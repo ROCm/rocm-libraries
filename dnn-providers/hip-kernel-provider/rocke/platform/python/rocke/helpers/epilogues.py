@@ -401,6 +401,11 @@ class CShuffleEpilogue:
     # a constant row step (one add per atomic instead of the row/column
     # decode and a branch per pair).
     atomic_fast_full: bool = False
+    # atomic_pair_lanes with a row_map and wave-uniform rows (tile_n / 2 a
+    # multiple of the wave, at most one atomic iteration per lane): map all
+    # iterations' rows at once (lane e = iteration e) and v_readlane each,
+    # instead of a scalar map (and its wait) per atomic.
+    atomic_row_batch: bool = False
     # store(): when ``fast_ok`` (an i1 the caller computes: tile in bounds and
     # D rows ``fast_row_pitch`` elements apart, offset = m * pitch + n +
     # ``fast_col_base``) holds, the bf16 wide stores walk the tile at a
@@ -849,7 +854,8 @@ class CShuffleEpilogue:
             self._sync(b)
             if atomic is not None and self.atomic_pair_lanes:
                 # One bf16 pair per lane, lanes contiguous along N.
-                dw_ptr, wg_N, col_offset = atomic
+                dw_ptr, wg_N, col_offset = atomic[:3]
+                pl_row_map = atomic[3] if len(atomic) > 3 else None
                 M_bound, N_bound = bounds if bounds is not None else (None, None)
                 c_ppr = b.const_i32(grid.tile_n // 2)
                 n_pairs = rows_c * grid.tile_n // 2
@@ -857,6 +863,20 @@ class CShuffleEpilogue:
                     raise ValueError("m_chunks: pairs do not distribute over the block")
                 scope = ({"syncscope": self.atomic_syncscope}
                          if self.atomic_syncscope else {})
+                if self.atomic_row_batch:
+                    self._atomic_pairs_batched(
+                        b, c_smem=c_smem, dw_ptr=dw_ptr, wg_N=wg_N, col_offset=col_offset,
+                        row_map=pl_row_map, M_bound=M_bound, N_bound=N_bound,
+                        n_iter=n_pairs // threads, scope=scope,
+                        g_row_fn=lambda b_, row, _c=c: b_.add(
+                            b_.add(
+                                b_.mul(b_.div(row, c_slab), c_wrows),
+                                b_.const_i32(_c * cm * am),
+                            ),
+                            b_.sub(row, b_.mul(b_.div(row, c_slab), c_slab)),
+                        ),
+                    )
+                    continue
                 for e in range(n_pairs // threads):
                     pidx = b.add(b.mul(b.const_i32(e), c_threads), grid.tid)
                     row = b.div(pidx, c_ppr)
@@ -871,7 +891,17 @@ class CShuffleEpilogue:
                             if N_bound is not None else None)
                     okp = (b.land(m_ok, n_ok) if (m_ok is not None and n_ok is not None)
                            else (m_ok if m_ok is not None else n_ok))
-                    c_off = b.add(b.mul(m_val, wg_N), n_even)
+                    c_off = b.add(
+                        b.mul(
+                            pl_row_map(
+                                b,
+                                b.readfirstlane(m_val)
+                                if (grid.tile_n // 2) % grid.wave_size == 0 else m_val,
+                            ) if pl_row_map is not None else m_val,
+                            wg_N,
+                        ),
+                        n_even,
+                    )
                     if col_offset is not None:
                         c_off = b.add(c_off, col_offset)
 
@@ -941,7 +971,8 @@ class CShuffleEpilogue:
                 vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=sv)
                 b.buffer_store_vN_bf16(d_rsrc, safe, b.const_i32(0), vbf, sv // 2)
 
-    def _atomic_pairs(self, b, *, c_smem, dw_ptr, wg_N, bounds, col_offset) -> None:
+    def _atomic_pairs(self, b, *, c_smem, dw_ptr, wg_N, bounds, col_offset,
+                      row_map=None) -> None:
         """atomic_store step 3 with :attr:`atomic_pair_lanes`: bf16 pairs,
         lane-contiguous along N (one 4-byte LDS read per pair)."""
         grid = self.grid
@@ -957,7 +988,8 @@ class CShuffleEpilogue:
         c_ppr = b.const_i32(pairs_per_row)
         M_bound, N_bound = bounds if bounds is not None else (None, None)
         scope = {"syncscope": self.atomic_syncscope} if self.atomic_syncscope else {}
-        if self.atomic_fast_full and threads % pairs_per_row == 0 and bounds is not None:
+        if (self.atomic_fast_full and threads % pairs_per_row == 0 and bounds is not None
+                and row_map is None):
             full = b.land(
                 b.cmp_le(b.add(grid.block_m_off, b.const_i32(grid.tile_m)), M_bound),
                 b.cmp_le(b.add(grid.block_n_off, b.const_i32(grid.tile_n)), N_bound),
@@ -986,10 +1018,65 @@ class CShuffleEpilogue:
                     )
             return
         self._atomic_pairs_checked(
-            b, c_smem=c_smem, dw_ptr=dw_ptr, wg_N=wg_N, bounds=bounds, col_offset=col_offset
+            b, c_smem=c_smem, dw_ptr=dw_ptr, wg_N=wg_N, bounds=bounds, col_offset=col_offset,
+            row_map=row_map,
         )
 
-    def _atomic_pairs_checked(self, b, *, c_smem, dw_ptr, wg_N, bounds, col_offset) -> None:
+    def _atomic_pairs_batched(self, b, *, c_smem, dw_ptr, wg_N, col_offset, row_map,
+                              M_bound, N_bound, n_iter, scope, g_row_fn) -> None:
+        """atomic_row_batch: the pair atomics with every LDS read issued first
+        (one VGPR per pair, so the reads overlap instead of each atomic
+        waiting for its own) and, when a row spans whole waves and there is at
+        most one iteration per lane, the rows' map done once (lane e =
+        iteration e) and read back with v_readlane. ``g_row_fn`` maps the
+        staged row to the tile row (m-chunked staging), None = identity."""
+        grid = self.grid
+        threads = grid.block_size
+        pairs_per_row = grid.tile_n // 2
+        c_threads = b.const_i32(threads)
+        c_ppr = b.const_i32(pairs_per_row)
+
+        def coords(e_val):
+            pidx = b.add(b.mul(e_val, c_threads), grid.tid)
+            row = b.div(pidx, c_ppr)
+            col = b.mul(b.mod(pidx, c_ppr), b.const_i32(2))
+            g_row = g_row_fn(b, row) if g_row_fn is not None else row
+            return row, col, b.add(grid.block_m_off, g_row), b.add(grid.block_n_off, col)
+
+        uniform = pairs_per_row % grid.wave_size == 0
+        pre = None
+        if row_map is not None and uniform and n_iter <= grid.wave_size:
+            lane_e = b.smin(b.mod(grid.tid, b.const_i32(grid.wave_size)),
+                            b.const_i32(n_iter - 1))
+            pre = row_map(b, coords(lane_e)[2])
+        items = []
+        for e in range(n_iter):
+            row, col, m_val, n_even = coords(b.const_i32(e))
+            items.append((row, col, m_val, n_even,
+                          b.smem_load_vN(c_smem, row, col, dtype=BF16, n=2)))
+        for e, (row, col, m_val, n_even, vec) in enumerate(items):
+            m_ok = b.cmp_lt(m_val, M_bound) if M_bound is not None else None
+            n_ok = (b.cmp_lt(b.add(n_even, b.const_i32(1)), N_bound)
+                    if N_bound is not None else None)
+            ok = (b.land(m_ok, n_ok) if (m_ok is not None and n_ok is not None)
+                  else (m_ok if m_ok is not None else n_ok))
+            if pre is not None:
+                mapped = b.readlane(pre, b.const_i32(e))
+            elif row_map is not None:
+                mapped = row_map(b, b.readfirstlane(m_val) if uniform else m_val)
+            else:
+                mapped = m_val
+            c_off = b.add(b.mul(mapped, wg_N), n_even)
+            if col_offset is not None:
+                c_off = b.add(c_off, col_offset)
+            if ok is not None:
+                with b.scf_if(ok):
+                    b.global_atomic_add_pk_bf16(dw_ptr, c_off, vec, **scope)
+            else:
+                b.global_atomic_add_pk_bf16(dw_ptr, c_off, vec, **scope)
+
+    def _atomic_pairs_checked(self, b, *, c_smem, dw_ptr, wg_N, bounds, col_offset,
+                              row_map=None) -> None:
         """:meth:`_atomic_pairs` with a bounds check per pair."""
         grid = self.grid
         threads = grid.block_size
@@ -999,6 +1086,13 @@ class CShuffleEpilogue:
         c_ppr = b.const_i32(pairs_per_row)
         M_bound, N_bound = bounds if bounds is not None else (None, None)
         scope = {"syncscope": self.atomic_syncscope} if self.atomic_syncscope else {}
+        if self.atomic_row_batch:
+            self._atomic_pairs_batched(
+                b, c_smem=c_smem, dw_ptr=dw_ptr, wg_N=wg_N, col_offset=col_offset,
+                row_map=row_map, M_bound=M_bound, N_bound=N_bound,
+                n_iter=total // threads, scope=scope, g_row_fn=None,
+            )
+            return
         for e in range(total // threads):
             pair_idx = b.add(b.mul(b.const_i32(e), c_threads), grid.tid)
             row = b.div(pair_idx, c_ppr)
@@ -1016,7 +1110,18 @@ class CShuffleEpilogue:
                 if (m_ok is not None and n_ok is not None)
                 else (m_ok if m_ok is not None else n_ok)
             )
-            c_off = b.add(b.mul(m_val, wg_N), n_even)
+            # A row spans whole waves when pairs_per_row is a multiple of the
+            # wave: the mapped row is wave-uniform (scalar map / table load).
+            c_off = b.add(
+                b.mul(
+                    row_map(
+                        b,
+                        b.readfirstlane(m_val) if pairs_per_row % grid.wave_size == 0 else m_val,
+                    ) if row_map is not None else m_val,
+                    wg_N,
+                ),
+                n_even,
+            )
             if col_offset is not None:
                 c_off = b.add(c_off, col_offset)
 
@@ -1195,7 +1300,7 @@ class CShuffleEpilogue:
         if self.atomic_pair_lanes and _bf16_out:
             self._atomic_pairs(
                 b, c_smem=c_smem, dw_ptr=dw_ptr, wg_N=wg_N, bounds=bounds,
-                col_offset=col_offset,
+                col_offset=col_offset, row_map=row_map,
             )
             return
         # After the shuffle each thread holds sv consecutive N-position elements

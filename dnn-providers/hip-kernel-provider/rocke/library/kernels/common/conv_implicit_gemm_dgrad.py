@@ -2374,9 +2374,8 @@ def _tapk_pingpong_conflict(spec: DgradConvSpec) -> str:
     if spec.split_atomic_pairs and not (
         spec.split_k > 1
         and (spec.tapk_xhalo or spec.tapk_pingpong)
-        # pp_boxes' split store maps rows (atomic_store row_map), which the
-        # lane-contiguous pair store does not take.
-        and not spec.pp_boxes
+        # pp_boxes' split store maps rows (atomic_store row_map); the
+        # lane-contiguous pair store takes the map too (r4b).
         and spec.epilogue == "cshuffle"
         and spec.data.dtype_d == "bf16"
         and spec.wave_size == 64
@@ -4826,6 +4825,12 @@ def _build_tilde_dgrad(
                 def _box_row(b_, m):
                     if _rm_map is not None:
                         m = _rm_map(b_, m)
+                        if spec.split_atomic_pairs:
+                            # Pixel lists (pp_boxes 7/77) with sapl: the
+                            # record is the whole dX (origin 0, extents Di,
+                            # Hi, Wi), so the listed pixel index IS the dX
+                            # row -- no decode / re-encode per atomic.
+                            return m
                     nv, mr = _magic_divmod(b_, m, hw_div)
                     nv = _bx_nval(b_, nv)
                     htl, wtl = _magic_divmod(b_, mr, w_div)
@@ -4837,6 +4842,15 @@ def _build_tilde_dgrad(
                         b_.add(wtl, rec_d_w_offset),
                     )
 
+                if spec.split_atomic_pairs:
+                    # sapl on boxes: LDS reads of all pairs first, the rows'
+                    # map batched per wave (one vector map, v_readlane per
+                    # atomic), and LDS-only barriers between the m-chunks
+                    # (no drain of the previous chunk's atomics).
+                    _epi = dc_replace(
+                        _epi, atomic_pair_lanes=True, atomic_row_batch=True,
+                        lds_barriers=True,
+                    )
                 with b.scf_if_else(b.cmp_gt(bx_sk, b.const_i32(1))) as (_t, _e):
                     with _t:
                         _epi.atomic_store(

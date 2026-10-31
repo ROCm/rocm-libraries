@@ -197,6 +197,11 @@ class TestSmallGridSpecs(unittest.TestCase):
             (dict(pp_boxes=7, tapk_pp_epi=2, xcd_remap=6, pp_box_order=2), "pbl"),
             (dict(pp_boxes=77, split_k=8, pp_box_order=1, tapk_pp_sched=7), "pbl"),
             (dict(tapk_pp_sched=7), "pps7"),
+            # r4b: lane-contiguous pair atomics on the box / pixel-list split store
+            (dict(pp_boxes=113, split_k=8, pp_box_order=1, split_atomic_pairs=True), "sapl"),
+            (dict(pp_boxes=77, split_k=8, pp_box_order=1, split_atomic_pairs=True), "sapl"),
+            (dict(pp_boxes=7, split_k=8, tile_m=256, tile_k=32, cshuffle_m_chunks=2,
+                  split_atomic_pairs=True), "sapl"),
         ):
             with self.subTest(**kw):
                 s = _spec(**kw)
@@ -225,6 +230,7 @@ class TestSmallGridSpecs(unittest.TestCase):
             dict(pp_boxes=77, pp_zskip=True),
             dict(pp_boxes=123),
             dict(tapk_pp_sched=7, tapk_pp_epi=2),
+            dict(pp_boxes=5, split_atomic_pairs=True),  # sapl needs split_k
         ):
             with self.subTest(**kw):
                 ok, _why = is_valid_dgrad_spec(_spec(**kw), _ARCH)
