@@ -43,15 +43,20 @@ namespace TensileLite
             std::shared_ptr<Hardware>                                      hardware,
             po::variables_map const&                                       args)
         {
-            bool   bestSolution        = args["best-solution"].as<bool>();
-            int    gridbasedTopSols    = Debug::Instance().getGridbasedTopSols();
-            bool   printWinnerOnly     = args["PrintWinnersOnly"].as<bool>();
-            double predictionThreshold = args["prediction-threshold"].as<double>();
+            bool   bestSolution            = args["best-solution"].as<bool>();
+            int    gridbasedTopSols        = Debug::Instance().getGridbasedTopSols();
+            bool   printWinnerOnly         = args["PrintWinnersOnly"].as<bool>();
+            double predictionThreshold     = args["prediction-threshold"].as<double>();
+            bool   printRejectedPredicates = args["print-rejected-predicates"].as<bool>();
 
             if(bestSolution)
             {
-                return std::make_shared<TopSolutionIterator>(
-                    library, hardware, predictionThreshold, gridbasedTopSols, printWinnerOnly);
+                return std::make_shared<TopSolutionIterator>(library,
+                                                             hardware,
+                                                             predictionThreshold,
+                                                             gridbasedTopSols,
+                                                             printWinnerOnly,
+                                                             printRejectedPredicates);
             }
             else
             {
@@ -65,6 +70,7 @@ namespace TensileLite
                     firstSolutionIdx,
                     numSolutions,
                     printWinnerOnly,
+                    printRejectedPredicates,
                     AllSolutionsIterator::CreateCriteria(library, hardware, args));
             }
         }
@@ -72,10 +78,12 @@ namespace TensileLite
         SolutionIterator::SolutionIterator(
             std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
             std::shared_ptr<Hardware>                                      hardware,
-            bool                                                           printWinnerOnly)
+            bool                                                           printWinnerOnly,
+            bool                                                           printRejectedPredicates)
             : m_library(library)
             , m_hardware(hardware)
             , m_printWinnerOnly(printWinnerOnly)
+            , m_printRejectedPredicates(printRejectedPredicates)
         {
         }
 
@@ -92,7 +100,7 @@ namespace TensileLite
             {
                 if(isReportValid)
                     m_reporter->report(ResultKey::Validation, "WRONG_HARDWARE");
-                if(m_reporter->logAtLevel(LogLevel::Verbose))
+                if(m_printRejectedPredicates && m_reporter->logAtLevel(LogLevel::Verbose))
                 {
                     std::ostringstream msg;
                     solution.hardwarePredicate->debugEval(*m_hardware, msg);
@@ -125,7 +133,8 @@ namespace TensileLite
             {
                 if(isReportValid)
                     m_reporter->report(ResultKey::Validation, "DID_NOT_SATISFY_ASSERTS");
-                if(m_reporter->logAtLevel(LogLevel::Verbose) && !m_printWinnerOnly)
+                if(m_printRejectedPredicates && m_reporter->logAtLevel(LogLevel::Verbose)
+                   && !m_printWinnerOnly)
                 {
                     std::ostringstream msg;
                     solution.problemPredicate->debugEval(problem, msg);
@@ -352,8 +361,9 @@ namespace TensileLite
             int                                                            firstSolutionIdx,
             int                                                            numSolutions,
             bool                                                           printWinnerOnly,
+            bool                                                           printRejectedPredicates,
             RunCriteria                                                    runCriteria)
-            : SolutionIterator(library, hardware, printWinnerOnly)
+            : SolutionIterator(library, hardware, printWinnerOnly, printRejectedPredicates)
             , m_runCriteria(runCriteria)
             , m_predictionThreshold(predictionThreshold)
         {
@@ -551,8 +561,9 @@ namespace TensileLite
         BestSolutionIterator::BestSolutionIterator(
             std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
             std::shared_ptr<Hardware>                                      hardware,
-            bool                                                           printWinnerOnly)
-            : SolutionIterator(library, hardware, printWinnerOnly)
+            bool                                                           printWinnerOnly,
+            bool                                                           printRejectedPredicates)
+            : SolutionIterator(library, hardware, printWinnerOnly, printRejectedPredicates)
         {
         }
 
@@ -613,8 +624,9 @@ namespace TensileLite
             std::shared_ptr<Hardware>                                      hardware,
             double                                                         predictionThreshold,
             int                                                            numSolutions,
-            bool                                                           printWinnerOnly)
-            : SolutionIterator(library, hardware, printWinnerOnly)
+            bool                                                           printWinnerOnly,
+            bool                                                           printRejectedPredicates)
+            : SolutionIterator(library, hardware, printWinnerOnly, printRejectedPredicates)
             , m_numSolutions(numSolutions)
             , m_predictionThreshold(predictionThreshold)
         {
