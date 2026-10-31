@@ -711,6 +711,49 @@ class WgradConvSpec:
     # memory phases. LDS rows are permuted r ^ ((r >> 2) & 4) (conflict-free
     # transposed stores). Default 0.
     xwin_pp: int = 0
+    # two_stage with ws_replicas 1, one tile per workgroup: the Stage 1
+    # epilogue does the whole reduction -- no scratch clear, no Stage 2. The
+    # scratch slab is zero between launches (cleared once at allocation, left
+    # zero by every launch); per (M, N) tile two i32 counters in ``sk_flags``
+    # (likewise). Every slice but the last to arrive atomic-adds its partial
+    # and counts itself done; the last waits for them, reads the slab back
+    # with atomics, stores dW = slab + its own partial and zeroes what it
+    # read. Only atomics touch the slab (no L2 write-back / invalidate), and
+    # a slice only waits on slices that already arrived. Appends the
+    # ``sk_flags`` kernarg. Tags ``wsf1``. Default 0: byte-identical.
+    ws_fuse: int = 0
+    # two_stage: Stage 1 stores its partial plainly into slab z % ws_replicas
+    # instead of atomic-adding it -- a launch needs split_k <= ws_replicas
+    # (one slab per slice) and groups == 1 (host rules). No atomics, no
+    # scratch clear (every element of the min(R, split_k) slabs Stage 2 folds
+    # is written). For small split degrees, where the f32 atomics bound
+    # Stage 1. Tags ``wss1``. Default 0: byte-identical.
+    ws_store: int = 0
+    # Unsplit default epilogue on 16x16x16 atoms, 16-bit dW: each lane quad
+    # transposes its 4x4 accumulator block (two DPP exchanges + v_perm_b32,
+    # as fwd's epi_quad_xpose 1), so a lane holds 4 consecutive dW columns
+    # of one row and writes them with one 8-byte buffer_store instead of four
+    # 2-byte ones. Needs cpg % 4 == 0 (host rule). Tags ``eqx1``. Default 0.
+    epi_quad_xpose: int = 0
+    # xwin, 3-D, N == 1 (host rule, with Ho % xwin_kband == 0): the reduction
+    # (output voxel) order of the K loop is (band of xwin_kband output rows,
+    # depth, row in band, column) instead of (depth, row, column), so a
+    # split-K slice covers one band through many depth planes and the X
+    # planes a slice's z taps share are re-read while still in L2 (the plain
+    # order re-reads them one whole plane later). Power of 2. Tags ``xkb<n>``.
+    # Default 0: byte-identical.
+    xwin_kband: int = 0
+    # Plain (non-xwin) register-prefetch loop (prefetch_regs 1) of an 8-wave
+    # tile as a block ping-pong ("ppp1"): per K tile four phases, each closed
+    # by an LDS barrier -- [mem A] every fragment read of the tile into
+    # registers, [compute A] the first half of the k atoms' MFMAs, [mem B]
+    # the next tile's LDS stores and the global reads of the tile two ahead,
+    # [compute B] the other half. Waves 4-7 (the second wave of each SIMD)
+    # run one barrier behind, so the two waves of a SIMD alternate memory
+    # and MFMA phases; s_setprio 1 on the memory phases. 2 / 3: the same with
+    # the VALU work (kpack packing, next-read offsets) interleaved into the
+    # MFMA phases (_ppp2_loop). Default 0.
+    plain_pp: int = 0
 
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
@@ -952,6 +995,11 @@ class WgradConvSpec:
                 f"xmr{self.xwin_mrow}": self.xwin_mrow > 1,
                 f"xgn{self.xwin_gn}": self.xwin_gn > 0,
                 f"xpp{self.xwin_pp}": self.xwin_pp > 0,
+                f"wsf{self.ws_fuse}": self.ws_fuse > 0,
+                f"wss{self.ws_store}": self.ws_store > 0,
+                f"eqx{self.epi_quad_xpose}": self.epi_quad_xpose > 0,
+                f"xkb{self.xwin_kband}": self.xwin_kband > 0,
+                f"ppp{self.plain_pp}": self.plain_pp > 0,
                 # Stream-K changes the grid decode, the K ranges and the
                 # epilogue, and the launch mode and the reduction both change
                 # the emitted body. The CTA pool does not: like the split-K
@@ -1533,6 +1581,54 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
         return "xcd_remap needs the grid-per-tile kernel (no stream-K, chiplet_swizzle or group_merge)"
     if spec.m_band < 0 or (spec.m_band and (spec.xcd_remap in (0, 1) or spec.streamk != "off")):
         return "m_band (split-K slice band order) needs xcd_remap and the grid-per-tile kernel"
+    if spec.ws_fuse not in (0, 1) or (spec.ws_fuse and (
+        not spec.two_stage
+        or spec.ws_replicas != 1
+        or spec.xwin_groups != 1
+        or spec.streamk != "off"
+        or spec.group_merge > 1
+        or spec.data.dtype_d not in ("bf16", "fp16", "fp32")
+    )):
+        # (ungrouped launches only: the host refuses groups > 1)
+        return "ws_fuse is 0 or 1 and needs two_stage, ws_replicas 1, one tile per workgroup"
+    if spec.ws_store not in (0, 1) or (spec.ws_store and (
+        not spec.two_stage or spec.streamk != "off" or spec.group_merge > 1 or spec.ws_fuse
+    )):
+        return "ws_store is 0 or 1 and needs the two_stage grid-per-tile kernel (no group_merge / ws_fuse)"
+    if spec.epi_quad_xpose not in (0, 1) or (spec.epi_quad_xpose and (
+        spec.split_k > 1
+        or spec.two_stage
+        or spec.streamk != "off"
+        or spec.epilogue != "default"
+        or spec.xwin
+        or spec.group_merge > 1
+        or (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) != (16, 16, 16)
+        or spec.data.dtype_d not in ("bf16", "fp16")
+    )):
+        return "epi_quad_xpose (wgrad) is 0 or 1: unsplit default epilogue, 16x16x16 atoms, 16-bit dW"
+    if spec.plain_pp not in (0, 1, 2, 3, 4) or (spec.plain_pp and (
+        spec.xwin
+        or spec.prefetch_regs != 1
+        or spec.warp_m * spec.warp_n != 8
+        or spec.k_atoms_per_tile_k % 2
+        or spec.lds_k_outer
+        or spec.lds_bswz
+        or spec.async_dma
+        or spec.unroll_k
+        or spec.streamk != "off"
+        or spec.pfr_sched
+        or spec.wave_size != 64
+    )):
+        return ("plain_pp is 0..4: the plain prefetch_regs=1 loop of an 8-wave tile with an even "
+                "k-atom count (no lds_k_outer / lds_bswz / pfr_sched)")
+    if spec.xwin_kband and (
+        spec.xwin_kband < 2
+        or spec.xwin_kband & (spec.xwin_kband - 1)
+        or not spec.xwin
+        or spec.xwin_mrow != 1
+        or not spec.problem.is_3d
+    ):
+        return "xwin_kband is a power of 2 >= 2 on the 3-D xwin loop (xwin_mrow 1)"
     if spec.xwin:
         _why = _xwin_conflict(spec)
         if _why:
@@ -2579,6 +2675,7 @@ def build_implicit_gemm_conv_wgrad(
             is_3d=p.is_3d,
             two_stage=_is_two_stage,
             streamk=spec.streamk_reduction if _is_streamk else None,
+            **({"split_flags": True} if spec.ws_fuse else {}),
         ),
         declare_ptr=_declare_wgrad_ptr,
     )
@@ -2877,6 +2974,8 @@ def build_implicit_gemm_conv_wgrad(
         _b_shape = (_xg * _b_shape[0], _b_shape[1])
     A_smem = b.smem_alloc(ir_dtype_a, _a_shape, name_hint="A_smem")
     B_smem = b.smem_alloc(ir_dtype_b, _b_shape, name_hint="B_smem")
+    # ws_fuse: the slice's arrival order, broadcast to the workgroup.
+    wsf_smem = b.smem_alloc(I32, (4,), name_hint="wsf_role") if spec.ws_fuse else None
     # See the LDS budget note in is_valid_*_spec: "compv4" alone does not reach a
     # buffer-alternating K-loop, so allocating a second tile for it produced a
     # dead allocation that the LDS pool then stripped anyway.
@@ -4065,11 +4164,25 @@ def build_implicit_gemm_conv_wgrad(
 
         st = {}
 
+        _kb = spec.xwin_kband
+        if _kb:
+            _c_kbm = b.const_i32(_kb - 1)
+            _c_kbs = b.const_i32(_kb.bit_length() - 1)
+
         def _tile(k):
             """Uniform per-tile bases: X window start, dY row start, validity."""
             q, wo = _dm(k, "k_Wo", p_Wo)
-            q, ho = _dm(q, "k_Ho", p_Ho)
-            if is3:
+            if _kb:
+                # (band, depth, row in band) order, N == 1 (host rule).
+                h_in = b.land(q, _c_kbm)
+                band, do_ = _dm(b.lshr(q, _c_kbs), "k_Do", P["p_Do"])
+                ho = b.add(b.mul(band, b.const_i32(_kb)), h_in)
+                n_ = c0
+            else:
+                q, ho = _dm(q, "k_Ho", p_Ho)
+            if _kb:
+                pass
+            elif is3:
                 n_, do_ = _dm(q, "k_Do", P["p_Do"])
             else:
                 n_, do_ = q, None
@@ -4099,10 +4212,23 @@ def build_implicit_gemm_conv_wgrad(
             o = []
             yield from _dm_steps(k, "k_Wo", p_Wo, o)
             q, wo = o
-            o = []
-            yield from _dm_steps(q, "k_Ho", p_Ho, o)
-            q, ho = o
-            if is3:
+            if _kb:
+                h_in = b.land(q, _c_kbm)
+                qb = b.lshr(q, _c_kbs)
+                yield
+                o = []
+                yield from _dm_steps(qb, "k_Do", P["p_Do"], o)
+                band, do_ = o
+                ho = b.add(b.mul(band, b.const_i32(_kb)), h_in)
+                n_ = c0
+                yield
+            else:
+                o = []
+                yield from _dm_steps(q, "k_Ho", p_Ho, o)
+                q, ho = o
+            if _kb:
+                pass
+            elif is3:
                 o = []
                 yield from _dm_steps(q, "k_Do", P["p_Do"], o)
                 n_, do_ = o
@@ -4849,6 +4975,7 @@ def build_implicit_gemm_conv_wgrad(
         # the prefetch this loop exists to keep in flight. The LDS store waits
         # for its own data through the compiler's waitcnt.
         _dbuf = spec.prefetch_regs == 2
+        _ppp = bool(spec.plain_pp)
         _a_fn, _b_fn = _split_desc_fns()
         _inc = _make_inc_addr()
         if _inc is not None:
@@ -4935,6 +5062,240 @@ def build_implicit_gemm_conv_wgrad(
                 b.sync_lds_only()
             return new, nxt
 
+        def _ppp2_loop(upper, lower, _frags, _mfmas):
+            """plain_pp=2: the plain_pp phases with the VALU work moved into the
+            MFMA phases. compute A also packs the carried tile t+1 for its LDS
+            store (kpack v_perm), compute B derives the byte offsets of tile
+            t+3's reads (descriptor + bounds); both interleaved one MFMA at a
+            time (sched_group_barrier), so mem B only issues the reads of tile
+            t+2 from carried offsets and writes LDS. plain_pp=3: the packing
+            sits in the second half of compute A (the reads of tile t+1 get
+            ~half a phase more to land; no spills). plain_pp=4: 3 without the
+            s_setprio phase priorities."""
+            _a_slots = a_sync_loader.plan_slots(b, tid=tid)
+            _b_slots = b_sync_loader.plan_slots(b, tid=tid)
+            _n_o = len(_a_slots) + len(_b_slots)
+
+            def _prio(v):
+                # plain_pp=4: ppp3 without the phase priorities
+                if spec.plain_pp != 4:
+                    b.s_setprio(v)
+
+            def _pack(ld, coords, vals):
+                # ld._store_staged split in two: values to write (VALU) ...
+                out = []
+                if ld.row_kpack == 1:
+                    for (row, col, _), v in zip(coords, vals):
+                        if ld.vector_axis == "row" and ld.load_vec > 1:
+                            for i in range(ld.load_vec):
+                                r = b.add(row, b.const_i32(i)) if i else row
+                                out.append((r, col, b.vec_extract(v, i), 1))
+                        else:
+                            out.append((row, col, v, ld.load_vec))
+                    return out
+                kp = ld.row_kpack
+                for g in range(0, len(vals), kp):
+                    row, col, _ = coords[g]
+                    grp = vals[g:g + kp]
+                    for i in range(ld.load_vec):
+                        r = b.add(row, b.const_i32(i)) if i else row
+                        parts = [b.vec_extract(v, i) for v in grp]
+                        out.append((r, col, b.vec_pack(parts, ld.elem_dtype), kp))
+                return out
+
+            def _write(smem, packed):
+                # ... and the LDS writes.
+                for r, c, v, w in packed:
+                    b.smem_store_vN(smem, [r, c], v, w)
+
+            def _offsets():
+                if _inc is not None:
+                    _inc["set"](_inc["step"](_inc["get"]()))
+                _inc_reset()
+                oa = a_sync_loader.slot_offsets(b, slots=_a_slots, descriptor=_a_fn)
+                _inc_reset()
+                ob = b_sync_loader.slot_offsets(b, slots=_b_slots, descriptor=_b_fn)
+                return oa + ob
+
+            def _issue(offs):
+                an = a_sync_loader.issue_slots(b, rsrc=dy_rsrc, slots=_a_slots, offsets=offs[:len(_a_slots)])
+                bn = b_sync_loader.issue_slots(b, rsrc=x_rsrc, slots=_b_slots, offsets=offs[len(_a_slots):])
+                return [v for _r, _c, v in an] + [v for _r, _c, v in bn]
+
+            def _interleave(n_mfma, valu_per):
+                for _ in range(n_mfma):
+                    b.sched_group_barrier(_SG_MFMA, 1, 0)
+                    b.sched_group_barrier(_SG_VALU, valu_per, 0)
+                b.sched_barrier(0)
+
+            # prologue: tile 0 to LDS, tile 1 in registers, tile 2's offsets.
+            _write(A_smem, _pack(a_sync_loader, _a0, [v for _r, _c, v in _a0]))
+            _write(B_smem, _pack(b_sync_loader, _b0, [v for _r, _c, v in _b0]))
+            k_off_capture[0] = b.add(k_lo, c_block_k)
+            o1 = _offsets()
+            cur1 = _issue(o1)
+            k_off_capture[0] = b.add(k_lo, b.const_i32(2 * block_k))
+            o2 = _offsets()
+            b.sync_lds_only()
+            with b.scf_if(upper):
+                b.sync_lds_only()
+            it = (list(accs) + [(f"ppp_r{i}", v) for i, v in enumerate(cur1)]
+                  + [(f"ppp_o{i}", v) for i, v in enumerate(o2)])
+            if _inc is not None:
+                it += [(f"ppp_st{i}", v) for i, v in enumerate(_inc["get"]())]
+            loop = b.scf_for_iter(k_lo, _k_upper, c_block_k, it, iv_name="k0")
+            half = k_atoms // 2
+            n_half = half * mfmas_m * mfmas_n
+            with loop as (k0, iv):
+                acc = list(iv[:_n_acc])
+                cur = list(iv[_n_acc:_n_acc + _n_t])
+                offs = list(iv[_n_acc + _n_t:_n_acc + _n_t + _n_o])
+                if _inc is not None:
+                    _inc["set"](list(iv[_n_acc + _n_t + _n_o:]))
+                # [mem A]
+                fr = [_frags(kk) for kk in range(k_atoms)]
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                # [compute A] + the packing of tile t+1
+                _prio(0)
+                if spec.plain_pp in (3, 4):
+                    for kk in range(half):
+                        _mfmas(acc, fr[kk])
+                    pa = _pack(a_sync_loader, _a0, cur[:_n_a])
+                    pb = _pack(b_sync_loader, _b0, cur[_n_a:])
+                    b.sched_group_barrier(_SG_MFMA, n_half // 2, 0)
+                    _interleave(n_half - n_half // 2, 1)
+                else:
+                    pa = _pack(a_sync_loader, _a0, cur[:_n_a])
+                    pb = _pack(b_sync_loader, _b0, cur[_n_a:])
+                    for kk in range(half):
+                        _mfmas(acc, fr[kk])
+                    _interleave(n_half, 1)
+                _prio(1)
+                b.sync_lds_only()
+                # [mem B] tile t+1 to LDS, the reads of tile t+2
+                nxt = _issue(offs)
+                _write(A_smem, pa)
+                _write(B_smem, pb)
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                # [compute B] + the offsets of tile t+3
+                _prio(0)
+                k_off_capture[0] = b.add(k0, b.const_i32(3 * block_k))
+                onx = _offsets()
+                for kk in range(half, k_atoms):
+                    _mfmas(acc, fr[kk])
+                _interleave(n_half, 3)
+                _prio(1)
+                b.sync_lds_only()
+                st_ = list(_inc["get"]()) if _inc is not None else []
+                b.scf_yield(*acc, *nxt, *onx, *st_)
+            with b.scf_if(lower):
+                b.sync_lds_only()
+            _prio(0)
+            return list(loop.results)[:_n_acc]
+
+        def _ppp_loop():
+            """plain_pp: the block ping-pong form of this loop (see the field)."""
+            dec = decode_mfma_lanes(b, atom, lane)
+            wmo = grid.warp_m_off(b)
+            wno = grid.warp_n_off(b)
+            a_rows_i = [b.add(wmo, b.add(b.const_i32(mi * spec.warp_tile_m), dec.m_in_atom))
+                        for mi in range(mfmas_m)]
+            b_rows_i = [b.add(wno, b.add(b.const_i32(ni * spec.warp_tile_n), dec.n_in_atom))
+                        for ni in range(mfmas_n)]
+            kcol = b.mul(dec.k_blk, b.const_i32(a_per_lane))
+            _wv = b.to_sgpr_u32(warp_id)
+            _hw = b.const_i32(spec.warp_m * spec.warp_n // 2)
+            upper = b.cmp_ge(_wv, _hw)
+            lower = b.cmp_lt(_wv, _hw)
+
+            def _store(vals):
+                a_sync_loader.store_lds(
+                    b, smem_dst=A_smem,
+                    staged=[(r, c, v) for (r, c, _), v in zip(_a0, vals[:_n_a])],
+                )
+                b_sync_loader.store_lds(
+                    b, smem_dst=B_smem,
+                    staged=[(r, c, v) for (r, c, _), v in zip(_b0, vals[_n_a:])],
+                )
+
+            def _loads(k_next):
+                k_off_capture[0] = k_next
+                if _inc is not None:
+                    _inc["set"](_inc["step"](_inc["get"]()))
+                _inc_reset()
+                an = a_sync_loader.load_global(b, tid=tid, descriptor=_a_fn, rsrc=dy_rsrc)
+                _inc_reset()
+                bn = b_sync_loader.load_global(b, tid=tid, descriptor=_b_fn, rsrc=x_rsrc)
+                return [v for _r, _c, v in an] + [v for _r, _c, v in bn]
+
+            def _frags(kk):
+                cb = b.add(kcol, b.const_i32(kk * spec.warp_tile_k))
+                ar = [_emit_smem_load(b, A_smem, r, cb, a_per_lane, smem_dtype=_smem_dtype)
+                      for r in a_rows_i]
+                bc = [_emit_smem_load(b, B_smem, r, cb, b_per_lane, smem_dtype=_smem_dtype)
+                      for r in b_rows_i]
+                return ar, bc
+
+            def _mfmas(acc, fr):
+                ar, bc = fr
+                flat = 0
+                for mi in range(mfmas_m):
+                    for ni in range(mfmas_n):
+                        acc[flat] = _emit_mfma(b, atom, ar[mi], bc[ni], acc[flat])
+                        flat += 1
+
+            if spec.plain_pp >= 2:
+                return _ppp2_loop(upper, lower, _frags, _mfmas)
+            # prologue: tile 0 to LDS, tile 1 in registers; the upper half
+            # takes one barrier more so it runs one phase behind.
+            _store([v for _r, _c, v in _a0] + [v for _r, _c, v in _b0])
+            cur1 = _loads(b.add(k_lo, c_block_k))
+            b.sync_lds_only()
+            with b.scf_if(upper):
+                b.sync_lds_only()
+            it = list(accs) + [(f"ppp_r{i}", v) for i, v in enumerate(cur1)]
+            if _inc is not None:
+                it += [(f"ppp_st{i}", v) for i, v in enumerate(_inc["get"]())]
+            loop = b.scf_for_iter(k_lo, _k_upper, c_block_k, it, iv_name="k0")
+            half = k_atoms // 2
+            with loop as (k0, iv):
+                acc = list(iv[:_n_acc])
+                cur = list(iv[_n_acc:_n_acc + _n_t])
+                if _inc is not None:
+                    _inc["set"](list(iv[_n_acc + _n_t:]))
+                # [mem A]
+                fr = [_frags(kk) for kk in range(k_atoms)]
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                # [compute A]
+                b.s_setprio(0)
+                for kk in range(half):
+                    _mfmas(acc, fr[kk])
+                b.sched_barrier(0)
+                b.s_setprio(1)
+                b.sync_lds_only()
+                # [mem B] tile t+1 to LDS (its registers are then reused by
+                # the reads of tile t+2, one iteration ahead like pfr1)
+                _store(cur)
+                nxt = _loads(b.add(k0, b.const_i32(2 * block_k)))
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                # [compute B]
+                b.s_setprio(0)
+                for kk in range(half, k_atoms):
+                    _mfmas(acc, fr[kk])
+                b.sched_barrier(0)
+                b.s_setprio(1)
+                b.sync_lds_only()
+                st_ = list(_inc["get"]()) if _inc is not None else []
+                b.scf_yield(*acc, *nxt, *st_)
+            with b.scf_if(lower):
+                b.sync_lds_only()
+            b.s_setprio(0)
+            return list(loop.results)[:_n_acc]
+
         # prefetch_regs=3: two tiles in flight. The prologue also reads the
         # second tile, the loop carries both and reads two tiles ahead; the
         # reads issued by the last two iterations land past the slice (the
@@ -4965,33 +5326,36 @@ def build_implicit_gemm_conv_wgrad(
             _iter.append(("pfr_buf", b.const_i32(0)))
         _o_st = _n_acc + _n_t + _n_q
         _k_last = b.sub(_k_upper, c_block_k)
-        for_op = b.scf_for_iter(k_lo, _k_last, c_block_k, _iter, iv_name="k0")
-        with for_op as (k0, iter_vars):
-            _buf = iter_vars[_o_st + _n_st] if _dbuf else None
-            if _inc is not None:
-                _inc["set"](list(iter_vars[_o_st : _o_st + _n_st]))
-            new_accs, _nxt = _pfr_body(
-                k0,
-                iter_vars[:_n_acc],
-                list(iter_vars[_n_acc : _n_acc + _n_t]),
-                _buf,
-                True,
+        if _ppp:
+            final_accs = _ppp_loop()
+        else:
+            for_op = b.scf_for_iter(k_lo, _k_last, c_block_k, _iter, iv_name="k0")
+            with for_op as (k0, iter_vars):
+                _buf = iter_vars[_o_st + _n_st] if _dbuf else None
+                if _inc is not None:
+                    _inc["set"](list(iter_vars[_o_st : _o_st + _n_st]))
+                new_accs, _nxt = _pfr_body(
+                    k0,
+                    iter_vars[:_n_acc],
+                    list(iter_vars[_n_acc : _n_acc + _n_t]),
+                    _buf,
+                    True,
+                )
+                _tail = [b.sub(b.const_i32(1), _buf)] if _dbuf else []
+                if _deep:
+                    # Queue: the carried second tile moves up, the new read joins.
+                    _q = list(iter_vars[_n_acc + _n_t : _n_acc + _n_t + _n_q])
+                    b.scf_yield(*new_accs, *_q, *_nxt[:_n_t], *_nxt[_n_t:], *_tail)
+                else:
+                    b.scf_yield(*new_accs, *_nxt, *_tail)
+            _res = list(for_op.results)
+            final_accs, _ = _pfr_body(
+                _k_last,
+                _res[:_n_acc],
+                _res[_n_acc : _n_acc + _n_t],
+                _res[_o_st + _n_st] if _dbuf else None,
+                False,
             )
-            _tail = [b.sub(b.const_i32(1), _buf)] if _dbuf else []
-            if _deep:
-                # Queue: the carried second tile moves up, the new read joins.
-                _q = list(iter_vars[_n_acc + _n_t : _n_acc + _n_t + _n_q])
-                b.scf_yield(*new_accs, *_q, *_nxt[:_n_t], *_nxt[_n_t:], *_tail)
-            else:
-                b.scf_yield(*new_accs, *_nxt, *_tail)
-        _res = list(for_op.results)
-        final_accs, _ = _pfr_body(
-            _k_last,
-            _res[:_n_acc],
-            _res[_n_acc : _n_acc + _n_t],
-            _res[_o_st + _n_st] if _dbuf else None,
-            False,
-        )
     elif spec.prefetch_addr:
         # Same loop as below, with the global byte offsets of the current tile
         # carried as iteration arguments. Each iteration issues every buffer
@@ -5095,6 +5459,19 @@ def build_implicit_gemm_conv_wgrad(
             gm_group=group_v,
             n_base_fn=_xw_n_base,
             **({"replica_sel": _z_virtual} if _z_virtual is not None else {}),
+            # ws_store: one slab per (logical) slice, whatever the grid remap.
+            **({"replica_sel": slice_id} if spec.ws_store and _z_virtual is None else {}),
+            **({"fused": dict(
+                flags=sk_flags,
+                tile=b.to_sgpr_u32(b.add(
+                    b.mul(b.div(block_m_off_v, b.const_i32(block_m)), p_num_pid_n),
+                    b.div(block_n_off_v, b.const_i32(block_n)),
+                )),
+                ks_count=_ks_count_param,
+                tid=tid,
+                smem=wsf_smem,
+                dw_rsrc=dw_rsrc,
+            )} if spec.ws_fuse else {}),
         )
     elif _is_split_k and op.family == "wmma":
         # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
@@ -5164,7 +5541,8 @@ def build_implicit_gemm_conv_wgrad(
         )
     else:
         _emit_wgrad_direct_epilogue(
-            b, spec, final_accs, grid, dw_rsrc, params, group=group_v
+            b, spec, final_accs, grid, dw_rsrc, params, group=group_v,
+            **({"quad_xpose": (lane, block_m_off_v, block_n_off_v)} if spec.epi_quad_xpose else {}),
         )
 
     return b.kernel
@@ -5550,6 +5928,7 @@ def _emit_wgrad_direct_epilogue(
     dw_rsrc: Value,
     params: Dict[str, Value],
     group: Optional[Value] = None,
+    quad_xpose=None,
 ) -> None:
     """Per-lane scalar store to dW via the weight-gradient descriptor.
 
@@ -5589,6 +5968,10 @@ def _emit_wgrad_direct_epilogue(
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return dW_desc.offset(b_, k_out=m_val, n_wg=n_val)
+
+    if quad_xpose is not None:
+        _emit_wgrad_quad_xpose_store(b, spec, accs, grid, dw_rsrc, params, dw_addr, *quad_xpose)
+        return
 
     DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
         b,
@@ -5769,6 +6152,7 @@ def _emit_wgrad_workspace_store_epilogue(
     gm_group: Optional[Value] = None,
     replica_sel: Optional[Value] = None,
     n_base_fn=None,
+    fused: Optional[dict] = None,
 ) -> None:
     """Two-stage Stage 1 epilogue: f32 atomic-add into the scratch accumulator.
 
@@ -5884,6 +6268,42 @@ def _emit_wgrad_workspace_store_epilogue(
         rows.append(x_row)
         cols.append(x_col)
 
+    if fused is not None:
+        def _elems(opaque_lane=False):
+            # Emitted where it is consumed. ``opaque_lane``: the lane id goes
+            # through a v_mov the compiler cannot see through, so the second
+            # pass recomputes its coordinates instead of keeping the first
+            # pass's live across the handshake.
+            if opaque_lane:
+                ln = b.inline_asm("v_mov_b32 $0, $1", "=v,v", [lane], I32)
+                p2 = [b.div(ln, c_nlane), b.mod(ln, c_nlane)]
+                rows, cols = [], []
+                for i in range(c_per_lane):
+                    ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
+                    x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p2])
+                    rows.append(x_row)
+                    cols.append(x_col)
+            else:
+                rows, cols = rows_, cols_
+            flat = 0
+            for mi in range(mfmas_m):
+                atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
+                for ni in range(mfmas_n):
+                    acc = accs[flat]
+                    flat += 1
+                    if n_base_fn is not None:
+                        atom_n_base = n_base_fn(ni)
+                    else:
+                        atom_n_base = b.add(
+                            block_warp_n_off, b.const_i32(ni * spec.warp_tile_n)
+                        )
+                    for i in range(c_per_lane):
+                        yield (b.add(atom_m_base, rows[i]), b.add(atom_n_base, cols[i]),
+                               b.vec_extract(acc, i))
+        rows_, cols_ = rows, cols
+        _emit_ws_fused_reduction(b, spec, _elems, wg_M_v, wg_N_v, ws_ptr, fused)
+        return
+
     flat = 0
     for mi in range(mfmas_m):
         atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
@@ -5909,7 +6329,10 @@ def _emit_wgrad_workspace_store_epilogue(
                         ws_off = b.add(b.mul(c_m, wg_N_v), c_n)
                         if slab_off is not None:
                             ws_off = b.add(slab_off, ws_off)
-                        b.global_atomic_add(ws_ptr, ws_off, val_f32)
+                        if spec.ws_store:
+                            b.global_store(ws_ptr, ws_off, val_f32, align=4)
+                        else:
+                            b.global_atomic_add(ws_ptr, ws_off, val_f32)
                 else:
                     gm_m, km, gm_n, yx, cc = _gm_split(b, c_m, c_n)
                     in_bounds = b.land(
@@ -5932,3 +6355,166 @@ def _emit_wgrad_workspace_store_epilogue(
                             b.add(b.mul(km, wg_N_v), n_true),
                         )
                         b.global_atomic_add(ws_ptr, ws_off, val_f32)
+
+
+def _emit_ws_fused_reduction(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    elems,
+    wg_M_v: Value,
+    wg_N_v: Value,
+    ws_ptr: Value,
+    fz: dict,
+) -> None:
+    """``WgradConvSpec.ws_fuse``: the split-K reduction in the Stage 1 epilogue.
+
+    ``elems()`` yields the lane's accumulator elements as ``(c_m, c_n, value)``.
+    The scratch slab is all zero between launches (cleared once at
+    allocation; every launch leaves it zero), and so is the per-(M, N)-tile
+    arrival counter ``sk_flags[4 * tile]``. Every slice atomic-adds its
+    partial into the slab, drains its atomics (vmcnt 0, barrier) and then
+    takes a ticket; the one that draws ticket S-1 knows every partial is in,
+    reads the tile back with device-coherent (sc1) loads (chunks of 32, its
+    accumulators are dead by then), stores dW, writes the slab back to zero
+    with sc1 stores and resets the counter. The slab is only ever touched by
+    device-scope atomics and sc1 loads / stores (no L2 write-back /
+    invalidate fence), and nothing waits.
+    """
+    flags = fz["flags"]
+    tid = fz["tid"]
+    smem = fz["smem"]
+    dw_rsrc = fz["dw_rsrc"]
+    c0 = b.const_i32(0)
+    c1 = b.const_i32(1)
+    f_zero = b.const_f32(0.0)
+    oob = b.const_i32((1 << 31) - 1)
+    c_eb = b.const_i32(4 if spec.data.dtype_d == "fp32" else 2)
+
+    # Branch-free per element: an out-of-bounds element adds 0.0 at slot 0
+    # (harmless) and its dW store goes to the buffer's OOB sentinel.
+    def _el(opaque=False):
+        for c_m, c_n, v in elems(opaque):
+            ok = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
+            off = b.add(b.mul(c_m, wg_N_v), c_n)
+            yield ok, b.select(ok, off, c0), off, v
+
+    for ok, soff, _, v in _el():
+        b.global_atomic_add(ws_ptr, soff, b.select(ok, v, f_zero))
+    b.s_waitcnt(vmcnt=0)
+    b.sync()
+    i_cnt = b.to_sgpr_u32(b.mul(fz["tile"], b.const_i32(4)))
+    with b.scf_if(b.cmp_eq(tid, c0)):
+        tk = b.global_atomic_add(flags, i_cnt, c1)
+        b.smem_store_vN(smem, [c0], tk, 1)
+    b.sync()
+    ticket = b.to_sgpr_u32(b.vec_extract(b.smem_load_vN(smem, c0, dtype=I32, n=1), 0))
+
+    def _store_dw(safe, tot):
+        if spec.data.dtype_d == "fp32":
+            b.buffer_store_f32(dw_rsrc, safe, c0, tot)
+        elif spec.data.dtype_d == "bf16":
+            b.buffer_store_bf16(dw_rsrc, safe, c0, b.trunc_f32_to_bf16(tot))
+        else:
+            b.buffer_store_f16(dw_rsrc, safe, c0, b.trunc_f32_to_f16(tot))
+
+    c4 = b.const_i32(4)
+
+    def _fold_chunk(chunk):
+        # Device-coherent (sc1) loads, which the slab's atomics are visible
+        # to without an L2 invalidate. Inline asm, so the counter wait is
+        # explicit: one asm drains vmcnt and re-defines every loaded value.
+        ptrs = [b.global_ptr_add(ws_ptr, b.mul(soff, c4)) for soff, _ in chunk]
+        raw = [
+            b.inline_asm("global_load_dword $0, $1, off sc1", "=v,v", [pt], F32)
+            for pt in ptrs
+        ]
+        n = len(raw)
+        parts = b.inline_asm_multi(
+            "s_waitcnt vmcnt(0)",
+            ",".join(["=v"] * n + [str(k) for k in range(n)]),
+            raw,
+            result_types=[F32] * n,
+        )
+        for (soff, safe), pt, part in zip(chunk, ptrs, parts):
+            _store_dw(safe, part)
+            b.inline_asm("global_store_dword $0, $1, off sc1", "v,v", [pt, f_zero], None)
+
+    with b.scf_if(b.cmp_eq(ticket, b.sub(fz["ks_count"], c1))):
+        chunk = []
+        for ok, soff, off, _ in _el(True):
+            chunk.append((soff, b.select(ok, b.mul(off, c_eb), oob)))
+            if len(chunk) == _WS_FUSE_CHUNK:
+                _fold_chunk(chunk)
+                chunk = []
+        if chunk:
+            _fold_chunk(chunk)
+        with b.scf_if(b.cmp_eq(tid, c0)):
+            b.global_flag_store(flags, i_cnt, c0, ordering="monotonic")
+
+
+_WS_FUSE_CHUNK = 32
+
+
+def _emit_wgrad_quad_xpose_store(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    accs: Sequence[Value],
+    grid: WarpGrid,
+    dw_rsrc: Value,
+    params: Dict[str, Value],
+    dw_addr,
+    lane: Value,
+    block_m_off: Value,
+    block_n_off: Value,
+) -> None:
+    """``WgradConvSpec.epi_quad_xpose``: 8-byte dW stores after a quad transpose.
+
+    Atom layout: lane l, slot i holds C[4*(l/16) + i][l % 16]. Within a quad
+    (q = l % 4) the lanes hold four consecutive columns of the same four rows;
+    after the transpose lane q holds row 4*(l/16) + q, columns (l % 16) & ~3
+    .. +3 (the cast to 16 bits happens first, so two dwords move per lane).
+    """
+    from rocke.core.ir import VectorType
+
+    c0 = b.const_i32(0)
+    _dt = BF16 if spec.data.dtype_d == "bf16" else F16
+    q_hi = b.cmp_ne(b.land(lane, b.const_i32(2)), c0)
+    q_odd = b.cmp_ne(b.land(lane, b.const_i32(1)), c0)
+    sel_s = b.select(q_odd, b.const_i32(0x05040100), b.const_i32(0x07060302))
+    sel_o0 = b.select(q_odd, b.const_i32(0x03020504), b.const_i32(0x05040100))
+    sel_o1 = b.select(q_odd, b.const_i32(0x03020706), b.const_i32(0x07060100))
+    row_in = b.add(b.mul(b.div(lane, b.const_i32(16)), b.const_i32(4)), b.land(lane, b.const_i32(3)))
+    col_in = b.land(lane, b.const_i32(12))
+    m_base = b.add(b.add(block_m_off, grid.warp_m_off(b)), row_in)
+    n_base = b.add(b.add(block_n_off, grid.warp_n_off(b)), col_in)
+    bound_m, bound_n = _grid_mn_runtime(b, spec, params)
+    c_eb = b.const_i32(2)
+    oob = b.const_i32((1 << 31) - 1)
+    wt2 = VectorType(I32, 2)
+    mfmas_m, mfmas_n = spec.mfmas_per_warp_m, spec.mfmas_per_warp_n
+    for mi in range(mfmas_m):
+        m_val = b.add(m_base, b.const_i32(mi * 16))
+        m_ok = b.cmp_lt(m_val, bound_m)
+        for ni in range(mfmas_n):
+            acc = accs[mi * mfmas_n + ni]
+            w = b.vec_bitcast(b.vec_cast_f32_to(acc, _dt), wt2)
+            w0 = b.vec_extract(w, 0)  # rows 0, 1
+            w1 = b.vec_extract(w, 1)  # rows 2, 3
+            snd = b.select(q_hi, w0, w1)
+            rcv = b.dpp_xor(snd, 2)
+            a_ = b.select(q_hi, rcv, w0)
+            bv = b.select(q_hi, w1, rcv)
+            t_ = b.dpp_xor(b.perm_b32(bv, a_, sel_s), 1)
+            o0 = b.perm_b32(t_, a_, sel_o0)
+            o1 = b.perm_b32(t_, bv, sel_o1)
+            n_val = b.add(n_base, b.const_i32(16 * ni))
+            off, valid = dw_addr(b, m_val, n_val)
+            ok = b.land(m_ok, b.cmp_le(b.add(n_val, b.const_i32(4)), bound_n))
+            if valid is not None:
+                ok = b.land(ok, valid)
+            safe = b.select(ok, b.mul(off, c_eb), oob)
+            v = b.vec_bitcast(b.vec_pack([o0, o1], I32), VectorType(_dt, 4))
+            if _dt == BF16:
+                b.buffer_store_vN_bf16(dw_rsrc, safe, c0, v, 2)
+            else:
+                b.buffer_store_vN_f16(dw_rsrc, safe, c0, v, 2)

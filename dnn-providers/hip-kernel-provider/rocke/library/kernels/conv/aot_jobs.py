@@ -706,6 +706,46 @@ _WGRAD_XWIN_MROW_WSR = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_MROW_WSR", "0")
 _WGRAD_XWIN_PP: Tuple[int, ...] = tuple(
     int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_PP", "") or "").split(",") if v
 )
+# ROCKE_AOT_WGRAD_WSF=1: also a ws_fuse=1 copy (split-K reduction in the
+# Stage 1 epilogue: no scratch clear, no Stage 2) of every ws_replicas=1
+# one-tile-per-workgroup xwin twin made above (the WSR=1 and TK2 copies).
+# Unset: no jobs.
+_WGRAD_WSF = int(_os.environ.get("ROCKE_AOT_WGRAD_WSF", "0") or 0)
+_WGRAD_MB_PP: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_MB_PP", "") or "").split(",") if v
+)
+# ROCKE_AOT_WGRAD_XWIN_KBAND=<n>[,<n>...]: also an xwin_kband=<n> copy (K
+# order banded by n output rows: a split-K slice runs one band through the
+# depth planes) of the multi-group ping-pong xwin copies (ROCKE_AOT_WGRAD_XWIN_PP).
+_WGRAD_XWIN_KBAND: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_KBAND", "") or "").split(",") if v
+)
+
+
+# ROCKE_AOT_WGRAD_WSS=<r>[,<r>...]: also ws_store=1 copies with ws_replicas=r
+# (per-slice slabs written with plain stores: split_k <= r) of the same
+# ws_replicas=1 one-tile xwin twins. Unset: no jobs.
+# ROCKE_AOT_WGRAD_WSS_TILE_K=<k>: only of the twins with tile_k == k.
+_WGRAD_WSS: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_WSS", "") or "").split(",") if v
+)
+_WGRAD_WSS_TILE_K = int(_os.environ.get("ROCKE_AOT_WGRAD_WSS_TILE_K", "0") or 0)
+
+
+def _wgrad_wsf_twins(variants: tuple, tile_k: int = 0) -> tuple:
+    base = tuple(
+        v for v in variants
+        if v.get("ws_replicas") == 1 and v.get("xwin_groups", 1) == 1
+        and not v.get("ws_fuse") and not v.get("ws_store")
+    )
+    out = ()
+    if _WGRAD_WSF:
+        out = out + tuple(dict(v, ws_fuse=_WGRAD_WSF) for v in base)
+    out = out + tuple(
+        dict(v, ws_store=1, ws_replicas=r) for r in _WGRAD_WSS for v in base
+        if not _WGRAD_WSS_TILE_K or v.get("tile_k", tile_k) == _WGRAD_WSS_TILE_K
+    )
+    return out
 
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
@@ -2147,7 +2187,58 @@ def _wgrad_jobs(
             )
 
 
+# ROCKE_AOT_WGRAD_EQX=1 with ROCKE_AOT_WGRAD_EQX_MIN_MN=<n>: also an
+# epi_quad_xpose=1 copy (quad-transposed 8-byte dW stores) of the unsplit
+# default-epilogue 16x16x16 jobs and their K-loop variants with
+# tile_m * tile_n >= n. Unset: no jobs.
+# ROCKE_AOT_WGRAD_PPP=<1,2> with ROCKE_AOT_WGRAD_PPP_MIN_MN=<n>: also a
+# plain_pp=<v> copy (block ping-pong of the plain register-prefetch loop) of
+# the 8-wave "mem" prefetch_regs=1 variants with tile_m * tile_n >= n (before
+# the EQX copies, so those get one too). Unset: no jobs.
+# ROCKE_AOT_WGRAD_PPP_WSS=1: the two-stage plain_pp copies also get a
+# ws_store=1 twin (per-slice slabs, plain stores, no scratch clear).
+_WGRAD_PPP_WSS = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_WSS", "0") or 0)
+_WGRAD_PPP = tuple(int(x) for x in (_os.environ.get("ROCKE_AOT_WGRAD_PPP", "") or "").split(",") if x.strip() and int(x))
+_WGRAD_PPP_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_MIN_MN", "0") or 0)
+_WGRAD_EQX = int(_os.environ.get("ROCKE_AOT_WGRAD_EQX", "0") or 0)
+_WGRAD_EQX_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_EQX_MIN_MN", "0") or 0)
+
+
 def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
+    """:func:`_wgrad_kloop_variants_base` plus the ROCKE_AOT_WGRAD_EQX copies."""
+    variants = _wgrad_kloop_variants_base(arch, cfg)
+    if (
+        _WGRAD_PPP
+        and cfg.get("warp_m", 0) * cfg.get("warp_n", 0) == 8
+        and cfg.get("tile_m", 0) * cfg.get("tile_n", 0) >= _WGRAD_PPP_MIN_MN
+        and cfg.get("pipeline") == "mem"
+    ):
+        _pp = tuple(
+            dict(v, plain_pp=pp)
+            for pp in _WGRAD_PPP
+            for v in variants
+            if v.get("prefetch_regs") == 1 and not v.get("xwin") and not v.get("pfr_sched")
+            and not v.get("lds_bswz") and not v.get("waves_per_eu")
+        )
+        if _WGRAD_PPP_WSS and cfg.get("two_stage"):
+            _pp = _pp + tuple(dict(v, ws_store=1) for v in _pp)
+        variants = variants + _pp
+    if (
+        _WGRAD_EQX
+        and cfg.get("split_k", 1) == 1
+        and not cfg.get("two_stage")
+        and cfg.get("epilogue") == "default"
+        and cfg.get("warp_tile_m") == 16
+        and cfg.get("warp_tile_k") == 16
+        and cfg.get("tile_m", 0) * cfg.get("tile_n", 0) >= _WGRAD_EQX_MIN_MN
+    ):
+        variants = variants + ({"epi_quad_xpose": _WGRAD_EQX},) + tuple(
+            dict(v, epi_quad_xpose=_WGRAD_EQX) for v in variants if not v.get("xwin")
+        )
+    return variants
+
+
+def _wgrad_kloop_variants_base(arch: str, cfg: dict) -> Tuple[dict, ...]:
     """Extra K-loop variants built next to each plain wgrad job.
 
     ``CACHE_WGRAD_KLOOP_VARIANTS[arch]``, minus what cannot apply to the
@@ -2262,7 +2353,7 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     for v in xw
                     if v.get("waves_per_eu")
                 )
-                variants = variants + xw
+                variants = variants + xw + _wgrad_wsf_twins(xw, cfg.get("tile_k", 0))
                 return variants
             # r4-fwdL's m_band axis covers only these plain xwin variants
             # (the ones it built and checked), not the r4-wgrad PP/MROW/WSR
@@ -2295,6 +2386,21 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     for v in _pp
                     if v.get("xwin_groups", 1) > 1
                 )
+                _pp = _pp + tuple(
+                    dict(v, xwin_kband=kb)
+                    for kb in _WGRAD_XWIN_KBAND
+                    for v in _pp
+                    if v.get("xwin_groups", 1) > 1
+                )
+                # ROCKE_AOT_WGRAD_MB_PP=<n>[,...]: m_band=<n> twins of the
+                # multi-group xwin_gn ping-pong copies (slice band order: the
+                # concurrent slices of an XCD one output plane apart).
+                _pp = _pp + tuple(
+                    dict(v, m_band=m)
+                    for m in _WGRAD_MB_PP
+                    for v in _pp
+                    if v.get("xwin_gn") and not v.get("m_band") and not v.get("xwin_kband")
+                )
                 xw = xw + _pp
             if _WGRAD_XWIN_MROW and cfg.get("tile_m", 0) >= _WGRAD_XWIN_MROW_MIN_M:
                 mrow = tuple(
@@ -2315,7 +2421,7 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     if r != cfg.get("ws_replicas")
                     for v in xw
                 )
-            variants = variants + xw + mrow + mb
+            variants = variants + xw + mrow + mb + _wgrad_wsf_twins(xw, cfg.get("tile_k", 0))
     return variants
 
 

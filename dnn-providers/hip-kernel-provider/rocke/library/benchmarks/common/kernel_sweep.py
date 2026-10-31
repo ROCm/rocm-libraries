@@ -866,6 +866,7 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
             split_k=extras.get("split_k", 1),
             ws_ptr=extras.get("ws_ptr"),
             ws_bytes=extras.get("ws_bytes"),
+            **({"sk_flags": extras["sk_flags"]} if "sk_flags" in extras else {}),
         )
     return ConvArgs.from_problem(
         problem, direction="dgrad", tile_m=tm, tile_n=tn

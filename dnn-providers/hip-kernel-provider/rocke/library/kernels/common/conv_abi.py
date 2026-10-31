@@ -175,6 +175,7 @@ def _wgrad_arg_names(
     is_3d: bool = False,
     two_stage: bool = False,
     streamk: Optional[str] = None,
+    ws_flags: bool = False,
 ) -> List[ArgSpec]:
     """Weight-gradient conv: ``dY`` (N[D]HWK), ``X`` (N[D]HWC), ``dW`` (K[Z]YXC).
 
@@ -245,6 +246,11 @@ def _wgrad_arg_names(
     out += [("ks", "i32"), ("ks_count", "i32")]
     if streamk in ("linear", "tree"):
         out += [("sk_flags", "i32*"), ("sk_partials", "f32*")]
+    if ws_flags:
+        # WgradConvSpec.ws_fuse: the per-tile counters of the fused reduction.
+        if not two_stage:
+            raise ValueError("ws_flags extends the wgrad two-stage ABI only")
+        out += [("sk_flags", "i32*")]
     if streamk is not None:
         out += [(name, "i32") for name in _STREAMK_SCALARS]
     return out
@@ -367,7 +373,10 @@ def conv_arg_names(
             out += [("sk_flags", "i32*")]
         return out
     if direction == "wgrad":
-        return _wgrad_arg_names(is_3d=is_3d, two_stage=two_stage, streamk=streamk)
+        return _wgrad_arg_names(
+            is_3d=is_3d, two_stage=two_stage, streamk=streamk,
+            **({"ws_flags": True} if split_flags else {}),
+        )
     if direction == "dgrad":
         return _dgrad_arg_names(is_3d=is_3d)
     raise ValueError(

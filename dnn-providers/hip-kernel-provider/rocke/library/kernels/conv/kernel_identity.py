@@ -176,6 +176,16 @@ class KernelIdentity:
     # wgrad only (WgradConvSpec.xwin_gn): groups over consecutive flat tiles.
     # Left out of the hash at 0.
     xwin_gn: int = 0
+    # wgrad only (WgradConvSpec.ws_fuse): the two-stage reduction done in the
+    # Stage 1 epilogue (per-tile counters, no clear, no Stage 2). Left out of
+    # the hash at 0.
+    ws_fuse: int = 0
+    # wgrad only (WgradConvSpec.ws_store): plain-store per-slice scratch slabs. Left out of the hash at 0.
+    ws_store: int = 0
+    # wgrad only (WgradConvSpec.xwin_kband): banded K order. Left out of the hash at 0.
+    xwin_kband: int = 0
+    # wgrad only (WgradConvSpec.plain_pp): plain-loop block ping-pong. Left out of the hash at 0.
+    plain_pp: int = 0
     # dgrad (DgradConvSpec.uniform_k_decode) and fwd
     # (ImplicitGemmConvSpec.uniform_k_decode): the per-tile reduction decode
     # K loop. Left out of the hash while False, like prefetch_addr.
@@ -465,6 +475,14 @@ class KernelIdentity:
             del fields["xwin_mrow"]
         if not fields["xwin_gn"]:
             del fields["xwin_gn"]
+        if not fields["ws_fuse"]:
+            del fields["ws_fuse"]
+        if not fields["ws_store"]:
+            del fields["ws_store"]
+        if not fields["xwin_kband"]:
+            del fields["xwin_kband"]
+        if not fields["plain_pp"]:
+            del fields["plain_pp"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["reg_prefetch"]:
@@ -887,6 +905,23 @@ def identity_supports_problem(
         and any(int(getattr(problem, a, 0) or 0) for a in ("pH", "pW", "pD"))
     ):
         return False, "uk_nopad serves unpadded problems only"
+
+    # wgrad epi_quad_xpose: 4 consecutive dW columns per 8-byte store, which
+    # must stay inside one filter tap's channel run.
+    if (
+        identity.direction == "wgrad"
+        and getattr(identity, "epi_quad_xpose", 0)
+        and not identity.is_direct
+        and cpg % 4
+    ):
+        return False, f"wgrad epi_quad_xpose needs cpg % 4 == 0 (cpg={cpg})"
+
+    # wgrad xwin_kband: the banded K decode assumes N == 1 and whole bands.
+    _kb = getattr(identity, "xwin_kband", 0)
+    if identity.direction == "wgrad" and _kb and not identity.is_direct:
+        _ho = int(getattr(problem, "Ho", 0) or 0)
+        if int(getattr(problem, "N", 1) or 1) != 1 or not _ho or _ho % _kb:
+            return False, f"xwin_kband {_kb} needs N == 1 and Ho % {_kb} == 0"
 
     # m_band (fwd / dgrad): a band at least as wide as the output plane's
     # tile row is the launch order, i.e. the same binary as without it --

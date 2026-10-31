@@ -5507,7 +5507,7 @@ def _fast_rank_candidates(
 def _free_extras(rt, live_extras: list) -> None:
     """Free the device buffers :func:`_extras_and_grid` allocated, and forget them."""
     for extras in live_extras:
-        for key in ("ws_ptr", "sub_gemm_buf"):
+        for key in ("ws_ptr", "sub_gemm_buf", "sk_flags"):
             if key in extras:
                 rt.free(extras[key])
     live_extras.clear()
@@ -5636,6 +5636,7 @@ def _signature_for_identity(ident, dtype):
             is_3d=ident.is_3d,
             two_stage=ident.two_stage,
             streamk=ident.streamk_reduction if ident.streamk != "off" else None,
+            **({"split_flags": True} if getattr(ident, "ws_fuse", 0) else {}),
         )
     if ident.direction == "dgrad":
         return conv_args_signature(dtype, direction="dgrad", is_3d=ident.is_3d)
@@ -6399,6 +6400,10 @@ def _cached_bind(
             rt.memset_async(dx_ptr, 0, dx_bytes, stream)
             _launch()
 
+    elif direction == "wgrad" and ident.two_stage and getattr(ident, "ws_fuse", 0):
+        # ws_fuse: Stage 1 reduces in its epilogue into dW -- no scratch
+        # clear and no Stage 2 (the tile counters reset themselves).
+        pass
     elif direction == "wgrad" and ident.two_stage:
         # Two-stage is three steps and all of them are the algorithm's cost:
         # zero the scratch (Stage 1 accumulates), Stage 1, then the fold/cast
@@ -6427,8 +6432,11 @@ def _cached_bind(
             s2_values=s2_values,
             s2_cfg=s2_cfg,
             stream=stream,
+            ws_store=bool(getattr(ident, "ws_store", 0)),
         ):
-            rt.memset_async(extras["ws_ptr"], 0, extras["ws_bytes"], stream)
+            if not ws_store:
+                # (ws_store writes every element of the slabs Stage 2 folds)
+                rt.memset_async(extras["ws_ptr"], 0, extras["ws_bytes"], stream)
             launcher(values, config=cfg)
             s2_launcher(s2_values, config=s2_cfg)
 
@@ -6555,10 +6563,25 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
             ws_slabs = _ws_slabs_used(problem, ident, split_k)
             ws_bytes = wgrad_workspace_nbytes(problem, ws_slabs)
             extras["ws_slabs"] = ws_slabs
+            if (getattr(ident, "ws_fuse", 0) or getattr(ident, "ws_store", 0)) and max(1, problem.groups) > 1:
+                raise ValueError("ws_fuse / ws_store serve ungrouped problems only")
+            if getattr(ident, "ws_store", 0) and split_k > _ws_replicas_of(ident):
+                raise ValueError(
+                    f"ws_store writes one scratch slab per slice: split_k={split_k} > "
+                    f"ws_replicas={_ws_replicas_of(ident)}"
+                )
             ws = rt.alloc(ws_bytes)
             rt.memset(ws, 0, ws_bytes)
             extras["ws_ptr"] = ws
             extras["ws_bytes"] = ws_bytes
+            if getattr(ident, "ws_fuse", 0):
+                # Four i32 per (M, N) tile, zeroed once: the kernel resets them.
+                _gx, _gy, _ = _grid_for(direction, problem, ident, split_k)
+                nb = 16 * _gx * _gy
+                fl = rt.alloc(nb)
+                rt.memset(fl, 0, nb)
+                extras["sk_flags"] = fl
+                extras["sk_flags_bytes"] = nb
         return extras, _grid_for(direction, problem, ident, split_k)
 
     if direction == "fwd" and ident.split_k > 1:

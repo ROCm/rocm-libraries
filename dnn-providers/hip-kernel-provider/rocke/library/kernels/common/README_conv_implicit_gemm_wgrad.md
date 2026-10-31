@@ -488,6 +488,38 @@ AOT axes (all opt-in): `ROCKE_AOT_WGRAD_XWIN_PP=8` (ping-pong copies of the
 `ROCKE_AOT_WGRAD_XWIN_TK2=16` (+`_MIN_M`, `_WSR`: `tile_k` 16 twins for Wo = 16),
 `ROCKE_AOT_WGRAD_XWIN_MROW` (+`_MIN_M`, `_WSR`).
 
+### Plain-loop block ping-pong (`plain_pp`, tag `wpl<n>`)
+
+The same 8-wave block ping-pong for the plain (non-xwin) register-prefetch loop
+(`prefetch_regs = 1`) of an 8-wave tile with an even k-atom count (t256x256x32
+w4x2 / w2x4 a16 on the small-grid W cells s7/s8/s10): waves 4-7 run one barrier
+behind waves 0-3, per K tile `[mem A]` every fragment read of tile t,
+`[compute A]` the first half of the k atoms, `[mem B]` tile t+1's LDS stores and
+tile t+2's global reads, `[compute B]` the other half.
+
+* `1`: the VALU (kpack v_perm packing, read address/bounds math) sits in the
+  memory phases (the compiler hoists it above the barriers, serialized after the
+  MFMAs) -- -2..-3% only.
+* `2`: the packing of tile t+1 interleaved into compute A (one VALU per MFMA,
+  `sched_group_barrier`), tile t+3's byte offsets (sep_addr incremental state +
+  bounds) into compute B (three per MFMA, carried as loop VGPRs); mem B is LDS
+  writes + buffer_loads from carried offsets only. `3`: the packing in the
+  second half of compute A (0 spills). `4`: `3` without the `s_setprio`
+  phase priorities. 2-4 measured -5..-14% on s7/s8/s10 against the plain record
+  kernels; reads in compute A (TA bursts avoided) and offsets in mem A were slower.
+
+AOT: `ROCKE_AOT_WGRAD_PPP=2,3,4` with `ROCKE_AOT_WGRAD_PPP_MIN_MN=65536` (copies
+of the 8-wave `mem` pfr1 variants with tile_m*tile_n >= 65536),
+`ROCKE_AOT_WGRAD_PPP_WSS=1` (+ `ws_store` twins of the two-stage ones).
+
+### Plain-store scratch (`ws_store`, tag `wss1`)
+
+Two-stage split-K with one slab per slice (`ws_replicas >= split_k`): Stage 1
+writes its partial with plain stores, so the scratch needs no clear and takes no
+atomics; Stage 2 sums the slabs. Wins where the clear dominates (s7 @2/@3: 28-57 MB).
+AOT: `ROCKE_AOT_WGRAD_WSS=<r>` (+ `ROCKE_AOT_WGRAD_WSS_TILE_K=<k>`) on the
+`ws_replicas` 1 xwin twins, `ROCKE_AOT_WGRAD_PPP_WSS` on the plain_pp copies.
+
 ### Two-stage scratch slabs
 
 Stage 1 accumulates slice `z` into slab `z % ws_replicas`; a launch at
