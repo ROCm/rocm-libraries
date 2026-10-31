@@ -162,6 +162,11 @@ NATIVE_PARITY_TESTS = (
         "native integer-expression evaluator parity",
     ),
     (
+        "ROCKE_PARAM_FACTS_CLI",
+        "rocke_param_facts",
+        "native parameter-fact print, verify and canonicalize parity",
+    ),
+    (
         "ROCKE_ARCH_TARGET_TEST_EXE",
         "rocke_arch_target_identity",
         "native target identity parity",

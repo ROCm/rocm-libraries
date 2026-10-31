@@ -24,6 +24,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <string>
+#include <vector>
 
 #include "rocke/arena.h"
 #include "rocke/error.hpp"
@@ -857,6 +859,67 @@ static int rocke_kernel_params_add(rocke_ir_builder_t* b, rocke_param_t* p)
     return 0;
 }
 
+/* Python IRBuilder.param's facts: store each stated bound (an int, or a
+ * relation as canonical JSON) in p->attrs, then refuse a declaration that
+ * breaks a rule, with the first of rocke_param_fact_errors's messages. */
+static void rocke_i_first_fact_error(void* ctx, const char* message)
+{
+    std::string* first = (std::string*)ctx;
+    if(first->empty())
+    {
+        *first = message;
+    }
+}
+
+static bool
+    rocke_i_param_set_facts(rocke_ir_builder_t* b, rocke_param_t* p, const rocke_int_facts_t* facts)
+{
+    const struct
+    {
+        const char* word;
+        const rocke_int_bound_t* bound;
+    } bounds[] = {{"ge", &facts->ge},
+                  {"gt", &facts->gt},
+                  {"le", &facts->le},
+                  {"lt", &facts->lt},
+                  {"eq", &facts->eq}};
+    for(const auto& entry : bounds)
+    {
+        if(entry.bound->relation != NULL)
+        {
+            /* Stored canonical, as the Python builder stores it; a string that
+             * holds no relation is kept as given and refused below. */
+            const char* canonical
+                = rocke_relation_canonical(entry.bound->relation, &b->arena, NULL, NULL);
+            rocke_attr_set_str(
+                b, &p->attrs, entry.word, canonical ? canonical : entry.bound->relation);
+        }
+        else if(entry.bound->set)
+        {
+            rocke_attr_set_int(b, &p->attrs, entry.word, entry.bound->value);
+        }
+    }
+    if(facts->multiple_of_set)
+    {
+        rocke_attr_set_int(b, &p->attrs, "multiple_of", facts->multiple_of);
+    }
+    const rocke_kernel_def_t* k = b->kernel;
+    std::vector<const rocke_param_t*> params(k->params, k->params + k->num_params);
+    params.push_back(p);
+    std::string first;
+    rocke_param_fact_errors(params.data(),
+                            (int)params.size(),
+                            (int)params.size() - 1,
+                            rocke_i_first_fact_error,
+                            &first);
+    if(!first.empty())
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", first.c_str());
+        return false;
+    }
+    return true;
+}
+
 rocke_value_t* rocke_b_param(rocke_ir_builder_t* b,
                              const char* name,
                              const rocke_type_t* t,
@@ -949,6 +1012,10 @@ rocke_value_t* rocke_b_param(rocke_ir_builder_t* b,
         if(opts->dereferenceable_set)
         {
             rocke_attr_set_int(b, &p->attrs, "dereferenceable", opts->dereferenceable);
+        }
+        if(!rocke_i_param_set_facts(b, p, &opts->facts))
+        {
+            return NULL;
         }
     }
 

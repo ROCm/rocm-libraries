@@ -73,7 +73,7 @@ def _host(valid: Value, *leaves: tuple[Value, int]) -> bool:
 def _mixed_constants(b: IRBuilder):
     """An origin in ``[0, 65)`` plus a lane in ``[0, 4)`` against a length of 70, at constants
     0 and 12: the upper side is proven at 0 and fails at 12."""
-    origin = b._assume_range(b.block_id_x(), lo=0, hi=65)
+    origin = b._assume_range(b.block_id_x(), ge=0, lt=65)
     x = b.add(origin, b.land(b.thread_id_x(), _c(b, 3)))
     return x, [(x,), (b.add(x, _c(b, 12)),)]
 

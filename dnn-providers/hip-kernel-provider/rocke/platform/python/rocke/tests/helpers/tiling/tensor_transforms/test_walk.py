@@ -68,7 +68,7 @@ def _runtime_length(
     b: IRBuilder, name: str, at_most: int, *, multiple_of: int = 1
 ) -> RuntimeValue:
     """A runtime length the way its producer states it: an envelope marker, then rebuilt."""
-    marked = _stated(b, name, lo=0, hi=at_most + 1, multiple_of=multiple_of)
+    marked = _stated(b, name, ge=0, lt=at_most + 1, multiple_of=multiple_of)
     return runtime_value_of(marked)
 
 
@@ -301,7 +301,7 @@ def test_a_guard_marker_gives_a_multiplied_and_a_shifted_origin_the_same_facts()
     b = _builder()
     m = _runtime_length(b, "M", 1 << 20, multiple_of=128)
     for origin in (b.mul(b.block_id_x(), _c(b, 128)), b.shl(b.block_id_x(), _c(b, 7))):
-        guarded = b._assume_range(origin, lo=0, hi_value=m.value)
+        guarded = b._assume_range(origin, ge=0, lt=m.value)
         assert value_facts(b, guarded) == (
             Interval(0, m._shifted(-127)),
             Congruence(128, 0),
@@ -310,8 +310,8 @@ def test_a_guard_marker_gives_a_multiplied_and_a_shifted_origin_the_same_facts()
 
 def test_worked_example_and_with_a_low_mask():
     b = _builder()
-    wide = _stated(b, "x", lo=-300, hi=300)
-    narrow = _stated(b, "y", lo=16, hi=20)
+    wide = _stated(b, "x", ge=-300, lt=300)
+    narrow = _stated(b, "y", ge=16, lt=20)
     assert value_facts(b, b.land(wide, _c(b, 7)))[0] == Interval(0, 8)
     assert value_facts(b, b.land(_c(b, 31), narrow))[0] == Interval(16, 20)
 
@@ -390,7 +390,7 @@ def test_shl_and_low_mask_rows_hold_for_every_i32_value_and_their_precondition_m
             and not any((v - r) % m == 0 for v in range(lo, min(hi, lo + m)))
         ):
             continue  # no value of this range has this residue
-        x = _stated(b, f"x{index}", lo=lo, hi=hi, multiple_of=m, residue=r)
+        x = _stated(b, f"x{index}", ge=lo, lt=hi, multiple_of=m, residue=r)
         x_facts = value_facts(b, x)
         xs = _samples(x_facts, rng)
         for c in range(32):
@@ -479,19 +479,19 @@ def test_a_marker_narrows_the_derived_facts_and_snaps_to_the_residue():
     b = _builder()
     length = _runtime_length(b, "L", 1 << 20, multiple_of=128)
     origin = b.mul(b.block_id_x(), _c(b, 128))
-    guarded = b._assume_range(origin, lo=0, hi_value=length.value)
+    guarded = b._assume_range(origin, ge=0, lt=length.value)
     assert value_facts(b, guarded) == (
         Interval(0, length._shifted(-127)),
         Congruence(128, 0),
     )
-    stated_residue = _stated(b, "s", lo=0, hi=1000, multiple_of=8, residue=3)
+    stated_residue = _stated(b, "s", ge=0, lt=1000, multiple_of=8, residue=3)
     assert value_facts(b, stated_residue) == (Interval(3, 996), Congruence(8, 3))
 
 
 def test_a_marker_that_contradicts_the_ir_raises_the_intersect_error():
     b = _builder(100)
     proven = b.add(b.thread_id_x(), _c(b, 100))  # [100, 200)
-    marked = b._assume_range(proven, lo=0, hi=64)
+    marked = b._assume_range(proven, ge=0, lt=64)
     message = (
         "Interval.intersect: [100, 200) and [0, 64) have no value in common -- the two ranges "
         "state contradictory facts; check where each was derived"
@@ -503,7 +503,7 @@ def test_a_marker_that_contradicts_the_ir_raises_the_intersect_error():
 def test_a_marker_on_a_per_lane_value_keeps_it_per_lane():
     b = _builder()
     lane = b.mod(b.thread_id_x(), _c(b, 64))
-    marked = b._assume_range(lane, lo=0, hi=64)
+    marked = b._assume_range(lane, ge=0, lt=64)
     split = split_coordinate(b, marked)
     assert split.uniform == () and split.lane is marked
 
@@ -511,23 +511,23 @@ def test_a_marker_on_a_per_lane_value_keeps_it_per_lane():
 def test_runtime_value_of_rebuilds_exactly_what_the_marker_states():
     b = _builder()
     p = b.param("p", I32)
-    marked = b._assume_range(p, lo=0, hi=4097, multiple_of=8)
+    marked = b._assume_range(p, ge=0, lt=4097, multiple_of=8)
     assert runtime_value_of(marked) == RuntimeValue(
         marked, 0, Interval(0, 4097), Congruence(8, 0)
     )
-    residue = b._assume_range(p, lo=0, hi=100, multiple_of=8, residue=3)
+    residue = b._assume_range(p, ge=0, lt=100, multiple_of=8, residue=3)
     assert runtime_value_of(residue)._congruence == Congruence(8, 3)
     assert runtime_value_of(p) is None
     assert runtime_value_of(b.thread_id_x()) is None
     assert runtime_value_of(7) is None
-    with_runtime_end = b._assume_range(p, lo=0, hi_value=marked)
+    with_runtime_end = b._assume_range(p, ge=0, lt=marked)
     assert runtime_value_of(with_runtime_end) is None
 
 
 def test_runtime_value_of_takes_the_stated_envelope_not_the_derived_range():
     b = _builder()
     capped = b.smin(b.param("p", I32), _c(b, 100))  # derived [?, 101)
-    marked = b._assume_range(capped, lo=0, hi=1001)
+    marked = b._assume_range(capped, ge=0, lt=1001)
     assert value_facts(b, marked)[0] == Interval(0, 101)
     rebuilt = runtime_value_of(marked)
     assert rebuilt._envelope == Interval(0, 1001)
@@ -540,10 +540,10 @@ def test_a_marker_runtime_end_resolves_through_the_length_marker():
     b = _builder()
     ks = _runtime_length(b, "K", 4096)
     origin = b.block_id_x()
-    guarded = b._assume_range(origin, lo=0, hi_value=ks.value, hi_plus=-3)
+    guarded = b._assume_range(origin, ge=0, lt=ks.value, lt_plus=-3)
     assert value_facts(b, guarded)[0] == Interval(0, ks._shifted(-3))
     not_a_length = b.param("n", I32)
-    bad = b._assume_range(origin, lo=0, hi_value=not_a_length)
+    bad = b._assume_range(origin, ge=0, lt=not_a_length)
     message = (
         f"IR range walk: the marker on {origin} states an end over {not_a_length}, which is not "
         "a runtime value's marker result -- a runtime end is the .value of a RuntimeValue (from "
@@ -678,7 +678,7 @@ def test_block_ids_parameters_and_their_arithmetic_are_the_same_for_the_workgrou
         b.mul(b.block_id_y(), _c(b, 128)),
         b.add(b.mul(b.div(b.block_id_x(), _c(b, 8)), _c(b, 128)), _c(b, 64)),
         p,
-        b._assume_range(p, lo=0, hi=4097),
+        b._assume_range(p, ge=0, lt=4097),
         b.readfirstlane(b.block_id_x()),
         5,
     ]

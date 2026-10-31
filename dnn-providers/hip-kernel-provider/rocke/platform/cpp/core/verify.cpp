@@ -366,7 +366,7 @@ static void check_assume_range_attrs(verifier_t* v, const rocke_op_t* op)
 {
     /* ir._ASSUME_RANGE_INT_ATTRS: every present attr must be an integer before
      * the value rules below compare it. */
-    static const char* const int_attrs[] = {"multiple_of", "residue", "lo", "hi", "hi_plus"};
+    static const char* const int_attrs[] = {"multiple_of", "residue", "ge", "lt", "lt_plus"};
     bool typed = true;
     for(const char* key : int_attrs)
     {
@@ -383,8 +383,8 @@ static void check_assume_range_attrs(verifier_t* v, const rocke_op_t* op)
     }
     int64_t multiple_of = 1;
     int64_t residue = 0;
-    int64_t lo = 0;
-    int64_t hi = 0;
+    int64_t ge = 0;
+    int64_t lt = 0;
     int64_t unused = 0;
     rocke_attr_get_int(&op->attrs, "multiple_of", &multiple_of);
     rocke_attr_get_int(&op->attrs, "residue", &residue);
@@ -403,24 +403,27 @@ static void check_assume_range_attrs(verifier_t* v, const rocke_op_t* op)
                (long long)multiple_of,
                (long long)residue);
     }
-    const bool has_hi_value = op->num_operands == 2;
-    const bool has_lo = rocke_attr_get_int(&op->attrs, "lo", &lo);
-    const bool has_hi = rocke_attr_get_int(&op->attrs, "hi", &hi);
-    if(has_hi && has_hi_value)
-    {
-        v_errf(v, op, "arith.assume_range: hi and hi_value are both given; state at most one end");
-    }
-    if(rocke_attr_get_int(&op->attrs, "hi_plus", &unused) && !has_hi_value)
-    {
-        v_errf(v, op, "arith.assume_range: hi_plus is given without hi_value");
-    }
-    if(has_lo && has_hi && lo >= hi)
+    const bool has_lt_operand = op->num_operands == 2;
+    const bool has_ge = rocke_attr_get_int(&op->attrs, "ge", &ge);
+    const bool has_lt = rocke_attr_get_int(&op->attrs, "lt", &lt);
+    if(has_lt && has_lt_operand)
     {
         v_errf(v,
                op,
-               "arith.assume_range: lo (%lld) must be below hi (%lld)",
-               (long long)lo,
-               (long long)hi);
+               "arith.assume_range: lt is given both as an attr and as an operand; "
+               "state one upper end");
+    }
+    if(rocke_attr_get_int(&op->attrs, "lt_plus", &unused) && !has_lt_operand)
+    {
+        v_errf(v, op, "arith.assume_range: lt_plus is given without an lt operand");
+    }
+    if(has_ge && has_lt && ge >= lt)
+    {
+        v_errf(v,
+               op,
+               "arith.assume_range: ge (%lld) must be below lt (%lld)",
+               (long long)ge,
+               (long long)lt);
     }
 }
 
@@ -552,7 +555,7 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         {
             v_errf(v,
                    op,
-                   "%s: hi_value type %s != operand type %s",
+                   "%s: lt operand type %s != operand type %s",
                    name,
                    tn(op->operands[1]->type),
                    tn(t));
@@ -992,6 +995,12 @@ static void check_region(verifier_t* v, const rocke_region_t* region, int is_ker
     }
 }
 
+/* A rocke_param_fact_errors message, reported as a kernel-level error. */
+static void v_param_fact_error(void* ctx, const char* message)
+{
+    v_errf((verifier_t*)ctx, NULL, "%s", message);
+}
+
 /* ---- entry ---- */
 
 rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, size_t* n)
@@ -1031,6 +1040,8 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
         char where[160];
         snprintf(where, sizeof(where), "param '%s'", p->name ? p->name : "");
         check_type(&v, p->type, where, NULL);
+        rocke_param_fact_errors(
+            (const rocke_param_t* const*)k->params, k->num_params, i, v_param_fact_error, &v);
         char vname[160];
         snprintf(vname, sizeof(vname), "%%%s", p->name ? p->name : "");
         if(scope_has(&v, vname))

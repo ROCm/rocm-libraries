@@ -11,6 +11,8 @@ passes in this package.
 Modules:
 
   - ``dtypes``     : target-independent dtype names and alias normalization.
+  - ``facts``      : `stated_facts_of(value)`, the facts a kernel parameter's
+                     declaration or a range marker states for a Value.
   - ``intexpr``    : the integer-expression tree, its evaluator
                      (`eval_intexpr`) and the host-bound constructors
                      (`sum_of`, `product_of`, `quotient_of`, `difference_of`).
@@ -88,6 +90,7 @@ from .backend import (
     lower_universal_gemm,
     resolve_backend,
 )
+from .facts import StatedFacts, stated_facts_of
 from .ir_print import print_ir
 from .ir_serialize import (
     canonical_equal,
@@ -153,6 +156,8 @@ __all__ = [
     "lower_universal_gemm",
     "resolve_backend",
     "print_ir",
+    "StatedFacts",
+    "stated_facts_of",
     "serialize",
     "parse",
     "canonicalize",

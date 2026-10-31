@@ -558,7 +558,9 @@ if(ROCKE_INSTALL_TESTS)
       # manifest; ROCKE_UNSIGNED_INT_OPS_CLI is the C API program whose
       # --print-llvm output test_unsigned_int_ops.py compares with the Python
       # builder's text; ROCKE_INTEXPR_CLI is the C++ integer-expression
-      # evaluator whose --eval output test_intexpr.py compares with Python's.
+      # evaluator whose --eval output test_intexpr.py compares with Python's;
+      # ROCKE_PARAM_FACTS_CLI prints the C++ print_ir, verifier messages and
+      # canonicalize that test_param_facts.py compares with Python's.
       set(_ROCKE_PYTEST_ENVIRONMENT
           "PYTHONPATH=."
           "ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}"
@@ -569,6 +571,7 @@ if(ROCKE_INSTALL_TESTS)
               "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
               "ROCKE_UNSIGNED_INT_OPS_CLI=rocke_unsigned_int_ops"
               "ROCKE_INTEXPR_CLI=rocke_intexpr"
+              "ROCKE_PARAM_FACTS_CLI=rocke_param_facts"
               "ROCKE_ARCH_TARGET_TEST_EXE=rocke_arch_target_identity"
               "ROCKE_BUFFER_RSRC_HIP_TEST=rocke_buffer_rsrc_hip")
         string(REPLACE "=" ";" _rocke_native_parity "${_rocke_native_parity}")

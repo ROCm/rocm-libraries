@@ -472,11 +472,45 @@ void check_param_attrs()
 
 } // namespace
 
+// The VM reads an integer parameter's facts -- ints, and a relation as the
+// canonical intexpr JSON string the recording builder records -- and they lower
+// to no byte; a declaration the builder refuses fails the replay with its text.
+void check_param_facts()
+{
+    const auto recipe = [](const std::string& ldc_attrs) {
+        return std::string(R"json({"schema": "rocke.recipe/v1", "kernel_name_fmt": "fact_probe",
+  "spec": [], "attrs": {}, "program": [
+    {"op": "param", "name": "M", "bind": "M", "type": "i32",
+     "attrs": {"ge": 1, "multiple_of": 8}},
+    {"op": "param", "name": "ldc", "bind": "ldc", "type": "i32", "attrs": )json")
+               + ldc_attrs + R"json(}, {"op": "ret"}]})json";
+    };
+    std::string ll, err;
+    check(run_attr_recipe(recipe(R"json({"ge": "{\"param\":\"M\"}", "le": 4096})json"), &ll, &err)
+              == ROCKE_OK,
+          ("param facts replay (got: " + err + ")").c_str());
+    check(ll.find("(i32 %M, i32 %ldc)") != std::string::npos,
+          "param facts lower to plain i32 arguments");
+    const char* const bad[][2] = {
+        {R"json({"ge": "{\"param\":\"K\"}"})json",
+         "ldc: the relation names K, which is not a parameter of this kernel"},
+        {R"json({"ge": true})json", "param 'ldc' ge is not an integer or a relation"},
+    };
+    for(const auto& c : bad)
+    {
+        ll.clear();
+        err.clear();
+        check(run_attr_recipe(recipe(c[0]), &ll, &err) != ROCKE_OK, c[0]);
+        check(err.find(c[1]) != std::string::npos, (std::string(c[0]) + " got: " + err).c_str());
+    }
+}
+
 int main()
 {
     std::printf("portable_ir recipe_vm_replay:\n");
 
     check_param_attrs();
+    check_param_facts();
     check_kernel_list_attrs();
     check_invalid_integer_values();
     check_scf_if_else();

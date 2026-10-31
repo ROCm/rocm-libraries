@@ -412,3 +412,80 @@ open(out + "/py.ll", "w").write(
         got = replay(flag, tmp_path / f"bad.{form}")
         assert got.returncode != 0, f"{form}: an unknown param attr was accepted"
         assert "param 'src' has unknown attr 'el'" in got.stderr, got.stderr[-2000:]
+
+
+def test_standalone_importers_carry_and_refuse_param_facts(tmp_path):
+    """Both C++ importers read an integer parameter's facts -- ints, and a
+    relation stored as its canonical intexpr JSON -- and refuse a declaration
+    the builder refuses, with the builder's text.
+
+    The facts lower to no byte, so the replay of a kernel that states them
+    matches the Python lowerer exactly."""
+    cli = _replay_cli()
+    author = """
+import json, sys
+from rocke.core import ir_export
+from rocke.core.intexpr import product_of
+from rocke.core.ir import I32, IRBuilder, PtrType
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.portable_ir.src.recording_builder import record_kernel
+
+
+def build():
+    b = IRBuilder("param_fact_probe")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    out = b.param("out", PtrType(I32, "global"), align=16)
+    m = b.param("M", I32, ge=1, le=4096, multiple_of=8)
+    ldc = b.param("ldc", I32, ge=m)
+    b.param("sb", I32, ge=product_of(m, ldc))
+    tid = b.thread_id_x()
+    b.global_store(out, tid, b.add(m, ldc))
+    b.ret()
+    return b.kernel
+
+
+out = sys.argv[1]
+kernel, recipe = record_kernel(build)
+open(out + "/k.ir.json", "w").write(ir_export.export_kernel_ir_json(kernel))
+open(out + "/k.recipe.json", "w").write(json.dumps(recipe))
+open(out + "/py.ll", "w").write(
+    lower_kernel_to_llvm(kernel, llvm_flavor="llvm20", arch="gfx950"))
+"""
+    r = _run([sys.executable, "-c", author, str(tmp_path)])
+    assert r.returncode == 0, r.stderr[-4000:]
+
+    import json
+
+    expected = (tmp_path / "py.ll").read_text()
+    ir_doc = json.loads((tmp_path / "k.ir.json").read_text())
+    recipe = json.loads((tmp_path / "k.recipe.json").read_text())
+    relation = '{"mul":[{"param":"M"},{"param":"ldc"}]}'
+    assert ir_doc["kernel"]["params"][3]["attrs"] == {"ge": relation}
+    recorded = [i for i in recipe["program"] if i.get("op") == "param"]
+    assert recorded[3]["attrs"] == {"ge": relation}
+    ir_doc["kernel"]["params"][2]["attrs"]["ge"] = '{"param":"K"}'
+    recorded[2]["attrs"]["ge"] = '{"param":"K"}'
+    (tmp_path / "bad.ir.json").write_text(json.dumps(ir_doc))
+    (tmp_path / "bad.recipe.json").write_text(json.dumps(recipe))
+
+    def replay(flag, path):
+        return subprocess.run(
+            [cli, flag, str(path), "--arch", "gfx950", "--flavor", "llvm20"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    for form, flag in (("ir.json", "--ir"), ("recipe.json", "--recipe")):
+        got = replay(flag, tmp_path / f"k.{form}")
+        assert got.returncode == 0, f"{form}: {got.stderr[-2000:]}"
+        assert got.stdout == expected, f"{form}: replay diverged from Python"
+
+        got = replay(flag, tmp_path / f"bad.{form}")
+        assert (
+            got.returncode != 0
+        ), f"{form}: a relation on an unknown name was accepted"
+        assert (
+            "ldc: the relation names K, which is not a parameter of this kernel"
+            in got.stderr
+        ), got.stderr[-2000:]

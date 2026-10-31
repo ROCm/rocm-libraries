@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import List
 
-from .ir import KernelDef, Op
+from .ir import KernelDef, Op, Param, param_fact_texts
 
 
 def _format_operand(v) -> str:
@@ -60,8 +60,18 @@ def _print_op(op: Op, indent: int) -> List[str]:
     return lines
 
 
+def _format_param(p: Param) -> str:
+    """``%name: type``, then the facts its declaration states, e.g.
+    ``%ldc: i32 {ge = %N, le = 1048576, multiple_of = 8}``."""
+    facts = param_fact_texts(p)
+    if not facts:
+        return f"%{p.name}: {p.type.name}"
+    inner = ", ".join(f"{word} = {text}" for word, text in facts)
+    return f"%{p.name}: {p.type.name} {{{inner}}}"
+
+
 def print_ir(kernel: KernelDef) -> str:
-    param_str = ", ".join(f"%{p.name}: {p.type.name}" for p in kernel.params)
+    param_str = ", ".join(_format_param(p) for p in kernel.params)
     lines = [f"kernel @{kernel.name}({param_str}) {{"]
     for op in kernel.body.ops:
         lines.extend(_print_op(op, 2))

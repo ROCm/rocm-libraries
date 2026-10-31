@@ -532,7 +532,32 @@ typedef struct rocke_region
     int cap_ops;
 } rocke_region_t;
 
-/* Kernel parameter ABI options (the Python **attrs on IRBuilder.param). A field
+/* One bound of an integer fact: an int, or a relation over earlier parameters
+ * (the intexpr JSON tree rocke.core.intexpr builds, e.g. {"param":"N"} or
+ * {"mul":[{"param":"M"},{"param":"ldc"}]}). `relation` wins when non-NULL. */
+typedef struct rocke_int_bound
+{
+    bool set;
+    int64_t value;
+    const char* relation;
+} rocke_int_bound_t;
+
+/* The integer facts a declaration states (Python IRBuilder.param's ge / gt / le /
+ * lt / eq / multiple_of): value >= / > / <= / < / == a bound, and value % n ==
+ * 0. At most one of ge/gt and one of le/lt; eq excludes every other word. The
+ * host checks them before every launch and the GPU trusts them. */
+typedef struct rocke_int_facts
+{
+    rocke_int_bound_t ge;
+    rocke_int_bound_t gt;
+    rocke_int_bound_t le;
+    rocke_int_bound_t lt;
+    rocke_int_bound_t eq;
+    int64_t multiple_of;
+    bool multiple_of_set;
+} rocke_int_facts_t;
+
+/* Kernel parameter options (the Python keywords of IRBuilder.param). A field
  * is "unset" via the *_set companion flag so defaults match Python (absent key).
  */
 typedef struct rocke_param_opts
@@ -554,12 +579,17 @@ typedef struct rocke_param_opts
     bool nonnull_set;
     int64_t dereferenceable; /* bytes, as in dereferenceable(N)            */
     bool dereferenceable_set;
+    /* An integer parameter's facts; rocke_b_param refuses one it cannot state,
+     * with the Python texts (cpp/core/ir/param_facts.cpp). */
+    rocke_int_facts_t facts;
 } rocke_param_opts_t;
 
 /* The param attr keys rocke_param_opts_t carries, as the portable-IR importers
- * name them when they refuse any other key. */
-#define ROCKE_PARAM_ATTR_KEYS \
-    "noalias, readonly, writeonly, nocapture, nonnull, align, dereferenceable, addr_space"
+ * and both verifiers name them when they refuse any other key (Python
+ * ir.PARAM_ATTR_KEYS). */
+#define ROCKE_PARAM_ATTR_KEYS                                                    \
+    "noalias, readonly, writeonly, nocapture, nonnull, align, dereferenceable, " \
+    "addr_space, ge, gt, le, lt, eq, multiple_of"
 
 typedef struct rocke_param
 {

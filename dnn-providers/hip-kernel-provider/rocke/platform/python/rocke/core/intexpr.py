@@ -37,6 +37,7 @@ describe arithmetic the host evaluates, and they emit nothing.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -49,6 +50,11 @@ __all__ = [
     "magic_division_constants",
     "product_of",
     "quotient_of",
+    "relation_error",
+    "relation_json",
+    "relation_names",
+    "relation_text",
+    "renamed_relation",
     "sum_of",
 ]
 
@@ -298,3 +304,91 @@ def difference_of(minuend: Any, subtrahend: Any) -> IntExpr:
     return IntExpr(
         "sub", (_term("difference_of", minuend), _term("difference_of", subtrahend))
     )
+
+
+# --------------------------------------------------------------------------
+# relations: the intexpr subset a kernel parameter's bound is stored in
+# --------------------------------------------------------------------------
+# A relation is an int, a ``{"param": NAME}`` leaf, or an ``add`` / ``sub`` /
+# ``mul`` / ``div`` node over two relations: exactly what ``sum_of`` /
+# ``product_of`` / ``difference_of`` / ``quotient_of`` build. It is stored as
+# canonical JSON (sorted keys, no spaces) in one string attr, so it round-trips
+# through every serializer with no new attr kind. ``cpp/core/ir/param_facts.cpp``
+# mirrors these readers, with the same texts.
+
+_RELATION_OPS = ("add", "sub", "mul", "div")
+
+
+def relation_json(tree: Any) -> str:
+    """The canonical JSON text of a relation tree: sorted keys, no spaces."""
+    return json.dumps(tree, sort_keys=True, separators=(",", ":"))
+
+
+def relation_error(tree: Any) -> str | None:
+    """Why ``tree`` is not a relation, or ``None`` when it is one."""
+    if isinstance(tree, bool):
+        return "a relation is an int, a param leaf, or add / sub / mul / div of two relations"
+    if isinstance(tree, (int, float)):
+        if isinstance(tree, float) and not tree.is_integer():
+            return "intexpr number is not an integer"
+        if abs(tree) > _EXACT_DOUBLE_INT:
+            return "intexpr number is not an integer"
+        return None
+    if isinstance(tree, dict) and len(tree) == 1:
+        ((key, value),) = tree.items()
+        if key == "param":
+            return None if isinstance(value, str) else "a param leaf names a parameter"
+        if key in _RELATION_OPS:
+            if not isinstance(value, list) or len(value) != 2:
+                return f"bad intexpr '{key}'"
+            return relation_error(value[0]) or relation_error(value[1])
+    return (
+        "a relation is an int, a param leaf, or add / sub / mul / div of two relations"
+    )
+
+
+def relation_names(tree: Any) -> list[str]:
+    """The parameter names a relation's leaves name, left to right."""
+    if isinstance(tree, dict):
+        ((key, value),) = tree.items()
+        if key == "param":
+            return [value]
+        return relation_names(value[0]) + relation_names(value[1])
+    return []
+
+
+def renamed_relation(tree: Any, rename: Callable[[str], str]) -> Any:
+    """``tree`` with every ``param`` leaf renamed through ``rename``."""
+    if isinstance(tree, dict):
+        ((key, value),) = tree.items()
+        if key == "param":
+            return {"param": rename(value)}
+        return {
+            key: [
+                renamed_relation(value[0], rename),
+                renamed_relation(value[1], rename),
+            ]
+        }
+    return tree
+
+
+def relation_text(tree: Any, leaf_text: Callable[[str], str] = str) -> str:
+    """A relation as the author writes it, e.g. ``product_of(M, ldc)``.
+
+    A left-nested chain of one ``add`` or ``mul`` prints as one call, so
+    ``sum_of(a, b, c)`` prints as written. ``leaf_text`` renders a parameter
+    name (``print_ir`` passes one that adds ``%``).
+    """
+    if isinstance(tree, dict):
+        ((key, value),) = tree.items()
+        if key == "param":
+            return leaf_text(value)
+        terms = [value[1]]
+        head = value[0]
+        while key in ("add", "mul") and isinstance(head, dict) and key in head:
+            terms.append(head[key][1])
+            head = head[key][0]
+        terms.append(head)
+        inner = ", ".join(relation_text(t, leaf_text) for t in reversed(terms))
+        return f"{_FUNCTION_OF[key]}({inner})"
+    return str(int(tree))
