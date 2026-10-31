@@ -196,8 +196,10 @@ void GRUFwdCPUVerify(const miopen::Handle& handle,
             int prelayer_shift = (li - 1) * batch_n * hy_stride + bi * 3 * hy_h;
             if(use_dropout)
             {
-                auto dropout_states_tmp = dropout_states_host;
-                size_t drop_out_offset  = (static_cast<size_t>(li) - 1) * batch_n * hy_h * bi;
+                // The GPU forward evolves the PRNG states across layers, so each layer draws
+                // an independent mask; mirror that by advancing the same host states.
+                auto& dropout_states_tmp = dropout_states_host;
+                size_t drop_out_offset   = (static_cast<size_t>(li) - 1) * batch_n * hy_h * bi;
 
                 DropoutForwardVerify<T>(handle,
                                         dropoutDesc,
