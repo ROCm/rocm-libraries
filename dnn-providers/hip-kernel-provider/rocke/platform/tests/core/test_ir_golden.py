@@ -176,7 +176,7 @@ class TestGoldenShards(unittest.TestCase):
 
     def test_inconsistent_aliases_rejected(self):
         self._shard("x", ["x/1", "x/2"])
-        self._shard("y", ["y/1"], aliases={})
+        self._shard("y", ["y/1"], aliases={"llvm24": "llvm23"})
         errors = check_golden(self.dir, self._run)
         self.assertEqual(len(errors), 1)
         self.assertIn("re-bless every shard", errors[0])

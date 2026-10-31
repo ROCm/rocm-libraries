@@ -123,11 +123,13 @@
     "raw.ptr.buffer.load.f16": "llvm.amdgcn.raw.ptr.buffer.load.f16",
     "raw.ptr.buffer.load.i16": "llvm.amdgcn.raw.ptr.buffer.load.i16",
     "raw.ptr.buffer.load.i32": "llvm.amdgcn.raw.ptr.buffer.load.i32",
+    "raw.ptr.buffer.load.i8": "llvm.amdgcn.raw.ptr.buffer.load.i8",
     "raw.ptr.buffer.load.lds": "llvm.amdgcn.raw.ptr.buffer.load.lds",
     "raw.ptr.buffer.load.v2i32": "llvm.amdgcn.raw.ptr.buffer.load.v2i32",
     "raw.ptr.buffer.load.v4i32": "llvm.amdgcn.raw.ptr.buffer.load.v4i32",
     "raw.ptr.buffer.store.i16": "llvm.amdgcn.raw.ptr.buffer.store.i16",
     "raw.ptr.buffer.store.i32": "llvm.amdgcn.raw.ptr.buffer.store.i32",
+    "raw.ptr.buffer.store.i8": "llvm.amdgcn.raw.ptr.buffer.store.i8",
     "raw.ptr.buffer.store.v2i32": "llvm.amdgcn.raw.ptr.buffer.store.v2i32",
     "raw.ptr.buffer.store.v4i32": "llvm.amdgcn.raw.ptr.buffer.store.v4i32",
     "rcp.f32": "llvm.amdgcn.rcp.f32",
@@ -172,6 +174,7 @@
     "sqrt.f32": "llvm.sqrt.f32",
     "tensor.load.to.lds": "llvm.amdgcn.tensor.load.to.lds",
     "tensor.store.from.lds": "llvm.amdgcn.tensor.store.from.lds",
+    "trap": "llvm.trap",
     "umax.i8": "llvm.umax.i8",
     "umin.i8": "llvm.umin.i8",
     "update.dpp.i32": "llvm.amdgcn.update.dpp.i32",
@@ -4720,6 +4723,40 @@
         "verified_on": "llvm24"
       }
     },
+    "raw.ptr.buffer.load.i8": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      }
+    },
     "raw.ptr.buffer.load.lds": {
       "gfx11-generic": {
         "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr): llvm.amdgcn.raw.ptr.buffer.load.lds requires target feature 'vmem-to-lds-load-insts'",
@@ -4865,6 +4902,40 @@
       }
     },
     "raw.ptr.buffer.store.i32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      }
+    },
+    "raw.ptr.buffer.store.i8": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm24"
@@ -6532,6 +6603,40 @@
       "gfx950": {
         "evidence": "Segmentation fault",
         "status": "toolchain_crash",
+        "verified_on": "llvm24"
+      }
+    },
+    "trap": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
         "verified_on": "llvm24"
       }
     },
