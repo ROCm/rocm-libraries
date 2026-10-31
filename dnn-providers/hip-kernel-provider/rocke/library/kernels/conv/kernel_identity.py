@@ -380,6 +380,23 @@ class KernelIdentity:
     # sized for this output width, so the binary serves Wo <= halo_max_wo.
     # 0 = not a halo binary. Left out of the hash at 0.
     halo_max_wo: int = 0
+    # Dgrad only (DgradConvSpec.pp_streamk): the persistent stream-K grid of
+    # the ping-pong loop (launch grid (pp_streamk, 1, 1), dX zeroed first).
+    # Left out of the hash at 0.
+    pp_streamk: int = 0
+    # Dgrad only (DgradConvSpec.pp_sk_mode): bit 1 = fix-up reduction in a
+    # workspace behind the record table (no dX zeroing); bit 2 =
+    # slice-major order. Left out of the hash at 0.
+    pp_sk_mode: int = 0
+    # Dgrad only (DgradConvSpec.pp_zskip). Left out of the hash at False.
+    pp_zskip: bool = False
+    # Dgrad only (DgradConvSpec.pp_boxes): H/W border boxes, one sub-GEMM
+    # record each (pp_box_sub_gemms). Left out of the hash at 0.
+    pp_boxes: int = 0
+    # Dgrad only (DgradConvSpec.pp_box_cus). Left out of the hash at 0.
+    pp_box_cus: int = 0
+    # Dgrad only (DgradConvSpec.pp_box_order). Left out of the hash at 0.
+    pp_box_order: int = 0
     # async_dma only: elements per DRAM->LDS chunk of the A and B loaders. The
     # width is picked from the build-time cpg so a chunk never straddles a
     # filter position, and is baked into the ISA -- a binary is only correct
@@ -517,7 +534,7 @@ class KernelIdentity:
         ):
             if not fields[name]:
                 del fields[name]
-        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo"):
+        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo", "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order"):
             if not fields[name]:
                 del fields[name]
         # Same for the stream-K pair at "no stream-K".
@@ -591,8 +608,19 @@ def dgrad_sub_gemms(identity: KernelIdentity, problem: object) -> list:
         compute_tilde,
         enumerate_sub_gemms,
         patch_sub_gemms,
+        pp_box_sub_gemms,
     )
 
+    if getattr(identity, "pp_boxes", 0):
+        return pp_box_sub_gemms(
+            problem,
+            identity.tile_m,
+            identity.tile_n,
+            identity.pp_boxes,
+            tile_k=identity.tile_k,
+            max_split=max(1, identity.split_k),
+            cus=getattr(identity, "pp_box_cus", 0),
+        )
     if identity.patch:
         return patch_sub_gemms(
             problem, identity.tile_m, identity.tile_n, tile_k=identity.tile_k
@@ -958,7 +986,10 @@ def identity_supports_problem(
     # sized at build time for ``max_sub_gemms``; a problem that decomposes
     # into more would be rejected only at launch.
     if identity.direction == "dgrad" and not identity.is_direct:
-        n_sub = len(dgrad_sub_gemms(identity, problem))
+        try:
+            n_sub = len(dgrad_sub_gemms(identity, problem))
+        except ValueError as e:  # pp_boxes: a dX row with no filter tap
+            return False, str(e)
         bound = identity.max_sub_gemms or _DGRAD_DEFAULT_MAX_SUB_GEMMS
         if n_sub > bound:
             return False, (
@@ -1035,6 +1066,26 @@ def identity_supports_problem(
                     f"problem has Wo={wo}"
                 )
 
+    # Stream-K ping-pong: one dense (M, C) dX (ungrouped), and the
+    # iteration split v * tiles * K-tiles stays in 32 bits.
+    if identity.pp_streamk:
+        if int(getattr(problem, "groups", 1)) != 1:
+            return False, "pp_streamk serves groups == 1 only"
+        _m = int(problem.N) * int(problem.Hi) * int(problem.Wi)
+        if getattr(problem, "is_3d", False):
+            _m *= int(problem.Di)
+        _taps = int(problem.Y) * int(problem.X) * (
+            int(problem.Z) if getattr(problem, "is_3d", False) else 1
+        )
+        _ti = (
+            -(-_m // identity.tile_m)
+            * -(-int(problem.C) // identity.tile_n)
+            * _taps
+            * (int(problem.K) // max(1, identity.tile_k))
+        )
+        if _ti * (identity.pp_streamk + 1) >= 2**31:
+            return False, "pp_streamk iteration space overflows 32 bits"
+
     if not identity.is_direct:
         ok, why = _grid_fits(identity, problem)
         if not ok:
@@ -1108,6 +1159,10 @@ IDENTITY_CAPABILITY_FIELDS = (
     "xh_persist",
     "dy_halo",
     "halo_max_wo",
+    "pp_streamk",
+    "pp_sk_mode",
+    "pp_boxes",
+    "pp_box_cus",
     "split_addr_k_decode",
     "uk_nopad",
     "xwin",

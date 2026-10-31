@@ -375,9 +375,14 @@ static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op
     const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* ordering = ll_attr_str(op, "ordering", "monotonic");
-    /* Optional "syncscope" attr (Python: same); absent = system scope. */
+    /* Optional "syncscope" (r4-fwdS) or "scope" (r4-dgradL) attr, as in
+     * Python; absent or "system" = LLVM's default system scope, no clause. */
     const char* scope = ll_attr_str(op, "syncscope", NULL);
-    const char* sc = scope ? rocke_arena_printf(&L->arena, " syncscope(\"%s\")", scope) : "";
+    if(!scope || !scope[0])
+        scope = ll_attr_str(op, "scope", NULL);
+    const char* sc = (scope && scope[0] && strcmp(scope, "system") != 0)
+                         ? rocke_arena_printf(&L->arena, " syncscope(\"%s\")", scope)
+                         : "";
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds bfloat, ptr addrspace(1) %s, %s %s",
                    gep,

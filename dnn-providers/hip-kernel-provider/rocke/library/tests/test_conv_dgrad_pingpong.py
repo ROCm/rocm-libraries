@@ -89,7 +89,7 @@ class TestPingpongSpec(unittest.TestCase):
             dict(tapk_pp_epi=2, split_k=2),
             dict(tapk_pp_epi=3),
             dict(tapk_pingpong=0, tapk_pp_sched=2),
-            dict(tapk_pp_sched=7),
+            dict(tapk_pp_sched=8),
         )
         for kw in cases:
             with self.subTest(**{k: str(v) for k, v in kw.items()}):

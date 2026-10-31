@@ -1325,7 +1325,17 @@ static void
         {
             int child_loop_end;
             if(op->opcode == ROCKE_OP_SCF_FOR
-               && !rocke_attr_get_bool(&op->attrs, "smem_iter_local", false))
+               && (rocke_attr_get_bool(&op->attrs, "smem_iter_local", false)
+                   || rocke_attr_get_bool(&op->attrs, "smem_per_iteration", false)
+                   || rocke_attr_get_bool(&op->attrs, "lds_iter_local", false)))
+            {
+                /* Mirrors Python: a loop whose body rewrites every allocation
+                 * it uses before reading it keeps straight-line intervals
+                 * (smem_iter_local: r4-fwdS; smem_per_iteration: r4-dgradL;
+                 * lds_iter_local: r4-dgradS). */
+                child_loop_end = loop_end;
+            }
+            else if(op->opcode == ROCKE_OP_SCF_FOR)
             {
                 int own_last = idx + ll_subtree_size(op) - 1;
                 child_loop_end

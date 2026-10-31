@@ -6387,7 +6387,9 @@ def _cached_bind(
                 rt.memset_async(dx_ptr, 0, dx_bytes, stream)
             _launch()
 
-    elif direction == "dgrad" and ident.split_k > 1:
+    elif direction == "dgrad" and (
+        ident.split_k > 1 or (ident.pp_streamk and not ident.pp_sk_mode & 1)
+    ):
         # Split-K dgrad (the x-halo loop's whole-tile slices) atomically
         # accumulates into dX, so every launch zeroes it first -- part of
         # the algorithm's cost.
@@ -6470,6 +6472,16 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
             pack_sub_gemm_buffer(sub_gemms, ident.tile_m, ident.tile_n),
             dtype=np.int32,
         )
+        if ident.pp_streamk and ident.pp_sk_mode & 1:
+            # Stream-K fix-up: the workspace slots and the per-tile counters
+            # follow the table (DgradConvSpec.pp_sk_mode), zeroed once; the
+            # counters reset themselves.
+            from kernels.common.conv_implicit_gemm_dgrad import (
+                pp_streamk_fixup_words,
+            )
+
+            extra = pp_streamk_fixup_words(ident, problem) - flat.size
+            flat = np.concatenate([flat, np.zeros(max(0, extra), np.int32)])
         buf = rt.alloc(flat.nbytes)
         rt.memcpy_h2d(buf, flat.ctypes.data, flat.nbytes)
         extras["sub_gemm_buf"] = buf
@@ -6482,6 +6494,13 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
             -(-sg.gemm_m // ident.tile_m) * -(-sg.gemm_n // ident.tile_n)
             for sg in sub_gemms
         )
+        if ident.pp_streamk:
+            # Stream-K: a persistent grid, the tiles are walked in-kernel.
+            return extras, (ident.pp_streamk, 1, 1)
+        if ident.pp_boxes:
+            # Box records: each record's blocks are its tiles x its own
+            # split-K degree (DgradConvSpec.pp_boxes).
+            return extras, (sub_gemms[-1].block_end, max(1, problem.groups), 1)
         if getattr(ident, "tapk_pp_persist", 0) or getattr(ident, "xh_persist", 0):
             # A persistent binary walks the tiles itself (the ping-pong: one
             # workgroup per CU; the x-halo kernel: xh_persist per CU).

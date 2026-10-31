@@ -394,7 +394,8 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
 # an "@<regex>" scope on the plain binary's label (unscoped sets are
 # ignored, so the plain grid never grows by accident). Unset = none.
 def _parse_dgrad_pp_knobs(text: str):
-    keys = {"bpp", "pps", "ppe", "ppp", "ppx", "zt", "pbs", "xcd", "kpad", "lxor", "mch", "wpe", "sk", "sapl", "mb"}
+    keys = {"bpp", "pps", "ppe", "ppp", "ppx", "zt", "pbs", "xcd", "kpad", "lxor", "mch", "wpe", "sk", "sapl", "mb",
+            "psk", "pskm", "pzs", "pbx", "pbc", "pbo"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -466,6 +467,25 @@ def _dgrad_pp_knob_cfg(knobs, *, epilogue: str):
         if d.get("sapl"):
             # lane-contiguous split-K atomic pairs (DgradConvSpec.split_atomic_pairs)
             cfg["split_atomic_pairs"] = True
+    if d.get("pbx"):
+        if not d.get("bpp") or epilogue != "cshuffle":
+            return None
+        cfg["pp_boxes"] = d["pbx"]
+        if d.get("pbc"):
+            cfg["pp_box_cus"] = d["pbc"]
+        if d.get("pbo"):
+            cfg["pp_box_order"] = d["pbo"]
+    if d.get("pzs"):
+        if not d.get("bpp"):
+            return None
+        cfg["pp_zskip"] = True
+    if d.get("psk"):
+        # Stream-K persistent grid (DgradConvSpec.pp_streamk).
+        if epilogue != "cshuffle" or not d.get("bpp"):
+            return None
+        cfg["pp_streamk"] = d["psk"]
+        if d.get("pskm"):
+            cfg["pp_sk_mode"] = d["pskm"]
     return cfg
 
 
@@ -2243,7 +2263,11 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     if v.get("waves_per_eu")
                 )
                 variants = variants + xw
-                return _wgrad_m_band_variants(cfg, variants)
+                return variants
+            # r4-fwdL's m_band axis covers only these plain xwin variants
+            # (the ones it built and checked), not the r4-wgrad PP/MROW/WSR
+            # twins added below.
+            mb = _wgrad_m_band_variants(cfg, xw)[len(xw):]
             _nw = cfg.get("warp_m", 0) * cfg.get("warp_n", 0)
             if (
                 _WGRAD_XWIN_PP
@@ -2291,8 +2315,8 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     if r != cfg.get("ws_replicas")
                     for v in xw
                 )
-            variants = variants + xw + mrow
-    return _wgrad_m_band_variants(cfg, variants)
+            variants = variants + xw + mrow + mb
+    return variants
 
 
 def _wgrad_m_band_variants(cfg: dict, variants: tuple) -> tuple:
