@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -43,6 +43,22 @@ Tests:
   direction: [rocsparse_direction_row, rocsparse_direction_column]
   storage: [rocsparse_storage_mode_unsorted]
   matrix: [rocsparse_matrix_random]
+
+- name: check_matrix_gebsc_file
+  category: quick
+  function: check_matrix_gebsc
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  row_block_dimA: [3]
+  col_block_dimA: [3]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix_type: [rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1, nos3, mplate]
 
 - name: check_matrix_gebsc
   category: pre_checkin
