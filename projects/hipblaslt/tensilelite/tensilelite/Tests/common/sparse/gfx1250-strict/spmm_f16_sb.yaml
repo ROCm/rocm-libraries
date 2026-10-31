@@ -102,6 +102,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
           - Exact: [1024, 1024, 1, 1024] # classic format
+          - Exact: [1024, 1024, 2, 1024] # batch>1 (GSU=1 and 2)
         - BiasTypeArgs: ['s']
         - FactorDimArgs: [0]
         - ActivationArgs:
