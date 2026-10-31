@@ -191,6 +191,59 @@ def run_probe(native, library, **overrides):
     return info["native"]
 
 
+def test_native_compiler_filename_rules(tmp_path):
+    header = PLATFORM / "cpp" / "core" / "lower_llvm" / "compiler_library_name.h"
+    if not header.is_file():
+        pytest.skip("native source filename classifier is absent from installed tests")
+    compiler = shutil.which("c++") or shutil.which("clang++")
+    if not compiler:
+        pytest.skip("native filename classifier requires a C++ compiler")
+    source = tmp_path / "filename_rules.cpp"
+    source.write_text(
+        '#include "compiler_library_name.h"\n'
+        "int main(){\n"
+        "struct Case{const char* name;bool windows,mapped,expected;};\n"
+        "Case cases[] = {\n"
+        '{"amd_comgr.dll",true,false,true},\n'
+        '{"amd_comgr0702.dll",true,false,true},\n'
+        '{"amd_comgr_3.dll",true,false,false},\n'
+        '{"amd_comgr_3.dll",true,true,true},\n'
+        '{"AMD_COMGR_3.DLL",true,true,true},\n'
+        '{"AMD_COMGR.DLL",true,false,false},\n'
+        '{"amd_comgr_.dll",true,true,false},\n'
+        '{"amd_comgr_3.dll.debug",true,true,false},\n'
+        '{"other_amd_comgr_3.dll",true,true,false},\n'
+        '{"libamd_comgr.so.3",false,false,true},\n'
+        '{"libamd_comgr.so.3.2",false,true,true},\n'
+        '{"libamd_comgr.so.debug",false,true,false},\n'
+        '{"amd_comgr_3.dll",false,true,false}};\n'
+        "for(unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i){auto c=cases[i];\n"
+        "if(ckc::comgr_library_name(c.name,c.windows,c.mapped)!=c.expected)return i+1;}\n"
+        "return 0;}\n"
+    )
+    binary = tmp_path / (
+        "filename_rules.exe" if sys.platform == "win32" else "filename_rules"
+    )
+    subprocess.run(
+        [
+            compiler,
+            "-std=c++20",
+            "-I",
+            str(header.parent),
+            str(source),
+            "-o",
+            str(binary),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = subprocess.run([str(binary)], capture_output=True, text=True)
+    assert (
+        result.returncode == 0
+    ), f"filename rule {result.returncode} failed: {result.stderr}"
+
+
 def test_dependency_query_reports_the_library_that_supplied_version(
     native_detector, tmp_path
 ):

@@ -123,8 +123,10 @@ def _mapped_lib_paths(stem: str) -> List[str]:
                 raise OSError(
                     ctypes.get_last_error(), "cannot identify a mapped runtime library"
                 )
+            # Driver COMGR names differ from the SDK's digit-stamped payloads.
+            suffix = r"(?:_?\d+)?" if stem == "amd_comgr" else r"\d*"
             if re.fullmatch(
-                rf"{re.escape(stem)}\d*\.dll",
+                rf"{re.escape(stem)}{suffix}\.dll",
                 os.path.basename(path.value),
                 re.IGNORECASE,
             ):

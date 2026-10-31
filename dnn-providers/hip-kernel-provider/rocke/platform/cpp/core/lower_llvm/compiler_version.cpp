@@ -7,6 +7,8 @@
  * private handle is not shared with an external compilation stage. */
 #include "compiler_version.h"
 
+#include "compiler_library_name.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -118,18 +120,12 @@ std::string library_for_symbol(void* address, bool physical = false)
 
 bool comgr_name(const fs::path& path, bool mapped = false)
 {
-    auto name = path.filename().string();
 #ifdef _WIN32
-    static const std::regex pattern("amd_comgr[0-9]*\\.dll");
-    if(mapped)
-        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
+    constexpr bool windows = true;
 #else
-    static const std::regex pattern("libamd_comgr\\.so(\\.[0-9]+)*");
-    (void)mapped;
+    constexpr bool windows = false;
 #endif
-    return std::regex_match(name, pattern);
+    return ckc::comgr_library_name(path.filename().string(), windows, mapped);
 }
 
 std::vector<fs::path> children(const fs::path& root)

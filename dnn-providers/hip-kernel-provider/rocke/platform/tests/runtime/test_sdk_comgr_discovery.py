@@ -377,6 +377,69 @@ def test_compatibility_hook_never_imports_torch(sdk_site, monkeypatch):
     assert sys.modules["torch"] is None
 
 
+@pytest.mark.parametrize(
+    "stem, expected",
+    [
+        ("amd_comgr", ["amd_comgr.dll", "amd_comgr0702.dll", "AMD_COMGR_3.DLL"]),
+        ("amdhip64", ["amdhip64.dll"]),
+    ],
+)
+def test_windows_mapping_classifies_comgr_driver_names(monkeypatch, stem, expected):
+    import ctypes
+    from ctypes import wintypes
+
+    names = [
+        "amd_comgr.dll",
+        "amd_comgr0702.dll",
+        "AMD_COMGR_3.DLL",
+        "amd_comgr_.dll",
+        "amd_comgr_3.dll.debug",
+        "other_amd_comgr_3.dll",
+        "amdhip64.dll",
+        "amdhip64_7.dll",
+    ]
+
+    def enumerate_modules(process, modules, size, needed):
+        for index in range(len(names)):
+            modules[index] = index + 1
+        needed._obj.value = len(names) * ctypes.sizeof(wintypes.HMODULE)
+        return 1
+
+    def filename(process, module, buffer, capacity):
+        buffer.value = "C:/runtime/" + names[module - 1]
+        return len(buffer.value)
+
+    def current_process():
+        return 1
+
+    psapi = SimpleNamespace(
+        EnumProcessModules=enumerate_modules, GetModuleFileNameExW=filename
+    )
+    kernel = SimpleNamespace(GetCurrentProcess=current_process)
+    with monkeypatch.context() as patch:
+        patch.setattr(rc, "_IS_WINDOWS", True)
+        patch.setattr(os, "name", "nt")
+        patch.setattr(
+            ctypes,
+            "WinDLL",
+            lambda name, **kwargs: psapi if name == "psapi" else kernel,
+            raising=False,
+        )
+        assert rc._mapped_lib_paths(stem) == ["C:/runtime/" + name for name in expected]
+
+
+def test_windows_driver_name_is_not_an_sdk_payload(sdk_site, monkeypatch):
+    from rocke.runtime import _sdk_comgr
+
+    library = sdk_site / "bin" / "amd_comgr_3.dll"
+    library.parent.mkdir()
+    library.touch()
+    next(sdk_site.parent.glob("*.dist-info")).joinpath("RECORD").write_text(
+        "_rocm_sdk_core/bin/amd_comgr_3.dll,,\n"
+    )
+    assert _sdk_comgr.candidates(windows=True) == []
+
+
 def test_windows_mapping_introspection_fails_closed(monkeypatch):
     import ctypes
     from ctypes import wintypes
