@@ -3,6 +3,7 @@
 
 from ._hostnumerics import (
     Layout,
+    Permutation,
     ScalarCategory,
     ScalarType,
     ScalarTypeInfo,
@@ -17,6 +18,7 @@ __all__ = [
     "ScalarType",
     "ScalarTypeInfo",
     "scalar_type_info",
+    "Permutation",
     "Shape",
     "Layout",
 ]

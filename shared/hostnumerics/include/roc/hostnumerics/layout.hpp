@@ -8,9 +8,9 @@
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
-#include <numeric>
 #include <optional>
 #include <roc/hostnumerics/expected.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <span>
 #include <stdexcept>
@@ -26,14 +26,13 @@ enum class LayoutError {
     OffsetMultiplyOverflow,
     OffsetAddOverflow,
     OrderRankMismatch,
-    InvalidOrder,
     CoordinateRankMismatch,
     CoordinateOutOfRange,
 };
 
 // Rank failures carry the supplied and expected ranks in value and limit.
-// Other failures identify an axis, or an invalid order entry's position, in
-// dimension. Coordinate, extent and order failures also carry value and limit.
+// Other failures identify an axis in dimension. Coordinate and extent failures
+// also carry value and limit.
 struct LayoutFailure {
     LayoutError error;
     size_t dimension = 0;
@@ -45,10 +44,6 @@ struct LayoutFailure {
             case LayoutError::OrderRankMismatch:
                 return "Tensor layout order rank " + std::to_string(value) +
                        " does not match shape rank " + std::to_string(limit) + ".";
-            case LayoutError::InvalidOrder:
-                return "Tensor layout order must contain each dimension once; axis " +
-                       std::to_string(value) + " at position " + std::to_string(dimension) +
-                       " is repeated or outside [0, " + std::to_string(limit) + ").";
             case LayoutError::ExtentOutOfRange:
                 return "Tensor extent " + std::to_string(value) + " in dimension " +
                        std::to_string(dimension) + " exceeds ptrdiff_t.";
@@ -125,19 +120,11 @@ class Layout {
     // extent, depending on order. Validation failures are returned; allocation
     // can still throw.
     static detail::Expected<Layout, detail::LayoutFailure> getContiguousLayout(
-        const Shape& shape, std::span<const size_t> order) {
+        const Shape& shape, const Permutation& order) {
         using namespace detail;
         if (order.size() != shape.rank())
             return Unexpected(
                 LayoutFailure{LayoutError::OrderRankMismatch, 0, order.size(), shape.rank()});
-        std::vector<bool> seen(shape.rank(), false);
-        for (size_t position = 0; position < order.size(); ++position) {
-            const size_t axis = order[position];
-            if (axis >= shape.rank() || seen[axis])
-                return Unexpected(
-                    LayoutFailure{LayoutError::InvalidOrder, position, axis, shape.rank()});
-            seen[axis] = true;
-        }
 
         const auto dimensions = shape.dimensions();
         std::vector<ptrdiff_t> strides(shape.rank());
@@ -159,28 +146,17 @@ class Layout {
         return Layout(shape, std::move(strides), 0);
     }
 
-    static detail::Expected<Layout, detail::LayoutFailure> getContiguousLayout(
-        const Shape& shape, std::initializer_list<size_t> order) {
-        return getContiguousLayout(shape, std::span<const size_t>(order.begin(), order.size()));
-    }
-
     static detail::Expected<Layout, detail::LayoutFailure> getContiguousLayout(const Shape& shape) {
-        std::vector<size_t> order(shape.rank());
-        std::iota(order.begin(), order.end(), size_t{0});
-        return getContiguousLayout(shape, order);
+        return getContiguousLayout(shape, Permutation::identity(shape.rank()));
     }
 
     // Throwing forms of getContiguousLayout. The default order is C order, an
     // alias of contiguousLastDimensionFastest; the explicit names make the
     // first/last-fastest pair available without an order argument.
-    static Layout contiguous(const Shape& shape, std::span<const size_t> order) {
+    static Layout contiguous(const Shape& shape, const Permutation& order) {
         auto result = getContiguousLayout(shape, order);
         if (!result) throw std::runtime_error(result.error().message());
         return std::move(*result);
-    }
-
-    static Layout contiguous(const Shape& shape, std::initializer_list<size_t> order) {
-        return contiguous(shape, std::span<const size_t>(order.begin(), order.size()));
     }
 
     static Layout contiguous(const Shape& shape) {
@@ -196,9 +172,7 @@ class Layout {
 
     // For a matrix this is column-major/Fortran-order: the first dimension has unit stride.
     static Layout contiguousFirstDimensionFastest(const Shape& shape) {
-        std::vector<size_t> order(shape.rank());
-        std::iota(order.rbegin(), order.rend(), size_t{0});
-        return contiguous(shape, order);
+        return contiguous(shape, Permutation::reverse(shape.rank()));
     }
 
     // Returned references/views remain valid while this Layout is alive and unmodified.
