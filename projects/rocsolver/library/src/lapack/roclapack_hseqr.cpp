@@ -1,0 +1,149 @@
+/* **************************************************************************
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ * *************************************************************************/
+
+#include "roclapack_hseqr.hpp"
+#include "exceptions.hpp"
+
+ROCSOLVER_BEGIN_NAMESPACE
+
+template <typename T, typename I, typename U>
+rocblas_status rocsolver_hseqr_impl(rocblas_handle handle,
+                                    const rocsolver_schur_job job,
+                                    const rocsolver_schur_vectors compz,
+                                    const I n,
+                                    const I* ilo,
+                                    const I* ihi,
+                                    U H,
+                                    const I ldh,
+                                    T* W,
+                                    U Z,
+                                    const I ldz,
+                                    I* info)
+try
+{
+    ROCSOLVER_ENTER_TOP("hseqr", "--job", job, "--compz", compz, "-n", n, "--ldh", ldh, "--ldz", ldz);
+
+    if(!handle)
+        return rocblas_status_invalid_handle;
+
+    // argument checking
+    rocblas_status st
+        = rocsolver_hseqr_argCheck(handle, job, compz, n, ilo, ihi, ldh, ldz, H, W, Z, info);
+    if(st != rocblas_status_continue)
+        return st;
+
+    // working with unshifted arrays
+    rocblas_stride shiftH = 0;
+    rocblas_stride shiftZ = 0;
+
+    // normal (non-batched non-strided) execution
+    rocblas_stride strideH = 0;
+    rocblas_stride strideW = 0;
+    rocblas_stride strideZ = 0;
+    I batch_count = 1;
+
+    // memory workspace sizes:
+    // sizes of the integer and scalar workspaces of the multishift algorithm (status
+    // arrays, flags, grid barrier counters, reflections of the sweep and band copy)
+    size_t size_work, size_workT;
+    rocsolver_hseqr_getMemorySize<T>(n, batch_count, &size_work, &size_workT);
+
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_set_optimal_device_memory_size(handle, size_work, size_workT);
+
+    // memory workspace allocation
+    void *work, *workT;
+    rocblas_device_malloc mem(handle, size_work, size_workT);
+    if(!mem)
+        return rocblas_status_memory_error;
+
+    work = mem[0];
+    workT = mem[1];
+
+    // execution
+    return rocsolver_hseqr_template<false, false, T>(handle, job, compz, n, ilo, ihi, H, shiftH, ldh,
+                                                     strideH, W, strideW, Z, shiftZ, ldz, strideZ,
+                                                     info, batch_count, (I*)work, (T*)workT);
+}
+catch(...)
+{
+    return exception2rocblas_status();
+}
+
+ROCSOLVER_END_NAMESPACE
+
+/*
+ * ===========================================================================
+ *    C wrapper
+ * ===========================================================================
+ */
+
+extern "C" {
+
+rocblas_status rocsolver_chseqr(rocblas_handle handle,
+                                const rocsolver_schur_job job,
+                                const rocsolver_schur_vectors compz,
+                                const rocblas_int n,
+                                const rocblas_int* ilo,
+                                const rocblas_int* ihi,
+                                rocblas_float_complex* H,
+                                const rocblas_int ldh,
+                                rocblas_float_complex* W,
+                                rocblas_float_complex* Z,
+                                const rocblas_int ldz,
+                                rocblas_int* info)
+{
+#if defined(ROCSOLVER_ENABLE_HSEQR)
+    return rocsolver::rocsolver_hseqr_impl<rocblas_float_complex>(handle, job, compz, n, ilo, ihi,
+                                                                  H, ldh, W, Z, ldz, info);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_zhseqr(rocblas_handle handle,
+                                const rocsolver_schur_job job,
+                                const rocsolver_schur_vectors compz,
+                                const rocblas_int n,
+                                const rocblas_int* ilo,
+                                const rocblas_int* ihi,
+                                rocblas_double_complex* H,
+                                const rocblas_int ldh,
+                                rocblas_double_complex* W,
+                                rocblas_double_complex* Z,
+                                const rocblas_int ldz,
+                                rocblas_int* info)
+{
+#if defined(ROCSOLVER_ENABLE_HSEQR)
+    return rocsolver::rocsolver_hseqr_impl<rocblas_double_complex>(handle, job, compz, n, ilo, ihi,
+                                                                   H, ldh, W, Z, ldz, info);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+} // extern C
