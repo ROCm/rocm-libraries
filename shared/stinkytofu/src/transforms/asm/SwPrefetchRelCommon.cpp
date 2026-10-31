@@ -22,6 +22,7 @@
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250ReplayGroup.hpp"
 #include "stinkytofu/transforms/asm/InstructionSizeCosting.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
@@ -30,6 +31,15 @@ using namespace stinkytofu;
 
 /// Grid constants `kSwPrefetchFirstGlobalByte` / `kSwPrefetchSpacingBytes` live in
 /// SwPrefetchRelCommon.hpp (128*255, then every 32*128).
+
+/// BUG #20 (MI400-SPG §4.5.6.1): in xnack-replay mode XCNT must be 0 when an `s_prefetch_*`
+/// issues. A prefetch belongs to the SMEM group, so single-group hardware already drains XCNT when
+/// it follows any other group or a non-memory instruction; only an open SMEM group needs a wait.
+/// Gfx1250HazardPass rejects kernels that may enable multi-group replay.
+bool needsSwPrefetchXcntWait(BasicBlock& bb, IRList::iterator insertBefore) {
+    if (!kSwPrefetchEmitXnackWait) return false;
+    return gfx1250::smemReplayGroupOpenBefore(bb, insertBefore);
+}
 
 /// **PC-rel chain after `s_getpc_b64`.**  The instruction records the address
 /// of the *next* in-stream instruction in an SGPR pair.  Downstream scalars
@@ -101,18 +111,15 @@ int64_t insertSwPrefetchInstPcRelBefore(
     BasicBlock& bb, IRList::iterator anchorIt, GfxArchID archId, AsmIRBuilder& builder,
     std::unordered_map<std::string, int64_t>* labelOff, int64_t blockGlobalByteOffset,
     int64_t blockLocalByteOffsetWherePrefetchStarts, int64_t& walkTotalBytes,
-    const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool emitXcntWait) {
     const HwInstDesc* pfMc = getMCIDByUOp(GFX::s_prefetch_inst_pc_rel, archId);
     if (pfMc == nullptr) return 0;
 
-    // XNACK safety: drain outstanding address translations before the prefetch. Relative hints are
-    // scattered (one per grid point, separated by real code), so a single upstream drain would be
-    // stale by the next hint — hence one s_wait_xcnt 0 per prefetch. Gated by the toggle + opcode
-    // availability (no-op off gfx1250). Its bytes MUST join the walk so downstream P(k) placement
-    // and PC-relative literal/label offsets stay aligned with the emitted layout.
+    // XNACK safety: emit a wait only when an SMEM replay group reaches the insertion site.
+    // Its bytes must join the walk so downstream placement and PC-relative offsets stay aligned.
     StinkyInstruction* xcntInst = nullptr;
     int xcntB = 0;
-    if (kSwPrefetchEmitXnackWait) {
+    if (emitXcntWait) {
         if (const HwInstDesc* xcntMc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
             xcntInst = builder.create(xcntMc);
             xcntInst->addSrcReg(StinkyRegister(0));  // xcnt = 0
@@ -147,9 +154,10 @@ void insertPrefetchBeforeGetpcAndRewalkWindow(
     int64_t& totalBytes, std::ostream* dbgOut, const char* debugPassTag,
     const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
     int64_t dummyWalk = 0;
+    const bool emitXcntWait = needsSwPrefetchXcntWait(bb, anchorIt);
     const int64_t d = insertSwPrefetchInstPcRelBefore(bb, anchorIt, archId, builder, &labelOff,
                                                       blockGlobalByteOffset, nextPrefetchLocal,
-                                                      dummyWalk, asmSetSymbols);
+                                                      dummyWalk, asmSetSymbols, emitXcntWait);
     nextPrefetchLocal += d;
     // Block-local offset at start of s_getpc_b64 after stacked prefetches.
     totalBytes = nextPrefetchLocal;
@@ -558,9 +566,10 @@ SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlock(
                                 insertDbgOut, debugPassTag, asmSetSymbols);
                             redirectRewalkAbsorbedCurrentInstSizes = true;
                         } else {
+                            const bool emitXcntWait = needsSwPrefetchXcntWait(bb, it);
                             (void)insertSwPrefetchInstPcRelBefore(
                                 bb, it, archId, *builder, &labelOff, blockGlobalByteOffset,
-                                walkOffsetAtInstStart, totalBytes, asmSetSymbols);
+                                walkOffsetAtInstStart, totalBytes, asmSetSymbols, emitXcntWait);
                         }
                         ++result.insertCount;
                     }
@@ -796,9 +805,10 @@ SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlockPerBbAnchor(
                                 insertDbgOut, debugPassTag, asmSetSymbols);
                             redirectRewalkAbsorbedCurrentInstSizes = true;
                         } else {
+                            const bool emitXcntWait = needsSwPrefetchXcntWait(bb, it);
                             (void)insertSwPrefetchInstPcRelBefore(
                                 bb, it, archId, *builder, &labelOff, blockGlobalByteOffset,
-                                walkOffsetAtInstStart, totalBytes, asmSetSymbols);
+                                walkOffsetAtInstStart, totalBytes, asmSetSymbols, emitXcntWait);
                         }
                         ++result.insertCount;
                     }
@@ -976,8 +986,7 @@ void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& b
     const HwInstDesc* pfMc = getMCIDByUOp(GFX::s_prefetch_inst_pc_rel, archId);
     if (pfMc == nullptr) return;
 
-    // XNACK safety: one s_wait_xcnt 0 before the tail-flush prefetch (see insert-before variant).
-    if (kSwPrefetchEmitXnackWait) {
+    if (needsSwPrefetchXcntWait(bb, bb.end())) {
         if (const HwInstDesc* xcntMc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
             StinkyInstruction* xcntInst = builder.create(xcntMc);
             xcntInst->addSrcReg(StinkyRegister(0));  // xcnt = 0
@@ -1160,9 +1169,10 @@ void insertSwPrefetchLabels(BasicBlock& bb, int64_t blockGlobalByteOffset, GfxAr
                     // bb.insertIR(it, lbl);
                     labelOff[name] = globalPcAfter;
                     if (getpcPcRelChainGuardRemaining == 0u) {
+                        const bool emitXcntWait = needsSwPrefetchXcntWait(bb, it);
                         (void)insertSwPrefetchInstPcRelBefore(
                             bb, it, archId, builder, &labelOff, blockGlobalByteOffset,
-                            walkOffsetAtInstStart, totalBytes, asmSetSymbols);
+                            walkOffsetAtInstStart, totalBytes, asmSetSymbols, emitXcntWait);
                     } else if (!getpcWindowIters.empty()) {
                         insertPrefetchBeforeGetpcAndRewalkWindow(
                             bb, getpcWindowIters.front(), getpcWindowIters, totalBytesAtGetpcStart,

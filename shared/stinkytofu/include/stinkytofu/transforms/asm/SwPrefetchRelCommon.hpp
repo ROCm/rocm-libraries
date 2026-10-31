@@ -25,21 +25,17 @@ inline constexpr int64_t kSwPrefetchSpacingBytes = int64_t(32) * 128;
 /// klength simm5: 31 => 32 instruction cache lines (128 B each).
 inline constexpr int32_t kSwPrefetchPcRelKlengthImm = 31;
 
-/// Debug/perf-only toggle: emit `s_wait_xcnt 0` before each SW instruction prefetch
-/// (relative & absolute) for gfx1250 XNACK safety. A shader must drain outstanding address
-/// translations before any `s_prefetch_inst[_pc_rel]`, else the prefetch can be caught in an
-/// XNACK replay group. Relative inserts one wait per (scattered) prefetch; absolute inserts one
-/// wait per contiguous burst.
+/// Debug/perf-only toggle: allow SW instruction prefetch to emit `s_wait_xcnt 0`
+/// for gfx1250 XNACK safety. Relative prefetch uses the hazard pass's single-group model and emits
+/// a wait only when an SMEM replay group reaches the insertion site, including across a
+/// fall-through block boundary. Absolute prefetch emits a scalar address setup before each burst,
+/// which is already a non-memory boundary.
 ///
 /// Intentionally NOT a ModuleOption / TensileLite parameter — purely a stinkytofu-internal knob
 /// for debugging and performance A/B testing. Flip to false to measure without the wait; when
-/// false every gated site collapses to today's bytes exactly (zero golden churn). Also gated by
-/// opcode availability (getMCIDByUOp(GFX::s_wait_xcnt) != nullptr), so it is a no-op off gfx1250.
+/// false every gated site collapses to no extra wait bytes. Also gated by opcode availability
+/// (getMCIDByUOp(GFX::s_wait_xcnt) != nullptr), so it is a no-op off gfx1250.
 inline constexpr bool kSwPrefetchEmitXnackWait = true;
-
-/// s_wait_xcnt 0 encodes as a fixed 4-byte SOPP (MC_SOPP => 0 literal bytes). Compile-time size
-/// contribution of the wait, folded into the abs byte-accounting constants below.
-inline constexpr int64_t kSwPrefetchXnackWaitBytes = kSwPrefetchEmitXnackWait ? int64_t(4) : 0;
 
 /// Grid boundary P(k) = kSwPrefetchFirstGlobalByte + k * kSwPrefetchSpacingBytes.
 inline constexpr int64_t swPrefetchGridOffset(int64_t k) {
