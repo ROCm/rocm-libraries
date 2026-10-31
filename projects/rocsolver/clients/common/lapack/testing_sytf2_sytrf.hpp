@@ -147,7 +147,7 @@ void sytf2_sytrf_initData(const rocblas_handle handle,
                           Th& hA,
                           Uh& hIpiv,
                           Uh& hInfo,
-                          const bool singular)
+                          const int singular)
 {
     if(CPU)
     {
@@ -156,31 +156,58 @@ void sytf2_sytrf_initData(const rocblas_handle handle,
 
         for(rocblas_int b = 0; b < bc; ++b)
         {
-            // scale A to avoid singularities
-            for(rocblas_int i = 0; i < n; i++)
+            if(singular == 3)
             {
+                // a symmetric indefinite matrix with random entries (without ties), whose
+                // factorization has 1-by-1 and 2-by-2 blocks and interchanges in no particular
+                // pattern
                 for(rocblas_int j = 0; j < n; j++)
                 {
-                    if(i == j)
-                        hA[b][i + j * lda] += 400;
-                    else
-                        hA[b][i + j * lda] -= 4;
+                    for(rocblas_int i = 0; i <= j; i++)
+                    {
+                        tmp = hA[b][i + j * lda] - T(5.5) + T(0.001 * ((i * 31 + j * 17) % 97));
+                        hA[b][i + j * lda] = tmp;
+                        hA[b][j + i * lda] = tmp;
+                    }
+                }
+            }
+            else
+            {
+                // scale A to avoid singularities
+                for(rocblas_int i = 0; i < n; i++)
+                {
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        if(i == j)
+                            hA[b][i + j * lda] += 400;
+                        else
+                            hA[b][i + j * lda] -= 4;
+                    }
+                }
+
+                // shuffle rows to test pivoting
+                // always the same permuation for debugging purposes
+                for(rocblas_int i = 0; i < n / 2; i++)
+                {
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        tmp = hA[b][i + j * lda];
+                        hA[b][i + j * lda] = hA[b][n - 1 - i + j * lda];
+                        hA[b][n - 1 - i + j * lda] = tmp;
+                    }
                 }
             }
 
-            // shuffle rows to test pivoting
-            // always the same permuation for debugging purposes
-            for(rocblas_int i = 0; i < n / 2; i++)
+            // singular = 2: a NaN on the diagonal element that is factored last (the first one
+            // with uplo = upper, the last one with uplo = lower), where the search for the
+            // largest off-diagonal element is empty; as in LAPACK, info must point to it
+            if(singular == 2 && b == bc / 2 && n > 0)
             {
-                for(rocblas_int j = 0; j < n; j++)
-                {
-                    tmp = hA[b][i + j * lda];
-                    hA[b][i + j * lda] = hA[b][n - 1 - i + j * lda];
-                    hA[b][n - 1 - i + j * lda] = tmp;
-                }
+                rocblas_int k = (uplo == rocblas_fill_upper) ? 0 : n - 1;
+                hA[b][k + k * lda] = T(std::numeric_limits<decltype(std::real(T{}))>::quiet_NaN());
             }
 
-            if(singular && (b == bc / 4 || b == bc / 2 || b == bc - 1))
+            if(singular == 1 && (b == bc / 4 || b == bc / 2 || b == bc - 1))
             {
                 // add some singularities
                 // always the same elements for debugging purposes
@@ -236,7 +263,7 @@ void sytf2_sytrf_getError(const rocblas_handle handle,
                           Uh& hInfo,
                           Uh& hInfoRes,
                           double* max_err,
-                          const bool singular)
+                          const int singular)
 {
     int lwork = (SYTRF ? 64 * n : 0);
     std::vector<T> work(lwork);
@@ -268,7 +295,29 @@ void sytf2_sytrf_getError(const rocblas_handle handle,
     *max_err = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        err = norm_error('F', n, n, lda, hA[b], hARes[b]);
+        // singular = 2: the factorization of the matrix with a NaN pivot has NaN entries, which
+        // must be where LAPACK's are (each other position counts as an error); the other entries
+        // are compared as usual
+        double nan_err = 0;
+        if(singular == 2 && b == bc / 2)
+        {
+            auto is_nan
+                = [](const T x) { return std::isnan(std::real(x)) || std::isnan(std::imag(x)); };
+            for(rocblas_int j = 0; j < n; j++)
+            {
+                for(rocblas_int i = 0; i < n; i++)
+                {
+                    T& x = hA[b][i + j * lda];
+                    T& y = hARes[b][i + j * lda];
+                    if(is_nan(x) != is_nan(y))
+                        nan_err++;
+                    if(is_nan(x) || is_nan(y))
+                        x = y = 0;
+                }
+            }
+        }
+
+        err = norm_error('F', n, n, lda, hA[b], hARes[b]) + nan_err;
         *max_err = rocblas_max_nan(err, *max_err);
 
         // also check pivoting (count the number of incorrect pivots)
@@ -313,7 +362,7 @@ void sytf2_sytrf_getPerfData(const rocblas_handle handle,
                              const int profile,
                              const bool profile_kernels,
                              const bool perf,
-                             const bool singular)
+                             const int singular)
 {
     int lwork = (SYTRF ? 64 * n : 0);
     std::vector<T> work(lwork);
@@ -550,9 +599,10 @@ void testing_sytf2_sytrf(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using n * machine_precision as tolerance
+    // using n * machine_precision as tolerance (n^2 * machine_precision for the random
+    // indefinite matrices, which are less well conditioned; the pivots are compared exactly)
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, n);
+        ROCSOLVER_TEST_CHECK(T, max_error, (argus.singular == 3 ? n * n : n));
 
     // output results for rocsolver-bench
     if(argus.timing)
