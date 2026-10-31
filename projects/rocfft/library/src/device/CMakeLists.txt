@@ -103,6 +103,7 @@ add_library( rocfft-function-pool OBJECT
 # Instrument for code coverage (no-op unless BUILD_CODE_COVERAGE is ON).
 # The internal test suite exercises function_pool.cpp directly.
 rocfft_add_coverage_flags( rocfft-function-pool )
+target_link_libraries( rocfft-function-pool PRIVATE hip::host )
 
 target_include_directories( rocfft-function-pool
   PRIVATE

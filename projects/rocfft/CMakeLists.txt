@@ -20,10 +20,7 @@
 # THE SOFTWARE.
 # #############################################################################
 
-cmake_minimum_required( VERSION 3.16 )
-
-# We use C++20 features, this will add compile option: -std=c++20
-set( CMAKE_CXX_STANDARD 20 )
+cmake_minimum_required( VERSION 3.25 )
 
 # This should appear before the project command, because it does not
 # use FORCE
@@ -47,32 +44,20 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
+project( rocfft LANGUAGES CXX C )
+set( CMAKE_CXX_STANDARD 20 )
+
 set( ROCFFT_BUILD_SCOPE ON )
 
-project( rocfft LANGUAGES CXX C )
+include( cmake/buildopts.cmake )
 
 # This finds the rocm-cmake project, and installs it if not found
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
-set( PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern )
 find_package( ROCmCMakeBuildTools PATHS ${ROCM_PATH} /opt/rocm )
 if( NOT ROCmCMakeBuildTools_FOUND )
-  include( FetchContent )
-
-  FetchContent_Declare( rocm_cmake_local
-    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake
-    GIT_TAG rocm-6.4.1
-    GIT_SHALLOW ON
-  )
-
-  FetchContent_MakeAvailable( rocm_cmake_local )
-
-  execute_process( COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
-    WORKING_DIRECTORY ${rocm_cmake_local_SOURCE_DIR} )
-  execute_process( COMMAND ${CMAKE_COMMAND} --build ${rocm_cmake_local_SOURCE_DIR} --target install
-    WORKING_DIRECTORY ${rocm_cmake_local_SOURCE_DIR} )
-
-  find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
+  include( ${CMAKE_CURRENT_SOURCE_DIR}/cmake/build-rocmcmake.cmake )
 endif( )
+
 include( ROCMSetupVersion )
 include( ROCMCreatePackage )
 include( ROCMInstallTargets )
@@ -114,9 +99,6 @@ option(ROCFFT_RUNTIME_COMPILE_DEFAULT "Compile kernels at runtime by default" OF
 # Using -DROCFFT_BUILD_OFFLINE_TUNER=ON to compile an executable,
 # Set default to OFF since users are not likely to tune
 option(ROCFFT_BUILD_OFFLINE_TUNER "Build with offline tuner executable rocfft_offline_tuner" OFF)
-
-# Provide ability to disable hipRAND dependency
-option(USE_HIPRAND "Use hipRAND to provide device-side input generation" ON)
 
 # Split up function pool compilation across N files to parallelize its build
 set(ROCFFT_FUNCTION_POOL_N 8 CACHE STRING "Number of files to split function_pool into for compilation")
@@ -190,19 +172,8 @@ rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
 find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
 find_package( hiprtc REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hiprtc/ )
 
-# hipcc automatically provides HIP include dirs and HIP platform,
-# but plain clang needs to be told
-if( NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
-  include_directories( ${HIP_INCLUDE_DIRS} )
-  add_compile_definitions( __HIP_PLATFORM_AMD__ )
-endif()
-
-# Enable MPI support in rocFFT:
-option(ROCFFT_MPI_ENABLE "Enable MPI" OFF)
-option(ROCFFT_CRAY_MPI_ENABLE "Cray MPI" OFF)
 if( ROCFFT_MPI_ENABLE )
   find_package( MPI REQUIRED )
-  include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
 
 # Optional RCCL backend for single-node multi-GPU communication.
@@ -229,8 +200,6 @@ if( ROCFFT_BUILD_INTERNAL_TESTS )
 endif()
 
 add_subdirectory( library )
-
-include( clients/cmake/build-options.cmake )
 
 # Build clients of the library
 if( BUILD_CLIENTS )

@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 # #############################################################################
 
-cmake_minimum_required( VERSION 3.16 )
+cmake_minimum_required( VERSION 3.25 )
 
 # This should appear before the project command, because it does not
 # use FORCE
@@ -40,7 +40,9 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( rocfft-clients-samples-rocfft LANGUAGES CXX )
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( rocfft-clients-samples-mpi LANGUAGES CXX )
+endif()
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
@@ -54,10 +56,6 @@ endif()
 
 if( NOT MPI_FOUND )
   find_package( MPI REQUIRED )
-endif()
-  
-if( USE_HIPRAND AND NOT hiprand_FOUND )
-  find_package( hiprand REQUIRED )
 endif()
 
 set( sample_list rocfft_mpi_example )
@@ -75,29 +73,21 @@ foreach( sample ${sample_list} )
 
   target_link_libraries(
     ${sample}
-    PRIVATE roc::rocfft
+    PRIVATE
+    roc::rocfft
     MPI::MPI_CXX
-    )
+  )
 
   message( "MPI_CXX_LIB_NAMES: ${MPI_CXX_LIB_NAMES}")
   if ( ROCFFT_CRAY_MPI_ENABLE )
     target_link_libraries( ${sample}
       PRIVATE
       "mpi_gtl_hsa"
-      )
-      get_filename_component( MPI_LIBDIR ${MPI_LIBRARY} DIRECTORY )
-      target_link_directories( ${sample}
-	PRIVATE
-	${MPI_LIBDIR}/../../../../gtl/lib )
-    endif()
-
-  if ( USE_HIPRAND )
-    target_link_libraries(
-    ${sample}
-    PRIVATE
-    hip::hiprand
     )
-    target_compile_definitions( ${sample} PRIVATE USE_HIPRAND )
+    get_filename_component( MPI_LIBDIR ${MPI_LIBRARY} DIRECTORY )
+    target_link_directories( ${sample}
+      PRIVATE
+      ${MPI_LIBDIR}/../../../../gtl/lib )
   endif()
 
   target_compile_options( ${sample} PRIVATE ${WARNING_FLAGS} -Wno-cpp )
@@ -108,21 +98,18 @@ foreach( sample ${sample_list} )
   )
 
   if( ROCFFT_BUILD_SCOPE )
-    set( SAMPLES_ROCFFT_OUT_DIR "/../../staging" )
-  elseif( ROCFFT_CLIENTS_BUILD_SCOPE )
-    set( SAMPLES_ROCFFT_OUT_DIR "/../../bin" )
-  elseif( ROCFFT_CLIENTS_SAMPLES_BUILD_SCOPE )
-    set( SAMPLES_ROCFFT_OUT_DIR "/../bin" )
+    set( SAMPLES_ROCFFT_OUT_DIR "/clients/staging" )
   else()
     set( SAMPLES_ROCFFT_OUT_DIR "/bin" )
   endif()
   string( CONCAT SAMPLES_ROCFFT_OUT_DIR "${PROJECT_BINARY_DIR}" ${SAMPLES_ROCFFT_OUT_DIR} )
 
   set_target_properties(${sample}
-                        PROPERTIES 
-                        RUNTIME_OUTPUT_DIRECTORY 
-                        ${SAMPLES_ROCFFT_OUT_DIR})
-
+    PROPERTIES 
+    RUNTIME_OUTPUT_DIRECTORY 
+    ${SAMPLES_ROCFFT_OUT_DIR}
+  )
+  
   target_link_libraries( ${sample} PRIVATE hip::host hip::device )
 
 endforeach( )
