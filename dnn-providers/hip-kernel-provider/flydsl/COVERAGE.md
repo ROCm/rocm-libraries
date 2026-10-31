@@ -14,7 +14,7 @@ RDNA families **SDPA forward**, prefill and decode engines (156 per family, §5)
 `gfx12-generic` also **AOTriton's gfx1201 kernel** as an engine of its own (72, §5.6).
 **SDPA forward on CDNA** (§7) is three engines -- the generic kernel's prefill, gfx950's
 dual-wave kernel and the split-KV decode -- built per arch for gfx950, gfx942 and gfx90a
-from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,729 objects). Every graph a pack accepts is
+from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,729 objects; the split engine also on gfx11-generic). Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -1034,9 +1034,9 @@ Approved for this integration.
 
 ---
 
-## 9. SDPA backward on CDNA — `hipkernel:flydsl_sdpa_bwd_merged` and `hipkernel:flydsl_sdpa_bwd_split`
+## 9. SDPA backward — `hipkernel:flydsl_sdpa_bwd_merged` and `hipkernel:flydsl_sdpa_bwd_split`
 
-gfx950 only. Both engines share one graph matcher
+Split and merged ship for gfx950; split alone also ships for gfx11-generic. Both engines share one graph matcher
 ([`FlydslSdpaBwdCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp)),
 a pure function of the graph that either computes the problem or says why it declines; what
 belongs to one engine (tile routing, bias staging, workspace bounds) is that engine's.

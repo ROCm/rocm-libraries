@@ -99,9 +99,12 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     configure_file("${_hkp_provider_root}/flydsl/tests/data/sdpa_bwd_gfx11_verdicts.csv"
                    "${_hkp_bwd_data}/sdpa_bwd_gfx11_verdicts.csv" COPYONLY)
     foreach(_hkp_bwd_op sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq)
-        configure_file(
-            "${HKP_INGESTOR_PLAN_SOURCE_DIR}/descriptors/FlyDSL/${_hkp_bwd_op}/gfx11-generic/manifest.json"
-            "${_hkp_bwd_data}/${_hkp_bwd_op}/gfx11-generic/manifest.json" COPYONLY)
+        set(_hkp_bwd_manifest
+            "${HKP_INGESTOR_PLAN_SOURCE_DIR}/descriptors/FlyDSL/${_hkp_bwd_op}/gfx11-generic/manifest.json")
+        if(EXISTS "${_hkp_bwd_manifest}")
+            configure_file("${_hkp_bwd_manifest}"
+                           "${_hkp_bwd_data}/${_hkp_bwd_op}/gfx11-generic/manifest.json" COPYONLY)
+        endif()
     endforeach()
     foreach(_hkp_verdict_target hip_kernel_provider_tests hip_kernel_provider_census_tests)
         target_compile_definitions(${_hkp_verdict_target} PRIVATE

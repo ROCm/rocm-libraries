@@ -237,23 +237,22 @@ endif()
 # bundles include bf16 cases, so the target takes the engine's tolerance config, as its
 # tiered checks do.
 foreach(_hkp_bwd_engine IN ITEMS split merged)
-    foreach(_hkp_bwd_arch IN ITEMS gfx950 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150
-                                   gfx1151 gfx1152 gfx1153)
+    foreach(_hkp_bwd_arch IN LISTS HKP_FLYDSL_SDPA_BWD_ARCHS)
         set(_hkp_bwd_ships FALSE)
         if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             hkp_product_ships_engine_for_arch(_hkp_bwd_ships
                 "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}" ${_hkp_bwd_arch})
         endif()
-        if(NOT (HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
-                AND _hkp_bwd_ships
+        if(NOT (HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPDNN_ENABLE_KERNEL_INGESTOR
+                AND HIPDNN_ENABLE_SDPA AND _hkp_bwd_ships
                 AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target))
             continue()
         endif()
 
         # The shard names this TOML, so it is reserved with the shard as well as passed as
-        # TEST_CONFIG; hkp_reserve_census_shard() says why.
-        set(_hkp_bwd_toml
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../config/hipkernel_flydsl_sdpa_bwd_${_hkp_bwd_engine}.toml")
+        # TEST_CONFIG; hkp_reserve_census_shard() says why. It is the per-architecture file
+        # the external-integration registration shares.
+        hkp_flydsl_sdpa_bwd_arch_toml(_hkp_bwd_toml ${_hkp_bwd_engine} ${_hkp_bwd_arch})
         hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch} FILES "${_hkp_bwd_toml}")
         add_external_integration_test_target(
             TARGET_NAME hip_kernel_provider_flydsl_sdpa_bwd_${_hkp_bwd_engine}_${_hkp_bwd_arch}_gpu_ref_integration_tests
