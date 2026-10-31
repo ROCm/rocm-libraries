@@ -54,8 +54,8 @@ ROCSOLVER_KERNEL void bdsvdx_abs_eigs(const rocblas_int n,
 
     // local variables
     rocblas_int nsv = nsvA[bid];
-    T* S = SS + (bid * strideS);
-    T* Stmp = StmpA + (bid * 2 * n);
+    T* S = SS + (rocblas_stride(bid) * strideS);
+    T* Stmp = StmpA + (rocblas_stride(bid) * 2 * n);
 
     if(nsv > n)
         nsvA[bid] = nsv = n;
@@ -71,7 +71,7 @@ ROCSOLVER_KERNEL void bdsvdx_reorder_vect(const rocblas_fill uplo,
                                           T* SS,
                                           const rocblas_stride strideS,
                                           U ZZ,
-                                          const rocblas_int shiftZ,
+                                          const rocblas_stride shiftZ,
                                           const rocblas_int ldz,
                                           const rocblas_stride strideZ,
                                           T* workA)
@@ -85,8 +85,8 @@ ROCSOLVER_KERNEL void bdsvdx_reorder_vect(const rocblas_fill uplo,
     // local variables
     rocblas_int i, j;
     rocblas_int nsv = nsvA[bid];
-    T* work = workA + (bid * 2 * n);
-    T* S = SS + (bid * strideS);
+    T* work = workA + (rocblas_stride(bid) * 2 * n);
+    T* S = SS + (rocblas_stride(bid) * strideS);
     T* Z = load_ptr_batch<T>(ZZ, bid, shiftZ, strideZ);
 
     if(nsv > n)
@@ -104,23 +104,23 @@ ROCSOLVER_KERNEL void bdsvdx_reorder_vect(const rocblas_fill uplo,
     for(j = 0; j < nsv; j++)
     {
         for(i = tid; i < 2 * n; i += hipBlockDim_x)
-            work[i] = Z[i + j * ldz];
+            work[i] = Z[idx2D(i, j, ldz)];
         __syncthreads();
 
         if(uplo == rocblas_fill_upper)
         {
             for(i = tid; i < n; i += hipBlockDim_x)
             {
-                Z[i + j * ldz] = work[2 * i + 1] * scl;
-                Z[(n + i) + j * ldz] = -work[2 * i] * scl;
+                Z[idx2D(i, j, ldz)] = work[2 * i + 1] * scl;
+                Z[idx2D((n + i), j, ldz)] = -work[2 * i] * scl;
             }
         }
         else
         {
             for(i = tid; i < n; i += hipBlockDim_x)
             {
-                Z[i + j * ldz] = work[2 * i] * scl;
-                Z[(n + i) + j * ldz] = -work[2 * i + 1] * scl;
+                Z[idx2D(i, j, ldz)] = work[2 * i] * scl;
+                Z[idx2D((n + i), j, ldz)] = -work[2 * i + 1] * scl;
             }
         }
         __syncthreads();
@@ -262,7 +262,7 @@ rocblas_status rocsolver_bdsvdx_template(rocblas_handle handle,
                                          T* S,
                                          const rocblas_stride strideS,
                                          U Z,
-                                         const rocblas_int shiftZ,
+                                         const rocblas_stride shiftZ,
                                          const rocblas_int ldz,
                                          const rocblas_stride strideZ,
                                          rocblas_int* ifail,

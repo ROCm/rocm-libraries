@@ -193,20 +193,24 @@ void syevdx_heevdx_inplace_initData(const rocblas_handle handle,
                 for(rocblas_int j = i; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 10;
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = std::real(hA[b][i + rocblas_stride(j) * lda]) + 10;
                     else
                     {
                         if(j == i + 1)
                         {
-                            hA[b][i + j * lda] = (hA[b][i + j * lda] - 5) / 10;
-                            hA[b][j + i * lda] = sconj(hA[b][i + j * lda]);
+                            hA[b][i + rocblas_stride(j) * lda]
+                                = (hA[b][i + rocblas_stride(j) * lda] - 5) / 10;
+                            hA[b][j + rocblas_stride(i) * lda]
+                                = sconj(hA[b][i + rocblas_stride(j) * lda]);
                         }
                         else
-                            hA[b][j + i * lda] = hA[b][i + j * lda] = 0;
+                            hA[b][j + rocblas_stride(i) * lda] = hA[b][i + rocblas_stride(j) * lda]
+                                = 0;
                     }
                 }
                 if(i == n / 4 || i == n / 2 || i == n - 1 || i == n / 7 || i == n / 5 || i == n / 3)
-                    hA[b][i + i * lda] *= -1;
+                    hA[b][i + rocblas_stride(i) * lda] *= -1;
             }
 
             // make copy of original data to test vectors if required
@@ -215,7 +219,8 @@ void syevdx_heevdx_inplace_initData(const rocblas_handle handle,
                 for(rocblas_int i = 0; i < n; i++)
                 {
                     for(rocblas_int j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -266,8 +271,8 @@ void syevdx_heevdx_inplace_getError(const rocblas_handle handle,
     std::vector<T> work(lwork);
     std::vector<S> rwork(lrwork);
     std::vector<int> iwork(liwork);
-    std::vector<T> A(lda * n * bc);
-    std::vector<T> Z(ldz * n);
+    std::vector<T> A(rocblas_stride(lda) * n * bc);
+    std::vector<T> Z(rocblas_stride(ldz) * n);
     std::vector<int> ifail(n);
 
     // input data initialization
@@ -340,8 +345,9 @@ void syevdx_heevdx_inplace_getError(const rocblas_handle handle,
                 for(int j = 0; j < hNev[b][0]; j++)
                 {
                     alpha = T(1) / hWRes[b][j];
-                    cpu_symv_hemv(uplo, n, alpha, A.data() + b * lda * n, lda, hARes[b] + j * lda,
-                                  1, beta, hA[b] + j * lda, 1);
+                    cpu_symv_hemv(uplo, n, alpha, A.data() + rocblas_stride(b) * lda * n, lda,
+                                  hARes[b] + rocblas_stride(j) * lda, 1, beta,
+                                  hA[b] + rocblas_stride(j) * lda, 1);
                 }
 
                 // error is ||hZ - hZRes|| / ||hZ||
@@ -394,7 +400,7 @@ void syevdx_heevdx_inplace_getPerfData(const rocblas_handle handle,
     std::vector<S> rwork(lrwork);
     std::vector<int> iwork(liwork);
     std::vector<T> A;
-    std::vector<T> Z(ldz * n);
+    std::vector<T> Z(rocblas_stride(ldz) * n);
     std::vector<int> ifail(n);
 
     // abstol = 0 ensures max accuracy in rocsolver; for lapack we should use 2*safemin
@@ -465,7 +471,7 @@ void testing_syevdx_heevdx_inplace(Arguments& argus)
     char uploC = argus.get<char>("uplo");
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stW = argus.get<rocblas_stride>("strideW", n);
 
     S vl = S(argus.get<double>("vl", 0));

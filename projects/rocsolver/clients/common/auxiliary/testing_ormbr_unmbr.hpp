@@ -166,9 +166,9 @@ void ormbr_unmbr_initData(const rocblas_handle handle,
                 for(int j = 0; j < s; ++j)
                 {
                     if(i == j)
-                        hA[0][i + j * lda] += 400;
+                        hA[0][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[0][i + j * lda] -= 4;
+                        hA[0][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
             cpu_gebrd(nq, s, hA[0], lda, D.data(), E.data(), hIpiv[0], P.data(), hW.data(), size_W);
@@ -180,9 +180,9 @@ void ormbr_unmbr_initData(const rocblas_handle handle,
                 for(int j = 0; j < nq; ++j)
                 {
                     if(i == j)
-                        hA[0][i + j * lda] += 400;
+                        hA[0][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[0][i + j * lda] -= 4;
+                        hA[0][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
             cpu_gebrd(s, nq, hA[0], lda, D.data(), E.data(), P.data(), hIpiv[0], hW.data(), size_W);
