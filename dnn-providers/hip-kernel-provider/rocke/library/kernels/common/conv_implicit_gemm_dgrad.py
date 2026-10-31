@@ -467,6 +467,10 @@ class SubGemmParams:
     gemm_k_padded: int
 
     RECORD_NUM_FIELDS: int = 22
+    # pp_boxes 7 (pixel lists): the record's dX rows, one dX pixel index
+    # (n*Di + d)*Hi*Wi + h*Wi + w per GEMM row. Packed after
+    # the magic table by pack_sub_gemm_buffer; None = rows are a box.
+    row_list: Optional[Tuple[int, ...]] = field(default=None, repr=False, compare=False)
 
     def pack_i32(self) -> List[int]:
         """Pack this record as a list of 22 signed i32 values."""
@@ -589,6 +593,313 @@ def enumerate_sub_gemms(
     return sub_gemms
 
 
+# CU budget of the pp_boxes split-K degrees (MI300A: 228 CUs); override with
+# ROCKE_PP_BOX_CUS.
+PP_BOX_SPLIT_CUS = int(os.environ.get("ROCKE_PP_BOX_CUS", "228"))
+
+
+def pp_box_sub_gemms(
+    p: ConvProblem,
+    tile_m: int,
+    tile_n: int,
+    nclass: int = 5,
+    *,
+    tile_k: int = 32,
+    max_split: int = 1,
+    cus: int = 0,
+) -> List[SubGemmParams]:
+    """The sub-GEMM records of a ``pp_boxes`` binary (stride 1, dilation 1).
+
+    Per spatial axis (H, W) the dX coordinates group into runs that can use
+    the same filter offsets: dX row h reads dY row h + pH - y, so y runs
+    over [h + pH - Ho + 1, h + pH] clamped to [0, Y). ``nclass`` 5 keeps
+    every distinct run (for a 3-tap axis: the two first rows, the interior,
+    the two last rows); 3 merges the leading runs into one and the trailing
+    runs into one (the union of their offsets). One record per (H run, W
+    run) box: rows N*[Di*]hs*ws (n', h - hb, w - wb), the box's filter rows
+    [yb, yb + ys) and columns [xb, xb + xs) (y_dot_slice / b_y_offset,
+    x_dot_slice / b_x_offset), dX row h = htl + hb (d_h_offset); K runs the
+    full depth (Z) of the filter.
+    """
+
+    def runs(n_in, n_out, pad, filt, nclass):
+        rng = []
+        for h in range(n_in):
+            lo = max(0, h + pad - n_out + 1)
+            hi = min(filt - 1, h + pad)
+            rng.append((lo, hi))
+        out = []  # (begin, size, flo, fhi)
+        for h, r in enumerate(rng):
+            if out and (out[-1][2], out[-1][3]) == r and out[-1][0] + out[-1][1] == h:
+                b0, sz, lo, hi = out[-1]
+                out[-1] = (b0, sz + 1, lo, hi)
+            else:
+                out.append((h, 1, r[0], r[1]))
+        if nclass == 1:
+            lo = min(q[2] for q in out)
+            hi = max(q[3] for q in out)
+            return [(0, n_in, lo, hi)]
+        if nclass == 3 and len(out) > 3:
+            # interior = the largest run; merge everything before / after it.
+            k = max(range(len(out)), key=lambda i: out[i][1])
+            merged = []
+            for part in (out[:k], [out[k]], out[k + 1 :]):
+                if not part:
+                    continue
+                b0 = part[0][0]
+                sz = sum(q[1] for q in part)
+                merged.append((b0, sz, min(q[2] for q in part), max(q[3] for q in part)))
+            out = merged
+        return out
+
+    if nclass in (7, 77):
+        return _pp_pixel_list_sub_gemms(
+            p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus,
+            axis_runs=runs, cheap_tail=nclass == 77,
+        )
+    # Classes per axis (D, H, W): 3 / 5 = (1, n, n); 33 / 55 = (n, n, n);
+    # three digits ``dhw`` = per axis (1 = one run, 3, 5), e.g. 131 = H only.
+    if nclass >= 100:
+        dc, hc, wc = nclass // 100, nclass // 10 % 10, nclass % 10
+    elif nclass >= 10:
+        dc = hc = wc = nclass // 11
+    else:
+        dc, hc, wc = 1, nclass, nclass
+    hr = runs(p.Hi, p.Ho, p.pH, p.Y, hc)
+    wr = runs(p.Wi, p.Wo, p.pW, p.X, wc)
+    if p.is_3d:
+        dr = runs(p.Di, p.Do, p.pD, p.Z, dc)
+    else:
+        dr = [(0, 1, 0, 0)]
+    boxes = [(d, h, w) for d in dr for h in hr for w in wr]
+    # Split-K degree per box (max_split > 1): K slices of the box's tiles,
+    # raised greedily on the box whose slice is longest while the launch
+    # stays within PP_BOX_SPLIT_CUS workgroups (one round).
+    tiles_b, work_b = [], []
+    for (db, ds, zlo, zhi), (hb, hs, ylo, yhi), (wb, ws, xlo, xhi) in boxes:
+        tiles_b.append(ceil_div(p.N * ds * hs * ws, tile_m) * ceil_div(p.cpg, tile_n))
+        work_b.append(
+            (yhi - ylo + 1) * (xhi - xlo + 1) * (zhi - zlo + 1)
+            * ceil_div(p.kpg, tile_k)
+        )
+    split = [1] * len(boxes)
+    budget = cus or PP_BOX_SPLIT_CUS
+    if max_split > 1:
+        total = sum(tiles_b)
+        while True:
+            i = max(range(len(boxes)), key=lambda j: ceil_div(work_b[j], split[j]))
+            if split[i] >= max_split or total + tiles_b[i] > budget:
+                break
+            split[i] += 1
+            total += tiles_b[i]
+    # Longest slices first: the dispatcher hands out blocks in order, so a
+    # budget of several rounds is packed largest-first.
+    order = sorted(
+        range(len(boxes)), key=lambda j: -ceil_div(work_b[j], split[j])
+    )
+    sgs: List[SubGemmParams] = []
+    start = 0
+    for bi in order:
+        (db, ds, zlo, zhi), (hb, hs, ylo, yhi), (wb, ws, xlo, xhi) = boxes[bi]
+        if True:  # noqa: SIM108 (keeps the record build in one block)
+            ys, xs = yhi - ylo + 1, xhi - xlo + 1
+            if ys <= 0 or xs <= 0:
+                raise ValueError("pp_boxes: a dX row has no filter tap")
+            gemm_m = p.N * ds * hs * ws
+            tiles = tiles_b[bi] * split[bi]
+            sgs.append(
+                SubGemmParams(
+                    i_ytilde=0,
+                    i_xtilde=0,
+                    y_dot_slice=ys,
+                    x_dot_slice=xs,
+                    h_tilde_slice_begin=hb,
+                    h_tilde_slice=hs,
+                    w_tilde_slice_begin=wb,
+                    w_tilde_slice=ws,
+                    gemm_m=gemm_m,
+                    gemm_n=p.cpg,
+                    gemm_k=ys * xs * p.kpg,
+                    block_start=start,
+                    block_end=start + tiles,
+                    a_embed_h_coeff=ds,  # pp_boxes: depth run size
+                    a_embed_w_coeff=db,  # pp_boxes: depth run origin
+                    b_y_stride=zlo,  # pp_boxes: first filter depth
+                    b_y_offset=ylo,
+                    b_x_stride=split[bi],  # pp_boxes: the box's split degree
+                    b_x_offset=xlo,
+                    d_h_stride=1,
+                    d_h_offset=hb,
+                    d_w_stride=1,
+                    d_w_offset=wb,
+                    gemm_k_padded=zhi - zlo + 1,  # pp_boxes: filter depths
+                )
+            )
+            start += tiles
+    return sgs
+
+
+def _pp_pixel_list_sub_gemms(
+    p: ConvProblem,
+    tile_m: int,
+    tile_n: int,
+    *,
+    tile_k: int,
+    max_split: int,
+    cus: int,
+    axis_runs,
+    cheap_tail: bool = False,
+) -> List[SubGemmParams]:
+    """``pp_boxes`` 7 (77: ``cheap_tail``): records of M tiles of up to ``tile_m`` dX pixels
+    that need not form a box (their indices ride in the record's row list),
+    running the union of its pixels' filter-offset ranges per axis.
+
+    The dX pixels group into exact classes (per axis: the run of filter
+    offsets the coordinate can use, as pp_boxes 5 along D, H and W). Each
+    class fills whole tiles in pixel order; the class remainders are packed
+    together, each tile grown with the remainder that widens its offset box
+    least. A record is the full dX as a box (origin 0, extents Di, Hi, Wi),
+    so a row's pixel index decodes as a box-local row would; its filter
+    offsets are the tile's union ranges. Split-K degrees and the order are
+    pp_boxes' (longest slice first, within ``cus`` workgroups).
+    """
+    if p.is_3d:
+        dr = axis_runs(p.Di, p.Do, p.pD, p.Z, 5)
+    else:
+        dr = [(0, 1, 0, 0)]
+    hr = axis_runs(p.Hi, p.Ho, p.pH, p.Y, 5)
+    wr = axis_runs(p.Wi, p.Wo, p.pW, p.X, 5)
+    Di = p.Di if p.is_3d else 1
+    hw = p.Hi * p.Wi
+    classes = []  # (pixel list, (zlo, zhi, ylo, yhi, xlo, xhi))
+    for db, ds, zlo, zhi in dr:
+        for hb, hs, ylo, yhi in hr:
+            for wb, ws, xlo, xhi in wr:
+                if zhi < zlo or yhi < ylo or xhi < xlo:
+                    raise ValueError("pp_boxes: a dX row has no filter tap")
+                pix = [
+                    (n * Di + d) * hw + h * p.Wi + w
+                    for n in range(p.N)
+                    for d in range(db, db + ds)
+                    for h in range(hb, hb + hs)
+                    for w in range(wb, wb + ws)
+                ]
+                classes.append((pix, (zlo, zhi, ylo, yhi, xlo, xhi)))
+
+    def taps(r):
+        return (r[1] - r[0] + 1) * (r[3] - r[2] + 1) * (r[5] - r[4] + 1)
+
+    # cheap_tail (pp_boxes 77): the launch's one partial tile (pixels mod
+    # tile_m) takes that many pixels of the class with the fewest filter
+    # offsets that has them, instead of the packer's leftovers: it costs a
+    # whole tile of MFMAs either way, so give it the shortest K.
+    _tail = None
+    _r = sum(len(c[0]) for c in classes) % tile_m
+    if cheap_tail and _r:
+        ci = min(
+            (i for i in range(len(classes)) if len(classes[i][0]) >= _r),
+            key=lambda i: (taps(classes[i][1]), i),
+        )
+        pix, rr = classes[ci]
+        _tail = (pix[:_r], rr)
+        classes[ci] = (pix[_r:], rr)
+
+    def union(a, c):
+        return (
+            min(a[0], c[0]), max(a[1], c[1]), min(a[2], c[2]),
+            max(a[3], c[3]), min(a[4], c[4]), max(a[5], c[5]),
+        )
+
+    tiles = []  # (rows, ranges)
+    rem = []
+    for pix, r in classes:
+        full = len(pix) // tile_m * tile_m
+        for i in range(0, full, tile_m):
+            tiles.append((pix[i : i + tile_m], r))
+        if full < len(pix):
+            rem.append([pix[full:], r])
+    rem.sort(key=lambda x: (-taps(x[1]), x[0][0]))
+    while rem:
+        rows, r = rem.pop(0)
+        rows = list(rows)
+        while len(rows) < tile_m and rem:
+            j = min(
+                range(len(rem)),
+                key=lambda q: (taps(union(r, rem[q][1])), -len(rem[q][0]), q),
+            )
+            take = min(tile_m - len(rows), len(rem[j][0]))
+            rows += rem[j][0][:take]
+            r = union(r, rem[j][1])
+            rem[j][0] = rem[j][0][take:]
+            if not rem[j][0]:
+                rem.pop(j)
+        tiles.append((sorted(rows), r))
+
+    if _tail is not None:
+        tiles.append((sorted(_tail[0]), _tail[1]))
+    # Tiles of one offset box form one record (several M tiles; a partial
+    # tile last), so their workgroups read the same W slices together.
+    groups: Dict[tuple, List[List[int]]] = {}
+    for rows, r in tiles:
+        groups.setdefault(r, []).append(rows)
+    tiles = []
+    for r, lst in groups.items():
+        lst.sort(key=lambda q: (len(q) < tile_m, q[0]))
+        tiles.append(([x for q in lst for x in q], r))
+    nt = ceil_div(p.cpg, tile_n)
+    kt = ceil_div(p.kpg, tile_k)
+    mt = [ceil_div(len(rows), tile_m) for rows, _r in tiles]
+    work = [taps(r) * kt for _rows, r in tiles]
+    split = [1] * len(tiles)
+    budget = cus or PP_BOX_SPLIT_CUS
+    if max_split > 1:
+        total = sum(mt) * nt
+        while True:
+            i = max(range(len(tiles)), key=lambda j: (ceil_div(work[j], split[j]), -j))
+            if split[i] >= max_split or total + mt[i] * nt > budget:
+                break
+            split[i] += 1
+            total += mt[i] * nt
+    order = sorted(range(len(tiles)), key=lambda j: (-ceil_div(work[j], split[j]), j))
+    sgs: List[SubGemmParams] = []
+    start = 0
+    for j in order:
+        rows, (zlo, zhi, ylo, yhi, xlo, xhi) = tiles[j]
+        ys, xs = yhi - ylo + 1, xhi - xlo + 1
+        blocks = mt[j] * nt * split[j]
+        sgs.append(
+            SubGemmParams(
+                i_ytilde=0,
+                i_xtilde=0,
+                y_dot_slice=ys,
+                x_dot_slice=xs,
+                h_tilde_slice_begin=0,
+                h_tilde_slice=p.Hi,
+                w_tilde_slice_begin=0,
+                w_tilde_slice=p.Wi,
+                gemm_m=len(rows),
+                gemm_n=p.cpg,
+                gemm_k=ys * xs * p.kpg,
+                block_start=start,
+                block_end=start + blocks,
+                a_embed_h_coeff=Di,  # the box: all of dX
+                a_embed_w_coeff=0,
+                b_y_stride=zlo,
+                b_y_offset=ylo,
+                b_x_stride=split[j],
+                b_x_offset=xlo,
+                d_h_stride=1,
+                d_h_offset=0,
+                d_w_stride=1,
+                d_w_offset=0,
+                gemm_k_padded=zhi - zlo + 1,
+                row_list=tuple(rows),
+            )
+        )
+        start += blocks
+    return sgs
+
+
 def is_patch_problem(p: ConvProblem) -> bool:
     """Does every dX pixel of ``p`` take at most one filter tap?
 
@@ -681,6 +992,20 @@ def pack_sub_gemm_buffer(
         buf.extend(record)
     for sg in sub_gemms:
         buf.extend(sub_gemm_magic_pairs(sg))
+    if any(sg.row_list is not None for sg in sub_gemms):
+        # pp_boxes 7 (pixel lists), after the magic table: one row base per
+        # record, then each record's rows padded to whole M tiles (the
+        # padding repeats the first row: in bounds, never stored).
+        slots = []
+        for sg in sub_gemms:
+            rows = list(sg.row_list or (0,))
+            slots.append(rows + [rows[0]] * (-len(rows) % tile_m))
+        base = 0
+        for rows in slots:
+            buf.append(base)
+            base += len(rows)
+        for rows in slots:
+            buf.extend(rows)
     return buf
 
 
@@ -1361,6 +1686,63 @@ class DgradConvSpec:
     # problem with Wo <= halo_max_wo runs on the same binary. Required (> 0)
     # with dy_halo, 0 otherwise. Tags ``hwo<n>``.
     halo_max_wo: int = 0
+    # Stream-K over a persistent grid of ``pp_streamk`` workgroups (the CU
+    # count of the target, e.g. 228 on MI300A), for the ping-pong loop
+    # (tapk_pingpong) on grids of a few waves. The (output tile, K tile)
+    # iteration space, tile-major, is cut into pp_streamk equal contiguous
+    # ranges; a workgroup walks its range tile by tile (each segment its own
+    # prologue, ping-pong loop and epilogue) and atomically adds every
+    # segment into dX (the cshuffle packed-atomic epilogue: dX is zeroed
+    # before the launch, as for split_k). The workgroup ids are first laid
+    # out XCD-contiguous (xcd_remap XCDs), so the workgroups that share a
+    # tile run on one XCD. Needs split_k 1 and an ungrouped problem. Launch
+    # grid (pp_streamk, 1, 1). Default 0 (off); tags ``psk<n>``.
+    pp_streamk: int = 0
+    # With pp_streamk, bit mask. 1: reduce the split tiles without atomics
+    # -- every segment that covers only part of its tile writes its f32
+    # accumulators to a workspace slot behind the sub-GEMM record table
+    # (sub_gemm_buf, sized by the launcher), the last of a tile's
+    # contributors (a per-tile counter there, reset by it) adds the slots
+    # and stores the tile with the plain cshuffle epilogue; whole tiles are
+    # stored plainly, so dX needs no zeroing. 2 (atomic mode only): when
+    # pp_streamk is a multiple of the M tile count, order the workgroups
+    # slice-major (the workgroups that read one W slice at one time share
+    # an XCD) instead of tile-major. Default 0; tags ``pskm<n>``.
+    pp_sk_mode: int = 0
+    # With tapk_pingpong on a 3-D problem: run only the filter depths z
+    # some row of the M tile can use (the dX planes at the depth borders
+    # read no dY plane for some z, so those K tiles are all-zero rows);
+    # with split_k / pp_streamk the skipped tiles are cut from each
+    # slice / segment. Default False; tags ``pzs``.
+    pp_zskip: bool = False
+    # With tapk_pingpong >= 4 at stride 1: skip the dX rows' zero taps on
+    # the H/W borders. The host splits dX into boxes along H and W by which
+    # filter rows/columns their pixels can use (``pp_boxes`` classes per
+    # axis: 5 = exact, the first two and last two rows of a 3-tap axis
+    # apart; 3 = those border pairs merged) and passes one sub-GEMM record
+    # per box (pp_box_sub_gemms); a tile runs only its box's sub-filter, so
+    # no MFMA multiplies a border pixel's out-of-image taps. The rows of a
+    # box are not contiguous in dX: the epilogue stores through the record's
+    # (h, w) offsets. Needs split_k 1, no pp_streamk / tapk_pp_epi. Default
+    # 0; tags ``pbx<n>``. 7 = pixel lists (_pp_pixel_list_sub_gemms); 77 =
+    # the same binary, the launch's one partial tile filled with pixels of
+    # the cheapest class (host-only difference).
+    pp_boxes: int = 0
+    # With pp_boxes and split_k > 1: the workgroup budget the host fills
+    # with box split-K slices (pp_box_sub_gemms); 0 = PP_BOX_SPLIT_CUS (one
+    # round on MI300A). Launch-time only (the kernel reads each record's
+    # degree): identical binaries. Tags ``pbc<n>``.
+    pp_box_cus: int = 0
+    # With pp_boxes and split_k > 1: the order of a record's blocks. 0 =
+    # (m tile, n tile, K slice), slice fastest; 1 = (n tile, K slice, m tile),
+    # m fastest, so the workgroups that read one W slice are consecutive
+    # (one XCD). Bit 2 (2, 3; needs xcd_remap, any split_k): the XCD-contiguous
+    # tile order per window of PP_BOX_SPLIT_CUS workgroups instead of over
+    # the whole launch, so a launch of several rounds keeps the records'
+    # longest-first order on every XCD (the whole-launch order gives the
+    # first XCDs only the longest boxes' tiles: several full rounds there,
+    # short tiles elsewhere). Default 0; tags ``pbo<n>``.
+    pp_box_order: int = 0
 
     @property
     def block_size(self) -> int:
@@ -1565,7 +1947,9 @@ class DgradConvSpec:
         atomics: the tilde decomposition guarantees disjoint writes, so
         _emit_dgrad_tilde_direct/cshuffle_epilogue can issue plain buffer_store.
         """
-        return self.split_k > 1
+        return self.split_k > 1 or (
+            self.pp_streamk > 0 and not self.pp_sk_mode & 1
+        )
 
     @property
     def is_strided(self) -> bool:
@@ -1661,6 +2045,15 @@ class DgradConvSpec:
                 f"hprio{self.dy_halo_setprio}": self.dy_halo_setprio > 0,
                 f"hkp{self.dy_halo_kouter_pad}": self.dy_halo_kouter_pad > 0,
                 f"hwo{self.halo_max_wo}": self.halo_max_wo > 0,
+                f"psk{self.pp_streamk}": self.pp_streamk > 0,
+                f"pskm{self.pp_sk_mode}": self.pp_sk_mode > 0,
+                "pzs": self.pp_zskip,
+                # The box classes and the split budget are host-side only
+                # (pp_box_sub_gemms): one binary, one symbol for all of them.
+                "pbx": self.pp_boxes > 0,
+                # pp_boxes 7: rows from the record's pixel list (own binary)
+                "pbl": self.pp_boxes in (7, 77),
+                f"pbo{self.pp_box_order}": self.pp_box_order > 0,
             },
         )
 
@@ -1964,6 +2357,9 @@ def _tapk_pingpong_conflict(spec: DgradConvSpec) -> str:
     if spec.split_atomic_pairs and not (
         spec.split_k > 1
         and (spec.tapk_xhalo or spec.tapk_pingpong)
+        # pp_boxes' split store maps rows (atomic_store row_map), which the
+        # lane-contiguous pair store does not take.
+        and not spec.pp_boxes
         and spec.epilogue == "cshuffle"
         and spec.data.dtype_d == "bf16"
         and spec.wave_size == 64
@@ -1981,8 +2377,10 @@ def _tapk_pingpong_conflict(spec: DgradConvSpec) -> str:
         )
     ):
         return "tapk_pp_epi 1/2 needs tapk_pingpong, the cshuffle epilogue, split_k 1, 16x16 atoms, bf16 dX"
-    if spec.tapk_pp_sched not in (0, 1, 2, 3, 4, 5, 6) or (spec.tapk_pp_sched and not spec.tapk_pingpong):
-        return "tapk_pp_sched is 0..6 and needs tapk_pingpong"
+    if spec.tapk_pp_sched not in (0, 1, 2, 3, 4, 5, 6, 7) or (spec.tapk_pp_sched and not spec.tapk_pingpong):
+        return "tapk_pp_sched is 0..7 and needs tapk_pingpong"
+    if spec.tapk_pp_sched == 7 and (spec.tapk_pp_epi or spec.tapk_pingpong == 5):
+        return "tapk_pp_sched 7 (three tiles ahead) does not take tapk_pp_epi or tapk_pingpong 5"
     if spec.tapk_pp_persist not in (0, 1, 2) or (
         spec.tapk_pp_persist
         and not (
@@ -2087,9 +2485,83 @@ def _tapk_pingpong_conflict(spec: DgradConvSpec) -> str:
     return ""
 
 
+def pp_streamk_fixup_words(identity, problem) -> int:
+    """i32 words of the sub-GEMM buffer a ``pp_streamk`` fix-up binary
+    (pp_sk_mode bit 1) needs for ``problem``: the record and its magic
+    entry, the 2 * pp_streamk f32 accumulator slots of one tile each, and
+    one counter per output tile (see DgradConvSpec.pp_sk_mode)."""
+    G = int(identity.pp_streamk)
+    tm, tn = int(identity.tile_m), int(identity.tile_n)
+    ws_base = ((_RECORD_FIELDS + _MAGIC_FIELDS) * 4 + 15) // 16 * 16
+    m = int(problem.N) * int(problem.Hi) * int(problem.Wi)
+    if getattr(problem, "is_3d", False):
+        m *= int(problem.Di)
+    tiles = -(-m // tm) * -(-int(problem.C) // tn)
+    return (ws_base + 2 * G * tm * tn * 4) // 4 + tiles
+
+
+def _pp_streamk_conflict(spec: DgradConvSpec) -> str:
+    """Why ``spec.pp_streamk`` cannot be honoured, or ``""``."""
+    if (spec.pp_streamk or spec.pp_boxes or spec.pp_zskip) and (
+        spec.tapk_pp_persist or spec.tapk_pp_xhalo or spec.tapk_ztrim
+    ):
+        # Two ways each of walking / trimming the ping-pong K loop (r4-dgradS:
+        # stream-K, border boxes, z skip; r4-dgradL: persistent grid, x-halo
+        # steps, z trim): the K-loop prologue honours one family.
+        return ("pp_streamk / pp_boxes / pp_zskip do not combine with "
+                "tapk_pp_persist / tapk_pp_xhalo / tapk_ztrim")
+    if spec.pp_zskip and not (spec.tapk_pingpong and spec.problem.is_3d):
+        return "pp_zskip needs tapk_pingpong and a 3-D problem"
+    if spec.pp_boxes and not (
+        (
+            spec.pp_boxes in (3, 5, 33, 55)
+            or (spec.pp_boxes in (7, 77) and not spec.pp_zskip)
+            or (
+                100 <= spec.pp_boxes <= 555
+                and all(c in "135" for c in str(spec.pp_boxes))
+            )
+        )
+        and spec.tapk_pingpong >= 4
+        and spec.split_k >= 1
+        and not spec.pp_streamk
+        and not (spec.tapk_pp_epi and spec.split_k > 1)
+        and spec.pp_box_order in (0, 1, 2, 3)
+        and not (spec.pp_box_order & 1 and spec.split_k == 1)
+        and not (spec.pp_box_order & 2 and not spec.xcd_remap)
+        and spec.epilogue == "cshuffle"
+        and spec.folds_sub_gemm_record
+    ):
+        return (
+            "pp_boxes (3 or 5) needs tapk_pingpong >= 4, the cshuffle epilogue "
+            "(tapk_pp_epi only with split_k 1), no pp_streamk, stride 1"
+        )
+    if spec.pp_sk_mode and not spec.pp_streamk:
+        return "pp_sk_mode needs pp_streamk"
+    if not spec.pp_streamk:
+        return ""
+    if spec.pp_sk_mode not in (0, 1, 2):
+        return f"pp_sk_mode must be 0, 1 or 2; got {spec.pp_sk_mode}"
+    if spec.pp_streamk < 0:
+        return f"pp_streamk must be >= 0; got {spec.pp_streamk}"
+    if not (
+        spec.tapk_pingpong
+        and spec.split_k == 1
+        and spec.epilogue == "cshuffle"
+        and not spec.tapk_pp_epi
+        and spec.data.dtype_d in ("fp32", "bf16", "fp16")
+        and spec.folds_sub_gemm_record
+    ):
+        return (
+            "pp_streamk needs tapk_pingpong, split_k 1, the cshuffle epilogue "
+            "without tapk_pp_epi, stride 1 and an fp32/bf16/fp16 dX (a grouped "
+            "binary serves groups == 1 only, see identity_supports_problem)"
+        )
+    return ""
+
+
 def _tapk_prefetch_conflict(spec: DgradConvSpec) -> str:
     """Why ``spec.tapk_prefetch`` / ``tapk_xhalo`` / ``b_kpack`` cannot be honoured."""
-    _pp_why = _tapk_pingpong_conflict(spec)
+    _pp_why = _tapk_pingpong_conflict(spec) or _pp_streamk_conflict(spec)
     if _pp_why:
         return _pp_why
     if spec.b_kpack:
@@ -2225,6 +2697,8 @@ def xcd_tile_order_xcds(spec: DgradConvSpec, arch: str) -> int:
     if not num_xcds or not spec.xcd_tile_order:
         return 0
     if (spec.problem.groups <= 1 and not spec.xcd_remap) or spec.split_k != 1:
+        return 0
+    if spec.pp_streamk or spec.pp_boxes:
         return 0
     if not spec.folds_sub_gemm_record:
         return 0
@@ -2533,11 +3007,16 @@ def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
         return "xcd_remap must be >= 0"
     if spec.m_band < 0 or (spec.m_band and (
             not spec.xcd_remap or spec.split_k != 1 or not spec.folds_sub_gemm_record
-            or spec.tapk_pp_persist or spec.xh_persist)):
-        return "m_band needs xcd_remap, split_k 1 and the folded (stride-1) record"
+            or spec.tapk_pp_persist or spec.xh_persist or spec.pp_boxes or spec.pp_streamk)):
+        # (pp_boxes launches several box records -- no folded record to band;
+        # the persistent / stream-K grids walk the tiles themselves.)
+        return ("m_band needs xcd_remap, split_k 1 and the folded (stride-1) record "
+                "(not with tapk_pp_persist / xh_persist / pp_boxes / pp_streamk)")
     mc = spec.cshuffle_m_chunks
     if mc != 1:
-        if mc < 1 or spec.epilogue != "cshuffle" or spec.split_k != 1:
+        if mc < 1 or spec.epilogue != "cshuffle" or (
+            spec.split_k != 1 and not spec.pp_boxes
+        ):
             return "cshuffle_m_chunks > 1 needs the cshuffle epilogue and split_k 1"
         if spec.data.dtype_d != "bf16":
             return "cshuffle_m_chunks > 1 is bf16 output only"
@@ -3075,7 +3554,10 @@ def _build_tilde_dgrad(
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
     # split_k>1 uses atomic_add; tilde split_k=1 uses direct store — both allow writeonly.
-    _dx_writeonly = spec.split_k <= 1
+    _dx_writeonly = spec.split_k <= 1 and not spec.needs_atomic
+    # pp_streamk fix-up: the workspace and tile counters live behind the
+    # record table, so the buffer is written.
+    _psk_fixup = bool(spec.pp_streamk and spec.pp_sk_mode & 1)
 
     # ---- Runtime problem-dimension parameters (AOT) -------------------------
     # Emitted straight from the ordered ABI list so the kernel's parameter
@@ -3117,7 +3599,7 @@ def _build_tilde_dgrad(
                         name,
                         PtrType(I32, "global"),
                         noalias=True,
-                        readonly=True,
+                        readonly=not (_psk_fixup and name == "sub_gemm_buf"),
                         align=4,
                     )
                 )
@@ -3193,7 +3675,54 @@ def _build_tilde_dgrad(
             ungrouped=bool(spec.xcd_remap),
         )
 
-    fold_record = spec.folds_sub_gemm_record
+    fold_record = spec.folds_sub_gemm_record and not spec.pp_boxes
+    if spec.pp_boxes and spec.xcd_remap:
+        # pp_boxes: XCD-contiguous order over the boxes' tiles (the last
+        # record's end is the launch's tile count).
+        _last = b.sub(num_sub_gemms_param, b.const_i32(1))
+        _rb = b.mul(_last, b.const_i32(_RECORD_FIELDS))
+        _tot = b.add(
+            b.global_load_i32(sub_gemm_buf, _rb),
+            b.mul(
+                b.mul(
+                    b.global_load_i32(sub_gemm_buf, b.add(_rb, b.const_i32(1))),
+                    b.global_load_i32(sub_gemm_buf, b.add(_rb, b.const_i32(2))),
+                ),
+                # the record's split-K degree (pp_boxes split-K), else 1
+                b.smax(
+                    b.global_load_i32(sub_gemm_buf, b.add(_rb, b.const_i32(15))),
+                    b.const_i32(1),
+                )
+                if spec.split_k > 1
+                else b.const_i32(1),
+            ),
+        )
+        _nx = b.const_i32(spec.xcd_remap)
+        if spec.pp_box_order & 2:
+            # pp_box_order bit 2: the XCD-contiguous order per window of
+            # PP_BOX_SPLIT_CUS workgroups (one round), so a launch of several
+            # rounds keeps the records' longest-first order round by round
+            # (the whole-launch order hands the first XCDs only the first
+            # records' tiles, i.e. the longest ones).
+            _win = b.const_i32(PP_BOX_SPLIT_CUS)
+            _w0 = b.mul(b.div(flat_block_id, _win), _win)
+            _wt = b.smin(b.sub(_tot, _w0), _win)
+            _loc = b.sub(flat_block_id, _w0)
+            _xw = b.mod(_loc, _nx)
+            _q = b.div(_wt, _nx)
+            _remv = b.sub(_wt, b.mul(_q, _nx))
+            _v = b.add(
+                b.add(b.mul(_xw, _q), b.smin(_xw, _remv)), b.div(_loc, _nx)
+            )
+            flat_block_id = b.add(_w0, b.select(b.cmp_ge(_wt, _nx), _v, _loc))
+        else:
+            _xw = b.mod(flat_block_id, _nx)
+            _q = b.div(_tot, _nx)
+            _remv = b.sub(_tot, b.mul(_q, _nx))
+            _v = b.add(
+                b.add(b.mul(_xw, _q), b.smin(_xw, _remv)), b.div(flat_block_id, _nx)
+            )
+            flat_block_id = b.select(b.cmp_ge(_tot, _nx), _v, flat_block_id)
     if fold_record:
         # Stride 1 (DgradConvSpec.folds_sub_gemm_record): the only sub-GEMM's
         # record is rebuilt from the kernargs, so there is nothing to search
@@ -3285,6 +3814,23 @@ def _build_tilde_dgrad(
         def _ld_magic(j: int) -> Value:
             return b.global_load_i32(sub_gemm_buf, b.add(_magic_base, b.const_i32(j)))
 
+    # pp_boxes 7: a record's rows are its pixel list (after the magic table:
+    # row bases, then the rows, see pack_sub_gemm_buffer); a box-local
+    # row index m becomes the pixel index the full-dX box decodes.
+    _rm_map = None
+    if spec.pp_boxes in (7, 77):
+        _rm_tab = b.add(
+            b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS + _MAGIC_FIELDS)),
+            num_sub_gemms_param,
+        )
+        _rm_base = b.add(
+            _rm_tab,
+            b.global_load_i32(sub_gemm_buf, b.add(b.sub(_rm_tab, num_sub_gemms_param), sg_idx)),
+        )
+
+        def _rm_map(b_: IRBuilder, m: Value) -> Value:
+            return b_.global_load_i32(sub_gemm_buf, b_.add(_rm_base, m))
+
     rec_kpg_magic = (_ld_magic(0), _ld_magic(1))
     rec_xdot_magic = (_ld_magic(2), _ld_magic(3))
     rec_hw_magic = (_ld_magic(4), _ld_magic(5))
@@ -3293,8 +3839,43 @@ def _build_tilde_dgrad(
     # Compute local tile indices within this sub-GEMM. The folded record's
     # block_start is 0, so the subtraction is skipped.
     local_flat = flat_block_id if fold_record else b.sub(flat_block_id, rec_block_start)
-    local_m_tile = b.div(local_flat, rec_num_n_tiles)
-    local_n_tile = b.mod(local_flat, rec_num_n_tiles)
+    # pp_boxes, 3-D: a box's rows are (n, d - db, h - hb, w - wb) with
+    # d - db < ds (record fields 11 = ds, 12 = db); its filter depths are
+    # [zb, zb + zs) (fields 13, 21).
+    def _bx_split_d(b_: IRBuilder, nd: Value):
+        """(image, dX depth) of the box-local row index n*ds + (d - db)."""
+        ds = rec_a_embed_h_coeff
+        img = b_.div(nd, ds)
+        return img, b_.add(b_.sub(nd, b_.mul(img, ds)), rec_a_embed_w_coeff)
+
+    def _bx_nval(b_: IRBuilder, nd: Value) -> Value:
+        """The dX row index n*Di + d of the box-local n*ds + (d - db)."""
+        if not is_3d:
+            return nd
+        img, d = _bx_split_d(b_, nd)
+        return b_.add(b_.mul(img, params["p_Di"]), d)
+
+    # pp_boxes split-K: a record's blocks are its tiles x its own split
+    # degree (record field 15), slice fastest.
+    bx_slice = bx_sk = None
+    if spec.pp_boxes and spec.split_k > 1 and spec.pp_box_order & 1:
+        # pp_box_order 1: (n, slice, m) with m fastest -- the workgroups that
+        # read one W slice (same n tile and K slice) are consecutive, so the
+        # XCD order puts them on one L2.
+        bx_sk = b.smax(rec_b_x_stride, b.const_i32(1))
+        local_m_tile = b.mod(local_flat, rec_num_m_tiles)
+        _rest = b.div(local_flat, rec_num_m_tiles)
+        local_n_tile = b.div(_rest, bx_sk)
+        bx_slice = b.sub(_rest, b.mul(local_n_tile, bx_sk))
+    if spec.pp_boxes and spec.split_k > 1 and not spec.pp_box_order & 1:
+        bx_sk = b.smax(rec_b_x_stride, b.const_i32(1))
+        _tl = b.div(local_flat, bx_sk)
+        bx_slice = b.sub(local_flat, b.mul(_tl, bx_sk))
+        local_flat = _tl
+    if not (spec.pp_boxes and spec.split_k > 1 and spec.pp_box_order & 1):
+        local_m_tile = b.div(local_flat, rec_num_n_tiles)
+        local_n_tile = b.mod(local_flat, rec_num_n_tiles)
+
     if spec.m_band and fold_record:
         # Output-plane band order (DgradConvSpec.m_band).
         local_m_tile = emit_m_band_order(
@@ -3536,6 +4117,8 @@ def _build_tilde_dgrad(
     # tapk_pp_epi: the ping-pong loop hands its accumulators to the
     # epilogue already converted to bf16 (see _tapk_pingpong_loop).
     _pp_state: dict = {}
+    # pp_streamk: the current segment's first K tile and K tile count.
+    _psk_seg: dict = {}
     acc_init = b.zero_vec_f32(c_per_lane)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
@@ -4145,7 +4728,7 @@ def _build_tilde_dgrad(
         is_wmma = op.family == "wmma"
 
         if (
-            spec.split_k > 1
+            (spec.split_k > 1 or spec.pp_streamk)
             and (spec.tapk_xhalo or spec.tapk_pingpong)
             and use_cshuffle
             and not is_wmma
@@ -4160,11 +4743,42 @@ def _build_tilde_dgrad(
                 max_store_vec=_dgrad_store_vec(spec),
                 out_dtype=spec.data.dtype_d,
             )
-            if spec.split_atomic_pairs:
-                _epi = dc_replace(_epi, atomic_pair_lanes=True)
-            _epi.atomic_store(
-                b, accs=final_accs, dw_ptr=dX, wg_N=c_C, bounds=(rec_gemm_m, c_dg_N)
-            )
+            if (spec.pp_streamk or spec.pp_boxes) and spec.cshuffle_m_chunks > 1:
+                _epi = dc_replace(_epi, m_chunks=spec.cshuffle_m_chunks)
+            if spec.pp_boxes:
+                # Box rows: dX row of box row m (the record's (h, w) origin).
+                def _box_row(b_, m):
+                    if _rm_map is not None:
+                        m = _rm_map(b_, m)
+                    nv, mr = _magic_divmod(b_, m, hw_div)
+                    nv = _bx_nval(b_, nv)
+                    htl, wtl = _magic_divmod(b_, mr, w_div)
+                    return b_.add(
+                        b_.mul(
+                            b_.add(b_.mul(nv, c_Hi), b_.add(htl, rec_d_h_offset)),
+                            c_Wi,
+                        ),
+                        b_.add(wtl, rec_d_w_offset),
+                    )
+
+                with b.scf_if_else(b.cmp_gt(bx_sk, b.const_i32(1))) as (_t, _e):
+                    with _t:
+                        _epi.atomic_store(
+                            b, accs=final_accs, dw_ptr=dX, wg_N=c_C,
+                            bounds=(rec_gemm_m, c_dg_N), row_map=_box_row,
+                        )
+                    with _e:
+                        _emit_dgrad_box_cshuffle_epilogue(
+                            b, spec, atom, grid, final_accs, dx_rsrc,
+                            n_map=_bx_nval, **_tilde_kwargs,
+                            **({"m_map": _rm_map} if _rm_map is not None else {}),
+                        )
+            else:
+                if spec.split_atomic_pairs:
+                    _epi = dc_replace(_epi, atomic_pair_lanes=True)
+                _epi.atomic_store(
+                    b, accs=final_accs, dw_ptr=dX, wg_N=c_C, bounds=(rec_gemm_m, c_dg_N)
+                )
         elif spec.split_k > 1:
             _emit_dgrad_tilde_atomic_epilogue(
                 b,
@@ -4220,6 +4834,31 @@ def _build_tilde_dgrad(
                         params,
                         c_group_base=c_group_base,
                     )
+            elif use_cshuffle and spec.pp_boxes and spec.tapk_pp_epi:
+                _tk = _tilde_kwargs
+
+                def _bx_addr(b_, m_val, n_val):
+                    if _rm_map is not None:
+                        m_val = _rm_map(b_, m_val)
+                    return _tilde_dx_addr_fn(
+                        b_, m_val, n_val, _tk["hw_tilde"], _tk["w_tilde_slice"],
+                        _tk["d_h_stride"], _tk["d_h_offset"], _tk["d_w_stride"],
+                        _tk["d_w_offset"], c_Hi, c_Wi, c_C, c_group_base,
+                        n_map=_bx_nval,
+                    )
+
+                _emit_pp_cshuffle_epilogue(
+                    b, spec, final_accs, grid, dx_rsrc, params,
+                    c_group_base=c_group_base,
+                    addr=(_bx_addr, (rec_gemm_m, c_dg_N)),
+                    **({"pre_bf16": _pp_state["bf16"]} if "bf16" in _pp_state else {}),
+                )
+            elif use_cshuffle and spec.pp_boxes:
+                _emit_dgrad_box_cshuffle_epilogue(
+                    b, spec, atom, grid, final_accs, dx_rsrc, n_map=_bx_nval,
+                    **_tilde_kwargs,
+                    **({"m_map": _rm_map} if _rm_map is not None else {}),
+                )
             elif use_cshuffle:
                 _emit_dgrad_cshuffle_epilogue(
                     b,
@@ -4684,6 +5323,136 @@ def _build_tilde_dgrad(
         upper = b.cmp_ge(wave, b.const_i32(n_w // 2))
         with b.scf_if(upper):
             b.sync_lds_only()
+        def _pp_three_ahead(frag_reads, mfmas, wave, half):
+            """tapk_pp_sched 7: pps 2 one tile deeper -- tiles t+1 and t+2
+            ride in two staging register sets across the back edge and tile
+            t+3's loads are interleaved with [compute B], so a load has two
+            iterations to land. The loop runs two tiles per trip so the two
+            sets alternate in place (a loop-carried copy of a pending load
+            would drain vmcnt on the back edge); an odd tile count runs one
+            more guarded tile after it."""
+
+            def flat(parts):
+                out = []
+                for part in parts:
+                    for _row, _col, v in part:
+                        out.extend(v if isinstance(v, list) else [v])
+                return out
+
+            def rebuild(template, vals):
+                vals = list(vals)
+                out = []
+                for part in template:
+                    p_out = []
+                    for row, col, v in part:
+                        if isinstance(v, list):
+                            p_out.append((row, col, vals[: len(v)]))
+                            del vals[: len(v)]
+                        else:
+                            p_out.append((row, col, vals.pop(0)))
+                    out.append(p_out)
+                return out
+
+            def ld():
+                if fast_a is None:
+                    return load_tile()
+                return (fast_a(), load_tile("b")[1])
+
+            def interleave(n_mf, n_vm):
+                first_vm = n_mf // 2
+                left = n_vm
+                for j in range(n_mf):
+                    b.sched_group_barrier(_SG_MFMA, 1, 0)
+                    b.sched_group_barrier(_SG_VALU, 4, 0)
+                    b.sched_group_barrier(_SG_SALU, 2, 0)
+                    if j >= first_vm and left > 0 and (j - first_vm) % 2 == 1:
+                        b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                        left -= 1
+                if left:
+                    b.sched_group_barrier(_SG_VMEM_READ, left, 0)
+
+            n_mf_half = half * mfmas_m * mfmas_n
+
+            def step(acc_in, st, regs_store):
+                """One tile: MFMAs of the LDS tile, store ``regs_store`` (the
+                next tile), issue the loads of the tile at ``st``. Returns
+                (accumulators, the new loads' values, the advanced coord)."""
+                frags = frag_reads()
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                b.s_setprio(1)
+                set_tile(*st)
+                nxt = advance(*st)
+                acc_a = mfmas(frags[:half], list(acc_in))
+                for _j in range(n_mf_half):
+                    b.sched_group_barrier(_SG_MFMA, 1, 0)
+                    b.sched_group_barrier(_SG_SALU, 3, 0)
+                b.sched_barrier(0)
+                b.s_setprio(0)
+                b.sync_lds_only()
+                store_tile(rebuild(staged1, regs_store), A_smem, B_smem)
+                b.sched_barrier(0)
+                b.sync_lds_only()
+                b.s_setprio(1)
+                staged = ld()
+                acc_b = mfmas(frags[half:], acc_a)
+                interleave(n_mf_half, len(flat(staged)))
+                b.sched_barrier(0)
+                b.s_setprio(0)
+                b.sync_lds_only()
+                return acc_b, flat(staged), nxt
+
+            set_tile(*nxt0)
+            staged1 = load_tile()
+            nxt1 = advance(*nxt0)
+            set_tile(*nxt1)
+            staged2 = ld()
+            nxt2 = advance(*nxt1)
+            regs1 = flat(staged1)
+            n_regs = len(regs1)
+            regs2 = flat(staged2)
+            assert len(regs2) == n_regs
+            c2_ = b.const_i32(2)
+            pairs = b.div(n_tiles, c2_)
+            it = (
+                list(accs)
+                + [(f"pp_r{i}", v) for i, v in enumerate(regs1)]
+                + [(f"pp_q{i}", v) for i, v in enumerate(regs2)]
+                + list(zip(st_names, nxt2[:n_st]))
+            )
+            loop = b.scf_for_iter(c0, pairs, c1, it, iv_name="t2")
+            with loop as (_t, iv):
+                x = iv[n_acc : n_acc + n_regs]
+                y = iv[n_acc + n_regs : n_acc + 2 * n_regs]
+                st = list(iv[n_acc + 2 * n_regs :])
+                if not is_3d:
+                    st.append(None)
+                # tile 2t: store X (tile 2t+1), X <- tile 2t+3
+                acc1, x_new, st1 = step(iv[:n_acc], st, x)
+                st1 = list(st1)
+                if not is_3d:
+                    st1 = st1[:3] + [None]
+                # tile 2t+1: store Y (tile 2t+2), Y <- tile 2t+4
+                acc2, y_new, st2 = step(acc1, st1, y)
+                b.scf_yield(*acc2, *x_new, *y_new, *st2[:n_st])
+            res = list(loop.results)
+            accs_f = res[:n_acc]
+            x_f = res[n_acc : n_acc + n_regs]
+            # odd tile count: the last tile (its next tile is X)
+            odd = b.cmp_ne(b.sub(n_tiles, b.mul(pairs, c2_)), c0)
+            st_f = list(res[n_acc + 2 * n_regs :])
+            if not is_3d:
+                st_f.append(None)
+            tail = b.scf_for_iter(
+                c0, b.select(odd, c1, c0), c1,
+                [(f"pp_ta{i}", a) for i, a in enumerate(accs_f)],
+                iv_name="tt",
+            )
+            with tail as (_tt, tv):
+                acc_t, _new, _nst = step(tv, st_f, x_f)
+                b.scf_yield(*acc_t)
+            return _pp_finish(list(tail.results), wave)
+
         def _pp_two_ahead(frag_reads, mfmas, wave, half):
             """tapk_pp_sched 1: tile t+2's global loads are issued in [mem B]
             right after tile t+1's LDS stores and ride in registers across
@@ -4838,6 +5607,8 @@ def _build_tilde_dgrad(
             return _pp_finish(list(loop.results)[:n_acc], wave)
 
         half = k_atoms // 2
+        if spec.tapk_pp_sched == 7:
+            return _pp_three_ahead(frag_reads, mfmas, wave, half)
         if spec.tapk_pp_sched:
             return _pp_two_ahead(frag_reads, mfmas, wave, half)
         it = list(accs) + list(zip(st_names, nxt0[:n_st]))
@@ -5675,6 +6446,257 @@ def _build_tilde_dgrad(
                 del b.sync
             b.sync_lds_only()
             b.scf_yield(b.add(cur, cnt))
+    def _psk_plain_store(fa) -> None:
+        _emit_dgrad_cshuffle_epilogue(
+            b, spec, fa, grid, dx_rsrc, params, c_group_base=c_group_base
+        )
+
+    def _psk_fixup(fa, v, tile, seg, c_I, c_TI, c_G) -> None:
+        """pp_streamk fix-up of a split tile (see DgradConvSpec.pp_sk_mode):
+        write this segment's f32 accumulators to its workspace slot, count
+        the tile's contributors in, and let the last one sum the slots and
+        store the tile."""
+        G = spec.pp_streamk
+        c1f = b.const_i32(1)
+        n_w = spec.warp_m * spec.warp_n
+        tile_elems = block_m * block_n
+        # sub_gemm_buf: [record | magic table] then the 2*G slots of
+        # tile_elems f32 each, then one i32 counter per output tile.
+        ws_base = ((_RECORD_FIELDS + _MAGIC_FIELDS) * 4 + 15) // 16 * 16
+        cnt_base = (ws_base + 2 * G * tile_elems * 4) // 4
+        ws = make_buffer_resource(
+            b, sub_gemm_buf, num_bytes=b.const_i32(0x7FFFFFF0)
+        )
+        wave = b.readfirstlane(b.div(tid, b.const_i32(spec.wave_size)))
+        lane_off = b.mul(
+            b.add(b.mul(wave, b.const_i32(64)), lane), b.const_i32(16)
+        )
+        acc_stride = n_w * 64 * 16
+
+        def slot_off(slot):
+            return b.add(
+                b.const_i32(ws_base), b.mul(slot, b.const_i32(tile_elems * 4))
+            )
+
+        # The workgroup's first segment is slot 2v, its later one 2v+1
+        # (only the first and the last segment of a range can be partial).
+        my_slot = b.add(
+            b.mul(v, b.const_i32(2)), b.select(b.cmp_gt(seg, c0), c1f, c0)
+        )
+        base = b.add(slot_off(my_slot), lane_off)
+        for j, acc in enumerate(fa):
+            b.buffer_store_vN_f32(
+                ws.rsrc, b.add(base, b.const_i32(j * acc_stride)), c0, acc, 4
+            )
+        b.fence(scope="agent", ordering="release")
+        b.sync()
+        # Contributors of the tile: the workgroups whose ranges
+        # [floor(u*TI/G), floor((u+1)*TI/G)) meet [tile*I, (tile+1)*I).
+        # The one holding iteration i is floor(((i+1)*G - 1) / TI).
+
+        def owner(i):
+            return b.div(b.sub(b.mul(b.add(i, c1f), c_G), c1f), c_TI)
+
+        t_lo = b.mul(tile, c_I)
+        u_first = owner(t_lo)
+        u_last = owner(b.sub(b.add(t_lo, c_I), c1f))
+        n_c = b.add(b.sub(u_last, u_first), c1f)
+        flag = b.smem_alloc(I32, (1,), name_hint="psk_flag")
+        cnt_idx = b.add(b.const_i32(cnt_base), tile)
+        with b.scf_if(b.cmp_eq(tid, c0)):
+            old = b.global_atomic_add(sub_gemm_buf, cnt_idx, c1f, ordering="monotonic")
+            b.smem_store_vN(flag, [c0], old, 1)
+        b.sync()
+        old_u = b.readfirstlane(b.vec_extract(b.smem_load_vN(flag, c0, dtype=I32, n=1), 0))
+        with b.scf_if(b.cmp_eq(old_u, b.sub(n_c, c1f))):
+            b.fence(scope="agent", ordering="acquire")
+            # Sum every contributor's slot (this one's included).
+            it = [(f"psk_a{j}", b.zero_vec_f32(c_per_lane)) for j in range(len(fa))]
+            red = b.scf_for_iter(u_first, b.add(u_last, c1f), c1f, it, iv_name="u")
+            with red as (u, accs_u):
+                tile_a_u = b.div(b.div(b.mul(u, c_TI), c_G), c_I)
+                slot_u = b.add(
+                    b.mul(u, b.const_i32(2)),
+                    b.select(b.cmp_eq(tile_a_u, tile), c0, c1f),
+                )
+                base_u = b.add(slot_off(slot_u), lane_off)
+                new = []
+                for j, a in enumerate(accs_u):
+                    pv = b.buffer_load_vN(
+                        ws.rsrc, b.add(base_u, b.const_i32(j * acc_stride)),
+                        c0, F32, 4,
+                    )
+                    new.append(b.fadd(a, pv))
+                b.scf_yield(*new)
+            with b.scf_if(b.cmp_eq(tid, c0)):
+                b.global_store(sub_gemm_buf, cnt_idx, c0, align=4)
+            _psk_plain_store(list(red.results))
+
+    def _emit_pp_streamk() -> None:
+        """``pp_streamk``: the persistent stream-K walk. Workgroup w (laid
+        out XCD-contiguous) takes iterations [v*T*I/G, (v+1)*T*I/G) of the
+        tile-major (output tile, K tile) space (T tiles of I K tiles, G =
+        pp_streamk) and runs one ping-pong segment per output tile it
+        touches, each with its own prologue and packed-atomic epilogue."""
+        nonlocal block_m_off_v, block_n_off_v, grid
+        G = spec.pp_streamk
+        c1s = b.const_i32(1)
+        c_G = b.const_i32(G)
+        c_taps_s = b.mul(c_Y, c_X)
+        if is_3d:
+            c_taps_s = b.mul(p_Z, c_taps_s)
+        c_I = b.mul(c_taps_s, b.div(c_K, c_block_k))
+        c_RI = b.mul(rec_num_n_tiles, c_I)
+        c_TI = b.mul(rec_num_m_tiles, c_RI)
+        w = b.block_id_x()
+        nx = spec.xcd_remap
+        if nx and G > nx:
+            # XCD-contiguous: workgroup w runs on XCD w % nx; XCD x takes
+            # the virtual ids [x*q + min(x, rem), ...) in order.
+            c_nx = b.const_i32(nx)
+            xw = b.mod(w, c_nx)
+            v = b.add(
+                b.add(b.mul(xw, b.const_i32(G // nx)), b.smin(xw, b.const_i32(G % nx))),
+                b.div(w, c_nx),
+            )
+        else:
+            v = w
+        # Row-aligned split when G is a multiple of the M tile count: S
+        # workgroups per row of N tiles, every row cut at the same points,
+        # so the workgroups that read one W slice at one time are the S-th
+        # slices of all rows -- consecutive virtual ids (slice-major), one
+        # XCD. Otherwise the plain tile-major split.
+        S = b.div(c_G, rec_num_m_tiles)
+        aligned = b.land(
+            b.cmp_eq(b.mul(S, rec_num_m_tiles), c_G), b.cmp_gt(S, c0)
+        )
+        S1 = b.smax(S, c1s)
+        r_ = b.mod(v, rec_num_m_tiles)
+        c_ = b.div(v, rec_num_m_tiles)
+        if not spec.pp_sk_mode & 2:
+            # Row-major (tile-major) order: the M tiles of an XCD share
+            # their dY rows across the taps.
+            aligned = b.cmp_lt(c_G, c0)
+        row0 = b.mul(r_, c_RI)
+        al_a = b.add(row0, b.div(b.mul(c_, c_RI), S1))
+        al_e = b.add(row0, b.div(b.mul(b.add(c_, c1s), c_RI), S1))
+        it_a = b.select(aligned, al_a, b.div(b.mul(v, c_TI), c_G))
+        it_e = b.select(aligned, al_e, b.div(b.mul(b.add(v, c1s), c_TI), c_G))
+        compact = bool(spec.pp_zskip and is_3d and not spec.pp_sk_mode)
+        if compact:
+            # pp_zskip: partition only the K tiles the M tiles run. Row r's
+            # tiles run nz(r) of the Z depths (see _emit_tap_outer_prefetch_
+            # loop); Q(r) = sum of nz over the rows before r, closed form for
+            # one image (N == 1, dD == 1; otherwise every depth runs):
+            # Q(r) = Z*r - sum_j min(r, lo_j) - sum_j max(0, r - hi_j), j <
+            # Z, lo_j = rows whose last plane d keeps d + pD <= Z-1-j, hi_j =
+            # first row whose first plane d has d + pD - (Do-1) >= j.
+            c_hw = b.mul(c_Hi, c_Wi)
+            c_tm = b.const_i32(block_m)
+            per_z = b.mul(b.mul(c_Y, c_X), b.div(c_K, c_block_k))
+            ok = b.land(b.cmp_eq(p_N, c1s), b.cmp_eq(p_dD, c1s))
+            big = b.const_i32(1 << 30)
+            los, his = [], []
+            for j in (1, 2):
+                live = b.land(ok, b.cmp_lt(b.const_i32(j), p_Z))
+                e1 = b.sub(p_Z, b.add(b.const_i32(j), p_pD))  # (Z-1-j-pD)+1
+                lo_j = b.div(b.mul(b.smax(e1, c0), c_hw), c_tm)
+                los.append(b.select(live, lo_j, c0))
+                g = b.add(b.sub(p_Do, c1s), b.sub(b.const_i32(j), p_pD))
+                hi_j = b.div(
+                    b.add(b.mul(b.smax(g, c0), c_hw), b.sub(c_tm, c1s)), c_tm
+                )
+                his.append(b.select(live, hi_j, big))
+
+            def Q(r):
+                q = b.mul(p_Z, r)
+                for lo_j, hi_j in zip(los, his):
+                    q = b.sub(q, b.smin(r, lo_j))
+                    q = b.sub(q, b.smax(b.sub(r, hi_j), c0))
+                return q
+
+            def zlo(r):
+                z = c0
+                for hi_j in his:
+                    z = b.add(z, b.select(b.cmp_ge(r, hi_j), c1s, c0))
+                return z
+
+            c_rowu = b.mul(rec_num_n_tiles, per_z)
+            TIc = b.mul(c_rowu, Q(rec_num_m_tiles))
+            it_a = b.div(b.mul(v, TIc), c_G)
+            it_e = b.div(b.mul(b.add(v, c1s), TIc), c_G)
+
+            def locate(i):
+                # (tile, compact K offset) of compact iteration i.
+                r = c0
+                for bit in reversed(range(16)):
+                    cand = b.add(r, b.const_i32(1 << bit))
+                    okc = b.land(
+                        b.cmp_lt(cand, rec_num_m_tiles),
+                        b.cmp_le(b.mul(c_rowu, Q(cand)), i),
+                    )
+                    r = b.select(okc, cand, r)
+                o = b.sub(i, b.mul(c_rowu, Q(r)))
+                sp = b.mul(b.sub(Q(b.add(r, c1s)), Q(r)), per_z)
+                sp = b.smax(sp, c1s)
+                n = b.div(o, sp)
+                return b.add(b.mul(r, rec_num_n_tiles), n), b.sub(o, b.mul(n, sp))
+
+            tile_a, koff_a = locate(it_a)
+            tile_l, koff_l = locate(b.sub(it_e, c1s))
+        else:
+            tile_a = b.div(it_a, c_I)
+            tile_l = b.div(b.sub(it_e, c1s), c_I)
+        nseg = b.select(
+            b.cmp_gt(it_e, it_a), b.add(b.sub(tile_l, tile_a), c1s), c0
+        )
+        loop = b.scf_for_iter(
+            c0, nseg, c1s, [], iv_name="seg", elide_trailing_barrier=False
+        )
+        # Each segment rewrites the A/B tiles (prologue) and the C staging
+        # (epilogue) before reading them, and ends in a barrier: the LDS
+        # allocations may alias as in straight-line code.
+        loop.op.attrs["lds_iter_local"] = True
+        with loop as seg:
+            tile = b.add(tile_a, seg)
+            if compact:
+                m_r = b.div(tile, rec_num_n_tiles)
+                sp_t = b.mul(b.sub(Q(b.add(m_r, c1s)), Q(m_r)), per_z)
+                zb = b.mul(zlo(m_r), per_z)
+                kc0 = b.select(b.cmp_eq(seg, c0), koff_a, c0)
+                kc1 = b.select(
+                    b.cmp_eq(seg, b.sub(nseg, c1s)), b.add(koff_l, c1s), sp_t
+                )
+                k0 = b.add(zb, kc0)
+                kend = b.add(zb, kc1)
+            else:
+                base = b.mul(tile, c_I)
+                k0 = b.smax(b.sub(it_a, base), c0)
+                kend = b.smin(b.sub(it_e, base), c_I)
+            m_t = b.div(tile, rec_num_n_tiles)
+            n_t = b.sub(tile, b.mul(m_t, rec_num_n_tiles))
+            block_m_off_v = b.mul(m_t, b.const_i32(block_m))
+            block_n_off_v = b.mul(n_t, b.const_i32(block_n))
+            grid = dc_replace(
+                grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v
+            )
+            _psk_seg["k0"] = k0
+            _psk_seg["cnt"] = b.sub(kend, k0)
+            fa = _emit_tap_outer_prefetch_loop()
+            fa = _apply_accumulator_epilogue(b, spec.acc_epilogue, fa)
+            if not spec.pp_sk_mode & 1:
+                _dispatch_dgrad_epilogue(fa)
+            else:
+                whole = b.land(b.cmp_eq(k0, c0), b.cmp_eq(kend, c_I))
+                with b.scf_if_else(whole) as (then_ctx, else_ctx):
+                    with then_ctx:
+                        _psk_plain_store(fa)
+                    with else_ctx:
+                        _psk_fixup(fa, v, tile, seg, c_I, c_TI, c_G)
+            # The next segment's prologue stores reuse the LDS the
+            # epilogue staged C through.
+            b.sync()
+            b.scf_yield()
 
     def _emit_tap_outer_prefetch_loop() -> list[Value]:
         """The pipelined tap-outer K loop (``tapk_prefetch``).
@@ -5698,8 +6720,28 @@ def _build_tilde_dgrad(
         c_ho_wo_k = b.mul(c_Ho, c_wo_k)
         n_tiles = b.mul(c_taps, b.div(c_kd, c_block_k))
         cap: dict[str, Value] = {}
+        # pp_boxes: the record's box of dX rows runs the filter rows
+        # [yb, yb + ys) and columns [xb, xb + xs) only; the loop walks
+        # (z, y', x', chunk) over that sub-filter, y = yb + y', x = xb + x'.
+        if spec.pp_boxes:
+            bx_ys, bx_xs = rec_y_dot_slice, rec_x_dot_slice
+            bx_yb, bx_xb = rec_b_y_offset, rec_b_x_offset
+            bx_hb, bx_wb = rec_h_tilde_slice_begin, rec_w_tilde_slice_begin
+            _bx_taps = b.mul(bx_ys, bx_xs)
+            if is_3d:
+                bx_zb, bx_zs = rec_b_y_stride, _ld(21)
+                _bx_taps = b.mul(bx_zs, _bx_taps)
+            n_tiles = b.mul(_bx_taps, b.div(c_kd, c_block_k))
+            c_Xl, c_Yl = bx_xs, bx_ys
+        else:
+            c_Xl, c_Yl = c_X, c_Y
 
         def set_tile(kb0: Value, xd: Value, yd: Value, zd: Value | None, live=None):
+            if spec.pp_boxes:
+                xd = b.add(bx_xb, xd)
+                yd = b.add(bx_yb, yd)
+                if is_3d:
+                    zd = b.add(bx_zb, zd)
             dh = b.sub(params["p_pH"], yd)
             dw = b.sub(params["p_pW"], xd)
             cap["dh"], cap["dw"] = dh, dw
@@ -5721,20 +6763,25 @@ def _build_tilde_dgrad(
             wrap_k = b.cmp_ge(nk, c_kd)
             nk = b.select(wrap_k, c0, nk)
             nx = b.add(xd, b.select(wrap_k, c1, c0))
-            wrap_x = b.cmp_ge(nx, c_X)
+            wrap_x = b.cmp_ge(nx, c_Xl)
             nx = b.select(wrap_x, c0, nx)
             ny = b.add(yd, b.select(wrap_x, c1, c0))
             if not is_3d:
                 return nk, nx, ny, None
-            wrap_y = b.cmp_ge(ny, c_Y)
+            wrap_y = b.cmp_ge(ny, c_Yl)
             ny = b.select(wrap_y, c0, ny)
             nz = b.add(zd, b.select(wrap_y, c1, c0))
             return nk, nx, ny, nz
 
         def dy_pf(b_: IRBuilder, row: Value, col: Value):
             m_sub = b_.add(block_m_off_v, row)
+            if _rm_map is not None:
+                m_sub = _rm_map(b_, m_sub)
             n, m_rem = _magic_divmod(b_, m_sub, hw_div)
             hi, wi = _magic_divmod(b_, m_rem, w_div)
+            if spec.pp_boxes:
+                hi = b_.add(hi, bx_hb)
+                wi = b_.add(wi, bx_wb)
             ho = b_.add(hi, cap["dh"])
             wo = b_.add(wi, cap["dw"])
             if spec.tapk_pingpong:
@@ -5742,7 +6789,10 @@ def _build_tilde_dgrad(
                 # past the bound): half the mask ops of the signed pair.
                 valid = b_.land(b_.cmp_ult(ho, c_Ho), b_.cmp_ult(wo, c_Wo))
                 if is_3d:
-                    n, di = _magic_divmod(b_, n, di_div)
+                    if spec.pp_boxes:
+                        n, di = _bx_split_d(b_, n)
+                    else:
+                        n, di = _magic_divmod(b_, n, di_div)
                     valid = b_.land(valid, b_.cmp_ult(b_.add(di, cap["dd"]), p_Do))
                     n = b_.add(b_.mul(n, p_Do), di)
                 pix = b_.add(
@@ -5844,11 +6894,19 @@ def _build_tilde_dgrad(
                 else:
                     idle.append(None)
                 m_sub = b.add(block_m_off_v, row)
+                if _rm_map is not None:
+                    m_sub = _rm_map(b, m_sub)
                 n, m_rem = _magic_divmod(b, m_sub, hw_div)
                 hi, wi = _magic_divmod(b, m_rem, w_div)
+                if spec.pp_boxes:
+                    hi = b.add(hi, bx_hb)
+                    wi = b.add(wi, bx_wb)
                 di = None
                 if is_3d:
-                    n, di = _magic_divmod(b, n, di_div)
+                    if spec.pp_boxes:
+                        n, di = _bx_split_d(b, n)
+                    else:
+                        n, di = _magic_divmod(b, n, di_div)
                     n = b.add(b.mul(n, p_Do), di)
                 pix.append(
                     b.add(
@@ -5930,7 +6988,83 @@ def _build_tilde_dgrad(
             return _pp_persistent(
                 set_tile, advance, load_tile, store_tile, s0, n_tiles, _pp_fast_a
             )
-        if spec.tapk_pingpong and spec.split_k > 1:
+        def _decode_t0(t0, z_base=None):
+            nkc = b.div(c_kd, c_block_k)
+            tap0 = b.div(t0, nkc)
+            kb_0 = b.mul(b.sub(t0, b.mul(tap0, nkc)), c_block_k)
+            yz0 = b.div(tap0, c_Xl)
+            x_0 = b.sub(tap0, b.mul(yz0, c_Xl))
+            if is_3d:
+                z_0 = b.div(yz0, c_Yl)
+                return (kb_0, x_0, b.sub(yz0, b.mul(z_0, c_Yl)), z_0)
+            return (kb_0, x_0, yz0, None)
+
+        if spec.pp_zskip:
+            # Only the filter depths z some row of this M tile can use: the
+            # tile's dX planes [d_first, d_last] read dY planes d + pD - z,
+            # so z runs over [d_first + pD - (Do-1), d_last + pD] clamped to
+            # the filter (the whole filter if the tile spans two images or
+            # dD != 1). The K tiles of the other depths are all-zero rows.
+            c_hw = (
+                b.mul(rec_h_tilde_slice, rec_w_tilde_slice)
+                if spec.pp_boxes
+                else b.mul(c_Hi, c_Wi)
+            )
+            _dext = rec_a_embed_h_coeff if spec.pp_boxes else params["p_Di"]
+            c_dhw = b.mul(_dext, c_hw)
+            m_last = b.sub(
+                b.smin(b.add(block_m_off_v, b.const_i32(block_m)), rec_gemm_m), c1
+            )
+            pl_f = b.div(block_m_off_v, c_hw)
+            pl_l = b.div(m_last, c_hw)
+            same = b.land(
+                b.cmp_eq(b.div(block_m_off_v, c_dhw), b.div(m_last, c_dhw)),
+                b.cmp_eq(p_dD, c1),
+            )
+            d_f = b.mod(pl_f, _dext)
+            d_l = b.mod(pl_l, _dext)
+            if spec.pp_boxes:
+                d_f = b.add(d_f, rec_a_embed_w_coeff)
+                d_l = b.add(d_l, rec_a_embed_w_coeff)
+            zmax = b.sub(p_Z, c1)
+            z_lo = b.smax(b.sub(b.add(d_f, p_pD), b.sub(p_Do, c1)), c0)
+            z_hi = b.smin(b.add(d_l, p_pD), zmax)
+            z_lo = b.select(same, z_lo, c0)
+            z_hi = b.select(same, z_hi, zmax)
+            if spec.pp_boxes:
+                # the box's own depth range [zb, zb + zs), local z
+                z_lo = b.sub(b.smax(z_lo, bx_zb), bx_zb)
+                z_hi = b.sub(b.smin(z_hi, b.sub(b.add(bx_zb, bx_zs), c1)), bx_zb)
+            nz = b.smax(b.add(b.sub(z_hi, z_lo), c1), c0)
+            per_z = b.mul(b.mul(c_Yl, c_Xl), b.div(c_kd, c_block_k))
+            zbase = b.mul(z_lo, per_z)
+            span = b.mul(nz, per_z)
+            if spec.pp_streamk:
+                lo = b.smax(_psk_seg["k0"], zbase)
+                hi = b.smin(
+                    b.add(_psk_seg["k0"], _psk_seg["cnt"]), b.add(zbase, span)
+                )
+                t0 = lo
+                n_tiles = b.smax(b.sub(hi, lo), c0)
+            elif spec.split_k > 1:
+                c_sk = bx_sk if bx_sk is not None else b.const_i32(spec.split_k)
+                per = b.div(b.add(span, b.sub(c_sk, c1)), c_sk)
+                t0c = b.mul(bx_slice if bx_slice is not None else b.block_id_z(), per)
+                cnt = b.sub(b.smin(b.add(t0c, per), span), t0c)
+                n_tiles = b.smax(cnt, c0)
+                t0 = b.add(zbase, t0c)
+            else:
+                t0 = zbase
+                n_tiles = span
+            s0 = _decode_t0(t0)
+        elif spec.tapk_pingpong and spec.split_k > 1 and spec.pp_boxes:
+            # pp_boxes split-K: the record's slice of the box's K tiles.
+            per = b.div(b.add(n_tiles, b.sub(bx_sk, c1)), bx_sk)
+            t0 = b.mul(bx_slice, per)
+            cnt = b.sub(b.smin(b.add(t0, per), n_tiles), t0)
+            n_tiles = b.smax(cnt, c0)
+            s0 = _decode_t0(t0)
+        elif spec.tapk_pingpong and spec.split_k > 1:
             # Split-K (ping-pong): slice z takes tiles [t0, t0 + per) of the
             # flat (z, y, x, chunk) order -- whole tiles, so no slice starts
             # mid-tap; its first tile's coordinate is decoded once.
@@ -5940,6 +7074,21 @@ def _build_tilde_dgrad(
             t_end = b.select(b.cmp_lt(b.add(t0, per), n_tiles), b.add(t0, per), n_tiles)
             cnt = b.sub(t_end, t0)
             n_tiles = b.select(b.cmp_gt(cnt, c0), cnt, c0)
+            nkc = b.div(c_kd, c_block_k)
+            tap0 = b.div(t0, nkc)
+            kb_0 = b.mul(b.sub(t0, b.mul(tap0, nkc)), c_block_k)
+            yz0 = b.div(tap0, c_X)
+            x_0 = b.sub(tap0, b.mul(yz0, c_X))
+            if is_3d:
+                z_0 = b.div(yz0, c_Y)
+                s0 = (kb_0, x_0, b.sub(yz0, b.mul(z_0, c_Y)), z_0)
+            else:
+                s0 = (kb_0, x_0, yz0, None)
+        if spec.pp_streamk and not spec.pp_zskip:
+            # Stream-K segment (see _emit_pp_streamk): K tiles [t0, t0 + cnt)
+            # of the flat (z, y, x, chunk) order of one output tile.
+            t0 = _psk_seg["k0"]
+            n_tiles = _psk_seg["cnt"]
             nkc = b.div(c_kd, c_block_k)
             tap0 = b.div(t0, nkc)
             kb_0 = b.mul(b.sub(t0, b.mul(tap0, nkc)), c_block_k)
@@ -7003,6 +8152,10 @@ def _build_tilde_dgrad(
         )
         return b.kernel
 
+    if spec.pp_streamk:
+        _emit_pp_streamk()
+        return b.kernel
+
     if spec.dy_halo:
         final_accs = _emit_dy_halo_loop()
     elif spec.tap_outer_k and spec.tapk_xhalo and spec.xh_persist:
@@ -7619,6 +8772,7 @@ def _emit_pp_cshuffle_epilogue(
     params: Dict[str, Value],
     c_group_base: Optional[Value] = None,
     pre_bf16: Optional[Sequence[Value]] = None,
+    addr: Optional[tuple] = None,
 ) -> None:
     """``tapk_pp_epi``: the cshuffle store of the ping-pong kernels (16x16
     atoms, bf16 dX) in ``cshuffle_m_chunks`` row slabs, with the staging
@@ -7627,7 +8781,11 @@ def _emit_pp_cshuffle_epilogue(
     m_blk = 0..3, which the unswizzled 512-byte rows put on one bank."""
     from rocke.helpers.tensor_view import make_lds_view
 
-    dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, params, c_group_base)
+    # addr: (addr_fn, bounds) of rows that are not dense dX rows (pp_boxes).
+    dx_addr, bounds = (
+        addr if addr is not None
+        else _dgrad_stride1_dx_addr(b, spec, params, c_group_base)
+    )
     atom = spec.atom
     mc = spec.cshuffle_m_chunks
     mfmas_m, mfmas_n = spec.mfmas_per_warp_m, spec.mfmas_per_warp_n
@@ -7718,6 +8876,7 @@ def _tilde_dx_addr_fn(
     c_C: Value,
     c_group_base: Optional[Value] = None,
     patch_cols: Optional[Tuple[Value, Value]] = None,
+    n_map=None,
 ):
     """Compute NHWC element offset + hi/wi validity for the tilde epilogues.
 
@@ -7741,6 +8900,9 @@ def _tilde_dx_addr_fn(
 
     n_val, m_rem = _magic_divmod(b, m_global, hw_tilde)
     htl, wtl = _magic_divmod(b, m_rem, w_tilde_slice)
+    if n_map is not None:
+        # pp_boxes: the box-local leading index to the dX one.
+        n_val = n_map(b, n_val)
 
     hi = b.add(b.mul(htl, d_h_stride), d_h_offset)
     wi = b.add(b.mul(wtl, d_w_stride), d_w_offset)
@@ -7821,6 +8983,55 @@ def _emit_dgrad_tilde_direct_epilogue(
         addr_fn=dx_addr,
         d_rsrc=dx_rsrc,
         bounds=(bounds_m, bounds_n),
+    )
+
+
+def _emit_dgrad_box_cshuffle_epilogue(
+    b: IRBuilder,
+    spec: DgradConvSpec,
+    atom: MfmaAtom,
+    grid: WarpGrid,
+    accs: Sequence[Value],
+    dx_rsrc: Value,
+    *,
+    bounds_m: Value,
+    bounds_n: Value,
+    hw_tilde: _MagicDiv,
+    w_tilde_slice: _MagicDiv,
+    d_h_stride: Value,
+    d_h_offset: Value,
+    d_w_stride: Value,
+    d_w_offset: Value,
+    c_Hi: Value,
+    c_Wi: Value,
+    c_C: Value,
+    c_group_base: Optional[Value] = None,
+    patch_cols: Optional[Tuple[Value, Value]] = None,
+    n_map=None,
+    m_map=None,
+) -> None:
+    """pp_boxes: the cshuffle store of a box of dX rows (the tilde
+    address map with the record's (h, w) offsets; cshuffle_m_chunks
+    honoured). ``m_map``: box row -> the row the map decodes (pp_boxes 7)."""
+
+    def dx_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+        if m_map is not None:
+            m_val = m_map(b_, m_val)
+        return _tilde_dx_addr_fn(
+            b_, m_val, n_val, hw_tilde, w_tilde_slice, d_h_stride, d_h_offset,
+            d_w_stride, d_w_offset, c_Hi, c_Wi, c_C, c_group_base, n_map=n_map,
+        )
+
+    epi = CShuffleEpilogue.from_grid(
+        atom=atom,
+        grid=grid,
+        max_store_vec=_dgrad_store_vec(spec),
+        out_dtype=spec.data.dtype_d,
+        no_alias=spec.cshuffle_no_alias,
+    )
+    epi = dc_replace(epi, war_barriers=1, m_chunks=spec.cshuffle_m_chunks)
+    epi.store(
+        b, accs=accs, addr_fn=dx_addr, d_rsrc=dx_rsrc, bounds=(bounds_m, bounds_n)
     )
 
 
