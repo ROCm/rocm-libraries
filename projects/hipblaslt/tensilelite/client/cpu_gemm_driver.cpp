@@ -75,6 +75,9 @@
  * # Complex float (C_C_C) with conjugated A
  * ./cpu_gemm_driver --type c --transA --conjA --validate --tryFastPath
  *
+ * # Half with bias and relu, also writing E (the value before activation)
+ * ./cpu_gemm_driver --type f16 --bias --activation relu --useE --validate --tryFastPath
+ *
  * # Benchmark mode (validation disabled)
  * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0 --tryFastPath 1
  *
@@ -207,6 +210,9 @@ namespace
     //
     // scaleA is always indexed by row (M), scaleB always by col (N).
     // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
+    //
+    // preActivation (if not null) receives the value before activation, i.e.
+    // after bias, which the reference writes to E (useE).
     //
     // Template parameters:
     //   AccumT         — epilogue type (float, double or int32_t): alpha, beta,
@@ -363,7 +369,8 @@ namespace
                          const AccumT*  scaleBVec     = nullptr,
                          int            factorDim     = 0,
                          QuantizeFn     quantizeA     = nullptr,
-                         QuantizeFn     quantizeB     = nullptr
+                         QuantizeFn     quantizeB     = nullptr,
+                         AccumT*        preActivation = nullptr
 #ifndef _WIN32
                          ,
                          MXGemmOperand  mxA           = {},
@@ -479,6 +486,9 @@ namespace
                 if(biasVec)
                     result = checkedInt32(result + static_cast<WideT>(biasVec[i]));
 
+                if(preActivation)
+                    preActivation[i + j * m] = static_cast<AccumT>(result);
+
                 if(activation == ActivationType::Relu)
                 {
                     if constexpr(!isComplexV<AccumT>)
@@ -543,6 +553,7 @@ namespace
  *              (float, double, int32_t for Int8 inputs, or the complex input type).
  * OutputT: C/D storage type (defaults to AccumulateT).
  * conjA/conjB: TensorOp::ComplexConjugate on A/B (complex inputs only).
+ * useE: the reference also writes E (the value before activation), in OutputT.
  */
 template <typename InputAT,
           typename InputBT     = InputAT,
@@ -573,7 +584,8 @@ int runGemm(size_t         m,
             int                int8Min       = -128,
             int                int8Max       = 127,
             bool               conjA         = false,
-            bool               conjB         = false)
+            bool               conjB         = false,
+            bool               useE          = false)
 {
     if(batchCount == 0)
     {
@@ -733,6 +745,9 @@ int runGemm(size_t         m,
     std::vector<InputBT>     b(storageB);
     std::vector<OutputT>     c(numC * batchCount);
     std::vector<OutputT>     d(numC * batchCount);
+    // E (useE) has D's sizes, a packed layout and the C/D type. It starts at zero,
+    // so an unwritten E fails validation (almost every golden value is nonzero).
+    std::vector<OutputT>     e(useE ? numC * batchCount : 0);
 
     // Initialize inputs with random values. We use ±1 (binary) for A and B by
     // default because it is exactly representable in every supported storage
@@ -927,6 +942,14 @@ int runGemm(size_t         m,
         contraction.setAmaxD(accumDtypeEnum, /*isOutput=*/true);
     }
 
+    // useE must be set before setE, which skips the tensor otherwise.
+    if(useE)
+    {
+        contraction.setUseE(true);
+        contraction.setE(
+            outputDtypeEnum, contraction.d().sizes(), /*strides=*/{}, /*isOutput=*/true);
+    }
+
 #ifndef _WIN32
     // MX scale setup (FP4 with mxBlockA/B > 0 only)
     [[maybe_unused]] std::vector<E8> mxsa, mxsb;
@@ -974,6 +997,7 @@ int runGemm(size_t         m,
     inputs.scaleA        = (useScaleAB != "none") ? scaleABuf.data() : nullptr;
     inputs.scaleB        = (useScaleAB != "none") ? scaleBBuf.data() : nullptr;
     inputs.amaxD         = outputAmaxD ? &amaxD : nullptr;
+    inputs.e             = useE ? e.data() : nullptr;
 
 #ifndef _WIN32
     if constexpr(isFP4)
@@ -1079,6 +1103,9 @@ int runGemm(size_t         m,
         // dRef holds the golden epilogue result before the cast to OutputT
         // (AMAX-D is computed on it); D is compared after the cast.
         std::vector<AccumulateT> dRef(d.size());
+        // eRef: the golden value before activation (useE), compared with E after
+        // the cast to OutputT, as D is.
+        std::vector<AccumulateT> eRef(e.size());
 
         // If the storage type is wider than the compute-input type, the GPU
         // (and slow-path validator) quantize the operand down before the MAC.
@@ -1132,6 +1159,7 @@ int runGemm(size_t         m,
                 const MacT*        bPtr = bRef.data() + batch * numB;
                 const AccumulateT* cPtr = cRef.data() + batch * numC;
                 AccumulateT*       dPtr = dRef.data() + batch * numC;
+                AccumulateT*       ePtr = useE ? eRef.data() + batch * numC : nullptr;
 
                 columnMajorGemm<AccumulateT, MathOpT, MacT>(
                     aPtr,
@@ -1152,7 +1180,8 @@ int runGemm(size_t         m,
                     (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
                     factorDim,
                     quantA,
-                    quantB
+                    quantB,
+                    ePtr
 #ifndef _WIN32
                     ,
                     MXGemmOperand{
@@ -1204,9 +1233,6 @@ int runGemm(size_t         m,
             return 0.05;
         }();
 
-        bool   allClose = true;
-        double maxDiff  = 0.0;
-
         // Equal values (also equal infinities) and NaN on both sides match; a NaN on
         // one side only (e.g. an unsaturated Float8 overflow) is an infinite difference,
         // which the tolerance check below would otherwise miss.
@@ -1218,44 +1244,54 @@ int runGemm(size_t         m,
             return diff;
         };
 
-        for(size_t i = 0; i < totalC; i++)
-        {
-            // Complex: the larger of the real-part and imaginary-part differences.
-            const auto valDut = d[i];
-            const auto valRef = saturateCastLikeReference<OutputT>(dRef[i]);
-            double     diff;
-            if constexpr(isComplex)
-                diff = std::max(valueDiff(valDut.real(), valRef.real()),
-                                valueDiff(valDut.imag(), valRef.imag()));
-            else
-                diff = valueDiff(static_cast<double>(valDut), static_cast<double>(valRef));
-            maxDiff = std::max(maxDiff, diff);
-
-            if(diff > tolerance)
+        // Compares an output (D or E) with its golden values cast to OutputT and
+        // prints the result, each line starting with `label`. Returns true if
+        // every element is within the tolerance.
+        auto compareOutput = [&](std::vector<OutputT> const&     dut,
+                                 std::vector<AccumulateT> const& ref,
+                                 std::string const&              label) {
+            bool   allClose = true;
+            double maxDiff  = 0.0;
+            for(size_t i = 0; i < totalC; i++)
             {
-                allClose = false;
-                if(i < 10)
+                // Complex: the larger of the real-part and imaginary-part differences.
+                const auto valDut = dut[i];
+                const auto valRef = saturateCastLikeReference<OutputT>(ref[i]);
+                double     diff;
+                if constexpr(isComplex)
+                    diff = std::max(valueDiff(valDut.real(), valRef.real()),
+                                    valueDiff(valDut.imag(), valRef.imag()));
+                else
+                    diff = valueDiff(static_cast<double>(valDut), static_cast<double>(valRef));
+                maxDiff = std::max(maxDiff, diff);
+
+                if(diff > tolerance)
                 {
-                    std::cout << "Mismatch at " << i << ": observed=";
-                    if constexpr(isComplex)
-                        std::cout << valDut << " expected=" << valRef;
-                    else
-                        std::cout << static_cast<double>(valDut)
-                                  << " expected=" << static_cast<double>(valRef);
-                    std::cout << " diff=" << diff << std::endl;
+                    allClose = false;
+                    if(i < 10)
+                    {
+                        std::cout << label << "Mismatch at " << i << ": observed=";
+                        if constexpr(isComplex)
+                            std::cout << valDut << " expected=" << valRef;
+                        else
+                            std::cout << static_cast<double>(valDut)
+                                      << " expected=" << static_cast<double>(valRef);
+                        std::cout << " diff=" << diff << std::endl;
+                    }
                 }
             }
-        }
 
-        if(allClose)
-        {
-            std::cout << "PASSED! (max diff: " << maxDiff << ")" << std::endl;
-        }
-        else
-        {
-            std::cout << "FAILED! (max diff: " << maxDiff << ")" << std::endl;
+            std::cout << label << (allClose ? "PASSED!" : "FAILED!") << " (max diff: " << maxDiff
+                      << ")" << std::endl;
+            return allClose;
+        };
+
+        if(!compareOutput(d, dRef, ""))
             return 1;
-        }
+
+        // E (the value before activation) is checked against the golden as D is.
+        if(useE && !compareOutput(e, eRef, "E "))
+            return 1;
 
         // AMAX-D is checked against the golden D, whichever CPU path computed it.
         if constexpr(!isComplex)
@@ -1320,7 +1356,8 @@ int main(int argc, char* argv[])
         "int8Min", po::value<int>()->default_value(-128), "Smallest i8 A/B value (i8 inputs only; default -128)")(
         "int8Max", po::value<int>()->default_value(127), "Largest i8 A/B value (i8 inputs only; default 127)")(
         "conjA", po::value<bool>()->default_value(false), "Conjugate A (TensorOp::ComplexConjugate; c/z inputs only)")(
-        "conjB", po::value<bool>()->default_value(false), "Conjugate B (TensorOp::ComplexConjugate; c/z inputs only)");
+        "conjB", po::value<bool>()->default_value(false), "Conjugate B (TensorOp::ComplexConjugate; c/z inputs only)")(
+        "useE", po::value<bool>()->default_value(false), "Also output E (the value before activation, in the C/D type) and validate it against the golden GEMM (not for c/z inputs)");
 
     po::variables_map vm;
     try
@@ -1401,6 +1438,7 @@ int main(int argc, char* argv[])
     int         int8Max                  = vm["int8Max"].as<int>();
     bool        conjA                    = vm["conjA"].as<bool>();
     bool        conjB                    = vm["conjB"].as<bool>();
+    bool        useE                     = vm["useE"].as<bool>();
     const bool  typeAIsTF32              = (typeAStr == "tf32");
     const bool  typeBIsTF32              = (typeBStr == "tf32");
     const bool  isTF32                   = typeAIsTF32 && typeBIsTF32;
@@ -1443,7 +1481,8 @@ int main(int argc, char* argv[])
     // alpha/beta type (the reference's C_C_C / Z_Z_Z), optionally conjugated
     // (--conjA, --conjB). The reference's fast path takes no bias, ScaleAB,
     // scaleAlphaVec, activation or AMAX-D for them (the slow path reads complex bias
-    // and scale values as zero), and the golden has no complex activation.
+    // and scale values as zero), and the golden has no complex activation. The
+    // reference writes no complex E (SetValue has no complex case).
     const bool typeAIsComplex = (typeAStr == "c" || typeAStr == "z");
     const bool typeBIsComplex = (typeBStr == "c" || typeBStr == "z");
     const bool isComplex      = typeAIsComplex && typeBIsComplex;
@@ -1460,10 +1499,10 @@ int main(int argc, char* argv[])
     }
     if(isComplex
        && (useBias || activationStr != "none" || useScaleAlphaVec || useScaleAB != "none"
-           || outputAmaxD))
+           || outputAmaxD || useE))
     {
         std::cerr << "Error: complex inputs do not support --bias, --activation, --scaleAlphaVec,"
-                  << " --useScaleAB or --outputAmaxD" << std::endl;
+                  << " --useScaleAB, --outputAmaxD or --useE" << std::endl;
         return 1;
     }
     if(!isComplex && (conjA || conjB))
@@ -1598,7 +1637,7 @@ int main(int argc, char* argv[])
             validate, injectValidationFailure, tryFastPath,
             useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
             computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32,
-            outputAmaxD, int8Min, int8Max, conjA, conjB);
+            outputAmaxD, int8Min, int8Max, conjA, conjB, useE);
     };
 
     // Float8/BFloat8 C/D with float alpha/beta: the reference's Float8-output type ids.
