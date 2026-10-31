@@ -272,9 +272,11 @@ namespace
                   HIPBLAS_STATUS_NOT_SUPPORTED);
     }
 
-    // Matmul computes every layout as column-major, so a row-major A, B, C or D is refused
-    // rather than multiplied as if it were column-major (ROCM-29960). ORDER_COL set
-    // explicitly on all four is the control: it must still get algorithms and pass every call.
+    // The extension API computes every layout as column-major, so a row-major A, B, C or D is
+    // refused rather than multiplied as if it were column-major (ROCM-29960). The C API
+    // rewrites a row-major A or B as its column-major transpose, but still refuses C and D
+    // with different orders. ORDER_COL set explicitly on all four is the control: it must
+    // still get algorithms and pass every call.
     TEST_F(AlgoErrors, smoke_RowOrderIsRefused)
     {
         const LayoutPtr         colOwner = layoutWithOrder(HIPBLASLT_ORDER_COL);
@@ -297,36 +299,37 @@ namespace
             const hipblasStatus_t expected
                 = rowIndex < 0 ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_NOT_SUPPORTED;
             const std::string which = rowIndex < 0 ? "control" : std::string(1, "ABCD"[rowIndex]);
+            const bool        cApiRewrites = rowIndex == 0 || rowIndex == 1;
 
             hipblasLtMatmulHeuristicResult_t result{};
             int                              returned = -1;
             EXPECT_EQ(
                 hipblasLtMatmulAlgoGetHeuristic(
                     handle, desc, mats[0], mats[1], mats[2], mats[3], pref, 1, &result, &returned),
-                expected)
+                cApiRewrites ? HIPBLAS_STATUS_SUCCESS : expected)
                 << which;
-            if(rowIndex >= 0)
+            if(cApiRewrites)
+                EXPECT_GT(returned, 0) << which;
+            else if(rowIndex >= 0)
                 EXPECT_EQ(returned, 0) << which;
-            {
-                EXPECT_EQ(hipblasLtMatmul(handle,
-                                          desc,
-                                          &alpha,
-                                          a,
-                                          mats[0],
-                                          b,
-                                          mats[1],
-                                          &beta,
-                                          c,
-                                          mats[2],
-                                          d,
-                                          mats[3],
-                                          nullptr,
-                                          nullptr,
-                                          0,
-                                          nullptr),
-                          expected)
-                    << which;
-            }
+            EXPECT_EQ(hipblasLtMatmul(handle,
+                                      desc,
+                                      &alpha,
+                                      a,
+                                      mats[0],
+                                      b,
+                                      mats[1],
+                                      &beta,
+                                      c,
+                                      mats[2],
+                                      d,
+                                      mats[3],
+                                      nullptr,
+                                      nullptr,
+                                      0,
+                                      nullptr),
+                      cApiRewrites ? HIPBLAS_STATUS_SUCCESS : expected)
+                << which;
 
             hipblaslt_ext::Gemm gemm(handle,
                                      HIPBLAS_OP_N,

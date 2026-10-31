@@ -92,8 +92,8 @@ hipblasStatus_t refuse_row_order(const char*      caller,
         if(orders[i] == HIPBLASLT_ORDER_ROW)
         {
             log_error(caller,
-                      "HIPBLASLT_ORDER_ROW is not supported for a matmul; only "
-                      "hipblasLtMatrixTransform accepts it",
+                      "HIPBLASLT_ORDER_ROW is not supported by this API; hipblasLtMatmul and "
+                      "hipblasLtMatrixTransform accept it",
                       "matrix",
                       names[i]);
             return HIPBLAS_STATUS_NOT_SUPPORTED;
@@ -212,6 +212,107 @@ namespace
                                      int*                        returnAlgoCount)
     {
         return handle && matmulDesc && pref && returnAlgoCount && requestedAlgoCount >= 1;
+    }
+
+    /********************************************************************************
+     * Row-major A and B for hipblasLtMatmul and hipblasLtMatmulAlgoGetHeuristic.
+     *
+     * The kernels read every matrix as column-major. A row-major r x c matrix with
+     * leading dimension ld has the same bytes as a column-major c x r matrix with the
+     * same ld, so a row-major A or B becomes its column-major transpose with its op
+     * flipped. D is not rewritten, so C and D must be column-major. The heuristic and
+     * matmul rewrite the same way, so an algo from one is valid for the other.
+     *******************************************************************************/
+    struct ColumnMajorProblem
+    {
+        _rocblaslt_matmul_desc   desc;
+        _rocblaslt_matrix_layout a, b;
+    };
+
+    // Only called for HIPBLAS_OP_N and HIPBLAS_OP_T; rewrite_row_major refuses the rest.
+    hipblasOperation_t flip(hipblasOperation_t op)
+    {
+        return op == HIPBLAS_OP_N ? HIPBLAS_OP_T : HIPBLAS_OP_N;
+    }
+
+    bool is_n_or_t(hipblasOperation_t op)
+    {
+        return op == HIPBLAS_OP_N || op == HIPBLAS_OP_T;
+    }
+
+    void to_column_major(_rocblaslt_matrix_layout& layout)
+    {
+        std::swap(layout.m, layout.n);
+        layout.order = HIPBLASLT_ORDER_COL;
+    }
+
+    bool is_scalar_scale(RocblasltContractionProblem::ScalingFormat format)
+    {
+        return format == RocblasltContractionProblem::ScalingFormat::None
+               || format == RocblasltContractionProblem::ScalingFormat::Scalar;
+    }
+
+    hipblasStatus_t refuse_rewrite(const char* caller, const char* reason)
+    {
+        log_error(caller, "HIPBLASLT_ORDER_ROW is not supported here", "reason", reason);
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
+    }
+
+    // Sets `rewritten` and fills `out` when A or B is row-major. Leaves `rewritten`
+    // false for an all-column-major call, a grouped call (the grouped path refuses
+    // row-major itself), a null argument, or HIPBLASLT_OPERATION_INVALID (the normal
+    // validation reports both).
+    hipblasStatus_t rewrite_row_major(const char*             caller,
+                                      rocblaslt_matmul_desc   desc,
+                                      rocblaslt_matrix_layout matA,
+                                      rocblaslt_matrix_layout matB,
+                                      rocblaslt_matrix_layout matC,
+                                      rocblaslt_matrix_layout matD,
+                                      ColumnMajorProblem&     out,
+                                      bool&                   rewritten)
+    {
+        rewritten = false;
+        if(!desc || !matA || !matB || !matC || !matD)
+            return HIPBLAS_STATUS_SUCCESS;
+        for(auto mat : {matA, matB, matC, matD})
+            if(mat->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED)
+                return HIPBLAS_STATUS_SUCCESS;
+
+        const bool rowA = matA->order == HIPBLASLT_ORDER_ROW;
+        const bool rowB = matB->order == HIPBLASLT_ORDER_ROW;
+        const bool rowC = matC->order == HIPBLASLT_ORDER_ROW;
+        const bool rowD = matD->order == HIPBLASLT_ORDER_ROW;
+        if(!rowA && !rowB && !rowC && !rowD)
+            return HIPBLAS_STATUS_SUCCESS;
+
+        if(desc->op_A == HIPBLASLT_OPERATION_INVALID || desc->op_B == HIPBLASLT_OPERATION_INVALID)
+            return HIPBLAS_STATUS_SUCCESS;
+        if(rowC || rowD)
+            return refuse_rewrite(caller, "C and D must be column-major");
+        if(!is_n_or_t(desc->op_A) || !is_n_or_t(desc->op_B))
+            return refuse_rewrite(caller,
+                                  "only HIPBLAS_OP_N and HIPBLAS_OP_T have a row-major equivalent");
+        if(!is_scalar_scale(desc->scaleAType) || !is_scalar_scale(desc->scaleBType))
+            return refuse_rewrite(caller, "block and vector scale tensors have a fixed layout");
+        if(matA->type == HIP_R_4I || matB->type == HIP_R_4I)
+            return refuse_rewrite(caller, "int4 weights have a fixed layout");
+
+        out.desc.copy(*desc);
+        out.desc.m_data = desc->m_data;
+        out.a           = *matA;
+        out.b           = *matB;
+        if(rowA)
+        {
+            to_column_major(out.a);
+            out.desc.op_A = flip(out.desc.op_A);
+        }
+        if(rowB)
+        {
+            to_column_major(out.b);
+            out.desc.op_B = flip(out.desc.op_B);
+        }
+        rewritten = true;
+        return HIPBLAS_STATUS_SUCCESS;
     }
 } // namespace
 
@@ -1314,13 +1415,16 @@ try
     }
 #endif
 
+    auto               desc = (rocblaslt_matmul_desc)matmulDesc;
+    auto               matA = (rocblaslt_matrix_layout)Adesc;
+    auto               matB = (rocblaslt_matrix_layout)Bdesc;
+    auto               matC = (rocblaslt_matrix_layout)Cdesc;
+    auto               matD = (rocblaslt_matrix_layout)Ddesc;
+    ColumnMajorProblem columnMajor;
+    bool               rewritten = false;
     if(auto order_status
        = heuristic_arguments_present(handle, matmulDesc, pref, requestedAlgoCount, returnAlgoCount)
-             ? refuse_row_order(__func__,
-                                (rocblaslt_matrix_layout)Adesc,
-                                (rocblaslt_matrix_layout)Bdesc,
-                                (rocblaslt_matrix_layout)Cdesc,
-                                (rocblaslt_matrix_layout)Ddesc)
+             ? rewrite_row_major(__func__, desc, matA, matB, matC, matD, columnMajor, rewritten)
              : HIPBLAS_STATUS_SUCCESS;
        order_status != HIPBLAS_STATUS_SUCCESS)
     {
@@ -1328,14 +1432,20 @@ try
         rocblaslt::Debug::Instance().markerStop();
         return order_status;
     }
+    if(rewritten)
+    {
+        desc = &columnMajor.desc;
+        matA = &columnMajor.a;
+        matB = &columnMajor.b;
+    }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(
         (rocblaslt_handle)handle,
-        (rocblaslt_matmul_desc)matmulDesc,
-        (rocblaslt_matrix_layout)Adesc,
-        (rocblaslt_matrix_layout)Bdesc,
-        (rocblaslt_matrix_layout)Cdesc,
-        (rocblaslt_matrix_layout)Ddesc,
+        desc,
+        matA,
+        matB,
+        matC,
+        matD,
         (rocblaslt_matmul_preference)pref,
         requestedAlgoCount,
         (rocblaslt_matmul_heuristic_result*)heuristicResultsArray,
@@ -1378,6 +1488,13 @@ try
     }
 #endif
 
+    auto               desc    = (rocblaslt_matmul_desc)matmul_descr;
+    auto               layoutA = (rocblaslt_matrix_layout)matA;
+    auto               layoutB = (rocblaslt_matrix_layout)matB;
+    auto               layoutC = (rocblaslt_matrix_layout)matC;
+    auto               layoutD = (rocblaslt_matrix_layout)matD;
+    ColumnMajorProblem columnMajor;
+    bool               rewritten = false;
     if(matmul_arguments_present(handle,
                                 matmul_descr,
                                 alpha,
@@ -1392,29 +1509,32 @@ try
                                 matD,
                                 workspace,
                                 workspaceSizeInBytes))
-        return_status = refuse_row_order(__func__,
-                                         (rocblaslt_matrix_layout)matA,
-                                         (rocblaslt_matrix_layout)matB,
-                                         (rocblaslt_matrix_layout)matC,
-                                         (rocblaslt_matrix_layout)matD);
+        return_status = rewrite_row_major(
+            __func__, desc, layoutA, layoutB, layoutC, layoutD, columnMajor, rewritten);
     if(return_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
         return return_status;
     }
+    if(rewritten)
+    {
+        desc    = &columnMajor.desc;
+        layoutA = &columnMajor.a;
+        layoutB = &columnMajor.b;
+    }
 
     return_status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul((rocblaslt_handle)handle,
-                                                                (rocblaslt_matmul_desc)matmul_descr,
+                                                                desc,
                                                                 alpha,
                                                                 A,
-                                                                (rocblaslt_matrix_layout)matA,
+                                                                layoutA,
                                                                 B,
-                                                                (rocblaslt_matrix_layout)matB,
+                                                                layoutB,
                                                                 beta,
                                                                 C,
-                                                                (rocblaslt_matrix_layout)matC,
+                                                                layoutC,
                                                                 D,
-                                                                (rocblaslt_matrix_layout)matD,
+                                                                layoutD,
                                                                 (const rocblaslt_matmul_algo*)algo,
                                                                 workspace,
                                                                 workspaceSizeInBytes,
