@@ -92,7 +92,8 @@ struct Gfx942StridedKvArguments
  *
  * Precondition: the tensor passed KvTensorLayout's admission (stridedKvRefusal), which
  * keeps the token stride and the span inside the buffer-offset range. A token stride or
- * span outside int32 throws rather than truncate.
+ * span outside int32 throws rather than truncate, and so does a batch or head stride whose
+ * byte value overflows int64, so a direct caller gets the refusal too.
  */
 inline Gfx942StridedKvArguments gfx942StridedKvArguments(const std::array<int64_t, 4>& dims,
                                                          const std::array<int64_t, 4>& strides)
@@ -108,8 +109,13 @@ inline Gfx942StridedKvArguments gfx942StridedKvArguments(const std::array<int64_
             "gfx942 unified 3d: strided K/V token stride or head span exceeds int32 bytes");
     }
     Gfx942StridedKvArguments args;
-    args.strideBatchBytes = strides[0] * E;
-    args.strideHeadBytes = strides[1] * E;
+    if(__builtin_mul_overflow(strides[0], E, &args.strideBatchBytes)
+       || __builtin_mul_overflow(strides[1], E, &args.strideHeadBytes))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "gfx942 unified 3d: strided K/V batch or head stride overflows int64 bytes");
+    }
     args.strideTokenBytes = static_cast<int32_t>(span->tokenBytes);
     args.spanBytes = static_cast<int32_t>(span->spanBytes);
     return args;
