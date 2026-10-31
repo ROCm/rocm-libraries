@@ -228,21 +228,72 @@ protected:
     }
 };
 
-class GPU_FindDbWorkspaceCkWrw_BFP16 : public FindDbWorkspaceTest, public ::testing::Test
+struct CkWrwProblem
+{
+    std::vector<std::size_t> x_lens; // NCHW order; the tensors are NHWC
+    std::vector<std::size_t> w_lens;
+    int group_count;
+};
+
+std::ostream& operator<<(std::ostream& os, const CkWrwProblem& p)
+{
+    const auto lens = [&](const char* name, const std::vector<std::size_t>& v) {
+        os << name;
+        for(const auto n : v)
+            os << '_' << n;
+    };
+    lens("x", p.x_lens);
+    lens(" w", p.w_lens);
+    return os << " g" << p.group_count;
+}
+
+/// NHWC bf16 backward-weights problems for the CK grouped solver, whose workspace depends on the
+/// configuration (split-K). A case is only meaningful where the configuration that runs (from the
+/// system perf-db) needs less than the maximum over configurations; it skips elsewhere. The list
+/// covers gfx942 and gfx950.
+class GPU_FindDbWorkspaceCkWrw_BFP16 : public FindDbWorkspaceTest,
+                                       public ::testing::TestWithParam<CkWrwProblem>
 {
 protected:
     void SetUp() override
     {
-        // NHWC backward-weights where CK's workspace depends on the configuration (split-K). On
-        // gfx950 the system perf-db's configuration for this problem needs no workspace while
-        // the maximum over configurations does.
+        const auto& p = GetParam();
         SetUpProblem(miopen::conv::Direction::BackwardWeights,
                      miopenBFloat16,
                      miopenTensorNHWC,
-                     1,
-                     {8, 64, 75, 75},
-                     {64, 64, 3, 3});
+                     p.group_count,
+                     p.x_lens,
+                     p.w_lens);
     }
+
+    /// Records the CK solver first with a correct workspace, then the naive solver. Returns false
+    /// (and skips) when the case cannot tell the configuration that runs from the maximum.
+    bool RecordCkFirst()
+    {
+        const auto ck = miopen::solver::Id{"ConvHipImplicitGemmGroupWrwXdlops"};
+        if(!ck.IsValid() || !ck.GetSolver().IsApplicable(ctx, problem))
+        {
+            skip_reason = "ConvHipImplicitGemmGroupWrwXdlops is not applicable here";
+            return false;
+        }
+        recorded.push_back(Record(ck, 0));
+        recorded.front().recorded_ws = recorded.front().run_ws; // a correct record
+        const auto naive             = miopen::solver::Id{"ConvDirectNaiveConvWrw"};
+        if(naive.IsValid() && naive.GetSolver().IsApplicable(ctx, problem))
+            recorded.push_back(Record(naive, 0));
+        const auto& best = recorded.front();
+        if(best.run_ws >= best.max_ws)
+        {
+            std::ostringstream reason;
+            reason << "The configuration that runs needs the maximum workspace (" << best.max_ws
+                   << "); nothing to distinguish";
+            skip_reason = reason.str();
+            return false;
+        }
+        return true;
+    }
+
+    std::string skip_reason;
 };
 
 } // namespace
@@ -332,27 +383,17 @@ TEST_P(GPU_FindDbWorkspace_FP32, FindDropsSolverWhenStoredWorkspaceIsTooSmall)
     }
 }
 
-TEST_F(GPU_FindDbWorkspaceCkWrw_BFP16, FindKeepsTunedSolverThatFits)
+TEST_P(GPU_FindDbWorkspaceCkWrw_BFP16, FindKeepsTunedSolverThatFits)
 {
-    const auto ck = miopen::solver::Id{"ConvHipImplicitGemmGroupWrwXdlops"};
-    if(!ck.IsValid() || !ck.GetSolver().IsApplicable(ctx, problem))
-        GTEST_SKIP() << "ConvHipImplicitGemmGroupWrwXdlops is not applicable here";
-    const auto naive = miopen::solver::Id{"ConvDirectNaiveConvWrw"};
-
     const miopen::TempFile temp_file{"miopen.test.find_db_workspace"};
     const FindDbPathOverride path_override{temp_file.Path()};
-    recorded.push_back(Record(ck, 0));
-    recorded.front().recorded_ws = recorded.front().run_ws; // a correct record
-    if(naive.IsValid() && naive.GetSolver().IsApplicable(ctx, problem))
-        recorded.push_back(Record(naive, 0));
-    const auto& best = recorded.front();
-    if(best.run_ws >= best.max_ws)
-        GTEST_SKIP() << "The configuration that runs needs the maximum workspace (" << best.max_ws
-                     << "); nothing to distinguish";
+    if(!RecordCkFirst())
+        GTEST_SKIP() << skip_reason;
     WriteFindDb(temp_file.Path());
 
     // A buffer that fits the configuration that runs but not the maximum over configurations
     // must keep the CK solver.
+    const auto& best = recorded.front();
     Workspace wspace{best.run_ws};
     const auto invoke_ctx = InvokeParams(wspace);
 
@@ -360,10 +401,28 @@ TEST_F(GPU_FindDbWorkspaceCkWrw_BFP16, FindKeepsTunedSolverThatFits)
     const auto solutions = conv.GetSolutions(ctx, problem, 1, &fallback, &invoke_ctx);
 
     ASSERT_EQ(solutions.size(), 1u);
-    EXPECT_EQ(solutions.front().solution_id, ck.Value())
+    EXPECT_EQ(solutions.front().solution_id, best.id.Value())
         << "Got " << miopen::solver::Id{solutions.front().solution_id}.ToString();
     EXPECT_EQ(solutions.front().workspace_size, best.max_ws);
 }
+
+TEST_P(GPU_FindDbWorkspaceCkWrw_BFP16, WorkSpaceSizeReportsMaximumOnFindDbHit)
+{
+    const miopen::TempFile temp_file{"miopen.test.find_db_workspace"};
+    const FindDbPathOverride path_override{temp_file.Path()};
+    if(!RecordCkFirst())
+        GTEST_SKIP() << skip_reason;
+    WriteFindDb(temp_file.Path());
+
+    // GWSS (Hybrid mode) takes the find-db's best solver and must return its maximum workspace,
+    // so that any configuration fits, not the workspace of the configuration in the perf-db.
+    EXPECT_EQ(conv.GetWorkSpaceSize(ctx, problem), recorded.front().max_ws);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_FindDbWorkspaceCkWrw_BFP16,
+                         testing::Values(CkWrwProblem{{2, 64, 56, 56}, {64, 64, 3, 3}, 1},
+                                         CkWrwProblem{{2, 128, 28, 28}, {128, 128, 3, 3}, 1}));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_FindDbWorkspace_FP32,
