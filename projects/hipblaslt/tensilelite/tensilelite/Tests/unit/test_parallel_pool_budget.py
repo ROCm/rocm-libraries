@@ -122,3 +122,47 @@ def test_all_workers_together_stay_within_twice_the_cpus(host, cpus, workers):
     perProcess = P.CPUThreadCount()
     assert 1 <= perProcess <= cpus
     assert perProcess * workers <= max(workers, P.OVERSUBSCRIPTION_FACTOR * cpus)
+
+
+@pytest.fixture
+def poolSizes(monkeypatch):
+    """Pool sizes ParallelMap2 hands joblib, one entry per call; no task is run."""
+    sizes = []
+
+    class RecordingParallel:
+        def __init__(self, n_jobs, **kwargs):
+            sizes.append(n_jobs)
+
+        def __call__(self, tasks):
+            return [None for _ in tasks]
+
+    monkeypatch.setattr(P, "Parallel", RecordingParallel)
+    monkeypatch.setitem(globalParameters, "ShowProgressBar", False)
+    return sizes
+
+
+@pytest.mark.parametrize(
+    "affinity, workers, cpuThreads, procs, expected",
+    [
+        (64, None, -1, 4, 4),  # below the budget: honoured (TensileLogic's --jobs)
+        (64, None, -1, 64, 64),
+        (25, "4", -1, 48, 12),  # above the budget: capped at it
+        (64, None, 8, 16, 8),  # CpuThreads still caps
+        (64, None, -1, None, 64),  # no procs: the budget
+        (64, None, -1, 0, 64),
+        (64, None, -1, -1, 64),
+    ],
+)
+def test_parallel_map2_takes_procs_up_to_the_budget(
+    host, poolSizes, capsys, affinity, workers, cpuThreads, procs, expected
+):
+    host(affinity, workers=workers, cpuThreads=cpuThreads)
+    assert P.ParallelMap2(abs, [1, 2], multiArg=False, procs=procs) == [None, None]
+    assert poolSizes == [expected]
+    assert f"Launching {expected} threads for 2 tasks" in capsys.readouterr().out
+
+
+def test_parallel_map2_disabled_ignores_procs(host, poolSizes):
+    host(64)
+    P.ParallelMap2(abs, [1, 2], multiArg=False, enable=False, procs=4)
+    assert poolSizes == [1]

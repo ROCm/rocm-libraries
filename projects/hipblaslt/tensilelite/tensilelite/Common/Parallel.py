@@ -254,15 +254,17 @@ def ParallelMap2(
       enable: May be set to false to disable parallelism.
       multiArg: True if objects represent multiple arguments
                   (differentiates multi args vs single collection arg)
+      procs: At most this many processes; the CPUThreadCount() budget stays the upper bound.
+             None or a value below 1 means the budget.
     """
     if return_as in ("generator", "generator_unordered") and not joblibParallelSupportsGenerator():
         return ParallelMapReturnAsGenerator(function, objects, message, enable, multiArg)
 
     from .GlobalParameters import globalParameters
 
-    threadCount = procs if procs else CPUThreadCount(enable)
-
     threadCount = CPUThreadCount(enable)
+    if procs is not None and procs > 0:
+        threadCount = min(threadCount, procs)
 
     if threadCount <= 1 and globalParameters["ShowProgressBar"]:
         # Provide a progress bar for single-threaded operation.
