@@ -2251,7 +2251,10 @@ class _Lowerer:
 
                 # Recurse into sub-regions; scf.for gets a conservative loop_end
                 for r in op.regions:
-                    if op.name == "scf.for":
+                    # ``smem_iter_local``: the loop carries no LDS contents
+                    # between iterations (each rewrites what it reads, behind
+                    # a barrier), so its body packs like straight-line code.
+                    if op.name == "scf.for" and not op.attrs.get("smem_iter_local"):
                         # Conservative loop liveness: a value written on one
                         # iteration may be read on the next, so every allocation
                         # touched anywhere in the loop body must be treated as
@@ -3723,9 +3726,10 @@ class _Lowerer:
         cur.terminated = True
         val = self._fresh("flag")
         hit = self._fresh("flag.hit")
+        wait_ord = op.attrs.get("ordering", "acquire")
         spin.emit(
             f"  {val} = load atomic i32, ptr addrspace(1) {gep}"
-            f"{_llvm_syncscope(scope)} acquire, align 4"
+            f"{_llvm_syncscope(scope)} {wait_ord}, align 4"
         )
         spin.emit(f"  {hit} = icmp eq i32 {val}, {self._operand(expect)}")
         done = self._new_block("flag.done")
@@ -3778,6 +3782,9 @@ class _Lowerer:
             ", !amdgpu.no.remote.memory !1"
             ", !amdgpu.ignore.denormal.mode !1"
         )
+        # An explicit "syncscope" attr on the op overrides the per-dtype
+        # default scope (the mirror reads the same attr).
+        scope = op.attrs.get("syncscope", scope)
         sync = _llvm_syncscope(scope) if scope else ""
         self._current().emit(
             f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
