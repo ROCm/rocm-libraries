@@ -546,7 +546,20 @@ typedef struct rocke_param_opts
     int align;
     bool align_set;
     const char* addr_space; /* NULL => default "global"                     */
+    /* Pointer argument attributes the lowerer emits. An unset nocapture is
+     * emitted (the lowerer's default), so only an explicit false drops it. */
+    bool nocapture;
+    bool nocapture_set;
+    bool nonnull;
+    bool nonnull_set;
+    int64_t dereferenceable; /* bytes, as in dereferenceable(N)            */
+    bool dereferenceable_set;
 } rocke_param_opts_t;
+
+/* The param attr keys rocke_param_opts_t carries, as the portable-IR importers
+ * name them when they refuse any other key. */
+#define ROCKE_PARAM_ATTR_KEYS \
+    "noalias, readonly, writeonly, nocapture, nonnull, align, dereferenceable, addr_space"
 
 typedef struct rocke_param
 {

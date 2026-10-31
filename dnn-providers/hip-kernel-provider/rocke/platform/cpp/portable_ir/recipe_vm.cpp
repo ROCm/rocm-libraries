@@ -952,6 +952,105 @@ static const char* rv_bind_name(rvm_t* vm, const jd_val_t* instr, const char* fa
     return b ? rv_resolve_name(vm, b) : fallback;
 }
 
+/* Read a param instr's attrs into *opts. Every key is one rocke_param_opts_t
+ * carries, with a value of its kind; anything else fails the replay, because a
+ * dropped attr would silently change the lowered kernel. */
+static bool
+    rv_param_attrs(rvm_t* vm, const char* name, const jd_val_t* pa, rocke_param_opts_t* opts)
+{
+    memset(opts, 0, sizeof *opts);
+    if(!pa)
+        return true;
+    if(pa->kind != JD_OBJ)
+    {
+        rv_fail(vm, "param '%s' attrs is not an object", name);
+        return false;
+    }
+    for(int k = 0; k < pa->obj_len; k++)
+    {
+        const char* key = pa->obj[k].key;
+        const jd_val_t* v = pa->obj[k].val;
+        bool* flag = NULL;
+        bool* flag_set = NULL;
+        double d;
+        if(strcmp(key, "noalias") == 0)
+        {
+            flag = &opts->noalias;
+            flag_set = &opts->noalias_set;
+        }
+        else if(strcmp(key, "readonly") == 0)
+        {
+            flag = &opts->readonly;
+            flag_set = &opts->readonly_set;
+        }
+        else if(strcmp(key, "writeonly") == 0)
+        {
+            flag = &opts->writeonly;
+            flag_set = &opts->writeonly_set;
+        }
+        else if(strcmp(key, "nocapture") == 0)
+        {
+            flag = &opts->nocapture;
+            flag_set = &opts->nocapture_set;
+        }
+        else if(strcmp(key, "nonnull") == 0)
+        {
+            flag = &opts->nonnull;
+            flag_set = &opts->nonnull_set;
+        }
+        if(flag)
+        {
+            if(v->kind != JD_BOOL)
+            {
+                rv_fail(vm, "param '%s' attr %s is not a bool", name, key);
+                return false;
+            }
+            *flag = v->b;
+            *flag_set = true;
+        }
+        else if(strcmp(key, "align") == 0)
+        {
+            long align;
+            if(!rocke_jnum(v, &d) || !rv_number_to_long(d, &align) || align < INT_MIN
+               || align > INT_MAX)
+            {
+                rv_fail(vm, "param '%s' align is not an integer", name);
+                return false;
+            }
+            opts->align = (int)align;
+            opts->align_set = true;
+        }
+        else if(strcmp(key, "dereferenceable") == 0)
+        {
+            if(!rocke_jnum(v, &d) || !rv_number_to_int64(d, &opts->dereferenceable))
+            {
+                rv_fail(vm, "param '%s' dereferenceable is not an integer", name);
+                return false;
+            }
+            opts->dereferenceable_set = true;
+        }
+        else if(strcmp(key, "addr_space") == 0)
+        {
+            if(v->kind != JD_STR)
+            {
+                rv_fail(vm, "param '%s' attr addr_space is not a string", name);
+                return false;
+            }
+            opts->addr_space = v->str;
+        }
+        else
+        {
+            rv_fail(
+                vm,
+                "param '%s' has unknown attr '%s' -- a param attr is one of " ROCKE_PARAM_ATTR_KEYS,
+                name,
+                key);
+            return false;
+        }
+    }
+    return true;
+}
+
 static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
 {
     if(vm->failed)
@@ -973,47 +1072,8 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             return;
         }
         rocke_param_opts_t opts;
-        memset(&opts, 0, sizeof opts);
-        const jd_val_t* pa = rocke_jget(instr, "attrs");
-        if(pa && pa->kind == JD_OBJ)
-        {
-            for(int k = 0; k < pa->obj_len; k++)
-            {
-                const char* key = pa->obj[k].key;
-                const jd_val_t* v = pa->obj[k].val;
-                double d;
-                if(strcmp(key, "noalias") == 0)
-                {
-                    opts.noalias = v->b;
-                    opts.noalias_set = true;
-                }
-                else if(strcmp(key, "readonly") == 0)
-                {
-                    opts.readonly = v->b;
-                    opts.readonly_set = true;
-                }
-                else if(strcmp(key, "writeonly") == 0)
-                {
-                    opts.writeonly = v->b;
-                    opts.writeonly_set = true;
-                }
-                else if(strcmp(key, "align") == 0 && rocke_jnum(v, &d))
-                {
-                    long align;
-                    if(!rv_number_to_long(d, &align) || align < INT_MIN || align > INT_MAX)
-                        rv_fail(vm, "param '%s' align is not an integer", name);
-                    else
-                    {
-                        opts.align = (int)align;
-                        opts.align_set = true;
-                    }
-                }
-                else if(strcmp(key, "addr_space") == 0)
-                {
-                    opts.addr_space = v->str;
-                }
-            }
-        }
+        if(!rv_param_attrs(vm, name, rocke_jget(instr, "attrs"), &opts))
+            return;
         rocke_value_t* pv = rocke_b_param(vm->b, name, type, &opts);
         if(!pv)
         {
