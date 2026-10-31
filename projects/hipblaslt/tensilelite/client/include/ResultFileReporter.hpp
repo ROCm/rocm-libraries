@@ -41,6 +41,7 @@ namespace TensileLite
         class ResultFileReporter : public ResultReporter
         {
         public:
+            // nullptr (no reporter) when no-results-file is set.
             static std::shared_ptr<ResultFileReporter> Default(po::variables_map const& args);
 
             ResultFileReporter(std::string const& filename,
