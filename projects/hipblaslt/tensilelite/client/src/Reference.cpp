@@ -1360,12 +1360,6 @@ namespace TensileLite
                 if(mxBlockB > 0 && mxBlockB % FAST_BLOCK_K != 0)
                     return rejectFast("mxBlockB_not_aligned_to_BLOCK_K");
 
-                size_t sizeK = problem.boundSize(0);
-                if(mxBlockA > 0 && sizeK % mxBlockA != 0)
-                    return rejectFast("K_not_multiple_of_mxBlockA");
-                if(mxBlockB > 0 && sizeK % mxBlockB != 0)
-                    return rejectFast("K_not_multiple_of_mxBlockB");
-
                 // The fast path reinterprets the scale tensors as E8 (UE8M0)
                 // unconditionally (see solveGemmMXFastPath). Non-E8 scale
                 // formats (E5M3 / Float8-E4M3) would be misdecoded as e8m0
@@ -1955,9 +1949,12 @@ namespace TensileLite
                         {
                             if constexpr(macSupportsMX)
                             {
-                                // K divisibility follows from isFastPathEligible's MX checks.
-                                assert(sizeK % BLOCK_K == 0
-                                       && "MX fast path requires K divisible by BLOCK_K");
+                                // Each K tile lies in one MX block per side (the MX
+                                // blocks are multiples of BLOCK_K, isFastPathEligible).
+                                // K need not be a multiple of BLOCK_K or of the MX
+                                // blocks: the tile loads zero the elements past K, so a
+                                // partial last MX block sums only its elements below K,
+                                // scaled by that block's scales.
                                 for(size_t k = 0; k < kTiles; ++k)
                                 {
                                     auto k0 = k * BLOCK_K;

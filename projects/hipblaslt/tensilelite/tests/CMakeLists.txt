@@ -510,7 +510,7 @@ set_tests_properties("CPUGemm.tf32_MixedB_Rejected" PROPERTIES WILL_FAIL TRUE)
 #        FP4 / MX Scale tests (fast & slow)     #
 #################################################
 if(NOT WIN32)
-    # M/N similar to f32 tests; K must be a multiple of mxBlock (32).
+    # M/N similar to f32 tests; K a multiple of mxBlock (32), as the slow path needs.
     set(F4_SIZES_32 -M 133 -N 147 -K 160)
     set(F4_SIZES_64 -M 133 -N 147 -K 192)
 
@@ -636,7 +636,53 @@ if(NOT WIN32)
         ARGS -M 3 -N 5 -K 7 --type f4 --validate --tryFastPath
     )
 
-    # Negative tests: invalid K/mxBlock combos should fail with clear error
+    # Partial last MX block (K not a multiple of mxBlockA and/or mxBlockB), as in
+    # mxfp4_mxfp4_bf16_tn_act (K = 333 / 255 / 63, block 32). Fast path only: the
+    # slow path's MX inner loop sums whole blocks, reading past K (the driver
+    # rejects K tails without --tryFastPath, see the BadK tests below).
+    foreach(TRANS NN TN NT TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(fast_f4_MX32_KTail333_${TRANS}
+            ARGS -M 133 -N 147 -K 333 ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --tryFastPath
+        )
+        # K smaller than the block and not a multiple of the fast path's K tile
+        add_cpu_gemm_test(fast_f4_MX32_KTail7_${TRANS}
+            ARGS -M 33 -N 31 -K 7 ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --tryFastPath
+        )
+    endforeach()
+    foreach(K 255 63)
+        add_cpu_gemm_test(fast_f4_MX32_KTail${K}_TN
+            ARGS -M 133 -N 147 -K ${K} --transA --type f4 --mxBlockA 32 --mxBlockB 32 --validate --tryFastPath
+        )
+    endforeach()
+    add_cpu_gemm_test(fast_f4_MX32_KTail_AllFeatures_TN
+        ARGS -M 133 -N 147 -K 333 --transA --type f4 --mxBlockA 32 --mxBlockB 32 --validate --beta 1.0 --bias --activation relu --scaleAlphaVec --tryFastPath
+    )
+    add_cpu_gemm_test(fast_f4_MX32_KTail_ScaleAB_Vector_TN
+        ARGS -M 133 -N 147 -K 333 --transA --type f4 --mxBlockA 32 --mxBlockB 32 --validate --useScaleAB Vector --tryFastPath
+    )
+    foreach(TRANS NN TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(fast_f4_MX32_KTail_Batched_${TRANS}
+            ARGS -M 133 -N 147 -K 333 ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --batchCount 2 --tryFastPath
+        )
+    endforeach()
+    add_cpu_gemm_test(fast_f4_MX16_KTail_NN
+        ARGS -M 133 -N 147 -K 333 --type f4 --mxBlockA 16 --mxBlockB 16 --validate --tryFastPath
+    )
+    # Asymmetric blocks: K = 160 is a multiple of 32 but not of 64, so only the
+    # 64 side has a partial last block; K = 333 gives both sides one.
+    add_cpu_gemm_test(fast_f4_MX_A32_B64_KTailB_NN
+        ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 64 --validate --tryFastPath
+    )
+    add_cpu_gemm_test(fast_f4_MX_A64_B32_KTailA_NN
+        ARGS ${F4_SIZES_32} --type f4 --mxBlockA 64 --mxBlockB 32 --validate --tryFastPath
+    )
+    add_cpu_gemm_test(fast_f4_MX_A32_B64_KTail333_TN
+        ARGS -M 133 -N 147 -K 333 --transA --type f4 --mxBlockA 32 --mxBlockB 64 --validate --tryFastPath
+    )
+
+    # Negative tests: K/mxBlock combos the slow path rejects should fail with a clear error
     add_test(
         NAME "CPUGemm.slow_f4_MX32_BadK_Unaligned"
         COMMAND cpu-gemm-driver -M 16 -N 16 -K 33 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
