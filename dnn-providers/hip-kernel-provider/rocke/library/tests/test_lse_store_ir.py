@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 
 import pytest
 from ._lse_store_support import factory_for
@@ -13,6 +15,7 @@ from ._lse_store_support import factory_for
 import _attention_fwd_ext_harness as H
 from kernels.common import _lse_store as L
 from rocke.core.ir import F32, I32, IRBuilder, PtrType
+from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 from rocke.helpers.attention_fwd_ext import RowEpilogue
 
@@ -130,3 +133,51 @@ def test_batch_rebase_is_emitted_once_with_a_64_bit_offset():
 
 def test_no_exported_helper_looks_like_a_builder():
     assert not [n for n in L.__all__ if n.startswith("build_")]
+
+
+# Host harness for the bare HIP kernel: the body is plain C++ once the HIP
+# function qualifiers are defined away, so it runs on the CPU.
+_HIP_HOST_PRELUDE = """#include <cmath>
+#include <cstdio>
+using std::isnan;
+#define __global__
+#define __launch_bounds__(n)
+"""
+_HIP_HOST_MAIN = """
+int main() {
+  const float xs[] = {0.0f, -0.0f, 1.0f, -3.5f, NAN, INFINITY};
+  for (float x : xs) {
+    float r = -1.0f;
+    lse_row_has_mass_probe(&r, x);
+    std::printf("%g\\n", r);
+  }
+}
+"""
+
+
+def test_row_has_mass_is_not_l_equals_zero_in_the_hip_lowering(tmp_path):
+    """lse_row_has_mass must be !(l == 0) with NaN counted as mass, in the HIP
+    lowerer too (the GPU tests only exercise the LLVM path). A NaN row must keep
+    NaN, so the predicate is true for NaN; only an exact zero (either sign) is
+    keyless."""
+    compiler = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+    if compiler is None:
+        pytest.skip("no host C++ compiler")
+    b = IRBuilder("lse_row_has_mass_probe")
+    out = b.param("out", PtrType(F32, "global"))
+    l = b.param("l", F32)
+    has_mass = L.lse_row_has_mass(b, l)
+    one, zero = b.const_f32(1.0), b.const_f32(0.0)
+    b.global_store(out, b.const_i32(0), b.select(has_mass, one, zero), align=4)
+    b.ret()
+    src = tmp_path / "probe.cpp"
+    src.write_text(
+        _HIP_HOST_PRELUDE
+        + lower_kernel_to_hip(b.kernel, include_prologue=False)
+        + _HIP_HOST_MAIN
+    )
+    exe = tmp_path / "probe"
+    subprocess.run([compiler, "-O2", "-o", str(exe), str(src)], check=True)
+    got = subprocess.run([str(exe)], check=True, capture_output=True, text=True)
+    #                      0    -0   1    -3.5 NaN  inf
+    assert got.stdout.split() == ["0", "0", "1", "1", "1", "1"]

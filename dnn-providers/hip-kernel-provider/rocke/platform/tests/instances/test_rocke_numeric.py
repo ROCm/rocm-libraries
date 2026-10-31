@@ -31,15 +31,20 @@ import importlib.util
 import os
 import pathlib
 import subprocess
-import sys
 import tempfile
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
-_PYDIR = pathlib.Path(__file__).resolve().parents[2] / "python"  # rocke/platform/python
-_LIBDIR = pathlib.Path(__file__).resolve().parents[3] / "library"  # rocke/library
-_SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
+_HERE = pathlib.Path(__file__).resolve()
+_LIBRARY_ROOTS = (
+    _HERE.parents[3] / "library",  # source tree: rocke/library
+    _HERE.parents[1] / "library",  # installed tree: <test-root>/tests/library
+)
 
 
 # Detect arch via the rocke HIP runtime (no torch). The parity harnesses run in
@@ -60,12 +65,11 @@ class TestNumericVerification(unittest.TestCase):
     """Launch + numeric-compare on whatever gfx device this runs on."""
 
     def _run(self, *cmd, timeout=300):
-        env = dict(os.environ)
-        env["PYTHONPATH"] = _SUBPROC_PYTHONPATH
+        library_roots = [root for root in _LIBRARY_ROOTS if root.is_dir()]
+        env = rocke_subprocess_env(python_paths=library_roots)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         r = subprocess.run(
-            [sys.executable, *cmd],
-            cwd=str(_PYDIR),
+            rocke_python_command(*cmd),
             env=env,
             capture_output=True,
             text=True,

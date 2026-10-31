@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -62,6 +60,35 @@
       "expected_failures": {}
     },
     "llvm23": {
+      "cases": {
+        "fused_moe/gfx950/gather_h128": {
+          "arch": "gfx950",
+          "bytes": 1868,
+          "family": "moe",
+          "kernel_name": "irhash_fused_moe_gather_gather_T32_E8_K2_H128_I256_f16_b128_v4",
+          "sha256": "8635aec0de1ee81b1afea0d97512d55e290f3f5872de358cc4e9524865bdcda6",
+          "status": "ok"
+        },
+        "fused_moe/gfx950/reduce_h128": {
+          "arch": "gfx950",
+          "bytes": 2273,
+          "family": "moe",
+          "kernel_name": "irhash_fused_moe_reduce_reduce_T32_E8_K2_H128_I256_f16_b128_v4",
+          "sha256": "0598cd0f21ba59fa7a395976417b849cfbcdc6b22480df52299a804af0a73562",
+          "status": "ok"
+        },
+        "fused_moe/gfx950/silu_i256": {
+          "arch": "gfx950",
+          "bytes": 3019,
+          "family": "moe",
+          "kernel_name": "irhash_fused_moe_silu_silu_mul_T32_E8_K2_H128_I256_f16_b128_v4",
+          "sha256": "eb02f3c6e7e76507bcc86d533cd49e27825f67c009e2b7929457475713575669",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "fused_moe/gfx950/gather_h128": {
           "arch": "gfx950",
