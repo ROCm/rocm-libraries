@@ -66,8 +66,9 @@ against the interleave reference tables (MFMA/WMMA, CDNA + RDNA).
 **Scope.** One recipe (§6, §8, §9) builds the intra-lane `reorder` tier **cross-lane-free**, by adjusting
 the **static distribution** read from the target's traits. It covers **every dense square atom** — any
 AMDGPU arch (CDNA, and RDNA/gfx11 via operand **replication**, §9), any dtype **including f64** — with no
-special-casing. The **one non-square** catalogue atom (`wmma_f32_32x16x128_f4`) over-subscribes the wave on
-one operand and does **not** interleave under this construction; it is deferred (task #21). Which rows
+special-casing. The **one non-square** catalogue atom (`wmma_f32_32x16x128_f4`) holds two M blocks of A per
+lane in its registers, which this construction does not model, so it does **not** interleave (`InterleavedStyle`
+refuses it by name); it is deferred (task #21). Which rows
 interleave is enumerated and locked by the proof sweep `test_interleave_all_dense.py` — read the census
 there, never copy a count into prose. What varies per instance is **validation depth**: the construction is
 proven cross-lane-free across the whole square catalogue (incl. f64) by that CPU sweep; GPU **bit-exact**
@@ -882,7 +883,7 @@ wave; that arithmetic is the whole reason the bijection validator passes at rank
 builds a silently wrong lane map — a wrong ANSWER, not an exception.
 
 **Construction.** Four steps. Every *atom* quantity is READ from the traits row (`traits/mma_traits.py`,
-the 128-row catalogue) and never hand-typed; the *wave-tile* factors (`m_sub`, `n_sub`) come from the
+the MMA catalogue) and never hand-typed; the *wave-tile* factors (`m_sub`, `n_sub`) come from the
 chosen tile. A new atom or a new target needs no new table:
 
 1. Read the atom's accumulator shape from the traits row (`traits/mma_traits.py`) — **both free axes**:
@@ -1121,8 +1122,8 @@ separate LDS regions — isolate them (A-only / B-only, store-only / read-only) 
 
 - Interleave reference tables (MFMA/WMMA), CDNA + RDNA: `interleave_idx`, the transforms summary, the
   per-tile A/B grids, and the ACC transform tables.
-- `helpers/tiling/traits/mma_traits.py` — the traits / catalogue registry (128 atom rows); every §9
-  construction quantity is read from here.
+- `helpers/tiling/traits/mma_traits.py` — the traits / catalogue registry (one row per MMA instruction
+  variant); every §9 construction quantity is read from here.
 - `helpers/tiling/transforms/` — `interleave_idx`, `k_distribution`, `classify_transform`,
   `mma_pair_k_aligned`, `derive_c_distribution` (the §9 accumulator ground truth).
 - `helpers/tiling/mma/styles/interleaved.py` — `InterleavedStyle`: the shipped interleaved construction

@@ -476,8 +476,9 @@ The demos (`tiling_gemm_{interwave,pipelined,interleaved}_demo.py`) show real, n
 ## 6. `TileMma` -- the resolver + subtile driver (where the defaults live)
 
 `TileMma(shape, *, a, b, c, target, tiling=None)`. `shape` is the **wave tile**. Everything
-below is resolved for you and is inspectable. The **intrinsic** SSOT is **`traits/data/mma_traits.json`**
-(atom shapes + dtypes = the hardware truth; resolved automatically, never hand-edit it). Its **canonical**
+below is resolved for you and is inspectable. The **instruction** catalog is **`traits/data/mma_traits.json`**
+(one row per MMA instruction variant: atom shape + per-operand dtypes; hand-maintained, schema and edit
+procedure in `traits/README.md`; resolved automatically). Its **canonical**
 A/B/C encodings are the **baseline/fallback** layout — a starting place, NOT a requirement: you are free to
 hand-roll valid non-canonical (interleaved / custom) layouts (canonical is never required — `mma_is_machinery.md`).
 
@@ -527,7 +528,7 @@ dtypes -- MFMA on CDNA, WMMA on RDNA -- with no author-side gfx branch.
 TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)))     # op_id -> mfma_f32_16x16x16f16
 # same author code, different target (verified):
-TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx12",
+TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx1201",
         tiling=Tiling(atom_shape=(16, 16, 16)))     # op_id -> wmma_f32_16x16x16_f16_w32_gfx12 (wave 32)
 ```
 

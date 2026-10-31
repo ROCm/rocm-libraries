@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from math import log2
 from types import SimpleNamespace
 
+from ....core.dtypes import dtype_info
+from ....core.ir import dtype_to_ir_type
 from ..encoding import WarpDistributionEncoding
 from ..register_mapper import RegisterMapper
 from ..transforms import (
@@ -2901,8 +2903,8 @@ class MmaTee:
     a_dtype_bits: int = 16
     b_dtype_bits: int = 16
     c_dtype_bits: int = 32
-    in_dtype: str = ""  # input (A/B) dtype name, e.g. "f16"; blank -> shown as bits
-    out_dtype: str = ""  # output (C) dtype name, e.g. "f32"
+    in_dtype: str = ""  # A/B dtype name, "f16" or "fp8e4m3/fp4e2m1"; blank -> bits
+    out_dtype: str = ""  # output (C/D) dtype name, e.g. "f32"
     dims_a: tuple = ("M", "K")
     dims_b: tuple = ("N", "K")
     dims_c: tuple = ("M", "N")
@@ -2961,8 +2963,12 @@ class MmaTee:
         # `a_enc`/`b_enc` override to render a styled operand. C derives by flowing the supplied labels
         # through the refs.
         a_canon, b_canon, c_canon = canonical_layouts(t, mma.subtiles)
-        # The C/D fragment is drawn with the result's width (they differ only for "bf16f32").
-        a_bits, b_bits, _, d_bits = t.element_bits()
+        # Widths and labels come from the row's per-operand dtypes. The C/D fragment is drawn with
+        # the result's (D) width; C and D differ only where the instruction returns another dtype.
+        # Labels are IR type names ("f16", "fp8e4m3"); A and B are spelled "<a>/<b>" when they differ.
+        a_name, b_name, d_name = (
+            dtype_to_ir_type(name).name for name in (t.a_dtype, t.b_dtype, t.d_dtype)
+        )
         base = dict(
             a_enc=a_canon,
             b_enc=b_canon,
@@ -2971,11 +2977,11 @@ class MmaTee:
             a_canon=a_canon,
             b_canon=b_canon,
             c_canon=c_canon,
-            a_dtype_bits=a_bits,
-            b_dtype_bits=b_bits,
-            c_dtype_bits=d_bits,
-            in_dtype=t.input_dtype,
-            out_dtype=t.output_dtype,
+            a_dtype_bits=dtype_info(t.a_dtype).encoded_bits,
+            b_dtype_bits=dtype_info(t.b_dtype).encoded_bits,
+            c_dtype_bits=dtype_info(t.d_dtype).encoded_bits,
+            in_dtype=a_name if a_name == b_name else f"{a_name}/{b_name}",
+            out_dtype=d_name,
             op_id=mma.op_id,
             wave_shape=mma.shape,
         )
