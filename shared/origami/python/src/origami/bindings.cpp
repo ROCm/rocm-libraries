@@ -11,6 +11,7 @@
 #include <nanobind/stl/vector.h>
 #include "origami/attention.hpp"
 #include "origami/gemm.hpp"
+#include "origami/gemm_intermediates.hpp"
 #include "origami/hardware.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
@@ -348,7 +349,16 @@ NB_MODULE(origami, m) {
         &origami::select_workgroup_mapping,
         "Select best workgroup mapping");
   m.def("select_staggerU", &origami::select_staggerU, "Select best staggerU parameters");
-  m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");
+  m.def("rank_configs",
+        static_cast<std::vector<origami::prediction_result_t> (*)(const origami::problem_t&,
+                                                                 const origami::hardware_t&,
+                                                                 const std::vector<origami::config_t>&,
+                                                                 origami::model_t)>(&origami::rank_configs),
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("configs"),
+        nanobind::arg("model") = origami::model_t::gemm,
+        "Rank configurations by performance");
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
@@ -554,4 +564,173 @@ NB_MODULE(origami, m) {
         return origami::gemm::compute_timestep_latency(problem, hardware, config, context);
       },
       "Compute latency per K-complete MT wave (auto-creates context)");
+
+  // Intermediates [gemm.hpp, gemm_intermediates.hpp]; field documentation in the headers.
+  using memory_terms_t = origami::gemm::memory_latency_terms_t;
+  nanobind::class_<memory_terms_t>(m, "memory_latency_terms_t")
+      .def(nanobind::init<>())
+      .def_ro("H_mem_l2_A", &memory_terms_t::H_mem_l2_A)
+      .def_ro("H_mem_l2_B", &memory_terms_t::H_mem_l2_B)
+      .def_ro("H_mem_mall_A", &memory_terms_t::H_mem_mall_A)
+      .def_ro("H_mem_mall_B", &memory_terms_t::H_mem_mall_B)
+      .def_ro("L_mem_l2", &memory_terms_t::L_mem_l2)
+      .def_ro("L_mem_mall", &memory_terms_t::L_mem_mall)
+      .def_ro("L_mem_dram", &memory_terms_t::L_mem_dram)
+      .def_ro("L_mem", &memory_terms_t::L_mem);
+
+  using tile_terms_t = origami::gemm::tile_latency_terms_t;
+  nanobind::class_<tile_terms_t>(m, "tile_latency_terms_t")
+      .def(nanobind::init<>())
+      .def_ro("memory", &tile_terms_t::memory)
+      .def_ro("L_mt_compute", &tile_terms_t::L_mt_compute)
+      .def_ro("L_lds_read", &tile_terms_t::L_lds_read)
+      .def_ro("L_lds_floor", &tile_terms_t::L_lds_floor)
+      .def_ro("L_local_read", &tile_terms_t::L_local_read)
+      .def_ro("wgs_per_cu", &tile_terms_t::wgs_per_cu)
+      .def_ro("L_compute", &tile_terms_t::L_compute)
+      .def_ro("L_cvt", &tile_terms_t::L_cvt)
+      .def_ro("k_iters", &tile_terms_t::k_iters)
+      .def_ro("num_main_iters", &tile_terms_t::num_main_iters)
+      .def_ro("num_ngll_iters", &tile_terms_t::num_ngll_iters)
+      .def_ro("tail_k", &tile_terms_t::tail_k)
+      .def_ro("tail_fraction", &tile_terms_t::tail_fraction)
+      .def_ro("eff_scale", &tile_terms_t::eff_scale)
+      .def_ro("utilization", &tile_terms_t::utilization)
+      .def_ro("compute_utilization", &tile_terms_t::compute_utilization)
+      .def_ro("L_prologue", &tile_terms_t::L_prologue)
+      .def_ro("L_main", &tile_terms_t::L_main)
+      .def_ro("L_ngll", &tile_terms_t::L_ngll)
+      .def_ro("L_nll", &tile_terms_t::L_nll)
+      .def_ro("L_main_per_iter", &tile_terms_t::L_main_per_iter)
+      .def_ro("L_tail", &tile_terms_t::L_tail)
+      .def_ro("L_pgr_stall", &tile_terms_t::L_pgr_stall)
+      .def_ro("L_loop_overhead", &tile_terms_t::L_loop_overhead)
+      .def_ro("L_single_lds_buffer", &tile_terms_t::L_single_lds_buffer)
+      .def_ro("depth_waste_ratio", &tile_terms_t::depth_waste_ratio)
+      .def_ro("batched_fill_ratio", &tile_terms_t::batched_fill_ratio)
+      .def_ro("m_edge_ratio", &tile_terms_t::m_edge_ratio)
+      .def_ro("L_du_waste", &tile_terms_t::L_du_waste)
+      .def_ro("L_mainloop", &tile_terms_t::L_mainloop)
+      .def_ro("epi_occ_exposure", &tile_terms_t::epi_occ_exposure)
+      .def_ro("scalar_store_fraction", &tile_terms_t::scalar_store_fraction)
+      .def_ro("store_exposure", &tile_terms_t::store_exposure)
+      .def_ro("scalar_store_mult", &tile_terms_t::scalar_store_mult)
+      .def_ro("L_epilogue", &tile_terms_t::L_epilogue)
+      .def_ro("L_lsu_reduce", &tile_terms_t::L_lsu_reduce)
+      .def_ro("weight_tile_total", &tile_terms_t::weight_tile_total)
+      .def_ro("L_tile_total", &tile_terms_t::L_tile_total);
+
+  using intermediates_t = origami::gemm::gemm_intermediates_t;
+  nanobind::class_<intermediates_t>(m, "gemm_intermediates_t")
+      .def(nanobind::init<>())
+      .def_ro("context", &intermediates_t::context)
+      .def_ro("tile", &intermediates_t::tile)
+      // context.reduction_strategy as a number: reduction_t::none is not an exported value.
+      .def_prop_ro("reduction_strategy_code",
+                   [](const intermediates_t& r) {
+                     return r.context.reduction_strategy == origami::reduction_t::none
+                                ? -1
+                                : static_cast<long>(r.context.reduction_strategy);
+                   })
+      .def_ro("l2_hit_global", &intermediates_t::l2_hit_global)
+      .def_ro("mall_hit_global", &intermediates_t::mall_hit_global)
+      .def_ro("num_matrix_instructions", &intermediates_t::num_matrix_instructions)
+      .def_ro("batch", &intermediates_t::batch)
+      .def_ro("flops", &intermediates_t::flops)
+      .def_ro("bytes", &intermediates_t::bytes)
+      .def_ro("arith_intensity", &intermediates_t::arith_intensity)
+      .def_ro("aspect", &intermediates_t::aspect)
+      .def_ro("k_bits_mod_cache_line", &intermediates_t::k_bits_mod_cache_line)
+      .def_ro("cache_hint_gate", &intermediates_t::cache_hint_gate)
+      .def_ro("quant_m", &intermediates_t::quant_m)
+      .def_ro("quant_n", &intermediates_t::quant_n)
+      .def_ro("quant_k", &intermediates_t::quant_k)
+      .def_ro("quant_total", &intermediates_t::quant_total)
+      .def_ro("edge_frac_m", &intermediates_t::edge_frac_m)
+      .def_ro("edge_frac_n", &intermediates_t::edge_frac_n)
+      .def_ro("k_over_mt_k", &intermediates_t::k_over_mt_k)
+      .def_ro("mt_aspect", &intermediates_t::mt_aspect)
+      .def_ro("tile_arith_intensity", &intermediates_t::tile_arith_intensity)
+      .def_ro("mt_k_bits_mod_cache_line", &intermediates_t::mt_k_bits_mod_cache_line)
+      .def_ro("lds_bytes", &intermediates_t::lds_bytes)
+      .def_ro("lds_frac", &intermediates_t::lds_frac)
+      .def_ro("lds_fit_count", &intermediates_t::lds_fit_count)
+      .def_ro("lds_bytes_buffered", &intermediates_t::lds_bytes_buffered)
+      .def_ro("threads_per_wg", &intermediates_t::threads_per_wg)
+      .def_ro("grvw_bytes_a", &intermediates_t::grvw_bytes_a)
+      .def_ro("grvw_bytes_b", &intermediates_t::grvw_bytes_b)
+      .def_ro("gwvw_bytes_d", &intermediates_t::gwvw_bytes_d)
+      .def_ro("occupancy", &intermediates_t::occupancy)
+      .def_ro("waves_per_wg", &intermediates_t::waves_per_wg)
+      .def_ro("workgroup_m", &intermediates_t::workgroup_m)
+      .def_ro("workgroup_n", &intermediates_t::workgroup_n)
+      .def_ro("mi_wave_tile_m", &intermediates_t::mi_wave_tile_m)
+      .def_ro("mi_wave_tile_n", &intermediates_t::mi_wave_tile_n)
+      .def_ro("wave_tile_m", &intermediates_t::wave_tile_m)
+      .def_ro("wave_tile_n", &intermediates_t::wave_tile_n)
+      .def_ro("wave_aspect", &intermediates_t::wave_aspect)
+      .def_ro("waves_per_tile", &intermediates_t::waves_per_tile)
+      .def_ro("pgr_over_k_iters", &intermediates_t::pgr_over_k_iters)
+      .def_ro("pgr_unfilled", &intermediates_t::pgr_unfilled)
+      .def_ro("k_per_lsu", &intermediates_t::k_per_lsu)
+      .def_ro("dtl_edge_m", &intermediates_t::dtl_edge_m)
+      .def_ro("tile_waves_304", &intermediates_t::tile_waves_304)
+      .def_ro("tile_tail_304", &intermediates_t::tile_tail_304)
+      .def_ro("total_latency", &intermediates_t::total_latency)
+      .def_ro("perf_gflops", &intermediates_t::perf_gflops)
+      .def_ro("L_parallel_reduce_residual", &intermediates_t::L_parallel_reduce_residual)
+      .def_ro("L_epilogue_residual", &intermediates_t::L_epilogue_residual)
+      .def_ro("cu_util", &intermediates_t::cu_util)
+      .def_ro("tiles_per_cu", &intermediates_t::tiles_per_cu)
+      .def_ro("wave_quant_waste", &intermediates_t::wave_quant_waste)
+      .def_ro("bytes_per_tile", &intermediates_t::bytes_per_tile)
+      .def_ro("cycles_per_tile", &intermediates_t::cycles_per_tile)
+      .def_ro("tile_share_of_total", &intermediates_t::tile_share_of_total)
+      .def_ro("parallel_reduce_frac", &intermediates_t::parallel_reduce_frac)
+      .def_ro("mem_comp_ratio", &intermediates_t::mem_comp_ratio)
+      .def_ro("mainloop_mem_frac", &intermediates_t::mainloop_mem_frac)
+      .def_ro("prologue_frac", &intermediates_t::prologue_frac)
+      .def_ro("mainloop_frac", &intermediates_t::mainloop_frac)
+      .def_ro("epilogue_frac", &intermediates_t::epilogue_frac)
+      .def_ro("du_waste_frac", &intermediates_t::du_waste_frac)
+      .def_ro("overhead_frac", &intermediates_t::overhead_frac)
+      .def_ro("mem_l2_share", &intermediates_t::mem_l2_share)
+      .def_ro("mem_dram_share", &intermediates_t::mem_dram_share)
+      .def_ro("lds_over_mfma", &intermediates_t::lds_over_mfma);
+
+  m.def(
+      "compute_memory_latency_terms",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config) {
+        origami::gemm::context_t context(problem, hardware, config);
+        return origami::gemm::compute_memory_latency_terms(problem, hardware, config, context);
+      },
+      "compute_memory_latency with its terms (auto-creates context)");
+  m.def(
+      "compute_tile_latency_terms",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config) {
+        origami::gemm::context_t context(problem, hardware, config);
+        return origami::gemm::compute_tile_latency_terms(problem, hardware, config, context);
+      },
+      "compute_tile_latency with its terms, in one evaluation (auto-creates context)");
+  m.def(
+      "compute_gemm_intermediates",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config,
+         std::optional<double> total_latency) {
+        const double total = total_latency
+                                 ? *total_latency
+                                 : origami::gemm::compute_total_latency(problem, hardware, config);
+        return origami::gemm::compute_gemm_intermediates(problem, hardware, config, total);
+      },
+      nanobind::arg("problem"),
+      nanobind::arg("hardware"),
+      nanobind::arg("config"),
+      nanobind::arg("total_latency") = nanobind::none(),
+      "Origami's intermediates of one GEMM prediction; total_latency defaults to "
+      "compute_total_latency(problem, hardware, config)");
 }
