@@ -351,13 +351,16 @@ namespace TensileLite
                     if(m_problemDependentData)
                         copyValidToGPUBuffer(problem.gemms[0]);
 
-                    // gpu to gpu
+                    // gpu to gpu. When this call sets up the fast path above, later, possibly
+                    // larger, problems reuse these buffers without copying: copy them whole.
                     copyInputs(m_gpuPtrs,
                                m_gpuBatchPtrs,
                                m_maxElements,
                                m_groupedOffsets,
                                problem.gemms[0],
-                               hipMemcpyDeviceToDevice);
+                               hipMemcpyDeviceToDevice,
+                               m_curBoundsCheck == BoundsCheckMode::Disable
+                                   && !m_problemDependentData);
                     m_gpuInit = true;
                 }
                 initializeGPUBatchedInputs(problem.gemms[0]);
@@ -379,6 +382,9 @@ namespace TensileLite
 
                 bool needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
                 bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
+                bool const fastPathEligible = m_curBoundsCheck == BoundsCheckMode::Disable
+                                              && !m_problemDependentData && !needSwizzle
+                                              && !needMXSwizzle;
 
                 if(m_keepPristineCopyOnGPU && !m_problemDependentData)
                 {
@@ -391,8 +397,7 @@ namespace TensileLite
                     kind = hipMemcpyHostToDevice;
                 }
 
-                if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-                   && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
+                if(m_gpuInit && fastPathEligible)
                 {
                     if(m_elementsToValidate)
                     {
@@ -435,7 +440,8 @@ namespace TensileLite
                         copySwizzledToGPUBuffer(problem);
                     }
 
-                    // gpu to gpu
+                    // gpu to gpu. When this call sets up the fast path above, later, possibly
+                    // larger, problems reuse these buffers without copying: copy them whole.
                     {
                         ScopedTimer timer(gpuInputCategory("gpu_input_reset_copy_inputs_d2d",
                                                            "gpu_input_prep_copy_inputs_d2d"));
@@ -444,7 +450,8 @@ namespace TensileLite
                                    m_maxElements,
                                    m_groupedOffsets,
                                    problem,
-                                   hipMemcpyDeviceToDevice);
+                                   hipMemcpyDeviceToDevice,
+                                   fastPathEligible);
                     }
                     if(m_rotatingMode == 1 && m_rotatingBuffer > 0)
                     {
@@ -1197,12 +1204,22 @@ namespace TensileLite
                        && solution->problemType.mxScaleFormat == 1;
             }
 
+            // Number of elements of pristine unit p (tensor i) that hold the current problem's
+            // data, i.e. what a copy of its buffers must cover.
+            size_t problemExtentElements(ContractionProblemGemm const& problem,
+                                         size_t                        i,
+                                         PristineUnit const&           p) const;
+
+            // Copies each tensor's valid data to its current buffer. Disable mode (and the
+            // GuardPageFront run, which shares its layout) copies the current problem's extent,
+            // or the whole buffers with copyWholeBuffers.
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
                             std::vector<size_t>&              maxElements,
                             std::vector<std::vector<size_t>>& offsets,
                             ContractionProblemGemm const&     problem,
-                            hipMemcpyKind                     kind);
+                            hipMemcpyKind                     kind,
+                            bool                              copyWholeBuffers = false);
 
             void resetOutput(std::vector<void*>&               ptrs,
                              std::vector<void**>&              batchPtrs,

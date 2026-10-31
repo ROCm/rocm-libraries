@@ -26,8 +26,8 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <hip/hip_runtime.h>
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGenerator/dataTypeInfo.hpp>
 #include <mxDataGenerator/ocp_e2m1_mxfp4.hpp>
 #include <mxDataGenerator/ocp_e2m3_mxfp6.hpp>
@@ -95,7 +95,6 @@ namespace
         return problem;
     }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
     TensileLite::Client::po::variables_map makeMinimalClientArgs(int mxScaleFormat)
     {
         using namespace TensileLite::Client;
@@ -179,9 +178,6 @@ namespace
         setOption(args, "bounds-check", TensileLite::Client::BoundsCheckMode::Disable);
         return args;
     }
-
-#endif
-
 } // namespace
 
 // =============================================================================
@@ -384,6 +380,93 @@ TEST(DataInitializationInputEpoch, PerSolutionEpochRequiresPreSolution)
     EXPECT_THROW(dataInit.inputEpoch(&otherSolution), std::logic_error);
 }
 #endif
+
+// =============================================================================
+//   Section 3b - prepareCPUInputs / prepareGPUInputs copy the current problem's extent
+//
+//   The copies only cover the current problem's tensors, not the run's largest one. With
+//   problem-independent data (Random) every GPU call after the first takes the fast path and
+//   copies no inputs, so the first copy must still fill the whole buffers: a later, larger
+//   problem reads them as they are. With problem-dependent data (SerialDim0) every call copies;
+//   its values depend on the coordinate, so a copy that misses part of a problem's extent
+//   leaves an earlier problem's values there, which the independent expectation catches.
+//   Sizes start below the run's maximum, shrink, then grow to it.
+// =============================================================================
+class DataInitializationCopyExtentTest
+    : public ::testing::TestWithParam<TensileLite::Client::InitMode>
+{
+};
+
+TEST_P(DataInitializationCopyExtentTest, GpuInputsMatchCpuInputsWhenProblemsShrinkAndGrow)
+{
+    using TensileLite::Client::InitMode;
+
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount <= 0)
+        GTEST_SKIP() << "No HIP device";
+
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
+    for(auto const* name : {"type",
+                            "a-type",
+                            "b-type",
+                            "c-type",
+                            "d-type",
+                            "compute-input-type-A",
+                            "compute-input-type-B"})
+        setOption(args, name, rocisa::DataType::Float);
+    setOption(args,
+              "problem-size",
+              std::vector<std::vector<size_t>>{
+                  {96, 80, 1, 72}, {16, 24, 1, 8}, {200, 136, 2, 120}, {40, 40, 1, 40}});
+    for(auto const* name : {"init-a", "init-b", "init-c"})
+        setOption(args, name, GetParam());
+
+    TensileLite::Client::ClientProblemFactory factory(args);
+    TensileLite::Client::DataInitialization   dataInit(args, factory);
+    ASSERT_EQ(factory.problems().size(), 4u);
+
+    for(size_t k = 0; k < factory.problems().size(); k++)
+    {
+        auto const& problem = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[k]);
+        // The client prepares the reference (CPU) inputs before the GPU ones.
+        auto cpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+            dataInit.prepareCPUInputs(&problem));
+        auto gpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+            dataInit.prepareGPUInputs(&problem));
+        ASSERT_TRUE(cpu && gpu);
+
+        std::pair<void const*, void const*> const inputs[]
+            = {{cpu->a, gpu->a}, {cpu->b, gpu->b}, {cpu->c, gpu->c}};
+        for(size_t i = 0; i < std::size(inputs); i++)
+        {
+            auto const&          desc  = problem.tensors()[i];
+            size_t               bytes = desc.totalAllocatedBytes();
+            std::vector<uint8_t> fromGpu(bytes);
+            ASSERT_EQ(hipMemcpy(fromGpu.data(), inputs[i].second, bytes, hipMemcpyDeviceToHost),
+                      hipSuccess);
+            EXPECT_EQ(std::memcmp(fromGpu.data(), inputs[i].first, bytes), 0)
+                << "tensor " << desc.getName() << " of problem " << k;
+            if(GetParam() == InitMode::SerialDim0)
+            {
+                // Packed tensors: every element of the extent is written.
+                std::vector<float> expected(desc.totalAllocatedElements());
+                DataInitialization::initArraySerialDim<float>(expected.data(), 0, desc);
+                EXPECT_EQ(std::memcmp(expected.data(), inputs[i].first, bytes), 0)
+                    << "CPU tensor " << desc.getName() << " of problem " << k;
+                EXPECT_EQ(std::memcmp(expected.data(), fromGpu.data(), bytes), 0)
+                    << "GPU tensor " << desc.getName() << " of problem " << k;
+            }
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(InitModes,
+                         DataInitializationCopyExtentTest,
+                         ::testing::Values(TensileLite::Client::InitMode::Random,
+                                           TensileLite::Client::InitMode::SerialDim0),
+                         [](::testing::TestParamInfo<TensileLite::Client::InitMode> const& info) {
+                             return TensileLite::Client::ToString(info.param);
+                         });
 
 // =============================================================================
 //   Section 4 — direct calls into TensileLite::Client::detail (MX builds only)

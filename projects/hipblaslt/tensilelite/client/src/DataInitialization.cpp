@@ -2532,12 +2532,39 @@ namespace TensileLite
             return;
         }
 
+        size_t DataInitialization::problemExtentElements(ContractionProblemGemm const& problem,
+                                                         size_t                        i,
+                                                         PristineUnit const&           p) const
+        {
+            // Grouped GEMMs lay their gemms out back to back (groupedGemmOffsets), and the
+            // copies only see gemms[0]. MX scales: the GPU copy may hold one of several padded
+            // swizzled layouts, sized differently from the allocation. Both keep the whole buffer.
+            if(!p.groupedGemmOffsets.empty()
+               || (i == ContractionProblemGemm::TENSOR::MXSA && problem.mxBlockA())
+               || (i == ContractionProblemGemm::TENSOR::MXSB && problem.mxBlockB()))
+                return p.maxElements;
+
+            auto const& desc     = problem.tensors()[i];
+            size_t      elements = desc.totalAllocatedElements();
+            if((problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
+               || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B))
+            {
+                // Same swizzle shape as the allocation in the constructor.
+                size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
+                calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
+                elements = std::max(elements,
+                                    getSwizzledTensorNumAllocatedElements(desc, MiM_N, MiK, PackK));
+            }
+            return std::min(elements, p.maxElements);
+        }
+
         void DataInitialization::copyInputs(std::vector<void*>&               ptrs,
                                             std::vector<void**>&              batchPtrs,
                                             std::vector<size_t>&              maxElements,
                                             std::vector<std::vector<size_t>>& offsets,
                                             ContractionProblemGemm const&     problem,
-                                            hipMemcpyKind                     kind)
+                                            hipMemcpyKind                     kind,
+                                            bool                              copyWholeBuffers)
         {
             ptrs.clear();
             batchPtrs.clear();
@@ -2655,24 +2682,27 @@ namespace TensileLite
                     auto  it   = m_vdata[i].pristine.find(desc.dataType());
                     if(it != m_vdata[i].pristine.end())
                     {
-                        auto& p = it->second;
+                        auto&        p        = it->second;
+                        size_t const elements = copyWholeBuffers
+                                                    ? p.maxElements
+                                                    : problemExtentElements(problem, i, p);
                         if(kind == hipMemcpyHostToHost)
                             ptr = copyInputBuffers(desc,
                                                    p.cpuInput.current.get(),
                                                    p.cpuInput.valid.get(),
-                                                   p.maxElements,
+                                                   elements,
                                                    kind);
                         else if(kind == hipMemcpyHostToDevice)
                             ptr = copyInputBuffers(desc,
                                                    p.gpuInput.current.get(),
                                                    p.cpuInput.valid.get(),
-                                                   p.maxElements,
+                                                   elements,
                                                    kind);
                         else if(kind == hipMemcpyDeviceToDevice)
                             ptr = copyInputBuffers(desc,
                                                    p.gpuInput.current.get(),
                                                    p.gpuInput.valid.get(),
-                                                   p.maxElements,
+                                                   elements,
                                                    kind);
                         if(ptr == nullptr)
                         {
@@ -2758,23 +2788,24 @@ namespace TensileLite
                     }
                     else
                     {
+                        size_t const elements = problemExtentElements(problem, i, p);
                         if(kind == hipMemcpyHostToHost)
                             ptr = copyInputBuffers(desc,
                                                    p.cpuInput.current.get(),
                                                    p.cpuInput.valid.get(),
-                                                   p.maxElements,
+                                                   elements,
                                                    kind);
                         else if(kind == hipMemcpyHostToDevice)
                             ptr = copyInputBuffers(desc,
                                                    p.gpuInput.current.get(),
                                                    p.cpuInput.valid.get(),
-                                                   p.maxElements,
+                                                   elements,
                                                    kind);
                         else if(kind == hipMemcpyDeviceToDevice)
                             ptr = copyInputBuffers(desc,
                                                    p.gpuInput.current.get(),
                                                    p.gpuInput.valid.get(),
-                                                   p.maxElements,
+                                                   elements,
                                                    kind);
                     }
                     if(ptr == nullptr)
@@ -2820,7 +2851,7 @@ namespace TensileLite
                 ptr = copyInputBuffers(desc,
                                        p.gpuInput.valid.get(),
                                        p.cpuInput.valid.get(),
-                                       p.maxElements,
+                                       problemExtentElements(problem, i, p),
                                        hipMemcpyHostToDevice);
                 if(ptr == nullptr)
                     std::__throw_runtime_error("error");
@@ -3056,7 +3087,7 @@ namespace TensileLite
                     ptr = copyInputBuffers(desc,
                                            p.gpuInput.valid.get(),
                                            p.cpuInput.valid.get(),
-                                           p.maxElements,
+                                           problemExtentElements(problem, i, p),
                                            hipMemcpyHostToDevice);
                 }
 
