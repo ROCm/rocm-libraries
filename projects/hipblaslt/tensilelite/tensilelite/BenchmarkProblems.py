@@ -1011,7 +1011,8 @@ def main(
                     resultsFileName = resultsFileBase + ".csv"
                     solutionsFileName = resultsFileBase + ".yaml"
                     granularityFileName = resultsFileBase + "_Granularity.csv"
-                    shutil.copy(resultsFileName, newResultsFileName)
+                    if os.path.isfile(resultsFileName):
+                        shutil.copy(resultsFileName, newResultsFileName)
                     shutil.copy(solutionsFileName, newSolutionsFileName)
                     if os.path.isfile(granularityFileName):
                         shutil.copy(granularityFileName, newGranularityFileName)
