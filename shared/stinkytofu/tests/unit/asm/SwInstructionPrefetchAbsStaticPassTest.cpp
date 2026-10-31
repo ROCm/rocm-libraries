@@ -43,6 +43,14 @@ void appendAlignDirective(BasicBlock* bb, int64_t alignBytes) {
 
 /// Mirror sw_instruction_prefetch_rel_static.stir @at_p0_k0_wmma layout.
 /// Pre-insert totalLayoutBytes = 32640 + 4 = 32644 > P(0). Static pass runs.
+// A kernel whose pre-insertion layout totals exactly \p totalBytes: 4 B of
+// v_add, padding, then a trailing 4 B v_add.
+void buildKernelOfSize(BasicBlock* bb, GfxArchID arch, int64_t totalBytes) {
+    createVAddInBlock(bb, arch, 0, 1, 2);
+    appendAlignDirective(bb, static_cast<int>(totalBytes - 4));
+    createVAddInBlock(bb, arch, 3, 4, 5);
+}
+
 void buildAboveP0Kernel(BasicBlock* bb, GfxArchID arch) {
     createVAddInBlock(bb, arch, 0, 1, 2);
     appendAlignDirective(bb, 32632);
@@ -75,6 +83,12 @@ int countInstructions(const BasicBlock& bb, const char* mnemonic) {
 int countSPrefetchInst(const Function& func) {
     int c = 0;
     for (const BasicBlock& bb : func) c += countInstructions(bb, "s_prefetch_inst");
+    return c;
+}
+
+int countSWaitXcnt(const Function& func) {
+    int c = 0;
+    for (const BasicBlock& bb : func) c += countInstructions(bb, "s_wait_xcnt");
     return c;
 }
 
@@ -127,10 +141,17 @@ class SwInstructionPrefetchAbsStaticPassTest : public ::testing::Test {
         gemmConfig.NumGRM = 1;
     }
 
-    PassManager makePm(int baseSgpr = 64, bool afterSgprCompact = false) {
+    // xnackReplay defaults to the shipping mode. Before this PR the drain was
+    // unconditional, so a default of false would have moved every pre-existing
+    // case in this file to the xnack- configuration and left the mode that
+    // ships covered by the two XnackDrain_* cases alone.
+    PassManager makePm(int baseSgpr = 64, bool afterSgprCompact = false, bool xnackReplay = true) {
         PassManager pm;
         registerAllAnalyses(pm.getAnalysisManager());
         pm.setGemmTileConfig(gemmConfig);
+        AsmCapsConfig caps;
+        caps.enableXnackReplay = xnackReplay;
+        pm.setAsmCapsConfig(caps);
         pm.addPass(createSwInstructionPrefetchAbsStaticPass(baseSgpr, {}, afterSgprCompact));
         return pm;
     }
@@ -472,4 +493,25 @@ TEST_F(SwInstructionPrefetchAbsStaticPassTest, DebugFile_BelowThreshold_NoOpMess
 
     EXPECT_NE(text.find("no-op"), std::string::npos);
     EXPECT_NE(text.find("32640"), std::string::npos);
+}
+
+// The burst's fixed size feeds the fixed-point that solves N, so dropping the
+// drain is not only four bytes of output: it can change how many prefetches
+// fit. At a pre-insertion total of 36708 the two modes land either side of the
+// P(1) boundary, which pins burstFixedBytes from the outside -- hard-coding it
+// to either 20 or 24 fails one of these two.
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, XnackDrain_Size36708_ModesDiffer) {
+    buildKernelOfSize(bb, arch, 36708);
+    auto pm = makePm(64, /*afterSgprCompact=*/false, /*xnackReplay=*/true);
+    pm.run(*func);
+    EXPECT_EQ(countSPrefetchInst(*func), 2);
+    EXPECT_EQ(countSWaitXcnt(*func), 1);  // one drain per contiguous burst
+}
+
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, NoXnackDrain_Size36708_ModesDiffer) {
+    buildKernelOfSize(bb, arch, 36708);
+    auto pm = makePm(64, /*afterSgprCompact=*/false, /*xnackReplay=*/false);
+    pm.run(*func);
+    EXPECT_EQ(countSPrefetchInst(*func), 1);
+    EXPECT_EQ(countSWaitXcnt(*func), 0);
 }
