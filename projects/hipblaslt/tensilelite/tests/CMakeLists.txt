@@ -978,6 +978,62 @@ foreach(PATH fast slow)
     set_tests_properties("CPUGemm.${PATH}_c_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
 endforeach()
 
+#################################################
+#     E output tests (fast & slow)              #
+#################################################
+# --useE makes the reference also write E, the value before activation (after
+# bias), converted to E's type (here the C/D type) as the reference's SetValue
+# does. The driver checks E against the golden GEMM's pre-activation value with
+# the same casts and tolerance as D. With relu, D and E differ wherever the
+# value is negative, so E written after activation (or not at all) fails.
+# Bias is not combined with --batchCount (the driver's bias is one M vector).
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
+
+    foreach(TYPE f32 f16 bf16)
+        get_test_sizes(${TYPE} SIZES)
+        add_cpu_gemm_test(${PATH}_${TYPE}_UseE_BiasRelu
+            ARGS ${SIZES} --type ${TYPE} --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
+        )
+    endforeach()
+    add_cpu_gemm_test(${PATH}_f32_UseE
+        ARGS ${F32_SIZES} --type f32 --useE --validate ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f32_UseE_TN_AllFeatures
+        ARGS ${F32_SIZES} --transA --type f32 --beta 0.5 --bias --activation relu --scaleAlphaVec --useScaleAB Vector --useE --validate ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f32_UseE_Relu_Batched
+        ARGS ${F32_SIZES} --type f32 --beta 1.0 --activation relu --batchCount 3 --useE --validate ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f64_UseE_BiasRelu
+        ARGS ${F64_SIZES} --type f64 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_tf32_UseE_BiasRelu
+        ARGS ${F32_SIZES} --type tf32 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
+    )
+    # Int8 inputs: Int8 E from a float epilogue (round half to even, saturate) and
+    # Int32 E from an int32 epilogue, compared exactly (alphas as in the Int8 tests).
+    add_cpu_gemm_test(${PATH}_I8_I8_S_UseE_BiasRelu
+        ARGS ${F16_SIZES} --type i8 --typeCD i8 --typeAlpha f32 --alpha 0.001953125 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_I8_I32_I32_UseE_BiasRelu
+        ARGS ${F16_SIZES} --type i8 --typeCD i32 --typeAlpha i32 --alpha 1 --beta 2 --bias --activation relu --useE --validate ${PATH_FLAGS}
+    )
+    if(NOT WIN32)
+        # Float8 E, compared exactly (see the Float8 output tests).
+        add_cpu_gemm_test(${PATH}_F8_F8_S_UseE_BiasRelu
+            ARGS ${F16_SIZES} --type f8 --typeCD f8 --alpha 0.3 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_f4_MX32_UseE_Relu
+            ARGS -M 133 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --activation relu --useE --validate ${PATH_FLAGS}
+        )
+    endif()
+endforeach()
+
 # Option checks: these must be rejected.
 foreach(CASE
         "I8_MixedA;--typeA i8 --typeB f32"
@@ -998,6 +1054,7 @@ foreach(CASE
         "C_ComputeInput;--type c --computeInputA f32"
         "C_Bias;--type c --bias"
         "Z_ScaleAB;--type z --useScaleAB Scalar"
+        "C_UseE;--type c --useE"
         "F32_ConjA;--type f32 --conjA")
     list(GET CASE 0 NAME)
     list(GET CASE 1 FLAGS)

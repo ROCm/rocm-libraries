@@ -1171,6 +1171,9 @@ namespace TensileLite
         }
 
 
+        std::pair<rocisa::DataType, rocisa::DataType>
+            getAlphaBetaTypes(ContractionProblemGemm const& problem);
+
         uint64_t getInputContractionInputsTypeId(ContractionProblemGemm const& problem);
 
         // Fast-path epilogue type for Int8 A/B: the slow path's Accumulator for the
@@ -1388,9 +1391,14 @@ namespace TensileLite
                 return rejectFast("amaxD");
             }
 
+            // With useE, the slow path requires equal alpha and beta types
+            // (getInputContractionInputsTypeId throws otherwise); such problems
+            // stay on it, so they fail there as before.
             if(problem.useE())
             {
-                return rejectFast("useE");
+                auto [alphaType, betaType] = getAlphaBetaTypes(problem);
+                if(alphaType != betaType)
+                    return rejectFast("useE_alpha_beta_types_differ");
             }
 
             // After the useE check: with useE, getInputContractionInputsTypeId throws
@@ -1612,6 +1620,8 @@ namespace TensileLite
         // alpha, or std::complex<float/double> for the complex C_C_C/Z_Z_Z types).
         // Alpha, beta, the ScaleAB and scaleAlphaVec scales, C, bias, activation and
         // gate residual are applied in it, and D is written back from it.
+        // With useE, E receives the value before activation (after bias), converted
+        // to E's type by SetValue as in the slow path.
         // OperandMathOpT: per-operand math type used immediately before multiply.
         // XFloat32, for example, truncates float operands to a 10-bit mantissa.
         // Default matches AccumT; when it also matches MacT the operand cast is a no-op.
@@ -2052,6 +2062,19 @@ namespace TensileLite
                                                                aConjugate);
 
                                         current += biasVal;
+                                    }
+
+                                    // E: the pre-activation value, stored as the slow
+                                    // path stores it (SetValue to E's type).
+                                    if(problem.useE())
+                                    {
+                                        assert(!problem.useGradient()
+                                               && "E input (gradient) not supported on this "
+                                                  "path.");
+
+                                        auto const& e = problem.e();
+                                        SetValue<AccumT>(
+                                            e.dataType(), current, inputs.e, e.index(dCoord));
                                     }
 
                                     if(doActivation)
@@ -2629,7 +2652,10 @@ namespace TensileLite
             }
         }
 
-        uint64_t getInputContractionInputsTypeId(ContractionProblemGemm const& problem)
+        // The alpha and beta types of the problem's type id: the ones set via
+        // setAlpha/BetaType(), or the defaults when they were not set.
+        std::pair<rocisa::DataType, rocisa::DataType>
+            getAlphaBetaTypes(ContractionProblemGemm const& problem)
         {
             // retreive alpha/beta type set via setAlpha/BetaType()
             auto alphaType = problem.alphaType();
@@ -2647,6 +2673,13 @@ namespace TensileLite
             {
                 betaType = alphaType;
             }
+
+            return {alphaType, betaType};
+        }
+
+        uint64_t getInputContractionInputsTypeId(ContractionProblemGemm const& problem)
+        {
+            auto [alphaType, betaType] = getAlphaBetaTypes(problem);
 
             if(problem.useE())
             {

@@ -734,3 +734,94 @@ TEST(ReferenceFastPath, ComplexMatchesSlowPathExactly)
         checkComplexFastMatchesSlow<double>(rocisa::DataType::ComplexDouble);
     }
 }
+
+namespace
+{
+    // Float M x N x K problem writing E (useE) of type typeE with strides strideE.
+    ContractionProblemGemm makeUseEProblem(size_t                     M,
+                                           size_t                     N,
+                                           size_t                     K,
+                                           rocisa::DataType           typeE,
+                                           std::vector<size_t> const& stridesE)
+    {
+        using DT     = rocisa::DataType;
+        auto problem = makePackedProblem(DT::Float, DT::Float, DT::Float, M, N, K);
+        problem.setUseE(true);
+        problem.setE(typeE, problem.d().sizes(), stridesE, /*isOutput=*/true);
+        return problem;
+    }
+} // namespace
+
+TEST(ReferenceFastPath, UseEEligibility)
+{
+    using DT = rocisa::DataType;
+    EXPECT_TRUE(isFastPathEligible(makeUseEProblem(4, 4, 4, DT::Float, {})));
+    EXPECT_TRUE(isFastPathEligible(makeUseEProblem(4, 4, 4, DT::Half, {})));
+
+    // Gradient reads E instead of writing it: not on the fast path.
+    auto gradient = makeUseEProblem(4, 4, 4, DT::Float, {});
+    gradient.setUseGradient(true);
+    EXPECT_FALSE(isFastPathEligible(gradient));
+
+    // With useE the slow path requires equal alpha and beta types and throws
+    // otherwise; the fast path leaves such problems to it. Without useE they are
+    // eligible.
+    auto mixedAlphaBeta = makeUseEProblem(4, 4, 4, DT::Float, {});
+    mixedAlphaBeta.setBetaType(DT::Double);
+    EXPECT_FALSE(isFastPathEligible(mixedAlphaBeta));
+    std::vector<float> a(16, 1.0f), b(16, 1.0f), c(16, 0.0f), d(16, 0.0f), e(16, 0.0f);
+    ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.e = e.data();
+    EXPECT_THROW(SolveGemmCPU(mixedAlphaBeta, inputs, /*elementsToValidate=*/-1, true),
+                 std::runtime_error);
+    auto mixedAlphaBetaNoE = makePackedProblem(DT::Float, DT::Float, DT::Float, 4, 4, 4);
+    mixedAlphaBetaNoE.setBetaType(DT::Double);
+    EXPECT_TRUE(isFastPathEligible(mixedAlphaBetaNoE));
+}
+
+// E receives the value before activation (after bias), converted to E's own type
+// (here Half, while D is Float) and stored at E's own strides (here a padded
+// leading dimension), on both paths; D receives relu of that value.
+TEST(ReferenceFastPath, UseEStoresPreActivationValue)
+{
+    using DT       = rocisa::DataType;
+    const size_t M = 3, N = 2, K = 1, ldE = M + 2;
+    auto problem   = makeUseEProblem(M, N, K, DT::Half, {1, ldE, ldE * N});
+    problem.setUseBias(1);
+    problem.setBias(DT::Float, M, M);
+    problem.setActivationType(ActivationType::Relu);
+    problem.setParams().setActivationEnum(ActivationType::Relu);
+    ASSERT_EQ(problem.e().totalAllocatedElements(), ldE + M);
+
+    // value(m, n) = a[m] * b[n] + bias[m]; 2049 is not a Half value (it rounds to
+    // the even neighbour 2048).
+    const std::vector<float> a    = {2049.0f, -3.0f, 0.5f};
+    const std::vector<float> b    = {1.0f, -1.0f};
+    const std::vector<float> bias = {0.0f, 1.0f, -2.0f};
+    const std::vector<float> c(M * N, 0.0f);
+    const std::vector<float> value = {2049.0f, -2.0f, -1.5f, -2049.0f, 4.0f, -2.5f};
+
+    // E padding (rows M .. ldE - 1 of column 0) must keep its initial value.
+    const Half sentinel(99.0f);
+
+    const std::vector<float> expectedE
+        = {2048.0f, -2.0f, -1.5f, 99.0f, 99.0f, -2048.0f, 4.0f, -2.5f};
+
+    for(bool fast : {true, false})
+    {
+        SCOPED_TRACE(fast ? "fast path" : "slow path");
+        if(fast)
+            ASSERT_TRUE(isFastPathEligible(problem));
+        std::vector<float> d(M * N, -1.0f);
+        std::vector<Half>  e(problem.e().totalAllocatedElements(), sentinel);
+        ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+        inputs.bias = bias.data();
+        inputs.e    = e.data();
+        SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/fast);
+
+        for(size_t i = 0; i < M * N; ++i)
+            EXPECT_EQ(d[i], std::max(value[i], 0.0f)) << "D element " << i;
+        for(size_t i = 0; i < e.size(); ++i)
+            EXPECT_EQ(static_cast<float>(e[i]), expectedE[i]) << "E element " << i;
+    }
+}
