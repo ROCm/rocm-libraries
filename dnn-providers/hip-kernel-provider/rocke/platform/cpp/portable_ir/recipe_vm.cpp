@@ -56,6 +56,7 @@
 #include "rocke/abi.h"
 #include "rocke/arena.h"
 #include "rocke/cbor_dom.h"
+#include "rocke/error.hpp"
 #include "rocke/intexpr.h"
 #include "rocke/json_dom.h"
 #include "rocke/recipe_guard.h"
@@ -876,6 +877,22 @@ static const char* rv_bind_name(rvm_t* vm, const jd_val_t* instr, const char* fa
     return b ? rv_resolve_name(vm, b) : fallback;
 }
 
+/* The bound a fact word names (ge / gt / le / lt / eq), or NULL for another key. */
+static rocke_int_bound_t* rv_fact_bound(rocke_int_facts_t* facts, const char* key)
+{
+    if(strcmp(key, "ge") == 0)
+        return &facts->ge;
+    if(strcmp(key, "gt") == 0)
+        return &facts->gt;
+    if(strcmp(key, "le") == 0)
+        return &facts->le;
+    if(strcmp(key, "lt") == 0)
+        return &facts->lt;
+    if(strcmp(key, "eq") == 0)
+        return &facts->eq;
+    return NULL;
+}
+
 /* Read a param instr's attrs into *opts. Every key is one rocke_param_opts_t
  * carries, with a value of its kind; anything else fails the replay, because a
  * dropped attr would silently change the lowered kernel. */
@@ -962,6 +979,29 @@ static bool
             }
             opts->addr_space = v->str;
         }
+        else if(strcmp(key, "multiple_of") == 0)
+        {
+            if(!rocke_jnum(v, &d) || !rv_number_to_int64(d, &opts->facts.multiple_of))
+            {
+                rv_fail(vm, "param '%s' multiple_of is not an integer", name);
+                return false;
+            }
+            opts->facts.multiple_of_set = true;
+        }
+        else if(rocke_int_bound_t* bound = rv_fact_bound(&opts->facts, key))
+        {
+            /* An int, or a relation (its canonical intexpr JSON, a string). */
+            if(v->kind == JD_STR)
+            {
+                bound->relation = v->str;
+            }
+            else if(!rocke_jnum(v, &d) || !rv_number_to_int64(d, &bound->value))
+            {
+                rv_fail(vm, "param '%s' %s is not an integer or a relation", name, key);
+                return false;
+            }
+            bound->set = true;
+        }
         else
         {
             rv_fail(
@@ -998,7 +1038,18 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         rocke_param_opts_t opts;
         if(!rv_param_attrs(vm, name, rocke_jget(instr, "attrs"), &opts))
             return;
-        rocke_value_t* pv = rocke_b_param(vm->b, name, type, &opts);
+        /* The builder raises (ckc::Error) a declaration it refuses, such as a
+         * fact it cannot state; report its text as the replay's failure. */
+        rocke_value_t* pv = NULL;
+        try
+        {
+            pv = rocke_b_param(vm->b, name, type, &opts);
+        }
+        catch(const ckc::Error& error)
+        {
+            rv_fail(vm, "%s", error.what());
+            return;
+        }
         if(!pv)
         {
             rv_fail(vm, "param '%s' failed", name);

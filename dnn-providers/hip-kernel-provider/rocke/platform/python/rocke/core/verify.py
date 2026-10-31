@@ -41,6 +41,7 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _assume_range_errors,
+    param_fact_errors,
     _buffer_op_bytes,
     _if_else_branch_yield,
     _global_ptr_offset_op_error,
@@ -189,8 +190,10 @@ class _Verifier:
         # Top-level scope: kernel params.
         scope: Dict[str, Value] = {}
         param_names: Set[str] = set()
-        for p in self.kernel.params:
+        for index, p in enumerate(self.kernel.params):
             self._check_type(p.type, f"param {p.name!r}", None)
+            for message in param_fact_errors(self.kernel.params, index):
+                self.err(message)
             vname = f"%{p.name}"
             if vname in scope:
                 self.err(f"duplicate kernel parameter id {vname!r}")
@@ -399,7 +402,7 @@ class _Verifier:
                 )
             if len(op.operands) == 2 and op.operands[1].type != v.type:
                 self.err(
-                    f"{name}: hi_value type {op.operands[1].type.name} != "
+                    f"{name}: lt operand type {op.operands[1].type.name} != "
                     f"operand type {v.type.name}",
                     op,
                 )

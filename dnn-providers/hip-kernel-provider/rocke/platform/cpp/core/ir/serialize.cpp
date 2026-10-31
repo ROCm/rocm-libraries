@@ -2524,6 +2524,46 @@ static void canon_rename_region(rename_table_t* rt, rocke_region_t* region)
     }
 }
 
+/* A param leaf "N" of a relation names the id "%N"; its canonical name is the
+ * renamed id without the '%'. */
+static const char* canon_rename_leaf(void* ctx, const char* name)
+{
+    rename_table_t* rt = (rename_table_t*)ctx;
+    const char* oldid = rocke_arena_printf(&rt->b->arena, "%%%s", name);
+    const char* newid = oldid ? rn_get(rt, oldid) : NULL;
+    return newid && newid[0] == '%' ? newid + 1 : name;
+}
+
+/* Python canonicalize's rparam_attrs: a relation names parameters, so its
+ * leaves are renamed by walking its tree, never by text substitution. */
+static void canon_rename_param_relations(rename_table_t* rt, rocke_kernel_def_t* k)
+{
+    static const char* const words[] = {"ge", "gt", "le", "lt", "eq", "multiple_of"};
+    for(int i = 0; i < k->num_params; ++i)
+    {
+        rocke_attr_map_t* attrs = &k->params[i]->attrs;
+        for(int j = 0; j < attrs->count; ++j)
+        {
+            rocke_attr_entry_t* e = &attrs->entries[j];
+            bool is_fact = false;
+            for(const char* word : words)
+            {
+                is_fact = is_fact || strcmp(e->key, word) == 0;
+            }
+            if(!is_fact || e->value.kind != ROCKE_ATTR_STR)
+            {
+                continue;
+            }
+            const char* renamed
+                = rocke_relation_canonical(e->value.u.s, &rt->b->arena, canon_rename_leaf, rt);
+            if(renamed)
+            {
+                e->value.u.s = renamed;
+            }
+        }
+    }
+}
+
 /* Boundary shim: a ckc::Error thrown while parsing is caught here and recorded
  * on the builder, returning the exception's status code (the C ABI is
  * unchanged). */
@@ -2583,6 +2623,7 @@ rocke_status_t rocke_ir_canonicalize(const char* text, char** out_text)
             k->params[i]->name = rocke_arena_strdup(&b.arena, newid + 1);
         }
     }
+    canon_rename_param_relations(&rt, k);
     canon_rename_region(&rt, k->body);
 
     char* ser = NULL;

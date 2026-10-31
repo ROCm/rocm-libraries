@@ -31,7 +31,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .arch import target as _arch
-from .dtypes import dtype_info
+from .dtypes import UNSIGNED_INTEGER_DTYPES, dtype_info
+from .intexpr import IntExpr, relation_json
+from .param_facts import declaration_errors, stored_int
 
 # ----------------------------- Types --------------------------------------
 
@@ -353,7 +355,7 @@ def _int_cmp_pred_error(pred: Any, operand_type: str) -> Optional[str]:
 
 
 # ``arith.assume_range`` integer attrs, in the order their type is checked.
-_ASSUME_RANGE_INT_ATTRS = ("multiple_of", "residue", "lo", "hi", "hi_plus")
+_ASSUME_RANGE_INT_ATTRS = ("multiple_of", "residue", "ge", "lt", "lt_plus")
 
 
 def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
@@ -361,8 +363,8 @@ def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
 
     The one home of the marker's attr rules: the builder raises the first
     message and the verifier reports all of them. The C++ verifier emits the
-    same texts. ``num_operands`` is 2 when the end is a runtime value
-    (``hi_value``) and 1 otherwise.
+    same texts. ``num_operands`` is 2 when the upper end is a Value (the
+    ``lt`` operand) and 1 otherwise.
     """
     errors = [
         f"arith.assume_range: {key} must be an integer"
@@ -383,18 +385,28 @@ def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
         errors.append(
             f"arith.assume_range: residue must be in [0, {multiple_of}), got {residue}"
         )
-    has_hi_value = num_operands == 2
-    if "hi" in attrs and has_hi_value:
+    has_lt_operand = num_operands == 2
+    if "lt" in attrs and has_lt_operand:
         errors.append(
-            "arith.assume_range: hi and hi_value are both given; state at most one end"
+            "arith.assume_range: lt is given both as an attr and as an operand; "
+            "state one upper end"
         )
-    if "hi_plus" in attrs and not has_hi_value:
-        errors.append("arith.assume_range: hi_plus is given without hi_value")
-    if "lo" in attrs and "hi" in attrs and attrs["lo"] >= attrs["hi"]:
+    if "lt_plus" in attrs and not has_lt_operand:
+        errors.append("arith.assume_range: lt_plus is given without an lt operand")
+    if "ge" in attrs and "lt" in attrs and attrs["ge"] >= attrs["lt"]:
         errors.append(
-            f"arith.assume_range: lo ({attrs['lo']}) must be below hi ({attrs['hi']})"
+            f"arith.assume_range: ge ({attrs['ge']}) must be below lt ({attrs['lt']})"
         )
     return errors
+
+
+def param_fact_errors(params: Sequence[Param], index: int) -> list[str]:
+    """Every rule the declaration ``params[index]`` breaks, in order:
+    ``rocke.core.param_facts.declaration_errors``, told whether the declaration
+    has a pointer type."""
+    return declaration_errors(
+        params, index, is_pointer=isinstance(params[index].type, PtrType)
+    )
 
 
 def _check_unsigned_int_operands(op_name: str, a: "Value", b: "Value") -> None:
@@ -451,13 +463,10 @@ def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
 # unsigned operand through _refuse_unsigned when they are built, and again
 # through _refuse_unsigned_operands when they are lowered. U4 is packed-only
 # (above), so only U8 values ever reach an op.
-_UNSIGNED_SCALARS = ("u4", "u8")
-
-
 def _is_unsigned(t: "Type") -> bool:
     """True when ``t``, or the element of a vector ``t``, is an unsigned integer."""
     elem = t.elem if isinstance(t, VectorType) else t
-    return elem.name in _UNSIGNED_SCALARS
+    return elem.name in UNSIGNED_INTEGER_DTYPES
 
 
 def _refuse_unsigned(op_name: str, t: "Type", instead: Optional[str] = None) -> None:
@@ -1066,6 +1075,10 @@ class Value:
     name: str
     type: Type
     op: Optional["Op"] = None
+    # The declaration of a kernel parameter's Value (``IRBuilder.param``,
+    # ``ir_serialize.parse``); ``None`` for every other Value. Its facts are read
+    # through ``rocke.core.facts.stated_facts_of``.
+    param: Param | None = field(default=None, compare=False, repr=False)
 
     def __repr__(self) -> str:
         return self.name
@@ -1111,6 +1124,10 @@ class Param:
     name: str
     type: Type
     attrs: Dict[str, Any] = field(default_factory=dict)
+    # The kernel's parameters declared before this one, the only ones a
+    # relation in ``attrs`` may name. Set wherever a Param is declared
+    # (``IRBuilder.param``, ``ir_serialize.parse``).
+    declared_before: tuple[Param, ...] = field(default=(), compare=False, repr=False)
 
 
 @dataclass
@@ -1401,32 +1418,140 @@ class IRBuilder:
 
     # ----- params -----
 
-    def param(self, name: str, t: Type, **attrs: Any) -> Value:
-        """Declare a kernel parameter.
+    def param(
+        self,
+        name: str,
+        t: Type,
+        *,
+        ge: Any = None,
+        gt: Any = None,
+        le: Any = None,
+        lt: Any = None,
+        eq: Any = None,
+        multiple_of: int | None = None,
+        noalias: bool | None = None,
+        readonly: bool | None = None,
+        writeonly: bool | None = None,
+        nocapture: bool | None = None,
+        nonnull: bool | None = None,
+        align: int | None = None,
+        dereferenceable: int | None = None,
+        addr_space: str | None = None,
+    ) -> Value:
+        """Declare a kernel parameter, with the facts the host checks before
+        every launch.
 
-        Standard ``attrs`` recognised by the lowering:
+        Facts on an integer parameter (each optional; the host checks them,
+        and the GPU trusts them):
 
-        * ``noalias`` (bool) — emit ``noalias`` on the LLVM kernel arg.
-        * ``readonly`` (bool) — emit ``readonly``.
-        * ``writeonly`` (bool) — emit ``writeonly``.
-        * ``align`` (int) — emit ``align N``.
-        * ``addr_space`` (str) — for ``PtrType`` params, override the
-          pointee address space:
+        * ``ge`` / ``gt`` -- value >= / > bound (at most one of the two).
+        * ``le`` / ``lt`` -- value <= / < bound (at most one of the two).
+        * ``eq`` -- value == bound, a baked length; excludes every other word.
+        * ``multiple_of`` -- value % n == 0, an int n >= 1.
 
-          * ``"global"`` (default) → ``ptr addrspace(1)``
-          * ``"constant"`` → ``ptr addrspace(4)`` (kernel-arg
-            constant memory; AMDGPU backend uses scalar
-            ``s_load_dwordxN`` instead of per-lane VMEM loads).
-            Used by descriptor tables (P17): grouped-GEMM
-            ``gemm_descs_const``, per-expert pointer arrays, etc.
+        A bound is an int, a parameter of this kernel declared earlier (its
+        Value), or ``sum_of`` / ``product_of`` / ``quotient_of`` /
+        ``difference_of`` (``rocke.core.intexpr``) over those. A relation sits
+        on the parameter declared last among its terms, so the declaration
+        order (the kernel's argument order) is never changed:
+        ``ldc = b.param("ldc", I32, ge=N)``. ``quotient_of`` needs its
+        divisor's stated lower bound to be at least 1 and its dividend's at
+        least 0. A side with no word has the type's limit; there is no hidden
+        default.
+
+        LLVM argument attributes on a pointer parameter, emitted by the
+        lowering and never checked, except ``align``, which the host also
+        checks:
+
+        * ``noalias``, ``readonly``, ``writeonly``, ``nonnull`` (bool);
+          ``nocapture`` (bool, emitted unless False).
+        * ``align`` (a power of two) -- ``align N``.
+        * ``dereferenceable`` (bytes) -- ``dereferenceable(N)``.
+        * ``addr_space`` (str) -- override the pointee address space:
+          ``"global"`` (default) -> ``ptr addrspace(1)``; ``"constant"`` ->
+          ``ptr addrspace(4)`` (kernel-arg constant memory; the AMDGPU backend
+          uses scalar ``s_load_dwordxN`` instead of per-lane VMEM loads), used
+          by descriptor tables: grouped-GEMM ``gemm_descs_const``, per-expert
+          pointer arrays, etc.
+
+        A misspelled word is a ``TypeError``; a fact the declaration cannot
+        state (a word on the wrong type, two lower bounds, a bound computed in
+        the kernel) is a ``ValueError``.
         """
         if name in self._param_values:
             raise ValueError(f"duplicate kernel parameter {name!r}")
         _refuse_packed_only_value("param", t)
-        v = Value(name=f"%{name}", type=t)
+        attrs: dict[str, Any] = {}
+        for word, bound in (("ge", ge), ("gt", gt), ("le", le), ("lt", lt), ("eq", eq)):
+            if bound is not None:
+                attrs[word] = self._stored_bound(name, word, bound)
+        if multiple_of is not None:
+            attrs["multiple_of"] = stored_int(name, "multiple_of", multiple_of)
+        for key, value in (
+            ("noalias", noalias),
+            ("readonly", readonly),
+            ("writeonly", writeonly),
+            ("nocapture", nocapture),
+            ("nonnull", nonnull),
+        ):
+            if value is not None:
+                attrs[key] = value
+        if align is not None:
+            attrs["align"] = stored_int(name, "align", align)
+        if dereferenceable is not None:
+            attrs["dereferenceable"] = stored_int(
+                name, "dereferenceable", dereferenceable
+            )
+        if addr_space is not None:
+            attrs["addr_space"] = addr_space
+        declared = Param(
+            name=name, type=t, attrs=attrs, declared_before=tuple(self._params)
+        )
+        errors = param_fact_errors([*self._params, declared], len(self._params))
+        if errors:
+            raise ValueError(errors[0])
+        v = Value(name=f"%{name}", type=t, param=declared)
         self._param_values[name] = v
-        self._params.append(Param(name=name, type=t, attrs=dict(attrs)))
+        self._params.append(declared)
         return v
+
+    def _stored_bound(self, name: str, word: str, bound: Any) -> Any:
+        """``bound`` in its stored form: an int, or a relation's canonical JSON."""
+        if isinstance(bound, (Value, IntExpr)):
+            subject = (
+                bound.text(lambda leaf: getattr(leaf, "name", repr(leaf)).lstrip("%"))
+                if isinstance(bound, IntExpr)
+                else f"{word}={bound.name.lstrip('%')}"
+            )
+            return relation_json(
+                bound.tree(lambda leaf: self._leaf_name(name, subject, leaf))
+                if isinstance(bound, IntExpr)
+                else {"param": self._leaf_name(name, subject, bound)}
+            )
+        return stored_int(name, word, bound, relations=True)
+
+    def _leaf_name(self, name: str, subject: str, leaf: Any) -> str:
+        """The parameter name a bound's leaf stands for; refuses any leaf the
+        host cannot evaluate."""
+        if not isinstance(leaf, Value):
+            raise TypeError(
+                f"param {name}: {subject} has the term {leaf!r} -- a term is an int, "
+                "a parameter of this kernel, or a nested sum_of / product_of / "
+                "quotient_of / difference_of"
+            )
+        shown = leaf.name.lstrip("%")
+        if leaf.param is None:
+            raise ValueError(
+                f"param {name}: {subject} uses {shown}, which is computed in the "
+                "kernel -- the host can only evaluate kernel parameters and ints"
+            )
+        if not any(leaf.param is p for p in self._params):
+            raise ValueError(
+                f"param {name}: {subject} uses {shown}, which is a parameter of "
+                "another kernel -- the host can only evaluate this kernel's "
+                "parameters and ints"
+            )
+        return leaf.param.name
 
     def get_param(self, name: str) -> Value:
         return self._param_values[name]
@@ -1704,17 +1829,16 @@ class IRBuilder:
         self,
         v: Value,
         *,
-        lo: Optional[int] = None,
-        hi: Optional[int] = None,
-        hi_value: Optional[Value] = None,
-        hi_plus: int = 0,
+        ge: int | None = None,
+        lt: int | Value | None = None,
+        lt_plus: int = 0,
         multiple_of: int = 1,
         residue: int = 0,
     ) -> Value:
         """Return ``v`` unchanged, marked with facts its caller has checked.
 
-        The marker records ``lo <= v``, ``v < hi`` (an int ``hi``, or
-        ``hi_value + hi_plus`` for an end only known at run time) and
+        The marker records ``ge <= v``, ``v < lt`` (an int ``lt``, or a Value
+        ``lt`` plus ``lt_plus`` for an end only known at run time) and
         ``v == residue (mod multiple_of)``. It emits no instruction: both
         lowerings print ``v`` wherever the result is used. Its one reader is
         the tiling layer's IR range walk, which trusts every marker.
@@ -1725,21 +1849,22 @@ class IRBuilder:
         """
         if v.type not in (I32, I64):
             raise ValueError(f"_assume_range: v must be i32 or i64, got {v.type.name}")
-        if hi_value is not None and hi_value.type != v.type:
+        if isinstance(lt, Value) and lt.type != v.type:
             raise ValueError(
-                f"_assume_range: hi_value type {hi_value.type.name} != v type {v.type.name}"
+                f"_assume_range: lt type {lt.type.name} != v type {v.type.name}"
             )
         attrs: Dict[str, Any] = {"multiple_of": multiple_of, "residue": residue}
-        if lo is not None:
-            attrs["lo"] = lo
-        if hi is not None:
-            attrs["hi"] = hi
+        if ge is not None:
+            attrs["ge"] = ge
         operands = [v]
-        if hi_value is not None:
-            operands.append(hi_value)
-            attrs["hi_plus"] = hi_plus
-        elif hi_plus != 0:
-            attrs["hi_plus"] = hi_plus
+        if isinstance(lt, Value):
+            operands.append(lt)
+            attrs["lt_plus"] = lt_plus
+        else:
+            if lt is not None:
+                attrs["lt"] = lt
+            if lt_plus != 0:
+                attrs["lt_plus"] = lt_plus
         errors = _assume_range_errors(attrs, len(operands))
         if errors:
             raise ValueError(errors[0])

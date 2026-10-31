@@ -55,7 +55,7 @@ def runtime_length(
     ``multiple_of``), the way the tiling layer's ``runtime_value`` states a length it checked.
     """
     marked = b._assume_range(
-        b.param(name, I32), lo=at_least, hi=at_most + 1, multiple_of=multiple_of
+        b.param(name, I32), ge=at_least, lt=at_most + 1, multiple_of=multiple_of
     )
     return runtime_value_of(marked)
 

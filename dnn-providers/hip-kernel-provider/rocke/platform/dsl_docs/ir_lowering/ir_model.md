@@ -45,9 +45,10 @@ gfx942 / gfx950 it sets NT only, the bits of `CACHE_STREAM`, **not** `NON_TEMPOR
 ### `Value`
 
 ```text
-name : "%v42" or "%A"
-type : Type
-op   : Optional[Op]   # producer
+name  : "%v42" or "%A"
+type  : Type
+op    : Optional[Op]      # producer
+param : Optional[Param]   # the declaration, for a kernel parameter's Value
 ```
 
 `Value.__bool__` raises `TypeError`. This is the central safety rail:
@@ -73,9 +74,12 @@ loc       : Optional[str]
 
 ```text
 Region(label, ops)
-Param(name, type, attrs)
+Param(name, type, attrs, declared_before)
 KernelDef(name, params, body, attrs)
 ```
+
+`Param.attrs` holds the pointer attributes and the integer facts a declaration states (below);
+`declared_before` is the parameters declared before it, the only ones its relations may name.
 
 Kernel attributes consumed by lowering:
 
@@ -291,25 +295,69 @@ scf_yield(*values)
 ### Parameters and naming
 
 ```text
-param(name, type, **attrs) -> Value
+param(name, type, *, ge=, gt=, le=, lt=, eq=, multiple_of=,
+      noalias=, readonly=, writeonly=, nocapture=, nonnull=, align=, dereferenceable=, addr_space=) -> Value
 get_param(name) -> Value
 ```
 
-Pointer attributes consumed by LLVM lowering:
+Every keyword is optional and keyword-only; a misspelled one is a `TypeError`.
+
+Pointer attributes consumed by LLVM lowering (on a pointer parameter only):
 
 ```text
 noalias        -> noalias
 readonly       -> readonly
 writeonly      -> writeonly + nocapture
-align=N        -> align N
+nonnull        -> nonnull
+nocapture=False -> drops the default nocapture
+align=N        -> align N              (N a power of two)
 dereferenceable=N -> dereferenceable(N)
+addr_space     -> "constant" lowers the pointer as ptr addrspace(4)
 ```
 
 Verified by `test_param_metadata_lowers_to_llvm_arg_attrs` in `tests/test_rocke.py`.
 
+Facts on an integer parameter, which the host checks before every launch and the GPU trusts.
+They emit nothing:
+
+```text
+ge / gt  -> value >= / > bound      (at most one of the two)
+le / lt  -> value <= / < bound      (at most one of the two)
+eq       -> value == bound          (a baked length; excludes every other word)
+multiple_of=n -> value % n == 0     (an int n >= 1)
+```
+
+A bound is an int, an earlier parameter's Value, or `sum_of` / `product_of` / `quotient_of` /
+`difference_of` (`rocke.core.intexpr`) over those. The declaration order is the kernel's argument
+order, so a relation sits on the parameter declared last among its terms; `quotient_of` and
+`difference_of` move a product or a sum to that side:
+
+```python
+M   = b.param("M",   I32, ge=1, le=1 << 20, multiple_of=64)
+N   = b.param("N",   I32, ge=1, le=1 << 20)
+ldc = b.param("ldc", I32, ge=N, le=1 << 20, multiple_of=8)
+sb  = b.param("sb",  I32, ge=product_of(M, ldc))
+```
+
+A side with no word has the type's limit; there is no hidden default. `quotient_of` needs its
+divisor's stated lower bound to be at least 1 and its dividend's at least 0. An int bound is
+stored as an int; a relation as the canonical JSON of its intexpr tree
+(`{"mul":[{"param":"M"},{"param":"ldc"}]}`), which every serializer carries as a string. The
+builder refuses what a declaration cannot state (a word on the wrong type, two lower bounds, a
+bound computed in the kernel) with a `ValueError`; both verifiers apply the same rules to
+`Param.attrs`, and also refuse a relation that names a parameter declared later. The C++ builder
+takes the same facts in `rocke_param_opts_t.facts` (`rocke_int_facts_t`), a relation as its JSON
+text.
+
+`rocke.core.facts.stated_facts_of(value)` reads the facts stated for a Value -- by its parameter
+declaration or by the range marker that produced it -- and resolves each Value bound to numbers
+through that Value's own facts: `ldc ge N` with `N ge 1` gives `ldc >= 1`. It never runs the IR
+range walk.
+
 ## IR Printer
 
-`core/ir_print.py::print_ir(kernel)` emits MLIR-style textual IR for inspection and manifest artifacts. It is not parsed back into the compiler. The production input to `core/lower_llvm.py::lower_kernel_to_llvm` is the `KernelDef` object, not this text.
+`core/ir_print.py::print_ir(kernel)` emits MLIR-style textual IR for inspection and manifest artifacts. A
+parameter's facts print after its type: `%ldc: i32 {ge = %N, le = 1048576, multiple_of = 8}`. It is not parsed back into the compiler. The production input to `core/lower_llvm.py::lower_kernel_to_llvm` is the `KernelDef` object, not this text.
 
 ## Conservative Passes
 
@@ -319,7 +367,8 @@ Verified by `test_param_metadata_lowers_to_llvm_arg_attrs` in `tests/test_rocke.
 - common subexpression elimination on pure ops with one result;
 - dead-pure-op elimination (recursive into nested regions).
 
-It never removes or reorders side-effecting operations. `PassStats` records `constants_folded`, `common_subexpressions`, `dead_ops_removed`.
+It never removes or reorders side-effecting operations, and it keeps every parameter's facts and every range
+marker. `PassStats` records `constants_folded`, `common_subexpressions`, `dead_ops_removed`.
 
 ## IR Design Rules
 

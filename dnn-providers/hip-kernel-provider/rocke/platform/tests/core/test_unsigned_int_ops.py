@@ -140,8 +140,8 @@ def test_verifier_accepts_the_new_attrs():
     n = b.param("n", I32)
     b.add_nuw(a, n)
     b.cmp_ult(a, n)
-    b._assume_range(a, lo=0, hi_value=n, hi_plus=1, multiple_of=4, residue=3)
-    b._assume_range(a, lo=0, hi=64)
+    b._assume_range(a, ge=0, lt=n, lt_plus=1, multiple_of=4, residue=3)
+    b._assume_range(a, ge=0, lt=64)
     b.ret()
     assert _errors(b.kernel) == []
 
@@ -235,13 +235,14 @@ _BAD_MARKERS = [
     ),
     (
         True,
-        {"multiple_of": 1, "residue": 0, "hi": 8, "hi_plus": 0},
-        "arith.assume_range: hi and hi_value are both given; state at most one end",
+        {"multiple_of": 1, "residue": 0, "lt": 8, "lt_plus": 0},
+        "arith.assume_range: lt is given both as an attr and as an operand; "
+        "state one upper end",
     ),
     (
         False,
-        {"multiple_of": 1, "residue": 0, "lo": 8, "hi": 8},
-        "arith.assume_range: lo (8) must be below hi (8)",
+        {"multiple_of": 1, "residue": 0, "ge": 8, "lt": 8},
+        "arith.assume_range: ge (8) must be below lt (8)",
     ),
     # A value that is not an integer is refused before any value rule reads it.
     (
@@ -251,18 +252,18 @@ _BAD_MARKERS = [
     ),
     (
         False,
-        {"multiple_of": 1, "residue": 0, "lo": True},
-        "arith.assume_range: lo must be an integer",
+        {"multiple_of": 1, "residue": 0, "ge": True},
+        "arith.assume_range: ge must be an integer",
     ),
     (
         False,
-        {"multiple_of": 1, "residue": 0, "hi": 8.5},
-        "arith.assume_range: hi must be an integer",
+        {"multiple_of": 1, "residue": 0, "lt": 8.5},
+        "arith.assume_range: lt must be an integer",
     ),
     (
         True,
-        {"multiple_of": 1, "residue": 0, "hi_plus": False},
-        "arith.assume_range: hi_plus must be an integer",
+        {"multiple_of": 1, "residue": 0, "lt_plus": False},
+        "arith.assume_range: lt_plus must be an integer",
     ),
 ]
 
@@ -278,15 +279,22 @@ def test_verifier_rejects_bad_marker_attrs(runtime_end, attrs, message):
     assert _errors(b.kernel) == [message]
 
 
-@pytest.mark.parametrize("runtime_end,attrs,message", _BAD_MARKERS)
+# The builder takes one ``lt``, an int or a Value, so it cannot state the upper
+# end both ways; every other bad marker it refuses with the verifier's text.
+_BAD_BUILDER_MARKERS = [
+    case for case in _BAD_MARKERS if not (case[0] and "lt" in case[1])
+]
+
+
+@pytest.mark.parametrize("runtime_end,attrs,message", _BAD_BUILDER_MARKERS)
 def test_marker_builder_refuses_the_same_attrs(runtime_end, attrs, message):
     b = IRBuilder("bad_marker_builder")
     a = b.param("a", I32)
     n = b.param("n", I32)
-    kwargs = {k: v for k, v in attrs.items() if k != "hi_plus"}
+    kwargs = {k: v for k, v in attrs.items() if k != "lt_plus"}
     if runtime_end:
-        kwargs["hi_value"] = n
-        kwargs["hi_plus"] = attrs["hi_plus"]
+        kwargs["lt"] = n
+        kwargs["lt_plus"] = attrs["lt_plus"]
     with pytest.raises(ValueError) as raised:
         b._assume_range(a, **kwargs)
     assert str(raised.value) == message
@@ -457,7 +465,7 @@ def test_marker_on_a_constant_folds_to_the_constant():
     b = IRBuilder("fold_marker")
     out = b.param("out", PtrType(I32, "global"))
     n = b.param("n", I32)
-    b.store(b._assume_range(b.const_i32(5), hi_value=n), out)
+    b.store(b._assume_range(b.const_i32(5), lt=n), out)
     b.ret()
     assert _folded_store_value(b.kernel) == 5
 
@@ -476,7 +484,7 @@ def test_marker_lowers_to_the_text_without_it():
     x = b.param("x", I32)
     n = b.param("n", I32)
     out = b.param("out", PtrType(I32, "global"))
-    marked = b._assume_range(x, lo=0, hi_value=n, hi_plus=1, multiple_of=2, residue=0)
+    marked = b._assume_range(x, ge=0, lt=n, lt_plus=1, multiple_of=2, residue=0)
     b.store(b.add(marked, b.const_i32(1)), out)
     b.ret()
     kernel = b.kernel
@@ -496,12 +504,12 @@ def test_marker_attrs_round_trip():
     b = IRBuilder("marker_attrs")
     x = b.param("x", I32)
     n = b.param("n", I32)
-    b._assume_range(x, lo=0, hi_value=n, hi_plus=1, multiple_of=4, residue=2)
-    b._assume_range(x, hi=16)
+    b._assume_range(x, ge=0, lt=n, lt_plus=1, multiple_of=4, residue=2)
+    b._assume_range(x, lt=16)
     b.ret()
     printed = print_ir(b.kernel)
-    assert "{hi_plus = 1, lo = 0, multiple_of = 4, residue = 2}" in printed
-    assert "{hi = 16, multiple_of = 1, residue = 0}" in printed
+    assert "{ge = 0, lt_plus = 1, multiple_of = 4, residue = 2}" in printed
+    assert "{lt = 16, multiple_of = 1, residue = 0}" in printed
     ir = serialize(b.kernel)
     assert serialize(parse(ir)) == ir
     assert print_ir(parse(ir)) == printed
@@ -520,7 +528,7 @@ def _hip_kernel():
     below = b.param("below", PtrType(I1, "global"))
     b.store(b.add_nuw(a, c), out)
     b.store(b.cmp_ult(a, c), below)
-    b.store(b._assume_range(a, lo=0), out, b.const_i32(1))
+    b.store(b._assume_range(a, ge=0), out, b.const_i32(1))
     b.ret()
     return b.kernel
 

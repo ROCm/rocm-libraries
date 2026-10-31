@@ -143,14 +143,14 @@ def runtime_value_of(value: Value | int) -> RuntimeValue | None:
         op is None
         or op.name != "arith.assume_range"
         or len(op.operands) != 1
-        or "lo" not in op.attrs
-        or "hi" not in op.attrs
+        or "ge" not in op.attrs
+        or "lt" not in op.attrs
     ):
         return None
     return RuntimeValue(
         value,
         0,
-        Interval(op.attrs["lo"], op.attrs["hi"]),
+        Interval(op.attrs["ge"], op.attrs["lt"]),
         Congruence(op.attrs.get("multiple_of", 1), op.attrs.get("residue", 0)),
     )
 
@@ -272,16 +272,17 @@ class _FactWalk:
         return r.lo if _is_exact(r) else None
 
     def runtime_end(self, marker: Op) -> RuntimeValue:
-        """A marker's runtime end ``hi_value + hi_plus``, rebuilt from ``hi_value``'s marker."""
-        hi_value = marker.operands[1]
-        end = runtime_value_of(hi_value)
+        """A marker's runtime end ``lt + lt_plus`` (its ``lt`` operand), rebuilt from that
+        operand's marker."""
+        lt = marker.operands[1]
+        end = runtime_value_of(lt)
         if end is None:
             raise ValueError(
                 f"IR range walk: the marker on {marker.operands[0]} states an end over "
-                f"{hi_value}, which is not a runtime value's marker result -- a runtime end is "
+                f"{lt}, which is not a runtime value's marker result -- a runtime end is "
                 "the .value of a RuntimeValue (from runtime_value)"
             )
-        return end._shifted(marker.attrs.get("hi_plus", 0))
+        return end._shifted(marker.attrs.get("lt_plus", 0))
 
     def _derive(self, value: Value) -> Facts:
         op = value.op
@@ -372,8 +373,8 @@ class _FactWalk:
         """An ``assume_range`` marker: the operand's facts narrowed by the stated ones."""
         x_range, x_congruence = self.facts(op.operands[0])
         attrs = op.attrs
-        hi = self.runtime_end(op) if len(op.operands) == 2 else attrs.get("hi")
-        stated = Interval(attrs.get("lo"), hi)
+        hi = self.runtime_end(op) if len(op.operands) == 2 else attrs.get("lt")
+        stated = Interval(attrs.get("ge"), hi)
         multiple_of, residue = attrs.get("multiple_of", 1), attrs.get("residue", 0)
         congruence = (
             Congruence(multiple_of, residue) if multiple_of > 1 else x_congruence

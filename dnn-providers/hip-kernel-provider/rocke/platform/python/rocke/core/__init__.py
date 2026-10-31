@@ -11,12 +11,18 @@ passes in this package.
 Modules:
 
   - ``dtypes``     : target-independent dtype names and alias normalization.
+  - ``facts``      : `stated_facts_of(value)`, the facts a kernel parameter's
+                     declaration or a range marker states for a Value.
   - ``intexpr``    : the integer-expression tree, its evaluator
                      (`eval_intexpr`) and the host-bound constructors
                      (`sum_of`, `product_of`, `quotient_of`, `difference_of`).
   - ``ir``         : `IRBuilder`, `KernelDef`, `Value`, `Op`, `Region`,
                      plus type system (`F16`, `F32`, `I32`, `I64`,
                      `VectorType`, `PtrType`, `SmemType`).
+  - ``param_facts``: the facts a kernel parameter's declaration may state
+                     (`FACT_WORDS`, `FACT_INT_TYPES`,
+                     `int_type_limits`), their rules
+                     (`declaration_errors`) and their resolved intervals.
   - ``ir_print``   : MLIR-style textual dump (`print_ir(kernel)`); human-only.
   - ``ir_serialize``: round-trippable ``ck.dsl.ir/v1`` machine format
                      (`serialize` / `parse`) with explicit SSA ids, plus
@@ -88,6 +94,7 @@ from .backend import (
     lower_universal_gemm,
     resolve_backend,
 )
+from .facts import StatedFacts, stated_facts_of
 from .ir_print import print_ir
 from .ir_serialize import (
     canonical_equal,
@@ -153,6 +160,8 @@ __all__ = [
     "lower_universal_gemm",
     "resolve_backend",
     "print_ir",
+    "StatedFacts",
+    "stated_facts_of",
     "serialize",
     "parse",
     "canonicalize",
