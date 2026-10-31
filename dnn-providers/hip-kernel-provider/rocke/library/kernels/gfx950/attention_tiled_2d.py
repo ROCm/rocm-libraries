@@ -3709,6 +3709,9 @@ def build_unified_attention_2d_tiled(
                 # Non-transposed 32x32 QK: ``S32_n[n] = vec_f32(16)``,
                 # one 32x32x16 C tile per warp. Downstream softmax/PV
                 # consume this via the non-transposed mask block below.
+                # K goes through the shared K reader, like the transposed
+                # path: when K_lds holds raw fp8 bytes it reads them as fp8
+                # and dequantizes with k_scale before the bf16 MFMA.
                 S32_n = [None] * QK_N_TILES
                 for n in range(QK_N_TILES):
                     acc32 = b.zero_vec_f32(16)
@@ -3717,9 +3720,7 @@ def build_unified_attention_2d_tiled(
                         kc_off32 = b.add(
                             b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8))
                         )
-                        B32_v = b.smem_load_vN(
-                            K_lds, cur_buf, k_row32, kc_off32, dtype=dtype, n=8
-                        )
+                        B32_v = _read_k8_mfma_operand(cur_buf, k_row32, kc_off32)
                         q32_op = _read_q32(k) if Q_REREAD else Q32_reg[k]
                         acc32 = _mfma_32x32x16(b, dtype, q32_op, B32_v, acc32)
                     S32_n[n] = acc32
