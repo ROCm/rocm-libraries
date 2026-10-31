@@ -60,7 +60,7 @@ struct histogram
         __shared__
         typename bhistogram_t::TempStorage storage;
 
-        _CCCL_PRAGMA_NOUNROLL()
+        HIPCUB_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bhistogram_t(storage).Histogram(values, histogram);
@@ -69,7 +69,7 @@ struct histogram
             values[0] ^= static_cast<T>(histogram[hipThreadIdx_x] & 1);
         }
 
-        _CCCL_PRAGMA_UNROLL_FULL()
+        HIPCUB_PRAGMA_UNROLL_FULL()
         for(unsigned int offset = 0; offset < BinSize; offset += BlockSize)
         {
             if(offset + hipThreadIdx_x < BinSize)
