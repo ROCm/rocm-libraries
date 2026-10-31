@@ -60,6 +60,9 @@ extern "C" {
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval rocsparse_status_invalid_pointer \p mat_A, \p mat_B, \p descr, or \p buffer_size pointer is invalid.
+*  \retval rocsparse_status_not_implemented \ref rocsparse_spgeam_input_operation_A or
+*          \ref rocsparse_spgeam_input_operation_B is \ref rocsparse_operation_transpose or
+*          \ref rocsparse_operation_conjugate_transpose.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle,
@@ -195,6 +198,9 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval rocsparse_status_invalid_pointer \p mat_A, \p mat_B, \p mat_C, \p descr, or \p buffer_size pointer is invalid.
+*  \retval rocsparse_status_not_implemented \ref rocsparse_spgeam_input_operation_A or
+*          \ref rocsparse_spgeam_input_operation_B is \ref rocsparse_operation_transpose or
+*          \ref rocsparse_operation_conjugate_transpose.
 *
 *  \par First Example
 *  \snippet example_rocsparse_spgeam_1.cpp doc example
