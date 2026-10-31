@@ -93,6 +93,39 @@ def markNamed(name):
     return getattr(pytest.mark, name)
 
 
+def _usingStinkytofuBackend(availableArchs):
+    """Return True when kernels for this config will be built on the stinkytofu backend.
+
+    Checked in order:
+      1. ``ROCISA_BACKEND`` set explicitly -> True iff it is ``stinkytofu``.
+      2. Otherwise, this process already loaded the stinkytofu adaptor.
+      3. Otherwise, a gfx1250 target (the build subprocess auto-selects
+         stinkytofu from ``--architecture=gfx1250``, even on a GPU-less host
+         where this process stayed on native).
+    """
+    cached = getattr(_usingStinkytofuBackend, "_cached", None)
+    if cached is not None:
+        return cached
+
+    backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+    if backend:
+        active = backend == "stinkytofu"
+    else:
+        try:
+            import rocisa
+        except Exception:
+            rocisa = None
+        loaded_adaptor = (
+            rocisa is not None
+            and "rocisa_stinkytofu_adaptor" in (getattr(rocisa, "__file__", "") or "")
+        )
+        targets_gfx1250 = any("gfx1250" in arch for arch in availableArchs)
+        active = loaded_adaptor or targets_gfx1250
+
+    _usingStinkytofuBackend._cached = active
+    return active
+
+
 def configMarks(filepath, rootDir, availableArchs):
     """
     Returns a list of marks to add to a particular YAML config path.  Currently gets a mark for:
@@ -166,8 +199,7 @@ def configMarks(filepath, rootDir, availableArchs):
             marks.append(pytest.mark.skip)
 
     # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
-    rocisa_backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
-    if rocisa_backend == "stinkytofu" and markNamed("skip-stinkytofu") in marks:
+    if markNamed("skip-stinkytofu") in marks and _usingStinkytofuBackend(availableArchs):
         marks.append(pytest.mark.skip(reason="Not yet supported in stinkytofu backend"))
 
     # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
