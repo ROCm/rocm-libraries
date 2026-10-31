@@ -104,6 +104,14 @@ custom.config:
 `Source`, `Version`, and `Features` are presence-checked but otherwise
 provenance only — they are read by the validator, not by the runtime.
 
+Under uniform summation order, which hipBLASLt applies unless the caller turns
+it off, hipBLASLt refuses an external kernel unless its `CustomKernel` block
+sets `uniformSummationOrder: true` (default `false`). Set it only for a kernel
+that reduces every row of D in the same order, so that identical rows of A give
+bitwise-identical rows of D, and that has no compiled-in StaggerU, which
+hipBLASLt still refuses. `AddCustomConfig` copies the key from the kernel's
+`CustomKernel` entry in the test YAML.
+
 ## Adding a new external kernel
 
 The `tensilelite.AddCustomConfig` helper extracts the Tensile-side interface from
