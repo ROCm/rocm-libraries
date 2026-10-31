@@ -244,6 +244,7 @@
 /projects/rocfft/**/.readthedocs.yaml               @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
 /projects/rocfft/docs/                              @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
 /projects/rocfft/library/include/                   @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/rocfft/fortran/                           @ROCm/rocm-fortran-maintainers @ROCm/fft-reviewers
 
 /projects/rocprim/**/*.md                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/rocprim/**/*.rst                          @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
