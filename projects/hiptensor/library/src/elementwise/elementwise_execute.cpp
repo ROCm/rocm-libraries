@@ -35,10 +35,13 @@
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
 #include "handle.hpp"
+#include "hip_error.hpp"
 #include "hiptensor_element_wise_operation.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
 #include "performance.hpp"
+#include "reduction/reduction_epilogue.hpp"
+#include "util.hpp"
 
 namespace hiptensor
 {
@@ -237,6 +240,62 @@ namespace hiptensor
             }
         }
         return HIPTENSOR_STATUS_SUCCESS;
+    }
+
+    bool elementwiseAllScalesZero(std::vector<double> const& scalars)
+    {
+        return !scalars.empty()
+               && std::all_of(scalars.begin(), scalars.end(), [](double s) { return s == 0.0; });
+    }
+
+    hiptensorStatus_t
+        elementwiseZeroOutput(hiptensorTensorDescriptor const& descD, void* D, hipStream_t stream)
+    {
+        auto const& lengths = descD.mLengths;
+        auto const& strides = descD.mStrides;
+        // The elements fill a contiguous range when, ordered by stride, every mode of extent
+        // greater than one starts where the previous one ends.
+        std::vector<std::size_t> order(lengths.size());
+        for(std::size_t d = 0; d < order.size(); d++)
+        {
+            order[d] = d;
+        }
+        std::sort(
+            order.begin(), order.end(), [&](auto a, auto b) { return strides[a] < strides[b]; });
+        std::size_t expected   = 1;
+        bool        contiguous = strides.size() == lengths.size();
+        for(auto d : order)
+        {
+            if(!contiguous || lengths[d] == 1)
+            {
+                continue;
+            }
+            contiguous = strides[d] == expected;
+            expected *= lengths[d];
+        }
+        if(contiguous)
+        {
+            auto const bytes = elementsFromLengths(lengths) * hiptensorDataTypeSize(descD.mType);
+            if(bytes > 0)
+            {
+                HIPTENSOR_RETURN_IF_HIP_ERROR(hipMemsetAsync(D, 0, bytes, stream));
+            }
+            return HIPTENSOR_STATUS_SUCCESS;
+        }
+        // no input term: +0 at every element, through D's strides
+        return reductionEpilogue(descD.mType,
+                                 lengths,
+                                 strides,
+                                 D,
+                                 {},
+                                 nullptr,
+                                 HIPTENSOR_OP_IDENTITY,
+                                 0.0,
+                                 {},
+                                 nullptr,
+                                 HIPTENSOR_OP_IDENTITY,
+                                 0.0,
+                                 stream);
     }
 
     hiptensorStatus_t runElementwise(hiptensorHandle_t                       handle,

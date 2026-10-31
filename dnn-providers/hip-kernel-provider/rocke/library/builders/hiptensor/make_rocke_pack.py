@@ -1142,6 +1142,9 @@ def build_kernel(family, params, arch, num_cus):
             tpc=spec.tpc,
             ilp=spec.ilp,
             vec=spec.vec,
+            vb=spec.vb,
+            rag=spec.rag,
+            vt=spec.vect,
             rank=ewp_host.pack_classes(arch).index(spec),
             # capability: batch digit slots, i32 element offsets
             slots_b=ep.SLOTS_B,

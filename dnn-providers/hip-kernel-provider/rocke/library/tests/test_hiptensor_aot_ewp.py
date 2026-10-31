@@ -4,15 +4,17 @@
 (``ewp_host``).
 
 CPU: spec validity, kernel names and ABI, the runs / launch arguments of layouts (refusals of
-negative strides, unaligned strides, too many batch modes, offsets past 2^31), the palettes of the
+negative strides, unaligned strides, too many batch modes, offsets past 2^31), the vector widths
+below 16 bytes and the ragged classes (run growth, tile counts, run lengths), the palettes of the
 packs (every class valid, names unique, LDS within the target's), the tuned problems (every entry
-serves its problem with its class), the choice rule, and the C++ engine's copy of the table
-(``gen_ewp_table.py --check``).
+serves its problem with its class), the choice rule (the ragged classes only where no other class
+serves), and the C++ engine's copy of the table (``gen_ewp_table.py --check``).
 
 GPU: classes against the pack's generic elementwise kernel (``.ew``) on the same problem, bit for
 bit (a NaN equals a NaN of any sign and payload), and on integer data also against an
 independent float64 torch reference: transposing permutations, binary and trinary operations
-(inputs transposed or laid out like D, both modes), every data-type row, (1) integer data with the
+(inputs transposed or laid out like D, both modes; extents and strides that are not multiples of
+16 bytes, runs that do not hold whole tiles), every data-type row, (1) integer data with the
 exact operators (the fast path and the operator table), (2) NaN, infinities, signed zeros,
 overflowing and tiny values with every basic and binary operator, (3) a zero scale (that input,
 all NaN, is not read) and (4) a NaN scale (counts as zero). Streaming classes run on gfx942 /
@@ -95,12 +97,23 @@ def test_spec_checks():
         dict(kinds="TV", ilp=3),
         dict(kinds="TV", to=256, tt=256, block=64),  # phase-1 registers
         dict(kinds="TT", to=256, tt=256, block=512),  # two 128 KiB LDS tiles
+        dict(kinds="TV", vb=3),  # not a vector width
+        dict(kinds="TV", vb=32),
+        dict(kinds="TV", rag=2),
+        dict(kinds="TV", vb=2, nt=1),  # one-element vectors: no streaming loads
+        dict(kinds="TV", vb=4, to=1, tt=4),  # mode t: below the vector (2 f16)
     ]
     for kw in bad:
         with pytest.raises(ValueError):
             spec(2, "f16", **kw).check()
     with pytest.raises(ValueError):
         EwpSpec(arity=2, a="f16", c="f32", d="f16", kinds="TV").check()  # element sizes
+    with pytest.raises(ValueError):
+        spec(2, "f32", kinds="TV", vb=2).check()  # below the element size
+    for vb, v in ((16, 8), (8, 4), (4, 2), (2, 1)):
+        s = spec(2, "f16", kinds="TV", vb=vb, rag=1, nt=2)
+        s.check()
+        assert s.vec == v and s.chunks() == s.tile_bytes() // vb
     assert LDS_BYTES == 163840 and SLOTS_B == 8
 
 
@@ -171,6 +184,17 @@ def test_kernel_abi_and_names():
     assert spec(1, "f16", kinds="T", mode="a", to=4, tt=16, tw=8).kernel_name() == (
         "hiptensor_aot_ewp1_f16_f16_T_a_o4_t16_w8_b256"
     )
+    # ragged classes: the run lengths after ystep (mode a: the shared mode's extent too)
+    rt = spec(2, "f16", kinds="TV", vb=4, rag=1)
+    na = [p.name for p in build_ewp(rt).params]
+    assert na[na.index("ystep") + 1 : na.index("ystep") + 3] == ["lo", "lt"]
+    assert "lw" not in na and rt.kernel_name().endswith("_b256_v4_r")
+    ra = spec(1, "f64", kinds="T", mode="a", to=4, tt=16, tw=16, vb=8, rag=1, nt=2)
+    na = [p.name for p in build_ewp(ra).params]
+    assert na[na.index("ystep") + 1 : na.index("ystep") + 4] == ["lo", "lt", "lw"]
+    assert ra.kernel_name() == "hiptensor_aot_ewp1_f64_f64_T_a_o4_t16_w16_b256_nt2_v8_r"
+    nr = [p.name for p in build_ewp(replace(rt, rag=0)).params]
+    assert "lo" not in nr and "lt" not in nr
 
 
 def test_runs_and_plan():
@@ -215,6 +239,78 @@ def test_runs_and_plan():
     assert [dims[i][0] for i in o] == [112, 256] and [dims[i][0] for i in t] == [64]
 
 
+def test_ragged_runs_and_plan():
+    # hipTensor's rank-5 binary bench layout: D = (c, e, b, a, d), A = C = (a, b, c, d, e)
+    ext = dict(a=48, b=40, c=50, d=46, e=50)
+    dims = problem(2, "abcde", "cebad", ext, None, "abcde")
+    assert ewp_kinds(NAMES[2], dims, "t") == "TT"
+    # 50 elements along D's stride-1 mode: no 16-byte (nor 8-byte) f16 vectors
+    for vb in (16, 8):
+        assert ewp_plan(spec(2, "f16", kinds="TT", vb=vb, rag=1), dims) is None
+    s = spec(2, "f16", kinds="TT", vb=4, rag=1)
+    o, t, w = ewp_runs(s, dims)
+    # ragged runs grow by the next contiguous mode: o = c (+e), t = a (+b)
+    assert w is None
+    assert [dims[i][0] for i in o] == [50, 50] and [dims[i][0] for i in t] == [48, 40]
+    vals, grid = ewp_plan(s, dims)
+    assert vals["lo"] == 2500 and vals["lt"] == 1920 and "lw" not in vals
+    assert vals["ntl"] == -(-2500 // 64) * (1920 // 64) and vals["nb"] == 46
+    # the non-ragged class of the same knobs needs whole tiles
+    assert ewp_plan(replace(s, rag=0), dims) is None
+    # D = (f, b, a, c, d, e), the inputs (a, b, ...): both 16-element stride-1 runs continue in
+    # b, so one run takes it; the two orders waste as much (the 16-element run fills half a
+    # 32-element tile). One or two inputs: D's run takes b; three: the inputs' run.
+    ext = dict(a=16, b=32, c=4, d=4, e=2, f=16)
+    for arity in (1, 2, 3):
+        dims = problem(arity, "abcdef", "fbacde", ext, None, "abcdef")
+        kinds = "T" * arity
+        assert ewp_kinds(NAMES[arity], dims, "t") == kinds
+        s = spec(arity, "f16", kinds=kinds, to=32, tt=32, block=64, rag=1)
+        o, t, w = ewp_runs(s, dims)
+        lo = 1
+        for i in o:
+            lo *= dims[i][0]
+        lt = 1
+        for i in t:
+            lt *= dims[i][0]
+        assert (lo, lt) == ((512, 16) if arity < 3 else (16, 512)), (arity, lo, lt)
+    # a shared stride-1 mode of an odd extent (mode a, one-element vectors)
+    ext = dict(a=121, b=120, c=110, d=130)
+    dims = problem(2, "abcd", "adcb", ext, None, "abcd")
+    assert ewp_kinds(NAMES[2], dims, "a") == "TT"
+    for vb in (16, 8, 4):
+        cls = spec(
+            2, "f16", kinds="TT", mode="a", to=4, tt=16, tw=128 // vb, vb=vb, rag=1
+        )
+        assert ewp_plan(cls, dims) is None
+    s = spec(2, "f16", kinds="TT", mode="a", to=4, tt=16, tw=64, vb=2, rag=1, nt=2)
+    vals, grid = ewp_plan(s, dims)
+    assert vals["lw"] == 121 and vals["nw"] == 2
+    # o = d (130), t = b (+c: contiguous after b in A)
+    assert vals["lo"] == 130 and vals["lt"] == 120 * 110
+    assert vals["ntl"] == 2 * -(-130 // 4) * -(-13200 // 16)
+    # a tile row shorter than 128 bytes of a longer shared mode: refused
+    assert ewp_plan(replace(s, tw=32), dims) is None
+    # wider vectors for the transposed inputs (tb): A's 48-element stride-1 mode takes 16-byte
+    # loads while D's 50-element mode takes pairs
+    ext = dict(a=48, b=40, c=50, d=46, e=50)
+    dims = problem(2, "abcde", "cebad", ext, None, "abcde")
+    u = spec(2, "f16", kinds="TT", vb=4, tb=16, rag=1)
+    assert u.vect == 8 and u.vec == 2 and u.p1_units() == (64 // 2) * (64 // 8)
+    assert u.kernel_name().endswith("_v4_r_u16")
+    vals, grid = ewp_plan(u, dims)
+    assert vals == ewp_plan(spec(2, "f16", kinds="TT", vb=4, rag=1), dims)[0]
+    # A's stride-1 run of 6 elements: no 16-byte loads along it
+    ext = dict(a=6, b=40, c=50, d=46)
+    assert ewp_plan(u, problem(2, "abcd", "cdba", ext, None, "abcd")) is None
+    with pytest.raises(ValueError):
+        spec(
+            1, "f16", kinds="T", mode="a", to=4, tt=16, tw=8, tb=16
+        ).check()  # mode t only
+    with pytest.raises(ValueError):
+        spec(2, "f32", kinds="TT", vb=8, tb=2).check()  # below the element size
+
+
 def test_plan_refusals():
     s = spec(2, "f16", kinds="TV", to=32, tt=32, block=64)
     ext = dict(a=32, b=32)
@@ -245,7 +341,28 @@ def test_palettes():
             c.check()
             assert c.kinds.count("T") * c.tile_bytes() <= H.LDS_LIMIT[arch]
             assert c.swz != 1  # names do not tell swizzle 0 from 1
-            assert c.nt == 3
+            # no streaming loads for one-element vectors and the ragged mode a classes
+            assert c.nt == (2 if c.vec == 1 or (c.rag and c.mode == "a") else 3)
+        # the ragged mode a classes (rows in bytes): vectors of several elements in rows of
+        # 256 then 128 bytes (8 x 8), one-element vectors in rows of 64 elements (2 x 32) then 128
+        # bytes (8 x 8), every vector width in rows of 64 bytes (8 x 16), one-element vectors in
+        # rows of 64 elements of 8 x 8 (the fallback) unless that is 128 bytes; none for 8-byte
+        # elements
+        for es in (2, 4, 8):
+            ra = [
+                (t["tw"] * t["vb"], t["to"], t["tt"], t["vb"])
+                for t in H.RAG_TEMPLATES[es]
+                if t["mode"] == "a"
+            ]
+            wide = [vb for vb in (16, 8, 4) if vb > es]
+            want = (
+                [(256, 8, 8, vb) for vb in wide]
+                + [(128, 8, 8, vb) for vb in wide]
+                + [(64 * es, 2, 32, es), (128, 8, 8, es)]
+                + [(64, 8, 16, vb) for vb in wide + [es]]
+                + ([(64 * es, 8, 8, es)] if 64 * es != 128 else [])
+            )
+            assert ra == (want if es < 8 else []), es
     assert H.pack_classes("gfx90a") == []
 
 
@@ -282,19 +399,101 @@ def test_choice_rule():
     assert (
         s.mode == "a" and src in ("rule", "tuned") and grid[0] * grid[1] >= H.MIN_CTAS
     )
-    # few CTAs: the class with the most
+    # few CTAs: the class with the most (of the classes with whole tiles: the ragged ones only
+    # where none of those serves)
     small = problem(2, "ab", "ba", dict(a=128, b=128))
     s, (vals, grid), src = H.choose("gfx950", 2, row(2, "f16"), small, cls)
-    assert src == "rule"
+    assert src == "rule" and s.rag == 0
     n = grid[0] * grid[1] * grid[2]
     for c in cls:
-        if (c.arity, c.a, c.d, c.kinds) == (2, "f16", "f16", "TV") and c.mode == "t":
+        if (c.arity, c.a, c.d, c.kinds, c.rag) == (
+            2,
+            "f16",
+            "f16",
+            "TV",
+            0,
+        ) and c.mode == "t":
             pl = ewp_plan(c, small)
             if pl is not None:
                 assert pl[1][0] * pl[1][1] <= n
     # an input laid out neither like D nor fastest along a mode: no class
     weird = [(16, [2, 1, 1]), (16, [32, 16, 16]), (2, [1, 256, 256])]
     assert H.choose("gfx950", 2, row(2, "f16"), weird, cls) is None
+    # the ragged classes serve what the others cannot, with the widest vector that fits
+    ext = dict(a=48, b=40, c=50, d=46, e=50)
+    for arity, mc, dt, vb in (
+        (2, "abcde", "f16", 4),
+        (1, None, "f16", 4),
+        (3, "abcde", "f16", 4),
+        (2, "abcde", "f32", 8),
+        (2, "abcde", "f64", 16),
+    ):
+        dims = problem(arity, "abcde", "cebad", ext, None, mc)
+        got = H.choose("gfx950", arity, row(arity, dt), dims, cls)
+        assert got is not None and got[0].rag == 1 and got[0].vb == vb, (arity, dt, got)
+    dims = problem(2, "abcd", "adcb", dict(a=121, b=120, c=110, d=130), None, "abcd")
+    got = H.choose("gfx950", 2, row(2, "f16"), dims, cls)
+    assert got[0].rag == 1 and got[0].vb == 2 and got[0].mode == "a"
+    # D's odd stride-1 mode, A's of 696 elements: single elements on D's side, 16-byte
+    # loads of the transposed inputs (tb)
+    dims = problem(2, "abc", "bac", dict(a=696, b=585, c=40), None, "abc")
+    got = H.choose("gfx950", 2, row(2, "f16"), dims, cls)
+    assert got[0].rag == 1 and got[0].vb == 2 and got[0].tb == 16 and got[0].mode == "t"
+    # a shared mode of 16-byte multiples (40 f16): no ragged class of mode a (the generic
+    # kernel's vector form serves it); no other class either
+    dims = problem(2, "abcd", "adcb", dict(a=40, b=6, c=5, d=7), None, "abcd")
+    assert H.choose("gfx950", 2, row(2, "f16"), dims, cls) is None
+    dims = problem(2, "abcd", "adcb", dict(a=42, b=6, c=5, d=7), None, "abcd")
+    got = H.choose("gfx950", 2, row(2, "f16"), dims, cls)
+    assert got[0].rag == 1 and got[0].mode == "a" and got[0].vb == 4
+    # mode a: 121 f16 elements (one-element vectors) take rows of 64 elements of 2 x 32
+    # positions; 120 f16 elements (8-byte vectors) rows of 256 bytes of 8 x 8 positions
+    dims = problem(2, "abcd", "adcb", dict(a=121, b=120, c=110, d=130), None, "abcd")
+    got = H.choose("gfx950", 2, row(2, "f16"), dims, cls)
+    assert (got[0].tw * got[0].vb, got[0].to, got[0].tt, got[0].nt) == (128, 2, 32, 2)
+    assert got[0].vec == 1
+    dims = problem(2, "abcd", "adcb", dict(a=124, b=120, c=110, d=130), None, "abcd")
+    got = H.choose("gfx950", 2, row(2, "f16"), dims, cls)
+    assert (got[0].tw * got[0].vb, got[0].to, got[0].tt, got[0].vb) == (256, 8, 8, 8)
+    # 23 f16 elements: rows of 128 bytes would span 2.8 times the shared mode (more than
+    # twice): the 64-byte rows (8 x 16 positions)
+    dims = problem(1, "abcd", "adcb", dict(a=23, b=48, c=48, d=48))
+    got = H.choose("gfx950", 1, row(1, "f16"), dims, cls)
+    assert got[0].rag == 1 and got[0].mode == "a"
+    assert (got[0].tw * got[0].vb, got[0].to, got[0].tt) == (64, 8, 16)
+    # 37 elements (one-element vectors) and short runs: no ragged class within twice the
+    # elements; the 8 x 8 class of 64-element rows within three times (f16: 128 bytes, f32: 256)
+    dims = problem(1, "abcd", "adcb", dict(a=37, b=9, c=5, d=33))
+    for dt in ("f16", "f32"):
+        got = H.choose("gfx950", 1, row(1, dt), dims, cls)
+        assert (
+            got[0].mode,
+            got[0].to,
+            got[0].tt,
+            got[0].tw * got[0].vec,
+            got[0].vec,
+        ) == (
+            "a",
+            8,
+            8,
+            64,
+            1,
+        ), dt
+        useful, work = H._rag_work(got[0], got[1][0])
+        assert 2 * useful < work <= 3 * useful
+    # 8-byte elements: no ragged class of mode a (the generic kernel serves them)
+    dims = problem(2, "abcd", "adcb", dict(a=121, b=120, c=110, d=130), None, "abcd")
+    assert H.choose("gfx950", 2, row(2, "f64"), dims, cls) is None
+    # never where a class with whole tiles serves
+    for arch in H.ARCHES:
+        ac = H.pack_classes(arch)
+        for arity, dims in (
+            (1, problem(1, "abcd", "acdb", dict(a=64, b=256, c=112, d=112))),
+            (2, problem(2, "abcd", "dcba", dict(a=64, b=256, c=112, d=112))),
+        ):
+            for dt in ("f16", "f32"):
+                got = H.choose(arch, arity, row(arity, dt), dims, ac)
+                assert got is not None and got[0].rag == 0
 
 
 def test_engine_table_is_current():
@@ -394,6 +593,35 @@ LAYOUTS = [
     (3, "abc", "cba", None, None, dict(a=64, b=3, c=128)),  # TTV
     (3, "abc", "cba", "cba", None, dict(a=64, b=3, c=128)),  # TVV
     (3, "abcd", "dcba", "abcd", "abcd", dict(a=64, b=3, c=2, d=128)),  # TTT
+    # extents / strides that are not multiples of 16 bytes, runs without whole tiles (ragged
+    # classes; the rank-5 bench layout of hipTensor's elementwise tests at a small size)
+    (
+        2,
+        "abcde",
+        "cebad",
+        None,
+        "abcde",
+        dict(a=6, b=5, c=10, d=3, e=10),
+    ),  # TT, 4-byte f16
+    (1, "abcde", "cebad", None, None, dict(a=6, b=5, c=10, d=3, e=10)),
+    (3, "abcde", "cebad", "abcde", "abcde", dict(a=6, b=5, c=10, d=3, e=10)),  # TTT
+    (2, "abcd", "adcb", None, "abcd", dict(a=11, b=6, c=5, d=7)),  # shared odd mode (a)
+    (
+        1,
+        "abcde",
+        "acdbe",
+        None,
+        None,
+        dict(a=12, b=11, c=10, d=11, e=3),
+    ),  # shared 12 (a)
+    (
+        2,
+        "abc",
+        "cba",
+        None,
+        None,
+        dict(a=72, b=3, c=40),
+    ),  # 16-byte vectors, ragged runs
 ]
 DTYPES = {
     1: ("f16", "f32", "f64"),
@@ -430,12 +658,13 @@ def _classes_for(arity, dt, dims, arch):
                 and (c.a, c.b, c.c) == row(arity, dt)[:3]
             ):
                 out.append(c)
-    extra = []
+    extra, ragged = [], []
+    es = {"f16": 2, "bf16": 2, "f32": 4, "f64": 8}[dt]
     for mode in ("t", "a"):
         k = ewp_kinds(NAMES[arity], dims, mode)
         if not k or "T" not in k:
             continue
-        v = 16 // {"f16": 2, "bf16": 2, "f32": 4, "f64": 8}[dt]
+        v = 16 // es
         tiles = (v, 2 * v, 4 * v) if mode == "t" else (1, 2, 4)
         # mode a: the whole shared mode per tile row (16-byte pieces of it only for 16-byte atoms)
         unit = next((e for e, st in dims if all(x == 1 for x in st)), v)
@@ -463,7 +692,58 @@ def _classes_for(arity, dt, dims, arch):
                     continue
                 if ewp_plan(s, dims) is not None:
                     extra.append(s)
-    out += extra[:2]
+        # ragged classes of every vector width that serves the layout (small tiles)
+        for vb in (16, 8, 4, 2):
+            if vb < es:
+                continue
+            vr = vb // es
+            to, tt, rw = (
+                (max(vr, 8), max(vr, 8), 1) if mode == "t" else (2, 4, 128 // vb)
+            )
+            s = spec(
+                arity,
+                dt,
+                kinds=k,
+                mode=mode,
+                to=to,
+                tt=tt,
+                tw=max(1, rw),
+                block=64,
+                nt=0 if vr == 1 else 3,
+                walk="t" if vb in (8, 2) else "o",
+                tpc=2 if vb in (16, 2) else 1,
+                ilp=1,
+                vb=vb,
+                rag=1,
+            )
+            z, sh = default_swizzle(s)
+            s = replace(s, swz=z, swsh=sh)
+            try:
+                s.check()
+            except ValueError:
+                continue
+            if ewp_plan(s, dims) is not None:
+                ragged.append(s)
+        # one-element vectors on D's side, 16-byte loads of the transposed inputs (tb)
+        if mode == "t" and es < 16:
+            s = spec(
+                arity,
+                dt,
+                kinds=k,
+                to=16,
+                tt=16,
+                block=64,
+                nt=2,
+                ilp=1,
+                vb=es,
+                rag=1,
+                tb=16,
+            )
+            z, sh = default_swizzle(s)
+            s = replace(s, swz=z, swsh=sh)
+            if ewp_plan(s, dims) is not None:
+                ragged.insert(0, s)
+    out += extra[:2] + ragged[:3]
     if arch not in ("gfx942", "gfx950"):
         out = [replace(s, nt=0) for s in out]
     return out

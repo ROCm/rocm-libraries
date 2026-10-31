@@ -1219,6 +1219,9 @@ namespace
                           {"tpc", int64_t(s.tpc)},
                           {"ilp", int64_t(s.ilp)},
                           {"vec", int64_t(rocke_htaot_ewp_vec(&s))},
+                          {"vb", int64_t(s.vb)},
+                          {"rag", int64_t(s.rag)},
+                          {"vt", int64_t(rocke_htaot_ewp_vect(&s))},
                           {"rank", int64_t(i)},
                           {"slots_b", int64_t(ROCKE_HTAOT_EWP_SLOTS_B)},
                           {"limit_index", kLimitIndex},
@@ -2515,6 +2518,9 @@ namespace
             c.block = s.block;
             c.tpc   = s.tpc;
             c.vec   = rocke_htaot_ewp_vec(&s);
+            c.vb    = s.vb;
+            c.rag   = s.rag;
+            c.vt    = rocke_htaot_ewp_vect(&s);
             c.slots = ROCKE_HTAOT_EWP_SLOTS_B;
             classes.push_back(c);
         }

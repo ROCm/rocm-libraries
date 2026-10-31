@@ -551,11 +551,12 @@ def test_cpp_rreduce_picks_equal_python(arch, tmp_path):
     )
 
 
-def _ewp_problem(rng):
+def _ewp_problem(rng, ragged=False):
     """A random elementwise problem in hipTensor's canonical form: arity, the data types and
     ``(extent, [stride per tensor])`` ordered by D's strides, contiguous modes merged; the inputs
     stored in random mode orders (sometimes D's, sometimes padded), extents that are often
-    multiples of the classes' tiles."""
+    multiples of the classes' tiles (``ragged``: extents that often are not, nor of 16 bytes).
+    """
     from kernels.common.hiptensor_aot.host import canonicalize
 
     arity = rng.choice((1, 2, 2, 3))
@@ -572,10 +573,12 @@ def _ewp_problem(rng):
     else:
         dts = [dt] * (arity + 1)
     rank = rng.randrange(2, 7)
-    shape = [
-        rng.choice([1, 2, 3, 4, 6, 8, 16, 24, 32, 48, 64, 112, 128, 256])
-        for _ in range(rank)
-    ]
+    sizes = (
+        [1, 2, 3, 5, 6, 7, 10, 11, 12, 14, 20, 40, 48, 50, 60, 121, 146]
+        if ragged
+        else [1, 2, 3, 4, 6, 8, 16, 24, 32, 48, 64, 112, 128, 256]
+    )
+    shape = [rng.choice(sizes) for _ in range(rank)]
     while math.prod(shape) > 1 << 26:
         i = max(range(rank), key=lambda j: shape[j])
         shape[i] = max(1, shape[i] // 2)
@@ -606,6 +609,30 @@ def _ewp_problem(rng):
     return arity, full, dims
 
 
+def _ewp_layout_problem(
+    arity, dt, shape=(16, 32, 4, 4, 2, 16), d_order=(5, 1, 0, 2, 3, 4)
+):
+    """Packed inputs in mode order, D in ``d_order``. The default: D = (f, b, a, c, d, e) of the
+    inputs' (a, b, c, d, e, f), extents 16, 32, 4, 4, 2, 16: D's and the inputs' 16-element
+    stride-1 runs both continue in b, and a ragged class's two run orders waste as much.
+    """
+    from kernels.common.hiptensor_aot.host import canonicalize
+
+    shape = list(shape)
+    orders = [list(range(len(shape)))] * arity + [list(d_order)]
+    strides = []
+    for o in orders:
+        st, acc = [0] * len(shape), 1
+        for i in o:
+            st[i] = acc
+            acc *= shape[i]
+        strides.append(st)
+    dims = canonicalize(
+        [(shape[i], [s[i] for s in strides]) for i in range(len(shape))], arity
+    )
+    return arity, [dt, dt if arity == 3 else None, dt if arity >= 2 else None, dt], dims
+
+
 @pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
 def test_cpp_ewp_picks_equal_python(arch, tmp_path):
     """hipTensor's tuned tiled elementwise choice is rocKE's: the C++ rule (rocke_ewp_rule.hpp,
@@ -619,6 +646,25 @@ def test_cpp_ewp_picks_equal_python(arch, tmp_path):
     classes = H.pack_classes(arch)
     rng = random.Random(8192 + ("gfx942", "gfx950").index(arch))
     probs = [_ewp_problem(rng) for _ in range(3000)]
+    # layouts the ragged classes (vectors below 16 bytes, runs without whole tiles) serve
+    rng2 = random.Random(4096 + ("gfx942", "gfx950").index(arch))
+    probs += [_ewp_problem(rng2, ragged=True) for _ in range(1500)]
+    # layouts whose two run orders waste as much (both stride-1 runs continue in one mode)
+    probs += [
+        _ewp_layout_problem(arity, dt) for arity in (1, 2, 3) for dt in ("f16", "f32")
+    ]
+    # a shared stride-1 mode of 37 elements: one-element vectors in rows of 64 elements (2 x 32
+    # positions), and with short runs the 8 x 8 classes of 64-element rows (more than twice the
+    # elements, at most three times)
+    probs += [
+        _ewp_layout_problem(a, dt, shape, d_order)
+        for a in (1, 2)
+        for dt in ("f16", "f32")
+        for shape, d_order in (
+            ((37, 44, 44, 22, 6, 28), (0, 4, 1, 3, 5, 2)),
+            ((37, 9, 5, 33), (0, 3, 2, 1)),
+        )
+    ]
     for key, _c in H.TUNED.get(arch, []):
         ar, dt, modes = key.split("|")
         dims = [
@@ -627,7 +673,7 @@ def test_cpp_ewp_picks_equal_python(arch, tmp_path):
         ]
         probs.append((int(ar), [x or None for x in dt.split(",")], dims))
     lines, want = [], []
-    picked = tuned = 0
+    picked = tuned = ragged = 0
     for arity, dts, dims in probs:
         lines.append(H.problem_key(arity, dts, dims))
         got = H.choose(arch, arity, dts, dims, classes)
@@ -637,10 +683,12 @@ def test_cpp_ewp_picks_equal_python(arch, tmp_path):
         s, (vals, grid), src = got
         picked += 1
         tuned += src == "tuned"
+        ragged += s.rag
         args = ",".join(f"{k}={vals[k]}" for k in sorted(vals))
         want.append(f"{s.kernel_name()} {src} {grid[0]},{grid[1]},{grid[2]} {args}")
     # the sample exercises the classes and the tuned routes
     assert picked > 300 and tuned == len(H.TUNED.get(arch, [])), (picked, tuned)
+    assert ragged > 100, ragged
     problems = tmp_path / "problems.txt"
     problems.write_text("\n".join(lines) + "\n")
     got = _run(

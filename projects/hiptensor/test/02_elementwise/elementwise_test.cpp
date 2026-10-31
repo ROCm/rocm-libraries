@@ -444,12 +444,12 @@ namespace hiptensor
 
             size_t sizeA = std::accumulate(extentA.begin(),
                                            extentA.end(),
-                                           hiptensorDataTypeSize(abDataType),
+                                           size_t(hiptensorDataTypeSize(abDataType)),
                                            std::multiplies<size_t>());
 
             size_t sizeB = std::accumulate(extentB.begin(),
                                            extentB.end(),
-                                           hiptensorDataTypeSize(abDataType),
+                                           size_t(hiptensorDataTypeSize(abDataType)),
                                            std::multiplies<size_t>());
 
             mElapsedTimeMs        = float64_t(timeMs) / hotRuns;

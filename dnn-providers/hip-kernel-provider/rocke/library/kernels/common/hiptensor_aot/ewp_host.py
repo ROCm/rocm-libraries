@@ -17,7 +17,16 @@ contiguous in every tensor merged (``host.canonicalize(dims, key=D)``).
 The choice (:func:`choose`): the tuned class of a tuned problem when it serves the layout;
 otherwise the first class of the palette (in table order) of the problem's data types whose
 kinds match the layout, which serves it and launches at least :data:`MIN_CTAS` CTAs; when none
-launches that many, the serving class with the most CTAs (the first of equals).
+launches that many, the serving class with the most CTAs (the first of equals). The ragged
+classes (``EwpSpec.rag``: runs of any length, vectors of 16 down to the element size,
+:data:`RAG_TEMPLATES`) are a second palette, taken only when no other class serves the problem
+(layouts whose extents or strides are not multiples of the 16-byte vector or whose runs do not
+hold a whole number of tiles; not in mode a when every stride is a multiple of 16 bytes, which the
+vector form of the generic kernel serves better): a ragged class whose tiles span more than twice
+the elements of the problem is not taken, and of the others the first in table order that launches
+at least :data:`MIN_CTAS` CTAs, else the one with the most CTAs; when none serves the problem so, the
+same among the mode a classes of 8 x 8 positions and rows of 64 elements whose tiles span at most
+three times its elements.
 """
 
 from __future__ import annotations
@@ -111,6 +120,96 @@ TEMPLATES: Dict[int, List[dict]] = {
         _a(16, 32, 1, 256),
     ],
 }
+
+
+def _rag_templates(es: int) -> List[dict]:
+    """The ragged templates of an element size: per vector width ``vb`` (16 bytes down to the
+    element size, in that order) the mode t classes: with 16-byte vectors the large tile of the
+    palette's first template (128 x 128 f16, 128 x 64 f32; not for trinary operations); 64 x 64 with
+    the transposed inputs read with
+    wider vectors than D's (``tb``: 16, 8, 4 bytes), 64 x 64, 32 x 32, 64 x 8 and 8 x 64 (runs of
+    a few elements along the inputs' or D's stride-1 mode); then the mode a classes, without
+    streaming loads (``nt`` 2: measured faster on these layouts), in this order: vectors of
+    several elements (widest first) in rows of 256 bytes, then 128 bytes, of 8 x 8 positions;
+    one-element vectors in rows of 64 elements of 2 x 32 positions, then 128 bytes of 8 x 8;
+    every vector width in rows of 64 bytes of 8 x 16 positions (a row shorter than 128 bytes must
+    hold the whole shared mode); one-element vectors in rows of 64 elements of 8 x 8 positions
+    (the fallback of :func:`choose`) when that row is not 128 bytes. None for 8-byte elements (the
+    generic kernel serves those layouts better). One-element vectors are scalar loads without a
+    streaming hint (``nt`` 2)."""
+    out = []
+    for vb in (16, 8, 4, 2):
+        if vb < es:
+            continue
+        v = vb // es
+        nt = 3 if v > 1 else 2
+        # 16-byte vectors: the large tile of the palette's first template first; the transposed
+        # inputs' loads may be wider than D's vectors (tb): 64 x 64 first
+        big = {2: (128, 128), 4: (128, 64), 8: (64, 64)}[es] if vb == 16 else None
+        tiles = (
+            ([(big[0], big[1], 0)] if big and big != (64, 64) else [])
+            + [(64, 64, tb) for tb in (16, 8, 4) if tb > vb]
+            + [
+                (64, 64, 0),
+                (32, 32, 0),
+                (64, 8, 0),
+                (8, 64, 0),
+            ]
+        )
+        for to, tt, tb in tiles:
+            if to % v or tt % ((tb or vb) // es):
+                continue
+            p2 = (to // v) * tt
+            k = dict(
+                mode="t",
+                to=to,
+                tt=tt,
+                block=max(64, min(256, p2 // 4)),
+                nt=nt,
+                ilp=2,
+                vb=vb,
+                rag=1,
+                swz=1,
+            )
+            if tb:
+                k["tb"] = tb
+            if big and (to, tt) == big:
+                k["max_arity"] = (
+                    2  # three transposed inputs: the 64 x 64 tile is faster
+                )
+            out.append(k)
+    if es >= 8:
+        return out
+    wide = [
+        vb for vb in (16, 8, 4) if vb > es
+    ]  # several elements per vector, widest first
+    entries = (
+        [(256, 8, 8, vb) for vb in wide]
+        + [(128, 8, 8, vb) for vb in wide]
+        + [(64 * es, 2, 32, es), (128, 8, 8, es)]
+        + [(64, 8, 16, vb) for vb in wide + [es]]
+        + ([(64 * es, 8, 8, es)] if 64 * es != 128 else [])
+    )
+    for row, to, tt, vb in entries:
+        out.append(
+            dict(
+                mode="a",
+                to=to,
+                tt=tt,
+                tw=row // vb,
+                block=256,
+                nt=2,
+                ilp=0,
+                vb=vb,
+                rag=1,
+                swz=1,
+            )
+        )
+    return out
+
+
+#: Ragged class templates per element size (see :func:`_rag_templates`).
+RAG_TEMPLATES: Dict[int, List[dict]] = {es: _rag_templates(es) for es in (2, 4, 8)}
 
 #: Tuned problems per target: (canonical problem key, class). gfx950: the API's permutation and
 #: elementwise doc rows with a transposing layout (f16 / f32), each class the fastest of an
@@ -556,6 +655,7 @@ def class_spec(row, arity: int, kinds: str, knobs: dict) -> EwpSpec:
 
     a, b, c, d = row
     k = dict(knobs)
+    k.pop("max_arity", None)
     sw = k.pop("swz", 0)
     s = EwpSpec(arity=arity, a=a, b=b, c=c, d=d, kinds=kinds, **k)
     if sw == 1:
@@ -574,7 +674,8 @@ def _fits(s: EwpSpec, arch: str) -> bool:
 
 def pack_classes(arch: str) -> List[EwpSpec]:
     """The classes of the target's pack, in choice order: per arity, data-type row, kinds and
-    template; then the classes of the tuned problems not already there."""
+    template (the ragged templates after the others); then the classes of the tuned problems not
+    already there."""
     if arch not in ARCHES:
         return []
     out: List[EwpSpec] = []
@@ -583,9 +684,11 @@ def pack_classes(arch: str) -> List[EwpSpec]:
         for row in DTYPE_ROWS[arity]:
             es = {"f16": 2, "bf16": 2, "f32": 4, "f64": 8}[row[3]]
             for kinds in _kinds(arity):
-                for t in TEMPLATES.get(es, []):
+                for t in TEMPLATES.get(es, []) + RAG_TEMPLATES.get(es, []):
                     if arity == 3 and t["mode"] != "t":
                         continue  # trinary: element transpositions only
+                    if arity > t.get("max_arity", 3):
+                        continue
                     s = class_spec(row, arity, kinds, t)
                     if s not in seen and _fits(s, arch):
                         seen.add(s)
@@ -629,6 +732,32 @@ def _ctas(grid) -> int:
     return grid[0] * grid[1] * grid[2]
 
 
+def _vec16(es: int, dims) -> bool:
+    """Whether every stride of every tensor but the shared stride-1 mode's, and that mode's
+    extent, are multiples of 16 bytes: the vector form of the generic kernel (16-byte accesses
+    along the shared mode) serves such a layout, and serves it better than a ragged class of
+    mode a."""
+    v = 16 // es
+    for e_, st in dims:
+        if all(x == 1 for x in st):
+            if e_ % v:
+                return False
+        elif any(x % v for x in st):
+            return False
+    return True
+
+
+def _rag_work(s: EwpSpec, vals) -> Tuple[int, int]:
+    """``(useful, work)`` of a ragged launch: the elements of the runs (mode a: times the shared
+    mode) and the elements its tiles span."""
+    useful = vals["lo"] * vals["lt"]
+    work = vals["ntl"] * s.to * s.tt
+    if s.mode == "a":
+        useful *= vals["lw"]
+        work *= s.tw * s.vec
+    return useful, work
+
+
 def choose(arch: str, arity: int, dts, dims, classes: Optional[List[EwpSpec]] = None):
     """``(spec, (args, grid), source)`` of a problem (source "tuned" or "rule"), or None when
     no class of the target serves it."""
@@ -644,22 +773,36 @@ def choose(arch: str, arity: int, dts, dims, classes: Optional[List[EwpSpec]] = 
                     return s, pl, "tuned"
     names = {1: ["A", "D"], 2: ["A", "C", "D"], 3: ["A", "B", "C", "D"]}[arity]
     kinds = {m: ewp_kinds(names, dims, m) for m in ("t", "a")}
-    best = None
-    for s in classes:
-        if (s.arity, s.a, s.b, s.c, s.d) != (arity, a, b, c, d) or s.kinds != kinds[
-            s.mode
-        ]:
-            continue
-        pl = ewp_plan(s, dims)
-        if pl is None:
-            continue
-        n = _ctas(pl[1])
-        if n >= MIN_CTAS:
-            return s, pl, "rule"
-        if best is None or n > _ctas(best[1][1]):
-            best = (s, pl)
-    if best is not None:
-        return best[0], best[1], "rule"
+    # the ragged classes only when no other class serves the problem; when no ragged class
+    # serves it within twice its elements, the mode a classes of 8 x 8 positions and rows of
+    # 64 elements within three times
+    for rag, span in ((0, 2), (1, 2), (1, 3)):
+        best = None
+        for s in classes:
+            if s.rag != rag:
+                continue
+            if span == 3 and (s.mode, s.to, s.tt, s.tw * s.vec) != ("a", 8, 8, 64):
+                continue
+            if rag and s.mode == "a" and _vec16(s.es, dims):
+                continue  # the generic kernel's vector form serves it better
+            if (s.arity, s.a, s.b, s.c, s.d) != (arity, a, b, c, d) or s.kinds != kinds[
+                s.mode
+            ]:
+                continue
+            pl = ewp_plan(s, dims)
+            if pl is None:
+                continue
+            n = _ctas(pl[1])
+            if rag:
+                useful, work = _rag_work(s, pl[0])
+                if span * useful < work:
+                    continue  # mostly overhang
+            if n >= MIN_CTAS:
+                return s, pl, "rule"
+            if best is None or n > _ctas(best[1][1]):
+                best = (s, pl)
+        if best is not None:
+            return best[0], best[1], "rule"
     return None
 
 
@@ -672,6 +815,7 @@ __all__ = [
     "DTYPE_ROWS",
     "LDS_LIMIT",
     "MIN_CTAS",
+    "RAG_TEMPLATES",
     "TEMPLATES",
     "TUNED",
     "choose",

@@ -8901,9 +8901,11 @@ namespace
 
     // The tiled kernel (KERNEL_RANK 0) and the generic one (1) compute the same exact results for
     // every data type row, with aligned and unaligned buffers (the tiled program's fallback) and
-    // with an input whose scale is zero.
+    // with an input whose scale is zero. The tuned tiled kernels are off: on gfx942 / gfx950 a
+    // ragged one would come first for these layouts (RockeTunedElementwise.RaggedLayoutsExact).
     TEST(RockeTiledElementwise, EveryCandidateExact)
     {
+        ScopedEnv off("HIPTENSOR_ROCKE_DISABLE_TUNED", "1");
         struct Row
         {
             int                 arity;
@@ -8958,12 +8960,10 @@ namespace
                     auto      pick = runTiled(c);
                     if(rank == 0 && skew == 0)
                     {
-                        // a 16-bit permutation laid out as D is one contiguous run: the flat
-                        // kernel on gfx942 / gfx950
-                        bool const flat = r.arity == 1 && r.in == r.out
-                                          && (r.in == HIPTENSOR_R_16F || r.in == HIPTENSOR_R_16BF)
-                                          && (deviceArch() == "gfx942" || deviceArch() == "gfx950");
-                        EXPECT_EQ(pick.rfind(flat ? "ewf:" : "ewv:", 0), 0u) << pick;
+                        // the vector class, also for a 16-bit permutation (one contiguous run):
+                        // the flat kernel that would serve it on gfx942 / gfx950 is a tuned one
+                        // (RockeFlatElementwise.EveryRowExact)
+                        EXPECT_EQ(pick.rfind("ewv:", 0), 0u) << pick;
                     }
                 }
             }
@@ -9161,8 +9161,41 @@ namespace
             = {{'a', 24}, {'b', 24}, {'c', 48}, {'d', 32}, {'e', 40}, {'f', 36}};
         std::map<char, int64_t> const r2m
             = {{'a', 64}, {'b', 256}, {'c', 80}, {'d', 64}, {'e', 112}, {'f', 144}};
-        bool const                gfx950 = deviceArch() == "gfx950";
-        std::vector<EstimateCase> cases  = {
+        std::map<char, int64_t> const r5s    = {{'a', 4},
+                                                {'b', 4},
+                                                {'c', 3},
+                                                {'d', 3},
+                                                {'e', 2},
+                                                {'f', 8},
+                                                {'g', 6},
+                                                {'h', 6},
+                                                {'i', 4},
+                                                {'j', 4},
+                                                {'k', 8},
+                                                {'l', 6},
+                                                {'m', 4},
+                                                {'n', 6},
+                                                {'o', 4}};
+        std::map<char, int64_t> const r6s    = {{'a', 4},
+                                                {'b', 4},
+                                                {'c', 3},
+                                                {'d', 2},
+                                                {'e', 2},
+                                                {'f', 2},
+                                                {'g', 8},
+                                                {'h', 6},
+                                                {'i', 4},
+                                                {'j', 4},
+                                                {'k', 3},
+                                                {'l', 2},
+                                                {'m', 6},
+                                                {'n', 6},
+                                                {'o', 4},
+                                                {'p', 4},
+                                                {'q', 4},
+                                                {'r', 2}};
+        bool const                    gfx950 = deviceArch() == "gfx950";
+        std::vector<EstimateCase>     cases  = {
             {HIPTENSOR_C_32F,
               HIPTENSOR_COMPUTE_DESC_C32F,
               "daebfc",
@@ -9177,15 +9210,39 @@ namespace
             {HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, "cdab", "efab", "cdef", r2, false},
             {HIPTENSOR_R_64F, HIPTENSOR_COMPUTE_DESC_64F, "cdab", "efab", "cdef", r2, false},
             {HIPTENSOR_C_64F, HIPTENSOR_COMPUTE_DESC_C64F, "daebfc", "gahbic", "dgehfi", r3, false},
+            // doc rows ctr_P1_r5_small / ctr_P1_r6_small (five / six modes per group, small
+            // extents): the 16-bit GEMM bodies, the f64 route and the direct GETT compete; the
+            // zero-workspace direct GETT is their least-workspace candidate on gfx942 (gfx950's
+            // tuned GETT table and ring GETT also need none)
+            {HIPTENSOR_R_16F,
+                  HIPTENSOR_COMPUTE_DESC_32F,
+                  "fagbhcidje",
+                  "kalbmcndoe",
+                  "fkglhminjo",
+                  r5s,
+                  !gfx950},
+            {HIPTENSOR_R_16BF,
+                  HIPTENSOR_COMPUTE_DESC_32F,
+                  "fagbhcidje",
+                  "kalbmcndoe",
+                  "fkglhminjo",
+                  r5s,
+                  !gfx950},
+            {HIPTENSOR_R_16F,
+                  HIPTENSOR_COMPUTE_DESC_32F,
+                  "gahbicjdkelf",
+                  "manbocpdqerf",
+                  "gmhniojpkqlr",
+                  r6s,
+                  !gfx950},
         };
-        for(auto const& c : cases)
-        {
+        auto check = [&](EstimateCase const& c) {
             SCOPED_TRACE("type " + std::to_string(int(c.type)) + " " + c.a + "," + c.b + "->"
                          + c.d);
             ApiObjects api;
             if(!api.supports(c.type))
             {
-                continue;
+                return;
             }
             LogCapture log;
             auto       desc = describeEstimateCase(api, c);
@@ -9230,6 +9287,37 @@ namespace
                 EXPECT_EQ(minimum.required, 0u);
                 EXPECT_EQ(minimum.pick.rfind("dgett:", 0), 0u) << minimum.pick;
             }
+        };
+        for(auto const& c : cases)
+        {
+            check(c);
+        }
+        // the x6 recipe on the f32 doc rows ctr_P1_r6_medium / ctr_P3_r6_medium (gfx942: the x6
+        // GEMM bodies, the native route the recipe admits there, the f64 route and the direct GETT)
+        std::map<char, int64_t> const r6m = {{'a', 4},
+                                             {'b', 4},
+                                             {'c', 4},
+                                             {'d', 3},
+                                             {'e', 2},
+                                             {'f', 2},
+                                             {'g', 10},
+                                             {'h', 8},
+                                             {'i', 6},
+                                             {'j', 4},
+                                             {'k', 4},
+                                             {'l', 2},
+                                             {'m', 10},
+                                             {'n', 8},
+                                             {'o', 4},
+                                             {'p', 4},
+                                             {'q', 4},
+                                             {'r', 3}};
+        ScopedEnv                     recipe("HIPTENSOR_ROCKE_F32_RECIPE", "x6");
+        for(auto const& abd :
+            {std::array<char const*, 3>{"gahbicjdkelf", "manbocpdqerf", "gmhniojpkqlr"},
+             std::array<char const*, 3>{"ghijklabcdef", "mnopqrabcdef", "gmhniojpkqlr"}})
+        {
+            check({HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, abd[0], abd[1], abd[2], r6m, true});
         }
     }
 
@@ -9354,8 +9442,9 @@ namespace
     // gfx950): explicit storage orders of the inputs (A [B] C) and of D (`orders`, fastest
     // first), extents `ext`; `rank`: KERNEL_RANK; `skew`: every buffer one element past an aligned
     // address (the program's fallback runs); `zeroScale`: an input whose scale is zero and holds a
-    // NaN; `fast`: identity operators and one binary operator (the classes' fast path); `special`:
-    // NaN, infinities, signed zeros and values whose doubles overflow f16 among the inputs.
+    // NaN; `fast`: identity or NEG operators (the plan folds NEG into the scale) and one binary
+    // operator (the classes' fast path); `special`: NaN, infinities, signed zeros and values whose
+    // doubles overflow f16 among the inputs.
     struct EwpCase
     {
         int                               arity;
@@ -9429,7 +9518,8 @@ namespace
         std::vector<hiptensorOperator_t> uop;
         for(int i = 0; i < c.arity; i++)
         {
-            uop.push_back(c.fast ? HIPTENSOR_OP_IDENTITY : ops[rng() % 4]);
+            // the fast path: identity, or NEG (the plan folds it into the scale)
+            uop.push_back(c.fast ? ops[rng() % 2] : ops[rng() % 4]);
         }
         auto   opAB  = bops[rng() % 4];
         auto   opABC = c.fast ? opAB : bops[rng() % 4];
@@ -9682,6 +9772,192 @@ namespace
                 }
                 ASSERT_FALSE(HasFailure()) << "arity " << l.arity << " type " << int(r.type);
             }
+        }
+    }
+
+    // Layouts whose extents or strides are not multiples of 16 bytes, or whose runs do not hold a
+    // whole number of tiles (hipTensor's rank-5 bench layout at a small size, a shared stride-1
+    // mode of an odd extent, a permutation of atoms of 59 elements, ragged runs of 16-byte vectors):
+    // on gfx942 / gfx950 a ragged tuned tiled class first (vectors of 16 bytes down to the element
+    // size), then the other candidates, all exact against the loop reference, with aligned and
+    // unaligned buffers (the class's fallback), an input whose scale is zero, the fast path and
+    // special values.
+    TEST(RockeTunedElementwise, RaggedLayoutsExact)
+    {
+        struct Layout
+        {
+            int                               arity;
+            std::map<int32_t, int64_t>        ext;
+            std::vector<std::vector<int32_t>> orders;
+            bool                              shared = false; // a stride-1 mode every tensor shares
+        };
+        std::map<int32_t, int64_t> const e5 = {{'a', 6}, {'b', 5}, {'c', 10}, {'d', 3}, {'e', 10}};
+        std::map<int32_t, int64_t> const eo = {{'a', 121}, {'b', 6}, {'c', 5}, {'d', 7}};
+        std::vector<int32_t> const       a5 = {'a', 'b', 'c', 'd', 'e'};
+        std::vector<int32_t> const       d5 = {'c', 'e', 'b', 'a', 'd'};
+        std::vector<int32_t> const       a4 = {'a', 'b', 'c', 'd'};
+        std::vector<int32_t> const       d4 = {'a', 'd', 'c', 'b'};
+        std::vector<Layout> const        layouts = {
+            {1, e5, {a5, d5}},
+            {2, e5, {a5, a5, d5}},
+            {3, e5, {a5, a5, a5, d5}},
+            {2, eo, {a4, a4, d4}, true}, // shared odd mode
+            {1,
+                    {{'a', 59}, {'b', 11}, {'c', 10}, {'d', 11}, {'e', 3}},
+                    {a5, {'a', 'c', 'd', 'b', 'e'}},
+                    true},
+            {2,
+                    {{'a', 72}, {'b', 3}, {'c', 41}},
+                    {{'a', 'b', 'c'}, {'c', 'b', 'a'}, {'c', 'b', 'a'}}},
+        };
+        struct Row
+        {
+            int                 arity;
+            hiptensorDataType_t type, scalar;
+        };
+        Row const  rows[] = {{1, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
+                             {1, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                             {1, HIPTENSOR_R_64F, HIPTENSOR_R_64F},
+                             {2, HIPTENSOR_R_16F, HIPTENSOR_R_32F},
+                             {2, HIPTENSOR_R_16BF, HIPTENSOR_R_32F},
+                             {2, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                             {2, HIPTENSOR_R_64F, HIPTENSOR_R_64F},
+                             {3, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
+                             {3, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                             {3, HIPTENSOR_R_64F, HIPTENSOR_R_64F}};
+        bool const target = deviceArch() == "gfx942" || deviceArch() == "gfx950";
+        int        seed   = 4700;
+        for(auto const& l : layouts)
+        {
+            for(auto const& r : rows)
+            {
+                if(r.arity != l.arity)
+                {
+                    continue;
+                }
+                auto mk = [&](int32_t rank, size_t skew) {
+                    return EwpCase{l.arity, r.type, r.scalar, seed++, l.ext, l.orders, rank, skew};
+                };
+                auto pick = runEwp(mk(0, 0));
+                if(pick.empty())
+                {
+                    continue; // data type not supported on this device
+                }
+                if(target && l.shared && r.type == HIPTENSOR_R_64F)
+                {
+                    // no ragged class for a shared mode of 8-byte elements: the generic kernel
+                    EXPECT_EQ(pick.rfind("ewp:", 0), std::string::npos) << pick;
+                }
+                else if(target && l.arity == 1 && r.type == HIPTENSOR_R_64F)
+                {
+                    // a permutation the folded tiled kernel serves (10 f64 elements along D's
+                    // stride-1 mode: 16-byte vectors), then the ragged class
+                    EXPECT_EQ(pick.rfind("ewt:", 0), 0u) << pick;
+                    EXPECT_EQ(pick.compare(pick.size() - 2, 2, "_f"), 0) << pick;
+                    auto next = runEwp(mk(1, 0));
+                    EXPECT_EQ(next.rfind("ewp:", 0), 0u) << next;
+                    EXPECT_EQ(next.compare(next.size() - 2, 2, "_r"), 0) << next;
+                }
+                else if(target)
+                {
+                    // a ragged class (kernel name suffix _r)
+                    EXPECT_EQ(pick.rfind("ewp:", 0), 0u) << pick;
+                    EXPECT_EQ(pick.compare(pick.size() - 2, 2, "_r"), 0) << pick;
+                    auto next = runEwp(mk(1, 0));
+                    EXPECT_EQ(next.rfind("ewp:", 0), std::string::npos) << next;
+                }
+                runEwp(mk(0, 1));
+                for(int z = 0; z < l.arity; z++)
+                {
+                    auto c      = mk(0, 0);
+                    c.zeroScale = z;
+                    runEwp(c);
+                }
+                auto f = mk(0, 0);
+                f.fast = true;
+                runEwp(f);
+                auto sp    = mk(0, 0);
+                sp.special = true;
+                runEwp(sp);
+                ASSERT_FALSE(HasFailure()) << "arity " << l.arity << " type " << int(r.type);
+            }
+        }
+    }
+
+    // Planes of 16 x 16 elements (D's and the inputs' stride-1 modes hold 16 elements and both
+    // continue in the same mode): a ragged class serves them with 32 x 32 tiles half outside the
+    // planes, the folded tiled kernel holds several whole planes per tile. On gfx942 / gfx950 the
+    // folded kernel comes first for a permutation and when the ragged tile holds less than 4 KiB
+    // of a tensor (f16), else (f32 binary) the ragged class; the other one next (KERNEL_RANK 1);
+    // both exact.
+    TEST(RockeTunedElementwise, FoldedTiledBeforeRagged)
+    {
+        std::map<int32_t, int64_t> const ext
+            = {{'a', 16}, {'b', 32}, {'c', 4}, {'d', 4}, {'e', 2}, {'f', 16}};
+        std::vector<int32_t> const a6 = {'a', 'b', 'c', 'd', 'e', 'f'};
+        std::vector<int32_t> const d6 = {'f', 'b', 'a', 'c', 'd', 'e'};
+        struct Row
+        {
+            int                 arity;
+            hiptensorDataType_t type, scalar;
+        };
+        Row const  rows[] = {{1, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
+                             {1, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                             {2, HIPTENSOR_R_16F, HIPTENSOR_R_32F},
+                             {2, HIPTENSOR_R_32F, HIPTENSOR_R_32F}};
+        bool const target = deviceArch() == "gfx942" || deviceArch() == "gfx950";
+        int        seed   = 4900;
+        for(auto const& r : rows)
+        {
+            std::vector<std::vector<int32_t>> orders(r.arity, a6);
+            orders.push_back(d6);
+            auto pick = runEwp(EwpCase{r.arity, r.type, r.scalar, seed++, ext, orders, 0, 0});
+            if(pick.empty())
+            {
+                continue; // data type not supported on this device
+            }
+            if(target)
+            {
+                auto next = runEwp(EwpCase{r.arity, r.type, r.scalar, seed++, ext, orders, 1, 0});
+                bool const  first  = r.arity == 1 || r.type == HIPTENSOR_R_16F;
+                auto const& folded = first ? pick : next;
+                auto const& ragged = first ? next : pick;
+                EXPECT_EQ(folded.rfind("ewt:", 0), 0u) << folded;
+                EXPECT_EQ(folded.compare(folded.size() - 2, 2, "_f"), 0) << folded;
+                EXPECT_EQ(ragged.rfind("ewp:", 0), 0u) << ragged;
+                EXPECT_EQ(ragged.compare(ragged.size() - 2, 2, "_r"), 0) << ragged;
+            }
+            ASSERT_FALSE(HasFailure()) << "arity " << r.arity << " type " << int(r.type);
+        }
+    }
+
+    // C laid out like D (kind V) and D's stride-1 mode of 40 elements (16-byte vectors for every
+    // data type): the tiled kernel serves the layout and comes first on gfx942 / gfx950, then the
+    // ragged class that reads C like D (KERNEL_RANK 1); both exact.
+    TEST(RockeTunedElementwise, TiledBeforeRaggedReadingLikeD)
+    {
+        std::map<int32_t, int64_t> const        ext = {{'a', 72}, {'b', 3}, {'c', 40}};
+        std::vector<std::vector<int32_t>> const orders
+            = {{'a', 'b', 'c'}, {'c', 'b', 'a'}, {'c', 'b', 'a'}};
+        hiptensorDataType_t const types[] = {HIPTENSOR_R_16F, HIPTENSOR_R_32F, HIPTENSOR_R_64F};
+        bool const                target  = deviceArch() == "gfx942" || deviceArch() == "gfx950";
+        int                       seed    = 5100;
+        for(auto type : types)
+        {
+            auto const scalar = type == HIPTENSOR_R_16F ? HIPTENSOR_R_32F : type;
+            auto       pick   = runEwp(EwpCase{2, type, scalar, seed++, ext, orders, 0, 0});
+            if(pick.empty())
+            {
+                continue; // data type not supported on this device
+            }
+            if(target)
+            {
+                EXPECT_EQ(pick.rfind("ewt:", 0), 0u) << pick;
+                auto next = runEwp(EwpCase{2, type, scalar, seed++, ext, orders, 1, 0});
+                EXPECT_EQ(next.rfind("ewp:", 0), 0u) << next;
+                EXPECT_EQ(next.compare(next.size() - 2, 2, "_r"), 0) << next;
+            }
+            ASSERT_FALSE(HasFailure()) << "type " << int(type);
         }
     }
 

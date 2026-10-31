@@ -112,6 +112,7 @@ FAMILY_MAX_CFG = {
     "gett_f64_pack": 1024,
     "hiptensor_aot_dgett": 512,
     "hiptensor_aot_ew": 512,
+    "hiptensor_aot_ewp": 2048,
     "hiptensor_aot_jit_ew": 2048,
     "hiptensor_aot_rgett": 512,
     "hiptensor_aot_rreduce": 4096,

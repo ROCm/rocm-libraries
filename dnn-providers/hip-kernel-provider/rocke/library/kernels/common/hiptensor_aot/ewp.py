@@ -39,11 +39,25 @@ through LDS, ``V`` read in phase 2 with 16-byte loads along ``o`` (mode ``a``: a
 coordinate that is fastest across consecutive CTAs (``o`` or ``t``; ``w`` is always fastest).
 ``tpc``: tiles per CTA (consecutive tile indices, one LDS tile reused).
 
-Kernel ABI ``hiptensor-aot-ewp/v1``: ``A [B] [C] D``, ``alpha [beta] [gamma]``, ``opA [opB]
+``vb`` (vector bytes, default 16): every global access, LDS chunk and the ``V x V`` blocks use
+``vb``-byte vectors (``V = vb / element size``), so that layouts whose extents or strides are not
+multiples of 16 bytes keep vector accesses (e.g. ``vb = 4``: pairs of f16); ``tb`` (mode t, 0:
+``vb``) is the vector of the ``T`` inputs' loads along ``t`` (``VT = tb / element size``), so that
+phase 1 transposes ``V x VT`` blocks (``V`` loads of ``VT`` elements) when D's side allows only
+narrower vectors than the transposed inputs' side. ``rag`` (ragged
+classes): a tile may overhang the end of a run (mode ``a``: of the shared mode too). Positions
+past an end are clamped to the last vector of the run; such a lane reads and writes the same
+vector as the lane that owns it (the same values), so ragged tiles need no masks. The runs of
+a ragged class need not hold a whole number of tiles; their inner extents (and the shared mode)
+must still be multiples of ``V``.
+
+Kernel ABI ``hiptensor-aot-ewp/v2``: ``A [B] [C] D``, ``alpha [beta] [gamma]``, ``opA [opB]
 [opC] [opAB] [opABC]``, then (i32) ``eo, om, os, et, tm, ts`` (inner extents of the runs and
 their magic pairs), ``nw, wm, ws, nf, fm, fs`` (tile counts: ``nw`` along ``w``, ``nf`` along the
-walk's fast run, with magic pairs), ``ntl`` (tiles per batch index), ``nb, ystep``, the run strides ``s<T>o0, s<T>o1, s<T>t0,
-s<T>t1`` per tensor, and the batch digits ``be<i>, bm<i>, bs<i>, s<T><i>`` (element offsets).
+walk's fast run, with magic pairs), ``ntl`` (tiles per batch index), ``nb, ystep``, ragged
+classes only: ``lo, lt`` (the lengths of the o and t runs) and, mode ``a``, ``lw`` (the extent of
+the shared mode), then the run strides ``s<T>o0, s<T>o1, s<T>t0, s<T>t1`` per tensor, and the
+batch digits ``be<i>, bm<i>, bs<i>, s<T><i>`` (element offsets). (v1: no ``vb`` / ``rag``.)
 Launch: block ``(block, 1, 1)``, grid ``(ceil(ntl / tpc), min(nb, 65535), 1)`` with
 ``ntl = nw * tiles_o * tiles_t``.
 """
@@ -67,10 +81,10 @@ from .common import (
     ptr,
 )
 
-EWP_ABI = "hiptensor-aot-ewp/v1"
+EWP_ABI = "hiptensor-aot-ewp/v2"
 #: batch digits (the modes that are not in the two runs)
 SLOTS_B = 8
-#: largest number of 16-byte vectors a thread holds in phase 1
+#: largest number of vectors a thread holds in phase 1
 MAX_VECTORS = 32
 #: LDS budget of the tiles (gfx950; the pack's classes of the other targets fit their LDS)
 LDS_BYTES = 163840
@@ -87,7 +101,7 @@ class EwpSpec:
     mode: str = "t"  # t: element transposition, a: shared stride-1 mode (atoms)
     to: int = 64  # tile along the o run (elements; mode a: positions of the run)
     tt: int = 64  # tile along the t run
-    tw: int = 1  # mode a: 16-byte chunks of the shared mode per tile
+    tw: int = 1  # mode a: vectors (vb bytes) of the shared mode per tile
     block: int = 256
     nt: int = 0  # bit 0: streaming loads, bit 1: streaming stores
     swz: int = 0  # XOR group of the LDS chunk index (0 / 1: none)
@@ -97,6 +111,9 @@ class EwpSpec:
     ilp: int = (
         0  # phase-2 units whose loads are issued together (0: all of the thread's)
     )
+    vb: int = 16  # bytes per vector access (16, 8, 4 or 2; at least the element size)
+    rag: int = 0  # 1: tiles may overhang the ends of the runs (ragged class)
+    tb: int = 0  # mode t: bytes per vector of the T inputs along t (0: vb)
 
     # ------------------------------------------------------------------ derived
     def tensors(self) -> List[str]:
@@ -122,23 +139,28 @@ class EwpSpec:
 
     @property
     def vec(self) -> int:
-        return 16 // self.es
+        return self.vb // self.es
+
+    @property
+    def vect(self) -> int:
+        """Elements per vector of the T inputs along t (mode t)."""
+        return (self.tb or self.vb) // self.es
 
     def p1_units(self) -> int:
-        """Phase-1 units per T input: V x V blocks (mode t) or 16-byte chunks (mode a)."""
+        """Phase-1 units per T input: V x V blocks (mode t) or vectors (mode a)."""
         if self.mode == "a":
             return self.to * self.tt * self.tw
-        return (self.to // self.vec) * (self.tt // self.vec)
+        return (self.to // self.vec) * (self.tt // self.vect)
 
     def p2_units(self) -> int:
-        """Phase-2 units: 16-byte vectors of D."""
+        """Phase-2 units: vectors of D."""
         if self.mode == "a":
             return self.to * self.tt * self.tw
         return (self.to // self.vec) * self.tt
 
     def tile_bytes(self) -> int:
         if self.mode == "a":
-            return self.to * self.tt * self.tw * 16
+            return self.to * self.tt * self.tw * self.vb
         return self.to * self.tt * self.es
 
     @property
@@ -147,8 +169,8 @@ class EwpSpec:
         return self.tw.bit_length() - 1 if self.mode == "a" else 0
 
     def chunks(self) -> int:
-        """16-byte chunks of one LDS tile."""
-        return self.tile_bytes() // 16
+        """Vector chunks (vb bytes) of one LDS tile."""
+        return self.tile_bytes() // self.vb
 
     def check(self) -> None:
         if self.arity not in (1, 2, 3):
@@ -168,10 +190,22 @@ class EwpSpec:
             raise ValueError("at least one input read through LDS (kind T)")
         if self.mode not in ("t", "a"):
             raise ValueError("mode must be t or a")
+        if self.vb not in (2, 4, 8, 16) or self.vb < self.es:
+            raise ValueError(
+                "vb must be 2, 4, 8 or 16 bytes and at least the element size"
+            )
+        if self.rag not in (0, 1):
+            raise ValueError("rag must be 0 or 1")
+        if self.tb and (
+            self.tb not in (2, 4, 8, 16) or self.tb < self.es or self.mode != "t"
+        ):
+            raise ValueError(
+                "tb: 2, 4, 8 or 16 bytes, at least the element size, mode t only"
+            )
         for x in (self.to, self.tt, self.tw, self.block):
             if x <= 0 or x & (x - 1):
                 raise ValueError("tile extents and block must be powers of two")
-        if self.mode == "t" and (self.to % self.vec or self.tt % self.vec):
+        if self.mode == "t" and (self.to % self.vec or self.tt % self.vect):
             raise ValueError("mode t: the tile extents must be multiples of the vector")
         if self.mode == "t" and self.tw != 1:
             raise ValueError("mode t: tw must be 1")
@@ -186,6 +220,10 @@ class EwpSpec:
             raise ValueError("the LDS tiles exceed the LDS budget")
         if self.nt not in (0, 1, 2, 3):
             raise ValueError("nt must be 0 .. 3")
+        if self.vec == 1 and self.nt & 1:
+            raise ValueError(
+                "one-element vectors: scalar loads have no streaming hint (nt bit 0)"
+            )
         if self.swz not in (0, 1) and (
             self.swz & (self.swz - 1)
             or (1 << self.swsh) < self.swz << self.swlo
@@ -218,17 +256,25 @@ class EwpSpec:
             n += f"_x{self.tpc}"
         if self.ilp:
             n += f"_g{self.ilp}"
+        if self.vb != 16:
+            n += f"_v{self.vb}"
+        if self.rag:
+            n += "_r"
+        if self.tb:
+            n += f"_u{self.tb}"
         return n
 
 
 def default_swizzle(spec: EwpSpec, banks_chunks: int = 16) -> Tuple[int, int]:
     """``(swz, swsh)``: an XOR swizzle that spreads phase 1's LDS writes over the banks (16
-    chunks of 16 bytes span the 64 banks of gfx950; 8 the 32 banks of the other targets).
-    Mode t: lanes of a wave write the same column chunk of rows ``V`` apart, so the key comes
-    from the row bits above ``V`` and flips the column bits. Mode a: lanes write the chunks of
-    one atom for consecutive ``t``, rows ``to * tw`` chunks apart: the key comes from the ``t``
+    chunks of 16 bytes span the 64 banks of gfx950; 8 the 32 banks of the other targets;
+    ``banks_chunks`` counts 16-byte chunks, a class of ``vb``-byte chunks has ``16 / vb`` times
+    as many). Mode t: lanes of a wave write the same column chunk of rows ``V`` apart, so the key
+    comes from the row bits above ``V`` and flips the column bits. Mode a: lanes write the chunks
+    of one atom for consecutive ``t``, rows ``to * tw`` chunks apart: the key comes from the ``t``
     bits and flips the ``o`` bits above the atom's chunks."""
     V = spec.vec
+    banks_chunks = banks_chunks * 16 // spec.vb
     if spec.mode == "a":
         lo = spec.swlo
         k = max(1, min(banks_chunks // spec.tw, spec.to))
@@ -236,7 +282,7 @@ def default_swizzle(spec: EwpSpec, banks_chunks: int = 16) -> Tuple[int, int]:
     else:
         lo = 0
         k = max(1, min(banks_chunks, spec.to // V * V))
-        sh = (spec.to // V).bit_length() - 1 + (V.bit_length() - 1)
+        sh = (spec.to // V).bit_length() - 1 + (spec.vect.bit_length() - 1)
     if k <= 1 or (1 << sh) < (k << lo) or spec.chunks() % (1 << sh):
         return 0, 0
     return k, sh
@@ -279,6 +325,7 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
     ins = spec.inputs()
     dts = spec.dtypes()
     V = spec.vec
+    VT = spec.vect
     BS = spec.block
     TO, TT, TW = spec.to, spec.tt, spec.tw
     mode_a = spec.mode == "a"
@@ -309,6 +356,10 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
     ntl = b.param("ntl", I32)
     nb = b.param("nb", I32)
     ystep = b.param("ystep", I32)
+    if spec.rag:
+        lo = b.param("lo", I32)
+        lt = b.param("lt", I32)
+        lw = b.param("lw", I32) if mode_a else None
     SO = {n: (b.param(f"s{n}o0", I32), b.param(f"s{n}o1", I32)) for n in names}
     ST = {n: (b.param(f"s{n}t0", I32), b.param(f"s{n}t1", I32)) for n in names}
     bext, bmg = [], []
@@ -328,7 +379,8 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
     allnz = nz[ins[0]]
     for n in ins[1:]:
         allnz = b.land(allnz, nz[n])
-    # the fast path: every scale non-zero and every unary operator the identity (CONJ of a real)
+    # the fast path: every scale non-zero and every unary operator the identity (CONJ of a real;
+    # hipTensor folds NEG into the scale)
     idop = None
     for n in ins:
         t_ = b.lor(
@@ -336,6 +388,32 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
         )
         idop = t_ if idop is None else b.land(idop, t_)
     fastp = b.land(allnz, idop)
+    if spec.rag:
+        # ragged class: the last position a lane may touch along each run (a lane past the end
+        # takes the last vector of the run: the same data as the lane that owns it)
+        if mode_a:
+            last_w = b.sub(lw, e.c32(V))
+            last_o1 = b.sub(lo, e.c32(1))
+            last_t1 = b.sub(lt, e.c32(1))
+        else:
+            last_ov = b.sub(lo, e.c32(V))
+            last_tv = b.sub(lt, e.c32(VT))
+            last_t1 = b.sub(lt, e.c32(1))
+
+    def gload(n: str, off: Value, w: int = V) -> Value:
+        """A vector of ``w`` elements of tensor ``n`` (``<w x ty>``, default ``vb`` bytes; w = 1:
+        one scalar load, no streaming hint)."""
+        ty = DTYPES[dts[n]][0]
+        nbytes = w * DTYPES[dts[n]][1]
+        if w == 1:
+            return b.vec_pack([b.global_load(P[n], off, ty, align=nbytes)], ty)
+        return b.global_load_vN(P[n], off, ty, w, align=nbytes, temporal_hint=hint_ld)
+
+    def lstore(n: str, chunk: Value, v: Value) -> None:
+        if V == 1:
+            b.smem_store_vN(lds[n], [chunk], b.vec_extract(v, 0), 1)
+        else:
+            b.smem_store_vN(lds[n], [chunk], v, V)
 
     def run_off(n: str, pos: Value, ext: Value, m: Value, s: Value, st) -> Value:
         """Offset of position ``pos`` of a run (``pos = i0 + ext * i1``) in tensor ``n``."""
@@ -394,23 +472,40 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
                         rest = _pow2_div(b, e, u, TW)
                         tl = _pow2_mod(b, e, rest, TT)
                         ol = _pow2_div(b, e, rest, TT)
-                        off = b.add(
-                            b.add(boff[n], b.add(w0, b.mul(c, e.c32(V)))),
-                            b.add(ooff(n, b.add(o0, ol)), toff(n, b.add(t0, tl))),
-                        )
-                        v = b.global_load_vN(
-                            P[n], off, ty, V, align=16, temporal_hint=hint_ld
-                        )
+                        if spec.rag:
+                            pw = b.smin(b.add(w0, b.mul(c, e.c32(V))), last_w)
+                            po = b.smin(b.add(o0, ol), last_o1)
+                            pt = b.smin(b.add(t0, tl), last_t1)
+                            c = _pow2_div(b, e, b.sub(pw, w0), V)
+                            ol = b.sub(po, o0)
+                            tl = b.sub(pt, t0)
+                            off = b.add(
+                                b.add(boff[n], pw),
+                                b.add(ooff(n, po), toff(n, pt)),
+                            )
+                        else:
+                            off = b.add(
+                                b.add(boff[n], b.add(w0, b.mul(c, e.c32(V)))),
+                                b.add(ooff(n, b.add(o0, ol)), toff(n, b.add(t0, tl))),
+                            )
+                        v = gload(n, off)
                         loaded.append((ol, tl, c, [v]))
                     else:
-                        ub_t = _pow2_mod(b, e, u, TT // V)
-                        ub_o = _pow2_div(b, e, u, TT // V)
+                        ub_t = _pow2_mod(b, e, u, TT // VT)
+                        ub_o = _pow2_div(b, e, u, TT // VT)
                         ol = b.mul(ub_o, e.c32(V))
-                        tl = b.mul(ub_t, e.c32(V))
-                        base = b.add(
-                            boff[n],
-                            b.add(ooff(n, b.add(o0, ol)), toff(n, b.add(t0, tl))),
-                        )
+                        tl = b.mul(ub_t, e.c32(VT))
+                        if spec.rag:
+                            po = b.smin(b.add(o0, ol), last_ov)
+                            pt = b.smin(b.add(t0, tl), last_tv)
+                            ub_o = _pow2_div(b, e, b.sub(po, o0), V)
+                            ub_t = _pow2_div(b, e, b.sub(pt, t0), VT)
+                            base = b.add(boff[n], b.add(ooff(n, po), toff(n, pt)))
+                        else:
+                            base = b.add(
+                                boff[n],
+                                b.add(ooff(n, b.add(o0, ol)), toff(n, b.add(t0, tl))),
+                            )
                         rws = []
                         for j in range(V):
                             o_ = (
@@ -418,31 +513,27 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
                                 if j == 0
                                 else b.add(base, b.mul(e.c32(j), SO[n][0]))
                             )
-                            rws.append(
-                                b.global_load_vN(
-                                    P[n], o_, ty, V, align=16, temporal_hint=hint_ld
-                                )
-                            )
+                            rws.append(gload(n, o_, VT))
                         loaded.append((ub_o, ub_t, None, rws))
                 for ol, tl, c, rws in loaded:
                     if mode_a:
                         # chunk (t, o, w) of the [t][o][w] tile
                         ch = b.add(b.mul(b.add(b.mul(tl, e.c32(TO)), ol), e.c32(TW)), c)
-                        b.smem_store_vN(lds[n], [b.mul(swz(ch), e.c32(V))], rws[0], V)
+                        lstore(n, b.mul(swz(ch), e.c32(V)), rws[0])
                         continue
                     ub_o, ub_t = ol, tl
-                    for i in range(V):
-                        # elements (o .. o + V - 1, t + i): column i of the V x V block
+                    for i in range(VT):
+                        # elements (o .. o + V - 1, t + i): column i of the V x VT block
                         vv = b.vec_pack(
                             [b.vec_extract(rws[j], i) for j in range(V)], ty
                         )
                         trow = (
-                            b.add(b.mul(ub_t, e.c32(V)), e.c32(i))
+                            b.add(b.mul(ub_t, e.c32(VT)), e.c32(i))
                             if i
-                            else b.mul(ub_t, e.c32(V))
+                            else b.mul(ub_t, e.c32(VT))
                         )
                         ch = b.add(b.mul(trow, e.c32(TO // V)), ub_o)
-                        b.smem_store_vN(lds[n], [b.mul(swz(ch), e.c32(V))], vv, V)
+                        lstore(n, b.mul(swz(ch), e.c32(V)), vv)
         b.sync()
 
         # ---------------------------------------------------------- phase 2
@@ -453,16 +544,30 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
                 rest = _pow2_div(b, e, u, TW)
                 ol = _pow2_mod(b, e, rest, TO)
                 tl = _pow2_div(b, e, rest, TO)
+                if spec.rag:
+                    wv = b.smin(b.add(w0, b.mul(c, e.c32(V))), last_w)
+                    go = b.smin(b.add(o0, ol), last_o1)
+                    gt = b.smin(b.add(t0, tl), last_t1)
+                    c = _pow2_div(b, e, b.sub(wv, w0), V)
+                    ol = b.sub(go, o0)
+                    tl = b.sub(gt, t0)
                 ch = b.add(b.mul(b.add(b.mul(tl, e.c32(TO)), ol), e.c32(TW)), c)
-                wv = b.add(w0, b.mul(c, e.c32(V)))
+                if not spec.rag:
+                    wv = b.add(w0, b.mul(c, e.c32(V)))
             else:
                 uo = _pow2_mod(b, e, u, TO // V)
                 tl = _pow2_div(b, e, u, TO // V)
                 ol = b.mul(uo, e.c32(V))
+                if spec.rag:
+                    go = b.smin(b.add(o0, ol), last_ov)
+                    gt = b.smin(b.add(t0, tl), last_t1)
+                    uo = _pow2_div(b, e, b.sub(go, o0), V)
+                    tl = b.sub(gt, t0)
                 ch = b.add(b.mul(tl, e.c32(TO // V)), uo)
                 wv = None
-            go = b.add(o0, ol)
-            gt = b.add(t0, tl)
+            if not spec.rag:
+                go = b.add(o0, ol)
+                gt = b.add(t0, tl)
 
             def offs(n: str, go=go, gt=gt, wv=wv) -> Value:
                 o_ = b.add(boff[n], b.add(ooff(n, go), toff(n, gt)))
@@ -475,9 +580,7 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
             ch, offs = unit
             if spec.kind(n) == "T":
                 return b.smem_load_vN(lds[n], b.mul(swz(ch), e.c32(V)), dtype=ty, n=V)
-            return b.global_load_vN(
-                P[n], offs(n), ty, V, align=16, temporal_hint=hint_ld
-            )
+            return gload(n, offs(n))
 
         def body(every: bool, op: Optional[int] = None) -> None:
             """``op`` given: the fast path (no operator table; ``op`` the binary operator, 0 for
@@ -538,7 +641,7 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
                         offs("D"),
                         b.vec_pack(outs, dty),
                         V,
-                        align=16,
+                        align=spec.vb,
                         temporal_hint=hint_st,
                     )
 
@@ -637,7 +740,8 @@ def ewp_runs(
     def grow(first: int, k: int, tile: int, exclude) -> Optional[List[int]]:
         """The run from ``first``: alone when its extent is a multiple of the tile, else with
         the mode contiguous after it in tensor ``k`` (not in ``exclude``) when the two hold a
-        whole number of tiles."""
+        whole number of tiles. A ragged class takes that mode whenever there is one (a longer
+        run wastes less of its last tile), else the mode alone."""
         if dims[first][0] % tile == 0:
             return [first]
         want = dims[first][0] * dims[first][1][k]
@@ -649,10 +753,34 @@ def ewp_runs(
             ),
             None,
         )
+        if spec.rag:
+            return [first] if nxt is None else [first, nxt]
         if nxt is None or (dims[first][0] * dims[nxt][0]) % tile:
             return None
         return [first, nxt]
 
+    if spec.rag:
+        # both orders (t run first, o run first); the one whose tiles waste less; on a tie the
+        # o run first for one or two inputs (D's stores then cover longer contiguous runs), the
+        # t run first for three (their loads outweigh the stores)
+        def fill(o_run, t_run):
+            no = 1
+            for i in o_run:
+                no *= dims[i][0]
+            nt = 1
+            for i in t_run:
+                nt *= dims[i][0]
+            return no * nt, -(-no // spec.to) * spec.to * -(-nt // spec.tt) * spec.tt
+
+        t1 = grow(t_first, ki, spec.tt, excl + [o_first])
+        o1 = grow(o_first, nd, spec.to, excl + t1)
+        o2 = grow(o_first, nd, spec.to, excl + [t_first])
+        t2 = grow(t_first, ki, spec.tt, excl + o2)
+        u1, w1 = fill(o1, t1)
+        u2, w2 = fill(o2, t2)
+        if u2 * w1 > u1 * w2 or (u2 * w1 == u1 * w2 and spec.arity < 3):
+            return o2, t2, w
+        return o1, t1, w
     # the t run first, then the o run; when that fails (both want the same mode), the other way
     t_run = grow(t_first, ki, spec.tt, excl + [o_first])
     o_run = grow(o_first, nd, spec.to, excl + t_run) if t_run is not None else None
@@ -667,10 +795,11 @@ def ewp_runs(
 def ewp_plan(spec: EwpSpec, dims, limits=(1 << 31) - 1):
     """Arguments and grid of an :mod:`.ewp` launch (the rules hipTensor's C++ planner applies),
     or None when the layout does not fit the class: the runs (:func:`ewp_runs`) must hold a
-    whole number of tiles, D (and every ``V`` input) must have stride 1 along ``o`` (mode t)
-    and every ``T`` input stride 1 along ``t``, the inner extents and every other stride must
-    keep the 16-byte vectors aligned, at most :data:`SLOTS_B` batch modes, every tensor's
-    offsets below 2^31, no negative stride."""
+    whole number of tiles (a ragged class: any length), D (and every ``V`` input) must have
+    stride 1 along ``o`` (mode t) and every ``T`` input stride 1 along ``t``, the inner extents
+    (mode a: the shared mode) and every other stride must keep the class's vectors aligned, at
+    most :data:`SLOTS_B` batch modes, every tensor's offsets below 2^31, no negative stride.
+    """
     from .common import as_i32_bits, magic_u31
 
     spec.check()
@@ -694,22 +823,25 @@ def ewp_plan(spec: EwpSpec, dims, limits=(1 << 31) - 1):
     et0 = dims[t_run[0]][0]
     if spec.mode == "a":
         ew_ = dims[w][0]
-        if ew_ % (spec.tw * V):
+        if ew_ % (V if spec.rag else spec.tw * V):
             return None
         # a tile row covers the whole shared mode or at least 128 bytes of it
-        if spec.tw * V != ew_ and spec.tw * 16 < 128:
+        if spec.tw * V < ew_ and spec.tw * spec.vb < 128:
             return None
         for k in range(len(names)):
             if any(dims[i][1][k] % V for i in used + others if i != w):
                 return None
     else:
-        if eo0 % V or et0 % V:
+        VT = spec.vect
+        if eo0 % V or et0 % VT:
             return None
         for k, n in enumerate(names):
-            unit = o_run[0] if (n == "D" or spec.kind(n) == "V") else t_run[0]
+            direct = n == "D" or spec.kind(n) == "V"
+            unit = o_run[0] if direct else t_run[0]
+            vk = V if direct else VT
             if dims[unit][1][k] != 1:
                 return None
-            if any(dims[i][1][k] % V for i in used + others if i != unit):
+            if any(dims[i][1][k] % vk for i in used + others if i != unit):
                 return None
     vals: Dict[str, int] = {}
 
@@ -723,8 +855,16 @@ def ewp_plan(spec: EwpSpec, dims, limits=(1 << 31) - 1):
     nt_ = 1
     for i in t_run:
         nt_ *= dims[i][0]
-    tiles_o, tiles_t = no // spec.to, nt_ // spec.tt
-    tiles_w = dims[w][0] // (spec.tw * V) if w is not None else 1
+    if spec.rag:
+        tiles_o, tiles_t = -(-no // spec.to), -(-nt_ // spec.tt)
+        tiles_w = -(-dims[w][0] // (spec.tw * V)) if w is not None else 1
+        vals["lo"] = no
+        vals["lt"] = nt_
+        if w is not None:
+            vals["lw"] = dims[w][0]
+    else:
+        tiles_o, tiles_t = no // spec.to, nt_ // spec.tt
+        tiles_w = dims[w][0] // (spec.tw * V) if w is not None else 1
     vals["eo"] = eo0
     magic("om", "os", eo0)
     vals["et"] = et0

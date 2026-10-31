@@ -923,17 +923,17 @@ namespace hiptensor
 
             size_t sizeA = std::accumulate(a_ms_ks->mLengths.begin(),
                                            a_ms_ks->mLengths.end(),
-                                           hiptensorDataTypeSize(ADataType),
+                                           size_t(hiptensorDataTypeSize(ADataType)),
                                            std::multiplies<size_t>());
 
             size_t sizeB = std::accumulate(b_ns_ks->mLengths.begin(),
                                            b_ns_ks->mLengths.end(),
-                                           hiptensorDataTypeSize(BDataType),
+                                           size_t(hiptensorDataTypeSize(BDataType)),
                                            std::multiplies<size_t>());
 
             size_t sizeD = std::accumulate(d_ms_ns->mLengths.begin(),
                                            d_ms_ns->mLengths.end(),
-                                           hiptensorDataTypeSize(DDataType),
+                                           size_t(hiptensorDataTypeSize(DDataType)),
                                            std::multiplies<size_t>());
 
             mTotalGBytes = sizeA + sizeB + sizeD;

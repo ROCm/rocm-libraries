@@ -380,6 +380,166 @@ TEST(ElementwiseZeroScaleTest, PermutationReusedPlan)
     }
 }
 
+namespace
+{
+    // Every scaling factor zero: D = +0 at each of its elements whatever the inputs hold (here
+    // NaN and Inf, or nullptr) and whatever the operators are, written through D's strides: a
+    // packed D, and a padded one whose gaps keep their values. The output is permuted against
+    // the inputs (the case where running the elementwise kernels anyway was slowest).
+    template <typename T>
+    void allScalesZero()
+    {
+        ApiObjects api;
+        if(!api.supports(dataType<T>()))
+        {
+            GTEST_SKIP() << "Data type not supported on this device";
+        }
+        constexpr int64_t pad      = 3;
+        auto              descIn   = api.tensor({M, N}, {1, M}, dataType<T>());
+        auto              packed   = api.tensor({N, M}, {1, N}, dataType<T>());
+        auto              padded   = api.tensor({N, M}, {1, N + pad}, dataType<T>());
+        int32_t const     modesA[] = {'m', 'n'}, modesD[] = {'n', 'm'};
+        T const           zero = 0, sentinel = 7;
+        DeviceBuffer<T>   dBad(poisoned<T>());
+        int64_t const     spanPadded = (N + pad) * M;
+
+        for(bool padD : {false, true})
+        {
+            auto const    descD = padD ? padded : packed;
+            int64_t const span  = padD ? spanPadded : count;
+            // check D: +0 at every element (no sign, no NaN), the gaps unchanged
+            auto check = [&](DeviceBuffer<T> const& dD, char const* what) {
+                auto const out = dD.read();
+                for(int64_t i = 0; i < span; ++i)
+                {
+                    bool const element = (i % (N + (padD ? pad : 0))) < N;
+                    if(element)
+                    {
+                        EXPECT_TRUE(out[i] == T(0) && !std::signbit(out[i]))
+                            << what << " element " << i << " " << double(out[i]);
+                    }
+                    else
+                    {
+                        EXPECT_EQ(double(out[i]), double(sentinel)) << what << " gap " << i;
+                    }
+                }
+            };
+            auto fresh = [&]() {
+                std::vector<T> v(span, sentinel);
+                for(int64_t i = 0; i < span; ++i)
+                {
+                    if((i % (N + (padD ? pad : 0))) < N)
+                    {
+                        v[i] = std::numeric_limits<T>::quiet_NaN();
+                    }
+                }
+                return v;
+            };
+            SCOPED_TRACE(padD ? "padded D" : "packed D");
+
+            // permutation
+            {
+                hiptensorOperationDescriptor_t op = nullptr;
+                ASSERT_EQ(hiptensorCreatePermutation(api.handle,
+                                                     &op,
+                                                     descIn,
+                                                     modesA,
+                                                     HIPTENSOR_OP_NEG,
+                                                     descD,
+                                                     modesD,
+                                                     computeType<T>()),
+                          HIPTENSOR_STATUS_SUCCESS);
+                api.keep(op);
+                hiptensorPlan_t plan = nullptr;
+                ASSERT_EQ(api.plan(op, plan), HIPTENSOR_STATUS_SUCCESS);
+                for(T const* a : {static_cast<T const*>(dBad.ptr), static_cast<T const*>(nullptr)})
+                {
+                    DeviceBuffer<T> dD(fresh());
+                    ASSERT_EQ(hiptensorPermute(api.handle, plan, &zero, a, dD.ptr, nullptr),
+                              HIPTENSOR_STATUS_SUCCESS);
+                    CHECK_HIP_ERROR(hipDeviceSynchronize());
+                    check(dD, a ? "permute, A poisoned" : "permute, A = nullptr");
+                }
+            }
+            // binary operations, every binary operator, opA LOG (NaN / -Inf of the poisoned values)
+            for(auto opAC :
+                {HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX, HIPTENSOR_OP_MIN})
+            {
+                hiptensorOperationDescriptor_t op = nullptr;
+                ASSERT_EQ(hiptensorCreateElementwiseBinary(api.handle,
+                                                           &op,
+                                                           descIn,
+                                                           modesA,
+                                                           HIPTENSOR_OP_LOG,
+                                                           descIn,
+                                                           modesA,
+                                                           HIPTENSOR_OP_NEG,
+                                                           descD,
+                                                           modesD,
+                                                           opAC,
+                                                           computeType<T>()),
+                          HIPTENSOR_STATUS_SUCCESS);
+                api.keep(op);
+                hiptensorPlan_t plan = nullptr;
+                ASSERT_EQ(api.plan(op, plan), HIPTENSOR_STATUS_SUCCESS);
+                for(T const* in : {static_cast<T const*>(dBad.ptr), static_cast<T const*>(nullptr)})
+                {
+                    DeviceBuffer<T> dD(fresh());
+                    ASSERT_EQ(hiptensorElementwiseBinaryExecute(
+                                  api.handle, plan, &zero, in, &zero, in, dD.ptr, nullptr),
+                              HIPTENSOR_STATUS_SUCCESS);
+                    CHECK_HIP_ERROR(hipDeviceSynchronize());
+                    check(dD, in ? "binary, inputs poisoned" : "binary, inputs nullptr");
+                }
+            }
+            // trinary operation
+            {
+                hiptensorOperationDescriptor_t op = nullptr;
+                ASSERT_EQ(hiptensorCreateElementwiseTrinary(api.handle,
+                                                            &op,
+                                                            descIn,
+                                                            modesA,
+                                                            HIPTENSOR_OP_IDENTITY,
+                                                            descIn,
+                                                            modesA,
+                                                            HIPTENSOR_OP_IDENTITY,
+                                                            descIn,
+                                                            modesA,
+                                                            HIPTENSOR_OP_NEG,
+                                                            descD,
+                                                            modesD,
+                                                            HIPTENSOR_OP_ADD,
+                                                            HIPTENSOR_OP_MUL,
+                                                            computeType<T>()),
+                          HIPTENSOR_STATUS_SUCCESS);
+                api.keep(op);
+                hiptensorPlan_t plan = nullptr;
+                ASSERT_EQ(api.plan(op, plan), HIPTENSOR_STATUS_SUCCESS);
+                for(T const* in : {static_cast<T const*>(dBad.ptr), static_cast<T const*>(nullptr)})
+                {
+                    DeviceBuffer<T> dD(fresh());
+                    ASSERT_EQ(
+                        hiptensorElementwiseTrinaryExecute(
+                            api.handle, plan, &zero, in, &zero, in, &zero, in, dD.ptr, nullptr),
+                        HIPTENSOR_STATUS_SUCCESS);
+                    CHECK_HIP_ERROR(hipDeviceSynchronize());
+                    check(dD, in ? "trinary, inputs poisoned" : "trinary, inputs nullptr");
+                }
+            }
+        }
+    }
+} // namespace
+
+TEST(ElementwiseZeroScaleTest, AllScalesZeroF32)
+{
+    allScalesZero<float>();
+}
+
+TEST(ElementwiseZeroScaleTest, AllScalesZeroF64)
+{
+    allScalesZero<double>();
+}
+
 // A carries fewer modes than D (it is broadcast along n): with alpha == 0 it is not read.
 TEST(ElementwiseZeroScaleTest, BroadcastInputWithZeroScale)
 {

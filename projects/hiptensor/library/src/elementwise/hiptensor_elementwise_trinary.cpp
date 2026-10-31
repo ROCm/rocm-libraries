@@ -183,6 +183,12 @@ hiptensorStatus_t hiptensor::ckbackend::elementwiseTrinary(hiptensorHandle_t    
         }
     }
 
+    // alpha == beta == gamma == 0: D = +0 without reading an input or running a kernel
+    if(hiptensor::elementwiseAllScalesZero(scalars))
+    {
+        return hiptensor::elementwiseZeroOutput(*descD, D, stream);
+    }
+
     auto output    = hiptensor::ElementwiseTensor{descD, opDes->mModeD, D};
     auto inputs    = std::vector<hiptensor::ElementwiseTensor>{
         {descA, opDes->mModeA, A}, {descB, opDes->mModeB, B}, {descC, opDes->mModeC, C}};

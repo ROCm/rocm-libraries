@@ -1133,7 +1133,8 @@ namespace hiptensor
                 }
                 for(auto const& sc : g.scalars)
                 {
-                    good = good && w.scalar(argNameAtOffset(k, sc.offset), sc.role, sc.imag);
+                    good = good
+                           && w.scalar(argNameAtOffset(k, sc.offset), sc.role, sc.imag, sc.negate);
                 }
                 auto const magic = magicU31(static_cast<uint32_t>(e0 / vec));
                 for(auto const& a : kernel->args)
@@ -1291,7 +1292,8 @@ namespace hiptensor
                 }
                 for(auto const& sc : g.scalars)
                 {
-                    good = good && w.scalar(argNameAtOffset(k, sc.offset), sc.role, sc.imag);
+                    good = good
+                           && w.scalar(argNameAtOffset(k, sc.offset), sc.role, sc.imag, sc.negate);
                 }
                 for(auto const& a : kernel->args)
                 {
@@ -1347,9 +1349,11 @@ namespace hiptensor
             // kernels.common.hiptensor_aot.ewp) of an elementwise operation whose tensors share
             // one element size and whose inputs are not all laid out like D: the class of a tuned
             // problem (route ewp.tuned.<hash>), else the first class of the pack's palette that
-            // serves the layout with enough CTAs (rocke_ewp_rule.hpp: ewp_host.choose). Every
-            // tensor is accessed with 16-byte vectors; the generic program is the fallback
-            // (buffers not aligned to them).
+            // serves the layout with enough CTAs (rocke_ewp_rule.hpp: ewp_host.choose), the
+            // ragged classes (vectors of 16 bytes down to the element size, runs of any length)
+            // when no other class serves it. Every tensor is accessed with the class's vectors
+            // (attribute vb, bytes); the generic program is the fallback (buffers not aligned to
+            // them).
             hiptensorStatus_t planEwp(EwLayout const& lay,
                                       Pack const&     pack,
                                       Program const&  generic,
@@ -1406,6 +1410,9 @@ namespace hiptensor
                     c.block = k.attr("block", 256);
                     c.tpc   = k.attr("tpc", 1);
                     c.vec   = k.attr("vec", 0);
+                    c.vb    = k.attr("vb", 16);
+                    c.rag   = k.attr("rag", 0);
+                    c.vt    = k.attr("vt", 0);
                     c.slots = k.attr("slots_b", 0);
                     classes.push_back(std::move(c));
                 }
@@ -1456,11 +1463,12 @@ namespace hiptensor
                 char const*                                  scal[] = {"alpha", "beta", "gamma"};
                 bool                                         good   = true;
                 std::vector<std::pair<BufferRole, uint32_t>> align;
+                auto const vbytes = static_cast<uint32_t>(kernel->attr("vb", 16));
                 for(int k = 0; k < nt; k++)
                 {
                     auto const& op = lay.operands[k];
                     good           = good && w.pointer(op.name, op.role, op.bytes);
-                    align.emplace_back(op.role, 16u);
+                    align.emplace_back(op.role, vbytes);
                     if(k == ari)
                     {
                         continue;
@@ -1468,7 +1476,11 @@ namespace hiptensor
                     std::string const sname = op.name == "A"   ? scal[0]
                                               : op.name == "B" ? scal[1]
                                                                : scal[2];
-                    good = good && w.scalar(sname, op.scale) && w.set("op" + op.name, op.op);
+                    // NEG folds into the scale (alpha * -x == -alpha * x, bit for bit): the kernel
+                    // takes its fast path for identity operators
+                    bool const neg = op.op == HIPTENSOR_OP_NEG;
+                    good           = good && w.scalar(sname, op.scale, false, neg)
+                           && w.set("op" + op.name, neg ? HIPTENSOR_OP_IDENTITY : op.op);
                 }
                 if(ari >= 2)
                 {
@@ -6718,25 +6730,65 @@ namespace hiptensor
                     out.push_back(std::move(flat));
                 }
                 // the tuned tiled classes when the inputs are not all laid out like the output
-                // and every tensor has one element size (not with HIPTENSOR_ROCKE_DISABLE_TUNED)
+                // and every tensor has one element size (not with HIPTENSOR_ROCKE_DISABLE_TUNED),
+                // then the tiled kernel when an input is fastest along another mode than the
+                // output (the generic program is its fallback). A ragged tuned class comes after
+                // the tiled kernel when it reads an input laid out like D (kind V: the tiled
+                // kernel's vector loads along o serve those better), and after the folded tiled
+                // kernel for a permutation or when its tile holds less than 4 KiB of a tensor: on
+                // planes smaller than half a tile (runs of a few vectors) the folded kernel's tile
+                // holds several whole planes where the ragged class's small tiles overhang them
+                // (with two or three inputs read through larger tiles the ragged class is the
+                // faster one).
                 Candidate tuned;
+                bool      hasTuned = false;
                 if(!options.disableTuned
                    && planEwp(layout, pack, candidate.program, tuned.program, tuned.facts, why)
                           == HIPTENSOR_STATUS_SUCCESS)
                 {
-                    tuned.key        = "ewp:" + tuned.program.description;
-                    tuned.staticRank = static_cast<int>(out.size());
-                    out.push_back(std::move(tuned));
+                    tuned.key = "ewp:" + tuned.program.description;
+                    hasTuned  = true;
                 }
-                // the tiled kernel when an input is fastest along another mode than the output
-                // (the generic program is its fallback)
-                Candidate tiled;
-                if(planEwt(layout, pack, candidate.program, tiled.program, tiled.facts, why)
-                   == HIPTENSOR_STATUS_SUCCESS)
+                Candidate  tiled;
+                bool const hasTiled
+                    = planEwt(layout, pack, candidate.program, tiled.program, tiled.facts, why)
+                      == HIPTENSOR_STATUS_SUCCESS;
+                if(hasTiled)
                 {
-                    tiled.key        = "ewt:" + tiled.program.description;
-                    tiled.staticRank = static_cast<int>(out.size());
-                    out.push_back(std::move(tiled));
+                    tiled.key = "ewt:" + tiled.program.description;
+                }
+                auto attrOf = [](Program const& p, char const* name) {
+                    return p.steps.empty() || p.steps.front().kernel == nullptr
+                               ? int64_t(0)
+                               : p.steps.front().kernel->attr(name, 0);
+                };
+                bool const raggedTuned = hasTuned && hasTiled && attrOf(tuned.program, "rag") == 1;
+                bool const readsLikeD
+                    = raggedTuned
+                      && tuned.program.steps.front().kernel->attrStr("kinds").find('V')
+                             != std::string::npos;
+                bool smallTile = false;
+                if(raggedTuned)
+                {
+                    auto const*   tk = tuned.program.steps.front().kernel;
+                    int64_t const es
+                        = tk->attr("vb", 16) / std::max<int64_t>(1, tk->attr("vec", 1));
+                    smallTile = tk->attrStr("mode") == "t"
+                                && tk->attr("to", 0) * tk->attr("tt", 0) * es < 4096;
+                }
+                bool const tiledFirst = raggedTuned
+                                        && (readsLikeD
+                                            || ((problem.kind == OpKind::Permute || smallTile)
+                                                && attrOf(tiled.program, "fold") == 1));
+                for(int pass = 0; pass < 2; pass++)
+                {
+                    bool const takeTiled = (pass == 0) == tiledFirst;
+                    Candidate& c         = takeTiled ? tiled : tuned;
+                    if(takeTiled ? hasTiled : hasTuned)
+                    {
+                        c.staticRank = static_cast<int>(out.size());
+                        out.push_back(std::move(c));
+                    }
                 }
                 // then the vector class of the generic kernel when an input is read with vector
                 // loads along D's fastest mode

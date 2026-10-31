@@ -256,7 +256,7 @@ rocke_kernel_def_t* rocke_build_htaot_ewf(rocke_ir_builder_t* b, const rocke_hta
 /* ----------------------------------------------------------------- ewp */
 
 /* Python ewp.EWP_ABI, SLOTS_B, MAX_VECTORS, LDS_BYTES. */
-#define ROCKE_HTAOT_EWP_ABI "hiptensor-aot-ewp/v1"
+#define ROCKE_HTAOT_EWP_ABI "hiptensor-aot-ewp/v2"
 #define ROCKE_HTAOT_EWP_SLOTS_B 8
 #define ROCKE_HTAOT_EWP_MAX_VECTORS 32
 #define ROCKE_HTAOT_EWP_LDS_BYTES 163840
@@ -274,7 +274,7 @@ typedef struct rocke_htaot_ewp_spec
     const char* mode; /* "t" (element transposition) or "a" (shared stride-1 mode) */
     int to; /* tile along the o run */
     int tt; /* tile along the t run */
-    int tw; /* mode a: 16-byte chunks of the shared mode per tile */
+    int tw; /* mode a: vectors (vb bytes) of the shared mode per tile */
     int block;
     int nt; /* bit 0 streaming loads, bit 1 streaming stores */
     int swz; /* XOR group of the LDS chunk index (0 / 1: none) */
@@ -282,13 +282,18 @@ typedef struct rocke_htaot_ewp_spec
     const char* walk; /* "o" or "t": the tile coordinate fastest across consecutive CTAs */
     int tpc; /* tiles per CTA */
     int ilp; /* phase-2 units whose loads are issued together (0: all) */
+    int vb; /* bytes per vector access: 16, 8, 4 or 2 (at least the element size) */
+    int rag; /* 1: ragged class (tiles may overhang the ends of the runs) */
+    int tb; /* mode t: bytes per vector of the T inputs along t (0: vb) */
 } rocke_htaot_ewp_spec_t;
 
 rocke_htaot_ewp_spec_t rocke_htaot_ewp_spec_default(void);
 bool rocke_htaot_ewp_check(const rocke_htaot_ewp_spec_t* s, char* reason, size_t cap);
-/* EwpSpec.vec: elements per 16-byte vector. */
+/* EwpSpec.vec: elements per vector (vb bytes). */
 int rocke_htaot_ewp_vec(const rocke_htaot_ewp_spec_t* s);
-/* EwpSpec.chunks(): 16-byte chunks of one LDS tile. */
+/* EwpSpec.vect: elements per vector of the T inputs along t (tb bytes, or vb). */
+int rocke_htaot_ewp_vect(const rocke_htaot_ewp_spec_t* s);
+/* EwpSpec.chunks(): vector chunks (vb bytes) of one LDS tile. */
 int rocke_htaot_ewp_chunks(const rocke_htaot_ewp_spec_t* s);
 rocke_status_t rocke_htaot_ewp_kernel_name(const rocke_htaot_ewp_spec_t* s, char* out, size_t cap);
 rocke_kernel_def_t* rocke_build_htaot_ewp(rocke_ir_builder_t* b, const rocke_htaot_ewp_spec_t* s);

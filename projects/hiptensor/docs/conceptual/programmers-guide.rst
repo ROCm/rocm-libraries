@@ -281,6 +281,26 @@ loads issued together), and the kernel measured for each problem of rocKE's tune
 workgroups, or the one with the most. Results are those of the generic kernel. Buffers not aligned to
 16 bytes run the generic kernel. The JIT doesn't specialize these kernels.
 
+Layouts that these kernels can't tile with 16-byte vectors and whole tiles (an extent or a stride that isn't
+a multiple of 16 bytes, for example an output whose fastest mode has 50 f16 elements, or a run that doesn't
+hold a whole number of tiles) take the ragged kernels of the palette. Their tiles may overhang the end of a
+run (a lane past the end repeats the last vector of the run, so it reads and writes the same values as the
+lane that owns it), each run takes the mode contiguous after it whenever there is one, and their loads and
+stores use the widest vector that the layout keeps aligned, from 16 bytes down to one element; the inputs
+read through LDS may use wider vectors than the output. The palette has square and flat tiles for them,
+and for a mode that every tensor shares, rows of that mode: 256 and 128 bytes with vectors of several
+elements, 64 elements and 128 bytes with one-element vectors, then 64 bytes (a row shorter than 128 bytes
+must hold the whole mode; not for 8-byte elements, which the generic kernel serves better).
+They're taken only when no other tuned tiled kernel serves the problem, not for a shared mode whose
+extent and strides are multiples of 16 bytes (the vector form of the generic kernel serves those), and
+only when their tiles span at most twice the problem's elements (for a shared mode where none does, rows
+of 64 elements spanning at most three times): the first, widest vectors and square tiles first (for a
+shared mode, longer rows first), that launches at least 1024 workgroups, else the one with the most
+workgroups. When the tiled kernel serves the problem, it comes before a ragged kernel that reads an
+input laid out like the output, and, when its tile holds several whole planes (planes smaller than half
+its tile, for example runs of 16 elements), before the ragged kernels of a permutation and before
+ragged tiles of less than 4 KiB. Buffers not aligned to their vectors run the generic kernel.
+
 .. _elementwise-data-types:
 
 The data type combinations of permutations and elementwise operations are the real ones of cuTENSOR 2.x

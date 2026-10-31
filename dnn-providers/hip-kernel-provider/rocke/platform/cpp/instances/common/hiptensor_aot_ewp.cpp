@@ -76,7 +76,13 @@ bool mode_a(const rocke_htaot_ewp_spec_t* s)
 int vec_of(const rocke_htaot_ewp_spec_t* s)
 {
     int nb = nbytes(s->d);
-    return nb > 0 ? 16 / nb : 0;
+    return nb > 0 ? s->vb / nb : 0;
+}
+
+int vect_of(const rocke_htaot_ewp_spec_t* s)
+{
+    int nb = nbytes(s->d);
+    return nb > 0 ? (s->tb ? s->tb : s->vb) / nb : 0;
 }
 
 int64_t p1_units(const rocke_htaot_ewp_spec_t* s)
@@ -84,7 +90,7 @@ int64_t p1_units(const rocke_htaot_ewp_spec_t* s)
     if(mode_a(s))
         return int64_t(s->to) * s->tt * s->tw;
     int v = vec_of(s);
-    return int64_t(s->to / v) * (s->tt / v);
+    return int64_t(s->to / v) * (s->tt / vect_of(s));
 }
 
 int64_t p2_units(const rocke_htaot_ewp_spec_t* s)
@@ -97,7 +103,7 @@ int64_t p2_units(const rocke_htaot_ewp_spec_t* s)
 int64_t tile_bytes(const rocke_htaot_ewp_spec_t* s)
 {
     if(mode_a(s))
-        return int64_t(s->to) * s->tt * s->tw * 16;
+        return int64_t(s->to) * s->tt * s->tw * s->vb;
     return int64_t(s->to) * s->tt * nbytes(s->d);
 }
 
@@ -138,6 +144,12 @@ std::string ewp_name(const rocke_htaot_ewp_spec_t* s)
         n += "_x" + std::to_string(s->tpc);
     if(s->ilp)
         n += "_g" + std::to_string(s->ilp);
+    if(s->vb != 16)
+        n += "_v" + std::to_string(s->vb);
+    if(s->rag)
+        n += "_r";
+    if(s->tb)
+        n += "_u" + std::to_string(s->tb);
     return n;
 }
 
@@ -165,6 +177,9 @@ rocke_htaot_ewp_spec_t rocke_htaot_ewp_spec_default(void)
     s.walk = "o";
     s.tpc = 1;
     s.ilp = 0;
+    s.vb = 16;
+    s.rag = 0;
+    s.tb = 0;
     return s;
 }
 
@@ -173,9 +188,14 @@ int rocke_htaot_ewp_vec(const rocke_htaot_ewp_spec_t* s)
     return s == nullptr ? 0 : vec_of(s);
 }
 
+int rocke_htaot_ewp_vect(const rocke_htaot_ewp_spec_t* s)
+{
+    return s == nullptr ? 0 : vect_of(s);
+}
+
 int rocke_htaot_ewp_chunks(const rocke_htaot_ewp_spec_t* s)
 {
-    return s == nullptr ? 0 : (int)(tile_bytes(s) / 16);
+    return s == nullptr || s->vb <= 0 ? 0 : (int)(tile_bytes(s) / s->vb);
 }
 
 bool rocke_htaot_ewp_check(const rocke_htaot_ewp_spec_t* s, char* reason, size_t cap)
@@ -212,10 +232,20 @@ bool rocke_htaot_ewp_check(const rocke_htaot_ewp_spec_t* s, char* reason, size_t
         return set_reason(reason, cap, "at least one input read through LDS (kind T)");
     if(!streq(s->mode, "t") && !streq(s->mode, "a"))
         return set_reason(reason, cap, "mode must be t or a");
+    if((s->vb != 2 && s->vb != 4 && s->vb != 8 && s->vb != 16) || s->vb < nbytes(s->d))
+        return set_reason(
+            reason, cap, "vb must be 2, 4, 8 or 16 bytes and at least the element size");
+    if(s->rag != 0 && s->rag != 1)
+        return set_reason(reason, cap, "rag must be 0 or 1");
+    if(s->tb
+       && ((s->tb != 2 && s->tb != 4 && s->tb != 8 && s->tb != 16) || s->tb < nbytes(s->d)
+           || !streq(s->mode, "t")))
+        return set_reason(
+            reason, cap, "tb: 2, 4, 8 or 16 bytes, at least the element size, mode t only");
     if(!pow2(s->to) || !pow2(s->tt) || !pow2(s->tw) || !pow2(s->block))
         return set_reason(reason, cap, "tile extents and block must be powers of two");
     const int v = vec_of(s);
-    if(!mode_a(s) && (s->to % v || s->tt % v))
+    if(!mode_a(s) && (s->to % v || s->tt % vect_of(s)))
         return set_reason(reason, cap, "mode t: the tile extents must be multiples of the vector");
     if(!mode_a(s) && s->tw != 1)
         return set_reason(reason, cap, "mode t: tw must be 1");
@@ -236,9 +266,12 @@ bool rocke_htaot_ewp_check(const rocke_htaot_ewp_spec_t* s, char* reason, size_t
         return set_reason(reason, cap, "the LDS tiles exceed the LDS budget");
     if(s->nt < 0 || s->nt > 3)
         return set_reason(reason, cap, "nt must be 0 .. 3");
+    if(v == 1 && (s->nt & 1))
+        return set_reason(
+            reason, cap, "one-element vectors: scalar loads have no streaming hint (nt bit 0)");
     if(s->swz != 0 && s->swz != 1)
     {
-        int64_t chunks = tile_bytes(s) / 16;
+        int64_t chunks = tile_bytes(s) / s->vb;
         if(!pow2(s->swz) || (int64_t(1) << s->swsh) < (int64_t(s->swz) << swlo_of(s))
            || chunks % (int64_t(1) << s->swsh))
             return set_reason(reason, cap, "the swizzle is not a bijection of the tile's chunks");
@@ -296,6 +329,7 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
     std::vector<std::string> ins(names.begin(), names.end() - 1);
     std::map<std::string, const char*> dts = dtypes(spec);
     const int VW = vec_of(spec);
+    const int VT = vect_of(spec);
     const int BS = spec->block;
     const int TO = spec->to, TT = spec->tt, TW = spec->tw;
     const bool ma = mode_a(spec);
@@ -342,6 +376,16 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
     V* ntl = param(b, "ntl", rocke_i32());
     V* nbv = param(b, "nb", rocke_i32());
     V* ystep = param(b, "ystep", rocke_i32());
+    V* lo = nullptr;
+    V* lt = nullptr;
+    V* lw = nullptr;
+    if(spec->rag)
+    {
+        lo = param(b, "lo", rocke_i32());
+        lt = param(b, "lt", rocke_i32());
+        if(ma)
+            lw = param(b, "lw", rocke_i32());
+    }
     std::map<std::string, std::pair<V*, V*>> SO, ST;
     for(const auto& n : names)
     {
@@ -387,7 +431,7 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
     for(size_t i = 1; i < ins.size(); ++i)
         allnz = rocke_b_land(b, allnz, nz[ins[i]]);
     /* the fast path: every scale non-zero and every unary operator the identity (CONJ of a
-     * real) */
+     * real; hipTensor folds NEG into the scale) */
     V* idop = nullptr;
     for(const auto& n : ins)
     {
@@ -399,6 +443,49 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
         idop = idop == nullptr ? t_ : rocke_b_land(b, idop, t_);
     }
     V* fastp = rocke_b_land(b, allnz, idop);
+    /* ragged class: the last position a lane may touch along each run (a lane past the end
+     * takes the last vector of the run: the same data as the lane that owns it) */
+    V* last_w = nullptr;
+    V* last_o1 = nullptr;
+    V* last_t1 = nullptr;
+    V* last_ov = nullptr;
+    V* last_tv = nullptr;
+    if(spec->rag)
+    {
+        if(ma)
+        {
+            V* k1 = e.c32(VW);
+            last_w = rocke_b_sub(b, lw, k1);
+            V* k2 = e.c32(1);
+            last_o1 = rocke_b_sub(b, lo, k2);
+            V* k3 = e.c32(1);
+            last_t1 = rocke_b_sub(b, lt, k3);
+        }
+        else
+        {
+            V* k1 = e.c32(VW);
+            last_ov = rocke_b_sub(b, lo, k1);
+            V* k2 = e.c32(VT);
+            last_tv = rocke_b_sub(b, lt, k2);
+            V* k3 = e.c32(1);
+            last_t1 = rocke_b_sub(b, lt, k3);
+        }
+    }
+    /* a vector of w elements of tensor n (<w x ty>, default vb bytes; w = 1: one scalar load,
+     * no streaming hint) */
+    auto gload = [&](const std::string& n, V* off, int w) {
+        const rocke_type_t* ty = nullptr;
+        int nb = 0;
+        dtype_of(dts[n], &ty, &nb);
+        const int bytes = w * nb;
+        if(w == 1)
+        {
+            V* x = rocke_b_global_load(b, P[n], off, ty, bytes);
+            V* xs[1] = {x};
+            return rocke_b_vec_pack(b, xs, 1, ty);
+        }
+        return rocke_b_global_load_vN_ex(b, P[n], off, ty, w, bytes, &mo_ld);
+    };
 
     auto run_off = [&](const std::string& n, V* pos, V* ext, V* m, V* s, std::pair<V*, V*> st) {
         std::pair<V*, V*> qr = e.divmod(pos, ext, m, s);
@@ -415,7 +502,7 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
     {
         const rocke_type_t* ty = nullptr;
         dtype_of(dts[n], &ty, nullptr);
-        int shape[1] = {(int)(tile_bytes(spec) / 16) * VW};
+        int shape[1] = {(int)(tile_bytes(spec) / spec->vb) * VW};
         std::string hint = "t" + n;
         lds[n] = rocke_b_smem_alloc(b, ty, shape, 1, hint.c_str());
     }
@@ -473,6 +560,16 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
         V* sw = swz(ch);
         return vmul(sw, VW);
     };
+    auto lstore = [&](const std::string& n, V* ch, V* v) {
+        V* idx[1] = {lds_index(ch)};
+        if(VW == 1)
+        {
+            V* x = rocke_b_vec_extract(b, v, 0);
+            rocke_b_smem_store_vN(b, lds[n], idx, 1, x, 1);
+        }
+        else
+            rocke_b_smem_store_vN(b, lds[n], idx, 1, v, VW);
+    };
 
     struct Unit
     {
@@ -517,30 +614,72 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                         V* rest = pow2_div(u, TW);
                         V* tl = pow2_mod(rest, TT);
                         V* ol = pow2_div(rest, TT);
-                        V* cv = vmul(c, VW);
-                        V* wc = rocke_b_add(b, w0, cv);
-                        V* a1 = rocke_b_add(b, boff[n], wc);
-                        V* po = rocke_b_add(b, o0, ol);
-                        V* oo = ooff(n, po);
-                        V* pt = rocke_b_add(b, t0, tl);
-                        V* to_ = toff(n, pt);
-                        V* a2 = rocke_b_add(b, oo, to_);
-                        V* off = rocke_b_add(b, a1, a2);
-                        V* v = rocke_b_global_load_vN_ex(b, P[n], off, ty, VW, 16, &mo_ld);
+                        V* off;
+                        if(spec->rag)
+                        {
+                            V* cv = vmul(c, VW);
+                            V* wc = rocke_b_add(b, w0, cv);
+                            V* pw = rocke_b_smin(b, wc, last_w);
+                            V* po0 = rocke_b_add(b, o0, ol);
+                            V* po = rocke_b_smin(b, po0, last_o1);
+                            V* pt0 = rocke_b_add(b, t0, tl);
+                            V* pt = rocke_b_smin(b, pt0, last_t1);
+                            V* dw = rocke_b_sub(b, pw, w0);
+                            c = pow2_div(dw, VW);
+                            ol = rocke_b_sub(b, po, o0);
+                            tl = rocke_b_sub(b, pt, t0);
+                            V* a1 = rocke_b_add(b, boff[n], pw);
+                            V* oo = ooff(n, po);
+                            V* to_ = toff(n, pt);
+                            V* a2 = rocke_b_add(b, oo, to_);
+                            off = rocke_b_add(b, a1, a2);
+                        }
+                        else
+                        {
+                            V* cv = vmul(c, VW);
+                            V* wc = rocke_b_add(b, w0, cv);
+                            V* a1 = rocke_b_add(b, boff[n], wc);
+                            V* po = rocke_b_add(b, o0, ol);
+                            V* oo = ooff(n, po);
+                            V* pt = rocke_b_add(b, t0, tl);
+                            V* to_ = toff(n, pt);
+                            V* a2 = rocke_b_add(b, oo, to_);
+                            off = rocke_b_add(b, a1, a2);
+                        }
+                        V* v = gload(n, off, VW);
                         loaded.push_back({ol, tl, c, {v}});
                     }
                     else
                     {
-                        V* ub_t = pow2_mod(u, TT / VW);
-                        V* ub_o = pow2_div(u, TT / VW);
+                        V* ub_t = pow2_mod(u, TT / VT);
+                        V* ub_o = pow2_div(u, TT / VT);
                         V* ol = vmul(ub_o, VW);
-                        V* tl = vmul(ub_t, VW);
-                        V* po = rocke_b_add(b, o0, ol);
-                        V* oo = ooff(n, po);
-                        V* pt = rocke_b_add(b, t0, tl);
-                        V* to_ = toff(n, pt);
-                        V* a2 = rocke_b_add(b, oo, to_);
-                        V* base = rocke_b_add(b, boff[n], a2);
+                        V* tl = vmul(ub_t, VT);
+                        V* base;
+                        if(spec->rag)
+                        {
+                            V* po0 = rocke_b_add(b, o0, ol);
+                            V* po = rocke_b_smin(b, po0, last_ov);
+                            V* pt0 = rocke_b_add(b, t0, tl);
+                            V* pt = rocke_b_smin(b, pt0, last_tv);
+                            V* dob = rocke_b_sub(b, po, o0);
+                            ub_o = pow2_div(dob, VW);
+                            V* dtb = rocke_b_sub(b, pt, t0);
+                            ub_t = pow2_div(dtb, VT);
+                            V* oo = ooff(n, po);
+                            V* to_ = toff(n, pt);
+                            V* a2 = rocke_b_add(b, oo, to_);
+                            base = rocke_b_add(b, boff[n], a2);
+                        }
+                        else
+                        {
+                            V* po = rocke_b_add(b, o0, ol);
+                            V* oo = ooff(n, po);
+                            V* pt = rocke_b_add(b, t0, tl);
+                            V* to_ = toff(n, pt);
+                            V* a2 = rocke_b_add(b, oo, to_);
+                            base = rocke_b_add(b, boff[n], a2);
+                        }
                         std::vector<V*> rws;
                         for(int j = 0; j < VW; ++j)
                         {
@@ -551,8 +690,7 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                                 V* m = rocke_b_mul(b, kj, SO[n].first);
                                 o_ = rocke_b_add(b, base, m);
                             }
-                            rws.push_back(
-                                rocke_b_global_load_vN_ex(b, P[n], o_, ty, VW, 16, &mo_ld));
+                            rws.push_back(gload(n, o_, VT));
                         }
                         loaded.push_back({ub_o, ub_t, nullptr, rws});
                     }
@@ -565,19 +703,18 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                         V* a1 = rocke_b_add(b, m1, l.ol);
                         V* m2 = vmul(a1, TW);
                         V* ch = rocke_b_add(b, m2, l.c);
-                        V* idx[1] = {lds_index(ch)};
-                        rocke_b_smem_store_vN(b, lds[n], idx, 1, l.rws[0], VW);
+                        lstore(n, ch, l.rws[0]);
                         continue;
                     }
                     V* ub_o = l.ol;
                     V* ub_t = l.tl;
-                    for(int i = 0; i < VW; ++i)
+                    for(int i = 0; i < VT; ++i)
                     {
                         std::vector<V*> cols;
                         for(int j = 0; j < VW; ++j)
                             cols.push_back(rocke_b_vec_extract(b, l.rws[(size_t)j], i));
                         V* vv = rocke_b_vec_pack(b, cols.data(), VW, ty);
-                        V* trow = vmul(ub_t, VW);
+                        V* trow = vmul(ub_t, VT);
                         if(i)
                         {
                             V* ki = e.c32(i);
@@ -585,8 +722,7 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                         }
                         V* m = vmul(trow, TO / VW);
                         V* ch = rocke_b_add(b, m, ub_o);
-                        V* idx[1] = {lds_index(ch)};
-                        rocke_b_smem_store_vN(b, lds[n], idx, 1, vv, VW);
+                        lstore(n, ch, vv);
                     }
                 }
             });
@@ -606,24 +742,54 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                 V* rest = pow2_div(u, TW);
                 ol = pow2_mod(rest, TO);
                 tl = pow2_div(rest, TO);
+                if(spec->rag)
+                {
+                    V* cv = vmul(c, VW);
+                    V* wc = rocke_b_add(b, w0, cv);
+                    un.wv = rocke_b_smin(b, wc, last_w);
+                    V* go0 = rocke_b_add(b, o0, ol);
+                    un.go = rocke_b_smin(b, go0, last_o1);
+                    V* gt0 = rocke_b_add(b, t0, tl);
+                    un.gt = rocke_b_smin(b, gt0, last_t1);
+                    V* dw = rocke_b_sub(b, un.wv, w0);
+                    c = pow2_div(dw, VW);
+                    ol = rocke_b_sub(b, un.go, o0);
+                    tl = rocke_b_sub(b, un.gt, t0);
+                }
                 V* m1 = vmul(tl, TO);
                 V* a1 = rocke_b_add(b, m1, ol);
                 V* m2 = vmul(a1, TW);
                 un.ch = rocke_b_add(b, m2, c);
-                V* cv = vmul(c, VW);
-                un.wv = rocke_b_add(b, w0, cv);
+                if(!spec->rag)
+                {
+                    V* cv = vmul(c, VW);
+                    un.wv = rocke_b_add(b, w0, cv);
+                }
             }
             else
             {
                 V* uo = pow2_mod(u, TO / VW);
                 tl = pow2_div(u, TO / VW);
                 ol = vmul(uo, VW);
+                if(spec->rag)
+                {
+                    V* go0 = rocke_b_add(b, o0, ol);
+                    un.go = rocke_b_smin(b, go0, last_ov);
+                    V* gt0 = rocke_b_add(b, t0, tl);
+                    un.gt = rocke_b_smin(b, gt0, last_t1);
+                    V* dob = rocke_b_sub(b, un.go, o0);
+                    uo = pow2_div(dob, VW);
+                    tl = rocke_b_sub(b, un.gt, t0);
+                }
                 V* m = vmul(tl, TO / VW);
                 un.ch = rocke_b_add(b, m, uo);
                 un.wv = nullptr;
             }
-            un.go = rocke_b_add(b, o0, ol);
-            un.gt = rocke_b_add(b, t0, tl);
+            if(!spec->rag)
+            {
+                un.go = rocke_b_add(b, o0, ol);
+                un.gt = rocke_b_add(b, t0, tl);
+            }
             p2.push_back(un);
         }
         auto offs = [&](const std::string& n, const Unit& un) {
@@ -644,7 +810,7 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                 return rocke_b_smem_load_vN(b, lds[n], idx, 1, ty, VW);
             }
             V* o_ = offs(n, un);
-            return rocke_b_global_load_vN_ex(b, P[n], o_, ty, VW, 16, &mo_ld);
+            return gload(n, o_, VW);
         };
         /* body(every, op): op >= 0: the fast path (no operator table; op the binary
          * operator, 0 for a permutation) */
@@ -740,7 +906,7 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                         outs.push_back(e.from_c(x, spec->d));
                     V* doff = offs("D", grp[q]);
                     V* pk = rocke_b_vec_pack(b, outs.data(), (int)outs.size(), dty);
-                    rocke_b_global_store_vN_ex(b, P["D"], doff, pk, VW, 16, &mo_st);
+                    rocke_b_global_store_vN_ex(b, P["D"], doff, pk, VW, spec->vb, &mo_st);
                 }
             }
         };
@@ -837,33 +1003,55 @@ int rocke_htaot_ewp_pack_classes(const char* arch, rocke_htaot_ewp_spec_t* out, 
     if(arch == nullptr)
         return -1;
     int n = 0;
-#define ROCKE_EWP_CLASS(                                                                    \
-    ARCH, ARITY, A, B, C, D, KINDS, MODE, TO, TT, TW, BLOCK, NT, SWZ, SWSH, WALK, TPC, ILP) \
-    if(strcmp(arch, ARCH) == 0)                                                             \
-    {                                                                                       \
-        if(out != nullptr && n < cap)                                                       \
-        {                                                                                   \
-            rocke_htaot_ewp_spec_t s_ = rocke_htaot_ewp_spec_default();                     \
-            s_.arity = ARITY;                                                               \
-            s_.a = A;                                                                       \
-            s_.b = B;                                                                       \
-            s_.c = C;                                                                       \
-            s_.d = D;                                                                       \
-            s_.kinds = KINDS;                                                               \
-            s_.mode = MODE;                                                                 \
-            s_.to = TO;                                                                     \
-            s_.tt = TT;                                                                     \
-            s_.tw = TW;                                                                     \
-            s_.block = BLOCK;                                                               \
-            s_.nt = NT;                                                                     \
-            s_.swz = SWZ;                                                                   \
-            s_.swsh = SWSH;                                                                 \
-            s_.walk = WALK;                                                                 \
-            s_.tpc = TPC;                                                                   \
-            s_.ilp = ILP;                                                                   \
-            out[n] = s_;                                                                    \
-        }                                                                                   \
-        ++n;                                                                                \
+#define ROCKE_EWP_CLASS(ARCH,                                           \
+                        ARITY,                                          \
+                        A,                                              \
+                        B,                                              \
+                        C,                                              \
+                        D,                                              \
+                        KINDS,                                          \
+                        MODE,                                           \
+                        TO,                                             \
+                        TT,                                             \
+                        TW,                                             \
+                        BLOCK,                                          \
+                        NT,                                             \
+                        SWZ,                                            \
+                        SWSH,                                           \
+                        WALK,                                           \
+                        TPC,                                            \
+                        ILP,                                            \
+                        VB,                                             \
+                        RAG,                                            \
+                        TB)                                             \
+    if(strcmp(arch, ARCH) == 0)                                         \
+    {                                                                   \
+        if(out != nullptr && n < cap)                                   \
+        {                                                               \
+            rocke_htaot_ewp_spec_t s_ = rocke_htaot_ewp_spec_default(); \
+            s_.arity = ARITY;                                           \
+            s_.a = A;                                                   \
+            s_.b = B;                                                   \
+            s_.c = C;                                                   \
+            s_.d = D;                                                   \
+            s_.kinds = KINDS;                                           \
+            s_.mode = MODE;                                             \
+            s_.to = TO;                                                 \
+            s_.tt = TT;                                                 \
+            s_.tw = TW;                                                 \
+            s_.block = BLOCK;                                           \
+            s_.nt = NT;                                                 \
+            s_.swz = SWZ;                                               \
+            s_.swsh = SWSH;                                             \
+            s_.walk = WALK;                                             \
+            s_.tpc = TPC;                                               \
+            s_.ilp = ILP;                                               \
+            s_.vb = VB;                                                 \
+            s_.rag = RAG;                                               \
+            s_.tb = TB;                                                 \
+            out[n] = s_;                                                \
+        }                                                               \
+        ++n;                                                            \
     }
 #include "hiptensor_aot_ewp_table.inc"
 #undef ROCKE_EWP_CLASS

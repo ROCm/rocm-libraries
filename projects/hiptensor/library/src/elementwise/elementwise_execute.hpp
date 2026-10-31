@@ -74,6 +74,18 @@ namespace hiptensor
                                       std::vector<hiptensorOperator_t>& operators,
                                       ElementwiseTensor const&          output);
 
+    // Whether every input's scaling factor is zero (a NaN scaling factor is not zero).
+    bool elementwiseAllScalesZero(std::vector<double> const& scalars);
+
+    // cuTENSOR semantics when every input's scaling factor is zero: no input is read and no
+    // operator is applied, and ADD, MUL, MAX and MIN of zeros are zero, so the result does not
+    // depend on the inputs: D = +0 at each of its elements. Writes them through D's own strides
+    // on `stream`, with one memset when D's elements occupy a contiguous range, otherwise
+    // element by element (the memory between the elements of a padded D is not written). Both
+    // backends call it instead of running an elementwise kernel over the whole operation.
+    hiptensorStatus_t
+        elementwiseZeroOutput(hiptensorTensorDescriptor const& descD, void* D, hipStream_t stream);
+
     // Selects and runs an elementwise kernel: the plan's kernel from an earlier execution if it
     // supports this call, otherwise the best supporting kernel of the registry. `operators` is
     // in the order of the solution's initArgs, `queryOperators` in the order of the registry's

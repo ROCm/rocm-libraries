@@ -70,6 +70,9 @@ namespace hiptensor
                 std::string a, b, c, d; // "" for an absent B / C
                 std::string kinds, mode, walk;
                 int64_t     to = 0, tt = 0, tw = 1, block = 256, tpc = 1, vec = 0, slots = 8;
+                int64_t     vb  = 16; // bytes per vector access
+                int64_t     rag = 0; // 1: ragged class (runs of any length)
+                int64_t     vt  = 0; // mode t: elements per vector of the T inputs (0: vec)
             };
 
             // A launch: argument values by name (i32 bit patterns) and the grid.
@@ -298,12 +301,14 @@ namespace hiptensor
                 }
                 // the run from `first`: alone when its extent is a multiple of the tile, else with
                 // the mode contiguous after it in tensor k (not excluded) when the two hold a whole
-                // number of tiles
-                auto grow = [&dims](int                     first,
-                                    int                     k,
-                                    int64_t                 tile,
-                                    std::vector<int> const& ex,
-                                    std::vector<int>&       run) {
+                // number of tiles; a ragged class takes that mode whenever there is one, else the
+                // mode alone
+                bool const rag  = c.rag != 0;
+                auto       grow = [&dims, rag](int                     first,
+                                         int                     k,
+                                         int64_t                 tile,
+                                         std::vector<int> const& ex,
+                                         std::vector<int>&       run) {
                     run.clear();
                     if(dims[first].extent % tile == 0)
                     {
@@ -320,6 +325,15 @@ namespace hiptensor
                             break;
                         }
                     }
+                    if(rag)
+                    {
+                        run.push_back(first);
+                        if(nxt >= 0)
+                        {
+                            run.push_back(nxt);
+                        }
+                        return true;
+                    }
                     if(nxt < 0 || (dims[first].extent * dims[nxt].extent) % tile != 0)
                     {
                         return false;
@@ -327,6 +341,54 @@ namespace hiptensor
                     run = {first, nxt};
                     return true;
                 };
+                if(rag)
+                {
+                    // both orders (t run first, o run first); the one whose tiles waste less; on
+                    // a tie the o run first for one or two inputs (D's stores then cover longer
+                    // contiguous runs), the t run first for three (their loads outweigh the stores)
+                    auto fill = [&dims, &c](std::vector<int> const& o, std::vector<int> const& t) {
+                        int64_t no = 1, nt = 1;
+                        for(int i : o)
+                        {
+                            no *= dims[i].extent;
+                        }
+                        for(int i : t)
+                        {
+                            nt *= dims[i].extent;
+                        }
+                        return std::pair<int64_t, int64_t>{
+                            no * nt, eCeilDiv(no, c.to) * c.to * eCeilDiv(nt, c.tt) * c.tt};
+                    };
+                    std::vector<int> o1, t1, o2, t2;
+                    std::vector<int> e1 = excl;
+                    e1.push_back(oFirst);
+                    grow(tFirst, ki, c.tt, e1, t1);
+                    std::vector<int> e2 = excl;
+                    e2.insert(e2.end(), t1.begin(), t1.end());
+                    grow(oFirst, nd, c.to, e2, o1);
+                    std::vector<int> e3 = excl;
+                    e3.push_back(tFirst);
+                    grow(oFirst, nd, c.to, e3, o2);
+                    std::vector<int> e4 = excl;
+                    e4.insert(e4.end(), o2.begin(), o2.end());
+                    grow(tFirst, ki, c.tt, e4, t2);
+                    auto const f1  = fill(o1, t1);
+                    auto const f2  = fill(o2, t2);
+                    using I128     = __int128;
+                    auto const lhs = I128(f2.first) * f1.second;
+                    auto const rhs = I128(f1.first) * f2.second;
+                    if(lhs > rhs || (lhs == rhs && c.arity < 3))
+                    {
+                        oRun = o2;
+                        tRun = t2;
+                    }
+                    else
+                    {
+                        oRun = o1;
+                        tRun = t1;
+                    }
+                    return true;
+                }
                 // the t run first, then the o run; when that fails, the other way
                 std::vector<int> ex = excl;
                 ex.push_back(oFirst);
@@ -407,12 +469,12 @@ namespace hiptensor
                 int64_t const et0 = dims[tRun[0]].extent;
                 if(c.mode == "a")
                 {
-                    if(dims[w].extent % (c.tw * V) != 0)
+                    if(dims[w].extent % (c.rag ? V : c.tw * V) != 0)
                     {
                         return false;
                     }
                     // a tile row covers the whole shared mode or at least 128 bytes of it
-                    if(c.tw * V != dims[w].extent && c.tw * 16 < 128)
+                    if(c.tw * V < dims[w].extent && c.tw * c.vb < 128)
                     {
                         return false;
                     }
@@ -429,21 +491,23 @@ namespace hiptensor
                 }
                 else
                 {
-                    if(eo0 % V != 0 || et0 % V != 0)
+                    int64_t const VT = c.vt > 0 ? c.vt : V;
+                    if(eo0 % V != 0 || et0 % VT != 0)
                     {
                         return false;
                     }
                     for(int k = 0; k < tensors; k++)
                     {
-                        bool const direct = k == tensors - 1 || c.kinds[size_t(k)] == 'V';
-                        int const  unit   = direct ? oRun[0] : tRun[0];
+                        bool const    direct = k == tensors - 1 || c.kinds[size_t(k)] == 'V';
+                        int const     unit   = direct ? oRun[0] : tRun[0];
+                        int64_t const vk     = direct ? V : VT;
                         if(dims[unit].stride[k] != 1)
                         {
                             return false;
                         }
                         for(int i : all)
                         {
-                            if(i != unit && dims[i].stride[k] % V != 0)
+                            if(i != unit && dims[i].stride[k] % vk != 0)
                             {
                                 return false;
                             }
@@ -465,9 +529,22 @@ namespace hiptensor
                 {
                     nt *= dims[i].extent;
                 }
-                int64_t const tilesO = no / c.to, tilesT = nt / c.tt;
-                int64_t const tilesW = w >= 0 ? dims[w].extent / (c.tw * V) : 1;
-                v["eo"]              = eo0;
+                int64_t tilesO = no / c.to, tilesT = nt / c.tt;
+                int64_t tilesW = w >= 0 ? dims[w].extent / (c.tw * V) : 1;
+                if(c.rag)
+                {
+                    // ragged class: tiles may overhang the ends; the kernel clamps to the lengths
+                    tilesO  = eCeilDiv(no, c.to);
+                    tilesT  = eCeilDiv(nt, c.tt);
+                    tilesW  = w >= 0 ? eCeilDiv(dims[w].extent, c.tw * V) : 1;
+                    v["lo"] = no;
+                    v["lt"] = nt;
+                    if(w >= 0)
+                    {
+                        v["lw"] = dims[w].extent;
+                    }
+                }
+                v["eo"] = eo0;
                 magic("om", "os", eo0);
                 v["et"] = et0;
                 magic("tm", "ts", et0);
@@ -538,11 +615,49 @@ namespace hiptensor
                 return k;
             }
 
+            // ewp_host._vec16: every stride of every tensor but the shared stride-1 mode's, and
+            // that mode's extent, multiples of 16 bytes (the generic kernel's vector form serves
+            // such a layout better than a ragged class of mode a)
+            inline bool eVec16(int64_t es, int tensors, std::vector<EMode> const& dims)
+            {
+                int64_t const v = 16 / es;
+                for(auto const& m : dims)
+                {
+                    bool unit = true;
+                    for(int t = 0; t < tensors; t++)
+                    {
+                        unit = unit && m.stride[t] == 1;
+                    }
+                    if(unit)
+                    {
+                        if(m.extent % v != 0)
+                        {
+                            return false;
+                        }
+                        continue;
+                    }
+                    for(int t = 0; t < tensors; t++)
+                    {
+                        if(m.stride[t] % v != 0)
+                        {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            }
+
             // ewp_host.choose: the tuned class of a tuned problem (`tuned`: the kernel name its
             // route names, "" for none) when it serves the layout; else the first class (in rank
             // order) of the problem's data types whose kinds match the layout, which serves it and
             // launches at least kEMinCtas CTAs; when none does, the serving class with the most
-            // CTAs (the first of equals). -1 when no class serves the problem.
+            // CTAs (the first of equals). The ragged classes are a second palette, taken only
+            // when no other class serves the problem (not in mode a when every stride is a
+            // multiple of 16 bytes: eVec16): not one whose tiles span more than twice the
+            // problem's elements; of the others the first that launches at least kEMinCtas
+            // CTAs, else the one with the most CTAs; when none, the same among the mode a
+            // classes of 8 x 8 positions and rows of 64 elements whose tiles span at most three
+            // times the problem's elements. -1 when no class serves the problem.
             inline int eChoose(std::vector<EClass> const&        classes,
                                std::string const&                tuned,
                                int64_t                           arity,
@@ -572,40 +687,77 @@ namespace hiptensor
                 int const         tensors = int(arity) + 1;
                 std::string const kt      = eKinds(dims, tensors, "t");
                 std::string const ka      = eKinds(dims, tensors, "a");
-                int               best    = -1;
-                int64_t           bestN   = -1;
-                ELaunch           bestL;
-                for(int i = 0; i < int(classes.size()); i++)
+                // pass 0: the classes with whole tiles; 1: the ragged classes; 2 (when no ragged
+                // class serves the problem within twice its elements): the ragged mode a classes
+                // of 8 x 8 positions and rows of 64 elements, within three times
+                for(int pass = 0; pass < 3; pass++)
                 {
-                    auto const& c = classes[size_t(i)];
-                    if(c.arity != arity || c.a != dts[0] || c.b != dts[1] || c.c != dts[2]
-                       || c.d != dts[3] || c.kinds != (c.mode == "a" ? ka : kt))
+                    int64_t const rag   = pass > 0 ? 1 : 0;
+                    int64_t const span  = pass == 2 ? 3 : 2;
+                    int           best  = -1;
+                    int64_t       bestN = -1;
+                    ELaunch       bestL;
+                    for(int i = 0; i < int(classes.size()); i++)
                     {
-                        continue;
+                        auto const& c = classes[size_t(i)];
+                        if(c.rag != rag)
+                        {
+                            continue;
+                        }
+                        if(pass == 2
+                           && (c.mode != "a" || c.to != 8 || c.tt != 8 || c.tw * c.vec != 64))
+                        {
+                            continue;
+                        }
+                        if(rag && c.mode == "a" && eVec16(c.vb / c.vec, tensors, dims))
+                        {
+                            continue; // the generic kernel's vector form serves it better
+                        }
+                        if(c.arity != arity || c.a != dts[0] || c.b != dts[1] || c.c != dts[2]
+                           || c.d != dts[3] || c.kinds != (c.mode == "a" ? ka : kt))
+                        {
+                            continue;
+                        }
+                        ELaunch l;
+                        if(!eplan(c, dims, l))
+                        {
+                            continue;
+                        }
+                        int64_t const n = l.grid[0] * l.grid[1] * l.grid[2];
+                        if(rag)
+                        {
+                            // ewp_host._rag_work: the elements of the runs and of the tiles
+                            int64_t useful = l.args["lo"] * l.args["lt"];
+                            int64_t work   = l.args["ntl"] * c.to * c.tt;
+                            if(c.mode == "a")
+                            {
+                                useful *= l.args["lw"];
+                                work *= c.tw * c.vec;
+                            }
+                            if(span * useful < work)
+                            {
+                                continue; // mostly overhang
+                            }
+                        }
+                        if(n >= kEMinCtas)
+                        {
+                            out = l;
+                            return i;
+                        }
+                        if(best < 0 || n > bestN)
+                        {
+                            best  = i;
+                            bestN = n;
+                            bestL = l;
+                        }
                     }
-                    ELaunch l;
-                    if(!eplan(c, dims, l))
+                    if(best >= 0)
                     {
-                        continue;
-                    }
-                    int64_t const n = l.grid[0] * l.grid[1] * l.grid[2];
-                    if(n >= kEMinCtas)
-                    {
-                        out = l;
-                        return i;
-                    }
-                    if(best < 0 || n > bestN)
-                    {
-                        best  = i;
-                        bestN = n;
-                        bestL = l;
+                        out = bestL;
+                        return best;
                     }
                 }
-                if(best >= 0)
-                {
-                    out = bestL;
-                }
-                return best;
+                return -1;
             }
         } // namespace ewprule
     } // namespace rockebackend

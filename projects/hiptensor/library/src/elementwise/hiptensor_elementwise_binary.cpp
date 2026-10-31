@@ -203,6 +203,12 @@ namespace hiptensor
             return HIPTENSOR_STATUS_NOT_INITIALIZED;
         }
 
+        // alpha == gamma == 0: D = +0 without reading an input or running a kernel
+        if(elementwiseAllScalesZero(scalars))
+        {
+            return elementwiseZeroOutput(*descD, D, stream);
+        }
+
         auto output    = ElementwiseTensor{descD, modeD, D};
         auto inputs    = std::vector<ElementwiseTensor>{{descA, modeA, A}, {descC, modeC, C}};
         auto operators = std::vector<hiptensorOperator_t>{opAC, opA, opC};

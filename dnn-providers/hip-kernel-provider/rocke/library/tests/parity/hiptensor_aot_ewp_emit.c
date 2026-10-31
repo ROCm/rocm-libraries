@@ -64,6 +64,14 @@ rocke_htaot_ewp_spec_t spec(int arity,
     return s;
 }
 
+rocke_htaot_ewp_spec_t with_vb(rocke_htaot_ewp_spec_t s, int vb, int rag, int tb = 0)
+{
+    s.vb = vb;
+    s.rag = rag;
+    s.tb = tb;
+    return s;
+}
+
 /* _hiptensor_aot_rows.EWP_COVER */
 std::vector<rocke_htaot_ewp_spec_t> cover()
 {
@@ -80,6 +88,32 @@ std::vector<rocke_htaot_ewp_spec_t> cover()
         spec(3, "f32", "f32", "f32", "f32", "VVT", "t", 16, 32, 1, 64, 0, 0, 0, "o", 1, 0),
         spec(3, "f32", "f32", "f32", "f32", "TVT", "a", 2, 4, 4, 128, 3, 0, 0, "o", 8, 8),
         spec(2, "bf16", nullptr, "bf16", "bf16", "TV", "t", 256, 64, 1, 256, 3, 16, 8, "o", 1, 4),
+        /* vector widths below 16 bytes and ragged classes (vb / rag) */
+        with_vb(
+            spec(2, "f16", nullptr, "f16", "f16", "TV", "t", 16, 16, 1, 64, 0, 16, 4, "t", 2, 1),
+            4,
+            1),
+        with_vb(
+            spec(3, "f32", "f32", "f32", "f32", "TVT", "a", 2, 4, 8, 64, 1, 0, 0, "t", 2, 0), 8, 1),
+        with_vb(
+            spec(1, "f64", nullptr, nullptr, "f64", "T", "t", 16, 16, 1, 64, 2, 16, 4, "o", 1, 0),
+            8,
+            1),
+        with_vb(
+            spec(2, "bf16", nullptr, "bf16", "bf16", "VT", "t", 32, 32, 1, 64, 3, 32, 5, "o", 1, 2),
+            8,
+            0),
+        with_vb(spec(2, "f16", nullptr, "f16", "f16", "TT", "a", 4, 4, 16, 64, 2, 4, 6, "o", 1, 0),
+                2,
+                1),
+        with_vb(spec(3, "f16", "f16", "f16", "f16", "TVT", "t", 16, 32, 1, 64, 2, 0, 0, "t", 2, 1),
+                2,
+                1,
+                8),
+        with_vb(spec(2, "f32", nullptr, "f32", "f32", "TT", "t", 16, 16, 1, 64, 3, 0, 0, "o", 1, 2),
+                8,
+                0,
+                16),
     };
 }
 

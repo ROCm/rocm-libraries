@@ -783,14 +783,14 @@ namespace hiptensor
             return true;
         }
 
-        bool ArgWriter::scalar(std::string_view name, ScalarRole role, bool imag)
+        bool ArgWriter::scalar(std::string_view name, ScalarRole role, bool imag, bool negate)
         {
             auto const* a = arg(name);
             if(a == nullptr || a->pointer || (a->size != 4 && a->size != 8))
             {
                 return false;
             }
-            mStep.scalars.push_back({a->offset, role, imag, a->size == 8});
+            mStep.scalars.push_back({a->offset, role, imag, a->size == 8, negate});
             return true;
         }
 
@@ -1039,6 +1039,10 @@ namespace hiptensor
                     {
                         auto const& v     = values[static_cast<int>(s.role)];
                         double      value = s.imag ? v.im : v.re;
+                        if(s.negate)
+                        {
+                            value = -value;
+                        }
                         if(s.f64)
                         {
                             std::memcpy(args + s.offset, &value, 8);

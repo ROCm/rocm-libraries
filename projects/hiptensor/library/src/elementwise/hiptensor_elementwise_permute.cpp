@@ -143,6 +143,12 @@ hiptensorStatus_t hiptensor::ckbackend::permute(hiptensorHandle_t            han
         return HIPTENSOR_STATUS_NOT_INITIALIZED;
     }
 
+    // alpha == 0: B = +0 without reading A or running a permutation kernel
+    if(hiptensor::elementwiseAllScalesZero(scalars))
+    {
+        return hiptensor::elementwiseZeroOutput(*descB, B, stream);
+    }
+
     auto output    = hiptensor::ElementwiseTensor{descB, opDes->mModeB, B};
     auto inputs    = std::vector<hiptensor::ElementwiseTensor>{{descA, opDes->mModeA, A}};
     auto operators = std::vector<hiptensorOperator_t>{opDes->mOpA};

@@ -33,6 +33,7 @@
 #include <string>
 
 #include "data_types.hpp"
+#include "elementwise/elementwise_execute.hpp"
 #include "logger.hpp"
 #include "plan_cache.hpp"
 #include "platform.hpp"
@@ -90,7 +91,44 @@ namespace hiptensor
                                       uint64_t                     workspaceSize,
                                       backend::LaunchConfig const& cfg) const override
                 {
-                    static_cast<void>(context);
+                    // an elementwise operation whose every input has a zero scaling factor:
+                    // D = +0 without reading an input or running the program's kernels (the
+                    // other backend does the same, elementwise_execute.hpp)
+                    if(auto const* desc = context.plan != nullptr ? context.plan->mOpDesc : nullptr;
+                       desc != nullptr && buffers.out != nullptr)
+                    {
+                        auto const type = desc->mOperationType;
+                        if(type == HIPTENSOR_PERMUTATION || type == HIPTENSOR_ELEMENTWISE_BINARY
+                           || type == HIPTENSOR_ELEMENTWISE_TRINARY)
+                        {
+                            auto const compute = convertToComputeType(desc->mScalarType);
+                            std::vector<void const*> used{scalars.alpha};
+                            if(type == HIPTENSOR_ELEMENTWISE_TRINARY)
+                            {
+                                used.push_back(scalars.beta);
+                            }
+                            if(type != HIPTENSOR_PERMUTATION)
+                            {
+                                used.push_back(scalars.gamma);
+                            }
+                            std::vector<double> values;
+                            for(auto const* s : used)
+                            {
+                                if(s == nullptr)
+                                {
+                                    values.clear();
+                                    break;
+                                }
+                                values.push_back(readVal<double>(s, compute));
+                            }
+                            auto const* out
+                                = type == HIPTENSOR_PERMUTATION ? desc->mDescB : desc->mDescD;
+                            if(out != nullptr && elementwiseAllScalesZero(values))
+                            {
+                                return elementwiseZeroOutput(*out, buffers.out, cfg.stream);
+                            }
+                        }
+                    }
                     return runProgram(
                         mProgram, scalars, buffers, workspace, workspaceSize, cfg.stream);
                 }

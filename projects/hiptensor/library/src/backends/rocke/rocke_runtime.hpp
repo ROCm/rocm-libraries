@@ -210,6 +210,9 @@ namespace hiptensor
                 ScalarRole role   = ScalarRole::One;
                 bool       imag   = false; // the imaginary part of a complex scalar
                 bool       f64    = false;
+                // the scalar negated: a NEG operator of a real input folded into its scale
+                // (alpha * -x == -alpha * x, bit for bit; the kernel takes the identity)
+                bool negate = false;
             };
             std::vector<PointerPatch> pointers;
             std::vector<ScalarPatch>  scalars;
@@ -286,7 +289,10 @@ namespace hiptensor
             bool setF32(std::string_view name, float value);
             bool setF64(std::string_view name, double value);
             bool pointer(std::string_view name, BufferRole role, uint64_t bytes = 0);
-            bool scalar(std::string_view name, ScalarRole role, bool imag = false);
+            bool scalar(std::string_view name,
+                        ScalarRole       role,
+                        bool             imag   = false,
+                        bool             negate = false);
 
             // Whether every argument was written.
             bool complete(std::string& missing) const;
