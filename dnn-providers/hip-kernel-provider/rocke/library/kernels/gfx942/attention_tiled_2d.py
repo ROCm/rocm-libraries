@@ -1755,7 +1755,13 @@ def build_unified_attention_2d_tiled(
     # store use ``(buf, row, col)`` indexing in both cases.
     # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
     # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
-    Q_DIRECT_GLOBAL = K_SLICED_ACTIVE or spec.use_q_direct_global
+    # Q must not alias K_lds when K_lds is smaller than a Q tile: the sliced-K
+    # ring holds only a head-dim slice, and use_k_hbm_direct allocates K_lds as
+    # a one-element stub (K_TOTAL_BYTES above is the full logical size, not the
+    # stub). Both read Q straight from global memory instead.
+    Q_DIRECT_GLOBAL = (
+        K_SLICED_ACTIVE or spec.use_q_direct_global or spec.use_k_hbm_direct
+    )
     Q_ALIAS_K = (
         (not Q_DIRECT_GLOBAL) and (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
     )
