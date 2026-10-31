@@ -1184,8 +1184,10 @@ def generateKernelHelperObjects(solutions: List[Solution], cxxCompiler: str, isa
     # KernelWriterBase hashes its string form, so a set would order them by a
     # salted string hash.
     khos = list(dict.fromkeys(khos))
-    sortByEnum = lambda x: ("Enum" in x.getKernelName(), khos.index(x))
-    return sorted(khos, key=sortByEnum, reverse=True) # Ensure that we write Enum kernel helpers are first in list
+    # Enum helpers first, then the rest; within each group, reverse insertion
+    # order. The order must not depend on hashing, so Kernels.cpp (and the
+    # code object built from it) is the same on every run.
+    return sorted(reversed(khos), key=lambda x: "Enum" not in x.getKernelName())
 
 
 def _renameFallbackPlaceholders(node, arch: str) -> None:
