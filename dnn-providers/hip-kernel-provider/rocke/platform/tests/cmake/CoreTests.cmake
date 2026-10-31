@@ -317,6 +317,49 @@ if(BUILD_TESTING)
                  rocke_xf32_bf16x3_lowering)
   endif()
 
+  # Facts on a kernel parameter's declaration (cpp/core/ir/param_facts.cpp). With
+  # --ir it is also the C++ side of tests/core/test_param_facts.py, which pins its
+  # print_ir, verifier messages and canonicalize against the Python engine.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_param_facts.cpp")
+    add_executable(rocke_param_facts core/test_param_facts.cpp)
+    target_link_libraries(rocke_param_facts PRIVATE rocke_core)
+    add_test(NAME rocke_param_facts COMMAND rocke_param_facts)
+    set_tests_properties(rocke_param_facts PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_param_facts)
+    set_target_properties(rocke_param_facts PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_param_facts RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_param_facts)
+  endif()
+
+  # The integer-expression evaluator (cpp/support/intexpr.cpp). With --eval it is
+  # also the C++ side of tests/core/test_intexpr.py, which pins it against the
+  # Python mirror.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_intexpr.cpp")
+    add_executable(rocke_intexpr core/test_intexpr.cpp)
+    target_link_libraries(rocke_intexpr PRIVATE rocke_core)
+    add_test(NAME rocke_intexpr COMMAND rocke_intexpr)
+    set_tests_properties(rocke_intexpr PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_intexpr)
+    set_target_properties(rocke_intexpr PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_intexpr RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_intexpr)
+  endif()
+
+  # The GPU check (cpp/core/ir/gpu_check.cpp) and the range marker builder. With
+  # --cases and --verify it is also the C++ side of tests/core/test_gpu_checked_value.py,
+  # which pins its emitted IR, refusal texts and marker verifier messages
+  # against the Python engine.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_gpu_checked_value.cpp")
+    add_executable(rocke_gpu_checked_value core/test_gpu_checked_value.cpp)
+    target_link_libraries(rocke_gpu_checked_value PRIVATE rocke_core)
+    add_test(NAME rocke_gpu_checked_value COMMAND rocke_gpu_checked_value)
+    set_tests_properties(rocke_gpu_checked_value PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_gpu_checked_value)
+    set_target_properties(rocke_gpu_checked_value PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_gpu_checked_value RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_gpu_checked_value)
+  endif()
+
   # Unsigned compare, no-unsigned-wrap add and range marker: C API builders,
   # both C++ lowerers, the verifier and the constant folder.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_unsigned_int_ops.cpp")
@@ -332,6 +375,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_unsigned_int_ops)
+  endif()
+
+  # The exact workgroup_size kernel attr: the one block-size accessor, both
+  # C++ lowerers and the verifier's refusal of both block-size attrs.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_workgroup_size.cpp")
+    add_executable(rocke_workgroup_size core/test_workgroup_size.cpp)
+    target_link_libraries(rocke_workgroup_size PRIVATE rocke_core)
+    add_test(NAME rocke_workgroup_size COMMAND rocke_workgroup_size)
+    set_tests_properties(rocke_workgroup_size PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_workgroup_size)
+    set_target_properties(rocke_workgroup_size
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_workgroup_size
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_workgroup_size)
   endif()
 
   # f64 op rejection and f64 vector arithmetic in both C++ lowerers.

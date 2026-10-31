@@ -411,12 +411,106 @@ void check_scf_if_else()
           ("unresolved cond names the op (got: " + err + ")").c_str());
 }
 
+// A recipe whose one instruction is a pointer param carrying `attrs_json`.
+std::string param_recipe(const std::string& attrs_json)
+{
+    return std::string(R"json({"schema": "rocke.recipe/v1", "kernel_name_fmt": "param_probe",
+  "spec": [], "attrs": {}, "program": [
+    {"op": "param", "name": "P", "bind": "P",
+     "type": {"kind": "ptr", "pointee": "f32", "space": "global"}, "attrs": )json")
+           + attrs_json + R"json(}, {"op": "ret"}]})json";
+}
+
+// Every pointer attribute the lowerer emits reaches the replayed kernel, and a
+// param attr the VM cannot read fails the replay: dropping it would lower a
+// different kernel than the one recorded.
+void check_param_attrs()
+{
+    std::string ll, err;
+    check(
+        run_attr_recipe(
+            param_recipe(R"json({"nonnull": true, "nocapture": false, "dereferenceable": 64})json"),
+            &ll,
+            &err)
+            == ROCKE_OK,
+        ("nonnull / nocapture / dereferenceable replay (got: " + err + ")").c_str());
+    check(
+        ll.find("ptr addrspace(1) nonnull dereferenceable(64) %P") != std::string::npos,
+        "nonnull and dereferenceable reach the lowered param, and nocapture=false drops nocapture");
+
+    struct bad_t
+    {
+        const char* what;
+        const char* attrs;
+        const char* message;
+    };
+    const bad_t bad[] = {
+        {"unknown key",
+         R"json({"el": 1048576})json",
+         "param 'P' has unknown attr 'el' -- a param attr is one of " ROCKE_PARAM_ATTR_KEYS},
+        {"non-bool flag", R"json({"nonnull": 1})json", "param 'P' attr nonnull is not a bool"},
+        {"non-integral dereferenceable",
+         R"json({"dereferenceable": 1.5})json",
+         "param 'P' dereferenceable is not an integer"},
+        {"non-integral align", R"json({"align": "16"})json", "param 'P' align is not an integer"},
+        {"non-string addr_space",
+         R"json({"addr_space": 3})json",
+         "param 'P' attr addr_space is not a string"},
+        {"non-object attrs", R"json([])json", "param 'P' attrs is not an object"},
+    };
+    for(const bad_t& c : bad)
+    {
+        ll.clear();
+        err.clear();
+        const std::string what = std::string("param attr with ") + c.what;
+        check(run_attr_recipe(param_recipe(c.attrs), &ll, &err) != ROCKE_OK,
+              (what + " is rejected").c_str());
+        check(err.find(c.message) != std::string::npos,
+              (what + " names the defect (got: " + err + ")").c_str());
+    }
+}
+
 } // namespace
+
+// The VM reads an integer parameter's facts -- ints, and a relation as the
+// canonical intexpr JSON string the recording builder records -- and they lower
+// to no byte; a declaration the builder refuses fails the replay with its text.
+void check_param_facts()
+{
+    const auto recipe = [](const std::string& ldc_attrs) {
+        return std::string(R"json({"schema": "rocke.recipe/v1", "kernel_name_fmt": "fact_probe",
+  "spec": [], "attrs": {}, "program": [
+    {"op": "param", "name": "M", "bind": "M", "type": "i32",
+     "attrs": {"ge": 1, "multiple_of": 8}},
+    {"op": "param", "name": "ldc", "bind": "ldc", "type": "i32", "attrs": )json")
+               + ldc_attrs + R"json(}, {"op": "ret"}]})json";
+    };
+    std::string ll, err;
+    check(run_attr_recipe(recipe(R"json({"ge": "{\"param\":\"M\"}", "le": 4096})json"), &ll, &err)
+              == ROCKE_OK,
+          ("param facts replay (got: " + err + ")").c_str());
+    check(ll.find("(i32 %M, i32 %ldc)") != std::string::npos,
+          "param facts lower to plain i32 arguments");
+    const char* const bad[][2] = {
+        {R"json({"ge": "{\"param\":\"K\"}"})json",
+         "ldc: the relation names K, which is not a parameter of this kernel"},
+        {R"json({"ge": true})json", "param 'ldc' ge is not an integer or a relation"},
+    };
+    for(const auto& c : bad)
+    {
+        ll.clear();
+        err.clear();
+        check(run_attr_recipe(recipe(c[0]), &ll, &err) != ROCKE_OK, c[0]);
+        check(err.find(c[1]) != std::string::npos, (std::string(c[0]) + " got: " + err).c_str());
+    }
+}
 
 int main()
 {
     std::printf("portable_ir recipe_vm_replay:\n");
 
+    check_param_attrs();
+    check_param_facts();
     check_kernel_list_attrs();
     check_invalid_integer_values();
     check_scf_if_else();

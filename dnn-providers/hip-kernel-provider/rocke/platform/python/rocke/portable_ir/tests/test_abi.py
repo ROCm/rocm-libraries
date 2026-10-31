@@ -166,6 +166,49 @@ class TestMinReaderDerivation(unittest.TestCase):
         )
         self.assertEqual(abi.recipe_min_reader(r), 1)
 
+    def test_exact_workgroup_size_needs_level_four(self):
+        """A lowerer older than workgroup_size ignores it and sizes the kernel
+        for max_workgroup_size, so a recorded kernel stating it must not reach
+        that engine. Recorded from a real kernel, as a generator would."""
+        from rocke.core.ir import F32, IRBuilder, PtrType
+        from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+        b = IRBuilder("exact_block")
+        b.kernel.attrs["workgroup_size"] = 64
+        x = b.param("X", PtrType(F32, "global"))
+        b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+        b.ret()
+        r = kerneldef_to_recipe(b.kernel)
+        self.assertEqual(abi.recipe_min_reader(r), 4)
+        self.assertEqual(abi.stamp(r, engine="test")["abi"]["min_reader"], 4)
+        # The upper-bound attr every older lowerer knows stays at the floor.
+        del b.kernel.attrs["workgroup_size"]
+        b.kernel.attrs["max_workgroup_size"] = 64
+        self.assertEqual(abi.recipe_min_reader(kerneldef_to_recipe(b.kernel)), 1)
+
+    def test_parameter_facts_need_level_four(self):
+        """A reader older than parameter facts drops the param attrs it does
+        not know, so it would plan a launch that checks none of them. One fact
+        on one parameter is enough; pointer attributes alone stay at the floor.
+        Recorded from a real kernel, as a generator would."""
+        from rocke.core.ir import F32, I32, IRBuilder, PtrType
+        from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+        def recorded(**facts):
+            b = IRBuilder("stated_facts")
+            x = b.param("X", PtrType(F32, "global"), noalias=True, align=16)
+            b.param("M", I32, **facts)
+            b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+            b.ret()
+            return kerneldef_to_recipe(b.kernel)
+
+        self.assertEqual(abi.recipe_min_reader(recorded()), 1)
+        for facts in ({"ge": 1}, {"multiple_of": 64}, {"eq": 128}):
+            with self.subTest(facts=facts):
+                r = recorded(**facts)
+                self.assertEqual(abi.recipe_min_reader(r), 4)
+                self.assertEqual(abi.stamp(r, engine="test")["abi"]["min_reader"], 4)
+
     def test_finds_constructs_nested_in_compile_time_bodies(self):
         """static_for bodies are where most of a rolled recipe lives, so a walk
         that only looked at the top level would report the floor for almost

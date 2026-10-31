@@ -376,6 +376,41 @@ class TestCEvaluatorParity(unittest.TestCase):
                 verdict, "admitted" if py_ok else "refused", f"D={d} ({why})"
             )
 
+    def test_refusals_match_python(self):
+        """A rule the evaluator refuses -- a zero divisor, a negative operand of
+        div or mod, an int64 overflow, an inexact number, an unbound leaf --
+        refuses the binding in both engines with the same reason, so the
+        caller who asked in one engine hears what the other would enforce."""
+        two_62 = {"mul": [1 << 31, 1 << 31]}
+        preds = [
+            {"eq": [{"mod": [{"spec": "D"}, 0]}, 0]},
+            {"eq": [{"div": [{"spec": "D"}, 2]}, 1]},
+            {"gt": [{"mul": [two_62, {"spec": "D"}]}, 0]},
+            {"gt": [{"add": [{"mul": [two_62, 2]}, 0]}, 0]},
+            {"gt": [2.5, 0]},
+            {"gt": [{"param": "M"}, 0]},
+        ]
+        for pred in preds:
+            g = {
+                "schema": GUARD_SCHEMA,
+                "free": ["D"],
+                "rules": [{"pred": pred, "reason": "rule rejected"}],
+            }
+            recipe = attach_guard(
+                {**self.recipe, "spec": [{"name": "D", "kind": "int"}]}, g
+            )
+            cbor = self.recipe_bundle.cbor_encode(recipe)
+            for d in (3, -3):
+                py_ok, py_why = check_guard(g, {"D": d}, {})
+                verdict, c_why = self.online.check_recipe_guard(cbor, ints={"D": d})
+                self.assertEqual(
+                    verdict, "admitted" if py_ok else "refused", f"{pred} D={d}"
+                )
+                self.assertEqual(py_why, c_why, f"{pred} D={d}")
+            # Every rule above is refused at D = -3; the case is only worth
+            # having if the refusal comes from the evaluator.
+            self.assertIn("did not evaluate", py_why, pred)
+
     def test_absent_guard_reported_not_assumed(self):
         from rocke.portable_ir.examples import recipe_toy
 

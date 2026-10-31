@@ -25,6 +25,8 @@ Design constraints:
 from __future__ import annotations
 
 import enum
+import json
+import numbers
 import os
 import sys
 from dataclasses import dataclass, field
@@ -32,6 +34,21 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .arch import target as _arch
 from .dtypes import dtype_info
+from .intexpr import (
+    IntExpr,
+    relation_error,
+    relation_json,
+    relation_names,
+    relation_text,
+)
+from .value_sources import (
+    THREAD_ID_OP,
+    Sources,
+    first_unchecked_arithmetic,
+    loaded_directly,
+    sources_of,
+    value_text,
+)
 
 # ----------------------------- Types --------------------------------------
 
@@ -353,7 +370,27 @@ def _int_cmp_pred_error(pred: Any, operand_type: str) -> Optional[str]:
 
 
 # ``arith.assume_range`` integer attrs, in the order their type is checked.
-_ASSUME_RANGE_INT_ATTRS = ("multiple_of", "residue", "lo", "hi", "hi_plus")
+_ASSUME_RANGE_INT_ATTRS = ("multiple_of", "residue", "ge", "ge_plus", "lt", "lt_plus")
+# The writers a marker's ``by`` attr may name. Every marker states facts its
+# writer checked first; ``by`` says which check, so a reader can tell a fact
+# the GPU traps on from one the tiling layer proved.
+ASSUME_RANGE_WRITERS = ("gpu_checked_value",)
+
+
+def assume_range_bound_operands(
+    op: "Op",
+) -> Tuple[Optional["Value"], Optional["Value"]]:
+    """The ``(ge, lt)`` operands of an ``arith.assume_range`` marker, ``None``
+    for an end the marker does not state as a Value.
+
+    The one home of the marker's operand layout: the marked value, then the
+    ``ge`` operand when ``ge_plus`` is present, then the ``lt`` operand when one
+    operand is left. The ends are ``ge + ge_plus <= v < lt + lt_plus``.
+    """
+    rest = list(op.operands[1:])
+    ge = rest.pop(0) if "ge_plus" in op.attrs and rest else None
+    lt = rest.pop(0) if rest else None
+    return ge, lt
 
 
 def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
@@ -361,8 +398,9 @@ def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
 
     The one home of the marker's attr rules: the builder raises the first
     message and the verifier reports all of them. The C++ verifier emits the
-    same texts. ``num_operands`` is 2 when the end is a runtime value
-    (``hi_value``) and 1 otherwise.
+    same texts. ``num_operands`` counts the marked value and its Value ends:
+    a ``ge`` operand (present exactly when ``ge_plus`` is) and an ``lt``
+    operand (the operand left after it).
     """
     errors = [
         f"arith.assume_range: {key} must be an integer"
@@ -370,6 +408,15 @@ def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
         if key in attrs
         and (not isinstance(attrs[key], int) or isinstance(attrs[key], bool))
     ]
+    if "by" in attrs:
+        by = attrs["by"]
+        if not isinstance(by, str):
+            errors.append("arith.assume_range: by must be a string")
+        elif by not in ASSUME_RANGE_WRITERS:
+            errors.append(
+                f"arith.assume_range: by names no marker writer: '{by}' "
+                f"(one of: {', '.join(ASSUME_RANGE_WRITERS)})"
+            )
     if errors:
         # The value rules below compare these attrs as integers.
         return errors
@@ -383,17 +430,457 @@ def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
         errors.append(
             f"arith.assume_range: residue must be in [0, {multiple_of}), got {residue}"
         )
-    has_hi_value = num_operands == 2
-    if "hi" in attrs and has_hi_value:
+    has_ge_operand = "ge_plus" in attrs
+    ends = num_operands - 1
+    if has_ge_operand and ends < 1:
+        errors.append("arith.assume_range: ge_plus is given without a ge operand")
+    if ends > 1 and not has_ge_operand:
         errors.append(
-            "arith.assume_range: hi and hi_value are both given; state at most one end"
+            "arith.assume_range: two Value ends need ge_plus (the operands are the "
+            "value, the ge operand, then the lt operand)"
         )
-    if "hi_plus" in attrs and not has_hi_value:
-        errors.append("arith.assume_range: hi_plus is given without hi_value")
-    if "lo" in attrs and "hi" in attrs and attrs["lo"] >= attrs["hi"]:
+    if "ge" in attrs and has_ge_operand and ends >= 1:
         errors.append(
-            f"arith.assume_range: lo ({attrs['lo']}) must be below hi ({attrs['hi']})"
+            "arith.assume_range: ge is given both as an attr and as an operand; "
+            "state one lower end"
         )
+    has_lt_operand = ends - (1 if has_ge_operand else 0) >= 1
+    if "lt" in attrs and has_lt_operand:
+        errors.append(
+            "arith.assume_range: lt is given both as an attr and as an operand; "
+            "state one upper end"
+        )
+    if "lt_plus" in attrs and not has_lt_operand:
+        errors.append("arith.assume_range: lt_plus is given without an lt operand")
+    if "ge" in attrs and "lt" in attrs and attrs["ge"] >= attrs["lt"]:
+        errors.append(
+            f"arith.assume_range: ge ({attrs['ge']}) must be below lt ({attrs['lt']})"
+        )
+    return errors
+
+
+def one_unsigned_compare_checks(end_least: int, end_most: int, t: "Type") -> bool:
+    """Whether ``0 <= v < end`` is exactly ``v u< end`` for an i32 or i64 ``v``
+    and an ``end`` known to lie in ``[end_least, end_most]``.
+
+    The rule every emitted bound check follows: compare, and never form a
+    subtraction that can wrap (``v - lo`` overflows for a ``v`` far below
+    ``lo``). One unsigned compare decides both sides when ``end`` lies in
+    ``[0, 2^(bits-1))``: a negative ``v`` reads as at least ``2^(bits-1)``
+    unsigned, so it fails, and so does every ``v >= end``. Otherwise each side
+    takes its own signed compare. ``IRBuilder.gpu_checked_value`` and the
+    tiling layer's bound checks both ask this function.
+    """
+    bits = {"i32": 32, "i64": 64}[t.name]
+    return 0 <= end_least and end_most < (1 << (bits - 1))
+
+
+# ----------------------------- parameter facts -----------------------------
+#
+# A kernel parameter states its facts on its declaration (``IRBuilder.param``)
+# and they live in ``Param.attrs``: the host checks them before every launch.
+# The six words below are the only spelling of a comparison fact. A bound is an
+# int, or a *relation*: an intexpr tree over earlier parameters
+# (``rocke.core.intexpr``), stored as canonical JSON in one string attr. The
+# rules here are the one home of what a declaration may state: the builder
+# raises the first message, the verifier reports all of them, and
+# ``cpp/core/ir/param_facts.cpp`` gives the same texts.
+
+# The words that state an integer fact, in the order they are checked and printed.
+FACT_WORDS = ("ge", "gt", "le", "lt", "eq", "multiple_of")
+_BOUND_WORDS = ("ge", "gt", "le", "lt", "eq")
+# Two of a kind on one declaration are refused; each pair is named exclusive first.
+_LOWER_WORDS = ("gt", "ge")
+_UPPER_WORDS = ("lt", "le")
+# LLVM argument attributes, emitted for a pointer parameter (``align`` is also
+# host-checked).
+POINTER_ATTRS = (
+    "noalias",
+    "readonly",
+    "writeonly",
+    "nocapture",
+    "nonnull",
+    "align",
+    "dereferenceable",
+    "addr_space",
+)
+# Every key a parameter may carry, as the portable-IR importers list it
+# (ROCKE_PARAM_ATTR_KEYS in rocke/ir.h).
+PARAM_ATTR_KEYS = POINTER_ATTRS + FACT_WORDS
+
+# The range of each integer type a fact may be stated on.
+_INT_TYPE_LIMITS = {
+    "i8": (-(1 << 7), (1 << 7) - 1),
+    "i16": (-(1 << 15), (1 << 15) - 1),
+    "i32": (-(1 << 31), (1 << 31) - 1),
+    "i64": (-(1 << 63), (1 << 63) - 1),
+    "u8": (0, (1 << 8) - 1),
+}
+_INT64_MIN, _INT64_MAX = _INT_TYPE_LIMITS["i64"]
+# The largest integer a stored fact holds exactly (portable IR is JSON).
+_EXACT_FACT_INT = (1 << 53) - 1
+
+
+def _type_name(t: Optional["Type"]) -> str:
+    """``t.name``; a placeholder declaration may carry no type yet (``None``)."""
+    return t.name if t is not None else "None"
+
+
+def _is_attr_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _stored_relation(value: str) -> Any:
+    """The tree a stored relation string holds, or ``None`` when it holds none
+    (the verifier reports that)."""
+    try:
+        tree = json.loads(value)
+    except ValueError:
+        return None
+    return None if relation_error(tree) else tree
+
+
+def _bound_text(value: Any, leaf_text: Callable[[str], str] = str) -> str:
+    """A stored bound as the author writes it: an int, or a relation's text
+    (a string that holds no relation prints as stored)."""
+    if isinstance(value, str):
+        tree = _stored_relation(value)
+        return value if tree is None else relation_text(tree, leaf_text)
+    # Neither an int nor a relation: the verifier reports it on its own.
+    return str(value) if _is_attr_int(value) else "?"
+
+
+def param_fact_texts(param: "Param") -> List[Tuple[str, str]]:
+    """``(word, text)`` for each fact ``param`` states, in ``FACT_WORDS`` order,
+    with relation leaves printed as ``%NAME`` (``print_ir``'s form)."""
+    return [
+        (word, _bound_text(param.attrs[word], lambda name: f"%{name}"))
+        for word in FACT_WORDS
+        if word in param.attrs
+    ]
+
+
+def _checked_end(value: Optional[int]) -> Optional[int]:
+    """An interval end, or ``None`` (unknown) when it leaves int64."""
+    if value is None or value < _INT64_MIN or value > _INT64_MAX:
+        return None
+    return value
+
+
+def _relation_interval(
+    tree: Any, param_interval: Callable[[str], Tuple[Optional[int], Optional[int]]]
+) -> Tuple[Optional[int], Optional[int]]:
+    """``[lo, hi]`` a relation can take, ``None`` for an end it cannot bound.
+
+    Interval arithmetic over the leaves' intervals. An end outside int64 is
+    unknown, and a ``div`` is bounded only when its dividend is known
+    non-negative and its divisor at least 1 -- the cases its evaluation accepts.
+    """
+    if not isinstance(tree, dict):
+        return int(tree), int(tree)
+    ((op, operands),) = tree.items()
+    if op == "param":
+        return param_interval(operands)
+    (alo, ahi), (blo, bhi) = (
+        _relation_interval(operands[0], param_interval),
+        _relation_interval(operands[1], param_interval),
+    )
+    if op == "add":
+        return (
+            _checked_end(None if alo is None or blo is None else alo + blo),
+            _checked_end(None if ahi is None or bhi is None else ahi + bhi),
+        )
+    if op == "sub":
+        return (
+            _checked_end(None if alo is None or bhi is None else alo - bhi),
+            _checked_end(None if ahi is None or blo is None else ahi - blo),
+        )
+    if op == "mul":
+        if None in (alo, ahi, blo, bhi):
+            return None, None
+        products = [alo * blo, alo * bhi, ahi * blo, ahi * bhi]
+        return _checked_end(min(products)), _checked_end(max(products))
+    # div: floor division, defined for a non-negative dividend and a divisor >= 1.
+    if alo is None or alo < 0 or blo is None or blo < 1:
+        return None, None
+    return (
+        _checked_end(None if bhi is None else alo // bhi),
+        _checked_end(None if ahi is None else ahi // blo),
+    )
+
+
+def _param_interval_resolver(
+    params: Sequence["Param"],
+) -> Callable[[str], Tuple[Optional[int], Optional[int]]]:
+    """The interval of each named parameter in ``params``, from its stated
+    facts; an unstated side takes its type's limit. A name that is not an
+    integer parameter of ``params``, or a fact that does not resolve, is
+    unknown (``None``)."""
+    by_name = {p.name: p for p in params}
+    memo: Dict[str, Tuple[Optional[int], Optional[int]]] = {}
+
+    def interval(name: str) -> Tuple[Optional[int], Optional[int]]:
+        if name in memo:
+            return memo[name]
+        memo[name] = (None, None)  # a cycle (refused elsewhere) stays unknown
+        param = by_name.get(name)
+        if param is None or _type_name(param.type) not in _INT_TYPE_LIMITS:
+            return memo[name]
+        tmin, tmax = _INT_TYPE_LIMITS[param.type.name]
+        lo, hi = _stated_param_interval(param, interval)
+        memo[name] = (tmin if lo is _UNSTATED else lo, tmax if hi is _UNSTATED else hi)
+        return memo[name]
+
+    return interval
+
+
+_UNSTATED: Any = object()
+
+
+def _stated_param_interval(
+    param: "Param", interval: Callable[[str], Tuple[Optional[int], Optional[int]]]
+) -> Tuple[Any, Any]:
+    """``param``'s stated ``(lower, upper)``, inclusive, resolved to numbers.
+
+    Each end is ``_UNSTATED`` when no word states it and ``None`` when the
+    stated bound does not resolve to a number.
+    """
+
+    def bound(word: str) -> Tuple[Optional[int], Optional[int]]:
+        value = param.attrs[word]
+        if isinstance(value, str):
+            tree = _stored_relation(value)
+            return (None, None) if tree is None else _relation_interval(tree, interval)
+        return (value, value) if _is_attr_int(value) else (None, None)
+
+    attrs = param.attrs
+    if "eq" in attrs:
+        return bound("eq")
+    lower: Any = _UNSTATED
+    upper: Any = _UNSTATED
+    if "ge" in attrs:
+        lower = bound("ge")[0]
+    elif "gt" in attrs:
+        lo = bound("gt")[0]
+        lower = None if lo is None else _checked_end(lo + 1)
+    if "le" in attrs:
+        upper = bound("le")[1]
+    elif "lt" in attrs:
+        hi = bound("lt")[1]
+        upper = None if hi is None else _checked_end(hi - 1)
+    return lower, upper
+
+
+def _quotient_errors(
+    name: str,
+    tree: Any,
+    params: Sequence["Param"],
+    interval: Callable[[str], Tuple[Optional[int], Optional[int]]],
+) -> List[str]:
+    """The ``quotient_of`` rule over every ``div`` in ``tree``: its divisor's
+    stated lower bound is at least 1 and its dividend's at least 0.
+
+    A compound dividend has no stated bound; evaluation refuses a negative one
+    at launch, so both engines never disagree.
+    """
+    if not isinstance(tree, dict) or "param" in tree:
+        return []
+    ((op, (left, right)),) = tree.items()
+    errors: List[str] = []
+    if op == "div":
+        text = relation_text(tree)
+        by_name = {p.name: p for p in params}
+        for operand, least, role in ((right, 1, "divisor"), (left, 0, "dividend")):
+            if isinstance(operand, dict) and "param" in operand:
+                errors.extend(
+                    _stated_lower_errors(
+                        name, text, by_name[operand["param"]], least, interval
+                    )
+                )
+            elif not isinstance(operand, dict):
+                if operand < least:
+                    errors.append(
+                        f"param {name}: {text} needs a {role} of at least {least}, "
+                        f"got {operand}"
+                    )
+            elif role == "divisor":
+                errors.append(
+                    f"param {name}: {text} needs a divisor that is an int or one "
+                    "kernel parameter, so that its lower bound is stated"
+                )
+    return (
+        errors
+        + _quotient_errors(name, left, params, interval)
+        + _quotient_errors(name, right, params, interval)
+    )
+
+
+def _stated_lower_errors(
+    name: str,
+    text: str,
+    operand: "Param",
+    least: int,
+    interval: Callable[[str], Tuple[Optional[int], Optional[int]]],
+) -> List[str]:
+    lower, _ = _stated_param_interval(operand, interval)
+    if lower is not _UNSTATED and lower is not None and lower >= least:
+        return []
+    q = operand.name
+    if lower is _UNSTATED:
+        declared = "is declared with no lower bound"
+    else:
+        word = next(w for w in ("eq", "ge", "gt") if w in operand.attrs)
+        declared = f"is declared with {word}={_bound_text(operand.attrs[word])}"
+    fix = f'b.param("{q}", {operand.type.name.upper()}, ge={least}, ...)'
+    return [f"param {name}: {text} needs {q} ge {least} -- {q} {declared}.\nFix: {fix}"]
+
+
+def _stored_int(name: str, word: str, value: Any, *, relations: bool = False) -> int:
+    """``value`` as a plain int, or a ``TypeError`` naming what ``word`` takes."""
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
+        takes = (
+            "an int, a parameter of this kernel, or sum_of / product_of / "
+            "quotient_of / difference_of over those"
+            if relations
+            else "an int"
+        )
+        raise TypeError(f"param {name}: {word} is {takes}, got {value!r}")
+    return int(value)
+
+
+def param_fact_errors(params: Sequence["Param"], index: int) -> List[str]:
+    """Every rule the declaration ``params[index]`` breaks, in order.
+
+    ``params`` is the kernel's parameter list in declaration order; a relation
+    may name only parameters declared before ``params[index]``. The one home of
+    these rules in Python: ``IRBuilder.param`` raises the first message and the
+    verifier reports all of them. ``cpp/core/ir/param_facts.cpp`` mirrors them.
+    """
+    param = params[index]
+    name, attrs = param.name, param.attrs
+    type_name = _type_name(param.type)
+    errors: List[str] = []
+    for key in sorted(attrs):
+        if key not in PARAM_ATTR_KEYS:
+            errors.append(
+                f"param '{name}' has unknown attr '{key}' -- a param attr is one of "
+                + ", ".join(PARAM_ATTR_KEYS)
+            )
+    is_int = type_name in _INT_TYPE_LIMITS
+    is_ptr = isinstance(param.type, PtrType)
+    for word in FACT_WORDS:
+        if word in attrs and not is_int:
+            errors.append(
+                f"param {name}: {word} states an integer fact, and {name} is "
+                f"{type_name} -- state it on an integer parameter"
+            )
+    for key in POINTER_ATTRS:
+        if key in attrs and not is_ptr:
+            errors.append(
+                f"param {name}: {key} applies to a pointer parameter, and {name} is {type_name}"
+            )
+    if errors:
+        return errors
+    for word in _BOUND_WORDS:
+        value = attrs.get(word)
+        if word in attrs and not (_is_attr_int(value) or isinstance(value, str)):
+            errors.append(f"param {name}: {word} must be an integer or a relation")
+    for key in ("multiple_of", "align", "dereferenceable"):
+        if key in attrs and not _is_attr_int(attrs[key]):
+            errors.append(f"param {name}: {key} must be an integer")
+    if errors:
+        return errors
+    for kind, words in (("lower", _LOWER_WORDS), ("upper", _UPPER_WORDS)):
+        if all(w in attrs for w in words):
+            errors.append(
+                f"param {name}: states two {kind} bounds ({', '.join(words)}) -- state one"
+            )
+    if "eq" in attrs:
+        others = [w for w in FACT_WORDS if w != "eq" and w in attrs]
+        if others:
+            errors.append(
+                f"param {name}: eq excludes every other word -- "
+                f"eq={_bound_text(attrs['eq'])} already decides {', '.join(others)}"
+            )
+    if attrs.get("multiple_of", 1) < 1:
+        errors.append(
+            f"param {name}: multiple_of must be >= 1, got {attrs['multiple_of']}"
+        )
+    align = attrs.get("align", 1)
+    if align < 1 or align & (align - 1):
+        errors.append(f"param {name}: align must be a power of two >= 1, got {align}")
+    if attrs.get("dereferenceable", 1) < 1:
+        errors.append(
+            f"param {name}: dereferenceable must be >= 1, got {attrs['dereferenceable']}"
+        )
+    if is_int:
+        tmin, tmax = _INT_TYPE_LIMITS[type_name]
+        for word in FACT_WORDS:
+            value = attrs.get(word)
+            if not _is_attr_int(value):
+                continue
+            if value < tmin or value > tmax:
+                errors.append(
+                    f"param {name}: {word}={value} is outside the range of {type_name}"
+                )
+            elif abs(value) > _EXACT_FACT_INT:
+                errors.append(
+                    f"param {name}: {word}={value} is outside +/-(2^53 - 1), which a "
+                    "stored fact cannot hold exactly"
+                )
+    interval = _param_interval_resolver(params[:index])
+    position = {p.name: i for i, p in enumerate(params)}
+    for word in _BOUND_WORDS:
+        value = attrs.get(word)
+        if not isinstance(value, str):
+            continue
+        try:
+            tree = json.loads(value)
+        except ValueError:
+            tree, reason = None, "it is not JSON"
+        else:
+            reason = relation_error(tree)
+        if reason is not None:
+            errors.append(f"param {name}: {word} is not a relation: {reason}")
+            continue
+        name_errors = _relation_name_errors(name, index, tree, params, position)
+        errors.extend(name_errors)
+        if not name_errors:
+            errors.extend(_quotient_errors(name, tree, params[:index], interval))
+    return errors
+
+
+def _relation_name_errors(
+    name: str,
+    index: int,
+    tree: Any,
+    params: Sequence["Param"],
+    position: Dict[str, int],
+) -> List[str]:
+    """Each leaf of a relation names an integer parameter declared before ``name``."""
+    errors: List[str] = []
+    leaves = list(dict.fromkeys(relation_names(tree)))
+    for q in leaves:
+        if q == name:
+            errors.append(
+                f"{name}: the relation names {name} itself -- a parameter cannot bound itself"
+            )
+        elif q not in position:
+            errors.append(
+                f"{name}: the relation names {q}, which is not a parameter of this kernel"
+            )
+        elif position[q] > index:
+            last = max((p for p in leaves if p in position), key=lambda p: position[p])
+            errors.append(
+                f"{name}: the relation names {q}, which is declared later -- state it on "
+                f"the last-declared term, {last} (difference_of and quotient_of move a sum "
+                "or a product to its side)"
+            )
+        elif _type_name(params[position[q]].type) not in _INT_TYPE_LIMITS:
+            errors.append(
+                f"{name}: the relation names {q}, which is "
+                f"{_type_name(params[position[q]].type)}, not an integer parameter"
+            )
     return errors
 
 
@@ -1065,6 +1552,10 @@ class Value:
     name: str
     type: Type
     op: Optional["Op"] = None
+    # The declaration of a kernel parameter's Value (``IRBuilder.param``,
+    # ``ir_serialize.parse``); ``None`` for every other Value. Its facts are read
+    # through ``rocke.core.facts.stated_facts_of``.
+    param: Optional["Param"] = field(default=None, compare=False, repr=False)
 
     def __repr__(self) -> str:
         return self.name
@@ -1110,6 +1601,10 @@ class Param:
     name: str
     type: Type
     attrs: Dict[str, Any] = field(default_factory=dict)
+    # The kernel's parameters declared before this one, the only ones a
+    # relation in ``attrs`` may name. Set wherever a Param is declared
+    # (``IRBuilder.param``, ``ir_serialize.parse``).
+    declared_before: Tuple["Param", ...] = field(default=(), compare=False, repr=False)
 
 
 @dataclass
@@ -1125,7 +1620,15 @@ class KernelDef:
         gets baked into the AMDGPU kernel attributes
         (`amdgpu-flat-work-group-size="64,N"`); launching with more
         than N threads/block triggers a HIP `unspecified launch
-        failure`. Defaults to 256 for legacy kernels."""
+        failure`.
+
+        A kernel states its block size in one of two attrs, never both (the
+        verifier refuses both): ``workgroup_size`` is the exact block size the
+        kernel must be launched with, and ``max_workgroup_size`` an upper bound
+        it may be launched below. Either one is the bound returned here, so the
+        two lower to the same bytes. Defaults to 256 for legacy kernels."""
+        if "workgroup_size" in self.attrs:
+            return int(self.attrs["workgroup_size"])
         return int(self.attrs.get("max_workgroup_size", 256))
 
     @property
@@ -1334,6 +1837,252 @@ def current_source_loc() -> Optional[str]:
     return join_loc(frames) if frames else None
 
 
+# ----------------------------- GPU checks ---------------------------------
+#
+# ``IRBuilder.gpu_checked_value``'s rules and messages. ``cpp/core/ir/gpu_check.cpp``
+# gives the same texts.
+
+
+def _declaration_text(param: "Param") -> str:
+    """``param``'s declaration as the author writes it:
+    ``b.param("M", I32, ge=1, le=1048576)``."""
+    facts = "".join(
+        f", {word}={_bound_text(param.attrs[word])}"
+        for word in FACT_WORDS
+        if word in param.attrs
+    )
+    return f'b.param("{param.name}", {param.type.name.upper()}{facts})'
+
+
+def _marker_states_facts(op: "Op") -> bool:
+    """Whether an ``arith.assume_range`` marker states a bound or a
+    divisibility (a marker may state neither)."""
+    ge_operand, lt_operand = assume_range_bound_operands(op)
+    return (
+        "ge" in op.attrs
+        or "lt" in op.attrs
+        or ge_operand is not None
+        or lt_operand is not None
+        or op.attrs.get("multiple_of", 1) > 1
+    )
+
+
+def _states_facts(value: "Value") -> bool:
+    """Whether ``value``'s declaration or range marker states a fact."""
+    if value.param is not None:
+        return any(word in value.param.attrs for word in FACT_WORDS)
+    op = value.op
+    return (
+        op is not None and op.name == "arith.assume_range" and _marker_states_facts(op)
+    )
+
+
+def _gpu_check_form(
+    value: Any, stated: Dict[str, Any], multiple_of: Any
+) -> Tuple[Optional[int], Optional[int]]:
+    """Refuse a ``gpu_checked_value`` call that states no checkable fact.
+
+    Returns the inclusive ``(lower, upper)`` the int bounds give, ``None`` for
+    a side with no int bound.
+    """
+    if not isinstance(value, Value):
+        raise TypeError(f"gpu_checked_value: value is an IR Value, got {value!r}")
+    t = value.type
+    if t not in (I32, I64):
+        raise ValueError(
+            f"gpu_checked_value: the value is {t.name} -- a GPU check takes an i32 "
+            "or i64 value"
+        )
+    if not stated and multiple_of is None:
+        raise ValueError(
+            "gpu_checked_value: state at least one fact: ge, gt, le, lt or multiple_of"
+        )
+    for kind, words in (("lower", _LOWER_WORDS), ("upper", _UPPER_WORDS)):
+        if all(w in stated for w in words):
+            raise ValueError(
+                f"gpu_checked_value: states two {kind} bounds ({', '.join(words)}) "
+                "-- state one"
+            )
+    tmin, tmax = _INT_TYPE_LIMITS[t.name]
+    if multiple_of is not None:
+        if not _is_attr_int(multiple_of):
+            raise TypeError(
+                f"gpu_checked_value: multiple_of is an int, got {multiple_of!r}"
+            )
+        if multiple_of < 1:
+            raise ValueError(
+                f"gpu_checked_value: multiple_of must be >= 1, got {multiple_of}"
+            )
+        if multiple_of > tmax:
+            raise ValueError(
+                f"gpu_checked_value: multiple_of={multiple_of} is outside the range of {t.name}"
+            )
+    for word, bound in stated.items():
+        if isinstance(bound, IntExpr):
+            text = bound.text(
+                lambda leaf: value_text(leaf) if isinstance(leaf, Value) else repr(leaf)
+            )
+            raise ValueError(
+                f"gpu_checked_value: {word}={text} is a host expression -- on the GPU a "
+                "bound is an int or one Value; compute it with b.add / b.mul, where the "
+                "instruction can be seen"
+            )
+        if isinstance(bound, Value):
+            shown = value_text(bound)
+            if bound.type != t:
+                raise ValueError(
+                    f"gpu_checked_value: {word}={shown} is {bound.type.name} and the "
+                    f"value is {t.name} -- a bound has the value's type"
+                )
+            if not _states_facts(bound):
+                raise ValueError(
+                    f"gpu_checked_value: {word}={shown} has no stated facts -- a Value "
+                    "bound is a kernel parameter whose declaration states facts, or a "
+                    "Value gpu_checked_value returned"
+                )
+        elif _is_attr_int(bound):
+            if not tmin <= bound <= tmax:
+                raise ValueError(
+                    f"gpu_checked_value: {word}={bound} is outside the range of {t.name}"
+                )
+        else:
+            raise TypeError(
+                f"gpu_checked_value: {word} is an int or a Value, got {bound!r}"
+            )
+    lower = upper = None
+    if _is_attr_int(stated.get("ge")):
+        lower = stated["ge"]
+    elif _is_attr_int(stated.get("gt")):
+        lower = stated["gt"] + 1
+    if _is_attr_int(stated.get("le")):
+        upper = stated["le"]
+    elif _is_attr_int(stated.get("lt")):
+        upper = stated["lt"] - 1
+    least = tmin if lower is None else lower
+    most = tmax if upper is None else upper
+    if least > most:
+        ints = [
+            f"{word}={bound}" for word, bound in stated.items() if _is_attr_int(bound)
+        ]
+        verb = "leave" if len(ints) > 1 else "leaves"
+        raise ValueError(
+            f"gpu_checked_value: {' and '.join(ints)} {verb} no {t.name} value"
+        )
+    return lower, upper
+
+
+def _stated_call_text(stated: Dict[str, Any], multiple_of: Optional[int]) -> str:
+    """The words of a ``gpu_checked_value`` call, as ``le=4096, multiple_of=8``."""
+    words = [
+        f"{word}={value_text(bound) if isinstance(bound, Value) else bound}"
+        for word, bound in stated.items()
+    ]
+    if multiple_of is not None:
+        words.append(f"multiple_of={multiple_of}")
+    return ", ".join(words)
+
+
+def _gpu_check_host_visible_text(
+    value: "Value",
+    sources: Sources,
+    stated: Dict[str, Any],
+    multiple_of: Optional[int],
+    upper: Optional[int],
+) -> str:
+    """Why the host already checks ``value``, and where its facts belong."""
+    text = value_text(value)
+    if value.param is not None:
+        name = value.param.name
+        count = len(stated) + (multiple_of is not None)
+        fact = "facts" if count > 1 else "fact"
+        return (
+            f"gpu_checked_value: {name} is a kernel parameter. The host checks every "
+            "fact of a kernel parameter before every launch and refuses the launch if "
+            "one fails, so a GPU check here would only repeat that check.\n"
+            f"Fix: state the {fact} where {name} is declared:\n"
+            f'    b.param("{name}", {value.type.name.upper()}, '
+            f"{_stated_call_text(stated, multiple_of)})\n"
+            f"{name} is declared today as: {_declaration_text(value.param)}"
+        )
+    if sources.thread_ids:
+        if (
+            value.op is not None
+            and value.op.name == THREAD_ID_OP
+            and value.op.attrs.get("axis") == "x"
+            and upper is not None
+        ):
+            return (
+                f"gpu_checked_value: {text} is bounded by the kernel's workgroup size, "
+                "which the host checks.\n"
+                f'Fix: b.kernel.attrs["workgroup_size"] = {upper + 1}'
+            )
+        names = ", ".join(p.param.name for p in sources.params)
+        params = f" and kernel parameters ({names})" if names else ""
+        declarations = (
+            ", and the parameters' facts on their declarations" if names else ""
+        )
+        return (
+            f"gpu_checked_value: {text} is computed only from thread ids{params}, which "
+            "the host bounds before every launch.\n"
+            'Fix: state the workgroup size, b.kernel.attrs["workgroup_size"] = '
+            f"<threads per workgroup>{declarations}; the IR range walk derives the "
+            f"facts of {text} from them."
+        )
+    if not sources.params:
+        return (
+            f"gpu_checked_value: {text} is computed only from constants, so it is "
+            "known when the kernel is built -- there is nothing to check on the GPU"
+        )
+    names = ", ".join(p.param.name for p in sources.params)
+    declarations = ", ".join(
+        f'b.param("{p.param.name}", {p.type.name.upper()}, ...)' for p in sources.params
+    )
+    if len(sources.params) == 1:
+        fix = f"state the bound on the parameter: {declarations}"
+        source = "it"
+    else:
+        fix = f"state the bounds on the parameters: {declarations}"
+        source = "them"
+    return (
+        f"gpu_checked_value: {text} is computed only from kernel parameters ({names}), "
+        f"which the host checks before every launch. Fix: {fix}. The IR range walk "
+        f"derives the facts of {text} from {source}."
+    )
+
+
+# What an op on an unchecked value can do first, and the verb for its fix.
+_UNCHECKED_ARITHMETIC = {
+    "arith.add": ("the addition can wrap or become poison first", "add"),
+    "arith.sub": ("the subtraction can wrap or become poison first", "subtract"),
+    "arith.mul": ("the multiplication can wrap or become poison first", "multiply"),
+    "arith.div": (
+        "the division is undefined for a zero or overflowing divisor",
+        "divide",
+    ),
+    "arith.mod": (
+        "the remainder is undefined for a zero or overflowing divisor",
+        "take the remainder of",
+    ),
+}
+
+
+def _gpu_check_unchecked_text(op: "Op", operand: "Value") -> str:
+    """Why arithmetic on an unchecked loaded value comes too late to check."""
+    shown = value_text(operand)
+    origin = (
+        "is loaded from memory"
+        if loaded_directly(operand)
+        else "is computed from a value loaded from memory"
+    )
+    why, verb = _UNCHECKED_ARITHMETIC[op.name]
+    short = op.name.split(".", 1)[1]
+    return (
+        f"gpu_checked_value: {shown} {origin} and unchecked, and {short} uses it before "
+        f"this check ({why}). Fix: check {shown} with gpu_checked_value first, then "
+        f"{verb} the Values gpu_checked_value returned."
+    )
+
+
 # ----------------------------- Builder -----------------------------------
 
 # Values of the ``fence`` attr of tile.sync / tile.sync_lds_only /
@@ -1392,32 +2141,140 @@ class IRBuilder:
 
     # ----- params -----
 
-    def param(self, name: str, t: Type, **attrs: Any) -> Value:
-        """Declare a kernel parameter.
+    def param(
+        self,
+        name: str,
+        t: Type,
+        *,
+        ge: Any = None,
+        gt: Any = None,
+        le: Any = None,
+        lt: Any = None,
+        eq: Any = None,
+        multiple_of: Optional[int] = None,
+        noalias: Optional[bool] = None,
+        readonly: Optional[bool] = None,
+        writeonly: Optional[bool] = None,
+        nocapture: Optional[bool] = None,
+        nonnull: Optional[bool] = None,
+        align: Optional[int] = None,
+        dereferenceable: Optional[int] = None,
+        addr_space: Optional[str] = None,
+    ) -> Value:
+        """Declare a kernel parameter, with the facts the host checks before
+        every launch.
 
-        Standard ``attrs`` recognised by the lowering:
+        Facts on an integer parameter (each optional; the host checks them,
+        and the GPU trusts them):
 
-        * ``noalias`` (bool) — emit ``noalias`` on the LLVM kernel arg.
-        * ``readonly`` (bool) — emit ``readonly``.
-        * ``writeonly`` (bool) — emit ``writeonly``.
-        * ``align`` (int) — emit ``align N``.
-        * ``addr_space`` (str) — for ``PtrType`` params, override the
-          pointee address space:
+        * ``ge`` / ``gt`` -- value >= / > bound (at most one of the two).
+        * ``le`` / ``lt`` -- value <= / < bound (at most one of the two).
+        * ``eq`` -- value == bound, a baked length; excludes every other word.
+        * ``multiple_of`` -- value % n == 0, an int n >= 1.
 
-          * ``"global"`` (default) → ``ptr addrspace(1)``
-          * ``"constant"`` → ``ptr addrspace(4)`` (kernel-arg
-            constant memory; AMDGPU backend uses scalar
-            ``s_load_dwordxN`` instead of per-lane VMEM loads).
-            Used by descriptor tables (P17): grouped-GEMM
-            ``gemm_descs_const``, per-expert pointer arrays, etc.
+        A bound is an int, a parameter of this kernel declared earlier (its
+        Value), or ``sum_of`` / ``product_of`` / ``quotient_of`` /
+        ``difference_of`` (``rocke.core.intexpr``) over those. A relation sits
+        on the parameter declared last among its terms, so the declaration
+        order (the kernel's argument order) is never changed:
+        ``ldc = b.param("ldc", I32, ge=N)``. ``quotient_of`` needs its
+        divisor's stated lower bound to be at least 1 and its dividend's at
+        least 0. A side with no word has the type's limit; there is no hidden
+        default.
+
+        LLVM argument attributes on a pointer parameter, emitted by the
+        lowering and never checked, except ``align``, which the host also
+        checks:
+
+        * ``noalias``, ``readonly``, ``writeonly``, ``nonnull`` (bool);
+          ``nocapture`` (bool, emitted unless False).
+        * ``align`` (a power of two) -- ``align N``.
+        * ``dereferenceable`` (bytes) -- ``dereferenceable(N)``.
+        * ``addr_space`` (str) -- override the pointee address space:
+          ``"global"`` (default) -> ``ptr addrspace(1)``; ``"constant"`` ->
+          ``ptr addrspace(4)`` (kernel-arg constant memory; the AMDGPU backend
+          uses scalar ``s_load_dwordxN`` instead of per-lane VMEM loads), used
+          by descriptor tables: grouped-GEMM ``gemm_descs_const``, per-expert
+          pointer arrays, etc.
+
+        A misspelled word is a ``TypeError``; a fact the declaration cannot
+        state (a word on the wrong type, two lower bounds, a bound computed in
+        the kernel) is a ``ValueError``.
         """
         if name in self._param_values:
             raise ValueError(f"duplicate kernel parameter {name!r}")
         _refuse_packed_only_value("param", t)
-        v = Value(name=f"%{name}", type=t)
+        attrs: Dict[str, Any] = {}
+        for word, bound in (("ge", ge), ("gt", gt), ("le", le), ("lt", lt), ("eq", eq)):
+            if bound is not None:
+                attrs[word] = self._stored_bound(name, word, bound)
+        if multiple_of is not None:
+            attrs["multiple_of"] = _stored_int(name, "multiple_of", multiple_of)
+        for key, value in (
+            ("noalias", noalias),
+            ("readonly", readonly),
+            ("writeonly", writeonly),
+            ("nocapture", nocapture),
+            ("nonnull", nonnull),
+        ):
+            if value is not None:
+                attrs[key] = value
+        if align is not None:
+            attrs["align"] = _stored_int(name, "align", align)
+        if dereferenceable is not None:
+            attrs["dereferenceable"] = _stored_int(
+                name, "dereferenceable", dereferenceable
+            )
+        if addr_space is not None:
+            attrs["addr_space"] = addr_space
+        declared = Param(
+            name=name, type=t, attrs=attrs, declared_before=tuple(self._params)
+        )
+        errors = param_fact_errors([*self._params, declared], len(self._params))
+        if errors:
+            raise ValueError(errors[0])
+        v = Value(name=f"%{name}", type=t, param=declared)
         self._param_values[name] = v
-        self._params.append(Param(name=name, type=t, attrs=dict(attrs)))
+        self._params.append(declared)
         return v
+
+    def _stored_bound(self, name: str, word: str, bound: Any) -> Any:
+        """``bound`` in its stored form: an int, or a relation's canonical JSON."""
+        if isinstance(bound, (Value, IntExpr)):
+            subject = (
+                bound.text(lambda leaf: getattr(leaf, "name", repr(leaf)).lstrip("%"))
+                if isinstance(bound, IntExpr)
+                else f"{word}={bound.name.lstrip('%')}"
+            )
+            return relation_json(
+                bound.tree(lambda leaf: self._leaf_name(name, subject, leaf))
+                if isinstance(bound, IntExpr)
+                else {"param": self._leaf_name(name, subject, bound)}
+            )
+        return _stored_int(name, word, bound, relations=True)
+
+    def _leaf_name(self, name: str, subject: str, leaf: Any) -> str:
+        """The parameter name a bound's leaf stands for; refuses any leaf the
+        host cannot evaluate."""
+        if not isinstance(leaf, Value):
+            raise TypeError(
+                f"param {name}: {subject} has the term {leaf!r} -- a term is an int, "
+                "a parameter of this kernel, or a nested sum_of / product_of / "
+                "quotient_of / difference_of"
+            )
+        shown = leaf.name.lstrip("%")
+        if leaf.param is None:
+            raise ValueError(
+                f"param {name}: {subject} uses {shown}, which is computed in the "
+                "kernel -- the host can only evaluate kernel parameters and ints"
+            )
+        if not any(leaf.param is p for p in self._params):
+            raise ValueError(
+                f"param {name}: {subject} uses {shown}, which is a parameter of "
+                "another kernel -- the host can only evaluate this kernel's "
+                "parameters and ints"
+            )
+        return leaf.param.name
 
     def get_param(self, name: str) -> Value:
         return self._param_values[name]
@@ -1695,20 +2552,24 @@ class IRBuilder:
         self,
         v: Value,
         *,
-        lo: Optional[int] = None,
-        hi: Optional[int] = None,
-        hi_value: Optional[Value] = None,
-        hi_plus: int = 0,
+        ge: Optional["int | Value"] = None,
+        ge_plus: int = 0,
+        lt: Optional["int | Value"] = None,
+        lt_plus: int = 0,
         multiple_of: int = 1,
         residue: int = 0,
+        by: Optional[str] = None,
     ) -> Value:
         """Return ``v`` unchanged, marked with facts its caller has checked.
 
-        The marker records ``lo <= v``, ``v < hi`` (an int ``hi``, or
-        ``hi_value + hi_plus`` for an end only known at run time) and
-        ``v == residue (mod multiple_of)``. It emits no instruction: both
-        lowerings print ``v`` wherever the result is used. Its one reader is
-        the tiling layer's IR range walk, which trusts every marker.
+        The marker records ``ge <= v`` and ``v < lt``, each end an int or a
+        Value plus a constant (``ge + ge_plus``, ``lt + lt_plus``) for an end
+        only known at run time, and ``v == residue (mod multiple_of)``. ``by``
+        names the writer (``ASSUME_RANGE_WRITERS``) when the facts come from
+        one of the checks that name themselves. It emits no instruction: both
+        lowerings print ``v`` wherever the result is used. Its readers are
+        ``stated_facts_of`` and the tiling layer's IR range walk, which trust
+        every marker.
 
         Private on purpose: a fact stated here is never checked, so only
         callers that checked or proved it first may state it. Those callers
@@ -1716,21 +2577,24 @@ class IRBuilder:
         """
         if v.type not in (I32, I64):
             raise ValueError(f"_assume_range: v must be i32 or i64, got {v.type.name}")
-        if hi_value is not None and hi_value.type != v.type:
-            raise ValueError(
-                f"_assume_range: hi_value type {hi_value.type.name} != v type {v.type.name}"
-            )
+        for word, end in (("ge", ge), ("lt", lt)):
+            if isinstance(end, Value) and end.type != v.type:
+                raise ValueError(
+                    f"_assume_range: {word} type {end.type.name} != v type {v.type.name}"
+                )
         attrs: Dict[str, Any] = {"multiple_of": multiple_of, "residue": residue}
-        if lo is not None:
-            attrs["lo"] = lo
-        if hi is not None:
-            attrs["hi"] = hi
         operands = [v]
-        if hi_value is not None:
-            operands.append(hi_value)
-            attrs["hi_plus"] = hi_plus
-        elif hi_plus != 0:
-            attrs["hi_plus"] = hi_plus
+        for word, end, plus in (("ge", ge, ge_plus), ("lt", lt, lt_plus)):
+            if isinstance(end, Value):
+                operands.append(end)
+                attrs[f"{word}_plus"] = plus
+            else:
+                if end is not None:
+                    attrs[word] = end
+                if plus != 0:
+                    attrs[f"{word}_plus"] = plus
+        if by is not None:
+            attrs["by"] = by
         errors = _assume_range_errors(attrs, len(operands))
         if errors:
             raise ValueError(errors[0])
@@ -1741,6 +2605,123 @@ class IRBuilder:
             attrs=attrs,
             result_name_hint="range",
         ).result
+
+    def gpu_checked_value(
+        self,
+        value: Value,
+        *,
+        ge: Any = None,
+        gt: Any = None,
+        le: Any = None,
+        lt: Any = None,
+        multiple_of: Optional[int] = None,
+    ) -> Value:
+        """Always emitted: no build mode drops it; a false fact traps the kernel.
+
+        A taken trap costs the whole process, not just the launch: the launch
+        fails or the HIP runtime aborts the process, and either way the process
+        cannot use the GPU afterwards (see :meth:`trap`). So the check is a last
+        line of defence for a value the host cannot see, not a way to reject
+        input; make bad input impossible upstream.
+
+        Returns ``value`` carrying the stated facts, for a value only the GPU
+        can see: one computed from a memory load or a block id, such as a
+        sequence start read from ``cu_seqlens``. The facts live only on the
+        returned Value (``rocke.core.facts.stated_facts_of`` reads them), so
+        pass that Value on, not ``value``::
+
+            start = b.gpu_checked_value(b.readfirstlane(b.global_load(cu, s, I32)), ge=0, le=T)
+
+        * ``ge`` / ``gt`` -- value >= / > bound (at most one of the two).
+        * ``le`` / ``lt`` -- value <= / < bound (at most one of the two).
+        * ``multiple_of`` -- value % n == 0, an int n >= 1.
+
+        At least one word is required, and exactly the stated sides are
+        checked. A bound is an int, or one Value of the value's type whose
+        facts are stated (a kernel parameter or a Value this method returned):
+        ``le=T`` gives the one home of a maximum and states the true fact.
+        ``sum_of`` / ``product_of`` / ``quotient_of`` / ``difference_of`` are
+        host expressions and are refused; compute a GPU bound with ``b.add`` /
+        ``b.mul``, where the instruction can be seen.
+
+        Emitted from existing ops: a compare per stated side (one unsigned
+        compare for ``0 <= v < n``, see :func:`one_unsigned_compare_checks`),
+        ``scf.if`` on the failure, ``tile.trap``, and a range marker naming
+        ``by="gpu_checked_value"``. A per-lane value is checked per lane.
+
+        Refused, with the fix in the message:
+
+        * a value the host already checks: a kernel parameter or a value
+          computed only from parameters and constants (state the facts on the
+          declaration), or from thread ids (state ``workgroup_size``);
+        * a value an unchecked load reaches through an ``add``, ``sub``,
+          ``mul``, ``div`` or ``mod``: that arithmetic can wrap, become poison
+          or divide by zero before this check sees it. Check the loaded value
+          first, then compute with the Values this method returns. A load that
+          reaches the value only through conditions (a compare, a select's
+          condition) does not count.
+        """
+        stated = {
+            word: bound
+            for word, bound in (("ge", ge), ("gt", gt), ("le", le), ("lt", lt))
+            if bound is not None
+        }
+        lower, upper = _gpu_check_form(value, stated, multiple_of)
+        sources = sources_of(value)
+        if not sources.gpu_only:
+            raise ValueError(
+                _gpu_check_host_visible_text(value, sources, stated, multiple_of, upper)
+            )
+        unchecked = first_unchecked_arithmetic(value)
+        if unchecked is not None:
+            raise ValueError(_gpu_check_unchecked_text(*unchecked))
+        const = self.const_i64 if value.type == I64 else self.const_i32
+        type_max = _INT_TYPE_LIMITS[value.type.name][1]
+        lower_word = next((w for w in ("ge", "gt") if w in stated), None)
+        upper_word = next((w for w in ("le", "lt") if w in stated), None)
+        fails: List[Value] = []
+        if (
+            lower == 0
+            and upper is not None
+            and one_unsigned_compare_checks(upper + 1, upper + 1, value.type)
+        ):
+            fails.append(self.cmp_ult(const(upper), value))
+        else:
+            if lower_word is not None:
+                bound = stated[lower_word]
+                end = bound if isinstance(bound, Value) else const(bound)
+                compare = self.cmp_lt if lower_word == "ge" else self.cmp_le
+                fails.append(compare(value, end))
+            if upper_word is not None:
+                bound = stated[upper_word]
+                end = bound if isinstance(bound, Value) else const(bound)
+                compare = self.cmp_gt if upper_word == "le" else self.cmp_ge
+                fails.append(compare(value, end))
+        if multiple_of is not None and multiple_of > 1:
+            remainder = self.mod(value, const(multiple_of))
+            fails.append(self.cmp_ne(remainder, const(0)))
+        if fails:
+            fail = fails[0]
+            for other in fails[1:]:
+                fail = self.lor(fail, other)
+            with self.scf_if(fail):
+                self.trap()
+        lower_bound = stated.get(lower_word) if lower_word is not None else None
+        upper_bound = stated.get(upper_word) if upper_word is not None else None
+        return self._assume_range(
+            value,
+            ge=lower_bound if isinstance(lower_bound, Value) else lower,
+            ge_plus=1 if lower_word == "gt" and isinstance(lower_bound, Value) else 0,
+            # An upper end at the type's maximum states nothing.
+            lt=(
+                upper_bound
+                if isinstance(upper_bound, Value)
+                else (None if upper is None or upper == type_max else upper + 1)
+            ),
+            lt_plus=1 if upper_word == "le" and isinstance(upper_bound, Value) else 0,
+            multiple_of=1 if multiple_of is None else multiple_of,
+            by="gpu_checked_value",
+        )
 
     def fcmp(self, pred: str, a: Value, b: Value) -> Value:
         if pred not in ("olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno"):

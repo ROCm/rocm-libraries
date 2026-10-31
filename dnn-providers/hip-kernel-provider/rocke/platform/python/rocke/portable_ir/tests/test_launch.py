@@ -134,6 +134,53 @@ class TestSignature(unittest.TestCase):
         self.assertIn("f16", str(cm.exception))
 
 
+def facts_recipe():
+    """A recorded kernel whose integer parameters state facts, one as an int
+    and one as a relation over an earlier parameter, with launch geometry."""
+    from rocke.core.intexpr import product_of
+    from rocke.core.ir import F32, I32, IRBuilder, PtrType
+    from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+    b = IRBuilder("facts_kernel")
+    x = b.param("X", PtrType(F32, "global"), align=16)
+    m = b.param("M", I32, ge=1, multiple_of=64)
+    b.param("ld", I32, ge=product_of(m, 2))
+    b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+    b.ret()
+    return launch.attach_launch(
+        kerneldef_to_recipe(b.kernel), grid=[1, 1, 1], block=[64, 1, 1]
+    )
+
+
+FACTS_REFUSAL = (
+    "facts_kernel: parameters carry facts, which the C++ launch plan cannot "
+    "check yet -- launch it through KernelLauncher.from_artifact"
+)
+
+
+class TestStatedFacts(unittest.TestCase):
+    """The caller packs the arguments itself, so a plan cannot check the facts
+    a parameter states; the plan is refused rather than handed out unchecked."""
+
+    def test_a_recipe_whose_params_state_facts_is_refused(self):
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(facts_recipe(), {}, {})
+        self.assertEqual(str(cm.exception), FACTS_REFUSAL)
+
+    def test_one_fact_on_one_param_is_enough(self):
+        r = mixed_signature_recipe()
+        r["program"][1]["attrs"] = {"le": 4096}
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(r, {"D": 1}, {})
+        self.assertIn("mixed_1: parameters carry facts", str(cm.exception))
+
+    def test_pointer_attributes_are_not_facts(self):
+        """The toy kernel's pointers carry noalias / readonly / align, which
+        recipes carried before facts existed; it plans as before."""
+        p = launch.plan(toy(), {"D": 256}, {"dtype": "f32"})
+        self.assertEqual(p["geometry"]["grid"], (4, 1, 1))
+
+
 def int_list(*vals):
     """A kernel list attr as rocke.core.ir_export._attrs_to_json writes it."""
     return {"t": "l", "v": [{"_": {"t": "i", "v": v}} for v in vals]}
@@ -308,6 +355,18 @@ class TestCEngineAgrees(unittest.TestCase):
             cbor_encode(toy()), ints={"D": 256}, strs={"dtype": "f32"}
         )
         self.assertIsNone(c["cluster"])
+
+    def test_stated_facts_refused_by_c_too_with_the_same_message(self):
+        blob = cbor_encode(facts_recipe())
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(blob)
+        self.assertTrue(str(cm.exception).endswith(FACTS_REFUSAL), str(cm.exception))
+        bundle = cbor_encode(
+            build_bundle([{"key": "facts", "arch": "gfx950", "recipe": facts_recipe()}])
+        )
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(bundle, "facts", arch="gfx950")
+        self.assertTrue(str(cm.exception).endswith(FACTS_REFUSAL), str(cm.exception))
 
     def test_partial_cluster_refused_by_c_too(self):
         with self.assertRaises(RuntimeError) as cm:

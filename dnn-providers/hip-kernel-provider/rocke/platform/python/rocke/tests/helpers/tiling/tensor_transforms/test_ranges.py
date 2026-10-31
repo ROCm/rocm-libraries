@@ -19,13 +19,12 @@ from dataclasses import fields
 
 import pytest
 
-from rocke.core.ir import F16, I32, Value
+from rocke.core.ir import F16, F32, I32, I64, IRBuilder, Value
 from rocke.helpers.tiling import tensor_transforms as tt
 from rocke.helpers.tiling.descriptors import TensorDesc
 from rocke.helpers.tiling.tensor_transforms import (
     BoundCheck,
     CheckReason,
-    RuntimeValue,
     embed,
     graph_injective,
     inputs,
@@ -47,7 +46,10 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     Congruence,
     Interval,
     VectorRun,
+    _numeric_hi,
+    _numeric_lo,
     _required_checks,
+    _RuntimeEnd,
     _value_ranges,
 )
 
@@ -63,12 +65,23 @@ def _runtime(
     at_least: int | None = 0,
     multiple_of: int = 1,
     residue: int = 0,
-) -> RuntimeValue:
-    """A runtime length as its producer states it: ``at_least <= value <= at_most``."""
-    hi = None if at_most is None else at_most + 1
-    return RuntimeValue(
-        Value(name, I32), 0, Interval(at_least, hi), Congruence(multiple_of, residue)
+) -> _RuntimeEnd:
+    """The range end at a runtime length whose facts are stated once, where it is declared:
+    ``at_least <= value <= at_most``, ``value == residue (mod multiple_of)``. A kernel
+    parameter states them; a residue other than 0 is stated by a range marker on one."""
+    b = IRBuilder(f"runtime_{name}")
+    if residue == 0:
+        return _RuntimeEnd(
+            b.param(name, I32, ge=at_least, le=at_most, multiple_of=multiple_of)
+        )
+    marked = b._assume_range(
+        b.param(name, I32),
+        ge=at_least,
+        lt=None if at_most is None else at_most + 1,
+        multiple_of=multiple_of,
+        residue=residue,
     )
+    return _RuntimeEnd(marked)
 
 
 def _tensor(*lengths: int) -> TensorDesc:
@@ -231,29 +244,29 @@ def test_congruence_examples():
     assert Congruence(4, 7).residue == 3
 
 
-# --- RuntimeValue ends -------------------------------------------------------------------------
+# --- runtime ends ------------------------------------------------------------------------------
 
 
 def test_runtime_end_survives_shift_and_unit_scale_only():
     ms = _runtime("Ms", 4095, multiple_of=8)
     ks = _runtime("Ks", 4095)
     r = Interval(0, ms)
-    assert r.shifted(-3) == Interval(-3, ms._shifted(-3))
-    assert r.plus(Interval(0, 4)) == Interval(0, ms._shifted(3))
+    assert r.shifted(-3) == Interval(-3, ms.shifted(-3))
+    assert r.plus(Interval(0, 4)) == Interval(0, ms.shifted(3))
     assert r.scaled(1) == r
     assert r.scaled(2) == Interval(0, 8189)
     assert r.plus(Interval(0, ks)) == Interval(0, 4094 + 4094 + 1)
-    shifted = ms._shifted(-63)
+    shifted = ms.shifted(-63)
     assert shifted.value is ms.value
-    assert shifted._envelope == ms._envelope and shifted._congruence == ms._congruence
-    assert shifted._plus == -63
+    assert shifted.envelope == ms.envelope and shifted.congruence == ms.congruence
+    assert shifted.plus == -63
 
 
 def test_minimum_and_maximum_with_runtime_ends():
     ms = _runtime("Ms", 4095)
     small = _runtime("Ms", 32)
     other = _runtime("Ns", 99)
-    assert Interval(0, ms).minimum(Interval(0, ms._shifted(-1))).hi == ms._shifted(-1)
+    assert Interval(0, ms).minimum(Interval(0, ms.shifted(-1))).hi == ms.shifted(-1)
     assert Interval(0, ms).minimum(Interval(0, 64)).hi == 64
     assert Interval(0, small).minimum(Interval(0, 64)).hi == 32
     assert Interval(0, ms).minimum(Interval(0, other)).hi == 99
@@ -265,12 +278,12 @@ def test_minimum_and_maximum_with_runtime_ends():
 def _symmetry_cases() -> list[tuple[Interval, Interval]]:
     ms, ns = _runtime("Ms", 4095), _runtime("Ns", 99)
     return [
-        (Interval(0, ms), Interval(0, ms._shifted(-1))),
+        (Interval(0, ms), Interval(0, ms.shifted(-1))),
         (Interval(0, ms), Interval(0, 64)),
         (Interval(0, ms), Interval(0, ns)),
         (Interval(0, None), Interval(0, ms)),
         (Interval(ms, None), Interval(ns, None)),
-        (Interval(-3, ms), Interval(ns._shifted(-2), 7)),
+        (Interval(-3, ms), Interval(ns.shifted(-2), 7)),
         (Interval(None, ms), Interval(None, ns)),
     ]
 
@@ -286,24 +299,24 @@ def test_minimum_maximum_and_intersect_are_symmetric(a, b):
 
 def test_intersect_keeps_the_runtime_upper_end_and_the_int_lower_end():
     ms, ks, ns = _runtime("Ms", 4095), _runtime("Ks", 4095), _runtime("Ns", 99)
-    assert Interval(0, 4096).intersect(Interval(0, ms._shifted(-63))) == Interval(
-        0, ms._shifted(-63)
+    assert Interval(0, 4096).intersect(Interval(0, ms.shifted(-63))) == Interval(
+        0, ms.shifted(-63)
     )
-    assert Interval(0, ms._shifted(-1)).intersect(Interval(0, ms._shifted(-63))).hi == (
-        ms._shifted(-63)
+    assert Interval(0, ms.shifted(-1)).intersect(Interval(0, ms.shifted(-63))).hi == (
+        ms.shifted(-63)
     )
     assert Interval(-5, ms).intersect(Interval(0, ms)).lo == 0
-    assert Interval(ks._shifted(-8), ms).intersect(Interval(0, ms)).lo == 0
-    assert Interval(-15, 4096).intersect(Interval(None, ms._shifted(-15))) == Interval(
-        -15, ms._shifted(-15)
+    assert Interval(ks.shifted(-8), ms).intersect(Interval(0, ms)).lo == 0
+    assert Interval(-15, 4096).intersect(Interval(None, ms.shifted(-15))) == Interval(
+        -15, ms.shifted(-15)
     )
     assert Interval(0, ms).intersect(Interval(0, ns)).hi == 99
     pairs = [
-        (Interval(0, 4096), Interval(0, ms._shifted(-63))),
-        (Interval(0, ms._shifted(-1)), Interval(0, ms._shifted(-63))),
+        (Interval(0, 4096), Interval(0, ms.shifted(-63))),
+        (Interval(0, ms.shifted(-1)), Interval(0, ms.shifted(-63))),
         (Interval(-5, ms), Interval(0, ms)),
-        (Interval(ks._shifted(-8), ms), Interval(0, ms)),
-        (Interval(-15, 4096), Interval(None, ms._shifted(-15))),
+        (Interval(ks.shifted(-8), ms), Interval(0, ms)),
+        (Interval(-15, 4096), Interval(None, ms.shifted(-15))),
         (Interval(0, ms), Interval(0, ns)),
     ]
     for a, b in pairs:
@@ -322,40 +335,40 @@ def test_overlaps_cases():
     ls_wide = _runtime("Ls", 4095)
     cases = [
         (Interval(0, 4), Interval(8, 16), False),
-        (Interval(100, 4096), Interval(0, ls._shifted(-63)), False),
+        (Interval(100, 4096), Interval(0, ls.shifted(-63)), False),
         (Interval(0, 5), Interval(10, ls), False),
-        (Interval(0, None), Interval(0, ls9._shifted(-15)), False),
-        (Interval(0, ls_wide._shifted(-3)), Interval(0, ls_wide._shifted(-1)), True),
-        (Interval(ls._shifted(2), None), Interval(0, ls._shifted(2)), False),
+        (Interval(0, None), Interval(0, ls9.shifted(-15)), False),
+        (Interval(0, ls_wide.shifted(-3)), Interval(0, ls_wide.shifted(-1)), True),
+        (Interval(ls.shifted(2), None), Interval(0, ls.shifted(2)), False),
         (Interval(None, 3), UNBOUNDED, True),
     ]
     for a, b, expected in cases:
         assert a.overlaps(b) is expected and b.overlaps(a) is expected
     assert not Interval(0, 4).overlaps(Interval(8, 16))
-    assert not Interval(100, 4096).overlaps(Interval(0, ls._shifted(-63)))
+    assert not Interval(100, 4096).overlaps(Interval(0, ls.shifted(-63)))
     with pytest.raises(ValueError, match="have no value in common"):
-        Interval(100, 4096).intersect(Interval(0, ls._shifted(-63)))
+        Interval(100, 4096).intersect(Interval(0, ls.shifted(-63)))
     assert not Interval(0, 5).overlaps(Interval(10, ls))
-    assert not Interval(0, None).overlaps(Interval(0, ls9._shifted(-15)))
-    assert Interval(0, ls_wide._shifted(-3)).overlaps(Interval(0, ls_wide._shifted(-1)))
-    assert not Interval(ls._shifted(2), None).overlaps(Interval(0, ls._shifted(2)))
+    assert not Interval(0, None).overlaps(Interval(0, ls9.shifted(-15)))
+    assert Interval(0, ls_wide.shifted(-3)).overlaps(Interval(0, ls_wide.shifted(-1)))
+    assert not Interval(ls.shifted(2), None).overlaps(Interval(0, ls.shifted(2)))
     assert Interval(None, 3).overlaps(UNBOUNDED)
 
 
-def _random_end(rng: random.Random, side: str, runtime: tuple[RuntimeValue, ...]):
+def _random_end(rng: random.Random, side: str, runtime: tuple[_RuntimeEnd, ...]):
     pick = rng.random()
     if pick < 0.15:
         return None
     if pick < 0.55:
         return rng.randint(-6, 6)
-    return rng.choice(runtime)._shifted(rng.randint(-3, 3))
+    return rng.choice(runtime).shifted(rng.randint(-3, 3))
 
 
 def _substitute(end, values: dict[int, int], side: str) -> float:
     if end is None:
         return float("-inf") if side == "lo" else float("inf")
-    if isinstance(end, RuntimeValue):
-        return values[id(end.value)] + end._plus
+    if isinstance(end, _RuntimeEnd):
+        return values[id(end.value)] + end.plus
     return end
 
 
@@ -430,7 +443,7 @@ def test_minimum_maximum_intersect_are_sound_on_random_runtime_pairs():
 def test_snapped_moves_a_runtime_end_only_when_its_residue_is_known():
     ms128 = _runtime("Ms", 4096, multiple_of=128)
     ms64 = _runtime("Ms", 4096, multiple_of=64)
-    assert Interval(0, ms128).snapped(Congruence(128, 0)).hi == ms128._shifted(-127)
+    assert Interval(0, ms128).snapped(Congruence(128, 0)).hi == ms128.shifted(-127)
     assert Interval(0, ms64).snapped(Congruence(128, 0)).hi == ms64
 
 
@@ -440,13 +453,13 @@ def test_runtime_snap_matches_concrete_lengths():
             length = _runtime("L", 64, multiple_of=multiple, residue=residue)
             for plus in range(-5, 6):
                 for r in range(4):
-                    snapped = Interval(0, length._shifted(plus)).snapped(
+                    snapped = Interval(0, length.shifted(plus)).snapped(
                         Congruence(4, r)
                     )
                     for value in range(residue, 65, multiple):
                         members = [x for x in range(value + plus) if x % 4 == r]
                         if members:
-                            assert value + snapped.hi._plus == max(members) + 1
+                            assert value + snapped.hi.plus == max(members) + 1
 
 
 # --- value ranges against exhaustive enumeration -----------------------------------------------
@@ -534,8 +547,8 @@ def _passes(
 
 
 def _end_value(end, runtime) -> int:
-    if isinstance(end, RuntimeValue):
-        return runtime[id(end.value)] + end._plus
+    if isinstance(end, Value):
+        return runtime[id(end)]
     return end
 
 
@@ -649,7 +662,9 @@ def test_runtime_lower_and_upper_bound_give_a_two_sided_check():
     checks = _required_checks(
         identity_graph((None,)), (UNBOUNDED,), (AxisBound.of(lo, hi),)
     )
-    assert checks == (BoundCheck("axis0", lo, hi, (CheckReason.TENSOR_BOUND,)),)
+    assert checks == (
+        BoundCheck("axis0", lo.value, hi.value, (CheckReason.TENSOR_BOUND,)),
+    )
 
 
 def _tile_inside_graph(tile: int):
@@ -665,28 +680,30 @@ def test_whole_tile_inside_a_runtime_length_is_proven_by_identity():
     seqlen = _runtime("seqlen", 4096, multiple_of=tile)
     graph = _tile_inside_graph(tile)
     bound = (AxisBound.of(0, seqlen),)
-    inside = (Interval(0, seqlen._shifted(-(tile - 1))), Interval(0, tile))
+    inside = (Interval(0, seqlen.shifted(-(tile - 1))), Interval(0, tile))
     assert _required_checks(graph, inside, bound) == ()
     unknown = (UNBOUNDED, Interval(0, tile))
     assert _required_checks(graph, unknown, bound) == (
-        BoundCheck("row", 0, seqlen, (CheckReason.TENSOR_BOUND,)),
+        BoundCheck("row", 0, seqlen.value, (CheckReason.TENSOR_BOUND,)),
     )
     same_number = _runtime("seqlen_copy", 4096, multiple_of=tile)
     copied = (AxisBound.of(0, same_number),)
     assert _required_checks(graph, inside, copied) == (
-        BoundCheck("row", None, same_number, (CheckReason.TENSOR_BOUND,)),
+        BoundCheck("row", None, same_number.value, (CheckReason.TENSOR_BOUND,)),
     )
 
 
 def test_identity_graph_over_a_runtime_length_checks_that_axis_only():
     seqlen = _runtime("seqlen", 8192)
-    graph = identity_graph((seqlen, 128))
+    graph = identity_graph((seqlen.value, 128))
     assert tuple(graph.inputs.items()) == (("axis0", None), ("axis1", 128))
     assert graph.outputs == ("axis0", "axis1")
     bounds = (AxisBound.of(0, seqlen), AxisBound.of(0, 128))
     checks = _required_checks(graph, (Interval(0, None), Interval(0, 128)), bounds)
     # Per side: the lower side is proven (None), the upper side is reported.
-    assert checks == (BoundCheck("axis0", None, seqlen, (CheckReason.TENSOR_BOUND,)),)
+    assert checks == (
+        BoundCheck("axis0", None, seqlen.value, (CheckReason.TENSOR_BOUND,)),
+    )
 
 
 def _enumerated_sides(origins: range, tile: int, length: int) -> tuple[bool, bool]:
@@ -803,29 +820,62 @@ def test_dilated_conv_taps_overlap_and_are_not_injective():
 # --- public values carry public types only -----------------------------------------------------
 
 
-_INTERNAL = (Interval, Congruence, AxisBound, CheckSide, VectorRun)
+_INTERNAL = (Interval, Congruence, AxisBound, CheckSide, VectorRun, _RuntimeEnd)
 
 
 def test_public_values_carry_no_internal_type():
-    ms = _runtime("Ms", 4096, multiple_of=8)
+    """The door shows a runtime end as its Value, and one shifted by a constant as the number
+    its stated facts give: the shifted form is private to range arithmetic."""
+    ms = _runtime("Ms", 4096, multiple_of=8).value
     graph = _tile_inside_graph(16)
     found = value_ranges(graph, ((0, ms), (0, 16)))
     for pair in found.values():
         assert isinstance(pair, tuple) and not any(
             isinstance(e, _INTERNAL) for e in pair
         )
+    assert found["origin"][0] == 0 and found["origin"][1] is ms
+    assert found["row"] == (0, 4096 + 15)
     checks = required_checks(identity_graph((32,)), _tensor(32), ((None, None),))
     for check in checks:
         for f in fields(BoundCheck):
             assert not isinstance(getattr(check, f.name), _INTERNAL)
-    assert [a for a in dir(ms) if not a.startswith("_")] == ["value"]
     for name in tt.__all__:
         assert getattr(tt, name) not in _INTERNAL
 
 
-def test_runtime_value_reads_its_facts_in_plain_words():
+def test_a_runtime_end_reads_as_its_value_and_its_shift():
     k = _runtime("K", 65536, multiple_of=8)
-    assert str(k) == "K: 0 <= value <= 65536, a multiple of 8"
+    assert (str(k), str(k.shifted(3)), str(k.shifted(-3))) == ("%K", "%K + 3", "%K - 3")
+
+
+def test_a_runtime_end_reads_its_numbers_from_the_stated_facts():
+    """A runtime end holds no facts: a parameter's come from its declaration, a marker's from
+    the marker, and a marker bounded by a Value resolves that bound through the Value's own
+    stated facts. A Value with none gives no number, so an identity proof is all it offers.
+    """
+    b = IRBuilder("stated_facts")
+    t = b.param("T", I32, ge=1, le=4096)
+    n = b.param("N", I32, ge=8, le=99, multiple_of=4)
+    start = b._assume_range(b.thread_id_x(), ge=0, lt=t)
+    end = _RuntimeEnd(n, -2)
+    assert (_numeric_lo(end), _numeric_hi(end)) == (6, 97)
+    assert end.envelope == Interval(8, 100) and end.congruence == Congruence(4, 0)
+    assert _RuntimeEnd(start).envelope == Interval(0, 4096)
+    assert _RuntimeEnd(t).envelope == Interval(1, 4097)
+    unstated = _RuntimeEnd(b.thread_id_x())
+    assert unstated.envelope == UNBOUNDED and _numeric_hi(unstated.shifted(5)) is None
+
+
+def test_two_ends_over_one_value_are_equal_exactly_when_their_shifts_are():
+    """Identity is the proof: the same value object and the same shift, never the same
+    numbers."""
+    ms = _runtime("Ms", 4095)
+    twin = _runtime("Ms", 4095)
+    assert ms.shifted(-1) == ms.shifted(-1) and hash(ms.shifted(-1)) == hash(
+        ms.shifted(-1)
+    )
+    assert ms.shifted(-1) != ms and ms != twin
+    assert Interval(0, ms.value) == Interval(0, ms)
 
 
 @pytest.mark.parametrize(
@@ -837,32 +887,16 @@ def test_interval_pairs_round_trip(pair):
 
 
 def test_interval_pairs_round_trip_runtime_ends():
-    ms = _runtime("Ms", 4096)
-    for pair in [(0, ms), (ms._shifted(-4), None), (ms, ms._shifted(3))]:
-        assert Interval.from_pair(pair).as_pair() == pair
+    """A Value end comes back as the same Value; a shifted end as its stated number."""
+    ms = _runtime("Ms", 4096).value
+    lo, hi = Interval.from_pair((0, ms)).as_pair()
+    assert lo == 0 and hi is ms
+    assert Interval.from_pair((_RuntimeEnd(ms, -4), None)).as_pair() == (-4, None)
+    lo, hi = Interval.from_pair((ms, _RuntimeEnd(ms, 3))).as_pair()
+    assert lo is ms and hi == 4099
 
 
 # --- errors ------------------------------------------------------------------------------------
-
-
-def test_two_runtime_values_over_one_value_with_different_facts_raise():
-    ms = _runtime("Ms", 4095)
-    retyped = RuntimeValue(ms.value, -63, Interval(0, 64), ms._congruence)
-    message = (
-        "two RuntimeValues over the same value Ms state different facts (envelope [0, 4096) vs "
-        "[0, 64), congruence 0 mod 1 vs 0 mod 1) -- write ends relative to a length as "
-        "length.shifted(k), never restate its envelope"
-    )
-    with _raises(ValueError, message):
-        Interval(0, ms).intersect(Interval(0, retyped))
-    graph = _tile_inside_graph(16)
-    with pytest.raises(ValueError, match="state different facts"):
-        _required_checks(
-            graph, (Interval(0, retyped), Interval(0, 16)), (AxisBound.of(0, ms),)
-        )
-    recongruent = RuntimeValue(ms.value, 0, ms._envelope, Congruence(8, 0))
-    with pytest.raises(ValueError, match="state different facts"):
-        value_ranges(graph, ((0, ms), (0, recongruent)))
 
 
 @pytest.mark.parametrize("owner", [Interval(0, 4), Congruence(4, 1)])
@@ -912,10 +946,37 @@ def test_axis_bound_with_a_shifted_runtime_end_raises():
     ms = _runtime("Ms", 4095)
     with _raises(
         ValueError,
-        "AxisBound end Ms - 1 is RuntimeValue(..., plus=-1) -- a bound is a length (plus 0); an "
-        "end relative to a length belongs in an Interval: length.shifted(k)",
+        "AxisBound end %Ms - 1 is a length shifted by -1 -- a bound is a length; an end relative "
+        "to a length belongs in an Interval",
     ):
-        AxisBound.of(0, ms._shifted(-1))
+        AxisBound.of(0, ms.shifted(-1))
+
+
+def test_an_end_that_is_not_an_i32_value_is_refused_at_the_door():
+    """A runtime end is an i32 integer: an i64 or f32 Value given as an end, a tensor length or
+    an AxisBound end is refused where it enters, naming the value and its type, before any range
+    arithmetic or IR depends on it."""
+    b = IRBuilder("non_i32_ends")
+    wide = b.param("wide", I64, ge=1, le=1000)
+    real = b.param("real", F32)
+    graph = identity_graph((4,))
+    for end in (wide, real):
+        message = (
+            f"a range end is an int, an i32 Value or None, got Value {end.name} of type "
+            f"{end.type.name}"
+        )
+        with _raises(TypeError, message):
+            value_ranges(graph, ((0, end),))
+        with _raises(TypeError, message):
+            graph_injective(graph, ((0, end),))
+        with _raises(TypeError, message):
+            Interval(0, end)
+        with _raises(
+            TypeError,
+            f"an AxisBound end is an int or an i32 Value, got Value {end.name} of type "
+            f"{end.type.name}",
+        ):
+            AxisBound.of(0, end)
 
 
 def test_empty_bound_raises():
@@ -956,7 +1017,7 @@ def test_two_failing_ends_that_cannot_be_ordered_raise():
     length = _runtime("L", 99)
     with _raises(
         ValueError,
-        "coordinate 'axis0' must be checked against both 8 and L on its upper side, and which "
+        "coordinate 'axis0' must be checked against both 8 and %L on its upper side, and which "
         "of the two is tighter is not known at build time -- one check holds one end per side; "
         "bound the coordinate by one of them (an input over a runtime-length axis is declared "
         "inputs(name=None))",

@@ -275,6 +275,18 @@ The `program` is a flat list of instructions. Kernel arguments first:
 }
 ```
 
+A param's `attrs` are the pointer argument attributes the lowerer emits:
+`noalias`, `readonly`, `writeonly`, `nocapture`, `nonnull` (bools), `align`,
+`dereferenceable` (ints) and `addr_space` (a string); and an integer
+parameter's facts: `ge`, `gt`, `le`, `lt`, `eq` (an int, or a relation over
+earlier parameters as its canonical intexpr JSON string, e.g.
+`"{\"mul\":[{\"param\":\"M\"},{\"param\":\"ldc\"}]}"`) and
+`multiple_of` (an int). Both C++ importers (the recipe VM and the concrete-IR
+importer) refuse any other key, and a value of the wrong kind, rather than drop
+it: a dropped attribute would change the lowered kernel without a word. A
+declaration the builder refuses (two upper bounds, a relation naming an unknown
+parameter, ...) fails the import with the builder's text.
+
 then the ops, in emission order:
 
 ```json
@@ -827,13 +839,16 @@ The C++ side lives in `platform/cpp/portable_ir/` (C++20, part of
   evaluator (+ `rocke/recipe_guard.h`), so that guards and recipes share one
   intexpr evaluator rather than two.
 - `recipe_vm.cpp` also carries the launch planner (+ `rocke/recipe_launch.h`):
-  kernel name, kernarg layout and grid/block/LDS for a shape.
+  kernel name, kernarg layout and grid/block/LDS for a shape. It refuses a
+  recipe whose params state facts (`ge`, `le`, `multiple_of`, ...), which it
+  cannot check; such a kernel launches through `KernelLauncher.from_artifact`.
 - `core/rocke_abi.cpp` (+ `rocke/abi.h`) — the two compatibility contracts, and
   the policy for bumping each. Distinct from `rocke/rocke_build_id.h`, which is
   provenance: build-ids change every commit, so they cannot gate anything
   without forcing a lockstep upgrade of the whole stack.
 - `ir_import_json.cpp` (+ `rocke/ir_import.h`) — the portable-IR importer.
-- `cbor_dom.cpp`, `json_dom.cpp` — the two DOM decoders.
+- `cbor_dom.cpp` and `cpp/support/json_dom.cpp` -- the two DOM decoders. The
+  integer-expression evaluator the VM calls is `cpp/support/intexpr.cpp`.
 - `online.cpp` (+ `rocke/online.h`) — one-call wrappers (recipe/bundle/IR → `.ll`).
 
 Its ctests, the pytest harnesses, and the standalone `replay_cli` are in

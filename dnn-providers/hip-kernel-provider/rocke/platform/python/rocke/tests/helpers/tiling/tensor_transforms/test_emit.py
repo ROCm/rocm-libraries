@@ -79,7 +79,7 @@ def _c(b: IRBuilder, value: int) -> Value:
 
 def _guarded(b: IRBuilder, origin: Value, length: int) -> Value:
     """The marker the tile guard emits: ``0 <= origin < length``, checked by the guard."""
-    return b._assume_range(origin, lo=0, hi=length)
+    return b._assume_range(origin, ge=0, lt=length)
 
 
 def _ops(b: IRBuilder):
@@ -451,9 +451,9 @@ def _stated(b: IRBuilder, name: str, **facts) -> Value:
 @pytest.mark.parametrize(
     "parts, aligned",
     [
-        (({"lo": 0, "hi": 1 << 20, "multiple_of": 128},), True),
-        (({"lo": 0, "hi": 1 << 20, "multiple_of": 256, "residue": 128},) * 2, True),
-        (({"lo": 0, "hi": 1 << 20, "multiple_of": 64},), False),
+        (({"ge": 0, "lt": 1 << 20, "multiple_of": 128},), True),
+        (({"ge": 0, "lt": 1 << 20, "multiple_of": 256, "residue": 128},) * 2, True),
+        (({"ge": 0, "lt": 1 << 20, "multiple_of": 64},), False),
     ],
 )
 def test_a_uniform_side_aligned_to_the_inner_length_emits_no_scalar_remainder(
@@ -962,8 +962,9 @@ def test_an_unguarded_block_origin_into_an_unmerge_raises_the_dividend_message()
     with _raises(
         ValueError,
         "unmerge of 'm' needs its dividend in [0, 2^31) for magic division, but its range is "
-        "[0, +inf) -- bound the origin with exit_if_tile_outside(b, origin, length), or state a "
-        "trusted range with runtime_value(b, v, at_most=...)",
+        "[0, +inf) -- bound the origin with exit_if_tile_outside(b, origin, length), or state "
+        "its range where it is declared (b.param(name, I32, ge=0, le=...)) or check it on the "
+        "GPU (b.gpu_checked_value(v, ge=0, le=...))",
     ):
         emit_addresses(b, graph, tensor, [(m, 0)])
     b = _builder()
