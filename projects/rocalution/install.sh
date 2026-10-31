@@ -27,7 +27,7 @@ function display_help()
   echo "    [--compiler] compiler to build with"
   echo "    [--verbose] print additional cmake build information"
   echo "    [--address-sanitizer] Build with address sanitizer enabled. Uses amdclang++ as compiler"
-  echo "    [--codecoverage] build with code coverage profiling enabled"
+  echo "    [--codecoverage] build with code coverage profiling enabled. Uses amdclang++ as compiler"
 }
 
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
@@ -344,6 +344,7 @@ while true; do
         shift ;;
     --codecoverage)
         build_codecoverage=true
+        compiler=amdclang++
         shift ;;
     --mpi)
         mpi_dir=${2}
@@ -506,7 +507,7 @@ pushd .
           echo "Code coverage is disabled in Release mode, to enable code coverage select either Debug mode (-g | --debug) or RelWithDebInfo mode (-k | --relwithdebinfo); aborting";
           exit 1
       fi
-      cmake_common_options="${cmake_common_options} -DBUILD_CODE_COVERAGE=ON -DBUILD_SUPPORT_COMPLEX=OFF"
+      cmake_common_options="${cmake_common_options} -DBUILD_CODE_COVERAGE=ON"
   fi
 
   # Verbose cmake

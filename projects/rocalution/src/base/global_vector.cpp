@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,7 @@
 #include <sstream>
 
 #ifndef SUPPORT_MULTINODE
-// LCOV_EXCL_START
+// COVERAGE_EXCL_NO_MPI_START
 #endif
 
 namespace rocalution
@@ -327,15 +327,13 @@ namespace rocalution
             current_backend_name = _rocalution_backend_name[this->local_backend_.backend];
         }
 
-        LOG_INFO("GlobalVector"
-                 << " name=" << this->object_name_ << ";"
-                 << " size=" << this->GetSize() << ";"
-                 << " prec=" << 8 * sizeof(ValueType) << "bit;"
-                 << " subdomains=" << this->pm_->num_procs_ << ";"
-                 << " host backend={" << _rocalution_host_name[0] << "};"
-                 << " accelerator backend={"
-                 << _rocalution_backend_name[this->local_backend_.backend] << "};"
-                 << " current=" << current_backend_name);
+        LOG_INFO("GlobalVector" << " name=" << this->object_name_ << ";" << " size="
+                                << this->GetSize() << ";" << " prec=" << 8 * sizeof(ValueType)
+                                << "bit;" << " subdomains=" << this->pm_->num_procs_ << ";"
+                                << " host backend={" << _rocalution_host_name[0] << "};"
+                                << " accelerator backend={"
+                                << _rocalution_backend_name[this->local_backend_.backend] << "};"
+                                << " current=" << current_backend_name);
     }
 
     template <typename ValueType>
@@ -722,5 +720,5 @@ namespace rocalution
 } // namespace rocalution
 
 #ifndef SUPPORT_MULTINODE
-// LCOV_EXCL_STOP
+// COVERAGE_EXCL_NO_MPI_STOP
 #endif

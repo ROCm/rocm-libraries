@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -78,4 +78,8 @@ endif()
 if(BUILD_CLIENTS_TESTS)
   enable_testing()
   add_subdirectory(tests)
+  # The unit tests do not build on Windows yet
+  if(NOT WIN32)
+    add_subdirectory(unittests)
+  endif()
 endif()
