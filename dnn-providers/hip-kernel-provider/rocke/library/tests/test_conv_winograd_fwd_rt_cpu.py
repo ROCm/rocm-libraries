@@ -105,6 +105,8 @@ _PROBLEMS = [
     ConvProblem(N=2, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=4),
     ConvProblem(N=1, Hi=8, Wi=8, C=16384, K=64, Y=3, X=3, pH=1, pW=1),
     ConvProblem(N=1, Hi=5, Wi=7, C=3, K=5, Y=3, X=3, pH=1, pW=1),
+    ConvProblem(N=1, Hi=8, Wi=8, C=2048, K=64, Y=3, X=3, pH=1, pW=1),
+    ConvProblem(N=1, Hi=8, Wi=8, C=4096, K=64, Y=3, X=3, pH=1, pW=1),
 ]
 
 
@@ -128,6 +130,29 @@ def test_fused_prescale_falls_back_to_split_for_wide_c():
     assert "K2a" in specs and not specs["K2"].fused
     narrow = R.default_stage_specs(_PROBLEMS[0], (4, 4), "bf16")
     assert "K2a" not in narrow and narrow["K2"].fused
+
+
+@pytest.mark.parametrize(
+    "C,tile,block",
+    [
+        (256, (4, 4), 256),
+        (1024, (4, 4), 256),
+        (2048, (4, 4), 512),
+        (2048, (6, 4), 512),
+        (4096, (4, 4), 1024),
+        (4096, (4, 2), 1024),
+        (4096, (6, 4), None),  # 48 bins: block 1024 spills, the split is faster
+        (8192, (4, 4), None),
+    ],
+)
+def test_fused_prescale_block_is_the_smallest_that_holds_c(C, tile, block):
+    p = ConvProblem(N=1, Hi=8, Wi=8, C=C, K=64, Y=3, X=3, pH=1, pW=1)
+    specs = R.default_stage_specs(p, tile, "bf16")
+    if block is None:
+        assert "K2a" in specs and not specs["K2"].fused
+    else:
+        assert "K2a" not in specs and specs["K2"].fused
+        assert specs["K2"].block_size == block
 
 
 @pytest.mark.parametrize("problem", _PROBLEMS[:4])

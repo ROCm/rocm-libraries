@@ -1356,8 +1356,10 @@ bf16 I/O). Four implementations:
   the K2 register run or LDS region, and the prescale. Divisions by runtime
   extents are a multiply-high by a host-computed magic number (`magic_div`,
   exact for 31-bit indices). The fused prescale reduces the tile maxima over
-  a runtime number of channel lanes (up to the workgroup size); wider C runs
-  the split form (K2a). `stage_launch(spec, RtGeometry(...))` gives a stage's
+  a runtime number of channel lanes (up to the workgroup size); the default
+  is the smallest block (256, 512 or 1024) that holds all lanes, since a
+  larger block caps the registers per lane and spills. Wider C (and tiles over
+  36 bins past 512 lanes) runs the split form (K2a). `stage_launch(spec, RtGeometry(...))` gives a stage's
   grid, block and scalar kernargs; `aot_stage_specs()` is the AOT grid and
   `default_stage_specs(problem, tile, dtype)` the binaries a pipeline uses by
   default (the JIT pipeline's tuned knobs, narrowed to the problem's channel

@@ -157,6 +157,11 @@ _CASES = [
     ),  # fmt: skip
     ("bf16", dict(N=2, C=128, K=128, Hi=16, Wi=16, Y=3, X=3, pad_h=1, pad_w=1, G=4)),
     ("fp16", dict(N=1, C=64, K=64, Hi=17, Wi=23, Y=3, X=3, pad_h=0, pad_w=2)),
+    # bf16 wide C: the fused prescale's max over more than one wave of channel
+    # lanes, at blocks 256 / 512 / 1024, and the split prescale past them.
+    ("bf16", dict(N=1, C=256, K=64, Hi=12, Wi=12, Y=3, X=3, pad_h=1, pad_w=1)),
+    ("bf16", dict(N=1, C=2048, K=64, Hi=8, Wi=8, Y=3, X=3, pad_h=1, pad_w=1)),
+    ("bf16", dict(N=1, C=4096, K=32, Hi=8, Wi=8, Y=3, X=3, pad_h=1, pad_w=1)),
 ]
 
 

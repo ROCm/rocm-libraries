@@ -1418,6 +1418,14 @@ _LDS_REGION = (4, 8)
 _LDS_TPT = 4
 _LDS_LANES = 16
 _LDS_MIN_FILL = 0.75
+#: Workgroup sizes of the fused-prescale K2 binaries: the smallest that holds
+#: all of a problem's channel lanes is the default (as the JIT pipeline's
+#: ``block = max(block, lanes)``; a larger block caps the registers per lane
+#: and spills).
+_FUSED_BLOCKS = (256, 512, 1024)
+#: Bins above which a fused K2 at block 1024 (128 VGPRs per lane) spills so
+#: much that the split prescale is faster.
+_FUSED_1024_MAX_BINS = 36
 
 
 def pipeline_dtypes(tile, io_dtype: str) -> Tuple[str, bool]:
@@ -1437,7 +1445,7 @@ def aot_stage_specs() -> list:
     """Every stage spec of the AOT grid: per I/O dtype, K2a at each vector
     width; per tile and operand dtype (bf16 F(2,3) also with fp16 operands),
     K1, K2 and K4 at each vector width -- K2 on the register path, with the
-    fused prescale at blocks 256 and 1024 when the tile takes the prescale,
+    fused prescale at blocks 256, 512 and 1024 when the tile takes the prescale,
     and for tiles under 36 bins also with 2-tile runs and through the LDS
     region."""
     out = []
@@ -1456,7 +1464,7 @@ def aot_stage_specs() -> list:
                     out.append(RtOutputSpec(mh, mw, io, op, v, 256, prescale=ps))
                     out.append(RtInputSpec(mh, mw, io, op, v, 256, prescale=ps))
                     if ps:
-                        for blk in (256, 1024):
+                        for blk in _FUSED_BLOCKS:
                             out.append(
                                 RtInputSpec(
                                     mh, mw, io, op, v, blk, prescale=True, fused=True
@@ -1488,9 +1496,9 @@ def default_stage_specs(problem: ConvProblem, tile, io_dtype: str) -> dict:
     """The AOT binaries a pipeline uses by default, ``{"K1", ("K2a",) "K2",
     "K4"}`` -> spec: the JIT pipeline's tuned knobs (8-wide channel vectors
     for F(2,3)-sized tiles, 4-wide for larger ones, narrowed to divide the
-    channel extent; the fused prescale while a workgroup can hold all
-    channels, else the split one; the LDS region for small tiles whose tile
-    grid fills it). A pure function of the problem; every spec is in
+    channel extent; the fused prescale on the smallest block that holds all
+    channels -- up to 1024 lanes, 512 for tiles over 36 bins -- else the split
+    one; the LDS region for small tiles whose tile grid fills it). A pure function of the problem; every spec is in
     :func:`aot_stage_specs`."""
     mh, mw = _split_tile(tile)
     operand, ps = pipeline_dtypes((mh, mw), io_dtype)
@@ -1507,8 +1515,9 @@ def default_stage_specs(problem: ConvProblem, tile, io_dtype: str) -> dict:
     }
     if ps:
         lanes = _pow2_ceil(p.C // vc)
-        if lanes <= 1024:
-            blk = 256 if lanes <= 256 else 1024
+        cap = 1024 if (mh + 2) * (mw + 2) <= _FUSED_1024_MAX_BINS else 512
+        if lanes <= cap:
+            blk = next(b for b in _FUSED_BLOCKS if b >= lanes)
             out["K2"] = RtInputSpec(
                 mh, mw, io_dtype, operand, vc, blk, prescale=True, fused=True
             )
