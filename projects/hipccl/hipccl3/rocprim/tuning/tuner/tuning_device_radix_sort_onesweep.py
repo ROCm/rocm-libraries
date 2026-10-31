@@ -27,8 +27,10 @@ import subprocess
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
-from utils import TYPE_CONFIGS, BASE_DIR
+from utils import TYPE_CONFIGS, BASE_DIR, create_logger
 from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALUE_TYPES
+
+log = create_logger()
 
 """
 Inclusive range for params tuning, edit these to adjust tuning grid range.
@@ -93,7 +95,7 @@ class CheckParam:
 
         valid = compiled.returncode == 0
         if not valid and "exceeds LDS" not in compiled.stderr:
-            print(f"[probe] unexpected failure for {param}:\n{compiled.stderr[:500]}")
+            log.error(f"[probe] unexpected failure for {param}:\n{compiled.stderr[:500]}")
 
         self.cache[param] = ipt
         return valid

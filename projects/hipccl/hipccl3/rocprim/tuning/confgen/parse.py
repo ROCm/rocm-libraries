@@ -5,10 +5,15 @@ import logging
 import argparse
 import enum
 import re
+import os
+import sys
 
 import typing_extensions as ty
 
-log = logging.getLogger("confgen.parse")
+sys.path.append(f"{os.path.dirname(__file__)}/../")
+from utils import create_logger
+
+log = create_logger("confgen.parse")
 
 
 class parse_state(enum.Enum):
@@ -105,9 +110,8 @@ def main():
     with open(args.input) as file:
         lines = file.readlines()
         configs = parse_lines(lines)
-    print(configs)
+    log.info(configs)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
     main()
