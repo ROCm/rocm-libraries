@@ -523,6 +523,9 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
 
         if mergedData.get("DefaultSolution"):
             removeDefaultInitParams(mergedData)
+        mergedData["Solutions"] = [
+            LibraryIO.reorderSolutionDictForDictMerge(solution) for solution in mergedData["Solutions"]
+        ]
         normalizeDictLibraryLayout(mergedData)
         if isinstance(mergedData.get("ProblemType"), dict):
             mergedData["ProblemType"] = dict(sorted(mergedData["ProblemType"].items()))

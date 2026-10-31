@@ -56,6 +56,20 @@ SUPPORTED_INITIALIZATIONS = ("trig_float", "rand_int", "hpl")
 logger = logging.getLogger("GEKO")
 
 
+def _reorder_dict_solution(state: dict) -> dict:
+    """Match LibraryIO.reorderSolutionDictForDictMerge without importing TensileLite.
+
+    Return a new mapping with naming keys first and other keys alphabetical,
+    including InternalSupportParams. Preserve every field and value.
+    """
+    out = dict(sorted(state.items()))
+    if isinstance(out.get("InternalSupportParams"), dict):
+        out["InternalSupportParams"] = dict(sorted(out["InternalSupportParams"].items()))
+    lead = ("SolutionIndex", "SolutionUID", "KernelNameMin", "SolutionNameMin")
+    names = {key: out.pop(key) for key in lead if key in out}
+    return {**names, **out}
+
+
 try:
     DEFAULT_YAML_DUMPER = yaml.CSafeDumper
 except (ModuleNotFoundError, AttributeError):
@@ -586,7 +600,7 @@ class Library:
             self.sizes = new_sizes
 
     def dump(self, output_dir, name: str | None = None) -> None:
-        """Write the library data to a YAML file.
+        """Write library data, ordering dict-format keys without changing this library.
 
         Args:
             output_dir (str | Path): Directory to store the YAML file.
@@ -595,9 +609,15 @@ class Library:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         name = name or self.name
-        
+        data = self.data
+        if self.format == "dict":
+            data = {
+                **self.data,
+                "Solutions": [_reorder_dict_solution(solution) for solution in self.solutions],
+            }
+
         with open(output_dir / name, "w") as f:
-            yaml.dump(self.data, f, default_flow_style=None, Dumper=DEFAULT_YAML_DUMPER, sort_keys=False)
+            yaml.dump(data, f, default_flow_style=None, Dumper=DEFAULT_YAML_DUMPER, sort_keys=False)
 
 
 class LibraryCollection:
