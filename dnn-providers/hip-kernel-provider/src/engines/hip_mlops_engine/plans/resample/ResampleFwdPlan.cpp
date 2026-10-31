@@ -270,7 +270,7 @@ void ResampleFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     addSpatialOptions(options, _params, spatialDims);
 
     _compiledProgram = kernelCompiler.compile("ResampleFwd.cpp", options);
-    _runnableKernel = _compiledProgram->getKernel("ResampleFwd");
+    _runnableKernel = _compiledProgram->getKernel("resampleFwd");
     _runnableKernel->setBlockSize(static_cast<unsigned int>(BLOCK_SIZE), 1, 1);
     _runnableKernel->setGridSize(static_cast<unsigned int>(gridSize), 1, 1);
 }

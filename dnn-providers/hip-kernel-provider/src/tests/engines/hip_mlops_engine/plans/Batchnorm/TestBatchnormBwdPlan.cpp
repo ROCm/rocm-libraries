@@ -1,6 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <initializer_list>
+#include <string>
+#include <vector>
+
 #include <gtest/gtest.h>
 
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormBwdPlan.hpp"
@@ -143,7 +148,7 @@ TEST(TestBatchnormBwdPlan, CompileDefaultSetsCorrectDefines)
             EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
             EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
             auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel(::testing::_))
+            EXPECT_CALL(*program, getKernel("batchNormBwdSpatial"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
             return program;
         });
@@ -204,6 +209,67 @@ TEST(TestBatchnormBwdPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_OUTPUT_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MEAN_VAR_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SCALE_TYPE=float"));
+}
+
+TEST(TestBatchnormBwdPlan, CompileVariantTwoRequestsExpectedKernelNames)
+{
+    const std::vector<std::string> savedStatsKernelNames{"batchNormBwdSpatialDScaleDBias",
+                                                         "batchNormBwdSpatialFinalDScaleDBias",
+                                                         "batchNormBwdSpatialDX",
+                                                         "batchNormBwdSpatialDX",
+                                                         "batchNormBwdSpatialDX"};
+    const std::vector<std::string> unsavedStatsKernelNames{"batchNormBwdSpatialMeanVariance",
+                                                           "batchNormBwdSpatialFinalMeanVariance",
+                                                           "batchNormBwdSpatialDScaleDBias",
+                                                           "batchNormBwdSpatialFinalDScaleDBias",
+                                                           "batchNormBwdSpatialDX"};
+
+    for(const bool usesSavedStats : {true, false})
+    {
+        const MockKernelCompiler mockCompiler;
+        std::vector<std::string> requestedKernelNames;
+        std::vector<std::string> capturedOptions;
+
+        EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+            .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+                capturedOptions = options;
+                auto program = std::make_unique<MockCompiledProgram>();
+                EXPECT_CALL(*program, getKernel(::testing::_))
+                    .Times(5)
+                    .WillRepeatedly([&](const std::string& kernelName) {
+                        requestedKernelNames.push_back(kernelName);
+                        auto kernel = std::make_unique<MockRunnableKernel>();
+                        EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_))
+                            .Times(1);
+                        EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_))
+                            .Times(1);
+                        return kernel;
+                    });
+                return program;
+            });
+
+        auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
+            {3145728, 1048576, 1024, 1}, {32, 3, 1024, 1024}, usesSavedStats);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto& node = graph.getNode(0);
+        auto* attrs = node.attributes_as_BatchnormBackwardAttributes();
+        ASSERT_NE(attrs, nullptr);
+
+        BatchnormBwdParams params(*attrs, graph.getTensorMap());
+        BatchnormBwdPlan plan(std::move(params));
+        plan.compile(mockCompiler, createTestDeviceProps());
+
+        const auto hasOption = [&](const std::string& opt) {
+            return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+                   != capturedOptions.end();
+        };
+        EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VARIANT=2"));
+        EXPECT_TRUE(hasOption(usesSavedStats ? "-DHIP_PLUGIN_BN_USESAVED=1"
+                                             : "-DHIP_PLUGIN_BN_USESAVED=0"));
+        EXPECT_EQ(requestedKernelNames,
+                  usesSavedStats ? savedStatsKernelNames : unsavedStatsKernelNames);
+    }
 }
 
 TEST(TestBatchnormBwdPlan, CompileWithUnsupportedDimensionThrows)

@@ -48,6 +48,7 @@
 | HIP | Matching TheRock | GPU programming interface (included with ROCm/TheRock) |
 | clang-format | 18.x | Code formatting tool |
 | clang-tidy | 20.x | Static analysis tool |
+| clang-tidy (ROCm) | 23.x | Static analysis tool for the embedded HIP kernels |
 | LLVM Tools | 20.x | LLVM tools for code_coverage, and ASAN enabled builds |
 
 #### Optional Dependencies
@@ -490,16 +491,18 @@ cmake --preset release -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/an
 
 Different versions of Clang tools are required. For example, clang-format version 18 and clang-tidy version 20. The hipDNN project tool discovery provides two mechanism to assist with finding the needed version of each tool.
 
-#### Version Suffix
+Two clang-tidy binaries are used, and they are discovered independently:
 
-Before searching for the tool using it's standard name, a search will be made for a tool that has the version appended as a suffix. E.g. before looking for `clang-format` a search for a file named `clang-format-18` will be run first, and if that fails then a search will be made for `clang-format`. Similarly, `clang-tidy-20` will be searched-for first, and then `clang-tidy`. This approach can be used if it is possible to modify the Clang toolchain folder(s) on your system to give the tools the corresponding names.
+* **Host C++** uses the clang-tidy on the system path, pinned by `EXPECTED_CLANG_TIDY_VERSION`.
+* **Embedded HIP kernels** in hip-kernel-provider use the clang-tidy from the ROCm toolchain, pinned by `EXPECTED_ROCM_CLANG_TIDY_VERSION`. When available on Linux, the kernels are compiled and tidied through unlinked object libraries as part of a normal build; the objects are not linked into the provider. If the ROCm tool or hipRTC runtime header is unavailable, the kernel checks are skipped with a warning.
 
-#### LLVM_TOOLS_SEARCH_PREFIX
+Both binaries share `projects/hipdnn/.clang-tidy`.
 
-As an alternative to the above, `LLVM_TOOLS_SEARCH_PREFIX` can be set as a prefix for the folder path where the Clang tools are installed, such that `${LLVM_TOOLS_SEARCH_PREFIX}18/bin` is where the Clang version 18 tools are located, and `${LLVM_TOOLS_SEARCH_PREFIX}20/bin` is where the Clang version 20 tools are located. The CMake configuration step will automatically select the required version for each tool from these folders. For example with `-DLLVM_TOOLS_SEARCH_PREFIX=c:\tools\clang` the the following folders will be searched for Clang tools (depending on the version of each tool that is needed):
-* `c:\tools\clang18\bin`
-* `c:\tools\clang20\bin`
-* `c:\tools\clang\bin`
+#### Host Tool Search
+
+The host tool finders search for the version-suffixed name before the standard name. For example, `clang-tidy-20` is searched before `clang-tidy`. `LLVM_TOOLS_SEARCH_PREFIX` can also direct these host tools to versioned toolchain directories.
+
+The embedded-kernel finder is separate: it searches `${ROCM_PATH}/llvm/bin` and `${ROCM_PATH}/lib/llvm/bin` (when `ROCM_PATH` is set), plus `/opt/rocm/llvm/bin` and `/opt/rocm/lib/llvm/bin`. It does not use `LLVM_TOOLS_SEARCH_PREFIX` or the host tool version-suffix mechanism; install ROCm in one of these locations or set `ROCM_PATH` to its root.
 
 
 ## Build Targets
