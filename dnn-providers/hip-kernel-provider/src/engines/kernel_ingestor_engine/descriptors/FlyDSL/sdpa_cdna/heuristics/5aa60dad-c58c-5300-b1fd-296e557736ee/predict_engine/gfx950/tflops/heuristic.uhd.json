@@ -1,11 +1,9 @@
 {
   "version": "1.0",
-  "id": "3c583039-bc42-4858-b6bc-f53914322bd1",
+  "id": "a133d01d-8dfd-4237-927b-a797ad7c9189",
   "name": "hipkernel:flydsl_sdpa_cdna (gfx950, 200 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
-    "$device.memory_clock_rate",
-    "$device.peak_memory_bandwidth",
     "$flydsl_sdpa_cdna.causal",
     "$flydsl_sdpa_cdna.diag_offset",
     "$flydsl_sdpa_cdna.scale",
@@ -88,7 +86,7 @@
     "$graph.tensors[3].strides[1]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:1359c4af34c732f1",
+  "features_hash": "sha256:9df0296081a86510",
   "trained_against": {
     "ued": {
       "id": "5aa60dad-c58c-5300-b1fd-296e557736ee",
@@ -115,6 +113,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "0ce19ef6754bf9ec89eab75821f8014252c4be63a622f93ab1b0aead33dd61fb"
+    "hash": "e9612145805b48a8aa1052e100a9271ec0d7818b0386fc4749f7a3cfbe7f8096"
   }
 }

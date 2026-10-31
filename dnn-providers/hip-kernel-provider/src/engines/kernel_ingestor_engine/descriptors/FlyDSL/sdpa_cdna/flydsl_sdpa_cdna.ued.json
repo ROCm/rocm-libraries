@@ -14,7 +14,7 @@
   "predict_engine": {
     "default": "45cce86c-2f2d-5c0f-a1df-77bff9d5d92a",
     "gfx942": "66bffb3c-880f-4d56-baab-d98ee1449ab4",
-    "gfx950": "3c583039-bc42-4858-b6bc-f53914322bd1"
+    "gfx950": "a133d01d-8dfd-4237-927b-a797ad7c9189"
   },
   "metadata": "6638c9a9-4a0d-5704-95b9-db8774e663e4",
   "knobs": [
