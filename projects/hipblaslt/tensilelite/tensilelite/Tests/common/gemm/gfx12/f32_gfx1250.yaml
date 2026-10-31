@@ -81,6 +81,7 @@ BenchmarkProblems:
         #- AssertFree0ElementMultiple: [ 16 ]
         #- AssertFree1ElementMultiple: [ 16 ]
         #- AssertSummationElementMultiple: [ 32 ]
+        - AssertFree0ElementMultiple: [1, -1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -89,6 +90,7 @@ BenchmarkProblems:
           - Exact: [127, 127, 1, 127]
           - Exact: [128, 128, 1, 128]
           - Exact: [129, 129, 1, 129]
+          - Exact: [130, 129, 1, 129]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]
