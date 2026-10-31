@@ -45,6 +45,7 @@
 #include "tensile_host.hpp"
 #include "utility.hpp"
 #endif
+#include "hipBuffer.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
 #include <limits>
@@ -2303,6 +2304,75 @@ void testing_aux_mat_copy(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul_dest));
 }
 
+inline void testing_aux_matmul_swish(const Arguments& arg)
+{
+    hipblaslt_local_handle        handle{arg};
+    hipblaslt_local_matrix_layout mat(128, 128, 128, HIP_R_32F);
+    hipblaslt_local_matmul_descr  desc(HIPBLAS_OP_N, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
+    HipDeviceBuffer               buffer(HIP_R_32F, 128 * 128);
+    CHECK_HIP_ERROR(buffer.memcheck());
+    void*       data  = buffer.buf();
+    const float alpha = 1.0f, beta = 0.0f;
+
+    for(auto mode : {HIPBLASLT_EPILOGUE_SWISH_AUX_EXT, HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT})
+    {
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+            desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &mode, sizeof(mode)));
+        hipblasLtEpilogue_t retrieved = HIPBLASLT_EPILOGUE_DEFAULT;
+        size_t              written   = 0;
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescGetAttribute(
+            desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &retrieved, sizeof(retrieved), &written));
+        EXPECT_EQ(retrieved, mode);
+        EXPECT_EQ(written, sizeof(mode));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+            desc, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &data, sizeof(data)));
+
+        struct AuxLayout
+        {
+            void*   pointer;
+            int64_t ld;
+            int64_t stride;
+        };
+        const AuxLayout invalid[] = {
+            {nullptr, 128, 128 * 128}, // Missing AUX pointer.
+            {data, 127, 128 * 128}, // Leading dimension below M.
+            {data, 128, 128 * 128 - 1}, // Batch stride below M * N.
+        };
+        for(auto layout : invalid)
+        {
+            CHECK_HIPBLASLT_ERROR(
+                hipblasLtMatmulDescSetAttribute(desc,
+                                                HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER,
+                                                &layout.pointer,
+                                                sizeof(layout.pointer)));
+            CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &layout.ld, sizeof(layout.ld)));
+            CHECK_HIPBLASLT_ERROR(
+                hipblasLtMatmulDescSetAttribute(desc,
+                                                HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE,
+                                                &layout.stride,
+                                                sizeof(layout.stride)));
+            EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                                  desc,
+                                                  &alpha,
+                                                  data,
+                                                  mat,
+                                                  data,
+                                                  mat,
+                                                  &beta,
+                                                  data,
+                                                  mat,
+                                                  data,
+                                                  mat,
+                                                  nullptr,
+                                                  nullptr,
+                                                  0,
+                                                  nullptr),
+                                  HIPBLAS_STATUS_INVALID_VALUE);
+        }
+    }
+}
+
 #ifdef CODE_COVERAGE
 inline void testing_aux_auxiliary_func(const Arguments& arg)
 {
@@ -2450,6 +2520,10 @@ inline void testing_aux_auxiliary_func(const Arguments& arg)
                 == HIPBLASLT_EPILOGUE_SWISH_EXT);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT")
                 == HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_AUX_EXT")
+                == HIPBLASLT_EPILOGUE_SWISH_AUX_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT")
+                == HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_EXT")
                 == HIPBLASLT_EPILOGUE_CLAMP_EXT);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT")
@@ -3198,6 +3272,11 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
                 == "EPILOGUE_SWISH_EXT");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT)}
                 == "EPILOGUE_SWISH_BIAS_EXT");
+    ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SWISH_AUX_EXT)}
+                == "EPILOGUE_SWISH_AUX_EXT");
+    ASSERT_TRUE(
+        std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT)}
+        == "EPILOGUE_SWISH_AUX_BIAS_EXT");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(static_cast<rocblaslt_epilogue>(999))}
                 == "Invalid epilogue");
 
@@ -3558,6 +3637,12 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_DRELU_BGRAD) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT) == true);
+    ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_EXT));
+    ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT));
+    ASSERT_TRUE(is_e_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_EXT));
+    ASSERT_TRUE(is_e_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT));
+    ASSERT_FALSE(is_bias_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_EXT));
+    ASSERT_TRUE(is_bias_enabled(ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT));
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT) == true);
     // Test all epilogue values that should return false (activation disabled)
