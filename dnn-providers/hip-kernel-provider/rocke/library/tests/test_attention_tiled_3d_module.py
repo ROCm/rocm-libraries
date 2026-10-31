@@ -204,6 +204,25 @@ def test_module_predicate_rejects_other_arch():
     assert reason
 
 
+@pytest.mark.parametrize("block_size, tile", [(32, 24), (32, 64), (64, 8), (16, 0)])
+def test_module_predicate_refuses_a_tile_the_builder_cannot_walk(block_size, tile):
+    # 24 and 64 do not divide 32 (the builder asserts BS % T == 0); 8 divides 64 but
+    # is not a whole 16-wide MFMA step (T // MFMA_N would be 0); 0 is no tile.
+    seg = _segment(block_size=block_size, tile_size_override=tile)
+    ok, reason = mod.supports_unified_attention_3d_module(seg, arch="gfx942")
+    assert not ok
+    assert "KV tile" in reason
+
+
+@pytest.mark.parametrize("block_size, tile", [(16, None), (32, 16), (64, 32), (64, 16)])
+def test_module_predicate_accepts_only_tiles_the_builder_builds(block_size, tile):
+    seg = _segment(block_size=block_size, tile_size_override=tile)
+    ok, reason = mod.supports_unified_attention_3d_module(seg, arch="gfx942")
+    assert ok, reason
+    module = mod.build_unified_attention_3d_module(seg, arch="gfx942")
+    assert module.primary.name == seg.kernel_name()
+
+
 def test_i64_kv_addr_spec_cannot_be_built():
     # The gfx942 segment spec refuses >2 GiB addressing at construction, so the
     # packer can never hand such a spec to the predicate or the builder.
