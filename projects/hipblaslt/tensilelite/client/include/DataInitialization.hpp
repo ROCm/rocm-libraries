@@ -663,17 +663,19 @@ namespace TensileLite
                 case InitMode::TrigCos:
                 case InitMode::TrigAbsSin:
                 case InitMode::TrigAbsCos:
-                case InitMode::TrigIndSin:
                     initArrayTrig<T, false, false>(array, elements);
                     break;
+                case InitMode::TrigIndSin:
+                    initArrayTrig<T, false, false, true>(array, elements);
+                    break;
                 case InitMode::TrigIndCos:
-                    initArrayTrig<T, true, false>(array, elements);
+                    initArrayTrig<T, true, false, true>(array, elements);
                     break;
                 case InitMode::TrigIndAbsSin:
-                    initArrayTrig<T, false, true>(array, elements);
+                    initArrayTrig<T, false, true, true>(array, elements);
                     break;
                 case InitMode::TrigIndAbsCos:
-                    initArrayTrig<T, true, true>(array, elements);
+                    initArrayTrig<T, true, true, true>(array, elements);
                     break;
                 case InitMode::Count:
                     throw std::runtime_error("Invalid InitMode.");
@@ -750,16 +752,16 @@ namespace TensileLite
                     initArrayTrig<T, true, true>(array, tensor);
                     break;
                 case InitMode::TrigIndSin:
-                    initArrayTrig<T, false, false>(array, tensor);
+                    initArrayTrig<T, false, false, true>(array, tensor);
                     break;
                 case InitMode::TrigIndCos:
-                    initArrayTrig<T, true, false>(array, tensor);
+                    initArrayTrig<T, true, false, true>(array, tensor);
                     break;
                 case InitMode::TrigIndAbsSin:
-                    initArrayTrig<T, false, true>(array, tensor);
+                    initArrayTrig<T, false, true, true>(array, tensor);
                     break;
                 case InitMode::TrigIndAbsCos:
-                    initArrayTrig<T, true, true>(array, tensor);
+                    initArrayTrig<T, true, true, true>(array, tensor);
                     break;
                 case InitMode::RandomNegPosLimited:
                     initArray<T, InitMode::RandomNegPosLimited>(array, tensor);
@@ -867,9 +869,22 @@ namespace TensileLite
                 }
             }
 
+            // perElement (the TrigInd modes): each fp4 value of a byte takes its own index; otherwise both take the
+            // index of the first.
+            template <typename T, bool perElement>
+            static T getTrigPack(size_t idx, bool useCos, bool useAbs)
+            {
+#ifndef _WIN32
+                if constexpr(perElement && std::is_same<T, Float4x2>::value)
+                    return Float4x2(getTrigValue<float>(idx, useCos, useAbs),
+                                    getTrigValue<float>(idx + 1, useCos, useAbs));
+#endif
+                return getTrigValue<T>(idx, useCos, useAbs);
+            }
+
             // A zero-stride (broadcast) dimension is filled from its coordinate 0 only, so shared
             // storage is written once rather than raced by elements with different values.
-            template <typename T, bool useCos, bool useAbs>
+            template <typename T, bool useCos, bool useAbs, bool perElement = false>
             static void initArrayTrig(T* array, TensorDescriptor const& tensor)
             {
                 const auto& sizes   = tensor.sizes();
@@ -886,17 +901,17 @@ namespace TensileLite
                     if(broadcast)
                         continue;
                     size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
-                    array[tensorIndex] = getTrigValue<T>(idx, useCos, useAbs);
+                    array[tensorIndex] = getTrigPack<T, perElement>(idx, useCos, useAbs);
                 }
             }
 
-            template <typename T, bool useCos, bool useAbs>
+            template <typename T, bool useCos, bool useAbs, bool perElement = false>
             static void initArrayTrig(T* array, size_t elements)
             {
 #pragma omp parallel for shared(array) firstprivate(elements)
                 for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
                 {
-                    array[i / TypeInfo<T>::Packing] = getTrigValue<T>(i, useCos, useAbs);
+                    array[i / TypeInfo<T>::Packing] = getTrigPack<T, perElement>(i, useCos, useAbs);
                 }
             }
 

@@ -27,6 +27,7 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 
+#include <Tensile/ContractionSolution.hpp>
 #include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 
@@ -585,37 +586,46 @@ namespace TensileLite
                                     rv.back().setActivationType(m_activationType);
                                 }
                                 rv.back().setActivationNoGuard(m_activationNoGuard);
+                            // f16 accumulation keeps its scales in f32, the type its epilogue computes in.
+                            bool const f32Scales = ContractionSolution::isF16Accumulation(rv.back().computeType(),
+                                                                                          rv.back().highPrecisionAccumulate(),
+                                                                                          rv.back().computeInputTypeA(),
+                                                                                          rv.back().computeInputTypeB());
+                            auto const scaleTypeAlpha
+                                = f32Scales ? rocisa::DataType::Float : m_constantTypes[ContractionProblemGemm::CONST::ALPHA];
+                            auto const scaleTypeBeta
+                                = f32Scales ? rocisa::DataType::Float : m_constantTypes[ContractionProblemGemm::CONST::BETA];
                             rv.back().setUseScaleAB(m_useScaleAB);
                             if(m_useScaleAB == "Scalar")
                             {
                                 rv.back().setScaleA(
-                                    m_constantTypes[ContractionProblemGemm::CONST::ALPHA], 1);
+                                    scaleTypeAlpha, 1);
                                 rv.back().setScaleB(
-                                    m_constantTypes[ContractionProblemGemm::CONST::ALPHA], 1);
+                                    scaleTypeAlpha, 1);
                             }
                             else if(m_useScaleAB == "Vector")
                             {
                                 rv.back().setScaleA(
-                                    m_constantTypes[ContractionProblemGemm::CONST::ALPHA],
+                                    scaleTypeAlpha,
                                     rv.back().d().sizes()[0]);
                                 rv.back().setScaleB(
-                                    m_constantTypes[ContractionProblemGemm::CONST::ALPHA],
+                                    scaleTypeAlpha,
                                     rv.back().d().sizes()[1]);
                             }
                             rv.back().setUseScaleCD(m_useScaleCD);
                             if(m_useScaleCD)
                             {
                                 rv.back().setScaleC(
-                                    m_constantTypes[ContractionProblemGemm::CONST::BETA]);
+                                    scaleTypeBeta);
                                 rv.back().setScaleD(
-                                    m_constantTypes[ContractionProblemGemm::CONST::BETA]);
+                                    scaleTypeBeta);
                             }
                             rv.back().setUseScaleAlphaVec(m_deviceScalarAlpha
                                                              ? ScaleAlphaVecDeviceScalarBit
                                                              : vectorAlphaMode);
                             rv.back().setParams().setDeviceScalarAlpha(m_deviceScalarAlpha);
                             rv.back().setScaleAlphaVec(
-                                m_constantTypes[ContractionProblemGemm::CONST::ALPHA],
+                                scaleTypeAlpha,
                                 m_deviceScalarAlpha ? 1 : rv.back().d().sizes()[factorDim],
                                 factorDim);
                             rv.back().setGroupedGemm(m_groupedGemm);

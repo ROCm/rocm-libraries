@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy
+from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, hasStaticTreeFixup
 
 import collections
 import copy
@@ -79,10 +79,10 @@ from ..Common.ValidParameters import validParameters, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
-from .Problem import ProblemType
+from .Problem import ProblemType, isF16Accumulation
 from .lds_layout import format_lds_layout
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
-  b_rotate_reason as segBRotateReason, \
+  b_rotate_reason as segBRotateReason, mn_major_b_requested as segMnMajorBRequested, \
   paired_buffer_reason as segPairedReason, paired_buffer_offsets as segPairedOffsets, \
   paired_buffer_layout_reason as segPairedLayoutReason, \
   persistent_keeps_unpaired as segPersistentKeepsUnpaired
@@ -95,7 +95,26 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU, hasPackedAccumulators
+
+
+def ldsHoldsFp4(state, tc):
+  """f16 accumulation widens an fp4 operand to its fp8 MacDataType only after the LDS read, so LDS holds it as fp4.
+  The other fp4 LDS rules key on MacDataType F4, which f16 accumulation never sets."""
+  return isF16Accumulation(state["ProblemType"]) and state["ProblemType"]["DataType%s" % tc].isFloat4()
+
+
+def ldsDataType(state, tc):
+  """The type LDS holds for operand tc."""
+  return state["ProblemType"][("DataType%s" if ldsHoldsFp4(state, tc) else "MacDataType%s") % tc]
+
+
+def mnMajorBBlock(state, tc, mt, miwt, tdmComponentBytes, tdmNumComponents):
+  """An interleaved MN-major B is two dense [DepthU][MT1/2] blocks, each padded from its own start and loaded without
+  the TDM tile-major components: the LDS layout rules size one block."""
+  if tc == "B" and segMnMajorBRequested(state):
+    return mt // 2, miwt // 2, 0, 1
+  return mt, miwt, tdmComponentBytes, tdmNumComponents
 
 
 def _oneSidedMX(state):
@@ -1121,6 +1140,9 @@ class Solution(collections.abc.Mapping):
         outputVectorWidth, RegsPerOut = 1, 1
     elif isaInfoMap[isa].asmCaps['HasWMMA_V2'] or isaInfoMap[isa].asmCaps['HasWMMA_V3']:
         outputVectorWidth, RegsPerOut = 8, 1
+        # The f16 accumulators of a 16x16 WMMA pack two elements per VGPR.
+        if isaInfoMap[isa].asmCaps['HasWMMA_V3'] and isF16Accumulation(state["ProblemType"]):
+          RegsPerOut = 0.5
     else:
       print("WARNING: unexpect code flow")
 
@@ -2855,6 +2877,9 @@ class Solution(collections.abc.Mapping):
         # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
         reject(state, printRejectionReason,
                "DebugPersistentKernelLoopForever requires WorkAssignment=StaticGrid")
+      if state.get("SpaceFillingAlgo") and not hasStaticAssignment(state):
+        # The space-filling walk reads PersistentTileID, which only the static-grid tile mapping writes.
+        reject(state, printRejectionReason, "SpaceFillingAlgo requires WorkAssignment=StaticGrid")
       if state["WorkQueueStealing"]:
         # Codegen-time rejections only; there is no hardware context here
         # (MI300A/MI300X both compile as gfx942). The kernel bakes a power-of-two
@@ -2916,6 +2941,9 @@ class Solution(collections.abc.Mapping):
     # requiredWorkspaceSizeGsu report 0 bytes.
     state["_WorkspaceSizePerElemC"] = \
         0 if isPersistentDataParallel(state) or state["GlobalSplitUAlgorithm"] == 'AtomicDest' else computeBytes
+    if isF16Accumulation(state["ProblemType"]) and isStreamK(state) and hasStaticTreeFixup(state):
+      # the tree fixup slots hold f32 sums; the linear fixup's partials stay f16
+      state["_WorkspaceSizePerElemC"] = 4
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
       state["_WorkspaceSizePerElemBias"] = computeBytes
@@ -3431,8 +3459,8 @@ class Solution(collections.abc.Mapping):
         return asmCaps["HasLDSTrB64B16"] or asmCaps["HasLDSTrB128B16"]
       return False
 
-    numBytesA = state["ProblemType"]["MacDataTypeA"].numBytes()
-    numBytesB = state["ProblemType"]["MacDataTypeB"].numBytes()
+    numBytesA = ldsDataType(state, "A").numBytes()
+    numBytesB = ldsDataType(state, "B").numBytes()
     isa = tuple(state["ISA"])
     # state["enableLDSTrA"] = state["LDSTrInst"] and isaInfoMap[isa].asmCaps["HasLDSTr"] and numBytes == 2 \
     #         and not state["UnrollMajorLDSA"] and not state["DirectToVgprA"]
@@ -3652,7 +3680,66 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "Archs with HasEccHalf require AF0EM%2==0 except for HPA kernels")
           return
 
-    if state["ConvertAfterDS"]:
+    if isF16Accumulation(state["ProblemType"]):
+      ptype = state["ProblemType"]
+      if not state["EnableMatrixInstruction"]:
+        reject(state, printRejectionReason, "f16 accumulation requires the gfx1250 f16-accumulate fp8 WMMA")
+        return
+      if not isaInfoMap[state["ISA"]].archCaps.get("HasF16Accumulation", False):
+        reject(state, printRejectionReason,
+               "f16 accumulation needs the HasF16Accumulation capability, which is off for this architecture")
+        return
+      if state["MatrixInstM"] != 16 or state["MatrixInstN"] != 16 or state["MatrixInstK"] not in (64, 128):
+        reject(state, printRejectionReason, "f16 accumulation supports only the 16x16x64 and 16x16x128 WMMA")
+        return
+      if state["WavefrontSize"] != 32:
+        reject(state, printRejectionReason, "f16 accumulation supports only wave32")
+        return
+      persistent = isPersistent(state) or isStreamK(state)
+      if persistent:
+        if state["DebugStreamK"] or state.get("PrefetchAcrossPersistent", 0) or state.get("ReuseAcrossPersistent", 0) \
+            or state["WorkQueueStealing"] or list(state.get("ClusterDim", [1, 1])) != [1, 1]:
+          reject(state, printRejectionReason, "f16 accumulation supports persistent kernels without DebugStreamK, PrefetchAcrossPersistent, "
+                 "ReuseAcrossPersistent, work stealing or clusters")
+          return
+      if ptype["GroupedGemm"]:
+        reject(state, printRejectionReason, "f16 accumulation does not support grouped GEMM: no per-launch K-order reference")
+        return
+      # SupportUserGSU makes GSU a run-time argument, so GlobalSplitU 1 does not bound the split either.
+      if not persistent and state["GlobalSplitUAlgorithm"] not in ("MultipleBuffer", "MultipleBufferSingleKernel"):
+        reject(state, printRejectionReason, "f16 accumulation splits K only with GlobalSplitUAlgorithm MultipleBuffer or MultipleBufferSingleKernel: "
+               "SingleBuffer adds the slices with atomics in a run-dependent order")
+        return
+      if state["LocalSplitU"] > 1:
+        reject(state, printRejectionReason, "f16 accumulation does not support LocalSplitU")
+        return
+      if state["CompactLoopStore"] or state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "f16 accumulation does not support CompactLoopStore or UseSubtileImpl")
+        return
+      if ptype["UseE"] or ptype["Gradient"] or ptype["UseGateResidual"] or ptype["FusedGemmA2A"] or ptype["Sparse"] \
+          or ptype["MXBlockA"] or ptype["MXBlockB"] or ptype["StochasticRounding"]:
+        reject(state, printRejectionReason, "f16 accumulation does not support UseE, Gradient, UseGateResidual, FusedGemmA2A, "
+               "Sparse, MXBlock or StochasticRounding")
+        return
+      for tc in ("A", "B"):
+        if ldsHoldsFp4(state, tc):
+          if not state["ConvertAfterDS"]:
+            reject(state, printRejectionReason, "f16 accumulation converts F4 to F8 after the LDS read and needs ConvertAfterDS")
+            return
+          if ptype["TLU%s"%tc]:
+            if state["UnrollMajorLDS%s"%tc] or not state["enableLDSTr%s"%tc] \
+                or state["DirectToVgpr%s"%tc] or state["DirectToLds%s"%tc]:
+              reject(state, printRejectionReason, "f16 accumulation reads MN-contiguous F4 %s with ds_load_tr4_b64 (LDSTrInst) from MN-major LDS only"%tc)
+              return
+          elif not state["UnrollMajorLDS%s"%tc] or state["DirectToVgpr%s"%tc] or state["DirectToLds%s"%tc]:
+            reject(state, printRejectionReason, "f16 accumulation reads F4 %s K-contiguous from unroll-major LDS only"%tc)
+            return
+
+    if state["ConvertAfterDS"] and isF16Accumulation(state["ProblemType"]):
+      if not (state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()):
+        reject(state, printRejectionReason, "f16 accumulation uses ConvertAfterDS only for F4 inputs")
+        return
+    elif state["ConvertAfterDS"]:
       if (state["ProblemType"]["DataType"].isHalf() == False) and (state["ProblemType"]["DataType"].isBFloat16() == False):
           reject(state, printRejectionReason, "ConvertAfterDS only support DataType half")
           return
@@ -3971,6 +4058,22 @@ class Solution(collections.abc.Mapping):
         # Currently we only support fp4 tail-loop with AssertSummationElementMultiple = 8.
         # TODO: Enalbe tail-loop with arbitrary number
         state["AssertSummationElementMultiple"] = 8
+
+      if isF16Accumulation(state["ProblemType"]):
+        mnF4 = [tc for tc in ("A", "B") if ldsHoldsFp4(state, tc) and state["ProblemType"]["TLU%s"%tc]]
+        for tc in mnF4:
+          lrvw = state.get("LocalReadVectorWidth%s"%tc, -1)
+          lrvw = lrvw if lrvw != -1 else state["LocalReadVectorWidth"]
+          if lrvw != -1 and lrvw % 32:
+            reject(state, printRejectionReason, "f16 accumulation reads MN-contiguous F4 %s with a LocalReadVectorWidth that is a multiple of 32"%tc)
+            return
+        # The fp4 transpose read handles edges only for even free extents; the fp4 tail loop handles only K % 8 == 0.
+        if "A" in mnF4:
+          state["AssertFree0ElementMultiple"] = max(state["AssertFree0ElementMultiple"], 2)
+        if "B" in mnF4:
+          state["AssertFree1ElementMultiple"] = max(state["AssertFree1ElementMultiple"], 2)
+        if isFloat4:
+          state["AssertSummationElementMultiple"] = max(state["AssertSummationElementMultiple"], 8)
 
       if state["ProblemType"]["MacDataTypeA"].is6bitFloat() or state["ProblemType"]["MacDataTypeB"].is6bitFloat():
         state["AssertFree0ElementMultiple"] = 1
@@ -4644,6 +4747,7 @@ class Solution(collections.abc.Mapping):
           tlu       = state["ProblemType"][f"TLU{tc}"]
           (tdmComponentBytes, tdmNumComponents) = (
               tdmTileMajorComponentLayout(tc, mt))
+          mt, _, tdmComponentBytes, tdmNumComponents = mnMajorBBlock(state, tc, mt, 0, tdmComponentBytes, tdmNumComponents)
 
           ldsPad = 0
           if not state[f"UnrollMajorLDS{tc}"]:
@@ -4659,7 +4763,8 @@ class Solution(collections.abc.Mapping):
                 # MIWaveTile / MIWaveGroup are only populated for MFMA/WMMA
                 # kernels; reading them outside this guard breaks non-MI dtypes
                 # (e.g. FP64) where the keys are absent.
-                miwt = state["MIWaveTile"][idx]
+                # Read for WMMA kernels only; the same MN-major B block as mt above.
+                _, miwt, _, _ = mnMajorBBlock(state, tc, 0, state["MIWaveTile"][idx], 0, 0)
                 miwg = state["MIWaveGroup"][idx]
                 if macDtype.numBytes() == 0.5 and ldstr:
                   ldsPad = get_fp4_mt_config(
@@ -4912,6 +5017,7 @@ class Solution(collections.abc.Mapping):
                   miwg = state["MIWaveGroup"][miWaveTileIdx]
                   (tdmComponentBytes, tdmNumComponents) = (
                       tdmTileMajorComponentLayout(tc, mt))
+                  mt, miwt, tdmComponentBytes, tdmNumComponents = mnMajorBBlock(state, tc, mt, miwt, tdmComponentBytes, tdmNumComponents)
                   if tmpBpe == 0.5 and state.get("enableLDSTr%s"%tc, False):
                     LdsBlockSizePerPad = get_fp4_mt_config(mt, "perBlock", miwt, miwg, state["MatrixInstK"],
                                             state.get(f"enableTDM{tc}", False),
@@ -5049,6 +5155,9 @@ class Solution(collections.abc.Mapping):
           # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
           if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeA"].numBytes() == 0.75:
             maxLRVWA = 32
+          # The fp4 transpose read sizes reads by the fp4 in LDS, not the fp8 MacDataType.
+          if ldsHoldsFp4(state, "A") and state["enableLDSTrA"]:
+            maxLRVWA = 32
           if state["LocalReadVectorWidthA"] == -1:
             autoLRVWA = True
             if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeA"].numBytes() > maxNumDsLoadBytesA):
@@ -5088,6 +5197,8 @@ class Solution(collections.abc.Mapping):
           maxLRVWB = int(maxNumDsLoadBytesB // state["ProblemType"]["MacDataTypeB"].numBytes())
           # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
           if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeB"].numBytes() == 0.75:
+            maxLRVWB = 32
+          if ldsHoldsFp4(state, "B") and state["enableLDSTrB"]:
             maxLRVWB = 32
           if state["LocalReadVectorWidthB"] == -1:
             autoLRVWB = True
@@ -5794,6 +5905,17 @@ class Solution(collections.abc.Mapping):
             state["StoreVectorWidth"] = state["VectorWidthA"]
         else:
           state["StoreVectorWidth"] = state["VectorWidthA"]
+
+    # Packed f16 accumulators take power-of-two VectorWidthA and VectorWidthB only; the divisibility rules below then
+    # keep StoreVectorWidth a power of two (element pairs or whole VGPRs).
+    vwa = state["VectorWidthA"]
+    if hasPackedAccumulators(state) and vwa & (vwa - 1):
+      reject(state, printRejectionReason, "f16 accumulation needs a power-of-two VectorWidthA")
+      return
+    vwb = state["VectorWidthB"]
+    if hasPackedAccumulators(state) and vwb & (vwb - 1):
+      reject(state, printRejectionReason, "f16 accumulation needs a power-of-two VectorWidthB")
+      return
 
     if state["GlobalSplitUAlgorithm"] == 'AtomicDest':
       # buffer_atomic_pk_add_bf16 has no single-element form, so a thread must
@@ -6569,6 +6691,7 @@ class Solution(collections.abc.Mapping):
       k = state["MatrixInstK"]
       (tdmComponentBytes, tdmNumComponents) = (
           tdmTileMajorComponentLayout(tc, mt))
+      mt, miwt, tdmComponentBytes, tdmNumComponents = mnMajorBBlock(state, tc, mt, miwt, tdmComponentBytes, tdmNumComponents)
       if dtype.numBytes() == 0.5 and ldstr:
         return get_fp4_valid_blocks(
             mt, miwt, miwg, k, tdm,
@@ -7139,7 +7262,7 @@ class Solution(collections.abc.Mapping):
       state["MbskPrefetchMethod"] = 1 if numStoreElements >= 4 else 0
     if state["MbskPrefetchMethod"] == 1:
       state["NumMbskPrefetchElements"] = 16
-      storeRegs = state["StoreVectorWidth"] * state["ProblemType"]["ComputeDataType"].numRegisters()
+      storeRegs = math.ceil(state["StoreVectorWidth"] * state["ProblemType"]["ComputeDataType"].numRegisters())
       # exceed 16*4 = 64 VPGRs
       if storeRegs > 4:
         state["NumMbskPrefetchElements"] //= storeRegs // 4
@@ -7754,6 +7877,10 @@ class Solution(collections.abc.Mapping):
     state["EdgeType"] = "ShiftPtr" # Use ShiftPtr by default
     if state["enableTDMA"] and state["enableTDMB"]:
       state["EdgeType"] = "None"
+    if hasPackedAccumulators(state) and state["EdgeType"] == "ShiftPtr" \
+        and not (state["GuaranteeNoPartialA"] and state["GuaranteeNoPartialB"]):
+      reject(state, printRejectionReason, "f16 accumulators cannot be shifted for a partial global-read vector")
+      return
 
     # Precise bounds check uses the "num_records" field in the buffer to
     # precisely detect when we are inbounds or not.  Only a one-dimensional

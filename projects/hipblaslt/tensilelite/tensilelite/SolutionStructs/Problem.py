@@ -607,6 +607,18 @@ _validGEMMTypes = [
     ("B8", "B8", "H", "S"),
     ("F8", "B8", "H", "S"),
     ("B8", "F8", "H", "S"),
+    ("F8", "F8", "H", "H"),
+    ("F8", "F8", "F8", "H"),
+    ("F8", "F8", "B", "H"),
+    ("B8", "B8", "H", "H"),
+    ("B8", "B8", "F8", "H"),
+    ("B8", "B8", "B", "H"),
+    ("F8", "B8", "H", "H"),
+    ("F8", "B8", "F8", "H"),
+    ("F8", "B8", "B", "H"),
+    ("B8", "F8", "H", "H"),
+    ("B8", "F8", "F8", "H"),
+    ("B8", "F8", "B", "H"),
     ("B8", "B8", "B", "S"),
     ("H", "H", "F8", "S"),
     ("F8", "F8", "B", "S"),
@@ -777,6 +789,24 @@ _HPATypes = [
     ("B6", "F6", "F8", "S"),
     ("B6", "F6", "B8", "S"),
 ]
+
+def isF16Accumulation(problemType) -> bool:
+  # Every field is read through .get, so a partially built ProblemType (a solution-rule
+  # unit test, a characterization fixture) does not raise: a missing type answers False,
+  # and a missing HighPrecisionAccumulate takes its default, False.
+  # Library logic holds the types as enum values.
+  computeType = problemType.get("ComputeDataType")
+  macA = problemType.get("MacDataTypeA")
+  macB = problemType.get("MacDataTypeB")
+  if computeType is None or macA is None or macB is None:
+    return False
+  computeType, macA, macB = DataType(computeType), DataType(macA), DataType(macB)
+  return computeType.isHalf() and not problemType.get("HighPrecisionAccumulate") \
+    and macA.is8bitFloat() and macB.is8bitFloat()
+
+def epilogueComputeDataType(problemType):
+  # The epilogue widens f16 accumulators to f32 and computes in f32, like HighPrecisionAccumulate.
+  return DataType('s') if isF16Accumulation(problemType) else problemType["ComputeDataType"]
 
 def problemTypeToEnum(problemType):
   problemType["DataType"] = \
@@ -1014,7 +1044,7 @@ class ProblemType(Mapping):
 
     # Just like DataTypeE is DestDataType by default; DataTypeAmaxD if ComputeDataType by default.
     # So far we don't have to set it in config yamls
-    self["DataTypeAmaxD"] = self["ComputeDataType"]
+    self["DataTypeAmaxD"] = epilogueComputeDataType(self)
     if "DataTypeAmaxD" in config:
       self["DataTypeAmaxD"] = DataType(config["DataTypeAmaxD"])
 
@@ -1035,6 +1065,22 @@ class ProblemType(Mapping):
     if self["ComputeDataType"].isBFloat16() and self["DataType"].isBFloat16() and self["HighPrecisionAccumulate"]:
       printWarning("Inconsistent DataTypes: DataType == bf16, DestType == bf16, ComputeDataType == bf16, but HPA == True (BBB+HPA, no such a type); Converting BBB+HPA to BBS_BH by setting compute data type to f32.")
       self["ComputeDataType"] = DataType('s')
+
+    # Modifying ComputeDataType for F8F8H+HPA: f16 compute means f16 accumulation, which is HPA == False.
+    if self["ComputeDataType"].isHalf() and self["MacDataTypeA"].is8bitFloat() and self["MacDataTypeB"].is8bitFloat() \
+        and self["HighPrecisionAccumulate"]:
+      printWarning("Inconsistent DataTypes: 8-bit float inputs with ComputeDataType == f16 and HPA == True (f16 accumulation needs HPA == False); Converting to f32 compute.")
+      self["ComputeDataType"] = DataType('s')
+
+    # fp4 with f16 accumulation: the client's reference types follow the DataType F8 spelling, so DataType F4
+    # becomes DataType F8 with DataTypeA/DataTypeB F4 where they are not set, and the MAC types fp8.
+    if self["ComputeDataType"].isHalf() and not self["HighPrecisionAccumulate"] and self["DataType"].isFloat4():
+      self["DataType"] = DataType('F8')
+      for tc in "AB":
+        if "DataType%s" % tc not in config:
+          self["DataType%s" % tc] = DataType('F4')
+        if self["MacDataType%s" % tc].isFloat4():
+          self["MacDataType%s" % tc] = DataType('F8')
 
     # Modifying ComputeDataType for I8I8I_BH: if (I8I8I8+HPA), convert it to I8I8I_BH by setting ComputeDataType to i.
     if self["ComputeDataType"].isInt8() and DataType(config["DataType"]).isInt8() and self["HighPrecisionAccumulate"]:
@@ -1060,7 +1106,7 @@ class ProblemType(Mapping):
     # If compute data type is not equal to dest data type, TensileLite will run conversion kernel.
     # In this case we don't need to apply bias in beta only kernel.
     if "UseBias" in config:
-      if self["ComputeDataType"] != self["DestDataType"]:
+      if epilogueComputeDataType(self) != self["DestDataType"]:
         self["BetaOnlyUseBias"] = False
       else:
         self["BetaOnlyUseBias"] = True if self["UseBias"] > 0 else False
@@ -1093,30 +1139,31 @@ class ProblemType(Mapping):
     else:
       typeStr = 'none'
     self["ActivationType"] = ActivationType(typeStr)
+    computeDataType = epilogueComputeDataType(self)
     if "ActivationComputeDataType" in config:
       self["ActivationComputeDataType"] = DataType(config["ActivationComputeDataType"])
     else:
-      self["ActivationComputeDataType"] = self["ComputeDataType"]
+      self["ActivationComputeDataType"] = computeDataType
 
     if self["ActivationType"] != 'none':
-      if self["OutputAmaxD"] and self["ActivationComputeDataType"] != self["ComputeDataType"]:
+      if self["OutputAmaxD"] and self["ActivationComputeDataType"] != computeDataType:
         # Amax reduces activated accumulators before destination rounding.
         # Select this precision before activation register allocation and calls.
         printWarning("OutputAmaxD requires activation in ComputeDataType; "
                      "ActivationComputeDataType will be set to ComputeDataType.")
-        self["ActivationComputeDataType"] = self["ComputeDataType"]
+        self["ActivationComputeDataType"] = computeDataType
       # This is a dummy guard in case we currently don't have a converter to convert data from compute type to activation compute type
-      if self["ActivationComputeDataType"] not in [self["ComputeDataType"], self["DestDataType"]]:
+      if self["ActivationComputeDataType"] not in [computeDataType, self["DestDataType"]]:
         printWarning("TensileLite currently only supports ActivationComputeDataType (%s) = ComputeDataType (%s) or DestDataType (%s). \
                       ActivationComputeDataType will be set to ComputeDataType automatically."%(self["ActivationComputeDataType"].toChar(), \
-                                                                                                self["ComputeDataType"], \
+                                                                                                computeDataType, \
                                                                                                 self["DestDataType"]))
-        self["ActivationComputeDataType"] = self["ComputeDataType"]
-      if (self["ActivationComputeDataType"].numRegisters() != self["ComputeDataType"].numRegisters()) and \
+        self["ActivationComputeDataType"] = computeDataType
+      if (self["ActivationComputeDataType"].numRegisters() != computeDataType.numRegisters()) and \
         (self["DataType"].numRegisters() < self["DestDataType"].numRegisters()):
         printWarning("TensileLite only supports ActivationComputeDataType = ComputeDataType if DestDataType > DataType. \
                       ActivationComputeDataType will be set to ComputeDataType automatically.")
-        self["ActivationComputeDataType"] = self["ComputeDataType"]
+        self["ActivationComputeDataType"] = computeDataType
 
     if "UseE" in config:
       if config["UseE"]:
@@ -1192,6 +1239,12 @@ class ProblemType(Mapping):
     inTypeB = self["MacDataTypeB"]
     outType = self["DestDataType"]
     computeType = self["ComputeDataType"]
+
+    # The storage types DataTypeA/B are set independently of the MAC types, which _validGEMMTypes checks.
+    if computeType.isHalf() and not self["HighPrecisionAccumulate"] and inTypeA.is8bitFloat() and inTypeB.is8bitFloat() \
+        and not all(self["DataType%s" % tc] == self["MacDataType%s" % tc]
+                    or (self["DataType%s" % tc].isFloat4() and self["MacDataType%s" % tc].isFloat8()) for tc in "AB"):
+      raise Exception("f16 accumulation stores each input as its MAC type, or as F4 with an F8 MAC type.")
 
     gemmType = ( inTypeA.toChar(), inTypeB.toChar(), outType.toChar(), computeType.toChar() )
     if gemmType not in _validGEMMTypes:
@@ -1412,7 +1465,8 @@ class ProblemType(Mapping):
     # TODO: Distinguish all kernels by _TiToTc_ to be more consistent with rocblas
     gemmType = (self["MacDataTypeA"].toChar(), self["MacDataTypeB"].toChar(),
                 self["DestDataType"].toChar(), self["ComputeDataType"].toChar())
-    if gemmType in _HPATypes:
+    # f16 accumulation types are named like the HPA types.
+    if gemmType in _HPATypes or isF16Accumulation(self):
       name[-1] += "".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()])
 
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
@@ -1549,8 +1603,8 @@ class ProblemType(Mapping):
 
 def getBiasDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   bList = []
-  for d in ["DataType", "ComputeDataType", "DestDataType"]:
-    dtype = DataType(problem[d])
+  for dtype in [problem["DataType"], epilogueComputeDataType(problem), problem["DestDataType"]]:
+    dtype = DataType(dtype)
     # filter out sizeof(dtype) <= 1, because it is not supported by bias datatype
     if dtype.numBytes() > 1:
       bList.append(dtype)

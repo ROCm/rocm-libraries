@@ -21,13 +21,15 @@
 ################################################################################
 
 from rocisa.code import Label, Module
-from rocisa.container import vgpr, sgpr, accvgpr, Holder, MemTokenData
+from rocisa.container import vgpr, sgpr, accvgpr, Holder, MemTokenData, VOP3PModifiers
 from rocisa.instruction import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, SWaitTensorcnt,\
   VAccvgprReadB32, VAccvgprWriteB32, VFmaF32, VFmaF64, VLShiftLeftB64, VMovB32, \
-  VMovRelsD2B32, VMulF32, VMulF64, VMulLOU32, VMulPKF16
+  VLShiftRightB32, VMovRelsD2B32, VMulF32, VMulF64, VMulLOU32, VMulPKF16, VPackF16toB32, ECvtF16toF32
+from rocisa.enum import HighBitSel
 from rocisa.functions import BranchIfNotZero
 
 from .Common.DataType import DataType
+from .Common.Utilities import hasPackedAccumulators, hasF32Epilogue
 
 def tdmWait(states, kernel, tPA, tPB, tensorcnt: int, comment: str) -> Module:
   #TODO: refactor this
@@ -234,10 +236,100 @@ def accVgprImagNumOffset(kernel):
   return len(acc2arch) * kernel["MIRegPerOut"]
 
 ##############################################################################
+# Packed f16 accumulators: MI output element e lives in half e%2 of ValuC+e//2.
+# A partial store temp register holds two consecutive arch elements, or for a
+# width-1 store one element in its low half. The epilogue widens each element
+# to an f32 temp register.
+##############################################################################
+def packedAccVgprIdx(sumIdx, gwvw, startVgprValu):
+  # Packed f16 accumulators hold an element pair per VGPR: the VGPR of each pair of the gwvw elements from sumIdx.
+  return [(sumIdx + vi) // 2 - startVgprValu for vi in range(0, gwvw, 2)]
+
+def _packedAccPairs(kernel):
+  _, arch2acc = accToArchMapper(kernel)
+  return [(arch2acc[d], arch2acc[d + 1]) for d in range(0, len(arch2acc), 2)]
+
+def _gatherPackedPair(dst, s0, s1, comment):
+  if s1 == s0 + 1 and s0 % 2 == 0:
+    return VMovB32(dst=dst, src=vgpr("ValuC+%u"%(s0 // 2)), comment=comment)
+  return VPackF16toB32(dst=dst, src0=vgpr("ValuC+%u"%(s0 // 2)), src1=vgpr("ValuC+%u"%(s1 // 2)), \
+                       vop3=VOP3PModifiers(op_sel=[s0 % 2, s1 % 2, 0]), comment=comment)
+
+def _packedAccToArch(kernel):
+  return [_gatherPackedPair(vgpr(Holder(name="ValuC")), s0, s1, "MI out elements %u,%u -> vreg" % (s0, s1)) \
+          for s0, s1 in _packedAccPairs(kernel)]
+
+def packedAccSingles(kernel):
+  _, arch2acc = accToArchMapper(kernel)
+  items = []
+  for d in range(len(arch2acc)):
+    s = arch2acc[d]
+    src = vgpr("ValuC+%u"%(s // 2))
+    if s % 2:
+      items.append(VLShiftRightB32(dst=vgpr(Holder(name="ValuC")), shiftHex=16, src=src, comment="MI out element %u -> vreg" % s))
+    else:
+      items.append(VMovB32(dst=vgpr(Holder(name="ValuC")), src=src, comment="MI out element %u -> vreg" % s))
+  imod = Module("AccVgprRead")
+  imod.setItems(items)
+  return imod
+
+def packedAccToF32(kernel, mulAlpha):
+  _, arch2acc = accToArchMapper(kernel)
+  items = []
+  for d in range(len(arch2acc)):
+    s = arch2acc[d]
+    cvt = ECvtF16toF32(dst=vgpr(Holder(name="ValuC")), src=vgpr("ValuC+%u"%(s // 2)), \
+                       sel=HighBitSel.HIGH if s % 2 else HighBitSel.LOW, comment="MI out element %u -> f32 vreg" % s)
+    if mulAlpha:
+      item = Module("packedAlpha")
+      item.add(cvt)
+      item.add(VMulF32(dst=vgpr(Holder(name="ValuC")), src0=sgpr("Alpha"), src1=vgpr(Holder(name="ValuC")), \
+                       comment="Multiply MI out element %u with alpha" % s))
+      items.append(item)
+    else:
+      items.append(cvt)
+  imod = Module("MulAlpha" if mulAlpha else "AccVgprRead")
+  imod.setItems(items)
+  return imod
+
+def _insertPackedHalf(s, src, srcHalf, comment):
+  # Half srcHalf of src into half s%2 of element s's MI output VGPR; its other half is kept.
+  acc = vgpr("ValuC+%u"%(s // 2))
+  if s % 2:
+    return VPackF16toB32(dst=acc, src0=acc, src1=src, vop3=VOP3PModifiers(op_sel=[0, srcHalf, 0]), comment=comment)
+  return VPackF16toB32(dst=acc, src0=src, src1=acc, vop3=VOP3PModifiers(op_sel=[srcHalf, 1, 0]), comment=comment)
+
+def _packedArchToAcc(kernel):
+  """Inverse of _packedAccToArch: a temp holding arch elements d, d+1 back to their MI output halves."""
+  items = []
+  for s0, s1 in _packedAccPairs(kernel):
+    comment = "vreg -> MI out elements %u,%u" % (s0, s1)
+    if s1 == s0 + 1 and s0 % 2 == 0:
+      items.append(VMovB32(dst=vgpr("ValuC+%u"%(s0 // 2)), src=vgpr(Holder(name="ValuC")), comment=comment))
+    else:
+      pair = Module("packedArchPair")
+      pair.add(_insertPackedHalf(s0, vgpr(Holder(name="ValuC")), 0, comment))
+      pair.add(_insertPackedHalf(s1, vgpr(Holder(name="ValuC")), 1, comment))
+      items.append(pair)
+  return items
+
+def packedArchSinglesToAcc(kernel):
+  """Inverse of packedAccSingles: an element in the low half of its temp back to its MI output half."""
+  _, arch2acc = accToArchMapper(kernel)
+  imod = Module("AccVgprWrite")
+  imod.setItems([_insertPackedHalf(arch2acc[d], vgpr(Holder(name="ValuC")), 0, "vreg -> MI out element %u" % arch2acc[d]) \
+                 for d in range(len(arch2acc))])
+  return imod
+
+##############################################################################
 # MapAcctoArch
 # function to map MFMA Acc  Registers to Arch VGPR register
 ##############################################################################
 def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, spilledVgprBase=None):
+  if hasPackedAccumulators(kernel):
+    imod = Module("AccVgprWrite" if write else "AccVgprRead")
+    imod.setItems(_packedArchToAcc(kernel) if write else _packedAccToArch(kernel))
+    return imod
   acc2arch, _ = accToArchMapper(kernel)
 
   complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
@@ -311,6 +403,8 @@ def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, spilledVgprBase=None):
 # function to handle MFMA alpha*MIout to Arch VGPR register
 ##############################################################################
 def mulMIoutAlphaToArch(kernel, startVgprAlphaTmp):
+  if hasPackedAccumulators(kernel):
+    return packedAccToF32(kernel, mulAlpha=True)
   acc2arch, _ = accToArchMapper(kernel)
   itemList = [None] * len(acc2arch)
   for i in range(len(acc2arch)):
@@ -374,6 +468,10 @@ def mulMIoutAlphaToArch(kernel, startVgprAlphaTmp):
   # function to handle MFMA MIout to Arch VGPR register
   ##############################################################################
 def moveMIoutToArch(kernel, startVgprAlphaTmp):
+  if hasPackedAccumulators(kernel):
+    imod = Module("MulAlpha")
+    imod.setItems(_packedAccToArch(kernel))
+    return imod
   acc2arch, _ = accToArchMapper(kernel)
   itemList = [None] * len(acc2arch)
   for i in range(len(acc2arch)):

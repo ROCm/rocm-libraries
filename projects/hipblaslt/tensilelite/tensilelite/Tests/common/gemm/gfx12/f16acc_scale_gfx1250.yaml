@@ -1,0 +1,169 @@
+# f16 accumulation with scales in f32 memory: ScaleAB (vector and scalar), ScaleAlphaVec and ScaleC/ScaleD applied by the
+# f32 epilogue, for D h, f8 and bf16 at odd M and N edges; GSU 1 and GSU 3 MultipleBuffer, where the reduction kernel
+# applies them. The inputs are all ones and K at most 768, so the f16 accumulator holds K exactly; alpha 2, beta -1,
+# C TrigCos and random scales.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 1
+  DataInitTypeB: 1
+  DataInitTypeC: 13
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 17
+  DataInitTypeScaleA: 3
+  DataInitTypeScaleB: 3
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  ########################################
+  # D h: ScaleA/ScaleB vectors, ScaleAlphaVec, ScaleC/ScaleD
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: h
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseScaleAB: "Vector"
+      UseScaleAlphaVec: 1
+      UseScaleCD: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 64, 1, 1, 2, 2, 1, 1], [16, 16, 128, 1, 1, 2, 2, 1, 1]]
+        - AssertFree0ElementMultiple: [1]
+        - AssertSummationElementMultiple: [128]
+        - DepthU: [128]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - SourceSwap: [False]
+        - GlobalSplitU: [1, 3]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [65, 33, 1, 768]
+          - Exact: [128, 96, 2, 384]
+
+  ########################################
+  # D f8: ScaleA/ScaleB scalars, ScaleAlphaVec, ScaleC/ScaleD
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseScaleAB: "Scalar"
+      UseScaleAlphaVec: 1
+      UseScaleCD: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 64, 1, 1, 2, 2, 1, 1], [16, 16, 128, 1, 1, 2, 2, 1, 1]]
+        - AssertFree0ElementMultiple: [1]
+        - AssertSummationElementMultiple: [128]
+        - DepthU: [128]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - SourceSwap: [False]
+        - GlobalSplitU: [1, 3]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [65, 33, 1, 128]
+          - Exact: [128, 96, 2, 128]
+
+  ########################################
+  # D bf16: ScaleA/ScaleB vectors and ScaleAlphaVec
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseScaleAB: "Vector"
+      UseScaleAlphaVec: 1
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 64, 1, 1, 2, 2, 1, 1], [16, 16, 128, 1, 1, 2, 2, 1, 1]]
+        - AssertFree0ElementMultiple: [1]
+        - AssertSummationElementMultiple: [128]
+        - DepthU: [128]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - SourceSwap: [False]
+        - GlobalSplitU: [1, 3]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [65, 33, 1, 768]
+          - Exact: [128, 96, 2, 384]

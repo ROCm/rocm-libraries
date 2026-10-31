@@ -1590,6 +1590,38 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::VFmaPKF16& self, nb::dict&) { return new rocisa::VFmaPKF16(self); });
 
+    nb::class_<rocisa::VPkMaximum3F16, rocisa::CommonInstruction>(m_common, "VPkMaximum3F16")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::VOP3PModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("vop3")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VPkMaximum3F16& self, nb::dict&) { return new rocisa::VPkMaximum3F16(self); });
+
+    nb::class_<rocisa::VPkMinimum3F16, rocisa::CommonInstruction>(m_common, "VPkMinimum3F16")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::VOP3PModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("vop3")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VPkMinimum3F16& self, nb::dict&) { return new rocisa::VPkMinimum3F16(self); });
+
     nb::class_<rocisa::VFmaMixF32, rocisa::CommonInstruction>(m_common, "VFmaMixF32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,

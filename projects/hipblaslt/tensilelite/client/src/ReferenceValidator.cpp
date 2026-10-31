@@ -32,6 +32,7 @@
 #include "Reference.hpp"
 
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <algorithm>
@@ -133,12 +134,17 @@ namespace TensileLite
                     for(auto const& reference : m_referenceInputs)
                         SolveCPU(problem, reference.get(), m_elementsToValidate);
                 }
+                m_f16AccumulationOrder.clear();
+                m_f16AccumulationReferences.clear();
 
                 if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
                    gemm != nullptr && gemm->fusedGemmA2A())
                     referenceRecvs(*gemm);
             }
         }
+
+        // The reference D copies kept per device for f16 accumulation, one per K order.
+        constexpr size_t f16AccumulationReferenceBytes = size_t(1) << 30;
 
         void ReferenceValidator::preSolution(ContractionSolution* const solution)
         {
@@ -154,6 +160,51 @@ namespace TensileLite
 
             if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
+                if(isF16AccumulationProblem(*gemm))
+                {
+                    // The K order of the solution's launch decides the reference.
+                    if(!m_hardware)
+                        m_hardware = hip::GetCurrentDevice();
+                    F16AccumulationLaunch launch;
+                    static_cast<LaunchSummationOrder&>(launch)
+                        = solution->launchSummationOrder(*gemm, *m_hardware);
+                    launch.depthU             = solution->sizeMapping.depthU;
+                    launch.macroTile0         = solution->sizeMapping.macroTile.x;
+                    launch.macroTile1         = solution->sizeMapping.macroTile.y;
+                    launch.prefetchGlobalRead = solution->sizeMapping.PrefetchGlobalRead;
+                    auto const key = f16AccumulationOrderKey(launch);
+                    if(key == m_f16AccumulationOrder)
+                        return;
+                    size_t const bytes = gemm->d().totalAllocatedBytes();
+                    size_t const keep
+                        = std::max<size_t>(1, f16AccumulationReferenceBytes / std::max<size_t>(bytes, 1));
+                    m_f16AccumulationReferences.resize(m_referenceInputs.size());
+                    for(size_t dev = 0; dev < m_referenceInputs.size(); dev++)
+                    {
+                        auto&    reference = dynamic_cast<ContractionInputs&>(*m_referenceInputs[dev]);
+                        auto&    cache     = m_f16AccumulationReferences[dev];
+                        uint8_t* d         = static_cast<uint8_t*>(reference.d);
+                        auto     held      = [&](std::vector<uint64_t> const& k) {
+                            return std::find_if(
+                                cache.begin(), cache.end(), [&](auto const& e) { return e.first == k; });
+                        };
+                        if(held(m_f16AccumulationOrder) == cache.end())
+                            cache.emplace_back(m_f16AccumulationOrder, std::vector<uint8_t>(d, d + bytes));
+                        auto cached = held(key);
+                        if(cached != cache.end())
+                            std::memcpy(d, cached->second.data(), bytes);
+                        else
+                        {
+                            ScopedTimer timer("cpu_reference_gemm_per_order");
+                            SolveCPU(m_problem, m_referenceInputs[dev].get(), m_elementsToValidate, &launch);
+                            cache.emplace_back(key, std::vector<uint8_t>(d, d + bytes));
+                        }
+                        while(cache.size() > keep)
+                            cache.pop_front();
+                    }
+                    m_f16AccumulationOrder = key;
+                    return;
+                }
                 // Match DataInitialization MX gate.
                 if(!isMXProblem(*gemm))
                     return;

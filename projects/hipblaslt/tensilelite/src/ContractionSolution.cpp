@@ -686,6 +686,36 @@ namespace TensileLite
         USERARGS = 2
     };
 
+    namespace
+    {
+        bool isF16AccumulationType(ContractionSolution::ProblemType const& type)
+        {
+            return ContractionSolution::isF16Accumulation(
+                type.computeType, type.highPrecisionAccumulate, type.computeInputTypeA, type.computeInputTypeB);
+        }
+
+        // f16-accumulation kernels read alpha and beta as 32-bit floats and test beta for zero as one 32-bit
+        // word, which reads -0 as nonzero: the float of the value, +0 for a zero.
+        float f16AccumulationScalar(ConstantVariant const& value)
+        {
+            float const f = constVariantCast<float>(value);
+            return f == 0.0f ? 0.0f : f;
+        }
+    }
+
+    bool ContractionSolution::isF16Accumulation(rocisa::DataType computeType,
+                                                bool             highPrecisionAccumulate,
+                                                rocisa::DataType computeInputTypeA,
+                                                rocisa::DataType computeInputTypeB)
+    {
+        auto isMacInput = [](rocisa::DataType t) {
+            return t == rocisa::DataType::Float8 || t == rocisa::DataType::BFloat8
+                   || t == rocisa::DataType::Float4;
+        };
+        return computeType == rocisa::DataType::Half && !highPrecisionAccumulate && isMacInput(computeInputTypeA)
+               && isMacInput(computeInputTypeB);
+    }
+
     void setVariantToBuffer(ConstantVariant const& value,
                             void*                  buffer,
                             size_t                 bufferLength,
@@ -865,10 +895,23 @@ namespace TensileLite
             arg.strideA2 = a.strides()[startStrideAB + 1];
             arg.strideB1 = b.strides()[startStrideAB];
             arg.strideB2 = b.strides()[startStrideAB + 1];
-            setVariantToBuffer(
-                inputs.grouped[i].alpha, arg.alpha, sizeof(arg.alpha), problems[i].alphaType());
-            setVariantToBuffer(
-                inputs.grouped[i].beta, arg.beta, sizeof(arg.beta), problems[i].betaType());
+            if(ContractionSolution::isF16Accumulation(problems[i].computeType(),
+                                                      problems[i].highPrecisionAccumulate(),
+                                                      problems[i].computeInputTypeA(),
+                                                      problems[i].computeInputTypeB()))
+            {
+                setVariantToBuffer(ConstantVariant(f16AccumulationScalar(inputs.grouped[i].alpha)),
+                                   arg.alpha, sizeof(arg.alpha), rocisa::DataType::Float);
+                setVariantToBuffer(ConstantVariant(f16AccumulationScalar(inputs.grouped[i].beta)),
+                                   arg.beta, sizeof(arg.beta), rocisa::DataType::Float);
+            }
+            else
+            {
+                setVariantToBuffer(
+                    inputs.grouped[i].alpha, arg.alpha, sizeof(arg.alpha), problems[i].alphaType());
+                setVariantToBuffer(
+                    inputs.grouped[i].beta, arg.beta, sizeof(arg.beta), problems[i].betaType());
+            }
             arg.scaleA        = const_cast<void*>(inputs.grouped[i].scaleA);
             arg.scaleB        = const_cast<void*>(inputs.grouped[i].scaleB);
             arg.scaleC        = const_cast<void*>(inputs.grouped[i].scaleC);
@@ -1195,6 +1238,19 @@ namespace TensileLite
                        || launch.clusterSchedule.split.skTiles == tiles);
         }
 
+        template <typename KA, typename V>
+        void appendAlphaOrBeta(KA&                args,
+                               std::string const& name,
+                               V const&           value,
+                               rocisa::DataType   type,
+                               bool               f16Accumulation)
+        {
+            if(f16Accumulation)
+                args.append(name, ConstantVariant(f16AccumulationScalar(ConstantVariant(value))), rocisa::DataType::Float);
+            else
+                args.append(name, value, type);
+        }
+
         template <typename KA>
         void appendLegacyDataParallelSchedulingArgs(ContractionSolution const& solution,
                                                    ContractionSolution::Problem const& problem,
@@ -1481,18 +1537,10 @@ namespace TensileLite
 
         if(internalArgsSupport.version < 3)
         {
-            args.append("alpha", inputs.alpha, problem.alphaType());
-
-            if(problem.alphaType() == rocisa::DataType::Half)
-                args.append("alpha_2", inputs.alpha, problem.alphaType());
+            appendAlphaOrBeta(args, "alpha", inputs.alpha, problem.alphaType(), isF16AccumulationType(problemType));
 
             if(problemType.useBeta)
-            {
-                args.append("beta", inputs.beta, problem.betaType());
-
-                if(problem.betaType() == rocisa::DataType::Half)
-                    args.append("beta_2", inputs.beta, problem.betaType());
-            }
+                appendAlphaOrBeta(args, "beta", inputs.beta, problem.betaType(), isF16AccumulationType(problemType));
 
             if(sizeMapping.expertSchedulingMode > 0)
             {
@@ -1755,29 +1803,16 @@ namespace TensileLite
 
         if(internalArgsSupport.version >= 3)
         {
-            args.append("alpha", inputs.alpha, problem.alphaType());
-
-            if(problem.alphaType() == rocisa::DataType::Half)
-                args.append("alpha_2", inputs.alpha, problem.alphaType());
+            appendAlphaOrBeta(args, "alpha", inputs.alpha, problem.alphaType(), isF16AccumulationType(problemType));
 
             // The beta slot is always emitted so the layout does not depend on UseBeta;
             // the kernel gates the beta math separately. Keep the "beta" name: append()
             // promotes small types to 32-bit only for names "alpha"/"beta", so a
             // differently named pad would be written at the wrong size.
             if(problemType.useBeta)
-            {
-                args.append("beta", inputs.beta, problem.betaType());
-
-                if(problem.betaType() == rocisa::DataType::Half)
-                    args.append("beta_2", inputs.beta, problem.betaType());
-            }
+                appendAlphaOrBeta(args, "beta", inputs.beta, problem.betaType(), isF16AccumulationType(problemType));
             else
-            {
-                args.append("beta", 0.0f, problem.betaType());
-
-                if(problem.betaType() == rocisa::DataType::Half)
-                    args.append("beta_2", 0.0f, problem.betaType());
-            }
+                appendAlphaOrBeta(args, "beta", 0.0f, problem.betaType(), isF16AccumulationType(problemType));
 
             // ver3 places AddressWS after alpha/beta, see the StreamK block above.
             if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0)
@@ -2517,6 +2552,19 @@ namespace TensileLite
         return result;
     }
 
+    uint32_t ContractionSolution::internalArgsGsuMask() const
+    {
+        // GSU bit-width depends on InternalArgsSupport.version and alpha support:
+        //   v <  3: GSU occupies bits 0..13 (mask 0x3FFF, max 16383)
+        //   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF, max 4095);
+        //           bits 12/13 carry NTA / NTB for AdaptiveGemmNTAB.
+        //   deviceScalarAlpha capability: GSU narrowed to bits 0..10
+        //           (mask 0x07FF, max 2047); bit 11 selects scalar alpha.
+        if(scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec))
+            return 0x07FF;
+        return internalArgsSupport.version >= 3 ? 0x0FFF : 0x3FFF;
+    }
+
     template <bool T_Debug>
     void ContractionSolution::calculateInternalArgs(uint32_t&                           internalArg0,
                                                     uint32_t&                           internalArg1,
@@ -2544,29 +2592,18 @@ namespace TensileLite
         size_t         staggerU            = autoStaggerU;
         size_t         staggerUStrideShift = autoStaggerUStrideShift;
         const uint32_t mask16              = 0xFFFF;
-        const uint32_t mask14              = 0x3FFF;
         const uint32_t mask8               = 0xFF;
 
         internalArg0 = 0;
         internalArg1 = 0;
 
-        // GSU bit-width depends on InternalArgsSupport.version and alpha support:
-        //   v <  3: GSU occupies bits 0..13 (mask 0x3FFF, max 16383)
-        //   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF, max 4095);
-        //           bits 12/13 carry NTA / NTB for AdaptiveGemmNTAB.
-        //   deviceScalarAlpha capability: GSU narrowed to bits 0..10
-        //           (mask 0x07FF, max 2047); bit 11 selects scalar alpha.
-        constexpr uint32_t kGsuMaskV3               = 0x0FFF;
-        constexpr uint32_t kGsuMaskDeviceScalar     = 0x07FF;
         constexpr uint32_t kDeviceScalarAlphaBitPos = 11;
         constexpr uint32_t kNtaBitPos               = 12;
         constexpr uint32_t kNtbBitPos               = 13;
         const bool         useNtabBits              = (internalArgsSupport.version >= 3);
         const bool         scalarAlphaSupport
             = scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec);
-        const uint32_t     gsuMask                  = scalarAlphaSupport
-                                                          ? kGsuMaskDeviceScalar
-                                                          : (useNtabBits ? kGsuMaskV3 : mask14);
+        const uint32_t     gsuMask                  = internalArgsGsuMask();
         if(param.deviceScalarAlpha() && !scalarAlphaSupport)
         {
             throw std::runtime_error(
@@ -2687,6 +2724,99 @@ namespace TensileLite
         }
         else if(T_Debug && Debug::Instance().disableStaggerU())
             std::cout << "solution doesn't support configurable staggerU" << std::endl;
+    }
+
+    ContractionSolution::LaunchSummationOrder
+        ContractionSolution::launchSummationOrder(Problem const& problem, Hardware const& hardware) const
+    {
+        // singleCallArgs packs internalArgs from these values, with the grid solve() resolves for a persistent
+        // launch and 0 otherwise.
+        LaunchSummationOrder     order;
+        PersistentLaunchSettings launch;
+        if(sizeMapping.isPersistentDataParallel())
+        {
+            launch           = resolvePersistentSettings(problem, hardware);
+            order.persistent = LaunchSummationOrder::Persistent::DataParallel;
+        }
+        else if(sizeMapping.isStreamK())
+            launch = resolveStreamKSettings(problem, hardware);
+        auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
+            = calculateAutoWGM(problem, &hardware, launch.grid);
+        auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
+            = calculateAutoStaggerU(problem, &hardware, launch.grid, autoWGM);
+        uint32_t internalArg0 = 0, internalArg1 = 0;
+        calculateInternalArgs<false>(internalArg0,
+                                     internalArg1,
+                                     &hardware,
+                                     problem.getParams(),
+                                     autoWGM,
+                                     autoWGMXCC,
+                                     autoWGMXCCCHUNK,
+                                     autoWGMXCCSPLITK,
+                                     autoStaggerUMapping,
+                                     autoStaggerU,
+                                     autoStaggerUStrideShift,
+                                     calculateAutoGSU(problem, &hardware),
+                                     calculateAdaptiveGemmNTAB(problem, &hardware));
+        order.gsu                 = internalArg0 & internalArgsGsuMask();
+        order.gsuCoalesced        = (internalArg0 >> 15) & 1;
+        order.staggerU            = (internalArg0 >> 16) & 0xFF;
+        order.staggerUStrideShift = (internalArg0 >> 24) & 0x1F;
+        order.staggerUMapping     = (internalArg0 >> 29) & 0x7;
+        if(!sizeMapping.isPersistent())
+            return order;
+
+        order.tiles        = problem.getNumTiles(sizeMapping, 1);
+        order.itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+        order.grid         = launch.grid;
+        dim3 tiles;
+        calculateTiles(tiles, problem);
+        order.tiles0       = tiles.x;
+        order.tiles1       = tiles.y;
+        order.spaceFilling     = (static_cast<uint32_t>(sizeMapping.spaceFillingAlgo) >> 28) != 0;
+        order.spaceFillingAlgo = static_cast<uint32_t>(sizeMapping.spaceFillingAlgo);
+        order.wgmWord          = internalArg1;
+        order.wgm          = sizeMapping.workGroupMappingXCC == -1
+                                 ? static_cast<int32_t>((internalArg1 & 0x3FF) ^ 0x200) - 0x200
+                                 : static_cast<int32_t>(static_cast<int16_t>(internalArg1 & 0xFFFF));
+        if(!sizeMapping.isStreamK())
+            return order;
+
+        // The StreamK arguments makeArgs packs.
+        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+        if(pAMDGPU == nullptr)
+            throw std::runtime_error("launchSummationOrder: StreamK needs AMDGPU hardware");
+        if(sizeMapping.hasDynamicAssignment()
+           || (sizeMapping.hasHybridAssignment() && streamK5EffectiveDynamic(problem, hardware)))
+        {
+            auto const items   = streamKDynamicItems(hardware, order.tiles, order.itersPerTile);
+            order.persistent   = LaunchSummationOrder::Persistent::StreamKDynamic;
+            order.skTiles      = items.skTiles;
+            order.skSplit      = items.skSplit;
+            order.skItersPerWI = items.skItersPerWI;
+        }
+        else if(launch.reduction == origami::reduction_t::parallel)
+        {
+            order.persistent   = LaunchSummationOrder::Persistent::StreamKParallel;
+            order.skSplit      = launch.grid / order.tiles;
+            order.skItersPerWG = order.itersPerTile / order.skSplit;
+        }
+        else
+        {
+            StreamKStaticSplit const split = streamKStaticSplit(
+                order.tiles, order.itersPerTile, launch.grid, pAMDGPU->skFullTiles, false);
+            order.persistent        = LaunchSummationOrder::Persistent::StreamK;
+            order.fixupTree         = sizeMapping.streamKFixupTreeReduction != 0;
+            // The per-tile bit the StaticGrid packer puts in magicShiftItersPerTile for this launch.
+            order.perTileExtraIters = usePerTileStreamKSplit(
+                *this, problem, launch,
+                usesStreamKSpatialCluster() ? launch.clusterSchedule.blocks : order.tiles,
+                order.itersPerTile);
+            order.skTiles           = split.skTiles;
+            order.skItersPerWG      = split.skItersPerWG;
+            order.extraIters        = split.extraIters;
+        }
+        return order;
     }
 
     template <bool T_Debug, bool Legacy, typename KA>
@@ -4780,9 +4910,11 @@ namespace TensileLite
         if(wiX * wiY * wiZ > 2048)
         {
             //reach threashhold to trigger wider load
-            if(problem.freeSizeA(0) % 4 == 0
-               && DataTypeInfo::Get(problemType.aType).elementSize
-                      < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
+            if(isF16AccumulationType(problemType) && problem.freeSizeA(0) % 8 == 0)
+                vw = 8;
+            else if(problem.freeSizeA(0) % 4 == 0
+                    && DataTypeInfo::Get(problemType.aType).elementSize
+                           < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
                 vw = 4;
             else if(problem.freeSizeA(0) % 2 == 0
                     && DataTypeInfo::Get(problemType.aType).elementSize
@@ -5058,6 +5190,8 @@ namespace TensileLite
                                 ? DataTypeInfo::Get(rocisa::DataType::Int32).abbrev
                             : problem.a().dataType() == rocisa::DataType::Double
                                 ? DataTypeInfo::Get(rocisa::DataType::Double).abbrev
+                            : isF16AccumulationType(problemType)
+                                ? DataTypeInfo::Get(rocisa::DataType::Half).abbrev
                                 : DataTypeInfo::Get(rocisa::DataType::Float).abbrev;
 
         std::string name = concatenate("C",
@@ -6495,6 +6629,12 @@ namespace TensileLite
         if(handwrittenCustomKernel())
         {
             reductionStrat = origami::reduction_t::tree;
+        }
+        else if(const int forced = Debug::Instance().streamKReductionForceMode(); forced >= 0)
+        {
+            // Test-only: the grid reconciliation still demotes a parallel launch it cannot express.
+            reductionStrat = forced == 1 && sizeMapping.streamKAtomic == 0 ? origami::reduction_t::parallel
+                                                                          : origami::reduction_t::tree;
         }
         else
         {

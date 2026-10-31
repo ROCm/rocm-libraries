@@ -757,8 +757,10 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
 
     # Global number of WGs in M, N directions.
     # sgprNumTiles{M,N} may be overwritten so we store NumWorkGroups{0,1} values in them.
-    sgprNumTilesM = writer.sgprPool.checkOut(1, tag="SpaceFillingCurveWalk_sgprNumTilesM")
-    sgprNumTilesN = writer.sgprPool.checkOut(1, tag="spaceFillingCurveWalk_sgprNumTilesN")
+    # The multi-level SCSelectB64 and SpaceFillCurveSimpleImpl move M and N as one 64-bit pair.
+    sgprNumTilesMN = writer.sgprPool.checkOutAligned(2,2, tag="SpaceFillingCurveWalk_sgprNumTilesMN")
+    sgprNumTilesM  = sgprNumTilesMN
+    sgprNumTilesN  = sgprNumTilesMN + 1
     module.add(SMovB32(dst=sgpr(sgprNumTilesM), src=sgpr("NumWorkGroups0")))
     module.add(SMovB32(dst=sgpr(sgprNumTilesN), src=sgpr("NumWorkGroups1")))
 
@@ -912,8 +914,7 @@ def SpaceFillingCurveWalk(writer, kernel, sgprWGM):
         module.add(TransformNLevels(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN, sgprWGM, sgprGlobalY, sgprGlobalX, 1))
 
     writer.sgprPool.checkIn(sgprGlobal)
-    writer.sgprPool.checkIn(sgprNumTilesM)
-    writer.sgprPool.checkIn(sgprNumTilesN)
+    writer.sgprPool.checkIn(sgprNumTilesMN)
 
     # Restore sgprs listed in sgprsToStore to their original sgprs
     for sgprVarsId in range(len(sgprsToStore)):
@@ -962,8 +963,10 @@ def TransformNLevels(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN, sg
     if numLevels > 1:
         sgprCumulativeX = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprCumulativeX")
         sgprCumulativeY = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprCumulativeY")
-        sgprBlockM       = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprBlockM")
-        sgprBlockN       = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprBlockN")
+        # SpaceFillCurveSimpleImpl moves M and N as one 64-bit pair.
+        sgprBlockMN      = writer.sgprPool.checkOutAligned(2,2, tag="TransformNLevels_sgprBlockMN")
+        sgprBlockM       = sgprBlockMN
+        sgprBlockN       = sgprBlockMN + 1
 
     sgprLocalXY      = writer.sgprPool.checkOutAligned(2,2, tag="TransformNLevels_sgprLocalXY")
     sgprLocalY       = sgprLocalXY
@@ -1057,8 +1060,7 @@ def TransformNLevels(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN, sg
     if numLevels > 1:
         writer.sgprPool.checkIn(sgprCumulativeX)
         writer.sgprPool.checkIn(sgprCumulativeY)
-        writer.sgprPool.checkIn(sgprBlockM)
-        writer.sgprPool.checkIn(sgprBlockN)
+        writer.sgprPool.checkIn(sgprBlockMN)
     writer.sgprPool.checkIn(sgprLocalXY)
     writer.sgprPool.checkIn(sgprTemp)
 

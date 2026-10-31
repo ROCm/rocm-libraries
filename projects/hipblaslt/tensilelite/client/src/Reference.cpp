@@ -31,8 +31,11 @@
 #include "TimingInstrumentation.hpp"
 #include "TypedId.hpp"
 
+#include <Tensile/ContractionSolution.hpp>
+
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <omp.h>
 #include <optional>
@@ -457,6 +460,38 @@ namespace TensileLite
             SaturateCast(Accumulator val)
         {
             return static_cast<T>(val);
+        }
+
+        template <typename T>
+        constexpr bool isEightBitFloat
+            = std::is_same<Float8, T>::value || std::is_same<BFloat8, T>::value
+              || std::is_same<Float8_fnuz, T>::value || std::is_same<BFloat8_fnuz, T>::value;
+
+        // The kernel widens F4 to F8, exactly, before the f16-accumulate WMMA.
+        template <typename T>
+        using F16AccumulationInput = std::conditional_t<std::is_same<Float4x2, T>::value, Float8, T>;
+
+        // f16 accumulation (Half alpha/beta/compute, 8-bit float MAC inputs).
+        template <typename Inputs>
+        constexpr bool isF16AccumulationGemm
+            = std::is_same<typename Inputs::AlphaType, Half>::value
+              && isEightBitFloat<F16AccumulationInput<typename Inputs::ComputeInputTypeA>>
+              && isEightBitFloat<F16AccumulationInput<typename Inputs::ComputeInputTypeB>>;
+
+        // The single output conversion of every f16-accumulation reference result. Float8 maps +-inf (an f16
+        // overflow) to +-448 like a finite overflow and keeps NaN, as the kernel's clamp does.
+        template <typename DType, typename T>
+        inline DType f16AccumulationOutputCast(T result)
+        {
+            if constexpr(std::is_same<DType, Float8>::value)
+            {
+                float f = static_cast<float>(result);
+                if(std::isinf(f))
+                    return static_cast<Float8>(std::copysign(448.0f, f));
+                return SaturateCast<Float8>(f);
+            }
+            else
+                return SaturateCast<DType>(result);
         }
 
         template <typename Accumulator>
@@ -1172,6 +1207,10 @@ namespace TensileLite
                 return rejectFast(detail.c_str());
             }
 
+            // f16 accumulation follows the f16-accumulate WMMA step by step; only the slow path models that.
+            if(isF16AccumulationProblem(problem))
+                return rejectFast("f16_accumulation");
+
             constexpr size_t FAST_BLOCK_K = 8;
             size_t mxBlockA    = problem.mxBlockA();
             size_t mxBlockB    = problem.mxBlockB();
@@ -1846,8 +1885,13 @@ namespace TensileLite
         void ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
             ContractionProblemGemm const& problem,
             ContractionInputs const&      inputs,
-            size_t                        elementsToValidate)
+            size_t                        elementsToValidate,
+            F16AccumulationLaunch const*  launch)
         {
+            if(isF16AccumulationProblem(problem) != isF16AccumulationGemm<Inputs>)
+                throw std::runtime_error("Reference: the problem's f16-accumulation classification does not match the "
+                                         "model of the reference types it was dispatched to.");
+
             Accumulator* ws                   = nullptr;
             size_t       validationStrideGemm = 1;
             if(problem.useGradient() && problem.useBias()
@@ -1912,10 +1956,16 @@ namespace TensileLite
                 boundSize[i] = problem.boundSize(i);
 
             auto boundCount = CoordCount(boundSize.begin() + 1, boundSize.end());
+            auto const& tensors           = problem.tensors();
+            auto const  scaleAType        = tensors[ContractionProblemGemm::TENSOR::SCALEA].dataType();
+            auto const  scaleBType        = tensors[ContractionProblemGemm::TENSOR::SCALEB].dataType();
+            auto const  scaleCType        = tensors[ContractionProblemGemm::TENSOR::SCALEC].dataType();
+            auto const  scaleDType        = tensors[ContractionProblemGemm::TENSOR::SCALED].dataType();
+            auto const  scaleAlphaVecType = tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC].dataType();
             const Accumulator effectiveAlpha
                 = problem.getParams().deviceScalarAlpha()
                       ? GetValue<Accumulator>(
-                            problem.alphaType(), inputs.scaleAlphaVec, 0, aConjugate)
+                            scaleAlphaVecType, inputs.scaleAlphaVec, 0, aConjugate)
                       : constVariantCast<Accumulator>(inputs.alpha);
 
             if(effectiveAlpha != static_cast<Accumulator>(0))
@@ -1939,6 +1989,20 @@ namespace TensileLite
             constexpr bool notCmplxAmaxD = !std::is_same<Accumulator, std::complex<double>>()
                                            && !std::is_same<Accumulator, std::complex<float>>();
 
+            [[maybe_unused]] F16AccumulationLaunch const f16Launch = launch ? *launch : F16AccumulationLaunch{};
+            [[maybe_unused]] uint32_t const              f16Tiles0
+                = f16Launch.macroTile0
+                      ? uint32_t((problem.freeSizeA(0) + f16Launch.macroTile0 - 1) / f16Launch.macroTile0)
+                      : 0;
+            // The StreamK chunks of the tile at each workgroup.
+            [[maybe_unused]] std::vector<std::vector<F16AccumulationChunk>> f16TileChunks;
+            if(f16Launch.persistent > LaunchSummationOrder::Persistent::DataParallel)
+            {
+                std::vector<size_t> const tileOf = f16AccumulationTileOrder(f16Launch);
+                for(size_t t : tileOf)
+                    f16TileChunks.push_back(f16AccumulationStreamKChunks(f16Launch, t));
+            }
+
             // gemm
             omp_set_num_threads(MAX_OMP_THREADS);
 #pragma omp parallel
@@ -1952,16 +2016,21 @@ namespace TensileLite
                 std::vector<int64_t> mxsaCoord(mxsa.dimensions());
                 std::vector<int64_t> mxsbCoord(mxsb.dimensions());
                 std::vector<int64_t> bound(problem.boundIndices().size());
+                std::vector<double>   f16AVals, f16BVals;
+                std::vector<uint16_t> f16Partials;
 #pragma omp for
             for(size_t dNum = 0; dNum < d.totalLogicalElements(); dNum += validationStrideGemm)
             {
                 CoordNumbered(
                     dNum, dCoord.begin(), dCoord.end(), d.sizes().begin(), d.sizes().end());
 
+                [[maybe_unused]] size_t f16Batch = 0, f16BatchStride = 1;
                 for(size_t i = 0; i < problem.batchIndices().size(); i++)
                 {
                     auto const& idx   = problem.batchIndices()[i];
                     size_t      coord = dCoord[idx.d];
+                    f16Batch += coord * f16BatchStride;
+                    f16BatchStride *= problem.batchSize(i);
 
                     aCoord[idx.a] = coord;
                     bCoord[idx.b] = coord;
@@ -1974,12 +2043,14 @@ namespace TensileLite
                         mxsbCoord[idx.b] = coord;
                 }
 
+                [[maybe_unused]] size_t f16Row = 0, f16Col = 0;
                 for(size_t i = 0; i < problem.freeIndices().size(); i++)
                 {
                     auto const& idx   = problem.freeIndices()[i];
                     size_t      coord = dCoord[idx.d];
 
                     cCoord[idx.c] = coord;
+                    (idx.isA ? f16Row : f16Col) = coord;
 
                     // setMXScaleA/B divide the scale tensor's free dimension by the
                     // tile extent, so divide the free coordinate to match (identity
@@ -2002,6 +2073,7 @@ namespace TensileLite
                 }
 
                 Accumulator value(0);
+                [[maybe_unused]] Half f16Acc(0);
 
                 // Check short-circuit for the selected inline or device alpha.
                 if(effectiveAlpha != static_cast<Accumulator>(0))
@@ -2046,6 +2118,64 @@ namespace TensileLite
                             = problem.mxBlockA() ? mxsa.strides()[boundIndices[0].a] : 0;
                         auto mxsbStride
                             = problem.mxBlockB() ? mxsb.strides()[boundIndices[0].b] : 0;
+
+                        if constexpr(isF16AccumulationGemm<Inputs>)
+                        {
+                            using InputA = F16AccumulationInput<typename Inputs::ComputeInputTypeA>;
+                            using InputB = F16AccumulationInput<typename Inputs::ComputeInputTypeB>;
+                            static_assert((std::is_same<InputA, Float8>::value || std::is_same<InputA, BFloat8>::value)
+                                              && (std::is_same<InputB, Float8>::value
+                                                  || std::is_same<InputB, BFloat8>::value),
+                                          "f16 accumulation models OCP 8-bit float operands only");
+                            constexpr F16AccumulationOperandFormat f16FormatA
+                                = std::is_same<InputA, BFloat8>::value ? f16AccumulationE5M2 : f16AccumulationE4M3;
+                            constexpr F16AccumulationOperandFormat f16FormatB
+                                = std::is_same<InputB, BFloat8>::value ? f16AccumulationE5M2 : f16AccumulationE4M3;
+                            size_t const sizeK = boundSize[0];
+                            f16AVals.resize(sizeK);
+                            f16BVals.resize(sizeK);
+                            for(size_t k = 0; k < sizeK; k++)
+                            {
+                                size_t aI = boundIndices[0].aMirror ? (sizeK - k - 1) : k;
+                                size_t bI = boundIndices[0].bMirror ? (sizeK - k - 1) : k;
+                                f16AVals[k] = static_cast<double>(
+                                    getElement<Accumulator, MathOpAccum, typename Inputs::AType, InputA>(
+                                        problem, aPtr, aIndex + (aI * aStride), inputs.scaleA, aConjugate));
+                                f16BVals[k] = static_cast<double>(
+                                    getElement<Accumulator, MathOpAccum, typename Inputs::BType, InputB>(
+                                        problem, bPtr, bIndex + (bI * bStride), inputs.scaleB, bConjugate));
+                            }
+                            uint32_t const wg0 = f16Launch.macroTile0 ? uint32_t(f16Row / f16Launch.macroTile0) : 0;
+                            uint32_t const wg1 = f16Launch.macroTile1 ? uint32_t(f16Col / f16Launch.macroTile1) : 0;
+                            bool const streamK = !f16TileChunks.empty();
+                            std::vector<F16AccumulationChunk> const& f16Chunks
+                                = streamK ? f16TileChunks.at(wg0 + wg1 * f16Launch.tiles0
+                                                             + f16Batch * f16Launch.tiles0
+                                                                   * f16Launch.tiles1)
+                                          : std::vector<F16AccumulationChunk>{};
+                            f16Partials.resize(streamK ? f16Chunks.size() : std::max<uint32_t>(f16Launch.gsu, 1));
+                            for(uint32_t g = 0; g < f16Partials.size(); g++)
+                            {
+                                uint16_t acc  = 0;
+                                auto     step = [&](size_t k, size_t n) {
+                                    acc = f16AccumulationStep(
+                                        acc, &f16AVals[k], &f16BVals[k], n, f16FormatA, f16FormatB);
+                                };
+                                if(streamK)
+                                    f16AccumulationForEachChunkStep(
+                                        f16Launch, sizeK, f16Chunks[g], wg0, wg1, f16Tiles0, step);
+                                else
+                                    f16AccumulationForEachStep(f16Launch, sizeK, g, wg0, wg1, f16Tiles0, step);
+                                f16Partials[g] = acc;
+                            }
+                            uint16_t accBits
+                                = f16Partials.size() == 1 ? f16Partials[0]
+                                  : streamK && f16Launch.fixupTree
+                                      ? f16AccumulationTreeReduce(f16Partials.data(), f16Partials.size())
+                                      : f16AccumulationReduce(f16Partials.data(), f16Partials.size());
+                            std::memcpy(&f16Acc, &accBits, sizeof(accBits));
+                            continue;
+                        }
 
                         // innermost bound calculation:
                         size_t innerMXLoop = std::max<size_t>(
@@ -2124,6 +2254,9 @@ namespace TensileLite
                 auto cIndex = c.index(cCoord);
                 auto dIndex = d.index(dCoord);
 
+                if constexpr(isF16AccumulationGemm<Inputs>)
+                    value = static_cast<Accumulator>(static_cast<float>(f16Acc));
+
                 // Ensure zero*nan returns zero
                 // DeviceScalarAlpha replaces inline alpha. ScaleA/ScaleB remain
                 // independent multipliers and are applied below.
@@ -2134,9 +2267,9 @@ namespace TensileLite
                 if(problem.useScaleAB() == "Scalar")
                 {
                     Accumulator scaleA
-                        = GetValue<Accumulator>(problem.alphaType(), inputs.scaleA, 0, aConjugate);
+                        = GetValue<Accumulator>(scaleAType, inputs.scaleA, 0, aConjugate);
                     Accumulator scaleB
-                        = GetValue<Accumulator>(problem.alphaType(), inputs.scaleB, 0, aConjugate);
+                        = GetValue<Accumulator>(scaleBType, inputs.scaleB, 0, aConjugate);
                     if constexpr(sizeof(typename Inputs::AType)
                                  <= sizeof(typename Inputs::ComputeInputTypeA))
                         alpha *= scaleA;
@@ -2150,9 +2283,9 @@ namespace TensileLite
                     auto posB = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
                     auto posA = int(dNum % problem.d().sizes()[0]);
                     Accumulator scaleA = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleA, posA, aConjugate);
+                        scaleAType, inputs.scaleA, posA, aConjugate);
                     Accumulator scaleB = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleB, posB, aConjugate);
+                        scaleBType, inputs.scaleB, posB, aConjugate);
                     if constexpr(sizeof(typename Inputs::AType)
                                  <= sizeof(typename Inputs::ComputeInputTypeA))
                         alpha *= scaleA;
@@ -2173,7 +2306,7 @@ namespace TensileLite
                     else
                         pos = int(dNum % problem.d().sizes()[0]);
                     Accumulator scaleAlphaVec = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleAlphaVec, pos, aConjugate);
+                        scaleAlphaVecType, inputs.scaleAlphaVec, pos, aConjugate);
                     resultD *= scaleAlphaVec;
                 }
 
@@ -2183,7 +2316,7 @@ namespace TensileLite
                     if(problem.useScaleCD())
                     {
                         Accumulator scaleC = GetValue<Accumulator>(
-                            problem.betaType(), inputs.scaleC, 0, aConjugate);
+                            scaleCType, inputs.scaleC, 0, aConjugate);
                         cValue *= scaleC;
                     }
 
@@ -2268,7 +2401,7 @@ namespace TensileLite
                 if(problem.useScaleCD())
                 {
                     Accumulator scaleD = GetValue<Accumulator>(
-                        problem.betaType(), inputs.scaleD, 0, aConjugate);
+                        scaleDType, inputs.scaleD, 0, aConjugate);
                     resultD *= scaleD;
                 }
                 if(problem.useBias() && problem.useGradient()
@@ -2289,7 +2422,10 @@ namespace TensileLite
                     resultD = gateVal * resultD + gateVal;
                 }
 
-                dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
+                if constexpr(isF16AccumulationGemm<Inputs>)
+                    dPtr[dIndex] = f16AccumulationOutputCast<typename Inputs::DType>(resultD);
+                else
+                    dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
             }
             } // end #pragma omp parallel
 
@@ -2349,13 +2485,22 @@ namespace TensileLite
         void ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
             ContractionProblemGroupedGemm const& problem,
             ContractionGroupedInputs const&      inputs,
-            size_t                               elementsToValidate)
+            size_t                               elementsToValidate,
+            F16AccumulationLaunch const*         launch)
         {
             for(int idx = 0; idx < problem.gemms.size(); idx++)
             {
                 ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
-                    problem.gemms[idx], inputs.grouped[idx], elementsToValidate);
+                    problem.gemms[idx], inputs.grouped[idx], elementsToValidate, launch);
             }
+        }
+
+        bool isF16AccumulationProblem(ContractionProblemGemm const& problem)
+        {
+            return ContractionSolution::isF16Accumulation(problem.computeType(),
+                                                          problem.highPrecisionAccumulate(),
+                                                          problem.computeInputTypeA(),
+                                                          problem.computeInputTypeB());
         }
 
         uint64_t getInputContractionInputsTypeId(ContractionProblemGemm const& problem)
@@ -2396,10 +2541,11 @@ namespace TensileLite
         }
 
         template <typename Problem, typename Inputs>
-        void SolveCPUTemplates(uint64_t const& contractionInputsTypeId,
-                               Problem const&  problem,
-                               Inputs const&   inputs,
-                               size_t          elementsToValidate)
+        void SolveCPUTemplates(uint64_t const&              contractionInputsTypeId,
+                               Problem const&               problem,
+                               Inputs const&                inputs,
+                               size_t                       elementsToValidate,
+                               F16AccumulationLaunch const* launch = nullptr)
         {
             bool isHPA = false;
             if constexpr(std::is_same<ContractionProblemGemm, Problem>::value)
@@ -2550,6 +2696,66 @@ namespace TensileLite
             {
                 return ReferenceSolution<TypedGemm_F8_S_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F8_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F8_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_B8_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_B8_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_B8_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F8B8_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8B8_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F8B8_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8B8_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F8B8_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8B8_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_B8F8_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8F8_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_B8F8_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8F8_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_B8F8_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8F8_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
             }
             case TypedGemm_F8_H_S::TypeId():
             {
@@ -2991,6 +3197,81 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F4B6_B_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
+            case TypedGemm_F8F4_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8F4_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F4F8_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4F8_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F4_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F8F4_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8F4_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F4F8_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4F8_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F4_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F8F4_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8F4_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F4F8_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4F8_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F4_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F4B8_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4B8_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_B8F4_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8F4_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F4B8_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4B8_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_B8F4_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8F4_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_F4B8_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4B8_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
+            case TypedGemm_B8F4_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8F4_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate, launch);
+            }
 #endif // !_WIN32
             // F4 data (both A and B), F8 dest
             case TypedGemm_F4_F8_S::TypeId():
@@ -3295,7 +3576,8 @@ namespace TensileLite
         void SolveGemmCPU(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs,
                           size_t                        elementsToValidate,
-                          bool                          tryFastPath)
+                          bool                          tryFastPath,
+                          F16AccumulationLaunch const*  launch)
         {
 
             // The fast solver computes all elements. If the number of elements to validate
@@ -3325,13 +3607,14 @@ namespace TensileLite
             {
                 ScopedTimer timer("solve_cpu_slow");
                 auto contractionInputsTypeId = getInputContractionInputsTypeId(problem);
-                SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate);
+                SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate, launch);
             }
         }
 
-        void SolveCPU(ContractionProblem const* problem,
-                      ProblemInputs const*      inputs,
-                      size_t                    elementsToValidate)
+        void SolveCPU(ContractionProblem const*    problem,
+                      ProblemInputs const*         inputs,
+                      size_t                       elementsToValidate,
+                      F16AccumulationLaunch const* launch)
         {
 
             if(auto groupedProblem = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
@@ -3361,7 +3644,7 @@ namespace TensileLite
                 {
                     throw std::runtime_error("Unable to cast input to ContractionInputs.");
                 }
-                SolveGemmCPU(*gemmProblem, *refInput, elementsToValidate);
+                SolveGemmCPU(*gemmProblem, *refInput, elementsToValidate, true, launch);
             }
 
             else

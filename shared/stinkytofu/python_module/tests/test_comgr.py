@@ -269,6 +269,7 @@ class TestArchCaps:
         assert arch["WmmaArbStallBitOffset"] == 2
         assert arch["HasF32XEmulation"] == 1
         assert arch["F32XEmulationInfSupport"] == 1
+        assert arch["HasF16Accumulation"] == 1
 
 
 class TestRegCaps:

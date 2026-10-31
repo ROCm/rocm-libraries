@@ -30,6 +30,7 @@ from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, \
 from rocisa.functions import vectorAddMultiplyBpe, vectorMultiply64Bpe
 from .ExecutionPolicy import isPersistent
 from .Common import INDEX_CHARS, DataDirection, log2
+from .SolutionStructs.Problem import epilogueComputeDataType
 
 ##############################################################################
 # Fields associated with computing address
@@ -68,14 +69,15 @@ class AddrCalculation:
         self.scaleAVecOffset = 0
         self.scaleBVecOffset = 0
         self.scaleAlphaVecOffset = [0, 0]
+        vecBpe = epilogueComputeDataType(ss.kernel["ProblemType"]).numBytes() # bias and scale vectors are staged in LDS in this type
         if ss.optSingleColVgpr:
             # optimized stores use the load offset for coordOffset0 calculations.
-            self.biasOffset[0]   = coordOffset0 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.bias(0).ldsOffset
-            self.biasOffset[1]   = coordOffset1 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.bias(1).ldsOffset
-            self.scaleAVecOffset = coordOffset0 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.scaleA.ldsOffset
-            self.scaleBVecOffset = coordOffset1 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.scaleB.ldsOffset
-            self.scaleAlphaVecOffset[0]   = coordOffset0 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.scaleAlpha(0).ldsOffset
-            self.scaleAlphaVecOffset[1]   = coordOffset1 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.scaleAlpha(1).ldsOffset
+            self.biasOffset[0]   = coordOffset0 * vecBpe + self.vectorDataTypes.bias(0).ldsOffset
+            self.biasOffset[1]   = coordOffset1 * vecBpe + self.vectorDataTypes.bias(1).ldsOffset
+            self.scaleAVecOffset = coordOffset0 * vecBpe + self.vectorDataTypes.scaleA.ldsOffset
+            self.scaleBVecOffset = coordOffset1 * vecBpe + self.vectorDataTypes.scaleB.ldsOffset
+            self.scaleAlphaVecOffset[0]   = coordOffset0 * vecBpe + self.vectorDataTypes.scaleAlpha(0).ldsOffset
+            self.scaleAlphaVecOffset[1]   = coordOffset1 * vecBpe + self.vectorDataTypes.scaleAlpha(1).ldsOffset
             self.globalOffset  = coordOffset0 * kernelWriter.states.bpeCexternal
             self.globalOffsetE = coordOffset0 * kernelWriter.states.bpeE
             self.globalOffsetGate = coordOffset0 * kernelWriter.states.bpeGate
@@ -409,7 +411,7 @@ class AddrCalculation:
                         module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile%u"%dim], src1=sgpr("WorkGroup%u"%dim), comment="wgp%u * MT%u"%(dim, dim)))
                         module.add(VSubU32(dst=vgpr(self.addrBiasVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
                         module.add(VLShiftLeftB32(dst=vgpr(self.addrBiasVgpr), \
-                                                shiftHex=hex(log2(kw.states.bpeCinternal)), \
+                                                shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                                 src=vgpr(self.addrBiasVgpr), \
                                                 comment="Bias address scaled by BPE"))
                         if kernel["LdsOffsetBias"] != 0:
@@ -425,7 +427,7 @@ class AddrCalculation:
                             coordVgpr = self.coord0Vgpr if dim == 0 else self.coord1Vgpr
                             module.add(VSubU32(dst=vgpr(self.addrScaleAlphaVecVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
                             module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
-                                                    shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
+                                                    shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                                     src=vgpr(self.addrScaleAlphaVecVgpr), \
                                                     comment="ScaleAlpha address scaled by BPE"))
                             if kernel["LdsOffsetBias"] != 0:
@@ -439,7 +441,7 @@ class AddrCalculation:
                             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile0"], src1=sgpr("WorkGroup0"), comment="wgp0 * MT0"))
                             module.add(VSubU32(dst=vgpr(self.addrScaleAVecVgpr), src0=vgpr(self.coord0Vgpr), src1=sgpr(tmpSgpr)))
                             module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAVecVgpr), \
-                                                    shiftHex=hex(log2(kw.states.bpeCinternal)), \
+                                                    shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                                     src=vgpr(self.addrScaleAVecVgpr), \
                                                     comment="ScaleAVec address scaled by BPE"))
                             if kernel["LdsOffsetBias"] != 0:
@@ -453,7 +455,7 @@ class AddrCalculation:
                             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile1"], src1=sgpr("WorkGroup1"), comment="wgp1 * MT1"))
                             module.add(VSubU32(dst=vgpr(self.addrScaleBVecVgpr), src0=vgpr(self.coord1Vgpr), src1=sgpr(tmpSgpr)))
                             module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleBVecVgpr), \
-                                                    shiftHex=hex(log2(kw.states.bpeCinternal)), \
+                                                    shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                                     src=vgpr(self.addrScaleBVecVgpr), \
                                                     comment="ScaleBVec address scaled by BPE"))
                             if kernel["LdsOffsetBias"] != 0:
@@ -484,7 +486,7 @@ class AddrCalculation:
                     module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile%u"%dim], src1=sgpr("WorkGroup%u"%dim), comment="wgp%u * MT%u"%(dim, dim)))
                     module.add(VSubU32(dst=vgpr(self.addrBiasVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
                     module.add(VLShiftLeftB32(dst=vgpr(self.addrBiasVgpr), \
-                                            shiftHex=hex(log2(kw.states.bpeCinternal)), \
+                                            shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                             src=vgpr(self.addrBiasVgpr), \
                                             comment="Bias address scaled by BPE"))
                     if kernel["LdsOffsetBias"] != 0:
@@ -499,7 +501,7 @@ class AddrCalculation:
                         coordVgpr = self.coord0Vgpr if dim == 0 else self.coord1Vgpr
                         module.add(VSubU32(dst=vgpr(self.addrScaleAlphaVecVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
                         module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
-                                                shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
+                                                shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                                 src=vgpr(self.addrScaleAlphaVecVgpr), \
                                                 comment="ScaleAlpha address scaled by BPE"))
                         if kernel["LdsOffsetBias"] != 0:
@@ -513,7 +515,7 @@ class AddrCalculation:
                         module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile0"], src1=sgpr("WorkGroup0"), comment="wgp0 * MT0"))
                         module.add(VSubU32(dst=vgpr(self.addrScaleAVecVgpr), src0=vgpr(self.coord0Vgpr), src1=sgpr(tmpSgpr)))
                         module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAVecVgpr), \
-                                                shiftHex=hex(log2(kw.states.bpeCinternal)), \
+                                                shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                                 src=vgpr(self.addrScaleAVecVgpr), \
                                                 comment="ScaleAVec address scaled by BPE"))
                         if kernel["LdsOffsetBias"] != 0:
@@ -527,7 +529,7 @@ class AddrCalculation:
                         module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile1"], src1=sgpr("WorkGroup1"), comment="wgp1 * MT1"))
                         module.add(VSubU32(dst=vgpr(self.addrScaleBVecVgpr), src0=vgpr(self.coord1Vgpr), src1=sgpr(tmpSgpr)))
                         module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleBVecVgpr), \
-                                                shiftHex=hex(log2(kw.states.bpeCinternal)), \
+                                                shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                                 src=vgpr(self.addrScaleBVecVgpr), \
                                                 comment="ScaleBVec address scaled by BPE"))
                         if kernel["LdsOffsetBias"] != 0:
@@ -554,7 +556,7 @@ class AddrCalculation:
                 module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile%u"%dim], src1=sgpr("WorkGroup%u"%dim), comment="wgp%u * MT%u"%(dim, dim)))
                 module.add(VSubU32(dst=vgpr(self.addrBiasVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
                 module.add(VLShiftLeftB32(dst=vgpr(self.addrBiasVgpr), \
-                                        shiftHex=hex(log2(kw.states.bpeCinternal)), \
+                                        shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                         src=vgpr(self.addrBiasVgpr), \
                                         comment="Bias address scaled by BPE"))
                 if kernel["LdsOffsetBias"] != 0:
@@ -569,7 +571,7 @@ class AddrCalculation:
                     coordVgpr = self.coord0Vgpr if dim == 0 else self.coord1Vgpr
                     module.add(VSubU32(dst=vgpr(self.addrScaleAlphaVecVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
                     module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
-                                            shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
+                                            shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                             src=vgpr(self.addrScaleAlphaVecVgpr), \
                                             comment="ScaleAlpha address scaled by BPE"))
                     if kernel["LdsOffsetBias"] != 0:
@@ -583,7 +585,7 @@ class AddrCalculation:
                     module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile0"], src1=sgpr("WorkGroup0"), comment="wgp0 * MT0"))
                     module.add(VSubU32(dst=vgpr(self.addrScaleAVecVgpr), src0=vgpr(self.coord0Vgpr), src1=sgpr(tmpSgpr)))
                     module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAVecVgpr), \
-                                            shiftHex=hex(log2(kw.states.bpeCinternal)), \
+                                            shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                             src=vgpr(self.addrScaleAVecVgpr), \
                                             comment="ScaleAVec address scaled by BPE"))
                     if kernel["LdsOffsetBias"] != 0:
@@ -597,7 +599,7 @@ class AddrCalculation:
                     module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile1"], src1=sgpr("WorkGroup1"), comment="wgp1 * MT1"))
                     module.add(VSubU32(dst=vgpr(self.addrScaleBVecVgpr), src0=vgpr(self.coord1Vgpr), src1=sgpr(tmpSgpr)))
                     module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleBVecVgpr), \
-                                            shiftHex=hex(log2(kw.states.bpeCinternal)), \
+                                            shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                             src=vgpr(self.addrScaleBVecVgpr), \
                                             comment="ScaleBVec address scaled by BPE"))
                 if kernel["LdsOffsetBias"] != 0:
@@ -821,7 +823,7 @@ class AddrCalculation:
                 coordVgpr = self.coord0Vgpr if dim == 0 else self.coord1Vgpr
                 module.add(VSubU32(dst=vgpr(self.addrBiasVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
                 module.add(VLShiftLeftB32(dst=vgpr(self.addrBiasVgpr), \
-                                        shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
+                                        shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                         src=vgpr(self.addrBiasVgpr), \
                                         comment="Bias address scaled by BPE"))
                 if kernel["LdsOffsetBias"] != 0:
@@ -835,7 +837,7 @@ class AddrCalculation:
                     coordVgpr = self.coord0Vgpr if dim == 0 else self.coord1Vgpr
                     module.add(VSubU32(dst=vgpr(self.addrScaleAlphaVecVgpr), src0=vgpr(coordVgpr), src1=sgpr(tmpSgpr)))
                     module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAlphaVecVgpr), \
-                                            shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
+                                            shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                             src=vgpr(self.addrScaleAlphaVecVgpr), \
                                             comment="ScaleAlpha address scaled by BPE"))
                     if kernel["LdsOffsetBias"] != 0:
@@ -848,7 +850,7 @@ class AddrCalculation:
                     module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile0"], src1=sgpr("WorkGroup0"), comment="wgp0 * MT0"))
                     module.add(VSubU32(dst=vgpr(self.addrScaleAVecVgpr), src0=vgpr(self.coord0Vgpr), src1=sgpr(tmpSgpr)))
                     module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleAVecVgpr), \
-                                            shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
+                                            shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                             src=vgpr(self.addrScaleAVecVgpr), \
                                             comment="ScaleAVec address scaled by BPE"))
                     if kernel["LdsOffsetBias"] != 0:
@@ -861,7 +863,7 @@ class AddrCalculation:
                     module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile1"], src1=sgpr("WorkGroup1"), comment="wgp1 * MT1"))
                     module.add(VSubU32(dst=vgpr(self.addrScaleBVecVgpr), src0=vgpr(self.coord1Vgpr), src1=sgpr(tmpSgpr)))
                     module.add(VLShiftLeftB32(dst=vgpr(self.addrScaleBVecVgpr), \
-                                            shiftHex=hex(log2(self.kernelWriter.states.bpeCinternal)), \
+                                            shiftHex=hex(log2(epilogueComputeDataType(kernel["ProblemType"]).numBytes())), \
                                             src=vgpr(self.addrScaleBVecVgpr), \
                                             comment="ScaleBVec address scaled by BPE"))
                     if kernel["LdsOffsetBias"] != 0:
