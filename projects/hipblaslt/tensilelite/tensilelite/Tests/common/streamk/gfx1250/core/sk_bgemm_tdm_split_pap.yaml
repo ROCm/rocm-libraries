@@ -83,7 +83,6 @@ BenchmarkProblems:
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - ExpandPointerSwap: [False]
-        - AssertFree0ElementMultiple: [1, -1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -93,6 +92,5 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 192]  #tail
           - Exact: [129, 128, 1, 128]  #edge-m
           - Exact: [128, 129, 1, 128]  #edge-n
-          - Exact: [130, 129, 1, 128]
         - ActivationArgs:
           - [Enum: none]

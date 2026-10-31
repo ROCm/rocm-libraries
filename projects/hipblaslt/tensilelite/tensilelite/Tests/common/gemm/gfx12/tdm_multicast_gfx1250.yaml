@@ -158,7 +158,6 @@ BenchmarkProblems:
         - ExpandPointerSwap: [false]
         - GroupLoadStore: [False]
         - ClusterDim: [[1, 1], [2, 2], [2, 3]]
-        - AssertFree0ElementMultiple: [1, -1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -168,7 +167,6 @@ BenchmarkProblems:
           - Exact: [736, 736, 1, 2304] # 23WG x 23WG (MT32x32)
           - Exact: [128, 192, 2, 256]
           - Exact: [32, 48, 65537, 64] # batch > 65535 (cluster grid z limit)
-          - Exact: [130, 368, 1, 2304]
         - ActivationArgs:
           - [Enum: none]
   
