@@ -1881,19 +1881,28 @@ namespace
         const char* name;
         int         mxBlock;
         size_t      depthU;
+        size_t      k;
         bool        rejected;
     };
 
     const MXCase kMXCases[] = {
         // Every shipped MX StreamK solution sits at DepthU 256 or 512.
-        {"MXDepthU256", 32, 256, false},
-        {"MXDepthU512", 32, 512, false},
+        {"MXDepthU256", 32, 256, 1024, false},
+        {"MXDepthU512", 32, 512, 1024, false},
         // Reachable through the generator's own validation for MX fp8, where
         // duUnit is numSubIterK(1) * MatrixInstK(128) * LocalSplitU(1) = 128.
-        {"MXDepthU128", 32, 128, true},
+        // Stream-K divides K in whole 256-K scale epochs there
+        // (ContractionSolution::skKGranularity), so a cut cannot land inside a
+        // granule while the tile's K is a whole number of epochs: K=1024 is
+        // eight DepthU, four epochs.
+        {"MXDepthU128EpochAligned", 32, 128, 1024, false},
+        // An odd number of DepthU per tile leaves a half-epoch the device's
+        // whole-epoch distribution cannot place, so skKUnit drops the quantum
+        // back to one iteration and a cut can straddle a granule again.
+        {"MXDepthU128EpochRagged", 32, 128, 896, true},
         // The guard must scope to MX problems and nothing else.
-        {"NonMXDepthU128", 0, 128, false},
-        {"NonMXDepthU16", 0, 16, false},
+        {"NonMXDepthU128", 0, 128, 1024, false},
+        {"NonMXDepthU16", 0, 16, 1024, false},
     };
 
     class RowUniformityStreamKMX_pre_checkin : public ::testing::TestWithParam<MXCase>
@@ -1910,8 +1919,17 @@ namespace
         solution->problemType.mxBlockB   = c.mxBlock;
         solution->sizeMapping.depthU     = c.depthU;
 
-        EXPECT_EQ(!admitsUniformSummationOrder(*solution, hardware), c.rejected)
-            << "mxBlock=" << c.mxBlock << " depthU=" << c.depthU;
+        // K decides how many DepthU a tile holds, and so whether the
+        // whole-epoch Stream-K split applies (skKUnit) or falls back to
+        // single iterations.
+        auto problem = TensileLite::ContractionProblemGemm::GEMM(
+            false, false, 1024, 1024, c.k, 1024, 1024, 1024, 0.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setParams().setUniformSummationOrder(1);
+
+        EXPECT_EQ(!solution->uniformSummationOrderSupported(problem, hardware), c.rejected)
+            << "mxBlock=" << c.mxBlock << " depthU=" << c.depthU << " k=" << c.k;
     }
 
     INSTANTIATE_TEST_SUITE_P(RowUniformity,

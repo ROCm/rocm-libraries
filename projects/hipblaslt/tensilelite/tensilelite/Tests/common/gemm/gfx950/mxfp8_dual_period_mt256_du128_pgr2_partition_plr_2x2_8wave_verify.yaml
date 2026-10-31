@@ -13,6 +13,14 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
+  # These shapes exist to validate the dual-period scale contract, not the
+  # row-uniform reduction promise.  Stream-K only divides K in whole 256-K
+  # scale epochs when a tile holds a whole number of them, so under the
+  # default (auto) request the K=383/384-style shapes are refused before
+  # they ever reach the kernel.  Ask for the historical order instead; the
+  # USO envelope itself is pinned by RowUniformityStreamKMX in
+  # clients/tests/src/row_uniformity_gtest.cpp.
+  UniformSummationOrder: 0
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 2
   Device: 0

@@ -7084,12 +7084,18 @@ namespace TensileLite
                 // indivisible, not DepthU. skKGranularity() is the number of
                 // iterations in one scale epoch, and every host packer and
                 // device mapping site rounds its K chunk to it, so the cut
-                // quantum is DepthU * skKGranularity(). That is 256 for the
-                // dual-period MX fp8 kernels (DepthU=128, granularity 2) and
-                // DepthU itself everywhere else, which leaves an unquantised
-                // DepthU=128 MX solution refused exactly as before.
+                // quantum is DepthU * the unit that actually applies here.
+                //
+                // That unit is skKUnit(), not skKGranularity() itself: a tile
+                // whose K is not a whole number of epochs has a leftover the
+                // device's whole-epoch distribution cannot place, so the split
+                // falls back to single iterations and a cut can land inside a
+                // granule again. Such a problem is still refused.
                 constexpr size_t mxScaleSwizzleGranuleK = 256; // lrSubtileShape[1](2) * instK(128)
-                const size_t     skKCutQuantumK = sizeMapping.depthU * solution.skKGranularity();
+                const size_t     itersPerTile
+                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+                const size_t skKCutQuantumK
+                    = sizeMapping.depthU * skKUnit(itersPerTile, solution.skKGranularity());
                 if(skKCutQuantumK % mxScaleSwizzleGranuleK != 0)
                     return refuse("MXScaleSwizzleGranule",
                                   "StreamK K-cut quantum " + std::to_string(skKCutQuantumK)
