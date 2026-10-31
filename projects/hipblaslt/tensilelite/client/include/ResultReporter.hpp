@@ -30,6 +30,7 @@
 #include "RunListener.hpp"
 
 #include <cstddef>
+#include <functional>
 #include <string>
 
 namespace TensileLite
@@ -188,6 +189,15 @@ namespace TensileLite
             virtual void reportValue_vecOfSizes(std::string const&                      key,
                                                 std::vector<std::vector<size_t>> const& value)
                 = 0;
+
+            /**
+   * Reports the current solution's row values that are only worth computing if the row is
+   * output: a reporter that outputs the row calls the provider with itself as the target,
+   * the others ignore it. Valid until the end of the solution (postSolution).
+   */
+            using RowValueProvider = std::function<void(ResultReporter&)>;
+
+            virtual void setRowValueProvider(RowValueProvider const& provider) {}
 
             virtual bool logAtLevel(LogLevel level)
             {
