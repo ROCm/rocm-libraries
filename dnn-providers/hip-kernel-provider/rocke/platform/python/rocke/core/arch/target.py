@@ -72,9 +72,10 @@ def _expand_mma_rows(gfx: str, declarations: list[dict]) -> list[dict]:
             rows = [declaration]
         else:
             # JSON text comparison also rejects bools masquerading as integers.
-            if gfx != "gfx1250" or json.dumps(
-                declaration, sort_keys=True
-            ) != json.dumps(_GFX1250_SCALED_FAMILY, sort_keys=True):
+            # Admitted by content: any arch may declare the family.
+            if json.dumps(declaration, sort_keys=True) != json.dumps(
+                _GFX1250_SCALED_FAMILY, sort_keys=True
+            ):
                 raise ValueError(
                     f"unsupported MMA family declaration for {gfx}: {declaration!r}"
                 )
@@ -566,8 +567,8 @@ def _mfma_b_32x32x4_xf32(builder, lane, slot):
     return k, axis
 
 
-def _mfma_a_16x16x4_f32(builder, lane, slot):
-    """MFMA 16x16x4 fp32 A operand: each lane holds one fp32 scalar.
+def _mfma_a_16x16x4(builder, lane, slot):
+    """MFMA 16x16x4 fp32 / f64 A operand: each lane holds one scalar.
 
     row = lane % 16, k = lane // 16 (slot is always 0 — a_frag_len == 1).
     Returns ``(row, k)``.
@@ -578,8 +579,8 @@ def _mfma_a_16x16x4_f32(builder, lane, slot):
     return m_in_atom, k
 
 
-def _mfma_b_16x16x4_f32(builder, lane, slot):
-    """MFMA 16x16x4 fp32 B operand: each lane holds one fp32 scalar.
+def _mfma_b_16x16x4(builder, lane, slot):
+    """MFMA 16x16x4 fp32 / f64 B operand: each lane holds one scalar.
 
     col = lane % 16, k = lane // 16 (slot is always 0 — b_frag_len == 1).
     Returns ``(k, col)``.
@@ -612,6 +613,46 @@ def _mfma_b_32x32x2_f32(builder, lane, slot):
     n_in_atom = builder.mod(lane, c32)
     k = builder.div(lane, c32)
     return k, n_in_atom
+
+
+def _mfma_acc_16x16x4_f64(builder, lane, slot):
+    """MFMA 16x16x4 f64 accumulator: slot ``i`` -> ``(i*4 + lane // 16, lane % 16)``.
+
+    Unlike ``_mfma_acc_16x16``, consecutive slots of a lane are 4 rows apart.
+    """
+    c16 = builder.const_i32(16)
+    n_in_atom = builder.mod(lane, c16)
+    m_blk = builder.div(lane, c16)
+    row = builder.add(builder.const_i32(slot * 4), m_blk)
+    return row, n_in_atom
+
+
+def _mfma_b_4x4x4_f64(builder, lane, slot):
+    """MFMA 4x4x4 f64 B operand (4 blocks, one scalar per lane).
+
+    Blocks are stacked along rows: lane ``16*k + 4*blk + n`` holds
+    ``(blk*4 + k, n)``. Returns ``(blk*4 + k, n)``.
+    """
+    c4 = builder.const_i32(4)
+    n_in_blk = builder.mod(lane, c4)
+    blk = builder.mod(builder.div(lane, c4), c4)
+    k = builder.div(lane, builder.const_i32(16))
+    row = builder.add(builder.mul(blk, c4), k)
+    return row, n_in_blk
+
+
+def _mfma_acc_4x4x4_f64(builder, lane, slot):
+    """MFMA 4x4x4 f64 accumulator (4 blocks, one scalar per lane).
+
+    Blocks are stacked along rows: lane ``16*m + 4*blk + n`` holds
+    ``(blk*4 + m, n)``. Returns ``(blk*4 + m, n)``.
+    """
+    c4 = builder.const_i32(4)
+    n_in_blk = builder.mod(lane, c4)
+    blk = builder.mod(builder.div(lane, c4), c4)
+    m = builder.div(lane, builder.const_i32(16))
+    row = builder.add(builder.mul(blk, c4), m)
+    return row, n_in_blk
 
 
 def _mfma_a_32x32x8(builder, lane, slot):
@@ -905,10 +946,21 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # A/B are scalar float per lane (a_frag_len=b_frag_len=1); accumulator
     # shares the standard 16x16 / 32x32 layout (c_frag_len=4 / 16).
     "mfma_f32_16x16x4_f32": _FragInfo(
-        1, 1, 4, 64, _mfma_a_16x16x4_f32, _mfma_b_16x16x4_f32, _mfma_acc_16x16
+        1, 1, 4, 64, _mfma_a_16x16x4, _mfma_b_16x16x4, _mfma_acc_16x16
     ),
     "mfma_f32_32x32x2_f32": _FragInfo(
         1, 1, 16, 64, _mfma_a_32x32x2_f32, _mfma_b_32x32x2_f32, _mfma_acc_32x32
+    ),
+    # --- MFMA fp64 (wave64) -----------------------------------------------
+    # A/B are scalar double per lane in the same layout as fp32 16x16x4; the
+    # accumulator has its own f64 layout (c_frag_len=4).
+    "mfma_f64_16x16x4_f64": _FragInfo(
+        1, 1, 4, 64, _mfma_a_16x16x4, _mfma_b_16x16x4, _mfma_acc_16x16x4_f64
+    ),
+    # 4x4x4 is four independent 4x4x4 blocks stacked along rows (16x4 A, B and
+    # C/D). A matches the 16x16x4 A map.
+    "mfma_f64_4x4x4_f64": _FragInfo(
+        1, 1, 1, 64, _mfma_a_16x16x4, _mfma_b_4x4x4_f64, _mfma_acc_4x4x4_f64
     ),
     # --- MFMA f16 (wave64) ------------------------------------------------
     "mfma_f32_16x16x16_f16": _FragInfo(
@@ -924,6 +976,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
     ),
     "mfma_f32_4x4x4_f16": _FragInfo(4, 4, 4, 64),
+    "mfma_f32_4x4x4_bf16": _FragInfo(4, 4, 4, 64),
     # --- MFMA bf16 (wave64) ----------------------------------------------
     "mfma_f32_16x16x16_bf16": _FragInfo(
         4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_acc_16x16
@@ -953,8 +1006,6 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
     ),
     # --- MFMA MX (wave64), frag lengths only -----------------------------
-    "mfma_f32_16x16x128_fp4": _FragInfo(16, 16, 4, 64),
-    "mfma_f32_16x16x96_fp6": _FragInfo(12, 12, 4, 64),
     # Unscaled fp8 K=128 hero atom (lowers through the f8f6f4 scale-MFMA
     # intrinsic; there is no dense plain fp8 K=128). A/B are 32 fp8 bytes per
     # lane (<8 x i32> at the intrinsic boundary), accumulator <4 x float> --
@@ -963,6 +1014,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # ir.IRBuilder.mma consults) even before it is added to the JSON catalog,
     # instead of hitting the zero-length _frag_info fallback.
     "mfma_f32_16x16x128_fp8": _FragInfo(32, 32, 4, 64),
+    "mfma_f32_16x16x128_fp4fp6fp8": _FragInfo(32, 32, 4, 64),
     "mfma_scale_f32_16x16x128_f8f6f4": _FragInfo(32, 32, 4, 64),
     # --- WMMA f16 / bf16 (wave32, RDNA) ----------------------------------
     "wmma_f32_16x16x16_f16": _FragInfo(
@@ -1076,8 +1128,9 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
 
 
 # Scaled operands share the padded <16 x i32> ABI, byte-carrier scales,
-# and gfx12 accumulator map. Derive every ID from the expanded catalog.
-for _row in _load_specs()["gfx1250"]["mma"]:
+# and gfx12 accumulator map. Derive every ID from the expanded catalog of
+# every arch that lists the family.
+for _row in (row for spec in _load_specs().values() for row in spec["mma"]):
     if _row["family"] == "wmma_scaled":
         _scale_frag_len = 128 // _row["scale_block_k"]
         _MMA_FRAGMENT_INFO[_row["op_id"]] = _FragInfo(
@@ -1184,12 +1237,18 @@ class MemoryCapabilities:
     # ``buffer_load_max_dwords``, which is the *register* vector buffer-load
     # width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
     async_lds_max_dwords: int
-    # gfx1250 feature flags. An arch sets one only after its feature passes a
-    # functional run on a device; the ops themselves are gated separately.
+    # Feature flags. An arch sets one only after its feature passes a
+    # functional run on a device; the lowerers admit the feature's operations
+    # only on a target that sets it.
     has_scalar_data_prefetch: bool = False
     has_global_prefetch: bool = False
     has_cluster_launch: bool = False
     has_multicast_load: bool = False
+    # Float add global atomics: scalar f32 ``global_atomic_add`` and the packed
+    # ``<2 x bf16>`` / ``<2 x f16>`` ``global_atomic_pk_add``. Gates the WMMA
+    # split-K wgrad epilogue; MFMA targets reach these atomics through their own
+    # validated epilogues and do not consult it.
+    has_global_float_atomic_add: bool = False
 
 
 @dataclass(frozen=True)
@@ -1571,6 +1630,22 @@ def _op_id_physical_op_id() -> Dict[str, str]:
     return out
 
 
+def _mma_op_by_id(op_id: str) -> MmaOp | None:
+    """The catalog atom named ``op_id``, or ``None`` when no arch lists it.
+
+    For a caller that holds only an op_id, such as the operand contract of a
+    scaled atom, which does not depend on the target lowering it. An op_id
+    names one atom, so every arch that lists it holds the same row; the first
+    hit in :func:`known_arches` order is returned. Mirrored by
+    ``rocke_arch_mma_op_by_id`` in ``query.cpp``.
+    """
+    for gfx in known_arches():
+        atom = _build_target(gfx).mma.by_op_id(op_id)
+        if atom is not None:
+            return atom
+    return None
+
+
 @lru_cache(maxsize=1)
 def _op_id_family() -> Dict[str, str]:
     """Resolve operation families without selecting a target or parsing IDs."""
@@ -1723,6 +1798,7 @@ def _build_target(gfx: str) -> ArchTarget:
             has_global_prefetch=mem.get("has_global_prefetch", False),
             has_cluster_launch=mem.get("has_cluster_launch", False),
             has_multicast_load=mem.get("has_multicast_load", False),
+            has_global_float_atomic_add=mem.get("has_global_float_atomic_add", False),
         ),
         limits=ResourceLimits(
             max_threads_per_block=lim["max_threads_per_block"],

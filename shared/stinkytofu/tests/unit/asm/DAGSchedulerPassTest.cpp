@@ -818,6 +818,39 @@ TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairStaysTogether) {
     EXPECT_EQ(wmmasBetween(beforeSignal, beforeWait), 0) << scheduleOrder(*bb);
 }
 
+// The latest matching ds_load does not overlap any WMMA, so lastOverlap is 0.
+// An earlier ds_load on the same token overwrites a VGPR read by WMMA 12, so
+// that WMMA is its register-DAG parent. The parent index plus the Step 4 drain
+// budget is larger than the overlap threshold, and the barrier
+// stays behind the WMMAs that follow that parent. A second barrier whose ds_load
+// has no WMMA parent keeps the smaller threshold and issues earlier.
+TEST_F(DAGSchedulerPassTest, BarrierAfterUsesParentWmmaWhenItExceedsDrainThreshold) {
+    bb->addSuccessor(bb);
+
+    createMovableDsLoad(/*destReg=*/400, /*addrReg=*/800, /*ldsToken=*/7);
+    auto [earlySignal, earlyWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/7);
+    (void)earlyWait;
+
+    for (int i = 0; i < 12; ++i) {
+        const int src = (i == 11) ? 0 : 3000 + i * 16;
+        createWmmaF32_16x16x16_bf16(/*destStart=*/1100 + i * 16, /*src0Start=*/src);
+    }
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/810, /*ldsToken=*/3);
+    StinkyInstruction* afterParentWmma =
+        createWmmaF32_16x16x16_bf16(/*destStart=*/1400, /*src0Start=*/4000);
+    for (int i = 0; i < 3; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/1420 + i * 16, /*src0Start=*/4020 + i * 16);
+    createMovableDsLoad(/*destReg=*/64, /*addrReg=*/820, /*ldsToken=*/3);
+    auto [lateSignal, lateWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/3);
+    (void)lateWait;
+    createUnrelatedDsLoads(20);
+
+    runPassWithUnrollGemm(/*dsSpread=*/false);
+
+    EXPECT_LT(positionOf(*bb, earlySignal), positionOf(*bb, afterParentWmma)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, afterParentWmma), positionOf(*bb, lateSignal)) << scheduleOrder(*bb);
+}
+
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWithoutBeforeGroup) {
     bb->addSuccessor(bb);
 
@@ -924,6 +957,39 @@ TEST_F(DAGSchedulerPassTest, AllDsLoadsIssueInDsReadPriorityOrder) {
     const auto [freeHigh, freeLow] = schedule(/*lockDsReadOrder=*/false);
     EXPECT_LT(freeLow, freeHigh)
         << "without LockDsReadOrder a ready lower-priority ds_load may issue first";
+}
+
+// DsReadOrder::ProgramOrder is "no reorder (AABB)": the ds_loads keep program
+// order even though the deadline grouping (earliest WMMA consumer) would pair
+// A0 with B0. Same LDS token, so LockDsReadOrder enforces the priorities.
+TEST_F(DAGSchedulerPassTest, ProgramOrderKeepsDsLoadsInProgramOrder) {
+    StinkyInstruction* a0 = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
+    StinkyInstruction* a1 = createMovableDsLoad(/*destReg=*/208, /*addrReg=*/80, /*ldsToken=*/1);
+    StinkyInstruction* b0 = createMovableDsLoad(/*destReg=*/216, /*addrReg=*/80, /*ldsToken=*/1);
+    StinkyInstruction* b1 = createMovableDsLoad(/*destReg=*/224, /*addrReg=*/80, /*ldsToken=*/1);
+    auto wmma = [&](int dest, int srcA, int srcB) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, arch));
+        inst->addDestReg(StinkyRegister("v", dest, 8));
+        inst->addSrcReg(StinkyRegister("v", srcA, 8));
+        inst->addSrcReg(StinkyRegister("v", srcB, 8));
+        inst->addSrcReg(StinkyRegister("v", dest, 8));
+    };
+    wmma(/*dest=*/100, /*srcA=*/200, /*srcB=*/216);
+    wmma(/*dest=*/116, /*srcA=*/208, /*srcB=*/224);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadOrder = PassFeatureConfig::DsReadOrder::ProgramOrder;
+    pfc.dagFeatures.lockDsReadOrder = true;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    EXPECT_LT(positionOf(*bb, a0), positionOf(*bb, a1));
+    EXPECT_LT(positionOf(*bb, a1), positionOf(*bb, b0)) << "ProgramOrder must not pair A0 with B0";
+    EXPECT_LT(positionOf(*bb, b0), positionOf(*bb, b1));
 }
 
 // Same readiness shape as AllDsLoadsIssueInDsReadPriorityOrder, but the two
@@ -1471,222 +1537,6 @@ TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Disabled_PreservesAll) {
     int beforeCount = countStinkyInstructions(*body);
     runPassWithGlobalReadThrottle(/*depth=*/0, /*drainLatency=*/0);
     EXPECT_EQ(countStinkyInstructions(*body), beforeCount);
-}
-
-// SGPR->tensor_load hazard: a SALU that writes an SGPR a tensor_load reads must
-// be separated from that tensor_load by the fixed hardware gap
-// (kCdna5HazardRules' SaluSgprToMemAddr entry, 8 cycles). Mirrors the real case
-// (wmma/ds fill around the SALU): the scheduler hoists the SALU and/or holds
-// the tensor_load so >= 8 cycles of work sit between them. We assert the cycle
-// invariant, not an exact order. A WMMA counts as its latencyCycles (the
-// co-issue window it opens, 8 here), other ops as issueCycles.
-TEST_F(DAGSchedulerPassTest, SgprToTensorLoadHazard_AtLeast8CycleGap) {
-    BasicBlock* body = bb;
-    body->addSuccessor(body);
-
-    // Movable ds_loads (LDS token -> stay in one region, no side-effect boundary)
-    // as the fill work, a SALU writing s0, and a tensor_load reading s[0:4) so s0
-    // is the hazard register. Enough ds fill (>= hazard) so the gap is filled by
-    // real work, observable in the emitted order rather than an invisible stall.
-    for (int i = 0; i < 12; i++)
-        createMovableDsLoad(/*destReg=*/8 + i * 4, /*addrReg=*/60,
-                            /*ldsToken=*/i + 2);
-
-    AsmIRBuilder builder(*body, arch);
-    StinkyInstruction* salu = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
-    salu->addDestReg(StinkyRegister("s", 0, 1));
-    salu->addSrcReg(StinkyRegister(0));
-
-    createMovableTensorLoad(body, /*s0=*/0, /*s1=*/4, /*ldsToken=*/1);
-
-    runPassWithGlobalReadThrottle(/*depth=*/4, /*drainLatency=*/8);
-
-    // Locate the SALU and the tensor_load in the scheduled order, and total the
-    // cycles of the work between them (WMMA -> latency window, else issue
-    // cycles).
-    int saluPos = -1, tensorPos = -1, idx = 0;
-    std::vector<int> cyclesAt;
-    for (const IRBase& ir : *body) {
-        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
-        const auto* inst = cast<StinkyInstruction>(&ir);
-        cyclesAt.push_back(isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
-        if (inst == salu) saluPos = idx;
-        if (isTensorLoad(*inst)) tensorPos = idx;
-        idx++;
-    }
-    ASSERT_GE(saluPos, 0);
-    ASSERT_GE(tensorPos, 0);
-    ASSERT_LT(saluPos, tensorPos) << "SALU must be scheduled before the tensor_load it feeds";
-
-    int gap = 0;
-    for (int i = saluPos + 1; i < tensorPos; i++) gap += cyclesAt[i];
-    EXPECT_GE(gap, 8) << "tensor_load must be >= 8 cycles after the SALU writing its SGPR";
-}
-
-// Two-instruction SGPR address (e.g. low/high 64-bit split) where a second WMMA
-// becomes ready right as WMMA #0's window closes, stealing the slot the address
-// SALUs needed -- both must still end up >= 8 cycles ahead of the tensor_load.
-TEST_F(DAGSchedulerPassTest, SgprPairToTensorLoadHazard_StolenWindow_AtLeast8CycleGap) {
-    BasicBlock* body = bb;
-    body->addSuccessor(body);
-
-    auto createScalarAdd = [&](int dst, int src0, int src1) {
-        AsmIRBuilder builder(*body, arch);
-        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
-        inst->addDestReg(StinkyRegister("s", dst, 1));
-        inst->addSrcReg(StinkyRegister("s", src0, 1));
-        inst->addSrcReg(StinkyRegister("s", src1, 1));
-        return inst;
-    };
-
-    // WMMA #0 fires first (Phase B); latency=8 keeps its co-issue window open.
-    createWmmaScaleF8_in(body, /*destStart=*/12, /*src0Start=*/50);
-
-    // RAW chain a0->a1->a2->a3: fills positions 2,4,6,8 exactly, saturating the
-    // window.
-    const int kChain = 4;
-    for (int i = 0; i < kChain; i++) {
-        const int src0 = (i == 0) ? 20 : (100 + i - 1);
-        StinkyInstruction* a = createScalarAdd(/*dst=*/100 + i, src0, /*src1=*/21);
-        a->issueCycles = 1;
-        a->latencyCycles = 2;
-    }
-
-    // Independent WMMA #1: ready the instant WMMA #0's window closes.
-    createWmmaScaleF8_in(body, /*destStart=*/200, /*src0Start=*/220);
-
-    // The hazard pair: address low/high, independently computed (no RAW between
-    // them), both feeding the same tensor_load's 4-SGPR base address s[150:154).
-    StinkyInstruction* addLow = createScalarAdd(/*dst=*/150, /*src0=*/160, /*src1=*/161);
-    StinkyInstruction* addHigh = createScalarAdd(/*dst=*/151, /*src0=*/162, /*src1=*/163);
-
-    createMovableTensorLoad(body, /*s0=*/150, /*s1=*/158, /*ldsToken=*/1);
-
-    int beforeCount = countStinkyInstructions(*body);
-    runPassWithUnrollGemm();
-    EXPECT_EQ(countStinkyInstructions(*body), beforeCount)
-        << "scheduling must not drop instructions";
-
-    int addLowPos = -1, addHighPos = -1, tensorPos = -1, idx = 0;
-    std::vector<int> cyclesAt;
-    for (const IRBase& ir : *body) {
-        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
-        const auto* inst = cast<StinkyInstruction>(&ir);
-        cyclesAt.push_back(isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
-        if (inst == addLow) addLowPos = idx;
-        if (inst == addHigh) addHighPos = idx;
-        if (isTensorLoad(*inst)) tensorPos = idx;
-        idx++;
-    }
-    ASSERT_GE(addLowPos, 0);
-    ASSERT_GE(addHighPos, 0);
-    ASSERT_GE(tensorPos, 0);
-    ASSERT_LT(addLowPos, tensorPos) << "low-address SALU must precede the tensor_load";
-    ASSERT_LT(addHighPos, tensorPos) << "high-address SALU must precede the tensor_load";
-
-    const int laterProducerPos = std::max(addLowPos, addHighPos);
-    int gap = 0;
-    for (int i = laterProducerPos + 1; i < tensorPos; i++) gap += cyclesAt[i];
-    EXPECT_GE(gap, 8) << "tensor_load must be >= 8 cycles after BOTH address SALUs, "
-                         "including whichever one was scheduled later";
-}
-
-// Forces Phase G to fire while a SaluSgprToMemAddr gate is still live. Phase
-// G's wait is a clock-only advance with no emitted instruction, so this asserts
-// on the PASS_DEBUG trace instead of instruction order.
-TEST_F(DAGSchedulerPassTest, QueueFullDuringHazard_PhaseGPaysHazardWait) {
-    BasicBlock* body = bb;
-    body->addSuccessor(body);
-
-    // Occupies the single global-read credit slot (unrelated address).
-    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
-
-    AsmIRBuilder builder(*body, arch);
-    StinkyInstruction* salu = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
-    salu->addDestReg(StinkyRegister("s", 0, 1));
-    salu->addSrcReg(StinkyRegister(0));
-
-    // Hazarded: address s[0:4) written by the SALU above; credit pool still full.
-    createMovableTensorLoad(body, /*s0=*/0, /*s1=*/4, /*ldsToken=*/2);
-
-    PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
-    std::ostringstream captured;
-    std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
-    runPassWithGlobalReadThrottle(/*depth=*/1, /*drainLatency=*/6);
-    std::cerr.rdbuf(oldBuf);
-    PassManagerDebugConfig::clearDebugOnly();
-
-    const std::string trace = captured.str();
-    const std::string marker = "Phase G fallback pick";
-    const size_t phaseGPos = trace.find(marker);
-    ASSERT_NE(phaseGPos, std::string::npos)
-        << "expected the credit-pool-exhaustion scenario to force Phase G; "
-           "trace:\n"
-        << trace;
-
-    const std::string waitMarker = "wait=";
-    const size_t waitPos = trace.find(waitMarker, phaseGPos);
-    ASSERT_NE(waitPos, std::string::npos)
-        << "Phase G must record the hazard wait it paid before issuing "
-           "(regression: it used "
-           "to pay only the credit-pool drain wait and skip the hazard gate "
-           "entirely); trace:\n"
-        << trace;
-    const int paidWait = std::stoi(trace.substr(waitPos + waitMarker.size()));
-
-    // Safe clock is >= 9 (gate stamped at clock 1); Phase G is reached at clock
-    // 2, so it must pay >= 7 -- the pre-fix code paid only the credit-pool wait
-    // (6).
-    EXPECT_GE(paidWait, 7) << "Phase G must pay the full outstanding SaluSgprToMemAddr hazard "
-                              "wait, not just the credit-pool drain wait";
-}
-
-// VGPR->global_prefetch_b8 address hazard: a VALU that writes a VGPR the
-// prefetch reads as its vaddr must be separated from that prefetch by the
-// ValuVgprToVmemAddr gap (16 cycles). Same structure as SgprToTensorLoadHazard,
-// but exercises the vgpr-address rule against a global_prefetch_b8 consumer.
-// Regression for the bug where the prefetch was missing IF_GLOBALLoad, so
-// isBufferMemLoad (the rule's consumer predicate) never matched it and the gate
-// was skipped -- the prefetch could sit < 16 cycles after its address VALU.
-TEST_F(DAGSchedulerPassTest, VgprToGlobalPrefetchHazard_AtLeast16CycleGap) {
-    BasicBlock* body = bb;
-    body->addSuccessor(body);
-
-    // Movable ds_loads as fill work so the 16-cycle gap is paid by real
-    // intervening instructions (observable in emitted order rather than an
-    // invisible stall). Each ds_load_b128 is issueCycles=1, so >= 16 are needed
-    // to cover the 16-cycle gate; use the default ds in-flight queue depth (16)
-    // worth so they all pack between.
-    for (int i = 0; i < 16; i++)
-        createMovableDsLoad(/*destReg=*/8 + i * 4, /*addrReg=*/60,
-                            /*ldsToken=*/i + 2);
-
-    // VALU writes v100; prefetch reads v[100:102) as vaddr, so v100 is the hazard
-    // register.
-    StinkyInstruction* valu = createVAddInBlock(body, arch, /*destReg=*/100, /*src0Reg=*/101,
-                                                /*src1Reg=*/102);
-    StinkyInstruction* prefetch = createGlobalPrefetchB8(body, /*vaddrReg=*/100, /*saddrReg=*/0);
-
-    runPassWithGlobalReadThrottle(/*depth=*/4, /*drainLatency=*/8);
-
-    int valuPos = -1, prefetchPos = -1, idx = 0;
-    std::vector<int> cyclesAt;
-    for (const IRBase& ir : *body) {
-        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
-        const auto* inst = cast<StinkyInstruction>(&ir);
-        cyclesAt.push_back(isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
-        if (inst == valu) valuPos = idx;
-        if (inst == prefetch) prefetchPos = idx;
-        idx++;
-    }
-    ASSERT_GE(valuPos, 0);
-    ASSERT_GE(prefetchPos, 0);
-    ASSERT_LT(valuPos, prefetchPos) << "VALU must be scheduled before the prefetch it feeds";
-
-    int gap = 0;
-    for (int i = valuPos + 1; i < prefetchPos; i++) gap += cyclesAt[i];
-    EXPECT_GE(gap, 16) << "global_prefetch_b8 must be >= 16 cycles after the VALU writing its "
-                          "vaddr VGPR";
 }
 
 // ---------------------------------------------------------------------------
@@ -2530,7 +2380,9 @@ TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
     std::string shapes[2];
     for (int v = 0; v < 2; ++v) {
         SetUp();
-        for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+        // Destination registers outside what the WMMAs write (100 .. 476), so no WMMA has to wait
+        // for a load and the WMMAs stay in program order whatever the loads do.
+        for (int i = 0; i < 8; i++) createMovableDsLoad(600 + i * 4, 80, i + 1);
         for (int i = 0; i < 48; i++) createWmmaF32_16x16x16_bf16(8 * (i % 8), 100 + 8 * i);
         PassContext ctx;
         ctx.setGemmTileConfig(config);
@@ -2552,12 +2404,41 @@ TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
         }
         return best;
     };
-    // Greedy bursts the loads; the spread keeps them at most two to a window and finishes the
-    // last one about a ds return latency before the region's last WMMA.
+    // Greedy bursts the loads; the spread keeps them at most two to a window and, with no barrier
+    // ahead of the loads, spreads them to the region's end (no drain there).
     EXPECT_GE(longestRun(shapes[0]), 5u) << shapes[0];
     EXPECT_LE(longestRun(shapes[1]), 2u) << shapes[1];
     EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 8);
-    EXPECT_LT(shapes[1].find_last_of('d') + 9, shapes[1].size()) << shapes[1];
+    EXPECT_GE(shapes[1].find_last_of('d') + 10, shapes[1].size()) << shapes[1];
+}
+
+// The plan counts WMMA positions in program order, so the scheduler must issue the WMMAs in that
+// order: a WMMA waiting for a load does not let a later, independent WMMA pass it (the ready queue
+// is first come first serve, so without the DAG edge it could).
+TEST_F(DAGSchedulerPassTest, DsSpread_KeepsTheWmmasInProgramOrder) {
+    // A reads what the load writes (it waits for the load); B and C are independent of it.
+    createMovableDsLoad(/*destReg=*/600, /*addrReg=*/80, /*ldsToken=*/1);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/600);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/140, /*src0Start=*/8);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.dsSpread = true;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    std::vector<int> wmmaDests;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* in = cast<StinkyInstruction>(&ir);
+        if (isMatrixInstruction(*in))
+            wmmaDests.push_back(static_cast<int>(in->getDestRegs()[0].reg.idx));
+    }
+    EXPECT_EQ(wmmaDests, (std::vector<int>{100, 120, 140}));
 }
 
 // Fixed with batch size 1 is the one-WMMA-at-a-time refill the queue model always had.
@@ -2582,4 +2463,445 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
     }
     EXPECT_EQ(shapes[0], shapes[1]);
     EXPECT_EQ(shapes[0], "WddWWWWWWWdddddd");
+}
+
+// ---------------------------------------------------------------------------
+// Parent VALUs (feedsWmma) go out one WMMA at a time: the parents of a WMMA,
+// then that WMMA, then the next WMMA's parents. A DAG-only edge from the WMMA
+// two before a parent's first consumer holds the parent back; without it every
+// ready parent VALU issues before the first WMMA (perm0, perm1, wmma0, wmma1).
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, ParentValuIssuesOnlyForTargetWmma) {
+    createVAddInBlock(bb, arch, /*destReg=*/10, /*src0Reg=*/11, /*src1Reg=*/13);
+    StinkyInstruction* w0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(w0, nullptr);
+    w0->addSrcReg(StinkyRegister("v", 10, 1));
+
+    createVAddInBlock(bb, arch, /*destReg=*/20, /*src0Reg=*/21, /*src1Reg=*/22);
+    StinkyInstruction* w1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(w1, nullptr);
+    w1->addSrcReg(StinkyRegister("v", 20, 1));
+
+    int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "target-parent unlock must not drop instructions";
+
+    std::vector<std::pair<std::string, int>> seq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        std::string kind;
+        if (mnem.find("wmma") != std::string_view::npos)
+            kind = "wmma";
+        else if (mnem.find("v_add") != std::string_view::npos)
+            kind = "valu";
+        else
+            continue;
+        int dst = (!inst->getDestRegs().empty() && inst->getDestRegs()[0].isRegister())
+                      ? static_cast<int>(inst->getDestRegs()[0].reg.idx)
+                      : -1;
+        seq.push_back({kind, dst});
+    }
+
+    const std::vector<std::pair<std::string, int>> expected = {
+        {"valu", 10},
+        {"wmma", 32},
+        {"valu", 20},
+        {"wmma", 100},
+    };
+    EXPECT_EQ(seq, expected) << "parent VALU of WMMA #1 must not issue before WMMA #0";
+}
+
+// ---------------------------------------------------------------------------
+// A parent VALU is an ordinary VALU candidate, so it co-issues in an in-flight
+// WMMA's window like any other VALU. Here wmma2 is independently ready; perm20
+// (which feeds wmma1) must ride wmma0's window instead of waiting until the
+// ready WMMAs drain.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, ParentValuCoIssuesUnderInFlightWmmaInsteadOfWaitingForQueueDrain) {
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+
+    StinkyInstruction* perm20 =
+        createVAddInBlock(bb, arch, /*destReg=*/20, /*src0Reg=*/21, /*src1Reg=*/22);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+    wmma1->addSrcReg(StinkyRegister("v", 20, 1));
+
+    StinkyInstruction* wmma2 = createWmmaScaleF8(/*destStart=*/300, /*src0Start=*/400);
+    ASSERT_NE(wmma2, nullptr);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "co-issued unlock must not drop instructions";
+
+    EXPECT_LT(positionOf(*bb, wmma0), positionOf(*bb, perm20))
+        << "the unlock should be co-issued under an in-flight WMMA, not hoisted before it";
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma2))
+        << "an already-ready WMMA must not starve the parent VALU of a blocked earlier WMMA";
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma1))
+        << "the unlocked WMMA still has to follow its parent";
+}
+
+// After the in-flight window, a later WMMA whose sources are ready must not
+// overtake an earlier WMMA that still waits for its splat v_perm / matrix_b_reuse
+// partner (the C+16 then C+32-before-C+24 pattern): the parent issues before the
+// later ready WMMA. Filler ds_loads compete for the hide budget the way B_X2
+// preloads do in the real kernel.
+TEST_F(DAGSchedulerPassTest, ParentValuUnlocksEarlierBlockedWmmaBeforeLaterReadyWmma) {
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+
+    StinkyInstruction* perm20 =
+        createVAddInBlock(bb, arch, /*destReg=*/20, /*src0Reg=*/21, /*src1Reg=*/22);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+    wmma1->addSrcReg(StinkyRegister("v", 20, 1));
+
+    StinkyInstruction* wmma2 = createWmmaScaleF8(/*destStart=*/300, /*src0Start=*/400);
+    ASSERT_NE(wmma2, nullptr);
+    StinkyInstruction* wmma3 = createWmmaScaleF8(/*destStart=*/500, /*src0Start=*/600);
+    ASSERT_NE(wmma3, nullptr);
+
+    createMovableDsLoad(/*destReg=*/700, /*addrReg=*/80, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/704, /*addrReg=*/80, /*ldsToken=*/2);
+    createMovableDsLoad(/*destReg=*/708, /*addrReg=*/80, /*ldsToken=*/3);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, wmma0), positionOf(*bb, perm20));
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma1));
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma2))
+        << "a later already-ready WMMA must not issue before the parent that "
+           "unlocks an earlier blocked WMMA";
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma3));
+}
+
+// MX128 splat v_perm per WMMA: each parent issues no earlier than the WMMA two
+// before its consumer (kSplatLeadWmmas): one window of lead still delays the
+// consumer; two hide that without holding the splat VGPR longer.
+TEST_F(DAGSchedulerPassTest, ParentValuWaitsForWmmaTwoBeforeConsumer) {
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+
+    StinkyInstruction* perm20 =
+        createVAddInBlock(bb, arch, /*destReg=*/20, /*src0Reg=*/21, /*src1Reg=*/22);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+    wmma1->addSrcReg(StinkyRegister("v", 20, 1));
+
+    StinkyInstruction* perm24 =
+        createVAddInBlock(bb, arch, /*destReg=*/24, /*src0Reg=*/25, /*src1Reg=*/26);
+    StinkyInstruction* wmma2 = createWmmaScaleF8(/*destStart=*/300, /*src0Start=*/400);
+    ASSERT_NE(wmma2, nullptr);
+    wmma2->addSrcReg(StinkyRegister("v", 24, 1));
+
+    StinkyInstruction* perm28 =
+        createVAddInBlock(bb, arch, /*destReg=*/28, /*src0Reg=*/29, /*src1Reg=*/30);
+    StinkyInstruction* wmma3 = createWmmaScaleF8(/*destStart=*/500, /*src0Start=*/600);
+    ASSERT_NE(wmma3, nullptr);
+    wmma3->addSrcReg(StinkyRegister("v", 28, 1));
+
+    createMovableDsLoad(/*destReg=*/700, /*addrReg=*/80, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/704, /*addrReg=*/80, /*ldsToken=*/2);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, wmma0), positionOf(*bb, perm24))
+        << "wmma2's parent must wait for wmma0, two WMMAs before its consumer";
+    EXPECT_LT(positionOf(*bb, perm24), positionOf(*bb, wmma2));
+    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, perm28))
+        << "wmma3's parent must wait for wmma1, two WMMAs before its consumer";
+    EXPECT_LT(positionOf(*bb, perm28), positionOf(*bb, wmma3));
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma1));
+    // A one-WMMA lead would hold perm24 behind wmma1 and perm28 behind wmma2.
+    EXPECT_LT(positionOf(*bb, perm24), positionOf(*bb, wmma1))
+        << "wmma2's parent rides wmma0's window, ahead of wmma1";
+    EXPECT_LT(positionOf(*bb, perm28), positionOf(*bb, wmma2))
+        << "wmma3's parent rides wmma1's window, ahead of wmma2";
+}
+
+// Next-iter / already-consumed ds_loads can get a better dsReadPriority than
+// the load that still unlocks a later WMMA (loop-head affinity via PHI). If
+// those preloads issue first they occupy the LDS queue and the later WMMA
+// waits s_wait_dscnt 0. While any WMMA is still unissued, only loads that
+// still feed a pending WMMA may be picked.
+TEST_F(DAGSchedulerPassTest, PendingWmmaDsLoadBeatsNextIterPreload) {
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+    StinkyInstruction* preload = createMovableDsLoad(/*destReg=*/500, /*addrReg=*/80,
+                                                     /*ldsToken=*/1);
+    StinkyInstruction* needed = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80,
+                                                    /*ldsToken=*/2);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, needed), positionOf(*bb, preload))
+        << "the ds_load that unlocks a still-pending WMMA must issue before a "
+           "preload that feeds no pending WMMA";
+    EXPECT_LT(positionOf(*bb, needed), positionOf(*bb, wmma1));
+}
+
+// MX128 loop body under LockDsReadOrder. This trip's MXSA/MXSB loads feed one
+// WMMA through splat VALUs; the next trip's MXSA preload overwrites a register
+// an earlier WMMA still reads and waits on the LDS1 barrier. Ordering the
+// parent tier MXSA-before-MXSB chained the current MXSB behind that preload,
+// holding the WMMA back until after the barrier.
+TEST_F(DAGSchedulerPassTest, ParentTierDsLoadOrderFollowsWmmaConsumerNotKind) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* mxsaCur = createMovableDsLoad(/*destReg=*/600, /*addrReg=*/80,
+                                                     /*ldsToken=*/0);
+    StinkyInstruction* mxsbCur = createMovableDsLoad(/*destReg=*/620, /*addrReg=*/81,
+                                                     /*ldsToken=*/0);
+
+    StinkyInstruction* wmmaHead = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmmaHead, nullptr);
+    wmmaHead->addSrcReg(StinkyRegister("v", 652, 1));  // MXSB
+    wmmaHead->addSrcReg(StinkyRegister("v", 640, 1));  // MXSA, loop-carried preload
+
+    createVAddInBlock(bb, arch, /*destReg=*/610, /*src0Reg=*/600, /*src1Reg=*/600);
+    createVAddInBlock(bb, arch, /*destReg=*/611, /*src0Reg=*/620, /*src1Reg=*/620);
+    StinkyInstruction* wmmaCur = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmmaCur, nullptr);
+    wmmaCur->addSrcReg(StinkyRegister("v", 611, 1));  // MXSB
+    wmmaCur->addSrcReg(StinkyRegister("v", 610, 1));  // MXSA
+
+    StinkyInstruction* wait = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1).second;
+    StinkyInstruction* mxsaNext = createMovableDsLoad(/*destReg=*/640, /*addrReg=*/80,
+                                                      /*ldsToken=*/1);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, mxsaCur), positionOf(*bb, mxsbCur));
+    EXPECT_LT(positionOf(*bb, mxsbCur), positionOf(*bb, mxsaNext))
+        << "the MXSB load of this trip's WMMA must not be chained behind the next "
+           "trip's barrier-gated MXSA preload";
+    EXPECT_LT(positionOf(*bb, wait), positionOf(*bb, mxsaNext));
+}
+
+// MX128 loop body: two WMMAs on the same accumulator read their own buffers
+// (X1, X2). LDS returns in order, so the second WMMA's MXS load chained ahead
+// of the first WMMA's A load would be waited out by the first WMMA. The parent
+// tier leads only among loads with the same deadline.
+TEST_F(DAGSchedulerPassTest, ParentTierDsLoadOrderFollowsDeadline_AccumulatorReuse) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* wmmaHead = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmmaHead, nullptr);
+
+    StinkyInstruction* mxsP1 = createMovableDsLoad(/*destReg=*/600, /*addrReg=*/80,
+                                                   /*ldsToken=*/0);
+    StinkyInstruction* mxsP2 = createMovableDsLoad(/*destReg=*/700, /*addrReg=*/81,
+                                                   /*ldsToken=*/0);
+    StinkyInstruction* aP1 = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/82,
+                                                 /*ldsToken=*/0);
+    StinkyInstruction* aP2 = createMovableDsLoad(/*destReg=*/400, /*addrReg=*/83,
+                                                 /*ldsToken=*/0);
+
+    createVAddInBlock(bb, arch, /*destReg=*/610, /*src0Reg=*/600, /*src1Reg=*/600);
+    StinkyInstruction* wmmaP1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmmaP1, nullptr);
+    wmmaP1->addSrcReg(StinkyRegister("v", 610, 1));
+
+    createVAddInBlock(bb, arch, /*destReg=*/710, /*src0Reg=*/700, /*src1Reg=*/700);
+    // Reuse wmmaP1's accumulator destination.
+    StinkyInstruction* wmmaP2 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/400);
+    ASSERT_NE(wmmaP2, nullptr);
+    wmmaP2->addSrcReg(StinkyRegister("v", 710, 1));
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, mxsP1), positionOf(*bb, aP1))
+        << "the parent tier still leads within its deadline";
+    EXPECT_LT(positionOf(*bb, aP1), positionOf(*bb, mxsP2))
+        << "a later WMMA's MXS load must not issue ahead of an earlier WMMA's "
+           "outstanding A/B load";
+    EXPECT_LT(positionOf(*bb, mxsP2), positionOf(*bb, aP2));
+    EXPECT_LT(positionOf(*bb, wmmaP1), positionOf(*bb, wmmaP2));
+}
+
+// Same loads, but the two WMMAs write disjoint accumulators, as the B tiles of
+// one k-step do when each carries its own MXSB load (MT64x192, MT32x256). The
+// second MXS load is still a parent-tier load, yet its deadline is the second
+// WMMA, so it must not lead the first WMMA's A load.
+TEST_F(DAGSchedulerPassTest, ParentTierDsLoadOrderFollowsDeadline_DisjointAccumulators) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* wmmaHead = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmmaHead, nullptr);
+
+    StinkyInstruction* mxsP1 = createMovableDsLoad(/*destReg=*/600, /*addrReg=*/80,
+                                                   /*ldsToken=*/0);
+    StinkyInstruction* mxsP2 = createMovableDsLoad(/*destReg=*/700, /*addrReg=*/81,
+                                                   /*ldsToken=*/0);
+    StinkyInstruction* aP1 = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/82,
+                                                 /*ldsToken=*/0);
+    StinkyInstruction* aP2 = createMovableDsLoad(/*destReg=*/400, /*addrReg=*/83,
+                                                 /*ldsToken=*/0);
+
+    createVAddInBlock(bb, arch, /*destReg=*/610, /*src0Reg=*/600, /*src1Reg=*/600);
+    StinkyInstruction* wmmaP1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmmaP1, nullptr);
+    wmmaP1->addSrcReg(StinkyRegister("v", 610, 1));
+
+    createVAddInBlock(bb, arch, /*destReg=*/710, /*src0Reg=*/700, /*src1Reg=*/700);
+    StinkyInstruction* wmmaP2 = createWmmaScaleF8(/*destStart=*/300, /*src0Start=*/400);
+    ASSERT_NE(wmmaP2, nullptr);
+    wmmaP2->addSrcReg(StinkyRegister("v", 710, 1));
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, mxsP1), positionOf(*bb, aP1))
+        << "the parent tier still leads within its deadline";
+    EXPECT_LT(positionOf(*bb, aP1), positionOf(*bb, mxsP2))
+        << "a parent-tier load for a later WMMA must wait for the earlier WMMA's "
+           "A/B load even when the accumulators are disjoint";
+    EXPECT_LT(positionOf(*bb, mxsP2), positionOf(*bb, aP2));
+}
+
+// Later-consumer loads that are also pending (B_X2+0/+4) must not issue ahead
+// of an earlier consumer's load (B_X1+28): LDS returns in order, so the earlier
+// WMMA would wait them out. Rank by earliest pending WMMA consumer. Outside a
+// steady loop too, once the earlier WMMA has no ds_load left, leftover
+// dsReadPerWmma slots go to the later consumer in DS order.
+TEST_F(DAGSchedulerPassTest, EarliestPendingWmmaDsLoadBeatsLaterConsumerCapFill) {
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+
+    StinkyInstruction* dsLate0 = createMovableDsLoad(/*destReg=*/400, /*addrReg=*/80,
+                                                     /*ldsToken=*/1);
+    StinkyInstruction* dsLate1 = createMovableDsLoad(/*destReg=*/404, /*addrReg=*/80,
+                                                     /*ldsToken=*/2);
+    StinkyInstruction* dsEarly = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80,
+                                                     /*ldsToken=*/3);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+    // Reuse wmma1's accumulator destination.
+    StinkyInstruction* wmma2 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/400);
+    ASSERT_NE(wmma2, nullptr);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, dsLate0))
+        << "the load that unlocks the earlier WMMA must issue before later-consumer "
+           "loads that only compete on leftover dsReadPerWmma slots";
+    EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, dsLate1));
+    EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, wmma1));
+    EXPECT_LT(positionOf(*bb, dsLate0), positionOf(*bb, wmma1))
+        << "once the earlier consumer's loads are issued, a later consumer's load "
+           "should use the current WMMA window outside a steady loop as well";
+    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, wmma2));
+}
+
+// The same look-ahead in a steady loop. Once the earlier WMMA has no ds_load
+// left to issue, a load for a later, disjoint accumulator tile should use the
+// current WMMA's latency window instead of landing immediately before its own
+// consumer and producing s_wait_dscnt 0.
+TEST_F(DAGSchedulerPassTest, SteadyLoopFutureWmmaDsLoadUsesCurrentWindow) {
+    bb->addSuccessor(bb);
+    StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma0, nullptr);
+    StinkyInstruction* dsEarly = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80,
+                                                     /*ldsToken=*/1);
+    StinkyInstruction* dsFuture = createMovableDsLoad(/*destReg=*/400, /*addrReg=*/80,
+                                                      /*ldsToken=*/2);
+    StinkyInstruction* wmma1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(wmma1, nullptr);
+    StinkyInstruction* wmma2 = createWmmaScaleF8(/*destStart=*/300, /*src0Start=*/400);
+    ASSERT_NE(wmma2, nullptr);
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, dsEarly), positionOf(*bb, dsFuture));
+    EXPECT_LT(positionOf(*bb, dsFuture), positionOf(*bb, wmma1))
+        << "once the earlier consumer's loads are issued, a later consumer's load "
+           "should prefetch in the current WMMA window";
+    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, wmma2));
+}
+
+// Before the region's first WMMA there is no co-issue window, but the WMMA
+// itself stalls on its parent VALU. A RAW-stalled SALU that finishes issuing
+// inside that stall is free, so it must go ahead of the WMMA instead of the WMMA
+// being forced first. When the SALU would delay the WMMA, the WMMA keeps going
+// first.
+static std::vector<StinkyInstruction*> buildFirstWmmaStallCase(BasicBlock* bb, GfxArchID arch,
+                                                               int parentLatency) {
+    StinkyInstruction* parent =
+        createVAddInBlock(bb, arch, /*destReg=*/10, /*src0Reg=*/11, /*src1Reg=*/12);
+    parent->issueCycles = 1;
+    parent->latencyCycles = parentLatency;
+
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* producer = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+    producer->addDestReg(StinkyRegister("s", 100, 1));
+    producer->addSrcReg(StinkyRegister("s", 0, 1));
+    producer->addSrcReg(StinkyRegister("s", 1, 1));
+    producer->issueCycles = 1;
+    producer->latencyCycles = 2;
+
+    StinkyInstruction* stalled = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+    stalled->addDestReg(StinkyRegister("s", 101, 1));
+    stalled->addSrcReg(StinkyRegister("s", 100, 1));
+    stalled->addSrcReg(StinkyRegister("s", 1, 1));
+    stalled->issueCycles = 1;
+    stalled->latencyCycles = 1;
+    return {parent, producer, stalled};
+}
+
+TEST_F(DAGSchedulerPassTest, StalledSaluFillsFirstWmmaSourceStall) {
+    const std::vector<StinkyInstruction*> nodes =
+        buildFirstWmmaStallCase(bb, arch, /*parentLatency=*/5);
+    StinkyInstruction* wmma = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma, nullptr);
+    wmma->addSrcReg(StinkyRegister("v", 10, 1));
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, nodes[0]), positionOf(*bb, wmma));
+    EXPECT_LT(positionOf(*bb, nodes[1]), positionOf(*bb, wmma));
+    EXPECT_LT(positionOf(*bb, nodes[2]), positionOf(*bb, wmma))
+        << "a SALU whose 1-cycle RAW wait ends inside the first WMMA's own source "
+           "stall is free and must not be pushed behind a forced WMMA";
+}
+
+TEST_F(DAGSchedulerPassTest, StalledSaluDoesNotDelayFirstWmma) {
+    const std::vector<StinkyInstruction*> nodes =
+        buildFirstWmmaStallCase(bb, arch, /*parentLatency=*/2);
+    StinkyInstruction* wmma = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(wmma, nullptr);
+    wmma->addSrcReg(StinkyRegister("v", 10, 1));
+
+    const int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
+
+    EXPECT_LT(positionOf(*bb, wmma), positionOf(*bb, nodes[2]))
+        << "a stalled SALU that cannot finish before the first WMMA's sources are "
+           "ready would delay it and must stay behind it";
 }

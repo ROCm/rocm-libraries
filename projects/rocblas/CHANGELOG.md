@@ -3,6 +3,16 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
+## rocBLAS 5.9.0
+
+### Added
+
+* `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`) writes one `rocblas-bench`-replayable line to the trace log for each internal GEMM sub-problem that launches a kernel. Use it to break higher-level Level 3 calls such as `trsm`, `trmm`, and `syrk` into kernels that can be benchmarked individually. The bench function is `gemm_ex`, `gemm_batched_ex`, or `gemm_strided_batched_ex`, matching the sub-problem layout. A trailing comment names the path that ran it (`hipblaslt`, `tensile`, `source`, or `gemv`), the selected kernel or launcher (except for hipBLASLt), the backends it fell back from, and the calling API.
+
+### Resolved issues
+
+* Fix trace and bench logging of `alpha` for `axpy_ex` and `scal_ex`, including batched and strided-batched forms, when `alpha_type` is `bf16_r`. The trace log wrote an empty `alpha` field, and the bench log omitted `--alpha`, so replaying the logged command with `rocblas-bench` ran with the default `alpha` of 1. Logging-helper failures in the `_ex` functions are now reported on `stderr` rather than silently discarded.
+
 ## rocBLAS 5.8.0 
 
 ### Added

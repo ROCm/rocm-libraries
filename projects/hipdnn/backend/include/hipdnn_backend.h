@@ -165,6 +165,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * Executes the given engine_configuration_plan on the variantPack and the finalized executionPlan
  * on the data. The data and the working space are encapsulated in the variantPack.
  *
+ * The plan may run on any handle whose stream is on the device the plan was finalized or
+ * deserialized for; a handle on another device is rejected with HIPDNN_STATUS_BAD_PARAM, even
+ * when both devices have the same properties. To run the plan on another device, serialize it
+ * and deserialize it with a handle on that device (see
+ * hipdnnBackendCreateAndDeserializeExecutionPlan_ext()).
+ *
  * @param  [in]  handle              An instance of hipdnnHandle_t
  * @param  [in]  executionPlan       Descriptor of the finalized executionPlan
  * @param  [in]  variantPack         Descriptor of the finalized variantPack consisting of:
@@ -174,8 +180,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  *                                     large as the size queried
  *
  * @retval  HIPDNN_STATUS_SUCCESS               The executionPlan was executed successfully
- * @retval  HIPDNN_STATUS_BAD_PARAM             An incorrect or inconsistent value is encountered. For example, a required data pointer is invalid.
- * @retval  HIPDNN_STATUS_INTERNAL_ERROR        Some internal errors were encountered.
+ * @retval  HIPDNN_STATUS_BAD_PARAM             An incorrect or inconsistent value is encountered. For example, a required data pointer is invalid, or the handle's stream is on a different device than the executionPlan.
+ * @retval  HIPDNN_STATUS_INTERNAL_ERROR        Some internal errors were encountered, for example the device of the handle's stream could not be queried.
  * @retval  HIPDNN_STATUS_EXECUTION_FAILED      An error was encountered executing the plan with the variantPack.
  *
  */
@@ -188,6 +194,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
 * Finalizes the memory pointed to by the descriptor. The type of finalization is done depending on
 * the descriptor_type argument with which the descriptor was created using
 * hipdnnBackendCreateDescriptor() or initialized using hipdnnBackendInitialize().
+*
+* @note An engine descriptor validates its graph and engine applicability here, but loads
+* plugin metadata lazily. The first engine-name, knob-info, or behavior-note attribute query
+* fetches and validates EngineDetails, including count-only queries. Successful finalization
+* does not guarantee that metadata retrieval will succeed; callers requiring eager metadata
+* validation should issue such a query after finalization.
 *
 * @param  [in]  descriptor  Instance of hipdnnBackendDescriptor_t to finalize
 *
@@ -209,6 +221,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * pointer to the output value. This function will return HIPDNN_STATUS_NOT_INTIALIZED if the
  * descriptor has not been successfully finalized using hipdnnBackendFinalize()
  *
+ * @note Engine-name, knob-info, and behavior-note queries lazily fetch plugin EngineDetails.
+ * Retrieval or validation errors are reported by this call, not engine finalization. A failed
+ * metadata load publishes no partial result and can be retried by a later attribute query.
+ *
  * @param  [in]   descriptor               Instance of hipdnnBackendDescriptor_t whose attribute to
  *                                         retrieve
  * @param  [in]   attributeName            The name of the attribute being get from the descriptor
@@ -226,6 +242,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * @retval  HIPDNN_STATUS_BAD_PARAM         One or more invalid or inconsistent argument values were encountered. Some examples include:
  *                                              attributeName is not a valid attribute for the descriptor.
  *                                              attributeType is not one of the valid types for the attribute.
+ * @retval  HIPDNN_STATUS_PLUGIN_ERROR      An engine plugin failed to provide valid metadata.
  * @retval  HIPDNN_STATUS_NOT_INITIALIZED   The descriptor has not been successfully finalized using hipdnnBackendFinalize().
  *
  */
@@ -421,6 +438,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * contain a hipDNN FlatBuffer envelope with routing metadata, plan tensor UIDs, and opaque
  * plugin-specific execution context bytes.
  *
+ * A plan created by hipdnnBackendCreateAndDeserializeExecutionPlan_ext() is not serialized again:
+ * the call returns the plan bytes it was deserialized from, unchanged, and does not call the
+ * plugin. When those bytes came from a graph-and-plan container, only the embedded plan is
+ * returned. The returned bytes keep their original envelope version, plugin payload and kernel,
+ * so upgrading a plugin does not change them; build a new plan to pick up a newer kernel.
+ *
  * @param [in]  descriptor        A finalized execution plan descriptor.
  * @param [in]  requestedByteSize Size of the caller-allocated buffer in bytes.
  *                                Ignored when @p serializedPlan is @c nullptr.
@@ -442,7 +465,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * extracted and deserialized. A container that carries no execution plan is rejected with
  * HIPDNN_STATUS_BAD_PARAM. A bare execution-plan blob (as produced by
  * hipdnnBackendGetSerializedExecutionPlan_ext()) is deserialized directly. The returned execution
- * plan descriptor is finalized in both cases.
+ * plan descriptor is finalized in both cases. It keeps a copy of the plan bytes, which can include
+ * GPU code objects, for its lifetime; hipdnnBackendGetSerializedExecutionPlan_ext() returns them.
+ *
+ * The returned plan is bound to the device of @p handle's stream and executes only on handles
+ * whose stream is on that device (see hipdnnBackendExecute()). To move a plan to another device,
+ * deserialize the same bytes with a handle on that device.
  *
  * @param [in]  handle         A hipDNN handle used to access loaded engine plugins.
  * @param [out] descriptor     Pointer to the created execution plan descriptor.

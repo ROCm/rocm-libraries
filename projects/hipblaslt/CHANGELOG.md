@@ -15,7 +15,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   `HIPBLASLT_CHECK_NUMERICS`, each covered call pays a stream sync and a
   device-to-host copy, so this is single-threaded debugging use only, not for
   concurrent-stream workloads.
-* Opt-in runtime tuning cache, off by default. `HIPBLASLT_TUNING_MODE=cache` with `HIPBLASLT_TUNING_CACHE_PATH=<file>` replays a tuning file, validating each entry as `HIPBLASLT_TUNING_OVERRIDE_FILE` does. Unlike the override file, it also serves `hipblasLtMatmul` calls that pass no `algo`, and it reports what it loaded and a closing summary of how many problems it served without needing a log level. An explicit `algo` always launches as given. With a tuning mode set, `HIPBLASLT_TUNING_OVERRIDE_FILE` is ignored. A process in a secure execution context ignores both variables.
+* Opt-in runtime tuning cache, off by default. `HIPBLASLT_TUNING_MODE=off|cache|tune` and `HIPBLASLT_TUNING_CACHE_PATH=<file>` let the library benchmark candidate kernels for an unseen problem at its first `hipblasLtMatmul`, record the winner, and replay it afterwards. `tune` measures candidates the way `hipblaslt-bench` does (warm-up and timed launches over rotating buffers, with an instruction-cache flush), serialises tuning within a process, and bounds each shape's search to five minutes by default (`HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`). A search the budget stops records its best candidate as incomplete, which is never slower than the untuned kernel because that kernel is measured first, and tune mode revisits it when a later run can finish or widen the search. `cache` only replays, validating each entry as `HIPBLASLT_TUNING_OVERRIDE_FILE` does, and also serves `hipblasLtMatmul` calls that pass no `algo`. An explicit `algo` always launches as given. Both modes report what they loaded, each tuned shape's start and result, and a closing summary without needing a log level. With a tuning mode set, `HIPBLASLT_TUNING_OVERRIDE_FILE` is ignored, and a process in a secure execution context ignores every tuning variable.
+* `TENSILELITE_EMIT_OCCUPANCY_PROBE` CMake option and `invoke build --emit-occupancy-probe` (off by default) to emit a CU-occupancy probe into gfx950 Stream-K Hybrid kernels, needed by `HIPBLASLT_ADAPTIVE_SM_COUNT`.
+* Adaptive `sm_count_target` mode, off by default. With `HIPBLASLT_ADAPTIVE_SM_COUNT=1`, `hipblasLtMatmul` periodically measures the CUs available to a stream with the occupancy probe and uses the count as an implicit `sm_count_target`; `HIPBLASLT_ADAPTIVE_SM_COUNT_*` variables tune or force it. In this mode the top heuristic result reports `workspaceSize = min(MAX_WORKSPACE_BYTES, max(required, 128 MiB))`, and `hipblaslt-bench`, `hipblaslt-sequence`, and `hipblaslt-api-overhead` refuse to time unless `HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE` is set.
+* In adaptive `sm_count_target` mode, `hipblasLtMatmul` re-selects the top heuristic result at launch when the adaptive hint differs from the one it was ranked under and the new solution fits the workspace. A result from `HIPBLASLT_TUNING_OVERRIDE_FILE` or the tuning cache, or a launch on a capturing stream, is never re-selected.
 * w4a16 mixed-precision GEMM support: matrix A accepts `HIP_R_4I` (signed int4, two elements per byte) with per-K-group scales, as used by GPTQ, AWQ, and compressed-tensors checkpoints. Group sizes are 32, 64, and 128, with symmetric scales or asymmetric scales that carry packed zero-points. New API: twelve `hipblasLtMatmulMatrixScale_t` values (`HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT` through `HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_EXT`, plus the matching `_ZP_EXT` variants), the `HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT` descriptor attribute with `hipblasLtInt4Encoding_t` (`HIPBLASLT_INT4_ENCODING_SIGNED_EXT` or `HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT`), and `hipblaslt_ext::GemmProblemType::setInt4EncodingA` and `getInt4EncodingA`. Custom gfx1151 assembly kernels cover bf16 and fp16 activations. `hipblaslt-bench` adds `--int4_encoding`.
 * gfx1170 and gfx1171 GPU target support, with tuned Equality and GridBased GEMM libraries for gfx1170.
 * gfx1250 GEMM support for bf16 and fp32 with bias, GELU activation, and Aux output (`UseE`), and for per-tensor FP8 and BF8 inputs with FP8 or BF8 output and `OutputAmaxD`, each for all four transpose combinations. MXFP8 (TN only) adds mixed e4m3/e5m2 inputs, FP8 inputs with FP16 output, and BF8 inputs.
@@ -37,6 +40,14 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Removed
 
 * `TENSILE_PRECISE_SM_TARGET` environment variable, which previously disabled the rounding of the SM count target.
+* `install.sh --asic-revision` option and `HIPBLASLT_ASIC_REVISION` CMake variable.
+
+### Optimized
+
+* Improved DGEMM performance on gfx942 (MI300X) with retuned GridBased library logic.
+* Improved fp16 and bf16 NN GEMM performance on gfx1100 and fp8, bf8, and int8 TN GEMM performance on gfx1201 with Origami libraries.
+* Added tuned Origami libraries for CGEMM, ZGEMM, and int8 GEMMs on gfx950.
+* Improved gfx950 performance of skinny BF16 and FP16 TN GEMMs with one to five tokens (`n` of 1 to 5, the decode layout of `torch.mm(x, w.t())`) by routing them to wave-split-K custom kernels adapted from vLLM.
 
 ### Resolved issues
 

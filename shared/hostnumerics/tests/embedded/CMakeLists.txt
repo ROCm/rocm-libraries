@@ -21,8 +21,15 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${HOSTNUMERICS_SOURCE_DIR}/cmake")
 include(HostNumericsTestDependencies)
-add_executable(hostnumerics-embedded-test "${HOSTNUMERICS_SOURCE_DIR}/tests/version_test.cpp")
+add_executable(hostnumerics-embedded-test "${HOSTNUMERICS_SOURCE_DIR}/tests/core_test.cpp"
+    "${HOSTNUMERICS_SOURCE_DIR}/tests/expected_test.cpp"
+    "${HOSTNUMERICS_SOURCE_DIR}/tests/integer_conversion_test.cpp")
 target_link_libraries(hostnumerics-embedded-test PRIVATE roc::hostnumerics GTest::gtest_main)
 
 enable_testing()
-add_test(NAME hostnumerics-embedded-test COMMAND hostnumerics-embedded-test)
+include(GoogleTest)
+gtest_discover_tests(
+    hostnumerics-embedded-test
+    DISCOVERY_MODE PRE_TEST
+    TEST_PREFIX "hostnumerics-embedded-test."
+)

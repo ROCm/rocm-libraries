@@ -369,15 +369,53 @@ pieces the v2 body composes.
 
 ## MX GEMM `instances/mx_gemm.py::MxGemmSpec` matches CK Tile ``42_mx_gemm``. Uses
 the OCP MX-spec shared-exponent format: each 32-element mantissa
-block carries one 8-bit unbiased E8M0 scale. v1 supports fp8 and bf8
+block carries one 8-bit biased E8M0 scale (bias 127). v1 supports fp8 and bf8
 mantissa with ``group_k=32``; fp4 / fp6 mantissa land with the
 matching unpack helpers as v2.
 
-The decode chain
-(:func:`rocke.helpers.decode_mx_scale_e8m0` +
-:func:`rocke.helpers.apply_mx_scale`) handles the NaN / zero
-sentinels (E8M0 ``e == 0`` and ``e == 255``) by returning ``0.0``,
-matching the AMDGPU MX MFMA hardware path's denormal flush.
+The scales follow the OCP MX spec: the E8M0 byte is an unsigned
+biased exponent, codes 0..254 mean exactly ``2^(code - 127)`` (code 0
+is the f32 subnormal ``2^-127``) and code 255 means NaN. Each group's
+MFMA result is scaled by :func:`rocke.helpers.fma_with_mx_scale_pair`,
+which adds the A and B scale exponents as integers instead of
+multiplying two decoded f32 scales: that product spans
+``2^-254..2^254`` and would overflow or flush to zero in f32 even when
+the output is an ordinary f32.
+
+### MX GEMM outputs: exact
+
+Write ``ea``, ``eb`` for the unbiased exponents of a group's A and B scale
+codes (``code - 127``) and ``dot`` for the group's f32 MFMA result. Each output
+starts at +0 and adds every group's ``dot * 2^(ea + eb)``, one group at a time,
+rounding each addition once to f32. That is what IEEE f32 arithmetic gives for
+the same steps, bit for bit, including infinities, NaN and the sign of zero,
+for the supported fp8 and bf8 formats on gfx942 and gfx950. A scale code 255
+makes its block NaN.
+
+How: ``2^(ea + eb)`` spans ``2^-254..2^254``, so it is never formed as one
+f32. The update is ``fma(dot * 2^pre, 2^fused, acc)`` with ``pre + fused =
+ea + eb``: ``fused`` is ``ea + eb`` clamped to the f32 powers of two
+(``-149..127``) and ``pre`` the rest. The fma rounds once, so the update is
+exact whenever ``dot * 2^pre`` is exact.
+
+Why that is exact: ``dot`` is bounded. A group is 32 products of two fp8 or
+bf8 values, so ``dot`` is a multiple of the product of the two smallest
+subnormals and at most ``32 * largest^2`` in magnitude, and an f32 rounding of
+it keeps both properties. ``dot * 2^pre`` is therefore an exact f32 for every
+``pre`` that neither pushes the largest ``dot`` past the f32 range nor pushes
+the smallest below ``2^-149``, and that range of ``pre`` together with
+``fused`` covers every ``ea + eb`` from -254 up to a saturation point. Above
+that point ``fused`` is 127 and ``pre`` is saturated, so the update uses
+``2^(saturation point)`` in place of ``2^(ea + eb)``: there
+``|dot| * 2^(ea + eb)`` is at least
+``2^129`` for every nonzero ``dot``, so the exact update is the infinity of
+the product's sign for a finite accumulator and the accumulator itself for an
+infinite one, and a zero ``dot`` adds a zero either way: the saturated update
+gives the same. :func:`rocke.helpers.exact_mx_scale_split` derives the
+saturation point and the split from the bounds of the element format the
+target's MFMA reads (the OCP encodings on gfx950, the FNUZ encodings on
+gfx942), and refuses a format whose bounds admit no exact split. The
+derivation is in its docstring.
 
 ## FP8 / BF8 MFMA atoms `helpers/atoms.py` adds four FP8 / BF8 MFMA atoms paired with the
 existing fp16 catalog:

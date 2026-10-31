@@ -49,6 +49,7 @@ from kernels.gfx942.attention_dense import (
     run_attention_dense_torch,
     supports_attention_dense,
     _BLOCK_M,
+    _as_gfx942_spec,
     _DEFAULT_LDS_ROW_PAD,
     _FASTDIV_DIVIDEND_LIMIT,
     _k_group_pad_active,
@@ -136,6 +137,10 @@ def test_bottom_right_field_is_keyword_only_without_shifting_concrete_signatures
             params["causal_bottom_right"].kind is inspect.Parameter.KEYWORD_ONLY
         ), spec_type.__name__
         assert params["causal_bottom_right"].default is False
+        for kw_only in ("nonpersist_decode", "chiplet_num_xcds"):
+            assert (
+                params[kw_only].kind is inspect.Parameter.KEYWORD_ONLY
+            ), spec_type.__name__
         positionals = tuple(
             name
             for name, param in params.items()
@@ -262,7 +267,6 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
         "paged",
         "block_size",
         "num_kv_blocks",
-        "causal_bottom_right",
         "lds_num_buffers",
     }
 )
@@ -290,7 +294,7 @@ _SPEC_PERTURBATIONS = {
     "num_kv_heads": (8, 2),
     "head_size": (64, 128),
     "causal": (False, True),
-    "causal_bottom_right": (),  # unbuildable on gfx942
+    "causal_bottom_right": (True,),
     "dtype": ("bf16", "fp16"),
     "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
@@ -305,7 +309,9 @@ _SPEC_PERTURBATIONS = {
     "persistent": (True, False),
     "num_persistent": (152, 304),
     "interleave": (True, False),
-    "persist_decode": ("qb_major", "hkv_major"),
+    "persist_decode": ("qb_major", "hkv_major", "bt_hkv_minor"),
+    "nonpersist_decode": ("bt_hkv_minor", "qb_minor", "hq_minor_swz"),
+    "chiplet_num_xcds": (1, 4),
     "lazy_rescale": (False, True),
     "use_sinks": (True,),
 }
@@ -328,7 +334,9 @@ _PRIVATE_PERTURBATIONS = {
     "pv_priority": (1, 3),
     "pv_sched_fence_mask": (0, 0x108),
     "causal_diag_split": (True,),
+    "window_wave_skip": (True,),  # legal only with a causal window -> the *_swa base
     "emit_lse": (True, False),
+    "kv_segments": (2, 4),  # default grid only; skipped on the persistent base
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -346,6 +354,8 @@ _INJECTIVITY_BASES = {
     "d128_bf16_naive": dict(head_size=128, dtype="bf16"),
     "d64_fp16": dict(head_size=64, dtype="fp16"),
     "d64_bf16": dict(head_size=64, dtype="bf16"),
+    # The sliding-window base is what makes window_wave_skip reachable.
+    "d128_fp16_swa": dict(head_size=128, dtype="fp16", sliding_window=128),
     "persistent_d128_fp16": dict(
         head_size=128,
         dtype="fp16",
@@ -361,6 +371,21 @@ _INJECTIVITY_BASES = {
 # The shape fields the gfx942 body reads only from kernel params. Reflected off the
 # spec rather than restated, so the injectivity test follows the kernel's own ABI.
 _RUNTIME_PARAM_FIELDS = frozenset(_spec().runtime_param_fields)
+
+
+# Every persistent decode order the gfx942 body emits.
+_PERSIST_DECODES = sorted(
+    Gfx942AttentionDenseSpec.supported_persist_decodes() - {"auto"}
+)
+
+
+def _decode_kw(decode: str) -> dict:
+    """Pin ``decode``; hq_minor_swz also needs num_persistent divisible by the XCD
+    count (the base's 228 is not)."""
+    kw = dict(persist_decode=decode)
+    if decode == "hq_minor_swz":
+        kw["num_persistent"] = 224
+    return kw
 
 
 def _persistent_spec(**kw) -> Gfx942AttentionDenseSpec:
@@ -560,7 +585,7 @@ def test_kernel_name_covers_every_baked_parameter(field):
     )
 
 
-@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+@pytest.mark.parametrize("decode", _PERSIST_DECODES)
 def test_persistent_grid_shares_one_kernel_across_batches(decode):
     """The persistent grid reads batch from a kernel param too: every batch is ONE
     name, ONE body and ONE cache key, with no ``_b{N}`` token.
@@ -576,7 +601,7 @@ def test_persistent_grid_shares_one_kernel_across_batches(decode):
     The decode is pinned: ``"auto"`` would flip order with batch, which is a
     separate identity (:func:`test_auto_persist_decode_keys_on_the_resolved_order`).
     """
-    specs = [_persistent_spec(batch=b, persist_decode=decode) for b in (1, 2, 4, 8)]
+    specs = [_persistent_spec(batch=b, **_decode_kw(decode)) for b in (1, 2, 4, 8)]
     assert all(s.runtime_shape for s in specs)
     names = {gfx942_kernel_name(s) for s in specs}
     assert len(names) == 1, f"persistent batches split the name: {names}"
@@ -614,20 +639,27 @@ def test_build_emits_one_symbol_across_batches(make):
 _HEAD_CONFIGS = ((128, 8), (40, 8), (28, 4), (32, 32))
 
 
-@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+@pytest.mark.parametrize("decode", _PERSIST_DECODES)
 def test_persistent_grid_shares_one_kernel_across_head_configs(decode):
     """The persistent work decode divides by the runtime head counts (through the
     fast-division kernargs), so every head config -- pow2 and non-pow2 GQA, MHA --
     is ONE name, ONE body and ONE cache key per decode order, with no hq/kv token.
 
     The head counts still have to reach the launch: each config gets distinct
-    kernarg values, ``gqa`` magic/shift included. That the IR probe can see baked
+    kernarg values, fast-division pairs included. That the IR probe can see baked
     head counts is the gfx950 control
     (:func:`test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control`), so the
-    single-body assertion here is not vacuous."""
-    specs = [
-        _persistent_spec(num_query_heads=hq, num_kv_heads=hkv, persist_decode=decode)
+    single-body assertion here is not vacuous. hq_minor_swz needs Hq divisible by
+    the XCD count, so it skips the configs that are not."""
+    configs = [
+        (hq, hkv)
         for hq, hkv in _HEAD_CONFIGS
+        if decode != "hq_minor_swz" or hq % 8 == 0
+    ]
+    assert len(configs) >= 3
+    specs = [
+        _persistent_spec(num_query_heads=hq, num_kv_heads=hkv, **_decode_kw(decode))
+        for hq, hkv in configs
     ]
     for s in specs:
         ok, why = supports_attention_dense(s, arch="gfx942")
@@ -637,10 +669,14 @@ def test_persistent_grid_shares_one_kernel_across_head_configs(decode):
     assert not re.search(r"_(hq|kv)\d+", names.pop())
     assert len({attention_dense_cache_key(s, arch="gfx942") for s in specs}) == 1
     assert len({_ir_body_sha(s) for s in specs}) == 1
-    # Every config has a distinct gqa (16, 5, 7, 1), so its fast-division pair must
-    # differ too; the exact values are pinned by the kernarg-ABI test below.
+    # Every config has a distinct Hq (128, 40, 28, 32) and gqa (16, 5, 7, 1), and
+    # each decode divides by one of them, so the fast-division pairs must differ
+    # too; the exact values are pinned by the kernarg-ABI test below.
     args = [attention_dense_runtime_args(s) for s in specs]
-    assert len({(a["gqa_magic"], a["gqa_shift"]) for a in args}) == len(specs)
+    pairs = [
+        tuple(v for k, v in a.items() if k.endswith(("_magic", "_shift"))) for a in args
+    ]
+    assert len(set(pairs)) == len(specs)
 
 
 def test_kernel_name_drops_heads_on_the_runtime_shape_grid():
@@ -765,9 +801,10 @@ def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
     assert marker in why
 
 
-def test_shared_bottom_right_field_is_rejected_by_support_and_build():
-    """The reflected common field is outside gfx942's concrete contract."""
-    spec = AttentionDenseSpec(
+def test_bottom_right_is_supported_without_a_window():
+    """Bottom-right causal is the plain causal band shifted by seqlen_kv - seqlen_q;
+    a window cannot shift with it, so that combination stays rejected."""
+    common = dict(
         batch=1,
         seqlen_q=2048,
         seqlen_kv=4096,
@@ -779,11 +816,52 @@ def test_shared_bottom_right_field_is_rejected_by_support_and_build():
         block_n=64,
         causal_bottom_right=True,
     )
+    spec = AttentionDenseSpec(**common)
     ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    assert "_br_" in _as_gfx942_spec(spec).kernel_name()
+    build_attention_dense(spec, arch="gfx942")
+    windowed = AttentionDenseSpec(**{**common, "sliding_window": 128})
+    ok, why = supports_attention_dense(windowed, arch="gfx942")
     assert not ok
     assert "causal_bottom_right" in why
-    with pytest.raises(ValueError, match="causal_bottom_right"):
-        build_attention_dense(spec, arch="gfx942")
+
+
+def test_kv_segments_admission():
+    """The KV-segment split runs on the default grid only, and tags the name."""
+    base = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=8192,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+        block_m=128,
+        block_n=64,
+        causal_bottom_right=True,
+    )
+    spec = Gfx942AttentionDenseSpec(**base, kv_segments=4)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    assert spec.kernel_name().endswith("_kvs4")
+    assert (
+        attention_dense_grid(spec)[0]
+        == 4 * attention_dense_grid(Gfx942AttentionDenseSpec(**base))[0]
+    )
+    for over in (
+        {"persistent": True},
+        {"use_sinks": True},
+        {"emit_lse": True},
+    ):
+        bad = Gfx942AttentionDenseSpec(**{**base, **over}, kv_segments=4)
+        ok, why = supports_attention_dense(bad, arch="gfx942")
+        assert not ok and "kv_segments" in why, over
+    ok, _ = supports_attention_dense(
+        Gfx942AttentionDenseSpec(**base, kv_segments=0), arch="gfx942"
+    )
+    assert not ok
 
 
 @pytest.mark.parametrize("block_n", [96, 160, 224])
@@ -923,7 +1001,9 @@ def test_supports_rejects_over_budget_lds():
     flips to ACCEPT and this test's premise would silently invert into a tautology.
     The pad=0 boundary is pinned deliberately in the test below.
     """
-    spec = _spec(block_n=128, head_size=128, dtype="bf16", lds_row_pad=8)
+    spec = _spec(
+        block_n=128, head_size=128, dtype="bf16", lds_row_pad=8, use_cfvst=False
+    )
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert not ok and "LDS" in why
     # the arithmetic the rejection rests on, spelled out so a capacity/pad change is loud
@@ -1043,8 +1123,8 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
         num_persistent=304,
         persist_decode="auto",
     )
-    assert spec.resolved_persist_decode == "hkv_major"
-    assert "hkvmaj" in spec.kernel_name()
+    assert spec.resolved_persist_decode == "bt_hkv_minor"
+    assert "bthkvmin" in spec.kernel_name()
     assert "gqapair" not in spec.kernel_name()
 
 
@@ -1104,12 +1184,12 @@ _CONTRACT_GRID = [
     # --- private: lds_row_pad / v_row_pad (the pad-value sweep surface) ---
     dict(lds_row_pad=0),  # accepted: the unpadded A/B arm
     dict(lds_row_pad=2),  # REJECTED: not a multiple of 4 elements
-    dict(v_row_pad=16),  # accepted
+    dict(v_row_pad=16, use_v_swizzle=False),  # accepted (non-pow2 row: swizzle off)
     dict(v_row_pad=-4),  # REJECTED: negative
     # --- private: use_cfvst (the one tri-state with a rejected direction) ---
     dict(dtype="fp16", use_cfvst=False),  # accepted: OFF is always legal
     dict(head_size=64, use_cfvst=True),  # REJECTED: policy says off at D64
-    dict(dtype="bf16", head_size=128, use_cfvst=True),  # REJECTED: spills
+    dict(dtype="bf16", head_size=128, use_cfvst=True),  # accepted: policy on at D128
     # --- private: use_v_swizzle (independent of the pad; cfvst-gated) ---
     dict(dtype="fp16", use_v_swizzle=False),  # accepted: OFF is always legal
     dict(head_size=64, use_v_swizzle=True),  # REJECTED: no V^T path at D64
@@ -1121,6 +1201,9 @@ _CONTRACT_GRID = [
     dict(dtype="fp16", iglp=True),
     dict(iglp=True, pv_sched_fence_mask=0),  # REJECTED: iglp owns the schedule
     # --- private: performance-only codegen knobs ---
+    # --- private: kv_segments (default grid only) ---
+    dict(kv_segments=4),  # accepted
+    dict(kv_segments=4, persistent=True, num_persistent=304),  # REJECTED
     dict(lds_num_buffers=1),  # accepted: the only implemented depth
     dict(lds_num_buffers=2),  # REJECTED: NBUF=2 is not implemented
     dict(iglp=True, iglp_mode=1),  # accepted
@@ -1137,6 +1220,8 @@ _CONTRACT_GRID = [
     dict(causal_diag_split=True),  # accepted
     dict(causal=False, causal_diag_split=True),  # REJECTED: causal only
     dict(sliding_window=64, causal_diag_split=True),  # REJECTED: no window
+    dict(sliding_window=128, window_wave_skip=True),  # accepted
+    dict(window_wave_skip=True),  # REJECTED: needs a sliding window
     # --- private: emit_lse (no rejected region -- see the comment above) ---
     dict(emit_lse=False),
     dict(emit_lse=True, persistent=True, num_persistent=304),
@@ -1240,7 +1325,7 @@ def test_supports_true_implies_build_succeeds(row):
 # launch geometry
 # --------------------------------------------------------------------------- #
 def test_grid_and_block_geometry():
-    s = _spec(seqlen_q=2048, num_query_heads=128, batch=1)
+    s = _spec(seqlen_q=2048, num_query_heads=128, batch=1, nonpersist_decode="qb_minor")
     assert attention_dense_grid(s) == (2048 // _BLOCK_M, 128, 1)
     assert attention_dense_block(s) == (s.num_waves * 64, 1, 1)
     assert attention_dense_block(s) == (_EXPECTED_WORKGROUP_SIZE, 1, 1)
@@ -1249,7 +1334,12 @@ def test_grid_and_block_geometry():
 def test_grid_covers_every_query_row_and_head():
     for sq, hq, batch in ((2048, 128, 1), (512, 16, 4), (4096, 40, 2)):
         s = _spec(
-            seqlen_q=sq, seqlen_kv=sq, num_query_heads=hq, num_kv_heads=8, batch=batch
+            seqlen_q=sq,
+            seqlen_kv=sq,
+            num_query_heads=hq,
+            num_kv_heads=8,
+            batch=batch,
+            nonpersist_decode="qb_minor",
         )
         nqb, ghq, gb = attention_dense_grid(s)
         assert (
@@ -1430,13 +1520,14 @@ def test_exp2_fast_policy_bf16_d128_default_grid_guard(
 @pytest.mark.parametrize(
     "head_size, dtype, block_n, expected",
     [
-        # cfvst path (fp16-D128): pad is DERIVED so V_LDROW = block_n + pad is the
-        # smallest pow2 >= max(64, block_n) -> the XOR swizzle engages at EVERY tile
-        # width, not only block_n=64.
+        # cfvst path (D128, both dtypes): pad is DERIVED so V_LDROW = block_n + pad is
+        # the smallest pow2 >= max(64, block_n) -> the XOR swizzle engages at EVERY
+        # tile width, not only block_n=64.
         (128, "fp16", 64, 0),  # shipped tile; V_LDROW=64 (golden pinned here)
         (128, "fp16", 32, 32),  # small-tile double-K variant; V_LDROW=64, swizzle ON
         (128, "fp16", 128, 0),  # wide tile; V_LDROW=128, swizzle ON
-        (128, "bf16", 64, 8),  # no cfvst (bf16 D128 spills) -> no swizzle
+        (128, "bf16", 64, 0),  # bf16 D128 takes the same transposed-V path
+        (128, "bf16", 32, 32),
         (64, "fp16", 64, 8),  # D64 naive-V layout -> no swizzle
         (64, "bf16", 64, 8),
     ],
@@ -1444,7 +1535,7 @@ def test_exp2_fast_policy_bf16_d128_default_grid_guard(
 def test_v_row_pad_policy_matches_the_cfvst_swizzle_matrix(
     head_size, dtype, block_n, expected
 ):
-    """On the cfvst path (fp16-D128) v_row_pad is DERIVED from block_n so V_lds is the
+    """On the cfvst path (D128) v_row_pad is DERIVED from block_n so V_lds is the
     smallest pow2 >= max(64, block_n) wide and the XOR bank-conflict swizzle engages at
     any tile width; 8 (no swizzle) everywhere else. This
     pins the derived values so a future edit that flips one arm updates this on purpose.
@@ -1458,10 +1549,11 @@ def test_cfvst_swizzle_engages_at_every_block_n(block_n):
     V_LDROW = block_n + pad a pow2 >= 64 at EVERY block_n, so the swizzle never silently
     turns off (a constant pad dropped it + wasted LDS at block_n != 64). The non-cfvst
     path stays unpadded (no swizzle)."""
-    v_ldrow = block_n + _v_row_pad(128, "fp16", block_n)
-    assert v_ldrow == _v_swizzle_width(block_n), (block_n, v_ldrow)
-    assert v_ldrow >= 64 and (v_ldrow & (v_ldrow - 1)) == 0, (block_n, v_ldrow)
-    assert _v_row_pad(128, "bf16", block_n) == 8
+    for dtype in ("fp16", "bf16"):
+        v_ldrow = block_n + _v_row_pad(128, dtype, block_n)
+        assert v_ldrow == _v_swizzle_width(block_n), (dtype, block_n, v_ldrow)
+        assert v_ldrow >= 64 and (v_ldrow & (v_ldrow - 1)) == 0, (block_n, v_ldrow)
+    assert _v_row_pad(64, "bf16", block_n) == 8
 
 
 @pytest.mark.parametrize("block_n", [64, 32])
@@ -1505,19 +1597,21 @@ def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
 
 def test_default_v_row_pad_resolves_through_policy():
     """The shipped default leaves ``v_row_pad=None`` and resolves through the policy,
-    derived from (head_size, dtype, block_n): fp16-D128 -> a pow2 (>=64) V_LDROW at any
+    derived from (head_size, dtype, block_n): D128 -> a pow2 (>=64) V_LDROW at any
     width (swizzle on), 8 otherwise; an explicit override still wins. Guards that
     production picks up the swizzle without a hand-set pad, at block_n 64 AND 32."""
     fp16_d128 = _spec(head_size=128, dtype="fp16")  # block_n=64 default
     fp16_d128_bn32 = _spec(head_size=128, dtype="fp16", block_n=32)
     bf16_d128 = _spec(head_size=128, dtype="bf16")
+    bf16_d64 = _spec(head_size=64, dtype="bf16")
     # Tri-state: the shipped default is None ("resolve through the policy"), so a
     # harness that omits the field tracks whatever ships instead of freezing a value.
     assert Gfx942AttentionDenseSpec.__dataclass_fields__["v_row_pad"].default is None
     assert fp16_d128.v_row_pad is None
     assert fp16_d128.resolved_v_row_pad() == 0  # V_LDROW=64, swizzle on
     assert fp16_d128_bn32.resolved_v_row_pad() == 32  # V_LDROW=64 too
-    assert bf16_d128.resolved_v_row_pad() == 8
+    assert bf16_d128.resolved_v_row_pad() == 0  # same transposed-V path as fp16
+    assert bf16_d64.resolved_v_row_pad() == 8
     assert dataclasses.replace(fp16_d128, v_row_pad=16).resolved_v_row_pad() == 16
 
 
@@ -1584,6 +1678,15 @@ def test_fused_rescale_casts_each_p_exactly_once(head_size, dtype):
     names = list(_walk_op_names(loops[0]))
     n_exp = names.count("math.exp2_fast") + names.count("math.exp2")
     n_cast = names.count("arith.cast_f32_to")
+    if dtype == "bf16" and spec.resolved_use_cfvst():
+        # bf16 on the transposed-V path packs P with one perm_b32 per element pair
+        # (_pack_p_bf16) instead of a generic cast per element; the V^T store adds
+        # two perms per 2x2 block it owns.
+        threads = spec.block_m // 32 * 64
+        v_items = (spec.block_n // 2) * (head_size // 2) // threads
+        assert n_cast == 0, n_cast
+        assert names.count("tile.perm_b32") == n_p // 2 + 2 * v_items
+        n_cast = n_p
     # exactly one P cast per P element -- no second pass (o_acc rescale uses
     # fmul/vec_pack, not cast; the final output cast lives outside the loop).
     assert n_cast == n_p, (
@@ -1941,8 +2044,13 @@ def test_codegen_knob_moves_ir_and_name_together(overrides, token, marker):
     assert kd.name.endswith(token), kd.name
     assert _ir_body_sha(alt) != _ir_body_sha(base)
     if marker is not None:
-        assert marker in _lower(kd)
-        assert marker not in _lower(build_attention_dense(base, arch="gfx942"))
+        # Store markers are matched on the global (output) stores only: the
+        # transposed-V path also writes <2 x elem> vectors to LDS.
+        def text(ir):
+            return "\n".join(_global_stores(ir)) if marker.startswith("store ") else ir
+
+        assert marker in text(_lower(kd))
+        assert marker not in text(_lower(build_attention_dense(base, arch="gfx942")))
 
 
 def test_o_store_width_splits_every_store():
@@ -2033,17 +2141,16 @@ def test_codegen_knob_rejections(overrides, reason):
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("d", [64, 128])
-@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+@pytest.mark.parametrize("decode", _PERSIST_DECODES)
 def test_persistent_builds_for_both_decodes(dtype, d, decode):
-    """P4: the persistent grid-stride body builds for every in-scope config and both
-    work-decode orders. The decode is a build-time (Python) branch, so both must emit;
+    """P4: the persistent grid-stride body builds for every in-scope config and every
+    work-decode order. The decode is a build-time (Python) branch, so each must emit;
     GPU numeric correctness (the decode bijection) is verified in the live cohort."""
     spec = _spec(
         head_size=d,
         dtype=dtype,
         persistent=True,
-        num_persistent=228,
-        persist_decode=decode,
+        **{"num_persistent": 228, **_decode_kw(decode)},
     )
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, why
@@ -2088,7 +2195,9 @@ def test_persistent_and_default_share_one_inner_body():
 # The divisors each resolved persistent decode order divides by in the grid-stride
 # loop, in kernarg order. Restated (not imported) on purpose: this IS the ABI.
 _EXPECTED_FASTDIV_DIVISORS = {
+    "bt_hkv_minor": ("batch", "num_query_heads"),
     "hkv_major": ("batch", "gqa", "nqb"),
+    "hq_minor_swz": ("nqb", "num_query_heads", "gqa"),
     "qb_major": ("batch", "num_query_heads", "gqa"),
 }
 
@@ -2099,7 +2208,7 @@ def _fastdiv(n: int, magic_i32: int, shift: int) -> int:
     return (((n * (magic_i32 & 0xFFFFFFFF)) >> 32) + n) >> shift
 
 
-@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+@pytest.mark.parametrize("decode", _PERSIST_DECODES)
 def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
     """The persistent kernarg ABI is the five shape params, then one
     ``<divisor>_magic`` / ``<divisor>_shift`` i32 pair per divisor of the RESOLVED
@@ -2108,21 +2217,23 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
     GPU only.
 
     The values are checked two ways: equal to
-    :func:`rocke.helpers.transforms.calculate_magic_numbers` for the divisor (magic
+    :func:`rocke.helpers.magic_division.calculate_magic_numbers` for the divisor (magic
     packed as its two's-complement i32), and -- through the host model of the
     in-kernel divide -- exact for dividends up to just under the 2**30 bound. Non-pow2
     divisors throughout (B=3, NQB=13, Hq=40, gqa=5), so the magic is not the trivial
-    pow2 one.
+    pow2 one; hq_minor_swz pairs query blocks under causal masking, so it takes
+    NQB=14.
     """
-    from rocke.helpers.transforms import calculate_magic_numbers
+    from rocke.helpers.magic_division import calculate_magic_numbers
 
+    nqb = 14 if decode == "hq_minor_swz" else 13
     spec = _persistent_spec(
         batch=3,
-        seqlen_q=13 * _BLOCK_M,
+        seqlen_q=nqb * _BLOCK_M,
         seqlen_kv=4096,
         num_query_heads=40,
         num_kv_heads=8,
-        persist_decode=decode,
+        **_decode_kw(decode),
     )
     assert supports_attention_dense(spec, arch="gfx942")[0]
     divisors = _EXPECTED_FASTDIV_DIVISORS[decode]
@@ -2139,7 +2250,7 @@ def test_persistent_kernarg_abi_carries_the_fastdiv_pairs(decode):
 
     args = attention_dense_runtime_args(spec)
     assert tuple(args) == spec.runtime_kernarg_fields
-    value = {"batch": 3, "num_query_heads": 40, "gqa": 5, "nqb": 13}
+    value = {"batch": 3, "num_query_heads": 40, "gqa": 5, "nqb": nqb}
     for d in divisors:
         magic, shift = calculate_magic_numbers(value[d])
         assert -(1 << 31) <= args[f"{d}_magic"] < (1 << 31), "magic must fit an i32"
@@ -2166,16 +2277,22 @@ def test_auto_persist_decode_keys_on_the_resolved_order():
     the raw ``"auto"`` would let two shapes that resolve differently share one slot
     and serve one decode's binary for the other.
 
-    gqa=4, NQB=16, NP=228: per-kv-head work 64*B crosses 2*NP between B=4 and B=8.
-    Same-order shapes share key, name and body; cross-order shapes differ in all
-    three; and an ``"auto"`` that resolves to an order is the SAME kernel as that
-    order spelled explicitly.
+    gqa=4, NQB=16, NP=228: batch below the XCD count resolves to bt_hkv_minor, and
+    at B=8 the per-kv-head work 64*B is past 2*NP, so hkv_major. Same-order shapes
+    share key, name and body; cross-order shapes differ in all three; and an
+    ``"auto"`` that resolves to an order is the SAME kernel as that order spelled
+    explicitly.
     """
     by_batch = {
         b: _persistent_spec(batch=b, persist_decode="auto") for b in (1, 2, 8, 16)
     }
     order = {b: s.resolved_persist_decode for b, s in by_batch.items()}
-    assert order == {1: "qb_major", 2: "qb_major", 8: "hkv_major", 16: "hkv_major"}
+    assert order == {
+        1: "bt_hkv_minor",
+        2: "bt_hkv_minor",
+        8: "hkv_major",
+        16: "hkv_major",
+    }
 
     def ident(spec):
         return (
@@ -2190,11 +2307,11 @@ def test_auto_persist_decode_keys_on_the_resolved_order():
     lo, hi = ids[1], ids[8]
     assert all(a != b for a, b in zip(lo, hi)), "key, name and body must all split"
     assert "hkvmaj" in hi[1] and "hkvmaj" not in lo[1]
-    for b, resolved in ((1, "qb_major"), (8, "hkv_major")):
+    for b, resolved in ((1, "bt_hkv_minor"), (8, "hkv_major")):
         explicit = dataclasses.replace(by_batch[b], persist_decode=resolved)
         assert ident(explicit) == ids[b]
     # The fast-division ABI follows the resolved order as well.
-    assert by_batch[1].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["qb_major"]
+    assert by_batch[1].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["bt_hkv_minor"]
     assert by_batch[8].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["hkv_major"]
 
 
@@ -2219,11 +2336,11 @@ def test_persistent_runtime_args_reject_work_past_the_fastdiv_bound():
     assert attention_dense_runtime_args(default)["batch"] == at_limit
 
 
-def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
-    """P4 dispatch: the default spec turns persistent on once the work
-    (nqb*Hq*B) fills the gfx942 persistent grid (num_persistent defaulted to 304), and
-    stays off for small Sq. The ``persistent`` knob is honored; gfx950 keeps its 256 default
-    and is otherwise untouched."""
+def test_dispatch_persistent_auto_turns_on_for_d128_only():
+    """P4 dispatch: the default spec turns persistent on at D128 for any Sq and
+    batch (num_persistent defaulted to 304), and stays off at D64. The
+    ``persistent`` knob is honored; gfx950 keeps its 256 default and is otherwise
+    untouched."""
     from dispatch.attention import AttentionRequest
     from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
 
@@ -2235,15 +2352,15 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
     def _dense_spec_gfx950(req):
         return attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
 
-    def _req(sq, arch):
+    def _req(sq, arch, d=128):
         return AttentionRequest(
             batch=1,
             nhead_q=16,
             nhead_k=4,
             seqlen_q=sq,
             seqlen_k=sq,
-            hdim_q=128,
-            hdim_v=128,
+            hdim_q=d,
+            hdim_v=d,
             arch=arch,
             mask_type=1,
             dtype="fp16",
@@ -2251,10 +2368,11 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
 
     # gfx942 num_persistent defaulted to the 304-CU part's CU count.
     assert _dense_spec(_req(8192, "gfx942")).num_persistent == 304
-    # auto: on for large Sq (nqb*Hq = 32*16 = 512 >= 304), off for small.
+    # default: on at D128 whatever the Sq, off at D64.
+    assert _dense_spec(_req(2048, "gfx942")).persistent is True
     assert _dense_spec(_req(8192, "gfx942")).persistent is True
-    assert _dense_spec(_req(2048, "gfx942")).persistent is False  # 8*16 = 128 < 304
-    # explicit modes honored.
+    assert _dense_spec(_req(8192, "gfx942", d=64)).persistent is False
+    # the persistent knob is honored.
     assert _dense_spec(_req(8192, "gfx942"), persistent=False).persistent is False
     assert _dense_spec(_req(256, "gfx942"), persistent=True).persistent is True
     # gfx950 untouched: keeps the 256 default (not the gfx942 304 override).

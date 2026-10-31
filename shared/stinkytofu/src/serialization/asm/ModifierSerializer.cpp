@@ -200,16 +200,42 @@ bool serializeVisit(const FLATModifiers& mod, std::ostream& os) {
     return true;
 }
 
-// GLOBALModifiers — offset plus the temporal hint / cache scope used by
-// global_prefetch_b8 (gl2-prefetch). Serialized so the .stir IR roundtrip
-// preserves the hint/scope; TH_NONE / SCOPE_NONE are omitted.
+// GLOBALModifiers — cache-control bits, offset, temporal hint, and cache scope.
 bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
     os << ", mod.global = { offset = " << mod.offset;
+    if (mod.glc) os << ", glc = true";
+    if (mod.slc) os << ", slc = true";
+    if (mod.dlc) os << ", dlc = true";
+    if (mod.lds) os << ", lds = true";
+    if (mod.isStore) os << ", isStore = true";
+    if (mod.hasGLCModifier) os << ", hasGLCModifier = true";
+    if (mod.hasSC0Modifier) os << ", hasSC0Modifier = true";
+    if (mod.hasDLCModifier) os << ", hasDLCModifier = true";
     if (hasTemporalHint(mod.th)) {
         os << ", th = \"" << toString(mod.th) << "\"";
     }
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
+    os << " }";
+    return true;
+}
+
+// TENSORModifiers — th / scope / nv of the gfx1250 tensor ops (tensor_load_to_lds).
+// TH_NONE / SCOPE_NONE / NV_NONE are omitted.
+bool serializeVisit(const TENSORModifiers& mod, std::ostream& os) {
+    os << ", mod.tensor = {";
+    const char* sep = " ";
+    if (hasTemporalHint(mod.th)) {
+        os << sep << "th = \"" << toString(mod.th, mod.isStore) << "\"";
+        sep = ", ";
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << sep << "scope = \"" << toString(mod.scope) << "\"";
+        sep = ", ";
+    }
+    if (mod.nv != NonVolatile::NV_NONE) {
+        os << sep << "nv = \"" << toString(mod.nv) << "\"";
     }
     os << " }";
     return true;
@@ -507,12 +533,12 @@ bool serializeVisit(const Modifier& mod, std::ostream& os) {
 }  // namespace
 
 bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
-    return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers,
-                          CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
-                          VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
-                          SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
-                          SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData,
-                          CallTargetData>(mod, os);
+    return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, TENSORModifiers,
+                          MUBUFModifiers, CacheScopeModifiers, SMEMModifiers, SDWAModifiers,
+                          DPPModifiers, VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC,
+                          SWaitCntData, SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData,
+                          SDelayAluData, SWaitAluData, MFMAModifiers, MatrixFmtModifiers,
+                          MemTokenData, LabelData, CallTargetData>(mod, os);
 }
 
 /*
@@ -534,9 +560,18 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             FLATModifiers(getInt(fields, "offset12", 0), getBool(fields, "glc", false),
                           getBool(fields, "slc", false), getBool(fields, "lds", false)));
     } else if (attrKey == "mod.global") {
-        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0),
+        inst->addModifier(GLOBALModifiers(
+            getInt(fields, "offset", 0), parseTemporalHint(getStr(fields, "th", "")),
+            parseMUBUFScope(getStr(fields, "scope", "")), getBool(fields, "glc", false),
+            getBool(fields, "slc", false), getBool(fields, "dlc", false),
+            getBool(fields, "lds", false), getBool(fields, "isStore", false),
+            getBool(fields, "hasGLCModifier", false), getBool(fields, "hasSC0Modifier", false),
+            getBool(fields, "hasDLCModifier", false)));
+    } else if (attrKey == "mod.tensor") {
+        inst->addModifier(TENSORModifiers(parseMUBUFScope(getStr(fields, "scope", "")),
                                           parseTemporalHint(getStr(fields, "th", "")),
-                                          parseMUBUFScope(getStr(fields, "scope", ""))));
+                                          parseNonVolatile(getStr(fields, "nv", "")),
+                                          getStr(fields, "th", "").rfind("TH_STORE_", 0) == 0));
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
         TemporalHint th = parseTemporalHint(getStr(fields, "th", ""));
@@ -558,6 +593,14 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                           getBool(fields, "neg_src2", false), getBool(fields, "abs_src0", false),
                           getBool(fields, "abs_src1", false), getBool(fields, "abs_src2", false),
                           getBool(fields, "clamp", false), getInt(fields, "omod", 0)));
+    } else if (attrKey == "mod.vop3p") {
+        // op_sel carries more than encoding detail: its destination element says
+        // which half of a narrow destination the instruction writes, and so
+        // which half it keeps and reads back (see readsDestination). A .stir
+        // kernel needs this to state that.
+        inst->addModifier(VOP3PModifiers(getIntVector(fields, "op_sel"),
+                                         getIntVector(fields, "op_sel_hi"),
+                                         getIntVector(fields, "byte_sel")));
     } else if (attrKey == "mod.exec") {
         inst->addModifier(EXEC(getBool(fields, "setHi", false)));
     } else if (attrKey == "mod.vcc") {
@@ -657,7 +700,7 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
     } else if (attrKey == "mod.call_targets") {
         inst->addModifier(CallTargetData(getStrVector(fields, "callees")));
     }
-    // mod.sdwa, mod.vop3p, mod.true16: no deserialize support yet
+    // mod.sdwa, mod.true16: no deserialize support yet
 }
 
 }  // namespace

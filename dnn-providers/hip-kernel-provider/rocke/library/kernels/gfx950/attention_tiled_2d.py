@@ -40,8 +40,12 @@ Correctness contract (validated against `aiter.op_tests.triton_tests.attention`
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from typing import Optional, Tuple
+
+from kernels.common._attention_additive_bias import (
+    add_additive_bias,
+    declare_additive_bias_params,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -61,6 +65,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
+    binary_search_seq_idx_iters,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
@@ -159,6 +164,7 @@ class UnifiedAttention2DTiledSpec:
     has_softcap: bool
     use_alibi: bool = False
     use_qq_bias: bool = False
+    use_additive_bias: bool = False
     num_seqs: int = 0
     # Number of wave64 warps per CTA. `BLOCK_M = num_warps * 16` rows are
     # processed per CTA, with each warp owning its own 16-row slice. The
@@ -286,6 +292,12 @@ class UnifiedAttention2DTiledSpec:
     # v1 is intentionally restricted to bf16/no-bias/no-window until parity
     # is proven broadly.
     use_register_pv: bool = False
+    # Walk query blocks longest-first: grid row ``y`` computes query block
+    # ``num_q_blocks - 1 - y``. Under causal masking a block's cost grows with
+    # its index, so the dynamically scheduled grid starts the longest blocks
+    # first and leaves the cheapest ones for the tail. The launch grid is
+    # unchanged; the order is a bijection, so outputs are identical.
+    use_qblock_reverse: bool = False
     # ``T`` (per-CTA-iter KV-tile size in tokens). When ``None``, the
     # kernel uses ``T = block_size`` (one paged-KV cache block per
     # iter, matching the AITER decode path). Setting ``tile_size > block_size``
@@ -490,6 +502,11 @@ class UnifiedAttention2DTiledSpec:
     right_bound: int = 0
 
     def __post_init__(self):
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
+            )
         if self.right_bound < -1:
             raise ValueError(
                 f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
@@ -565,14 +582,32 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "transposed softmax VALU opts require no sliding window"
                 )
-            if self.has_softcap or self.use_alibi or self.use_qq_bias:
+            if (
+                self.has_softcap
+                or self.use_alibi
+                or self.use_qq_bias
+                or self.use_additive_bias
+            ):
                 raise ValueError(
-                    "transposed softmax VALU opts do not support softcap, ALiBi, or QQ bias"
+                    "transposed softmax VALU opts do not support softcap, ALiBi, "
+                    "QQ bias, or additive bias"
                 )
             if self.use_grouped_kv2_softmax:
                 raise ValueError(
                     "transposed softmax VALU opts do not support grouped_kv2"
                 )
+        # Additive bias is emitted only on the score paths the selectors route a
+        # bias problem to (16x16 and the plain transposed 32x32 path); the hoisted
+        # and mask-once query-head variants and non-transposed 32x32 are not.
+        if self.use_additive_bias and (
+            self.use_transposed_invariant_hoist
+            or self.use_transposed_mask_once
+            or (self.use_mfma_32x32 and not self.use_transposed_qk_32x32)
+        ):
+            raise ValueError(
+                "use_additive_bias does not support use_transposed_invariant_hoist, "
+                "use_transposed_mask_once, or the non-transposed 32x32 path"
+            )
         if self.use_grouped_kv2_softmax:
             if self.dtype != "bf16":
                 raise ValueError(
@@ -588,9 +623,15 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "use_grouped_kv2_softmax v1 requires no sliding window"
                 )
-            if self.has_softcap or self.use_alibi or self.use_qq_bias:
+            if (
+                self.has_softcap
+                or self.use_alibi
+                or self.use_qq_bias
+                or self.use_additive_bias
+            ):
                 raise ValueError(
-                    "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, or QQ bias"
+                    "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, "
+                    "QQ bias, or additive bias"
                 )
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_grouped_kv2_softmax v1 does not support FP8 KV")
@@ -794,8 +835,10 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "use_register_pv v1 requires no sinks, no sliding window, and no softcap"
                 )
-            if self.use_alibi or self.use_qq_bias:
-                raise ValueError("use_register_pv v1 does not support ALiBi or QQ bias")
+            if self.use_alibi or self.use_qq_bias or self.use_additive_bias:
+                raise ValueError(
+                    "use_register_pv v1 does not support ALiBi, QQ bias, or additive bias"
+                )
         if self.tile_size is not None:
             if self.tile_size <= 0 or self.tile_size % self.block_size != 0:
                 raise ValueError(
@@ -852,11 +895,9 @@ class UnifiedAttention2DTiledSpec:
         # AITER/Triton uses a true while-loop binary search. Our IR currently
         # lowers this as a fixed-trip scf.for, so specialize the trip count to
         # the known problem batch size instead of always paying 32 iterations.
-        # Keep 32 as a conservative fallback for direct unit-test specs that do
-        # not provide `num_seqs`.
-        if self.num_seqs <= 0:
-            return 32
-        return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
+        # Falls back to 32 for direct unit-test specs that do not provide
+        # `num_seqs`.
+        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -878,6 +919,7 @@ class UnifiedAttention2DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "addb" if self.use_additive_bias else "",
             "tl" if self.causal_top_left else "",
             (
                 ("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
@@ -919,6 +961,7 @@ class UnifiedAttention2DTiledSpec:
             "fp8mfma" if self.use_fp8_mfma_qk else "",
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
+            "qrev" if self.use_qblock_reverse else "",
         )
 
 
@@ -930,8 +973,9 @@ def supports_tiled_2d(
     num_queries_per_kv: int,
     use_alibi: bool,
     use_qq_bias: bool,
-    use_fp8: bool,
-    q_dtype,
+    use_additive_bias: bool = False,
+    use_fp8: bool = False,
+    q_dtype=None,
     num_warps: int = 1,
     block_m_per_warp: int = 16,
     kv_storage_dtype: Optional[str] = None,
@@ -962,10 +1006,10 @@ def supports_tiled_2d(
         return False, arch_reason
     if dtype not in ("fp16", "bf16"):
         return False, f"tiled 2D kernel currently supports fp16/bf16 (got {dtype!r})"
-    if head_size not in (64, 128, 256):
+    if head_size not in (64, 128, 192, 256):
         return (
             False,
-            f"tiled 2D kernel only supports head_size in {{64,128,256}} (got {head_size})",
+            f"tiled 2D kernel only supports head_size in {{64,128,192,256}} (got {head_size})",
         )
     if head_size % 32 != 0:
         return (
@@ -1113,6 +1157,7 @@ def build_unified_attention_2d_tiled(
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    USE_ADDITIVE_BIAS = spec.use_additive_bias
     TRANSPOSED_SCALAR_STATE = spec.use_transposed_scalar_state
     TRANSPOSED_INVARIANT_HOIST = spec.use_transposed_invariant_hoist
     TRANSPOSED_MASK_ONCE = spec.use_transposed_mask_once
@@ -1258,9 +1303,19 @@ def build_unified_attention_2d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Additive-bias params are appended only when the feature is on, so the
+    # non-bias kernel ABI (and its IR) is unchanged.
+    additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
 
     kv_head_idx = b.block_id_x()
     q_block_global_idx = b.block_id_y()
+    if spec.use_qblock_reverse:
+        # Grid y extent, as the launcher sizes it: total_q // BLOCK_Q + num_seqs.
+        total_q = b.global_load_i32(cu_q, num_seqs_p)
+        num_q_blocks = b.add(b.div(total_q, b.const_i32(BLOCK_Q)), num_seqs_p)
+        q_block_global_idx = b.sub(
+            b.sub(num_q_blocks, b.const_i32(1)), q_block_global_idx
+        )
     tid = b.thread_id_x()
 
     # Wave decomposition. For NUM_WARPS=1 this collapses to `wave_id=0,
@@ -3561,6 +3616,26 @@ def build_unified_attention_2d_tiled(
                                     align=4,
                                 )
                                 score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
+                            if USE_ADDITIVE_BIAS:
+                                # additive_bias[seq_idx*batch_stride + q_head*head_stride
+                                #               + qp_r*sq_stride + col_abs]
+                                # stride=0 broadcasts that dimension. The head is
+                                # the per-row *query* head (GQA-correct; the spec
+                                # rejects bias with the hoist / mask-once variants,
+                                # so ``qh_r`` is always set here). Under ``m_ok``,
+                                # padding rows and tail columns (col_abs >= seq_len)
+                                # load element 0 instead of an out-of-range index.
+                                score = add_additive_bias(
+                                    b,
+                                    score,
+                                    additive_bias,
+                                    seq_idx=seq_idx,
+                                    q_head=qh_r,
+                                    q_row=qp_r,
+                                    col=col_abs,
+                                    mask=m_ok,
+                                    rcp_ln2=rcp_ln2,
+                                )
                             st_scores[(group_idx, n, reg)] = score
                             st_local_max = b.fmax(st_local_max, score)
                 st_remote_max = b.warp_shuffle_xor(st_local_max, 32)
@@ -3595,6 +3670,7 @@ def build_unified_attention_2d_tiled(
                 # full ``l_new = alpha * l_old + l_sum`` updates are applied
                 # by that shared downstream block, not here.
                 m_new = [st_m_new for _ in range(SOFTMAX_STATE_SLOTS)]
+                m_carry = [st_m_raw for _ in range(SOFTMAX_STATE_SLOTS)]
                 l_local = [st_l_sum for _ in range(SOFTMAX_STATE_SLOTS)]
                 # In the transposed orientation we already have masked /
                 # scaled / softcapped scores in ``st_scores`` and softmax
@@ -3788,6 +3864,7 @@ def build_unified_attention_2d_tiled(
                     masked[(n, reg)] = score
 
             m_new = []
+            m_carry = []
             s_local = {}
             for reg in range(REGS_PER_LANE):
                 local_max = neg_inf
@@ -3799,6 +3876,7 @@ def build_unified_attention_2d_tiled(
                 full_max_raw = b.fmax(m_vals[reg], tile_max)
                 ok = b.fcmp("ogt", full_max_raw, neg_inf)
                 m_new.append(b.select(ok, full_max_raw, zero_f))
+                m_carry.append(full_max_raw)
 
             l_local = []
             for reg in range(REGS_PER_LANE):
@@ -3870,6 +3948,20 @@ def build_unified_attention_2d_tiled(
                             align=4,
                         )
                         score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
+                    if USE_ADDITIVE_BIAS:
+                        # Per-row query head; ``m_ok`` guards the load (see
+                        # the transposed path above).
+                        score = add_additive_bias(
+                            b,
+                            score,
+                            additive_bias,
+                            seq_idx=seq_idx,
+                            q_head=hoist_qh_r[reg],
+                            q_row=qp_r,
+                            col=col_abs,
+                            mask=m_ok,
+                            rcp_ln2=rcp_ln2,
+                        )
                     masked[(n, reg)] = score
 
             # ---- per-row max via cross-lane butterfly ----
@@ -3877,6 +3969,7 @@ def build_unified_attention_2d_tiled(
             # repeated for every N-tile. Local lane-max across N-tiles, then 4-stage
             # XOR butterfly across the 16 lanes in the row-group.
             m_new = []
+            m_carry = []
             s_local = {}  # (reg, n) -> the lane's masked score (still owned per-lane)
             for reg in range(REGS_PER_LANE):
                 local_max = neg_inf
@@ -3889,6 +3982,7 @@ def build_unified_attention_2d_tiled(
                 full_max_raw = b.fmax(m_vals[reg], tile_max)
                 ok = b.fcmp("ogt", full_max_raw, neg_inf)
                 m_new.append(b.select(ok, full_max_raw, zero_f))
+                m_carry.append(full_max_raw)
 
             # ---- compute P = exp2(S - m_new) and l_local = sum(P) per row ----
             # P_lds[row, col] = exp2(S[row, col] - m_new[row]). Each warp publishes
@@ -4348,9 +4442,14 @@ def build_unified_attention_2d_tiled(
             for atom in range(M_ATOMS_PER_WARP):
                 new_acc[n * M_ATOMS_PER_WARP + atom] = acc_per_atom[atom]
 
+        # Carry the unclamped running max: it stays -inf until the row has seen a
+        # key. ``m_new`` (-inf replaced by 0) is only the exponent reference for
+        # P and alpha. Carrying the clamped 0 instead pins m at 0 when a row's
+        # first tile is fully masked (sliding window), and exp2(s - 0) then
+        # underflows P for very negative scores so the row's O collapses.
         yields = []
         for r in range(SOFTMAX_STATE_SLOTS):
-            yields.append(m_new[r])
+            yields.append(m_carry[r])
             yields.append(new_l_vals[r])
         for n in range(ACC_N_TILES):
             for atom in range(ACC_M_ATOMS):
@@ -4447,9 +4546,10 @@ def build_unified_attention_2d_tiled(
     def _acc_final_get(n: int, atom: int) -> Value:
         return acc_final[n * ACC_M_ATOMS + atom]
 
-    # Per-row reciprocal of L (computed once, reused across stripes).
+    # Per-row reciprocal of L (computed once, reused across stripes). Only an
+    # exact-zero L marks a keyless row (stored as 0); a NaN L stays NaN in O.
     rcp_l = [b.rcp(l_final[r]) for r in range(SOFTMAX_STATE_SLOTS)]
-    l_nonzero = [b.fcmp("ogt", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
+    l_zero = [b.fcmp("oeq", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
 
     if USE_MFMA_32X32:
         if TRANSPOSED_QK_32X32:
@@ -4484,7 +4584,7 @@ def build_unified_attention_2d_tiled(
                 dim=b.const_i32(0),
             )
             inv_l_t = b.rcp(l_final[0])
-            l_nonzero_t = b.fcmp("ogt", l_final[0], zero_f)
+            l_zero_t = b.fcmp("oeq", l_final[0], zero_f)
             for n in range(ACC_N_TILES):
                 acc32 = _acc_final_get(n, 0)
                 for reg in range(REGS_PER_LANE):
@@ -4494,7 +4594,7 @@ def build_unified_attention_2d_tiled(
                     v = b.vec_extract(acc32, reg)
                     normalized = b.fmul(v, inv_l_t)
                     final_h = b.cast_f32_to(
-                        b.select(l_nonzero_t, normalized, zero_f), dtype
+                        b.select(l_zero_t, zero_f, normalized), dtype
                     )
                     with b.scf_if(op_mask_t):
                         b.global_store(
@@ -4544,7 +4644,7 @@ def build_unified_attention_2d_tiled(
                 v = b.vec_extract(acc32, reg)
                 normalized = b.fmul(v, rcp_l[reg])
                 final_h = b.cast_f32_to(
-                    b.select(l_nonzero[reg], normalized, zero_f), dtype
+                    b.select(l_zero[reg], zero_f, normalized), dtype
                 )
                 b.smem_store_vN(Acc_lds, [row, col_in_stripe], final_h, 1)
             b.sync()
@@ -4654,7 +4754,7 @@ def build_unified_attention_2d_tiled(
                 v = b.vec_extract(_acc_final_get(n, atom), in_atom)
                 normalized = b.fmul(v, rcp_l[reg])
                 final_h = b.cast_f32_to(
-                    b.select(l_nonzero[reg], normalized, zero_f), dtype
+                    b.select(l_zero[reg], zero_f, normalized), dtype
                 )
                 b.smem_store_vN(Acc_lds, [row, col_in_stripe], final_h, 1)
         b.sync()

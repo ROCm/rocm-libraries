@@ -32,6 +32,7 @@ from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common import kernel_sweep as ks
 from benchmarks.common.grouped_conv import instance_list
 from dispatch import grouped_convolution as gc
+from kernels.conv.direct_variants import DIRECT_WAVE_PARAMETRIC
 from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.dispatch.core import PinRefused
@@ -93,9 +94,25 @@ _SHAPES = {
 # Shapes that reach every registered dgrad family: implicit GEMM with one
 # tilde sub-GEMM and with several (stride 2, dilation 2), the depthwise dgrad
 # filters and strides, and every channel pair the MFMA dgrad instances bake.
+# The 2x2/s2 downsample and the 16x16/s16 stem run width-folded (fold_width).
 _DGRAD_SHAPES = {
     "dense3x3": dict(),
     "dense_stride2": dict(stride_h=2, stride_w=2, K=128),
+    "dense2x2_stride2_folds": dict(Y=2, X=2, pad_h=0, pad_w=0, stride_h=2, stride_w=2),
+    "patch16_stem_folds_bf16": dict(
+        N=2,
+        C=3,
+        K=768,
+        Hi=224,
+        Wi=224,
+        Y=16,
+        X=16,
+        pad_h=0,
+        pad_w=0,
+        stride_h=16,
+        stride_w=16,
+        dtype="bf16",
+    ),
     "dense_dilated2_bf16": dict(
         Hi=32, Wi=32, dilation_h=2, dilation_w=2, pad_h=2, pad_w=2, dtype="bf16"
     ),
@@ -210,7 +227,9 @@ def test_an_instance_builds_only_for_its_own_arch():
     "kw, match",
     [
         (dict(arch="gfx90a"), "arch 'gfx90a'"),
+        (dict(arch="gfx942"), "arch 'gfx942'"),
         (dict(arch="gfx1250"), "arch 'gfx1250'"),
+        (dict(arch="gfx1250", llvm_flavor="llvm23"), "arch 'gfx1250'"),
         (dict(direction="wgrad"), "no 'wgrad' instances"),
         (dict(dtype="fp32"), "fp16 or bf16 only"),
         (dict(C=63, G=2), "divisible by G"),
@@ -228,7 +247,15 @@ def test_nothing_outside_the_lists_dispatches(kw, match):
     req = gc.ConvGroupedRequest(**fields)
     with pytest.raises(ValueError, match=match):
         gc.dispatch_conv_grouped(req)
-    assert not gc.dispatch_conv_grouped_all(req)
+    results = gc.dispatch_conv_grouped_all(req)
+    if fields["arch"] == "gfx1250" and kw.get("llvm_flavor") == "llvm23":
+        # Only the opt-in Winograd forward route (its 3x3 plans lower at
+        # llvm23 only); never an auto pick.
+        assert results
+        assert {r.spec.algorithm for r in results} == {"winograd"}
+        assert all(r.candidate.opt_in for r in results)
+    else:
+        assert not results
 
 
 def test_only_wgrad_has_no_candidates():
@@ -356,9 +383,9 @@ class _HelperCache:
     def __init__(self):
         self.looked_up: list[KernelIdentity] = []
 
-    def get(self, identity):
+    def entry_meta(self, identity):
         self.looked_up.append(identity)
-        return b"", {"kernel_name": "helper"}
+        return {"kernel_name": "helper"}
 
     def hsaco_path(self, identity):
         return Path("unused.hsaco")
@@ -366,11 +393,16 @@ class _HelperCache:
 
 def _direct_plan(spec, req):
     cache = _HelperCache()
+    # The meta a fresh --compile-all entry carries: a wave-parametric build
+    # records the wave size it was built at, the identity's.
+    meta = {"kernel_name": "k"}
+    if spec.algorithm in DIRECT_WAVE_PARAMETRIC:
+        meta["spec_wave_size"] = spec.identity.wave_size
     plan, why = dks.plan_for(
         cache,
         spec.identity,
         Path("unused.hsaco"),
-        {"kernel_name": "k"},
+        meta,
         _direct_problem(req),
         req.arch,
     )
@@ -390,7 +422,10 @@ def _cache_side_admits(spec, req) -> bool:
     if ident.dtype_a != req.dtype:
         return False
     if not ident.is_direct:
-        return KernelCache.supports_problem(ident, _implicit_problem(req))[0]
+        from benchmarks.common.benchmark_implicit_gemm_conv import _launch_problem
+
+        problem = _launch_problem(spec.direction, _implicit_problem(req))
+        return KernelCache.supports_problem(ident, problem)[0]
     if req.stride_h != req.stride_w or req.pad_h != req.pad_w:
         return False
     if ident.algorithm == "direct_nongrouped" and req.G != 1:
@@ -410,8 +445,7 @@ def test_admission_matches_the_aot_run_path(arch, direction, shape):
         if _cache_side_admits(s, req)
     ]
     assert admitted == expected
-    if arch == _ARCH:
-        assert admitted, f"{shape}: no registered instance runs it"
+    assert admitted, f"{arch} {shape}: no registered instance runs it"
 
 
 @pytest.mark.parametrize("direction", ["fwd", "dgrad"])
@@ -453,13 +487,14 @@ def _cache_side_plan(spec, req, ptrs, sizes):
     ``(identity, grid, block, signature names, buffers, values)``."""
     from benchmarks.common.benchmark_implicit_gemm_conv import (
         _extras_and_grid,
+        _launch_problem,
         _signature_for_identity,
     )
 
     ident = spec.identity
     direction = spec.direction
     if not ident.is_direct:
-        problem = _implicit_problem(req)
+        problem = _launch_problem(direction, _implicit_problem(req))
         rt = _UploadRecorder()
         extras, grid = _extras_and_grid(direction, problem, ident, rt, ident.dtype_a)
         buffers = gc._OPERANDS[direction]
@@ -535,6 +570,107 @@ def test_launch_plan_matches_the_aot_run_path(arch, direction, shape):
             assert set(plan.values(s, _PTRS, _SIZES)) == {
                 a["name"] for a in s.signature
             }, name
+
+
+# The runtime-channel MFMA dgrad (direct_dgrad_mfma_rtc) runs its own pair of
+# weight transforms, which take the per-group channel counts as kernargs. No
+# list registers one yet, so the parametrized test above never meets it.
+_RTC_DGRAD = (
+    "dgrad-direct_dgrad_mfma_rtc-fp16-2d-f3x3-p1x1-s1x1-d1x1-c0k0-block_groups=1-"
+    "block_h=8-block_q=16-fold_k32=true-k_atoms=10-m_tiles=1-persistent_grid=false-"
+    "runtime_k_loop=false-waves_k=2-waves_q=1-wave64-gfx950-llvm22"
+)
+
+
+def test_launch_plan_of_the_runtime_channel_mfma_dgrad():
+    identity = KernelIdentity.from_label(_RTC_DGRAD)
+    spec = gc.ConvInstanceSpec(
+        name=_RTC_DGRAD,
+        identity=identity,
+        block=gc._instance_block(identity),
+        helpers=gc._instance_helpers(identity),
+    )
+    req = _case_req("gfx950", "dgrad", "grouped_cpg4_kpg320")
+    ok, why = gc._admits(identity, req)
+    assert ok, why
+    assert [h.algorithm for h in spec.helpers] == [
+        "direct_dgrad_transpose_rtc",
+        "direct_dgrad_reorganize_rtc",
+    ]
+    plan = gc.launch_plan_for(req, spec)
+    got = [
+        (
+            s.identity,
+            s.grid,
+            s.block,
+            [a["name"] for a in s.signature],
+            s.buffers,
+            plan.values(s, _PTRS, _SIZES),
+        )
+        for s in plan.steps
+    ]
+    want, workspaces, _ = _cache_side_plan(spec, req, _PTRS, _SIZES)
+    assert got == want
+    assert dict(plan.workspaces) == workspaces
+
+
+@pytest.mark.parametrize(
+    "shape", [s for s in _DGRAD_SHAPES if s.endswith(("_folds", "_folds_bf16"))]
+)
+def test_the_folding_shapes_fold(shape):
+    from kernels.common.conv_implicit_gemm_dgrad import fold_width
+
+    p = _implicit_problem(_case_req(_ARCH, "dgrad", shape))
+    assert fold_width(p) != p
+
+
+# The patch-embedding dgrad (DgradConvSpec.patch) runs one record over the
+# filter's (y, x, c). No list registers one yet, so the parametrized tests
+# never meet it; the AOT run path must hand its binary that record too, not
+# the Y*X tilde records of C columns each.
+_PATCH_DGRAD = (
+    "dgrad-implicit_gemm-bf16-2d-t128x256x64-w2x4-a16x16x32-v8x8x8-mem-"
+    "cshuffle-kouter-ukd-patch-msg1024-wave64-gfx950-llvm22"
+)
+
+
+def test_launch_plan_of_the_patch_dgrad():
+    from kernels.common.conv_implicit_gemm_dgrad import (
+        fold_width,
+        pack_sub_gemm_buffer,
+        patch_sub_gemms,
+    )
+
+    identity = KernelIdentity.from_label(_PATCH_DGRAD)
+    spec = gc.ConvInstanceSpec(
+        name=_PATCH_DGRAD,
+        identity=identity,
+        block=gc._instance_block(identity),
+    )
+    req = _case_req("gfx950", "dgrad", "patch16_stem_folds_bf16")
+    ok, why = gc._admits(identity, req)
+    assert ok, why
+    assert _cache_side_admits(spec, req)
+    plan = gc.launch_plan_for(req, spec)
+    (step,) = plan.steps
+    got = (
+        step.identity,
+        step.grid,
+        step.block,
+        [a["name"] for a in step.signature],
+        step.buffers,
+        plan.values(step, _PTRS, _SIZES),
+    )
+    want, workspaces, table = _cache_side_plan(spec, req, _PTRS, _SIZES)
+    assert [got] == want
+    assert dict(plan.workspaces) == workspaces
+    assert plan.sub_gemm_table == table
+    # One record of all Y*X*C = 768 columns, on the folded problem.
+    p = fold_width(_implicit_problem(req))
+    (sg,) = patch_sub_gemms(p, identity.tile_m, identity.tile_n, identity.tile_k)
+    assert sg.gemm_n == req.Y * req.X * req.C
+    assert plan.num_sub_gemms == 1
+    assert table == tuple(pack_sub_gemm_buffer([sg], identity.tile_m, identity.tile_n))
 
 
 # ---------------------------------------------------------------------------
