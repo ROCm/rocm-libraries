@@ -6,7 +6,8 @@
 #
 # This mirrors the non-StreamK HalfPLR pure-F8 coverage
 # (tensilelite/Tests/common/gemm/gfx12/f8f8s_cls_gfx1250.yaml, TN, HalfPLR + TDMInst=3
-# + SIA=4, and tdm_multicast_gfx1250.yaml, TN & NT, HalfPLR=2) onto StreamK=3,
+# + SIA=4, and tdm_multicast_gfx1250_part2.yaml / tdm_multicast_gfx1250_part4.yaml,
+# TN & NT, HalfPLR=2) onto StreamK=3,
 # intersected with the StreamK+TDM+HalfPLR constraints: SIA=4 (required for
 # HalfPLR on StreamK), PrefetchAcrossPersistent=0, UseSubtileImpl=0, TDMInst=3,
 # PGR in (1,2), PLR=1, InnerUnroll=1, even MIWaveTile. Covers HalfPLR=1 (A),

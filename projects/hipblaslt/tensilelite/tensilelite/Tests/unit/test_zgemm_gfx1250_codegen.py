@@ -19,8 +19,7 @@ from pathlib import Path
 from tensilelite import Tensile
 
 # Reuse the common ZGEMM gfx1250 config (small enough to double as codegen input).
-_CONFIG = (Path(__file__).parent / ".." / "common" / "gemm" / "gfx12"
-           / "zgemm_gfx1250.yaml").resolve()
+_CONFIG_DIR = (Path(__file__).parent / ".." / "common" / "gemm" / "gfx12").resolve()
 
 
 def _gfx1250_asm_supported() -> bool:
@@ -41,12 +40,13 @@ def _gfx1250_asm_supported() -> bool:
 
 @pytest.mark.skipif(not _gfx1250_asm_supported(),
                     reason="assembler does not support gfx1250")
-def test_zgemm_gfx1250_codegen(tensile_args: list[str], tmp_path: Path) -> None:
+@pytest.mark.parametrize("config_name", ["zgemm_gfx1250.yaml", "zgemm_gfx1250_part2.yaml"])
+def test_zgemm_gfx1250_codegen(tensile_args: list[str], tmp_path: Path, config_name: str) -> None:
     output_dir = tmp_path / "output"
     # Force gfx1250 last so it wins over any CI-provided --gpu-targets (this is a
     # gfx1250-only codegen check; other targets reject the complex VALU solutions).
     args = [
-        str(_CONFIG), str(output_dir), "--build-only",
+        str(_CONFIG_DIR / config_name), str(output_dir), "--build-only",
         "--global-parameters", "KeepBuildTmp=True",
         *tensile_args,
         "--gpu-targets", "gfx1250",
