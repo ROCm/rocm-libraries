@@ -512,45 +512,58 @@ namespace
                           st_ok);
             }
 
-        // A percentage outside of [0, 100] is invalid. The header documents
-        // invalid_size, the library returns invalid_value (AISPARSE-904).
+        // A percentage outside of [0, 100] is an invalid value.
         DevBuf<double> val(std::vector<double>{1.0, 2.0});
         DevBuf<I>      rp(std::vector<I>{0, 1, 2}), ci(std::vector<I>{0, 1});
         I              nnz_c = 0;
         size_t         size  = 0;
-        EXPECT_STATUS_IN(rocsparse_sprune_csr2csr_nnz_by_percentage(handle,
-                                                                    2,
-                                                                    2,
-                                                                    0,
-                                                                    descr_a,
-                                                                    nullptr,
-                                                                    ptr,
-                                                                    nullptr,
-                                                                    -1.f,
-                                                                    descr_c,
-                                                                    ptr_c,
-                                                                    &nnz_c,
-                                                                    info.get(),
-                                                                    tmp),
-                         st_val,
-                         st_size);
-        EXPECT_STATUS_IN(rocsparse_dprune_csr2csr_by_percentage_buffer_size(handle,
-                                                                            2,
-                                                                            2,
-                                                                            2,
-                                                                            descr_a,
-                                                                            val,
-                                                                            rp,
-                                                                            ci,
-                                                                            150.0,
-                                                                            descr_c,
-                                                                            nullptr,
-                                                                            rp,
-                                                                            nullptr,
-                                                                            info.get(),
-                                                                            &size),
-                         st_val,
-                         st_size);
+        EXPECT_EQ(rocsparse_sprune_csr2csr_nnz_by_percentage(handle,
+                                                             2,
+                                                             2,
+                                                             0,
+                                                             descr_a,
+                                                             nullptr,
+                                                             ptr,
+                                                             nullptr,
+                                                             -1.f,
+                                                             descr_c,
+                                                             ptr_c,
+                                                             &nnz_c,
+                                                             info.get(),
+                                                             tmp),
+                  st_val);
+        EXPECT_EQ(rocsparse_dprune_csr2csr_by_percentage_buffer_size(handle,
+                                                                     2,
+                                                                     2,
+                                                                     2,
+                                                                     descr_a,
+                                                                     val,
+                                                                     rp,
+                                                                     ci,
+                                                                     150.0,
+                                                                     descr_c,
+                                                                     nullptr,
+                                                                     rp,
+                                                                     nullptr,
+                                                                     info.get(),
+                                                                     &size),
+                  st_val);
+        EXPECT_EQ(rocsparse_dprune_csr2csr_by_percentage(handle,
+                                                         2,
+                                                         2,
+                                                         2,
+                                                         descr_a,
+                                                         val,
+                                                         rp,
+                                                         ci,
+                                                         101.0,
+                                                         descr_c,
+                                                         nullptr,
+                                                         ptr_c,
+                                                         nullptr,
+                                                         info.get(),
+                                                         tmp),
+                  st_val);
     }
 
     // The CSR routine checks csr_val_C and csr_col_ind_C against the number of kept
@@ -872,14 +885,16 @@ namespace
         EXPECT_EQ(compute(nullptr, 40.0, m, d_val, d_ind, temp), rocsparse_status_invalid_handle);
         EXPECT_EQ(compute(handle, 40.0, m - 1, d_val, d_ind, temp), st_size);
         EXPECT_EQ(compute(handle, 40.0, m, d_val, d_ind, nullptr), st_ptr);
-        // The header documents invalid_size for an invalid percentage, the library returns
-        // invalid_value (AISPARSE-904).
-        EXPECT_STATUS_IN(compute(handle, -1.0, m, d_val, d_ind, temp), st_size, st_val);
+        // A percentage outside of [0, 100] is an invalid value.
+        EXPECT_EQ(compute(handle, -1.0, m, d_val, d_ind, temp), st_val);
         I count = 0;
-        EXPECT_STATUS_IN(rocsparse_dprune_dense2csr_nnz_by_percentage(
-                             handle, m, n, d_A, m, 101.0, descr, d_ptr, &count, info.get(), temp),
-                         st_size,
-                         st_val);
+        EXPECT_EQ(rocsparse_dprune_dense2csr_nnz_by_percentage(
+                      handle, m, n, d_A, m, 101.0, descr, d_ptr, &count, info.get(), temp),
+                  st_val);
+        EXPECT_EQ(
+            rocsparse_dprune_dense2csr_by_percentage_buffer_size(
+                handle, m, n, d_A, m, 101.0, descr, nullptr, d_ptr, nullptr, info.get(), &size),
+            st_val);
         EXPECT_EQ(rocsparse_dprune_dense2csr_nnz_by_percentage(
                       handle, m, n, d_A, m, 40.0, descr, d_ptr, nullptr, info.get(), temp),
                   st_ptr);
