@@ -17,7 +17,12 @@ from .isa import IsaStats, ResourceInfo, analyze_hsaco
 
 @dataclass(frozen=True)
 class VariantReport:
-    """One fully measured kernel variant."""
+    """One fully measured kernel variant.
+
+    ``launch_block_size`` is the number of threads per workgroup the kernel
+    is launched with (x * y * z), when the caller knows it. The kernel itself
+    only records an upper bound (``KernelDef.max_workgroup_size``).
+    """
 
     name: str
     spec: Mapping[str, Any]
@@ -26,6 +31,7 @@ class VariantReport:
     llvm: LlvmIrStats = field(default_factory=LlvmIrStats)
     isa: Optional[IsaStats] = None
     resources: Optional[ResourceInfo] = None
+    launch_block_size: Optional[int] = None
 
     @classmethod
     def from_artifact(
@@ -36,6 +42,7 @@ class VariantReport:
         artifact: KernelArtifact,
         benchmark: Optional[BenchmarkSummary] = None,
         hsaco_path: Optional[Path] = None,
+        launch_block_size: Optional[int] = None,
         objdump: str = "llvm-objdump",
         readelf: str = "llvm-readelf",
     ) -> "VariantReport":
@@ -50,6 +57,7 @@ class VariantReport:
             llvm=analyze_llvm_ir(artifact.llvm_text),
             isa=hsaco.isa if hsaco is not None else None,
             resources=hsaco.resources if hsaco is not None else None,
+            launch_block_size=launch_block_size,
         )
 
     def as_dict(self) -> Dict[str, Any]:
@@ -64,6 +72,7 @@ class VariantReport:
             "llvm": self.llvm.as_dict(),
             "isa": self.isa.as_dict() if self.isa else None,
             "resources": self.resources.as_dict() if self.resources else None,
+            "launch_block_size": self.launch_block_size,
         }
 
 
@@ -88,6 +97,17 @@ def compare_variant_reports(reports: Sequence[VariantReport]) -> List[Dict[str, 
                 "vgpr": r.resources.vgpr_count if r.resources else None,
                 "sgpr": r.resources.sgpr_count if r.resources else None,
                 "lds_bytes": r.resources.lds_bytes if r.resources else None,
+                # Workgroup sizes. wg_bound is the declared upper bound the
+                # flat-work-group-size attribute is lowered from; wg_compiled
+                # is the size the compiler budgeted registers for. compiled >
+                # bound means LLVM ignored the attribute. compiled > launch
+                # (when the launch size is known) means a smaller register
+                # budget than the launch needs.
+                "wg_bound": r.artifact.kernel.max_workgroup_size,
+                "wg_launch": r.launch_block_size,
+                "wg_compiled": (
+                    r.resources.max_flat_workgroup_size if r.resources else None
+                ),
             }
         )
     return sorted(

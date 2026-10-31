@@ -336,6 +336,35 @@ _TILED_2D_BUDGET_GEOMETRIES = [
             sliding_window=128,
         ),
     ),
+    # gfx950 D128 bs16 sliding-window single-batch combo (this PR): the
+    # transposed-32x32 online-softmax path, now admitting bf16 alongside
+    # fp16. Distinct geometry from the gfx942 SW rows above (block_size=16,
+    # not the default 64), so those don't exercise this combo's LDS/scratch
+    # budget.
+    (
+        "fp16_d128_bs16_sw_gqa32x8",
+        "gfx950",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="fp16",
+            block_size=16,
+            sliding_window=128,
+        ),
+    ),
+    (
+        "bf16_d128_bs16_sw_gqa32x8",
+        "gfx950",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="bf16",
+            block_size=16,
+            sliding_window=128,
+        ),
+    ),
 ]
 
 
@@ -2532,9 +2561,10 @@ class TestAttentionHelpers(unittest.TestCase):
             )
 
     def test_gfx950_sink_prefill_wpe3_cohort(self):
-        """gfx950 full-causal bf16 sink prefill selects waves_per_eu=3 (occupancy
-        hint only, output-preserving); SWA, non-sink, decode, and other shapes
-        keep the shipped waves_per_eu=2.
+        """The gfx950 full-causal bf16 sink prefill wpe=3 gate fires only on its
+        cohort (SWA, non-sink, decode, and other shapes miss it). Sink prefill
+        now rides the single-batch combo, which is checked first and keeps
+        waves_per_eu=2.
         """
         import kernels.common.attention_unified as au
 
@@ -2558,7 +2588,8 @@ class TestAttentionHelpers(unittest.TestCase):
         with _patch_resolved_arch("gfx950"):
             cohort = _make_problem()
             self.assertTrue(au._enable_gfx950_sink_prefill_wpe3(cohort, "gfx950"))
-            self.assertEqual(au._select_2d_waves_per_eu(cohort, "gfx950"), 3)
+            self.assertTrue(au._enable_single_batch_combo(cohort, "gfx950"))
+            self.assertEqual(au._select_2d_waves_per_eu(cohort, "gfx950"), 2)
 
             # Near-miss shapes must NOT hit the wpe=3 cohort.
             for label, p in (
@@ -2862,46 +2893,41 @@ class TestAttentionHelpers(unittest.TestCase):
                         spec = au._tiled_spec_from_problem(p, arch)
                         self.assertIsInstance(spec, au._tiled_2d_impl(arch)[0])
 
-    def test_gfx950_fp16_d128_sw_routing(self):
-        """Regression for the fp16 D128 sliding-window routing fix + its
-        ``block_size == 16`` scoping.
+    def test_gfx950_d128_sw_routing(self):
+        """Regression for the fp16 & bf16 D128 sliding-window routing.
 
-        fp16 D128 SW is admitted into the single-batch transposed-32x32 combo
-        only for ``block_size == 16``: at block_size in {32, 64} the combo also
-        enables the default-on ``_enable_d128_small_tile`` /
-        ``_enable_softmax_mfma_interleave`` levers, yielding
-        ``block_m=128 > tile_size=64`` with ``use_k_single_buffer`` -- an
-        uncaught ``ValueError`` in ``_tiled_spec_from_problem`` at launch. So
-        every block_size must build without raising, and only block_size==16
-        takes the transposed-32x32 (T=64) path; 32/64 stay on the narrow path.
+        fp16 & bf16 D128 SW take the single-batch transposed-32x32 combo at
+        every block size. block_size in {32, 64} once raised an uncaught
+        ``ValueError`` in ``_tiled_spec_from_problem`` (``block_m=128 >
+        tile_size=64`` with ``use_k_single_buffer``), so every block_size must
+        build without raising and land on the T=64 combo path.
         """
         import kernels.common.attention_unified as au
         from kernels import supports_native_unified_attention_tiled
 
         with _patch_resolved_arch("gfx950"):
-            for bs in (16, 32, 64):
-                with self.subTest(block_size=bs):
-                    p = _budget_problem(
-                        head_size=128,
-                        num_query_heads=32,
-                        num_kv_heads=8,
-                        dtype="fp16",
-                        seq=8192,
-                        block_size=bs,
-                        sliding_window=4096,
-                    )
-                    ok, reason = supports_native_unified_attention_tiled(p, "gfx950")
-                    self.assertTrue(ok, msg=reason)
-                    # Must not raise: block_size 32/64 previously hit an
-                    # uncaught ValueError building the combo spec here.
-                    spec = au._tiled_spec_from_problem(p, "gfx950")
-                    if bs == 16:
+            for dtype in ("fp16", "bf16"):
+                for bs in (16, 32, 64):
+                    with self.subTest(dtype=dtype, block_size=bs):
+                        p = _budget_problem(
+                            head_size=128,
+                            num_query_heads=32,
+                            num_kv_heads=8,
+                            dtype=dtype,
+                            seq=8192,
+                            block_size=bs,
+                            sliding_window=4096,
+                        )
+                        ok, reason = supports_native_unified_attention_tiled(
+                            p, "gfx950"
+                        )
+                        self.assertTrue(ok, msg=reason)
+                        # Must not raise: block_size 32/64 previously hit an
+                        # uncaught ValueError building the combo spec here.
+                        spec = au._tiled_spec_from_problem(p, "gfx950")
                         # routed to the transposed-32x32 combo at T=64
                         self.assertTrue(spec.use_mfma_32x32)
                         self.assertEqual(spec.tile_size, 64)
-                    else:
-                        # block_size 32/64 stay on the narrow path
-                        self.assertFalse(spec.use_mfma_32x32)
 
     def test_tiled_3d_support_gate_rejects_unsupported(self):
         """Mirror of ``test_tiled_2d_support_gate_rejects_unsupported`` for the
@@ -4582,12 +4608,14 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
     # The runtime K stride feeds three K/V load paths; each (head_size, dtype)
     # pins one, keyed to the (rows per async-load instruction, cfvst) it must take:
     # D128 bf16 the one-row _async_load, D64 the two-row _async_load, D128 fp16
-    # the cfvst V loads.
+    # the cfvst V loads. D128 bf16 defaults to cfvst too, so it forces cfvst off
+    # to keep the one-row path covered.
     _LOAD_PATHS = {
         (128, "bf16"): (1, False),
         (128, "fp16"): (1, True),
         (64, "bf16"): (2, False),
     }
+    _LOAD_PATH_KWARGS = {(128, "bf16"): {"use_cfvst": False}}
 
     @staticmethod
     def _spec(**kw):
@@ -4602,7 +4630,13 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
 
         for (d, dtype), path in self._LOAD_PATHS.items():
             base = self._spec(
-                **{**self._BASE_KWARGS, "head_size": d, "dtype": dtype}, **kw
+                **{
+                    **self._BASE_KWARGS,
+                    "head_size": d,
+                    "dtype": dtype,
+                    **self._LOAD_PATH_KWARGS.get((d, dtype), {}),
+                },
+                **kw,
             )
             self.assertEqual(
                 (_rows_per_instr(d), base.resolved_use_cfvst()),
@@ -5304,7 +5338,8 @@ class TestAttentionCdnaPrimitives(unittest.TestCase):
         Gate 1 (_enable_combo_2d): fp16, D=64, block_size=32, GQA-8, sinks,
           multi-seq prefill. Must fire -> wpe=4 from _select_2d_waves_per_eu.
         Gate 2 (_enable_gfx950_sink_prefill_wpe3): fp16, D=64, block_size=16,
-          num_seqs<=1, full-causal, sinks. Must fire -> wpe=3.
+          num_seqs<=1, full-causal, sinks. Must fire, but the single-batch combo
+          also takes this sink prefill and is checked first -> wpe=2.
 
         CPU-only (no GPU, no comgr): exercises the selector logic in isolation.
         """
@@ -5348,15 +5383,16 @@ class TestAttentionCdnaPrimitives(unittest.TestCase):
             4,
             "waves_per_eu for fp16+sinks Gate 1 (combo) should be 4",
         )
-        # Gate 2: wpe3 gate must fire, selecting wpe=3
+        # Gate 2: wpe3 gate must fire; the single-batch combo wins with wpe=2
         self.assertTrue(
             au._enable_gfx950_sink_prefill_wpe3(gate2_problem, "gfx950"),
             "_enable_gfx950_sink_prefill_wpe3 did not fire for fp16+sinks Gate 2 cohort",
         )
+        self.assertTrue(au._enable_single_batch_combo(gate2_problem, "gfx950"))
         self.assertEqual(
             au._select_2d_waves_per_eu(gate2_problem, "gfx950"),
-            3,
-            "waves_per_eu for fp16+sinks Gate 2 (wpe3) should be 3",
+            2,
+            "waves_per_eu for fp16+sinks Gate 2 (single-batch combo) should be 2",
         )
 
 

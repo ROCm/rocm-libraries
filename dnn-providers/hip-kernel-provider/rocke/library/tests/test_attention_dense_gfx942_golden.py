@@ -100,10 +100,14 @@ def _cases():
     def mk(**over):
         d = dict(base)
         d.update(over)
-        spec_type = (
-            Gfx942AttentionDenseSpec if d.get("emit_lse", False) else AttentionDenseSpec
-        )
+        gfx942_only = d.get("emit_lse", False) or d.get("window_wave_skip", False)
+        spec_type = Gfx942AttentionDenseSpec if gfx942_only else AttentionDenseSpec
         return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
+
+    def mk_gfx942(**over):
+        d = dict(base)
+        d.update(over)
+        return lambda: build_attention_dense(Gfx942AttentionDenseSpec(**d), arch=_ARCH)
 
     def mk_dispatch(**over):
         """Build via the gfx942 dispatch spec so the case tracks the SHIPPED config
@@ -204,6 +208,30 @@ def _cases():
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": mk_dispatch(
             sliding_window=128
         ),
+        # Window spanning the query block (W >= block_m): three-phase band loop
+        # (window-bound / mask-free / causal-bound) on the persistent grid, and the
+        # narrow-band dispatch geometry for D64 bf16 (64-row blocks).
+        "attention_dense_gfx942/persist_swa_d128_bf16_w256": mk(
+            sliding_window=256,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        "attention_dense_gfx942/dispatch_swa_sink_d64_bf16_w128": mk_dispatch(
+            head_size=64, sliding_window=128, use_sinks=True
+        ),
+        # Wave-uniform skip of fully masked (wave, tile) pairs on the persistent grid
+        # (the dispatch D128 case above covers the one-CTA-per-block grid).
+        "attention_dense_gfx942/persist_swa_wskip_d128_fp16_w128": mk(
+            dtype="fp16",
+            sliding_window=128,
+            block_m=128,
+            block_n=32,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+            window_wave_skip=True,
+        ),
         # D64 SWA: structurally distinct builder arm (packed 2-rows/DMA + K row-group
         # pad + wpe=4 tune). Numeric coverage is in _SWA_COHORT
         "attention_dense_gfx942/swa_d64_bf16_w128": mk(
@@ -264,6 +292,30 @@ def _cases():
         # --- sinks + LSE: a keyless row keeps the sink seed (m = sink * LOG2E,
         #     l = 1), so its LSE is the sink logit rather than -inf. Same geometry
         #     as the LSE empty-window case. ---
+        # --- bottom-right causal (runtime diagonal offset) on both grids, the
+        #     diagonal split, the KV-segment split, and the dispatcher path. ---
+        "attention_dense_gfx942/br_d128_bf16": mk(
+            seqlen_kv=1024, causal_bottom_right=True
+        ),
+        "attention_dense_gfx942/br_persist_d128_bf16": mk(
+            seqlen_kv=1024,
+            causal_bottom_right=True,
+            persistent=True,
+            num_persistent=304,
+        ),
+        "attention_dense_gfx942/br_dsplit_d64_bf16": mk_gfx942(
+            head_size=64,
+            seqlen_kv=1024,
+            causal_bottom_right=True,
+            causal_diag_split=True,
+        ),
+        "attention_dense_gfx942/br_dsplit_kvs4_d128_bf16": mk_gfx942(
+            seqlen_kv=2048,
+            causal_bottom_right=True,
+            causal_diag_split=True,
+            kv_segments=4,
+            block_m=128,
+        ),
         "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": mk(
             emit_lse=True,
             use_sinks=True,
@@ -296,11 +348,12 @@ def _run(flavor):
 
 
 def _build_doc():
-    from rocke.core.ir_golden import GOLDEN_FLAVORS
+    from rocke.core.ir_golden import GOLDEN_ALIASES, GOLDEN_PROFILE_FLAVORS
 
     return {
         "schema": "attention_dense_gfx942.ir_golden_sha256/v1",
-        "flavors": {fl: _run(fl) for fl in GOLDEN_FLAVORS},
+        "aliases": GOLDEN_ALIASES,
+        "flavors": {fl: _run(fl) for fl in GOLDEN_PROFILE_FLAVORS},
     }
 
 

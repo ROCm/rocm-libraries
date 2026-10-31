@@ -387,8 +387,8 @@ TEST_F(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_FollowsMIOpenModule)
 #else
     ScopedEnvironment<std::string> unset_system_db(MIOPEN_SYSTEM_DB_PATH, "");
 
-    // DATABASE_INSTALL_DIR is "bin" on Windows, so the databases are installed next to
-    // MIOpen.dll. Resolve that directory independently and compare.
+    // DATABASE_INSTALL_DIR is share/miopen/db on Windows too, under the prefix whose bin/
+    // directory holds MIOpen.dll. Resolve that directory independently and compare.
     HMODULE hmod = nullptr;
     ASSERT_NE(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                                      GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -408,7 +408,9 @@ TEST_F(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_FollowsMIOpenModule)
         module_path.resize(module_path.size() * 2);
     }
     module_path.resize(len);
-    const auto expected = miopen::weakly_canonical(fs::path{module_path}).parent_path();
+    const auto expected =
+        miopen::weakly_canonical(fs::path{module_path}).parent_path().parent_path() / "share" /
+        "miopen" / "db";
 
     EXPECT_EQ(miopen::GetSystemDbPath(), expected)
         << "System DB path should follow MIOpen.dll so an installed MIOpen finds its databases "

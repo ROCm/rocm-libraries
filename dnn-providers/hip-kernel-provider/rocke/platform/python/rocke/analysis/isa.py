@@ -20,7 +20,22 @@ from typing import Dict, Mapping, Optional
 
 @dataclass(frozen=True)
 class IsaStats:
-    """Instruction-family counts from final AMDGPU ISA text."""
+    """Instruction-family counts from final AMDGPU ISA text.
+
+    Counts are arch-neutral where the hardware concept is the same:
+
+    - ``ds_read`` / ``ds_write`` count LDS reads/writes under both the CDNA
+      spelling (``ds_read_*`` / ``ds_write_*``) and the gfx11+ spelling
+      (``ds_load_*`` / ``ds_store_*``).
+    - ``s_barrier`` counts completed barriers: ``s_barrier`` on CDNA/gfx11 and
+      ``s_barrier_wait`` on gfx12, whose barrier is split into
+      ``s_barrier_signal`` + ``s_barrier_wait``.
+    - ``s_waitcnt`` counts memory-counter waits: ``s_waitcnt*`` plus the gfx12
+      split forms (``s_wait_loadcnt``, ``s_wait_dscnt``, ``s_wait_kmcnt``, ...).
+      The gfx12 ALU dependency wait ``s_wait_alu`` is counted separately.
+    - ``wmma`` is the RDNA/gfx12 matrix-core count (``v_wmma_*``,
+      ``v_swmmac_*``), the counterpart of ``mfma`` on CDNA.
+    """
 
     mfma: int = 0
     mfma_dest_vgpr: int = 0
@@ -39,6 +54,13 @@ class IsaStats:
     sched_barrier: int = 0
     valu: int = 0
     salu: int = 0
+    wmma: int = 0
+    global_load: int = 0
+    global_store: int = 0
+    global_load_lds: int = 0
+    scratch_load: int = 0
+    scratch_store: int = 0
+    s_wait_alu: int = 0
 
     def as_dict(self) -> Dict[str, int]:
         return {
@@ -59,12 +81,26 @@ class IsaStats:
             "sched_barrier": self.sched_barrier,
             "valu": self.valu,
             "salu": self.salu,
+            "wmma": self.wmma,
+            "global_load": self.global_load,
+            "global_store": self.global_store,
+            "global_load_lds": self.global_load_lds,
+            "scratch_load": self.scratch_load,
+            "scratch_store": self.scratch_store,
+            "s_wait_alu": self.s_wait_alu,
         }
 
 
 @dataclass(frozen=True)
 class ResourceInfo:
-    """Resource metadata from AMDHSA code-object notes or disassembly."""
+    """Resource metadata from AMDHSA code-object notes or disassembly.
+
+    ``max_flat_workgroup_size`` is the largest workgroup the compiler budgeted
+    registers for. When it exceeds the kernel's real launch size, the register
+    budget is smaller than necessary; LLVM falls back to 1024 when the
+    ``amdgpu-flat-work-group-size`` attribute is missing or its range is
+    invalid (min > max).
+    """
 
     vgpr_count: Optional[int] = None
     agpr_count: Optional[int] = None
@@ -72,7 +108,7 @@ class ResourceInfo:
     lds_bytes: Optional[int] = None
     scratch_bytes: Optional[int] = None
     wavefront_size: Optional[int] = None
-    workgroup_size_hint: Optional[int] = None
+    max_flat_workgroup_size: Optional[int] = None
     raw: Mapping[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Optional[int]]:
@@ -83,7 +119,7 @@ class ResourceInfo:
             "lds_bytes": self.lds_bytes,
             "scratch_bytes": self.scratch_bytes,
             "wavefront_size": self.wavefront_size,
-            "workgroup_size_hint": self.workgroup_size_hint,
+            "max_flat_workgroup_size": self.max_flat_workgroup_size,
         }
 
 
@@ -124,10 +160,13 @@ def parse_isa(text: str) -> IsaStats:
     buffer_load = buffer_store = buffer_load_lds = 0
     ds_read = ds_write = s_barrier = s_waitcnt = sched_barrier = 0
     valu = salu = 0
+    wmma = global_load = global_store = global_load_lds = 0
+    scratch_load = scratch_store = s_wait_alu = 0
 
     for line in _instruction_lines(text):
         # Normalize away address/encoding prefixes. The mnemonic is still
         # present as a token in llvm-objdump output.
+        mnemonic = _extract_mnemonic(line)
         if "v_mfma" in line:
             mfma += 1
             dest_cls, c_cls = _mfma_acc_classes(line)
@@ -139,6 +178,9 @@ def parse_isa(text: str) -> IsaStats:
                 mfma_c_vgpr += 1
             elif c_cls == "a":
                 mfma_c_agpr += 1
+        is_wmma = mnemonic.startswith(("v_wmma", "v_swmmac"))
+        if is_wmma:
+            wmma += 1
         if "v_accvgpr_read_b32" in line:
             accvgpr_read += 1
         if "v_accvgpr_write_b32" in line:
@@ -150,23 +192,42 @@ def parse_isa(text: str) -> IsaStats:
                 buffer_load += 1
         if "buffer_store" in line:
             buffer_store += 1
-        if "ds_read" in line:
+        if mnemonic.startswith("global_load"):
+            if "lds" in mnemonic:
+                global_load_lds += 1
+            else:
+                global_load += 1
+        elif mnemonic.startswith("global_store"):
+            global_store += 1
+        elif mnemonic.startswith("scratch_load"):
+            scratch_load += 1
+        elif mnemonic.startswith("scratch_store"):
+            scratch_store += 1
+        if "ds_read" in line or mnemonic.startswith("ds_load"):
             ds_read += 1
-        if "ds_write" in line:
+        if "ds_write" in line or mnemonic.startswith("ds_store"):
             ds_write += 1
-        if "s_barrier" in line:
+        is_barrier = mnemonic.startswith("s_barrier")
+        if mnemonic in ("s_barrier", "s_barrier_wait"):
             s_barrier += 1
-        if "s_waitcnt" in line:
+        is_mem_wait = mnemonic.startswith("s_waitcnt") or (
+            mnemonic.startswith("s_wait_") and mnemonic.endswith("cnt")
+        )
+        if is_mem_wait:
             s_waitcnt += 1
+        if mnemonic == "s_wait_alu":
+            s_wait_alu += 1
         if "sched_barrier" in line:
             sched_barrier += 1
 
         # Crude scalar/vector ALU buckets. These are intentionally broad
-        # enough to spot large address-arithmetic regressions.
-        mnemonic = _extract_mnemonic(line)
-        if mnemonic.startswith("v_") and not mnemonic.startswith("v_mfma"):
+        # enough to spot large address-arithmetic regressions. Matrix-core ops,
+        # barriers and waits have their own counters above.
+        if mnemonic.startswith("v_") and not (mnemonic.startswith("v_mfma") or is_wmma):
             valu += 1
-        if mnemonic.startswith("s_") and mnemonic not in ("s_barrier", "s_waitcnt"):
+        if mnemonic.startswith("s_") and not (
+            is_barrier or is_mem_wait or mnemonic == "s_wait_alu"
+        ):
             salu += 1
 
     return IsaStats(
@@ -187,6 +248,13 @@ def parse_isa(text: str) -> IsaStats:
         sched_barrier=sched_barrier,
         valu=valu,
         salu=salu,
+        wmma=wmma,
+        global_load=global_load,
+        global_store=global_store,
+        global_load_lds=global_load_lds,
+        scratch_load=scratch_load,
+        scratch_store=scratch_store,
+        s_wait_alu=s_wait_alu,
     )
 
 
@@ -219,7 +287,9 @@ def _extract_mnemonic(line: str) -> str:
     #   s_waitcnt vmcnt(0)
     tokens = line.replace("\t", " ").split()
     for tok in tokens:
-        if tok.startswith(("v_", "s_", "ds_", "buffer_", "flat_", "global_")):
+        if tok.startswith(
+            ("v_", "s_", "ds_", "buffer_", "flat_", "global_", "scratch_")
+        ):
             return tok
     return tokens[0] if tokens else ""
 
@@ -265,7 +335,7 @@ def parse_resources(text: str) -> ResourceInfo:
             "scratch_bytes",
         ),
         wavefront_size=first("amdhsa_wavefront_size32", "wavefront_size"),
-        workgroup_size_hint=first("amdhsa_workgroup_processor_mode"),
+        max_flat_workgroup_size=first("max_flat_workgroup_size"),
         raw=raw,
     )
 

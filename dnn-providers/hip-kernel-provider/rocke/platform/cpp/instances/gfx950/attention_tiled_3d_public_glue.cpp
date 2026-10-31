@@ -221,6 +221,7 @@ rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled
     memset(&s, 0, sizeof(s));
     s.has_waves_per_eu = false;
     s.waves_per_eu = 0;
+    s.emit_lse = false;
     return s;
 }
 
@@ -265,6 +266,20 @@ bool rocke_gfx950_unified_attention_3d_tiled_spec_validate(
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs fp16/bf16 KV");
         return false;
+    }
+    /* The swizzle XORs a row's 16-byte chunk index with row % chunks, which
+     * stays inside the row only for a power-of-two chunk count. */
+    {
+        const int chunks = s->head_size / 8;
+        if(s->use_kv_lds_swizzle && (chunks & (chunks - 1)) != 0)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "use_kv_lds_swizzle needs head_size / 8 a power of two "
+                            "(got head_size=%d)",
+                            s->head_size);
+            return false;
+        }
     }
     if(s->use_wave_page_id_load && s->kv_storage_dtype != NULL)
     {
@@ -503,7 +518,7 @@ int rocke_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
     /* kernel_name_join("rocke_uattn_reduce_tiled", d<HD>, h<NUM_QH>,
-     *   seg<NUM_SEG>, dtype) */
+     *   seg<NUM_SEG>, dtype[, "lse"]) */
     char d_part[32];
     char h_part[32];
     char seg_part[32];
@@ -526,6 +541,10 @@ int rocke_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
+    if(s->emit_lse)
+    {
+        parts[np++] = "lse";
+    }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
     if(st != ROCKE_OK)
@@ -584,11 +603,11 @@ bool rocke_gfx950_attention_tiled_3d_supports(int head_size,
         ATTN3D950_REASON(reason_buf);
         return false;
     }
-    if(head_size != 64 && head_size != 128 && head_size != 256)
+    if(head_size != 64 && head_size != 128 && head_size != 192 && head_size != 256)
     {
         snprintf(reason_buf,
                  sizeof(reason_buf),
-                 "tiled 3D kernel only supports head_size in {64,128,256} (got %d)",
+                 "tiled 3D kernel only supports head_size in {64,128,192,256} (got %d)",
                  head_size);
         ATTN3D950_REASON(reason_buf);
         return false;
@@ -642,11 +661,8 @@ bool rocke_gfx950_attention_tiled_3d_supports(int head_size,
         ATTN3D950_REASON(reason_buf);
         return false;
     }
-    if(16 % num_queries_per_kv != 0)
-    {
-        ATTN3D950_REASON("tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16");
-        return false;
-    }
+    /* A num_queries_per_kv that does not divide BLOCK_M=16 is supported: see
+     * supports_tiled_3d in the Python twin. */
     ATTN3D950_REASON("supported");
     return true;
 #undef ATTN3D950_REASON
@@ -1013,6 +1029,22 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
         if(strided_kv && spec->use_wave_page_id_load)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
+            return NULL;
+        }
+        /* An async K/V copy moves KV_HALVES_PER_CALL halves. When that is not a
+         * whole number of rows (head_size 192), each lane derives its own row,
+         * which holds only while a tile is one page and its LDS rows are not
+         * permuted. */
+        if(!strided_kv && spec->kv_storage_dtype == NULL && spec->head_size > 0
+           && ROCKE_ATTN3D950_KV_HALVES_PER_CALL % spec->head_size != 0
+           && ((spec->has_tile_size_override && spec->tile_size_override != spec->block_size)
+               || spec->use_kv_lds_swizzle))
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "head_size=%d K/V copies span partial rows: needs page-sized tiles "
+                            "and no use_kv_lds_swizzle",
+                            spec->head_size);
             return NULL;
         }
 
