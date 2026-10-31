@@ -79,6 +79,10 @@ struct BlockFmhaPipelineQRKSVS
     // needed for K/V aliasing.
 #if defined(__gfx11__) || defined(__gfx120__)
     static constexpr bool kUseSeparateKVLds =
+#if defined(__gfx120__)
+        // M64 tiles without bias or dropout benefit from sharing K/V LDS.
+        (kM0 > 64 || BiasEnum != BlockAttentionBiasEnum::NO_BIAS || kHasDropout) &&
+#endif
 #if defined(__gfx115__)
         !(kQKHeaddim == 64 && kN1 == 64) &&
 #endif
@@ -678,6 +682,11 @@ struct BlockFmhaPipelineQRKSVS
             constexpr auto kSepLdsVPrefetch = kQKHeaddim == 128 && kN1 == 128
                                                   ? VPrefetchPoint::AfterGemm0Tail
                                                   : VPrefetchPoint::BeforeGemm0Tail;
+#elif defined(__gfx120__)
+            constexpr auto kSepLdsVPrefetch =
+                (kHasDropout && (kQKHeaddim == 64 || kQKHeaddim == 128))
+                    ? VPrefetchPoint::AfterSoftmax
+                    : VPrefetchPoint::BeforeGemm0Tail;
 #else
             constexpr auto kSepLdsVPrefetch = VPrefetchPoint::BeforeGemm0Tail;
 #endif
