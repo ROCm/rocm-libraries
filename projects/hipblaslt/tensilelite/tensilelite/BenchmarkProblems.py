@@ -115,6 +115,16 @@ def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutio
     with open(resultsFileName, "w", newline="") as f:
         f.write("\n".join(lines) + "\n")
 
+
+def _resultsFileConsumed(hasLibraryLogic: bool, backendName: str) -> bool:
+    """Whether anything reads the benchmark client's results CSVs.
+
+    The LibraryLogic step reads them from 2_BenchmarkData, and the Ductile backend
+    scores each GA generation from them. Otherwise the client is told to write none.
+    """
+    return hasLibraryLogic or backendName == "ductile"
+
+
 # 12 hex chars = 48 bits. Birthday-collision likely around 2^24 (~16M) entries
 # in one caches/ dir; tuning sweeps produce <<1k entries, so collision risk is
 # negligible. Lookup re-validates by content so a collision becomes a recompile,
@@ -490,8 +500,12 @@ def writeBenchmarkFiles(
         isaInfoMap: Dict[IsaVersion, IsaInfo],
         probSolMap: dict,
         archNames: Optional[List[str]] = None,
+        writeResultsFile: bool = True,
     ):
-    """Write all the files needed for a given benchmarking step"""
+    """Write all the files needed for a given benchmarking step
+
+    writeResultsFile: False makes ClientParameters.ini ask the client for no results CSV.
+    """
 
     ensurePath(sourcePath)
     copyStaticFiles(sourcePath)
@@ -602,7 +616,7 @@ def writeBenchmarkFiles(
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, False, deviceId, gfxName, \
                                   libraryFile=newLibraryFileFull, gateTypeArgs=gateTypeArgs, probSolMap=probSolMap,
-                                  sourceDir=str(sourcePath))
+                                  sourceDir=str(sourcePath), writeResultsFile=writeResultsFile)
 
     if len(solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")
@@ -619,6 +633,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                          buildOnly: bool = False,
                          solutionPoolIndex: dict = None,
                          archNames: Optional[List[str]] = None,
+                         writeResultsFile: bool = True,
     ):
     """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config
 
@@ -626,6 +641,8 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
         buildOnly: If True, generate and build kernels but skip benchmarking.
         solutionPoolIndex: Dict mapping ProblemType string to pool file path.
             Only the matched file's solutions are constructed (on demand).
+        writeResultsFile: If False, the client writes no results CSV
+            (ClientParameters.ini sets no-results-file).
     """
     if solutionPoolIndex is None:
         solutionPoolIndex = {}
@@ -754,7 +771,8 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                             benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                             benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                             benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                            sourcePath, debugConfig, getattr(benchmarkStep, "gateTypeArgs", None), deviceId, gfxName, isaInfoMap, probSolMap, archNames)
+                            sourcePath, debugConfig, getattr(benchmarkStep, "gateTypeArgs", None), deviceId, gfxName, isaInfoMap, probSolMap, archNames,
+                            writeResultsFile=writeResultsFile)
                 # ^ this mutates solutions
 
                 # write cache data
@@ -804,7 +822,8 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                 writeClientConfigIni(True, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
                                     benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                     benchmarkStep.icacheFlushArgs, conProblemType,
-                                    sourcePath, codeObjectFiles, resultsFileName,
+                                    sourcePath, codeObjectFiles,
+                                    resultsFileName if writeResultsFile else None,
                                     outFile, deviceId, gfxName, libraryFile=cachedLibraryFile,
                                     gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), probSolMap=probSolMap)
 
@@ -831,14 +850,20 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
 
                 if enableTileSelection:
                     configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
+                # A results CSV left by an earlier run into this output directory
+                # (reached here only with ForceRedoBenchmarkProblems) would otherwise be
+                # copied to 2_BenchmarkData as this run's results.
+                if not writeResultsFile and os.path.isfile(resultsFileName):
+                    os.remove(resultsFileName)
                 returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
                 # --cpu-only plumbing: runClient covered the config/run-script writing then
                 # stubbed the device launch (returncode 0). The device never produced a perf
                 # CSV, so synthesize a deterministic one here in the addFromCSV schema. We are
                 # inside the `not os.path.exists(resultsFileName)` branch, so this honors the
-                # existing skip-if-already-benchmarked guard.
-                if globalParameters["CpuOnly"]:
+                # existing skip-if-already-benchmarked guard. It stands in for the client's
+                # CSV, so it is written only when the client would write one.
+                if globalParameters["CpuOnly"] and writeResultsFile:
                     numSolutions = len(solutions) if solutions else 1
                     _writeSyntheticResultsCSV(resultsFileName, benchmarkStep.problemSizes,
                                             gfxName, numSolutions)
@@ -910,6 +935,7 @@ def main(
     buildOnly: bool = False,
     solutionPoolFiles: list = None,
     archNames: Optional[List[str]] = None,
+    hasLibraryLogic: bool = True,
 ):
     """Entry point for the "BenchmarkProblems" section of a Tensile config yaml
 
@@ -920,6 +946,11 @@ def main(
             instead of generating from ForkParameters.
         archNames: The gfx names this build was asked for, when the caller knows
             them. Needed to tune a stepping, whose ISA cannot name its target.
+        hasLibraryLogic: Whether the config has a LibraryLogic section, which reads
+            the results CSVs. Without one (and without the Ductile backend) the client
+            writes no results CSV, so a rerun into the same output directory with
+            ForceRedoBenchmarkProblems=False benchmarks again: the results CSV is the
+            "already benchmarked" marker.
     """
     if config is None:
         print(f'No config specified in {globalParameters["ConfigPath"]}, built client only')
@@ -927,11 +958,12 @@ def main(
 
     # Parse and validate backend config using shared contract
     backend = parse_backend_config(backend if backend else None)
+    backend_name = str(backend.get("Name", "tensile")).lower()
+    writeResultsFile = _resultsFileConsumed(hasLibraryLogic, backend_name)
 
     # Load solution pool index if provided and supported by the backend
     solutionPoolIndex = None
     if solutionPoolFiles:
-        backend_name = str(backend.get("Name", "tensile")).lower()
         if BackendFactory.create(backend_name).supports_solution_pool():
             solutionPoolIndex = _loadSolutionPool(solutionPoolFiles)
         else:
@@ -996,6 +1028,7 @@ def main(
                             buildOnly=buildOnly,
                             solutionPoolIndex=solutionPoolIndex,
                             archNames=archNames,
+                            writeResultsFile=writeResultsFile,
                         )
                 totalTestFails += benchmarkErrors
 
@@ -1013,6 +1046,9 @@ def main(
                     granularityFileName = resultsFileBase + "_Granularity.csv"
                     if os.path.isfile(resultsFileName):
                         shutil.copy(resultsFileName, newResultsFileName)
+                    elif not writeResultsFile and os.path.isfile(newResultsFileName):
+                        # From an earlier run (ForceRedoBenchmarkProblems): not this run's results.
+                        os.remove(newResultsFileName)
                     shutil.copy(solutionsFileName, newSolutionsFileName)
                     if os.path.isfile(granularityFileName):
                         shutil.copy(granularityFileName, newGranularityFileName)
