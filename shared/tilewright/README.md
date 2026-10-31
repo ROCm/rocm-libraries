@@ -853,8 +853,10 @@ of the two layouts it applies to, with each sample kernel's non-temporal
 siblings in the pool, and requires the veto to change some of their hashes
 against the copies without it. It makes no drift copy of the models
 `DRIFT_SKIP` names and no veto copy of those `VETO_SKIP` names
-(`tests/CMakeLists.txt`). Without a materialized shipped model it is
-skipped.
+(`tests/CMakeLists.txt`). The skips concern those shipped files alone: a
+recipe may still deploy the veto for the models its runs stage, as
+`training_pipeline/configs/gfx950_tf32_tt_origami_v3.yaml` does. Without a
+materialized shipped model it is skipped.
 
 As a subproject, `add_subdirectory(shared/tilewright)` provides the static
 library `roc::tilewright`. An installed tilewright is found with
