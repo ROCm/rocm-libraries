@@ -49,6 +49,12 @@ Construction is AETG-style: take the first uncovered tuple, fix its two axes, dr
 completions (each fills the other axes in a random order with the level that covers the most
 uncovered tuples so far), keep the legal one whose live gain is largest and that covers the start
 tuple live, and credit the tuples that are live in it. No such completion: run the exhaustive search.
+
+A run that declines many rows leaves tuples no passing row ever drew. ``repair_targets`` lists the
+tuples whose every drawing record was ``DECLINED`` or ``UNEXERCISED`` and the levels that some
+``PASS`` record held; ``repair`` builds new rows for them (the same construction and liveness,
+only the targets left to cover) from those levels alone. A target with a value that never passed
+is not retried.
 """
 
 import ast
@@ -83,6 +89,7 @@ GRAPH_METADATA_KEYS = ("purpose", "inputs", "validator", "placement", "placement
 # The outcomes of a gauntlet run that `pair_coverage` tells apart.
 PASSED_OUTCOMES = ("PASS", "UNCLAIMED_PASS")
 DECLINED_OUTCOME = "DECLINED"
+UNEXERCISED_OUTCOME = "UNEXERCISED"
 
 
 class Finding(NamedTuple):
@@ -456,16 +463,44 @@ class _Search(NamedTuple):
 
 
 class _Builder:
-    def __init__(self, space, seed, candidates, cap):
+    def __init__(
+        self,
+        space,
+        seed,
+        candidates,
+        cap,
+        liveness=None,
+        allowed=None,
+        targets=None,
+        avoid=None,
+        seed_prefix=None,
+        witness=None,
+    ):
+        """``allowed`` (axis -> level values) restricts every row to those levels, ``targets``
+        (tuples as ``((axisA, valueA), (axisB, valueB))``) makes those the only tuples to cover,
+        ``avoid`` lists tuples a row should not hold, ``witness`` is a legal row (axis -> value)
+        to fill the axes a pair does not depend on from; ``liveness`` shares the answers of an
+        earlier build. These are what ``repair`` sets.
+        """
         self.space = space
         self.seed = seed
         self.candidates = candidates
         self.cap = cap
+        self.seed_prefix = seed_prefix or f"gauntlet-pairwise:{space.space_id}:{seed}"
+        self.witness = witness
         self.names = list(space.axes)
         self.n = len(self.names)
         self.level_map = {n: levels(space, n, seed) for n in self.names}
         self.size = [len(self.level_map[n]) for n in self.names]
-        self.liveness = Liveness(space, self.level_map)
+        self.liveness = liveness or Liveness(space, self.level_map)
+        self.allowed = [list(range(s)) for s in self.size]
+        if allowed is not None:
+            for p, n in enumerate(self.names):
+                self.allowed[p] = [
+                    i
+                    for i, level in enumerate(self.level_map[n])
+                    if any(_same(level, v) for v in allowed.get(n, ()))
+                ]
         self.base_row = None
         self._plans = {}
         self._single = {}
@@ -492,6 +527,34 @@ class _Builder:
         for (x, y), start in self.block_start.items():
             self.slot[x][y] = (start, self.size[y], 1)
             self.slot[y][x] = (start, 1, self.size[y])
+        self.avoid = bytearray(total)
+        self.has_avoid = bool(avoid)
+        for pair in avoid or ():
+            self.avoid[self.index_of(pair)] = 1
+        if targets is not None:
+            self.retarget(targets)
+
+    def index_of(self, pair):
+        """The position in ``uncovered`` of a tuple ``((axisA, valueA), (axisB, valueB))``."""
+        (a, va), (b, vb) = pair
+        x, y = self.names.index(a), self.names.index(b)
+        if x > y:
+            x, y, va, vb = y, x, vb, va
+        lx = self._level_index(x, va)
+        ly = self._level_index(y, vb)
+        return self.block_start[x, y] + lx * self.size[y] + ly
+
+    def retarget(self, pairs):
+        """Make these tuples the only ones left to cover."""
+        self.uncovered = bytearray(self.total)
+        for pair in pairs:
+            self.uncovered[self.index_of(pair)] = 1
+
+    def _level_index(self, pos, value):
+        for i, level in enumerate(self.level_map[self.names[pos]]):
+            if _same(level, value):
+                return i
+        raise ValueError(f"{value!r} is not a level of axis '{self.names[pos]}'")
 
     def values(self, row):
         return {
@@ -531,13 +594,19 @@ class _Builder:
         rng.shuffle(order)
         placed = [p for p in range(self.n) if row[p] >= 0]
         unc = self.uncovered
+        avoid = self.avoid if self.has_avoid else None
         for x in order:
             best, ties = -1, []
             slots = [(self.slot[x][y], row[y]) for y in placed]
-            for level in range(self.size[x]):
+            for level in self.allowed[x]:
                 gain = 0
-                for (start, step_x, step_y), ly in slots:
-                    gain += unc[start + level * step_x + ly * step_y]
+                if avoid is None:
+                    for (start, step_x, step_y), ly in slots:
+                        gain += unc[start + level * step_x + ly * step_y]
+                else:  # a tuple to avoid outweighs any number of tuples to cover
+                    for (start, step_x, step_y), ly in slots:
+                        at = start + level * step_x + ly * step_y
+                        gain += unc[at] - (self.n + 1) * avoid[at]
                 if gain > best:
                     best, ties = gain, [level]
                 elif gain == best:
@@ -548,19 +617,22 @@ class _Builder:
 
     def choose(self, rows, start):
         """The legal row of ``rows`` with the most newly covered tuples that cover tuple ``start``
-        (axes ``a`` and ``b``) live; None if none does."""
+        (axes ``a`` and ``b``) live; None if none does. A row that holds fewer tuples of
+        ``avoid`` comes first."""
         live = self.liveness
         scored = []
         for k, row in enumerate(rows):
             if live.violation(self.values(row)) is None:
                 pairs = self.row_pairs(row)
-                scored.append((-len(pairs), k, row, pairs))
-        scored.sort(key=lambda s: (s[0], s[1]))
+                scored.append((self.avoided(row), -len(pairs), k, row, pairs))
+        scored.sort(key=lambda s: s[:3])
         a, b = start
-        best, best_gain = None, 0
-        for neg, _k, row, pairs in scored:
-            if -neg <= best_gain:
+        best, best_gain, best_bad = None, 0, 0
+        for bad, neg, _k, row, pairs in scored:
+            if best is not None and bad > best_bad:
                 break
+            if -neg <= best_gain:
+                continue
             if not (live.live_index(row, a) and live.live_index(row, b)):
                 continue
             gain = sum(
@@ -569,8 +641,17 @@ class _Builder:
                 if live.live_index(row, x) and live.live_index(row, y)
             )
             if gain > best_gain:
-                best, best_gain = row, gain
+                best, best_gain, best_bad = row, gain, bad
         return best
+
+    def avoided(self, row):
+        """How many tuples of ``avoid`` a row holds (0 when there are none)."""
+        if not self.has_avoid:
+            return 0
+        return sum(
+            self.avoid[start + row[x] * self.size[y] + row[y]]
+            for (x, y), start in self.block_start.items()
+        )
 
     def credit(self, row):
         live = self.liveness
@@ -589,12 +670,22 @@ class _Builder:
                 del self.unproven_at[x, y, lx, ly]
 
     def legal_base_row(self):
+        if self.base_row is None and self.witness is not None:
+            try:
+                row = tuple(
+                    self._level_index(p, self.witness[n])
+                    for p, n in enumerate(self.names)
+                )
+            except (KeyError, ValueError):
+                row = None
+            if row is not None and self.liveness.violation(self.values(row)) is None:
+                self.base_row = row
         if self.base_row is None:
             rng = random.Random(
                 f"gauntlet-pairwise-base:{self.space.space_id}:{self.seed}"
             )
             for _ in range(BASE_ROW_ATTEMPTS):
-                row = tuple(rng.randrange(s) for s in self.size)
+                row = tuple(rng.choice(a) for a in self.allowed)
                 if self.liveness.violation(self.values(row)) is None:
                     self.base_row = row
                     break
@@ -830,7 +921,7 @@ class _Builder:
                 return None
             p = order[depth]
             stage = stages[depth + 1]
-            for level in range(self.size[p]):
+            for level in self.allowed[p]:
                 nodes += 1
                 if nodes > self.cap:
                     raise _Capped
@@ -913,9 +1004,7 @@ class _Builder:
         rows = [
             self.fill(
                 fixed,
-                random.Random(
-                    f"gauntlet-pairwise:{space_id}:{self.seed}:{row_number}:{k}"
-                ),
+                random.Random(f"{self.seed_prefix}:{row_number}:{k}"),
             )
             for k in range(self.candidates)
         ]
@@ -929,9 +1018,7 @@ class _Builder:
         rows = [verdict.row] + [
             self.fill(
                 fixed,
-                random.Random(
-                    f"gauntlet-pairwise:{space_id}:{self.seed}:{row_number}:fallback{k}"
-                ),
+                random.Random(f"{self.seed_prefix}:{row_number}:fallback{k}"),
             )
             for k in range(FALLBACK_COMPLETIONS)
         ]
@@ -997,6 +1084,44 @@ def build(
     return result
 
 
+def _universe(names, level_map):
+    """Every tuple of the levels as ``((x, lx, y, ly), ((axisX, valueX), (axisY, valueY)))``,
+    axes in space order (x before y)."""
+    for x, y in itertools.combinations(range(len(names)), 2):
+        for lx, vx in enumerate(level_map[names[x]]):
+            for ly, vy in enumerate(level_map[names[y]]):
+                yield (
+                    (x, lx, y, ly),
+                    ((names[x], copy.deepcopy(vx)), (names[y], copy.deepcopy(vy))),
+                )
+
+
+def _tally(space, records, level_map, liveness):
+    """Read a run's records: ``(drawn, passing, witness)``. ``drawn`` maps each tuple key
+    ``(x, lx, y, ly)`` that some record drew (both values levels, both live in its row) to the set
+    of outcomes of the records that drew it; ``passing`` is every ``(axis position, level index)``
+    that some passed record held, live or not; ``witness`` is the axis values of the first passed
+    record whose every value is a level (None if there is none)."""
+    names = list(space.axes)
+    drawn, passing, witness = {}, set(), None
+    for values, outcome in records:
+        index = {}
+        for p, name in enumerate(names):
+            value = values[name]
+            for i, level in enumerate(level_map[name]):
+                if _same(level, value):
+                    index[p] = i
+                    break
+        if outcome in PASSED_OUTCOMES:
+            passing.update(index.items())
+            if witness is None and len(index) == len(names):
+                witness = copy.deepcopy(values)
+        held = sorted(p for p in index if liveness.live(values, names[p]))
+        for x, y in itertools.combinations(held, 2):
+            drawn.setdefault((x, index[x], y, index[y]), set()).add(outcome)
+    return drawn, passing, witness
+
+
 def pair_coverage(space, records, level_map, liveness=None):
     """How much of the pair universe a run drew and passed.
 
@@ -1011,41 +1136,168 @@ def pair_coverage(space, records, level_map, liveness=None):
     was not passed, drawn or not, as ``((axisA, valueA), (axisB, valueB))``, in universe order).
     """
     liveness = liveness if liveness is not None else Liveness(space, level_map)
-    names = list(space.axes)
-    drawn, passed, declined, other = set(), set(), set(), set()
-    for values, outcome in records:
-        held = {}
-        for p, name in enumerate(names):
-            value = values[name]
-            for index, level in enumerate(level_map[name]):
-                if _same(level, value):
-                    if liveness.live(values, name):
-                        held[p] = index
-                    break
-        for x, y in itertools.combinations(sorted(held), 2):
-            key = (x, held[x], y, held[y])
-            drawn.add(key)
-            if outcome in PASSED_OUTCOMES:
-                passed.add(key)
-            elif outcome == DECLINED_OUTCOME:
-                declined.add(key)
-            else:
-                other.add(key)
+    drawn, _, _ = _tally(space, records, level_map, liveness)
+    passed = {k for k, outcomes in drawn.items() if outcomes & set(PASSED_OUTCOMES)}
+    declined = {k for k, outcomes in drawn.items() if outcomes == {DECLINED_OUTCOME}}
     not_passed = []
     total = 0
-    for x, y in itertools.combinations(range(len(names)), 2):
-        for lx, vx in enumerate(level_map[names[x]]):
-            for ly, vy in enumerate(level_map[names[y]]):
-                total += 1
-                if (x, lx, y, ly) not in passed:
-                    not_passed.append(
-                        ((names[x], copy.deepcopy(vx)), (names[y], copy.deepcopy(vy)))
-                    )
+    for key, pair in _universe(list(space.axes), level_map):
+        total += 1
+        if key not in passed:
+            not_passed.append(pair)
     return {
         "tuples": total,
         "drawn": len(drawn),
         "passed": len(passed),
-        "declined_only": len(declined - passed - other),
-        "never_passed": len(drawn - passed),
+        "declined_only": len(declined),
+        "never_passed": len(drawn) - len(passed),
         "not_passed": not_passed,
     }
+
+
+class Targets(NamedTuple):
+    """What a run leaves for a repair round: ``targets`` (tuples every drawing record of which
+    ended ``DECLINED`` or ``UNEXERCISED``, in universe order), ``allowed`` (axis -> the levels
+    some passed record held) and ``witness`` (the axis values of a passed record, or None).
+    """
+
+    targets: list
+    allowed: dict
+    witness: dict
+
+
+def repair_targets(space, records, level_map, liveness=None):
+    """The tuples of a run worth a second try, and the levels to try them with (see ``repair``).
+    ``records`` and ``level_map`` are those of ``pair_coverage``."""
+    liveness = liveness if liveness is not None else Liveness(space, level_map)
+    names = list(space.axes)
+    drawn, passing, witness = _tally(space, records, level_map, liveness)
+    waiting = {DECLINED_OUTCOME, UNEXERCISED_OUTCOME}
+    targets = [
+        pair
+        for key, pair in _universe(names, level_map)
+        if drawn.get(key, ()) and drawn[key] <= waiting
+    ]
+    allowed = {
+        name: [
+            copy.deepcopy(level)
+            for i, level in enumerate(level_map[name])
+            if (p, i) in passing
+        ]
+        for p, name in enumerate(names)
+    }
+    return Targets(targets, allowed, witness)
+
+
+class Repair:
+    """The result of ``repair``: ``rows`` (axis-value dicts), ``retried`` (the targets a row was
+    built for), ``never_passed`` (targets not retried because a value of theirs is no level in
+    ``allowed``), the ``unreachable`` findings (retried targets no row of the allowed levels
+    covers) and ``timings``."""
+
+    def __init__(self, space, seed, round_number):
+        self.space_id = space.space_id
+        self.seed = seed
+        self.round = round_number
+        self.rows = []
+        self.retried = []
+        self.never_passed = []
+        self.unreachable = []
+        self.timings = {}
+
+
+def _pair_key(pair):
+    return (pair[0][0], repr(pair[0][1]), pair[1][0], repr(pair[1][1]))
+
+
+def repair(
+    space,
+    seed,
+    targets,
+    allowed,
+    *,
+    round_number,
+    stubborn=(),
+    witness=None,
+    liveness=None,
+    candidates=DEFAULT_CANDIDATES,
+    cap=DEFAULT_EXHAUSTIVE_CAP,
+):
+    """Rows that cover ``targets`` (tuples as ``repair_targets`` lists them) using only the levels
+    of ``allowed`` (axis -> level values) on every axis: the construction and the liveness
+    of ``build``, with the targets as the only tuples left to cover. A target with a value
+    outside ``allowed`` is not retried (``never_passed``).
+
+    ``stubborn`` are targets an earlier round already retried without success. A row built for
+    other targets avoids holding them (a tuple that always declines would otherwise decline every
+    row it is packed into), and each gets a row of its own that avoids the other stubborn ones.
+
+    ``seed`` is the pairwise seed of the run whose levels ``targets`` are in; the rows are
+    deterministic in ``(space, seed, round_number, targets, stubborn, allowed, witness)``.
+    ``witness`` is a legal row of allowed levels (axis -> value) that fills the axes a tuple does
+    not depend on; ``liveness`` shares the answers of the build."""
+    started = time.perf_counter()
+    result = Repair(space, seed, round_number)
+
+    def usable(axis, value):
+        return any(_same(value, v) for v in allowed.get(axis, ()))
+
+    retry = []
+    for pair in targets:
+        (a, va), (b, vb) = pair
+        (retry if usable(a, va) and usable(b, vb) else result.never_passed).append(pair)
+    result.retried = retry
+    if not retry:
+        return result
+    if any(not allowed.get(name) for name in space.axes):
+        result.unreachable = [
+            Finding(pair, "an axis has no level that passed") for pair in retry
+        ]
+        return result
+    stubborn_keys = {_pair_key(p) for p in stubborn}
+    fresh = [p for p in retry if _pair_key(p) not in stubborn_keys]
+    isolated = [p for p in retry if _pair_key(p) in stubborn_keys]
+    b = _Builder(
+        space,
+        seed,
+        candidates,
+        cap,
+        liveness=liveness,
+        allowed=allowed,
+        targets=fresh,
+        avoid=isolated,
+        seed_prefix=f"gauntlet-pairwise-repair:{space.space_id}:{seed}:{round_number}",
+        witness=witness,
+    )
+
+    def cover(cursor):
+        x, y, lx, ly = b.decode(cursor)
+        row, verdict = b.next_row((x, y, lx, ly), len(result.rows))
+        if row is not None:
+            b.credit(row)
+            result.rows.append(copy.deepcopy(b.values(row)))
+            return
+        detail = (
+            f"{verdict.kind}: {verdict.detail}"
+            if verdict is not None
+            else "no completion kept both values live"
+        )
+        result.unreachable.append(Finding(b.tuple_of(x, y, lx, ly), detail))
+        b.uncovered[cursor] = 0
+
+    cursor = 0
+    while True:
+        while cursor < b.total and not b.uncovered[cursor]:
+            cursor += 1
+        if cursor == b.total:
+            break
+        cover(cursor)
+    for pair in isolated:
+        b.retarget([pair])
+        cover(b.index_of(pair))
+    result.timings = {
+        "total_s": time.perf_counter() - started,
+        "exhaustive_s": b.exhaustive_seconds,
+        "renders": b.liveness.renders,
+    }
+    return result

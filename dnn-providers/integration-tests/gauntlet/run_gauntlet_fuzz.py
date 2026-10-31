@@ -19,6 +19,12 @@ Synopsis::
         [--time-budget 30m] [--case-timeout 10m] [--batch-size N] [--summary FILE] [--shrink N]
         [--spaces-dir DIR] [--binary-arg ARG ...]
     run_gauntlet_fuzz.py --binary BIN ... --row FILE        (one explicit sample, see below)
+    run_gauntlet_fuzz.py --binary BIN ... --pairwise [--seed S] [--pairwise-repair N]
+        (every row of each space's pairwise covering set, see below)
+    run_gauntlet_fuzz.py --pairwise --generate-only [--seed S] [--work-dir DIR] [--filter REGEX]
+        (write the covering sets as sweeps; no binary)
+    run_gauntlet_fuzz.py --coverage-of WORK_DIR --levels-from REPORT [--first N]
+        (the pair coverage of an earlier run, offline)
 
 Control (a flag overrides its environment variable)::
 
@@ -62,6 +68,28 @@ accepted candidate and a ``replay.sh`` that replays with ``--row``. ``summary.js
 finding ``shrunk: {runs, accepted_steps, axes_changed}``. SIGINT ends a shrink early, keeping the
 best sample so far; the time budget does not.
 
+``--pairwise`` runs a pairwise covering set instead of random samples (``pairwise.py``, RFC 0023
+section 6): per space, rows ``pw0``, ``pw1``, ... in which every value of every axis meets every
+value of every other axis in a legal row where both values matter. ``--seed`` is the generator
+seed (printed when random; the same seed gives the same rows); ``--samples`` does not apply (it
+and ``--row`` are usage errors with ``--pairwise``). A row is an explicit row: its sweep case
+names ``gauntlet-pairwise`` as ``metadata.generator`` and the seed in its notes, its data seed is
+``--data-seed`` or derived from (space, seed, row), and a failure's folder holds a ``row.json`` and
+a ``replay.sh`` that calls ``--row``. After the rows, up to ``--pairwise-repair N`` (default 2)
+rounds build new rows for the tuples that every row drawing them left ``DECLINED`` or
+``UNEXERCISED``, from the levels that passed in the run, until a round builds none.
+``--time-budget`` still ends the run (its coverage is then marked incomplete).
+``<work>/pairwise/<Op>_<Space>.json`` reports the levels, the tuple and row counts, the lower
+bound, the ``illegal`` / ``dead`` / ``unproven`` tuples, the repair rounds and the generator's
+timings; ``summary.json`` gets ``mode: "pairwise"`` and a ``pair_coverage`` entry per space.
+
+``--generate-only`` (with ``--pairwise``) writes each space's full row set under
+``<work>/bundles/gauntlet/`` and the reports and runs nothing (``--binary`` is not needed).
+``--coverage-of WORK_DIR --levels-from REPORT`` prints, as JSON, the pair coverage of the samples
+and outcomes of an earlier run (a random one, to compare with a pairwise run) against the levels
+of a pairwise report (a file, or a directory of them); ``--first N`` counts only each space's
+first N samples.
+
 Outputs under the work directory: ``outcomes.jsonl`` (one record per sample),
 ``samples.jsonl``, ``summary.json``, ``reports/`` and ``logs/`` (per binary invocation) and
 ``failures/<case>/`` for every ``WRONG`` and ``CRASH`` (and ``shrink/<case>/`` for the candidate
@@ -90,6 +118,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+import pairwise  # noqa: E402
 import sampler  # noqa: E402
 import space as space_lib  # noqa: E402
 
@@ -395,6 +424,337 @@ def parse_listing(text):
 
 
 # --------------------------------------------------------------------------
+# Samples: drawn, explicit and pairwise
+# --------------------------------------------------------------------------
+
+PAIRWISE_GENERATOR = "gauntlet-pairwise"
+DEFAULT_PAIRWISE_REPAIR = 2
+MAX_LISTED_TUPLES = 50
+
+
+def is_explicit_row(sample):
+    """Whether a sample was built from given axis values (a ``--row`` file, a pairwise row)
+    and not drawn from a shape seed. It has no seed to replay from, so its failure folder keeps a
+    ``row.json`` and ``replay.sh`` calls the driver with ``--row``."""
+    return sample.shape_seed is None
+
+
+def write_sweeps(root, sp, samples):
+    """One sweep directory per input dtype tag (``dtype_tag``) of ``samples`` under
+    ``root/<Op>/<Space>/``, the samples of a tag in the order given. Nothing is removed.
+    """
+    groups = {}
+    for s in samples:
+        groups.setdefault(dtype_tag(sp, s), []).append(s)
+    for tag, group in groups.items():
+        out = root / sp.operation / sp.name
+        if tag is not None:
+            out = out / dtype_directory(tag)
+        out.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(sp.template_path, out / "graph.template.json")
+        json_dump(out / "sweep.json", {"version": 1, "cases": [s.row for s in group]})
+
+
+def pairwise_data_seed(space_id, seed, k):
+    """The data seed of row ``k`` of a space's pairwise set for a pairwise seed: a stable hash,
+    always in ``[0, 2^32)``."""
+    digest = hashlib.sha256(
+        f"gauntlet-pairwise-data-seed:{space_id}:{seed}:{k}".encode()
+    ).digest()
+    return int.from_bytes(digest[:4], "big")
+
+
+def pair_json(pair):
+    """A tuple ``((axisA, valueA), (axisB, valueB))`` as JSON: ``[[axisA, valueA], [axisB, valueB]]``."""
+    return [[pair[0][0], pair[0][1]], [pair[1][0], pair[1][1]]]
+
+
+def pair_key(pair):
+    """A hashable key of a tuple, in the form ``pair_json`` gives as well as the one ``pairwise``
+    returns (``repr`` keeps ``1``, ``True`` and ``1.0`` apart)."""
+    return (pair[0][0], repr(pair[0][1]), pair[1][0], repr(pair[1][1]))
+
+
+def finding_json(finding):
+    return {"pair": pair_json(finding.pair), "detail": finding.detail}
+
+
+class PairwiseSpace:
+    """What a pairwise run keeps of one space: its ``pairwise.build`` result, the row numbers
+    handed out so far, the repair rounds and what they found."""
+
+    def __init__(self, sp, result):
+        self.sp = sp
+        self.result = result
+        self.next_row = 0  # the k of the next row, in ``pw<k>``
+        self.rounds = []  # one dict per repair round
+        self.never_passed = []  # tuples the last round did not retry
+        self.unreachable = {}  # pair key -> Finding: no row of passing levels covers it
+        self.tried = set()  # pair keys of the targets some repair round retried
+        self.repair_rows = 0
+
+    def sample_rows(self, rows, args, repair_round=None):
+        """The samples of axis-value rows, with the next ids ``pw<k>``. The row records the
+        generator (``metadata.generator``) and the pairwise seed (its notes); its data seed is
+        ``--data-seed`` or derived from (space, seed, k)."""
+        seed = self.result.seed
+        samples = []
+        for values in rows:
+            k = self.next_row
+            self.next_row += 1
+            where = (
+                f"row {k}"
+                if repair_round is None
+                else f"repair round {repair_round}, row {k}"
+            )
+            data_seed = (
+                args.data_seed
+                if args.data_seed is not None
+                else pairwise_data_seed(self.sp.space_id, seed, k)
+            )
+            samples.append(
+                sampler.sample_from_axes(
+                    self.sp,
+                    values,
+                    data_seed,
+                    f"pw{k}",
+                    generator=PAIRWISE_GENERATOR,
+                    origin=f"pairwise seed {seed}, {where}",
+                )
+            )
+        return samples
+
+
+def build_pairwise(args, spaces):
+    """``{space id: PairwiseSpace}`` for the spaces, built from ``args.seed``."""
+    states = {}
+    for sp in spaces:
+        try:
+            result = pairwise.build(sp, args.seed)
+        except ValueError as e:
+            raise DriverError(f"pairwise: {e}") from None
+        states[sp.space_id] = PairwiseSpace(sp, result)
+        print(
+            f"  pairwise {sp.space_id}: {len(result.rows)} rows (lower bound"
+            f" {result.lower_bound}), {result.tuples_total} tuples, {len(result.illegal)}"
+            f" illegal, {len(result.dead)} dead, {len(result.unproven)} unproven, built in"
+            f" {result.timings['total_s']:.1f} s",
+            flush=True,
+        )
+    return states
+
+
+def write_pairwise_report(work, state, args):
+    """``<work>/pairwise/<Op>_<Space>.json``: the levels, the tuple count, the rows, the lower
+    bound, the ``illegal`` / ``dead`` / ``unproven`` tuples with the reason, the repair rounds and
+    the generator's timings."""
+    r = state.result
+    directory = work / "pairwise"
+    directory.mkdir(parents=True, exist_ok=True)
+    report = {
+        "space": state.sp.space_id,
+        "seed": r.seed,
+        "strength": r.strength,
+        "levels": r.levels,
+        "tuples_total": r.tuples_total,
+        "rows": len(r.rows),
+        "lower_bound": r.lower_bound,
+        "illegal": [finding_json(f) for f in r.illegal],
+        "dead": [finding_json(f) for f in r.dead],
+        "unproven": [finding_json(f) for f in r.unproven],
+        "repair": {
+            "max_rounds": 0 if args.generate_only else args.pairwise_repair,
+            "rows": state.repair_rows,
+            "rounds": state.rounds,
+            "never_passed": [pair_json(p) for p in state.never_passed],
+        },
+        "timings": {
+            k: round(v, 3) if isinstance(v, float) else v for k, v in r.timings.items()
+        },
+    }
+    json_dump(directory / f"{state.sp.operation}_{state.sp.name}.json", report)
+
+
+def coverage_summary(sp, levels, flagged, records, liveness=None):
+    """``pairwise.pair_coverage`` of ``records`` (``(axis values, outcome)``) in the form
+    ``summary.json`` gives it: ``tuples``, the ``illegal`` / ``dead`` / ``unproven`` counts of
+    ``flagged`` (kind -> tuples), ``drawn``, ``passed``, ``declined_only``, ``never_passed`` and
+    the tuples that could still be passed (``not_passed_total``, and the first
+    ``MAX_LISTED_TUPLES`` as ``not_passed``): every tuple of the universe not passed, less the
+    flagged ones, which no legal row covers."""
+    found = pairwise.pair_coverage(sp, records, levels, liveness)
+    skip = {pair_key(p) for pairs in flagged.values() for p in pairs}
+    open_ = [p for p in found["not_passed"] if pair_key(p) not in skip]
+    return {
+        "tuples": found["tuples"],
+        "illegal": len(flagged["illegal"]),
+        "dead": len(flagged["dead"]),
+        "unproven": len(flagged["unproven"]),
+        "drawn": found["drawn"],
+        "passed": found["passed"],
+        "declined_only": found["declined_only"],
+        "never_passed": found["never_passed"],
+        "not_passed_total": len(open_),
+        "not_passed": [pair_json(p) for p in open_[:MAX_LISTED_TUPLES]],
+    }
+
+
+class _RandomSource:
+    """The samples a random run draws for one space: shape seeds ``seed + i``."""
+
+    def __init__(self, sp, args):
+        self.sp = sp
+        self.args = args
+        self.done = 0
+
+    @property
+    def exhausted(self):
+        return bool(self.args.samples) and self.done >= self.args.samples
+
+    def take(self, size):
+        a = self.args
+        if a.samples:
+            size = min(size, a.samples - self.done)
+        samples = [
+            sampler.sample(self.sp, a.seed + self.done + i, a.data_seed)
+            for i in range(size)
+        ]
+        self.done += size
+        return samples
+
+
+class _ListSource:
+    """Samples made beforehand, handed out in order."""
+
+    def __init__(self, samples):
+        self.samples = list(samples)
+        self.cursor = 0
+
+    @property
+    def exhausted(self):
+        return self.cursor >= len(self.samples)
+
+    def take(self, size):
+        taken = self.samples[self.cursor : self.cursor + size]
+        self.cursor += len(taken)
+        return taken
+
+
+def generate_only(args, spaces):
+    """``--pairwise --generate-only``: each space's full row set as sweeps under
+    ``<work>/bundles/gauntlet/<Op>/<Space>/`` (one per dtype tag, as a run writes them) and
+    its pairwise report. No binary runs. Only the space's own earlier sweeps are replaced, so
+    spaces and row counts above ``--batch-size`` all stay."""
+    work = Path(args.work_dir).resolve()
+    root = work / "bundles" / "gauntlet"
+    print(
+        f"gauntlet fuzz: pairwise seed {args.seed}, generate only (replay with --pairwise"
+        f" --generate-only --seed {args.seed}); work dir {work}",
+        flush=True,
+    )
+    states = build_pairwise(args, spaces)
+    for sp in spaces:
+        state = states[sp.space_id]
+        samples = state.sample_rows(state.result.rows, args)
+        shutil.rmtree(root / sp.operation / sp.name, ignore_errors=True)
+        write_sweeps(root, sp, samples)
+        write_pairwise_report(work, state, args)
+        print(
+            f"  wrote {len(samples)} rows of {sp.space_id} to {root / sp.operation / sp.name}",
+            flush=True,
+        )
+    print(f"reports: {work / 'pairwise'}", flush=True)
+    return 0
+
+
+def _read_jsonl(path):
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        raise DriverError(f"{path}: cannot read the file: {e}") from None
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def load_pairwise_reports(path):
+    """``{space id: report}`` of a pairwise report file, or of every ``*.json`` in a directory."""
+    path = Path(path)
+    files = sorted(path.glob("*.json")) if path.is_dir() else [path]
+    reports = {}
+    for file in files:
+        try:
+            report = json.loads(file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise DriverError(
+                f"--levels-from {file}: cannot read a report: {e}"
+            ) from None
+        if (
+            not isinstance(report, dict)
+            or "space" not in report
+            or "levels" not in report
+        ):
+            raise DriverError(
+                f"--levels-from {file}: not a pairwise report (it has no 'space' and 'levels')"
+            )
+        reports[report["space"]] = report
+    if not reports:
+        raise DriverError(f"--levels-from {path}: no pairwise report found")
+    return reports
+
+
+def coverage_of(work_dir, levels_from, first=None, spaces_dir=None):
+    """The pair coverage of an earlier run, offline: ``{space id: coverage_summary + samples}``
+    for each space of the pairwise report(s) at ``levels_from``. Reads the run's
+    ``samples.jsonl`` and ``outcomes.jsonl`` under ``work_dir``; with ``first`` only the first
+    ``first`` samples of each space count. A sample with no outcome record (the run stopped
+    before it) is left out (``with_outcome`` says how many had one). Each space's samples are read
+    in the run's order, so a random run's coverage at N samples is its coverage after N draws.
+    """
+    reports = load_pairwise_reports(levels_from)
+    spaces = {
+        s.space_id: s
+        for s in space_lib.load_spaces(spaces_dir or space_lib.DEFAULT_SPACES_DIR)
+    }
+    work = Path(work_dir)
+    outcomes = {
+        (r["space"], r["case"]): r["outcome"]
+        for r in _read_jsonl(work / "outcomes.jsonl")
+    }
+    drawn = {}
+    for s in _read_jsonl(work / "samples.jsonl"):
+        drawn.setdefault(s["space"], []).append(s)
+    found = {}
+    for space_id, report in reports.items():
+        if space_id not in spaces:
+            raise DriverError(
+                f"--levels-from: no space '{space_id}' in the spaces directory"
+            )
+        sp = spaces[space_id]
+        if list(report["levels"]) != list(sp.axes):
+            raise DriverError(
+                f"--levels-from: the levels of '{space_id}' are for other axes than the"
+                " space has now"
+            )
+        samples = drawn.get(space_id, [])
+        if first is not None:
+            samples = samples[:first]
+        records = [
+            (s["axes"], outcomes[(space_id, s["case"])])
+            for s in samples
+            if (space_id, s["case"]) in outcomes
+        ]
+        flagged = {
+            kind: [f["pair"] for f in report.get(kind, ())]
+            for kind in ("illegal", "dead", "unproven")
+        }
+        found[space_id] = {
+            **coverage_summary(sp, report["levels"], flagged, records),
+            "samples": len(samples),
+            "with_outcome": len(records),
+        }
+    return found
+
+
+# --------------------------------------------------------------------------
 # The driver
 # --------------------------------------------------------------------------
 
@@ -443,6 +803,10 @@ class Fuzz:
         self._pending_shrink = []
         # (space id, case id) -> what the shrink of that finding did
         self._shrunk = {}
+        # (space id, case id) -> every axis value of a pairwise run's sample; no shrink candidate
+        self._coverage_axes = {}
+        # space id -> PairwiseSpace, once a pairwise run has built its rows
+        self._pairwise = {}
 
     # -- control ---------------------------------------------------------
 
@@ -490,10 +854,14 @@ class Fuzz:
         try:
             self._print_header()
             self._preflight()
-            if self.row_sample is None:
-                self._loop()
-            else:
+            if self.row_sample is not None:
                 self._run_row()
+            elif self.args.pairwise:
+                self._run_pairwise()
+            elif self._loop(
+                {sp.space_id: _RandomSource(sp, self.args) for sp in self.spaces}
+            ):
+                self.stop_reason = self.stop_reason or "sample-cap"
         except BaseException as e:  # noqa: BLE001 - report what we have, then re-raise
             error = e
             self.stop_reason = f"error: {e}"
@@ -503,6 +871,8 @@ class Fuzz:
             self._samples_file.close()
             if previous is not None:
                 signal.signal(signal.SIGINT, previous)
+            if self._pairwise:
+                self._write_pairwise_reports()
             summary = self.summarize()
             if error is not None:
                 summary["error"] = str(error)
@@ -520,6 +890,20 @@ class Fuzz:
                 f" {self.row_sample.data_seed}); work dir {self.work}",
                 flush=True,
             )
+            return
+        if a.pairwise:
+            print(
+                f"gauntlet fuzz: pairwise seed {a.seed} (replay with --pairwise --seed {a.seed})",
+                flush=True,
+            )
+            print(f"  spaces: {', '.join(s.space_id for s in self.spaces)}", flush=True)
+            print(
+                f"  every row of each space; up to {a.pairwise_repair} repair rounds;"
+                f" batch size {a.batch_size}; work dir {self.work}",
+                flush=True,
+            )
+            if a.time_budget:
+                print(f"  time budget: {a.time_budget:g}s", flush=True)
             return
         limit = "unlimited" if not a.samples else str(a.samples)
         print(f"gauntlet fuzz: seed {a.seed} (replay with --seed {a.seed})", flush=True)
@@ -575,32 +959,28 @@ class Fuzz:
         budget = self.args.time_budget
         return bool(budget) and time.monotonic() - self._started_at >= budget
 
-    def _loop(self):
+    def _loop(self, sources):
+        """Run batches round-robin over the spaces until every source has nothing left (True)
+        or the run is told to stop or its time budget ends (False; ``stop_reason`` says which).
+        ``sources`` maps a space id to its ``take(size)`` source; a space without one is skipped.
+        """
         a = self.args
-        cursors = {s.space_id: 0 for s in self.spaces}
         while True:
             ran = False
             for sp in self.spaces:
+                source = sources.get(sp.space_id)
+                if source is None or source.exhausted:
+                    continue
                 if self.stop.is_set():
                     self.stop_reason = self.stop_reason or "interrupted"
-                    return
+                    return False
                 if self._time_up():
                     self.stop_reason = "time-budget"
-                    return
-                done = cursors[sp.space_id]
-                if a.samples and done >= a.samples:
-                    continue
-                size = (
-                    a.batch_size
-                    if not a.samples
-                    else min(a.batch_size, a.samples - done)
+                    return False
+                samples = source.take(a.batch_size)
+                self.generated[sp.space_id] = self.generated.get(sp.space_id, 0) + len(
+                    samples
                 )
-                samples = [
-                    sampler.sample(sp, a.seed + done + i, a.data_seed)
-                    for i in range(size)
-                ]
-                cursors[sp.space_id] = done + size
-                self.generated[sp.space_id] = self.generated.get(sp.space_id, 0) + size
                 for s in samples:
                     self._samples_file.write(
                         json.dumps(
@@ -621,8 +1001,7 @@ class Fuzz:
                 self._print_batch(sp, samples, self.results[before:])
                 self._shrink_pending()
             if not ran:
-                self.stop_reason = self.stop_reason or "sample-cap"
-                return
+                return True
 
     def _run_row(self):
         """The one explicit sample of ``--row``: through the same bundle, binary and outcome
@@ -649,25 +1028,131 @@ class Fuzz:
         (result,) = self.results[before:]
         print(f"row {sp.space_id} {s.case_id}: {result['outcome']}", flush=True)
 
+    # -- pairwise --------------------------------------------------------
+
+    def _run_pairwise(self):
+        """Every row of each space's pairwise covering set, then up to ``--pairwise-repair`` rounds
+        of new rows for the tuples that were only declined or unexercised."""
+        a = self.args
+        self._pairwise = build_pairwise(a, self.spaces)
+        sources = {}
+        for sp in self.spaces:
+            state = self._pairwise[sp.space_id]
+            sources[sp.space_id] = _ListSource(state.sample_rows(state.result.rows, a))
+        self._write_pairwise_reports()
+        if not self._loop(sources):
+            return
+        for round_number in range(1, a.pairwise_repair + 1):
+            sources = self._repair_round(round_number)
+            if not sources:
+                break
+            if not self._loop(sources):
+                return
+        self.stop_reason = self.stop_reason or "pairwise-complete"
+
+    def _records(self, sp):
+        """``(axis values, outcome)`` of every sample of ``sp`` the run recorded, in run order."""
+        return [
+            (self._coverage_axes[(sp.space_id, r["case"])], r["outcome"])
+            for r in self.results
+            if r["space"] == sp.space_id
+            and (sp.space_id, r["case"]) in self._coverage_axes
+        ]
+
+    def _repair_round(self, round_number):
+        """New rows (one source per space that has some) for the tuples whose every drawing row
+        was declined or unexercised, built from the levels that passed in this run."""
+        a = self.args
+        sources = {}
+        for sp in self.spaces:
+            state = self._pairwise[sp.space_id]
+            result = state.result
+            found = pairwise.repair_targets(
+                sp, self._records(sp), result.levels, result.liveness
+            )
+            targets = [t for t in found.targets if pair_key(t) not in state.unreachable]
+            if not targets:
+                continue
+            repair = pairwise.repair(
+                sp,
+                a.seed,
+                targets,
+                found.allowed,
+                round_number=round_number,
+                stubborn=[t for t in targets if pair_key(t) in state.tried],
+                witness=found.witness,
+                liveness=result.liveness,
+            )
+            state.tried.update(pair_key(t) for t in repair.retried)
+            for finding in repair.unreachable:
+                state.unreachable[pair_key(finding.pair)] = finding
+            first = state.next_row
+            rows = state.sample_rows(repair.rows, a, repair_round=round_number)
+            state.repair_rows += len(rows)
+            state.never_passed = repair.never_passed
+            state.rounds.append(
+                {
+                    "round": round_number,
+                    "targets": len(targets),
+                    "retried": len(repair.retried),
+                    "never_passed": len(repair.never_passed),
+                    "unreachable": len(repair.unreachable),
+                    "rows": len(rows),
+                    "first_row": first if rows else None,
+                    "timings": {k: round(v, 3) for k, v in repair.timings.items()},
+                    "unreachable_tuples": [
+                        finding_json(f) for f in repair.unreachable[:MAX_LISTED_TUPLES]
+                    ],
+                }
+            )
+            print(
+                f"  repair round {round_number} {sp.space_id}: {len(targets)} tuples to retry,"
+                f" {len(repair.never_passed)} never passed, {len(repair.unreachable)}"
+                f" unreachable, {len(rows)} rows",
+                flush=True,
+            )
+            if rows:
+                sources[sp.space_id] = _ListSource(rows)
+        self._write_pairwise_reports()
+        return sources
+
+    def _pair_coverage(self):
+        """``summary.json`` ``pair_coverage``: per space, how much of the tuple universe the run
+        drew and passed (``coverage_summary``), with the rows it ran."""
+        found = {}
+        for sp in self.spaces:
+            state = self._pairwise.get(sp.space_id)
+            if state is None:
+                continue
+            r = state.result
+            flagged = {
+                "illegal": [f.pair for f in r.illegal],
+                "dead": [f.pair for f in r.dead],
+                "unproven": [f.pair for f in r.unproven],
+            }
+            found[sp.space_id] = {
+                **coverage_summary(
+                    sp, r.levels, flagged, self._records(sp), r.liveness
+                ),
+                "rows": len(r.rows),
+                "repair_rows": state.repair_rows,
+                "complete": self.stop_reason == "pairwise-complete",
+            }
+        return found
+
+    def _write_pairwise_reports(self):
+        for state in self._pairwise.values():
+            write_pairwise_report(self.work, state, self.args)
+
     # -- bundles ---------------------------------------------------------
 
     def _write_bundle(self, sp, samples):
-        """One sweep directory per input dtype tag (``dtype_tag``), samples in draw order."""
+        """One sweep directory per input dtype tag (``dtype_tag``), samples in draw order; what
+        an earlier batch left under ``bundles/gauntlet`` is removed first."""
         root = self.bundles / "gauntlet"
         if root.exists():
             shutil.rmtree(root)
-        groups = {}
-        for s in samples:
-            groups.setdefault(dtype_tag(sp, s), []).append(s)
-        for tag, group in groups.items():
-            out = root / sp.operation / sp.name
-            if tag is not None:
-                out = out / dtype_directory(tag)
-            out.mkdir(parents=True)
-            shutil.copyfile(sp.template_path, out / "graph.template.json")
-            json_dump(
-                out / "sweep.json", {"version": 1, "cases": [s.row for s in group]}
-            )
+        write_sweeps(root, sp, samples)
 
     def _test_name(self, sp, sample):
         """The GTest name the harness registers: the suite of the sweep directory (the
@@ -989,6 +1474,9 @@ class Fuzz:
             for name, axis in sp.axes.items()
             if not axis.is_range and name in sample.axis_values
         }
+        if self.args.pairwise:
+            # Every axis, range axes too, and never a shrink candidate (they returned above).
+            self._coverage_axes[(sp.space_id, sample.case_id)] = sample.axis_values
         if outcome in FAILING:
             # The fault folder exists before the run goes on.
             result["failure_dir"] = str(self.failures / self._case_dir_name(sp, sample))
@@ -1041,9 +1529,10 @@ class Fuzz:
 
     def _replay_argv(self, sp, sample, work_dir, row_path, as_row=False):
         a = self.args
-        # A drawn sample replays from its seeds; a --row sample has none, so it replays from
-        # the row file the failure folder keeps, and so does a shrunk sample (``as_row``).
-        if as_row or self.row_sample is not None:
+        # A drawn sample replays from its seeds; an explicit row (a --row sample, a pairwise
+        # row) has none, so it replays from the row file the failure folder keeps, and so does
+        # a shrunk sample (``as_row``).
+        if as_row or is_explicit_row(sample):
             which = ["--row", str(row_path)]
         else:
             which = [
@@ -1157,6 +1646,7 @@ class Fuzz:
     def _write_failure(self, sp, sample, result, record, tail):
         """``<work>/failures/<case>/``: everything needed to replay or freeze a finding."""
         case = self._case_dir_name(sp, sample)
+        explicit = is_explicit_row(sample)
         folder = self.failures / case
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -1167,7 +1657,7 @@ class Fuzz:
             sample,
             (
                 f"explicit row (case {sample.case_id})"
-                if self.row_sample is not None
+                if explicit
                 else f"shape seed {sample.shape_seed}"
             ),
             f"{result['outcome']} found by gauntlet-fuzz.",
@@ -1179,7 +1669,7 @@ class Fuzz:
             sp, sample, folder / "replay-work", folder / "row.json"
         )
         command = self._replay_command(argv, env_set, env_unset)
-        if self.row_sample is not None:
+        if explicit:
             json_dump(folder / "row.json", self._row_spec(sp, sample))
         engine = result["engine"] or self._run_engine()
         a = self.args
@@ -1195,7 +1685,7 @@ class Fuzz:
             "shape_seed": sample.shape_seed,
             "data_seed": sample.data_seed,
             "axis_values": sample.axis_values,
-            "row": self._row_spec(sp, sample) if self.row_sample is not None else None,
+            "row": self._row_spec(sp, sample) if explicit else None,
             "sweep_row": sample.row,
             "uids_canonical": all(k == v for k, v in uid_map.items()),
             "input_fill": {
@@ -1231,7 +1721,7 @@ class Fuzz:
         write_text(folder / "log_tail.txt", tail)
 
         axes_text = json.dumps(sample.axis_values, sort_keys=True)
-        if self.row_sample is not None:
+        if explicit:
             what = f"Renders the same explicit row (axes {axes_text}, data seed"
         else:
             what = f"Regenerates the same sweep row (shape seed {sample.shape_seed}, data seed"
@@ -1245,7 +1735,7 @@ class Fuzz:
         write_text(
             folder / "replay.txt",
             f"{command}\n"
-            + (f"axes: {axes_text}\n" if self.row_sample is not None else "")
+            + (f"axes: {axes_text}\n" if explicit else "")
             + f"input fill path: {'host' if host_fill else 'device'} ({HOST_FILL_ENV}="
             f"{os.environ.get(HOST_FILL_ENV)!r})\n"
             f"freeze: {self._freeze_command(folder / (case + '.json'))}\n",
@@ -1382,8 +1872,11 @@ class Fuzz:
         for r in results:
             counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1
         text = ", ".join(f"{k} {counts[k]}" for k in OUTCOMES if k in counts)
-        lo, hi = samples[0].shape_seed, samples[-1].shape_seed
-        print(f"batch {sp.space_id} seeds {lo}..{hi}: {text}", flush=True)
+        if is_explicit_row(samples[0]):
+            where = f"rows {samples[0].case_id}..{samples[-1].case_id}"
+        else:
+            where = f"seeds {samples[0].shape_seed}..{samples[-1].shape_seed}"
+        print(f"batch {sp.space_id} {where}: {text}", flush=True)
 
     def _reason_key(self, reason):
         """A reason with the work directory, dtype directories and case ids masked, so equal
@@ -1392,7 +1885,9 @@ class Fuzz:
         text = re.sub(
             r"(?<![A-Za-z0-9])[a-z0-9]+_cases(?![A-Za-z0-9_])", "<dtype>_cases", text
         )
-        return re.sub(r"(?<![A-Za-z0-9_])s\d+(?![A-Za-z0-9_])", "<case>", text)[:300]
+        return re.sub(r"(?<![A-Za-z0-9_])(?:s|pw)\d+(?![A-Za-z0-9_])", "<case>", text)[
+            :300
+        ]
 
     def summarize(self):
         run_engine = self._run_engine() or "unknown"
@@ -1480,11 +1975,12 @@ class Fuzz:
         a = self.args
         failed = bool(totals["WRONG"] or totals["CRASH"])
         return {
+            "mode": "pairwise" if a.pairwise else "row" if a.row_spec else "random",
             "seed": a.seed,
             "row": a.row_spec,
             "data_seed": a.data_seed,
             "samples_per_space": a.samples or None,
-            "continuous": not a.samples,
+            "continuous": not a.samples and not a.pairwise,
             "time_budget_seconds": a.time_budget,
             "shrink_budget": a.shrink,
             "stopped_because": self.stop_reason,
@@ -1506,6 +2002,7 @@ class Fuzz:
             "axis_outcomes": axis_outcomes,
             "engines": engines,
             "findings": findings,
+            **({"pair_coverage": self._pair_coverage()} if a.pairwise else {}),
             "work_dir": str(self.work),
             "exit_code": 1 if failed else 0,
         }
@@ -1539,6 +2036,14 @@ class Fuzz:
                 ):
                     for reason, n in sorted(sp[key].items(), key=lambda kv: -kv[1]):
                         print(f"      {title} x{n}: {reason}")
+        for space_id, cov in summary.get("pair_coverage", {}).items():
+            print(
+                f"  pairwise {space_id}: {cov['tuples']} tuples, {cov['illegal']} illegal,"
+                f" {cov['dead']} dead, {cov['unproven']} unproven; drawn {cov['drawn']},"
+                f" passed {cov['passed']}, declined only {cov['declined_only']}, never passed"
+                f" {cov['never_passed']}; {cov['rows']} rows + {cov['repair_rows']} repair"
+                + ("" if cov["complete"] else " (INCOMPLETE: the run stopped early)")
+            )
         if not summary["reconciled"]:
             print("  WARNING: outcomes do not add up to samples")
         shown = summary["findings"][:MAX_PRINTED_FINDINGS]
@@ -1586,8 +2091,8 @@ def build_parser():
     )
     p.add_argument(
         "--binary",
-        required=True,
-        help="hipdnn_integration_tests (path, .py script or quoted command)",
+        help="hipdnn_integration_tests (path, .py script or quoted command); required except"
+        " with --generate-only and --coverage-of",
     )
     p.add_argument("--test-article", help="passed to the binary as --test-article")
     p.add_argument("--test-engine", help="passed to the binary as --test-engine")
@@ -1652,6 +2157,45 @@ def build_parser():
         help="samples per binary invocation",
     )
     p.add_argument(
+        "--pairwise",
+        action="store_true",
+        help="run the pairwise covering set of each space (every value of every axis meets every"
+        " value of every other axis in a legal row where both matter) instead of random samples;"
+        " --seed is the generator seed (not with --row or --samples)",
+    )
+    p.add_argument(
+        "--pairwise-repair",
+        type=int,
+        metavar="N",
+        help=f"with --pairwise: up to N rounds of new rows for the tuples that were only"
+        f" declined or unexercised, built from levels that passed (default {DEFAULT_PAIRWISE_REPAIR})",
+    )
+    p.add_argument(
+        "--generate-only",
+        action="store_true",
+        help="with --pairwise: write the full row set of each space as sweeps under"
+        " <work-dir>/bundles/gauntlet/ and the pairwise reports, and run no binary"
+        " (--binary is not needed)",
+    )
+    p.add_argument(
+        "--coverage-of",
+        metavar="WORK_DIR",
+        help="offline: print the pair coverage of the samples and outcomes of an earlier run's"
+        " work directory, against the levels of --levels-from, as JSON; runs nothing",
+    )
+    p.add_argument(
+        "--levels-from",
+        metavar="PATH",
+        help="with --coverage-of: a pairwise report (<work>/pairwise/<Op>_<Space>.json) or a"
+        " directory of them",
+    )
+    p.add_argument(
+        "--first",
+        type=int,
+        metavar="N",
+        help="with --coverage-of: count only the first N samples of each space",
+    )
+    p.add_argument(
         "--summary", help="summary.json path (default <work-dir>/summary.json)"
     )
     return p
@@ -1707,6 +2251,32 @@ def parse_args(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     args.row_spec = None
+    if args.coverage_of is not None:
+        if args.levels_from is None:
+            parser.error("--coverage-of needs --levels-from")
+        if args.first is not None and args.first < 1:
+            parser.error("--first must be >= 1")
+        return args
+    if args.levels_from is not None or args.first is not None:
+        parser.error("--levels-from and --first belong to --coverage-of")
+    if args.generate_only and not args.pairwise:
+        parser.error("--generate-only needs --pairwise")
+    if args.pairwise_repair is not None and not args.pairwise:
+        parser.error("--pairwise-repair needs --pairwise")
+    if args.pairwise and args.row is not None:
+        parser.error(
+            "--pairwise runs a generated set of rows and cannot be combined with --row"
+        )
+    if args.pairwise and args.samples is not None:
+        parser.error(
+            "--pairwise runs every row of the generator and cannot be combined with --samples"
+        )
+    if args.pairwise_repair is None:
+        args.pairwise_repair = DEFAULT_PAIRWISE_REPAIR
+    if args.pairwise_repair < 0:
+        parser.error("--pairwise-repair must be >= 0")
+    if args.binary is None and not args.generate_only:
+        parser.error("the following arguments are required: --binary")
     if args.row is not None:
         # The flags, not the HIPDNN_FUZZ_* variables: a variable left in the shell is a default
         # a one-case run has no use for, not a conflict.
@@ -1747,7 +2317,10 @@ def parse_args(argv=None):
         parser.error("--shrink must be >= 0")
 
     if args.row_spec is None:
-        args.samples = pick(args.samples, "HIPDNN_FUZZ_SAMPLES", int)
+        # A pairwise run runs every row of the generator: the sample count is no control of it.
+        args.samples = (
+            None if args.pairwise else pick(args.samples, "HIPDNN_FUZZ_SAMPLES", int)
+        )
         args.seed = pick(args.seed, "HIPDNN_FUZZ_SEED", int)
         args.data_seed = pick(args.data_seed, "HIPDNN_FUZZ_DATA_SEED", int)
         args.filter = pick(args.filter, "HIPDNN_FUZZ_FILTER", str)
@@ -1774,9 +2347,9 @@ def parse_args(argv=None):
         if args.batch_size < 1:
             parser.error("--batch-size must be >= 1")
         return args
-    if args.samples is None:
+    if args.samples is None and not args.pairwise:
         args.samples = 0 if args.time_budget else DEFAULT_SAMPLES
-    if args.samples < 0:
+    if args.samples is not None and args.samples < 0:
         parser.error("--samples must be >= 0")
     if args.batch_size < 1:
         parser.error("--batch-size must be >= 1")
@@ -1820,7 +2393,15 @@ def select_spaces(args):
 def main(argv=None):
     args = parse_args(argv)
     try:
+        if args.coverage_of is not None:
+            report = coverage_of(
+                args.coverage_of, args.levels_from, args.first, args.spaces_dir
+            )
+            print(json.dumps(report, indent=2))
+            return 0
         spaces = select_spaces(args)
+        if args.generate_only:
+            return generate_only(args, spaces)
         row_sample = None
         if args.row_spec is not None:
             # Rendered before anything is written, so a row that no sample could be is a usage

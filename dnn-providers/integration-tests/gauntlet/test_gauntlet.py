@@ -5563,3 +5563,611 @@ def test_a_capped_search_reports_unproven_and_never_counts_the_tuple_covered(tmp
     assert not covered & (flagged | unproven)
     # every tuple is covered, proven impossible or reported unproven: none is dropped
     assert covered | flagged | unproven == _tuple_universe(capped.levels)
+
+
+# --------------------------------------------------------------------------
+# Pairwise runs (--pairwise, --generate-only, pair coverage)
+# --------------------------------------------------------------------------
+
+# A dtype axis (three sweep directories), two feature axes and a range axis; `n` must reach `a`,
+# so (a=2, n=1) and (a=3, n=1) are illegal. Small enough to run in a second or two.
+PW_TOY = {
+    "axes": {
+        "dtype": {"values": ["half", "bfloat16", "float"]},
+        "a": {"values": [1, 2, 3]},
+        "mode": {"values": ["p", "q", "r"]},
+        "n": {"range": [1, 100], "boundaries": [1, 100]},
+    },
+    "derive": {},
+    "constraints": [{"rule": "n >= a", "reason": "n must reach a"}],
+    "case": {
+        "values": {
+            "dtype": "${dtype}",
+            "a": "${a}",
+            "mode": "${mode}",
+            "n": "${n}",
+        },
+        "metadata": {"purpose": "probe"},
+    },
+}
+PW_TOY_TAG = {"half": "fp16", "bfloat16": "bfp16", "float": "fp32"}
+PW_ILLEGAL = [[["a", 2], ["n", 1]], [["a", 3], ["n", 1]]]
+
+
+def _pw_spaces(tmp_path, *names):
+    spaces = tmp_path / "spaces"
+    spaces.mkdir(exist_ok=True)
+    for name in names or ("Toy.Default.space.json",):
+        write_space(spaces, file_name=name, **PW_TOY)
+    return spaces
+
+
+def _pw_space(spaces, name="Toy.Default.space.json"):
+    return space_lib.load_space(spaces / name)
+
+
+def _pw_run(run, spaces, *extra, seed=3):
+    return run.run(
+        "--pairwise", "--spaces-dir", str(spaces), *extra, space=None, seed=seed
+    )
+
+
+def _pw_samples(run):
+    return [
+        json.loads(line)
+        for line in (run.work / "samples.jsonl").read_text().splitlines()
+    ]
+
+
+def _pw_report(work, name="Toy_Default"):
+    return json.loads((Path(work) / "pairwise" / f"{name}.json").read_text())
+
+
+def _pw_expected_coverage(sp, levels, samples, outcomes):
+    """What a run drew and passed, from its samples and outcomes, worked out with the test's own
+    liveness: ``(drawn, passed, declined_only)`` as sets of tuple keys."""
+    drawn = {}
+    for s in samples:
+        for key in _held_live(levels, s["axes"], _live_axes(sp, levels, s["axes"])):
+            drawn.setdefault(key, set()).add(outcomes[s["case"]])
+    passed = {k for k, o in drawn.items() if o & {"PASS", "UNCLAIMED_PASS"}}
+    declined = {k for k, o in drawn.items() if o == {"DECLINED"}}
+    return drawn, passed, declined
+
+
+def test_pairwise_runs_every_generator_row_once_as_pw_k_and_records_the_generator_and_seed(
+    run, tmp_path, capsys
+):
+    # bug caught: a row dropped or run twice, a pairwise case named like a drawn one, a sweep row
+    # that does not say which generator and seed made it, data seeds that are constant or change
+    # from one process to the next, a summary that calls the run a sampling run
+    spaces = _pw_spaces(tmp_path)
+    sp = _pw_space(spaces)
+    rows = pairwise.build(sp, 3).rows
+    assert len(rows) > 8
+    assert _pw_run(run, spaces, "--batch-size", "100") == 0
+    out = capsys.readouterr().out
+    assert re.search(r"pairwise Toy/Default: \d+ tuples, 2 illegal, \d+ dead", out)
+
+    outcomes = run.outcome_list
+    assert [o["case"] for o in outcomes] == [f"pw{k}" for k in range(len(rows))]
+    assert len({o["test"] for o in outcomes}) == len(rows)
+    assert [s["axes"] for s in _pw_samples(run)] == rows
+    assert all(s["shape_seed"] is None for s in _pw_samples(run))
+    sweeps = sorted(
+        (run.work / "bundles/gauntlet/Toy/Default").glob("*_cases/sweep.json")
+    )
+    assert {f.parent.name for f in sweeps} == {
+        f"{PW_TOY_TAG[r['dtype']]}_cases" for r in rows
+    }
+    cases = [c for f in sweeps for c in json.loads(f.read_text())["cases"]]
+    assert sorted(c["id"] for c in cases) == sorted(f"pw{k}" for k in range(len(rows)))
+    for case in cases:
+        k = int(case["id"][2:])
+        meta = case["metadata"]
+        assert meta["generator"] == "gauntlet-pairwise"
+        assert f"pairwise seed 3, row {k}," in meta["notes"]
+        assert case["values"] == {**rows[k]}
+    seeds = [o["data_seed"] for o in outcomes]
+    assert all(0 <= d < 2**32 for d in seeds) and len(set(seeds)) > len(rows) // 2
+    assert sorted(c["metadata"]["seed"] for c in cases) == sorted(seeds)
+
+    summary = run.summary
+    assert summary["mode"] == "pairwise" and summary["seed"] == 3
+    assert summary["stopped_because"] == "pairwise-complete"
+    assert summary["continuous"] is False and summary["samples_per_space"] is None
+    assert summary["samples"] == len(rows) and summary["reconciled"] is True
+
+    report = _pw_report(run.work)
+    assert report["space"] == "Toy/Default" and report["seed"] == 3
+    assert report["rows"] == len(rows) and report["lower_bound"] <= len(rows)
+    assert report["levels"]["n"] == pairwise.levels(sp, "n", 3)
+    assert report["tuples_total"] == 6 * 9
+    assert [f["pair"] for f in report["illegal"]] == PW_ILLEGAL
+    assert all("n >= a" in f["detail"] for f in report["illegal"])
+    # n = 1 is legal only with a = 1, so a is inert there
+    assert [f["pair"] for f in report["dead"]] == [[["a", 1], ["n", 1]]]
+    assert report["unproven"] == []
+    assert report["repair"]["rounds"] == [] and report["repair"]["max_rounds"] == 2
+    assert report["timings"]["total_s"] >= 0
+
+    # the same seed gives the same data seeds in another process; --data-seed fixes them all
+    assert _pw_run(run, spaces, "--batch-size", "100") == 0
+    assert [o["data_seed"] for o in run.outcome_list] == seeds
+    assert _pw_run(run, spaces, "--data-seed", "77") == 0
+    assert {o["data_seed"] for o in run.outcome_list} == {77}
+
+
+def test_pairwise_rows_go_through_the_binary_in_batches(run, tmp_path):
+    # bug caught: a batch that holds the whole set, or one that drops the rows past the batch size
+    spaces = _pw_spaces(tmp_path)
+    rows = pairwise.build(_pw_space(spaces), 3).rows
+    assert _pw_run(run, spaces, "--batch-size", "4") == 0
+    runs = [i["tests"] for i in run.invocations if i["mode"] == "run"]
+    assert [len(r) for r in runs] == [4] * (len(rows) // 4) + [len(rows) % 4] * (
+        len(rows) % 4 > 0
+    )
+    assert run.summary["samples"] == len(rows)
+
+
+def test_a_pairwise_wrong_on_a_rendered_value_replays_by_row_under_the_same_gtest_name(
+    run, tmp_path
+):
+    # bug caught: a failure folder that replays with the shape seed a pairwise row does not have,
+    # or has no row.json for the --row it names, an repro.json without the row, a replay that
+    # runs under another GTest name; the case ids all differ here, so only the rendered value can
+    # make the stub answer WRONG
+    spaces = _pw_spaces(tmp_path)
+    sp = _pw_space(spaces)
+    rows = pairwise.build(sp, 3).rows
+    interior = pairwise.levels(sp, "n", 3)[2]
+    run.control(match=[_when("wrong", ("values.n", "==", interior))])
+    assert _pw_run(run, spaces) == 1
+    wrong = [o["case"] for o in run.outcome_list if o["outcome"] == "WRONG"]
+    assert wrong and wrong == [
+        f"pw{k}" for k, r in enumerate(rows) if r["n"] == interior
+    ]
+    case = wrong[0]
+    k = int(case[2:])
+    folder = run.failure_dir(case, "Toy_Default")
+    repro = json.loads((folder / "repro.json").read_text())
+    assert repro["shape_seed"] is None and repro["axis_values"] == rows[k]
+    assert repro["row"] == json.loads((folder / "row.json").read_text())
+    assert repro["row"]["case_id"] == case and repro["row"]["axes"] == rows[k]
+    assert repro["sweep_row"]["metadata"]["generator"] == "gauntlet-pairwise"
+    argv = repro["replay"]["argv"]
+    assert argv[argv.index("--row") + 1] == str(folder / "row.json")
+    assert not {"--seed", "--filter", "--samples", "--pairwise"} & set(argv)
+    script = (folder / "replay.sh").read_text()
+    assert '--row "$D/row.json"' in script and "--filter" not in script
+    replay = (folder / "replay.txt").read_text()
+    assert "--row" in replay.splitlines()[0]
+    assert f"axes: {json.dumps(rows[k], sort_keys=True)}" in replay
+    meta = (folder / f"Toy_Default_{case}.meta.json").read_text()
+    assert "explicit row" in meta and "shape seed" not in meta
+    finding = next(f for f in run.summary["findings"] if f["case"] == case)
+    assert "--row" in finding["replay"]
+
+    _, work, done = _replay(folder)
+    assert done.returncode == 1, done.stdout + done.stderr
+    (again,) = [
+        json.loads(line) for line in (work / "outcomes.jsonl").read_text().splitlines()
+    ]
+    original = next(o for o in run.outcome_list if o["case"] == case)
+    assert (again["test"], again["outcome"]) == (original["test"], "WRONG")
+
+
+def test_pairwise_load_reasons_of_different_rows_group_under_one_key(run, tmp_path):
+    # bug caught: every pw<k> case id makes its own reason group, so a systematic load failure
+    # reads as one-off findings
+    spaces = _pw_spaces(tmp_path)
+    run.control(cases={"pw1": "load_skip", "pw3": "load_skip"})
+    assert _pw_run(run, spaces) == 0
+    reasons = {}
+    for engine in run.summary["engines"].values():
+        reasons.update(engine["spaces"]["Toy/Default"]["unexercised_reasons"])
+    assert len(reasons) == 1 and list(reasons.values()) == [2]
+    assert "pw1" not in next(iter(reasons)) and "<case>" in next(iter(reasons))
+
+
+def test_reason_key_masks_pairwise_ids_like_drawn_ones_and_nothing_longer(run):
+    # bug caught: a pw<k> id left in a reason, or a longer word that holds one masked
+    f = _fuzz(run, "--samples", "1")
+    assert (
+        f._reason_key("load: pw12 and s7 and pw3.")
+        == "load: <case> and <case> and <case>."
+    )
+    assert f._reason_key("spw1 pw1a xpw2 pw s") == "spw1 pw1a xpw2 pw s"
+
+
+def test_the_repair_round_retries_declined_only_tuples_from_levels_that_passed(
+    run, tmp_path
+):
+    # bug caught: a repair row that uses a level that never passed (it would only decline again),
+    # a coverable declined-only tuple left uncovered, a never-passing value retried or lost from
+    # the report, a repair that does not stop at its round limit
+    spaces = _pw_spaces(tmp_path)
+    sp = _pw_space(spaces)
+    # mode q is declined whatever it meets; (a=1, n=100) is declined whatever else the row holds
+    run.control(
+        match=[
+            _when("declined", ("values.mode", "==", "q")),
+            _when("declined", ("values.a", "==", 1), ("values.n", "==", 100)),
+        ]
+    )
+    assert _pw_run(run, spaces, "--pairwise-repair", "3") == 0
+    report = _pw_report(run.work)
+    samples = _pw_samples(run)
+    outcomes = {o["case"]: o["outcome"] for o in run.outcome_list}
+    main = report["rows"]
+    repair_samples = samples[main:]
+    assert report["repair"]["rows"] == len(repair_samples) > 0
+    assert [s["case"] for s in samples] == [f"pw{k}" for k in range(len(samples))]
+
+    # round 1's targets, worked out from the main pass alone
+    levels = report["levels"]
+    drawn, passed, declined = _pw_expected_coverage(
+        sp, levels, samples[:main], outcomes
+    )
+    q_tuples = {k for k in declined if ("mode", "'q'") in k}
+    coverable = declined - q_tuples - {_tuple_key("a", 1, "n", 100)}
+    assert q_tuples and coverable  # both kinds of target exist for this seed
+    first = report["repair"]["rounds"][0]
+    assert first["targets"] == len(declined) and first["first_row"] == main
+    assert first["never_passed"] == len(q_tuples)
+    assert first["retried"] == len(declined) - len(q_tuples)
+
+    # the rows use only levels that passed in the main pass: never mode q, every other level
+    passing = {axis: [] for axis in levels}
+    for s in samples[:main]:
+        if outcomes[s["case"]] == "PASS":
+            for axis, value in s["axes"].items():
+                passing[axis].append(value)
+    assert "q" not in passing["mode"] and set(passing["mode"]) == {"p", "r"}
+    for s in repair_samples:
+        for axis, value in s["axes"].items():
+            assert value in passing[axis], (s["case"], axis, value)
+
+    # every coverable tuple passes now; what is left is mode q (never retried) and the one
+    # tuple the stub always declines
+    cov = run.summary["pair_coverage"]["Toy/Default"]
+    assert cov["not_passed_total"] == len(cov["not_passed"]) < 50
+    for pair in cov["not_passed"]:
+        assert ["mode", "q"] in pair or pair == [["a", 1], ["n", 100]]
+    assert [["a", 1], ["n", 100]] in cov["not_passed"]
+    assert cov["repair_rows"] == len(repair_samples) and cov["complete"] is True
+    assert report["repair"]["never_passed"] and all(
+        ["mode", "q"] in pair for pair in report["repair"]["never_passed"]
+    )
+    assert {
+        _tuple_key(a, va, b, vb)
+        for (a, va), (b, vb) in report["repair"]["never_passed"]
+    } == q_tuples
+
+    # one round per limit step: the always-declined tuple keeps coming back
+    rounds = report["repair"]["rounds"]
+    assert [r["round"] for r in rounds] == [1, 2, 3] and all(r["rows"] for r in rounds)
+    assert rounds[1]["first_row"] == rounds[0]["first_row"] + rounds[0]["rows"]
+    assert run.summary["stopped_because"] == "pairwise-complete"
+
+
+def test_no_repair_rows_are_built_with_a_zero_round_limit(run, tmp_path):
+    spaces = _pw_spaces(tmp_path)
+    run.control(match=[_when("declined", ("values.mode", "==", "q"))])
+    assert _pw_run(run, spaces, "--pairwise-repair", "0") == 0
+    report = _pw_report(run.work)
+    assert report["repair"]["rounds"] == [] and report["repair"]["rows"] == 0
+    assert len(run.outcome_list) == report["rows"]
+    assert run.summary["pair_coverage"]["Toy/Default"]["repair_rows"] == 0
+
+
+def test_pair_coverage_counts_range_axes_and_not_shrink_candidates(run, tmp_path):
+    # bug caught: tuples of a range axis never drawn (the outcome axis map drops them), a shrink
+    # candidate (same case id, other axis values) counted in place of the row it shrinks, drawn
+    # not adding up to the universe less what no legal row covers
+    spaces = _pw_spaces(tmp_path)
+    sp = _pw_space(spaces)
+    run.control(
+        match=[
+            _when("wrong", ("values.a", "==", 3)),
+            _when("declined", ("values.mode", "==", "q")),
+        ]
+    )
+    assert _pw_run(run, spaces, "--shrink", "3") == 1
+    assert _candidate_runs(run)  # a candidate ran, with the finding's own case id
+    report = _pw_report(run.work)
+    cov = run.summary["pair_coverage"]["Toy/Default"]
+    assert cov["tuples"] == report["tuples_total"]
+    flagged = cov["illegal"] + cov["dead"] + cov["unproven"]
+    assert cov["drawn"] == cov["tuples"] - flagged
+    assert cov["rows"] == report["rows"] and cov["complete"] is True
+
+    samples = _pw_samples(run)
+    outcomes = {o["case"]: o["outcome"] for o in run.outcome_list}
+    drawn, passed, declined = _pw_expected_coverage(
+        sp, report["levels"], samples, outcomes
+    )
+    assert (cov["drawn"], cov["passed"], cov["declined_only"]) == (
+        len(drawn),
+        len(passed),
+        len(declined),
+    )
+    assert cov["never_passed"] == len(drawn) - len(passed)
+    assert cov["declined_only"] > 0 and cov["never_passed"] > cov["declined_only"]
+    assert any("n" in (a, b) for (a, _), (b, _) in drawn)  # range-axis tuples count
+    assert any("n" in (a, b) for (a, _), (b, _) in passed)
+    assert cov["not_passed_total"] == cov["tuples"] - cov["passed"] - flagged
+    assert len(cov["not_passed"]) == min(50, cov["not_passed_total"])
+
+
+def test_a_pairwise_run_of_the_flash2_probe_space_passes_every_tuple(run):
+    # a shipped SDPA forward space through the driver: all rows run, all 27 tuples pass
+    assert run.run("--pairwise", "--seed", "1", space="SdpaFwd/Flash2") == 0
+    cov = run.summary["pair_coverage"]["SdpaFwd/Flash2"]
+    assert (cov["tuples"], cov["rows"], cov["unproven"]) == (27, 27, 0)
+    assert cov["drawn"] == cov["passed"] == 27 - cov["illegal"] - cov["dead"]
+    assert cov["declined_only"] == cov["never_passed"] == cov["not_passed_total"] == 0
+
+
+def test_a_pairwise_run_stopped_by_the_time_budget_marks_its_coverage_incomplete(
+    run, tmp_path
+):
+    # bug caught: a stopped run that reports its partial coverage as the whole set's
+    spaces = _pw_spaces(tmp_path)
+    run.control(delay=0.4)
+    assert _pw_run(run, spaces, "--batch-size", "2", "--time-budget", "1s") == 0
+    summary = run.summary
+    assert summary["stopped_because"] == "time-budget" and summary["reconciled"] is True
+    cov = summary["pair_coverage"]["Toy/Default"]
+    assert cov["complete"] is False and 0 < summary["samples"] < cov["rows"]
+    assert cov["drawn"] < cov["tuples"] - cov["illegal"] - cov["dead"] - cov["unproven"]
+
+
+def test_generate_only_writes_every_row_of_every_space_in_every_dtype_tag_and_runs_nothing(
+    run, tmp_path, capsys
+):
+    # bug caught: a writer that clears the bundle root per space or batch (only the last survives),
+    # a dtype tag or a row past the batch size missing, a binary that runs after all
+    spaces = _pw_spaces(tmp_path, "Toy.Default.space.json", "Toy.Other.space.json")
+    work = tmp_path / "generated"
+    code = fuzz.main(
+        [
+            "--pairwise", "--generate-only", "--seed", "5", "--batch-size", "4",
+            "--work-dir", str(work), "--spaces-dir", str(spaces),
+        ]
+    )  # fmt: skip
+    assert code == 0
+    assert not run.log.exists() and not (work / "logs").exists()
+    for name in ("Default", "Other"):
+        sp = _pw_space(spaces, f"Toy.{name}.space.json")
+        rows = pairwise.build(sp, 5).rows
+        assert len(rows) > 4  # more rows than a batch holds
+        sweeps = sorted(
+            (work / "bundles/gauntlet/Toy" / name).glob("*_cases/sweep.json")
+        )
+        assert {f.parent.name for f in sweeps} == {
+            f"{PW_TOY_TAG[r['dtype']]}_cases" for r in rows
+        } and len(sweeps) == 3
+        found = {}
+        for sweep in sweeps:
+            assert (sweep.parent / "graph.template.json").is_file()
+            for case in json.loads(sweep.read_text())["cases"]:
+                found[case["id"]] = (sweep.parent.name, case)
+        assert sorted(found) == sorted(f"pw{k}" for k in range(len(rows)))
+        for k, values in enumerate(rows):
+            tag_dir, case = found[f"pw{k}"]
+            assert tag_dir == f"{PW_TOY_TAG[values['dtype']]}_cases"
+            assert case["values"] == values
+            assert case["metadata"]["generator"] == "gauntlet-pairwise"
+            assert f"pairwise seed 5, row {k}," in case["metadata"]["notes"]
+        report = _pw_report(work, f"Toy_{name}")
+        assert report["rows"] == len(rows) and report["seed"] == 5
+        assert report["repair"] == {
+            "max_rounds": 0, "rows": 0, "rounds": [], "never_passed": [],
+        }  # fmt: skip
+        assert [f["pair"] for f in report["illegal"]] == PW_ILLEGAL
+    assert "wrote" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "flags, message",
+    [
+        (["--pairwise", "--row", "{row}"], "cannot be combined with --row"),
+        (["--pairwise", "--samples", "3"], "cannot be combined with --samples"),
+        (["--pairwise", "--samples", "0"], "cannot be combined with --samples"),
+        (["--generate-only"], "--generate-only needs --pairwise"),
+        (["--pairwise-repair", "2"], "--pairwise-repair needs --pairwise"),
+        (["--pairwise", "--pairwise-repair", "-1"], "--pairwise-repair must be >= 0"),
+    ],
+)
+def test_pairwise_flag_clashes_are_usage_errors(run, tmp_path, capsys, flags, message):
+    # bug caught: a pairwise run that quietly ignores a row file or a sample count it was given
+    sample = sampler.sample(space_by_id("SdpaFwd/Default"), 3)
+    row = _write_row(tmp_path, **_row_of(sample))
+    argv = [f.replace("{row}", str(row)) for f in flags]
+    with pytest.raises(SystemExit) as exit_:
+        fuzz.main(run.args(*argv))
+    assert exit_.value.code == 2
+    assert message in capsys.readouterr().err
+    assert not run.work.exists() and not run.log.exists()
+
+
+def test_pairwise_ignores_the_samples_variable_and_needs_a_binary_unless_it_generates(
+    monkeypatch, capsys
+):
+    monkeypatch.setenv("HIPDNN_FUZZ_SAMPLES", "9")  # a default of the random runs only
+    a = fuzz.parse_args(["--binary", "bin", "--pairwise"])
+    assert a.samples is None and a.pairwise_repair == 2 and a.seed is not None
+    g = fuzz.parse_args(["--pairwise", "--generate-only"])
+    assert g.binary is None and g.generate_only
+    with pytest.raises(SystemExit) as exit_:
+        fuzz.parse_args(["--pairwise"])
+    assert exit_.value.code == 2 and "--binary" in capsys.readouterr().err
+
+
+def test_the_offline_coverage_helper_counts_a_random_runs_first_samples_against_a_report(
+    run, tmp_path, capsys
+):
+    # bug caught: a random run's coverage read from the wrong samples (other spaces, past N), a
+    # range value that is no level counted, outcomes joined to the wrong case
+    spaces = _pw_spaces(tmp_path)
+    sp = _pw_space(spaces)
+    generated = tmp_path / "generated"
+    assert (
+        fuzz.main(
+            [
+                "--pairwise", "--generate-only", "--seed", "3",
+                "--work-dir", str(generated), "--spaces-dir", str(spaces),
+            ]
+        )  # fmt: skip
+        == 0
+    )
+    capsys.readouterr()
+    reports = generated / "pairwise"
+    report = _pw_report(generated)
+    run.control(seed_mod={"m": 3, "map": {"0": "declined", "1": "wrong"}})
+    run.run("--samples", "24", "--spaces-dir", str(spaces), space=None)
+    samples = _pw_samples(run)
+    outcomes = {o["case"]: o["outcome"] for o in run.outcome_list}
+
+    counts = {}
+    for first in (None, 7):
+        found = fuzz.coverage_of(run.work, reports, first, str(spaces))
+        assert list(found) == ["Toy/Default"]
+        cov = found["Toy/Default"]
+        used = samples if first is None else samples[:first]
+        drawn, passed, declined = _pw_expected_coverage(
+            sp, report["levels"], used, outcomes
+        )
+        assert (cov["samples"], cov["with_outcome"]) == (len(used), len(used))
+        assert (cov["drawn"], cov["passed"], cov["declined_only"]) == (
+            len(drawn),
+            len(passed),
+            len(declined),
+        )
+        assert cov["tuples"] == report["tuples_total"]
+        assert cov["illegal"] == len(report["illegal"]) == 2
+        assert cov["not_passed_total"] == (
+            cov["tuples"] - cov["passed"] - cov["illegal"] - cov["dead"]
+        )
+        counts[first] = cov
+    assert 0 < counts[7]["drawn"] < counts[None]["drawn"]
+    assert counts[None]["passed"] > 0
+    capsys.readouterr()  # what the random run printed
+
+    code = fuzz.main(
+        [
+            "--coverage-of", str(run.work),
+            "--levels-from", str(reports / "Toy_Default.json"),
+            "--first", "7", "--spaces-dir", str(spaces),
+        ]
+    )  # fmt: skip
+    assert code == 0
+    assert json.loads(capsys.readouterr().out) == json.loads(
+        json.dumps({"Toy/Default": counts[7]})
+    )
+
+
+def test_the_offline_coverage_helper_rejects_a_missing_report(run, tmp_path, capsys):
+    assert (
+        fuzz.main(
+            [
+                "--coverage-of",
+                str(tmp_path),
+                "--levels-from",
+                str(tmp_path / "none.json"),
+            ]
+        )
+        == 2
+    )
+    assert "--levels-from" in capsys.readouterr().err
+
+
+def _hand_records(rows, declined):
+    """A run's records for ``rows``: ``DECLINED`` where ``declined(row)``, else ``PASS``."""
+    return [(row, "DECLINED" if declined(row) else "PASS") for row in rows]
+
+
+def test_repair_rows_are_deterministic_use_only_passing_levels_and_cover_what_is_coverable(
+    tmp_path,
+):
+    # bug caught: a repair row that holds a level that never passed, a coverable target left
+    # without a live row, a value that never passed retried, rows that change between calls
+    sp = space_lib.load_space(write_space(tmp_path, **PW_TOY))
+    built = pairwise.build(sp, 3)
+    records = _hand_records(built.rows, lambda r: r["mode"] == "q")
+    found = pairwise.repair_targets(sp, records, built.levels, built.liveness)
+    assert found.targets and found.witness["mode"] != "q"
+    assert found.allowed["mode"] == ["p", "r"]
+    assert found.allowed["n"] == built.levels["n"]
+
+    def call(round_number):
+        return pairwise.repair(
+            sp,
+            3,
+            found.targets,
+            found.allowed,
+            round_number=round_number,
+            witness=found.witness,
+            liveness=built.liveness,
+        )
+
+    first = call(1)
+    assert call(1).rows == first.rows
+    assert first.rows and all(row["mode"] in ("p", "r") for row in first.rows)
+    assert first.unreachable == []
+    retried = {_tuple_key(a, va, b, vb) for (a, va), (b, vb) in first.retried}
+    never = {_tuple_key(a, va, b, vb) for (a, va), (b, vb) in first.never_passed}
+    assert never and all(("mode", "'q'") in key for key in never)
+    assert retried and not retried & never
+    assert retried | never == {
+        _tuple_key(a, va, b, vb) for (a, va), (b, vb) in found.targets
+    }
+    assert retried <= _covered(sp, built.levels, first.rows)
+    assert len(first.rows) < len(
+        first.retried
+    )  # rows are packed with several targets each
+
+
+def test_a_target_only_the_declined_level_can_cover_is_unreachable_not_retried(
+    tmp_path,
+):
+    # bug caught: a repair that builds a row from a level that never passed to reach a tuple (it
+    # would decline again), or drops the tuple without saying so
+    sp = space_lib.load_space(
+        write_space(
+            tmp_path,
+            axes={
+                "a": {"values": [1, 2]},
+                "b": {"values": ["x", "y"]},
+                "c": {"values": ["p", "q"]},
+            },
+            derive={},
+            constraints=[
+                {
+                    "rule": "a != 2 or b == 'x' or c == 'q'",
+                    "reason": "a = 2 with b = y needs c = q",
+                }
+            ],
+            case={
+                "values": {"a": "${a}", "b": "${b}", "c": "${c}"},
+                "metadata": {},
+            },
+        )
+    )
+    built = pairwise.build(sp, 1)
+    records = _hand_records(built.rows, lambda r: r["c"] == "q")
+    found = pairwise.repair_targets(sp, records, built.levels, built.liveness)
+    target = (("a", 2), ("b", "y"))
+    assert target in found.targets and found.allowed["c"] == ["p"]
+    result = pairwise.repair(
+        sp, 1, found.targets, found.allowed, round_number=1,
+        witness=found.witness, liveness=built.liveness,
+    )  # fmt: skip
+    # with c held at p, a and b are inert in (a=1, b=y) and (a=2, b=x) (the other value of a
+    # needs c = q), and (a=2, b=y) is illegal: no row of the passing levels covers them
+    unreachable = {f.pair: f.detail for f in result.unreachable}
+    assert set(unreachable) == {(("a", 1), ("b", "y")), (("a", 2), ("b", "x")), target}
+    assert "a != 2 or b == 'x' or c == 'q'" in unreachable[target]
+    assert result.rows == [] and result.never_passed  # the c = q tuples are not retried
+    assert all(("c", "q") in pair for pair in result.never_passed)
