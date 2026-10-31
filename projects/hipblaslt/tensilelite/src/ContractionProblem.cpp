@@ -1390,6 +1390,17 @@ namespace TensileLite
         return m_freeSizesB.at(idx);
     }
 
+    bool ContractionProblemGemm::hasOutputTiles() const
+    {
+        size_t m = 1;
+        for(size_t i = 0; i < freeIndicesA().size(); ++i)
+            m *= freeSizeA(i);
+        size_t n = 1;
+        for(size_t i = 0; i < freeIndicesB().size(); ++i)
+            n *= freeSizeB(i);
+        return m != 0 && n != 0;
+    }
+
     size_t ContractionProblemGemm::batchSize(size_t idx) const
     {
         return m_batchSizes[idx];
