@@ -9,10 +9,14 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <Tensile/SolutionLibrary.hpp>
+
 #include <cstdint>
 #include <limits>
 #include <tuple>
 #include <vector>
+
+extern "C" int rocblaslt_testing_last_get_all_search_type();
 
 namespace
 {
@@ -252,5 +256,64 @@ namespace
             hipblasLtMatmulAlgo_t algo = fitting.front().algo;
             EXPECT_EQ(gemm.initialize(algo, ws), HIPBLAS_STATUS_SUCCESS);
         }
+    }
+
+    // The heuristic top-up asks getAllSolutions for a no-ranking search. A result
+    // list cannot show that: duplicates of the ranking rows are dropped. This
+    // checks the search type that call passes.
+    TEST(HeuristicSearchType, smoke_TopUpPassesNoRankingSearch)
+    {
+        int deviceCount = 0;
+        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
+            GTEST_SKIP() << "No GPU available";
+
+        hipblasLtHandle_t       handle  = nullptr;
+        hipblasLtMatmulDesc_t   desc    = nullptr;
+        hipblasLtMatrixLayout_t layoutA = nullptr;
+        hipblasLtMatrixLayout_t layoutB = nullptr;
+        hipblasLtMatrixLayout_t layoutD = nullptr;
+        hipblasLtMatmulPreference_t pref = nullptr;
+        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_32F, 128, 128, 128),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_32F, 128, 128, 128),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&layoutD, HIP_R_32F, 128, 128, 128),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+        const uint64_t workspace = 32ull << 20;
+        ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(
+                      pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspace, sizeof(workspace)),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        constexpr int kRequest = 100000;
+        std::vector<hipblasLtMatmulHeuristicResult_t> results(kRequest);
+        int                                           returned = 0;
+        const hipblasStatus_t                         status
+            = hipblasLtMatmulAlgoGetHeuristic(handle,
+                                              desc,
+                                              layoutA,
+                                              layoutB,
+                                              layoutD,
+                                              layoutD,
+                                              pref,
+                                              kRequest,
+                                              results.data(),
+                                              &returned);
+
+        hipblasLtMatmulPreferenceDestroy(pref);
+        hipblasLtMatrixLayoutDestroy(layoutA);
+        hipblasLtMatrixLayoutDestroy(layoutB);
+        hipblasLtMatrixLayoutDestroy(layoutD);
+        hipblasLtMatmulDescDestroy(desc);
+        hipblasLtDestroy(handle);
+
+        ASSERT_EQ(status, HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(returned, 0);
+        ASSERT_LT(returned, kRequest);
+        EXPECT_EQ(rocblaslt_testing_last_get_all_search_type(),
+                  static_cast<int>(TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING));
     }
 } // namespace

@@ -111,6 +111,16 @@ namespace TensileLite
             add_impl(m_map, value, ks...);
         }
 
+        // Keeps the stored value when preferIncoming is false. The check and
+        // the write share this lock.
+        template <typename PreferIncoming, typename... Ks>
+        void addIfPreferred(Value const& incoming, PreferIncoming preferIncoming, Ks const&... ks)
+        {
+            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+
+            addIfPreferred_impl(m_map, incoming, preferIncoming, ks...);
+        }
+
     private:
         template <typename SubMap, typename K>
         Value find_impl(SubMap const& map, K const& key)
@@ -146,6 +156,27 @@ namespace TensileLite
             add_impl(map[key], value, ks...);
         }
 
+        template <typename SubMap, typename PreferIncoming, typename K>
+        void addIfPreferred_impl(SubMap&          map,
+                                 Value const&     incoming,
+                                 PreferIncoming   preferIncoming,
+                                 K const&         key)
+        {
+            auto iter = map.find(key);
+            if(iter == map.end() || preferIncoming(iter->second, incoming))
+                map.insert_or_assign(key, incoming);
+        }
+
+        template <typename SubMap, typename PreferIncoming, typename K, typename... Ks>
+        void addIfPreferred_impl(SubMap&          map,
+                                 Value const&     incoming,
+                                 PreferIncoming   preferIncoming,
+                                 K const&         key,
+                                 Ks const&...     ks)
+        {
+            addIfPreferred_impl(map[key], incoming, preferIncoming, ks...);
+        }
+
         Map                     m_map;
         std::shared_timed_mutex m_mutex;
         Value                   m_nullValue;
@@ -161,17 +192,34 @@ namespace TensileLite
     public:
         using Library = SolutionLibrary<MyProblem, MySolution>;
         using Cache  = CacheMap<std::tuple<std::shared_ptr<MySolution>, double>, AMDGPU, MyProblem>;
-        using Caches = CacheMap<SolutionVector<MySolution>, AMDGPU, MyProblem>;
-        using CachesAllSolsFlag
-            = CacheMap<bool, AMDGPU, MyProblem>;
+
+        // The solutions found for a problem and whether they are all of the
+        // solutions the sub-library has. They are published and read as one
+        // CacheMap value, so no thread can see one request's solutions paired
+        // with another request's already-returned-all bit.
+        struct TopSolutionsEntry
+        {
+            SolutionVector<MySolution> solutions;
+            bool                       alreadyRetAll = false;
+
+            bool operator==(TopSolutionsEntry const& other) const
+            {
+                return alreadyRetAll == other.alreadyRetAll && solutions == other.solutions;
+            }
+            bool operator!=(TopSolutionsEntry const& other) const
+            {
+                return !(*this == other);
+            }
+        };
+
+        using Caches = CacheMap<TopSolutionsEntry, AMDGPU, MyProblem>;
         using CachesGroupedGemm
             = CacheMap<SolutionVector<MySolution>, AMDGPU, std::vector<MyProblem>>;
 
         CachingLibrary(std::shared_ptr<Library> subLibrary)
             : m_subLibrary(subLibrary)
             , m_cache(std::make_tuple(nullptr, std::numeric_limits<double>::max()))
-            , m_caches(SolutionVector<MySolution>{})
-            , m_cachesAllSolutions(false)
+            , m_caches(TopSolutionsEntry{})
             , m_cachesGroupedGemm(SolutionVector<MySolution>{})
         {
         }
@@ -252,37 +300,43 @@ namespace TensileLite
             return m_subLibrary;
         }
 
-        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
-                                                            Hardware const&  hardware,
-                                                            int numSolutions) const override
+        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
+                                                                Hardware const&  hardware,
+                                                                int numSolutions) const override
         {
             try
             {
                 auto const&                amdgpu = dynamic_cast<AMDGPU const&>(hardware);
                 SolutionVector<MySolution> solutions;
-                bool                       cacheAlreadyContainAll;
-                solutions = m_caches.find(problem, amdgpu);
-                cacheAlreadyContainAll = m_cachesAllSolutions.find(problem, amdgpu);
-                // set flag in case of early return
-                lastFindTopRetAll = cacheAlreadyContainAll;
 
-                if(solutions.size() >= numSolutions || cacheAlreadyContainAll)
-                    return solutions;
+                // One lookup returns the solutions and their already-returned-all bit together.
+                auto cached = m_caches.find(problem, amdgpu);
 
-                solutions = m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
+                // flag for this call in case of early return
+                if(cached.solutions.size() >= numSolutions || cached.alreadyRetAll)
+                    return {std::move(cached.solutions), cached.alreadyRetAll};
+
+                auto sub = m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
+                solutions = std::move(sub.solutions);
                 if(solutions.size() != 0)
                 {
-                    bool alreadyRetAll = m_subLibrary->lastFindTopAlreadyRetAll();
-                    m_caches.add(solutions, problem, amdgpu);
-                    m_cachesAllSolutions.add(alreadyRetAll, problem, amdgpu);
-                    // debug
-                    // std::cout << "m_cachesAllSolutions.add() with solution.size() = " << solutions.size()
-                    //           << " and alreadyRetAll: " << (alreadyRetAll? "True" : "False") << std::endl;
+                    // A shorter list must not replace a longer one for this problem.
+                    // For equal-length lists, keep the incoming one only if it upgrades
+                    // alreadyRetAll from false to true to avoid repeated top-up rescans.
+                    m_caches.addIfPreferred(
+                        TopSolutionsEntry{solutions, sub.alreadyRetAll},
+                        [](TopSolutionsEntry const& existing, TopSolutionsEntry const& incoming) {
+                            return incoming.solutions.size() > existing.solutions.size()
+                                   || (incoming.solutions.size() == existing.solutions.size()
+                                       && incoming.alreadyRetAll && !existing.alreadyRetAll);
+                        },
+                        problem,
+                        amdgpu);
                 }
 
                 // can't reach the requested number, means findTop already done its best
-                lastFindTopRetAll = (solutions.size() < numSolutions);
-                return solutions;
+                const bool alreadyRetAll = (solutions.size() < numSolutions);
+                return {std::move(solutions), alreadyRetAll};
             }
             catch(std::bad_cast const& exc)
             {
@@ -290,11 +344,6 @@ namespace TensileLite
             }
             // TODO- redundant ??
             return m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>
@@ -329,9 +378,7 @@ namespace TensileLite
         std::shared_ptr<Library>  m_subLibrary;
         mutable Cache             m_cache;
         mutable Caches            m_caches;
-        mutable CachesAllSolsFlag m_cachesAllSolutions;
         mutable CachesGroupedGemm m_cachesGroupedGemm;
-        mutable std::atomic<bool> lastFindTopRetAll = false;
     };
 
 } // namespace TensileLite

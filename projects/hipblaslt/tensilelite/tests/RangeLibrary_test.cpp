@@ -150,7 +150,7 @@ TEST_P(RangeLibraryTest, SpecificSizes)
         problem.setWorkspaceSize(120324096);
 
         auto solution = library->findBestSolution(problem, hardware);
-        auto solutions = library->findTopSolutions(problem, hardware, 1);
+        auto solutions = library->findTopSolutions(problem, hardware, 1).solutions;
         if(in_range)
         {
             ASSERT_NE(solution, nullptr) << problem;

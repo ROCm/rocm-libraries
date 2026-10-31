@@ -137,13 +137,18 @@ namespace
             return {};
         }
 
-        SolutionVector<ContractionSolution> findTopSolutions(ContractionProblemGemm const&,
-                                                             Hardware const&,
-                                                             int numSolutions) const override
+        TopSolutionsResult<ContractionSolution>
+            findTopSolutions(ContractionProblemGemm const&,
+                             Hardware const&,
+                             int numSolutions) const override
         {
             lastTopRequest = numSolutions;
-            const size_t n = std::min(shipped.size(), static_cast<size_t>(numSolutions));
-            return SolutionVector<ContractionSolution>(shipped.begin(), shipped.begin() + n);
+            const size_t n
+                = std::min(shipped.size(), static_cast<size_t>(std::max(numSolutions, 0)));
+            TopSolutionsResult<ContractionSolution> result;
+            result.solutions.assign(shipped.begin(), shipped.begin() + n);
+            result.alreadyRetAll = result.solutions.size() < static_cast<size_t>(numSolutions);
+            return result;
         }
 
         std::string type() const override
@@ -507,6 +512,8 @@ TEST(LocalKernelLibrary, smoke_FindAllHonoursSearchType)
               SolutionSet<ContractionSolution>({serves}));
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::GEMM_TYPE_ONLY),
               SolutionSet<ContractionSolution>({serves, rejects}));
+    EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING),
+              SolutionSet<ContractionSolution>({serves, rejects}));
     EXPECT_EQ(library.findAll(problem, gpu, SolutionLibrarySearchType::HARDWARE_ONLY).size(), 3u);
 }
 
@@ -587,11 +594,11 @@ TEST(LocalKernelMaster, smoke_TopSolutionsPrependMappedKernelOnce)
     auto          local = f.registerAndMap(problem);
 
     auto top = f.master.findTopSolutions(problem, gpu, 4);
-    ASSERT_EQ(top.size(), 4u);
-    EXPECT_EQ(top[0], local);
+    ASSERT_EQ(top.solutions.size(), 4u);
+    EXPECT_EQ(top.solutions[0], local);
     EXPECT_EQ(f.stub->lastTopRequest, 3);
     for(int i = 1; i < 4; i++)
-        EXPECT_EQ(top[i], f.stub->shipped[i - 1]) << "shipped order should be kept";
+        EXPECT_EQ(top.solutions[i], f.stub->shipped[i - 1]) << "shipped order should be kept";
 }
 
 // Registering a solution the shipped library holds is rejected, so it keeps
@@ -619,10 +626,10 @@ TEST(LocalKernelMaster, smoke_TopOneSkipsShippedLibrary)
     auto          local = f.registerAndMap(problem);
 
     auto top = f.master.findTopSolutions(problem, gpu, 1);
-    ASSERT_EQ(top.size(), 1u);
-    EXPECT_EQ(top[0], local);
+    ASSERT_EQ(top.solutions.size(), 1u);
+    EXPECT_EQ(top.solutions[0], local);
     EXPECT_EQ(f.stub->lastTopRequest, -1);
-    EXPECT_FALSE(f.master.lastFindTopAlreadyRetAll());
+    EXPECT_FALSE(top.alreadyRetAll);
 }
 
 TEST(LocalKernelMaster, smoke_UnmappedShapeUsesShippedLibrary)
@@ -633,7 +640,7 @@ TEST(LocalKernelMaster, smoke_UnmappedShapeUsesShippedLibrary)
     f.registerAndMap(makeProblem(kM, kN, kK * 2));
 
     auto top = f.master.findTopSolutions(problem, gpu, 4);
-    EXPECT_EQ(top, f.stub->shipped);
+    EXPECT_EQ(top.solutions, f.stub->shipped);
     EXPECT_EQ(f.stub->lastTopRequest, 4);
 
     double fitness = 0.0;
