@@ -1188,6 +1188,14 @@ RppStatus sobel_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                    rpp::Handle& handle);
 
+// -------------------- prewitt_filter --------------------
+
+template <typename T>
+RppStatus prewitt_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
+                                     RpptDescPtr dstDescPtr, Rpp32u prewittType,
+                                     RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                     RppLayoutParams layoutParams, rpp::Handle& handle);
+
 // -------------------- median_filter --------------------
 
 template <typename T>
