@@ -993,8 +993,9 @@ int main(int argc, const char* argv[])
     }
 
     MetaRunListener listeners;
-    std::shared_ptr<BenchmarkTimer> benchmarkTimer;
-    float                           flushTimeMs{};
+    std::shared_ptr<BenchmarkTimer>        benchmarkTimer;
+    std::shared_ptr<SynchronizerValidator> synchronizerValidator;
+    float                                  flushTimeMs{};
 
     {
         ScopedTimer timer("listener_setup");
@@ -1012,7 +1013,8 @@ int main(int argc, const char* argv[])
             // Before ReferenceValidator: postSolution runs listeners in
             // reverse, so the dirty-buffer verdict lands after the reference
             // one rather than being overwritten by it.
-            listeners.addListener(std::make_shared<SynchronizerValidator>(args, devices));
+            synchronizerValidator = std::make_shared<SynchronizerValidator>(args, devices);
+            listeners.addListener(synchronizerValidator);
             listeners.addListener(std::make_shared<ReferenceValidator>(args, devices));
             benchmarkTimer
                 = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000, devices);
@@ -1269,6 +1271,7 @@ int main(int argc, const char* argv[])
                                     });
                                 }
                                 resetInput = true;
+                                synchronizerValidator->beginRunIteration();
 
                                 std::vector<std::vector<std::vector<KernelInvocation>>> kernels;
                                 {
@@ -1471,6 +1474,11 @@ int main(int argc, const char* argv[])
                                         HIP_CHECK_EXC(hipStreamSynchronize(ctx.stream));
                                     });
                                 }
+
+                                // Check the Synchronizer after all of this iteration's launches,
+                                // before the next iteration's input reset (GuardPageAll runs two
+                                // iterations). The verdict is reported in postSolution.
+                                synchronizerValidator->checkRunIteration();
 
                                 if(useUserArgs)
                                 {

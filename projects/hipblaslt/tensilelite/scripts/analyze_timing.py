@@ -125,9 +125,8 @@ TIMING_HIERARCHY = {
                     "validate_report": {},
                 },
                 "validate_warmups_listener.SynchronizerValidator": {
-                    # Per validation: read the Synchronizer buffer back and scan it for residue.
-                    # Only solutions that may use the Synchronizer (StreamK, MBSK, GSU partial
-                    # reduction, amaxD) do the readback and scan; the rest are "inactive".
+                    # Older logs: the Synchronizer check ran here, after warmup 0 (now
+                    # synchronizer_check, at the end of each run iteration).
                     "validate_synchronizer_check": {
                         "validate_synchronizer_readback": {},
                         "validate_synchronizer_scan": {},
@@ -233,6 +232,16 @@ TIMING_HIERARCHY = {
             # 1..N-1 with SyncsPerBenchmark: 0) at the end of the iteration.
             "warmup_first_sync": {},
             "run_iteration_sync": {},
+            # Per run iteration that launched (and in post_solution for launches an exception left
+            # unchecked): read the Synchronizer buffer back and scan it for residue. Only solutions
+            # that may use the Synchronizer (StreamK, MBSK, GSU partial reduction, amaxD) do the
+            # readback and scan; the rest are "inactive".
+            "synchronizer_check": {
+                "synchronizer_readback": {},
+                "synchronizer_scan": {},
+                "synchronizer_inactive": {},
+                "synchronizer_no_buffer": {},
+            },
             "benchmark_runs": {
                 "benchmark_pre_syncs": {},
                 "benchmark_events_setup": {},
@@ -329,6 +338,7 @@ CPP_PHASE_GROUPS = {
     ],
     "Reference Computation": [
         "validate_warmups",
+        "synchronizer_check",
     ],
     "Kernel Execution": [
         "solution_selection",
@@ -429,6 +439,7 @@ PURPOSE_OF = {
     "pre_solution_listener.DataInitialization": G_INPUT,
     # Checking the results
     "validate_warmups": G_VALIDATION,
+    "synchronizer_check": G_VALIDATION,
     # Running the kernels
     "kernel_solving": G_KERNEL,
     "warmup_events_setup": G_KERNEL,
