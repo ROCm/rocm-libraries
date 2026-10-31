@@ -875,6 +875,13 @@ static rocke_status_t rocke_h_op_math_exp2(rocke_h_lowerer_t* lw, const rocke_op
     return lw->status;
 }
 
+/* def _op_math_exp2_fast(self, op): self._math1(op, "__builtin_amdgcn_exp2f") */
+static rocke_status_t rocke_h_op_math_exp2_fast(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    h_math1(lw, op, "__builtin_amdgcn_exp2f");
+    return lw->status;
+}
+
 /* def _op_math_log2(self, op): self._math1(op, "log2f") */
 static rocke_status_t rocke_h_op_math_log2(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -967,6 +974,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_arith(void)
         {ROCKE_OP_ARITH_FMIN, rocke_h_op_arith_fmin},
         {ROCKE_OP_ARITH_FCMP, rocke_h_op_arith_fcmp},
         {ROCKE_OP_MATH_EXP2, rocke_h_op_math_exp2},
+        {ROCKE_OP_MATH_EXP2_FAST, rocke_h_op_math_exp2_fast},
         {ROCKE_OP_MATH_LOG2, rocke_h_op_math_log2},
         {ROCKE_OP_MATH_RCP, rocke_h_op_math_rcp},
         {ROCKE_OP_MATH_RCP_FAST, rocke_h_op_math_rcp_fast},

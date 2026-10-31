@@ -309,7 +309,7 @@ def default_scenarios() -> List[Scenario]:
         ),
         # D256 gfx950 bf16 prefill fast path (Qwen3-Next-80B-A3B cohort,
         # GQA 16/2). Exercises the _d256_gfx950_fast route (32x32 transposed
-        # + FA3-style softmax<->MFMA interleave) at the two measured points.
+        # + half-local PV) at the two measured points.
         Scenario(
             name="prefill_d256_gqa8_b16_sq4096",
             seq_lens=[(4096, 4096)],

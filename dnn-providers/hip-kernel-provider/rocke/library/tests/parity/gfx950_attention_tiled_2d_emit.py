@@ -1069,6 +1069,30 @@ _CONFIGS = {
         num_seqs=2,
         use_qblock_reverse=True,
     ),
+    # Native softmax exp2 (no range guard) on the D256 32x32 transposed
+    # half-local-PV body (four waves, T=32).
+    64: dict(
+        head_size=256,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=1,
+        num_warps=4,
+        waves_per_eu=2,
+        tile_size=32,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_half_local_pv=True,
+        use_transposed_mask_limit=True,
+        use_exp2_fast=True,
+    ),
 }
 
 

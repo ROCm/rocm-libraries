@@ -179,6 +179,7 @@ typedef struct rocke_attention_tiled_2d_spec
     bool use_global_load_lds_k; /* False */
     bool use_q_major_grid; /* False */
     bool use_qblock_reverse; /* False (gfx950: longest-first query blocks) */
+    bool use_exp2_fast; /* False (gfx950: native softmax exp2, no range guard) */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

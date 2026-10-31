@@ -472,6 +472,12 @@ void rocke_gfx950_attn2d_reset_softmax_scratch(void)
  *  rocke_gfx950_attn2d_emit_pv_bucket, which runs acc *= alpha; acc += P @ V and
  *  emits the scf_yield carry.
  * ===================================================================== */
+/* Python: ``_exp2 = b.exp2_fast if spec.use_exp2_fast else b.exp2``. */
+static rocke_value_t* attn2d_softmax_exp2(rocke_gfx950_attn2d_build_ctx_t* ctx, rocke_value_t* x)
+{
+    return ctx->spec->use_exp2_fast ? rocke_b_exp2_fast(ctx->b, x) : rocke_b_exp2(ctx->b, x);
+}
+
 void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -847,7 +853,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 {
                     rocke_value_t* score
                         = (group_idx == 0) ? st_scores0[n][reg] : st_scores1[n][reg];
-                    rocke_value_t* p_t = rocke_b_exp2(b, rocke_b_fsub(b, score, st_m_new));
+                    rocke_value_t* p_t = attn2d_softmax_exp2(ctx, rocke_b_fsub(b, score, st_m_new));
                     pt32[n * 16 + reg] = p_t;
                     st_l_local = rocke_b_fadd(b, st_l_local, p_t);
                 }
@@ -894,7 +900,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         }
 
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
-            alpha_regs[r] = rocke_b_exp2(b, rocke_b_fsub(b, ctx->m_cur[r], m_new[r]));
+            alpha_regs[r] = attn2d_softmax_exp2(ctx, rocke_b_fsub(b, ctx->m_cur[r], m_new[r]));
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             new_l_vals[r]
@@ -1050,8 +1056,8 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 rocke_value_t* sum_p = zero_f;
                 for(int n = 0; n < QK_N_TILES; ++n)
                 {
-                    rocke_value_t* p
-                        = rocke_b_exp2(b, rocke_b_fsub(b, s_local[reg][n], m_new_out[reg]));
+                    rocke_value_t* p = attn2d_softmax_exp2(
+                        ctx, rocke_b_fsub(b, s_local[reg][n], m_new_out[reg]));
                     rocke_value_t* col = fh_c32_col(ctx, n);
                     rocke_value_t* sidx[2];
                     rocke_value_t* p_d = rocke_b_cast_f32_to(b, p, ctx->dtype);
@@ -1066,7 +1072,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
 
         /* alpha + running-L update (Python shared block 3066-3172). */
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
-            alpha_regs[r] = rocke_b_exp2(b, rocke_b_fsub(b, ctx->m_cur[r], m_new_out[r]));
+            alpha_regs[r] = attn2d_softmax_exp2(ctx, rocke_b_fsub(b, ctx->m_cur[r], m_new_out[r]));
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), new_l_vals[r]);
@@ -1238,7 +1244,8 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
             rocke_value_t* sum_p = zero_f;
             for(int n = 0; n < QK_N_TILES; ++n)
             {
-                rocke_value_t* p = rocke_b_exp2(b, rocke_b_fsub(b, s_local[reg][n], m_new[reg]));
+                rocke_value_t* p
+                    = attn2d_softmax_exp2(ctx, rocke_b_fsub(b, s_local[reg][n], m_new[reg]));
                 if(ctx->REGISTER_PV)
                     p_regs_f32_buf[reg * QK_N_TILES + n] = p;
                 if(!ctx->REGISTER_PV)
@@ -1269,7 +1276,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
 
         /* alpha + running-L update (two-pass order). */
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
-            alpha_regs[r] = rocke_b_exp2(b, rocke_b_fsub(b, ctx->m_cur[r], m_new[r]));
+            alpha_regs[r] = attn2d_softmax_exp2(ctx, rocke_b_fsub(b, ctx->m_cur[r], m_new[r]));
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             new_l_vals[r]
