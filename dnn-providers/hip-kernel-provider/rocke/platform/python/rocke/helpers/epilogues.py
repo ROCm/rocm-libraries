@@ -912,8 +912,10 @@ class CShuffleEpilogue:
                 m_val = b.add(grid.block_m_off, g_row)
                 n_val = b.add(grid.block_n_off, col)
                 if atomic is not None:
-                    dw_ptr, wg_N, col_offset = atomic
+                    dw_ptr, wg_N, col_offset = atomic[:3]
+                    row_map = atomic[3] if len(atomic) > 3 else None
                     M_bound, N_bound = bounds if bounds is not None else (None, None)
+                    m_row = row_map(b, m_val) if row_map is not None else m_val
                     for pr in range(sv // 2):
                         n_even = b.add(n_val, b.const_i32(2 * pr))
                         m_ok = b.cmp_lt(m_val, M_bound) if M_bound is not None else None
@@ -921,7 +923,7 @@ class CShuffleEpilogue:
                                 if N_bound is not None else None)
                         okp = (b.land(m_ok, n_ok) if (m_ok is not None and n_ok is not None)
                                else (m_ok if m_ok is not None else n_ok))
-                        c_off = b.add(b.mul(m_val, wg_N), n_even)
+                        c_off = b.add(b.mul(m_row, wg_N), n_even)
                         if col_offset is not None:
                             c_off = b.add(c_off, col_offset)
 
@@ -1054,6 +1056,7 @@ class CShuffleEpilogue:
         bounds: Optional[Tuple[Value, Value]] = None,
         addr_fn=None,
         col_offset: Optional[Value] = None,
+        row_map=None,
     ) -> None:
         """Split-K variant: cshuffle scatter + barrier, then atomic-adds into dW.
 
@@ -1082,6 +1085,8 @@ class CShuffleEpilogue:
         ``col_offset`` — optional i32 added to every destination offset after
         the bounds check (e.g. a conv group's output-channel slab base when
         ``wg_N`` is the full row stride). ``None`` emits nothing.
+        ``row_map`` — optional ``(b, m) -> row``: the destination row of tile
+        row ``m`` (rows not contiguous in the output); ``None`` uses ``m``.
 
         The caller must zero-initialise dW before launch (atomic-adds only,
         no unconditional store).
@@ -1124,7 +1129,9 @@ class CShuffleEpilogue:
             return self._store_m_chunked(
                 b, accs=accs, addr_fn=None, d_rsrc=None, bounds=bounds,
                 lds_dtype=_lds_dtype, bf16_out=_bf16_out, fp32_out=_fp32_out,
-                warp_n_off=warp_n_off, atomic=(dw_ptr, wg_N, col_offset),
+                warp_n_off=warp_n_off,
+                atomic=(dw_ptr, wg_N, col_offset)
+                + ((row_map,) if row_map is not None else ()),
             )
 
         # ---- step 1: scatter accs to LDS (identical to store()). ----
@@ -1314,7 +1321,10 @@ class CShuffleEpilogue:
                     smem_col_e = b.add(col, b.const_i32(2 * p))
                     smem_col_o = b.add(col, b.const_i32(2 * p + 1))
                     if addr_fn is None:
-                        c_off_even = b.add(b.mul(m_val, wg_N), n_even)
+                        c_off_even = b.add(
+                            b.mul(row_map(b, m_val) if row_map is not None else m_val, wg_N),
+                            n_even,
+                        )
                     else:
                         c_off_even, a_ok = _addr(m_val, n_even)
                         ok = _and(ok, a_ok)

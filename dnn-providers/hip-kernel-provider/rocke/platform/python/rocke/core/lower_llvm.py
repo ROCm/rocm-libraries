@@ -2252,14 +2252,21 @@ class _Lowerer:
 
                 # Recurse into sub-regions; scf.for gets a conservative loop_end
                 for r in op.regions:
-                    # ``smem_iter_local`` / ``smem_per_iteration``
-                    # (IRBuilder.scf_for_iter): the loop carries no
-                    # LDS contents between iterations (each rewrites what it
-                    # reads, behind a barrier), so its body packs like
-                    # straight-line code (one iteration's liveness).
-                    if op.name == "scf.for" and not (
-                        op.attrs.get("smem_iter_local") or op.attrs.get("smem_per_iteration")
+                    if op.name == "scf.for" and (
+                        op.attrs.get("smem_iter_local")
+                        or op.attrs.get("smem_per_iteration")
+                        or op.attrs.get("lds_iter_local")
                     ):
+                        # The body rewrites every allocation it uses before
+                        # reading it, on every iteration (and closes the
+                        # iteration with a barrier): nothing it touches is
+                        # live across the back edge, so its uses keep their
+                        # straight-line intervals. Three names for it:
+                        # ``smem_iter_local`` (fwd stream-K segments),
+                        # ``smem_per_iteration`` (IRBuilder.scf_for_iter)
+                        # and ``lds_iter_local`` (dgrad stream-K).
+                        walk(r.ops, loop_end=loop_end)
+                    elif op.name == "scf.for":
                         # Conservative loop liveness: a value written on one
                         # iteration may be read on the next, so every allocation
                         # touched anywhere in the loop body must be treated as
