@@ -273,7 +273,7 @@ namespace TensileLite
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
                 ("verify-reference-reuse",   po::value<bool>()->default_value(false), "Recompute the CPU reference even when its inputs are unchanged and fail if the result differs (also: TENSILELITE_VERIFY_REFERENCE_REUSE=1)")
-                ("verify-upload-skip",       po::value<bool>()->default_value(false), "Read back every GPU input upload skipped because the GPU copy is current and fail if it differs from the host data (also: TENSILELITE_VERIFY_UPLOAD_SKIP=1)")
+                ("verify-upload-skip",       po::value<bool>()->default_value(false), "Read back every GPU input upload skipped because the GPU copy is current and fail if it differs from the host data, and every skipped batched-pointer array upload and fail if it differs from the recomputed pointers (also: TENSILELITE_VERIFY_UPLOAD_SKIP=1)")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
                 ("check-synchronizer",       po::value<bool>()->default_value(true),

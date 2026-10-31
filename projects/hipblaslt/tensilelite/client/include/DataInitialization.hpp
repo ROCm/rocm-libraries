@@ -39,6 +39,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <map>
+#include <optional>
 #include <random>
 
 #include "RunListener.hpp"
@@ -1127,8 +1128,12 @@ namespace TensileLite
             virtual void finalizeReport() override
             {
                 if(m_verifyUploadSkip)
+                {
                     std::cout << "Verified " << m_verifiedUploadSkips
                               << " skipped GPU input uploads against the host data." << std::endl;
+                    std::cout << "Verified " << m_verifiedBatchedPointerSkips
+                              << " skipped GPU batched-pointer uploads." << std::endl;
+                }
             }
 
             virtual int error() const override
@@ -1146,6 +1151,19 @@ namespace TensileLite
                 std::shared_ptr<void*> batch;
             };
 
+            // Everything a batched-pointer array (gpuInput.batch) is built from: the start
+            // pointer of batch 0 (the current buffer plus the bounds-check padding) and the
+            // tensor's batch sizes, strides and element size.
+            struct BatchedPointersKey
+            {
+                uint8_t*            base = nullptr;
+                std::vector<size_t> batchSizes;
+                std::vector<size_t> batchStrides;
+                size_t              elementBytes = 0;
+
+                bool operator==(BatchedPointersKey const&) const = default;
+            };
+
             // Pristine unit for each allocated memory
             struct PristineUnit
             {
@@ -1160,6 +1178,10 @@ namespace TensileLite
                 // written yet, or last written with another layout, e.g. a swizzled copy).
                 InputEpoch gpuValidEpoch    = 0;
                 size_t     gpuValidElements = 0;
+
+                // What gpuInput.batch holds: the pointers built from this key. Empty means
+                // unknown (not written yet).
+                std::optional<BatchedPointersKey> gpuBatchKey;
 
                 MemoryInput& getInputByKind(hipMemcpyKind kind)
                 {
@@ -1209,6 +1231,17 @@ namespace TensileLite
             }
 
             void initializeGPUBatchedInputs(ContractionProblemGemm const& problem);
+
+            // The start pointer of each batch of the tensor described by key.
+            static std::vector<uint8_t*> batchedPointers(BatchedPointersKey const& key);
+
+            // Uploads to p.gpuInput.batch the start pointer of each batch of `tensor`, whose
+            // batch 0 starts at `base`, unless p.gpuBatchKey says it already holds them (then,
+            // with m_verifyUploadSkip, reads them back and throws if they differ).
+            void uploadBatchedPointers(PristineUnit&              p,
+                                       uint8_t*                   base,
+                                       TensorDescriptor const&    tensor,
+                                       std::vector<size_t> const& batchIdx);
 
             void initializeCPUInputs(ContractionProblemGroupedGemm const& problem);
             void initializeCPUInputs(ContractionProblemGemm const& problem);
@@ -1350,9 +1383,11 @@ namespace TensileLite
             InputEpoch                         m_inputEpoch = 0;
 
             // Debug mode (--verify-upload-skip / TENSILELITE_VERIFY_UPLOAD_SKIP=1): every upload
-            // skipped by uploadValidToGPU is checked against the host data.
-            bool   m_verifyUploadSkip    = false;
-            size_t m_verifiedUploadSkips = 0;
+            // skipped by uploadValidToGPU is checked against the host data, every one skipped by
+            // uploadBatchedPointers against the pointers it would upload.
+            bool   m_verifyUploadSkip            = false;
+            size_t m_verifiedUploadSkips         = 0;
+            size_t m_verifiedBatchedPointerSkips = 0;
         };
 
         template <>

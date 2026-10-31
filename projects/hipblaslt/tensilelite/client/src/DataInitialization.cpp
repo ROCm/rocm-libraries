@@ -741,38 +741,22 @@ namespace TensileLite
             }
         }
 
-        void initGPUBatchedInput(void*                      base,
-                                 void**                     array,
-                                 TensorDescriptor const&    tensor,
-                                 const std::vector<size_t>& batchIdx)
+        std::vector<uint8_t*> DataInitialization::batchedPointers(BatchedPointersKey const& key)
         {
-            std::vector<size_t> batchSizes;
-            std::vector<size_t> batchStrides;
-            for(auto& idx : batchIdx)
-            {
-                batchSizes.push_back(tensor.sizes().at(idx));
-                batchStrides.push_back(tensor.strides().at(idx));
-            }
-            std::vector<size_t> coord(batchSizes.size(), 0);
-            size_t elementBytes = static_cast<size_t>(
-                std::ceil(std::max(1.0f, tensor.elementBytes())));
-
-            auto      count    = CoordCount(batchSizes.begin(), batchSizes.end());
-            uint8_t** cpuArray = (uint8_t**)std::malloc(count * sizeof(void*));
+            std::vector<size_t>   coord(key.batchSizes.size(), 0);
+            auto                  count = CoordCount(key.batchSizes.begin(), key.batchSizes.end());
+            std::vector<uint8_t*> pointers(count);
             for(size_t idx = 0; idx < count; idx++)
             {
                 CoordNumbered(
-                    idx, coord.begin(), coord.end(), batchSizes.begin(), batchSizes.end());
-                cpuArray[idx] = (uint8_t*)base;
-                for(size_t i = 0; i < batchSizes.size(); i++)
+                    idx, coord.begin(), coord.end(), key.batchSizes.begin(), key.batchSizes.end());
+                pointers[idx] = key.base;
+                for(size_t i = 0; i < key.batchSizes.size(); i++)
                 {
-                    cpuArray[idx] += coord[i] * batchStrides[i] * elementBytes;
+                    pointers[idx] += coord[i] * key.batchStrides[i] * key.elementBytes;
                 }
             }
-
-            HIP_CHECK_EXC(hipMemcpy(array, cpuArray, count * sizeof(void*), hipMemcpyHostToDevice));
-
-            std::free(cpuArray);
+            return pointers;
         }
 
         void* copyBadInputBuffers(const TensorDescriptor& descriptor,
@@ -1670,10 +1654,7 @@ namespace TensileLite
                 padding = multiplyElementSize(
                     padding, DataTypeInfo::Get(problem.tensors()[i].dataType()).elementSize);
                 uint8_t* offset = (uint8_t*)pUnit.gpuInput.current.get();
-                initGPUBatchedInput((void*)(offset + padding),
-                                    pUnit.gpuInput.batch.get(),
-                                    problem.tensors()[i],
-                                    batchIdx);
+                uploadBatchedPointers(pUnit, offset + padding, problem.tensors()[i], batchIdx);
 
                 if(problem.useBias() && problem.biasSrc() == i)
                 {
@@ -1698,10 +1679,10 @@ namespace TensileLite
                             problem.tensors()[ContractionProblemGemm::TENSOR::BIAS].dataType())
                             .elementSize);
                     uint8_t* offset = (uint8_t*)pUnitBias.gpuInput.current.get();
-                    initGPUBatchedInput((void*)(offset + padding),
-                                        pUnitBias.gpuInput.batch.get(),
-                                        problem.tensors()[ContractionProblemGemm::TENSOR::BIAS],
-                                        batchIdx);
+                    uploadBatchedPointers(pUnitBias,
+                                          offset + padding,
+                                          problem.tensors()[ContractionProblemGemm::TENSOR::BIAS],
+                                          batchIdx);
                 }
 
                 if((problem.sparse() == 1 && i == ContractionProblemGemm::TENSOR::A)
@@ -1730,10 +1711,11 @@ namespace TensileLite
                         pUnitM,
                         problem.tensors()[ContractionProblemGemm::TENSOR::METADATA]);
                     offset = (uint8_t*)pUnitM.gpuInput.current.get();
-                    initGPUBatchedInput((void*)(offset + padding),
-                                        pUnitM.gpuInput.batch.get(),
-                                        problem.tensors()[ContractionProblemGemm::TENSOR::METADATA],
-                                        batchIdx);
+                    uploadBatchedPointers(
+                        pUnitM,
+                        offset + padding,
+                        problem.tensors()[ContractionProblemGemm::TENSOR::METADATA],
+                        batchIdx);
 
                     auto& pUnitCp = m_vdata[ContractionProblemGemm::TENSOR::COMPRESSED]
                                         .pristine[problem.compressed().dataType()];
@@ -1742,13 +1724,61 @@ namespace TensileLite
                         pUnitCp,
                         problem.tensors()[ContractionProblemGemm::TENSOR::COMPRESSED]);
                     offset = (uint8_t*)pUnitCp.gpuInput.current.get();
-                    initGPUBatchedInput(
-                        (void*)(offset + padding),
-                        pUnitCp.gpuInput.batch.get(),
+                    uploadBatchedPointers(
+                        pUnitCp,
+                        offset + padding,
                         problem.tensors()[ContractionProblemGemm::TENSOR::COMPRESSED],
                         batchIdx);
                 }
             }
+        }
+
+        void DataInitialization::uploadBatchedPointers(PristineUnit&              p,
+                                                       uint8_t*                   base,
+                                                       TensorDescriptor const&    tensor,
+                                                       std::vector<size_t> const& batchIdx)
+        {
+            BatchedPointersKey key;
+            key.base = base;
+            for(auto& idx : batchIdx)
+            {
+                key.batchSizes.push_back(tensor.sizes().at(idx));
+                key.batchStrides.push_back(tensor.strides().at(idx));
+            }
+            key.elementBytes
+                = static_cast<size_t>(std::ceil(std::max(1.0f, tensor.elementBytes())));
+
+            if(p.gpuBatchKey == key)
+            {
+                if(m_verifyUploadSkip)
+                {
+                    auto const            expected = batchedPointers(key);
+                    std::vector<uint8_t*> onGPU(expected.size());
+                    HIP_CHECK_EXC(hipMemcpy(onGPU.data(),
+                                            p.gpuInput.batch.get(),
+                                            onGPU.size() * sizeof(uint8_t*),
+                                            hipMemcpyDeviceToHost));
+                    if(onGPU != expected)
+                        throw std::runtime_error(
+                            "Stale GPU batched pointers of " + tensor.getName()
+                            + ": DataInitialization skipped their upload because they were built "
+                              "from the same start pointer and batch sizes and strides, but they "
+                              "differ from the pointers that would be uploaded. Another writer "
+                              "of gpuInput.batch does not reset gpuBatchKey, or a kernel wrote "
+                              "into this buffer.");
+                    ++m_verifiedBatchedPointerSkips;
+                }
+                return;
+            }
+
+            auto const pointers = batchedPointers(key);
+            // Unknown until the copy has completed.
+            p.gpuBatchKey.reset();
+            HIP_CHECK_EXC(hipMemcpy(p.gpuInput.batch.get(),
+                                    pointers.data(),
+                                    pointers.size() * sizeof(uint8_t*),
+                                    hipMemcpyHostToDevice));
+            p.gpuBatchKey = std::move(key);
         }
 
         void DataInitialization::initializeCPUInputs(ContractionProblemGroupedGemm const& problem)
