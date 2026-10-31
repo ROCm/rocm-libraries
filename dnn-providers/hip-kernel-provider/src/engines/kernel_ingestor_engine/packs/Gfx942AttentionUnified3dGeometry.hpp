@@ -91,14 +91,24 @@ inline int64_t gfx942NextPowerOf2(int64_t x)
     return p;
 }
 
-/// The AITER split formula of `rocke/helpers/attention.py::select_3d_config` at target
-/// @p targetCtas, with `num_2d = UnifiedAttentionProblem.total_num_q_blocks_upper_bound
-/// * num_kv_heads` (`select_3d` and `_pre_bump_segments` evaluate the same expression):
+/// The AITER split formula of `rocke/helpers/attention.py::select_3d_config` for a 2D
+/// grid of @p num2d programs at target @p targetCtas:
+///
+///     segments = min(next_power_of_2(ceil(target / num_2d)), 128)
+///     segments = max(segments, 16 if block_size <= 16 else 8)
+inline int64_t gfx942SplitFormula(int64_t num2d, int64_t blockSize, int64_t targetCtas)
+{
+    int64_t segments = gfx942NextPowerOf2((targetCtas + num2d - 1) / num2d);
+    segments = segments < 128 ? segments : 128;
+    const int64_t minSegments = blockSize <= 16 ? 16 : 8;
+    return segments > minSegments ? segments : minSegments;
+}
+
+/// `select_3d`'s count: the split formula with the prefill upper bound
+/// `num_2d = UnifiedAttentionProblem.total_num_q_blocks_upper_bound * num_kv_heads`:
 ///
 ///     block_m = 16 if qpk <= 16 else next_power_of_2(qpk)
 ///     num_2d = (total_q // (block_m // qpk) + num_seqs) * num_kv_heads
-///     segments = min(next_power_of_2(ceil(target / num_2d)), 128)
-///     segments = max(segments, 16 if block_size <= 16 else 8)
 inline int64_t gfx942AiterSegments(
     int64_t batch, int64_t hq, int64_t hkv, int64_t blockSize, int64_t targetCtas)
 {
@@ -106,11 +116,7 @@ inline int64_t gfx942AiterSegments(
     const int64_t blockM = qpk <= 16 ? 16 : gfx942NextPowerOf2(qpk);
     const int64_t blockQ = blockM / qpk;
     // total_q == num_seqs == batch for single-token decode.
-    const int64_t num2d = (batch / blockQ + batch) * hkv;
-    int64_t segments = gfx942NextPowerOf2((targetCtas + num2d - 1) / num2d);
-    segments = segments < 128 ? segments : 128;
-    const int64_t minSegments = blockSize <= 16 ? 16 : 8;
-    return segments > minSegments ? segments : minSegments;
+    return gfx942SplitFormula((batch / blockQ + batch) * hkv, blockSize, targetCtas);
 }
 
 } // namespace detail
@@ -130,9 +136,18 @@ inline int64_t gfx942AiterSegments(
  *         cap = 64 if max_seqlen_k < 8192 else 128
  *         return max(2, min(per_cu * num_cus // ctas, cap))
  *
- *  2. Otherwise `segments` = `select_3d()` at target `num_cus * 4`
- *     (`_effective_target_ctas`), `pre_bump` = the same formula at
- *     `_PRE_BUMP_CUS * 4 = 480` (`_pre_bump_segments`), and the measured decode clamps:
+ *  2. Head-size-256 decode with block_size 16, about 2 CTAs per CU:
+ *
+ *         return max(2, min(2 * num_cus // ctas, 128, max_seqlen_k // 32))
+ *
+ *     `max_seqlen_k // 32` caps over-splitting; it does not give every segment 32 keys
+ *     (the kernel splits whole tiles, so trailing segments can be short or empty), and
+ *     the floor of 2 wins below 64 keys.
+ *
+ *  3. Otherwise `segments` = `select_3d()` at target `num_cus * 4`
+ *     (`_effective_target_ctas`), `pre_bump` = the split formula on the decode grid
+ *     (`num_2d = num_seqs * num_kv_heads`) at `_PRE_BUMP_CUS * 4 = 480`
+ *     (`_pre_bump_segments(problem, decode_grid=True)`), and the measured decode clamps:
  *
  *         if max_seqlen_k <= 2048:
  *             D64 -> min(segments, 32); D128 -> min(segments, 16);
@@ -176,6 +191,16 @@ inline int64_t gfx942SplitRuleSegments(int64_t batch,
         return capped > 2 ? capped : 2;
     }
 
+    // Head-size-256 decode (block_size 16): about 2 CTAs per CU.
+    if(headSize == 256 && blockSize == 16)
+    {
+        const int64_t split = 2 * numCus / ctas;
+        int64_t capped = split < 128 ? split : 128;
+        const int64_t kvCap = seqlenK / 32;
+        capped = capped < kvCap ? capped : kvCap;
+        return capped > 2 ? capped : 2;
+    }
+
     const int64_t segments = detail::gfx942AiterSegments(batch, hq, hkv, blockSize, numCus * 4);
     if(seqlenK <= 2048)
     {
@@ -195,9 +220,10 @@ inline int64_t gfx942SplitRuleSegments(int64_t batch,
     }
     if(headSize == 128 && seqlenK < 32768)
     {
-        // _pre_bump_segments: target _PRE_BUMP_CUS * 4 = 480.
+        // _pre_bump_segments(decode_grid=True): num_2d = num_seqs * num_kv_heads at
+        // target _PRE_BUMP_CUS * 4 = 480.
         const int64_t preBump
-            = detail::gfx942AiterSegments(batch, hq, hkv, blockSize, GFX942_PRE_BUMP_CUS * 4);
+            = detail::gfx942SplitFormula(batch * hkv, blockSize, GFX942_PRE_BUMP_CUS * 4);
         return segments < preBump ? segments : preBump;
     }
     return segments;

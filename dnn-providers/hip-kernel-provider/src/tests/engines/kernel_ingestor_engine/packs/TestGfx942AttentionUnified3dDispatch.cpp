@@ -147,11 +147,12 @@ std::optional<KernelDefinition> shippedKernel(const MatchContext& context, const
         throw std::runtime_error("no descriptor set for engine '" + std::string(PACK.engineName)
                                  + "' under '" + root.string() + "'");
     }
-    for(auto& kernel : shipped->stateManager->unsortedDefinitions(context))
+    // The catalog belongs to the state manager, which `validated` frees on return: copy.
+    for(const KernelDefinition* kernel : shipped->stateManager->unsortedDefinitions(context))
     {
-        if(kernel.name == name)
+        if(kernel->name == name)
         {
-            return std::move(kernel);
+            return *kernel;
         }
     }
     return std::nullopt;

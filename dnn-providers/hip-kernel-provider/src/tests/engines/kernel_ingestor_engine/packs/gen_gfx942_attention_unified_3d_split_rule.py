@@ -29,7 +29,7 @@ from kernels.common.attention_unified import _num_segments
 
 BATCHES = (1, 4, 16, 64, 256)
 KV_HEADS = (1, 8)
-GQA = (1, 4, 16)
+GQA = (1, 2, 4, 8, 16)
 SEQLEN_K = (1, 64, 256, 512, 2048, 8192, 32768, 131072)
 HEAD_SIZES = (64, 128, 256)
 BLOCK_SIZES = (16, 32, 64)
@@ -59,6 +59,22 @@ FULL_EDGE_ROWS = (
     # batch, hkv, gqa, skv, d, block
     # The D128 pre-bump clamp binds: pins its fixed _PRE_BUMP_CUS = 120 target.
     (12, 1, 4, 4096, 128, 32),
+    # Few CTAs (ctas * 16 < 304) on either side of the decode rule's Skv < 8192 test
+    # and its cap 64/128 step: pins the 8192 threshold.
+    (1, 1, 4, 4096, 128, 16),
+    (1, 8, 4, 4096, 64, 16),
+    (1, 1, 4, 8191, 128, 16),
+    (1, 8, 1, 8191, 64, 16),
+    # Just below the D128 pre-bump clamp's Skv < 32768 bound (32768 is in the grid).
+    (1, 1, 4, 32767, 128, 16),
+    (1, 8, 4, 32767, 128, 32),
+    # D256 block 16 rule: the floor of 2 (Skv // 32 = 1) and the Skv // 32 cap (3).
+    (4, 8, 4, 32, 256, 16),
+    (1, 1, 1, 96, 256, 16),
+    # qpk 8 on the select_3d path: block_m 16 gives block_q 2, so num_2d =
+    # (3 // 2 + 3) * 4 = 16 -> 128; a block_q of 1 would give (3 + 3) * 4 = 24 -> 64.
+    # The grid's batches and KV heads cannot tell these apart.
+    (3, 4, 8, 131072, 64, 32),
 )
 
 

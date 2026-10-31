@@ -450,7 +450,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
        AND _hkp_gfx942_attention_unified_3d
        AND TARGET hipdnn_integration_tests)
-        hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942)
+        # The TOML goes to the reservation as well as TEST_CONFIG, as for gfx950 above.
+        set(_gfx942_attention_unified_3d_config
+            "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx942AttentionUnified3d.toml")
+        hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942
+            FILES "${_gfx942_attention_unified_3d_config}")
         set(_gfx942_shard_args
             INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx942)
@@ -463,7 +467,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             ENGINE_NAME    "hipkernel:Gfx942AttentionUnified3d"
             INSTALL_SUBDIR hip_kernel_provider
             ${_gfx942_shard_args}
-            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx942AttentionUnified3d.toml
+            TEST_CONFIG    ${_gfx942_attention_unified_3d_config}
             GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
