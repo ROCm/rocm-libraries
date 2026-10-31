@@ -39,7 +39,7 @@ from typing import Dict, List, Optional, TypedDict
 
 from . import SolutionLibrary, LibraryIO
 from .KernelWriter import DebugConfig
-from .KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
+from .KernelHelperNaming import KernelHelperEnum, HelperKernelObjectsMemo
 from .Toolchain.Component import Assembler
 from .SolutionStructs.Problem import ProblemType, ProblemSizes
 from .SolutionStructs.Solution import Solution
@@ -516,16 +516,17 @@ def writeBenchmarkFiles(
 
     # get unique kernels and kernel helpers
     with timing_context("python_kernel_bench_setup"):
+        # Helper objects depend on a few solution fields only: build them once per distinct
+        # input; the name-based dedupe below keeps the same helpers in the same order.
+        helperKernelObjects = HelperKernelObjectsMemo(KernelHelperEnum.All,
+                                                      str(asmToolchain.assembler.path),
+                                                      isaInfoMap)
         for solution in tqdm(solutions, "Finding unique solutions"):
             solutionKernels = solution.getKernels()
             for kernel in solutionKernels:
                 kernels.append(kernel)
 
-            solutionHelperKernels = initHelperKernelObjects(solution,
-                                                            KernelHelperEnum.All,
-                                                            str(asmToolchain.assembler.path),
-                                                            isaInfoMap)
-            for ko in solutionHelperKernels:
+            for ko in helperKernelObjects(solution):
                 kname = ko.getKernelName()
                 if kname not in kernelHelperNames:
                     kernelHelperObjs.append(ko)
