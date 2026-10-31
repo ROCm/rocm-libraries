@@ -80,6 +80,77 @@ def test_configure_sets_skip_ratio_from_latency() -> None:
     assert out[1]["skip_slow_solution_ratio"] == 0.6
 
 
+def _adaptive_like_row() -> dict:
+    # A representative bf16 TN GEMM row for adaptive-timing assertions.
+    return {
+        "transA": "T",
+        "transB": "N",
+        "batch_count": 1,
+        "m": 9504,
+        "n": 7248,
+        "k": 368,
+        "a_type": "bf16_r",
+        "b_type": "bf16_r",
+        "c_type": "bf16_r",
+        "d_type": "bf16_r",
+        "compute_type": "f32_r",
+        "scaleA": 0,
+        "scaleB": 0,
+    }
+
+
+def test_configure_adaptive_matches_defaults() -> None:
+    """Default configure() emits the expected adaptive-timing config.
+
+    duration=5 (ms) is the measurement floor; warmup_time, max_measure_time and
+    sample_time are derived from it (2x, 4x, 1/10).
+    """
+    out = search.configure(pd.DataFrame([_adaptive_like_row()]))
+    cfg = out[0]
+
+    assert cfg["adaptive"] is True
+    assert cfg["measure_time"] == 5.0
+    assert cfg["warmup_time"] == 10.0
+    assert cfg["max_measure_time"] == 20.0
+    assert cfg["sample_time"] == 0.5
+    assert cfg["noise_threshold"] == 0.05
+    assert cfg["min_iters"] == 10
+    assert cfg["max_iters"] == 0
+    assert cfg["stability_threshold"] == 0.05
+    assert cfg["stability_window"] == 32
+    assert cfg["stability_interval"] == 16
+
+
+def test_configure_adaptive_timing_scales_with_duration() -> None:
+    """All derived timing knobs track the measurement floor (duration, ms)."""
+    out = search.configure(pd.DataFrame([_adaptive_like_row()]), duration=20.0)
+    cfg = out[0]
+
+    assert cfg["measure_time"] == 20.0
+    assert cfg["warmup_time"] == 40.0
+    assert cfg["max_measure_time"] == 80.0
+    assert cfg["sample_time"] == 2.0
+
+
+def test_configure_adaptive_disabled_omits_timing_fields() -> None:
+    """adaptive=False falls back to fixed sizing with no adaptive knobs."""
+    out = search.configure(pd.DataFrame([_adaptive_like_row()]), adaptive=False)
+    cfg = out[0]
+
+    for field in (
+        "adaptive",
+        "measure_time",
+        "warmup_time",
+        "max_measure_time",
+        "sample_time",
+        "noise_threshold",
+        "stability_threshold",
+        "stability_window",
+        "stability_interval",
+    ):
+        assert field not in cfg
+
+
 def test_run_raises_for_missing_hipblaslt_dir(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         search.run(tmp_path / "nohip", [{"M": 1}], tmp_path / "out", devices=[0])

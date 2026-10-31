@@ -71,8 +71,22 @@ def main() -> None:
     parser.add_argument(
         "--duration",
         type=float,
-        default=0.04,
-        help="Target dense-search benchmark duration per GEMM (seconds)",
+        default=5.0,
+        help=(
+            "Adaptive measurement floor per GEMM in milliseconds (measure_time). "
+            "Derives warmup_time (2x), max_measure_time (4x) and sample_time (1/10). "
+            "Defaults to 5.0."
+        ),
+    )
+    parser.add_argument(
+        "--no-adaptive-search",
+        dest="adaptive_search",
+        action="store_false",
+        default=True,
+        help=(
+            "Disable hipblaslt-bench --adaptive timing (falls back to fixed "
+            "iters/cold_iters sizing). Adaptive is on by default."
+        ),
     )
     parser.add_argument(
         "--custom-lib-src",
@@ -139,6 +153,7 @@ def main() -> None:
         workdir=args.workdir,
         verbose=args.verbose,
         duration=args.duration,
+        adaptive=args.adaptive_search,
         bench_freq=args.bench_freq,
         custom_lib_src=args.custom_lib_src,
     )
