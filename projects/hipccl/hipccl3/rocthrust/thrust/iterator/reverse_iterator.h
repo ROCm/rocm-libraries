@@ -80,11 +80,7 @@ struct make_reverse_iterator_base
 //! #include <thrust/iterator/reverse_iterator.h>
 //! #include <thrust/device_vector.h>
 //! ...
-//! thrust::device_vector<float> v(4);
-//! v[0] = 0.0f;
-//! v[1] = 1.0f;
-//! v[2] = 2.0f;
-//! v[3] = 3.0f;
+//! thrust::device_vector<float> v{0.0f, 1.0f, 2.0f, 3.0f};
 //!
 //! using Iterator = thrust::device_vector<float>::iterator;
 //!

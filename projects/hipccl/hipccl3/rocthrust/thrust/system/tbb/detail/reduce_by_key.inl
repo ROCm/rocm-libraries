@@ -37,11 +37,12 @@
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__algorithm/max.h)
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
+#  include _THRUST_STD_INCLUDE(cassert)
 #else
 #  include <thrust/detail/algorithm_wrapper.h>
 #endif
 
-#include <cassert>
 #include <thread>
 
 #include <tbb/blocked_range.h>
@@ -345,7 +346,7 @@ thrust::pair<Iterator3, Iterator4> reduce_by_key(
     tail_flags.end(),
     interval_size,
     interval_output_offsets.begin() + 1,
-    thrust::plus<size_t>());
+    _THRUST_STD::plus<size_t>());
   interval_output_offsets[0] = 0;
 
   // scan the counts to get each body's output offset

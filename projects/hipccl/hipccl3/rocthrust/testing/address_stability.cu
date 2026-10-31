@@ -15,11 +15,11 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
-
 #include <unittest/unittest.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(functional)
+#else
 #  include <functional>
 #endif
 
@@ -33,8 +33,8 @@ struct addable
 
 void TestAddressStabilityLibcuxx()
 {
-  using ::internal::proclaim_copyable_arguments;
-  using ::internal::proclaims_copyable_arguments;
+  using _THRUST_LIBCXX::proclaim_copyable_arguments;
+  using _THRUST_LIBCXX::proclaims_copyable_arguments;
 
   // libcu++ function objects with known types
   static_assert(proclaims_copyable_arguments<_THRUST_STD::plus<int>>::value, "");
@@ -53,21 +53,21 @@ DECLARE_UNITTEST(TestAddressStabilityLibcuxx);
 
 void TestAddressStabilityThrust()
 {
-  using ::internal::proclaim_copyable_arguments;
-  using ::internal::proclaims_copyable_arguments;
+  using _THRUST_LIBCXX::proclaim_copyable_arguments;
+  using _THRUST_LIBCXX::proclaims_copyable_arguments;
 
   // thrust function objects with known types
-  static_assert(proclaims_copyable_arguments<thrust::plus<int>>::value, "");
-  static_assert(!proclaims_copyable_arguments<thrust::plus<>>::value, "");
+  static_assert(proclaims_copyable_arguments<_THRUST_STD::plus<int>>::value, "");
+  static_assert(!proclaims_copyable_arguments<_THRUST_STD::plus<>>::value, "");
 
   // thrust function objects with unknown types
-  static_assert(!proclaims_copyable_arguments<thrust::plus<addable>>::value, "");
-  static_assert(!proclaims_copyable_arguments<thrust::plus<>>::value, "");
+  static_assert(!proclaims_copyable_arguments<_THRUST_STD::plus<addable>>::value, "");
+  static_assert(!proclaims_copyable_arguments<_THRUST_STD::plus<>>::value, "");
 
   // thrust function objects with unknown types and opt-in
-  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(thrust::plus<addable>{}))>::value,
-                "");
-  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(thrust::plus<>{}))>::value, "");
+  static_assert(
+    proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(_THRUST_STD::plus<addable>{}))>::value, "");
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(_THRUST_STD::plus<>{}))>::value, "");
 }
 DECLARE_UNITTEST(TestAddressStabilityThrust);
 
@@ -82,8 +82,8 @@ struct my_plus
 
 void TestAddressStabilityUserDefinedFunctionObject()
 {
-  using ::internal::proclaim_copyable_arguments;
-  using ::internal::proclaims_copyable_arguments;
+  using _THRUST_LIBCXX::proclaim_copyable_arguments;
+  using _THRUST_LIBCXX::proclaims_copyable_arguments;
 
   // by-value overload
   static_assert(!proclaims_copyable_arguments<my_plus<int>>::value, "");
@@ -107,8 +107,8 @@ DECLARE_UNITTEST(TestAddressStabilityUserDefinedFunctionObject);
 
 void TestAddressStabilityLambda()
 {
-  using ::internal::proclaim_copyable_arguments;
-  using ::internal::proclaims_copyable_arguments;
+  using _THRUST_LIBCXX::proclaim_copyable_arguments;
+  using _THRUST_LIBCXX::proclaims_copyable_arguments;
 
   {
     auto l = [](const int& i) {
@@ -125,8 +125,7 @@ void TestAddressStabilityLambda()
       return i + 2;
     };
     static_assert(!proclaims_copyable_arguments<decltype(l)>::value, "");
-    auto pr_device_l = proclaim_copyable_arguments(l);
-    (void) &pr_device_l;
+    [[maybe_unused]] auto pr_device_l = proclaim_copyable_arguments(l);
     static_assert(proclaims_copyable_arguments<decltype(pr_device_l)>::value, "");
   }
 

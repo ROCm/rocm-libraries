@@ -39,13 +39,15 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/iterator/detail/device_system_tag.h>
 #include <thrust/iterator/detail/iterator_category_to_system.h>
 #include <thrust/iterator/detail/iterator_category_to_traversal.h>
+#include <thrust/iterator/detail/minimum_system.h>
 #include <thrust/iterator/iterator_categories.h>
 
-#include _THRUST_STD_INCLUDE(iterator)
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(iterator)
 #  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
 #else
 #  include <type_traits>
@@ -206,6 +208,83 @@ struct iterator_system<const void*> : iterator_system<const int*>
 template <typename Iterator>
 using iterator_system_t = typename iterator_system<Iterator>::type;
 #endif
+
+// specialize the respective cuda iterators
+template <>
+struct iterator_system<_THRUST_LIBCXX::discard_iterator>
+{
+  using type = any_system_tag;
+};
+template <>
+struct iterator_traversal<_THRUST_LIBCXX::discard_iterator>
+{
+  using type = random_access_traversal_tag;
+};
+
+template <class T, class Index>
+struct iterator_system<_THRUST_LIBCXX::constant_iterator<T, Index>>
+{
+  using type = any_system_tag;
+};
+template <class T, class Index>
+struct iterator_traversal<_THRUST_LIBCXX::constant_iterator<T, Index>>
+{
+  using type = random_access_traversal_tag;
+};
+
+template <class Start>
+struct iterator_system<_THRUST_LIBCXX::counting_iterator<Start>>
+{
+  using type = any_system_tag;
+};
+template <class Start>
+struct iterator_traversal<_THRUST_LIBCXX::counting_iterator<Start>>
+{
+  using type = random_access_traversal_tag;
+};
+
+template <class Iter, class Offset>
+struct iterator_system<_THRUST_LIBCXX::permutation_iterator<Iter, Offset>>
+{
+  using type = detail::minimum_system_t<iterator_system_t<Iter>, iterator_system_t<Offset>>;
+};
+template <class Iter, class Offset>
+struct iterator_traversal<_THRUST_LIBCXX::permutation_iterator<Iter, Offset>>
+{
+  using type = random_access_traversal_tag;
+};
+
+template <class Iter, class Stride>
+struct iterator_system<_THRUST_LIBCXX::strided_iterator<Iter, Stride>> : iterator_system<Iter>
+{};
+template <class Iter, class Stride>
+struct iterator_traversal<_THRUST_LIBCXX::strided_iterator<Iter, Stride>> : iterator_traversal<Iter>
+{};
+
+template <class Fn, class Index>
+struct iterator_system<_THRUST_LIBCXX::tabulate_output_iterator<Fn, Index>>
+{
+  using type = any_system_tag;
+};
+template <class Fn, class Index>
+struct iterator_traversal<_THRUST_LIBCXX::tabulate_output_iterator<Fn, Index>>
+{
+  using type = random_access_traversal_tag;
+};
+
+template <class Fn, class Iter>
+struct iterator_system<_THRUST_LIBCXX::transform_output_iterator<Fn, Iter>> : iterator_system<Iter>
+{};
+template <class Fn, class Iter>
+struct iterator_traversal<_THRUST_LIBCXX::transform_output_iterator<Fn, Iter>> : iterator_traversal<Iter>
+{};
+
+template <class Fn, class Iter>
+struct iterator_system<_THRUST_LIBCXX::transform_iterator<Fn, Iter>> : iterator_system<Iter>
+{};
+template <class Fn, class Iter>
+struct iterator_traversal<_THRUST_LIBCXX::transform_iterator<Fn, Iter>> : iterator_traversal<Iter>
+{};
 
 THRUST_NAMESPACE_END
 
