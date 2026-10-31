@@ -46,8 +46,14 @@ TOOLS = ROCKE / "tools"
 # instead of restating them here and letting the two drift.
 if str(ROCKE / "python") not in sys.path:
     sys.path.insert(0, str(ROCKE / "python"))
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+# Source runs keep helpers under tools/. Installed tests stage the same helper
+# beside the arch-domain generator instead. Bootstrap the first complete home so
+# importing this runner by path never depends on another test's sys.path changes.
+for helper_root in (TOOLS, TESTS / "arch_domain"):
+    if (helper_root / "_hostcaps.py").is_file():
+        if str(helper_root) not in sys.path:
+            sys.path.insert(0, str(helper_root))
+        break
 
 from _hostcaps import available_cpus
 
@@ -485,7 +491,8 @@ def main() -> int:
         selected_pytests = pytest_targets(args.pytest_target)
     except ValueError as exc:
         ap.error(str(exc))
-    focused = bool(args.pytest_target)
+    pytest_focused = bool(args.pytest_target)
+    run_focused = bool(args.only or args.only_ir or args.pytest_target)
 
     status = 0
     arch_domain_complete = False
@@ -544,7 +551,7 @@ def main() -> int:
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
             print(f"native parity test setup failed: {exc}", file=sys.stderr)
             return 1
-        label = "pytest (FOCUSED)" if focused else "pytest"
+        label = "pytest (FOCUSED)" if pytest_focused else "pytest"
         print(f"\n== {label} ==")
         status |= subprocess.run(
             [sys.executable, "-m", "pytest", *selected_pytests],
@@ -570,7 +577,7 @@ def main() -> int:
             cwd=str(build_root),
         ).returncode
 
-    result_scope = "FOCUSED " if focused else ""
+    result_scope = "FOCUSED " if run_focused else ""
     print("\nRESULT:", result_scope + ("GREEN" if status == 0 else "RED"))
     return status
 
