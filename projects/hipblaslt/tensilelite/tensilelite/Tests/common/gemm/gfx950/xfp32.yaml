@@ -17,8 +17,6 @@ GlobalParameters:
   DataInitTypeB: 13
   BoundsCheck: 2
   KeepBuildTmp: True
-  EnqueuesPerSync: 10
-  NumWarmups: 5
 
 BenchmarkProblems:
   ########################################
