@@ -253,6 +253,21 @@ if(BUILD_TESTING)
                  rocke_buffer_rsrc_hip)
   endif()
 
+  # The HIP lowering of the dtype-generic scalar buffer load (tile.buffer_load).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_buffer_load_hip.cpp")
+    add_executable(rocke_buffer_load_hip core/test_buffer_load_hip.cpp)
+    target_link_libraries(rocke_buffer_load_hip PRIVATE rocke_core)
+    add_test(NAME rocke_buffer_load_hip COMMAND rocke_buffer_load_hip)
+    set_tests_properties(rocke_buffer_load_hip PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_buffer_load_hip)
+    set_target_properties(rocke_buffer_load_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_buffer_load_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_buffer_load_hip)
+  endif()
+
   # A buffer descriptor refused as a loop-carried value by the C++ builder and
   # verifier.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_loop_carried_descriptor.cpp")

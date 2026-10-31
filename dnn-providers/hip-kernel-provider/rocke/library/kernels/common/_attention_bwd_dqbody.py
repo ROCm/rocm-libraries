@@ -3,7 +3,9 @@
 
 """Body of the split dQ kernel of the attention backward (Q-parallel, no atomics).
 
-Family glue for the backward kernels (Python-only, no C++ twin; packs pin
+Family glue for the backward kernels (C++ twin:
+``helper_rocke.instances.common._attention_bwd_dqbody.h``, byte-identical by
+``tests/parity/attention_bwd_dq_emit``; the packs still pin
 ``ROCKE_BACKEND=python``). The second orientation of the backward tile step:
 one CTA owns ``kM0`` query rows (of one query head, or of ``G`` query heads
 that share one K head and one V head, packed onto the rows) and walks the
