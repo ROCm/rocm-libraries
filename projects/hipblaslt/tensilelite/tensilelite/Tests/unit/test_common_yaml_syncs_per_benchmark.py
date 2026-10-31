@@ -112,6 +112,18 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
         "LibraryLogic requires benchmark data to build the library table",
     ),
     SyncsPerBenchmarkOptOut(
+        "common/streamk/gfx950/sk_hybrid_dynamic_split.yaml",
+        "validates output and synchronizer after back-to-back launches",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/streamk/gfx950/sk_hybrid_dynamic_split_alpha0.yaml",
+        "validates output and synchronizer after back-to-back launches",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/streamk/sk_dynamic_split.yaml",
+        "validates output and synchronizer after back-to-back launches",
+    ),
+    SyncsPerBenchmarkOptOut(
         "common/streamk/sk_hybrid.yaml",
         "validates output and synchronizer after back-to-back launches",
     ),

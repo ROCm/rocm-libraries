@@ -981,6 +981,7 @@ class InternalArgsSupport:
                  'wgm',
                  'staggerU',
                  'perTileExtraIters',
+                 'arrivalFixup',
                  'useUniversalArgs',
                  'useSFC'
                  ]
@@ -997,6 +998,7 @@ class InternalArgsSupport:
                    wgm = isp['SupportCustomWGM'],
                    staggerU = isp['SupportCustomStaggerU'],
                    perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
+                   arrivalFixup = isp.get('SupportStreamKArrivalFixup', False),
                    occupancyProbe = isp.get('SupportOccupancyProbe', False),
                    useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
