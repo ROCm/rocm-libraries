@@ -1,0 +1,144 @@
+# Rows of f16acc_streamk_gfx1250.yaml that run on hardware like the other rows, where their output was confirmed bit
+# for bit against the client reference. The emulator does not reproduce the hardware's f16-accumulation rounding, so
+# the emulator lane expects them to fail: they are marked ffm_fail.
+# Inputs as f16acc_brotate, so the emulator results do not change from run to run.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict, ffm_fail]
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 23
+  DataInitTypeB: 26
+  DataInitTypeC: 13
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 17
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  Architecture: gfx1250
+  # With the uniform summation order (the default) the host launches these kernels with StaggerU 0, which would
+  # leave StaggerU under StreamK untested; f16acc_streamk_beta0 keeps the default.
+  UniformSummationOrder: 0
+
+BenchmarkProblems:
+  # The 16x16x64 forks of f16acc_streamk_gfx1250.yaml at 129x127x2x1024.
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: h
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup: StaticGrid, linear and tree fixup, DefaultWGM
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 64, 1, 1, 2, 2, 1, 1]]
+        - AssertFree0ElementMultiple: [1]
+        - AssertSummationElementMultiple: [128]
+        - DepthU: [128]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - SourceSwap: [False, True]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - StreamKFixupTreeReduction: [0, 1]
+        - WorkGroupMapping: [1, 3, -2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [0, 3]
+        - TransposeLDS: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [129, 127, 2, 1024]
+
+    - # BenchmarkProblemSizeGroup: DynamicWorkQueue and Hybrid
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 64, 1, 1, 2, 2, 1, 1]]
+        - AssertFree0ElementMultiple: [1]
+        - AssertSummationElementMultiple: [128]
+        - DepthU: [128]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - SourceSwap: [True]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [DynamicWorkQueue, Hybrid]
+        - StreamKFixupTreeReduction: [0, 1]
+        - WorkGroupMapping: [1, -3]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [0, 3]
+        - TransposeLDS: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [129, 127, 2, 1024]
+  # The 16x16x64 forks of f16acc_streamk_gfx1250.yaml at 129x127x2x1024.
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 64, 1, 1, 2, 2, 1, 1]]
+        - AssertFree0ElementMultiple: [1]
+        - AssertSummationElementMultiple: [128]
+        - DepthU: [128]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - SourceSwap: [True]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid, DynamicWorkQueue]
+        - StreamKFixupTreeReduction: [0, 1]
+        - WorkGroupMapping: [-2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [0, 3]
+        - TransposeLDS: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [129, 127, 2, 1024]

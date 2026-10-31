@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/DataTypes.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <origami/hardware.hpp>
 
@@ -200,6 +201,41 @@ TEST(PersistentArgumentLayout, DataParallelV1PayloadChangesOnlySchedulingSlots)
         EXPECT_EQ(bytes(oldArgs, 0, oldStart), bytes(newArgs, 0, newStart));
         EXPECT_EQ(bytes(oldArgs, oldStart + 24, oldArgs.size()),
                   bytes(newArgs, newStart + 8, newArgs.size()));
+    }
+}
+
+// f16-accumulation kernels read a Half alpha and beta as 32-bit floats, a -0 as +0.
+TEST(PersistentArgumentLayout, F16AccumulationAlphaAndBetaArriveAsF32)
+{
+    for(int outer : {0, 3})
+    {
+        SCOPED_TRACE(outer);
+        ContractionSolution solution;
+        configurePersistentSolution(solution, outer, 0);
+        solution.problemType.computeType             = rocisa::DataType::Half;
+        solution.problemType.highPrecisionAccumulate = false;
+        solution.problemType.computeInputTypeA       = rocisa::DataType::Float8;
+        solution.problemType.computeInputTypeB       = rocisa::DataType::Float8;
+        auto problem = persistentProblem();
+        problem.setAlphaType(rocisa::DataType::Half);
+        problem.setBetaType(rocisa::DataType::Half);
+        auto device = persistentDevice();
+        auto inputs = persistentInputs();
+        inputs.alpha = Half(2.5f);
+        inputs.beta  = Half(-1.25f);
+        auto call    = solution.generateSingleCall<true>(
+            problem, inputs, device, solution.resolvePersistentSettings(problem, device), GSUSettings{});
+        auto const& args = call.args;
+        EXPECT_FLOAT_EQ(value<float>(args, "alpha"), 2.5f);
+        EXPECT_FLOAT_EQ(value<float>(args, "beta"), -1.25f);
+        EXPECT_EQ(offset(args, "beta"), offset(args, "alpha") + 4);
+
+        auto zeroInputs = persistentInputs(-0.0f);
+        zeroInputs.beta = -0.0f;
+        auto zeroCall = solution.generateSingleCall<true>(
+            problem, zeroInputs, device, solution.resolvePersistentSettings(problem, device), GSUSettings{});
+        auto start = offset(zeroCall.args, "alpha");
+        EXPECT_EQ(bytes(zeroCall.args, start, start + 8), std::vector<uint8_t>(8, 0));
     }
 }
 
@@ -848,6 +884,19 @@ TEST(PersistentArgumentLayout, UnevenStaticSplitsStayInsideTheirOutputBlocks)
             problem, clusterInputs(), device, launch, GSUSettings{});
         const bool active = value<uint32_t>(call.args, "magicShiftItersPerTile") & 0x20000000u;
         ASSERT_EQ(active, capability && test.active);
+        // The f16-accumulation reference, which rejects StreamK clusters, re-derives each launch's K order
+        // from launchSummationOrder.
+        if(!clustered)
+        {
+            // calculateTiles reads the macro tile from the kernel record a generated solution carries.
+            solution.customKernel.macrotile.x = solution.sizeMapping.macroTile.x;
+            solution.customKernel.macrotile.y = solution.sizeMapping.macroTile.y;
+            const auto order = solution.launchSummationOrder(problem, device);
+            if(order.persistent == ContractionSolution::LaunchSummationOrder::Persistent::StreamK)
+                EXPECT_EQ(order.perTileExtraIters, active);
+            else
+                EXPECT_TRUE(test.uniform || !active);
+        }
         if(!active)
             continue;
         const size_t blocks = clustered ? launch.clusterSchedule.blocks : launch.totalTiles;
@@ -1078,4 +1127,79 @@ TEST(PersistentArgumentLayout, OccupancyProbeDisabledForMultiDimGridBelowMinGrid
     EXPECT_FALSE(call.occupancyProbe);
     EXPECT_EQ(value<uint32_t>(call.args, "ProbeGrid"),
               call.numWorkGroups.x * call.numWorkGroups.y * call.numWorkGroups.z);
+}
+
+// The host names the split-K reduction kernel by the workspace type: f16 only for f16 accumulation,
+// that is Half compute without HighPrecisionAccumulate on F8, BF8 or F4 compute inputs.
+TEST(F16AccumulationHost, ReductionKernelReadsAnF16WorkspaceOnlyForF16Accumulation)
+{
+    using DT = rocisa::DataType;
+    struct Cell
+    {
+        DT a, b, computeA, computeB;
+    };
+    auto expectWorkspace = [](Cell const& cell, DT computeType, bool hpa, DT d, DT workspace) {
+        ContractionSolution solution;
+        solution.problemType.computeType             = computeType;
+        solution.problemType.highPrecisionAccumulate = hpa;
+        solution.problemType.computeInputTypeA       = cell.computeA;
+        solution.problemType.computeInputTypeB       = cell.computeB;
+
+        auto problem = ContractionProblemGemm::GEMM_Strides(
+            false, false, cell.a, cell.b, d, d, 1, 1, 64, 1, 1, 64, 64, 64, 1, 1, 1, 1, 0.0);
+        std::string const head = "C" + problem.cNames() + "_" + DataTypeInfo::Get(workspace).abbrev
+                                 + DataTypeInfo::Get(d).abbrev;
+        auto const name = solution.outputConversionKernelName(problem, ContractionInputs(), 1, 2);
+        EXPECT_EQ(name.substr(0, head.size()), head) << "hpa " << hpa;
+    };
+
+    // F8F8, F4F8, F8F4, F4F4 and the BF8 pairs with the compute input types the library's problem types carry.
+    std::vector<Cell> const cells = {{DT::Float8, DT::Float8, DT::Float8, DT::Float8},
+                                     {DT::Float4, DT::Float8, DT::Float4, DT::Float8},
+                                     {DT::Float8, DT::Float4, DT::Float8, DT::Float4},
+                                     {DT::Float4, DT::Float4, DT::Float8, DT::Float8},
+                                     {DT::BFloat8, DT::BFloat8, DT::BFloat8, DT::BFloat8},
+                                     {DT::Float8, DT::BFloat8, DT::Float8, DT::BFloat8},
+                                     {DT::BFloat8, DT::Float8, DT::BFloat8, DT::Float8},
+                                     {DT::Float4, DT::BFloat8, DT::Float8, DT::BFloat8},
+                                     {DT::BFloat8, DT::Float4, DT::BFloat8, DT::Float8}};
+    for(size_t i = 0; i < cells.size(); i++)
+    {
+        SCOPED_TRACE(i);
+        for(DT d : {DT::Half, DT::Float8, DT::BFloat16})
+        {
+            expectWorkspace(cells[i], DT::Half, false, d, DT::Half);
+            expectWorkspace(cells[i], DT::Half, true, d, DT::Float);
+            expectWorkspace(cells[i], DT::Float, false, d, DT::Float);
+        }
+    }
+    // Half inputs.
+    expectWorkspace(Cell{DT::Half, DT::Half, DT::Half, DT::Half}, DT::Half, false, DT::Half, DT::Float);
+}
+
+// The split-K reduction kernel of f16 accumulation declares alpha and beta as float (KernelWriterConversion), the type
+// the host appends for a Half alpha and beta.
+TEST(F16AccumulationHost, ReductionKernelReceivesAlphaAndBetaAsF32)
+{
+    ContractionSolution solution;
+    configurePersistentSolution(solution, 0, 0);
+    solution.problemType.computeType             = rocisa::DataType::Half;
+    solution.problemType.highPrecisionAccumulate = false;
+    solution.problemType.computeInputTypeA       = rocisa::DataType::Float8;
+    solution.problemType.computeInputTypeB       = rocisa::DataType::Float8;
+    solution.problemType.useBeta                 = true;
+    solution.sizeMapping.globalAccumulation      = 2;
+    auto problem = persistentProblem();
+    problem.setAlphaType(rocisa::DataType::Half);
+    problem.setBetaType(rocisa::DataType::Half);
+    auto device = persistentDevice();
+    auto inputs = persistentInputs();
+    inputs.alpha = Half(2.5f);
+    inputs.beta  = Half(-1.25f);
+    inputs.ws    = reinterpret_cast<void*>(uintptr_t{0x10000});
+    auto call    = solution.generateOutputConversionCall<true>(
+        problem, inputs, solution.resolvePersistentSettings(problem, device), 2, 2);
+    EXPECT_FLOAT_EQ(value<float>(call.args, "alpha"), 2.5f);
+    EXPECT_FLOAT_EQ(value<float>(call.args, "beta"), -1.25f);
+    EXPECT_EQ(offset(call.args, "beta"), offset(call.args, "alpha") + 4);
 }

@@ -43,6 +43,7 @@
 #include <Tensile/CachingLibrary.hpp>
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/LaunchSummationOrder.hpp>
 #include <Tensile/MXScaleFormat.hpp>
 #include <Tensile/Predicates.hpp>
 #include <Tensile/Task.hpp>
@@ -483,10 +484,13 @@ namespace TensileLite
         int                    PrefetchLocalRead          = 1;
         bool                   sourceKernel               = false;
         bool                   SourceSwap                 = false;
+        //! SpaceFillingAlgo levels, 4 bits each, with the level count in bits 28-31
+        int                    spaceFillingAlgo           = 0;
         size_t                 staggerStrideShift         = 0;
         size_t                 staggerU                   = 0;
         size_t                 staggerUMapping            = 0;
         int                    streamKAtomic              = 0;
+        int                    streamKFixupTreeReduction  = 0;
         size_t                 synchronizerSizePerWG      = 0;
         int                    TDMInst                    = 0;
         int                    temporalHintA              = 0;
@@ -1358,6 +1362,9 @@ namespace TensileLite
                                    uint32_t                            autoGsuVal,
                                    AdaptiveGemmNTAB                    ntab) const;
 
+        //! The bits of internalArg0 that hold GSU, for this solution's internal-args layout.
+        uint32_t internalArgsGsuMask() const;
+
         // Common kernel related arguments (e.g. gemm_count, arg type, MT, GSU...)
         template <bool T_Debug, bool Legacy, typename KA>
         void kernelArgs(uint32_t                            gemmCount,
@@ -1635,6 +1642,16 @@ namespace TensileLite
                                                                   uint32_t        skgrid,
                                                                   int32_t         autoWGM) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
+
+        using LaunchSummationOrder = TensileLite::LaunchSummationOrder;
+        LaunchSummationOrder launchSummationOrder(Problem const& problem, Hardware const& hardware) const;
+
+        //! Half compute without HighPrecisionAccumulate on F8, BF8 or F4 compute inputs: f16 accumulation, whose
+        //! workspace holds f16. The kernel widens F4 operands to F8; the problem type refuses the fnuz types for it.
+        static bool isF16Accumulation(rocisa::DataType computeType,
+                                      bool             highPrecisionAccumulate,
+                                      rocisa::DataType computeInputTypeA,
+                                      rocisa::DataType computeInputTypeB);
 
         double calculateDimensionM(Problem const&  problem) const;
         double calculateDimensionN(Problem const&  problem) const;

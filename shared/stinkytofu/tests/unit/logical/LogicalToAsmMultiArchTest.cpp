@@ -146,6 +146,10 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VMed3I32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VMed3F32:
             return VMed3F32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VPkMaximum3F16:
+            return VPkMaximum3F16(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VPkMinimum3F16:
+            return VPkMinimum3F16(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VMaximumMinimumF32:
             return VMaximumMinimumF32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VAndB32:
@@ -336,6 +340,10 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VCvtScaleFP8toF16(vgpr(0), vgpr(1), vgpr(2));
         case logical::VCvtScalePkF16toFP8:
             return VCvtScalePkF16toFP8(vgpr(0), vgpr(1), vgpr(2));
+        case logical::VCvtScalePk8F16toFP8:
+            return VCvtScalePk8F16toFP8(vgpr(0), vgpr(1), vgpr(2));
+        case logical::VCvtScalePk8FP4toF16:
+            return VCvtScalePk8FP4toF16(vgpr(0), vgpr(1), vgpr(2));
         case logical::VCvtScalePkF16toBF8:
             return VCvtScalePkF16toBF8(vgpr(0), vgpr(1), vgpr(2));
         case logical::VCvtScaleSRF16toFP8:
@@ -971,6 +979,10 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     // Vector Ternary (med3, lshl_or)
     {logical::VMed3I32, "v_med3_i32"},
     {logical::VMed3F32, "v_med3_f32"},
+    {logical::VPkMaximum3F16, "v_pk_maximum3_f16"},
+    {logical::VPkMinimum3F16, "v_pk_minimum3_f16"},
+    {logical::VCvtScalePk8F16toFP8, "v_cvt_scalef32_pk8_fp8_f16"},
+    {logical::VCvtScalePk8FP4toF16, "v_cvt_scale_pk8_f16_fp4"},
     {logical::VMaximumMinimumF32, "v_maximumminimum_f32"},
     {logical::VLShiftLeftOrB32, "v_lshl_or_b32"},
     // Vector Shift (ashr)
@@ -1021,8 +1033,12 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
     // STEP 1: COVERAGE GUARD - Check all opcodes have factory cases
     // ========================================================================
 
-    // Test that factory has a case for each opcode
+    // An opcode counts as tested only when the factory builds an instruction for it. The default
+    // case returns nullptr too, so a nullptr from an opcode not listed here is a missing case.
+    const std::set<logical::Opcode> NO_TEST_INSTRUCTION = {
+        logical::IntrinsicCall, logical::SWaitAlu, logical::SchedulingFence};
     std::set<logical::Opcode> testedOpcodes;
+    std::vector<std::string> missingOpcodes;
 
     for (uint16_t i = 0; i < logical::NUM_OPCODES; ++i) {
         logical::Opcode opcode = static_cast<logical::Opcode>(i);
@@ -1030,28 +1046,12 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
 
         if (!name || std::string(name) == "UNKNOWN") continue;
 
-        // Try to create instruction (nullptr is OK for special cases)
         LogicalInstruction* inst = createTestInstruction(opcode);
-
-        // If factory has a case for this opcode (even if it returns nullptr), count as tested
-        // The factory must explicitly handle the opcode, even if just to return nullptr
-        testedOpcodes.insert(opcode);
-
         if (inst != nullptr) {
+            testedOpcodes.insert(opcode);
             inst->safeErase();  // Clean up
-        }
-    }
-
-    // Check coverage
-    std::vector<std::string> missingOpcodes;
-    for (uint16_t i = 0; i < logical::NUM_OPCODES; ++i) {
-        logical::Opcode opcode = static_cast<logical::Opcode>(i);
-        const char* name = logical::getOpcodeName(opcode);
-
-        if (name && std::string(name) != "UNKNOWN") {
-            if (testedOpcodes.find(opcode) == testedOpcodes.end()) {
-                missingOpcodes.push_back(name);
-            }
+        } else if (NO_TEST_INSTRUCTION.find(opcode) == NO_TEST_INSTRUCTION.end()) {
+            missingOpcodes.push_back(name);
         }
     }
 
@@ -1079,9 +1079,14 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
     struct ArchConfig {
         int major, minor, stepping;
         const char* name;
+        const char* steppingName;  // GemmTileConfig::archName, for steppings that share a triple
     };
 
-    std::vector<ArchConfig> archs = {{12, 5, 0, "Gfx1250"}};
+    std::vector<ArchConfig> archs = {{12, 5, 0, "Gfx1250", ""},
+                                     {12, 5, 0, "Gfx1250v0", "gfx1250v0"}};
+    // The name must select the gfx1250v0 tables, not fall back to gfx1250's on the shared triple.
+    ASSERT_NE(getGfxArchID("gfx1250v0"), getGfxArchID("gfx1250"));
+    ASSERT_EQ(resolveArchId({12, 5, 0}, "gfx1250v0"), getGfxArchID("gfx1250v0"));
 
     // Special opcodes that can't be lowered through standard passes
     std::set<logical::Opcode> SKIP_LOWERING = {
@@ -1132,12 +1137,10 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         logical::SAtomicDec,
         logical::SAtomicCmpswapX2,
         logical::SAtomicUmaxX2,
-        logical::SCSelectB64,
         logical::SCmpKEQU32,
         logical::SCmpKGeU32,
         logical::SCmpKGtU32,
         logical::SCmpKLGU32,
-        logical::SFlbitI32B32,
         logical::SBfmB64,
         logical::VPermlane16SwapB32,
         logical::VPermlane32SwapB32,
@@ -1199,6 +1202,7 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
             PassManager pm;
             GemmTileConfig config;
             config.arch = {arch.major, arch.minor, arch.stepping};
+            config.archName = arch.steppingName;
             config.TileA0 = 16;
             config.TileB0 = 16;
             config.TileM0 = 16;

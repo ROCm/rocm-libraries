@@ -180,6 +180,7 @@ ARCH_CAP_OVERRIDES = {
             "HasWMMA_f4_32x16": False,  # no fp4 32x16 WMMA opcode
         },
         "archCaps": {
+            "HasF16Accumulation": False,
             "HasTDMMulticast": False,
             # May use non-coherent (MTYPE NC) mappings.
             "MTypeNC": True,

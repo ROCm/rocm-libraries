@@ -38,6 +38,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <vector>
 
 namespace TensileLite
@@ -140,6 +141,13 @@ namespace TensileLite
 
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
             std::vector<std::vector<uint8_t>>           m_referenceRecvs;
+
+            // f16 accumulation depends on the K order, which each launch decides: the reference D of the
+            // most recent orders, per device and oldest first, up to f16AccumulationReferenceBytes each.
+            using F16AccumulationCache = std::deque<std::pair<std::vector<uint64_t>, std::vector<uint8_t>>>;
+            std::shared_ptr<Hardware>         m_hardware;
+            std::vector<uint64_t>             m_f16AccumulationOrder;
+            std::vector<F16AccumulationCache> m_f16AccumulationReferences;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;

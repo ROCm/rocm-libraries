@@ -652,3 +652,14 @@ def swizzleGeometry(solution, tc: str) -> dict:
 streamKCluster = persistentSpatialCluster
 streamKMulticast = persistentMulticast
 streamK2DCluster = persistent2DCluster
+
+
+def hasPackedAccumulators(kernel):
+    """A matrix-instruction kernel whose accumulators take half a VGPR each (MIRegPerOut 0.5, f16 accumulation)."""
+    return bool(kernel.get("EnableMatrixInstruction")) and kernel.get("MIRegPerOut") == 0.5
+
+
+def hasF32Epilogue(kernel, packedStore):
+    """A store that computes in f32 and lays out its data as HighPrecisionAccumulate does: HPA kernels, and packed f16
+    accumulators widened for the epilogue. A packedStore (a partial written to the workspace) keeps them packed."""
+    return bool(kernel["ProblemType"]["HighPrecisionAccumulate"]) or (hasPackedAccumulators(kernel) and not packedStore)

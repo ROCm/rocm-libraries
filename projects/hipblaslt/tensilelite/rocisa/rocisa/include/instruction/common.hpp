@@ -4772,6 +4772,67 @@ namespace rocisa
         }
     };
 
+    // IEEE maximum/minimum of three f16 pairs: a NaN operand gives NaN, unlike v_pk_max_num_f16.
+    struct VPkMaximum3F16 : public CommonInstruction
+    {
+        VPkMaximum3F16(const std::shared_ptr<Container>& dst,
+                       const InstructionInput&           src0,
+                       const InstructionInput&           src1,
+                       const InstructionInput&           src2,
+                       std::optional<VOP3PModifiers>     vop3    = std::nullopt,
+                       const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F16,
+                                dst,
+                                {src0, src1, src2},
+                                std::nullopt,
+                                std::nullopt,
+                                vop3,
+                                comment)
+        {
+            setInst("v_pk_maximum3_f16");
+        }
+
+        VPkMaximum3F16(const VPkMaximum3F16& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VPkMaximum3F16>(*this);
+        }
+    };
+
+    struct VPkMinimum3F16 : public CommonInstruction
+    {
+        VPkMinimum3F16(const std::shared_ptr<Container>& dst,
+                       const InstructionInput&           src0,
+                       const InstructionInput&           src1,
+                       const InstructionInput&           src2,
+                       std::optional<VOP3PModifiers>     vop3    = std::nullopt,
+                       const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F16,
+                                dst,
+                                {src0, src1, src2},
+                                std::nullopt,
+                                std::nullopt,
+                                vop3,
+                                comment)
+        {
+            setInst("v_pk_minimum3_f16");
+        }
+
+        VPkMinimum3F16(const VPkMinimum3F16& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VPkMinimum3F16>(*this);
+        }
+    };
+
     struct VFmaMixF32 : public CommonInstruction
     {
         VFmaMixF32(const std::shared_ptr<Container>& dst,

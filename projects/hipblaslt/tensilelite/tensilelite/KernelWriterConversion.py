@@ -31,6 +31,7 @@ from .Common.Architectures import archMacroNames
 from .Common import INDEX_CHARS, IsaInfo
 from .Common.DataType import DataType
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
+from .SolutionStructs.Problem import isF16Accumulation, epilogueComputeDataType
 
 class KernelWriterConversion(KernelWriterBase):
 
@@ -136,20 +137,20 @@ class KernelWriterConversion(KernelWriterBase):
 
     # ScaleAB
     if self.state["ProblemType"]["UseScaleAB"]:
-      scalePtrStr = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
+      scalePtrStr = epilogueComputeDataType(self.state["ProblemType"]).toDevice(self.language)
       kStr += "  " + scalePtrStr + " * " + "ScaleA;" + self.endLine
       kStr += "  " + scalePtrStr + " * " + "ScaleB;" + self.endLine
 
     # ScaleCD
     if self.state["ProblemType"]["UseScaleCD"]:
-      scalePtrStr = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
+      scalePtrStr = epilogueComputeDataType(self.state["ProblemType"]).toDevice(self.language)
       kStr += "  " + scalePtrStr + " * " + "ScaleC;" + self.endLine
       kStr += "  " + scalePtrStr + " * " + "ScaleD;" + self.endLine
 
     enableFactorDim = False
     # interface: ScaleAlphaVec GSU>1 GSUA "MUL"
     if self.state["ProblemType"]["UseScaleAlphaVec"]:
-      scaleAlphaVecPtrStr = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
+      scaleAlphaVecPtrStr = epilogueComputeDataType(self.state["ProblemType"]).toDevice(self.language)
       kStr += "  " + scaleAlphaVecPtrStr + " * " + "ScaleAlphaVec;" + self.endLine
       if scaleAlphaVectorMode(self.state["ProblemType"]["UseScaleAlphaVec"]) == 3:
         enableFactorDim = True
@@ -158,9 +159,9 @@ class KernelWriterConversion(KernelWriterBase):
       gatePtrStr = self.state["ProblemType"]["GateResidualDataTypeList"][0].toDevice(self.language)
       kStr += "  " + gatePtrStr + " * " + "Gate;" + self.endLine
 
-    # alpha & beta
-    kStr += "  %s alpha;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
-    kStr += "  %s beta;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
+    # alpha & beta; f16 accumulation takes them as float, the type the host appends for a Half alpha/beta.
+    kStr += "  %s alpha;%s" % (epilogueComputeDataType(self.state["ProblemType"]).toDevice(self.language), self.endLine)
+    kStr += "  %s beta;%s" % (epilogueComputeDataType(self.state["ProblemType"]).toDevice(self.language), self.endLine)
     if self.state["ProblemType"]["UseScaleAlphaVec"] and self.deviceScalarAlphaEnabled():
       kStr += "  unsigned int deviceScalarAlpha;%s" % (self.endLine)
 
@@ -337,7 +338,7 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += " + (IDX%s)*arg.strideBias" % (indexChar)
       kStr += " ))" + self.endLine
 
-    self.num_dword_load = int(self.num_elements_load * self.state["ProblemType"]["ComputeDataType"].numBytes() / 4)
+    self.num_dword_load = int(self.num_elements_load * epilogueComputeDataType(self.state["ProblemType"]).numBytes() / 4)
     self.num_dword_store = int(self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4)
     if self.num_dword_store == 0:
       self.num_dword_store = self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4
@@ -538,10 +539,9 @@ class KernelWriterConversion(KernelWriterBase):
       else:
         kStr += "  %s idxBias = %s;%s" % (self.uint64Str, id_str, self.endLine)
 
-
     ########################################
     # multi buffers GSU: Accumulate all GSU buffer
-    intermediateDataType = self.datatype
+    intermediateDataType = epilogueComputeDataType(problemType).toDevice(self.language)
     if self.state["ProblemType"]["DataType"].isInt8() and self.state["ProblemType"]["ComputeDataType"].isSingle() and self.state["ProblemType"]["HighPrecisionAccumulate"]:
       intermediateDataType = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
 
@@ -610,7 +610,9 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += self.endLine
 
     #Load GSU D buffer
-    if self.state["UnrollOnly"]:
+    if isF16Accumulation(problemType):
+      kStr += self.f16AccumulationSum(problemType)
+    elif self.state["UnrollOnly"]:
       kStr += "  %s temp[NUM_GSU];" % loadTypeStr + self.endLine
       for gsuIdx in range(self.state["GlobalSplitU"]):
         # kStr += "  temp[%d] = *((%s*)(arg.W+idxW));%s" % (gsuIdx, loadTypeStr, self.endLine)
@@ -896,6 +898,8 @@ class KernelWriterConversion(KernelWriterBase):
       for vIdx in range(self.num_dword_load):
         kStr += "  %s[%d] = min(127, max(-128, (int32_t)std::nearbyint(%s[%d])));%s" % (accumStr, vIdx, accumStr, vIdx, self.endLine)
       kStr += self.endLine
+    if isF16Accumulation(problemType):
+      kStr += self.f16AccumulationSaturation(accumStr)
 
     #covert to output
     for vIdx in range(self.num_dword_load):
@@ -913,9 +917,12 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  }" + self.endLine
     else:
       kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, byteOffsetD, 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, self.endLine)
-    ########################################
-    # end
-    kStr += "}%s" % self.endLine
+    kStr += self.kernelBodyEnd(firstStride, lastStrideC)
+    return kStr
+
+
+  def kernelBodyEnd(self, firstStride, lastStrideC):
+    kStr = "}%s" % self.endLine
     kStr += "#undef NUM_GSU" + self.endLine
     kStr += "#undef NUM_ELEMENT_LOAD" + self.endLine
     for i in range(firstStride, lastStrideC):
@@ -939,6 +946,69 @@ class KernelWriterConversion(KernelWriterBase):
 
     return kStr
 
+  def f16AccumulationSum(self, problemType):
+    """
+    f16 accumulation: the GSU slices hold f16 partials. They are added in f32 in slice order and the sum is
+    rounded once to f16, the accumulator type; accum holds it widened to f32 for the epilogue.
+    A thread loads its NUM_ELEMENT_LOAD halves of a slice in one access and keeps NUM_GSU slices in flight.
+    Slices after the first are added with v_fma_mix_f32 (x * 1.0 + sum, one rounding): finite sums are those of
+    an f32 add, and when several slices are NaN this instruction decides which NaN propagates.
+    """
+    vw = self.num_elements_load
+    endl = self.endLine
+    wordType = {1: "uint16_t", 2: "uint32_t", 4: "f16acc_u32x2", 8: "f16acc_u32x4"}[vw]
+    word = {1: "(uint32_t)v[u]", 2: "v[u]", 4: "v[u][e >> 1]", 8: "v[u][e >> 1]"}[vw]
+    kStr = ""
+    if vw >= 4:
+      kStr += "  typedef uint32_t f16acc_u32x2 __attribute__((ext_vector_type(2)));" + endl
+    if vw == 8:
+      kStr += "  typedef uint32_t f16acc_u32x4 __attribute__((ext_vector_type(4)));" + endl
+    # alpha == 0 never reads the partials, so D is beta * C even where a slice overflowed to inf.
+    alpha = "arg.alpha"
+    if self.state["ProblemType"]["UseScaleAlphaVec"] and self.deviceScalarAlphaEnabled():
+      alpha = "(arg.deviceScalarAlpha ? arg.ScaleAlphaVec[0] : arg.alpha)"
+    kStr += "  if(%s != 0.0f)%s" % (alpha, endl)
+    kStr += "  for(uint32_t g0 = 0; g0 < arg.gsu; g0 += NUM_GSU)" + endl
+    kStr += "  {" + endl
+    kStr += "    %s v[NUM_GSU];%s" % (wordType, endl)
+    kStr += "#pragma unroll" + endl
+    kStr += "    for(uint32_t u = 0; u < NUM_GSU; u++)" + endl
+    kStr += "      if(g0 + u < arg.gsu)" + endl
+    kStr += "        v[u] = *(%s const*)(arg.W + idxW + (g0 + u) * strideW);%s" % (wordType, endl)
+    kStr += "#pragma unroll" + endl
+    kStr += "    for(uint32_t u = 0; u < NUM_GSU; u++)" + endl
+    kStr += "      if(g0 + u < arg.gsu)" + endl
+    kStr += "      {" + endl
+    kStr += "#pragma unroll" + endl
+    kStr += "        for(int e = 0; e < NUM_ELEMENT_LOAD; e++)" + endl
+    kStr += "        {" + endl
+    kStr += "          uint32_t w = %s;%s" % (word, endl)
+    kStr += "          if(g0 + u == 0)" + endl
+    kStr += "            accum[e] = (float)__builtin_bit_cast(tensile_half, (uint16_t)((e & 1) ? (w >> 16) : w));" + endl
+    kStr += "          else if(e & 1)" + endl
+    kStr += "            asm(\"v_fma_mix_f32 %0, %1, 1.0, %2 op_sel:[1,0,0] op_sel_hi:[1,1,0]\" : \"=v\"(accum[e]) : \"v\"(w), \"v\"(accum[e]));" + endl
+    kStr += "          else" + endl
+    kStr += "            asm(\"v_fma_mix_f32 %0, %1, 1.0, %2 op_sel_hi:[1,1,0]\" : \"=v\"(accum[e]) : \"v\"(w), \"v\"(accum[e]));" + endl
+    kStr += "        }" + endl
+    kStr += "      }" + endl
+    kStr += "  }" + endl
+    kStr += "#pragma unroll" + endl
+    kStr += "  for(int e = 0; e < NUM_ELEMENT_LOAD; e++)" + endl
+    kStr += "    accum[e] = (float)(tensile_half)accum[e];" + endl
+    kStr += endl
+    return kStr
+
+  def f16AccumulationSaturation(self, accumStr):
+    """
+    An f16 accumulator that overflowed to inf saturates an fp8 D to +/-448 like a finite overflow, as the GEMM kernel's
+    epilogue does; the conversion to the fp8 type that follows clamps finite values only and turns inf into NaN.
+    """
+    if not self.state["ProblemType"]["DestDataType"].isFloat8():
+      return ""
+    kStr = ""
+    for vIdx in range(self.num_dword_load):
+      kStr += "  if(__builtin_isinf(%s[%d])) %s[%d] = __builtin_copysignf(448.0f, %s[%d]);%s" % (accumStr, vIdx, accumStr, vIdx, accumStr, vIdx, self.endLine)
+    return kStr + self.endLine
 
   @staticmethod
   def kernelName(solution, num_elements_load, btype=None, gateType=None):
@@ -953,6 +1023,8 @@ class KernelWriterConversion(KernelWriterBase):
     # add input datatype into kernel name (the datatype of workspace)
     inputTypeStr = DataType("I").toChar() if state["ProblemType"]["DataType"].isInt8() or state["ProblemType"]["DataType"].isInt32() else \
                                   (DataType("D").toChar() if state["ProblemType"]["DataType"].isDouble() else DataType("S").toChar())
+    if isF16Accumulation(state["ProblemType"]):
+      inputTypeStr = DataType("H").toChar()
 
     name += (inputTypeStr + state["ProblemType"]["DestDataType"].toChar())
 

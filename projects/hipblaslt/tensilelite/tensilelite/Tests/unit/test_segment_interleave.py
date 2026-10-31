@@ -1338,3 +1338,17 @@ def test_rows_without_scales_place_pieces_like_tdmfuse1(tdmFuse, layout):
     row, paired = _unscaled_tdmfuse_state(tdmFuse, layout), _unscaled_tdmfuse_state(1, layout)
     for tc in ("A", "B"):
         assert _piece_lds_addrs(row, tc) == _piece_lds_addrs(paired, tc), tc
+
+
+def test_k_row_elems_is_the_component_k_row_of_an_interleaved_mn_major_b():
+    """An interleaved MN-major B is two [DepthU][MT1/2] components, so its K row holds MT1/2 elements; A and a B
+    that is not split keep their macro tile."""
+    from tensilelite.SolutionStructs.segment_interleave import k_row_elems
+    kernel = {"LDSSegmentInterleave": 1, "LDSSegInterleaveOffsets": {"bMnMajor": True},
+              "MacroTile1": 256, "MacroTileA": 128, "MacroTileB": 256}
+    assert k_row_elems(kernel, "B") == 128
+    assert k_row_elems(kernel, "A") == 128
+    kernel["LDSSegInterleaveOffsets"]["bMnMajor"] = False
+    assert k_row_elems(kernel, "B") == 256
+    kernel["LDSSegInterleaveOffsets"]["bMnMajor"], kernel["LDSSegmentInterleave"] = True, 0
+    assert k_row_elems(kernel, "B") == 256
