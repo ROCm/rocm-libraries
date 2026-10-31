@@ -16,13 +16,19 @@ from importlib import metadata
 from pathlib import Path
 
 
-def write_location(build_root: Path) -> None:
-    build_root = build_root.resolve()
+def _sdk_site() -> Path:
     try:
         site = Path(metadata.distribution("rocm-sdk-core").locate_file(""))
     except metadata.PackageNotFoundError:
         # A subsequent SDK installation can recover without rebuilding native code.
         site = Path(sysconfig.get_paths()["purelib"])
+    # Resolve existing symlinks before relpath collapses '..'; purelib may not exist yet.
+    return site.resolve(strict=False)
+
+
+def write_location(build_root: Path) -> None:
+    build_root = build_root.resolve()
+    site = _sdk_site()
     try:
         location = os.path.relpath(site, build_root)
         marker = "rocke-sdk-site-v1"

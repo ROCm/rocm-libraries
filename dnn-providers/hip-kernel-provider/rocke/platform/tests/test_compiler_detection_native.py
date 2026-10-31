@@ -10,7 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
@@ -869,11 +869,9 @@ def test_windows_build_sidecar_format(
     spec = importlib.util.spec_from_file_location("sdk_location_generator", generator)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.setattr(
-        module.metadata,
-        "distribution",
-        lambda name: SimpleNamespace(locate_file=lambda relative: site),
-    )
+    # The site has already been resolved physically; format Windows paths without
+    # asking this POSIX host to resolve a Windows filesystem location.
+    monkeypatch.setattr(module, "_sdk_site", lambda: PureWindowsPath(site))
     # Use Windows path semantics while storing the descriptor in host scratch.
     monkeypatch.setattr(
         module,
@@ -1030,6 +1028,108 @@ def test_native_discovery_stays_in_physical_prefix(
     assert result.stdout.splitlines() == (
         ["23", str(library)] if local_sdk else ["0", ""]
     )
+
+
+@pytest.mark.parametrize("relative_site", [False, True])
+@pytest.mark.parametrize("decoy_present", [False, True])
+def test_build_descriptor_preserves_sdk_site_traversal(
+    native_detector, tmp_path, monkeypatch, relative_site, decoy_present
+):
+    generator = PLATFORM / "tools" / "gen_sdk_comgr_location.py"
+    if not generator.is_file():
+        pytest.skip("configure-time generator is absent from installed tests")
+    site = tmp_path / "physical" / "site-packages"
+    library = sdk_fixture(site)
+    child = site.parent / "child"
+    child.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(child, target_is_directory=True)
+    spelling = os.path.join(str(alias), "..", "site-packages")
+    if relative_site:
+        spelling = os.path.join("alias", "..", "site-packages")
+    if decoy_present:
+        sdk_fixture(tmp_path / "site-packages")
+    build = tmp_path / "build"
+    build.mkdir()
+    native = build / native_detector.name
+    shutil.copyfile(native_detector, native)
+    spec = importlib.util.spec_from_file_location("sdk_location_generator", generator)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        module.metadata,
+        "distribution",
+        lambda name: SimpleNamespace(locate_file=lambda relative: spelling),
+    )
+    module.write_location(build)
+    marker, location = (build / "rocke_sdk_site.txt").read_text().splitlines()
+    assert marker == "rocke-sdk-site-v1"
+    assert (build / location).resolve() == site
+    # Set sys.path after startup: Python itself normalizes PYTHONPATH spellings.
+    script = "import sys; sys.path.insert(0, sys.argv[2])\n" + PROBE
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(native), spelling],
+        env=automatic_env(site),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    info = json.loads(result.stdout)
+    assert info["native"]["llvm_version"] == info["python"]["llvm_version"]
+    assert Path(info["native"]["requested_comgr"]).samefile(library)
+    assert Path(info["python"]["requested_comgr"]).samefile(library)
+
+
+def test_build_descriptor_missing_sdk_site_recovers(
+    native_detector, tmp_path, monkeypatch
+):
+    generator = PLATFORM / "tools" / "gen_sdk_comgr_location.py"
+    if not generator.is_file():
+        pytest.skip("configure-time generator is absent from installed tests")
+    site = tmp_path / "physical" / "site-packages"
+    child = site.parent / "child"
+    child.mkdir(parents=True)
+    alias = tmp_path / "alias"
+    alias.symlink_to(child, target_is_directory=True)
+    spelling = os.path.join(str(alias), "..", "site-packages")
+    build = tmp_path / "build"
+    build.mkdir()
+    native = build / native_detector.name
+    shutil.copyfile(native_detector, native)
+    spec = importlib.util.spec_from_file_location("sdk_location_generator", generator)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def missing(name):
+        raise module.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(module.metadata, "distribution", missing)
+    monkeypatch.setattr(module.sysconfig, "get_paths", lambda: {"purelib": spelling})
+    module.write_location(build)
+    descriptor = (build / "rocke_sdk_site.txt").read_text()
+    location = descriptor.splitlines()[1]
+    assert (build / location).resolve() == site
+    env = automatic_env(site)
+    unavailable = subprocess.run(
+        [sys.executable, "-c", UNAVAILABLE_PROBE, str(native)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert unavailable.returncode == 0, unavailable.stderr
+    library = sdk_fixture(site)
+    result = subprocess.run(
+        [sys.executable, "-c", PROBE, str(native)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    info = json.loads(result.stdout)
+    assert info["native"] == info["python"]
+    assert info["native"]["requested_comgr"] == str(library)
+    assert (build / "rocke_sdk_site.txt").read_text() == descriptor
 
 
 def test_relative_loaded_module_ignores_changed_cwd(native_detector, tmp_path):
