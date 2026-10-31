@@ -652,3 +652,8 @@ def swizzleGeometry(solution, tc: str) -> dict:
 streamKCluster = persistentSpatialCluster
 streamKMulticast = persistentMulticast
 streamK2DCluster = persistent2DCluster
+
+
+def hasPackedAccumulators(kernel):
+    """A matrix-instruction kernel whose accumulators take half a VGPR each (MIRegPerOut 0.5, f16 accumulation)."""
+    return bool(kernel.get("EnableMatrixInstruction")) and kernel.get("MIRegPerOut") == 0.5

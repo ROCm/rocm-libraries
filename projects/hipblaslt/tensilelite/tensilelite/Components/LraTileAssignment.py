@@ -34,7 +34,7 @@ from ..Component import LraTileAssignment, LraTileProperties, LocalRead
 from ..Common import roundUp, log2, ceilDivide
 from ..Common.DataType import DataType
 from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLraFreeShift, mxSegmentSplit
-from ..SolutionStructs.segment_interleave import wave_tile_span
+from ..SolutionStructs.segment_interleave import k_row_elems, mn_major_b, wave_tile_span
 from dataclasses import dataclass
 
 
@@ -361,6 +361,10 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         if not tP["enableLDSTr"]:
             comp = LraTileAssignmentMFMA()
             return comp(writer, kernel, tP)
+        if tP["bpeDS"] == 0.5:
+            # An fp4 operand widened to fp8 after its LDS read keeps the fp8 MAC type, which selects this component.
+            comp = LraTileAssignmentTransposedMFMAF4()
+            return comp(writer, kernel, tP)
 
         dividendReg = "Serial"
         module = Module("LraTileAssignmentTransposedMFMA")
@@ -631,9 +635,11 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
                                                                         maxKId=maxKId)
 
         # strider for each type of index
-        mt           = kernel["MacroTile%u" % tile01]
+        mt           = k_row_elems(kernel, tc) if mn_major_b(kernel) else kernel["MacroTile%u" % tile01]
         strideUnroll = mt + ldsPad
         strideWave   = matrixInstT * vectorWidth
+        # Widened to fp8, a half-wave takes 16 consecutive K per register group instead of the fp4 WMMA's 32.
+        unrolledStride = self.NUM_UNROLLED_STRIDE_ELEMENTS // 2 if tP.get("bpe", tP["bpeDS"]) > tP["bpeDS"] else self.NUM_UNROLLED_STRIDE_ELEMENTS
 
         with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMAF4_tmpSgprInfo") as tmpSgprInfo:
             module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
@@ -642,7 +648,7 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
             module.add(vectorStaticMultiply(vgpr(sReg), vgpr(sReg), self.NUM_CONT_READ_ELEMENTS, tmpSgprInfo, comment=f"s*={self.NUM_CONT_READ_ELEMENTS}"))
             module.add(vectorStaticRemainder(dummy, mReg, kReg, self.NUM_READ_ELEMENT_PER_THREAD, tmpVgprRes, tmpSgprInfo, comment=f"m=wtid%{self.NUM_READ_ELEMENT_PER_THREAD}"))
             module.add(vectorStaticDivide(mReg, mReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, comment=f"m/={self.NUM_CONT_READ_ELEMENTS}"))
-            module.add(vectorStaticMultiply(vgpr(mReg), vgpr(mReg), self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, comment=f"m*={self.NUM_UNROLLED_STRIDE_ELEMENTS}"))
+            module.add(vectorStaticMultiply(vgpr(mReg), vgpr(mReg), unrolledStride, tmpSgprInfo, comment=f"m*={unrolledStride}"))
             module.add(VAddU32(vgpr(tReg), vgpr(sReg), vgpr(mReg), "t=s+m"))
             module.add(vectorStaticRemainder(dummy, kReg, kReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, tmpSgprInfo, comment=f"k=k%{self.NUM_CONT_READ_ELEMENTS}"))
             module.add(VAddU32(vgpr(tReg), vgpr(tReg), vgpr(kReg), "t+=k"))

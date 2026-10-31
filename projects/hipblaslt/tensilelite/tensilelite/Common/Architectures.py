@@ -180,6 +180,7 @@ ARCH_CAP_OVERRIDES = {
             "HasWMMA_f4_32x16": False,  # no fp4 32x16 WMMA opcode
         },
         "archCaps": {
+            "HasF16Accumulation": False,
             "HasTDMMulticast": False,
             # RequiresXCntForVolatileVMEM is deliberately absent: gfx1250-strict
             # still needs the XNACK-replay xcnt drain, so it inherits the probed True.

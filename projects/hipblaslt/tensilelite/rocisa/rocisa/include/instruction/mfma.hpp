@@ -184,7 +184,9 @@ namespace rocisa
         {
             size_t f8f6f4_k = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 128 : 64;
             size_t f4_t     = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 32 : 0;
-            bool   useF8f6f4 = (variant[2] >= f8f6f4_k) && !useNativeFp8WMMA();
+            // f8f6f4 has no f16-accumulate form; f16 accumulation keeps the fp8/bf8 opcodes.
+            bool   useF8f6f4 = (variant[2] >= f8f6f4_k) && !useNativeFp8WMMA()
+                             && (accType != InstType::INST_F16);
 
             switch(iType)
             {
@@ -510,6 +512,10 @@ namespace rocisa
                     break;
                 default:
                     break;
+                }
+                if(typeConvert(instType) != "f8f6f4")
+                {
+                    inputPermuteStr = "";
                 }
                 if(forceScaledWMMA())
                 {

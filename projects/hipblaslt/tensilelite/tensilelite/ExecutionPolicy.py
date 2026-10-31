@@ -107,6 +107,11 @@ def hasHybridAssignment(state):
     return _policy(state).assignment == WorkAssignment.HYBRID
 
 
+def hasStaticTreeFixup(state):
+    """StreamKFixupTreeReduction applies to statically assigned tiles: DynamicWorkQueue has no tree fixup."""
+    return bool(state["StreamKFixupTreeReduction"]) and not hasDynamicAssignment(state)
+
+
 def requiresPartialReduction(state):
     return isStreamK(state) and not state.get("StreamKAtomic", 0)
 
