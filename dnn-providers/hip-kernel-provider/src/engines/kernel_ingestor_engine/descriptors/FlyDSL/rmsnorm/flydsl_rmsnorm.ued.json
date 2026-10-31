@@ -9,6 +9,9 @@
   "sort_kernel_catalog": {
     "default": "b1392faf-ca0b-527d-a523-1d723ce4420f"
   },
+  "predict_engine": {
+    "default": "a1f15e2d-ddea-5249-9f91-acf91f1a0e6c"
+  },
   "metadata": "50b317c4-05a1-5d32-a5ba-08ce1d39ae62",
   "knobs": [
     "block_threads"
