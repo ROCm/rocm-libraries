@@ -329,6 +329,33 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_decode_grid = true;
         s->kv_cache_policy = "stream";
         break;
+    /* Split-KV reduce: a segment count its 2 lane groups do not divide (d128). */
+    case 20:
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 4;
+        s->dtype = "bf16";
+        s->num_segments = 9;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
+    /* Split-KV reduce: unrolled segment loop plus a range-checked tail (d64,
+     * 4 lane groups, 70 segments). */
+    case 21:
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 70;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
     default:
         return -1;
     }

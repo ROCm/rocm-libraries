@@ -331,6 +331,33 @@ _CONFIGS = {
         use_decode_grid=True,
         kv_cache_policy="stream",
     ),
+    # Split-KV reduce: a segment count its 2 lane groups do not divide (d128).
+    20: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=4,
+        dtype="bf16",
+        num_segments=9,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    # Split-KV reduce: unrolled segment loop plus a range-checked tail (d64,
+    # 4 lane groups, 70 segments).
+    21: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=70,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
 }
 
 

@@ -27,6 +27,7 @@
 #include <stdio.h> /* snprintf  */
 #include <string.h>
 
+#include "rocke/instance_attention_split_kv_reduce.h"
 #include "rocke/instance_gfx950_attention_tiled_3d_internal.h"
 
 /* ============================================================ *
@@ -73,48 +74,6 @@ static rocke_value_t* rocke__red_ml_offset(rocke_gfx950_attention_tiled_3d_build
     return off;
 }
 
-static rocke_value_t* rocke__red_seg_acc_offset(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
-                                                rocke_value_t* token,
-                                                rocke_value_t* head,
-                                                rocke_value_t* seg,
-                                                rocke_value_t* dim)
-{
-    const char* in_names[4] = {"token", "head", "seg", "dim"};
-    rocke_value_t* in_values[4];
-    rocke_value_t* off = NULL;
-    rocke_value_t* valid = NULL;
-    in_values[0] = token;
-    in_values[1] = head;
-    in_values[2] = seg;
-    in_values[3] = dim;
-    if(!rocke_transforms_descriptor_offset(
-           ctx->b, ctx->seg_acc_desc_red, in_names, in_values, 4, &off, &valid))
-    {
-        return NULL;
-    }
-    return off;
-}
-
-static rocke_value_t* rocke__red_out_offset(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
-                                            rocke_value_t* token,
-                                            rocke_value_t* head,
-                                            rocke_value_t* dim)
-{
-    const char* in_names[3] = {"token", "head", "dim"};
-    rocke_value_t* in_values[3];
-    rocke_value_t* off = NULL;
-    rocke_value_t* valid = NULL;
-    in_values[0] = token;
-    in_values[1] = head;
-    in_values[2] = dim;
-    if(!rocke_transforms_descriptor_offset(
-           ctx->b, ctx->out_desc_red, in_names, in_values, 3, &off, &valid))
-    {
-        return NULL;
-    }
-    return off;
-}
-
 /* ============================================================ *
  * reduce_declare_and_prologue (Python lines 1014-1080).
  *
@@ -145,9 +104,11 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
     if(b != NULL && b->kernel != NULL)
     {
         rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", cfg->THREADS);
-        if(spec != NULL && spec->has_waves_per_eu)
+        int waves_per_eu = rocke_split_kv_reduce_waves_per_eu(
+            spec != NULL && spec->has_waves_per_eu, spec != NULL ? spec->waves_per_eu : 0, NUM_SEG);
+        if(waves_per_eu > 0)
         {
-            rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
+            rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", waves_per_eu);
         }
     }
 
@@ -418,93 +379,29 @@ void rocke_gfx950_attention_tiled_3d_reduce_combine_pass(
 }
 
 /* ============================================================ *
- * pass 3: per-element reduce + normalize + write (lines 1134-1162).
- *
- *   for li in range(HALFS_PER_THREAD):
- *       d = add(mul(const_i32(li), const_i32(THREADS)), tid)
- *       acc_loop = scf_for_iter(0, NUM_SEG, 1, [("ac{li}", zero_f)], iv_name="s_acc{li}")
- *       with acc_loop as (sv, (ac,)):
- *           factor = smem_load_vN_f32(factor_lds, sv, n=1)
- *           factor_s = vec_extract(factor, 0)
- *           idx_acc, _ = seg_acc_desc_red.offset(token=q_token, head=q_head, seg=sv, dim=d)
- *           ov = global_load_f32(seg_out, idx_acc)
- *           scf_yield(fadd(ac, fmul(ov, factor_s)))
- *       scalar_out_f32 = fmul(acc_loop.results[0], inv_l)
- *       scalar_out = cast_f32_to(scalar_out_f32, dtype)
- *       out_idx, _ = out_desc_red.offset(token=q_token, head=q_head, dim=d)
- *       global_store(out, out_idx, scalar_out, align=2)
+ * pass 3: weighted per-dim sum over segments + normalize + write. Shared with
+ * the other arch's reduce: kernels/common/_split_kv_reduce.py
+ * (rocke_split_kv_reduce_weighted_segments).
  * ============================================================ */
 void rocke_gfx950_attention_tiled_3d_reduce_normalize_pass(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx)
 {
-    rocke_ir_builder_t* b = ctx->b;
     const rocke_gfx950_attn_tiled_3d_config_t* cfg = &ctx->cfg;
-    int THREADS = cfg->THREADS;
-    int NUM_SEG = cfg->NUM_SEG;
-    int HALFS_PER_THREAD = cfg->HALFS_PER_THREAD;
-    int li;
+    rocke_split_kv_reduce_args_t args;
 
-    for(li = 0; li < HALFS_PER_THREAD; ++li)
-    {
-        rocke_value_t* d;
-        rocke_for_t acc_loop;
-        rocke_iter_arg_t iter_args[1];
-        char acname[32];
-        char ivname[32];
-        rocke_value_t* scalar_out_f32;
-        rocke_value_t* scalar_out;
-        rocke_value_t* out_idx;
-
-        {
-            rocke_value_t* d_li = rocke_b_const_i32(b, li);
-            rocke_value_t* d_thr = rocke_b_const_i32(b, THREADS);
-            d = rocke_b_add(b, rocke_b_mul(b, d_li, d_thr), ctx->tid);
-        }
-
-        snprintf(acname, sizeof(acname), "ac%d", li);
-        snprintf(ivname, sizeof(ivname), "s_acc%d", li);
-
-        iter_args[0].name = acname;
-        iter_args[0].init = ctx->zero_f;
-
-        {
-            rocke_value_t* acc_lb = rocke_b_const_i32(b, 0);
-            rocke_value_t* acc_ub = rocke_b_const_i32(b, NUM_SEG);
-            rocke_value_t* acc_step = rocke_b_const_i32(b, 1);
-            acc_loop = rocke_b_scf_for_iter(
-                b, acc_lb, acc_ub, acc_step, iter_args, 1, ivname, false, true);
-        }
-
-        rocke_b_region_enter(b, acc_loop.body);
-        {
-            rocke_value_t* sv = acc_loop.iv;
-            rocke_value_t* ac = acc_loop.iter_vars ? acc_loop.iter_vars[0] : NULL;
-            rocke_value_t* factor;
-            rocke_value_t* factor_s;
-            rocke_value_t* idx_acc;
-            rocke_value_t* ov;
-            rocke_value_t* indices[1];
-            rocke_value_t* yields[1];
-
-            indices[0] = sv;
-            factor = rocke_b_smem_load_vN_f32(b, ctx->factor_lds, indices, 1, 1);
-            factor_s = rocke_b_vec_extract(b, factor, 0);
-
-            idx_acc = rocke__red_seg_acc_offset(ctx, ctx->q_token, ctx->q_head, sv, d);
-            ov = rocke_b_global_load_f32(b, ctx->seg_out, idx_acc, 0);
-
-            yields[0] = rocke_b_fadd(b, ac, rocke_b_fmul(b, ov, factor_s));
-            rocke_b_scf_yield(b, yields, 1);
-        }
-        rocke_b_region_leave(b);
-
-        scalar_out_f32 = rocke_b_fmul(
-            b,
-            (acc_loop.op != NULL && acc_loop.op->num_results >= 1) ? acc_loop.op->results[0] : NULL,
-            ctx->inv_l);
-        scalar_out = rocke_b_cast_f32_to(b, scalar_out_f32, ctx->cfg.dtype);
-
-        out_idx = rocke__red_out_offset(ctx, ctx->q_token, ctx->q_head, d);
-        rocke_b_global_store(b, ctx->out, out_idx, scalar_out, 2);
-    }
+    args.head_size = cfg->HD;
+    args.num_segments = cfg->NUM_SEG;
+    args.threads = cfg->THREADS;
+    args.dtype = cfg->dtype;
+    args.tid = ctx->tid;
+    args.q_token = ctx->q_token;
+    args.q_head = ctx->q_head;
+    args.seg_out = ctx->seg_out;
+    args.out = ctx->out;
+    args.factor_lds = ctx->factor_lds;
+    args.seg_acc_desc = ctx->seg_acc_desc_red;
+    args.out_desc = ctx->out_desc_red;
+    args.inv_l = ctx->inv_l;
+    args.zero_f = ctx->zero_f;
+    rocke_split_kv_reduce_weighted_segments(ctx->b, &args);
 }

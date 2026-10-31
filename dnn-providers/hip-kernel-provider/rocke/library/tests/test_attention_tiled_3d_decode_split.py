@@ -143,7 +143,7 @@ def gfx942(monkeypatch):
         ({"num_seqs": 4}, True),
         ({"num_seqs": 4, "head_size": 64}, True),
         ({"max_seqlen_k": 4096}, True),
-        ({}, False),
+        ({}, True),
         ({"num_seqs": 4, "head_size": 256}, False),
         ({"num_seqs": 4, "block_size": 32}, False),
         ({"num_seqs": 4, "sliding_window": 128}, False),
@@ -193,8 +193,8 @@ def test_gfx942_split(
     assert segment.num_segments == reduce.num_segments == segments
 
 
-def test_gfx942_few_ctas_at_long_kv_keep_the_previous_count(gfx942, monkeypatch):
-    p = _problem(num_seqs=1, num_kv_heads=8, max_seqlen_k=32768, num_cus=304)
-    assert au._gfx942_3d_decode_ctas_per_segment(p, "gfx942") is None
-    monkeypatch.setattr(au, "_gfx942_3d_decode_ctas_per_segment", lambda *a, **k: None)
+@pytest.mark.parametrize("max_seqlen_k", [8192, 16384, 32768])
+def test_gfx942_few_ctas_at_long_kv_split_to_the_cap(gfx942, max_seqlen_k):
+    p = _problem(num_seqs=1, num_kv_heads=8, max_seqlen_k=max_seqlen_k, num_cus=304)
+    assert au._gfx942_3d_decode_ctas_per_segment(p, "gfx942") == 8
     assert au._num_segments(p, "gfx942") == 128

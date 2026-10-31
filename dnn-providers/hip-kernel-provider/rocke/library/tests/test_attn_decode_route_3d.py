@@ -7,6 +7,7 @@ its pre-bump segment ceiling."""
 
 from __future__ import annotations
 
+import kernels.common.attention_unified as au
 import pytest
 from kernels.common.attention_unified import UnifiedAttentionProblem, _num_segments
 
@@ -99,9 +100,19 @@ def test_gfx942_d256_decode_split(hq, hkv, skv, segments):
 
 
 @pytest.mark.parametrize("hq,segments", [(32, 64), (64, 64), (128, 64)])
-def test_gfx942_decode_pre_bump_counts_one_q_block_per_sequence(hq, segments):
-    # B1, 8 KV heads, 16K KV: outside the decode split rule; the ceiling is the
-    # pre-bump split of 8 CTAs (64) at every GQA ratio, including 16 query heads
-    # per KV head (one query row per q-block).
+def test_gfx942_decode_pre_bump_counts_one_q_block_per_sequence(
+    hq, segments, monkeypatch
+):
+    # B1, 8 KV heads, 16K KV with the decode split rule switched off: the
+    # ceiling is the pre-bump split of 8 CTAs (64) at every GQA ratio, including
+    # 16 query heads per KV head (one query row per q-block).
     p = _decode("gfx942", 1, hq, 8, 16384)
+    monkeypatch.setattr(au, "_gfx942_3d_decode_ctas_per_segment", lambda *a, **k: None)
     assert _num_segments(p, "gfx942") == segments
+
+
+@pytest.mark.parametrize("hq", [32, 64, 128])
+def test_gfx942_few_cta_long_kv_decode_takes_the_split_cap(hq):
+    # The same shapes under the decode split rule: 128 segments from 8K KV.
+    p = _decode("gfx942", 1, hq, 8, 16384)
+    assert _num_segments(p, "gfx942") == 128
