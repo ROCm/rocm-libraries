@@ -28,6 +28,7 @@ from bundle_discovery import (
     find_sweep_roots,
     graph_for_sidecar,
     is_descendant_of,
+    is_expected_rejection,
     is_graph_file,
     is_single_graph_sidecar,
     is_sweep_root,
@@ -35,6 +36,8 @@ from bundle_discovery import (
     meta_for_graph,
     read_sweep_cases,
     sidecar_for_graph,
+    single_graph_expected_rejection,
+    sweep_case_expected_rejection,
 )
 
 HEADER = (
@@ -337,3 +340,54 @@ class TestReadSweepCases:
         cases, error = read_sweep_cases(path)
         assert cases is None
         assert "invalid JSON" in error
+
+
+class TestExpectedRejection:
+    """Only the JSON boolean true flags a bundle, as in the C++ parser."""
+
+    @pytest.mark.parametrize(
+        "metadata, flagged",
+        [
+            ({"expected_rejection": True}, True),
+            ({"expected_rejection": False}, False),
+            ({"expected_rejection": "true"}, False),
+            ({"expected_rejection": 1}, False),
+            ({"expected_rejection": None}, False),
+            ({}, False),
+            (None, False),
+            ([{"expected_rejection": True}], False),
+        ],
+    )
+    def test_metadata_object(self, metadata: object, flagged: bool) -> None:
+        assert is_expected_rejection(metadata) is flagged
+
+    @pytest.mark.parametrize(
+        "meta_text, flagged",
+        [
+            ('{"expected_rejection": true}', True),
+            ('{"expected_rejection": 1}', False),
+            ("[true]", False),
+            ("{", False),
+            (None, False),
+        ],
+    )
+    def test_single_graph_reads_its_meta_file(
+        self, tmp_path: Path, meta_text: str | None, flagged: bool
+    ) -> None:
+        graph = _touch(tmp_path / "G.json")
+        if meta_text is not None:
+            meta_for_graph(graph).write_text(meta_text, encoding="utf-8")
+        assert single_graph_expected_rejection(graph) is flagged
+
+    @pytest.mark.parametrize(
+        "case, flagged",
+        [
+            ({"id": "a", "metadata": {"expected_rejection": True}}, True),
+            ({"id": "a", "metadata": {"expected_rejection": "true"}}, False),
+            ({"id": "a", "metadata": [True]}, False),
+            ({"id": "a"}, False),
+            ("a", False),
+        ],
+    )
+    def test_sweep_case_reads_its_metadata(self, case: object, flagged: bool) -> None:
+        assert sweep_case_expected_rejection(case) is flagged

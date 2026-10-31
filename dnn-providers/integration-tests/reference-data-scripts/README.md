@@ -35,6 +35,9 @@ Hard errors, single-graph bundles (`{Name}.json`):
 - present tensors (input or output) with floating dtypes must not contain NaN or Inf
 - bundle total size must not exceed 2 MiB; larger bundles fail because they would quickly explode test artifact sizes
 - discovered metadata sidecars (`meta.json` or `*.meta.json`) must parse and contain non-empty string fields `generator` and `reference_source`
+- the optional metadata fields `no_cpu_reference`, `no_gpu_reference` and `expected_rejection` must be JSON booleans when present
+- a `<Name>.meta.json` that sets both `no_cpu_reference` and `no_gpu_reference` to `true` must have golden data declared next to `<Name>.json`: a `<Name>.tensors.dvc` or a `<Name>.tensor<uid>.bin`
+- a `<Name>.meta.json` that sets `expected_rejection` to `true` (an intentionally invalid graph the engine under test must reject; it is never executed) must not declare golden data: no `<Name>.tensors.dvc` and no `<Name>.tensor<uid>.bin` next to `<Name>.json`
 - advisory naming must be derivable as `{Tier}/{Operation}/{Layout}/{DataType}/{Name}/{Name}.json`
 
 Hard errors, template-sweep bundles (`graph.template.json` + `sweep.json`):
@@ -46,6 +49,9 @@ Hard errors, template-sweep bundles (`graph.template.json` + `sweep.json`):
 - resolved per-case tensor `dims`/`strides`/`data_type` are validated the same way as single-graph bundles
 - each case's `metadata` object must contain non-empty string fields `generator` and `reference_source`
 - a non-null `golden` requires a `path` pointing at a `tensors.dvc` file
+- a case's `metadata` may set `no_cpu_reference` / `no_gpu_reference` / `expected_rejection`; each must be a JSON boolean when present
+- a case whose `metadata` sets both `no_cpu_reference` and `no_gpu_reference` to `true` must declare golden data (a `golden` object with a `path`)
+- a case whose `metadata` sets `expected_rejection` to `true` must not declare golden data (no `golden` object with a `path`)
 - when a case has golden data, tensor files are expected at `golden/{CaseId}/tensor<uid>.bin` (not the template's directory) and validated the same as single-graph tensors (byte-size, NaN/Inf for both input and output tensors, per-case 2 MiB budget)
 - advisory naming must be derivable as `{Tier}/{Operation}/{TopologyName}/sweep.json`
 

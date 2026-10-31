@@ -256,6 +256,105 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
 
+std::optional<std::string> IntegrationBundleVerificationHarness::expectedRejectionClaimError() const
+{
+    if(!carriesSidecar())
+    {
+        return std::nullopt;
+    }
+
+    const auto& sidecar = _claimLocator.sidecarPath;
+    bool named = false;
+    if(_claimLocator.isSweep())
+    {
+        for(const auto& [engine, groups] : loadSweepSupportClaimsFromPath(sidecar).claims)
+        {
+            for(const auto& group : groups)
+            {
+                named = named
+                        || std::find(group.cases.begin(), group.cases.end(), _claimLocator.caseId)
+                               != group.cases.end();
+            }
+        }
+    }
+    else
+    {
+        named = !loadSupportClaimsFromPath(sidecar).claims.empty();
+    }
+
+    if(!named)
+    {
+        return std::nullopt;
+    }
+    return "expected_rejection bundle " + _bundlePath.string() + " has a support claim in "
+           + sidecar.string()
+           + "; no engine may claim a graph every engine must reject. Remove the claim.";
+}
+
+VerificationOutcome
+    IntegrationBundleVerificationHarness::expectedRejectionOutcome(GraphSession& session)
+{
+    // An authoring error is the bundle's, whichever engine this lane pins.
+    if(auto claimError = expectedRejectionClaimError())
+    {
+        return VerificationOutcome::failed(
+            VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, std::move(*claimError));
+    }
+
+    // "Every engine rejects it" is only checkable one lane at a time, so a run that
+    // pinned no engine has nothing to judge. Same answer as enforceAtLevel().
+    if(!_engineUnderTest.has_value())
+    {
+        return unverifiable("expected_rejection requires --test-engine");
+    }
+    const std::string& engine = _engineUnderTest->name;
+
+    // The bundle has to reach an engine for the engine to refuse it. A graph that does
+    // not even deserialize, or a ranked query that did not resolve, says nothing
+    // about this engine, so neither may pass.
+    if(session.buildFailed)
+    {
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           "expected-rejection bundle never reached an engine: "
+                                           "from_binary failed: "
+                                               + session.buildError + " (" + _bundlePath.string()
+                                               + ")");
+    }
+    if(!isResolved(session.engines.status.get_code()))
+    {
+        return VerificationOutcome::failed(
+            VerificationDepth::NOT_REACHED,
+            FailureOrigin::HARNESS,
+            "the ranked-engine query for an expected-rejection bundle did not resolve ("
+                + session.engines.status.get_message() + "), so it is unknown whether " + engine
+                + " rejects it (" + _bundlePath.string() + ")");
+    }
+
+    // The query resolved, so absence from the list is the engine's refusal.
+    if(!session.engines.accepted)
+    {
+        return VerificationOutcome::rejected("ranked_list");
+    }
+
+    // Ranked: the engine took the graph. It may still refuse to build it, which is
+    // equally a rejection; only a plan that builds is acceptance.
+    const EngineOpResult built = _deps.engineRunner->buildPlans(session, _engineUnderTest);
+    if(built.declined)
+    {
+        return VerificationOutcome::rejected("plan_build_declined");
+    }
+    if(!built.ok)
+    {
+        return VerificationOutcome::rejected("plan_build_failed");
+    }
+    return VerificationOutcome::failed(VerificationDepth::BUILDABLE,
+                                       FailureOrigin::ENGINE,
+                                       "Engine " + engine + " accepted expected-rejection bundle "
+                                           + _bundlePath.string()
+                                           + ": it is ranked and its plans build");
+}
+
 std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeSupportOnly(
     const GraphSession& session, const std::vector<LoadedEngine>& engines)
 {
@@ -339,6 +438,13 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
         return unverifiable("bundle has no output tensors to compare");
     }
 
+    // Decided from the bundle's own metadata, so before any input is read or filled and
+    // before the engine runs: the outcome would be the same whatever they did.
+    if(auto skipped = disabledReferenceSkip())
+    {
+        return *skipped;
+    }
+
     // A graph the engine declined never reads its inputs: every mode below reaches
     // runEngine() -- which reports the decline -- before anything touches
     // _inputs. Filling first made a declined graph pay the full host-side
@@ -394,6 +500,72 @@ IntegrationBundleVerificationHarness::OracleChain
             + modeName(mode));
     }
     return chain;
+}
+
+void IntegrationBundleVerificationHarness::dropDisabledReferences(OracleChain& chain) const
+{
+    const auto isDisabled = [this](ReferenceExecutorType type) {
+        return type == ReferenceExecutorType::GPU ? _bundle->metadata.noGpuReference
+                                                  : _bundle->metadata.noCpuReference;
+    };
+
+    std::vector<ReferenceExecutorType> kept;
+    for(const auto type : chain.candidates)
+    {
+        if(isDisabled(type))
+        {
+            chain.declined(refLabel(type) + " (disabled by bundle metadata)");
+        }
+        else
+        {
+            kept.push_back(type);
+        }
+    }
+    chain.candidates = std::move(kept);
+}
+
+std::optional<VerificationOutcome>
+    IntegrationBundleVerificationHarness::disabledReferenceSkip() const
+{
+    const auto& metadata = _bundle->metadata;
+    switch(_deps.policy.mode)
+    {
+    case VerificationMode::GPU:
+        if(metadata.noGpuReference)
+        {
+            return VerificationOutcome::skipped(
+                VerificationDepth::NOT_REACHED,
+                "verification-mode=gpu names the GPU reference, which this bundle disables "
+                "(no_gpu_reference)");
+        }
+        break;
+    case VerificationMode::CPU:
+        if(metadata.noCpuReference)
+        {
+            return VerificationOutcome::skipped(
+                VerificationDepth::NOT_REACHED,
+                "verification-mode=cpu names the CPU reference, which this bundle disables "
+                "(no_cpu_reference)");
+        }
+        break;
+    case VerificationMode::AUTO:
+        // Golden data is all that can verify such a bundle. The loader guarantees it is
+        // declared, so absent here means declared but not pulled.
+        if(metadata.noCpuReference && metadata.noGpuReference && !_bundle->hasGoldenOutputs)
+        {
+            return VerificationOutcome::skipped(
+                VerificationDepth::NOT_REACHED,
+                "golden data not pulled; bundle disables both references (no_cpu_reference, "
+                "no_gpu_reference) ("
+                    + _bundlePath.string() + ")");
+        }
+        break;
+    case VerificationMode::GOLDEN:
+    default:
+        // Golden mode demands golden data and keeps its own FAIL for its absence.
+        break;
+    }
+    return std::nullopt;
 }
 
 std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
@@ -525,6 +697,8 @@ VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(Graph
     }
     if(!outcome.has_value())
     {
+        // After golden, so a message lists what the chain tried in the order it tried it.
+        dropDisabledReferences(oracles);
         outcome = runOracleChain(engine.outputs, oracles);
     }
     benchmarkIfVerified(session, engine.outputs, *outcome);

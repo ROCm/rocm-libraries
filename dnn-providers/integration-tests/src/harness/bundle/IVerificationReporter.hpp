@@ -54,9 +54,13 @@ public:
     virtual void recordReferenceError(const std::string& bundlePath, const std::string& reason) = 0;
 
     /// The oracle that graded this test body's outputs, NONE when nothing was
-    /// compared. Called once per verification body, including one that throws
-    /// before it reaches an outcome. Support-claim authoring runs do not call it.
-    virtual void recordVerifier(const std::string& bundlePath, Verifier verifier) = 0;
+    /// compared. `detail` is the stage an EXPECTED_REJECTION refused the bundle at, and
+    /// empty for every other verifier. Called once per verification body, including one
+    /// that throws before it reaches an outcome. Support-claim authoring runs do not
+    /// call it.
+    virtual void
+        recordVerifier(const std::string& bundlePath, Verifier verifier, const std::string& detail)
+        = 0;
 };
 
 /// The production sinks: the run's coverage counters, verdict table,
@@ -106,9 +110,11 @@ public:
         UnverifiableBundleReport::get().record(bundlePath, reason, UnverifiableSeverity::REF_ERROR);
     }
 
-    void recordVerifier(const std::string& bundlePath, Verifier verifier) override
+    void recordVerifier(const std::string& bundlePath,
+                        Verifier verifier,
+                        const std::string& detail) override
     {
-        VerifierTally::get().record(bundlePath, verifier);
+        VerifierTally::get().record(bundlePath, verifier, detail);
     }
 };
 

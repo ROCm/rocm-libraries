@@ -1152,4 +1152,163 @@ TEST_F(TestVerificationModePathsFixture, FullBundleRoutesToComparisonPath)
     EXPECT_FALSE(testing_support::anyFailed(results)) << "FULL bundle must run the comparison path";
 }
 
+// ── Bundle metadata switches references off (no_cpu_reference / no_gpu_reference) ──
+
+// A disabled reference is not "tried and declined": it is never created, so a broken or
+// slow executor the bundle opted out of cannot touch the run. The other one still
+// grades it.
+TEST_F(TestVerificationModePathsFixture, AutoDeviceRefDisabledIsNeverRequested)
+{
+    using ::testing::_;
+    using ::testing::ReturnRef;
+    useMatchingEngine();
+    useMatchingReference();
+
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU)).Times(0);
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU))
+        .Times(1)
+        .WillRepeatedly(ReturnRef(_mocks.cpuReference));
+
+    auto bundle = loadBundle("auto_no_device_ref", /*includeGoldenOutput=*/false);
+    bundle->metadata.noGpuReference = true;
+
+    ::testing::TestPartResultArray results;
+    runCapturing(std::move(bundle), VerificationMode::AUTO, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::CPU_REFERENCE));
+}
+
+// With the CPU reference off and the device one unable to take the graph, nothing can
+// verify it. That fails, and says the CPU reference was switched off rather than that
+// it could not run the op; the CPU executor is never asked.
+TEST_F(TestVerificationModePathsFixture, AutoCpuRefDisabledAndDeviceRefDecliningFails)
+{
+    using ::testing::_;
+    useMatchingEngine();
+    declineUpFront(_mocks.gpuReference);
+
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU)).Times(0);
+
+    auto bundle = loadBundle("auto_no_cpu_ref", /*includeGoldenOutput=*/false);
+    bundle->metadata.noCpuReference = true;
+
+    ::testing::TestPartResultArray results;
+    runCapturing(std::move(bundle), VerificationMode::AUTO, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const std::string messages = testing_support::allMessages(results);
+    EXPECT_THAT(messages, ::testing::HasSubstr("CPU reference (disabled by bundle metadata)"));
+    EXPECT_THAT(messages, ::testing::HasSubstr("GPU reference (not applicable)"));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::NONE));
+}
+
+// An explicit mode is a demand for one reference. When the bundle has switched that
+// one off, the test skips -- before the engine runs, since nothing it did could change
+// the answer -- rather than falling back to the other.
+TEST_F(TestVerificationModePathsFixture, ExplicitModeNamingADisabledRefSkipsBeforeTheEngine)
+{
+    using ::testing::_;
+    const std::vector<std::pair<VerificationMode, const char*>> modes{
+        {VerificationMode::CPU, "no_cpu_reference"}, {VerificationMode::GPU, "no_gpu_reference"}};
+    for(const auto& [mode, flag] : modes)
+    {
+        SCOPED_TRACE(flag);
+        EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(0);
+        EXPECT_CALL(_mocks.referenceExecutors, get(_)).Times(0);
+
+        auto bundle = loadBundle(std::string("explicit_") + flag, /*includeGoldenOutput=*/true);
+        bundle->metadata.noCpuReference = mode == VerificationMode::CPU;
+        bundle->metadata.noGpuReference = mode == VerificationMode::GPU;
+
+        ::testing::TestPartResultArray results;
+        runCapturing(std::move(bundle), mode, &results);
+
+        EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+        ASSERT_TRUE(testing_support::anySkipped(results));
+        EXPECT_THAT(testing_support::allMessages(results), ::testing::HasSubstr(flag));
+    }
+}
+
+// The flag only takes away the reference it names: disabling the CPU reference does not
+// stop an explicit device-reference run.
+TEST_F(TestVerificationModePathsFixture, ExplicitModeIsNotAffectedByTheOtherRefsFlag)
+{
+    useMatchingEngine();
+    useMatchingReference();
+
+    auto bundle = loadBundle("explicit_other_flag", /*includeGoldenOutput=*/false);
+    bundle->metadata.noCpuReference = true;
+
+    ::testing::TestPartResultArray results;
+    runCapturing(std::move(bundle), VerificationMode::GPU, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GPU_REFERENCE));
+}
+
+// Both references off and the golden data declared but not pulled (the state of every
+// dev box and alola): nothing can verify it here, which is a skip and not a failure,
+// decided before the engine runs.
+TEST_F(TestVerificationModePathsFixture, AutoBothRefsDisabledWithoutPulledGoldenSkips)
+{
+    using ::testing::_;
+    EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(0);
+    EXPECT_CALL(_mocks.referenceExecutors, get(_)).Times(0);
+
+    auto bundle = loadBundle("auto_both_off_unpulled", /*includeGoldenOutput=*/false);
+    bundle->metadata.noCpuReference = true;
+    bundle->metadata.noGpuReference = true;
+
+    ::testing::TestPartResultArray results;
+    runCapturing(std::move(bundle), VerificationMode::AUTO, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    ASSERT_TRUE(testing_support::anySkipped(results));
+    EXPECT_THAT(testing_support::allMessages(results),
+                ::testing::HasSubstr("golden data not pulled; bundle disables both references"));
+}
+
+// The same bundle with its golden data pulled is graded by it, and no reference is
+// consulted.
+TEST_F(TestVerificationModePathsFixture, AutoBothRefsDisabledWithGoldenComparesAgainstIt)
+{
+    using ::testing::_;
+    useMatchingEngine();
+    EXPECT_CALL(_mocks.referenceExecutors, get(_)).Times(0);
+
+    auto bundle = loadBundle("auto_both_off_golden", /*includeGoldenOutput=*/true);
+    bundle->metadata.noCpuReference = true;
+    bundle->metadata.noGpuReference = true;
+
+    ::testing::TestPartResultArray results;
+    runCapturing(std::move(bundle), VerificationMode::AUTO, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(_verifiers, ::testing::ElementsAre(Verifier::GOLDEN));
+}
+
+// Golden mode demands golden data, so the not-pulled skip is not its answer: a bundle
+// that disables both references still fails there when the data is absent.
+TEST_F(TestVerificationModePathsFixture, GoldenModeBothRefsDisabledWithoutDataStillFails)
+{
+    useMatchingEngine();
+
+    auto bundle = loadBundle("golden_both_off_unpulled", /*includeGoldenOutput=*/false);
+    bundle->metadata.noCpuReference = true;
+    bundle->metadata.noGpuReference = true;
+
+    ::testing::TestPartResultArray results;
+    runCapturing(std::move(bundle), VerificationMode::GOLDEN, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    EXPECT_THAT(testing_support::allMessages(results),
+                ::testing::HasSubstr("verification-mode=golden was requested"));
+}
+
 // NOLINTEND(readability-identifier-naming)
