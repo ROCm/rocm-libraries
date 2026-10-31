@@ -1,0 +1,39 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# Caller workflow: triggers the centralized ROCm PR Bot hosted in
+# ROCm/TheRock-PR-Bot. Drop this file into any repo that needs PR bot
+# coverage; no other changes are required.
+name: ROCm PR Bot Scan
+
+on:
+  # SECURITY: pull_request_target runs in the base-repo context so secrets
+  # are available even for fork PRs. The called workflow never checks out
+  # or executes PR head code directly.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  check_run:
+    types: [completed]
+
+# Caller must grant what the reusable workflow needs (callee cannot exceed it).
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  checks: read
+
+concurrency:
+  group: rocm-pr-bot-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.check_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  rocm-pr-bot:
+    # Skip the bot's own completed check_run to avoid trigger loops.
+    # endsWith() matches the reusable job name ("rocm-pr-bot / rocm-pr-bot").
+    if: >-
+      github.event_name != 'check_run' ||
+      !endsWith(github.event.check_run.name, 'rocm-pr-bot')
+    uses: ROCm/TheRock-PR-Bot/.github/workflows/rocm-pr-bot.yml@49fb88fb1d113f4507a6449008ffa3a80b36454a
+    secrets:
+      ROCM_PR_BOT_APPID: ${{ secrets.ROCM_PR_BOT_APPID }}
+      ROCM_PRBOT_KEY: ${{ secrets.ROCM_PRBOT_KEY }}
