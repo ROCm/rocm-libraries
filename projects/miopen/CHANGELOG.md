@@ -30,6 +30,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
   ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
   does the weight tensor in every case.
+* [Conv] Fixed inaccurate and slow deterministic-mode backward-weights results from the 2D and 3D
+  grouped CK xdlops solvers. Deterministic mode forces split-K = 1, so each weight element is one
+  FP32 accumulator chain over N*Do*Ho*Wo products, and the error grows with the chain length
+  (relative error 1.1e-3 at 2,560,000 products). These solvers are now not applicable in
+  deterministic mode when the chain is longer than 16384 (FP32 and TF32 output) or 2^21 (FP16 and
+  BF16 output).
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
