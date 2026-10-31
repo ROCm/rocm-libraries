@@ -3,11 +3,11 @@
 
 """What `catalog_diff.py` calls the same catalog, and what it refuses to.
 
-The gate exists because byte comparison cannot work here: `generator.py` mints
-every descriptor id with `uuid.uuid4()`, so two runs of one config differ
-everywhere. Masking ids is therefore the premise, and the risk that comes with
-it is a mask that hides a real change. Each case below is one thing the mask
-must NOT swallow.
+The gate exists because output generated with new ids (`--new-ids`, or nothing to
+reuse) differs from the shipped bundle in every id, so byte comparison fails (a run
+that reused the previous bundle's ids needs no mask). Masking ids is
+therefore the premise, and the risk that comes with it is a mask that hides a
+real change. Each case below is one thing the mask must NOT swallow.
 """
 
 from __future__ import annotations
@@ -81,8 +81,9 @@ def run(tmp_path):
 
 class TestTheMaskHidesIdsAndNothingElse:
     def test_regenerated_ids_alone_are_not_a_difference(self, run):
-        """The premise. Every id differs between two runs of one config, so if
-        this failed the gate could never pass and would be abandoned."""
+        """The premise. Every id differs between two runs of one config that
+        reuse nothing, so if this failed the gate could never pass and would be
+        abandoned."""
         shipped = _kdp([_entry("k0")])
         regenerated = json.loads(json.dumps(shipped))
         regenerated["id"] = "fresh-kdp-id"
@@ -92,8 +93,8 @@ class TestTheMaskHidesIdsAndNothingElse:
 
     @pytest.mark.parametrize("key", ["engine_id", "kmd_id"])
     def test_the_contract_consumer_ids_are_masked(self, run, key):
-        """The contract references the freshly minted UED and KMD, so a straight
-        generate.py output differs from the shipped KDP in these two keys."""
+        """The contract references the UED and KMD ids, so output generated
+        with new ids differs from the shipped KDP in these two keys."""
         shipped = _kdp([_entry("k0")])
         regenerated = json.loads(json.dumps(shipped))
         consumer = regenerated["provenance"]["specialization_contract"]["consumers"][0]
@@ -222,9 +223,10 @@ class TestTheDuplicateSpecCheck:
 
 class TestExpectIds:
     def test_preserved_ids_pass_and_fresh_ones_fail(self, run, capsys):
-        """`--expect-ids` is for checking a SPLICE, where reusing the shipped
-        UUIDs is the obligation -- `extend.md`'s 'resolve by UUID, not
-        filename' made checkable rather than left to review."""
+        """`--expect-ids` is for checking a splice or a `generate.py` run that
+        reused the previous ids, where reusing the shipped UUIDs is the
+        obligation -- `extend.md`'s 'resolve by UUID, not filename' made
+        checkable rather than left to review."""
         shipped = _kdp([_entry("k0")])
         assert run(shipped, json.loads(json.dumps(shipped)), "--expect-ids") == 0
 

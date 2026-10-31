@@ -35,10 +35,18 @@
 #include "rocsparse.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <string>
 #include <vector>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace rocsparse_ut
 {
@@ -74,6 +82,16 @@ namespace rocsparse_ut
     {
         return rocsparse_datatype_f64_c;
     }
+    template <>
+    inline rocsparse_datatype dt_of<_Float16>()
+    {
+        return rocsparse_datatype_f16_r;
+    }
+    template <>
+    inline rocsparse_datatype dt_of<rocsparse_bfloat16>()
+    {
+        return rocsparse_datatype_bf16_r;
+    }
 
     template <typename I>
     rocsparse_indextype it_of();
@@ -102,6 +120,16 @@ namespace rocsparse_ut
     inline rocsparse_double_complex scalar<rocsparse_double_complex>(float v)
     {
         return rocsparse_double_complex(v, 0.0);
+    }
+    template <>
+    inline _Float16 scalar<_Float16>(float v)
+    {
+        return static_cast<_Float16>(v);
+    }
+    template <>
+    inline rocsparse_bfloat16 scalar<rocsparse_bfloat16>(float v)
+    {
+        return rocsparse_bfloat16(v);
     }
 
     // ----- tiny device buffer RAII ------------------------------------------
@@ -150,7 +178,9 @@ namespace rocsparse_ut
         std::vector<T> host(count);
         if(count > 0 && device_ptr != nullptr)
         {
-            (void)hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost);
+            const hipError_t status
+                = hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost);
+            EXPECT_EQ(status, hipSuccess) << hipGetErrorString(status);
         }
         return host;
     }
@@ -315,4 +345,74 @@ namespace rocsparse_ut
         return hipErrorInvalidValue;
     }
 #endif // __HIPCC__
+
+    // setenv / unsetenv do not exist on Windows.
+    inline void set_env(const char* name, const char* value)
+    {
+#ifdef _WIN32
+        (void)_putenv_s(name, value);
+#else
+        (void)::setenv(name, value, 1);
+#endif
+    }
+
+    inline void unset_env(const char* name)
+    {
+#ifdef _WIN32
+        (void)_putenv_s(name, "");
+#else
+        (void)::unsetenv(name);
+#endif
+    }
+
+    // Sets an environment variable for the lifetime of the object and restores the
+    // previous state afterwards, also when an ASSERT_* returns early.
+    class scoped_env
+    {
+    public:
+        scoped_env(const char* name, const char* value)
+            : m_name(name)
+        {
+            if(const char* old = std::getenv(name))
+            {
+                m_had_old = true;
+                m_old     = old;
+            }
+            set_env(name, value);
+        }
+
+        ~scoped_env()
+        {
+            if(m_had_old)
+            {
+                set_env(m_name.c_str(), m_old.c_str());
+            }
+            else
+            {
+                unset_env(m_name.c_str());
+            }
+        }
+
+        scoped_env(const scoped_env&) = delete;
+        scoped_env& operator=(const scoped_env&) = delete;
+
+    private:
+        std::string m_name;
+        std::string m_old;
+        bool        m_had_old = false;
+    };
+
+    // A file in the system temporary directory (/tmp on Linux). The process id is
+    // part of the name so concurrent runs of the same binary do not collide.
+    inline std::string temp_file_path(const char* name)
+    {
+#ifdef _WIN32
+        const auto pid = static_cast<long>(_getpid());
+#else
+        const auto pid = static_cast<long>(::getpid());
+#endif
+        return (std::filesystem::temp_directory_path()
+                / (std::string(name) + "." + std::to_string(pid)))
+            .string();
+    }
 } // namespace rocsparse_ut

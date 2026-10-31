@@ -5,9 +5,9 @@ an `s_wait_alu`, and the rest of the fillers, the knobs that control it, and wha
 
 ## Why the DAG needs rules for these
 
-The DAG models hazards in **cycles**. InsertWaitAlu, which runs after the DAG, decides
-waits by **op counts** (`HWModel::WaitHide`). When the DAG thinks a gap is covered and the
-pass does not, the pass inserts an `s_wait_alu`.
+InsertWaitAlu, which runs after the DAG, decides waits by **op counts** (`HWModel::WaitHide`).
+The DAG used to model the same hazards in cycles and disagreed with it; it now asks the pass's
+scoreboard instead (see [Scoreboard-driven filler placement](waitalu-placement.md)).
 
 Prefetch placement is not a hazard but a **performance** placement. Left alone, the DAG
 issues a prefetch as soon as its address is ready, far ahead of the `tensor_load_to_lds` it

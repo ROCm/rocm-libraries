@@ -50,9 +50,20 @@
  *        Mutually exclusive with EnableSwInstructionPrefetchRelStatic.
  * @note SwInstructionPrefetchAbsBaseSgpr: low index of the reserved 3-SGPR
  * abs-prefetch base (even-aligned pair s[base:base+1] + scratch s[base+2]),
- * auto-allocated in Tensile
- *        `_initKernel`. -1 = not reserved / pass no-ops (also -1 for Stream-K /
- * non-gfx1250).
+ * auto-allocated in Tensile `_initKernel`. -1 = not reserved / pass no-ops
+ * (also -1 for Stream-K). After SGPR compact this reservation no longer
+ * describes the kernel, so the passes ignore the index and pick their own
+ * block: one emitted at kernel entry reuses registers from inside the kernel's
+ * range, one emitted mid-kernel takes registers above every index the kernel
+ * names.
+ * @note RegisterAllocation: the mode of Tensile `StinkyTofuRegisterAllocation`,
+ * 0 off, 1 shadow, 2 apply, 3 force. RegisterAllocationConfig is the rest of
+ * that parameter, in its canonical spelling (RegisterAllocationConfig.hpp);
+ * empty means every default at this mode.
+ * @note RegisterAllocationDump: Tensile `StinkyTofuRegisterAllocationDump`.
+ * Writes what allocation saw and did -- the IR before the lift, the SSA form,
+ * its live ranges, and each attempt's placement table -- to
+ * <outputDir>/<kernel>/ra/, or ./<kernel>/ra/ without an output directory.
  * @note TimePasses: print a per-pass wall-time report to stderr after the
  * pipeline runs (Tensile `StinkyTofuTimePasses`, stinkytofu-opt
  * `--time-passes`).
@@ -102,6 +113,9 @@
     X(PrefetchGlobalRead, int)                    \
     X(PrefetchLocalRead, int)                     \
     X(UnrollLoopCopies, int)                      \
+    X(RegisterAllocation, int)                    \
+    X(RegisterAllocationConfig, std::string)      \
+    X(RegisterAllocationDump, bool)               \
     X(RemoveInstructions, std::string)            \
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
@@ -120,8 +134,10 @@
 // have fixed defaults and
 // are not resolved by the heuristics. Gfx1250Backend resolves unset
 // knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier insertion (user value
-// wins; degenerate main-loop IR falls back to the static Rule3 default). See
+// wins; degenerate main-loop IR falls back to the static default). See
 // SchedulingKnobHeuristics.hpp.
+// ReduceClusterBarrierPerLoop: <0 unset, 0 = a Rule 3 handshake on every loop
+// trigger, >0 = one handshake per enclosing loop. propose() currently leaves it off.
 #define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                       \
     X(LockDsReadOrder, bool, true)                                                                 \
     X(EvenSpreadFillers, bool, true)                                                               \
@@ -137,6 +153,7 @@
     X(WmmaQueueCoverCycles, int, 56) /* queued WMMA cover kept (8 WMMAs of 8-14 cycles ~ 50-56) */ \
     X(DsReadCyclesPerLoad, int, 6)   /* LDS return rate (cycles per ds_load); 0 = off */           \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
+    X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
     X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
@@ -182,6 +199,11 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
 #define GEN_MEMBER_OPTION_WITH_DEFAULT(name, type, value) type name = value;
         MODULE_OPTIONS_WITH_DEFAULTS_LIST(GEN_MEMBER_OPTION_WITH_DEFAULT)
 #undef GEN_MEMBER_OPTION_WITH_DEFAULT
+
+        /// True when register allocation renumbers the kernel's SGPRs: the
+        /// mode applies and the configuration allocates scalars. A pass after
+        /// allocation that found SGPRs by the producer's numbering asks this.
+        bool sgprsCompacted() const;
     };
 
     /**
@@ -268,6 +290,17 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     std::optional<uint64_t> getMetaDataU64(const std::string& key) const;
 
     /**
+     * @brief Write uint64 metadata on the underlying Function.
+     *
+     * Occupancy-aware passes (InsertDelayAluPass) read
+     * kSigTotalVgprsMetaKey from here. toStinkyTofuModule stamps it; the
+     * logical-IR binding stamps the same key through this setter.
+     * @param key Metadata key
+     * @param value Metadata value
+     */
+    void setMetaDataU64(const std::string& key, uint64_t value);
+
+    /**
      * @brief Get the underlying Function
      *
      * This provides access to the internal Function representation.
@@ -327,6 +360,19 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     findGroupRange(const std::string& groupName) const;
 
     /**
+     * @brief Clear every group whose boundary instruction lives in \p blocks
+     *
+     * Bounds are raw nodes, so this must run before the delete, not after:
+     * reading a freed node to ask whether it is still listed is undefined. A
+     * group that loses a boundary is cleared, so findGroupRange() reports
+     * nothing rather than a dead range.
+     *
+     * @param blocks Blocks the caller is about to delete
+     * @return Names of the groups cleared, sorted, for the caller to report
+     */
+    std::vector<std::string> invalidateGroupsInBlocks(const std::vector<BasicBlock*>& blocks);
+
+    /**
      * @brief Update the group ranges
      * @param groups Group names if exists to update
      * @param instsCountBefore Number of instructions before updating
@@ -342,6 +388,17 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      */
     void setGroupRange(const std::string& groupName, IntrusiveListIterator<IRBase> first,
                        IntrusiveListIterator<IRBase> last);
+
+    /**
+     * @brief Move a group endpoint off a node that is about to be deleted.
+     *
+     * ScopeAdaptor erases TEXTBLOCK comments while extracting a region. Another
+     * group's stored first/last may be that comment (an epilogue anchor can sit
+     * inside an earlier noLoadLoopBody span). Point the endpoint at a neighbor
+     * that stays alive: \p ifFirst when this node is the group's first, \p ifLast
+     * when it is the group's last. A null replacement leaves that side unchanged.
+     */
+    void retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBase* ifLast);
 
     /**
      * @brief Get the ModuleOptions

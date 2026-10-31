@@ -178,6 +178,86 @@ class TestFoldWidth(unittest.TestCase):
             torch.testing.assert_close(got.reshape(want.shape), want)
 
 
+class TestForwardWidthFold(unittest.TestCase):
+    """The fold is direction-free: a forward runs folded on the same tensors."""
+
+    @unittest.skipUnless(_HAS_TORCH, "torch is optional")
+    def test_folded_forward_is_the_same_numbers(self):
+        import torch
+
+        from kernels.common.conv_implicit_gemm_dgrad import fold_width
+
+        def fwd(p, x, w):
+            # NHWC X / KYXC W -> NHWC Y, through torch's NCHW reference.
+            y = torch.nn.functional.conv2d(
+                x.permute(0, 3, 1, 2),
+                w.permute(0, 3, 1, 2),
+                stride=(p.sH, p.sW),
+                padding=(p.pH, p.pW),
+            )
+            return y.permute(0, 2, 3, 1).contiguous()
+
+        torch.manual_seed(0)
+        for kw in (
+            # ViT patch embedding, ConvNeXt stem, a 2x2 stride-2 downsample,
+            # and a padded strided case the fold still covers.
+            {
+                "N": 2,
+                "Hi": 32,
+                "Wi": 32,
+                "C": 3,
+                "K": 8,
+                "Y": 16,
+                "X": 16,
+                "sH": 16,
+                "sW": 16,
+            },
+            {"N": 2, "Hi": 12, "Wi": 12, "C": 3, "K": 8},
+            {
+                "N": 1,
+                "Hi": 8,
+                "Wi": 8,
+                "C": 16,
+                "K": 8,
+                "Y": 2,
+                "X": 2,
+                "sH": 2,
+                "sW": 2,
+            },
+            {
+                "N": 2,
+                "Hi": 11,
+                "Wi": 16,
+                "C": 3,
+                "K": 4,
+                "Y": 3,
+                "X": 4,
+                "sH": 2,
+                "sW": 2,
+                "pH": 1,
+                "pW": 2,
+            },
+        ):
+            p = _problem(**kw)
+            q = fold_width(p)
+            self.assertNotEqual(q, p)
+            x = torch.randn(p.N, p.Hi, p.Wi, p.C, dtype=torch.float64)
+            w = torch.randn(p.K, p.Y, p.X, p.C, dtype=torch.float64)
+            want = fwd(p, x, w)
+            got = fwd(q, x.reshape(q.N, q.Hi, q.Wi, q.C), w.reshape(q.K, q.Y, q.X, q.C))
+            torch.testing.assert_close(got, want)
+
+    def test_benchmark_launches_forward_folded(self):
+        from benchmarks.common.benchmark_implicit_gemm_conv import _launch_problem
+        from kernels.common.conv_implicit_gemm_dgrad import fold_width
+
+        patch = _problem(Wi=224, Hi=224, X=16, Y=16, sW=16, sH=16)
+        self.assertEqual(_launch_problem("fwd", patch), fold_width(patch))
+        plain = _problem(X=3, Y=3, sW=1, sH=1, pW=1, pH=1)
+        self.assertIs(_launch_problem("fwd", plain), plain)
+        self.assertIs(_launch_problem("wgrad", patch), patch)
+
+
 class TestPatchRecord(unittest.TestCase):
     def test_is_patch_problem(self):
         from kernels.common.conv_implicit_gemm_dgrad import is_patch_problem

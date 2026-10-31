@@ -117,11 +117,21 @@ def ctest_tests(
     return json.loads(listing.stdout)["tests"]
 
 
+_CTEST_READINESS_EXEMPT = frozenset({"rocke_arch_domain_reproducibility"})
+
+
 def ctest_ready(build_root: Path, config: str) -> bool:
     if not (build_root / "CTestTestfile.cmake").is_file():
         print("\n== ctest: SKIPPED (no configured test build) ==")
         return False
-    commands = [test.get("command", []) for test in ctest_tests(build_root, config)]
+    # A configured source-script test is immediately executable, but does not
+    # mean the registered native suite was built. Preserve run_all's contract:
+    # only launch the entire CTest suite once at least one build product exists.
+    commands = [
+        test.get("command", [])
+        for test in ctest_tests(build_root, config)
+        if test.get("name") not in _CTEST_READINESS_EXEMPT
+    ]
     if any(command and Path(command[0]).is_file() for command in commands):
         return True
     print(f"\n== ctest: SKIPPED (no built registered tests for {config}) ==")
@@ -130,7 +140,9 @@ def ctest_ready(build_root: Path, config: str) -> bool:
 
 # Native C++ test binaries that a pytest file drives through an env var. With a
 # configured build each one is resolved from CTest, so its pytest cases run
-# instead of skipping: (env var, CTest name, label).
+# instead of skipping: (env var, CTest name, label). The installed rocke_pytest
+# CTest entry (platform/CMakeLists.txt) sets the same variables to the installed
+# binaries; add a new pair in both places.
 NATIVE_PARITY_TESTS = (
     ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
     ("ROCKE_IR_TYPES_TEST", "rocke_ir_types", "native IR type rule parity"),
@@ -143,6 +155,16 @@ NATIVE_PARITY_TESTS = (
         "ROCKE_UNSIGNED_INT_OPS_CLI",
         "rocke_unsigned_int_ops",
         "native unsigned integer op C API parity",
+    ),
+    (
+        "ROCKE_ARCH_TARGET_TEST_EXE",
+        "rocke_arch_target_identity",
+        "native target identity parity",
+    ),
+    (
+        "ROCKE_BUFFER_RSRC_HIP_TEST",
+        "rocke_buffer_rsrc_hip",
+        "native buffer descriptor HIP parity",
     ),
 )
 
@@ -188,6 +210,7 @@ def configure_pytest_build(build_root: Path, config: str) -> None:
             "-B",
             str(build_root),
             f"-DCMAKE_BUILD_TYPE={config}",
+            f"-DPython3_EXECUTABLE={sys.executable}",
             "-DROCKE_BUILD_SHARED_ENGINE=ON",
             "-DBUILD_TESTING=ON",
         ],

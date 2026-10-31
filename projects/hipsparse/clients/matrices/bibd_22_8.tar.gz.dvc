@@ -1,0 +1,6 @@
+outs:
+- path: bibd_22_8.tar.gz
+  remote: sparse-matrices
+  md5: 455d5b699ea10232bbab5bc002219ae6
+  size: 20548479
+  hash: md5

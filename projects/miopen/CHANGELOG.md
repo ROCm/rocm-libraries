@@ -3,6 +3,54 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.3 for ROCm 10.3.0
+
+### Resolved Issues
+* [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
+  `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
+  the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
+  applicable CK instance was never tuned.
+* [Conv] Fixed deterministic-mode tuning of the 3D grouped backward-weights CK xdlops solver, which
+  used an inverted `NextLinear` exit condition in `SetNextValue`: enumeration stopped after the
+  first step, so an exhaustive Find tuned only the GenericSearch fallback config, and with exactly
+  one applicable CK instance the enumeration never terminated.
+* [RNN] Fixed an intermittent wrong forward output from the multi-stream LSTM path (bias, more than
+  one layer, `seq_len` >= 32) caused by an unordered bias add and input GEMM on different streams.
+* [Conv] Fixed incorrect gfx1200 backward-weights results for the bf16 problem
+  `96-18-18-3x3-96-35-35-256`, pad 1, stride 2, by removing the Composable Kernel
+  `DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<96, 96, 96, 48, ...>` entry the system database
+  served for it. That kernel returned a weight gradient with a relative error of about 0.306.
+  The problem now uses the next recorded solver, `GemmWrwUniversal`.
+* [Conv] Fixed wrong backward-weights results from `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC`
+  when a batch row read past N reaches 4 GiB. The fp16/bf16 kernels with filter padding read
+  batch rows in packs of 4 or 8, and those rows wrapped back into the tensor through 32-bit
+  offsets. Perf configs and problems that can wrap are now rejected.
+* [Conv] On gfx950, `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC` again accepts FP32 NCHW or
+  NHWC activations up to 4 GiB (previously 2 GiB), and the FP32 gfx950 find-db rows removed by
+  the 2 GiB bound are restored where the tuned config passes the new check. This restores
+  ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
+  does the weight tensor in every case.
+
+### Added
+* [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
+  RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
+  filters up to 7x7 and is selected through Find mode.
+
+### Changed
+* [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
+  never uses split-K, so these solvers are deterministic; previously, deterministic forward
+  convolutions could only use the GEMM and naive solvers.
+* [DB] Windows installs now place the system find-db, perf-db, kernel-db and AI heuristic model
+  files in `share\miopen\db`, the same location as Linux, instead of `bin`. MIOpen looks for them
+  in `share\miopen\db` under the parent of the directory that holds `MIOpen.dll`.
+  `MIOPEN_SYSTEM_DB_PATH` still overrides the location. A Windows build tree stages the same
+  files under `build\share\miopen\db` instead of `build\bin`, so a `BUILD_DEV=OFF` build runs
+  from the build tree without an install.
+
+### Removed
+* Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
+* Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
+
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues

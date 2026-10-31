@@ -6,7 +6,7 @@
  * (rocke/instances/gfx942/attention_tiled_2d.py, lines 5054-5287).
  *
  * Implements rocke_gfx942_attn2d_emit_epilogue: the post-loop async-copy drain,
- * the read of the loop results into l_final/acc_final/rcp_l/l_nonzero, the
+ * the read of the loop results into l_final/acc_final/rcp_l/l_zero, the
  * acc /= L normalization, and the three store variants:
  *   1. the transposed-x8 direct per-lane scalar global stores,
  *   2. the 32x32 Acc_lds 32-col stripe store, and
@@ -93,11 +93,12 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
         for(atom = 0; atom < ACC_M_ATOMS; ++atom)
             ctx->acc_final[n * ACC_M_ATOMS + atom] = final[ml_count_final + n * ACC_M_ATOMS + atom];
 
-    /* Per-row reciprocal of L (computed once, reused across stripes). */
+    /* Per-row reciprocal of L (computed once, reused across stripes). Only an
+     * exact-zero L marks a keyless row (stored as 0); a NaN L stays NaN in O. */
     for(r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         ctx->rcp_l[r] = rocke_b_rcp(b, ctx->l_final[r]);
     for(r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
-        ctx->l_nonzero[r] = rocke_b_fcmp(b, "ogt", ctx->l_final[r], zero_f);
+        ctx->l_zero[r] = rocke_b_fcmp(b, "oeq", ctx->l_final[r], zero_f);
 
     /* lane_col = lane % 16 ; lane_col32 = lane % 32. Reuse the cached prologue
      * SSA values (emitted once at line 2014) instead of recomputing. */
@@ -150,7 +151,7 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
                 = epilogue_q_desc_offset(ctx, op_token_t, op_qh_t, rocke_b_const_i32(b, 0));
 
             rocke_value_t* inv_l_t = rocke_b_rcp(b, ctx->l_final[0]);
-            rocke_value_t* l_nonzero_t = rocke_b_fcmp(b, "ogt", ctx->l_final[0], zero_f);
+            rocke_value_t* l_zero_t = rocke_b_fcmp(b, "oeq", ctx->l_final[0], zero_f);
 
             for(n = 0; n < ACC_N_TILES; ++n)
             {
@@ -165,7 +166,7 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
                     rocke_value_t* v = rocke_b_vec_extract(b, acc32, reg);
                     rocke_value_t* normalized = rocke_b_fmul(b, v, inv_l_t);
                     rocke_value_t* final_h = rocke_b_cast_f32_to(
-                        b, rocke_b_select(b, l_nonzero_t, normalized, zero_f), dtype);
+                        b, rocke_b_select(b, l_zero_t, zero_f, normalized), dtype);
                     rocke_if_t iff = rocke_b_scf_if(b, op_mask_t);
                     rocke_b_region_enter(b, iff.then_region);
                     {
@@ -239,7 +240,7 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
                 rocke_value_t* v = rocke_b_vec_extract(b, acc32, reg);
                 rocke_value_t* normalized = rocke_b_fmul(b, v, ctx->rcp_l[reg]);
                 rocke_value_t* final_h = rocke_b_cast_f32_to(
-                    b, rocke_b_select(b, ctx->l_nonzero[reg], normalized, zero_f), dtype);
+                    b, rocke_b_select(b, ctx->l_zero[reg], zero_f, normalized), dtype);
                 rocke_value_t* idx[2];
                 idx[0] = row;
                 idx[1] = col_in_stripe;
@@ -344,7 +345,7 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
                     b, rocke_gfx942_attn2d_acc_final_get(ctx, n, atom_i), in_atom);
                 rocke_value_t* normalized = rocke_b_fmul(b, v, ctx->rcp_l[reg]);
                 rocke_value_t* final_h = rocke_b_cast_f32_to(
-                    b, rocke_b_select(b, ctx->l_nonzero[reg], normalized, zero_f), dtype);
+                    b, rocke_b_select(b, ctx->l_zero[reg], zero_f, normalized), dtype);
                 rocke_value_t* idx[2];
                 idx[0] = row;
                 idx[1] = col_in_stripe;

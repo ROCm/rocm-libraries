@@ -33,6 +33,7 @@
 
 #include <atomic>
 #include <algorithm>
+#include <iterator>
 #include <map>
 
 #include <tensilelitehost/export.h>

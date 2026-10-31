@@ -240,6 +240,12 @@ class Destroyer {
                     const RegKey incomingPhysical = allocation_.assignmentOf(incomingId);
                     if (incomingPhysical == resultPhysical) continue;
 
+                    // A copy moves contents and an undefined value has none, so
+                    // the two registers may differ -- the freedom
+                    // AllocationConstraints::build() grants by leaving such an
+                    // edge out of the affinity set.
+                    if (incoming->isUndefined()) continue;
+
                     error("@" + function_.getName() + " phi#%" + std::to_string(resultId) +
                           " edge " + std::to_string(edge) + ": %" + std::to_string(incomingId) +
                           " is " + regKeyToString(incomingPhysical) + " but the result is " +

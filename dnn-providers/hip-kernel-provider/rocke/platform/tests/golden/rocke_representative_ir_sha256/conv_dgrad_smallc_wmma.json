@@ -1,0 +1,55 @@
+{
+  "aliases": {
+    "llvm24": "llvm23"
+  },
+  "flavors": {
+    "llvm20": {
+      "cases": {},
+      "expected_failures": {
+        "conv_dgrad_smallc_wmma/gfx1250/bf16_3x3s1_c4_pf": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
+        "conv_dgrad_smallc_wmma/gfx1250/fp16_7x7s2_c3": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        }
+      }
+    },
+    "llvm22": {
+      "cases": {},
+      "expected_failures": {
+        "conv_dgrad_smallc_wmma/gfx1250/bf16_3x3s1_c4_pf": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
+        "conv_dgrad_smallc_wmma/gfx1250/fp16_7x7s2_c3": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        }
+      }
+    },
+    "llvm23": {
+      "cases": {
+        "conv_dgrad_smallc_wmma/gfx1250/bf16_3x3s1_c4_pf": {
+          "arch": "gfx1250",
+          "bytes": 147708,
+          "family": "conv_dgrad_smallc_wmma",
+          "kernel_name": "dgrad_smallc_wmma_f3x3_s1_p1_c4_wc1_wp3_tc3_tp8_oh8_ow32_ck64_st2_pf_siterative-ilp_bf16",
+          "sha256": "726d637fb92165ae4df6f9f7eac63e4da0891bb3abc51cb76b6d8148b50db844",
+          "status": "ok"
+        },
+        "conv_dgrad_smallc_wmma/gfx1250/fp16_7x7s2_c3": {
+          "arch": "gfx1250",
+          "bytes": 122833,
+          "family": "conv_dgrad_smallc_wmma",
+          "kernel_name": "dgrad_smallc_wmma_f7x7_s2_p3_c3_wc2_wp4_tc5_tp6_oh32_ow32_ck32_st2",
+          "sha256": "292b3f42860025afa2f499510efa4c08a5305a2c74c10730f9a71e061c7cbaab",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}

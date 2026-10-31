@@ -242,7 +242,9 @@ def validate_dense_lse(
             False,
         ),
     ):
-        if tensor.dtype != torch.int32 or tuple(tensor.shape) != (spec.batch + 1,):
+        if str(tensor.dtype) != "torch.int32" or tuple(tensor.shape) != (
+            spec.batch + 1,
+        ):
             raise ValueError(f"{name} must be int32 [batch+1]")
         if not tensor.is_contiguous():
             raise ValueError(f"{name} must be contiguous")

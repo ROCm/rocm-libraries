@@ -304,6 +304,34 @@ _CONFIGS = {
         tile_size_override=16,
         use_wave_page_id_load=True,
     ),
+    18: dict(
+        # num_queries_per_kv=5 does not divide BLOCK_M=16: padded q-block.
+        head_size=128,
+        block_size=16,
+        num_query_heads=40,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    # --- idx19: head_size=192 MHA decode selector spec
+    19: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=96,
+        num_kv_heads=96,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_segments=16,
+        num_seqs=1,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+    ),
 }
 
 
@@ -329,20 +357,20 @@ def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32,
     )
 
 
-# 18-26: representative strided decode specs spanning the catalog's D x block
-# axes (D64/128/256 x block 16/32/64); 27 is 22 with waves_per_eu=2.
+# 20-28: representative strided decode specs spanning the catalog's D x block
+# axes (D64/128/256 x block 16/32/64); 29 is 24 with waves_per_eu=2.
 _CONFIGS.update(
     {
-        18: _strided_decode(64, 16, None, "fp16", 64),
-        19: _strided_decode(64, 32, None, "bf16", 16),
-        20: _strided_decode(64, 64, None, "fp16", 8),
-        21: _strided_decode(128, 16, None, "bf16", 60, heads=(16, 16)),
-        22: _strided_decode(128, 32, 16, "fp16", 16),
-        23: _strided_decode(128, 64, 32, "bf16", 2),
-        24: _strided_decode(256, 16, None, "fp16", 22),
-        25: _strided_decode(256, 32, 16, "bf16", 64, heads=(64, 4)),
-        26: _strided_decode(256, 64, 32, "fp16", 8),
-        27: dict(_strided_decode(128, 32, 16, "fp16", 16), waves_per_eu=2),
+        20: _strided_decode(64, 16, None, "fp16", 64),
+        21: _strided_decode(64, 32, None, "bf16", 16),
+        22: _strided_decode(64, 64, None, "fp16", 8),
+        23: _strided_decode(128, 16, None, "bf16", 60, heads=(16, 16)),
+        24: _strided_decode(128, 32, 16, "fp16", 16),
+        25: _strided_decode(128, 64, 32, "bf16", 2),
+        26: _strided_decode(256, 16, None, "fp16", 22),
+        27: _strided_decode(256, 32, 16, "bf16", 64, heads=(64, 4)),
+        28: _strided_decode(256, 64, 32, "fp16", 8),
+        29: dict(_strided_decode(128, 32, 16, "fp16", 16), waves_per_eu=2),
     }
 )
 

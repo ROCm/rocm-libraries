@@ -9,7 +9,7 @@
  *   1. the segment kernel via
  *      rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm (paged K/V)
  *      or rocke_build_unified_attention_3d_tiled_strided_gfx942 (configs
- *      18-27: strided K/V, the Python kv_layout="strided"), then
+ *      20-29: strided K/V, the Python kv_layout="strided"), then
  *   2. the reduce kernel via
  *      rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm, with a
  *      rocke_unified_attention_reduce_tiled_spec_t derived from the same config
@@ -335,36 +335,64 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* 
         s->tile_size_override = 16;
         s->use_wave_page_id_load = true;
         break;
-    /* 18-26: representative strided decode specs spanning the catalog's D x block
-     * axes (D64/128/256 x block 16/32/64); 27 is 22 with waves_per_eu=2. */
     case 18:
+        /* num_queries_per_kv=5 does not divide BLOCK_M=16: padded q-block. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 40;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
+    /* head_size=192 MHA decode selector spec */
+    case 19:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 96;
+        s->num_kv_heads = 96;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_segments = 16;
+        s->num_seqs = 1;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        break;
+    /* 20-28: representative strided decode specs spanning the catalog's D x block
+     * axes (D64/128/256 x block 16/32/64); 29 is 24 with waves_per_eu=2. */
+    case 20:
         strided_decode(s, 64, 16, 0, "fp16", 64, 32, 8);
         break;
-    case 19:
+    case 21:
         strided_decode(s, 64, 32, 0, "bf16", 16, 32, 8);
         break;
-    case 20:
+    case 22:
         strided_decode(s, 64, 64, 0, "fp16", 8, 32, 8);
         break;
-    case 21:
+    case 23:
         strided_decode(s, 128, 16, 0, "bf16", 60, 16, 16);
         break;
-    case 22:
+    case 24:
         strided_decode(s, 128, 32, 16, "fp16", 16, 32, 8);
         break;
-    case 23:
+    case 25:
         strided_decode(s, 128, 64, 32, "bf16", 2, 32, 8);
         break;
-    case 24:
+    case 26:
         strided_decode(s, 256, 16, 0, "fp16", 22, 32, 8);
         break;
-    case 25:
+    case 27:
         strided_decode(s, 256, 32, 16, "bf16", 64, 64, 4);
         break;
-    case 26:
+    case 28:
         strided_decode(s, 256, 64, 32, "fp16", 8, 32, 8);
         break;
-    case 27:
+    case 29:
         strided_decode(s, 128, 32, 16, "fp16", 16, 32, 8);
         s->has_waves_per_eu = true;
         s->waves_per_eu = 2;
@@ -372,7 +400,7 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* 
     default:
         return -1;
     }
-    if(idx >= 18)
+    if(idx >= 20)
         *strided = true;
     return 0;
 }

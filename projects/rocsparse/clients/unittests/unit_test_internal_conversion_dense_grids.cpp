@@ -62,6 +62,10 @@ using namespace rocsparse_ut;
 
 namespace
 {
+    // Index type of the rocsparse_int buffers below (i64 with rocsparse_ILP64).
+    constexpr rocsparse_indextype rocsparse_int_type
+        = sizeof(rocsparse_int) == 4 ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
+
     // grid.x limits the tests shrink maxGridSize[0] to. 0 means the device limit.
     constexpr int limits[] = {0, 1, 3, 7};
 
@@ -174,8 +178,8 @@ namespace
                                                      d_ptr.ptr,
                                                      nullptr,
                                                      nullptr,
-                                                     rocsparse_indextype_i32,
-                                                     rocsparse_indextype_i32,
+                                                     rocsparse_int_type,
+                                                     rocsparse_int_type,
                                                      rocsparse_index_base_zero,
                                                      dt_of<T>()),
                           rocsparse_status_success);
@@ -189,8 +193,8 @@ namespace
                                                      d_ptr.ptr,
                                                      nullptr,
                                                      nullptr,
-                                                     rocsparse_indextype_i32,
-                                                     rocsparse_indextype_i32,
+                                                     rocsparse_int_type,
+                                                     rocsparse_int_type,
                                                      rocsparse_index_base_zero,
                                                      dt_of<T>()),
                           rocsparse_status_success);

@@ -292,7 +292,7 @@ def test_validatemetadata_main_non_strict_bad_exits_zero(tmp_path, monkeypatch, 
 
 def test_validatemetadata_main_default_root_uses_shipped_kernels(monkeypatch, capsys):
     # With no --custom-kernels-root, main() auto-detects the shipped
-    # Tensile/CustomKernels directory and validates the real kernels.
+    # tensilelite/CustomKernels directory and validates the real kernels.
     monkeypatch.setattr(sys, "argv", ["prog"])
 
     with pytest.raises(SystemExit) as e:

@@ -598,8 +598,8 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
 {
     SKIP_IF_NO_DEVICES();
 
-    // ResampleBwd has no GPU plan yet - should throw
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    // SdpaBwd has no GPU plan yet - should throw
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
 
     const std::unordered_map<int64_t, void*> variantPack;
 

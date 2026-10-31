@@ -167,15 +167,37 @@ class TestTuningSpace(unittest.TestCase):
         # use_kv_lds_swizzle x use_wave_page_id_load.
         self.assertEqual(len(specs), 40)
 
+    def test_3d_space_drops_kv_lds_swizzle_at_head_size_192(self):
+        """24 chunks per K/V row: the XOR swizzle would leave the row."""
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch):
+                specs = _sampled(
+                    f"attention_{arch}_u3d_splitkv_seg64_t1xb",
+                    256,
+                    arch=arch,
+                    seqlen_q=1,
+                    seqlen_k=4096,
+                    hdim_q=192,
+                    hdim_v=192,
+                )
+                self.assertTrue(specs)
+                self.assertFalse(any(s.kernel_spec.use_kv_lds_swizzle for s in specs))
+
     def test_3d_cache_policy_base_follows_the_problem(self):
         """The 3D builder resolves the K/V cache policy per problem
         (``_kv_cache_policy_3d``): restating it names the default kernel, the
         other value stays reachable, and every id records the policy built."""
         for arch in ("gfx950", "gfx942"):
-            for seqlen_q, auto in ((1, "stream"), (1024, "all")):
-                with self.subTest(arch=arch, seqlen_q=seqlen_q):
+            # Decode streams K/V past the caches only when it exceeds the
+            # last-level cache (64 x 4096 tokens x 8 heads here, not 1 x 4096).
+            for seqlen_q, batch, auto in (
+                (1, 64, "stream"),
+                (1, 1, "all"),
+                (1024, 1, "all"),
+            ):
+                with self.subTest(arch=arch, seqlen_q=seqlen_q, batch=batch):
                     prefix = f"attention_{arch}_u3d_splitkv_seg64_t1xb"
-                    kw = dict(arch=arch, seqlen_q=seqlen_q, seqlen_k=4096)
+                    kw = dict(arch=arch, batch=batch, seqlen_q=seqlen_q, seqlen_k=4096)
                     specs = _sampled(prefix, 1000, **kw)
                     kernels = {repr(s.kernel_spec) for s in specs}
                     self.assertEqual(len(kernels), len(specs))
@@ -314,8 +336,20 @@ class TestTuningSpace(unittest.TestCase):
             seqlen_q=1,
             seqlen_k=4096,
         )
+        # The gfx942 3D kernel has no i64 path; its K/V loader sets the cache it
+        # reads. The wide loader reads 2^31 bytes (65536 of these 32 KiB
+        # blocks), the async copies stop at the 0x7FFF0000 buffer range.
+        wide = next(s for s in gfx942_split_specs if s.kernel_spec.use_wide_kv_load)
+        not_wide = next(
+            s for s in gfx942_split_specs if not s.kernel_spec.use_wide_kv_load
+        )
+        for n in (65535, 65536):
+            self.assertFalse(wide.with_num_kv_blocks(n).kernel_spec.use_i64_kv_addr)
         with self.assertRaisesRegex(NotImplementedError, "does not support"):
-            gfx942_split_specs[0].with_num_kv_blocks(65535)
+            wide.with_num_kv_blocks(65537)
+        self.assertFalse(not_wide.with_num_kv_blocks(65534).kernel_spec.use_i64_kv_addr)
+        with self.assertRaisesRegex(NotImplementedError, "does not support"):
+            not_wide.with_num_kv_blocks(65535)
 
         # The 4-warp GQA builder has no i64 path either, but shares its spec
         # class with the default builder. Its i32 element offsets read 2^31
@@ -816,7 +850,7 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
     def test_production_specs_are_legal_distinct_and_start_at_the_shipped_spec(self):
         req = _dense_request()
         grouped = _by_candidate(_dense_combos(req))
-        self.assertEqual(len(grouped), 3, sorted(grouped))
+        self.assertEqual(len(grouped), 4, sorted(grouped))
         for name, (candidate, specs) in grouped.items():
             with self.subTest(candidate=name):
                 probe = replace(
@@ -863,7 +897,7 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
         kernels = [spec.kernel_spec for spec in specs]
         self.assertEqual(
             {k.resolved_persist_decode for k in kernels},
-            {"qb_major", "hkv_major", "gqa_pair", "gqa_pair_2phase"},
+            Gfx950AttentionDenseSpec.supported_persist_decodes() - {"auto"},
         )
         swept_counts = {k.num_persistent for k in kernels}
         for policy in ("gqa_pair", "gqa_pair_2phase", "0.75x", "1.25x", "2x"):
@@ -1020,6 +1054,9 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                 _gfx942_request(
                     dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1
                 ),
+                # A wide sliding window keeps the default geometry, so the
+                # window-only knobs are swept from their defaults.
+                _gfx942_request(sliding_window=512),
             )
         )
         missing = _dense_swept_fields("gfx942") - changed
@@ -1067,18 +1104,26 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         def canonical(knobs, r=req):
             return tuning_spec_with_knobs(r, "gfx942_dense", knobs)
 
+        self.assertTrue(base.persistent)  # D128: the default spec is persistent
         redundant = (
             dict(use_cfvst=True),  # the policy already turns it on here
             dict(use_exp2_fast=base.resolved_use_exp2_fast()),
             dict(persistent=base.persistent),  # base-relative no-op
-            dict(num_persistent=base.num_persistent * 2),  # grid body ignores it
-            dict(persist_decode="hkv_major"),
-            dict(interleave=True),
+            dict(nonpersist_decode="hq_minor_swz"),  # persistent body ignores it
         )
         default = attention_tuning_spec(req, "gfx942_dense")
         for knobs in redundant:
             with self.subTest(**knobs):
                 self.assertEqual(canonical(knobs), default)
+        # The grid body ignores the persistent-only knobs.
+        grid = dict(persistent=False)
+        for knobs in (
+            dict(num_persistent=base.num_persistent * 2),
+            dict(persist_decode="hkv_major"),
+            dict(interleave=True),
+        ):
+            with self.subTest(grid=knobs):
+                self.assertEqual(canonical({**grid, **knobs}), canonical(grid))
         # No cfvst path at D64: the V knobs are out of scope, so dropped, not refused.
         d64_default = attention_tuning_spec(d64_req, "gfx942_dense")
         self.assertEqual(d64_default.kernel_spec, d64)

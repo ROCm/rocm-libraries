@@ -29,6 +29,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsDynamicPass.hpp"
@@ -166,6 +167,23 @@ int countSGetpc(const Function& func) {
     return c;
 }
 
+/// Destination index of every `s_getpc_b64` in program order: the entry cover's
+/// first, then one per ladder arm.
+std::vector<uint32_t> getpcDestIndexes(const Function& func) {
+    std::vector<uint32_t> dests;
+    for (const BasicBlock& bb : func) {
+        for (auto it = bb.begin(); it != bb.end(); ++it) {
+            const IRBase* n = it.getNodePtr();
+            if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+            const StinkyInstruction& inst = *cast<StinkyInstruction>(n);
+            const char* m = inst.getHwInstDesc() ? inst.getHwInstDesc()->mnemonic : nullptr;
+            if (m && std::strcmp(m, "s_getpc_b64") == 0 && !inst.getDestRegs().empty())
+                dests.push_back(inst.getDestRegs().front().reg.idx);
+        }
+    }
+    return dests;
+}
+
 /// Collect, in program order, the mnemonics of the burst-relevant instructions (getpc /
 /// add-family / prefetch). Used to pin the INTRA-burst instruction ORDER, which the
 /// count/label/offset assertions elsewhere cannot observe (they are order-invariant).
@@ -228,12 +246,23 @@ class SwInstructionPrefetchAbsDynamicPassTest : public ::testing::Test {
         gemmConfig.NumGRM = 1;
     }
 
-    PassManager makePm(int baseSgpr = 64, bool cpCover = false) {
+    PassManager makePm(int baseSgpr = 64, bool cpCover = false, bool afterSgprCompact = false) {
         PassManager pm;
         registerAllAnalyses(pm.getAnalysisManager());
         pm.setGemmTileConfig(gemmConfig);
-        pm.addPass(createSwInstructionPrefetchAbsDynamicPass(baseSgpr, {}, cpCover));
+        pm.addPass(
+            createSwInstructionPrefetchAbsDynamicPass(baseSgpr, {}, cpCover, afterSgprCompact));
         return pm;
+    }
+
+    /// Name s57 as the kernel's highest SGPR, as if compact had renumbered it,
+    /// and publish where the dispatch stopped filling scalars.
+    void compactedTo57() {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+        mov->addDestReg(StinkyRegister("s", 57, 1));
+        mov->addSrcReg(StinkyRegister(0));
+        func->setMetaData(kSigDispatchFilledSgprsMetaKey, 8);
     }
 
     std::string runWithDebug(int baseSgpr = 64) {
@@ -465,6 +494,34 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_CpCover_EmittedAtE
     EXPECT_EQ(countSGetpc(*func), 4);  // 1 cover (entry) + 3 arms (MGE)
     EXPECT_TRUE(firstGetpcBeforeLabel(*func, "label_MultiGemmEnd"));  // cover is at entry
     EXPECT_EQ(countLabel(*func, "label_SW_PrefetchAbs_CpBoundary"), 1);
+}
+
+// Without compact both sites write the triple Tensile reserved, which it keeps
+// live across the prolog and the label_MultiGemmEnd window alike.
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, WithoutCompactBothSitesUseTheReservedTriple) {
+    buildThreeArmEmittableKernel(bb, arch);
+
+    auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true);
+    pm.run(*func);
+
+    EXPECT_EQ(getpcDestIndexes(*func), std::vector<uint32_t>({64u, 64u, 64u, 64u}));
+}
+
+// After compact that reservation names nothing, and the two sites no longer have
+// the same freedom. The cover is at kernel entry, where no instruction has run,
+// so it reuses a block inside the kernel's range (s[52:54], below the pair the
+// prologue takes). The ladder sits after label_MultiGemmEnd, where any allocated
+// register may still be holding a value, so it has to stay above everything the
+// kernel names (s57 → s[58:60]).
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, AfterCompactLadderStaysAboveTheAllocatedRange) {
+    buildThreeArmEmittableKernel(bb, arch);
+    compactedTo57();
+
+    auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true, /*afterSgprCompact=*/true);
+    pm.run(*func);
+
+    EXPECT_TRUE(firstGetpcBeforeLabel(*func, "label_MultiGemmEnd"));  // dests[0] is the cover
+    EXPECT_EQ(getpcDestIndexes(*func), std::vector<uint32_t>({52u, 58u, 58u, 58u}));
 }
 
 // With the gfx1250 hardware-entrypoint prologue present (s_mov_b64 s[64:65], 0 / v_nop /

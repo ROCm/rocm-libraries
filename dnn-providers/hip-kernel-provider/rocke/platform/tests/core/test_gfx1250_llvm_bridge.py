@@ -1,12 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Focused validation for the standalone gfx1250 LLVM 23 bridge."""
+"""Focused validation for the gfx1250 LLVM23-generation emission profile."""
 
 from __future__ import annotations
 
 import unittest
 
+from rocke.core.backend import BackendError, _lower_via_cpp_engine
 from rocke.core.ir import F32, I16, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
@@ -54,6 +55,7 @@ def _lower(kernel, *, arch="gfx1250", flavor="llvm23"):
 class TestGfx1250LlvmBridge(unittest.TestCase):
     def test_exact_control_intrinsics_and_inline_asm(self):
         llvm = _lower(_build_all())
+        self.assertEqual(llvm, _lower(_build_all(), flavor="llvm24"))
         expected = (
             "call void @llvm.amdgcn.s.wait.tensorcnt(i16 3)",
             "call void @llvm.amdgcn.s.barrier.signal(i32 1)",
@@ -108,6 +110,36 @@ class TestGfx1250LlvmBridge(unittest.TestCase):
         parsed = parse(text)
         self.assertEqual(text, serialize(parsed))
         self.assertEqual(_lower(kernel), _lower(parsed))
+
+    def test_non_string_minimum_flavor_is_rejected_by_both_engines(self):
+        builder = IRBuilder("malformed_minimum_flavor")
+        value = builder.const_i32(0)
+        result = builder.inline_asm(
+            "v_mov_b32 $0, $1",
+            "=v,v",
+            [value],
+            result_type=I32,
+            sideeffect=True,
+        )
+        result.op.attrs["minimum_llvm_flavor"] = 23
+        builder.ret()
+        kernel = builder.kernel
+        message = (
+            "tile.inline_asm failed - minimum_llvm_flavor has a non-string "
+            "value, expected a string"
+        )
+        with self.assertRaisesRegex(TypeError, message):
+            _lower(kernel, flavor="llvm20")
+
+        serialized = serialize(kernel)
+        try:
+            _lower_via_cpp_engine(serialized, "gfx1250", "llvm20")
+        except BackendError as exc:
+            self.skipTest(f"C++ engine unavailable: {exc}")
+        except RuntimeError as exc:
+            self.assertIn(message, str(exc))
+        else:
+            self.fail("C++ engine accepted a non-string minimum_llvm_flavor")
 
     def test_unsupported_arch_rejected(self):
         with self.assertRaisesRegex(

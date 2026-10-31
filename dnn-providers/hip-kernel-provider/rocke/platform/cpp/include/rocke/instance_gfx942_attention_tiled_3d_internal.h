@@ -119,6 +119,7 @@ typedef struct rocke_gfx942_attn_tiled_3d_config
     int QK_N_TILES; /* T // MFMA_N */
     int PV_K_ITERS; /* T // PV_K_STEP */
     int PV_N_TILES; /* HD // MFMA_N */
+    bool Q_IN_V_SLOT; /* HD == 192 && T >= BLOCK_M: stage Q through V_lds */
 
     int THREADS; /* 64 */
     int binary_search_iters; /* spec.binary_search_iters */

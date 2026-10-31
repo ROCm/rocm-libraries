@@ -2,16 +2,25 @@
 
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
-under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds three rocKE bundles: the DVC-stored
-`rocKE/gfx950_attention_dense/` and `rocKE/gfx942_attention_unified_3d/` (their KDPs are
-stored in DVC, see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below),
-whose KDPs declare gfx950 and gfx942 respectively, and the git-stored
-`rocKE/gfx1151_wmma_attention/`, whose KDP declares gfx11 (gfx1100 to gfx1103, gfx1150 to
-gfx1153) and gfx12 (gfx1200, gfx1201) targets. Production packaging runs for a build whose
-GPU targets include any of these and that has rocKE enabled
-(`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk). For
-any other build the root has nothing to pack and production packaging is dormant, unless
-the cache variable below is pointed elsewhere.
+under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two producers' bundles:
+
+- `rocKE/gfx950_attention_dense/` and `rocKE/gfx942_attention_unified_3d/` (their KDPs are
+  stored in DVC, see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc)
+  below), whose KDPs declare gfx950 and gfx942 respectively. Each packs for a build whose
+  GPU targets include its arch and that has rocKE enabled
+  (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the walk).
+- `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
+  their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
+  that target's KDP. Each `<target>/` directory is a DVC output on the same `ingestor`
+  remote (`<target>.dvc` in git), fetched and checked like rocKE's (below). The
+  target is a concrete arch or an LLVM generic target such as `gfx11-generic`, whose UKDs
+  list every member arch, so the same objects pack into each member's shard. A bundle
+  packs for a build whose GPU targets include one of its arches and that has FlyDSL
+  enabled (`HIPKERNELPROVIDER_ENABLE_FLYDSL`, OFF by default; TheRock turns it on). The objects and descriptors are
+  generated, not hand-written: see `flydsl/REGEN.md` in the provider tree.
+
+For any other build the root has nothing to pack and production packaging is dormant,
+unless the cache variable below is pointed elsewhere.
 
 ## Authoring a bundle
 
@@ -122,6 +131,9 @@ The small descriptors name each other by id, not by path, so moving a KDP needs 
   checked. Set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` (default OFF) to make this
   an error. Release builds should set it.
 - **`OFF`:** rocKE descriptors are not consumed. DVC is not needed.
+- **FlyDSL:** each `FlyDSL/<op>/<target>.dvc` pointer is checked the same way when
+  `HIPKERNELPROVIDER_ENABLE_FLYDSL` is ON (with the kernel ingestor); a target not pulled
+  ships no FlyDSL kernels. `flydsl/REGEN.md` covers updating them.
 
 ### Adding or changing a large file
 

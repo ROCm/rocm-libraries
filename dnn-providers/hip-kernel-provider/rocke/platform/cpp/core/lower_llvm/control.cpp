@@ -1530,6 +1530,23 @@ static void _op_tile_s_setprio(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.setprio(i16 %lld)", (long long)level);
 }
 
+/* Python _op_tile_trap. */
+static void _op_tile_trap(rocke_lower_t* L, const rocke_op_t* op)
+{
+    char err[64];
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    if(const char* error = rocke_i_trap_op_error(op, err, sizeof err))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
+    rocke_ll_need(L, "trap");
+    rocke_ll_emitf(L, "  call void @llvm.trap()");
+}
+
 /* ======================================================================== */
 /* scf.* / cf.* control flow                                                */
 /* ======================================================================== */
@@ -2069,10 +2086,20 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
     }
 }
 
-/* Python _op_scf_for: pick unrolled vs normal lowering. */
+/* Python _op_scf_for: refuse a loop-carried buffer descriptor, then pick
+ * unrolled vs normal lowering. */
 static void _op_scf_for(rocke_lower_t* L, const rocke_op_t* op)
 {
-    if(!rocke_ll_live(L) || op->num_operands < 3)
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    char descriptor_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", descriptor_error);
+    }
+    if(op->num_operands < 3)
     {
         return;
     }
@@ -2268,12 +2295,50 @@ static void _op_scf_if(rocke_lower_t* L, const rocke_op_t* op)
  *   if.end:
  *     [continuation]
  *
- * Mirrors Python _op_scf_if_else (lower_llvm.py lines 5276-5346).
+ * An if/else with results takes each result from the scf.yield that ends each
+ * branch, through one phi per result at the head of if.end.
+ *
+ * Mirrors Python _op_scf_if_else.
  */
+
+/* Python _lower_if_else_branch: lower one branch of the scf.if_else `op`; the
+ * operands its closing scf.yield gives the results land in `*values` (none
+ * when `op` has none). */
+static void ll_lower_if_else_branch(rocke_lower_t* L,
+                                    const rocke_op_t* op,
+                                    const rocke_region_t* region,
+                                    const char* const** values,
+                                    int* num_values)
+{
+    *values = NULL;
+    *num_values = 0;
+    if(op->num_results == 0)
+    {
+        rocke_ll_lower_region(L, region);
+        return;
+    }
+    rocke_ll_yield_push(L);
+    rocke_ll_lower_region(L, region);
+    rocke_ll_yield_pop(L, values, num_values);
+}
+
 static void _op_scf_if_else(rocke_lower_t* L, const rocke_op_t* op)
 {
-    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_regions < 2)
+    if(!rocke_ll_live(L))
         return;
+    /* Refuse a malformed if/else, or a branch that does not yield the results,
+     * before reading the op or emitting. */
+    for(int branch = 0; branch < 2; branch++)
+    {
+        const rocke_op_t* yld = NULL;
+        char err[ROCKE_ERR_MSG_CAP];
+        if(!rocke_i_if_else_branch_yield(op, branch, &yld, err, sizeof(err)))
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", err);
+    }
+    const char* const* then_values = NULL;
+    const char* const* else_values = NULL;
+    int num_then_values = 0;
+    int num_else_values = 0;
     const rocke_value_t* cond = op->operands[0];
     rocke_ll_block_t* cur = rocke_ll_current(L);
     rocke_ll_block_t* then_blk = rocke_ll_new_block(L, "if.then");
@@ -2288,7 +2353,7 @@ static void _op_scf_if_else(rocke_lower_t* L, const rocke_op_t* op)
         cur->terminated = true;
     }
     /* Lower then branch. */
-    rocke_ll_lower_region(L, op->regions[0]);
+    ll_lower_if_else_branch(L, op, op->regions[0], &then_values, &num_then_values);
     rocke_ll_block_t* then_last = rocke_ll_current(L);
     /* then falls through to join; use %IF_END placeholder. */
     if(then_last && !then_last->terminated)
@@ -2299,7 +2364,7 @@ static void _op_scf_if_else(rocke_lower_t* L, const rocke_op_t* op)
     /* Create else block (becomes _current). */
     rocke_ll_block_t* else_blk = rocke_ll_new_block(L, "if.else");
     /* Lower else branch. */
-    rocke_ll_lower_region(L, op->regions[1]);
+    ll_lower_if_else_branch(L, op, op->regions[1], &else_values, &num_else_values);
     rocke_ll_block_t* else_last = rocke_ll_current(L);
     /* Create join block. */
     rocke_ll_block_t* end_blk = rocke_ll_new_block(L, "if.end");
@@ -2307,6 +2372,20 @@ static void _op_scf_if_else(rocke_lower_t* L, const rocke_op_t* op)
     {
         rocke_ll_block_emitf(L, else_last, "  br label %%%s", end_blk->label);
         else_last->terminated = true;
+    }
+    /* One phi per result (Python zips the results with both yields). */
+    for(int i = 0; i < op->num_results && i < num_then_values && i < num_else_values; i++)
+    {
+        const rocke_value_t* result = op->results[i];
+        rocke_ll_block_emitf(L,
+                             end_blk,
+                             "  %s = phi %s [ %s, %%%s ], [ %s, %%%s ]",
+                             result->name,
+                             rocke_ll_llvm_type(L, result->type),
+                             then_values[i],
+                             then_last->label,
+                             else_values[i],
+                             else_last->label);
     }
     /* Backpatch placeholders. */
     if(cur && else_blk)
@@ -2421,6 +2500,7 @@ void rocke_ll_register_vector(void)
                          _op_gpu_cluster_workgroup_max_flat_id);
     rocke_ll_set_handler(ROCKE_OP_TILE_CLUSTER_BARRIER, _op_tile_cluster_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_SETPRIO, _op_tile_s_setprio);
+    rocke_ll_set_handler(ROCKE_OP_TILE_TRAP, _op_tile_trap);
     rocke_ll_set_handler(ROCKE_OP_TILE_IGLP_OPT, _op_tile_iglp_opt);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_BARRIER, _op_tile_sched_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_GROUP_BARRIER, _op_tile_sched_group_barrier);

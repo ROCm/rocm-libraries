@@ -13,6 +13,11 @@ def preserve_rocisa_kernel_state():
     ``rocIsa.setKernel`` changes the thread's instruction spelling and clears
     register-name tracking. Tests can safely retain the former while restoring
     the latter for the next pytest item.
+
+    ``outputNoComment`` is process-wide. The stinkytofu adaptor returns the
+    live options object from ``getOutputOptions()``, so a library emit that
+    flips the flag would otherwise strip ``//`` comments from every later
+    ``str()`` in the same pytest process.
     """
     from rocisa import rocIsa
 
@@ -21,9 +26,13 @@ def preserve_rocisa_kernel_state():
     previous_vgpr_idx = dict(ri.getVgprIdx())
     previous_vgpr_msb = ri.getVgprMsb()
     previous_force_scaled_wmma = ri.getForceScaledWMMA()
+    previous_no_comment = ri.getOutputOptions().outputNoComment
     try:
         yield
     finally:
+        opts = ri.getOutputOptions()
+        opts.outputNoComment = previous_no_comment
+        ri.setOutputOptions(opts)
         ri.setForceScaledWMMA(previous_force_scaled_wmma)
         previous_isa = getattr(previous_kernel, "isa", None)
         if previous_isa is None:

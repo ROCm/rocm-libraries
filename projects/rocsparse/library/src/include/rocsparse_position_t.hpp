@@ -52,4 +52,9 @@ namespace rocsparse
         void*               get_position();
     };
 
+    // Copy position[0] to the other batch slots. A zero value stride factorizes
+    // only instance 0, and the remaining instances must still report its pivot.
+    rocsparse_status broadcast_instance0_async(rocsparse_handle handle,
+                                               position_t*      position,
+                                               int64_t          batch_count);
 }

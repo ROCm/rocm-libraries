@@ -19,7 +19,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # TN - StreamK=3, full tree-reduction (no StreamKForceDPOnly), 1-D ClusterDim
+  # TN - static StreamK with linear fixup (no DP-only override), 1-D ClusterDim
   # range [2,1]/[4,1]/[8,1]. Same base sweep as sk_mxf4gemm_tdm.yaml with a 1-D
   # ClusterDim range added: exercises the enableCluster guard in
   # StreamKTwoTileDPFirst.preLoop on the general/split tile-splitting + fixup path
