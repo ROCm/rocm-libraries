@@ -146,6 +146,21 @@ def shared_isa_info_map(arch):
     return _shared_isa_info_map(_isa_of(arch))
 
 
+def use_isa(arch, wavefront):
+    """Initialize cached capabilities and select an ISA and wavefront for this test.
+
+    Selection is not cached: another test may have changed the active kernel.
+    The unit fixtures restore the previous kernel state after each test.
+    """
+    import rocisa
+
+    isa = _isa_of(arch)
+    shared_isa_info_map(isa)
+    ri = rocisa.rocIsa.getInstance()
+    ri.setKernel(tuple(isa), wavefront)
+    return ri
+
+
 def _probe_isa_chunk(arguments):
     """Probe in a fresh process and return rocisa's pickleable capability data."""
     import rocisa
