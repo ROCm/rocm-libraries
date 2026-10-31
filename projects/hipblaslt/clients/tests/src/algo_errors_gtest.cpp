@@ -8,7 +8,9 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -20,6 +22,22 @@ namespace
 
     // No solution library holds this many solutions.
     constexpr int kUnknownIndex = 0x3fffffff;
+
+    using LayoutPtr
+        = std::unique_ptr<hipblasLtMatrixLayoutOpaque_t, decltype(&hipblasLtMatrixLayoutDestroy)>;
+
+    // A square layout with the given order, owned so a failed assertion still destroys it.
+    LayoutPtr layoutWithOrder(hipblasLtOrder_t order)
+    {
+        hipblasLtMatrixLayout_t l = nullptr;
+        EXPECT_EQ(hipblasLtMatrixLayoutCreate(&l, kType, kSize, kSize, kSize),
+                  HIPBLAS_STATUS_SUCCESS);
+        const int32_t value = order;
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      l, HIPBLASLT_MATRIX_LAYOUT_ORDER, &value, sizeof(value)),
+                  HIPBLAS_STATUS_SUCCESS);
+        return LayoutPtr(l, &hipblasLtMatrixLayoutDestroy);
+    }
 
     hipblasLtMatmulAlgo_t algoWithUnknownIndex()
     {
@@ -252,6 +270,479 @@ namespace
         std::vector<hipblaslt_ext::GemmInputs>   ins{inputs(), in};
         EXPECT_EQ(grouped.setProblem(size, size, size, batch, epilogues, ins),
                   HIPBLAS_STATUS_NOT_SUPPORTED);
+    }
+
+    // Matmul computes every layout as column-major, so a row-major A, B, C or D is refused
+    // rather than multiplied as if it were column-major (ROCM-29960). ORDER_COL set
+    // explicitly on all four is the control: it must still get algorithms and pass every call.
+    TEST_F(AlgoErrors, smoke_RowOrderIsRefused)
+    {
+        const LayoutPtr         colOwner = layoutWithOrder(HIPBLASLT_ORDER_COL);
+        const LayoutPtr         rowOwner = layoutWithOrder(HIPBLASLT_ORDER_ROW);
+        hipblasLtMatrixLayout_t col = colOwner.get(), row = rowOwner.get();
+
+        hipblasLtMatmulHeuristicResult_t control{};
+        int                              controlCount = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, desc, col, col, col, col, pref, 1, &control, &controlCount),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(controlCount, 0);
+
+        // rowIndex -1 is the all-column control; 0..3 puts ROW on A, B, C or D alone.
+        for(int rowIndex = -1; rowIndex < 4; rowIndex++)
+        {
+            hipblasLtMatrixLayout_t mats[4] = {col, col, col, col};
+            if(rowIndex >= 0)
+                mats[rowIndex] = row;
+            const hipblasStatus_t expected
+                = rowIndex < 0 ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_NOT_SUPPORTED;
+            const std::string which = rowIndex < 0 ? "control" : std::string(1, "ABCD"[rowIndex]);
+
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = -1;
+            EXPECT_EQ(
+                hipblasLtMatmulAlgoGetHeuristic(
+                    handle, desc, mats[0], mats[1], mats[2], mats[3], pref, 1, &result, &returned),
+                expected)
+                << which;
+            if(rowIndex >= 0)
+                EXPECT_EQ(returned, 0) << which;
+            {
+                EXPECT_EQ(hipblasLtMatmul(handle,
+                                          desc,
+                                          &alpha,
+                                          a,
+                                          mats[0],
+                                          b,
+                                          mats[1],
+                                          &beta,
+                                          c,
+                                          mats[2],
+                                          d,
+                                          mats[3],
+                                          nullptr,
+                                          nullptr,
+                                          0,
+                                          nullptr),
+                          expected)
+                    << which;
+            }
+
+            hipblaslt_ext::Gemm gemm(handle,
+                                     HIPBLAS_OP_N,
+                                     HIPBLAS_OP_N,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     HIPBLAS_COMPUTE_32F);
+            EXPECT_EQ(gemm.setProblem(
+                          desc, &alpha, a, mats[0], b, mats[1], &beta, c, mats[2], d, mats[3]),
+                      expected)
+                << which;
+
+            hipblaslt_ext::GroupedGemm           grouped(handle,
+                                               HIPBLAS_OP_N,
+                                               HIPBLAS_OP_N,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               HIPBLAS_COMPUTE_32F);
+            std::vector<hipblasLtMatmulDesc_t>   descs{desc, desc};
+            std::vector<void*>                   alphas{&alpha, &alpha}, betas{&beta, &beta};
+            std::vector<void*>                   as{a, a}, bs{b, b}, cs{c, c}, ds{d, d};
+            std::vector<hipblasLtMatrixLayout_t> la{col, mats[0]}, lb{col, mats[1]};
+            std::vector<hipblasLtMatrixLayout_t> lc{col, mats[2]}, ld{col, mats[3]};
+            EXPECT_EQ(grouped.setProblem(descs, alphas, as, la, bs, lb, betas, cs, lc, ds, ld),
+                      expected)
+                << which << " in the second of two grouped GEMMs";
+
+            size_t workspace = 0;
+            EXPECT_EQ(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                           desc,
+                                                           &alpha,
+                                                           mats[0],
+                                                           mats[1],
+                                                           &beta,
+                                                           mats[2],
+                                                           mats[3],
+                                                           control.algo,
+                                                           workspace),
+                      expected)
+                << which;
+
+            hipblasLtMatmulHeuristicResult_t supported      = control;
+            int                              supportedCount = 0;
+            EXPECT_EQ(hipblaslt_ext::isSolutionSupported(&supported,
+                                                         handle,
+                                                         desc,
+                                                         &alpha,
+                                                         mats[0],
+                                                         mats[1],
+                                                         &beta,
+                                                         mats[2],
+                                                         mats[3],
+                                                         nullptr,
+                                                         &supportedCount),
+                      expected)
+                << which;
+
+            // 1 is tuned and 0 is untuned; -1 is a problem the library cannot answer for.
+            const int tuned
+                = hipblaslt_ext::matmulIsTuned(handle, desc, mats[0], mats[1], mats[2], mats[3]);
+            if(rowIndex < 0)
+                EXPECT_GE(tuned, 0) << which;
+            else
+                EXPECT_EQ(tuned, -1) << which;
+        }
+
+        // GemmProblemType carries an order for A and B only.
+        for(int rowIndex = -1; rowIndex < 2; rowIndex++)
+        {
+            const hipblasStatus_t expected
+                = rowIndex < 0 ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_NOT_SUPPORTED;
+            const std::string which = rowIndex < 0 ? "control" : std::string(1, "AB"[rowIndex]);
+
+            hipblaslt_ext::Gemm            gemm(handle,
+                                     HIPBLAS_OP_N,
+                                     HIPBLAS_OP_N,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     HIPBLAS_COMPUTE_32F);
+            hipblaslt_ext::GemmProblemType problemType = gemm.getProblemTypes();
+            problemType.setOrderA(rowIndex == 0 ? HIPBLASLT_ORDER_ROW : HIPBLASLT_ORDER_COL);
+            problemType.setOrderB(rowIndex == 1 ? HIPBLASLT_ORDER_ROW : HIPBLASLT_ORDER_COL);
+
+            hipblaslt_ext::GemmEpilogue epilogue;
+            hipblaslt_ext::GemmInputs   in     = inputs();
+            const int64_t               stride = kSize * kSize;
+            EXPECT_EQ(gemm.setProblem(kSize,
+                                      kSize,
+                                      kSize,
+                                      1,
+                                      kSize,
+                                      kSize,
+                                      kSize,
+                                      kSize,
+                                      stride,
+                                      stride,
+                                      stride,
+                                      stride,
+                                      epilogue,
+                                      in,
+                                      problemType),
+                      expected)
+                << which;
+
+            hipblaslt_ext::GroupedGemm grouped(handle,
+                                               HIPBLAS_OP_N,
+                                               HIPBLAS_OP_N,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               HIPBLAS_COMPUTE_32F);
+            std::vector<int64_t>       size(2, kSize), batch(2, 1), strides(2, stride);
+            std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
+            std::vector<hipblaslt_ext::GemmInputs>   ins(2, inputs());
+            EXPECT_EQ(grouped.setProblem(size,
+                                         size,
+                                         size,
+                                         batch,
+                                         size,
+                                         size,
+                                         size,
+                                         size,
+                                         strides,
+                                         strides,
+                                         strides,
+                                         strides,
+                                         epilogues,
+                                         ins,
+                                         problemType),
+                      expected)
+                << which;
+        }
+    }
+
+    // A missing handle, descriptor, layout or pointer is reported the same way whatever the
+    // layouts' order is: each invalid call below must return the status it returns with
+    // column-major layouts, not HIPBLAS_STATUS_NOT_SUPPORTED.
+    TEST_F(AlgoErrors, smoke_RowOrderKeepsArgumentValidationFirst)
+    {
+        const LayoutPtr         colOwner = layoutWithOrder(HIPBLASLT_ORDER_COL);
+        const LayoutPtr         rowOwner = layoutWithOrder(HIPBLASLT_ORDER_ROW);
+        hipblasLtMatrixLayout_t col = colOwner.get(), row = rowOwner.get();
+
+        hipblasLtMatmulHeuristicResult_t control{};
+        int                              controlCount = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, desc, col, col, col, col, pref, 1, &control, &controlCount),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(controlCount, 0);
+
+        // Each case gets the layout under test as A (it decides the order) and column-major
+        // layouts elsewhere.
+        using Call     = std::function<int(hipblasLtMatrixLayout_t)>;
+        auto heuristic = [&](hipblasLtHandle_t           h,
+                             hipblasLtMatmulDesc_t       d,
+                             hipblasLtMatmulPreference_t p,
+                             int                         requested,
+                             bool                        count) {
+            return [=](hipblasLtMatrixLayout_t l) {
+                hipblasLtMatmulHeuristicResult_t result{};
+                int                              returned = 0;
+                return int(hipblasLtMatmulAlgoGetHeuristic(
+                    h, d, l, col, col, col, p, requested, &result, count ? &returned : nullptr));
+            };
+        };
+        auto matmul = [&](hipblasLtHandle_t       h,
+                          hipblasLtMatmulDesc_t   d,
+                          const void*             alphaPtr,
+                          const void*             aPtr,
+                          hipblasLtMatrixLayout_t layoutB,
+                          void*                   dPtr,
+                          size_t                  workspaceSize) {
+            return [=, bPtr = b, cPtr = c, betaPtr = &beta, algo = control.algo](
+                       hipblasLtMatrixLayout_t l) {
+                return int(hipblasLtMatmul(h,
+                                           d,
+                                           alphaPtr,
+                                           aPtr,
+                                           l,
+                                           bPtr,
+                                           layoutB,
+                                           betaPtr,
+                                           cPtr,
+                                           col,
+                                           dPtr,
+                                           col,
+                                           &algo,
+                                           nullptr,
+                                           workspaceSize,
+                                           nullptr));
+            };
+        };
+        // The extension cases vary one scalar or data pointer; the layout under test is A, or
+        // for GemmProblemType the order it gives A.
+        auto gemmDesc = [&](const void* alphaPtr,
+                            const void* betaPtr,
+                            const void* aPtr,
+                            const void* cPtr,
+                            void*       dPtr) {
+            return [=](hipblasLtMatrixLayout_t l) {
+                hipblaslt_ext::Gemm gemm(handle,
+                                         HIPBLAS_OP_N,
+                                         HIPBLAS_OP_N,
+                                         kType,
+                                         kType,
+                                         kType,
+                                         kType,
+                                         HIPBLAS_COMPUTE_32F);
+                return int(gemm.setProblem(
+                    desc, alphaPtr, aPtr, l, b, col, betaPtr, cPtr, col, dPtr, col));
+            };
+        };
+        auto groupedDesc = [&](void* alphaPtr, void* betaPtr, void* aPtr, void* dPtr) {
+            return [=](hipblasLtMatrixLayout_t l) {
+                hipblaslt_ext::GroupedGemm         grouped(handle,
+                                                   HIPBLAS_OP_N,
+                                                   HIPBLAS_OP_N,
+                                                   kType,
+                                                   kType,
+                                                   kType,
+                                                   kType,
+                                                   HIPBLAS_COMPUTE_32F);
+                std::vector<hipblasLtMatmulDesc_t> descs{desc, desc};
+                std::vector<void*>                 alphas{&alpha, alphaPtr}, betas{&beta, betaPtr};
+                std::vector<void*>                 as{a, aPtr}, bs{b, b}, cs{c, c}, ds{d, dPtr};
+                std::vector<hipblasLtMatrixLayout_t> la{col, l}, lb{col, col}, lc{col, col},
+                    ld{col, col};
+                return int(
+                    grouped.setProblem(descs, alphas, as, la, bs, lb, betas, cs, lc, ds, ld));
+            };
+        };
+        auto inputsWith = [&](const void* alphaPtr, const void* betaPtr, void* aPtr, void* dPtr) {
+            hipblaslt_ext::GemmInputs in = inputs();
+            in.setAlpha(alphaPtr);
+            in.setBeta(betaPtr);
+            in.setA(aPtr);
+            in.setD(dPtr);
+            return in;
+        };
+        auto problemTypeFor
+            = [](hipblaslt_ext::GemmProblemType type, hipblasLtMatrixLayout_t l, bool rowMajor) {
+                  type.setOrderA(rowMajor ? HIPBLASLT_ORDER_ROW : HIPBLASLT_ORDER_COL);
+                  return type;
+              };
+        const int64_t stride = kSize * kSize;
+        auto          gemmProblemType
+            = [&](const void* alphaPtr, const void* betaPtr, void* aPtr, void* dPtr) {
+                  return [=](hipblasLtMatrixLayout_t l) {
+                      hipblaslt_ext::Gemm            gemm(handle,
+                                               HIPBLAS_OP_N,
+                                               HIPBLAS_OP_N,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               HIPBLAS_COMPUTE_32F);
+                      hipblaslt_ext::GemmProblemType type
+                          = problemTypeFor(gemm.getProblemTypes(), l, l == row);
+                      hipblaslt_ext::GemmEpilogue epilogue;
+                      hipblaslt_ext::GemmInputs   in = inputsWith(alphaPtr, betaPtr, aPtr, dPtr);
+                      return int(gemm.setProblem(kSize,
+                                                 kSize,
+                                                 kSize,
+                                                 1,
+                                                 kSize,
+                                                 kSize,
+                                                 kSize,
+                                                 kSize,
+                                                 stride,
+                                                 stride,
+                                                 stride,
+                                                 stride,
+                                                 epilogue,
+                                                 in,
+                                                 type));
+                  };
+              };
+        auto groupedProblemType
+            = [&](const void* alphaPtr, const void* betaPtr, void* aPtr, void* dPtr) {
+                  return [=](hipblasLtMatrixLayout_t l) {
+                      hipblaslt_ext::GroupedGemm     grouped(handle,
+                                                         HIPBLAS_OP_N,
+                                                         HIPBLAS_OP_N,
+                                                         kType,
+                                                         kType,
+                                                         kType,
+                                                         kType,
+                                                         HIPBLAS_COMPUTE_32F);
+                      hipblaslt_ext::GemmProblemType type
+                          = problemTypeFor(grouped.getProblemTypes()[0], l, l == row);
+                      std::vector<int64_t> size(2, kSize), batch(2, 1), strides(2, stride);
+                      std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
+                      std::vector<hipblaslt_ext::GemmInputs>   ins{
+                          inputs(), inputsWith(alphaPtr, betaPtr, aPtr, dPtr)};
+                      return int(grouped.setProblem(size,
+                                                    size,
+                                                    size,
+                                                    batch,
+                                                    size,
+                                                    size,
+                                                    size,
+                                                    size,
+                                                    strides,
+                                                    strides,
+                                                    strides,
+                                                    strides,
+                                                    epilogues,
+                                                    ins,
+                                                    type));
+                  };
+              };
+        const std::vector<std::pair<std::string, Call>> cases = {
+            {"heuristic, null handle", heuristic(nullptr, desc, pref, 1, true)},
+            {"heuristic, null descriptor", heuristic(handle, nullptr, pref, 1, true)},
+            {"heuristic, null preference", heuristic(handle, desc, nullptr, 1, true)},
+            {"heuristic, zero algos requested", heuristic(handle, desc, pref, 0, true)},
+            {"heuristic, null algo count", heuristic(handle, desc, pref, 1, false)},
+            {"matmul, null handle", matmul(nullptr, desc, &alpha, a, col, d, 0)},
+            {"matmul, null descriptor", matmul(handle, nullptr, &alpha, a, col, d, 0)},
+            {"matmul, null B layout", matmul(handle, desc, &alpha, a, nullptr, d, 0)},
+            {"matmul, null alpha", matmul(handle, desc, nullptr, a, col, d, 0)},
+            {"matmul, null A with nonzero alpha", matmul(handle, desc, &alpha, nullptr, col, d, 0)},
+            {"matmul, null D", matmul(handle, desc, &alpha, a, col, nullptr, 0)},
+            {"matmul, null workspace with a size", matmul(handle, desc, &alpha, a, col, d, 1024)},
+            {"Gemm::setProblem, null descriptor",
+             [&](hipblasLtMatrixLayout_t l) {
+                 hipblaslt_ext::Gemm gemm(handle,
+                                          HIPBLAS_OP_N,
+                                          HIPBLAS_OP_N,
+                                          kType,
+                                          kType,
+                                          kType,
+                                          kType,
+                                          HIPBLAS_COMPUTE_32F);
+                 return int(gemm.setProblem(nullptr, &alpha, a, l, b, col, &beta, c, col, d, col));
+             }},
+            {"GroupedGemm::setProblem, null second descriptor",
+             [&](hipblasLtMatrixLayout_t l) {
+                 hipblaslt_ext::GroupedGemm           grouped(handle,
+                                                    HIPBLAS_OP_N,
+                                                    HIPBLAS_OP_N,
+                                                    kType,
+                                                    kType,
+                                                    kType,
+                                                    kType,
+                                                    HIPBLAS_COMPUTE_32F);
+                 std::vector<hipblasLtMatmulDesc_t>   descs{desc, nullptr};
+                 std::vector<void*>                   alphas{&alpha, &alpha}, betas{&beta, &beta};
+                 std::vector<void*>                   as{a, a}, bs{b, b}, cs{c, c}, ds{d, d};
+                 std::vector<hipblasLtMatrixLayout_t> la{l, col}, lb{col, col}, lc{col, col},
+                     ld{col, col};
+                 return int(
+                     grouped.setProblem(descs, alphas, as, la, bs, lb, betas, cs, lc, ds, ld));
+             }},
+            {"Gemm::setProblem, null alpha", gemmDesc(nullptr, &beta, a, c, d)},
+            {"Gemm::setProblem, null beta", gemmDesc(&alpha, nullptr, a, c, d)},
+            {"Gemm::setProblem, null A with nonzero alpha", gemmDesc(&alpha, &beta, nullptr, c, d)},
+            {"Gemm::setProblem, null C", gemmDesc(&alpha, &beta, a, nullptr, d)},
+            {"Gemm::setProblem, null D", gemmDesc(&alpha, &beta, a, c, nullptr)},
+            {"GroupedGemm::setProblem, null second alpha", groupedDesc(nullptr, &beta, a, d)},
+            {"GroupedGemm::setProblem, null second beta", groupedDesc(&alpha, nullptr, a, d)},
+            {"GroupedGemm::setProblem, null second A", groupedDesc(&alpha, &beta, nullptr, d)},
+            {"GroupedGemm::setProblem, null second D", groupedDesc(&alpha, &beta, a, nullptr)},
+            {"Gemm::setProblem with GemmProblemType, null alpha",
+             gemmProblemType(nullptr, &beta, a, d)},
+            {"Gemm::setProblem with GemmProblemType, null beta",
+             gemmProblemType(&alpha, nullptr, a, d)},
+            {"Gemm::setProblem with GemmProblemType, null A",
+             gemmProblemType(&alpha, &beta, nullptr, d)},
+            {"Gemm::setProblem with GemmProblemType, null D",
+             gemmProblemType(&alpha, &beta, a, nullptr)},
+            {"GroupedGemm::setProblem with GemmProblemType, null second alpha",
+             groupedProblemType(nullptr, &beta, a, d)},
+            {"GroupedGemm::setProblem with GemmProblemType, null second beta",
+             groupedProblemType(&alpha, nullptr, a, d)},
+            {"GroupedGemm::setProblem with GemmProblemType, null second A",
+             groupedProblemType(&alpha, &beta, nullptr, d)},
+            {"GroupedGemm::setProblem with GemmProblemType, null second D",
+             groupedProblemType(&alpha, &beta, a, nullptr)},
+            {"matmulIsAlgoSupported, null handle",
+             [&](hipblasLtMatrixLayout_t l) {
+                 size_t workspace = 0;
+                 return int(hipblaslt_ext::matmulIsAlgoSupported(
+                     nullptr, desc, &alpha, l, col, &beta, col, col, control.algo, workspace));
+             }},
+            {"matmulIsAlgoSupported, null alpha",
+             [&](hipblasLtMatrixLayout_t l) {
+                 size_t workspace = 0;
+                 return int(hipblaslt_ext::matmulIsAlgoSupported(
+                     handle, desc, nullptr, l, col, &beta, col, col, control.algo, workspace));
+             }},
+            {"isSolutionSupported, null handle",
+             [&](hipblasLtMatrixLayout_t l) {
+                 hipblasLtMatmulHeuristicResult_t supported = control;
+                 int                              count     = 0;
+                 return int(hipblaslt_ext::isSolutionSupported(
+                     &supported, nullptr, desc, &alpha, l, col, &beta, col, col, nullptr, &count));
+             }},
+            {"matmulIsTuned, null handle",
+             [&](hipblasLtMatrixLayout_t l) {
+                 return hipblaslt_ext::matmulIsTuned(nullptr, desc, l, col, col, col);
+             }},
+        };
+        for(const auto& [name, call] : cases)
+        {
+            const int columnMajor = call(col);
+            EXPECT_NE(columnMajor, int(HIPBLAS_STATUS_SUCCESS)) << name;
+            EXPECT_EQ(call(row), columnMajor) << name;
+        }
     }
 
     struct WorkspaceConfig

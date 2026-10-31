@@ -1500,6 +1500,56 @@ rocblaslt_status rocblaslt_matrix_layout_get_attribute(rocblaslt_matrix_layout  
                 }
                 memcpy(buf, &matLayout->batch_stride, sizeof(int64_t));
                 break;
+            case ROCBLASLT_MATRIX_LAYOUT_TYPE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(uint32_t);
+                if(sizeInBytes < sizeof(uint32_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->type, sizeof(uint32_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_ORDER:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->order, sizeof(int32_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_ROWS:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(uint64_t);
+                if(sizeInBytes < sizeof(uint64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->m, sizeof(uint64_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_COLS:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(uint64_t);
+                if(sizeInBytes < sizeof(uint64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->n, sizeof(uint64_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_LD:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int64_t);
+                if(sizeInBytes < sizeof(int64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->ld, sizeof(int64_t));
+                break;
             case ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE:
                 if(sizeWritten)
                     *sizeWritten = sizeof(int32_t);       

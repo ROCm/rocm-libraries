@@ -267,6 +267,23 @@ void testing_aux_mat_get_attr_bad_arg(const Arguments& arg)
         hipblasLtMatrixLayoutGetAttribute(
             mat, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &data64, sizeof(int), &sizeWritten),
         HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Each attribute the setter accepts reports its size, and refuses a buffer one byte short.
+    const std::vector<std::pair<hipblasLtMatrixLayoutAttribute_t, size_t>> attr_sizes
+        = {{HIPBLASLT_MATRIX_LAYOUT_TYPE, sizeof(uint32_t)},
+           {HIPBLASLT_MATRIX_LAYOUT_ORDER, sizeof(int32_t)},
+           {HIPBLASLT_MATRIX_LAYOUT_ROWS, sizeof(uint64_t)},
+           {HIPBLASLT_MATRIX_LAYOUT_COLS, sizeof(uint64_t)},
+           {HIPBLASLT_MATRIX_LAYOUT_LD, sizeof(int64_t)}};
+    for(const auto& [attr, size] : attr_sizes)
+    {
+        sizeWritten = 0;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatrixLayoutGetAttribute(mat, attr, &data64, size - 1, &sizeWritten),
+            HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(sizeWritten, size) << "attribute " << attr;
+    }
+
     // test sizeWritten is nullptr, and the return state should be success
     data = 0;
     EXPECT_HIPBLAS_STATUS(
@@ -317,6 +334,90 @@ void testing_aux_mat_set_get_attr(const Arguments& arg)
             HIPBLAS_STATUS_SUCCESS);
         ASSERT_TRUE(data64_r == data64);
     }
+
+    // The layout was created with these values, so each reads back before it is changed.
+    uint32_t type_r = 0;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_TYPE, &type_r, sizeof(type_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(sizeWritten, sizeof(uint32_t));
+    EXPECT_EQ(type_r, static_cast<uint32_t>(arg.a_type));
+
+    uint64_t udata64_r = 0;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_ROWS, &udata64_r, sizeof(udata64_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(sizeWritten, sizeof(uint64_t));
+    EXPECT_EQ(udata64_r, static_cast<uint64_t>(row));
+
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_COLS, &udata64_r, sizeof(udata64_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(udata64_r, static_cast<uint64_t>(col));
+
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_LD, &data64_r, sizeof(data64_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(sizeWritten, sizeof(int64_t));
+    EXPECT_EQ(data64_r, ld);
+
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_ORDER, &data_r, sizeof(data_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(sizeWritten, sizeof(int32_t));
+    EXPECT_EQ(data_r, static_cast<int32_t>(HIPBLASLT_ORDER_COL));
+
+    // A changed value reads back as the new value, including the row-major and swizzled orders
+    // that only some APIs accept.
+    for(int32_t order : {int32_t(HIPBLASLT_ORDER_ROW),
+                         int32_t(HIPBLASLT_ORDER_COL16_4R8),
+                         int32_t(HIPBLASLT_ORDER_COL)})
+    {
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                                  mat, HIPBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order)),
+                              HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatrixLayoutGetAttribute(
+                mat, HIPBLASLT_MATRIX_LAYOUT_ORDER, &data_r, sizeof(data_r), &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(data_r, order);
+    }
+
+    const uint32_t type = static_cast<uint32_t>(HIP_R_32F);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutSetAttribute(mat, HIPBLASLT_MATRIX_LAYOUT_TYPE, &type, sizeof(type)),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_TYPE, &type_r, sizeof(type_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(type_r, type);
+
+    for(auto attr : {HIPBLASLT_MATRIX_LAYOUT_ROWS, HIPBLASLT_MATRIX_LAYOUT_COLS})
+    {
+        const uint64_t extent = 96;
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(mat, attr, &extent, sizeof(extent)),
+                              HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutGetAttribute(
+                                  mat, attr, &udata64_r, sizeof(udata64_r), &sizeWritten),
+                              HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(udata64_r, extent) << "attribute " << attr;
+    }
+
+    const int64_t new_ld = 160;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutSetAttribute(mat, HIPBLASLT_MATRIX_LAYOUT_LD, &new_ld, sizeof(new_ld)),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_LD, &data64_r, sizeof(data64_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(data64_r, new_ld);
 }
 
 void testing_aux_matmul_init_bad_arg(const Arguments& arg)
