@@ -536,7 +536,12 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     def resolved_use_exp2_fast(self) -> bool:
         """Resolved exp2_fast decision (``None`` -> :func:`_use_exp2_fast`)."""
         if self.use_exp2_fast is None:
-            return _use_exp2_fast(self.head_size, self.dtype, self.persistent)
+            return _use_exp2_fast(
+                self.head_size,
+                self.dtype,
+                self.persistent,
+                window_wave_skip=self.window_wave_skip,
+            )
         return bool(self.use_exp2_fast)
 
     def resolved_waves_per_eu(self) -> int:
@@ -747,7 +752,12 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
     if swz != (spec.resolved_use_cfvst() and _use_cfvst(spec.head_size, spec.dtype)):
         parts.append("vswz1" if swz else "vswz0")
     e2f = spec.resolved_use_exp2_fast()
-    if e2f != _use_exp2_fast(spec.head_size, spec.dtype, spec.persistent):
+    if e2f != _use_exp2_fast(
+        spec.head_size,
+        spec.dtype,
+        spec.persistent,
+        window_wave_skip=spec.window_wave_skip,
+    ):
         parts.append("e2f1" if e2f else "e2f0")
     if spec.iglp != _DEFAULT_IGLP:
         parts.append("iglp1" if spec.iglp else "iglp0")
@@ -809,7 +819,9 @@ def _rows_per_instr(head_size: int) -> int:
     return _DMA_ELEMS_PER_INSTR // head_size
 
 
-def _use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
+def _use_exp2_fast(
+    head_size: int, dtype: str, persistent: bool, *, window_wave_skip: bool = False
+) -> bool:
     """Whether softmax uses ``exp2_fast`` (one v_exp_f32, no range-reduction guard).
 
     Enabled for all configs EXCEPT bf16 head_dim=128 on the DEFAULT grid (see the
@@ -846,8 +858,12 @@ def _use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
     fp32 scores (one extra multiply per score; bf16-D128 default-grid VGPR use rose),
     and it was not re-measured after that change -- re-measure via the dense sweep
     harness on a toolchain or kernel change rather than treating it as fixed.
+
+    The narrow sliding-window body (``window_wave_skip``: 32-key tiles, two CTAs
+    per CU) is the exception on the default grid: exp2_fast measured 6-7% faster
+    there on MI300X (bf16 D128 S512 window 128 with sinks), so it keeps it.
     """
-    if dtype == "bf16" and head_size == 128 and not persistent:
+    if dtype == "bf16" and head_size == 128 and not (persistent or window_wave_skip):
         return False
     return True
 
@@ -934,7 +950,13 @@ def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
     return _v_swizzle_width(block_n) - block_n
 
 
-def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
+def _tuned_waves_per_eu(
+    head_size: int,
+    dtype: str,
+    *,
+    grid_ctas: int | None = None,
+    num_cus: int | None = None,
+) -> int:
     """Tuned ``amdgpu-waves-per-eu`` per config (P3 occupancy).
 
     Default 2 (one WG/CU = 2 waves/SIMD at this kernel's ~178-220 VGPR on ROCm 10 /
@@ -954,10 +976,17 @@ def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
         reaches a 2nd WG/CU. Occupancy there is an LDS-footprint problem (P3 K/V-pad
         or single-buffer work), not a waves-per-eu knob.
 
+    The bf16 D64 override only pays when a second WG can co-reside. With
+    ``grid_ctas`` and ``num_cus`` given and a grid of at most one CTA per CU, no CU
+    ever holds a second WG, so the cap only costs ILP: keep 2 (measured on MI300X,
+    256-CTA S512 grids with and without sinks: 6-11% faster at 2).
+
     Consumed by the gfx942 dispatch base spec (``_base_spec``) so the kernel_name
     ``wpe{N}`` tag and the emitted ``amdgpu-waves-per-eu`` attribute always agree.
     """
     if dtype == "bf16" and head_size == 64:
+        if grid_ctas is not None and num_cus and grid_ctas <= num_cus:
+            return 2
         return 4
     return 2
 

@@ -306,19 +306,23 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     work_items = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
     persistent = not moving_bottom_right and work_items >= _DEFAULT_NUM_PERSISTENT
-    wide_ok = (
+    wide_shape = (
         not moving_bottom_right
         and int(req.hdim_q) == int(req.hdim_v) == 128
         and causal
-        and not int(req.sliding_window)
-        and not bool(req.use_sinks)
         and sq % bm == 0
         and sk % bn == 0
     )
+    wide_ok = wide_shape and not int(req.sliding_window) and not bool(req.use_sinks)
     by_id = {v.variant_id: v.candidate_name for v in GFX950_DENSE_VARIANTS}
     if persistent:
+        # On a filled persistent grid the wide DMA also wins with a sliding
+        # window and with sinks (measured on the 256-CU part, D128, windows
+        # 128-4096 and causal sinks: 6-23% faster).
         order = (
-            ("persist_widedma", "persist", "grid") if wide_ok else ("persist", "grid")
+            ("persist_widedma", "persist", "grid")
+            if wide_shape
+            else ("persist", "grid")
         )
     elif wide_ok and not right_bound:
         order = ("persist_widedma", "grid")

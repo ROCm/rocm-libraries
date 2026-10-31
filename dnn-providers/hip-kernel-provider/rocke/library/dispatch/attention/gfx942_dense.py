@@ -197,6 +197,11 @@ def _make_spec(
             )
             if kv_segments > 1:
                 persistent = False
+    if persistent:
+        grid_ctas = _GFX942_NUM_PERSISTENT
+    else:
+        grid_ctas = -(-sq // bm) * int(req.nhead_q) * int(req.batch) * kv_segments
+    num_cus = int(req.num_cus) if int(req.num_cus) > 0 else _GFX942_NUM_PERSISTENT
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -214,7 +219,9 @@ def _make_spec(
         ragged=ragged,
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
-        waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
+        waves_per_eu=_tuned_waves_per_eu(
+            head_size, dtype, grid_ctas=grid_ctas, num_cus=num_cus
+        ),
         emit_lse=bool(req.emit_lse),
         causal_bottom_right=bottom_right,
         causal_diag_split=diag_split,
