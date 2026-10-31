@@ -211,6 +211,87 @@ def test_gemm_worker_reuses_the_reference_per_shape_and_encoding(monkeypatch, ca
     assert len(calls) == 4, calls
 
 
+def test_gemm_worker_reuses_encoded_operands_and_isolates_shapes_dtypes_layouts(
+    monkeypatch, capsys
+):
+    # Kernels sharing (shape, dtype, layout, use_ocp) reuse the encoded (A_h, B_h)
+    # byte buffers without re-encoding; changing shape, dtype, layout, or OCP
+    # format invalidates the cache and produces the exact buffers for the new key.
+    import gemm_utils
+
+    worker = run_one_gemm_kernel
+    for cache in ("_ab_cache", "_ref_cache"):
+        if hasattr(worker._run_one, cache):
+            monkeypatch.delattr(worker._run_one, cache)
+    gemm_utils._ENCODED_AB_CACHE.clear()
+
+    encode_calls = []
+    orig_encode = gemm_utils._encode_operand
+
+    def spy_encode(x, dtype, use_ocp=None):
+        encode_calls.append((x.shape, dtype, use_ocp))
+        return orig_encode(x, dtype, use_ocp)
+
+    monkeypatch.setattr(gemm_utils, "_encode_operand", spy_encode)
+
+    other = {"M": 32, "N": 64, "K": 128}
+    items = [
+        # 3 fp8 FNUZ rcr kernels on PROBLEM -> 1 encode pair (2 _encode_operand calls)
+        (_runner("fp8", False, layout="rcr"), PROBLEM),
+        (_runner("fp8", False, layout="rcr"), PROBLEM),
+        (_runner("fp8", False, layout="rcr"), PROBLEM),
+        # layout change (rrr) on same shape/dtype -> 1 new encode pair
+        (_runner("fp8", False, layout="rrr"), PROBLEM),
+        (_runner("fp8", False, layout="rrr"), PROBLEM),
+        # OCP format change on same shape/layout -> 1 new encode pair
+        (_runner("fp8", True, layout="rrr"), PROBLEM),
+        (_runner("fp8", True, layout="rrr"), PROBLEM),
+        # dtype change (bf16) on same shape/layout -> 1 new encode pair
+        (_runner("bf16", None, layout="rrr"), PROBLEM),
+        (_runner("bf16", None, layout="rrr"), PROBLEM),
+        # shape change (other) -> 1 new encode pair, and single-entry cache evicts PROBLEM
+        (_runner("fp8", False, layout="rcr"), other),
+        (_runner("fp8", False, layout="rcr"), other),
+    ]
+    for idx, (runner, problem) in enumerate(items):
+        monkeypatch.setattr(worker, "GpuGemmRunner", lambda **kw: runner)
+        worker._run_one(idx, "fake.so", problem, runner.kernel_name, verify=True)
+
+    outs = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    assert len(outs) == len(items)
+    for out, (runner, _) in zip(outs, items):
+        assert out["ok"] and out["verified"], out
+        assert out["max_rel"] < _c_eps(_dtype_of(runner)), out
+
+    # 5 distinct (shape, dtype, layout, use_ocp) runs * 2 operands + 4 reference()
+    # calls (reference() calls encode(A) and encode(B) once per unique ref_key).
+    # What matters for Problem B: repeating the same (shape, dtype, layout) kernel
+    # does NOT add any _encode_operand calls, and both caches stay bounded to 1 entry.
+    count_before = len(encode_calls)
+    runner = _runner("fp8", False, layout="rcr")
+    monkeypatch.setattr(worker, "GpuGemmRunner", lambda **kw: runner)
+    worker._run_one(len(items), "fake.so", other, runner.kernel_name, verify=False)
+    assert len(encode_calls) == count_before
+    assert len(getattr(worker._run_one, "_ab_cache", {})) == 1
+    assert len(gemm_utils._ENCODED_AB_CACHE) == 1
+
+
+def test_encoded_ab_cache_handles_in_place_input_mutation():
+    # Direct callers that mutate A or B in place and re- call runner.run(A, B, problem)
+    # must not silently reuse stale encoded bytes from the same array id().
+    import gemm_utils
+
+    gemm_utils._ENCODED_AB_CACHE.clear()
+    runner = _runner("fp8", False, layout="rcr")
+    problem = GemmProblem.from_dict(PROBLEM)
+    A, B = _inputs(PROBLEM)
+    out1 = runner.run(A, B, problem).output.copy()
+    A *= 2.0
+    out2 = runner.run(A, B, problem).output.copy()
+    assert not np.allclose(out1, out2)
+    assert _max_rel(out2, runner.reference(A, B)) < _c_eps("fp8")
+
+
 def _dtype_of(runner):
     return runner.kernel_name.split("_")[1]
 

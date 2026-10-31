@@ -55,19 +55,23 @@ def _run_one(
         problem = BatchedGemmProblem.from_dict(prob_dict)
 
         # Cache host tensors per (batch, M, N, K) so batch mode doesn't
-        # regenerate large inputs per kernel.
+        # regenerate large inputs per kernel; paired with _encode_ab_cached in
+        # dispatcher/python/gemm_utils.py so encoded (A_h, B_h) buffers are
+        # reused across kernels sharing (shape, dtype, layout).
         cache = getattr(_run_one, "_ab_cache", {})
         key = (problem.batch_count, problem.M, problem.N, problem.K)
         if key not in cache:
             rng = np.random.RandomState(42)
-            cache[key] = (
-                (rng.randn(problem.batch_count, problem.M, problem.K) * 0.1).astype(
-                    np.float32
-                ),
-                (rng.randn(problem.batch_count, problem.K, problem.N) * 0.1).astype(
-                    np.float32
-                ),
-            )
+            A_in = (
+                rng.randn(problem.batch_count, problem.M, problem.K) * 0.1
+            ).astype(np.float32)
+            B_in = (
+                rng.randn(problem.batch_count, problem.K, problem.N) * 0.1
+            ).astype(np.float32)
+            A_in.flags.writeable = False
+            B_in.flags.writeable = False
+            cache.clear()
+            cache[key] = (A_in, B_in)
             _run_one._ab_cache = cache
         A, B = cache[key]
 
