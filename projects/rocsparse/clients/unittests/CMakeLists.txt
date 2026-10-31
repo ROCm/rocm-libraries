@@ -208,6 +208,17 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # Drives the public rocsparse_spgemm entry point with
   # handle->properties.maxGridSize[0] shrunk; no compile-in TUs.
   unit_test_internal_extra_gemm_calc_grids.cpp
+  # --- AISPARSE-654: forced-clamp coverage of rocsparse::conjugate ------------
+  # Distinct anchor at the end of the device source list. Needs
+  # rocsparse_conjugate.cpp compiled in (see ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES).
+  unit_test_internal_common_conjugate.cpp
+  # --- AISPARSE-649: forced-clamp coverage of gthr_strided_batched ----------
+  # Needs rocsparse_gthr_impl.cpp compiled in (see
+  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES).
+  unit_test_internal_level1_gthr_grids.cpp
+  # --- AISPARSE-656: bsrsv solve with a clamped grid ------------------------
+  # Drives the public rocsparse_dbsrsv_* entry points; no compile-in TUs.
+  unit_test_internal_level2_bsrsv_clamped_grid.cpp
   # Residual in-scope internal-routine coverage: device __global__ wrappers for
   # collective/atomic/hash device helpers, plus host-path primitive helpers.
   # unit_test_internal_primitives_host_extras.cpp additionally needs the
@@ -382,6 +393,9 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_bsrmv_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csritsv_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_info.cpp
+  # AISPARSE-654: rocsparse::conjugate is hidden in librocsparse; defining TU for
+  # unit_test_internal_common_conjugate.cpp.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_conjugate.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_spgeam.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_buffer_size.cpp
@@ -496,6 +510,7 @@ target_include_directories(rocsparse-unit-test-device PRIVATE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2>
 )
 
 # hip::device provides the HIP device-compilation flags (-x hip, --offload-arch).

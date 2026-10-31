@@ -97,7 +97,7 @@ namespace
     template <typename T, typename I>
     __global__ void k_gthr(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base base)
     {
-        rocsparse::gthr_device<BS, I, T>(nnz, y, x_val, x_ind, base);
+        rocsparse::gthr_device<BS, true, I, T>(nnz, y, x_val, x_ind, base);
     }
 
     template <typename T, typename I, bool GRID_STRIDE = false>
