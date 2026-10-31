@@ -21,8 +21,8 @@
  *   backend.buffer_rsrc_word3            rocke_isa_buffer_rsrc_word3()
  *   backend.encode_waitcnt(...)          rocke_isa_encode_waitcnt(...)
  *   backend.emit_wmma(lowerer, op)       rocke_isa_emit_wmma_call(...) (text only)
- *   _RDNA_WMMA / _RDNA_WMMA_INT /        rocke_isa_wmma_lookup() / *_int / *_gfx12
- *     _RDNA_GFX12_WMMA tables
+ *   _RDNA_WMMA / _RDNA_GFX12_WMMA        rocke_isa_wmma_lookup() / *_gfx12
+ *     tables
  *
  * Scope note (see the implementation's TODO(port) markers): the Python
  * emit_mma/emit_wmma methods drive a live ``_Lowerer`` (op rebuilding via
@@ -96,7 +96,8 @@ typedef struct rocke_isa_backend
  * On an unknown gfx, returns a backend with .valid == false and leaves *err (if
  * non-NULL) pointing at a static "no ISA backend registered for ..." message;
  * callers should check .valid. Known gfx: gfx908, gfx90a, gfx942, gfx950,
- * gfx1151, gfx1201, gfx11-generic, gfx1250. */
+ * gfx11-generic and gfx1100 .. gfx1154, gfx12-generic, gfx1200 and gfx1201,
+ * gfx1250. */
 rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err);
 
 /* True if `gfx` has a registered backend. */
@@ -175,22 +176,9 @@ typedef struct rocke_wmma_spec
     rocke_wmma_shape_t shape; /* which intrinsic signature to emit              */
 } rocke_wmma_spec_t;
 
-/* One row of the integer WMMA table (_RDNA_WMMA_INT): op.name ->
- * (decl key, mangled intrinsic, A/B i32-vector width, accumulator width). */
-typedef struct rocke_wmma_int_spec
-{
-    const char* op_name;
-    const char* decl_key;
-    const char* intrinsic;
-    int op_vec; /* A/B <op_vec x i32> width (4 for iu8, 2 for iu4) */
-    int acc_vec; /* accumulator/result <acc_vec x i32> width (8)    */
-} rocke_wmma_int_spec_t;
-
 /* Look up the RDNA3/3.5 float WMMA spec for an op name (incl. leading "tile.").
  * Returns NULL if not in _RDNA_WMMA. */
 const rocke_wmma_spec_t* rocke_isa_wmma_lookup(const char* op_name);
-/* Look up the RDNA3/3.5 integer WMMA spec (_RDNA_WMMA_INT). NULL if absent. */
-const rocke_wmma_int_spec_t* rocke_isa_wmma_int_lookup(const char* op_name);
 /* Look up the RDNA4 (gfx12) float WMMA spec (_RDNA_GFX12_WMMA). NULL if absent. */
 const rocke_wmma_spec_t* rocke_isa_wmma_gfx12_lookup(const char* op_name);
 /* Look up the gfx1250 float WMMA spec (_GFX1250_WMMA + _GFX1250_WMMA_FP8).
@@ -230,21 +218,6 @@ int rocke_isa_emit_wmma_call(rocke_strbuf_t* out,
                              const char* c_name,
                              const char* a_cast_name,
                              const char* b_cast_name);
-
-/* Emit the byte-identical text of an integer WMMA (iu8/iu4) call. Mirrors
- * Gfx11Backend._emit_wmma_int: signedA=1, signedB=1, clamp=0. `a_name` and
- * `b_name` must already name <op_vec x i32> values; reinterpreting an operand
- * of another shape is the lowerer's job (mma_operand in lower_llvm/mma.cpp).
- *   %<result_name> = call <acc_vec x i32> @<intrinsic>(
- *     i1 1, <op_vec x i32> a, i1 1, <op_vec x i32> b,
- *     <acc_vec x i32> c, i1 0)
- * Appended to `out`. Returns 0 on success, -1 on OOM. */
-int rocke_isa_emit_wmma_int_call(rocke_strbuf_t* out,
-                                 const rocke_wmma_int_spec_t* spec,
-                                 const char* result_name,
-                                 const char* a_name,
-                                 const char* b_name,
-                                 const char* c_name);
 
 #ifdef __cplusplus
 } /* extern "C" */

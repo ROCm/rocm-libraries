@@ -16,6 +16,7 @@
 
 #include "mma_family_index.h"
 
+#include "rocke/arch_domain.h"
 #include "rocke/arch_target.h"
 #include "rocke/arch_target_internal.h"
 #include "rocke/error.hpp"
@@ -115,6 +116,15 @@ void rocke_mma_op_shape(const rocke_mma_op_t* op, int* m, int* n, int* k)
         *k = op->k;
 }
 
+const char* rocke_mma_op_dst_dtype(const rocke_mma_op_t* op)
+{
+    /* Mirrors MmaOp.dst_dtype: a row that records no result dtype returns its
+     * accumulator. */
+    if(!op)
+        return NULL;
+    return op->dst_dtype ? op->dst_dtype : op->c_dtype;
+}
+
 /* MmaOp._require_layout: returns the map, or NULL + (on a non-NULL builder)
  * the NotImplementedError-equivalent sticky error with byte-identical text. */
 static const rocke_layout_map_t* rocke_ati_require_layout(const rocke_mma_op_t* op,
@@ -188,13 +198,14 @@ const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int*
 }
 
 /* Shared predicate matching MmaCatalog.enumerate's per-op filter. dtypes here
- * are already-normalised canonical keys (a/b/c). family is non-NULL. m/n < 0
- * mean "any" (Python None). */
+ * are already-normalised canonical keys (a/b/c/dst; dst already defaulted to
+ * c). family is non-NULL. m/n < 0 mean "any" (Python None). */
 static bool rocke_ati_op_matches(const rocke_mma_op_t* op,
                                  const char* family,
                                  const char* a,
                                  const char* b,
                                  const char* c,
+                                 const char* dst,
                                  int m,
                                  int n,
                                  const rocke_mma_scale_filter_t* scales)
@@ -206,6 +217,8 @@ static bool rocke_ati_op_matches(const rocke_mma_op_t* op,
     if(strcmp(op->b_dtype, b) != 0)
         return false;
     if(strcmp(op->c_dtype, c) != 0)
+        return false;
+    if(strcmp(rocke_mma_op_dst_dtype(op), dst) != 0)
         return false;
     if(m >= 0 && op->m != m)
         return false;
@@ -228,6 +241,7 @@ static bool rocke_ati_op_shadowed_by_native(const rocke_mma_catalog_t* cat,
                                             const char* a,
                                             const char* b,
                                             const char* c,
+                                            const char* dst,
                                             int m,
                                             int n,
                                             const rocke_mma_scale_filter_t* scales)
@@ -242,7 +256,7 @@ static bool rocke_ati_op_shadowed_by_native(const rocke_mma_catalog_t* cat,
             continue;
         if(other->m != op->m || other->n != op->n || other->k != op->k)
             continue;
-        if(rocke_ati_op_matches(other, family, a, b, c, m, n, scales))
+        if(rocke_ati_op_matches(other, family, a, b, c, dst, m, n, scales))
             return true;
     }
     return false;
@@ -257,12 +271,22 @@ static bool rocke_ati_op_selectable(const rocke_mma_catalog_t* cat,
                                     const char* a,
                                     const char* b,
                                     const char* c,
+                                    const char* dst,
                                     int m,
                                     int n,
                                     const rocke_mma_scale_filter_t* scales)
 {
-    return rocke_ati_op_matches(op, family, a, b, c, m, n, scales)
-           && !rocke_ati_op_shadowed_by_native(cat, op, family, a, b, c, m, n, scales);
+    return rocke_ati_op_matches(op, family, a, b, c, dst, m, n, scales)
+           && !rocke_ati_op_shadowed_by_native(cat, op, family, a, b, c, dst, m, n, scales);
+}
+
+/* The result dtype a query selects: the normalised dst_dtype, or c (already
+ * normalised) when the caller names none -- MmaCatalog's "None means equal to
+ * c_dtype". */
+static const char*
+    rocke_ati_query_dst(const char* dst_dtype, const char* c, char* buf, size_t buf_size)
+{
+    return dst_dtype ? rocke_normalize_dtype(dst_dtype, buf, buf_size) : c;
 }
 
 int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
@@ -274,10 +298,11 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 int n,
                                 const rocke_mma_op_t** out,
                                 int cap,
-                                const rocke_mma_scale_filter_t* scales)
+                                const rocke_mma_scale_filter_t* scales,
+                                const char* dst_dtype)
 {
-    char abuf[64], bbuf[64], cbuf[64];
-    const char *a, *bd, *c, *fam;
+    char abuf[64], bbuf[64], cbuf[64], dbuf[64];
+    const char *a, *bd, *c, *dst, *fam;
     int i, total = 0;
 
     if(!cat)
@@ -287,11 +312,12 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
     a = rocke_normalize_dtype(a_dtype, abuf, sizeof abuf);
     bd = rocke_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
     c = rocke_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    dst = rocke_ati_query_dst(dst_dtype, c, dbuf, sizeof dbuf);
 
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, dst, m, n, scales))
             continue;
         if(out && total < cap)
             out[total] = op;
@@ -308,10 +334,11 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  int m,
                                  int n,
                                  int k,
-                                 const rocke_mma_scale_filter_t* scales)
+                                 const rocke_mma_scale_filter_t* scales,
+                                 const char* dst_dtype)
 {
-    char abuf[64], bbuf[64], cbuf[64];
-    const char *a, *bd, *c, *fam;
+    char abuf[64], bbuf[64], cbuf[64], dbuf[64];
+    const char *a, *bd, *c, *dst, *fam;
     int i;
 
     if(!cat)
@@ -321,12 +348,13 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
     a = rocke_normalize_dtype(a_dtype, abuf, sizeof abuf);
     bd = rocke_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
     c = rocke_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    dst = rocke_ati_query_dst(dst_dtype, c, dbuf, sizeof dbuf);
 
     /* Python enumerates with m=m, n=n then checks op.shape == (m, n, k). */
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, dst, m, n, scales))
             continue;
         if(op->m == m && op->n == n && op->k == k)
             return true;
@@ -342,10 +370,11 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
                                                          int m,
                                                          int n,
                                                          int k_max,
-                                                         const rocke_mma_scale_filter_t* scales)
+                                                         const rocke_mma_scale_filter_t* scales,
+                                                         const char* dst_dtype)
 {
-    char abuf[64], bbuf[64], cbuf[64];
-    const char *a, *bd, *c, *fam;
+    char abuf[64], bbuf[64], cbuf[64], dbuf[64];
+    const char *a, *bd, *c, *dst, *fam;
     const rocke_mma_op_t* best = NULL;
     int i;
     bool ambiguous = false;
@@ -357,11 +386,12 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
     a = rocke_normalize_dtype(a_dtype, abuf, sizeof abuf);
     bd = rocke_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
     c = rocke_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    dst = rocke_ati_query_dst(dst_dtype, c, dbuf, sizeof dbuf);
 
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, dst, m, n, scales))
             continue;
         if(k_max >= 0 && op->k > k_max)
             continue; /* Python: k_max is None || op.k <= k_max */
@@ -401,10 +431,11 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
                                                      int m,
                                                      int n,
                                                      int k,
-                                                     const rocke_mma_scale_filter_t* scales)
+                                                     const rocke_mma_scale_filter_t* scales,
+                                                     const char* dst_dtype)
 {
-    char abuf[64], bbuf[64], cbuf[64];
-    const char *a, *bd, *c, *fam;
+    char abuf[64], bbuf[64], cbuf[64], dbuf[64];
+    const char *a, *bd, *c, *dst, *fam;
     int i;
     const rocke_mma_op_t* match = NULL;
 
@@ -415,12 +446,13 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
     a = rocke_normalize_dtype(a_dtype, abuf, sizeof abuf);
     bd = rocke_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
     c = rocke_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    dst = rocke_ati_query_dst(dst_dtype, c, dbuf, sizeof dbuf);
 
     /* Exact selection requires a unique contract. */
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, dst, m, n, scales))
             continue;
         if(op->k == k)
         {
@@ -483,6 +515,14 @@ const char* rocke_arch_mma_op_id_c_dtype(const char* op_id)
         }
     }
     return NULL;
+}
+
+const char* rocke_arch_mma_op_id_dst_dtype(const char* op_id)
+{
+    /* Mirrors target._op_id_dst_dtype()[op_id]: the first catalog row that
+     * lists op_id, its dst_dtype or else its c_dtype. NULL when no catalog
+     * lists op_id. */
+    return rocke_mma_op_dst_dtype(rocke_arch_mma_op_by_id(op_id));
 }
 
 bool rocke_arch_mma_op_is_native(const rocke_mma_op_t* op)
@@ -732,7 +772,9 @@ static const char* rocke_target_id_start(const char* isa)
  * wildcard. Membership comes from rocke_ati_generic_targets (arch_specs.json
  * "generic_targets"), aligned with LLVM's AMDGPU Generic Processors table:
  * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
- * A member without its own catalog row (gfx1100, gfx1200) uses its generic row. */
+ * A member without its own catalog row uses its generic row; every member of a
+ * catalogued generic target has a row of its own, so this serves only names
+ * the catalog does not list. */
 static const char* rocke_generic_arch_alias(const char* target_id)
 {
     size_t name_len = strcspn(target_id, ":");
@@ -821,20 +863,127 @@ const char* rocke_base_arch_from_target_id(const char* target_id, char* out, siz
     return rocke_copy_target(target_id, rocke_base_arch_length(target_id), out, out_cap);
 }
 
+/* True when the llvm_flavor compiler was measured not to accept the processor
+ * named by the first len bytes of gfx (rocke_ati_rejected_processors). A lane
+ * with no column of its own enforces the column it borrows (Python
+ * arch_domain.load), so the measurement is looked up under that column. */
+static bool rocke_processor_rejected(const char* llvm_flavor, const char* gfx, size_t len)
+{
+    const char* column = rocke_arch_domain_column_flavor(llvm_flavor);
+    for(const rocke_ati_rejected_processor_t* row = rocke_ati_rejected_processors;
+        row->llvm_flavor != NULL;
+        ++row)
+    {
+        if(strcmp(row->llvm_flavor, column) == 0 && strlen(row->gfx) == len
+           && strncmp(row->gfx, gfx, len) == 0)
+            return true;
+    }
+    return false;
+}
+
+/* The generic target the row named by the first len bytes of gfx points at
+ * (arch_specs.json "facts_of"), or NULL. */
+static const char* rocke_row_facts_of(const char* gfx, size_t len)
+{
+    for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_ati_arch_row_t* row = &rocke_ati_arch_registry[i];
+        if(strlen(row->gfx) == len && strncmp(row->gfx, gfx, len) == 0)
+            return row->facts_of;
+    }
+    return NULL;
+}
+
+static void rocke_set_message(char* message, size_t message_cap, const char* fmt, ...)
+{
+    if(message == NULL || message_cap == 0)
+        return;
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(message, message_cap, fmt, args);
+    va_end(args);
+}
+
+/* Length of the processor part of target_id with any profile removed
+ * (gfx1250-strict:xnack- -> 7); its features start at strcspn(target_id, ":"). */
+static size_t rocke_compiler_processor_length(const char* target_id)
+{
+    size_t name_len = strcspn(target_id, ":");
+    size_t base_len = rocke_base_arch_length(target_id);
+    if(base_len < name_len && target_id[base_len] == '-')
+        name_len = base_len;
+    return name_len;
+}
+
+/* Write the first name_len bytes of name followed by features into out. */
+static const char* rocke_write_compiler_target(
+    const char* name, size_t name_len, const char* features, char* out, size_t out_cap)
+{
+    if(name_len >= out_cap)
+        return rocke_copy_target(name, name_len, out, out_cap);
+    memcpy(out, name, name_len);
+    rocke_copy_target(features, strlen(features), out + name_len, out_cap - name_len);
+    return out;
+}
+
 const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap)
 {
     if(!target_id || !out || out_cap == 0)
         return NULL;
-    size_t name_len = strcspn(target_id, ":");
-    const char* features = target_id + name_len;
-    size_t base_len = rocke_base_arch_length(target_id);
-    if(base_len < name_len && target_id[base_len] == '-')
-        name_len = base_len;
-    if(name_len >= out_cap)
-        return rocke_copy_target(target_id, name_len, out, out_cap);
-    memcpy(out, target_id, name_len);
-    rocke_copy_target(features, strlen(features), out + name_len, out_cap - name_len);
-    return out;
+    return rocke_write_compiler_target(target_id,
+                                       rocke_compiler_processor_length(target_id),
+                                       target_id + strcspn(target_id, ":"),
+                                       out,
+                                       out_cap);
+}
+
+const char* rocke_compiler_target_for_flavor(const char* target_id,
+                                             const char* llvm_flavor,
+                                             char* out,
+                                             size_t out_cap,
+                                             char* message,
+                                             size_t message_cap)
+{
+    rocke_set_message(message, message_cap, "%s", "");
+    if(!target_id || !llvm_flavor || !out || out_cap == 0)
+        return NULL;
+    size_t name_len = rocke_compiler_processor_length(target_id);
+    const char* features = target_id + strcspn(target_id, ":");
+    const char* name = target_id;
+    if(rocke_processor_rejected(llvm_flavor, target_id, name_len))
+    {
+        const char* generic = rocke_row_facts_of(target_id, name_len);
+        const int len = (int)name_len;
+        if(generic == NULL || rocke_processor_rejected(llvm_flavor, generic, strlen(generic)))
+        {
+            rocke_set_message(message,
+                              message_cap,
+                              "the %s compiler does not accept the processor '%.*s', and its "
+                              "arch_specs.json row points at no generic target that compiler "
+                              "accepts -- compile with an LLVM flavor whose compiler accepts "
+                              "'%.*s'",
+                              llvm_flavor,
+                              len,
+                              target_id,
+                              len,
+                              target_id);
+            return NULL;
+        }
+        rocke_set_message(message,
+                          message_cap,
+                          "the %s compiler does not accept the processor '%.*s'; compiling for "
+                          "'%s' instead, the generic target its arch_specs.json row points at, "
+                          "whose code objects load on '%.*s'",
+                          llvm_flavor,
+                          len,
+                          target_id,
+                          generic,
+                          len,
+                          target_id);
+        name = generic;
+        name_len = strlen(generic);
+    }
+    return rocke_write_compiler_target(name, name_len, features, out, out_cap);
 }
 
 const char* rocke_generic_arch_from_target_id(const char* target_id, char* out, size_t out_cap)

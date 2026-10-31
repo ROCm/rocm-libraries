@@ -12,7 +12,11 @@ from __future__ import annotations
 
 import pytest
 
-from rocke.tests.ir_validity import arbiter_verdict, assert_target_accepts
+from rocke.tests.ir_validity import (
+    arbiter_verdict,
+    assert_target_accepts,
+    target_mnemonics,
+)
 
 _VALID = """\
 target triple = "amdgcn-amd-amdhsa"
@@ -98,3 +102,16 @@ def test_a_clang_that_cannot_run_its_linker_is_not_a_verdict_on_the_module():
     assert not _toolchain_incomplete(
         "module.ll:4:64: error: '%a' defined with type '<1 x float>' but expected 'float'"
     )
+
+
+def test_target_mnemonics_disassembles_the_code_object():
+    _verdict_or_skip(_VALID, "gfx90a")
+    mnemonics = target_mnemonics(_VALID, "gfx90a")
+    assert "s_endpgm" in mnemonics
+    assert any(m.startswith("global_store") for m in mnemonics)
+
+
+def test_target_mnemonics_fails_on_a_rejected_module():
+    _verdict_or_skip(_WRONG_OPERAND_TYPE, "gfx90a")
+    with pytest.raises(AssertionError, match="LLVM rejected the lowered IR for gfx90a"):
+        target_mnemonics(_WRONG_OPERAND_TYPE, "gfx90a")

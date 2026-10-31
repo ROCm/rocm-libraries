@@ -63,6 +63,14 @@ Read `name_absent` with care: it means the exact mangled string rocke emits is
 not a known intrinsic. A nonexistent operation and a mis-mangled overload suffix
 look identical here -- both are decl-table bugs, but different ones.
 
+# Processor names
+
+The target preflight -- an empty kernel compiled and linked once per target --
+also answers whether this compiler accepts the processor name at all.
+`processors` records that answer, which is what the compile helpers read to
+choose the name they pass the compiler
+(`rocke.core.arch.compiler_target_for_flavor`).
+
 # Provenance
 
 A result is only meaningful against the toolchain that produced it, and a host
@@ -166,7 +174,10 @@ STATUS_PROBE_ERROR = _domain.STATUS_PROBE_ERROR
 #        the key is held out of stage B. No cell moves on a healthy toolchain,
 #        but the stamp must, because a generator-5 column cannot otherwise be
 #        told apart from one that banked a crash as a definite negative.
-GENERATOR = 6
+#   7 -- `processors` records, from the target preflight, whether this
+#        flavor's compiler accepts each target's processor name, so the
+#        compile-target rule reads a measurement instead of guessing.
+GENERATOR = 7
 
 # Hoisted out of `_probe` so the artifact records the flags that actually ran.
 # `-O0` is the one that decides correctness (see `_probe`), which is why a
@@ -830,6 +841,27 @@ def _target_preflight_module(datalayout: str) -> str:
 def _target_preflight(clang: str, path: Path, arch: str, out: Path) -> tuple[str, str]:
     """Probe target support once; the scheduler owns any serial retry."""
     return _probe(clang, path, arch, out, verify_assembly=False)
+
+
+def _processor_support(
+    preflight: dict[str, tuple[str, str]],
+) -> dict[str, dict[str, object]]:
+    """Whether this clang accepts each target's processor name.
+
+    Read from the target preflight: an empty kernel compiled and linked once
+    per target, so its only question is the frontend's -- is this a processor
+    name the compiler knows. `{"accepted": true}`, or `{"accepted": false,
+    "evidence": ...}` with the compiler's reason. `main` has already refused a
+    preflight that ended any other way, so every target has an answer here.
+    """
+    return {
+        arch: (
+            {"accepted": True}
+            if status == STATUS_OK
+            else {"accepted": False, "evidence": evidence}
+        )
+        for arch, (status, evidence) in preflight.items()
+    }
 
 
 def _probe(
@@ -1748,6 +1780,12 @@ def main() -> int:
         )
         return 1
 
+    processors = _processor_support(preflight)
+    rejected = sorted(a for a, cell in processors.items() if not cell["accepted"])
+    print(
+        f"   processors not accepted by this compiler: {', '.join(rejected) or 'none'}"
+    )
+
     doc = {
         "schema": SCHEMA,
         "_comment": (
@@ -1771,6 +1809,11 @@ def main() -> int:
             "probe_timeout_s": PROBE_TIMEOUT_S,
         },
         "keys": results,
+        # Whether this flavor's compiler accepts each target's processor name.
+        # The compile helpers read it to pick the name they pass the compiler:
+        # the target itself, else the generic target its arch_specs.json row
+        # points at.
+        "processors": processors,
         # What this LLVM resolved each surviving declare to. Mostly identical
         # to the declared name; the interesting rows are overloads that
         # remangle (`ds.read.tr16.b64` -> `...b64.v4i16`) and legacy names

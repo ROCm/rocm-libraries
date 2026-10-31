@@ -392,9 +392,9 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     # RDNA3/3.5 (gfx11) integer WMMA — wave32 16x16x16 iu8. Operands are
     # <4 x i32> (16 int8 packed 4-per-i32), accumulator/result <8 x i32>. The
-    # signature carries i1 signedness flags (unsignedA/unsignedB) before each
-    # matrix operand and a trailing i1 clamp. Emission goes through
-    # Gfx11RdnaBackend.emit_wmma. LLVM-lowered to v_wmma_i32_16x16x16_iu8.
+    # signature carries an i1 signedness flag (1 = signed) before each matrix
+    # operand and a trailing i1 clamp. Emitted from its MATRIX_CALLS entries
+    # (core/isa/matrix_calls.py). LLVM-lowered to v_wmma_i32_16x16x16_iu8.
     "wmma.i32.16x16x16.iu8": (
         "declare <8 x i32> @llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32("
         "i1, <4 x i32>, i1, <4 x i32>, <8 x i32>, i1)"
@@ -966,9 +966,16 @@ _AV_B128_PTR_TYPES: Dict[int, str] = {
 }
 
 
-# Declares that change shape on LLVM 21+ hosts (ROCm 7.2+). Keys MUST
+# Declaration overrides, one table per declaration ABI generation
+# (:class:`_LlvmDeclarationAbi`, which a compiler lane reaches through its
+# emission profile). Each table holds only the entries whose text changed AT
+# that generation; a generation inherits every older generation's overrides in
+# :class:`_LlvmDeclarationAbi` order (see :func:`_decls_for_flavor`), so an
+# entry is written once, at the generation where its ABI changed. Keys MUST
 # already exist in :data:`_INTRINSIC_DECLS`; only the declaration TEXT
 # differs, so call-site ``_need(...)`` lookups stay flavor-agnostic.
+#
+# LLVM 21+ hosts (ROCm 7.2+).
 _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     "mfma.f32.16x16x32.fp8.fp8": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
@@ -992,29 +999,53 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     ),
 }
 
-# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides. No intrinsic needs a
-# further override today.
-_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
-    **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
+# LLVM 23 (ROCm 7.13+): only the intrinsics whose ABI changed again; the
+# LLVM 22 overrides reach this generation through inheritance, never by
+# copying. No intrinsic has an LLVM 23 text of its own today.
+_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {}
+
+
+# Each declaration ABI generation's own overrides, one entry per member of
+# :class:`_LlvmDeclarationAbi` (LLVM20 is the base table itself, so it
+# overrides nothing). A dict, not a list: the order of inheritance comes from
+# the enum's member order alone.
+_INTRINSIC_DECL_OVERRIDES_BY_ABI: Dict[_LlvmDeclarationAbi, Dict[str, str]] = {
+    _LlvmDeclarationAbi.LLVM20: {},
+    _LlvmDeclarationAbi.LLVM22: _INTRINSIC_DECLS_LLVM22_OVERRIDES,
+    _LlvmDeclarationAbi.LLVM23: _INTRINSIC_DECLS_LLVM23_OVERRIDES,
 }
 
 
 def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     """The declaration table a lowering at ``flavor`` resolves against.
 
+    The rule, in one place: the base table, then the overrides of every
+    declaration ABI generation up to and including the one ``flavor``'s
+    emission profile selects, oldest first in :class:`_LlvmDeclarationAbi`
+    order, then the declaration of every
+    :data:`~rocke.core.isa.matrix_calls.MATRIX_CALLS` entry whose key is not
+    already present (``MatrixCall.declaration`` derives it for ``flavor``). A
+    newer generation's entry replaces an older one's text; a key keeps the
+    position it first appeared at. An unknown flavor is refused by
+    :func:`_emission_profile`.
+
     Insertion order of ``_INTRINSIC_DECLS`` is preserved: it drives the emit
     order in ``finalize``, so the result is byte-significant.
 
     Kept as one copy because there are two readers -- ``_Lowerer.__init__``
     and :func:`check_arch_domain_in_ir`, which needs the table without a
-    lowerer to ask.
+    lowerer to ask. The C++ engine resolves the same chain in
+    ``rocke_ll_decl_text`` / ``rocke_ll_decl_at`` (``cpp/core/lower_llvm/data.cpp``).
     """
-    decls = dict(_INTRINSIC_DECLS)
+    from .isa.matrix_calls import MATRIX_CALLS
+
     abi = _emission_profile(flavor).declaration_abi
-    if abi is _LlvmDeclarationAbi.LLVM22:
-        decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
-    elif abi is _LlvmDeclarationAbi.LLVM23:
-        decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+    generations = list(_LlvmDeclarationAbi)
+    decls = dict(_INTRINSIC_DECLS)
+    for inherited in generations[: generations.index(abi) + 1]:
+        decls.update(_INTRINSIC_DECL_OVERRIDES_BY_ABI[inherited])
+    for call in MATRIX_CALLS.values():
+        decls.setdefault(call.key, call.declaration(flavor))
     return decls
 
 
@@ -1032,11 +1063,11 @@ def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> N
     something never measured (the dynamic ``llvm.smax.v<N>i<W>`` declares),
     which is silence by the same rule as the rest of the lane.
 
-    It is not one-to-one, though: several keys can share one declare line, and
-    at llvm23 ``mfma.scale.f32.16x16x128.f8f6f4`` and
-    ``mfma.f32.16x16x128.fp8.hero`` do. Identical declare text means the same
-    LLVM intrinsic, so those keys are aliases for one declaration and the IR
-    cannot say which of them the kernel demanded. Picking one would name the
+    It need not be one-to-one, though: nothing stops two keys of a flavor's
+    table from resolving to the same declare line (no committed table has such
+    a pair today). Identical declare text means the same LLVM intrinsic, so
+    such keys would be aliases for one declaration and the IR could not say
+    which of them the kernel demanded. Picking one would name the
     wrong table row half the time, so every negative alias is reported, each
     against its own cell -- which is also what keeps a waiver on one alias from
     silencing the other.
@@ -4188,17 +4219,6 @@ class _Lowerer:
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf16("
             f"<8 x bfloat> {self._operand(a)}, "
             f"<8 x bfloat> {self._operand(b)}, "
-            f"<16 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0)"
-        )
-
-    def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._need("mfma.f32.32x32x16.f16")
-        self._current().emit(
-            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.f16("
-            f"<8 x half> {self._operand(a)}, "
-            f"<8 x half> {self._operand(b)}, "
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
