@@ -23,10 +23,21 @@ namespace TensileLite
             // set. Callers guarantee an int-sized-or-wider alpha, so the byte
             // count always divides evenly.
             assert(bytes % sizeof(uint32_t) == 0);
-            size_t const    ints    = bytes / sizeof(uint32_t);
-            uint32_t const* v       = reinterpret_cast<uint32_t const*>(host);
-            size_t          nonzero = 0;
-            size_t          first   = ints;
+            size_t const    ints = bytes / sizeof(uint32_t);
+            uint32_t const* v    = reinterpret_cast<uint32_t const*>(host);
+
+            // Clean is the common case and only needs "anything nonzero?": a
+            // branch-free OR over the buffer, which vectorizes. The count and
+            // first offset are only needed for the dirty-buffer diagnostic.
+            uint32_t any = 0;
+            for(size_t i = 0; i < ints; i++)
+                any |= v[i];
+
+            if(any == 0)
+                return false;
+
+            size_t nonzero = 0;
+            size_t first   = ints;
             for(size_t i = 0; i < ints; i++)
             {
                 if(v[i] != 0)
@@ -36,9 +47,6 @@ namespace TensileLite
                     nonzero++;
                 }
             }
-
-            if(nonzero == 0)
-                return false;
 
             out.totalInts   = ints;
             out.nonzeroInts = nonzero;

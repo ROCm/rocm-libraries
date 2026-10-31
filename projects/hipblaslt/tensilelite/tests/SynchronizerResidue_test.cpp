@@ -80,3 +80,47 @@ TEST(SynchronizerResidue, FindsResidueInTheLastInt)
     EXPECT_EQ(r.firstInt, 63u);
     EXPECT_EQ(r.nonzeroInts, 1u);
 }
+
+// The clean verdict comes from a vectorized OR over the buffer: residue must be
+// found at every position, including the scalar tail and sizes that are not a
+// multiple of any vector width.
+TEST(SynchronizerResidue, FindsResidueAtEveryPositionOfOddSizes)
+{
+    for(size_t ints = 1; ints <= 67; ints++)
+    {
+        for(size_t pos = 0; pos < ints; pos++)
+        {
+            auto                buf = makeBuffer(ints, {{pos, 1}});
+            SynchronizerResidue r;
+            ASSERT_TRUE(scanSynchronizerResidue(buf.data(), buf.size(), r))
+                << "ints " << ints << ", residue at " << pos;
+            EXPECT_EQ(r.totalInts, ints);
+            EXPECT_EQ(r.nonzeroInts, 1u);
+            EXPECT_EQ(r.firstInt, pos);
+        }
+    }
+}
+
+// The client's buffer size (409,600 float-alpha elements): clean, and residue
+// that sets only the top bit (a sign-like flag), far from the start.
+TEST(SynchronizerResidue, ClientSizedBufferCleanAndHighBitResidue)
+{
+    size_t const ints = 409600;
+
+    // A clean scan leaves *out* untouched.
+    auto                clean = makeBuffer(ints);
+    SynchronizerResidue r;
+    r.totalInts   = 11;
+    r.nonzeroInts = 22;
+    r.firstInt    = 33;
+    EXPECT_FALSE(scanSynchronizerResidue(clean.data(), clean.size(), r));
+    EXPECT_EQ(r.totalInts, 11u);
+    EXPECT_EQ(r.nonzeroInts, 22u);
+    EXPECT_EQ(r.firstInt, 33u);
+
+    auto buf = makeBuffer(ints, {{300001, 0x80000000u}, {ints - 1, 0x80000000u}});
+    ASSERT_TRUE(scanSynchronizerResidue(buf.data(), buf.size(), r));
+    EXPECT_EQ(r.totalInts, ints);
+    EXPECT_EQ(r.nonzeroInts, 2u);
+    EXPECT_EQ(r.firstInt, 300001u);
+}
