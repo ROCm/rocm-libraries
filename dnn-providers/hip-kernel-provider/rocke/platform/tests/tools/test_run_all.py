@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import subprocess
 import shutil
+import sys
 
 import pytest
 
@@ -315,6 +316,37 @@ def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
     assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    "selector",
+    [
+        ["--only", "gemm"],
+        ["--only-ir", "gemm/gfx950/base"],
+    ],
+)
+def test_corpus_selectors_label_the_overall_result_focused(
+    runner, monkeypatch, tmp_path, capsys, selector
+):
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+            *selector,
+        ],
+    )
+
+    assert runner.main() == 0
+    assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+
+
 def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
     runner, monkeypatch, tmp_path, capsys
 ):
@@ -369,6 +401,22 @@ def test_explicit_fixture_override_is_resolved_before_pytest_changes_directory(
     monkeypatch.setenv("ROCKE_STORAGE_TEST", "fixture")
     env = runner.native_pytest_env(tmp_path, "Release")
     assert env["ROCKE_STORAGE_TEST"] == str(executable)
+
+
+def test_installed_runner_bootstraps_staged_hostcaps(runner, tmp_path):
+    installed_tests = tmp_path / "installed" / "tests"
+    arch_domain = installed_tests / "arch_domain"
+    arch_domain.mkdir(parents=True)
+    shutil.copy2(runner.TESTS / "run_all.py", installed_tests / "run_all.py")
+    shutil.copy2(runner.TOOLS / "_hostcaps.py", arch_domain / "_hostcaps.py")
+
+    proc = subprocess.run(
+        [sys.executable, "-I", str(installed_tests / "run_all.py"), "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "rocKE test/validation runner" in proc.stdout
 
 
 def test_pytest_build_configuration_owns_shared_engine(runner, monkeypatch, tmp_path):
