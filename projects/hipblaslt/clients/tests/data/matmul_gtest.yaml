@@ -2584,6 +2584,470 @@ Tests:
   unit_check: 1
   gpu_arch: '1250'
 
+# maf2_0: N(0,1) FP64 data; Gaussian inputs are not bit-exact, so validate with norm_check.
+# batch_mode [0, 1] covers both the strided and the pointer-array (per-batch seed) fills.
+- name: matmul_one_double_maf2_0
+  category: quick
+  function:
+    matmul: *double_precision
+  matrix_size: *one_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  batch_count: 2
+  batch_mode: [0, 1]
+  initialization: maf2_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# maf2_0 with padded leading dimensions (the fill covers ld padding; see hipblaslt_init_device.cpp).
+- name: matmul_one_double_maf2_0_padded
+  category: quick
+  function:
+    matmul: *double_precision
+  matrix_size:
+    - { M: 64, N: 56, K: 72, lda: 80, ldb: 80, ldc: 72, ldd: 72 }
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  batch_count: 2
+  batch_mode: [0, 1]
+  initialization: maf2_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# FP32 Gaussian data: skip the M=N=1 sizes, where a single cancelling dot product can exceed the
+# FP32 norm_check tolerance (1e-5) even against an exact result; larger outputs average it out.
+- name: matmul_one_float_maf2_0
+  category: quick
+  function:
+    matmul: *single_precision
+  matrix_size:
+    - { M:  8, N:  8, K:    8 }
+    - { M: 16, N: 16, K:   16 }
+    - { M: 24, N: 24, K:   24 }
+    - { M: 32, N: 32, K:   32 }
+    - { M: 40, N: 40, K:   40 }
+    - { M: 48, N: 48, K:   48 }
+    - { M: 56, N: 56, K:   56 }
+    - { M: 64, N: 64, K:   64 }
+    - { M: 72, N: 72, K:   72 }
+    - { M: 64, N: 64, K: 1024 }
+    - { M: 64, N: 56, K: 72, lda: 80, ldb: 80, ldc: 72, ldd: 72 }
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  batch_count: 2
+  batch_mode: [0, 1]
+  initialization: maf2_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# BF16 maf2_0: each double draw is rounded to float, then to BF16 (both round-to-nearest-even).
+- name: matmul_one_bf16_maf2_0
+  category: quick
+  function:
+    matmul: [ *hpa_bf16_precision, *hpa_half_bf16_fp32dst_precision ]
+  matrix_size:
+    - { M:  8, N:  8, K:    8 }
+    - { M: 16, N: 16, K:   16 }
+    - { M: 24, N: 24, K:   24 }
+    - { M: 32, N: 32, K:   32 }
+    - { M: 40, N: 40, K:   40 }
+    - { M: 48, N: 48, K:   48 }
+    - { M: 56, N: 56, K:   56 }
+    - { M: 64, N: 64, K:   64 }
+    - { M: 72, N: 72, K:   72 }
+    - { M: 64, N: 64, K: 1024 }
+    - { M: 64, N: 56, K: 72, lda: 80, ldb: 80, ldc: 72, ldd: 72 }
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  batch_count: 2
+  batch_mode: [0, 1]
+  initialization: maf2_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# FP8 non-scaled maf2_0: each double draw is rounded once to FP8 (nearest even); scale mode none
+# means scale 1 in both the kernel and the reference. K <= 1024 keeps FP8 outputs below saturation.
+# Covers every gfx1250 FP8 library type: f8, bf8 and mixed f8 x bf8 / bf8 x f8 inputs with
+# f32, f16, bf16, f8 and bf8 outputs.
+- name: matmul_one_f8_maf2_0
+  category: quick
+  function:
+    matmul: [ *f8_precision_dst_fp32, *bf8_precision_dst_fp32, *f8_precision_dst_bf16, *bf8_precision_dst_bf16,
+              *f8_precision_dst_f8, *bf8_precision_dst_bf8,
+              *f8_precision_dst_fp16, *bf8_precision_dst_fp16, *f8_precision_dst_bf8, *bf8_precision_dst_f8,
+              *f8bf8_precision_dst_fp32, *bf8f8_precision_dst_fp32, *f8bf8_precision_dst_fp16,
+              *bf8f8_precision_dst_fp16, *f8bf8_precision_dst_bf16, *bf8f8_precision_dst_bf16,
+              *f8bf8_precision_dst_f8, *f8bf8_precision_dst_bf8, *bf8f8_precision_dst_f8,
+              *bf8f8_precision_dst_bf8 ]
+  matrix_size:
+    - { M:  8, N:  8, K:    8 }
+    - { M: 16, N: 16, K:   16 }
+    - { M: 24, N: 24, K:   24 }
+    - { M: 32, N: 32, K:   32 }
+    - { M: 40, N: 40, K:   40 }
+    - { M: 48, N: 48, K:   48 }
+    - { M: 56, N: 56, K:   56 }
+    - { M: 64, N: 64, K:   64 }
+    - { M: 72, N: 72, K:   72 }
+    - { M: 64, N: 64, K: 1024 }
+    - { M: 64, N: 56, K: 72, lda: 80, ldb: 80, ldc: 72, ldd: 72 }
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  batch_count: 2
+  batch_mode: [0, 1]
+  initialization: maf2_0
+  scaleA: 0
+  scaleB: 0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# MXFP8 maf2_0 (E8M0 block 32, the gfx1250 MX kernels are TN): block scales 2^(k - 11) with
+# k ~ Binomial(21, 0.5) and data uniform over the finite FP8 encodings, seeded per matrix and batch.
+# Outputs reach ~1e7 (E4M3) to ~1e12 (E5M2), so FP16 outputs would overflow; BF16 and FP32 only.
+# No bf8 x bf8 -> bf16: the gfx1250 library has no MX kernel for it.
+- name: matmul_one_mxfp8_maf2_0
+  category: quick
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M: 128, N: 128, K: 256 }
+    - { M: 129, N: 129, K: 256 }
+    - { M: 256, N: 256, K: 512 }
+    - { M: 256, N: 256, K: 2048 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  batch_count: [1, 2]
+  initialization: maf2_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# MXFP4 maf2_0 (MAF2.0 row F4F4BF16BF16; the gfx1250 MX kernels are TN): block scales |x| for
+# x ~ N(0.34375, 0.08) rounded to the scale format, data uniform over the 16 FP4 codes, seeded per
+# matrix and batch. Scale formats: 3 = E8M0 block 32, 6 = UE4M3 block 16, 8 = UE5M3 block 16.
+# FP32 output too where the library has it (3 and 6).
+- name: matmul_one_mxfp4_maf2_0
+  category: quick
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 8, scaleB: 8, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+  matrix_size:
+    - { M: 128, N: 128, K:  512 }
+    - { M: 128, N: 128, K:  544 }
+    - { M: 130, N: 128, K:  512 }
+    - { M: 128, N: 130, K:  512 }
+    - { M: 256, N: 256, K: 2048 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  batch_count: [1, 2]
+  initialization: maf2_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# MXFP4 maf2_0_unit_scale (MAF2.0 row FP4 non-scaled F4F4BF16BF16): every block scale is 1.0
+# and the data is N(0,1) rounded to FP4. Scale formats: 3 = E8M0 block 32, 6 = UE4M3 block 16,
+# 8 = UE5M3 block 16. FP32 output too where the library has it (3 and 6).
+- name: matmul_one_mxfp4_maf2_0_unit_scale
+  category: quick
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 8, scaleB: 8, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+  matrix_size:
+    - { M: 128, N: 128, K:  512 }
+    - { M: 128, N: 128, K:  544 }
+    - { M: 130, N: 128, K:  512 }
+    - { M: 128, N: 130, K:  512 }
+    - { M: 256, N: 256, K: 2048 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  batch_count: [1, 2]
+  initialization: maf2_0_unit_scale
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# maf1_0 (MAF1.0): A = sin(idx), B and C = cos(idx), idx = i + j*rows + b*rows*cols of the stored
+# matrix, rounded once from double. The trig sums are not exact, so validate with norm_check.
+# batch_mode [0, 1] covers both the strided and the pointer-array (batch_index) fills.
+- name: matmul_one_double_maf1_0
+  category: quick
+  function:
+    matmul: *double_precision
+  matrix_size: *one_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  batch_count: 2
+  batch_mode: [0, 1]
+  initialization: maf1_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# maf1_0 with padded leading dimensions: the index is logical, so padding does not shift it.
+- name: matmul_one_double_maf1_0_padded
+  category: quick
+  function:
+    matmul: *double_precision
+  matrix_size:
+    - { M: 64, N: 56, K: 72, lda: 80, ldb: 80, ldc: 72, ldd: 72 }
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  batch_count: 2
+  batch_mode: [0, 1]
+  initialization: maf1_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# FP32 trig data: skip the M=N=1 sizes, where a single cancelling dot product can exceed the
+# FP32 norm_check tolerance (1e-5) even against an exact result; larger outputs average it out.
+- name: matmul_one_float_maf1_0
+  category: quick
+  function:
+    matmul: *single_precision
+  matrix_size:
+    - { M:  8, N:  8, K:    8 }
+    - { M: 16, N: 16, K:   16 }
+    - { M: 24, N: 24, K:   24 }
+    - { M: 32, N: 32, K:   32 }
+    - { M: 40, N: 40, K:   40 }
+    - { M: 48, N: 48, K:   48 }
+    - { M: 56, N: 56, K:   56 }
+    - { M: 64, N: 64, K:   64 }
+    - { M: 72, N: 72, K:   72 }
+    - { M: 64, N: 64, K: 1024 }
+    - { M: 64, N: 56, K: 72, lda: 80, ldb: 80, ldc: 72, ldd: 72 }
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  batch_count: 2
+  batch_mode: [0, 1]
+  initialization: maf1_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# BF16 maf1_0: each double value is rounded once to BF16 (nearest even).
+- name: matmul_one_bf16_maf1_0
+  category: quick
+  function:
+    matmul: [ *hpa_bf16_precision, *hpa_half_bf16_fp32dst_precision ]
+  matrix_size:
+    - { M:  8, N:  8, K:    8 }
+    - { M: 16, N: 16, K:   16 }
+    - { M: 24, N: 24, K:   24 }
+    - { M: 32, N: 32, K:   32 }
+    - { M: 40, N: 40, K:   40 }
+    - { M: 48, N: 48, K:   48 }
+    - { M: 56, N: 56, K:   56 }
+    - { M: 64, N: 64, K:   64 }
+    - { M: 72, N: 72, K:   72 }
+    - { M: 64, N: 64, K: 1024 }
+    - { M: 64, N: 56, K: 72, lda: 80, ldb: 80, ldc: 72, ldd: 72 }
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  batch_count: 2
+  batch_mode: [0, 1]
+  initialization: maf1_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# FP8 non-scaled maf1_0: each double value is rounded once to FP8 (nearest even, saturating);
+# scale mode none means scale 1 in both the kernel and the reference. Same library types as
+# matmul_one_f8_maf2_0.
+- name: matmul_one_f8_maf1_0
+  category: quick
+  function:
+    matmul: [ *f8_precision_dst_fp32, *bf8_precision_dst_fp32, *f8_precision_dst_bf16, *bf8_precision_dst_bf16,
+              *f8_precision_dst_f8, *bf8_precision_dst_bf8,
+              *f8_precision_dst_fp16, *bf8_precision_dst_fp16, *f8_precision_dst_bf8, *bf8_precision_dst_f8,
+              *f8bf8_precision_dst_fp32, *bf8f8_precision_dst_fp32, *f8bf8_precision_dst_fp16,
+              *bf8f8_precision_dst_fp16, *f8bf8_precision_dst_bf16, *bf8f8_precision_dst_bf16,
+              *f8bf8_precision_dst_f8, *f8bf8_precision_dst_bf8, *bf8f8_precision_dst_f8,
+              *bf8f8_precision_dst_bf8 ]
+  matrix_size:
+    - { M:  8, N:  8, K:    8 }
+    - { M: 16, N: 16, K:   16 }
+    - { M: 24, N: 24, K:   24 }
+    - { M: 32, N: 32, K:   32 }
+    - { M: 40, N: 40, K:   40 }
+    - { M: 48, N: 48, K:   48 }
+    - { M: 56, N: 56, K:   56 }
+    - { M: 64, N: 64, K:   64 }
+    - { M: 72, N: 72, K:   72 }
+    - { M: 64, N: 64, K: 1024 }
+    - { M: 64, N: 56, K: 72, lda: 80, ldb: 80, ldc: 72, ldd: 72 }
+  transA_transB: *transA_transB_range
+  alpha: [1.0, 2.0]
+  beta: [ 0.0, 2.0 ]
+  batch_count: 2
+  batch_mode: [0, 1]
+  initialization: maf1_0
+  scaleA: 0
+  scaleB: 0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# FP8 maf1_0 with a scalar A/B scale (scaleA/B 1): maf1_0 sets both scale factors to 0.5, as
+# mblas-bench does for a constant scale factor of 0.5.
+- name: matmul_one_f8_maf1_0_scale_ab
+  category: quick
+  function:
+    matmul: [ *f8_precision_dst_fp32, *f8_precision_dst_bf16 ]
+  matrix_size:
+    - { M:  16, N:  16, K:   16 }
+    - { M:  64, N:  64, K:   64 }
+    - { M: 128, N: 128, K:  128 }
+    - { M: 129, N: 129, K:  129 }
+    - { M:  64, N:  64, K: 1024 }
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  initialization: maf1_0
+  scaleA: 1
+  scaleB: 1
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# FP8 maf1_0 with vector A/B scales (scaleA/B 2): every entry is 0.5. The gfx1250 library has
+# vector-scale FP8 kernels for TN with BF16 output (see matmul_f8_dst_bf16_scale_ab_vec).
+- name: matmul_one_f8_maf1_0_scale_ab_vec
+  category: quick
+  function:
+    matmul: *f8_precision_dst_bf16
+  matrix_size:
+    - { M: 128, N: 128, K: 128 }
+    - { M: 129, N: 129, K: 129 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  initialization: maf1_0
+  scaleA: 2
+  scaleB: 2
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# MXFP8 maf1_0 (E8M0 block 32, the gfx1250 MX kernels are TN): every block scale is 0.5 (0x7E)
+# and each element code is the trig value rounded to FP8 at unit scale, so values are 0.5 * code.
+# Same library types as matmul_one_mxfp8_maf2_0.
+- name: matmul_one_mxfp8_maf1_0
+  category: quick
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: bf8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  matrix_size:
+    - { M: 128, N: 128, K: 256 }
+    - { M: 129, N: 129, K: 256 }
+    - { M: 256, N: 256, K: 512 }
+    - { M: 256, N: 256, K: 2048 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  batch_count: [1, 2]
+  initialization: maf1_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# MXFP4 maf1_0 (MAF1.0 row F4F4BF16BF16; the gfx1250 MX kernels are TN): every block scale is 0.5
+# (E8M0 0x7E, UE4M3 0x30, UE5M3 0x70) and the codes are in {0, +-0.5, +-1}, so values are in
+# {0, +-0.25, +-0.5}. Scale formats: 3 = E8M0 block 32, 6 = UE4M3 block 16, 8 = UE5M3 block 16.
+# FP32 output too where the library has it (3 and 6).
+- name: matmul_one_mxfp4_maf1_0
+  category: quick
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 8, scaleB: 8, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+  matrix_size:
+    - { M: 128, N: 128, K:  512 }
+    - { M: 128, N: 128, K:  544 }
+    - { M: 130, N: 128, K:  512 }
+    - { M: 128, N: 130, K:  512 }
+    - { M: 256, N: 256, K: 2048 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  batch_count: [1, 2]
+  initialization: maf1_0
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
+# MX maf2_0 / maf1_0 with a broadcast A or B (stride 0): the MAF data differs per batch, so the
+# shared matrix must be generated once, from batch 0, to agree with its scales and the reference.
+- name: matmul_one_mx_maf_broadcast
+  category: quick
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  arguments:
+    - { stride_a: 0 }
+    - { stride_b: 0 }
+  matrix_size:
+    - { M: 128, N: 128, K: 512 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 0.0
+  batch_count: 3
+  initialization: [ maf2_0, maf1_0 ]
+  norm_check: 1
+  unit_check: 0
+  gpu_arch: '1250'
+
 - name: matmul_gemm_double
   category: pre_checkin
   function:

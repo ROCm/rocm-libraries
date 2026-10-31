@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace
 {
@@ -60,11 +61,17 @@ namespace
 {
     using namespace DGen;
 
+    // Base seed of the maf2_0 MX streams: 2^31 above the non-MX maf2_0 base (1713573849), so
+    // the two families of mt19937(seed + 32 * index + thread) streams never meet.
+    constexpr uint32_t kMaf2_0MXSeed = 1713573849u + 0x80000000u;
+
     void applyInitMethodString(DataGeneratorOptions&  opt,
                                std::string_view const initMethod,
                                hipDataType            dataType,
                                float                  min_val,
-                               float                  max_val)
+                               float                  max_val,
+                               uint64_t               elementCount = 0,
+                               uint32_t               seedIndex    = 0)
     {
         opt.min         = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
         opt.max         = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ? .5 : max_val);
@@ -119,13 +126,37 @@ namespace
             auto const range = randIntRangeFor(dataType);
             opt.initMode     = DataInitMode(RandInt{range.first, range.second});
         }
+        else if(initMethod == "maf2_0_unit_scale")
+        {
+            // MAF2.0 FP4 non-scaled row: every block scale 1.0, N(0,1) data.
+            Maf2_0 mode;
+            mode.unitScaleNormalData = true;
+            opt.initMode             = DataInitMode(mode);
+        }
+        else if(initMethod == "maf2_0")
+        {
+            // MAF2.0: FP8/FP6 blocks take 2^Binomial scales, FP4 blocks N(0.34375, 0.08) scales.
+            Maf2_0 mode;
+            mode.normalScale = static_cast<int>(dataType) == static_cast<int>(HIP_R_4F_E2M1);
+            opt.initMode     = DataInitMode(mode);
+        }
+        else if(initMethod == "maf1_0")
+        {
+            // MAF1.0: A = sin(idx), B = cos(idx), idx = i + j * rows + batch * rows * cols of the
+            // stored matrix (seedIndex = abc + 3 * batch); every block scale 0.5.
+            Maf1_0 mode;
+            mode.useCos      = seedIndex % 3 != 0;
+            mode.indexOffset = uint64_t(seedIndex / 3) * elementCount;
+            opt.initMode     = DataInitMode(mode);
+        }
         else
             throw std::runtime_error(
                 std::string("generateMXInput: unsupported initMethod '")
                 + std::string(initMethod)
                 + "'. Supported methods: Bounded/uniform_01, hpl, "
                   "uniform_low_precision, "
-                  "TrigonometricFromFloat/trig_float, norm_dist, rand_int, "
+                  "TrigonometricFromFloat/trig_float, norm_dist, rand_int, maf2_0, "
+                  "maf2_0_unit_scale, maf1_0, "
                   "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
                   "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "
                   "DenormMins, DenormMaxs, NaNs, Infs.");
@@ -469,7 +500,12 @@ std::vector<float> generateData(T                           dgen,
         = swizzledScaleBytes.empty() ? scaleBytes : swizzledScaleBytes;
     std::memcpy(scale, deviceScaleBytes.data(), deviceScaleBytes.size() * sizeof(uint8_t));
 
-    if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose))
+    // Maf1_0 already writes element (i, j) of the stored matrix at i + j * stride with its
+    // sin/cos(i + j * row) code, and every block has the same scale. getAlignedFloat's reordering
+    // only exists to pair runs of data with their block scale, so it would just move elements
+    // away from their index; keep the generator's layout and reference instead.
+    bool const maf1_0 = std::holds_alternative<DGen::Maf1_0>(opt.initMode);
+    if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose) || maf1_0)
     {
         // For (1) transposed matrixA and (2) non-transposed matrixB,
         // return the reference float directly since they are aligned already.
@@ -548,16 +584,21 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    std::string_view const initMethod,
                                    float                  min_val,
                                    float                  max_val,
-                                   std::string_view const scaleInitMethod)
+                                   std::string_view const scaleInitMethod,
+                                   uint32_t               seedIndex)
 {
     using namespace DGen;
 
     DataGeneratorOptions opt;
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
-    applyInitMethodString(opt, initMethod, dataType, min_val, max_val);
+    applyInitMethodString(opt, initMethod, dataType, min_val, max_val, row * col, seedIndex);
     applyScaleInitMethodString(opt, scaleInitMethod, dataType);
 
-    const uint32_t seed = 1713573849;
+    // maf2_0 salts the seed per matrix and batch (seedIndex = abc + 3 * batch) from its own
+    // base, so its streams differ between A and B and between batches, and stay clear of the
+    // non-MX maf2_0 streams that start at 1713573849. Other methods keep the single seed.
+    const bool     maf2_0 = initMethod == "maf2_0" || initMethod == "maf2_0_unit_scale";
+    const uint32_t seed   = maf2_0 ? kMaf2_0MXSeed + 32u * seedIndex : 1713573849;
 
     std::vector<index_t> sizes = {row, col};
     std::vector<index_t> strides;

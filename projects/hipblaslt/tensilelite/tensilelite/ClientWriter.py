@@ -78,6 +78,9 @@ class DataInitName(Enum):
   TrigIndAbsSin = 25
   TrigIndAbsCos = 26
   UniformLowPrecision = 27
+  Maf2_0 = 28
+  Maf2_0UnitScale = 29
+  Maf1_0 = 30
 
 class ClientLogLevel(Enum):
   Error = 0

@@ -658,3 +658,485 @@ TEST(MXScaleLayoutFormat, MapsScalingFormatToLayout)
     EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0, "gfx1250"), MXScaleLayout::GFX1250);
     EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE4M3, "gfx942"), MXScaleLayout::None);
 }
+
+// ---------------------------------------------------------------------------
+// maf2_0 MX data, checked with decoders written independently of mxDataGenerator.
+// ---------------------------------------------------------------------------
+
+// OCP FP8 value (E4M3: bias 7, 0x7F/0xFF NaN; E5M2: bias 15, exponent 31 Inf/NaN).
+static double decodeOcpFp8(uint8_t code, bool e4m3)
+{
+    const int    expBits  = e4m3 ? 4 : 5;
+    const int    manBits  = e4m3 ? 3 : 2;
+    const int    bias     = e4m3 ? 7 : 15;
+    const int    exponent = (code >> manBits) & ((1 << expBits) - 1);
+    const int    mantissa = code & ((1 << manBits) - 1);
+    const double sign     = (code & 0x80) ? -1.0 : 1.0;
+    if(e4m3 && (code & 0x7F) == 0x7F)
+        return std::nan("");
+    if(!e4m3 && exponent == 31)
+        return mantissa == 0 ? sign * INFINITY : std::nan("");
+    if(exponent == 0)
+        return sign * std::ldexp(mantissa, 1 - bias - manBits);
+    return sign * std::ldexp((1 << manBits) + mantissa, exponent - bias - manBits);
+}
+
+struct MXOut
+{
+    std::vector<uint8_t> data;
+    std::vector<uint8_t> scale;
+    std::vector<float>   ref;
+};
+
+// A transposed A of rows x cols (K = rows, contiguous): one scale per mxBlock elements.
+static MXOut runFp8MX(hipDataType            dataType,
+                      hipDataType            scaleType,
+                      std::string_view const initMethod,
+                      uint32_t               seedIndex = 0,
+                      int                    mxBlock   = 32,
+                      uint64_t               rows      = 256,
+                      uint64_t               cols      = 64,
+                      MXScaleLayout          layout    = MXScaleLayout::None)
+{
+    MXOut out;
+    out.data.assign(rows * cols, 0);
+    out.scale.assign((rows / mxBlock) * cols * 2, 0); // room for swizzle padding
+    out.ref = generateMXInput(dataType,
+                              scaleType,
+                              out.data.data(),
+                              out.scale.data(),
+                              rows,
+                              cols,
+                              rows,
+                              /*isTranspose=*/true,
+                              mxBlock,
+                              1,
+                              /*isMatrixA=*/true,
+                              layout,
+                              initMethod,
+                              -1.0f,
+                              1.0f,
+                              "",
+                              seedIndex);
+    return out;
+}
+
+class MXDataGenMaf2_0 : public ::testing::TestWithParam<hipDataType>
+{
+};
+
+TEST_P(MXDataGenMaf2_0, E8M0ScalesAreBinomialPowersOfTwoAndDataIsFinite)
+{
+    const hipDataType dt   = GetParam();
+    const bool        e4m3 = dt == HIP_R_8F_E4M3;
+    const auto        out  = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_0");
+
+    std::set<uint8_t> scales(out.scale.begin(), out.scale.begin() + (256 / 32) * 64);
+    for(uint8_t s : scales)
+    {
+        EXPECT_GE(s, 127 - 11) << "scale exponent below 2^-11";
+        EXPECT_LE(s, 127 + 10) << "scale exponent above 2^10";
+    }
+    EXPECT_GT(scales.size(), 5u) << "binomial scales should vary";
+
+    for(size_t i = 0; i < out.data.size(); ++i)
+    {
+        const double v = decodeOcpFp8(out.data[i], e4m3);
+        ASSERT_TRUE(std::isfinite(v)) << "i=" << i << " code=" << int(out.data[i]);
+        const double expected = v * std::ldexp(1.0, int(out.scale[i / 32]) - 127);
+        EXPECT_EQ(out.ref[i], static_cast<float>(expected)) << "i=" << i;
+    }
+}
+
+TEST_P(MXDataGenMaf2_0, SeedIndexSeparatesMatricesAndBatches)
+{
+    const hipDataType dt = GetParam();
+    const auto        a0 = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_0", 0);
+    const auto        a0again = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_0", 0);
+    const auto        b0 = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_0", 1);
+    const auto        a1 = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_0", 3);
+    EXPECT_EQ(a0.data, a0again.data);
+    EXPECT_EQ(a0.scale, a0again.scale);
+    EXPECT_NE(a0.data, b0.data) << "A and B must differ";
+    EXPECT_NE(a0.data, a1.data) << "batches must differ";
+}
+
+TEST_P(MXDataGenMaf2_0, OtherInitMethodsIgnoreSeedIndex)
+{
+    const hipDataType dt = GetParam();
+    const auto        x  = runFp8MX(dt, HIP_R_8F_UE8M0, "Bounded", 0);
+    const auto        y  = runFp8MX(dt, HIP_R_8F_UE8M0, "Bounded", 4);
+    EXPECT_EQ(x.data, y.data);
+    EXPECT_EQ(x.scale, y.scale);
+}
+
+INSTANTIATE_TEST_SUITE_P(Fp8, MXDataGenMaf2_0, ::testing::Values(HIP_R_8F_E4M3, HIP_R_8F_E5M2));
+
+// OCP FP6 value (E2M3: bias 1; E3M2: bias 3); no Inf/NaN encodings.
+static double decodeOcpFp6(uint8_t code, bool e2m3)
+{
+    const int    expBits  = e2m3 ? 2 : 3;
+    const int    manBits  = e2m3 ? 3 : 2;
+    const int    bias     = e2m3 ? 1 : 3;
+    const int    exponent = (code >> manBits) & ((1 << expBits) - 1);
+    const int    mantissa = code & ((1 << manBits) - 1);
+    const double sign     = (code & 0x20) ? -1.0 : 1.0;
+    if(exponent == 0)
+        return sign * std::ldexp(mantissa, 1 - bias - manBits);
+    return sign * std::ldexp((1 << manBits) + mantissa, exponent - bias - manBits);
+}
+
+// Element i of a packed FP6 buffer (6 bits per element, little-endian bit order).
+static uint8_t fp6At(std::vector<uint8_t> const& packed, size_t i)
+{
+    size_t const bit  = i * 6;
+    uint16_t     word = packed[bit / 8];
+    if(bit / 8 + 1 < packed.size())
+        word |= static_cast<uint16_t>(packed[bit / 8 + 1]) << 8;
+    return static_cast<uint8_t>((word >> (bit % 8)) & 0x3F);
+}
+
+class MXDataGenMaf2_0Fp6 : public ::testing::TestWithParam<hipDataType>
+{
+};
+
+TEST_P(MXDataGenMaf2_0Fp6, E8M0ScalesAreBinomialPowersOfTwo)
+{
+    const hipDataType dt   = GetParam();
+    const bool        e2m3 = dt == static_cast<hipDataType>(HIP_R_6F_E2M3);
+    const auto        out  = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_0");
+    for(size_t i = 0; i < out.ref.size(); ++i)
+    {
+        const uint8_t s = out.scale[i / 32];
+        ASSERT_GE(s, 127 - 11);
+        ASSERT_LE(s, 127 + 10);
+        const double expected = decodeOcpFp6(fp6At(out.data, i), e2m3) * std::ldexp(1.0, s - 127);
+        ASSERT_EQ(out.ref[i], static_cast<float>(expected)) << "i=" << i;
+    }
+    const auto b = runFp8MX(dt, HIP_R_8F_UE8M0, "maf2_0", 1);
+    EXPECT_NE(out.data, b.data) << "A and B must differ";
+}
+
+INSTANTIATE_TEST_SUITE_P(Fp6,
+                         MXDataGenMaf2_0Fp6,
+                         ::testing::Values(static_cast<hipDataType>(HIP_R_6F_E2M3),
+                                           static_cast<hipDataType>(HIP_R_6F_E3M2)));
+
+// OCP FP4 E2M1 value (bias 1); element i is the low nibble of byte i/2 for even i.
+static double decodeFp4At(std::vector<uint8_t> const& packed, size_t i)
+{
+    const uint8_t code     = (packed[i / 2] >> ((i % 2) * 4)) & 0xF;
+    const int     exponent = (code >> 1) & 0x3;
+    const int     mantissa = code & 0x1;
+    const double  sign     = (code & 0x8) ? -1.0 : 1.0;
+    if(exponent == 0)
+        return sign * 0.5 * mantissa;
+    return sign * std::ldexp(2 + mantissa, exponent - 2);
+}
+
+// Unsigned E4M3 / E5M3 scale values (payload 0x7F / 0xFF is NaN).
+static double decodeUe4m3Scale(uint8_t code)
+{
+    return decodeOcpFp8(code & 0x7F, /*e4m3=*/true);
+}
+
+static double decodeUe5m3Scale(uint8_t code)
+{
+    if(code == 0xFF)
+        return std::nan("");
+    const int e = (code >> 3) & 0x1F;
+    const int m = code & 0x7;
+    return e == 0 ? std::ldexp(m, 1 - 15 - 3) : std::ldexp(8 + m, e - 15 - 3);
+}
+
+struct Fp4ScaleCase
+{
+    hipDataType scaleType;
+    int         mxBlock;
+};
+
+class MXDataGenMaf2_0Fp4 : public ::testing::TestWithParam<Fp4ScaleCase>
+{
+};
+
+// FP4 maf2_0 blocks take |N(0.34375, 0.08)| scales rounded to the scale format, and data
+// uniform over the 16 FP4 codes.
+TEST_P(MXDataGenMaf2_0Fp4, NormalScalesAndDecodedReference)
+{
+    const auto        c   = GetParam();
+    const hipDataType f4  = static_cast<hipDataType>(HIP_R_4F_E2M1);
+    const auto        out = runFp8MX(f4, c.scaleType, "maf2_0", 0, c.mxBlock);
+
+    auto scaleValue = [&](uint8_t s) {
+        if(c.scaleType == HIP_R_8F_E4M3)
+            return decodeUe4m3Scale(s);
+        if(c.scaleType == static_cast<hipDataType>(HIP_R_8F_E5M3_EXT))
+            return decodeUe5m3Scale(s);
+        return std::ldexp(1.0, int(s) - 127);
+    };
+
+    const size_t blocks = out.ref.size() / c.mxBlock;
+    double       sum = 0, quarter = 0;
+    for(size_t b = 0; b < blocks; ++b)
+    {
+        const double v = scaleValue(out.scale[b]);
+        ASSERT_TRUE(std::isfinite(v)) << "block " << b;
+        sum += v;
+        quarter += v == 0.25;
+    }
+    if(c.scaleType == HIP_R_8F_UE8M0)
+        EXPECT_NEAR(quarter / blocks, 0.627, 0.1) << "E8M0 rounds most draws to 0.25";
+    else
+        EXPECT_NEAR(sum / blocks, 0.3435, 0.015) << "mean scale";
+
+    for(size_t i = 0; i < out.ref.size(); ++i)
+    {
+        const double expected = decodeFp4At(out.data, i) * scaleValue(out.scale[i / c.mxBlock]);
+        ASSERT_EQ(out.ref[i], static_cast<float>(expected)) << "i=" << i;
+    }
+
+    const auto b = runFp8MX(f4, c.scaleType, "maf2_0", 1, c.mxBlock);
+    EXPECT_NE(out.data, b.data) << "A and B must differ";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Fp4,
+    MXDataGenMaf2_0Fp4,
+    ::testing::Values(Fp4ScaleCase{HIP_R_8F_UE8M0, 32},
+                      Fp4ScaleCase{HIP_R_8F_E4M3, 16},
+                      Fp4ScaleCase{static_cast<hipDataType>(HIP_R_8F_E5M3_EXT), 16}));
+
+class MXDataGenMaf2_0UnitScale : public ::testing::TestWithParam<Fp4ScaleCase>
+{
+};
+
+// The FP4 non-scaled row: every block scale is 1.0 and the data is N(0, 1) rounded to FP4.
+TEST_P(MXDataGenMaf2_0UnitScale, UnitScalesAndRoundedNormalData)
+{
+    const auto        c   = GetParam();
+    const hipDataType f4  = static_cast<hipDataType>(HIP_R_4F_E2M1);
+    const auto        out = runFp8MX(f4, c.scaleType, "maf2_0_unit_scale", 0, c.mxBlock);
+
+    const uint8_t one = c.scaleType == HIP_R_8F_E4M3                                    ? 0x38
+                        : c.scaleType == static_cast<hipDataType>(HIP_R_8F_E5M3_EXT) ? 0x78
+                                                                                     : 0x7F;
+    const size_t  blocks = out.ref.size() / c.mxBlock;
+    for(size_t b = 0; b < blocks; ++b)
+        ASSERT_EQ(out.scale[b], one) << "block " << b;
+
+    double zeros = 0, small = 0;
+    for(size_t i = 0; i < out.ref.size(); ++i)
+    {
+        const double v = decodeFp4At(out.data, i);
+        ASSERT_EQ(out.ref[i], static_cast<float>(v)) << "i=" << i;
+        zeros += v == 0.0;
+        small += std::abs(v) <= 1.0;
+    }
+    // P(|x| < 0.25) = 0.197 and P(|x| < 1.25) = 0.789 for x ~ N(0, 1).
+    EXPECT_NEAR(zeros / out.ref.size(), 0.197, 0.02);
+    EXPECT_NEAR(small / out.ref.size(), 0.789, 0.02);
+
+    const auto b = runFp8MX(f4, c.scaleType, "maf2_0_unit_scale", 1, c.mxBlock);
+    EXPECT_NE(out.data, b.data) << "A and B must differ";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Fp4,
+    MXDataGenMaf2_0UnitScale,
+    ::testing::Values(Fp4ScaleCase{HIP_R_8F_UE8M0, 32},
+                      Fp4ScaleCase{HIP_R_8F_E4M3, 16},
+                      Fp4ScaleCase{static_cast<hipDataType>(HIP_R_8F_E5M3_EXT), 16}));
+
+// ---------------------------------------------------------------------------
+// maf1_0 MX data: every block scale is 0.5, and the code of stored element n (= i + j * rows) is
+// sin (A, seedIndex % 3 == 0) or cos (B) of n + batch * rows * cols (batch = seedIndex / 3),
+// rounded once to nearest even at unit scale, so its value is 0.5 * code. Checked against a
+// brute-force rounding over every encoding.
+// ---------------------------------------------------------------------------
+
+struct Maf1_0Case
+{
+    hipDataType dataType;
+    hipDataType scaleType;
+    int         mxBlock;
+    uint8_t     halfScale; // 0.5 in the scale format
+};
+
+static bool isFp8(hipDataType dt)
+{
+    return dt == HIP_R_8F_E4M3 || dt == HIP_R_8F_E5M2;
+}
+
+static bool isFp4(hipDataType dt)
+{
+    return dt == static_cast<hipDataType>(HIP_R_4F_E2M1);
+}
+
+static uint8_t maf1_0SignBit(hipDataType dt)
+{
+    return isFp8(dt) ? 0x80 : isFp4(dt) ? 0x8 : 0x20;
+}
+
+// Code of element n of a packed data buffer.
+static uint8_t maf1_0CodeAt(hipDataType dt, std::vector<uint8_t> const& data, size_t n)
+{
+    if(isFp8(dt))
+        return data[n];
+    if(isFp4(dt))
+        return (data[n / 2] >> ((n % 2) * 4)) & 0xF;
+    return fp6At(data, n);
+}
+
+static double maf1_0Decode(hipDataType dt, uint8_t code)
+{
+    if(isFp8(dt))
+        return decodeOcpFp8(code, dt == HIP_R_8F_E4M3);
+    if(isFp4(dt))
+        return decodeFp4At(std::vector<uint8_t>{code}, 0);
+    return decodeOcpFp6(code, dt == static_cast<hipDataType>(HIP_R_6F_E2M3));
+}
+
+// The finite code nearest to v (the even one on a tie), carrying the sign of v.
+static uint8_t maf1_0NearestEven(hipDataType dt, double v)
+{
+    uint8_t const signBit = maf1_0SignBit(dt);
+    int           best    = 0;
+    double        bestErr = INFINITY;
+    for(int c = 0; c < signBit; ++c)
+    {
+        double const d = maf1_0Decode(dt, static_cast<uint8_t>(c));
+        if(!std::isfinite(d))
+            continue;
+        double const err = std::abs(d - std::abs(v));
+        if(err < bestErr || (err == bestErr && c % 2 == 0))
+        {
+            best    = c;
+            bestErr = err;
+        }
+    }
+    return static_cast<uint8_t>(best | (std::signbit(v) ? signBit : 0));
+}
+
+static double maf1_0Trig(uint32_t seedIndex, size_t n, size_t elements)
+{
+    double const x = static_cast<double>(n + seedIndex / 3 * elements);
+    return seedIndex % 3 == 0 ? std::sin(x) : std::cos(x);
+}
+
+class MXDataGenMaf1_0 : public ::testing::TestWithParam<Maf1_0Case>
+{
+};
+
+TEST_P(MXDataGenMaf1_0, HalfScalesAndRoundedTrigData)
+{
+    const auto     c        = GetParam();
+    const uint64_t rows     = 256;
+    const uint64_t cols     = 64;
+    const size_t   elements = rows * cols;
+    for(uint32_t seedIndex : {0u, 1u, 3u, 4u}) // A, B, batch-1 A, batch-1 B
+    {
+        SCOPED_TRACE("seedIndex " + std::to_string(seedIndex));
+        const auto out = runFp8MX(c.dataType, c.scaleType, "maf1_0", seedIndex, c.mxBlock);
+        for(size_t b = 0; b < (rows / c.mxBlock) * cols; ++b)
+            ASSERT_EQ(out.scale[b], c.halfScale) << "block " << b;
+        ASSERT_EQ(out.ref.size(), elements);
+        for(size_t n = 0; n < elements; ++n)
+        {
+            const uint8_t code = maf1_0CodeAt(c.dataType, out.data, n);
+            ASSERT_EQ(code, maf1_0NearestEven(c.dataType, maf1_0Trig(seedIndex, n, elements)))
+                << "n=" << n;
+            ASSERT_EQ(out.ref[n], static_cast<float>(0.5 * maf1_0Decode(c.dataType, code)))
+                << "n=" << n;
+        }
+    }
+}
+
+TEST_P(MXDataGenMaf1_0, MatricesAndBatchesDifferAndRepeat)
+{
+    const auto c       = GetParam();
+    const auto a0      = runFp8MX(c.dataType, c.scaleType, "maf1_0", 0, c.mxBlock);
+    const auto a0again = runFp8MX(c.dataType, c.scaleType, "maf1_0", 0, c.mxBlock);
+    const auto b0      = runFp8MX(c.dataType, c.scaleType, "maf1_0", 1, c.mxBlock);
+    const auto a1      = runFp8MX(c.dataType, c.scaleType, "maf1_0", 3, c.mxBlock);
+    const auto b1      = runFp8MX(c.dataType, c.scaleType, "maf1_0", 4, c.mxBlock);
+    EXPECT_EQ(a0.data, a0again.data);
+    EXPECT_EQ(a0.scale, a0again.scale);
+    EXPECT_EQ(a0.ref, a0again.ref);
+    EXPECT_NE(a0.data, b0.data) << "A (sin) and B (cos) must differ";
+    EXPECT_NE(a0.data, a1.data) << "batches must differ";
+    EXPECT_NE(b0.data, b1.data) << "batches must differ";
+}
+
+// With K along the stored columns (non-transposed A) the index is still i + j * rows of the
+// stored matrix.
+TEST_P(MXDataGenMaf1_0, IndexFollowsTheStoredMatrix)
+{
+    const auto           c    = GetParam();
+    const uint64_t       rows = 64;
+    const uint64_t       cols = 256;
+    std::vector<uint8_t> data(rows * cols, 0);
+    std::vector<uint8_t> scale(rows * cols, 0);
+    generateMXInput(c.dataType,
+                    c.scaleType,
+                    data.data(),
+                    scale.data(),
+                    rows,
+                    cols,
+                    rows,
+                    /*isTranspose=*/false,
+                    c.mxBlock,
+                    1,
+                    /*isMatrixA=*/true,
+                    MXScaleLayout::None,
+                    "maf1_0",
+                    -1.0f,
+                    1.0f,
+                    "",
+                    0);
+    for(size_t b = 0; b < (rows / c.mxBlock) * cols; ++b)
+        ASSERT_EQ(scale[b], c.halfScale) << "block " << b;
+    for(size_t n = 0; n < rows * cols; ++n)
+        ASSERT_EQ(maf1_0CodeAt(c.dataType, data, n),
+                  maf1_0NearestEven(c.dataType, std::sin(static_cast<double>(n))))
+            << "n=" << n;
+}
+
+INSTANTIATE_TEST_SUITE_P(Fp8,
+                         MXDataGenMaf1_0,
+                         ::testing::Values(Maf1_0Case{HIP_R_8F_E4M3, HIP_R_8F_UE8M0, 32, 0x7E},
+                                           Maf1_0Case{HIP_R_8F_E5M2, HIP_R_8F_UE8M0, 32, 0x7E},
+                                           Maf1_0Case{HIP_R_8F_E4M3, HIP_R_8F_UE8M0, 16, 0x7E}));
+
+INSTANTIATE_TEST_SUITE_P(
+    Fp6,
+    MXDataGenMaf1_0,
+    ::testing::Values(Maf1_0Case{static_cast<hipDataType>(HIP_R_6F_E2M3), HIP_R_8F_UE8M0, 32, 0x7E},
+                      Maf1_0Case{
+                          static_cast<hipDataType>(HIP_R_6F_E3M2), HIP_R_8F_UE8M0, 16, 0x7E}));
+
+INSTANTIATE_TEST_SUITE_P(
+    Fp4,
+    MXDataGenMaf1_0,
+    ::testing::Values(Maf1_0Case{static_cast<hipDataType>(HIP_R_4F_E2M1), HIP_R_8F_UE8M0, 32, 0x7E},
+                      Maf1_0Case{static_cast<hipDataType>(HIP_R_4F_E2M1), HIP_R_8F_E4M3, 16, 0x30},
+                      Maf1_0Case{static_cast<hipDataType>(HIP_R_4F_E2M1),
+                                 static_cast<hipDataType>(HIP_R_8F_E5M3_EXT),
+                                 16,
+                                 0x70}));
+
+// Hand-computed codes: E4M3 sin(1) = 0.8415 -> 0.8125 (0x35), sin(2) = 0.9093 -> 0.875 (0x37),
+// cos(0) = 1 (0x38); FP4 sin(1) -> 1.0 (0x2), element 1 being the high nibble of byte 0.
+TEST(MXDataGenMaf1_0Golden, HandComputedCodes)
+{
+    const auto a = runFp8MX(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, "maf1_0", 0);
+    EXPECT_EQ(a.data[0], 0x00);
+    EXPECT_EQ(a.data[1], 0x35);
+    EXPECT_EQ(a.data[2], 0x37);
+    EXPECT_EQ(a.ref[1], 0.40625f);
+    const auto b = runFp8MX(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, "maf1_0", 1);
+    EXPECT_EQ(b.data[0], 0x38);
+    EXPECT_EQ(b.ref[0], 0.5f);
+    const auto f4 = runFp8MX(static_cast<hipDataType>(HIP_R_4F_E2M1), HIP_R_8F_UE8M0, "maf1_0", 0);
+    EXPECT_EQ((f4.data[0] >> 4) & 0xF, 0x2);
+    EXPECT_EQ(f4.ref[1], 0.5f);
+}
