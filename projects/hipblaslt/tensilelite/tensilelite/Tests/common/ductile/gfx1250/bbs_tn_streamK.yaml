@@ -201,11 +201,6 @@ BenchmarkProblems:
     - ProblemSizes:
       - Exact: [ 32, 16, 1, 1024 ]
     - BiasTypeArgs: [B]
-LibraryLogic:
-  ScheduleName: "gfx1250"
-  ArchitectureName: "gfx1250"
-  DeviceNames: ["Device 73f0"]
-#LibraryClient: 
 Backend:
   Name: Ductile
   Config:
