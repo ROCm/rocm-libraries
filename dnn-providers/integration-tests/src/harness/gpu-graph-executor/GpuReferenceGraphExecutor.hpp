@@ -141,6 +141,10 @@ private:
                 node, tensorMap, node.compute_data_type());
         case NodeAttrs::ConvolutionFwdAttributes:
             return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::ConvolutionBwdAttributes:
+            return detail::GpuConvolutionBwdSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::ConvolutionWrwAttributes:
+            return detail::GpuConvolutionWrwSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::LayernormAttributes:
             return detail::GpuLayernormFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::LayernormBackwardAttributes:
@@ -191,8 +195,6 @@ private:
 
         // Node types with no GPU plan yet - throw descriptive error
         case NodeAttrs::BatchnormBackwardAttributes:
-        case NodeAttrs::ConvolutionBwdAttributes:
-        case NodeAttrs::ConvolutionWrwAttributes:
         case NodeAttrs::SdpaBackwardAttributes:
         case NodeAttrs::BlockScaleDequantizeAttributes:
         case NodeAttrs::BlockScaleQuantizeAttributes:
