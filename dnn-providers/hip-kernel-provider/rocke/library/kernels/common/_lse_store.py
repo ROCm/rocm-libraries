@@ -215,8 +215,6 @@ def validate_dense_lse(
 
     if not spec.varlen:
         return
-    import torch
-
     for name, tensor, heads in (
         ("q", q, spec.num_query_heads),
         ("out", out, spec.num_query_heads),
