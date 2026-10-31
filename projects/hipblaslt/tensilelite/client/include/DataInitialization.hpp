@@ -1124,7 +1124,12 @@ namespace TensileLite
             {
             }
 
-            virtual void finalizeReport() override {}
+            virtual void finalizeReport() override
+            {
+                if(m_verifyUploadSkip)
+                    std::cout << "Verified " << m_verifiedUploadSkips
+                              << " skipped GPU input uploads against the host data." << std::endl;
+            }
 
             virtual int error() const override
             {
@@ -1149,6 +1154,12 @@ namespace TensileLite
                 std::vector<TensorDescriptor> initDescriptor;
                 MemoryInput                   cpuInput;
                 MemoryInput                   gpuInput;
+
+                // What gpuInput.valid holds: the first gpuValidElements elements of
+                // cpuInput.valid as of input epoch gpuValidEpoch. 0 elements means unknown (not
+                // written yet, or last written with another layout, e.g. a swizzled copy).
+                InputEpoch gpuValidEpoch    = 0;
+                size_t     gpuValidElements = 0;
 
                 MemoryInput& getInputByKind(hipMemcpyKind kind)
                 {
@@ -1183,6 +1194,19 @@ namespace TensileLite
             void copyValidToGPUBuffer(ContractionProblemGemm const& problem);
 
             void copySwizzledToGPUBuffer(ContractionProblemGemm const& problem);
+
+            // Uploads the first `elements` elements of p.cpuInput.valid to p.gpuInput.valid
+            // unless gpuInput.valid already holds them for the current input epoch (then, with
+            // m_verifyUploadSkip, reads them back and throws if they differ). Returns
+            // gpuInput.valid.
+            void* uploadValidToGPU(TensorDescriptor const& desc, PristineUnit& p, size_t elements);
+
+            // Every writer of gpuInput.valid other than uploadValidToGPU calls this (or sets the
+            // tag to what it wrote).
+            static void invalidateGPUValid(PristineUnit& p)
+            {
+                p.gpuValidElements = 0;
+            }
 
             void initializeGPUBatchedInputs(ContractionProblemGemm const& problem);
 
@@ -1324,6 +1348,11 @@ namespace TensileLite
             // tensor index. The MX equivalent of g_swizzleCache.
             std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
             InputEpoch                         m_inputEpoch = 0;
+
+            // Debug mode (--verify-upload-skip / TENSILELITE_VERIFY_UPLOAD_SKIP=1): every upload
+            // skipped by uploadValidToGPU is checked against the host data.
+            bool   m_verifyUploadSkip    = false;
+            size_t m_verifiedUploadSkips = 0;
         };
 
         template <>

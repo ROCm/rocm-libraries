@@ -980,6 +980,11 @@ namespace TensileLite
             m_rotatingMode   = args["rotating-buffer-mode"].as<int32_t>();
             m_boundsCheck    = args["bounds-check"].as<BoundsCheckMode>();
             m_curBoundsCheck = m_boundsCheck;
+            m_verifyUploadSkip
+                = args.count("verify-upload-skip") && args["verify-upload-skip"].as<bool>();
+            // Also settable from the environment so the pytest-driven client runs can enable it.
+            if(char const* env = std::getenv("TENSILELITE_VERIFY_UPLOAD_SKIP"))
+                m_verifyUploadSkip = m_verifyUploadSkip || std::string(env) == "1";
 
             if(m_boundsCheck == BoundsCheckMode::GuardPageAll)
             {
@@ -1419,6 +1424,8 @@ namespace TensileLite
                                       pUnit.cpuInput.valid.get(),
                                       multiplyElementSize(pUnit.maxElements, dataTypeSize),
                                       hipMemcpyHostToDevice));
+                        pUnit.gpuValidEpoch    = m_inputEpoch;
+                        pUnit.gpuValidElements = pUnit.maxElements;
                     }
                     // Init and copy bad from cpu to gpu
                     if(pUnit.gpuInput.bad && pUnit.cpuInput.bad)
@@ -2345,6 +2352,7 @@ namespace TensileLite
                                           initModeToMXMethod(scaleInitMode),
                                           /*returnReference=*/false);
                       }
+                      invalidateGPUValid(pristineScale);
                       HIP_CHECK_EXC(hipMemcpy(pristineScale.gpuInput.valid.get(),
                                               gpuScaleBuf.data(),
                                               gpuScaleBytes,
@@ -2840,7 +2848,6 @@ namespace TensileLite
                 //Copy swizzle tensor would be in copySwizzledToGPUBuffer
                 if(needSwizzle || needMXSwizzle)
                     continue;
-                void* ptr  = nullptr;
                 auto& desc = problem.tensors()[i];
                 auto  it   = m_vdata[i].pristine.find(desc.dataType());
                 if(it == m_vdata[i].pristine.end())
@@ -2848,14 +2855,46 @@ namespace TensileLite
                 auto& p = m_vdata[i].pristine[desc.dataType()];
                 if(p.gpuInput.valid.get() == nullptr || p.cpuInput.valid.get() == nullptr)
                     continue;
-                ptr = copyInputBuffers(desc,
-                                       p.gpuInput.valid.get(),
-                                       p.cpuInput.valid.get(),
-                                       problemExtentElements(problem, i, p),
-                                       hipMemcpyHostToDevice);
-                if(ptr == nullptr)
-                    std::__throw_runtime_error("error");
+                uploadValidToGPU(desc, p, problemExtentElements(problem, i, p));
             }
+        }
+
+        void* DataInitialization::uploadValidToGPU(TensorDescriptor const& desc,
+                                                   PristineUnit&           p,
+                                                   size_t                  elements)
+        {
+            if(p.gpuValidEpoch == m_inputEpoch && p.gpuValidElements >= elements)
+            {
+                if(m_verifyUploadSkip)
+                {
+                    size_t const         bytes = multiplyElementSize(elements, desc.elementBytes());
+                    std::vector<uint8_t> onGPU(bytes);
+                    HIP_CHECK_EXC(hipMemcpy(
+                        onGPU.data(), p.gpuInput.valid.get(), bytes, hipMemcpyDeviceToHost));
+                    if(std::memcmp(onGPU.data(), p.cpuInput.valid.get(), bytes) != 0)
+                        throw std::runtime_error(
+                            "Stale GPU input " + desc.getName()
+                            + ": DataInitialization skipped its upload because the GPU copy is "
+                              "tagged with the current input epoch, but it differs from the host "
+                              "data. A writer of gpuInput.valid does not update the tag, a "
+                              "writer of cpuInput.valid is missing an epoch bump, or a kernel "
+                              "wrote out of bounds into this buffer.");
+                    ++m_verifiedUploadSkips;
+                }
+                return p.gpuInput.valid.get();
+            }
+
+            // Unknown until the copy has completed.
+            invalidateGPUValid(p);
+            void* ptr = copyInputBuffers(desc,
+                                         p.gpuInput.valid.get(),
+                                         p.cpuInput.valid.get(),
+                                         elements,
+                                         hipMemcpyHostToDevice);
+
+            p.gpuValidEpoch    = m_inputEpoch;
+            p.gpuValidElements = elements;
+            return ptr;
         }
 
         void DataInitialization::copySwizzledToGPUBuffer(ContractionProblemGemm const& problem)
@@ -2934,6 +2973,7 @@ namespace TensileLite
                         if(swizzleKey != g_swizzleCache.back())
                         {
                             Tensor& permuted = g_swizzleCache.at(swizzleKey);
+                            invalidateGPUValid(p);
                             ptr = copyInputBuffers(
                                 desc,
                                 p.gpuInput.valid.get(),
@@ -2961,6 +3001,7 @@ namespace TensileLite
                                               effMiK / effMiKv,
                                               effMiKv * effPackK});
                         Tensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
+                        invalidateGPUValid(p);
                         ptr             = copyInputBuffers(
                             desc,
                             p.gpuInput.valid.get(),
@@ -2993,11 +3034,7 @@ namespace TensileLite
                         // uploading cpuInput.valid must also invalidate any prior
                         // "gpuInput.valid is swizzled" cache state for this tensor.
                         m_mxSwizzledDescriptor.erase(i);
-                        ptr = copyInputBuffers(desc,
-                                               p.gpuInput.valid.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               hipMemcpyHostToDevice);
+                        ptr = uploadValidToGPU(desc, p, p.maxElements);
                     }
                     else if(preswizzledAlready)
                     {
@@ -3018,6 +3055,7 @@ namespace TensileLite
                         // data, so any previous descriptor tag is stale until the new
                         // transform completes and is written back to gpuInput.valid.
                         m_mxSwizzledDescriptor.erase(i);
+                        invalidateGPUValid(p);
 
                         // Fallback K-dimension swizzle for the case where
                         // initializeMXData did NOT pre-produce a swizzled
@@ -3084,11 +3122,7 @@ namespace TensileLite
                 }
                 else
                 {
-                    ptr = copyInputBuffers(desc,
-                                           p.gpuInput.valid.get(),
-                                           p.cpuInput.valid.get(),
-                                           problemExtentElements(problem, i, p),
-                                           hipMemcpyHostToDevice);
+                    ptr = uploadValidToGPU(desc, p, problemExtentElements(problem, i, p));
                 }
 
                 if(ptr == nullptr)

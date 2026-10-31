@@ -391,6 +391,9 @@ TEST(DataInitializationInputEpoch, PerSolutionEpochRequiresPreSolution)
 //   its values depend on the coordinate, so a copy that misses part of a problem's extent
 //   leaves an earlier problem's values there, which the independent expectation catches.
 //   Sizes start below the run's maximum, shrink, then grow to it.
+//   Each problem is then reset as before a second solution: the host data has not changed, so
+//   the upload to the GPU's pristine copy is skipped, and the debug mode (verify-upload-skip)
+//   reads that copy back and throws if it differs from the host data.
 // =============================================================================
 class DataInitializationCopyExtentTest
     : public ::testing::TestWithParam<TensileLite::Client::InitMode>
@@ -420,6 +423,7 @@ TEST_P(DataInitializationCopyExtentTest, GpuInputsMatchCpuInputsWhenProblemsShri
                   {96, 80, 1, 72}, {16, 24, 1, 8}, {200, 136, 2, 120}, {40, 40, 1, 40}});
     for(auto const* name : {"init-a", "init-b", "init-c"})
         setOption(args, name, GetParam());
+    setOption(args, "verify-upload-skip", true);
 
     TensileLite::Client::ClientProblemFactory factory(args);
     TensileLite::Client::DataInitialization   dataInit(args, factory);
@@ -431,33 +435,49 @@ TEST_P(DataInitializationCopyExtentTest, GpuInputsMatchCpuInputsWhenProblemsShri
         // The client prepares the reference (CPU) inputs before the GPU ones.
         auto cpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
             dataInit.prepareCPUInputs(&problem));
-        auto gpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
-            dataInit.prepareGPUInputs(&problem));
-        ASSERT_TRUE(cpu && gpu);
-
-        std::pair<void const*, void const*> const inputs[]
-            = {{cpu->a, gpu->a}, {cpu->b, gpu->b}, {cpu->c, gpu->c}};
-        for(size_t i = 0; i < std::size(inputs); i++)
+        for(char const* call : {"problem", "solution reset"})
         {
-            auto const&          desc  = problem.tensors()[i];
-            size_t               bytes = desc.totalAllocatedBytes();
-            std::vector<uint8_t> fromGpu(bytes);
-            ASSERT_EQ(hipMemcpy(fromGpu.data(), inputs[i].second, bytes, hipMemcpyDeviceToHost),
-                      hipSuccess);
-            EXPECT_EQ(std::memcmp(fromGpu.data(), inputs[i].first, bytes), 0)
-                << "tensor " << desc.getName() << " of problem " << k;
-            if(GetParam() == InitMode::SerialDim0)
+            std::shared_ptr<TensileLite::ContractionInputs> gpu;
+            ASSERT_NO_THROW(gpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+                                dataInit.prepareGPUInputs(&problem)))
+                << call << " of problem " << k;
+            ASSERT_TRUE(cpu && gpu);
+
+            std::pair<void const*, void const*> const inputs[]
+                = {{cpu->a, gpu->a}, {cpu->b, gpu->b}, {cpu->c, gpu->c}};
+            for(size_t i = 0; i < std::size(inputs); i++)
             {
-                // Packed tensors: every element of the extent is written.
-                std::vector<float> expected(desc.totalAllocatedElements());
-                DataInitialization::initArraySerialDim<float>(expected.data(), 0, desc);
-                EXPECT_EQ(std::memcmp(expected.data(), inputs[i].first, bytes), 0)
-                    << "CPU tensor " << desc.getName() << " of problem " << k;
-                EXPECT_EQ(std::memcmp(expected.data(), fromGpu.data(), bytes), 0)
-                    << "GPU tensor " << desc.getName() << " of problem " << k;
+                auto const&          desc  = problem.tensors()[i];
+                size_t               bytes = desc.totalAllocatedBytes();
+                std::vector<uint8_t> fromGpu(bytes);
+                ASSERT_EQ(hipMemcpy(fromGpu.data(), inputs[i].second, bytes, hipMemcpyDeviceToHost),
+                          hipSuccess);
+                EXPECT_EQ(std::memcmp(fromGpu.data(), inputs[i].first, bytes), 0)
+                    << "tensor " << desc.getName() << " after the " << call << " of problem " << k;
+                if(GetParam() == InitMode::SerialDim0)
+                {
+                    // Packed tensors: every element of the extent is written.
+                    std::vector<float> expected(desc.totalAllocatedElements());
+                    DataInitialization::initArraySerialDim<float>(expected.data(), 0, desc);
+                    EXPECT_EQ(std::memcmp(expected.data(), inputs[i].first, bytes), 0)
+                        << "CPU tensor " << desc.getName() << " of problem " << k;
+                    EXPECT_EQ(std::memcmp(expected.data(), fromGpu.data(), bytes), 0)
+                        << "GPU tensor " << desc.getName() << " after the " << call
+                        << " of problem " << k;
+                }
             }
         }
     }
+
+    // With problem-dependent data (SerialDim0) every reset takes the slow path, whose uploads
+    // are skipped and verified; Random takes the fast path, which uploads nothing.
+    testing::internal::CaptureStdout();
+    dataInit.finalizeReport();
+    std::string const report = testing::internal::GetCapturedStdout();
+    if(GetParam() == InitMode::SerialDim0)
+        EXPECT_EQ(report.find("Verified 0 "), std::string::npos) << report;
+    EXPECT_NE(report.find("skipped GPU input uploads against the host data"), std::string::npos)
+        << report;
 }
 
 INSTANTIATE_TEST_SUITE_P(InitModes,
