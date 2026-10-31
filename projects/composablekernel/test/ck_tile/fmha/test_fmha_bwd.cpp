@@ -6,6 +6,11 @@
 
 #include "gtest/gtest.h"
 
+#include <cstdlib>
+#include <optional>
+#include <string>
+#include <vector>
+
 #ifndef DataTypeConfig
 #define DataTypeConfig FmhaBwdFp16 // or FmhaBwdBf16 / FmhaBwdFp32
 #endif
@@ -1367,4 +1372,277 @@ TEST_P(SinkGradSaturated, DataTypeConfig)
     if(result == bwd_result::no_instance)
         GTEST_SKIP() << "No instance for sink_grad saturated regime";
     ASSERT_EQ(result, bwd_result::success);
+}
+
+// ============================================================================
+// Deterministic tile split: chunking, the workspace cap, and d_sink
+// ----------------------------------------------------------------------------
+// On gfx1250 a deterministic batch-mode run keeps one dq_acc slot per kv tile. When that
+// workspace is too large, fmha_bwd_launcher splits the run into batch/head chunks that take
+// turns on one workspace, rebasing every pointer per chunk. A chunk computes exactly what the
+// whole run computes for its batches and heads, so the gradients must match the unsplit run
+// bit for bit. On archs without tile split nothing is chunked, and these suites still check
+// that deterministic runs reproduce bit for bit.
+// ============================================================================
+
+// Sets an environment variable for one scope; the launcher reads these when it is built.
+class ScopedEnv
+{
+    public:
+    ScopedEnv(const char* name, const std::optional<std::string>& value) : name_(name)
+    {
+        if(const char* old = std::getenv(name))
+            old_ = old;
+        set(name_, value);
+    }
+    ~ScopedEnv() { set(name_, old_); }
+    ScopedEnv(const ScopedEnv&)            = delete;
+    ScopedEnv& operator=(const ScopedEnv&) = delete;
+
+    private:
+    static void set(const std::string& name, const std::optional<std::string>& value)
+    {
+#ifdef _WIN32
+        _putenv_s(name.c_str(), value ? value->c_str() : ""); // an empty value removes it
+#else
+        if(value)
+            setenv(name.c_str(), value->c_str(), 1);
+        else
+            unsetenv(name.c_str());
+#endif
+    }
+
+    std::string name_;
+    std::optional<std::string> old_;
+};
+
+static bool is_gfx125() { return ck_tile::get_device_name().compare(0, 6, "gfx125") == 0; }
+
+// A deterministic run without bias or dropout; the gradients land in `capture`.
+static bwd_result fmha_bwd_det_run(mode_enum mode,
+                                   int hdim,
+                                   std::tuple<bool, bool> perm,
+                                   int batch,
+                                   int nhead,
+                                   int nhead_k,
+                                   std::vector<ck_tile::index_t> seqlen_qs,
+                                   std::vector<ck_tile::index_t> seqlen_ks,
+                                   const std::string& mask_str,
+                                   bool sink_grad,
+                                   fmha_bwd_capture& capture)
+{
+    return fmha_bwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        std::move(seqlen_qs),
+        std::move(seqlen_ks),
+        {-1},
+        {-1},
+        hdim,
+        -1, // hdim_v
+        std::get<0>(perm),
+        std::get<1>(perm),
+        0,     // scale
+        "n",   // bias_str
+        false, // use_dbias
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        sink_grad,
+        true, // deterministic
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,
+        stream_config,
+        std::nullopt, // json
+        sink_regime::sensitive,
+        &capture);
+}
+
+// batch, nhead, nhead_k, seqlen_q, seqlen_k, mask, heads and batches per chunk (0: all)
+using DetChunkCase  = std::tuple<int, int, int, int, int, std::string, int, int>;
+using DetChunkParam = std::tuple<std::tuple<int, int>,   // hdim_q, hdim_v
+                                 std::tuple<bool, bool>, // io perm
+                                 DetChunkCase,
+                                 bool>; // sink_grad
+
+class DeterministicChunking : public TestWithParam<DetChunkParam>
+{
+};
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaBwd,
+    DeterministicChunking,
+    Combine(Values(std::tuple{64, -1}, std::tuple{128, -1}),
+            Values(std::tuple{true, true}, std::tuple{false, false}),
+            Values(DetChunkCase{2, 8, 2, 256, 320, "0", 2, 0},  // GQA 4:1, chunk inside a group
+                   DetChunkCase{2, 12, 3, 200, 384, "t", 3, 0}, // chunks straddle kv heads
+                   DetChunkCase{2, 12, 3, 200, 384, "b", 6, 0}, // straddle, two chunks
+                   DetChunkCase{4, 4, 4, 256, 256, "0", 0, 2},  // batches only
+                   DetChunkCase{3, 2, 1, 300, 260, "t", 0, 1},  // one batch per launch
+                   DetChunkCase{4, 8, 2, 128, 512, "b", 2, 2}), // batches and heads
+            Bool()));
+TEST_P(DeterministicChunking, DataTypeConfig)
+{
+    const auto& [hdims, perm, chunk_case, sink_grad]                                  = GetParam();
+    const auto& [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str, heads, batches] = chunk_case;
+    const int hdim = std::get<0>(hdims);
+
+    fmha_bwd_capture whole, split;
+    whole.runs = 2;
+    split.runs = 2;
+    bwd_result result;
+    {
+        ScopedEnv no_split("CK_DET_HEAD_CHUNK", std::string("0"));
+        result = fmha_bwd_det_run(mode_enum::batch,
+                                  hdim,
+                                  perm,
+                                  batch,
+                                  nhead,
+                                  nhead_k,
+                                  {seqlen_q},
+                                  {seqlen_k},
+                                  mask_str,
+                                  sink_grad,
+                                  whole);
+    }
+    if(result == bwd_result::no_instance)
+        GTEST_SKIP() << "No deterministic instance";
+    ASSERT_EQ(result, bwd_result::success);
+    {
+        ScopedEnv h("CK_DET_HEAD_CHUNK",
+                    heads > 0 ? std::optional{std::to_string(heads)} : std::nullopt);
+        ScopedEnv b("CK_DET_BATCH_CHUNK",
+                    batches > 0 ? std::optional{std::to_string(batches)} : std::nullopt);
+        result = fmha_bwd_det_run(mode_enum::batch,
+                                  hdim,
+                                  perm,
+                                  batch,
+                                  nhead,
+                                  nhead_k,
+                                  {seqlen_q},
+                                  {seqlen_k},
+                                  mask_str,
+                                  sink_grad,
+                                  split);
+    }
+    ASSERT_EQ(result, bwd_result::success);
+
+    EXPECT_EQ(whole.head_chunk, 0);
+    EXPECT_EQ(whole.batch_chunk, 0);
+    if(split.tile_split)
+    {
+        EXPECT_EQ(split.head_chunk, heads);
+        EXPECT_EQ(split.batch_chunk, batches);
+        EXPECT_LT(split.workspace_size, whole.workspace_size);
+    }
+    EXPECT_TRUE(split.dq == whole.dq) << "dQ of the split run differs from the whole run";
+    EXPECT_TRUE(split.dk == whole.dk) << "dK of the split run differs from the whole run";
+    EXPECT_TRUE(split.dv == whole.dv) << "dV of the split run differs from the whole run";
+    // A launch folds the d_sink partials of its own batches, so splitting the batches changes
+    // the order they are summed in; the runner has checked that d_sink against the reference.
+    if(sink_grad && batches == 0)
+        EXPECT_TRUE(split.d_sink == whole.d_sink) << "d_sink of the split run differs";
+}
+
+// mode, hdim, batch, nhead, nhead_k, seqlen_qs, seqlen_ks, mask. Group-mode lengths missing
+// from the list are drawn at or below its last one.
+using DetSinkParam = std::tuple<mode_enum,
+                                int,
+                                int,
+                                int,
+                                int,
+                                std::vector<ck_tile::index_t>,
+                                std::vector<ck_tile::index_t>,
+                                std::string>;
+
+class DeterministicSink : public TestWithParam<DetSinkParam>
+{
+};
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaBwd,
+    DeterministicSink,
+    Values(
+        // ConvertQGrad folds the d_sink partials
+        DetSinkParam{mode_enum::batch, 64, 2, 4, 2, {300}, {280}, "0"},
+        DetSinkParam{mode_enum::batch, 128, 2, 4, 2, {300}, {280}, "t"},
+        DetSinkParam{mode_enum::batch, 128, 3, 2, -1, {259}, {513}, "b"},
+        // the short batches leave most OGradDotO blocks without rows; those still own a slot
+        DetSinkParam{mode_enum::group, 64, 3, 4, 2, {300, 40, 700}, {300, 520, 700}, "0"},
+        DetSinkParam{mode_enum::group, 128, 3, 4, 2, {300, 1, 700}, {300, 64, 700}, "t"},
+        // decode kernel sets have no ConvertQGrad: the last OGradDotO block of a head folds,
+        // elected by a counter that has to re-arm itself for the next run
+        DetSinkParam{mode_enum::batch, 64, 128, 6, 6, {16}, {64}, "0"},
+        DetSinkParam{mode_enum::batch, 64, 128, 6, 6, {32}, {96}, "0"},
+        DetSinkParam{mode_enum::group, 64, 128, 6, 6, {32}, {96}, "0"}));
+TEST_P(DeterministicSink, DataTypeConfig)
+{
+    const auto& [mode, hdim, batch, nhead, nhead_k, seqlen_qs, seqlen_ks, mask_str] = GetParam();
+
+    fmha_bwd_capture capture;
+    capture.runs      = 3;
+    capture.reprepare = false; // later runs reuse the workspace wherever the launcher allows
+    const auto result = fmha_bwd_det_run(mode,
+                                         hdim,
+                                         {true, true},
+                                         batch,
+                                         nhead,
+                                         nhead_k,
+                                         seqlen_qs,
+                                         seqlen_ks,
+                                         mask_str,
+                                         true,
+                                         capture);
+    if(result == bwd_result::no_instance)
+        GTEST_SKIP() << "No deterministic sink instance";
+    // success covers d_sink against the reference and every run matching the first
+    ASSERT_EQ(result, bwd_result::success);
+    EXPECT_TRUE(capture.runs_identical);
+
+    // The decode cases mirror DecodeDropout's shapes, which clear the decode dispatch
+    // threshold on gfx1250; other archs run them through ConvertQGrad instead.
+    if(is_gfx125() && hdim == 64 && seqlen_qs.front() <= 32)
+        EXPECT_GT(capture.decode_max_seq, 0) << "expected a decode kernel set";
+}
+
+// A tile-split run whose smallest chunk (one batch, one head) is over the workspace cap must
+// get the persistent kernel; one that fits must split itself to stay within the cap.
+class DeterministicWorkspaceCap : public TestWithParam<std::tuple<int, std::string>>
+{
+};
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
+                         DeterministicWorkspaceCap,
+                         Combine(Values(64, 128), Values("0", "t")));
+TEST_P(DeterministicWorkspaceCap, DataTypeConfig)
+{
+    const auto& [hdim, mask_str] = GetParam();
+    // b2 h8 s1024: one batch-head needs 2-4 MiB of slots at hdim <= 128, the whole run 16
+    // times that. An 8 MiB cap fits the former and not the latter, a 1 MiB cap fits neither.
+    fmha_bwd_capture fits, over;
+    bwd_result result;
+    {
+        ScopedEnv cap("CK_DET_WS_CAP_MB", std::string("8"));
+        result = fmha_bwd_det_run(
+            mode_enum::batch, hdim, {true, true}, 2, 8, 2, {1024}, {1024}, mask_str, false, fits);
+    }
+    if(result == bwd_result::no_instance)
+        GTEST_SKIP() << "No deterministic instance";
+    ASSERT_EQ(result, bwd_result::success);
+    {
+        ScopedEnv cap("CK_DET_WS_CAP_MB", std::string("1"));
+        result = fmha_bwd_det_run(
+            mode_enum::batch, hdim, {true, true}, 2, 8, 2, {1024}, {1024}, mask_str, false, over);
+    }
+    ASSERT_EQ(result, bwd_result::success);
+
+    if(!is_gfx125())
+        return; // no tile split here: both runs are persistent
+    EXPECT_TRUE(fits.tile_split);
+    EXPECT_TRUE(fits.head_chunk > 0 || fits.batch_chunk > 0);
+    // the cap bounds dq_acc; the d_sink partials and the split metadata come on top
+    EXPECT_LE(fits.workspace_size, size_t{9} << 20);
+    EXPECT_FALSE(over.tile_split);
 }
