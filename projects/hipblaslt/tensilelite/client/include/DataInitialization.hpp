@@ -391,8 +391,11 @@ namespace TensileLite
                 else
                 {
                     // Update CPU Inputs if prepareGPUInputs is not called.
-                    if(m_cpuPtrs.empty() && m_problemDependentData)
+                    if(m_cpuPtrs.empty() && m_problemDependentData && !m_cpuInputsReadyForProblem)
+                    {
                         initializeCPUInputs(problem);
+                        m_cpuInputsReadyForProblem = m_currentSolution != nullptr;
+                    }
                     if(m_problemDependentData)
                         copyValidToGPUBuffer(problem);
                     if(needSwizzle || needMXSwizzle)
@@ -902,20 +905,27 @@ namespace TensileLite
             {
                 m_currentGemmProblem
                     = dynamic_cast<ContractionProblemGemm const*>(problem);
-                m_currentSolution = nullptr;
+                m_currentSolution          = nullptr;
+                m_mxPreswizzleMiK          = -1;
+                m_cpuInputsReadyForProblem = false;
             }
             virtual void postProblem() override {}
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX inputs for solution-dependent HostPreSwizzle.
-                if(m_currentSolution != nullptr
-                   && m_currentGemmProblem != nullptr
+                // Re-init MX inputs for solution-dependent HostPreSwizzle. The
+                // swizzled scale layout only depends on the solution's MFMA K,
+                // so consecutive solutions sharing it reuse the uploaded data.
+                if(m_currentSolution != nullptr && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty()
-                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
-                                                         m_currentSolution))
+                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem, m_currentSolution)
+                   && static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2])
+                          != m_mxPreswizzleMiK)
                 {
                     ScopedDevice device(m_deviceId);
+                    m_mxPreswizzleMiK
+                        = static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2]);
+                    m_cpuInputsReadyForProblem = true;
                     initializeMXData(*m_currentGemmProblem);
                     copyValidToGPUBuffer(*m_currentGemmProblem);
                     copyInputs(m_gpuPtrs,
@@ -1187,6 +1197,8 @@ namespace TensileLite
 
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
+            int                           m_mxPreswizzleMiK          = -1;
+            bool                          m_cpuInputsReadyForProblem = false;
 
             int m_mxScaleFormat = 0;
             /// A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator
