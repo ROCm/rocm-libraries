@@ -58,7 +58,7 @@ class ConfigSectionGenerator:
 
     @staticmethod
     def _convert_type(dtype: str) -> str:
-        """Map config datatype to Tensile datatype."""
+        """Map config datatype to TensileLite datatype."""
         if dtype == "X1":
             return "B"
         if dtype == "X":
@@ -185,7 +185,7 @@ class ConfigSectionGenerator:
         # (DataInitialization.cpp), the client aborts with
         #   ``terminate called after throwing an instance of 'std::runtime_error'
         #    what():  Insufficient rotating buffer size.``
-        # Remove this special-case once tensilelite clamps the per-problem
+        # Remove this special-case once TensileLite clamps the per-problem
         # rotatingNum to (m_size - m_largestUnitSize) / rotatingSize instead
         # of ceil(m_rotatingBuffer / rotatingSize) - 1, or once it sizes the
         # rotating buffer using per-problem tensor bytes rather than the
