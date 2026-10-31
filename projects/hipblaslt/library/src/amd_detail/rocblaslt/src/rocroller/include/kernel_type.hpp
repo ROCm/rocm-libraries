@@ -3,25 +3,39 @@
 
 #pragma once
 
-#include <rocRoller/DataTypes/DataTypes.hpp>
-#include <rocRoller/Operations/Command.hpp>
+// A kernel's operands are described in the types hipBLASLt already uses for
+// them: hipDataType for an element format, and the scaling format carried by
+// RocblasltContractionProblem. Nothing here names a kernel generator's types,
+// which is what lets the tile ranker build with no generator present.
+#include "rocblaslt-types.h"
+
+#include <hipblaslt/hipblaslt.h>
+
+#include <compare>
+#include <cstddef>
+#include <functional>
+#include <vector>
 
 /**
  * @brief ScaleType
  *
  * Scale parameters for a matrix (A or B).
+ * - format: how the operand's block scales are supplied. ScalingFormat::None
+ *   means the operand is not scaled; isBlockScaling(format) means the scales
+ *   arrive in a tensor of their own.
  * - preSwizzleTile: Pre-swizzle tile configuration {tileMN, tileK, subTileK}
  *   Similar to scaleShuffleTileA/B in rocRoller's TypeParameters.
  * - preTile: Pre-tile configuration {tileM, tileK} for A or {tileK, tileN} for B
  */
 struct ScaleType
 {
-    rocRoller::Operations::ScaleMode mode;
-    size_t                           blockRowSize = 32u;
-    size_t                           blockColSize = 1u;
-    rocRoller::DataType              type         = rocRoller::DataType::E8M0;
+    RocblasltContractionProblem::ScalingFormat format
+        = RocblasltContractionProblem::ScalingFormat::None;
+    size_t              blockRowSize = 32u;
+    size_t              blockColSize = 1u;
+    hipDataType         type         = HIP_R_8F_UE8M0;
     std::vector<size_t> preSwizzleTile; // {tileMN, tileK, subTileK} for pre-swizzled scale data
-    std::vector<size_t> preTile;        
+    std::vector<size_t> preTile;
 
     auto operator<=>(const ScaleType& other) const = default;
 };
@@ -44,10 +58,11 @@ struct std::hash<ScaleType>
     size_t operator()(const ScaleType& s) const noexcept
     {
         size_t seed = 0;
-        detail::hash_combine(seed, std::hash<rocRoller::Operations::ScaleMode>{}(s.mode));
+        detail::hash_combine(seed,
+                             std::hash<RocblasltContractionProblem::ScalingFormat>{}(s.format));
         detail::hash_combine(seed, std::hash<size_t>{}(s.blockRowSize));
         detail::hash_combine(seed, std::hash<size_t>{}(s.blockColSize));
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(s.type));
+        detail::hash_combine(seed, std::hash<hipDataType>{}(s.type));
 
         for(const auto& elem : s.preSwizzleTile)
         {
@@ -69,14 +84,16 @@ struct std::hash<ScaleType>
  * All of the values required for different types of kernels.
  * This should not include any optimization flags.
  *
+ * An element format the ranker does not handle is held as
+ * HIPBLASLT_DATATYPE_INVALID, which matches no kernel.
  */
 struct KernelType
 {
-    rocRoller::DataType typeA;
-    rocRoller::DataType typeB;
-    rocRoller::DataType typeC;
-    rocRoller::DataType typeD;
-    rocRoller::DataType typeAcc = rocRoller::DataType::Float;
+    hipDataType typeA;
+    hipDataType typeB;
+    hipDataType typeC;
+    hipDataType typeD;
+    hipDataType typeAcc = HIP_R_32F;
 
     bool transA;
     bool transB;
@@ -96,11 +113,11 @@ struct std::hash<KernelType>
     size_t operator()(const KernelType& k) const noexcept
     {
         size_t seed = 0;
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeA));
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeB));
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeC));
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeD));
-        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeAcc));
+        detail::hash_combine(seed, std::hash<hipDataType>{}(k.typeA));
+        detail::hash_combine(seed, std::hash<hipDataType>{}(k.typeB));
+        detail::hash_combine(seed, std::hash<hipDataType>{}(k.typeC));
+        detail::hash_combine(seed, std::hash<hipDataType>{}(k.typeD));
+        detail::hash_combine(seed, std::hash<hipDataType>{}(k.typeAcc));
         detail::hash_combine(seed, std::hash<ScaleType>{}(k.scaleTypeA));
         detail::hash_combine(seed, std::hash<ScaleType>{}(k.scaleTypeB));
         detail::hash_combine(seed, std::hash<bool>{}(k.transA));

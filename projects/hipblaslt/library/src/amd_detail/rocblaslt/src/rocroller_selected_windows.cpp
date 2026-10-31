@@ -1,10 +1,9 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Windows build of rankRocRollerSelectedTiles. rocRoller's data-type headers
-// do not compile under the MSVC record layout. No Windows GPU target has
-// checked-in rocRoller kernels, so no ranked tile could match one; returning
-// no tiles gives callers the same empty result.
+// Windows build of rankRocRollerSelectedTiles. This file does not include
+// rocRoller's headers. No Windows GPU target has checked-in rocRoller kernels,
+// so a tile returned here would have nothing to run.
 
 #include "include/rocroller_selected.hpp"
 
