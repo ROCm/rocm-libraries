@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <mxDataGen.hpp>
+#include <mxDataGenerator/PreSwizzle.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -633,3 +634,154 @@ TEST(MXScaleLayoutFormat, MapsScalingFormatToLayout)
     EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0, "gfx1250"), MXScaleLayout::GFX1250);
     EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE4M3, "gfx942"), MXScaleLayout::None);
 }
+
+// ============================================================================
+// GFX950 swizzled scale from the canonical scale
+//
+// Permuting the compact canonical scale that generateMXInput(..., MXScaleLayout::None) writes
+// (before the TensileLite client's K-fast restride) with applyMXScaleLayoutInPlace gives the
+// GFX950-swizzled scale without a second generateMXInput(..., GFX950) call. This checks that
+// both give the bytes the client uploads, emulating its per-batch loop: the scale tensor is
+// packed with K blocks padded to 8 and MN padded to 32
+// (ContractionProblemGemm::setMXScaleA/B), and batch b's swizzle is written at b times that
+// batch stride into a buffer of batchCount batch strides, which is uploaded whole.
+//
+// The generator sizes the scale from the leading dimension, so with a padded one a call writes
+// more than one batch stride and the client's later batches overwrite the excess of earlier ones
+// (the last one's excess is not uploaded): what is uploaded, and compared here, is the
+// batch-stride prefix of each batch's swizzle.
+//
+// K tails are covered only for K along the stored rows (transposed A, non-transposed B): in the
+// other orientations generateMXInput's data for a partial last K block is not deterministic.
+// ============================================================================
+
+// Params: {dataType}
+class MXSwizzleFromCanonicalTest : public ::testing::TestWithParam<hipDataType>
+{
+};
+
+TEST_P(MXSwizzleFromCanonicalTest, MatchesGFX950Generator)
+{
+    hipDataType const dataType = GetParam();
+    constexpr size_t  mxBlock  = 32;
+
+    struct Shape
+    {
+        uint64_t mn, k, ldPadding;
+        size_t   batchCount;
+    };
+    std::vector<Shape> const shapes = {
+        {256, 256, 0, 1}, // aligned
+        {64, 96, 0, 1}, // 3 K blocks: the canonical scale's K-fast restride pads them to 8
+        {200, 256, 0, 1}, // MN tail
+        {256, 100, 0, 1}, // K tail
+        {256, 256, 64, 1}, // padded leading dimension
+        {256, 96, 0, 3}, // batched
+        // Batched, padded leading dimension, MN tail. The padding is chosen so that the
+        // generator's scale size divides into K blocks for every orientation; otherwise
+        // generateMXInput(..., GFX950) throws.
+        {200, 256, 25, 3},
+    };
+
+    auto ceilDiv = [](size_t v, size_t m) { return (v + m - 1) / m; };
+    auto roundUp = [&](size_t v, size_t m) { return ceilDiv(v, m) * m; };
+
+    for(auto const& shape : shapes)
+        for(bool isMatrixA : {true, false})
+            for(bool isTranspose : {true, false})
+            {
+                // K runs along the stored rows for transposed A and non-transposed B.
+                bool const kMajor = isMatrixA == isTranspose;
+                if(!kMajor && shape.k % mxBlock != 0)
+                    continue;
+                uint64_t const rows = kMajor ? shape.k : shape.mn;
+                uint64_t const cols = kMajor ? shape.mn : shape.k;
+                uint64_t const ld   = rows + shape.ldPadding;
+                SCOPED_TRACE(::testing::Message()
+                             << "mn=" << shape.mn << " k=" << shape.k << " ld=" << ld
+                             << " batchCount=" << shape.batchCount << " isMatrixA=" << isMatrixA
+                             << " isTranspose=" << isTranspose);
+
+                size_t const kBlocks          = ceilDiv(shape.k, mxBlock);
+                size_t const scaleBatchStride = roundUp(kBlocks, 8) * roundUp(shape.mn, 32);
+                size_t const uploadBytes      = scaleBatchStride * shape.batchCount;
+
+                // The compact canonical scale: one scale per block of the stored rows, for each
+                // of the ld * cols / rows rows the generator sizes its buffers for. The GFX950
+                // layout swizzles it as an {MN, K blocks} grid with the MN extent derived from
+                // that size.
+                size_t const compactElems = ceilDiv(rows, mxBlock) * (ld * cols / rows);
+                size_t const mnExtent
+                    = compactElems % kBlocks == 0 ? compactElems / kBlocks : shape.mn;
+                size_t const swizzledElems
+                    = DGen::preSwizzleScalesGFX950PaddedSize(mnExtent, kBlocks);
+
+                // Upper bounds with room for the generator's excess past the last batch.
+                size_t const dataBytes  = ld * cols;
+                size_t const scaleBytes = uploadBytes + swizzledElems + compactElems + 1;
+                auto         generate   = [&](void* data, void* scale, MXScaleLayout layout) {
+                    generateMXInput(dataType,
+                                    HIP_R_8F_UE8M0,
+                                    data,
+                                    scale,
+                                    rows,
+                                    cols,
+                                    ld,
+                                    isTranspose,
+                                    isMatrixA ? mxBlock : 1,
+                                    isMatrixA ? 1 : mxBlock,
+                                    isMatrixA,
+                                    layout,
+                                    "Bounded",
+                                    -1.0f,
+                                    1.0f,
+                                    "",
+                                    /*returnReference=*/false);
+                };
+
+                // What the client uploads before the change: one GFX950 generator call per batch.
+                std::vector<uint8_t> generated(scaleBytes, 0);
+                std::vector<uint8_t> dataSwizzled(dataBytes * shape.batchCount, 0xcc);
+                for(size_t b = 0; b < shape.batchCount; b++)
+                    generate(dataSwizzled.data() + b * dataBytes,
+                             generated.data() + b * scaleBatchStride,
+                             MXScaleLayout::GFX950);
+
+                // The change: permute each batch's compact canonical scale and keep its
+                // batch-stride prefix.
+                std::vector<uint8_t> permuted(uploadBytes, 0);
+                std::vector<uint8_t> dataCanonical(dataBytes * shape.batchCount, 0xcc);
+                for(size_t b = 0; b < shape.batchCount; b++)
+                {
+                    std::vector<uint8_t> compact(scaleBytes, 0xcc);
+                    generate(
+                        dataCanonical.data() + b * dataBytes, compact.data(), MXScaleLayout::None);
+                    // The generator writes exactly compactElems scales (checked with a sentinel
+                    // that no UE8M0 scale of Bounded data takes).
+                    ASSERT_NE(compact[compactElems - 1], 0xcc);
+                    ASSERT_EQ(compact[compactElems], 0xcc);
+
+                    compact.resize(std::max(compactElems, swizzledElems));
+                    applyMXScaleLayoutInPlace(compact.data(),
+                                              compactElems,
+                                              MXScaleLayout::GFX950,
+                                              mnExtent,
+                                              kBlocks,
+                                              mxBlock);
+                    std::copy_n(compact.begin(),
+                                std::min(scaleBatchStride, swizzledElems),
+                                permuted.begin() + b * scaleBatchStride);
+                }
+
+                generated.resize(uploadBytes);
+                EXPECT_EQ(permuted, generated)
+                    << "permuted canonical scale differs from generateMXInput(..., GFX950)";
+                // The client keeps the data of the canonical call; the GFX950 call used to
+                // rewrite it.
+                EXPECT_EQ(dataCanonical, dataSwizzled);
+            }
+}
+
+INSTANTIATE_TEST_SUITE_P(SwizzleFromCanonical,
+                         MXSwizzleFromCanonicalTest,
+                         ::testing::Values((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_E4M3));
