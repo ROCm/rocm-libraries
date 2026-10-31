@@ -230,6 +230,10 @@ class KernelCodeGenResult(NamedTuple):
     pgr: int
     mathclk: int
     customKernelDef: Optional[dict] = None
+    # Set on the kernel during codegen (subtile LDS layout / ForceUnrollSubIter); a worker
+    # process's kernel is a copy, so passPostKernelInfoToSolution copies them back.
+    ldsNumBytes: Optional[int] = None
+    loopIters: Optional[int] = None
 
 class KernelMinResult(NamedTuple):
     err: int
@@ -521,7 +525,7 @@ def _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress=False) -> Kerne
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]),
         kernel["WavefrontSize"], cuocc,
         pgr, kernel["MathClocksUnrolledLoop"],
-        customKernelDef
+        customKernelDef, kernel["LdsNumBytes"], kernel["LoopIters"]
     )
 
 
@@ -704,6 +708,8 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
             solution._state["MathClocksUnrolledLoop"] = result.mathclk
+            solution._state["LdsNumBytes"] = result.ldsNumBytes
+            solution._state["LoopIters"] = result.loopIters
             if result.customKernelDef is not None:
                 solution._state["CustomKernel"] = result.customKernelDef
 
