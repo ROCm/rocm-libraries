@@ -1,0 +1,13 @@
+md5: f7fcf37072ebfb1bbbcfbae5cdf06ced
+frozen: true
+deps:
+- path: Workloads/headline/conv.tar.gz
+  repo:
+    url: https://github.com/ROCm/dnn-benchmarking
+    rev_lock: d2a43302cdd136af26fa421529bdc4e6ca0c1bb1
+outs:
+- md5: b8e7d9105a49d3e9c566bf26a0f87451
+  size: 21264
+  hash: md5
+  remote: dnn-benchmarking
+  path: conv.tar.gz
