@@ -2,6 +2,12 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 5.1.0 for ROCm 10.3.0
+
+### Optimizations
+
+* Improved performance of `device_search` and `device_find_end` by reducing branches.
+
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
 ### Added

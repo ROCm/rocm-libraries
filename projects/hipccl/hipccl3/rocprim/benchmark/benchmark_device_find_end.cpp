@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_find_end.hpp"
+#include "benchmark_device_search.hpp"
 #include "primbench.hpp"
 
 #include "../common/utils_custom_type.hpp"
@@ -34,18 +34,19 @@
 #include <string>
 #include <vector>
 
-#define CREATE_BENCHMARK_FIND_END(TYPE, KEY_SIZE, REPEATING) \
-    executor.queue<device_find_end_benchmark<TYPE>>(KEY_SIZE, REPEATING);
+#define CREATE_BENCHMARK_FIND_END(TYPE, KEY_SIZE, VARIANT) \
+    executor.queue<device_search_benchmark<TYPE, true>>(KEY_SIZE, VARIANT);
 
-#define CREATE_BENCHMARK_PATTERN(TYPE, REPEATING)    \
-    CREATE_BENCHMARK_FIND_END(TYPE, 10, REPEATING)   \
-    CREATE_BENCHMARK_FIND_END(TYPE, 100, REPEATING)  \
-    CREATE_BENCHMARK_FIND_END(TYPE, 1000, REPEATING) \
-    CREATE_BENCHMARK_FIND_END(TYPE, 10000, REPEATING)
+#define CREATE_BENCHMARK_PATTERN(TYPE, VARIANT)    \
+    CREATE_BENCHMARK_FIND_END(TYPE, 10, VARIANT)   \
+    CREATE_BENCHMARK_FIND_END(TYPE, 100, VARIANT)  \
+    CREATE_BENCHMARK_FIND_END(TYPE, 1000, VARIANT) \
+    CREATE_BENCHMARK_FIND_END(TYPE, 10000, VARIANT)
 
-#define CREATE_BENCHMARK(TYPE)           \
-    CREATE_BENCHMARK_PATTERN(TYPE, true) \
-    CREATE_BENCHMARK_PATTERN(TYPE, false)
+#define CREATE_BENCHMARK(TYPE)                                      \
+    CREATE_BENCHMARK_PATTERN(TYPE, benchmark_variant::PartialMatch) \
+    CREATE_BENCHMARK_PATTERN(TYPE, benchmark_variant::RandomNoKey)  \
+    CREATE_BENCHMARK_PATTERN(TYPE, benchmark_variant::RandomKeyAtStart)
 
 int main(int argc, char* argv[])
 {
