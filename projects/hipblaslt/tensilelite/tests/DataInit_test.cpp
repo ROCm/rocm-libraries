@@ -15,6 +15,7 @@
 #include <Tensile/Utils.hpp>
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -40,6 +41,7 @@ using TensileLite::DataTypeInfo;
 using TensileLite::KernelLanguage;
 using TensileLite::PerformanceMetric;
 using TensileLite::TensorDescriptor;
+using TensileLite::Client::DataInitialization;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
 
@@ -550,3 +552,124 @@ TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
 }
 
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
+
+// =============================================================================
+//   Section 5 - DataInitialization::initArrayTrig(array, tensor)
+//
+//       Each element gets getTrigValue(idx), idx being its logical (column-major) index, at
+//       tensor.index(coordinate of idx) / Packing. Packed descriptors take a flat loop, others
+//       a per-coordinate loop; both must write exactly the bytes of the original algorithm
+//       (initArrayTrigReference: CoordNumbered + TensorDescriptor::index per element, serial),
+//       and leave the stride gaps untouched.
+// =============================================================================
+namespace
+{
+    template <typename T, bool useCos, bool useAbs>
+    void initArrayTrigReference(T* array, TensorDescriptor const& tensor)
+    {
+        auto const&  sizes = tensor.sizes();
+        size_t const count = TensileLite::CoordCount(sizes.begin(), sizes.end());
+        for(size_t idx = 0; idx < count; idx += TensileLite::TypeInfo<T>::Packing)
+        {
+            std::vector<size_t> coord(tensor.dimensions(), 0);
+            TensileLite::CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+            array[tensor.index(coord) / TensileLite::TypeInfo<T>::Packing]
+                = DataInitialization::getTrigValue<T>(idx, useCos, useAbs);
+        }
+    }
+
+    struct TrigLayout
+    {
+        std::vector<size_t> sizes;
+        std::vector<size_t> strides; // empty: default (packed) strides
+        // Dimension 0 is contiguous and size[0] and the outer strides are even, so a packed
+        // type (Float4x2) maps distinct packs to distinct array slots.
+        bool        packableTypes;
+        char const* name;
+
+        friend void PrintTo(TrigLayout const& layout, std::ostream* os)
+        {
+            *os << layout.name;
+        }
+    };
+
+    template <typename T, bool useCos, bool useAbs>
+    void expectTrigMatchesReference(TrigLayout const& layout)
+    {
+        using Info = TensileLite::TypeInfo<T>;
+        if(Info::Packing > 1 && !layout.packableTypes)
+            return;
+
+        TensorDescriptor const tensor
+            = layout.strides.empty()
+                  ? TensorDescriptor("t", Info::Enum, layout.sizes.begin(), layout.sizes.end())
+                  : TensorDescriptor("t",
+                                     Info::Enum,
+                                     layout.sizes.begin(),
+                                     layout.sizes.end(),
+                                     layout.strides.begin(),
+                                     layout.strides.end());
+        size_t const bytes = tensor.totalAllocatedElements() / Info::Packing * sizeof(T);
+
+        std::vector<unsigned char> expected(bytes, 0xcc);
+        std::vector<unsigned char> actual(bytes, 0xcc);
+        initArrayTrigReference<T, useCos, useAbs>(reinterpret_cast<T*>(expected.data()), tensor);
+        DataInitialization::initArrayTrig<T, useCos, useAbs>(reinterpret_cast<T*>(actual.data()),
+                                                             tensor);
+
+        auto const diff = std::mismatch(expected.begin(), expected.end(), actual.begin());
+        EXPECT_TRUE(diff.first == expected.end())
+            << "type=" << Info::Name() << " useCos=" << useCos << " useAbs=" << useAbs
+            << " tensor=" << tensor << ": first differing byte " << (diff.first - expected.begin())
+            << " of " << bytes;
+    }
+
+    template <typename T>
+    void expectTrigMatchesReferenceAllModes(TrigLayout const& layout)
+    {
+        expectTrigMatchesReference<T, false, false>(layout);
+        expectTrigMatchesReference<T, true, false>(layout);
+        expectTrigMatchesReference<T, false, true>(layout);
+        expectTrigMatchesReference<T, true, true>(layout);
+    }
+} // namespace
+
+class InitArrayTrigTest : public ::testing::TestWithParam<TrigLayout>
+{
+};
+TEST_P(InitArrayTrigTest, MatchesPerElementAlgorithm)
+{
+    auto const& layout = GetParam();
+    expectTrigMatchesReferenceAllModes<float>(layout);
+    expectTrigMatchesReferenceAllModes<double>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::Half>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::BFloat16>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::Float8>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::BFloat8_fnuz>(layout);
+    expectTrigMatchesReferenceAllModes<std::complex<float>>(layout);
+    expectTrigMatchesReferenceAllModes<std::complex<double>>(layout);
+#ifndef _WIN32
+    expectTrigMatchesReferenceAllModes<TensileLite::Float4x2>(layout);
+#endif
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PackedAndStrided,
+    InitArrayTrigTest,
+    ::testing::Values(
+        // ----- packed: default strides (flat loop) -------------------------
+        TrigLayout{{4096}, {}, true, "Packed1D"},
+        TrigLayout{{52, 20, 2}, {}, true, "PackedDefaultStrides"},
+        TrigLayout{{64, 40}, {1, 64}, true, "PackedExplicitStrides"},
+        TrigLayout{{1000, 37, 2}, {1, 1000, 37000}, true, "PackedBatched"},
+        // ----- strided (per-coordinate loop) -------------------------------
+        TrigLayout{{60, 40}, {1, 64}, true, "LeadingDimPadding"},
+        TrigLayout{{48, 36, 3}, {1, 48, 1800}, true, "BatchStridePadding"},
+        TrigLayout{{1000, 37, 2}, {1, 1004, 40000}, true, "LeadingDimAndBatchPadding"},
+        TrigLayout{{64, 1, 5}, {1, 4, 128}, true, "SizeOneDimNonDefaultStride"},
+        TrigLayout{{40, 64}, {64, 1}, false, "Transposed"}
+    ),
+    [](::testing::TestParamInfo<TrigLayout> const& info) {
+        return std::string(info.param.name);
+    }
+);

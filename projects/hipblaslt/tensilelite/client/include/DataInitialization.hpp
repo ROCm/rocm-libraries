@@ -911,23 +911,45 @@ namespace TensileLite
                 }
             }
 
+            // The value of each element depends only on its logical (column-major) index idx.
+            // With the default (packed) strides idx is also the element's offset in the array,
+            // so the flat loop below is used; other strides map idx to an offset through its
+            // coordinate.
             template <typename T, bool useCos, bool useAbs>
-            void initArrayTrig(T* array, TensorDescriptor const& tensor)
+            static void initArrayTrig(T* array, TensorDescriptor const& tensor)
             {
-                const auto& sizes = tensor.sizes();
-                const auto  count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for shared(array, tensor, sizes, count)
-                for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
+                const auto& sizes   = tensor.sizes();
+                const auto& strides = tensor.strides();
+                const auto  count   = CoordCount(sizes.begin(), sizes.end());
+
+                bool   packed       = true;
+                size_t packedStride = 1;
+                for(size_t d = 0; d < sizes.size(); d++)
+                {
+                    packed = packed && strides[d] == packedStride;
+                    packedStride *= sizes[d];
+                }
+                if(packed)
+                {
+                    initArrayTrig<T, useCos, useAbs>(array, count);
+                    return;
+                }
+
+#pragma omp parallel shared(array, tensor, sizes, count)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
-                    CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
-                    size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
-                    array[tensorIndex] = getTrigValue<T>(idx, useCos, useAbs);
+#pragma omp for
+                    for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
+                    {
+                        CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+                        size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
+                        array[tensorIndex] = getTrigValue<T>(idx, useCos, useAbs);
+                    }
                 }
             }
 
             template <typename T, bool useCos, bool useAbs>
-            void initArrayTrig(T* array, size_t elements)
+            static void initArrayTrig(T* array, size_t elements)
             {
 #pragma omp parallel for shared(array) firstprivate(elements)
                 for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
