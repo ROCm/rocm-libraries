@@ -51,6 +51,17 @@ class ConfigSectionGenerator:
     are computed once at init. Per-size sections are built via build_config().
     """
 
+    # Real fp8-family DataType letters that need a scalar UseScaleAB / an
+    # F32 bias fallback. A naive "8" in dtype substring check also matches
+    # "I8" (int8), which has neither -- real int8 Tensile kernels have no
+    # UseScaleAB/SAB flag, unlike fp8/bf8 ones.
+    _FP8_FAMILY_DATA_TYPES = frozenset({"F8", "F8N", "B8", "F8B8", "B8F8"})
+
+    @staticmethod
+    def _is_fp8_family(dtype: str) -> bool:
+        """Whether *dtype* is a real fp8/bf8-family DataType (not int8)."""
+        return dtype in ConfigSectionGenerator._FP8_FAMILY_DATA_TYPES
+
     @staticmethod
     def _is_tf32(dtype: str) -> bool:
         """Whether *dtype* is TF32 (X / X1)."""
@@ -69,6 +80,15 @@ class ConfigSectionGenerator:
     def _calc_iters(m: int, n: int, b: int, k: int) -> int:
         """Estimate iteration count for benchmarking based on problem size."""
         return max(round((-(m + n + k) * 0.015 + 431) / b), 5)
+
+    def _i8_bias_supported(self) -> bool:
+        """Whether an int8 GEMM supports Bias.
+
+        Rule: Int8 only supports Bias when ComputeDataType is "S" (float);
+        with int32 compute (MFMA accumulation), there is no bias-capable
+        kernel variant at all.
+        """
+        return self._convert_type(self._gt.compute_data_type) == "S"
 
     def _mx_format(self) -> Optional[Tuple[int, str]]:
         """(block size, scale DataType) of this GEMM's MX format, or None when not block scaled."""
@@ -138,7 +158,9 @@ class ConfigSectionGenerator:
         equality = str(self.config.get("LIBRARY_TYPE", "OOB")).lower() == "equality"
         if not (gfx1250_mx and equality):
             pt[f'{epi_tag}UseScaleAlphaVec'] = "1"
-        if not gfx1250_mx and ("8" in pt["DataType"] or "8" in pt["DestDataType"]):
+        if not gfx1250_mx and (
+            self._is_fp8_family(pt["DataType"]) or self._is_fp8_family(pt["DestDataType"])
+        ):
             pt[f'{epi_tag}UseScaleAB'] = "Scalar"
 
         pt['TransposeA'] = val_transA
@@ -147,7 +169,8 @@ class ConfigSectionGenerator:
             pt['ComplexConjugateA'] = "True" if self._gt.transA == "C" else "False"
             pt['ComplexConjugateB'] = "True" if self._gt.transB == "C" else "False"
         pt['UseBeta'] = "True"
-        pt[f'{epi_tag}UseBias'] = "1"
+        bias_epi_tag = "#" if (epi_tag == "#" or (self._gt.data_type == "I8" and not self._i8_bias_supported())) else ""
+        pt[f'{bias_epi_tag}UseBias'] = "1"
 
         pt[f'{epi_tag}Activation'] = "True"
         pt[f'{epi_tag}ActivationHPA'] = "True"
@@ -233,10 +256,12 @@ class ConfigSectionGenerator:
             return None
         if self._gt.data_type in ("C", "Z"):
             return None
+        if self._gt.data_type == "I8":
+            return "[S]" if self._i8_bias_supported() else None
         bias_type = self._convert_type(self._gt.data_type)
-        if "8" in bias_type:
+        if self._is_fp8_family(bias_type):
             bias_type = self._convert_type(self._gt.dest_data_type)
-        if "8" in bias_type:
+        if self._is_fp8_family(bias_type):
             bias_type = "S"
         if self._gt.data_type == "X1":
             bias_type = "S"
@@ -496,7 +521,7 @@ class ConfigSectionGenerator:
             'BenchmarkProblems': [[self._problem_type, benchmark_common]],
             'LibraryLogic': self._library_logic,
             '#LibraryClient': '',
-            'Backend': {"Name": "Ductile"} if is_ductile else {"Name": "Tensile"}
+            'Backend': {"Name": "Ductile" if is_ductile else "Tensile", "Arch": self.config["ARCH"]}
         }
 
         if is_ductile:
