@@ -27,6 +27,8 @@
 
 #include <hip/hip_runtime.h>
 #include <hipsparse/hipsparse.h>
+#include <sstream>
+#include <stdexcept>
 
 #include "hipsparse_arguments.hpp"
 #include "utility.hpp"

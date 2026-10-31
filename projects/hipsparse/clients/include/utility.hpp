@@ -307,6 +307,25 @@ inline void log_hipsparse_error(const char* call, hipsparseStatus_t status)
     throw std::runtime_error(message.str());
 }
 
+// Constructors throw so a failed create cannot be used by the rest of the test.
+// Destructors record a failed destroy without throwing, so teardown stays safe
+// while another exception is unwinding.
+inline void throw_if_hipsparse_error(hipsparseStatus_t status, const char* call)
+{
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        throw_hipsparse_error(call, status);
+    }
+}
+
+inline void log_if_hipsparse_error(hipsparseStatus_t status, const char* call)
+{
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        log_hipsparse_error(call, status);
+    }
+}
+
 // EXPECT_HIPSPARSE_STATUS
 #ifdef GOOGLE_TEST
 #define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)                                                 \

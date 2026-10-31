@@ -24,6 +24,10 @@
 #include "hipsparse_routine.hpp"
 #include "utility.hpp"
 
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+
 constexpr const char* hipsparse_routine::s_routine_names[hipsparse_routine::num_routines];
 
 hipsparse_routine::hipsparse_routine(const char* function)
