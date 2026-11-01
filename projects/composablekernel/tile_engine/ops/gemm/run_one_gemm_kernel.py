@@ -95,15 +95,20 @@ def _run_one(
             A = B = None
         else:
             # Cache host matrices per shape so batch mode doesn't regenerate huge
-            # inputs per kernel.
+            # inputs per kernel. Paired with _encode_ab_cached in
+            # dispatcher/python/gemm_utils.py, which caches the layout-arranged,
+            # dtype-encoded (A_h, B_h) buffers keyed on these cached (A, B)
+            # instances and (dtype, layout_a, layout_b, use_ocp).
             cache = getattr(_run_one, "_ab_cache", {})
             key = (problem.M, problem.N, problem.K)
             if key not in cache:
                 rng = np.random.RandomState(42)
-                cache[key] = (
-                    (rng.randn(problem.M, problem.K) * 0.1).astype(np.float32),
-                    (rng.randn(problem.K, problem.N) * 0.1).astype(np.float32),
-                )
+                A_in = (rng.randn(problem.M, problem.K) * 0.1).astype(np.float32)
+                B_in = (rng.randn(problem.K, problem.N) * 0.1).astype(np.float32)
+                A_in.flags.writeable = False
+                B_in.flags.writeable = False
+                cache.clear()
+                cache[key] = (A_in, B_in)
                 _run_one._ab_cache = cache
             A, B = cache[key]
 

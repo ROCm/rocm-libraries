@@ -1131,19 +1131,16 @@ def _fnuz_decode_table(exp_bits: int, mant_bits: int) -> np.ndarray:
     return _fp8_decode_table(exp_bits, mant_bits, False)
 
 
-def _fp8_encode(
-    x: np.ndarray, exp_bits: int, mant_bits: int, use_ocp: Optional[bool] = None
+def _fp8_encode_ladder(
+    x: np.ndarray, exp_bits: int, mant_bits: int, use_ocp: bool
 ) -> np.ndarray:
-    """Encode fp32 -> nearest 8-bit float, returned as a uint8 bit pattern.
+    """Reference fp32 -> 8-bit float encoder: float64 nearest-even ladder.
 
-    Rounding is round-to-nearest, ties-to-even -- the hardware convert's rule and
-    ml_dtypes'.  Saturation on overflow is deliberate and is where this encoder
-    *does* diverge from ml_dtypes: CK's convert clamps to the max finite value
-    (1e30 -> 448.0 for e4m3), while ``np.astype(ml_dtypes.float8_e4m3fn)``
-    produces NaN.  Matching the kernel is the point, so the divergence stays;
-    ``test_gemm_utils.TestFp8EncodeMatchesMlDtypes`` pins both halves of that.
+    Per-element ``searchsorted`` over the sorted finite magnitudes; too slow for
+    benchmark-sized operands, so :func:`_fp8_encode` only runs it over the
+    65,536 float32 top-16-bit buckets (see :func:`_fp8_encode_tables`). Also the
+    bit-exactness oracle in ``test_gemm_utils``.
     """
-    use_ocp = _resolve_use_ocp(use_ocp)
     table = _fp8_decode_table(exp_bits, mant_bits, use_ocp)
     sign_byte = np.uint8(1 << (exp_bits + mant_bits))  # 0x80
 
@@ -1159,7 +1156,8 @@ def _fp8_encode(
     sorted_byte = order.astype(np.uint8)
 
     xf = np.ascontiguousarray(x, dtype=np.float32)
-    ax = np.abs(xf).astype(np.float64)
+    with np.errstate(invalid="ignore"):
+        ax = np.abs(xf).astype(np.float64)
     # Both neighbours come from the raw insertion point: raw==size saturates to
     # the top magnitude (lo==hi), raw==0 pins to zero, otherwise compare the two.
     raw = np.searchsorted(sorted_mag, ax)
@@ -1191,6 +1189,60 @@ def _fp8_encode(
         if use_ocp else sign_byte
     out = np.where(np.isnan(xf), nan_byte, out)
     return out.astype(np.uint8).reshape(np.shape(x))
+
+
+@functools.lru_cache(maxsize=None)
+def _fp8_encode_tables(exp_bits: int, mant_bits: int, use_ocp: bool):
+    """Cached 64K-entry uint8 lookup tables equivalent to :func:`_fp8_encode_ladder`.
+
+    Every representable fp8/bf8 value and every exact midpoint between adjacent
+    values has all-zero low 16 mantissa bits in IEEE-754 float32 (exp_bits <= 5,
+    mant_bits <= 3, so midpoints use at most 4 mantissa bits out of the 7 kept
+    in the top 16 bits of float32). No rounding boundary therefore falls strictly
+    inside a top-16-bit bucket, and the encoded byte depends only on the top 16
+    bits (``hi16``) and on whether the low 16 bits (``lo16``) are non-zero (which
+    breaks odd-midpoint ties upward and turns +/-Inf payload bits into NaN).
+
+    Returns ``(lut0, lut1, diff)``: the ladder evaluated at ``lo16 == 0`` and at
+    ``lo16 == 1`` (standing in for any non-zero ``lo16``) over all 65,536 ``hi16``
+    buckets, and the mask of the few buckets where the two disagree.
+    """
+    top16 = np.arange(65536, dtype=np.uint32) << 16
+    lut0 = _fp8_encode_ladder(top16.view(np.float32), exp_bits, mant_bits, use_ocp)
+    lut1 = _fp8_encode_ladder(
+        (top16 | np.uint32(1)).view(np.float32), exp_bits, mant_bits, use_ocp
+    )
+    diff = lut0 != lut1
+    for arr in (lut0, lut1, diff):
+        arr.flags.writeable = False  # shared cached instances -- do not mutate
+    return lut0, lut1, diff
+
+
+def _fp8_encode(
+    x: np.ndarray, exp_bits: int, mant_bits: int, use_ocp: Optional[bool] = None
+) -> np.ndarray:
+    """Encode fp32 -> nearest 8-bit float, returned as a uint8 bit pattern.
+
+    Rounding is round-to-nearest, ties-to-even -- the hardware convert's rule and
+    ml_dtypes'.  Saturation on overflow is deliberate and is where this encoder
+    *does* diverge from ml_dtypes: CK's convert clamps to the max finite value
+    (1e30 -> 448.0 for e4m3), while ``np.astype(ml_dtypes.float8_e4m3fn)``
+    produces NaN.  Matching the kernel is the point, so the divergence stays;
+    ``test_gemm_utils.TestFp8EncodeMatchesMlDtypes`` pins both halves of that.
+
+    Byte-identical to :func:`_fp8_encode_ladder` for every float32 bit pattern,
+    via the table lookup of :func:`_fp8_encode_tables`.
+    """
+    use_ocp = _resolve_use_ocp(use_ocp)
+    lut0, lut1, diff = _fp8_encode_tables(exp_bits, mant_bits, use_ocp)
+    u32 = np.ascontiguousarray(x, dtype=np.float32).reshape(-1).view(np.uint32)
+    hi16 = (u32 >> np.uint32(16)).astype(np.uint16)
+    out = lut0[hi16]
+    # Only odd-midpoint and +/-Inf buckets (~130 of 65536) depend on lo16.
+    cand = np.flatnonzero(diff[hi16])
+    fix = cand[(u32[cand] & np.uint32(0xFFFF)) != 0]
+    out[fix] = lut1[hi16[fix]]
+    return out.reshape(np.shape(x))
 
 
 def _fp32_to_fp8_u8(x: np.ndarray, use_ocp: Optional[bool] = None) -> np.ndarray:
@@ -1297,6 +1349,65 @@ def _encode_operand(x: np.ndarray, dtype: str, use_ocp: Optional[bool] = None) -
     return _input_codec(dtype)[0](x, use_ocp)
 
 
+# One-entry FIFO cache of encoded (A_h, B_h) host buffers, keyed by the identity
+# of the logical (A, B) numpy arrays and the kernel's (dtype, la, lb, use_ocp).
+# In batch benchmark sweeps (e.g. tile_engine/ops/gemm/run_one_gemm_kernel.py),
+# every kernel in a worker batch shares the same cached fp32 (A, B) matrices,
+# dtype, and layout; caching the encoded bytes avoids re-encoding A and B per
+# kernel while bounding the memory overhead to a single shape at a time.
+_ENCODED_AB_CACHE: Dict[
+    Tuple[int, int, str, str, str, bool],
+    Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+] = {}
+
+
+def _encode_ab_cached(
+    A: np.ndarray,
+    B: np.ndarray,
+    dtype: str,
+    la: str,
+    lb: str,
+    use_ocp: Optional[bool],
+    kernel_name: str = "",
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return layout-arranged, dtype-encoded ``(A_h, B_h)`` for ``(A, B)``.
+
+    Reuses the previous encoded buffers when called repeatedly on the same
+    read-only ``A`` and ``B`` array instances with the same
+    ``(dtype, la, lb, use_ocp)`` (see the paired fp32 operand cache in
+    ``tile_engine/ops/gemm/run_one_gemm_kernel.py``). Writeable arrays passed by
+    ad-hoc callers are encoded fresh so in-place caller mutations are respected
+    without scanning or copying the inputs on every call.
+    """
+    if dtype not in _INPUT_CODEC:
+        raise ValueError(
+            f"unsupported A/B dtype {dtype!r} in kernel {kernel_name!r}; "
+            "add it to _NATIVE_IN_NP or _INPUT_CODEC"
+        )
+    resolved_ocp = _resolve_use_ocp(use_ocp) if dtype in ("fp8", "bf8") else False
+    cacheable = (
+        isinstance(A, np.ndarray)
+        and isinstance(B, np.ndarray)
+        and not A.flags.writeable
+        and not B.flags.writeable
+    )
+    key = (id(A), id(B), dtype, la, lb, resolved_ocp)
+    if cacheable:
+        cached = _ENCODED_AB_CACHE.get(key)
+        if cached is not None and cached[0] is A and cached[1] is B:
+            return cached[2], cached[3]
+
+    transpose = (lambda X: X.T) if A.ndim == 2 else (lambda X: np.transpose(X, (0, 2, 1)))
+    A_lay = A if la == "r" else transpose(A)
+    B_lay = B if lb == "r" else transpose(B)
+    A_h = _encode_operand(A_lay, dtype, use_ocp)
+    B_h = _encode_operand(B_lay, dtype, use_ocp)
+    if cacheable:
+        _ENCODED_AB_CACHE.clear()
+        _ENCODED_AB_CACHE[key] = (A, B, A_h, B_h)
+    return A_h, B_h
+
+
 def _c_numpy_dtype(dtype: str):
     """Return (C dtype token, host numpy type) for input ``dtype``; raise if unknown.
 
@@ -1391,34 +1502,15 @@ class GpuGemmRunner:
         # allocate (N,M) and transpose the result back to logical MxN.
         dtype = _dtype_from_kernel_name(self._kernel_name)
         la, lb, lc = _layout_from_kernel_name(self._kernel_name)
-
-        A_lay = A if la == "r" else A.T
-        B_lay = B if lb == "r" else B.T
         C_shape = (M, N) if lc == "r" else (N, M)
 
-        # Build A/B host buffers in the kernel's element dtype. The encode
-        # helpers (bf16/fp8/bf8) already force a contiguous float32 source, so an
-        # outer ascontiguousarray would only add a redundant copy; the native
-        # numpy dtypes (fp16/fp32/int8) still need it.
-        if dtype == "bf16":
-            A_h = _fp32_to_bf16_u16(A_lay)
-            B_h = _fp32_to_bf16_u16(B_lay)
-        elif dtype == "fp8":
-            A_h = _fp32_to_fp8_u8(A_lay, use_ocp=self._use_ocp)
-            B_h = _fp32_to_fp8_u8(B_lay, use_ocp=self._use_ocp)
-        elif dtype == "bf8":
-            A_h = _fp32_to_bf8_u8(A_lay, use_ocp=self._use_ocp)
-            B_h = _fp32_to_bf8_u8(B_lay, use_ocp=self._use_ocp)
-        elif dtype in _NATIVE_NP:
-            A_h = np.ascontiguousarray(A_lay, dtype=_NATIVE_NP[dtype])
-            B_h = np.ascontiguousarray(B_lay, dtype=_NATIVE_NP[dtype])
-        else:
-            # A silent fp16 fallback would hand the kernel buffers of the wrong
-            # element size (e.g. fp32 kernels would read fp16 data).
-            raise ValueError(
-                f"unsupported A/B dtype {dtype!r} in kernel {self._kernel_name!r}; "
-                "add it to _NATIVE_NP or an encode branch"
-            )
+        # Build (or reuse cached) A/B host buffers in the kernel's element dtype
+        # and layout. Paired with the fp32 (A, B) shape cache in
+        # tile_engine/ops/gemm/run_one_gemm_kernel.py so batch sweeps encode once
+        # per (shape, dtype, layout) rather than once per kernel.
+        A_h, B_h = _encode_ab_cached(
+            A, B, dtype, la, lb, self._use_ocp, self._kernel_name
+        )
 
         # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
         # accumulate into fp16, int8 into int32, otherwise the input dtype.
