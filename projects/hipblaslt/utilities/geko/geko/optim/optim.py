@@ -13,6 +13,7 @@ Key functions:
     configure: Generate tensilelite configs for GEMM types.
     run: Execute optimization across multiple GPUs.
     analyze: Benchmark and filter optimized kernels.
+    process_duplicates: Replace Tensile estimates for shared sizes with bench results.
 
 Integrates with hipBLASLt for benchmarking and Tensile for kernel compilation.
 """
@@ -35,6 +36,8 @@ from threading import Lock
 from dataclasses import dataclass
 
 from geko import bench
+import geko.library as library
+from geko.bench.utils import is_built_custom_library
 from geko.config_generator import config_generator as cg
 from geko.config_generator.load_input_config import apply_input_config_defaults, resolve_mx_defaults
 from geko.constants import GEMM_FIELDS, canonical_arch, runtime_env
@@ -50,7 +53,7 @@ from geko.optim.utils import *
 from geko.optim import _metrics
 
 
-__all__ = ["configure", "run", "analyze"]
+__all__ = ["configure", "run", "analyze", "process_duplicates"]
 
 _THIS_FILE = Path(__file__).resolve()
 if len(_THIS_FILE.parents) < 4:
@@ -559,3 +562,134 @@ def analyze(
     )
 
     return final_df.drop("valid", axis=1, errors="ignore"), df
+
+
+def _size_key(lib_name: str, size: list) -> tuple | None:
+    """Return a duplicate key of library name plus [M, N, batch, K].
+
+    The library name encodes datatype and transpose, so sizes from different
+    layouts are not treated as the same problem.
+    """
+    if not size or not isinstance(size[0], (list, tuple)) or len(size[0]) < 4:
+        return None
+    return (lib_name, *(int(dim) for dim in size[0][:4]))
+
+
+def process_duplicates(
+    hipblaslt_path: str | Path,
+    input_dir: str | Path,
+    devices: Sequence[int] | None = None,
+) -> None:
+    """Replace Tensile performance estimates for duplicated problem sizes.
+
+    A completed config is a ``build_<name>`` directory whose ``3_LibraryLogic``
+    directory is non-empty. A problem size is duplicated when the same library
+    name and ``[M, N, batch, K]`` appear more than once, including repeated rows
+    inside one file. The library name keeps different datatypes and layouts
+    apart. Each config that contains such a size is built, benchmarked with
+    that library, and the measured ``hipblaslt-Gflops`` is written back onto
+    the matching ExactLogic rows.
+    The solution index is left unchanged so the row still points at the kernel
+    that was tuned. Sizes that are not duplicated are left as they are.
+
+    Args:
+        hipblaslt_path: hipBLASLt checkout root.
+        input_dir: Optimizations directory that contains the tuning YAMLs and
+            ``build_*`` outputs.
+        devices: GPU ids forwarded to hipblaslt-bench.
+    """
+    input_dir = Path(input_dir)
+    completed: list[tuple[Path, list[tuple[Path, library.Library]]]] = []
+    for config_path in list_optimization_configs(input_dir):
+        build_dir = input_dir / f"build_{Path(config_path).stem}"
+        if get_build_state(build_dir) != "completed":
+            continue
+        logic_dir = build_dir / "3_LibraryLogic"
+        loaded = [
+            (path, library.load_library(path))
+            for path in sorted(logic_dir.glob("*.yaml"))
+        ]
+        if loaded:
+            completed.append((build_dir, loaded))
+
+    occurrences: dict[tuple, list[Path]] = {}
+    keyed = [
+        (key, build_dir)
+        for build_dir, loaded in completed
+        for _, lib in loaded
+        for size in lib.sizes or []
+        if (key := _size_key(lib.name, size)) is not None
+    ]
+    for key, build_dir in keyed:
+        occurrences.setdefault(key, []).append(build_dir)
+    duplicated = {key for key, builds in occurrences.items() if len(builds) > 1}
+    selected = {build for key in duplicated for build in occurrences[key]}
+    if not duplicated:
+        logger.info("No duplicate problem sizes among completed configs")
+        return
+
+    logger.info(
+        "Benchmarking %s completed config(s) that share %s problem size(s)",
+        len(selected),
+        len(duplicated),
+    )
+
+    class DuplicateBenchWorker(Worker[tuple[Path, list[tuple[Path, library.Library]]]]):
+        """Build one config's library and benchmark its duplicated sizes."""
+
+        def setup(self) -> None:
+            self.build_dir, self.loaded = self.item
+
+        def run(self) -> bool:
+            lib_out = self.build_dir / "lib"
+            if not is_built_custom_library(lib_out):
+                library.create(hipblaslt_path, self.build_dir / "3_LibraryLogic", lib_out)
+
+            bench_dir = self.build_dir / "duplicate_bench"
+            for yaml_path, lib in self.loaded:
+                if not any(_size_key(lib.name, size) in duplicated for size in lib.sizes or []):
+                    continue
+                bench_file, _ = lib.create_bench_input(bench_dir)
+                results = bench.run(
+                    hipblaslt_path,
+                    bench_file,
+                    Path(bench_file).with_suffix(".out"),
+                    custom_lib_dir=lib_out,
+                    devices=[self.device],
+                    cache=True,
+                )
+                measured = {
+                    (int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"])): float(row["hipblaslt-Gflops"])
+                    for _, row in results.iterrows()
+                }
+                updates = [
+                    (size, key[1:])
+                    for size in lib.sizes or []
+                    if (key := _size_key(lib.name, size)) is not None
+                    and key in duplicated
+                    and key[1:] in measured
+                    and isinstance(size[1], list)
+                    and len(size[1]) >= 2
+                ]
+                for size, problem in updates:
+                    size[1][1] = measured[problem]
+                if updates:
+                    lib.dump(yaml_path.parent, name=yaml_path.name)
+                    logger.info(
+                        "Wrote measured performance for duplicate sizes in '%s'",
+                        yaml_path,
+                    )
+            return True
+
+        def teardown(self) -> None:
+            pass
+
+    device_list = list(devices) if devices else [0]
+    work = [(build_dir, loaded) for build_dir, loaded in completed if build_dir in selected]
+    runner = Runner(
+        items=work,
+        worker_impl=DuplicateBenchWorker,
+        devices=device_list,
+        n_slots=1,
+    )
+    runner(input_dir / "duplicate_bench_runner")
