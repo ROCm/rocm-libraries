@@ -2494,13 +2494,14 @@ _TENSOR_LIMIT = 1 << 31
 
 def _batch_chunks(p, direction: str) -> List[int]:
     """Images per launch: the fewest balanced batch chunks that keep every
-    activation under 2 GiB (``[N]`` when one launch fits, and for wgrad).
+    activation under 2 GiB (``[N]`` when one launch fits).
 
     The chunks need not divide N; they differ by at most one image (N=31 that
-    fits 15 images per launch runs as 11 + 10 + 10).
+    fits 15 images per launch runs as 11 + 10 + 10). wgrad reduces over N, so
+    its chunks are not independent launches, but they can accumulate: every
+    chunk adds into the one dW, zeroed once, which only a kernel that adds
+    into dW can do (:func:`_accumulates_dw`).
     """
-    if direction == "wgrad":
-        return [p.N]
     elem = 2
     per_image = max(p.H * p.W * p.total_c, p.Ho * p.Wo * p.total_k) * elem
     per_launch = (_TENSOR_LIMIT - 1) // per_image
@@ -2518,7 +2519,9 @@ def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i):
         return ptrs, sizes
     ptrs, sizes = dict(ptrs), dict(sizes)
     n_total, n0 = sum(chunks), sum(chunks[:i])
-    for name in [n for n in inputs if n != "w"] + [out_name]:
+    # wgrad's dW has no batch: every chunk adds into the whole of it.
+    batched = [out_name] if out_name != "dw" else []
+    for name in [n for n in inputs if n != "w"] + batched:
         per_image = sizes[name] // n_total
         ptrs[name] = ptrs[name] + n0 * per_image
         sizes[name] = chunks[i] * per_image
@@ -2551,6 +2554,31 @@ def _chunk_plans(plan_fn, p, chunks):
         plans = [pl for pl in plans if pl.label in labels[n]]
     per_chunk = {pl.label: [labels[n][pl.label] for n in chunks] for pl in plans}
     return plans, rejected, per_chunk
+
+
+def _accumulates_dw(plan) -> bool:
+    """A one-step wgrad plan with no scratch: its kernel adds its tiles into
+    the zeroed fp32 dW (atomics), so its launches over batch chunks sum. A fold
+    or reduce step, or a scratch slab, writes dW instead."""
+    return len(plan.steps) == 1 and not plan.workspaces and not plan.zeroed
+
+
+def _wgrad_chunk_plans(plans, rejected, per_chunk, chunks):
+    """``(plans, rejected)`` for a wgrad problem run as ``chunks``: past one
+    chunk, only the plans whose every chunk accumulates into dW."""
+    if len(chunks) == 1:
+        return plans, rejected
+    keep = [pl for pl in plans if all(map(_accumulates_dw, per_chunk[pl.label]))]
+    rejected = list(rejected) + [
+        (
+            pl.identity,
+            f"a wgrad batch run as {len(chunks)} chunks needs a kernel that "
+            f"accumulates into dW",
+        )
+        for pl in plans
+        if pl not in keep
+    ]
+    return keep, rejected
 
 
 def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
@@ -2615,6 +2643,8 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 p,
                 chunks,
             )
+            if direction == "wgrad":
+                plans, rejected = _wgrad_chunk_plans(plans, rejected, per_chunk, chunks)
             if not plans:
                 why = _no_plan_reason(rejected, dtype, variants)
                 print(

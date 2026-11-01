@@ -1659,7 +1659,8 @@ def test_run_from_cache_batch_chunks_are_balanced():
     assert (_TENSOR_LIMIT - 1) // per_image == 15
     chunks = _batch_chunks(big, "fwd")
     assert chunks == [11, 10, 10]
-    assert _batch_chunks(big, "wgrad") == [31]
+    # wgrad reduces over N: its chunks accumulate into one dW.
+    assert _batch_chunks(big, "wgrad") == [11, 10, 10]
     assert _batch_chunks(replace(big, N=15), "fwd") == [15]
     assert _batch_chunks(replace(big, N=16), "dgrad") == [8, 8]
     # A prime N past the limit no longer degrades to one image per launch.
@@ -1677,6 +1678,59 @@ def test_run_from_cache_batch_chunks_are_balanced():
         assert (p_i["w"], s_i["w"]) == (ptrs["w"], sizes["w"])
         n0 += n
     assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (ptrs, sizes)
+
+
+def test_run_from_cache_wgrad_chunks_accumulate_into_one_dw():
+    """A wgrad problem past the 2 GiB limit runs as batch chunks on slices of
+    dY and X that all add into the whole dW, zeroed once; only the one-step
+    plans that accumulate into dW (no fold, reduce or scratch) are offered."""
+    from types import SimpleNamespace
+
+    _need_benchmark_direct_conv()
+    from benchmarks.common.benchmark_direct_conv import (
+        _accumulates_dw,
+        _chunk_buffers,
+        _wgrad_chunk_plans,
+    )
+
+    per_image = 1 << 27
+    chunks = [11, 10, 10]
+    inputs = {"dy": None, "x": None}
+    ptrs = {"dy": 0x1000_0000_0000, "x": 0x2000_0000_0000, "dw": 0x3000}
+    sizes = {"dy": 31 * per_image, "x": 31 * per_image, "dw": 4096}
+    n0 = 0
+    for i, n in enumerate(chunks):
+        p_i, s_i = _chunk_buffers(ptrs, sizes, inputs, "dw", chunks, i)
+        for name in ("dy", "x"):
+            assert p_i[name] == ptrs[name] + n0 * per_image
+            assert s_i[name] == n * per_image
+        assert (p_i["dw"], s_i["dw"]) == (ptrs["dw"], sizes["dw"])
+        n0 += n
+
+    def plan(label, steps=1, workspaces=None, zeroed=()):
+        return SimpleNamespace(
+            label=label,
+            identity=label,
+            steps=(None,) * steps,
+            workspaces=workspaces or {},
+            zeroed=zeroed,
+        )
+
+    atomic = plan("atomic")
+    two_stage = plan(
+        "two_stage", steps=2, workspaces={"ws_wgrad": 64}, zeroed=("ws_wgrad",)
+    )
+    folded = plan("folded", steps=2, workspaces={"ws": 64})
+    assert _accumulates_dw(atomic)
+    assert not _accumulates_dw(two_stage) and not _accumulates_dw(folded)
+    plans = [atomic, two_stage, folded]
+    per_chunk = {pl.label: [pl] * len(chunks) for pl in plans}
+    kept, rejected = _wgrad_chunk_plans(plans, [], per_chunk, chunks)
+    assert kept == [atomic]
+    assert {r[0] for r in rejected} == {"two_stage", "folded"}
+    assert all("accumulates into dW" in why for _, why in rejected)
+    # One launch: every plan stays.
+    assert _wgrad_chunk_plans(plans, [], per_chunk, [31]) == (plans, [])
 
 
 def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsys):

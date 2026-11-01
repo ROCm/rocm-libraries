@@ -142,7 +142,7 @@ def test_batch_chunks_single_launch_up_to_the_limit(direction):
     assert _chunks(direction, _image(15)) == [(0, 15)]
 
 
-@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+@pytest.mark.parametrize("direction", ["fwd", "dgrad", "wgrad"])
 def test_batch_chunks_splits_one_past_the_limit(direction):
     # 16 images are exactly 2^31 bytes: one byte past the i32 maximum.
     assert _chunks(direction, _image(16)) == [(0, 8), (8, 8)]
@@ -181,9 +181,20 @@ def test_batch_chunks_3d_counts_depth():
     assert _chunks("fwd", p) == [(0, 8), (8, 8)]
 
 
-def test_batch_chunks_wgrad_cannot_split():
-    with pytest.raises(ValueError, match="wgrad reduces over"):
-        _chunks("wgrad", _image(16))
+def test_wgrad_slices_need_a_kernel_that_accumulates():
+    """A wgrad problem past the limit runs as slices that all add into the one
+    dW: only the packed-atomic split-K kernels accumulate into it."""
+    from types import SimpleNamespace
+
+    from benchmarks.common.benchmark_implicit_gemm_conv import _wgrad_accumulates
+
+    def ident(split_k, two_stage=False, streamk="off"):
+        return SimpleNamespace(split_k=split_k, two_stage=two_stage, streamk=streamk)
+
+    assert _wgrad_accumulates(ident(4))
+    assert not _wgrad_accumulates(ident(1))
+    assert not _wgrad_accumulates(ident(4, two_stage=True))
+    assert not _wgrad_accumulates(ident(4, streamk="linear"))
 
 
 def test_batch_chunks_rejects_one_oversized_image():
