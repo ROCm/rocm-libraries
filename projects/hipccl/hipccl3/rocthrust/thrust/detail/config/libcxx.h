@@ -47,9 +47,10 @@
     #define USE_LIBHIPCXX 1
 #endif
 
-// If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
-#if THRUST_HAS_INCLUDE(<cuda/std/version>) \
-	&& (USE_LIBCUDACXX || USE_LIBHIPCXX)
+// If the '::cuda::std' namespace from 'libcudacxx' is available.
+// Not for HIP, where this may be NVIDIA's libcu++. libhipcxx is found via <hip/std/version>.
+#if !defined(__HIP__) && THRUST_HAS_INCLUDE(<cuda/std/version>) \
+	&& USE_LIBCUDACXX
 #  include <cuda/std/version>
 // If version matches and '_CUDA_VSTD' is available.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
@@ -107,6 +108,11 @@
 #  include <nv/target>
 #else
 #  include <thrust/detail/libcxx_wrapper/nv/detail/__target_macros.h>
+#endif
+
+// NVIDIA's <nv/target> always selects host code under HIP.
+#if defined(__HIP__) && defined(_NV_COMPILER_NVCC) && !defined(__NVCC__)
+#  error "<nv/target> was included in a HIP compilation, which is not HIP-aware and breaks rocThrust's host/device dispatch."
 #endif
 
 // NV_* macros provided by 'libhipcxx' are suffixed with _LIBHIPCXX.
