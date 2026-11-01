@@ -216,7 +216,9 @@ def from_hipdnn(
     mask resolver would also reject, and for any key hipDNN does not write.
     An absent key reads as hipDNN's null.
     """
-    node_type = node_json.get("type", "SdpaAttributes")
+    if "type" not in node_json:
+        raise ValueError("SDPA node is missing its 'type' key")
+    node_type = node_json["type"]
     if node_type != "SdpaAttributes":
         raise ValueError(f"expected an SdpaAttributes node, got {node_type!r}")
     inputs = node_json.get("inputs", {})

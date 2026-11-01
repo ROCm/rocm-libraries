@@ -443,6 +443,7 @@ def test_invalid_ragged_offsets_are_rejected(graph_edit, match):
     "graph_edit, match",
     [
         (lambda g: g["nodes"][0].update(type="MatmulAttributes"), "SdpaAttributes"),
+        (lambda g: g["nodes"][0].pop("type"), "missing its 'type'"),
         (lambda g: g["nodes"][0]["inputs"].update(q_tensor_uid=None), "missing"),
         (lambda g: g["nodes"][0]["inputs"].update(seed_tensor_uid=99), "uid 99"),
         (lambda g: g["tensors"][0].update(data_type="fp12"), "data_type"),
