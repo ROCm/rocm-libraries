@@ -236,7 +236,7 @@ python3 -m pytest -q tests/test_conv_dgrad_fused_weights.py \
 cd ../platform && export ROCKE=$(pwd) PYTHONPATH=$(pwd)/python:$(pwd)/../library
 python3 tools/check_byte_identity.py --only conv_direct_dgrad_ext,conv_direct_grouped
 python3 tests/instances/rocke_ir_parity_harness.py \
-    --check tests/golden/rocke_representative_ir_sha256.json --flavor llvm22
+    --check tests/golden/rocke_representative_ir_sha256/ --flavor llvm22
 ```
 
 Host-event timing includes launch overhead, which favours a single kernel;

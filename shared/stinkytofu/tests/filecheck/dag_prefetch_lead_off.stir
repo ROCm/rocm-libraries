@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --prefetch-lead-wmmas=0 --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wait-alu-scoreboard --prefetch-lead-wmmas=0 --print-output
 #
 # Lead off (dag_prefetch_lead.stir has it on): the prefetch group is still pinned, in its
 # tensor_load's window as in a single-stage loop, and issued there by the Prefetch level.

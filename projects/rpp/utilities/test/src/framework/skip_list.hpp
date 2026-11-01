@@ -73,8 +73,6 @@ inline constexpr const char* kSkipList[] = {
     "Image_Effects/CutoutDropoutTest.Correctness/*_PartialRoi_*",
     "Image_Effects/EraseTest.Correctness/*_PartialRoi_*",
     "Image_Effects/FogNegativeTest.Negative/*_U8toU8_PKD3_FullRoi_*",
-    "Image_Effects/FogTest.Correctness/HOST_F16toF16_*",
-    "Image_Effects/FogTest.Correctness/HOST_F32toF32_*",
     "Image_Effects/GaussianNoiseNegativeTest.Negative/*_U8toU8_PKD3_FullRoi_*",
     "Image_Effects/GaussianNoiseTest.Correctness/HIP_I8toI8_*",
     "Image_Effects/GaussianNoiseTest.Correctness/HOST_I8toI8_*_PartialRoi_*",
@@ -115,6 +113,8 @@ inline constexpr const char* kSkipList[] = {
     "Image_Effects/SnowTest.Correctness/HOST_F16toF16_PLN3toPKD3_PartialRoi_*_b2p5_t0p5_d1",
     "Image_Effects/SnowTest.Correctness/HOST_F32toF32_PLN3toPKD3_PartialRoi_*_b2p5_t0p5_d1",
     "Image_Effects/WaterTest.Correctness/*_PartialRoi_*",
+    // no HIP kernel yet: rppt_bilateral_filter returns RPP_ERROR_NOT_IMPLEMENTED on HIP
+    "Image_Filter/BilateralFilterTest.Correctness/HIP_*",
     "Image_Filter/BoxFilterTest.Correctness/HOST_U8toU8_PLN1_FullRoi_2x36x55_*",
     "Image_Filter/BoxFilterTest.Correctness/HOST_U8toU8_PLN3_FullRoi_2x36x55_*",
     "Image_Filter/BoxFilterTest.Correctness/HOST_I8toI8_PLN1_FullRoi_2x36x55_*",

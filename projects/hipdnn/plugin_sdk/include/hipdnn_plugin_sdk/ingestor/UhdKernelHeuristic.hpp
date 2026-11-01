@@ -236,6 +236,7 @@ public:
         config.nativeSymbol = descriptor.nativeSymbol;
         config.customLibrarySymbol = descriptor.customLibrarySymbol;
         config.modelHash = descriptor.modelHash;
+        config.authoredArtifactPath = descriptor.authoredArtifactPath;
         config.engineName = descriptor.engineName;
         config.role = descriptor.role;
         config.arch = descriptor.arch;

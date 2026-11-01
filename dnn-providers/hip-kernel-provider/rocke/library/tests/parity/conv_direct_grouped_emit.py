@@ -18,8 +18,12 @@
 # index 103 its grouped / group-merge mode, and from index 114 the direct
 # wgrad kernels: DirectWgradTiledSpec, DwWgradFoldSpec, DwWgradColsSpec,
 # DwWgradLdsSpec, WgradGatherSpec, DwWgradMfmaSpec and GroupedWgradMfmaSpec,
-# from index 163 the bf16 DirectConv4cSpec, and from index 166 the depthwise
-# forward kernels on the wave32 gfx1250), builds the kernel
+# from index 163 the bf16 DirectConv4cSpec, from index 166 the depthwise
+# forward kernels on the wave32 gfx1250, from index 171 their channel-packed
+# cpl > 1 forms, and from index 179 the depthwise dgrad kernels:
+# DirectDepthwiseDgradStreamSpec, scalar and channel-packed, and
+# DirectDepthwiseTiledSpec(dgrad=True) with large and non-square filters and
+# per-axis padding), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -39,6 +43,7 @@ from kernels.common.conv_direct_grouped import (
     DirectConvDgradSpec,
     DirectConvSpec,
     DirectDepthwiseDgradSpec,
+    DirectDepthwiseDgradStreamSpec,
     DirectReorganizeWeightsSpec,
     DirectTransposeWeightsDgradSpec,
     build_direct_conv,
@@ -53,6 +58,7 @@ from kernels.common.conv_direct_grouped import (
     build_direct_depthwise_tiled,
     build_direct_conv_dgrad,
     build_direct_depthwise_dgrad,
+    build_direct_depthwise_dgrad_streaming,
     build_direct_reorganize_weights,
     build_direct_transpose_weights_dgrad,
 )
@@ -482,10 +488,11 @@ def _wgrad_direct_spec(idx: int):
 
 
 # ---------------------------------------------------------------------------
-# Depthwise forward on a wave32 target (gfx1250), indices 166..170: the
+# Depthwise forward on a wave32 target (gfx1250), indices 166..178: the
 # preloading, spatial, tiled and column-streamed kernels at wave_size 32, then
 # the preloading kernel at wave_size 64: a logical wave of 64 threads, which
-# the wave32 target runs as two hardware waves.
+# the wave32 target runs as two hardware waves. Indices 179..200 are the
+# depthwise dgrad kernels (see _dw_dgrad_spec).
 # ---------------------------------------------------------------------------
 _WAVE32_CFG_BASE = 166
 
@@ -553,7 +560,208 @@ def _wave32_spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1),
             "gfx1250",
         )
+    # Channel-packed (cpl > 1) depthwise forward: row-streaming and tiled.
+    if idx == 5:
+        p = _dwp_fwd(2, 14, 14, 64, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(
+                problem=p, block_w=8, block_waves=2, wave_size=32, cpl=2
+            ),
+            "gfx1250",
+        )
+    if idx == 6:
+        p = _dwp_fwd(2, 15, 15, 96, 5, 2, 2, "bf16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(
+                problem=p, block_w=4, block_waves=1, wave_size=32, cpl=4
+            ),
+            "gfx1250",
+        )
+    if idx == 7:
+        p = _dwp_fwd(2, 16, 16, 96, 3, 1, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=2, block_waves=2, wave_size=32, cpl=2
+            ),
+            "gfx1250",
+        )
+    if idx == 8:
+        p = _dwp_fwd(2, 17, 17, 128, 7, 3, 2, "fp16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p,
+                block_w=4,
+                block_h=2,
+                block_waves=1,
+                unroll_rows=True,
+                wave_size=32,
+                cpl=4,
+            ),
+            "gfx1250",
+        )
+    if idx == 9:
+        p = _dwp_fwd(2, 12, 12, 64, 3, 1, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=1, block_waves=1, wave_size=32, cpl=4
+            ),
+            "gfx1250",
+        )
+    if idx == 10:
+        # wave64 target.
+        p = _dwp_fwd(2, 14, 14, 128, 3, 1, 1, "bf16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1, cpl=2),
+            "gfx950",
+        )
+    if idx == 11:
+        # Both engines reject: 98 channels are not a multiple of cpl 4.
+        p = _dwp_fwd(2, 14, 14, 98, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(
+                problem=p, block_w=8, block_waves=1, wave_size=32, cpl=4
+            ),
+            "gfx1250",
+        )
+    if idx == 12:
+        # Both engines reject: cpl must be 1, 2 or 4.
+        p = _dwp_fwd(2, 16, 16, 96, 3, 1, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=2, block_waves=1, wave_size=32, cpl=3
+            ),
+            "gfx1250",
+        )
+    if 13 <= idx <= 34:
+        return _dw_dgrad_spec(idx - 13)
     return None
+
+
+def _dwp_dg(N, H, W, groups, KH, KW, PAD, pad_w, stride, dtype):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=1,
+        kpg=1,
+        KH=KH,
+        KW=KW,
+        PAD=PAD,
+        stride=stride,
+        dtype=dtype,
+        pad_w=pad_w,
+    )
+
+
+def _dw_dgrad_spec(idx: int):
+    """Depthwise dgrad configs 179..200 (``idx`` 0..21): the row-streaming
+    DirectDepthwiseDgradStreamSpec (scalar, then channel-packed cpl 2 / 4 / 8),
+    the rotated-filter DirectDepthwiseTiledSpec(dgrad=True) on large, non-square
+    and per-axis-padded filters, and specs both engines reject."""
+
+    def stream(p, block_w, block_waves, cpl=1, wave_size=32, arch="gfx1250"):
+        return (
+            "dw_dgrad_stream",
+            DirectDepthwiseDgradStreamSpec(
+                problem=p,
+                block_w=block_w,
+                block_waves=block_waves,
+                wave_size=wave_size,
+                cpl=cpl,
+            ),
+            arch,
+        )
+
+    def tiled(p, block_w, block_h, dgrad=True, wave_size=32, arch="gfx1250", **kw):
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p,
+                block_w=block_w,
+                block_h=block_h,
+                block_waves=1,
+                wave_size=wave_size,
+                dgrad=dgrad,
+                **kw,
+            ),
+            arch,
+        )
+
+    table = {
+        # Row-streaming, one channel per lane.
+        0: lambda: stream(_dwp_dg(2, 14, 14, 64, 3, 3, 1, -1, 1, "fp16"), 8, 2),
+        1: lambda: stream(
+            _dwp_dg(2, 14, 14, 64, 3, 3, 1, -1, 2, "bf16"),
+            8,
+            1,
+            wave_size=64,
+            arch="gfx950",
+        ),
+        # Channel-packed: cpl 2 / 4 / 8, fp16 and bf16, stride 1 and 2.
+        2: lambda: stream(_dwp_dg(2, 14, 14, 64, 3, 3, 1, -1, 1, "fp16"), 8, 2, cpl=2),
+        3: lambda: stream(_dwp_dg(2, 15, 15, 96, 5, 5, 2, -1, 2, "bf16"), 7, 1, cpl=2),
+        4: lambda: stream(_dwp_dg(2, 14, 14, 128, 3, 3, 1, -1, 2, "fp16"), 4, 1, cpl=4),
+        5: lambda: stream(_dwp_dg(2, 12, 12, 256, 3, 3, 1, -1, 1, "bf16"), 4, 1, cpl=8),
+        6: lambda: stream(
+            _dwp_dg(2, 14, 14, 128, 7, 7, 3, -1, 1, "bf16"),
+            4,
+            1,
+            cpl=4,
+            wave_size=64,
+            arch="gfx950",
+        ),
+        # Rotated-filter tiled dgrad: 13x13, 31x31, 51x5, 5x51 and a padding
+        # that differs per axis and is not "same".
+        7: lambda: tiled(_dwp_dg(2, 20, 20, 64, 13, 13, 6, -1, 1, "fp16"), 8, 2),
+        8: lambda: tiled(_dwp_dg(2, 16, 16, 32, 31, 31, 15, -1, 1, "bf16"), 4, 1),
+        9: lambda: tiled(_dwp_dg(2, 24, 24, 64, 51, 5, 25, 2, 1, "fp16"), 8, 2),
+        10: lambda: tiled(
+            _dwp_dg(2, 24, 24, 64, 5, 51, 2, 25, 1, "bf16"), 4, 2, unroll_rows=True
+        ),
+        11: lambda: tiled(
+            _dwp_dg(2, 14, 14, 128, 7, 7, 1, 3, 1, "fp16"),
+            8,
+            2,
+            wave_size=64,
+            arch="gfx950",
+        ),
+        # Both engines reject: per-axis padding on the forward tiled kernel.
+        12: lambda: tiled(
+            _dwp_dg(2, 16, 16, 64, 5, 5, 1, 2, 1, "fp16"), 8, 2, dgrad=False
+        ),
+        # Both engines reject: the dgrad mode is stride 1 only.
+        13: lambda: tiled(_dwp_dg(2, 16, 16, 64, 5, 5, 2, -1, 2, "fp16"), 8, 2),
+        # Both engines reject: a 65-row filter is past the dgrad mode's limit.
+        14: lambda: tiled(_dwp_dg(2, 80, 16, 64, 65, 3, 32, 1, 1, "fp16"), 4, 1),
+        # Both engines reject: 98 channels are not a multiple of cpl 4.
+        15: lambda: stream(_dwp_dg(2, 14, 14, 98, 3, 3, 1, -1, 1, "fp16"), 8, 1, cpl=4),
+        # Both engines reject: cpl must be 1, 2, 4 or 8.
+        16: lambda: stream(_dwp_dg(2, 14, 14, 96, 3, 3, 1, -1, 1, "bf16"), 8, 1, cpl=3),
+        # Both engines reject: cpl 8 x block_w 16 x KH 3 accumulator rows.
+        17: lambda: stream(
+            _dwp_dg(2, 14, 14, 256, 3, 3, 1, -1, 1, "fp16"), 16, 1, cpl=8
+        ),
+        # A 5x5 filter whose column padding (0) differs from its row padding
+        # (2): the kernel name carries the per-axis padding.
+        18: lambda: tiled(_dwp_dg(2, 16, 16, 64, 5, 5, 2, 0, 1, "fp16"), 8, 2),
+        # Both engines reject: pad_w below -1 is no column padding.
+        19: lambda: tiled(_dwp_dg(2, 16, 16, 64, 5, 5, 1, -2, 1, "fp16"), 8, 2),
+        # Both engines reject: the row-streaming kernel takes one padding.
+        20: lambda: stream(_dwp_dg(2, 16, 16, 64, 5, 5, 2, 1, 1, "fp16"), 8, 1),
+        # Both engines reject: pad_w below -1 on the row-streaming kernel.
+        21: lambda: stream(_dwp_dg(2, 14, 14, 64, 3, 3, 1, -3, 1, "bf16"), 8, 1),
+    }
+    sel = table.get(idx)
+    return None if sel is None else sel()
 
 
 def _gp(groups, cpg, kpg, *, N=2, H=20, W=24, KH=3, PAD=1, dtype="fp16"):
@@ -1999,6 +2207,8 @@ def main() -> int:
         kernel = build_direct_conv_dgrad(spec, arch=arch)
     elif kind == "dw_dgrad":
         kernel = build_direct_depthwise_dgrad(spec, arch=arch)
+    elif kind == "dw_dgrad_stream":
+        kernel = build_direct_depthwise_dgrad_streaming(spec, arch=arch)
     elif kind == "nongrouped":
         kernel = build_direct_conv_nongrouped(spec, arch=arch)
     elif kind == "generic":
