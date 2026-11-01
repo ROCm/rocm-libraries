@@ -586,7 +586,8 @@ class LoadPolicyTests(unittest.TestCase):
         policy = pc.load_policy(policy_path)
 
         # Per team lead request, 'unit/**' was removed from unit_test_patterns.
-        # Test files are now recognized ONLY by basename (test_*, *_test.*, Test*).
+        # A broad unit/ glob stays out. unit_test_* is a basename, and any
+        # unittests/ directory counts, the same way test/gtest/ does.
         self.assertNotIn("unit/**", policy.unit_test_patterns)
         # Verify the allowed patterns ARE present.
         self.assertIn("test_*", policy.unit_test_patterns)
@@ -594,7 +595,54 @@ class LoadPolicyTests(unittest.TestCase):
         self.assertIn("*_tests.*", policy.unit_test_patterns)
         self.assertIn("*_gtest.*", policy.unit_test_patterns)
         self.assertIn("Test*", policy.unit_test_patterns)
+        self.assertIn("unit_test_*", policy.unit_test_patterns)
         self.assertIn("**/test/gtest/**", policy.unit_test_patterns)
+        self.assertIn("**/unittests/**", policy.unit_test_patterns)
+        self.assertNotIn(
+            "projects/rocsparse/clients/unittests/**", policy.unit_test_patterns
+        )
+
+    def test_unittests_directory_and_unit_test_basename_satisfy_requirement(
+        self,
+    ) -> None:
+        policy_path = THIS_DIR / "policy.yml"
+        if not policy_path.exists():
+            self.skipTest("policy.yml not present next to tests")
+        policy = pc.load_policy(policy_path)
+        library = (
+            "projects/rocsparse/library/src/conversion/rocsparse_csxsldu_preprocess.cpp"
+        )
+        cases = [
+            "projects/rocsparse/clients/unittests/unit_test_host_internal_branches.cpp",
+            "projects/rocsparse/clients/unittests/rocsparse_unit_test_main.cpp",
+            # Another project's unittests/ directory, with a name that matches
+            # no basename pattern.
+            "projects/hipsparse/clients/unittests/foo.cpp",
+            # Outside any unittests/ directory, so only unit_test_* matches.
+            "projects/rocwmma/test/unit/unit_test_macros.hpp",
+        ]
+        for test_path in cases:
+            with self.subTest(test_path=test_path):
+                errs: List[str] = []
+                pc.ensure_unit_tests(
+                    policy, [make_file(library), make_file(test_path)], errs
+                )
+                self.assertEqual(errs, [])
+        # Near misses for the directory glob. None of these is a test file.
+        misses = [
+            "projects/rocsparse/clients/unittests_old/foo.cpp",
+            "projects/rocsparse/clients/tests/foo.cpp",
+        ]
+        for test_path in misses:
+            with self.subTest(test_path=test_path):
+                errs = []
+                pc.ensure_unit_tests(
+                    policy, [make_file(library), make_file(test_path)], errs
+                )
+                self.assertTrue(errs)
+        errs = []
+        pc.ensure_unit_tests(policy, [make_file(library)], errs)
+        self.assertTrue(errs)
 
 
 if __name__ == "__main__":
