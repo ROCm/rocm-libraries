@@ -217,13 +217,10 @@ WINNING_LEVERS = {
     (16, 4096, 16): dict(waves_per_eu=2, pv_priority=3),
 }
 
-# Expected kernel symbols, used for auditing only: the recorded Step-0 winner
-# symbols plus the ``cfvst0`` token, which kernel_name() adds because A now pins
-# use_cfvst=False explicitly (the recorded winners resolved CFVST off from None,
-# before #14367). The current emitter may produce a different symbol if policy
-# or implementation changed.
+# The seven HISTORICAL Step-0 winner symbols, exactly as recorded by the sweep
+# (pre-#14367, use_cfvst=None resolving off). Exported verbatim for provenance.
 _A_PREFIX = "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_"
-_A_SUFFIX = "_krowpad4_cfvst0_iglp1_iglpm1_pvkmaj_prio"
+_A_SUFFIX = "_krowpad4_iglp1_iglpm1_pvkmaj_prio"
 EXPECTED_A_KERNEL = {
     (1, 4096, 8): _A_PREFIX + "bthkvmin_gfx942_wpe3" + _A_SUFFIX + "1_dsplit",
     (1, 4096, 16): _A_PREFIX + "bthkvmin_gfx942_wpe2" + _A_SUFFIX + "1_dsplit",
@@ -234,6 +231,19 @@ EXPECTED_A_KERNEL = {
     (16, 4096, 16): _A_PREFIX + "gfx942_wpe2" + _A_SUFFIX + "3_dsplit",
 }
 
+
+def _current_a_symbol(historical: str) -> str:
+    """The symbol the rebuilt A must compile to at this checkout: the historical
+    symbol plus the ``cfvst0`` token kernel_name() emits for the explicit
+    use_cfvst=False pin A now needs (CFVST resolves on by default since #14367).
+    The guard compares against this; provenance keeps the historical name too."""
+    assert historical.count("_krowpad4_") == 1, historical
+    return historical.replace("_krowpad4_", "_krowpad4_cfvst0_")
+
+
+CURRENT_EXPECTED_A_KERNEL = {
+    key: _current_a_symbol(name) for key, name in EXPECTED_A_KERNEL.items()
+}
 assert set(EXPECTED_A_KERNEL) == set(WINNING_LEVERS)
 assert not set(MISSING_SWEEP_WINNERS) & set(WINNING_LEVERS)
 
@@ -1143,10 +1153,11 @@ def _run_shapes(
         if not no_winner:
             original_a_name = EXPECTED_A_KERNEL[key]
             actual_a_name = specs["A"].kernel_name()
-            if actual_a_name != original_a_name:
+            if actual_a_name != CURRENT_EXPECTED_A_KERNEL[key]:
                 raise RuntimeError(
                     f"{shape.label}: rebuilt A is not the recorded Step-0 winner; "
-                    f"recorded={original_a_name}, rebuilt={actual_a_name}"
+                    f"expected={CURRENT_EXPECTED_A_KERNEL[key]} "
+                    f"(historical={original_a_name}), rebuilt={actual_a_name}"
                 )
             if (
                 specs["A"].resolved_use_cfvst()
@@ -1247,9 +1258,17 @@ def _run_shapes(
                     else "per-shape Step-0 lever-sweep winner, independently rebuilt"
                 ),
                 "A_original_expected_kernel": original_a_name,
+                "A_current_expected_kernel": (
+                    None if no_winner else CURRENT_EXPECTED_A_KERNEL[key]
+                ),
                 "A_current_kernel": actual_a_name,
                 "A_kernel_name_matches_original": (
                     None if no_winner else actual_a_name == original_a_name
+                ),
+                "A_kernel_name_matches_current_expected": (
+                    None
+                    if no_winner
+                    else actual_a_name == CURRENT_EXPECTED_A_KERNEL[key]
                 ),
                 "A_overrides": a_overrides,
                 "B_stage_baseline": "current production dispatch",
@@ -1731,9 +1750,12 @@ def _run_shapes(
                 "seqlen": sh.seqlen,
                 "hkv": sh.hkv,
                 "A_original_kernel": EXPECTED_A_KERNEL[key],
+                "A_current_expected_kernel": CURRENT_EXPECTED_A_KERNEL[key],
                 "A_compiled_kernel": r["A_kernel"],
                 "A_kernel_name_matches_original": r["A_kernel"]
                 == EXPECTED_A_KERNEL[key],
+                "A_kernel_name_matches_current_expected": r["A_kernel"]
+                == CURRENT_EXPECTED_A_KERNEL[key],
                 "B7_kernel": r["pipeline_pad_dsplit_kernel"],
                 "A_median_ms": r["A_median_ms"],
                 "B7_median_ms": r["pipeline_pad_dsplit_median_ms"],
@@ -1750,8 +1772,10 @@ def _run_shapes(
         "seqlen",
         "hkv",
         "A_original_kernel",
+        "A_current_expected_kernel",
         "A_compiled_kernel",
         "A_kernel_name_matches_original",
+        "A_kernel_name_matches_current_expected",
         "B7_kernel",
         "A_median_ms",
         "B7_median_ms",
@@ -1807,6 +1831,9 @@ def _run_shapes(
         "A_config_matches_newer_seven_winner_report": True,
         "no_A_comparison_for_shapes_without_step0_winner": True,
         "A_expected_kernels": {str(k): v for k, v in EXPECTED_A_KERNEL.items()},
+        "A_current_expected_kernels": {
+            str(k): v for k, v in CURRENT_EXPECTED_A_KERNEL.items()
+        },
         "B_stages_derive_only_from_production": True,
         "stage_descriptions": STAGE_DESCRIPTIONS,
         "stage_overrides": STAGE_OVERRIDES,
