@@ -386,6 +386,8 @@ static const struct
     {"tf32", "i32x"},
     {"i16", "i16x"},
     {"i8", "i8x"},
+    {"u8", "u8x"},
+    {"i64", "i64x"},
     {"fp8e4m3", "i8x"},
     {"bf8e5m2", "i8x"},
 };

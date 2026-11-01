@@ -289,8 +289,7 @@ def test_lowerings_refuse_a_signed_op_on_u8(op_name):
     # The builders refuse the op on u8, so the kernel is built on i8 and its
     # serialized text retyped to u8: IR that did not come through a builder,
     # which each lowering must refuse with the builders' text under the op's
-    # name. HIP has no u8 vector type, so the HIP lowerings refuse a u8 vector
-    # before they reach a vector op.
+    # name.
     build, instead = _SIGNED_OPS[op_name]
     b = IRBuilder("signed_op")
     build(b, b.param("X", I8))
@@ -300,12 +299,7 @@ def test_lowerings_refuse_a_signed_op_on_u8(op_name):
     if instead is not None:
         message += f" -- use {instead}"
     assert_both_engines_reject(kernel, "gfx90a", TypeError, message)
-    if op_name.startswith("vector."):
-        assert_both_engines_reject_hip(
-            kernel, "gfx90a", NotImplementedError, "no HIP mapping for type vec<u8x4>"
-        )
-    else:
-        assert_both_engines_reject_hip(kernel, "gfx90a", TypeError, message)
+    assert_both_engines_reject_hip(kernel, "gfx90a", TypeError, message)
 
 
 def test_lowerings_refuse_uitofp_of_a_non_u8_source():
