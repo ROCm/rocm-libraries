@@ -353,7 +353,7 @@ class KernelIdentity:
     fb_skip_empty: bool = False
     # fwd only (ImplicitGemmConvSpec.pp_end_guard). Left out of the hash while False.
     pp_end_guard: bool = False
-    # fwd only (ImplicitGemmConvSpec.epi_lds_barriers). Left out of the hash while False.
+    # fwd and dgrad (ImplicitGemmConvSpec.epi_lds_barriers, DgradConvSpec.epi_lds_barriers). Left out of the hash while False.
     epi_lds_barriers: bool = False
     # fwd only (ImplicitGemmConvSpec.split_hybrid). Left out of the hash at 0.
     split_hybrid: int = 0
@@ -373,6 +373,12 @@ class KernelIdentity:
     fxh_dma: int = 0
     # fwd only (ImplicitGemmConvSpec.xh_yring). Left out of the hash at 0.
     xh_yring: int = 0
+    # dgrad only (DgradConvSpec.xh_dlds). Left out of the hash at 0.
+    xh_dlds: int = 0
+    # dgrad only (DgradConvSpec.xh_epi_lin). Left out of the hash while False.
+    xh_epi_lin: bool = False
+    # dgrad only (DgradConvSpec.xh_tap_rsrc). Left out of the hash while False.
+    xh_tap_rsrc: bool = False
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
     # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
@@ -599,7 +605,7 @@ class KernelIdentity:
             "epi_store_fast", "split_zero_first", "pp_fetch_deep",
             "pp_split_fetch", "fb_skip_empty", "pp_end_guard",
             "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact",
-            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring",
+            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring", "xh_dlds", "xh_epi_lin", "xh_tap_rsrc",
         ):
             if not fields[name]:
                 del fields[name]
@@ -1137,6 +1143,18 @@ def identity_supports_problem(
             return False, "tapk_xhalo serves pW == 0 only"
         if identity.tapk_pp_xhalo and int(getattr(problem, "pW", 0)) != 0:
             return False, "tapk_pp_xhalo serves pW == 0 only"
+        if getattr(identity, "xh_tap_rsrc", False):
+            # xh_tap_rsrc marks an out-of-range dY row with offset bit 30 (in
+            # elements): dY (bounded by the padded input extents) < 2^30.
+            def _e(a, p_):
+                return int(getattr(problem, a, 1) or 1) + 2 * int(getattr(problem, p_, 0) or 0)
+
+            dy_bound = (
+                int(getattr(problem, "N", 1) or 1) * _e("Di", "pD") * _e("Hi", "pH")
+                * _e("Wi", "pW") * int(getattr(problem, "K", 1) or 1)
+            )
+            if dy_bound >= (1 << 30):
+                return False, "xh_tap_rsrc serves dY below 2^30 elements"
         if identity.tapk_pp_xhalo >= 2 and int(getattr(problem, "Wi", 0)) < 32:
             # The gapped halo tile is sized for W rows of >= 32 pixels
             # (conv_implicit_gemm_dgrad.PP_XHALO_GAP_MIN_WI).

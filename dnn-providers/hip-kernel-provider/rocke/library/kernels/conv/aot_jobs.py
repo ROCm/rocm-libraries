@@ -293,7 +293,7 @@ CACHE_DGRAD_B_KPACK: Tuple[int, ...] = tuple(
 # "@<regex>" gives its set its own scope (see ROCKE_AOT_DGRAD_XHK_SCOPE). An
 # empty set is the plain binary; unset = that alone.
 def _parse_dgrad_xh_knobs(text: str) -> Tuple[Tuple[Tuple[str, int], ...], ...]:
-    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad", "ak4", "xo", "xdf", "xfa", "xep", "xhp", "mb", "xsm", "nag", "zt"}
+    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad", "ak4", "xo", "xdf", "xfa", "xep", "xhp", "mb", "xsm", "nag", "xdl", "xel", "elb", "xtr", "zt"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -381,6 +381,14 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
         cfg["m_band"] = d["mb"]
     if d.get("xsm"):
         cfg["xh_stride_m"] = True
+    if d.get("xdl"):
+        cfg["xh_dlds"] = d["xdl"]
+    if d.get("xel"):
+        cfg["xh_epi_lin"] = True
+    if d.get("elb"):
+        cfg["epi_lds_barriers"] = True
+    if d.get("xtr"):
+        cfg["xh_tap_rsrc"] = True
     if d.get("zt"):
         cfg["tapk_ztrim"] = d["zt"]
     if d.get("nag"):
@@ -407,7 +415,7 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
 # ignored, so the plain grid never grows by accident). Unset = none.
 def _parse_dgrad_pp_knobs(text: str):
     keys = {"bpp", "pps", "ppe", "ppp", "ppx", "zt", "pbs", "xcd", "kpad", "lxor", "mch", "wpe", "sk", "sapl", "mb",
-            "psk", "pskm", "pzs", "pbx", "pbc", "pbo"}
+            "psk", "pskm", "pzs", "pbx", "pbc", "pbo", "xel", "elb"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -491,6 +499,11 @@ def _dgrad_pp_knob_cfg(knobs, *, epilogue: str):
         if not d.get("bpp"):
             return None
         cfg["pp_zskip"] = True
+    if d.get("xel"):
+        # Round 5: linear dX store offsets on the dense pp epilogue.
+        cfg["xh_epi_lin"] = True
+    if d.get("elb"):
+        cfg["epi_lds_barriers"] = True
     if d.get("psk"):
         # Stream-K persistent grid (DgradConvSpec.pp_streamk).
         if epilogue != "cshuffle" or not d.get("bpp"):
