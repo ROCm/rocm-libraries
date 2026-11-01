@@ -235,11 +235,12 @@ def test_gfx950_bottom_right_causal_is_admitted_on_the_grid_body():
     assert all("persist" not in n for n in names)
 
 
-def test_gfx942_bottom_right_causal_is_declined():
+def test_gfx942_bottom_right_causal_is_admitted():
+    """gfx942's dense candidate now serves a moving bottom-right diagonal (#14367)."""
     req = _dense_request(
         arch="gfx942", s_q=S, s_kv=2 * S, right_bound=0, diagonal="bottom_right"
     )
-    assert "causal_bottom_right" in _declined(req)
+    assert _admitted(req) == ("attention_gfx942_dense",)
 
 
 def test_gfx950_bottom_right_window_with_unequal_lengths_is_declined():
