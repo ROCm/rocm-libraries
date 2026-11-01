@@ -425,6 +425,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_compute.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_preprocess.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_history.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_async.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync_fusion.cpp
