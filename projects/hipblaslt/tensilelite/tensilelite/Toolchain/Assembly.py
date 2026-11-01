@@ -23,15 +23,18 @@
 ################################################################################
 
 import collections
+import functools
 import math
 import shutil
 import subprocess
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Union, NamedTuple
 
 from ..Common import ensurePath, print1, print2, printWarning
 from ..Common.GlobalParameters import globalParameters
+from ..Common.Parallel import CPUThreadCount
 from ..Common.Architectures import compilerTargetOf, isaToGfx
 from ..Common.Types import IsaVersion
 from ..CustomKernels import validateCustomKernelMetadata
@@ -84,6 +87,16 @@ def validateCustomKernelMetadataAtBuild(kernels, directory=None):
     return issues
 
 
+def _linkAndBundle(linker, bundler, compress, linkThreads, job):
+    """Links one code object, then bundles it or moves it into place."""
+    objFiles, coFileRaw, coFile, gfx = job
+    linker(objFiles, str(coFileRaw), threads=linkThreads)
+    if compress:
+        bundler.compress(str(coFileRaw), str(coFile), gfx)
+    else:
+        shutil.move(coFileRaw, coFile)
+
+
 def buildAssemblyCodeObjectFiles(
       linker: Linker,
       bundler: Bundler,
@@ -128,6 +141,7 @@ def buildAssemblyCodeObjectFiles(
       archKernelMap[tuple(representative(entry)['ISA'])].append(entry)
 
     coFiles = []
+    jobs = []
     for arch, archEntries in archKernelMap.items():
       if len(archEntries) == 0:
         continue
@@ -151,13 +165,24 @@ def buildAssemblyCodeObjectFiles(
             coFileMap[destination].add(objectFile)
 
       for coFileRaw, objFiles in coFileMap.items():
-        # Keep link order independent of record and alias ordering.
-        linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
-        if compress:
-          bundler.compress(str(coFileRaw), str(coFile), compilerTargetOf(name))
-        else:
-          shutil.move(coFileRaw, coFile)
+        # Keep link order independent of record and alias ordering.
+        jobs.append((sorted(objFiles), coFileRaw, coFile, compilerTargetOf(name)))
         coFiles.append(coFile)
+
+    # Each code object is an independent ld.lld + bundler subprocess pair, so
+    # run them concurrently; threads suffice since the work is in the children.
+    # ld.lld uses every hardware thread by default, so split the CPUs between
+    # the concurrent links instead, and start the largest links first so one
+    # of them doesn't finish last on its own.
+    cpus = CPUThreadCount()
+    workers = max(1, min(cpus, len(jobs)))
+    linkThreads = max(1, cpus // workers)
+    jobs.sort(key=lambda job: len(job[0]), reverse=True)
+
+    linkAndBundle = functools.partial(_linkAndBundle, linker, bundler, compress, linkThreads)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+      for _ in executor.map(linkAndBundle, jobs):
+        pass
 
     return coFiles

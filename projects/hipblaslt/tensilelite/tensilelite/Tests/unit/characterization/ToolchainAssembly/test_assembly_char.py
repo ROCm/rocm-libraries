@@ -23,7 +23,7 @@ class _StubLinker:
         self.calls = []
         self.input_types = []
 
-    def __call__(self, objFiles, coFileRaw):
+    def __call__(self, objFiles, coFileRaw, threads=None):
         self.input_types.append(type(objFiles))
         self.calls.append((list(objFiles), coFileRaw))
         Path(coFileRaw).write_text("raw")  # create the raw file for the move path
