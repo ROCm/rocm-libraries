@@ -16,15 +16,30 @@
  *
  * Exit 0 = all pass. Prints a per-config verdict.
  */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/abi.h"
 #include "rocke/instance_gemm_universal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
+
+/* Layout canary (as for rocke_mma_op_t in test_mma_catalog_lookup.cpp): the GEMM
+ * spec structs are passed by value and by pointer across the C API, so growing
+ * or reordering them must move ROCKE_ABI_VERSION. Editing either struct fails
+ * the build here; the fix is to bump ROCKE_ABI_VERSION in rocke/abi.h and update
+ * these numbers in the same change. 64-bit only, where the pointer width that
+ * is part of the layout is known. */
+#if INTPTR_MAX == INT64_MAX
+static_assert(sizeof(rocke_gemm_trait_spec_t) == 296 && sizeof(rocke_gemm_universal_spec_t) == 432
+                  && ROCKE_ABI_VERSION >= 7,
+              "a GEMM spec struct changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
+              "update this pin");
+#endif
 
 static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
 {

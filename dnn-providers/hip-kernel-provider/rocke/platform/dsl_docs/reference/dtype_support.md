@@ -385,24 +385,32 @@ mode. The missing selector and precision contract are described in §2.5.
   the mode is exposed; see [§1](#1-the-canonical-dtype-set).
 - **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected by the
   MIOpen provider, and not requested by any family.
-- **`f64` — IR, memory, elementwise/reduce2d, the gfx942 MFMA atoms, and gfx942
-  universal GEMM.** The IR type,
-  `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fabs`/`fmax`/`fmin`/
-  `fcmp`/`select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS
-  memory up to 2-element vectors, and HIP lowering are present. Elementwise
-  (non-transcendental ops) and reduce2d accept f64 with `vec=2`
+- **`f64` — IR, memory, math, elementwise/reduce2d, the f64 MFMA atoms, the
+  GETT family and gfx942 universal GEMM.** The IR type, `const_f64`, f64
+  `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fabs`/`fmax`/`fmin`/`fcmp`/`select` and
+  `vector_add`/`vector_sub`/`vector_mul`, global/LDS memory up to 2-element
+  vectors, f64 kernel scalars (`f64` signature entries), and HIP lowering are
+  present. `fma`, `vector_fma` (`llvm.fma`, always fused), `fmax3` / `fmin3`,
+  `sqrt`, `rsqrt` (IEEE `1 / sqrt`), `rcp` and the transcendentals `exp`,
+  `exp2`, `log`, `log2`, `tanh` compute in f64 in both lowerings: the
+  transcendentals expand to the fixed instruction programs of
+  `rocke/core/f64_math.py` (no libcall, within 1 ulp; `sqrt` correctly
+  rounded; the C++ engine reads the same programs from
+  `cpp/core/lower_llvm/f64_math_programs.inc`), HIP uses the double-precision
+  device library. `rcp_fast` and `exp2_fast` (single-instruction
+  approximations) reject f64. Elementwise accepts f64 with `vec=2` for every op
+  except the f32-constant activations, and reduce2d accepts f64 with `vec=2`
   ([SUPPORT_MATRIX](../../python/rocke/instances/SUPPORT_MATRIX.md)).
-  `exp2`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `fma`, `fmax3`, `fmin3`, and
-  `vector_fma` reject f64 in both lowerings. `exp2_fast` rejects f64 in the
-  LLVM lowering and has no HIP lowering for any dtype. `tanh` accepts only
-  f32: the builder rejects any other operand type. `cvt_f32_to_f64` (exact)
-  and `cvt_f64_to_f32` (round to nearest even) are the only conversions;
-  `cast_to_f32` / `cast_f32_to` refuse f64, and there are no direct f16/bf16
-  conversions or atomics. f64 is in the
-  hipDNN enum (`DOUBLE`) but rejected by the MIOpen provider.
-  gfx942 declares `mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; universal
-  GEMM and its batched/grouped wrappers select `mfma_f64_16x16x4_f64` with fp64
-  accumulation (§5), and gfx90a/gfx950 declare no f64 atom (§4C.6).
+  `cvt_f32_to_f64` (exact) and `cvt_f64_to_f32` (round to nearest even) are
+  the only conversions; `cast_to_f32` / `cast_f32_to` refuse f64, and there
+  are no direct f16/bf16 conversions or atomics. f64 is in the hipDNN enum
+  (`DOUBLE`) but rejected by the MIOpen provider. gfx90a, gfx942 and gfx950
+  declare `mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; the
+  [f64 GETT family](../instances/gett_f64.md) (strided GEMM and tensor
+  contraction, real and interleaved complex) uses the 16x16x4 atom (§4C.6);
+  its f32 form uses gfx942 / gfx950's `mfma_f32_16x16x4_f32`. On gfx942,
+  universal GEMM and its batched/grouped wrappers select
+  `mfma_f64_16x16x4_f64` with fp64 accumulation (§5).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
   `gfx1251-gemm-insts` (§4A).
 
@@ -506,9 +514,9 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 
 | Arch | Declared matrix atoms | dtypes reachable |
 |---|---|---|
-| `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` | f16, bf16 |
+| `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` + `mfma_f64_{16x16x4,4x4x4}_f64` | f16, bf16, **f64** |
 | `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, **f64** |
-| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
+| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, **fp4, fp6**, f64 |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **i8, i4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4 |
@@ -559,10 +567,9 @@ Structured sparsity is available on gfx942, gfx950, gfx1201 and gfx1250. The
 catalog declares no sparse atom on any arch, and no family requests one. No dtype
 in §2.4 is blocked on it.
 
-#### 4C.6 f64 matrix is in silicon but mostly undeclared
-`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. gfx942 declares
-`mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; gfx90a and gfx950 declare no
-f64 MMA atom.
+#### 4C.6 f64 matrix
+`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950, and all three declare
+`mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64` with the same lane layouts.
 gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 
 ### 4D. XF32 / TF32 across the arch set

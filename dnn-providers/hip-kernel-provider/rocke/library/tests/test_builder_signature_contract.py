@@ -287,6 +287,59 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_segments",
     ),
     "kernels.gfx950.gdn_decode.GdnDecodeSpec": (),
+    "kernels.gfx950.gemm_rich_epilogue.epilogue.EpiKnobs": (),
+    "kernels.gfx950.gemm_rich_epilogue.epilogue.RichEpilogueSpec": (),
+    # hipTensor monokernels (experimental): the plan / problem is the shape;
+    # every knob is defaulted.
+    "kernels.gfx950.hiptensor_mono.contraction_plan.ContractionPlan": (
+        "K",
+        "M",
+        "N",
+        "dcol",
+        "drow",
+        "ext",
+        "k_order",
+        "m_order",
+        "modes_a",
+        "modes_b",
+        "modes_d",
+        "n_order",
+        "ops",
+        "swapped",
+        "vec_d",
+    ),
+    "kernels.gfx950.hiptensor_mono.permute_gather.PermuteGatherSpec": ("permute",),
+    # hipTensor's tuned reduction classes: the class identity (mode, data types, operator)
+    "kernels.common.hiptensor_aot.rreduce.RreduceSpec": ("a", "d", "mode", "op"),
+    "kernels.common.hiptensor_aot.rreduce.RreduceFinalSpec": ("a", "d", "op"),
+    # hipTensor's tuned tiled elementwise classes: the arity and the data types of A and D
+    "kernels.common.hiptensor_aot.ewp.EwpSpec": ("a", "arity", "d"),
+    # hipTensor's shape-generic kernels: the row (arity, data types of A and D; reductions: the
+    # mode, direct GETT: the compute class); the problem itself is kernel arguments. The JIT
+    # classes wrap a generic row (`base`) and carry a problem's geometry in the defaulted `geom`;
+    # the ring GETT classes default every field (f16, scale, the pack's lane widths).
+    "kernels.common.hiptensor_aot.dgett.DgettSpec": ("comp",),
+    "kernels.common.hiptensor_aot.ew.EwSpec": ("a", "arity", "d"),
+    "kernels.common.hiptensor_aot.ewf.EwfSpec": ("a", "arity", "d"),
+    "kernels.common.hiptensor_aot.ewt.EwtSpec": ("a", "arity", "d"),
+    "kernels.common.hiptensor_aot.jit_ew.EwJitSpec": ("base",),
+    "kernels.common.hiptensor_aot.reduce.ReduceSpec": ("a", "d", "mode"),
+    "kernels.common.hiptensor_aot.rgett.RgettSpec": (),
+    "kernels.gfx950.hiptensor_mono.persistent_contraction.OperandPackSpec": ("plan",),
+    "kernels.gfx950.hiptensor_mono.persistent_contraction.PersistentContractionKnobs": (),
+    "kernels.gfx950.hiptensor_mono.persistent_contraction.PersistentContractionSpec": (
+        "plan",
+    ),
+    "kernels.gfx950.hiptensor_mono.task_queue.QueueKnobs": (),
+    "kernels.gfx950.hiptensor_mono.task_queue.QueuePlan": (
+        "block_size",
+        "name",
+        "ops",
+        "tensors",
+    ),
+    "kernels.gfx950.hiptensor_mono.task_queue.TaskQueueSpec": ("plan",),
+    "kernels.gfx950.hiptensor_mono.transpose_lds.TransposeLdsSpec": ("cols", "rows"),
+    "kernels.gfx950.tensor_network_mono.circuit_kernel.CircuitSpec": ("n", "phases"),
     # gfx950's KDA specs carry extra fusion / split knobs over gfx942's, all
     # defaulted, so the required set is empty on this arch too.
     "kernels.gfx950.kda_chunkwise.KdaChunkFusedSpec": (),
@@ -296,6 +349,8 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.mla.mla_prefill_gfx942.MlaPrefillSpec": ("num_heads",),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
+    # Reached through PermuteGatherSpec.permute (the permute_nd problem).
+    "rocke.instances.common.permute_nd.PermuteSpec": ("perm", "x_shape"),
     # Convolution specs (migrated from platform to library in AICK-5627).
     # Required fields are the problem shape; everything else carries a default.
     "kernels.common._conv_implicit_gemm_common.ConvProblem": (

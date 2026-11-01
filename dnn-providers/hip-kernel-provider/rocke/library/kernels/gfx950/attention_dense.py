@@ -210,6 +210,13 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # into this many contiguous chunks, one CTA each, merged by a combine kernel
     # (see kernels.common.attention_dense_kv_split). 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
+    # Back-to-back GEMM instead of attention: the score map is the identity,
+    # P = scale * S (no running max, no exp, no 1/l), so the kernel computes
+    # E = scale * (Q K^T) V with the [Sq, Sk] intermediate kept in registers
+    # (rounded once to the storage type for the PV MFMA, as a 2-GEMM composition
+    # rounds its stored intermediate). A problem field (it changes the math and
+    # the symbol: ``_b2b``); False keeps every existing kernel byte-identical.
+    score_identity: bool = field(default=False, kw_only=True)
 
     def _supports_noncausal_window(self) -> bool:
         return True
@@ -315,6 +322,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
+        self._validate_score_identity()
         if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
@@ -371,6 +379,40 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 raise ValueError(
                     "wide_lds_dma requires K/V slab padding of 8/32 elements"
                 )
+
+    def _validate_score_identity(self) -> None:
+        """Reject, never coerce: ``score_identity`` changes the math and the
+        symbol, so a non-bool (``"false"`` is truthy) or a mode whose softmax
+        machinery the identity map would silently skip is an error."""
+        if type(self.score_identity) is not bool:
+            raise ValueError(
+                "score_identity must be a bool, got "
+                f"{type(self.score_identity).__name__}"
+            )
+        if not self.score_identity:
+            return
+        # each of these reads the running max / row sum / exp (LSE, sinks, the
+        # KV-split combine, lazy rescale), lives only on the persistent body, or
+        # masks scores with the -2**99 sentinel, which the identity map would
+        # turn into a huge P instead of 0 (causal, window, ragged, varlen, paged)
+        bad = [
+            name
+            for name, on in (
+                ("lazy_rescale", self.lazy_rescale),
+                ("emit_lse", self.emit_lse),
+                ("causal", self.causal),
+                ("sliding_window", self.sliding_window > 0),
+                ("ragged", self.ragged),
+                ("varlen", self.varlen),
+                ("paged", self.paged),
+                ("use_sinks", self.use_sinks),
+                ("persistent", self.persistent),
+                ("kv_segments", self.kv_segments != 1),
+            )
+            if on
+        ]
+        if bad:
+            raise ValueError(f"score_identity is not supported with {', '.join(bad)}")
 
     def _validate_codegen_knobs(self) -> None:
         if self.lds_k_row_pad < 0 or self.lds_k_row_pad % 8 != 0:
@@ -507,6 +549,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             parts.append("lse")
         if self.kv_segments != 1:
             parts.append(f"kvs{self.kv_segments}")
+        if self.score_identity:
+            parts.append("b2b")
         return tuple(parts)
 
     def _codegen_name_part(self) -> str:
@@ -788,6 +832,9 @@ def build_attention_dense(
     RAGGED = spec.ragged
     LAZY_RESCALE = spec.lazy_rescale
     LAZY_THRESHOLD = float(spec.lazy_rescale_threshold)
+    # back-to-back GEMM (``spec.score_identity``, validated by the spec): the
+    # score map is the identity, P = scale * S
+    _IDENT = spec.score_identity
     use_sinks = spec.use_sinks
 
     K_STEPS = D // 16
@@ -1244,7 +1291,15 @@ def build_attention_dense(
                     b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
                 )
 
+    def _pmap(sv, neg_m):
+        """Score -> P: exp2(s * qk_scale - m) (softmax) or scale * s (score_identity)."""
+        if _IDENT:
+            return b.fmul(sv, scale)
+        return _exp2(b.fma(sv, qk_scale, neg_m))
+
     def softmax_max(s_reg, m_i):
+        if _IDENT:
+            return m_i, b.const_f32(1.0), None
         local_max = neg_inf
         for nsub in range(N_SUB):
             for i in range(16):
@@ -1338,7 +1393,7 @@ def build_attention_dense(
                 if slot is None:
                     break
                 nsub, i = slot
-                p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
+                p_vals[nsub][i] = _pmap(s_reg[nsub][i], neg_m)
                 n_emit += 1
             if SCHED_GROUP:
                 b.sched_group_barrier(DS_READ, SCHED_GROUP_DS_READ, 0)
@@ -1347,7 +1402,7 @@ def build_attention_dense(
                 b.sched_group_barrier(TRANS, max(1, n_emit), 0)
         for slot in it:
             nsub, i = slot
-            p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
+            p_vals[nsub][i] = _pmap(s_reg[nsub][i], neg_m)
         l_local = b.const_f32(0.0)
         for nsub in range(N_SUB):
             for i in range(16):
@@ -1436,10 +1491,7 @@ def build_attention_dense(
     m0, alpha0, _skip0 = softmax_max(s0, m_init)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
     neg_m0 = b.fneg(m0)  # same unbounded-score limitation; see _MAX_SCALE
-    p0_vals = [
-        [_exp2(b.fma(s0[nsub][i], qk_scale, neg_m0)) for i in range(16)]
-        for nsub in range(N_SUB)
-    ]
+    p0_vals = [[_pmap(s0[nsub][i], neg_m0) for i in range(16)] for nsub in range(N_SUB)]
     l0_local = b.const_f32(0.0)
     for nsub in range(N_SUB):
         for i in range(16):
@@ -1657,7 +1709,9 @@ def build_attention_dense(
         return b.kernel
 
     # Epilogue: O = (P@V) / l, vectorized bf16 store.
-    if spec.emit_lse:
+    if _IDENT:
+        rcp_l = b.const_f32(1.0)
+    elif spec.emit_lse:
         positive_l = b.fcmp("ogt", l_i, b.const_f32(0.0))
         rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
     else:

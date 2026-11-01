@@ -3,7 +3,7 @@
 """Declared-coverage invariants applied to every platform registry.
 
 The same checks the GEMM family gets in ``dispatch_tests/gemm/test_capability.py``,
-run here across conv, moe, and norm so a new family inherits them by being
+run here across conv, moe, norm and the contraction families so a new family inherits them by being
 listed once. Each family supplies a request generator wide enough that every
 registered candidate is reachable somewhere in it; without that, the
 reachability check below would pass vacuously.
@@ -14,8 +14,15 @@ from __future__ import annotations
 import unittest
 
 from rocke.core.arch import ArchTarget, known_arches
+from rocke.dispatch.families.gett_f64 import GETT_F64_REGISTRY, GettF64Request
 from rocke.dispatch.families.moe import MOE_REGISTRY, MoeRequest
 from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest
+from rocke.dispatch.families.tensor_gett import (
+    TENSOR_GETT_REGISTRY,
+    TensorGettRequest,
+)
+from rocke.instances.common.gett_f64 import gemm_problem
+from rocke.instances.common.tensor import GettKnobs, TensorGettSpec
 
 
 def _moe_requests(arch: str):
@@ -43,9 +50,83 @@ def _norm_requests(arch: str):
                 )
 
 
+def _gett_f64_requests(arch: str):
+    # The shape classes need the part's CU count (no per-arch default).
+    num_cus = {"gfx90a": 104, "gfx942": 304, "gfx950": 256}.get(arch, 256)
+    for cx in (False, True):
+        for n in (256, 2048, 8192):
+            for runtime_sizes in (False, True):
+                yield GettF64Request(
+                    problem=gemm_problem(
+                        n,
+                        n,
+                        512,
+                        a_strides=(512, 1),
+                        b_strides=(512, 1),
+                        d_strides=(n, 1),
+                        complex_=cx,
+                    ),
+                    arch=arch,
+                    num_cus=num_cus,
+                    runtime_sizes=runtime_sizes,
+                )
+
+
+def _tensor_gett_requests(arch: str):
+    # a permuted contraction (D modes interleaved from both operands)
+    ext = {"K0": 8, "K1": 8, "M0": 16, "M1": 32, "N0": 16, "N1": 24}
+    for dtype in ("fp16", "bf16"):
+        for bilinear in (False, True):
+            yield TensorGettRequest(
+                problem=TensorGettSpec.make(
+                    ["K1", "M1", "K0", "M0"],
+                    ["K1", "N1", "K0", "N0"],
+                    ["N1", "M1", "N0", "M0"],
+                    ext,
+                    dtype=dtype,
+                    knobs=GettKnobs(bilinear=bilinear),
+                ),
+                arch=arch,
+            )
+    # a canonical-D contraction big enough for the K-contiguous route (the
+    # GEMM dispatcher's RCR pick there is a vector-epilogue body)
+    ext2 = {"K0": 16, "K1": 12, "K2": 8, "M0": 32, "M1": 16, "M2": 16}
+    ext2.update({"N0": 16, "N1": 16, "N2": 16})
+    for dtype in ("fp16", "bf16"):
+        yield TensorGettRequest(
+            problem=TensorGettSpec.make(
+                ["K2", "M2", "K1", "M1", "K0", "M0"],
+                ["K2", "N2", "K1", "N1", "K0", "N0"],
+                ["N2", "N1", "N0", "M2", "M1", "M0"],
+                ext2,
+                dtype=dtype,
+            ),
+            arch=arch,
+        )
+    # the same contraction with both operands already packed K-contiguous (free modes, then
+    # the K modes; every tensor packed): the single-launch K-contiguous GETT (tensor_gett_kc)
+    # serves it on the user tensors (its candidate admits only operands that already are the
+    # copies it reads; the others take the packed K-contiguous route of plan_tensor_gett)
+    for dtype in ("fp16", "bf16"):
+        for bilinear in (False, True):
+            yield TensorGettRequest(
+                problem=TensorGettSpec.make(
+                    ["M2", "M1", "M0", "K2", "K1", "K0"],
+                    ["N2", "N1", "N0", "K2", "K1", "K0"],
+                    ["N2", "N1", "N0", "M2", "M1", "M0"],
+                    ext2,
+                    dtype=dtype,
+                    knobs=GettKnobs(bilinear=bilinear),
+                ),
+                arch=arch,
+            )
+
+
 _FAMILIES = (
     (MOE_REGISTRY, _moe_requests),
     (NORM_REGISTRY, _norm_requests),
+    (GETT_F64_REGISTRY, _gett_f64_requests),
+    (TENSOR_GETT_REGISTRY, _tensor_gett_requests),
 )
 
 # Candidates that legitimately span both wave sizes. Norm kernels derive

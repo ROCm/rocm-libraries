@@ -168,7 +168,7 @@ class TestHipArchSeamValidation(unittest.TestCase):
 
 
 class TestHipF64Rejection(unittest.TestCase):
-    """f64 ops without an f64 lowering fail explicitly in both lowerers."""
+    """f64 ops lower in double; those without an f64 form fail explicitly."""
 
     def _kernel(self, op_name):
         b = IRBuilder(f"{op_name}_f64")
@@ -184,33 +184,41 @@ class TestHipF64Rejection(unittest.TestCase):
         b.ret()
         return b.kernel
 
-    # Each op's exact rejection message: (HIP lowerer, LLVM lowerer).
+    # Each op's exact rejection message: (HIP lowerer, LLVM lowerer). The
+    # single-instruction approximations have no f64 form.
     _REJECTIONS: ClassVar[dict[str, tuple[str, str]]] = {
-        "exp2": ("math.exp2 does not support f64", "math.exp2 currently supports f32"),
-        "log2": ("math.log2 does not support f64", "math.log2 currently supports f32"),
-        "sqrt": ("math.sqrt does not support f64", "math.sqrt currently supports f32"),
-        "rsqrt": (
-            "math.rsqrt does not support f64",
-            "math.rsqrt currently supports f32",
-        ),
         "rcp_fast": (
             "math.rcp_fast does not support f64",
             "math.rcp_fast currently supports f32",
         ),
-        "fma": ("arith.fma does not support f64", "fma: unsupported FP type 'f64'"),
-        "fmax3": (
-            "arith.fmax3 does not support f64",
-            "fmax3: unsupported FP type 'f64'",
-        ),
-        "fmin3": (
-            "arith.fmin3 does not support f64",
-            "fmin3: unsupported FP type 'f64'",
-        ),
+    }
+
+    # Ops that compute in f64: (a declaration the LLVM module must carry, the
+    # HIP double-precision spelling).
+    _F64_LOWERED: ClassVar[dict[str, tuple[str, str]]] = {
+        "exp2": ("declare double @llvm.ldexp.f64.i32(double, i32)", "= exp2("),
+        "log2": ("declare { double, i32 } @llvm.frexp.f64.i32(double)", "= log2("),
+        "sqrt": ("declare double @llvm.sqrt.f64(double)", "= sqrt("),
+        "rsqrt": ("declare double @llvm.sqrt.f64(double)", "= 1.0 / sqrt("),
+        "fma": ("declare double @llvm.fma.f64(double, double, double)", "= fma("),
+        "fmax3": ("declare double @llvm.maxnum.f64(double, double)", " > "),
+        "fmin3": ("declare double @llvm.minnum.f64(double, double)", " < "),
         "vector_fma": (
-            "vector.fma does not support f64",
-            "vector_fma: unsupported element type 'f64'",
+            "declare <2 x double> @llvm.fma.v2f64(<2 x double>, <2 x double>, <2 x double>)",
+            "] = fma(",
         ),
     }
+
+    def test_f64_ops_lower_in_double(self):
+        for op_name, (decl, hip_form) in self._F64_LOWERED.items():
+            with self.subTest(op=op_name):
+                kernel = self._kernel(op_name)
+                ll = lower_kernel_to_llvm(kernel, arch="gfx942")
+                self.assertIn(decl, ll)
+                self.assertNotIn(" float ", ll.split("define")[1])
+                hip = lower_kernel_to_hip(kernel, arch="gfx942")
+                self.assertIn(hip_form, hip)
+                self.assertNotIn("(float)", hip)
 
     def test_unsupported_ops_raise(self):
         # The whole message is pinned, not just the exception type, so a

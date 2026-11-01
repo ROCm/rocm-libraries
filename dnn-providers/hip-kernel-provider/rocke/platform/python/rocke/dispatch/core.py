@@ -514,6 +514,15 @@ class KernelCandidate:
     sampled sweep falls back to the full ``sweep_space``.
     """
 
+    search_space: Callable[[OperatorRequest], tuple[Any, Any]] | None = None
+    """``search_space(request) -> (knob_space, base)``, or ``None``; optional.
+
+    The tuning space a search engine (:mod:`rocke.dispatch.tuning.search`)
+    walks for this request: the variant's ``KnobSpace`` and the base it builds
+    from. Raises ``ValueError`` when the candidate does not admit the request.
+    Tuned candidates made by ``make_tuned_candidate`` provide it.
+    """
+
     def built(self, spec: Any, arch: str) -> Any:
         """Build this candidate's IR for ``spec`` on ``arch``."""
         if self.build is None:

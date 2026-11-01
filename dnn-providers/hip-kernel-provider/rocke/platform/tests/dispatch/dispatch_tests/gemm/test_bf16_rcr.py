@@ -11,8 +11,8 @@ from rocke.dispatch.gemm import gemm_bf16_candidates
 from rocke.dispatch.gemm.bf16_rcr import build_kernel
 
 
-def _bf16(M, N, K, arch):
-    return GemmRequest(M=M, N=N, K=K, arch=arch, dtype="bf16")
+def _bf16(M, N, K, arch, **kw):
+    return GemmRequest(M=M, N=N, K=K, arch=arch, dtype="bf16", **kw)
 
 
 _EXPECTED_BF16_PTRS = {
@@ -28,7 +28,14 @@ class TestBf16RcrDispatch(unittest.TestCase):
             dispatch_gemm_bf16(GemmRequest(M=128, N=128, K=32, arch="gfx950"))  # fp16
 
     def test_cdna_cshuffle_selected_when_tile_divides(self):
-        r = dispatch_gemm_bf16(_bf16(256, 256, 256, "gfx950"))
+        from unittest import mock
+
+        from rocke.dispatch.gemm import skinny as _SK
+
+        with mock.patch.object(_SK, "RING_ANY", False):
+            r = dispatch_gemm_bf16(
+                _bf16(256, 256, 256, "gfx950", algorithm="universal_gemm")
+            )
         self.assertEqual(r.candidate.spec_id, "cdna_cshuffle_default")
         self.assertEqual((r.spec.tile.tile_m, r.spec.tile.tile_n), (128, 128))
         # bf16 CDNA has no 32x32 atom -> 16x16x16 warp tile, 4x4 warp grid.
@@ -37,7 +44,14 @@ class TestBf16RcrDispatch(unittest.TestCase):
 
     def test_cdna_mem_selected_when_cshuffle_does_not_divide(self):
         # Same divergence shape the arch-family gate fix covers, for bf16.
-        r = dispatch_gemm_bf16(_bf16(64, 128, 32, "gfx950"))
+        from unittest import mock
+
+        from rocke.dispatch.gemm import skinny as _SK
+
+        with mock.patch.object(_SK, "RING_ANY", False):
+            r = dispatch_gemm_bf16(
+                _bf16(64, 128, 32, "gfx950", algorithm="universal_gemm")
+            )
         self.assertEqual(r.candidate.spec_id, "cdna_mem_64x128")
         self.assertNotIn("rdna", r.candidate.name)
 

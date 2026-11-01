@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <string>
+
 #include <hip/hip_runtime_api.h>
 
 #include "hiptensor/hiptensor_types.hpp"
@@ -70,6 +72,20 @@ namespace hiptensor
         hipDevice_t  getDeviceId() const;
         hipGcnArch_t getGcnArch() const;
 
+        // Full architecture name of the device, with its target features
+        // (e.g. "gfx942:sramecc+:xnack-"). Empty if the device query failed.
+        std::string getArchName() const;
+
+        int getCuCount() const;
+
+        // Result of querying the current device. Anything other than hipSuccess (e.g. no
+        // visible device) leaves the architecture and the warp size unsupported.
+        hipError_t queryStatus() const;
+
+        // True when the device query succeeded and both the architecture and the warp size
+        // are supported.
+        bool isSupported() const;
+
         int warpSize() const;
 
         bool supportsF64() const;
@@ -85,6 +101,7 @@ namespace hiptensor
         int             mSharedMemSize;
         int             mCuCount;
         int             mMaxFreqMhz;
+        hipError_t      mQueryStatus;
     };
 
 } // namespace hiptensor

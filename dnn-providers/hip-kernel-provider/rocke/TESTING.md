@@ -645,10 +645,13 @@ provider and TheRock's categorization script determine tier membership. A
 passing command that selected zero tests is not validation. In particular,
 check that `rocke_pytest` is selected when it is part of the intended coverage.
 
-That entry runs from `build/bin/hip_kernel_provider`, with `PYTHONPATH=.`:
+The platform test tree runs as four entries from `build/bin/hip_kernel_provider`, with
+`PYTHONPATH=.` and the same environment: `rocke_dispatch_pytest`, `rocke_instances_pytest`
+and `rocke_numeric_pytest` run `./tests/dispatch`, `./tests/instances` and
+`./tests/numeric`, and `rocke_pytest` runs the rest:
 
 ```text
-python -m pytest ./tests --ignore ./tests/library -v -rs --timeout=60
+python -m pytest ./tests --ignore ./tests/library --ignore ./tests/dispatch --ignore ./tests/instances --ignore ./tests/numeric -m "not integration" -v -rs --timeout=60
 ```
 
 Use a clean runtime environment with no editable source installs, no binding

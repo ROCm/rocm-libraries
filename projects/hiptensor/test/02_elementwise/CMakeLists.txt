@@ -55,6 +55,18 @@ add_hiptensor_unit_test(elementwise_output_strides_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_output_strides_test.cpp)
 
+add_hiptensor_unit_test(elementwise_scalar_op_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_scalar_op_test.cpp)
+
+add_hiptensor_unit_test(elementwise_zero_scale_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_zero_scale_test.cpp)
+
+add_hiptensor_unit_test(elementwise_f64_unary_op_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_f64_unary_op_test.cpp)
+
 # Rank 2 tests
 set (PermutationRank2TestSources ${PermutationCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank2_elementwise_permute_test.cpp)

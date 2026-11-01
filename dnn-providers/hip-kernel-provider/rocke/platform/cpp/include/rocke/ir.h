@@ -490,6 +490,11 @@ typedef enum rocke_opcode
      * shifts. */
     ROCKE_OP_TILE_TRAP,
 
+    /* math.exp / math.log, natural base (f32 and f64). Appended after
+     * the ragged tile access ops so no earlier opcode value changes. */
+    ROCKE_OP_MATH_EXP,
+    ROCKE_OP_MATH_LOG,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -891,6 +896,9 @@ rocke_value_t* rocke_b_rcp_fast(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_sqrt(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_rsqrt(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_tanh(rocke_ir_builder_t* b, rocke_value_t* a);
+/* Natural exp / log of an f32 or f64 value (f64 expands to f64_math programs). */
+rocke_value_t* rocke_b_exp(rocke_ir_builder_t* b, rocke_value_t* a);
+rocke_value_t* rocke_b_log(rocke_ir_builder_t* b, rocke_value_t* a);
 
 /* ----- casts / conversions ----- */
 rocke_value_t* rocke_b_zext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
@@ -967,6 +975,14 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
                                  rocke_value_t* idx,
                                  rocke_value_t* expect,
                                  const char* scope);
+/* IRBuilder.global_flag_wait_eq(..., ordering=): NULL / "acquire" = the plain
+ * op (no ordering attr); "monotonic" = relaxed spin (caller fences after). */
+void rocke_b_global_flag_wait_eq_ex(rocke_ir_builder_t* b,
+                                    rocke_value_t* ptr,
+                                    rocke_value_t* idx,
+                                    rocke_value_t* expect,
+                                    const char* scope,
+                                    const char* ordering);
 
 /* ----- atomics ----- */
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
@@ -1192,6 +1208,16 @@ rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                const rocke_type_t* const* result_types,
                                int num_results,
                                const rocke_inline_asm_opts_t* opts);
+/* inline_asm with Python's result_name_hint (rocke_b_inline_asm uses "asm"). */
+rocke_op_t* rocke_b_inline_asm_named(rocke_ir_builder_t* b,
+                                     const char* asm_template,
+                                     const char* constraints,
+                                     rocke_value_t* const* operands,
+                                     int num_operands,
+                                     const rocke_type_t* const* result_types,
+                                     int num_results,
+                                     const rocke_inline_asm_opts_t* opts,
+                                     const char* result_name_hint);
 void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm);
 void rocke_b_s_wait_alu(rocke_ir_builder_t* b, int imm);
 void rocke_b_s_clause(rocke_ir_builder_t* b, int imm);
@@ -1575,6 +1601,7 @@ rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
                                        rocke_value_t* soffset);
+
 /* Dtype-generic scalar buffer load (one element, out-of-range reads 0): f16 and
  * bf16 through the i16 intrinsic, f32 and i32 through the i32 one. Port of
  * Python IRBuilder.buffer_load (op tile.buffer_load, attr elem_type). */

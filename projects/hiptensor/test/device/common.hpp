@@ -54,9 +54,12 @@ __global__ static void
 {
     double* localRelativeError = relativeError + (offset * elements * blockIdx.x);
 
-    for(int i = elements >> 1; i > 0; i = i >> 1)
+    // Fold the upper half onto the lower half. Round the half up, so that the last element of an
+    // odd count is folded at the next level rather than dropped.
+    for(uint32_t n = elements; n > 1; n = (n + 1) >> 1)
     {
-        if(threadIdx.x < i && offset * (elements * blockIdx.x + threadIdx.x + i) < maxElements)
+        uint32_t i = (n + 1) >> 1;
+        if(threadIdx.x + i < n && offset * (elements * blockIdx.x + threadIdx.x + i) < maxElements)
         {
             localRelativeError[offset * threadIdx.x]
                 = maxDouble(localRelativeError[offset * threadIdx.x],

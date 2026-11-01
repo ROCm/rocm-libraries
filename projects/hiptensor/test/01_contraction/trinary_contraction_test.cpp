@@ -33,7 +33,9 @@
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 
+#include "backend/backend.hpp"
 #include "contraction/contraction_cpu_reference.hpp"
+#include "contraction_test_utils.hpp"
 #include "trinary_contraction_test.hpp"
 #include "util.hpp"
 #include "utils.hpp"
@@ -46,9 +48,8 @@ namespace hiptensor
     template <typename DataType>
     using FillLaunchKernelFn = void (*)(DataType* data, uint32_t elementSize, uint32_t seed);
 
-    static void trinaryLogMessage(int32_t logLevel,
-                                  const char* funcName /*=""*/,
-                                  const char* msg /*=""*/)
+    static void
+        trinaryLogMessage(int32_t logLevel, const char* funcName /*=""*/, const char* msg /*=""*/)
     {
         TrinaryContractionTest::sAPILogBuff << msg;
     }
@@ -324,53 +325,77 @@ namespace hiptensor
                     de_strides.push_back(strides[3][i]);
             }
 
-            size_t elementsA = std::accumulate(a_lengths.begin(), a_lengths.end(),
-                                               size_t{1}, std::multiplies<size_t>());
-            size_t elementsB = std::accumulate(b_lengths.begin(), b_lengths.end(),
-                                               size_t{1}, std::multiplies<size_t>());
-            size_t elementsC = std::accumulate(c_lengths.begin(), c_lengths.end(),
-                                               size_t{1}, std::multiplies<size_t>());
-            size_t elementsDE = std::accumulate(de_lengths.begin(), de_lengths.end(),
-                                                size_t{1}, std::multiplies<size_t>());
+            size_t elementsA = std::accumulate(
+                a_lengths.begin(), a_lengths.end(), size_t{1}, std::multiplies<size_t>());
+            size_t elementsB = std::accumulate(
+                b_lengths.begin(), b_lengths.end(), size_t{1}, std::multiplies<size_t>());
+            size_t elementsC = std::accumulate(
+                c_lengths.begin(), c_lengths.end(), size_t{1}, std::multiplies<size_t>());
+            size_t elementsDE = std::accumulate(
+                de_lengths.begin(), de_lengths.end(), size_t{1}, std::multiplies<size_t>());
 
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
             CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
                 logLevel
                 & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
-                                                     // PERF_TRACE so the CK backend does not run its
-                                                     // internal cold/hot timed loop
+                // PERF_TRACE so the CK backend does not run its
+                // internal cold/hot timed loop
 
             uint32_t alignmentRequirement = 1;
 
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                handle, &descA, a_lengths.size(), a_lengths.data(),
-                strides.empty() ? NULL : a_strides.data(), ADataType, alignmentRequirement));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descA,
+                                                a_lengths.size(),
+                                                a_lengths.data(),
+                                                strides.empty() ? NULL : a_strides.data(),
+                                                ADataType,
+                                                alignmentRequirement));
 
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                handle, &descB, b_lengths.size(), b_lengths.data(),
-                strides.empty() ? NULL : b_strides.data(), BDataType, alignmentRequirement));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descB,
+                                                b_lengths.size(),
+                                                b_lengths.data(),
+                                                strides.empty() ? NULL : b_strides.data(),
+                                                BDataType,
+                                                alignmentRequirement));
 
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                handle, &descC, c_lengths.size(), c_lengths.data(),
-                strides.empty() ? NULL : c_strides.data(), CDataType, alignmentRequirement));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descC,
+                                                c_lengths.size(),
+                                                c_lengths.data(),
+                                                strides.empty() ? NULL : c_strides.data(),
+                                                CDataType,
+                                                alignmentRequirement));
 
             if(DDataType != NONE_TYPE)
             {
-                CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                    handle, &descD, de_lengths.size(), de_lengths.data(),
-                    strides.empty() ? NULL : de_strides.data(), DDataType, alignmentRequirement));
+                CHECK_HIPTENSOR_ERROR(
+                    hiptensorCreateTensorDescriptor(handle,
+                                                    &descD,
+                                                    de_lengths.size(),
+                                                    de_lengths.data(),
+                                                    strides.empty() ? NULL : de_strides.data(),
+                                                    DDataType,
+                                                    alignmentRequirement));
             }
 
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                handle, &descE, de_lengths.size(), de_lengths.data(),
-                strides.empty() ? NULL : de_strides.data(), EDataType, alignmentRequirement));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descE,
+                                                de_lengths.size(),
+                                                de_lengths.data(),
+                                                strides.empty() ? NULL : de_strides.data(),
+                                                EDataType,
+                                                alignmentRequirement));
 
-            TrinaryContractionResource::ElementBytes elementBytes(
-                hiptensorDataTypeSize(ADataType),
-                hiptensorDataTypeSize(BDataType),
-                hiptensorDataTypeSize(CDataType),
-                hiptensorDataTypeSize(DDataType),
-                hiptensorDataTypeSize(EDataType));
+            TrinaryContractionResource::ElementBytes elementBytes(hiptensorDataTypeSize(ADataType),
+                                                                  hiptensorDataTypeSize(BDataType),
+                                                                  hiptensorDataTypeSize(CDataType),
+                                                                  hiptensorDataTypeSize(DDataType),
+                                                                  hiptensorDataTypeSize(EDataType));
 
             auto resource = getResource();
             resource->resizeStorage(lengths, elementBytes);
@@ -380,12 +405,15 @@ namespace hiptensor
             if(ADataType == HIPTENSOR_R_16F && BDataType == HIPTENSOR_R_16F
                && CDataType == HIPTENSOR_R_16F && EDataType == HIPTENSOR_R_16F)
             {
-                fillLaunchKernel<_Float16>((_Float16*)resource->deviceA().get(), elementsA, seed - 1);
+                fillLaunchKernel<_Float16>(
+                    (_Float16*)resource->deviceA().get(), elementsA, seed - 1);
                 fillLaunchKernel<_Float16>((_Float16*)resource->deviceB().get(), elementsB, seed);
-                fillLaunchKernel<_Float16>((_Float16*)resource->deviceC().get(), elementsC, seed + 1);
+                fillLaunchKernel<_Float16>(
+                    (_Float16*)resource->deviceC().get(), elementsC, seed + 1);
                 if(DDataType == HIPTENSOR_R_16F)
                 {
-                    fillLaunchKernel<_Float16>((_Float16*)resource->deviceD().get(), elementsDE, seed + 2);
+                    fillLaunchKernel<_Float16>(
+                        (_Float16*)resource->deviceD().get(), elementsDE, seed + 2);
                 }
                 fillValLaunchKernel<_Float16>((_Float16*)resource->deviceE().get(),
                                               elementsDE,
@@ -394,12 +422,16 @@ namespace hiptensor
             else if(ADataType == HIPTENSOR_R_16BF && BDataType == HIPTENSOR_R_16BF
                     && CDataType == HIPTENSOR_R_16BF && EDataType == HIPTENSOR_R_16BF)
             {
-                fillLaunchKernel<hip_bfloat16>((hip_bfloat16*)resource->deviceA().get(), elementsA, seed - 1);
-                fillLaunchKernel<hip_bfloat16>((hip_bfloat16*)resource->deviceB().get(), elementsB, seed);
-                fillLaunchKernel<hip_bfloat16>((hip_bfloat16*)resource->deviceC().get(), elementsC, seed + 1);
+                fillLaunchKernel<hip_bfloat16>(
+                    (hip_bfloat16*)resource->deviceA().get(), elementsA, seed - 1);
+                fillLaunchKernel<hip_bfloat16>(
+                    (hip_bfloat16*)resource->deviceB().get(), elementsB, seed);
+                fillLaunchKernel<hip_bfloat16>(
+                    (hip_bfloat16*)resource->deviceC().get(), elementsC, seed + 1);
                 if(DDataType == HIPTENSOR_R_16BF)
                 {
-                    fillLaunchKernel<hip_bfloat16>((hip_bfloat16*)resource->deviceD().get(), elementsDE, seed + 2);
+                    fillLaunchKernel<hip_bfloat16>(
+                        (hip_bfloat16*)resource->deviceD().get(), elementsDE, seed + 2);
                 }
                 fillValLaunchKernel<hip_bfloat16>(
                     (hip_bfloat16*)resource->deviceE().get(),
@@ -414,7 +446,8 @@ namespace hiptensor
                 fillLaunchKernel<float>((float*)resource->deviceC().get(), elementsC, seed + 1);
                 if(DDataType == HIPTENSOR_R_32F)
                 {
-                    fillLaunchKernel<float>((float*)resource->deviceD().get(), elementsDE, seed + 2);
+                    fillLaunchKernel<float>(
+                        (float*)resource->deviceD().get(), elementsDE, seed + 2);
                 }
                 fillValLaunchKernel<float>((float*)resource->deviceE().get(),
                                            elementsDE,
@@ -428,7 +461,8 @@ namespace hiptensor
                 fillLaunchKernel<double>((double*)resource->deviceC().get(), elementsC, seed + 1);
                 if(DDataType == HIPTENSOR_R_64F)
                 {
-                    fillLaunchKernel<double>((double*)resource->deviceD().get(), elementsDE, seed + 2);
+                    fillLaunchKernel<double>(
+                        (double*)resource->deviceD().get(), elementsDE, seed + 2);
                 }
                 fillValLaunchKernel<double>((double*)resource->deviceE().get(),
                                             elementsDE,
@@ -465,6 +499,9 @@ namespace hiptensor
             if(worksize > 0)
             {
                 CHECK_HIP_ERROR(hipMalloc(static_cast<void**>(&workspace), worksize));
+                // The workspace holds the intermediate tensor, whose initial contents must not
+                // reach the result. Fill it with NaN (all bits set) so that any use shows.
+                CHECK_HIP_ERROR(hipMemset(workspace, 0xFF, worksize));
             }
         }
     }
@@ -518,8 +555,13 @@ namespace hiptensor
 
             ScalarData alphaBuf;
             ScalarData betaBuf;
-            writeVal(&alphaBuf, computeType, ScalarData(computeType, alpha[0], alpha[1]));
-            writeVal(&betaBuf, computeType, ScalarData(computeType, beta[0], beta[1]));
+            // Real scalars are configured with a single value.
+            writeVal(&alphaBuf,
+                     computeType,
+                     ScalarData(computeType, alpha[0], alpha.size() > 1 ? alpha[1] : 0.0));
+            writeVal(&betaBuf,
+                     computeType,
+                     ScalarData(computeType, beta[0], beta.size() > 1 ? beta[1] : 0.0));
 
             CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
 
@@ -571,23 +613,34 @@ namespace hiptensor
             CHECK_HIP_ERROR(hipEventElapsedTime(&timeMs, startEvent, stopEvent));
 
             mElapsedTimeMs        = float64_t(timeMs) / hotRuns;
-            mTotalGFlops          = 0.0;
-            mMeasuredTFlopsPerSec = 0.0;
+            mTotalGFlops          = trinaryContractionGFlops(desc->mModeA,
+                                                    descA->mLengths,
+                                                    desc->mModeB,
+                                                    descB->mLengths,
+                                                    desc->mModeC,
+                                                    descC->mLengths,
+                                                    desc->mModeE,
+                                                    computeType);
+            mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
 
-            size_t sizeA = std::accumulate(descA->mLengths.begin(), descA->mLengths.end(),
+            size_t sizeA = std::accumulate(descA->mLengths.begin(),
+                                           descA->mLengths.end(),
                                            hiptensorDataTypeSize(ADataType),
                                            std::multiplies<size_t>());
-            size_t sizeB = std::accumulate(descB->mLengths.begin(), descB->mLengths.end(),
+            size_t sizeB = std::accumulate(descB->mLengths.begin(),
+                                           descB->mLengths.end(),
                                            hiptensorDataTypeSize(BDataType),
                                            std::multiplies<size_t>());
-            size_t sizeC = std::accumulate(descC->mLengths.begin(), descC->mLengths.end(),
+            size_t sizeC = std::accumulate(descC->mLengths.begin(),
+                                           descC->mLengths.end(),
                                            hiptensorDataTypeSize(CDataType),
                                            std::multiplies<size_t>());
-            size_t sizeE = std::accumulate(descE->mLengths.begin(), descE->mLengths.end(),
+            size_t sizeE = std::accumulate(descE->mLengths.begin(),
+                                           descE->mLengths.end(),
                                            hiptensorDataTypeSize(EDataType),
                                            std::multiplies<size_t>());
 
-            mTotalGBytes = (sizeA + sizeB + sizeC + sizeE) / 1e9;
+            mTotalGBytes  = (sizeA + sizeB + sizeC + sizeE) / 1e9;
             mGBytesPerSec = mTotalGBytes / (mElapsedTimeMs * 1e-3);
 
             CHECK_HIP_ERROR(hipEventDestroy(startEvent));
@@ -642,10 +695,8 @@ namespace hiptensor
                 for(size_t i = 1; i < t_strides.size(); i++)
                     t_strides[i] = t_strides[i - 1] * t_lengths[i - 1];
 
-                size_t elementsT = std::accumulate(t_lengths.begin(),
-                                                   t_lengths.end(),
-                                                   size_t{1},
-                                                   std::multiplies<size_t>());
+                size_t elementsT = std::accumulate(
+                    t_lengths.begin(), t_lengths.end(), size_t{1}, std::multiplies<size_t>());
                 size_t bytesT = elementsT * hiptensorDataTypeSize(EDataType);
 
                 auto hostT = TrinaryContractionResource::allocHost(bytesT);
@@ -658,32 +709,32 @@ namespace hiptensor
 
                 // Step 1: T = 1.0 * opA(A) * opB(B) + 0*T
                 // Uses bilinear with beta=0 (matching the GPU decomposition)
-                CHECK_HIPTENSOR_ERROR(hiptensorContractionReference(
-                    plan,
-                    (void*)&oneVal,
-                    resource->hostA().get(),
-                    resource->hostB().get(),
-                    (void*)&zeroVal,
-                    hostT.get(),
-                    hostT.get(),
-                    descA->mLengths,
-                    descA->mStrides,
-                    desc->mModeA,
-                    descB->mLengths,
-                    descB->mStrides,
-                    desc->mModeB,
-                    t_lengths,
-                    t_strides,
-                    t_modes,
-                    t_lengths,
-                    t_strides,
-                    t_modes,
-                    ADataType,
-                    BDataType,
-                    EDataType,
-                    EDataType,
-                    {desc->mOpA, desc->mOpB, HIPTENSOR_OP_IDENTITY},
-                    workspace));
+                CHECK_HIPTENSOR_ERROR(
+                    hiptensorContractionReference(plan,
+                                                  (void*)&oneVal,
+                                                  resource->hostA().get(),
+                                                  resource->hostB().get(),
+                                                  (void*)&zeroVal,
+                                                  hostT.get(),
+                                                  hostT.get(),
+                                                  descA->mLengths,
+                                                  descA->mStrides,
+                                                  desc->mModeA,
+                                                  descB->mLengths,
+                                                  descB->mStrides,
+                                                  desc->mModeB,
+                                                  t_lengths,
+                                                  t_strides,
+                                                  t_modes,
+                                                  t_lengths,
+                                                  t_strides,
+                                                  t_modes,
+                                                  ADataType,
+                                                  BDataType,
+                                                  EDataType,
+                                                  EDataType,
+                                                  {desc->mOpA, desc->mOpB, HIPTENSOR_OP_IDENTITY},
+                                                  workspace));
 
                 // Step 2: E = α * T * opC(C) + β * opD(D)
                 if(DDataType != NONE_TYPE)
@@ -764,28 +815,51 @@ namespace hiptensor
                 auto   eps       = getEpsilon(computeType);
                 double tolerance = 2 * (nelems_k1 + nelems_k2) * eps;
 
-                if(computeType == HIPTENSOR_COMPUTE_DESC_16BF
-                   || EDataType == HIPTENSOR_R_16BF)
+                if(computeType == HIPTENSOR_COMPUTE_DESC_16BF || EDataType == HIPTENSOR_R_16BF)
                 {
                     const double epsilon = std::pow(2, -7);
                     tolerance += epsilon * 2;
                 }
-                else if(computeType == HIPTENSOR_COMPUTE_DESC_16F
-                        || EDataType == HIPTENSOR_R_16F)
+                else if(computeType == HIPTENSOR_COMPUTE_DESC_16F || EDataType == HIPTENSOR_R_16F)
                 {
                     const double epsilon = std::pow(2, -10);
                     tolerance += epsilon * 2;
                 }
 
+                // The CPU reference applies alpha and beta as float, as the Composable Kernel
+                // instances do. A backend that applies them in the 64-bit compute type differs
+                // from it by the float rounding of the scalars.
+                bool const servedByCk
+                    = plan->mBackend == nullptr || plan->mBackend->primary == nullptr
+                      || plan->mBackend->primary->kernelId().backend == backend::kCkBackendName;
+                if(!servedByCk
+                   && (computeType == HIPTENSOR_COMPUTE_DESC_64F
+                       || computeType == HIPTENSOR_COMPUTE_DESC_C64F))
+                {
+                    auto floatRounding = [](std::vector<double> const& scalar) {
+                        double rounding = 0.0;
+                        for(double part : scalar)
+                        {
+                            if(part != 0.0)
+                            {
+                                rounding = std::max(rounding,
+                                                    std::fabs(part - static_cast<float>(part))
+                                                        / std::fabs(part));
+                            }
+                        }
+                        return rounding;
+                    };
+                    tolerance += 2 * (floatRounding(alpha) + floatRounding(beta));
+                }
+
                 if(EDataType == HIPTENSOR_R_16F)
                 {
                     std::tie(mValidationResult, mMaxRelativeError)
-                        = compareEqualLaunchKernel<_Float16>(
-                            (_Float16*)resource->deviceE().get(),
-                            (_Float16*)reference.get(),
-                            elementsE,
-                            computeType,
-                            tolerance);
+                        = compareEqualLaunchKernel<_Float16>((_Float16*)resource->deviceE().get(),
+                                                             (_Float16*)reference.get(),
+                                                             elementsE,
+                                                             computeType,
+                                                             tolerance);
                 }
                 else if(EDataType == HIPTENSOR_R_16BF)
                 {
@@ -800,26 +874,23 @@ namespace hiptensor
                 else if(EDataType == HIPTENSOR_R_32F || EDataType == HIPTENSOR_C_32F)
                 {
                     std::tie(mValidationResult, mMaxRelativeError)
-                        = compareEqualLaunchKernel<float>(
-                            (float*)resource->deviceE().get(),
-                            (float*)reference.get(),
-                            elementsE,
-                            computeType,
-                            tolerance);
+                        = compareEqualLaunchKernel<float>((float*)resource->deviceE().get(),
+                                                          (float*)reference.get(),
+                                                          elementsE,
+                                                          computeType,
+                                                          tolerance);
                 }
                 else if(EDataType == HIPTENSOR_R_64F || EDataType == HIPTENSOR_C_64F)
                 {
                     std::tie(mValidationResult, mMaxRelativeError)
-                        = compareEqualLaunchKernel<double>(
-                            (double*)resource->deviceE().get(),
-                            (double*)reference.get(),
-                            elementsE,
-                            computeType,
-                            tolerance);
+                        = compareEqualLaunchKernel<double>((double*)resource->deviceE().get(),
+                                                           (double*)reference.get(),
+                                                           elementsE,
+                                                           computeType,
+                                                           tolerance);
                 }
 
-                EXPECT_TRUE(mValidationResult)
-                    << "Max relative error: " << mMaxRelativeError;
+                EXPECT_TRUE(mValidationResult) << "Max relative error: " << mMaxRelativeError;
             }
             else
             {

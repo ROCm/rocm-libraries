@@ -8,12 +8,14 @@ from rocke.core.ir import F32, F64, IRBuilder, VectorType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
-from rocke.instances.gfx942.f64_mma_probe import (
+from rocke.instances.common.f64_mma_probe import (
+    F64_MFMA_ARCHS,
     F64MmaProbeSpec,
     build_f64_mma_probe,
 )
 
-# m -> (op_id, c_frag_len, A/B/C shapes) for the gfx942 f64 atoms.
+# m -> (op_id, c_frag_len, A/B/C shapes) for the f64 atoms (same on every
+# arch that has them).
 _ATOMS = {
     16: ("mfma_f64_16x16x4_f64", 4, ((16, 4), (4, 16), (16, 16))),
     4: ("mfma_f64_4x4x4_f64", 1, ((16, 4), (16, 4), (16, 4))),
@@ -28,25 +30,51 @@ class _Integers:
     add = staticmethod(lambda x, y: x + y)
 
 
-def _f64_atom(m):
-    return ArchTarget.from_gfx("gfx942").mma.op_for_shape(
+def _f64_atom(m, arch="gfx942"):
+    return ArchTarget.from_gfx(arch).mma.op_for_shape(
         family="mma", a_dtype="fp64", b_dtype="fp64", c_dtype="fp64", m=m, n=m, k=4
     )
 
 
+@pytest.mark.parametrize("arch", F64_MFMA_ARCHS)
 @pytest.mark.parametrize("m", [16, 4])
-def test_catalog_isolation(m):
+def test_catalog_isolation(m, arch):
     op_id, c_frag_len, _ = _ATOMS[m]
-    atom = _f64_atom(m)
+    atom = _f64_atom(m, arch)
     assert atom.op_id == op_id
     assert atom.c_dtype == "fp64"
     assert (atom.a_frag_len, atom.b_frag_len, atom.c_frag_len) == (1, 1, c_frag_len)
-    fp32 = ArchTarget.from_gfx("gfx942").mma.op_for_shape(
-        family="mma", a_dtype="fp32", b_dtype="fp32", c_dtype="fp32", m=16, n=16, k=4
-    )
-    assert fp32.op_id == "mfma_f32_16x16x4_f32"
-    for gfx in ("gfx950", "gfx1151", "gfx1250"):
-        assert not any(op.a_dtype == "fp64" for op in ArchTarget.from_gfx(gfx).mma.ops)
+    if arch != "gfx90a":
+        fp32 = ArchTarget.from_gfx(arch).mma.op_for_shape(
+            family="mma",
+            a_dtype="fp32",
+            b_dtype="fp32",
+            c_dtype="fp32",
+            m=16,
+            n=16,
+            k=4,
+        )
+        assert fp32.op_id == "mfma_f32_16x16x4_f32"
+
+
+@pytest.mark.parametrize("gfx", ["gfx1151", "gfx1201", "gfx1250"])
+def test_no_f64_atom_without_f64_mfma(gfx):
+    assert not any(op.a_dtype == "fp64" for op in ArchTarget.from_gfx(gfx).mma.ops)
+
+
+@pytest.mark.parametrize("arch", ["gfx90a", "gfx950"])
+@pytest.mark.parametrize("m", [16, 4])
+def test_lane_maps_match_gfx942(m, arch):
+    """The gfx90a / gfx950 rows reuse the gfx942 lane maps exactly."""
+    calc = _Integers()
+    ref, atom = _f64_atom(m), _f64_atom(m, arch)
+    for get in ("a_layout", "b_layout", "c_layout"):
+        count = atom.c_frag_len if get == "c_layout" else 1
+        for lane in range(64):
+            for slot in range(count):
+                assert getattr(atom, get)().coord(calc, lane, slot) == getattr(
+                    ref, get
+                )().coord(calc, lane, slot)
 
 
 @pytest.mark.parametrize("m", [16, 4])
@@ -113,13 +141,20 @@ def test_probe_rejects_bad_spec(m, k):
         F64MmaProbeSpec(m, k)
 
 
+@pytest.mark.parametrize("arch", ["gfx908", "gfx1151", "gfx1250"])
+def test_probe_rejects_arch_without_f64_mfma(arch):
+    with pytest.raises(ValueError, match="f64 MMA probe requires one of"):
+        build_f64_mma_probe(F64MmaProbeSpec(16, 4), arch)
+
+
+@pytest.mark.parametrize("arch", F64_MFMA_ARCHS)
 @pytest.mark.parametrize("m", [16, 4])
 @pytest.mark.parametrize("k", [4, 8, 64])
-def test_both_builders_and_lowerers(m, k):
-    kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k))
+def test_both_builders_and_lowerers(m, k, arch):
+    kernel = build_f64_mma_probe(F64MmaProbeSpec(m, k), arch)
     ir = serialize(kernel)
     assert serialize(parse(ir)) == ir
-    hip = lower_kernel_to_hip(kernel, arch="gfx942")
+    hip = lower_kernel_to_hip(kernel, arch=arch)
     assert f"__builtin_amdgcn_mfma_f64_{m}x{m}x4f64(" in hip
     call = (
         "call <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64("
@@ -127,8 +162,8 @@ def test_both_builders_and_lowerers(m, k):
         else "call double @llvm.amdgcn.mfma.f64.4x4x4f64("
     )
     native = pytest.importorskip("rocke_engine")
-    assert native.f64_mma_probe_serialize_ir(m, k) == ir
+    assert native.f64_mma_probe_serialize_ir(m, k, arch) == ir
     for flavor in LLVM_FLAVORS:
-        ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
-        assert native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor) == ll
+        ll = _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
+        assert native.lower_serialized_ir(ir, arch=arch, flavor=flavor) == ll
         assert ll.count(call) == k // 4

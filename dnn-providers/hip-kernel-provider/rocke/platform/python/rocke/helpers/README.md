@@ -78,6 +78,12 @@ rocke/helpers/
 │ # Reduction strategies. Pairs with
 │ # ``persistent.py`` -- the partitioner picks the
 │ # work, the persistent loop drives it.
+├── task_schedule.py # Host-only model of a persistent kernel's
+│ # static task table (stages, placement maps,
+│ # dependencies): validate() proves deadlock
+│ # freedom on a resident grid and dataflow
+│ # coverage before a monokernel is built.
+│ # No IR is emitted (Python only).
 ├── i4_dequant.py # Packed-i4 byte unpack (sign-extend
 │ # 4-bit nibbles to i32 / f32 / fp8 / bf8) for
 │ # the i4-quant weight path in block-scale GEMM

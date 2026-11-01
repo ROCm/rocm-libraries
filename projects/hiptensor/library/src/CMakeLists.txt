@@ -161,6 +161,7 @@ endfunction()
 include_directories(BEFORE
     ${PROJECT_SOURCE_DIR}/library/include
     ${PROJECT_SOURCE_DIR}/library/src/include
+    ${PROJECT_SOURCE_DIR}/library/src
 )
 
 if (ADDRESS_SANITIZER_ENABLED)
@@ -186,14 +187,51 @@ set(HIPTENSOR_CORE_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/handle.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_options.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/backend/problem.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/backend/registry.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/backends/ck/ck_backend.cpp
 )
 
+# The rocKE backend is optional; the Composable Kernel backend is always built and stays the
+# default backend.
+if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
+    list(APPEND HIPTENSOR_CORE_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_autotune.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_backend.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_plan.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_runtime.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_select.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_select_model.cpp
+    )
+    if(HIPTENSOR_ENABLE_ROCKE_JIT)
+        list(APPEND HIPTENSOR_CORE_SOURCES
+            ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_codeobject.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_comgr.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_gett_jit.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_jit.cpp
+        )
+    endif()
+endif()
+
 add_hiptensor_component(hiptensor_core ${HIPTENSOR_CORE_SOURCES})
+if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
+    target_compile_definitions(hiptensor_core PRIVATE HIPTENSOR_ENABLE_ROCKE_BACKEND)
+endif()
 
 # Create shared library for production use
 create_hiptensor_shared_library()
 
-# Host-side CPU reference + stateless data-type helpers, built as a static library for the
+# The rocKE backend's kernel packs (built at build time, installed next to the library), and
+# its JIT
+if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
+    hiptensor_add_rocke_pack(hiptensor)
+    if(HIPTENSOR_ENABLE_ROCKE_JIT)
+        hiptensor_add_rocke_jit(hiptensor hiptensor_core)
+    endif()
+endif()
+
+# Host-side CPU reference + stateless data-type helpers (and the plan cache and the contraction
+# kernel selection, which their unit tests exercise directly), built as a static library for the
 # test suite only.
 # With the hidden-visibility baseline the symbols are local to the .so, so the tests get their
 # own copy here instead.
@@ -205,8 +243,11 @@ create_hiptensor_shared_library()
 if(HIPTENSOR_BUILD_TESTS)
     set(HIPTENSOR_HOST_REFERENCE_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/data_types.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/performance.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_cpu_reference.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_cpu_reference_instances.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_selection.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_solution.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction/contraction_solution_registry.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/reduction/reduction_cpu_reference.cpp

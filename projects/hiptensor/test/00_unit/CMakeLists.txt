@@ -54,6 +54,160 @@ add_hiptensor_unit_test(elementwise_broadcast_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_broadcast_test.cpp
     )
+add_hiptensor_unit_test(elementwise_instance_selection_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/elementwise_instance_selection_test.cpp
+    )
+add_hiptensor_unit_test(api_safety_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/api_safety_test.cpp
+    )
+add_hiptensor_unit_test(plan_cache_unit_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache_unit_test.cpp
+    )
+add_hiptensor_unit_test(backend_seam_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/backend_seam_test.cpp
+    )
+# The rocKE backend's kernels through the public API (HIPTENSOR_BACKEND=rocke, no fallback).
+if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
+    # The C++ pack builder lists the kernels, attributes, routes and JIT classes rocKE's Python
+    # reference lists (the manifests the rocKE tree keeps in library/builders/hiptensor/
+    # manifests). No GPU, no compile; a build from prebuilt packs has no builder to check.
+    set(_ROCKE_MANIFESTS "${HIPTENSOR_ROCKE_SOURCE_DIR}/library/builders/hiptensor/manifests")
+    if(TARGET hiptensor_rocke_pack_builder AND EXISTS "${_ROCKE_MANIFESTS}")
+        set(_ROCKE_MANIFEST_ARCHS)
+        foreach(target IN LISTS HIPTENSOR_ROCKE_SUPPORTED_TARGETS)
+            list(APPEND _ROCKE_MANIFEST_ARCHS --arch ${target})
+        endforeach()
+        add_test(NAME rocke_pack_manifest_test
+                 COMMAND hiptensor_rocke_pack_builder --list ${_ROCKE_MANIFEST_ARCHS}
+                         --check-manifests "${_ROCKE_MANIFESTS}")
+        # rocKE's cross-check of this builder (library/tests/test_hiptensor_pack_cross_check.py,
+        # which skips without ROCKE_HIPTENSOR_PACK_BUILDER): the C++ builder's manifests, its
+        # untuned reduction and tuned elementwise picks, and the packs it writes for this
+        # build's pack targets byte for byte against rocKE's Python writer with the COMGR the
+        # builder links. Needs a Python with pytest; no GPU (every kernel compiles twice: long).
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        set(_ROCKE_HAS_PYTEST 1)
+        if(Python3_EXECUTABLE)
+            execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
+                            RESULT_VARIABLE _ROCKE_HAS_PYTEST OUTPUT_QUIET ERROR_QUIET)
+        endif()
+        hiptensor_rocke_pack_targets("${GPU_TARGETS}" _ROCKE_CROSS_CHECK_TARGETS)
+        if(DEFINED HIPTENSOR_ROCKE_PACK_TARGETS AND NOT HIPTENSOR_ROCKE_PACK_TARGETS STREQUAL "")
+            set(_ROCKE_CROSS_CHECK_TARGETS ${HIPTENSOR_ROCKE_PACK_TARGETS})
+        endif()
+        if(_ROCKE_HAS_PYTEST EQUAL 0 AND _ROCKE_CROSS_CHECK_TARGETS)
+            string(REPLACE ";" ":" _ROCKE_CROSS_CHECK_ARCHS "${_ROCKE_CROSS_CHECK_TARGETS}")
+            add_test(NAME rocke_pack_cross_check_test
+                     COMMAND "${Python3_EXECUTABLE}" -m pytest -p no:cacheprovider -v -rs
+                             "${HIPTENSOR_ROCKE_SOURCE_DIR}/library/tests/test_hiptensor_pack_cross_check.py")
+            set_tests_properties(rocke_pack_cross_check_test PROPERTIES
+                ENVIRONMENT "ROCKE_HIPTENSOR_PACK_BUILDER=$<TARGET_FILE:hiptensor_rocke_pack_builder>;ROCKE_HIPTENSOR_PACK_ARCHS=${_ROCKE_CROSS_CHECK_ARCHS};PYTHONPATH=${HIPTENSOR_ROCKE_SOURCE_DIR}/platform/python:${HIPTENSOR_ROCKE_SOURCE_DIR}/library:$ENV{PYTHONPATH};PYTHONDONTWRITEBYTECODE=1;ROCKE_BACKEND=python"
+                TIMEOUT 7200)
+        else()
+            message(STATUS "rocKE pack cross-check: no Python with pytest or no pack target; "
+                           "rocke_pack_cross_check_test not added")
+        endif()
+    elseif(TARGET hiptensor_rocke_pack_builder)
+        message(STATUS "rocKE pack manifests: ${_ROCKE_MANIFESTS} not found; "
+                       "rocke_pack_manifest_test not added")
+    endif()
+    add_hiptensor_unit_test(rocke_backend_test
+        ${HIPTENSOR_COMMON_TEST_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocke_backend_test.cpp
+        )
+    # The shipped selection models (HIPTENSOR_ROCKE_SELECT_MODEL_DIR) read and walked by the
+    # library's model code against the exporter's check vectors (CPU only).
+    add_hiptensor_unit_test(rocke_select_model_test
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocke_select_model_test.cpp
+        ${PROJECT_SOURCE_DIR}/library/src/backends/rocke/rocke_select_model.cpp
+        )
+    target_compile_definitions(rocke_select_model_test PRIVATE
+        HIPTENSOR_ROCKE_SELECT_MODEL_DIR="${HIPTENSOR_ROCKE_SELECT_MODEL_DIR}")
+    # Every contraction on the f64 route (operands converted to f64, one rounding of the result).
+    add_test(NAME rocke_backend_test_f64_route
+             COMMAND rocke_backend_test --gtest_filter=*RockeContraction*)
+    set_tests_properties(rocke_backend_test_f64_route PROPERTIES
+        ENVIRONMENT "HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64"
+        WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+    if(HIPTENSOR_ENABLE_ROCKE_JIT)
+        # The JIT and kernel cache, and every rocke_backend_test case with every elementwise
+        # launch specialized (HIPTENSOR_ROCKE_JIT=all: also the launches without a vector form).
+        add_hiptensor_unit_test(rocke_jit_test
+            ${HIPTENSOR_COMMON_TEST_SOURCES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rocke_jit_test.cpp
+            )
+        # The contraction JIT (rocKE's tensor GETT planner at plan creation).
+        add_hiptensor_unit_test(rocke_gett_jit_test
+            ${HIPTENSOR_COMMON_TEST_SOURCES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rocke_gett_jit_test.cpp
+            )
+        # rocKE's C++ engine: the route tables and their plans the JIT's routes are compared with
+        target_link_libraries(rocke_gett_jit_test PRIVATE hiptensor_rocke_core)
+        add_test(NAME rocke_backend_test_jit COMMAND rocke_backend_test)
+        set_tests_properties(rocke_backend_test_jit PROPERTIES
+            ENVIRONMENT "HIPTENSOR_ROCKE_TEST_JIT=1;HIPTENSOR_ROCKE_JIT=all"
+            WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+    endif()
+endif()
+add_hiptensor_unit_test(contraction_selection_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_selection_test.cpp
+    )
+# The actor-critic cases that need the tables for row-major strides, which name kernels that
+# cannot run column-major problems. They skip with that message when the tables are not selected.
+set(_HIPTENSOR_ROW_MAJOR_TABLES_ENV "HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=OFF")
+if(WIN32)
+    list(APPEND _HIPTENSOR_ROW_MAJOR_TABLES_ENV
+        "PATH=${CMAKE_INSTALL_PREFIX}/bin$<SEMICOLON>${CMAKE_RUNTIME_OUTPUT_DIRECTORY}$<SEMICOLON>$ENV{PATH}")
+endif()
+add_test(NAME contraction_selection_test_row_major_tables
+         COMMAND contraction_selection_test --gtest_filter=ActorCriticRowMajorTableTest.*)
+set_tests_properties(contraction_selection_test_row_major_tables PROPERTIES
+    ENVIRONMENT "${_HIPTENSOR_ROW_MAJOR_TABLES_ENV}"
+    FAIL_REGULAR_EXPRESSION "Runs only with the row-major actor-critic tables"
+    WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+add_hiptensor_unit_test(large_tensor_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/large_tensor_test.cpp
+    )
+add_hiptensor_unit_test(operation_validation_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/operation_validation_test.cpp
+    )
+add_hiptensor_unit_test(workspace_size_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/workspace_size_test.cpp
+    )
+
+# Has its own main: the shared one stops early on the hosts this test is about.
+add_hiptensor_unit_test(device_support_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/device_support_test.cpp
+    )
+# The same binary with every GPU hidden, which simulates a host without a GPU.
+set(_HIPTENSOR_NO_VISIBLE_DEVICE_ENV "HIP_VISIBLE_DEVICES=-1" "ROCR_VISIBLE_DEVICES=-1")
+if(WIN32)
+    list(APPEND _HIPTENSOR_NO_VISIBLE_DEVICE_ENV
+        "PATH=${CMAKE_INSTALL_PREFIX}/bin$<SEMICOLON>${CMAKE_RUNTIME_OUTPUT_DIRECTORY}$<SEMICOLON>$ENV{PATH}")
+endif()
+add_test(NAME device_support_test_no_visible_device
+         COMMAND device_support_test --gtest_filter=*NoVisibleDevice*)
+set_tests_properties(device_support_test_no_visible_device PROPERTIES
+    ENVIRONMENT "${_HIPTENSOR_NO_VISIBLE_DEVICE_ENV}"
+    WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+# Fills the device memory, so it must not share the GPU with other tests.
+add_hiptensor_unit_test(alloc_failure_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/alloc_failure_test.cpp
+    )
+set_tests_properties(alloc_failure_test PROPERTIES RUN_SERIAL TRUE)
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(alloc_failure_test PROPERTIES RUN_SERIAL TRUE)\n")
+file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "set_tests_properties(\"alloc_failure_test smoke\" PROPERTIES RUN_SERIAL TRUE)\n")
+file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "set_tests_properties(\"alloc_failure_test regression\" PROPERTIES RUN_SERIAL TRUE)\n")
  # add_hiptensor_unit_test(interface_test
      # ${HIPTENSOR_COMMON_TEST_SOURCES}
      # ${CMAKE_CURRENT_SOURCE_DIR}/interface_test.cpp

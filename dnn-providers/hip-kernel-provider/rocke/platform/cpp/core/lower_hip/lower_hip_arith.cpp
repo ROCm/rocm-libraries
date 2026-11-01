@@ -612,7 +612,7 @@ static rocke_status_t rocke_h_op_arith_fabs(rocke_h_lowerer_t* lw, const rocke_o
 /* def _op_arith_fma(self, op):
  *     a, b, c = op.operands
  *     ty = _type_to_hip(op.result.type)
- *     _reject_f64(op, op.result.type.name)
+ *     if f64: self._emit(f"{ty} {_name(op.result)} = fma({a}, {b}, {c});")
  *     self._emit(f"{ty} {_name(op.result)} = ({ty})fmaf("
  *                f"(float){_name(a)}, (float){_name(b)}, (float){_name(c)});") */
 static rocke_status_t rocke_h_op_arith_fma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
@@ -622,7 +622,17 @@ static rocke_status_t rocke_h_op_arith_fma(rocke_h_lowerer_t* lw, const rocke_op
     const rocke_value_t* c = op->operands[2];
     const rocke_value_t* r = h_res(op);
     const char* ty = rocke_h_type_to_hip(lw, r->type);
-    rocke_h_reject_f64(lw, op, r->type->name);
+    if(r->type->name && strcmp(r->type->name, "f64") == 0)
+    {
+        rocke_h_emitf(lw,
+                      "%s %s = fma(%s, %s, %s);",
+                      ty,
+                      rocke_h_name(lw, r),
+                      rocke_h_name(lw, a),
+                      rocke_h_name(lw, b),
+                      rocke_h_name(lw, c));
+        return lw->status;
+    }
     rocke_h_emitf(lw,
                   "%s %s = (%s)fmaf((float)%s, (float)%s, (float)%s);",
                   ty,
@@ -637,7 +647,6 @@ static rocke_status_t rocke_h_op_arith_fma(rocke_h_lowerer_t* lw, const rocke_op
 /* def _op_arith_fmax3(self, op):
  *     a, b, c = op.operands
  *     ty = _type_to_hip(op.result.type)
- *     _reject_f64(op, op.result.type.name)
  *     self._emit(f"{ty} {_name(op.result)} = "
  *                f"(({_name(b)} > {_name(c)}) ? {_name(b)} : {_name(c)});")
  *     self._emit(f"{_name(op.result)} = "
@@ -649,7 +658,6 @@ static rocke_status_t rocke_h_op_arith_fmax3(rocke_h_lowerer_t* lw, const rocke_
     const rocke_value_t* c = op->operands[2];
     const rocke_value_t* r = h_res(op);
     const char* ty = rocke_h_type_to_hip(lw, r->type);
-    rocke_h_reject_f64(lw, op, r->type->name);
     const char* rn = rocke_h_name(lw, r);
     const char* an = rocke_h_name(lw, a);
     const char* bn = rocke_h_name(lw, b);
@@ -662,7 +670,6 @@ static rocke_status_t rocke_h_op_arith_fmax3(rocke_h_lowerer_t* lw, const rocke_
 /* def _op_arith_fmin3(self, op):
  *     a, b, c = op.operands
  *     ty = _type_to_hip(op.result.type)
- *     _reject_f64(op, op.result.type.name)
  *     self._emit(f"{ty} {_name(op.result)} = "
  *                f"(({_name(b)} < {_name(c)}) ? {_name(b)} : {_name(c)});")
  *     self._emit(f"{_name(op.result)} = "
@@ -674,7 +681,6 @@ static rocke_status_t rocke_h_op_arith_fmin3(rocke_h_lowerer_t* lw, const rocke_
     const rocke_value_t* c = op->operands[2];
     const rocke_value_t* r = h_res(op);
     const char* ty = rocke_h_type_to_hip(lw, r->type);
-    rocke_h_reject_f64(lw, op, r->type->name);
     const char* rn = rocke_h_name(lw, r);
     const char* an = rocke_h_name(lw, a);
     const char* bn = rocke_h_name(lw, b);
@@ -812,17 +818,22 @@ static rocke_status_t rocke_h_op_arith_fcmp(rocke_h_lowerer_t* lw, const rocke_o
 /* ----------------------------- math (transcendentals) --------------------- */
 
 /* The Python `_math1` helper:
- *   def _math1(self, op, fn_f32, *, prefer_amdgcn_builtin=False):
+ *   def _math1(self, op, fn_f32, *, prefer_amdgcn_builtin=False, fn_f64=None):
  *       (v,) = op.operands
  *       tname = op.result.type.name
  *       cpp_t = _type_to_hip(op.result.type)
+ *       if tname == "f64" and fn_f64 is not None:
+ *           self._emit(f"{cpp_t} {_name(op.result)} = {fn_f64}({_name(v)});"); return
  *       _reject_f64(op, tname)
  *       if tname == "f32":
  *           self._emit(f"{cpp_t} {_name(op.result)} = {fn_f32}({_name(v)});")
  *       else:
  *           self._emit(f"{cpp_t} {_name(op.result)} = ({cpp_t}){fn_f32}((float){_name(v)});")
  * Shared by exp2/log2/sqrt/tanh. */
-static void h_math1(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* fn_f32)
+static void h_math1(rocke_h_lowerer_t* lw,
+                    const rocke_op_t* op,
+                    const char* fn_f32,
+                    const char* fn_f64 = NULL)
 {
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* r = h_res(op);
@@ -830,6 +841,12 @@ static void h_math1(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* fn_
     const char* cpp_t = rocke_h_type_to_hip(lw, r->type);
     const char* rn = rocke_h_name(lw, r);
     const char* vn = rocke_h_name(lw, v);
+    if(fn_f64 && tname && strcmp(tname, "f64") == 0)
+    {
+        /* HIP's double overload (the device math library) computes in f64. */
+        rocke_h_emitf(lw, "%s %s = %s(%s);", cpp_t, rn, fn_f64, vn);
+        return;
+    }
     rocke_h_reject_f64(lw, op, tname);
     if(tname && strcmp(tname, "f32") == 0)
     {
@@ -868,17 +885,31 @@ static void h_amdgcn_unary(rocke_h_lowerer_t* lw, const rocke_op_t* op, const ch
     }
 }
 
-/* def _op_math_exp2(self, op): self._math1(op, "exp2f") */
+/* def _op_math_exp2(self, op): self._math1(op, "exp2f", fn_f64="exp2") */
 static rocke_status_t rocke_h_op_math_exp2(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    h_math1(lw, op, "exp2f");
+    h_math1(lw, op, "exp2f", "exp2");
     return lw->status;
 }
 
-/* def _op_math_log2(self, op): self._math1(op, "log2f") */
+/* def _op_math_exp(self, op): self._math1(op, "expf", fn_f64="exp") */
+static rocke_status_t rocke_h_op_math_exp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    h_math1(lw, op, "expf", "exp");
+    return lw->status;
+}
+
+/* def _op_math_log(self, op): self._math1(op, "logf", fn_f64="log") */
+static rocke_status_t rocke_h_op_math_log(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    h_math1(lw, op, "logf", "log");
+    return lw->status;
+}
+
+/* def _op_math_log2(self, op): self._math1(op, "log2f", fn_f64="log2") */
 static rocke_status_t rocke_h_op_math_log2(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    h_math1(lw, op, "log2f");
+    h_math1(lw, op, "log2f", "log2");
     return lw->status;
 }
 
@@ -907,24 +938,35 @@ static rocke_status_t rocke_h_op_math_rcp_fast(rocke_h_lowerer_t* lw, const rock
     return lw->status;
 }
 
-/* def _op_math_sqrt(self, op): self._math1(op, "sqrtf") */
+/* def _op_math_sqrt(self, op): self._math1(op, "sqrtf", fn_f64="sqrt") */
 static rocke_status_t rocke_h_op_math_sqrt(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    h_math1(lw, op, "sqrtf");
+    h_math1(lw, op, "sqrtf", "sqrt");
     return lw->status;
 }
 
-/* def _op_math_rsqrt(self, op): -- __builtin_amdgcn_rsqf, promote/demote else. */
+/* def _op_math_rsqrt(self, op): -- f64 divides by the IEEE sqrt, else
+ * __builtin_amdgcn_rsqf with promote/demote. */
 static rocke_status_t rocke_h_op_math_rsqrt(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    const rocke_value_t* r = h_res(op);
+    if(r->type->name && strcmp(r->type->name, "f64") == 0)
+    {
+        rocke_h_emitf(lw,
+                      "%s %s = 1.0 / sqrt(%s);",
+                      rocke_h_type_to_hip(lw, r->type),
+                      rocke_h_name(lw, r),
+                      rocke_h_name(lw, op->operands[0]));
+        return lw->status;
+    }
     h_amdgcn_unary(lw, op, "__builtin_amdgcn_rsqf");
     return lw->status;
 }
 
-/* def _op_math_tanh(self, op): self._math1(op, "tanhf") */
+/* def _op_math_tanh(self, op): self._math1(op, "tanhf", fn_f64="tanh") */
 static rocke_status_t rocke_h_op_math_tanh(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    h_math1(lw, op, "tanhf");
+    h_math1(lw, op, "tanhf", "tanh");
     return lw->status;
 }
 
@@ -973,6 +1015,8 @@ const rocke_h_handler_entry_t* rocke_h_handlers_arith(void)
         {ROCKE_OP_MATH_SQRT, rocke_h_op_math_sqrt},
         {ROCKE_OP_MATH_RSQRT, rocke_h_op_math_rsqrt},
         {ROCKE_OP_MATH_TANH, rocke_h_op_math_tanh},
+        {ROCKE_OP_MATH_EXP, rocke_h_op_math_exp},
+        {ROCKE_OP_MATH_LOG, rocke_h_op_math_log},
         {ROCKE_OP_INVALID, NULL}, /* terminator */
     };
     return table;

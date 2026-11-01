@@ -14,8 +14,8 @@ from rocke.helpers.split_k import (
 )
 
 
-def _bf16(M, N, K, arch="gfx950"):
-    return GemmRequest(M=M, N=N, K=K, arch=arch, dtype="bf16")
+def _bf16(M, N, K, arch="gfx950", **kw):
+    return GemmRequest(M=M, N=N, K=K, arch=arch, dtype="bf16", **kw)
 
 
 class TestSelectSplitK(unittest.TestCase):
@@ -104,15 +104,31 @@ class TestSelectSplitK(unittest.TestCase):
 
 class TestDispatchWiring(unittest.TestCase):
     def test_decode_dispatch_sets_split_k_and_z_grid(self):
-        r = dispatch_gemm_bf16(_bf16(2, 4096, 4096))
+        # the universal decode body (gemm_skinny takes decode shapes in auto mode)
+        r = dispatch_gemm_bf16(_bf16(2, 4096, 4096, algorithm="universal_gemm"))
         self.assertEqual(r.candidate.spec_id, "cdna_decode_16x64")
         self.assertGreater(r.spec.trait.split_k, 1)
         # grid Z dim == split_k
         self.assertEqual(r.grid[2], r.spec.trait.split_k)
 
-    def test_square_dispatch_unchanged(self):
+    def test_square_dispatch_has_no_split_k(self):
+        # A square that fills the device never engages split-K, whichever
+        # candidate the admission model picks for it.
         r = dispatch_gemm_bf16(_bf16(4096, 4096, 4096))
-        self.assertEqual(r.candidate.spec_id, "cdna_cshuffle_default")
+        self.assertEqual(r.spec.trait.split_k, 1)
+        self.assertEqual(r.grid[2], 1)
+
+    def test_dtl_pingpong_never_split(self):
+        # 2304^2 (81 tiles of 256x256) would engage split-K for a 256-tile
+        # kernel; the DTL candidates are selected without it (the small-tile
+        # ring takes this poorly filled wave; the ping-pong / ring
+        # candidate keeps split-K off where it is selected, e.g. 4096^3).
+        r = dispatch_gemm_bf16(_bf16(2304, 2304, 2304))
+        self.assertEqual(r.candidate.spec_id, "cdna_dtl_ring_small")
+        self.assertEqual(r.spec.trait.split_k, 1)
+        self.assertEqual(r.grid[2], 1)
+        r = dispatch_gemm_bf16(_bf16(4096, 4096, 4096))
+        self.assertEqual(r.candidate.spec_id, "cdna_dtl_pingpong_256x256")
         self.assertEqual(r.spec.trait.split_k, 1)
         self.assertEqual(r.grid[2], 1)
 

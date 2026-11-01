@@ -1014,7 +1014,7 @@ plus `build` means "compile every registered kernel for this problem" costs a
 bench script one loop.
 
 **The launch half is what was missing.** `run_manifest.py` already provides an
-operator-agnostic runner — `_launch_timed`, the perf/TFLOPs/GB-s computation, and
+operator-agnostic runner — `_launch_timed`, the throughput / bandwidth computation, and
 the verification plumbing are all generic. But it selected the per-problem
 adapter through a hardcoded string dispatch on the manifest `kind`:
 
@@ -1816,6 +1816,99 @@ refuses (or whose knobs no longer reproduce `config_key` after a version bump)
 falls through to the static order. Heuristics that still live in kernels, such
 as gfx942 `_tuned_waves_per_eu`, become rows of that table rather than code.
 
+### 11.3 Learned selection: the RCR GEMM selector
+
+The RCR UniversalGemm families (`dispatch/gemm`) are the first consumer of
+sweep data, through a model rather than a table
+(`dispatch/gemm/selector.py`):
+
+- **After the rules, never instead of them.** `dispatch_gemm_fp16` /
+  `_bf16` first take the registry's priority pick (the rule layer above),
+  then `selector.dispatch_override` ranks a gated candidate set and replaces
+  the rule pick only when the predicted gain clears the margin of the rule
+  pick's class. A request pinned to an `algorithm` / `spec_id`, an arch
+  without a shipped model, and `ROCKE_GEMM_SELECTOR=0` all get the rule pick
+  unchanged. The selector never widens coverage: a request the rules refuse
+  stays refused.
+- **Candidates.** The registered candidates that admit the request with their
+  `sweep_space` variants; one-step trait mutations of those specs over the
+  levers in `SELECTOR_NEIGHBOUR_LEVERS`; a small library of generic tilings
+  that tile the request exactly. Every spec passes the dispatcher's gates
+  (`universal_spec_supported`, `request_shape_supported`,
+  `launch_shape_error`); generated specs also pass `generated_spec_error`
+  (no ragged rows outside bounded bodies, whole-tile split-K slices, no new
+  stream-K / persistent pools, ...). Levers that exist only on
+  direct-to-LDS bodies (`_DTL_ONLY_LEVERS`, e.g. `dtl_stages`) are never
+  offered on global-load parents.
+- **gemm_skinny family** (`SELECTOR_SKINNY`). The registered skinny
+  candidates' configurations and their generated variants (split-K degree,
+  K chunk, prefetch depth, warp K split) join the ranked set, each checked by
+  `skinny_variant_error` (static validity, launch contract, no empty K
+  slice). Only models whose sidecar declares the family
+  (`families.skinny` with a feature version in `SKINNY_FEATURE_VERSIONS`)
+  rank them; older models keep ranking universal specs only. A skinny
+  decision is served by the opt-in `*_cdna_selected_skinny` candidate.
+- **Portfolio guard** (`SELECTOR_PORTFOLIO_GUARD`). A sidecar can ship
+  bootstrap-bag models (`guard.bags`); when `guard.enabled` is true, a switch
+  away from the rule pick also needs every bag to predict a gain above
+  `guard.min_gain`, else the rule pick is kept. The shipped gfx950 sidecar
+  ships the bags with the guard disabled: in same-process GPU evaluations
+  against the margin rule alone it kept the rule pick where the switch was
+  faster.
+- **Model.** A LightGBM text model per arch (`selector_models/`) walked in
+  Python (`TreeEnsemble`, NumPy-vectorised when available) over features that
+  are plain arithmetic on the request and the spec; the sidecar fixes the
+  feature order, the library, the levers and the margins. The C++ mirror for
+  hipTensor computes the same features and walks the same file.
+- **Identity.** A spec that is not a registered candidate's own `select_spec`
+  is served by the family's opt-in `*_cdna_selected` candidate, whose
+  `select_spec` is the selector's decision: pinning `spec_id="cdna_selected"`
+  reselects it and the `KernelId` names it. Its `sweep_space` is the
+  selector's top-k, which `dispatch_*_all` therefore exposes to autotuning.
+- **Autotune mode.** `dispatch/gemm/autotune.py` (`tune_gemm`) measures
+  instead of predicting: `mode="lite"` re-times the rule pick and the
+  selector's top-k; `mode="search"` runs the search engine
+  (`rocke.dispatch.tuning.search`) over the selector's candidate pool with the
+  model as the prior and the rule pick plus the top predictions as warm
+  starts. The caller's numeric check is mandatory.
+- **Tests.** Rule-layer tests run with the selector off (the root
+  `conftest.py` pins `ROCKE_GEMM_SELECTOR=0` unless a module sets
+  `GEMM_SELECTOR_TESTS = True`); the selector's own contract is in
+  `dispatch_tests/gemm/test_selector.py`.
+- **Native layouts (NN / TN / TT).** A non-RCR request is ranked by the
+  arch's `gemm_native_<arch>` model (feature version `r2n-v1`: the RCR
+  features plus data-layout features) over `native_candidates`: the
+  registered candidates' native specs, every `native_layout_alternatives`
+  form of every registered RCR spec (`form:<name>`), and one-step mutations
+  over the RCR and native levers through the same gates.
+  `ROCKE_GEMM_SELECTOR_NATIVE=0` (or the sidecar's `default_on`) keeps the
+  rule order; `ROCKE_GEMM_SELECTOR=0` turns both selectors off. The
+  `*_cdna_selected` candidate serves every layout.
+- **Plan level.** `dispatch/gemm/plan.py` (`plan_gemm_fp16` / `_bf16`)
+  chooses between the native kernel and transpose pre-pass + RCR kernel from
+  the native model's time predictions and a transpose cost model; the plan
+  names existing kernels and the workspace bytes (`ROCKE_GEMM_PLAN_PREPASS`
+  auto / off / always).
+- **K-proxy and wave-quantization rules (gfx950 RCR, post-selection).**
+  `common.r3_kproxy_dispatch` (`R3_KPROXY`): a request with K % 64 != 0
+  (K % 8 == 0) is dispatched as K rounded up to a multiple of 64 and the pick
+  runs at the real K with the DTL K tail (`g1_adapt_spec`); a pick that is not
+  a direct-to-LDS body taking the tail, or that fails `is_valid_spec` / the
+  launch contract at the real K, keeps the normal dispatch. Without it such
+  shapes fall to the tile_k 32 ring geometries. `common.r3_qgeo_spec`
+  (`R3_QGEO`): a dispatched 128x128x64 2x4-wave ring is replaced by the
+  256x192 / 192x256 4-wave interleave ring when that ring's quantised work
+  (waves of tiles x tile area, one workgroup per CU against the small ring's
+  two) is at most the small ring's; `R3_QGEO_KTAIL_ONLY` limits it to the
+  K-tail form. The explanation records both rules.
+- **Stream-K levers.** `gemm_universal.STREAMK_KLOOP_UNROLL` admits
+  kloop_unroll 2 / 4 on stream-K bodies (the staged K loop takes a runtime
+  tile count per item); `STREAMK_RESIDENCY_WPE` counts a `waves_per_eu` hint
+  as the register budget of the stream-K co-residency bound. A launcher must
+  still check the pool against the loaded kernel's occupancy
+  (`streamk_launch_error`). Stream-K is not dispatched by these rules: it
+  pays off only for a nearly empty last wave of output tiles.
+
 ---
 
 
@@ -2260,3 +2353,20 @@ piece in one file) and attention (`library/dispatch/attention`: `DenseSpace`
 in `dense_rules.py`, `UnifiedSpace` in `unified_rules.py`, factories in
 `candidate.py`; `WmmaSpace` in `wmma_rules.py` for a per-problem policy whose
 every knob is `recorded`, with its candidates in `gfx1151.py`).
+
+**Searching instead of sweeping.** Every tuned candidate also exposes
+`search_space(req) -> (knob_space, base)`, which
+`rocke.dispatch.tuning.search` turns into a `KnobSearchSpace`: mixed
+ordinal/categorical/bool/gated parameters derived from the axes, with the
+space's own `canonicalize` as validity and `config_key` as identity. The
+search strategies (differential evolution, successive halving with racing,
+TPE / GP with a selector prior, hill climbing with combination re-sweeps, a
+bandit portfolio) measure a budgeted handful of configs instead of the full
+walk, and `tune_candidate` records the winner as a `TunedRecord` (with its
+confirmed paired speedup over the candidate's default and that speedup's
+p-value) that `TuningDB.serve` / `TuningDB.pin` turn back into a pinned
+request, so dispatch serves it through the normal pin path above. Only a pick
+that beat the default beyond noise is served, and a stale record is refused,
+never substituted. The
+design, API and C++ port notes are in `dsl_docs/autotune/overview.md`
+("Search engine").

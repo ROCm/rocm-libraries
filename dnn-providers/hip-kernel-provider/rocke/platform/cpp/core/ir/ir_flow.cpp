@@ -791,9 +791,11 @@ void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
                         dwords);
         return;
     }
-    if(!(coherency >= 0 && coherency <= 3))
+    /* bits 0..1 = SC0 / NT; bit 4 = SC1 (gfx940+ scope bit, the CPol::SCC position) */
+    if(!((coherency & ~0x13) == 0))
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "coherency must be 0..3 (got %d)", coherency);
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "coherency must be 0..3, optionally | 16 (got %d)", coherency);
         return;
     }
     attrs = rocke_i_attrs(b);

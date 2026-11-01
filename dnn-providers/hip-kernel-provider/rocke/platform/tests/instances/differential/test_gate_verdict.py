@@ -939,6 +939,36 @@ class TestConfigEnumeration(unittest.TestCase):
             self.assertEqual(result["status"], "BATCH_INCOMPLETE")
             self.assertIn(f"{run_diff.MAX_CFG} records", result["error"])
 
+    def test_exhaustive_family_reaching_its_cap_is_incomplete(self):
+        success = run_diff.Emission(0, True, "same", "")
+        ended = run_diff.Emission(2, False, None, "unknown config")
+        family = "hiptensor_aot_jit_ew"
+        self.assertIn(family, run_diff.EXHAUSTIVE_FAMILIES)
+        cap = run_diff.config_limit(family)
+        capped = batch(*([success] * cap))
+        complete = batch(*([success] * (cap - 1)), ended)
+        for native, python, status in (
+            (capped, capped, "BATCH_INCOMPLETE"),
+            (capped, complete, "BATCH_INCOMPLETE"),
+            (complete, complete, "GREEN"),
+        ):
+            with (
+                mock.patch.object(
+                    run_diff, "compile_c", return_value=(Path("emit"), "")
+                ),
+                mock.patch.object(run_diff, "_run_native_configs", return_value=native),
+                mock.patch.object(run_diff, "_run_python_batch", return_value=python),
+            ):
+                result = run_diff.run_family(family, Path("archive"), "ll")
+            self.assertEqual(result["status"], status)
+            if status == "BATCH_INCOMPLETE":
+                self.assertIn("raise FAMILY_MAX_CFG", result["error"])
+
+    def test_exhaustive_families_are_parity_families(self):
+        # a renamed or removed pair must not leave a stale name behind (the gate checks the caps)
+        names = {name for name, _ in run_diff.find_families()}
+        self.assertLessEqual(set(run_diff.EXHAUSTIVE_FAMILIES), names)
+
     def test_default_cap_would_miss_late_drift(self):
         self.assertEqual(run_diff.config_limit("gemm"), 256)
         for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):

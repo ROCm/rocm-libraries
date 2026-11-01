@@ -18,10 +18,22 @@ from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY
 
 _REGISTRIES = (("fp16", GEMM_FP16_REGISTRY), ("bf16", GEMM_BF16_REGISTRY))
 
+# Declared coverage is checked with the learned selector on for every arch
+# that ships a model (root conftest): the opt-in ``*_cdna_selected`` candidate
+# serves requests only while the selector is on.
+GEMM_SELECTOR_TESTS = "1"
+
 # Wide enough that every registered tile divides some entry, and skinny enough
 # to reach the decode candidate.
 _DIMS = (1, 2, 16, 32, 64, 128, 256, 512, 1024, 4096)
 _SHAPES = tuple((m, n, k) for m in _DIMS for n in _DIMS for k in _DIMS)
+# Plus one large square: the 256x256 DTL ping-pong candidate is admitted by its
+# cost model only for shapes large enough to amortise its big tile; and one
+# large ragged shape: the padded 256x256 ring takes ragged M / N only where its
+# tiles fill the device.
+_SHAPES += ((8192, 8192, 8192), (8192, 8000, 8192))
+# the split-K ring is admitted for 12..200 tiles with long K only
+_SHAPES += ((1024, 768, 10752),)
 
 
 def _requests(arch: str, dtype: str):

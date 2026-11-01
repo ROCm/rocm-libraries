@@ -42,6 +42,14 @@
 #define HIPTENSOR_UNARY_INLINE __attribute__((noinline))
 #endif
 
+// Internal unary operator, never accepted through the API (the create functions only accept the
+// operators of hiptensorOperator_t that apply to one operand): its result is zero whatever the
+// operand. It replaces the operator of an operand whose scaling factor is zero, so that the
+// operand's value and the result of its own operator, which may be NaN or Inf, do not reach the
+// output as 0 * op(x).
+inline constexpr hiptensorOperator_t HIPTENSOR_OP_INTERNAL_ZERO
+    = static_cast<hiptensorOperator_t>(125);
+
 namespace ck
 {
     namespace tensor_operation
@@ -52,7 +60,8 @@ namespace ck
             using DoubleFunctionPtr = void (*)(double& y, double const& x);
 
             template <typename T>
-            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_identity(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_identity(T&       y,
+                                                                                      T const& x)
             {
                 y = x;
             };
@@ -77,7 +86,8 @@ namespace ck
                 y = 1 / x;
             }
             template <typename T>
-            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_sigmoid(T& y, T const& x)
+            __host__ __device__ HIPTENSOR_UNARY_INLINE static void hiptensor_sigmoid(T&       y,
+                                                                                     T const& x)
             {
                 y = 1 / (1 + std::exp(-x));
             }
@@ -261,6 +271,9 @@ namespace ck
                     case HIPTENSOR_OP_FLOOR:
                         hiptensor_floor(y, x);
                         break;
+                    case HIPTENSOR_OP_INTERNAL_ZERO:
+                        y = T(0);
+                        break;
                     default:
                         hiptensor_identity(y, x);
                         break;
@@ -294,7 +307,7 @@ namespace ck
                 }
 
                 // Generic overload for CK contraction kernels where ComputeDataType differs from DataType (e.g. BF16 data and F32 compute).
-                // CK calls a_element_op(ComputeType& y, const DataType& x) during the global->LDS transfer. 
+                // CK calls a_element_op(ComputeType& y, const DataType& x) during the global->LDS transfer.
                 // Without this, bhalf_t (unsigned short) silently integer-promotes to float for op(float& y, const bhalf_t& x), causing incorrect results.
                 // As template is less preferred than the explicit same-type overloads, (float,float), (double,double), etc. still be used firstly.
                 template <typename Y, typename X>

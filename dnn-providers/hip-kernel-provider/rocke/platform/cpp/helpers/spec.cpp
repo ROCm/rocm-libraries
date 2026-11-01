@@ -566,7 +566,7 @@ rocke_status_t
     rocke_sig_scalar(rocke_arena_t* arena, const char* name, const char* ty, rocke_sig_entry_t* out)
 {
     /* Python:
-     *   if ty not in ("i32", "i64", "f32"):
+     *   if ty not in ("i32", "i64", "f32", "f64"):
      *       raise ValueError(f"unsupported scalar arg type {ty!r}")
      *   return {"name": name, "type": ty} */
     char* name_copy;
@@ -576,7 +576,9 @@ rocke_status_t
     {
         return ROCKE_ERR_VALUE;
     }
-    if(ty == NULL || (strcmp(ty, "i32") != 0 && strcmp(ty, "i64") != 0 && strcmp(ty, "f32") != 0))
+    if(ty == NULL
+       || (strcmp(ty, "i32") != 0 && strcmp(ty, "i64") != 0 && strcmp(ty, "f32") != 0
+           && strcmp(ty, "f64") != 0))
     {
         return ROCKE_ERR_VALUE; /* the Python ValueError */
     }

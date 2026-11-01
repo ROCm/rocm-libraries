@@ -72,8 +72,9 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
     f16 represents equivalent support for both _Float16 and __half types.
 
 .. note::
-    For element-wise operations (permutation, binary, and trinary), all tensors share one data
-    type, and the compute type is the type of the alpha, beta, and gamma scalars.
+    For element-wise operations (permutation, binary, and trinary), the compute type is the type
+    of the alpha, beta, and gamma scalars. On the Composable Kernel backend all tensors share one
+    data type; the rows with several data types are served by the rocKE backend.
 
 .. tabularcolumns::
    |C|C|C|C|
@@ -115,6 +116,14 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     |     f32 / f32 / f32          |                     |                     |
 |                     +------------------------------+---------------------+                     |
 |                     |     f64 / f64 / f64          |  gfx90a+ gfx1250    |                     |
+|                     +------------------------------+---------------------+                     |
+|                     |     f16 / f32 / f32          |  gfx90a gfx942      |                     |
+|                     +------------------------------+  gfx950             |                     |
+|                     |     f32 / f64 / f64          |  (rocKE backend)    |                     |
+|                     +------------------------------+                     |                     |
+|                     |     f32, f16 / f16 / f32     |                     |                     |
+|                     +------------------------------+                     |                     |
+|                     |     f64, f32 / f32 / f64     |                     |                     |
 +---------------------+------------------------------+---------------------+---------------------+
 |                     |     f16 / f16 / f16          |  gfx9 gfx11 gfx12   | Rank1 - Rank6       |
 | Reduction           +------------------------------+                     |                     |
@@ -128,6 +137,14 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     +------------------------------+---------------------+                     |
 |                     |     f64 / f64 / f64          |  gfx90a+            |                     |
 +---------------------+------------------------------+---------------------+---------------------+
+
+For element-wise operations, Tc is the compute descriptor (the type of the scalars). The rows
+apply per operation as the :ref:`programmer's guide <elementwise-data-types>` lists them: for example
+bf16 / bf16 / bf16 is a permutation, a binary or a trinary operation of bf16 tensors, f32 / f64 / f64
+is a permutation of f32 data into f64 data, and "f32, f16 / f16 / f32" is a binary operation of an f32
+A and an f16 C into an f16 D. The rows marked (rocKE backend) are served by the rocKE backend
+(``HIPTENSOR_BACKEND=rocke``); the Composable Kernel backend, the default, has no kernels for them and
+``hiptensorCreatePlan`` returns ``HIPTENSOR_STATUS_NOT_SUPPORTED``.
 
 Limitations
 ------------

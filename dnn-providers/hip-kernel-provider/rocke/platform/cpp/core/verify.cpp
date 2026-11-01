@@ -274,6 +274,8 @@ static int is_unary_same_type(rocke_opcode_t o)
     case ROCKE_OP_MATH_SQRT:
     case ROCKE_OP_MATH_RSQRT:
     case ROCKE_OP_MATH_TANH:
+    case ROCKE_OP_MATH_EXP:
+    case ROCKE_OP_MATH_LOG:
         return 1;
     default:
         return 0;
@@ -339,6 +341,7 @@ static void check_op(verifier_t* v, const rocke_op_t* op);
 static const char* const k_fence_scopes[] = {"workgroup", "agent", "system", NULL};
 static const char* const k_fence_orderings[] = {"acquire", "release", "acq_rel", "seq_cst", NULL};
 static const char* const k_flag_store_orderings[] = {"monotonic", "release", "seq_cst", NULL};
+static const char* const k_flag_wait_orderings[] = {"acquire", "monotonic", NULL};
 
 static bool in_set(const char* s, const char* const* set)
 {
@@ -494,9 +497,12 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    tn(op->results[0]->type),
                    tn(op->operands[0]->type));
         }
-        if(o == ROCKE_OP_MATH_TANH && strcmp(tn(op->operands[0]->type), "f32") != 0)
+        if((o == ROCKE_OP_MATH_TANH || o == ROCKE_OP_MATH_EXP || o == ROCKE_OP_MATH_LOG)
+           && strcmp(tn(op->operands[0]->type), "f32") != 0
+           && strcmp(tn(op->operands[0]->type), "f64") != 0)
         {
-            v_errf(v, op, "math.tanh requires f32 operand, got %s", tn(op->operands[0]->type));
+            v_errf(
+                v, op, "%s requires f32 or f64 operand, got %s", name, tn(op->operands[0]->type));
         }
     }
     else if(is_cmp(o))
@@ -695,8 +701,10 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                 v_errf(v, op, "%s: %s must be i32, got %s", name, what[i], tn(t));
             }
         }
-        check_sync_attrs(
-            v, op, o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE ? k_flag_store_orderings : NULL);
+        check_sync_attrs(v,
+                         op,
+                         o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE ? k_flag_store_orderings
+                                                                : k_flag_wait_orderings);
     }
     else if(o == ROCKE_OP_TILE_GLOBAL_PTR_OFFSET)
     {

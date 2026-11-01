@@ -165,7 +165,51 @@ def collect_ref_shas(results):
 
 
 MAX_CFG = 256  # default cap on config enumeration per family
-FAMILY_MAX_CFG = {"gfx1250_lowering": 512}
+FAMILY_MAX_CFG = {
+    "gemm_vp_h16": 512,
+    "gemm_vp_menu": 1024,
+    "gemm_vp_modes": 4096,
+    "gemm_vp_pick": 1024,
+    "gemm_vp_pro": 4096,
+    "gemm_vp_pro2": 4096,
+    "gemm_vp_sk": 512,
+    "gfx1250_lowering": 512,
+    "gett_f64_pack": 1024,
+    "hiptensor_aot_dgett": 512,
+    "hiptensor_aot_ew": 512,
+    "hiptensor_aot_ewp": 2048,
+    "hiptensor_aot_jit_ew": 2048,
+    "hiptensor_aot_rgett": 512,
+    "hiptensor_aot_rreduce": 4096,
+    "tensor_gett_aot": 512,
+}
+# Families whose every config must be compared: the kernel sets of hipTensor's kernel pack and
+# JIT, which the pack ships whole. Reaching the cap before the emitters' end record is an
+# incomplete batch for them (raise the cap), not a sampled family.
+EXHAUSTIVE_FAMILIES = frozenset(
+    {
+        "gemm_vp_h16",
+        "gemm_vp_menu",
+        "gemm_vp_modes",
+        "gemm_vp_pick",
+        "gemm_vp_pro",
+        "gemm_vp_pro2",
+        "gemm_vp_sk",
+        "gett_f64_pack",
+        "hiptensor_aot_dgett",
+        "hiptensor_aot_ew",
+        "hiptensor_aot_ewf",
+        "hiptensor_aot_ewp",
+        "hiptensor_aot_ewt",
+        "hiptensor_aot_ewv",
+        "hiptensor_aot_jit_ew",
+        "hiptensor_aot_reduce",
+        "hiptensor_aot_rgett",
+        "hiptensor_aot_rreduce",
+        "tensor_gett_aot",
+        "tensor_pack",
+    }
+)
 TIMEOUT = 120  # seconds per emitter invocation
 
 
@@ -697,12 +741,15 @@ def _config_record(
     return record
 
 
-def _batch_complete(emissions: list[Emission], mode: str, limit: int = MAX_CFG) -> bool:
-    """Require a hard cap or an explicit terminal record from each producer."""
+def _batch_complete(
+    emissions: list[Emission], mode: str, limit: int = MAX_CFG, exhaustive: bool = False
+) -> bool:
+    """Require a hard cap or an explicit terminal record from each producer. An exhaustive
+    family must end before its cap."""
     if not emissions:
         return False
     tail = emissions[-1]
-    if len(emissions) == limit:
+    if len(emissions) == limit and not exhaustive:
         return True
     return (
         _is_end_emission(tail)
@@ -741,15 +788,28 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
 
     c_emissions = c_batch.emissions
     p_emissions = p_batch.emissions
+    exhaustive = name in EXHAUSTIVE_FAMILIES
     incomplete = []
-    if not _batch_complete(c_emissions, mode, limit):
+    for side, emissions in (("native", c_emissions), ("Python", p_emissions)):
+        if (
+            exhaustive
+            and len(emissions) == limit
+            and not _is_end_emission(emissions[-1])
+        ):
+            incomplete.append(
+                f"{side} has more than the {limit} configs of the cap of exhaustive family "
+                f"{name}: raise FAMILY_MAX_CFG[{name!r}]"
+            )
+    if incomplete:
+        return [], None, False, "; ".join(incomplete)
+    if not _batch_complete(c_emissions, mode, limit, exhaustive):
         detail = (
             f": {c_emissions[-1].error}"
             if c_emissions and c_emissions[-1].error
             else ""
         )
         incomplete.append(f"native returned {len(c_emissions)} records{detail}")
-    if not _batch_complete(p_emissions, mode, limit):
+    if not _batch_complete(p_emissions, mode, limit, exhaustive):
         detail = (
             f": {p_emissions[-1].error}"
             if p_emissions and p_emissions[-1].error

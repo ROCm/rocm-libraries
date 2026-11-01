@@ -40,7 +40,7 @@ def pack_args(
     lands 4 bytes before its expected kernarg slot and the kernel
     reads garbage as the pointer, then segfaults on first access.
 
-    Supported types: ``ptr<..., global>``, ``i32``, ``i64``, ``f32``.
+    Supported types: ``ptr<..., global>``, ``i32``, ``i64``, ``f32``, ``f64``.
     """
     # Map manifest type -> (struct format char, size in bytes, align).
     # The Python struct format is built with no implicit padding;
@@ -49,6 +49,7 @@ def pack_args(
         "i32": ("i", 4, 4),
         "i64": ("q", 8, 8),
         "f32": ("f", 4, 4),
+        "f64": ("d", 8, 8),
     }
     fmt_parts: List[str] = ["<"]
     packed: List[Any] = []
@@ -64,7 +65,7 @@ def pack_args(
             arg_val: Any = _as_ptr(v)
         elif ty in _TY_FMT:
             fmt_char, size, align = _TY_FMT[ty]
-            if ty == "f32":
+            if ty in ("f32", "f64"):
                 arg_val = float(v)
             else:
                 arg_val = int(v)
@@ -100,9 +101,10 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
         "i32": ("i", 4, 4),
         "i64": ("q", 8, 8),
         "f32": ("f", 4, 4),
+        "f64": ("d", 8, 8),
     }
     fmt_parts: List[str] = ["<"]
-    # plan: (name, kind) with kind in {"ptr", "f32", "int"} -- the only
+    # plan: (name, kind) with kind in {"ptr", "float", "int"} -- the only
     # per-call work is reading values[name] and coercing by kind.
     plan: List[Tuple[str, str]] = []
     offset = 0
@@ -113,7 +115,7 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
             fmt_char, size, align, kind = "Q", 8, 8, "ptr"
         elif ty in _TY_FMT:
             fmt_char, size, align = _TY_FMT[ty]
-            kind = "f32" if ty == "f32" else "int"
+            kind = "float" if ty in ("f32", "f64") else "int"
         else:
             raise ValueError(f"unsupported kernel arg type {ty!r} for {name}")
         pad = (-offset) % align
@@ -133,7 +135,7 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
             v = values[name]
             if kind == "ptr":
                 out.append(_as_ptr(v))
-            elif kind == "f32":
+            elif kind == "float":
                 out.append(float(v))
             else:
                 out.append(int(v))
@@ -179,6 +181,8 @@ def pack_args_kernelparams(
             out.append(ctypes.c_int64(int(v)))
         elif ty == "f32":
             out.append(ctypes.c_float(float(v)))
+        elif ty == "f64":
+            out.append(ctypes.c_double(float(v)))
         else:
             raise ValueError(f"unsupported kernel arg type {ty!r} for {name}")
     return out

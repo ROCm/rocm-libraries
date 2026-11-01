@@ -27,6 +27,7 @@
 
 #include <algorithm>
 
+#include "ck_tensor_limits.hpp"
 #include "common.hpp"
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
@@ -391,8 +392,8 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
                 logLevel
                 & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
-                                                     // PERF_TRACE so the CK backend does not run its
-                                                     // internal cold/hot timed loop
+                // PERF_TRACE so the CK backend does not run its
+                // internal cold/hot timed loop
 
             hiptensorTensorDescriptor_t descA = nullptr;
             CHECK_HIPTENSOR_ERROR(
@@ -462,8 +463,21 @@ namespace hiptensor
 
             resource->setupWorkspace(worksize);
 
-            hiptensorPlan_t plan;
-            CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
+            hiptensorPlan_t plan = nullptr;
+            auto planStatus      = hiptensorCreatePlan(handle, &plan, desc, planPref, worksize);
+            // No plan is created for tensors the kernels cannot address, which the bench
+            // configurations include.
+            if(planStatus == HIPTENSOR_STATUS_NOT_SUPPORTED && exceedsCkTensorLimits(*desc))
+            {
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descA));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descC));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descD));
+                GTEST_SKIP() << "Tensor size not supported by the kernels";
+            }
+            CHECK_HIPTENSOR_ERROR(planStatus);
 
             void*  work = resource->deviceWorkspace().get();
             double alphaValue{};
@@ -512,12 +526,12 @@ namespace hiptensor
 
             size_t sizeA = std::accumulate(extentA.begin(),
                                            extentA.end(),
-                                           hiptensorDataTypeSize(acDataType),
+                                           size_t(hiptensorDataTypeSize(acDataType)),
                                            std::multiplies<size_t>());
 
             size_t sizeCD = std::accumulate(extentCD.begin(),
                                             extentCD.end(),
-                                            hiptensorDataTypeSize(acDataType),
+                                            size_t(hiptensorDataTypeSize(acDataType)),
                                             std::multiplies<size_t>());
 
             mElapsedTimeMs        = float64_t(timeMs) / hotRuns;
@@ -593,6 +607,18 @@ namespace hiptensor
                     auto reducedSize = resource->getCurrentInputElementCount()
                                        / resource->getCurrentOutputElementCount();
                     double tolerance = reducedSize * getEpsilon(computeDataType);
+                    // A reduction that keeps every mode is checked against the elementwise CPU
+                    // reference, which applies alpha and beta as float; the library applies
+                    // them in double.
+                    if(modeD.size() == modeA.size())
+                    {
+                        auto floatRounding = [](double scalar) {
+                            return scalar == 0.0 ? 0.0
+                                                 : std::fabs(scalar - static_cast<float>(scalar))
+                                                       / std::fabs(scalar);
+                        };
+                        tolerance += 2 * (floatRounding(alpha) + floatRounding(beta));
+                    }
                     std::tie(mValidationResult, mMaxRelativeError)
                         = compareEqualLaunchKernel<float64_t>(
                             (float64_t*)resource->deviceD().get(),

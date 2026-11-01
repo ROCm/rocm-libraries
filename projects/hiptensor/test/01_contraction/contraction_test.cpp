@@ -27,11 +27,14 @@
 
 #include <algorithm>
 
+#include "ck_tensor_limits.hpp"
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 
+#include "backend/backend.hpp"
 #include "contraction/contraction_cpu_reference.hpp"
 #include "contraction_test.hpp"
+#include "contraction_test_utils.hpp"
 #include "util.hpp"
 #include "utils.hpp"
 
@@ -379,8 +382,8 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
                 logLevel
                 & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
-                                                     // PERF_TRACE so the CK backend does not run its
-                                                     // internal cold/hot timed loop
+            // PERF_TRACE so the CK backend does not run its
+            // internal cold/hot timed loop
 
             uint32_t alignmentRequirement = 1;
             // lengths - m, n, u, v, h, k
@@ -839,8 +842,13 @@ namespace hiptensor
              */
             ScalarData alphaBuf;
             ScalarData betaBuf;
-            writeVal(&alphaBuf, computeType, ScalarData(computeType, alpha[0], alpha[1]));
-            writeVal(&betaBuf, computeType, ScalarData(computeType, beta[0], beta[1]));
+            // Real scalars are configured with a single value.
+            writeVal(&alphaBuf,
+                     computeType,
+                     ScalarData(computeType, alpha[0], alpha.size() > 1 ? alpha[1] : 0.0));
+            writeVal(&betaBuf,
+                     computeType,
+                     ScalarData(computeType, beta[0], beta.size() > 1 ? beta[1] : 0.0));
 
             /**************************
             * Disable Plan Cache for tests
@@ -862,7 +870,14 @@ namespace hiptensor
                 CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
                 plan = nullptr;
             }
-            CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
+            // No plan is created for tensors the kernels cannot address, which the bench
+            // configurations include. TearDown releases the rest.
+            auto planStatus = hiptensorCreatePlan(handle, &plan, desc, planPref, worksize);
+            if(planStatus == HIPTENSOR_STATUS_NOT_SUPPORTED && exceedsCkTensorLimits(*desc))
+            {
+                GTEST_SKIP() << "Tensor size not supported by the kernels";
+            }
+            CHECK_HIPTENSOR_ERROR(planStatus);
 
             auto resource = getResource();
 
@@ -907,45 +922,32 @@ namespace hiptensor
             auto timeMs = 0.0f;
             CHECK_HIP_ERROR(hipEventElapsedTime(&timeMs, startEvent, stopEvent));
 
-            size_t totalLength = std::accumulate(d_ms_ns->mLengths.begin(),
-                                                 d_ms_ns->mLengths.end(),
-                                                 size_t(1),
-                                                 std::multiplies<size_t>());
-
-            // TODO: make totalLength calculation robust to different modes
-            // currently assumes modes in the following:
-            // Rank 2 ex:
-            // [[modesA], [modesB], [modesD]]
-            // [[0, 1, 4, 5], [2, 3, 4, 5], [0, 1, 2, 3]]
-
-            // iterate through "K" dimension
-            auto rank = a_ms_ks->mLengths.size() / 2;
-            for(auto i = 0; i < rank; i++)
-            {
-                totalLength *= a_ms_ks->mLengths[i + rank];
-            }
-
-            mElapsedTimeMs        = float64_t(timeMs) / hotRuns;
-            mTotalGFlops          = 2.0 * totalLength * 1e-9;
+            mElapsedTimeMs = float64_t(timeMs) / hotRuns;
+            mTotalGFlops   = contractionGFlops(
+                desc->mModeA, a_ms_ks->mLengths, desc->mModeB, b_ns_ks->mLengths, computeType);
             mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
 
             size_t sizeA = std::accumulate(a_ms_ks->mLengths.begin(),
                                            a_ms_ks->mLengths.end(),
-                                           hiptensorDataTypeSize(ADataType),
+                                           size_t(hiptensorDataTypeSize(ADataType)),
                                            std::multiplies<size_t>());
 
             size_t sizeB = std::accumulate(b_ns_ks->mLengths.begin(),
                                            b_ns_ks->mLengths.end(),
-                                           hiptensorDataTypeSize(BDataType),
+                                           size_t(hiptensorDataTypeSize(BDataType)),
                                            std::multiplies<size_t>());
 
             size_t sizeD = std::accumulate(d_ms_ns->mLengths.begin(),
                                            d_ms_ns->mLengths.end(),
-                                           hiptensorDataTypeSize(DDataType),
+                                           size_t(hiptensorDataTypeSize(DDataType)),
                                            std::multiplies<size_t>());
 
             mTotalGBytes = sizeA + sizeB + sizeD;
-            mTotalGBytes += (betaBuf.mReal != 0.0) ? sizeD : 0;
+            // C is read only when beta is non-zero. betaBuf holds beta in the compute type, so
+            // test the configured value.
+            bool betaIsZero
+                = std::all_of(beta.begin(), beta.end(), [](double b) { return b == 0.0; });
+            mTotalGBytes += betaIsZero ? 0 : sizeD;
             mTotalGBytes /= 1e9;
             mGBytesPerSec = mTotalGBytes / (mElapsedTimeMs * 1e-3);
 
@@ -993,7 +995,10 @@ namespace hiptensor
                                                 size_t{1},
                                                 std::multiplies<size_t>());
 
-                size_t elementsCD = sizeD / hiptensorDataTypeSize(ADataType);
+                size_t elementsD = std::accumulate(d_ms_ns->mLengths.begin(),
+                                                   d_ms_ns->mLengths.end(),
+                                                   size_t{1},
+                                                   std::multiplies<size_t>());
 
                 auto   eps       = getEpsilon(computeType);
                 double tolerance = 2 * nelems_k * eps;
@@ -1010,43 +1015,40 @@ namespace hiptensor
                     tolerance += epsilon * 2;
                 }
 
-                if(DDataType == HIPTENSOR_R_16F)
+                // The CPU reference applies alpha and beta as float, as the Composable Kernel
+                // instances do. A backend that applies them in the 64-bit compute type differs
+                // from it by the float rounding of the scalars.
+                bool const servedByCk
+                    = plan->mBackend == nullptr || plan->mBackend->primary == nullptr
+                      || plan->mBackend->primary->kernelId().backend == backend::kCkBackendName;
+                if(!servedByCk
+                   && (computeType == HIPTENSOR_COMPUTE_DESC_64F
+                       || computeType == HIPTENSOR_COMPUTE_DESC_C64F))
                 {
-                    std::tie(mValidationResult, mMaxRelativeError)
-                        = compareEqualLaunchKernel<_Float16>((_Float16*)resource->deviceD().get(),
-                                                             (_Float16*)reference.get(),
-                                                             elementsCD,
-                                                             computeType,
-                                                             tolerance);
+                    auto floatRounding = [](std::vector<double> const& scalar) {
+                        double rounding = 0.0;
+                        for(double part : scalar)
+                        {
+                            if(part != 0.0)
+                            {
+                                rounding = std::max(rounding,
+                                                    std::fabs(part - static_cast<float>(part))
+                                                        / std::fabs(part));
+                            }
+                        }
+                        return rounding;
+                    };
+                    tolerance += 2 * (floatRounding(alpha) + floatRounding(beta));
                 }
-                else if(DDataType == HIPTENSOR_R_16BF)
-                {
-                    std::tie(mValidationResult, mMaxRelativeError)
-                        = compareEqualLaunchKernel<hip_bfloat16>(
-                            (hip_bfloat16*)resource->deviceD().get(),
-                            (hip_bfloat16*)reference.get(),
-                            elementsCD,
-                            computeType,
-                            tolerance);
-                }
-                else if(DDataType == HIPTENSOR_R_32F || DDataType == HIPTENSOR_C_32F)
-                {
-                    std::tie(mValidationResult, mMaxRelativeError)
-                        = compareEqualLaunchKernel<float>((float*)resource->deviceD().get(),
-                                                          (float*)reference.get(),
-                                                          elementsCD,
-                                                          computeType,
-                                                          tolerance);
-                }
-                else if(DDataType == HIPTENSOR_R_64F || DDataType == HIPTENSOR_C_64F)
-                {
-                    std::tie(mValidationResult, mMaxRelativeError)
-                        = compareEqualLaunchKernel<double>((double*)resource->deviceD().get(),
-                                                           (double*)reference.get(),
-                                                           elementsCD,
-                                                           computeType,
-                                                           tolerance);
-                }
+
+                // Both parts of every complex element are compared.
+                std::tie(mValidationResult, mMaxRelativeError)
+                    = compareContractionOutput(DDataType,
+                                               resource->deviceD().get(),
+                                               reference.get(),
+                                               elementsD,
+                                               computeType,
+                                               tolerance);
 
                 EXPECT_TRUE(mValidationResult) << "Max relative error: " << mMaxRelativeError;
             } // if (testOptions->performValidation())

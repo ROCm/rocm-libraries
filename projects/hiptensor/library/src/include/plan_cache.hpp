@@ -27,9 +27,12 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <hiptensor/hiptensor_types.h>
@@ -66,18 +69,18 @@ namespace hiptensor
 
         UpdatablePriorityQueue() = default;
 
+        // Copies own their elements: sharing them would let either queue free the other's.
         UpdatablePriorityQueue(const UpdatablePriorityQueue& other)
-            : mHeapData(other.mHeapData)
-            , mKeyToElement(other.mKeyToElement)
         {
+            copyElements(other);
         }
 
         UpdatablePriorityQueue& operator=(const UpdatablePriorityQueue& other)
         {
             if(this != &other)
             {
-                mHeapData     = other.mHeapData;
-                mKeyToElement = other.mKeyToElement;
+                clear();
+                copyElements(other);
             }
             return (*this);
         }
@@ -153,17 +156,45 @@ namespace hiptensor
             return mHeapData.size();
         }
 
-        ~UpdatablePriorityQueue()
+        //All (key, priority) pairs, in no particular order
+        std::vector<std::pair<T, PriorityType>> items() const
+        {
+            std::vector<std::pair<T, PriorityType>> result;
+            result.reserve(mHeapData.size());
+            for(auto elem : mHeapData)
+                result.emplace_back(elem->key, elem->priority);
+            return result;
+        }
+
+        //Remove all elements
+        void clear()
         {
             for(auto elem : mHeapData)
                 delete elem;
             mHeapData.clear();
+            mKeyToElement.clear();
+        }
+
+        ~UpdatablePriorityQueue()
+        {
+            clear();
         }
 
     private:
         std::vector<Element*>           mHeapData;
         std::unordered_map<T, Element*> mKeyToElement;
         Compare                         compare;
+
+        void copyElements(const UpdatablePriorityQueue& other)
+        {
+            mHeapData.reserve(other.mHeapData.size());
+            for(auto elem : other.mHeapData)
+            {
+                Element* item = new Element(*elem);
+                mHeapData.push_back(item);
+                mKeyToElement[item->key] = item;
+            }
+        }
 
         void siftUp(std::size_t index)
         {
@@ -203,35 +234,64 @@ namespace hiptensor
         }
     };
 
+    //! A backend whose solutions a plan cache holds, with the version of its kernel arguments.
+    //! Plan cache files record the backends of the cache that wrote them.
+    struct PlanCacheBackend
+    {
+        std::string name;
+        uint32_t    kernelAbi;
+
+        bool operator==(PlanCacheBackend const& other) const
+        {
+            return name == other.name && kernelAbi == other.kernelAbi;
+        }
+    };
+
     class PlanCache
     {
     public:
-        using HashId     = std::size_t;
-        using Uid        = std::size_t;
-        using time_point = std::chrono::system_clock::time_point;
+        using HashId = std::size_t;
+        using Uid    = std::size_t;
+        //Order of last use: a larger stamp is more recent
+        using UseStamp = uint64_t;
 
-        PlanCache();
+        //archName and cuCount identify the device: they are part of every key and of the
+        //plan cache file, which is only read back on the same kind of device. The file also
+        //records the backends, and is only read back by a library with the same backends.
+        PlanCache(std::string                   archName,
+                  uint32_t                      cuCount,
+                  std::vector<PlanCacheBackend> backends = {});
         ~PlanCache() = default;
 
-        //Get hash ID from peration descriptor pointer
-        //Calculate hash key by: hash({Tag, DatatypeA, DatatypeB, DatatypeC, DatatypeD, DatatypeCompute, mOperationType, mContractionOpId, lengths, strides, modes})
-        HashId getHashID(hiptensorOperationDescriptor_t desc);
+        //Get hash ID from operation descriptor pointer, for the solutions of a backend
+        //Calculate hash key by: hash({device, backend, Tag, DatatypeA..E, DatatypeCompute, mOperationType, mContractionOpId, operators, ranks, lengths, strides, modes})
+        HashId getHashID(hiptensorOperationDescriptor_t desc, std::string const& backend);
 
-        //Query solution Uid through operation descriptor pointer
-        Uid querySolutionUid(hiptensorOperationDescriptor_t desc);
+        //Query solution Uid of a backend through operation descriptor pointer
+        Uid querySolutionUid(hiptensorOperationDescriptor_t desc, std::string const& backend);
+
+        //Query solution Uid through hash key, 0 if there is none
+        Uid querySolutionUidByHash(HashId hashId);
 
         //Add a cache record to the solution table
-        //If the table size exceeds the maximum size, then remove one LRU(least-recently-used) record
+        //If the table is full and the key is new, then remove the LRU(least-recently-used) record first
         void addCacheLine(HashId hashId, Uid sol_id);
 
         //Function for serialization to disk
         hiptensorStatus_t writeFile(const char fileName[]);
 
-        //Function for deserialization from disk
-        hiptensorStatus_t readFile(const char fileName[]);
+        //Function for deserialization from disk. Replaces the cache lines, keeps the capacity.
+        //On success numCachelinesRead is the number of lines read. A file written by another
+        //hipTensor version, for another device or by a library with other backends returns
+        //HIPTENSOR_STATUS_INVALID_VALUE, and a
+        //file with more lines than the capacity returns HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE
+        //with numCachelinesRead set to the number of lines it needs. Unreadable or damaged files
+        //return HIPTENSOR_STATUS_IO_ERROR. On error the cache is unchanged.
+        hiptensorStatus_t readFile(const char fileName[], uint32_t* numCachelinesRead);
 
         uint32_t getCachelinesNum()
         {
+            std::scoped_lock lock(mMutex);
             return mPlanCacheLines.size();
         }
 
@@ -239,14 +299,25 @@ namespace hiptensor
         void resize(uint32_t numEntries);
 
     private:
+        //Device the cached solutions were selected for
+        std::string mArchName;
+        uint32_t    mCuCount;
+        HashId      mDeviceHash;
+
+        //Backends the cached solutions belong to
+        std::vector<PlanCacheBackend> mBackends;
+
         //Max size of the hash table
         uint32_t mMaxCachelines;
+
+        //Stamp given to the next use of a cache line
+        UseStamp mNextUseStamp;
 
         //Hash table to store solution uid for lookup by hash key
         std::unordered_map<HashId, Uid> mPlanCacheLines;
 
-        //Heap to sort the solution uid by used time
-        UpdatablePriorityQueue<HashId, time_point> mPqUidUsedTimes;
+        //Heap to sort the solution uid by last use
+        UpdatablePriorityQueue<HashId, UseStamp> mPqUidUsedTimes;
 
         //Mutex to implement the plan cache in a thread-safe manner
         mutable std::mutex mMutex;
@@ -256,6 +327,9 @@ namespace hiptensor
 
         //Update cache line used time
         void updateCachelineTime(HashId hashId);
+
+        //Remove the LRU(least-recently-used) record
+        void evictLeastRecentlyUsed();
     };
 
 } // namespace hiptensor

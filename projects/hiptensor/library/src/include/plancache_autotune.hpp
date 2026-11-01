@@ -91,7 +91,8 @@ namespace hiptensor
                 return;
 
             // Look for solution from memory cache (Plan Cache) or do autotuning for Plan Cache
-            auto Uid = handle->getPlanCache()->querySolutionUid(plan->mOpDesc);
+            auto Uid
+                = handle->getPlanCache()->querySolutionUid(plan->mOpDesc, backend::kCkBackendName);
             if(Uid > 0ull)
             {
                 //If there is a solution already in the Plan Cache, directly set solution from Plan Cache
@@ -101,7 +102,13 @@ namespace hiptensor
                                candidates.begin(),
                                [](auto* p) { return (T*)p; });
 
-                plan->mPref->mSolution = findSolutionByUid(candidates, Uid);
+                // Keep the plan's solution when the cached one is not among the candidates. The
+                // trinary contraction plan, for example, keeps no candidates for ACTOR_CRITIC.
+                auto* cached = findSolutionByUid(candidates, Uid);
+                if(cached != nullptr)
+                {
+                    plan->mPref->mSolution = cached;
+                }
             }
             else if(plan->mPref->mAutotuneMode == HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL)
             {
@@ -152,7 +159,7 @@ namespace hiptensor
                || plan->mPref->mAutotuneMode == HIPTENSOR_AUTOTUNE_MODE_NONE)
             {
                 hiptensor::PlanCache::HashId hashID
-                    = handle->getPlanCache()->getHashID(plan->mOpDesc);
+                    = handle->getPlanCache()->getHashID(plan->mOpDesc, backend::kCkBackendName);
                 T* solution = (T*)mBestSolution[autotuneType].second;
                 if(solution == nullptr)
                     solution = (T*)(plan->mPref->mSolution);

@@ -132,28 +132,28 @@ namespace hiptensor
         {
         case HIPTENSOR_COMPUTE_DESC_16F:
         {
-            return ScalarData(id, static_cast<double>(*(_Float16*)value));
+            return ScalarData(id, static_cast<double>(loadUnaligned<_Float16>(value)));
         }
         case HIPTENSOR_COMPUTE_DESC_16BF:
         {
-            return ScalarData(id, static_cast<double>(*(hip_bfloat16*)value));
+            return ScalarData(id, static_cast<double>(loadUnaligned<hip_bfloat16>(value)));
         }
         case HIPTENSOR_COMPUTE_DESC_32F:
         {
-            return ScalarData(id, static_cast<double>(*(float*)value));
+            return ScalarData(id, static_cast<double>(loadUnaligned<float>(value)));
         }
         case HIPTENSOR_COMPUTE_DESC_64F:
         {
-            return ScalarData(id, *(double*)value);
+            return ScalarData(id, loadUnaligned<double>(value));
         }
         case HIPTENSOR_COMPUTE_DESC_C32F:
         {
-            auto complex = *(hipFloatComplex*)value;
+            auto complex = loadUnaligned<hipFloatComplex>(value);
             return ScalarData(id, complex.x, complex.y);
         }
         case HIPTENSOR_COMPUTE_DESC_C64F:
         {
-            auto complex = *(hipDoubleComplex*)value;
+            auto complex = loadUnaligned<hipDoubleComplex>(value);
             return ScalarData(id, complex.x, complex.y);
         }
         default:
@@ -173,32 +173,34 @@ namespace hiptensor
         {
         case HIPTENSOR_COMPUTE_DESC_16F:
         {
-            *(_Float16*)addr = static_cast<_Float16>(value.mReal);
+            storeUnaligned<_Float16>(const_cast<void*>(addr), static_cast<_Float16>(value.mReal));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_16BF:
         {
-            *(hip_bfloat16*)addr = static_cast<hip_bfloat16>(value.mReal);
+            storeUnaligned<hip_bfloat16>(const_cast<void*>(addr),
+                                         static_cast<hip_bfloat16>(value.mReal));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_32F:
         {
-            *(float*)addr = static_cast<float>(value.mReal);
+            storeUnaligned<float>(const_cast<void*>(addr), static_cast<float>(value.mReal));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_64F:
         {
-            *(double*)addr = value.mReal;
+            storeUnaligned<double>(const_cast<void*>(addr), value.mReal);
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_C32F:
         {
-            *(hipFloatComplex*)addr = hipComplexDoubleToFloat(value.mComplex);
+            storeUnaligned<hipFloatComplex>(const_cast<void*>(addr),
+                                            hipComplexDoubleToFloat(value.mComplex));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_C64F:
         {
-            *(hipDoubleComplex*)addr = value.mComplex;
+            storeUnaligned<hipDoubleComplex>(const_cast<void*>(addr), value.mComplex);
             return;
         }
         default:
@@ -323,6 +325,40 @@ namespace hiptensor
             return "HIPTENSOR_OP_MIN";
         default:
             return "HIPTENSOR_OP_UNKNOWN";
+        }
+    }
+
+    bool isUnaryOperator(hiptensorOperator_t op)
+    {
+        switch(op)
+        {
+        case HIPTENSOR_OP_IDENTITY:
+        case HIPTENSOR_OP_SQRT:
+        case HIPTENSOR_OP_RELU:
+        case HIPTENSOR_OP_CONJ:
+        case HIPTENSOR_OP_RCP:
+        case HIPTENSOR_OP_SIGMOID:
+        case HIPTENSOR_OP_TANH:
+        case HIPTENSOR_OP_EXP:
+        case HIPTENSOR_OP_LOG:
+        case HIPTENSOR_OP_ABS:
+        case HIPTENSOR_OP_NEG:
+        case HIPTENSOR_OP_SIN:
+        case HIPTENSOR_OP_COS:
+        case HIPTENSOR_OP_TAN:
+        case HIPTENSOR_OP_SINH:
+        case HIPTENSOR_OP_COSH:
+        case HIPTENSOR_OP_ASIN:
+        case HIPTENSOR_OP_ACOS:
+        case HIPTENSOR_OP_ATAN:
+        case HIPTENSOR_OP_ASINH:
+        case HIPTENSOR_OP_ACOSH:
+        case HIPTENSOR_OP_ATANH:
+        case HIPTENSOR_OP_CEIL:
+        case HIPTENSOR_OP_FLOOR:
+            return true;
+        default:
+            return false;
         }
     }
 

@@ -28,17 +28,10 @@
 #include <numeric>
 #include <string>
 
-#ifndef CHECK_HIP_ALLOC
-#define CHECK_HIP_ALLOC(status)               \
-    if(status != hipSuccess)                  \
-    {                                         \
-        return HIPTENSOR_STATUS_ALLOC_FAILED; \
-    }
-#endif
-
 #include <ck/stream_config.hpp>
 
 #include "contraction_selection.hpp"
+#include "hip_error.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
 #include "performance.hpp"
@@ -46,6 +39,28 @@
 
 namespace hiptensor
 {
+    // Number of elements a tensor's lengths and strides can address: one past its
+    // largest offset. Falls back to the packed element count without strides.
+    static std::size_t elementSpaceFromLengthsAndStrides(std::vector<std::size_t> const& lengths,
+                                                         std::vector<std::size_t> const& strides)
+    {
+        if(strides.size() != lengths.size())
+        {
+            return elementsFromLengths(lengths);
+        }
+
+        std::size_t space = 1;
+        for(std::size_t i = 0; i < lengths.size(); i++)
+        {
+            if(lengths[i] == 0)
+            {
+                return 0;
+            }
+            space += (lengths[i] - 1) * strides[i];
+        }
+        return space;
+    }
+
     // Find the first solution in candidates whose kernel name matches the given string.
     // Used by ActorCriticSelection to perform a cross-platform-stable lookup.
     static ContractionSolution*
@@ -84,16 +99,21 @@ namespace hiptensor
                                       const uint64_t                     workspaceSize)
     {
         // Make sure that we calculate full element space incase strides are not packed.
-        auto sizeA = elementsFromLengths(a_ms_ks_lengths) * hiptensorDataTypeSize(typeA);
-        auto sizeB = elementsFromLengths(b_ns_ks_lengths) * hiptensorDataTypeSize(typeB);
-        auto sizeD = 0;
+        auto sizeA = elementSpaceFromLengthsAndStrides(a_ms_ks_lengths, a_ms_ks_strides)
+                     * hiptensorDataTypeSize(typeA);
+        auto sizeB = elementSpaceFromLengthsAndStrides(b_ns_ks_lengths, b_ns_ks_strides)
+                     * hiptensorDataTypeSize(typeB);
+        std::size_t sizeD = 0;
         if(typeD != NONE_TYPE)
         {
-            sizeD = elementsFromLengths(d_ms_ns_lengths) * hiptensorDataTypeSize(typeD);
+            sizeD = elementSpaceFromLengthsAndStrides(d_ms_ns_lengths, d_ms_ns_strides)
+                    * hiptensorDataTypeSize(typeD);
         }
-        auto sizeE = elementsFromLengths(e_ms_ns_lengths) * hiptensorDataTypeSize(typeE);
+        auto sizeE = elementSpaceFromLengthsAndStrides(e_ms_ns_lengths, e_ms_ns_strides)
+                     * hiptensorDataTypeSize(typeE);
 
-        void *A_d, *B_d, *D_d, *E_d, *wspace;
+        // Freed on every exit path, including an exception thrown by a candidate.
+        HipMemoryGuard A_d, B_d, D_d, E_d, wspace;
 
         /*
          * `alpha` and `beta` are void pointer. hiptensor uses readVal to load the value of alpha.
@@ -116,11 +136,11 @@ namespace hiptensor
             writeVal(&beta, computeType, ScalarData(computeType, 1.03));
         }
 
-        CHECK_HIP_ALLOC(hipMalloc(&A_d, sizeA));
-        CHECK_HIP_ALLOC(hipMalloc(&B_d, sizeB));
-        CHECK_HIP_ALLOC(hipMalloc(&D_d, sizeD));
-        CHECK_HIP_ALLOC(hipMalloc(&E_d, sizeE));
-        CHECK_HIP_ALLOC(hipMalloc(&wspace, workspaceSize));
+        HIPTENSOR_RETURN_IF_HIP_ERROR(hipMalloc(&A_d.ptr, sizeA));
+        HIPTENSOR_RETURN_IF_HIP_ERROR(hipMalloc(&B_d.ptr, sizeB));
+        HIPTENSOR_RETURN_IF_HIP_ERROR(hipMalloc(&D_d.ptr, sizeD));
+        HIPTENSOR_RETURN_IF_HIP_ERROR(hipMalloc(&E_d.ptr, sizeE));
+        HIPTENSOR_RETURN_IF_HIP_ERROR(hipMalloc(&wspace.ptr, workspaceSize));
 
         std::string          best_op_name;
         ContractionSolution* bestSolution = nullptr;
@@ -142,11 +162,11 @@ namespace hiptensor
             auto& options = HiptensorOptions::instance();
 
             auto [errorCode, time] = (*solution)(&alpha,
-                                                 A_d,
-                                                 B_d,
+                                                 A_d.ptr,
+                                                 B_d.ptr,
                                                  &beta,
-                                                 D_d,
-                                                 E_d,
+                                                 D_d.ptr,
+                                                 E_d.ptr,
                                                  a_ms_ks_lengths,
                                                  a_ms_ks_strides,
                                                  a_ms_ks_modes,
@@ -160,7 +180,7 @@ namespace hiptensor
                                                  e_ms_ns_strides,
                                                  e_ms_ns_modes,
                                                  unaryOps,
-                                                 wspace,
+                                                 wspace.ptr,
                                                  workspaceSize,
                                                  StreamConfig{
                                                      nullptr, // stream id
@@ -215,12 +235,6 @@ namespace hiptensor
             idx++;
         }
 
-        CHECK_HIP_ALLOC(hipFree(A_d));
-        CHECK_HIP_ALLOC(hipFree(B_d));
-        CHECK_HIP_ALLOC(hipFree(D_d));
-        CHECK_HIP_ALLOC(hipFree(E_d));
-        CHECK_HIP_ALLOC(hipFree(wspace));
-
         *winner = bestSolution;
 
         //Sort candidates based on performance (from fastest to slowest)
@@ -240,6 +254,141 @@ namespace hiptensor
         {
             return HIPTENSOR_STATUS_SUCCESS;
         }
+    }
+
+    bool isSupportedSolution(ContractionSolution*            solution,
+                             std::vector<std::size_t> const& a_ms_ks_lengths,
+                             std::vector<std::size_t> const& a_ms_ks_strides,
+                             std::vector<int32_t> const&     a_ms_ks_modes,
+                             std::vector<std::size_t> const& b_ns_ks_lengths,
+                             std::vector<std::size_t> const& b_ns_ks_strides,
+                             std::vector<int32_t> const&     b_ns_ks_modes,
+                             std::vector<std::size_t> const& d_ms_ns_lengths,
+                             std::vector<std::size_t> const& d_ms_ns_strides,
+                             std::vector<int32_t> const&     d_ms_ns_modes,
+                             std::vector<std::size_t> const& e_ms_ns_lengths,
+                             std::vector<std::size_t> const& e_ms_ns_strides,
+                             std::vector<int32_t> const&     e_ms_ns_modes,
+                             ContractionUnaryOps const&      unaryOps,
+                             const uint64_t                  workspaceSize)
+    {
+        bool supported = solution->initArgs(nullptr,
+                                            nullptr,
+                                            nullptr,
+                                            nullptr,
+                                            nullptr,
+                                            nullptr,
+                                            a_ms_ks_lengths,
+                                            a_ms_ks_strides,
+                                            a_ms_ks_modes,
+                                            b_ns_ks_lengths,
+                                            b_ns_ks_strides,
+                                            b_ns_ks_modes,
+                                            d_ms_ns_lengths,
+                                            d_ms_ns_strides,
+                                            d_ms_ns_modes,
+                                            e_ms_ns_lengths,
+                                            e_ms_ns_strides,
+                                            e_ms_ns_modes,
+                                            unaryOps,
+                                            nullptr)
+                         && solution->workspaceSize() <= workspaceSize;
+        solution->resetArgs();
+        return supported;
+    }
+
+    hiptensorStatus_t ensureSupportedWinner(ContractionSolution**                    winner,
+                                            std::vector<ContractionSolution*> const& candidates,
+                                            hiptensorDataType_t                      typeA,
+                                            std::vector<std::size_t> const& a_ms_ks_lengths,
+                                            std::vector<std::size_t> const& a_ms_ks_strides,
+                                            std::vector<int32_t> const&     a_ms_ks_modes,
+                                            hiptensorDataType_t             typeB,
+                                            std::vector<std::size_t> const& b_ns_ks_lengths,
+                                            std::vector<std::size_t> const& b_ns_ks_strides,
+                                            std::vector<int32_t> const&     b_ns_ks_modes,
+                                            hiptensorDataType_t             typeD,
+                                            std::vector<std::size_t> const& d_ms_ns_lengths,
+                                            std::vector<std::size_t> const& d_ms_ns_strides,
+                                            std::vector<int32_t> const&     d_ms_ns_modes,
+                                            hiptensorDataType_t             typeE,
+                                            std::vector<std::size_t> const& e_ms_ns_lengths,
+                                            std::vector<std::size_t> const& e_ms_ns_strides,
+                                            std::vector<int32_t> const&     e_ms_ns_modes,
+                                            hiptensorComputeDescriptor_t    computeType,
+                                            ContractionUnaryOps const&      unaryOps,
+                                            const uint64_t                  workspaceSize)
+    {
+        auto isSupported = [&](ContractionSolution* solution) {
+            return isSupportedSolution(solution,
+                                       a_ms_ks_lengths,
+                                       a_ms_ks_strides,
+                                       a_ms_ks_modes,
+                                       b_ns_ks_lengths,
+                                       b_ns_ks_strides,
+                                       b_ns_ks_modes,
+                                       d_ms_ns_lengths,
+                                       d_ms_ns_strides,
+                                       d_ms_ns_modes,
+                                       e_ms_ns_lengths,
+                                       e_ms_ns_strides,
+                                       e_ms_ns_modes,
+                                       unaryOps,
+                                       workspaceSize);
+        };
+
+        if(*winner != nullptr && isSupported(*winner))
+        {
+            return HIPTENSOR_STATUS_SUCCESS;
+        }
+
+        std::vector<ContractionSolution*> supported;
+        for(auto* candidate : candidates)
+        {
+            if(isSupported(candidate))
+            {
+                supported.push_back(candidate);
+            }
+        }
+
+        using hiptensor::Logger;
+        auto& logger = Logger::instance();
+        char  msg[256];
+        snprintf(msg,
+                 sizeof(msg),
+                 "Selected kernel %s cannot solve the problem, %zu of %zu candidates can",
+                 *winner != nullptr ? (*winner)->kernelName().c_str() : "(none)",
+                 supported.size(),
+                 candidates.size());
+        logger->logHeuristics("ensureSupportedWinner", msg);
+
+        *winner = nullptr;
+        if(supported.empty())
+        {
+            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+        }
+
+        return bruteForceModel(winner,
+                               supported,
+                               typeA,
+                               a_ms_ks_lengths,
+                               a_ms_ks_strides,
+                               a_ms_ks_modes,
+                               typeB,
+                               b_ns_ks_lengths,
+                               b_ns_ks_strides,
+                               b_ns_ks_modes,
+                               typeD,
+                               d_ms_ns_lengths,
+                               d_ms_ns_strides,
+                               d_ms_ns_modes,
+                               typeE,
+                               e_ms_ns_lengths,
+                               e_ms_ns_strides,
+                               e_ms_ns_modes,
+                               computeType,
+                               unaryOps,
+                               workspaceSize);
     }
 
     template <>
@@ -3096,7 +3245,7 @@ namespace hiptensor
                                                                 workspaceSize);
         }
         else if(typeA == HIPTENSOR_R_32F && typeB == HIPTENSOR_R_32F && typeD == NONE_TYPE
-                && typeE == HIPTENSOR_R_32F && computeType == HIPTENSOR_R_16BF)
+                && typeE == HIPTENSOR_R_32F && computeType == HIPTENSOR_COMPUTE_DESC_16BF)
         {
             return ActorCriticSelection<float,
                                         float,
@@ -3124,7 +3273,7 @@ namespace hiptensor
                                                                     workspaceSize);
         }
         else if(typeA == HIPTENSOR_R_32F && typeB == HIPTENSOR_R_32F && typeD == HIPTENSOR_R_32F
-                && typeE == HIPTENSOR_R_32F && computeType == HIPTENSOR_R_16BF)
+                && typeE == HIPTENSOR_R_32F && computeType == HIPTENSOR_COMPUTE_DESC_16BF)
         {
             return ActorCriticSelection<float,
                                         float,
@@ -5857,7 +6006,7 @@ namespace hiptensor
                                                                         workspaceSize);
         }
         else if(typeA == HIPTENSOR_R_32F && typeB == HIPTENSOR_R_32F && typeD == NONE_TYPE
-                && typeE == HIPTENSOR_R_32F && computeType == HIPTENSOR_R_16BF)
+                && typeE == HIPTENSOR_R_32F && computeType == HIPTENSOR_COMPUTE_DESC_16BF)
         {
             return ActorCriticSelectionUnaryOps<float,
                                                 float,
@@ -5885,7 +6034,7 @@ namespace hiptensor
                                                                             workspaceSize);
         }
         else if(typeA == HIPTENSOR_R_32F && typeB == HIPTENSOR_R_32F && typeD == HIPTENSOR_R_32F
-                && typeE == HIPTENSOR_R_32F && computeType == HIPTENSOR_R_16BF)
+                && typeE == HIPTENSOR_R_32F && computeType == HIPTENSOR_COMPUTE_DESC_16BF)
         {
             return ActorCriticSelectionUnaryOps<float,
                                                 float,

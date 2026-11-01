@@ -70,10 +70,17 @@ static rocke_value_t* rocke_gemm_dtl_off_bytes(rocke_gemm_build_ctx_t* ctx,
                                                rocke_value_t* blk_off,
                                                rocke_value_t* row,
                                                rocke_value_t* col,
-                                               rocke_value_t* k_off)
+                                               rocke_value_t* k_off,
+                                               bool b_operand)
 {
     rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* row_term = rocke_b_mul(b, rocke_b_add(b, blk_off, row), ctx->K);
+    /* the global operand row of the tile row (complex B: rocke_gemm_brow) */
+    rocke_value_t* g_row = rocke_b_add(b, blk_off, row);
+    if(b_operand)
+    {
+        g_row = rocke_gemm_brow(ctx, g_row);
+    }
+    rocke_value_t* row_term = rocke_b_mul(b, g_row, ctx->K);
     if(ctx->dtl_sub_elem)
     {
         rocke_value_t* off_elems = rocke_b_add(b, batch_off, rocke_b_add(b, row_term, k_off));
@@ -174,7 +181,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* col_v = rocke_b_mod(b, chunk_idx, ctx->dtl_c_chunks_per_row);
             rocke_value_t* col = rocke_b_mul(b, col_v, ctx->dtl_c_cols_per_chunk);
             rocke_value_t* off_bytes = rocke_gemm_dtl_off_bytes(
-                ctx, c_eb, ctx->batch_off_a, ctx->block_m_off, row, col, k_off);
+                ctx, c_eb, ctx->batch_off_a, ctx->block_m_off, row, col, k_off, false);
             rocke_b_async_buffer_load_lds_addr(b,
                                                ctx->dtl_a_rsrc,
                                                pass_lds_a,
@@ -199,7 +206,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* col_v = rocke_b_mod(b, chunk_idx, ctx->dtl_c_chunks_per_row);
             rocke_value_t* col = rocke_b_mul(b, col_v, ctx->dtl_c_cols_per_chunk);
             rocke_value_t* off_bytes = rocke_gemm_dtl_off_bytes(
-                ctx, c_eb, ctx->batch_off_b, ctx->block_n_off, row, col, k_off);
+                ctx, c_eb, ctx->batch_off_b, ctx->block_n_off, row, col, k_off, true);
             rocke_b_async_buffer_load_lds_addr(b,
                                                ctx->dtl_b_rsrc,
                                                pass_lds_b,
@@ -247,6 +254,12 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                               : (rvar))))
 
 #define PADK_VALID(elem_col) rocke_b_cmp_lt(b, rocke_b_add(b, k_off, (elem_col)), ctx->K)
+/* _safe_k0(): the column a masked lane reads instead (any in-bounds element):
+ * the tile's first column, or with split_k_aligned -- whose empty slices sit
+ * past K -- the row's first column (k_off + (-k_off)) */
+#define SAFE_K0()                                                                 \
+    (spec->trait.split_k_aligned ? rocke_b_sub(b, rocke_b_const_i32(b, 0), k_off) \
+                                 : rocke_b_const_i32(b, 0))
 #define STORAGE_ZERO()                              \
     (rocke_type_eq(ctx->storage_dtype, rocke_f64()) \
          ? rocke_b_const_f64(b, 0.0)                \
@@ -270,8 +283,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             {
                 rocke_value_t* elem_col = i ? rocke_b_add(b, col, rocke_b_const_i32(b, i)) : col;
                 rocke_value_t* valid = PADK_VALID(elem_col);
-                rocke_value_t* safe_col
-                    = rocke_b_select(b, valid, elem_col, rocke_b_const_i32(b, 0));
+                rocke_value_t* safe_col = rocke_b_select(b, valid, elem_col, SAFE_K0());
                 rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, safe_col};
                 rocke_value_t* raw = rocke_tile_window_load_scalar(b, &a_global_tile, gidx, 3);
                 comps[i] = MASK_STORAGE(raw, valid);
@@ -387,8 +399,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                     rocke_value_t* elem_col
                         = i ? rocke_b_add(b, col, rocke_b_const_i32(b, i)) : col;
                     rocke_value_t* valid = PADK_VALID(elem_col);
-                    rocke_value_t* safe_col
-                        = rocke_b_select(b, valid, elem_col, rocke_b_const_i32(b, 0));
+                    rocke_value_t* safe_col = rocke_b_select(b, valid, elem_col, SAFE_K0());
                     rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, safe_col};
                     rocke_value_t* raw = rocke_tile_window_load_scalar(b, &b_global_tile, gidx, 3);
                     comps[i] = MASK_STORAGE(raw, valid);
@@ -423,6 +434,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
     }
 #undef MASK_STORAGE
 #undef STORAGE_ZERO
+#undef SAFE_K0
 #undef PADK_VALID
 #undef LD_ROW
 }

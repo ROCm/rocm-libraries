@@ -32,6 +32,10 @@
 #include <hip/hip_runtime.h>
 #include <hiptensor/hiptensor.h>
 
+#include <cstdlib>
+#include <string>
+#include <utility>
+
 constexpr int32_t mMode = 'm';
 constexpr int32_t nMode = 'n';
 
@@ -49,6 +53,48 @@ struct ScopeExit
 };
 template <typename F>
 ScopeExit(F) -> ScopeExit<F>;
+
+// Sets an environment variable for the life of the object (restoring the previous value).
+struct ScopedEnvironment
+{
+    ScopedEnvironment(char const* name, char const* value)
+        : mName(name)
+    {
+        if(char const* old = std::getenv(name))
+        {
+            mOld    = old;
+            mHadOld = true;
+        }
+        set(value);
+    }
+    ~ScopedEnvironment()
+    {
+        set(mHadOld ? mOld.c_str() : nullptr);
+    }
+    ScopedEnvironment(ScopedEnvironment const&)            = delete;
+    ScopedEnvironment& operator=(ScopedEnvironment const&) = delete;
+
+private:
+    void set(char const* value)
+    {
+#ifdef _WIN32
+        _putenv_s(mName, value == nullptr ? "" : value);
+#else
+        if(value == nullptr)
+        {
+            unsetenv(mName);
+        }
+        else
+        {
+            setenv(mName, value, 1);
+        }
+#endif
+    }
+
+    char const* mName;
+    std::string mOld;
+    bool        mHadOld = false;
+};
 
 // Fixture holding the descriptors shared by every case: a rank-2 {m,n} tensor, a rank-2 {n,m}
 // tensor that only reorders those modes, a rank-1 {n} tensor holding a strict subset of them,
@@ -178,8 +224,9 @@ TEST_F(ElementwiseModeTest, PermutationWithReorderedModesIsSupported)
     hiptensorDestroyOperationDescriptor(opDesc);
 }
 
-// Permute does not convert types, so an output whose data type differs from the input's has no
-// matching kernel and must be rejected up front.
+// Permute does not convert types from bf16, so an output whose data type differs from the input's
+// has no matching kernel on either backend and must be rejected up front: when the plan is created
+// (the backends check the data types then) or, at the latest, when it is executed.
 TEST_F(ElementwiseModeTest, PermutationWithMismatchedOutputTypeReturnsNotSupported)
 {
     int64_t                     lengths[2] = {2, 3};
@@ -208,7 +255,12 @@ TEST_F(ElementwiseModeTest, PermutationWithMismatchedOutputTypeReturnsNotSupport
     ScopeExit destroyPref{[&] { hiptensorDestroyPlanPreference(pref); }};
 
     hiptensorPlan_t plan{};
-    ASSERT_EQ(hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0), HIPTENSOR_STATUS_SUCCESS);
+    auto const      planStatus = hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0);
+    if(planStatus != HIPTENSOR_STATUS_SUCCESS)
+    {
+        EXPECT_EQ(planStatus, HIPTENSOR_STATUS_NOT_SUPPORTED);
+        return;
+    }
     ScopeExit destroyPlan{[&] { hiptensorDestroyPlan(plan); }};
 
     void* a = nullptr;
@@ -351,10 +403,137 @@ TEST_F(ElementwiseModeTest, TrinaryWithReorderedModesIsSupported)
     hiptensorDestroyOperationDescriptor(opDesc);
 }
 
-// D must have the same data type as C: no instance converts types on output, so a mismatch is
-// rejected up front instead of failing later in kernel selection.
+// The elementwise kernels only implement ADD, MUL, MAX and MIN as the operator combining two
+// operands. Any other value used to be accepted and left the output undefined, so it has to be
+// rejected when the descriptor is created.
+constexpr hiptensorOperator_t nonBinaryOperators[]
+    = {HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_NEG, HIPTENSOR_OP_SQRT, HIPTENSOR_OP_UNKNOWN};
+constexpr hiptensorOperator_t binaryOperators[]
+    = {HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX, HIPTENSOR_OP_MIN};
+
+TEST_F(ElementwiseModeTest, BinaryWithNonBinaryOperatorReturnsInvalidValue)
+{
+    for(auto opAC : nonBinaryOperators)
+    {
+        hiptensorOperationDescriptor_t opDesc{};
+        EXPECT_EQ(hiptensorCreateElementwiseBinary(mHandle,
+                                                   &opDesc,
+                                                   mFull,
+                                                   mFullModes,
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   mFull,
+                                                   mFullModes,
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   mFull,
+                                                   mFullModes,
+                                                   opAC,
+                                                   HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_INVALID_VALUE)
+            << "opAC = " << opAC;
+        if(opDesc != nullptr)
+        {
+            hiptensorDestroyOperationDescriptor(opDesc);
+        }
+    }
+}
+
+TEST_F(ElementwiseModeTest, BinaryWithBinaryOperatorIsSupported)
+{
+    for(auto opAC : binaryOperators)
+    {
+        hiptensorOperationDescriptor_t opDesc{};
+        ASSERT_EQ(hiptensorCreateElementwiseBinary(mHandle,
+                                                   &opDesc,
+                                                   mFull,
+                                                   mFullModes,
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   mFull,
+                                                   mFullModes,
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   mFull,
+                                                   mFullModes,
+                                                   opAC,
+                                                   HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_SUCCESS)
+            << "opAC = " << opAC;
+        hiptensorDestroyOperationDescriptor(opDesc);
+    }
+}
+
+TEST_F(ElementwiseModeTest, TrinaryWithNonBinaryOperatorReturnsInvalidValue)
+{
+    for(auto badOp : nonBinaryOperators)
+    {
+        // The bad operator in either position is rejected, with a valid operator in the other.
+        for(auto [opAB, opABC] :
+            {std::pair{badOp, HIPTENSOR_OP_ADD}, std::pair{HIPTENSOR_OP_ADD, badOp}})
+        {
+            hiptensorOperationDescriptor_t opDesc{};
+            EXPECT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+                                                        &opDesc,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        opAB,
+                                                        opABC,
+                                                        HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_INVALID_VALUE)
+                << "opAB = " << opAB << ", opABC = " << opABC;
+            if(opDesc != nullptr)
+            {
+                hiptensorDestroyOperationDescriptor(opDesc);
+            }
+        }
+    }
+}
+
+TEST_F(ElementwiseModeTest, TrinaryWithBinaryOperatorsIsSupported)
+{
+    for(auto opAB : binaryOperators)
+    {
+        for(auto opABC : binaryOperators)
+        {
+            hiptensorOperationDescriptor_t opDesc{};
+            ASSERT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+                                                        &opDesc,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        mFull,
+                                                        mFullModes,
+                                                        opAB,
+                                                        opABC,
+                                                        HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_SUCCESS)
+                << "opAB = " << opAB << ", opABC = " << opABC;
+            hiptensorDestroyOperationDescriptor(opDesc);
+        }
+    }
+}
+
+// D must have the same data type as C on the Composable Kernel backend: no CK instance converts
+// types on output, so a mismatch is rejected up front (when the plan is created) instead of
+// failing later in kernel selection. The rocKE backend serves this row (f32 A, B and C into an
+// f16 D), so the CK backend is selected without fallback here.
 TEST_F(ElementwiseModeTest, TrinaryWithMismatchedOutputTypeReturnsNotSupported)
 {
+    ScopedEnvironment backend("HIPTENSOR_BACKEND", "ck");
+    ScopedEnvironment fallback("HIPTENSOR_BACKEND_FALLBACK", "0");
+
     int64_t                     lengths[2] = {2, 3};
     hiptensorTensorDescriptor_t f16Desc{};
     ASSERT_EQ(hiptensorCreateTensorDescriptor(
@@ -389,7 +568,12 @@ TEST_F(ElementwiseModeTest, TrinaryWithMismatchedOutputTypeReturnsNotSupported)
     ScopeExit destroyPref{[&] { hiptensorDestroyPlanPreference(pref); }};
 
     hiptensorPlan_t plan{};
-    ASSERT_EQ(hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0), HIPTENSOR_STATUS_SUCCESS);
+    auto const      planStatus = hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0);
+    if(planStatus != HIPTENSOR_STATUS_SUCCESS)
+    {
+        EXPECT_EQ(planStatus, HIPTENSOR_STATUS_NOT_SUPPORTED);
+        return;
+    }
     ScopeExit destroyPlan{[&] { hiptensorDestroyPlan(plan); }};
 
     void* abc = nullptr;

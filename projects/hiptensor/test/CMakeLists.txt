@@ -415,7 +415,9 @@ endif()
 set(_HIPTENSOR_HOST_TESTS
   batched_contraction_test
   contraction_mode_test
+  device_support_test
   elementwise_cpu_test
+  elementwise_instance_selection_test
   elementwise_mode_test
   elementwise_op_test
   hiptensor_options_test
@@ -456,11 +458,23 @@ set(_HIPTENSOR_DEVICE_TESTS
   "complex_scale_contraction_test_m6n6k6|01_contraction/complex_scale_test_params_rank6.yaml"
   "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
   "plan_lifetime_test|NONE"
+  "api_safety_test|NONE"
+  "plan_cache_unit_test|NONE"
+  "contraction_selection_test|NONE"
+  "large_tensor_test|NONE"
+  "operation_validation_test|NONE"
+  "workspace_size_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
   "bilinear_contraction_with_unary_ops_test|NONE"
   "scale_contraction_with_unary_ops_test|NONE"
+  "contraction_layout_test|NONE"
+  "trinary_contraction_workspace_test|NONE"
+  "contraction_test_utils_test|NONE"
   "elementwise_output_strides_test|NONE"
+  "elementwise_scalar_op_test|NONE"
+  "elementwise_zero_scale_test|NONE"
+  "elementwise_f64_unary_op_test|NONE"
   "rank2_elementwise_permute_test|02_elementwise/permutation/rank2_test_params.yaml"
   "rank3_elementwise_permute_test|02_elementwise/permutation/rank3_test_params.yaml"
   "rank4_elementwise_permute_test|02_elementwise/permutation/rank4_test_params.yaml"
@@ -482,6 +496,8 @@ set(_HIPTENSOR_DEVICE_TESTS
   "rank4_reduction_test|03_reduction/rank4_test_params.yaml"
   "rank5_reduction_test|03_reduction/rank5_test_params.yaml"
   "rank6_reduction_test|03_reduction/rank6_test_params.yaml"
+  "reduction_scalar_test|NONE"
+  "reduction_semantics_test|NONE"
 )
 
 # Bench (performance) tests encoded as "binary|config". Same encoding as
@@ -625,6 +641,31 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
         _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}")
     endforeach()
 endforeach()
+
+# Tests that need ctest properties, emitted once under quick (and nesting up into the higher
+# tiers) but not into the emulation families:
+#  - device_support_test with every GPU hidden, which simulates a host without a GPU;
+#  - alloc_failure_test, which fills the device memory and so must not share the GPU;
+#  - contraction_test_utils_test with a Google Test flag, which the shared test main must hand
+#    to Google Test. The flag selects one suite, so the other suite must not appear;
+#  - bilinear_contraction_test_m1n1k1 with a one-case -y config and a Google Test flag. The test
+#    main must load the config before Google Test registers the parameterized tests;
+#  - contraction_selection_test with the actor-critic tables for row-major strides, whose cases
+#    skip, and so must fail here, when the environment does not select those tables.
+_hiptensor_emit_test("device_support_test_no_visible_device quick"
+    "\"../device_support_test\" --gtest_filter=*NoVisibleDevice*")
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"device_support_test_no_visible_device quick\" PROPERTIES ENVIRONMENT \"HIP_VISIBLE_DEVICES=-1;ROCR_VISIBLE_DEVICES=-1\")\n")
+_hiptensor_emit_test("alloc_failure_test quick" "\"../alloc_failure_test\"")
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"alloc_failure_test quick\" PROPERTIES RUN_SERIAL TRUE)\n")
+_hiptensor_emit_test("contraction_test_utils_test_gtest_filter quick"
+    "\"../contraction_test_utils_test\" --gtest_filter=ContractionFlopsTest.*")
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"contraction_test_utils_test_gtest_filter quick\" PROPERTIES FAIL_REGULAR_EXPRESSION \"ContractionOutputCompareTest\")\n")
+_hiptensor_emit_test("bilinear_contraction_test_m1n1k1_yaml_config quick"
+    "\"../bilinear_contraction_test_m1n1k1\" -y configs/validation/quick/01_contraction/bilinear_test_params_rank1.yaml --gtest_list_tests")
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"bilinear_contraction_test_m1n1k1_yaml_config quick\" PROPERTIES PASS_REGULAR_EXPRESSION \"RunKernel/0  # GetParam\" FAIL_REGULAR_EXPRESSION \"RunKernel/[1-9][0-9]*  # GetParam\")\n")
+_hiptensor_emit_test("contraction_selection_test_row_major_tables quick"
+    "\"../contraction_selection_test\" --gtest_filter=ActorCriticRowMajorTableTest.*")
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"contraction_selection_test_row_major_tables quick\" PROPERTIES ENVIRONMENT \"HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=OFF\" FAIL_REGULAR_EXPRESSION \"Runs only with the row-major actor-critic tables\")\n")
 
 # ffm-quick / ffm-full: device only. ffm-quick uses emulation/quick, ffm-full
 # uses emulation/full (they are now distinct sets, not aliases).

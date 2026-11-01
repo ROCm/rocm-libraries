@@ -51,6 +51,12 @@ _ARCH_NUM_CUS: dict[str, int] = {
 }
 _DEFAULT_NUM_CUS = 256
 
+
+def arch_num_cus(arch: str) -> int:
+    """Static CU count for ``arch`` (``_ARCH_NUM_CUS``; 256 when unknown)."""
+    return _ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS)
+
+
 # Assumed waves-per-CU for a 256-thread wgrad kernel (conservative; CK uses
 # hipOccupancyMaxActiveBlocksPerMultiprocessor which we cannot call at build
 # time).  2 is the safe lower bound for the LDS-heavy wgrad tile shapes.

@@ -215,8 +215,12 @@ sixteen values), and lower to three BF16 MFMAs on `mfma_f32_16x16x32_bf16` and
 `mfma_f32_32x32x16_bf16`; see the
 [emulation description](../architecture/xf32_bf16x3_emulation.md).
 
-gfx942 declares two f64 atoms in the arch catalog. Both hold one f64 value per
-lane for A and B.
+gfx90a, gfx942 and gfx950 declare the same two f64 atoms in the arch catalog,
+with the same lane layouts (the instruction is spelled
+`v_mfma_f64_16x16x4f64` / `v_mfma_f64_4x4x4f64` on gfx90a and
+`v_mfma_f64_16x16x4_f64` / `v_mfma_f64_4x4x4_4b_f64` on gfx942 / gfx950; the
+LLVM intrinsics and HIP builtins are the same). Both hold one f64 value per lane
+for A and B.
 
 `mfma_f64_16x16x4_f64` uses the fp32 16x16x4 A/B lane maps
 (`row`/`col = lane % 16`, `k = lane / 16`). C/D hold four f64 values per lane
@@ -230,6 +234,12 @@ For i in 0..3:
 
 An epilogue written for the f32 16x16 layout stores f64 results to the wrong
 rows. Take the layout from the atom's `c_layout()`.
+
+A negated operand (complex arithmetic, conjugation) is an `fneg` of the f64
+fragment: the backend emits one `v_xor_b32` of the sign bit and does not fold
+it into the instruction, on every target. gfx942 / gfx950 also encode an
+operand negation in the instruction's `neg` field, which gfx90a reads as a
+lane-broadcast pattern instead; rocKE does not set that field.
 
 `mfma_f64_4x4x4_f64` computes four independent 4x4x4 products per wave. The
 catalog describes the blocks stacked along rows, so A, B, and C/D are each

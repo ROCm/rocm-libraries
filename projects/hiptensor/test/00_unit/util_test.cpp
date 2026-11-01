@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <cstring>
 #include <gtest/gtest.h>
 #include <iostream>
 
@@ -148,17 +149,56 @@ TEST(convertToHipTensorDataTypeTypeToStringTest, UtilTest)
     EXPECT_EQ(hiptensor::convertToHipTensorDataType(HIPTENSOR_COMPUTE_DESC_C64F), HIPTENSOR_C_64F);
 }
 
-TEST(readValComputeDescTest, UtilTest)
+// The elementwise and reduction entry points read alpha, beta and gamma through readVal with a
+// compute descriptor, so every real compute type they accept must decode to the value written.
+// 1.25 is exact in every one of these types.
+TEST(readValComputeDescriptorTest, UtilTest)
 {
-    hip_bfloat16 bf16Val(2.5f);
-    _Float16     f16Val = 2.5;
-    float        f32Val = 2.5f;
-    double       f64Val = 2.5;
-    EXPECT_EQ(hiptensor::readVal<float>(&bf16Val, HIPTENSOR_COMPUTE_DESC_16BF), 2.5f);
-    EXPECT_EQ(hiptensor::readVal<double>(&bf16Val, HIPTENSOR_COMPUTE_DESC_16BF), 2.5);
-    EXPECT_EQ(hiptensor::readVal<double>(&f16Val, HIPTENSOR_COMPUTE_DESC_16F), 2.5);
-    EXPECT_EQ(hiptensor::readVal<double>(&f32Val, HIPTENSOR_COMPUTE_DESC_32F), 2.5);
-    EXPECT_EQ(hiptensor::readVal<double>(&f64Val, HIPTENSOR_COMPUTE_DESC_64F), 2.5);
+    hip_bfloat16 bf16Value(1.25f);
+    _Float16     f16Value = 1.25f;
+    float        f32Value = 1.25f;
+    double       f64Value = 1.25;
+
+    EXPECT_EQ(hiptensor::readVal<float>(&bf16Value, HIPTENSOR_COMPUTE_DESC_16BF), 1.25f);
+    EXPECT_EQ(hiptensor::readVal<double>(&bf16Value, HIPTENSOR_COMPUTE_DESC_16BF), 1.25);
+    EXPECT_EQ(hiptensor::readVal<float>(&f16Value, HIPTENSOR_COMPUTE_DESC_16F), 1.25f);
+    EXPECT_EQ(hiptensor::readVal<double>(&f16Value, HIPTENSOR_COMPUTE_DESC_16F), 1.25);
+    EXPECT_EQ(hiptensor::readVal<float>(&f32Value, HIPTENSOR_COMPUTE_DESC_32F), 1.25f);
+    EXPECT_EQ(hiptensor::readVal<double>(&f32Value, HIPTENSOR_COMPUTE_DESC_32F), 1.25);
+    EXPECT_EQ(hiptensor::readVal<float>(&f64Value, HIPTENSOR_COMPUTE_DESC_64F), 1.25f);
+    EXPECT_EQ(hiptensor::readVal<double>(&f64Value, HIPTENSOR_COMPUTE_DESC_64F), 1.25);
+}
+
+// Host scalars come from user pointers with no alignment guarantee: a complex double passed as
+// double[2] is only 8-byte aligned. Scalar reads must not fault or misread at any byte offset.
+TEST(readValUnalignedTest, UtilTest)
+{
+    alignas(16) unsigned char buffer[64] = {};
+    for(size_t offset = 0; offset < 16; offset++)
+    {
+        unsigned char* p = buffer + offset;
+
+        hipDoubleComplex const z = make_hipDoubleComplex(1.25, -2.5);
+        std::memcpy(p, &z, sizeof(z));
+        auto const zr = hiptensor::loadUnaligned<hipDoubleComplex>(p);
+        EXPECT_EQ(zr.x, 1.25);
+        EXPECT_EQ(zr.y, -2.5);
+
+        hipFloatComplex const c = make_hipFloatComplex(0.5f, 3.0f);
+        std::memcpy(p, &c, sizeof(c));
+        auto const cr = hiptensor::loadUnaligned<hipFloatComplex>(p);
+        EXPECT_EQ(cr.x, 0.5f);
+        EXPECT_EQ(cr.y, 3.0f);
+
+        double const d = -7.75;
+        std::memcpy(p, &d, sizeof(d));
+        EXPECT_EQ(hiptensor::readVal<double>(p, HIPTENSOR_COMPUTE_DESC_64F), -7.75);
+        EXPECT_EQ(hiptensor::readVal<double>(p, HIPTENSOR_R_64F), -7.75);
+
+        float const f = 6.5f;
+        std::memcpy(p, &f, sizeof(f));
+        EXPECT_EQ(hiptensor::readVal<float>(p, HIPTENSOR_COMPUTE_DESC_32F), 6.5f);
+    }
 }
 
 TEST(algoTypeToStringTest, UtilTest)

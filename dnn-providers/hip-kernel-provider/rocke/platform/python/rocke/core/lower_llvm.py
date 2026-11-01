@@ -44,6 +44,7 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _FLAG_WAIT_ORDERINGS,
     _int_add_wrap_error,
     _scf_for_carried_descriptor_error,
     BF16,
@@ -318,6 +319,14 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "rcp.f32": "declare float @llvm.amdgcn.rcp.f32(float)",
+    "exp.f32": "declare float @llvm.exp.f32(float)",
+    "log.f32": "declare float @llvm.log.f32(float)",
+    # f64 math (``rocke.core.f64_math`` expansions, f64 fma / sqrt).
+    "sqrt.f64": "declare double @llvm.sqrt.f64(double)",
+    "rint.f64": "declare double @llvm.rint.f64(double)",
+    "fma.f64": "declare double @llvm.fma.f64(double, double, double)",
+    "ldexp.f64": "declare double @llvm.ldexp.f64.i32(double, i32)",
+    "frexp.f64": "declare { double, i32 } @llvm.frexp.f64.i32(double)",
     "maxnum.f64": "declare double @llvm.maxnum.f64(double, double)",
     "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
     "maxnum.f16": "declare half @llvm.maxnum.f16(half, half)",
@@ -353,6 +362,13 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "fmuladd.v16f32": (
         "declare <16 x float> @llvm.fmuladd.v16f32("
         "<16 x float>, <16 x float>, <16 x float>)"
+    ),
+    # f64 ``vector.fma``: always fused (``llvm.fma``, not ``fmuladd``).
+    "fma.v2f64": (
+        "declare <2 x double> @llvm.fma.v2f64(<2 x double>, <2 x double>, <2 x double>)"
+    ),
+    "fma.v4f64": (
+        "declare <4 x double> @llvm.fma.v4f64(<4 x double>, <4 x double>, <4 x double>)"
     ),
     "fmuladd.v2f16": (
         "declare <2 x half> @llvm.fmuladd.v2f16(<2 x half>, <2 x half>, <2 x half>)"
@@ -2523,6 +2539,16 @@ class _Lowerer:
         """
         a, b, c = op.operands
         ty_name = a.type.name
+        if ty_name == "f64":
+            # f64 is always fused (``llvm.fma``): the error-free transforms
+            # built on it need the single rounding, not ``fmuladd``'s may-fuse.
+            self._need("fma.f64")
+            self._current().emit(
+                f"  {op.result.name} = call double @llvm.fma.f64("
+                f"double {self._operand(a)}, double {self._operand(b)}, "
+                f"double {self._operand(c)})"
+            )
+            return
         llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
         if llvm_ty is None:
             raise NotImplementedError(f"fma: unsupported FP type {ty_name!r}")
@@ -2559,8 +2585,14 @@ class _Lowerer:
         """
         a, b, c = op.operands
         ty_name = a.type.name
-        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        llvm_ty = {
+            "f64": "double",
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+        }.get(ty_name)
         intrin_key = {
+            "f64": "maxnum.f64",
             "f32": "maxnum.f32",
             "f16": "maxnum.f16",
             "bf16": "maxnum.bf16",
@@ -2582,8 +2614,14 @@ class _Lowerer:
         """Sibling of :meth:`_op_arith_fmax3` for three-way min."""
         a, b, c = op.operands
         ty_name = a.type.name
-        llvm_ty = {"f32": "float", "f16": "half", "bf16": "bfloat"}.get(ty_name)
+        llvm_ty = {
+            "f64": "double",
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+        }.get(ty_name)
         intrin_key = {
+            "f64": "minnum.f64",
             "f32": "minnum.f32",
             "f16": "minnum.f16",
             "bf16": "minnum.bf16",
@@ -3189,10 +3227,29 @@ class _Lowerer:
             f"  {op.result.name} = call float @llvm.rint.f32(float {self._operand(v)})"
         )
 
+    def _emit_f64_program(self, op: Op) -> None:
+        """Expand an f64 math op into its :mod:`rocke.core.f64_math` program.
+
+        Every step gets a fresh SSA name in program order and the last step
+        defines the op result; the C++ lowerer walks the same table.
+        """
+        from .f64_math import PROGRAMS, render
+
+        prog = PROGRAMS[op.name]
+        for key in prog.keys:
+            self._need(key)
+        names = [self._fresh(step.hint) for step in prog.steps[:-1]]
+        names.append(op.result.name)
+        for line in render(prog, self._operand(op.operands[0]), names):
+            self._current().emit(f"  {line}")
+
     def _op_math_exp2(self, op: Op) -> None:
         (v,) = op.operands
+        if v.type.name == "f64":
+            self._emit_f64_program(op)
+            return
         if v.type.name != "f32":
-            raise NotImplementedError("math.exp2 currently supports f32")
+            raise NotImplementedError("math.exp2 currently supports f32 and f64")
         self._need("exp2.f32")
         self._current().emit(
             f"  {op.result.name} = call float @llvm.exp2.f32(float {self._operand(v)})"
@@ -3209,10 +3266,39 @@ class _Lowerer:
             f"@llvm.amdgcn.exp2.f32(float {self._operand(v)})"
         )
 
+    def _op_math_exp(self, op: Op) -> None:
+        """Natural ``exp``: ``llvm.exp.f32`` or the f64 expansion."""
+        (v,) = op.operands
+        if v.type.name == "f64":
+            self._emit_f64_program(op)
+            return
+        if v.type.name != "f32":
+            raise NotImplementedError("math.exp supports f32 and f64")
+        self._need("exp.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.exp.f32(float {self._operand(v)})"
+        )
+
+    def _op_math_log(self, op: Op) -> None:
+        """Natural ``log``: ``llvm.log.f32`` or the f64 expansion."""
+        (v,) = op.operands
+        if v.type.name == "f64":
+            self._emit_f64_program(op)
+            return
+        if v.type.name != "f32":
+            raise NotImplementedError("math.log supports f32 and f64")
+        self._need("log.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.log.f32(float {self._operand(v)})"
+        )
+
     def _op_math_log2(self, op: Op) -> None:
         (v,) = op.operands
+        if v.type.name == "f64":
+            self._emit_f64_program(op)
+            return
         if v.type.name != "f32":
-            raise NotImplementedError("math.log2 currently supports f32")
+            raise NotImplementedError("math.log2 currently supports f32 and f64")
         self._need("log2.f32")
         self._current().emit(
             f"  {op.result.name} = call float @llvm.log2.f32(float {self._operand(v)})"
@@ -3238,8 +3324,11 @@ class _Lowerer:
 
     def _op_math_sqrt(self, op: Op) -> None:
         (v,) = op.operands
+        if v.type.name == "f64":
+            self._emit_f64_program(op)
+            return
         if v.type.name != "f32":
-            raise NotImplementedError("math.sqrt currently supports f32")
+            raise NotImplementedError("math.sqrt currently supports f32 and f64")
         self._need("sqrt.f32")
         self._current().emit(
             f"  {op.result.name} = call float @llvm.sqrt.f32(float {self._operand(v)})"
@@ -3247,8 +3336,12 @@ class _Lowerer:
 
     def _op_math_rsqrt(self, op: Op) -> None:
         (v,) = op.operands
+        if v.type.name == "f64":
+            # 1 / sqrt(x): IEEE sqrt and division (no f64 rsq approximation).
+            self._emit_f64_program(op)
+            return
         if v.type.name != "f32":
-            raise NotImplementedError("math.rsqrt currently supports f32")
+            raise NotImplementedError("math.rsqrt currently supports f32 and f64")
         # llvm.amdgcn.rsq.f32 maps directly to v_rsq_f32 (~1 ulp). For higher precision
         # the user can compute rcp(sqrt(x)) explicitly. This matches Triton's tl.rsqrt.
         self._need("rsqrt.f32")
@@ -3258,8 +3351,13 @@ class _Lowerer:
 
     def _op_math_tanh(self, op: Op) -> None:
         (v,) = op.operands
+        if v.type.name == "f64":
+            self._emit_f64_program(op)
+            return
         if v.type.name != "f32":
-            raise ValueError(f"math.tanh requires f32 operand, got {v.type.name}")
+            raise ValueError(
+                f"math.tanh requires f32 or f64 operand, got {v.type.name}"
+            )
 
         # OCML f32 tanh small-argument minimax polynomial for |x| < 0.625.
         # Coefficients are in Horner power-basis order, not Taylor coefficients.
@@ -3515,10 +3613,15 @@ class _Lowerer:
 
         The loop re-issues an ``acquire`` atomic load until the flag matches;
         an atomic load cannot be hoisted out of the loop, and the acquire
-        orders every later global load after the observed flag value.
+        orders every later global load after the observed flag value. With
+        the optional ``ordering="monotonic"`` the load is relaxed (the IR
+        places the acquire fence after the op).
         """
         ptr, idx, expect = op.operands
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = op.attrs.get("ordering", "acquire")
+        if ordering not in _FLAG_WAIT_ORDERINGS:
+            raise ValueError(f"{op.name}: unknown ordering '{ordering}'")
         gep = self._fresh("gep")
         cur = self._current()
         cur.emit(
@@ -3532,7 +3635,7 @@ class _Lowerer:
         hit = self._fresh("flag.hit")
         spin.emit(
             f"  {val} = load atomic i32, ptr addrspace(1) {gep}"
-            f"{_llvm_syncscope(scope)} acquire, align 4"
+            f"{_llvm_syncscope(scope)} {ordering}, align 4"
         )
         spin.emit(f"  {hit} = icmp eq i32 {val}, {self._operand(expect)}")
         done = self._new_block("flag.done")
@@ -5982,7 +6085,7 @@ class _Lowerer:
         else:
             intrinsic = "llvm.amdgcn.make.buffer.rsrc.p1"
             nb_text = f"i32 {self._operand(num_bytes)}"
-        word3 = self._backend.buffer_rsrc_word3
+        word3 = int(op.attrs.get("word3", self._backend.buffer_rsrc_word3))
         self._current().emit(
             f"  {op.result.name} = call ptr addrspace(8) @{intrinsic}("
             f"ptr addrspace(1) {self._operand(ptr)}, "
@@ -6757,6 +6860,16 @@ class _Lowerer:
         count = vec_ty.count  # type: ignore[attr-defined]
         elem_ty = vec_ty.elem  # type: ignore[attr-defined]
         elem_name = elem_ty.name
+        if elem_name == "f64" and count in (2, 4):
+            # f64 is always fused, as for scalar ``arith.fma``.
+            self._need(f"fma.v{count}f64")
+            vec_llvm = _llvm_type(vec_ty)
+            self._current().emit(
+                f"  {op.result.name} = call {vec_llvm} @llvm.fma.v{count}f64("
+                f"{vec_llvm} {self._operand(a)}, {vec_llvm} {self._operand(b)}, "
+                f"{vec_llvm} {self._operand(c)})"
+            )
+            return
         if elem_name not in ("f16", "bf16", "f32"):
             raise NotImplementedError(
                 f"vector_fma: unsupported element type {elem_name!r}"

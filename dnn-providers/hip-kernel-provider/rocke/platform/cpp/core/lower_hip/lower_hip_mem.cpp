@@ -871,12 +871,20 @@ static rocke_status_t _op_memref_global_flag_wait_eq(rocke_h_lowerer_t* lw, cons
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_flag_wait_eq: too few operands");
     }
     scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
-    rocke_h_emitf(lw,
-                  "while (__hip_atomic_load(&%s[%s], __ATOMIC_ACQUIRE, %s) != %s) {}",
-                  rocke_h_name(lw, op->operands[0]),
-                  rocke_h_name(lw, op->operands[1]),
-                  hip_memory_scope(scp),
-                  rocke_h_name(lw, op->operands[2]));
+    {
+        const char* ord = rocke_attr_get_str(&op->attrs, "ordering");
+        if(ord == NULL)
+            ord = "acquire";
+        else if(strcmp(ord, "acquire") != 0 && strcmp(ord, "monotonic") != 0)
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s: unknown ordering '%s'", op->name, ord);
+        rocke_h_emitf(lw,
+                      "while (__hip_atomic_load(&%s[%s], %s, %s) != %s) {}",
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]),
+                      hip_atomic_order(ord),
+                      hip_memory_scope(scp),
+                      rocke_h_name(lw, op->operands[2]));
+    }
     return lw->status;
 }
 
@@ -1064,6 +1072,7 @@ static rocke_status_t _op_tile_global_ptr_to_i64(rocke_h_lowerer_t* lw, const ro
 static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     rocke_value_t *ptr, *num_bytes;
+    int64_t w3 = 0;
     if(!rocke_h_live(lw))
     {
         return lw->status;
@@ -1076,13 +1085,17 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
     num_bytes = op->operands[1];
     /* The flags word is the rsrc DWORD3, whose format / out-of-bounds encoding
      * is ISA-specific. Take it from the target's ISA backend, the same source
-     * the LLVM lowerer's tile.buffer_rsrc reads, so both routes agree. */
+     * the LLVM lowerer's tile.buffer_rsrc reads, so both routes agree. An
+     * explicit per-resource DWORD3 (Python IRBuilder.buffer_rsrc(word3=))
+     * overrides the backend default. */
     rocke_status_t backend_status = ROCKE_OK;
     const rocke_isa_backend_t* backend = rocke_ll_backend_for(lw->arch.gfx, &backend_status);
     if(backend == NULL)
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "no ISA backend registered for '%s'", lw->arch.gfx);
     }
+    w3 = (int64_t)backend->buffer_rsrc_word3;
+    (void)rocke_attr_get_int(&op->attrs, "word3", &w3);
     rocke_h_emitf(lw,
                   "rsrc_t %s = __builtin_amdgcn_make_buffer_rsrc("
                   "(void*)%s, /*stride=*/(short)0, "
@@ -1091,7 +1104,7 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
                   rocke_h_name(lw, op->results[0]),
                   rocke_h_name(lw, ptr),
                   rocke_h_name(lw, num_bytes),
-                  (unsigned)backend->buffer_rsrc_word3);
+                  (unsigned)w3);
     return lw->status;
 }
 

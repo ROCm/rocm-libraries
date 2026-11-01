@@ -11,10 +11,12 @@ operation per element.
 What we cover today:
 
 * Unary ops: ``copy``, ``neg``, ``abs``, ``relu``, ``gelu_tanh``, ``silu``, ``exp2``,
-  ``tanh``
+  ``tanh``, ``sigmoid``, and the math ops ``exp``, ``log``, ``log2``, ``sqrt``,
+  ``rsqrt``, ``rcp``
 * Binary ops: ``add``, ``sub``, ``mul``, ``max``, ``min``
 * Dtypes: ``f16`` and ``bf16`` for I/O (compute is f32 internally), and
-  ``f64`` (native f64 ops only, ``vec=2``)
+  ``f64`` (computed in f64, ``vec=2``; the transcendental ops use the
+  ``rocke.core.f64_math`` expansions)
 
 The kernel processes the buffer as a single contiguous run of ``numel``
 elements; multi-dimensional torch tensors must be ``contiguous()``. This
@@ -83,13 +85,38 @@ UnaryOp = Literal[
     "tanh",
     "sigmoid",
     "exp2",
+    "exp",
+    "log",
+    "log2",
+    "sqrt",
+    "rsqrt",
+    "rcp",
 ]
 BinaryOp = Literal["add", "sub", "mul", "max", "min", "swiglu", "geglu"]
 DType = Literal["f16", "bf16", "f64"]
 
-# Ops with a native f64 lowering; the exp2-based activations are f32-only,
-# so f64 is limited to this set.
-_F64_OPS = ("copy", "neg", "abs", "relu", "add", "sub", "mul", "max", "min")
+# Ops computed in f64 for f64 I/O. The f32-constant activations (gelu_tanh,
+# quick_gelu, silu/swish and the gated binaries) stay f16/bf16-only.
+_F64_OPS = (
+    "copy",
+    "neg",
+    "abs",
+    "relu",
+    "add",
+    "sub",
+    "mul",
+    "max",
+    "min",
+    "exp2",
+    "tanh",
+    "sigmoid",
+    "exp",
+    "log",
+    "log2",
+    "sqrt",
+    "rsqrt",
+    "rcp",
+)
 
 
 @dataclass(frozen=True)
@@ -115,6 +142,12 @@ class ElementwiseSpec:
             "tanh",
             "sigmoid",
             "exp2",
+            "exp",
+            "log",
+            "log2",
+            "sqrt",
+            "rsqrt",
+            "rcp",
         )
 
     def is_binary(self) -> bool:
@@ -209,9 +242,27 @@ def _apply_unary(b: IRBuilder, x: Value, op: str) -> Value:
         return b.fmax(x, zero)
     if op == "exp2":
         return b.exp2(x)
+    if op == "exp":
+        return b.exp(x)
+    if op == "log":
+        return b.log(x)
+    if op == "log2":
+        return b.log2(x)
+    if op == "sqrt":
+        return b.sqrt(x)
+    if op == "rsqrt":
+        return b.rsqrt(x)
+    if op == "rcp":
+        return b.rcp(x)
     if op == "tanh":
+        if x.type.name == "f64":
+            return b.tanh(x)
         return _tanh_via_exp2(b, x)
     if op == "sigmoid":
+        if x.type.name == "f64":
+            # 1 / (1 + e^-x) in f64 (e^-x = inf gives 0, as it should).
+            one = b.const_f64(1.0)
+            return b.rcp(b.fadd(one, b.exp(b.fneg(x))))
         return _sigmoid_via_exp2(b, x)
     if op in ("silu", "swish"):
         # SiLU / Swish: x * sigmoid(x). The two names are interchangeable

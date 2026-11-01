@@ -77,7 +77,14 @@ test_categories:
       - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
       - "rocke_pytest"
+      # rocKE's pytest tree is split across these four entries (rocke/platform/CMakeLists.txt)
+      - "rocke_dispatch_pytest"
+      - "rocke_instances_pytest"
+      - "rocke_numeric_pytest"
       - "rocke_library_gpu_pytest"
+      # hipTensor's rocKE kernels and pack writer (host and GPU lanes; not on Windows)
+      - "rocke_library_hiptensor_pytest"
+      - "rocke_library_hiptensor_gpu_pytest"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
@@ -122,7 +129,14 @@ test_categories:
       - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
       - "rocke_pytest"
+      # rocKE's pytest tree is split across these four entries (rocke/platform/CMakeLists.txt)
+      - "rocke_dispatch_pytest"
+      - "rocke_instances_pytest"
+      - "rocke_numeric_pytest"
       - "rocke_library_gpu_pytest"
+      # hipTensor's rocKE kernels and pack writer (host and GPU lanes; not on Windows)
+      - "rocke_library_hiptensor_pytest"
+      - "rocke_library_hiptensor_gpu_pytest"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"

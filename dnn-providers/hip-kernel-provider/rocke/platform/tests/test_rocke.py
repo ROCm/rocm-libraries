@@ -1201,18 +1201,57 @@ class TestElementwiseInstance(unittest.TestCase):
         self.assertIn("llvm.maxnum.f32", ll_f32)
         self.assertNotIn("llvm.fabs", ll_f32)
 
-    def test_f64_rejects_transcendental_ops_and_wide_vec(self):
+    def test_f64_rejects_f32_activations_and_wide_vec(self):
         from rocke.instances.common.elementwise import ElementwiseSpec, is_valid_spec
 
         # The reason names the rejected op or vector width, so a spec refused
         # for some other reason cannot pass.
-        for op in ("exp2", "tanh", "silu", "gelu_tanh"):
+        for op in ("silu", "gelu_tanh", "quick_gelu", "swish"):
             ok, reason = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
             self.assertFalse(ok, op)
             self.assertEqual(reason, f"op '{op}' not supported for f64")
         ok, reason = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
         self.assertFalse(ok)
         self.assertEqual(reason, "vec 4 not in {2} for f64")
+
+    def test_f64_transcendental_ops_compute_in_double(self):
+        # exp2 / exp / log / log2 / tanh / sigmoid / sqrt / rsqrt / rcp keep f64
+        # end to end: the f64 math expansions, no float op and no libcall.
+        from rocke.instances.common.elementwise import (
+            ElementwiseSpec,
+            build_elementwise,
+            is_valid_spec,
+        )
+
+        markers = {
+            "exp2": "@llvm.ldexp.f64.i32(",
+            "exp": "@llvm.ldexp.f64.i32(",
+            "log": "@llvm.frexp.f64.i32(",
+            "log2": "@llvm.frexp.f64.i32(",
+            "tanh": "@llvm.ldexp.f64.i32(",
+            "sigmoid": "fdiv double",
+            "sqrt": "@llvm.sqrt.f64(",
+            "rsqrt": "@llvm.sqrt.f64(",
+            "rcp": "fdiv double",
+        }
+        for op, marker in markers.items():
+            spec = ElementwiseSpec(op=op, dtype="f64", vec=2)
+            self.assertEqual(is_valid_spec(spec), (True, "ok"), op)
+            ll = lower_kernel_to_llvm(build_elementwise(spec), arch="gfx950")
+            body = ll.split("define")[1]
+            self.assertIn(marker, body, op)
+            self.assertNotIn(" float", body, op)
+            for libcall in ("@llvm.exp.f64", "@llvm.exp2.f64", "@llvm.log.f64"):
+                self.assertNotIn(libcall, ll, op)
+
+    def test_natural_exp_log_on_16bit_io(self):
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        for op in ("exp", "log"):
+            ll = lower_kernel_to_llvm(
+                build_elementwise(ElementwiseSpec(op=op, dtype="f16")), arch="gfx950"
+            )
+            self.assertIn(f"@llvm.{op}.f32(", ll)
 
 
 class TestLayerNormInstance(unittest.TestCase):

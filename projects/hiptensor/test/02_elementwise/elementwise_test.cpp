@@ -25,6 +25,7 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include "ck_tensor_limits.hpp"
 #include "common.hpp"
 #include "data_types.hpp"
 #include "elementwise/elementwise_cpu_reference.hpp"
@@ -301,8 +302,8 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
                 logLevel
                 & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
-                                                     // PERF_TRACE so the CK backend does not run its
-                                                     // internal cold/hot timed loop
+                // PERF_TRACE so the CK backend does not run its
+                // internal cold/hot timed loop
 
             hiptensorTensorDescriptor_t descA = nullptr;
             CHECK_HIPTENSOR_ERROR(
@@ -345,9 +346,21 @@ namespace hiptensor
                                                     &cacheMode,
                                                     sizeof(hiptensorCacheMode_t)));
 
-            hiptensorPlan_t plan;
-            CHECK_HIPTENSOR_ERROR(
-                hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /* workspaceSizeLimit */));
+            hiptensorPlan_t plan = nullptr;
+            auto            planStatus
+                = hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /* workspaceSizeLimit */);
+            // No plan is created for tensors the kernels cannot address, which the bench
+            // configurations include.
+            if(planStatus == HIPTENSOR_STATUS_NOT_SUPPORTED && exceedsCkTensorLimits(*desc))
+            {
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descA));
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyTensorDescriptor(descB));
+                GTEST_SKIP() << "Tensor size not supported by the kernels";
+            }
+            CHECK_HIPTENSOR_ERROR(planStatus);
 
             double alphaValue{};
             if(!writeElementwiseScalar(alphaValue, computeDataType, alpha))
@@ -357,18 +370,22 @@ namespace hiptensor
 
             auto& opts     = HiptensorOptions::instance();
             int   coldRuns = opts->coldRuns();
-            int   hotRuns  = std::max(1, opts->hotRuns());      // guard hot_runs <= 0
+            int   hotRuns  = std::max(1, opts->hotRuns()); // guard hot_runs <= 0
             // untimed warm-up: ramps clocks, primes plan/caches
             for(int i = 0; i < coldRuns; ++i)
-                CHECK_HIPTENSOR_ERROR(hiptensorPermute(handle, plan, &alphaValue,
-                    resource->deviceInput1().get(), resource->deviceOutput().get(), nullptr));
+                CHECK_HIPTENSOR_ERROR(hiptensorPermute(handle,
+                                                       plan,
+                                                       &alphaValue,
+                                                       resource->deviceInput1().get(),
+                                                       resource->deviceOutput().get(),
+                                                       nullptr));
 
             hipEvent_t startEvent, stopEvent;
             CHECK_HIP_ERROR(hipEventCreate(&startEvent));
             CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
             CHECK_HIP_ERROR(hipEventRecord(startEvent));
 
-            for(int i = 0; i < hotRuns; ++i)                     // timed: M clean launches
+            for(int i = 0; i < hotRuns; ++i) // timed: M clean launches
                 CHECK_HIPTENSOR_ERROR(hiptensorPermute(handle,
                                                        plan,
                                                        &alphaValue,
@@ -384,12 +401,12 @@ namespace hiptensor
 
             size_t sizeA = std::accumulate(extentA.begin(),
                                            extentA.end(),
-                                           hiptensorDataTypeSize(abDataType),
+                                           size_t(hiptensorDataTypeSize(abDataType)),
                                            std::multiplies<size_t>());
 
             size_t sizeB = std::accumulate(extentB.begin(),
                                            extentB.end(),
-                                           hiptensorDataTypeSize(abDataType),
+                                           size_t(hiptensorDataTypeSize(abDataType)),
                                            std::multiplies<size_t>());
 
             mElapsedTimeMs        = float64_t(timeMs) / hotRuns;

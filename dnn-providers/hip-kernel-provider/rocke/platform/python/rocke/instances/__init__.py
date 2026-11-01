@@ -322,6 +322,21 @@ from .common.grouped_gemm import (  # noqa: F401
     grouped_gemm_problems,
     grouped_gemm_signature,
 )
+from .common.gett_f64 import (  # noqa: F401
+    GettF64Problem,
+    GettF64Spec,
+    arch_spec as gett_f64_arch_spec,
+    build_gett_f64,
+    gemm_problem as gett_f64_gemm_problem,
+    gett_f64_grid,
+    gett_f64_signature,
+    is_valid_spec as is_valid_gett_f64_spec,
+)
+from .common.gett_f64_plan import (  # noqa: F401
+    GettLaunch,
+    GettPlan,
+    plan_contraction as plan_gett_f64_contraction,
+)
 from .common.gemm_policy import (  # noqa: F401
     GemmPipelinePolicy,
     ValidationResult,

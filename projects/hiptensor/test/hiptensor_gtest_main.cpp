@@ -27,15 +27,33 @@
 #include "utils.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
+#include <hiptensor/hiptensor.h>
+#include <vector>
 
 #include "llvm/command_line_parser.hpp"
 
 int main(int argc, char** argv)
 {
-    // Parse hiptensor test options
-    hiptensor::parseOptions(argc, argv);
+    // Parse hiptensor test options. The YAML config must be loaded before Google Test registers
+    // the value-parameterized tests, so the options are parsed before InitGoogleTest. Hand the
+    // parser argv without the Google Test flags, which it would reject as unknown arguments.
+    std::vector<char*> hiptensorArgv;
+    for(int i = 0; i < argc; ++i)
+    {
+        if(i == 0
+           || (std::strncmp(argv[i], "--gtest_", 8) != 0
+               && std::strncmp(argv[i], "-gtest_", 7) != 0))
+        {
+            hiptensorArgv.push_back(argv[i]);
+        }
+    }
+    hiptensor::parseOptions(static_cast<int>(hiptensorArgv.size()), hiptensorArgv.data());
+
+    // Initialize Google Tests. This registers the parameterized tests from the loaded options.
+    testing::InitGoogleTest(&argc, argv);
 
     // Force HIP runtime initialization before any test fixture runs.
     // If HIP fails here we get a clean error rather than an SEH crash inside a
@@ -54,8 +72,17 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Initialize Google Tests
-    testing::InitGoogleTest(&argc, argv);
+    // hiptensorCreate reports a device that hipTensor does not support. Print the marker that the
+    // ctest SKIP_REGULAR_EXPRESSION matches, so these tests are reported as skipped on such a
+    // device instead of failing in every fixture.
+    hiptensorHandle_t handle = nullptr;
+    if(hiptensorCreate(&handle) == HIPTENSOR_STATUS_ARCH_MISMATCH)
+    {
+        fprintf(stdout,
+                "HIPTENSOR_STATUS_ARCH_MISMATCH: unsupported host device, skipping tests.\n");
+        return 0;
+    }
+    hiptensorDestroy(handle);
 
     // Run the tests
     return RUN_ALL_TESTS();

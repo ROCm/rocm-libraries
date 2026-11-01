@@ -54,12 +54,16 @@ namespace hiptensor
                              std::vector<std::size_t> const& b_ns_ks_lengths,
                              std::vector<std::size_t> const& b_ns_ks_strides,
                              std::vector<int32_t> const&     b_ns_ks_modes,
+                             std::vector<std::size_t> const& ds_ms_ns_lengths,
+                             std::vector<std::size_t> const& ds_ms_ns_strides,
+                             std::vector<int32_t> const&     ds_ms_ns_modes,
                              std::vector<std::size_t> const& e_ms_ns_lengths,
                              std::vector<std::size_t> const& e_ms_ns_strides,
                              std::vector<int32_t> const&     e_ms_ns_modes);
 
-    bool isColMajorLayout(std::vector<std::size_t> const& strides,
-                          std::vector<std::size_t> const& lengths);
+    // True if the (normalized) tensor is packed column-major, ignoring unit-length modes.
+    bool isPackedColMajorLayout(std::vector<std::size_t> const& strides,
+                                std::vector<std::size_t> const& lengths);
     std::vector<std::size_t>
         applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths);
 
@@ -145,6 +149,9 @@ namespace hiptensor
                                        b_ns_ks_lengths,
                                        b_ns_ks_strides,
                                        b_ns_ks_modes,
+                                       ds_ms_ns_lengths,
+                                       ds_ms_ns_strides,
+                                       ds_ms_ns_modes,
                                        e_ms_ns_lengths,
                                        e_ms_ns_strides,
                                        e_ms_ns_modes);
@@ -154,24 +161,34 @@ namespace hiptensor
                 return std::vector<ck::index_t>(v.begin(), v.end());
             };
 
-            //Apply CK ColMajor strides for col major layout
-            if(isColMajorLayout(a_ms_ks_strides, a_ms_ks_lengths))
+            // Apply CK ColMajor strides only when they address the same elements as
+            // the true strides: every tensor must be packed col-major in its
+            // normalized mode order. Otherwise keep the true strides.
+            if(isPackedColMajorLayout(normal_a_ms_ks_strides, normal_a_ms_ks_lengths)
+               && isPackedColMajorLayout(normal_b_ns_ks_strides, normal_b_ns_ks_lengths)
+               && isPackedColMajorLayout(normal_ds_ms_ns_strides, normal_ds_ms_ns_lengths)
+               && isPackedColMajorLayout(normal_e_ms_ns_strides, normal_e_ms_ns_lengths))
+            {
                 normal_a_ms_ks_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
-            if(isColMajorLayout(b_ns_ks_strides, b_ns_ks_lengths))
                 normal_b_ns_ks_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
-            if(isColMajorLayout(ds_ms_ns_strides, ds_ms_ns_lengths))
                 normal_ds_ms_ns_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_ds_ms_ns_lengths);
-            if(isColMajorLayout(e_ms_ns_strides, e_ms_ns_lengths))
                 normal_e_ms_ns_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
+            }
 
             // Initialize the argument pointer
-            if constexpr(std::is_same_v<typename Traits::AOp, ck::tensor_operation::element_wise::PassThrough> 
-                      && std::is_same_v<typename Traits::BOp, ck::tensor_operation::element_wise::PassThrough> 
-                      &&(std::is_same_v<typename Traits::CDEOp, ck::tensor_operation::element_wise::Bilinear> || std::is_same_v<typename Traits::CDEOp, ck::tensor_operation::element_wise::BilinearComplex>))
+            if constexpr(std::is_same_v<typename Traits::AOp,
+                                        ck::tensor_operation::element_wise::PassThrough>
+                         && std::is_same_v<typename Traits::BOp,
+                                           ck::tensor_operation::element_wise::PassThrough>
+                         && (std::is_same_v<typename Traits::CDEOp,
+                                            ck::tensor_operation::element_wise::Bilinear>
+                             || std::is_same_v<
+                                 typename Traits::CDEOp,
+                                 ck::tensor_operation::element_wise::BilinearComplex>))
             {
                 Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     A,
@@ -323,6 +340,9 @@ namespace hiptensor
                                        b_ns_ks_lengths,
                                        b_ns_ks_strides,
                                        b_ns_ks_modes,
+                                       {},
+                                       {},
+                                       {},
                                        e_ms_ns_lengths,
                                        e_ms_ns_strides,
                                        e_ms_ns_modes);
@@ -332,23 +352,26 @@ namespace hiptensor
                 return std::vector<ck::index_t>(v.begin(), v.end());
             };
 
-            //Apply CK ColMajor strides for col major layout
-            if(isColMajorLayout(a_ms_ks_strides, a_ms_ks_lengths))
+            // Apply CK ColMajor strides only when they address the same elements as
+            // the true strides: every tensor must be packed col-major in its
+            // normalized mode order. Otherwise keep the true strides.
+            if(isPackedColMajorLayout(normal_a_ms_ks_strides, normal_a_ms_ks_lengths)
+               && isPackedColMajorLayout(normal_b_ns_ks_strides, normal_b_ns_ks_lengths)
+               && isPackedColMajorLayout(normal_e_ms_ns_strides, normal_e_ms_ns_lengths))
+            {
                 normal_a_ms_ks_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
-            if(isColMajorLayout(b_ns_ks_strides, b_ns_ks_lengths))
                 normal_b_ns_ks_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
-            if(isColMajorLayout(e_ms_ns_strides, e_ms_ns_lengths))
                 normal_e_ms_ns_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
+            }
 
             // Initialize the argument pointer
-            if constexpr(
-                std::is_same_v<
-                    typename Traits::AOp,
-                    ck::tensor_operation::element_wise::
-                        PassThrough> && std::is_same_v<typename Traits::BOp, ck::tensor_operation::element_wise::PassThrough>)
+            if constexpr(std::is_same_v<typename Traits::AOp,
+                                        ck::tensor_operation::element_wise::PassThrough>
+                         && std::is_same_v<typename Traits::BOp,
+                                           ck::tensor_operation::element_wise::PassThrough>)
             {
                 Base::mInvokerArgPtr = std::move(
                     deviceOp->MakeArgumentPointer(A,

@@ -41,6 +41,7 @@
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/hiptensor_types.h>
 
+#include "../backend/backend.hpp"
 #include "hip_device.hpp"
 #include "plan_cache.hpp"
 
@@ -60,9 +61,10 @@ struct hiptensorOperationDescriptor
     hiptensorDataType_t mScalarType;
     float               mFlops;
     float               mMovedBytes;
-    uint32_t            mPaddingLeft;
-    uint32_t            mPaddingRighT;
-    void*               mPaddingValue;
+
+    //! One output-tensor element set through HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_VALUE, empty
+    //! until set. Only zero padding is accepted, so no kernel reads it.
+    std::vector<uint8_t> mPaddingValue;
 
     hiptensorOperationType_t    mOperationType;
     int32_t                     mContractionOpId;
@@ -127,6 +129,10 @@ struct hiptensorPlan
     std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescE;
     std::unique_ptr<hiptensorOperationDescriptor> mOwnedOpDesc;
     std::unique_ptr<hiptensorPlanPreference>      mOwnedPref;
+
+    // The backend that serves the plan and its prepared program, set at plan creation.
+    // Declared last so it is released before the descriptors it was prepared from.
+    std::unique_ptr<hiptensor::backend::PlanBackendState> mBackend;
 };
 
 struct hiptensorPlanPreference
@@ -232,6 +238,10 @@ namespace hiptensor
     std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
     std::string hipTypeToString(hiptensorDataType_t hipType);
     std::string opTypeToString(hiptensorOperator_t opType);
+
+    // True for the operators that apply to a single operand (HIPTENSOR_OP_IDENTITY to
+    // HIPTENSOR_OP_FLOOR), false for the binary operators and any other value.
+    bool        isUnaryOperator(hiptensorOperator_t op);
     std::string algoTypeToString(hiptensorAlgo_t algoType);
     std::string logLevelToString(hiptensorLogLevel_t);
     std::string workSizePrefToString(hiptensorWorksizePreference_t workSize);

@@ -159,6 +159,16 @@ def _sample_gemm(rng):
     batched = rng.random() < 0.20
     if batched and rng.random() < 0.4:
         knobs["active_tile_skip"] = True
+    # Knobs added after the original sampler (drawn last so the earlier draws
+    # of each sample are unchanged): the opt-in MFMA-cluster priority bookends,
+    # the (emission-neutral) interwave scheduler value and the explicit compv4
+    # AB double buffer.
+    if rng.random() < 0.10:
+        knobs["interwave_setprio"] = True
+    if rng.random() < 0.10:
+        knobs["scheduler"] = "interwave"
+    if pipeline == "compv4" and not knobs.get("direct_to_lds") and rng.random() < 0.15:
+        knobs["ab_double_buffer"] = rng.choice([True, False])
 
     trait = TraitSpec(pipeline=pipeline, epilogue=epilogue, **knobs)
     spec = UniversalGemmSpec(
@@ -198,6 +208,121 @@ def _gemm_build(spec):
     from rocke.instances.common.gemm_universal import build_universal_gemm
 
     return build_universal_gemm(spec, arch="gfx950")
+
+
+# Universal GEMM, DTL-ring bodies (ring + AGPR / interleave levers): the random "gemm"
+# sampler above almost never reaches them (direct_to_lds + dtl_prefetch +
+# lds_swizzle on a big tile is rare), so this family draws the ring geometry on
+# purpose and then the ring / schedule / accumulator levers, each with a fair
+# probability. Invalid combinations are skipped by the shared gate.
+_RING_GEOMS = [
+    # (warp_m, warp_n, atom, tile_k)
+    (2, 2, (16, 16, 32), 32),
+    (2, 2, (16, 16, 32), 64),
+    (2, 2, (32, 32, 16), 64),
+    (2, 2, (32, 32, 16), 32),
+    (2, 4, (32, 32, 16), 64),
+    (4, 4, (16, 16, 32), 64),
+    (4, 4, (32, 32, 16), 64),
+]
+
+
+def _sample_gemm_ring(rng):
+    from rocke.instances.common.gemm_universal import (
+        DataSpec,
+        TileSpec,
+        TraitSpec,
+        UniversalGemmSpec,
+    )
+
+    dtype = rng.choice(["fp16", "bf16"])
+    warp_m, warp_n, (wtm, wtn, wtk), tile_k = rng.choice(_RING_GEOMS)
+    tile_m = tile_n = 256
+    knobs = {
+        "direct_to_lds": True,
+        "dtl_prefetch": True,
+        "lds_swizzle": True,
+        "dtl_cache_a": 0,
+        "dtl_cache_b": 0,
+        "dtl_stages": rng.choice([2, 2, 3, 4]),
+    }
+    epilogue = "cshuffle" if rng.random() < 0.15 else "default"
+    if rng.random() < 0.6:
+        knobs["chiplet_swizzle"] = True
+        knobs["chiplet_wgm"] = 8
+        knobs["chiplet_chunk_size"] = rng.choice([32, 64])
+    if rng.random() < 0.5:
+        knobs["interwave_setprio"] = True
+    if rng.random() < 0.5:
+        knobs["acc_agpr"] = True
+        if rng.random() < 0.3:
+            knobs["acc_agpr_pin"] = True
+    if rng.random() < 0.6:
+        knobs["dtl_frag_prefetch"] = True
+        if rng.random() < 0.7:
+            knobs["mfma_interleave"] = True
+            n_atom = (tile_m // (warp_m * wtm)) * (tile_n // (warp_n * wtn))
+            if rng.random() < 0.5:
+                knobs["ilv_barrier_after"] = rng.randrange(1, min(4, n_atom))
+            r = rng.random()
+            if r < 0.4:
+                knobs["ilv_merge"] = True
+            elif r < 0.6:
+                knobs["ilv_dtl_every"] = rng.choice([1, 2, 4])
+    elif rng.random() < 0.2:
+        knobs["dtl_issue_spread"] = True
+    if rng.random() < 0.4:
+        knobs["lds_swizzle_r"] = rng.randrange(0, 5)
+    if rng.random() < 0.4:
+        knobs["dtl_hoist"] = True
+    if rng.random() < 0.10:
+        knobs["iglp_opt"] = rng.choice([0, 1])
+    if rng.random() < 0.10 and not knobs.get("dtl_frag_prefetch"):
+        knobs["persistent_ctas"] = 256
+    elif rng.random() < 0.10:
+        knobs["split_k"] = 2
+    # persistent / stream-K / pad levers (appended draws: every earlier draw
+    # is unchanged)
+    if (
+        rng.random() < 0.15
+        and "persistent_ctas" not in knobs
+        and "split_k" not in knobs
+    ):
+        knobs["persistent_ctas"] = 256  # incl. the in-stream bodies now
+    if knobs.get("persistent_ctas") and rng.random() < 0.4:
+        knobs["streamk"] = True
+    if rng.random() < 0.3:
+        knobs["dtl_tight_rsrc"] = True
+        knobs["pad_m"] = rng.random() < 0.6
+        knobs["pad_n"] = rng.random() < 0.8
+        if (knobs["pad_m"] or knobs["pad_n"]) and rng.random() < 0.6:
+            knobs["pad_fast_tile"] = True
+
+    trait = TraitSpec(pipeline="compv4", epilogue=epilogue, **knobs)
+    spec = UniversalGemmSpec(
+        name="fuzz_gemm_ring",
+        tile=TileSpec(
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_k=1,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
+            warp_tile_k=wtk,
+        ),
+        trait=trait,
+        data=DataSpec(dtype_a=dtype, dtype_b=dtype, dtype_c=dtype),
+        wave_size=64,
+        block_size=warp_m * warp_n * 64,
+    )
+    rep = (
+        f"gemm_ring dtype={dtype} tile={tile_m}x{tile_n}x{tile_k} "
+        f"warp={warp_m}x{warp_n}x1 wt={wtm}x{wtn}x{wtk} epilogue={epilogue} "
+        f"knobs={knobs}"
+    )
+    return spec, rep, "gfx950"
 
 
 # Batched GEMM: the same universal geometry surface routed through the batched
@@ -348,6 +473,7 @@ def _reduce_build(spec):
 # Family registry. name -> (sampler, validity_gate, builder).
 FAMILIES = {
     "gemm": (_sample_gemm, _gemm_valid, _gemm_build),
+    "gemm_ring": (_sample_gemm_ring, _gemm_valid, _gemm_build),
     "batched_gemm": (_sample_batched_gemm, _batched_gemm_valid, _batched_gemm_build),
     "elementwise": (_sample_elementwise, _elementwise_valid, _elementwise_build),
     "reduce": (_sample_reduce, _reduce_valid, _reduce_build),

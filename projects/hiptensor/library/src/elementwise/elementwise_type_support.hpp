@@ -28,24 +28,28 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <iterator>
 
 #include <hiptensor/hiptensor_types.h>
 
 namespace hiptensor
 {
     // Every elementwise op (permute, binary, trinary) shares one rule: all tensors have the same
-    // data type T, and the scalar type is T, or f32 when T is a 16-bit type.
-    inline bool isSupportedElementwiseTypeCombination(
-        std::initializer_list<hiptensorDataType_t> tensorTypes, hiptensorDataType_t scalarType)
+    // data type T, and the scalar type is T, or f32 when T is a 16-bit type. `tensorTypes` is any
+    // range of hiptensorDataType_t (the descriptor-driven check passes a vector).
+    template <typename TensorTypes>
+    inline bool isSupportedElementwiseTypeCombination(TensorTypes const&  tensorTypes,
+                                                      hiptensorDataType_t scalarType)
     {
-        if(tensorTypes.size() == 0)
+        if(std::begin(tensorTypes) == std::end(tensorTypes))
         {
             return false;
         }
 
-        auto const type = *tensorTypes.begin();
-        if(std::any_of(
-               tensorTypes.begin(), tensorTypes.end(), [type](auto t) { return t != type; }))
+        auto const type = *std::begin(tensorTypes);
+        if(std::any_of(std::begin(tensorTypes), std::end(tensorTypes), [type](auto t) {
+               return t != type;
+           }))
         {
             return false;
         }
@@ -61,5 +65,12 @@ namespace hiptensor
         default:
             return false;
         }
+    }
+
+    inline bool isSupportedElementwiseTypeCombination(
+        std::initializer_list<hiptensorDataType_t> tensorTypes, hiptensorDataType_t scalarType)
+    {
+        return isSupportedElementwiseTypeCombination<std::initializer_list<hiptensorDataType_t>>(
+            tensorTypes, scalarType);
     }
 } // namespace hiptensor

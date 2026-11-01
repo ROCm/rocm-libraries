@@ -271,6 +271,11 @@ def enumerate_variants(
             pipeline=pipelines,  # type: ignore[arg-type]
             epilogue=epilogues,  # type: ignore[arg-type]
             arch=arch,
+            # The parquet schema (``_config_columns``) has no lever columns
+            # yet, so lever-bundle variants would collide with their plain
+            # rows in the training data. Keep the plain-body enumeration here
+            # until the feature engine grows lever features.
+            levers=("none",),
         )
     )
 

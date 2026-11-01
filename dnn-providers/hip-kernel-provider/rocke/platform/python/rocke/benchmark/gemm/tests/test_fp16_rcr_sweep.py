@@ -78,8 +78,34 @@ class TestGemmFp16RcrSweepPlan(unittest.TestCase):
                         shapes=(GemmSweepShape(130, 128, 32, "bad-m"),),
                     )
                 )
-                self.assertEqual(plan.variants, ())
+                # the granular-only candidates are filtered; the variants left
+                # (if any) are the padded bodies (M = 130 is ragged)
                 self.assertTrue(any("not divisible" in f.reason for f in plan.filtered))
+                if arch == "gfx950":
+                    self.assertGreaterEqual(len(plan.variants), 1)
+                for v in plan.variants:
+                    self.assertTrue(v.spec["trait"]["pad_m"], v.candidate)
+
+    def test_bodies_outside_the_manifest_are_filtered(self):
+        # 128x128x32: gemm_skinny; 64x4096x8192 (long K): split-K universal
+        # bodies with the f32 Cf32 workspace and the in-launch W / Cnt form
+        plan = expand_sweep(
+            GemmSweepConfig(
+                arch="gfx950",
+                shapes=(
+                    GemmSweepShape(128, 128, 32, "skinny"),
+                    GemmSweepShape(64, 4096, 8192, "split-k"),
+                ),
+            )
+        )
+        for v in plan.variants:
+            self.assertIn("tile", v.spec)
+            names = tuple(s["name"] for s in v.signature)
+            self.assertEqual(names, ("A", "B", "C", "M", "N", "K"))
+        reasons = [f.reason for f in plan.filtered]
+        self.assertTrue(any("result.bind()" in r for r in reasons))
+        self.assertTrue(any("'Cf32'" in r for r in reasons))
+        self.assertTrue(any("'W', 'Cnt'" in r for r in reasons))
 
     def test_write_sweep_json_schema(self):
         for arch in ARCHS:

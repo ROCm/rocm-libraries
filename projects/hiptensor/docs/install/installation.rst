@@ -273,6 +273,40 @@ Here are the available options to build the hipTensor library, with or without c
     *   -   ``HIPTENSOR_INLINE_UNARY_OPS``
         -   Inline all contraction unary ops for best runtime performance (slower compilation)
         -   ``OFF``
+    *   -   ``HIPTENSOR_ENABLE_ROCKE_BACKEND``
+        -   Build the rocKE backend, which plans select with ``HIPTENSOR_BACKEND=rocke``
+        -   ``OFF``
+    *   -   ``HIPTENSOR_ENABLE_ROCKE_JIT``
+        -   Build the rocKE backend's JIT and kernel cache (with ``HIPTENSOR_ENABLE_ROCKE_BACKEND``): compiles rocKE's
+            C++ kernel builders from ``HIPTENSOR_ROCKE_SOURCE_DIR`` into the library and links the COMGR library
+        -   ``ON``
+    *   -   ``HIPTENSOR_ROCKE_SOURCE_DIR``
+        -   rocKE source tree whose C++ engine builds the rocKE kernel packs and the JIT (build time only). A C++ host
+            tool of the build writes the packs; the build runs no Python. Besides ``platform/cpp``, the build reads
+            three data files of the tree, rocKE's tuned and AOT GETT route tables and its reduction route table
+            (``platform/python/rocke/dispatch/families/tensor_gett_tuned.json``, ``tensor_gett_aot.json`` and
+            ``hiptensor_rreduce.json``, compiled into the engine; configuration fails when one is missing),
+            with the JIT the GEMM selection models of ``platform/python/rocke/dispatch/gemm/selector_models``
+            (text files, only read: the pack build copies the files of each target that rocKE's
+            tensor-contraction planner serves to ``share/hiptensor/rocke/<target>/gemm_models`` with their
+            SHA-256 digests, the contraction JIT's input), and,
+            with the tests, the pack manifests of ``library/builders/hiptensor/manifests`` (the test
+            ``rocke_pack_manifest_test`` checks that the C++ tool lists what rocKE's manifests list)
+        -   ``../../dnn-providers/hip-kernel-provider/rocke``
+    *   -   ``HIPTENSOR_ROCKE_PACK_DIR``
+        -   Directory of prebuilt rocKE kernel packs (``<target>/rocke.htpk``, ``<target>/rocke.index.json``, and
+            the contraction JIT's ``<target>/gemm_models`` where present); when set, no pack is built
+        -   Empty
+    *   -   ``HIPTENSOR_ROCKE_PACK_TARGETS``
+        -   GPU targets to build rocKE kernel packs for
+        -   The targets of ``GPU_TARGETS`` among gfx90a, gfx942, gfx950
+    *   -   ``HIPTENSOR_ROCKE_PACK_JOBS``
+        -   Parallel compile jobs of the rocKE kernel pack build
+        -   Number of CPUs
+    *   -   ``HIPTENSOR_ROCKE_SELECT_MODEL_DIR``
+        -   Kernel selection models written into the rocKE kernel packs (``<target>/<class>.model``); a target
+            without models selects kernels by rocKE's rules
+        -   ``library/src/backends/rocke/select``
     *   -   ``CREATE_TEST_APP_LOCAL_DEPLOY``
         -   Copy ROCm runtime DLLs next to test binaries so they take precedence over System32 (Windows only)
         -   ``OFF``

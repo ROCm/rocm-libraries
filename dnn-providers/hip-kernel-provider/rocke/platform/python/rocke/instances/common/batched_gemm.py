@@ -223,6 +223,12 @@ def build_persistent_batched_gemm(
     (``StreamKDispatch``); FlyDSL
     ``mixed_moe_gemm_2stage.py:3215-3252``.
 
+    NOTE: the universal body has no persistent tile loop yet, so this
+    builder emits the plain (non-persistent) universal body under a
+    ``_persistent`` name and ``trait.persistent=True`` only renames the kernel
+    (:func:`build_universal_gemm` warns). Use ``streamk_gemm`` for a real
+    persistent / stream-K body.
+
     Minimum-viable: builds the persistent universal-GEMM kernel
     (``trait.persistent=True``); the dynamic ``counts`` /
     ``offsets`` lookup is wired into the host-side launcher (which

@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <numeric>
 
 #include "elementwise_solution.hpp"
@@ -63,6 +64,11 @@ namespace hiptensor
 
             // Clear out the previous arguments
             resetArgs();
+
+            if(!appliesScalarsAndOps(scalarValues, operators))
+            {
+                return false;
+            }
 
             // Promote to derived class for necessary functions such as
             // MakeArgumentPointer and MakeInvokerPointer.
@@ -205,6 +211,9 @@ namespace hiptensor
             else if constexpr(Traits::InstanceType
                               == ElementwiseInstanceType_t::ELEMENTWISE_TRINARY_OP)
             {
+                // `operators` is {opABC, opAB, opA, opB, opC}. The combined op applies its first
+                // binary op to (A, B) and its second to that result and C, so opAB has to go
+                // first to compute opABC(opAB(alpha * A, beta * B), gamma * C).
                 Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     deviceInputLengths,
                     deviceInputStrides,
@@ -212,8 +221,8 @@ namespace hiptensor
                     deviceInBuffers,
                     deviceOutBuffers,
                     typename Traits::CombinedOp{
-                        typename Traits::ABCOp{operators[0]},
                         typename Traits::ABOp{operators[1]},
+                        typename Traits::ABCOp{operators[0]},
                         typename Traits::AOp{CkHiptensorUnaryOp{operators[2]},
                                              CkScale{static_cast<float>(scalarValues[0])}},
                         typename Traits::AOp{CkHiptensorUnaryOp{operators[3]},
@@ -243,6 +252,27 @@ namespace hiptensor
             Base::mThreadDim = findThreadDim(deviceOp->GetTypeString());
 
             return mValid;
+        }
+
+        bool appliesScalarsAndOps(std::vector<double> const&              scalarValues,
+                                  std::vector<hiptensorOperator_t> const& operators) const override
+        {
+            using Traits = MetaTraits<DeviceOp>;
+
+            if constexpr(Traits::InstanceType == ElementwiseInstanceType_t::ELEMENTWISE_PERMUTE)
+            {
+                if constexpr(std::is_same_v<typename Traits::ScaleOp,
+                                            ck::tensor_operation::element_wise::PassThrough>)
+                {
+                    return std::all_of(scalarValues.cbegin(),
+                                       scalarValues.cend(),
+                                       [](auto v) { return v == 1.0F; })
+                           && std::all_of(operators.cbegin(), operators.cend(), [](auto op) {
+                                  return op == HIPTENSOR_OP_IDENTITY;
+                              });
+                }
+            }
+            return true;
         }
     };
 
