@@ -57,7 +57,7 @@ from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.Subtile.Kernel import *
 from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
-from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
+from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide, dcpLateFillIncrements
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
@@ -909,7 +909,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           self._emitTdmWaveParitySCC(mod, kernel, tmp.idx, "check wave parity")
 
     late = Module("TDM decoupled late fill %s" % singleTc)
-    pinThinFence = (self.tdmFusePaired(kernel)
+    incNames = dcpLateFillIncrements(kernel, singleTc)
+    pinThinFence = (incNames is not None
                     and self.states.dcpTokenGate)
     if pinThinFence:
       late.add(SSchedulingFence(comment="pin all local reads before %s-thin WAR fence" % singleTc))
@@ -918,18 +919,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if pinThinFence:
       late.add(SSchedulingFence(comment="pin %s-thin refill after whole-WG WAR fence" % singleTc))
 
-    if self.tdmFusePaired(kernel):
-      # Move the single-buffered descriptor set and its increment together.
+    if incNames is not None:
+      # Move the single-buffered descriptor set and its increments together.
       singleFill = self.codes.globalReadA if singleTc == "A" else self.codes.globalReadB
-      singleIncName = "globalReadIncrement%s" % singleTc
       kept = []
       for item in src.items():
-        if item is singleFill or getattr(item, "name", None) == singleIncName:
+        if item is singleFill or getattr(item, "name", None) in incNames:
           late.add(item)
         else:
           kept.append(item)
       thick = Module("TDM decoupled early fill set %s" % doubleTc)
-      thick.setItems(kept)
+      thick.setItems(self._dcpHalfPlrMasks(kernel, singleFill, late.findNamedItem("globalReadIncrementA")) + kept)
       # Keep the thick fill inside the InitCIterWmma clone region.
       thick.add(Label(self.labels.getNameInc("DcpEarlyFill%sEnd" % doubleTc), ""))
       src.setItems([thick])
@@ -954,6 +954,26 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.codes.unrollLoopHeader = early
 
     self.codes.perIterGlobalRead[lateIter].add(late)
+
+  def _dcpHalfPlrMasks(self, kernel, fill, inc):
+    """HalfPLR's last-trip masks, taken out of a set that moves late.
+
+    A's fill header zeroes every set's TDM enable word and A's increment module zeroes the
+    increments; the double-buffered fill and increment that stay early must follow both.
+    """
+    if not kernel["HalfPLR"]:
+      return []
+    masks = []
+    if fill.header.itemsSize():
+      mask = Module("HalfPLR last-trip TDM disable")
+      mask.setItems(fill.header.items())
+      fill.header.setItems([])
+      masks.append(mask)
+    incMask = inc.findNamedItem("graIncrementMask") if inc is not None else None
+    if incMask is not None:
+      inc.setItems([item for item in inc.items() if item is not incMask])
+      masks.append(incMask)
+    return masks
 
   def _dcpTokenSide(self, tc):
     return dcpLdsSide(tc)
@@ -3088,11 +3108,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # does not need parity-based increment selection.
       if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel["UseSubtileImpl"]:
         module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+        # The scale pair passes None for a scale the problem does not carry.
+        if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
         module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+        if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
         tdmInited = True
 
       # Tile offset assignment A(MXSA)
@@ -3349,13 +3370,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if tdmA and tdmB and kernel["NumWaves"] > 1:
         module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA, tensorParametersB))
 
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+        if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
 
         if isPersistent(kernel):
           module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-          if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-            module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+          if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+            module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
 
         if not self.states.staggerUCode:
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
@@ -4278,8 +4299,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             if "MX" in tensorParametersB:
               pointerLWCode.addComment1("local write swap offsets mxsb")
               #TODO: TDM refactor
-              if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1:
-                pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"]))
+              if kernel["enableTDMA"] and kernel["enableTDMB"]:
+                # On more waves MXSB's set swaps with its owner, unless that owner is a dead MXSA.
+                swap = self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"])
+                if kernel["NumWaves"] == 1 or swap.items():
+                  pointerLWCode.add(swap)
               elif not kernel["enableTDMB"] and not kernel["NoLdsWriteCode"]:
                 pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
             if kernel["enableTDMB"]:
@@ -5226,8 +5250,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
           # Swap offsets B(MXSB)
           if kernel["ProblemType"]["MXBlockB"]:
-            if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1:
-              pointerLWCode.addComment1("local write swap offsets mxsb")
+            if kernel["enableTDMA"] and kernel["enableTDMB"]:
+              # On more waves MXSB's set swaps with its owner, unless that owner is a dead MXSA.
+              swap = self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"])
+              if kernel["NumWaves"] == 1 or swap.items():
+                pointerLWCode.addComment1("local write swap offsets mxsb")
+                pointerLWCode.add(swap)
             elif not kernel["enableTDMB"]:
               pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
           if kernel["enableTDMB"]:
@@ -6006,8 +6034,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Swap local ptrs B(MXSB)
       if "MX" in tensorParametersB:
         module.addComment1("local write swap mxsb")
-        if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1:
-          module.add(self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"]))
+        if kernel["enableTDMA"] and kernel["enableTDMB"]:
+          # On more waves MXSB's set swaps with its owner, unless that owner is a dead MXSA.
+          swap = self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"])
+          if kernel["NumWaves"] == 1 or swap.items():
+            module.add(swap)
         elif not kernel["enableTDMB"]:
           module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
 
@@ -6860,6 +6891,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             else:
               module.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, tensorParameters1st["MX"], \
                                                                      tensorParameters2nd["MX"]))
+          elif kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+            # PrefetchAcrossPersistent rejects a lone scale; the pair passes None for the absent one.
+            module.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, tensorParameters1st.get("MX"), \
+                                                                   tensorParameters2nd.get("MX")))
         else:
           module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters1st))
           module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters2nd))
@@ -10122,9 +10157,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       #   own descriptors and never reads GlobalReadIncs, so holding the SGPR there
       #   only costs registers that MX kernels, which Solution forces onto subtile
       #   on gfx950, cannot spare.
+      # - A and B do not ride separate wave-separated TDM descriptor sets: those
+      #   read GlobalReadIncsA/B as SGPR operands (every-wave and shared-set
+      #   increments, the paired selects, the StreamK K-offset, the HalfPLR mask)
       mxSwizzledScale = kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle", "HostPreSwizzle") \
                         and not kernel["UseSubtileImpl"]
-      if isPersistent(kernel) and (not self.states.staggerUCode):
+      if isPersistent(kernel) and (not self.states.staggerUCode) and not self.tdmSeparateABDescriptors(kernel):
         if kernel["ProblemType"]["TLUA"] == False:
           if self.states.a.numSgprGlobalReadIncs == 1:
             # use const GR Inc

@@ -8,6 +8,7 @@
 import copy
 import itertools
 import re
+from contextlib import contextmanager
 import types
 
 import pytest
@@ -1612,8 +1613,6 @@ def test_reachable_fuse_integers_resolve_to_their_row(fuse, expected):
 DECLINES = (
     ("TDMSplit", {"TDMSplit": True}),
     ("UseSubtileImpl", {"UseSubtileImpl": True}),
-    ("no MX scale on A", {"ProblemType": {"MXBlockA": 0, "MXBlockB": 32}}),
-    ("no MX scale on B", {"ProblemType": {"MXBlockA": 32, "MXBlockB": 0}}),
     ("NumWaves==1", {"NumWaves": 1}),
     ("TDM moves A only", {"TDMInst": 1}),
     ("TDM moves B only", {"TDMInst": 2}),
@@ -2069,3 +2068,112 @@ def test_the_schedule_iter_alg_3_refusal_is_correctness_not_conservatism(
     with pytest.raises(AssertionError,
                        match="fill group to re-slot carries no tensor_load_to_lds"):
         _emitDerived(sol, assembler)
+
+
+# Divergent pairs on TDMFuse 1 with HalfPLR and on TDMFuse 1-3 without MX.
+_LATE_FILL_MX = {"both": (32, 32), "none": (0, 0), "A only": (32, 0), "B only": (0, 32)}
+
+
+@pytest.mark.parametrize("pgrA, pgrB, thin", [(1, 2, "A"), (2, 1, "B")])
+@pytest.mark.parametrize("numWaves", [1, 2, 4])
+@pytest.mark.parametrize("mx", sorted(_LATE_FILL_MX))
+@pytest.mark.parametrize("fuse", sorted(TDM_FUSE_GROUPING))
+def test_late_fill_moves_the_thin_set_where_a_and_b_have_sets_of_their_own(
+        fuse, mx, numWaves, pgrA, pgrB, thin):
+    mxA, mxB = _LATE_FILL_MX[mx]
+    state = ks(fuse, pgrA, pgrB, NumWaves=numWaves,
+               ProblemType={"MXBlockA": mxA, "MXBlockB": mxB})
+    if numWaves == 1:
+        expected = None
+    elif fuse == 1 and mx == "both":
+        expected = ("globalReadIncrement%s" % thin,)
+    elif fuse in (1, 2, 3) and mx == "none":
+        expected = ("globalReadIncrementA", "globalReadIncrementB")
+    else:
+        expected = None
+    assert DP.dcpLateFillIncrements(state, thin) == expected
+
+
+_DCP_HALFPLR_MASK_RE = re.compile(r"^\s*s_cmov_b32\s+s\[sgpr\w*(?:Group0\+0|Incs\w*)\],\s*0(?:\s|$)")
+_DCP_MX_HALFPLR_MI = [16, 16, 128, 1, 1, 2, 4, 2, 2]
+
+
+@contextmanager
+def _stinkyTofuInputs():
+    """The text of every module handed to StinkyTofu inside the block, as TensileLite emitted it."""
+    import rocisa
+    original, texts = rocisa.toStinkyTofuModule, []
+
+    def recorded(body, *args, **kwargs):
+        texts.append(str(body))
+        return original(body, *args, **kwargs)
+
+    rocisa.toStinkyTofuModule = recorded
+    try:
+        yield texts
+    finally:
+        rocisa.toStinkyTofuModule = original
+
+
+def _dcpMasksAfterTheEarlyFill(text):
+    """(main-loop HalfPLR last-iteration masks placed after their iteration's early fill set, mask count).
+
+    The main loop splits into its unrolled iterations at label_LoopBeginL and at each exit branch to
+    label_LoopEndL. A mask that leads the early fill set comes before the iteration's closing
+    DcpEarlyFill label, ahead of the set's own LDS sync and load; one left in the late fill comes after it.
+    """
+    late, count, filled = [], 0, None
+    for i, line in enumerate(text.splitlines()):
+        if line.startswith("label_LoopBeginL:") or re.match(r"\s*s_cbranch_scc[01]\s+label_LoopEndL\b", line):
+            filled = False
+        elif line.startswith("label_LoopEndL:"):
+            filled = None
+        elif filled is not None and "DcpEarlyFill" in line and line.rstrip().endswith(":"):
+            filled = True
+        elif filled is not None and _DCP_HALFPLR_MASK_RE.match(line):
+            count += 1
+            if filled:
+                late.append((i, line.strip()))
+    return late, count
+
+
+def _dcpDivergentAsm(gfx1250_iim, assembler, capsys, tdmFuse, scaleLess, pgrA, pgrB, halfPlr):
+    if scaleLess:
+        overrides = _scaleLessDivergent(pgrA, pgrB)
+    else:
+        overrides = dict(MatrixInstruction=list(_DCP_MX_HALFPLR_MI), LDSTrInst=False,
+                         PrefetchGlobalRead=max(pgrA, pgrB),
+                         PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    overrides.update(TDMFuse=tdmFuse, HalfPLR=halfPlr)
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **overrides)
+    assert sol.get("Valid") is True, out
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs and all(err == 0 for err in errs), errs
+    return asm
+
+
+@pytest.mark.parametrize("tdmFuse, scaleLess, halfPlr", [
+    (1, False, 1), (1, False, 2), (1, False, 3), (1, True, 1), (2, True, 2), (3, True, 3)])
+@pytest.mark.parametrize("pgrA, pgrB", [(1, 2), (2, 1)])
+def test_divergent_halfplr_masks_lead_the_early_fill_set(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, scaleLess, halfPlr, pgrA, pgrB):
+    """Checked on the module TensileLite hands to StinkyTofu, which reschedules within blocks and
+    copies loop iterations."""
+    with _stinkyTofuInputs() as texts:
+        _dcpDivergentAsm(gfx1250_iim, assembler, capsys, tdmFuse, scaleLess, pgrA, pgrB, halfPlr)
+    assert texts
+    for text in texts:
+        late, count = _dcpMasksAfterTheEarlyFill(text)
+        assert count, "the HalfPLR kernel emitted no last-iteration mask in its main loop"
+        assert not late, late
+
+
+@pytest.mark.parametrize("tdmFuse", [1, 2, 3])
+@pytest.mark.parametrize("pgrA, pgrB", [(1, 2), (2, 1)])
+def test_scale_less_divergent_pair_moves_its_thin_set_instead_of_splitting_by_parity(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB):
+    asm = _dcpDivergentAsm(gfx1250_iim, assembler, capsys, tdmFuse, True, pgrA, pgrB, 0)
+    labels = [line.strip() for line in asm.splitlines() if line.rstrip().endswith(":")]
+    assert any("DcpEarlyFill" in label for label in labels), "no early fill set was emitted"
+    assert not any("DcpLateFill" in label for label in labels), \
+        "the fill group was split by wave parity"

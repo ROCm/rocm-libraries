@@ -1273,10 +1273,29 @@ validParameters = { # we need to make sure this matches develop
     #      when NumWaves>1). Hidden from the kernel name.
     #   1  {A,MXSA} + {MXSB,B}, each scale on a data tensor's set. NumWaves>1.
     #      Parity crosses the scales: waves 0,2 carry A+MXSB, 1,3 B+MXSA.
-    #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
-    #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
-    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
-    #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #   2  {A,MXSA,MXSB} + {B}. With both scales on 4 waves a 2/1/1 split:
+    #      A on waves 0-1, MXSA on wave 2, MXSB on wave 3, B on every wave;
+    #      on 2 waves A on wave 0, MXSA (on A's set) and MXSB (on a set of
+    #      its own) on wave 1, B on both.
+    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2 with A and B exchanged.
+    #   Without MX scales 1-3 reduce to {A} + {B}: A and B each on every wave,
+    #   so every wave issues a slice of both.
+    #   With MX scales on one tensor only, the scale takes every wave of the
+    #   0 scale set; on 1-3 it shares its data tensor's set, splitting that
+    #   set's waves with it, and the other data tensor rides every wave of
+    #   its own set.
+    #   Solution rejects, naming the limit and what to use instead:
+    #   - a value outside this list;
+    #   - 1-3 without the TDM on both tensors (TDMInst=3), on one wave, or
+    #     with UseSubtileImpl;
+    #   - 2 and 3 with both scales on other than 2 or 4 waves, or at a
+    #     divergent decoupled pair;
+    #   - 1-3 with both scales and PrefetchAcrossPersistent;
+    #   - one-sided MX off gfx1250 TDM kernels (MXLoadInst=TDM), with
+    #     UseSubtileImpl, with PrefetchAcrossPersistent or
+    #     ReuseAcrossPersistent on a persistent kernel, or at a divergent
+    #     decoupled pair on more than one wave;
+    #   - TDMSplit, which is disabled for every row.
     #
     # th/scope/nv are instruction-wide: at 1/2/3 the data tensor's (A or B) hints decide and the
     # scale tensors' are ignored; at 0 a field is emitted only if the members of a set agree.
