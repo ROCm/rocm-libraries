@@ -137,15 +137,19 @@ namespace FixedPointEmulation
         double ovh_host;
     };
 
-    /* Returns the perf-model parameters for the given HIP device, or nullopt if
-     * the device is not in the table (in which case emulation should not run).
-     * The table is keyed by PCI device ID.  Values are relative (only ratios
-     * matter).  Field order: ai_fp64, ai_fp32, ai_int8, ovh_kernel, ovh_matmul,
-     * ovh_memset, ovh_sync, ovh_host.
-     * See fp_emulation/README.md, "Adding support for a new device".           */
-    static std::optional<PerfModelDeviceParams> get_perf_model_params(int device)
+    /* Device support tables.  Performance-model values are relative (only
+     * ratios matter).  Field order: ai_fp64, ai_fp32, ai_int8, ovh_kernel,
+     * ovh_matmul, ovh_memset, ovh_sync, ovh_host.
+     * See fp_emulation/README.md, "Adding support for a new device".
+     *
+     * Chip rows, keyed by PCI device ID, hold values measured on that card.
+     * Architecture rows, keyed by gfx target, hold the values used for cards
+     * of that architecture without a chip row, and the architecture's policy.
+     * A chip row overrides the architecture's values; the architecture's
+     * policy applies either way.  A device with neither row is not supported. */
+    static const std::unordered_map<uint32_t, PerfModelDeviceParams>& chip_rows()
     {
-        static const std::unordered_map<uint32_t, PerfModelDeviceParams> hw_params_by_pci_id = {
+        static const std::unordered_map<uint32_t, PerfModelDeviceParams> rows = {
             {0x75a0u, {11.22, 22.04, 521.7, 3.0e7, 6.1e7, 1.2e7, 3.0e8, 6.1e8}}, // gfx950-mi350x
             {0x75b0u, {11.22, 22.04, 521.7, 3.0e7, 6.1e7, 1.2e7, 3.0e8, 6.1e8}}, // gfx950-mi350x
             {0x75a3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx950-mi355x
@@ -153,23 +157,111 @@ namespace FixedPointEmulation
             {0x745eu, {1.591, 15.62, 159.7, 1.3e6, 3.3e6, 1.4e6, 6.6e6, 2.7e7}}, // gfx1100-w7800
             {0x7550u, {1.36, 39.86, 332.0, 1.4e6, 4.2e6, 1.8e6, 1.6e7, 5.6e7}}, // gfx1201-rx9070xt
         };
-        static std::optional<std::optional<PerfModelDeviceParams>> device_params_cache[64];
+        return rows;
+    }
 
+    struct ArchRow
+    {
+        const char*           arch; /* gfx target                      */
+        PerfModelDeviceParams params; /* for cards without a chip row */
+        /* FP64 policy when no strategy is set (descriptor or
+         * HIPBLAS_EMULATION_STRATEGY): emulate exactly when m * n * k is at
+         * least this value, without the performance model.
+         * 0 = performance model.                                             */
+        double fp64_default_min_mnk;
+    };
+
+    static const ArchRow* find_arch_row(const char* gcn_arch_name)
+    {
+        /* Values: generic Radeon values {0, 1, 1, 1, 1, 1, 1, 1}.  ai_fp64 = 0
+         * marks native FP64 as never competitive, so the performance model
+         * always emulates FP64; ai_fp32 and ai_int8 are equal, so it never
+         * emulates FP32 (an FP32 emulation needs several INT8 GEMMs); the
+         * overheads are negligible.  Cards with a chip row use their measured
+         * values instead.
+         *
+         * FP64 thresholds:
+         *   RDNA 3:   on the Radeon Pro W7800, emulated FP64 is slower than
+         *             native at 512^3 and faster at 640^3 (2.6e8).
+         *   RDNA 3.5: copied from RDNA 3; not yet measured on RDNA 3.5.
+         *   RDNA 4:   on the Radeon RX 9070 XT, emulation ties native FP64 at
+         *             512^3 and is faster at 640^3.                            */
+        static const ArchRow rows[] = {
+            {"gfx1100", {0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}, 2.5e8}, // RDNA 3
+            {"gfx1101", {0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}, 2.5e8}, // RDNA 3
+            {"gfx1102", {0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}, 2.5e8}, // RDNA 3
+            {"gfx1150", {0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}, 2.5e8}, // RDNA 3.5
+            {"gfx1151", {0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}, 2.5e8}, // RDNA 3.5
+            {"gfx1152", {0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}, 2.5e8}, // RDNA 3.5
+            {"gfx1200", {0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}, 2.0e8}, // RDNA 4
+            {"gfx1201", {0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}, 2.0e8}, // RDNA 4
+        };
+        if(gcn_arch_name == nullptr)
+            return nullptr;
+        /* gcnArchName may carry target features, e.g. "gfx1100:sramecc-:xnack-". */
+        const size_t len = std::strcspn(gcn_arch_name, ":");
+        for(const auto& row : rows)
+            if(std::strlen(row.arch) == len && std::strncmp(row.arch, gcn_arch_name, len) == 0)
+                return &row;
+        return nullptr;
+    }
+
+    struct DeviceEmulationInfo
+    {
+        std::optional<PerfModelDeviceParams> params; /* nullopt: not supported */
+        FixedPointEmulationDeviceSupport     support;
+    };
+
+    static DeviceEmulationInfo lookup_device(uint32_t pci_device_id, const char* gcn_arch_name)
+    {
+        DeviceEmulationInfo info{std::nullopt, {FIXED_POINT_EMULATION_DEVICE_NONE, 0.0, false}};
+        const ArchRow* arch = find_arch_row(gcn_arch_name);
+        if(arch)
+            info.support.fp64_default_min_mnk = arch->fp64_default_min_mnk;
+        const auto& chips = chip_rows();
+        const auto  it    = chips.find(pci_device_id & 0xFFFFu);
+        if(it != chips.end())
+        {
+            info.params        = it->second;
+            info.support.match = FIXED_POINT_EMULATION_DEVICE_CHIP;
+        }
+        else if(arch)
+        {
+            info.params        = arch->params;
+            info.support.match = FIXED_POINT_EMULATION_DEVICE_ARCH;
+        }
+        if(info.params)
+            info.support.fp64_native_competitive = info.params->ai_fp64 > 0.0;
+        return info;
+    }
+
+    /* Device lookup, cached per device; nullptr for an out-of-range index. */
+    static const DeviceEmulationInfo* device_info(int device)
+    {
+        static std::optional<DeviceEmulationInfo> cache[64];
         if(device < 0 || device >= 64)
-            return std::nullopt;
-        auto& entry = device_params_cache[device];
+            return nullptr;
+        auto& entry = cache[device];
         if(!entry)
         {
-            int              chip_id = 0;
-            const hipError_t attr_err
-                = hipDeviceGetAttribute(&chip_id, hipDeviceAttributePciChipId, device);
-            const uint32_t pci_device_id = static_cast<uint32_t>(chip_id) & 0xFFFFu;
-            auto           it            = hw_params_by_pci_id.find(pci_device_id);
-            entry                        = (it != hw_params_by_pci_id.end())
-                                               ? std::optional<PerfModelDeviceParams>{it->second}
-                                               : std::optional<PerfModelDeviceParams>{};
+            int chip_id = 0;
+            if(hipDeviceGetAttribute(&chip_id, hipDeviceAttributePciChipId, device) != hipSuccess)
+                chip_id = 0;
+            hipDeviceProp_t prop{};
+            const char*     arch = (hipGetDeviceProperties(&prop, device) == hipSuccess)
+                                       ? prop.gcnArchName
+                                       : nullptr;
+            entry                = lookup_device(static_cast<uint32_t>(chip_id), arch);
         }
-        return *entry;
+        return &*entry;
+    }
+
+    /* Returns the perf-model parameters for the given HIP device, or nullopt if
+     * the device is not supported (in which case emulation should not run).   */
+    static std::optional<PerfModelDeviceParams> get_perf_model_params(int device)
+    {
+        const DeviceEmulationInfo* info = device_info(device);
+        return info ? info->params : std::nullopt;
     }
 
     /* Returns the minimum number of moduli s ∈ [2, S_MAX] such that
@@ -266,8 +358,13 @@ namespace FixedPointEmulation
               + hw.ovh_sync; /* hipStreamSynchronize — dominant cost */
         const double t_total = t_prelim_kern + t_prelim_gemm + t_refine_kern + t_scale_kern
                                + t_gemm_accum + t_host + t_adp;
+        /* A native rate of 0 (generic architecture rows) marks native GEMM of this
+         * type as never competitive: its predicted cost is infinite, so the
+         * performance model always prefers emulation.                         */
         const double t_native
-            = std::max(2.0 * mnk / c1, bytes_per_elem * (mk + kn + mn) / c0) + hw.ovh_matmul;
+            = (c1 > 0.0)
+                  ? std::max(2.0 * mnk / c1, bytes_per_elem * (mk + kn + mn) / c0) + hw.ovh_matmul
+                  : std::numeric_limits<double>::infinity();
 
         return {t_prelim_kern,
                 t_prelim_gemm,
@@ -1821,6 +1918,33 @@ bool fixedPointEmulationIsEager()
     return v;
 }
 
+hipblasEmulationStrategy_t fixedPointEmulationEnvStrategy()
+{
+    static const hipblasEmulationStrategy_t v = []() -> hipblasEmulationStrategy_t {
+        const auto parsed
+            = fixedPointEmulationParseStrategyEnv(std::getenv("HIPBLAS_EMULATION_STRATEGY"));
+        if(parsed.state == FIXED_POINT_EMULATION_ENV_UNSET)
+            return HIPBLAS_EMULATION_STRATEGY_DEFAULT;
+        if(parsed.state == FIXED_POINT_EMULATION_ENV_VALID)
+            return static_cast<hipblasEmulationStrategy_t>(parsed.value);
+        return HIPBLAS_EMULATION_STRATEGY_PERFORMANT; /* invalid value: unchanged behavior */
+    }();
+    return v;
+}
+
+FixedPointEmulationDeviceSupport fixedPointEmulationLookupDevice(uint32_t    pci_device_id,
+                                                                 const char* gcn_arch_name)
+{
+    return FixedPointEmulation::lookup_device(pci_device_id, gcn_arch_name).support;
+}
+
+FixedPointEmulationDeviceSupport fixedPointEmulationDeviceSupport(int device)
+{
+    const auto* info = FixedPointEmulation::device_info(device);
+    return info ? info->support
+                : FixedPointEmulationDeviceSupport{FIXED_POINT_EMULATION_DEVICE_NONE, 0.0, false};
+}
+
 uint32_t fixedPointEmulationSpecialValuesMask()
 {
     static const uint32_t v = []() -> uint32_t {
@@ -1900,7 +2024,8 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
     /* Setting Precedence (highest to lowest):
      *   1. Per-matmul descriptor fields (desc->emulation_*; sentinel = inherit).
      *   2. Environment variable — read once at first use, process-wide default.
-     *   3. Built-in default (ADP mode, S_MAX moduli, special-values mask = 0x3).
+     *   3. Built-in default (ADP mode, S_MAX moduli, special-values mask = 0x3;
+     *      strategy from the device's architecture policy, otherwise PERFORMANT).
      *
      * Descriptor fields are initialized to sentinel values (-1 / ~0u / 0).
      * A sentinel means "inherit from env var"; a non-sentinel means "use this
@@ -1938,7 +2063,7 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
     if(!emulEnabled)
         return result;
 
-    /* Device must be in the supported table. */
+    /* Device must have a chip row or an architecture row. */
     const int dev = h->device;
     if(!get_perf_model_params(dev))
         return result;
@@ -1956,17 +2081,35 @@ FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*
     }
 
     /* Strategy (eager vs performant).
-     * Priority: desc->emulation_strategy (non-DEFAULT) > env var.
+     * Priority: desc->emulation_strategy (non-DEFAULT) > env var > architecture
+     * policy > PERFORMANT.
      * force_off is already handled above; only DEFAULT/PERFORMANT/EAGER reach here. */
     {
         const hipblasEmulationStrategy_t desc_strat
             = ed ? ed->emulation_strategy : HIPBLAS_EMULATION_STRATEGY_DEFAULT;
-        result.strategy
-            = (desc_strat == HIPBLAS_EMULATION_STRATEGY_EAGER
-               || (desc_strat == HIPBLAS_EMULATION_STRATEGY_DEFAULT && fixedPointEmulationIsEager()))
-                  ? HIPBLAS_EMULATION_STRATEGY_EAGER
-                  : HIPBLAS_EMULATION_STRATEGY_PERFORMANT;
+        hipblasEmulationStrategy_t strat = (desc_strat != HIPBLAS_EMULATION_STRATEGY_DEFAULT)
+                                               ? desc_strat
+                                               : fixedPointEmulationEnvStrategy();
         result.workspace_bytes = workspace_bytes;
+        if(strat == HIPBLAS_EMULATION_STRATEGY_DEFAULT)
+        {
+            /* No strategy set: an architecture policy (Radeon FP64) emulates
+             * exactly the problems at or above a size threshold, without the
+             * performance model; otherwise the performance model decides.     */
+            const double min_mnk = (type_a == HIP_R_64F)
+                                       ? fixedPointEmulationDeviceSupport(dev).fp64_default_min_mnk
+                                       : 0.0;
+            if(min_mnk > 0.0)
+            {
+                result.strategy = HIPBLAS_EMULATION_STRATEGY_EAGER;
+                result.apply    = static_cast<double>(m) * static_cast<double>(n)
+                                   * static_cast<double>(k)
+                               >= min_mnk;
+                return result;
+            }
+            strat = HIPBLAS_EMULATION_STRATEGY_PERFORMANT;
+        }
+        result.strategy = strat;
         if(result.strategy == HIPBLAS_EMULATION_STRATEGY_EAGER
            || fixedPointEmulationPerformanceCheck(
                h, desc, type_a, opA, opB, m, n, k, workspace_bytes))

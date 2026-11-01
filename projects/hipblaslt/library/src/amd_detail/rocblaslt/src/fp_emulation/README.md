@@ -10,7 +10,10 @@ hardware where INT8 peak throughput greatly exceeds FP64/FP32 throughput, this
 can outperform native DGEMM/SGEMM while producing results that are roughly as
 accurate as — and sometimes more accurate than — the native path.
 
-- **Supported hardware:** AMD Instinct MI350X and MI355X (gfx950).
+- **Supported hardware:** AMD Instinct MI350X and MI355X (gfx950), and AMD
+  Radeon GPUs with RDNA 3 (gfx1100–gfx1102), RDNA 3.5 (gfx1150–gfx1152) and
+  RDNA 4 (gfx1200, gfx1201) targets. Tested on the Radeon Pro W7800
+  (gfx1100) and the Radeon RX 9070 XT (gfx1201).
 - **Supported types:** FP64 (`HIP_R_64F`) and FP32 (`HIP_R_32F`).
 - **Restrictions:** non-batched (`batch_count = 1`) only; default epilogue only.
 
@@ -61,9 +64,50 @@ linkage) to keep the symbols hidden.
 
 ## Adding support for a new device
 
-Emulation is enabled only on devices listed in `hw_params_by_pci_id` in
-`get_perf_model_params()` (`emulation.cpp`). There is no other device gate:
-adding a row enables emulation and the performance model for that device.
+Emulation is enabled only on devices found by the device lookup in
+`emulation.cpp`, which has two tables:
+
+- **Chip rows** (`chip_rows()`), keyed by PCI device ID: performance-model
+  values measured on that card.
+- **Architecture rows** (`find_arch_row()`), one per gfx target: the values
+  used for any card of that target without a chip row, and the target's
+  policy.
+
+A chip row overrides the architecture row's values. The architecture row's
+policy applies either way. A device with neither row is never emulated. There
+is no other device gate.
+
+The policy field `fp64_default_min_mnk` sets the built-in FP64 strategy for
+the target. When it is greater than 0 and neither the emulation descriptor
+nor `HIPBLAS_EMULATION_STRATEGY` sets a strategy, an FP64 GEMM is emulated
+exactly when `m * n * k` is at least this value, without the performance
+model. The Radeon targets use this, because FP64 emulation is faster than
+native FP64 there from a small problem size on. FP32 always uses the
+performance model unless a strategy is set.
+
+### Generic values
+
+The Radeon architecture rows use generic performance-model values instead of
+measured ones: `{0, 1, 1, 1, 1, 1, 1, 1}`.
+
+- `ai_fp64 = 0` marks native FP64 as never competitive. The model then
+  predicts an infinite native FP64 cost, so the `performant` strategy always
+  emulates FP64.
+- `ai_fp32 = ai_int8 = 1` makes native FP32 as fast as one INT8 GEMM. An
+  FP32 emulation runs several INT8 GEMMs, so `performant` never emulates
+  FP32. An explicit `eager` strategy still does.
+- The overheads (`1`) are negligible next to the GEMM costs.
+
+The values also drive how a problem that does not fit the workspace is split.
+With generic values those splits ignore launch overheads, so a card with a
+measured chip row can split better. To support a new architecture without
+measuring a card, add an architecture row with the generic values and an FP64
+threshold.
+
+### Measured values
+
+To add a chip row with measured values for a specific card, follow these
+steps:
 
 1. **PCI device ID.** Read it with
    `hipDeviceGetAttribute(&id, hipDeviceAttributePciChipId, dev)`. Only the
@@ -98,7 +142,7 @@ adding a row enables emulation and the performance model for that device.
    ratio, especially near 1.0, where the decision flips.
 6. **Update docs and tests.** Add the device to "Supported hardware" above
    and in `docs/how-to/fp-emulation.rst`. The emulation gtests detect support
-   through the same table, so run
+   through the same lookup, so run
    `hipblaslt-test --gtest_filter='*FixedPointEmulation*'` on the new device.
 
 ## Profiling CSV
@@ -145,7 +189,7 @@ match the `hipblasComputeType_t` enumerators.
 | --- | --- | --- |
 | `HIPBLAS_EMULATE_DOUBLE_PRECISION` | `0` / `1` | Transparently emulate plain `HIPBLAS_COMPUTE_64F` GEMMs. |
 | `HIPBLAS_EMULATE_SINGLE_PRECISION` | `0` / `1` | Transparently emulate plain `HIPBLAS_COMPUTE_32F` GEMMs. |
-| `HIPBLAS_EMULATION_STRATEGY` | `performant` (default) / `eager` | `performant` emulates only when the performance model predicts a speedup; `eager` always emulates when supported. |
+| `HIPBLAS_EMULATION_STRATEGY` | `performant` / `eager` | `performant` emulates only when the performance model predicts a speedup; `eager` always emulates when supported. Unset: the device's architecture policy for FP64 (see "Adding support for a new device"), otherwise `performant`. |
 | `HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK` | hex bitmask, default `0x3` | Bit 0 = detect Inf, bit 1 = detect NaN. `0` skips detection (unsupported values silently corrupt the output). |
 | `HIPBLAS_FIXEDPOINT_EMULATION_FP64_MANTISSA_BIT_COUNT` | `1`..`52`, default `52` | ADP precision target for FP64. Fewer bits mean fewer moduli and faster execution. Takes precedence over the generic variable below. |
 | `HIPBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT` | `1`..`52`, default `52` | Same as the FP64 variable, used only when that one is unset; FP64 only. CUDA-compatible name (`CUBLAS_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT`), but sets the ADP target rather than a fixed bit count. |
