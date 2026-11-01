@@ -168,12 +168,21 @@ def test_wave32_only_capability_rows_are_built_on_gfx1250():
         directions=("dgrad",),
     )
     built = {
-        (j.identity.algorithm, j.identity.filter_h, j.identity.pad_h)
+        (
+            j.identity.algorithm,
+            j.identity.filter_h,
+            j.identity.pad_h,
+            j.identity.stride_h,
+            j.identity.cpg,
+            j.identity.kpg,
+        )
         for j in jobs
         if j.identity.algorithm == DIRECT_DGRAD_WMMA
     }
+    # Packed small groups (stride 1 and 2) bake their channel counts.
     for c in dks.DIRECT_CAPABILITIES[DIRECT_DGRAD_WMMA][1]:
-        assert (DIRECT_DGRAD_WMMA, c.KH, c.PAD) in built, c
+        key = (DIRECT_DGRAD_WMMA, c.KH, c.PAD, c.stride, c.cpg, c.kpg)
+        assert key in built, c
 
 
 def test_wave32_only_fwd_capability_rows_are_built_on_gfx1250():

@@ -436,6 +436,10 @@ def _ceil(a, b):
         (dict(C=128, K=128, groups=32), 8),
         (dict(C=256, K=256, groups=32), 4),
         (dict(C=256, K=256, groups=16), 2),
+        # Small groups at stride 2: packed super-group + phase decomposition.
+        (dict(C=128, K=128, groups=32, stride=2), 8),
+        (dict(C=256, K=256, groups=32, stride=2), 4),
+        (dict(C=512, K=512, groups=32, stride=2), 2),
     ],
 )
 def test_aot_cache_plans_launch(wmma_cache, pkw, pack):
@@ -581,6 +585,32 @@ _CASES = (
     (
         dict(N=2, H=9, W=12, C=64, K=64, groups=4, dtype="fp16"),
         dict(tiles_c=1, pack_groups=2, prefetch=True, sched="iterative-ilp"),
+    ),
+    # Packed small groups at stride 2 (4 phases of accumulators per block):
+    # 4 groups of 8 with ragged extents, 2 groups of 16 in fp16 with
+    # prefetch, and the ResNeXt downsampling layers (cpg 8 and 16).
+    (
+        dict(N=2, H=13, W=21, C=64, K=64, groups=8, stride=2),
+        dict(waves_c=1, tiles_c=2, tiles_p=2, pack_groups=4),
+    ),
+    (
+        dict(N=3, H=12, W=17, C=64, K=64, groups=4, stride=2, dtype="fp16"),
+        dict(
+            waves_c=1,
+            tiles_c=2,
+            tiles_p=4,
+            pack_groups=2,
+            prefetch=True,
+            sched="iterative-ilp",
+        ),
+    ),
+    (
+        dict(N=16, H=56, W=56, C=256, K=256, groups=32, stride=2),
+        dict(waves_c=1, waves_p=4, tiles_c=2, tiles_p=4, pack_groups=4),
+    ),
+    (
+        dict(N=16, H=28, W=28, C=512, K=512, groups=32, stride=2, dtype="fp16"),
+        dict(waves_c=1, waves_p=8, tiles_c=2, tiles_p=4, tile_w=8, pack_groups=2),
     ),
     # Stride 2: odd and even extents, several images per block, the 2x2
     # patch merge, and fp16 with prefetch.

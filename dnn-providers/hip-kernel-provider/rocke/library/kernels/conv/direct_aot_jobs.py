@@ -451,6 +451,24 @@ DGRAD_WMMA_PACKED_KNOBS = (
     (1, 8, 2, 4, 32, 2, 32, 2, True),
     (2, 4, 1, 8, 16, 2, 32, 2, True),
 )
+# Small groups at stride 2 (ResNeXt / RegNet downsampling 3x3 at 8 or 16
+# channels per group): the packed super-group of DGRAD_WMMA_PACKED_KNOBS under
+# the stride-2 phase decomposition, so every block holds 4 x tiles_c x tiles_p
+# accumulators: fewer pixel tiles per wave than the stride-1 packed rows.
+DGRAD_WMMA_PACKED_STRIDED_KNOBS = (
+    (1, 4, 2, 2, 16, 1, 32, 2, False),
+    (1, 4, 2, 4, 8, 1, 32, 2, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, False),
+    (1, 4, 2, 4, 16, 2, 32, 2, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, True),
+    (1, 8, 2, 2, 16, 1, 32, 2, False),
+    (1, 8, 2, 4, 8, 1, 32, 2, False),
+    (1, 8, 2, 4, 16, 1, 32, 2, False),
+    (2, 4, 1, 4, 16, 1, 32, 2, False),
+    (2, 4, 1, 4, 16, 2, 32, 2, False),
+    (1, 2, 2, 4, 16, 1, 32, 2, False),
+    (1, 4, 2, 3, 16, 1, 32, 2, False),
+)
 # Stride 2 (phase decomposition: every block computes all four output phases
 # from one dY halo, so it holds 4 x tiles_c x tiles_p accumulators).
 DGRAD_WMMA_STRIDED_KNOBS = (
@@ -1107,6 +1125,11 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=c)
             for c in DGRAD_WMMA_PACKED_CHANNELS
         )
+        # Small groups at stride 2: packed super-group + phase decomposition.
+        + tuple(
+            DirectCaps(KH=3, PAD=1, stride=2, cpg=c, kpg=c)
+            for c in DGRAD_WMMA_PACKED_CHANNELS
+        )
         # Stride 2 by phase decomposition: 3x3 "same" and the 2x2 patch-merge.
         + (
             DirectCaps(KH=3, PAD=1, stride=2, cpg=0, kpg=0),
@@ -1497,7 +1520,12 @@ def _knob_grid(
         if caps is not None and caps.cpg > 0:
             # Pack groups up to one 32-channel WMMA K step.
             yield from _dgrad_wmma_knobs(
-                DGRAD_WMMA_PACKED_KNOBS, pack_groups=max(1, 32 // caps.cpg)
+                (
+                    DGRAD_WMMA_PACKED_STRIDED_KNOBS
+                    if caps.stride > 1
+                    else DGRAD_WMMA_PACKED_KNOBS
+                ),
+                pack_groups=max(1, 32 // caps.cpg),
             )
         elif caps is not None and caps.stride > 1 and caps.KH == caps.stride:
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_PATCH2_KNOBS)

@@ -5525,8 +5525,9 @@ def cases():
         )
 
     # Stride 2 (3x3 phases and the 2x2 patch merge), dilation, packed small
-    # groups, the split barrier with and without the per-wave epilogue, and
-    # tile widths that are not a power of two. Also llvm23-only.
+    # groups (also at stride 2), the split barrier with and without the
+    # per-wave epilogue, and tile widths that are not a power of two. Also
+    # llvm23-only.
     def build_direct_dgrad_wmma_ext_case(prob_kw, **spec_kw):
         def _build():
             from kernels.common.conv_direct_dgrad_wmma import (
@@ -5567,6 +5568,16 @@ def cases():
             "bf16_pg4_c8k8",
             dict(groups=8, cpg=8, kpg=8),
             dict(waves_c=1, waves_p=8, tiles_c=2, tiles_p=4, tile_n=2, pack_groups=4),
+        ),
+        (
+            "bf16_s2_pg4_c8k8",
+            dict(stride=2, groups=8, cpg=8, kpg=8),
+            dict(waves_c=1, waves_p=8, tiles_c=2, tiles_p=4, tile_w=8, pack_groups=4),
+        ),
+        (
+            "fp16_s2_pg8_c4k4",
+            dict(dtype="fp16", stride=2, groups=16, cpg=4, kpg=4),
+            dict(waves_c=2, waves_p=4, tiles_c=1, tiles_p=4, tile_n=2, pack_groups=8),
         ),
         (
             "bf16_s2_3x3",

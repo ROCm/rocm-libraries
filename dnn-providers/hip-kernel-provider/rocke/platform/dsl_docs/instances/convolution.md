@@ -1242,7 +1242,9 @@ byte offsets), `pack_groups * cpg` and `pack_groups * kpg` multiples of 8
 and `pack_groups * cpg <= block_c`), `split_barrier` / `wave_epilogue` on
 stride-1 unpacked tiles only, and the ring and the staged dX tile within the
 320 KB LDS. The AOT grid is `DGRAD_WMMA_KNOBS` plus `DGRAD_WMMA_SB_KNOBS`
-(split barrier), `DGRAD_WMMA_PACKED_KNOBS`, `DGRAD_WMMA_STRIDED_KNOBS`,
+(split barrier), `DGRAD_WMMA_PACKED_KNOBS` (4 / 8 / 16 channels per group at
+stride 1), `DGRAD_WMMA_PACKED_STRIDED_KNOBS` (the same small groups at stride 2:
+packed super-group under the phase decomposition), `DGRAD_WMMA_STRIDED_KNOBS`,
 `DGRAD_WMMA_PATCH2_KNOBS` and `DGRAD_WMMA_DILATED_KNOBS`
 (`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_wmma`). The C++ twin
 covers every knob; the byte-identity gate is
