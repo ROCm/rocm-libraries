@@ -23672,8 +23672,8 @@ class KernelWriterAssembly(KernelWriter):
     # that subtracting LDSBufferWriteInc is not idempotent -- the second application
     # drops an already normalized descriptor a block below buffer 0, which wraps
     # unsigned and puts the tail writes outside LDS.
-    # LdsOffsetA_Blk is a byte offset, not necessarily a power of two, so a buffer
-    # has to be detected by comparison and removed by subtraction. Using it as an
+    # In unpaired layouts LdsOffsetA_Blk is a byte offset, not necessarily a power
+    # of two, so detect buffers by comparison and remove them by subtraction. An
     # AND mask aliases every descriptor base that shares bits with it (B and the MX
     # scales do), which moves the tail writes into a different tensor's LDS region.
     # Every descriptor base sits inside block 0, so walking the blocks high to low
@@ -23685,6 +23685,17 @@ class KernelWriterAssembly(KernelWriter):
     # recalculation rebuilt the read addresses (see the tail loop in KernelWriter);
     # without it Orig still holds the wide-read address and the tail reads garbage.
     mod = Module("TDM reset tail LDS buffer")
+    if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
+      # The per-wave mask exchanges this descriptor's ping/pong addresses, including
+      # its component offset. Ping is always the lower address. Taking the minimum
+      # resets either phase to ping and leaves repeated resets unchanged.
+      swapMask = "PairedTDMScaleSwap" if ldsAddrSgprName.startswith("tdmMXS") else "PairedTDMSwap"
+      with self.allocTmpSgpr(1, tag="tdmResetTailPaired") as tmpSgprRes:
+        mod.add(SXorB32(dst=sgpr(tmpSgprRes.idx), src0=sgpr(ldsAddrSgprName), src1=sgpr(swapMask),
+                        comment="Compute the other paired LDS buffer address"))
+        mod.add(SMinU32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=sgpr(tmpSgprRes.idx),
+                        comment="Reset to paired ping buffer"))
+      return mod
     blkOffset: int = kernel["LdsOffsetA_Blk"]
     if blkOffset == 0:
       return mod
