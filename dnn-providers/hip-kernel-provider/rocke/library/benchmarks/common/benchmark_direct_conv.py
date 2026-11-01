@@ -41,7 +41,7 @@ from typing import List
 
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
-from benchmarks.common import batched_timing
+from benchmarks.common import batched_timing, conv_fill
 from benchmarks.common.case_results import (
     RUNNERS_UP,
     ResultsWriter,
@@ -2289,7 +2289,8 @@ def _measure_plans(
         rt.memcpy_d2h(u8(out_cpu), ptrs[out_name], Out_t.nbytes)
         ref_f32 = ref_out.float().cpu()
         rel_err = float(
-            (out_cpu.float() - ref_f32).abs().max() / ref_f32.abs().max().clamp(min=1.0)
+            (out_cpu.float() - ref_f32).abs().max()
+            / ref_f32.abs().max().clamp(min=conv_fill.ref_floor())
         )
         passed = rel_err < 5e-2
         if not passed:
@@ -2588,6 +2589,9 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
     variants = _cache_variants(args)
+    # --kernels-file: only the cached kernels named there (labels as the
+    # results print them, with or without the direction prefix)
+    kernel_map = conv_fill.load_kernels_file(getattr(args, "kernels_file", None))
     overall_rc = 0
     for case_idx, (p, dtype, case_direction) in enumerate(cases, 1):
         if dtype not in DIRECT_DTYPES:
@@ -2613,6 +2617,9 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 p,
                 chunks,
             )
+            if kernel_map is not None:
+                keep = conv_fill.kernels_for(kernel_map, case_key(p, dtype, direction))
+                plans = [pl for pl in plans if pl.identity.label() in keep]
             if not plans:
                 why = _no_plan_reason(rejected, dtype, variants)
                 print(
@@ -2640,13 +2647,15 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 out_name = "dw"
                 Out_t = torch.zeros(*w_shape, dtype=torch.float32)
             else:
-                W_t = torch.empty(*w_shape, dtype=torch_dt).uniform_(-1, 1)
+                W_t = torch.empty(*w_shape, dtype=torch_dt)
                 if direction == "fwd":
                     in_name, out_name = "x", "y"
-                    In_t = torch.empty(*x_shape, dtype=torch_dt).uniform_(-1, 1)
+                    conv_fill.fill_w(W_t, dtype)
+                    In_t = conv_fill.fill_x(torch.empty(*x_shape, dtype=torch_dt))
                     Out_t = torch.empty(*y_shape, dtype=torch_dt)
                 else:
                     in_name, out_name = "dy", "dx"
+                    W_t.uniform_(-1, 1)
                     In_t = torch.empty(*y_shape, dtype=torch_dt).uniform_(-1, 1)
                     Out_t = torch.empty(*x_shape, dtype=torch_dt)
                 inputs = {in_name: In_t, "w": W_t}
@@ -3034,7 +3043,14 @@ def main() -> int:
         help="--compile-all only: stop after building this many kernels (smoke tests).",
     )
 
+    conv_fill.add_argument(parser)
+    parser.add_argument(
+        "--kernels-file",
+        default=None,
+        help="--run-from-cache only: run just the cached kernels whose labels the file lists",
+    )
     args = parser.parse_args()
+    conv_fill.set_mode(args.fill)
     if args.skip_measured and not args.run_from_cache:
         print(
             "error: --skip-measured resumes an AOT sweep; pass " "--run-from-cache DIR",

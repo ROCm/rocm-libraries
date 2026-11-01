@@ -76,7 +76,7 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # validators on other targets.
 # ---------------------------------------------------------------------------
 
-from benchmarks.common import batched_timing  # noqa: E402
+from benchmarks.common import batched_timing, conv_fill  # noqa: E402
 from benchmarks.common.case_results import (  # noqa: E402
     RUNNERS_UP,
     ResultsWriter,
@@ -612,11 +612,11 @@ def _verify_kernel(
     if arch == "gfx1250":
         out_f32 = out_cpu.float()
         abs_diff = out_f32.sub(ref_out.cpu()).abs()
-        ref_scale = ref_out.cpu().abs().max().clamp(min=1.0)
+        ref_scale = ref_out.cpu().abs().max().clamp(min=conv_fill.ref_floor())
     else:
         out_f32 = out_cpu.float().cuda()
         abs_diff = out_f32.sub(ref_out).abs()
-        ref_scale = ref_out.abs().max().clamp(min=1.0)
+        ref_scale = ref_out.abs().max().clamp(min=conv_fill.ref_floor())
     rel_err = float(abs_diff.max() / ref_scale)
     # Peak-normalised relative error: max|out-ref| / max|ref|.
     # Caveat: a large relative error on a small-magnitude weight can be masked
@@ -1647,7 +1647,14 @@ def main() -> int:
         help="AOT only: stop after building this many kernels (smoke tests).",
     )
 
+    conv_fill.add_argument(parser)
+    parser.add_argument(
+        "--kernels-file",
+        default=None,
+        help="--run-from-cache only: run just the cached kernels whose labels the file lists",
+    )
     args = parser.parse_args()
+    conv_fill.set_mode(args.fill)
     if args.skip_measured and not args.run_from_cache:
         print(
             "error: --skip-measured resumes an AOT sweep; pass " "--run-from-cache DIR",
@@ -4713,6 +4720,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     overall_rc = 0
     # Stage 2 reduce launchers for two-stage wgrad, compiled once per dW dtype.
     stage2_kernels: dict = {}
+    # --kernels-file: only the cached kernels named there (labels as the
+    # results print them, with or without the direction prefix)
+    kernel_map = conv_fill.load_kernels_file(getattr(args, "kernels_file", None))
     for case_idx, case in enumerate(cases, 1):
         problem = case[0]
         case_dtype = case[1] if len(case) > 1 else args.dtype
@@ -4746,6 +4756,13 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     fit_problem, direction=direction
                 )
                 if ident.dtype_a == case_dtype
+                and (
+                    kernel_map is None
+                    or ident.label()
+                    in conv_fill.kernels_for(
+                        kernel_map, case_key(problem, case_dtype, direction)
+                    )
+                )
             ]
             if not candidates:
                 _, why = next(
@@ -4881,8 +4898,14 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             else:
                 a_shape, b_shape, d_shape = nhwc, krsc, nhwk
 
-            A_t = torch.empty(*a_shape, dtype=torch_dt).uniform_(-1, 1)
-            B_t = torch.empty(*b_shape, dtype=torch_dt).uniform_(-1, 1)
+            if direction == "fwd":
+                A_t = conv_fill.fill_x(torch.empty(*a_shape, dtype=torch_dt))
+                B_t = conv_fill.fill_w(
+                    torch.empty(*b_shape, dtype=torch_dt), case_dtype
+                )
+            else:
+                A_t = torch.empty(*a_shape, dtype=torch_dt).uniform_(-1, 1)
+                B_t = torch.empty(*b_shape, dtype=torch_dt).uniform_(-1, 1)
             D_t = torch.empty(*d_shape, dtype=torch_dt)
 
             rt = Runtime()
