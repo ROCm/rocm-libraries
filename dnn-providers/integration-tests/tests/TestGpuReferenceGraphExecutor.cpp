@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -440,6 +441,97 @@ void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
     }
 }
 
+void runResampleFwdExecutorVsCpu()
+{
+    constexpr int64_t X_UID = 1;
+    constexpr int64_t Y_UID = 2;
+    constexpr int64_t INDEX_UID = 3;
+    const std::vector<int64_t> xDims{1, 1, 4, 4};
+    const std::vector<int64_t> yDims{1, 1, 2, 2};
+    const std::vector<int64_t> xStrides{16, 16, 4, 1};
+    const std::vector<int64_t> yStrides{4, 4, 2, 1};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    hipdnn_data_sdk::utilities::Tensor<float> xTensor(xDims, xStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> gpuYTensor(yDims, yStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> cpuYTensor(yDims, yStrides);
+    hipdnn_data_sdk::utilities::Tensor<int32_t> gpuIndexTensor(yDims, yStrides);
+    hipdnn_data_sdk::utilities::Tensor<int32_t> cpuIndexTensor(yDims, yStrides);
+    fillWithRandomValues(xTensor, -1.0f, 1.0f, 42);
+
+    const std::unordered_map<int64_t, void*> gpuVariantPack{
+        {X_UID, xTensor.rawDeviceData()},
+        {Y_UID, gpuYTensor.rawDeviceData()},
+        {INDEX_UID, gpuIndexTensor.rawDeviceData()}};
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), gpuVariantPack);
+    gpuYTensor.markDeviceModified();
+    gpuIndexTensor.markDeviceModified();
+
+    const std::unordered_map<int64_t, void*> cpuVariantPack{
+        {X_UID, xTensor.rawHostData()},
+        {Y_UID, cpuYTensor.rawHostData()},
+        {INDEX_UID, cpuIndexTensor.rawHostData()}};
+    CpuReferenceGraphExecutor cpuExecutor;
+    cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
+    cpuYTensor.markHostModified();
+    cpuIndexTensor.markHostModified();
+
+    const auto tolerance = hipdnn_test_sdk::utilities::resample::getTolerance<float>();
+    const auto* gpuY = static_cast<const float*>(gpuYTensor.rawHostData());
+    const auto* cpuY = static_cast<const float*>(cpuYTensor.rawHostData());
+    const auto* gpuIndex = static_cast<const int32_t*>(gpuIndexTensor.rawHostData());
+    const auto* cpuIndex = static_cast<const int32_t*>(cpuIndexTensor.rawHostData());
+    for(size_t i = 0; i < gpuYTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(gpuY[i], cpuY[i], tolerance) << "Mismatch in y at index " << i;
+        EXPECT_EQ(gpuIndex[i], cpuIndex[i]) << "Mismatch in index at " << i;
+    }
+}
+
+void runResampleBwdExecutorVsCpu()
+{
+    constexpr int64_t DY_UID = 1;
+    constexpr int64_t DX_UID = 2;
+    constexpr int64_t INDEX_UID = 3;
+    const std::vector<int64_t> dyDims{1, 1, 2, 2};
+    const std::vector<int64_t> dxDims{1, 1, 4, 4};
+    const std::vector<int64_t> dyStrides{4, 4, 2, 1};
+    const std::vector<int64_t> dxStrides{16, 16, 4, 1};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    hipdnn_data_sdk::utilities::Tensor<float> dyTensor(dyDims, dyStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> gpuDxTensor(dxDims, dxStrides);
+    hipdnn_data_sdk::utilities::Tensor<float> cpuDxTensor(dxDims, dxStrides);
+    hipdnn_data_sdk::utilities::Tensor<int32_t> indexTensor(dyDims, dyStrides);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, 42);
+    std::fill_n(static_cast<int32_t*>(indexTensor.rawHostData()), indexTensor.elementCount(), 0);
+    indexTensor.markHostModified();
+
+    const std::unordered_map<int64_t, void*> gpuVariantPack{
+        {DY_UID, dyTensor.rawDeviceData()},
+        {DX_UID, gpuDxTensor.rawDeviceData()},
+        {INDEX_UID, indexTensor.rawDeviceData()}};
+    GpuReferenceGraphExecutor gpuExecutor;
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), gpuVariantPack);
+    gpuDxTensor.markDeviceModified();
+
+    const std::unordered_map<int64_t, void*> cpuVariantPack{{DY_UID, dyTensor.rawHostData()},
+                                                            {DX_UID, cpuDxTensor.rawHostData()},
+                                                            {INDEX_UID, indexTensor.rawHostData()}};
+    CpuReferenceGraphExecutor cpuExecutor;
+    cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
+    cpuDxTensor.markHostModified();
+
+    const auto tolerance = hipdnn_test_sdk::utilities::resample::getTolerance<float>();
+    const auto* gpuDx = static_cast<const float*>(gpuDxTensor.rawHostData());
+    const auto* cpuDx = static_cast<const float*>(cpuDxTensor.rawHostData());
+    for(size_t i = 0; i < gpuDxTensor.elementCount(); ++i)
+    {
+        EXPECT_NEAR(gpuDx[i], cpuDx[i], tolerance) << "Mismatch in dx at index " << i;
+    }
+}
+
 } // namespace
 
 TEST(TestGpuReferenceGraphExecutor, CanBeConstructed)
@@ -606,6 +698,56 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
     GpuReferenceGraphExecutor executor;
     EXPECT_THROW(executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack),
                  std::runtime_error);
+}
+
+TEST(TestGpuReferenceGraphExecutor, ResampleFwdIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    GpuReferenceGraphExecutor executor;
+    auto maxPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    EXPECT_TRUE(executor.isApplicable(maxPoolBuilder.GetBufferPointer(), maxPoolBuilder.GetSize()));
+
+    auto avgPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(
+        false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+    EXPECT_TRUE(executor.isApplicable(avgPoolBuilder.GetBufferPointer(), avgPoolBuilder.GetSize()));
+
+    auto avgPoolWithIndexBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(
+        true, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+    EXPECT_FALSE(executor.isApplicable(avgPoolWithIndexBuilder.GetBufferPointer(),
+                                       avgPoolWithIndexBuilder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutor, ResampleBwdIsApplicable)
+{
+    SKIP_IF_NO_DEVICES();
+
+    GpuReferenceGraphExecutor executor;
+    auto maxPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    EXPECT_TRUE(executor.isApplicable(maxPoolBuilder.GetBufferPointer(), maxPoolBuilder.GetSize()));
+
+    auto avgPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
+        false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+    EXPECT_TRUE(executor.isApplicable(avgPoolBuilder.GetBufferPointer(), avgPoolBuilder.GetSize()));
+
+    auto avgPoolWithIndexBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
+        true, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+    EXPECT_FALSE(executor.isApplicable(avgPoolWithIndexBuilder.GetBufferPointer(),
+                                       avgPoolWithIndexBuilder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutor, ResampleFwdExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runResampleFwdExecutorVsCpu();
+}
+
+TEST(TestGpuReferenceGraphExecutor, ResampleBwdExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runResampleBwdExecutorVsCpu();
 }
 
 TEST(TestGpuReferenceGraphExecutor, MissingVariantPackEntryThrows)
