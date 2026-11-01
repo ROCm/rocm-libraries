@@ -115,7 +115,7 @@ def main() -> int:
         help="also report each output's canonical ck.dsl.ir/v1 hash",
     )
     parser.add_argument("emitter", type=Path)
-    parser.add_argument("mode", choices=("ll", "ir", "verify"))
+    parser.add_argument("mode", choices=("ll", "ir", "verify", "target-ir"))
     parser.add_argument("indices", nargs="+", type=int)
     args = parser.parse_args()
 
