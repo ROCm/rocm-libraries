@@ -3,12 +3,15 @@
 
 # Builds hipBLASLt with the experimental HIPBLASLT_ENABLE_LOCAL_KERNELS option,
 # which no other lane turns on, and runs the local kernel tests on gfx942 and
-# gfx950. The host library is built without a device kernel library.
+# gfx950. The device library is built from the bf16 TN logic only, which the
+# registration tests load as payloads. The ci:run-multi-gpu label, or the
+# multi_gpu input of a manual run, adds a gfx950 job with two GPUs visible,
+# which runs the tests that need two devices and fails if any test is skipped.
 name: hipBLASLt Local Kernels CI
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - "projects/hipblaslt/tensilelite/include/Tensile/LocalKernel*.hpp"
       - "projects/hipblaslt/tensilelite/src/LocalKernel*.cpp"
@@ -16,26 +19,43 @@ on:
       - "projects/hipblaslt/tensilelite/include/Tensile/SolutionLibrary.hpp"
       - "projects/hipblaslt/tensilelite/include/Tensile/ContractionSolution.hpp"
       - "projects/hipblaslt/tensilelite/src/ContractionSolution.cpp"
+      - "projects/hipblaslt/tensilelite/include/Tensile/hip/HipSolutionAdapter.hpp"
+      - "projects/hipblaslt/tensilelite/src/hip/HipSolutionAdapter.cpp"
+      - "projects/hipblaslt/library/include/hipblaslt/hipblaslt-local-kernel.h"
+      - "projects/hipblaslt/library/src/amd_detail/hipblaslt-local-kernel.cpp"
+      - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/tensile_host.cpp"
+      - "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/include/tensile_host.hpp"
       - "projects/hipblaslt/clients/tests/src/local_kernel*"
+      - "projects/hipblaslt/clients/tests/src/hip_solution_adapter_gtest.cpp"
       - "projects/hipblaslt/CMakeLists.txt"
       - "projects/hipblaslt/tensilelite/CMakeLists.txt"
       - "projects/hipblaslt/tensilelite/include/CMakeLists.txt"
       - "projects/hipblaslt/tensilelite/src/CMakeLists.txt"
+      - "projects/hipblaslt/library/include/CMakeLists.txt"
+      - "projects/hipblaslt/library/src/amd_detail/CMakeLists.txt"
       - "projects/hipblaslt/clients/CMakeLists.txt"
       - "projects/hipblaslt/clients/tests/src/CMakeLists.txt"
       - "projects/hipblaslt/scripts/local-kernels/**"
       - ".github/workflows/hipblaslt-local-kernels-ci.yml"
   workflow_dispatch:
+    inputs:
+      multi_gpu:
+        description: Also run the tests on a gfx950 runner with two GPUs visible
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  # A labeled event runs only the two-GPU job, so it must not cancel the run
+  # for the push.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}${{ github.event.action == 'labeled' && '-labeled' || '' }}
   cancel-in-progress: true
 
 jobs:
   setup:
+    if: ${{ github.event.action != 'labeled' || github.event.label.name == 'ci:run-multi-gpu' }}
     runs-on: ubuntu-24.04
     outputs:
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
@@ -56,6 +76,10 @@ jobs:
       - name: Select the artifact family and GPU runner of each architecture
         id: matrix
         shell: bash
+        env:
+          EVENT_ACTION: ${{ github.event.action }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          MANUAL_MULTI_GPU: ${{ inputs.multi_gpu }}
         run: |
           python3 - <<'PY'
           import json
@@ -64,21 +88,36 @@ jobs:
           sys.path.insert(0, "TheRock/build_tools/github_actions")
           from amdgpu_family_matrix import get_all_families_for_trigger_types, select_weighted_label
           families = get_all_families_for_trigger_types(["presubmit", "postsubmit"])
+          labeled = os.environ["EVENT_ACTION"] == "labeled"
+          pr_labels = json.loads(os.environ.get("PR_LABELS") or "null") or []
+          multi_gpu = (
+              labeled
+              or "ci:run-multi-gpu" in pr_labels
+              or os.environ.get("MANUAL_MULTI_GPU") == "true"
+          )
           include = []
           for architecture, key in [("gfx942", "gfx94x"), ("gfx950", "gfx950")]:
               config = families[key]["linux"]
-              labels = config.get("test-runs-on-labels")
-              runner = select_weighted_label(labels, architecture) if labels else config["test-runs-on"]
-              if not runner:
-                  raise RuntimeError(f"No GPU runner configured for {architecture}")
-              include.append({"architecture": architecture, "family": config["family"], "runs_on": runner})
+              if not labeled:
+                  labels = config.get("test-runs-on-labels")
+                  runner = select_weighted_label(labels, architecture) if labels else config["test-runs-on"]
+                  if not runner:
+                      raise RuntimeError(f"No GPU runner configured for {architecture}")
+                  include.append({"name": architecture, "architecture": architecture,
+                                  "family": config["family"], "runs_on": runner, "gpus": 1})
+              if multi_gpu and architecture == "gfx950":
+                  runner = config.get("test-runs-on-multi-gpu")
+                  if not runner:
+                      raise RuntimeError(f"No multi-GPU runner configured for {architecture}")
+                  include.append({"name": f"{architecture}, 2 GPUs", "architecture": architecture,
+                                  "family": config["family"], "runs_on": runner, "gpus": 2})
           with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
               stream.write("matrix=" + json.dumps({"include": include}) + "\n")
           print(json.dumps(include, indent=2))
           PY
 
   test:
-    name: Local kernels (${{ matrix.architecture }})
+    name: Local kernels (${{ matrix.name }})
     needs: setup
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 90
@@ -103,6 +142,7 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       LOCAL_KERNELS_ARCHITECTURE: ${{ matrix.architecture }}
+      LOCAL_KERNELS_GPUS: ${{ matrix.gpus }}
     steps:
       - name: Checkout source under test
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -141,7 +181,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
         with:
-          name: hipblaslt-local-kernels-${{ matrix.architecture }}
+          name: hipblaslt-local-kernels-${{ matrix.architecture }}-${{ matrix.gpus }}gpu
           path: local-kernels-test-logs
           if-no-files-found: warn
           retention-days: 7

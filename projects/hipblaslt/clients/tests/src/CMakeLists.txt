@@ -59,10 +59,20 @@ if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
     )
 endif()
 
+# The registration tests run their DISABLED_ workers in child processes,
+# because registered kernels are process-global. The cases that need code
+# objects built for another architecture, or with stand-in kernels, compile
+# them with hiprtc, so it is required rather than letting those cases lapse.
 if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_library_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_register_test.cpp
     )
+    find_package(hiprtc CONFIG REQUIRED)
+    target_link_libraries(hipblaslt-test PRIVATE hiprtc::hiprtc)
+    if(NOT HIPBLASLT_ENABLE_YAML)
+        target_link_libraries(hipblaslt-test PRIVATE ${hipblaslt_msgpack_target})
+    endif()
 endif()
 
 # NOTE: secure_env_gtest.cpp (ROCM-26729) intentionally includes the header-only
