@@ -194,18 +194,19 @@ an otherwise invalid configuration can become valid before later knobs
 are considered. Only `lazy_rescale` is untunable on gfx942, because the
 kernel body does not read it.
 
-The three performance levers are **independent opt-ins** for supported
-BF16 D128 causal attention (`sliding_window=0`, no sinks), with or without
-`causal_diag_split`. `use_cfvst=True` enables conflict-free V storage on
-either grid; `lds_num_buffers=2` enables **K LDS double buffering only**; and
-`v_reg_prefetch=True` enables **V register prefetch only**. KDB and VPF also
-require CFVST, `persistent=True` and `block_n=64`, as enforced by the
-kernel's validator; turning on either one does not implicitly enable the
-other.
+Two performance levers are **independent opt-ins** for supported BF16 D128
+causal attention (`sliding_window=0`, no sinks), with or without
+`causal_diag_split`: `lds_num_buffers=2` enables **K LDS double buffering
+only**, and `v_reg_prefetch=True` enables **V register prefetch only**. Both
+run on the CFVST body, which is already the D128 default
+(`use_cfvst=None` resolves on via `_use_cfvst`; `use_cfvst=False` opts out
+on either grid). KDB and VPF also require `persistent=True` and
+`block_n=64`, as enforced by the kernel's validator; turning on either one
+does not implicitly enable the other.
 
-The production tuning space remains **one knob at a time**, using CFVST
-as a prerequisite when necessary. It can offer CFVST alone, CFVST + KDB,
-and CFVST + VPF without requiring the triple combination. The triple
+The production tuning space remains **one knob at a time** on the default
+CFVST body. It offers CFVST off, CFVST + KDB, and CFVST + VPF without
+requiring the triple combination. The triple
 CFVST + KDB + VPF combination remains reachable through an explicit knob
 pin or the full tuning space. The BF16 D128 default remains
 `use_cfvst=None` (policy resolves to on at D128), `lds_num_buffers=1`, and
