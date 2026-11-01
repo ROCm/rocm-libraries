@@ -33,6 +33,7 @@ from rocke.instances.common.fused_moe_e2e import (
 from rocke.instances.common.topk_softmax import build_topk_softmax
 from rocke.instances.common.batched_gemm import build_batched_gemm
 from rocke.core.ir_serialize import serialize
+from _emit_common import target_ir
 from rocke.core.verify import verify
 
 
@@ -90,6 +91,10 @@ def main() -> int:
     out = []
     for banner, build_kernel in _STAGES:
         kernel = build_kernel(fwd)
+        if mode == "target-ir":
+            # One target-ir block per stage, with no banner between them.
+            out.append(target_ir(kernel, "gfx950"))
+            continue
         out.append(f"; === fused_moe_e2e stage: {banner} ===\n")
         if mode == "ll":
             text = _native_lower(kernel, arch="gfx950")
