@@ -352,6 +352,16 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
         auto ck_val_creator = MakeCKValidatorCreator(
             loader, CKSolverType::GrpConvFwd, problem.GetInDataType(), mode_use_tf32);
 
+        // Per-candidate applicability for the lazy (precomputed-vocab) fast path (fwd: no split_k).
+        auto is_args_supported =
+            [&loader, &problem, mode_use_tf32](const std::string& kernel_id, int /*split_k*/) {
+                return loader.IsArgsSupported(CKSolverType::GrpConvFwd,
+                                              problem,
+                                              kernel_id,
+                                              problem.GetInDataType(),
+                                              mode_use_tf32);
+            };
+
         if(RunAIHeuristics(k2DFwdSolverConfig,
                            state,
                            ctx,
@@ -360,7 +370,8 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
                            fill_valid_kernels,
                            ktn_runner,
                            ck_val_creator,
-                           mode_use_tf32))
+                           mode_use_tf32,
+                           is_args_supported))
         {
             return;
         }

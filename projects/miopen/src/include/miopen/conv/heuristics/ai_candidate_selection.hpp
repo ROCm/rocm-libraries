@@ -84,6 +84,36 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
                              const std::string& arch,
                              const std::string& solver);
 
+/// Precomputed config-tower fast path: look each raw (EncodeKernelParams) candidate up in the
+/// shipped {arch}_{solver}_kernel_config_embeddings.bin table and return the stored embeddings,
+/// skipping the whole config tower (feature engineering + fdeep). nullopt on any miss so the
+/// caller falls back to the neural path. Keyed on the raw encoded candidate, so it must run
+/// before EngineerKernelConfigFeaturesImpl. Implemented in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT std::optional<std::vector<std::vector<float>>>
+TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& encoded_candidates,
+                                const std::string& arch,
+                                const std::string& solver);
+
+/// Ordered (kernel_id, precomputed-embedding) vocabulary from the installed v3 config-embedding
+/// table. Empty when no v3 table is present (callers then fall back to FillValidKernels).
+/// Implemented in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT const std::vector<std::pair<std::string, std::vector<float>>>&
+GetConfigEmbeddingVocab(const std::string& arch, const std::string& solver);
+
+/// Rank-then-lazy-applicability candidate selection. Ranks the whole precomputed config vocabulary
+/// by the two-tower score (input encoder + stored config embeddings -- no FillValidKernels, no fdeep
+/// config encoder), then walks the ranking best-first and returns the first candidate accepted by
+/// is_args_supported(kernel_id, split_k). Returns {kernel_id (with "+split_k" suffix where the
+/// solver uses one), split_k} or nullopt when no vocab is available or none is applicable (caller
+/// falls back to the FillValidKernels path). Behaviour-preserving: first applicable in score order
+/// is the argmax over applicable candidates.
+MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>>
+SelectBestVocabCandidate(const std::string& arch,
+                         const std::string& solver,
+                         const std::map<std::string, float>& features,
+                         const std::function<bool(const std::string& kernel_id, int split_k)>&
+                             is_args_supported);
+
 /// Expands problem features into the vector consumed by the input_encoder submodel.
 /// Produces the engineered features consumed by the input_encoder submodel for 2D and 3D models.
 /// Shares derived-feature math with ExtractTunaNetNDFeatures (ai_heuristics.cpp); the direction

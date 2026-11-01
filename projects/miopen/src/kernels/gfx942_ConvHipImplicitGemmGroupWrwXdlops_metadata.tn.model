@@ -1,5 +1,5 @@
 {
-    "generated_on": "15 Jun 2026, 02:39:35",
+    "generated_on": "12 Oct 2026, 09:39:19",
     "gpu": {
         "num_cu": 304,
         "arch": "gfx942"
@@ -11,9 +11,16 @@
         10,
         12,
         14,
-        16
+        16,
+        18,
+        21,
+        25,
+        28,
+        29,
+        33,
+        34
     ],
-    "note": "Data merged from sessions: [10, 12, 14, 16]",
+    "note": "Data merged from sessions: [10, 12, 14, 16, 18, 21, 25, 28, 29, 33, 34]",
     "solver_name": "ConvHipImplicitGemmGroupWrwXdlops",
     "output_params": [
         "000_kernel_name",
