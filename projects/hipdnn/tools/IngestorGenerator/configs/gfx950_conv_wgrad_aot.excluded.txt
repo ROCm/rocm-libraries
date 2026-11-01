@@ -1,0 +1,3 @@
+# No instances excluded: 612/612 of instances_wgrad_pruned1pct_mirrored.txt build and
+# package for real (512 single-launch + 100 two-stage, see WGRAD_AOT_PROGRESS.md).
+# This file is kept (empty) so a later regression shows up as a diff, not a deletion.

@@ -11,11 +11,20 @@ import pytest
 
 from kernels.common.conv_direct_dw_wgrad import (
     DwWgradColsSpec,
+    DwWgradFoldSpec,
     DwWgradLdsSpec,
     build_dw_wgrad_cols,
+    build_dw_wgrad_fold,
     build_dw_wgrad_lds,
+    dw_wgrad_fold_signature,
     is_valid_dw_wgrad_cols_spec,
     is_valid_dw_wgrad_lds_spec,
+)
+from kernels.common.conv_direct_wgrad_cast import (
+    DirectWgradCastSpec,
+    build_direct_wgrad_cast,
+    direct_wgrad_cast_signature,
+    is_valid_direct_wgrad_cast_spec,
 )
 from kernels.common.conv_direct_dw_wgrad_mfma import (
     DwWgradMfmaSpec,
@@ -254,3 +263,73 @@ def test_degenerate_knobs_are_rejected(spec, valid):
 )
 def test_missing_dtype_is_rejected(spec, valid):
     assert not valid(spec)[0]
+
+
+# ---------------------------------------------------------------------------
+# DwWgradFoldSpec.dtype_d: the final store's real dW element type
+# ---------------------------------------------------------------------------
+
+
+def test_dw_wgrad_fold_default_dtype_d_preserves_old_name():
+    """The field's default (``"fp32"``) must not change any existing caller's
+    kernel name or binary -- every pre-existing instance omits ``dtype_d``."""
+    spec = DwWgradFoldSpec(taps=9)
+    assert spec.dtype_d == "fp32"
+    assert spec.kernel_name() == "dw_wgrad_fold_t9"
+
+
+@pytest.mark.parametrize("dtype_d,suffix", [("fp32", ""), ("bf16", "_bf16"), ("fp16", "_fp16")])
+def test_dw_wgrad_fold_dtype_d_tags_the_kernel_name(dtype_d, suffix):
+    spec = DwWgradFoldSpec(taps=9, dtype_d=dtype_d)
+    assert spec.kernel_name() == f"dw_wgrad_fold_t9{suffix}"
+
+
+@pytest.mark.parametrize("dtype_d", ["fp32", "bf16", "fp16"])
+def test_dw_wgrad_fold_builds_and_declares_d_as_dtype_d(dtype_d):
+    spec = DwWgradFoldSpec(taps=9, dtype_d=dtype_d)
+    build_dw_wgrad_fold(spec)  # must not raise
+    sig = dw_wgrad_fold_signature(spec)
+    d_param = next(p for p in sig if p["name"] == "D")
+    expected = "f16" if dtype_d == "fp16" else dtype_d
+    assert d_param["type"] == f"ptr<{expected}, global>"
+    a_param = next(p for p in sig if p["name"] == "A")
+    assert a_param["type"] == "ptr<fp32, global>"  # the reduction scratch is always fp32
+
+
+# ---------------------------------------------------------------------------
+# DirectWgradCastSpec: the flat narrowing cast (no reduction, no transpose)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("dtype_d", ["bf16", "fp16"])
+def test_direct_wgrad_cast_builds_and_declares_d_as_dtype_d(dtype_d):
+    spec = DirectWgradCastSpec(dtype_d=dtype_d)
+    assert is_valid_direct_wgrad_cast_spec(spec)[0]
+    build_direct_wgrad_cast(spec)  # must not raise
+    sig = direct_wgrad_cast_signature(spec)
+    d_param = next(p for p in sig if p["name"] == "D")
+    expected = "f16" if dtype_d == "fp16" else dtype_d
+    assert d_param["type"] == f"ptr<{expected}, global>"
+    a_param = next(p for p in sig if p["name"] == "A")
+    assert a_param["type"] == "ptr<fp32, global>"
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        DirectWgradCastSpec(dtype_d="fp32"),  # not a narrowing cast target
+        DirectWgradCastSpec(dtype_d="bf16", threads=0),
+        DirectWgradCastSpec(dtype_d="bf16", threads=2048),
+    ],
+)
+def test_direct_wgrad_cast_degenerate_specs_are_rejected(spec):
+    assert not is_valid_direct_wgrad_cast_spec(spec)[0]
+    with pytest.raises(ValueError):
+        build_direct_wgrad_cast(spec)
+
+
+def test_direct_wgrad_cast_launch_geometry_covers_every_element():
+    spec = DirectWgradCastSpec(dtype_d="bf16", threads=256)
+    grid, block = spec.launch_geometry(12345)
+    assert grid[0] * block[0] >= 12345
+    assert block == (256, 1, 1)

@@ -19,6 +19,8 @@ from dataclasses import replace
 __all__ = [
     "DIRECT_WGRAD_FOLD",
     "DIRECT_WGRAD_FOLDED",
+    "DIRECT_WGRAD_CAST",
+    "DIRECT_WGRAD_CAST_PRODUCERS",
     "DIRECT_DGRAD_REORGANIZE",
     "DIRECT_DGRAD_REORGANIZE_RTC",
     "DIRECT_DGRAD_TRANSPOSE",
@@ -96,12 +98,19 @@ DIRECT_WGRAD_FOLDED = (
     "direct_wgrad_gather",
     "direct_wgrad_grouped_mfma",
 )
+# The flat narrowing cast (no reduction, no transpose) the two non-folded
+# wgrad kernels route their fp32 atomic-add scratch through to reach a real
+# fp16/bf16 dW: unlike DIRECT_WGRAD_FOLD it is keyed on dtype alone (no taps),
+# so exactly one binary per dtype serves every producer shape.
+DIRECT_WGRAD_CAST = "direct_wgrad_cast"
+DIRECT_WGRAD_CAST_PRODUCERS = ("direct_wgrad", "direct_wgrad_tiled")
 _HELPERS = (
     DIRECT_DGRAD_TRANSPOSE,
     DIRECT_DGRAD_REORGANIZE,
     DIRECT_DGRAD_TRANSPOSE_RTC,
     DIRECT_DGRAD_REORGANIZE_RTC,
     DIRECT_WGRAD_FOLD,
+    DIRECT_WGRAD_CAST,
 )
 # Register budget for the MFMA dgrad fprop pass's preloaded weights and
 # accumulators (see direct_mfma_knobs_reason): three quarters of the 512-VGPR
@@ -313,6 +322,10 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         from kernels.common.conv_direct_dw_wgrad import DwWgradFoldSpec
 
         return DwWgradFoldSpec(name="rocke_direct_wgrad_fold", **knobs)
+    if variant == DIRECT_WGRAD_CAST:
+        from kernels.common.conv_direct_wgrad_cast import DirectWgradCastSpec
+
+        return DirectWgradCastSpec(name="rocke_direct_wgrad_cast", **knobs)
     if variant == DIRECT_SPLIT_REDUCE:
         return dn.DirectSplitReduceSpec(dtype=problem.dtype, **knobs)
     if variant == DIRECT_DGRAD_TRANSPOSE:
@@ -562,6 +575,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_direct_grouped as dc
     from kernels.common import conv_direct_grouped_wgrad_mfma as gwm
     from kernels.common import conv_direct_nongrouped as dn
+    from kernels.common import conv_direct_wgrad_cast as wc
     from kernels.common import conv_direct_wgrad_gather as wg
     from kernels.common import conv_direct_wgrad_tiled as wt
     from kernels.common import conv_fwd_small_wmma as fs
@@ -580,6 +594,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_wgrad_dw_mfma": dwmf.build_dw_wgrad_mfma,
         "direct_wgrad_grouped_mfma": gwm.build_grouped_wgrad_mfma,
         DIRECT_WGRAD_FOLD: dw.build_dw_wgrad_fold,
+        DIRECT_WGRAD_CAST: wc.build_direct_wgrad_cast,
         "direct_grouped": dc.build_direct_conv,
         "direct_nongrouped": dn.build_direct_conv_nongrouped,
         DIRECT_GROUPED_HALO: dn.build_direct_conv_nongrouped,

@@ -104,7 +104,11 @@ if(ROCKE_BUILD_PYENV)
     add_custom_command(
         OUTPUT "${_rocke_platform_wheel}"
         COMMAND ${_rocke_wheel_env}
+                # --no-cache-dir: see cmake/build_library_wheel.py's comment on the
+                # sibling library-wheel command -- pip's wheel cache has served a stale
+                # build for this unchanging name+version even though the source changed.
                 "${ROCKE_PYENV_PYTHON}" -m pip wheel --no-deps --no-build-isolation
+                --no-cache-dir
                 --wheel-dir "${ROCKE_WHEEL_DIR}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/platform"
         DEPENDS "${ROCKE_PYENV_STAMP}"

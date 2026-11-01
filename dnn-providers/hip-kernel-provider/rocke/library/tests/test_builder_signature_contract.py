@@ -353,6 +353,8 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_dw_wgrad.DwWgradColsSpec": ("problem",),
     # The dW extent per output channel the fold sums partial slots over.
     "kernels.common.conv_direct_dw_wgrad.DwWgradFoldSpec": ("taps",),
+    # The real dW element type the narrowing cast stores.
+    "kernels.common.conv_direct_wgrad_cast.DirectWgradCastSpec": ("dtype_d",),
     "kernels.common.conv_direct_wgrad_gather.WgradGatherSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectSplitReduceSpec": (),
     "kernels.common.conv_direct_grouped_wgrad_mfma.GroupedWgradMfmaSpec": ("problem",),

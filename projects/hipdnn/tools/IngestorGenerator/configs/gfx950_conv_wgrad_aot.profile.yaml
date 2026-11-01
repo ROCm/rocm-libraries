@@ -1,0 +1,183 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Tool profile for hipkernel:Gfx950ConvWgradAot, the shape-generic AOT-instance
+# backward-filter (wgrad) engine. The bundle and its generator config come from
+# tools/make_conv_wgrad_aot_config.py over the lists of
+# tools/enumerate_conv_wgrad_aot_instances.py; the rocKE adapter is
+# builders/common/convolution_backward_filter.py.
+#
+# No sort_kernel_catalog: this engine ships heuristic-only. The reference
+# gfx950_conv_dgrad_aot/gfx950_conv_fwd_aot UHD models were trained by an
+# external fleet pipeline (not reproducible on local hardware this session);
+# see WGRAD_AOT_PROGRESS.md.
+
+slug: gfx950_conv_wgrad_aot
+bundle: gfx950_conv_wgrad_aot
+pack: gfx950_conv_wgrad_aot
+arch: gfx950
+provider_root: dnn-providers/hip-kernel-provider
+dialect: packaged
+authored_subpath: rocKE/gfx950_conv_wgrad_aot
+source: builders/common/convolution_backward_filter.py
+builder: build_gfx950_conv_wgrad_aot
+kernel_source_kind: rocke
+workspace_policy: derived
+delegates_to_existing_plan: false
+
+engine:
+  name: hipkernel:Gfx950ConvWgradAot
+  sdk_version: "1.0.0"
+  # make_conv_wgrad_aot_config.engine_knobs()
+  knobs:
+    - kernel_family
+    - direct_variant
+    - tile_m
+    - tile_n
+    - tile_k
+    - warp_m
+    - warp_n
+    - warp_tile_m
+    - warp_tile_n
+    - warp_tile_k
+    - pipeline
+    - epilogue
+    - vector_size_a
+    - vector_size_b
+    - vector_size_c
+    - lds_k_outer
+    - group_merge
+    - prefetch_addr
+    - split_k
+    - waves_c
+    - waves_k
+    - waves_q
+    - ho_per_block
+    - mfma_k
+    - rows_per_seg
+    - rows_per_chunk
+    - prefetch
+    - target_blocks
+    - row_unroll
+    - unfold_n
+    - q_groups
+    - lanes_c
+    - lanes_w
+    - cols_per_lane
+    - strip
+    - threads
+    - q_tiles
+    - pingpong
+  heuristic: native
+
+# Instances are matched per problem by capability, so "dispatch" resolves the wgrad
+# problem the engine would match (Hi/Wi are the X extents), and the predicate is its
+# graph contract. The generator config comes from make_conv_wgrad_aot_config.py.
+request:
+  module: dispatch.grouped_convolution
+  class: ConvGroupedRequest
+  defaults:
+    direction: wgrad
+    layout: NHWC
+    G: 1
+    algorithm: implicit_gemm_wgrad
+dispatch:
+  module: builders.common.convolution_backward_filter
+  function: gfx950_conv_wgrad_aot_problem_for_request
+predicate:
+  module: builders.common.convolution_backward_filter
+  function: supports_gfx950_conv_wgrad_aot_problem
+arch_spec:
+  module: builders.common.convolution_backward_filter
+  class: Gfx950ConvWgradProblem
+
+kmd_fields:
+  - {name: dtype, type: string}
+  - {name: tile_m, type: int}
+  - {name: tile_n, type: int}
+  - {name: tile_k, type: int}
+  - {name: warp_m, type: int}
+  - {name: warp_n, type: int}
+  - {name: warp_tile_m, type: int}
+  - {name: warp_tile_n, type: int}
+  - {name: warp_tile_k, type: int}
+  - {name: wave_size, type: int}
+  - {name: pipeline, type: string}
+  - {name: epilogue, type: string}
+  - {name: vector_size_a, type: int}
+  - {name: vector_size_b, type: int}
+  - {name: vector_size_c, type: int}
+  - {name: lds_k_outer, type: int}
+  - {name: group_merge, type: int}
+  - {name: prefetch_addr, type: int}
+  - {name: split_k, type: int}
+  - {name: instance_id, type: string}
+  - {name: layout, type: string}
+  # Direct and helper instances; implicit-GEMM descriptors leave them to the builder default.
+  - {name: kernel_family, type: int, default_value: 0, builder_default: true}
+  - {name: direct_variant, type: string, default_value: none, builder_default: true}
+  - {name: filter_h, type: int, default_value: 0, builder_default: true}
+  - {name: filter_w, type: int, default_value: 0, builder_default: true}
+  - {name: stride_h, type: int, default_value: 0, builder_default: true}
+  - {name: stride_w, type: int, default_value: 0, builder_default: true}
+  - {name: pad_h, type: int, default_value: 0, builder_default: true}
+  - {name: pad_w, type: int, default_value: 0, builder_default: true}
+  - {name: dilation_h, type: int, default_value: 0, builder_default: true}
+  - {name: dilation_w, type: int, default_value: 0, builder_default: true}
+  - {name: cpg, type: int, default_value: 0, builder_default: true}
+  - {name: kpg, type: int, default_value: 0, builder_default: true}
+  - {name: waves_c, type: int, default_value: 0, builder_default: true}
+  - {name: waves_k, type: int, default_value: 0, builder_default: true}
+  - {name: waves_q, type: int, default_value: 0, builder_default: true}
+  - {name: ho_per_block, type: int, default_value: 0, builder_default: true}
+  - {name: mfma_k, type: int, default_value: 0, builder_default: true}
+  - {name: rows_per_seg, type: int, default_value: 0, builder_default: true}
+  - {name: rows_per_chunk, type: int, default_value: 0, builder_default: true}
+  - {name: prefetch, type: int, default_value: 0, builder_default: true}
+  - {name: target_blocks, type: int, default_value: 0, builder_default: true}
+  - {name: row_unroll, type: int, default_value: 0, builder_default: true}
+  - {name: unfold_n, type: int, default_value: 0, builder_default: true}
+  - {name: q_groups, type: int, default_value: 0, builder_default: true}
+  - {name: lanes_c, type: int, default_value: 0, builder_default: true}
+  - {name: lanes_w, type: int, default_value: 0, builder_default: true}
+  - {name: cols_per_lane, type: int, default_value: 0, builder_default: true}
+  - {name: strip, type: int, default_value: 0, builder_default: true}
+  - {name: threads, type: int, default_value: 0, builder_default: true}
+  - {name: q_tiles, type: int, default_value: 0, builder_default: true}
+  - {name: pingpong, type: int, default_value: 0, builder_default: true}
+
+vocabulary:
+  dtype: {fp16: fp16, bf16: bf16}
+  layout: {NHWC: NHWC}
+  pipeline: {mem: mem, compv3: compv3, compv4: compv4, direct: direct}
+  epilogue: {cshuffle: cshuffle, default: default, direct: direct}
+  direct_variant: {none: none, direct_wgrad: direct_wgrad, direct_wgrad_tiled: direct_wgrad_tiled, direct_wgrad_dw: direct_wgrad_dw, direct_wgrad_dw_cols: direct_wgrad_dw_cols, direct_wgrad_dw_mfma: direct_wgrad_dw_mfma, direct_wgrad_grouped_mfma: direct_wgrad_grouped_mfma, direct_wgrad_gather: direct_wgrad_gather, direct_wgrad_fold: direct_wgrad_fold, wgrad_workspace_reduce: wgrad_workspace_reduce}
+
+# The cpp_mirror names below are the native pack's (Phase 3, not yet implemented):
+# packs/Gfx950ConvWgradNative.cpp and packs/Gfx950ConvWgradGeometry.hpp, mirroring
+# Gfx950ConvDgradNative.cpp / Gfx950ConvDgradGeometry.hpp.
+launch_surface:
+  - name: instance_contract
+    python_source: builders/common/convolution_backward_filter.py:supports_gfx950_conv_wgrad_aot
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvWgradGeometry.hpp:parseAotInstance
+    kmd_fields: [dtype, layout, kernel_family, direct_variant, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue, vector_size_a, vector_size_b, vector_size_c, lds_k_outer, group_merge, prefetch_addr, split_k, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w, cpg, kpg, instance_id]
+    guard: Not yet implemented in C++ (Phase 3). parseAotInstance reads kernel_family first. Implicit GEMM (0) needs NHWC, wave64, a mem/compv3/compv4 pipeline, a default or cshuffle epilogue, positive tile/warp fields, widths in {1,2,4,8} and 0/1 flags. Direct (1) and helper (2) instances need the direct placeholders, a variant of their family, the baked geometry and the knobs their variant uses (AOT_WGRAD_DIRECT_KNOBS). Missing or malformed fields refuse the kernel; the kernel matcher never admits a helper.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvWgradMatchers.cpp
+  - name: launch_plan
+    python_source: builders/common/convolution_backward_filter.py:gfx950_conv_wgrad_aot_serves
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvWgradGeometry.hpp:instancePlan
+    kmd_fields: [kernel_family, direct_variant, tile_m, tile_n, tile_k, vector_size_a, vector_size_b, vector_size_c, group_merge, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, cpg, kpg]
+    guard: Not yet implemented in C++ (Phase 3). The instance serves the problem exactly when a plan exists -- implicit GEMM follows rocKE's own offer (identity_supports_problem), direct kernels follow direct_spec_for_problem. library/tests/test_convolution_backward_filter_aot_packaging.py checks specs against rocKE's own offer where the adapter's own probe can reconstruct a problem (see its two documented gaps: the two-stage split-K pipeline and the group_merge/vector_size interaction).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvWgradGeometry.cpp
+  - name: kernargs_and_execution
+    python_source: builders/common/convolution_backward_filter.py:build_gfx950_conv_wgrad_aot
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvWgradNative.cpp:stepSignature
+    kmd_fields: [dtype, kernel_family, direct_variant]
+    guard: Not yet implemented in C++ (Phase 3). One kernarg signature per step ABI -- the implicit GEMM ABI, the direct wgrad ABI (dY/X/dW), and the partial-slot fold helper. The GPU suite poisons dW and compares every catalog instance with the CPU reference.
+    test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvWgrad.cpp
+  - name: fallback_selection
+    python_source: builders/common/convolution_backward_filter.py:gfx950_conv_wgrad_aot_runtime_candidates
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvWgradGeometry.hpp:planScore
+    kmd_fields: [kernel_family, direct_variant, tile_m, tile_n]
+    guard: Not yet implemented in C++ (Phase 3). Unbenchmarked order only -- no sort_kernel_catalog ships with this engine (see note above); native heuristic / declared-order fallback until a trained ranker exists.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvWgradMatchers.cpp

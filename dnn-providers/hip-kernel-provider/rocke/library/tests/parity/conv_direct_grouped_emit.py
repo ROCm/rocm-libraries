@@ -17,10 +17,13 @@
 # DirectNongroupedConvSpec and its DirectSplitReduceSpec second pass, from
 # index 103 its grouped / group-merge mode, and from index 114 the direct
 # wgrad kernels: DirectWgradTiledSpec, DwWgradFoldSpec, DwWgradColsSpec,
-# DwWgradLdsSpec, WgradGatherSpec, DwWgradMfmaSpec and GroupedWgradMfmaSpec,
-# from index 163 the bf16 DirectConv4cSpec, and from index 166 the depthwise
-# forward kernels on the wave32 gfx1250, from index 171 their channel-packed
-# cpl > 1 forms), builds the kernel
+# DwWgradLdsSpec, WgradGatherSpec, DwWgradMfmaSpec and GroupedWgradMfmaSpec
+# (indices 163-164: DwWgradFoldSpec at dtype_d bf16/fp16), from index 165 the
+# bf16 DirectConv4cSpec, and from index 168 the depthwise
+# forward kernels on the wave32 gfx1250, from index 173 their channel-packed
+# cpl > 1 forms, and from index 181 DirectWgradCastSpec (the flat narrowing
+# cast direct_wgrad / direct_wgrad_tiled use to finish into a real fp16/bf16
+# dW), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -78,6 +81,10 @@ from kernels.common.conv_direct_dw_wgrad_mfma import (
 from kernels.common.conv_direct_grouped_wgrad_mfma import (
     GroupedWgradMfmaSpec,
     build_grouped_wgrad_mfma,
+)
+from kernels.common.conv_direct_wgrad_cast import (
+    DirectWgradCastSpec,
+    build_direct_wgrad_cast,
 )
 from kernels.common.conv_direct_wgrad_gather import (
     WgradGatherSpec,
@@ -149,9 +156,10 @@ _NONGROUPED_GROUPED_CFG_BASE = 103
 # ---------------------------------------------------------------------------
 _WGRAD_DIRECT_CFG_BASE = 114
 
-# bf16 4c (mfma_f32_4x4x4_bf16) configs, indices 163..165, after the direct
-# wgrad ones.
-_FOURC_BF16_CFG_BASE = 163
+# bf16 4c (mfma_f32_4x4x4_bf16) configs, indices 165..167, after the direct
+# wgrad ones (which now run 0..50, the last two being DwWgradFoldSpec at a
+# real dtype_d).
+_FOURC_BF16_CFG_BASE = 165
 
 
 def _fourc_bf16_spec(idx: int):
@@ -475,6 +483,10 @@ def _wgrad_direct_spec(idx: int):
             "grouped_wgrad_mfma",
             gm(problem=_wp(groups=16, cpg=4, kpg=4), target_blocks=-1),
         ),
+        # dtype_d-aware fold: the final store casts the f32 reduction down to
+        # the real dW element type instead of always leaving it fp32.
+        49: ("dw_wgrad_fold", DwWgradFoldSpec(taps=9, dtype_d="bf16")),
+        50: ("dw_wgrad_fold", DwWgradFoldSpec(taps=9, dtype_d="fp16")),
     }
     sel = table.get(idx)
     if sel is None:
@@ -483,12 +495,12 @@ def _wgrad_direct_spec(idx: int):
 
 
 # ---------------------------------------------------------------------------
-# Depthwise forward on a wave32 target (gfx1250), indices 166..178: the
+# Depthwise forward on a wave32 target (gfx1250), indices 168..180: the
 # preloading, spatial, tiled and column-streamed kernels at wave_size 32, then
 # the preloading kernel at wave_size 64: a logical wave of 64 threads, which
 # the wave32 target runs as two hardware waves.
 # ---------------------------------------------------------------------------
-_WAVE32_CFG_BASE = 166
+_WAVE32_CFG_BASE = 168
 
 
 def _dwp_fwd(N, H, W, groups, KH, PAD, stride, dtype):
@@ -634,6 +646,23 @@ def _wave32_spec(idx: int):
             ),
             "gfx1250",
         )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# direct_wgrad_cast (the flat narrowing cast direct_wgrad / direct_wgrad_tiled
+# use to finish their "D" scratch into a real fp16/bf16 dW), indices 181..182:
+# follows the wave32 depthwise forward ones.
+# ---------------------------------------------------------------------------
+_CAST_CFG_BASE = 181
+
+
+def _cast_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_CAST_CFG_BASE + idx``, or None."""
+    if idx == 0:
+        return ("direct_wgrad_cast", DirectWgradCastSpec(dtype_d="bf16"), "gfx950")
+    if idx == 1:
+        return ("direct_wgrad_cast", DirectWgradCastSpec(dtype_d="fp16"), "gfx950")
     return None
 
 
@@ -1926,6 +1955,11 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
+    if idx >= _CAST_CFG_BASE:
+        sel = _cast_spec(idx - _CAST_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WAVE32_CFG_BASE:
         sel = _wave32_spec(idx - _WAVE32_CFG_BASE)
         if sel is not None:
@@ -2106,6 +2140,8 @@ def main() -> int:
         kernel = build_dw_wgrad_mfma(spec, arch=arch)
     elif kind == "grouped_wgrad_mfma":
         kernel = build_grouped_wgrad_mfma(spec, arch=arch)
+    elif kind == "direct_wgrad_cast":
+        kernel = build_direct_wgrad_cast(spec, arch=arch)
     else:
         kernel = build_direct_depthwise(spec, arch=arch)
     if mode == "ll":

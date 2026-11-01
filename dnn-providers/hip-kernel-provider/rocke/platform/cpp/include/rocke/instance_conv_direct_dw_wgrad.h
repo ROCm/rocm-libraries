@@ -48,15 +48,20 @@ extern "C" {
  *  class DwWgradFoldSpec:
  *      taps: int
  *      name: str = "dw_wgrad_fold"
+ *      dtype_d: str = "fp32"
  * ===================================================================== */
 typedef struct rocke_dw_wgrad_fold_spec
 {
     int taps;
     const char* name; /* default "dw_wgrad_fold" */
+    /* The real dW element type the final store casts the f32 reduction down
+     * to: "fp32" (default, no cast -- preserves every pre-existing caller),
+     * "fp16" or "bf16". NULL is treated as "fp32". */
+    const char* dtype_d;
 } rocke_dw_wgrad_fold_spec_t;
 
 rocke_dw_wgrad_fold_spec_t rocke_dw_wgrad_fold_spec_default(void);
-/* kernel_name_join(name, t{taps}). */
+/* kernel_name_join(name, t{taps}, flags=[bf16] or [fp16] when dtype_d says so). */
 rocke_status_t rocke_dw_wgrad_fold_kernel_name(const rocke_dw_wgrad_fold_spec_t* spec,
                                                char* out,
                                                size_t out_cap);

@@ -26,6 +26,15 @@ public:
         launchImpl(stream, kernelParams.data());
     }
 
+    /// For a kernel whose kernarg count is only known at runtime (e.g. assembled from a
+    /// per-instance-sized argument list), where the compile-time-sized `launch(...)` pack
+    /// above cannot be used. `kernelParams` holds the same `void*`-to-each-argument layout
+    /// `launch` builds itself.
+    void launchWithParams(hipStream_t stream, void** kernelParams) const
+    {
+        launchImpl(stream, kernelParams);
+    }
+
 protected:
     virtual void launchImpl(hipStream_t stream, void** kernelParams) const = 0;
 };

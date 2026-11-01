@@ -92,6 +92,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
     endif()
+    # Same rule as the dense-attention knobs suite above, one source per wgrad AOT
+    # engine: the single-launch and two-stage engines are separate product bundles.
+    hkp_product_offers_engine(_hkp_conv_wgrad_aot_bundle "hipkernel:Gfx950ConvWgradAot")
+    if(_hkp_conv_wgrad_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvWgradAotKnobs.cpp
+        )
+    endif()
+    hkp_product_offers_engine(_hkp_conv_wgrad_two_stage_aot_bundle "hipkernel:Gfx950ConvWgradTwoStageAot")
+    if(_hkp_conv_wgrad_two_stage_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvWgradTwoStageAotKnobs.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -224,6 +238,56 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
         ${_gfx950_shard_args}
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+endif()
+
+# hipkernel:Gfx950ConvWgradAot: same gating shape as dense-attention above.
+set(_hkp_gfx950_conv_wgrad_aot FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_gfx950_conv_wgrad_aot_available(_hkp_gfx950_conv_wgrad_aot)
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR
+   AND _hkp_gfx950_conv_wgrad_aot
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+    set(_gfx950_shard_args
+        INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx950)
+
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx950_conv_wgrad_aot_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   "hipkernel:Gfx950ConvWgradAot"
+        INSTALL_SUBDIR hip_kernel_provider
+        ${_gfx950_shard_args}
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER "quick_Gfx950ConvWgradAot*:standard_Gfx950ConvWgradAot*"
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+endif()
+
+# hipkernel:Gfx950ConvWgradTwoStageAot: the two-stage split-K sibling engine.
+set(_hkp_gfx950_conv_wgrad_two_stage_aot FALSE)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_gfx950_conv_wgrad_two_stage_aot_available(_hkp_gfx950_conv_wgrad_two_stage_aot)
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR
+   AND _hkp_gfx950_conv_wgrad_two_stage_aot
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+    set(_gfx950_shard_args
+        INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx950)
+
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx950_conv_wgrad_two_stage_aot_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   "hipkernel:Gfx950ConvWgradTwoStageAot"
+        INSTALL_SUBDIR hip_kernel_provider
+        ${_gfx950_shard_args}
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER "quick_Gfx950ConvWgradTwoStageAot*:standard_Gfx950ConvWgradTwoStageAot*"
         ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
     )
 endif()

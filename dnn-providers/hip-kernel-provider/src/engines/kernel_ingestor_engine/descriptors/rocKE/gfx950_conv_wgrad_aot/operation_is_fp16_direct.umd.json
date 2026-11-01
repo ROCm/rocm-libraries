@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "40ba2453-0b1c-441a-bbd6-4118c4d52706",
+  "name": "graph operation is fp16_direct",
+  "scope": "graph",
+  "match_symbol": "hipkernel.gfx950_conv_wgrad_aot.fp16_direct_match"
+}

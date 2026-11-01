@@ -1,0 +1,72 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider hipkernel:Gfx950ConvWgradTwoStageAot external integration test
+# categories.
+#
+# Pinned to hipkernel:Gfx950ConvWgradTwoStageAot via --test-engine. Matches the bundles
+# under integration-test-bundles/{quick,standard}/ConvWgrad/.
+# The harness skips any case the engine does not service.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "Quick gfx950 wgrad two-stage (split-K) AOT bundle coverage"
+    test_patterns:
+      - "quick_Gfx950ConvWgradTwoStageAot*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard gfx950 wgrad two-stage AOT bundle coverage"
+    test_patterns:
+      - "quick_Gfx950ConvWgradTwoStageAot*"
+      - "standard_Gfx950ConvWgradTwoStageAot*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Comprehensive gfx950 wgrad two-stage AOT coverage"
+    test_patterns:
+      - "*Gfx950ConvWgradTwoStageAot*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Full gfx950 wgrad two-stage AOT coverage"
+    test_patterns:
+      - "*Gfx950ConvWgradTwoStageAot*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm-quick:
+    description: "Fast-feedback quick tier: gfx950 wgrad two-stage AOT quick bundles"
+    test_patterns:
+      - "quick_Gfx950ConvWgradTwoStageAot*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 1800
+    comprehensive: 7200
+    full: 14400
+    ffm-quick: 1800

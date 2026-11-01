@@ -47,17 +47,49 @@ _FOLD_COLS = 64
 _FOLD_UNROLL = 4
 
 
+def _fold_dtype_ir(dtype_d: str):
+    """The IR element type ``dtype_d`` (``"fp32"``, ``"fp16"`` or ``"bf16"``) stores as."""
+    if dtype_d == "fp32":
+        return F32
+    return _io_type(dtype_d)
+
+
+def _fold_store_align(dtype_d: str) -> int:
+    return 4 if dtype_d == "fp32" else 2
+
+
+def _cast_fold_result(b, v_f32: Value, dtype_d: str) -> Value:
+    """Cast the f32 reduction result to ``dtype_d`` for the final store."""
+    if dtype_d == "fp32":
+        return v_f32
+    if dtype_d == "bf16":
+        return b.trunc_f32_to_bf16(v_f32)
+    if dtype_d == "fp16":
+        return b.trunc_f32_to_f16(v_f32)
+    raise ValueError(f"unsupported dw_wgrad_fold dtype_d: {dtype_d!r}")
+
+
 @dataclass(frozen=True)
 class DwWgradFoldSpec:
-    """Fold of ``taps`` partial gradients per output channel into an fp32 dW."""
+    """Fold of ``taps`` partial gradients per output channel into dW.
+
+    The reduction itself always accumulates in fp32 (``A``, the partial-slot
+    scratch, is always fp32); ``dtype_d`` is the real dW element type the
+    *final* store casts down to. Defaults to ``"fp32"`` (no cast, the
+    original behaviour) so every existing caller is unaffected -- a caller
+    dispatching against a real fp16/bf16 graph tensor must pass the real
+    dtype explicitly.
+    """
 
     taps: int
     name: str = "dw_wgrad_fold"
+    dtype_d: str = "fp32"
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(self.name, f"t{self.taps}")
+        flags = {} if self.dtype_d == "fp32" else {self.dtype_d: True}
+        return kernel_name_join(self.name, f"t{self.taps}", flags=flags)
 
     def launch_geometry(self, channels: int):
         return (ceil_div(channels * self.taps, _FOLD_COLS), 1, 1), (
@@ -72,13 +104,14 @@ DW_WGRAD_FOLD_ARGS = ("parts", "channels")
 
 
 def dw_wgrad_fold_signature(spec: DwWgradFoldSpec) -> list:
-    """A = the fp32 partial slots, D = dW, as the AOT plans bind helper steps."""
+    """A = the fp32 partial slots, D = dW (``spec.dtype_d``), as the AOT plans bind
+    helper steps."""
     from rocke.helpers.spec import SignatureBuilder
 
     sb = (
         SignatureBuilder()
         .ptr("A", "fp32")
-        .ptr("D", "fp32")
+        .ptr("D", spec.dtype_d)
         .scalar("A_bytes", "i32")
         .scalar("D_bytes", "i32")
     )
@@ -96,10 +129,10 @@ def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDe
     ws = b.param("A", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     dw = b.param(
         "D",
-        PtrType(F32, "global"),
+        PtrType(_fold_dtype_ir(spec.dtype_d), "global"),
         noalias=True,
         writeonly=True,
-        align=4,
+        align=_fold_store_align(spec.dtype_d),
     )
     b.param("A_bytes", I32)
     b.param("D_bytes", I32)
@@ -154,7 +187,7 @@ def build_dw_wgrad_fold(spec: DwWgradFoldSpec, arch: str = "gfx950") -> KernelDe
         tap = b.div(o, chans)
         c = b.mod(o, chans)
         off = b.add(b.mul(c, ci(spec.taps)), tap)
-        b.global_store(dw, off, t, align=4)
+        b.global_store(dw, off, _cast_fold_result(b, t, spec.dtype_d), align=_fold_store_align(spec.dtype_d))
     return b.kernel
 
 

@@ -34,6 +34,8 @@ from kernels.conv.direct_variants import (
     DIRECT_WAVE_PARAMETRIC,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
+    DIRECT_WGRAD_CAST as _WGRAD_CAST,
+    DIRECT_WGRAD_CAST_PRODUCERS as _WGRAD_CAST_PRODUCERS,
     direct_wgrad_fold_knobs,
     dgrad_rtc_vgprs,
     direct_dgrad_weight_transforms,
@@ -1867,6 +1869,19 @@ def _helper_identity(
             knobs,
             dtype,
         )
+    if variant == _WGRAD_CAST:
+        # A flat narrowing cast depends on nothing but dtype: zero every
+        # capability so direct_wgrad and direct_wgrad_tiled, at every filter
+        # and channel count, collapse onto the same one-per-dtype binary.
+        return _identity(
+            arch,
+            wave_size,
+            variant,
+            "direct_wgrad_helper",
+            replace(caps, KH=0, PAD=0, stride=0, cpg=0, kpg=0),
+            knobs,
+            dtype,
+        )
     return _identity(
         arch,
         wave_size,
@@ -2219,6 +2234,21 @@ def _caps_jobs(
                     ),
                     replace(caps, PAD=0, stride=0, cpg=0, kpg=0),
                     fold_knobs,
+                )
+            )
+        if variant in _WGRAD_CAST_PRODUCERS:
+            # dtype alone selects the binary (DirectWgradCastSpec has no
+            # geometry); knobs carries the real dtype_d both the identity's
+            # hash and the spec constructor need, so every (shape, variant)
+            # cell of a given dtype collapses onto the same cast job.
+            cast_knobs = {"dtype_d": dtype}
+            cell.append(
+                _job(
+                    _helper_identity(
+                        arch, wave_size, _WGRAD_CAST, caps, cast_knobs, dtype
+                    ),
+                    replace(caps, KH=0, PAD=0, stride=0, cpg=0, kpg=0),
+                    cast_knobs,
                 )
             )
         if variant == "direct_nongrouped" and knobs.get("split_c", 1) > 1:

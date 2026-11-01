@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "id": "fecace68-8cf4-4f29-9eda-878240c87d95",
+  "name": "hipkernel:Gfx950ConvWgradTwoStageAot",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.gfx950_conv_wgrad_two_stage_aot.graph_match"
+  },
+  "metadata": "d5f2ef7a-8bfd-4328-9a57-310c428ae526",
+  "sort_kernel_catalog": {
+    "default": "54dadfb5-7e47-4ab9-a3ce-a5050615bbe9"
+  },
+  "knobs": [
+    "kernel_family",
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warp_m",
+    "warp_n",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
+    "vector_size_a",
+    "vector_size_b",
+    "vector_size_c",
+    "lds_k_outer",
+    "group_merge",
+    "prefetch_addr",
+    "split_k",
+    "waves_c",
+    "waves_k",
+    "waves_q",
+    "ho_per_block",
+    "mfma_k",
+    "rows_per_seg",
+    "prefetch",
+    "target_blocks",
+    "row_unroll",
+    "unfold_n",
+    "q_groups",
+    "pingpong",
+    "lanes_c",
+    "lanes_w",
+    "cols_per_lane",
+    "channels",
+    "strip",
+    "threads",
+    "q_tiles",
+    "rows_per_chunk"
+  ]
+}

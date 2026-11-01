@@ -17,10 +17,12 @@
  * group-merge non-grouped spec; from index 114 the direct wgrad kernels:
  * rocke_direct_wgrad_tiled_spec_t, rocke_dw_wgrad_{fold,cols,lds}_spec_t,
  * rocke_direct_wgrad_gather_spec_t and, from index 148, the 4x4x4 MFMA
- * rocke_dw_wgrad_mfma_spec_t and rocke_grouped_wgrad_mfma_spec_t; from
- * index 163 the bf16 rocke_direct_conv_4c_spec_t; from index 166 the
- * depthwise forward kernels on the wave32 gfx1250, from index 171 their
- * channel-packed cpl > 1 forms) identically to the Python emitter
+ * rocke_dw_wgrad_mfma_spec_t and rocke_grouped_wgrad_mfma_spec_t (indices
+ * 163-164: rocke_dw_wgrad_fold_spec_t at a real dtype_d); from
+ * index 165 the bf16 rocke_direct_conv_4c_spec_t; from index 168 the
+ * depthwise forward kernels on the wave32 gfx1250, from index 173 their
+ * channel-packed cpl > 1 forms, and from index 181
+ * rocke_direct_wgrad_cast_spec_t) identically to the Python emitter
  * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
@@ -35,6 +37,7 @@
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_wgrad_mfma.h"
 #include "rocke/instance_conv_direct_nongrouped.h"
+#include "rocke/instance_conv_direct_wgrad_cast.h"
 #include "rocke/instance_conv_direct_wgrad_gather.h"
 #include "rocke/instance_conv_direct_wgrad_tiled.h"
 #include "rocke/ir.h"
@@ -66,7 +69,8 @@ enum
     KIND_DW_WGRAD_LDS = 19,
     KIND_WGRAD_GATHER = 20,
     KIND_DW_WGRAD_MFMA = 21,
-    KIND_GROUPED_WGRAD_MFMA = 22
+    KIND_GROUPED_WGRAD_MFMA = 22,
+    KIND_DIRECT_WGRAD_CAST = 23
 };
 
 #define NONGROUPED_CFG_BASE 42
@@ -90,11 +94,16 @@ enum
  * the 11 grouped non-grouped configs. */
 #define WGRAD_DIRECT_CFG_BASE 114
 
-/* bf16 4c configs 163..165 follow the direct wgrad ones. */
-#define FOURC_BF16_CFG_BASE 163
-/* Depthwise forward on a wave32 target (gfx1250), configs 166..178, follows
+/* bf16 4c configs 165..167 follow the direct wgrad ones (which now run
+ * 0..50, the last two being rocke_dw_wgrad_fold_spec_t at a real dtype_d). */
+#define FOURC_BF16_CFG_BASE 165
+/* Depthwise forward on a wave32 target (gfx1250), configs 168..180, follows
  * the bf16 4c ones: see _wave32_spec in the Python emitter. */
-#define WAVE32_CFG_BASE 166
+#define WAVE32_CFG_BASE 168
+
+/* rocke_direct_wgrad_cast_spec_t configs 181..182 (bf16, fp16), follows the
+ * wave32 depthwise forward ones: see _cast_spec in the Python emitter. */
+#define CAST_CFG_BASE 181
 
 /* bf16 DirectConv4cSpec configs, emitted as FOURC_BF16_CFG_BASE + idx (mirrors
  * Python _fourc_bf16_spec). Returns 0 on success, -1 past the last one. */
@@ -937,6 +946,26 @@ static int make_wave32_cfg(int idx,
         stiled->wave_size = 32;
         stiled->cpl = 3;
         *kind = KIND_DW_TILED;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* Config CAST_CFG_BASE + idx (see _cast_spec in the Python emitter):
+ * rocke_direct_wgrad_cast_spec_t at dtype_d bf16 (0) / fp16 (1). Returns 0 on
+ * success, -1 past the last one. */
+static int make_cast_cfg(int idx, rocke_direct_wgrad_cast_spec_t* s, const char** arch)
+{
+    *s = rocke_direct_wgrad_cast_spec_default();
+    *arch = "gfx950";
+    switch(idx)
+    {
+    case 0:
+        s->dtype_d = "bf16";
+        return 0;
+    case 1:
+        s->dtype_d = "fp16";
         return 0;
     default:
         return -1;
@@ -1832,8 +1861,10 @@ static int make_wgrad_direct_cfg(int idx, int* kind, wgrad_direct_specs_t* w, co
         *kind = KIND_WGRAD_GATHER;
     else if(idx <= 40 || idx == 45 || idx == 46)
         *kind = KIND_DW_WGRAD_MFMA;
-    else
+    else if(idx <= 48)
         *kind = KIND_GROUPED_WGRAD_MFMA;
+    else
+        *kind = KIND_DW_WGRAD_FOLD;
     ts->problem = mk_wp();
     gs->problem = mk_wp();
     gm->problem = mk_wp();
@@ -2170,6 +2201,14 @@ static int make_wgrad_direct_cfg(int idx, int* kind, wgrad_direct_specs_t* w, co
         gm->problem.kpg = 4;
         gm->target_blocks = -1;
         return 0;
+    case 49: /* dtype_d-aware fold: final store casts down to bf16 */
+        w->fold.taps = 9;
+        w->fold.dtype_d = "bf16";
+        return 0;
+    case 50: /* dtype_d-aware fold: final store casts down to fp16 */
+        w->fold.taps = 9;
+        w->fold.dtype_d = "fp16";
+        return 0;
     default:
         return -1;
     }
@@ -2203,8 +2242,18 @@ int main(int argc, char** argv)
     rocke_direct_reorganize_weights_spec_t sreorg;
     wgrad_direct_specs_t swd;
     rocke_direct_conv_split_reduce_spec_t sred;
+    rocke_direct_wgrad_cast_spec_t scast;
     const char* arch = "gfx950";
-    if(idx >= WAVE32_CFG_BASE)
+    if(idx >= CAST_CFG_BASE)
+    {
+        kind = KIND_DIRECT_WGRAD_CAST;
+        if(make_cast_cfg(idx - CAST_CFG_BASE, &scast, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= WAVE32_CFG_BASE)
     {
         if(make_wave32_cfg(idx - WAVE32_CFG_BASE, &kind, &sdw, &ssp, &stiled, &sdwc, &arch) != 0)
         {
@@ -2320,6 +2369,8 @@ int main(int argc, char** argv)
         kernel = rocke_build_dw_wgrad_mfma_new(&b, &swd.dw_mfma, arch);
     else if(kind == KIND_GROUPED_WGRAD_MFMA)
         kernel = rocke_build_grouped_wgrad_mfma_new(&b, &swd.grouped_mfma, arch);
+    else if(kind == KIND_DIRECT_WGRAD_CAST)
+        kernel = rocke_build_direct_wgrad_cast_new(&b, &scast, arch);
     else
         kernel = rocke_build_direct_depthwise_new(&b, &sdw, arch);
     if(kernel == NULL)

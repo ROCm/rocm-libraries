@@ -38,6 +38,15 @@ constexpr int kFoldCols = 64;
 constexpr int kFoldUnroll = 4;
 
 const char* bf16_flag[1] = {"bf16"};
+/* DwWgradFoldSpec.dtype_d's two non-default values -- at most one is ever on. */
+const char* fold_dtype_flags[2] = {"bf16", "fp16"};
+
+/* "fp32" (and NULL, treated the same) is the spec's default: no cast, same
+ * binary name as before this field existed. */
+bool fold_dtype_is(const rocke_dw_wgrad_fold_spec_t* s, const char* dtype)
+{
+    return s->dtype_d != NULL && strcmp(s->dtype_d, dtype) == 0;
+}
 
 } // namespace
 
@@ -50,6 +59,7 @@ extern "C" rocke_dw_wgrad_fold_spec_t rocke_dw_wgrad_fold_spec_default(void)
     rocke_dw_wgrad_fold_spec_t s;
     memset(&s, 0, sizeof(s));
     s.name = "dw_wgrad_fold";
+    s.dtype_d = "fp32";
     return s;
 }
 
@@ -63,7 +73,8 @@ extern "C" rocke_status_t
     char t_buf[24];
     snprintf(t_buf, sizeof t_buf, "t%d", s->taps);
     const char* parts[1] = {t_buf};
-    return rocke_kernel_name_join(s->name, parts, 1, NULL, NULL, 0, out, out_cap, NULL);
+    int on[2] = {fold_dtype_is(s, "bf16") ? 1 : 0, fold_dtype_is(s, "fp16") ? 1 : 0};
+    return rocke_kernel_name_join(s->name, parts, 1, fold_dtype_flags, on, 2, out, out_cap, NULL);
 }
 
 extern "C" void rocke_dw_wgrad_fold_launch_geometry(const rocke_dw_wgrad_fold_spec_t* s,
@@ -93,14 +104,18 @@ rocke_kernel_def_t* build_fold(rocke_ir_builder_t* b, const rocke_dw_wgrad_fold_
     ro.readonly = ro.readonly_set = true;
     ro.align = 16;
     ro.align_set = true;
+    const bool dw_bf16 = fold_dtype_is(spec, "bf16");
+    const bool dw_fp16 = fold_dtype_is(spec, "fp16");
+    const rocke_type_t* dw_type = dw_bf16 ? rocke_bf16() : dw_fp16 ? rocke_f16() : rocke_f32();
+    const int dw_align = (dw_bf16 || dw_fp16) ? 2 : 4;
     rocke_param_opts_t wo;
     memset(&wo, 0, sizeof(wo));
     wo.noalias = wo.noalias_set = true;
     wo.writeonly = wo.writeonly_set = true;
-    wo.align = 4;
+    wo.align = dw_align;
     wo.align_set = true;
     V ws = rocke_b_param(b, "A", rocke_ptr_type(b, rocke_f32(), "global"), &ro);
-    V dw = rocke_b_param(b, "D", rocke_ptr_type(b, rocke_f32(), "global"), &wo);
+    V dw = rocke_b_param(b, "D", rocke_ptr_type(b, dw_type, "global"), &wo);
     rocke_b_param(b, "A_bytes", rocke_i32(), NULL);
     rocke_b_param(b, "D_bytes", rocke_i32(), NULL);
     V parts = rocke_b_param(b, "parts", rocke_i32(), NULL);
@@ -168,7 +183,8 @@ rocke_kernel_def_t* build_fold(rocke_ir_builder_t* b, const rocke_dw_wgrad_fold_
         V tap = e.div(o, chans);
         V c = e.mod(o, chans);
         V off = e.add(e.muli(c, spec->taps), tap);
-        rocke_b_global_store(b, dw, off, t, 4);
+        V stored = dw_bf16 ? rocke_b_trunc_f32_to_bf16(b, t) : dw_fp16 ? rocke_b_trunc_f32_to_f16(b, t) : t;
+        rocke_b_global_store(b, dw, off, stored, dw_align);
     });
     return rocke_ir_builder_ok(b) ? b->kernel : NULL;
 }

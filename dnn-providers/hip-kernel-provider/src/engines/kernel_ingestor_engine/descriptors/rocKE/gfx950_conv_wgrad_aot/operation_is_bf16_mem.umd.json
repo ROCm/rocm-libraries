@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "da077b9d-c169-4796-8f8e-e0f7df6ec2be",
+  "name": "graph operation is bf16_mem",
+  "scope": "graph",
+  "match_symbol": "hipkernel.gfx950_conv_wgrad_aot.bf16_mem_match"
+}

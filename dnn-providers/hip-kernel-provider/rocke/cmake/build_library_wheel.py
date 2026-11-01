@@ -49,6 +49,13 @@ def main() -> int:
                 "wheel",
                 "--no-deps",
                 "--no-build-isolation",
+                # pip's wheel cache keys a local directory build loosely enough that
+                # it has served a stale cached wheel for an unchanged name+version
+                # (0.1.0 never bumps) even though the staged tree's contents changed
+                # (a newly added module silently missing from the wheel). The stage
+                # directory is already unique per build, so there is nothing for the
+                # cache to usefully save here.
+                "--no-cache-dir",
                 "--wheel-dir",
                 wheel_dir,
                 str(stage),

@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "e8c7c20e-b420-420d-bd7b-8fec638ba6f6",
+  "name": "graph operation is fp16_mem",
+  "scope": "graph",
+  "match_symbol": "hipkernel.gfx950_conv_wgrad_two_stage_aot.fp16_mem_match"
+}

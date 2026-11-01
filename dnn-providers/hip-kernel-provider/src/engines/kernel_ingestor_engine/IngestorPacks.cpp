@@ -26,6 +26,12 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:Gfx1151WmmaAttentionDecode",
          &registerGfx1151WmmaAttentionDecodeSymbols,
          &resetGfx1151WmmaAttentionDecodeModuleCache},
+        {"hipkernel:Gfx950ConvWgradAot",
+         &registerGfx950ConvWgradAotSymbols,
+         &resetGfx950ConvWgradAotModuleCache},
+        {"hipkernel:Gfx950ConvWgradTwoStageAot",
+         &registerGfx950ConvWgradTwoStageAotSymbols,
+         &resetGfx950ConvWgradTwoStageAotModuleCache},
     };
     return s_packs;
 }

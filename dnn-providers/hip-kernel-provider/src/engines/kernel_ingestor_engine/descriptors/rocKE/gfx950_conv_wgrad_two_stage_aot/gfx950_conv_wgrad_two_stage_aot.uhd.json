@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "54dadfb5-7e47-4ab9-a3ce-a5050615bbe9",
+  "name": "Gfx950ConvWgradTwoStageAot selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.gfx950_conv_wgrad_two_stage_aot.score"
+  }
+}

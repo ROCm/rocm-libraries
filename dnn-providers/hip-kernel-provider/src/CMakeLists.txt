@@ -421,6 +421,87 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipkernel:Gfx950AttentionDense is not shipped for gfx950 by this configuration - skipping gfx950-attention-dense-external-integration-check")
     endif()
 
+    # hipkernel:Gfx950ConvWgradAot: same shape as the dense-attention target above --
+    # gated on the bundle actually shipping for gfx950, routed into the gfx950 shard.
+    set(_gfx950_conv_wgrad_aot_category_args "")
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND DEFINED HIPKERNELPROVIDER_GFX950_CONV_WGRAD_AOT_INTEGRATION_CATEGORIES_YAML)
+        list(APPEND _gfx950_conv_wgrad_aot_category_args
+            TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_CONV_WGRAD_AOT_INTEGRATION_CATEGORIES_YAML}"
+            INSTALL_TEST_FILE "${_hkp_gfx950_external_ctest}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-conv-wgrad-aot-external-integration
+        )
+    endif()
+
+    set(_hkp_gfx950_conv_wgrad_aot FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_gfx950_conv_wgrad_aot_available(_hkp_gfx950_conv_wgrad_aot)
+    endif()
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR
+       AND HIPKERNELPROVIDER_ENABLE_ROCKE
+       AND _hkp_gfx950_conv_wgrad_aot
+       AND TARGET hipdnn_integration_tests)
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+        set(_gfx950_shard_args
+            INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx950)
+
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-conv-wgrad-aot-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx950ConvWgradAot"
+            INSTALL_SUBDIR hip_kernel_provider
+            ${_gfx950_shard_args}
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950ConvWgradAot.toml
+            GTEST_FILTER   "quick_Gfx950ConvWgradAot*:standard_Gfx950ConvWgradAot*"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ${_gfx950_conv_wgrad_aot_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-conv-wgrad-aot-external-integration-check target")
+    else()
+        message(STATUS "hipkernel:Gfx950ConvWgradAot is not shipped for gfx950 by this configuration - skipping gfx950-conv-wgrad-aot-external-integration-check")
+    endif()
+
+    # hipkernel:Gfx950ConvWgradTwoStageAot: the two-stage split-K sibling engine, same shape.
+    set(_gfx950_conv_wgrad_two_stage_aot_category_args "")
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND DEFINED HIPKERNELPROVIDER_GFX950_CONV_WGRAD_TWO_STAGE_AOT_INTEGRATION_CATEGORIES_YAML)
+        list(APPEND _gfx950_conv_wgrad_two_stage_aot_category_args
+            TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_CONV_WGRAD_TWO_STAGE_AOT_INTEGRATION_CATEGORIES_YAML}"
+            INSTALL_TEST_FILE "${_hkp_gfx950_external_ctest}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-conv-wgrad-two-stage-aot-external-integration
+        )
+    endif()
+
+    set(_hkp_gfx950_conv_wgrad_two_stage_aot FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_gfx950_conv_wgrad_two_stage_aot_available(_hkp_gfx950_conv_wgrad_two_stage_aot)
+    endif()
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR
+       AND HIPKERNELPROVIDER_ENABLE_ROCKE
+       AND _hkp_gfx950_conv_wgrad_two_stage_aot
+       AND TARGET hipdnn_integration_tests)
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+        set(_gfx950_shard_args
+            INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx950)
+
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-conv-wgrad-two-stage-aot-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx950ConvWgradTwoStageAot"
+            INSTALL_SUBDIR hip_kernel_provider
+            ${_gfx950_shard_args}
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950ConvWgradTwoStageAot.toml
+            GTEST_FILTER   "quick_Gfx950ConvWgradTwoStageAot*:standard_Gfx950ConvWgradTwoStageAot*"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ${_gfx950_conv_wgrad_two_stage_aot_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-conv-wgrad-two-stage-aot-external-integration-check target")
+    else()
+        message(STATUS "hipkernel:Gfx950ConvWgradTwoStageAot is not shipped for gfx950 by this configuration - skipping gfx950-conv-wgrad-two-stage-aot-external-integration-check")
+    endif()
+
     # Second drain of the common external staging, after every registration above.
     #
     # The first drain sits beside the cross-provider target, far higher up, so it can

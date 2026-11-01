@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "c56d5223-7f46-437a-8b7d-9496ad2993b7",
+  "name": "graph operation is fp16_compv3",
+  "scope": "graph",
+  "match_symbol": "hipkernel.gfx950_conv_wgrad_two_stage_aot.fp16_compv3_match"
+}
