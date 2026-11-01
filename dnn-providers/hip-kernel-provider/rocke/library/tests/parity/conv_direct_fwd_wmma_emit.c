@@ -63,6 +63,19 @@ static rocke_direct_conv_problem_t
     return p;
 }
 
+/* make_problem_rect(KH, KW, PAD, column padding, H, W, stride, dtype): the
+ * Python emitter's _pr() (N 2, dense cpg 64 / kpg 96, undilated). */
+static rocke_direct_conv_problem_t
+    make_problem_rect(int KH, int KW, int PAD, int pw, int H, int W, int stride, const char* dtype)
+{
+    rocke_direct_conv_problem_t p = make_problem(KH, PAD, stride, 1, 64, 96, 1, 1, dtype);
+    p.H = H;
+    p.W = W;
+    p.KW = KW;
+    p.pad_w = pw;
+    return p;
+}
+
 static void knobs(
     rocke_direct_fwd_wmma_spec_t* s, int wk, int wp, int tk, int tp, int tw, int tn, int ck, int st)
 {
@@ -237,6 +250,48 @@ static int make_cfg(int idx, rocke_direct_fwd_wmma_spec_t* s, const char** arch)
     case 28:
         s->problem = make_problem_1d(11, 5, 25, 1, 64, 96, "fp16");
         knobs(s, 1, 8, 2, 4, 512, 1, 32, 2);
+        return 0;
+    case 29:
+        s->problem = make_problem_rect(7, 1, 3, 0, 17, 17, 1, "bf16");
+        knobs(s, 1, 4, 4, 5, 20, 2, 32, 2);
+        pf(s);
+        return 0;
+    case 30:
+        s->problem = make_problem_rect(1, 7, 0, 3, 17, 17, 1, "fp16");
+        knobs(s, 2, 2, 1, 5, 20, 2, 32, 3);
+        pf(s);
+        return 0;
+    case 31:
+        s->problem = make_problem_rect(3, 1, 1, 0, 8, 8, 1, "bf16");
+        knobs(s, 4, 2, 2, 2, 8, 1, 32, 3);
+        pf(s);
+        return 0;
+    case 32:
+        s->problem = make_problem_rect(1, 3, 0, 1, 8, 8, 1, "fp16");
+        knobs(s, 2, 2, 2, 4, 8, 2, 32, 2);
+        pf(s);
+        return 0;
+    case 33:
+        s->problem = make_problem_rect(3, 3, 0, -1, 35, 35, 2, "bf16");
+        knobs(s, 2, 2, 2, 5, 20, 2, 32, 2);
+        pf(s);
+        return 0;
+    case 34:
+        s->problem = make_problem_rect(3, 3, 0, -1, 17, 17, 2, "fp16");
+        knobs(s, 4, 2, 2, 5, 20, 2, 32, 2);
+        s->phase_split = true;
+        pf(s);
+        return 0;
+    case 35:
+        s->problem = make_problem_rect(7, 1, 3, 0, 17, 17, 1, "bf16");
+        s->problem.groups = 2;
+        s->problem.cpg = 8;
+        s->problem.kpg = 8;
+        s->pack_groups = 2;
+        return 0;
+    case 36:
+        s->problem = make_problem_rect(3, 1, 2, 0, 17, 17, 1, "bf16");
+        s->problem.dil_h = 2;
         return 0;
     default:
         return -1;

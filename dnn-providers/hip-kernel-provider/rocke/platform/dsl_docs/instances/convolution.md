@@ -1281,15 +1281,19 @@ Knobs beyond the tile geometry (`prefetch`, `sched` as in the dgrad):
   wave); `tap_shift` builds the next filter column's fragments with an
   in-wave lane rotation (`v_permlane16`).
 
-Besides square filters it serves 1 x R filters on 1-D signals (stride 1,
-unpacked, no `phase_split` / `tap_reuse`) with a column padding of their own
-(`pad_w`, in 0..(R-1)*dil_w): the halo's column origin, the left-edge shift
-and its wrap slack follow `PAD_W`. Their AOT rows (`FWD_WMMA_1D_FILTERS`,
-`FWD_WMMA_1D_KNOBS`) put one output row in a block, the tile as wide as the
-block.
+Besides square filters it serves rectangular filters with a column padding
+of their own (`pad_w`, in 0..(KW-1)*dil): the halo's column origin, the
+left-edge shift and its wrap slack follow `PAD_W`. Non-square filters are
+served unpacked, without `phase_split` or `tap_reuse`, and dilated only as
+1 x R at stride 1. The AOT grid has 1 x R rows on 1-D signals
+(`FWD_WMMA_1D_FILTERS`, `FWD_WMMA_1D_KNOBS`: one output row per block, the
+tile as wide as the block), the 7x1 / 1x7 / 3x1 / 1x3 "same" rows of
+`FWD_WMMA_RECT_LAYERS` and the 3x3 stride-2 "valid" rows of
+`FWD_WMMA_S2V_KNOBS` (two images of 4x20 or 8x8 output pixels per block, for
+odd 17x17 / 8x8 maps).
 
 Runtime (kernargs): batch, extents, the group count and both channel counts
-(unless packed). Build-time: filter (square or 1 x R), stride 1 or 2,
+(unless packed). Build-time: filter, stride 1 or 2,
 per-axis dilation, `PAD` in 0..(K-1)*dil, dtype and the tile geometry. Constraints:
 `cpg` and `kpg` (after packing) multiples of 8, `ck` a multiple of 32, every
 tensor below 2 GiB (i32 byte offsets), and the ring and the staged Y tile
@@ -1323,7 +1327,8 @@ Both: `PAD` in 0..KH-1, every tensor below 2 GiB; small C takes square
 filters with one padding only. Batch,
 extents and the other channel count are kernargs; the filter, stride,
 padding, the small channel count and the tile geometry are baked. The AOT
-grid is `FWD_SMALLC_KNOBS` over `FWD_SMALLC_STEMS` (3x3, 7x7 / stride 2 and
+grid is `FWD_SMALLC_KNOBS` over `FWD_SMALLC_STEMS` (3x3 "same" and "valid",
+7x7 / stride 2 and
 the 4x4, 14x14 and 16x16 patch-embedding stems) and `FWD_SMALLK_KNOBS` (or
 the per-layer rows of `FWD_SMALLK_KNOBS_BY_LAYER`) over `FWD_SMALLK_LAYERS`:
 3x3 K=4, 3x3 K=3 and 1x7 K=1 with column padding 3 (variants `direct_fwd_smallc_wmma` /

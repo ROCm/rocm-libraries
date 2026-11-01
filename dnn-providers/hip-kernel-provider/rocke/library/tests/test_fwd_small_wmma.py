@@ -468,6 +468,8 @@ _SMALLC_CASES = (
         dict(N=2, H=64, W=64, K=128),
         dict(waves_k=2, tiles_k=4, tiles_per_block=4),
     ),
+    # 3x3 stride-2 "valid" stem (299x299 -> 149x149 in Inception-v3).
+    (dict(N=2, H=51, W=47, K=32, S=2, PAD=0), dict(tiles_p=2, out_h=8, out_w=16)),
 )
 _SMALLK_CASES = (
     (dict(C=64, K=4, H=33, W=27), dict()),

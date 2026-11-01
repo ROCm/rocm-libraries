@@ -4,6 +4,10 @@
     "llvm20": {
       "cases": {},
       "expected_failures": {
+        "conv_direct_fwd_wmma/gfx1250/bf16_7x1_pw0_tn2": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
         "conv_direct_fwd_wmma/gfx1250/bf16_default": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
           "type": "ValueError"
@@ -21,6 +25,10 @@
           "type": "ValueError"
         },
         "conv_direct_fwd_wmma/gfx1250/fp16_1x7_dil3_pw9": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
+        "conv_direct_fwd_wmma/gfx1250/fp16_s2_valid_tn2": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
           "type": "ValueError"
         },
@@ -33,6 +41,10 @@
     "llvm22": {
       "cases": {},
       "expected_failures": {
+        "conv_direct_fwd_wmma/gfx1250/bf16_7x1_pw0_tn2": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
         "conv_direct_fwd_wmma/gfx1250/bf16_default": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
           "type": "ValueError"
@@ -53,6 +65,10 @@
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
           "type": "ValueError"
         },
+        "conv_direct_fwd_wmma/gfx1250/fp16_s2_valid_tn2": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
         "conv_direct_fwd_wmma/gfx1250/fp16_tn2_sb_we_pf": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
           "type": "ValueError"
@@ -61,6 +77,14 @@
     },
     "llvm23": {
       "cases": {
+        "conv_direct_fwd_wmma/gfx1250/bf16_7x1_pw0_tn2": {
+          "arch": "gfx1250",
+          "bytes": 271834,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f7x1_p3_pw0_wk1_wp4_tk4_tp5_tw20_tn2_ck32_st2_bf16",
+          "sha256": "fec4224779a774ed0bc59c4815aba435843c194ee634715bf1acce0bb4b30e7a",
+          "status": "ok"
+        },
         "conv_direct_fwd_wmma/gfx1250/bf16_default": {
           "arch": "gfx1250",
           "bytes": 276580,
@@ -99,6 +123,14 @@
           "family": "conv_direct_fwd_wmma",
           "kernel_name": "direct_fwd_wmma_f1x7_p0_pw9_wk2_wp4_tk4_tp4_tw256_ck32_st3_pf_dil1x3_sb",
           "sha256": "6aef1a4f0abe3b98d0d79c1df1eedddb5dac7454af150110e1af551a2efab1c1",
+          "status": "ok"
+        },
+        "conv_direct_fwd_wmma/gfx1250/fp16_s2_valid_tn2": {
+          "arch": "gfx1250",
+          "bytes": 244413,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f3x3_p0_wk2_wp2_tk2_tp5_tw20_tn2_ck32_st2_pf_siterative-ilp_str2",
+          "sha256": "35fbb6a1c5a7d7aa1cc46619adbf82507a5832679421e7fe45123f0a430dc787",
           "status": "ok"
         },
         "conv_direct_fwd_wmma/gfx1250/fp16_tn2_sb_we_pf": {
@@ -114,6 +146,14 @@
     },
     "llvm24": {
       "cases": {
+        "conv_direct_fwd_wmma/gfx1250/bf16_7x1_pw0_tn2": {
+          "arch": "gfx1250",
+          "bytes": 271834,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f7x1_p3_pw0_wk1_wp4_tk4_tp5_tw20_tn2_ck32_st2_bf16",
+          "sha256": "fec4224779a774ed0bc59c4815aba435843c194ee634715bf1acce0bb4b30e7a",
+          "status": "ok"
+        },
         "conv_direct_fwd_wmma/gfx1250/bf16_default": {
           "arch": "gfx1250",
           "bytes": 276580,
@@ -152,6 +192,14 @@
           "family": "conv_direct_fwd_wmma",
           "kernel_name": "direct_fwd_wmma_f1x7_p0_pw9_wk2_wp4_tk4_tp4_tw256_ck32_st3_pf_dil1x3_sb",
           "sha256": "6aef1a4f0abe3b98d0d79c1df1eedddb5dac7454af150110e1af551a2efab1c1",
+          "status": "ok"
+        },
+        "conv_direct_fwd_wmma/gfx1250/fp16_s2_valid_tn2": {
+          "arch": "gfx1250",
+          "bytes": 244413,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f3x3_p0_wk2_wp2_tk2_tp5_tw20_tn2_ck32_st2_pf_siterative-ilp_str2",
+          "sha256": "35fbb6a1c5a7d7aa1cc46619adbf82507a5832679421e7fe45123f0a430dc787",
           "status": "ok"
         },
         "conv_direct_fwd_wmma/gfx1250/fp16_tn2_sb_we_pf": {

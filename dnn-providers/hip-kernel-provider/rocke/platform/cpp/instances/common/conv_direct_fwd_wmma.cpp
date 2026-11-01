@@ -375,19 +375,33 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
         FWW_FAIL("stride %d not in (1, 2)", p->stride);
     if(p->dil_h < 1 || p->dil_w < 1)
         FWW_FAIL("dilation %dx%d < 1", p->dil_h, p->dil_w);
-    if(p->KH != p->KW
-       && (p->KH != 1 || p->stride != 1 || spec->pack_groups > 1 || spec->phase_split
-           || spec->tap_reuse))
-        FWW_FAIL("filter %dx%d: non-square only as 1 x R, stride 1, unpacked", p->KH, p->KW);
     {
+        /* Non-square filters: 1 x R stride-1 rows on 1-D signals (dilated
+         * or not), and undilated rectangular filters (7x1, 1x7); all
+         * unpacked, without tap_reuse or a phase split. */
+        const bool dilated = p->dil_h != 1 || p->dil_w != 1;
+        const int pad_w = rocke_direct_conv_problem_pad_w(p);
+        if(p->KH != p->KW)
+        {
+            if(spec->pack_groups > 1 || spec->tap_reuse || spec->phase_split)
+                FWW_FAIL("a %dx%d filter is served unpacked, without tap_reuse or phase split",
+                         p->KH,
+                         p->KW);
+            if(dilated && (p->KH != 1 || p->stride != 1))
+                FWW_FAIL("a dilated %dx%d filter is served only as 1 x R, stride 1", p->KH, p->KW);
+        }
+        if(pad_w != p->PAD)
+        {
+            if(spec->pack_groups > 1)
+                FWW_FAIL("per-axis padding is served unpacked");
+            if(dilated && (p->KH != 1 || p->stride != 1))
+                FWW_FAIL("per-axis padding with dilation is served only as 1 x R, stride 1");
+        }
         int dmax = p->dil_h > p->dil_w ? p->dil_h : p->dil_w;
         if(p->PAD < 0 || p->PAD > (p->KH - 1) * dmax)
             FWW_FAIL("PAD %d outside 0..(K-1)*dilation", p->PAD);
-    }
-    {
-        const int pad_w = rocke_direct_conv_problem_pad_w(p);
-        if(pad_w < 0 || pad_w > (p->KW - 1) * p->dil_w)
-            FWW_FAIL("PAD_W %d outside 0..(KW-1)*dil_w", pad_w);
+        if(pad_w < 0 || pad_w > (p->KW - 1) * dmax)
+            FWW_FAIL("PAD_W %d outside 0..(KW-1)*dilation", pad_w);
     }
     long long Ho = fww_Ho(p), Wo = fww_Wo(p);
     if(Ho < 1 || Wo < 1)

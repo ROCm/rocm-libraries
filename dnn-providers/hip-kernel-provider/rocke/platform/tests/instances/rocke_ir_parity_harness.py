@@ -5364,6 +5364,24 @@ def cases():
                 split_barrier=True,
             ),
         ),
+        (
+            "bf16_7x1_pw0_tn2",
+            dict(H=17, W=17, KH=7, KW=1, PAD=3, pad_w=0),
+            dict(waves_k=1, tiles_k=4, tiles_p=5, tile_w=20, tile_n=2),
+        ),
+        (
+            "fp16_s2_valid_tn2",
+            dict(H=35, W=35, PAD=0, stride=2, dtype="fp16"),
+            dict(
+                waves_p=2,
+                tiles_k=2,
+                tiles_p=5,
+                tile_w=20,
+                tile_n=2,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
     ):
         add(
             "conv_direct_fwd_wmma",

@@ -280,7 +280,7 @@ class DirectFwdWmmaSpec:
 
     @property
     def halo_slack(self) -> int:
-        # A left-edge block's last row wraps up to PAD columns past the ring
+        # A left-edge block's last row wraps up to PAD_W columns past the ring
         # (a split halo carries the slack in each phase).
         return 0 if self.phase_split else self.problem.PAD_W * self.x_pitch
 
@@ -373,18 +373,26 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
         return f"stride {p.stride} not in (1, 2)"
     if p.dil_h < 1 or p.dil_w < 1:
         return f"dilation {p.dil_h}x{p.dil_w} < 1"
-    if p.KH != p.KW and (
-        p.KH != 1
-        or p.stride != 1
-        or spec.pack_groups > 1
-        or spec.phase_split
-        or spec.tap_reuse
-    ):
-        return f"filter {p.KH}x{p.KW}: non-square only as 1 x R, stride 1, unpacked"
+    # Non-square filters: 1 x R stride-1 rows on 1-D signals (dilated or
+    # not), and undilated rectangular filters (7x1, 1x7); all unpacked,
+    # without tap_reuse or a phase split.
+    if p.KH != p.KW:
+        if spec.pack_groups > 1 or spec.tap_reuse or spec.phase_split:
+            return (
+                f"a {p.KH}x{p.KW} filter is served unpacked, without tap_reuse "
+                "or phase split"
+            )
+        if p.is_dilated and (p.KH != 1 or p.stride != 1):
+            return f"a dilated {p.KH}x{p.KW} filter is served only as 1 x R, stride 1"
+    if p.PAD_W != p.PAD:
+        if spec.pack_groups > 1:
+            return "per-axis padding is served unpacked"
+        if p.is_dilated and (p.KH != 1 or p.stride != 1):
+            return "per-axis padding with dilation is served only as 1 x R, stride 1"
     if p.PAD < 0 or p.PAD > (p.KH - 1) * max(p.dil_h, p.dil_w):
         return f"PAD {p.PAD} outside 0..(K-1)*dilation"
-    if p.PAD_W < 0 or p.PAD_W > (p.KW - 1) * p.dil_w:
-        return f"PAD_W {p.PAD_W} outside 0..(KW-1)*dil_w"
+    if p.PAD_W < 0 or p.PAD_W > (p.KW - 1) * max(p.dil_h, p.dil_w):
+        return f"PAD_W {p.PAD_W} outside 0..(KW-1)*dilation"
     if p.Ho < 1 or p.Wo < 1:
         return f"empty output {p.Ho}x{p.Wo}"
     G = spec.pack_groups

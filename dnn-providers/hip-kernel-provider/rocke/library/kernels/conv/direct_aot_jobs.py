@@ -655,6 +655,38 @@ FWD_WMMA_DILATED_STRIDED_KNOBS = (
     (2, 1, 1, 4, 16, 1, 64, 2, True, False, False, False, False),
     (4, 1, 1, 4, 16, 2, 32, 2, True, False, False, False, False),
 )
+# 3x3 stride 2 "valid" (PAD 0; the Inception-v3 reduction layers 35x35 ->
+# 17x17 and 17x17 -> 8x8): tiles that fit the odd output maps. Two images of
+# 4x20 (17x17 maps: 72% of the padded grid real, against 38% for the 16- and
+# 32-wide tiles) or 8x8 per block, 128 K.
+FWD_WMMA_S2V_KNOBS = (
+    (2, 2, 2, 4, 8, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 2, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 4, 8, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 6, 24, 2, 32, 2, True, False, False, False, False),
+    (4, 2, 2, 5, 20, 2, 32, 2, True, False, False, True, False),
+)
+# 7x1 / 1x7 "same" (the Inception-v3 17x17 factorized layers): two images of
+# 4x20 per block, as for the 17x17 stride-2 maps; 3x1 / 1x3 "same" (its 8x8
+# blocks).
+FWD_WMMA_RECT_LAYERS = ((7, 1, 3, 0), (1, 7, 0, 3), (3, 1, 1, 0), (1, 3, 0, 1))
+FWD_WMMA_RECT_KNOBS = (
+    (1, 4, 4, 5, 20, 2, 32, 2, True, False, False, False, False),
+    # 32-channel K blocks: 200-240 blocks at n16 (the n16 17x17 layers)
+    (2, 2, 1, 5, 20, 2, 32, 3, True, False, False, False, False),
+    (2, 2, 2, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 3, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 6, 24, 2, 32, 2, True, False, False, False, False),
+)
+# 3x1 / 1x3 "same" (the Inception-v3 8x8 blocks, c384 -> 384): one or two
+# 8x8 images per block and 32-64 channel K blocks, so n16-n128 fill the CUs.
+FWD_WMMA_RECT3_KNOBS = (
+    (4, 2, 2, 2, 8, 1, 32, 3, True, False, False, False, False),
+    (4, 2, 1, 2, 8, 1, 32, 3, True, False, False, False, False),
+    (2, 2, 2, 4, 8, 2, 32, 2, True, False, False, False, False),
+    (4, 2, 2, 4, 8, 2, 32, 3, True, False, False, False, False),
+)
 # 1 x R filters on 1-D signals, (R, dilation), "same" padding: the HiFi-GAN
 # resblock / generator layers.
 FWD_WMMA_1D_FILTERS = tuple((r, d) for r in (3, 7, 11) for d in (1, 3, 5))
@@ -751,6 +783,7 @@ FWD_SMALLC_STEMS = (
     (3, 1, 1, 3),
     (3, 1, 1, 4),
     (3, 1, 2, 3),
+    (3, 0, 2, 3),  # Inception-v3 stem: 299x299 -> 149x149, "valid"
     (7, 3, 2, 3),
     (4, 0, 4, 3),
     (14, 0, 14, 3),
@@ -1267,9 +1300,10 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for c in FWD_WMMA_PACKED_CHANNELS
             for s in _STRIDES
         )
-        # Stride 2: 3x3 "same" and the 2x2 patch merge.
+        # Stride 2: 3x3 "same", 3x3 "valid" and the 2x2 patch merge.
         + (
             DirectCaps(KH=3, PAD=1, stride=2, cpg=0, kpg=0),
+            DirectCaps(KH=3, PAD=0, stride=2, cpg=0, kpg=0),
             DirectCaps(KH=2, PAD=0, stride=2, cpg=0, kpg=0),
         )
         # Dilated 3x3 (per-axis dilation), stride 1 and 2.
@@ -1290,6 +1324,18 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
                 dil_w=d,
             )
             for r, d in FWD_WMMA_1D_FILTERS
+        )
+        # Rectangular filters with per-axis "same" padding, stride 1.
+        + tuple(
+            DirectCaps(KH=kh, kw=kw, PAD=ph, pad_w=pw, stride=1, cpg=0, kpg=0)
+            for kh, kw, ph, pw in FWD_WMMA_RECT_LAYERS
+            # a 1 x R "same" undilated row is already a 1-D cap above
+            if not (
+                kh == 1
+                and ph == 0
+                and (kw, 1) in FWD_WMMA_1D_FILTERS
+                and pw == (kw - 1) // 2
+            )
         ),
     ),
     # Wgrad (grouped and non-grouped), channel counts runtime. The kernel is a
@@ -1744,8 +1790,16 @@ def _knob_grid(
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return  # a wave32 kernel: no tuning for this arch at all
         if caps is not None and caps.KH != caps.KW:
-            # 1 x R rows on 1-D signals.
-            yield from _fwd_wmma_1d_knobs(caps.KW)
+            # 1 x R rows on 1-D signals and / or the Inception rectangular
+            # rows (a 1x7 "same" cap is both).
+            if caps.KH == 1:
+                yield from _fwd_wmma_1d_knobs(caps.KW)
+            if (caps.KH, caps.KW, caps.PAD, caps.pad_w) in FWD_WMMA_RECT_LAYERS:
+                yield from _fwd_wmma_knobs(
+                    FWD_WMMA_RECT3_KNOBS
+                    if caps.KH * caps.KW == 3
+                    else FWD_WMMA_RECT_KNOBS
+                )
         elif caps is not None and caps.cpg > 0:
             # Pack groups up to one 32-channel WMMA K step.
             yield from _fwd_wmma_knobs(
@@ -1759,7 +1813,9 @@ def _knob_grid(
         elif caps is not None and caps.stride > 1 and caps.KH == caps.stride:
             yield from _fwd_wmma_knobs(FWD_WMMA_PATCH2_KNOBS)
         elif caps is not None and caps.stride > 1 and caps.dil_h == caps.dil_w == 1:
-            yield from _fwd_wmma_knobs(FWD_WMMA_STRIDED_KNOBS)
+            yield from _fwd_wmma_knobs(
+                FWD_WMMA_S2V_KNOBS if caps.PAD == 0 else FWD_WMMA_STRIDED_KNOBS
+            )
         elif caps is not None and (caps.dil_h, caps.dil_w) != (1, 1):
             yield from _fwd_wmma_knobs(
                 FWD_WMMA_DILATED_STRIDED_KNOBS
