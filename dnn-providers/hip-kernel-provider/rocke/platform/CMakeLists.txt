@@ -491,6 +491,11 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()
+    # tests/helpers/test_elementary.py checks the stored f64 coefficient tables against their
+    # generator (it skips them where the generator or mpmath is missing): install the
+    # generator next to the test, where the relocated test tree looks for it.
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_elementary_coefficients.py"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/helpers")
 
     # The top-level developer runner is not part of the standalone platform
     # component, but its command-plan regression tests run in the relocated
@@ -889,6 +894,65 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 1200)\n")
+
+    # hipTensor's rocKE kernels (library/kernels/common/hiptensor_aot and the kernel-pack writer
+    # builders/hiptensor), the experimental gfx950 hipTensor monokernels and tensor-network kernel,
+    # the rich GEMM epilogue and the dense-attention score-identity knob. Host lane: their CPU
+    # checks (specs, plans, route tables, palettes, the manifests against the Python pack writer,
+    # IR properties), with HIP_VISIBLE_DEVICES=-1 so the files' GPU numerics skip even on a GPU
+    # runner; the C++ pack builder cross-check skips without ROCKE_HIPTENSOR_PACK_BUILDER
+    # (hipTensor's build registers it with its builder as rocke_pack_cross_check_test). GPU lane:
+    # the files with GPU numerics (exact against references; their CPU checks run again). Not
+    # registered on Windows (hipTensor's rocKE backend is Linux-only, and the Windows CI shard
+    # runs close to its time limit).
+    set(_ROCKE_LIBRARY_HIPTENSOR_GPU_TEST_RELPATHS
+        "tests/library/tests/test_gemm_rich_epilogue.py"
+        "tests/library/tests/test_hiptensor_aot_dgett.py"
+        "tests/library/tests/test_hiptensor_aot_ewf.py"
+        "tests/library/tests/test_hiptensor_aot_ewp.py"
+        "tests/library/tests/test_hiptensor_aot_ewt.py"
+        "tests/library/tests/test_hiptensor_aot_jit.py"
+        "tests/library/tests/test_hiptensor_aot_math_ops.py"
+        "tests/library/tests/test_hiptensor_aot_numeric.py"
+        "tests/library/tests/test_hiptensor_aot_rgett.py"
+        "tests/library/tests/test_hiptensor_aot_rreduce.py")
+    set(_ROCKE_LIBRARY_HIPTENSOR_TEST_RELPATHS
+        ${_ROCKE_LIBRARY_HIPTENSOR_GPU_TEST_RELPATHS}
+        "tests/library/tests/test_attention_dense_score_identity.py"
+        "tests/library/tests/test_hiptensor_aot_rreduce_table.py"
+        "tests/library/tests/test_hiptensor_mono_persistent.py"
+        "tests/library/tests/test_hiptensor_mono_queue.py"
+        "tests/library/tests/test_hiptensor_pack_cross_check.py"
+        "tests/library/tests/test_hiptensor_pack_gemm_targets.py"
+        "tests/library/tests/test_tensor_network_mono.py")
+    set(_ROCKE_LIBRARY_HIPTENSOR_TESTS "")
+    foreach(_rocke_ht_test ${_ROCKE_LIBRARY_HIPTENSOR_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_HIPTENSOR_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_ht_test}\"")
+    endforeach()
+    set(_ROCKE_LIBRARY_HIPTENSOR_GPU_TESTS "")
+    foreach(_rocke_ht_test ${_ROCKE_LIBRARY_HIPTENSOR_GPU_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_HIPTENSOR_GPU_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_ht_test}\"")
+    endforeach()
+    if(WIN32)
+      message(STATUS "rocKE: the hipTensor library lanes are not registered on Windows")
+    else()
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_library_hiptensor_pytest python -m pytest${_ROCKE_LIBRARY_HIPTENSOR_TESTS} -v -rs --timeout=300)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_library_hiptensor_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;hiptensor\\;host\\;quick\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;HIP_VISIBLE_DEVICES=-1\"\n"
+             "  TIMEOUT 1200)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_library_hiptensor_gpu_pytest python -m pytest${_ROCKE_LIBRARY_HIPTENSOR_GPU_TESTS} -v -rs)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_library_hiptensor_gpu_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;hiptensor\\;gpu\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+             "  TIMEOUT 3600)\n")
+    endif()
 
     # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950
     # dense numeric and extended-parity attention tests run only in

@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value
+from rocke.helpers.magic_division import do_magic_division_u31_dynamic
 from rocke.instances.common.tensor.gett import (
     MAX_D_BYTES,
     NARROW_D_BYTES,
@@ -52,6 +53,8 @@ from rocke.instances.common.tensor.gett import (
     body_spec,
 )
 from rocke.instances.common.tensor.gett_plan import GettPlan, OpGeom
+
+from .common import require_bool
 
 RGETT_ABI = "hiptensor-aot-rgett/v1"
 
@@ -93,8 +96,21 @@ class RgettSpec:
     dtl_stages: int = 3
     chiplet_wgm: int = 8
     chiplet_chunk_size: int = 64
+    #: the geometry constants of a problem-specific kernel (``(name, value)`` for every name of
+    #: :func:`geometry_names`; :meth:`with_geom`), None: the class kernel (geometry arguments)
+    geom: Optional[Tuple[Tuple[str, int], ...]] = None
+
+    def with_geom(self, geom: Optional[Dict[str, int]]) -> "RgettSpec":
+        """The class with the geometry values ``geom`` (None: the class kernel)."""
+        g = (
+            None
+            if geom is None
+            else tuple(sorted((k, int(v)) for k, v in geom.items()))
+        )
+        return dataclasses.replace(self, geom=g)
 
     def check(self) -> None:
+        require_bool(self, "bilinear", "epi_pair", "wide_d")
         if self.dtype not in ("f16", "bf16"):
             raise ValueError("dtype must be f16 or bf16")
         if self.vec_a not in (8, 2) or self.vec_b not in (8, 2):
@@ -197,8 +213,7 @@ class RtGettHooks(GettHooks):
             elif self.geom is None:
                 # magic-number division (common.Emit.udiv)
                 m, s = self._v(b, f"{prefix}m{i}"), self._v(b, f"{prefix}s{i}")
-                q = b.lshr(b.umul_hi_i32(rest, m), s)
-                q = b.select(b.cmp_eq(m, b.const_i32(0)), rest, q)
+                q = do_magic_division_u31_dynamic(b, rest, m, s)
                 d = b.sub(rest, b.mul(q, e))
             else:
                 q = b.div(rest, e)
@@ -320,13 +335,13 @@ def _plan(spec: RgettSpec) -> GettPlan:
     )
 
 
-def build_rgett(
-    spec: RgettSpec, *, arch: str = "gfx950", geom: Optional[Dict[str, int]] = None
-) -> KernelDef:
-    """The class kernel (``geom`` None: geometry arguments) or its problem-specific form."""
+def build_rgett(spec: RgettSpec, *, arch: str = "gfx950") -> KernelDef:
+    """The class kernel (``spec.geom`` None: geometry arguments) or its problem-specific form
+    (:meth:`RgettSpec.with_geom`)."""
     from rocke.instances.common.gemm_universal import build_universal_gemm
 
     spec.check()
+    geom = None if spec.geom is None else dict(spec.geom)
     if arch not in ARCHS:
         raise ValueError(f"the ring GETT body needs {ARCHS}")
     name = spec.kernel_name()

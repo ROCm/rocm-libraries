@@ -77,10 +77,10 @@
         },
         "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
           "arch": "gfx942",
-          "bytes": 72522,
+          "bytes": 72610,
           "family": "gemm",
-          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
-          "sha256": "ee051c197329850f0c9a9db7277479bcdf5f7b0e99a39e8824d1429107360520",
+          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref_swz",
+          "sha256": "7cb3321a0fc25901dcffc25d40a0058c5bd872679f1eb9c7fb9ecaeb78feb48c",
           "status": "ok"
         },
         "gemm/gfx942/t128x128x16": {
@@ -219,10 +219,10 @@
         },
         "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
           "arch": "gfx942",
-          "bytes": 72618,
+          "bytes": 72706,
           "family": "gemm",
-          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
-          "sha256": "846b4d34dc734e6a963b8c6a55e10a96af160b337aa8871d51abacab87c64224",
+          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref_swz",
+          "sha256": "918f5f37e90fa45220e6e5537f96e5b34ac1bc1646c35f0c76c308439b24bb1d",
           "status": "ok"
         },
         "gemm/gfx942/t128x128x16": {
@@ -393,10 +393,10 @@
         },
         "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
           "arch": "gfx942",
-          "bytes": 72682,
+          "bytes": 72770,
           "family": "gemm",
-          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
-          "sha256": "1f409a70cf37f72a6ef044f4c4ad56ec5a2e7c84d1cde1c9750cf45bddfe8a86",
+          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref_swz",
+          "sha256": "7b135155fd4aac24b9ab2d16f9fb1cdc6ead71587116c63b3663c3e780780b52",
           "status": "ok"
         },
         "gemm/gfx942/t128x128x16": {
@@ -550,10 +550,10 @@
         },
         "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle": {
           "arch": "gfx942",
-          "bytes": 72682,
+          "bytes": 72770,
           "family": "gemm",
-          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref",
-          "sha256": "1f409a70cf37f72a6ef044f4c4ad56ec5a2e7c84d1cde1c9750cf45bddfe8a86",
+          "kernel_name": "irhash_gemm_942_f64_dtl_fp64_t64x64x16_w2x2x1_wt16x16x4_compv4_intrawave_default_pad_dtl_pref_swz",
+          "sha256": "7b135155fd4aac24b9ab2d16f9fb1cdc6ead71587116c63b3663c3e780780b52",
           "status": "ok"
         },
         "gemm/gfx942/t128x128x16": {

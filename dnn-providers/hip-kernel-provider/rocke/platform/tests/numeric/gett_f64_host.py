@@ -13,6 +13,15 @@ plus the single-rounding epilogue, per the precision contract:
 (complex: ``2K + 4`` roundings per component), with ``u`` the unit roundoff
 of the problem's words (``2^-53`` for f64 data, ``2^-24`` for f32 data; f32
 values are exact doubles, so the same exact reference applies).
+
+:func:`reference` computes the same correctly rounded values for many samples
+at once: the products and their errors of all samples are formed with numpy,
+summed per sample with TwoSum (Ogita, Rump, Oishi: Sum2), and a sample's sum
+is taken from that only when its certified error bound cannot reach a
+rounding boundary of the result; any other sample (and any sample whose
+operands could underflow or overflow the error-free transformations) goes
+through ``math.fsum`` / ``Fraction`` exactly as :func:`reference_exact` does.
+``test_gett_reference_host.py`` checks the two against each other.
 """
 
 from __future__ import annotations
@@ -109,10 +118,12 @@ def exact_dot(a: np.ndarray, b: np.ndarray) -> float:
     return math.fsum(np.concatenate([p, e]).tolist())
 
 
-def reference(
+def reference_exact(
     problem, A, B, C, alpha, beta, samples
 ) -> List[Tuple[Tuple[int, int, int], complex, float]]:
-    """(index, correctly rounded alpha*t + beta*c, bound) for each sample."""
+    """(index, correctly rounded alpha*t + beta*c, bound) for each sample, one
+    sample at a time with ``math.fsum`` and ``Fraction`` (the oracle of
+    :func:`reference`)."""
     wide = np.complex128 if problem.complex_ else np.float64
     Am = gather(problem, "A", A).astype(wide)
     Bm = gather(problem, "B", B).astype(wide)
@@ -163,6 +174,194 @@ def reference(
             )
             bound = U * abs(val) + (K + 2) * U * (abs(alpha) * s + abs(be) * abs(c))
         out.append(((l, m, n), val, bound))
+    return out
+
+
+# Operand magnitudes inside which TwoProduct (Veltkamp split) is error-free:
+# no product overflows, no split overflows, and the product error (a multiple
+# of ulp(a) * ulp(b)) is representable. Zeros are always fine.
+_SAFE_LO = 2.0**-480
+_SAFE_HI = 2.0**500
+_EPS = 2.0**-53
+_TINY = 2.0**-1074
+# samples per vectorised block, bounded so the (samples x terms) arrays stay small
+_BLOCK_TERMS = 1 << 21
+
+
+def _safe_rows(x: np.ndarray) -> np.ndarray:
+    """Rows of ``x`` whose values are all finite and zero or of a safe magnitude."""
+    a = np.abs(x)
+    ok = np.isfinite(x) & ((a == 0) | ((a >= _SAFE_LO) & (a <= _SAFE_HI)))
+    return ok.all(axis=1) if x.ndim == 2 else ok
+
+
+def _two_sum(a, b):
+    s = a + b
+    z = s - a
+    return s, (a - (s - z)) + (b - z)
+
+
+def _rn_row_sums(x: np.ndarray) -> np.ndarray:
+    """Correctly rounded sum of every row of ``x`` (finite doubles).
+
+    Sum2: sigma accumulates with TwoSum, tau the TwoSum errors in plain floating
+    point; sigma + (sum of the errors) is the exact sum, and
+    ``|tau - sum of the errors| <= gamma_{n-1}^2 * sum|x|``. A row is rounded
+    to ``RN(sigma + tau)`` when the exact sum, anywhere in that bound around
+    ``sigma + tau``, cannot leave the rounding interval of that double (strict,
+    so a tie is never decided here); every other row takes ``math.fsum``.
+    """
+    rows, n = x.shape
+    if n == 0:
+        return np.zeros(rows)
+    sig = x[:, 0].copy()
+    tau = np.zeros(rows)
+    for j in range(1, n):
+        sig, e = _two_sum(sig, x[:, j])
+        tau += e
+    r, rr = _two_sum(sig, tau)
+    g = (n - 1) * _EPS / (1 - (n - 1) * _EPS) if n > 1 else 0.0
+    # 2x: rounding in this float evaluation of the bound; n * TINY: subnormal
+    # rounding of the error accumulation
+    eb = 2.0 * g * g * np.abs(x).sum(axis=1) + n * _TINY
+    up = (np.nextafter(r, np.inf) - r) / 2
+    down = (r - np.nextafter(r, -np.inf)) / 2
+    ok = np.isfinite(r) & (r != 0) & (rr + eb < up) & (rr - eb > -down)
+    out = r.copy()
+    for i in np.flatnonzero(~ok):
+        out[i] = math.fsum(x[i].tolist())
+    return out
+
+
+def _rn_dots(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Correctly rounded ``sum_k a[i, k] * b[i, k]`` per row (TwoProduct terms)."""
+    p, e = two_prod(a, b)
+    return _rn_row_sums(np.concatenate([p, e], axis=1))
+
+
+def _rn_combine(pairs) -> np.ndarray:
+    """Correctly rounded ``sum x * y`` over ``pairs`` of per-sample vectors."""
+    terms = []
+    for x, y in pairs:
+        p, e = two_prod(x, y)
+        terms += [p, e]
+    return _rn_row_sums(np.stack(terms, axis=1))
+
+
+def reference(
+    problem, A, B, C, alpha, beta, samples
+) -> List[Tuple[Tuple[int, int, int], complex, float]]:
+    """(index, correctly rounded alpha*t + beta*c, bound) for each sample: the
+    values of :func:`reference_exact`, computed for many samples at once."""
+    samples = [tuple(int(v) for v in smp) for smp in samples]
+    if not samples:
+        return []
+    wide = np.complex128 if problem.complex_ else np.float64
+    Am = gather(problem, "A", A).astype(wide)
+    Bm = gather(problem, "B", B).astype(wide)
+    Cm = gather(problem, "C", C).astype(wide) if C is not None else None
+    K = problem.K
+    Uw = unit_roundoff(problem)
+    idx = np.asarray(samples, dtype=np.int64)
+    out = []
+    step = max(1, _BLOCK_TERMS // max(1, 8 * K))
+    for lo in range(0, len(samples), step):
+        blk = samples[lo : lo + step]
+        li, mi, ni = (idx[lo : lo + step, j] for j in range(3))
+        a, b = Am[li, mi], Bm[li, ni]
+        if problem.complex_:
+            out += _reference_complex(problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta)
+        else:
+            out += _reference_real(problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta)
+    return out
+
+
+def _reference_real(problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta):
+    safe = _safe_rows(a) & _safe_rows(b)
+    t = np.zeros(len(blk))
+    if safe.any():
+        t[safe] = _rn_dots(a[safe], b[safe])
+    for i in np.flatnonzero(~safe):
+        t[i] = exact_dot(a[i], b[i])
+    s = np.sum(np.abs(a) * np.abs(b), axis=1)
+    c = Cm[li, mi, ni].real if Cm is not None else np.zeros(len(blk))
+    be = float(beta) if Cm is not None else 0.0
+    al = float(alpha)
+    alv, bev = np.full(len(blk), al), np.full(len(blk), be)
+    ok = _safe_rows(np.stack([alv, t, bev, c], axis=1))
+    val = np.zeros(len(blk))
+    # without a beta term the value is one product, which IEEE rounds correctly
+    one = ok & ((bev == 0) | (c == 0))
+    val[one] = alv[one] * t[one]
+    two = ok & ~one
+    if two.any():
+        val[two] = _rn_combine([(alv[two], t[two]), (bev[two], c[two])])
+    for i in np.flatnonzero(~ok):
+        val[i] = float(
+            Fraction(al) * Fraction(float(t[i])) + Fraction(be) * Fraction(float(c[i]))
+        )
+    out = []
+    for i, smp in enumerate(blk):
+        v = float(val[i])
+        bound = Uw * abs(v) + (K + 2) * Uw * (abs(alpha) * float(s[i]) + abs(be) * abs(float(c[i])))
+        out.append((smp, v, bound))
+    return out
+
+
+def _reference_complex(problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta):
+    ar, ai = a.real.copy(), a.imag.copy()
+    br, bi = b.real.copy(), b.imag.copy()
+    if problem.conj_a:
+        ai = -ai
+    if problem.conj_b:
+        bi = -bi
+    n = len(blk)
+    safe = _safe_rows(ar) & _safe_rows(ai) & _safe_rows(br) & _safe_rows(bi)
+    tr, ti = np.zeros(n), np.zeros(n)
+    if safe.any():
+        pr1, er1 = two_prod(ar[safe], br[safe])
+        pr2, er2 = two_prod(-ai[safe], bi[safe])
+        pi1, ei1 = two_prod(ar[safe], bi[safe])
+        pi2, ei2 = two_prod(ai[safe], br[safe])
+        tr[safe] = _rn_row_sums(np.concatenate([pr1, er1, pr2, er2], axis=1))
+        ti[safe] = _rn_row_sums(np.concatenate([pi1, ei1, pi2, ei2], axis=1))
+    for i in np.flatnonzero(~safe):
+        pr1, er1 = two_prod(ar[i], br[i])
+        pr2, er2 = two_prod(-ai[i], bi[i])
+        pi1, ei1 = two_prod(ar[i], bi[i])
+        pi2, ei2 = two_prod(ai[i], br[i])
+        tr[i] = math.fsum(np.concatenate([pr1, er1, pr2, er2]).tolist())
+        ti[i] = math.fsum(np.concatenate([pi1, ei1, pi2, ei2]).tolist())
+    s = np.sum(np.abs(a) * np.abs(b), axis=1)
+    c = Cm[li, mi, ni] if Cm is not None else np.zeros(n, dtype=np.complex128)
+    al, be = complex(alpha), complex(beta) if Cm is not None else 0j
+    alr, ali = np.full(n, al.real), np.full(n, al.imag)
+    ber, bei = np.full(n, be.real), np.full(n, be.imag)
+    cr, ci = c.real.copy(), c.imag.copy()
+    ok = _safe_rows(np.stack([alr, ali, ber, bei, tr, ti, cr, ci], axis=1))
+    vr, vi = np.zeros(n), np.zeros(n)
+    if ok.any():
+        vr[ok] = _rn_combine(
+            [(alr[ok], tr[ok]), (-ali[ok], ti[ok]), (ber[ok], cr[ok]), (-bei[ok], ci[ok])]
+        )
+        vi[ok] = _rn_combine(
+            [(alr[ok], ti[ok]), (ali[ok], tr[ok]), (ber[ok], ci[ok]), (bei[ok], cr[ok])]
+        )
+    F = Fraction
+    for i in np.flatnonzero(~ok):
+        t_r, t_i, c_r, c_i = (float(v) for v in (tr[i], ti[i], cr[i], ci[i]))
+        vr[i] = float(
+            F(al.real) * F(t_r) - F(al.imag) * F(t_i) + F(be.real) * F(c_r) - F(be.imag) * F(c_i)
+        )
+        vi[i] = float(
+            F(al.real) * F(t_i) + F(al.imag) * F(t_r) + F(be.real) * F(c_i) + F(be.imag) * F(c_r)
+        )
+    out = []
+    for i, smp in enumerate(blk):
+        val = complex(float(vr[i]), float(vi[i]))
+        cc = complex(c[i])
+        bound = Uw * abs(val) + (2 * K + 4) * Uw * (abs(al) * float(s[i]) + abs(be) * abs(cc))
+        out.append((smp, val, bound))
     return out
 
 

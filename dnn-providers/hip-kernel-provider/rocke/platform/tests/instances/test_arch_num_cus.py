@@ -9,9 +9,17 @@ Host-only: reads the C++ table from its source and compares it with
 import re
 from pathlib import Path
 
+import pytest
+
 from rocke.helpers import split_k
 
 CPP = Path(__file__).resolve().parents[2] / "cpp"
+
+# the installed test tree ships no C++ sources: the check runs from a source tree
+pytestmark = pytest.mark.skipif(
+    not (CPP / "helpers" / "arch_num_cus.cpp").is_file(),
+    reason="no C++ engine sources here (the installed test tree)",
+)
 
 
 def _cpp_table():

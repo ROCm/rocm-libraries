@@ -169,9 +169,12 @@ def _finish(
         b.global_store(P["W"], widx, acc, align=8 if e.cdt == "f64" else 4)
 
 
-def build_reduce(spec: ReduceSpec) -> KernelDef:
+def build_reduce(spec: ReduceSpec, *, arch: str = "gfx950") -> KernelDef:
+    """The reduction kernel of a row (mode ``final``: :func:`build_reduce_finalize`).
+    ``arch`` is not used: the kernel is target-neutral IR (the pack builds a target's
+    classes for it)."""
     if spec.mode == "final":
-        return build_reduce_finalize(spec)
+        return build_reduce_finalize(spec, arch=arch)
     if spec.block % WAVE:
         raise ValueError("block must be a multiple of 64")
     b = IRBuilder(spec.kernel_name())
@@ -335,8 +338,9 @@ def _col(b, e: Emit, spec, P, geo: _Geo, n_red, rchunk, ystep, n_outer) -> None:
             _finish(e, P, geo, acc, o, kc, sidx, spec)
 
 
-def build_reduce_finalize(spec: ReduceSpec) -> KernelDef:
-    """Combine ``split`` partials ``W[s * n_out + o]`` per output and write D."""
+def build_reduce_finalize(spec: ReduceSpec, *, arch: str = "gfx950") -> KernelDef:
+    """Combine ``split`` partials ``W[s * n_out + o]`` per output and write D (``arch`` is not
+    used: the kernel is target-neutral IR)."""
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block
     e = Emit(b, spec.idx64, spec.cdt, spec.math)

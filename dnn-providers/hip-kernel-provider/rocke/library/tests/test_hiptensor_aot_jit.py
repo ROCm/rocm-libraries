@@ -118,6 +118,71 @@ def test_f64_to_16bit_rows_roll(d):
         assert recipe["kernel_name_fmt"] == spec.kernel_name()
 
 
+def _flag_specs():
+    """``(make(value), name)`` for every boolean field of the hiptensor_aot specs (and the int
+    ``rag`` of the tuned tiled classes)."""
+    from kernels.common.hiptensor_aot.dgett import DgettSpec
+    from kernels.common.hiptensor_aot.ewf import EwfSpec
+    from kernels.common.hiptensor_aot.ewp import EwpSpec
+    from kernels.common.hiptensor_aot.ewt import EwtSpec
+    from kernels.common.hiptensor_aot.rgett import RgettSpec
+    from kernels.common.hiptensor_aot.rreduce import RreduceFinalSpec, RreduceSpec
+
+    def raising(cls, **base):
+        return lambda **kw: cls(**base, **kw).check()
+
+    def reason(cls, **base):
+        def make(**kw):
+            why = cls(**base, **kw).check()
+            if why is not None:
+                raise ValueError(why)
+
+        return make
+
+    ew = raising(EwSpec, arity=1, a="f32", d="f32")
+    out = [(ew, f) for f in ("cplx", "idx64", "math")]
+    dg = DgettSpec(comp="f32")
+
+    def dgett(**kw):
+        import dataclasses
+
+        dataclasses.replace(dg, **kw).check("gfx950")
+
+    out += [(dgett, f) for f in ("cplx", "math", "idx64")]
+    out.append((raising(EwfSpec, arity=1, a="f32", d="f32"), "nt"))
+    out.append((raising(EwtSpec, arity=2, a="f32", c="f32", d="f32"), "fold"))
+    out += [(raising(RgettSpec), f) for f in ("bilinear", "epi_pair", "wide_d")]
+    out.append(
+        (raising(EwpSpec, arity=2, a="f16", c="f16", d="f16", kinds="TV", vb=4), "rag")
+    )
+    rr = reason(RreduceSpec, mode="row", a="f32", d="f32", op="add")
+    out += [(rr, f) for f in ("nt", "una", "idx64")]
+    out.append((reason(RreduceFinalSpec, a="f32", d="f32", op="add"), "idx64"))
+    out.append((lambda unit: EwJitSpec(ROWS[2], 4, unit).check(), "unit"))
+    return out
+
+
+@pytest.mark.parametrize("bad", ["false", "", None, 2.0])
+def test_spec_flags_reject_non_bools(bad):
+    """A boolean field (and the tuned tiled classes' ``rag``) that is not a bool is refused, not
+    coerced: ``"false"`` is truthy, and a kernel built from it would not be the one asked for.
+    """
+    for make, field in _flag_specs():
+        if field == "unit":
+            with pytest.raises(ValueError):
+                make((True, bad))
+            make((True, False))
+            continue
+        with pytest.raises(ValueError):
+            make(**{field: bad})
+        if field == "rag":
+            with pytest.raises(ValueError):
+                make(rag=True)  # a bool is not the int the class's name and ABI encode
+            make(rag=1)
+        else:
+            make(**{field: False})
+
+
 torch = pytest.importorskip("torch")
 TD = {
     "f16": torch.float16,
@@ -228,7 +293,7 @@ def test_jit_exact(arity, a, d, gather, idx64, seed):
         assert spec.vec > 1 and all(
             spec.unit
         ), "packed layouts have an all-vector class"
-    k = build_ew_jit(spec, geom)
+    k = build_ew_jit(spec.with_geom(geom))
     run = {"D": dd}
     sn = {"A": "alpha", "B": "beta", "C": "gamma"}
     for n in names:
@@ -270,7 +335,7 @@ def test_jit_permute_padding_limits():
     vals["opA"] = C.OP_IDENTITY
     spec, geom, n_in = jit_class_of(EwSpec(arity=1, a="f32", d="f32"), vals)
     assert spec.vec == 4
-    k = build_ew_jit(spec, geom)
+    k = build_ew_jit(spec.with_geom(geom))
     _run(k, {"A": xd, "D": out, "alpha": 3.0}, (-(-n_in // 256), geom["ystep"], 1))
     want = torch.zeros([48, 6], dtype=torch.float64)
     want[:32] = 3.0 * x.double()
@@ -296,7 +361,7 @@ def test_jit_f64_to_16bit_rounds_once(d):
     args.update(opA=C.OP_IDENTITY, opC=C.OP_IDENTITY, opAB=C.OP_ADD)
     spec, geom, n_in = jit_class_of(EwSpec(arity=2, a="f64", c=d, d=d), args)
     assert spec.vec > 1 and all(spec.unit)
-    k = build_ew_jit(spec, geom)
+    k = build_ew_jit(spec.with_geom(geom))
     _run(
         k,
         {"A": x, "C": c, "D": out, "alpha": 1.0, "gamma": 0.0},
@@ -494,7 +559,7 @@ def test_widened_class_matches_pack_kernel(spec):
         gkey = ("generic", base.kernel_name())
         gk = build_ew(base) if gkey not in _LAUNCHERS else None
         _launch(gk, gkey, dict(vals, D=out_g, **run), grid)
-        jk = build_ew_jit(spec, geom)
+        jk = build_ew_jit(spec.with_geom(geom))
         _launch(
             jk,
             ("jit", jk.name, tuple(sorted(geom.items()))),

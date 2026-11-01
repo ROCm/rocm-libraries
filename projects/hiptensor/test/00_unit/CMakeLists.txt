@@ -84,6 +84,33 @@ if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
         add_test(NAME rocke_pack_manifest_test
                  COMMAND hiptensor_rocke_pack_builder --list ${_ROCKE_MANIFEST_ARCHS}
                          --check-manifests "${_ROCKE_MANIFESTS}")
+        # rocKE's cross-check of this builder (library/tests/test_hiptensor_pack_cross_check.py,
+        # which skips without ROCKE_HIPTENSOR_PACK_BUILDER): the C++ builder's manifests, its
+        # untuned reduction and tuned elementwise picks, and the packs it writes for this
+        # build's pack targets byte for byte against rocKE's Python writer with the COMGR the
+        # builder links. Needs a Python with pytest; no GPU (every kernel compiles twice: long).
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        set(_ROCKE_HAS_PYTEST 1)
+        if(Python3_EXECUTABLE)
+            execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
+                            RESULT_VARIABLE _ROCKE_HAS_PYTEST OUTPUT_QUIET ERROR_QUIET)
+        endif()
+        hiptensor_rocke_pack_targets("${GPU_TARGETS}" _ROCKE_CROSS_CHECK_TARGETS)
+        if(DEFINED HIPTENSOR_ROCKE_PACK_TARGETS AND NOT HIPTENSOR_ROCKE_PACK_TARGETS STREQUAL "")
+            set(_ROCKE_CROSS_CHECK_TARGETS ${HIPTENSOR_ROCKE_PACK_TARGETS})
+        endif()
+        if(_ROCKE_HAS_PYTEST EQUAL 0 AND _ROCKE_CROSS_CHECK_TARGETS)
+            string(REPLACE ";" ":" _ROCKE_CROSS_CHECK_ARCHS "${_ROCKE_CROSS_CHECK_TARGETS}")
+            add_test(NAME rocke_pack_cross_check_test
+                     COMMAND "${Python3_EXECUTABLE}" -m pytest -p no:cacheprovider -v -rs
+                             "${HIPTENSOR_ROCKE_SOURCE_DIR}/library/tests/test_hiptensor_pack_cross_check.py")
+            set_tests_properties(rocke_pack_cross_check_test PROPERTIES
+                ENVIRONMENT "ROCKE_HIPTENSOR_PACK_BUILDER=$<TARGET_FILE:hiptensor_rocke_pack_builder>;ROCKE_HIPTENSOR_PACK_ARCHS=${_ROCKE_CROSS_CHECK_ARCHS};PYTHONPATH=${HIPTENSOR_ROCKE_SOURCE_DIR}/platform/python:${HIPTENSOR_ROCKE_SOURCE_DIR}/library:$ENV{PYTHONPATH};PYTHONDONTWRITEBYTECODE=1;ROCKE_BACKEND=python"
+                TIMEOUT 7200)
+        else()
+            message(STATUS "rocKE pack cross-check: no Python with pytest or no pack target; "
+                           "rocke_pack_cross_check_test not added")
+        endif()
     elseif(TARGET hiptensor_rocke_pack_builder)
         message(STATUS "rocKE pack manifests: ${_ROCKE_MANIFESTS} not found; "
                        "rocke_pack_manifest_test not added")

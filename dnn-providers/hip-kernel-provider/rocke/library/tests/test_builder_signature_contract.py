@@ -314,6 +314,17 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.hiptensor_aot.rreduce.RreduceFinalSpec": ("a", "d", "op"),
     # hipTensor's tuned tiled elementwise classes: the arity and the data types of A and D
     "kernels.common.hiptensor_aot.ewp.EwpSpec": ("a", "arity", "d"),
+    # hipTensor's shape-generic kernels: the row (arity, data types of A and D; reductions: the
+    # mode, direct GETT: the compute class); the problem itself is kernel arguments. The JIT
+    # classes wrap a generic row (`base`) and carry a problem's geometry in the defaulted `geom`;
+    # the ring GETT classes default every field (f16, scale, the pack's lane widths).
+    "kernels.common.hiptensor_aot.dgett.DgettSpec": ("comp",),
+    "kernels.common.hiptensor_aot.ew.EwSpec": ("a", "arity", "d"),
+    "kernels.common.hiptensor_aot.ewf.EwfSpec": ("a", "arity", "d"),
+    "kernels.common.hiptensor_aot.ewt.EwtSpec": ("a", "arity", "d"),
+    "kernels.common.hiptensor_aot.jit_ew.EwJitSpec": ("base",),
+    "kernels.common.hiptensor_aot.reduce.ReduceSpec": ("a", "d", "mode"),
+    "kernels.common.hiptensor_aot.rgett.RgettSpec": (),
     "kernels.gfx950.hiptensor_mono.persistent_contraction.OperandPackSpec": ("plan",),
     "kernels.gfx950.hiptensor_mono.persistent_contraction.PersistentContractionKnobs": (),
     "kernels.gfx950.hiptensor_mono.persistent_contraction.PersistentContractionSpec": (

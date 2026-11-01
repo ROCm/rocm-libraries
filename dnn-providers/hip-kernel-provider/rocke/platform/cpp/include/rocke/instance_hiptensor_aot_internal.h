@@ -71,6 +71,15 @@ bool is_dtype(const char* dt);
 bool streq(const char* a, const char* b);
 bool present(const char* s); /* not NULL and not "" */
 
+/* common.PACK_TARGETS / vector_bytes / max_vec / lds_bytes, from the target catalog
+ * (rocke/arch_target.h): the widest global vector access in bytes (max_vector_load_dwords * 4;
+ * the narrowest over the pack targets), the elements of nbytes bytes in it, and the LDS capacity
+ * of `arch` (nullptr: the largest over the pack targets). Each returns 0 where the catalog gives
+ * no positive value (the Python functions raise). */
+int vector_bytes();
+int max_vec(int nbytes);
+int lds_bytes(const char* arch);
+
 /* Python common.Emit. */
 class Emit
 {

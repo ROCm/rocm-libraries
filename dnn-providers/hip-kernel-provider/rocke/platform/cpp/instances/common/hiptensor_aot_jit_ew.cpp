@@ -54,10 +54,12 @@ bool set_reason(char* reason, size_t cap, const char* msg)
     return false;
 }
 
-/* jit_ew._MAX_VEC / _runs */
+/* jit_ew._runs (common.max_vec) */
 std::vector<int> runs(int n, int nbytes)
 {
-    int mx = nbytes == 2 ? 8 : nbytes == 4 ? 4 : 2;
+    int mx = max_vec(nbytes);
+    if(mx <= 0 || n <= 0)
+        return {}; /* no vector width in the catalog (the Python max_vec raises) */
     int w = n < mx ? n : mx;
     return std::vector<int>(n / w, w);
 }
@@ -135,7 +137,7 @@ int rocke_htaot_ew_jit_vec(const char* d)
     int nb = 0;
     if(!dtype_of(d, nullptr, &nb))
         return 0;
-    return 16 / nb;
+    return max_vec(nb);
 }
 
 bool rocke_htaot_ew_jit_check(const rocke_htaot_ew_jit_spec_t* s, char* reason, size_t cap)

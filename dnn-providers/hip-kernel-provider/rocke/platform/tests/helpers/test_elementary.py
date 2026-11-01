@@ -87,7 +87,9 @@ def _ulp_error(got: float, exact) -> float:
     if exact == 0:
         return 0.0 if got == 0 else math.inf
     if math.isinf(got) or math.isnan(got):
-        return 0.0 if abs(exact) > 1.7976931348623157e308 and math.isinf(got) else math.inf
+        return (
+            0.0 if abs(exact) > 1.7976931348623157e308 and math.isinf(got) else math.inf
+        )
     with mp.workprec(256):
         e = int(mp.floor(mp.log(abs(exact), 2)))
         return float(abs(mp.mpf(got) - exact) / mp.mpf(2) ** max(e - 52, -1074))
@@ -99,7 +101,10 @@ def samples(name: str, n: int, seed: int):
     sgn = lambda: rnd.choice((-1.0, 1.0))  # noqa: E731
     xs = []
     if name in ("asin", "acos", "atanh"):
-        xs += [sgn() * math.ldexp(rnd.uniform(1, 2), rnd.randint(-1074, -1)) for _ in range(n)]
+        xs += [
+            sgn() * math.ldexp(rnd.uniform(1, 2), rnd.randint(-1074, -1))
+            for _ in range(n)
+        ]
         xs += [rnd.uniform(-1, 1) for _ in range(n)]
         xs += [sgn() * (1 - math.ldexp(1.0, -k)) for k in range(1, 54)]
         xs += [sgn() * (0.5 + d) for d in (-(2.0**-53), 0.0, 2.0**-52, 2.0**-30)]
@@ -108,13 +113,22 @@ def samples(name: str, n: int, seed: int):
         xs += [math.ldexp(rnd.uniform(1, 2), rnd.randint(0, 1023)) for _ in range(n)]
         xs += [math.nextafter(1.0, 2.0), 2.0**28, math.nextafter(2.0**28, 3e8)]
     elif name in ("sinh", "cosh"):
-        xs += [sgn() * math.ldexp(rnd.uniform(1, 2), rnd.randint(-1074, 9)) for _ in range(n)]
+        xs += [
+            sgn() * math.ldexp(rnd.uniform(1, 2), rnd.randint(-1074, 9))
+            for _ in range(n)
+        ]
         xs += [sgn() * rnd.uniform(0.5, 2.0) for _ in range(n)]
         xs += [sgn() * rnd.uniform(705, 710.4758600739439) for _ in range(n // 4)]
         xs += [math.nextafter(1.0, 0.0), 1.0, 710.4758600739439]
     else:
-        xs += [sgn() * math.ldexp(rnd.uniform(1, 2), rnd.randint(-1074, 1023)) for _ in range(n)]
-        xs += [sgn() * math.ldexp(rnd.uniform(1, 2), rnd.randint(-30, 32)) for _ in range(n)]
+        xs += [
+            sgn() * math.ldexp(rnd.uniform(1, 2), rnd.randint(-1074, 1023))
+            for _ in range(n)
+        ]
+        xs += [
+            sgn() * math.ldexp(rnd.uniform(1, 2), rnd.randint(-30, 32))
+            for _ in range(n)
+        ]
         if name == "atan":
             for c in (7 / 16, 11 / 16, 19 / 16, 39 / 16):
                 xs += [c, math.nextafter(c, 0.0), math.nextafter(c, 4.0)]
@@ -161,18 +175,54 @@ def test_constants_are_their_definitions():
         assert el.ATAN_INF == (el.PIO2_0, el.PIO2_1)
 
 
-def _gen_module():
-    spec = importlib.util.spec_from_file_location(
-        "gen_elementary_coefficients",
-        PLATFORM / "tools" / "gen_elementary_coefficients.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules.setdefault("gen_elementary_coefficients", mod)
-    spec.loader.exec_module(mod)
+#: where the coefficient generator lives: the source tree's tools/, or next to this file (the
+#: installed test tree, which has no tools/ directory)
+_GEN_PATHS = (
+    PLATFORM / "tools" / "gen_elementary_coefficients.py",
+    Path(__file__).resolve().parent / "gen_elementary_coefficients.py",
+)
+
+
+def _load_gen():
+    """The coefficient generator module, or None when it is not there or its mpmath is missing
+    (it imports mpmath at module level)."""
+    path = next((p for p in _GEN_PATHS if p.is_file()), None)
+    if path is None or importlib.util.find_spec("mpmath") is None:
+        return None
+    mod = sys.modules.get("gen_elementary_coefficients")
+    if mod is None:
+        spec = importlib.util.spec_from_file_location(
+            "gen_elementary_coefficients", path
+        )
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["gen_elementary_coefficients"] = mod
+        spec.loader.exec_module(mod)
     return mod
 
 
-@pytest.mark.parametrize("table", [t[0] for t in _gen_module().TABLES])
+def _gen_module():
+    """The generator inside a test: skips the test when the generator or mpmath is missing."""
+    mod = _load_gen()
+    if mod is None:
+        pytest.skip("tools/gen_elementary_coefficients.py or mpmath is not available")
+    return mod
+
+
+def _table_params():
+    gen = _load_gen()
+    if gen is None:
+        return [
+            pytest.param(
+                None,
+                marks=pytest.mark.skip(
+                    reason="tools/gen_elementary_coefficients.py or mpmath is not available"
+                ),
+            )
+        ]
+    return [t[0] for t in gen.TABLES]
+
+
+@pytest.mark.parametrize("table", _table_params())
 def test_coefficient_table_error_bound(table):
     """The stored double coefficients approximate their function within 2^-53.5 (relative) on
     their interval (dominated by rounding the leading coefficient to a double)."""
@@ -195,7 +245,9 @@ def test_coefficient_intervals_cover_the_reduced_ranges():
     assert hi["ATAN_A"] >= (7 / 16) ** 2
     assert hi["ASIN_R"] >= 0.25
     assert hi["SINH_H"] >= 1.0
-    assert hi["EXP_P"] >= math.log(2) / 2 * (1 + 2.0**-30) and lo["EXP_P"] <= -hi["EXP_P"]
+    assert (
+        hi["EXP_P"] >= math.log(2) / 2 * (1 + 2.0**-30) and lo["EXP_P"] <= -hi["EXP_P"]
+    )
     s = (math.sqrt(2) - 1) / (math.sqrt(2) + 1)
     assert hi["LOG_G"] >= s * s * (1 + 2.0**-20)
 
@@ -213,7 +265,15 @@ def test_trig_preop_reference_windows():
     mp = _mp()
     with mp.workprec(1600):
         two_pi = 2 / mp.pi
-        for x in (1.0, 2.0**30, 2.0**60, 1e300, 2.0**944, 2.0**945, 1.7976931348623157e308):
+        for x in (
+            1.0,
+            2.0**30,
+            2.0**60,
+            1e300,
+            2.0**944,
+            2.0**945,
+            1.7976931348623157e308,
+        ):
             e = (el._bits(x) >> 52) & 0x7FF
             shift = max(0, e - 1077)
             scale = mp.mpf(2) ** (128 if e >= 1968 else 0)
@@ -400,7 +460,8 @@ def _integers_past_2_53(o, out: set) -> set:
 def test_recipe_integers_are_exact_doubles(name):
     """Portable recipes (the form hipTensor's JIT replays) carry integers as doubles: every
     integer of a program is at most 2^53 in magnitude (wider i64 constants, such as the
-    anchored f64 bit patterns and the sign / magnitude masks, are built from 32-bit halves)."""
+    anchored f64 bit patterns and the sign / magnitude masks, are built from 32-bit halves).
+    """
     from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
 
     for ty in (F64, F32):

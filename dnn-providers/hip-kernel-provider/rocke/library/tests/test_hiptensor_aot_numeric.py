@@ -525,3 +525,44 @@ def test_ew_mixed_epilogue_exact(t, c, d, cplx):
     _run(build_ew(spec), args, grid, (256, 1, 1))
     want = ref.to(od)
     assert torch.equal(out.cpu(), want), (out.cpu() - want).abs().max()
+
+
+@pytest.mark.parametrize("dt", ["i32", "f32", "f64"])
+def test_row_reduction_lane_exchange(dt):
+    """The lane exchange of the row reductions (``reduce.py``: ``warp_shuffle_xor`` with the masks
+    32, 16, 8, 4, 2 and 1 combine the 64 lanes of a wave) moves lane ``l ^ m``'s value to lane
+    ``l`` for every mask 1 .. 32 and every lane, 32- and 64-bit values: masks below 32 lower to
+    ``ds_swizzle_b32`` in its bit-mask mode (an XOR within each 32-lane half, masks up to 31),
+    mask 32 to ``ds_bpermute_b32`` (across the halves)."""
+    if _wave() != 64:
+        pytest.skip("the row reductions run on wave64 targets")
+    from rocke.core.ir import F32, F64, I32, IRBuilder, PtrType
+
+    ty = {"i32": I32, "f32": F32, "f64": F64}[dt]
+    tdt = {"i32": torch.int32, "f32": torch.float32, "f64": torch.float64}[dt]
+    masks = list(range(1, 33))
+    b = IRBuilder(f"htaot_lane_xor_{dt}")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    x = b.param("X", PtrType(ty, "global"), readonly=True)
+    out = b.param("Y", PtrType(ty, "global"))
+    lane = b.lane_id()
+    v = b.global_load(x, lane, ty, align=8 if dt == "f64" else 4)
+    for i, m in enumerate(masks):
+        idx = b.add(lane, b.const_i32(64 * i))
+        b.global_store(
+            out, idx, b.warp_shuffle_xor(v, m), align=8 if dt == "f64" else 4
+        )
+    k = b.kernel
+    lanes = torch.arange(64, dtype=torch.int64)
+    if dt == "f64":
+        # distinct low and high words (the f64 path exchanges two 32-bit halves)
+        src = (lanes * 2.0**40 + lanes * 3 + 7).to(torch.float64)
+    else:
+        src = (lanes * 7 - 200).to(tdt)
+    xd = src.cuda()
+    yd = torch.zeros(64 * len(masks), dtype=tdt, device="cuda")
+    _run(k, {"X": xd, "Y": yd}, (1, 1, 1), (64, 1, 1))
+    got = yd.cpu().view(len(masks), 64)
+    for i, m in enumerate(masks):
+        want = src[lanes ^ m]
+        assert torch.equal(got[i], want), (m, got[i][:8], want[:8])

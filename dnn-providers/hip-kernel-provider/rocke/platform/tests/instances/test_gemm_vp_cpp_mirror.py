@@ -157,13 +157,16 @@ class TestMirroredLevers(unittest.TestCase):
             backend._refuse_python_only_levers(replace(s.trait, vp_mn_kv=8))
 
     def test_cpp_dispatcher_table(self):
-        inc = (
+        path = (
             Path(__file__).resolve().parents[2]
             / "cpp"
             / "include"
             / "rocke"
             / "gemm_dispatch_fields.inc"
-        ).read_text()
+        )
+        if not path.is_file():
+            self.skipTest("no C++ engine sources here (the installed test tree)")
+        inc = path.read_text()
         for k in _MIRRORED:
             self.assertNotIn(f"ROCKE_GD_PYONLY({k})", inc)
         for k in _STILL_PY:

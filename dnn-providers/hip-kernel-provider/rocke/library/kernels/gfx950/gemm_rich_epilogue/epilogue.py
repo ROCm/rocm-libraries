@@ -86,11 +86,45 @@ class EpiKnobs:
         False  # reduction outputs double-buffered: the kernel zeroes the other slot (no memset launch)
     )
 
+    def __post_init__(self) -> None:
+        # reject, never coerce: every knob changes the kernel (params, math or
+        # emission), so a wrong type or an unknown value is an error, not a
+        # silent default ("false" is truthy, a negative pipe depth is not 0)
+        for f in dataclasses.fields(self):
+            v = getattr(self, f.name)
+            if f.name in _EPI_CHOICES:
+                if type(v) is not str or v not in _EPI_CHOICES[f.name]:
+                    raise ValueError(
+                        f"EpiKnobs.{f.name} must be one of "
+                        f"{_EPI_CHOICES[f.name]}, got {v!r}"
+                    )
+            elif f.name in ("qblock", "aux_pipe"):
+                if type(v) is not int:
+                    raise ValueError(f"EpiKnobs.{f.name} must be an int, got {v!r}")
+            elif type(v) is not bool:
+                raise ValueError(f"EpiKnobs.{f.name} must be a bool, got {v!r}")
+        if self.aux_pipe < 0:
+            raise ValueError(f"EpiKnobs.aux_pipe must be >= 0, got {self.aux_pipe}")
+        if self.qblock not in (32, 64, 128):
+            raise ValueError(
+                "EpiKnobs.qblock must be 32, 64 or 128 (8 columns per lane, 16 "
+                f"lanes per row group), got {self.qblock}"
+            )
+
     def tag(self) -> str:
         d = dataclasses.asdict(self)
         base = EpiKnobs()
         parts = [f"{k}={v}" for k, v in d.items() if getattr(base, k) != v]
         return ",".join(parts) or "plain"
+
+
+_EPI_CHOICES = {
+    "beta": ("", "same", "t"),
+    "bias": ("", "col", "row"),
+    "act": ("", "relu", "gelu", "silu"),
+    "out": ("d", "fp8", "fp8b", "none"),
+    "amax": ("", "all", "row"),
+}
 
 
 def _ty(dtype: str):
@@ -323,8 +357,12 @@ class EpiHooks:
 
     def _atomic_umax(self, b, ptr, idx, val_f32):
         off = b.mul(idx, b.const_i32(4))
+        # the leading s_nop 4 covers the gfx9 hazard "VALU writes an SGPR ->
+        # VMEM reads it" (5 wait states), which LLVM pads for its own VMEM
+        # instructions but not inside inline asm: the SGPR base may be
+        # restored from a spill by v_readlane right before this asm
         b.inline_asm(
-            "global_atomic_umax $0, $1, $2 sc1",
+            "s_nop 4\n\tglobal_atomic_umax $0, $1, $2 sc1",
             "v,v,s",
             [off, b.bitcast(val_f32, I32), ptr],
         )
@@ -374,7 +412,7 @@ class EpiHooks:
         gmax = None
         # aux loads: issued aux_pipe blocks ahead of their use (0 = right before)
         pend = {}
-        ahead = max(0, int(k.aux_pipe))
+        ahead = k.aux_pipe  # validated >= 0 by EpiKnobs
         for v0 in range(min(ahead, c_per_lane)):
             pend[v0] = self._aux_loads(b, v0, row0, col0, mfmas_m)
         for v in range(c_per_lane):

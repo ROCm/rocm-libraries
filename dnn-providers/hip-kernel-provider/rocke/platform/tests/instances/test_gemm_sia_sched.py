@@ -258,8 +258,12 @@ class TestEmission(unittest.TestCase):
             ),
         ):
             self.assertFalse(is_valid_spec(_spec(tr), "gfx950")[0], tr)
-        with self.assertRaises(NotImplementedError):
-            universal_gemm_spec_to_dict(_spec(replace(_BASE, rilv_pad=32)))
+        # the C++ engine mirrors the pad (gemm_build_staged.cpp; the gemm_hb parity family
+        # holds rilv_pad=32 specs byte-identical): the binding dict carries it
+        self.assertEqual(
+            universal_gemm_spec_to_dict(_spec(replace(_BASE, rilv_pad=32)))["rilv_pad"],
+            32,
+        )
 
     def test_engine_guard(self):
         for tr in (_FULL, _MRG, replace(_SIA, sia_tensile=True)):

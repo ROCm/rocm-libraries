@@ -9,8 +9,9 @@ device code of one persistent kernel. Instead of re-authoring each body as a
 device function, the composer builds the stand-alone kernel as usual and then
 copies its IR into the monokernel's current region:
 
-* every value the body defines gets a fresh, instance-unique name (results,
-  ``scf.for`` induction variables and loop-carried values, LDS allocations);
+* every value the body defines gets a fresh name from the host builder's
+  counter (``IRBuilder._fresh``; results, ``scf.for`` induction variables and
+  loop-carried values, LDS allocations);
 * the body's kernel parameters are bound to caller values (monokernel
   parameters, or constants / runtime-selected scalars);
 * ``gpu.block_id`` reads are replaced by caller-provided task-local tile
@@ -96,10 +97,20 @@ def inline_kernel_body(
     vmap: Dict[int, Value] = {}
     names: Dict[str, str] = {}
 
+    def new_name(old_name: str) -> str:
+        # every inlined name comes from the host builder's counter
+        # (IRBuilder._fresh), so it cannot collide with a name the host
+        # builder or another inlined instance hands out; the trailing "_"
+        # keeps the counter apart from digits ending the source name.
+        got = names.get(old_name)
+        if got is None:
+            got = b._fresh(f"{prefix}_{old_name.lstrip('%')}_")
+            names[old_name] = got
+        return got
+
     def fresh(old: Value) -> Value:
-        nv = Value(name=f"%{prefix}_{old.name.lstrip('%')}", type=old.type)
+        nv = Value(name=new_name(old.name), type=old.type)
         vmap[id(old)] = nv
-        names[old.name] = nv.name
         return nv
 
     def operand(v: Value) -> Value:
@@ -172,18 +183,10 @@ def inline_kernel_body(
                 for v in _region_free_defs(op, {iv_name} | carried):
                     nv = fresh(v)
                     nv.op = new_op
-                new_op.attrs["iv"] = names.get(
-                    iv_name, f"%{prefix}_{iv_name.lstrip('%')}"
-                )
+                new_op.attrs["iv"] = new_name(iv_name)
                 if "iter_args" in op.attrs:
                     new_op.attrs["iter_args"] = [
-                        dict(
-                            m,
-                            name=names.get(
-                                m["name"], f"%{prefix}_{m['name'].lstrip('%')}"
-                            ),
-                        )
-                        for m in op.attrs["iter_args"]
+                        dict(m, name=new_name(m["name"])) for m in op.attrs["iter_args"]
                     ]
             for r in op.results:
                 nv = fresh(r)

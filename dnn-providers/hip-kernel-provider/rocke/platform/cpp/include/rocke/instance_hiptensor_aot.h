@@ -195,10 +195,11 @@ int rocke_htaot_ew_jit_axes(const rocke_htaot_ew_jit_spec_t* s,
                             char names[][16],
                             bool* is_i64,
                             int cap);
-/* jit_ew.jit_vec(d): 16-byte output accesses. */
+/* jit_ew.jit_vec(d): the widest output vector access (common.max_vec; 16 bytes on the pack
+ * targets). */
 int rocke_htaot_ew_jit_vec(const char* d);
-/* build_ew_jit(spec, geom): `geom` values in axes() order, or NULL for the
- * pack's class kernel (every geometry value a kernel argument). */
+/* build_ew_jit(spec.with_geom(geom)): `geom` values in axes() order, or NULL for the
+ * pack's class kernel (spec.geom None: every geometry value a kernel argument). */
 rocke_kernel_def_t* rocke_build_htaot_ew_jit(rocke_ir_builder_t* b,
                                              const rocke_htaot_ew_jit_spec_t* s,
                                              const int64_t* geom,
@@ -255,11 +256,11 @@ rocke_kernel_def_t* rocke_build_htaot_ewf(rocke_ir_builder_t* b, const rocke_hta
 
 /* ----------------------------------------------------------------- ewp */
 
-/* Python ewp.EWP_ABI, SLOTS_B, MAX_VECTORS, LDS_BYTES. */
+/* Python ewp.EWP_ABI, SLOTS_B, MAX_VECTORS (the LDS budget, ewp.LDS_BYTES, comes from the target
+ * catalog: the largest LDS of the pack targets). */
 #define ROCKE_HTAOT_EWP_ABI "hiptensor-aot-ewp/v2"
 #define ROCKE_HTAOT_EWP_SLOTS_B 8
 #define ROCKE_HTAOT_EWP_MAX_VECTORS 32
-#define ROCKE_HTAOT_EWP_LDS_BYTES 163840
 
 /* Python ewp.EwpSpec (frozen dataclass): the tuned tiled elementwise kernel of transposing
  * layouts (tensors of one element size). */
@@ -386,7 +387,7 @@ const char* rocke_htaot_rgett_geometry_name(int i);
 /* rgett_classes(): the classes of hipTensor's kernel pack for one dtype
  * (NULL: f16 then bf16). Writes up to `cap` specs; returns the count. */
 int rocke_htaot_rgett_classes(const char* dtype, rocke_htaot_rgett_spec_t* out, int cap);
-/* build_rgett(spec, arch, geom). geom NULL: the class kernel (geometry
+/* build_rgett(spec.with_geom(geom), arch=arch). geom NULL: the class kernel (geometry
  * arguments); else the problem-specific JIT form with geom[i] the value of
  * geometry argument i (rocke_htaot_rgett_geometry_count() values). */
 rocke_kernel_def_t* rocke_build_htaot_rgett(rocke_ir_builder_t* b,

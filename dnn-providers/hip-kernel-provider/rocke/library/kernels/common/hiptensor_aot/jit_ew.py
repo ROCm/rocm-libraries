@@ -41,7 +41,7 @@ to ``vec`` elements: vector accesses are emitted with that alignment.
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import I32, I64, IRBuilder, KernelDef
@@ -50,6 +50,7 @@ from .common import (
     DTYPES,
     MAX_RANK,
     Emit,
+    max_vec,
     ptr,
 )
 from .ew import EwSpec
@@ -58,9 +59,6 @@ EW_JIT_ABI = "hiptensor-jit-ew/v1"
 #: The ABI of the vector classes of the elementwise kernel (:func:`ewv_kernel_name`, the class
 #: kernels of hipTensor's kernel pack).
 EWV_ABI = "hiptensor-aot-ewv/v1"
-
-#: Widest vector access per element size (bytes -> elements) of the IR builder's vector ops.
-_MAX_VEC = {2: 8, 4: 4, 8: 2}
 
 
 @dataclass(frozen=True)
@@ -72,9 +70,28 @@ class EwJitSpec:
     base: EwSpec
     vec: int = 1
     unit: Tuple[bool, ...] = field(default_factory=tuple)
+    #: the geometry constants of a problem-specific kernel (``(name, value)`` for every name of
+    #: :meth:`axes`; :meth:`with_geom`), None: the class kernel of hipTensor's kernel pack
+    geom: Optional[Tuple[Tuple[str, int], ...]] = None
+
+    def with_geom(self, geom: Optional[Dict[str, int]]) -> "EwJitSpec":
+        """The class with the geometry values ``geom`` (None: the pack's class kernel)."""
+        g = (
+            None
+            if geom is None
+            else tuple(sorted((k, int(v)) for k, v in geom.items()))
+        )
+        return replace(self, geom=g)
 
     def check(self) -> None:
         self.base.check()
+        if any(type(u) is not bool for u in self.unit):
+            raise ValueError(f"unit flags must be bools, got {self.unit!r}")
+        if self.geom is not None:
+            have = {k for k, _ in self.geom}
+            missing = [n for n, _ in self.axes() if n not in have]
+            if missing:
+                raise ValueError(f"geom lacks {missing}")
         if self.vec not in (1, 2, 4, 8):
             raise ValueError("vec must be 1, 2, 4 or 8")
         if self.vec > 1 and self.base.cplx:
@@ -121,16 +138,18 @@ class EwJitSpec:
 
 
 def _runs(n: int, nbytes: int) -> List[int]:
-    w = min(n, _MAX_VEC[nbytes])
+    w = min(n, max_vec(nbytes))
     return [w] * (n // w)
 
 
-def build_ew_jit(spec: EwJitSpec, geom: Optional[Dict[str, int]]) -> KernelDef:
-    """The kernel of class ``spec`` for the geometry values ``geom`` (every name of
-    :meth:`EwJitSpec.axes`). With ``geom`` None, the class kernel of hipTensor's kernel pack
-    instead (:func:`ewv_kernel_name`): every geometry value is a kernel argument of that name,
-    declared after the scalars in the order of :meth:`EwJitSpec.axes`."""
+def build_ew_jit(spec: EwJitSpec, *, arch: str = "gfx950") -> KernelDef:
+    """The kernel of class ``spec`` for its geometry values ``spec.geom`` (every name of
+    :meth:`EwJitSpec.axes`; :meth:`EwJitSpec.with_geom`). With ``spec.geom`` None, the class
+    kernel of hipTensor's kernel pack instead (:func:`ewv_kernel_name`): every geometry value is
+    a kernel argument of that name, declared after the scalars in the order of
+    :meth:`EwJitSpec.axes`. ``arch`` is not used: the kernel is target-neutral IR."""
     spec.check()
+    geom = None if spec.geom is None else dict(spec.geom)
     base = spec.base
     vec = spec.vec
     b = IRBuilder(spec.kernel_name() if geom is not None else ewv_kernel_name(spec))
@@ -339,8 +358,9 @@ def ewv_kernel_name(spec: EwJitSpec) -> str:
 
 
 def jit_vec(d: str) -> int:
-    """The vector width of a class whose output type is ``d``: 16-byte output accesses."""
-    return 16 // DTYPES[d][1]
+    """The vector width of a class whose output type is ``d``: the widest output vector access
+    (:func:`.common.max_vec`)."""
+    return max_vec(DTYPES[d][1])
 
 
 def jit_classes(bases: Sequence[EwSpec]) -> List[EwJitSpec]:
@@ -433,7 +453,7 @@ def roll_jit_ew(spec: EwJitSpec, verify: int = 2):
     axes = {name: [base[name], probe[name]] for name, _ in spec.axes()}
     points = [_sentinels(spec, 100 + i) for i in range(verify)]
     res = roll_nd(
-        lambda **g: build_ew_jit(spec, g),
+        lambda **g: build_ew_jit(spec.with_geom(g)),
         axes=axes,
         verify_points=points,
         fit_cross_terms=False,

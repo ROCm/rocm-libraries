@@ -283,6 +283,45 @@ and selector parity cases with LSE on.
 
 ---
 
+## 8. gfx950 monokernel and rich-epilogue families — Python-only builders
+
+**Subsystem:** `library/kernels/gfx950/gemm_rich_epilogue/`,
+`library/kernels/gfx950/hiptensor_mono/`,
+`library/kernels/gfx950/tensor_network_mono/`, the `spec._mono` hook of
+`instances/common/gemm_universal.py`, and the `score_identity` field of the
+gfx950 `attention_dense` spec
+
+These are experimental families, not dispatched by hipTensor or any
+selector. Their builders, specs and host runners exist in Python only:
+
+| Family | What is Python-only |
+|---|---|
+| `gemm_rich_epilogue` | The rich-epilogue hook (`EpiHooks`) that the universal GEMM body calls through `spec._mono`, and `build_rich_epilogue`. |
+| `hiptensor_mono` | The persistent contraction monokernel (`persistent_contraction.py`, also through `spec._mono`), the task-queue monokernel and its IR inliner (`task_queue.py`, `inline.py`), and its permute bodies (`permute_gather.py`, `transpose_lds.py`). |
+| `tensor_network_mono` | The quantum-circuit tensor-network kernel builder and host runner (`circuit_kernel.py`). |
+| `attention_dense` `score_identity` | The back-to-back GEMM score map (`P = scale * S`) of the gfx950 dense attention body. The dense attention builder itself is Python-only (see §6). |
+
+With the hook absent and `score_identity=False` (the defaults) nothing is
+emitted, so every existing universal GEMM and dense attention kernel is
+byte-identical and the gate is unaffected.
+
+**What is gated:** the kernels use only IR ops both lowerers implement, so
+the C++ lowerer can consume their serialized IR; there is no parity-harness
+case for them yet. Host-side codegen tests pin knob validation, kernel
+parameters, the unhooked body's identity and the emission change per knob
+(`library/tests/test_gemm_rich_epilogue.py`,
+`test_hiptensor_mono_queue.py`, `test_hiptensor_mono_persistent.py`,
+`test_tensor_network_mono.py`, `test_attention_dense_score_identity.py`); the
+rich epilogue also has gfx950 GPU numerics against an f64 reference in
+`test_gemm_rich_epilogue.py`.
+
+**What closes it:** C++ twins of the hook protocol (`add_params` /
+`pre_tasks` / `wait_tile` / `post_tile` / `epilogue`) and of each family's
+builder, plus parity-harness cases, once a family is promoted to a dispatched
+path (hipTensor needs C++ twins for its JIT).
+
+---
+
 ## Structural debt (not per-family gaps)
 
 These are codebase-level risks worth tracking independently of any single

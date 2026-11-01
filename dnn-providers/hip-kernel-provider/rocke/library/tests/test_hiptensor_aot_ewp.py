@@ -17,8 +17,9 @@ independent float64 torch reference: transposing permutations, binary and trinar
 16 bytes, runs that do not hold whole tiles), every data-type row, (1) integer data with the
 exact operators (the fast path and the operator table), (2) NaN, infinities, signed zeros,
 overflowing and tiny values with every basic and binary operator, (3) a zero scale (that input,
-all NaN, is not read) and (4) a NaN scale (counts as zero). Streaming classes run on gfx942 /
-gfx950 only.
+all NaN, is not read) and (4) a NaN scale (counts as zero). In place (C == D, C laid out like
+D): the ragged classes whose C is read like D, exact against a reference computed from copies.
+Streaming classes run on gfx942 / gfx950 only.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from rocke.core.arch import ArchTarget
 
 from kernels.common.hiptensor_aot import common as C
 from kernels.common.hiptensor_aot import ewp_host as H
@@ -44,6 +46,7 @@ from kernels.common.hiptensor_aot.ewp import (
     ewp_kinds,
     ewp_plan,
     ewp_runs,
+    vector_widths,
 )
 from kernels.common.hiptensor_aot.host import canonicalize, ew_args
 
@@ -114,7 +117,20 @@ def test_spec_checks():
         s = spec(2, "f16", kinds="TV", vb=vb, rag=1, nt=2)
         s.check()
         assert s.vec == v and s.chunks() == s.tile_bytes() // vb
-    assert LDS_BYTES == 163840 and SLOTS_B == 8
+    # the LDS budget without a target: the largest LDS of the pack targets (the catalog's)
+    assert LDS_BYTES == max(
+        ArchTarget.from_gfx(a).lds_capacity_bytes for a in C.PACK_TARGETS
+    )
+    assert SLOTS_B == 8
+    # with a target, its LDS: two 64 KiB f16 tiles fit gfx950, not gfx942
+    big = spec(2, "f16", kinds="TT", to=256, tt=128, block=512)
+    big.check("gfx950")
+    with pytest.raises(ValueError):
+        big.check("gfx942")
+    # the vector widths: powers of two up to the catalog's widest vector access
+    assert vector_widths() == tuple(
+        w for w in (2, 4, 8, 16, 32, 64) if w <= C.vector_bytes()
+    )
 
 
 def test_kernel_abi_and_names():
@@ -339,7 +355,9 @@ def test_palettes():
         assert len(set(names)) == len(names)
         for c in cls:
             c.check()
-            assert c.kinds.count("T") * c.tile_bytes() <= H.LDS_LIMIT[arch]
+            assert ArchTarget.from_gfx(arch).fits_lds(
+                c.kinds.count("T") * c.tile_bytes()
+            )
             assert c.swz != 1  # names do not tell swizzle 0 from 1
             # no streaming loads for one-element vectors and the ragged mode a classes
             assert c.nt == (2 if c.vec == 1 or (c.rag and c.mode == "a") else 3)
@@ -497,6 +515,16 @@ def test_choice_rule():
 
 
 def test_engine_table_is_current():
+    table = (
+        Path(__file__).resolve().parents[2]
+        / "platform"
+        / "cpp"
+        / "instances"
+        / "common"
+        / "hiptensor_aot_ewp_table.inc"
+    )
+    if not table.is_file():
+        pytest.skip("no C++ engine sources here (the installed test tree)")
     tool = (
         Path(__file__).resolve().parents[1]
         / "builders"
@@ -845,3 +873,123 @@ def test_ewp_matches_generic_kernel(case):
                 )
             want = ref.to(TD[dt])
             assert torch.equal(out_p.cpu(), want), (s.kernel_name(), case_, ops)
+
+
+# In place: hipTensor allows C == D for binary and trinary operations when C has D's layout (so C
+# is of kind V). Ragged classes clamp the units past the end of a run onto owned vectors; the
+# store of such a unit, or of a later ilp group of the owning thread, must not land before the
+# owner read C there (the operator would apply twice). (arity, A modes, D modes, B modes,
+# extents); C is laid out like D and is D's buffer.
+IN_PLACE_LAYOUTS = [
+    (2, "ab", "ba", None, dict(a=4096, b=70)),  # D = A^T + C, 70-element rows
+    (2, "ab", "ba", None, dict(a=70, b=4096)),
+    (3, "abc", "cba", None, dict(a=40, b=3, c=72)),  # TTV
+    (3, "abc", "cba", "cba", dict(a=40, b=3, c=72)),  # TVV
+    (2, "abcde", "cebad", None, dict(a=6, b=5, c=10, d=3, e=10)),
+    (2, "abcd", "adcb", None, dict(a=11, b=6, c=5, d=7)),  # mode a, odd shared mode
+    (2, "abcde", "acdbe", None, dict(a=12, b=11, c=10, d=11, e=3)),  # mode a
+]
+
+
+def _in_place_cases():
+    out = []
+    for i, (arity, *_rest) in enumerate(IN_PLACE_LAYOUTS):
+        for dt in ("f16", "f32", "f64"):
+            out.append((i, dt))
+    return out
+
+
+def _in_place_classes(arity, dt, dims, arch):
+    """Ragged classes whose C is of kind V that serve the layout: the rule's pick, other
+    classes of the device's palette (at most 4 in all) and the small knob-coverage classes of
+    :func:`_classes_for` (one-wave blocks, one unit per ilp group)."""
+    cls = H.pack_classes(arch) if arch in H.ARCHES else []
+    out = []
+    got = H.choose(arch, arity, row(arity, dt), dims, cls) if cls else None
+    if got is not None and got[0].rag and got[0].kind("C") == "V":
+        out.append(got[0])
+    for c in cls:
+        if len(out) >= 4:
+            break
+        if (
+            c.rag
+            and (c.arity, c.d) == (arity, dt)
+            and (c.a, c.b, c.c) == row(arity, dt)[:3]
+            and c.kind("C") == "V"
+            and c not in out
+            and c.kinds == ewp_kinds(NAMES[arity], dims, c.mode)
+            and ewp_plan(c, dims) is not None
+        ):
+            out.append(c)
+    for s in _classes_for(arity, dt, dims, arch):
+        if s.rag and s.kind("C") == "V" and s not in out:
+            out.append(s)
+    if arch not in ("gfx942", "gfx950"):
+        out = [replace(s, nt=0) for s in out]
+    return out
+
+
+@pytest.mark.parametrize("case", _in_place_cases(), ids=lambda c: f"P{c[0]}-{c[1]}")
+def test_ewp_in_place(case):
+    """C == D: every ragged class that may run in place, exact against a float64 reference
+    computed from copies of the inputs (integer data, the exact operators)."""
+    arch = _gpu()
+    li, dt = case
+    arity, ma, md, mb, ext = IN_PLACE_LAYOUTS[li]
+    dims = problem(arity, ma, md, ext, mb, None)
+    names = NAMES[arity]
+    ins = names[:-1]
+    specs = _in_place_classes(arity, dt, dims, arch)
+    if not specs:
+        pytest.skip("no ragged class with C of kind V serves this layout")
+    n_el = math.prod(ext.values())
+    rng = random.Random(7000 + 10 * li + len(dt))
+    sn = {"A": "alpha", "B": "beta", "C": "gamma"}
+    exact_ops = [C.OP_IDENTITY, C.OP_NEG, C.OP_ABS, C.OP_RELU]
+    modes = {"A": ma, "B": mb or ma, "C": md}
+    for s in specs:
+        vals0, grid = ewp_plan(s, dims)
+        for fast in (True, False):
+            g = torch.Generator().manual_seed(rng.randrange(1 << 30))
+            values = {
+                n: torch.randint(-6, 7, (n_el,), generator=g).double() for n in ins
+            }
+            if fast:
+                ops = {n: C.OP_IDENTITY for n in ins}
+            else:
+                ops = {n: rng.choice(exact_ops) for n in ins}
+            scal = {n: rng.choice([1.0, 2.0, -1.0]) for n in ins}
+            vals = {"op" + n: ops[n] for n in ins}
+            vals["opAB"] = rng.choice(list(C.BINARY_OPS))
+            vals["opABC"] = vals["opAB"] if fast else rng.choice(list(C.BINARY_OPS))
+            run = {n: values[n].to(TD[dt]).cuda() for n in ins}
+            run.update({sn[n]: scal[n] for n in ins})
+            out = run["C"]  # D is C's buffer
+            _launch(build_ewp(s), dict(vals0, **vals, **run, D=out), grid, s.block)
+
+            def term(n):
+                x = values[n].to(TD[dt]).double()
+                src = list(reversed(modes[n]))
+                dst = list(reversed(md))
+                x = x.view(*[ext[m] for m in src]).permute(*[src.index(m) for m in dst])
+                return scal[n] * _unary(x.reshape(-1), ops[n])
+
+            if arity == 2:
+                ref = _binary(term("A"), term("C"), vals["opAB"])
+            else:
+                ref = _binary(
+                    _binary(term("A"), term("B"), vals["opAB"]),
+                    term("C"),
+                    vals["opABC"],
+                )
+            want = ref.to(TD[dt])
+            bad = (out.cpu() != want).nonzero().view(-1)
+            assert bad.numel() == 0, (
+                s.kernel_name(),
+                fast,
+                ops,
+                vals["opAB"],
+                scal,
+                bad.numel(),
+                [(i, out.cpu()[i].item(), want[i].item()) for i in bad[:4].tolist()],
+            )

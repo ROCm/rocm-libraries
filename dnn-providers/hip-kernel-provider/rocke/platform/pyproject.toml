@@ -46,4 +46,6 @@ where = ["python"]
 include = ["rocke*"]
 
 [tool.setuptools.package-data]
-rocke = ["**/*.json"]
+# the GEMM selector's LightGBM models (dispatch/gemm/selector_models/*.model.txt) ship with their
+# *.meta.json sidecars: the wheel must carry both
+rocke = ["**/*.json", "dispatch/gemm/selector_models/*.model.txt"]

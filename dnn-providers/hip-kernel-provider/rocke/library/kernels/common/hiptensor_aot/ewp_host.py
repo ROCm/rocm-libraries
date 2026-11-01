@@ -34,6 +34,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from .common import fnv1a64, max_vec
 from .ewp import EwpSpec, ewp_kinds, ewp_plan
 
 #: CTAs the untuned choice wants a launch to have (four per CU of the largest target).
@@ -41,8 +42,6 @@ MIN_CTAS = 1024
 #: Targets with ewp classes in the pack (streaming accesses and the measurements behind the
 #: palette: gfx942 / gfx950).
 ARCHES = ("gfx942", "gfx950")
-#: LDS a class of each target may use.
-LDS_LIMIT = {"gfx942": 65536, "gfx950": 163840}
 
 #: The data-type rows with ewp classes: the API's rows (hipTensor's planElementwise) whose
 #: tensors share one element size: permutations f16 / f32 / f64, binary f16 / bf16 / f32 / f64,
@@ -665,11 +664,12 @@ def class_spec(row, arity: int, kinds: str, knobs: dict) -> EwpSpec:
 
 
 def _fits(s: EwpSpec, arch: str) -> bool:
+    """A valid class whose LDS tiles fit the target's LDS (the target catalog's)."""
     try:
-        s.check()
+        s.check(arch)
     except ValueError:
         return False
-    return s.kinds.count("T") * s.tile_bytes() <= LDS_LIMIT[arch]
+    return True
 
 
 def pack_classes(arch: str) -> List[EwpSpec]:
@@ -709,14 +709,6 @@ def problem_key(arity: int, dts: Sequence[Optional[str]], dims) -> str:
     )
 
 
-def fnv1a64(text: str) -> int:
-    h = 0xCBF29CE484222325
-    for ch in text.encode():
-        h ^= ch
-        h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    return h
-
-
 def routes(arch: str) -> Dict[str, str]:
     """The pack routes of the tuned problems: ``ewp.tuned.<fnv>`` = the class's kernel name,
     ``ewp.tuned.<fnv>.key`` = the canonical problem."""
@@ -737,7 +729,7 @@ def _vec16(es: int, dims) -> bool:
     extent, are multiples of 16 bytes: the vector form of the generic kernel (16-byte accesses
     along the shared mode) serves such a layout, and serves it better than a ragged class of
     mode a."""
-    v = 16 // es
+    v = max_vec(es)
     for e_, st in dims:
         if all(x == 1 for x in st):
             if e_ % v:
@@ -813,7 +805,6 @@ def class_dict(s: EwpSpec) -> dict:
 __all__ = [
     "ARCHES",
     "DTYPE_ROWS",
-    "LDS_LIMIT",
     "MIN_CTAS",
     "RAG_TEMPLATES",
     "TEMPLATES",

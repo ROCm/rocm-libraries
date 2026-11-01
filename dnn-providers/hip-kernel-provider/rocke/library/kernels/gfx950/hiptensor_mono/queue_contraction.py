@@ -92,23 +92,9 @@ def _build_permute_any_rank(spec: PermuteSpec, arch: str):
 
     if spec.rank <= _pn.MAX_RANK:
         return build_permute(spec, arch)
-    old = _pn.MAX_RANK
-    _pn.MAX_RANK = max(old, spec.rank)
-    try:
-        return build_permute(spec, arch)
-    finally:
-        _pn.MAX_RANK = old
-
-
-def _with_rank(spec: PermuteSpec, fn):
-    from rocke.instances.common import permute_nd as _pn
-
-    old = _pn.MAX_RANK
-    _pn.MAX_RANK = max(old, spec.rank)
-    try:
-        return fn()
-    finally:
-        _pn.MAX_RANK = old
+    # an explicit cap for this call only: the module-level MAX_RANK is never
+    # rebound, so concurrent builds elsewhere keep the C++-mirrored cap
+    return _pn._build_permute(spec, arch, max_rank=spec.rank)
 
 
 def coalesce_modes(src: Sequence[str], dst: Sequence[str], ext: Dict[str, int]):
@@ -184,11 +170,8 @@ def permute_op(
         u = max(1, min(max_unroll, elems_per_ticket // (block_size * spec.vec_width)))
         while u > 1 and block_size * u * spec.vec_width > 2 * spec.total_elements:
             u //= 2
-        kdef = _with_rank(
-            spec,
-            lambda: build_permute_gather(
-                PermuteGatherSpec(permute=spec, unroll=u), arch=arch
-            ),
+        kdef = build_permute_gather(
+            PermuteGatherSpec(permute=spec, unroll=u), arch=arch
         )
         gx = permute_gather_grid(spec, u)[0]
         per_blk = block_size * u * spec.vec_width

@@ -947,6 +947,8 @@ namespace
         int64_t groupFirst = 0;
         // an outer product: no contracted mode, A = m p, B = n, D = n m p (groupRank 0)
         bool outer = false;
+        // C is D's buffer (in place; C laid out like D)
+        bool inPlace = false;
     };
 
     void runContraction(ContractionCase const& c,
@@ -1026,8 +1028,8 @@ namespace
         auto B = makeTensor(c.type, mb, ext, rng, c.exact);
         auto C = makeTensor(c.type, md, ext, rng, c.exact);
         auto D = makeTensor(c.type, md, ext, rng, c.exact);
-        // complex contractions need C with D's layout
-        if(rng() % 2 || isComplex(c.type))
+        // complex contractions (and contractions in place) need C with D's layout
+        if(rng() % 2 || isComplex(c.type) || c.inPlace)
         {
             D.strides = C.strides; // C and D with one layout
             D.values.assign(C.values.size(), cplx(0, 0));
@@ -1072,7 +1074,7 @@ namespace
         void*       pA = dev.upload(A, choice.skew);
         void*       pB = dev.upload(B, choice.skew);
         void*       pC = c.scale ? nullptr : dev.upload(C, choice.skew);
-        void*       pD = dev.upload(D, choice.skew);
+        void*       pD = c.inPlace && pC != nullptr ? pC : dev.upload(D, choice.skew);
         void*       ws = nullptr;
         if(workspaceSize > 0)
         {
@@ -1230,9 +1232,13 @@ namespace
     {
     };
 
-    TEST_P(RockeLargeContraction, SampledOutputs)
+    // A large contraction (choice nullptr: the default plan; else planned with the Choice), C and
+    // D separate or one buffer (inPlace: executed once, a second run would read the new D).
+    void runLarge(LargeCase const& c,
+                  Choice const*    choice    = nullptr,
+                  bool             inPlace   = false,
+                  SelectionLog*    selection = nullptr)
     {
-        auto const c = GetParam();
         ApiObjects api;
         if(!api.supports(c.type))
         {
@@ -1282,13 +1288,14 @@ namespace
                   HIPTENSOR_STATUS_SUCCESS);
         api.keep(desc);
         uint64_t workspaceSize = 0;
-        auto     plan          = planOf(api, desc, workspaceSize, log);
+        auto     plan          = choice == nullptr ? planOf(api, desc, workspaceSize, log)
+                                                   : planWith(api, desc, *choice, log, workspaceSize, selection);
         ASSERT_NE(plan, nullptr);
         Device dev;
         void*  pA = dev.upload(A);
         void*  pB = dev.upload(B);
         void*  pC = dev.upload(C);
-        void*  pD = dev.upload(D);
+        void*  pD = inPlace ? pC : dev.upload(D);
         void*  ws = nullptr;
         if(workspaceSize > 0)
         {
@@ -1305,8 +1312,8 @@ namespace
             beta.im  = 1.0;
         }
         Stream stream;
-        // twice: the second execution reuses the plan (stream-K flags zeroed again)
-        for(int run = 0; run < 2; run++)
+        // twice: the second execution reuses the plan (stream-K flags zeroed again); in place once
+        for(int run = 0; run < (inPlace ? 1 : 2); run++)
         {
             ASSERT_EQ(hiptensorContract(api.handle,
                                         plan,
@@ -1345,6 +1352,11 @@ namespace
             }
         }
         EXPECT_EQ(bad, 0) << log.all();
+    }
+
+    TEST_P(RockeLargeContraction, SampledOutputs)
+    {
+        runLarge(GetParam());
     }
 
     INSTANTIATE_TEST_SUITE_P(
@@ -1507,7 +1519,11 @@ namespace
     // A problem of rocKE's tuned GETT route table (rank-8 operands, packed column-major): the
     // plan takes the tuned route when the pack has it. 4096 sampled outputs are compared with
     // the loop reference (integer data: exact).
-    TEST(RockeTunedGett, SampledOutputs)
+    // choice nullptr: the default plan (the tuned route when the pack has it, else a skip); else
+    // planned with the Choice. inPlace: C is D's buffer.
+    void runTunedGett(Choice const* choice    = nullptr,
+                      bool          inPlace   = false,
+                      SelectionLog* selection = nullptr)
     {
         ApiObjects                 api;
         LogCapture                 log;
@@ -1573,19 +1589,23 @@ namespace
                   HIPTENSOR_STATUS_SUCCESS);
         api.keep(desc);
         uint64_t workspaceSize = 0;
-        auto     plan          = planOf(api, desc, workspaceSize, log);
+        auto     plan          = choice == nullptr ? planOf(api, desc, workspaceSize, log)
+                                                   : planWith(api, desc, *choice, log, workspaceSize, selection);
         ASSERT_NE(plan, nullptr);
-        if(!log.contains("tuned-gett"))
+        if(choice == nullptr || choice->rank == 0)
         {
-            GTEST_SKIP() << "the pack has no tuned GETT route for this problem";
+            if(!log.contains("tuned-gett"))
+            {
+                GTEST_SKIP() << "the pack has no tuned GETT route for this problem";
+            }
+            // the tuned route table decides before the selection model
+            EXPECT_TRUE(log.contains("Source: TUNED")) << log.all();
         }
-        // the tuned route table decides before the selection model
-        EXPECT_TRUE(log.contains("Source: TUNED")) << log.all();
         Device dev;
         void*  pA = dev.upload(A);
         void*  pB = dev.upload(B);
         void*  pC = dev.upload(C);
-        void*  pD = dev.upload(D);
+        void*  pD = inPlace ? pC : dev.upload(D);
         void*  ws = nullptr;
         if(workspaceSize > 0)
         {
@@ -1632,6 +1652,11 @@ namespace
             }
         }
         EXPECT_EQ(bad, 0);
+    }
+
+    TEST(RockeTunedGett, SampledOutputs)
+    {
+        runTunedGett();
     }
 
     // ---------------------------------------------------------------- AOT GETT route table
@@ -1742,7 +1767,8 @@ namespace
 
     // Plans `c`, then runs it once per scale / poison / workspace variant and compares sampled
     // outputs with the reference.
-    void runAotGettCase(AotGettCase const& c)
+    // inPlaceOnly: only the variant with C as D's buffer (bilinear cases)
+    void runAotGettCase(AotGettCase const& c, bool inPlaceOnly = false)
     {
         SCOPED_TRACE(c.name);
         ApiObjects api;
@@ -1865,6 +1891,7 @@ namespace
             char const* what;
             double      alpha, beta;
             bool        poisonAB, poisonC, misalignWs;
+            bool        inPlace = false; // C is D's buffer
         };
         std::vector<Variant> variants = {
             {"plain", 1.0, -2.0, false, false, false},
@@ -1875,6 +1902,15 @@ namespace
         if(c.bilinear)
         {
             variants.push_back({"beta 0, C poisoned", 2.0, 0.0, false, true, false});
+        }
+        if(inPlaceOnly)
+        {
+            variants = {{"in place", 1.0, -2.0, false, false, false, true},
+                        {"in place, misaligned workspace", 2.0, 3.0, false, false, true, true}};
+            if(!c.bilinear)
+            {
+                return;
+            }
         }
         for(auto const& v : variants)
         {
@@ -1897,6 +1933,13 @@ namespace
             void* pB = upload(b);
             void* pC = c.bilinear ? upload(cc) : nullptr;
             ASSERT_EQ(hipMemset(pD, 0x7f, size_t(D.size) * 2), hipSuccess);
+            if(v.inPlace)
+            {
+                ASSERT_EQ(D.size, cc.size);
+                ASSERT_EQ(hipMemcpy(pD, cc.bits.data(), size_t(cc.size) * 2, hipMemcpyHostToDevice),
+                          hipSuccess);
+                pC = pD;
+            }
             float  alpha = float(v.alpha), beta = float(v.beta);
             Stream stream;
             void*  w = v.misalignWs ? static_cast<uint8_t*>(ws) + 8 : ws;
@@ -2354,6 +2397,7 @@ namespace
         hiptensorComputeDescriptor_t compute;
         hiptensorOperator_t          op;
         int                          seed;
+        bool                         inPlace = false; // C is D's buffer
     };
 
     void runReduction(ReductionCase const& c,
@@ -2432,7 +2476,7 @@ namespace
         Device dev;
         void*  pA = dev.upload(A);
         void*  pC = dev.upload(C);
-        void*  pD = dev.upload(D);
+        void*  pD = c.inPlace ? pC : dev.upload(D);
         void*  ws = nullptr;
         if(workspaceSize > 0)
         {
@@ -2554,6 +2598,7 @@ namespace
         bool                 nanC    = false; // C all NaN (beta 0: never read)
         bool                 allNanA = false; // A all NaN (alpha 0: never read)
         size_t               skew    = 0; // A, C, D this many elements past aligned addresses
+        bool                 inPlace = false; // C is D's buffer
     };
 
     std::ostream& operator<<(std::ostream& os, TunedReductionCase const& c)
@@ -2566,9 +2611,11 @@ namespace
     {
     };
 
-    TEST_P(RockeTunedReduction, ExactAndPicked)
+    // A tuned reduction case with a plan Choice: KERNEL_RANK 0 must be the tuned class.
+    void runTunedReduction(TunedReductionCase const& c,
+                           Choice const&             choice    = {},
+                           SelectionLog*             selection = nullptr)
     {
-        auto const   c = GetParam();
         std::mt19937 rng(c.seed);
         ApiObjects   api;
         if(!api.supports(c.type))
@@ -2634,14 +2681,21 @@ namespace
         api.keep(desc);
         uint64_t     workspaceSize = 0;
         SelectionLog sel;
-        auto         plan = planWith(api, desc, {}, log, workspaceSize, &sel);
+        auto         plan = planWith(api, desc, choice, log, workspaceSize, &sel);
         ASSERT_NE(plan, nullptr);
+        if(selection != nullptr)
+        {
+            *selection = sel;
+        }
         // the pack of every rocKE target carries the tuned classes: the rule picks one
-        EXPECT_EQ(sel.pick.rfind("rreduce:", 0), 0u) << sel.pick << "\n" << log.all();
+        if(choice.rank == 0)
+        {
+            EXPECT_EQ(sel.pick.rfind("rreduce:", 0), 0u) << sel.pick << "\n" << log.all();
+        }
         Device dev;
         void*  pA = dev.upload(A, c.skew);
         void*  pC = dev.upload(C, c.skew);
-        void*  pD = dev.upload(D, c.skew);
+        void*  pD = c.inPlace ? pC : dev.upload(D, c.skew);
         void*  ws = nullptr;
         if(workspaceSize > 0)
         {
@@ -2695,6 +2749,11 @@ namespace
             }
         });
         EXPECT_EQ(bad, 0) << sel.pick;
+    }
+
+    TEST_P(RockeTunedReduction, ExactAndPicked)
+    {
+        runTunedReduction(GetParam());
     }
 
     std::vector<TunedReductionCase> tunedReductionCases()
@@ -9457,6 +9516,7 @@ namespace
         int                               zeroScale = -1;
         bool                              fast      = false;
         bool                              special   = false;
+        bool inPlace = false; // C (the last input, laid out like D) is D's buffer
     };
 
     // NaN-propagating MAX / MIN (the kernels' semantics), else binaryRef
@@ -9469,8 +9529,9 @@ namespace
         return binaryRef(op, a, c);
     }
 
-    // Returns the pick ("" when the device has no such data type).
-    std::string runEwp(EwpCase const& c)
+    // Returns the pick ("" when the device has no such data type); `selection`: the plan's
+    // selection log.
+    std::string runEwp(EwpCase const& c, SelectionLog* selection = nullptr)
     {
         std::mt19937 rng(c.seed);
         ApiObjects   api;
@@ -9507,6 +9568,12 @@ namespace
         }
         auto D = packedTensor(c.type, modes, c.orders.back(), c.ext, rng);
         std::fill(D.values.begin(), D.values.end(), cplx(0, 0));
+        if(c.inPlace)
+        {
+            // the API's in-place rule: C (the last input) has D's layout
+            EXPECT_GE(c.arity, 2);
+            EXPECT_EQ(c.orders[size_t(c.arity - 1)], c.orders.back());
+        }
         if(c.zeroScale >= 0)
         {
             ins[size_t(c.zeroScale)].values[3] = cplx(std::numeric_limits<double>::quiet_NaN(), 0);
@@ -9596,6 +9663,10 @@ namespace
         {
             return "";
         }
+        if(selection != nullptr)
+        {
+            *selection = sel;
+        }
         Device dev;
         auto   at = [&](Tensor const& t) {
             Tensor x = t;
@@ -9607,7 +9678,7 @@ namespace
         {
             p.push_back(at(t));
         }
-        void*             pD = at(D);
+        void*             pD = c.inPlace ? p.back() : at(D);
         Stream            stream;
         hiptensorStatus_t status;
         if(c.arity == 1)
@@ -10895,5 +10966,391 @@ namespace
         }
         // every rocKE target has f64 tensors: no row is skipped
         EXPECT_EQ(checked, std::size(declined));
+    }
+
+    // ------------------------------------------------- in place: D is an input's buffer
+
+    // hipTensor lets the output alias one input: C == D for elementwise binary and trinary
+    // operations (descC == descD), for contractions (C laid out like D) and for reductions, and
+    // D == E for trinary contractions (A and B never overlap D; a permutation's A never does).
+    // The RockeAliasing tests run every candidate (KERNEL_RANK 0, 1, ...) of every route kind in
+    // place, exact against references computed from host copies of the inputs (integer data):
+    // the tuned tiled elementwise classes (ragged ones too: their units past the end of a run
+    // repeat an owned vector, and only the owner may store it), the flat, tiled (folded),
+    // vector and generic kernels and their JIT forms, with aligned and unaligned buffers (the
+    // programs' fallbacks); the generic reductions (split partials and the final step) and the
+    // tuned reduction classes; the contraction routes (direct and ring GETT, the tuned and AOT
+    // GETT routes, the GEMM bodies with their epilogues, the f32 recipes, the f64 and complex
+    // routes) and the steps of trinary contractions.
+
+    // Every candidate of each in-place elementwise layout (C laid out like D); counts the ragged
+    // tuned tiled classes that ran.
+    int runAliasingElementwise()
+    {
+        struct Layout
+        {
+            int                               arity;
+            std::map<int32_t, int64_t>        ext;
+            std::vector<std::vector<int32_t>> orders; // A [B] C D: C's order is D's
+        };
+        std::map<int32_t, int64_t> const e5 = {{'a', 6}, {'b', 5}, {'c', 10}, {'d', 3}, {'e', 10}};
+        std::map<int32_t, int64_t> const eo = {{'a', 11}, {'b', 6}, {'c', 5}, {'d', 7}};
+        std::map<int32_t, int64_t> const e12
+            = {{'a', 12}, {'b', 11}, {'c', 10}, {'d', 11}, {'e', 3}};
+        std::map<int32_t, int64_t> const e3      = {{'a', 128}, {'b', 4}, {'c', 64}};
+        std::map<int32_t, int64_t> const er      = {{'a', 40}, {'b', 3}, {'c', 72}};
+        std::vector<int32_t> const       ab      = {'a', 'b'};
+        std::vector<int32_t> const       ba      = {'b', 'a'};
+        std::vector<int32_t> const       abc     = {'a', 'b', 'c'};
+        std::vector<int32_t> const       cba     = {'c', 'b', 'a'};
+        std::vector<int32_t> const       acb     = {'a', 'c', 'b'};
+        std::vector<int32_t> const       a5      = {'a', 'b', 'c', 'd', 'e'};
+        std::vector<int32_t> const       d5      = {'c', 'e', 'b', 'a', 'd'};
+        std::vector<int32_t> const       s5      = {'a', 'c', 'd', 'b', 'e'};
+        std::vector<int32_t> const       a4      = {'a', 'b', 'c', 'd'};
+        std::vector<int32_t> const       d4      = {'a', 'd', 'c', 'b'};
+        std::vector<Layout> const        layouts = {
+            // D = A^T + C with 70-element rows (ragged runs; review finding N3), and transposed
+            {2, {{'a', 4096}, {'b', 70}}, {ab, ba, ba}},
+            {2, {{'a', 70}, {'b', 4096}}, {ab, ba, ba}},
+            {2, e3, {abc, cba, cba}}, // whole tiles (tuned tiled / tiled classes)
+            {2, e5, {a5, d5, d5}}, // rank 5, 4-byte f16 runs (ragged, narrow vectors)
+            {2, eo, {a4, d4, d4}}, // a shared stride-1 mode of 11 elements (ragged mode a)
+            {2, e12, {a5, s5, s5}}, // a shared mode of 12 elements (ragged mode a)
+            {2, {{'a', 16}, {'b', 32}, {'c', 32}}, {acb, acb, acb}}, // one layout (flat)
+            {2, {{'a', 16}, {'b', 32}, {'c', 32}}, {abc, acb, acb}}, // shared mode (vector)
+            {3, er, {abc, abc, cba, cba}}, // TTV, ragged
+            {3, er, {abc, cba, cba, cba}}, // TVV, ragged
+            {3, e5, {a5, a5, d5, d5}},
+            {3, eo, {a4, a4, d4, d4}},
+            {3, {{'a', 16}, {'b', 32}, {'c', 32}}, {acb, acb, acb, acb}},
+        };
+        struct Row
+        {
+            int                 arity;
+            hiptensorDataType_t type, scalar;
+        };
+        Row const rows[] = {{2, HIPTENSOR_R_16F, HIPTENSOR_R_32F},
+                            {2, HIPTENSOR_R_16BF, HIPTENSOR_R_32F},
+                            {2, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                            {2, HIPTENSOR_R_64F, HIPTENSOR_R_64F},
+                            {3, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
+                            {3, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                            {3, HIPTENSOR_R_64F, HIPTENSOR_R_64F}};
+        int       seed = 15100, ragged = 0;
+        for(auto const& l : layouts)
+        {
+            for(auto const& r : rows)
+            {
+                if(r.arity != l.arity)
+                {
+                    continue;
+                }
+                auto mk = [&](int32_t rank, size_t skew) {
+                    EwpCase c{l.arity, r.type, r.scalar, seed++, l.ext, l.orders, rank, skew};
+                    c.inPlace = true;
+                    return c;
+                };
+                SelectionLog first;
+                auto         pick = runEwp(mk(0, 0), &first);
+                if(pick.empty())
+                {
+                    continue; // data type not supported on this device
+                }
+                for(int32_t rank = 0; rank < first.candidates; rank++)
+                {
+                    for(size_t skew : {size_t(0), size_t(1)})
+                    {
+                        SelectionLog s;
+                        auto         p   = runEwp(mk(rank, skew), &s);
+                        bool const   rag = p.rfind("ewp:", 0) == 0
+                                         && ((p.size() > 2 && p.compare(p.size() - 2, 2, "_r") == 0)
+                                             || p.find("_r_u") != std::string::npos);
+                        ragged += rag && skew == 0;
+                        auto f = mk(rank, skew);
+                        f.fast = true; // the fast path of the tuned classes
+                        runEwp(f);
+                        if(skew == 0)
+                        {
+                            auto z      = mk(rank, 0);
+                            z.zeroScale = l.arity - 1; // C not read; D still written in place
+                            runEwp(z);
+                        }
+                        EXPECT_FALSE(::testing::Test::HasFailure())
+                            << "arity " << l.arity << " type " << int(r.type) << " rank " << rank
+                            << " skew " << skew << ": " << p;
+                        if(::testing::Test::HasFailure())
+                        {
+                            return ragged;
+                        }
+                    }
+                }
+            }
+        }
+        return ragged;
+    }
+
+    TEST(RockeAliasing, ElementwiseEveryCandidate)
+    {
+        int const ragged = runAliasingElementwise();
+        if(deviceArch() == "gfx942" || deviceArch() == "gfx950")
+        {
+            // the packs of gfx942 / gfx950 carry ragged tuned tiled classes for these layouts
+            EXPECT_GT(ragged, 0);
+        }
+    }
+
+    // The same with every elementwise launch specialized by the JIT (HIPTENSOR_JIT_MODE_DEFAULT).
+    TEST(RockeAliasing, ElementwiseEveryCandidateJit)
+    {
+        ScopedEnv jit("HIPTENSOR_ROCKE_TEST_JIT", "1");
+        ScopedEnv all("HIPTENSOR_ROCKE_JIT", "all");
+        runAliasingElementwise();
+    }
+
+    // Every candidate of the generic reductions (row and col kernels, split partials and the
+    // final step), C == D, beta not zero.
+    TEST(RockeAliasing, ReductionEveryCandidate)
+    {
+        struct Row
+        {
+            hiptensorDataType_t          type;
+            hiptensorComputeDescriptor_t compute;
+        };
+        Row const rows[] = {{HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F},
+                            {HIPTENSOR_R_16BF, HIPTENSOR_COMPUTE_DESC_32F},
+                            {HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F},
+                            {HIPTENSOR_R_64F, HIPTENSOR_COMPUTE_DESC_64F}};
+        int       seed   = 15301; // odd seeds: beta -1 (runReduction)
+        for(auto const& r : rows)
+        {
+            ApiObjects probe;
+            if(!probe.supports(r.type))
+            {
+                continue;
+            }
+            for(auto op : {HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX, HIPTENSOR_OP_MIN})
+            {
+                for(int i = 0; i < 2; i++, seed += 2)
+                {
+                    ReductionCase c{r.type, r.compute, op, seed};
+                    c.inPlace = true;
+                    Choice all;
+                    all.workspace = HIPTENSOR_WORKSPACE_MAX;
+                    SelectionLog first;
+                    runReduction(c, all, &first);
+                    ASSERT_FALSE(HasFailure()) << "seed " << seed << ": " << first.pick;
+                    for(int32_t rank = 1; rank < first.candidates; rank++)
+                    {
+                        Choice choice = all;
+                        choice.rank   = rank;
+                        SelectionLog s;
+                        runReduction(c, choice, &s);
+                        ASSERT_FALSE(HasFailure())
+                            << "seed " << seed << " rank " << rank << ": " << s.pick;
+                    }
+                }
+            }
+        }
+    }
+
+    // The tuned reduction classes (row / col classes, split partials and the final class of a
+    // full reduction, A, C and D past aligned addresses: their fallback) and every other
+    // candidate of these problems, C == D.
+    TEST(RockeAliasing, TunedReductionEveryCandidate)
+    {
+        std::vector<TunedReductionCase> cases;
+        int                             seed = 15500;
+        for(auto type : {HIPTENSOR_R_16F, HIPTENSOR_R_16BF, HIPTENSOR_R_32F, HIPTENSOR_R_64F})
+        {
+            for(auto op : {HIPTENSOR_OP_ADD, HIPTENSOR_OP_MAX})
+            {
+                auto add = [&](std::string a, std::string d, std::vector<int64_t> e, size_t skew) {
+                    TunedReductionCase c{type, op, a, d, e, seed++};
+                    c.alpha   = 1.0;
+                    c.beta    = -2.0;
+                    c.opC     = HIPTENSOR_OP_NEG;
+                    c.skew    = skew;
+                    c.inPlace = true;
+                    cases.push_back(c);
+                };
+                add("ab", "b", {4096, 96}, 0);
+                add("ab", "a", {96, 3000}, 0);
+                add("a", "", {1 << 20}, 0); // a full reduction: split partials and the final class
+                add("abc", "ca", {64, 129, 48}, 0);
+                add("abcde", "bd", {24, 9, 16, 7, 33}, 0);
+                add("ab", "b", {1024, 64}, 1);
+                add("ab", "a", {64, 1024}, 1);
+            }
+        }
+        for(auto const& c : cases)
+        {
+            ApiObjects probe;
+            if(!probe.supports(c.type))
+            {
+                continue;
+            }
+            Choice all;
+            all.workspace = HIPTENSOR_WORKSPACE_MAX;
+            SelectionLog first;
+            runTunedReduction(c, all, &first);
+            ASSERT_FALSE(HasFailure()) << c << ": " << first.pick;
+            for(int32_t rank = 1; rank < first.candidates; rank++)
+            {
+                Choice choice = all;
+                choice.rank   = rank;
+                SelectionLog s;
+                runTunedReduction(c, choice, &s);
+                ASSERT_FALSE(HasFailure()) << c << " rank " << rank << ": " << s.pick;
+            }
+        }
+    }
+
+    // Every candidate of bilinear contractions with C == D: every data and compute type (the
+    // direct GETT, the ring GETT, the GEMM bodies and recipes, the f64 and complex routes),
+    // conjugate operands, 10 and 12 modes per tensor and outer products, aligned and unaligned
+    // buffers.
+    TEST(RockeAliasing, ContractionEveryCandidate)
+    {
+        for(auto c : contractionCases())
+        {
+            if(!c.exact || !c.bilinear || c.scale)
+            {
+                continue;
+            }
+            c.inPlace = true;
+            for(size_t skew : {size_t(0), size_t(1)})
+            {
+                ApiObjects probe;
+                if(!probe.supports(c.type)
+                   || (f64RouteOnly() && c.type == HIPTENSOR_R_32F
+                       && c.compute != HIPTENSOR_COMPUTE_DESC_32F))
+                {
+                    continue;
+                }
+                Choice all;
+                all.workspace = HIPTENSOR_WORKSPACE_MAX;
+                all.skew      = skew;
+                SelectionLog first;
+                runContraction(c, all, &first);
+                ASSERT_FALSE(HasFailure()) << "seed " << c.seed << ": " << first.pick;
+                for(int32_t rank = 1; rank < first.candidates; rank++)
+                {
+                    Choice choice = all;
+                    choice.rank   = rank;
+                    SelectionLog s;
+                    runContraction(c, choice, &s);
+                    ASSERT_FALSE(HasFailure()) << "seed " << c.seed << " rank " << rank << " skew "
+                                               << skew << ": " << s.pick;
+                }
+            }
+        }
+    }
+
+    // Large contractions whose GEMM bodies run many output tiles (data-parallel and stream-K)
+    // before the epilogue writes D: every candidate with C == D.
+    TEST(RockeAliasing, LargeContractionEveryCandidate)
+    {
+        LargeCase const cases[] = {{HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, 4096, 4096, 256},
+                                   {HIPTENSOR_R_16BF, HIPTENSOR_COMPUTE_DESC_32F, 4096, 4096, 192},
+                                   {HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, 4096, 4096, 128},
+                                   {HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, 2048, 2048, 64},
+                                   {HIPTENSOR_R_64F, HIPTENSOR_COMPUTE_DESC_64F, 1024, 1024, 512},
+                                   {HIPTENSOR_C_64F, HIPTENSOR_COMPUTE_DESC_C64F, 512, 512, 256}};
+        for(auto const& c : cases)
+        {
+            ApiObjects probe;
+            if(!probe.supports(c.type))
+            {
+                continue;
+            }
+            Choice all;
+            all.workspace = HIPTENSOR_WORKSPACE_MAX;
+            SelectionLog first;
+            runLarge(c, &all, true, &first);
+            ASSERT_FALSE(HasFailure()) << int(c.type) << ": " << first.pick;
+            for(int32_t rank = 1; rank < first.candidates; rank++)
+            {
+                Choice choice = all;
+                choice.rank   = rank;
+                SelectionLog s;
+                runLarge(c, &choice, true, &s);
+                ASSERT_FALSE(HasFailure()) << int(c.type) << " rank " << rank << ": " << s.pick;
+            }
+        }
+    }
+
+    // The tuned GETT route (KERNEL_RANK 0 where the pack has it) and every other candidate of
+    // its problem, C == D.
+    TEST(RockeAliasing, TunedGettEveryCandidate)
+    {
+        Choice all;
+        all.workspace = HIPTENSOR_WORKSPACE_MAX;
+        SelectionLog first;
+        runTunedGett(&all, true, &first);
+        if(HasFatalFailure() || IsSkipped())
+        {
+            return;
+        }
+        for(int32_t rank = 1; rank < first.candidates; rank++)
+        {
+            Choice choice = all;
+            choice.rank   = rank;
+            SelectionLog s;
+            runTunedGett(&choice, true, &s);
+            ASSERT_FALSE(HasFailure()) << "rank " << rank << ": " << s.pick;
+        }
+    }
+
+    // The AOT GETT routes (MN layout in place, packed operands, the K-contiguous route) of
+    // every bilinear table problem with C == D, with an aligned and a misaligned workspace.
+    TEST(RockeAliasing, AotGettRoutes)
+    {
+        if(f64RouteOnly())
+        {
+            GTEST_SKIP() << "HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64";
+        }
+        for(auto const& c : aotGettCases())
+        {
+            SCOPED_TRACE(c.name);
+            runAotGettCase(c, true);
+            ASSERT_FALSE(HasFailure()) << c.name;
+        }
+    }
+
+    // Trinary contractions with E == D (step 2 reads D as its C): every pair of step candidates,
+    // aligned and unaligned buffers.
+    TEST(RockeAliasing, TrinaryContractionEveryCandidate)
+    {
+        for(auto const& c : trinaryCases())
+        {
+            if(!c.inPlace || !c.exact)
+            {
+                continue;
+            }
+            for(size_t skew : {size_t(0), size_t(1)})
+            {
+                ApiObjects probe;
+                if(!probe.supports(c.type))
+                {
+                    continue;
+                }
+                Choice all;
+                all.workspace = HIPTENSOR_WORKSPACE_MAX;
+                all.skew      = skew;
+                SelectionLog first;
+                runTrinary(c, all, &first);
+                ASSERT_FALSE(HasFailure()) << "seed " << c.seed << ": " << first.pick;
+                for(int32_t rank = 1; rank < first.candidates; rank++)
+                {
+                    Choice choice = all;
+                    choice.rank   = rank;
+                    SelectionLog s;
+                    runTrinary(c, choice, &s);
+                    ASSERT_FALSE(HasFailure()) << "seed " << c.seed << " rank " << rank << " skew "
+                                               << skew << ": " << s.pick;
+                }
+            }
+        }
     }
 } // namespace

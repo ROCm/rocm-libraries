@@ -92,6 +92,81 @@ def test_inline_renames_and_maps_block_ids():
     assert len(names) == len(set(names)), "inlined instances must not share value names"
 
 
+def _value_names(kdef):
+    names = []
+
+    def walk(reg):
+        for op in reg.ops:
+            names.extend(r.name for r in op.results)
+            if op.name == "scf.for":
+                names.append(op.attrs["iv"])
+                names.extend(m["name"] for m in op.attrs.get("iter_args", []))
+            for r in op.regions:
+                walk(r)
+
+    walk(kdef.body)
+    return names
+
+
+def test_inline_names_come_from_the_host_builder():
+    """Inlined names are allocated by the host IRBuilder's counter: unique
+    against host values created before AND after the inline, and the same
+    on every build (no id()-derived or caller-composed names)."""
+
+    def build():
+        b = IRBuilder("host")
+        T0 = b.param("T0", PtrType(F16, "global"))
+        T1 = b.param("T1", PtrType(F16, "global"))
+        bx = b.add(b.const_i32(5), b.const_i32(1))
+        before = b._counter
+        inline_kernel_body(
+            b, _toy(), params={"X": T0, "Y": T1}, block_ids={"x": bx}, prefix="i"
+        )
+        inline_kernel_body(
+            b, _toy(), params={"X": T1, "Y": T0}, block_ids={"x": bx}, prefix="i"
+        )
+        after = b._counter
+        b.add(bx, b.const_i32(2))
+        return b.kernel, before, after
+
+    k, before, after = build()
+    names = _value_names(k)
+    assert len(names) == len(set(names))
+    inlined = [n for n in names if n.startswith("%i_")]
+    assert inlined and after - before == len(inlined)
+    k2, _, _ = build()
+    assert _value_names(k2) == names
+
+
+def test_permute_rank_cap_is_never_rebound(monkeypatch):
+    """Bodies above the C++-mirrored permute rank cap get an explicit per-call
+    cap; the module-level cap every other build reads is never rebound while
+    the body is built (it was, in a try/finally, which a concurrent build in
+    another thread could observe)."""
+    from kernels.gfx950.hiptensor_mono.queue_contraction import (
+        _build_permute_any_rank,
+    )
+    from rocke.instances.common import permute_nd as pn
+
+    cap = pn.MAX_RANK
+    seen = []
+    real = pn._build_offset_descriptor
+
+    def spy(spec):
+        seen.append(pn.MAX_RANK)  # the cap a concurrent build would read now
+        return real(spec)
+
+    monkeypatch.setattr(pn, "_build_offset_descriptor", spy)
+    big = pn.PermuteSpec(x_shape=(2,) * (cap + 2), perm=tuple(range(cap + 2))[::-1])
+    k = _build_permute_any_rank(big, "gfx950")
+    assert [p.name for p in k.params] == ["X", "Y"]
+    assert seen == [cap] and pn.MAX_RANK == cap
+    over = pn.PermuteSpec(x_shape=(2,) * (cap + 1), perm=tuple(range(cap + 1)))
+    assert not pn.is_valid_spec(over, "gfx950")[0]
+    with pytest.raises(ValueError, match="rank"):
+        pn.build_permute(over, "gfx950")
+
+
 def test_inline_refuses_early_return_and_unbound_param():
     b = IRBuilder("host")
     T0 = b.param("T0", PtrType(F16, "global"))
@@ -217,6 +292,16 @@ def test_permute_bodies_build_and_refuse():
     assert [p.name for p in k.params] == ["X", "Y"] and k.name.endswith("_gu4")
     with pytest.raises(ValueError):
         build_permute_gather(PermuteGatherSpec(permute=ps, unroll=0), arch="gfx950")
+    # the gather body is validated like permute_nd (minus the rank cap)
+    for bad, kw in (
+        (PermuteSpec(x_shape=(8, 16, 32), perm=(2, 0, 1), dtype="f32"), {}),
+        (PermuteSpec(x_shape=(8, 16, 32), perm=(2, 0, 1), block_size=96), {}),
+        (ps, {"arch": "gfx000"}),
+    ):
+        with pytest.raises(ValueError, match="invalid permute spec"):
+            build_permute_gather(
+                PermuteGatherSpec(permute=bad, unroll=4), **{"arch": "gfx950", **kw}
+            )
 
 
 @pytest.mark.parametrize("body", ["auto", "nd", "tlds"])

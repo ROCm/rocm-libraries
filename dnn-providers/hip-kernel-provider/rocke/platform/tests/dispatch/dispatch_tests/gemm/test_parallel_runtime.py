@@ -56,14 +56,12 @@ def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
     artifact = compile_kernel(build_kernel(result), arch=req.arch)
     spec = result.spec
     work_dir = Path(tempfile.mkdtemp(prefix="rocke_dispatch_parallel_gemm_"))
-    env = dict(os.environ)
-    py_root = str(Path(__file__).resolve().parents[4] / "python")
-    env["PYTHONPATH"] = py_root + os.pathsep + env.get("PYTHONPATH", "")
     if req.spec_id == "auto":
         hsaco = work_dir / f"{artifact.kernel_name}.hsaco"
         hsaco.write_bytes(artifact.hsaco)
-        cmd = [
-            sys.executable,
+        # same hermetic launch as the manifest path below (#14778): the child
+        # imports this process's rocke package first
+        cmd = rocke_python_command(
             "-c",
             _BOUND_RUN,
             str(hsaco),
@@ -71,8 +69,10 @@ def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
             req.arch,
             req.spec_id,
             ",".join(str(x) for x in shape),
-        ]
-        proc = subprocess.run(cmd, text=True, capture_output=True, timeout=180, env=env)
+        )
+        proc = subprocess.run(
+            cmd, text=True, capture_output=True, timeout=180, env=rocke_subprocess_env()
+        )
         output = (proc.stdout or "") + (proc.stderr or "")
         if proc.returncode:
             raise RuntimeError(output[-2500:])

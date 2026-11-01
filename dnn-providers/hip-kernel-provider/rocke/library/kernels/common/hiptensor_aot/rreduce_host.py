@@ -19,7 +19,7 @@ import os
 from dataclasses import asdict, dataclass, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .common import MAX_RANK, as_i32_bits, magic_u31
+from .common import MAX_RANK, as_i32_bits, fnv1a64, magic_u31
 from .rreduce import (
     LOAD_VECS,
     SLOT_COUNTS,
@@ -717,14 +717,6 @@ def problem_key(a: str, d: str, op: str, kept, red) -> str:
     k = ",".join(f"{e}:{sa}:{sd}" for e, sa, sd in kept)
     r = ",".join(f"{e}:{sa}" for e, sa in red)
     return f"a={a};d={d};op={op};k={k};r={r}"
-
-
-def fnv1a64(text: str) -> int:
-    h = 0xCBF29CE484222325
-    for ch in text.encode():
-        h ^= ch
-        h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    return h
 
 
 def route_record(e: dict) -> str:

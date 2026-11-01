@@ -53,10 +53,12 @@ const char* cdt_of(const rocke_htaot_ewf_spec_t* s)
     return "f32";
 }
 
-/* ewf._runs */
+/* ewf._runs (common.max_vec) */
 std::vector<int> runs(int n, int nbytes)
 {
-    int mx = nbytes == 2 ? 8 : nbytes == 4 ? 4 : 2;
+    int mx = max_vec(nbytes);
+    if(mx <= 0 || n <= 0)
+        return {}; /* no vector width in the catalog (the Python max_vec raises) */
     int w = n < mx ? n : mx;
     return std::vector<int>(n / w, w);
 }
@@ -104,7 +106,7 @@ int rocke_htaot_ewf_vec(const rocke_htaot_ewf_spec_t* s)
     int nb = 0;
     if(s == nullptr || !dtype_of(s->d, nullptr, &nb))
         return 0;
-    return 16 / nb;
+    return max_vec(nb);
 }
 
 bool rocke_htaot_ewf_check(const rocke_htaot_ewf_spec_t* s, char* reason, size_t cap)

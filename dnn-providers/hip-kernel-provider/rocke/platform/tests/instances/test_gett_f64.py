@@ -822,7 +822,10 @@ def test_parity_family_covers_every_tuned_configuration():
         spec, arch = specs[len(E._CONFIGS) + j]
         assert spec == arch_spec(E._tuned_problem(key), arch, **TUNED_CONFIGS[key])
     # the generated C cases are current
-    c_src = (Path(__file__).resolve().parent / "parity" / "gett_f64_emit.c").read_text()
+    c_path = Path(__file__).resolve().parent / "parity" / "gett_f64_emit.c"
+    if not c_path.is_file():
+        pytest.skip("parity/gett_f64_emit.c is not here (installed test tree)")
+    c_src = c_path.read_text()
     assert E.c_cases() in c_src.replace("\r\n", "\n")
 
 

@@ -46,10 +46,17 @@ multiples of 16 bytes keep vector accesses (e.g. ``vb = 4``: pairs of f16); ``tb
 phase 1 transposes ``V x VT`` blocks (``V`` loads of ``VT`` elements) when D's side allows only
 narrower vectors than the transposed inputs' side. ``rag`` (ragged
 classes): a tile may overhang the end of a run (mode ``a``: of the shared mode too). Positions
-past an end are clamped to the last vector of the run; such a lane reads and writes the same
-vector as the lane that owns it (the same values), so ragged tiles need no masks. The runs of
-a ragged class need not hold a whole number of tiles; their inner extents (and the shared mode)
-must still be multiples of ``V``.
+past an end are clamped to the last vector of the run; such a lane reads the same vector as the
+lane that owns it, so the loads need no masks. The runs of a ragged class need not hold a whole
+number of tiles; their inner extents (and the shared mode) must still be multiples of ``V``.
+
+In place (``C == D``, which the API allows when C is laid out like D, so C is of kind ``V``):
+every D vector is stored only by the unit that owns it (classes of two or three inputs whose C
+is of kind ``V``: the store of a clamped unit, or of a thread past a phase's last unit, is
+predicated off). A repeated store would land after the owner, or a later ``ilp`` group of the
+same thread, has read C there, and that element would get the operator twice. A ragged class
+runs a predicated copy of phase 2 only in a tile that overhangs a run (a wave-uniform test); a
+whole tile runs the unpredicated phase 2.
 
 Kernel ABI ``hiptensor-aot-ewp/v2``: ``A [B] [C] D``, ``alpha [beta] [gamma]``, ``opA [opB]
 [opC] [opAB] [opABC]``, then (i32) ``eo, om, os, et, tm, ts`` (inner extents of the runs and
@@ -78,7 +85,9 @@ from .common import (
     OP_MIN,
     OP_MUL,
     Emit,
+    lds_bytes,
     ptr,
+    vector_bytes,
 )
 
 EWP_ABI = "hiptensor-aot-ewp/v2"
@@ -86,8 +95,20 @@ EWP_ABI = "hiptensor-aot-ewp/v2"
 SLOTS_B = 8
 #: largest number of vectors a thread holds in phase 1
 MAX_VECTORS = 32
-#: LDS budget of the tiles (gfx950; the pack's classes of the other targets fit their LDS)
-LDS_BYTES = 163840
+#: LDS budget of the tiles without a target: the largest LDS of the pack targets (the target
+#: catalog's ``lds_capacity_bytes``; :meth:`EwpSpec.check` with a target checks that target's,
+#: ``ewp_host.pack_classes`` keeps a target's classes within it)
+LDS_BYTES = lds_bytes()
+
+
+def vector_widths() -> Tuple[int, ...]:
+    """The bytes a class's vectors may have (``vb``, ``tb``): the powers of two from 2 to the
+    widest global vector access of the pack targets (:func:`.common.vector_bytes`)."""
+    out, w = [], 2
+    while w <= vector_bytes():
+        out.append(w)
+        w *= 2
+    return tuple(out)
 
 
 @dataclass(frozen=True)
@@ -172,7 +193,9 @@ class EwpSpec:
         """Vector chunks (vb bytes) of one LDS tile."""
         return self.tile_bytes() // self.vb
 
-    def check(self) -> None:
+    def check(self, arch: Optional[str] = None) -> None:
+        """Raises ``ValueError`` for an invalid class; with ``arch``, also for a class whose LDS
+        tiles exceed that target's LDS (without it: :data:`LDS_BYTES`)."""
         if self.arity not in (1, 2, 3):
             raise ValueError("arity must be 1, 2 or 3")
         if self.arity >= 2 and not self.c:
@@ -190,17 +213,16 @@ class EwpSpec:
             raise ValueError("at least one input read through LDS (kind T)")
         if self.mode not in ("t", "a"):
             raise ValueError("mode must be t or a")
-        if self.vb not in (2, 4, 8, 16) or self.vb < self.es:
+        widths = vector_widths()
+        if self.vb not in widths or self.vb < self.es:
             raise ValueError(
-                "vb must be 2, 4, 8 or 16 bytes and at least the element size"
+                f"vb must be one of {widths} bytes and at least the element size"
             )
-        if self.rag not in (0, 1):
-            raise ValueError("rag must be 0 or 1")
-        if self.tb and (
-            self.tb not in (2, 4, 8, 16) or self.tb < self.es or self.mode != "t"
-        ):
+        if type(self.rag) is not int or self.rag not in (0, 1):
+            raise ValueError("rag must be the int 0 or 1")
+        if self.tb and (self.tb not in widths or self.tb < self.es or self.mode != "t"):
             raise ValueError(
-                "tb: 2, 4, 8 or 16 bytes, at least the element size, mode t only"
+                f"tb: one of {widths} bytes, at least the element size, mode t only"
             )
         for x in (self.to, self.tt, self.tw, self.block):
             if x <= 0 or x & (x - 1):
@@ -216,7 +238,7 @@ class EwpSpec:
         held = -(-self.p1_units() // self.block) * (self.vec if self.mode == "t" else 1)
         if held > MAX_VECTORS:
             raise ValueError(f"{held} vectors per thread in phase 1 > {MAX_VECTORS}")
-        if self.kinds.count("T") * self.tile_bytes() > LDS_BYTES:
+        if self.kinds.count("T") * self.tile_bytes() > lds_bytes(arch):
             raise ValueError("the LDS tiles exceed the LDS budget")
         if self.nt not in (0, 1, 2, 3):
             raise ValueError("nt must be 0 .. 3")
@@ -315,9 +337,9 @@ def _binary_fixed(b: IRBuilder, a: Value, c: Value, op: int) -> Value:
 
 
 def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
-    """The kernel of a class (``arch`` is not used: every class is target-neutral IR; the pack
-    builds a target's classes for it)."""
-    spec.check()
+    """The kernel of a class: target-neutral IR (the pack builds a target's classes for it);
+    ``arch`` only bounds the class's LDS tiles by the target's LDS."""
+    spec.check(arch)
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block
     e = Emit(b, False, spec.cdt, False)
@@ -332,6 +354,14 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
     hint_ld = TemporalHint.STREAMING if spec.nt & 1 else TemporalHint.DEFAULT
     hint_st = TemporalHint.STREAMING if spec.nt & 2 else TemporalHint.DEFAULT
     tins = [n for n in ins if spec.kind(n) == "T"]
+    # D may alias C (the API allows C == D with C's layout D's, so C is read like D: kind V):
+    # every D vector is then stored only by the unit that owns it. A unit past the end of a
+    # ragged run (or past a phase's last unit) repeats an owned vector; its store would land
+    # after the owner (or a later group of its own thread) read C there.
+    alias = spec.arity >= 2 and spec.kind("C") == "V"
+    # ... and some unit of phase 2 may repeat an owned vector (ragged runs, or a phase-2 unit count
+    # that is not a multiple of the block)
+    owned = alias and (spec.rag == 1 or spec.p2_units() % BS != 0)
 
     P = {n: ptr(b, n, dts[n], readonly=n != "D") for n in names}
     scal_of = {"A": "alpha", "B": "beta", "C": "gamma"}
@@ -439,14 +469,22 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
             key = b.shl(key, e.c32(spec.swlo))
         return b.xor(chunk, key)
 
-    def units(total: int) -> List[Value]:
+    def units(
+        total: int, owners: Optional[List[Optional[Value]]] = None
+    ) -> List[Value]:
         """This thread's units of a phase (a thread past the last unit redoes the last one:
-        identical data, no branch)."""
+        identical data, no branch). ``owners`` given: per unit, whether the thread owns it (None:
+        always)."""
         out = []
         for it in range(-(-total // BS)):
             u = tid if it == 0 else b.add(tid, e.c32(it * BS))
+            mine = None
             if (it + 1) * BS > total:
+                if owners is not None:
+                    mine = b.cmp_lt(u, e.c32(total))
                 u = b.smin(u, e.c32(total - 1))
+            if owners is not None:
+                owners.append(mine)
             out.append(u)
         return out
 
@@ -458,6 +496,15 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
         o0 = b.mul(tile_o, e.c32(TO))
         t0 = b.mul(tile_t, e.c32(TT))
         w0 = b.mul(tile_w, e.c32(TW * V))
+        # in place, ragged: whether the tile holds no clamped unit (wave-uniform); such a tile
+        # stores unconditionally, a tile that overhangs a run stores only its owned vectors
+        full = notfull = None
+        if alias and spec.rag:
+            full = b.cmp_le(b.add(o0, e.c32(TO)), lo)
+            full = b.land(full, b.cmp_le(b.add(t0, e.c32(TT)), lt))
+            if mode_a:
+                full = b.land(full, b.cmp_le(b.add(w0, e.c32(TW * V)), lw))
+            notfull = b.lnot(full)
         # every wave done with the previous tile's LDS
         b.sync()
 
@@ -538,19 +585,28 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
 
         # ---------------------------------------------------------- phase 2
         p2 = []
-        for u in units(spec.p2_units()):
+        owners: Optional[List[Optional[Value]]] = [] if alias else None
+        for ui, u in enumerate(units(spec.p2_units(), owners)):
+            mine = owners[ui] if alias else None
+            bounds = (
+                None  # the unclamped positions of a ragged unit and their run lengths
+            )
             if mode_a:
                 c = _pow2_mod(b, e, u, TW)
                 rest = _pow2_div(b, e, u, TW)
                 ol = _pow2_mod(b, e, rest, TO)
                 tl = _pow2_div(b, e, rest, TO)
                 if spec.rag:
-                    wv = b.smin(b.add(w0, b.mul(c, e.c32(V))), last_w)
-                    go = b.smin(b.add(o0, ol), last_o1)
-                    gt = b.smin(b.add(t0, tl), last_t1)
+                    wc = b.add(w0, b.mul(c, e.c32(V)))
+                    wv = b.smin(wc, last_w)
+                    go0 = b.add(o0, ol)
+                    go = b.smin(go0, last_o1)
+                    gt0 = b.add(t0, tl)
+                    gt = b.smin(gt0, last_t1)
                     c = _pow2_div(b, e, b.sub(wv, w0), V)
                     ol = b.sub(go, o0)
                     tl = b.sub(gt, t0)
+                    bounds = ((wc, lw), (go0, lo), (gt0, lt))
                 ch = b.add(b.mul(b.add(b.mul(tl, e.c32(TO)), ol), e.c32(TW)), c)
                 if not spec.rag:
                     wv = b.add(w0, b.mul(c, e.c32(V)))
@@ -559,10 +615,13 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
                 tl = _pow2_div(b, e, u, TO // V)
                 ol = b.mul(uo, e.c32(V))
                 if spec.rag:
-                    go = b.smin(b.add(o0, ol), last_ov)
-                    gt = b.smin(b.add(t0, tl), last_t1)
+                    go0 = b.add(o0, ol)
+                    go = b.smin(go0, last_ov)
+                    gt0 = b.add(t0, tl)
+                    gt = b.smin(gt0, last_t1)
                     uo = _pow2_div(b, e, b.sub(go, o0), V)
                     tl = b.sub(gt, t0)
+                    bounds = ((go0, lo), (gt0, lt))
                 ch = b.add(b.mul(tl, e.c32(TO // V)), uo)
                 wv = None
             if not spec.rag:
@@ -573,18 +632,29 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
                 o_ = b.add(boff[n], b.add(ooff(n, go), toff(n, gt)))
                 return o_ if wv is None else b.add(o_, wv)
 
-            p2.append((ch, offs))
+            def own(mine=mine, bounds=bounds) -> Optional[Value]:
+                """Whether the thread owns the unit's vector (None: always); emitted where the
+                predicated stores use it."""
+                if not alias or bounds is None:
+                    return mine
+                r = b.cmp_lt(bounds[0][0], bounds[0][1])
+                for x, lim in bounds[1:]:
+                    r = b.land(r, b.cmp_lt(x, lim))
+                return r if mine is None else b.land(mine, r)
+
+            p2.append((ch, offs, own))
 
         def raw(n: str, unit) -> Value:
             ty = DTYPES[dts[n]][0]
-            ch, offs = unit
+            ch, offs, _own = unit
             if spec.kind(n) == "T":
                 return b.smem_load_vN(lds[n], b.mul(swz(ch), e.c32(V)), dtype=ty, n=V)
             return gload(n, offs(n))
 
-        def body(every: bool, op: Optional[int] = None) -> None:
+        def body(every: bool, op: Optional[int], pred: bool) -> None:
             """``op`` given: the fast path (no operator table; ``op`` the binary operator, 0 for
-            a permutation)."""
+            a permutation). ``pred``: only the owner of a vector stores it (D may alias C).
+            """
             g = spec.ilp or len(p2)
             dty = DTYPES[spec.d][0]
             for g0 in range(0, len(p2), g):
@@ -620,7 +690,7 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
                             b.select(nz[n], b.fmul(S[n], x), zero)
                             for x in e.unary_list(xs, OPS[n])
                         ]
-                for q, (ch, offs) in enumerate(grp):
+                for q, (ch, offs, own) in enumerate(grp):
                     out = []
                     for k in range(q * V, q * V + V):
                         if spec.arity == 1:
@@ -636,35 +706,56 @@ def build_ewp(spec: EwpSpec, *, arch: str = "gfx950") -> KernelDef:
                             ab = e.binary(vals["A"][k], vals["B"][k], OPS["AB"])
                             out.append(e.binary(ab, vals["C"][k], OPS["ABC"]))
                     outs = [e.from_c(x, spec.d) for x in out]
-                    b.global_store_vN(
-                        P["D"],
-                        offs("D"),
-                        b.vec_pack(outs, dty),
-                        V,
-                        align=spec.vb,
-                        temporal_hint=hint_st,
-                    )
 
-        # the fast path per binary operator (trinary: the same operator twice); then every scale
-        # non-zero (straight-line loads, operator table); otherwise skip the inputs of zero scale
-        if spec.arity == 1:
-            conds = [(fastp, 0)]
+                    def store(outs=outs, offs=offs) -> None:
+                        b.global_store_vN(
+                            P["D"],
+                            offs("D"),
+                            b.vec_pack(outs, dty),
+                            V,
+                            align=spec.vb,
+                            temporal_hint=hint_st,
+                        )
+
+                    mask = own() if pred else None
+                    if mask is None:
+                        store()
+                    else:
+                        with b.scf_if(mask):
+                            store()
+
+        def dispatch(pred: bool) -> None:
+            # the fast path per binary operator (trinary: the same operator twice); then every
+            # scale non-zero (straight-line loads, operator table); otherwise skip the inputs of
+            # zero scale
+            if spec.arity == 1:
+                conds = [(fastp, 0)]
+            else:
+                conds = []
+                for bop in (OP_ADD, OP_MUL, OP_MAX, OP_MIN):
+                    cnd = b.land(fastp, b.cmp_eq(OPS["AB"], e.c32(bop)))
+                    if spec.arity == 3:
+                        cnd = b.land(cnd, b.cmp_eq(OPS["ABC"], e.c32(bop)))
+                    conds.append((cnd, bop))
+            covered = None
+            for cnd, bop in conds:
+                with b.scf_if(cnd):
+                    body(True, bop, pred)
+                covered = cnd if covered is None else b.lor(covered, cnd)
+            with b.scf_if(b.land(allnz, b.lnot(covered))):
+                body(True, None, pred)
+            with b.scf_if(b.lnot(allnz)):
+                body(False, None, pred)
+
+        if full is not None and spec.p2_units() % BS == 0:
+            # in place, ragged: the units clamp only in a tile that overhangs a run; a whole
+            # tile runs the unpredicated phase 2
+            with b.scf_if(full):
+                dispatch(False)
+            with b.scf_if(notfull):
+                dispatch(True)
         else:
-            conds = []
-            for bop in (OP_ADD, OP_MUL, OP_MAX, OP_MIN):
-                cnd = b.land(fastp, b.cmp_eq(OPS["AB"], e.c32(bop)))
-                if spec.arity == 3:
-                    cnd = b.land(cnd, b.cmp_eq(OPS["ABC"], e.c32(bop)))
-                conds.append((cnd, bop))
-        covered = None
-        for cnd, bop in conds:
-            with b.scf_if(cnd):
-                body(True, bop)
-            covered = cnd if covered is None else b.lor(covered, cnd)
-        with b.scf_if(b.land(allnz, b.lnot(covered))):
-            body(True)
-        with b.scf_if(b.lnot(allnz)):
-            body(False)
+            dispatch(owned)
 
     rows = b.scf_for(b.block_id_y(), nb, ystep, iv_name="bt")
     with rows as bi:
@@ -933,6 +1024,7 @@ __all__ = [
     "MAX_VECTORS",
     "SLOTS_B",
     "build_ewp",
+    "vector_widths",
     "ewp_kinds",
     "ewp_plan",
     "ewp_runs",

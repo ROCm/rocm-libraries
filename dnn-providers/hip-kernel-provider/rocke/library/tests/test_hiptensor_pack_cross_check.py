@@ -55,6 +55,13 @@ _MANIFESTS = _LIBROOT / "builders" / "hiptensor" / "manifests"
 _PACK_TARGETS = ("gfx90a", "gfx942", "gfx950")
 # hipTensor's tree in the rocm-libraries monorepo (absent in a standalone rocKE checkout)
 _HIPTENSOR = _LIBROOT.parents[3] / "projects" / "hiptensor"
+# The writer builds from a rocKE source tree (library + platform/python + platform/cpp headers);
+# the relocated (installed) test tree has none, so the checks that run the writer or read the
+# C header skip there (hipTensor's build runs them: rocke_pack_cross_check_test)
+needs_source = pytest.mark.skipif(
+    not (_LIBROOT.parent / "platform" / "python" / "rocke").is_dir(),
+    reason="needs the rocKE source tree (the installed test tree has no platform sources)",
+)
 
 
 # ------------------------------------------------------------------------------------------------
@@ -155,6 +162,7 @@ def _load_writer():
     return mod
 
 
+@needs_source
 def test_writer_default_source_tree_is_this_tree():
     mod = _load_writer()
     assert Path(mod._DEFAULT_ROCKE_SRC) == _LIBROOT.parent
@@ -166,9 +174,7 @@ def test_writer_descriptor_families():
     """Every family the C++ builder builds has descriptors in the Python writer (gfx950), and the
     family names are the ones both writers' --only filters see."""
     mod = _load_writer()
-    from rocke.helpers.split_k import arch_num_cus
-
-    descs = mod.kernel_descriptors("gfx950", arch_num_cus("gfx950"))
+    descs = mod.kernel_descriptors("gfx950")
     families = {f for f, _ in descs}
     assert families == {
         "ew",
@@ -188,6 +194,7 @@ def test_writer_descriptor_families():
     }, families
 
 
+@needs_source
 @pytest.mark.parametrize("arch", _PACK_TARGETS)
 def test_manifest_is_current(arch, tmp_path):
     """The committed manifest of ``arch`` is the one the Python writer writes for this tree."""
@@ -316,6 +323,7 @@ def test_jit_classes_are_the_jit_rows_classes():
         assert [line[4:] for line in lines if line.startswith("jit ")] == names
 
 
+@needs_source
 def test_kernel_abi_names_match_the_c_header():
     """rocke/instance_hiptensor_aot.h's ROCKE_HTAOT_*_ABI names are the Python ABI constants."""
     from kernels.common.hiptensor_aot import (
@@ -353,6 +361,7 @@ def test_kernel_abi_names_match_the_c_header():
     }
 
 
+@needs_source
 def test_writer_gemm_models_and_digest_check(tmp_path):
     """The writer's --gemm-models directory: exactly the files the planner's model loader reads
     for a target the tensor GETT planner serves (none for the others), an index of their SHA-256

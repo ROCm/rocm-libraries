@@ -156,7 +156,9 @@ def test_math_recipe_replay_lowers_like_the_builder(a, d):
         if recipe is None:
             recipe = cbor_encode(roll_jit_ew(spec, verify=1))
         cpp, _ = online.recipe_cbor_to_llvm(recipe, arch="gfx942", ints=geom)
-        py = _lower_kernel_to_llvm_python(build_ew_jit(spec, geom), arch="gfx942")
+        py = _lower_kernel_to_llvm_python(
+            build_ew_jit(spec.with_geom(geom)), arch="gfx942"
+        )
         assert _ssa_free(cpp) == _ssa_free(py), (spec.key(), op)
 
 
@@ -206,7 +208,7 @@ def test_math_programs_are_not_hoisted_out_of_loops():
     )
     vals["opA"] = C.OP_SIN
     spec, geom, _ = jit_class_of(base, vals)
-    assert _vgprs(build_ew_jit(spec, geom)) <= 48
+    assert _vgprs(build_ew_jit(spec.with_geom(geom))) <= 48
 
 
 # ---------------------------------------------------------------- references
@@ -387,7 +389,7 @@ def test_math_operator_exact(op, a, d, jit, packed):
     if jit:
         spec, geom, n_in = jit_class_of(base, vals)
         assert spec.vec == (16 // C.DTYPES[d][1] if packed else 1)
-        k = build_ew_jit(spec, geom)
+        k = build_ew_jit(spec.with_geom(geom))
         _run(
             k,
             {"A": x, "D": dd, "alpha": 1.0},
@@ -469,7 +471,7 @@ def test_math_operators_of_several_inputs(arity, a, d, jit):
         if jit:
             spec, geom, n_in = jit_class_of(base, vals)
             _run(
-                build_ew_jit(spec, geom),
+                build_ew_jit(spec.with_geom(geom)),
                 run,
                 (-(-n_in // 256), geom["ystep"], 1),
                 key=sorted(geom.items()),

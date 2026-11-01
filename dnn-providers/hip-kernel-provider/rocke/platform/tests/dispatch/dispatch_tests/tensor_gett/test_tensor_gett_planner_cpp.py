@@ -75,6 +75,8 @@ def _python_defaults(monkeypatch):
 
 @pytest.fixture(scope="module")
 def cli(tmp_path_factory):
+    if not (PR.PLATFORM / "cpp" / "include").is_dir() or not PR.CLI_SRC.is_file():
+        pytest.skip("no C++ engine sources here (the installed test tree)")
     if shutil.which("cmake") is None or not any(
         shutil.which(c) for c in ("c++", "clang++", "g++")
     ):
@@ -98,6 +100,8 @@ def _compare(cli, kind, problems, tmp_path):
 
 def test_generated_data_is_current():
     tool = HERE.parents[3] / "tools" / "gen_gemm_dispatch_data.py"
+    if not tool.is_file():
+        pytest.skip("tools/gen_gemm_dispatch_data.py is not here (installed test tree)")
     r = subprocess.run(
         [sys.executable, str(tool), "--check"], capture_output=True, text=True
     )

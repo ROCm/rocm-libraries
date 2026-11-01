@@ -76,7 +76,7 @@ from rocke.core.ir import (
     VectorType,
 )
 
-from .common import DTYPES, OP_CONJ, OP_IDENTITY, Emit
+from .common import DTYPES, OP_CONJ, OP_IDENTITY, Emit, require_bool
 
 DGETT_ABI = "hiptensor-aot-dgett/v1"
 
@@ -116,6 +116,7 @@ class DgettSpec:
     idx64: bool = False  # 64-bit offsets (tensors past 2^31 bytes)
 
     def check(self, arch: str) -> None:
+        require_bool(self, "cplx", "math", "idx64")
         if self.comp not in COMPS:
             raise ValueError(f"comp {self.comp!r} not in {COMPS}")
         if self.a_fast not in ("k", "r") or self.b_fast not in ("k", "r"):
@@ -727,7 +728,6 @@ def build_dgett(spec: DgettSpec, *, arch: str) -> KernelDef:
             q = scaled(beta, c, bi_zero)
             outs.append([b.select(use_c, b.fadd(x, y), x) for x, y in zip(t, q)])
         store_d(elems, outs)
-    b.ret()
     return b.kernel
 
 

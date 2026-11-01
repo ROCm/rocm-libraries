@@ -7,7 +7,9 @@
  */
 #include "rocke/instance_hiptensor_aot_internal.h"
 
+#include "rocke/arch_target.h"
 #include "rocke/elementary.h"
+#include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/ir_internal.h"
 
 #include <string.h>
@@ -96,6 +98,51 @@ Emit::Emit(rocke_ir_builder_t* b_, bool idx64_, const char* cdt, bool math_)
 {
 }
 
+/* common.PACK_TARGETS */
+static const char* const kPackTargets[] = {"gfx90a", "gfx942", "gfx950"};
+
+int vector_bytes()
+{
+    int n = 0;
+    for(const char* a : kPackTargets)
+    {
+        const rocke_arch_target_t* t = rocke_arch_target_from_gfx(a);
+        int w = t == nullptr ? 0 : rocke_arch_max_vector_load_dwords(t, "i32") * 4;
+        if(w <= 0)
+            return 0;
+        n = n == 0 || w < n ? w : n;
+    }
+    return n;
+}
+
+int max_vec(int nbytes)
+{
+    if(nbytes <= 0)
+        return 0;
+    return vector_bytes() / nbytes;
+}
+
+int lds_bytes(const char* arch)
+{
+    int n = 0;
+    for(const char* a : kPackTargets)
+    {
+        if(arch != nullptr && !streq(arch, a))
+            continue;
+        const rocke_arch_target_t* t = rocke_arch_target_from_gfx(a);
+        int c = t == nullptr ? 0 : t->lds_capacity_bytes;
+        if(c <= 0)
+            return 0;
+        n = c > n ? c : n;
+    }
+    if(arch != nullptr && n == 0)
+    {
+        const rocke_arch_target_t* t = rocke_arch_target_from_gfx(arch);
+        n = t == nullptr || t->lds_capacity_bytes <= 0 ? 0 : t->lds_capacity_bytes;
+    }
+    return n;
+}
+
 V* Emit::c32(int64_t v)
 {
     return rocke_b_const_i32(b, v);
@@ -128,11 +175,7 @@ V* Emit::scalar_param(const char* name)
 
 V* Emit::udiv(V* x, V* m, V* s)
 {
-    V* hi = rocke_b_umul_hi_i32(b, x, m);
-    V* q = rocke_b_lshr(b, hi, s);
-    V* z = c32(0);
-    V* is1 = rocke_b_cmp_eq(b, m, z);
-    return rocke_b_select(b, is1, x, q);
+    return rocke_do_magic_division_u31_dynamic(b, x, m, s, true);
 }
 
 std::pair<V*, V*> Emit::divmod(V* x, V* d, V* m, V* s)

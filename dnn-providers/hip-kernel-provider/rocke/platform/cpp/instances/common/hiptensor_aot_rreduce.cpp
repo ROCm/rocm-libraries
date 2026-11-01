@@ -10,6 +10,7 @@
 #include "rocke/instance_hiptensor_aot_internal.h"
 
 #include "rocke/error_boundary.hpp"
+#include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/ir_internal.h"
 
 #include <functional>
@@ -222,8 +223,7 @@ V* nan_any(RedEmit& e, const std::vector<V*>& vals)
 std::pair<V*, V*> divmod_nosel(RedEmit& e, V* x, V* d, V* m, V* s)
 {
     rocke_ir_builder_t* b = e.b;
-    V* hi = rocke_b_umul_hi_i32(b, x, m);
-    V* q = rocke_b_lshr(b, hi, s);
+    V* q = rocke_do_magic_division_u31_dynamic(b, x, m, s, false);
     V* qd = rocke_b_mul(b, q, d);
     V* r = rocke_b_sub(b, x, qd);
     return {q, r};

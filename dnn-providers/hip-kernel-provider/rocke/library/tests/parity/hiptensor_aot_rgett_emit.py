@@ -6591,7 +6591,7 @@ def _spec(idx: int):
 
 def _build(sg, arch=None):
     spec, geom = sg
-    return build_rgett(spec, arch=arch, geom=geom)
+    return build_rgett(spec.with_geom(geom), arch=arch)
 
 
 def main() -> int:

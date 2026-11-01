@@ -174,6 +174,14 @@ def is_valid_spec(spec: PermuteSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     ``{64,128,256,512,1024}`` are clamped to the target's
     ``max_threads_per_block``).
     """
+    return _check_spec(spec, arch, max_rank=MAX_RANK)
+
+
+def _check_spec(spec: PermuteSpec, arch: str, *, max_rank: int) -> Tuple[bool, str]:
+    """:func:`is_valid_spec` with an explicit rank cap. The cap is the size of
+    the host-args arrays the C++ instance builder mirrors; a Python-only caller
+    that builds the body directly (no host-args array) passes its own cap
+    instead of rebinding the module-level ``MAX_RANK``."""
     from ...core.arch import ArchTarget
 
     try:
@@ -192,8 +200,8 @@ def is_valid_spec(spec: PermuteSpec, arch: str = "gfx950") -> Tuple[bool, str]:
         )
     if spec.rank == 0:
         return False, "rank must be >= 1"
-    if spec.rank > MAX_RANK:
-        return False, f"rank {spec.rank} > {MAX_RANK} (CK Tile cap)"
+    if spec.rank > max_rank:
+        return False, f"rank {spec.rank} > {max_rank} (CK Tile cap)"
     if len(spec.perm) != spec.rank:
         return (
             False,
@@ -288,7 +296,13 @@ def build_permute(spec: PermuteSpec, arch: str = "gfx950") -> KernelDef:
     :func:`is_valid_spec` purely so the block-size bound is validated
     against the target's ``max_threads_per_block``.
     """
-    ok, why = is_valid_spec(spec, arch)
+    return _build_permute(spec, arch, max_rank=MAX_RANK)
+
+
+def _build_permute(spec: PermuteSpec, arch: str, *, max_rank: int) -> KernelDef:
+    """:func:`build_permute` validated against an explicit rank cap (see
+    :func:`_check_spec`); the emitted body does not depend on the cap."""
+    ok, why = _check_spec(spec, arch, max_rank=max_rank)
     if not ok:
         raise ValueError(f"invalid permute spec: {why}")
 

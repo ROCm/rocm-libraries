@@ -38,7 +38,7 @@ from typing import List, Optional
 
 from rocke.core.ir import I32, IRBuilder, KernelDef
 
-from .common import MAX_RANK, Emit, ptr
+from .common import MAX_RANK, Emit, ptr, require_bool
 
 EW_ABI = "hiptensor-aot-ew/v1"
 
@@ -64,6 +64,7 @@ class EwSpec:
         return {1: ["A", "D"], 2: ["A", "C", "D"], 3: ["A", "B", "C", "D"]}[self.arity]
 
     def check(self) -> None:
+        require_bool(self, "cplx", "idx64", "math")
         if self.arity not in (1, 2, 3):
             raise ValueError("arity must be 1, 2 or 3")
         if self.arity >= 2 and not self.c:
@@ -90,7 +91,9 @@ class EwSpec:
         )
 
 
-def build_ew(spec: EwSpec) -> KernelDef:
+def build_ew(spec: EwSpec, *, arch: str = "gfx950") -> KernelDef:
+    """The generic kernel of a row. ``arch`` is not used: the kernel is target-neutral IR (the pack builds a target's
+    classes for it)."""
     spec.check()
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block

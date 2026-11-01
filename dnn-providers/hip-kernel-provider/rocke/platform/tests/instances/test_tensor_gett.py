@@ -383,6 +383,8 @@ def test_traitspec_fields_table_is_current():
     from pathlib import Path
 
     tool = Path(__file__).resolve().parents[2] / "tools" / "gen_traitspec_fields.py"
+    if not tool.is_file():
+        pytest.skip("tools/gen_traitspec_fields.py is not here (installed test tree)")
     r = subprocess.run(
         [sys.executable, str(tool), "--check"], capture_output=True, text=True
     )

@@ -124,8 +124,8 @@ static rocke_kernel_def_t* ewt_impl(rocke_ir_builder_t* b, const rocke_htaot_ewt
     Emit e(b, false, cdt, false);
     const int TT = rocke_htaot_ewt_tile_t(spec);
     const int TO = TILE_O;
-    const int vo = 16 / nbytes(spec->d);
-    auto vt_of = [&](const std::string& n) { return 16 / nbytes(dts[n]); };
+    const int vo = max_vec(nbytes(spec->d));
+    auto vt_of = [&](const std::string& n) { return max_vec(nbytes(dts[n])); };
     std::map<std::string, V*> P;
     for(const auto& n : names)
         P[n] = ptr(b, n.c_str(), dts[n], n != "D");
@@ -208,7 +208,7 @@ static rocke_kernel_def_t* ewt_impl(rocke_ir_builder_t* b, const rocke_htaot_ewt
         const rocke_type_t* ty = nullptr;
         int nb_ = 0;
         dtype_of(dts[n], &ty, &nb_);
-        int shape[2] = {TO, TT + 16 / nb_};
+        int shape[2] = {TO, TT + max_vec(nb_)};
         std::string hint = "t" + n;
         lds[n] = rocke_b_smem_alloc(b, ty, shape, 2, hint.c_str());
     }
@@ -406,7 +406,7 @@ static rocke_kernel_def_t* ewt_impl(rocke_ir_builder_t* b, const rocke_htaot_ewt
                         off = rocke_b_add(b, a1, m2);
                         off = rocke_b_select(b, okv, off, c0);
                     }
-                    V* v = rocke_b_global_load_vN(b, P[n], off, ty, l.vt, 16);
+                    V* v = rocke_b_global_load_vN(b, P[n], off, ty, l.vt, vector_bytes());
                     V* z = zero_of(b, ty);
                     std::vector<V*> zs(l.vt, z);
                     V* zv = rocke_b_vec_pack(b, zs.data(), l.vt, ty);
@@ -481,7 +481,7 @@ static rocke_kernel_def_t* ewt_impl(rocke_ir_builder_t* b, const rocke_htaot_ewt
                 auto vec_load = [&](const std::vector<V*>&) {
                     std::vector<V*> out;
                     int done = 0;
-                    int w = vo < 16 / nb_ ? vo : 16 / nb_;
+                    int w = vo < max_vec(nb_) ? vo : max_vec(nb_);
                     while(done < vo)
                     {
                         V* o_ = base;
@@ -574,7 +574,7 @@ static rocke_kernel_def_t* ewt_impl(rocke_ir_builder_t* b, const rocke_htaot_ewt
                 for(V* x : out)
                     outs.push_back(e.from_c(x, spec->d));
                 V* pk = rocke_b_vec_pack(b, outs.data(), (int)outs.size(), dty);
-                rocke_b_global_store_vN(b, P["D"], doff, pk, vo, 16);
+                rocke_b_global_store_vN(b, P["D"], doff, pk, vo, vector_bytes());
             });
         }
     }

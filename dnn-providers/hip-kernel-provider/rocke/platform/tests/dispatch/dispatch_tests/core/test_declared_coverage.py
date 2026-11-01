@@ -103,6 +103,23 @@ def _tensor_gett_requests(arch: str):
             ),
             arch=arch,
         )
+    # the same contraction with both operands already packed K-contiguous (free modes, then
+    # the K modes; every tensor packed): the single-launch K-contiguous GETT (tensor_gett_kc)
+    # serves it on the user tensors (its candidate admits only operands that already are the
+    # copies it reads; the others take the packed K-contiguous route of plan_tensor_gett)
+    for dtype in ("fp16", "bf16"):
+        for bilinear in (False, True):
+            yield TensorGettRequest(
+                problem=TensorGettSpec.make(
+                    ["M2", "M1", "M0", "K2", "K1", "K0"],
+                    ["N2", "N1", "N0", "K2", "K1", "K0"],
+                    ["N2", "N1", "N0", "M2", "M1", "M0"],
+                    ext2,
+                    dtype=dtype,
+                    knobs=GettKnobs(bilinear=bilinear),
+                ),
+                arch=arch,
+            )
 
 
 _FAMILIES = (

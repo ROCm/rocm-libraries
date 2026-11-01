@@ -42,9 +42,11 @@ ULP_BOUND = {
 
 
 def _gen_module():
-    spec = importlib.util.spec_from_file_location(
-        "gen_f64_math", PLATFORM / "tools" / "gen_f64_math.py"
-    )
+    path = PLATFORM / "tools" / "gen_f64_math.py"
+    if not path.is_file():
+        # the installed test tree ships neither tools/ nor the C++ table the generator checks
+        pytest.skip("tools/gen_f64_math.py is not here (installed test tree)")
+    spec = importlib.util.spec_from_file_location("gen_f64_math", path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules.setdefault("gen_f64_math", mod)
     spec.loader.exec_module(mod)

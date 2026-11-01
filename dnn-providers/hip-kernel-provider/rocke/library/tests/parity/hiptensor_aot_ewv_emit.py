@@ -22,7 +22,7 @@ def _spec(idx: int):
 
 
 def _build(spec, arch=None):
-    return build_ew_jit(spec, None)
+    return build_ew_jit(spec)
 
 
 def main() -> int:

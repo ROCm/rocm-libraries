@@ -30,7 +30,7 @@ def _spec(idx: int):
 
 def _build(sg, arch=None):
     spec, geom = sg
-    return build_ew_jit(spec, geom)
+    return build_ew_jit(spec.with_geom(geom))
 
 
 def main() -> int:

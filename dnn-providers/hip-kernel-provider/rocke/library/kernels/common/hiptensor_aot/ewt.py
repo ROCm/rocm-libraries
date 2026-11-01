@@ -44,7 +44,7 @@ from typing import Dict, List, Optional
 
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value
 
-from .common import DTYPES, Emit, ptr
+from .common import DTYPES, Emit, max_vec, ptr, require_bool, vector_bytes
 
 EWT_ABI = "hiptensor-aot-ewt/v2"
 #: batch digits: every mode of a contraction's operand pack or epilogue but the tile plane (at most
@@ -81,12 +81,13 @@ class EwtSpec:
         return 32 if any(DTYPES[x][1] == 8 for x in ins) else 64
 
     def vo(self) -> int:
-        return 16 // DTYPES[self.d][1]
+        return max_vec(DTYPES[self.d][1])
 
     def vt(self, n: str) -> int:
-        return 16 // DTYPES[self.dtypes()[n]][1]
+        return max_vec(DTYPES[self.dtypes()[n]][1])
 
     def check(self) -> None:
+        require_bool(self, "fold")
         if self.arity not in (1, 2, 3):
             raise ValueError("arity must be 1, 2 or 3")
         if self.arity >= 2 and not self.c:
@@ -102,7 +103,9 @@ class EwtSpec:
         return f"hiptensor_aot_ewt{self.arity}_{dts}" + ("_f" if self.fold else "")
 
 
-def build_ewt(spec: EwtSpec) -> KernelDef:
+def build_ewt(spec: EwtSpec, *, arch: str = "gfx950") -> KernelDef:
+    """The tiled kernel of a class. ``arch`` is not used: the kernel is target-neutral IR (the pack builds a target's
+    classes for it)."""
     spec.check()
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
@@ -155,11 +158,11 @@ def build_ewt(spec: EwtSpec) -> KernelDef:
     zero = e.cf(0.0)
     nz = {n: b.fcmp("one", S[n], zero) for n in ins}
 
-    # LDS tiles of the inputs read along t: [o][t] in the input's type, rows padded by 16 bytes
+    # LDS tiles of the inputs read along t: [o][t] in the input's type, rows padded by a vector
     lds = {}
     for n in ins:
         ty, nb_ = DTYPES[dts[n]]
-        lds[n] = b.smem_alloc(ty, [TO, TT + 16 // nb_], name_hint=f"t{n}")
+        lds[n] = b.smem_alloc(ty, [TO, TT + max_vec(nb_)], name_hint=f"t{n}")
 
     # phase 1 lanes (per T input): vt consecutive t, rows of o
     def p1_lanes(n):
@@ -247,7 +250,7 @@ def build_ewt(spec: EwtSpec) -> KernelDef:
                         ok = b.land(t_ok, b.cmp_lt(g_o, eo))
                         off = b.add(b.add(boff[n], b.mul(g_o, so[n])), b.mul(gt, st[n]))
                         off = b.select(ok, off, c0)
-                    v = b.global_load_vN(P[n], off, ty, vt, align=16)
+                    v = b.global_load_vN(P[n], off, ty, vt, align=vector_bytes())
                     v = b.select(ok, v, b.vec_pack([_zero(b, ty)] * vt, ty))
                     b.smem_store_vN(lds[n], [orow, tl], v, vt)
         b.sync()
@@ -289,7 +292,7 @@ def build_ewt(spec: EwtSpec) -> KernelDef:
                     ty, nb_ = DTYPES[dts[n]]
                     out = []
                     done = 0
-                    w = min(vo, 16 // nb_)
+                    w = min(vo, max_vec(nb_))
                     while done < vo:
                         o_ = base if done == 0 else b.add(base, e.c32(done))
                         v = b.global_load_vN(P[n], o_, ty, w, align=w * nb_)
@@ -330,7 +333,9 @@ def build_ewt(spec: EwtSpec) -> KernelDef:
                         b.add(boff["D"], b.mul(go, so["D"])), b.mul(gt, st["D"])
                     )
                 outs = [e.from_c(x, spec.d) for x in out]
-                b.global_store_vN(P["D"], doff, b.vec_pack(outs, dty), vo, align=16)
+                b.global_store_vN(
+                    P["D"], doff, b.vec_pack(outs, dty), vo, align=vector_bytes()
+                )
     return b.kernel
 
 

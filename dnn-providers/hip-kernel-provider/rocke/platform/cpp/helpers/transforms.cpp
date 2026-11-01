@@ -135,6 +135,32 @@ rocke_value_t* rocke_do_magic_division(rocke_ir_builder_t* b,
     return rocke_b_lshr(b, summed, rocke_b_const_i32(b, (int64_t)shift));
 }
 
+rocke_value_t* rocke_do_magic_division_u31_dynamic(rocke_ir_builder_t* b,
+                                                   rocke_value_t* dividend,
+                                                   rocke_value_t* multiplier,
+                                                   rocke_value_t* shift,
+                                                   bool one)
+{
+    rocke_value_t* hi;
+    rocke_value_t* q;
+    rocke_value_t* zero;
+    rocke_value_t* is1;
+
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    hi = rocke_b_umul_hi_i32(b, dividend, multiplier);
+    q = rocke_b_lshr(b, hi, shift);
+    if(!one)
+    {
+        return q;
+    }
+    zero = rocke_b_const_i32(b, 0);
+    is1 = rocke_b_cmp_eq(b, multiplier, zero);
+    return rocke_b_select(b, is1, dividend, q);
+}
+
 /* ====================================================================== */
 /* Coord map: a small ordered (name -> CoordVar) association list.         */
 /* The Python uses a dict; we use an insertion-ordered array. Lookups and  */

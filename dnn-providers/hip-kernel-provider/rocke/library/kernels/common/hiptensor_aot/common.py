@@ -24,10 +24,16 @@ problem does not use costs a scalar compare per element.
 from __future__ import annotations
 
 import itertools
+from functools import lru_cache
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import BF16, F16, F32, F64, I32, I64, IRBuilder, PtrType, Type, Value
+from rocke.core.arch import ArchTarget
 from rocke.helpers import elementary
+from rocke.helpers.magic_division import (
+    calculate_magic_numbers_u31,
+    do_magic_division_u31_dynamic,
+)
 
 #: I/O dtypes and their element size in bytes.
 DTYPES: Dict[str, Tuple[Type, int]] = {
@@ -111,24 +117,72 @@ MAX_RANK = 8
 
 INT32_LIMIT = 1 << 31
 
+#: The targets of hipTensor's rocKE kernel packs (its HIPTENSOR_ROCKE_SUPPORTED_TARGETS). A
+#: kernel class is one target-neutral IR that the pack of every target carries.
+PACK_TARGETS = ("gfx90a", "gfx942", "gfx950")
+
+
+@lru_cache(maxsize=None)
+def vector_bytes(arch: Optional[str] = None) -> int:
+    """Bytes of the widest global vector access of ``arch`` (``ArchTarget.max_vector_load_dwords``
+    times 4); ``None``: the narrowest over :data:`PACK_TARGETS` (a class's kernel serves the pack
+    of every target, so its vectors fit each). Raises ``ValueError`` when the catalog gives no
+    positive width."""
+    archs = PACK_TARGETS if arch is None else (arch,)
+    n = min(ArchTarget.from_gfx(a).max_vector_load_dwords("i32") * 4 for a in archs)
+    if n <= 0:
+        raise ValueError(f"no positive vector access width for {archs}")
+    return n
+
+
+def max_vec(nbytes: int, arch: Optional[str] = None) -> int:
+    """Elements of ``nbytes`` bytes in the widest global vector access (:func:`vector_bytes`)."""
+    if nbytes <= 0:
+        raise ValueError(f"element size must be positive, got {nbytes}")
+    v = vector_bytes(arch) // nbytes
+    if v <= 0:
+        raise ValueError(f"{nbytes}-byte elements exceed the vector access width")
+    return v
+
+
+@lru_cache(maxsize=None)
+def lds_bytes(arch: Optional[str] = None) -> int:
+    """LDS capacity of ``arch`` in bytes (``ArchTarget.lds_capacity_bytes``); ``None``: the
+    largest over :data:`PACK_TARGETS` (what a class may use on some pack target). Raises
+    ``ValueError`` when the catalog gives no positive capacity."""
+    archs = PACK_TARGETS if arch is None else (arch,)
+    n = max(ArchTarget.from_gfx(a).lds_capacity_bytes for a in archs)
+    if n <= 0:
+        raise ValueError(f"no positive LDS capacity for {archs}")
+    return n
+
+
+def require_bool(spec, *names: str) -> None:
+    """Reject, never coerce, a boolean field of a spec (``"false"`` and ``1`` are truthy, and a
+    kernel name or ABI flag built from them would not say what was asked for)."""
+    for n in names:
+        v = getattr(spec, n)
+        if type(v) is not bool:
+            raise ValueError(f"{type(spec).__name__}.{n} must be a bool, got {v!r}")
+
 
 def magic_u31(d: int) -> Tuple[int, int]:
-    """``(m, s)`` with ``x // d == umulhi(x, m) >> s`` for every ``0 <= x < 2^31``.
-
-    ``(0, 0)`` for ``d == 1`` (the kernels then use ``x`` itself). hipTensor's C++ runtime
+    """``(m, s)`` with ``x // d == umulhi(x, m) >> s`` for every ``0 <= x < 2^31``;
+    ``(0, 0)`` for ``d == 1`` (the kernels then use ``x`` itself): rocKE's
+    :func:`rocke.helpers.magic_division.calculate_magic_numbers_u31`. hipTensor's C++ runtime
     computes the same numbers (``rocke_runtime.cpp``, ``magicU31``)."""
-    if d <= 0:
-        raise ValueError("divisor must be positive")
-    if d == 1:
-        return 0, 0
-    for s in range(32, 64):
-        m = -(-(1 << s) // d)
-        if m >= (1 << 32):
-            break
-        e = m * d - (1 << s)
-        if e * (INT32_LIMIT - 1) < (1 << s):
-            return m, s - 32
-    raise ValueError(f"no 32-bit magic for divisor {d}")
+    return calculate_magic_numbers_u31(d)
+
+
+def fnv1a64(text: str) -> int:
+    """FNV-1a 64 of ``text``'s UTF-8 bytes: the hash of the route keys of hipTensor's kernel
+    packs (``<family>.tuned.<hash as 16 hex digits>``; hipTensor's C++ side computes the same).
+    """
+    h = 0xCBF29CE484222325
+    for ch in text.encode():
+        h ^= ch
+        h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return h
 
 
 def as_i32_bits(v: int) -> int:
@@ -169,10 +223,9 @@ class Emit:
 
     # ---------------------------------------------------------------- integer helpers
     def udiv(self, x: Value, m: Value, s: Value) -> Value:
-        """``x // d`` for ``0 <= x < 2^31`` with the magic pair ``(m, s)`` of ``d``."""
-        b = self.b
-        q = b.lshr(b.umul_hi_i32(x, m), s)
-        return b.select(b.cmp_eq(m, self.c32(0)), x, q)
+        """``x // d`` for ``0 <= x < 2^31`` with the magic pair ``(m, s)`` of ``d``
+        (:func:`rocke.helpers.magic_division.do_magic_division_u31_dynamic`)."""
+        return do_magic_division_u31_dynamic(self.b, x, m, s)
 
     def divmod(self, x: Value, d: Value, m: Value, s: Value) -> Tuple[Value, Value]:
         b = self.b

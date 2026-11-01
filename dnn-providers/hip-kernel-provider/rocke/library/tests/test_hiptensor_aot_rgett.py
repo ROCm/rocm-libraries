@@ -73,7 +73,7 @@ def test_jit_form_has_no_geometry_arguments():
     sp = RgettSpec("bf16", True, 8, 2, 2, False)
     geom = {n: 1 for n in geometry_names()}
     geom.update(kps=-1, kpl=0)
-    k = build_rgett(sp, arch="gfx950", geom=geom)
+    k = build_rgett(sp.with_geom(geom), arch="gfx950")
     params = [p.name for p in k.params]
     assert params == ["A", "B", "C", "M", "N", "K", "alpha", "Cin", "beta"]
 
@@ -232,7 +232,7 @@ def run(
     )
     assert not slots or p["digits"] <= slots
     geom = {n: p["vals"][n] for n in geometry_names()} if jit else None
-    k = build_rgett(spec, arch="gfx950", geom=geom)
+    k = build_rgett(spec.with_geom(geom), arch="gfx950")
     vals = dict(p["vals"])
     ka, kb = ("B", "A") if p["swapped"] else ("A", "B")
     d0 = t["D"].clone()

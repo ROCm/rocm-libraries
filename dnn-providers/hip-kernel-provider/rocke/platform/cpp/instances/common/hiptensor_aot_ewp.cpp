@@ -232,16 +232,16 @@ bool rocke_htaot_ewp_check(const rocke_htaot_ewp_spec_t* s, char* reason, size_t
         return set_reason(reason, cap, "at least one input read through LDS (kind T)");
     if(!streq(s->mode, "t") && !streq(s->mode, "a"))
         return set_reason(reason, cap, "mode must be t or a");
-    if((s->vb != 2 && s->vb != 4 && s->vb != 8 && s->vb != 16) || s->vb < nbytes(s->d))
+    /* ewp.vector_widths(): the powers of two from 2 to the widest vector access */
+    auto width = [](int w) { return w >= 2 && w <= vector_bytes() && pow2(w); };
+    if(!width(s->vb) || s->vb < nbytes(s->d))
         return set_reason(
-            reason, cap, "vb must be 2, 4, 8 or 16 bytes and at least the element size");
+            reason, cap, "vb must be a vector width in bytes and at least the element size");
     if(s->rag != 0 && s->rag != 1)
         return set_reason(reason, cap, "rag must be 0 or 1");
-    if(s->tb
-       && ((s->tb != 2 && s->tb != 4 && s->tb != 8 && s->tb != 16) || s->tb < nbytes(s->d)
-           || !streq(s->mode, "t")))
+    if(s->tb && (!width(s->tb) || s->tb < nbytes(s->d) || !streq(s->mode, "t")))
         return set_reason(
-            reason, cap, "tb: 2, 4, 8 or 16 bytes, at least the element size, mode t only");
+            reason, cap, "tb: a vector width in bytes, at least the element size, mode t only");
     if(!pow2(s->to) || !pow2(s->tt) || !pow2(s->tw) || !pow2(s->block))
         return set_reason(reason, cap, "tile extents and block must be powers of two");
     const int v = vec_of(s);
@@ -262,7 +262,7 @@ bool rocke_htaot_ewp_check(const rocke_htaot_ewp_spec_t* s, char* reason, size_t
     int nT = 0;
     for(int i = 0; i < s->arity; ++i)
         nT += s->kinds[i] == 'T';
-    if(nT * tile_bytes(s) > ROCKE_HTAOT_EWP_LDS_BYTES)
+    if(nT * tile_bytes(s) > lds_bytes(nullptr))
         return set_reason(reason, cap, "the LDS tiles exceed the LDS budget");
     if(s->nt < 0 || s->nt > 3)
         return set_reason(reason, cap, "nt must be 0 .. 3");
@@ -347,6 +347,14 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
     for(const auto& n : ins)
         if(kind(n) == 'T')
             tins.push_back(n);
+    /* D may alias C (the API allows C == D with C's layout D's, so C is read like D: kind V):
+     * every D vector is then stored only by the unit that owns it. A unit past the end of a
+     * ragged run (or past a phase's last unit) repeats an owned vector; its store would land
+     * after the owner (or a later group of its own thread) read C there. */
+    const bool alias = spec->arity >= 2 && kind("C") == 'V';
+    /* ... and some unit of phase 2 may repeat an owned vector (ragged runs, or a phase-2 unit
+     * count that is not a multiple of the block) */
+    const bool owned = alias && (spec->rag == 1 || p2_units(spec) % BS != 0);
 
     std::map<std::string, V*> P;
     for(const auto& n : names)
@@ -521,7 +529,8 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
         }
         return rocke_b_xor(b, chunk, key);
     };
-    auto units = [&](int64_t total) {
+    /* owners given: per unit, whether the thread owns it (nullptr: always) */
+    auto units = [&](int64_t total, std::vector<V*>* owners) {
         std::vector<V*> out;
         for(int64_t it = 0; it < (total + BS - 1) / BS; ++it)
         {
@@ -531,11 +540,19 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                 V* k = e.c32(it * BS);
                 u = rocke_b_add(b, tid, k);
             }
+            V* mine = nullptr;
             if((it + 1) * BS > total)
             {
+                if(owners != nullptr)
+                {
+                    V* kt = e.c32(total);
+                    mine = rocke_b_cmp_lt(b, u, kt);
+                }
                 V* k = e.c32(total - 1);
                 u = rocke_b_smin(b, u, k);
             }
+            if(owners != nullptr)
+                owners->push_back(mine);
             out.push_back(u);
         }
         return out;
@@ -577,6 +594,10 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
         V* go;
         V* gt;
         V* wv; /* mode a only */
+        V* mine; /* in place: the thread is not past the phase's last unit (nullptr: always) */
+        int nb; /* in place, ragged: the unclamped positions bx[i] of the unit and their run */
+        V* bx[3]; /* lengths bl[i] (mode a: w, o, t; mode t: o, t) */
+        V* bl[3];
     };
 
     auto one_tile = [&](V* tile_id, std::map<std::string, V*>& boff) {
@@ -590,6 +611,28 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
         V* o0 = vmul(tile_o, TO);
         V* t0 = vmul(tile_t, TT);
         V* w0 = vmul(tile_w, int64_t(TW) * VW);
+        /* in place, ragged: whether the tile holds no clamped unit (wave-uniform); such a tile
+         * stores unconditionally, a tile that overhangs a run stores only its owned vectors */
+        V* full = nullptr;
+        V* notfull = nullptr;
+        if(alias && spec->rag)
+        {
+            V* kO = e.c32(TO);
+            V* eO = rocke_b_add(b, o0, kO);
+            full = rocke_b_cmp_le(b, eO, lo);
+            V* kT = e.c32(TT);
+            V* eT = rocke_b_add(b, t0, kT);
+            V* fT = rocke_b_cmp_le(b, eT, lt);
+            full = rocke_b_land(b, full, fT);
+            if(ma)
+            {
+                V* kW = e.c32(int64_t(TW) * VW);
+                V* eW = rocke_b_add(b, w0, kW);
+                V* fW = rocke_b_cmp_le(b, eW, lw);
+                full = rocke_b_land(b, full, fW);
+            }
+            notfull = rocke_b_lnot(b, full);
+        }
         rocke_b_sync(b);
 
         /* ---------------- phase 1 */
@@ -606,7 +649,7 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                     std::vector<V*> rws;
                 };
                 std::vector<Ld> loaded;
-                for(V* u : units(p1_units(spec)))
+                for(V* u : units(p1_units(spec), nullptr))
                 {
                     if(ma)
                     {
@@ -731,9 +774,13 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
 
         /* ---------------- phase 2 */
         std::vector<Unit> p2;
-        for(V* u : units(p2_units(spec)))
+        std::vector<V*> owners;
+        std::vector<V*> us2 = units(p2_units(spec), alias ? &owners : nullptr);
+        for(size_t ui = 0; ui < us2.size(); ++ui)
         {
+            V* u = us2[ui];
             Unit un{};
+            un.mine = alias ? owners[ui] : nullptr;
             V* ol;
             V* tl;
             if(ma)
@@ -755,6 +802,13 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                     c = pow2_div(dw, VW);
                     ol = rocke_b_sub(b, un.go, o0);
                     tl = rocke_b_sub(b, un.gt, t0);
+                    un.nb = 3;
+                    un.bx[0] = wc;
+                    un.bl[0] = lw;
+                    un.bx[1] = go0;
+                    un.bl[1] = lo;
+                    un.bx[2] = gt0;
+                    un.bl[2] = lt;
                 }
                 V* m1 = vmul(tl, TO);
                 V* a1 = rocke_b_add(b, m1, ol);
@@ -780,6 +834,11 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                     V* dob = rocke_b_sub(b, un.go, o0);
                     uo = pow2_div(dob, VW);
                     tl = rocke_b_sub(b, un.gt, t0);
+                    un.nb = 2;
+                    un.bx[0] = go0;
+                    un.bl[0] = lo;
+                    un.bx[1] = gt0;
+                    un.bl[1] = lt;
                 }
                 V* m = vmul(tl, TO / VW);
                 un.ch = rocke_b_add(b, m, uo);
@@ -792,6 +851,19 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
             }
             p2.push_back(un);
         }
+        /* whether the thread owns the unit's vector (nullptr: always); emitted where the
+         * predicated stores use it */
+        auto own = [&](const Unit& un) -> V* {
+            if(!alias || un.nb == 0)
+                return un.mine;
+            V* r = rocke_b_cmp_lt(b, un.bx[0], un.bl[0]);
+            for(int i = 1; i < un.nb; ++i)
+            {
+                V* ci = rocke_b_cmp_lt(b, un.bx[i], un.bl[i]);
+                r = rocke_b_land(b, r, ci);
+            }
+            return un.mine == nullptr ? r : rocke_b_land(b, un.mine, r);
+        };
         auto offs = [&](const std::string& n, const Unit& un) {
             V* oo = ooff(n, un.go);
             V* to_ = toff(n, un.gt);
@@ -812,9 +884,10 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
             V* o_ = offs(n, un);
             return gload(n, o_, VW);
         };
-        /* body(every, op): op >= 0: the fast path (no operator table; op the binary
-         * operator, 0 for a permutation) */
-        auto body = [&](bool every, int op) {
+        /* body(every, op, pred): op >= 0: the fast path (no operator table; op the binary
+         * operator, 0 for a permutation); pred: only the owner of a vector stores it (D may
+         * alias C) */
+        auto body = [&](bool every, int op, bool pred) {
             size_t g = spec->ilp ? (size_t)spec->ilp : p2.size();
             const rocke_type_t* dty = nullptr;
             dtype_of(spec->d, &dty, nullptr);
@@ -904,44 +977,62 @@ static rocke_kernel_def_t* ewp_impl(rocke_ir_builder_t* b, const rocke_htaot_ewp
                     std::vector<V*> outs;
                     for(V* x : out)
                         outs.push_back(e.from_c(x, spec->d));
-                    V* doff = offs("D", grp[q]);
-                    V* pk = rocke_b_vec_pack(b, outs.data(), (int)outs.size(), dty);
-                    rocke_b_global_store_vN_ex(b, P["D"], doff, pk, VW, spec->vb, &mo_st);
+                    auto store = [&]() {
+                        V* doff = offs("D", grp[q]);
+                        V* pk = rocke_b_vec_pack(b, outs.data(), (int)outs.size(), dty);
+                        rocke_b_global_store_vN_ex(b, P["D"], doff, pk, VW, spec->vb, &mo_st);
+                    };
+                    V* mask = pred ? own(grp[q]) : nullptr;
+                    if(mask == nullptr)
+                        store();
+                    else
+                        scf_if(b, mask, store);
                 }
             }
         };
-        /* the fast path per binary operator (trinary: the same operator twice); then every
-         * scale non-zero (straight-line loads, operator table); otherwise skip the inputs of
-         * zero scale */
-        std::vector<std::pair<V*, int>> conds;
-        if(spec->arity == 1)
-            conds.push_back({fastp, 0});
-        else
-            for(int bop : {OP_ADD, OP_MUL, OP_MAX, OP_MIN})
-            {
-                V* kb = e.c32(bop);
-                V* eq = rocke_b_cmp_eq(b, OPS["AB"], kb);
-                V* cnd = rocke_b_land(b, fastp, eq);
-                if(spec->arity == 3)
+        auto dispatch = [&](bool pred) {
+            /* the fast path per binary operator (trinary: the same operator twice); then every
+             * scale non-zero (straight-line loads, operator table); otherwise skip the inputs
+             * of zero scale */
+            std::vector<std::pair<V*, int>> conds;
+            if(spec->arity == 1)
+                conds.push_back({fastp, 0});
+            else
+                for(int bop : {OP_ADD, OP_MUL, OP_MAX, OP_MIN})
                 {
-                    V* kb3 = e.c32(bop);
-                    V* eq3 = rocke_b_cmp_eq(b, OPS["ABC"], kb3);
-                    cnd = rocke_b_land(b, cnd, eq3);
+                    V* kb = e.c32(bop);
+                    V* eq = rocke_b_cmp_eq(b, OPS["AB"], kb);
+                    V* cnd = rocke_b_land(b, fastp, eq);
+                    if(spec->arity == 3)
+                    {
+                        V* kb3 = e.c32(bop);
+                        V* eq3 = rocke_b_cmp_eq(b, OPS["ABC"], kb3);
+                        cnd = rocke_b_land(b, cnd, eq3);
+                    }
+                    conds.push_back({cnd, bop});
                 }
-                conds.push_back({cnd, bop});
+            V* covered = nullptr;
+            for(auto& c : conds)
+            {
+                int bop = c.second;
+                scf_if(b, c.first, [&]() { body(true, bop, pred); });
+                covered = covered == nullptr ? c.first : rocke_b_lor(b, covered, c.first);
             }
-        V* covered = nullptr;
-        for(auto& c : conds)
+            V* notcov = rocke_b_lnot(b, covered);
+            V* gen = rocke_b_land(b, allnz, notcov);
+            scf_if(b, gen, [&]() { body(true, -1, pred); });
+            V* notall = rocke_b_lnot(b, allnz);
+            scf_if(b, notall, [&]() { body(false, -1, pred); });
+        };
+        if(full != nullptr && p2_units(spec) % BS == 0)
         {
-            int bop = c.second;
-            scf_if(b, c.first, [&]() { body(true, bop); });
-            covered = covered == nullptr ? c.first : rocke_b_lor(b, covered, c.first);
+            /* in place, ragged: the units clamp only in a tile that overhangs a run; a whole
+             * tile runs the unpredicated phase 2 */
+            scf_if(b, full, [&]() { dispatch(false); });
+            scf_if(b, notfull, [&]() { dispatch(true); });
         }
-        V* notcov = rocke_b_lnot(b, covered);
-        V* gen = rocke_b_land(b, allnz, notcov);
-        scf_if(b, gen, [&]() { body(true, -1); });
-        V* notall = rocke_b_lnot(b, allnz);
-        scf_if(b, notall, [&]() { body(false, -1); });
+        else
+            dispatch(owned);
     };
 
     V* by = rocke_b_block_id_y(b);

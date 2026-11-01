@@ -1282,7 +1282,6 @@ static rocke_kernel_def_t*
         }
         store_d(elems, outs);
     }
-    rocke_b_ret(b);
     if(!rocke_ir_builder_ok(b))
         return nullptr;
     return rocke_ir_builder_kernel(b);

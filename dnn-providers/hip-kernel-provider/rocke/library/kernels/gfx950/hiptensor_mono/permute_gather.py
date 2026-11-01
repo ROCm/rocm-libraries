@@ -23,6 +23,7 @@ from rocke.helpers.tensor_view import make_global_view
 from rocke.instances.common.permute_nd import (
     PermuteSpec,
     _build_offset_descriptor,
+    _check_spec,
     io_ir_type,
 )
 
@@ -46,8 +47,13 @@ def permute_gather_grid(spec: PermuteSpec, unroll: int) -> Tuple[int, int, int]:
 def build_permute_gather(spec: PermuteGatherSpec, *, arch: str = "gfx950") -> KernelDef:
     unroll = spec.unroll
     spec = spec.permute
-    if unroll < 1:
-        raise ValueError("unroll >= 1")
+    if type(unroll) is not int or unroll < 1:
+        raise ValueError(f"unroll must be an int >= 1, got {unroll!r}")
+    # the permute_nd validator (dtype, block size on ``arch``, perm, shape);
+    # no rank cap: this body has no host-args array
+    ok, why = _check_spec(spec, arch, max_rank=spec.rank)
+    if not ok:
+        raise ValueError(f"invalid permute spec: {why}")
     io_ty = io_ir_type(spec.dtype)
     vec = spec.vec_width
     total = spec.total_elements

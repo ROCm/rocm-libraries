@@ -11,6 +11,7 @@
 #include "rocke/instance_tensor_gett.h"
 
 #include "rocke/error_boundary.hpp"
+#include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/ir_internal.h"
 
 #include <stdio.h>
@@ -194,11 +195,7 @@ struct RtGettHooks : rocke_gett_hooks
                 /* magic-number division (common.Emit.udiv) */
                 V* m = v(b, prefix + "m" + I);
                 V* s = v(b, prefix + "s" + I);
-                V* hi = rocke_b_umul_hi_i32(b, rest, m);
-                q = rocke_b_lshr(b, hi, s);
-                V* c0 = ci(b, 0);
-                V* z = rocke_b_cmp_eq(b, m, c0);
-                q = rocke_b_select(b, z, rest, q);
+                q = rocke_do_magic_division_u31_dynamic(b, rest, m, s, true);
                 V* qe = rocke_b_mul(b, q, e);
                 d = rocke_b_sub(b, rest, qe);
             }

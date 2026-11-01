@@ -33,7 +33,7 @@ from typing import Dict, List, Optional, Sequence
 
 from rocke.core.ir import I32, IRBuilder, KernelDef, TemporalHint
 
-from .common import DTYPES, Emit, ptr
+from .common import DTYPES, Emit, max_vec, ptr, require_bool
 from .ew import EwSpec
 
 EWF_ABI = "hiptensor-aot-ewf/v1"
@@ -41,9 +41,6 @@ EWF_ABI = "hiptensor-aot-ewf/v1"
 EWF_UNROLL = 2
 #: Targets whose streaming (``nt``) accesses the pack's classes use.
 EWF_STREAMING_ARCHS = ("gfx942", "gfx950")
-
-#: Widest vector access per element size (bytes -> elements) of the IR builder's vector ops.
-_MAX_VEC = {2: 8, 4: 4, 8: 2}
 
 
 @dataclass(frozen=True)
@@ -66,10 +63,11 @@ class EwfSpec:
 
     @property
     def vec(self) -> int:
-        """Elements per vector: 16 bytes of D."""
-        return 16 // DTYPES[self.d][1]
+        """Elements per vector: the widest vector access (:func:`.common.max_vec`) of D."""
+        return max_vec(DTYPES[self.d][1])
 
     def check(self) -> None:
+        require_bool(self, "nt")
         self.base().check()
         if self.block not in (64, 128, 256, 512, 1024):
             raise ValueError("block must be 64, 128, 256, 512 or 1024")
@@ -86,11 +84,13 @@ class EwfSpec:
 
 
 def _runs(n: int, nbytes: int) -> List[int]:
-    w = min(n, _MAX_VEC[nbytes])
+    w = min(n, max_vec(nbytes))
     return [w] * (n // w)
 
 
-def build_ewf(spec: EwfSpec) -> KernelDef:
+def build_ewf(spec: EwfSpec, *, arch: str = "gfx950") -> KernelDef:
+    """The flat kernel of a class. ``arch`` is not used: the kernel is target-neutral IR (the pack builds a target's
+    classes for it)."""
     spec.check()
     base = spec.base()
     vec = spec.vec

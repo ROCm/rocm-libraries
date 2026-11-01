@@ -501,7 +501,7 @@ def ew_params(idx64, mixed=True):
     return out
 
 
-def kernel_descriptors(arch, num_cus):
+def kernel_descriptors(arch):
     out = []
     features = rocke_features()
     for idx64 in (False, True):
@@ -718,7 +718,7 @@ def _gemm_spec(params, arch):
     return spec, "ok"
 
 
-def _gett64_spec(params, arch, num_cus, dtype="f64"):
+def _gett64_spec(params, arch, dtype="f64"):
     """The spec of a gett64 (``dtype`` "f64") or gett32 (``dtype`` "f32") descriptor."""
     from dataclasses import replace
 
@@ -798,11 +798,11 @@ def aot_gett_keys(arch):
     return _table_keys(tg.TENSOR_GETT_AOT_FILE, arch)
 
 
-def fnv1a64(text):
-    h = 0xCBF29CE484222325
-    for byte in text.encode():
-        h = ((h ^ byte) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    return f"{h:016x}"
+def _route_hash(text):
+    """A route key's hash as 16 hex digits (``hiptensor_aot.common.fnv1a64``)."""
+    from kernels.common.hiptensor_aot.common import fnv1a64
+
+    return f"{fnv1a64(text):016x}"
 
 
 def gett_problem_key(dtype, bilinear, tensors):
@@ -922,7 +922,7 @@ def build_gett_plan(params, arch):
     return dict(kernels=kernels, key=pkey, record="|".join(rec)), "ok"
 
 
-def build_kernel(family, params, arch, num_cus):
+def build_kernel(family, params, arch):
     """(KernelDef, attributes) of a descriptor, or (None, reason) when it does not apply."""
     if family == "ew":
         from kernels.common.hiptensor_aot.ew import EW_ABI, EwSpec, build_ew
@@ -1091,7 +1091,7 @@ def build_kernel(family, params, arch, num_cus):
             max_rank=8,
             limit_index=(1 << 31) - 1,
         )
-        return build_ew_jit(spec, None), attrs
+        return build_ew_jit(spec), attrs
     if family == "ewf":
         from kernels.common.hiptensor_aot.ewf import (
             EWF_ABI,
@@ -1242,7 +1242,7 @@ def build_kernel(family, params, arch, num_cus):
         from rocke.instances.common.gett_f64 import build_gett_f64
 
         f32 = family == "gett32"
-        spec, why = _gett64_spec(params, arch, num_cus, "f32" if f32 else "f64")
+        spec, why = _gett64_spec(params, arch, "f32" if f32 else "f64")
         if spec is None:
             return None, why
         attrs = dict(
@@ -1370,7 +1370,7 @@ def _worker_init(src):
 
 def _compile_one(job):
     """Builds, lowers and compiles one descriptor. Returns a result dict (never raises)."""
-    family, params, arch, num_cus, cache_dir, compiler_id = job
+    family, params, arch, cache_dir, compiler_id = job
     t0 = time.time()
     try:
         if family == "gett_plan":
@@ -1387,7 +1387,7 @@ def _compile_one(job):
                 )
                 for k in plan["kernels"]
             ]
-            route = fnv1a64(plan["key"])
+            route = _route_hash(plan["key"])
             return dict(
                 status="ok",
                 family=family,
@@ -1399,7 +1399,7 @@ def _compile_one(job):
                 },
                 seconds=time.time() - t0,
             )
-        kernel, attrs = build_kernel(family, params, arch, num_cus)
+        kernel, attrs = build_kernel(family, params, arch)
         if kernel is None:
             return dict(status="skip", reason=attrs, family=family, params=params)
         r = _compile_kernel(kernel, attrs, arch, cache_dir, compiler_id)
@@ -1738,7 +1738,7 @@ def pack_manifest(arch, num_cus):
     (``jit <kernel name>``, sorted). Nothing is lowered or compiled."""
     kernels = {}
     routes = routes_for(arch, num_cus)
-    for family, params in kernel_descriptors(arch, num_cus):
+    for family, params in kernel_descriptors(arch):
         if family == "gett_plan":
             plan, _why = build_gett_plan(params, arch)
             if plan is None:
@@ -1747,11 +1747,11 @@ def pack_manifest(arch, num_cus):
                 (k, dict(family="gett", abi="rocke-tensor-gett/v1"))
                 for k in plan["kernels"]
             ]
-            route = fnv1a64(plan["key"])
+            route = _route_hash(plan["key"])
             routes[f"gett.tuned.{route}"] = plan["record"]
             routes[f"gett.tuned.{route}.key"] = plan["key"]
         else:
-            kernel, attrs = build_kernel(family, params, arch, num_cus)
+            kernel, attrs = build_kernel(family, params, arch)
             if kernel is None:
                 continue
             built = [(kernel, attrs)]
@@ -1981,14 +1981,14 @@ def main(argv=None):
         from rocke.helpers.split_k import arch_num_cus
 
         num_cus = a.num_cus or arch_num_cus(arch)
-        descs = kernel_descriptors(arch, num_cus)
+        descs = kernel_descriptors(arch)
         if a.only:
             import re
 
             descs = [
                 d for d in descs if re.search(a.only, f"{d[0]} {sorted(d[1].items())}")
             ]
-        work = [(f, p, arch, num_cus, a.cache_dir, compiler_id) for f, p in descs]
+        work = [(f, p, arch, a.cache_dir, compiler_id) for f, p in descs]
         t0 = time.time()
         results = []
         ctx = multiprocessing.get_context("spawn")

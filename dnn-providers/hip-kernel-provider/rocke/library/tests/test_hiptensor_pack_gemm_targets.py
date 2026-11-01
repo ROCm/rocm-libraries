@@ -51,7 +51,7 @@ def test_gemm_tables_are_rockes(writer):
 
 
 def test_gfx942_gemm_descriptors(writer):
-    descs = [p for f, p in writer.kernel_descriptors("gfx942", 304) if f == "gemm"]
+    descs = [p for f, p in writer.kernel_descriptors("gfx942") if f == "gemm"]
     want = []
     for route in writer.GEMM_ROUTES:
         for dt in ("fp16", "bf16") if route == "h16" else ("bf16",):
@@ -163,6 +163,8 @@ def test_parity_family_builds_the_pack_bodies(writer):
         / "parity"
         / "gemm_cf32_emit.py"
     )
+    if not path.is_file():
+        pytest.skip("no platform parity emitters here (the installed test tree)")
     spec = importlib.util.spec_from_file_location("_gemm_cf32_emit", path)
     emit = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(emit)

@@ -57,6 +57,7 @@ from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import I32, IRBuilder, KernelDef, PtrType, TemporalHint, Value
+from rocke.helpers.magic_division import do_magic_division_u31_dynamic
 
 from .common import DTYPES, MAX_RANK, OP_ADD, OP_MAX, OP_MIN, OP_MUL, Emit, ptr
 
@@ -115,6 +116,9 @@ class RreduceSpec:
 
     def check(self) -> Optional[str]:
         """Why the class cannot be built (None when it can)."""
+        for n in ("nt", "una", "idx64"):
+            if type(getattr(self, n)) is not bool:
+                return f"{n} must be a bool, got {getattr(self, n)!r}"
         if self.mode not in ("row", "col"):
             return f"mode {self.mode!r}"
         if self.a not in DTYPES or self.d not in DTYPES:
@@ -170,6 +174,8 @@ class RreduceFinalSpec:
         return "f64" if "f64" in (self.a, self.d) else "f32"
 
     def check(self) -> Optional[str]:
+        if type(self.idx64) is not bool:
+            return f"idx64 must be a bool, got {self.idx64!r}"
         if self.a not in DTYPES or self.d not in DTYPES:
             return "unknown dtype"
         if self.op not in OPS:
@@ -259,8 +265,7 @@ def _divmod(e: Emit, x: Value, d: Value, m: Value, s: Value) -> Tuple[Value, Val
     """``(x // d, x % d)`` with the magic pair of ``d`` (exact for ``d >= 2``; for a padding slot,
     ``d == 1`` and ``m == 0``, exact for ``x == 0``)."""
     b = e.b
-    hi = b.umul_hi_i32(x, m)
-    q = b.lshr(hi, s)
+    q = do_magic_division_u31_dynamic(b, x, m, s, one=False)
     qd = b.mul(q, d)
     r = b.sub(x, qd)
     return q, r

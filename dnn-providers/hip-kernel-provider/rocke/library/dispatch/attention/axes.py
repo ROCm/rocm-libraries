@@ -163,9 +163,10 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "chiplet_num_xcds",
     }
 )
-# Problem fields only some arches' dense specs declare (the band's right bound).
+# Problem fields only some arches' dense specs declare (the band's right bound;
+# the back-to-back GEMM score map).
 DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
-    "gfx950": frozenset({"right_bound"}),
+    "gfx950": frozenset({"right_bound", "score_identity"}),
     "gfx942": frozenset(),
 }
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {

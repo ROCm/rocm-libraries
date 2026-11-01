@@ -19,6 +19,34 @@ if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
 
 
+def pytest_configure(config):
+    """Initialise torch's HIP runtime before anything initialises rocKE's.
+
+    rocKE binds the HIP runtime torch uses only when torch is already imported
+    (``rocke.runtime.runtime_coexistence``); otherwise it loads a ROCm
+    install's ``libamdhip64``. Modules of this tree probe the device through
+    rocKE while they are collected (``get_device_arch(0)`` for a skip mark),
+    long before a later module imports torch. That initialises the install's
+    HSA runtime first, and torch's own HSA runtime, initialised after it in the
+    same process, then finds no GPU: every torch device test fails with "no
+    ROCm-capable device is detected" (a second HSA runtime initialised AFTER
+    torch's does see the device). Initialising torch here, before collection,
+    gives the whole session the single runtime a torch process has. Without
+    torch installed nothing changes; a torch that fails to import or to
+    initialise is left to the tests that need it.
+    """
+    import importlib.util
+
+    try:
+        if importlib.util.find_spec("torch") is None:
+            return
+        import torch
+
+        torch.cuda.is_available()
+    except Exception:  # noqa: BLE001 - see the docstring
+        pass
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     """Report a ``ROCKE_BACKEND=both`` coverage gap as a skip, never a pass.
