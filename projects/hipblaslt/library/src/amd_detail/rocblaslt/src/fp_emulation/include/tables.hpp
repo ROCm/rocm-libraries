@@ -619,6 +619,45 @@ namespace FixedPointEmulation
         return vc[s_idx][mod_idx];
     }
 
+    // 16-bit limbs of the exact CRT coefficients qpi_k and of the moduli products
+    // P_s, for the exact integer CRT sum in accum_finalize_kernel.  All moduli are
+    // at most 2^8, so P_s < 2^160 and qpi_k < P_s fit in CRT_LIMBS limbs.
+    static constexpr unsigned CRT_LIMBS = 10u;
+
+    __device__ __forceinline__ uint32_t qpi_limb(unsigned s_idx,
+                                                 unsigned mod_idx,
+                                                 unsigned j) noexcept
+    {
+        static constexpr auto v = []() constexpr {
+            std::array<std::array<std::array<uint16_t, CRT_LIMBS>, S_MAX>, S_MAX - 1> t{};
+            auto Pt = make_P_table();
+            for(unsigned s = 1; s < S_MAX; ++s)
+                for(unsigned m = 0; m <= s; ++m)
+                {
+                    uint32_t mk = static_cast<uint32_t>(moduli[m]);
+                    UInt256  Mk = Pt[s - 1].div(mk);
+                    UInt256  qp = Mk.mul(mod_inverse(Mk.mod(mk), mk));
+                    for(unsigned l = 0; l < CRT_LIMBS; ++l)
+                        t[s - 1][m][l] = static_cast<uint16_t>(qp.d[l / 4] >> (16 * (l % 4)));
+                }
+            return t;
+        }();
+        return v[s_idx][mod_idx][j];
+    }
+
+    __device__ __forceinline__ uint32_t P_limb(unsigned s_idx, unsigned j) noexcept
+    {
+        static constexpr auto v = []() constexpr {
+            std::array<std::array<uint16_t, CRT_LIMBS>, S_MAX - 1> t{};
+            auto Pt = make_P_table();
+            for(unsigned s = 0; s < S_MAX - 1; ++s)
+                for(unsigned l = 0; l < CRT_LIMBS; ++l)
+                    t[s][l] = static_cast<uint16_t>(Pt[s].d[l / 4] >> (16 * (l % 4)));
+            return t;
+        }();
+        return v[s_idx][j];
+    }
+
     // crt_capacity_bits(s_idx): usable CRT capacity (bits) for (s_idx+2) moduli.
     //
     //   log2(P_s)/2 - 0.5: per-side CRT capacity.  The 1/2 splits the single
