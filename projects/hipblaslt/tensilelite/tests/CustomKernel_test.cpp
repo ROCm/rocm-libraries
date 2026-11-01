@@ -208,6 +208,203 @@ TEST(CustomKernelTest, ScalarsFillTheDeclaredThirtyTwoBitSlot)
 
 namespace
 {
+    // hipBLASLt passes compact scales; the TensileLite client uses the padded
+    // descriptor. Keep both caller layouts available to the argument probes.
+    ContractionProblemGemm mxScaleProblem(size_t M,
+                                          size_t N,
+                                          size_t K,
+                                          bool   transA,
+                                          bool   transB,
+                                          int    mxBlock      = 32,
+                                          bool   packedScales = true)
+    {
+        auto problem = ContractionProblemGemm::GEMM_Strides(transA,
+                                                            transB,
+                                                            rocisa::DataType::Float4,
+                                                            rocisa::DataType::Float4,
+                                                            rocisa::DataType::BFloat16,
+                                                            rocisa::DataType::BFloat16,
+                                                            M,
+                                                            N,
+                                                            K,
+                                                            1,
+                                                            transA ? K : M,
+                                                            transA ? K * M : M * K,
+                                                            transB ? N : K,
+                                                            transB ? N * K : K * N,
+                                                            M,
+                                                            M * N,
+                                                            M,
+                                                            M * N,
+                                                            0.0);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setMXScaleA(rocisa::DataType::E8, mxBlock);
+        problem.setMXScaleB(rocisa::DataType::E8, mxBlock);
+        problem.setCustomKernelMXScalesArePacked(packedScales);
+        return problem;
+    }
+
+    // The int64 this problem emits into a probe kernel's single scale-stride slot.
+    int64_t emittedScaleStride(CustomArgSemantic             semantic,
+                               ContractionProblemGemm const& problem,
+                               int                           argsVersion       = 0,
+                               bool                          useInitialStrides = false)
+    {
+        ContractionSolution solution;
+        configureProbeKernel(solution, {CustomArgType::int64, semantic});
+        solution.sizeMapping.globalSplitU                      = 1;
+        solution.internalArgsSupport.persistentLoopArgsVersion = argsVersion;
+        solution.problemType.useInitialStridesAB               = useInitialStrides;
+        if(argsVersion == 1)
+        {
+            // Version 1 is valid only for a persistent data-parallel solution
+            // with KernArgsVersion 3.
+            solution.internalArgsSupport.version        = 3;
+            solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+            solution.customKernel.generated             = true;
+        }
+
+        auto              device = probeDevice();
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+
+        auto invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+
+        EXPECT_EQ(invocation.args.size(), sizeof(int64_t));
+        int64_t stride = 0;
+        std::memcpy(&stride, invocation.args.data(), sizeof(stride));
+        return stride;
+    }
+}
+
+// A compact buffer needs the unpadded pitch when ceil(K/mxBlock) is not a
+// multiple of 8; using the descriptor pitch would misaddress later rows.
+TEST(CustomKernelTest, ScaleStrideIsCompactNotPadded)
+{
+    // TN: K is the fast (bound) dim of both A and B, so the padded K-block count
+    // would leak straight into the stride.
+    struct
+    {
+        size_t  K;
+        int64_t compact;
+        int64_t padded;
+    } const tnCases[] = {
+        {128, 4, 8}, // ceil(K/32) = 4  -> padded to 8
+        {384, 12, 16}, // ceil(K/32) = 12 -> padded to 16
+        {256, 8, 8}, // ceil(K/32) = 8  -> already aligned, the two agree
+    };
+
+    for(auto const& c : tnCases)
+    {
+        auto problem = mxScaleProblem(64, 64, c.K, /*transA*/ true, /*transB*/ false);
+
+        // The descriptor really does carry the padding; we are diverging from it.
+        EXPECT_EQ(problem.mxsa().strides()[1], static_cast<size_t>(c.padded)) << "K=" << c.K;
+        EXPECT_EQ(problem.mxsb().strides()[1], static_cast<size_t>(c.padded)) << "K=" << c.K;
+
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem), c.compact)
+            << "K=" << c.K;
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), c.compact)
+            << "K=" << c.K;
+    }
+}
+
+// Both argument versions must preserve the caller's batch layout, including
+// padding in the free dimension as well as the K-block dimension.
+TEST(CustomKernelTest, ScaleBatchStrideFollowsTheCallerBuffer)
+{
+    auto packedProblem = mxScaleProblem(60, 60, 128, true, false);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA1, packedProblem), 4 * 60);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB1, packedProblem), 4 * 60);
+    for(bool packed : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "packed=" << packed);
+        auto          problem  = mxScaleProblem(60, 60, 128, true, false, 32, packed);
+        const int64_t expected = packed ? 4 * 60 : 8 * 64;
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA1, problem, 1), expected);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB1, problem, 1), expected);
+    }
+}
+
+TEST(CustomKernelTest, ScaleStridesIncludeTheInitialStrideForDataParallelArgs)
+{
+    for(bool packed : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "packed=" << packed);
+        auto problem = mxScaleProblem(60, 60, 128, true, false, 32, packed);
+        // With initial strides enabled, slots 0 and 1 describe tensor dimensions 0 and 1.
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem, 1, true), 1);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem, 1, true), 1);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA1, problem, 1, true),
+                  packed ? 4 : 8);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB1, problem, 1, true),
+                  packed ? 4 : 8);
+    }
+}
+
+TEST(CustomKernelTest, ScaleStrideRoundsUpPartialBlocks)
+{
+    for(int block : {16, 32})
+    {
+        SCOPED_TRACE(::testing::Message() << "block=" << block);
+        auto          problem  = mxScaleProblem(60, 60, 129, true, false, block);
+        const int64_t expected = block == 16 ? 9 : 5;
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem), expected);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), expected);
+    }
+}
+
+// The TensileLite client allocates and fills the descriptor's padded layout.
+// Compact strides would make some rows read padding instead of their scales.
+TEST(CustomKernelTest, ScaleStrideFollowsDescriptorWhenCallerDoesNotPack)
+{
+    struct
+    {
+        size_t  K;
+        int64_t padded; // what the descriptor says, and what must be emitted
+    } const tnCases[] = {
+        {128, 8}, // ceil(K/32) = 4  -> padded to 8;  packed would have said 4
+        {384, 16}, // ceil(K/32) = 12 -> padded to 16; packed would have said 12
+        {256, 8}, // ceil(K/32) = 8  -> already aligned, the two agree
+    };
+
+    for(auto const& c : tnCases)
+    {
+        auto problem = mxScaleProblem(
+            64, 64, c.K, /*transA*/ true, /*transB*/ false, /*mxBlock*/ 32, /*packedScales*/ false);
+
+        EXPECT_EQ(problem.mxsa().strides()[1], static_cast<size_t>(c.padded)) << "K=" << c.K;
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem), c.padded)
+            << "K=" << c.K;
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), c.padded)
+            << "K=" << c.K;
+    }
+
+    // Same for the K-slow orientation the packed path handles specially.
+    auto nn = mxScaleProblem(
+        60, 60, 128, /*transA*/ false, /*transB*/ false, /*mxBlock*/ 32, /*packedScales*/ false);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, nn), 64);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, nn), 8);
+}
+
+// NN places K on different stored axes in A and B. Unaligned M and K make
+// compact and padded pitches differ for both operands.
+TEST(CustomKernelTest, ScaleStrideIsCompactForEitherBoundDimension)
+{
+    auto problem = mxScaleProblem(60, 60, 128, /*transA*/ false, /*transB*/ false);
+
+    // A: bound dim is index 1, so the stride is A's free dim, padded to 32.
+    EXPECT_EQ(problem.mxsa().strides()[1], 64u);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem), 60);
+
+    // B: bound dim is index 0, so the stride is the K-block count, padded to 8.
+    EXPECT_EQ(problem.mxsb().strides()[1], 8u);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), 4);
+}
+
+namespace
+{
     // Grid x and ComputeUnits kernarg of a persistent probe kernel.
     std::pair<size_t, int32_t> computeUnitsLaunch(int smCountTarget, int persistentMaxCUs)
     {
