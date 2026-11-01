@@ -1651,7 +1651,8 @@ def main() -> int:
     parser.add_argument(
         "--kernels-file",
         default=None,
-        help="--run-from-cache only: run just the cached kernels whose labels the file lists",
+        help="--run-from-cache only: run just the cached kernels whose labels the file "
+        "lists (a label without its fwd-/dgrad-/wgrad- prefix names every direction)",
     )
     args = parser.parse_args()
     conv_fill.set_mode(args.fill)

@@ -60,27 +60,35 @@ def add_argument(parser) -> None:
     )
 
 
-def _bare(label: str) -> str:
-    return (
-        label.split("-", 1)[1]
-        if label.startswith(("fwd-", "dgrad-", "wgrad-"))
-        else label
-    )
+# The direction a kernel label starts with (``KernelIdentity.label()``).
+DIRECTIONS = ("fwd", "dgrad", "wgrad")
+
+
+def _labels(label: str) -> tuple:
+    """The full labels a ``--kernels-file`` entry names: a direction-prefixed
+    label is itself only; a bare one (the label without its direction) is the
+    label in every direction, since the runners match ``identity.label()``."""
+    if label.startswith(tuple(f"{d}-" for d in DIRECTIONS)):
+        return (label,)
+    return tuple(f"{d}-{label}" for d in DIRECTIONS)
 
 
 def load_kernels_file(path):
     """``--kernels-file``: ``None`` (no restriction) or ``{case key or "*": labels}``.
-    A line is a kernel label (allowed for every case) or ``case_key<TAB>label``."""
+    A line is a kernel label (allowed for every case) or ``case_key<TAB>label``;
+    a label may leave out its direction prefix (``fwd-`` ...) to name the
+    kernel in every direction."""
     if not path:
         return None
     out: dict = {}
-    for line in open(path):
-        line = line.strip()
-        if not line:
-            continue
-        key, _, label = line.rpartition("\t")
-        key = key or "*"
-        out.setdefault(key, set()).update((label, _bare(label)))
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            key, _, label = line.rpartition("\t")
+            key = key or "*"
+            out.setdefault(key, set()).update(_labels(label))
     return out
 
 

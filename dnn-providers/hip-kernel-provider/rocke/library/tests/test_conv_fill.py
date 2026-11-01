@@ -38,12 +38,66 @@ def test_fill_ranges():
 def test_kernels_file(tmp_path):
     assert conv_fill.load_kernels_file(None) is None
     f = tmp_path / "k.txt"
-    f.write_text("fwd-direct_fwd_wmma-a\n\ncase1\tfwd-direct_fwd_wmma-b\n")
+    f.write_text(
+        "fwd-direct_fwd_wmma-a\n\ncase1\tdirect_fwd_wmma-b\n"
+        "case1\twgrad-direct_wgrad-c\n"
+    )
     m = conv_fill.load_kernels_file(str(f))
-    # A label is kept with and without its direction prefix.
-    assert conv_fill.kernels_for(m, "case2") == {
+    # A prefixed label is that direction's only.
+    assert conv_fill.kernels_for(m, "case2") == {"fwd-direct_fwd_wmma-a"}
+    # A bare label is the kernel in every direction.
+    assert conv_fill.kernels_for(m, "case1") == {
         "fwd-direct_fwd_wmma-a",
-        "direct_fwd_wmma-a",
+        "fwd-direct_fwd_wmma-b",
+        "dgrad-direct_fwd_wmma-b",
+        "wgrad-direct_fwd_wmma-b",
+        "wgrad-direct_wgrad-c",
     }
-    assert "direct_fwd_wmma-b" in conv_fill.kernels_for(m, "case1")
-    assert "direct_fwd_wmma-a" in conv_fill.kernels_for(m, "case1")
+
+
+@pytest.mark.parametrize("direct", [True, False])
+def test_kernels_file_bare_label_matches_identity_label(tmp_path, direct):
+    """The cache runners keep a plan iff ``identity.label()`` is in
+    ``kernels_for``: a label written with or without its direction prefix
+    selects it, a prefixed one of another direction does not."""
+    from kernels.conv import aot_jobs as ks
+    from kernels.conv import direct_aot_jobs as dks
+    from rocke.core.arch import ArchTarget
+
+    if direct:
+        ident = dks._identity(
+            "gfx950",
+            64,
+            "direct_grouped",
+            "direct_fwd",
+            dks.DirectCaps(KH=3, PAD=1, stride=1, cpg=16, kpg=16),
+            dict(block_q=16, block_groups=2, double_buffer=True),
+            "fp16",
+        )
+    else:
+        target = ArchTarget.from_gfx("gfx950")
+        geos = ks._geometry_list(target, "bf16", "dgrad")
+        job = next(
+            iter(
+                ks._direction_jobs(
+                    "dgrad",
+                    "gfx950",
+                    "bf16",
+                    target,
+                    ks.CACHE_WGRAD_SPLIT_KS,
+                    64,
+                    geometries=geos[:1],
+                    llvm_flavor="llvm22",
+                )
+            )
+        )
+        ident = job.identity
+    label = ident.label()
+    direction, bare = label.split("-", 1)
+    assert direction in conv_fill.DIRECTIONS
+    other = next(d for d in conv_fill.DIRECTIONS if d != direction)
+    for entry, kept in ((label, True), (bare, True), (f"{other}-{bare}", False)):
+        f = tmp_path / "k.txt"
+        f.write_text(entry + "\n")
+        m = conv_fill.load_kernels_file(str(f))
+        assert (label in conv_fill.kernels_for(m, "any")) is kept, entry
