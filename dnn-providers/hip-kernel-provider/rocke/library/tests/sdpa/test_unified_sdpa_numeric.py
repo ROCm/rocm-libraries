@@ -17,6 +17,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from dispatch.sdpa.bind_unified import (
+    _LaunchPlan,
     sdpa_unified_admits,
     sdpa_unified_bind,
 )
@@ -26,6 +27,7 @@ from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
 from tests.sdpa.binding_harness import bind_tensors, outputs
 from tests.sdpa.request_bridge import request_from_case
+from tests.sdpa.request_cases import make_request
 
 
 def _arch():
@@ -68,3 +70,29 @@ def test_admitted_case_matches_sdpa_reference(case):
 
     o, lse = outputs(case, tensors, req)
     assert H.compare(case, o, lse, H.evaluate(inputs)) == []
+
+
+def _dense_cuda(req, name):
+    desc = getattr(req, name)
+    buf = torch.randn(
+        1 + sum((n - 1) * s for n, s in zip(desc.dims, desc.strides)), device="cuda"
+    )
+    return torch.as_strided(buf.half(), desc.dims, desc.strides)
+
+
+def test_an_out_of_range_block_table_physical_id_is_rejected_before_launch():
+    """The binding's own paged K/V cache is identity-mapped, so a physical id
+    the binding writes is always in range; this proves the bind-time check
+    (``validate_tuning_attention_tensors``, which the real ``sdpa_unified_bind``
+    calls before any kernel runs, not device-side) still catches a corrupted
+    entry, rather than trusting the block table blindly.
+    """
+    from dispatch.attention.bindings import validate_tuning_attention_tensors
+
+    req = make_request(arch=ARCH, d=64)
+    tensors = {n: _dense_cuda(req, n) for n in ("q", "k", "v", "o")}
+    plan = _LaunchPlan(req, tensors)
+    num_blocks = plan.k_cache.shape[0]
+    plan.block_table[0, 0] = num_blocks  # one past the last valid physical block
+    with pytest.raises(ValueError, match=r"outside \[0"):
+        validate_tuning_attention_tensors(plan.problem, plan.kernel_tensors())
