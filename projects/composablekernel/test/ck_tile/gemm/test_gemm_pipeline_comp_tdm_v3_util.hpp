@@ -110,7 +110,8 @@ template <ck_tile::index_t TileM_,
           typename ALayout_           = RowMajor,
           typename BLayout_           = ColumnMajor,
           bool PadMN_                 = false,
-          ck_tile::index_t VectorC_   = 0>
+          ck_tile::index_t VectorC_   = 0,
+          bool TdmEpilogue_           = false>
 struct V3Config
 {
     using ADataType                             = ADataType_;
@@ -126,11 +127,15 @@ struct V3Config
     static constexpr ck_tile::index_t WarpTileN = WarpTileN_;
     static constexpr ck_tile::index_t WarpTileK = WarpTileK_;
     // kPadM/kPadN of the pipeline traits: TDM ignores them for A/B (it clips in hardware), but
-    // the CShuffle epilogue needs kPadN (kPadM) to store a ragged N (M) tile of C.
+    // the CShuffle epilogue needs kPadN (kPadM) to store C when N (M) is not a multiple of the
+    // tile.
     static constexpr bool PadMN = PadMN_;
     // C store vector size; 0 lets the epilogue choose it (8 bf16 elements).
     static constexpr ck_tile::index_t VectorC = VectorC_;
-    using Policy                              = Policy_;
+    // TdmEpilogue instead of CShuffleEpilogue: C is staged in LDS and written with one TDM
+    // store, which clips to the real M x N in hardware.
+    static constexpr bool TdmEpilogue = TdmEpilogue_;
+    using Policy                      = Policy_;
 };
 
 // bf16 instance: warp tile 16x16x32 and the given K tile and A/B layouts.
@@ -142,7 +147,8 @@ template <ck_tile::index_t TileM,
           typename ALayout,
           typename BLayout,
           bool PadMN               = false,
-          ck_tile::index_t VectorC = 0>
+          ck_tile::index_t VectorC = 0,
+          bool TdmEpilogue         = false>
 using V3Bf16Config = V3Config<TileM,
                               TileN,
                               WarpsM,
@@ -157,7 +163,8 @@ using V3Bf16Config = V3Config<TileM,
                               ALayout,
                               BLayout,
                               PadMN,
-                              VectorC>;
+                              VectorC,
+                              TdmEpilogue>;
 
 template <typename Config>
 struct V3KernelOf
@@ -206,7 +213,9 @@ struct V3KernelOf
                                          (Config::VectorC != 0 ? Config::VectorC : 1),
                                          1,     // BlockedXDLN_PerWarp
                                          true>; // DoubleSmemBuffer
-    using Epilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;
+    using Epilogue = std::conditional_t<Config::TdmEpilogue,
+                                        ck_tile::TdmEpilogue<EpilogueProblem>,
+                                        ck_tile::CShuffleEpilogue<EpilogueProblem>>;
     using type     = ck_tile::GemmKernel<Partitioner, Pipeline, Epilogue>;
 };
 template <typename Config>
@@ -355,14 +364,15 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
     }
 
     // Host check only, no launch: whether the kernel accepts M x N x K, which must match the C
-    // store rule (C row-major): a ragged N tile needs kPadN, and N must be a multiple of the C
+    // store rule (C row-major): an unaligned N needs kPadN, and N must be a multiple of the C
     // vector size. A/B never limit the shape: TDM clips them in hardware.
     bool ExpectSupported(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K)
     {
         using Kernel         = V3Kernel<Config>;
         const bool tile_ok   = N % Config::TileN == 0 || Config::PadMN;
         const bool vector_ok = N % Kernel::EpiloguePipeline::GetVectorSizeC() == 0;
-        const bool expected  = tile_ok && vector_ok;
+        // A TDM epilogue clips C in hardware, so it accepts every shape.
+        const bool expected = Config::TdmEpilogue || (tile_ok && vector_ok);
         const ck_tile::GemmHostArgs args(nullptr, nullptr, nullptr, 1, M, N, K, K, K, N);
         const bool supported = Kernel::IsSupportedArgument(Kernel::MakeKernelArgs(args));
         EXPECT_EQ(supported, expected) << "M=" << M << " N=" << N << " K=" << K;
@@ -430,7 +440,7 @@ using V3Bf16Configs = ::testing::Types<V3Bf16Config<256, 256, 64, 4, 4, RM, CM>,
                                        V3Bf16Config<256, 256, 64, 4, 4, CM, CM>,
                                        V3Bf16Config<128, 128, 64, 2, 2, CM, CM>>;
 
-// Padded (kPadM = kPadN = true) for ragged M/N tiles: every layout at 256x256x64 and 128x128x64
+// Padded (kPadM = kPadN = true) for unaligned M and N: every layout at 256x256x64 and 128x128x64
 // with the default C vector (8), and RCR 256x256x64 with C vectors 2 and 1 for N that 8 does not
 // divide, plus CCR 128x128x64 with vector 1.
 using V3Bf16PaddedConfigs = ::testing::Types<V3Bf16Config<256, 256, 64, 4, 4, RM, CM, true>,
@@ -444,6 +454,18 @@ using V3Bf16PaddedConfigs = ::testing::Types<V3Bf16Config<256, 256, 64, 4, 4, RM
                                              V3Bf16Config<256, 256, 64, 4, 4, RM, CM, true, 2>,
                                              V3Bf16Config<256, 256, 64, 4, 4, RM, CM, true, 1>,
                                              V3Bf16Config<128, 128, 64, 2, 2, CM, CM, true, 1>>;
+
+// TdmEpilogue, unpadded, every layout at 256x256x64 and 128x128x64, and RCR 256x256x128.
+using V3Bf16TdmEpilogueConfigs =
+    ::testing::Types<V3Bf16Config<256, 256, 64, 4, 4, RM, CM, false, 0, true>,
+                     V3Bf16Config<256, 256, 128, 4, 4, RM, CM, false, 0, true>,
+                     V3Bf16Config<128, 128, 64, 2, 2, RM, CM, false, 0, true>,
+                     V3Bf16Config<256, 256, 64, 4, 4, RM, RM, false, 0, true>,
+                     V3Bf16Config<128, 128, 64, 2, 2, RM, RM, false, 0, true>,
+                     V3Bf16Config<256, 256, 64, 4, 4, CM, RM, false, 0, true>,
+                     V3Bf16Config<128, 128, 64, 2, 2, CM, RM, false, 0, true>,
+                     V3Bf16Config<256, 256, 64, 4, 4, CM, CM, false, 0, true>,
+                     V3Bf16Config<128, 128, 64, 2, 2, CM, CM, false, 0, true>>;
 
 // The 4096^3 set: the three RCR tiles that matter for large shapes, and 256x256x64 in each other
 // layout.

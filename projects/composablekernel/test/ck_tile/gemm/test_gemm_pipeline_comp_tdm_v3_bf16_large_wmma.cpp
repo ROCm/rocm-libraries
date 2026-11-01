@@ -16,9 +16,9 @@ TYPED_TEST(TestCkTileGemmPipelineCompTDMV3, Random4096)
 {
     this->Run(4096, 4096, 4096, Init::Random);
 }
-// Ragged in M and K, with odd A/B strides (unpadded kernels clip A/B in TDM; a ragged N tile
-// needs a padded instance, see the ragged smoke test).
-TYPED_TEST(TestCkTileGemmPipelineCompTDMV3, IntRagged4111x4096x4105)
+// Unaligned M and K, with odd A/B strides (unpadded kernels clip A/B in TDM; an unaligned N
+// needs a padded instance, see the unaligned M/N/K smoke test).
+TYPED_TEST(TestCkTileGemmPipelineCompTDMV3, IntUnaligned4111x4096x4105)
 {
     this->Run(4111, 4096, 4105, Init::Int);
 }
