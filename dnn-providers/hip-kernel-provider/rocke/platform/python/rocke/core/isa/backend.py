@@ -33,6 +33,9 @@ from ..arch import ArchTarget
 from ..arch.wmma_scale import gfx1250_scaled_wmma
 from ..ir import I32, Op, VectorType
 from ..llvm_profile import _supports_llvm23_target_ops
+from .matrix_call_lowering import emit_matrix_call
+from .matrix_calls import MATRIX_CALLS
+from .matrix_operand_forms import f8f6f4_operand_form
 from .wmma_scale import ScaledWmmaLLVM
 
 
@@ -123,33 +126,55 @@ class ISABackend:
     def emit_mma(self, lowerer, op) -> None:
         """Lower a target-neutral ``tile.mma`` op.
 
-        The ``op_id`` attribute selects the concrete atom. The base (CDNA)
-        implementation rebuilds the legacy ISA-named op (``tile.<op_id>``) and
-        dispatches it through the lowerer's existing per-op handler, so the
-        emitted text is **byte-identical** to the historical MFMA path. RDNA
-        backends override this to route through :meth:`emit_wmma`.
-
-        A WMMA ``op_id`` reaching a CDNA backend resolves to the WMMA handler,
-        which calls :meth:`emit_wmma` and correctly raises ``NotImplementedError``
-        (WMMA is an RDNA-only instruction).
+        The ``op_id`` attribute selects the concrete atom. An op_id listed in
+        :data:`~rocke.core.isa.matrix_calls.MATRIX_CALLS` is lowered from its
+        call description, and refused on a target whose MMA catalog does not
+        list it. Every other op_id is rebuilt as the legacy ISA-named
+        op (``tile.<op_id>``) and handed to :meth:`_emit_named_mma`, so the
+        emitted text is **byte-identical** to the historical path.
         """
         op_id = op.attrs["op_id"]
         from ..arch.mfma_scale import gfx950_scaled_mfma
 
-        if gfx950_scaled_mfma(op_id) is not None:
-            lowerer._emit_gfx950_scaled_mfma(op)
-            return
-        if gfx1250_scaled_wmma(op_id) is not None:
-            self.emit_scaled_wmma(lowerer, op)
-            return
-        legacy = Op(
+        named = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
             results=list(op.results),
             attrs={k: v for k, v in op.attrs.items() if k != "op_id"},
             loc=op.loc,
         )
-        lowerer.lower_op(legacy)
+        call = MATRIX_CALLS.get(op_id)
+        if call is not None:
+            self._require_catalog_lists(op_id)
+            emit_matrix_call(lowerer, named, call)
+            return
+        if gfx950_scaled_mfma(op_id) is not None:
+            lowerer._emit_gfx950_scaled_mfma(op)
+            return
+        if gfx1250_scaled_wmma(op_id) is not None:
+            self.emit_scaled_wmma(lowerer, named)
+            return
+        self._emit_named_mma(lowerer, named)
+
+    def _require_catalog_lists(self, op_id: str) -> None:
+        """Refuse ``op_id`` unless this target's MMA catalog lists it -- the
+        rule the C++ engine applies too."""
+        if self.arch.mma.by_op_id(op_id) is None:
+            raise NotImplementedError(
+                f"tile.{op_id} is not available on {self.arch.gfx}: "
+                "its MMA catalog does not list it"
+            )
+
+    def _emit_named_mma(self, lowerer, op) -> None:
+        """Emit an MMA op named ``tile.<op_id>`` through its hand-written handler.
+
+        CDNA dispatches it to the lowerer's ``_op_tile_<op_id>`` method. A WMMA
+        ``op_id`` reaching a CDNA backend resolves to the WMMA handler, which
+        calls :meth:`emit_wmma` and correctly raises ``NotImplementedError``
+        (WMMA is an RDNA-only instruction). RDNA backends override this to route
+        through :meth:`emit_wmma`.
+        """
+        lowerer.lower_op(op)
 
     @property
     def emits_legacy_s_waitcnt(self) -> bool:
@@ -215,21 +240,22 @@ class ISABackend:
         )
 
     def emit_scaled_wmma(self, lowerer, op) -> None:
-        """Emit a SCALE/SCALE16 WMMA call for a ``tile.mma`` op.
+        """Emit a SCALE/SCALE16 WMMA call for an MMA op named ``tile.<op_id>``.
 
         The op lowers on any target whose MMA catalog lists its atom and is
         refused on every other target -- the rule the C++ engine applies too.
-        The intrinsic comes from the resolved operand contract.
+        The intrinsic comes from the resolved operand contract. A and B each
+        reach their ``<16 x i32>`` register through the f8f6f4 form of their own
+        matrix format (:func:`~rocke.core.isa.matrix_operand_forms.f8f6f4_operand_form`):
+        the register words pass unchanged, 64 logical fp8 / bf8 values with one
+        ``bitcast``, and the packed words of 64 fp6 / bf6 / fp4 values are
+        zero-padded.
         """
-        spec = gfx1250_scaled_wmma(op.attrs["op_id"])
+        spec = gfx1250_scaled_wmma(op.name)
         if spec is None:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
         name = f"tile.{spec.op_id}"
-        if self.arch.mma.by_op_id(spec.op_id) is None:
-            raise NotImplementedError(
-                f"{name} is not available on {self.arch.gfx}: "
-                "its MMA catalog does not list it"
-            )
+        self._require_catalog_lists(spec.op_id)
         if not _supports_llvm23_target_ops(lowerer._flavor):
             raise NotImplementedError(
                 f"{name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
@@ -242,17 +268,20 @@ class ISABackend:
         intrinsic = signature.intrinsic
         scale_ty = signature.scale_type
         fmt0, fmt1 = spec.matrix_formats
-        a, b, c, a_scale, b_scale = op.operands
+        _, _, c, a_scale, b_scale = op.operands
         if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
             raise ValueError(
                 f"{name} expects {scale_ty} scale operands, got "
                 f"{a_scale.type.name}/{b_scale.type.name}"
             )
+        register_a, register_b = signature.matrix_registers
+        a = f8f6f4_operand_form(spec.atom.a_dtype, register_a).operand(lowerer, op, "a")
+        b = f8f6f4_operand_form(spec.atom.b_dtype, register_b).operand(lowerer, op, "b")
         lowerer._need(decl_key)
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
-            f"i32 {fmt0}, {signature.matrix_types[0]} {lowerer._operand(a)}, "
-            f"i32 {fmt1}, {signature.matrix_types[1]} {lowerer._operand(b)}, "
+            f"i32 {fmt0}, {signature.matrix_types[0]} {a}, "
+            f"i32 {fmt1}, {signature.matrix_types[1]} {b}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
             f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
             f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
@@ -277,7 +306,7 @@ class Gfx950Backend(ISABackend):
 class Gfx9MfmaBackend(ISABackend):
     """CDNA gfx9 MFMA family (gfx908 / gfx90a / gfx942). Shares the gfx9/10
     waitcnt layout and (for the verified base GEMM path) the same datalayout /
-    triple as gfx950. Per-arch divergence (4-bit VMCNT fields, no
+    triple as gfx950. Per-arch divergence (the recorded VMCNT field width, no
     transpose-LDS) keys off ``self.arch``."""
 
 
@@ -300,33 +329,6 @@ _RDNA_WMMA = {
         "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16",
         "bfloat",
         "i16",
-    ),
-}
-
-
-# Integer WMMA op -> (decl key, fully-mangled intrinsic, A/B operand vector
-# width, accumulator/result vector width). Integer WMMA differs from the float
-# path in two ways: (1) operands/accumulator are i32 vectors (A/B packed, C/D
-# the i32 accumulator), and (2) the intrinsic signature carries i1 signedness
-# flags before each matrix operand and a trailing i1 clamp. Operands arrive in
-# SSA already as <N x i32> (the kernel packs int8/int4 into i32), so no bitcast
-# is needed. Our quantized data is signed and within i32 range, so the flags are
-# emitted as (unsignedA=0, unsignedB=0, clamp=0). Verified on gfx1151/gfx11-generic
-# (ROCm 7.2.0): lowers to v_wmma_i32_16x16x16_iu8.
-#   iu8:  A/B = <4 x i32> (16 int8 packed 4-per-i32), C/D = <8 x i32>
-#   iu4:  A/B = <2 x i32> (16 int4 packed 8-per-i32), C/D = <8 x i32>
-_RDNA_WMMA_INT = {
-    "tile.wmma_i32_16x16x16_iu8": (
-        "wmma.i32.16x16x16.iu8",
-        "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32",
-        4,
-        8,
-    ),
-    "tile.wmma_i32_16x16x16_iu4": (
-        "wmma.i32.16x16x16.iu4",
-        "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32",
-        2,
-        8,
     ),
 }
 
@@ -413,41 +415,20 @@ class Gfx11RdnaBackend(ISABackend):
         gfx1151 Strix Halo box."""
         return 0x31014000
 
-    def emit_mma(self, lowerer, op) -> None:
-        """Lower ``tile.mma`` to an RDNA WMMA call.
+    def _emit_named_mma(self, lowerer, op) -> None:
+        """Emit an MMA op named ``tile.<op_id>`` as an RDNA WMMA call.
 
-        Rebuilds the legacy ``tile.<op_id>`` op so :meth:`emit_wmma`'s
-        name-keyed lookup keeps working, then emits the WMMA call. This is the
-        RDNA half of the neutral-MMA contract; the CDNA base emits MFMA.
+        :meth:`emit_wmma`'s lookup is keyed by that name. This is the RDNA half
+        of the neutral-MMA contract; the CDNA base emits MFMA.
         """
-        op_id = op.attrs["op_id"]
-        from ..arch.mfma_scale import gfx950_scaled_mfma
-
-        if gfx950_scaled_mfma(op_id) is not None:
-            lowerer._emit_gfx950_scaled_mfma(op)
-            return
-        if gfx1250_scaled_wmma(op_id) is not None:
-            self.emit_scaled_wmma(lowerer, op)
-            return
-        legacy = Op(
-            name=f"tile.{op_id}",
-            operands=list(op.operands),
-            results=list(op.results),
-            attrs={k: v for k, v in op.attrs.items() if k != "op_id"},
-            loc=op.loc,
-        )
-        self.emit_wmma(lowerer, legacy)
+        self.emit_wmma(lowerer, op)
 
     def emit_wmma(self, lowerer, op) -> None:
-        int_spec = _RDNA_WMMA_INT.get(op.name)
-        if int_spec is not None:
-            self._emit_wmma_int(lowerer, op, int_spec)
-            return
         spec = _RDNA_WMMA.get(op.name)
         if spec is None:
             raise NotImplementedError(
                 f"WMMA op {op.name!r} not yet wired for {self.arch.gfx}; "
-                f"known: {sorted(_RDNA_WMMA) + sorted(_RDNA_WMMA_INT)}"
+                f"known: {sorted(_RDNA_WMMA)}"
             )
         decl_key, intrinsic, ssa_elt, call_elt = spec
         a, b, c = op.operands
@@ -471,34 +452,6 @@ class Gfx11RdnaBackend(ISABackend):
             f"<16 x {call_elt}> {a_arg}, "
             f"<16 x {call_elt}> {b_arg}, "
             f"<8 x float> {lowerer._operand(c)})"
-        )
-
-    def _emit_wmma_int(self, lowerer, op, spec) -> None:
-        """Emit an integer WMMA (iu8/iu4) call.
-
-        The integer intrinsic signature is
-        ``(i1 signedA, <N x i32> A, i1 signedB, <N x i32> B, <8 x i32> C, i1 clamp)``
-        with an ``<8 x i32>`` result. The leading i1 per operand selects the
-        operand's *signedness*: ``1`` = signed, ``0`` = unsigned. This was
-        verified empirically on gfx11-generic (iu8 GEMM probe): passing ``0``
-        made the unit compute the **unsigned** dot product (all-positive
-        results matching ``A.view(uint8) @ B.view(uint8).T``). Our quantized
-        data is signed, so both flags are ``1``. A and B are passed as the
-        intrinsic's ``<N x i32>``; packed bytes of the same width (for example
-        ``<16 x i8>``) are reinterpreted with one bitcast. Values stay within
-        i32 range -> ``clamp = 0`` (exact wrap).
-        """
-        decl_key, intrinsic, op_vec, acc_vec = spec
-        c = op.operands[2]
-        lowerer._need(decl_key)
-        a_arg = lowerer._mma_operand(op, "a", VectorType(I32, op_vec))
-        b_arg = lowerer._mma_operand(op, "b", VectorType(I32, op_vec))
-        c_arg = lowerer._operand(c)
-        lowerer._current().emit(
-            f"  {op.result.name} = call <{acc_vec} x i32> @{intrinsic}("
-            f"i1 1, <{op_vec} x i32> {a_arg}, "
-            f"i1 1, <{op_vec} x i32> {b_arg}, "
-            f"<{acc_vec} x i32> {c_arg}, i1 0)"
         )
 
     def encode_waitcnt(self, vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
@@ -683,19 +636,26 @@ class Gfx1250Backend(Gfx12RdnaBackend):
 # gfx -> backend class. Adding a CDNA gfx is one row here plus, when its codegen
 # actually diverges, a new subclass.
 #
-# Some rows are forward-declarations: the backend class is wired here before the
-# matching ``core/arch/data/arch_specs.json`` row exists (gfx908 / gfx90a reuse
-# ``Gfx9MfmaBackend`` and are kept for upcoming enablement). ``backend_for``
-# resolves the :class:`ArchTarget` first, so such a row reports a clean
-# "metadata not yet present" error from this layer rather than a raw arch-layer
-# ``KeyError``. ``wired_arches()`` returns only the rows that have arch metadata
-# and can actually build a backend today.
+# A row may be added before its ``core/arch/data/arch_specs.json`` row exists (a
+# forward-declaration). ``backend_for`` resolves the :class:`ArchTarget` first,
+# so such a row reports a clean "metadata not yet present" error from this layer
+# rather than a raw arch-layer ``KeyError``. ``wired_arches()`` returns only the
+# rows that have arch metadata and can actually build a backend today.
 BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
     "gfx908": Gfx9MfmaBackend,
     "gfx90a": Gfx9MfmaBackend,
     "gfx942": Gfx9MfmaBackend,
     "gfx950": Gfx950Backend,
+    "gfx1100": Gfx11RdnaBackend,
+    "gfx1101": Gfx11RdnaBackend,
+    "gfx1102": Gfx11RdnaBackend,
+    "gfx1103": Gfx11RdnaBackend,
+    "gfx1150": Gfx11RdnaBackend,
     "gfx1151": Gfx11RdnaBackend,
+    "gfx1152": Gfx11RdnaBackend,
+    "gfx1153": Gfx11RdnaBackend,
+    "gfx1154": Gfx11RdnaBackend,
+    "gfx1200": Gfx12RdnaBackend,
     "gfx1201": Gfx12RdnaBackend,
     "gfx1250": Gfx1250Backend,
     "gfx11-generic": Gfx11RdnaBackend,
@@ -731,9 +691,9 @@ def backend_for(arch: Union[str, ArchTarget]) -> ISABackend:
             target = ArchTarget.from_gfx(arch)
         except KeyError as exc:
             # Backend row exists but the arch metadata does not: a
-            # forward-declared target (e.g. gfx908 / gfx90a) that is not yet
-            # buildable. Report it as such instead of leaking the arch-layer
-            # "unknown gfx target" message.
+            # forward-declared target that is not yet buildable. Report it as
+            # such instead of leaking the arch-layer "unknown gfx target"
+            # message.
             raise KeyError(
                 f"ISA backend for {arch!r} is forward-declared but has no "
                 f"arch_specs.json metadata yet; buildable now: "

@@ -13,7 +13,6 @@
  *   - rocke_fused_mega_fp8_spec_kernel_name                     (kernel_name())
  *   - rocke_moe_fused_mega_fp8_grid / _persistent_grid          (grid helpers)
  *   - rocke_moe_fused_mega_fp8_signature                        (SignatureBuilder)
- *   - moe_fp8_validate_atom                                     (_validate_fp8_atom)
  *   - rocke_moe_fp8_lds_allocs                                  (_lds_allocs)
  *   - rocke_build_moe_fused_mega_gemm_fp8 (+ _new + lower)      (the build driver)
  *   - rocke_moe_fp8_elem_bytes_b / _b_base / _scale_base        (rebasing closures)
@@ -746,52 +745,6 @@ void rocke_moe_fp8_emit_body(rocke_moe_fp8_build_ctx_t* ctx)
  *  SPEC VALIDATION  (Python 1554-1619)
  * ===================================================================== */
 
-/* L6: the unscaled fp8 16x16x128 hero atom is NOT a catalog shape on ANY target
- * -- the wide-K f8 MFMA is only reachable through
- * llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4 (MfmaAtom.fp8_16x16x128), which
- * the JSON MMA catalog does not model, so validate_mfma_atom_in_catalog would
- * raise a spurious NotImplementedError even on the target that HAS the
- * instruction. That is why the catalog guard is skipped for atom.k == 128.
- * Skipping it outright, though, also stopped rejecting the targets that
- * genuinely lack the instruction, which then reached comgr as an uncatchable
- * LLVM abort. This is the arch fact the catalog is missing: the scaled f8f6f4
- * family ships on the gfx950 target family. (Python 1568.) */
-#define ROCKE_MOE_FP8_SCALED_F8F6F4_TARGET_FAMILY "gfx950"
-
-/* _validate_fp8_atom(atom, target, arch) (Python 1571-1589): reject an fp8 MFMA
- * atom the target cannot issue. atom.k == 128 selects the scaled-f8f6f4 hero
- * atom, gated on the target family that owns the instruction; every other fp8
- * atom IS a catalog shape and goes through the shared per-arch catalog guard.
- * Returns ROCKE_OK, or the builder's sticky status with the Python message. */
-static rocke_status_t moe_fp8_validate_atom(rocke_ir_builder_t* b,
-                                            const rocke_mfma_atom_t* atom,
-                                            const rocke_archtarget_t* target,
-                                            const char* arch)
-{
-    if(atom->k != 128)
-    {
-        return rocke_validate_mfma_atom_in_catalog(b, atom, arch, "moe_fused_mega_fp8");
-    }
-    if(target == NULL || target->target_family == NULL
-       || strcmp(target->target_family, ROCKE_MOE_FP8_SCALED_F8F6F4_TARGET_FAMILY) != 0)
-    {
-        rocke_i_set_err(b,
-                        ROCKE_ERR_NOTIMPL,
-                        "moe_fused_mega_fp8 MFMA atom '%s' (%s %dx%dx%d) lowers to the "
-                        "scaled f8f6f4 instruction, which %s does not have; this "
-                        "configuration requires a different target (or gate_up_k / "
-                        "down_k = 32 for the catalog 16x16x32 atom).",
-                        (atom->name != NULL) ? atom->name : "None",
-                        (atom->dtype_in != NULL) ? atom->dtype_in : "None",
-                        atom->m,
-                        atom->n,
-                        atom->k,
-                        (arch != NULL) ? arch : "None");
-        return b->status;
-    }
-    return ROCKE_OK;
-}
-
 /* _lds_allocs(spec) (Python 1592-1619). */
 size_t rocke_moe_fp8_lds_allocs(const rocke_fused_mega_kernel_spec_fp8_t* spec,
                                 const rocke_fused_mega_fp8_levers_t* levers,
@@ -957,18 +910,17 @@ rocke_kernel_def_t*
         return NULL;
     }
 
-    /* ---- resolve + gate BOTH fp8 atoms ---- (Python 1672-1678) *
-     * The hero atom reuses the mfma.scale.f32.16x16x128.f8f6f4 intrinsic with
-     * both E8M0 scales at literal 0 (unscaled instruction; verified
-     * numerically standalone). gate_up_k and down_k select independently, so
-     * both atoms are checked. */
+    /* ---- resolve + gate BOTH fp8 atoms ---- *
+     * gate_up_k and down_k select independently, so both atoms are checked
+     * against the target's MMA catalog, which lists the K=128 hero atom where
+     * the target has it. */
     ctx.atom = rocke_fused_mega_fp8_spec_gate_up_atom(spec);
     if(ctx.atom == NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "fp8 fused-mega: gate_up_atom unavailable");
         return NULL;
     }
-    if(moe_fp8_validate_atom(b, ctx.atom, target, arch) != ROCKE_OK)
+    if(rocke_validate_mfma_atom_in_catalog(b, ctx.atom, arch, "moe_fused_mega_fp8") != ROCKE_OK)
     {
         return NULL;
     }
@@ -978,7 +930,7 @@ rocke_kernel_def_t*
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "fp8 fused-mega: down_atom unavailable");
         return NULL;
     }
-    if(moe_fp8_validate_atom(b, down_atom, target, arch) != ROCKE_OK)
+    if(rocke_validate_mfma_atom_in_catalog(b, down_atom, arch, "moe_fused_mega_fp8") != ROCKE_OK)
     {
         return NULL;
     }

@@ -225,6 +225,33 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                 self.assertGreater(tc.get("probe_timeout_s", 0), 0)
 
 
+class ArchDomainProcessorSupportTest(unittest.TestCase):
+    """Each column says, per target, whether its compiler accepts the name."""
+
+    def test_every_column_records_which_processor_names_its_compiler_accepts(self):
+        for flavor, path in _columns():
+            with self.subTest(flavor=flavor):
+                doc = json.loads(path.read_text())
+                processors = doc.get("processors", {})
+                self.assertEqual(sorted(processors), sorted(doc["toolchain"]["arches"]))
+                for arch, entry in processors.items():
+                    self.assertIsInstance(entry.get("accepted"), bool, arch)
+                    if not entry["accepted"]:
+                        self.assertTrue(entry.get("evidence"), arch)
+
+    def test_a_processor_its_compiler_rejects_has_no_measured_cell(self):
+        """The two answers agree: a name the compiler rejects was never probed
+        successfully for any declaration."""
+        for flavor, path in _columns():
+            doc = json.loads(path.read_text())
+            for arch, entry in doc.get("processors", {}).items():
+                if entry["accepted"]:
+                    continue
+                for key, row in doc["keys"].items():
+                    with self.subTest(flavor=flavor, arch=arch, key=key):
+                        self.assertNotEqual(row[arch]["status"], G.STATUS_OK)
+
+
 class AvailableCpusTest(unittest.TestCase):
     """The worker cap must reflect this process's share, not the host's size.
 

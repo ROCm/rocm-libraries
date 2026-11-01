@@ -4,7 +4,8 @@
 
 Named for the fp64 GEMM work this file was created for; the f16/bf16
 ``lds_swizzle`` granule regression also lives here so the gfx94X CI lane runs
-it on real gfx942 hardware.
+it on real gfx942 hardware. The fp64 GEMM numerics run on every target that
+admits fp64 GEMM and has run them on real hardware.
 """
 import ctypes
 import importlib.util
@@ -13,6 +14,7 @@ import struct
 
 import numpy as np
 import pytest
+from rocke.core.arch import ArchTarget, known_arches
 from rocke.core.backend import universal_gemm_spec_to_dict
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.instances.common.gemm_universal import (
@@ -33,6 +35,23 @@ def _require_gfx942():
         if os.getenv("ROCKE_REQUIRE_GFX942") == "1":
             pytest.fail(f"Required gfx942 device absent: {arch}")
         pytest.skip("requires gfx942")
+
+
+# Targets whose fp64 GEMM numerics have run on real hardware.
+_F64_GEMM_HARDWARE_RUN = ("gfx90a", "gfx942", "gfx950")
+
+
+def _require_f64_gemm_arch():
+    arch = (get_device_arch() or "").split(":")[0]
+    if os.getenv("ROCKE_REQUIRE_GFX942") == "1" and arch != "gfx942":
+        pytest.fail(f"Required gfx942 device absent: {arch}")
+    if arch in _F64_GEMM_HARDWARE_RUN:
+        return arch
+    if arch in known_arches() and any(
+        op.a_dtype == "fp64" for op in ArchTarget.from_gfx(arch).mma.ops
+    ):
+        pytest.skip(f"fp64 GEMM has not run on {arch} hardware yet; enable once it has")
+    pytest.skip("requires a GPU with fp64 GEMM")
 
 
 def _engines():
@@ -70,23 +89,23 @@ def _spec(
     )
 
 
-def _llvm(spec, engine):
+def _llvm(spec, engine, arch="gfx942"):
     if engine == "python":
-        kernel = build_universal_gemm(spec, arch="gfx942")
-        return _lower_kernel_to_llvm_python(kernel, arch="gfx942")
+        kernel = build_universal_gemm(spec, arch=arch)
+        return _lower_kernel_to_llvm_python(kernel, arch=arch)
     import rocke_engine as native
 
-    return native.gemm_lower_llvm(universal_gemm_spec_to_dict(spec), arch="gfx942")
+    return native.gemm_lower_llvm(universal_gemm_spec_to_dict(spec), arch=arch)
 
 
-def _launch(ll, spec, a, bt, b_device=None, sorted_ids=None, c=None):
+def _launch(ll, spec, a, bt, b_device=None, sorted_ids=None, c=None, arch="gfx942"):
     from rocke.runtime.comgr import build_hsaco_from_llvm_ir
     from rocke.runtime.hip_module import Runtime
 
     *batch, m, k = a.shape
     n = bt.shape[-2]
     batches = batch[0] if batch else 1
-    blob, _ = build_hsaco_from_llvm_ir(ll, isa="amdgcn-amd-amdhsa--gfx942")
+    blob, _ = build_hsaco_from_llvm_ir(ll, isa=f"amdgcn-amd-amdhsa--{arch}")
     runtime = Runtime()
     module = runtime.load_module(blob)
     if c is None:
@@ -174,9 +193,15 @@ def _preshuffle_b(bt, tile_n, tile_k):
     ],
 )
 def test_gfx942_f64_gemm_numeric(tile, pipeline, epilogue, pad, trait):
-    _require_gfx942()
+    arch = _require_f64_gemm_arch()
     spec = _spec(tile, pipeline, epilogue, pad, **trait)
-    assert is_valid_spec(spec, arch="gfx942") == (True, "ok")
+    if spec.trait.direct_to_lds and ArchTarget.from_gfx(arch).async_lds_max_dwords < 1:
+        assert is_valid_spec(spec, arch=arch) == (
+            False,
+            f"direct_to_lds: {arch} has no DRAM->LDS DMA instruction",
+        )
+        pytest.skip(f"{arch} has no DRAM->LDS DMA instruction")
+    assert is_valid_spec(spec, arch=arch) == (True, "ok")
     tile_m, tile_n, tile_k = tile[:3]
     # Padded configs use extents that are not tile multiples.
     trim = 1 if pad else 0
@@ -189,13 +214,14 @@ def test_gfx942_f64_gemm_numeric(tile, pipeline, epilogue, pad, trait):
         return None
 
     for engine in _engines():
-        ll = _llvm(spec, engine)
+        ll = _llvm(spec, engine, arch)
         a = rng.integers(-8, 9, (m, k)).astype(np.float64)
         bt = rng.integers(-8, 9, (n, k)).astype(np.float64)
-        np.testing.assert_array_equal(_launch(ll, spec, a, bt, b_device(bt)), a @ bt.T)
+        c = _launch(ll, spec, a, bt, b_device(bt), arch=arch)
+        np.testing.assert_array_equal(c, a @ bt.T)
         a = rng.standard_normal((m, k))
         bt = rng.standard_normal((n, k))
-        c = _launch(ll, spec, a, bt, b_device(bt))
+        c = _launch(ll, spec, a, bt, b_device(bt), arch=arch)
         error = np.abs(c - a @ bt.T) / (np.abs(a) @ np.abs(bt).T)
         assert np.max(error) < k * np.finfo(np.float64).eps
 
@@ -208,9 +234,9 @@ def test_gfx942_f64_gemm_numeric(tile, pipeline, epilogue, pad, trait):
     ],
 )
 def test_gfx942_f64_batched_active_tile_skip_numeric(tile, pipeline, epilogue):
-    _require_gfx942()
+    arch = _require_f64_gemm_arch()
     spec = _spec(tile, pipeline, epilogue, batched=True, active_tile_skip=True)
-    assert is_valid_spec(spec, arch="gfx942") == (True, "ok")
+    assert is_valid_spec(spec, arch=arch) == (True, "ok")
     tile_m, tile_n, tile_k = tile[:3]
     batches, m_tiles, n_tiles = 3, 2, 3
     m, n, k = m_tiles * tile_m, n_tiles * tile_n, 4 * tile_k
@@ -224,7 +250,7 @@ def test_gfx942_f64_batched_active_tile_skip_numeric(tile, pipeline, epilogue):
     for z, mi in skipped:
         ids[z, mi * tile_m] = -1
     for engine in _engines():
-        c = _launch(_llvm(spec, engine), spec, a, bt, sorted_ids=ids)
+        c = _launch(_llvm(spec, engine, arch), spec, a, bt, sorted_ids=ids, arch=arch)
         for z in range(batches):
             for mi in range(m_tiles):
                 rows = slice(mi * tile_m, (mi + 1) * tile_m)

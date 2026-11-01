@@ -516,8 +516,8 @@ def _aliased_negative_declare() -> tuple[str, str, tuple[str, ...], str]:
     and every one of them is a measured negative on that arch.
 
     Found from the committed tables rather than named, so the test keeps
-    meaning something when the data moves. At llvm23 the pair is
-    ``mfma.scale.f32.16x16x128.f8f6f4`` / ``mfma.f32.16x16x128.fp8.hero``.
+    meaning something when the data moves. No committed table has an aliased
+    declare today, so the tests that need one skip until one does.
     """
     from rocke.core.lower_llvm import _decls_for_flavor
 
