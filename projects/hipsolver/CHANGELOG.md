@@ -31,11 +31,48 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Changed
 
 * The rocSOLVER backend now allows devIpiv to be passed as a null pointer to hipsolverXgetrs and hipsolverDnXgetrs.
+* The Fortran binding is now generated from the hipSOLVER headers, as a static archive and a `.mod`
+  found with `find_package(hipsolver-fortran)` and linked as `roc::hipsolver_fortran`; the archive and
+  the `.mod` files install per compiler, under `<libdir>/fortran/<compiler>` and
+  `<includedir>/fortran/<compiler>`. `use hipsolver_enums` becomes `use hipsolver`. Controlled by
+  `BUILD_FORTRAN_BINDINGS` (ON on Linux, OFF on Windows and on the CUDA backend) and
+  `BUILD_FORTRAN_CLIENTS` and `FORTRAN_ARRAY_INTERFACES` (`assumed-shape` by default; `none` or
+  `assumed-rank`).
+  The archive has one section per procedure: link with `-Wl,--gc-sections` to keep only the wrappers
+  you call.
+* Output arguments the old module declared `type(c_ptr), value` -- `lwork` of every `_bufferSize`
+  routine, `residual` and `executed_sweeps` of the gesvdj/syevj getters, `niters` of
+  `hipsolver{SS,DD,CC,ZZ}gels` and `hipsolver{SS,DD,CC,ZZ}gesv` -- are now typed and passed by reference,
+  as are `nev`, the deterministic `mode` and the Rf getter outputs: drop the `c_loc()`.
+* The handle and info outputs of `hipsolverCreate`, `hipsolverGetStream`, `hipsolverCreateGesvdjInfo` and
+  `hipsolverCreateSyevjInfo` are now `type(c_ptr)` passed by reference instead of `type(c_ptr), value`.
+  The old spelling `hipsolverCreate(c_loc(handle))` still compiles but leaves `handle` null: pass the
+  variable itself, as in `hipsolverCreate(handle)`.
+* The `jobu` and `jobv` arguments of `hipsolver{S,D,C,Z}gesvd` and `hipsolver{S,D,C,Z}gesvd_bufferSize`
+  are now `character(c_char)` instead of `integer(c_signed_char)`, and the `lwork` argument of
+  `hipsolver{SS,DD,CC,ZZ}gels` and `hipsolver{SS,DD,CC,ZZ}gesv` is now `integer(c_size_t)` instead of
+  `integer(c_int)`, matching the C API.
+* On the CUDA backend the Fortran bindings are off by default, so the Fortran-API variants of
+  `hipsolver-test` are no longer built there unless `BUILD_FORTRAN_BINDINGS` is set.
+* The default Fortran compiler is now ROCm's `amdflang` when the Fortran bindings are built against the
+  in-tree OpenBLAS. It stays `gfortran` on the CUDA backend and with `HIPSOLVER_INTERNAL_LAPACK_BUILD=OFF`,
+  where the clients link the host LAPACK.
+
+### Removed
+
+* The hand-written `library/src/hipsolver_module.f90`, the rule that installed it into
+  `include/hipsolver` and the backward-compatibility symlinks to it; deprecated since hipSOLVER 2.3.0
+  (ROCm 6.3.0).
+* The `EXPORT_FORTRAN_BINDINGS` option: it only chose whether the removed shared `hipsolver_fortran`
+  library joined the `hipsolver-targets` export set, and the generated binding has an export set and a
+  config package of its own.
 
 ### Resolved issues
 
 * Fixed hipsolverDnXpotrs calling 32-bit potrs instead of 64-bit potrs.
 * Fixed hipsolverSpSetStream not setting the internal rocsparse_handle stream.
+* The Fortran `hipsolverXsyevjGetResidual` and `hipsolverXsyevjGetSweeps` were bound to the wrong C symbol,
+  `hipsolverXsyevjSetTolerance`; they now call `hipsolverXsyevjGetResidual` and `hipsolverXsyevjGetSweeps`.
 
 
 ## hipSOLVER 3.7.0 for ROCm 10.1.0
