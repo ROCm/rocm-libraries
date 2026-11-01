@@ -29,6 +29,7 @@
  * attrs must not be mutated.
  */
 #include "rocke/tf32_internal.h"
+#include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -670,20 +671,30 @@ rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_i
     {
         return lw ? lw->status : ROCKE_ERR_NOTIMPL;
     }
-    /* NOTE(port): Python keys off the ArchTarget MMA catalog (mma.by_op_id);
-     * that catalog is not ported, so we use lw->arch.has_wmma. */
-    if(!lw->arch.has_wmma)
+    /* Python _require_wmma_arch: admitted on any target whose MMA catalog lists
+     * the atom, never by the target's name. */
+    const rocke_arch_target_t* target
+        = lw->arch.gfx ? rocke_arch_target_from_gfx(lw->arch.gfx) : NULL;
+    if(target && op_id && rocke_mma_catalog_by_op_id(&target->mma, op_id))
     {
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_NOTIMPL,
-                            "WMMA op '%s' is not available on %s "
-                            "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
-                            "The MFMA atoms are the matrix path on CDNA.",
-                            op_id ? op_id : "(null)",
-                            lw->arch.gfx ? lw->arch.gfx : "(unknown)",
-                            lw->arch.family ? lw->arch.family : "cdna");
+        return ROCKE_OK;
     }
-    return ROCKE_OK;
+    char family[16] = "(UNKNOWN)";
+    if(target)
+    {
+        size_t i = 0;
+        for(; target->family[i] && i + 1 < sizeof(family); ++i)
+            family[i] = (char)toupper((unsigned char)target->family[i]);
+        family[i] = '\0';
+    }
+    return rocke_h_fail(lw,
+                        ROCKE_ERR_NOTIMPL,
+                        "WMMA op '%s' is not available on %s "
+                        "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
+                        "The MFMA atoms are the matrix path on CDNA.",
+                        op_id ? op_id : "(null)",
+                        lw->arch.gfx ? lw->arch.gfx : "(unknown)",
+                        family);
 }
 
 rocke_status_t rocke_h_require_ds_read_tr(rocke_h_lowerer_t* lw, const char* op_id)
