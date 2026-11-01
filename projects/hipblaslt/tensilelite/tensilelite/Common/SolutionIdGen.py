@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import time
+from pathlib import Path
 
 """
 Solution ID is a 64-bit integer that is used to uniquely identify a solution.
@@ -173,6 +175,94 @@ def ensure_solution_uid(solution: dict) -> None:
     """
     if "SolutionUID" not in solution:
         solution["SolutionUID"] = encode_solution_uid(generate_solution_id())
+
+
+def claim_solution_uid(solution: dict, seen: set[str]) -> str:
+    """Keep or assign a SolutionUID that is unique in one generation run.
+
+    An existing canonical UID is kept when it is not zero and not already in
+    ``seen``. Otherwise a new UID is drawn until it is unused. The chosen UID
+    is added to ``seen``.
+
+    Args:
+        solution: Solution dictionary updated in place.
+        seen: Canonical UIDs already reserved in this run.
+
+    Returns:
+        The canonical UID stored on ``solution``.
+
+    Raises:
+        RuntimeError: If 100 draws all collide with ``seen``.
+        ValueError: Propagated from :func:`generate_solution_id` on time overflow.
+    """
+    existing = solution.get("SolutionUID")
+    if isinstance(existing, str):
+        try:
+            decoded = decode_solution_uid(existing)
+        except (TypeError, ValueError):
+            decoded = 0
+        if decoded != 0:
+            canonical = encode_solution_uid(decoded)
+            if canonical not in seen:
+                solution["SolutionUID"] = canonical
+                seen.add(canonical)
+                return canonical
+
+    for _ in range(100):
+        uid = encode_solution_uid(generate_solution_id())
+        if uid not in seen and uid != "0u0":
+            solution["SolutionUID"] = uid
+            seen.add(uid)
+            return uid
+    raise RuntimeError("could not draw a unique SolutionUID")
+
+
+_SOLUTION_UID_LINE = re.compile(r"^(\s*(?:- )?SolutionUID:\s*)(\S+)(\s*(?:#.*)?)$")
+
+
+def rewrite_colliding_solution_uids(paths: list[Path]) -> int:
+    """Replace colliding SolutionUID lines in one generation's logic files.
+
+    Files are processed in the given order. The first occurrence of a canonical
+    non-zero UID is kept. A later collision, a zero, or a malformed value is
+    replaced. Only the UID line changes.
+
+    Args:
+        paths: Logic YAML files written by one generation run.
+
+    Returns:
+        Number of UID lines rewritten.
+
+    Raises:
+        RuntimeError: If a replacement UID cannot be drawn.
+        OSError: If a file cannot be read or written.
+    """
+    seen: set[str] = set()
+    rewritten = 0
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        newline = "\n"
+        lines = text.splitlines()
+        changed = False
+        for index, line in enumerate(lines):
+            match = _SOLUTION_UID_LINE.match(line)
+            if match is None:
+                continue
+            prefix, value, suffix = match.groups()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                value = value[1:-1]
+            replacement = claim_solution_uid({"SolutionUID": value}, seen)
+            if replacement == value:
+                continue
+            lines[index] = f"{prefix}{replacement}{suffix}"
+            changed = True
+            rewritten += 1
+        if changed:
+            body = newline.join(lines)
+            if text.endswith("\n"):
+                body += "\n"
+            path.write_text(body, encoding="utf-8")
+    return rewritten
 
 
 def regenerate_solution_uid(solution: dict) -> int:

@@ -73,3 +73,85 @@ def test_resolve_errors_and_require_built(monkeypatch: pytest.MonkeyPatch, tmp_p
     (not_built / "tensilelite").mkdir()
     with pytest.raises(SystemExit):
         paths.resolve_hipblaslt_path(explicit=not_built, require_built=True)
+
+
+def test_bind_hipblaslt_wins_over_env_and_anchor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A bound checkout is used even when the env var names another root.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the env checkout or the anchor walk wins.
+    """
+    env_root = tmp_path / "env"
+    (env_root / "tensilelite").mkdir(parents=True)
+    monkeypatch.setenv(paths.HIPBLASLT_PATH_ENV_VAR, str(env_root))
+    bound = tmp_path / "bound"
+    paths.bind_hipblaslt(bound)
+
+    assert paths.locate_hipblaslt_root(anchor=env_root / "a.py") == bound
+
+
+def test_locate_keeps_an_env_path_that_is_not_a_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An environment path is returned even when it has no tensilelite directory.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the lookup walks away from the environment path.
+    """
+    missing = tmp_path / "missing"
+    monkeypatch.setenv(paths.HIPBLASLT_PATH_ENV_VAR, str(missing))
+
+    assert paths.locate_hipblaslt_root(anchor=None) == missing.resolve()
+
+
+def test_locate_returns_none_without_a_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No binding, environment variable, or anchor means no checkout.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a checkout is reported.
+    """
+    monkeypatch.delenv(paths.HIPBLASLT_PATH_ENV_VAR, raising=False)
+
+    assert paths.locate_hipblaslt_root(anchor=None) is None
+
+
+def test_locate_returns_none_when_anchor_has_no_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An anchor outside every hipBLASLt checkout does not invent a root.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a parent directory is treated as a checkout.
+    """
+    monkeypatch.delenv(paths.HIPBLASLT_PATH_ENV_VAR, raising=False)
+
+    assert paths.locate_hipblaslt_root(anchor=tmp_path / "outside.py") is None

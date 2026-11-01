@@ -964,3 +964,108 @@ class TestRunCLIEntryPoint:
 
         mapping_writes = [n for n in written if "Mapping" in n]
         assert mapping_writes, f"Expected Mapping file write; got: {written}"
+
+    @pytest.mark.parametrize("lazy_uid", [222, 111, 0])
+    def test_run_uid_mapping_written_per_arch(self, logic_dir, output_dir, lazy_uid) -> None:
+        """Run writes a unique per-arch UID mapping or rejects ambiguous identities.
+
+        Args:
+            logic_dir: Fixture path containing at least one logic YAML.
+            output_dir: Fixture output path used by ``run()``.
+            lazy_uid: Valid, duplicate, or zero UID in the lazy library.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: If UID mapping write is not emitted or content is wrong.
+        """
+        writes: list[tuple[str, object, str | None]] = []
+
+        def _spy_write(
+            name: object,
+            data: object,
+            fmt: str | None = None,
+            *a: object,
+            **kw: object,
+        ) -> None:
+            """Capture LibraryIO.write calls for later assertions.
+
+            Args:
+                name: Output filename/path.
+                data: Serialized payload.
+                fmt: Format string expected by LibraryIO.write.
+                *a: Extra positional arguments ignored by the spy.
+                **kw: Extra keyword arguments ignored by the spy.
+
+            Returns:
+                None.
+
+            Raises:
+                None.
+            """
+            writes.append((str(name), data, fmt))
+
+        _, info_map = _make_isa_info_map("gfx942")
+        base_args = _make_run_arguments(logic_dir, output_dir)
+
+        solution_direct = SimpleNamespace(solutionUid=111, index=7)
+        solution_lazy = SimpleNamespace(solutionUid=lazy_uid, index=9)
+        lazy_library = SimpleNamespace(
+            solutions={1: solution_lazy},
+            applyNaming=lambda splitGSU: None,
+        )
+        master_library = SimpleNamespace(
+            solutions={0: solution_direct},
+            lazyLibraries={"lazyA": lazy_library},
+            applyNaming=lambda splitGSU: None,
+        )
+
+        def _parallel_stub(fn: object, it: object, *a: object, **kw: object) -> list[object]:
+            """Execute ParallelMap2 work items inline for deterministic testing.
+
+            Args:
+                fn: Callable used by ``ParallelMap2``.
+                it: Iterable of item tuples consumed by ``fn``.
+                *a: Unused positional arguments from ``ParallelMap2``.
+                **kw: Unused keyword arguments from ``ParallelMap2``.
+
+            Returns:
+                List of function results.
+
+            Raises:
+                TypeError: If ``fn`` or items do not match expected tuple-call shape.
+            """
+            return [fn(*entry) for entry in it]
+
+        with patch.object(M, "parseArguments", return_value=base_args), \
+             patch.object(M, "setVerbosity"), \
+             patch.object(M, "validateToolchain", return_value=(
+                 "/fake/hipcc", None, "/fake/bundler", None)), \
+             patch.object(M, "makeIsaInfoMap", return_value=info_map), \
+             patch.object(M, "assignGlobalParameters"), \
+             patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \
+             patch.object(M, "makeSourceToolchain", return_value=MagicMock()), \
+             patch.object(M, "generateLogicDataAndSolutions",
+                          return_value=([], {"gfx942": master_library}, {})), \
+             patch.object(M, "generateKernelObjectsFromSolutions", return_value=[]), \
+             patch.object(M, "generateKernelHelperObjects", return_value=[]), \
+             patch.object(M, "copyStaticFiles", return_value=[]), \
+             patch.object(M, "writeSolutionsAndKernelsTCL",
+                          return_value=(0, [], [])), \
+             patch.object(M, "passPostKernelInfoToLibrary"), \
+             patch.object(M, "ParallelMap2", side_effect=_parallel_stub), \
+             patch.object(M.LibraryIO, "write", side_effect=_spy_write), \
+             patch.object(M.shutil, "rmtree"):
+            if lazy_uid in (111, 0):
+                with pytest.raises(ValueError, match="SolutionUID"):
+                    M.run()
+                assert not writes
+                return
+            M.run()
+
+        uid_writes = [item for item in writes if "UidMapping" in item[0]]
+        assert uid_writes, f"Expected UidMapping file write; got: {writes}"
+        _, uid_mapping_payload, uid_mapping_format = uid_writes[0]
+        assert uid_mapping_format == "msgpack"
+        assert uid_mapping_payload == {111: 7, 222: 9}

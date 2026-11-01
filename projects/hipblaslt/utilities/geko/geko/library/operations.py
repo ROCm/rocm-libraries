@@ -58,6 +58,8 @@ from geko.concurrency.runner import Runner, Worker
 from geko.library import Library, LibraryCollection
 from geko.constants import GEMM_LOG_FIELDS, INDEX_TYPE_MAP
 from geko.library import _bank
+from geko.library.uid_uniqueness import assign_fresh_solution_uids, uniquify_generated_logic
+from geko.paths import bind_hipblaslt
 
 logger = logging.getLogger("GEKO")
 
@@ -138,6 +140,8 @@ def merge_solutions(
 
     Processes all 3_LibraryLogic/*.yaml files in build_* subdirectories,
     merging solutions by library type and deduplicating based on performance.
+    Colliding SolutionUID values are rewritten with the checkout bound by
+    ``bind_hipblaslt``. This function does not take a hipBLASLt path.
 
     Args:
         input_dir (str | Path): Directory containing build_* subdirectories with optimized solutions.
@@ -153,6 +157,8 @@ def merge_solutions(
 
     Raises:
         ValueError: If no valid YAML library logic files found.
+        FileNotFoundError: If ``SolutionIdGen.py`` cannot be located.
+        ImportError: If ``SolutionIdGen.py`` cannot be loaded.
 
     Note:
         For duplicate problem sizes, keeps the solution with highest performance.
@@ -165,7 +171,11 @@ def merge_solutions(
     lib_paths = sorted(input_dir.glob(pattern))
     if not lib_paths:
         raise ValueError(f"No valid YAML libraries found in '{input_dir}'")
-    logger.debug(f"Merging solutions, discovered {len(lib_paths)} library files")
+    rewritten = uniquify_generated_logic(lib_paths)
+    logger.debug(
+        f"Merging solutions, discovered {len(lib_paths)} library files; "
+        f"rewrote {rewritten} colliding SolutionUID values"
+    )
 
     # update dependant parameters if StaggerU == 0
     def _sanitize_solution(sol):
@@ -523,6 +533,9 @@ def from_dataframe(
 ) -> LibraryCollection:
     """Create filtered libraries from a DataFrame of selected solutions.
 
+    Fresh SolutionUIDs use the checkout bound by ``bind_hipblaslt``.
+    This function does not take a hipBLASLt path.
+
     Args:
         df (pd.DataFrame): DataFrame with solution selection results, must include 'lib' column.
         lib_dir (str | Path): Directory containing source library files.
@@ -532,6 +545,8 @@ def from_dataframe(
 
     Raises:
         ValueError: If DataFrame missing necessary columns or solution count mismatch.
+        FileNotFoundError: If ``SolutionIdGen.py`` cannot be located.
+        ImportError: If ``SolutionIdGen.py`` cannot be loaded.
 
     Returns:
         LibraryCollection: LibraryCollection with all solutions / sizes in the DataFrame.
@@ -539,6 +554,8 @@ def from_dataframe(
     Note:
         Groups solutions by GEMM type and creates separate library files
         with only the selected solutions and their corresponding sizes.
+        Every solution receives a new ``SolutionUID``. ``TensileMergeLibrary``
+        keeps the base UID when ``SolutionNameMin`` already exists.
     """
     if "lib" not in df.columns:
         raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
@@ -594,6 +611,7 @@ def from_dataframe(
     if processed != n_sols:
         raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
 
+    assign_fresh_solution_uids(libs.libs)
     return libs
 
 
@@ -604,19 +622,29 @@ def from_full_dataframe(
     type_override: str = None,
 ) -> LibraryCollection:
     """Create full libraries from a DataFrame of solutions.
+
+    Fresh SolutionUIDs use the checkout bound by ``bind_hipblaslt``.
+    This function does not take a hipBLASLt path.
+
     Args:
         df (pd.DataFrame): DataFrame with solution selection results, must include 'lib' column.
         lib_dir (str | Path): Directory containing source library files.
         match_table_path (str | Path): Path to the MatchTable.yaml file.
         type_override (str, optional): Library type to override (e.g., "Equality").
             Defaults to None.
+
     Raises:
         ValueError: If DataFrame missing necessary columns or solution count mismatch.
+        FileNotFoundError: If ``SolutionIdGen.py`` cannot be located.
+        ImportError: If ``SolutionIdGen.py`` cannot be loaded.
+
     Returns:
         LibraryCollection: LibraryCollection with all solutions / sizes in the DataFrame.
     Note:
         Groups solutions by GEMM type and creates separate library files
         with the best of tuned, reference solutions and their corresponding sizes.
+        Every solution receives a new ``SolutionUID``, including a solution
+        copied from another library such as Origami.
     """
     if "lib" not in df.columns:
         raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
@@ -705,6 +733,7 @@ def from_full_dataframe(
     if processed != n_sols:
         raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
 
+    assign_fresh_solution_uids(libs.libs)
     return libs
     
 
@@ -756,10 +785,12 @@ def prune_library(
     Note:
         - If clustering is not enabled, only one GPU will be used.
         - Will re-use benchmark results if they exist.
+        - Binds this checkout for SolutionIdGen before ``merge_solutions`` rewrites UIDs.
     """
     hipblaslt_path = Path(hipblaslt_path)
     if not hipblaslt_path.is_dir():
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
+    bind_hipblaslt(hipblaslt_path)
 
     if devices is None:
         devices = list(range(8))  # Default to all 8 devices if not specified

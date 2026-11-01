@@ -30,6 +30,7 @@ from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataf
 from geko.bench.utils import update_lib_source
 from geko.config_generator.constants import VALID_BACKENDS
 from geko.constants import SUPPORTED_ARCH, canonical_arch
+from geko.paths import bind_hipblaslt
 from geko.schemas import GemmConfig, RunState
 from geko.utils import parse_devices
 
@@ -203,6 +204,12 @@ def run_search(
             directory used to build a reference custom library under
             workdir/ref_build for analysis-time comparisons.
 
+    The resolved checkout is bound for SolutionIdGen. ``merge_solutions``,
+    ``from_dataframe``, and ``from_full_dataframe`` do not take that path.
+
+    Returns:
+        None.
+
     Raises:
         FileNotFoundError: If hipblaslt_path or log_file is missing.
         ValueError: If all benchmarks fail (no winners are produced).
@@ -210,6 +217,7 @@ def run_search(
     hipblaslt_path, log_file, workdir, state, state_path = _prepare_workflow_context(
         hipblaslt_path, log_file, workdir, verbose
     )
+    bind_hipblaslt(hipblaslt_path)
     if devices is None:
         devices = list(range(8))  # Default to all 8 devices if not specified
     devices = parse_devices(devices)
@@ -341,9 +349,10 @@ def run_search(
 
     logger.info("Creating full optimized libraries...")
     library.from_full_dataframe(
-        full_df, lib_dir, 
+        full_df,
+        lib_dir,
         match_table_path,
-        type_override="Equality"
+        type_override="Equality",
     ).dump(full_output_dir)
     logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
@@ -511,6 +520,12 @@ def run_optimize(
             (tracked in a persistent .failcount file); 0 disables
             retirement. Forwarded to optim.run.
 
+    The resolved checkout is bound for SolutionIdGen. ``merge_solutions``,
+    ``from_dataframe``, and ``from_full_dataframe`` do not take that path.
+
+    Returns:
+        None.
+
     Raises:
         FileNotFoundError: hipBLASLt, workdir, optimizations/, or state file missing.
         ValueError: configure not completed, no GEMM configs, or none completed after run.
@@ -518,6 +533,7 @@ def run_optimize(
     hipblaslt_path = Path(hipblaslt_path)
     if not hipblaslt_path.is_dir():
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
+    bind_hipblaslt(hipblaslt_path)
 
     workdir = Path(workdir)
     if not workdir.is_dir():
@@ -645,10 +661,10 @@ def run_optimize(
     logger.info("Creating full optimized libraries...")
     match_table_path = hipblaslt_path / "build/release/device-library/MatchTable.yaml"
     library.from_full_dataframe(
-        full_df, 
+        full_df,
         lib_dir,
         match_table_path,
-        type_override="Equality"
+        type_override="Equality",
     ).dump(full_output_dir)
     logger.info(f"Full optimized library available in: '{full_output_dir}'")
 

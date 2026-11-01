@@ -28,7 +28,7 @@ import geko.device as device
 from geko.config_generator.load_input_config import load_prepared_config_from_yaml, validate_mx_arch_support
 from geko.config_generator.constants import LIST_FORWARDED_KEYS, mx_format, mx_scale_code
 from geko.constants import SUPPORTED_ARCH, canonical_arch
-from geko.paths import resolve_hipblaslt_path
+from geko.paths import bind_hipblaslt, resolve_hipblaslt_path
 from geko.pipeline import run_bench, run_configure, run_optimize, run_search
 from geko.schemas import GemmConfig, GemmType
 from geko.utils import parse_devices
@@ -361,14 +361,25 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
 def dispatch(args: CliArgs, anchor: str | None = None) -> int:
     """Materialize a run dir, build a workload YAML if needed, then bench or full tune.
 
-    anchor is a path inside the hipBLASLt checkout (the launcher's location),
-    used to auto-detect the hipBLASLt root when --hipblaslt / the environment
-    variable are not set. The installed geko console script has no checkout
-    anchor, so it relies on --hipblaslt or $GEKO_HIPBLASLT_PATH.
+    Binds SolutionIdGen to the resolved hipBLASLt checkout before the workflow
+    runs. ``merge_solutions`` does not receive that path.
+
+    Args:
+        args: Normalized CLI flags.
+        anchor: Path inside the hipBLASLt checkout, usually the launcher's
+            location. Used when ``--hipblaslt`` and ``GEKO_HIPBLASLT_PATH``
+            are unset. The installed console script has no checkout anchor.
+
+    Returns:
+        Process status code from the selected workflow.
+
+    Raises:
+        SystemExit: If the hipBLASLt checkout cannot be resolved.
     """
     hipblaslt_path = resolve_hipblaslt_path(
         explicit=args.hipblaslt, anchor=anchor, require_built=True
     )
+    bind_hipblaslt(hipblaslt_path)
 
     run_root = Path(args.workdir) if args.workdir is not None else _alloc_run_root()
     run_root.mkdir(parents=True, exist_ok=True)
