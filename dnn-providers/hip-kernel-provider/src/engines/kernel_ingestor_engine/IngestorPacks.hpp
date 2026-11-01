@@ -5,10 +5,17 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "core/Handle.hpp"
@@ -85,6 +92,98 @@ void resetFlydslSdpaCdnaDualwaveModuleCache();
 /// @see packs/FlydslSdpaCdnaDecodeNative.cpp
 void registerFlydslSdpaCdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSdpaCdnaDecodeModuleCache();
+
+/// @see packs/FlydslSdpaBwdMergedNative.cpp
+void registerFlydslSdpaBwdMergedSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaBwdMergedModuleCache();
+
+/// What one launch of the merged SDPA backward engine hands the device, resolved without
+/// touching it. FOR TESTS ONLY: the product launches through the dispatch handler, and this
+/// is the same argument computation, so a test can read the kernarg images, grids and
+/// workspace offsets a launch would use.
+struct FlydslSdpaBwdMergedLaunchDump
+{
+    /// The merged kernel's arguments, each at its natural offset, and its launch.
+    std::vector<unsigned char> kernarg;
+    std::array<unsigned int, 3> grid{};
+    unsigned int block = 0;
+    /// Set when the graph's dBias is broadcast: the reduce kernel's symbol, arguments and launch.
+    bool reduces = false;
+    std::string reduceSymbol;
+    std::vector<unsigned char> reduceKernarg;
+    std::array<unsigned int, 3> reduceGrid{};
+    unsigned int reduceBlock = 0;
+    size_t workspaceBytes = 0;
+    /// Set when the seed and offset are written into the workspace ahead of the launch: either
+    /// as the four words in seedWords (seed low, seed high, offset low, offset high), or, with
+    /// seedCopiedFromDevice, by copying the 4 bytes at seedSource and offsetSource (the device
+    /// addresses of the 32-bit seed and offset tensors).
+    bool seedUploaded = false;
+    bool seedCopiedFromDevice = false;
+    std::vector<uint32_t> seedWords;
+    const void* seedSource = nullptr;
+    const void* offsetSource = nullptr;
+};
+
+/// The launch of @p kernel on the graph of @p context, over @p buffers (by tensor uid) and a
+/// workspace that starts at @p workspace; the address is only offset into, never dereferenced.
+/// @throws HipdnnPluginException with the status prepare() or launch() would throw.
+FlydslSdpaBwdMergedLaunchDump describeFlydslSdpaBwdMergedLaunchForTesting(
+    const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+    const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+    const std::vector<hipdnnPluginDeviceBuffer_t>& buffers,
+    void* workspace);
+
+/// @see packs/FlydslSdpaBwdSplitNative.cpp
+void registerFlydslSdpaBwdSplitSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaBwdSplitModuleCache();
+
+/// The slots of the split SDPA backward engine, in launch order.
+enum class FlydslSdpaBwdSplitSlot
+{
+    PREP,
+    DKDV,
+    DQ
+};
+
+/// What one launch of a split slot hands the device, resolved without touching it. FOR TESTS
+/// ONLY, as FlydslSdpaBwdMergedLaunchDump is for the merged engine: the product launches
+/// through the slot's dispatch handler, and this is the same argument computation.
+struct FlydslSdpaBwdSplitLaunchDump
+{
+    /// The slot kernel's arguments, each at its natural offset, and its launch.
+    std::vector<unsigned char> kernarg;
+    std::array<unsigned int, 3> grid{};
+    unsigned int block = 0;
+    /// Set when the launch is followed by the dBias reduce kernel: its symbol, arguments and
+    /// launch.
+    bool reduces = false;
+    std::string reduceSymbol;
+    std::vector<unsigned char> reduceKernarg;
+    std::array<unsigned int, 3> reduceGrid{};
+    unsigned int reduceBlock = 0;
+    /// The slot handler's workspaceBytes(): the scratch this slot needs, shared region excluded.
+    size_t scratchBytes = 0;
+    /// Set when the launch writes the seed and offset into the shared region ahead of the
+    /// kernel (the prep slot only); see FlydslSdpaBwdMergedLaunchDump for the two forms.
+    bool seedUploaded = false;
+    bool seedCopiedFromDevice = false;
+    std::vector<uint32_t> seedWords;
+    const void* seedSource = nullptr;
+    const void* offsetSource = nullptr;
+};
+
+/// The launch of @p slot's @p kernel on the graph of @p context, with the tokens @p bound that
+/// graph_match published, over @p buffers (by tensor uid) and a workspace that starts at
+/// @p workspace; the address is only offset into, never dereferenced.
+/// @throws HipdnnPluginException with the status prepare() or launch() would throw.
+FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
+    FlydslSdpaBwdSplitSlot slot,
+    const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+    const hipdnn_plugin_sdk::ingestor::BoundTokens& bound,
+    const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+    const std::vector<hipdnnPluginDeviceBuffer_t>& buffers,
+    void* workspace);
 
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);

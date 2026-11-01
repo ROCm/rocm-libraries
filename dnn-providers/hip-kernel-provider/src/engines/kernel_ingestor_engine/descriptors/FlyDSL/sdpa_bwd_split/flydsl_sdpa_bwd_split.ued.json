@@ -1,0 +1,60 @@
+{
+  "version": "1.1",
+  "id": "946099b9-2715-5e76-9b8b-703c331f95e0",
+  "name": "hipkernel:flydsl_sdpa_bwd_split",
+  "sdk_version": "1.2.0",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_bwd_split.graph_match"
+  },
+  "shared_workspace": "ws.bytes",
+  "slots": [
+    {
+      "name": "prep",
+      "metadata": "8ce86793-4738-5da1-a889-79c7848adad2",
+      "knobs": [
+        "padded",
+        "hints"
+      ]
+    },
+    {
+      "name": "dkdv",
+      "metadata": "df3383c6-3bca-5b83-8832-e5f237096398",
+      "knobs": [
+        "head_dim",
+        "padded",
+        "hints",
+        "floor",
+        "dform",
+        "num_waves",
+        "mfma_rows",
+        "dkv_shards",
+        "block_q",
+        "waves_per_eu",
+        "tight_registers",
+        "num_stream_buffers",
+        "gqa_pack",
+        "block_threads",
+        "block_kv"
+      ]
+    },
+    {
+      "name": "dq",
+      "metadata": "8da45ce1-8683-521f-94bb-f27dfd070750",
+      "knobs": [
+        "head_dim",
+        "padded",
+        "hints",
+        "floor",
+        "dform",
+        "num_waves",
+        "block_m",
+        "block_n",
+        "mfma_rows",
+        "waves_per_eu",
+        "store_db",
+        "bias_stage",
+        "block_threads"
+      ]
+    }
+  ]
+}

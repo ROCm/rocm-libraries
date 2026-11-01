@@ -661,10 +661,22 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_cdna.dispatch",
         "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch",
         "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
+        "hipkernel.flydsl_sdpa_bwd_merged.dispatch",
+        // The split engine is one pack with a handler per slot: the first slot stands for
+        // the pack above, the others are probed beside it.
+        "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
 #endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";
+#ifdef HIPDNN_ENGINE_FLYDSL
+    const std::vector<std::string_view> slotDispatchSymbols{
+        "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch",
+        "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch",
+    };
+#else
+    const std::vector<std::string_view> slotDispatchSymbols;
+#endif
 
     // Each handler once, with the first symbol that resolved to it.
     std::map<const IKernelDispatchHandler<Handle>*, std::string> handlers;
@@ -683,11 +695,14 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         }
     }
     registerNativeIngestorSymbols();
-    for(const auto symbol : packDispatchSymbols)
+    for(const auto& symbols : {packDispatchSymbols, slotDispatchSymbols})
     {
-        const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(symbol));
-        ASSERT_NE(handler, nullptr) << symbol;
-        handlers.emplace(handler, std::string(symbol));
+        for(const auto symbol : symbols)
+        {
+            const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(symbol));
+            ASSERT_NE(handler, nullptr) << symbol;
+            handlers.emplace(handler, std::string(symbol));
+        }
     }
 
     size_t saving = 0;

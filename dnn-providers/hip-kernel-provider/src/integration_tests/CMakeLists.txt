@@ -228,6 +228,47 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
     )
 endif()
 
+# The FlyDSL SDPA backward engines, one gpu-reference target per (engine, architecture)
+# the product ships. Split ships gfx950 content and gfx11-generic content, which the pack
+# expands to every gfx11 member this build targets; merged ships gfx950 only. Gated and
+# routed per architecture exactly as the gfx950 dense target above: the predicate is the
+# one the census uses, and the entry installs into that architecture's shard so a package
+# without the architecture carries no entry for an engine it no longer ships. The backward
+# bundles include bf16 cases, so the target takes the engine's tolerance config, as its
+# tiered checks do.
+foreach(_hkp_bwd_engine IN ITEMS split merged)
+    foreach(_hkp_bwd_arch IN LISTS HKP_FLYDSL_SDPA_BWD_ARCHS)
+        set(_hkp_bwd_ships FALSE)
+        if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+            hkp_product_ships_engine_for_arch(_hkp_bwd_ships
+                "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}" ${_hkp_bwd_arch})
+        endif()
+        if(NOT (HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPDNN_ENABLE_KERNEL_INGESTOR
+                AND HIPDNN_ENABLE_SDPA AND _hkp_bwd_ships
+                AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target))
+            continue()
+        endif()
+
+        # The shard names this TOML, so it is reserved with the shard as well as passed as
+        # TEST_CONFIG; hkp_reserve_census_shard() says why. It is the per-architecture file
+        # the external-integration registration shares.
+        hkp_flydsl_sdpa_bwd_arch_toml(_hkp_bwd_toml ${_hkp_bwd_engine} ${_hkp_bwd_arch})
+        hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch} FILES "${_hkp_bwd_toml}")
+        add_external_integration_test_target(
+            TARGET_NAME hip_kernel_provider_flydsl_sdpa_bwd_${_hkp_bwd_engine}_${_hkp_bwd_arch}_gpu_ref_integration_tests
+            PLUGIN_TARGET hip_kernel_provider
+            ENGINE_NAME   "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_hkp_bwd_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_${_hkp_bwd_arch}
+            REFERENCE_EXECUTOR gpu
+            TEST_CONFIG "${_hkp_bwd_toml}"
+            GTEST_FILTER "quick_SdpaBackward_Default.*:standard_SdpaBackward_Default.*:comprehensive_SdpaBackward_Default.*:full_SdpaBackward_Default.*"
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+        )
+    endforeach()
+endforeach()
+
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
     add_external_integration_test_target(

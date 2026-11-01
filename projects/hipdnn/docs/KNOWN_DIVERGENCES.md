@@ -1,6 +1,6 @@
 # Known divergences: cuDNN frontend compatibility shim
 
-Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` that differs from NVIDIA cuDNN frontend v1.24.0. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
+Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` and of the hip-kernel-provider's FlyDSL SDPA backward engines that differs from NVIDIA cuDNN frontend v1.24.0. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
 
 NVIDIA, CUDA, and cuDNN are trademarks of NVIDIA Corporation. hipDNN is not affiliated with or endorsed by NVIDIA.
 
@@ -102,6 +102,23 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `print()` on a graph whose operation graph is not built prints an empty object.
 - `deserialize` ignores `enforce_precompiled`.
 - A built or deserialized plan executes only on handles whose stream is on the device it was built or deserialized for; `execute` with a handle on another device fails, even when the devices have the same properties. cuDNN allows the same finalized plan on another GPU. To use a plan on another device, `serialize` it and `deserialize` it with a handle on that device. See [backend architecture](./user-guides/conceptual/backend-architecture.rst).
+
+## FlyDSL SDPA backward engines
+
+`hipkernel:flydsl_sdpa_bwd_merged` and `hipkernel:flydsl_sdpa_bwd_split` (hip-kernel-provider; [rules](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#9-sdpa-backward--hipkernelflydsl_sdpa_bwd_merged-and-hipkernelflydsl_sdpa_bwd_split)) serve some SDPA backward graphs that cuDNN's backward node rejects. They are accepted on purpose:
+
+- Dropout with a bottom-right causal mask (matcher rule MW-11). cuDNN returns `GRAPH_NOT_SUPPORTED`.
+- Bottom-right causal alignment or a window with `Sq > Skv` and no `padding_mask`. cuDNN returns `GRAPH_NOT_SUPPORTED`; the matcher has no rule against it.
+- Head dims that are not a multiple of 8 (4 for f32), when the smallest tensor stride is at least the head dim rounded up (DT-8). cuDNN requires multiples of 8.
+- Head dims above 256, up to 512 (`MAX_HEAD_DIM`). cuDNN v1.24.0 rejects above 256 on SM9x.
+- `s_q = s_kv = 1`. cuDNN v1.24.0 returns `GRAPH_NOT_SUPPORTED`; the matcher has no rule against it.
+- f32 data on the split engine (DT-2). The cuDNN v1.24.0 frontend has no data-type check in its backward node, so whether cuDNN serves f32 is unverified (the closed backend may refuse it).
+
+The engines also decline graphs cuDNN serves (ALiBi, bias with a causal or window mask, bias or dBias with `padding_mask`, a custom dropout mask, ragged offsets, a device `attn_scale` tensor, SC-2); the rule IDs are in COVERAGE.md section 9. No other hipDNN engine serves SDPA backward on gfx950 or gfx11 (asm_sdpa's backward builder dispatches gfx942 only), so such a graph has no hipDNN engine there.
+
+Dropout does not reproduce cuDNN's random stream. Both engines regenerate the mask in the kernel with Philox in AOTriton's seed and offset layout, so the mask is not bit-compatible with cuDNN's. The gradient is correct only when the forward pass drew its mask with the same layout, as AOTriton and PyTorch's SDPA do. No other hipDNN engine serves SDPA dropout, and no hipDNN-wide mask contract exists.
+
+Neither engine's plans can be serialized. The merged engine's dispatch handler does not implement plan saving (the SDK default `supportsSaving()` is false), and an object computing a broadcast dBias uses a second (reduce) launch. The split engine is slotted (three launches, one per slot) and does not advertise `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`; a save of its plan is refused, because saving a slot program is deferred by [RFC 0021](./rfcs/0021_KernelSlots.md). cuDNN can serialize the plan of a graph it serves.
 
 ## hipDNN extensions
 

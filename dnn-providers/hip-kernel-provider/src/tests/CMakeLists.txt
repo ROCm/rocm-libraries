@@ -409,6 +409,46 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheFiftySlotSignature
         )
     endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged}
+            SUITES TestFlydslSdpaBwdPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEveryMergedRowOnce
+                EveryKernelDeclaresTheMergedSignature
+                RefusesPlanSerialization
+        )
+    endif()
+    # The split engine's slots are ops of their own (prep, dkdv, dq); its descriptor-only
+    # engine folder has none. The census reads a shard only for an arch where all three slots
+    # ship, and the suite keys its inventory on the arch the entry names: gfx950 content for
+    # gfx950, gfx11-generic content for every gfx11 member. The merged engine's census above
+    # is registered only where merged content ships (gfx950).
+    set(_hkp_split_arches)
+    foreach(_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
+        if(_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_prep
+           AND _arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dkdv)
+            list(APPEND _hkp_split_arches ${_arch})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_split_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_split_arches}
+            SUITES TestFlydslSdpaBwdSplitPacks
+            EXPECTED_CASES
+                IsOneSlottedEngineWithANativeGraphMatchAndAKernelMatcherPerSlot
+                ShipsEverySplitRowOnceAndNoKernelInTwoSlots
+                EveryKernelDeclaresItsSlotsSignature
+                EveryVerdictRowIsServedOrDeclinedAsTheTableSays
+                EveryServedRowsSlotCatalogsHaveUniqueEnrolledKnobTuples
+                RefusesPlanSerialization
+        )
+    endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
