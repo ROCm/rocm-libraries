@@ -413,7 +413,8 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 ### `--search` options
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--duration SEC` | `0.04` | Target dense-search benchmark duration per GEMM. |
+| `--duration MS` | `5.0` | Adaptive measurement floor in milliseconds (`measure_time`). Derives `warmup_time` (2×), `max_measure_time` (4×) and `sample_time` (1/10). |
+| `--no-adaptive-search` | off (adaptive on) | Disable `hipblaslt-bench --adaptive` timing during search (falls back to fixed iters/cold_iters sizing). |
 | `--custom-lib-src PATH` | _none_ | Optional source logic directory used to build a reference custom library (`workdir/ref_build`) for summarize/search/analyze comparisons. |
 
 ### `--bench` options
@@ -638,7 +639,8 @@ Equivalent to Option A but takes the workload log as a positional argument and u
 | `--keep_thr` | Filter threshold (% of total time) | 0.1 |
 | `--up_thr` | Performance uplift threshold | 1.03 (3%) |
 | `-w, --workdir` | Working directory | workdir |
-| `--duration` | Target benchmark duration per GEMM (seconds) | 0.04 |
+| `--duration` | Adaptive measurement floor per GEMM (milliseconds) | 5.0 |
+| `--no-adaptive-search` | Disable `hipblaslt-bench --adaptive` timing (use fixed sizing) | off (adaptive on) |
 | `--custom-lib-src` | Source logic directory for building reference custom library | None |
 | `-v, --verbose` | Logging verbosity (0=WARNING, 1=INFO, 2=DEBUG) | 1 |
 | `--bench-freq` | Enable `HIPBLASLT_BENCH_FREQ` during benchmark runs | False |
@@ -825,7 +827,7 @@ df = pd.DataFrame([
 
 configs = search.configure(
     df=df,
-    duration=0.04,  # Target 40ms benchmark duration
+    duration=5.0,  # Adaptive measurement floor in ms
     iters=100,
     cold_iters=20,
     rotating=512
@@ -861,7 +863,7 @@ summary_df, uniq_df = bench.log.summarize(
 )
 
 # 2. Configure and run search
-configs = search.configure(summary_df, duration=0.04)
+configs = search.configure(summary_df, duration=5.0)
 winners = search.run(
     hipblaslt_path="/path/to/hipblaslt",
     configs=configs,
@@ -1090,7 +1092,7 @@ summary_df, uniq_df = bench.log.summarize(
 )
 
 # Phase 2: Configure and run search
-configs = search.configure(summary_df, duration=0.04)
+configs = search.configure(summary_df, duration=5.0)
 winners = search.run(
     hipblaslt_path,
     configs=configs,

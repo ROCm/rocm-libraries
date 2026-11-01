@@ -32,6 +32,14 @@ from geko.concurrency.runner import Runner, Worker
 
 logger = logging.getLogger("GEKO")
 
+# --- adaptive-timing defaults (hipblaslt-bench --adaptive) --------------------
+# The measurement floor is `duration` (milliseconds); every other timing knob is
+# derived from it so the whole family scales with a single number
+_ADAPTIVE_WARMUP_MULT = 2.0           # warmup_time      = 2 x measure_time
+_ADAPTIVE_CEIL_MULT = 4.0             # max_measure_time = 4 x measure_time
+_ADAPTIVE_MIN_SAMPLES = 10            # sample_time = measure_time / 10 (>=10 samples at the floor)
+
+
 def _normalize_compute_type(v: str) -> str:
     # Normalize legacy values so downstream joins always use c_* compute_type keys.
     v = str(v)
@@ -63,22 +71,40 @@ def _load_processed_df(processed_file: Path) -> pd.DataFrame:
 
 def configure(
     df: pd.DataFrame,
-    duration: float = 0.04,
+    duration: float = 5.0,
     iters: int = 100,
     cold_iters: int = 20,
     rotating: int = 512,
     beta: bool = False,
     flush: bool = False,
+    adaptive: bool = True,
+    noise_threshold: float = 0.05,
+    min_iters: int = 10,
+    max_iters: int = 0,
+    stability_threshold: float = 0.05,
+    stability_window: int = 32,
+    stability_interval: int = 16,
 ) -> List[dict]:
     """Generate benchmarking configurations for each input GEMM.
 
     Creates YAML and shell script configuration files for tuning a specific
     GEMM operation type using the config generator framework.
 
+    By default every config is emitted in hipblaslt-bench ``--adaptive`` mode:
+    the bench warms up, then accumulates samples until the measured mean's
+    relative standard error drops below ``noise_threshold`` (converged), the
+    robust spread plateaus (stable), or a ceiling is hit. The measurement floor
+    is ``duration`` (in milliseconds); ``warmup_time``, ``max_measure_time`` and
+    ``sample_time`` are derived from it (2x, 4x and 1/10 respectively). 
+    Under adaptive mode the per-row ``iters``/``cold_iters`` are
+    ignored by the bench (the adaptive loop gates timing), so they only size the
+    problem set.
+
     Args:
         df (DataFrame): DataFrame containing the GEMMs to benchmark.
-        duration (float, optional): Target benchmark duration in seconds.
-            Defaults to 0.04.
+        duration (float, optional): Adaptive measurement floor in MILLISECONDS
+            (``measure_time``). Also used to size the per-row iteration count.
+            Defaults to 5.0.
         iters (int, optional): Number of benchmark iterations.
             Defaults to 100.
         cold_iters (int, optional): Number of warm-up iterations.
@@ -89,6 +115,21 @@ def configure(
             Defaults to False.
         flush (bool, optional): Whether to flush GPU caches.
             Defaults to False.
+        adaptive (bool, optional): Emit hipblaslt-bench ``--adaptive`` rows with
+            the timing knobs below. When False, falls back to fixed
+            iters/cold_iters sizing only. Defaults to True.
+        noise_threshold (float, optional): Relative std-error convergence target.
+            Defaults to 0.05.
+        min_iters (int, optional): Iteration floor for the adaptive loop.
+            Defaults to 10.
+        max_iters (int, optional): Iteration ceiling (0 => bound by time).
+            Defaults to 0.
+        stability_threshold (float, optional): Robust-spread plateau for the
+            "stable" early stop. Defaults to 0.05.
+        stability_window (int, optional): Samples in the stability window.
+            Defaults to 32.
+        stability_interval (int, optional): Stability re-check interval.
+            Defaults to 16.
 
     Returns:
         dict: List of dictionaries containing the benchmark configurations.
@@ -109,7 +150,7 @@ def configure(
     configs = bench.log.update(
         uniq_df.to_dict(orient="records"),
         latency=latency,
-        duration=duration,
+        duration=duration / 1000.0,  # bench.log.update expects seconds; duration is ms
         iters=iters,
         cold_iters=cold_iters,
         rotating=rotating,
@@ -132,6 +173,25 @@ def configure(
                 config["skip_slow_solution_ratio"] = 0.6
             else:
                 config["skip_slow_solution_ratio"] = 0.3
+
+    if adaptive:
+        measure_time = float(duration)
+        warmup_time = _ADAPTIVE_WARMUP_MULT * measure_time
+        max_measure_time = _ADAPTIVE_CEIL_MULT * measure_time
+        sample_time = measure_time / _ADAPTIVE_MIN_SAMPLES
+        for config in configs:
+            config["adaptive"] = True
+            config["sample_time"] = sample_time
+            config["min_iters"] = min_iters
+            config["max_iters"] = max_iters
+            config["stability_threshold"] = stability_threshold
+            config["stability_window"] = stability_window
+            config["stability_interval"] = stability_interval
+            config["warmup_time"] = warmup_time
+            config["measure_time"] = measure_time
+            config["max_measure_time"] = max_measure_time
+            config["noise_threshold"] = noise_threshold
+
     return configs
 
 
