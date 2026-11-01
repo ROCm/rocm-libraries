@@ -8,6 +8,7 @@
 
 #include "hipdnn_conv.hpp"
 #include "hipdnn_graph.hpp"
+#include "hipdnn_tensor.hpp"
 #include "hipdnn_types.hpp"
 
 #include "miopen_impl.h"
@@ -34,18 +35,6 @@ constexpr int64_t kUidB    = 2; // w for fprop and dgrad, x for wgrad
 constexpr int64_t kUidOut  = 3;
 constexpr int64_t kUidBias = 4;
 
-struct TensorInfo
-{
-    miopenDataType_t dataType{};
-    std::vector<int64_t> dims;
-    std::vector<int64_t> strides;
-    // Above 1 only for NCHWc4, NCHWc8, CHWNc4 and CHWNc8.
-    int64_t vectorLength = 1;
-    // Set when a dim or stride is above INT_MAX, which the int getter cuts down.
-    // dims, strides and vectorLength are then unusable.
-    bool truncated = false;
-};
-
 struct ConvInfo
 {
     std::vector<int64_t> pads;
@@ -67,74 +56,6 @@ struct ConvProblem
     ConvInfo conv;
     miopenActivationMode_t act = miopenActivationPASTHRU;
 };
-
-size_t TypeSize(miopenDataType_t type)
-{
-    switch(type)
-    {
-    case miopenInt8:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz: return 1;
-    case miopenHalf:
-    case miopenBFloat16: return 2;
-    case miopenFloat:
-    case miopenInt32: return 4;
-    case miopenDouble:
-    case miopenInt64: return 8;
-    }
-    return 0;
-}
-
-// miopenGetTensorDescriptor fills caller-provided int arrays, so the size query
-// has to come first.
-miopenStatus_t ReadTensor(miopenTensorDescriptor_t desc, TensorInfo& out)
-{
-    int size = 0;
-    if(miopenGetTensorDescriptorSize_impl(desc, &size) != miopenStatusSuccess || size <= 0)
-        return miopenStatusInvalidValue;
-
-    std::vector<int> dims(static_cast<size_t>(size));
-    std::vector<int> strides(static_cast<size_t>(size));
-    miopenDataType_t dataType{};
-    if(miopenGetTensorDescriptor_impl(desc, &dataType, dims.data(), strides.data()) !=
-       miopenStatusSuccess)
-        return miopenStatusInvalidValue;
-
-    out.dataType = dataType;
-    out.dims.assign(dims.begin(), dims.end());
-    out.strides.assign(strides.begin(), strides.end());
-
-    // MIOpen stores no dim or stride below 1, so one here was cut down by the
-    // int getter.
-    const auto belowOne = [](int value) { return value < 1; };
-    if(std::any_of(dims.begin(), dims.end(), belowOne) ||
-       std::any_of(strides.begin(), strides.end(), belowOne))
-    {
-        out.truncated = true;
-        return miopenStatusSuccess;
-    }
-
-    // No getter exposes the vector length, but MIOpen's byte count is
-    // typeSize * (vectorLength + sum of (dim - 1) * stride), so it can be solved for.
-    // The sum is unsigned, as in MIOpen, so a cut-down value gives a wrong
-    // answer rather than signed overflow.
-    size_t numBytes       = 0;
-    const size_t typeSize = TypeSize(dataType);
-    if(miopenGetTensorNumBytes_impl(desc, &numBytes) != miopenStatusSuccess || typeSize == 0)
-        return miopenStatusInvalidValue;
-    uint64_t span = 0;
-    for(size_t i = 0; i < dims.size(); ++i)
-        span += static_cast<uint64_t>(dims[i] - 1) * static_cast<uint64_t>(strides[i]);
-    const uint64_t vectorLength = numBytes / typeSize - span;
-    // MIOpen allows only these, so any other answer means a value was cut down.
-    if(vectorLength != 1 && vectorLength != 4 && vectorLength != 8)
-    {
-        out.truncated = true;
-        return miopenStatusSuccess;
-    }
-    out.vectorLength = static_cast<int64_t>(vectorLength);
-    return miopenStatusSuccess;
-}
 
 miopenStatus_t ReadConvolution(miopenConvolutionDescriptor_t desc, ConvInfo& out)
 {
@@ -177,18 +98,6 @@ miopenStatus_t ReadConvolution(miopenConvolutionDescriptor_t desc, ConvInfo& out
     return miopenStatusSuccess;
 }
 
-// Exact comparison is the point: the only scaling hipDNN's convolution op can
-// express is none at all, so anything but a literal 1.0 or 0.0 has to be
-// declined rather than rounded into.
-bool ScalarEquals(const void* value, miopenDataType_t type, double expected)
-{
-    if(value == nullptr)
-        return false;
-    if(type == miopenDouble)
-        return *static_cast<const double*>(value) == expected;
-    return static_cast<double>(*static_cast<const float*>(value)) == expected;
-}
-
 // MIOpen itself serves only 2-D and 3-D convolutions.
 constexpr size_t kMinSpatialDims = 2;
 constexpr size_t kMaxSpatialDims = 3;
@@ -203,14 +112,9 @@ const char* CheckSupported(const std::vector<TensorInfo>& tensors, const ConvInf
     {
         if(!ToHipdnnDataType(tensor.dataType, unused))
             return "this data type has no hipDNN convolution";
-        if(tensor.truncated)
-            return "tensors with a dim or stride above INT_MAX are not forwarded to hipDNN";
-        // hipDNN describes a tensor only by dims and strides, which cannot
-        // express a vector packed into each element.
-        if(tensor.vectorLength != 1)
-            return "vectorized tensor layouts (NCHWc4, NCHWc8, CHWNc4, CHWNc8) are not "
-                   "forwarded to hipDNN";
     }
+    if(const char* reason = CheckTensorLayouts(tensors))
+        return reason;
     if(conv.groupCount != 1)
         return "grouped convolution is not forwarded to hipDNN";
     if(conv.pads.size() < kMinSpatialDims || conv.pads.size() > kMaxSpatialDims)
@@ -237,12 +141,6 @@ const char* CheckSupported(const std::vector<TensorInfo>& tensors, const ConvInf
     return nullptr;
 }
 
-void AppendList(std::vector<int64_t>& out, const std::vector<int64_t>& values)
-{
-    out.push_back(static_cast<int64_t>(values.size()));
-    out.insert(out.end(), values.begin(), values.end());
-}
-
 PlanKey MakePlanKey(miopenHandle_t handle, const ConvProblem& problem)
 {
     PlanKey key;
@@ -253,27 +151,13 @@ PlanKey MakePlanKey(miopenHandle_t handle, const ConvProblem& problem)
     out.push_back(static_cast<int64_t>(problem.act));
     out.push_back(static_cast<int64_t>(problem.tensors.size()));
     for(const TensorInfo& tensor : problem.tensors)
-    {
-        out.push_back(static_cast<int64_t>(tensor.dataType));
-        AppendList(out, tensor.dims);
-        AppendList(out, tensor.strides);
-    }
+        AppendTensor(out, tensor);
     AppendList(out, problem.conv.pads);
     AppendList(out, problem.conv.strides);
     AppendList(out, problem.conv.dilations);
     out.push_back(static_cast<int64_t>(problem.conv.mode));
     out.push_back(problem.conv.groupCount);
     return key;
-}
-
-std::shared_ptr<fe::graph::TensorAttributes>
-MakeTensor(const TensorInfo& info, fe::DataType dataType, int64_t uid)
-{
-    return fe::graph::Graph::tensor(fe::graph::TensorAttributes()
-                                        .set_dim(info.dims)
-                                        .set_stride(info.strides)
-                                        .set_data_type(dataType)
-                                        .set_uid(uid));
 }
 
 // Builds the graph for one problem. `a` and `b` are the two convolution inputs
@@ -335,6 +219,11 @@ bool PopulateGraph(const ConvProblem& problem, fe::graph::Graph& graph)
         out = graph.conv_wgrad(a, b, conv);
         break;
     }
+    case GraphKind::BnFwdTraining:
+    case GraphKind::BnFwdInference:
+    case GraphKind::BnFwdInferenceInvVar:
+    case GraphKind::BnBackward:
+    case GraphKind::BnBackwardActivation: break;
     }
 
     if(out == nullptr)
@@ -354,13 +243,13 @@ bool PopulateGraph(const ConvProblem& problem, fe::graph::Graph& graph)
         add.set_mode(fe::PointwiseMode::ADD).set_compute_data_type(types[3]);
         out = graph.pointwise(out, bias, add);
 
-        fe::PointwiseMode activation{};
+        PointwiseActivation activation{};
         if(!ToPointwiseActivation(problem.act, activation))
             return false;
         out->set_dim(outInfo.dims).set_stride(outInfo.strides);
 
         fe::graph::PointwiseAttributes activationAttributes;
-        activationAttributes.set_mode(activation).set_compute_data_type(computeType);
+        activationAttributes.set_mode(activation.forward).set_compute_data_type(computeType);
         out = graph.pointwise(out, activationAttributes);
     }
 
@@ -571,14 +460,7 @@ miopenStatus_t ConvolutionBiasActivationForward(miopenHandle_t handle,
     if(const char* reason = CheckSupported(problem.tensors, problem.conv))
         return RecordFailure(miopenStatusUnsupportedOp, reason);
 
-    // RELU, the only mode accepted, ignores these. The getter just needs
-    // somewhere to write them.
-    double activAlpha = 0.0;
-    double activBeta  = 0.0;
-    double activGamma = 0.0;
-    if(miopenGetActivationDescriptor_impl(
-           activationDesc, &problem.act, &activAlpha, &activBeta, &activGamma) !=
-       miopenStatusSuccess)
+    if(ReadActivationMode(activationDesc, problem.act) != miopenStatusSuccess)
         return RecordFailure(miopenStatusBadParm, "could not read the activation descriptor");
 
     // Matches the status MIOpen's own fused path returns.

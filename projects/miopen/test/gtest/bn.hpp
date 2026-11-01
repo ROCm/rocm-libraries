@@ -30,9 +30,11 @@
 #include <miopen/solver/ck_utility_common.hpp>
 
 #include "bn_test_data.hpp"
+#include "gtest_common.hpp"
 #include "test_operations.hpp"
 
-MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_FIND_ENFORCE)
+// MIOPEN_FIND_ENFORCE comes from gtest_common.hpp. A local declaration would clash
+// with it in any test that includes both headers, such as hipdnn_shim_batchnorm.cpp.
 #define WORKAROUND_SWDEV_547301 1
 // Define an enum to identify which version of BN api to call
 enum BNApiType
@@ -80,7 +82,10 @@ static std::string BNModeToString(int bn_mode)
 
 inline miopenTuningPolicy_t GetTuningPolicy(void)
 {
-    auto str = env::value(MIOPEN_FIND_ENFORCE);
+    // lib_env::value throws for an unset variable, so check presence first.
+    if(!MIOPEN_FIND_ENFORCE)
+        return miopenTuningPolicy_t::miopenTuningPolicyNone;
+    auto str = lib_env::value<std::string>(MIOPEN_FIND_ENFORCE);
     if(str.empty())
         return miopenTuningPolicy_t::miopenTuningPolicyNone;
     for(auto& c : str)

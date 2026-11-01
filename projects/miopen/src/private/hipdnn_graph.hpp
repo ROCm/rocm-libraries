@@ -4,9 +4,10 @@
 // The part of the hipDNN forwarding that does not depend on the operation. The
 // first half is what the rest of the wrapper calls: probing the backend,
 // releasing a handle's hipDNN state and prefixing forwarded error messages. The
-// second half is what each operation's file (hipdnn_conv.cpp) uses: it
-// describes its problem as a PlanKey and supplies the function that builds the
-// graph for it, and RunCachedGraph does the rest.
+// second half is what each operation's file (hipdnn_conv.cpp,
+// hipdnn_batchnorm.cpp) uses: it describes its problem as a PlanKey and
+// supplies the function that builds the graph for it, and RunCachedGraph does
+// the rest.
 //
 // Compiled only into the public wrapper library; never installed.
 #pragma once
@@ -72,6 +73,11 @@ enum class GraphKind : int64_t
     ConvDgrad,
     ConvWgrad,
     ConvBiasActivation,
+    BnFwdTraining,
+    BnFwdInference,
+    BnFwdInferenceInvVar,
+    BnBackward,
+    BnBackwardActivation,
 };
 
 // Identifies one cached graph. `problem` is everything that tells two problems
@@ -82,10 +88,14 @@ struct PlanKey
 {
     miopenHandle_t handle = nullptr;
     std::vector<int64_t> problem;
+    // Build the plan with the engine's benchmarking knob on, which makes the
+    // MIOpen provider run MIOpen under miopenTuningPolicySearch. Building fails
+    // when no engine exposes the knob, so the problem never runs untuned.
+    bool benchmark = false;
 
     bool operator==(const PlanKey& other) const
     {
-        return handle == other.handle && problem == other.problem;
+        return handle == other.handle && problem == other.problem && benchmark == other.benchmark;
     }
 };
 
@@ -101,6 +111,17 @@ miopenStatus_t RecordCurrentException() noexcept;
 
 using PopulateGraphFn = std::function<bool(hipdnn_frontend::graph::Graph&)>;
 using VariantPack     = std::unordered_map<int64_t, void*>;
+using BindScratchFn   = std::function<void(VariantPack&, void*)>;
+
+// Device scratch for graph outputs the caller has no buffer for. RunCachedGraph
+// carves `bytes` from the handle's buffer and passes their start to `bind`,
+// which adds the scratch pointers to the variant pack. The scratch is reused by
+// the next call on the handle, so its contents are lost.
+struct GraphScratch
+{
+    size_t bytes = 0;
+    BindScratchFn bind;
+};
 
 // Runs the graph for `key` on `handle`'s stream. On a cache miss, `populate`
 // fills in a new graph, which is then built and cached. The caller's workspace
@@ -111,7 +132,24 @@ miopenStatus_t RunCachedGraph(miopenHandle_t handle,
                               const PopulateGraphFn& populate,
                               VariantPack& variantPack,
                               void* workspace,
-                              size_t workspaceSize);
+                              size_t workspaceSize,
+                              const GraphScratch& scratch = {});
+
+// One graph of a sequence for RunCachedGraphs. `bindScratch` may be empty.
+struct GraphStep
+{
+    PlanKey key;
+    PopulateGraphFn populate;
+    VariantPack variantPack;
+    BindScratchFn bindScratch;
+};
+
+// Runs `steps` in order on `handle`'s stream, as RunCachedGraph runs one graph,
+// in the handle's buffer. Every step sees the same `scratchBytes` of scratch at
+// the same address, so a step can read what an earlier one wrote there. No
+// step runs unless every graph can be built.
+miopenStatus_t
+RunCachedGraphs(miopenHandle_t handle, std::vector<GraphStep>& steps, size_t scratchBytes);
 
 } // namespace hipdnn
 } // namespace wrapper
