@@ -37,8 +37,11 @@ Each emulated GEMM runs through the following GPU stages:
    the batched GEMM passes.
 5. **Batched INT8 GEMMs** — one INT8 GEMM per modulus (chunked to fit the
    workspace).
-6. **CRT reconstruction** — accumulate the per-modulus INT32 results (via a
-   double-double / TwoSum accumulator) and finalize to the output type.
+6. **CRT reconstruction** — accumulate the per-modulus INT32 results and
+   finalize to the output type. On devices with integer residues (see below),
+   when all moduli fit in one pass, the sum is exact in 16-bit integer limbs
+   and rounds once to the output type. Otherwise the sum is double-double
+   (TwoSum).
 
 Stages 4 and 6 reduce values modulo the CRT moduli. They have two versions:
 FP64 arithmetic, for GPUs with a fast FP64 rate, and integer
