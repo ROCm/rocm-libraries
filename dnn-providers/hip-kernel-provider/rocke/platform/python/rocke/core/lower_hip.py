@@ -103,40 +103,42 @@ _HIP_UNSIGNED_INT_TYPE = {
 }
 
 
+# Vector element type -> ext_vector_type name prefix: the one table behind
+# every HIP vector name (_type_to_hip) and every vector load / store handler
+# (_vec_prefix). fp8/bf8 share the i8 byte-storage view. The prologue's
+# _ROCKE_VEC typedefs declare the common widths; _extra_vector_declarations
+# declares any other the kernel uses. No packed-only type has an entry:
+# core/ir.py _refuse_packed_only_value keeps its values out of the IR.
+_VEC_PREFIX = {
+    "f16": "f16x",
+    "bf16": "bf16x",
+    "f32": "f32x",
+    "f64": "f64x",
+    "i32": "i32x",
+    "tf32": "i32x",
+    "i16": "i16x",
+    "i8": "i8x",
+    "fp8e4m3": "i8x",
+    "bf8e5m2": "i8x",
+}
+
+
 def _type_to_hip(t) -> str:
     if isinstance(t, PtrType):
         if t.space in ("global", "lds"):
             return f"{_type_to_hip(t.pointee)}*"
     if isinstance(t, VectorType):
-        # Naming convention matches the prologue's typedefs:
-        # ``f16xN``, ``bf16xN``, ``f32xN``, ``i32xN``, ``i8xN`` for N>=1.
-        # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
-        # keeps its values out of the IR.
-        elem = t.elem.name
-        if elem == "f16":
-            return f"f16x{t.count}"
-        if elem == "bf16":
-            return f"bf16x{t.count}"
-        if elem == "f32":
-            return f"f32x{t.count}"
-        if elem == "f64":
-            return f"f64x{t.count}"
-        if elem in ("i32", "tf32"):
-            return f"i32x{t.count}"
-        if elem == "i16":
-            return f"i16x{t.count}"
-        if elem == "i8":
-            return f"i8x{t.count}"
-        if elem == "fp8e4m3":
-            return f"i8x{t.count}"  # fp8e4m3 is stored as bytes
-        if elem == "bf8e5m2":
-            return f"i8x{t.count}"  # bf8e5m2 is stored as bytes
-        if elem == "i1":
-            # i1 vectors materialise per-element predicates; lower as
-            # ``boolxN`` from the prologue. The AMDGPU backend folds
-            # these into VCC / s_mov_b64 mask ops the same way the
-            # direct LLVM IR path does.
+        # ``<prefix><N>``: an i1 vector is ``boolxN``, any other element takes
+        # its _VEC_PREFIX prefix. The prologue or _extra_vector_declarations
+        # declares the name; an element with no prefix is refused below.
+        if t.elem.name == "i1":
+            # i1 vectors materialise per-element predicates. The AMDGPU
+            # backend folds ``boolxN`` into VCC / s_mov_b64 mask ops the same
+            # way the direct LLVM IR path does.
             return f"boolx{t.count}"
+        prefix = _VEC_PREFIX.get(t.elem.name)
+        if prefix is not None:
+            return f"{prefix}{t.count}"
     if isinstance(t, SmemType):
         # smem allocations expand into __shared__ arrays at the top of
         # the kernel; the value at the use site is a typed pointer-ish.
@@ -224,22 +226,6 @@ __device__ extern "C" void _llvm_amdgcn_raw_ptr_buffer_load_lds(
 
 def _name(v: Value) -> str:
     return v.name[1:] if v.name.startswith("%") else v.name
-
-
-# Vector-load/store element type -> ext_vector_type prefix (see the _ROCKE_VEC
-# typedefs in the prologue). fp8/bf8 share the i8 byte-storage view.
-_VEC_PREFIX = {
-    "f16": "f16x",
-    "bf16": "bf16x",
-    "f32": "f32x",
-    "f64": "f64x",
-    "i32": "i32x",
-    "tf32": "i32x",
-    "i16": "i16x",
-    "i8": "i8x",
-    "fp8e4m3": "i8x",
-    "bf8e5m2": "i8x",
-}
 
 
 # One buffer access per width in bytes (core/ir.py _BUFFER_ACCESS_BYTES): the

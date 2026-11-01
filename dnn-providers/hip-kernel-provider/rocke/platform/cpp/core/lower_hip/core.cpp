@@ -368,82 +368,46 @@ const char* rocke_h_require_hip_scalar(rocke_h_lowerer_t* lw, const char* ir_typ
     return spelling;
 }
 
-/* No packed-only type has an entry: rocke_i_refuse_packed_only_value keeps its
- * values out of the IR. */
-const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map)
+/* Python _VEC_PREFIX: vector element type -> ext_vector_type name prefix, the
+ * one table behind every HIP vector name (rocke_h_type_to_hip) and every vector
+ * load / store handler (rocke_h_vec_prefix_checked). fp8/bf8 share the i8
+ * byte-storage view. No packed-only type has an entry:
+ * rocke_i_refuse_packed_only_value keeps its values out of the IR. */
+static const struct
 {
-    if(ir_scalar_name)
-    {
-        /* Small 2-entry map ({f16,bf16}) always available. */
-        if(strcmp(ir_scalar_name, "f16") == 0)
-        {
-            return "f16x";
-        }
-        if(strcmp(ir_scalar_name, "bf16") == 0)
-        {
-            return "bf16x";
-        }
-        if(full_map)
-        {
-            if(strcmp(ir_scalar_name, "f32") == 0)
-            {
-                return "f32x";
-            }
-            if(strcmp(ir_scalar_name, "f64") == 0)
-            {
-                return "f64x";
-            }
-            if(strcmp(ir_scalar_name, "i32") == 0 || strcmp(ir_scalar_name, "tf32") == 0)
-            {
-                return "i32x";
-            }
-            if(strcmp(ir_scalar_name, "i16") == 0)
-            {
-                return "i16x";
-            }
-            if(strcmp(ir_scalar_name, "i8") == 0)
-            {
-                return "i8x";
-            }
-            if(strcmp(ir_scalar_name, "fp8e4m3") == 0)
-            {
-                return "i8x";
-            }
-            if(strcmp(ir_scalar_name, "bf8e5m2") == 0)
-            {
-                return "i8x";
-            }
-        }
-    }
-    /* Python .get(elem, "f16x") fallback. */
-    return "f16x";
-}
+    const char* elem;
+    const char* prefix;
+} k_hip_vec_prefix[] = {
+    {"f16", "f16x"},
+    {"bf16", "bf16x"},
+    {"f32", "f32x"},
+    {"f64", "f64x"},
+    {"i32", "i32x"},
+    {"tf32", "i32x"},
+    {"i16", "i16x"},
+    {"i8", "i8x"},
+    {"fp8e4m3", "i8x"},
+    {"bf8e5m2", "i8x"},
+};
 
-/* True iff `name` is one of the element types rocke_h_vec_prefix maps for real
- * (i.e. would not land on the "f16x" fallback). */
-static bool rocke_h_scalar_in_vec_map(const char* name, bool full_map)
+const char* rocke_h_vec_prefix(const char* ir_scalar_name)
 {
-    if(strcmp(name, "f16") == 0 || strcmp(name, "bf16") == 0)
-    {
-        return true;
-    }
-    if(!full_map)
-    {
-        return false;
-    }
-    return strcmp(name, "tf32") == 0 || strcmp(name, "f32") == 0 || strcmp(name, "f64") == 0
-           || strcmp(name, "i32") == 0 || strcmp(name, "i16") == 0 || strcmp(name, "i8") == 0
-           || strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0;
+    if(!ir_scalar_name)
+        return NULL;
+    for(const auto& entry : k_hip_vec_prefix)
+        if(strcmp(entry.elem, ir_scalar_name) == 0)
+            return entry.prefix;
+    return NULL;
 }
 
 const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
                                        const char* ir_scalar_name,
-                                       bool full_map,
                                        const char* op_desc)
 {
     /* Mirrors Python _vec_prefix: an elem_type outside the map is a hard error,
      * not a silent "f16x" that would reinterpret the bits of another type. */
-    if(!ir_scalar_name || !rocke_h_scalar_in_vec_map(ir_scalar_name, full_map))
+    const char* prefix = rocke_h_vec_prefix(ir_scalar_name);
+    if(!prefix)
     {
         rocke_h_fail(lw,
                      ROCKE_ERR_KEY,
@@ -451,7 +415,7 @@ const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
                      op_desc,
                      ir_scalar_name ? ir_scalar_name : "(null)");
     }
-    return rocke_h_vec_prefix(ir_scalar_name, full_map);
+    return prefix;
 }
 
 /* Python _reject_f64(op, tname):
@@ -505,21 +469,11 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
         }
         else
         {
-            /* full 8-entry map; fp8/bf8 fold to i8x as in Python. */
-            pfx = rocke_h_vec_prefix(elem, /*full_map=*/true);
-            /* vec_prefix falls back to "f16x" for unknown elems, but the
-             * Python code only emits the listed elems and otherwise falls
-             * through to the KeyError. Detect the listed set explicitly so an
-             * unknown vector elem is an error rather than silently "f16x". */
-            if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
-               && strcmp(elem, "tf32") != 0 && strcmp(elem, "f64") != 0 && strcmp(elem, "i32") != 0
-               && strcmp(elem, "i16") != 0 && strcmp(elem, "i8") != 0
-               && strcmp(elem, "fp8e4m3") != 0 && strcmp(elem, "bf8e5m2") != 0)
-            {
-                /* Python falls through to the scalar map, which refuses the
-                 * vector type by its own name. */
+            pfx = rocke_h_vec_prefix(elem);
+            /* Python falls through to the scalar map, which refuses the
+             * vector type by its own name. */
+            if(!pfx)
                 return rocke_h_require_hip_scalar(lw, t->name);
-            }
         }
         out = rocke_arena_printf(&lw->b->arena, "%s%d", pfx, t->count);
         return out ? out : "";
@@ -997,7 +951,7 @@ static void
         const char* prefix
             = strcmp(t->elem->name, "i1") == 0
                   ? "boolx"
-                  : ckc::rocke_h_vec_prefix_checked(lw, t->elem->name, true, "vector type");
+                  : ckc::rocke_h_vec_prefix_checked(lw, t->elem->name, "vector type");
         const char* scalar = strcmp(prefix, "i8x") == 0
                                  ? "int8_t"
                                  : ckc::rocke_h_require_hip_scalar(lw, t->elem->name);

@@ -169,20 +169,16 @@ const char* rocke_h_require_hip_scalar(rocke_h_lowerer_t* lw, const char* ir_typ
  * "uint64_t" for i1 / i8 and u8 / i16 / i32 / i64. Returns NULL for any other type. */
 const char* rocke_h_unsigned_int_type(const rocke_type_t* t);
 
-/* The "f16x"/"bf16x"/"f32x"/"i32x"/"i16x"/"i8x" vector-name prefix for an IR
- * scalar element name, used by the smem/global vN load/store handlers. Returns
- * the Python fallback "f16x" for names not in the small map (matching the
- * .get(elem,"f16x") idiom). Never NULL. `full_map` selects between the small
- * 2-entry {f16,bf16} map (false, used by global_load_vN etc.) and the full
- * 8-entry map including f32/i32/i16/i8/fp8/bf8 (true, used by smem_store_vN). */
-const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map);
+/* Python _VEC_PREFIX: the ext_vector_type name prefix ("f16x", "i8x", ...) of
+ * a vector of the IR scalar element `ir_scalar_name`, or NULL for an element
+ * with no HIP vector type. The one table behind every HIP vector name. */
+const char* rocke_h_vec_prefix(const char* ir_scalar_name);
 
 /* Same map, but an element name outside it raises (mirroring Python
- * _vec_prefix) instead of silently resolving to "f16x". Used by the handlers
- * whose Python counterparts validate: the smem and global vN load/store ops. */
+ * _vec_prefix) instead of resolving to a prefix that would reinterpret the bits
+ * of another type. Used by the vector load / store handlers. */
 const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
                                        const char* ir_scalar_name,
-                                       bool full_map,
                                        const char* op_desc);
 
 /* Python _reject_f64(op, tname): raises ROCKE_ERR_NOTIMPL "<op> does not support

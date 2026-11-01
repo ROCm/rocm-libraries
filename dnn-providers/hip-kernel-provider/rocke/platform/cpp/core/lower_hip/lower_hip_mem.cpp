@@ -210,7 +210,7 @@ static rocke_status_t _op_tile_smem_store_vN(rocke_h_lowerer_t* lw, const rocke_
     }
     idx_str = mem_idx_join(lw, &op->operands[1], op->num_operands - 2);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "smem_store_vN");
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, "smem_store_vN");
     rocke_h_emitf(lw,
                   "*reinterpret_cast<%s%lld*>(&%s[%s]) = %s;",
                   prefix,
@@ -340,9 +340,9 @@ static rocke_status_t _op_tile_smem_load_vN(rocke_h_lowerer_t* lw, const rocke_o
     smem = op->operands[0];
     n = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    /* Full map, like Python _smem_vec_prefix: an f32/i32/i8 LDS vector load must
-     * not be reinterpreted through the f16 view. */
-    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "smem_load_vN");
+    /* Like Python _vec_prefix: an f32/i32/i8 LDS vector load must not be
+     * reinterpreted through the f16 view. */
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, "smem_load_vN");
     storage = mem_storage_of(lw, smem);
     if(!storage)
     {
@@ -559,7 +559,7 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     idx = op->operands[1];
     vec = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_load_vN");
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, "global_load_vN");
     res = rocke_h_name(lw, op->results[0]);
     const int64_t byte_count = vec * (rocke_dtype_info(elem_name)->encoded_bits / 8);
     const int64_t align = mem_attr_int(op, "align", vec * 2);
@@ -673,7 +673,7 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     val = op->operands[2];
     n = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_store_vN");
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, "global_store_vN");
     const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
     const int64_t align = mem_attr_int(op, "align", byte_count);
     if(align <= 0 || (align & (align - 1)))
