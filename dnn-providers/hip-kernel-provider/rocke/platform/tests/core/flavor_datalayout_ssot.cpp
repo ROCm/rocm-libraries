@@ -119,9 +119,14 @@ int main(void)
         = ckc::rocke_ll_emission_profile(ROCKE_LLVM_FLAVOR_LLVM23);
     const ckc::rocke_ll_emission_profile_t* llvm24
         = ckc::rocke_ll_emission_profile(ROCKE_LLVM_FLAVOR_LLVM24);
-    CHECK(llvm23 != NULL && llvm23 == llvm24, "llvm23 and llvm24 share one emission profile");
+    CHECK(llvm23 != NULL && llvm24 != NULL && llvm23 != llvm24,
+          "llvm24 has a distinct named-barrier declaration profile");
+    CHECK(llvm23->datalayout == llvm24->datalayout,
+          "llvm23 and llvm24 retain one datalayout profile");
     CHECK(ckc::rocke_ll_profile_has(ROCKE_LLVM_FLAVOR_LLVM24, ckc::ROCKE_LL_CAP_LLVM23_TARGET_OPS),
           "llvm24 admits LLVM23-generation target operations");
+    CHECK(ckc::rocke_ll_profile_has(ROCKE_LLVM_FLAVOR_LLVM24, ckc::ROCKE_LL_CAP_NAMED_BARRIER_AS15),
+          "llvm24 uses addrspace(15) named barriers");
     CHECK(ckc::rocke_ll_flavor_for_llvm_major(23) == ROCKE_LLVM_FLAVOR_LLVM23,
           "LLVM 23 resolves to llvm23");
     CHECK(ckc::rocke_ll_flavor_for_llvm_major(24) == ROCKE_LLVM_FLAVOR_LLVM24,

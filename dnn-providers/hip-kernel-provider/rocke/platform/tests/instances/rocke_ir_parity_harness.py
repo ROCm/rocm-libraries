@@ -504,8 +504,9 @@ def build_attention_reduce_own_module(
     return _build
 
 
-def build_attention_scalar(name, arch, *, three_d=False, **problem):
-    """Scalar (correctness-oracle) unified attention, 2D or split-3D segment kernel.
+def build_attention_scalar(name, arch, *, three_d=False, reduce=False, **problem):
+    """Scalar (correctness-oracle) unified attention: 2D, split-3D segment kernel,
+    or (``reduce``) the cross-segment reduce that finishes the split-3D path.
 
     ``problem`` patches a small ``UnifiedAttentionProblem``; the band fields
     (``causal_top_left``, ``right_bound``, ``sliding_window``) select the mask.
@@ -516,8 +517,10 @@ def build_attention_scalar(name, arch, *, three_d=False, **problem):
             UnifiedAttention2DSpec,
             UnifiedAttention3DSpec,
             UnifiedAttentionProblem,
+            UnifiedAttentionReduceSpec,
             build_unified_attention_2d,
             build_unified_attention_3d,
+            build_unified_attention_reduce,
         )
 
         fields = dict(
@@ -533,6 +536,10 @@ def build_attention_scalar(name, arch, *, three_d=False, **problem):
         )
         fields.update(problem)
         p = UnifiedAttentionProblem(**fields)
+        if reduce:
+            return build_unified_attention_reduce(
+                UnifiedAttentionReduceSpec(p, num_segments=8), arch=arch
+            )
         if three_d:
             return build_unified_attention_3d(
                 UnifiedAttention3DSpec(p, num_segments=8), arch=arch
@@ -3530,6 +3537,37 @@ def cases():
             emit_lse=True,
         ),
     )
+    # Tiled 2D with LSE output, one case per epilogue branch (each branch has
+    # its own LSE store site).
+    for _branch, _branch_kw in (
+        (
+            "transposed32",
+            dict(
+                use_mfma_32x32=True,
+                block_m_per_warp=32,
+                use_transposed_qk_32x32=True,
+                use_transposed_scalar_state=True,
+            ),
+        ),
+        ("mfma32", dict(use_mfma_32x32=True, block_m_per_warp=32)),
+        ("striped16", {}),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/2d_lse_{_branch}_bf16_d128",
+            "gfx950",
+            build_attention_2d(
+                f"irhash_attn_950_2d_lse_{_branch}_bf16",
+                "gfx950",
+                head_size=128,
+                block_size=64,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="bf16",
+                emit_lse=True,
+                **_branch_kw,
+            ),
+        )
     add(
         "attention",
         "attention/gfx942/2d_fp16_d128_b64",
@@ -3579,6 +3617,37 @@ def cases():
             use_i64_kv_addr=True,
         ),
     )
+    # LSE-on tiled 2D, one case per epilogue branch (transposed 32x32x8 direct
+    # store, non-transposed 32x32x8 via Acc_lds, narrow 16x16 striped). The
+    # LSE-off cases above stay byte-identical.
+    for _branch, _branch_kw in (
+        (
+            "transposed32",
+            dict(
+                use_mfma_32x32x8=True,
+                use_transposed_qk_32x32=True,
+                block_m_per_warp=32,
+            ),
+        ),
+        ("mfma32", dict(use_mfma_32x32x8=True, block_m_per_warp=32)),
+        ("striped16", {}),
+    ):
+        add(
+            "attention",
+            f"attention/gfx942/2d_lse_{_branch}_bf16_d128",
+            "gfx942",
+            build_attention_2d(
+                f"irhash_attn_942_2d_lse_{_branch}_bf16",
+                "gfx942",
+                head_size=128,
+                block_size=64,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="bf16",
+                emit_lse=True,
+                **_branch_kw,
+            ),
+        )
     add(
         "attention",
         "attention/gfx942/3d_fp16_d128_b64",
@@ -4060,6 +4129,19 @@ def cases():
                 "gfx950",
                 three_d=True,
                 **_kw,
+            ),
+        )
+    # The scalar split-3D reduce: empty-segment and empty-row guards.
+    for _dtype in ("fp16", "bf16"):
+        add(
+            "attention",
+            f"attention/gfx950/scalar_reduce_{_dtype}_d128_seg8",
+            "gfx950",
+            build_attention_scalar(
+                f"irhash_attn_950_scalar_reduce_{_dtype}",
+                "gfx950",
+                reduce=True,
+                dtype=_dtype,
             ),
         )
     # 40 query heads over 8 KV heads: the head -> KV-head magic division is by 5, so the
