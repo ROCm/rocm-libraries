@@ -203,10 +203,12 @@ def _resolve_wgrad(
     # drop an off-diagonal group pair, so only the workspace carries the mask.
     # On MFMA the packed 16-bit atomic is emitted by the cshuffle epilogue only
     # (the direct-store one scatters the MFMA layout and has no pairs to add).
-    # WMMA (wave32) has only the default epilogue, and its split-K epilogue
-    # forms each packed pair itself.
+    # On WMMA (wave32) the default split-K epilogue forms each packed pair
+    # itself; the cshuffle one pairs from LDS as on MFMA.
     wave_size = ArchTarget.from_gfx(arch).wave_size
-    layout_ok, atomic_why = wgrad_atomic_epilogue_available(p, dtype, None, wave_size)
+    layout_ok, atomic_why = wgrad_atomic_epilogue_available(
+        p, dtype, None, wave_size, epilogue
+    )
     if gm > 1:
         atomic_why = "a merged tile reduces through the workspace only"
     elif wave_size == 32 and not wgrad_wmma_split_k_available(arch):

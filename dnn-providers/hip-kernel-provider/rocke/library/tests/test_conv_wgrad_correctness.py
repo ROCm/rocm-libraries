@@ -2308,14 +2308,32 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
                 ok, why = is_valid_wgrad_spec(other, arch)
                 self.assertFalse(ok, f"{dtype} split-K on {arch} must stay rejected")
                 self.assertIn("enabled only on", why)
-            # And no WMMA epilogue but 'default' is admitted for split-K.
-            ok, _ = is_valid_wgrad_spec(
+            # The cshuffle epilogue is admitted for WMMA split-K too: it pairs
+            # through LDS from the WMMA fragment (CShuffleEpilogue.from_grid_op).
+            ok, why = is_valid_wgrad_spec(
                 self._gfx1250_spec(data=data, split_k=4, epilogue="cshuffle"),
                 "gfx1250",
             )
-            self.assertFalse(
-                ok, f"{dtype} cshuffle split-K on gfx1250 must be rejected"
+            self.assertTrue(ok, f"{dtype} cshuffle split-K on gfx1250: {why}")
+
+    def test_wmma_cshuffle_split_k_needs_even_store_vec(self):
+        # The cshuffle epilogue pairs from LDS on WMMA as on MFMA, so unlike the
+        # default WMMA epilogue it needs an even store vector.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        for dtype in ("bf16", "fp16"):
+            data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
+            for sv, want in ((1, False), (2, True), (8, True)):
+                spec = self._gfx1250_spec(
+                    data=data, split_k=4, epilogue="cshuffle", vector_size_c=sv
+                )
+                ok, why = is_valid_wgrad_spec(spec, "gfx1250")
+                self.assertEqual(ok, want, f"{dtype} sv={sv}: {why}")
+            ok, _ = is_valid_wgrad_spec(
+                self._gfx1250_spec(data=data, split_k=4, vector_size_c=1), "gfx1250"
             )
+            self.assertTrue(ok, "the default WMMA epilogue ignores the store vector")
 
     def test_wmma_split_k_ignores_store_vec(self):
         # The AOT cache grid pins vector_size_c=1 for the default epilogue. The
@@ -2458,11 +2476,13 @@ class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
     )
 
     def _sweep(self, **knobs) -> None:
-        # Both loops are MFMA-only (WMMA wgrad rejects async_dma and
-        # unroll_k). On MFMA every case must build and run: a skip (an
-        # invalid spec) is a failure, not a quiet pass.
-        if not _IS_MFMA:
-            self.skipTest(f"{knobs} wgrad is MFMA-only; running on {GPU_ARCH}")
+        # Both loops exist on MFMA; gfx1250 WMMA has async_dma only (the
+        # global_load_async_to_lds ping-pong) and rejects unroll_k. Every case
+        # must build and run: a skip (an invalid spec) is a failure, not a
+        # quiet pass.
+        gfx1250_async = GPU_ARCH == "gfx1250" and knobs.get("async_dma", False)
+        if not (_IS_MFMA or gfx1250_async):
+            self.skipTest(f"{knobs} wgrad is not built on {GPU_ARCH}")
         for shape in self._CASES:
             for dtype in _DTYPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -2497,6 +2517,132 @@ def _assert_case_ran(test, ok: bool, why: str) -> None:
     """
     test.assertTrue(ok, why)
     test.assertFalse(why.startswith("skip"), f"case was skipped rather than run: {why}")
+
+
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestWgradWmmaCShuffle(unittest.TestCase):
+    """gfx1250 dW numerics for the WMMA cshuffle epilogue.
+
+    The tile is staged through LDS from the WMMA C layout (op.c_layout()) and
+    written as wide stores, or as genuine packed atomic pairs under split-K. A
+    wrong lane-to-element mapping shows up only in dW, so every case runs
+    against the CPU reference: direct store and split-K, fp16 and bf16, partial
+    M/N tiles (C=24), pointwise, stride 2, grouped, and the async K loop.
+    """
+
+    _CASES = (
+        _Shape(
+            "3x3_N2H14W14C64K64", N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1
+        ),
+        _Shape(
+            "3x3_C24_N2H12W12C24K32",
+            N=2,
+            Hi=12,
+            Wi=12,
+            C=24,
+            K=32,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+        ),
+        _Shape("1x1_N2H14W14C32K32", N=2, Hi=14, Wi=14, C=32, K=32, Y=1, X=1),
+        _Shape(
+            "3x3s2_N2H15W15C32K48",
+            N=2,
+            Hi=15,
+            Wi=15,
+            C=32,
+            K=48,
+            Y=3,
+            X=3,
+            sH=2,
+            sW=2,
+            pH=1,
+            pW=1,
+        ),
+        _Shape(
+            "3x3_g2_N2H10W10C32K32",
+            N=2,
+            Hi=10,
+            Wi=10,
+            C=32,
+            K=32,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=2,
+        ),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(
+                f"the WMMA cshuffle epilogue is gfx1250-tested; on {GPU_ARCH}"
+            )
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        for shape in self._CASES:
+            p = ConvProblem(
+                N=shape.N,
+                Hi=shape.Hi,
+                Wi=shape.Wi,
+                C=shape.C,
+                K=shape.K,
+                Y=shape.Y,
+                X=shape.X,
+                sH=shape.sH,
+                sW=shape.sW,
+                pH=shape.pH,
+                pW=shape.pW,
+                groups=shape.groups,
+            )
+            for dtype in _DTYPES:
+                for split_k in (1, 2):
+                    for tm, tn, tk, wm, wn in ((32, 64, 32, 2, 2), (64, 32, 64, 2, 1)):
+                        spec = WgradConvSpec(
+                            problem=p,
+                            data=ConvDataSpec(
+                                dtype_a=dtype, dtype_b=dtype, dtype_d=dtype
+                            ),
+                            tile_m=tm,
+                            tile_n=tn,
+                            tile_k=tk,
+                            warp_m=wm,
+                            warp_n=wn,
+                            warp_tile_m=16,
+                            warp_tile_n=16,
+                            warp_tile_k=32,
+                            wave_size=32,
+                            pipeline="mem",
+                            epilogue="cshuffle",
+                            split_k=split_k,
+                            lds_k_outer=True,
+                            **knobs,
+                        )
+                        with self.subTest(
+                            shape=shape.id, dtype=dtype, sk=split_k, tile=(tm, tn, tk)
+                        ):
+                            ok, why = _run_one(
+                                GPU_ARCH,
+                                shape,
+                                dtype,
+                                "mem",
+                                "cshuffle",
+                                spec_override=spec,
+                            )
+                            _assert_case_ran(
+                                self, ok, f"{shape.id} {dtype} {knobs}: {why}"
+                            )
+
+    def test_cshuffle(self):
+        self._sweep()
+
+    def test_cshuffle_async(self):
+        self._sweep(async_dma=True)
 
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")

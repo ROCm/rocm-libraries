@@ -514,6 +514,32 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
     /* k_off_capture[0] = k_off */
     ctx->k_off_capture = k_off;
 
+    if(ctx->async_global_lds)
+    {
+        /* gfx1250: Python a_sync_loader / b_sync_loader.load_async_to_lds with
+         * the default coherency (the X tile is re-read across N tiles and
+         * filter taps, so it is not streamed past the cache). */
+        rocke_coalesced_tile_loader_load_async_to_lds(b,
+                                                      &ctx->a_sync_loader,
+                                                      ctx->tid,
+                                                      A_dst,
+                                                      ctx->a_descriptor_fn,
+                                                      ctx,
+                                                      ctx->a_ptr,
+                                                      ctx->a_buf_rsrc.num_bytes,
+                                                      0);
+        rocke_coalesced_tile_loader_load_async_to_lds(b,
+                                                      &ctx->b_sync_loader,
+                                                      ctx->tid,
+                                                      B_dst,
+                                                      ctx->b_descriptor_fn,
+                                                      ctx,
+                                                      ctx->b_ptr,
+                                                      ctx->b_buf_rsrc.num_bytes,
+                                                      0);
+        return;
+    }
+
     if(spec->async_dma)
     {
         /* CACHE_STREAM (SLC=1): each K-tile is consumed exactly once by the
