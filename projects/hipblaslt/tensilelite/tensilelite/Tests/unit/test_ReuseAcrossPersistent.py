@@ -128,30 +128,6 @@ def test_pap_is_off_when_its_own_flag_is_off_whatever_rap_says():
 # Toolchain fixtures (real gfx1250 caps + assembler)
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def gfx1250_iim():
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def assembler():
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
-
-
-@pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
     """Assign process-global parameters for gfx1250; restore after module."""
     from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
