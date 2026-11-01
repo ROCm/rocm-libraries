@@ -99,6 +99,11 @@ class WgradReduceSpec:
     # and one 8-byte bf16 / 16-byte f32 store per thread). Needs wg_N % vec
     # == 0 (the launcher checks). Default 1: the scalar kernel, unchanged.
     vec: int = 1
+    # r5: 1 = the fold also stores zeros back into every scratch element it
+    # read ("rz1"), leaving the scratch zero for the next launch -- the
+    # launcher then skips its per-launch scratch clear (the allocation clear
+    # covers the first). vec > 1 path only. Default 0: unchanged.
+    rezero: int = 0
 
     @property
     def block_size(self) -> int:
@@ -121,6 +126,8 @@ class WgradReduceSpec:
             parts.append(f"wsr{self.ws_replicas}")
         if self.vec > 1:
             parts.append(f"v{self.vec}")
+        if self.rezero:
+            parts.append(f"rz{self.rezero}")
         parts.append(self.dtype_d)
         return kernel_name_join(self.name, *parts)
 
@@ -150,8 +157,14 @@ def build_conv_wgrad_workspace_reduce(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = BS
 
-    ws_ptr = b.param(
-        "ws_ptr", PtrType(F32, "global"), noalias=True, readonly=True, align=16
+    if spec.rezero and spec.vec <= 1:
+        raise ValueError("WgradReduceSpec.rezero needs vec > 1")
+    ws_ptr = (
+        b.param("ws_ptr", PtrType(F32, "global"), noalias=True, align=16)
+        if spec.rezero
+        else b.param(
+            "ws_ptr", PtrType(F32, "global"), noalias=True, readonly=True, align=16
+        )
     )
     # For fp32 output the ptr element type is f32; for fp16/bf16 use io_ir_type.
     if _is_fp32_out:
@@ -269,6 +282,11 @@ def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, gr
         tot = [b.vec_extract(parts[0], i) for i in range(v)]
         for pv in parts[1:]:
             tot = [b.fadd(t, b.vec_extract(pv, i)) for i, t in enumerate(tot)]
+        if spec.rezero:
+            z = b.zero_vec_f32(v)
+            for r in range(reps):
+                off = ws_base if r == 0 else b.add(ws_base, b.mul(b.const_i32(r), grp_stride))
+                b.global_store_vN(ws_ptr, off, z, v)
         if spec.dtype_d in ("fp32", "f32"):
             b.global_store_vN(dw_ptr, dw_off, b.vec_pack(tot, F32), v)
         else:

@@ -5869,7 +5869,12 @@ def _ws_slabs_used(problem, ident, split_k) -> int:
     return max(1, min(reps, int(split_k)))
 
 
-def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas):
+def _wgrad_s2_rezero() -> bool:
+    """ROCKE_WGRAD_S2_REZERO=1: self-clearing two-stage scratch (see _stage2_reduce)."""
+    return os.environ.get("ROCKE_WGRAD_S2_REZERO", "0") not in ("", "0")
+
+
+def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas, rezero_ok=True):
     """Stage 2 (scratch fold + cast to dW) for a cached two-stage wgrad kernel.
 
     The reduce kernel takes wg_M / wg_N / groups as kernargs, so its IR
@@ -5892,14 +5897,18 @@ def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas
 
     if vec <= 1 or _s2_wg_N(problem) % vec:
         vec = 1
+    # ROCKE_WGRAD_S2_REZERO=1 (r5, opt-in): the fold leaves the scratch zero
+    # (WgradReduceSpec.rezero) and the launcher skips its per-launch clear.
+    rz = 1 if (vec > 1 and rezero_ok and _wgrad_s2_rezero()) else 0
     spec = WgradReduceSpec(
         problem=problem,
         dtype_d=dtype_d,
         groups=problem.groups,
         ws_replicas=ws_replicas,
         **({"vec": vec} if vec > 1 else {}),
+        **({"rezero": rz} if rz else {}),
     )
-    key = (dtype_d, ws_replicas, vec)
+    key = (dtype_d, ws_replicas, vec, rz)
     if key not in compiled:
         art = compile_kernel(build_conv_wgrad_workspace_reduce(spec), arch=arch)
         compiled[key] = KernelLauncher(
@@ -6007,6 +6016,7 @@ def _streamk_launch(
                 stage2,
                 KernelLauncher,
                 spec.ws_replicas,
+                rezero_ok=False,
             )
             s2 = (
                 s2_launcher,
@@ -6731,6 +6741,7 @@ def _cached_bind(
             stage2_kernels,
             KernelLauncher,
             extras.get("ws_slabs", _ws_replicas_of(ident)),
+            rezero_ok=not getattr(ident, "ws_store", 0),
         )
         s2_values, s2_cfg = _stage2_launch(
             s2_spec,
@@ -6749,9 +6760,11 @@ def _cached_bind(
             s2_cfg=s2_cfg,
             stream=stream,
             ws_store=bool(getattr(ident, "ws_store", 0)),
+            rezero=bool(getattr(s2_spec, "rezero", 0)),
         ):
-            if not ws_store:
-                # (ws_store writes every element of the slabs Stage 2 folds)
+            if not ws_store and not rezero:
+                # (ws_store writes every element of the slabs Stage 2 folds;
+                # a rezero Stage 2 leaves them zero for this launch)
                 rt.memset_async(extras["ws_ptr"], 0, extras["ws_bytes"], stream)
             launcher(values, config=cfg)
             s2_launcher(s2_values, config=s2_cfg)

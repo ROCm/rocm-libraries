@@ -192,6 +192,20 @@ class KernelIdentity:
     xwin_kband: int = 0
     # wgrad only (WgradConvSpec.plain_pp): plain-loop block ping-pong. Left out of the hash at 0.
     plain_pp: int = 0
+    # wgrad only (WgradConvSpec.xwin_bq): X window staged in quads. Left out of the hash at 0.
+    xwin_bq: int = 0
+    # wgrad only (WgradConvSpec.xwin_aq): leader-only dY stores. Left out of the hash at 0.
+    xwin_aq: int = 0
+    # wgrad only (WgradConvSpec.xwin_pps): ping-pong schedule variant. Left out of the hash at 0.
+    xwin_pps: int = 0
+    # wgrad only (WgradConvSpec.xwin_rot): plane-rotated slice order. Left out of the hash at 0.
+    xwin_rot: int = 0
+    # wgrad only (WgradConvSpec.xwin_kord): row-fastest K order. Left out of the hash at 0.
+    xwin_kord: int = 0
+    # wgrad only (WgradConvSpec.ws_lc): lane-contiguous two-stage atomics. Left out of the hash at 0.
+    ws_lc: int = 0
+    # wgrad only (WgradConvSpec.ws_gred): pairwise group reduction before the atomics. Left out of the hash at 0.
+    ws_gred: int = 0
     # dgrad (DgradConvSpec.uniform_k_decode) and fwd
     # (ImplicitGemmConvSpec.uniform_k_decode): the per-tile reduction decode
     # K loop. Left out of the hash while False, like prefetch_addr.
@@ -506,6 +520,20 @@ class KernelIdentity:
             del fields["xwin_kband"]
         if not fields["plain_pp"]:
             del fields["plain_pp"]
+        if not fields["xwin_bq"]:
+            del fields["xwin_bq"]
+        if not fields["xwin_aq"]:
+            del fields["xwin_aq"]
+        if not fields["xwin_pps"]:
+            del fields["xwin_pps"]
+        if not fields["xwin_rot"]:
+            del fields["xwin_rot"]
+        if not fields["xwin_kord"]:
+            del fields["xwin_kord"]
+        if not fields["ws_lc"]:
+            del fields["ws_lc"]
+        if not fields["ws_gred"]:
+            del fields["ws_gred"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["reg_prefetch"]:

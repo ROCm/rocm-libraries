@@ -759,6 +759,46 @@ class WgradConvSpec:
     # the VALU work (kpack packing, next-read offsets) interleaved into the
     # MFMA phases (_ppp2_loop). Default 0.
     plain_pp: int = 0
+    # (2: channel chunk fastest across lanes -- 8 lanes per 128-byte voxel
+    # line -- with 2-way conflicted b64 stores.)
+    # xwin_pp only (r5): the X window is staged in quads -- a load unit is
+    # 8 channels x 4 consecutive window voxels (four 16-byte reads), stored
+    # transposed with one ds_write_b64 per channel instead of a b32 per voxel
+    # pair: one pass of units instead of two (the second pass of the pair
+    # form is mostly idle units writing the trash rows), half the LDS write
+    # instructions, quad index fastest across lanes (conflict-free b64
+    # stores under the pp row permutation). Default 0: byte-identical.
+    xwin_bq: int = 0
+    # xwin_pp with xwin_gn 2 (r5): the groups that are not their dY slot's
+    # leader skip the dY LDS stores (a wave-uniform branch) instead of
+    # storing into the trash slot. Default 0: byte-identical.
+    xwin_aq: int = 0
+    # xwin_pp schedule variants (r5): 1 = [mem A]'s offset ALU interleaved
+    # with the fragment reads (sched_group_barrier DS read 1 / ALU k)
+    # instead of issued after all of them. Default 0: byte-identical.
+    xwin_pps: int = 0
+    # xwin_pp under split-K (r5): each slice runs its K tiles rotated to
+    # start at the first output-plane boundary inside it (wrapping to its
+    # start), so the concurrent slices of an XCD process the same output
+    # rows in lockstep and the z taps' re-reads of X hit in L2. Default 0.
+    xwin_rot: int = 0
+    # xwin (r5): K tiles of a plane in row-fastest order (column segment
+    # outer, output row inner): the y taps' X windows recur one K tile
+    # apart, so they hit in L1/L2 instead of four tiles apart. Default 0.
+    xwin_kord: int = 0
+    # two_stage xwin (r5): lane-contiguous Stage 1 atomics. Each wave stages
+    # one (16-row atom, tap) block of its accumulators through a wave-private
+    # LDS tile and reads it back row-major, so one f32 atomic instruction
+    # covers 64 / W whole rows of W contiguous columns (W = the wave's
+    # channel run, 32: two full 128-byte lines) instead of 4 rows x 16
+    # columns (four half lines). Default 0: byte-identical.
+    ws_lc: int = 0
+    # two_stage xwin_groups 2 with xwin_gn 0 (r5): the two groups of a
+    # workgroup accumulate two K slices of the SAME (M, N) tile; before the
+    # Stage 1 atomics they exchange half of their accumulator fragments through
+    # LDS (in chunks, two barriers each) and each atomically adds the sum of
+    # the half it owns: half the atomics in all and per wave. Default 0.
+    ws_gred: int = 0
 
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
@@ -1005,6 +1045,13 @@ class WgradConvSpec:
                 f"eqx{self.epi_quad_xpose}": self.epi_quad_xpose > 0,
                 f"xkb{self.xwin_kband}": self.xwin_kband > 0,
                 f"ppp{self.plain_pp}": self.plain_pp > 0,
+                f"xbq{self.xwin_bq}": self.xwin_bq > 0,
+                f"xaq{self.xwin_aq}": self.xwin_aq > 0,
+                f"xps{self.xwin_pps}": self.xwin_pps > 0,
+                f"xrot{self.xwin_rot}": self.xwin_rot > 0,
+                f"xko{self.xwin_kord}": self.xwin_kord > 0,
+                f"wlc{self.ws_lc}": self.ws_lc > 0,
+                f"wgr{self.ws_gred}": self.ws_gred > 0,
                 # Stream-K changes the grid decode, the K ranges and the
                 # epilogue, and the launch mode and the reduction both change
                 # the emitted body. The CTA pool does not: like the split-K
@@ -1563,6 +1610,33 @@ def _xwin_conflict(spec: "WgradConvSpec") -> str:
         return "xwin_groups needs prefetch_regs=1 and xwin_rows=1"
     if spec.xwin_pp not in (0, 8):
         return f"xwin_pp must be 0 or 8 (got {spec.xwin_pp})"
+    if spec.xwin_bq:
+        _nq = -(-(spec.tile_k + X - 1) // 4)
+        if spec.xwin_bq not in (1, 2) or not spec.xwin_pp or n_mr != 1 or R != 1 or cb % 32:
+            return "xwin_bq is 0, 1 or 2 and needs xwin_pp (one filter row, xwin_mrow 1)"
+        if 4 * _nq > xwin_window_stride(spec.tile_k, X, 1):
+            return "xwin_bq: the quads overrun the window stride"
+    if spec.xwin_aq and (spec.xwin_aq not in (1, 2) or spec.xwin_gn != 2):
+        return "xwin_aq is 0, 1 or 2 and needs xwin_gn 2"
+    if spec.xwin_pps and (spec.xwin_pps not in (1, 2, 3) or not spec.xwin_pp):
+        return "xwin_pps is 0..3 and needs xwin_pp"
+    if spec.ws_gred and (
+        spec.ws_gred != 1 or G != 2 or spec.xwin_gn or spec.ws_store or spec.ws_fuse
+        or spec.group_merge > 1 or spec.ws_lc
+        or (spec.mfmas_per_warp_m * spec.mfmas_per_warp_n) % 4
+    ):
+        return "ws_gred is 0 or 1: xwin_groups 2, xwin_gn 0, no ws_store/ws_fuse/ws_lc, frags % 4 == 0"
+    if spec.ws_lc:
+        _w = spec.warp_tile_n * (spec.mfmas_per_warp_n // X)
+        if (
+            spec.ws_lc != 1 or spec.ws_store or spec.ws_fuse or spec.group_merge > 1
+            or (spec.warp_tile_m, spec.warp_tile_n) != (16, 16) or 64 % _w or _w < 16
+        ):
+            return "ws_lc is 0 or 1: 16x16 atoms, a wave channel run of 16/32/64, no ws_store/ws_fuse/group_merge"
+    if spec.xwin_kord and (spec.xwin_kord != 1 or n_mr != 1 or spec.xwin_kband or spec.tile_k & (spec.tile_k - 1)):
+        return "xwin_kord is 0 or 1 (xwin_mrow 1, no xwin_kband, power-of-two tile_k)"
+    if spec.xwin_rot and (spec.xwin_rot != 1 or n_mr != 1 or spec.xwin_kband or spec.m_band):
+        return "xwin_rot is 0 or 1 (xwin_mrow 1, no xwin_kband / m_band)"
     if spec.xwin_pp and (
         (G % 2 and G != 1)
         or G * spec.warp_m * spec.warp_n != 8
@@ -2825,6 +2899,10 @@ def build_implicit_gemm_conv_wgrad(
             warp_m_idx=b.div(_wl, b.const_i32(spec.warp_n)),
             warp_n_idx=b.mod(_wl, b.const_i32(spec.warp_n)),
         )
+    _lc_wave_v = None
+    if spec.ws_lc:
+        # ws_lc: the wave's index in the whole workgroup (its LDS tile)
+        _lc_wave_v = b.to_sgpr_u32(_wave_full) if _xg > 1 else b.to_sgpr_u32(grid.warp_id)
     tid = grid.tid
     lane = grid.lane
     warp_id = grid.warp_id
@@ -4166,6 +4244,11 @@ def build_implicit_gemm_conv_wgrad(
             n_pairs = n_mr * pairs_r
         else:
             n_pairs = (block_k + X_) // 2  # ceil((tile_k + X - 1) / 2)
+        _bq = spec.xwin_bq
+        # voxels per B load unit (xwin_bq: quads)
+        _bE = 4 if _bq else 2
+        if _bq:
+            n_pairs = -(-(block_k + X_ - 1) // 4)  # quads per window
         n_row_units = n_pairs * ncq
         n_units = R_ * n_row_units
         threads = spec.group_block_size
@@ -4220,6 +4303,19 @@ def build_implicit_gemm_conv_wgrad(
             _c_kbm = b.const_i32(_kb - 1)
             _c_kbs = b.const_i32(_kb.bit_length() - 1)
 
+        _kord = spec.xwin_kord
+        if _kord:
+            _c_tks = b.const_i32(block_k.bit_length() - 1)
+
+        def _kord_map(ho_v, wo_v):
+            """xwin_kord: the plane's K tiles row-fastest -- tile j of the plane
+            (j = ho_v * Wo/tile_k + wo_v/tile_k) is (column segment j / Ho,
+            output row j % Ho), so consecutive tiles are consecutive rows and
+            the y taps re-read a window one tile apart."""
+            j = b.add(b.mul(ho_v, b.lshr(p_Wo, _c_tks)), b.lshr(wo_v, _c_tks))
+            seg, h = _dm(j, "k_Ho", p_Ho)
+            return h, b.shl(seg, _c_tks)
+
         def _tile(k):
             """Uniform per-tile bases: X window start, dY row start, validity."""
             q, wo = _dm(k, "k_Wo", p_Wo)
@@ -4231,6 +4327,8 @@ def build_implicit_gemm_conv_wgrad(
                 n_ = c0
             else:
                 q, ho = _dm(q, "k_Ho", p_Ho)
+            if _kord:
+                ho, wo = _kord_map(ho, wo)
             if _kb:
                 pass
             elif is3:
@@ -4277,6 +4375,13 @@ def build_implicit_gemm_conv_wgrad(
                 o = []
                 yield from _dm_steps(q, "k_Ho", p_Ho, o)
                 q, ho = o
+            if _kord:
+                j = b.add(b.mul(ho, b.lshr(p_Wo, _c_tks)), b.lshr(wo, _c_tks))
+                yield
+                o = []
+                yield from _dm_steps(j, "k_Ho", p_Ho, o)
+                seg, ho = o
+                wo = b.shl(seg, _c_tks)
             if _kb:
                 pass
             elif is3:
@@ -4304,6 +4409,28 @@ def build_implicit_gemm_conv_wgrad(
                 yb = b.add(yb, b.mul(do_, P["p_dY_stride_do"]))
             st.update(xb=xb, yb=yb, wib=wib, ok=ok, hi=hi, di=di)
 
+        _rot_v = []
+        if spec.xwin_rot and k_hi is not None:
+            # xwin_rot: the slice's K tiles in rotated order, starting at
+            # the first output-plane boundary inside the slice, so the
+            # concurrent slices of an XCD walk the same output rows at the
+            # same time and the z taps' X rows hit in L2.
+            _q1, _wo = _dm(k_lo, "k_Wo", p_Wo)
+            _q2, _ho = _dm(_q1, "k_Ho", p_Ho)
+            _pl = b.mul(p_Ho, p_Wo)
+            _m = b.add(b.mul(_ho, p_Wo), _wo)
+            _tb = b.select(b.cmp_eq(_m, c0), c0, b.sub(_pl, _m))
+            _rot_v.append(b.to_sgpr_u32(
+                b.select(b.cmp_lt(b.add(k_lo, _tb), _k_upper), _tb, c0)
+            ))
+            _rot_v.append(b.sub(_k_upper, k_lo))
+
+        def _rk(k):
+            if not _rot_v:
+                return k
+            kr = b.add(k, _rot_v[0])
+            return b.select(b.cmp_lt(kr, _k_upper), kr, b.sub(kr, _rot_v[1]))
+
         def a_fn(b_, row, col):
             k_out = b_.add(k_out0, row)
             off = b_.add(b_.add(st["yb"], b_.mul(col, Yw)), k_out)
@@ -4320,7 +4447,42 @@ def build_implicit_gemm_conv_wgrad(
             else:
                 rr, ur = None, u
             q = b.mod(ur, b.const_i32(ncq))
-            if n_mr > 1:
+            if _bq == 2:
+                # xwin_bq 2: channel chunk fastest (8 lanes read one 128-byte
+                # voxel line), then the quad; trash rows for idle units
+                jq_t = b.div(ur, b.const_i32(ncq))
+            elif _bq:
+                # runs of 8 quads: 4 consecutive channel chunks (64 contiguous
+                # bytes of a voxel) fastest, then the quad, then the chunk
+                # group -- 16 lanes = 4 chunks x 4 quads, whose b64 stores
+                # cover all 32 banks once under the pp row permutation; the
+                # quads past the last whole run of 8 channel-chunk fastest
+                _nq8 = (n_pairs // 8) * 8
+                _main = _nq8 * ncq
+                jq_t = b.add(
+                    b.const_i32(_nq8), b.div(b.sub(ur, b.const_i32(_main)), b.const_i32(ncq))
+                )
+                q_t = b.mod(b.sub(ur, b.const_i32(_main)), b.const_i32(ncq))
+                if _main:
+                    _blk = b.div(ur, b.const_i32(8 * ncq))
+                    _r8 = b.mod(ur, b.const_i32(8 * ncq))
+                    _t4 = b.div(_r8, b.const_i32(4))
+                    jq_m = b.add(b.mul(_blk, b.const_i32(8)), b.mod(_t4, b.const_i32(8)))
+                    q_m = b.add(
+                        b.mod(_r8, b.const_i32(4)),
+                        b.mul(b.div(_t4, b.const_i32(8)), b.const_i32(4)),
+                    )
+                    if _main < n_row_units:
+                        _im = b.cmp_lt(ur, b.const_i32(_main))
+                        jq_m = b.select(_im, jq_m, jq_t)
+                        q_m = b.select(_im, q_m, q_t)
+                    jq_t, q_t = jq_m, q_m
+                q = q_t
+            if _bq:
+                mr = None
+                j0 = b.mul(jq_t, b.const_i32(4))
+                jw = j0
+            elif n_mr > 1:
                 # pair index -> (output row of the tile, pair in its window)
                 pr = b.div(ur, b.const_i32(ncq))
                 mr = b.div(pr, b.const_i32(pairs_r))
@@ -4418,9 +4580,11 @@ def build_implicit_gemm_conv_wgrad(
                 r_ok = b.land(st["ok"], b.cmp_ult(b.add(st["hi"], dy), p_Hi))
                 if is3:
                     r_ok = b.land(r_ok, b.cmp_ult(b.add(st["di"], dz), P["p_Di"]))
-                for e in range(2):
-                    off = base if e == 0 else b.add(base, Xw)
-                    wi = wi0 if e == 0 else b.add(wi0, b.const_i32(1))
+                for e in range(_bE):
+                    off = base if e == 0 else (
+                        b.add(base, Xw) if e == 1 else b.add(base, b.mul(Xw, b.const_i32(e)))
+                    )
+                    wi = wi0 if e == 0 else b.add(wi0, b.const_i32(e))
                     v_ok = b.land(r_ok, b.cmp_ult(wi, p_Wi))
                     if inr is not None:
                         v_ok = b.land(v_ok, inr)
@@ -4589,9 +4753,11 @@ def build_implicit_gemm_conv_wgrad(
             r_ok = b.land(st["ok"], b.cmp_ult(b.add(st["hi"], dy), p_Hi))
             if is3:
                 r_ok = b.land(r_ok, b.cmp_ult(b.add(st["di"], dz), P["p_Di"]))
-            for e in range(2):
-                off = base if e == 0 else b.add(base, Xw)
-                wi = wi0 if e == 0 else b.add(wi0, b.const_i32(1))
+            for e in range(_bE):
+                off = base if e == 0 else (
+                    b.add(base, Xw) if e == 1 else b.add(base, b.mul(Xw, b.const_i32(e)))
+                )
+                wi = wi0 if e == 0 else b.add(wi0, b.const_i32(e))
                 v_ok = b.land(r_ok, b.cmp_ult(wi, p_Wi))
                 if inr is not None:
                     v_ok = b.land(v_ok, inr)
@@ -4611,11 +4777,37 @@ def build_implicit_gemm_conv_wgrad(
             reads past the slice end go to wg_K (zero-fill)."""
             aoff, boff = _xg_off
             upper = _pp_half[0]
+            _pps_k = 3  # ALU instructions per fragment read (2 and 4 measured worse)
+
+            def _prio(kind):
+                """Phase priorities: compute 0 / memory 1 (default); xwin_pps 2:
+                none; xwin_pps 3: compute 1 / memory 0."""
+                if spec.xwin_pps == 2:
+                    return
+                if spec.xwin_pps == 3:
+                    b.s_setprio(1 if kind == "c" else 0)
+                    return
+                b.s_setprio(0 if kind == "c" else 1)
+            # xwin_aq 1 (gn2): only a slot's leader group stores the dY tile
+            # (wave-uniform branch) -- no trash-slot stores
+            _aq_lead = _ash[1] if (spec.xwin_aq and _ash is not None) else None
             k_end = _k_upper
             zf = _k_zero_fill if _k_zero_fill is not None else c_wg_K
 
             def _clamped(k):
-                return b.select(b.cmp_lt(k, k_end), k, zf)
+                return b.select(b.cmp_lt(k, k_end), _rk(k), zf)
+
+            def _pin(v):
+                """xwin_aq 2: route a packed store value through an empty
+                side-effecting asm where it is computed, so the compiler cannot
+                sink its packing into the conditional store block."""
+                nb = v.type.count * (2 if v.type.elem.name in ("bf16", "f16") else 4)
+                iv = b.vec_bitcast(v, VectorType(I32, nb // 4))
+                outs = []
+                for k in range(nb // 4):
+                    e = b.vec_extract(iv, k)
+                    outs.append(b.inline_asm("; xaq pin $0", "=v,0", [e], I32))
+                return b.vec_bitcast(b.vec_pack(outs, I32), v.type)
 
             def _pack_items(vals, n_a):
                 """Thunks, one per LDS store value; results in ``out``."""
@@ -4643,29 +4835,56 @@ def build_implicit_gemm_conv_wgrad(
                             r = b.add(row, b.const_i32(i)) if i else row
                             r = b.add(_pi(r), aoff if _ash is None else _ash[0])
                             parts = [b.vec_extract(v, i) for _r, _c, v in grp]
-                            out.append((A_smem, r, col, b.vec_pack(parts, ld.elem_dtype), kp))
+                            if _aq_lead is not None:
+                                pk = b.vec_pack(parts, ld.elem_dtype)
+                                if spec.xwin_aq == 2:
+                                    pk = _pin(pk)
+                                out.append((A_smem, r, col, pk, kp, _aq_lead))
+                            else:
+                                out.append((A_smem, r, col, b.vec_pack(parts, ld.elem_dtype), kp))
                         thunks.append(_t)
                 bv = vals[n_a:]
                 for idx, (lrow, j0, inr, _ro, _dz, _dy, _jw) in enumerate(units):
-                    v0, v1 = bv[2 * idx], bv[2 * idx + 1]
+                    vs = bv[_bE * idx : _bE * (idx + 1)]
                     for ci in range(8):
-                        def _t(lrow=lrow, j0=j0, inr=inr, v0=v0, v1=v1, ci=ci):
+                        def _t(lrow=lrow, j0=j0, inr=inr, vs=vs, ci=ci):
                             row, col = lrow, j0
-                            if inr is not None:
+                            pred = None
+                            if inr is not None and spec.xwin_aq == 2:
+                                pred = inr  # idle units: exec-masked (pinned packs)
+                            elif inr is not None:
                                 row = b.select(inr, row, b.const_i32(R_ * Cb))
                                 col = b.select(inr, col, c0)
                             rr = b.add(row, b.const_i32(ci)) if ci else row
                             rr = b.add(_pi(rr), boff)
-                            pair = b.vec_pack(
-                                [b.vec_extract(v0, ci), b.vec_extract(v1, ci)], ir_dtype_b
-                            )
-                            out.append((B_smem, rr, col, pair, 2))
+                            pair = b.vec_pack([b.vec_extract(v, ci) for v in vs], ir_dtype_b)
+                            if pred is not None:
+                                pair = _pin(pair)
+                            out.append((B_smem, rr, col, pair, _bE) if pred is None
+                                       else (B_smem, rr, col, pair, _bE, pred))
                         thunks.append(_t)
                 return out, thunks
 
             def _put(items):
-                for smem, r, c, v, n in items:
+                pend = []
+
+                def _flush():
+                    if pend:
+                        with b.scf_if(pend[0][5]):
+                            for smem, r, c, v, n, _p in pend:
+                                b.smem_store_vN(smem, [r, c], v, n)
+                        pend.clear()
+
+                for it_ in items:
+                    if len(it_) == 6:
+                        if pend and pend[0][5] is not it_[5]:
+                            _flush()
+                        pend.append(it_)
+                        continue
+                    _flush()
+                    smem, r, c, v, n = it_
                     b.smem_store_vN(smem, [r, c], v, n)
+                _flush()
 
             wmo = grid.warp_m_off(b)
             a_rows_idx = [
@@ -4725,9 +4944,9 @@ def build_implicit_gemm_conv_wgrad(
                         t()
                     b.sched_barrier(0)
 
-            _tile(k_lo)
+            _tile(_rk(k_lo))
             t0 = _a_load() + _b_load()
-            n_a = len(t0) - len(units) * 2
+            n_a = len(t0) - len(units) * _bE
             items, th = _pack_items(t0, n_a)
             for t_ in th:
                 t_()
@@ -4762,17 +4981,27 @@ def build_implicit_gemm_conv_wgrad(
                 sc = list(iv[n_acc + n_t :])
                 # [mem A]
                 raws = [_raw_pi(kk) for kk in range(k_atoms)]
-                # the reads issue first; tile t+2's offsets fill their latency
-                b.sched_barrier(0)
-                st.update(dict(zip(st_keys, sc)))
-                sc = _offsets()
+                if spec.xwin_pps in (1, 2, 3):
+                    # xwin_pps 1: tile t+2's offset ALU interleaved with the
+                    # fragment reads (fills their LDS back-pressure stalls)
+                    st.update(dict(zip(st_keys, sc)))
+                    sc = _offsets()
+                    for _ in range(16):
+                        b.sched_group_barrier(0x100, 1, 0)
+                        b.sched_group_barrier(0x6, _pps_k, 0)
+                    b.sched_barrier(0)
+                else:
+                    # the reads issue first; tile t+2's offsets fill their latency
+                    b.sched_barrier(0)
+                    st.update(dict(zip(st_keys, sc)))
+                    sc = _offsets()
                 fr = [_build_kk(*raws[kk]) for kk in range(k_atoms)]
                 b.sched_barrier(0)
                 b.sync_lds_only()
                 # [compute A]: + tile t+1's packs and tile t+2's reads.
                 # Priority to the memory phases (the longer ones): the MFMA
                 # phases run at 0, the LDS phases at 1 (~1.5% on s1/s2).
-                b.s_setprio(0)
+                _prio("c")
                 nxt_a = []
                 nxt_b = []
                 n_as = len(a_slots)
@@ -4796,20 +5025,20 @@ def build_implicit_gemm_conv_wgrad(
                 work = packs[:n_ap] + loads[:n_as]
                 for ui in range(len(units)):
                     work += packs[n_ap + 8 * ui : n_ap + 8 * (ui + 1)]
-                    work += loads[n_as + 2 * ui : n_as + 2 * (ui + 1)]
+                    work += loads[n_as + _bE * ui : n_as + _bE * (ui + 1)]
                 mf = []
                 for kk in range(half):
                     mf += _mma_thunks(acc, *fr[kk])
                 _mix(mf, work)
                 nxt = nxt_a + nxt_b
-                b.s_setprio(1)
+                _prio("m")
                 b.sync_lds_only()
                 # [mem B]
                 _put(packed)
                 b.sched_barrier(0)
                 b.sync_lds_only()
                 # [compute B]: tile t+3's decode
-                b.s_setprio(0)
+                _prio("c")
                 gen = _tile_steps(_clamped(b.add(k0, b.const_i32(3 * block_k))))
                 work = [(1, lambda g=gen: next(g, None)) for _ in range(16)]
                 mf = []
@@ -4819,7 +5048,7 @@ def build_implicit_gemm_conv_wgrad(
                 for _ in gen:  # drain: st complete
                     pass
                 sc = [st[k] for k in st_keys]
-                b.s_setprio(1)
+                _prio("m")
                 b.sync_lds_only()
                 b.scf_yield(*acc, *nxt, *sc)
             with b.scf_if(_pp_half[1]):
@@ -4882,7 +5111,7 @@ def build_implicit_gemm_conv_wgrad(
                 _xg_off = (c0, c0)
         if spec.xwin_pp:
             return _xwin_pp_loop()
-        _tile(k_lo)
+        _tile(_rk(k_lo))
         _a0 = _a_load()
         _b0 = _b_load()
         _n_acc = len(accs)
@@ -4892,7 +5121,7 @@ def build_implicit_gemm_conv_wgrad(
         _deep = spec.prefetch_regs == 3
         _q0 = []
         if _deep:
-            _tile(b.add(k_lo, c_block_k))
+            _tile(_rk(b.add(k_lo, c_block_k)))
             _q0 = _a_load() + _b_load()
         _c_dist = b.const_i32(2 * block_k) if _deep else c_block_k
 
@@ -4911,7 +5140,7 @@ def build_implicit_gemm_conv_wgrad(
             nxt = []
             n_reads = 0
             if prefetch:
-                _tile(b.add(k0, _c_dist))
+                _tile(_rk(b.add(k0, _c_dist)))
                 _an = _a_load()
                 _bn = _b_load()
                 nxt = _an + _bn
@@ -5509,6 +5738,8 @@ def build_implicit_gemm_conv_wgrad(
             params,
             gm_group=group_v,
             n_base_fn=_xw_n_base,
+            **({"lc_wave": _lc_wave_v} if spec.ws_lc else {}),
+            **({"gred": (_xg_idx, b.to_sgpr_u32(warp_id))} if spec.ws_gred else {}),
             **({"replica_sel": _z_virtual} if _z_virtual is not None else {}),
             # ws_store: one slab per (logical) slice, whatever the grid remap.
             **({"replica_sel": slice_id} if spec.ws_store and _z_virtual is None else {}),
@@ -6204,6 +6435,8 @@ def _emit_wgrad_workspace_store_epilogue(
     replica_sel: Optional[Value] = None,
     n_base_fn=None,
     fused: Optional[dict] = None,
+    lc_wave: Optional[Value] = None,
+    gred: Optional[Tuple[Value, Value]] = None,
 ) -> None:
     """Two-stage Stage 1 epilogue: f32 atomic-add into the scratch accumulator.
 
@@ -6355,6 +6588,19 @@ def _emit_wgrad_workspace_store_epilogue(
         _emit_ws_fused_reduction(b, spec, _elems, wg_M_v, wg_N_v, ws_ptr, fused)
         return
 
+    if spec.ws_gred and gred is not None and gm == 1:
+        _emit_ws_gred_atomics(
+            b, spec, accs, rows, cols, gred, block_warp_m_off, block_warp_n_off, n_base_fn,
+            wg_M_v, wg_N_v, ws_ptr, slab_off, c_per_lane,
+        )
+        return
+    if spec.ws_lc and lc_wave is not None and n_base_fn is not None and gm == 1:
+        _emit_ws_lc_atomics(
+            b, spec, accs, rows, cols, lane, lc_wave, block_warp_m_off, n_base_fn,
+            wg_M_v, wg_N_v, ws_ptr, slab_off,
+        )
+        return
+
     flat = 0
     for mi in range(mfmas_m):
         atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
@@ -6406,6 +6652,140 @@ def _emit_wgrad_workspace_store_epilogue(
                             b.add(b.mul(km, wg_N_v), n_true),
                         )
                         b.global_atomic_add(ws_ptr, ws_off, val_f32)
+
+
+def _emit_ws_gred_atomics(
+    b: IRBuilder,
+    spec: "WgradConvSpec",
+    accs,
+    rows,
+    cols,
+    gred,
+    block_warp_m_off: Value,
+    block_warp_n_off: Value,
+    n_base_fn,
+    wg_M_v: Value,
+    wg_N_v: Value,
+    ws_ptr: Value,
+    slab_off: Optional[Value],
+    c_per_lane: int,
+) -> None:
+    """WgradConvSpec.ws_gred: pairwise fragment exchange of the two groups.
+
+    Fragments come in pairs (2k, 2k+1); group g keeps 2k+g and sends the
+    other to its twin wave (same group-local wave index) of the other group
+    through LDS, receives the partner's copy of the one it keeps, adds and
+    atomically stores only that one. ``gred`` = (group index, group-local wave
+    index), both wave-uniform. Two pairs per chunk; every wave runs every
+    barrier."""
+    from rocke.core.ir import VectorType
+
+    g_idx, w_loc = gred
+    mfmas_n = spec.mfmas_per_warp_n
+    n_frag = spec.mfmas_per_warp_m * mfmas_n
+    n_w = spec.warp_m * spec.warp_n  # waves per group
+    PAIRS = 2  # pairs per chunk
+    lds = b.smem_alloc(F32, (2 * n_w * PAIRS * 64, c_per_lane), name_hint="ws_gred")
+    lane = None
+    is0 = b.cmp_eq(g_idx, b.const_i32(0))
+    # flat LDS row of (group, wave, slot, lane)
+    lane_v = b.mod(b.thread_id_x(), b.const_i32(64))
+    my_row0 = b.mul(b.add(b.mul(g_idx, b.const_i32(n_w)), w_loc), b.const_i32(PAIRS * 64))
+    pg = b.sub(b.const_i32(1), g_idx)
+    pt_row0 = b.mul(b.add(b.mul(pg, b.const_i32(n_w)), w_loc), b.const_i32(PAIRS * 64))
+
+    def _coords(f):
+        mi, ni = divmod(f, mfmas_n)
+        m0 = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
+        if n_base_fn is not None:
+            n0 = n_base_fn(ni)
+        else:
+            n0 = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
+        return m0, n0
+
+    for c0 in range(0, n_frag, 2 * PAIRS):
+        pairs = [(c0 + 2 * j, c0 + 2 * j + 1) for j in range(PAIRS) if c0 + 2 * j + 1 < n_frag]
+        b.sync_lds_only()
+        for j, (fa, fb) in enumerate(pairs):
+            send = b.select(is0, accs[fb], accs[fa])
+            r = b.add(my_row0, b.add(b.const_i32(j * 64), lane_v))
+            b.smem_store_vN_f32(lds, [r, b.const_i32(0)], send, c_per_lane)
+        b.sync_lds_only()
+        for j, (fa, fb) in enumerate(pairs):
+            keep = b.select(is0, accs[fa], accs[fb])
+            r = b.add(pt_row0, b.add(b.const_i32(j * 64), lane_v))
+            recv = b.smem_load_vN_f32(lds, r, b.const_i32(0), n=c_per_lane)
+            ma, na = _coords(fa)
+            mb, nb = _coords(fb)
+            m0 = b.select(is0, ma, mb)
+            n0 = b.select(is0, na, nb)
+            for i in range(c_per_lane):
+                c_m = b.add(m0, rows[i])
+                c_n = b.add(n0, cols[i])
+                val = b.fadd(b.vec_extract(keep, i), b.vec_extract(recv, i))
+                in_bounds = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
+                with b.scf_if(in_bounds):
+                    ws_off = b.add(b.mul(c_m, wg_N_v), c_n)
+                    if slab_off is not None:
+                        ws_off = b.add(slab_off, ws_off)
+                    b.global_atomic_add(ws_ptr, ws_off, val)
+
+
+def _emit_ws_lc_atomics(
+    b: IRBuilder,
+    spec: "WgradConvSpec",
+    accs,
+    rows,
+    cols,
+    lane: Value,
+    lc_wave: Value,
+    block_warp_m_off: Value,
+    n_base_fn,
+    wg_M_v: Value,
+    wg_N_v: Value,
+    ws_ptr: Value,
+    slab_off: Optional[Value],
+) -> None:
+    """WgradConvSpec.ws_lc: lane-contiguous two-stage atomics (xwin).
+
+    Per (16-row atom mi, tap x) the wave's ``n_sub`` 16x16 accumulator tiles
+    form a 16 x W block of contiguous dW columns (W = n_sub * 16). It is
+    written to a wave-private LDS tile (row stride W + 4) and read back with
+    lane l on column l % W of rows l // W + R k (R = 64 / W), so every atomic
+    instruction lands on R whole rows of W contiguous floats. The wave's own
+    LDS ops are in order: no barrier."""
+    X = spec.xwin
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+    n_sub = mfmas_n // X
+    W = 16 * n_sub
+    R = 64 // W
+    S = W + 4
+    n_waves = spec.block_size // spec.wave_size
+    lds = b.smem_alloc(F32, (n_waves * 16, S), name_hint="ws_lc")
+    row0 = b.mul(lc_wave, b.const_i32(16))
+    rd_col = b.mod(lane, b.const_i32(W))
+    rd_row = b.div(lane, b.const_i32(W))
+    for mi in range(mfmas_m):
+        atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
+        for x in range(X):
+            for s_ in range(n_sub):
+                acc = accs[mi * mfmas_n + x * n_sub + s_]
+                for i in range(len(rows)):
+                    r = b.add(row0, rows[i])
+                    c = b.add(cols[i], b.const_i32(16 * s_)) if s_ else cols[i]
+                    b.smem_store_vN(lds, [r, c], b.vec_extract(acc, i), 1)
+            c_n = b.add(n_base_fn(x * n_sub), rd_col)
+            for k in range(16 // R):
+                rr = b.add(rd_row, b.const_i32(R * k)) if k else rd_row
+                val = b.vec_extract(b.smem_load_vN_f32(lds, b.add(row0, rr), rd_col, n=1), 0)
+                c_m = b.add(atom_m_base, rr)
+                in_bounds = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
+                with b.scf_if(in_bounds):
+                    ws_off = b.add(b.mul(c_m, wg_N_v), c_n)
+                    if slab_off is not None:
+                        ws_off = b.add(slab_off, ws_off)
+                    b.global_atomic_add(ws_ptr, ws_off, val)
 
 
 def _emit_ws_fused_reduction(
