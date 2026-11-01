@@ -2007,6 +2007,46 @@ def test_w32_wgrad_rows_are_built_with_their_reduce_helpers(w32_jobs):
         assert dks.direct_job_for_identity(job.identity) == job
 
 
+def test_w32_wgrad_grid_skips_the_spilling_16_wave_register_staged_tiles(w32_jobs):
+    """A block of more than 8 waves caps a wave at 256 VGPRs, which the
+    register-staged multi-tile image body needs more than: those direct-epilogue
+    fallbacks would spill, so they are not cached. The TDM-staged fallback of
+    the same tiling fits and is still cached."""
+    from kernels.conv import direct_aot_jobs as A
+
+    image = [
+        json.loads(j.identity.knobs)
+        for j in w32_jobs
+        if j.identity.algorithm == "direct_wgrad"
+        and json.loads(j.identity.knobs).get("image_per_block")
+    ]
+    assert image
+
+    def big_tiled(k):
+        return (
+            k["waves_k"] * k["waves_c"] > A.WGRAD_W32_UNCAPPED_WAVES
+            and k["wave_tiles_k"] * k["wave_tiles_c"] > 1
+        )
+
+    assert not [k for k in image if big_tiled(k) and k["tdm_stages"] == 0]
+    tdm = [k for k in image if big_tiled(k) and k["tdm_stages"]]
+    assert tdm and not any(k["lds_epilogue"] for k in tdm)
+    # The filter is narrow: 8-wave register-staged multi-tile bodies and
+    # 16-wave single-tile ones are still built.
+    assert any(
+        k["waves_k"] * k["waves_c"] == A.WGRAD_W32_UNCAPPED_WAVES
+        and k["wave_tiles_k"] * k["wave_tiles_c"] > 1
+        and k["tdm_stages"] == 0
+        for k in image
+    )
+    assert any(
+        k["waves_k"] * k["waves_c"] > A.WGRAD_W32_UNCAPPED_WAVES
+        and k["wave_tiles_k"] * k["wave_tiles_c"] == 1
+        and k["tdm_stages"] == 0
+        for k in image
+    )
+
+
 @pytest.mark.parametrize(
     "problem,variant",
     [

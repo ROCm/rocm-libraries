@@ -662,7 +662,8 @@ FWD_WMMA_DILATED_STRIDED_KNOBS = (
 # Wave32 (gfx1250) wgrad runs the image-per-block kernel: one block per image
 # and k x c tile, KH rows staged per LDS sync. (waves_k, waves_c) and
 # (wave_tiles_k, wave_tiles_c); the spec's register estimate drops the
-# combinations that would spill.
+# combinations that would spill, and _wgrad_image_spills the register-staged
+# multi-tile bodies a block of more than 8 waves cannot hold.
 WGRAD_W32_WAVES = (
     (1, 1),
     (2, 1),
@@ -687,6 +688,8 @@ WGRAD_W32_ROWS_PER_SYNC = (1, 3)
 WGRAD_W32_ROW_BLOCKS = (1, 2, 4, 16)
 WGRAD_W32_TDM_STAGES = (0, 3)
 WGRAD_W32_WS_REPLICAS = 8
+# Past this many waves per block the compiler caps a wave32 wave at 256 VGPRs.
+WGRAD_W32_UNCAPPED_WAVES = 8
 # Small-channel wgrad (C=3 / C=4 stems; wave32). ((waves_k, waves_c, wave_tiles_k,
 # wave_tiles_c, vec_x, sub_steps, ws_replicas, uniform_wave), row_blocks):
 # the winners of the stem sweeps, from a narrow 3x3/s2 stem (one 16-wide K
@@ -2059,6 +2062,29 @@ def _dw_dgrad_packed_spills(caps: DirectCaps, knobs: dict, arch: str) -> bool:
     return live > DW_DGRAD_PACKED_LIVE_BUDGET
 
 
+def _wgrad_image_spills(spec) -> bool:
+    """Would this wave32 image-per-block wgrad binary spill registers?
+
+    The spec's estimate counts the accumulators and the dY/X fragments only.
+    The register-staged body (``tdm_stages=0``) of a multi-tile wave
+    (``wave_tiles_k * wave_tiles_c > 1``) also holds the staged rows and
+    compiles to more than 256 VGPRs: a block of up to
+    :data:`WGRAD_W32_UNCAPPED_WAVES` waves holds that, but a larger block caps
+    a wave at 256, so the binary spills to scratch. Such a tiling reaches the
+    grid as the direct-epilogue fallback of a block whose dW tile does not fit
+    the LDS epilogue. The TDM-staged body of the same tiling stays under the
+    cap and is still cached. Not a validity rule (a spilling kernel is still
+    correct), so it is a grid filter, like the other ``*_spills`` here.
+    """
+    if not getattr(spec, "image_per_block", False):
+        return False
+    return (
+        spec.waves_k * spec.waves_c > WGRAD_W32_UNCAPPED_WAVES
+        and spec.tdm_stages == 0
+        and spec.wave_tiles_k * spec.wave_tiles_c > 1
+    )
+
+
 def _depthwise_stream_spills(spec) -> bool:
     """Would this row-streaming depthwise kernel spill registers? Such a binary
     takes minutes to compile and runs far slower than the output-stationary
@@ -2509,6 +2535,8 @@ def _caps_jobs(
         if variant in _HALO_VARIANTS and _nongrouped_spills(spec, arch):
             continue
         if variant == "direct_depthwise" and _depthwise_stream_spills(spec):
+            continue
+        if variant == "direct_wgrad" and _wgrad_image_spills(spec):
             continue
         cell = [
             _job(
