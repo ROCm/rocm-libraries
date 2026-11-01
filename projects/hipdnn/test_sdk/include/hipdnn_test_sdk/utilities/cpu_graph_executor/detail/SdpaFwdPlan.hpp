@@ -35,7 +35,8 @@ struct SdpaFwdParams
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleQAttributes = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleKAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* sinkTokenAttributes = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
@@ -59,6 +60,9 @@ struct SdpaFwdParams
         , descaleVTensor(descaleVAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*descaleVAttributes))
                              : std::nullopt)
+        , sinkTokenTensor(sinkTokenAttributes != nullptr
+                              ? std::make_optional(unpackTensorAttributes(*sinkTokenAttributes))
+                              : std::nullopt)
     {
     }
 
@@ -75,6 +79,7 @@ struct SdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sinkTokenTensor;
 };
 
 template <typename QDataType,
@@ -145,6 +150,14 @@ public:
                 *_params.descaleVTensor, variantPack.at(_params.descaleVTensor->uid));
         }
 
+        // Attention-sink logits (float32, [1, H, 1, 1]). Absent for sink-free graphs.
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowSinkToken;
+        if(_params.sinkTokenTensor.has_value())
+        {
+            shallowSinkToken = createShallowTensor<float>(
+                *_params.sinkTokenTensor, variantPack.at(_params.sinkTokenTensor->uid));
+        }
+
         // Runtime attention scale: resolve the folded scale operand (runtime tensor
         // or baked attn_scale_value) to a scalar; nullopt => 1.0, no scaling (cuDNN's default).
         std::optional<float> effectiveScale;
@@ -168,7 +181,8 @@ public:
                 shallowLseTensor.get(),
                 shallowDescaleQ.get(),
                 shallowDescaleK.get(),
-                shallowDescaleV.get());
+                shallowDescaleV.get(),
+                shallowSinkToken.get());
     }
 
 private:
@@ -264,10 +278,19 @@ public:
         }
 
         // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
+        if(nodeAttributes->block_mask_tensor_uid().has_value())
         {
             return false;
+        }
+
+        // Supported: attention-sink logits. The tensor must exist and be FLOAT; its
+        // [1, H, 1, 1] shape is enforced by the reference.
+        if(nodeAttributes->sink_token_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->sink_token_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->sink_token_tensor_uid().value(),
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
         }
 
         // FP8 quantization: descales are required for fp8 inputs (mirrors AITER's
@@ -362,6 +385,10 @@ public:
         const auto* descaleVPtr = nodeAttributes->descale_v_tensor_uid().has_value()
                                       ? tensorMap.at(nodeAttributes->descale_v_tensor_uid().value())
                                       : nullptr;
+        const auto* sinkTokenPtr
+            = nodeAttributes->sink_token_tensor_uid().has_value()
+                  ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
+                  : nullptr;
 
         auto [leftBound, rightBound, isTopLeft]
             = extractDiagonalBandParams(*nodeAttributes, "SdpaFwdPlan");
@@ -379,7 +406,8 @@ public:
                           lsePtr,
                           descaleQPtr,
                           descaleKPtr,
-                          descaleVPtr));
+                          descaleVPtr,
+                          sinkTokenPtr));
     }
 };
 

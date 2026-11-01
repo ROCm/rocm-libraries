@@ -62,6 +62,11 @@ public:
     ///                         Descales mirror AITER's fp8 forward contract: a null pointer means
     ///                         no dequantization (neutral factor 1). Softmax/output (de)quant
     ///                         (descale_s / scale_o) are not modeled here.
+    /// @param sinkToken        Optional attention-sink logits [1, H, 1, 1] (float), one per Q
+    ///                         head, in the same scaled domain as the scores. Following cuDNN,
+    ///                         the sink is an extra softmax column with no value row: it joins
+    ///                         the row max and the exp-sum (so LSE includes it) but adds nothing
+    ///                         to O. A fully masked row then has O = 0 and LSE = sink.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -82,7 +87,8 @@ public:
                         hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr)
     {
         if(q.dims().size() != 4)
         {
@@ -168,6 +174,17 @@ public:
         validateDescaleShape(descaleK, "descaleK", batch, numHeadsK);
         validateDescaleShape(descaleV, "descaleV", batch, numHeadsV);
 
+        if(sinkToken != nullptr)
+        {
+            const auto& sinkDims = sinkToken->dims();
+            if(sinkDims.size() != 4 || sinkDims[0] != 1 || sinkDims[1] != numHeads
+               || sinkDims[2] != 1 || sinkDims[3] != 1)
+            {
+                throw std::invalid_argument("CpuFpReferenceSdpa: sinkToken shape must be [1, "
+                                            + std::to_string(numHeads) + ", 1, 1]");
+            }
+        }
+
         const auto headsPerHeadK = numHeads / numHeadsK;
         const auto headsPerHeadV = numHeads / numHeadsV;
 
@@ -230,8 +247,16 @@ public:
                 }
             }
 
-            // Step 4: Numerically stable softmax over skv
-            const auto maxVal = *std::max_element(scores.begin(), scores.end());
+            // Step 4: Numerically stable softmax over skv. An attention sink joins the
+            // max and the exp-sum as one more column, but has no value row.
+            auto maxVal = *std::max_element(scores.begin(), scores.end());
+            std::optional<ComputeDataType> sinkVal;
+            if(sinkToken != nullptr)
+            {
+                sinkVal = static_cast<ComputeDataType>(
+                    sinkToken->getHostValue(std::vector<int64_t>{0, h, 0, 0}));
+                maxVal = std::max(maxVal, *sinkVal);
+            }
             std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
             auto sumExp = static_cast<ComputeDataType>(0.0);
 
@@ -244,6 +269,10 @@ public:
                         = std::exp(scores[static_cast<size_t>(skv)] - maxVal);
                     sumExp += probs[static_cast<size_t>(skv)];
                 }
+                if(sinkVal.has_value())
+                {
+                    sumExp += std::exp(*sinkVal - maxVal);
+                }
                 for(int64_t skv = 0; skv < seqKv; ++skv)
                 {
                     probs[static_cast<size_t>(skv)] /= sumExp;
@@ -255,6 +284,7 @@ public:
             // LSE = maxVal + log(sumExp) enables backward pass to recompute softmax
             // probabilities without storing the full [B, H, Sq, Skv] attention matrix.
             // For fully masked rows (sumExp = 0), log(0) = -inf which is correct.
+            // With a sink, a fully masked row has maxVal = sink and sumExp = 1, so LSE = sink.
             if(lse != nullptr)
             {
                 const auto lseVal = static_cast<float>(maxVal + std::log(sumExp));
@@ -311,6 +341,8 @@ public:
     ///                       overload); forwarded through unchanged.
     /// @param descaleK       Optional FP8 dequantization scale for K.
     /// @param descaleV       Optional FP8 dequantization scale for V.
+    /// @param sinkToken      Optional attention-sink logits [1, H, 1, 1] (see the primary
+    ///                       overload); forwarded through unchanged.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -329,7 +361,8 @@ public:
         hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
+        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
+        const hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr)
     {
         const int64_t leftBound = -1;
         const int64_t rightBound = (causalMask) ? 0 : -1;
@@ -348,7 +381,8 @@ public:
             lse,
             descaleQ,
             descaleK,
-            descaleV);
+            descaleV,
+            sinkToken);
     }
 
     /// SDPA backward convenience overload: accepts a simple causalMask flag.
