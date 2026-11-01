@@ -22,6 +22,7 @@
 #include "../../shared/arithmetic.h"
 #include "../../shared/ptrdiff.h"
 #include "./device/kernels/array_format.h"
+#include "data_layout.h"
 #include "enum_printer.h"
 #include "logging.h"
 #include "node_factory.h"
@@ -241,62 +242,18 @@ static bool ValidOutBufferBluestein(TreeNode& node)
     return false;
 }
 
-// Decide if two length+stride sets match, even if one of the
-// lengths/strides is out of order with respect to the other.
-static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
-                                 const std::vector<size_t>& strideA,
-                                 const std::vector<size_t>& lengthB,
-                                 const std::vector<size_t>& strideB)
+// Return the layout that a node actually outputs.  The returned
+// layout folds batch axes into length axes, because we're expecting
+// to only want to know what indexes will be touched by a node, and
+// we want to have more ability to reorder the axes to be in standard
+// order.
+static data_layout_t OutputLayout(const TreeNode& node)
 {
-    // attach a length to a stride and make them sortable and
-    // comparable
-    struct iodim
-    {
-        size_t length;
-        size_t stride;
-
-        iodim(size_t length, size_t stride)
-            : length(length)
-            , stride(stride)
-        {
-        }
-
-        bool operator<(const iodim& other) const
-        {
-            return this->stride < other.stride;
-        }
-
-        bool operator==(const iodim& other) const
-        {
-            return this->length == other.length && this->stride == other.stride;
-        }
-    };
-
-    // check that A and B are equal when sorted
-    auto make_sorted_iodim_vec
-        = [](const std::vector<size_t>& length, const std::vector<size_t>& stride) {
-              std::vector<iodim> ret;
-              for(size_t i = 0; i < length.size(); ++i)
-                  ret.emplace_back(length[i], stride[i]);
-              std::sort(ret.begin(), ret.end());
-              return ret;
-          };
-
-    // avoid UB (TODO: remove once ruled out by design)
-    if(strideA.size() < lengthA.size() || strideB.size() < lengthB.size()
-       || lengthB.size() < lengthA.size())
-        return false;
-
-    std::vector<iodim> iodimA = make_sorted_iodim_vec(lengthA, strideA);
-    std::vector<iodim> iodimB = make_sorted_iodim_vec(lengthB, strideB);
-    return std::equal(iodimA.begin(), iodimA.end(), iodimB.begin());
-}
-
-// Output lengths, and the matching strides, that a node actually writes.
-static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(const TreeNode& node)
-{
-    auto len    = node.LengthForOutStride();
+    auto len = node.LengthForOutStride();
+    len.push_back(node.batch);
     auto stride = node.outStride;
+    stride.push_back(node.oDist);
+
     // the last fused Bluestein stage only stores the first transform_length of its padded dims 0-1
     if(node.fuseBlue == BFT_INV_CHIRP_MUL && node.scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
     {
@@ -304,7 +261,25 @@ static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(const
         len.insert(len.begin(), node.lengthBlueN);
         stride.erase(stride.begin() + 1);
     }
-    return {len, stride};
+
+    return data_layout_t{std::vector<size_t>(len.size(), 0), len, stride, 0};
+}
+
+// Return the layout of an input or output buffer of a plan.  The
+// returned layout folds batch axes into length axes, because we're
+// expecting to only want to know what indexes will be touched by a
+// node, and we want to have more ability to reorder the axes to be
+// in standard order.
+static data_layout_t BufferLayout(const ExecPlan& execPlan, OperatingBuffer buffer)
+{
+    auto len
+        = buffer == OB_USER_OUT ? execPlan.rootPlan->GetOutputLength() : execPlan.rootPlan->length;
+    len.push_back(execPlan.rootPlan->batch);
+    auto stride
+        = buffer == OB_USER_OUT ? execPlan.rootPlan->outStride : execPlan.rootPlan->inStride;
+    stride.push_back(buffer == OB_USER_OUT ? execPlan.rootPlan->oDist : execPlan.rootPlan->iDist);
+
+    return data_layout_t{std::vector<size_t>(len.size(), 0), len, stride, 0};
 }
 
 bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
@@ -322,69 +297,41 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
     // to always fit.  This function accepts OB_USER_IN also to mean
     // the input side of an in-place R2C transform (which the plan
     // would normally call OB_USER_OUT).
-    auto dataFits = [&execPlan](TreeNode& node, OperatingBuffer buffer) {
-        auto [nodeLen, nodeStride] = OutputFootprint(node);
-        auto bufLen                = buffer == OB_USER_OUT ? execPlan.rootPlan->GetOutputLength()
-                                                           : execPlan.rootPlan->length;
+    auto dataFits = [&execPlan, arrayType](const TreeNode& node, OperatingBuffer buffer) {
+        // CMPLX_TO_R is a special kernel where the incoming arrayType
+        // is complex but its output lengths and strides are counting
+        // reals.
+        auto nodeOutputLayout = OutputLayout(node);
+        auto nodeOutputType
+            = node.scheme == CS_KERNEL_COPY_CMPLX_TO_R ? rocfft_array_type_real : arrayType;
 
-        // if node's output is complex and buffer's format is real,
-        // adjust output length to be 2x to make the units of
-        // comparison match
-        bool kernelOutputIsReal = node.scheme == CS_KERNEL_COPY_CMPLX_TO_R;
-        bool outBufferIsReal
-            = (buffer == OB_USER_OUT && execPlan.rootPlan->outArrayType == rocfft_array_type_real)
-              || (buffer == OB_USER_IN && execPlan.rootPlan->inArrayType == rocfft_array_type_real);
-        const bool doubleFront = outBufferIsReal && !kernelOutputIsReal;
-        if(doubleFront)
-            nodeLen.front() *= 2;
+        auto bufferLayout     = BufferLayout(execPlan, buffer);
+        auto bufferLayoutType = buffer == OB_USER_IN ? execPlan.rootPlan->inArrayType
+                                                     : execPlan.rootPlan->outArrayType;
+
+        // Collapse contiguous lengths on both layouts to make them
+        // directly comparable.
+        nodeOutputLayout.collapse_contiguous_length_axes();
+        bufferLayout.collapse_contiguous_length_axes();
+
+        // We can potentially write complex data into a real-typed
+        // buffer if the complex data is interleaved and the fastest
+        // strides are 1
+        if(array_type_is_interleaved(nodeOutputType) && array_type_is_real(bufferLayoutType)
+           && nodeOutputLayout.strides().front() == 1 && bufferLayout.strides().front() == 1)
+        {
+            // Convert the node's layout into real type for comparison
+            nodeOutputLayout = nodeOutputLayout.convert_complex_to_real();
+        }
 
         if(BufferIsUnitStride(execPlan, buffer))
         {
             // just check if there's enough space
-            return product(nodeLen.begin(), nodeLen.end()) <= product(bufLen.begin(), bufLen.end());
+            return nodeOutputLayout.buffer_element_count() <= bufferLayout.buffer_element_count();
         }
 
-        // Data fits if the length+stride we want matches the
-        // length+stride of the buffer.  Since we could be accessing
-        // a higher dimension of the buffer, the order of the node's
-        // length+stride might not match what's declared on the
-        // buffer.
-        if(MatchingLengthStride(nodeLen,
-                                nodeStride,
-                                bufLen,
-                                buffer == OB_USER_OUT ? execPlan.rootPlan->outStride
-                                                      : execPlan.rootPlan->inStride))
-            return true;
-
-        // nodeLen was paired with nodeStride for MatchingLengthStride, but the
-        // decomposition below always needs the output lengths, which may differ
-        // (fused Bluestein nodes writing to user buffers are excluded as they have
-        // a behavior of their own that OutputFootprint handles).
-        // TODO: maintain consistency of axis ordering between input and output
-        // for all nodes (e.g. implicit-stride transpose AxB -> BxA can be made
-        // self-explanatory with explicit strides [1, A] -> [B, 1] without
-        // changing the ordering of axes). That would remove the ambiguity of
-        // "which length to use in this context?"
-        if(node.fuseBlue == BFT_NONE)
-        {
-            nodeLen = node.GetOutputLength();
-            if(doubleFront)
-                nodeLen.front() *= 2;
-        }
-
-        // ensure that the node's dimensions fit exactly into the
-        // buffer's dimensions.  e.g. if the node wants XxYxZ and the
-        // buffer is AxZ, this is ok so long as X*Y == A
-        for(auto len : nodeLen)
-        {
-            // not decomposing evenly
-            if(bufLen.empty() || bufLen.front() % len != 0)
-                return false;
-            bufLen.front() /= len;
-            if(bufLen.front() == 1)
-                bufLen.erase(bufLen.begin());
-        }
-        return true;
+        return bufferLayout.is_dimensionally_consistent_with(nodeOutputLayout)
+               && bufferLayout.logically_contains(nodeOutputLayout);
     };
 
     bool test_result = true;
@@ -460,8 +407,8 @@ bool AssignmentPolicy::CheckAssignmentValid(ExecPlan& execPlan)
         if(input)
             return compute_ptrdiff(node->length, node->inStride, node->batch, node->iDist);
 
-        const auto [outLen, outStride] = OutputFootprint(*node);
-        return compute_ptrdiff(outLen, outStride, node->batch, node->oDist);
+        const auto layout = OutputLayout(*node);
+        return compute_ptrdiff(layout.lengths_and_batches(), layout.strides_and_distances(), 0, 0);
     };
 
     size_t sizeBufIn  = 0;
