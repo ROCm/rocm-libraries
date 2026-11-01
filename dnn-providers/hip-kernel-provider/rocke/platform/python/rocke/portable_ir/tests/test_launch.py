@@ -248,17 +248,23 @@ class TestCEngineAgrees(unittest.TestCase):
         self.assertEqual(c["kernel_name"], "rocke_recipe_toy_d4_f32")
 
     def test_plan_from_a_bundle(self):
-        bundle = cbor_encode(
-            build_bundle([{"key": "toy", "arch": "gfx950", "recipe": toy()}])
-        )
-        c = self.online.plan_launch(
-            bundle, "toy", arch="gfx950", ints={"D": 256}, strs={"dtype": "f32"}
-        )
-        self.assertEqual(c["geometry"]["grid"], (4, 1, 1))
-        with self.assertRaises(KeyError):
-            self.online.plan_launch(
-                bundle, "nope", arch="gfx950", ints={"D": 256}, strs={"dtype": "f32"}
-            )
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                bundle = cbor_encode(
+                    build_bundle([{"key": "toy", "arch": arch, "recipe": toy()}])
+                )
+                c = self.online.plan_launch(
+                    bundle, "toy", arch=arch, ints={"D": 256}, strs={"dtype": "f32"}
+                )
+                self.assertEqual(c["geometry"]["grid"], (4, 1, 1))
+                with self.assertRaises(KeyError):
+                    self.online.plan_launch(
+                        bundle,
+                        "nope",
+                        arch=arch,
+                        ints={"D": 256},
+                        strs={"dtype": "f32"},
+                    )
 
     def test_nonpositive_extent_refused_by_c_too(self):
         r = launch.attach_launch(
