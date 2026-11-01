@@ -1367,6 +1367,9 @@ namespace TensileLite
             bool gsu                = true;
             bool wgm                = true;
             bool staggerU           = true;
+            // Packed runtime stagger survives repeated persistent tiles.
+            // Older/custom device libraries omit this capability.
+            bool persistentStaggerU = false;
             // Kernel distributes Stream-K extra iters within each tile when
             // skGrid % skTiles == 0. Older/custom kernels leave this false;
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
