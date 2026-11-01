@@ -7154,10 +7154,11 @@ namespace TensileLite
             return detail;
         };
 
-        if(handwrittenCustomKernel())
-            return refuse("CustomKernel",
-                          "custom kernel " + customKernel.name
-                              + " is not supported under uniform summation order");
+        // Allow custom kernels under USO for now
+        // if(handwrittenCustomKernel())
+        //     return refuse("CustomKernel",
+        //                   "custom kernel " + customKernel.name
+        //                       + " is not supported under uniform summation order");
 
         if(sizeMapping.isStreamK())
         {
