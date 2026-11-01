@@ -622,6 +622,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_library_layering.py"
         "tests/library/tests/test_aot_launch_zeroing.py"
         "tests/library/tests/test_batched_timing.py"
+        "tests/library/tests/test_conv_fill.py"
         "tests/library/tests/test_capability_keys.py"
         "tests/library/tests/test_module_cache.py"
         "tests/library/tests/test_run_conv_shards.py")

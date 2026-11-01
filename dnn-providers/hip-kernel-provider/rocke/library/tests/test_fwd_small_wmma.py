@@ -41,7 +41,9 @@ from kernels.common.conv_fwd_small_wmma import (
 GPU_ARCH = get_device_arch(0)
 
 
-def _problem(N=2, H=32, W=48, C=3, K=64, KH=3, S=1, PAD=1, groups=1, dtype="bf16"):
+def _problem(
+    N=2, H=32, W=48, C=3, K=64, KH=3, S=1, PAD=1, groups=1, dtype="bf16", KW=0, pad_w=-1
+):
     return DirectConvProblem(
         N=N,
         H=H,
@@ -50,8 +52,9 @@ def _problem(N=2, H=32, W=48, C=3, K=64, KH=3, S=1, PAD=1, groups=1, dtype="bf16
         cpg=C // groups,
         kpg=K // groups,
         KH=KH,
-        KW=KH,
+        KW=KW or KH,
         PAD=PAD,
+        pad_w=pad_w,
         stride=S,
         dtype=dtype,
     )
@@ -69,6 +72,7 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(dtype="fp32"), {}, "dtype"),
             (_problem(dtype=None), {}, "dtype"),
             (_problem(S=0), {}, "stride 0 < 1"),
+            (_problem(KH=1, KW=7, PAD=0, pad_w=3), {}, "one padding"),
             (_problem(), dict(out_h=4), "GEMM pixels"),
             (_problem(), dict(tiles_k=8, tiles_p=8, out_h=16), "VGPRs"),
         ):
@@ -81,9 +85,21 @@ class TestSmallSpecs(unittest.TestCase):
         ok = FwdSmallkWmmaSpec(problem=p)
         self.assertIsNone(fwd_smallk_reason(ok))
         self.assertIn("wave32", fwd_smallk_reason(ok, "gfx950"))
+        # Any K up to 8, rectangular filters with their own column padding.
+        k3 = FwdSmallkWmmaSpec(
+            problem=_problem(C=64, K=3), tiles_c=2, tiles_p=3, out_h=6, out_w=16
+        )
+        self.assertIsNone(fwd_smallk_reason(k3))
+        row = _problem(H=1, W=300, C=32, K=1, KH=1, KW=7, PAD=0, pad_w=3)
+        self.assertIsNone(
+            fwd_smallk_reason(
+                FwdSmallkWmmaSpec(problem=row, tiles_c=1, tiles_p=4, out_h=1, out_w=58)
+            )
+        )
         for problem, knobs, needle in (
             (_problem(C=64, K=16), {}, "K 16"),
-            (_problem(C=64, K=3), {}, "K 3"),
+            (_problem(C=64, K=3), {}, "block_c 48"),
+            (_problem(KH=1, KW=7, PAD=0, pad_w=7, C=32, K=1), {}, "column PAD 7"),
             (_problem(C=60, K=4), {}, "multiple of 8"),
             (_problem(C=64, K=4, S=0), {}, "stride 0 < 1"),
             (p, dict(tiles_c=4), "block_c"),
@@ -452,6 +468,8 @@ _SMALLC_CASES = (
         dict(N=2, H=64, W=64, K=128),
         dict(waves_k=2, tiles_k=4, tiles_per_block=4),
     ),
+    # 3x3 stride-2 "valid" stem (299x299 -> 149x149 in Inception-v3).
+    (dict(N=2, H=51, W=47, K=32, S=2, PAD=0), dict(tiles_p=2, out_h=8, out_w=16)),
 )
 _SMALLK_CASES = (
     (dict(C=64, K=4, H=33, W=27), dict()),
@@ -463,6 +481,22 @@ _SMALLK_CASES = (
     (
         dict(C=64, K=4, H=30, W=30, S=2),
         dict(out_h=8, out_w=8, tiles_c=3, tiles_p=5),
+    ),
+    (
+        dict(C=64, K=3, H=29, W=35, dtype="fp16"),
+        dict(tiles_c=2, tiles_p=3, out_h=6, out_w=16),
+    ),
+    (
+        dict(N=3, C=128, K=3, H=40, W=18),
+        dict(waves_c=2, tiles_c=1, tiles_p=4, out_h=14, out_w=14, ck=32, stages=3),
+    ),
+    (
+        dict(N=2, C=32, K=1, H=1, W=301, KH=1, KW=7, PAD=0, pad_w=3, dtype="fp16"),
+        dict(waves_p=2, tiles_c=1, tiles_p=4, out_h=1, out_w=122, ck=32),
+    ),  # K = 6: channel-by-channel Z reads and stores.
+    (
+        dict(C=64, K=6, H=20, W=23),
+        dict(waves_p=3, tiles_c=4, tiles_p=3, out_h=6, out_w=16, ck=32),
     ),
 )
 
@@ -510,7 +544,7 @@ class TestSmallGpu(unittest.TestCase):
             x.float().permute(0, 3, 1, 2),
             w.float().permute(0, 3, 1, 2),
             stride=p.stride,
-            padding=p.PAD,
+            padding=(p.PAD, p.PAD_W),
         ).permute(0, 2, 3, 1)
         err = float((y.float() - ref).abs().max() / ref.abs().max())
         self.assertLess(err, 1e-2, f"{spec}: rel err {err:.3g}")

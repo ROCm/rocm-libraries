@@ -34,6 +34,25 @@
 #  19  rejected by both engines: gfx950 (wave64, no TDM)
 #  20  rejected by both engines: stride 3
 #  21  bf16, 5x5 PAD 2, prefetch + max-ilp
+#  1 x R on a 1-D signal (H 1, W 300, PAD 0, "same" column padding):
+#  (one output row per block: tile_w = the block's pixels)
+#  22  bf16, 1x3, 1x4 waves, 2x4 tiles
+#  23  fp16, 1x7 dilation 3, 3 stages, prefetch + split_barrier
+#  24  bf16, 1x11, pingpong, 4x8 tiles
+#  25  fp16, 1x3, cpg = kpg = 128, ck 64
+#  26  rejected by both engines: 1x3 dilation 3 stride 2
+#  27  rejected by both engines: 1x7 dilation 3, column PAD 19
+#  28  fp16, 1x11 dilation 5, 1x8 waves
+#  rectangular filters with per-axis "same" padding and 3x3 stride-2 "valid"
+#  (2 images unless noted, prefetch + iterative-ilp):
+#  29  bf16, 7x1 on 17x17, 1x4 waves, 4x5 tiles, tile_w 20
+#  30  fp16, 1x7 on 17x17, 2x2 waves, 1x5 tiles, 3 stages
+#  31  bf16, 3x1 on 8x8, one image, 4x2 waves, 3 stages
+#  32  fp16, 1x3 on 8x8, 2x2 waves, 2x4 tiles
+#  33  bf16, 3x3 PAD 0 stride 2 on 35x35, 2x2 waves, 2x5 tiles
+#  34  fp16, 3x3 PAD 0 stride 2 on 17x17, phase_split
+#  35  rejected by both engines: 7x1 with pack_groups 2
+#  36  rejected by both engines: 3x1 dilated 2x1
 from _emit_common import run_emit
 from kernels.common.conv_direct_fwd_wmma import (
     DirectFwdWmmaSpec,
@@ -68,6 +87,42 @@ def _p(
         dtype=dtype,
         dil_h=dil_h,
         dil_w=dil_w,
+    )
+
+
+def _p1d(R, d, pw, *, dtype="bf16", stride=1, cpg=64, kpg=96):
+    return DirectConvProblem(
+        N=2,
+        H=1,
+        W=300,
+        groups=1,
+        cpg=cpg,
+        kpg=kpg,
+        KH=1,
+        KW=R,
+        PAD=0,
+        pad_w=pw,
+        stride=stride,
+        dtype=dtype,
+        dil_w=d,
+    )
+
+
+def _pr(KH, KW, PAD, pw, H, W, *, dtype="bf16", stride=1, **kw):
+    return DirectConvProblem(
+        N=2,
+        H=H,
+        W=W,
+        groups=kw.get("groups", 1),
+        cpg=kw.get("cpg", 64),
+        kpg=kw.get("kpg", 96),
+        KH=KH,
+        KW=KW,
+        PAD=PAD,
+        pad_w=pw,
+        stride=stride,
+        dtype=dtype,
+        dil_h=kw.get("dil_h", 1),
     )
 
 
@@ -245,6 +300,75 @@ def _spec(idx: int):
             ),
             "gfx1250",
         ),
+        22: (S(problem=_p1d(3, 1, 1), **_k(1, 4, 2, 4, 256, 1, 32, 2)), "gfx1250"),
+        23: (
+            S(
+                problem=_p1d(7, 3, 9, dtype="fp16"),
+                **_k(2, 4, 4, 4, 256, 1, 32, 3, prefetch=True, split_barrier=True),
+            ),
+            "gfx1250",
+        ),
+        24: (
+            S(problem=_p1d(11, 1, 5), **_k(2, 4, 4, 8, 512, 1, 32, 2, pingpong=True)),
+            "gfx1250",
+        ),
+        25: (
+            S(
+                problem=_p1d(3, 1, 1, dtype="fp16", cpg=128, kpg=128),
+                **_k(2, 4, 4, 4, 256, 1, 64, 2),
+            ),
+            "gfx1250",
+        ),
+        26: (S(problem=_p1d(3, 3, 3, stride=2)), "gfx1250"),
+        27: (S(problem=_p1d(7, 3, 19)), "gfx1250"),
+        28: (
+            S(problem=_p1d(11, 5, 25, dtype="fp16"), **_k(1, 8, 2, 4, 512, 1, 32, 2)),
+            "gfx1250",
+        ),
+        29: (
+            S(problem=_pr(7, 1, 3, 0, 17, 17), **_k(1, 4, 4, 5, 20, 2, 32, 2, **PF)),
+            "gfx1250",
+        ),
+        30: (
+            S(
+                problem=_pr(1, 7, 0, 3, 17, 17, dtype="fp16"),
+                **_k(2, 2, 1, 5, 20, 2, 32, 3, **PF),
+            ),
+            "gfx1250",
+        ),
+        31: (
+            S(problem=_pr(3, 1, 1, 0, 8, 8), **_k(4, 2, 2, 2, 8, 1, 32, 3, **PF)),
+            "gfx1250",
+        ),
+        32: (
+            S(
+                problem=_pr(1, 3, 0, 1, 8, 8, dtype="fp16"),
+                **_k(2, 2, 2, 4, 8, 2, 32, 2, **PF),
+            ),
+            "gfx1250",
+        ),
+        33: (
+            S(
+                problem=_pr(3, 3, 0, -1, 35, 35, stride=2),
+                **_k(2, 2, 2, 5, 20, 2, 32, 2, **PF),
+            ),
+            "gfx1250",
+        ),
+        34: (
+            S(
+                problem=_pr(3, 3, 0, -1, 17, 17, dtype="fp16", stride=2),
+                **_k(4, 2, 2, 5, 20, 2, 32, 2, phase_split=True, **PF),
+            ),
+            "gfx1250",
+        ),
+        35: (
+            S(
+                problem=_pr(7, 1, 3, 0, 17, 17, groups=2, cpg=8, kpg=8),
+                pack_groups=2,
+            ),
+            "gfx1250",
+        ),
+        36: (S(problem=_pr(3, 1, 2, 0, 17, 17, dil_h=2)), "gfx1250"),
     }
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")

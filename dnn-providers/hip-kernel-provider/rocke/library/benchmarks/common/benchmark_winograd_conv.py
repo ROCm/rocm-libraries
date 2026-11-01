@@ -596,7 +596,9 @@ def verify_error(out, ref) -> Tuple[float, float]:
     o = out.float().cpu()
     r = ref.float().cpu()
     d = (o - r).abs()
-    err = float(d.max() / r.abs().max().clamp(min=1.0))
+    from benchmarks.common import conv_fill
+
+    err = float(d.max() / r.abs().max().clamp(min=conv_fill.ref_floor()))
     if err != err:  # NaN
         err = float("inf")
     l2 = float((o - r).norm() / r.norm().clamp(min=1e-30))
@@ -608,11 +610,13 @@ def make_inputs(problem, io_dtype: str, seed: int = 42):
 
     tdt = {"fp16": torch.float16, "bf16": torch.bfloat16}[io_dtype]
     g = torch.Generator().manual_seed(seed)
-    x = torch.empty(problem.N, problem.Hi, problem.Wi, problem.C).uniform_(
-        -1.0, 1.0, generator=g
+    from benchmarks.common import conv_fill
+
+    x = conv_fill.fill_x(
+        torch.empty(problem.N, problem.Hi, problem.Wi, problem.C), generator=g
     )
-    w = torch.empty(problem.K, problem.Y, problem.X, problem.cpg).uniform_(
-        -1.0, 1.0, generator=g
+    w = conv_fill.fill_w(
+        torch.empty(problem.K, problem.Y, problem.X, problem.cpg), io_dtype, generator=g
     )
     y = torch.empty(problem.N, problem.Ho, problem.Wo, problem.K, dtype=tdt)
     return x.to(tdt), w.to(tdt), y
@@ -1037,7 +1041,11 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--arch", default=None)
+    from benchmarks.common import conv_fill
+
+    conv_fill.add_argument(ap)
     args = ap.parse_args(argv)
+    conv_fill.set_mode(args.fill)
 
     import torch  # noqa: F401 -- claim the HIP context first
 

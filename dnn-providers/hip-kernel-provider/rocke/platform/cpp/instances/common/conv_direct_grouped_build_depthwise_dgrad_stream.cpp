@@ -1012,6 +1012,14 @@ int rocke_direct_conv_problem_pad_w(const rocke_direct_conv_problem_t* p)
     return p->pad_w < 0 ? p->PAD : p->pad_w;
 }
 
+bool rocke_direct_conv_pad_w_reason(const rocke_direct_conv_problem_t* p,
+                                    const char* prefix,
+                                    char* reason,
+                                    size_t reason_cap)
+{
+    return dgs_pad_w_reason(p, prefix, reason, reason_cap);
+}
+
 bool rocke_direct_conv_one_padding_reason(const rocke_direct_conv_problem_t* p,
                                           const char* prefix,
                                           char* reason,

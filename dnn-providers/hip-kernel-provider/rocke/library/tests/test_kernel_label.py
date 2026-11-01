@@ -333,6 +333,40 @@ def test_direct_helper_job_builds_with_its_pipeline_caps():
     assert dks.direct_kernel_for_job(job, _ARCH, "fp16")[0] is not None
 
 
+@pytest.mark.parametrize("variant", [DIRECT_FWD_WMMA, DIRECT_FWD_SMALLK_WMMA])
+def test_direct_wmma_fwd_rect_and_per_axis_pad_jobs_round_trip(variant):
+    """The 1 x R, rectangular and per-axis-padded WMMA forward rows (the 1x7
+    small-K one too) come back from their identity, name and all, as
+    ``reproduce_kernel`` rebuilds them."""
+    from benchmarks.common.reproduce_kernel import job_and_builder
+
+    arch = _WAVE32_ONLY[variant]
+    target = ArchTarget.from_gfx(arch)
+    direction, rows = dks.DIRECT_CAPABILITIES[variant]
+    rows = [c for c in rows if c.kw or c.pad_w >= 0]
+    assert rows, variant
+    n = 0
+    for caps in rows:
+        _, cell = dks._caps_jobs(
+            arch, target.wave_size, variant, direction, caps, "fp16"
+        )
+        for _, job in cell:
+            ident = job.identity
+            assert (ident.filter_h, ident.pad_h) != (ident.filter_w, ident.pad_w)
+            _round_trips(ident)
+            assert dks.direct_job_for_identity(ident) == job
+            assert job_and_builder(KernelIdentity.from_label(ident.label()))[0] == job
+            n += 1
+    assert n > 0
+
+
+def test_direct_job_for_identity_still_rejects_per_axis_pad_elsewhere():
+    """Per-axis padding stays rejected for a variant without it."""
+    ident = _base_identity(direct=True)
+    with pytest.raises(LookupError):
+        dks.direct_job_for_identity(dataclasses.replace(ident, pad_w=0))
+
+
 def test_direct_job_for_identity_rejects_what_the_grid_cannot_build():
     ident = _base_identity(direct=True)
     for bad in (dict(filter_w=5), dict(stride_w=2), dict(dilation_h=2)):

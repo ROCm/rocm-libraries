@@ -5204,6 +5204,18 @@ def cases():
                 prefetch=True,
             ),
         ),
+        (
+            "smallk",
+            "bf16_k3_pf",
+            dict(cpg=64, kpg=3, dtype="bf16"),
+            dict(tiles_c=2, tiles_p=3, out_h=6, out_w=16, ck=32, prefetch=True),
+        ),
+        (
+            "smallk",
+            "fp16_1x7_pw3_k1",
+            dict(cpg=32, kpg=1, KH=1, KW=7, PAD=0, pad_w=3, dtype="fp16"),
+            dict(waves_p=2, tiles_c=1, tiles_p=4, out_h=1, out_w=122, ck=32),
+        ),
     ):
         add(
             f"conv_direct_fwd_{_kind}_wmma",
@@ -5338,6 +5350,37 @@ def cases():
             "bf16_tu_tsh_dil",
             dict(PAD=2, dil_w=2),
             dict(waves_k=1, tiles_k=2, tap_reuse=True, tap_shift=True),
+        ),
+        (
+            "fp16_1x7_dil3_pw9",
+            dict(H=1, W=300, KH=1, KW=7, PAD=0, pad_w=9, dil_w=3, dtype="fp16"),
+            dict(
+                waves_k=2,
+                tiles_k=4,
+                tiles_p=4,
+                tile_w=256,
+                stages=3,
+                prefetch=True,
+                split_barrier=True,
+            ),
+        ),
+        (
+            "bf16_7x1_pw0_tn2",
+            dict(H=17, W=17, KH=7, KW=1, PAD=3, pad_w=0),
+            dict(waves_k=1, tiles_k=4, tiles_p=5, tile_w=20, tile_n=2),
+        ),
+        (
+            "fp16_s2_valid_tn2",
+            dict(H=35, W=35, PAD=0, stride=2, dtype="fp16"),
+            dict(
+                waves_p=2,
+                tiles_k=2,
+                tiles_p=5,
+                tile_w=20,
+                tile_n=2,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
         ),
     ):
         add(

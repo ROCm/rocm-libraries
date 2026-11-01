@@ -203,7 +203,7 @@ class DirectFwdWmmaSpec:
     def lead_cols(self) -> int:
         """Most leading zero columns a (phase) sub-halo gets at the left edge."""
         p = self.problem
-        return _ceil_div(p.PAD, p.stride) if self.phase_split else p.PAD
+        return _ceil_div(p.PAD_W, p.stride) if self.phase_split else p.PAD_W
 
     @property
     def phase_elems(self) -> int:
@@ -280,9 +280,9 @@ class DirectFwdWmmaSpec:
 
     @property
     def halo_slack(self) -> int:
-        # A left-edge block's last row wraps up to PAD columns past the ring
+        # A left-edge block's last row wraps up to PAD_W columns past the ring
         # (a split halo carries the slack in each phase).
-        return 0 if self.phase_split else self.problem.PAD * self.x_pitch
+        return 0 if self.phase_split else self.problem.PAD_W * self.x_pitch
 
     def lds_bytes(self) -> int:
         # Each halo slot carries its own wrap slack (see the module docstring).
@@ -306,6 +306,7 @@ class DirectFwdWmmaSpec:
             self.name,
             f"f{p.KH}x{p.KW}",
             f"p{p.PAD}",
+            f"pw{p.PAD_W}" if p.PAD_W != p.PAD else "",
             f"wk{self.waves_k}",
             f"wp{self.waves_p}",
             f"tk{self.tiles_k}",
@@ -363,17 +364,35 @@ def fwd_wmma_tile_efficiency(spec: DirectFwdWmmaSpec) -> float:
 def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | None:
     """Why ``spec`` cannot run on ``arch`` (None when it can)."""
     p = spec.problem
-    why, target = wmma_fwd_gate(p, arch, "direct_fwd_wmma", spec.wave_size)
+    why, target = wmma_fwd_gate(
+        p, arch, "direct_fwd_wmma", spec.wave_size, per_axis_pad=True
+    )
     if why:
         return why
     if p.stride not in (1, 2):
         return f"stride {p.stride} not in (1, 2)"
     if p.dil_h < 1 or p.dil_w < 1:
         return f"dilation {p.dil_h}x{p.dil_w} < 1"
+    # Non-square filters: 1 x R stride-1 rows on 1-D signals (dilated or
+    # not), and undilated rectangular filters (7x1, 1x7); all unpacked,
+    # without tap_reuse or a phase split.
     if p.KH != p.KW:
-        return f"filter {p.KH}x{p.KW} is not square"
+        if spec.pack_groups > 1 or spec.tap_reuse or spec.phase_split:
+            return (
+                f"a {p.KH}x{p.KW} filter is served unpacked, without tap_reuse "
+                "or phase split"
+            )
+        if p.is_dilated and (p.KH != 1 or p.stride != 1):
+            return f"a dilated {p.KH}x{p.KW} filter is served only as 1 x R, stride 1"
+    if p.PAD_W != p.PAD:
+        if spec.pack_groups > 1:
+            return "per-axis padding is served unpacked"
+        if p.is_dilated and (p.KH != 1 or p.stride != 1):
+            return "per-axis padding with dilation is served only as 1 x R, stride 1"
     if p.PAD < 0 or p.PAD > (p.KH - 1) * max(p.dil_h, p.dil_w):
         return f"PAD {p.PAD} outside 0..(K-1)*dilation"
+    if p.PAD_W < 0 or p.PAD_W > (p.KW - 1) * max(p.dil_h, p.dil_w):
+        return f"PAD_W {p.PAD_W} outside 0..(KW-1)*dilation"
     if p.Ho < 1 or p.Wo < 1:
         return f"empty output {p.Ho}x{p.Wo}"
     G = spec.pack_groups
@@ -546,6 +565,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
     S = p.stride
     DH, DW = p.dil_h, p.dil_w
     PAD = p.PAD
+    PAD_W = p.PAD_W
     G = spec.pack_groups
     io_type = _io_type(p.dtype)
     ab = wmma_ab_dtype(p.dtype)
@@ -659,7 +679,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
 
     # Halo origin in X coordinates and the edge shifts (module docstring).
     h0 = b.sub(h_tile if S == 1 else b.mul(h_tile, b.const_i32(S)), b.const_i32(PAD))
-    w0 = b.sub(w_tile if S == 1 else b.mul(w_tile, b.const_i32(S)), b.const_i32(PAD))
+    w0 = b.sub(w_tile if S == 1 else b.mul(w_tile, b.const_i32(S)), b.const_i32(PAD_W))
     # Leading zero rows / columns; a padding wider than the filter's reach
     # (dilation along one axis only) can zero a whole (sub-)halo, never more.
     hs = b.smin(b.smax(b.sub(c0, h0), c0), b.const_i32(HALO_H))

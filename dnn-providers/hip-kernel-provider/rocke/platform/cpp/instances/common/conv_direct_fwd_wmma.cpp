@@ -86,7 +86,8 @@ long long fww_Ho(const rocke_direct_conv_problem_t* p)
 }
 long long fww_Wo(const rocke_direct_conv_problem_t* p)
 {
-    return fww_floordiv((long long)p->W + 2 * p->PAD - (long long)(p->KW - 1) * p->dil_w - 1,
+    return fww_floordiv((long long)p->W + 2 * rocke_direct_conv_problem_pad_w(p)
+                            - (long long)(p->KW - 1) * p->dil_w - 1,
                         p->stride)
            + 1;
 }
@@ -122,7 +123,8 @@ int fww_halo_cols(const rocke_direct_fwd_wmma_spec_t* s)
 int fww_lead_cols(const rocke_direct_fwd_wmma_spec_t* s)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
-    return s->phase_split ? fww_ceil_div(p->PAD, p->stride) : p->PAD;
+    const int pad_w = rocke_direct_conv_problem_pad_w(p);
+    return s->phase_split ? fww_ceil_div(pad_w, p->stride) : pad_w;
 }
 int fww_x_pitch(const rocke_direct_fwd_wmma_spec_t* s)
 {
@@ -165,7 +167,7 @@ int fww_wei_elems(const rocke_direct_fwd_wmma_spec_t* s)
 }
 int fww_halo_slack(const rocke_direct_fwd_wmma_spec_t* s)
 {
-    return s->phase_split ? 0 : s->problem.PAD * fww_x_pitch(s);
+    return s->phase_split ? 0 : rocke_direct_conv_problem_pad_w(&s->problem) * fww_x_pitch(s);
 }
 
 } // namespace
@@ -259,12 +261,17 @@ rocke_status_t rocke_direct_fwd_wmma_kernel_name(const rocke_direct_fwd_wmma_spe
                                                  char* out,
                                                  size_t out_cap)
 {
-    char f[32], pad[32], wk[32], wp[32], tk[32], tp[32], tw[32], tn[32], ck[32], st[32];
+    char f[32], pad[32], padw[32], wk[32], wp[32], tk[32], tp[32], tw[32], tn[32], ck[32], st[32];
     char str[32], dil[48], pg[64], ppg[32];
     std::string sched;
     const rocke_direct_conv_problem_t* p = &spec->problem;
+    const int pad_w = rocke_direct_conv_problem_pad_w(p);
     snprintf(f, sizeof f, "f%dx%d", p->KH, p->KW);
     snprintf(pad, sizeof pad, "p%d", p->PAD);
+    if(pad_w != p->PAD)
+        snprintf(padw, sizeof padw, "pw%d", pad_w);
+    else
+        padw[0] = '\0';
     snprintf(wk, sizeof wk, "wk%d", spec->waves_k);
     snprintf(wp, sizeof wp, "wp%d", spec->waves_p);
     snprintf(tk, sizeof tk, "tk%d", spec->tiles_k);
@@ -296,6 +303,7 @@ rocke_status_t rocke_direct_fwd_wmma_kernel_name(const rocke_direct_fwd_wmma_spe
         ppg[0] = '\0';
     const char* parts[] = {f,
                            pad,
+                           padw,
                            wk,
                            wp,
                            tk,
@@ -361,18 +369,39 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
         arch = "gfx1250";
     p = &spec->problem;
     if(!rocke_wmma_fwd_gate(
-           p, arch, "direct_fwd_wmma", spec->wave_size, &target, reason, reason_cap))
+           p, arch, "direct_fwd_wmma", spec->wave_size, true, &target, reason, reason_cap))
         return false;
     if(p->stride != 1 && p->stride != 2)
         FWW_FAIL("stride %d not in (1, 2)", p->stride);
     if(p->dil_h < 1 || p->dil_w < 1)
         FWW_FAIL("dilation %dx%d < 1", p->dil_h, p->dil_w);
-    if(p->KH != p->KW)
-        FWW_FAIL("filter %dx%d is not square", p->KH, p->KW);
     {
+        /* Non-square filters: 1 x R stride-1 rows on 1-D signals (dilated
+         * or not), and undilated rectangular filters (7x1, 1x7); all
+         * unpacked, without tap_reuse or a phase split. */
+        const bool dilated = p->dil_h != 1 || p->dil_w != 1;
+        const int pad_w = rocke_direct_conv_problem_pad_w(p);
+        if(p->KH != p->KW)
+        {
+            if(spec->pack_groups > 1 || spec->tap_reuse || spec->phase_split)
+                FWW_FAIL("a %dx%d filter is served unpacked, without tap_reuse or phase split",
+                         p->KH,
+                         p->KW);
+            if(dilated && (p->KH != 1 || p->stride != 1))
+                FWW_FAIL("a dilated %dx%d filter is served only as 1 x R, stride 1", p->KH, p->KW);
+        }
+        if(pad_w != p->PAD)
+        {
+            if(spec->pack_groups > 1)
+                FWW_FAIL("per-axis padding is served unpacked");
+            if(dilated && (p->KH != 1 || p->stride != 1))
+                FWW_FAIL("per-axis padding with dilation is served only as 1 x R, stride 1");
+        }
         int dmax = p->dil_h > p->dil_w ? p->dil_h : p->dil_w;
         if(p->PAD < 0 || p->PAD > (p->KH - 1) * dmax)
             FWW_FAIL("PAD %d outside 0..(K-1)*dilation", p->PAD);
+        if(pad_w < 0 || pad_w > (p->KW - 1) * dmax)
+            FWW_FAIL("PAD_W %d outside 0..(KW-1)*dilation", pad_w);
     }
     long long Ho = fww_Ho(p), Wo = fww_Wo(p);
     if(Ho < 1 || Wo < 1)
@@ -535,7 +564,7 @@ struct fww_ctx
     const rocke_type_t* io_type;
     const char* wmma_op_id;
 
-    int KH, KW, S, DH, DW, PAD, G;
+    int KH, KW, S, DH, DW, PAD, PAD_W, G;
     int WAVE, WK, WP, TM, TN, THREADS, BK, TH, TW, HALO_H, HALO_W, CK, NS;
     int XP, EPITCH, HALO, WEI, NB, IMG, HALO_STAGE, TAPS;
     bool PS;
@@ -1427,6 +1456,7 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     c.DH = p->dil_h;
     c.DW = p->dil_w;
     c.PAD = p->PAD;
+    c.PAD_W = rocke_direct_conv_problem_pad_w(p);
     c.G = spec->pack_groups;
     c.io_type = rocke_b_io_ir_type(b, fww_dtype(spec));
     if(c.io_type == NULL)
@@ -1586,7 +1616,7 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     }
     {
         V x = c.S == 1 ? c.w_tile : mulk(c, c.w_tile, c.S);
-        V y = ci(c, c.PAD);
+        V y = ci(c, c.PAD_W);
         w0 = sub(c, x, y);
     }
     {

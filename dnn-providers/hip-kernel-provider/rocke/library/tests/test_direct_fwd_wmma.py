@@ -53,6 +53,8 @@ def _problem(
     stride=1,
     dil_h=1,
     dil_w=1,
+    KW=None,
+    pad_w=-1,
 ):
     return DirectConvProblem(
         N=N,
@@ -62,8 +64,9 @@ def _problem(
         cpg=C // groups,
         kpg=K // groups,
         KH=KH,
-        KW=KH,
+        KW=KH if KW is None else KW,
         PAD=PAD,
+        pad_w=pad_w,
         stride=stride,
         dtype=dtype,
         dil_h=dil_h,
@@ -113,6 +116,11 @@ class TestFwdWmmaSpec(unittest.TestCase):
             ({}, dict(tap_reuse=True, row_ring=True), "tap_reuse"),
             ({}, dict(tap_reuse=True, tile_w=8), "tap_reuse"),
             ({}, dict(tap_shift=True), "tap_shift"),
+            (dict(KH=1, KW=3, PAD=0, pad_w=3, dil_w=3, stride=2), {}, "1 x R"),
+            (dict(KH=3, KW=1, PAD=2, pad_w=0, dil_h=2), {}, "1 x R"),
+            (dict(KH=7, KW=1, PAD=3, pad_w=0), dict(tap_reuse=True), "tap_reuse"),
+            (dict(KH=1, KW=7, PAD=0, pad_w=3), dict(phase_split=True), "phase split"),
+            (dict(KH=1, KW=7, PAD=0, pad_w=19, dil_w=3), {}, "PAD_W 19"),
         ):
             why = fwd_wmma_reason(DirectFwdWmmaSpec(problem=_problem(**pkw), **knobs))
             self.assertIsNotNone(why, (pkw, knobs))
@@ -338,6 +346,14 @@ class TestFwdWmmaSpec(unittest.TestCase):
         )
         self.assertIsNone(spec)
         self.assertIn("tile efficiency", why)
+        # A 1 x R problem keeps its own column padding.
+        row = _problem(N=1, H=1, W=300, KH=1, KW=7, PAD=0, pad_w=9, dil_w=3)
+        knobs = dict(waves_k=1, waves_p=4, tiles_k=2, tiles_p=4, tile_w=256)
+        spec, why = direct_spec_for_problem(
+            "direct_fwd_wmma", row, knobs, "gfx1250", 32
+        )
+        self.assertIsNotNone(spec, why)
+        self.assertEqual(spec.problem.PAD_W, 9)
 
 
 def _gpu_skip() -> str:
@@ -594,6 +610,81 @@ _CASES = (
         dict(N=2, H=9, W=12, C=64, K=96, groups=2),
         dict(tiles_k=1, tiles_p=2, tile_w=8, wave_epilogue=True),
     ),
+    # A column padding of its own on a square filter.
+    (dict(N=3, H=11, W=19, PAD=1, pad_w=0), dict(tiles_k=1, tiles_p=2, tile_w=8)),
+    # 1 x R "same" filters on 1-D signals (column padding of their own).
+    (
+        dict(H=1, W=301, C=64, K=64, KH=1, KW=3, PAD=0, pad_w=1),
+        dict(waves_k=1, waves_p=4, tiles_k=2, tiles_p=4, tile_w=256),
+    ),
+    (
+        dict(H=1, W=257, KH=1, KW=7, PAD=0, pad_w=9, dil_w=3, dtype="fp16"),
+        dict(
+            waves_k=2,
+            waves_p=4,
+            tiles_k=4,
+            tiles_p=4,
+            tile_w=256,
+            stages=3,
+            prefetch=True,
+            split_barrier=True,
+        ),
+    ),
+    (
+        dict(N=3, H=1, W=200, C=32, K=64, KH=1, KW=11, PAD=0, pad_w=25, dil_w=5),
+        dict(waves_k=1, waves_p=8, tiles_k=2, tiles_p=4, tile_w=512),
+    ),
+    (
+        dict(H=1, W=400, C=128, K=128, KH=1, KW=11, PAD=0, pad_w=5),
+        dict(waves_k=2, waves_p=4, tiles_k=4, tiles_p=8, tile_w=512, pingpong=True),
+    ),
+    # Rectangular filters with per-axis "same" padding (Inception 17x17 and
+    # 8x8 blocks), two images of 4x20 / 8x8 per block.
+    (
+        dict(N=3, H=17, W=17, KH=7, KW=1, PAD=3, pad_w=0),
+        dict(waves_k=1, waves_p=4, tiles_k=4, tiles_p=5, tile_w=20, tile_n=2),
+    ),
+    (
+        dict(N=3, H=17, W=17, KH=1, KW=7, PAD=0, pad_w=3, dtype="fp16"),
+        dict(
+            waves_k=2,
+            waves_p=2,
+            tiles_k=1,
+            tiles_p=5,
+            tile_w=20,
+            tile_n=2,
+            stages=3,
+            prefetch=True,
+            sched="iterative-ilp",
+        ),
+    ),
+    (
+        dict(N=3, H=8, W=8, KH=3, KW=1, PAD=1, pad_w=0),
+        dict(waves_k=4, waves_p=2, tiles_k=2, tiles_p=2, tile_w=8, stages=3),
+    ),
+    (
+        dict(N=3, H=8, W=8, KH=1, KW=3, PAD=0, pad_w=1),
+        dict(waves_k=2, waves_p=2, tiles_k=2, tiles_p=4, tile_w=8, tile_n=2),
+    ),
+    # 3x3 stride 2 "valid" on odd maps (35x35 -> 17x17, 17x17 -> 8x8).
+    (
+        dict(N=3, H=35, W=35, C=64, K=64, PAD=0, stride=2),
+        dict(waves_k=2, waves_p=2, tiles_k=2, tiles_p=5, tile_w=20, tile_n=2),
+    ),
+    (
+        dict(N=3, H=17, W=17, C=64, K=64, PAD=0, stride=2, dtype="fp16"),
+        dict(
+            waves_k=4,
+            waves_p=2,
+            tiles_k=2,
+            tiles_p=5,
+            tile_w=20,
+            tile_n=2,
+            phase_split=True,
+            prefetch=True,
+            sched="iterative-ilp",
+        ),
+    ),
 )
 
 
@@ -646,7 +737,7 @@ class TestFwdWmmaGpu(unittest.TestCase):
             x.float().permute(0, 3, 1, 2),
             w.float().permute(0, 3, 1, 2),
             stride=p.stride,
-            padding=p.PAD,
+            padding=(p.PAD, p.PAD_W),
             dilation=(p.dil_h, p.dil_w),
             groups=p.groups,
         ).permute(0, 2, 3, 1)

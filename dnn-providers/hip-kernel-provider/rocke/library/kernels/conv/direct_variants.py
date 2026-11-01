@@ -662,9 +662,13 @@ def direct_spec_for_problem(
     if getattr(problem, "pad_w", -1) < -1:
         return None, f"pad_w must be -1 (PAD) or at least 0 (got {problem.pad_w})"
     if getattr(problem, "PAD_W", problem.PAD) != problem.PAD and (
-        variant != DIRECT_DEPTHWISE_TILED_DGRAD
+        variant
+        not in (DIRECT_DEPTHWISE_TILED_DGRAD, DIRECT_FWD_SMALLK_WMMA, DIRECT_FWD_WMMA)
     ):
-        return None, "one padding for both axes (only the rotated-filter dgrad differs)"
+        return None, (
+            "one padding for both axes (only the rotated-filter dgrad, the "
+            "small-K forward and the 1 x R WMMA forward differ)"
+        )
     spec = make_direct_spec(variant, problem, knobs, wave_size)
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:

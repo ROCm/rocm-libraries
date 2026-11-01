@@ -39,6 +39,7 @@ bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
                          const char* arch,
                          const char* name,
                          int wave_size,
+                         bool per_axis_pad,
                          const rocke_archtarget_t** target_out,
                          char* reason,
                          size_t reason_cap)
@@ -91,5 +92,7 @@ bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
         gate_set_reason(reason, reason_cap, msg);
         return false;
     }
+    if(per_axis_pad)
+        return !rocke_direct_conv_pad_w_reason(p, "", reason, reason_cap);
     return !rocke_direct_conv_one_padding_reason(p, "", reason, reason_cap);
 }

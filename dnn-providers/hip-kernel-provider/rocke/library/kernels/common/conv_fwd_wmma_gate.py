@@ -19,7 +19,11 @@ from __future__ import annotations
 
 from rocke.core.arch import ArchTarget
 
-from kernels.common.conv_direct_grouped import DirectConvProblem, one_padding_reason
+from kernels.common.conv_direct_grouped import (
+    DirectConvProblem,
+    one_padding_reason,
+    pad_w_reason,
+)
 
 __all__ = ["WMMA_K", "WMMA_M", "WMMA_N", "wmma_ab_dtype", "wmma_fwd_gate"]
 
@@ -35,12 +39,19 @@ def wmma_ab_dtype(dtype: str) -> str:
 
 
 def wmma_fwd_gate(
-    p: DirectConvProblem, arch: str, name: str, wave_size: int
+    p: DirectConvProblem,
+    arch: str,
+    name: str,
+    wave_size: int,
+    *,
+    per_axis_pad: bool = False,
 ) -> tuple[str | None, ArchTarget | None]:
     """``(why, target)``: why kernel ``name`` cannot run ``p`` on ``arch`` at
     the spec's ``wave_size`` (``None`` when the target and the padding
     qualify), and the resolved :class:`ArchTarget` so callers need not resolve
-    it again. The target is ``None`` only when ``arch`` is unknown."""
+    it again. The target is ``None`` only when ``arch`` is unknown.
+    ``per_axis_pad`` lets a kernel that offsets columns by ``PAD_W`` take a
+    column padding of its own."""
     try:
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
@@ -62,4 +73,4 @@ def wmma_fwd_gate(
         k=WMMA_K,
     ):
         return f"missing wmma_f32_{WMMA_M}x{WMMA_N}x{WMMA_K}_{ab} on {arch}", target
-    return one_padding_reason(p), target
+    return (pad_w_reason(p) if per_axis_pad else one_padding_reason(p)), target

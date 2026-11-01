@@ -655,6 +655,55 @@ FWD_WMMA_DILATED_STRIDED_KNOBS = (
     (2, 1, 1, 4, 16, 1, 64, 2, True, False, False, False, False),
     (4, 1, 1, 4, 16, 2, 32, 2, True, False, False, False, False),
 )
+# 3x3 stride 2 "valid" (PAD 0; the Inception-v3 reduction layers 35x35 ->
+# 17x17 and 17x17 -> 8x8): tiles that fit the odd output maps. Two images of
+# 4x20 (17x17 maps: 72% of the padded grid real, against 38% for the 16- and
+# 32-wide tiles) or 8x8 per block, 128 K.
+FWD_WMMA_S2V_KNOBS = (
+    (2, 2, 2, 4, 8, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 2, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 4, 8, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 6, 24, 2, 32, 2, True, False, False, False, False),
+    (4, 2, 2, 5, 20, 2, 32, 2, True, False, False, True, False),
+)
+# 7x1 / 1x7 "same" (the Inception-v3 17x17 factorized layers): two images of
+# 4x20 per block, as for the 17x17 stride-2 maps; 3x1 / 1x3 "same" (its 8x8
+# blocks).
+FWD_WMMA_RECT_LAYERS = ((7, 1, 3, 0), (1, 7, 0, 3), (3, 1, 1, 0), (1, 3, 0, 1))
+FWD_WMMA_RECT_KNOBS = (
+    (1, 4, 4, 5, 20, 2, 32, 2, True, False, False, False, False),
+    # 32-channel K blocks: 200-240 blocks at n16 (the n16 17x17 layers)
+    (2, 2, 1, 5, 20, 2, 32, 3, True, False, False, False, False),
+    (2, 2, 2, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 3, 5, 20, 2, 32, 2, True, False, False, False, False),
+    (2, 2, 4, 6, 24, 2, 32, 2, True, False, False, False, False),
+)
+# 3x1 / 1x3 "same" (the Inception-v3 8x8 blocks, c384 -> 384): one or two
+# 8x8 images per block and 32-64 channel K blocks, so n16-n128 fill the CUs.
+FWD_WMMA_RECT3_KNOBS = (
+    (4, 2, 2, 2, 8, 1, 32, 3, True, False, False, False, False),
+    (4, 2, 1, 2, 8, 1, 32, 3, True, False, False, False, False),
+    (2, 2, 2, 4, 8, 2, 32, 2, True, False, False, False, False),
+    (4, 2, 2, 4, 8, 2, 32, 3, True, False, False, False, False),
+)
+# 1 x R filters on 1-D signals, (R, dilation), "same" padding: the HiFi-GAN
+# resblock / generator layers.
+FWD_WMMA_1D_FILTERS = tuple((r, d) for r in (3, 7, 11) for d in (1, 3, 5))
+# (waves_k, waves_p, tiles_k, tiles_p, ck, stages, mode): tile_h = 1, tile_w =
+# the block's pixels. 32-64 channels: small K blocks over long strips (memory
+# bound); 128-256 channels: the dense 3x3 schedules.
+FWD_WMMA_1D_KNOBS = (
+    (1, 4, 2, 4, 32, 2, ""),
+    (1, 8, 2, 4, 32, 2, ""),
+    (1, 4, 2, 8, 32, 2, ""),
+    (1, 4, 4, 4, 32, 2, ""),
+    (2, 4, 4, 4, 32, 3, "pfsb"),
+    (2, 4, 4, 4, 64, 2, ""),
+    (1, 8, 8, 4, 32, 2, "pfsb"),
+    (2, 4, 4, 8, 32, 2, "pp"),
+    (2, 4, 4, 10, 32, 2, "pp"),
+)
 # END FWD_WMMA TABLES
 
 # Tiled direct wgrad (DirectWgradTiledSpec): (wave_k16, wave_c16, waves_k,
@@ -734,12 +783,20 @@ FWD_SMALLC_STEMS = (
     (3, 1, 1, 3),
     (3, 1, 1, 4),
     (3, 1, 2, 3),
+    (3, 0, 2, 3),  # Inception-v3 stem: 299x299 -> 149x149, "valid"
     (7, 3, 2, 3),
     (4, 0, 4, 3),
     (14, 0, 14, 3),
     (16, 0, 16, 3),
 )
-FWD_SMALLK_LAYERS = ((3, 1, 1, 4),)
+# Small-K rows: (KH, KW, PAD, PAD_W, stride, K). 3x3 K=4: the SD VAE
+# quant_conv; 3x3 K=3: RGB output layers (SD VAE conv_out, Real-ESRGAN);
+# 1x7 K=1 with "same" column padding: the HiFi-GAN conv_post on a 1-D signal.
+FWD_SMALLK_LAYERS = (
+    (3, 3, 1, 1, 1, 4),
+    (3, 3, 1, 1, 1, 3),
+    (1, 7, 0, 3, 1, 1),
+)
 # fwd_smallc_wmma: (waves_k, waves_p, tiles_k, tiles_p, out_h, out_w,
 # tiles_per_block, tdm_store); the best few per stem of a tuning sweep.
 FWD_SMALLC_KNOBS = (
@@ -778,6 +835,42 @@ FWD_SMALLK_KNOBS = (
     (3, 4, 1, 4, 12, 12, 64, 3, False),
     (3, 4, 1, 4, 12, 12, 64, 3, True),
 )
+# Per-layer knob rows where the K=4 rows above do not fit: the GEMM column
+# block is R*S*K rounded up to 16 (32 for 3x3 K=3, 16 for 1x7 K=1).
+FWD_SMALLK_KNOBS_BY_LAYER = {
+    (3, 3, 3): (
+        (1, 3, 2, 3, 6, 16, 32, 2, True),
+        (1, 3, 2, 3, 6, 16, 32, 3, True),
+        (1, 3, 2, 3, 6, 16, 64, 2, False),
+        (1, 3, 2, 3, 6, 16, 64, 2, True),
+        (1, 2, 2, 4, 6, 14, 32, 2, True),
+        (1, 2, 2, 4, 6, 14, 64, 2, True),
+        (1, 4, 2, 3, 4, 30, 64, 2, True),
+        (1, 4, 2, 3, 10, 14, 64, 2, True),
+        (1, 4, 2, 3, 6, 16, 32, 2, True),
+        (1, 4, 2, 3, 6, 16, 64, 2, True),
+        (1, 4, 2, 4, 6, 30, 32, 3, True),
+        (1, 4, 2, 4, 6, 30, 64, 2, True),
+        (1, 4, 2, 4, 14, 14, 64, 2, True),
+        (2, 4, 1, 4, 14, 14, 64, 2, True),
+        (1, 2, 2, 4, 2, 30, 64, 2, True),
+        (1, 4, 2, 2, 2, 30, 64, 2, True),
+        (1, 8, 2, 4, 14, 30, 64, 2, True),
+        (1, 4, 2, 8, 14, 30, 64, 2, False),
+    ),
+    (1, 7, 1): (
+        (1, 2, 1, 2, 1, 58, 32, 2, True),
+        (1, 2, 1, 4, 1, 122, 32, 2, False),
+        (1, 2, 1, 8, 1, 250, 32, 2, True),
+        (1, 2, 1, 4, 1, 122, 32, 2, True),
+        (1, 4, 1, 2, 1, 122, 32, 2, True),
+        (1, 4, 1, 4, 1, 250, 32, 2, False),
+        (1, 4, 1, 4, 1, 250, 32, 2, True),
+        (1, 8, 1, 2, 1, 250, 32, 2, True),
+        (1, 4, 1, 8, 1, 506, 32, 2, True),
+        (1, 8, 1, 4, 1, 506, 32, 2, True),
+    ),
+}
 
 
 def wgrad_waves() -> Tuple[Tuple[int, int, int], ...]:
@@ -812,7 +905,8 @@ class DirectCaps:
     dil_h: int = 1
     dil_w: int = 1
     # Filter width and column padding where they differ from KH / PAD (0 and
-    # -1: the same); only the rotated-filter depthwise dgrad rows use them.
+    # -1: the same); only the rotated-filter depthwise dgrad and the small-K
+    # forward rows use them.
     kw: int = 0
     pad_w: int = -1
 
@@ -1206,15 +1300,42 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for c in FWD_WMMA_PACKED_CHANNELS
             for s in _STRIDES
         )
-        # Stride 2: 3x3 "same" and the 2x2 patch merge.
+        # Stride 2: 3x3 "same", 3x3 "valid" and the 2x2 patch merge.
         + (
             DirectCaps(KH=3, PAD=1, stride=2, cpg=0, kpg=0),
+            DirectCaps(KH=3, PAD=0, stride=2, cpg=0, kpg=0),
             DirectCaps(KH=2, PAD=0, stride=2, cpg=0, kpg=0),
         )
         # Dilated 3x3 (per-axis dilation), stride 1 and 2.
         + tuple(
             DirectCaps(KH=3, PAD=pad, stride=s, cpg=0, kpg=0, dil_h=dh, dil_w=dw)
             for pad, s, dh, dw in FWD_WMMA_DILATIONS
+        )
+        # 1 x R "same" filters on 1-D signals (H = 1), dilated or not.
+        + tuple(
+            DirectCaps(
+                KH=1,
+                kw=r,
+                PAD=0,
+                pad_w=(r - 1) * d // 2,
+                stride=1,
+                cpg=0,
+                kpg=0,
+                dil_w=d,
+            )
+            for r, d in FWD_WMMA_1D_FILTERS
+        )
+        # Rectangular filters with per-axis "same" padding, stride 1.
+        + tuple(
+            DirectCaps(KH=kh, kw=kw, PAD=ph, pad_w=pw, stride=1, cpg=0, kpg=0)
+            for kh, kw, ph, pw in FWD_WMMA_RECT_LAYERS
+            # a 1 x R "same" undilated row is already a 1-D cap above
+            if not (
+                kh == 1
+                and ph == 0
+                and (kw, 1) in FWD_WMMA_1D_FILTERS
+                and pw == (kw - 1) // 2
+            )
         ),
     ),
     # Wgrad (grouped and non-grouped), channel counts runtime. The kernel is a
@@ -1240,8 +1361,16 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
     _FWD_SMALLK: (
         "fwd",
         tuple(
-            DirectCaps(KH=k, PAD=pad, stride=st, cpg=0, kpg=kk)
-            for k, pad, st, kk in FWD_SMALLK_LAYERS
+            DirectCaps(
+                KH=kh,
+                kw=0 if kw == kh else kw,
+                PAD=pad,
+                pad_w=-1 if pw == pad else pw,
+                stride=st,
+                cpg=0,
+                kpg=kk,
+            )
+            for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
         ),
     ),
 }
@@ -1269,6 +1398,30 @@ def dgrad_rtc_spills(knobs: dict, KH: int, KW: int, arch: str) -> bool:
     waves = knobs["block_groups"] * knobs["waves_q"] * knobs["waves_k"]
     budget = limits.vgprs // -(-waves // 4)  # waves of a block share 4 SIMDs
     return dgrad_rtc_vgprs(knobs, KH, KW) > DGRAD_RTC_VGPR_FILL * budget
+
+
+def _fwd_wmma_1d_knobs(kw: int = 3) -> Iterator[dict]:
+    """1 x R rows: one output row per block, the tile as wide as the block.
+    The weight slot grows with the filter width: the 64-channel chunk rows
+    only fit LDS (and only win) for 1x3 filters, the three-stage and the
+    widest pingpong rows not for 1x11."""
+    for wk, wp, tk, tp, ck, st, mode in FWD_WMMA_1D_KNOBS:
+        if (ck > 32 and kw > 3) or (kw > 7 and (st > 2 or tp >= 10)):
+            continue
+        knobs = dict(
+            waves_k=wk,
+            waves_p=wp,
+            tiles_k=tk,
+            tiles_p=tp,
+            tile_w=wp * tp * 16,
+            ck=ck,
+            stages=st,
+        )
+        if mode == "pp":
+            knobs["pingpong"] = True
+        elif mode == "pfsb":
+            knobs.update(prefetch=True, split_barrier=True)
+        yield knobs
 
 
 def _dgrad_wmma_knobs(rows, pack_groups: int = 1) -> Iterator[dict]:
@@ -1636,7 +1789,18 @@ def _knob_grid(
 
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return  # a wave32 kernel: no tuning for this arch at all
-        if caps is not None and caps.cpg > 0:
+        if caps is not None and caps.KH != caps.KW:
+            # 1 x R rows on 1-D signals and / or the Inception rectangular
+            # rows (a 1x7 "same" cap is both).
+            if caps.KH == 1:
+                yield from _fwd_wmma_1d_knobs(caps.KW)
+            if (caps.KH, caps.KW, caps.PAD, caps.pad_w) in FWD_WMMA_RECT_LAYERS:
+                yield from _fwd_wmma_knobs(
+                    FWD_WMMA_RECT3_KNOBS
+                    if caps.KH * caps.KW == 3
+                    else FWD_WMMA_RECT_KNOBS
+                )
+        elif caps is not None and caps.cpg > 0:
             # Pack groups up to one 32-channel WMMA K step.
             yield from _fwd_wmma_knobs(
                 (
@@ -1649,7 +1813,9 @@ def _knob_grid(
         elif caps is not None and caps.stride > 1 and caps.KH == caps.stride:
             yield from _fwd_wmma_knobs(FWD_WMMA_PATCH2_KNOBS)
         elif caps is not None and caps.stride > 1 and caps.dil_h == caps.dil_w == 1:
-            yield from _fwd_wmma_knobs(FWD_WMMA_STRIDED_KNOBS)
+            yield from _fwd_wmma_knobs(
+                FWD_WMMA_S2V_KNOBS if caps.PAD == 0 else FWD_WMMA_STRIDED_KNOBS
+            )
         elif caps is not None and (caps.dil_h, caps.dil_w) != (1, 1):
             yield from _fwd_wmma_knobs(
                 FWD_WMMA_DILATED_STRIDED_KNOBS
@@ -1697,7 +1863,12 @@ def _knob_grid(
                     knobs["tdm_store"] = True
                 yield knobs
         else:
-            for wc, wp, tc, tp, oh, ow, ck, st, pf in FWD_SMALLK_KNOBS:
+            rows = FWD_SMALLK_KNOBS
+            if caps is not None:
+                rows = FWD_SMALLK_KNOBS_BY_LAYER.get(
+                    (caps.KH, caps.KW, caps.kpg), FWD_SMALLK_KNOBS
+                )
+            for wc, wp, tc, tp, oh, ow, ck, st, pf in rows:
                 knobs = dict(
                     waves_c=wc,
                     waves_p=wp,
@@ -2079,6 +2250,7 @@ def probe_problem(
             KH=caps.KH,
             KW=caps.KW,
             PAD=caps.PAD,
+            pad_w=caps.pad_w,
             stride=caps.stride,
             dtype=dtype,
         )
@@ -2193,6 +2365,7 @@ def probe_problem(
             dtype=dtype,
             dil_h=caps.dil_h,
             dil_w=caps.dil_w,
+            pad_w=caps.pad_w,
         )
     n_images = 1
     if variant == "direct_depthwise_spatial":
@@ -2439,9 +2612,14 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
             identity.dtype_a,
         )
     rebuilt = replace(rebuilt, llvm_flavor=identity.llvm_flavor)
-    if (caps.kw or caps.pad_w >= 0) and identity.algorithm != _DW_TILED_DGRAD:
-        # Only the rotated-filter depthwise dgrad rows carry a non-square
-        # filter or per-axis padding.
+    if (caps.kw or caps.pad_w >= 0) and identity.algorithm not in (
+        _DW_TILED_DGRAD,
+        _FWD_WMMA,
+        _FWD_SMALLK,
+    ):
+        # Only the rotated-filter depthwise dgrad and the WMMA forward rows
+        # (1 x R, rectangular, small-K) carry a non-square filter or per-axis
+        # padding; the spec validation below still checks those.
         raise LookupError(
             f"the direct grid cannot build this identity: "
             f"{caps.KH}x{caps.KW} filter, padding {caps.PAD}x{caps.PAD_W}"

@@ -126,6 +126,14 @@ rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void);
 /* @property PAD_W -> PAD if pad_w < 0 else pad_w. Every Wo below uses it. */
 int rocke_direct_conv_problem_pad_w(const rocke_direct_conv_problem_t* p);
 
+/* pad_w_reason(p): only -1 (PAD) or a value of at least 0 is a column
+ * padding. Returns true (and writes `prefix` + the reason) when pad_w is
+ * neither. */
+bool rocke_direct_conv_pad_w_reason(const rocke_direct_conv_problem_t* p,
+                                    const char* prefix,
+                                    char* reason,
+                                    size_t reason_cap);
+
 /* one_padding_reason(p): the kernels that offset columns by PAD compute no
  * per-axis padding. Returns true (and writes `prefix` + the reason) when
  * pad_w is no column padding or PAD_W != PAD. */

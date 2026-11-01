@@ -1748,6 +1748,7 @@ void fill_direct_conv_problem(rocke_direct_conv_problem_t* p,
     p->KH = dict_int(d, "KH", p->KH);
     p->KW = dict_int(d, "KW", p->KW);
     p->PAD = dict_int(d, "PAD", p->PAD);
+    p->pad_w = dict_int(d, "pad_w", p->pad_w);
     p->stride = dict_int(d, "stride", p->stride);
     p->dil_h = dict_int(d, "dil_h", p->dil_h);
     p->dil_w = dict_int(d, "dil_w", p->dil_w);
