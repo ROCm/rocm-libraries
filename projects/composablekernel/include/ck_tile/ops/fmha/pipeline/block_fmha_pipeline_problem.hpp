@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_rotary_embedding.hpp"
 
 namespace ck_tile {
@@ -296,6 +297,22 @@ struct BlockFmhaFwdSplitKVPipelineProblem
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = Traits::kMergeNumHeadGroupsSeqLenQ;
     static constexpr index_t kBlockPerCu             = Traits::kBlockPerCu;
     static constexpr bool kHasSink                   = Traits::kHasSink;
+
+    // Split-kv never supports dropout or a quantization scale, and it stores no
+    // random values. Spelled out here so that pipelines ported from a prefill
+    // path (qr_tdm) can query these members on either problem type.
+    using RandValOutputDataType       = uint8_t;
+    static constexpr bool kHasDropout = false;
+    static constexpr auto QScaleEnum  = BlockAttentionQuantScaleEnum::NO_SCALE;
+
+    // Read by the shared qr_tdm policy (block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp).
+    // These are qr_tdm LDS-arena knobs. kUseDoubleKVLdsBuffer false is what
+    // selects the single-V arena layout the split copy is built on, so it must
+    // stay false here. The split copy overrides kProgressiveDsLoadK locally --
+    // it does use the reload -- rather than flipping it for every split-kv
+    // problem; see block_fmha_fwd_splitkv_pipeline_qr_ks_vs_tdm.hpp.
+    static constexpr bool kUseDoubleKVLdsBuffer = false;
+    static constexpr bool kProgressiveDsLoadK   = false;
 };
 
 // extract tile size attributes to remove dependency on traits

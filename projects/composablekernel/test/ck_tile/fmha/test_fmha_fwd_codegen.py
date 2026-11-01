@@ -20,6 +20,7 @@ _CK_ROOT = Path(__file__).resolve().parents[3]
 _FMHA_EXAMPLE_DIR = _CK_ROOT / "example" / "ck_tile" / "01_fmha"
 sys.path.insert(0, str(_FMHA_EXAMPLE_DIR))
 
+from codegen.ops.fmha_fwd_splitkv import get_fwd_splitkv_blobs  # noqa: E402
 from codegen.ops.fmha_fwd import (  # noqa: E402
     CppConstraint,
     FMHA_FWD_API_FOOTER,
@@ -1969,6 +1970,41 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
             run(seqlen_q=100, seqlen_k=512, **big), [kernel("qr_tdm_pingpong", 64)]
         )
         self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
+
+
+
+class SplitKVQrTdmTiles(unittest.TestCase):
+    """The split-kv side of the gfx125 qr_tdm tile contract."""
+
+    def _tdm_kernels(self):
+        kernels = get_fwd_splitkv_blobs(
+            targets=["gfx1250"],
+            kernel_filter="",
+            receipt=600,
+            mask_impl="simplified",
+            optdim_list=[-1],
+        )
+        return [
+            k
+            for k in kernels
+            if getattr(getattr(k, "F_pipeline", None), "tag", None) == "qr_tdm"
+        ]
+
+    def test_every_qr_tdm_tile_keeps_bn0_64(self):
+        # kProgressiveDsLoadK is gated on kN0 == 64 because the reload's own
+        # static_asserts need NIterPerWarp == 4, and it is worth 4-5x. Hand the
+        # pipeline any other tile and the gate turns itself off silently, so
+        # assert it on the side that can actually change: codegen.
+        tdm = self._tdm_kernels()
+        self.assertTrue(tdm, "no qr_tdm split-kv kernels were generated")
+        for kernel in tdm:
+            self.assertEqual(kernel.F_tile.F_bn0, 64, kernel.filename)
+
+    def test_qr_tdm_covers_every_gfx125_split_kv_head_dim(self):
+        self.assertEqual(
+            sorted({kernel.F_hdim for kernel in self._tdm_kernels()}),
+            [32, 64, 128, 256],
+        )
 
 
 if __name__ == "__main__":
