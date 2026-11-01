@@ -294,6 +294,12 @@ namespace hiptensor
                       : hiptensor::stridesFromLengths(
                             extentB, memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
 
+            double alphaValue{};
+            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha))
+            {
+                FAIL() << "Unexpected compute data type: " << computeDataType;
+            }
+
             //hiptensorStatus_t err;
             hiptensorHandle_t handle;
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
@@ -348,12 +354,6 @@ namespace hiptensor
             hiptensorPlan_t plan;
             CHECK_HIPTENSOR_ERROR(
                 hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /* workspaceSizeLimit */));
-
-            double alphaValue{};
-            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha))
-            {
-                FAIL() << "Unexpected compute data type: " << computeDataType;
-            }
 
             auto& opts     = HiptensorOptions::instance();
             int   coldRuns = opts->coldRuns();
