@@ -87,13 +87,19 @@ def _init_rocisa(gfx: str):
     return ri
 
 
-def _make_writer(ri, gfx: str) -> KernelWriterAssembly:
-    """Construct a minimal KernelWriterAssembly with arch/reg caps wired in."""
+def _make_writer(ri, gfx: str, wave_size: int = 64) -> KernelWriterAssembly:
+    """Construct a minimal KernelWriterAssembly with arch/reg caps wired in.
+
+    getVgprOccupancy derives the waves-per-SIMD cost of a workgroup from
+    kernel["WavefrontSize"], so it must carry the same wave size the kernel is
+    assembled with (_init_rocisa's setKernel and _build_minimal_kernel_asm).
+    """
     kw = object.__new__(KernelWriterAssembly)
     kw.states = SimpleNamespace(
         archCaps=ri.getArchCaps(),
         regCaps=ri.getRegCaps(),
         version=tuple(gfxToIsa(gfx)),
+        kernel={"WavefrontSize": wave_size},
     )
     return kw
 
@@ -313,6 +319,23 @@ OCCUPANCY_CASES = [
         id="gfx942-low-vgpr-256t",
     ),
 ]
+
+
+# ── Fixture guard ───────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("gfx", sorted({p.values[0] for p in OCCUPANCY_CASES}))
+def test_writer_stub_supports_getoccupancy(gfx):
+    """The stub must carry every states field getOccupancy reads.
+
+    This needs no GPU, unlike the test it guards: a field missing from the stub
+    raises AttributeError on the runners that do have one of these GPUs, before
+    any occupancy value is ever compared.
+    """
+    ri = _init_rocisa(gfx)
+    kw = _make_writer(ri, gfx)
+    double_vgpr = bool(ri.getArchCaps().get("ArchAccUnifiedRegs", 0))
+    occ = kw.getOccupancy(256, 8, 16, _MIN_LDS, 0, double_vgpr)
+    assert isinstance(occ, int) and occ > 0
 
 
 # ── Main test ───────────────────────────────────────────────────────────────────
