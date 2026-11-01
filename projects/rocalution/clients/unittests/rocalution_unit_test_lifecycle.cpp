@@ -299,6 +299,17 @@ TEST_F(lifecycle, thread_affinity_uses_every_second_core_or_every_core)
 
     const int half = ncpu / 2;
     cpu_set_t mask;
+
+#ifndef _OPENMP
+    // Without OpenMP the library keeps one thread and leaves the affinity alone
+    for(int nthreads : {half, ncpu})
+    {
+        rocalution::set_omp_threads_rocalution(nthreads);
+        EXPECT_EQ(_get_backend_descriptor()->OpenMP_threads, 1);
+        ASSERT_EQ(sched_getaffinity(0, sizeof(mask), &mask), 0);
+        EXPECT_TRUE(CPU_EQUAL(&mask, &original)) << nthreads << " threads";
+    }
+#else
     rocalution::set_omp_threads_rocalution(half);
     ASSERT_EQ(sched_getaffinity(0, sizeof(mask), &mask), 0);
     for(int i = 0; i < ncpu; ++i)
@@ -323,6 +334,7 @@ TEST_F(lifecycle, thread_affinity_uses_every_second_core_or_every_core)
             EXPECT_TRUE(CPU_ISSET(i, &mask)) << "core " << i;
         }
     }
+#endif
 }
 #endif
 
