@@ -415,19 +415,21 @@ static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
     case 55:
     case 56:
     case 57:
+    case 67:
     {
-        /* gfx1250 WMMA async K loop. Must match the Python emitter's 55-57. */
+        /* gfx1250 WMMA async K loop. Must match the Python emitter's 55-57
+         * and 67 (55 with bf16 operands). */
         const bool big = idx == 56;
         if(idx == 57)
             spec->problem = rocke_conv_problem_default(4, 12, 12, 3, 32, 3, 3);
-        else if(idx == 55)
+        else if(idx == 55 || idx == 67)
             spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
         else
             spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
         spec->problem.pH = 1;
         spec->problem.pW = 1;
-        spec->dtype_a = "fp16";
-        spec->dtype_b = "fp16";
+        spec->dtype_a = idx == 67 ? "bf16" : "fp16";
+        spec->dtype_b = idx == 67 ? "bf16" : "fp16";
         spec->dtype_d = "fp32";
         spec->tile_m = big ? 64 : 32;
         spec->tile_n = big ? 64 : 32;

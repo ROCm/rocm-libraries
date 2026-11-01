@@ -70,8 +70,10 @@ barrier. `async_dma` now covers it on gfx1250, mirrored in the C++ engine.
   - Each phase waits `s_wait_asynccnt 0` and takes one LDS barrier, then issues
     the next tile while the current tile's WMMAs run.
   - The copy has no buffer-resource range check. The loader therefore ANDs that
-    check (byte offset below the tensor size) into the descriptor's `valid`,
-    and zero-fills failing chunks with an LDS store.
+    check (byte offset below the tensor size, compared unsigned as the
+    resource does, so an offset at or past 2 GiB is out of range) into the
+    descriptor's `valid`, and zero-fills failing chunks with an LDS store of
+    the tile's element type (fp16 or bf16).
   - It needs a 4-, 8- or 16-byte chunk on both operands, so an odd channel run
     is rejected.
 

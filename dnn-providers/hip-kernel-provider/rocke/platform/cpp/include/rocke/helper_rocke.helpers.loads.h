@@ -262,8 +262,9 @@ void rocke_coalesced_tile_loader_issue_slots(rocke_ir_builder_t* b,
  * mode, but each in-range chunk is one per-lane global_load_async_to_lds of
  * load_vec 16-bit elements from `ptr` to smem_dst[row, col]. The copy has no
  * buffer-resource range check, so the one the resource would make (byte offset
- * below `num_bytes`) is ANDed into the descriptor's valid; a chunk failing
- * either is zero-filled with an ordinary LDS store instead. The caller drains
+ * below `num_bytes`, compared unsigned) is ANDed into the descriptor's valid; a
+ * chunk failing either is zero-filled with an ordinary LDS store of the
+ * destination tile's element type (f16 or bf16) instead. The caller drains
  * the copies with s_wait_asynccnt (and the zero stores with an LDS barrier). */
 void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
                                                    const rocke_coalesced_tile_loader_t* self,

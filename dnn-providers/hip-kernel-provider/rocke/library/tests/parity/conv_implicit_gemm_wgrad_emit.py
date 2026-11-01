@@ -76,8 +76,11 @@
 #         dW over the async K loop with one scratch slab (ws_replicas=1) at C=24
 #   66 -- both engines must reject: two-stage on gfx1151 (no validated float
 #         global atomics for the scratch adds)
+#   67 -- gfx1250 async_dma with bf16 operands: case 55 with bf16 A/B, so the
+#         out-of-range chunks zero-fill a bf16 LDS tile with bf16 zeros
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
-#    loader has no elem_dtype, so no case loads bf16 operands. The stream-K
+#    loader has no elem_dtype, so no other case loads bf16 operands: the
+#    async loop's copy carries no element type, only its zero-fill does. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
 #    rejected with stream-K, and so is prefetch_addr.)
 #
@@ -91,7 +94,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-66, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-67, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -715,7 +718,7 @@ def _spec(idx: int):
             arch,
         )
 
-    if 55 <= idx <= 57:
+    if 55 <= idx <= 57 or idx == 67:
         # gfx1250 WMMA K loop: the global_load_async_to_lds ping-pong.
         from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -726,11 +729,13 @@ def _spec(idx: int):
             55: (p_small, "fp32", 2, False, {"async_dma": True}, "gfx1250"),
             56: (p, "fp32", 4, True, {"async_dma": True}, "gfx1250"),
             57: (p_c3, "fp32", 2, False, {"async_dma": True}, "gfx1250"),
+            67: (p_small, "fp32", 2, False, {"async_dma": True}, "gfx1250"),
         }[idx]
         wave32 = arch == "gfx1250"
+        dtype_ab = "bf16" if idx == 67 else "fp16"
         kw = dict(
             problem=problem,
-            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+            data=ConvDataSpec(dtype_a=dtype_ab, dtype_b=dtype_ab, dtype_d=dtype_d),
             tile_m=64 if big else 32,
             tile_n=64 if big else 32,
             tile_k=64 if big else 32,

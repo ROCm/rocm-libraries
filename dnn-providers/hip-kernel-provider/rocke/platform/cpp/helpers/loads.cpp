@@ -10,6 +10,8 @@
  */
 #include "rocke/helper_rocke.helpers.loads.h"
 
+#include <string.h>
+
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ============================================================================
@@ -670,8 +672,22 @@ void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
         return;
     }
 
-    /* Python: zero = b.zero_vec(self.elem_dtype, self.load_vec) */
-    rocke_value_t* zero = rocke_b_zero_vec(b, rocke_f16(), self->load_vec);
+    /* Python: zero = b.zero_vec(self.elem_dtype, self.load_vec). The C loader
+     * carries no elem_dtype, so the zero takes the destination LDS tile's
+     * element type (f16 or bf16: the 16-bit elements this port loads). */
+    const rocke_type_t* lds_elem
+        = (smem_dst->type != NULL && smem_dst->type->kind == ROCKE_TYPE_SMEM) ? smem_dst->type->elem
+                                                                              : NULL;
+    if(lds_elem == NULL
+       || (strcmp(lds_elem->name, "f16") != 0 && strcmp(lds_elem->name, "bf16") != 0))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "load_async_to_lds: the LDS tile must hold f16 or bf16 (got %s)",
+                        lds_elem != NULL ? lds_elem->name : "a non-LDS value");
+        return;
+    }
+    rocke_value_t* zero = rocke_b_zero_vec(b, lds_elem, self->load_vec);
     rocke_value_t* c_elem_bytes = rocke_b_const_i32(b, 2);
     rocke_ctl_staged_t slots;
     rocke_coalesced_tile_loader_plan_slots(b, self, tid, &slots);
@@ -683,9 +699,11 @@ void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
         /* Python: off_elems, valid = descriptor(b, row, col) */
         rocke_value_t* valid = NULL;
         rocke_value_t* off_elems = descriptor(b, idx[0], idx[1], &valid, descriptor_user);
-        /* Python: in_bounds = b.cmp_lt(b.mul(off_elems, c_elem_bytes), num_bytes) */
+        /* Python: in_bounds = b.cmp_ult(b.mul(off_elems, c_elem_bytes), num_bytes)
+         * -- unsigned, as the buffer resource's range check: a byte offset
+         * at or past 2 GiB (negative as i32) is out of range, not below. */
         rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c_elem_bytes);
-        rocke_value_t* in_bounds = rocke_b_cmp_lt(b, off_bytes, num_bytes);
+        rocke_value_t* in_bounds = rocke_b_cmp_ult(b, off_bytes, num_bytes);
         valid = (valid == NULL) ? in_bounds : rocke_b_land(b, valid, in_bounds);
         rocke_if_else_t ie = rocke_b_scf_if_else(b, valid);
         rocke_b_region_enter(b, ie.then_region);

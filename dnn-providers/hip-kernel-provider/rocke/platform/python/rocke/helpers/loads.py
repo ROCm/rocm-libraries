@@ -524,8 +524,9 @@ class CoalescedTileLoader:
         async global->LDS copy of ``load_vec`` elements to ``smem_dst[row, col]``
         instead of a register round trip. The copy reads through a plain global
         pointer with no buffer-resource range check, so the check the resource
-        would make -- byte offset below ``num_bytes`` -- is ANDed into the
-        descriptor's ``valid``. Descriptors lean on that check: a reduction
+        would make -- byte offset below ``num_bytes``, compared unsigned as the
+        resource does, so an offset at or past 2 GiB (negative as i32) is out
+        of range -- is ANDed into the descriptor's ``valid``. Descriptors lean on that check: a reduction
         tail past the tensor, or a free-axis overhang at its last element, is
         reported valid and only the resource turns it into zero. A chunk that
         fails either test is zero-filled with an ordinary LDS store. The caller
@@ -552,7 +553,7 @@ class CoalescedTileLoader:
         c_elem_bytes = b.const_i32(elem_bytes)
         for row, col in self.plan_slots(b, tid=tid):
             off_elems, valid = descriptor(b, row, col)
-            in_bounds = b.cmp_lt(b.mul(off_elems, c_elem_bytes), num_bytes)
+            in_bounds = b.cmp_ult(b.mul(off_elems, c_elem_bytes), num_bytes)
             valid = in_bounds if valid is None else b.land(valid, in_bounds)
             with b.scf_if_else(valid) as (in_range, out_of_range):
                 with in_range:
