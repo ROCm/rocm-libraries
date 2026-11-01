@@ -5,18 +5,18 @@
       "cases": {
         "attention_d256/gfx942/4warp_gqa": {
           "arch": "gfx942",
-          "bytes": 471570,
+          "bytes": 491716,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "39944b0c981aae3fc1430cce23b045bd537cd748e59fd66a28cba9452cd91bf4",
+          "sha256": "fef1e0afba5dda69bdc5bfae21e33cc0ba56699f49e42a17ef6d0df8a65c6229",
           "status": "ok"
         },
         "attention_d256/gfx942/4warp_gqa_d192": {
           "arch": "gfx942",
-          "bytes": 363560,
+          "bytes": 378152,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d192_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "105b06b922bdb3c7c0f4a1af89b1771e29345e7cc1bdd515da7235bf419f3c6b",
+          "sha256": "f53d61de44813cb908cab0fd3f9d9187468083a26d229c47970452243ec88b0d",
           "status": "ok"
         },
         "attention_d256/gfx950/pad_interleave": {
@@ -34,18 +34,18 @@
       "cases": {
         "attention_d256/gfx942/4warp_gqa": {
           "arch": "gfx942",
-          "bytes": 471577,
+          "bytes": 491723,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "81cb5af7ed6b63be55783adbc8c37e270d9e232be4cee0f1a09b1644d5e10e34",
+          "sha256": "427811b0f69aa726f37e2f01464204adbc29b93e7bab3531960ab32b382dcb26",
           "status": "ok"
         },
         "attention_d256/gfx942/4warp_gqa_d192": {
           "arch": "gfx942",
-          "bytes": 363567,
+          "bytes": 378159,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d192_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "ff9bfdd9db9c2bb5d331720495434f0a4f9d17d18cd7e20814b8d4b88dff7645",
+          "sha256": "d816816a1cd48c47c2218923d6d446da1fd99bf966b6b49ab22bd1aabf9ce842",
           "status": "ok"
         },
         "attention_d256/gfx950/pad_interleave": {
@@ -63,18 +63,18 @@
       "cases": {
         "attention_d256/gfx942/4warp_gqa": {
           "arch": "gfx942",
-          "bytes": 471641,
+          "bytes": 491787,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "365c38d6e523b041970c06a2aa1fe6aaa4879dbd4b9126afecd6d9ab6df13f98",
+          "sha256": "93f004e06ea6186edec828150478b3323f2824b5e7c021c7a2f742158e848027",
           "status": "ok"
         },
         "attention_d256/gfx942/4warp_gqa_d192": {
           "arch": "gfx942",
-          "bytes": 363631,
+          "bytes": 378223,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d192_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "01b216f302206495d970142af4a2ae7296765dd60faf44a565b1b9b899954d8a",
+          "sha256": "311284a80a3a2260eac4d9ae8adf5d191e30d4900d4926c197f6d1e17f215ba3",
           "status": "ok"
         },
         "attention_d256/gfx950/pad_interleave": {
@@ -92,18 +92,18 @@
       "cases": {
         "attention_d256/gfx942/4warp_gqa": {
           "arch": "gfx942",
-          "bytes": 471641,
+          "bytes": 491787,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "365c38d6e523b041970c06a2aa1fe6aaa4879dbd4b9126afecd6d9ab6df13f98",
+          "sha256": "93f004e06ea6186edec828150478b3323f2824b5e7c021c7a2f742158e848027",
           "status": "ok"
         },
         "attention_d256/gfx942/4warp_gqa_d192": {
           "arch": "gfx942",
-          "bytes": 363631,
+          "bytes": 378223,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d192_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "01b216f302206495d970142af4a2ae7296765dd60faf44a565b1b9b899954d8a",
+          "sha256": "311284a80a3a2260eac4d9ae8adf5d191e30d4900d4926c197f6d1e17f215ba3",
           "status": "ok"
         },
         "attention_d256/gfx950/pad_interleave": {
