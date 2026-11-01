@@ -87,14 +87,19 @@ long long fsw_ho(const rocke_direct_conv_problem_t* p)
 
 long long fsw_wo(const rocke_direct_conv_problem_t* p)
 {
-    return fsw_floordiv((long long)p->W + 2 * p->PAD - (long long)(p->KW - 1) * p->dil_w - 1,
+    return fsw_floordiv((long long)p->W + 2 * rocke_direct_conv_problem_pad_w(p)
+                            - (long long)(p->KW - 1) * p->dil_w - 1,
                         p->stride)
            + 1;
 }
 
-/* _common_shape_reason(p): the problem shapes small C and small K both
- * serve. On failure writes reason and returns false. */
-bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p, char* reason, size_t reason_cap)
+/* _common_shape_reason(p, square): the problem shapes small C and small K
+ * both serve (square=false: small K, rectangular filters too). On failure
+ * writes reason and returns false. */
+bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p,
+                             bool square,
+                             char* reason,
+                             size_t reason_cap)
 {
     char msg[512];
     if(p->groups != 1 || p->dil_h != 1 || p->dil_w != 1)
@@ -102,7 +107,7 @@ bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p, char* reason,
         fsw_set_reason(reason, reason_cap, "ungrouped, undilated convolutions only");
         return false;
     }
-    if(p->KH != p->KW)
+    if(square && p->KH != p->KW)
     {
         fsw_set_reason(reason, reason_cap, "square filters only");
         return false;
@@ -112,6 +117,15 @@ bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p, char* reason,
         snprintf(msg, sizeof msg, "PAD %d outside 0..K-1", p->PAD);
         fsw_set_reason(reason, reason_cap, msg);
         return false;
+    }
+    {
+        const int pad_w = rocke_direct_conv_problem_pad_w(p);
+        if(!(0 <= pad_w && pad_w <= p->KW - 1))
+        {
+            snprintf(msg, sizeof msg, "column PAD %d outside 0..KW-1", pad_w);
+            fsw_set_reason(reason, reason_cap, msg);
+            return false;
+        }
     }
     if(p->stride < 1) /* before fsw_ho / fsw_wo divide by it */
     {
@@ -140,20 +154,21 @@ bool fsw_common_shape_reason(const rocke_direct_conv_problem_t* p, char* reason,
     return true;
 }
 
-/* _common_reason(p, arch, name, wave_size): the WMMA forward gate, then the
- * shared problem shapes. On success stores the resolved target in
+/* _common_reason(p, arch, name, wave_size, square): the WMMA forward gate
+ * (any column padding unless square), then the shared problem shapes. On success stores the resolved target in
  * `*target_out` and returns true; otherwise writes reason and returns false. */
 bool fsw_common_reason(const rocke_direct_conv_problem_t* p,
                        const char* arch,
                        const char* name,
                        int wave_size,
+                       bool square,
                        const rocke_archtarget_t** target_out,
                        char* reason,
                        size_t reason_cap)
 {
-    if(!rocke_wmma_fwd_gate(p, arch, name, wave_size, target_out, reason, reason_cap))
+    if(!rocke_wmma_fwd_gate(p, arch, name, wave_size, !square, target_out, reason, reason_cap))
         return false;
-    return fsw_common_shape_reason(p, reason, reason_cap);
+    return fsw_common_shape_reason(p, square, reason, reason_cap);
 }
 
 /* ---- FwdSmallcWmmaSpec @property helpers the builder shares. */
@@ -218,7 +233,9 @@ int sk_z_pitch(const rocke_fwd_smallk_wmma_spec_t* s)
 }
 long sk_x_elems(const rocke_fwd_smallk_wmma_spec_t* s)
 {
-    return (long)(rocke_fwd_smallk_wmma_block_p(s) + s->problem.PAD + 1) * sk_x_pitch(s);
+    return (long)(rocke_fwd_smallk_wmma_block_p(s) + rocke_direct_conv_problem_pad_w(&s->problem)
+                  + 1)
+           * sk_x_pitch(s);
 }
 long sk_wei_elems(const rocke_fwd_smallk_wmma_spec_t* s)
 {
@@ -337,7 +354,8 @@ bool rocke_fwd_smallc_wmma_is_valid_spec(const rocke_fwd_smallc_wmma_spec_t* spe
     if(arch == NULL)
         arch = "gfx1250";
     p = &spec->problem;
-    if(!fsw_common_reason(p, arch, "fwd_smallc_wmma", spec->wave_size, &target, reason, reason_cap))
+    if(!fsw_common_reason(
+           p, arch, "fwd_smallc_wmma", spec->wave_size, true, &target, reason, reason_cap))
         return false;
     if(p->cpg > FSW_SMALLC_MAX_C)
     {
@@ -471,13 +489,18 @@ rocke_status_t rocke_fwd_smallk_wmma_kernel_name(const rocke_fwd_smallk_wmma_spe
                                                  char* out,
                                                  size_t out_cap)
 {
-    char f[32], st[32], pad[32], kk[32], wc[32], wp[32], tc[32], tp[32], oh[32], ow[32], ck[32],
-        sg[32];
+    char f[32], st[32], pad[32], padw[32], kk[32], wc[32], wp[32], tc[32], tp[32], oh[32], ow[32],
+        ck[32], sg[32];
     std::string sched;
     const rocke_direct_conv_problem_t* p = &spec->problem;
+    const int pad_w = rocke_direct_conv_problem_pad_w(p);
     snprintf(f, sizeof f, "f%dx%d", p->KH, p->KW);
     snprintf(st, sizeof st, "s%d", p->stride);
     snprintf(pad, sizeof pad, "p%d", p->PAD);
+    if(pad_w != p->PAD)
+        snprintf(padw, sizeof padw, "pw%d", pad_w);
+    else
+        padw[0] = '\0';
     snprintf(kk, sizeof kk, "k%d", p->kpg);
     snprintf(wc, sizeof wc, "wc%d", spec->waves_c);
     snprintf(wp, sizeof wp, "wp%d", spec->waves_p);
@@ -489,8 +512,21 @@ rocke_status_t rocke_fwd_smallk_wmma_kernel_name(const rocke_fwd_smallk_wmma_spe
     snprintf(sg, sizeof sg, "st%d", spec->stages);
     if(spec->sched != NULL && spec->sched[0] != '\0')
         sched = std::string("s") + spec->sched;
-    const char* parts[] = {
-        f, st, pad, kk, wc, wp, tc, tp, oh, ow, ck, sg, spec->prefetch ? "pf" : "", sched.c_str()};
+    const char* parts[] = {f,
+                           st,
+                           pad,
+                           padw,
+                           kk,
+                           wc,
+                           wp,
+                           tc,
+                           tp,
+                           oh,
+                           ow,
+                           ck,
+                           sg,
+                           spec->prefetch ? "pf" : "",
+                           sched.c_str()};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {fsw_is_bf16(p) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "fwd_smallk_wmma",
@@ -526,7 +562,8 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
     if(arch == NULL)
         arch = "gfx1250";
     p = &spec->problem;
-    if(!fsw_common_reason(p, arch, "fwd_smallk_wmma", spec->wave_size, &target, reason, reason_cap))
+    if(!fsw_common_reason(
+           p, arch, "fwd_smallk_wmma", spec->wave_size, false, &target, reason, reason_cap))
         return false;
     if(p->kpg > FSW_SMALLK_MAX_K)
     {
@@ -534,9 +571,9 @@ bool rocke_fwd_smallk_wmma_is_valid_spec(const rocke_fwd_smallk_wmma_spec_t* spe
         fsw_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(!(p->kpg == 1 || p->kpg == 2 || p->kpg == 4 || p->kpg == 8))
+    if(p->kpg < 1)
     {
-        snprintf(msg, sizeof msg, "K %d must be 1, 2, 4 or 8 (vector Z reads)", p->kpg);
+        snprintf(msg, sizeof msg, "K %d must be >= 1", p->kpg);
         fsw_set_reason(reason, reason_cap, msg);
         return false;
     }
@@ -1583,6 +1620,7 @@ rocke_kernel_def_t*
     }
     const rocke_direct_conv_problem_t* p = &spec->problem;
     int KH = p->KH, KW = p->KW, S = p->stride, PAD = p->PAD;
+    int PAD_W = rocke_direct_conv_problem_pad_w(p);
     c.b = b;
     c.spec = spec;
     c.K = p->kpg;
@@ -1676,7 +1714,7 @@ rocke_kernel_def_t*
     {
         rocke_value_t* x = ci(b, S);
         rocke_value_t* y = rocke_b_mul(b, ow0, x);
-        rocke_value_t* z = ci(b, PAD);
+        rocke_value_t* z = ci(b, PAD_W);
         j_lo = rocke_b_sub(b, y, z);
     }
     {
@@ -1738,7 +1776,7 @@ rocke_kernel_def_t*
     }
 
     {
-        int max_z = (PAD * c.DW + PAD) * c.XP;
+        int max_z = (PAD * c.DW + PAD_W) * c.XP;
         if(max_z)
         {
             rocke_value_t* zero_v = rocke_b_zero_vec(b, c.io_type, 8);
@@ -1883,27 +1921,54 @@ rocke_kernel_def_t*
                 rocke_value_t* zp = ci(b, ZP);
                 base = rocke_b_mul(b, s, zp);
             }
-            rocke_value_t* acc = NULL;
-            for(int r = 0; r < KH; ++r)
-                for(int s = 0; s < KW; ++s)
+            /* Z is read as one vector per tap (K = 3: a 96-bit read) where
+             * LDS has the width, else channel by channel; a power-of-two K
+             * is written as one vector per pixel, any other K per channel. */
+            const bool vec_k = (c.K & (c.K - 1)) == 0;
+            const bool one_part = vec_k || c.K == 3;
+            const int n_parts = one_part ? 1 : c.K;
+            rocke_value_t* out = NULL;
+            for(int part = 0; part < n_parts; ++part)
+            {
+                const int k0 = one_part ? 0 : part;
+                const int nk = one_part ? c.K : 1;
+                rocke_value_t* acc = NULL;
+                for(int r = 0; r < KH; ++r)
+                    for(int s = 0; s < KW; ++s)
+                    {
+                        int64_t off
+                            = (int64_t)(r * c.DW + s) * ZP + (int64_t)(r * KW + s) * c.K + k0;
+                        rocke_value_t* x = ci(b, off);
+                        rocke_value_t* y = rocke_b_add(b, base, x);
+                        rocke_value_t* z = rocke_b_mul(b, y, c.c2);
+                        rocke_value_t* idx[2] = {c.c0, z};
+                        rocke_value_t* zv = rocke_b_smem_load_vN(b, c.lds, idx, 2, rocke_f32(), nk);
+                        acc = (acc == NULL) ? zv : rocke_b_vector_add(b, acc, zv);
+                    }
+                if(out == NULL)
+                    out = nhw_off(b,
+                                  n_img,
+                                  params->p_D_stride_n,
+                                  oh,
+                                  params->p_D_stride_ho,
+                                  ow,
+                                  params->p_D_stride_wo);
+                if(vec_k || nk == 1)
                 {
-                    int64_t off = (int64_t)(r * c.DW + s) * ZP + (int64_t)(r * KW + s) * c.K;
-                    rocke_value_t* x = ci(b, off);
-                    rocke_value_t* y = rocke_b_add(b, base, x);
-                    rocke_value_t* z = rocke_b_mul(b, y, c.c2);
-                    rocke_value_t* idx[2] = {c.c0, z};
-                    rocke_value_t* zv = rocke_b_smem_load_vN(b, c.lds, idx, 2, rocke_f32(), c.K);
-                    acc = (acc == NULL) ? zv : rocke_b_vector_add(b, acc, zv);
+                    rocke_value_t* o = (k0 == 0) ? out : rocke_b_add(b, out, ci(b, k0));
+                    rocke_value_t* val = cvt_out(b, bf16, acc);
+                    rocke_b_global_store_vN(b, params->D, o, val, nk, 2 * nk);
                 }
-            rocke_value_t* out = nhw_off(b,
-                                         n_img,
-                                         params->p_D_stride_n,
-                                         oh,
-                                         params->p_D_stride_ho,
-                                         ow,
-                                         params->p_D_stride_wo);
-            rocke_value_t* val = cvt_out(b, bf16, acc);
-            rocke_b_global_store_vN(b, params->D, out, val, c.K, 2 * c.K);
+                else
+                {
+                    rocke_value_t* y = cvt_out(b, bf16, acc);
+                    for(int k = 0; k < nk; ++k)
+                    {
+                        rocke_value_t* o = (k0 + k == 0) ? out : rocke_b_add(b, out, ci(b, k0 + k));
+                        rocke_b_global_store(b, params->D, o, rocke_b_vec_extract(b, y, k), 2);
+                    }
+                }
+            }
         }
         rocke_b_region_leave(b);
     }

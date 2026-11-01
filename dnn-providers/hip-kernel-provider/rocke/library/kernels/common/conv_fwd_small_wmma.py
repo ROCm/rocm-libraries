@@ -34,7 +34,10 @@ every MMA tile empty:
     for every input pixel ``q`` of the output tile's window (a 1x1 GEMM with
     the taps and output channels as its M dimension), then the overlap-add
     ``Y[p, k] = sum_{r,s} Z[p*S - PAD + (r, s), (r, s, k)]`` in fp32 LDS.
-    Input channel chunks stream through a TDM ring.
+    Input channel chunks stream through a TDM ring. Filters may be
+    rectangular with their own column padding (the 1x7 HiFi-GAN ``conv_post``)
+    and K any count up to 8 (a K that is not a power of two reads and writes
+    its output channels one by one).
 
 AOT: batch, extents and the *other* channel count are kernargs; filter,
 stride, padding, the small channel count and the tile geometry are baked.
@@ -143,24 +146,27 @@ def _wmma_op(p: DirectConvProblem, arch: str):
 
 
 def _common_reason(
-    p: DirectConvProblem, arch: str, name: str, wave_size: int
+    p: DirectConvProblem, arch: str, name: str, wave_size: int, *, square: bool = True
 ) -> tuple[str | None, ArchTarget | None]:
     """The rules small C and small K share: the WMMA forward gate, then the
-    problem shapes both serve. Returns ``(why, target)`` like
-    :func:`wmma_fwd_gate`."""
-    why, target = wmma_fwd_gate(p, arch, name, wave_size)
+    problem shapes both serve. ``square=False`` (small K) also takes
+    rectangular filters with their own column padding. Returns
+    ``(why, target)`` like :func:`wmma_fwd_gate`."""
+    why, target = wmma_fwd_gate(p, arch, name, wave_size, per_axis_pad=not square)
     if why:
         return why, target
-    return _common_shape_reason(p), target
+    return _common_shape_reason(p, square), target
 
 
-def _common_shape_reason(p: DirectConvProblem) -> str | None:
+def _common_shape_reason(p: DirectConvProblem, square: bool = True) -> str | None:
     if p.groups != 1 or p.is_dilated:
         return "ungrouped, undilated convolutions only"
-    if p.KH != p.KW:
+    if square and p.KH != p.KW:
         return "square filters only"
     if not 0 <= p.PAD <= p.KH - 1:
         return f"PAD {p.PAD} outside 0..K-1"
+    if not 0 <= p.PAD_W <= p.KW - 1:
+        return f"column PAD {p.PAD_W} outside 0..KW-1"
     if p.stride < 1:  # before Ho / Wo divide by it
         return f"stride {p.stride} < 1"
     tensor_bytes = (
@@ -723,7 +729,7 @@ class FwdSmallkWmmaSpec:
     @property
     def x_elems(self) -> int:
         # The GEMM pixels plus the last window row's wrap past the window.
-        return (self.block_p + self.problem.PAD + 1) * self.x_pitch
+        return (self.block_p + self.problem.PAD_W + 1) * self.x_pitch
 
     @property
     def wei_elems(self) -> int:
@@ -743,6 +749,7 @@ class FwdSmallkWmmaSpec:
             f"f{p.KH}x{p.KW}",
             f"s{p.stride}",
             f"p{p.PAD}",
+            f"pw{p.PAD_W}" if p.PAD_W != p.PAD else "",
             f"k{p.kpg}",
             f"wc{self.waves_c}",
             f"wp{self.waves_p}",
@@ -777,13 +784,15 @@ def fwd_smallk_tile_efficiency(spec: FwdSmallkWmmaSpec) -> float:
 
 def fwd_smallk_reason(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> str | None:
     p = spec.problem
-    why, target = _common_reason(p, arch, "fwd_smallk_wmma", spec.wave_size)
+    why, target = _common_reason(
+        p, arch, "fwd_smallk_wmma", spec.wave_size, square=False
+    )
     if why:
         return why
     if p.kpg > SMALLK_MAX_K:
         return f"K {p.kpg} > {SMALLK_MAX_K}"
-    if p.kpg not in (1, 2, 4, 8):
-        return f"K {p.kpg} must be 1, 2, 4 or 8 (vector Z reads)"
+    if p.kpg < 1:
+        return f"K {p.kpg} must be >= 1"
     if p.cpg % 8:
         return f"C {p.cpg} must be a multiple of 8 (16-byte input rows)"
     if spec.ck % WMMA_K or spec.ck <= 0:
@@ -828,6 +837,7 @@ def build_fwd_smallk_wmma(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> Ker
 
     p = spec.problem
     KH, KW, S, PAD, K = p.KH, p.KW, p.stride, p.PAD, p.kpg
+    PAD_W = p.PAD_W
     RS = KH * KW
     io_type = _io_type(p.dtype)
     wmma_op = _wmma_op(p, arch)
@@ -883,7 +893,7 @@ def build_fwd_smallk_wmma(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> Ker
     # The input window starts at (oh0*S - PAD, ow0*S - PAD); a negative start
     # is clipped and the transfer lands shifted (the cells before it zeroed).
     i_lo = b.sub(b.mul(oh0, b.const_i32(S)), b.const_i32(PAD))
-    j_lo = b.sub(b.mul(ow0, b.const_i32(S)), b.const_i32(PAD))
+    j_lo = b.sub(b.mul(ow0, b.const_i32(S)), b.const_i32(PAD_W))
     hs = b.smax(b.sub(c0, i_lo), c0)
     sw = b.smax(b.sub(c0, j_lo), c0)
     i_start = b.add(i_lo, hs)
@@ -906,7 +916,7 @@ def build_fwd_smallk_wmma(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> Ker
     WEI0 = NS * XE
     wei_addr = b.add(lds_addr, b.const_i32(WEI0 * 2))
 
-    max_z = (PAD * DW + PAD) * XP
+    max_z = (PAD * DW + PAD_W) * XP
     if max_z:
         zero_v = b.zero_vec(io_type, 8)
         z_vecs = b.div(z_elems, c8)
@@ -1072,24 +1082,39 @@ def build_fwd_smallk_wmma(spec: FwdSmallkWmmaSpec, arch: str = "gfx1250") -> Ker
                 ),
                 b.const_i32(ZP),
             )
-            acc = None
-            for r in range(KH):
-                for s in range(KW):
-                    off = (r * DW + s) * ZP + (r * KW + s) * K
-                    z = b.smem_load_vN(
-                        lds,
-                        c0,
-                        b.mul(b.add(base, b.const_i32(off)), c2),
-                        dtype=F32,
-                        n=K,
+            # Z is read as one vector per tap (K = 3: a 96-bit read) where
+            # LDS has the width, else channel by channel; a power-of-two K
+            # is written as one vector per pixel, any other K per channel.
+            vec_k = K & (K - 1) == 0
+            parts = [(0, K)] if vec_k or K == 3 else [(k, 1) for k in range(K)]
+            out = None
+            for k0, nk in parts:
+                acc = None
+                for r in range(KH):
+                    for s in range(KW):
+                        off = (r * DW + s) * ZP + (r * KW + s) * K + k0
+                        z = b.smem_load_vN(
+                            lds,
+                            c0,
+                            b.mul(b.add(base, b.const_i32(off)), c2),
+                            dtype=F32,
+                            n=nk,
+                        )
+                        acc = z if acc is None else b.vector_add(acc, z)
+                if out is None:
+                    out = b.add(
+                        b.add(
+                            b.mul(n_img, params["p_D_stride_n"]),
+                            b.mul(oh, params["p_D_stride_ho"]),
+                        ),
+                        b.mul(ow, params["p_D_stride_wo"]),
                     )
-                    acc = z if acc is None else b.vector_add(acc, z)
-            out = b.add(
-                b.add(
-                    b.mul(n_img, params["p_D_stride_n"]),
-                    b.mul(oh, params["p_D_stride_ho"]),
-                ),
-                b.mul(ow, params["p_D_stride_wo"]),
-            )
-            b.global_store_vN(D, out, cvt(acc), K, align=2 * K)
+                if vec_k or nk == 1:
+                    o = out if k0 == 0 else b.add(out, b.const_i32(k0))
+                    b.global_store_vN(D, o, cvt(acc), nk, align=2 * nk)
+                else:
+                    y = cvt(acc)
+                    for k in range(nk):
+                        o = out if k0 + k == 0 else b.add(out, b.const_i32(k0 + k))
+                        b.global_store(D, o, b.vec_extract(y, k), align=2)
     return b.kernel

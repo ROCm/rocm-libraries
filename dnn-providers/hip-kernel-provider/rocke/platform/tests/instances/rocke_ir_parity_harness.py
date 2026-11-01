@@ -5204,6 +5204,18 @@ def cases():
                 prefetch=True,
             ),
         ),
+        (
+            "smallk",
+            "bf16_k3_pf",
+            dict(cpg=64, kpg=3, dtype="bf16"),
+            dict(tiles_c=2, tiles_p=3, out_h=6, out_w=16, ck=32, prefetch=True),
+        ),
+        (
+            "smallk",
+            "fp16_1x7_pw3_k1",
+            dict(cpg=32, kpg=1, KH=1, KW=7, PAD=0, pad_w=3, dtype="fp16"),
+            dict(waves_p=2, tiles_c=1, tiles_p=4, out_h=1, out_w=122, ck=32),
+        ),
     ):
         add(
             f"conv_direct_fwd_{_kind}_wmma",

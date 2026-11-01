@@ -361,7 +361,7 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
         arch = "gfx1250";
     p = &spec->problem;
     if(!rocke_wmma_fwd_gate(
-           p, arch, "direct_fwd_wmma", spec->wave_size, &target, reason, reason_cap))
+           p, arch, "direct_fwd_wmma", spec->wave_size, false, &target, reason, reason_cap))
         return false;
     if(p->stride != 1 && p->stride != 2)
         FWW_FAIL("stride %d not in (1, 2)", p->stride);

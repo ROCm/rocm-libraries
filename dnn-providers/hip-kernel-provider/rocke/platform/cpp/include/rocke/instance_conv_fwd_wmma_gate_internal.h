@@ -10,7 +10,8 @@
  *   ----------------------------------   ----------------------------------
  *   WMMA_M / WMMA_N / WMMA_K             ROCKE_FWD_WMMA_M / _N / _K
  *   wmma_ab_dtype(dtype)                 rocke_wmma_ab_dtype
- *   wmma_fwd_gate(p, arch, name, wave)   rocke_wmma_fwd_gate
+ *   wmma_fwd_gate(p, arch, name, wave,   rocke_wmma_fwd_gate
+ *                 per_axis_pad=...)
  *
  * The checks run in the Python order and write the same rejection messages.
  */
@@ -31,13 +32,15 @@
 const char* rocke_wmma_ab_dtype(const char* dtype);
 
 /* wmma_fwd_gate: whether kernel `name` can run `p` on `arch` at the spec's
- * `wave_size`, with one padding for both axes. On success stores the resolved target in `*target_out` and
+ * `wave_size`, with one padding for both axes (any column padding when
+ * `per_axis_pad`: the kernel offsets columns by PAD_W). On success stores the resolved target in `*target_out` and
  * returns true, so callers need not resolve it again; otherwise writes the
  * reason and returns false. */
 bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
                          const char* arch,
                          const char* name,
                          int wave_size,
+                         bool per_axis_pad,
                          const rocke_archtarget_t** target_out,
                          char* reason,
                          size_t reason_cap);

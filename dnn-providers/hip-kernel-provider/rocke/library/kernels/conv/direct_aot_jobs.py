@@ -739,7 +739,14 @@ FWD_SMALLC_STEMS = (
     (14, 0, 14, 3),
     (16, 0, 16, 3),
 )
-FWD_SMALLK_LAYERS = ((3, 1, 1, 4),)
+# Small-K rows: (KH, KW, PAD, PAD_W, stride, K). 3x3 K=4: the SD VAE
+# quant_conv; 3x3 K=3: RGB output layers (SD VAE conv_out, Real-ESRGAN);
+# 1x7 K=1 with "same" column padding: the HiFi-GAN conv_post on a 1-D signal.
+FWD_SMALLK_LAYERS = (
+    (3, 3, 1, 1, 1, 4),
+    (3, 3, 1, 1, 1, 3),
+    (1, 7, 0, 3, 1, 1),
+)
 # fwd_smallc_wmma: (waves_k, waves_p, tiles_k, tiles_p, out_h, out_w,
 # tiles_per_block, tdm_store); the best few per stem of a tuning sweep.
 FWD_SMALLC_KNOBS = (
@@ -778,6 +785,42 @@ FWD_SMALLK_KNOBS = (
     (3, 4, 1, 4, 12, 12, 64, 3, False),
     (3, 4, 1, 4, 12, 12, 64, 3, True),
 )
+# Per-layer knob rows where the K=4 rows above do not fit: the GEMM column
+# block is R*S*K rounded up to 16 (32 for 3x3 K=3, 16 for 1x7 K=1).
+FWD_SMALLK_KNOBS_BY_LAYER = {
+    (3, 3, 3): (
+        (1, 3, 2, 3, 6, 16, 32, 2, True),
+        (1, 3, 2, 3, 6, 16, 32, 3, True),
+        (1, 3, 2, 3, 6, 16, 64, 2, False),
+        (1, 3, 2, 3, 6, 16, 64, 2, True),
+        (1, 2, 2, 4, 6, 14, 32, 2, True),
+        (1, 2, 2, 4, 6, 14, 64, 2, True),
+        (1, 4, 2, 3, 4, 30, 64, 2, True),
+        (1, 4, 2, 3, 10, 14, 64, 2, True),
+        (1, 4, 2, 3, 6, 16, 32, 2, True),
+        (1, 4, 2, 3, 6, 16, 64, 2, True),
+        (1, 4, 2, 4, 6, 30, 32, 3, True),
+        (1, 4, 2, 4, 6, 30, 64, 2, True),
+        (1, 4, 2, 4, 14, 14, 64, 2, True),
+        (2, 4, 1, 4, 14, 14, 64, 2, True),
+        (1, 2, 2, 4, 2, 30, 64, 2, True),
+        (1, 4, 2, 2, 2, 30, 64, 2, True),
+        (1, 8, 2, 4, 14, 30, 64, 2, True),
+        (1, 4, 2, 8, 14, 30, 64, 2, False),
+    ),
+    (1, 7, 1): (
+        (1, 2, 1, 2, 1, 58, 32, 2, True),
+        (1, 2, 1, 4, 1, 122, 32, 2, False),
+        (1, 2, 1, 8, 1, 250, 32, 2, True),
+        (1, 2, 1, 4, 1, 122, 32, 2, True),
+        (1, 4, 1, 2, 1, 122, 32, 2, True),
+        (1, 4, 1, 4, 1, 250, 32, 2, False),
+        (1, 4, 1, 4, 1, 250, 32, 2, True),
+        (1, 8, 1, 2, 1, 250, 32, 2, True),
+        (1, 4, 1, 8, 1, 506, 32, 2, True),
+        (1, 8, 1, 4, 1, 506, 32, 2, True),
+    ),
+}
 
 
 def wgrad_waves() -> Tuple[Tuple[int, int, int], ...]:
@@ -812,7 +855,8 @@ class DirectCaps:
     dil_h: int = 1
     dil_w: int = 1
     # Filter width and column padding where they differ from KH / PAD (0 and
-    # -1: the same); only the rotated-filter depthwise dgrad rows use them.
+    # -1: the same); only the rotated-filter depthwise dgrad and the small-K
+    # forward rows use them.
     kw: int = 0
     pad_w: int = -1
 
@@ -1240,8 +1284,16 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
     _FWD_SMALLK: (
         "fwd",
         tuple(
-            DirectCaps(KH=k, PAD=pad, stride=st, cpg=0, kpg=kk)
-            for k, pad, st, kk in FWD_SMALLK_LAYERS
+            DirectCaps(
+                KH=kh,
+                kw=0 if kw == kh else kw,
+                PAD=pad,
+                pad_w=-1 if pw == pad else pw,
+                stride=st,
+                cpg=0,
+                kpg=kk,
+            )
+            for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
         ),
     ),
 }
@@ -1697,7 +1749,12 @@ def _knob_grid(
                     knobs["tdm_store"] = True
                 yield knobs
         else:
-            for wc, wp, tc, tp, oh, ow, ck, st, pf in FWD_SMALLK_KNOBS:
+            rows = FWD_SMALLK_KNOBS
+            if caps is not None:
+                rows = FWD_SMALLK_KNOBS_BY_LAYER.get(
+                    (caps.KH, caps.KW, caps.kpg), FWD_SMALLK_KNOBS
+                )
+            for wc, wp, tc, tp, oh, ow, ck, st, pf in rows:
                 knobs = dict(
                     waves_c=wc,
                     waves_p=wp,
@@ -2079,6 +2136,7 @@ def probe_problem(
             KH=caps.KH,
             KW=caps.KW,
             PAD=caps.PAD,
+            pad_w=caps.pad_w,
             stride=caps.stride,
             dtype=dtype,
         )

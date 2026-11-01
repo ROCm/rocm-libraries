@@ -265,9 +265,13 @@ def parse_miopen_cmd_direct(cmd: str):
             f"direct conv takes one stride for both axes "
             f"(got -u {miopen_args.sH} -v {miopen_args.sW})"
         )
-    # A stride-1 depthwise dgrad is the one problem a direct kernel (the
-    # rotated-filter tiled kernel) computes with per-axis padding.
-    pad_w_ok = miopen_args.forw == 2 and cpg == 1 and kpg == 1 and miopen_args.sH == 1
+    # A stride-1 depthwise dgrad (the rotated-filter tiled kernel) and an
+    # ungrouped stride-1 forward (the small-K WMMA kernel) are the problems a
+    # direct kernel computes with per-axis padding; every other variant
+    # refuses it.
+    pad_w_ok = (miopen_args.forw == 2 and cpg == 1 and kpg == 1 and sH == 1) or (
+        miopen_args.forw == 1 and groups == 1 and sH == 1 and not dilated
+    )
     if miopen_args.pH != miopen_args.pW and not pad_w_ok:
         raise ValueError(
             f"direct conv takes one padding for both axes "

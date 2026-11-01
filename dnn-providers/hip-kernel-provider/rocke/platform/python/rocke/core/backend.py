@@ -1102,6 +1102,7 @@ def _fwd_small_problem_dict(p: Any) -> Dict[str, Any]:
         KH=p.KH,
         KW=p.KW,
         PAD=p.PAD,
+        pad_w=p.pad_w,
         stride=p.stride,
         dil_h=p.dil_h,
         dil_w=p.dil_w,

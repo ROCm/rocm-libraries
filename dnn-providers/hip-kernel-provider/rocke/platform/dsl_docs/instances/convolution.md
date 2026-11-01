@@ -1302,18 +1302,24 @@ layers where implicit GEMM leaves most of every WMMA tile empty:
   weights stay in registers for the `tiles_per_block` tiles a block walks
   (double-buffered window). `tdm_store` stores the output tile through LDS
   with one TDM transfer. `K` must be a multiple of 8.
-- `build_fwd_smallk_wmma` -- `K` in (1, 2, 4, 8) output channels. A 1x1 GEMM
+- `build_fwd_smallk_wmma` -- `K` <= 8 output channels. A 1x1 GEMM
   over the window's input pixels with the taps and output channels as its M
   dimension (`Z[q, (r, s, k)]`), then the overlap-add into `Y` in fp32 LDS;
   input channel chunks of `ck` stream through a TDM ring of `stages` slots.
-  `C` must be a multiple of 8.
+  `C` must be a multiple of 8. A power-of-two `K` reads `Z` and writes `Y`
+  as one vector per pixel; `K` = 3 reads one 96-bit vector per tap and
+  writes channel by channel; any other `K` reads and writes channel by
+  channel. Filters may be rectangular, with a column padding of their own
+  (`pad_w`, in 0..KW-1; the 1x7 HiFi-GAN `conv_post`).
 
-Both: square filters, `PAD` in 0..K-1, every tensor below 2 GiB. Batch,
+Both: `PAD` in 0..KH-1, every tensor below 2 GiB; small C takes square
+filters with one padding only. Batch,
 extents and the other channel count are kernargs; the filter, stride,
 padding, the small channel count and the tile geometry are baked. The AOT
 grid is `FWD_SMALLC_KNOBS` over `FWD_SMALLC_STEMS` (3x3, 7x7 / stride 2 and
-the 4x4, 14x14 and 16x16 patch-embedding stems) and `FWD_SMALLK_KNOBS` over
-`FWD_SMALLK_LAYERS` (variants `direct_fwd_smallc_wmma` /
+the 4x4, 14x14 and 16x16 patch-embedding stems) and `FWD_SMALLK_KNOBS` (or
+the per-layer rows of `FWD_SMALLK_KNOBS_BY_LAYER`) over `FWD_SMALLK_LAYERS`:
+3x3 K=4, 3x3 K=3 and 1x7 K=1 with column padding 3 (variants `direct_fwd_smallc_wmma` /
 `direct_fwd_smallk_wmma`).
 
 ## Winograd Forward (gfx1250)
