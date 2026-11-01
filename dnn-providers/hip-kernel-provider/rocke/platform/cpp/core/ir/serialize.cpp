@@ -26,12 +26,12 @@
 
 #include "rocke/ir_serialize.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "rocke/arena.h"
 #include "rocke/error_boundary.hpp" /* ckc::guard_status boundary shim */
+#include "rocke/float_format.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 #include "rocke/strbuf.h"
@@ -126,145 +126,6 @@ static char* ser_unescape(rocke_arena_t* arena, const char* s, size_t n)
 }
 
 /* ====================================================================== *
- *      Shortest-round-trip float formatter (== Python repr(float))        *
- * ====================================================================== *
- *
- * Byte-identical to CPython repr(float): the shortest decimal that round-trips
- * to the same IEEE-754 double, formatted with CPython's fixed/exponential
- * switch rules. This is the exact algorithm in src/core/ir/print.c (emit_float),
- * verified there against ~200k CPython repr() samples; duplicated here so the
- * serializer has no cross-file dependency on the printer. */
-static void emit_float_repr(rocke_strbuf_t* out, double f)
-{
-    if(f != f)
-    {
-        rocke_strbuf_append(out, "nan");
-        return;
-    }
-
-    char sci[64];
-    int p;
-    for(p = 0; p <= 17; ++p)
-    {
-        snprintf(sci, sizeof(sci), "%.*e", p, f);
-        if(strtod(sci, NULL) == f)
-        {
-            break;
-        }
-    }
-    if(p > 17)
-    {
-        p = 17;
-        snprintf(sci, sizeof(sci), "%.*e", p, f);
-    }
-
-    const char* s = sci;
-    int negative = 0;
-    if(*s == '-')
-    {
-        negative = 1;
-        ++s;
-    }
-    if(s[0] == 'i' || s[0] == 'I')
-    {
-        if(negative)
-        {
-            rocke_strbuf_append_char(out, '-');
-        }
-        rocke_strbuf_append(out, "inf");
-        return;
-    }
-
-    char digits[40];
-    int nd = 0;
-    digits[nd++] = *s++;
-    if(*s == '.')
-    {
-        ++s;
-        while(*s && *s != 'e' && *s != 'E')
-        {
-            digits[nd++] = *s++;
-        }
-    }
-    digits[nd] = '\0';
-
-    int exp = 0;
-    if(*s == 'e' || *s == 'E')
-    {
-        ++s;
-        exp = atoi(s);
-    }
-
-    while(nd > 1 && digits[nd - 1] == '0')
-    {
-        digits[--nd] = '\0';
-    }
-
-    int decpt = exp + 1;
-
-    if(negative)
-    {
-        rocke_strbuf_append_char(out, '-');
-    }
-
-    if(decpt <= -4 || decpt > 16)
-    {
-        rocke_strbuf_append_char(out, digits[0]);
-        if(nd > 1)
-        {
-            rocke_strbuf_append_char(out, '.');
-            rocke_strbuf_append(out, digits + 1);
-        }
-        int e = decpt - 1;
-        rocke_strbuf_append_char(out, 'e');
-        rocke_strbuf_append_char(out, e < 0 ? '-' : '+');
-        int ae = e < 0 ? -e : e;
-        char eb[8];
-        int en = 0;
-        do
-        {
-            eb[en++] = (char)('0' + ae % 10);
-            ae /= 10;
-        } while(ae);
-        while(en < 2)
-        {
-            eb[en++] = '0';
-        }
-        while(en > 0)
-        {
-            rocke_strbuf_append_char(out, eb[--en]);
-        }
-    }
-    else if(decpt <= 0)
-    {
-        rocke_strbuf_append(out, "0.");
-        for(int i = 0; i < -decpt; ++i)
-        {
-            rocke_strbuf_append_char(out, '0');
-        }
-        rocke_strbuf_append(out, digits);
-    }
-    else if(decpt >= nd)
-    {
-        rocke_strbuf_append(out, digits);
-        for(int i = 0; i < decpt - nd; ++i)
-        {
-            rocke_strbuf_append_char(out, '0');
-        }
-        rocke_strbuf_append(out, ".0");
-    }
-    else
-    {
-        for(int i = 0; i < decpt; ++i)
-        {
-            rocke_strbuf_append_char(out, digits[i]);
-        }
-        rocke_strbuf_append_char(out, '.');
-        rocke_strbuf_append(out, digits + decpt);
-    }
-}
-
-/* ====================================================================== *
  *                       Attr encoding (spec 5)                            *
  * ====================================================================== */
 
@@ -302,7 +163,7 @@ static void emit_attr_value(rocke_strbuf_t* out, const rocke_attr_value_t* v)
         break;
     case ROCKE_ATTR_FLOAT:
         rocke_strbuf_append(out, "f:");
-        emit_float_repr(out, v->u.f);
+        rocke_append_python_float_repr(out, v->u.f);
         break;
     case ROCKE_ATTR_STR:
         rocke_strbuf_append(out, "s:\"");
