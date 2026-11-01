@@ -26,7 +26,7 @@ distinct coordinates can share one. Layout does not know the datatype or the
 extent of the underlying storage.
 
 Examples:
-    >>> layout = Layout.contiguous(Shape([2, 3]))
+    >>> layout = Layout.contiguous_last_dimension_fastest(Shape([2, 3]))
     >>> layout.strides
     [3, 1]
     >>> layout.element_offset([1, 2])
@@ -47,9 +47,6 @@ the traversal reaches a zero extent.
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
              "offset"_a)
         .def_static(
-            "contiguous", [](const Shape& shape) { return Layout::contiguous(shape); }, "shape"_a,
-            "Contiguous C-order layout with zero offset; the last dimension is fastest.")
-        .def_static(
             "contiguous",
             [](const Shape& shape, const std::vector<size_t>& order) {
                 return Layout::contiguous(shape, order);
@@ -58,7 +55,7 @@ the traversal reaches a zero extent.
             "Contiguous layout with zero offset. Order lists each axis once, from slowest "
             "to fastest, as in Shape.linear_index.")
         .def_static("contiguous_last_dimension_fastest", &Layout::contiguousLastDimensionFastest,
-                    "shape"_a, "Same as contiguous(shape): C order, last dimension fastest.")
+                    "shape"_a, "Contiguous C order, last dimension fastest.")
         .def_static("contiguous_first_dimension_fastest", &Layout::contiguousFirstDimensionFastest,
                     "shape"_a, "Contiguous Fortran order, first dimension fastest.")
         .def_prop_ro("shape", &Layout::shape, nb::rv_policy::copy)

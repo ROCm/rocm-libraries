@@ -4,18 +4,28 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
 #include <cstddef>
 #include <initializer_list>
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <ranges>
+#include <roc/hostnumerics/index_range.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace roc::hostnumerics {
+// A Shape traversal callback, taking (flat index, coordinates) or only
+// (coordinates). The two-argument form is used when both are available.
+template <typename Function>
+concept CoordinateVisitor = std::is_invocable_v<Function&, size_t, std::span<const size_t>> ||
+                            std::is_invocable_v<Function&, std::span<const size_t>>;
+
 // The logical shape of a tensor, independent of datatypes and storage strides.
 // The element count must fit size_t.
 class Shape {
@@ -85,6 +95,13 @@ class Shape {
         return Shape(std::move(dimensions));
     }
 
+    // Ascending axes: for a matrix, row-major order.
+    std::vector<size_t> indexOrderLastDimensionFastest() const {
+        std::vector<size_t> order(rank());
+        std::iota(order.begin(), order.end(), size_t{0});
+        return order;
+    }
+
     // Convert coordinates to a logical linear index.
     //
     // Parameter `order` lists axis numbers from slowest to fastest. For shape (2, 3, 5),
@@ -110,10 +127,12 @@ class Shape {
         return computeLinearIndex(indices, order);
     }
 
-    size_t linearIndex(std::span<const size_t> indices) const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), 0);
-        return linearIndex(indices, order);
+    size_t linearIndex(std::span<const size_t> indices, std::initializer_list<size_t> order) const {
+        return linearIndex(indices, std::span<const size_t>(order.begin(), order.size()));
+    }
+
+    size_t linearIndexLastDimensionFastest(std::span<const size_t> indices) const {
+        return linearIndex(indices, indexOrderLastDimensionFastest());
     }
 
     // Invert linearIndex with the same traversal order. The result stays in the
@@ -126,17 +145,114 @@ class Shape {
         return result;
     }
 
-    std::vector<size_t> coordinates(size_t index) const {
-        std::vector<size_t> order(rank());
-        std::iota(order.begin(), order.end(), 0);
-        return coordinates(index, order);
+    std::vector<size_t> coordinates(size_t index, std::initializer_list<size_t> order) const {
+        return coordinates(index, std::span<const size_t>(order.begin(), order.size()));
+    }
+
+    std::vector<size_t> coordinatesLastDimensionFastest(size_t index) const {
+        return coordinates(index, indexOrderLastDimensionFastest());
     }
 
     bool operator==(const Shape& other) const noexcept {
         return m_dimensions == other.m_dimensions;
     }
 
+    // Visit each selected flat index with its coordinates, which use the original
+    // axis numbering. Order must list every axis once, from slowest to fastest,
+    // and defines how flat indices map to coordinates. Every overload validates
+    // its inputs before the first callback, including empty work. The callback
+    // takes (index, coordinates) or only (coordinates); the coordinate span is
+    // borrowed and reused, and remains valid only during the callback. No
+    // flat-index list is allocated.
+    //
+    // A range's stop must not exceed elementCount(). Clip it first with
+    // std::min to visit only the elements that exist.
+    template <CoordinateVisitor Function>
+    void forEachCoordinate(const IndexRange& range, std::span<const size_t> order,
+                           Function&& function) const {
+        validateOrder(order);
+        if (range.stop() > elementCount())
+            throw std::runtime_error("Index range stop " + std::to_string(range.stop()) +
+                                     " exceeds the element count " +
+                                     std::to_string(elementCount()) + ".");
+        const size_t count = range.count();
+        if (count == 0) return;
+        std::vector<size_t> coordinates(rank());
+        computeCoordinates(range.start(), order, coordinates);
+        for (size_t ordinal = 0; ordinal < count; ++ordinal) {
+            const size_t index = range.start() + ordinal * range.stride();
+            if (range.stride() != 1) computeCoordinates(index, order, coordinates);
+            visitCoordinate(function, index, coordinates);
+            if (ordinal + 1 == count) break;
+            if (range.stride() == 1) {
+                for (size_t position = rank(); position > 0; --position) {
+                    const size_t axis = order[position - 1];
+                    if (++coordinates[axis] < m_dimensions[axis]) break;
+                    coordinates[axis] = 0;
+                }
+            }
+        }
+    }
+
+    // Explicit flat indices are visited in the order given, including repeats.
+    // Every index must be less than elementCount(); all are checked before the
+    // first callback, so the range is read twice.
+    template <typename Indices, CoordinateVisitor Function>
+        requires std::ranges::forward_range<const Indices> &&
+                 std::same_as<std::ranges::range_value_t<const Indices>, size_t>
+    void forEachCoordinate(const Indices& indices, std::span<const size_t> order,
+                           Function&& function) const {
+        validateOrder(order);
+        for (size_t index : indices)
+            if (index >= elementCount())
+                throw std::runtime_error("Tensor logical index " + std::to_string(index) +
+                                         " is outside [0, " + std::to_string(elementCount()) +
+                                         ").");
+        std::vector<size_t> coordinates(rank());
+        for (size_t index : indices) {
+            computeCoordinates(index, order, coordinates);
+            visitCoordinate(function, index, coordinates);
+        }
+    }
+
+    // Visit every element.
+    template <CoordinateVisitor Function>
+    void forEachCoordinate(std::span<const size_t> order, Function&& function) const {
+        forEachCoordinate(IndexRange::all(elementCount()), order, function);
+    }
+
+    template <typename Indices, CoordinateVisitor Function>
+    void forEachCoordinate(const Indices& indices, std::initializer_list<size_t> order,
+                           Function&& function) const {
+        forEachCoordinate(indices, std::span<const size_t>(order.begin(), order.size()), function);
+    }
+
+    template <CoordinateVisitor Function>
+    void forEachCoordinate(std::initializer_list<size_t> order, Function&& function) const {
+        forEachCoordinate(std::span<const size_t>(order.begin(), order.size()), function);
+    }
+
+    template <typename Indices, CoordinateVisitor Function>
+    void forEachCoordinateLastDimensionFastest(const Indices& indices, Function&& function) const {
+        forEachCoordinate(indices, indexOrderLastDimensionFastest(), function);
+    }
+
+    // Visit every element with the last axis fastest.
+    template <CoordinateVisitor Function>
+    void forEachCoordinateLastDimensionFastest(Function&& function) const {
+        forEachCoordinate(indexOrderLastDimensionFastest(), function);
+    }
+
    private:
+    template <typename Function>
+    static void visitCoordinate(Function& function, size_t index,
+                                std::span<const size_t> coordinates) {
+        if constexpr (std::is_invocable_v<Function&, size_t, std::span<const size_t>>)
+            function(index, coordinates);
+        else
+            function(coordinates);
+    }
+
     void validateDimension(size_t dimension) const {
         if (dimension >= rank())
             throw std::runtime_error("Tensor shape dimension " + std::to_string(dimension) +
