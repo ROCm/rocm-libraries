@@ -71,4 +71,31 @@ std::string mem_op_string()
     return std::string(memOpToStr<MemOp_>::name);
 }
 
+namespace impl {
+template <typename Epilogue, typename = void>
+struct epilogue_can_accumulate : std::true_type
+{
+};
+template <typename Epilogue>
+struct epilogue_can_accumulate<Epilogue, std::void_t<decltype(Epilogue::kCanAccumulateOutput)>>
+    : std::bool_constant<Epilogue::kCanAccumulateOutput>
+{
+    static_assert(std::is_same_v<std::remove_cv_t<decltype(Epilogue::kCanAccumulateOutput)>, bool>,
+                  "kCanAccumulateOutput must be a static constexpr bool");
+};
+} // namespace impl
+
+/**
+ * @brief Whether Epilogue's store can accumulate into its output, as a split-K atomic_add needs.
+ *
+ * An epilogue whose store always overwrites declares kCanAccumulateOutput = false (e.g.
+ * TdmEpilogue); one that does not declare it is assumed able to accumulate. Kernels with a
+ * split-K arm read this so that the host rejection and the device dispatch agree.
+ *
+ * Note: MxGemmKernel uses the opt-in marker kAtomicAddRequiresEvenVectorSize (absent => cannot
+ * accumulate). An epilogue that sets kCanAccumulateOutput = false must not declare that marker.
+ */
+template <typename Epilogue>
+inline constexpr bool epilogue_can_accumulate_v = impl::epilogue_can_accumulate<Epilogue>::value;
+
 } // namespace ck_tile
