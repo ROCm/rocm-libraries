@@ -224,7 +224,7 @@ struct FmhaFwdKernel
     static constexpr ck_tile::index_t kBlockPerCuInput = FmhaPipeline::Problem::kBlockPerCu;
     // Query heads of one KV head folded into the query rows (row = g * seqlen_q + s).
     static constexpr bool kMergeNumHeadGroupsSeqLenQ =
-        kTraitsMergeNumHeadGroupsSeqLenQ<typename FmhaPipeline::Problem>;
+        FmhaPipeline::Problem::kMergeNumHeadGroupsSeqLenQ;
 
     using QDataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::QDataType>;
     using KDataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::KDataType>;
@@ -2009,6 +2009,7 @@ struct FmhaFwdKernel
         }
     }
 
+    // Arena bytes only; qr_tdm_fp8_sched adds static LDS for O staging, MX and merged row scales.
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         if constexpr(detail::uses_qr_tdm_lds_arena_v<FmhaPipeline>)
@@ -2025,12 +2026,12 @@ struct FmhaFwdKernel
     }
 
     // PERTENSOR folds q_descale*k_descale into scale_s for every pipeline (its offset is always
-    // 0 - one scale for the whole tensor). qr_tdm additionally folds PERHEAD's q_descale*k_descale
-    // (per-head) and BLOCKSCALE's q_descale (per-M-block, via i_m0) into scale_s - other pipelines
-    // never instantiate PERHEAD, and leave BLOCKSCALE's q_descale/k_descale to be applied
-    // elsewhere, so scale_s stays unfolded there. descale_offset_q/k are the caller's
-    // already-computed nhead/batch (and, in group mode, block-scale-seqstart) offsets - 0 wherever
-    // the caller's pipeline never indexes them.
+    // 0 - one scale for the whole tensor). kTakesTdmDescales pipelines additionally fold PERHEAD's
+    // q_descale*k_descale (per-head) and BLOCKSCALE's q_descale (per-M-block, via i_m0) into
+    // scale_s - other pipelines never instantiate PERHEAD, and leave BLOCKSCALE's
+    // q_descale/k_descale to be applied elsewhere, so scale_s stays unfolded there.
+    // descale_offset_q/k are the caller's already-computed nhead/batch (and, in group mode,
+    // block-scale-seqstart) offsets - 0 wherever the caller's pipeline never indexes them.
     CK_TILE_DEVICE static constexpr float GetSoftmaxScale(const Kargs& kargs,
                                                           long_index_t descale_offset_q,
                                                           long_index_t descale_offset_k,

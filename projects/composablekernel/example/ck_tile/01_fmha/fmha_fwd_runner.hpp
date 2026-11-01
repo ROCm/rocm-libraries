@@ -852,7 +852,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                       : std::array<ck_tile::index_t, 5>{1, 1, 1, 1, 1});
 
     const ck_tile::index_t hdim_q_scale = ck_tile::integer_divide_ceil(hdim_q, kQKScaleGranularity);
-    const ck_tile::index_t shape_seqlen_v_scale = seqstart_v_scale_host.back();
+    // batch mode stores V scales per batch; group mode packs all batches along seqlen
+    const ck_tile::index_t shape_seqlen_v_scale =
+        (mode == mode_enum::batch)
+            ? ck_tile::integer_divide_ceil(shape_seqlen_k, kVScaleGranularity)
+            : seqstart_v_scale_host.back();
 
     ck_tile::HostTensor<QScaleDataType> q_descale_host({1});
     ck_tile::HostTensor<KScaleDataType> k_descale_host({1});

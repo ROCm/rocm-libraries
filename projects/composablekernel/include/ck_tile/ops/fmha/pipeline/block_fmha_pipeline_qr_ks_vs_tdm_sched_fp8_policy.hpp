@@ -1134,8 +1134,7 @@ inline constexpr index_t kFmhaTdmSchedFp8BiasBlockPerCu = 1;
 inline constexpr index_t kFmhaTdmSchedFp8D256BlockPerCu = 1;
 // D192 MX scales (six bytes per Q/K row) spill at two per CU, so it runs one per CU.
 inline constexpr index_t kFmhaTdmSchedFp8D192MxBlockPerCu = 1;
-// D192 merged-GQA decode runs one per CU where two do not fit: FP32 O staging next to the merged
-// row descales overflows the LDS, and masked sink tokens exceed half of the VGPRs.
+// D192 merged-GQA decode runs one per CU where two overflow the LDS (FP32 O) or VGPRs (sink).
 inline constexpr index_t kFmhaTdmSchedFp8D192MergedBlockPerCu = 1;
 template <typename Problem>
 inline constexpr bool kFmhaTdmSchedFp8D192MergedOnePerCu =
@@ -1144,7 +1143,7 @@ inline constexpr bool kFmhaTdmSchedFp8D192MergedOnePerCu =
        Problem::QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE) &&
       sizeof(typename Problem::ODataType) == 4) ||
      (Problem::kHasSink && Problem::FmhaMask::IsMasking));
-// One-wavefront workgroups: LDS holds at most this many per SIMD, so the VGPR bound costs nothing.
+// Target 2 per SIMD; D128/D192 are LDS-bound to 1 until the one-wavefront LDS footprint shrinks.
 template <index_t HeadDim>
 inline constexpr index_t kFmhaTdmSchedFp8OneWaveBlockPerCu = HeadDim == 256 ? 1 : 2;
 

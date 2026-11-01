@@ -7,12 +7,14 @@ function(ck_tile_fmha_fwd_get_source_compile_options fwd_blob_name out_var)
   # qr_tdm_pingpong instances. The qr_tdm_pingpong instances that store the LSE
   # keep the default: built in this mode, which leaves the ALU dependency checks
   # to the compiler, they produce intermittently wrong O and LSE values.
+  # Clang before 24 omits a required wait after the MX async scale loads in this mode.
   if(fwd_blob_name MATCHES "^fmha_fwd_d(64|128|192)_(fp16|bf16)_.*_qr_tdm_(sched|pingpong_.*_nlse)(_.*)?_gfx125\\.cpp$"
-     OR fwd_blob_name MATCHES "^fmha_fwd_d[0-9]+_[a-z0-9]+_.*_qr_tdm_fp8_sched_.*_gfx125\\.cpp$")
+     OR (fwd_blob_name MATCHES "^fmha_fwd_d[0-9]+_[a-z0-9]+_.*_qr_tdm_fp8_sched_.*_gfx125\\.cpp$"
+         AND NOT (fwd_blob_name MATCHES "_mx_" AND DEFINED CMAKE_HIP_COMPILER_VERSION
+                  AND CMAKE_HIP_COMPILER_VERSION VERSION_LESS 24)))
     list(APPEND compile_options -mllvm -amdgpu-expert-scheduling-mode)
   endif()
-  # Break large PHIs so the loop keeps its loop-carried K group in dwords: blockscale, and D64
-  # without MX, whose next K group is otherwise rebuilt byte by byte every iteration.
+  # Break large PHIs so blockscale and non-MX D64 keep the loop-carried K group in dwords.
   if(fwd_blob_name MATCHES "^fmha_fwd_d[0-9]+_[a-z0-9]+_.*_qr_tdm_fp8_sched_.*_blockscale_ntrload_.*_gfx125\\.cpp$"
      OR fwd_blob_name MATCHES "^fmha_fwd_d64_[a-z0-9]+_.*_qr_tdm_fp8_sched_.*_(nqscale|pertensor|perhead)_ntrload_.*_gfx125\\.cpp$")
     list(APPEND compile_options -mllvm -amdgpu-codegenprepare-force-break-large-phis)

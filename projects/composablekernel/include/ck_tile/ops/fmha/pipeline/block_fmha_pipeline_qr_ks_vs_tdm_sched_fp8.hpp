@@ -401,7 +401,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     CK_TILE_DEVICE static float
     MergedSinkLogit(const MergedHeads& merged, index_t row, float scale_s)
     {
+        // row is tile-local: merged query heads always fit one M tile, so it is the query row.
         const index_t g = min(row / merged.seqlen_q, merged.num_groups - 1);
+        // Rounds like the unmerged path, which passes sink / scale_s and multiplies by scale_s.
         return (merged.sink_ptr[g] / scale_s) * scale_s;
     }
 
@@ -540,8 +542,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             .get_bottom_index();
     }
 
-    // Sets the elements whose constant (row, col) part, the lane part excluded, passes pred, so
-    // each element costs compares against per-lane thresholds.
+    // Sets the elements whose lane-independent (row, col) part passes pred.
     template <typename Tensor, typename DataType, typename Predicate>
     CK_TILE_DEVICE static void SetTileIfConstPart(Tensor& tensor, DataType value, Predicate pred)
     {
@@ -861,8 +862,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
         using SaccBlockTileType = decltype(gemm_0.MakeCBlockTile());
         auto s_acc              = SaccBlockTileType{};
-        // Band masks compare a per-element constant against a per-lane threshold; merged rows are
-        // not linear, so masked merged tiles keep the per-element check.
+        // Band masks need lane-linear rows; masked merged tiles are not, so they check per element.
         constexpr bool kBandMask =
             std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<FmhaMask::IsMasking>> &&
             !Policy::template UseCountdownLoop<Problem>() && !(kMergeHeads && FmhaMask::IsMasking);

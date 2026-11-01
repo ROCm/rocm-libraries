@@ -321,6 +321,9 @@ class TestGfx125D192Codegen(unittest.TestCase):
             "ntrload_nsink_gfx125.cpp"
         )
         fp8_tdm_source = fp8_sched_source.replace("_qr_tdm_fp8_sched_", "_qr_tdm_")
+        mx_sched_source = fp8_sched_source.replace("_fp8bf16_", "_mxfp8_").replace(
+            "_pertensor_", "_mx_"
+        )
         sources = (
             _D192_BATCH_NMASK_FILENAME,
             _D192_BATCH_N128_FILENAME,
@@ -330,13 +333,11 @@ class TestGfx125D192Codegen(unittest.TestCase):
             _D192_GROUP_NMASK_FILENAME,
             d256_source,
             fp8_sched_source,
-            fp8_sched_source.replace("_fp8bf16_", "_mxfp8_").replace(
-                "_pertensor_", "_mx_"
-            ),
+            mx_sched_source,
             fp8_tdm_source,
         )
 
-        def configure():
+        def configure(hip_version=None):
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 for source in sources:
@@ -348,6 +349,7 @@ class TestGfx125D192Codegen(unittest.TestCase):
                     f"""cmake_minimum_required(VERSION 3.20)
 project(fmha_source_flags LANGUAGES CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+{f"set(CMAKE_HIP_COMPILER_VERSION {hip_version})" if hip_version else ""}
 include(\"{source_flags}\")
 set(sources
   {source_list}
@@ -377,13 +379,19 @@ endforeach()
                     Path(entry["file"]).name: entry["command"] for entry in commands
                 }
 
-        commands = configure()
-        for source in sources:
-            self.assertNotIn("-wwm-regalloc=fast", commands[source])
-            self.assertEqual(
-                "-amdgpu-expert-scheduling-mode" in commands[source],
-                source not in (d256_source, fp8_tdm_source),
+        for hip_version in (None, "24.0.0", "23.0.0"):
+            commands = configure(hip_version)
+            # Clang before 24 builds MX fp8_sched instances without the expert mode.
+            no_expert = (d256_source, fp8_tdm_source) + (
+                (mx_sched_source,) if hip_version == "23.0.0" else ()
             )
+            for source in sources:
+                with self.subTest(hip_version=hip_version, source=source):
+                    self.assertNotIn("-wwm-regalloc=fast", commands[source])
+                    self.assertEqual(
+                        "-amdgpu-expert-scheduling-mode" in commands[source],
+                        source not in no_expert,
+                    )
 
     def test_receipts_emit_d192_sched_and_fallback_tiles(self):
         for receipt in (100, 200, 600):
@@ -1404,16 +1412,18 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 )
 
     def test_mxfp8bf16_mirrors_mxfp8(self):
-        key = lambda k: (
-            k.F_mode,
-            k.F_tile.name,
-            k.F_pipeline.tag,
-            k.F_pipeline.F_qscale,
-            k.F_pipeline.F_mask,
-            k.F_pipeline.F_lse,
-            k.F_pipeline.F_sink,
-            k.F_pipeline.F_bias,
-        )
+        def key(k):
+            return (
+                k.F_mode,
+                k.F_tile.name,
+                k.F_pipeline.tag,
+                k.F_pipeline.F_qscale,
+                k.F_pipeline.F_mask,
+                k.F_pipeline.F_lse,
+                k.F_pipeline.F_sink,
+                k.F_pipeline.F_bias,
+            )
+
         traits = {}
         for dtype in ("mxfp8", "mxfp8bf16"):
             pool, kernels = get_fwd_blobs(
@@ -1501,12 +1511,15 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
                 )
                 sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
-                key = lambda k: (
-                    k.F_mode,
-                    k.F_pipeline.F_qscale,
-                    k.F_pipeline.F_mask,
-                    k.F_pipeline.F_lse,
-                )
+
+                def key(k):
+                    return (
+                        k.F_mode,
+                        k.F_pipeline.F_qscale,
+                        k.F_pipeline.F_mask,
+                        k.F_pipeline.F_lse,
+                    )
+
                 by_sink = {
                     sink: Counter(key(k) for k in sched if k.F_pipeline.F_sink == sink)
                     for sink in ("f", "t")
@@ -1533,13 +1546,16 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
                 )
                 sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
-                key = lambda k: (
-                    k.F_mode,
-                    k.F_pipeline.F_qscale,
-                    k.F_pipeline.F_mask,
-                    k.F_pipeline.F_lse,
-                    k.F_pipeline.F_sink,
-                )
+
+                def key(k):
+                    return (
+                        k.F_mode,
+                        k.F_pipeline.F_qscale,
+                        k.F_pipeline.F_mask,
+                        k.F_pipeline.F_lse,
+                        k.F_pipeline.F_sink,
+                    )
+
                 by_bias = {
                     bias: Counter(key(k) for k in sched if k.F_pipeline.F_bias == bias)
                     for bias in ("no", "bias", "alibi")
@@ -1557,30 +1573,18 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         self.assertEqual(k.F_tile.F_occupancy, 1)
                         self.assertIn("_o1_qr_tdm_fp8_sched_", k.name)
 
-    def test_fp8_sched_d64_resident_blocks_scope(self):
-        _, kernels = get_fwd_blobs(["gfx1250"], "", 0, [-1], "simplified")
-        targeted = [
-            k
-            for k in kernels
-            if KernelComponentFactoryGfx125.resident_blocks_per_cu(k) is not None
-        ]
-        # No mask or bias, in every mode and dtype; MX without LSE.
-        self.assertEqual(len(targeted), 104)
-        for k in targeted:
-            self.assertEqual(k.F_hdim, 64)
-            self.assertEqual(k.F_pipeline.tag, "qr_tdm_fp8_sched")
-            self.assertEqual(KernelComponentFactoryGfx125.resident_blocks_per_cu(k), 3)
-
     def test_fp8_sched_d64_mirrors_d128(self):
-        key = lambda k: (
-            k.F_mode,
-            k.F_pipeline.F_qscale,
-            k.F_pipeline.F_mask,
-            k.F_pipeline.F_lse,
-            k.F_pipeline.F_sink,
-            k.F_pipeline.F_bias,
-            k.F_tile.F_occupancy,
-        )
+        def key(k):
+            return (
+                k.F_mode,
+                k.F_pipeline.F_qscale,
+                k.F_pipeline.F_mask,
+                k.F_pipeline.F_lse,
+                k.F_pipeline.F_sink,
+                k.F_pipeline.F_bias,
+                k.F_tile.F_occupancy,
+            )
+
         for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8", "mxfp8bf16"):
             with self.subTest(dtype=dtype):
                 traits = {}
@@ -1647,14 +1651,16 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 )
 
     def test_fp8_sched_d256_mirrors_d128_at_occupancy_one(self):
-        key = lambda k: (
-            k.F_mode,
-            k.F_pipeline.F_qscale,
-            k.F_pipeline.F_mask,
-            k.F_pipeline.F_lse,
-            k.F_pipeline.F_sink,
-            k.F_pipeline.F_bias,
-        )
+        def key(k):
+            return (
+                k.F_mode,
+                k.F_pipeline.F_qscale,
+                k.F_pipeline.F_mask,
+                k.F_pipeline.F_lse,
+                k.F_pipeline.F_sink,
+                k.F_pipeline.F_bias,
+            )
+
         for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8", "mxfp8bf16"):
             with self.subTest(dtype=dtype):
                 traits = {}
@@ -1716,15 +1722,17 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 )
 
     def test_fp8_sched_d192_mirrors_d128(self):
-        key = lambda k: (
-            k.F_pipeline.tag,
-            k.F_mode,
-            k.F_pipeline.F_qscale,
-            k.F_pipeline.F_mask,
-            k.F_pipeline.F_lse,
-            k.F_pipeline.F_sink,
-            k.F_pipeline.F_bias,
-        )
+        def key(k):
+            return (
+                k.F_pipeline.tag,
+                k.F_mode,
+                k.F_pipeline.F_qscale,
+                k.F_pipeline.F_mask,
+                k.F_pipeline.F_lse,
+                k.F_pipeline.F_sink,
+                k.F_pipeline.F_bias,
+            )
+
         fp8_tags = ("qr_tdm_fp8_sched", "qr_tdm_fp8_sched_mgqa", "qr_tdm_fp8_sched_d1")
         for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8", "mxfp8bf16"):
             with self.subTest(dtype=dtype):

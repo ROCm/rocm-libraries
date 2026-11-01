@@ -96,8 +96,7 @@ struct FmhaTdmSchedFp8D256StreamedVReadSchedule
     static constexpr index_t kPvWmmasPerStage = Geometry::kPvWmmasPerStage;
     static constexpr index_t kChunkLoads      = Geometry::kVStageLoadCount / Geometry::kPvNIter;
     static constexpr index_t kMIter           = Geometry::kPvMIter;
-    // PV row r runs V chunk r / kMIter; rows read chunk r / kMIter + kLead.
-    // Each chunk of lead holds its V reads in VGPRs longer; six hide the LDS read latency.
+    // PV row r runs V chunk r / kMIter and reads chunk r / kMIter + kLead to hide LDS latency.
     static constexpr index_t kLead = 6;
     // Next-K group 0 reads go one per row from here, behind the V stream.
     static constexpr index_t kKFirstRow = 16;
