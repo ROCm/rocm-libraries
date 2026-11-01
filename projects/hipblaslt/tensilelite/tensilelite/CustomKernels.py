@@ -602,6 +602,9 @@ def getCustomKernelConfig(
             continue
         if k in mergedValid:
             checkParametersAreValid((k, [v]), mergedValid)
+    # AF0EM -1 is resolved by solution derivation, which custom kernels skip.
+    if kernelConfig.get("AssertFree0ElementMultiple") == -1:
+        raise ValueError(f"Custom kernel {kernelName}: AssertFree0ElementMultiple must be a concrete multiple, not -1 (auto)")
 
     metadata_keys = [
         k for k in kernelConfig
