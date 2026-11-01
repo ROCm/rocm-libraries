@@ -402,11 +402,18 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
     # from-scratch GPU reference implementation, and our own golden data directly),
     # so the ASAN-only MIOpen-cache-clear fixture miopen-provider/hipblaslt-provider
     # wire up does not apply here.
+    # hipdnn_gpu_ref_tests has its own tier file: its quick tier is fp32-only
+    # (see test_categories_gpu_ref.yaml).
+    set(HIPDNN_IT_GPU_REF_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_gpu_ref.yaml")
     foreach(_it_target hipdnn_integration_tests_unit_tests hipdnn_gpu_ref_tests
                        hipdnn_golden_data_tests)
+        set(_it_yaml "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
+        if(_it_target STREQUAL "hipdnn_gpu_ref_tests")
+            set(_it_yaml "${HIPDNN_IT_GPU_REF_CATEGORIES_YAML}")
+        endif()
         apply_test_category_labels(
             ${_it_target}
-            "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
+            "${_it_yaml}"
             "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
             "${HIPDNN_IT_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}
