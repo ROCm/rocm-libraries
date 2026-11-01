@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -79,14 +80,12 @@ void testing_dense_to_sparse_csc_bad_arg(const Arguments& argus)
     void*    dbuf         = (void*)dbuf_managed.get();
 
     // Matrix structures
-    hipsparseDnVecDescr_t matA;
     hipsparseSpMatDescr_t matB;
 
     size_t bsize;
 
     // Create matrix structures
-    verify_hipsparse_status_success(
-        hipsparseCreateDnMat(&matA, m, n, ld, ddense_val, dataType, order), "success");
+    hipsparseLocalDnMat matA(m, n, ld, ddense_val, dataType, order);
     verify_hipsparse_status_success(hipsparseCreateCsc(&matB,
                                                        m,
                                                        n,
@@ -137,7 +136,6 @@ void testing_dense_to_sparse_csc_bad_arg(const Arguments& argus)
         hipsparseDenseToSparse_convert(handle, matA, matB, alg, nullptr), "Error: dbuf is nullptr");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(matA), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(matB), "success");
 #endif
 }
@@ -204,8 +202,7 @@ void testing_dense_to_sparse_csc(Arguments argus)
         hipMemcpy(ddense, hdense_val.data(), sizeof(T) * nrow * ncol, hipMemcpyHostToDevice));
 
     // Create dense matrix
-    hipsparseDnMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matA, m, n, ld, ddense, typeT, order));
+    hipsparseLocalDnMat matA(m, n, ld, ddense, typeT, order);
 
     // Create matrices
     hipsparseSpMatDescr_t matB;
@@ -364,7 +361,6 @@ void testing_dense_to_sparse_csc(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif
 }
