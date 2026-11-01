@@ -67,6 +67,7 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: Relu]
           - [Enum: Gelu]
+          - [Enum: Silu]
 
   -
     - # ProblemType
@@ -128,3 +129,4 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: Relu]
           - [Enum: Gelu]
+          - [Enum: Silu]
