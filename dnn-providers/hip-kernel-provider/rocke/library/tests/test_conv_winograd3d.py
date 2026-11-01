@@ -149,3 +149,81 @@ def test_yc8h_invalid_combinations():
         s = cw.WinogradYxSpec(Di=68, Hi=34, Wi=34, C=256, K=256, **kw)
         ok, _ = cw.is_valid_yx_spec(s)
         assert not ok, kw
+
+
+# ---- round 5b: lin tile mapping (dgrad grids), split-K, scaling, weight transform v3 ----
+DGRAD_LIN = dict(BEST, yf16=True, lin=True)
+
+
+@pytest.mark.parametrize("sid", [1, 2, 3, 4, 5, 6, 7, 8, 9])
+def test_yx_dgrad_lin_support(sid):
+    D, H, W, C, K = SCAFFOLD[sid]
+    # dgrad as a forward conv of dY padded by 2: (Do+4, Ho+4, Wo+4, C=K, K=C)
+    sp = cw.WinogradYxSpec(Di=D + 2, Hi=H + 2, Wi=W + 2, C=K, K=C, **DGRAD_LIN)
+    ok, why = cw.is_valid_yx_spec(sp)
+    assert ok, why
+    assert "lin" in sp.kernel_name()
+    tx = sp.Wo // 2
+    assert cw._yx_lin_seams(sp) == -(-31 // tx)
+    assert cw.winograd_yx_grid(sp)[0] == -(-sp.tiles2d // 32) * (sp.Do // 2) * (C // 64)
+
+
+def test_yx_lin_mapping_exhaustive():
+    """Every lane of every lin block reads the 4 columns of its own tile's rows."""
+    for TX in (5, 8, 9, 16, 17, 32, 33, 65):
+        T = TX * TX
+        S = -(-31 // TX)
+        for tb in range(-(-T // 32)):
+            t0 = tb * 32
+            tx0 = t0 % TX
+            lds = {}
+            for col in range(66 + 2 * S):
+                sm = col >= 66
+                s_, es = divmod(max(col - 66, 0), 2)
+                m_s = (TX - 1 - tx0) + s_ * TX
+                mm = min(col // 2, 31)
+                lt = m_s if sm else mm
+                ty, tx = divmod(t0 + lt, TX)
+                xcol = 2 * TX + es if sm else 2 * tx + col - 2 * mm
+                key = (es, 33 + s_) if sm else (col % 2, col // 2)
+                if not sm or m_s < 31:
+                    assert key not in lds
+                    lds[key] = (ty, xcol)
+            for m in range(32):
+                if t0 + m >= T:
+                    continue
+                ty, tx = divmod(t0 + m, TX)
+                dm = m - (TX - 1 - tx0)
+                seam = dm >= 0 and dm % TX == 0 and m < 31
+                h1 = 33 + dm // TX if seam else m + 1
+                for x in range(4):
+                    assert lds[(x % 2, m if x < 2 else h1)] == (ty, 2 * tx + x)
+
+
+def test_yx_ksplit_and_oscale_validity():
+    D, H, W, C, K = SCAFFOLD[7]
+    ok, why = cw.is_valid_yx_spec(cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, ksplit=4, **BEST))
+    assert ok, why
+    sp = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, ksplit=3, **BEST)
+    assert not cw.is_valid_yx_spec(sp)[0]  # 64 chunks not divisible by 3
+    sp = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, ksplit=2, oscale=True, **BEST)
+    assert cw.winograd_yx_grid(sp)[0] == 2 * 256 and sp.kernel_name().endswith("ks2_os")
+
+
+@pytest.mark.parametrize("K,C", [(64, 64), (128, 256), (512, 512), (256, 1024)])
+def test_yx_wt3_swizzle_is_a_bijection(K, C):
+    # mirror of _emit_yx_wt3(swz=True) index math: every (dz, k, channel group) exactly once
+    assert cw.yx_wt3_swz_ok(K, C)
+    ncb = C // 8
+    seen = set()
+    for t in range(3 * K * ncb):
+        ln, g = t % 64, t // 64
+        k = (g % (K // 8)) * 8 + ln // 8
+        rest = g // (K // 8)
+        cb = (rest % (ncb // 8)) * 8 + ln % 8
+        seen.add((rest // (ncb // 8), k, cb))
+    assert len(seen) == 3 * K * ncb
+    assert all(0 <= d < 3 and 0 <= k < K and 0 <= c < ncb for d, k, c in seen)
+    kd = cw.build_yx_weight_transform_v3(K, C, swz=True)
+    assert kd.name.endswith("_swz")
+    assert not cw.yx_wt3_swz_ok(K, C, flip=True)

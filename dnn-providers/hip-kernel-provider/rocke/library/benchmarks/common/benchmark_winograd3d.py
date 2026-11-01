@@ -82,7 +82,56 @@ def _power_probe(fn, seconds=1.5):
     return {"b2b_ms": ms, "mhz": mhz, "watt": ej / (t1 - t0), "mcyc": ms * mhz / 1e3}
 
 
-def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=False, pipe=None):
+def _make_data(kind, xs, ws, dev):
+    """Operands (bf16). u1: uniform(-1, 1) both (the rocKE verify data); tr: training-like
+    -- activations N(0, 1), weights Kaiming-normal std sqrt(2 / (27 C)); a suffix ``@e`` scales
+    the activations by 2**e (e.g. tr@-20: gradients ~1e-6, f16 subnormal range)."""
+    import torch
+
+    base, _, e = kind.partition("@")
+    if base == "u1":
+        X = torch.empty(*xs, device=dev).uniform_(-1, 1)
+        W = torch.empty(*ws, device=dev).uniform_(-1, 1)
+    elif base == "tr":
+        X = torch.randn(*xs, device=dev)
+        W = torch.randn(*ws, device=dev) * (2.0 / (27 * ws[-1])) ** 0.5
+    else:
+        raise ValueError(kind)
+    if e:
+        X = X * 2.0 ** int(e)
+    return X.to(torch.bfloat16), W.to(torch.bfloat16)
+
+
+def _acc_stats(Yv, ref):
+    """Error of Yv (f32 view of the bf16 output) vs the f32 reference: the rocKE verify metric
+    (max|err| / max(max|ref|, 1)), the scale-free max|err| / max|ref|, mean|err| / mean|ref|,
+    the worst output channel (max_c max|err_c| / max|ref_c|) and the relative error of the
+    output's bf16 rounding alone (the floor any bf16-output kernel has)."""
+    import torch
+
+    err = (Yv - ref).abs()
+    K = ref.shape[-1]
+    e2 = err.reshape(-1, K)
+    r2 = ref.abs().reshape(-1, K)
+    rmax = r2.amax(0).clamp_min(1e-30)
+    per_c = e2.amax(0) / rmax
+    rnd = (ref.to(torch.bfloat16).float() - ref).abs()
+    out = {
+        "max_rel_scale_free": (err.max() / ref.abs().max()).item(),
+        "mean_rel": (err.mean() / ref.abs().mean()).item(),
+        "worst_ch_rel": per_c.max().item(),
+        "worst_ch": int(per_c.argmax().item()),
+        "median_ch_rel": per_c.median().item(),
+        "bf16_round_max_rel": (rnd.max() / ref.abs().max()).item(),
+        "bf16_round_mean_rel": (rnd.mean() / ref.abs().mean()).item(),
+        "ref_absmax": ref.abs().max().item(),
+    }
+    del err, e2, r2, rnd
+    return out
+
+
+def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=False, pipe=None,
+            dgrad=False, acc_out=None, data="u1", timing=True, wtv=1, scale_exp=0):
     import torch
 
     from kernels.common import conv_winograd3d as cw
@@ -91,13 +140,23 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
     from rocke.runtime.stall_gate import time_launches_staged
 
-    Di, Hi, Wi, C, K = shape
     spec_kw = dict(spec_kw)
     variant = spec_kw.pop("variant", "3d")
     torch.manual_seed(0)
     dev = "cuda"
-    X = torch.empty(Di, Hi, Wi, C, device=dev).uniform_(-1, 1).to(torch.bfloat16)
-    W = torch.empty(K, 3, 3, 3, C, device=dev).uniform_(-1, 1).to(torch.bfloat16)
+    if dgrad:
+        # BWD-data as a forward conv: dX = conv(pad(dY, 2), Wd), Wd[c][dz][dy][dx][k] =
+        # W[k][2-dz][2-dy][2-dx][c]. The Winograd problem is (Do+4, Ho+4, Wo+4, C=K, K=C);
+        # "X" below is dY (Do, Ho, Wo, K) and "W" the forward filter (K, 3, 3, 3, C).
+        if variant != "yx":
+            raise ValueError("--dgrad: variant yx only")
+        fDi, fHi, fWi, fC, fK = shape
+        Di, Hi, Wi, C, K = fDi + 2, fHi + 2, fWi + 2, fK, fC
+        X, W = _make_data(data, (fDi - 2, fHi - 2, fWi - 2, fK), (fK, 3, 3, 3, fC), dev)
+    else:
+        Di, Hi, Wi, C, K = shape
+        X, W = _make_data(data, (Di, Hi, Wi, C), (K, 3, 3, 3, C), dev)
+    Wd = W.flip(1, 2, 3).permute(4, 1, 2, 3, 0).contiguous() if dgrad else W
     if variant == "x":
         spec = cw.WinogradXSpec(Di=Di, Hi=Hi, Wi=Wi, C=C, K=K, **spec_kw)
         ok, why = cw.is_valid_x_spec(spec)
@@ -115,7 +174,7 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
 
         def wt():
             return cw.winograd_yx_weight_transform(
-                W, dtype=udt, fold=spec.stage in ("reg", "wlds"), u16=spec.b16, uc=spec.bc
+                Wd, dtype=udt, fold=spec.stage in ("reg", "wlds"), u16=spec.b16, uc=spec.bc
             )
 
         lay = getattr(spec, "xin", "c8")
@@ -140,32 +199,59 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         SignatureBuilder()
         .ptr("X", "bf16")
         .ptr("U", "f16" if variant in ("yx", "x") and spec.op_dtype == "f16" else "bf16")
-        .ptr("Y", "bf16")
+        .ptr("Y", "f32" if variant == "yx" and getattr(spec, "ksplit", 1) > 1 else "bf16")
     )
     if frel:
         sigb = sigb.ptr("Xn", "bf16").ptr("F", "i32")
     boff = variant == "yx" and getattr(spec, "boff", False)
     if boff:
         sigb = sigb.scalar("BOFF", "i32")
+    osc = variant == "yx" and getattr(spec, "oscale", False)
+    if osc:
+        sigb = sigb.scalar("OS", "f32")
+    SX = 2.0 ** scale_exp  # relayout scale (power of two); the main kernel multiplies by 1/SX
     sig = sigb.build()
     launcher = KernelLauncher(hsaco=art.hsaco, kernel_name=kern.name, signature=sig)
     yc8h = variant == "yx" and getattr(spec, "yc8h", False)
     if yc8h:  # next layer's input layout: c8 with a zero one-voxel halo
-        Y = torch.zeros(K // 8, spec.Do + 2, spec.Ho + 2, spec.Wo + 2, 8, device=dev,
-                        dtype=torch.bfloat16)
+        hh = spec.yc8h_halo
+        Y = torch.zeros(K // 8, spec.Do + 2 * hh, spec.Ho + 2 * hh, spec.Wo + 2 * hh, 8,
+                        device=dev, dtype=torch.bfloat16)
     else:
         Y = torch.zeros(spec.Do, spec.Ho, spec.Wo, K, device=dev, dtype=torch.bfloat16)
     U = wt()
-    Xk = {"c8": cw.winograd3d_x_to_c8, "r8": cw.winograd_x_to_r8}.get(lay, lambda t: t)(X)
+    if dgrad:
+        Xk = cw.winograd3d_x_to_c8(torch.nn.functional.pad(X * SX, (0, 0, 2, 2, 2, 2, 2, 2)))
+    else:
+        Xk = {"c8": cw.winograd3d_x_to_c8, "r8": cw.winograd_x_to_r8}.get(lay, lambda t: t)(X * SX)
     grid = grid_fn(spec)
     cfg = LaunchConfig(grid=grid, block=(spec.block_size, 1, 1))
     args = {"X": Xk, "U": U, "Y": Y}
     if boff:
         args["BOFF"] = 0
+    if osc:
+        args["OS"] = 1.0 / SX
     if frel:
         Fl = torch.zeros(grid[0], device=dev, dtype=torch.int32)
         args.update({"Xn": X, "F": Fl})
         res_plan = cw._frel_plan(spec)
+
+    KS = getattr(spec, "ksplit", 1) if variant == "yx" else 1
+    if KS > 1:
+        nel = spec.Do * spec.Ho * spec.Wo * K
+        Yp = torch.zeros(KS * nel, device=dev, dtype=torch.float32)
+        args["Y"] = Yp
+        kr_ = cw.build_ks_reduce(nel, KS)
+        lred = KernelLauncher(
+            hsaco=compile_kernel(kr_, arch=arch).hsaco, kernel_name=kr_.name,
+            signature=SignatureBuilder().ptr("P", "f32").ptr("Y", "bf16").build(),
+        )
+        cred = LaunchConfig(grid=cw.ks_reduce_grid(nel), block=(256, 1, 1))
+        _launch0 = launcher
+
+        def launcher(a_, config):  # noqa: F811 -- main kernel + split-K reduction
+            _launch0(a_, config=config)
+            lred({"P": Yp, "Y": Y}, config=cred)
 
     def main():
         launcher(args, config=cfg)
@@ -187,26 +273,37 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         aux = (lx, cx, lwx, cwx)
     if variant == "yx":
         # rocKE auxiliary kernels for the whole call: X relayout + weight transform
-        if lay == "r8":
+        if dgrad:
+            kx = cw.build_x_to_c8_lds(Di - 4, Hi - 4, Wi - 4, C, halo=2, scale=osc)
+            xgrid = cw.x_to_c8_lds_grid(Di - 4, Hi - 4, Wi - 4, C)
+        elif lay == "r8":
             kx = cw.build_x_to_c8(Di, Hi, Wi, C, rows=True)
             xgrid = cw.x_to_c8_grid(Di, Hi, Wi, C)
         else:  # LDS-transposed relayout (coalesced reads and writes)
-            kx = cw.build_x_to_c8_lds(Di, Hi, Wi, C)
+            kx = cw.build_x_to_c8_lds(Di, Hi, Wi, C, scale=osc)
             xgrid = cw.x_to_c8_lds_grid(Di, Hi, Wi, C)
         lx = KernelLauncher(
             hsaco=compile_kernel(kx, arch=arch).hsaco, kernel_name=kx.name,
-            signature=SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16").build(),
+            signature=(SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16").scalar("S", "f32")
+                       if osc else SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16")).build(),
         )
         odt = "f16" if spec.op_dtype == "f16" else "bf16"
-        kw_ = cw.build_yx_weight_transform(
-            K, C, out_dtype=odt, fold=spec.stage in ("reg", "wlds"), u16=spec.b16, uc=spec.bc
-        )
+        wt3 = wtv in (3, 4) and odt == "f16" and spec.stage == "lds16" and not spec.b16 \
+            and not spec.bc
+        if wt3:
+            kw_ = cw.build_yx_weight_transform_v3(K, C, flip=dgrad, swz=wtv == 4)
+        else:
+            kw_ = cw.build_yx_weight_transform(
+                K, C, out_dtype=odt, fold=spec.stage in ("reg", "wlds"), u16=spec.b16,
+                uc=spec.bc, flip=dgrad,
+            )
         lw = KernelLauncher(
             hsaco=compile_kernel(kw_, arch=arch).hsaco, kernel_name=kw_.name,
             signature=SignatureBuilder().ptr("W", "bf16").ptr("U", odt).build(),
         )
         cx = LaunchConfig(grid=xgrid, block=(256, 1, 1))
-        cwt = LaunchConfig(grid=cw.yx_weight_transform_grid(K, C), block=(256, 1, 1))
+        cwt = LaunchConfig(grid=(cw.yx_weight_transform_v3_grid if wt3 else
+                                 cw.yx_weight_transform_grid)(K, C), block=(256, 1, 1))
         aux = (lx, cx, lw, cwt)
         if frel:
             ka = cw.build_yx_frel_aux(spec)
@@ -219,15 +316,23 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
             aux = ("frel", la, ca)
         elif lay == "c8" and not spec.b16 and not spec.bc:
             # one launch for both passes (relayout and weight transform side by side)
-            ka = cw.build_yx_aux(Di, Hi, Wi, C, K, out_dtype=odt,
+            hd = 4 if dgrad else 0
+            ka = cw.build_yx_aux(Di - hd, Hi - hd, Wi - hd, C, K, out_dtype=odt,
                                  fold=spec.stage in ("reg", "wlds"),
-                                 rev=getattr(spec, "xrev", False))
+                                 rev=getattr(spec, "xrev", False),
+                                 halo=2 if dgrad else 0, flip=dgrad, wtv=(wtv if wt3 else 1),
+                                 scale=osc)
+            sga = (SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16")
+                   .ptr("W", "bf16").ptr("U", odt))
+            if osc:
+                sga = sga.scalar("S", "f32")
             la = KernelLauncher(
                 hsaco=compile_kernel(ka, arch=arch).hsaco, kernel_name=ka.name,
-                signature=SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16")
-                .ptr("W", "bf16").ptr("U", odt).build(),
+                signature=sga.build(),
             )
-            ca = LaunchConfig(grid=cw.yx_aux_grid(Di, Hi, Wi, C, K), block=(256, 1, 1))
+            ca = LaunchConfig(grid=cw.yx_aux_grid(Di - hd, Hi - hd, Wi - hd, C, K,
+                                                  wtv=(wtv if wt3 else 1)),
+                              block=(256, 1, 1))
             aux = ("one", la, ca)
 
     def run_aux():
@@ -235,10 +340,11 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
             aux[1]({"X": X, "X8": Xk, "W": W, "U": U, "F": Fl}, config=aux[2])
             return
         if aux[0] == "one":
-            aux[1]({"X": X, "X8": Xk, "W": W, "U": U}, config=aux[2])
+            aux[1]({"X": X, "X8": Xk, "W": W, "U": U, **({"S": SX} if osc else {})},
+                   config=aux[2])
             return
         if lay in ("c8", "r8"):
-            aux[0]({"X": X, "X8": Xk}, config=aux[1])
+            aux[0]({"X": X, "X8": Xk, **({"S": SX} if osc else {})}, config=aux[1])
         aux[2]({"W": W, "U": U}, config=aux[3])
 
     def full():
@@ -355,19 +461,28 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         res["aux_exact"] = bool(torch.equal(Xk, X8r)) and bool(
             (U.float() - Ur.float()).abs().max().item() <= 1e-3 * Ur.float().abs().max().item()
         )
+        if variant == "yx":  # the stand-alone weight transform (chained call) too
+            U.zero_()
+            lw({"W": W, "U": U}, config=cwt)
+            torch.cuda.synchronize()
+            res["wt_exact"] = bool(
+                (U.float() - Ur.float()).abs().max().item() <= 1e-3 * Ur.float().abs().max().item())
     if verify:
         if not frel and pipe_fn is None:  # Y is the poisoned whole call's output (above)
             main()
         torch.cuda.synchronize()
         xr = X.float().permute(3, 0, 1, 2)[None]
         wr = W.float().permute(0, 4, 1, 2, 3)
-        ref = torch.nn.functional.conv3d(xr, wr)[0].permute(1, 2, 3, 0)
+        if dgrad:
+            ref = torch.nn.functional.conv_transpose3d(xr, wr)[0].permute(1, 2, 3, 0)
+        else:
+            ref = torch.nn.functional.conv3d(xr, wr)[0].permute(1, 2, 3, 0)
         if yc8h:
             Yc = Y.float()
             hal = Yc.clone()
-            hal[:, 1:-1, 1:-1, 1:-1, :] = 0
+            hal[:, hh:-hh, hh:-hh, hh:-hh, :] = 0
             res["halo_zero"] = bool(hal.abs().max().item() == 0)
-            Yv = Yc[:, 1:-1, 1:-1, 1:-1, :].permute(1, 2, 3, 0, 4).reshape(
+            Yv = Yc[:, hh:-hh, hh:-hh, hh:-hh, :].permute(1, 2, 3, 0, 4).reshape(
                 spec.Do, spec.Ho, spec.Wo, K)
             del Yc, hal
         else:
@@ -378,9 +493,18 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         res["rel_err"] = rel
         res["mean_rel"] = err.mean().item() / ref.abs().mean().item()
         res["verify"] = "PASS" if rel < 5e-2 else "FAIL"
+        res.update(_acc_stats(Yv, ref))
+        if acc_out:
+            torch.save({"Y": Yv.to(torch.bfloat16).cpu()}, acc_out)
         del ref, err, xr, wr
     from statistics import median
 
+    res["dir"] = "dgrad" if dgrad else "fwd"
+    res["scale_exp"] = scale_exp
+    res["data"] = data
+    if not timing:
+        print(json.dumps(res), flush=True)
+        return res
     for _ in range(3):
         main()
     torch.cuda.synchronize()
@@ -392,6 +516,10 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
     res["ms_main"] = tm
     res["ms_full"] = tf
     if variant == "yx" and aux is not None and aux[0] != "frel":
+        def wt_only():
+            lw({"W": W, "U": U}, config=cwt)
+
+        res["ms_wt"] = median(time_launches_staged(wt_only, warmup=warmup, iters=iters))
         # chained call: X already in c8 (a yc8h producer wrote it) -> weight transform + main
         _lw, _cw = lw, cwt
 
@@ -425,6 +553,14 @@ def main(argv=None):
     p.add_argument("--power", action="store_true", help="also report clock / power / cycles")
     p.add_argument("--results", default=None, help="append JSON lines here")
     p.add_argument("--spec", default="{}", help="JSON dict of extra Winograd3dSpec fields")
+    p.add_argument("--dgrad", action="store_true",
+                   help="BWD-data of the shape (yx: conv of dY padded by 2, flipped weights)")
+    p.add_argument("--data", default="u1", help="operands: u1 | tr [@exp2 scale of X], see _make_data")
+    p.add_argument("--acc-out", default=None, help="save the output (bf16) here (torch.save)")
+    p.add_argument("--timing", type=int, default=1, help="0: verify / accuracy only")
+    p.add_argument("--wtv", type=int, default=1, help="weight transform: 1 (scalar) | 3 (16-B) | 4 (16-B, 8x8 lane swizzle)")
+    p.add_argument("--scale-exp", type=int, default=0,
+                   help="spec oscale: relayout scales X by 2**e, the epilogue by 2**-e")
     p.add_argument("--pipe", default="", help="yx boff: pipelined whole call, z cut points as "
                    "fractions of the slabs, e.g. 0.1,0.4")
     a = p.parse_args(argv)
@@ -445,9 +581,16 @@ def main(argv=None):
             label=label,
             power=a.power,
             pipe=[float(v) for v in a.pipe.split(",")] if a.pipe else None,
+            dgrad=a.dgrad,
+            acc_out=a.acc_out,
+            data=a.data,
+            timing=bool(a.timing),
+            wtv=a.wtv,
+            scale_exp=a.scale_exp,
         )
         if r is not None:
             r["spec"] = spec_kw
+            r["wtv"] = a.wtv
             out.append(r)
     if a.results:
         with open(a.results, "a") as f:
