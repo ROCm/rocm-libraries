@@ -268,10 +268,11 @@ class _StubBundler:
 
 @pytest.fixture
 def stubBuild(tmp_path, monkeypatch):
-    """buildSourceCodeObjectFiles with stub tools, no helper cache and no PCH. Returns
+    """buildSourceCodeObjectFiles with stub tools, no helper cache, PCH or chunk cache. Returns
     build(chunkPaths, archs) -> (one-piece compiles, code object text)."""
     monkeypatch.setenv("TENSILE_DISABLE_HELPER_CACHE", "1")
     monkeypatch.setenv("TENSILE_DISABLE_HELPER_PCH", "1")
+    monkeypatch.setenv("TENSILE_DISABLE_HELPER_CHUNK_CACHE", "1")
     kernel = tmp_path / "Kernels.cpp"
     kernel.write_text("// src")
 
@@ -292,7 +293,7 @@ def stubBuild(tmp_path, monkeypatch):
     return build
 
 
-def _chunkedCompile(compiler, includeDir, target, chunkPaths, objPath, pchPath=None):
+def _chunkedCompile(compiler, includeDir, target, chunkPaths, objPath, pchPath=None, cache=None):
     Path(objPath).write_text(f"{len(chunkPaths)} chunks")
 
 
@@ -373,9 +374,11 @@ def _kernelCode(coPath):
 def _realBuilder(tmp_path, monkeypatch, writeHelperFiles):
     """Writes the helpers with writeHelperFiles(tmp_path) (-> chunk sources) next to the static
     headers, and returns (chunks, build): build(name, chunkPaths) compiles them for gfx950 with
-    the real compiler and bundler (no helper cache, no PCH) and returns _kernelCode."""
+    the real compiler and bundler (no helper cache, PCH or chunk cache) and returns
+    _kernelCode."""
     monkeypatch.setenv("TENSILE_DISABLE_HELPER_CACHE", "1")
     monkeypatch.setenv("TENSILE_DISABLE_HELPER_PCH", "1")
+    monkeypatch.setenv("TENSILE_DISABLE_HELPER_CHUNK_CACHE", "1")
     copyStaticFiles(tmp_path)
     chunks = writeHelperFiles(tmp_path)
     compiler = Compiler(str(REAL_COMPILER), "sha1")

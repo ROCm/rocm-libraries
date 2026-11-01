@@ -13,7 +13,7 @@ supported route to separate compilation, -fgpu-rdc, changed every kernel's code
 (timing_runs/python_kernel_build_src_co_investigation.md, option C).
 
 A kernel's chunk is a hash of its name (chunkOf): content-stable, so adding or removing one
-kernel changes one chunk only.
+kernel changes one chunk only, and with a HelperKernelChunkCache only that chunk is compiled again.
 """
 
 import hashlib
@@ -22,7 +22,9 @@ from os import name as os_name
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
+from ..Common import print1
 from .Component import Compiler, _invoke, driverJobs
+from .HelperKernelChunkCache import HelperKernelChunkCache
 
 
 def chunkOf(kernelName: str, chunkCount: int) -> int:
@@ -95,11 +97,16 @@ def compileHelperChunks(
     chunkPaths: Sequence[Union[Path, str]],
     objPath: str,
     pchPath: Optional[str] = None,
+    cache: Optional[HelperKernelChunkCache] = None,
 ):
     """Compiles the chunk sources chunkPaths for target into objPath, the same bundled object the
     one-piece compile of their kernels writes (Compiler.__call__): every chunk's compile job at
     once (one process each), then one link of all chunk objects and the bundle job. The chunk
     objects are written next to objPath.
+
+    With an enabled cache, a chunk whose object is cached is not compiled (one line reports how
+    many chunks hit), every compiled chunk is stored once the link succeeded, and the cached
+    chunks are discarded if the link or the bundle fails.
 
     Raises:
         RuntimeError: If a job fails or the driver's jobs are not the expected compile, link and
@@ -113,6 +120,7 @@ def compileHelperChunks(
     compileJobs = []
     chunkObjs = []
     driverObjs = []
+    keyedJobs = []
     for chunkPath in chunkPaths:
         compileJob, link, bundle = _driverCompileJobs(
             compiler, includeDir, target, chunkPath, objPath, pchPath
@@ -122,6 +130,7 @@ def compileHelperChunks(
         compileJobs.append(_replaced(compileJob, driverObj, [chunkObj]))
         chunkObjs.append(chunkObj)
         driverObjs.append(driverObj)
+        keyedJobs.append((str(chunkPath), compileJob))
         if len(compileJobs) == 1:
             firstLink, firstBundle = link, bundle
 
@@ -134,9 +143,27 @@ def compileHelperChunks(
     if f"-output={objPath}" not in bundleJob:
         raise RuntimeError(f"the bundle job does not write {objPath}: {' '.join(bundleJob)}")
 
+    caching = cache is not None and cache.enabled
+    keys = cache.keys(compiler.path, includeDir, keyedJobs) if caching else [None] * len(chunkObjs)
+    hits = [key is not None and cache.restore(key, obj) for key, obj in zip(keys, chunkObjs)]
+    if caching:
+        print1(f"# Helper kernel chunk cache: {sum(hits)} of {len(hits)} chunks hit")
+
     desc = "Compiling a chunk of the HIP source kernels (.cpp -> .o)"
-    with ThreadPoolExecutor(max_workers=len(compileJobs)) as executor:
-        # list(): wait for every compile, and raise the first failure.
-        list(executor.map(lambda job: _invoke(job, desc), compileJobs))
-    _invoke(linkJob, "Linking the HIP source kernel chunks (.o -> .o)")
-    _invoke(bundleJob, "Bundling the linked HIP source kernels (.o -> .o)")
+    misses = [job for job, hit in zip(compileJobs, hits) if not hit]
+    if misses:
+        with ThreadPoolExecutor(max_workers=len(misses)) as executor:
+            # list(): wait for every compile, and raise the first failure.
+            list(executor.map(lambda job: _invoke(job, desc), misses))
+    try:
+        _invoke(linkJob, "Linking the HIP source kernel chunks (.o -> .o)")
+        _invoke(bundleJob, "Bundling the linked HIP source kernels (.o -> .o)")
+    except Exception:
+        # A cached object may be what broke the link (e.g. a truncated entry).
+        for key, hit in zip(keys, hits):
+            if hit:
+                cache.discard(key)
+        raise
+    for key, hit, obj in zip(keys, hits, chunkObjs):
+        if key is not None and not hit:
+            cache.store(key, obj)
