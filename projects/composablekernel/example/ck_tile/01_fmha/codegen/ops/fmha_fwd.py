@@ -798,6 +798,9 @@ class FmhaFwdTileSize:
     # The pipeline tag that owns this tile: an owned tile pairs with that pipeline
     # only (see check_tile_owner). None: any pipeline without tiles of its own.
     F_pipeline_tag: Optional[str] = None
+    # paged split-KV only: compile the merge of a K/V tile that straddles two
+    # page blocks (a page shorter than F_bn0, or one not aligned to F_bn0)
+    F_page_shorter_than_tile: bool = False
 
     @property
     def name(self) -> str:
