@@ -390,7 +390,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
             for(kh = 0; kh < KH; ++kh)
             {
-                snprintf(name_store[kh], 32, "sp_acc_%d", kh);
+                snprintf(name_store[kh], 32, "sp_acc_kh%d", kh);
                 iargs[kh].name = name_store[kh];
                 iargs[kh].init = zero_f32;
             }

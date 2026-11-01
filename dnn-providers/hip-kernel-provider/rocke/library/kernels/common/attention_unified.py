@@ -4294,7 +4294,7 @@ def _3d_signature(
         .scalar("softcap", "f32")
         .scalar("num_seqs", "i32")
         .scalar("block_table_stride", "i32")
-        .scalar("qq_bias_stride_0", "i32")
+        .scalar("qq_bias_stride0", "i32")
     )
     # Conditional params, in the kernel's declaration order (bias, then strided KV).
     if include_additive_bias:
@@ -4363,7 +4363,7 @@ def _attn_signature(
     if include_bt_stride:
         sb.scalar("block_table_stride", "i32")
     if include_qq_bias_stride:
-        sb.scalar("qq_bias_stride_0", "i32")
+        sb.scalar("qq_bias_stride0", "i32")
     # Appended last, matching the kernel's conditional param declarations:
     # additive bias, then the LSE output (the tiled 2D builders declare
     # lse_ptr after declare_additive_bias_params).
@@ -4433,7 +4433,7 @@ def _attn_values(
     if include_bt_stride:
         vals["block_table_stride"] = int(bt_stride)
     if include_qq_bias_stride:
-        vals["qq_bias_stride_0"] = int(qq_bias_stride_0)
+        vals["qq_bias_stride0"] = int(qq_bias_stride_0)
     if include_additive_bias_strides:
         vals["additive_bias_batch_stride"] = int(additive_bias_batch_stride)
         vals["additive_bias_head_stride"] = int(additive_bias_head_stride)
@@ -4773,7 +4773,7 @@ def _run_3d_tiled_on_stream(
         "softcap": float(softcap),
         "num_seqs": int(problem.num_seqs),
         "block_table_stride": int(bt_stride),
-        "qq_bias_stride_0": int(qq_bias_stride_0),
+        "qq_bias_stride0": int(qq_bias_stride_0),
         "additive_bias_batch_stride": int(additive_bias_batch_stride),
         "additive_bias_head_stride": int(additive_bias_head_stride),
         "additive_bias_sq_stride": int(additive_bias_sq_stride),

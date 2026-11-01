@@ -1224,7 +1224,7 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
                 return NULL;
             for(int i = 0; i < n_guard; ++i)
             {
-                g_args[i].name = rocke_arena_printf(&b->arena, "rg_y%d_%d", y_local, i);
+                g_args[i].name = rocke_arena_printf(&b->arena, "rg_y%d_i%d", y_local, i);
                 g_args[i].init = acc[guard_keys[i]];
             }
             const char* g_iv = rocke_arena_printf(&b->arena, "rg_y%d", y_local);

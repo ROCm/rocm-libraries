@@ -493,7 +493,7 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
             zslot,
             n_units,
             n_z,
-            [(f"acc{PRE}_{i}", zero_acc) for i in range(n_acc)],
+            [(f"acc{PRE}_i{i}", zero_acc) for i in range(n_acc)],
             iv_name=f"unit{PRE}",
             elide_trailing_barrier=False,
         )
@@ -557,7 +557,7 @@ def build_dw_wgrad_mfma(spec: DwWgradMfmaSpec, arch: str = "gfx950") -> KernelDe
                 c0,
                 trips,
                 c1,
-                [(f"a{PRE}_{i}", v) for i, v in enumerate(pack(accs, ring))],
+                [(f"a{PRE}_i{i}", v) for i, v in enumerate(pack(accs, ring))],
                 iv_name=f"rb{PRE}",
                 elide_trailing_barrier=False,
             )

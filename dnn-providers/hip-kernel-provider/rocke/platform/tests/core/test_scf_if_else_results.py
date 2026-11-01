@@ -160,15 +160,17 @@ def test_both_engines_emit_the_same_llvm_ir():
 def test_hip_declares_the_results_before_the_if_and_assigns_them_in_both_branches():
     hip = lower_hip_with_both_engines(_branch_kernel("if_else_hip"), "gfx942")
     lines = [line.strip() for line in hip.splitlines()]
-    head = lines.index("float if4;")
-    assert lines[head + 1] == "i32x2 if5;"
+    head = lines.index("float if_4;")
+    assert lines[head + 1] == "i32x2 if_5;"
     assert lines[head + 2].startswith("if(") and lines[head + 2].endswith(") {")
     middle = lines.index("} else {", head)
     end = lines.index("}", middle)
     then_lines = lines[head + 3 : middle]
     else_lines = lines[middle + 1 : end]
-    assert then_lines[-2].startswith("if4 = gl") and then_lines[-1].startswith("if5 = ")
-    assert else_lines[-2].startswith("if4 = c") and else_lines[-1].startswith("if5 = ")
+    assert then_lines[-2].startswith("if_4 = gl")
+    assert then_lines[-1].startswith("if_5 = ")
+    assert else_lines[-2].startswith("if_4 = c")
+    assert else_lines[-1].startswith("if_5 = ")
 
 
 def test_hip_source_compiles(tmp_path):

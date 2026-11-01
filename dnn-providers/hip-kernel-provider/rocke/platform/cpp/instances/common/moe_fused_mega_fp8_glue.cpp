@@ -502,7 +502,7 @@ void rocke_moe_fp8_emit_body(rocke_moe_fp8_build_ctx_t* ctx)
                               rocke_b_add(b, ctx->warp_n_off, rocke_b_const_i32(b, ni * atom->n)));
         }
 
-        snprintf(tag, sizeof(tag), "%d", mi);
+        snprintf(tag, sizeof(tag), "m%d", mi);
         rocke_moe_fp8_emit_fp8_gateup_fused_kloop(ctx,
                                                   ctx->A,
                                                   ctx->WGate,
@@ -704,7 +704,7 @@ void rocke_moe_fp8_emit_body(rocke_moe_fp8_build_ctx_t* ctx)
                         = rocke_b_add(b, down_warp_m_off, rocke_b_const_i32(b, mi * atom->m));
                     rocke_value_t* d_dq;
 
-                    snprintf(dtag, sizeof(dtag), "d%d_%d", mi, ni);
+                    snprintf(dtag, sizeof(dtag), "d_m%d_n%d", mi, ni);
                     d_dq = rocke_moe_fp8_emit_fp8_down_group_gemm(ctx,
                                                                   &ctx->fp8_view,
                                                                   ctx->WDown,

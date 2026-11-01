@@ -225,7 +225,7 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* softcap_p; /* F32 softcap                                 */
     rocke_value_t* num_seqs_p; /* I32 num_seqs                                */
     rocke_value_t* bt_stride_p; /* I32 block_table_stride                      */
-    rocke_value_t* qq_bias_stride0_p; /* I32 qq_bias_stride_0                        */
+    rocke_value_t* qq_bias_stride0_p; /* I32 qq_bias_stride0                         */
 
     /* ---------- grid ids + thread (lines 331-334) ---------- */
     rocke_value_t* q_block_global_idx; /* block_id_x()                              */

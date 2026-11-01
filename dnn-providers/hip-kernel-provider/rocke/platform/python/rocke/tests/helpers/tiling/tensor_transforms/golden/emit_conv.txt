@@ -1,95 +1,95 @@
 kernel @emit_test() {
-  %tid1 = gpu.thread_id {axis = "x"} : i32
-  %bid2 = gpu.block_id {axis = "x"} : i32
-  %c3 = arith.constant {ity = "i32", value = 16} : i32
-  %mul4 = arith.mul %bid2, %c3 : i32
-  %range5 = arith.assume_range %mul4 {hi = 72, lo = 0, multiple_of = 1, residue = 0} : i32
-  %c6 = arith.constant {ity = "i32", value = 4} : i32
-  %div7 = arith.div %tid1, %c6 : i32
-  %add8 = arith.add %range5, %div7 : i32
-  %c9 = arith.constant {ity = "i32", value = 4} : i32
-  %mod10 = arith.mod %tid1, %c9 : i32
-  %c11 = arith.constant {ity = "i32", value = 8} : i32
-  %mul12 = arith.mul %mod10, %c11 : i32
-  %c13 = arith.constant {ity = "i32", value = 1} : i32
-  %add14 = arith.add %mul12, %c13 : i32
-  %c15 = arith.constant {ity = "i32", value = 1431655766} : i32
-  %umh16 = arith.umul_hi_i32 %mul12, %c15 : i32
-  %add17 = arith.add %umh16, %mul12 {wrap = "nuw"} : i32
-  %c18 = arith.constant {ity = "i32", value = 2} : i32
-  %lshr19 = arith.lshr %add17, %c18 : i32
-  %c20 = arith.constant {ity = "i32", value = 3} : i32
-  %mul21 = arith.mul %lshr19, %c20 : i32
-  %sub22 = arith.sub %mul12, %mul21 : i32
-  %c23 = arith.constant {ity = "i32", value = 1431655766} : i32
-  %umh24 = arith.umul_hi_i32 %lshr19, %c23 : i32
-  %add25 = arith.add %umh24, %lshr19 {wrap = "nuw"} : i32
-  %c26 = arith.constant {ity = "i32", value = 2} : i32
-  %lshr27 = arith.lshr %add25, %c26 : i32
-  %mul28 = arith.mul %lshr27, %c20 : i32
-  %sub29 = arith.sub %lshr19, %mul28 : i32
-  %c30 = arith.constant {ity = "i32", value = 1431655766} : i32
-  %umh31 = arith.umul_hi_i32 %range5, %c30 : i32
-  %add32 = arith.add %umh31, %range5 {wrap = "nuw"} : i32
-  %c33 = arith.constant {ity = "i32", value = 3} : i32
-  %lshr34 = arith.lshr %add32, %c33 : i32
-  %c35 = arith.constant {ity = "i32", value = 6} : i32
-  %mul36 = arith.mul %lshr34, %c35 : i32
-  %sub37 = arith.sub %range5, %mul36 : i32
-  %c38 = arith.constant {ity = "i32", value = 1431655766} : i32
-  %umh39 = arith.umul_hi_i32 %div7, %c38 : i32
-  %add40 = arith.add %umh39, %div7 {wrap = "nuw"} : i32
-  %c41 = arith.constant {ity = "i32", value = 3} : i32
-  %lshr42 = arith.lshr %add40, %c41 : i32
-  %mul43 = arith.mul %lshr42, %c35 : i32
-  %sub44 = arith.sub %div7, %mul43 : i32
-  %add45 = arith.add %sub37, %sub44 : i32
-  %ge46 = arith.cmp %add45, %c35 {pred = "ge"} : i1
-  %c47 = arith.constant {ity = "i32", value = 0} : i32
-  %sel48 = arith.select %ge46, %c35, %c47 : i32
-  %sub49 = arith.sub %add45, %sel48 : i32
-  %zx50 = arith.zext %ge46 : i32
-  %c51 = arith.constant {ity = "i32", value = 1431655766} : i32
-  %umh52 = arith.umul_hi_i32 %lshr34, %c51 : i32
-  %add53 = arith.add %umh52, %lshr34 {wrap = "nuw"} : i32
-  %c54 = arith.constant {ity = "i32", value = 3} : i32
-  %lshr55 = arith.lshr %add53, %c54 : i32
-  %mul56 = arith.mul %lshr55, %c35 : i32
-  %sub57 = arith.sub %lshr34, %mul56 : i32
-  %add58 = arith.add %sub57, %lshr42 : i32
-  %add59 = arith.add %add58, %zx50 : i32
-  %ge60 = arith.cmp %add59, %c35 {pred = "ge"} : i1
-  %sel61 = arith.select %ge60, %c35, %c47 : i32
-  %sub62 = arith.sub %add59, %sel61 : i32
-  %zx63 = arith.zext %ge60 : i32
-  %add64 = arith.add %sub62, %lshr27 : i32
-  %add65 = arith.add %sub49, %sub29 : i32
-  %c66 = arith.constant {ity = "i32", value = 108} : i32
-  %mul67 = arith.mul %zx63, %c66 : i32
-  %mul68 = arith.mul %lshr55, %c66 : i32
-  %c69 = arith.constant {ity = "i32", value = 18} : i32
-  %mul70 = arith.mul %add64, %c69 : i32
-  %mul71 = arith.mul %add65, %c20 : i32
-  %add72 = arith.add %mul67, %mul70 : i32
-  %add73 = arith.add %add72, %mul71 : i32
-  %add74 = arith.add %add73, %sub22 : i32
-  %c75 = arith.constant {ity = "i32", value = 1} : i32
-  %add76 = arith.add %sub22, %c75 : i32
-  %ge77 = arith.cmp %add76, %c20 {pred = "ge"} : i1
-  %sel78 = arith.select %ge77, %c20, %c47 : i32
-  %sub79 = arith.sub %add76, %sel78 : i32
-  %zx80 = arith.zext %ge77 : i32
-  %add81 = arith.add %sub29, %zx80 : i32
-  %ge82 = arith.cmp %add81, %c20 {pred = "ge"} : i1
-  %sel83 = arith.select %ge82, %c20, %c47 : i32
-  %sub84 = arith.sub %add81, %sel83 : i32
-  %zx85 = arith.zext %ge82 : i32
-  %add86 = arith.add %lshr27, %zx85 : i32
-  %add87 = arith.add %sub62, %add86 : i32
-  %add88 = arith.add %sub49, %sub84 : i32
-  %mul89 = arith.mul %add87, %c69 : i32
-  %mul90 = arith.mul %add88, %c20 : i32
-  %add91 = arith.add %mul67, %mul89 : i32
-  %add92 = arith.add %add91, %mul90 : i32
-  %add93 = arith.add %add92, %sub79 : i32
+  %tid_1 = gpu.thread_id {axis = "x"} : i32
+  %bid_2 = gpu.block_id {axis = "x"} : i32
+  %c_3 = arith.constant {ity = "i32", value = 16} : i32
+  %mul_4 = arith.mul %bid_2, %c_3 : i32
+  %range_5 = arith.assume_range %mul_4 {hi = 72, lo = 0, multiple_of = 1, residue = 0} : i32
+  %c_6 = arith.constant {ity = "i32", value = 4} : i32
+  %div_7 = arith.div %tid_1, %c_6 : i32
+  %add_8 = arith.add %range_5, %div_7 : i32
+  %c_9 = arith.constant {ity = "i32", value = 4} : i32
+  %mod_10 = arith.mod %tid_1, %c_9 : i32
+  %c_11 = arith.constant {ity = "i32", value = 8} : i32
+  %mul_12 = arith.mul %mod_10, %c_11 : i32
+  %c_13 = arith.constant {ity = "i32", value = 1} : i32
+  %add_14 = arith.add %mul_12, %c_13 : i32
+  %c_15 = arith.constant {ity = "i32", value = 1431655766} : i32
+  %umh_16 = arith.umul_hi_i32 %mul_12, %c_15 : i32
+  %add_17 = arith.add %umh_16, %mul_12 {wrap = "nuw"} : i32
+  %c_18 = arith.constant {ity = "i32", value = 2} : i32
+  %lshr_19 = arith.lshr %add_17, %c_18 : i32
+  %c_20 = arith.constant {ity = "i32", value = 3} : i32
+  %mul_21 = arith.mul %lshr_19, %c_20 : i32
+  %sub_22 = arith.sub %mul_12, %mul_21 : i32
+  %c_23 = arith.constant {ity = "i32", value = 1431655766} : i32
+  %umh_24 = arith.umul_hi_i32 %lshr_19, %c_23 : i32
+  %add_25 = arith.add %umh_24, %lshr_19 {wrap = "nuw"} : i32
+  %c_26 = arith.constant {ity = "i32", value = 2} : i32
+  %lshr_27 = arith.lshr %add_25, %c_26 : i32
+  %mul_28 = arith.mul %lshr_27, %c_20 : i32
+  %sub_29 = arith.sub %lshr_19, %mul_28 : i32
+  %c_30 = arith.constant {ity = "i32", value = 1431655766} : i32
+  %umh_31 = arith.umul_hi_i32 %range_5, %c_30 : i32
+  %add_32 = arith.add %umh_31, %range_5 {wrap = "nuw"} : i32
+  %c_33 = arith.constant {ity = "i32", value = 3} : i32
+  %lshr_34 = arith.lshr %add_32, %c_33 : i32
+  %c_35 = arith.constant {ity = "i32", value = 6} : i32
+  %mul_36 = arith.mul %lshr_34, %c_35 : i32
+  %sub_37 = arith.sub %range_5, %mul_36 : i32
+  %c_38 = arith.constant {ity = "i32", value = 1431655766} : i32
+  %umh_39 = arith.umul_hi_i32 %div_7, %c_38 : i32
+  %add_40 = arith.add %umh_39, %div_7 {wrap = "nuw"} : i32
+  %c_41 = arith.constant {ity = "i32", value = 3} : i32
+  %lshr_42 = arith.lshr %add_40, %c_41 : i32
+  %mul_43 = arith.mul %lshr_42, %c_35 : i32
+  %sub_44 = arith.sub %div_7, %mul_43 : i32
+  %add_45 = arith.add %sub_37, %sub_44 : i32
+  %ge_46 = arith.cmp %add_45, %c_35 {pred = "ge"} : i1
+  %c_47 = arith.constant {ity = "i32", value = 0} : i32
+  %sel_48 = arith.select %ge_46, %c_35, %c_47 : i32
+  %sub_49 = arith.sub %add_45, %sel_48 : i32
+  %zx_50 = arith.zext %ge_46 : i32
+  %c_51 = arith.constant {ity = "i32", value = 1431655766} : i32
+  %umh_52 = arith.umul_hi_i32 %lshr_34, %c_51 : i32
+  %add_53 = arith.add %umh_52, %lshr_34 {wrap = "nuw"} : i32
+  %c_54 = arith.constant {ity = "i32", value = 3} : i32
+  %lshr_55 = arith.lshr %add_53, %c_54 : i32
+  %mul_56 = arith.mul %lshr_55, %c_35 : i32
+  %sub_57 = arith.sub %lshr_34, %mul_56 : i32
+  %add_58 = arith.add %sub_57, %lshr_42 : i32
+  %add_59 = arith.add %add_58, %zx_50 : i32
+  %ge_60 = arith.cmp %add_59, %c_35 {pred = "ge"} : i1
+  %sel_61 = arith.select %ge_60, %c_35, %c_47 : i32
+  %sub_62 = arith.sub %add_59, %sel_61 : i32
+  %zx_63 = arith.zext %ge_60 : i32
+  %add_64 = arith.add %sub_62, %lshr_27 : i32
+  %add_65 = arith.add %sub_49, %sub_29 : i32
+  %c_66 = arith.constant {ity = "i32", value = 108} : i32
+  %mul_67 = arith.mul %zx_63, %c_66 : i32
+  %mul_68 = arith.mul %lshr_55, %c_66 : i32
+  %c_69 = arith.constant {ity = "i32", value = 18} : i32
+  %mul_70 = arith.mul %add_64, %c_69 : i32
+  %mul_71 = arith.mul %add_65, %c_20 : i32
+  %add_72 = arith.add %mul_67, %mul_70 : i32
+  %add_73 = arith.add %add_72, %mul_71 : i32
+  %add_74 = arith.add %add_73, %sub_22 : i32
+  %c_75 = arith.constant {ity = "i32", value = 1} : i32
+  %add_76 = arith.add %sub_22, %c_75 : i32
+  %ge_77 = arith.cmp %add_76, %c_20 {pred = "ge"} : i1
+  %sel_78 = arith.select %ge_77, %c_20, %c_47 : i32
+  %sub_79 = arith.sub %add_76, %sel_78 : i32
+  %zx_80 = arith.zext %ge_77 : i32
+  %add_81 = arith.add %sub_29, %zx_80 : i32
+  %ge_82 = arith.cmp %add_81, %c_20 {pred = "ge"} : i1
+  %sel_83 = arith.select %ge_82, %c_20, %c_47 : i32
+  %sub_84 = arith.sub %add_81, %sel_83 : i32
+  %zx_85 = arith.zext %ge_82 : i32
+  %add_86 = arith.add %lshr_27, %zx_85 : i32
+  %add_87 = arith.add %sub_62, %add_86 : i32
+  %add_88 = arith.add %sub_49, %sub_84 : i32
+  %mul_89 = arith.mul %add_87, %c_69 : i32
+  %mul_90 = arith.mul %add_88, %c_20 : i32
+  %add_91 = arith.add %mul_67, %mul_89 : i32
+  %add_92 = arith.add %add_91, %mul_90 : i32
+  %add_93 = arith.add %add_92, %sub_79 : i32
 }

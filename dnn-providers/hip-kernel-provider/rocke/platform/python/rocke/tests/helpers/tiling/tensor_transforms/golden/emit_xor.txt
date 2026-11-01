@@ -1,20 +1,20 @@
 kernel @emit_test() {
-  %tid1 = gpu.thread_id {axis = "x"} : i32
-  %bid2 = gpu.block_id {axis = "x"} : i32
-  %c3 = arith.constant {ity = "i32", value = 8} : i32
-  %mul4 = arith.mul %bid2, %c3 : i32
-  %range5 = arith.assume_range %mul4 {hi = 64, lo = 0, multiple_of = 1, residue = 0} : i32
-  %c6 = arith.constant {ity = "i32", value = 8} : i32
-  %div7 = arith.div %tid1, %c6 : i32
-  %add8 = arith.add %range5, %div7 : i32
-  %c9 = arith.constant {ity = "i32", value = 8} : i32
-  %mod10 = arith.mod %tid1, %c9 : i32
-  %add11 = arith.add %range5, %div7 : i32
-  %c12 = arith.constant {ity = "i32", value = 7} : i32
-  %and13 = arith.and %add11, %c12 : i32
-  %xor14 = arith.xor %mod10, %and13 : i32
-  %c15 = arith.constant {ity = "i32", value = 8} : i32
-  %mul16 = arith.mul %div7, %c15 : i32
-  %mul17 = arith.mul %range5, %c15 : i32
-  %add18 = arith.add %mul16, %xor14 : i32
+  %tid_1 = gpu.thread_id {axis = "x"} : i32
+  %bid_2 = gpu.block_id {axis = "x"} : i32
+  %c_3 = arith.constant {ity = "i32", value = 8} : i32
+  %mul_4 = arith.mul %bid_2, %c_3 : i32
+  %range_5 = arith.assume_range %mul_4 {hi = 64, lo = 0, multiple_of = 1, residue = 0} : i32
+  %c_6 = arith.constant {ity = "i32", value = 8} : i32
+  %div_7 = arith.div %tid_1, %c_6 : i32
+  %add_8 = arith.add %range_5, %div_7 : i32
+  %c_9 = arith.constant {ity = "i32", value = 8} : i32
+  %mod_10 = arith.mod %tid_1, %c_9 : i32
+  %add_11 = arith.add %range_5, %div_7 : i32
+  %c_12 = arith.constant {ity = "i32", value = 7} : i32
+  %and_13 = arith.and %add_11, %c_12 : i32
+  %xor_14 = arith.xor %mod_10, %and_13 : i32
+  %c_15 = arith.constant {ity = "i32", value = 8} : i32
+  %mul_16 = arith.mul %div_7, %c_15 : i32
+  %mul_17 = arith.mul %range_5, %c_15 : i32
+  %add_18 = arith.add %mul_16, %xor_14 : i32
 }

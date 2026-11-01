@@ -1948,7 +1948,7 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     iter_args = [(f"m{mt}", neg_inf) for mt in range(M_TILES)]
     iter_args += [(f"l{mt}", zero_f) for mt in range(M_TILES)]
     iter_args += [
-        (f"acc{mt}_{t}", b.zero_vec_f32(4))
+        (f"acc{mt}_t{t}", b.zero_vec_f32(4))
         for mt in range(M_TILES)
         for t in range(N_R_PER_WAVE)
     ]
@@ -2843,7 +2843,7 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
         acc_file = _AgprAcc(b, M_TILES * N_R_TILES)
     else:
         iter_args += [
-            (f"acc{mt}_{t}", b.zero_vec_f32(4))
+            (f"acc{mt}_t{t}", b.zero_vec_f32(4))
             for mt in range(M_TILES)
             for t in range(N_R_TILES)
         ]
@@ -3286,7 +3286,7 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
                 ),
                 b.const_i32(1),
                 iter_args=[
-                    (f"rs{int(masked)}{slot}{mt}_{t}", accs[mt][t])
+                    (f"rs{int(masked)}{slot}{mt}_t{t}", accs[mt][t])
                     for t in range(N_R_TILES)
                 ],
                 iv_name=f"rescale{int(masked)}{slot}{mt}",

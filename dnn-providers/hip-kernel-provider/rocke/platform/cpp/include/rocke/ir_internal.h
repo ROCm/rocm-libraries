@@ -51,7 +51,13 @@ bool rocke_i_live(const rocke_ir_builder_t* b);
 
 /* ------------------------------------------------------ value / op plumbing */
 
-/* Allocate a fresh SSA Value (arena-owned) named "%<prefix><counter>" with the
+/* Throw ckc::ValueError when an author-chosen value name is not an identifier
+ * or ends in '_' and digits (the form builder-made names take). `what` names
+ * the kind of name ("kernel parameter", ...). The twin of
+ * core/ir.py::_refuse_declared_name, with the same messages. */
+void rocke_i_refuse_declared_name(rocke_ir_builder_t* b, const char* what, const char* name);
+
+/* Allocate a fresh SSA Value (arena-owned) named "%<prefix>_<counter>" with the
  * given type. Bumps builder->counter. Mirrors Python IRBuilder._fresh + Value
  * construction. Returns NULL on OOM (and sets the sticky error). */
 rocke_value_t*

@@ -536,7 +536,7 @@ def build_unified_attention_3d_tiled(
     softcap_p = b.param("softcap", F32)
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
-    qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    qq_bias_stride0_p = b.param("qq_bias_stride0", I32)
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
     additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None

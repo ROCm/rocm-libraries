@@ -731,7 +731,7 @@ std::vector<V> segment(Ctx& c, std::vector<V> accs, V n0, V q, V h0, V h_end, V 
     {
         for(int mi = 0; mi < c.WK16; ++mi)
         {
-            names.push_back("r" + std::to_string(j) + "_" + std::to_string(mi));
+            names.push_back("r" + std::to_string(j) + "_m" + std::to_string(mi));
             inits.push_back(ring[j][mi]);
         }
     }

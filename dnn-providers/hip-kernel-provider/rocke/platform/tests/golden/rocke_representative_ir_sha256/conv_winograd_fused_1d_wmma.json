@@ -5,18 +5,18 @@
       "cases": {
         "conv_winograd_fused_1d_wmma/gfx1250/1x11_4s3_c128_sel": {
           "arch": "gfx1250",
-          "bytes": 997274,
+          "bytes": 1023328,
           "family": "conv_winograd_fused_1d_wmma",
           "kernel_name": "conv_wino_fused1d_N1H1W600C128_K128Y1X11_3xF4_4_q2_fk4_g10_xwmma16_pf_mg_w4_mh",
-          "sha256": "c99fcd5869decb0e69f350259b757fa951786b57f1739b99e1372cb36b53f093",
+          "sha256": "7df05f0ef8df5159e7f2d90bebcf318fe9a536078699a2004b4f4816bd4e3507",
           "status": "ok"
         },
         "conv_winograd_fused_1d_wmma/gfx1250/1x7_4s2_c64_valu": {
           "arch": "gfx1250",
-          "bytes": 166365,
+          "bytes": 171312,
           "family": "conv_winograd_fused_1d_wmma",
           "kernel_name": "conv_wino_fused1d_N1H1W600C64_K64Y1X7_2xF4_4_q2_fk2_g10",
-          "sha256": "36893620e3eec260d6170dd3054be142a26becae26abb8bc8fab688402a32974",
+          "sha256": "7bd0bb57227459bea938b10997334d3c58f8c8d624e3facdfcb5772190b5a70a",
           "status": "ok"
         }
       },
@@ -26,18 +26,18 @@
       "cases": {
         "conv_winograd_fused_1d_wmma/gfx1250/1x11_4s3_c128_sel": {
           "arch": "gfx1250",
-          "bytes": 997419,
+          "bytes": 1023473,
           "family": "conv_winograd_fused_1d_wmma",
           "kernel_name": "conv_wino_fused1d_N1H1W600C128_K128Y1X11_3xF4_4_q2_fk4_g10_xwmma16_pf_mg_w4_mh",
-          "sha256": "e7cc4014fdd77592448911181cd2d1a9a333e949ea5734d8cfb1497a054faaa0",
+          "sha256": "adbd264ff8eb90935b22e92dab6508fdcab5101bb0d8993f3e7625839d63c7a8",
           "status": "ok"
         },
         "conv_winograd_fused_1d_wmma/gfx1250/1x7_4s2_c64_valu": {
           "arch": "gfx1250",
-          "bytes": 166504,
+          "bytes": 171451,
           "family": "conv_winograd_fused_1d_wmma",
           "kernel_name": "conv_wino_fused1d_N1H1W600C64_K64Y1X7_2xF4_4_q2_fk2_g10",
-          "sha256": "df1af184b6a701b9c3e56932a0f2f5a2ae1a6adb9eaa1f0693072cc989f05428",
+          "sha256": "ca3ec5b291e8474906c8643b5ca1f8651da7c9a9f6764e9ab64de2fda21b5648",
           "status": "ok"
         }
       },
@@ -47,18 +47,18 @@
       "cases": {
         "conv_winograd_fused_1d_wmma/gfx1250/1x11_4s3_c128_sel": {
           "arch": "gfx1250",
-          "bytes": 997483,
+          "bytes": 1023537,
           "family": "conv_winograd_fused_1d_wmma",
           "kernel_name": "conv_wino_fused1d_N1H1W600C128_K128Y1X11_3xF4_4_q2_fk4_g10_xwmma16_pf_mg_w4_mh",
-          "sha256": "c0361379844c66a779d9c8eb2710467b8f164f0cc83fe7e600905694c2df5dcb",
+          "sha256": "06bbed1ce4b080ae76dd4d55d1aced8f2fb3d03b83fcfcbbd693b60f85447156",
           "status": "ok"
         },
         "conv_winograd_fused_1d_wmma/gfx1250/1x7_4s2_c64_valu": {
           "arch": "gfx1250",
-          "bytes": 166568,
+          "bytes": 171515,
           "family": "conv_winograd_fused_1d_wmma",
           "kernel_name": "conv_wino_fused1d_N1H1W600C64_K64Y1X7_2xF4_4_q2_fk2_g10",
-          "sha256": "66c965d90bced895c388e739f7779accce686dcfe349a874ccdc8128aaa966c7",
+          "sha256": "1089f8b7cef64e0f4638c4824eef7e90c1feb2f840aba71b1fe3ff83c51c2e83",
           "status": "ok"
         }
       },
@@ -68,18 +68,18 @@
       "cases": {
         "conv_winograd_fused_1d_wmma/gfx1250/1x11_4s3_c128_sel": {
           "arch": "gfx1250",
-          "bytes": 997483,
+          "bytes": 1023537,
           "family": "conv_winograd_fused_1d_wmma",
           "kernel_name": "conv_wino_fused1d_N1H1W600C128_K128Y1X11_3xF4_4_q2_fk4_g10_xwmma16_pf_mg_w4_mh",
-          "sha256": "c0361379844c66a779d9c8eb2710467b8f164f0cc83fe7e600905694c2df5dcb",
+          "sha256": "06bbed1ce4b080ae76dd4d55d1aced8f2fb3d03b83fcfcbbd693b60f85447156",
           "status": "ok"
         },
         "conv_winograd_fused_1d_wmma/gfx1250/1x7_4s2_c64_valu": {
           "arch": "gfx1250",
-          "bytes": 166568,
+          "bytes": 171515,
           "family": "conv_winograd_fused_1d_wmma",
           "kernel_name": "conv_wino_fused1d_N1H1W600C64_K64Y1X7_2xF4_4_q2_fk2_g10",
-          "sha256": "66c965d90bced895c388e739f7779accce686dcfe349a874ccdc8128aaa966c7",
+          "sha256": "1089f8b7cef64e0f4638c4824eef7e90c1feb2f840aba71b1fe3ff83c51c2e83",
           "status": "ok"
         }
       },

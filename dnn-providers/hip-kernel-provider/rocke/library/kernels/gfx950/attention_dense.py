@@ -1492,8 +1492,8 @@ def build_attention_dense(
             _rs_ctr[0] += 1
             tg = _rs_ctr[0]
             trips = b.select(skip, b.const_i32(0), b.const_i32(1))
-            rs_args = [(f"ro{dt}_{tg}", o_acc[dt]) for dt in range(D_TILES)]
-            rs_args.append((f"rl_{tg}", l_i))
+            rs_args = [(f"ro{dt}_rs{tg}", o_acc[dt]) for dt in range(D_TILES)]
+            rs_args.append((f"rl_rs{tg}", l_i))
             rs = b.scf_for_iter(
                 b.const_i32(0), trips, b.const_i32(1), rs_args, iv_name=f"rs{tg}"
             )
@@ -2490,8 +2490,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 _rs_ctr[0] += 1
                 tg = _rs_ctr[0]
                 trips = b.select(skip, b.const_i32(0), b.const_i32(1))
-                rs_args = [(f"ro{dt}_{tg}", o_acc[dt]) for dt in range(D_TILES)]
-                rs_args.append((f"rl_{tg}", l_i))
+                rs_args = [(f"ro{dt}_rs{tg}", o_acc[dt]) for dt in range(D_TILES)]
+                rs_args.append((f"rl_rs{tg}", l_i))
                 rs = b.scf_for_iter(
                     b.const_i32(0), trips, b.const_i32(1), rs_args, iv_name=f"rs{tg}"
                 )

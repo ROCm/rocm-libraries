@@ -5,10 +5,10 @@
       "cases": {
         "conv_winograd_gemm_wmma/gfx1250/reduce_fp16": {
           "arch": "gfx1250",
-          "bytes": 4372,
+          "bytes": 4438,
           "family": "conv_winograd_gemm_wmma",
           "kernel_name": "wino_gemm_reduce",
-          "sha256": "cfac1d262cddc4ed08d86b5a91e2a547f5f924667141459831f26751df35ad27",
+          "sha256": "ebc6afbbd0ce7e6defe7d0e46843b0ce5ca0f7dce29a62d690905c6bc3f508cd",
           "status": "ok"
         }
       },
@@ -27,10 +27,10 @@
       "cases": {
         "conv_winograd_gemm_wmma/gfx1250/reduce_fp16": {
           "arch": "gfx1250",
-          "bytes": 4464,
+          "bytes": 4530,
           "family": "conv_winograd_gemm_wmma",
           "kernel_name": "wino_gemm_reduce",
-          "sha256": "069ab0991f5326841224e6b03a93b4978ca90c1147d9b9eb432f061b615691c6",
+          "sha256": "18e83ba8dfdd4e6d87e9f67f3e2a9e20f86b94bbd1f520054d79200deec1828d",
           "status": "ok"
         }
       },
@@ -49,26 +49,26 @@
       "cases": {
         "conv_winograd_gemm_wmma/gfx1250/bf16_sk_direct_taps2": {
           "arch": "gfx1250",
-          "bytes": 178113,
+          "bytes": 182479,
           "family": "conv_winograd_gemm_wmma",
           "kernel_name": "wino_gemm_wmma_wm2_wn4_fm8_fn4_tk64_st2_ptdm_direct_sk_pf_x8_siterative-ilp_taps2_bf16",
-          "sha256": "c614b6cfcaac5c0d270b9844aa092562f5661e4ca1d05c9369753cd8331d6fc5",
+          "sha256": "9caa8c122f719785de72db5e5502434230f9c515a3397f5fd07dbaeccb4c530c",
           "status": "ok"
         },
         "conv_winograd_gemm_wmma/gfx1250/fp16_default": {
           "arch": "gfx1250",
-          "bytes": 211622,
+          "bytes": 215314,
           "family": "conv_winograd_gemm_wmma",
           "kernel_name": "wino_gemm_wmma_wm2_wn4_fm8_fn4_tk128_st2_ptdm_tdm_pf_x8_siterative-ilp",
-          "sha256": "77b6c49591490b764e4da2742d6a5b9f02d52ddebb4cede653f6882c276658f7",
+          "sha256": "66b9e707ff05183ee67d0edac14781c6b6b23b0428dfa3b53ff30d7d3967d88d",
           "status": "ok"
         },
         "conv_winograd_gemm_wmma/gfx1250/reduce_fp16": {
           "arch": "gfx1250",
-          "bytes": 4528,
+          "bytes": 4594,
           "family": "conv_winograd_gemm_wmma",
           "kernel_name": "wino_gemm_reduce",
-          "sha256": "b6668987179ab1aec7ce393981ad8d3a6a8910714884641e024f5b6d8b147524",
+          "sha256": "0c4a167b30b9380433c6d24a16037b3f2a25aefea5c1818c23ba7a68d9e05eb0",
           "status": "ok"
         }
       },
@@ -78,26 +78,26 @@
       "cases": {
         "conv_winograd_gemm_wmma/gfx1250/bf16_sk_direct_taps2": {
           "arch": "gfx1250",
-          "bytes": 178113,
+          "bytes": 182479,
           "family": "conv_winograd_gemm_wmma",
           "kernel_name": "wino_gemm_wmma_wm2_wn4_fm8_fn4_tk64_st2_ptdm_direct_sk_pf_x8_siterative-ilp_taps2_bf16",
-          "sha256": "c614b6cfcaac5c0d270b9844aa092562f5661e4ca1d05c9369753cd8331d6fc5",
+          "sha256": "9caa8c122f719785de72db5e5502434230f9c515a3397f5fd07dbaeccb4c530c",
           "status": "ok"
         },
         "conv_winograd_gemm_wmma/gfx1250/fp16_default": {
           "arch": "gfx1250",
-          "bytes": 211622,
+          "bytes": 215314,
           "family": "conv_winograd_gemm_wmma",
           "kernel_name": "wino_gemm_wmma_wm2_wn4_fm8_fn4_tk128_st2_ptdm_tdm_pf_x8_siterative-ilp",
-          "sha256": "77b6c49591490b764e4da2742d6a5b9f02d52ddebb4cede653f6882c276658f7",
+          "sha256": "66b9e707ff05183ee67d0edac14781c6b6b23b0428dfa3b53ff30d7d3967d88d",
           "status": "ok"
         },
         "conv_winograd_gemm_wmma/gfx1250/reduce_fp16": {
           "arch": "gfx1250",
-          "bytes": 4528,
+          "bytes": 4594,
           "family": "conv_winograd_gemm_wmma",
           "kernel_name": "wino_gemm_reduce",
-          "sha256": "b6668987179ab1aec7ce393981ad8d3a6a8910714884641e024f5b6d8b147524",
+          "sha256": "0c4a167b30b9380433c6d24a16037b3f2a25aefea5c1818c23ba7a68d9e05eb0",
           "status": "ok"
         }
       },
