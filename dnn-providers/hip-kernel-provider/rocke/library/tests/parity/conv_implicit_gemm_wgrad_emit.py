@@ -70,6 +70,12 @@
 #   62 -- both engines must reject: gfx1250 cshuffle split-K fp16 dW whose
 #         store vector is odd (C=3 with a 2x2 filter: wg_N=12 is even, but
 #         the LDS pairing has no partner)
+#   63-65 -- gfx1250 two-stage (f32 workspace) split-K on WMMA, the scratch
+#         epilogue decoding the WMMA C fragment: fp16 dW with an odd dW row
+#         (C=3, wg_N=27, M-outer), bf16 dW 64x64x64 2x2 warps K-outer, and fp16
+#         dW over the async K loop with one scratch slab (ws_replicas=1) at C=24
+#   66 -- both engines must reject: two-stage on gfx1151 (no validated float
+#         global atomics for the scratch adds)
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no case loads bf16 operands. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -85,7 +91,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-62, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-66, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -798,6 +804,46 @@ def _spec(idx: int):
             ),
             "gfx1250",
         )
+
+    if 63 <= idx <= 66:
+        # Two-stage (f32 workspace) split-K on WMMA.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p64 = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        p24 = ConvProblem(N=4, Hi=12, Wi=12, C=24, K=32, Y=3, X=3, pH=1, pW=1)
+        p_c3 = ConvProblem(N=4, Hi=12, Wi=12, C=3, K=32, Y=3, X=3, pH=1, pW=1)
+        problem, dtype_d, big, extra, arch = {
+            63: (p_c3, "fp16", False, {}, "gfx1250"),
+            64: (p64, "bf16", True, {"lds_k_outer": True}, "gfx1250"),
+            65: (
+                p24,
+                "fp16",
+                False,
+                {"lds_k_outer": True, "async_dma": True, "ws_replicas": 1},
+                "gfx1250",
+            ),
+            66: (p64, "fp16", False, {}, "gfx1151"),
+        }[idx]
+        gfx1250 = arch == "gfx1250"
+        kw = dict(
+            problem=problem,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+            tile_m=64 if big else 32,
+            tile_n=64 if big else 32,
+            tile_k=64 if big else 32,
+            warp_m=2 if big else 1,
+            warp_n=2 if big else 1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32 if gfx1250 else 16,
+            wave_size=32,
+            pipeline="mem",
+            epilogue="default",
+            split_k=4,
+            two_stage=True,
+        )
+        kw.update(extra)
+        return WgradConvSpec(**kw), arch
 
     # ----------------------------------------------------------------
     # Negative cases: these specs must be REJECTED by the validator.

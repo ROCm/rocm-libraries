@@ -2199,14 +2199,14 @@ class TestWgradValidatorAgreement(unittest.TestCase):
         self.assertIn("two_stage", why)
 
 
-class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
-    """Two-stage wgrad must be rejected on WMMA rather than crashing the builder.
+class TestWgradTwoStageOnWmma(unittest.TestCase):
+    """Two-stage wgrad on WMMA: built on gfx1250, rejected cleanly elsewhere.
 
-    ``_emit_wgrad_workspace_store_epilogue`` is MFMA-only -- it calls
-    ``c_warp_params(atom)`` and ``atom`` is None on wave32 -- and the epilogue
-    dispatch tests ``_is_two_stage`` before the WMMA branch. Without a validator
-    gate a two-stage wave32 spec reaches that emitter and dies with an
-    ``AttributeError``, which no caller pre-filters against.
+    ``_emit_wgrad_workspace_store_epilogue`` decodes the WMMA C fragment through
+    ``op.c_layout()`` (the MFMA one through the atom). Its f32 scratch adds are
+    global float atomics, so a wave32 arch without validated float atomics
+    (gfx1151) must get a validation error, never an exception out of the
+    emitter.
     """
 
     def _gfx1250_spec(self, **kw):
@@ -2216,9 +2216,10 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
         )
         from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
+        dtype_d = kw.pop("dtype_d", "fp32")
         base = dict(
             problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
-            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
             tile_m=32,
             tile_n=32,
             tile_k=32,
@@ -2234,28 +2235,36 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
         base.update(kw)
         return WgradConvSpec(**base)
 
-    def test_two_stage_rejected_on_wmma(self):
-        from kernels.common.conv_implicit_gemm_wgrad import (
-            is_valid_wgrad_spec,
-        )
-
-        ok, why = is_valid_wgrad_spec(
-            self._gfx1250_spec(split_k=4, two_stage=True), "gfx1250"
-        )
-        self.assertFalse(ok, "two-stage on WMMA must be rejected")
-        self.assertIn("CDNA", why)
-
-    def test_two_stage_build_raises_value_error_not_attribute_error(self):
-        # The failure mode that matters: a clean ValueError a caller can handle,
-        # never an AttributeError out of the epilogue emitter.
+    def test_two_stage_admitted_on_gfx1250(self):
         from kernels.common.conv_implicit_gemm_wgrad import (
             build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+            wgrad_two_stage_available,
         )
 
+        self.assertTrue(wgrad_two_stage_available("gfx1250"))
+        for dtype_d in ("fp32", "fp16", "bf16"):
+            spec = self._gfx1250_spec(split_k=4, two_stage=True, dtype_d=dtype_d)
+            ok, why = is_valid_wgrad_spec(spec, "gfx1250")
+            self.assertTrue(ok, f"two-stage on gfx1250 WMMA ({dtype_d}): {why}")
+            build_implicit_gemm_conv_wgrad(spec, arch="gfx1250")
+
+    def test_two_stage_rejected_without_float_atomics(self):
+        # gfx1151 has no validated float global atomics: a clean ValueError a
+        # caller can handle, never an exception out of the epilogue emitter.
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+            wgrad_two_stage_available,
+        )
+
+        self.assertFalse(wgrad_two_stage_available("gfx1151"))
+        spec = self._gfx1250_spec(split_k=4, two_stage=True, warp_tile_k=16)
+        ok, why = is_valid_wgrad_spec(spec, "gfx1151")
+        self.assertFalse(ok)
+        self.assertIn("has_global_float_atomic_add", why)
         with self.assertRaises(ValueError):
-            build_implicit_gemm_conv_wgrad(
-                self._gfx1250_spec(split_k=4, two_stage=True), arch="gfx1250"
-            )
+            build_implicit_gemm_conv_wgrad(spec, arch="gfx1151")
 
     def test_split_k_atomic_still_valid_on_wmma(self):
         # The gate is two-stage-specific: the packed atomic epilogue DOES have a
@@ -2275,9 +2284,9 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
             wgrad_two_stage_available,
         )
 
-        for arch in ("gfx942", "gfx950"):
+        for arch in ("gfx942", "gfx950", "gfx1250"):
             self.assertTrue(wgrad_two_stage_available(arch), arch)
-        for arch in ("gfx1250", "gfx1151", "gfx1201"):
+        for arch in ("gfx1151", "gfx1201"):
             self.assertFalse(wgrad_two_stage_available(arch), arch)
 
     def test_16bit_split_k_atomic_arch_scope(self):
@@ -2643,6 +2652,60 @@ class TestWgradWmmaCShuffle(unittest.TestCase):
 
     def test_cshuffle_async(self):
         self._sweep(async_dma=True)
+
+
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestWgradTwoStageWmmaNumerics(unittest.TestCase):
+    """gfx1250 dW numerics for two-stage (f32 workspace) split-K on WMMA.
+
+    The Stage 1 scratch epilogue decodes the WMMA C fragment through
+    op.c_layout(); a wrong lane-to-element mapping only shows in dW. Covers an
+    odd dW row (a 3-channel stem, wg_N = 27, which the packed atomic cannot
+    serve) and a 2x2 stride-2 downsample, fp16 and bf16, with the plain and the
+    async K loop.
+    """
+
+    _CASES = (
+        _Shape(
+            "stem_C3_N4H32W32C3K32", N=4, Hi=32, Wi=32, C=3, K=32, Y=3, X=3, pH=1, pW=1
+        ),
+        _Shape(
+            "2x2s2_N4H32W32C32K64",
+            N=4,
+            Hi=32,
+            Wi=32,
+            C=32,
+            K=64,
+            Y=2,
+            X=2,
+            sH=2,
+            sW=2,
+        ),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(f"two-stage WMMA wgrad is gfx1250-only; on {GPU_ARCH}")
+        for shape in self._CASES:
+            if knobs.get("async_dma") and shape.C % 2:
+                continue  # the async copy needs an even channel run
+            for dtype in _DTYPES:
+                for split_k in (4, 16):
+                    with self.subTest(shape=shape.id, dtype=dtype, sk=split_k):
+                        ok, why = _check_two_stage(
+                            shape, dtype, "mem", split_k, seed=7, **knobs
+                        )
+                        self.assertTrue(ok, f"{shape.id} {dtype} {knobs}: {why}")
+                        self.assertFalse(why.startswith("split_k=1"), why)
+
+    def test_two_stage(self):
+        self._sweep()
+
+    def test_two_stage_kouter(self):
+        self._sweep(lds_k_outer=True)
+
+    def test_two_stage_async(self):
+        self._sweep(lds_k_outer=True, async_dma=True)
 
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")

@@ -1390,7 +1390,8 @@ def main() -> int:
             "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce), "
             "also for --run-from-cache: "
             "auto = two-stage only when C/groups is odd (where the packed atomic "
-            "cannot be built); "
+            "cannot be built) -- and, from the cache on wave32, for bf16 (whose "
+            "packed atomic is degree-capped for accuracy); "
             "always = time the two-stage kernels alongside the packed-atomic ones "
             "(nothing is dropped), so both split-K reductions compete; "
             "never = skip two-stage entirely (default: auto)"
@@ -4790,7 +4791,15 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # "never" drops them outright; "always" keeps them alongside
                 # the packed-atomic ones, so both reductions compete.
                 odd = (problem.C // max(1, problem.groups)) % 2 != 0
-                if args.two_stage == "never" or not odd:
+                # On wave32 (gfx1250) bf16 also runs the two-stage kernels: the
+                # packed bf16 atomic is degree-capped for accuracy (12), and the
+                # f32 workspace is the accuracy-safe way past that cap.
+                from rocke.core.arch import ArchTarget
+
+                deep_bf16 = (
+                    case_dtype == "bf16" and ArchTarget.from_gfx(arch).wave_size == 32
+                )
+                if args.two_stage == "never" or not (odd or deep_bf16):
                     candidates = [c for c in candidates if not c[0].two_stage]
                 if not candidates:
                     print(

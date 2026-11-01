@@ -848,18 +848,9 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     const bool is_wmma_family = target->wave_size == 32;
     if(sk > 1)
     {
-        /* The two-stage scratch-atomic epilogue is MFMA-only: it decodes the C
-         * fragment through ctx->atom, which is NULL on the WMMA path. */
-        if(s->two_stage && is_wmma_family)
-        {
-            if(reason && reason_cap)
-                snprintf(reason,
-                         reason_cap,
-                         "two-stage wgrad is CDNA-only (got family 'wmma' on %s); the "
-                         "scratch-atomic epilogue has no WMMA variant",
-                         arch);
-            return false;
-        }
+        /* The two-stage scratch-atomic epilogue decodes the C fragment through
+         * ctx->atom on MFMA and through op.c_layout() on WMMA, so every wave32 and
+         * wave64 target has it (Python wgrad_two_stage_available). */
         /* WMMA split-K is enabled for every dW dtype where the arch catalog marks
          * the float global atomics as run on a device. Mirrors Python
          * wgrad_wmma_split_k_available. */
@@ -1911,39 +1902,53 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
     rocke_value_t* block_warp_m_off = rocke_b_add(b, ctx->block_m_off_v, warp_m_off);
     rocke_value_t* block_warp_n_off = rocke_b_add(b, ctx->block_n_off_v, warp_n_off);
 
-    /* 4. c_warp_params: compile-time lookup, no IR ops -- Python: c_warp_params(atom) */
-    int m0, m_lane, m1, n_lane;
-    if(rocke_b_c_warp_params(b, atom, &m0, &m_lane, &m1, &n_lane) != ROCKE_OK)
-        return;
-
-    /* 5. c_dist -- Python: c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding) */
-    rocke_tile_distribution_encoding_t* enc = rocke_make_c_warp_dstr_encoding(b, atom);
-    if(enc == NULL)
-        return;
-    rocke_tile_distribution_t* c_dist = rocke_make_static_tile_distribution(b, enc);
-    if(c_dist == NULL)
-        return;
-
-    /* 6. c_nlane, n_in_atom, m_blk -- Python ordering */
-    rocke_value_t* c_nlane_v = rocke_b_const_i32(b, n_lane);
-    rocke_value_t* n_in_atom = rocke_b_mod(b, ctx->lane, c_nlane_v);
-    rocke_value_t* m_blk = rocke_b_div(b, ctx->lane, c_nlane_v);
-    rocke_value_t* p_lane_subs[2] = {m_blk, n_in_atom};
-    rocke_value_t* const* p_arr[1] = {p_lane_subs};
-    int p_counts[1] = {2};
-
-    /* 7. Pre-compute per-slot (row, col) within the atom */
+    /* 4-7. Per-slot (row, col) within the atom. WMMA (Python op is not None):
+     * the C fragment is decoded through op.c_layout(), as the WMMA atomic
+     * epilogue does. MFMA: through the atom's C-warp distribution. */
     rocke_value_t* slot_rows[ROCKE_CONV_MAX_ACCS * 4];
     rocke_value_t* slot_cols[ROCKE_CONV_MAX_ACCS * 4];
-    for(int i = 0; i < c_per_lane; ++i)
+    if(ctx->is_wmma)
     {
-        rocke_value_t* y0 = rocke_b_const_i32(b, i / m1);
-        rocke_value_t* y1 = rocke_b_const_i32(b, i % m1);
-        rocke_value_t* ys[2] = {y0, y1};
-        rocke_value_t* out_x[2] = {NULL, NULL};
-        rocke_tile_distribution_calculate_x(b, c_dist, ys, 2, p_arr, p_counts, 1, out_x, 2);
-        slot_rows[i] = out_x[0];
-        slot_cols[i] = out_x[1];
+        const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(ctx->op, b);
+        if(c_map == NULL)
+            return;
+        for(int i = 0; i < c_per_lane; ++i)
+            rocke_arch_layout_map_coord(c_map, b, ctx->lane, i, &slot_rows[i], &slot_cols[i]);
+    }
+    else
+    {
+        /* 4. c_warp_params: compile-time lookup, no IR ops -- Python: c_warp_params(atom) */
+        int m0, m_lane, m1, n_lane;
+        if(rocke_b_c_warp_params(b, atom, &m0, &m_lane, &m1, &n_lane) != ROCKE_OK)
+            return;
+
+        /* 5. c_dist -- Python: c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding) */
+        rocke_tile_distribution_encoding_t* enc = rocke_make_c_warp_dstr_encoding(b, atom);
+        if(enc == NULL)
+            return;
+        rocke_tile_distribution_t* c_dist = rocke_make_static_tile_distribution(b, enc);
+        if(c_dist == NULL)
+            return;
+
+        /* 6. c_nlane, n_in_atom, m_blk -- Python ordering */
+        rocke_value_t* c_nlane_v = rocke_b_const_i32(b, n_lane);
+        rocke_value_t* n_in_atom = rocke_b_mod(b, ctx->lane, c_nlane_v);
+        rocke_value_t* m_blk = rocke_b_div(b, ctx->lane, c_nlane_v);
+        rocke_value_t* p_lane_subs[2] = {m_blk, n_in_atom};
+        rocke_value_t* const* p_arr[1] = {p_lane_subs};
+        int p_counts[1] = {2};
+
+        /* 7. Pre-compute per-slot (row, col) within the atom */
+        for(int i = 0; i < c_per_lane; ++i)
+        {
+            rocke_value_t* y0 = rocke_b_const_i32(b, i / m1);
+            rocke_value_t* y1 = rocke_b_const_i32(b, i % m1);
+            rocke_value_t* ys[2] = {y0, y1};
+            rocke_value_t* out_x[2] = {NULL, NULL};
+            rocke_tile_distribution_calculate_x(b, c_dist, ys, 2, p_arr, p_counts, 1, out_x, 2);
+            slot_rows[i] = out_x[0];
+            slot_cols[i] = out_x[1];
+        }
     }
 
     /* 8. Main mi/ni/i loop */

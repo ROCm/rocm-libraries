@@ -3142,6 +3142,27 @@ def cases():
         ),
     )
 
+    # gfx1250 WMMA: the scratch epilogue decodes the WMMA C fragment.
+    add(
+        "conv_wgrad_two_stage",
+        "conv_wgrad_two_stage/gfx1250/n1h8c16k32r3_spk4",
+        "gfx1250",
+        build_conv_wgrad(
+            "irhash_wgrad_1250_twostage_spk4",
+            "gfx1250",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            split_k=4,
+            two_stage=True,
+        ),
+    )
+
     # Workspace reduce Stage 2: reads f32 partial sums written by Stage 1 and
     # reduces along split_k, emitting the result as dtype_d.
     # wg_M=32, wg_N=72 (3*3*8): small 3x3 filter footprint, fp16 output.

@@ -45,10 +45,12 @@ On MFMA targets, `epilogue="cshuffle"` is **required** for bf16/fp16 output when
 `split_k > 1`. The direct-atomic path emits zero-filled packed atomics at the
 scattered MFMA layout; the cshuffle path produces genuinely contiguous adjacent
 pairs after the LDS shuffle, which is necessary for correct `<2 x dtype>` packed
-atomics. WMMA has no cshuffle epilogue; on arches whose `ArchTarget` sets
-`memory.has_global_float_atomic_add` (gfx1250) its split-K epilogue places each
-value in its half of the pair itself, so `default` is the split-K epilogue there.
-Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
+atomics. On WMMA arches whose `ArchTarget` sets
+`memory.has_global_float_atomic_add` (gfx1250) the `default` split-K epilogue
+places each value in its half of the pair itself, and `cshuffle` pairs through
+LDS from the WMMA fragment; the two-stage path decodes the WMMA fragment
+through `op.c_layout()`. Other wave32 arches keep `split_k=1` and have no
+two-stage path.
 
 ---
 
@@ -114,8 +116,16 @@ dW rows, and the extra memory transactions outweigh the halved atomic count.
   one split-K binary per geometry, and the degree is resolved at launch by
   `select_split_k_wgrad` with the dW dtype (`benchmark_implicit_gemm_conv.py
   --run-from-cache --split-k -1`). A 16-bit dW whose row length (`Z*Y*X*cpg`) is
-  odd cannot use the packed atomic, and WMMA has no two-stage path to fall back
-  on, so such problems run at `split_k=1`.
+  odd cannot use the packed atomic; it reaches split-K through the two-stage
+  kernels (below).
+- Two-stage (f32 workspace) split-K on gfx1250: the Stage 1 scratch epilogue
+  decodes the WMMA C fragment through `op.c_layout()`, as the WMMA atomic
+  epilogue does, mirrored in the C++ engine. The workspace reduction
+  accumulates in fp32, so the split policy resolves its degree with the fp32
+  cap (`conv_split_k`). The AOT grid builds the two-stage kernels
+  (`ws_replicas` = 8) next to the packed-atomic ones, and from the cache on
+  wave32 bf16 runs them by default too (`--two-stage auto`), since the bf16
+  packed atomic is capped at degree 12 for accuracy.
 - Results are not bit-reproducible across runs once `split_k > 1` (atomic
   ordering), and the caller must zero `dW` before launch.
 - Runbook mapping (`platform/dsl_docs/optimization/optimization_runbook.md`)

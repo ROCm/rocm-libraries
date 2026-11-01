@@ -1437,12 +1437,18 @@ def _wmma_async_available(spec: "WgradConvSpec", arch: str) -> Tuple[bool, str]:
 def wgrad_two_stage_available(arch: str) -> bool:
     """Whether ``arch`` has the two-stage (f32 scratch) split-K wgrad path.
 
-    The scratch-store epilogue decodes the C fragment through the MFMA atom, so
-    wave32 (WMMA) targets have none. is_valid_wgrad_spec rejects a two-stage
-    spec wherever this is False, so a caller choosing between the split paths
-    can ask the same question before it builds.
+    The scratch-store epilogue decodes the C fragment through the MFMA atom on
+    wave64 and through the WMMA C layout (``op.c_layout()``) on wave32. Its
+    f32 scratch adds are global float atomics, so a wave32 target needs the
+    same catalog flag as the WMMA split-K atomics
+    (:func:`wgrad_wmma_split_k_available`: gfx1250). is_valid_wgrad_spec
+    rejects a two-stage spec wherever this is False, so a caller choosing
+    between the split paths can ask the same question before it builds.
     """
-    return _wgrad_mma_family(arch) != "wmma"
+    family = _wgrad_mma_family(arch)
+    if family == "wmma":
+        return wgrad_wmma_split_k_available(arch)
+    return family == "mma"
 
 
 _STREAMK_MODES = ("off", "dp_sk", "persistent")
@@ -1915,18 +1921,16 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # Mirrors the builder's `_is_two_stage`: two-stage applies whenever the
     # reduction is split. See the matching comment in WgradConvSpec.validate().
     _effective_two_stage = spec.two_stage and _is_atomic
-    # The two-stage scratch-atomic epilogue is MFMA-only. The packed *atomic*
-    # epilogue does have a WMMA variant (_emit_wgrad_split_k_epilogue_wmma), so
-    # split-K itself is fine on wave32 -- but _emit_wgrad_workspace_store_epilogue
-    # calls c_warp_params(atom), and `atom` is None on the WMMA path. The
-    # epilogue dispatch tests _is_two_stage BEFORE the wmma branch, so a
-    # two-stage wave32 spec reaches the MFMA-only emitter and dies with an
-    # AttributeError rather than a validation error. Reject it here, where every
-    # pre-filter (dispatch support(), the sweep drivers, benchmarks) can see it.
+    # The two-stage scratch-atomic epilogue decodes the WMMA C fragment through
+    # op.c_layout() and the MFMA one through the atom; its f32 scratch adds need
+    # the arch's float global atomics on wave32 (wgrad_two_stage_available).
+    # Reject it here, where every pre-filter (dispatch support(), the sweep
+    # drivers, benchmarks) can see it.
     if _effective_two_stage and not wgrad_two_stage_available(arch):
         return False, (
-            f"two-stage wgrad is CDNA-only (got family 'wmma' on "
-            f"{arch}); the scratch-atomic epilogue has no WMMA variant"
+            f"two-stage wgrad on WMMA needs validated float global atomics "
+            f"(has_global_float_atomic_add; got {arch}): the scratch epilogue "
+            f"adds f32 partials atomically"
         )
     # WMMA split-K is enabled for every dW dtype where the arch catalog marks
     # the float global atomics as run on a device.
@@ -3533,6 +3537,7 @@ def build_implicit_gemm_conv_wgrad(
             c_per_lane,
             params,
             gm_group=group_v,
+            **({"op": op} if op.family == "wmma" else {}),
         )
     elif _is_split_k and op.family == "wmma" and spec.epilogue != "cshuffle":
         # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
@@ -4219,8 +4224,13 @@ def _emit_wgrad_workspace_store_epilogue(
     params: Dict[str, Value],
     gm_group: Optional[Value] = None,
     replica_sel: Optional[Value] = None,
+    op=None,
 ) -> None:
     """Two-stage Stage 1 epilogue: f32 atomic-add into the scratch accumulator.
+
+    ``op`` (WMMA only): the accumulator is a WMMA C fragment, decoded through
+    ``op.c_layout()`` as :func:`_emit_wgrad_split_k_epilogue_wmma` does; the MFMA
+    path decodes it through ``atom``.
 
     Identical coordinate computation to :func:`_emit_wgrad_split_k_epilogue`,
     but the add lands in an f32 scratch buffer instead of in ``dW``:
@@ -4316,23 +4326,29 @@ def _emit_wgrad_workspace_store_epilogue(
     block_warp_n_off = b.add(block_n_off, warp_n_off)
 
     # Decode C-fragment layout (same as atomic epilogue).
-    from rocke.helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
-    from rocke.helpers.distribution import make_static_tile_distribution
-
-    _, __, kc_m1, kc_nlane = c_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
-    c_nlane = b.const_i32(kc_nlane)
-    n_in_atom = b.mod(lane, c_nlane)
-    m_blk = b.div(lane, c_nlane)
-    p_lane = [m_blk, n_in_atom]
-
     rows: List[Value] = []
     cols: List[Value] = []
-    for i in range(c_per_lane):
-        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
-        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
-        rows.append(x_row)
-        cols.append(x_col)
+    if op is not None and op.family == "wmma":
+        c_map = op.c_layout()
+        for i in range(c_per_lane):
+            x_row, x_col = c_map.coord(b, lane, i)
+            rows.append(x_row)
+            cols.append(x_col)
+    else:
+        from rocke.helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
+        from rocke.helpers.distribution import make_static_tile_distribution
+
+        _, __, kc_m1, kc_nlane = c_warp_params(atom)
+        c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+        c_nlane = b.const_i32(kc_nlane)
+        n_in_atom = b.mod(lane, c_nlane)
+        m_blk = b.div(lane, c_nlane)
+        p_lane = [m_blk, n_in_atom]
+        for i in range(c_per_lane):
+            ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
+            x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
+            rows.append(x_row)
+            cols.append(x_col)
 
     flat = 0
     for mi in range(mfmas_m):
