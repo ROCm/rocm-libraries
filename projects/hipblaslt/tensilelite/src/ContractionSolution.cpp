@@ -2923,7 +2923,7 @@ namespace TensileLite
                                inputs.fusedA2APeers,
                                inputs.fusedA2ACounter,
                                inputs.fusedA2AMyRank,
-                               problem.fusedA2AWorld(),
+                               problem.world(),
                                inputs.fusedA2ADrain,
                                static_cast<uint32_t>(problem.fusedA2AExtent()));
 
@@ -3818,7 +3818,7 @@ namespace TensileLite
                                        inputs.fusedA2APeers,
                                        inputs.fusedA2ACounter,
                                        inputs.fusedA2AMyRank,
-                                       problem.fusedA2AWorld(),
+                                       problem.world(),
                                        inputs.fusedA2ADrain,
                                        static_cast<uint32_t>(problem.fusedA2AExtent()));
                     break;

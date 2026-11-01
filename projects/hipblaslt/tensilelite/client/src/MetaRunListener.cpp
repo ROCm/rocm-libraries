@@ -45,8 +45,16 @@ namespace TensileLite
                 throw std::runtime_error("Can't add listeners after benchmarking has begun.");
 
             listener->setReporter(m_reporter);
+            listener->setDevices(m_devices);
 
             m_listeners.push_back(listener);
+        }
+
+        void MetaRunListener::setDevices(std::vector<std::shared_ptr<DeviceContext>> const* devices)
+        {
+            m_devices = devices;
+            for(auto const& listener : m_listeners)
+                listener->setDevices(devices);
         }
 
         void MetaRunListener::setReporter(std::shared_ptr<ResultReporter> reporter)
