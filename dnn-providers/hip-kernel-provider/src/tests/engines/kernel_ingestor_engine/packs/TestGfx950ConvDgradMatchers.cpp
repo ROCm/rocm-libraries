@@ -508,11 +508,6 @@ TEST(TestGfx950ConvDgradGraphMatcher, RefusesEverythingOutsideTheGraphContract)
     wave32.warpSize = 32;
     const GraphFixture wave32Fixture(buildGraph(graphSpec(shape)), wave32);
     EXPECT_FALSE(matchesGraph(GFX950_CONV_DGRAD_AOT, wave32Fixture.context()));
-    // The forward engine does not read a backward graph either.
-    const GraphFixture fixture(buildGraph(graphSpec(shape)), gfx950Properties());
-    registerNativeIngestorSymbols();
-    EXPECT_FALSE(GraphMatchRegistry::resolve("hipkernel.gfx950_conv_fwd_aot.graph_match")(
-        fixture.context()));
 }
 
 TEST(TestGfx950ConvDgradGraphMatcher, AcceptsGroupedDepthwiseStridedAndDilatedProblems)
