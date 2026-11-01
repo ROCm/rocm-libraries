@@ -1,6 +1,6 @@
 # gfx942 bf16 D128 causal prefill: CFVST, K LDS double buffering, and V register prefetch
 
-This change makes CFVST available as an opt-in and implements opt-in K LDS Double Buffering and V register pre-fetching on D128 bf16 persistent=true causal prefill attention gfx942 kernels. All three are off by default.
+This change implements opt-in K LDS Double Buffering and V register pre-fetching on the CFVST body of D128 bf16 persistent=true causal prefill attention gfx942 kernels. CFVST itself is already the D128 default for both dtypes (`use_cfvst=None` resolves on via `_use_cfvst`, since #14367); this change does not alter it. Both new levers are off by default.
 
 ## Problem
 
@@ -482,7 +482,7 @@ The optimization-specific eligibility conditions are enforced by `supports_atten
 
 The combined K/V LDS allocation is checked against the gfx942 capacity using `attention_lds_capacity_bytes(arch)` and `_lds_bytes(spec)`. Unsupported configurations are rejected before kernel emission.
 
-For BF16, the default configuration retains `use_cfvst=None` (policy resolves to off), `lds_num_buffers=1`, and `v_reg_prefetch=False`. All three optimizations remain opt-in and do not change the default kernel behavior.
+For BF16, the default configuration retains `use_cfvst=None` (policy resolves to on at D128), `lds_num_buffers=1`, and `v_reg_prefetch=False`. K double buffering and V register prefetch remain opt-in and do not change the default kernel behavior.
 
 ## gfx942 Barrier / LGKM ISA Evidence
 

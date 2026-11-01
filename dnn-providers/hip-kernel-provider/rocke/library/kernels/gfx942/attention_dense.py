@@ -140,7 +140,8 @@ P0 is CORRECTNESS-FIRST: the naive-V path (D64) is non-pipelined (a
 single LDS buffer) and reads V element-wise; the remaining perf levers (P2-P4) layer
 on top. It is validated against an fp32 SDPA reference across the in-scope cohort.
 
-Opt-in bf16 D128 causal CFVST on the persistent grid: ``lds_num_buffers=2``
+Opt-in pipeline levers on the bf16 D128 causal CFVST body (CFVST is the D128 default)
+on the persistent grid: ``lds_num_buffers=2``
 independently uses two K LDS slots and ``v_reg_prefetch=True`` loads next-tile V
 registers before current PV. V LDS stays single-buffered for all combinations. All
 shipped defaults use ``lds_num_buffers=1`` and ``v_reg_prefetch=False``.

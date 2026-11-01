@@ -1718,7 +1718,7 @@ _CONTRACT_GRID = [
     dict(lds_row_pad=2),  # REJECTED: not a multiple of 4 elements
     dict(v_row_pad=16, use_v_swizzle=False),  # accepted (non-pow2 row: swizzle off)
     dict(v_row_pad=-4),  # REJECTED: negative
-    # --- private: use_cfvst (legal opt-in for BF16 D128; rejected on D64) ---
+    # --- private: use_cfvst (D128 default; pinning ON is legal there, rejected on D64) ---
     dict(dtype="fp16", use_cfvst=False),  # accepted: OFF is always legal
     dict(head_size=64, use_cfvst=True),  # REJECTED: policy says off at D64
     dict(dtype="bf16", head_size=128, use_cfvst=True),  # accepted: policy on at D128

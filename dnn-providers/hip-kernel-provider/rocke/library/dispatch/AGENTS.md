@@ -208,7 +208,7 @@ as a prerequisite when necessary. It can offer CFVST alone, CFVST + KDB,
 and CFVST + VPF without requiring the triple combination. The triple
 CFVST + KDB + VPF combination remains reachable through an explicit knob
 pin or the full tuning space. The BF16 D128 default remains
-`use_cfvst=None` (policy resolves to off), `lds_num_buffers=1`, and
+`use_cfvst=None` (policy resolves to on at D128), `lds_num_buffers=1`, and
 `v_reg_prefetch=False`; these tuning choices do not alter the shipped
 default or make the opt-in dense candidate an automatic dispatch winner.
 Bare `tuning_id` replay searches production points only; replay a
