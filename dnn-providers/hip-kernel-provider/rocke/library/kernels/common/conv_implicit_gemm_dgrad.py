@@ -1561,7 +1561,10 @@ class DgradConvSpec:
     # [compute A] (two staging register sets live there); 4: the A loads in
     # [compute A], the B loads in [compute B]; 5: the A loads in [mem B] (as
     # 1), the B loads in [compute B] (as 2); 6: the B loads in [mem B], the
-    # A loads in [compute B]. Default 0; tags ``pps<n>``.
+    # A loads in [compute B]; 11: the B loads in [compute A] (a second B
+    # staging set: the partner half's [mem A] issues no global loads), the A
+    # loads in [mem B]; 12: the B loads in [compute A], the A loads in
+    # [compute B]. Default 0; tags ``pps<n>``.
     tapk_pp_sched: int = 0
     # With tapk_pingpong and the cshuffle epilogue (split_k 1, 16x16 bf16):
     # stage C through LDS with the 16-byte chunks of a row XOR its 4-row
@@ -1794,6 +1797,10 @@ class DgradConvSpec:
     # first XCDs only the longest boxes' tiles: several full rounds there,
     # short tiles elsewhere). Default 0; tags ``pbo<n>``.
     pp_box_order: int = 0
+    # (epi_lds_barriers, declared with the x-halo knobs above, also covers
+    # pp_boxes: the first epilogue barrier does not wait for the
+    # ping-pong loop's last over-fetched global loads, nor an m-chunk for the
+    # previous chunk's stores / atomics.)
 
     @property
     def block_size(self) -> int:
@@ -2105,7 +2112,7 @@ class DgradConvSpec:
                 "xsm": self.xh_stride_m,
                 f"xdl{self.xh_dlds}": self.xh_dlds > 0,
                 "xel": self.xh_epi_lin,
-                "elb": self.epi_lds_barriers,
+                "elb": self.epi_lds_barriers and not self.pp_boxes,
                 "xtr": self.xh_tap_rsrc,
                 "nag": self.no_agpr,
                 # The launch-order tile walk (A/B knob, see xcd_tile_order).
@@ -2130,7 +2137,9 @@ class DgradConvSpec:
                 # with a 16-bit one.
                 "tf32": self.data.is_tf32,
             },
-        )
+        ) + ("_elb" if self.epi_lds_barriers and self.pp_boxes else "")
+        # (elb on pp_boxes is named last; elsewhere (x-halo, dense /
+        # split-K pp) after xel, above.)
 
     def validate(self) -> None:
         _dtype_why = _mma_dtype_conflict(self)
@@ -2462,8 +2471,8 @@ def _tapk_pingpong_conflict(spec: DgradConvSpec) -> str:
         )
     ):
         return "tapk_pp_epi 1/2 needs tapk_pingpong, the cshuffle epilogue, split_k 1, 16x16 atoms, bf16 dX"
-    if spec.tapk_pp_sched not in (0, 1, 2, 3, 4, 5, 6, 7) or (spec.tapk_pp_sched and not spec.tapk_pingpong):
-        return "tapk_pp_sched is 0..7 and needs tapk_pingpong"
+    if spec.tapk_pp_sched not in (0, 1, 2, 3, 4, 5, 6, 7, 11, 12) or (spec.tapk_pp_sched and not spec.tapk_pingpong):
+        return "tapk_pp_sched is 0..7, 11 or 12 and needs tapk_pingpong"
     if spec.tapk_pp_sched == 7 and (spec.tapk_pp_epi or spec.tapk_pingpong == 5):
         return "tapk_pp_sched 7 (three tiles ahead) does not take tapk_pp_epi or tapk_pingpong 5"
     if spec.tapk_pp_persist not in (0, 1, 2) or (
@@ -2538,14 +2547,14 @@ def _tapk_pingpong_conflict(spec: DgradConvSpec) -> str:
             and not spec.lds_k_outer
             and not spec.tapk_pp_xhalo
             and not spec.tapk_pp_persist
-            and spec.split_k == 1
+            and (spec.split_k == 1 or spec.pp_boxes)
             and spec.tile_k % 8 == 0
             and spec.warp_tile_n == 16
         )
     ):
         return (
             "tapk_pp_bslab is 0..3 and needs tapk_pingpong 3-5 with tapk_pp_sched, "
-            "b_kpack 4, no tapk_pp_xhalo / tapk_pp_persist, split_k 1, 16-wide atoms"
+            "b_kpack 4, no tapk_pp_xhalo / tapk_pp_persist, split_k 1 (or pp_boxes), 16-wide atoms"
         )
     if not spec.tapk_pingpong:
         return ""
@@ -2632,6 +2641,8 @@ def _pp_streamk_conflict(spec: DgradConvSpec) -> str:
             "pp_boxes (3 or 5) needs tapk_pingpong >= 4, the cshuffle epilogue "
             "(tapk_pp_epi only with split_k 1), no pp_streamk, stride 1"
         )
+    # (epi_lds_barriers on pp_boxes is admitted by _xhalo_knob_conflict's
+    # _pp_elb_ok: any ping-pong cshuffle epilogue without a persistent loop.)
     if spec.pp_sk_mode and not spec.pp_streamk:
         return "pp_sk_mode needs pp_streamk"
     if not spec.pp_streamk:
@@ -5911,11 +5922,15 @@ def _build_tilde_dgrad(
                     staged2 = issue_loads()
                 if pps == 4:
                     a2 = ld("a")[0]
+                if pps in (11, 12):
+                    b2 = ld("b")[1]
                 acc_a = mfmas(frags[:half], list(iv[:n_acc]))
                 if pps == 3:
                     interleave(n_mf_half, len(flat(staged2)))
                 elif pps == 4:
                     interleave(n_mf_half, len(flat([a2])))
+                elif pps in (11, 12):
+                    interleave(n_mf_half, len(flat([b2])))
                 else:
                     for _j in range(n_mf_half):
                         b.sched_group_barrier(_SG_MFMA, 1, 0)
@@ -5928,7 +5943,7 @@ def _build_tilde_dgrad(
                 store_tile(rebuild(staged1, regs), A_smem, B_smem)
                 if pps == 1:
                     staged2 = issue_loads()
-                if pps == 5:
+                if pps in (5, 11):
                     a2 = ld("a")[0]
                 if pps == 6:
                     b2 = ld("b")[1]
@@ -5942,12 +5957,16 @@ def _build_tilde_dgrad(
                     staged2 = (a2, ld("b")[1])
                 if pps == 6:
                     staged2 = (ld("a")[0], b2)
+                if pps == 11:
+                    staged2 = (a2, b2)
+                if pps == 12:
+                    staged2 = (ld("a")[0], b2)
                 acc_b = mfmas(frags[half:], acc_a)
                 if pps == 2:
                     interleave(n_mf_half, len(flat(staged2)))
                 if pps in (4, 5):
                     interleave(n_mf_half, len(flat([staged2[1]])))
-                if pps == 6:
+                if pps in (6, 12):
                     interleave(n_mf_half, len(flat([staged2[0]])))
                 b.sched_barrier(0)
                 b.s_setprio(0)
@@ -9467,7 +9486,7 @@ def _build_tilde_dgrad(
         return b.kernel
     final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
     if spec.epi_lds_barriers:
-        # The epilogue's barriers LDS-only (see DgradConvSpec.epi_lds_barriers).
+        # The epilogue's barriers LDS-only (x-halo and pp_boxes; see DgradConvSpec.epi_lds_barriers).
         b.sync = b.sync_lds_only
         try:
             _dispatch_dgrad_epilogue(final_accs)
