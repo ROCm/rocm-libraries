@@ -295,6 +295,96 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinary)
     EXPECT_TRUE(keyFromNode == expectedKey);
 }
 
+TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinaryDivideMixedPrecision)
+{
+    const PointwiseSignatureKey expectedKey{
+        PointwiseMode::DIV, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    const std::vector<int64_t> dims = {1, 3, 2, 2};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph(dims,
+                                    dims,
+                                    dims,
+                                    DataType::HALF,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::DIV,
+                                    1,
+                                    TensorLayout::NCHW);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+
+    EXPECT_TRUE(keyFromNode == expectedKey);
+}
+
+TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapComparisonBooleanOutput)
+{
+    const PointwiseSignatureKey expectedKey{PointwiseMode::CMP_LT,
+                                            DataType::FLOAT,
+                                            DataType::FLOAT,
+                                            DataType::BOOLEAN,
+                                            DataType::FLOAT};
+    const std::vector<int64_t> dims = {1, 3, 2, 2};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph(dims,
+                                    dims,
+                                    dims,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::BOOLEAN,
+                                    hipdnn_frontend::PointwiseMode::CMP_LT,
+                                    1,
+                                    TensorLayout::NCHW);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+
+    EXPECT_TRUE(keyFromNode == expectedKey);
+}
+
+TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapLogicalBoolean)
+{
+    const PointwiseSignatureKey expectedKey{PointwiseMode::LOGICAL_AND,
+                                            DataType::BOOLEAN,
+                                            DataType::FLOAT,
+                                            DataType::BOOLEAN,
+                                            DataType::BOOLEAN};
+    const std::vector<int64_t> dims = {1, 3, 2, 2};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph(dims,
+                                    dims,
+                                    dims,
+                                    DataType::BOOLEAN,
+                                    DataType::BOOLEAN,
+                                    DataType::FLOAT,
+                                    DataType::BOOLEAN,
+                                    hipdnn_frontend::PointwiseMode::LOGICAL_AND,
+                                    1,
+                                    TensorLayout::NCHW);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+
+    EXPECT_TRUE(keyFromNode == expectedKey);
+}
+
 TEST(TestPointwiseSignatureKey, UnorderedMapUsage)
 {
     std::unordered_map<PointwiseSignatureKey, int, PointwiseSignatureKey> testMap;
@@ -475,4 +565,151 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeThirdInputTensorNotInMapThrows)
     tensors.addNull(99);
 
     EXPECT_THROW(PointwiseSignatureKey(node, tensors.map()), std::runtime_error);
+}
+
+TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnaryMixedPrecisionExp)
+{
+    const PointwiseSignatureKey expectedKey{
+        PointwiseMode::EXP, DataType::HALF, DataType::FLOAT, DataType::HALF};
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph(dims,
+                                   dims,
+                                   DataType::HALF,
+                                   DataType::FLOAT,
+                                   DataType::HALF,
+                                   hipdnn_frontend::PointwiseMode::EXP,
+                                   1,
+                                   TensorLayout::NCHW);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+
+    EXPECT_TRUE(keyFromNode == expectedKey);
+}
+
+TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedUnaryModes)
+{
+    const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
+    const auto& implementedUnaryModes = getImplementedUnaryModesBitset();
+
+    // input / compute / output combinations registered by getPlanBuilders()
+    const std::vector<std::array<DataType, 3>> typeCombinations
+        = {{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},
+           {DataType::HALF, DataType::FLOAT, DataType::HALF},
+           {DataType::BFLOAT16, DataType::FLOAT, DataType::BFLOAT16},
+           {DataType::FLOAT, DataType::FLOAT, DataType::HALF},
+           {DataType::FLOAT, DataType::FLOAT, DataType::BFLOAT16}};
+
+    for(size_t i = 0; i < implementedUnaryModes.size(); ++i)
+    {
+        if(!implementedUnaryModes.test(i))
+        {
+            continue;
+        }
+
+        const auto mode = static_cast<PointwiseMode>(i);
+        if(mode == PointwiseMode::LOGICAL_NOT)
+        {
+            // BOOLEAN-only; covered by the logical operations test below.
+            continue;
+        }
+
+        for(const auto& [input, compute, output] : typeCombinations)
+        {
+            const PointwiseSignatureKey key{mode, input, compute, output};
+            EXPECT_EQ(planBuilders.count(key), 1u) << key;
+        }
+    }
+}
+
+TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedBinaryModes)
+{
+    const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
+    const auto& implementedBinaryModes = getImplementedBinaryModesBitset();
+
+    // input0 / input1 / compute / output combinations registered for arithmetic binary modes
+    const std::vector<std::array<DataType, 4>> typeCombinations
+        = {{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},
+           {DataType::HALF, DataType::HALF, DataType::FLOAT, DataType::HALF},
+           {DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT, DataType::BFLOAT16},
+           {DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},
+           {DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT}};
+    // input0 / input1 / compute combinations registered for comparison modes (BOOLEAN output)
+    const std::vector<std::array<DataType, 3>> comparisonCombinations
+        = {{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},
+           {DataType::HALF, DataType::HALF, DataType::FLOAT},
+           {DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT}};
+
+    for(size_t i = 0; i < implementedBinaryModes.size(); ++i)
+    {
+        if(!implementedBinaryModes.test(i))
+        {
+            continue;
+        }
+
+        const auto mode = static_cast<PointwiseMode>(i);
+        if(mode == PointwiseMode::LOGICAL_AND || mode == PointwiseMode::LOGICAL_OR)
+        {
+            // BOOLEAN-only; covered by PlanBuildersRegisteredForLogicalOperations.
+            continue;
+        }
+
+        const bool isComparison = mode == PointwiseMode::CMP_EQ || mode == PointwiseMode::CMP_NEQ
+                                  || mode == PointwiseMode::CMP_GT || mode == PointwiseMode::CMP_GE
+                                  || mode == PointwiseMode::CMP_LT || mode == PointwiseMode::CMP_LE;
+        if(isComparison)
+        {
+            for(const auto& [input0, input1, compute] : comparisonCombinations)
+            {
+                const PointwiseSignatureKey key{mode, input0, compute, DataType::BOOLEAN, input1};
+                EXPECT_EQ(planBuilders.count(key), 1u) << key;
+            }
+            continue;
+        }
+
+        for(const auto& [input0, input1, compute, output] : typeCombinations)
+        {
+            const PointwiseSignatureKey key{mode, input0, compute, output, input1};
+            EXPECT_EQ(planBuilders.count(key), 1u) << key;
+        }
+    }
+}
+
+TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForGenIndexInt32Output)
+{
+    const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
+
+    for(auto input : {DataType::FLOAT, DataType::INT32})
+    {
+        const PointwiseSignatureKey key{
+            PointwiseMode::GEN_INDEX, input, DataType::FLOAT, DataType::INT32};
+        EXPECT_EQ(planBuilders.count(key), 1u) << key;
+    }
+}
+
+TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForLogicalOperations)
+{
+    const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
+
+    const PointwiseSignatureKey notKey{
+        PointwiseMode::LOGICAL_NOT, DataType::BOOLEAN, DataType::FLOAT, DataType::BOOLEAN};
+    EXPECT_EQ(planBuilders.count(notKey), 1u) << notKey;
+
+    for(auto mode : {PointwiseMode::LOGICAL_AND, PointwiseMode::LOGICAL_OR})
+    {
+        const PointwiseSignatureKey key{
+            mode, DataType::BOOLEAN, DataType::FLOAT, DataType::BOOLEAN, DataType::BOOLEAN};
+        EXPECT_EQ(planBuilders.count(key), 1u) << key;
+    }
+
+    // Logical operations are BOOLEAN-only; float inputs are not registered.
+    const PointwiseSignatureKey floatNotKey{
+        PointwiseMode::LOGICAL_NOT, DataType::FLOAT, DataType::FLOAT, DataType::BOOLEAN};
+    EXPECT_EQ(planBuilders.count(floatNotKey), 0u);
 }

@@ -423,3 +423,162 @@ TEST(TestClassifyPointwiseOp, BoundedOutputCorrect)
             << EnumNamesPointwiseMode()[static_cast<int>(mode)] << " should not be bounded";
     }
 }
+
+// =================================================================================================
+// Newly implemented CPU reference modes: verify classification and that tolerances are meaningful
+// =================================================================================================
+
+namespace
+{
+
+struct ImplementedModeClass
+{
+    PointwiseMode mode;
+    PointwiseErrorClass errorClass;
+};
+
+const std::vector<ImplementedModeClass>& getNewlyImplementedModeClasses()
+{
+    static const std::vector<ImplementedModeClass> s_modes = {
+        {PointwiseMode::IDENTITY, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::CEIL, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::FLOOR, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::CMP_EQ, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::CMP_NEQ, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::CMP_GE, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::CMP_LT, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::CMP_LE, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::LOGICAL_AND, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::LOGICAL_OR, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::LOGICAL_NOT, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::ADD_SQUARE, PointwiseErrorClass::LINEAR},
+        {PointwiseMode::DIV, PointwiseErrorClass::RATIONAL},
+        {PointwiseMode::RECIPROCAL, PointwiseErrorClass::RATIONAL},
+        {PointwiseMode::SQRT, PointwiseErrorClass::RATIONAL},
+        {PointwiseMode::RSQRT, PointwiseErrorClass::RATIONAL},
+        {PointwiseMode::EXP, PointwiseErrorClass::TRANSCENDENTAL_FWD},
+        {PointwiseMode::LOG, PointwiseErrorClass::TRANSCENDENTAL_FWD},
+        {PointwiseMode::SIN, PointwiseErrorClass::TRANSCENDENTAL_FWD},
+        {PointwiseMode::TAN, PointwiseErrorClass::TRANSCENDENTAL_FWD},
+        {PointwiseMode::ERF, PointwiseErrorClass::TRANSCENDENTAL_FWD},
+        {PointwiseMode::ELU_FWD, PointwiseErrorClass::TRANSCENDENTAL_FWD},
+        {PointwiseMode::SOFTPLUS_FWD, PointwiseErrorClass::COMPOSITE_FWD},
+        {PointwiseMode::GEN_INDEX, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::ELU_BWD, PointwiseErrorClass::TRANSCENDENTAL_BWD},
+        {PointwiseMode::GELU_BWD, PointwiseErrorClass::COMPOSITE_BWD},
+        {PointwiseMode::GELU_APPROX_TANH_BWD, PointwiseErrorClass::COMPOSITE_BWD},
+        {PointwiseMode::SWISH_BWD, PointwiseErrorClass::COMPOSITE_BWD},
+        {PointwiseMode::SOFTPLUS_BWD, PointwiseErrorClass::COMPOSITE_BWD},
+    };
+    return s_modes;
+}
+
+} // namespace
+
+TEST(TestNewlyImplementedPointwiseTolerance, ModesClassifiedAsExpected)
+{
+    for(const auto& [mode, errorClass] : getNewlyImplementedModeClasses())
+    {
+        EXPECT_EQ(classifyPointwiseOp(mode), errorClass)
+            << EnumNamesPointwiseMode()[static_cast<int>(mode)];
+    }
+}
+
+TEST(TestNewlyImplementedPointwiseTolerance, ToleranceIsPositiveForAllTypeCombinations)
+{
+    for(const auto& [mode, errorClass] : getNewlyImplementedModeClasses())
+    {
+        const auto name = std::string(EnumNamesPointwiseMode()[static_cast<int>(mode)]);
+        EXPECT_GT((calculatePointwiseTolerance<float, float, float>(1.0, errorClass)), 0.0f)
+            << name;
+        EXPECT_GT((calculatePointwiseTolerance<half, half, float>(1.0, errorClass)), 0.0f) << name;
+        EXPECT_GT((calculatePointwiseTolerance<bfloat16, bfloat16, float>(1.0, errorClass)), 0.0f)
+            << name;
+        EXPECT_GT((calculatePointwiseTolerance<float, half, float>(1.0, errorClass)), 0.0f) << name;
+    }
+}
+
+// A tolerance that approaches the value scale would accept almost any output.
+TEST(TestNewlyImplementedPointwiseTolerance, ToleranceIsSmallRelativeToScale)
+{
+    for(const auto& [mode, errorClass] : getNewlyImplementedModeClasses())
+    {
+        const auto name = std::string(EnumNamesPointwiseMode()[static_cast<int>(mode)]);
+        EXPECT_LT((calculatePointwiseTolerance<float, float, float>(1.0, errorClass)), 1e-4f)
+            << name;
+        EXPECT_LT((calculatePointwiseTolerance<half, half, float>(1.0, errorClass)), 0.05f) << name;
+        EXPECT_LT((calculatePointwiseTolerance<bfloat16, bfloat16, float>(1.0, errorClass)), 0.05f)
+            << name;
+    }
+}
+
+// Error classes must be ordered by expected accuracy loss: exact < linear < rational <
+// transcendental < composite.
+TEST(TestNewlyImplementedPointwiseTolerance, ToleranceGrowsWithErrorClass)
+{
+    const auto tolerance = [](PointwiseMode mode) {
+        return calculatePointwiseTolerance<float, float, float>(1.0, classifyPointwiseOp(mode));
+    };
+
+    EXPECT_LT(tolerance(PointwiseMode::FLOOR), tolerance(PointwiseMode::ADD_SQUARE));
+    EXPECT_LT(tolerance(PointwiseMode::ADD_SQUARE), tolerance(PointwiseMode::DIV));
+    EXPECT_LT(tolerance(PointwiseMode::DIV), tolerance(PointwiseMode::EXP));
+    EXPECT_LT(tolerance(PointwiseMode::EXP), tolerance(PointwiseMode::SOFTPLUS_FWD));
+}
+
+// Each backward mode needs a larger tolerance than its forward counterpart (chain rule
+// amplification of the forward error).
+TEST(TestNewlyImplementedPointwiseTolerance, BackwardToleranceExceedsForwardCounterpart)
+{
+    const auto tolerance = [](PointwiseMode mode) {
+        return calculatePointwiseTolerance<float, float, float>(1.0, classifyPointwiseOp(mode));
+    };
+
+    EXPECT_GT(tolerance(PointwiseMode::ELU_BWD), tolerance(PointwiseMode::ELU_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::GELU_BWD), tolerance(PointwiseMode::GELU_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::GELU_APPROX_TANH_BWD),
+              tolerance(PointwiseMode::GELU_APPROX_TANH_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::SWISH_BWD), tolerance(PointwiseMode::SWISH_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::SOFTPLUS_BWD), tolerance(PointwiseMode::SOFTPLUS_FWD));
+}
+
+// The float reference for each new unary mode must agree with a double-precision evaluation
+// within the tolerance for its class, and a 1% perturbation must be rejected.
+TEST(TestNewlyImplementedPointwiseTolerance, ToleranceAcceptsReferenceAndRejectsPerturbation)
+{
+    struct UnaryCase
+    {
+        PointwiseMode mode;
+        double input;
+        double exact;
+    };
+
+    const std::vector<UnaryCase> cases = {
+        {PointwiseMode::EXP, 1.5, std::exp(1.5)},
+        {PointwiseMode::LOG, 2.5, std::log(2.5)},
+        {PointwiseMode::SQRT, 3.0, std::sqrt(3.0)},
+        {PointwiseMode::RSQRT, 3.0, 1.0 / std::sqrt(3.0)},
+        {PointwiseMode::RECIPROCAL, 3.0, 1.0 / 3.0},
+        {PointwiseMode::SIN, 1.2, std::sin(1.2)},
+        {PointwiseMode::TAN, 0.7, std::tan(0.7)},
+        {PointwiseMode::ERF, 0.8, std::erf(0.8)},
+        {PointwiseMode::ELU_FWD, -1.3, std::exp(-1.3) - 1.0},
+        {PointwiseMode::SOFTPLUS_FWD, 0.9, std::log(1.0 + std::exp(0.9))},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        const auto name = std::string(EnumNamesPointwiseMode()[static_cast<int>(testCase.mode)]);
+        const double scale = isBoundedOutput(testCase.mode)
+                                 ? 1.0
+                                 : std::max(std::abs(testCase.input), std::abs(testCase.exact));
+        const auto tol = static_cast<double>(calculatePointwiseTolerance<float, float, float>(
+            scale, classifyPointwiseOp(testCase.mode)));
+
+        const auto reference = static_cast<float>(testCase.exact);
+        EXPECT_LE(std::abs(static_cast<double>(reference) - testCase.exact), tol) << name;
+
+        const double perturbed = testCase.exact * 1.01;
+        EXPECT_GT(std::abs(perturbed - testCase.exact), tol) << name;
+    }
+}
