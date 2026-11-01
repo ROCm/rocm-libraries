@@ -510,9 +510,9 @@ struct UniversalGemmKernel
             return false;
     }();
 
-    /// @brief Host checks of the C tensor against the epilogue's vector stores: a ragged tile in
-    ///        the contiguous dimension needs padding, and that dimension must be a multiple of
-    ///        the C vector size.
+    /// @brief Host checks of the C tensor against the epilogue's vector stores: if the contiguous
+    ///        dimension of C is not a multiple of the tile, it needs padding, and it must be a
+    ///        multiple of the C vector size.
     CK_TILE_HOST static bool IsCTensorSupported(const KernelArgs& kargs)
     {
         if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
@@ -795,9 +795,10 @@ struct UniversalGemmKernel
                 return false;
             }
             // A TDM epilogue clips C in hardware. Any other epilogue (CShuffle, with comp_tdm_v3)
-            // writes C with vector stores, which need the usual C checks: a ragged N (M) tile
-            // needs kPadN (kPadM), and N (M) must be a multiple of the C vector size. Without
-            // them a partial vector writes past the row end into the next row.
+            // writes C with vector stores, which need the usual C checks: an N (M) that is not a
+            // multiple of the tile needs kPadN (kPadM), and N (M) must be a multiple of the C
+            // vector size. Without them a partial vector writes past the row end into the next
+            // row.
             if constexpr(!is_tdm_epilogue_v<EpiloguePipeline>)
             {
                 return IsCTensorSupported(kargs);
