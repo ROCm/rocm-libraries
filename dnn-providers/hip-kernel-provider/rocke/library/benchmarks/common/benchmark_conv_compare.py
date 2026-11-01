@@ -302,6 +302,21 @@ def _build_implicit_only_args(args) -> list[str]:
     # budget to cap the probe's chunks with.
     if args.fast_rank and args.fast_rank_scratch is not None:
         a += ["--fast-rank-scratch", str(args.fast_rank_scratch)]
+    if args.fast_rank:
+        for flag, val in (
+            ("--fast-rank-recheck", args.fast_rank_recheck),
+            ("--fast-rank-recheck-rounds", args.fast_rank_recheck_rounds),
+            ("--fast-rank-recheck-iters", args.fast_rank_recheck_iters),
+            ("--fast-rank-recheck-window", args.fast_rank_recheck_window),
+            ("--fast-rank-reprobe", args.fast_rank_reprobe),
+            ("--fast-rank-interleave", args.fast_rank_interleave),
+        ):
+            if val is not None:
+                a += [flag, str(val)]
+        if args.fast_rank_reprobe_staged:
+            a += ["--fast-rank-reprobe-staged"]
+    if args.pins is not None:
+        a += ["--pins", args.pins]
     return a
 
 
@@ -557,6 +572,37 @@ def main() -> int:
         metavar="N",
         help="launches issued before a case's first measured chunk, to bring "
         "the device's clocks up",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-recheck",
+        type=int,
+        default=None,
+        dest="fast_rank_recheck",
+        metavar="N",
+        help="implicit-GEMM only, opt-in: re-time the best N finalists in "
+        "interleaved staged rounds and rank by their median",
+    )
+    rank_grp.add_argument("--fast-rank-recheck-rounds", type=int, default=None,
+                          dest="fast_rank_recheck_rounds", metavar="R")
+    rank_grp.add_argument("--fast-rank-recheck-iters", type=int, default=None,
+                          dest="fast_rank_recheck_iters", metavar="K")
+    rank_grp.add_argument("--fast-rank-recheck-window", type=float, default=None,
+                          dest="fast_rank_recheck_window", metavar="F")
+    rank_grp.add_argument("--fast-rank-reprobe", type=int, default=None,
+                          dest="fast_rank_reprobe", metavar="K",
+                          help="implicit-GEMM only, opt-in: re-probe the best K in reverse order (min of two)")
+    rank_grp.add_argument("--fast-rank-reprobe-staged", action="store_true",
+                          dest="fast_rank_reprobe_staged",
+                          help="implicit-GEMM only: the re-probe uses staged samples")
+    rank_grp.add_argument("--fast-rank-interleave", type=int, default=None,
+                          dest="fast_rank_interleave", metavar="R",
+                          help="implicit-GEMM only, opt-in: time the finalists in R interleaved staged rounds")
+    rank_grp.add_argument(
+        "--pins",
+        default=None,
+        metavar="JSON",
+        help="implicit-GEMM only, opt-in: a pins file (derive_conv_pins.py); a "
+        "pinned case runs only its pinned kernel and launch",
     )
 
     case_results.add_results_arg(parser, merged=True)

@@ -314,3 +314,83 @@ def test_an_unknown_timing_is_refused(monkeypatch):
     device.install(monkeypatch)
     with pytest.raises(ValueError, match="timing"):
         _rank(device, 1, timing="events")
+
+
+# --- opt-in ranking refinements (recheck / reprobe / interleave) ---------------
+
+
+class _DriftDevice(_FakeDevice):
+    """Round 2 (one staged block per finalist) sees ``block[i]`` -- a block's
+    clock state -- while interleaved timing sees the true ``times[i]``."""
+
+    def __init__(self, times, block):
+        super().__init__(times)
+        self.block = list(block)
+        self.interleaved = []
+
+    def install(self, monkeypatch) -> None:
+        super().install(monkeypatch)
+        monkeypatch.setattr(batched_timing, "time_interleaved_staged", self._inter)
+
+    def _time_staged(self, runs, *, warmup, iters, stream=0):
+        self.batches += 1
+        return [self.block[run()] for run in runs]
+
+    def _inter(self, runs, *, rounds, iters, warmup=1, stream=0):
+        idx = [run() for run in runs]
+        self.interleaved.append(idx)
+        return [self.times[i] for i in idx]
+
+
+def test_recheck_reranks_the_best_finalists(monkeypatch):
+    # true: 2 is fastest; its round-2 block was unlucky (slow) so default picks 0.
+    dev = _DriftDevice([1.00, 1.02, 0.97, 1.5], block=[0.95, 1.00, 1.01, 1.5])
+    dev.install(monkeypatch)
+    res = _rank(dev, 4, finalists=4)
+    assert min((r for r in res if r.ms), key=lambda r: r.ms).index == 0
+    dev = _DriftDevice([1.00, 1.02, 0.97, 1.5], block=[0.95, 1.00, 1.01, 1.5])
+    dev.install(monkeypatch)
+    res = _rank(dev, 4, finalists=4, recheck=3)
+    best = min((r for r in res if r.ms), key=lambda r: r.ms)
+    assert best.index == 2 and best.ms == pytest.approx(0.97)
+    assert sorted(dev.interleaved[0]) == [0, 1, 2]
+    # the finalist left out is scaled onto the rechecked footing and cannot win
+    assert res[3].ms > best.ms
+
+
+def test_recheck_window_limits_the_pool(monkeypatch):
+    dev = _DriftDevice([1.0, 1.01, 2.0], block=[1.0, 1.01, 2.0])
+    dev.install(monkeypatch)
+    _rank(dev, 3, finalists=3, recheck=8, recheck_window=0.05)
+    assert sorted(dev.interleaved[0]) == [0, 1]
+
+
+def test_interleave_times_round_two_interleaved(monkeypatch):
+    dev = _DriftDevice([1.0, 0.9], block=[0.8, 1.0])
+    dev.install(monkeypatch)
+    res = _rank(dev, 2, finalists=2, interleave=3)
+    assert [r.ms for r in res] == [1.0, 0.9]
+
+
+def test_reprobe_staged_replaces_probe_and_keeps_pool_only(monkeypatch):
+    # probe mis-ranks 3 (probe 2.0, true 0.5); a staged re-probe of the best 4
+    # by probe must bring it back, and candidates outside the pool never rank.
+    times = [1.0, 1.1, 1.2, 0.5, 3.0, 3.1]
+    dev = _DriftDevice(times, block=times)
+    dev.install(monkeypatch)
+    probe = {0: 1.0, 1: 1.1, 2: 1.2, 3: 2.0, 4: 3.0, 5: 3.1}
+    monkeypatch.setattr(
+        batched_timing, "time_batch",
+        lambda runs, **kw: [probe[run()] for run in runs],
+    )
+    res = _rank(dev, 6, finalists=2, reprobe=4, reprobe_staged=True)
+    finals = sorted((r for r in res if r.ms is not None), key=lambda r: r.ms)
+    assert [r.index for r in finals] == [3, 0]
+    assert res[4].ms is None and res[5].ms is None
+
+
+def test_defaults_do_not_recheck(monkeypatch):
+    dev = _DriftDevice([1.0, 0.9], block=[0.8, 1.0])
+    dev.install(monkeypatch)
+    _rank(dev, 2, finalists=2)
+    assert dev.interleaved == []

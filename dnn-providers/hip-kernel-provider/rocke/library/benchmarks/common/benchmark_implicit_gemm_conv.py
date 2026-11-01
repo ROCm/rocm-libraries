@@ -1136,6 +1136,7 @@ def _run_ckprofiler(
 
 
 def main() -> int:
+    batched_timing.apply_hip_device_flags()
     parser = argparse.ArgumentParser(
         description="Tile/pipeline sweep benchmark for implicit-GEMM conv (fwd + wgrad)"
     )
@@ -1191,6 +1192,17 @@ def main() -> int:
         "default only kernels using the widest widths the problem admits are "
         "run (one combination per configuration; configurations whose tile "
         "cannot reach those widths are skipped).",
+    )
+    parser.add_argument(
+        "--pins",
+        default=None,
+        metavar="JSON",
+        help="--run-from-cache, opt-in: a pins file (derive_conv_pins.py: case "
+        "-> kernel label [@split_k=...]). A pinned case offers only its pinned "
+        "kernel at its pinned launch -- a dispatch table rather than a sweep; "
+        "unpinned cases sweep as usual. The pinned launch (split-K degree) is "
+        "honoured with --fast-rank; the serial path runs the pinned kernel at "
+        "its usual degrees.",
     )
     parser.add_argument(
         "--sample",
@@ -1329,6 +1341,67 @@ def main() -> int:
         metavar="N",
         help=f"probe timed launches per kernel "
         f"(default: {batched_timing.DEFAULT_PROBE_ITERS})",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-recheck",
+        type=int,
+        default=0,
+        dest="fast_rank_recheck",
+        metavar="N",
+        help="opt-in (staged timing): re-time the best N finalists in "
+        "interleaved rounds (median over all their samples) and rank by that; "
+        "the other finalists are scaled to the same clock footing (default: 0, off)",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-reprobe",
+        type=int,
+        default=0,
+        dest="fast_rank_reprobe",
+        metavar="K",
+        help="opt-in: probe the best K candidates a second time in reverse "
+        "order and keep the lower probe of the two (default: 0, off)",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-reprobe-staged",
+        action="store_true",
+        dest="fast_rank_reprobe_staged",
+        help="with --fast-rank-reprobe: the second probe uses staged samples "
+        "(the reported protocol) and replaces the block probe",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-interleave",
+        type=int,
+        default=0,
+        dest="fast_rank_interleave",
+        metavar="R",
+        help="opt-in (staged): time the finalists in R interleaved rounds "
+        "(ceil(--iters / R) samples per visit) instead of one block each "
+        "(default: 0, off)",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-recheck-rounds",
+        type=int,
+        default=5,
+        dest="fast_rank_recheck_rounds",
+        metavar="R",
+        help="interleaved rounds of --fast-rank-recheck (default: 5)",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-recheck-iters",
+        type=int,
+        default=4,
+        dest="fast_rank_recheck_iters",
+        metavar="K",
+        help="kept staged samples per candidate per round (default: 4)",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-recheck-window",
+        type=float,
+        default=0.0,
+        dest="fast_rank_recheck_window",
+        metavar="F",
+        help="only finalists within this fraction of the best round-2 time "
+        "are re-timed (default: 0 = the best N regardless)",
     )
     rank_grp.add_argument(
         "--fast-rank-primer",
@@ -4754,6 +4827,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
     overall_rc = 0
+    pins = _load_pins(getattr(args, "pins", None))
     # Stage 2 reduce launchers for two-stage wgrad, compiled once per dW dtype.
     stage2_kernels: dict = {}
     for case_idx, case in enumerate(cases, 1):
@@ -4870,6 +4944,22 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         flush=True,
                     )
                     continue
+            pin = pins.get(case_key(problem, case_dtype, direction))
+            if pin is not None:
+                from kernels.conv.kernel_label import strip_launch_suffix
+
+                candidates = [
+                    c for c in candidates if c[0].label() == strip_launch_suffix(pin)
+                ]
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} {direction}: "
+                        f"pinned kernel not in the cache: {pin}",
+                        flush=True,
+                    )
+                    overall_rc = 1
+                    continue
+            args._pin_launch = pin
             n_compatible = len(candidates)
             n_vec_pruned = 0
             if not args.all_vector_sizes:
@@ -5259,6 +5349,24 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     return overall_rc
 
 
+def _load_pins(path) -> dict:
+    """``{case key: kernel label [@split_k=...]}`` of a pins file (or ``{}``)."""
+    if not path:
+        return {}
+    import json
+
+    from benchmarks.common.early_stop import case_key as _ck
+
+    out = {}
+    for name, pin in json.load(open(path))["cases"].items():
+        problem, dtype, forw = parse_miopen_cmd(pin["cmd"])
+        direction = {1: "fwd", 2: "dgrad", 4: "wgrad"}.get(int(forw))
+        if direction is None:
+            raise SystemExit(f"--pins: {name}: the command must name one direction")
+        out[_ck(problem, dtype, direction)] = pin["kernel"]
+    return out
+
+
 def _launch_problem(direction, problem):
     """The problem the cached kernels of ``direction`` launch on for ``problem``.
 
@@ -5374,6 +5482,31 @@ def _fast_rank_candidates(
         for split_k in degrees:
             items.append((ident, hsaco_path, meta, split_k))
 
+    pin = getattr(args, "_pin_launch", None)
+    if pin is not None:
+        # A pinned case runs its pinned launch only (same label spelling as
+        # the results: identity label + " @split_k=<degree>"). The pinned
+        # degree is launched even when this run's degree list does not offer
+        # it -- a pin is a launch, not a filter on the sweep.
+        want = " ".join(pin.split())
+        m = re.search(r"@split_k=(\d+)(?:/full(\d+))?", want)
+        if m and candidates:
+            sk = int(m.group(1))
+            if m.group(2) is not None:
+                sk = TailSplit(sk, int(m.group(2)))
+            ident, hsaco_path, meta = candidates[0]
+            if ident.label() == want.split()[0] and not any(
+                it[0].label() == ident.label() and str(it[3]) == str(sk) for it in items
+            ):
+                items.append((ident, hsaco_path, meta, sk))
+        items = [
+            it
+            for it in items
+            if (it[0].label() + (f" @split_k={it[3]}" if it[3] is not None else "")) == want
+        ]
+        items = items[:1]  # a launch some degree lists offer twice runs once
+        if not items:
+            print(f"  [skip] pinned launch not offered for this case: {pin}", flush=True)
     n = len(items)
     if not n:
         return 0, False
@@ -5503,6 +5636,13 @@ def _fast_rank_candidates(
         chunk=args.fast_rank_chunk,
         primer=args.fast_rank_primer,
         timing=args.timing,
+        recheck=args.fast_rank_recheck,
+        recheck_rounds=args.fast_rank_recheck_rounds,
+        recheck_iters=args.fast_rank_recheck_iters,
+        recheck_window=args.fast_rank_recheck_window,
+        reprobe=args.fast_rank_reprobe,
+        interleave=args.fast_rank_interleave,
+        reprobe_staged=args.fast_rank_reprobe_staged,
         on_probe=on_probe,
         on_finalist=on_finalist,
         on_drop=on_drop,
@@ -6297,11 +6437,18 @@ def _fwd_streamk_launches(problem, ident) -> tuple:
         problem, tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
     )
     iters = args_.num_pid_m * args_.num_pid_n * -(-args_.gemm_k // ident.tile_k)
-    return tuple(
-        g
-        for g in (n * num_cus for n in _FWD_STREAMK_WGS_PER_CU)
-        if g * _FWD_SPLIT_MIN_TILES_PER_SLICE <= iters
-    )
+    gs = [n * num_cus for n in _FWD_STREAMK_WGS_PER_CU]
+    # Opt-in (launch-parameter search): ROCKE_FWD_STREAMK_GS adds workgroup
+    # counts -- absolute ("192,256") or per CU ("1.5c,3c").
+    for tok in _env_list("ROCKE_FWD_STREAMK_GS"):
+        g = int(round(float(tok[:-1]) * num_cus)) if tok.endswith("c") else int(tok)
+        if g > 0 and g not in gs:
+            gs.append(g)
+    return tuple(g for g in gs if g * _FWD_SPLIT_MIN_TILES_PER_SLICE <= iters)
+
+
+def _env_list(name: str) -> list:
+    return [t.strip() for t in os.environ.get(name, "").split(",") if t.strip()]
 
 
 # Tail-split degrees tried per full-tile count; a few: the tail is short.
@@ -6325,12 +6472,18 @@ def _fwd_split_tail_launches(problem, ident) -> tuple:
     tiles = args_.num_pid_m * args_.num_pid_n
     k_tiles = -(-args_.gemm_k // ident.tile_k)
     out = []
-    for n in range(1, 5):
+    # Opt-in (launch-parameter search): ROCKE_FWD_TAIL_DEGREES adds tail
+    # degrees, ROCKE_FWD_TAIL_SLOTS adds resident workgroups per CU (n).
+    degs = list(_FWD_SPLIT_TAIL_DEGREES) + [
+        int(t) for t in _env_list("ROCKE_FWD_TAIL_DEGREES") if int(t) not in _FWD_SPLIT_TAIL_DEGREES
+    ]
+    ns = list(range(1, 5)) + [int(t) for t in _env_list("ROCKE_FWD_TAIL_SLOTS") if int(t) not in range(1, 5)]
+    for n in ns:
         slots = n * num_cus
         full = tiles - tiles % slots
         if full <= 0 or full == tiles:
             continue
-        for sk in _FWD_SPLIT_TAIL_DEGREES:
+        for sk in degs:
             if sk * _FWD_SPLIT_MIN_TILES_PER_SLICE <= k_tiles and (
                 max(1, problem.groups) * sk <= _MAX_GRID_DIM_Z
             ):
