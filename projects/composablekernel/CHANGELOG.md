@@ -11,6 +11,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ### Added
 
 * Added FP6 (E2M3) operands to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250, for row-major A, column-major B, a 16x16x128 warp tile, and 32-element E8M0 scale blocks, with fp16 or bf16 output.
+* Added K tails to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250: they accept any K that is a whole number of storage elements.
 
 ### Changed
 
