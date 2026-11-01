@@ -362,23 +362,23 @@ int main()
     typedef _Float16     f16TypeCompute;
     typedef double       doubleTypeCompute;
 
-    constexpr hiptensorDataType_t   typeInput_16BF = HIPTENSOR_R_16BF;
-    constexpr hiptensorDataType_t   typeInput_16F  = HIPTENSOR_R_16F;
-    constexpr hiptensorDataType_t   typeInput_32F  = HIPTENSOR_R_32F;
-    constexpr hiptensorDataType_t   typeInput_64F  = HIPTENSOR_R_64F;
+    constexpr hiptensorDataType_t typeInput_16BF = HIPTENSOR_R_16BF;
+    constexpr hiptensorDataType_t typeInput_16F  = HIPTENSOR_R_16F;
+    constexpr hiptensorDataType_t typeInput_32F  = HIPTENSOR_R_32F;
+    constexpr hiptensorDataType_t typeInput_64F  = HIPTENSOR_R_64F;
 
     constexpr hiptensorComputeDescriptor_t typeCompute_16BF = HIPTENSOR_COMPUTE_DESC_16BF;
-    constexpr hiptensorComputeDescriptor_t typeCompute_16F = HIPTENSOR_COMPUTE_DESC_16F;
-    constexpr hiptensorComputeDescriptor_t typeCompute_32F = HIPTENSOR_COMPUTE_DESC_32F;
-    constexpr hiptensorComputeDescriptor_t typeCompute_64F = HIPTENSOR_COMPUTE_DESC_64F;
+    constexpr hiptensorComputeDescriptor_t typeCompute_16F  = HIPTENSOR_COMPUTE_DESC_16F;
+    constexpr hiptensorComputeDescriptor_t typeCompute_32F  = HIPTENSOR_COMPUTE_DESC_32F;
+    constexpr hiptensorComputeDescriptor_t typeCompute_64F  = HIPTENSOR_COMPUTE_DESC_64F;
 
-    floatTypeCompute alphaFloat{1.0f};
-    bf16TypeCompute alphaBF16{1.0f};
+    floatTypeCompute  alphaFloat{1.0f};
+    bf16TypeCompute   alphaBF16{1.0f};
     f16TypeCompute    alphaF16{1.0f};
     doubleTypeCompute alphaDouble{1.0};
 
-    floatTypeCompute betaFloat{1.0f};
-    bf16TypeCompute betaBF16{1.0f};
+    floatTypeCompute  betaFloat{1.0f};
+    bf16TypeCompute   betaBF16{1.0f};
     f16TypeCompute    betaF16{1.0f};
     doubleTypeCompute betaDouble{1.0};
 
@@ -389,126 +389,190 @@ int main()
     // Example 1: BF16 input tensors and F32 compute type
     if(isF16F32MatrixCoreSupported())
     {
-        std::cout << "Running bilinear contraction sample with unary ops, BF16 input tensors and F32 compute type ..." << std::endl;
-        bilinearContractionSampleUnaryOps<DataType_BF16, DataType_BF16, DataType_BF16,
-                                          typeInput_16BF, typeInput_16BF, typeInput_16BF,
+        std::cout << "Running bilinear contraction sample with unary ops, BF16 input tensors and "
+                     "F32 compute type ..."
+                  << std::endl;
+        bilinearContractionSampleUnaryOps<DataType_BF16,
+                                          DataType_BF16,
+                                          DataType_BF16,
+                                          typeInput_16BF,
+                                          typeInput_16BF,
+                                          typeInput_16BF,
                                           typeCompute_32F>(&alphaFloat, &betaFloat, opA, opB, opC);
     }
     else
     {
-        std::cout << "Skipping BF16 input tensors and F32 compute type: unsupported host device" << std::endl;
+        std::cout << "Skipping BF16 input tensors and F32 compute type: unsupported host device"
+                  << std::endl;
     }
     std::cout << std::endl;
 
     // Example 2: F16 input tensors and F32 compute type
     if(isF16F32MatrixCoreSupported())
     {
-        std::cout << "Running bilinear contraction sample with unary ops, F16 input tensors and F32 compute type ..." << std::endl;
-        bilinearContractionSampleUnaryOps<DataType_F16, DataType_F16, DataType_F16,
-                                          typeInput_16F, typeInput_16F, typeInput_16F,
+        std::cout << "Running bilinear contraction sample with unary ops, F16 input tensors and "
+                     "F32 compute type ..."
+                  << std::endl;
+        bilinearContractionSampleUnaryOps<DataType_F16,
+                                          DataType_F16,
+                                          DataType_F16,
+                                          typeInput_16F,
+                                          typeInput_16F,
+                                          typeInput_16F,
                                           typeCompute_32F>(&alphaFloat, &betaFloat, opA, opB, opC);
     }
     else
     {
-        std::cout << "Skipping F16 input tensors and F32 compute type: unsupported host device" << std::endl;
+        std::cout << "Skipping F16 input tensors and F32 compute type: unsupported host device"
+                  << std::endl;
     }
     std::cout << std::endl;
 
     // Example 3: F32 input tensors and BF16 compute type
     if(isF32F16MatrixCoreSupported())
     {
-        std::cout << "Running bilinear contraction sample with unary ops, F32 input tensors and BF16 compute type ..." << std::endl;
-        bilinearContractionSampleUnaryOps<DataType_F32, DataType_F32, DataType_F32,
-                                          typeInput_32F, typeInput_32F, typeInput_32F,
+        std::cout << "Running bilinear contraction sample with unary ops, F32 input tensors and "
+                     "BF16 compute type ..."
+                  << std::endl;
+        bilinearContractionSampleUnaryOps<DataType_F32,
+                                          DataType_F32,
+                                          DataType_F32,
+                                          typeInput_32F,
+                                          typeInput_32F,
+                                          typeInput_32F,
                                           typeCompute_16BF>(&alphaBF16, &betaBF16, opA, opB, opC);
     }
     else
     {
-        std::cout << "Skipping F32 input tensors and BF16 compute type: unsupported host device" << std::endl;
+        std::cout << "Skipping F32 input tensors and BF16 compute type: unsupported host device"
+                  << std::endl;
     }
     std::cout << std::endl;
 
     // Example 4: F32 input tensors and F16 compute type
     if(isF32F16MatrixCoreSupported())
     {
-        std::cout << "Running bilinear contraction sample with unary ops, F32 input tensors and F16 compute type ..." << std::endl;
-        bilinearContractionSampleUnaryOps<DataType_F32, DataType_F32, DataType_F32,
-                                          typeInput_32F, typeInput_32F, typeInput_32F,
+        std::cout << "Running bilinear contraction sample with unary ops, F32 input tensors and "
+                     "F16 compute type ..."
+                  << std::endl;
+        bilinearContractionSampleUnaryOps<DataType_F32,
+                                          DataType_F32,
+                                          DataType_F32,
+                                          typeInput_32F,
+                                          typeInput_32F,
+                                          typeInput_32F,
                                           typeCompute_16F>(&alphaF16, &betaF16, opA, opB, opC);
     }
     else
     {
-        std::cout << "Skipping F32 input tensors and F16 compute type: unsupported host device" << std::endl;
+        std::cout << "Skipping F32 input tensors and F16 compute type: unsupported host device"
+                  << std::endl;
     }
     std::cout << std::endl;
 
     // Example 5: F32 input tensors and F32 compute type
     if(isF32F32MatrixCoreSupported())
     {
-        std::cout << "Running bilinear contraction sample with unary ops, F32 input tensors and F32 compute type ..." << std::endl;
-        bilinearContractionSampleUnaryOps<DataType_F32, DataType_F32, DataType_F32,
-                                          typeInput_32F, typeInput_32F, typeInput_32F,
+        std::cout << "Running bilinear contraction sample with unary ops, F32 input tensors and "
+                     "F32 compute type ..."
+                  << std::endl;
+        bilinearContractionSampleUnaryOps<DataType_F32,
+                                          DataType_F32,
+                                          DataType_F32,
+                                          typeInput_32F,
+                                          typeInput_32F,
+                                          typeInput_32F,
                                           typeCompute_32F>(&alphaFloat, &betaFloat, opA, opB, opC);
     }
     else
     {
-        std::cout << "Skipping F32 input tensors and F32 compute type: unsupported host device" << std::endl;
+        std::cout << "Skipping F32 input tensors and F32 compute type: unsupported host device"
+                  << std::endl;
     }
     std::cout << std::endl;
 
     // Example 6: F64 input tensors and F32 compute type
     if(isF64F32MatrixCoreSupported())
     {
-        std::cout << "Running bilinear contraction sample with unary ops, F64 input tensors and F32 compute type ..." << std::endl;
-        bilinearContractionSampleUnaryOps<DataType_F64, DataType_F64, DataType_F64,
-                                          typeInput_64F, typeInput_64F, typeInput_64F,
+        std::cout << "Running bilinear contraction sample with unary ops, F64 input tensors and "
+                     "F32 compute type ..."
+                  << std::endl;
+        bilinearContractionSampleUnaryOps<DataType_F64,
+                                          DataType_F64,
+                                          DataType_F64,
+                                          typeInput_64F,
+                                          typeInput_64F,
+                                          typeInput_64F,
                                           typeCompute_32F>(&alphaFloat, &betaFloat, opA, opB, opC);
     }
     else
     {
-        std::cout << "Skipping F64 input tensors and F32 compute type: unsupported host device" << std::endl;
+        std::cout << "Skipping F64 input tensors and F32 compute type: unsupported host device"
+                  << std::endl;
     }
     std::cout << std::endl;
 
     // Example 7: F64 input tensors and F64 compute type
     if(isF64F64MatrixCoreSupported())
     {
-        std::cout << "Running bilinear contraction sample with unary ops, F64 input tensors and F64 compute type ..." << std::endl;
-        bilinearContractionSampleUnaryOps<DataType_F64, DataType_F64, DataType_F64,
-                                          typeInput_64F, typeInput_64F, typeInput_64F,
-                                          typeCompute_64F>(&alphaDouble, &betaDouble, opA, opB, opC);
+        std::cout << "Running bilinear contraction sample with unary ops, F64 input tensors and "
+                     "F64 compute type ..."
+                  << std::endl;
+        bilinearContractionSampleUnaryOps<DataType_F64,
+                                          DataType_F64,
+                                          DataType_F64,
+                                          typeInput_64F,
+                                          typeInput_64F,
+                                          typeInput_64F,
+                                          typeCompute_64F>(
+            &alphaDouble, &betaDouble, opA, opB, opC);
     }
     else
     {
-        std::cout << "Skipping F64 input tensors and F64 compute type: unsupported host device" << std::endl;
+        std::cout << "Skipping F64 input tensors and F64 compute type: unsupported host device"
+                  << std::endl;
     }
     std::cout << std::endl;
 
     // Example 8: F16 input tensors and F16 compute type
     if(isF16F16MatrixCoreSupported())
     {
-        std::cout << "Running bilinear contraction sample with unary ops, F16 input tensors and F16 compute type ..." << std::endl;
-        bilinearContractionSampleUnaryOps<DataType_F16, DataType_F16, DataType_F16,
-                                          typeInput_16F, typeInput_16F, typeInput_16F,
+        std::cout << "Running bilinear contraction sample with unary ops, F16 input tensors and "
+                     "F16 compute type ..."
+                  << std::endl;
+        bilinearContractionSampleUnaryOps<DataType_F16,
+                                          DataType_F16,
+                                          DataType_F16,
+                                          typeInput_16F,
+                                          typeInput_16F,
+                                          typeInput_16F,
                                           typeCompute_16F>(&alphaF16, &betaF16, opA, opB, opC);
     }
     else
     {
-        std::cout << "Skipping F16 input tensors and F16 compute type: unsupported host device" << std::endl;
+        std::cout << "Skipping F16 input tensors and F16 compute type: unsupported host device"
+                  << std::endl;
     }
     std::cout << std::endl;
 
     // Example 9: BF16 input tensors and BF16 compute type
     if(isF16F16MatrixCoreSupported())
     {
-        std::cout << "Running bilinear contraction sample with unary ops, BF16 input tensors and BF16 compute type ..." << std::endl;
-        bilinearContractionSampleUnaryOps<DataType_BF16, DataType_BF16, DataType_BF16,
-                                          typeInput_16BF, typeInput_16BF, typeInput_16BF,
+        std::cout << "Running bilinear contraction sample with unary ops, BF16 input tensors and "
+                     "BF16 compute type ..."
+                  << std::endl;
+        bilinearContractionSampleUnaryOps<DataType_BF16,
+                                          DataType_BF16,
+                                          DataType_BF16,
+                                          typeInput_16BF,
+                                          typeInput_16BF,
+                                          typeInput_16BF,
                                           typeCompute_16BF>(&alphaBF16, &betaBF16, opA, opB, opC);
     }
     else
     {
-        std::cout << "Skipping BF16 input tensors and BF16 compute type: unsupported host device" << std::endl;
+        std::cout << "Skipping BF16 input tensors and BF16 compute type: unsupported host device"
+                  << std::endl;
     }
     std::cout << std::endl;
 

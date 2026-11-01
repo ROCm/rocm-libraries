@@ -229,7 +229,9 @@ CF32_COST: Dict[str, Dict[str, Tuple[float, float, int]]] = {
 
 # body selection thresholds, in waves = 256 x 256 output tiles / CU count
 CF32_SK_ALWAYS_WAVES = 4.0  # below: stream-K (RIW_SK)
-CF32_SK_MAX_WAVES = 32.0  # below, with a last wave filled at most CF32_SK_MAX_TAIL: RIW_SK
+CF32_SK_MAX_WAVES = (
+    32.0  # below, with a last wave filled at most CF32_SK_MAX_TAIL: RIW_SK
+)
 CF32_SK_MAX_TAIL = 0.65
 CF32_SMALL_MAX_WAVES = 0.5  # below: the small-problem cost model (CF32_SMALL_COST)
 # the small bodies (Q3_SK / C3) apply ``alpha`` / bilinear in their scatter
@@ -371,7 +373,9 @@ def cf32_body(name: str, arch: str = "gfx950") -> Tuple[TileSpec, TraitSpec, int
     if name == "RIW_SK":
         return (
             _tile(256, 256, 64, 2, 2),
-            _ring(**dict(_RI, chiplet_chunk_size=32), persistent_ctas=cus, streamk=True),
+            _ring(
+                **dict(_RI, chiplet_chunk_size=32), persistent_ctas=cus, streamk=True
+            ),
             256,
         )
     if name == "Q3_SK":
@@ -417,7 +421,9 @@ def _small_body(
         # (real f32: the data-parallel 8-wave 128 x 128 body; cf32's doubled
         # N / K keep the stream-K 4-wave body ahead)
         return "Q3_SK" if cplx else "C3"
-    cost = CF32_SMALL_COST[("cplx" if cplx else "real", "bilinear" if epi == "bilinear" else "scale")]
+    cost = CF32_SMALL_COST[
+        ("cplx" if cplx else "real", "bilinear" if epi == "bilinear" else "scale")
+    ]
     names = [b for b in cost if not (scatter_only and b == "RIW_SK")]
     best = min(names, key=lambda b: _small_cost(cost[b], b, M, Nk, Kh))
     return None if best == "RIW_SK" else best
@@ -571,7 +577,9 @@ def _choose(
     return (body or _body_for_k(M, Nk, wide, epi, arch, cplx=cplx, Kh=Kh)), wide
 
 
-def _adjust_k(spec: UniversalGemmSpec, M: int, Nk: int, wide: bool) -> UniversalGemmSpec:
+def _adjust_k(
+    spec: UniversalGemmSpec, M: int, Nk: int, wide: bool
+) -> UniversalGemmSpec:
     """Launch adjustments of a body for kernel extents ``M x Nk``."""
     t, tr = spec.tile, spec.trait
     upd: Dict[str, Any] = {}

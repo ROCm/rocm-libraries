@@ -114,8 +114,7 @@ namespace
     template <typename T>
     constexpr hiptensorComputeDescriptor_t computeType()
     {
-        return std::is_same_v<T, double> ? HIPTENSOR_COMPUTE_DESC_64F
-                                         : HIPTENSOR_COMPUTE_DESC_32F;
+        return std::is_same_v<T, double> ? HIPTENSOR_COMPUTE_DESC_64F : HIPTENSOR_COMPUTE_DESC_32F;
     }
 
     template <typename T>
@@ -162,14 +161,8 @@ namespace
             for(T const* aPtr : {static_cast<T const*>(dBad.ptr), static_cast<T const*>(nullptr)})
             {
                 dD.write(std::vector<T>(count, std::numeric_limits<T>::quiet_NaN()));
-                ASSERT_EQ(hiptensorElementwiseBinaryExecute(api.handle,
-                                                            plan,
-                                                            &zero,
-                                                            aPtr,
-                                                            &scale,
-                                                            dGoodC.ptr,
-                                                            dD.ptr,
-                                                            nullptr),
+                ASSERT_EQ(hiptensorElementwiseBinaryExecute(
+                              api.handle, plan, &zero, aPtr, &scale, dGoodC.ptr, dD.ptr, nullptr),
                           HIPTENSOR_STATUS_SUCCESS)
                     << "opAC " << opAC;
                 CHECK_HIP_ERROR(hipDeviceSynchronize());
@@ -269,7 +262,7 @@ TEST(ElementwiseZeroScaleTest, TrinaryF32ReusedPlan)
 
     for(int zeroed = -1; zeroed < 3; ++zeroed)
     {
-        float s[3];
+        float       s[3];
         void const* in[3] = {d0.ptr, d1.ptr, d2.ptr};
         for(int k = 0; k < 3; ++k)
         {
@@ -280,16 +273,8 @@ TEST(ElementwiseZeroScaleTest, TrinaryF32ReusedPlan)
             }
         }
         dD.write(std::vector<float>(count, NAN));
-        ASSERT_EQ(hiptensorElementwiseTrinaryExecute(api.handle,
-                                                     plan,
-                                                     &s[0],
-                                                     in[0],
-                                                     &s[1],
-                                                     in[1],
-                                                     &s[2],
-                                                     in[2],
-                                                     dD.ptr,
-                                                     nullptr),
+        ASSERT_EQ(hiptensorElementwiseTrinaryExecute(
+                      api.handle, plan, &s[0], in[0], &s[1], in[1], &s[2], in[2], dD.ptr, nullptr),
                   HIPTENSOR_STATUS_SUCCESS)
             << "zeroed " << zeroed;
         CHECK_HIP_ERROR(hipDeviceSynchronize());
@@ -318,29 +303,24 @@ TEST(ElementwiseZeroScaleTest, PermutationReusedPlan)
         {
             continue;
         }
-        auto          descA   = api.tensor({M, N}, {1, M}, type);
-        auto          descB   = api.tensor({N, M}, {1, N}, type);
+        auto          descA    = api.tensor({M, N}, {1, M}, type);
+        auto          descB    = api.tensor({N, M}, {1, N}, type);
         int32_t const modesA[] = {'m', 'n'}, modesB[] = {'n', 'm'};
         auto          compute
             = type == HIPTENSOR_R_64F ? HIPTENSOR_COMPUTE_DESC_64F : HIPTENSOR_COMPUTE_DESC_32F;
 
         hiptensorOperationDescriptor_t op = nullptr;
-        ASSERT_EQ(hiptensorCreatePermutation(api.handle,
-                                             &op,
-                                             descA,
-                                             modesA,
-                                             HIPTENSOR_OP_IDENTITY,
-                                             descB,
-                                             modesB,
-                                             compute),
-                  HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(
+            hiptensorCreatePermutation(
+                api.handle, &op, descA, modesA, HIPTENSOR_OP_IDENTITY, descB, modesB, compute),
+            HIPTENSOR_STATUS_SUCCESS);
         api.keep(op);
         hiptensorPlan_t plan = nullptr;
         ASSERT_EQ(api.plan(op, plan), HIPTENSOR_STATUS_SUCCESS);
 
         auto run = [&](auto tag) {
-            using T            = decltype(tag);
-            auto const      a  = integers<T>(7, 3);
+            using T           = decltype(tag);
+            auto const      a = integers<T>(7, 3);
             DeviceBuffer<T> dA(a), dBad(poisoned<T>());
             DeviceBuffer<T> dB(std::vector<T>(count, std::numeric_limits<T>::quiet_NaN()));
             // With alpha == 0, the first call passes the poisoned A and the second none.

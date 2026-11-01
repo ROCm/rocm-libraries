@@ -627,16 +627,37 @@ if(ROCKE_INSTALL_TESTS)
         endif()
       endforeach()
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"not integration\" -v -rs --timeout=60)\n")
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_compiler_env \"\")\n"
              "if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Linux\" AND NOT \"\$ENV{ROCM_PATH}\" STREQUAL \"\")\n"
              "  set(_rocke_compiler_env \";PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH};HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode\")\n"
-             "endif()\n"
-             "set_tests_properties(rocke_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"${_ROCKE_PYTEST_ENVIRONMENT}\${_rocke_compiler_env}\"\n"
-             "  TIMEOUT 300)\n")
+             "endif()\n")
+      # The tree runs as four entries with the same environment and options, so that
+      # each stays well inside its own limit: tests/dispatch, tests/instances and
+      # tests/numeric (planner checks and GPU numerics: most of the run time) in an
+      # entry each, and rocke_pytest for the rest. Each limit is about twice the
+      # entry's run time on a gfx950 runner with torch installed.
+      foreach(_rocke_pytest_lane
+              "rocke_pytest;tests;300"
+              "rocke_dispatch_pytest;tests/dispatch;600"
+              "rocke_instances_pytest;tests/instances;1200"
+              "rocke_numeric_pytest;tests/numeric;600")
+        list(GET _rocke_pytest_lane 0 _rocke_lane_name)
+        list(GET _rocke_pytest_lane 1 _rocke_lane_dir)
+        list(GET _rocke_pytest_lane 2 _rocke_lane_timeout)
+        set(_rocke_lane_args "\"${ROCKE_TEST_CTEST_REL}${_rocke_lane_dir}\"")
+        if(_rocke_lane_name STREQUAL "rocke_pytest")
+          foreach(_rocke_lane_skip library dispatch instances numeric)
+            string(APPEND _rocke_lane_args
+                   " --ignore \"${ROCKE_TEST_CTEST_REL}tests/${_rocke_lane_skip}\"")
+          endforeach()
+        endif()
+        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+               "add_test(${_rocke_lane_name} python -m pytest ${_rocke_lane_args} -m \"not integration\" -v -rs --timeout=60)\n"
+               "set_tests_properties(${_rocke_lane_name} PROPERTIES\n"
+               "  LABELS \"ckc\\;python\\;quick\"\n"
+               "  ENVIRONMENT \"${_ROCKE_PYTEST_ENVIRONMENT}\${_rocke_compiler_env}\"\n"
+               "  TIMEOUT ${_rocke_lane_timeout})\n")
+      endforeach()
     endif()
 
     # Library conv CPU tests (no GPU required; dispatch selection + signature guards).

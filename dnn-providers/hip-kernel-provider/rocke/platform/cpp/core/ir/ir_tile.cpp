@@ -904,8 +904,15 @@ rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                int num_results,
                                const rocke_inline_asm_opts_t* opts)
 {
-    return rocke_b_inline_asm_named(
-        b, asm_template, constraints, operands, num_operands, result_types, num_results, opts, "asm");
+    return rocke_b_inline_asm_named(b,
+                                    asm_template,
+                                    constraints,
+                                    operands,
+                                    num_operands,
+                                    result_types,
+                                    num_results,
+                                    opts,
+                                    "asm");
 }
 
 rocke_op_t* rocke_b_inline_asm_named(rocke_ir_builder_t* b,

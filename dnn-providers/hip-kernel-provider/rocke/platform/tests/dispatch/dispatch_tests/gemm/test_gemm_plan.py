@@ -18,8 +18,14 @@ GEMM_SELECTOR_TESTS = True
 
 def _req(M, N, K, lay, dt="fp16"):
     return GemmRequest(
-        M=M, N=N, K=K, arch="gfx950", dtype=dt, layout=lay,
-        trans_a=lay[0] == "C", trans_b=lay[1] == "C",
+        M=M,
+        N=N,
+        K=K,
+        arch="gfx950",
+        dtype=dt,
+        layout=lay,
+        trans_a=lay[0] == "C",
+        trans_b=lay[1] == "C",
     )
 
 
@@ -43,9 +49,16 @@ class TestPlan(unittest.TestCase):
 
     def test_transpose_steps(self):
         st = P.transpose_steps(_req(4096, 2048, 1024, "CRR"))
-        self.assertEqual([(t.operand, t.rows, t.cols) for t in st], [("A", 1024, 4096), ("B", 1024, 2048)])
-        self.assertEqual(P.transpose_steps(_req(4096, 2048, 1024, "RRR"))[0].operand, "B")
-        self.assertEqual(P.transpose_steps(_req(4096, 2048, 1024, "CCR"))[0].operand, "A")
+        self.assertEqual(
+            [(t.operand, t.rows, t.cols) for t in st],
+            [("A", 1024, 4096), ("B", 1024, 2048)],
+        )
+        self.assertEqual(
+            P.transpose_steps(_req(4096, 2048, 1024, "RRR"))[0].operand, "B"
+        )
+        self.assertEqual(
+            P.transpose_steps(_req(4096, 2048, 1024, "CCR"))[0].operand, "A"
+        )
         self.assertIsNone(P.transpose_steps(_req(4000, 2048, 1024, "CCR")))
         self.assertIsNone(P.transpose_steps(_req(4096, 2048, 1000, "RRR")))
         # rows / 64 on grid.y must fit the HIP limit
@@ -78,7 +91,12 @@ class TestPlan(unittest.TestCase):
     def test_zero_margin_follows_predictions(self):
         seen = set()
         for lay in ("RRR", "CRR", "CCR"):
-            for M, N, K in ((8192, 4096, 1024), (1024, 8192, 256), (4096, 4096, 4096), (256, 512, 8192)):
+            for M, N, K in (
+                (8192, 4096, 1024),
+                (1024, 8192, 256),
+                (4096, 4096, 4096),
+                (256, 512, 8192),
+            ):
                 req = _req(M, N, K, lay)
                 with mock.patch.object(P, "GEMM_PLAN_PREPASS_MARGIN", 0.0):
                     pl = P.plan_gemm_fp16(req)
@@ -87,7 +105,11 @@ class TestPlan(unittest.TestCase):
                     # a gemm_skinny native pick has no model time: native
                     self.assertEqual(pl.kind, "native")
                     continue
-                want = "prepass" if pr["native"] > pr["rcr_gemm"] + pr["transposes"] else "native"
+                want = (
+                    "prepass"
+                    if pr["native"] > pr["rcr_gemm"] + pr["transposes"]
+                    else "native"
+                )
                 self.assertEqual(pl.kind, want, (lay, M, N, K, pr))
                 seen.add(pl.kind)
         self.assertTrue(seen)
@@ -106,8 +128,12 @@ class TestPlan(unittest.TestCase):
         self.assertEqual(pl.gemm.spec, dispatch_gemm_fp16(req).spec)
 
     def test_transpose_cost_monotone(self):
-        a = P.transpose_cost_us("gfx950", P.transpose_steps(_req(1024, 1024, 1024, "RRR")))
-        b = P.transpose_cost_us("gfx950", P.transpose_steps(_req(1024, 8192, 1024, "RRR")))
+        a = P.transpose_cost_us(
+            "gfx950", P.transpose_steps(_req(1024, 1024, 1024, "RRR"))
+        )
+        b = P.transpose_cost_us(
+            "gfx950", P.transpose_steps(_req(1024, 8192, 1024, "RRR"))
+        )
         self.assertLess(a, b)
         self.assertIsNone(P.transpose_cost_us("gfx1151", ()))
 
@@ -128,11 +154,17 @@ class TestTailSplitRows(unittest.TestCase):
     def test_ragged_last_wave(self):
         # 30 x 27 tiles of 256 x 256 on 256 workgroups: 3 full waves hold 28
         # whole tile rows (756 tiles), the last 2 rows are the tail
-        rows = P.tail_split_rows(_req(7680, 6720, 1536, "RCR", "bf16"), self._spec(256, 256))
+        rows = P.tail_split_rows(
+            _req(7680, 6720, 1536, "RCR", "bf16"), self._spec(256, 256)
+        )
         self.assertEqual(rows, 512)
 
     def test_head_fits_the_full_waves(self):
-        for M, N, tm, tn in ((7680, 6720, 256, 256), (15360, 13440, 256, 256), (4608, 3840, 128, 192)):
+        for M, N, tm, tn in (
+            (7680, 6720, 256, 256),
+            (15360, 13440, 256, 256),
+            (4608, 3840, 128, 192),
+        ):
             sp = self._spec(tm, tn)
             rows = P.tail_split_rows(_req(M, N, 1024, "RCR", "bf16"), sp)
             with self.subTest(M=M, N=N):
@@ -147,9 +179,15 @@ class TestTailSplitRows(unittest.TestCase):
 
     def test_no_tail(self):
         # whole waves (16 x 16 tiles on 256 workgroups) and less than one wave
-        self.assertEqual(P.tail_split_rows(_req(4096, 4096, 1024, "RCR"), self._spec(256, 256)), 0)
-        self.assertEqual(P.tail_split_rows(_req(1024, 1024, 1024, "RCR"), self._spec(256, 256)), 0)
         self.assertEqual(
-            P.tail_split_rows(_req(4096, 4096, 1024, "RCR"), self._spec(256, 256), cus=300), 0
+            P.tail_split_rows(_req(4096, 4096, 1024, "RCR"), self._spec(256, 256)), 0
         )
-
+        self.assertEqual(
+            P.tail_split_rows(_req(1024, 1024, 1024, "RCR"), self._spec(256, 256)), 0
+        )
+        self.assertEqual(
+            P.tail_split_rows(
+                _req(4096, 4096, 1024, "RCR"), self._spec(256, 256), cus=300
+            ),
+            0,
+        )

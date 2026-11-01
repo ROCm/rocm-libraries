@@ -567,7 +567,11 @@ def _skinny_equiv(M: int, N: int, K: int, flat: Mapping[str, Any]) -> Dict[str, 
     """The UniversalGemm-like geometry of a gemm_skinny configuration (input
     of the shared derived features)."""
     ma, na = int(flat.get("wave_m_atoms", 1)), int(flat.get("wave_n_atoms", 4))
-    wm, wn, wk = int(flat.get("warp_m", 1)), int(flat.get("warp_n", 1)), int(flat.get("warp_k", 1))
+    wm, wn, wk = (
+        int(flat.get("warp_m", 1)),
+        int(flat.get("warp_n", 1)),
+        int(flat.get("warp_k", 1)),
+    )
     tm, tn = 16 * ma * wm, 16 * na * wn
     return {
         "tile_m": tm,
@@ -594,7 +598,11 @@ def _skinny_features(
         return f
     a = ARCH_CONSTANTS[arch]
     ma, na = int(flat.get("wave_m_atoms", 1)), int(flat.get("wave_n_atoms", 4))
-    wm, wn, wk = int(flat.get("warp_m", 1)), int(flat.get("warp_n", 1)), int(flat.get("warp_k", 1))
+    wm, wn, wk = (
+        int(flat.get("warp_m", 1)),
+        int(flat.get("warp_n", 1)),
+        int(flat.get("warp_k", 1)),
+    )
     kc, pf = int(flat.get("kc", 16)), int(flat.get("prefetch", 2))
     split = max(1, int(flat.get("split", 1)))
     tm, tn = 16 * ma * wm, 16 * na * wn
@@ -1249,7 +1257,9 @@ def skinny_variant_error(req: Any, spec: Any) -> Optional[str]:
         kps = skinny_kps(spec, K, spec.split)
         if (int(spec.split) - 1) * kps >= steps:
             return f"split={spec.split} leaves an empty K slice ({steps} steps)"
-    except Exception as exc:  # noqa: BLE001 - a spec the gates cannot evaluate is refused
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - a spec the gates cannot evaluate is refused
         return f"{type(exc).__name__}: {exc}"
     return None
 
@@ -1757,9 +1767,10 @@ def decide(req: Any, registry: Any) -> Optional[SelectorDecision]:
         # know keeps the rule pick
         if rule is None:
             known = False
-        elif SELECTOR_KEEP_R3_RING_SPLIT and str(
-            getattr(rule[0], "spec_id", "")
-        ) == "cdna_ring_split":
+        elif (
+            SELECTOR_KEEP_R3_RING_SPLIT
+            and str(getattr(rule[0], "spec_id", "")) == "cdna_ring_split"
+        ):
             # the split-K ring's levers (in-launch reduction,
             # aligned slices) are outside every shipped model's features
             known = False

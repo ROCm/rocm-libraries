@@ -133,7 +133,9 @@ def _write_chunk(spec, arch):
     return GU._choose_load_vec(spec)
 
 
-@pytest.mark.parametrize("label,tile,trait,arches", _NARROW, ids=[r[0] for r in _NARROW])
+@pytest.mark.parametrize(
+    "label,tile,trait,arches", _NARROW, ids=[r[0] for r in _NARROW]
+)
 def test_narrow_atoms_get_a_chunk_wide_group(label, tile, trait, arches):
     for arch in ("gfx942", "gfx950"):
         spec = _spec(label, tile, trait)
@@ -202,7 +204,9 @@ def _run(spec, monkeypatch=None, swz=None):
 
 
 @_device
-@pytest.mark.parametrize("label,tile,trait,arches", _NARROW, ids=[r[0] for r in _NARROW])
+@pytest.mark.parametrize(
+    "label,tile,trait,arches", _NARROW, ids=[r[0] for r in _NARROW]
+)
 def test_fragment_group_computes_wrong(label, tile, trait, arches, monkeypatch):
     if _ARCH not in arches:
         pytest.skip(f"the fragment group holds the chunk on {_ARCH}")

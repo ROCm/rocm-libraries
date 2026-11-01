@@ -84,12 +84,8 @@ class TestSplitKSerial(unittest.TestCase):
 
     def test_arguments_and_workspace(self):
         ser = _spec(split_k=4, split_k_serial=2)
-        self.assertEqual(
-            _params(ser), ["A", "B", "C", "W", "Cnt", "M", "N", "K"]
-        )
-        self.assertEqual(
-            _params(_spec(split_k=4)), ["A", "B", "Cf32", "M", "N", "K"]
-        )
+        self.assertEqual(_params(ser), ["A", "B", "C", "W", "Cnt", "M", "N", "K"])
+        self.assertEqual(_params(_spec(split_k=4)), ["A", "B", "Cf32", "M", "N", "K"])
         # 4 slices x 4 x 4 output tiles of 64 x 64; 4 waves per tile
         self.assertEqual(
             split_k_serial_workspace(ser, 256, 256), (4 * 16 * 64 * 64, 16 * 4)
@@ -211,7 +207,10 @@ class TestG5PlanDispatch(unittest.TestCase):
             self.assertIn(mode, (3, 4))
             tile, trait = gp.plan_tile_trait(gp.G5Plan(geo), 4096, 4096, 4096)
             s = UniversalGemmSpec(
-                name="r2t", tile=tile, trait=trait, data=DataSpec("fp16", "fp16", "fp16")
+                name="r2t",
+                tile=tile,
+                trait=trait,
+                data=DataSpec("fp16", "fp16", "fp16"),
             )
             with self.subTest(geo=geo):
                 self.assertEqual(is_valid_spec(s, arch="gfx942"), (True, "ok"))
@@ -321,14 +320,25 @@ class TestG5PlanDispatch(unittest.TestCase):
         for geo, want in ((small[0], 1), (big[0], 0)):
             _t, tr = gp.plan_tile_trait(gp.G5Plan(geo, 2, 2), 2048, 2048, 4096)
             self.assertEqual(tr.vp_unroll, want)
-            s = UniversalGemmSpec(name="r2t", tile=_t, trait=tr, data=DataSpec("fp16", "fp16", "fp16"))
+            s = UniversalGemmSpec(
+                name="r2t", tile=_t, trait=tr, data=DataSpec("fp16", "fp16", "fp16")
+            )
             self.assertEqual(is_valid_spec(s, arch="gfx942"), (True, "ok"))
         with mock.patch.object(gp, "G5P_VP_UNROLL_MAX_ACC", 0):
-            self.assertEqual(gp.plan_tile_trait(gp.G5Plan(small[0]), 2048, 2048, 4096)[1].vp_unroll, 0)
+            self.assertEqual(
+                gp.plan_tile_trait(gp.G5Plan(small[0]), 2048, 2048, 4096)[1].vp_unroll,
+                0,
+            )
         # the ranking scales unrolled plans by G5P_VP_UNROLL_SCALE (and the dispatcher cache keys on it)
         C._G5P_CACHE.clear()
-        base = dict((p, t) for t, p in gp.rank_plans(1000, 3000, 1000, "fp16", "gfx942"))
+        base = dict(
+            (p, t) for t, p in gp.rank_plans(1000, 3000, 1000, "fp16", "gfx942")
+        )
         with mock.patch.object(gp, "G5P_VP_UNROLL_SCALE", 1.0):
-            off = dict((p, t) for t, p in gp.rank_plans(1000, 3000, 1000, "fp16", "gfx942"))
+            off = dict(
+                (p, t) for t, p in gp.rank_plans(1000, 3000, 1000, "fp16", "gfx942")
+            )
         for p, t in base.items():
-            self.assertAlmostEqual(t / off[p], 0.97 if gp.plan_unroll(p) else 1.0, places=9)
+            self.assertAlmostEqual(
+                t / off[p], 0.97 if gp.plan_unroll(p) else 1.0, places=9
+            )

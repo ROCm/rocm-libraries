@@ -302,8 +302,8 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
                 logLevel
                 & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
-                                                     // PERF_TRACE so the CK backend does not run its
-                                                     // internal cold/hot timed loop
+                // PERF_TRACE so the CK backend does not run its
+                // internal cold/hot timed loop
 
             hiptensorTensorDescriptor_t descA = nullptr;
             CHECK_HIPTENSOR_ERROR(
@@ -370,18 +370,22 @@ namespace hiptensor
 
             auto& opts     = HiptensorOptions::instance();
             int   coldRuns = opts->coldRuns();
-            int   hotRuns  = std::max(1, opts->hotRuns());      // guard hot_runs <= 0
+            int   hotRuns  = std::max(1, opts->hotRuns()); // guard hot_runs <= 0
             // untimed warm-up: ramps clocks, primes plan/caches
             for(int i = 0; i < coldRuns; ++i)
-                CHECK_HIPTENSOR_ERROR(hiptensorPermute(handle, plan, &alphaValue,
-                    resource->deviceInput1().get(), resource->deviceOutput().get(), nullptr));
+                CHECK_HIPTENSOR_ERROR(hiptensorPermute(handle,
+                                                       plan,
+                                                       &alphaValue,
+                                                       resource->deviceInput1().get(),
+                                                       resource->deviceOutput().get(),
+                                                       nullptr));
 
             hipEvent_t startEvent, stopEvent;
             CHECK_HIP_ERROR(hipEventCreate(&startEvent));
             CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
             CHECK_HIP_ERROR(hipEventRecord(startEvent));
 
-            for(int i = 0; i < hotRuns; ++i)                     // timed: M clean launches
+            for(int i = 0; i < hotRuns; ++i) // timed: M clean launches
                 CHECK_HIPTENSOR_ERROR(hiptensorPermute(handle,
                                                        plan,
                                                        &alphaValue,

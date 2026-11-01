@@ -118,9 +118,15 @@ def features(arch: str, M: int, N: int, K: int, spec: Any) -> List[float]:
     waves = tiles * spec.waves * split
     steps = -(-K // spec.step_k)
     sps = max(1.0, -(-steps // split) / max(1, spec.warp_k))
-    load = tiles * spec.warp_m * spec.warp_n * 16 * (
-        spec.wave_m_atoms + spec.wave_n_atoms
-    ) * K * 2
+    load = (
+        tiles
+        * spec.warp_m
+        * spec.warp_n
+        * 16
+        * (spec.wave_m_atoms + spec.wave_n_atoms)
+        * K
+        * 2
+    )
     ws = split * tiles * tm * tn * 4 if split > 1 else 0
     acc = spec.wave_m_atoms * spec.wave_n_atoms * 4
     frag = (spec.wave_m_atoms + spec.wave_n_atoms) * (spec.kc // 2)
@@ -229,7 +235,9 @@ def _model_dir() -> Path:
 
 
 @lru_cache(maxsize=None)
-def _load(arch: str, model_dir: str) -> Optional[Tuple[Dict[str, Any], Tuple[_Packed, ...]]]:
+def _load(
+    arch: str, model_dir: str
+) -> Optional[Tuple[Dict[str, Any], Tuple[_Packed, ...]]]:
     from .selector import TreeEnsemble
 
     base = Path(model_dir) / f"skinny_cfg_{arch}"
@@ -359,13 +367,14 @@ def select(req: Any, plan: Any) -> Tuple[Any, str]:
         import numpy as np
 
         X = np.asarray(
-            [features(req.arch, req.M, req.N, req.K, c) for c in cands], dtype=np.float64
+            [features(req.arch, req.M, req.N, req.K, c) for c in cands],
+            dtype=np.float64,
         )
         # the main model ranks the menu; the guard bags re-score its
         # SKINNY_SELECT_TOPK best entries against the plan (row 0)
         p0 = model.predict(X)
         order = [0] + [
-            int(i) for i in np.argsort(p0[1:], kind="stable")[: SKINNY_SELECT_TOPK] + 1
+            int(i) for i in np.argsort(p0[1:], kind="stable")[:SKINNY_SELECT_TOPK] + 1
         ]
         Xs = X[order]
         P = np.stack([p0[order]] + [b.predict(Xs) for b in bags])  # models x top

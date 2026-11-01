@@ -196,9 +196,8 @@ namespace hiptensor
         // greater than one starts where the previous one ends.
         std::vector<std::size_t> order(lengths.size());
         std::iota(order.begin(), order.end(), 0);
-        std::sort(order.begin(), order.end(), [&](auto a, auto b) {
-            return strides[a] < strides[b];
-        });
+        std::sort(
+            order.begin(), order.end(), [&](auto a, auto b) { return strides[a] < strides[b]; });
         std::size_t expected   = 1;
         bool        contiguous = strides.size() == lengths.size();
         for(auto d : order)

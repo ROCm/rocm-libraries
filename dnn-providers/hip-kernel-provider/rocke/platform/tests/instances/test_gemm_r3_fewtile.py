@@ -86,7 +86,9 @@ class TestSerialValidity(_Clean):
             self.assertFalse(is_valid_spec(ring, arch="gfx950")[0])
         # ping-pong / persistent rings keep the vgpr_prefetch-only rule
         self.assertFalse(is_valid_spec(_tr(ring, pingpong=4), arch="gfx950")[0])
-        self.assertFalse(is_valid_spec(_tr(ring, persistent_ctas=256), arch="gfx950")[0])
+        self.assertFalse(
+            is_valid_spec(_tr(ring, persistent_ctas=256), arch="gfx950")[0]
+        )
 
     def test_aligned_slices_on_ring(self):
         ring = _ring()
@@ -104,7 +106,9 @@ class TestSerialValidity(_Clean):
         self.assertIn("empty", launch_shape_error(_tr(a5, split_k=16), 1024, 768, 640))
         self.assertIsNone(launch_shape_error(_tr(a5, split_k=10), 1024, 768, 640))
         # the ring's K tail (pad_k / dtl_k_tail) keeps refusing aligned slices
-        self.assertFalse(is_valid_spec(_tr(a5, pad_k=True, dtl_k_tail=1), arch="gfx950")[0])
+        self.assertFalse(
+            is_valid_spec(_tr(a5, pad_k=True, dtl_k_tail=1), arch="gfx950")[0]
+        )
         self.assertFalse(is_valid_spec(_tr(a5, pad_k=True), arch="gfx950")[0])
 
 
@@ -117,9 +121,13 @@ class TestTicketMode(_Clean):
         self.assertEqual(is_valid_spec(ring, arch="gfx950"), (True, "ok"))
         self.assertIn("sks3", ring.kernel_name())
         # W = M x N f32 (zeroed once), Cnt = tiles x waves
-        self.assertEqual(GU.split_k_serial_workspace(ring, 1024, 768), (1024 * 768, 48 * 8))
+        self.assertEqual(
+            GU.split_k_serial_workspace(ring, 1024, 768), (1024 * 768, 48 * 8)
+        )
         two = _tr(ring, split_k_serial=2)
-        self.assertEqual(GU.split_k_serial_workspace(two, 1024, 768), (8 * 48 * 128 * 128, 48 * 8))
+        self.assertEqual(
+            GU.split_k_serial_workspace(two, 1024, 768), (8 * 48 * 128 * 128, 48 * 8)
+        )
         self.assertFalse(is_valid_spec(_tr(ring, split_k_serial=4), arch="gfx950")[0])
 
     def test_binding_zeroes_w(self):
@@ -146,7 +154,12 @@ class TestTicketMode(_Clean):
             res = _Res()
             res.request = _req(256, 256, 4096)
             res.grid, res.block = (2, 2, 4), (512, 1, 1)
-            res.spec = _tr(_ring(256, 256, 4096), split_k=4, split_k_serial=mode, pad_fast_tile=False)
+            res.spec = _tr(
+                _ring(256, 256, 4096),
+                split_k=4,
+                split_k_serial=mode,
+                pad_fast_tile=False,
+            )
             rt = _Rt()
             _packed, ptrs = gemm_rcr_binding(res, True, dtype="fp16").make_args(rt)
             w_dev = ptrs[3]
@@ -183,7 +196,9 @@ class TestRingSplit(_Clean):
             (_req(128, 128, 8192), "tiles"),
         ):
             with self.subTest(r=(r.M, r.N, r.K)):
-                ok, msg = SK.r3_ring_split_admit(r, SK.r3_ring_split_spec(r, _ring(r.M, r.N, r.K)))
+                ok, msg = SK.r3_ring_split_admit(
+                    r, SK.r3_ring_split_spec(r, _ring(r.M, r.N, r.K))
+                )
                 self.assertFalse(ok)
                 self.assertIn(why, msg)
         # few tiles (the learned gemm_skinny configuration serves them), a small side below 64 and an
@@ -194,20 +209,30 @@ class TestRingSplit(_Clean):
             (_req(1028, 768, 10752, "CRR"), "multiple of 8"),
         ):
             with self.subTest(r=(r.M, r.N, r.K, r.layout)):
-                ok, msg = SK.r3_ring_split_admit(r, SK.r3_ring_split_spec(r, _ring(r.M, r.N, r.K)))
+                ok, msg = SK.r3_ring_split_admit(
+                    r, SK.r3_ring_split_spec(r, _ring(r.M, r.N, r.K))
+                )
                 self.assertFalse(ok)
                 self.assertIn(why, msg)
         # enough tiles for one slice: refused (the unsplit bodies serve it)
         r = _req(1600, 1536, 8192)  # 13 x 12 = 156 tiles -> 192 / 156 rounds to 1
-        ok, msg = SK.r3_ring_split_admit(r, SK.r3_ring_split_spec(r, _ring(1600, 1536, 8192)))
+        ok, msg = SK.r3_ring_split_admit(
+            r, SK.r3_ring_split_spec(r, _ring(1600, 1536, 8192))
+        )
         self.assertFalse(ok)
         self.assertIn("one slice", msg)
         # K % 64: no split (no K tail with split-K)
         r = _req(1024, 768, 10752 + 8)
-        self.assertFalse(SK.r3_ring_split_admit(r, SK.r3_ring_split_spec(r, _ring(1024, 768, 10760)))[0])
+        self.assertFalse(
+            SK.r3_ring_split_admit(
+                r, SK.r3_ring_split_spec(r, _ring(1024, 768, 10760))
+            )[0]
+        )
         with mock.patch.object(SK, "R3_RING_SPLIT", False):
             self.assertFalse(SK.r3_ring_split_admit(req, sp)[0])
-        self.assertFalse(SK.r3_ring_split_admit(_req(1024, 768, 10752, arch="gfx942"), sp)[0])
+        self.assertFalse(
+            SK.r3_ring_split_admit(_req(1024, 768, 10752, arch="gfx942"), sp)[0]
+        )
 
     def test_registered_and_dispatched(self):
         for reg, dt in ((GEMM_FP16_REGISTRY, "fp16"), (GEMM_BF16_REGISTRY, "bf16")):
@@ -218,7 +243,9 @@ class TestRingSplit(_Clean):
         for lay in ("RCR", "RRR", "CRR", "CCR"):
             with self.subTest(lay=lay):
                 r = dispatch_gemm_fp16(_req(2304, 256, 28416, lay))
-                self.assertEqual(r.candidate.name, "universal_gemm_fp16_cdna_ring_split")
+                self.assertEqual(
+                    r.candidate.name, "universal_gemm_fp16_cdna_ring_split"
+                )
                 self.assertEqual(r.spec.data.layout, lay)
                 self.assertEqual(int(r.spec.trait.split_k_serial), 2)
         with mock.patch.object(SK, "R3_RING_SPLIT", False):
@@ -261,8 +288,13 @@ class TestSkinnySelect(_Clean):
         self.assertEqual(meta["feature_version"], SS.FEATURE_VERSION)
         from pathlib import Path
 
-        ens = S.TreeEnsemble.from_text((Path(SS.__file__).with_name("selector_models") / meta["model"]).read_text())
-        rows = [SS.features("gfx942", 256, 512, 20224, c) for c in SS.menu(req, plan, meta)[:24]]
+        ens = S.TreeEnsemble.from_text(
+            (Path(SS.__file__).with_name("selector_models") / meta["model"]).read_text()
+        )
+        rows = [
+            SS.features("gfx942", 256, 512, 20224, c)
+            for c in SS.menu(req, plan, meta)[:24]
+        ]
         want = ens.predict(rows)
         got = model.predict(rows)
         for a, b in zip(want, got):
@@ -274,8 +306,14 @@ class TestSkinnySelect(_Clean):
         sp = SkinnyGemmSpec(dtype="bf16", wave_m_atoms=4, wave_n_atoms=2, warp_m=1, warp_n=2, warp_k=4, kc=8,
                             prefetch=2, split=8, red_sync="sc1")  # fmt: skip
         f = dict(zip(SS.FEATURES, SS.features("gfx950", 256, 512, 8192, sp)))
-        self.assertEqual((f["ma"], f["na"], f["wm"], f["wn"], f["wk"], f["kc"], f["pf"]), (4, 2, 1, 2, 4, 8, 2))
-        self.assertEqual((f["tile_m"], f["tile_n"], f["lsplit"], f["a942"], f["bf16"]), (64, 64, 3.0, 0.0, 1.0))
+        self.assertEqual(
+            (f["ma"], f["na"], f["wm"], f["wn"], f["wk"], f["kc"], f["pf"]),
+            (4, 2, 1, 2, 4, 8, 2),
+        )
+        self.assertEqual(
+            (f["tile_m"], f["tile_n"], f["lsplit"], f["a942"], f["bf16"]),
+            (64, 64, 3.0, 0.0, 1.0),
+        )
         # 4 x 8 tiles x 4 waves x 8 slices
         self.assertEqual(f["waves_cu"], 4 * 8 * 8 * 8 / 256)
 
@@ -298,7 +336,13 @@ class TestSkinnySelect(_Clean):
     def _with(self, fn_main, fns_bags):
         meta = {"menu": [[4, 4, 1, 1, 2, 8, 2], [4, 4, 2, 2, 1, 16, 2]]}
         return mock.patch.object(
-            SS, "load", lambda arch: (meta, _FakeModel(fn_main), tuple(_FakeModel(f) for f in fns_bags))
+            SS,
+            "load",
+            lambda arch: (
+                meta,
+                _FakeModel(fn_main),
+                tuple(_FakeModel(f) for f in fns_bags),
+            ),
         )
 
     def test_guard(self):
@@ -328,7 +372,9 @@ class TestSkinnySelect(_Clean):
             self.assertEqual(SK.skinny_plan(req), plan)
         with mock.patch.object(SS, "SKINNY_SELECT", False):
             self.assertEqual(SS.select(req, plan)[0], plan)
-        self.assertEqual(SS.select(_req(256, 512, 20224, arch="gfx1201"), plan)[0], plan)
+        self.assertEqual(
+            SS.select(_req(256, 512, 20224, arch="gfx1201"), plan)[0], plan
+        )
         # many tiles (outside the model's cells) keep the table plan
         breq = _req(4096, 8192, 8192, "CCR", arch="gfx942")
         self.assertIn("outside", SS.select(breq, SK.skinny_table_plan_of(breq))[1])
@@ -338,7 +384,10 @@ class TestSkinnySelect(_Clean):
         self.assertTrue(SS.select(dreq, dplan)[1].startswith("min(M, N)"))
 
     def test_shipped_choice_is_launchable(self):
-        from rocke.instances.common.gemm_skinny import is_valid_spec as skv, skinny_launch_error
+        from rocke.instances.common.gemm_skinny import (
+            is_valid_spec as skv,
+            skinny_launch_error,
+        )
 
         for arch in ("gfx950", "gfx942"):
             for M, N, K, lay in ((512, 256, 19968, "CCR"), (256, 512, 20992, "CRR"), (64, 4096, 4096, "RCR"),
@@ -351,7 +400,9 @@ class TestSkinnySelect(_Clean):
                     self.assertEqual(sp.layout, lay)
 
 
-G3_SOV = {"gfx942": {"max_tiles": 48, "longk_tiles": 0, "longk_min": 1 << 62, "max_small": 64}}
+G3_SOV = {
+    "gfx942": {"max_tiles": 48, "longk_tiles": 0, "longk_min": 1 << 62, "max_small": 64}
+}
 
 
 class TestSkinnyOverVgprNative(_Clean):
@@ -362,14 +413,20 @@ class TestSkinnyOverVgprNative(_Clean):
 
     def _refit_rule(self):
         rule = SK.SKINNY_OVER_VGPR_NATIVE["gfx942"]
-        self.assertEqual((rule["max_tiles"], rule["max_small"], rule["longk_tiles"]), (48, 64, 0))
-        g = lambda M, N, K: SK.skinny_native_over_vgpr(_req(M, N, K, "RRR", arch="gfx942"))  # noqa: E731
+        self.assertEqual(
+            (rule["max_tiles"], rule["max_small"], rule["longk_tiles"]), (48, 64, 0)
+        )
+        g = lambda M, N, K: SK.skinny_native_over_vgpr(
+            _req(M, N, K, "RRR", arch="gfx942")
+        )  # noqa: E731
         self.assertTrue(g(640, 1152, 4096))  # 5 x 9 = 45 tiles
         self.assertFalse(g(1024, 768, 4096))  # 48 tiles
         self.assertFalse(g(1024, 1024, 16384))  # 64 tiles: no long-K extension any more
         self.assertTrue(g(48, 26112, 4096))  # min(M, N) < 64
         self.assertFalse(g(64, 26112, 4096))
-        self.assertFalse(SK.skinny_native_over_vgpr(_req(640, 768, 4096, arch="gfx942")))  # RCR
+        self.assertFalse(
+            SK.skinny_native_over_vgpr(_req(640, 768, 4096, arch="gfx942"))
+        )  # RCR
 
 
 class TestNativeG5pSerial(_Clean):

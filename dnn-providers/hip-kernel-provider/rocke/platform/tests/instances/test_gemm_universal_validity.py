@@ -299,7 +299,8 @@ class TestWriteGranularity(unittest.TestCase):
         # the global-load path masks the K tail: a plain pad_k body is fine
         # (ragged rows: pad_row_clamp keeps the row loads inside the operand)
         plain = _spec(
-            _PICK_TILE, TraitSpec(pad_m=True, pad_n=True, pad_k=True, pad_row_clamp=True)
+            _PICK_TILE,
+            TraitSpec(pad_m=True, pad_n=True, pad_k=True, pad_row_clamp=True),
         )
         self.assertTrue(is_valid_spec(plain, arch="gfx950")[0])
         self.assertIsNone(launch_shape_error(plain, 1000, 1000, 1000))

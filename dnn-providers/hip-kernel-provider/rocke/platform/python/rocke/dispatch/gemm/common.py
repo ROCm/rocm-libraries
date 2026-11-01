@@ -73,9 +73,39 @@ NATIVE_LAYOUT_LAUNCHABLE_FIRST = True
 # preference order of the native forms per layout (native_layout_alternatives):
 # the RCR body itself, the beat body without its vector epilogue, the B3 ring
 NATIVE_LAYOUT_ORDER = {
-    "RRR": ("grid", "same", "no_rve", "no_rve_csh", "no_rve_sab", "flip", "b3", "r128", "no_rve_sv16"),
-    "CRR": ("grid", "same", "no_rve", "no_rve_csh", "no_rve_sab", "flip", "b3", "r128", "no_rve_sv16"),
-    "CCR": ("grid", "same", "no_rve", "no_rve_csh", "no_rve_sab", "flip", "b3", "r128", "no_rve_sv16"),
+    "RRR": (
+        "grid",
+        "same",
+        "no_rve",
+        "no_rve_csh",
+        "no_rve_sab",
+        "flip",
+        "b3",
+        "r128",
+        "no_rve_sv16",
+    ),
+    "CRR": (
+        "grid",
+        "same",
+        "no_rve",
+        "no_rve_csh",
+        "no_rve_sab",
+        "flip",
+        "b3",
+        "r128",
+        "no_rve_sv16",
+    ),
+    "CCR": (
+        "grid",
+        "same",
+        "no_rve",
+        "no_rve_csh",
+        "no_rve_sab",
+        "flip",
+        "b3",
+        "r128",
+        "no_rve_sv16",
+    ),
 }
 
 
@@ -409,9 +439,11 @@ def native_layout_alternatives(
             )
     if NATIVE_LAYOUT_SV16_NT:
         cands = [
-            (nm, replace(c, trait=replace(c.trait, sab_store_nt=True)))
-            if c.trait.sab_vec16
-            else (nm, c)
+            (
+                (nm, replace(c, trait=replace(c.trait, sab_store_nt=True)))
+                if c.trait.sab_vec16
+                else (nm, c)
+            )
             for nm, c in cands
         ]
     order = NATIVE_LAYOUT_ORDER.get(lay, ())

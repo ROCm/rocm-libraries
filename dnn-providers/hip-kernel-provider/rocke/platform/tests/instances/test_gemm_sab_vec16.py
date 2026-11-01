@@ -100,8 +100,13 @@ class TestEmitterMatchesGeometry(unittest.TestCase):
             for perm in (False, True):
                 try:
                     lay = MNO.MnLayout(
-                        tile_mn=256, tile_k=64, block_size=256, wave_size=64,
-                        warp_ext=128, chunk=chunk, sub_perm=perm,
+                        tile_mn=256,
+                        tile_k=64,
+                        block_size=256,
+                        wave_size=64,
+                        warp_ext=128,
+                        chunk=chunk,
+                        sub_perm=perm,
                     )
                 except ValueError:
                     continue
@@ -187,8 +192,12 @@ class _LaneBuilder:
 
     def global_store_vN(self, C, off, vec, n, align=0, temporal_hint=None):
         for l_ in range(64):
-            self.stores.append((int(off[l_]) if hasattr(off, "__len__") else int(off),
-                                [vec[j][l_] for j in range(n)]))
+            self.stores.append(
+                (
+                    int(off[l_]) if hasattr(off, "__len__") else int(off),
+                    [vec[j][l_] for j in range(n)],
+                )
+            )
 
 
 class TestEpilogueEmitter(unittest.TestCase):
@@ -244,7 +253,12 @@ class TestDataFlowModel(unittest.TestCase):
     def test_every_element_once(self):
         mfmas_m, mfmas_n = 4, 2
         lay = MNO.MnLayout(
-            tile_mn=256, tile_k=64, block_size=256, wave_size=64, warp_ext=128, sub_perm=True
+            tile_mn=256,
+            tile_k=64,
+            block_size=256,
+            wave_size=64,
+            warp_ext=128,
+            sub_perm=True,
         )
 
         def frag_n(n_idx):
@@ -281,7 +295,9 @@ class TestDataFlowModel(unittest.TestCase):
         self.assertTrue(all(v == 1 for v in written.values()))
 
     def test_without_perm_the_pairs_are_not_contiguous(self):
-        lay = MNO.MnLayout(tile_mn=256, tile_k=64, block_size=256, wave_size=64, warp_ext=128)
+        lay = MNO.MnLayout(
+            tile_mn=256, tile_k=64, block_size=256, wave_size=64, warp_ext=128
+        )
         n_lo = lay.read_lane_k_mn(0, 0, 0)[1]  # quad of fragment lanes 0..3 (q = 0)
         n_hi = lay.read_lane_k_mn(2, 0, 0)[1]  # q = 2
         self.assertNotEqual(n_hi, n_lo + 4)
@@ -300,13 +316,22 @@ class TestValidityAndEmission(unittest.TestCase):
 
     def test_rule_pick_unchanged(self):
         n_sv = 0
-        for M, N, K in ((8192, 8192, 8192), (4608, 4608, 384), (7936, 17664, 512), (4096, 4096, 1024)):
+        for M, N, K in (
+            (8192, 8192, 8192),
+            (4608, 4608, 384),
+            (7936, 17664, 512),
+            (4096, 4096, 1024),
+        ):
             req = GemmRequest(
                 M=M, N=N, K=K, arch="gfx950", dtype="fp16", layout="RRR", trans_b=False
             )
-            rr = dispatch_gemm_fp16(GemmRequest(M=M, N=N, K=K, arch="gfx950", dtype="fp16"))
+            rr = dispatch_gemm_fp16(
+                GemmRequest(M=M, N=N, K=K, arch="gfx950", dtype="fp16")
+            )
             a, _ = GC.native_layout_spec(req, rr.spec)
-            n_sv += "no_rve_sv16" in dict(GC.native_layout_alternatives(req, rr.spec)[0])
+            n_sv += "no_rve_sv16" in dict(
+                GC.native_layout_alternatives(req, rr.spec)[0]
+            )
             old = GC.NATIVE_LAYOUT_SAB_VEC16
             try:
                 GC.NATIVE_LAYOUT_SAB_VEC16 = False
@@ -322,25 +347,44 @@ class TestValidityAndEmission(unittest.TestCase):
         sv = self.alts["no_rve_sv16"]
         tr = sv.trait
         bad = {
-            "no swap": dataclasses.replace(sv, trait=dataclasses.replace(tr, mfma_swap_ab=False)),
-            "rcr": dataclasses.replace(sv, data=dataclasses.replace(sv.data, layout="RCR")),
-            "a only": dataclasses.replace(sv, data=dataclasses.replace(sv.data, layout="CCR")),
+            "no swap": dataclasses.replace(
+                sv, trait=dataclasses.replace(tr, mfma_swap_ab=False)
+            ),
+            "rcr": dataclasses.replace(
+                sv, data=dataclasses.replace(sv.data, layout="RCR")
+            ),
+            "a only": dataclasses.replace(
+                sv, data=dataclasses.replace(sv.data, layout="CCR")
+            ),
         }
         for nm, s in bad.items():
             self.assertFalse(is_valid_spec(s, arch="gfx950")[0], nm)
         self.assertFalse(is_valid_spec(sv, arch="gfx942")[0])
-        odd = dataclasses.replace(sv, tile=dataclasses.replace(sv.tile, tile_m=48 * 2, warp_m=2))
+        odd = dataclasses.replace(
+            sv, tile=dataclasses.replace(sv.tile, tile_m=48 * 2, warp_m=2)
+        )
         self.assertFalse(is_valid_spec(odd, arch="gfx950")[0])
 
     def test_ir_has_swaps_and_wide_stores(self):
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 
-        sab = lower(build_universal_gemm(self.alts["no_rve_sab"]), llvm_flavor="llvm22", arch="gfx950")
-        sv = lower(build_universal_gemm(self.alts["no_rve_sv16"]), llvm_flavor="llvm22", arch="gfx950")
+        sab = lower(
+            build_universal_gemm(self.alts["no_rve_sab"]),
+            llvm_flavor="llvm22",
+            arch="gfx950",
+        )
+        sv = lower(
+            build_universal_gemm(self.alts["no_rve_sv16"]),
+            llvm_flavor="llvm22",
+            arch="gfx950",
+        )
         self.assertEqual(sab.count("permlane32.swap("), 0)
         # one swap per dword: 2 per (M atom pair, N atom) = mfmas_m * mfmas_n
         t = self.alts["no_rve_sv16"].tile
-        self.assertEqual(sv.count("call { i32, i32 } @llvm.amdgcn.permlane32.swap("), t.mfmas_per_warp_m * t.mfmas_per_warp_n)
+        self.assertEqual(
+            sv.count("call { i32, i32 } @llvm.amdgcn.permlane32.swap("),
+            t.mfmas_per_warp_m * t.mfmas_per_warp_n,
+        )
         self.assertGreater(sv.count("store <8 x half>"), 0)
         self.assertEqual(sab.count("store <8 x half>"), 0)
 
@@ -348,7 +392,9 @@ class TestValidityAndEmission(unittest.TestCase):
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 
         sv = self.alts["no_rve_sv16"]
-        nt = dataclasses.replace(sv, trait=dataclasses.replace(sv.trait, sab_store_nt=True))
+        nt = dataclasses.replace(
+            sv, trait=dataclasses.replace(sv.trait, sab_store_nt=True)
+        )
         self.assertTrue(is_valid_spec(nt, arch="gfx950")[0])
         self.assertIn("_svnt", nt.kernel_name())
         bad = dataclasses.replace(
@@ -361,11 +407,22 @@ class TestValidityAndEmission(unittest.TestCase):
 
     def test_ring_forms(self):
         req = GemmRequest(
-            M=7936, N=17664, K=512, arch="gfx950", dtype="fp16", layout="CRR", trans_a=True, trans_b=False
+            M=7936,
+            N=17664,
+            K=512,
+            arch="gfx950",
+            dtype="fp16",
+            layout="CRR",
+            trans_a=True,
+            trans_b=False,
         )
-        rr = dispatch_gemm_fp16(GemmRequest(M=7936, N=17664, K=512, arch="gfx950", dtype="fp16"))
+        rr = dispatch_gemm_fp16(
+            GemmRequest(M=7936, N=17664, K=512, arch="gfx950", dtype="fp16")
+        )
         self.assertFalse(GC.NATIVE_LAYOUT_SAB_VEC16_RINGS)  # default off
-        self.assertNotIn("b3_sv16", dict(GC.native_layout_alternatives(req, rr.spec)[0]))
+        self.assertNotIn(
+            "b3_sv16", dict(GC.native_layout_alternatives(req, rr.spec)[0])
+        )
         old = GC.NATIVE_LAYOUT_SAB_VEC16_RINGS, GC.NATIVE_LAYOUT_SV16_NT
         try:
             GC.NATIVE_LAYOUT_SAB_VEC16_RINGS = True
@@ -384,9 +441,18 @@ class TestValidityAndEmission(unittest.TestCase):
 
     def test_sub_perm_only_b_on_both_mn(self):
         req = GemmRequest(
-            M=7936, N=17664, K=512, arch="gfx950", dtype="fp16", layout="CRR", trans_a=True, trans_b=False
+            M=7936,
+            N=17664,
+            K=512,
+            arch="gfx950",
+            dtype="fp16",
+            layout="CRR",
+            trans_a=True,
+            trans_b=False,
         )
-        rr = dispatch_gemm_fp16(GemmRequest(M=7936, N=17664, K=512, arch="gfx950", dtype="fp16"))
+        rr = dispatch_gemm_fp16(
+            GemmRequest(M=7936, N=17664, K=512, arch="gfx950", dtype="fp16")
+        )
         old = GC.NATIVE_LAYOUT_SAB_VEC16_RINGS
         try:
             GC.NATIVE_LAYOUT_SAB_VEC16_RINGS = True
@@ -411,7 +477,9 @@ class TestValidityAndEmission(unittest.TestCase):
             tile=odd_tile, trait=sv.trait, wave_size=64, data=sv.data, batched=False
         )
         self.assertIn("even", _sab_vec16_error(fake, "gfx950"))
-        fake2 = SimpleNamespace(tile=sv.tile, trait=sv.trait, wave_size=64, data=sv.data, batched=True)
+        fake2 = SimpleNamespace(
+            tile=sv.tile, trait=sv.trait, wave_size=64, data=sv.data, batched=True
+        )
         self.assertIn("non-batched", _sab_vec16_error(fake2, "gfx950"))
 
     def test_cpp_converter_refuses(self):

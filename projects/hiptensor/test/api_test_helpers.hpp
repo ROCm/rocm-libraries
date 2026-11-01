@@ -177,14 +177,14 @@ namespace hiptensor_test
                                            hiptensorDataType_t         type)
         {
             hiptensorTensorDescriptor_t desc = nullptr;
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
-                                                                  &desc,
-                                                                  lens.size(),
-                                                                  lens.data(),
-                                                                  strides.empty() ? nullptr
-                                                                                  : strides.data(),
-                                                                  type,
-                                                                  0));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &desc,
+                                                lens.size(),
+                                                lens.data(),
+                                                strides.empty() ? nullptr : strides.data(),
+                                                type,
+                                                0));
             tensors.push_back(desc);
             return desc;
         }

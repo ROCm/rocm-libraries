@@ -382,8 +382,8 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
                 logLevel
                 & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
-                // PERF_TRACE so the CK backend does not run its
-                // internal cold/hot timed loop
+            // PERF_TRACE so the CK backend does not run its
+            // internal cold/hot timed loop
 
             uint32_t alignmentRequirement = 1;
             // lengths - m, n, u, v, h, k

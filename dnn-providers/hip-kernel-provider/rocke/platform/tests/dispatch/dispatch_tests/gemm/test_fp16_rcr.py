@@ -705,7 +705,9 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("is_valid_spec", why)
         ok, why = universal_spec_supported(
-            replace(spec, trait=replace(spec.trait, direct_to_lds=False, dtl_prefetch=False)),
+            replace(
+                spec, trait=replace(spec.trait, direct_to_lds=False, dtl_prefetch=False)
+            ),
             arch="gfx950",
         )
         self.assertTrue(ok, why)

@@ -157,7 +157,14 @@ def load_model(arch: str):
 
 
 def analytic_us(
-    M: int, N: int, K: int, geo: str, d: Dict[str, float], split: int, serial: int, cus: int
+    M: int,
+    N: int,
+    K: int,
+    geo: str,
+    d: Dict[str, float],
+    split: int,
+    serial: int,
+    cus: int,
 ) -> Optional[float]:
     """Waves x (a + b * K slice) with the traffic floor and the split cost
     (None: the split leaves an empty K slice)."""
@@ -218,7 +225,13 @@ def plan_unroll(plan: G5Plan) -> bool:
 
 
 def plan_features(
-    M: int, N: int, K: int, bf16: bool, plan: G5Plan, menu: Dict[str, Dict[str, float]], cus: int
+    M: int,
+    N: int,
+    K: int,
+    bf16: bool,
+    plan: G5Plan,
+    menu: Dict[str, Dict[str, float]],
+    cus: int,
 ) -> List[float]:
     """The learned model's feature row of ``plan`` (order: FEATURES)."""
     NA = G5P_NA

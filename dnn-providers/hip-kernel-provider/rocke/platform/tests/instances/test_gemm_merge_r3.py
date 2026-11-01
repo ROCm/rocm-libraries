@@ -83,9 +83,18 @@ class TestOddLongK(_Clean):
     """gfx950 tiles2, odd MN leading dimension: gemm_skinny below 64 tiles when K >= 4096."""
 
     def test_rule(self):
-        self.assertEqual((SK.SKINNY_NATIVE_T2_ODD_LONGK_TILES, SK.SKINNY_NATIVE_T2_ODD_LONGK_MIN), (64, 4096))
+        self.assertEqual(
+            (SK.SKINNY_NATIVE_T2_ODD_LONGK_TILES, SK.SKINNY_NATIVE_T2_ODD_LONGK_MIN),
+            (64, 4096),
+        )
         for lay, M, N, K, want in (
-            ("CRR", 513, 769, 4096, True),  # 5 x 7 = 35 tiles, K = 4096 (otherwise the DTL odd forms)
+            (
+                "CRR",
+                513,
+                769,
+                4096,
+                True,
+            ),  # 5 x 7 = 35 tiles, K = 4096 (otherwise the DTL odd forms)
             ("CRR", 513, 769, 4088, False),  # K < 4096
             ("CRR", 1001, 500, 8192, True),  # 8 x 4 = 32 tiles
             ("CCR", 1001, 1001, 16384, False),  # 8 x 8 = 64 tiles
@@ -95,7 +104,11 @@ class TestOddLongK(_Clean):
             ok, _ = SK.skinny_admit_region(_req(M, N, K, lay, "bf16", arch="gfx950"))
             self.assertEqual(ok, want, (lay, M, N, K))
         with mock.patch.object(SK, "SKINNY_NATIVE_T2_ODD_LONGK_TILES", 0):
-            self.assertFalse(SK.skinny_admit_region(_req(513, 769, 4096, "CRR", "bf16", arch="gfx950"))[0])
+            self.assertFalse(
+                SK.skinny_admit_region(
+                    _req(513, 769, 4096, "CRR", "bf16", arch="gfx950")
+                )[0]
+            )
 
 
 class TestSkinnyOverVgprNativeMerge(_Clean):
@@ -105,9 +118,17 @@ class TestSkinnyOverVgprNativeMerge(_Clean):
     def test_rule(self):
         rule = SK.SKINNY_OVER_VGPR_NATIVE["gfx942"]
         self.assertEqual(
-            (rule["max_tiles"], rule["max_small"], rule["longk_tiles"], rule["native_min_k"]), (32, 64, 0, 16384)
+            (
+                rule["max_tiles"],
+                rule["max_small"],
+                rule["longk_tiles"],
+                rule["native_min_k"],
+            ),
+            (32, 64, 0, 16384),
         )
-        g = lambda M, N, K, lay="RRR": SK.skinny_native_over_vgpr(_req(M, N, K, lay, arch="gfx942"))  # noqa: E731
+        g = lambda M, N, K, lay="RRR": SK.skinny_native_over_vgpr(
+            _req(M, N, K, lay, arch="gfx942")
+        )  # noqa: E731
         self.assertTrue(g(640, 768, 4096))  # 5 x 6 = 30 tiles
         self.assertFalse(g(640, 1152, 4096))  # 45 tiles (the 48-tile rule: gemm_skinny)
         self.assertFalse(g(640, 768, 16384))  # 30 tiles, K >= 16384: g5 native
@@ -116,7 +137,9 @@ class TestSkinnyOverVgprNativeMerge(_Clean):
         self.assertTrue(g(48, 1024, 20480))  # min(M, N) < 64 at long K too
         self.assertFalse(g(64, 26112, 4096))
         self.assertFalse(g(1024, 1024, 16384))  # 64 tiles
-        self.assertFalse(SK.skinny_native_over_vgpr(_req(640, 768, 4096, arch="gfx942")))  # RCR
+        self.assertFalse(
+            SK.skinny_native_over_vgpr(_req(640, 768, 4096, arch="gfx942"))
+        )  # RCR
 
 
 class TestNativeRankingUnscaled(_Clean):
@@ -156,7 +179,8 @@ class TestNativeRankingUnscaled(_Clean):
 
 class TestRound2NativeG5pUnscaled(_Clean):
     """The native g5p pick (the comparison base of the native-form model) ranks without the main-loop scale
-    (NN / TT reach it only through g5_native's comparison, so the dispatch does not show it)."""
+    (NN / TT reach it only through g5_native's comparison, so the dispatch does not show it).
+    """
 
     def test_independent_of_mainloop_scale(self):
         for lay in ("RRR", "CCR"):
@@ -170,7 +194,9 @@ class TestRound2NativeG5pUnscaled(_Clean):
                     got.append(C.merge2_g5p_native_tile_trait(req))
             self.assertEqual(got, [a, a, a], lay)
         C._G5P_CACHE.clear()
-        self.assertIsNotNone(C.merge2_g5p_native_tile_trait(_req(8192, 8192, 8192, lay="RRR")))
+        self.assertIsNotNone(
+            C.merge2_g5p_native_tile_trait(_req(8192, 8192, 8192, lay="RRR"))
+        )
 
 
 class TestPredictSpecMainloopScale(_Clean):
@@ -194,7 +220,14 @@ class TestPredictSpecMainloopScale(_Clean):
     def test_no_scale_without_mainloop_traits(self):
         spec = self._ml_spec()
         plain = replace(
-            spec, trait=replace(spec.trait, vp_pair_reads=0, vp_mfma_first=0, vp_tail_pack=0, vp_release_atoms=1)
+            spec,
+            trait=replace(
+                spec.trait,
+                vp_pair_reads=0,
+                vp_mfma_first=0,
+                vp_tail_pack=0,
+                vp_release_atoms=1,
+            ),
         )
         req = _req(8192, 8192, 8192)
         with mock.patch.object(GN, "R3M_G5N_MAINLOOP_SCALE", False):
@@ -217,7 +250,9 @@ class TestKproxyRingSplit(_Clean):
     def test_fallback_takes_unsplit_ring_with_k_tail(self):
         for M, N, K in self.SHAPES:
             r = dispatch_gemm_fp16(_req(M, N, K, arch="gfx950"))
-            self.assertTrue(any("k-proxy" in e for e in r.explanation), (M, N, K, r.explanation))
+            self.assertTrue(
+                any("k-proxy" in e for e in r.explanation), (M, N, K, r.explanation)
+            )
             self.assertNotEqual(r.candidate.spec_id, "cdna_ring_split")
             self.assertEqual(int(r.spec.trait.split_k), 1)
             self.assertTrue(r.spec.trait.dtl_k_tail)

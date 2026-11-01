@@ -56,7 +56,10 @@ def _launcher(kd):
         nm = getattr(prm.type, "name", "") or ""
         if isinstance(prm.type, PtrType):
             sig.append(
-                {"name": prm.name, "type": nm if nm.startswith("ptr<") else f"ptr<{nm}>"}
+                {
+                    "name": prm.name,
+                    "type": nm if nm.startswith("ptr<") else f"ptr<{nm}>",
+                }
             )
         else:
             sig.append({"name": prm.name, "type": str(nm)})
@@ -104,12 +107,16 @@ def _run(plan, *, conj_b=False, epi="", rows=None, tail=0, seed=5, spec_override
         vals.update(alpha_re=_ALPHA.real, alpha_im=_ALPHA.imag)
     if epi == "bilinear":
         vals.update(
-            beta_re=_BETA.real, beta_im=_BETA.imag, Cin=torch.view_as_real(Cc).view(M, 2 * Nc)
+            beta_re=_BETA.real,
+            beta_im=_BETA.imag,
+            Cin=torch.view_as_real(Cc).view(M, 2 * Nc),
         )
     if spec.trait.streamk:
         fb, pb = plan.workspace_split()
         ws = torch.zeros(fb + pb, dtype=torch.uint8, device="cuda")
-        vals.update(SkFlags=ws[:fb].view(torch.int32), SkPart=ws[fb:].view(torch.float32))
+        vals.update(
+            SkFlags=ws[:fb].view(torch.int32), SkPart=ws[fb:].view(torch.float32)
+        )
     L(
         {p.name: vals[p.name] for p in kd.params},
         config=LaunchConfig(grid=plan.grid, block=plan.block, fence=False),
@@ -127,14 +134,18 @@ def _run(plan, *, conj_b=False, epi="", rows=None, tail=0, seed=5, spec_override
         Ar = A[rr].to(torch.complex128)
         ref = al * (Ar @ Bt.t())
         aar, aai = Ar.real.abs(), Ar.imag.abs()
-        bound = abs(al) * torch.complex(aar @ bbr.t() + aai @ bbi.t(), aar @ bbi.t() + aai @ bbr.t())
+        bound = abs(al) * torch.complex(
+            aar @ bbr.t() + aai @ bbi.t(), aar @ bbi.t() + aai @ bbr.t()
+        )
         if Cc is not None:
             Cr = Cc[rr].to(torch.complex128)
             ref = ref + _BETA * Cr
             bound = bound + abs(_BETA) * torch.complex(Cr.real.abs(), Cr.imag.abs())
         refr = torch.view_as_real(ref)
         bnd = torch.view_as_real(bound)
-        tol = 2 * 2.0**-24 * refr.abs() + bnd * (2.0**-23 + 2 * Kc * 2.0**-23) + 2.0**-126
+        tol = (
+            2 * 2.0**-24 * refr.abs() + bnd * (2.0**-23 + 2 * Kc * 2.0**-23) + 2.0**-126
+        )
         got = D[rr].view(-1, Nc, 2).double()
         nonfinite += int((~torch.isfinite(got)).sum())
         q = torch.nan_to_num((got - refr).abs() / tol, nan=float("inf"))
@@ -242,7 +253,9 @@ def test_alpha_only(body):
     _assert_exact(_run(plan, epi="alpha"))
 
 
-@pytest.mark.parametrize("M,Nc,Kc,epi", [(1000, 1001, 256, "bilinear"), (2100, 1303, 512, "")])
+@pytest.mark.parametrize(
+    "M,Nc,Kc,epi", [(1000, 1001, 256, "bilinear"), (2100, 1303, 512, "")]
+)
 def test_route_n_not_multiple_of_8_is_exact(M, Nc, Kc, epi):
     """2 Nc % 8 != 0: the route serves it on a scatter-epilogue body (the
     vector-epilogue bodies refuse it); every output checked, nothing written
@@ -254,7 +267,9 @@ def test_route_n_not_multiple_of_8_is_exact(M, Nc, Kc, epi):
     _assert_exact(_run(plan, epi=epi, tail=1 << 16))
 
 
-@pytest.mark.parametrize("M,N,K,epi", [(2100, 1999, 512, "bilinear"), (3000, 4001, 256, "")])
+@pytest.mark.parametrize(
+    "M,N,K,epi", [(2100, 1999, 512, "bilinear"), (3000, 4001, 256, "")]
+)
 def test_real_route_n_not_multiple_of_8_is_exact(M, N, K, epi):
     from rocke.dispatch.gemm.cf32 import plan_f32_gemm
 
@@ -288,7 +303,11 @@ def _run_real(plan, *, epi="", tail=0, seed=9):
     g.manual_seed(seed)
     A = torch.rand(M, K, device="cuda", generator=g) * 2 - 1
     B = torch.rand(N, K, device="cuda", generator=g) * 2 - 1
-    Cin = torch.rand(M, N, device="cuda", generator=g) * 2 - 1 if epi == "bilinear" else None
+    Cin = (
+        torch.rand(M, N, device="cuda", generator=g) * 2 - 1
+        if epi == "bilinear"
+        else None
+    )
     al, be = (1.25, -0.5) if epi else (1.0, 0.0)
     buf = torch.full((M * N + tail,), float("nan"), device="cuda")
     D = buf[: M * N].view(M, N)
@@ -305,7 +324,9 @@ def _run_real(plan, *, epi="", tail=0, seed=9):
     if plan.spec.trait.streamk:
         fb, pb = plan.workspace_split()
         ws = torch.zeros(fb + pb, dtype=torch.uint8, device="cuda")
-        vals.update(SkFlags=ws[:fb].view(torch.int32), SkPart=ws[fb:].view(torch.float32))
+        vals.update(
+            SkFlags=ws[:fb].view(torch.int32), SkPart=ws[fb:].view(torch.float32)
+        )
     L(
         {p.name: vals[p.name] for p in kd.params},
         config=LaunchConfig(grid=plan.grid, block=plan.block, fence=False),
@@ -321,7 +342,12 @@ def _run_real(plan, *, epi="", tail=0, seed=9):
     tol = 2 * 2.0**-24 * ref.abs() + bnd * (2.0**-23 + 2 * K * 2.0**-23) + 2.0**-126
     got = D.double()
     q = torch.nan_to_num((got - ref).abs() / tol, nan=float("inf"))
-    return int((q > 1).sum()), float(q.max()), int((~torch.isfinite(got)).sum()), tail_touched
+    return (
+        int((q > 1).sum()),
+        float(q.max()),
+        int((~torch.isfinite(got)).sum()),
+        tail_touched,
+    )
 
 
 @pytest.mark.parametrize("body", ["RIW", "RIW_SK", "Q3_SK"])

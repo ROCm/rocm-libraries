@@ -510,7 +510,9 @@ def skinny_native_over_vgpr(req: GemmRequest) -> bool:
         return False
     M, N, K = int(req.M), int(req.N), int(req.K)
     tiles = -(-M // 128) * -(-N // 128)
-    longk = tiles < int(rule.get("longk_tiles", 0)) and K >= int(rule.get("longk_min", 1 << 62))
+    longk = tiles < int(rule.get("longk_tiles", 0)) and K >= int(
+        rule.get("longk_min", 1 << 62)
+    )
     small = min(M, N) < int(rule.get("max_small", 0))
     if tiles >= int(rule["max_tiles"]) and not longk and not small:
         return False
@@ -530,7 +532,10 @@ def _native_admit(req: GemmRequest, reg: dict, s: int) -> Tuple[bool, str]:
     if s <= reg["always_small"]:
         return True, "ok"
     if skinny_native_over_vgpr(req):
-        return True, "ok (few tiles: ahead of the g5 native forms, SKINNY_OVER_VGPR_NATIVE)"
+        return (
+            True,
+            "ok (few tiles: ahead of the g5 native forms, SKINNY_OVER_VGPR_NATIVE)",
+        )
     if SKINNY_NATIVE_RULE.get(req.arch, "table") == "tiles":
         return _native_tiles_admit(req, s)
     if SKINNY_NATIVE_RULE.get(req.arch, "table") == "tiles2":
@@ -577,7 +582,10 @@ def _native_tiles2_admit(req: GemmRequest) -> Tuple[bool, str]:
         )
     if tiles < SKINNY_NATIVE_T2_SMALL:
         return True, "ok"
-    if tiles < SKINNY_NATIVE_T2_LONGK_TILES and int(req.K) >= SKINNY_NATIVE_T2_LONGK_MIN:
+    if (
+        tiles < SKINNY_NATIVE_T2_LONGK_TILES
+        and int(req.K) >= SKINNY_NATIVE_T2_LONGK_MIN
+    ):
         return True, "ok (few tiles, long K)"
     return False, (
         f"{tiles} 128x128 tiles (K={req.K}): the native non-skinny bodies serve it "
@@ -1080,7 +1088,10 @@ def r3_ring_split_admit(req: GemmRequest, spec: Any) -> Tuple[bool, str]:
     if _ld_odd(req):
         return False, "an MN-contiguous leading dimension is not a multiple of 8"
     if K % t.tile_k:
-        return False, f"K={K} is not a multiple of tile_k={t.tile_k} (no K tail with split-K)"
+        return (
+            False,
+            f"K={K} is not a multiple of tile_k={t.tile_k} (no K tail with split-K)",
+        )
     if int(spec.trait.split_k) < 2:
         return False, "the split rule keeps one slice (the unsplit bodies serve it)"
     ok, why = uv_valid(spec, arch=req.arch)

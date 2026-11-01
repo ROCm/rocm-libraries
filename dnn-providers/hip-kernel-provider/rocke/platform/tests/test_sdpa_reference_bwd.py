@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib.util
 import math
+import sys
 
 import numpy as np
 import pytest
@@ -99,6 +100,28 @@ def _close(a, b, tol=1e-10):
 # ---------------------------------------------------------------------------
 # torch autograd (float64, CPU)
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _one_torch_cpu_thread():
+    """Run this file's torch graphs on one intra-op thread.
+
+    They are tiny float64 CPU graphs, fastest on one thread. And after any torch
+    GPU kernel in the session (the rocKE suite runs many) the ROCm torch wheel
+    keeps one runtime thread polling at 100% of a CPU, so a pool as wide as the
+    process's CPUs waits on the core that thread holds: about 2 s per test here
+    instead of a few ms. torch is imported by then when it is installed
+    (``tests/conftest.py``); the thread count is restored after each test."""
+    torch = sys.modules.get("torch")
+    if torch is None:
+        yield
+        return
+    threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        yield
+    finally:
+        torch.set_num_threads(threads)
 
 
 def _torch_grads(q, k, v, do, *, scale, left, right, tl, lens_q=None, lens_kv=None):

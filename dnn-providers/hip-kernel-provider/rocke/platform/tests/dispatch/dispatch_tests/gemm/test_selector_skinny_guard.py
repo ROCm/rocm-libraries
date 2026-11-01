@@ -70,7 +70,17 @@ def _model_text(features, trees) -> str:
 _FEATURES = ["s_fam", "s_split", "p_ln_m"]
 
 
-def _write_model(d, arch, trees, *, version="r2c-v2", skinny=True, bags=(), min_gain=0.0, guard_enabled=None):
+def _write_model(
+    d,
+    arch,
+    trees,
+    *,
+    version="r2c-v2",
+    skinny=True,
+    bags=(),
+    min_gain=0.0,
+    guard_enabled=None,
+):
     meta = {
         "feature_version": version,
         "arch": arch,
@@ -184,28 +194,74 @@ class TestSkinnyConfigAndFeatures(unittest.TestCase):
 
     def test_skinny_feature_values(self):
         spec = SkinnyGemmSpec(
-            dtype="fp16", wave_m_atoms=2, wave_n_atoms=4, warp_m=1, warp_n=2, warp_k=4,
-            kc=16, prefetch=2, red_sync="sc1", split=9,
+            dtype="fp16",
+            wave_m_atoms=2,
+            wave_n_atoms=4,
+            warp_m=1,
+            warp_n=2,
+            warp_k=4,
+            kc=16,
+            prefetch=2,
+            red_sync="sc1",
+            split=9,
         )
         names = [
-            "s_fam", "s_ma", "s_na", "s_wk", "s_split", "s_rsc1", "s_regs",
-            "d_tm", "d_tn", "d_tk", "d_split", "d_tiles_m", "d_tiles_n", "tr_split_k",
+            "s_fam",
+            "s_ma",
+            "s_na",
+            "s_wk",
+            "s_split",
+            "s_rsc1",
+            "s_regs",
+            "d_tm",
+            "d_tn",
+            "d_tk",
+            "d_split",
+            "d_tiles_m",
+            "d_tiles_n",
+            "tr_split_k",
         ]
         x = S.feature_vector(
-            names, "gfx950", "fp16", 448, 128, 14912, S.flatten_spec(spec),
+            names,
+            "gfx950",
+            "fp16",
+            448,
+            128,
+            14912,
+            S.flatten_spec(spec),
             trait_defaults=S.trait_defaults(),
         )
         acc, frag = 2 * 4 * 4, (2 + 4) * 8
         self.assertEqual(
             x,
-            [1.0, 2.0, 4.0, 4.0, 9.0, 1.0, float(acc + 3 * frag),
-             32.0, 128.0, 256.0, 9.0, 14.0, 1.0, 9.0],
+            [
+                1.0,
+                2.0,
+                4.0,
+                4.0,
+                9.0,
+                1.0,
+                float(acc + 3 * frag),
+                32.0,
+                128.0,
+                256.0,
+                9.0,
+                14.0,
+                1.0,
+                9.0,
+            ],
         )
 
     def test_universal_rows_have_no_family_features(self):
         flat = S.flat_from_config("t128x128x32_w2x2x1_a32x32x16|")
         x = S.feature_vector(
-            list(S.SKINNY_FEATURES), "gfx950", "fp16", 1024, 1024, 1024, flat,
+            list(S.SKINNY_FEATURES),
+            "gfx950",
+            "fp16",
+            1024,
+            1024,
+            1024,
+            flat,
             trait_defaults=S.trait_defaults(),
         )
         self.assertEqual(x[0], 0.0)
@@ -221,14 +277,20 @@ class TestSkinnyVariantGate(unittest.TestCase):
         return GemmRequest(M=M, N=N, K=K, arch="gfx950", dtype="fp16")
 
     def test_empty_k_slice_is_refused(self):
-        spec = SkinnyGemmSpec(dtype="fp16", kc=16, split=1)   # 64 K per step
-        req = self._req(64, 64, 64 * 5)                         # 5 steps
+        spec = SkinnyGemmSpec(dtype="fp16", kc=16, split=1)  # 64 K per step
+        req = self._req(64, 64, 64 * 5)  # 5 steps
         self.assertIsNone(S.skinny_variant_error(req, spec))
-        self.assertIsNone(S.skinny_variant_error(req, dataclasses.replace(spec, split=5)))
+        self.assertIsNone(
+            S.skinny_variant_error(req, dataclasses.replace(spec, split=5))
+        )
         # 8 slices of ceil(5 / 8) = 1 step: slices 5..7 empty
-        self.assertIn("empty", S.skinny_variant_error(req, dataclasses.replace(spec, split=8)))
+        self.assertIn(
+            "empty", S.skinny_variant_error(req, dataclasses.replace(spec, split=8))
+        )
         # 4 slices of 2 steps: the last one starts at step 6 > 5
-        self.assertIn("empty", S.skinny_variant_error(req, dataclasses.replace(spec, split=4)))
+        self.assertIn(
+            "empty", S.skinny_variant_error(req, dataclasses.replace(spec, split=4))
+        )
 
     def test_body_contract_is_enforced(self):
         # K not a multiple of the configuration's K alignment (launch contract)
@@ -236,13 +298,19 @@ class TestSkinnyVariantGate(unittest.TestCase):
         self.assertIn("kalign", S.skinny_variant_error(self._req(64, 64, 1001), spec))
         self.assertIsNone(S.skinny_variant_error(self._req(64, 64, 1000), spec))
         # static validity (register budget) of the body
-        big = SkinnyGemmSpec(dtype="fp16", wave_m_atoms=8, wave_n_atoms=8, kc=32, prefetch=4)
-        self.assertIn("register", S.skinny_variant_error(self._req(256, 256, 4096), big))
+        big = SkinnyGemmSpec(
+            dtype="fp16", wave_m_atoms=8, wave_n_atoms=8, kc=32, prefetch=4
+        )
+        self.assertIn(
+            "register", S.skinny_variant_error(self._req(256, 256, 4096), big)
+        )
 
     def test_every_generated_variant_passes_the_body_gates(self):
         for M, N, K in _SHAPES + ((5, 4736, 2624), (130, 9000, 30000), (17, 33, 777)):
             req = self._req(M, N, K)
-            base = SkinnyGemmSpec(dtype="fp16", kalign=8 if K % 8 == 0 else (2 if K % 2 == 0 else 1))
+            base = SkinnyGemmSpec(
+                dtype="fp16", kalign=8 if K % 8 == 0 else (2 if K % 2 == 0 else 1)
+            )
             for lab, v in S._skinny_variants(base):
                 err = S.skinny_variant_error(req, v)
                 if err is not None:
@@ -257,13 +325,18 @@ class TestDtlOnlyLevers(unittest.TestCase):
     def test_dtl_stages_never_mutates_a_global_load_body(self):
         req = GemmRequest(M=4096, N=4096, K=4096, arch="gfx950", dtype="fp16")
         levers = [("dtl_stages", (2, 3))]
-        cs = next(c for c in GEMM_FP16_REGISTRY.candidates() if c.name.endswith("cdna_cshuffle"))
+        cs = next(
+            c
+            for c in GEMM_FP16_REGISTRY.candidates()
+            if c.name.endswith("cdna_cshuffle")
+        )
         base = cs.select_spec(req)
         self.assertFalse(base.trait.direct_to_lds)
         self.assertEqual(list(S._mutations(base, levers)), [])
         ring = GemmRequest(M=2048, N=2048, K=2048, arch="gfx950", dtype="fp16")
         dtl = next(
-            sp for c, sp in GEMM_FP16_REGISTRY.combos(ring, include_opt_in=False)
+            sp
+            for c, sp in GEMM_FP16_REGISTRY.combos(ring, include_opt_in=False)
             if hasattr(sp, "trait") and sp.trait.direct_to_lds
         )
         muts = list(S._mutations(dtl, levers))
@@ -280,8 +353,10 @@ class TestSkinnyRouting(_ModelDir):
 
     def test_generated_skinny_pick_is_served_and_reselected(self):
         hits = 0
-        for disp, reg, dt in ((dispatch_gemm_fp16, GEMM_FP16_REGISTRY, "fp16"),
-                              (dispatch_gemm_bf16, GEMM_BF16_REGISTRY, "bf16")):
+        for disp, reg, dt in (
+            (dispatch_gemm_fp16, GEMM_FP16_REGISTRY, "fp16"),
+            (dispatch_gemm_bf16, GEMM_BF16_REGISTRY, "bf16"),
+        ):
             for M, N, K in _SHAPES:
                 req = GemmRequest(M=M, N=N, K=K, arch="gfx950", dtype=dt)
                 r = disp(req)
@@ -403,12 +478,14 @@ class TestPortfolioGuardDisabledBySidecar(_ModelDir):
 
 class TestPortfolioGuardMinGain(_ModelDir):
     bags = (_BAG_FOR,)
-    min_gain = 1.0   # the bag's gain is exactly 1.0: not above the threshold
+    min_gain = 1.0  # the bag's gain is exactly 1.0: not above the threshold
 
     def test_gain_must_exceed_the_threshold(self):
         req = GemmRequest(M=448, N=128, K=14912, arch="gfx950", dtype="fp16")
         dec = S.decide(req, GEMM_FP16_REGISTRY)
-        if not isinstance(GEMM_FP16_REGISTRY.select(req).select_spec(req), SkinnyGemmSpec):
+        if not isinstance(
+            GEMM_FP16_REGISTRY.select(req).select_spec(req), SkinnyGemmSpec
+        ):
             self.assertTrue(dec.pick.is_rule_pick)
 
 

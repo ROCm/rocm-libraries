@@ -166,7 +166,7 @@ TEST(ElementwiseF64UnaryOpTest, BinaryTrinaryAndPermutation)
     auto          desc    = api.tensor({M, N}, {1, M}, HIPTENSOR_R_64F);
     int32_t const modes[] = {'m', 'n'};
 
-    auto const          b = inputs(-2, 2, 1), c = inputs(-2, 2, 2);
+    auto const           b = inputs(-2, 2, 1), c = inputs(-2, 2, 2);
     DeviceBuffer<double> dB(b), dC(c), dD(std::vector<double>(count, NAN));
     double const         alpha = 1.25, beta = 0.5, gamma = 0.75;
 
@@ -254,25 +254,20 @@ TEST(ElementwiseF64UnaryOpTest, BinaryTrinaryAndPermutation)
             for(int64_t i = 0; i < count; ++i)
             {
                 expected[i] = 1.25L * opA[i] + 0.5L * b[i] + 0.75L * c[i];
-                scale[i] = fabsl(1.25L * opA[i]) + fabsl(0.5L * b[i]) + fabsl(0.75L * c[i]);
+                scale[i]    = fabsl(1.25L * opA[i]) + fabsl(0.5L * b[i]) + fabsl(0.75L * c[i]);
             }
             expectClose(dD.read(), expected, scale, std::string("trinary ") + u.name);
         }
 
         // Permutation: D = alpha * op(A), with the modes swapped.
         {
-            auto          descT     = api.tensor({N, M}, {1, N}, HIPTENSOR_R_64F);
-            int32_t const modesT[]  = {'n', 'm'};
-            hiptensorOperationDescriptor_t op = nullptr;
-            ASSERT_EQ(hiptensorCreatePermutation(api.handle,
-                                                 &op,
-                                                 desc,
-                                                 modes,
-                                                 u.op,
-                                                 descT,
-                                                 modesT,
-                                                 HIPTENSOR_COMPUTE_DESC_64F),
-                      HIPTENSOR_STATUS_SUCCESS);
+            auto                           descT    = api.tensor({N, M}, {1, N}, HIPTENSOR_R_64F);
+            int32_t const                  modesT[] = {'n', 'm'};
+            hiptensorOperationDescriptor_t op       = nullptr;
+            ASSERT_EQ(
+                hiptensorCreatePermutation(
+                    api.handle, &op, desc, modes, u.op, descT, modesT, HIPTENSOR_COMPUTE_DESC_64F),
+                HIPTENSOR_STATUS_SUCCESS);
             api.keep(op);
             hiptensorPlan_t plan = nullptr;
             ASSERT_EQ(api.plan(op, plan), HIPTENSOR_STATUS_SUCCESS);
@@ -360,8 +355,8 @@ TEST(ElementwiseF64UnaryOpTest, Reduction)
             {
                 if(bad++ < 3)
                 {
-                    ADD_FAILURE() << "reduction " << u.name << ": m = " << m << " is "
-                                  << actual[m] << ", expected " << double(expected);
+                    ADD_FAILURE() << "reduction " << u.name << ": m = " << m << " is " << actual[m]
+                                  << ", expected " << double(expected);
                 }
             }
         }

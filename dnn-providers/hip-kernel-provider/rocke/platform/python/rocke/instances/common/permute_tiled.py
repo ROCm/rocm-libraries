@@ -313,7 +313,10 @@ def is_valid_spec(spec: PermuteTiledSpec, arch: str = "gfx950") -> Tuple[bool, s
         if spec.x_shape[a] <= 0:
             return False, f"x_shape must be positive, got {list(spec.x_shape)}"
         if spec.tile[a] <= 0 or spec.x_shape[a] % spec.tile[a]:
-            return False, f"tile[{a}]={spec.tile[a]} does not divide x_shape[{a}]={spec.x_shape[a]}"
+            return (
+                False,
+                f"tile[{a}]={spec.tile[a]} does not divide x_shape[{a}]={spec.x_shape[a]}",
+            )
     if spec.stage not in ("lds", "reg", "gather"):
         return False, f"unknown stage {spec.stage!r}"
     if spec.grid_order not in ("in", "out", "both"):
@@ -334,9 +337,17 @@ def is_valid_spec(spec: PermuteTiledSpec, arch: str = "gfx950") -> Tuple[bool, s
     if spec.stage == "gather":
         held = max(held, -(-spec.phase2_units // bs))
     if held > MAX_VECTORS_PER_THREAD:
-        return False, f"{held} vectors per thread > {MAX_VECTORS_PER_THREAD} (register budget)"
-    if spec.stage in ("lds", "gather") and not target.fits_lds(spec.tile_elems * spec.elem_bytes):
-        return False, f"LDS tile {spec.tile_elems * spec.elem_bytes} B exceeds {arch} capacity"
+        return (
+            False,
+            f"{held} vectors per thread > {MAX_VECTORS_PER_THREAD} (register budget)",
+        )
+    if spec.stage in ("lds", "gather") and not target.fits_lds(
+        spec.tile_elems * spec.elem_bytes
+    ):
+        return (
+            False,
+            f"LDS tile {spec.tile_elems * spec.elem_bytes} B exceeds {arch} capacity",
+        )
     k = spec.swizzle_k
     if k not in (0, 1) and spec.stage == "gather":
         return False, "the gather stage has no LDS swizzle"
@@ -403,7 +414,9 @@ def _unflatten(b: IRBuilder, x, dims: Sequence[Tuple[int, int]]) -> Dict[int, ob
     return out
 
 
-def _lin(b: IRBuilder, coords: Dict[int, object], weights: Dict[int, int], const: int = 0):
+def _lin(
+    b: IRBuilder, coords: Dict[int, object], weights: Dict[int, int], const: int = 0
+):
     acc = None
     for a, w in weights.items():
         c = coords.get(a)
@@ -482,8 +495,12 @@ def build_permute_tiled(spec: PermuteTiledSpec, arch: str = "gfx950") -> KernelD
     s, p, pinv, st_in, st_out, t, so = _geometry(spec)
     ai, ao, moving = spec.ai, spec.ao, spec.moving
     g = [s[a] // t[a] for a in range(n)]
-    hint_ld = TemporalHint.STREAMING if spec.nt in ("load", "both") else TemporalHint.DEFAULT
-    hint_st = TemporalHint.STREAMING if spec.nt in ("store", "both") else TemporalHint.DEFAULT
+    hint_ld = (
+        TemporalHint.STREAMING if spec.nt in ("load", "both") else TemporalHint.DEFAULT
+    )
+    hint_st = (
+        TemporalHint.STREAMING if spec.nt in ("store", "both") else TemporalHint.DEFAULT
+    )
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = BS
@@ -503,9 +520,15 @@ def build_permute_tiled(spec: PermuteTiledSpec, arch: str = "gfx950") -> KernelD
     if moving:
         bt[ao] = t[ao] // V
     p1_dims = [(a, bt[a]) for a in range(n)]
-    w_in = {a: st_in[a] * (V if (a == ai or (moving and a == ao)) else 1) for a in range(n)}
-    w_out = {a: st_out[a] * (V if (a == ai or (moving and a == ao)) else 1) for a in range(n)}
-    w_lds = {a: so[a] * (V if (a == ai or (moving and a == ao)) else 1) for a in range(n)}
+    w_in = {
+        a: st_in[a] * (V if (a == ai or (moving and a == ao)) else 1) for a in range(n)
+    }
+    w_out = {
+        a: st_out[a] * (V if (a == ai or (moving and a == ao)) else 1) for a in range(n)
+    }
+    w_lds = {
+        a: so[a] * (V if (a == ai or (moving and a == ao)) else 1) for a in range(n)
+    }
     # phase-2 unit geometry (output order, ao fastest, units of V elements)
     p2_ext = list(t)
     p2_ext[ao] = t[ao] // V
@@ -524,6 +547,7 @@ def build_permute_tiled(spec: PermuteTiledSpec, arch: str = "gfx950") -> KernelD
             # threads past the last unit redo the last one (identical data, benign)
             u = b.smin(u, b.const_i32(total - 1))
         return u, None
+
     order = grid_walk(spec)
 
     def one_tile(tile_id):
@@ -547,18 +571,30 @@ def build_permute_tiled(spec: PermuteTiledSpec, arch: str = "gfx950") -> KernelD
             off = _lin(b, cb, w_in)
             if moving:
                 rows = [
-                    b.global_load_vN(
-                        Xt, off if j == 0 else b.add(off, b.const_i32(j * st_in[ao])),
-                        ct, V, temporal_hint=hint_ld,
-                    ) if V > 1 else b.global_load(
-                        Xt, off if j == 0 else b.add(off, b.const_i32(j * st_in[ao])), ct
+                    (
+                        b.global_load_vN(
+                            Xt,
+                            off if j == 0 else b.add(off, b.const_i32(j * st_in[ao])),
+                            ct,
+                            V,
+                            temporal_hint=hint_ld,
+                        )
+                        if V > 1
+                        else b.global_load(
+                            Xt,
+                            off if j == 0 else b.add(off, b.const_i32(j * st_in[ao])),
+                            ct,
+                        )
                     )
                     for j in range(V)
                 ]
             else:
                 rows = [
-                    b.global_load_vN(Xt, off, ct, V, temporal_hint=hint_ld)
-                    if V > 1 else b.global_load(Xt, off, ct)
+                    (
+                        b.global_load_vN(Xt, off, ct, V, temporal_hint=hint_ld)
+                        if V > 1
+                        else b.global_load(Xt, off, ct)
+                    )
                 ]
             return cb, rows
 
@@ -705,8 +741,11 @@ def _build_gather(b, spec, X, Y, tid, lds, ct, hint_ld, hint_st):
             e = b.mul(u, b.const_i32(V)) if V > 1 else u
             c = _unflatten(b, e, in_dims)
             off = _lin(b, c, {a: st_in[a] for a in range(n)})
-            v = (b.global_load_vN(Xt, off, ct, V, temporal_hint=hint_ld) if V > 1
-                 else b.global_load(Xt, off, ct))
+            v = (
+                b.global_load_vN(Xt, off, ct, V, temporal_hint=hint_ld)
+                if V > 1
+                else b.global_load(Xt, off, ct)
+            )
             return e, v
 
         loads, tails = [], []
@@ -739,7 +778,9 @@ def _build_gather(b, spec, X, Y, tid, lds, ct, hint_ld, hint_st):
 
         def g_store(off, elems):
             if V > 1:
-                b.global_store_vN(Yt, off, b.vec_pack(elems, ct), V, temporal_hint=hint_st)
+                b.global_store_vN(
+                    Yt, off, b.vec_pack(elems, ct), V, temporal_hint=hint_st
+                )
             else:
                 b.global_store(Yt, off, elems[0])
 
@@ -835,14 +876,14 @@ def lds_bank_cost(spec: PermuteTiledSpec, banks: int = 64, wave: int = 64) -> in
             e += i * so[ai] if moving else 0
             addrs.append(swz(e // V) if V > 1 else e)
         for g0 in range(0, len(addrs), group):
-            grp = addrs[g0:g0 + group]
+            grp = addrs[g0 : g0 + group]
             hist: Dict[int, int] = {}
             for c in grp:
                 hist[c % slots] = hist.get(c % slots, 0) + 1
             cost += max(hist.values())
     addrs = [swz(u) for u in lanes]
     for g0 in range(0, len(addrs), group):
-        grp = addrs[g0:g0 + group]
+        grp = addrs[g0 : g0 + group]
         hist = {}
         for c in grp:
             hist[c % slots] = hist.get(c % slots, 0) + 1
@@ -850,17 +891,27 @@ def lds_bank_cost(spec: PermuteTiledSpec, banks: int = 64, wave: int = 64) -> in
     return cost
 
 
-def best_swizzle(spec: PermuteTiledSpec, banks: int = 64, wave: int = 64) -> Tuple[int, int]:
+def best_swizzle(
+    spec: PermuteTiledSpec, banks: int = 64, wave: int = 64
+) -> Tuple[int, int]:
     """The (k, shift) swizzle with the lowest static bank cost (ties: no swizzle)."""
     import dataclasses
 
-    best = (lds_bank_cost(dataclasses.replace(spec, swizzle_k=0, swizzle_shift=0), banks, wave), 0, 0)
+    best = (
+        lds_bank_cost(
+            dataclasses.replace(spec, swizzle_k=0, swizzle_shift=0), banks, wave
+        ),
+        0,
+        0,
+    )
     chunks = spec.tile_elems // spec.vec
     for k in (2, 4, 8, 16):
         for sh in range(k.bit_length() - 1, max(chunks.bit_length(), 1)):
             if chunks % (1 << sh):
                 continue
-            c = lds_bank_cost(dataclasses.replace(spec, swizzle_k=k, swizzle_shift=sh), banks, wave)
+            c = lds_bank_cost(
+                dataclasses.replace(spec, swizzle_k=k, swizzle_shift=sh), banks, wave
+            )
             if c < best[0]:
                 best = (c, k, sh)
     return best[1], best[2]
@@ -876,7 +927,10 @@ def _axis_chunks(extent: int, want: int) -> int:
 
 
 def default_tile(
-    shape: Sequence[int], perm: Sequence[int], dtype: str, run_bytes: int = 256,
+    shape: Sequence[int],
+    perm: Sequence[int],
+    dtype: str,
+    run_bytes: int = 256,
     max_tile_bytes: int = 32768,
 ) -> Tuple[int, ...]:
     """Pick tile extents: input runs and output runs of about ``run_bytes``.
@@ -915,7 +969,11 @@ def default_tile(
     v = 16 // es
     for a in (n - 1, perm[-1]):
         if t[a] % v and shape[a] % v == 0:
-            t[a] = _axis_chunks(shape[a], max(v, t[a] - t[a] % v + v)) if shape[a] >= v else t[a]
+            t[a] = (
+                _axis_chunks(shape[a], max(v, t[a] - t[a] % v + v))
+                if shape[a] >= v
+                else t[a]
+            )
     moving = perm[-1] != n - 1
     min_elems = 64 * v * (v if moving else 1)
 
@@ -934,10 +992,18 @@ def default_tile(
         else:
             break
     while _prod(t) * es > max_tile_bytes:
-        cand = [a for a in range(n) if t[a] > 1 and t[a] % 2 == 0 and a not in (n - 1, perm[-1])]
+        cand = [
+            a
+            for a in range(n)
+            if t[a] > 1 and t[a] % 2 == 0 and a not in (n - 1, perm[-1])
+        ]
         if not cand:
             # the innermost axes: shrink to a smaller divisor that keeps vec dividing it
-            cand = [a for a in range(n) if any(shape[a] % d == 0 and d % v == 0 for d in range(v, t[a]))]
+            cand = [
+                a
+                for a in range(n)
+                if any(shape[a] % d == 0 and d % v == 0 for d in range(v, t[a]))
+            ]
             if not cand:
                 break
             a = max(cand, key=lambda x: t[x])
@@ -973,7 +1039,9 @@ def _shrink_tile(shape, perm, tile, dtype, max_tile_bytes):
 
     def prev_div(a):
         for d in range(t[a] - 1, 0, -1):
-            if shape[a] % d == 0 and (a not in (n - 1, perm[-1]) or d % v == 0 or d == 1):
+            if shape[a] % d == 0 and (
+                a not in (n - 1, perm[-1]) or d % v == 0 or d == 1
+            ):
                 return d
         return t[a]
 
@@ -985,8 +1053,17 @@ def _shrink_tile(shape, perm, tile, dtype, max_tile_bytes):
         rin, ain = run(in_order)
         rout, aout = run(out_order)
         # axes outside both runs first (they only add rows), then the longer run's outer axis
-        outside = [a for a in range(n) if t[a] > 1 and a not in in_order[:in_order.index(ain) + 1]
-                   and a not in out_order[:out_order.index(aout) + 1]] if ain is not None and aout is not None else []
+        outside = (
+            [
+                a
+                for a in range(n)
+                if t[a] > 1
+                and a not in in_order[: in_order.index(ain) + 1]
+                and a not in out_order[: out_order.index(aout) + 1]
+            ]
+            if ain is not None and aout is not None
+            else []
+        )
         order = outside + ([ain, aout] if rin >= rout else [aout, ain])
         for a in order:
             if a is None:
@@ -1009,13 +1086,27 @@ def _shrink_tile(shape, perm, tile, dtype, max_tile_bytes):
 #: ``max(1, waves_target / waves) ** waves_exp`` that keeps small problems from
 #: running on too few CTAs.
 PLAN_COST = {
-    "run_a": 48.0, "run_cap": 2048, "width_exp": 0.4, "gather": 1.3, "reg": 1.2, "small_tile": 4096,
-    "small_f": 1.15, "mid_tile": 32768, "mid_f": 1.05, "big_tile": 65536, "big_f": 1.2, "idle": 0.1,
-    "waves_target": 2048, "waves_exp": 0.5, "tpc": 1.05,
+    "run_a": 48.0,
+    "run_cap": 2048,
+    "width_exp": 0.4,
+    "gather": 1.3,
+    "reg": 1.2,
+    "small_tile": 4096,
+    "small_f": 1.15,
+    "mid_tile": 32768,
+    "mid_f": 1.05,
+    "big_tile": 65536,
+    "big_f": 1.2,
+    "idle": 0.1,
+    "waves_target": 2048,
+    "waves_exp": 0.5,
+    "tpc": 1.05,
 }
 
 
-def _plan_cost(spec: "PermuteTiledSpec", th: Optional[Dict[str, float]] = None) -> float:
+def _plan_cost(
+    spec: "PermuteTiledSpec", th: Optional[Dict[str, float]] = None
+) -> float:
     """Relative time estimate of a planned spec under :data:`PLAN_COST`."""
     th = PLAN_COST if th is None else th
     es = spec.elem_bytes
@@ -1044,12 +1135,24 @@ def _plan_cost(spec: "PermuteTiledSpec", th: Optional[Dict[str, float]] = None) 
 
 
 @functools.lru_cache(maxsize=4096)
-def _auto_spec_cached(x_shape, perm, dtype, arch, grid_order, nt, tiles_per_cta, block_size):
-    return auto_spec(x_shape, perm, dtype, arch, grid_order, nt, tiles_per_cta, block_size)
+def _auto_spec_cached(
+    x_shape, perm, dtype, arch, grid_order, nt, tiles_per_cta, block_size
+):
+    return auto_spec(
+        x_shape, perm, dtype, arch, grid_order, nt, tiles_per_cta, block_size
+    )
 
 
-def auto_spec(x_shape, perm, dtype: str, arch: str, grid_order: Optional[str], nt: str,
-              tiles_per_cta: int = 1, block_size: Optional[int] = None) -> "PermuteTiledSpec":
+def auto_spec(
+    x_shape,
+    perm,
+    dtype: str,
+    arch: str,
+    grid_order: Optional[str],
+    nt: str,
+    tiles_per_cta: int = 1,
+    block_size: Optional[int] = None,
+) -> "PermuteTiledSpec":
     """Product-route choice: enumerate run / tile-size targets, the three
     stages and (unless given) the three walk orders; keep the valid specs and
     return the lowest :func:`_plan_cost`."""
@@ -1062,9 +1165,22 @@ def auto_spec(x_shape, perm, dtype: str, arch: str, grid_order: Optional[str], n
                 for go in orders:
                     for bs in ((block_size,) if block_size else (None, 256, 512)):
                         try:
-                            sp = plan_permute_tiled(x_shape, perm, dtype, arch, run_bytes=rb, max_tile_bytes=mt,
-                                                    stage=stage, grid_order=go, nt=nt, tiles_per_cta=tiles_per_cta,
-                                                    block_size=bs, swizzle=(0, 0), use_tuned=False, auto=False)
+                            sp = plan_permute_tiled(
+                                x_shape,
+                                perm,
+                                dtype,
+                                arch,
+                                run_bytes=rb,
+                                max_tile_bytes=mt,
+                                stage=stage,
+                                grid_order=go,
+                                nt=nt,
+                                tiles_per_cta=tiles_per_cta,
+                                block_size=bs,
+                                swizzle=(0, 0),
+                                use_tuned=False,
+                                auto=False,
+                            )
                         except ValueError:
                             continue
                         if sp in seen:
@@ -1074,13 +1190,18 @@ def auto_spec(x_shape, perm, dtype: str, arch: str, grid_order: Optional[str], n
                         if best is None or c < best[0] - 1e-12:
                             best = (c, sp)
     if best is None:
-        raise ValueError(f"no valid permute_tiled config for {list(x_shape)} perm {list(perm)}")
+        raise ValueError(
+            f"no valid permute_tiled config for {list(x_shape)} perm {list(perm)}"
+        )
     sp = best[1]
     if sp.stage == "lds" and sp.vec > 1:
         from ...core.arch import ArchTarget
 
-        k, sh = best_swizzle(sp, banks=64 if arch == "gfx950" else 32,
-                             wave=ArchTarget.from_gfx(arch).wave_size)
+        k, sh = best_swizzle(
+            sp,
+            banks=64 if arch == "gfx950" else 32,
+            wave=ArchTarget.from_gfx(arch).wave_size,
+        )
         sp = dataclasses.replace(sp, swizzle_k=k, swizzle_shift=sh)
     return sp
 
@@ -1096,61 +1217,530 @@ DEFAULT_GRID_ORDER = "out"
 #: Searched configurations served for exact canonical problems:
 #: ``{arch: {(elem_bytes, canonical shape, canonical perm): knobs}}``. Only a
 #: plan call without knob overrides consults it.
-TUNED_CONFIGS: Dict[str, Dict[Tuple[int, Tuple[int, ...], Tuple[int, ...]], Dict[str, object]]] = {
+TUNED_CONFIGS: Dict[
+    str, Dict[Tuple[int, Tuple[int, ...], Tuple[int, ...]], Dict[str, object]]
+] = {
     # hipTensor permute rows (doc and inner-identity controls, ranks 2-6), 2 / 4 / 8-byte
     # elements: search-engine winners confirmed in interleaved timing against the defaults
     "gfx950": {
-        (2, (2, 4, 4, 6, 4, 8, 4, 8, 6, 10), (1, 3, 5, 7, 9, 0, 2, 4, 6, 8)): {"tile": (1, 1, 1, 1, 4, 1, 4, 4, 6, 10), "block_size": 256, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 4, "grid_order": "out", "nt": "store", "tiles_per_cta": 1},
-        (2, (4, 8, 6, 12, 8, 10, 8, 14), (1, 3, 5, 7, 0, 2, 4, 6)): {"tile": (1, 1, 1, 1, 8, 5, 8, 14), "block_size": 256, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "store", "tiles_per_cta": 1},
-        (2, (36864, 8, 4, 10), (0, 2, 1, 3)): {"tile": (8, 8, 4, 10), "block_size": 256, "stage": "lds", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (16, 24, 20, 32, 24, 40), (1, 3, 5, 0, 2, 4)): {"tile": (1, 1, 20, 1, 24, 40), "block_size": 64, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 4, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (128, 128, 96, 192), (1, 3, 0, 2)): {"tile": (1, 1, 96, 192), "block_size": 512, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (320, 224, 40, 72), (1, 3, 0, 2)): {"tile": (8, 1, 40, 72), "block_size": 64, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 5, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (6, 4, 4, 4, 2, 15360), (5, 4, 3, 2, 1, 0)): {"tile": (6, 4, 4, 1, 1, 64), "block_size": 256, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 5, "grid_order": "in", "nt": "store", "tiles_per_cta": 2},
-        (2, (2, 2, 2, 4, 3, 4, 4, 6, 4, 8, 4, 10), (1, 3, 5, 7, 9, 11, 0, 2, 4, 6, 8, 10)): {"tile": (1, 1, 1, 1, 1, 1, 4, 1, 4, 4, 4, 10), "block_size": 256, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 5, "grid_order": "out", "nt": "store", "tiles_per_cta": 1},
-        (2, (2, 4, 4, 8, 4, 6, 4, 8, 6, 10), (1, 3, 5, 7, 9, 0, 2, 4, 6, 8)): {"tile": (1, 1, 2, 1, 4, 1, 4, 4, 6, 10), "block_size": 256, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 4, "grid_order": "out", "nt": "store", "tiles_per_cta": 1},
-        (2, (480, 12, 8, 14, 8, 18), (0, 2, 4, 1, 3, 5)): {"tile": (1, 2, 1, 14, 8, 18), "block_size": 512, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "both", "nt": "store", "tiles_per_cta": 1},
-        (2, (4, 8, 4, 6, 6, 8, 6, 10), (1, 3, 5, 7, 0, 2, 4, 6)): {"tile": (1, 1, 2, 1, 6, 4, 6, 10), "block_size": 512, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (16, 20, 20, 28, 24, 36), (1, 3, 5, 0, 2, 4)): {"tile": (1, 1, 20, 1, 24, 36), "block_size": 256, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "both", "nt": "store", "tiles_per_cta": 1},
-        (2, (4, 4, 4, 3, 2, 2, 15360), (6, 5, 4, 3, 2, 1, 0)): {"tile": (4, 4, 4, 1, 1, 1, 64), "block_size": 64, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "store", "tiles_per_cta": 1},
-        (2, (2, 3, 2, 4, 3, 4, 4, 4, 4, 8, 4, 10), (1, 3, 5, 7, 9, 11, 0, 2, 4, 6, 8, 10)): {"tile": (1, 1, 1, 1, 1, 1, 4, 1, 4, 4, 4, 10), "block_size": 256, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 5, "grid_order": "out", "nt": "store", "tiles_per_cta": 1},
-        (2, (4, 8, 6, 10, 8, 12, 8, 16), (1, 3, 5, 7, 0, 2, 4, 6)): {"tile": (1, 1, 1, 1, 8, 4, 8, 16), "block_size": 256, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (98304, 10, 6, 12), (0, 2, 1, 3)): {"tile": (2, 10, 6, 12), "block_size": 256, "stage": "lds", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "both", "nt": "both", "tiles_per_cta": 1},
-        (2, (24576, 8, 6, 10), (0, 2, 1, 3)): {"tile": (6, 8, 6, 10), "block_size": 512, "stage": "lds", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "in", "nt": "both", "tiles_per_cta": 2},
-        (2, (46080, 16, 8, 20), (0, 2, 1, 3)): {"tile": (1, 16, 8, 20), "block_size": 256, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (4, 6, 4, 8, 6, 8, 6, 12), (1, 3, 5, 7, 0, 2, 4, 6)): {"tile": (1, 1, 2, 1, 6, 4, 6, 12), "block_size": 512, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "in", "nt": "store", "tiles_per_cta": 1},
-        (2, (384, 12, 12, 20), (0, 2, 1, 3)): {"tile": (1, 3, 12, 20), "block_size": 64, "stage": "reg", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 4},
-        (2, (320, 40, 40, 224), (1, 3, 0, 2)): {"tile": (1, 1, 40, 112), "block_size": 512, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "in", "nt": "load", "tiles_per_cta": 1},
-        (2, (16, 32, 32, 32, 16, 16), (0, 3, 1, 5, 2, 4)): {"tile": (1, 1, 8, 2, 16, 16), "block_size": 64, "stage": "reg", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "in", "nt": "store", "tiles_per_cta": 1},
-        (2, (16, 32, 32, 32, 16, 16), (4, 3, 2, 1, 0, 5)): {"tile": (8, 8, 1, 8, 8, 16), "block_size": 256, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 9, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (32, 64, 64, 64, 32), (0, 4, 1, 3, 2)): {"tile": (1, 1, 64, 8, 32), "block_size": 64, "stage": "lds", "swizzle_k": 4, "swizzle_shift": 9, "grid_order": "in", "nt": "both", "tiles_per_cta": 1},
-        (2, (32, 64, 64, 64, 32), (3, 2, 1, 0, 4)): {"tile": (32, 1, 1, 32, 32), "block_size": 256, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 5, "grid_order": "both", "nt": "both", "tiles_per_cta": 1},
-        (2, (64, 256, 112, 112), (2, 1, 0, 3)): {"tile": (4, 1, 4, 112), "block_size": 256, "stage": "lds", "swizzle_k": 8, "swizzle_shift": 3, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (64, 256, 12544), (0, 2, 1)): {"tile": (1, 128, 256), "block_size": 512, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 7, "grid_order": "in", "nt": "both", "tiles_per_cta": 1},
-        (2, (512, 1024, 1024), (1, 0, 2)): {"tile": (1, 1, 1024), "block_size": 128, "stage": "lds", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (8192, 8192), (1, 0)): {"tile": (256, 256), "block_size": 512, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 8, "grid_order": "in", "nt": "both", "tiles_per_cta": 4},
-        (2, (524288, 1024), (1, 0)): {"tile": (64, 128), "block_size": 512, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (2, (67108864,), (0,)): {"tile": (512,), "block_size": 64, "stage": "reg", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "in", "nt": "both", "tiles_per_cta": 1},
-        (4, (16, 32, 32, 32, 16, 16), (0, 3, 1, 5, 2, 4)): {"tile": (1, 1, 16, 1, 16, 16), "block_size": 256, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 6, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (4, (16, 32, 32, 32, 16, 16), (4, 3, 2, 1, 0, 5)): {"tile": (4, 2, 1, 2, 4, 16), "block_size": 256, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 4, "grid_order": "out", "nt": "both", "tiles_per_cta": 2},
-        (4, (32, 64, 64, 64, 32), (0, 4, 1, 3, 2)): {"tile": (1, 1, 64, 8, 32), "block_size": 256, "stage": "lds", "swizzle_k": 8, "swizzle_shift": 9, "grid_order": "in", "nt": "both", "tiles_per_cta": 1},
-        (4, (32, 64, 64, 64, 32), (3, 2, 1, 0, 4)): {"tile": (2, 1, 1, 4, 32), "block_size": 64, "stage": "reg", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "in", "nt": "both", "tiles_per_cta": 1},
-        (4, (64, 256, 112, 112), (2, 1, 0, 3)): {"tile": (2, 1, 2, 112), "block_size": 128, "stage": "lds", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (4, (64, 256, 12544), (0, 2, 1)): {"tile": (1, 128, 128), "block_size": 512, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 7, "grid_order": "in", "nt": "both", "tiles_per_cta": 1},
-        (4, (512, 1024, 1024), (1, 0, 2)): {"tile": (1, 1, 256), "block_size": 64, "stage": "lds", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (4, (8192, 8192), (1, 0)): {"tile": (128, 256), "block_size": 512, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 7, "grid_order": "out", "nt": "both", "tiles_per_cta": 4},
-        (4, (524288, 1024), (1, 0)): {"tile": (64, 128), "block_size": 64, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 6, "grid_order": "in", "nt": "load", "tiles_per_cta": 1},
-        (4, (67108864,), (0,)): {"tile": (256,), "block_size": 64, "stage": "lds", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (8, (16, 32, 32, 32, 16, 16), (0, 3, 1, 5, 2, 4)): {"tile": (1, 1, 8, 1, 16, 16), "block_size": 512, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 6, "grid_order": "in", "nt": "both", "tiles_per_cta": 1},
-        (8, (16, 32, 32, 32, 16, 16), (4, 3, 2, 1, 0, 5)): {"tile": (4, 2, 1, 2, 8, 16), "block_size": 512, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (8, (32, 64, 64, 64, 32), (0, 4, 1, 3, 2)): {"tile": (1, 1, 64, 2, 32), "block_size": 64, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 7, "grid_order": "out", "nt": "none", "tiles_per_cta": 1},
-        (8, (32, 64, 64, 64, 32), (3, 2, 1, 0, 4)): {"tile": (1, 1, 1, 4, 32), "block_size": 64, "stage": "lds", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "in", "nt": "both", "tiles_per_cta": 1},
-        (8, (64, 256, 112, 112), (2, 1, 0, 3)): {"tile": (2, 1, 2, 112), "block_size": 256, "stage": "reg", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (8, (64, 256, 12544), (0, 2, 1)): {"tile": (1, 64, 128), "block_size": 64, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 6, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (8, (512, 1024, 1024), (1, 0, 2)): {"tile": (1, 1, 128), "block_size": 64, "stage": "lds", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "out", "nt": "both", "tiles_per_cta": 1},
-        (8, (8192, 8192), (1, 0)): {"tile": (128, 128), "block_size": 512, "stage": "lds", "swizzle_k": 16, "swizzle_shift": 7, "grid_order": "out", "nt": "both", "tiles_per_cta": 2},
-        (8, (524288, 1024), (1, 0)): {"tile": (64, 128), "block_size": 256, "stage": "gather", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "both", "nt": "both", "tiles_per_cta": 1},
-        (8, (67108864,), (0,)): {"tile": (128,), "block_size": 64, "stage": "lds", "swizzle_k": 0, "swizzle_shift": 0, "grid_order": "in", "nt": "both", "tiles_per_cta": 1},
+        (2, (2, 4, 4, 6, 4, 8, 4, 8, 6, 10), (1, 3, 5, 7, 9, 0, 2, 4, 6, 8)): {
+            "tile": (1, 1, 1, 1, 4, 1, 4, 4, 6, 10),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 4,
+            "grid_order": "out",
+            "nt": "store",
+            "tiles_per_cta": 1,
+        },
+        (2, (4, 8, 6, 12, 8, 10, 8, 14), (1, 3, 5, 7, 0, 2, 4, 6)): {
+            "tile": (1, 1, 1, 1, 8, 5, 8, 14),
+            "block_size": 256,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "store",
+            "tiles_per_cta": 1,
+        },
+        (2, (36864, 8, 4, 10), (0, 2, 1, 3)): {
+            "tile": (8, 8, 4, 10),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (16, 24, 20, 32, 24, 40), (1, 3, 5, 0, 2, 4)): {
+            "tile": (1, 1, 20, 1, 24, 40),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 4,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (128, 128, 96, 192), (1, 3, 0, 2)): {
+            "tile": (1, 1, 96, 192),
+            "block_size": 512,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (320, 224, 40, 72), (1, 3, 0, 2)): {
+            "tile": (8, 1, 40, 72),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 5,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (6, 4, 4, 4, 2, 15360), (5, 4, 3, 2, 1, 0)): {
+            "tile": (6, 4, 4, 1, 1, 64),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 5,
+            "grid_order": "in",
+            "nt": "store",
+            "tiles_per_cta": 2,
+        },
+        (
+            2,
+            (2, 2, 2, 4, 3, 4, 4, 6, 4, 8, 4, 10),
+            (1, 3, 5, 7, 9, 11, 0, 2, 4, 6, 8, 10),
+        ): {
+            "tile": (1, 1, 1, 1, 1, 1, 4, 1, 4, 4, 4, 10),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 5,
+            "grid_order": "out",
+            "nt": "store",
+            "tiles_per_cta": 1,
+        },
+        (2, (2, 4, 4, 8, 4, 6, 4, 8, 6, 10), (1, 3, 5, 7, 9, 0, 2, 4, 6, 8)): {
+            "tile": (1, 1, 2, 1, 4, 1, 4, 4, 6, 10),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 4,
+            "grid_order": "out",
+            "nt": "store",
+            "tiles_per_cta": 1,
+        },
+        (2, (480, 12, 8, 14, 8, 18), (0, 2, 4, 1, 3, 5)): {
+            "tile": (1, 2, 1, 14, 8, 18),
+            "block_size": 512,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "both",
+            "nt": "store",
+            "tiles_per_cta": 1,
+        },
+        (2, (4, 8, 4, 6, 6, 8, 6, 10), (1, 3, 5, 7, 0, 2, 4, 6)): {
+            "tile": (1, 1, 2, 1, 6, 4, 6, 10),
+            "block_size": 512,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (16, 20, 20, 28, 24, 36), (1, 3, 5, 0, 2, 4)): {
+            "tile": (1, 1, 20, 1, 24, 36),
+            "block_size": 256,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "both",
+            "nt": "store",
+            "tiles_per_cta": 1,
+        },
+        (2, (4, 4, 4, 3, 2, 2, 15360), (6, 5, 4, 3, 2, 1, 0)): {
+            "tile": (4, 4, 4, 1, 1, 1, 64),
+            "block_size": 64,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "store",
+            "tiles_per_cta": 1,
+        },
+        (
+            2,
+            (2, 3, 2, 4, 3, 4, 4, 4, 4, 8, 4, 10),
+            (1, 3, 5, 7, 9, 11, 0, 2, 4, 6, 8, 10),
+        ): {
+            "tile": (1, 1, 1, 1, 1, 1, 4, 1, 4, 4, 4, 10),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 5,
+            "grid_order": "out",
+            "nt": "store",
+            "tiles_per_cta": 1,
+        },
+        (2, (4, 8, 6, 10, 8, 12, 8, 16), (1, 3, 5, 7, 0, 2, 4, 6)): {
+            "tile": (1, 1, 1, 1, 8, 4, 8, 16),
+            "block_size": 256,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (98304, 10, 6, 12), (0, 2, 1, 3)): {
+            "tile": (2, 10, 6, 12),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "both",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (24576, 8, 6, 10), (0, 2, 1, 3)): {
+            "tile": (6, 8, 6, 10),
+            "block_size": 512,
+            "stage": "lds",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 2,
+        },
+        (2, (46080, 16, 8, 20), (0, 2, 1, 3)): {
+            "tile": (1, 16, 8, 20),
+            "block_size": 256,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (4, 6, 4, 8, 6, 8, 6, 12), (1, 3, 5, 7, 0, 2, 4, 6)): {
+            "tile": (1, 1, 2, 1, 6, 4, 6, 12),
+            "block_size": 512,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "in",
+            "nt": "store",
+            "tiles_per_cta": 1,
+        },
+        (2, (384, 12, 12, 20), (0, 2, 1, 3)): {
+            "tile": (1, 3, 12, 20),
+            "block_size": 64,
+            "stage": "reg",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 4,
+        },
+        (2, (320, 40, 40, 224), (1, 3, 0, 2)): {
+            "tile": (1, 1, 40, 112),
+            "block_size": 512,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "in",
+            "nt": "load",
+            "tiles_per_cta": 1,
+        },
+        (2, (16, 32, 32, 32, 16, 16), (0, 3, 1, 5, 2, 4)): {
+            "tile": (1, 1, 8, 2, 16, 16),
+            "block_size": 64,
+            "stage": "reg",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "in",
+            "nt": "store",
+            "tiles_per_cta": 1,
+        },
+        (2, (16, 32, 32, 32, 16, 16), (4, 3, 2, 1, 0, 5)): {
+            "tile": (8, 8, 1, 8, 8, 16),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 9,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (32, 64, 64, 64, 32), (0, 4, 1, 3, 2)): {
+            "tile": (1, 1, 64, 8, 32),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 4,
+            "swizzle_shift": 9,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (32, 64, 64, 64, 32), (3, 2, 1, 0, 4)): {
+            "tile": (32, 1, 1, 32, 32),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 5,
+            "grid_order": "both",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (64, 256, 112, 112), (2, 1, 0, 3)): {
+            "tile": (4, 1, 4, 112),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 8,
+            "swizzle_shift": 3,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (64, 256, 12544), (0, 2, 1)): {
+            "tile": (1, 128, 256),
+            "block_size": 512,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 7,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (512, 1024, 1024), (1, 0, 2)): {
+            "tile": (1, 1, 1024),
+            "block_size": 128,
+            "stage": "lds",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (8192, 8192), (1, 0)): {
+            "tile": (256, 256),
+            "block_size": 512,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 8,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 4,
+        },
+        (2, (524288, 1024), (1, 0)): {
+            "tile": (64, 128),
+            "block_size": 512,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (2, (67108864,), (0,)): {
+            "tile": (512,),
+            "block_size": 64,
+            "stage": "reg",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (4, (16, 32, 32, 32, 16, 16), (0, 3, 1, 5, 2, 4)): {
+            "tile": (1, 1, 16, 1, 16, 16),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 6,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (4, (16, 32, 32, 32, 16, 16), (4, 3, 2, 1, 0, 5)): {
+            "tile": (4, 2, 1, 2, 4, 16),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 4,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 2,
+        },
+        (4, (32, 64, 64, 64, 32), (0, 4, 1, 3, 2)): {
+            "tile": (1, 1, 64, 8, 32),
+            "block_size": 256,
+            "stage": "lds",
+            "swizzle_k": 8,
+            "swizzle_shift": 9,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (4, (32, 64, 64, 64, 32), (3, 2, 1, 0, 4)): {
+            "tile": (2, 1, 1, 4, 32),
+            "block_size": 64,
+            "stage": "reg",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (4, (64, 256, 112, 112), (2, 1, 0, 3)): {
+            "tile": (2, 1, 2, 112),
+            "block_size": 128,
+            "stage": "lds",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (4, (64, 256, 12544), (0, 2, 1)): {
+            "tile": (1, 128, 128),
+            "block_size": 512,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 7,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (4, (512, 1024, 1024), (1, 0, 2)): {
+            "tile": (1, 1, 256),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (4, (8192, 8192), (1, 0)): {
+            "tile": (128, 256),
+            "block_size": 512,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 7,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 4,
+        },
+        (4, (524288, 1024), (1, 0)): {
+            "tile": (64, 128),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 6,
+            "grid_order": "in",
+            "nt": "load",
+            "tiles_per_cta": 1,
+        },
+        (4, (67108864,), (0,)): {
+            "tile": (256,),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (8, (16, 32, 32, 32, 16, 16), (0, 3, 1, 5, 2, 4)): {
+            "tile": (1, 1, 8, 1, 16, 16),
+            "block_size": 512,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 6,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (8, (16, 32, 32, 32, 16, 16), (4, 3, 2, 1, 0, 5)): {
+            "tile": (4, 2, 1, 2, 8, 16),
+            "block_size": 512,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (8, (32, 64, 64, 64, 32), (0, 4, 1, 3, 2)): {
+            "tile": (1, 1, 64, 2, 32),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 7,
+            "grid_order": "out",
+            "nt": "none",
+            "tiles_per_cta": 1,
+        },
+        (8, (32, 64, 64, 64, 32), (3, 2, 1, 0, 4)): {
+            "tile": (1, 1, 1, 4, 32),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (8, (64, 256, 112, 112), (2, 1, 0, 3)): {
+            "tile": (2, 1, 2, 112),
+            "block_size": 256,
+            "stage": "reg",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (8, (64, 256, 12544), (0, 2, 1)): {
+            "tile": (1, 64, 128),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 6,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (8, (512, 1024, 1024), (1, 0, 2)): {
+            "tile": (1, 1, 128),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (8, (8192, 8192), (1, 0)): {
+            "tile": (128, 128),
+            "block_size": 512,
+            "stage": "lds",
+            "swizzle_k": 16,
+            "swizzle_shift": 7,
+            "grid_order": "out",
+            "nt": "both",
+            "tiles_per_cta": 2,
+        },
+        (8, (524288, 1024), (1, 0)): {
+            "tile": (64, 128),
+            "block_size": 256,
+            "stage": "gather",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "both",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
+        (8, (67108864,), (0,)): {
+            "tile": (128,),
+            "block_size": 64,
+            "stage": "lds",
+            "swizzle_k": 0,
+            "swizzle_shift": 0,
+            "grid_order": "in",
+            "nt": "both",
+            "tiles_per_cta": 1,
+        },
     },
 }
 
@@ -1164,7 +1754,9 @@ def _default_nt(arch: str) -> str:
 def tuned_spec(x_shape, perm, dtype: str, arch: str) -> Optional[PermuteTiledSpec]:
     """The tuned-table spec for this problem on ``arch`` (``None`` if absent or invalid)."""
     shape, cperm = canonicalize_permute(x_shape, perm)
-    knobs = TUNED_CONFIGS.get(arch, {}).get((ELEM_BYTES[dtype], tuple(shape), tuple(cperm)))
+    knobs = TUNED_CONFIGS.get(arch, {}).get(
+        (ELEM_BYTES[dtype], tuple(shape), tuple(cperm))
+    )
     if knobs is None:
         return None
     kw = dict(knobs)
@@ -1196,7 +1788,10 @@ def _grow_runs(shape, perm, tile, dtype, max_steps: int = 64):
 
     for _ in range(max_steps):
         changed = False
-        for order in (list(range(n - 1, -1, -1)), [perm[d] for d in range(n - 1, -1, -1)]):
+        for order in (
+            list(range(n - 1, -1, -1)),
+            [perm[d] for d in range(n - 1, -1, -1)],
+        ):
             r, part = run(order)
             if r % v and part is not None:
                 t[part] = nxt(part)
@@ -1207,11 +1802,22 @@ def _grow_runs(shape, perm, tile, dtype, max_steps: int = 64):
 
 
 def plan_permute_tiled(
-    x_shape: Sequence[int], perm: Sequence[int], dtype: str = "f16", arch: str = "gfx950",
-    *, run_bytes: Optional[int] = None, max_tile_bytes: Optional[int] = None,
-    block_size: Optional[int] = None, stage: Optional[str] = None, grid_order: Optional[str] = None,
-    nt: Optional[str] = None, tiles_per_cta: int = 1, swizzle: Optional[Tuple[int, int]] = None,
-    tile: Optional[Sequence[int]] = None, use_tuned: bool = True, auto: bool = True,
+    x_shape: Sequence[int],
+    perm: Sequence[int],
+    dtype: str = "f16",
+    arch: str = "gfx950",
+    *,
+    run_bytes: Optional[int] = None,
+    max_tile_bytes: Optional[int] = None,
+    block_size: Optional[int] = None,
+    stage: Optional[str] = None,
+    grid_order: Optional[str] = None,
+    nt: Optional[str] = None,
+    tiles_per_cta: int = 1,
+    swizzle: Optional[Tuple[int, int]] = None,
+    tile: Optional[Sequence[int]] = None,
+    use_tuned: bool = True,
+    auto: bool = True,
 ) -> PermuteTiledSpec:
     """Canonicalise ``(x_shape, perm)`` and return a valid spec (the product pick).
 
@@ -1225,36 +1831,82 @@ def plan_permute_tiled(
 
     from ...core.arch import ArchTarget
 
-    overridden = any(v is not None for v in (run_bytes, max_tile_bytes, block_size, grid_order, nt,
-                                             swizzle, tile, stage)) or tiles_per_cta != 1
+    overridden = (
+        any(
+            v is not None
+            for v in (
+                run_bytes,
+                max_tile_bytes,
+                block_size,
+                grid_order,
+                nt,
+                swizzle,
+                tile,
+                stage,
+            )
+        )
+        or tiles_per_cta != 1
+    )
     if use_tuned and not overridden:
         sp = tuned_spec(x_shape, perm, dtype, arch)
         if sp is not None:
             return sp
-    if auto and run_bytes is None and max_tile_bytes is None and tile is None and stage is None \
-            and swizzle is None:
+    if (
+        auto
+        and run_bytes is None
+        and max_tile_bytes is None
+        and tile is None
+        and stage is None
+        and swizzle is None
+    ):
         # the product route: cost-model choice of tile and stage
-        return _auto_spec_cached(tuple(x_shape), tuple(perm), dtype, arch, grid_order,
-                                 _default_nt(arch) if nt is None else nt, tiles_per_cta, block_size)
+        return _auto_spec_cached(
+            tuple(x_shape),
+            tuple(perm),
+            dtype,
+            arch,
+            grid_order,
+            _default_nt(arch) if nt is None else nt,
+            tiles_per_cta,
+            block_size,
+        )
     tile_given, stage_given = tile, stage
     run_bytes = DEFAULT_RUN_BYTES if run_bytes is None else run_bytes
-    max_tile_bytes = DEFAULT_MAX_TILE_BYTES if max_tile_bytes is None else max_tile_bytes
+    max_tile_bytes = (
+        DEFAULT_MAX_TILE_BYTES if max_tile_bytes is None else max_tile_bytes
+    )
     grid_order = DEFAULT_GRID_ORDER if grid_order is None else grid_order
     nt = _default_nt(arch) if nt is None else nt
     shape, cperm = canonicalize_permute(x_shape, perm)
     if stage is None:
         # 16-byte accesses need vec | the innermost tile extents (lds / reg);
         # odd extents go to the gather stage, which only needs vec | the runs
-        probe = PermuteTiledSpec(x_shape=tuple(shape), perm=tuple(cperm),
-                                 tile=tuple(tile or default_tile(shape, cperm, dtype, run_bytes,
-                                                                 max_tile_bytes)), dtype=dtype)
+        probe = PermuteTiledSpec(
+            x_shape=tuple(shape),
+            perm=tuple(cperm),
+            tile=tuple(
+                tile or default_tile(shape, cperm, dtype, run_bytes, max_tile_bytes)
+            ),
+            dtype=dtype,
+        )
         stage = "lds"
         if probe.vec * probe.elem_bytes < 16:
             try:
-                g = plan_permute_tiled(x_shape, perm, dtype, arch, run_bytes=run_bytes,
-                                       max_tile_bytes=max_tile_bytes, block_size=block_size,
-                                       stage="gather", grid_order=grid_order, nt=nt,
-                                       tiles_per_cta=tiles_per_cta, tile=tile, use_tuned=False)
+                g = plan_permute_tiled(
+                    x_shape,
+                    perm,
+                    dtype,
+                    arch,
+                    run_bytes=run_bytes,
+                    max_tile_bytes=max_tile_bytes,
+                    block_size=block_size,
+                    stage="gather",
+                    grid_order=grid_order,
+                    nt=nt,
+                    tiles_per_cta=tiles_per_cta,
+                    tile=tile,
+                    use_tuned=False,
+                )
                 if g.vec > probe.vec:
                     return g
             except ValueError:
@@ -1264,8 +1916,14 @@ def plan_permute_tiled(
         if stage == "gather":
             tile = _grow_runs(shape, cperm, tile, dtype)
     spec = PermuteTiledSpec(
-        x_shape=tuple(shape), perm=tuple(cperm), tile=tuple(tile), dtype=dtype,
-        block_size=256, stage=stage, grid_order=grid_order, nt=nt,
+        x_shape=tuple(shape),
+        perm=tuple(cperm),
+        tile=tuple(tile),
+        dtype=dtype,
+        block_size=256,
+        stage=stage,
+        grid_order=grid_order,
+        nt=nt,
         tiles_per_cta=tiles_per_cta,
     )
     target = ArchTarget.from_gfx(arch)
@@ -1273,26 +1931,51 @@ def plan_permute_tiled(
         sizes = [block_size]
     else:
         u = spec.phase1_units
-        sizes = sorted((256, 128, 512, 64, 1024),
-                       key=lambda x: ((-u) % x != 0, (-(-u // x)) * x - u, abs(x - 256)))
+        sizes = sorted(
+            (256, 128, 512, 64, 1024),
+            key=lambda x: ((-u) % x != 0, (-(-u // x)) * x - u, abs(x - 256)),
+        )
     last = "no block size"
     for bs in sizes:
         cand = dataclasses.replace(spec, block_size=bs)
         if swizzle is None and stage == "lds" and cand.vec > 1:
-            k, sh = best_swizzle(cand, banks=64 if arch == "gfx950" else 32, wave=target.wave_size)
+            k, sh = best_swizzle(
+                cand, banks=64 if arch == "gfx950" else 32, wave=target.wave_size
+            )
             cand = dataclasses.replace(cand, swizzle_k=k, swizzle_shift=sh)
         elif swizzle is not None:
-            cand = dataclasses.replace(cand, swizzle_k=swizzle[0], swizzle_shift=swizzle[1])
+            cand = dataclasses.replace(
+                cand, swizzle_k=swizzle[0], swizzle_shift=swizzle[1]
+            )
         ok, why = is_valid_spec(cand, arch)
         if ok:
             return cand
         last = why
-    if tile_given is None and max_tile_bytes > 1024 and ("per thread" in last or "exceeds" in last):
+    if (
+        tile_given is None
+        and max_tile_bytes > 1024
+        and ("per thread" in last or "exceeds" in last)
+    ):
         # a forced block size holds too many vectors per thread: retry with half the tile
-        return plan_permute_tiled(x_shape, perm, dtype, arch, run_bytes=run_bytes, max_tile_bytes=max_tile_bytes // 2,
-                                  block_size=block_size, stage=stage_given, grid_order=grid_order, nt=nt,
-                                  tiles_per_cta=tiles_per_cta, swizzle=swizzle, use_tuned=False, auto=False)
-    raise ValueError(f"no valid permute_tiled config for {list(x_shape)} perm {list(perm)}: {last}")
+        return plan_permute_tiled(
+            x_shape,
+            perm,
+            dtype,
+            arch,
+            run_bytes=run_bytes,
+            max_tile_bytes=max_tile_bytes // 2,
+            block_size=block_size,
+            stage=stage_given,
+            grid_order=grid_order,
+            nt=nt,
+            tiles_per_cta=tiles_per_cta,
+            swizzle=swizzle,
+            use_tuned=False,
+            auto=False,
+        )
+    raise ValueError(
+        f"no valid permute_tiled config for {list(x_shape)} perm {list(perm)}: {last}"
+    )
 
 
 __all__ = [

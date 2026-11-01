@@ -46,12 +46,10 @@ namespace
     uint64_t requiredWorkspace(ApiObjects& api, hiptensorPlan_t plan)
     {
         uint64_t required = ~uint64_t(0);
-        EXPECT_EQ(hiptensorPlanGetAttribute(api.handle,
-                                            plan,
-                                            HIPTENSOR_PLAN_REQUIRED_WORKSPACE,
-                                            &required,
-                                            sizeof(required)),
-                  HIPTENSOR_STATUS_SUCCESS);
+        EXPECT_EQ(
+            hiptensorPlanGetAttribute(
+                api.handle, plan, HIPTENSOR_PLAN_REQUIRED_WORKSPACE, &required, sizeof(required)),
+            HIPTENSOR_STATUS_SUCCESS);
         return required;
     }
 
@@ -82,26 +80,26 @@ TEST(WorkspaceSizeTest, ContractionReportsTheWorkspaceItsKernelNeeds)
     ApiObjects api;
 
     constexpr int64_t M = 16, N = 12, K = 8;
-    auto              descA = api.tensor({M, K}, {1, M}, HIPTENSOR_R_32F);
-    auto              descB = api.tensor({N, K}, {1, N}, HIPTENSOR_R_32F);
-    auto              descD = api.tensor({M, N}, {1, M}, HIPTENSOR_R_32F);
+    auto              descA   = api.tensor({M, K}, {1, M}, HIPTENSOR_R_32F);
+    auto              descB   = api.tensor({N, K}, {1, N}, HIPTENSOR_R_32F);
+    auto              descD   = api.tensor({M, N}, {1, M}, HIPTENSOR_R_32F);
     int32_t const     modeA[] = {'m', 'k'}, modeB[] = {'n', 'k'}, modeD[] = {'m', 'n'};
 
     hiptensorOperationDescriptor_t op     = nullptr;
     auto                           status = hiptensorCreateContraction(api.handle,
-                                                     &op,
-                                                     descA,
-                                                     modeA,
-                                                     HIPTENSOR_OP_IDENTITY,
-                                                     descB,
-                                                     modeB,
-                                                     HIPTENSOR_OP_IDENTITY,
-                                                     descD,
-                                                     modeD,
-                                                     HIPTENSOR_OP_IDENTITY,
-                                                     descD,
-                                                     modeD,
-                                                     HIPTENSOR_COMPUTE_DESC_32F);
+                                             &op,
+                                             descA,
+                                             modeA,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             descB,
+                                             modeB,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             descD,
+                                             modeD,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             descD,
+                                             modeD,
+                                             HIPTENSOR_COMPUTE_DESC_32F);
     if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
     {
         GTEST_SKIP() << "No f32 contraction on this device";
@@ -127,9 +125,9 @@ TEST(WorkspaceSizeTest, ContractionReportsTheWorkspaceItsKernelNeeds)
     EXPECT_EQ(estimateFresh, estimateNull);
 
     uint64_t estimateMin = ~uint64_t(0);
-    EXPECT_EQ(hiptensorEstimateWorkspaceSize(
-                  api.handle, op, pref, HIPTENSOR_WORKSPACE_MIN, &estimateMin),
-              HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_EQ(
+        hiptensorEstimateWorkspaceSize(api.handle, op, pref, HIPTENSOR_WORKSPACE_MIN, &estimateMin),
+        HIPTENSOR_STATUS_SUCCESS);
     EXPECT_LE(estimateMin, estimateNull);
 
     // A plan created with a large limit reports what its kernel needs, not the limit.
@@ -207,31 +205,31 @@ TEST(WorkspaceSizeTest, TrinaryContractionReportsItsIntermediateAndKernelWorkspa
 
     // E_{m,n} = alpha * A_{m,k} B_{k,j} C_{j,n}; the intermediate T is {m, j}.
     constexpr int64_t M = 8, K = 4, J = 6, N = 10;
-    auto              descA = api.tensor({M, K}, {1, M}, HIPTENSOR_R_32F);
-    auto              descB = api.tensor({K, J}, {1, K}, HIPTENSOR_R_32F);
-    auto              descC = api.tensor({J, N}, {1, J}, HIPTENSOR_R_32F);
-    auto              descE = api.tensor({M, N}, {1, M}, HIPTENSOR_R_32F);
+    auto              descA   = api.tensor({M, K}, {1, M}, HIPTENSOR_R_32F);
+    auto              descB   = api.tensor({K, J}, {1, K}, HIPTENSOR_R_32F);
+    auto              descC   = api.tensor({J, N}, {1, J}, HIPTENSOR_R_32F);
+    auto              descE   = api.tensor({M, N}, {1, M}, HIPTENSOR_R_32F);
     int32_t const     modeA[] = {'m', 'k'}, modeB[] = {'k', 'j'}, modeC[] = {'j', 'n'},
                   modeE[] = {'m', 'n'};
 
     hiptensorOperationDescriptor_t op     = nullptr;
     auto                           status = hiptensorCreateContractionTrinary(api.handle,
-                                                            &op,
-                                                            descA,
-                                                            modeA,
-                                                            HIPTENSOR_OP_IDENTITY,
-                                                            descB,
-                                                            modeB,
-                                                            HIPTENSOR_OP_IDENTITY,
-                                                            descC,
-                                                            modeC,
-                                                            HIPTENSOR_OP_IDENTITY,
-                                                            nullptr,
-                                                            nullptr,
-                                                            HIPTENSOR_OP_IDENTITY,
-                                                            descE,
-                                                            modeE,
-                                                            HIPTENSOR_COMPUTE_DESC_32F);
+                                                    &op,
+                                                    descA,
+                                                    modeA,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descB,
+                                                    modeB,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descC,
+                                                    modeC,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    nullptr,
+                                                    nullptr,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    descE,
+                                                    modeE,
+                                                    HIPTENSOR_COMPUTE_DESC_32F);
     if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
     {
         GTEST_SKIP() << "No f32 contraction on this device";

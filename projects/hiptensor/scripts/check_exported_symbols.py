@@ -56,7 +56,9 @@ def is_allowed(name: str) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="ABI export allowlist guard for libhiptensor.so")
+    parser = argparse.ArgumentParser(
+        description="ABI export allowlist guard for libhiptensor.so"
+    )
     parser.add_argument("lib", help="Path to libhiptensor.so (or versioned .so)")
     parser.add_argument(
         "--nm",
@@ -115,7 +117,10 @@ def main() -> int:
 
     print(f"checked {total} exported defined symbols in {args.lib}")
     if offenders:
-        print(f"FAIL: {len(offenders)} symbol(s) exported outside the allowlist:", file=sys.stderr)
+        print(
+            f"FAIL: {len(offenders)} symbol(s) exported outside the allowlist:",
+            file=sys.stderr,
+        )
         for sym_type, name in offenders[:50]:
             print(f"  {sym_type} {name}", file=sys.stderr)
         if len(offenders) > 50:

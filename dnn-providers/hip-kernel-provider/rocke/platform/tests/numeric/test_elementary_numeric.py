@@ -101,7 +101,16 @@ def _run(ll, name, x: np.ndarray, arch) -> np.ndarray:
         module.unload()
 
 
-SPECIALS = [0.0, -0.0, math.inf, -math.inf, math.nan, 5e-324, -5e-324, 2.2250738585072014e-308]
+SPECIALS = [
+    0.0,
+    -0.0,
+    math.inf,
+    -math.inf,
+    math.nan,
+    5e-324,
+    -5e-324,
+    2.2250738585072014e-308,
+]
 SPECIALS += [1.0, -1.0, 0.5, -0.5, 2.0, 1.7976931348623157e308, -1.7976931348623157e308]
 
 
@@ -109,7 +118,10 @@ def _f64_inputs(name: str):
     rnd = random.Random(sum(map(ord, name)) + 7)
     xs = list(SPECIALS) + samples(name, 600, seed=sum(map(ord, name)) + 1)
     # every exponent (each trig_preop window position, every log / scale path)
-    xs += [rnd.choice((-1.0, 1.0)) * math.ldexp(rnd.uniform(1, 2), e) for e in range(-1074, 1024)]
+    xs += [
+        rnd.choice((-1.0, 1.0)) * math.ldexp(rnd.uniform(1, 2), e)
+        for e in range(-1074, 1024)
+    ]
     if name in ("sin", "cos", "tan"):
         xs += list(HARD_TRIG) + [-x for x in HARD_TRIG]
     return xs
@@ -130,7 +142,9 @@ def test_f64_matches_host_model(name):
             for i in range(len(xs))
             if gb[i] != wb[i] and not (math.isnan(got[i]) and math.isnan(want[i]))
         ]
-        assert not bad, f"{name} [{engine}]: {len(bad)} differ from the host model: {bad[:4]}"
+        assert (
+            not bad
+        ), f"{name} [{engine}]: {len(bad)} differ from the host model: {bad[:4]}"
 
 
 def _f32(v: float) -> float:
@@ -159,14 +173,22 @@ def _f32_check(name: str, x: float, got: float):
         if mp.isinf(v):
             return None if got == float(v) else f"want {float(v)}, got {got!r}"
         if v == 0:
-            sign = math.copysign(1.0, x) if name not in ("cos", "cosh", "acos", "acosh") else 1.0
+            sign = (
+                math.copysign(1.0, x)
+                if name not in ("cos", "cosh", "acos", "acosh")
+                else 1.0
+            )
             if name in ("floor", "ceil"):
                 sign = math.copysign(1.0, x)
             want = math.copysign(0.0, sign)
             ok = got == 0 and math.copysign(1.0, got) == math.copysign(1.0, want)
             return None if ok else f"want {want!r}, got {got!r}"
         if abs(v) >= mp.mpf(2) ** 128 * (1 - mp.mpf(2) ** -25):
-            return None if math.isinf(got) and (got > 0) == (v > 0) else f"want inf, got {got!r}"
+            return (
+                None
+                if math.isinf(got) and (got > 0) == (v > 0)
+                else f"want inf, got {got!r}"
+            )
         e = max(int(mp.floor(mp.log(abs(v), 2))) - 23, -149)
         err = abs(mp.mpf(got) - v) / mp.mpf(2) ** e
         if err <= mp.mpf(0.5) + mp.mpf(2) ** -20:
@@ -184,7 +206,11 @@ def _f32_inputs(name: str):
         _f32(rnd.choice((-1.0, 1.0)) * math.ldexp(rnd.uniform(1, 2), e))
         for e in range(-149, 128)
     ]
-    return [x for x in xs if math.isnan(x) or abs(x) < math.inf or x in (math.inf, -math.inf)]
+    return [
+        x
+        for x in xs
+        if math.isnan(x) or abs(x) < math.inf or x in (math.inf, -math.inf)
+    ]
 
 
 @pytest.mark.parametrize("name", el.FUNCTIONS)

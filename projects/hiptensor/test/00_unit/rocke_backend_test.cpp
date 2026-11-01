@@ -9256,12 +9256,12 @@ namespace
         bool const                    gfx950 = deviceArch() == "gfx950";
         std::vector<EstimateCase>     cases  = {
             {HIPTENSOR_C_32F,
-              HIPTENSOR_COMPUTE_DESC_C32F,
-              "daebfc",
-              "gahbic",
-              "dgehfi",
-              r3,
-              gfx950},
+                  HIPTENSOR_COMPUTE_DESC_C32F,
+                  "daebfc",
+                  "gahbic",
+                  "dgehfi",
+                  r3,
+                  gfx950},
             {HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, "daebfc", "gahbic", "dgehfi", r3, gfx950},
             {HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, "cadb", "eafb", "cedf", r2m, gfx950},
             {HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, "cdab", "efab", "cdef", r2, gfx950},

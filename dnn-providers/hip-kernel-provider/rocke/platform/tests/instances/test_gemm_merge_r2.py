@@ -105,7 +105,9 @@ class TestNativeSelectorDefaults(_Clean):
     def test_model_kind_versions(self):
         self.assertIn(S.FEATURE_VERSION, S.SUPPORTED_FEATURE_VERSIONS)
         # the RCR kind loads every supported version; the native kind only its own
-        with mock.patch.dict(S.MODEL_KINDS, {"native": ("gemm_native", S.FEATURE_VERSION)}):
+        with mock.patch.dict(
+            S.MODEL_KINDS, {"native": ("gemm_native", S.FEATURE_VERSION)}
+        ):
             S.clear_cache()
             self.assertIsNone(S.load_model("gfx950", "native"))
         S.clear_cache()
@@ -137,7 +139,9 @@ class TestSkinnyNativeThresholds(_Clean):
     def test_gfx950_tiles(self):
         # (the rule with every odd MN leading dimension on gemm_skinny; the
         # DTL-ring odd forms off -- TestOddLdThresholds)
-        with mock.patch.object(SK, "SKINNY_NATIVE_T2_ODD_MAX_TILES", 0), mock.patch.object(
+        with mock.patch.object(
+            SK, "SKINNY_NATIVE_T2_ODD_MAX_TILES", 0
+        ), mock.patch.object(
             SK, "SKINNY_NATIVE_T2_LONGK_TILES", 32
         ):  # the shipped long-K tile bound is 48 (test_gemm_merge_r3)
             self._gfx950_tiles()
@@ -145,7 +149,11 @@ class TestSkinnyNativeThresholds(_Clean):
     def _gfx950_tiles(self):
         self.assertEqual(SK.SKINNY_NATIVE_RULE["gfx950"], "tiles2")
         self.assertEqual(
-            (SK.SKINNY_NATIVE_T2_SMALL, SK.SKINNY_NATIVE_T2_LONGK_TILES, SK.SKINNY_NATIVE_T2_LONGK_MIN),
+            (
+                SK.SKINNY_NATIVE_T2_SMALL,
+                SK.SKINNY_NATIVE_T2_LONGK_TILES,
+                SK.SKINNY_NATIVE_T2_LONGK_MIN,
+            ),
             (8, 32, 2048),
         )
         for lay, M, N, K, want in (
@@ -172,16 +180,24 @@ class TestSkinnyNativeThresholds(_Clean):
         many = _req(1024, 1024, 4096, "RRR")  # 64 tiles
         self.assertTrue(SK.skinny_native_over_vgpr(few))
         self.assertFalse(SK.skinny_native_over_vgpr(many))
-        self.assertFalse(SK.skinny_native_over_vgpr(_req(512, 1024, 4096, "RRR")))  # 32 tiles
+        self.assertFalse(
+            SK.skinny_native_over_vgpr(_req(512, 1024, 4096, "RRR"))
+        )  # 32 tiles
         # long K: below 128 tiles with K >= 16384
-        self.assertTrue(SK.skinny_native_over_vgpr(_req(1024, 1024, 16384, "RRR")))  # 64
-        self.assertFalse(SK.skinny_native_over_vgpr(_req(1024, 2048, 16384, "RRR")))  # 128
+        self.assertTrue(
+            SK.skinny_native_over_vgpr(_req(1024, 1024, 16384, "RRR"))
+        )  # 64
+        self.assertFalse(
+            SK.skinny_native_over_vgpr(_req(1024, 2048, 16384, "RRR"))
+        )  # 128
         self.assertFalse(SK.skinny_native_over_vgpr(_req(1024, 1024, 16376, "RRR")))
         self.assertFalse(SK.skinny_native_over_vgpr(_req(640, 768, 4096)))  # RCR
         self.assertIn("cdna_skinny", dispatch_gemm_fp16(few).candidate.name)
         self.assertIn("cdna_vgpr", dispatch_gemm_fp16(many).candidate.name)
         r = dispatch_gemm_fp16(few)
-        self.assertFalse(C.g5_vgpr_admit(few, r.spec)[0] if hasattr(r.spec, "trait") else False)
+        self.assertFalse(
+            C.g5_vgpr_admit(few, r.spec)[0] if hasattr(r.spec, "trait") else False
+        )
         with mock.patch.dict(SK.SKINNY_OVER_VGPR_NATIVE, clear=True):
             self.assertIn("cdna_vgpr", dispatch_gemm_fp16(few).candidate.name)
 
@@ -221,11 +237,15 @@ class TestPlanRouting(_Clean):
             self._odd_skinny_prepass()
 
     def _odd_skinny_prepass(self):
-        big = _req(6131, 9158, 17696, "CRR", "bf16", arch="gfx950")  # odd M, N; 3456 tiles
+        big = _req(
+            6131, 9158, 17696, "CRR", "bf16", arch="gfx950"
+        )  # odd M, N; 3456 tiles
         small = _req(1949, 1125, 29360, "CRR", "bf16", arch="gfx950")  # 144 tiles
         pl = P.plan_gemm_bf16(big)
         self.assertEqual(pl.kind, "prepass")
-        self.assertEqual([(t.operand, t.spec) for t in pl.transposes], [("A", None), ("B", None)])
+        self.assertEqual(
+            [(t.operand, t.spec) for t in pl.transposes], [("A", None), ("B", None)]
+        )
         self.assertEqual(pl.gemm.spec.data.layout, "RCR")
         self.assertEqual(pl.request.layout, "RCR")
         self.assertEqual(P.plan_gemm_bf16(small).kind, "native")
@@ -290,15 +310,24 @@ class TestPlanRouting(_Clean):
     def test_slow_skinny_fallback(self):
         req = _req(1149, 4396, 3304, "CRR")
         self.assertTrue(P._slow_native(req, "universal_gemm_fp16_cdna_skinny_fallback"))
-        self.assertFalse(P._slow_native(_req(512, 4396, 3304, "CRR"), "x_skinny_fallback"))
+        self.assertFalse(
+            P._slow_native(_req(512, 4396, 3304, "CRR"), "x_skinny_fallback")
+        )
         with mock.patch.object(P, "R2_PLAN_SLOW_SKINNY_FALLBACK_MIN_MN", 0):
-            self.assertFalse(P._slow_native(req, "universal_gemm_fp16_cdna_skinny_fallback"))
+            self.assertFalse(
+                P._slow_native(req, "universal_gemm_fp16_cdna_skinny_fallback")
+            )
             # without the rule the native skinny fallback keeps no cost model: native
             self.assertEqual(P.gemm_plan(req).kind, "native")
 
 
 class TestNativeG5pForms(_Clean):
-    SHAPES = ((4096, 4096, 4096), (1440, 4104, 7176), (3072, 1920, 576), (1000, 712, 3000))
+    SHAPES = (
+        (4096, 4096, 4096),
+        (1440, 4104, 7176),
+        (3072, 1920, 576),
+        (1000, 712, 3000),
+    )
 
     ALL = ("RRR", "CRR", "CCR")
 
@@ -329,10 +358,15 @@ class TestNativeG5pForms(_Clean):
         # 8-wave 256x192 plan-model bodies had only 2-element MN loads
         # natively; the guards keep the fitted-menu form there
         with mock.patch.object(C, "MERGE2_NATIVE_G5P_COMPARE", True):
-            for lay, M, N, K in (("RRR", 8704, 13568, 4864), ("CCR", 13056, 7680, 8192)):
+            for lay, M, N, K in (
+                ("RRR", 8704, 13568, 4864),
+                ("CCR", 13056, 7680, 8192),
+            ):
                 req = _req(M, N, K, lay)
                 r = dispatch_gemm_fp16(req)
-                self.assertGreaterEqual(r.spec.trait.mn_vec, C.MERGE2_NATIVE_G5P_MIN_VEC)
+                self.assertGreaterEqual(
+                    r.spec.trait.mn_vec, C.MERGE2_NATIVE_G5P_MIN_VEC
+                )
         req = _req(8704, 13568, 4864, "RRR")
         tt = C.merge2_g5p_native_tile_trait(req)
         if tt is not None:
@@ -340,9 +374,13 @@ class TestNativeG5pForms(_Clean):
             self.assertGreaterEqual(r.spec.trait.mn_vec, C.MERGE2_NATIVE_G5P_MIN_VEC)
         with mock.patch.object(C, "MERGE2_NATIVE_G5P_COMPARE", True):
             with mock.patch.object(P, "_g5p_native_est", lambda *a, **k: 1e9):
-                self.assertIsNone(C.merge2_g5p_native_tile_trait(_req(1440, 4104, 7176, "RRR")))
+                self.assertIsNone(
+                    C.merge2_g5p_native_tile_trait(_req(1440, 4104, 7176, "RRR"))
+                )
             with mock.patch.object(P, "_g5p_native_est", lambda *a, **k: 1e-9):
-                self.assertIsNotNone(C.merge2_g5p_native_tile_trait(_req(1440, 4104, 7176, "RRR")))
+                self.assertIsNotNone(
+                    C.merge2_g5p_native_tile_trait(_req(1440, 4104, 7176, "RRR"))
+                )
 
     def test_forms_valid_and_from_the_plan_menu(self):
         menu = GP.load_menu("gfx942")
@@ -365,7 +403,9 @@ class TestNativeG5pForms(_Clean):
                 self.assertFalse(int(getattr(trait, "split_k_serial", 0)))
                 self.assertIn("cdna_vgpr", r.candidate.name)
                 self.assertEqual(r.spec.data.layout, lay)
-                self.assertEqual((r.spec.tile.tile_m, r.spec.tile.tile_n), (tile.tile_m, tile.tile_n))
+                self.assertEqual(
+                    (r.spec.tile.tile_m, r.spec.tile.tile_n), (tile.tile_m, tile.tile_n)
+                )
                 self.assertTrue(r.spec.trait.vp_mn_kv > 0)
                 self.assertTrue(is_valid_spec(r.spec, arch="gfx942")[0])
                 self.assertIsNone(launch_shape_error(r.spec, M, N, K))
@@ -396,7 +436,9 @@ class TestMergeR2Edges(_Clean):
         # long-K few-tile: the plan model's top plans reduce split-K in-launch (serial 2)
         req = _req(256, 256, 20736, "RRR")
         rreq = replace(req, layout="RCR", trans_a=False, trans_b=True)
-        top = [p for _t, p in C._g5p_ranked(rreq) if p.geo != "skinny"][: C.MERGE2_NATIVE_G5P_TOP]
+        top = [p for _t, p in C._g5p_ranked(rreq) if p.geo != "skinny"][
+            : C.MERGE2_NATIVE_G5P_TOP
+        ]
         self.assertTrue(any(p.serial for p in top))
         # (with R3_NATIVE_G5P_SERIAL off they are skipped; on, they are served natively, tested in
         # test_gemm_r3_fewtile)
@@ -441,7 +483,9 @@ class TestMergeR2Edges(_Clean):
         # the fitted-menu plan is modelled cheaper here: the comparison keeps it
         self.assertIsNone(C.merge2_g5p_native_tile_trait(_req(2048, 6144, 4096, "RRR")))
         with mock.patch.object(C, "MERGE2_NATIVE_G5P_COMPARE", False):
-            self.assertIsNotNone(C.merge2_g5p_native_tile_trait(_req(2048, 6144, 4096, "RRR")))
+            self.assertIsNotNone(
+                C.merge2_g5p_native_tile_trait(_req(2048, 6144, 4096, "RRR"))
+            )
 
     def test_old_menu_key(self):
         self.assertEqual(P._old_menu_key("128x128x128"), "128x128x128_w2x2_m4_r1")
@@ -470,7 +514,9 @@ class TestMergeR2Edges(_Clean):
         for t, p in C._g5p_ranked(rreq):
             if p.geo != "skinny":
                 by_geo.setdefault(p.geo, []).append((p, t))
-        geo, plans = next((g, v) for g, v in by_geo.items() if len({p.split for p, _ in v}) > 1)
+        geo, plans = next(
+            (g, v) for g, v in by_geo.items() if len({p.split for p, _ in v}) > 1
+        )
         for p, t in plans[:2]:
             tile, trait = plan_tile_trait(p, 256, 256, 20736)
             spec = UniversalGemmSpec(

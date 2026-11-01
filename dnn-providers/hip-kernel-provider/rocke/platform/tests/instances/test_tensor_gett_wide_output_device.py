@@ -50,14 +50,15 @@ def _launcher(kd):
         nm = getattr(prm.type, "name", "") or ""
         if isinstance(prm.type, PtrType):
             sig.append(
-                {"name": prm.name, "type": nm if nm.startswith("ptr<") else f"ptr<{nm}>"}
+                {
+                    "name": prm.name,
+                    "type": nm if nm.startswith("ptr<") else f"ptr<{nm}>",
+                }
             )
         else:
             sig.append({"name": prm.name, "type": str(nm)})
     art = compile_kernel(kd, arch="gfx950", capture_ir_text=False, backend="python")
-    return KernelLauncher(
-        hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig
-    )
+    return KernelLauncher(hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig)
 
 
 def _run(dtype: str, *, bilinear=False, epi_pair=False):
@@ -115,7 +116,9 @@ def _run(dtype: str, *, bilinear=False, epi_pair=False):
         vals.update(Cin=Cin, beta=beta)
     L(
         {p.name: vals[p.name] for p in kd.params},
-        config=LaunchConfig(grid=tensor_gett_grid(spec), block=(256, 1, 1), fence=False),
+        config=LaunchConfig(
+            grid=tensor_gett_grid(spec), block=(256, 1, 1), fence=False
+        ),
     )
     torch.cuda.synchronize()
     u = 2.0**-11 if dtype == "fp16" else 2.0**-8

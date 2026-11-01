@@ -1431,11 +1431,7 @@ def hb_slots(spec: "UniversalGemmSpec") -> Tuple[int, int]:
         if tr.hb_rel_slot >= 0
         else min(ntot - 1, hb_last_read_slot(spec) + max(1, tr.hb_rel_gap))
     )
-    acq = (
-        tr.hb_acq_slot
-        if tr.hb_acq_slot >= 0
-        else min(ntot - 1, (ka - 1) * n + 3)
-    )
+    acq = tr.hb_acq_slot if tr.hb_acq_slot >= 0 else min(ntot - 1, (ka - 1) * n + 3)
     return rel, acq
 
 
@@ -2934,9 +2930,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         if tr.pad_k and tr.split_k > 1 and not tr.split_k_aligned:
             # ragged K // split_k slices: the K mask is the kernel's K, not the
             # slice end (split_k_aligned slices are whole tiles but the last)
-            return False, (
-                "vgpr_prefetch with pad_k and split-K needs split_k_aligned"
-            )
+            return False, ("vgpr_prefetch with pad_k and split-K needs split_k_aligned")
         if _choose_load_vec(spec) not in (2, 4, 8):
             return False, (
                 "vgpr_prefetch needs 4 / 8 / 16-byte global loads per lane "
@@ -6234,7 +6228,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             for g0 in range(0, len(cells), 16):
                 grp = cells[g0 : g0 + 16]
                 n_ = len(grp)
-                tmpl = [f"global_load_dword ${j}, ${n_ + j}, off sc1" for j in range(n_)]
+                tmpl = [
+                    f"global_load_dword ${j}, ${n_ + j}, off sc1" for j in range(n_)
+                ]
                 tmpl.append("s_waitcnt vmcnt(0)")
                 addrs = [
                     b.add(w64, b.mul(b.zext(off, I64), b.const_i64(4)))
@@ -6389,7 +6385,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     # static unroll: up to 16 write-through loads in flight per
                     # asm group, summed in z order (z = 0 .. split_k - 1)
                     sums = {i: None for i in idx}
-                    lq = [(z, i, q) for z in range(_split_k) for i in idx for q in range(nq)]
+                    lq = [
+                        (z, i, q)
+                        for z in range(_split_k)
+                        for i in idx
+                        for q in range(nq)
+                    ]
                     for c0_ in range(0, len(lq), 16):
                         grp_ = lq[c0_ : c0_ + 16]
                         n_ = len(grp_)
@@ -6412,10 +6413,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                                 v_ = qs[0]
                             else:
                                 v_ = b.vec_pack(
-                                    [b.vec_extract(qs[e // 4], e % 4) for e in range(c_per_lane)],
+                                    [
+                                        b.vec_extract(qs[e // 4], e % 4)
+                                        for e in range(c_per_lane)
+                                    ],
                                     F32,
                                 )
-                            sums[i] = v_ if sums[i] is None else b.vector_add(sums[i], v_)
+                            sums[i] = (
+                                v_ if sums[i] is None else b.vector_add(sums[i], v_)
+                            )
                     res_i = [sums[i] for i in idx]
                 else:
                     fold = b.scf_for_iter(
@@ -7547,9 +7553,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 def _w_left(rows: Value, org64: Value) -> Value:
                     left = b.sub(b.mul(b.zext(rows, _I64s), _row_b), org64)
                     return b.to_sgpr_u32(
-                        b.trunc(
-                            b.select(b.cmp_lt(left, _c_big64), left, _c_big64), I32
-                        )
+                        b.trunc(b.select(b.cmp_lt(left, _c_big64), left, _c_big64), I32)
                     )
 
                 a_bytes = _w_left(M, _w_org["A"])
@@ -10072,10 +10076,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         c1,
                         hi_p,
                         c1,
-                        [
-                            (f"skf_{accs[i][0]}", _sk_acc_out(vals[i]))
-                            for i in idx
-                        ],
+                        [(f"skf_{accs[i][0]}", _sk_acc_out(vals[i])) for i in idx],
                         iv_name=f"skp{g0}",
                     )
                     with fold as (pi, folded):
@@ -10730,6 +10731,7 @@ def _emit_epilogue_default(
                         y = b.fma(cs[j], br, y)
                     out.append(y)
             return b.vec_pack(out, F32)
+
         _rv_pad_m = bool(spec.trait.rve_pad == 1 and spec.trait.pad_m)
         _rv_pad_n = bool(spec.trait.rve_pad == 1 and spec.trait.pad_n)
         _rv_buf = spec.trait.rve_pad == 2 and (spec.trait.pad_m or spec.trait.pad_n)
@@ -11174,9 +11176,7 @@ def _emit_store_swapped_acc_vec16(
             # quad) = columns 8h + 0..3, 8h + 4..7; high lanes: (x, y) = (the
             # low lane's atom-(mi+1) quad, own) = the same column order
             vec = b.vec_bitcast(b.vec_pack([x0, x1, y0, y1], I32), vec8)
-            c_n = b.add(
-                b.add(n_base_off, b.const_i32(ni * t.warp_tile_n)), n_half
-            )
+            c_n = b.add(b.add(n_base_off, b.const_i32(ni * t.warp_tile_n)), n_half)
             off = b.add(row_off, c_n)
             if spec.trait.pad_m:
                 with b.scf_if(b.cmp_lt(c_m, M)):

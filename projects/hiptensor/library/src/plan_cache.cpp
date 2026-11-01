@@ -55,10 +55,10 @@ namespace hiptensor
         constexpr uint32_t planCacheFormatVersion = 2u;
 
         // A larger backend count is taken as a damaged file.
-        constexpr uint32_t maxBackendCount        = 64u;
-        constexpr uint32_t libraryMajorVersion    = HIPTENSOR_MAJOR_VERSION;
-        constexpr uint32_t libraryMinorVersion    = HIPTENSOR_MINOR_VERSION;
-        constexpr uint32_t libraryPatchVersion    = HIPTENSOR_PATCH_VERSION;
+        constexpr uint32_t maxBackendCount     = 64u;
+        constexpr uint32_t libraryMajorVersion = HIPTENSOR_MAJOR_VERSION;
+        constexpr uint32_t libraryMinorVersion = HIPTENSOR_MINOR_VERSION;
+        constexpr uint32_t libraryPatchVersion = HIPTENSOR_PATCH_VERSION;
 
         // A longer architecture name is taken as a damaged file.
         constexpr uint32_t maxArchNameLength = 256u;

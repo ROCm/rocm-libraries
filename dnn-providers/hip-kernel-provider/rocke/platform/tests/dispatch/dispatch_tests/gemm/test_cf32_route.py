@@ -38,7 +38,12 @@ from rocke.instances.common.gemm_universal import (
 )
 
 # cf32 contraction problems that need 64-bit addressing
-_WIDE = [(24576, 23040, 12288), (46080, 46080, 2304), (46080, 46080, 1536), (38400, 30240, 3072)]
+_WIDE = [
+    (24576, 23040, 12288),
+    (46080, 46080, 2304),
+    (46080, 46080, 1536),
+    (38400, 30240, 3072),
+]
 
 
 def _pro(**kw):
@@ -80,7 +85,9 @@ def test_small_problem_body_follows_k():
     assert f32_body_for(1024, 3072, 8192, epi="bilinear") == "RIW_SK"
     assert f32_body_for(1024, 1024, 8192) == "Q3_SK"
     # the alpha epilogue uses the scale model
-    assert cf32_body_for(1536, 1440, 2304, epi="alpha") == cf32_body_for(1536, 1440, 2304)
+    assert cf32_body_for(1536, 1440, 2304, epi="alpha") == cf32_body_for(
+        1536, 1440, 2304
+    )
 
 
 def test_n_not_multiple_of_8_takes_a_scatter_body(monkeypatch):
@@ -200,7 +207,9 @@ def test_wide_rows_refused_without_wide_addr(M, Nc, Kc):
     assert launch_shape_error(sp, M, 2 * Nc, 4 * Kc) is not None
 
 
-@pytest.mark.parametrize("M,Nc,Kc", [(30720, 20160, 7680), (38400, 30240, 3072), (1536, 1440, 576)])
+@pytest.mark.parametrize(
+    "M,Nc,Kc", [(30720, 20160, 7680), (38400, 30240, 3072), (1536, 1440, 576)]
+)
 def test_ragged_rows_get_bounds(M, Nc, Kc):
     p = plan_cf32_gemm(M, Nc, Kc)
     tr = p.spec.trait
@@ -252,7 +261,9 @@ def test_wide_addr_validity():
     assert ok
     for bad in (
         dict(wide_addr=True),  # neither dtl_soff0 nor dtl_tight_rsrc
-        dict(wide_addr=True, dtl_soff0=True, rilv_vec_epilogue=False, rve_store_nt=False),
+        dict(
+            wide_addr=True, dtl_soff0=True, rilv_vec_epilogue=False, rve_store_nt=False
+        ),
         dict(wide_addr=True, dtl_soff0=True, persistent_ctas=256),
         dict(wide_addr=True, dtl_soff0=True, dtl_hoist=False),
     ):
@@ -281,8 +292,12 @@ def test_wide_addr_changes_only_wide_kernels():
     b_ = _spec("RIW", wide_addr=True, dtl_soff0=True)
     attach_prologue(b_, _pro())
     fl = "llvm22"
-    ta = lower_kernel_to_llvm(build_universal_gemm(a, "gfx950"), arch="gfx950", llvm_flavor=fl)
-    tb = lower_kernel_to_llvm(build_universal_gemm(b_, "gfx950"), arch="gfx950", llvm_flavor=fl)
+    ta = lower_kernel_to_llvm(
+        build_universal_gemm(a, "gfx950"), arch="gfx950", llvm_flavor=fl
+    )
+    tb = lower_kernel_to_llvm(
+        build_universal_gemm(b_, "gfx950"), arch="gfx950", llvm_flavor=fl
+    )
     # 64-bit tile origins: the wide kernel multiplies in i64
     assert tb.count(" i64 %") > ta.count(" i64 %") and "mul nsw i64" in tb
     assert "mul nsw i64" not in ta
@@ -330,7 +345,6 @@ def test_f32_route_bodies_and_params():
     names = {q.name for q in p.kernel.params}
     assert {"alpha_re", "beta_re", "Cin"} <= names
     assert not ({"alpha_im", "beta_im"} & names)
-
 
 
 def test_streamk_partials_leave_agprs_through_vgprs():

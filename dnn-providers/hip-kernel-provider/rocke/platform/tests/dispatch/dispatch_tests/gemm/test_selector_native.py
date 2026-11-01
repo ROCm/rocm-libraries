@@ -118,8 +118,12 @@ class TestLayoutFeatures(_Clean):
         self.assertEqual(flat["layout"], "RCR")
         no_lay = {k: v for k, v in flat.items() if k != "layout"}
         d = S.trait_defaults(m.meta)
-        v1 = S.feature_vector(m.features, "gfx950", "fp16", 8192, 8192, 8192, flat, trait_defaults=d)
-        v2 = S.feature_vector(m.features, "gfx950", "fp16", 8192, 8192, 8192, no_lay, trait_defaults=d)
+        v1 = S.feature_vector(
+            m.features, "gfx950", "fp16", 8192, 8192, 8192, flat, trait_defaults=d
+        )
+        v2 = S.feature_vector(
+            m.features, "gfx950", "fp16", 8192, 8192, 8192, no_lay, trait_defaults=d
+        )
         self.assertEqual(v1, v2)
 
     def test_origin_class_form(self):
@@ -147,16 +151,22 @@ class TestNativeModel(_Clean):
     def test_sidecar_default_on_and_switches(self):
         for arch in ("gfx950", "gfx942"):
             m = S.load_model(arch, "native")
-            self.assertEqual(S.native_selector_enabled(arch), bool(m.meta["default_on"]))
+            self.assertEqual(
+                S.native_selector_enabled(arch), bool(m.meta["default_on"])
+            )
             with mock.patch.dict(os.environ, {S.NATIVE_SELECTOR_ENV: "0"}):
                 self.assertFalse(S.native_selector_enabled(arch))
             with mock.patch.dict(os.environ, {S.NATIVE_SELECTOR_ENV: "1"}):
                 self.assertTrue(S.native_selector_enabled(arch))
-            with mock.patch.dict(os.environ, {S.SELECTOR_ENV: "0", S.NATIVE_SELECTOR_ENV: "1"}):
+            with mock.patch.dict(
+                os.environ, {S.SELECTOR_ENV: "0", S.NATIVE_SELECTOR_ENV: "1"}
+            ):
                 self.assertFalse(S.native_selector_enabled(arch))
         with mock.patch.dict(S.MODEL_KINDS, {"native": ("gemm_native", "never")}):
             S.clear_cache()
-            self.assertEqual(S.native_selector_enabled("gfx950"), S.SELECTOR_NATIVE_DEFAULT_ON)
+            self.assertEqual(
+                S.native_selector_enabled("gfx950"), S.SELECTOR_NATIVE_DEFAULT_ON
+            )
         S.clear_cache()
 
 
@@ -278,7 +288,9 @@ class TestNativeCandidates(_Clean):
                         req, GEMM_FP16_REGISTRY, rule_pick=(cand, cand.select_spec(req))
                     )
                 vgpr_bases += sum(
-                    1 for c in cs if not c.origin.startswith("neighbour") and not S._mn_ring(c.spec)
+                    1
+                    for c in cs
+                    if not c.origin.startswith("neighbour") and not S._mn_ring(c.spec)
                 )
                 for c in cs:
                     if c.origin.startswith(("neighbour:mn_chunk", "neighbour:mn_pad")):
@@ -341,7 +353,14 @@ class TestNativeDecision(_Clean):
                 if r.candidate.name != "universal_gemm_fp16_cdna_selected":
                     continue
                 pinned = dispatch_gemm_fp16(
-                    _req(M, N, K, lay, algorithm="universal_gemm", spec_id="cdna_selected")
+                    _req(
+                        M,
+                        N,
+                        K,
+                        lay,
+                        algorithm="universal_gemm",
+                        spec_id="cdna_selected",
+                    )
                 )
                 self.assertEqual(pinned.spec, r.spec)
                 self.assertEqual(r.spec.data.layout, lay)

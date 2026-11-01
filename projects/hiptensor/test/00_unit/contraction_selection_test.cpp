@@ -149,9 +149,8 @@ namespace
     };
 
     // Values in [-3, 3].
-    Tensor makeTensor(std::vector<int32_t> const& modes,
-                      std::vector<int64_t> const& lengths,
-                      int                         seed)
+    Tensor
+        makeTensor(std::vector<int32_t> const& modes, std::vector<int64_t> const& lengths, int seed)
     {
         Tensor t;
         t.modes   = modes;
@@ -402,11 +401,8 @@ namespace
 
     // Plans E = alpha * A * B * C with algo, runs it with alpha = 2 and compares E with the
     // reference.
-    void planRunAndCheckTrinary(Tensor const&   a,
-                                Tensor const&   b,
-                                Tensor const&   c,
-                                Tensor const&   e,
-                                hiptensorAlgo_t algo)
+    void planRunAndCheckTrinary(
+        Tensor const& a, Tensor const& b, Tensor const& c, Tensor const& e, hiptensorAlgo_t algo)
     {
         HandleGuard handle;
         ASSERT_EQ(hiptensorCreate(&handle.handle), HIPTENSOR_STATUS_SUCCESS);

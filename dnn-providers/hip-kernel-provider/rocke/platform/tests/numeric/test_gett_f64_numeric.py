@@ -733,7 +733,9 @@ _PIPE_KNOBS = [
     dict(kmajor_lds=True, tile_k=16),
     dict(kmajor_lds=True, kmajor_pad=4, unroll2=True, tile_k=8),
     dict(ilv=4, prefetch_depth=2, tile_k=16),
-    dict(ilv=8, prefetch_depth=2, unroll2=True, tile_k=8, kmajor_lds=True, acc_agpr=True),
+    dict(
+        ilv=8, prefetch_depth=2, unroll2=True, tile_k=8, kmajor_lds=True, acc_agpr=True
+    ),
     dict(ilv=64, ilv_wgap=0, prefetch_depth=2, unroll2=True, tile_k=16),
     dict(ilv=4, prefetch_depth=2, unroll2=True, tile_k=12, warps_m=4, warps_n=1),
     dict(k_inner=2, mfma_fence=True, tile_k=16),
@@ -781,7 +783,9 @@ def knobs_id(kw):
 
 
 @pytest.mark.parametrize("cx", [False, True])
-@pytest.mark.parametrize("conj", [(False, False), (True, False), (False, True), (True, True)])
+@pytest.mark.parametrize(
+    "conj", [(False, False), (True, False), (False, True), (True, True)]
+)
 def test_pipeline_knobs_complex(cx, conj):
     """frag_pipe, acc_agpr and ilv also carry the complex fragments (re, im):
     f64 bound, and the default kernel's bits."""
@@ -789,8 +793,15 @@ def test_pipeline_knobs_complex(cx, conj):
     if not cx and conj != (False, False):
         pytest.skip("conjugation is complex only")
     p = gemm_problem(
-        96, 64, 40, a_strides=(40, 1), b_strides=(1, 64), d_strides=(1, 96),
-        complex_=cx, conj_a=conj[0], conj_b=conj[1],
+        96,
+        64,
+        40,
+        a_strides=(40, 1),
+        b_strides=(1, 64),
+        d_strides=(1, 96),
+        complex_=cx,
+        conj_a=conj[0],
+        conj_b=conj[1],
     )
     for kw in (
         dict(frag_pipe=True),
@@ -823,9 +834,17 @@ def test_split_serial(mode, split, cx):
         pytest.skip("write-through partials need gfx942 / gfx950")
     M, N, K, L = 96, 80, 1032, 2
     p = gemm_problem(
-        M, N, K, a_strides=(K, 1), b_strides=(1, N), d_strides=(N, 1),
-        c_strides=(1, M), batch=L, batch_strides=(M * K, N * K, M * N),
-        c_batch_stride=M * N, complex_=cx,
+        M,
+        N,
+        K,
+        a_strides=(K, 1),
+        b_strides=(1, N),
+        d_strides=(N, 1),
+        c_strides=(1, M),
+        batch=L,
+        batch_strides=(M * K, N * K, M * N),
+        c_batch_stride=M * N,
+        complex_=cx,
     )
     spec = arch_spec(
         p, arch, tile_m=64, tile_n=64, tile_k=8, split_k=split, split_serial=mode
@@ -853,7 +872,12 @@ def test_pipe_configurations():
             continue
         for sa, sb in (((136, 1), (1, 520)), ((1, 600), (136, 1))):
             p = gemm_problem(
-                600, 520, 136, a_strides=sa, b_strides=sb, d_strides=(1, 600),
+                600,
+                520,
+                136,
+                a_strides=sa,
+                b_strides=sb,
+                d_strides=(1, 600),
                 complex_=kind == "complex",
             )
             _run_check(arch_spec(p, arch, **cfg), arch, seed=71)

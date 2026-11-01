@@ -16,7 +16,7 @@ values are exact doubles, so the same exact reference applies).
 
 :func:`reference` computes the same correctly rounded values for many samples
 at once: the products and their errors of all samples are formed with numpy,
-summed per sample with TwoSum (Ogita, Rump, Oishi: Sum2), and a sample's sum
+summed per sample by a pairwise cascade of TwoSum, and a sample's sum
 is taken from that only when its certified error bound cannot reach a
 rounding boundary of the result; any other sample (and any sample whose
 operands could underflow or overflow the error-free transformations) goes
@@ -185,7 +185,7 @@ _SAFE_HI = 2.0**500
 _EPS = 2.0**-53
 _TINY = 2.0**-1074
 # samples per vectorised block, bounded so the (samples x terms) arrays stay small
-_BLOCK_TERMS = 1 << 21
+_BLOCK_TERMS = 1 << 22
 
 
 def _safe_rows(x: np.ndarray) -> np.ndarray:
@@ -204,26 +204,33 @@ def _two_sum(a, b):
 def _rn_row_sums(x: np.ndarray) -> np.ndarray:
     """Correctly rounded sum of every row of ``x`` (finite doubles).
 
-    Sum2: sigma accumulates with TwoSum, tau the TwoSum errors in plain floating
-    point; sigma + (sum of the errors) is the exact sum, and
-    ``|tau - sum of the errors| <= gamma_{n-1}^2 * sum|x|``. A row is rounded
-    to ``RN(sigma + tau)`` when the exact sum, anywhere in that bound around
+    A pairwise TwoSum cascade: each level adds the two halves of every row with
+    TwoSum, so ``sigma`` (the last partial sum) plus all the TwoSum errors ``q``
+    is exactly the row's sum; ``tau = fl(sum q)`` is within
+    ``gamma_{m} * sum|q|`` of ``sum q`` (``m`` errors). A row is rounded to
+    ``RN(sigma + tau)`` when the exact sum, anywhere in that bound around
     ``sigma + tau``, cannot leave the rounding interval of that double (strict,
     so a tie is never decided here); every other row takes ``math.fsum``.
     """
     rows, n = x.shape
     if n == 0:
         return np.zeros(rows)
-    sig = x[:, 0].copy()
-    tau = np.zeros(rows)
-    for j in range(1, n):
-        sig, e = _two_sum(sig, x[:, j])
-        tau += e
+    s = x
+    errs = []
+    while s.shape[1] > 1:
+        h = s.shape[1] // 2
+        t, e = _two_sum(s[:, :h], s[:, h : 2 * h])
+        errs.append(e)
+        s = np.concatenate([t, s[:, 2 * h :]], axis=1) if s.shape[1] % 2 else t
+    sig = s[:, 0]
+    q = np.concatenate(errs, axis=1) if errs else np.zeros((rows, 0))
+    m = q.shape[1]
+    tau = q.sum(axis=1)
     r, rr = _two_sum(sig, tau)
-    g = (n - 1) * _EPS / (1 - (n - 1) * _EPS) if n > 1 else 0.0
-    # 2x: rounding in this float evaluation of the bound; n * TINY: subnormal
-    # rounding of the error accumulation
-    eb = 2.0 * g * g * np.abs(x).sum(axis=1) + n * _TINY
+    g = m * _EPS / (1 - m * _EPS)
+    # 2x: rounding in this float evaluation of sum|q|; TINY terms: subnormal
+    # rounding of the error sum
+    eb = 2.0 * g * np.abs(q).sum(axis=1) + (m + 1) * _TINY
     up = (np.nextafter(r, np.inf) - r) / 2
     down = (r - np.nextafter(r, -np.inf)) / 2
     ok = np.isfinite(r) & (r != 0) & (rr + eb < up) & (rr - eb > -down)
@@ -270,9 +277,13 @@ def reference(
         li, mi, ni = (idx[lo : lo + step, j] for j in range(3))
         a, b = Am[li, mi], Bm[li, ni]
         if problem.complex_:
-            out += _reference_complex(problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta)
+            out += _reference_complex(
+                problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta
+            )
         else:
-            out += _reference_real(problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta)
+            out += _reference_real(
+                problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta
+            )
     return out
 
 
@@ -303,7 +314,9 @@ def _reference_real(problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta):
     out = []
     for i, smp in enumerate(blk):
         v = float(val[i])
-        bound = Uw * abs(v) + (K + 2) * Uw * (abs(alpha) * float(s[i]) + abs(be) * abs(float(c[i])))
+        bound = Uw * abs(v) + (K + 2) * Uw * (
+            abs(alpha) * float(s[i]) + abs(be) * abs(float(c[i]))
+        )
         out.append((smp, v, bound))
     return out
 
@@ -342,7 +355,12 @@ def _reference_complex(problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta):
     vr, vi = np.zeros(n), np.zeros(n)
     if ok.any():
         vr[ok] = _rn_combine(
-            [(alr[ok], tr[ok]), (-ali[ok], ti[ok]), (ber[ok], cr[ok]), (-bei[ok], ci[ok])]
+            [
+                (alr[ok], tr[ok]),
+                (-ali[ok], ti[ok]),
+                (ber[ok], cr[ok]),
+                (-bei[ok], ci[ok]),
+            ]
         )
         vi[ok] = _rn_combine(
             [(alr[ok], ti[ok]), (ali[ok], tr[ok]), (ber[ok], ci[ok]), (bei[ok], cr[ok])]
@@ -351,16 +369,24 @@ def _reference_complex(problem, Cm, K, Uw, blk, li, mi, ni, a, b, alpha, beta):
     for i in np.flatnonzero(~ok):
         t_r, t_i, c_r, c_i = (float(v) for v in (tr[i], ti[i], cr[i], ci[i]))
         vr[i] = float(
-            F(al.real) * F(t_r) - F(al.imag) * F(t_i) + F(be.real) * F(c_r) - F(be.imag) * F(c_i)
+            F(al.real) * F(t_r)
+            - F(al.imag) * F(t_i)
+            + F(be.real) * F(c_r)
+            - F(be.imag) * F(c_i)
         )
         vi[i] = float(
-            F(al.real) * F(t_i) + F(al.imag) * F(t_r) + F(be.real) * F(c_i) + F(be.imag) * F(c_r)
+            F(al.real) * F(t_i)
+            + F(al.imag) * F(t_r)
+            + F(be.real) * F(c_i)
+            + F(be.imag) * F(c_r)
         )
     out = []
     for i, smp in enumerate(blk):
         val = complex(float(vr[i]), float(vi[i]))
         cc = complex(c[i])
-        bound = Uw * abs(val) + (2 * K + 4) * Uw * (abs(al) * float(s[i]) + abs(be) * abs(cc))
+        bound = Uw * abs(val) + (2 * K + 4) * Uw * (
+            abs(al) * float(s[i]) + abs(be) * abs(cc)
+        )
         out.append((smp, val, bound))
     return out
 

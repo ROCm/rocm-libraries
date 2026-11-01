@@ -188,23 +188,23 @@ namespace hiptensor
 
 // Returns the hiptensorStatus_t matching a failed HIP call from the enclosing function, which
 // must return hiptensorStatus_t.
-#define HIPTENSOR_RETURN_IF_HIP_ERROR(expression)                                                  \
-    do                                                                                             \
-    {                                                                                              \
-        hipError_t hipStatus_ = (expression);                                                      \
-        if(hipStatus_ != hipSuccess)                                                               \
-        {                                                                                          \
-            return hiptensor::handleHipError(hipStatus_, #expression, __FILE__, __LINE__);         \
-        }                                                                                          \
+#define HIPTENSOR_RETURN_IF_HIP_ERROR(expression)                                          \
+    do                                                                                     \
+    {                                                                                      \
+        hipError_t hipStatus_ = (expression);                                              \
+        if(hipStatus_ != hipSuccess)                                                       \
+        {                                                                                  \
+            return hiptensor::handleHipError(hipStatus_, #expression, __FILE__, __LINE__); \
+        }                                                                                  \
     } while(0)
 
 // Returns a failed hiptensorStatus_t from the enclosing function.
-#define HIPTENSOR_RETURN_IF_ERROR(expression)                                                      \
-    do                                                                                             \
-    {                                                                                              \
-        hiptensorStatus_t hiptensorStatus_ = (expression);                                         \
-        if(hiptensorStatus_ != HIPTENSOR_STATUS_SUCCESS)                                           \
-        {                                                                                          \
-            return hiptensorStatus_;                                                               \
-        }                                                                                          \
+#define HIPTENSOR_RETURN_IF_ERROR(expression)              \
+    do                                                     \
+    {                                                      \
+        hiptensorStatus_t hiptensorStatus_ = (expression); \
+        if(hiptensorStatus_ != HIPTENSOR_STATUS_SUCCESS)   \
+        {                                                  \
+            return hiptensorStatus_;                       \
+        }                                                  \
     } while(0)

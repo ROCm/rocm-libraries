@@ -108,8 +108,8 @@ namespace
             return errorCode;
         }
 
-        auto const& modeA = desc.mModeA;
-        auto const& modeC = desc.mModeC;
+        auto const& modeA    = desc.mModeA;
+        auto const& modeC    = desc.mModeC;
         auto const  modeSetA = std::set<int32_t>(modeA.cbegin(), modeA.cend());
         auto const  modeSetC = std::set<int32_t>(modeC.cbegin(), modeC.cend());
 
@@ -390,20 +390,20 @@ hiptensorStatus_t hiptensor::ckbackend::reduce(hiptensorHandle_t            hand
     // alpha is zero: D = beta * opC(C), without reading A.
     if(descA->mLengths.size() == descD->mLengths.size() || !readsA)
     {
-        return hiptensor::reductionEpilogue(
-            descD->mType,
-            descD->mLengths,
-            stridesD,
-            D,
-            readsA ? stridesAlongOutputModes(*descA, modeA, modeC) : std::vector<std::size_t>{},
-            readsA ? A : nullptr,
-            opA,
-            alphaValue,
-            stridesOf(*descC),
-            readsC ? C : nullptr,
-            opC,
-            betaValue,
-            stream);
+        return hiptensor::reductionEpilogue(descD->mType,
+                                            descD->mLengths,
+                                            stridesD,
+                                            D,
+                                            readsA ? stridesAlongOutputModes(*descA, modeA, modeC)
+                                                   : std::vector<std::size_t>{},
+                                            readsA ? A : nullptr,
+                                            opA,
+                                            alphaValue,
+                                            stridesOf(*descC),
+                                            readsC ? C : nullptr,
+                                            opC,
+                                            betaValue,
+                                            stream);
     }
 
     auto& instances = hiptensor::ReductionSolutionInstances::instance();
@@ -501,20 +501,21 @@ hiptensorStatus_t hiptensor::ckbackend::reduce(hiptensorHandle_t            hand
             (logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE)
                 ? hiptensor::ckbackend::timedLaunch(cfg)
                 : cfg);
-        auto [isSupported, time] = (*pSolution)(descA->mLengths,
-                                                descA->mStrides,
-                                                modeA,
-                                                sortedDescC.mLengths,
-                                                sortedDescC.mStrides,
-                                                {modeC.data(), modeC.data() + sortedDescC.mLengths.size()},
-                                                opA,
-                                                opC,
-                                                alphaValue,
-                                                readsC ? betaValue : 0.0,
-                                                A,
-                                                D,
-                                                opReduce,
-                                                streamConfig);
+        auto [isSupported, time]
+            = (*pSolution)(descA->mLengths,
+                           descA->mStrides,
+                           modeA,
+                           sortedDescC.mLengths,
+                           sortedDescC.mStrides,
+                           {modeC.data(), modeC.data() + sortedDescC.mLengths.size()},
+                           opA,
+                           opC,
+                           alphaValue,
+                           readsC ? betaValue : 0.0,
+                           A,
+                           D,
+                           opReduce,
+                           streamConfig);
         if(isSupported)
         {
             if(time < 0)

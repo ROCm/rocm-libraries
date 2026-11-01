@@ -83,9 +83,9 @@ TEST(ReductionSemanticsTest, CopiesCOnTheCallersStreamAndKeepsDGaps)
 {
     constexpr int64_t M = 6, N = 5, gap = 3;
 
-    ApiObjects api;
-    auto       descA  = api.tensor({M, N}, {1, M}, HIPTENSOR_R_32F);
-    auto       descCD = api.tensor({M}, {gap}, HIPTENSOR_R_32F);
+    ApiObjects    api;
+    auto          descA   = api.tensor({M, N}, {1, M}, HIPTENSOR_R_32F);
+    auto          descCD  = api.tensor({M}, {gap}, HIPTENSOR_R_32F);
     int32_t const modeA[] = {'m', 'n'}, modeCD[] = {'m'};
 
     hiptensorOperationDescriptor_t op = nullptr;
@@ -138,10 +138,9 @@ TEST(ReductionSemanticsTest, CopiesCOnTheCallersStreamAndKeepsDGaps)
     CHECK_HIP_ERROR(hipGetLastError());
 
     float const alpha = 1.5f, beta = 0.5f;
-    ASSERT_EQ(
-        hiptensorReduce(
-            api.handle, plan, &alpha, dA.ptr, &beta, dC.ptr, dD.ptr, nullptr, 0, stream),
-        HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_EQ(hiptensorReduce(
+                  api.handle, plan, &alpha, dA.ptr, &beta, dC.ptr, dD.ptr, nullptr, 0, stream),
+              HIPTENSOR_STATUS_SUCCESS);
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
 
@@ -170,8 +169,8 @@ TEST(ReductionSemanticsTest, ZeroScalesDoNotReadTheirTensors)
     constexpr int64_t M = 8, N = 6;
 
     ApiObjects    api;
-    auto          descA  = api.tensor({M, N}, {1, M}, HIPTENSOR_R_32F);
-    auto          descCD = api.tensor({M}, {1}, HIPTENSOR_R_32F);
+    auto          descA   = api.tensor({M, N}, {1, M}, HIPTENSOR_R_32F);
+    auto          descCD  = api.tensor({M}, {1}, HIPTENSOR_R_32F);
     int32_t const modeA[] = {'m', 'n'}, modeCD[] = {'m'};
 
     for(auto opReduce : {HIPTENSOR_OP_ADD, HIPTENSOR_OP_MAX})
@@ -210,12 +209,14 @@ TEST(ReductionSemanticsTest, ZeroScalesDoNotReadTheirTensors)
 
         float const zero = 0.0f, alpha = 2.0f, beta = 0.25f;
 
-        for(float const* aPtr : {static_cast<float const*>(dBadA.ptr), static_cast<float const*>(nullptr)})
+        for(float const* aPtr :
+            {static_cast<float const*>(dBadA.ptr), static_cast<float const*>(nullptr)})
         {
             dD.write(std::vector<float>(M, NAN));
-            ASSERT_EQ(hiptensorReduce(
-                          api.handle, plan, &zero, aPtr, &beta, dC.ptr, dD.ptr, nullptr, 0, nullptr),
-                      HIPTENSOR_STATUS_SUCCESS);
+            ASSERT_EQ(
+                hiptensorReduce(
+                    api.handle, plan, &zero, aPtr, &beta, dC.ptr, dD.ptr, nullptr, 0, nullptr),
+                HIPTENSOR_STATUS_SUCCESS);
             CHECK_HIP_ERROR(hipDeviceSynchronize());
             auto d = dD.read();
             for(int64_t m = 0; m < M; ++m)
@@ -224,7 +225,8 @@ TEST(ReductionSemanticsTest, ZeroScalesDoNotReadTheirTensors)
             }
         }
 
-        for(float const* cPtr : {static_cast<float const*>(dBadC.ptr), static_cast<float const*>(nullptr)})
+        for(float const* cPtr :
+            {static_cast<float const*>(dBadC.ptr), static_cast<float const*>(nullptr)})
         {
             dD.write(std::vector<float>(M, NAN));
             ASSERT_EQ(hiptensorReduce(api.handle,
@@ -253,15 +255,17 @@ TEST(ReductionSemanticsTest, ZeroScalesDoNotReadTheirTensors)
         }
 
         dD.write(std::vector<float>(M, NAN));
-        ASSERT_EQ(hiptensorReduce(
-                      api.handle, plan, &zero, nullptr, &zero, nullptr, dD.ptr, nullptr, 0, nullptr),
-                  HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(
+            hiptensorReduce(
+                api.handle, plan, &zero, nullptr, &zero, nullptr, dD.ptr, nullptr, 0, nullptr),
+            HIPTENSOR_STATUS_SUCCESS);
         CHECK_HIP_ERROR(hipDeviceSynchronize());
         EXPECT_EQ(dD.read(), std::vector<float>(M, 0.0f));
 
-        EXPECT_EQ(hiptensorReduce(
-                      api.handle, plan, &alpha, nullptr, &beta, dC.ptr, dD.ptr, nullptr, 0, nullptr),
-                  HIPTENSOR_STATUS_NOT_INITIALIZED);
+        EXPECT_EQ(
+            hiptensorReduce(
+                api.handle, plan, &alpha, nullptr, &beta, dC.ptr, dD.ptr, nullptr, 0, nullptr),
+            HIPTENSOR_STATUS_NOT_INITIALIZED);
     }
 }
 
@@ -274,7 +278,7 @@ TEST(ReductionSemanticsTest, KeepingEveryModeIsElementwise)
 
     // Rank 1, f32, MAX.
     {
-        constexpr int64_t M = 37;
+        constexpr int64_t M       = 37;
         auto              desc    = api.tensor({M}, {1}, HIPTENSOR_R_32F);
         int32_t const     modes[] = {'m'};
 
@@ -306,9 +310,10 @@ TEST(ReductionSemanticsTest, KeepingEveryModeIsElementwise)
         float const         alpha = 1.5f, beta = -0.5f;
         for(int run = 0; run < 2; ++run)
         {
-            ASSERT_EQ(hiptensorReduce(
-                          api.handle, plan, &alpha, dA.ptr, &beta, dC.ptr, dD.ptr, nullptr, 0, nullptr),
-                      HIPTENSOR_STATUS_SUCCESS)
+            ASSERT_EQ(
+                hiptensorReduce(
+                    api.handle, plan, &alpha, dA.ptr, &beta, dC.ptr, dD.ptr, nullptr, 0, nullptr),
+                HIPTENSOR_STATUS_SUCCESS)
                 << "run " << run;
             CHECK_HIP_ERROR(hipDeviceSynchronize());
             auto d = dD.read();
@@ -356,9 +361,10 @@ TEST(ReductionSemanticsTest, KeepingEveryModeIsElementwise)
         float const alpha = 2.0f, beta = 1.0f;
         for(int run = 0; run < 2; ++run)
         {
-            ASSERT_EQ(hiptensorReduce(
-                          api.handle, plan, &alpha, dA.ptr, &beta, dC.ptr, dD.ptr, nullptr, 0, nullptr),
-                      HIPTENSOR_STATUS_SUCCESS)
+            ASSERT_EQ(
+                hiptensorReduce(
+                    api.handle, plan, &alpha, dA.ptr, &beta, dC.ptr, dD.ptr, nullptr, 0, nullptr),
+                HIPTENSOR_STATUS_SUCCESS)
                 << "run " << run;
             CHECK_HIP_ERROR(hipDeviceSynchronize());
             auto d = dD.read();

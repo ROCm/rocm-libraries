@@ -841,9 +841,9 @@ TEST(PlanCacheApiTest, InvalidArgumentsWithThePlanCacheDisabled)
               HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(numCachelinesRead, 7u);
 
-    EXPECT_EQ(hiptensorHandleReadPlanCacheFromFile(
-                  handle.handle, fileName.c_str(), &numCachelinesRead),
-              HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_EQ(
+        hiptensorHandleReadPlanCacheFromFile(handle.handle, fileName.c_str(), &numCachelinesRead),
+        HIPTENSOR_STATUS_SUCCESS);
     EXPECT_EQ(numCachelinesRead, 0u);
 }
 

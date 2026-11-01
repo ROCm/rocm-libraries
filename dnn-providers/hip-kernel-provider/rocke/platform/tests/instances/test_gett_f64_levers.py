@@ -76,7 +76,12 @@ def test_lever_combinations_are_checked(kw, needle):
 
 def test_complex_refuses_the_real_only_levers():
     p = gemm_problem(
-        128, 128, 64, a_strides=(64, 1), b_strides=(64, 1), d_strides=(1, 128),
+        128,
+        128,
+        64,
+        a_strides=(64, 1),
+        b_strides=(64, 1),
+        d_strides=(1, 128),
         complex_=True,
     )
     for kw in (
@@ -85,14 +90,20 @@ def test_complex_refuses_the_real_only_levers():
         dict(ilv=4, prefetch_depth=2, k_inner=2),
     ):
         assert not is_valid_spec(arch_spec(p, "gfx950", **kw), arch="gfx950")[0], kw
-    for kw in (dict(acc_agpr=True), dict(frag_pipe=True), dict(ilv=4, prefetch_depth=2)):
+    for kw in (
+        dict(acc_agpr=True),
+        dict(frag_pipe=True),
+        dict(ilv=4, prefetch_depth=2),
+    ):
         assert is_valid_spec(arch_spec(p, "gfx950", **kw), arch="gfx950")[0], kw
 
 
 def test_write_through_split_serial_is_gfx942_gfx950_only():
     s = arch_spec(_kk(K=4096), "gfx90a", split_k=4, split_serial=2)
     assert not is_valid_spec(s, arch="gfx90a")[0]
-    assert is_valid_spec(arch_spec(_kk(K=4096), "gfx90a", split_k=4, split_serial=1), arch="gfx90a")[0]
+    assert is_valid_spec(
+        arch_spec(_kk(K=4096), "gfx90a", split_k=4, split_serial=1), arch="gfx90a"
+    )[0]
     for arch in ("gfx942", "gfx950"):
         s = arch_spec(_kk(K=4096), arch, split_k=4, split_serial=2)
         assert is_valid_spec(s, arch=arch)[0]
@@ -136,7 +147,9 @@ def test_split_serial_signature_workspace_and_counters():
 
 @pytest.mark.parametrize("mode", [1, 2])
 def test_split_serial_kernel_structure(mode):
-    s = arch_spec(_kk(K=4096), "gfx950", tile_m=64, tile_n=64, split_k=4, split_serial=mode)
+    s = arch_spec(
+        _kk(K=4096), "gfx950", tile_m=64, tile_n=64, split_k=4, split_serial=mode
+    )
     ll = _lower_kernel_to_llvm_python(build_gett_f64(s, arch="gfx950"), arch="gfx950")
     assert ll.count("atomicrmw add") == 1
     if mode == 1:
@@ -145,7 +158,9 @@ def test_split_serial_kernel_structure(mode):
         assert "sc1" not in ll
     else:
         assert "fence syncscope" not in ll
-        assert "global_store_dwordx4" in ll and "global_load_dwordx4" in ll and "sc1" in ll
+        assert (
+            "global_store_dwordx4" in ll and "global_load_dwordx4" in ll and "sc1" in ll
+        )
 
 
 def test_acc_agpr_reserves_the_accumulators():
@@ -155,14 +170,18 @@ def test_acc_agpr_reserves_the_accumulators():
     assert k.attrs["mfma_agpr_form"] is True
     ll = _lower_kernel_to_llvm_python(k, arch="gfx950")
     assert '"amdgpu-agpr-alloc"="128,128"' in ll and '"=a,0"' in ll
-    plain = build_gett_f64(arch_spec(_kk(), "gfx950", tile_m=128, tile_n=128), arch="gfx950")
+    plain = build_gett_f64(
+        arch_spec(_kk(), "gfx950", tile_m=128, tile_n=128), arch="gfx950"
+    )
     assert "agpr_alloc" not in plain.attrs
 
 
 @pytest.mark.parametrize("arch", ARCHS)
 def test_kmajor_lds_tiles(arch):
     # A K-contiguous (K-major tile), B N-contiguous (the [k][n] tile)
-    p = gemm_problem(256, 192, 128, a_strides=(128, 1), b_strides=(1, 192), d_strides=(1, 256))
+    p = gemm_problem(
+        256, 192, 128, a_strides=(128, 1), b_strides=(1, 192), d_strides=(1, 256)
+    )
     s = arch_spec(p, arch, tile_m=128, tile_n=64, tile_k=8, kmajor_lds=True)
     assert is_valid_spec(s, arch=arch)[0]
     ll = _lower_kernel_to_llvm_python(build_gett_f64(s, arch=arch), arch=arch)
@@ -183,7 +202,9 @@ def test_ilv_barriers_keep_the_global_loads_in_flight(unroll2):
     ll = _lower_kernel_to_llvm_python(k, arch="gfx950")
     # the loop's barriers drain only LDS (the next tile's loads stay in flight);
     # every MFMA is followed by a scheduling barrier that pins the order
-    assert ll.count("llvm.amdgcn.sched.barrier") >= ll.count("llvm.amdgcn.mfma.f64.16x16x4f64")
+    assert ll.count("llvm.amdgcn.sched.barrier") >= ll.count(
+        "llvm.amdgcn.mfma.f64.16x16x4f64"
+    )
     assert "llvm.amdgcn.s.barrier" in ll
 
 
@@ -207,7 +228,12 @@ def test_frag_pipe_and_k_inner_build_on_every_arch():
 def test_pipe_configs_are_valid():
     for (arch, kind, cls), cfg in PIPE_CONFIGS.items():
         p = gemm_problem(
-            8192, 8192, 2048, a_strides=(1, 8192), b_strides=(2048, 1), d_strides=(1, 8192),
+            8192,
+            8192,
+            2048,
+            a_strides=(1, 8192),
+            b_strides=(2048, 1),
+            d_strides=(1, 8192),
             complex_=kind == "complex",
         )
         assert is_valid_spec(arch_spec(p, arch, **cfg), arch=arch)[0], (arch, cls)
@@ -226,19 +252,34 @@ def test_pipe_classes():
     # a large grid whose last wave of 256x128 CTAs is ragged keeps the tuned path
     assert gett_f64_pipe_class(_kk(M=6720, N=7680, K=1536), "gfx950", 256) is None
     cx = gemm_problem(
-        8192, 8192, 2048, a_strides=(2048, 1), b_strides=(2048, 1), d_strides=(1, 8192),
+        8192,
+        8192,
+        2048,
+        a_strides=(2048, 1),
+        b_strides=(2048, 1),
+        d_strides=(1, 8192),
         complex_=True,
     )
     assert gett_f64_pipe_class(cx, "gfx950", 256) == "long"
     assert gett_f64_pipe_class(cx, "gfx90a", 104) == "long"  # 4096 tiles >= 8 per CU
     cx_mid = gemm_problem(
-        2048, 2048, 2048, a_strides=(2048, 1), b_strides=(2048, 1), d_strides=(1, 2048),
+        2048,
+        2048,
+        2048,
+        a_strides=(2048, 1),
+        b_strides=(2048, 1),
+        d_strides=(1, 2048),
         complex_=True,
     )
     assert gett_f64_pipe_class(cx_mid, "gfx90a", 104) is None
     assert gett_f64_pipe_class(cx_mid, "gfx950", 256) == "long"
     short_k = gemm_problem(
-        8192, 8192, 512, a_strides=(512, 1), b_strides=(512, 1), d_strides=(1, 8192),
+        8192,
+        8192,
+        512,
+        a_strides=(512, 1),
+        b_strides=(512, 1),
+        d_strides=(1, 8192),
         complex_=True,
     )
     assert gett_f64_pipe_class(short_k, "gfx950", 256) is None
@@ -246,28 +287,40 @@ def test_pipe_classes():
     from rocke.instances.common.gett_f64 import GettF64Problem
 
     inter = GettF64Problem(
-        M=24 * 320, N=8192, K=2048,
-        a_m=((24, 1), (320, 24 * 2048)), a_k=((2048, 24),),
-        b_n=((8192, 1),), b_k=((2048, 8192),),
-        d_m=((24 * 320, 1),), d_n=((8192, 24 * 320),),
+        M=24 * 320,
+        N=8192,
+        K=2048,
+        a_m=((24, 1), (320, 24 * 2048)),
+        a_k=((2048, 24),),
+        b_n=((8192, 1),),
+        b_k=((2048, 8192),),
+        d_m=((24 * 320, 1),),
+        d_n=((8192, 24 * 320),),
     )
     assert gett_f64_pipe_class(inter, "gfx950", 256) == "short"
 
 
 def test_pipe_candidate_selection_and_refusals():
-    req = GettF64Request(problem=_kk(M=8192, N=8192, K=2048), arch="gfx950", num_cus=256)
+    req = GettF64Request(
+        problem=_kk(M=8192, N=8192, K=2048), arch="gfx950", num_cus=256
+    )
     r = dispatch_gett_f64(req)
     assert r.candidate.name == "gett_f64_pipe"
     assert r.spec == pipe_spec(req.problem, "gfx950", num_cus=256)
     assert r.spec.ilv and r.spec.acc_agpr and r.spec.kmajor_lds
     # runtime sizes: the pipelined loop is compile-time only
     rt = GettF64Request(
-        problem=_kk(M=8192, N=8192, K=2048), arch="gfx950", num_cus=256, runtime_sizes=True
+        problem=_kk(M=8192, N=8192, K=2048),
+        arch="gfx950",
+        num_cus=256,
+        runtime_sizes=True,
     )
     assert dispatch_gett_f64(rt).candidate.name == "gett_f64_tuned"
     # few CTAs and a long K: the tuned path splits K (shorter rounding chains)
     long_k = _kk(M=256, N=256, K=65536)
     assert tuned_spec(long_k, "gfx950", num_cus=256).split_k > 1
     assert pipe_spec(long_k, "gfx950", num_cus=256) is None
-    ragged = GettF64Request(problem=_kk(M=6720, N=7680, K=1536), arch="gfx950", num_cus=256)
+    ragged = GettF64Request(
+        problem=_kk(M=6720, N=7680, K=1536), arch="gfx950", num_cus=256
+    )
     assert dispatch_gett_f64(ragged).candidate.name == "gett_f64_tuned"

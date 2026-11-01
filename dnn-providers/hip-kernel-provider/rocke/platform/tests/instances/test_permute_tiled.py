@@ -64,8 +64,14 @@ def test_canonicalize_moves_every_element_like_numpy(seed):
 
 
 def test_canonicalize_examples():
-    assert PT.canonicalize_permute((512, 1024, 1024), (2, 0, 1)) == ((524288, 1024), (1, 0))
-    assert PT.canonicalize_permute((64, 256, 112, 112), (0, 2, 3, 1)) == ((64, 256, 12544), (0, 2, 1))
+    assert PT.canonicalize_permute((512, 1024, 1024), (2, 0, 1)) == (
+        (524288, 1024),
+        (1, 0),
+    )
+    assert PT.canonicalize_permute((64, 256, 112, 112), (0, 2, 3, 1)) == (
+        (64, 256, 12544),
+        (0, 2, 1),
+    )
     assert PT.canonicalize_permute((8192, 8192), (0, 1)) == ((67108864,), (0,))
     assert PT.canonicalize_permute((1, 1), (1, 0)) == ((1,), (0,))
     with pytest.raises(ValueError):
@@ -93,11 +99,15 @@ def test_plan_is_valid_and_vectorised_on_doc_rows(shape, perm, dtype, arch):
 def test_auto_stage_uses_gather_for_odd_extents(dtype):
     # innermost extents 10 / 6: the transpose path is limited to 4- or 8-byte
     # accesses, the gather stage moves whole 16-byte vectors along the runs
-    sp = PT.plan_permute_tiled((8, 10, 6, 10), (0, 2, 1, 3), dtype, "gfx950", run_bytes=512)
+    sp = PT.plan_permute_tiled(
+        (8, 10, 6, 10), (0, 2, 1, 3), dtype, "gfx950", run_bytes=512
+    )
     assert sp.stage == "gather"
     assert sp.vec * sp.elem_bytes == 16
     assert sp.run_in % sp.vec == 0 and sp.run_out % sp.vec == 0
-    lds = PT.plan_permute_tiled((8, 10, 6, 10), (0, 2, 1, 3), dtype, "gfx950", stage="lds")
+    lds = PT.plan_permute_tiled(
+        (8, 10, 6, 10), (0, 2, 1, 3), dtype, "gfx950", stage="lds"
+    )
     assert lds.vec * lds.elem_bytes < 16
 
 
@@ -105,9 +115,13 @@ def test_planner_defaults_and_overrides():
     sp = PT.plan_permute_tiled((8192, 8192), (1, 0), "f16", "gfx950", use_tuned=False)
     assert sp.nt == "both" and sp.grid_order in ("in", "out", "both")
     kn = PT.plan_permute_tiled((8192, 8192), (1, 0), "f16", "gfx950", run_bytes=512)
-    assert kn.grid_order == PT.DEFAULT_GRID_ORDER  # knob-driven plans keep the fixed defaults
+    assert (
+        kn.grid_order == PT.DEFAULT_GRID_ORDER
+    )  # knob-driven plans keep the fixed defaults
     assert PT.plan_permute_tiled((8192, 8192), (1, 0), "f16", "gfx1151").nt == "none"
-    o = PT.plan_permute_tiled((8192, 8192), (1, 0), "f16", "gfx950", nt="none", grid_order="in")
+    o = PT.plan_permute_tiled(
+        (8192, 8192), (1, 0), "f16", "gfx950", nt="none", grid_order="in"
+    )
     assert (o.nt, o.grid_order) == ("none", "in")
 
 
@@ -125,8 +139,14 @@ def test_default_tile_always_divides_the_extents():
     shape, perm = PT.canonicalize_permute((5, 8, 1000, 1, 1, 1), (4, 2, 1, 3, 0, 5))
     t = PT.default_tile(shape, perm, "f64", 2048, 4096)
     assert all(shape[a] % t[a] == 0 for a in range(len(shape))), t
-    PT.plan_permute_tiled((5, 8, 1000, 1, 1, 1), (4, 2, 1, 3, 0, 5), "f64", "gfx950", run_bytes=2048,
-                          max_tile_bytes=4096)
+    PT.plan_permute_tiled(
+        (5, 8, 1000, 1, 1, 1),
+        (4, 2, 1, 3, 0, 5),
+        "f64",
+        "gfx950",
+        run_bytes=2048,
+        max_tile_bytes=4096,
+    )
     rng = random.Random(5)
     ext = (1, 2, 3, 5, 6, 7, 9, 10, 12, 15, 24, 30, 56, 100, 112, 224, 1000)
     for _ in range(400):
@@ -138,12 +158,20 @@ def test_default_tile_always_divides_the_extents():
         for dt in ("f16", "f32", "f64"):
             for rb, mt in ((64, 4096), (2048, 4096), (512, 32768)):
                 t = PT.default_tile(cs, cp, dt, rb, mt)
-                assert all(cs[a] % t[a] == 0 for a in range(len(cs))), (cs, cp, dt, rb, mt, t)
+                assert all(cs[a] % t[a] == 0 for a in range(len(cs))), (
+                    cs,
+                    cp,
+                    dt,
+                    rb,
+                    mt,
+                    t,
+                )
 
 
 def test_validity_refusals():
-    base = PT.PermuteTiledSpec(x_shape=(256, 512), perm=(1, 0), tile=(64, 64), dtype="f16",
-                               block_size=64)
+    base = PT.PermuteTiledSpec(
+        x_shape=(256, 512), perm=(1, 0), tile=(64, 64), dtype="f16", block_size=64
+    )
     assert PT.is_valid_spec(base)[0]
     bad = {
         "tile does not divide": dataclasses.replace(base, tile=(48, 64)),
@@ -151,10 +179,14 @@ def test_validity_refusals():
         "dtype": dataclasses.replace(base, dtype="f8"),
         "block": dataclasses.replace(base, block_size=96),
         "regs": dataclasses.replace(base, tile=(256, 512), block_size=64, stage="reg"),
-        "lds": dataclasses.replace(base, x_shape=(512, 1024), tile=(512, 512), block_size=1024),
+        "lds": dataclasses.replace(
+            base, x_shape=(512, 1024), tile=(512, 512), block_size=1024
+        ),
         "swizzle k": dataclasses.replace(base, swizzle_k=3, swizzle_shift=2),
         "swizzle shift": dataclasses.replace(base, swizzle_k=16, swizzle_shift=2),
-        "gather swizzle": dataclasses.replace(base, stage="gather", swizzle_k=4, swizzle_shift=4),
+        "gather swizzle": dataclasses.replace(
+            base, stage="gather", swizzle_k=4, swizzle_shift=4
+        ),
         "stage": dataclasses.replace(base, stage="dma"),
         "nt arch": dataclasses.replace(base, nt="both"),
         "tiles_per_cta": dataclasses.replace(base, tiles_per_cta=0),
@@ -163,7 +195,9 @@ def test_validity_refusals():
         arch = "gfx1151" if why == "nt arch" else "gfx950"
         assert not PT.is_valid_spec(sp, arch)[0], why
     # a tile whose in-tile offsets pass 2^31 elements is refused
-    big = PT.PermuteTiledSpec(x_shape=(2, 2**31), perm=(1, 0), tile=(2, 8), dtype="f16", block_size=64)
+    big = PT.PermuteTiledSpec(
+        x_shape=(2, 2**31), perm=(1, 0), tile=(2, 8), dtype="f16", block_size=64
+    )
     assert not PT.is_valid_spec(big)[0]
 
 
@@ -179,12 +213,15 @@ def test_swizzle_is_a_bijection(shape, perm):
 
 
 def test_bank_model_prefers_swizzle_on_square_transpose():
-    sp = PT.PermuteTiledSpec(x_shape=(8192, 8192), perm=(1, 0), tile=(64, 64), dtype="f16",
-                             block_size=64)
+    sp = PT.PermuteTiledSpec(
+        x_shape=(8192, 8192), perm=(1, 0), tile=(64, 64), dtype="f16", block_size=64
+    )
     plain = PT.lds_bank_cost(sp)
     k, sh = PT.best_swizzle(sp)
     assert k > 1
-    assert PT.lds_bank_cost(dataclasses.replace(sp, swizzle_k=k, swizzle_shift=sh)) < plain
+    assert (
+        PT.lds_bank_cost(dataclasses.replace(sp, swizzle_k=k, swizzle_shift=sh)) < plain
+    )
 
 
 # ---------------------------------------------------------------- IR / ISA
@@ -193,7 +230,9 @@ def test_bank_model_prefers_swizzle_on_square_transpose():
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("stage", ("lds", "reg"))
 def test_build_ir(dtype, stage):
-    sp = PT.plan_permute_tiled((64, 128, 96), (2, 0, 1), dtype, "gfx950", stage=stage, tiles_per_cta=3)
+    sp = PT.plan_permute_tiled(
+        (64, 128, 96), (2, 0, 1), dtype, "gfx950", stage=stage, tiles_per_cta=3
+    )
     k = PT.build_permute_tiled(sp, "gfx950")
     assert k.name == sp.kernel_name()
     names = [p.name for p in k.params]
@@ -204,9 +243,11 @@ def _objdump():
     import os
     import shutil
 
-    for c in (os.environ.get("LLVM_OBJDUMP"),
-              os.path.join(os.environ.get("ROCM_PATH", "/opt/rocm"), "llvm/bin/llvm-objdump"),
-              shutil.which("llvm-objdump")):
+    for c in (
+        os.environ.get("LLVM_OBJDUMP"),
+        os.path.join(os.environ.get("ROCM_PATH", "/opt/rocm"), "llvm/bin/llvm-objdump"),
+        shutil.which("llvm-objdump"),
+    ):
         if c and os.path.isfile(c):
             return c
     return None
@@ -231,13 +272,24 @@ def _isa(sp, arch="gfx950"):
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "perm.hsaco"
         path.write_bytes(hsaco)
-        return subprocess.run([objdump, "-d", f"--mcpu={arch}", str(path)], check=True,
-                              capture_output=True, text=True).stdout
+        return subprocess.run(
+            [objdump, "-d", f"--mcpu={arch}", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
 
 
 def test_isa_uses_16_byte_accesses_and_byte_permutes():
-    sp = PT.plan_permute_tiled((8192, 8192), (1, 0), "f16", "gfx950", run_bytes=128,
-                               max_tile_bytes=8192, block_size=64)
+    sp = PT.plan_permute_tiled(
+        (8192, 8192),
+        (1, 0),
+        "f16",
+        "gfx950",
+        run_bytes=128,
+        max_tile_bytes=8192,
+        block_size=64,
+    )
     isa = _isa(sp)
     assert isa.count("global_load_dwordx4") == 8
     assert isa.count("global_store_dwordx4") == 8
@@ -267,13 +319,26 @@ def _run(sp, x, arch):
 
     k = PT.build_permute_tiled(sp, arch)
     art = compile_kernel(k, arch=arch, capture_ir_text=False)
-    sig = [{"name": p.name, "type": p.type.name if p.type.name.startswith("ptr<") else f"ptr<{p.type.name}>"}
-           for p in k.params if isinstance(p.type, PtrType)]
+    sig = [
+        {
+            "name": p.name,
+            "type": (
+                p.type.name if p.type.name.startswith("ptr<") else f"ptr<{p.type.name}>"
+            ),
+        }
+        for p in k.params
+        if isinstance(p.type, PtrType)
+    ]
     L = KernelLauncher(hsaco=art.hsaco, kernel_name=k.name, signature=sig)
     y = torch.full((x.numel(),), 0x55, dtype=x.dtype, device=x.device)
-    L.bind({"X": x.data_ptr(), "Y": y.data_ptr()},
-           config=LaunchConfig(grid=PT.permute_tiled_grid(sp), block=(sp.block_size, 1, 1),
-                               stream=torch.cuda.current_stream().cuda_stream))()
+    L.bind(
+        {"X": x.data_ptr(), "Y": y.data_ptr()},
+        config=LaunchConfig(
+            grid=PT.permute_tiled_grid(sp),
+            block=(sp.block_size, 1, 1),
+            stream=torch.cuda.current_stream().cuda_stream,
+        ),
+    )()
     torch.cuda.synchronize()
     return y
 
@@ -284,12 +349,18 @@ def _bits(shape, es, seed=0):
     g = torch.Generator(device="cuda")
     g.manual_seed(seed)
     if es == 8:
-        hi = torch.randint(-2**31, 2**31, shape, dtype=torch.int64, device="cuda", generator=g)
-        lo = torch.randint(0, 2**32, shape, dtype=torch.int64, device="cuda", generator=g)
+        hi = torch.randint(
+            -(2**31), 2**31, shape, dtype=torch.int64, device="cuda", generator=g
+        )
+        lo = torch.randint(
+            0, 2**32, shape, dtype=torch.int64, device="cuda", generator=g
+        )
         return (hi << 32) | lo
     lim = 2 ** (8 * es - 1)
     dt = {2: torch.int16, 4: torch.int32}[es]
-    return torch.randint(-lim, lim, shape, dtype=torch.int64, device="cuda", generator=g).to(dt)
+    return torch.randint(
+        -lim, lim, shape, dtype=torch.int64, device="cuda", generator=g
+    ).to(dt)
 
 
 SMALL = [
@@ -331,8 +402,16 @@ def test_device_persistent_loop_with_remainder(tpc, go, tail):
     shape, perm = (26, 64, 96), (2, 0, 1)
     x = _bits(shape, 2, seed=3)
     ref = x.permute(*perm).contiguous().reshape(-1)
-    sp = PT.plan_permute_tiled(shape, perm, "f16", _ARCH, tiles_per_cta=tpc, grid_order=go, tile=(128, 96),
-                               block_size=1024 if _ARCH != "gfx1151" else 512)
+    sp = PT.plan_permute_tiled(
+        shape,
+        perm,
+        "f16",
+        _ARCH,
+        tiles_per_cta=tpc,
+        grid_order=go,
+        tile=(128, 96),
+        block_size=1024 if _ARCH != "gfx1151" else 512,
+    )
     sp = dataclasses.replace(sp, tail=tail)
     assert sp.n_tiles % tpc  # the last CTA runs a partial tile loop
     y = _run(sp, x, _ARCH)
@@ -345,8 +424,15 @@ def test_device_persistent_loop_with_remainder(tpc, go, tail):
 def test_device_ragged_thread_count(tail, stage):
     # 56 phase-1 units with 64 threads: clamped lanes redo the last unit, guarded lanes skip it
     shape, perm = (4, 32, 14, 112), (2, 1, 0, 3)
-    sp = PT.PermuteTiledSpec(x_shape=shape, perm=perm, tile=(4, 1, 1, 112), dtype="f16", block_size=64,
-                             stage=stage, tail=tail)
+    sp = PT.PermuteTiledSpec(
+        x_shape=shape,
+        perm=perm,
+        tile=(4, 1, 1, 112),
+        dtype="f16",
+        block_size=64,
+        stage=stage,
+        tail=tail,
+    )
     assert PT.is_valid_spec(sp, _ARCH)[0]
     assert sp.phase1_units % sp.block_size
     x = _bits(shape, 2, seed=5)
@@ -356,7 +442,9 @@ def test_device_ragged_thread_count(tail, stage):
 
 
 @device
-@pytest.mark.skipif(_ARCH not in ("gfx950", "gfx942"), reason="needs a large-memory CDNA device")
+@pytest.mark.skipif(
+    _ARCH not in ("gfx950", "gfx942"), reason="needs a large-memory CDNA device"
+)
 @pytest.mark.parametrize("stage", ("lds", "reg", "gather"))
 @pytest.mark.parametrize("big_side", ("out", "in"))
 def test_device_beyond_2_pow_31_elements(stage, big_side):
@@ -366,7 +454,9 @@ def test_device_beyond_2_pow_31_elements(stage, big_side):
     # (big_side="in") tile bases pass 2^31 bytes
     n = 2**27 + 2**13
     shape, perm = ((16, n), (1, 0)) if big_side == "out" else ((n, 16), (1, 0))
-    sp = PT.plan_permute_tiled(shape, perm, "f16", _ARCH, stage=stage, run_bytes=256, max_tile_bytes=8192)
+    sp = PT.plan_permute_tiled(
+        shape, perm, "f16", _ARCH, stage=stage, run_bytes=256, max_tile_bytes=8192
+    )
     assert sp.stage == stage
     x = _bits(shape, 2, seed=9)
     y = _run(sp, x, _ARCH)
@@ -381,23 +471,46 @@ def test_device_beyond_2_pow_31_elements(stage, big_side):
 @device
 @pytest.mark.parametrize("skew", ("none", "diag", "hash"))
 @pytest.mark.parametrize("go", ("in", "out", "both"))
-@pytest.mark.parametrize("shape,perm", [((8, 16, 16, 16, 32), (3, 2, 1, 0, 4)), ((64, 128, 96), (2, 0, 1)),
-                                        ((2, 16, 8, 8, 16, 16), (0, 3, 1, 5, 2, 4)), ((26, 64, 96), (2, 0, 1))])
+@pytest.mark.parametrize(
+    "shape,perm",
+    [
+        ((8, 16, 16, 16, 32), (3, 2, 1, 0, 4)),
+        ((64, 128, 96), (2, 0, 1)),
+        ((2, 16, 8, 8, 16, 16), (0, 3, 1, 5, 2, 4)),
+        ((26, 64, 96), (2, 0, 1)),
+    ],
+)
 def test_device_grid_skew_is_a_bijection(skew, go, shape, perm):
     x = _bits(shape, 2, seed=11)
     ref = x.permute(*perm).contiguous().reshape(-1)
-    sp = PT.plan_permute_tiled(shape, perm, "f16", _ARCH, grid_order=go, tiles_per_cta=3, run_bytes=256,
-                               max_tile_bytes=4096)
+    sp = PT.plan_permute_tiled(
+        shape,
+        perm,
+        "f16",
+        _ARCH,
+        grid_order=go,
+        tiles_per_cta=3,
+        run_bytes=256,
+        max_tile_bytes=4096,
+    )
     sp = dataclasses.replace(sp, skew=skew)
-    if len(shape) > 3 and skew != "none":  # 3-D cases canonicalise to a 2-D transpose, one grid axis
+    if (
+        len(shape) > 3 and skew != "none"
+    ):  # 3-D cases canonicalise to a 2-D transpose, one grid axis
         assert PT.skew_axes(sp) is not None
     y = _run(sp, x, _ARCH)
     assert int((y != ref).sum()) == 0
 
 
 def test_grid_walk_both_puts_both_fast_axes_last():
-    sp = PT.PermuteTiledSpec(x_shape=(32, 64, 64, 64, 32), perm=(3, 2, 1, 0, 4), tile=(4, 1, 1, 4, 32),
-                             dtype="f16", block_size=64, grid_order="both")
+    sp = PT.PermuteTiledSpec(
+        x_shape=(32, 64, 64, 64, 32),
+        perm=(3, 2, 1, 0, 4),
+        tile=(4, 1, 1, 4, 32),
+        dtype="f16",
+        block_size=64,
+        grid_order="both",
+    )
     # input-fastest grid axis 3 (D chunks), output-fastest grid axis 0 (A chunks)
     assert PT.grid_walk(sp)[-2:] == [0, 3]
     assert sorted(PT.grid_walk(sp)) == list(range(5))

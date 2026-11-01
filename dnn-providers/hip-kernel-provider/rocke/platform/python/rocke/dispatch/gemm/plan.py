@@ -558,7 +558,9 @@ def _g5p_est(req: Any, res) -> Optional[float]:
     tr = getattr(res.spec, "trait", None)
     if not sk and (tr is None or not int(getattr(tr, "vgpr_prefetch", 0))):
         return None
-    pick = next((float(t) for t, p in _g5p_ranked(req) if (p.geo == "skinny") == sk), None)
+    pick = next(
+        (float(t) for t, p in _g5p_ranked(req) if (p.geo == "skinny") == sk), None
+    )
     return None if pick is None else pick * cal
 
 
@@ -688,7 +690,9 @@ def gemm_plan(req: Any, dispatch: Optional[Callable[[Any], Any]] = None) -> Gemm
             f"native {cname} is a slow fallback; RCR pick {rname}",
         )
     if est_n is None or est_r is None:
-        return _plan("native", req, nat, (), est_n, None, "no cost model for both plans")
+        return _plan(
+            "native", req, nat, (), est_n, None, "no cost model for both plans"
+        )
     est_p = est_r + tp_us
     best = ("prepass", rreq, rcr, tuple(tps), est_p)
     if lay == "CRR" and R2_PLAN_PARTIAL:

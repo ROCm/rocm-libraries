@@ -145,9 +145,8 @@ static hiptensorStatus_t checkElementwiseBinaryOperator(char const*         apiF
 
 // The operator applied to one operand must be one of the unary operators. Other values used to be
 // applied as the identity without notice.
-static hiptensorStatus_t checkUnaryOperator(char const*         apiFuncName,
-                                            hiptensorOperator_t op,
-                                            char const*         opName)
+static hiptensorStatus_t
+    checkUnaryOperator(char const* apiFuncName, hiptensorOperator_t op, char const* opName)
 {
     if(hiptensor::isUnaryOperator(op))
     {
@@ -1328,7 +1327,7 @@ try
 
     // Owned here until it is returned, so that a failed or throwing initialization frees it.
     // The backend that serves the plan records the workspace it needs.
-    auto ownedPlan              = std::make_unique<hiptensorPlan>();
+    auto            ownedPlan   = std::make_unique<hiptensorPlan>();
     hiptensorPlan_t newPlan     = ownedPlan.get();
     newPlan->mRequiredWorkspace = 0;
 

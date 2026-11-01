@@ -316,8 +316,8 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
                 logLevel
                 & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
-                                                     // PERF_TRACE so the CK backend does not run its
-                                                     // internal cold/hot timed loop
+                // PERF_TRACE so the CK backend does not run its
+                // internal cold/hot timed loop
 
             hiptensorTensorDescriptor_t descA = nullptr;
             CHECK_HIPTENSOR_ERROR(
@@ -410,14 +410,15 @@ namespace hiptensor
             int   hotRuns  = std::max(1, opts->hotRuns()); // guard hot_runs <= 0
             // untimed warm-up: ramps clocks, primes plan/caches
             for(int i = 0; i < coldRuns; ++i)
-                CHECK_HIPTENSOR_ERROR(hiptensorElementwiseBinaryExecute(handle,
-                                                                        plan,
-                                                                        (void*)&alphaValue,
-                                                                        resource->deviceInput1().get(),
-                                                                        (void*)&gammaValue,
-                                                                        resource->deviceInput2().get(),
-                                                                        resource->deviceOutput().get(),
-                                                                        nullptr /* stream */));
+                CHECK_HIPTENSOR_ERROR(
+                    hiptensorElementwiseBinaryExecute(handle,
+                                                      plan,
+                                                      (void*)&alphaValue,
+                                                      resource->deviceInput1().get(),
+                                                      (void*)&gammaValue,
+                                                      resource->deviceInput2().get(),
+                                                      resource->deviceOutput().get(),
+                                                      nullptr /* stream */));
 
             hipEvent_t startEvent, stopEvent;
             CHECK_HIP_ERROR(hipEventCreate(&startEvent));
@@ -425,14 +426,15 @@ namespace hiptensor
             CHECK_HIP_ERROR(hipEventRecord(startEvent));
 
             for(int i = 0; i < hotRuns; ++i) // timed: M clean launches
-                CHECK_HIPTENSOR_ERROR(hiptensorElementwiseBinaryExecute(handle,
-                                                                        plan,
-                                                                        (void*)&alphaValue,
-                                                                        resource->deviceInput1().get(),
-                                                                        (void*)&gammaValue,
-                                                                        resource->deviceInput2().get(),
-                                                                        resource->deviceOutput().get(),
-                                                                        nullptr /* stream */));
+                CHECK_HIPTENSOR_ERROR(
+                    hiptensorElementwiseBinaryExecute(handle,
+                                                      plan,
+                                                      (void*)&alphaValue,
+                                                      resource->deviceInput1().get(),
+                                                      (void*)&gammaValue,
+                                                      resource->deviceInput2().get(),
+                                                      resource->deviceOutput().get(),
+                                                      nullptr /* stream */));
 
             CHECK_HIP_ERROR(hipEventRecord(stopEvent));
             CHECK_HIP_ERROR(hipEventSynchronize(stopEvent))

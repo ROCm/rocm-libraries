@@ -180,9 +180,15 @@ namespace hiptensor
             }
 
             // Initialize the argument pointer
-            if constexpr(std::is_same_v<typename Traits::AOp, ck::tensor_operation::element_wise::PassThrough> 
-                      && std::is_same_v<typename Traits::BOp, ck::tensor_operation::element_wise::PassThrough> 
-                      &&(std::is_same_v<typename Traits::CDEOp, ck::tensor_operation::element_wise::Bilinear> || std::is_same_v<typename Traits::CDEOp, ck::tensor_operation::element_wise::BilinearComplex>))
+            if constexpr(std::is_same_v<typename Traits::AOp,
+                                        ck::tensor_operation::element_wise::PassThrough>
+                         && std::is_same_v<typename Traits::BOp,
+                                           ck::tensor_operation::element_wise::PassThrough>
+                         && (std::is_same_v<typename Traits::CDEOp,
+                                            ck::tensor_operation::element_wise::Bilinear>
+                             || std::is_same_v<
+                                 typename Traits::CDEOp,
+                                 ck::tensor_operation::element_wise::BilinearComplex>))
             {
                 Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     A,
@@ -362,11 +368,10 @@ namespace hiptensor
             }
 
             // Initialize the argument pointer
-            if constexpr(
-                std::is_same_v<
-                    typename Traits::AOp,
-                    ck::tensor_operation::element_wise::
-                        PassThrough> && std::is_same_v<typename Traits::BOp, ck::tensor_operation::element_wise::PassThrough>)
+            if constexpr(std::is_same_v<typename Traits::AOp,
+                                        ck::tensor_operation::element_wise::PassThrough>
+                         && std::is_same_v<typename Traits::BOp,
+                                           ck::tensor_operation::element_wise::PassThrough>)
             {
                 Base::mInvokerArgPtr = std::move(
                     deviceOp->MakeArgumentPointer(A,
