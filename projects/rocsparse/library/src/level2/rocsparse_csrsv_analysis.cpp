@@ -37,6 +37,7 @@
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_primitives.hpp"
+#include "rocsparse_trm_uncouple_slot.hpp"
 #include "rocsparse_utility.hpp"
 
 template <typename J>
@@ -502,6 +503,8 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
         csrsv_info      = new _rocsparse_csrsv_info();
         p_csrsv_info[0] = csrsv_info;
     }
+
+    rocsparse::trm_uncouple_slot(info, csrsv_info, trans, descr->fill_mode);
 
     // Perform analysis
     RETURN_IF_ROCSPARSE_ERROR(csrsv_info->recreate(handle,
