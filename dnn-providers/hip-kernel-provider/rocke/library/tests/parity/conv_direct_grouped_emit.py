@@ -98,6 +98,7 @@ try:
 except ImportError:  # pragma: no cover - older reference tree
     from rocke import lower_kernel_to_llvm as _native_lower
 from rocke.core.ir_serialize import serialize
+from _emit_common import target_ir
 from rocke.core.verify import verify
 
 
@@ -2242,6 +2243,8 @@ def main() -> int:
         sys.stdout.write(text)
     elif mode == "ir":
         sys.stdout.write(serialize(kernel))
+    elif mode == "target-ir":
+        sys.stdout.write(target_ir(kernel, arch))
     elif mode == "verify":
         sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
     else:

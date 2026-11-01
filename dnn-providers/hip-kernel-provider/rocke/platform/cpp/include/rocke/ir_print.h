@@ -30,6 +30,13 @@ void rocke_print_ir(const rocke_kernel_def_t* kernel, rocke_strbuf_t* out);
  * string the caller must free(). Returns NULL on allocation failure. */
 char* rocke_print_ir_alloc(const rocke_kernel_def_t* kernel);
 
+/* Append Python's repr(float) of `value` to `out`: the shortest decimal that
+ * reads back as the same double, in CPython's layout ("1.0", "0.5", "1e-05",
+ * "-3.4028234663852886e+38", "-0.0", "inf", "nan").
+ *
+ * Mirrors Python: repr(value) (== str(value)) for a float. */
+void rocke_append_python_float(rocke_strbuf_t* out, double value);
+
 #ifdef __cplusplus
 }
 #endif

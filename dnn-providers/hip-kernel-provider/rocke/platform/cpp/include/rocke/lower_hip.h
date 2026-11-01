@@ -38,7 +38,8 @@ extern "C" {
  * decisions. The full Python ArchTarget / MMA catalog is NOT ported; this is
  * the minimal subset the lowerer reads:
  *
- *   - waitcnt encoding family: gfx9/gfx10 split-VMCNT vs gfx11 contiguous,
+ *   - waitcnt encoding family: gfx9/gfx10 split-VMCNT vs gfx11 contiguous, or
+ *     none where the target has no monolithic s_waitcnt (gfx1250),
  *   - whether ds_read_*_tr_* exists (gfx950-class only),
  *   - whether WMMA is available (RDNA/gfx11+; never on CDNA/MFMA targets).
  *
@@ -47,7 +48,8 @@ extern "C" {
 typedef enum rocke_hip_waitcnt_family
 {
     ROCKE_HIP_WAITCNT_GFX9_10 = 0, /* split VMCNT [3:0]+[15:14], lgkm [11:8]     */
-    ROCKE_HIP_WAITCNT_GFX11 /* contiguous exp[2:0] lgkm[9:4] vm[15:10]    */
+    ROCKE_HIP_WAITCNT_GFX11, /* contiguous exp[2:0] lgkm[9:4] vm[15:10]    */
+    ROCKE_HIP_WAITCNT_NONE /* no monolithic s_waitcnt (split wait counters) */
 } rocke_hip_waitcnt_family_t;
 
 typedef struct rocke_hip_arch
