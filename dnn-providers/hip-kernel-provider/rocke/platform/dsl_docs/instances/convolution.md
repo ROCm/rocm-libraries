@@ -1367,6 +1367,9 @@ bf16 I/O). Four implementations:
   `benchmarks/common/benchmark_winograd_aot.py` compiles the grid
   (`--compile-all`) and runs cases from it (`--run-from-cache`), choosing each
   stage's binary by timing and verifying the assembled pipeline.
+  `benchmark_conv_compare.py --run-from-cache` runs it beside the direct-conv
+  and implicit-GEMM sweeps when the cache directory holds its binaries, and
+  `--results` merges the three engines' rows.
 - **Generalized** (`conv_winograd_gen` + K3 with `taps`): any `F(m, r)` per
   axis (1-D `1 x r` / `r x 1`, 5x5), and segmented long filters: `S`
   segments of `F(m, m)` share one input transform and K3 sums

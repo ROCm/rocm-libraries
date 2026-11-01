@@ -10,13 +10,21 @@ already), so the whole pipeline is a set of cached binaries:
 
 * ``--compile-all --cache-dir DIR``: build every binary of the grid below
   into ``DIR/<arch>/wino_rt`` (CPU only, ``--jobs`` workers);
-* ``--run-from-cache DIR --miopen-file F``: for each 3x3 stride-1 case and
-  each tile (all of :data:`conv_winograd_fwd_rt.AOT_TILES`), pick each stage's
-  fastest fitting binary by timing it alone (K3: every plan, as
-  ``benchmark_winograd_conv.py`` sweeps them), verify the assembled pipeline
-  against the reference conv, and time the whole chain (min over
-  ``--repeats``). One result row per case (``--results``, JSON Lines) with
-  every tile's pipeline, its time and its binaries in ``top``.
+* ``--run-from-cache DIR``: for each 3x3 stride-1 forward case (from
+  ``--miopen-file``, ``--miopen-cmd`` or the shape flags; the other cases are
+  skipped with the reason) and each tile (all of
+  :data:`conv_winograd_fwd_rt.AOT_TILES`), pick each stage's fastest fitting
+  binary by timing it alone (K3: every plan, as ``benchmark_winograd_conv.py``
+  sweeps them), verify the assembled pipeline against the reference conv, and
+  time the whole chain as one call (``--timing``, best of ``--repeats``).
+
+The cache run takes the inputs and writes the rows of the other AOT conv
+sweeps: ``--results`` writes one :mod:`benchmarks.common.case_results` row per
+case (engine ``winograd``, the fastest tile's pipeline, the next tiles as
+runners-up), ``--skip-measured`` resumes, and the ``Best:`` line is the one
+``benchmark_conv_compare.py`` reads -- the comparison runs this sweep beside
+the direct-conv and implicit-GEMM ones, and ``run_conv_shards.py --script
+winograd`` shards it.
 
 The prescale and operand dtype follow ``benchmark_winograd_conv.py``'s
 ``auto`` rules (bf16 operands only for F(2,3) with bf16 I/O, also tried with
@@ -151,11 +159,16 @@ def _compile_one(item):
     return name, meta, bytes(art.hsaco), art.kernel_name
 
 
+def cache_index(cache_dir: str, arch: str) -> Path:
+    """The index ``--compile-all`` writes last: a cache run needs it."""
+    return Path(cache_dir) / arch / "wino_rt" / "index.json"
+
+
 def compile_all(cache_dir: str, arch: str, jobs: int) -> int:
     import multiprocessing
     from concurrent.futures import ProcessPoolExecutor
 
-    out = Path(cache_dir) / arch / "wino_rt"
+    out = cache_index(cache_dir, arch).parent
     out.mkdir(parents=True, exist_ok=True)
     work = [(k, p, arch) for k, p in _job_list(arch)]
     print(f"compile-all: {len(work)} binaries -> {out}", flush=True)
@@ -182,7 +195,7 @@ def compile_all(cache_dir: str, arch: str, jobs: int) -> int:
             index[name] = meta
             if i % 200 == 0:
                 print(f"  {i}/{len(work)} ({time.time() - t0:.0f}s)", flush=True)
-    (out / "index.json").write_text(json.dumps(index, indent=1, sort_keys=True))
+    cache_index(cache_dir, arch).write_text(json.dumps(index, indent=1, sort_keys=True))
     print(
         f"compile-all done: {len(index)} binaries, {n_bad} failed "
         f"({time.time() - t0:.0f}s)",
@@ -213,8 +226,9 @@ class Binary:
 def load_cache(cache_dir: str, arch: str) -> List[Binary]:
     from kernels.common import conv_winograd_fwd_rt as W
 
-    d = Path(cache_dir) / arch / "wino_rt"
-    index = json.loads((d / "index.json").read_text())
+    path = cache_index(cache_dir, arch)
+    d = path.parent
+    index = json.loads(path.read_text())
     out = []
     for name, meta in sorted(index.items()):
         spec = None
@@ -458,10 +472,28 @@ def _fits(binary: Binary, tp: TilePipe) -> bool:
     return s.reason(tp.geo) is None
 
 
+def _time_us(run, args) -> float:
+    """One call of ``run`` (a whole pipeline) in microseconds, measured the
+    ``--timing`` way: ``staged`` is the median of single stalled calls, as
+    hipDNN times a convolution; ``block`` the average of back-to-back calls."""
+    if args.timing == "staged":
+        from statistics import median
+
+        from rocke.runtime.stall_gate import time_launches_staged
+
+        samples = time_launches_staged(run, warmup=args.warmup, iters=args.iters)
+        return median(samples) * 1e3
+    from rocke.runtime import time_launches
+
+    return time_launches(run, warmup=args.warmup, iters=args.iters) * 1e3
+
+
 def run_case(
     case: Case, tile, op: str, cache: List[Binary], args, log
 ) -> Optional[dict]:
-    """The best verified pipeline of one tile: ``{label, ms, binaries, stages}``."""
+    """The best verified pipeline of one tile: ``{label, ms, binaries, err}``;
+    ``{"failed": True}`` when no K3 finalist verifies, ``None`` when no
+    pipeline fits."""
     from benchmarks.common import winograd_k3_wmma as K3W
     from benchmarks.common.benchmark_winograd_conv import verify_error
     from rocke.runtime import time_launches
@@ -474,6 +506,8 @@ def run_case(
     tp = TilePipe(case, tile, op, prescale, chunks)
     try:
 
+        # Ranking a stage's binaries times each alone, back to back; only the
+        # assembled pipeline is timed the --timing way.
         def us(fn):
             return time_launches(fn, warmup=args.warmup, iters=args.iters) * 1e3
 
@@ -576,18 +610,20 @@ def run_case(
             best = (run, k3label, k3bins, err)
             break
         if best is None:
-            return None
+            return dict(failed=True)
         run, k3label, k3bins, err = best
         total = None
         for _ in range(args.repeats):
             if args.cooldown > 0:
                 time.sleep(args.cooldown)
-            t = us(run)
+            t = _time_us(run, args)
             total = t if total is None else min(total, t)
         bins = [pick[st].name for st in stages] + list(k3bins)
+        k2a = f"-k2a={pick['K2a'].name}" if "K2a" in pick else ""
         label = (
             f"winograd-{case.io}-F{tile[0]}x{tile[1]}-op={op}-ps={int(prescale)}"
-            f"-k1={pick['K1'].name}-k2={pick['K2'].name}-k3={k3label}-k4={pick['K4'].name}"
+            f"-k1={pick['K1'].name}{k2a}-k2={pick['K2'].name}-k3={k3label}"
+            f"-k4={pick['K4'].name}"
         )
         log(
             f"  F{tile[0]}x{tile[1]} op={op} ps={int(prescale)} chunks={chunks}: "
@@ -607,44 +643,138 @@ def _pow2(n: int, cap: int = 8) -> int:
     return v
 
 
+def winograd_case_reason(problem, dtype: str, direction: str) -> Optional[str]:
+    """Why the AOT pipeline does not run a case (``None``: it may).
+
+    The ``winograd_aot`` route's rule (``winograd_ineligible_reason``),
+    narrowed to the 3x3 filters the shape-generic transforms build."""
+    from kernels.common.conv_winograd_select import winograd_ineligible_reason
+
+    if direction != "fwd":
+        return "Winograd runs the forward direction only"
+    why = winograd_ineligible_reason(problem, dtype)
+    if why is None and (problem.Y, problem.X) != (3, 3):
+        why = f"{problem.Y}x{problem.X} filter (the AOT transforms are 3x3)"
+    return why
+
+
+def cases_of(args) -> list:
+    """``(problem, dtype, direction)`` of every case the run was given.
+
+    As the other conv sweeps read them: an MIOpenDriver line runs the
+    directions of its ``-F`` and its own dtype, ``--direction`` / ``--dtype``
+    override both, and the shape flags are one case (fp16 fwd by default)."""
+    from benchmarks.common.benchmark_implicit_gemm_conv import (
+        _FORW_TO_DIRECTIONS,
+        parse_miopen_cmd,
+    )
+
+    if args.miopen_file or args.miopen_cmd:
+        if args.miopen_cmd:
+            lines = [args.miopen_cmd]
+        else:
+            lines = Path(args.miopen_file).read_text().splitlines()
+        out = []
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            problem, dtype, forw = parse_miopen_cmd(line)
+            directions = (
+                [args.direction]
+                if args.direction
+                else _FORW_TO_DIRECTIONS.get(forw, ["fwd"])
+            )
+            out += [(problem, args.dtype or dtype, d) for d in directions]
+        return out
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    problem = ConvProblem(
+        N=args.N,
+        Hi=args.Hi,
+        Wi=args.Wi,
+        C=args.C,
+        K=args.K,
+        Y=args.Y,
+        X=args.X,
+        sH=args.sH,
+        sW=args.sW,
+        pH=args.pH,
+        pW=args.pW,
+        groups=args.groups,
+    )
+    return [(problem, args.dtype or "fp16", args.direction or "fwd")]
+
+
 def run_from_cache(args) -> int:
+    from benchmarks.common.case_results import (
+        RUNNERS_UP,
+        ResultsWriter,
+        measured_keys,
+        same_results_file,
+    )
+    from benchmarks.common.early_stop import case_key
+
+    # Filtered before anything is loaded: a comparison hands this sweep every
+    # case, and the ones it cannot run should cost a line, not a cache load.
+    cases = []
+    for problem, dtype, direction in cases_of(args):
+        why = winograd_case_reason(problem, dtype, direction)
+        if why is not None:
+            print(
+                f"[skip] {problem.short()} {dtype} {direction}: "
+                f"not a Winograd case: {why}",
+                flush=True,
+            )
+            continue
+        cases.append((problem, dtype))
+    if not cases:
+        return 0
+    # Read before the writer opens --results: the two may name one file.
+    done = measured_keys(args.skip_measured, "winograd", args.timing)
+
     import torch  # noqa: F401 -- claim the HIP context first
 
-    from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
-    from benchmarks.common.early_stop import case_key
     from rocke.runtime.hip_module import Runtime
+
+    if not args.cus:
+        from benchmarks.common.winograd_k3_wmma import device_cus
+
+        args.cus = device_cus()
+    if args.timing == "staged":
+        # Checked once, as batched_timing.time_batch_staged does: a device
+        # without the stall gate would otherwise fail every pipeline alike.
+        from rocke.runtime.hip_module import HipError
+        from rocke.runtime.stall_gate import default_gate
+
+        try:
+            default_gate()
+        except HipError as e:
+            raise HipError(
+                f"{e}; this device cannot be timed with --timing staged, rerun "
+                f"with --timing block"
+            ) from e
 
     cache = load_cache(args.run_from_cache, args.arch)
     print(f"cache: {len(cache)} binaries", flush=True)
-    cmds = [
-        ln.strip()
-        for ln in open(args.miopen_file)
-        if ln.strip() and not ln.startswith("#")
-    ]
-    out = open(args.results, "a" if args.resume else "w") if args.results else None
-    done = set()
-    if args.resume and args.results and Path(args.results).exists():
-        for ln in open(args.results):
-            try:
-                done.add(json.loads(ln)["miopen_cmd"])
-            except (ValueError, KeyError):
-                pass
+    results_out = ResultsWriter(
+        args.results,
+        "winograd",
+        args.timing,
+        append=same_results_file(args.results, args.skip_measured),
+    )
     rt = Runtime()
     rc = 0
-    for ci, cmd in enumerate(cmds, 1):
-        if cmd in done:
+    n_skipped = 0
+    for ci, (problem, dtype) in enumerate(cases, 1):
+        key = case_key(problem, dtype, "fwd")
+        if key in done:
+            n_skipped += 1
             continue
-        problem, dtype, forw = parse_miopen_cmd(cmd)
-        if (
-            forw != 1
-            or (problem.Y, problem.X) != (3, 3)
-            or (problem.sH, problem.sW) != (1, 1)
-        ):
-            print(f"[skip] not a 3x3 stride-1 forward: {cmd}", flush=True)
-            continue
-        print(f"\n== [{ci}/{len(cmds)}] {problem.short()} {dtype}", flush=True)
+        print(f"\n== [{ci}/{len(cases)}] {problem.short()} {dtype}", flush=True)
         case = Case(rt, problem, dtype, args.seed, args.verify)
         res = []
+        failed = False
         try:
             for tile in _tiles():
                 for op in _operands(tile, dtype):
@@ -655,47 +785,85 @@ def run_from_cache(args) -> int:
                     except (ValueError, RuntimeError) as e:
                         print(f"  [skip] F{tile} op={op}: {e}", flush=True)
                         r = None
-                    if r:
-                        res.append(r)
+                    if r is None:
+                        continue
+                    if r.get("failed"):
+                        failed = True
+                        continue
+                    res.append(r)
         finally:
             case.free()
         if not res:
-            print("  no Winograd pipeline passed", flush=True)
-            rc = 1
+            if failed:
+                # A pipeline that fits and computes the wrong answer is a bug;
+                # one that does not fit is coverage.
+                print("  no Winograd pipeline verified", flush=True)
+                rc = 1
+            else:
+                print("  no Winograd pipeline fits this case", flush=True)
             continue
         res.sort(key=lambda r: r["ms"])
         best = res[0]
-        print(f"Best: {best['ms'] * 1e3:.2f} us — {best['label']}", flush=True)
-        if out:
-            row = dict(
-                key=case_key(problem, dtype, "fwd"),
-                miopen_cmd=cmd,
-                engine="winograd",
-                shape=problem.short(),
-                dtype=dtype,
-                direction="fwd",
-                ms=round(best["ms"], 6),
-                kernel=best["label"],
-                timing="wino_aot",
-                top=[[r["label"], round(r["ms"], 6), r["binaries"]] for r in res],
-            )
-            out.write(json.dumps(row, sort_keys=True) + "\n")
-            out.flush()
-    if out:
-        out.close()
+        sec = best["ms"] * 1e-3
+        tflops = problem.flops / sec * 1e-12
+        gbps = (case.xb + case.wb + case.yb) / sec * 1e-9
+        # The line benchmark_conv_compare.py reads, as the other sweeps print.
+        print(
+            f"\nBest: {tflops:.1f} TFLOPS — {best['label']}  {best['ms']:.3f} ms",
+            flush=True,
+        )
+        results_out.row(
+            key=key,
+            case=ci,
+            shape=problem.short(),
+            dtype=dtype,
+            direction="fwd",
+            tflops=tflops,
+            ms=best["ms"],
+            gbps=gbps,
+            kernel=best["label"],
+            candidates=len(res),
+            # Every pipeline reported was verified, when --verify asked.
+            passed=True if args.verify else None,
+            runners_up=[r["label"] for r in res[1 : 1 + RUNNERS_UP]],
+        )
+    results_out.close()
+    if n_skipped:
+        print(
+            f"\n{n_skipped} case(s) skipped: already in {args.skip_measured}",
+            flush=True,
+        )
     return rc
 
 
 def main(argv=None) -> int:
+    from benchmarks.common import batched_timing, case_results
+
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--arch", default="gfx1250")
     ap.add_argument("--compile-all", action="store_true")
     ap.add_argument("--cache-dir", default="./kernel_cache")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 8)
     ap.add_argument("--run-from-cache", default=None, metavar="DIR")
-    ap.add_argument("--miopen-file", default=None)
-    ap.add_argument("--results", default=None)
-    ap.add_argument("--resume", action="store_true")
+    ap.add_argument(
+        "--miopen-file", default=None, help="MIOpenDriver commands, one per line"
+    )
+    ap.add_argument("--miopen-cmd", default=None, help="one MIOpenDriver command")
+    ap.add_argument(
+        "--dtype",
+        default=None,
+        choices=["fp16", "bf16"],
+        help="I/O dtype (default: fp16, or each MIOpenDriver command's)",
+    )
+    ap.add_argument(
+        "--direction",
+        default=None,
+        choices=["fwd", "dgrad", "wgrad"],
+        help="direction (default: fwd, or each command's -F); Winograd runs fwd only",
+    )
+    case_results.add_results_arg(ap, merged=False)
+    case_results.add_skip_measured_arg(ap)
+    batched_timing.add_timing_arg(ap)
     ap.add_argument("--verify", action="store_true")
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--iters", type=int, default=10)
@@ -704,15 +872,17 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--k3-finalists", type=int, default=4)
     ap.add_argument("--cus", type=int, default=0, help="0: query the device")
+    shape = ap.add_argument_group("Shape", "one case, without an MIOpenDriver input")
+    for name, default in (
+        ("N", 8), ("Hi", 56), ("Wi", 56), ("C", 64), ("K", 64), ("Y", 3), ("X", 3),
+        ("sH", 1), ("sW", 1), ("pH", 1), ("pW", 1), ("groups", 1),
+    ):  # fmt: skip
+        shape.add_argument(f"--{name}", type=int, default=default)
     args = ap.parse_args(argv)
     if args.compile_all:
         return compile_all(args.cache_dir, args.arch, args.jobs)
-    if not args.run_from_cache or not args.miopen_file:
-        ap.error("give --compile-all, or --run-from-cache with --miopen-file")
-    if not args.cus:
-        from benchmarks.common.winograd_k3_wmma import device_cus
-
-        args.cus = device_cus()
+    if not args.run_from_cache:
+        ap.error("give --compile-all or --run-from-cache")
     return run_from_cache(args)
 
 
