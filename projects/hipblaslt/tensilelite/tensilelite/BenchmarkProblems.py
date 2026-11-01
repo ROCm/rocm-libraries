@@ -54,7 +54,7 @@ from .backends.config import parse_backend_config
 from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
-from .TensileCreateLibrary import copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
+from .TensileCreateLibrary import benchmarkPoolSize, copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
 from .CustomKernels import getCustomKernelConfig
 from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
@@ -81,6 +81,12 @@ _KERNEL_NAMING_VERSION = 2
 # selection has a well-defined winner. See the synthetic-perf caveat in
 # tensilelite/Tests/unit/characterization/_codegen/GPU-MOCK.md.
 _CPU_ONLY_SYNTHETIC_GFLOPS = 1000.0
+
+
+def _poolSize():
+    """Size of this module's process pools: the same as writeSolutionsAndKernels' pools, so the
+    worker pool is not resized between them (see benchmarkPoolSize)."""
+    return benchmarkPoolSize(globalParameters["GenerateSourcesAndExit"])
 
 
 def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutions):
@@ -300,7 +306,8 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
         itertools.repeat(isaInfoMap),
         itertools.repeat(rocisa.rocIsa.getInstance().getData())
     )
-    raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list")
+    raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list",
+                                 procs=_poolSize())
 
     # Filter out None and duplicates
     solutionSet = set()
@@ -457,7 +464,7 @@ def _constructAllPoolSolutions(poolEntries, assembler, debugConfig, isaInfoMap):
     )
     raw = ParallelMap2(_create_solution_from_state, solIters,
                        "Constructing solutions from {} pool file(s)".format(len(poolEntries)),
-                       return_as="list")
+                       return_as="list", procs=_poolSize())
     return [s for s in raw if s is not None]
 
 def _parsePoolFile(poolFile):
@@ -475,7 +482,8 @@ def _loadSolutionPool(solutionPoolFiles):
     Each file is parsed once; the parsed data is cached for later solution construction.
     """
     poolIndex = {}
-    for (ptStr, poolFile, data) in ParallelMap2(_parsePoolFile, zip(solutionPoolFiles), "load solution pool", return_as="list"):
+    for (ptStr, poolFile, data) in ParallelMap2(_parsePoolFile, zip(solutionPoolFiles), "load solution pool", return_as="list",
+                                                procs=_poolSize()):
         print2("# Pool file {}: ProblemType={}, {} solutions".format(poolFile, ptStr, len(data["Solutions"])))
         poolIndex.setdefault(ptStr, []).append((poolFile, data))
     return poolIndex

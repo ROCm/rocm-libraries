@@ -36,6 +36,7 @@ import subprocess
 import sys
 import pickle
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from timeit import default_timer as timer
@@ -44,6 +45,7 @@ from typing import Collection, Dict, List, NamedTuple, Optional, Union
 from .. import LibraryIO
 from ..Common import (
     CHeader,
+    CPUThreadCount,
     DebugConfig,
     ensurePath,
     HR,
@@ -438,9 +440,10 @@ def _checkInvalidSolutions(splitGSU, removeKernelNames, solutions):
         invalids.append(False)
     return invalids
 
-def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant, printLevel: bool, splitGSU: bool):
+def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant, printLevel: bool, splitGSU: bool, procs=None):
     removeKernelsAndResultsFlag = ParallelMap2(functools.partial(_checkInvalidSolutionsAndKernels, errorTolerant),
-                                               zip(results, kernels), "check invalid kernels and results", return_as="list")
+                                               zip(results, kernels), "check invalid kernels and results", return_as="list",
+                                               procs=procs)
 
     if any(removeKernelsAndResultsFlag) and not errorTolerant:
         printExit("** kernel generation failure **")
@@ -612,6 +615,34 @@ def writeHelpers(
         kernelHeaderFile.write(HeaderText)
 
 
+def _timedBuildSourceCodeObjectFiles(*args):
+    """buildSourceCodeObjectFiles under the python_kernel_build_src_co timer, which runs
+    concurrently with the assembly work of writeSolutionsAndKernels (see there)."""
+    with timing_context("python_kernel_build_src_co"):
+        return buildSourceCodeObjectFiles(*args)
+
+
+def overlapsHelperCompile() -> bool:
+    """Whether writeSolutionsAndKernels compiles the helper kernels while its pools run: only with
+    a pool budget above one, since the compile takes one slot of it."""
+    return CPUThreadCount() > 1
+
+
+def benchmarkPoolSize(generateSourcesAndExit: bool) -> int:
+    """Process pool size for every pool of a benchmark run: solution generation in
+    BenchmarkProblems and codegen/assembly in writeSolutionsAndKernels.
+
+    When the helper compile overlaps (overlapsHelperCompile) it takes one slot of the budget, so
+    the pools get one process less. All pools of the run use that size, also those that never
+    run beside a compile: joblib resizes its worker pool whenever the size changes (stopping a
+    worker, then starting one that imports Tensile again), and alternating sizes every benchmark
+    step made subtile_mxfp4's build 85 -> 150 s."""
+    budget = CPUThreadCount()
+    if overlapsHelperCompile() and not generateSourcesAndExit:
+        return budget - 1
+    return budget
+
+
 def writeSolutionsAndKernels(
     outputPath,
     asmToolchain,
@@ -683,85 +714,23 @@ def writeSolutionsAndKernels(
             asmKernels
         )
         memcompress = numAsmKernels > 10000
-    with timing_context("python_kernel_codegen"):
-        asmResults = ParallelMap2(functools.partial(processKernelSource, compress=memcompress), asmIter, "Generating assembly kernels", return_as="list")
-    with timing_context("python_kernel_validate"):
-        removeInvalidSolutionsAndKernels(
-            asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
-        )
-        validKeys = {
-            getKernelCompileKey(kernel, splitGSU) for kernel in asmKernels
-        }
-        asmGroups[:] = [group for group in asmGroups if group.key in validKeys]
-        passPostKernelInfoToSolution(
-            asmResults, asmKernels, solutions, splitGSU
-        )
 
-    def assemble(ret):
-        p, isa, wavefrontsize, _ = ret
-        o_path = p.with_suffix(".o")
-        targetGfx = archNames.get(isa) or isaToGfx(isa)
-        _alignAmdgcnTargetToStepping(p, isa, compilerTargetOf(targetGfx))
-        try:
-            asmToolchain.assembler(targetGfx, wavefrontsize, str(p), str(o_path))
-        except RuntimeError as e:
-            printWarning(f"Failed to assemble {p}: {e}")
-            return
-        if _stinky_asm_verify_wanted(isa):
-            _verify_stinky_asm_comment_vs_elf_text(p, o_path, p.stem)
-        if removeTemporaries:
-            p.unlink()
-
-    unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
-    compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
-    with timing_context("python_kernel_write_assemble"):
-        ret = ParallelMap2(
-            compose(assemble, unaryWriteAssembly),
-            asmResults,
-            "Writing assembly kernels",
-            return_as="list",
-            multiArg=False,
-        )
-
-    # Remove solutions whose representative kernel failed to assemble.
-    failedKeys = {
-        group.key
-        for group in asmGroups
-        if not (assemblyTmpPath / (group.baseName + ".o")).exists()
-    }
-    if failedKeys:
-        solutions[:] = [s for s in solutions
-                        if getKernelCompileKey(s.getKernels()[0], splitGSU) not in failedKeys]
-        asmGroups[:] = [group for group in asmGroups if group.key not in failedKeys]
-        asmKernels[:] = [group.representative for group in asmGroups]
-
+    # The helper kernels in Kernels.cpp only depend on kernelHelperObjs, so they are written now
+    # and compiled in a background thread while the assembly kernels are generated, assembled
+    # and linked. The compile is one more process, so it takes one slot of the pool budget (see
+    # benchmarkPoolSize). With a budget of one there is no slot to spare: the compile then
+    # finishes before codegen starts.
     with timing_context("python_kernel_write_helpers"):
         writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    srcKernelFile = Path(outputPath) / "Kernels.cpp"
+    srcKernelFile = outputPath / "Kernels.cpp"
 
-    if globalParameters["PythonProfile"]:
-        yappi.stop()
-        yappi.get_func_stats().save("yappi_results.profile", type="callgrind")
-        with open("yappi_results.txt", "w") as f:
-            yappi.get_func_stats().print_all(out=f)
-        if globalParameters["CpuThreads"] != 0:
-            with open("yappi_thread_stats.txt", "w") as f:
-                yappi.get_thread_stats().print_all(out=f)
-
-    if not generateSourcesAndExit:
-        with timing_context("python_kernel_build_co"):
-            codeObjectFiles += buildAssemblyCodeObjectFiles(
-                asmToolchain.linker,
-                asmToolchain.bundler,
-                asmGroups,
-                destRoot,
-                assemblyTmpPath,
-                compress,
-                archNames=archNames,
-            )
-
-        with timing_context("python_kernel_build_src_co"):
-            buildSourceCodeObjectFiles(
+    # Leaving the with block, also through an exception, waits for the compile to finish.
+    with ThreadPoolExecutor(max_workers=1) as helperExecutor:
+        poolSize = benchmarkPoolSize(generateSourcesAndExit)
+        overlapHelperBuild = overlapsHelperCompile()
+        if not generateSourcesAndExit:
+            helperBuild = helperExecutor.submit(
+                _timedBuildSourceCodeObjectFiles,
                 srcToolchain.compiler,
                 srcToolchain.bundler,
                 destRoot,
@@ -770,6 +739,88 @@ def writeSolutionsAndKernels(
                 srcKernelFile,
                 cmdlineArchs,
             )
+            if not overlapHelperBuild:
+                with timing_context("python_kernel_build_src_co_wait"):
+                    helperBuild.result()
+
+        with timing_context("python_kernel_codegen"):
+            asmResults = ParallelMap2(functools.partial(processKernelSource, compress=memcompress), asmIter, "Generating assembly kernels", return_as="list", procs=poolSize)
+        with timing_context("python_kernel_validate"):
+            removeInvalidSolutionsAndKernels(
+                asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU,
+                procs=poolSize,
+            )
+            validKeys = {
+                getKernelCompileKey(kernel, splitGSU) for kernel in asmKernels
+            }
+            asmGroups[:] = [group for group in asmGroups if group.key in validKeys]
+            passPostKernelInfoToSolution(
+                asmResults, asmKernels, solutions, splitGSU
+            )
+
+        def assemble(ret):
+            p, isa, wavefrontsize, _ = ret
+            o_path = p.with_suffix(".o")
+            targetGfx = archNames.get(isa) or isaToGfx(isa)
+            _alignAmdgcnTargetToStepping(p, isa, compilerTargetOf(targetGfx))
+            try:
+                asmToolchain.assembler(targetGfx, wavefrontsize, str(p), str(o_path))
+            except RuntimeError as e:
+                printWarning(f"Failed to assemble {p}: {e}")
+                return
+            if _stinky_asm_verify_wanted(isa):
+                _verify_stinky_asm_comment_vs_elf_text(p, o_path, p.stem)
+            if removeTemporaries:
+                p.unlink()
+
+        unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
+        compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
+        with timing_context("python_kernel_write_assemble"):
+            ret = ParallelMap2(
+                compose(assemble, unaryWriteAssembly),
+                asmResults,
+                "Writing assembly kernels",
+                return_as="list",
+                multiArg=False,
+                procs=poolSize,
+            )
+
+        # Remove solutions whose representative kernel failed to assemble.
+        failedKeys = {
+            group.key
+            for group in asmGroups
+            if not (assemblyTmpPath / (group.baseName + ".o")).exists()
+        }
+        if failedKeys:
+            solutions[:] = [s for s in solutions
+                            if getKernelCompileKey(s.getKernels()[0], splitGSU) not in failedKeys]
+            asmGroups[:] = [group for group in asmGroups if group.key not in failedKeys]
+            asmKernels[:] = [group.representative for group in asmGroups]
+
+        if globalParameters["PythonProfile"]:
+            yappi.stop()
+            yappi.get_func_stats().save("yappi_results.profile", type="callgrind")
+            with open("yappi_results.txt", "w") as f:
+                yappi.get_func_stats().print_all(out=f)
+            if globalParameters["CpuThreads"] != 0:
+                with open("yappi_thread_stats.txt", "w") as f:
+                    yappi.get_thread_stats().print_all(out=f)
+
+        if not generateSourcesAndExit:
+            with timing_context("python_kernel_build_co"):
+                codeObjectFiles += buildAssemblyCodeObjectFiles(
+                    asmToolchain.linker,
+                    asmToolchain.bundler,
+                    asmGroups,
+                    destRoot,
+                    assemblyTmpPath,
+                    compress,
+                    archNames=archNames,
+                )
+
+            if overlapHelperBuild:
+                with timing_context("python_kernel_build_src_co_wait"):
+                    helperBuild.result()
 
     if removeTemporaries and not generateSourcesAndExit:
         removeScratch(outputPath, buildTmpPath)
