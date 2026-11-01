@@ -58,8 +58,8 @@ program example_fortran_auxiliary
     type(c_ptr) :: descr_A
     type(c_ptr) :: descr_B
 
-    integer :: version
-    integer :: pointer_mode
+    integer(c_int) :: version
+    integer(kind(HIPSPARSE_POINTER_MODE_HOST)) :: pointer_mode
     integer :: index_base
     integer :: mat_type
     integer :: fill_mode

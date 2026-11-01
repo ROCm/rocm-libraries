@@ -217,6 +217,7 @@
 /projects/hipsparse/**/.readthedocs.yaml            @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
 /projects/hipsparse/docs/                           @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
 /projects/hipsparse/library/include/                @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/hipsparse/fortran/                        @ROCm/rocm-fortran-maintainers @ROCm/sparses-reviewers
 
 /projects/hipsparselt/**/*.md                       @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 /projects/hipsparselt/**/*.rst                      @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
