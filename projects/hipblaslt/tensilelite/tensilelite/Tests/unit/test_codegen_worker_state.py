@@ -3,7 +3,7 @@
 
 """Codegen in a worker process must leave the solutions as in-process codegen does.
 
-writeSolutionsAndKernels generates the kernels with ParallelMap2. In-process (one process,
+generateBenchmarkKernels generates the kernels with ParallelMap2. In-process (one process,
 e.g. CpuThreads: 1) the kernel objects are the solutions themselves, so whatever codegen writes
 onto a kernel lands on its solution. In a worker the kernel is a pickled copy: only what
 passPostKernelInfoToSolution copies back from the KernelCodeGenResult reaches the solutions,
@@ -86,9 +86,9 @@ def _solutionStates(solutions):
 
 
 def _codegen(solutions, assembler, inWorker):
-    """The codegen + copy-back part of writeSolutionsAndKernels, with ParallelMap2 running
-    in-process (``inWorker`` False) or handing each task pickled arguments, as joblib does for
-    a worker process (``inWorker`` True)."""
+    """The codegen (generateBenchmarkKernels) + copy-back (finishSolutionsAndKernels) of the
+    benchmark build, with ParallelMap2 running in-process (``inWorker`` False) or handing each
+    task pickled arguments, as joblib does for a worker process (``inWorker`` True)."""
     kernels = [kernel for solution in solutions for kernel in solution.getKernels()]
     representatives = [group.representative for group in groupKernelRecords(kernels, False)]
     writer = KernelWriterAssembly(assembler, DebugConfig())

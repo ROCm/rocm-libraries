@@ -1,10 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""writeSolutionsAndKernels (the benchmark path) compiles the helper kernels (Kernels.cpp) in a
-background thread while the assembly kernels are generated, assembled and linked. The compile
-takes one slot of the pool budget, and its failure still fails the call. Every pool of the
-benchmark run has the same size (benchmarkPoolSize), so joblib never resizes its worker pool."""
+"""The benchmark path compiles the helper kernels (Kernels.cpp) of a step in a background thread
+(prepareSolutionsAndKernels) while the assembly kernels are generated (generateBenchmarkKernels),
+assembled and linked (finishSolutionsAndKernels). The compile takes one slot of the pool budget,
+and its failure still fails the step. Every pool of the benchmark run has the same size
+(benchmarkPoolSize), so joblib never resizes its worker pool."""
 
 import threading
 import time
@@ -19,18 +20,25 @@ pytestmark = pytest.mark.unit
 
 
 def _write(tmp_path, generateSourcesAndExit=False):
-    return Run.writeSolutionsAndKernels(
-        str(tmp_path),  # outputPath
-        MagicMock(),  # asmToolchain
-        MagicMock(),  # srcToolchain
-        [],  # solutions
-        [],  # kernels
-        [],  # kernelHelperObjs
-        MagicMock(),  # kernelWriterAssembly
-        False,  # splitGSU
-        ["gfx950"],  # cmdlineArchs
-        generateSourcesAndExit=generateSourcesAndExit,
-    )
+    """One step's kernel build, as BenchmarkProblems.writeBenchmarkFiles runs it. Returns the
+    build."""
+    with Run.helperCompileExecutor() as helperExecutor:
+        build = Run.prepareSolutionsAndKernels(
+            str(tmp_path),  # outputPath
+            MagicMock(),  # asmToolchain
+            MagicMock(),  # srcToolchain
+            [],  # solutions
+            [],  # kernels
+            [],  # kernelHelperObjs
+            MagicMock(),  # kernelWriterAssembly
+            False,  # splitGSU
+            ["gfx950"],  # cmdlineArchs
+            helperExecutor,
+            generateSourcesAndExit=generateSourcesAndExit,
+        )
+        Run.generateBenchmarkKernels([build])
+        Run.finishSolutionsAndKernels(build)
+    return build
 
 
 @pytest.fixture
@@ -122,6 +130,22 @@ def test_budget_of_one_compiles_before_codegen(tmp_path, builders):
         "Writing assembly kernels",
     ]
     assert builders.poolProcs == [1, 1, 1]
+
+
+def test_generated_sources_are_dropped_once_written(tmp_path, builders):
+    """The generated sources of every step of a pool are held until the step is finished;
+    finishing it drops them."""
+    generated = []
+    generate = Run.generateBenchmarkKernels
+
+    def generateAndRecord(builds):
+        generate(builds)
+        generated.extend(build.asmResults for build in builds)
+
+    builders.setattr(Run, "generateBenchmarkKernels", generateAndRecord)
+    build = _write(tmp_path)
+    assert generated == [[]]
+    assert build.asmResults is None
 
 
 def test_generate_sources_and_exit_does_not_compile(tmp_path, builders):

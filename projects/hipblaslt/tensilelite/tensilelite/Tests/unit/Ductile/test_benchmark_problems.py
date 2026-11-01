@@ -455,6 +455,9 @@ def test_main_ignores_solution_pool_for_backend_without_support(monkeypatch, tmp
         def supports_solution_pool(self):
             return False
 
+        def uses_benchmark_results(self):
+            return True
+
     monkeypatch.setattr(BP.BackendFactory, "create", lambda _name: _NoPoolBackend())
     monkeypatch.setattr(BP, "_loadSolutionPool", lambda _files: (_ for _ in ()).throw(AssertionError("should not load pool")))
     monkeypatch.setattr(BP, "_benchmarkProblemType", lambda **_kw: (str(tmp_path / "res"), 0))
@@ -599,6 +602,9 @@ def test_main_backend_config_invalid_type_exits(monkeypatch, tmp_path):
 def test_main_loads_solution_pool_when_backend_supports_it(monkeypatch, tmp_path):
     class _PoolBackend:
         def supports_solution_pool(self):
+            return True
+
+        def uses_benchmark_results(self):
             return True
 
     loaded = {}
