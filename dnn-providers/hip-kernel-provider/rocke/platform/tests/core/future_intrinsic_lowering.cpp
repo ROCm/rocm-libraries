@@ -1440,6 +1440,33 @@ rocke_status_t lower_expect_error(const char* name,
     return st;
 }
 
+/* The HIP-source counterpart of lower_expect_error: the HIP lowerer leaves its
+ * message on the builder's error channel. */
+template <typename BuildFn>
+rocke_status_t
+    lower_hip_expect_error(const char* name, BuildFn build, const char* arch, std::string* err_out)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
+    {
+        fail("rocke_ir_builder_init", __LINE__);
+        return ROCKE_OK;
+    }
+    build(&b);
+    rocke_b_ret(&b);
+    rocke_strbuf_t out;
+    rocke_strbuf_init(&out, 0);
+    rocke_lower_hip_opts_t opts{};
+    opts.arch = arch;
+    const rocke_status_t st
+        = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+    const char* msg = rocke_ir_builder_error(&b);
+    err_out->assign(msg ? msg : "");
+    rocke_strbuf_free(&out);
+    rocke_ir_builder_free(&b);
+    return st;
+}
+
 rocke_value_t* private_ptr_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem)
 {
     return rocke_b_param(b, name, rocke_ptr_type(b, elem, "private"), nullptr);
@@ -3296,6 +3323,101 @@ void case_buffer_load_lds_async()
     EXPECT_IR(ir, "ptr addrspace(3) %lds_ptr");
 }
 
+/* ---- buffer_rsrc: pointer address space and num_bytes width ---- */
+
+/* A buffer_rsrc over `X` with a `num_bytes` parameter of type `nb_type`;
+ * `X` is declared addr_space="constant" when `constant` is set. */
+static void build_buffer_rsrc(rocke_ir_builder_t* b, bool constant, const rocke_type_t* nb_type)
+{
+    rocke_param_opts_t opts{};
+    if(constant)
+        opts.addr_space = "constant";
+    rocke_value_t* X = rocke_b_param(b, "X", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
+    rocke_value_t* n = rocke_b_param(b, "n", nb_type, nullptr);
+    rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, X, n);
+    rocke_b_buffer_load_vN(
+        b, rsrc, rocke_b_const_i32(b, 0), rocke_b_const_i32(b, 0), rocke_f32(), 1);
+}
+
+void case_buffer_rsrc_refusals()
+{
+    /* The make.buffer.rsrc overload names ptr addrspace(1); a constant-space
+     * parameter is ptr addrspace(4) in the header, at every flavor. */
+    const rocke_llvm_flavor_t flavors[] = {ROCKE_LLVM_FLAVOR_LLVM20,
+                                           ROCKE_LLVM_FLAVOR_LLVM22,
+                                           ROCKE_LLVM_FLAVOR_LLVM23,
+                                           ROCKE_LLVM_FLAVOR_LLVM24};
+    for(const rocke_llvm_flavor_t flavor : flavors)
+    {
+        std::string err;
+        const rocke_status_t st = lower_expect_error(
+            "rsrc_constant",
+            [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, true, rocke_i32()); },
+            "gfx942",
+            flavor,
+            &err);
+        if(st != ROCKE_ERR_VALUE
+           || err.find("buffer_rsrc ptr must be a global pointer, got ptr addrspace(4) "
+                       "(its parameter's addr_space)")
+                  == std::string::npos)
+            fail(("constant-space buffer_rsrc: " + err).c_str(), __LINE__);
+    }
+
+    /* llvm20's make.buffer.rsrc.p1 takes an i32 num_records. */
+    std::string err;
+    const rocke_status_t st = lower_expect_error(
+        "rsrc_i64_llvm20",
+        [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, false, rocke_i64()); },
+        "gfx942",
+        ROCKE_LLVM_FLAVOR_LLVM20,
+        &err);
+    if(st != ROCKE_ERR_VALUE
+       || err.find("tile.buffer_rsrc num_bytes must be i32 at llvm20, got i64; the llvm20 "
+                   "make.buffer.rsrc takes an i32 num_records, so pass the byte count as i32")
+              == std::string::npos)
+        fail(("i64 num_bytes at llvm20: " + err).c_str(), __LINE__);
+
+    /* The accepted forms still lower: i32 at llvm20, i64 (as is) at llvm22. */
+    const std::string ir20 = lower_one(
+        "rsrc_i32_llvm20",
+        [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, false, rocke_i32()); },
+        "gfx942",
+        ROCKE_LLVM_FLAVOR_LLVM20);
+    EXPECT_IR(ir20, "@llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1) %X, i16 0, i32 %n, ");
+    const std::string ir22 = lower_one(
+        "rsrc_i64_llvm22",
+        [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, false, rocke_i64()); },
+        "gfx942",
+        ROCKE_LLVM_FLAVOR_LLVM22);
+    EXPECT_IR(ir22, "@llvm.amdgcn.make.buffer.rsrc.p8.p1(ptr addrspace(1) %X, i16 0, i64 %n, ");
+
+    /* The HIP builtin takes an int num_records, so the HIP lowering refuses an
+     * i64 num_bytes whatever the LLVM version. */
+    std::string hip_err;
+    const rocke_status_t hip_st = lower_hip_expect_error(
+        "rsrc_i64_hip",
+        [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, false, rocke_i64()); },
+        "gfx942",
+        &hip_err);
+    if(hip_st != ROCKE_ERR_VALUE
+       || hip_err.find("tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got i64; "
+                       "the HIP builtin takes an int num_records, so the byte count would be "
+                       "truncated at every LLVM version; pass it as i32")
+              == std::string::npos)
+        fail(("i64 num_bytes in HIP: " + hip_err).c_str(), __LINE__);
+
+    /* The HIP signature declares a constant-space pointer like any other, and
+     * the builtin takes a void*, so the HIP lowering keeps it. */
+    const std::string hip = lower_one_hip(
+        "rsrc_constant_hip",
+        [](rocke_ir_builder_t* b) { build_buffer_rsrc(b, true, rocke_i32()); },
+        "gfx942");
+    EXPECT_IR(hip, "void rsrc_constant_hip(float* __restrict__ X, int n)");
+    EXPECT_IR(hip,
+              "__builtin_amdgcn_make_buffer_rsrc((void*)X, /*stride=*/(short)0, "
+              "/*num_records=*/(int)n, ");
+}
+
 /* ---- dtype-generic buffer_load_vN / buffer_store_vN (Python IRBuilder) ---- */
 
 /* Run `build` on a fresh builder; return the refusal text, or "" when the
@@ -4066,6 +4188,7 @@ const TestCase k_cases[] = {
     {"memory_caps", case_memory_caps},
     {"vmcnt_bits", case_vmcnt_bits},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
+    {"buffer_rsrc_refusals", case_buffer_rsrc_refusals},
     {"buffer_load_vN_generic", case_buffer_load_vN_generic},
     {"buffer_store_vN_generic", case_buffer_store_vN_generic},
     {"buffer_vN_verify", case_buffer_vN_verify},

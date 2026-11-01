@@ -5955,15 +5955,23 @@ class _Lowerer:
         On the modern-flavor path we accept either an ``i32`` or an ``i64``
         ``num_bytes`` operand and ``zext`` ``i32`` callers up; ``i64``
         callers reach the full 64-bit range needed for >4 GiB KV
-        caches that would otherwise OOB-zero at the tail.
+        caches that would otherwise OOB-zero at the tail. LLVM 20 takes only
+        an ``i32``, so any other ``num_bytes`` is refused there: printed as
+        the ``i32`` operand, it would not match its own definition.
+
+        The intrinsic is the ``p1`` overload, so ``ptr`` must be
+        ``ptr addrspace(1)`` in the kernel header. A parameter declared
+        ``addr_space="constant"`` is ``ptr addrspace(4)`` there, and is
+        refused as the global-pointer ops refuse it.
 
         Flags = the target ISA backend's ``buffer_rsrc_word3`` -- the rsrc
         DWORD3 that makes the descriptor bounds-checked. Its encoding is
         ISA-specific (``0x00027000`` on gfx9, ``0x31014000`` on gfx11 /
         gfx12); the HIP lowering takes the same word from the same backend.
         """
-        self._need("make.buffer.rsrc.p1")
         ptr, num_bytes = op.operands
+        self._require_global_header_ptr("buffer_rsrc", ptr)
+        self._need("make.buffer.rsrc.p1")
         if _is_modern_flavor(self._flavor):
             intrinsic = "llvm.amdgcn.make.buffer.rsrc.p8.p1"
             nb_ty = _llvm_type(num_bytes.type)
@@ -5981,6 +5989,13 @@ class _Lowerer:
             nb_text = f"i64 {nb_arg}"
         else:
             intrinsic = "llvm.amdgcn.make.buffer.rsrc.p1"
+            nb_ty = _llvm_type(num_bytes.type)
+            if nb_ty != "i32":
+                raise ValueError(
+                    f"tile.buffer_rsrc num_bytes must be i32 at llvm20, got {nb_ty}; "
+                    "the llvm20 make.buffer.rsrc takes an i32 num_records, so pass "
+                    "the byte count as i32"
+                )
             nb_text = f"i32 {self._operand(num_bytes)}"
         word3 = self._backend.buffer_rsrc_word3
         self._current().emit(

@@ -2292,6 +2292,19 @@ class _Lowerer:
         # the right word, out-of-range byte offsets return 0 on load and are
         # dropped on store; without it the compiler can lower buffer loads to
         # unbounded single-dword loads with no bounds check.
+        #
+        # ``num_records`` is an ``int``, so the ``(int)`` cast would truncate an
+        # i64 byte count at every LLVM version; anything but i32 is refused.
+        # The C++ engine refuses with the same text. A constant-space ``ptr``
+        # is kept: the HIP signature declares every pointer parameter the same
+        # way whatever its ``addr_space``, and the builtin takes a ``void*``.
+        nb_ty = op.operands[1].type.name
+        if nb_ty != "i32":
+            raise ValueError(
+                f"tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
+                f"{nb_ty}; the HIP builtin takes an int num_records, so the byte "
+                "count would be truncated at every LLVM version; pass it as i32"
+            )
         ptr, num_bytes = op.operands
         word3 = backend_for(self.arch).buffer_rsrc_word3
         self._emit(

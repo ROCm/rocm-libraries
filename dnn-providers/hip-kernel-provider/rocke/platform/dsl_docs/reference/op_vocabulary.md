@@ -154,6 +154,14 @@ access of 4 bytes or more per 4-byte component and a 1- or 2-byte access whole: 
 `num_records` reads 0, a store past it writes nothing. The HIP lowering has no vector type for u8 or
 i64 elements, so those two lower through LLVM only.
 
+`buffer_rsrc` takes a global pointer: the intrinsic's overload names `ptr addrspace(1)`, so a
+parameter declared `addr_space="constant"` (`ptr addrspace(4)` in the kernel header) is refused by
+the LLVM lowering of both engines, as the `global_ptr_*` ops refuse it. `num_bytes` is i32 or i64 at
+llvm22 and later (an i32 is zero-extended); llvm20's intrinsic takes an i32 `num_records`, so an i64
+`num_bytes` is refused there. The HIP lowering's `__builtin_amdgcn_make_buffer_rsrc` takes an `int`
+`num_records` at every LLVM version, so it refuses any `num_bytes` but i32; it keeps a constant-space
+pointer, since the HIP signature declares every pointer parameter alike and the builtin takes a `void*`.
+
 ## MFMA
 
 | Op name                          | Operands (per-lane)              | Output (per-lane) |
