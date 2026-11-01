@@ -76,8 +76,12 @@ void rocsolver_geqlf_getMemorySize(const rocblas_int m,
         // size to store the temporary triangular factor
         *size_Abyx_norms_trfact = sizeof(T) * jb * jb * batch_count;
 
-        // requirements for calling GEQL2 with sub blocks
-        rocsolver_geql2_getMemorySize<BATCHED, T>(m, jb, batch_count, size_scalars, &w1, &s2, &s1);
+        // requirements for calling GEQL2 with sub blocks; for the last block, geql2 may be called
+        // with up to n - j_last columns where j_last = ceil((dim - SWITCHSIZE) / jb) * jb
+        rocblas_int dim = std::min(m, n);
+        rocblas_int j_last = ((dim - GEQxF_GEQx2_SWITCHSIZE + jb - 1) / jb) * jb;
+        rocsolver_geql2_getMemorySize<BATCHED, T>(m, std::max(jb, n - j_last), batch_count,
+                                                  size_scalars, &w1, &s2, &s1);
         *size_Abyx_norms_trfact = std::max(s2, *size_Abyx_norms_trfact);
 
         // requirements for calling LARFT
