@@ -3442,7 +3442,9 @@ rocblaslt_status
         static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "PredictionMatching"});
 
         // Try to get size independent solutions from getAllSolutions()
-        if(requestedAlgoCount > results.size())
+        // A grouped GEMM with no output tiles has nothing to top up, and the
+        // scan would walk the library (ROCM-33326).
+        if(requestedAlgoCount > results.size() && groupedGemmHasOutputTiles(gemmType, gemmData))
         {
             // set excluded lib here: if the #-returned < #-requested, we'll call getAll.
             // But in that case, we don't need to get GridBased or Prediction which are already returned here

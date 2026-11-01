@@ -239,6 +239,11 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
 
+// False when gemmType is a grouped GEMM and no member has an output tile
+// (M = 0 or N = 0). K = 0 still counts as work. Non-grouped calls are true.
+bool groupedGemmHasOutputTiles(rocblaslt::RocGemmType       gemmType,
+                               const std::shared_ptr<void>& gemmData);
+
 /**
  * Tops heuristicResultsArray up to requestedAlgoCount from the size-independent
  * libraries, as hipblasLtMatmulAlgoGetHeuristic does when the ranked libraries
