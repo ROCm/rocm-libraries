@@ -845,6 +845,35 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     }
   }
 
+  // gfx1250: with the real CUOccupancy every big streaming tile runs one WG per CU, and the fixed
+  // per-tile terms then rank the fewest rounds first by 1-3%, inside the model error for these
+  // kernels (bf16 tall-skinny sweeps on gfx1250). Among memory-bound near-ties take the finer
+  // split. Compute-bound picks keep the model order, the same rule costs big LLM tiles up to 28%.
+  if (hardware.arch == hardware_t::architecture_t::gfx1250 && results.size() > 1) {
+    constexpr double GFX1250_MEM_TIE_BAND = 0.02;
+
+    auto mem_bound = [&](const config_t& c) {
+      gemm::context_t ctx(problem, hardware, c);
+      return gemm::compute_memory_latency(problem, hardware, c, ctx) >
+             static_cast<double>(gemm::compute_mt_compute_latency(problem, hardware, c));
+    };
+    if (mem_bound(results.front().config)) {
+      const double limit = results.front().latency * (1.0 + GFX1250_MEM_TIE_BAND);
+      size_t best        = 0;
+      size_t best_ts     = gemm::context_t(problem, hardware, results.front().config).num_timesteps;
+      for (size_t i = 1; i < results.size() && results[i].latency <= limit; ++i) {
+        const auto& c   = results[i].config;
+        const size_t ts = gemm::context_t(problem, hardware, c).num_timesteps;
+        if (ts > best_ts && mem_bound(c)) {
+          best    = i;
+          best_ts = ts;
+        }
+      }
+      if (best > 0)
+        std::rotate(results.begin(), results.begin() + best, results.begin() + best + 1);
+    }
+  }
+
   OLOG_DEBUG("rank_configs selected MT=(" << results[0].config.mt.m << "," << results[0].config.mt.n
                                           << "," << results[0].config.mt.k << ")"
                                           << " latency=" << results[0].latency);
