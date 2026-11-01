@@ -16,6 +16,7 @@ Documentation for hipSPARSE is available at
 * Removed the no-op `deps` CMake project and the unused `deps/external-gtest.cmake`.
 
 ### Resolved issues
+* Fixed missing documentation in IDEs, clangd and libclang-based binding generators. Every S/D/C/Z variant of a routine family now carries the family's documentation instead of only the first variant, and the documentation of the generic API functions and types, `hipsparseStatus_t` and `hipsparseCsr2CscAlg_t` is now attached to their declarations. Corrected the documentation of `hipsparseXgtsv2_bufferSizeExt`, `hipsparseXgebsr2gebsc_bufferSize` and `hipsparseXpruneDense2csr_bufferSizeExt`.
 * Fixed an integer overflow in `hipsparseXcsr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion.
 
 ## hipSPARSE 4.8.0 for ROCm 10.1
