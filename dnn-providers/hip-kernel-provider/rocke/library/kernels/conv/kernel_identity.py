@@ -355,6 +355,10 @@ class KernelIdentity:
     m_band: int = 0
     # fwd and dgrad (ImplicitGemmConvSpec.xh_stride_m, DgradConvSpec.xh_stride_m). Left out of the hash while False.
     xh_stride_m: bool = False
+    # fwd only (ImplicitGemmConvSpec.fxh_dma). Left out of the hash at 0.
+    fxh_dma: int = 0
+    # fwd only (ImplicitGemmConvSpec.xh_yring). Left out of the hash at 0.
+    xh_yring: int = 0
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
     # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
@@ -567,7 +571,7 @@ class KernelIdentity:
             "epi_store_fast", "split_zero_first", "pp_fetch_deep",
             "pp_split_fetch", "fb_skip_empty", "pp_end_guard",
             "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact",
-            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m",
+            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring",
         ):
             if not fields[name]:
                 del fields[name]

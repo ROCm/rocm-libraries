@@ -732,6 +732,39 @@ class ImplicitGemmConvSpec:
     # fallback loops keep the default map). Needs Wo % mfmas_m == 0 (per
     # workgroup, with the other x-halo conditions). Tags ``xsm``.
     xh_stride_m: bool = False
+    # x-halo loop with direct-to-LDS staging (fwd only): the A (input halo
+    # rows) and B (the X taps' weight rows) tiles of the next (chunk, z, y)
+    # step are DMA'd straight into LDS with buffer_load_dword ... lds (4 bytes
+    # per lane, lane-contiguous 256-byte LDS segments; each lane fetches the
+    # global dword that the xh_stride_m / lds_xor layout puts there), so no
+    # VGPR staging and no ds_write. Per step: all fragment reads of the three
+    # taps, lgkmcnt(0) + barrier, the next step's DMA, the 3-tap MFMAs from
+    # registers, vmcnt(0) + barrier. Same LDS as the register-staged loop.
+    # Needs xh_stride_m, lds_kpack_read, tile_k 32, no defer_mfma /
+    # vmem_interleave. 0 = off. Tags ``fxd<n>``. Values (schedules):
+    #   1  reads, barrier, DMA (guarded), all MFMAs;  2  last tap's MFMAs
+    #   deferred into the next step;  3  1 with the DMA interleaved (1 per 3
+    #   MFMAs);  4-8  tap 0's MFMAs before the barrier, DMA 1 per 2 / 1 / burst
+    #   / 1 per 3 MFMAs (6: taps 0-1 before);  9  A reads, barrier, A DMA,
+    #   B reads, barrier, B DMA;  10-12, 16-99  barrier after n MFMAs of the
+    #   step (10: 16, 11: 24, 12: 8, else n), 1 DMA per 2 MFMAs; +100*k: 1 DMA
+    #   per k MFMAs;  1000 + n  wave-private A ranges (each wave DMAs its own
+    #   rows once its A reads are done, no barrier for A; needs Wo % 64 == 0 per
+    #   workgroup and xh_wait_smem), barrier after n MFMAs, then B's DMA;
+    #   2000 + n  as 1000 + n with part of A's DMA after the barrier.
+    #   Measured best (round 5): 1036, 1040, 2016, 2020.
+    fxh_dma: int = 0
+    # fxh_dma >= 1000 with the input-row ring across the y taps (fwd x-halo,
+    # tapf order: y fastest within (chunk, z)): a tile of R = xh_yring whole
+    # output rows stages R input rows (one wave range per wave); tap y + 1
+    # needs rows r0 + y + 1 .. r0 + y + R, of which R - 1 are already in LDS,
+    # so the waves' ranges rotate through the regions and only the new row is
+    # DMA'd (spread over all waves) -- A bytes per (chunk, z) R + 2 rows
+    # instead of 3R. The y = 2 step reloads every region for the next (chunk,
+    # z). All DMA after the step's mid barrier. Needs uk_tap_fast without
+    # chunk groups, warp_n 1; per workgroup Wo * R == tile_m, whole tiles per
+    # output plane and Y == 3 (else the plain loop). 0 = off. Tags ``xyr<R>``.
+    xh_yring: int = 0
 
     @property
     def block_size(self) -> int:
@@ -870,6 +903,8 @@ class ImplicitGemmConvSpec:
                 "nag": self.no_agpr,
                 f"mb{self.m_band}": self.m_band > 0,
                 "xsm": self.xh_stride_m,
+                f"fxd{self.fxh_dma}": self.fxh_dma > 0,
+                f"xyr{self.xh_yring}": self.xh_yring > 0,
                 f"eqx{self.epi_quad_xpose}": self.epi_quad_xpose > 0,
                 "nopad": self.uk_nopad,
                 f"dpw{self.defer_mfma_per_write}": self.defer_mfma_per_write > 0,
@@ -1061,8 +1096,8 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
         return _sched_why
     if spec.xcd_remap and spec.chiplet_swizzle:
         return "xcd_remap and chiplet_swizzle both remap the grid; set one"
-    if spec.m_band < 0 or (spec.m_band and (not spec.xcd_remap or spec.split_tail)):
-        return "m_band needs xcd_remap (and no split_tail)"
+    if spec.m_band < 0 or (spec.m_band and not spec.xcd_remap):
+        return "m_band needs xcd_remap"
     if spec.lds_xor:
         if not (spec.uniform_k_decode or spec.reg_prefetch or _fwd_pfr_single_buffer(spec)):
             return (
@@ -1200,6 +1235,22 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
     ):
         return ("xh_stride_m needs uk_xhalo (a multiple of 4), epi_quad_xpose 3/4, mfmas_per_warp_m >= 2 "
                 "and no xh_dpp / rpf_pingpong")
+    if spec.fxh_dma < 0 or (spec.fxh_dma and not (
+        spec.xh_stride_m and spec.lds_kpack_read and spec.lds_xor and spec.tile_k == 32
+        and not spec.defer_mfma and not spec.vmem_interleave and spec.split_k <= 1
+    )):
+        return ("fxh_dma needs xh_stride_m, lds_kpack_read, lds_xor, tile_k 32 and no "
+                "defer_mfma / vmem_interleave / split_k")
+    if spec.fxh_dma >= 1000 and not (spec.xh_wait_smem and spec.warp_n == 1):
+        # The wave's own A reads are waited for with a partial lgkmcnt, which
+        # needs no scalar load in flight (xh_wait_smem retires them).
+        return "fxh_dma >= 1000 (wave-private A) needs xh_wait_smem and warp_n 1"
+    if spec.xh_yring and not (
+        spec.xh_yring % 10 in (2, 4) and spec.xh_yring // 10 in (0, 1, 2)
+        and spec.fxh_dma >= 1000 and spec.uk_tap_fast
+        and not spec.uk_chunk_group and spec.warp_m % (spec.xh_yring % 10) == 0
+    ):
+        return "xh_yring (2 or 4 rows, + 10: early reload, + 20: also early ring rows) needs fxh_dma >= 1000, uk_tap_fast without chunk groups, warp_m % rows == 0"
     if spec.rpf_fetch_late and (
         spec.reg_prefetch != 1 or spec.vmem_interleave or spec.a_direct
     ):
@@ -1610,9 +1661,19 @@ def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
 _XHALO_TAPS = 3
 
 
+def _fxd_wave_rows(spec: "ImplicitGemmConvSpec") -> int:
+    """fxh_dma >= 1000: LDS rows of one wave's private x-halo A range (its M
+    extent plus the X - 1 halo pixels, whole groups of 4)."""
+    return -(-(spec.tile_m // spec.warp_m + _XHALO_TAPS - 1) // 4) * 4
+
+
 def _xhalo_a_rows(spec: "ImplicitGemmConvSpec") -> int:
     """A LDS rows: tile_m (or, with uk_xhalo, the staged range of tile_m +
     uk_xhalo pixels plus one scratch row the loader's surplus chunks write)."""
+    if spec.uk_xhalo and spec.xh_stride_m and spec.fxh_dma >= 1000:
+        # fxh_dma >= 1000: one private x-halo range per wave row (xh_yring:
+        # plus one 4-row scratch segment for the surplus DMA slots)
+        return spec.warp_m * _fxd_wave_rows(spec) + (4 if spec.xh_yring else 0)
     if spec.uk_xhalo and spec.xh_stride_m:
         # whole groups of 4 rows (the xh_stride_m layout rotates rows in them)
         return -(-(spec.tile_m + spec.uk_xhalo + 1) // 4) * 4
@@ -2508,7 +2569,18 @@ def _build_implicit_gemm_conv_impl(
                 b, wgid_flat, num_wgs=num_wgs, num_xcds=spec.xcd_remap
             )
         _mt = b.div(logical, p_num_pid_n)
-        if spec.m_band:
+        if spec.m_band and spec.split_tail:
+            # Band order over the full tiles' whole M rows only (a
+            # bijection of them); the split tail keeps launch order.
+            _mt = b.select(
+                b.cmp_lt(wgid_flat, p_full_tiles),
+                emit_m_band_order(
+                    b, _mt, num_m_tiles=b.div(p_full_tiles, p_num_pid_n),
+                    plane=b.mul(p_Ho, p_Wo), tile_m=block_m, m_band=spec.m_band,
+                ),
+                _mt,
+            )
+        elif spec.m_band:
             # Output-plane band order (kernels/common/conv_m_band.py).
             _mt = emit_m_band_order(
                 b, _mt, num_m_tiles=p_num_pid_m, plane=b.mul(p_Ho, p_Wo),
@@ -3252,6 +3324,8 @@ def _build_implicit_gemm_conv_impl(
         rmask = b_.land(row, b_.const_i32(block_k // 8 - 1))
         return b_.xor(col, b_.shl(rmask, b_.const_i32(3)))
 
+    _xa_ring = {"off": None}
+
     def _xa(b_: IRBuilder, row: Value, col: Value):
         """xh_stride_m: LDS (row, col) of x-halo A element (row, col): row bit 0
         flipped by row bit 2 (which half of a 128-byte bank line the row
@@ -3261,6 +3335,9 @@ def _build_implicit_gemm_conv_impl(
         hi = b_.lshr(row, b_.const_i32(2))
         prow = b_.xor(row, b_.land(hi, b_.const_i32(1)))
         key = b_.land(hi, b_.const_i32(3))
+        if _xa_ring["off"] is not None:
+            # xh_yring: rows are region-local (keys too); + the region's base row
+            prow = b_.add(prow, _xa_ring["off"])
         return prow, b_.xor(col, b_.shl(key, b_.const_i32(3)))
 
     # a_direct: per lane, the a_per_lane * k_atoms k-contiguous elements of
@@ -5048,6 +5125,695 @@ def _build_implicit_gemm_conv_impl(
             b.sync_half_block(lo_half)
             return list(for_op.results)[:n_acc]
 
+        def _emit_xhalo_dma(accs_in, st0, xh_ok, xh_hi, xh_uniforms, xh_adv, base_rows, XT,
+                            R, span, a_base0, lin_of=None, m0=None):
+            """fxh_dma: the uk_xhalo loop with direct-to-LDS staging (see
+            ImplicitGemmConvSpec.fxh_dma). Returns the accumulators."""
+            from rocke.core.ir import I64
+            c64 = b.const_i32(64)
+            n_waves = spec.warp_m * spec.warp_n
+            lane_ = b.mod(tid, c64)
+            # wave-uniform: the DMA LDS bases (M0) stay scalar, loop-invariant
+            wave_ = b.to_sgpr_u32(b.div(tid, c64))
+            l16 = b.div(lane_, b.const_i32(16))            # row within a 4-row segment
+            lch = b.div(b.mod(lane_, b.const_i32(16)), b.const_i32(4))  # LDS 16-byte chunk
+            ldw = b.mod(lane_, b.const_i32(4))             # dword in the chunk
+            c_oob = b.const_i32((1 << 31) - 1)
+            c2 = b.const_i32(2)
+            c_eb = c2  # bf16 / fp16 bytes
+            row_bytes = block_k * 2
+            assert row_bytes == 64
+            A_addr = b.smem_addr_of(A_smem)
+            B_addr = b.smem_addr_of(B_smem)
+
+            def segs(n_seg):
+                # segment s = j * n_waves + wave; the last round's surplus
+                # waves repeat the last segment (same bytes, benign).
+                out = []
+                for j in range(-(-n_seg // n_waves)):
+                    sg = b.add(b.const_i32(j * n_waves), wave_)
+                    if (j + 1) * n_waves > n_seg:
+                        sg = b.smin(sg, b.const_i32(n_seg - 1))
+                    out.append(sg)
+                return out
+
+            # A: physical rows 4s..4s+3 of the xh_stride_m layout; logical row
+            # = prow ^ ((prow >> 2) & 1), chunk = pchunk ^ ((prow >> 2) & 3).
+            a_dma = []
+            _wp = spec.fxh_dma >= 1000
+            if _wp:
+                # Wave-private A: wave w DMAs its own rows [WR*w, WR*(w+1)), the
+                # input pixels lin(first pixel of the wave) + rel.
+                WR = _fxd_wave_rows(spec)
+                w_m0 = b.add(m0, b.mul(wave_, b.const_i32(spec.tile_m // spec.warp_m)))
+                a_base_w = b.mul(lin_of(b, w_m0), s_wi)
+                if grouped:
+                    a_base_w = b.add(a_base_w, a_gbase)
+                # Segment j holds rows 4j .. 4j+3 of the range: physical row
+                # 4(WR/4 * w + j) + l16, logical (xh_stride_m) row bit 0 flipped
+                # by (w + j) & 1 (WR/4 is odd... or even: use it exactly) and
+                # chunk ^ (WR/4 * w + j) & 3 -- four lane patterns, picked by
+                # j % 4, plus a per-segment uniform offset.
+                hp = spec.tile_m // spec.warp_m + XT - 1
+                w_seg = b.mul(wave_, b.const_i32(WR // 4))
+                pats = []
+                for k in range(4):
+                    g = b.add(w_seg, b.const_i32(k))
+                    rel0 = b.xor(l16, b.land(g, c1))
+                    chunk = b.xor(lch, b.land(g, b.const_i32(3)))
+                    o = b.add(b.mul(rel0, s_wi), b.add(b.mul(chunk, b.const_i32(8)), b.mul(ldw, c2)))
+                    pats.append((rel0, b.mul(o, c_eb)))
+                for j in range(WR // 4):
+                    sg = b.add(w_seg, b.const_i32(j))
+                    rel0, o = pats[j % 4]
+                    ubase = b.to_sgpr_u32(b.mul(b.add(a_base_w, b.mul(b.const_i32(4 * j), s_wi)), c_eb))
+                    voff = b.add(o, ubase)
+                    if 4 * j + 3 >= hp:
+                        voff = b.select(b.cmp_lt(b.add(rel0, b.const_i32(4 * j)), b.const_i32(hp)),
+                                        voff, c_oob)
+                    lds = b.smem_ptr_add(A_addr, b.zext(b.mul(sg, b.const_i32(4 * row_bytes)), I64))
+                    a_dma.append((lds, voff))
+            for sg in ([] if _wp else segs(-(-R // 4))):
+                prow = b.add(b.mul(sg, b.const_i32(4)), l16)
+                hi = b.lshr(prow, c2)
+                row = b.xor(prow, b.land(hi, c1))
+                chunk = b.xor(lch, b.land(hi, b.const_i32(3)))
+                col = b.add(b.mul(chunk, b.const_i32(8)), b.mul(ldw, c2))
+                off = b.add(b.add(a_base0, b.mul(row, s_wi)), col)
+                voff = b.select(b.cmp_lt(row, span), b.mul(off, c_eb), c_oob)
+                lds = b.smem_ptr_add(A_addr, b.zext(b.mul(sg, b.const_i32(4 * row_bytes)), I64))
+                a_dma.append((lds, voff))
+            # B: rows (x, n) of the lds_xor layout; chunk = pchunk ^ (key(row) & 3).
+            _sh = 0 if spec.lds_xor_rowkey else 1
+            b_dma = []
+            c_tn = b.const_i32(block_n)
+            _bcheap = _wp and n_waves == 4 and block_n == 64
+            if _bcheap:
+                # segment s = 4j + w: rows 16j + 4w + l16 -> x tap j // 4,
+                # channel row 16 (j % 4) + 4w + l16, chunk key independent of j.
+                key = b.lshr(b.add(b.mul(wave_, b.const_i32(4)), l16), b.const_i32(_sh)) if _sh else l16
+                chunk = b.xor(lch, b.land(key, b.const_i32(3)))
+                col = b.add(b.mul(chunk, b.const_i32(8)), b.mul(ldw, c2))
+                bpats = []
+                for k in range(4):
+                    nloc = b.add(b.const_i32(16 * k), b.add(b.mul(wave_, b.const_i32(4)), l16))
+                    k_out = b.add(block_n_off_v, _eqx_chan(b, nloc))
+                    if grouped:
+                        k_out = b.add(k_out_group_base, k_out)
+                    bpats.append(b.mul(b.add(b.mul(k_out, p_B_stride_k), col), c_eb))
+                for j in range(XT * block_n // 16):
+                    sg = b.add(b.const_i32(4 * j), wave_)
+                    ub = b.to_sgpr_u32(b.mul(b.mul(b.const_i32(j // 4), p_B_stride_x), c_eb))
+                    lds = b.smem_ptr_add(B_addr, b.zext(b.mul(sg, b.const_i32(4 * row_bytes)), I64))
+                    b_dma.append((lds, b.add(bpats[j % 4], ub)))
+            for sg in ([] if _bcheap else segs(XT * block_n // 4)):
+                prow = b.add(b.mul(sg, b.const_i32(4)), l16)
+                key = b.lshr(prow, b.const_i32(_sh)) if _sh else prow
+                chunk = b.xor(lch, b.land(key, b.const_i32(3)))
+                col = b.add(b.mul(chunk, b.const_i32(8)), b.mul(ldw, c2))
+                x_ = b.div(prow, c_tn)
+                k_out = b.add(block_n_off_v, _eqx_chan(b, b.mod(prow, c_tn)))
+                if grouped:
+                    k_out = b.add(k_out_group_base, k_out)
+                off = b.add(b.add(b.mul(k_out, p_B_stride_k), b.mul(x_, p_B_stride_x)), col)
+                lds = b.smem_ptr_add(B_addr, b.zext(b.mul(sg, b.const_i32(4 * row_bytes)), I64))
+                b_dma.append((lds, b.mul(off, c_eb)))
+
+            def dma_sel(has_next, st1, st):
+                # Unconditional DMA (same basic block as the MFMAs, so it can
+                # interleave with them): past the last step it re-fetches the
+                # current step into the free LDS (never read again).
+                return [b.select(has_next, u, v) for u, v in zip(st1, st)]
+
+            def hint_interleave(n_first, n_other, other, n_mf, per):
+                # n_first of group `other` first, then (1 MFMA... ) pattern:
+                # one `other` per `per` MFMAs until both run out.
+                if n_first:
+                    b.sched_group_barrier(other, n_first, 0)
+                n_o = n_other
+                while n_mf > 0:
+                    take = min(per, n_mf)
+                    b.sched_group_barrier(MFMA, take, 0)
+                    n_mf -= take
+                    if n_o:
+                        b.sched_group_barrier(other, 1, 0)
+                        n_o -= 1
+                if n_o:
+                    b.sched_group_barrier(other, n_o, 0)
+
+            def dma(st):
+                a_off, b_off, _t_ok = xh_uniforms(st)
+                sa = b.to_sgpr_u32(b.mul(a_off, c_eb))
+                sb = b.to_sgpr_u32(b.mul(b_off, c_eb))
+                for lds, voff in a_dma:
+                    b.async_buffer_load_lds_addr(a_rsrc, lds, voff, sa, 1)
+                for lds, voff in b_dma:
+                    b.async_buffer_load_lds_addr(b_rsrc, lds, voff, sb, 1)
+
+            n_acc = len(accs_in)
+            n_mf = k_atoms * mfmas_m * mfmas_n
+
+            def reads():
+                frs, prev = [], None
+                for x in range(XT):
+                    rows = base_rows if x == 0 else [b.add(r, b.const_i32(x)) for r in base_rows]
+                    rec, fr = {}, []
+                    emit_mfma_phase(A_smem, B_smem, list(accs_in), a_lds_rows=rows,
+                                    b_row_off=x * block_n, a_shift_prev=prev, a_rec=rec,
+                                    pp_read=fr)
+                    prev = rec
+                    frs.append(fr)
+                return frs
+
+            def reads_part(a_part):
+                # Only the A (a_part) or only the B fragments of the 3 taps.
+                frs, prev = [], None
+                for x in range(XT):
+                    rows = base_rows if x == 0 else [b.add(r, b.const_i32(x)) for r in base_rows]
+                    rec, fr = {}, []
+                    if a_part:
+                        _pp_part["b_from"] = 0
+                    else:
+                        _pp_part["b_only"] = True
+                    emit_mfma_phase(A_smem, B_smem, list(accs_in), a_lds_rows=rows,
+                                    b_row_off=x * block_n,
+                                    a_shift_prev=prev if a_part else None,
+                                    a_rec=rec if a_part else None, pp_read=fr)
+                    _pp_part["b_from"] = None
+                    _pp_part["b_only"] = False
+                    prev = rec
+                    frs.append(fr)
+                return frs
+
+            def mfmas(acc, frs):
+                for fr in frs:
+                    acc = emit_mfma_phase(A_smem, B_smem, acc, pp_use=(fr, 0, n_mf))
+                return acc
+
+            def _xhalo_dma_yring():
+                """xh_yring (see ImplicitGemmConvSpec.xh_yring): the wave-private
+                fxd loop, unrolled over the 3 y taps of a (chunk, z), with the
+                input-row ring. Region keys are region-local, so a segment's lane
+                pattern depends only on its index in the region."""
+                RR = spec.xh_yring % 10
+                # + 10: the y = 2 step's reload goes out before the mid barrier,
+                # each wave refilling the region it read itself (no other reader)
+                early = spec.xh_yring // 10 in (1, 2)
+                # + 20: also the y = 0, 1 steps' new row before the barrier, by the
+                # row-0 waves (the only readers of the region it replaces), in a
+                # wave-uniform branch
+                early_ring = spec.xh_yring // 10 == 2
+                QQ = spec.warp_m // RR
+                WR = _fxd_wave_rows(spec)
+                NSEG = WR // 4
+                WEXT = spec.tile_m // spec.warp_m
+                hp = WEXT + XT - 1
+                c_hp = b.const_i32(hp)
+                c_seg = b.const_i32(4 * row_bytes)
+                lp = []
+                for k in range(4):
+                    rel0 = b.xor(l16, b.const_i32(k & 1))
+                    chunk = b.xor(lch, b.const_i32(k))
+                    o = b.add(b.mul(rel0, s_wi), b.add(b.mul(chunk, b.const_i32(8)), b.mul(ldw, c2)))
+                    lp.append((rel0, b.mul(o, c_eb)))
+
+                def a_base_of(m_rel):
+                    v = b.mul(lin_of(b, b.add(m0, m_rel)), s_wi)
+                    return b.add(v, a_gbase) if grouped else v
+
+                def lds_at(seg):
+                    return b.smem_ptr_add(A_addr, b.zext(b.mul(seg, c_seg), I64))
+
+                # own region (prologue, and the y = 2 step's reload for the next (chunk, z))
+                a_base_w = a_base_of(b.mul(wave_, b.const_i32(WEXT)))
+                own = []
+                for j in range(NSEG):
+                    rel0, o = lp[j % 4]
+                    ub = b.to_sgpr_u32(b.mul(b.add(a_base_w, b.mul(b.const_i32(4 * j), s_wi)), c_eb))
+                    voff = b.add(o, ub)
+                    if 4 * j + 3 >= hp:
+                        voff = b.select(b.cmp_lt(b.add(rel0, b.const_i32(4 * j)), c_hp), voff, c_oob)
+                    own.append((("own", j, None), voff))
+                # ring: the new row's ranges (wave rows RR - 1, column part cw), segments
+                # j = wave + 4i of each, written into the region the row-0 wave read
+                vq = b.land(wave_, b.const_i32(3))
+                rel_v, o_v = lp[3]
+                for k in (2, 1, 0):
+                    is_k = b.cmp_eq(vq, b.const_i32(k))
+                    rel_v = b.select(is_k, lp[k][0], rel_v)
+                    o_v = b.select(is_k, lp[k][1], o_v)
+                n_slot = -(-NSEG // 4)
+                scratch = b.const_i32(spec.warp_m * NSEG)
+                ring_v, ring_seg = [], []
+                for cw in range(QQ):
+                    src = a_base_of(b.const_i32(((RR - 1) * QQ + cw) * WEXT))
+                    for i in range(n_slot):
+                        j_s = b.add(wave_, b.const_i32(4 * i))
+                        ub = b.to_sgpr_u32(b.mul(b.add(src, b.mul(b.mul(j_s, b.const_i32(4)), s_wi)), c_eb))
+                        voff = b.add(o_v, ub)
+                        if 4 * (4 * i + 3) + 3 >= hp:
+                            ok = b.land(b.cmp_lt(j_s, b.const_i32(NSEG)),
+                                        b.cmp_lt(b.add(rel_v, b.mul(j_s, b.const_i32(4))), c_hp))
+                            voff = b.select(ok, voff, c_oob)
+                        ring_v.append(voff)
+                        ring_seg.append((cw, i, j_s))
+                if _bcheap:
+                    b_lazy = [(("w", 4 * j, None), voff) for j, (_l, voff) in enumerate(b_dma)]
+                else:
+                    b_lazy = [(lds, voff) for lds, voff in b_dma]
+                ring = {}
+                for y in range(XT - 1):
+                    lst = []
+                    for voff, (cw, i, j_s) in zip(ring_v, ring_seg):
+                        d = (y % RR) * QQ + cw
+                        inval = None
+                        if 4 * (4 * i + 3) >= 4 * NSEG:
+                            inval = b.to_sgpr_u32(b.select(b.cmp_lt(j_s, b.const_i32(NSEG)), c1, c0))
+                        lst.append((("w", d * NSEG + 4 * i, inval), voff))
+                    ring[y] = lst
+                # early reload: wave w refills region u = D(w, 2) with wave u's range
+                own2 = []
+                if early:
+                    lg0 = (QQ - 1).bit_length()
+                    rw0 = b.lshr(wave_, b.const_i32(lg0)) if lg0 else wave_
+                    u = b.to_sgpr_u32(b.add(b.mul(b.land(b.add(rw0, b.const_i32(2)), b.const_i32(RR - 1)),
+                                                  b.const_i32(QQ)), b.land(wave_, b.const_i32(QQ - 1))))
+                    a_base_u = a_base_of(b.mul(u, b.const_i32(WEXT)))
+                    for j in range(NSEG):
+                        rel0, o = lp[j % 4]
+                        ub = b.to_sgpr_u32(b.mul(b.add(a_base_u, b.mul(b.const_i32(4 * j), s_wi)), c_eb))
+                        voff = b.add(o, ub)
+                        if 4 * j + 3 >= hp:
+                            voff = b.select(b.cmp_lt(b.add(rel0, b.const_i32(4 * j)), c_hp), voff, c_oob)
+                        own2.append((("u", j, None), voff))
+                # reads: region-local rows, + the region's base row per y
+                loc = [b.sub(r, b.mul(grid.warp_m_idx, b.const_i32(WR))) for r in base_rows]
+                lg = (QQ - 1).bit_length()
+                rw = b.lshr(wave_, b.const_i32(lg)) if lg else wave_
+                cwv = b.land(wave_, b.const_i32(QQ - 1))
+                roff = [b.to_sgpr_u32(b.mul(b.add(b.mul(b.land(b.add(rw, b.const_i32(y)), b.const_i32(RR - 1)),
+                                                         b.const_i32(QQ)), cwv), b.const_i32(WR)))
+                        for y in range(XT)]
+
+                def ring_reads(a_part, y):
+                    frs, prev = [], None
+                    _xa_ring["off"] = roff[y] if a_part else None
+                    for x in range(XT):
+                        rows = loc if x == 0 else [b.add(r, b.const_i32(x)) for r in loc]
+                        rec, fr = {}, []
+                        if a_part:
+                            _pp_part["b_from"] = 0
+                        else:
+                            _pp_part["b_only"] = True
+                        emit_mfma_phase(A_smem, B_smem, list(accs_in), a_lds_rows=rows,
+                                        b_row_off=x * block_n,
+                                        a_shift_prev=prev if a_part else None,
+                                        a_rec=rec if a_part else None, pp_read=fr)
+                        _pp_part["b_from"] = None
+                        _pp_part["b_only"] = False
+                        prev = rec
+                        frs.append(fr)
+                    _xa_ring["off"] = None
+                    return frs
+
+                def run_mf(acc, frs, lo, hi):
+                    for x in range(XT):
+                        a_, b_ = max(lo, x * n_mf), min(hi, (x + 1) * n_mf)
+                        if a_ < b_:
+                            acc = emit_mfma_phase(A_smem, B_smem, acc,
+                                                  pp_use=(frs[x], a_ - x * n_mf, b_ - x * n_mf))
+                    return acc
+
+                n_pre_mf = spec.fxh_dma % 1000
+                c_nseg = b.const_i32(NSEG)
+                if early_ring:
+                    # row-0 wave (0, cw = wave): the new row is wave (R - 1, cw)'s range
+                    src_eb = b.to_sgpr_u32(b.mul(a_base_of(b.mul(b.add(wave_, b.const_i32((RR - 1) * QQ)),
+                                                                 b.const_i32(WEXT))), c_eb))
+                    row4_eb = b.to_sgpr_u32(b.mul(b.mul(b.const_i32(4), s_wi), c_eb))
+
+                def issue(lst, rsrc, base_addr, soff, z0):
+                    # LDS destinations computed here from one loop-variant base
+                    # per kind (+ an immediate), not hoisted into SGPRs.
+                    bases = {}
+                    for dst, voff in lst:
+                        if not isinstance(dst, tuple):
+                            b.async_buffer_load_lds_addr(rsrc, dst, voff, soff, 1)
+                            continue
+                        kind, cst, inval = dst
+                        if kind not in bases:
+                            w_ = {"own": b.mul(wave_, c_nseg), "w": wave_}.get(kind)
+                            if w_ is None:
+                                w_ = b.mul(u, c_nseg)
+                            bases[kind] = b.add(w_, z0)
+                        seg = b.add(bases[kind], b.const_i32(cst))
+                        if inval is not None:
+                            seg = b.select(b.cmp_ne(inval, c0), seg, scratch)
+                        b.async_buffer_load_lds_addr(rsrc, lds_at(seg) if base_addr is None
+                                                     else b.smem_ptr_add(base_addr, b.zext(b.mul(seg, c_seg), I64)),
+                                                     voff, soff, 1)
+
+                def body(kv_b, iv_b, y):
+                    st = list(iv_b[n_acc:])
+                    st1 = xh_adv(st)
+                    if spec.rpf_setprio:
+                        b.s_setprio(spec.rpf_setprio)
+                    fa = ring_reads(True, y)
+                    b.sched_barrier(0)
+                    fb = ring_reads(False, y)
+                    frs = [[(fa[x][kk][0], fb[x][kk][1]) for kk in range(k_atoms)]
+                           for x in range(XT)]
+                    if y == XT - 1:
+                        sel = dma_sel(b.cmp_lt(b.add(kv_b, c_block_k), xh_hi), st1, st)
+                        a_list = own
+                    else:
+                        sel = st1
+                        a_list = ring[y]
+                    a_off, b_off, _t = xh_uniforms(sel)
+                    sa = b.to_sgpr_u32(b.mul(a_off, c_eb))
+                    sb = b.to_sgpr_u32(b.mul(b_off, c_eb))
+                    pre = []
+                    z0 = b.to_sgpr_u32(b.lshr(kv_b, b.const_i32(31)))  # 0, loop-variant
+                    if early and y == XT - 1:
+                        # own A reads done -> this wave's refill before the barrier
+                        b.s_waitcnt(lgkmcnt=XT * mfmas_n)
+                        pre, a_list = own2, []
+                        issue(pre, a_rsrc, None, sa, z0)
+                    elif early_ring and y < XT - 1:
+                        b.s_waitcnt(lgkmcnt=XT * mfmas_n)
+                        a_list = []
+                        with b.scf_if(b.cmp_eq(rw, c0)):
+                            obase = b.add(b.mul(wave_, c_nseg), z0)
+                            for j in range(NSEG):
+                                rel0, o = lp[j % 4]
+                                voff = b.add(o, b.add(src_eb, b.mul(b.const_i32(j), row4_eb)))
+                                if 4 * j + 3 >= hp:
+                                    voff = b.select(b.cmp_lt(b.add(rel0, b.const_i32(4 * j)), c_hp),
+                                                    voff, c_oob)
+                                seg = b.add(obase, b.const_i32((y % RR) * QQ * NSEG + j))
+                                b.async_buffer_load_lds_addr(a_rsrc, lds_at(seg), voff, sa, 1)
+                    acc_n = run_mf(list(iv_b[:n_acc]), frs, 0, n_pre_mf)
+                    hint_interleave(0, len(pre), VMEM_READ, n_pre_mf,
+                                    max(1, n_pre_mf // max(1, len(pre))))
+                    b.sync_lds_only(fence="compiler")
+                    issue(a_list, a_rsrc, None, sa, z0)
+                    issue(b_lazy, b_rsrc, B_addr, sb, z0)
+                    acc_n = run_mf(acc_n, frs, n_pre_mf, XT * n_mf)
+                    n_post = len(a_list) + len(b_lazy)
+                    hint_interleave(0, n_post, VMEM_READ, XT * n_mf - n_pre_mf,
+                                    max(1, (XT * n_mf - n_pre_mf) // max(1, n_post) - 1))
+                    if spec.rpf_setprio:
+                        b.s_setprio(0)
+                    b.sync(fence="compiler")
+                    return [*acc_n, *st1]
+
+                with b.scf_if(xh_ok):
+                    a_off0, b_off0, _t0 = xh_uniforms(st0)
+                    sa0 = b.to_sgpr_u32(b.mul(a_off0, c_eb))
+                    sb0 = b.to_sgpr_u32(b.mul(b_off0, c_eb))
+                    issue(own, a_rsrc, None, sa0, c0)
+                    issue(b_lazy, b_rsrc, B_addr, sb0, c0)
+                b.sync()
+                it = [(f"xr_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
+                    ("xr_c", c0), ("xr_y", c0), ("xr_z", c0)
+                ]
+                for_op = b.scf_for_iter(c0, xh_hi, b.const_i32(XT * block_k), it, iv_name="xr_k",
+                                        elide_trailing_barrier=False)
+                with for_op as (kv, iv):
+                    vals = list(iv)
+                    for y in range(XT):
+                        vals = body(b.add(kv, b.const_i32(y * block_k)) if y else kv, vals, y)
+                    b.scf_yield(*vals)
+                return list(for_op.results)[:n_acc]
+
+            if spec.xh_yring:
+                return _xhalo_dma_yring()
+            with b.scf_if(xh_ok):
+                dma(st0)
+            b.sync()
+            n_rd = mfmas_m + (XT - 1) + XT * mfmas_n  # ds_read_b128 per step
+            n_dma = len(a_dma) + len(b_dma)
+            if spec.fxh_dma == 9:
+                # A fragments first, barrier, A's DMA; then the B fragments
+                # (with tap 0's MFMAs), barrier, B's DMA over taps 1-2.
+                it = [(f"xd_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
+                    ("xd_c", c0), ("xd_y", c0), ("xd_z", c0)
+                ]
+                for_op = b.scf_for_iter(c0, xh_hi, c_block_k, it, iv_name="xd_k",
+                                        elide_trailing_barrier=False)
+                with for_op as (kv, iv):
+                    st = list(iv[n_acc:])
+                    st1 = xh_adv(st)
+                    if spec.rpf_setprio:
+                        b.s_setprio(spec.rpf_setprio)
+                    fa = reads_part(True)
+                    b.sync_lds_only(fence="compiler")
+                    sel = dma_sel(b.cmp_lt(b.add(kv, c_block_k), xh_hi), st1, st)
+                    a_off, b_off, _t = xh_uniforms(sel)
+                    sa = b.to_sgpr_u32(b.mul(a_off, c_eb))
+                    sb = b.to_sgpr_u32(b.mul(b_off, c_eb))
+                    for lds, voff in a_dma:
+                        b.async_buffer_load_lds_addr(a_rsrc, lds, voff, sa, 1)
+                    fb = reads_part(False)
+                    frs = [[(fa[x][kk][0], fb[x][kk][1]) for kk in range(k_atoms)]
+                           for x in range(XT)]
+                    acc_n = mfmas(list(iv[:n_acc]), frs[:1])
+                    n_ra = mfmas_m + XT - 1
+                    b.sched_group_barrier(VMEM_READ, len(a_dma), 0)
+                    hint_interleave(mfmas_n, XT * mfmas_n - mfmas_n, DS_READ, n_mf, 3)
+                    b.sync_lds_only(fence="compiler")
+                    for lds, voff in b_dma:
+                        b.async_buffer_load_lds_addr(b_rsrc, lds, voff, sb, 1)
+                    acc_n = mfmas(acc_n, frs[1:])
+                    hint_interleave(0, len(b_dma), VMEM_READ, (XT - 1) * n_mf, 2)
+                    if spec.rpf_setprio:
+                        b.s_setprio(0)
+                    b.sync(fence="compiler")
+                    b.scf_yield(*acc_n, *st1)
+                return list(for_op.results)[:n_acc]
+            if spec.fxh_dma >= 1000:
+                # Wave-private A: the wave's A reads first; once they are done
+                # (lgkmcnt) its own A DMA goes out (no barrier), over the first
+                # n_pre MFMAs; then lgkmcnt(0) + barrier (B is shared) and the
+                # B DMA over the rest; vmcnt(0) + barrier.
+                n_pre_mf = spec.fxh_dma % 1000
+                # >= 2000: only one A DMA per 2 MFMAs before the barrier, the
+                # rest of A's after it, with B's.
+                na_pre = min(len(a_dma), n_pre_mf // 2) if spec.fxh_dma >= 2000 else len(a_dma)
+                n_rb = XT * mfmas_n
+                it = [(f"xd_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
+                    ("xd_c", c0), ("xd_y", c0), ("xd_z", c0)
+                ]
+                for_op = b.scf_for_iter(c0, xh_hi, c_block_k, it, iv_name="xd_k",
+                                        elide_trailing_barrier=False)
+                with for_op as (kv, iv):
+                    st = list(iv[n_acc:])
+                    st1 = xh_adv(st)
+                    if spec.rpf_setprio:
+                        b.s_setprio(spec.rpf_setprio)
+                    fa = reads_part(True)
+                    b.sched_barrier(0)
+                    fb = reads_part(False)
+                    frs = [[(fa[x][kk][0], fb[x][kk][1]) for kk in range(k_atoms)]
+                           for x in range(XT)]
+                    b.s_waitcnt(lgkmcnt=n_rb)
+                    sel = dma_sel(b.cmp_lt(b.add(kv, c_block_k), xh_hi), st1, st)
+                    a_off, b_off, _t = xh_uniforms(sel)
+                    sa = b.to_sgpr_u32(b.mul(a_off, c_eb))
+                    sb = b.to_sgpr_u32(b.mul(b_off, c_eb))
+                    for lds, voff in a_dma[:na_pre]:
+                        b.async_buffer_load_lds_addr(a_rsrc, lds, voff, sa, 1)
+
+                    def run_mf(acc, lo, hi):
+                        for x in range(XT):
+                            a_, b_ = max(lo, x * n_mf), min(hi, (x + 1) * n_mf)
+                            if a_ < b_:
+                                acc = emit_mfma_phase(A_smem, B_smem, acc,
+                                                      pp_use=(frs[x], a_ - x * n_mf, b_ - x * n_mf))
+                        return acc
+                    acc_n = run_mf(list(iv[:n_acc]), 0, n_pre_mf)
+                    hint_interleave(0, na_pre, VMEM_READ, n_pre_mf,
+                                    max(1, n_pre_mf // max(1, na_pre)))
+                    b.sync_lds_only(fence="compiler")
+                    for lds, voff in a_dma[na_pre:]:
+                        b.async_buffer_load_lds_addr(a_rsrc, lds, voff, sa, 1)
+                    for lds, voff in b_dma:
+                        b.async_buffer_load_lds_addr(b_rsrc, lds, voff, sb, 1)
+                    acc_n = run_mf(acc_n, n_pre_mf, XT * n_mf)
+                    n_post = len(a_dma) - na_pre + len(b_dma)
+                    hint_interleave(0, n_post, VMEM_READ, XT * n_mf - n_pre_mf,
+                                    max(1, (XT * n_mf - n_pre_mf) // max(1, n_post) - 1))
+                    if spec.rpf_setprio:
+                        b.s_setprio(0)
+                    b.sync(fence="compiler")
+                    b.scf_yield(*acc_n, *st1)
+                return list(for_op.results)[:n_acc]
+            if spec.fxh_dma in (10, 11, 12) or spec.fxh_dma >= 16:
+                # fxh_dma 4 with the barrier after `n_pre_mf` of the step's
+                # MFMAs (10: 16, 11: 24, 12: 8, >= 16: the value itself); the
+                # rest join the DMA phase.
+                # >= 100: one DMA per (value // 100) MFMAs, barrier after value % 100.
+                n_pre_mf = {10: 16, 11: 24, 12: 8}.get(spec.fxh_dma, spec.fxh_dma % 100)
+                per_dma = spec.fxh_dma // 100 if spec.fxh_dma >= 100 else 2
+                it = [(f"xd_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
+                    ("xd_c", c0), ("xd_y", c0), ("xd_z", c0)
+                ]
+                for_op = b.scf_for_iter(c0, xh_hi, c_block_k, it, iv_name="xd_k",
+                                        elide_trailing_barrier=False)
+                with for_op as (kv, iv):
+                    st = list(iv[n_acc:])
+                    st1 = xh_adv(st)
+                    if spec.rpf_setprio:
+                        b.s_setprio(spec.rpf_setprio)
+                    frs = reads()
+
+                    def run_mf(acc, lo, hi):
+                        # MFMAs [lo, hi) of the step, counted tap-major.
+                        for x in range(XT):
+                            a_, b_ = max(lo, x * n_mf), min(hi, (x + 1) * n_mf)
+                            if a_ < b_:
+                                acc = emit_mfma_phase(A_smem, B_smem, acc,
+                                                      pp_use=(frs[x], a_ - x * n_mf, b_ - x * n_mf))
+                        return acc
+                    acc_n = run_mf(list(iv[:n_acc]), 0, n_pre_mf)
+                    n_first = mfmas_m + mfmas_n
+                    hint_interleave(n_first, n_rd - n_first, DS_READ, n_pre_mf,
+                                    max(1, n_pre_mf // max(1, n_rd - n_first)))
+                    b.sync_lds_only(fence="compiler")
+                    dma(dma_sel(b.cmp_lt(b.add(kv, c_block_k), xh_hi), st1, st))
+                    acc_n = run_mf(acc_n, n_pre_mf, XT * n_mf)
+                    hint_interleave(0, n_dma, VMEM_READ, XT * n_mf - n_pre_mf, per_dma)
+                    if spec.rpf_setprio:
+                        b.s_setprio(0)
+                    b.sync(fence="compiler")
+                    b.scf_yield(*acc_n, *st1)
+                return list(for_op.results)[:n_acc]
+            if spec.fxh_dma in (4, 5, 6, 7, 8):
+                # fxh_dma 3 with the first x tap's MFMAs before the barrier,
+                # over the other taps' fragment reads (tap 0's are read first).
+                # 4: tap 0 before, one DMA per 2 MFMAs; 5: one per MFMA;
+                # 6: taps 0-1 before, one per MFMA; 7: tap 0 before, DMA burst.
+                n_pre, per_g = {4: (1, 2), 5: (1, 1), 6: (2, 1), 7: (1, 0), 8: (1, 3)}[spec.fxh_dma]
+                it = [(f"xd_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
+                    ("xd_c", c0), ("xd_y", c0), ("xd_z", c0)
+                ]
+                for_op = b.scf_for_iter(c0, xh_hi, c_block_k, it, iv_name="xd_k",
+                                        elide_trailing_barrier=False)
+                with for_op as (kv, iv):
+                    st = list(iv[n_acc:])
+                    st1 = xh_adv(st)
+                    if spec.rpf_setprio:
+                        b.s_setprio(spec.rpf_setprio)
+                    frs = reads()
+                    acc_n = mfmas(list(iv[:n_acc]), frs[:n_pre])
+                    n_first = mfmas_m + mfmas_n
+                    hint_interleave(n_first, n_rd - n_first, DS_READ, n_pre * n_mf,
+                                    max(1, (n_pre * n_mf) // max(1, n_rd - n_first)))
+                    b.sync_lds_only(fence="compiler")
+                    dma(dma_sel(b.cmp_lt(b.add(kv, c_block_k), xh_hi), st1, st))
+                    acc_n = mfmas(acc_n, frs[n_pre:])
+                    if per_g:
+                        hint_interleave(0, n_dma, VMEM_READ, (XT - n_pre) * n_mf, per_g)
+                    else:
+                        hint_interleave(n_dma, 0, VMEM_READ, (XT - n_pre) * n_mf, n_mf)
+                    if spec.rpf_setprio:
+                        b.s_setprio(0)
+                    b.sync(fence="compiler")
+                    b.scf_yield(*acc_n, *st1)
+                return list(for_op.results)[:n_acc]
+            if spec.fxh_dma == 3:
+                # fxh_dma 1 with the DMA interleaved into the MFMAs.
+                it = [(f"xd_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
+                    ("xd_c", c0), ("xd_y", c0), ("xd_z", c0)
+                ]
+                for_op = b.scf_for_iter(c0, xh_hi, c_block_k, it, iv_name="xd_k",
+                                        elide_trailing_barrier=False)
+                with for_op as (kv, iv):
+                    st = list(iv[n_acc:])
+                    st1 = xh_adv(st)
+                    if spec.rpf_setprio:
+                        b.s_setprio(spec.rpf_setprio)
+                    frs = reads()
+                    b.sync_lds_only(fence="compiler")
+                    dma(dma_sel(b.cmp_lt(b.add(kv, c_block_k), xh_hi), st1, st))
+                    acc_n = mfmas(list(iv[:n_acc]), frs)
+                    hint_interleave(0, n_dma, VMEM_READ, XT * n_mf, 3)
+                    if spec.rpf_setprio:
+                        b.s_setprio(0)
+                    b.sync(fence="compiler")
+                    b.scf_yield(*acc_n, *st1)
+                return list(for_op.results)[:n_acc]
+            if spec.fxh_dma == 1:
+                it = [(f"xd_{n}", v) for (n, _), v in zip(accs, accs_in)] + [
+                    ("xd_c", c0), ("xd_y", c0), ("xd_z", c0)
+                ]
+                for_op = b.scf_for_iter(c0, xh_hi, c_block_k, it, iv_name="xd_k",
+                                        elide_trailing_barrier=False)
+                with for_op as (kv, iv):
+                    st = list(iv[n_acc:])
+                    st1 = xh_adv(st)
+                    if spec.rpf_setprio:
+                        b.s_setprio(spec.rpf_setprio)
+                    frs = reads()
+                    # Every wave's fragment reads are done: the step's LDS is free.
+                    b.sync_lds_only(fence="compiler")
+                    with b.scf_if(b.cmp_lt(b.add(kv, c_block_k), xh_hi)):
+                        dma(st1)
+                    acc_n = mfmas(list(iv[:n_acc]), frs)
+                    if spec.rpf_setprio:
+                        b.s_setprio(0)
+                    b.sync(fence="compiler")
+                    b.scf_yield(*acc_n, *st1)
+                return list(for_op.results)[:n_acc]
+            # fxh_dma 2: the last x tap's MFMAs of step i run in step i + 1,
+            # over its fragment reads (its fragments are loop-carried), so the
+            # reads and the DMA each have MFMAs to hide behind. Step 0 peeled.
+            frs = reads()
+            b.sync_lds_only(fence="compiler")
+            st1 = xh_adv(st0)
+            with b.scf_if(b.land(xh_ok, b.cmp_lt(c_block_k, xh_hi))):
+                dma(st1)
+            acc0 = mfmas(list(accs_in), frs[:-1])
+            b.sync(fence="compiler")
+
+            def flat(fr):
+                return [v for a_rows, b_cols in fr for v in list(a_rows) + list(b_cols)]
+
+            def unflat(vals):
+                out, i = [], 0
+                for _kk in range(k_atoms):
+                    out.append((vals[i:i + mfmas_m], vals[i + mfmas_m:i + mfmas_m + mfmas_n]))
+                    i += mfmas_m + mfmas_n
+                return out
+
+            d0 = flat(frs[-1])
+            it = [(f"xd_{n}", v) for (n, _), v in zip(accs, acc0)] + [
+                ("xd_c", st1[0]), ("xd_y", st1[1]), ("xd_z", st1[2])
+            ] + [(f"xd_d{i}", v) for i, v in enumerate(d0)]
+            for_op = b.scf_for_iter(c_block_k, xh_hi, c_block_k, it, iv_name="xd_k",
+                                    elide_trailing_barrier=False)
+            with for_op as (kv, iv):
+                acc_n = list(iv[:n_acc])
+                st = list(iv[n_acc:n_acc + 3])
+                dfr = unflat(list(iv[n_acc + 3:]))
+                st1 = xh_adv(st)
+                if spec.rpf_setprio:
+                    b.s_setprio(spec.rpf_setprio)
+                frs = reads()
+                acc_n = mfmas(acc_n, [dfr])
+                hint_interleave(6, n_rd - 6, DS_READ, n_mf, 1)
+                b.sync_lds_only(fence="compiler")
+                dma(dma_sel(b.cmp_lt(b.add(kv, c_block_k), xh_hi), st1, st))
+                acc_n = mfmas(acc_n, frs[:-1])
+                hint_interleave(0, n_dma, VMEM_READ, (XT - 1) * n_mf, 2)
+                if spec.rpf_setprio:
+                    b.s_setprio(0)
+                b.sync(fence="compiler")
+                b.scf_yield(*acc_n, *st1, *flat(frs[-1]))
+            res = list(for_op.results)
+            acc_f = mfmas(res[:n_acc], [unflat(res[n_acc + 3:])])
+            return [b.select(xh_ok, v, v0) for v, v0 in zip(acc_f, accs_in)]
+
         def _emit_xhalo_loop(uk_ok_, accs_in, xs_range=None):
             """The uk_xhalo K loop (see ImplicitGemmConvSpec.uk_xhalo).
 
@@ -5093,6 +5859,15 @@ def _build_implicit_gemm_conv_impl(
             if spec.xh_stride_m:
                 # pixels 4r + mi, mi < mfmas_m - 1, never end an output row.
                 conds.append(b.cmp_eq(b.mod(p_Wo, b.const_i32(mfmas_m)), c0))
+            if spec.fxh_dma >= 1000:
+                # a wave's M extent never crosses an output row
+                conds.append(b.cmp_eq(b.mod(p_Wo, b.const_i32(mfmas_m * spec.warp_tile_m)), c0))
+            if spec.xh_yring:
+                # xh_yring: whole output rows per tile, whole tiles per plane, Y == 3
+                conds.append(b.cmp_eq(b.mul(p_Wo, b.const_i32(spec.xh_yring % 10)), b.const_i32(block_m)))
+                conds.append(b.cmp_eq(b.mod(b.mul(p_Ho, p_Wo), b.const_i32(block_m)), c0))
+                conds.append(b.cmp_eq(p_Y, c_XT))
+                conds.append(b.cmp_eq(b.mod(p_cpg, b.const_i32(block_k)), c0))
             xh_ok = conds[0]
             for c_ in conds[1:]:
                 xh_ok = b.land(xh_ok, c_)
@@ -5213,7 +5988,13 @@ def _build_implicit_gemm_conv_impl(
                                                 b.const_i32(mi)))
                 else:
                     a_row = b.add(wm_off, b.add(b.const_i32(mi * spec.warp_tile_m), dec.m_in_atom))
-                base_rows.append(b.sub(lin_of(b, b.add(m0, a_row)), lin0))
+                if spec.fxh_dma >= 1000:
+                    # the wave's private range: rows from lin(wave's first pixel)
+                    base_rows.append(b.add(
+                        b.mul(grid.warp_m_idx, b.const_i32(_fxd_wave_rows(spec))),
+                        b.sub(lin_of(b, b.add(m0, a_row)), lin_of(b, b.add(m0, wm_off)))))
+                else:
+                    base_rows.append(b.sub(lin_of(b, b.add(m0, a_row)), lin0))
 
             def xh_mfma(accs_t, defer_last: bool = False):
                 prev = None
@@ -5249,6 +6030,11 @@ def _build_implicit_gemm_conv_impl(
             if spec.rpf_pingpong:
                 return xh_ok, _emit_xhalo_pingpong(
                     accs_in, st0, xh_ok, xh_hi, xh_fetch, xh_store, xh_adv, base_rows, XT
+                )
+            if spec.fxh_dma:
+                return xh_ok, _emit_xhalo_dma(
+                    accs_in, st0, xh_ok, xh_hi, xh_uniforms, xh_adv, base_rows, XT,
+                    R, span, a_base0, lin_of=lin_of, m0=m0,
                 )
             with b.scf_if(xh_ok):
                 xh_store(xh_fetch(st0))

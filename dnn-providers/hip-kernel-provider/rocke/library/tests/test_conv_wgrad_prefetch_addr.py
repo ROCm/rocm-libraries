@@ -345,7 +345,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
                      "epi_store_fast", "split_xcd_remap", "split_streamk", "split_flag_store",
                      "split_zero_first", "xh_subtile",
                      "pp_fetch_deep", "pp_split_fetch", "fb_skip_empty", "pp_end_guard", "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact",
-                     "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m"):  # fwd K-loop / x-halo / split-store knobs, off
+                     "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma"):  # fwd K-loop / x-halo / split-store knobs, off
             del fields[name]
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()

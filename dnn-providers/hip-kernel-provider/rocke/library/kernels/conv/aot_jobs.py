@@ -1227,7 +1227,8 @@ def _fwd_sched_variants() -> Tuple[dict, ...]:
 # cache can carry them where they win without multiplying the whole grid.
 _FWD_R2_KNOBS = ("uk_xhalo", "lds_kpack_read", "uk_chunk_group", "rpf_lds_barrier",
                  "rpf_fetch_late", "xh_dpp", "waves_per_eu", "rpf_setprio", "xh_wait_smem",
-                 "lds_xor_rowkey", "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m")
+                 "lds_xor_rowkey", "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m",
+                 "fxh_dma", "xh_yring")
 _FWD_R2_SCOPE_RE = re.compile(r"^(\d+)x(\d+)x(\d+)(?:w(\d+)x(\d+))?(?:a(\d+))?$")
 
 
@@ -1414,7 +1415,7 @@ def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
         ]
     sched = _fwd_sched_variants()
     if not sched:
-        return _fwd_nopad_k_loops(k_loops)
+        return _fwd_fxd_k_loops(_fwd_nopad_k_loops(k_loops))
     extra = []
     for kl in k_loops:
         rpf1 = kl.get("reg_prefetch") == 1
@@ -1437,7 +1438,55 @@ def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
             if kl.get("defer_mfma") and kl.get("reg_prefetch") == 1
             and not kl.get("uk_xhalo") and not kl.get("defer_mfma_per_write")
         ]
-    return _fwd_nopad_k_loops(k_loops + extra)
+    return _fwd_xyr_k_loops(_fwd_fxd_k_loops(_fwd_nopad_k_loops(k_loops + extra)))
+
+
+def _fwd_fxd_k_loops(k_loops: List[dict]) -> List[dict]:
+    """``ROCKE_AOT_FWD_FXD=<n>[,...]``: every xh_stride_m k-packed x-halo loop
+    also with direct-to-LDS staging ``fxh_dma=<n>`` (its own schedule: no
+    defer_mfma / vmem_interleave twins). Adds variants only."""
+    vals = [int(t) for t in _os.environ.get("ROCKE_AOT_FWD_FXD", "").split(",") if t.strip()]
+    if not vals:
+        return k_loops
+    seen = {tuple(sorted(kl.items())) for kl in k_loops}
+    out = list(k_loops)
+    for kl in k_loops:
+        # Scoped to the round-4/5 x-halo winners' knob set (xh_wait_smem, row-keyed
+        # lds_xor, eqx4); lds_ahead / uk_nopad twins would build identical loops.
+        if not (kl.get("uk_xhalo") and kl.get("xh_stride_m") and kl.get("lds_kpack_read")
+                and kl.get("xh_wait_smem") and kl.get("lds_xor_rowkey")
+                and kl.get("epi_quad_xpose") == 4 and not kl.get("lds_ahead")
+                and not kl.get("uk_nopad") and not kl.get("fxh_dma")):
+            continue
+        for v in vals:
+            nk = dict(kl, fxh_dma=v, defer_mfma=0, vmem_interleave=0)
+            key = tuple(sorted(nk.items()))
+            if key not in seen:
+                seen.add(key)
+                out.append(nk)
+    return out
+
+
+def _fwd_xyr_k_loops(k_loops: List[dict]) -> List[dict]:
+    """``ROCKE_AOT_FWD_XYR=<n>[,...]``: every wave-private fxd x-halo loop
+    (fxh_dma >= 1000) also as the tapf input-row ring ``xh_yring=<n>``
+    (uk_tap_fast, no chunk groups). Adds variants only."""
+    vals = [int(t) for t in _os.environ.get("ROCKE_AOT_FWD_XYR", "").split(",") if t.strip()]
+    if not vals:
+        return k_loops
+    seen = {tuple(sorted(kl.items())) for kl in k_loops}
+    out = list(k_loops)
+    for kl in k_loops:
+        if not (kl.get("fxh_dma", 0) >= 1000 and not kl.get("xh_yring")):
+            continue
+        for v in vals:
+            nk = dict(kl, xh_yring=v, uk_tap_fast=True)
+            nk.pop("uk_chunk_group", None)
+            key = tuple(sorted(nk.items()))
+            if key not in seen:
+                seen.add(key)
+                out.append(nk)
+    return out
 
 
 def _fwd_nopad_k_loops(k_loops: List[dict]) -> List[dict]:
@@ -1568,6 +1617,12 @@ def _fwd_split_atomic_variants(kloop: dict, variant: tuple) -> Tuple[dict, ...]:
             out = out + [dict(v, split_hybrid=e) for e in shy for v in base]
         if skx and flat:
             out = out + [dict(v, split_xcd_remap=n) for n in skx for v in base]
+        # ROCKE_AOT_FWD_SHY_SKX=1: the split_hybrid binaries also with that
+        # slice-major XCD remap (an XCD runs whole aligned slices of every
+        # tile, so it reads only its slices' weights: fabric -45% on fwd s7).
+        if shy and skx and flat and _os.environ.get("ROCKE_AOT_FWD_SHY_SKX", "0") not in ("", "0"):
+            out = out + [dict(v, split_hybrid=e, split_xcd_remap=n)
+                         for e in shy for n in skx for v in base]
     return tuple(out)
 
 
