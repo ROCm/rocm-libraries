@@ -4,6 +4,7 @@
 #ifndef AMDISA_STRUCTURES_H_
 #define AMDISA_STRUCTURES_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
