@@ -624,13 +624,25 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     using hipdnn_plugin_sdk::ingestor::SavedKernelCode;
     using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 
-    constexpr std::array<std::string_view, 5> PACK_DISPATCH_SYMBOLS{
+    const std::vector<std::string_view> packDispatchSymbols{
         "hipkernel.pointwise.dispatch",
         "hipkernel.conv_fwd.dispatch",
         "hipkernel.gfx950_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
-        "hipkernel.gfx1151_wmma_attention_decode.dispatch"};
-    EXPECT_EQ(PACK_DISPATCH_SYMBOLS.size(), ingestorPacks().size())
+        "hipkernel.gfx1151_wmma_attention_decode.dispatch",
+#ifdef HIPDNN_ENGINE_FLYDSL
+        // FlyDSL's packs, compiled in whenever the production root has FlyDSL content.
+        "hipkernel.flydsl_rmsnorm.dispatch",
+        "hipkernel.flydsl_rmsnorm_bwd.dispatch",
+        "hipkernel.flydsl_sdpa_rdna.dispatch",
+        "hipkernel.flydsl_sdpa_rdna_decode.dispatch",
+        "hipkernel.flydsl_sdpa_aiw.dispatch",
+        "hipkernel.flydsl_sdpa_cdna.dispatch",
+        "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch",
+        "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
+#endif
+    };
+    EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";
 
     // Each handler once, with the first symbol that resolved to it.
@@ -650,7 +662,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         }
     }
     registerNativeIngestorSymbols();
-    for(const auto symbol : PACK_DISPATCH_SYMBOLS)
+    for(const auto symbol : packDispatchSymbols)
     {
         const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(symbol));
         ASSERT_NE(handler, nullptr) << symbol;

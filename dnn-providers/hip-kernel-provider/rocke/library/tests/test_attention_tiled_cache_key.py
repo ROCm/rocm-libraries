@@ -109,6 +109,7 @@ def _built_3d(problem, arch):
             problem.dtype,
             au._num_segments(problem, arch),
             au._select_3d_waves_per_eu(problem, arch),
+            problem.emit_lse,
         ),
     )
 
@@ -124,13 +125,14 @@ _NUM_SEQS = (1, 2, 3, 4)
 _SEQLEN_Q = (1, 2, 64, 65, 256, 257, 512, 513, 768, 769, 1024, 1025, 1536, 2048)
 _SEQLEN_K = ("q", 512, 513, 1024, 1025)
 
-# (sliding_window, use_sinks, bias) combinations; bias is one feature at a time.
+# (sliding_window, use_sinks, feature) combinations; one feature at a time.
 _FEATURES = (
     (0, False, None),
     (128, False, None),
     (0, True, None),
     (0, False, "softcap"),
     (0, False, "alibi"),
+    (0, False, "lse"),
 )
 
 
@@ -155,6 +157,7 @@ def _static_grid(arch):
             use_sinks=sinks,
             softcap=30.0 if bias == "softcap" else 0.0,
             use_alibi=bias == "alibi",
+            emit_lse=bias == "lse",
         )
 
 

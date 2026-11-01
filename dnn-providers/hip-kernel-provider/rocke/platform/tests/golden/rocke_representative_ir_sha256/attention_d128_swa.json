@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -37,6 +35,19 @@
           "family": "attention_d128_swa",
           "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
           "sha256": "f844c4fce452295ea8563418895e0575ad6cae94c85fb5c5385eae86e24b841f",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
+      "cases": {
+        "attention_d128_swa/gfx942/4warp_gqa_fold": {
+          "arch": "gfx942",
+          "bytes": 408425,
+          "family": "attention_d128_swa",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
+          "sha256": "0cd18465bf7c11e4b85f2b9d27be69822f5b5a90e2ac2c63bc9db13beed9ff68",
           "status": "ok"
         }
       },

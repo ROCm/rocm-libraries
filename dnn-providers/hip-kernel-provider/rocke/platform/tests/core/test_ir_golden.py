@@ -97,14 +97,24 @@ class TestIrGolden(unittest.TestCase):
         self.assertEqual(errors, [f"[{bad}] k: a -> b"])
 
     def test_wrong_profile_alias_is_rejected(self):
-        self._write(GOLDEN_PROFILE_FLAVORS, {"llvm24": "llvm22"})
-        errors = check_golden(self.path, lambda fl: _sub())
+        aliases = {"llvm24": "llvm23"}
+        profiles = tuple(fl for fl in GOLDEN_FLAVORS if fl not in aliases)
+        self._write(profiles, {"llvm24": "llvm22"})
+        with patch.object(ir_golden, "GOLDEN_ALIASES", aliases), patch.object(
+            ir_golden, "GOLDEN_PROFILE_FLAVORS", profiles
+        ):
+            errors = check_golden(self.path, lambda fl: _sub())
         self.assertEqual(len(errors), 1)
         self.assertIn("do not match emission-profile aliases", errors[0])
 
     def test_direct_and_aliased_lane_is_rejected(self):
-        self._write(GOLDEN_PROFILE_FLAVORS + ("llvm24",), GOLDEN_ALIASES)
-        errors = check_golden(self.path, lambda fl: _sub())
+        aliases = {"llvm24": "llvm23"}
+        profiles = tuple(fl for fl in GOLDEN_FLAVORS if fl not in aliases)
+        self._write(profiles + ("llvm24",), aliases)
+        with patch.object(ir_golden, "GOLDEN_ALIASES", aliases), patch.object(
+            ir_golden, "GOLDEN_PROFILE_FLAVORS", profiles
+        ):
+            errors = check_golden(self.path, lambda fl: _sub())
         self.assertTrue(any("both direct and aliased" in error for error in errors))
 
     def test_compare_case_sets_and_failures(self):
@@ -166,7 +176,7 @@ class TestGoldenShards(unittest.TestCase):
 
     def test_inconsistent_aliases_rejected(self):
         self._shard("x", ["x/1", "x/2"])
-        self._shard("y", ["y/1"], aliases={})
+        self._shard("y", ["y/1"], aliases={"llvm24": "llvm23"})
         errors = check_golden(self.dir, self._run)
         self.assertEqual(len(errors), 1)
         self.assertIn("re-bless every shard", errors[0])

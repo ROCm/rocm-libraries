@@ -29,7 +29,9 @@ set(HKP_PACK_STAMP_NAME ".hkp-packed.stamp" CACHE INTERNAL
 # Descriptor families a build option switches on and off, as <folder>=<option>. A
 # family lives in a top-level child folder of any source root; with its option OFF
 # every root is packed with that folder excluded. A new family is one entry here.
-set(HKP_DESCRIPTOR_FAMILIES "rocKE=HIPKERNELPROVIDER_ENABLE_ROCKE")
+set(HKP_DESCRIPTOR_FAMILIES
+    "rocKE=HIPKERNELPROVIDER_ENABLE_ROCKE"
+    "FlyDSL=HIPKERNELPROVIDER_ENABLE_FLYDSL")
 
 include(KpackPython)
 

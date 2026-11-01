@@ -34,10 +34,13 @@ from pathlib import Path
 import pytest
 
 import rocke.portable_ir.tests as _unit_tests
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 _HERE = Path(__file__).resolve().parent
 _PLATFORM = _HERE.parents[1]  # tests/portable_ir -> tests -> platform
-_PYROOT = _PLATFORM / "python"
 _LIBRARY_ROOTS = (
     _PLATFORM.parent / "library",  # source tree: rocke/library
     _PLATFORM / "tests" / "library",  # installed tree: <test-root>/tests/library
@@ -46,12 +49,8 @@ _LIBRARY_ROOTS = (
 
 def _env():
     """Subprocess env with the engine package (and the library tree) importable."""
-    env = dict(os.environ)
-    parts = [str(_PYROOT)]
-    parts.extend(str(root) for root in _LIBRARY_ROOTS if (root / "kernels").is_dir())
-    if env.get("PYTHONPATH"):
-        parts.append(env["PYTHONPATH"])
-    env["PYTHONPATH"] = os.pathsep.join(parts)
+    library_roots = [root for root in _LIBRARY_ROOTS if (root / "kernels").is_dir()]
+    env = rocke_subprocess_env(python_paths=library_roots)
     # The oracle for every byte-identity claim below is the Python lowerer, and
     # the C++ pybind extension is not on this path; say so rather than emitting
     # a fallback warning per kernel.
@@ -92,8 +91,9 @@ def _replay_cli():
 
 
 def _run(args, **kw):
+    command = rocke_python_command(*args[1:]) if args[0] == sys.executable else args
     return subprocess.run(
-        args, cwd=str(_PLATFORM), env=_env(), capture_output=True, text=True, **kw
+        command, cwd=str(_PLATFORM), env=_env(), capture_output=True, text=True, **kw
     )
 
 
@@ -181,7 +181,7 @@ def test_parity_matrix():
     lib = _online_lib()
     env_lib = dict(ROCKE_ONLINE_LIB=lib)
     r = subprocess.run(
-        [sys.executable, "-m", "rocke.portable_ir.drivers.parity_matrix"],
+        rocke_python_command("-m", "rocke.portable_ir.drivers.parity_matrix"),
         cwd=str(_PLATFORM),
         env={**_env(), **env_lib},
         capture_output=True,

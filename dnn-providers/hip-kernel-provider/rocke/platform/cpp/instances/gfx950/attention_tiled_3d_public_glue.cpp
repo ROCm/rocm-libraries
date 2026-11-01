@@ -221,6 +221,7 @@ rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled
     memset(&s, 0, sizeof(s));
     s.has_waves_per_eu = false;
     s.waves_per_eu = 0;
+    s.emit_lse = false;
     return s;
 }
 
@@ -517,7 +518,7 @@ int rocke_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
     /* kernel_name_join("rocke_uattn_reduce_tiled", d<HD>, h<NUM_QH>,
-     *   seg<NUM_SEG>, dtype) */
+     *   seg<NUM_SEG>, dtype[, "lse"]) */
     char d_part[32];
     char h_part[32];
     char seg_part[32];
@@ -540,6 +541,10 @@ int rocke_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
+    if(s->emit_lse)
+    {
+        parts[np++] = "lse";
+    }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
     if(st != ROCKE_OK)
