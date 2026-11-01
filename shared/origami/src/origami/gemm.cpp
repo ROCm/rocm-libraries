@@ -222,7 +222,7 @@ double calculate_work_utilization(const problem_t& problem, const config_t& conf
 // calculate_work_utilization for the compute terms, which already charge whole MFMAs:
 // an M or N narrower than one MFMA wastes nothing beyond what every kernel using that
 // MFMA pays, so it counts as one MFMA wide.
-static double calculate_compute_utilization(const problem_t& problem, const config_t& config) {
+double calculate_compute_utilization(const problem_t& problem, const config_t& config) {
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
   const size_t MT_K = config.mt.k;
@@ -475,6 +475,52 @@ bool check_lds_capacity(const hardware_t& hardware,
   const auto LDS_usage        = a_loads_in_bytes + b_loads_in_bytes;
 
   return LDS_usage <= hardware.lds_capacity;
+}
+
+bool is_config_feasible(const problem_t& problem, const config_t& config) {
+  const size_t M     = problem.size.m;
+  const size_t N     = problem.size.n;
+  const size_t K     = problem.size.k;
+  const size_t batch = problem.batch;
+
+  const size_t MT_M = config.mt.m;
+  const size_t MT_N = config.mt.n;
+  const size_t MT_K = config.mt.k;
+  const size_t MI_M = config.mi.m;
+  const size_t MI_N = config.mi.n;
+  const size_t MI_K = config.mi.k;
+
+  const int cha = config.cache_hints_a;
+  const int chb = config.cache_hints_b;
+
+  const bool a_trans = problem.a_transpose == transpose_t::T;
+  const bool b_trans = problem.b_transpose == transpose_t::T;
+
+  const int a_bits = datatype_to_bits(problem.a_dtype);
+  const int b_bits = datatype_to_bits(problem.b_dtype);
+  if (a_bits < 0 || b_bits < 0) return false;
+
+  if (M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N)) return false;
+  if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return false;
+
+  constexpr size_t cache_line_bits = heuristic_defaults_t::CACHE_LINE_BYTES * 8;  // 128 B in bits
+  const size_t K_mod_128bytes    = K * static_cast<size_t>(a_bits) % cache_line_bits;
+  const size_t MT_K_mod_128bytes = MT_K * static_cast<size_t>(a_bits) % cache_line_bits;
+  if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
+    const size_t ma_bits = std::max(M * static_cast<size_t>(a_bits), size_t{1});
+    const size_t nb_bits = std::max(N * static_cast<size_t>(b_bits), size_t{1});
+    // Non-temporal A/B is required only if the library has one for this macro tile.
+    if (M <= MT_M * 2 && !b_trans && (nb_bits / ma_bits > 5)) {
+      if (config.non_temporal_b_available && chb != 4) return false;
+    } else if (N <= MT_N * 2 && a_trans && (ma_bits / nb_bits > 5)) {
+      if (config.non_temporal_a_available && cha != 4) return false;
+    } else if (cha || chb) {
+      return false;
+    }
+  } else if (cha || chb) {
+    return false;
+  }
+  return true;
 }
 
 // Compute limited achievable memory bandwidth based on active CUs
@@ -830,7 +876,7 @@ double emulated_tf32_arithmetic_intensity(double m, double n, double k, double b
 // wave_group_m x wave_group_n waves of a LocalSplitU group owns
 // MT_M/wave_group_m x MT_N/wave_group_n of the tile, and each of the
 // local_split_u groups takes MT_K/local_split_u of the iteration's K.
-static dim3_t compute_wave_share(const config_t& config) {
+dim3_t compute_wave_share(const config_t& config) {
   const auto& tp = tparams(config);
   return {config.mt.m / static_cast<size_t>(std::max(tp.wave_group_m, 1)),
           config.mt.n / static_cast<size_t>(std::max(tp.wave_group_n, 1)),
@@ -1032,10 +1078,10 @@ double compute_local_read_latency(const problem_t& problem,
 // LocalSplitU reduction cost: the lsu waves' partial MT_MxMT_N tiles are reduced
 // through LDS (write -> barrier -> read + accumulate). Raw cycles to match
 // L_compute; charged once per output tile. Zero when lsu <= 1.
-static double compute_lsu_reduction_latency(const problem_t& problem,
-                                            const hardware_t& hardware,
-                                            const config_t& config,
-                                            const context_t& context) {
+double compute_lsu_reduction_latency(const problem_t& problem,
+                                     const hardware_t& hardware,
+                                     const config_t& config,
+                                     const context_t& context) {
   const dim3_t& waves = context.wave_group;
   if (waves.k <= 1) return 0.0;
 
@@ -1109,11 +1155,11 @@ operand_traffic_t compute_operand_traffic(const problem_t& problem,
 }
 
 // Total A+B bytes loaded for a single K-window of MT_M x MT_N tile (transaction-aligned).
-static double compute_operand_window_bytes(const problem_t& problem,
-                                           const config_t& config,
-                                           const context_t& context,
-                                           size_t k_window,
-                                           size_t transaction_bytes) {
+double compute_operand_window_bytes(const problem_t& problem,
+                                    const config_t& config,
+                                    const context_t& context,
+                                    size_t k_window,
+                                    size_t transaction_bytes) {
   const int a_bits = datatype_to_bits(problem.a_dtype);
   const int b_bits = datatype_to_bits(problem.b_dtype);
   const bool a_trans = (problem.a_transpose == transpose_t::T);
@@ -1417,11 +1463,13 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   return rates;
 }
 
-// Determine the memory latency
-double compute_memory_latency(const problem_t& problem,
-                              const hardware_t& hardware,
-                              const config_t& config,
-                              const context_t& context) {
+// Determine the memory latency.  With kTerms, also fills *terms (compute_memory_latency_terms).
+template <bool kTerms>
+static double memory_latency_impl(const problem_t&        problem,
+                                  const hardware_t&       hardware,
+                                  const config_t&         config,
+                                  const context_t&        context,
+                                  memory_latency_terms_t* terms) {
   const bool debug = context.debug;
 
   // Extract parameters from structured types
@@ -1510,7 +1558,33 @@ double compute_memory_latency(const problem_t& problem,
     OLOG_DEBUG("L_mem_dram: " << L_mem_dram);
   }
 
+  if constexpr (kTerms) {
+    terms->H_mem_l2_A   = H_mem_l2_A;
+    terms->H_mem_l2_B   = H_mem_l2_B;
+    terms->H_mem_mall_A = H_mem_mall_A;
+    terms->H_mem_mall_B = H_mem_mall_B;
+    terms->L_mem_l2     = L_mem_l2;
+    terms->L_mem_mall   = L_mem_mall;
+    terms->L_mem_dram   = L_mem_dram;
+    terms->L_mem        = L_mem;
+  }
   return L_mem;
+}
+
+double compute_memory_latency(const problem_t& problem,
+                              const hardware_t& hardware,
+                              const config_t& config,
+                              const context_t& context) {
+  return memory_latency_impl<false>(problem, hardware, config, context, nullptr);
+}
+
+memory_latency_terms_t compute_memory_latency_terms(const problem_t& problem,
+                                                    const hardware_t& hardware,
+                                                    const config_t& config,
+                                                    const context_t& context) {
+  memory_latency_terms_t terms;
+  memory_latency_impl<true>(problem, hardware, config, context, &terms);
+  return terms;
 }
 
 /* ---------------------------------------------------------------------------------------- */
@@ -1901,10 +1975,14 @@ static size_t compute_resident_wgs(const config_t& config, const context_t& cont
 //                + L_tail (partial K-tail iter) + K-loop penalties
 //   Epilogue  -- per-tile output stores
 //   Total     -- Prologue + MainLoop + Epilogue
-double compute_tile_latency(const problem_t& problem,
-                            const hardware_t& hardware,
-                            const config_t& config,
-                            const context_t& context) {
+//
+// With kTerms, also fills *terms (compute_tile_latency_terms).
+template <bool kTerms>
+static double tile_latency_impl(const problem_t&      problem,
+                                const hardware_t&     hardware,
+                                const config_t&       config,
+                                const context_t&      context,
+                                tile_latency_terms_t* terms) {
   assert(config.mt.m > 0 && config.mt.n > 0 && config.mt.k > 0);
   assert(config.mi.m > 0 && config.mi.n > 0 && config.mi.k > 0);
   assert(problem.size.m > 0 && problem.size.n > 0);
@@ -1927,7 +2005,12 @@ double compute_tile_latency(const problem_t& problem,
 
   // Per-K-iter cycle costs (simple MFMA-only compute model; bytes/BW memory).
   double L_compute = static_cast<double>(compute_mt_compute_latency(problem, hardware, config));
-  double L_mem     = compute_memory_latency(problem, hardware, config, context);
+  memory_latency_terms_t* memory_terms = nullptr;
+  if constexpr (kTerms) {
+    terms->L_mt_compute = L_compute;
+    memory_terms        = &terms->memory;
+  }
+  double L_mem = memory_latency_impl<kTerms>(problem, hardware, config, context, memory_terms);
 
   // LDS read time that narrow M/N-contiguous reads (VectorWidth * bpe below a
   // bank) add over the full-width floor.  The LDS pipe feeds the MFMAs, so only
@@ -2207,6 +2290,45 @@ double compute_tile_latency(const problem_t& problem,
   const double L_tile_total =
       (L_prologue + L_mainloop + L_epilogue + L_lsu_reduce) * weight_tile_total;
 
+  if constexpr (kTerms) {
+    terms->L_lds_read            = L_lds_read;
+    terms->L_lds_floor           = L_lds_floor;
+    terms->L_local_read          = L_local_read;
+    terms->wgs_per_cu            = wgs_per_cu;
+    terms->L_compute             = L_compute;
+    terms->L_cvt                 = L_cvt;
+    terms->k_iters               = k_iters;
+    terms->num_main_iters        = num_main_iters;
+    terms->num_ngll_iters        = num_ngll_iters;
+    terms->tail_k                = tail_k;
+    terms->tail_fraction         = tail_fraction;
+    terms->eff_scale             = eff_scale;
+    terms->utilization           = utilization;
+    terms->compute_utilization   = compute_utilization;
+    terms->L_prologue            = L_prologue;
+    terms->L_main                = L_main;
+    terms->L_ngll                = L_ngll;
+    terms->L_nll                 = L_nll;
+    terms->L_main_per_iter       = L_main_per_iter;
+    terms->L_tail                = L_tail;
+    terms->L_pgr_stall           = L_pgr_stall;
+    terms->L_loop_overhead       = L_loop_overhead;
+    terms->L_single_lds_buffer   = L_single_lds_buffer;
+    terms->depth_waste_ratio     = depth_waste_ratio;
+    terms->batched_fill_ratio    = batched_fill_ratio;
+    terms->m_edge_ratio          = m_edge_ratio;
+    terms->L_du_waste            = L_du_waste;
+    terms->L_mainloop            = L_mainloop;
+    terms->epi_occ_exposure      = epi_occ_exposure;
+    terms->scalar_store_fraction = scalar_store_fraction;
+    terms->store_exposure        = store_exposure;
+    terms->scalar_store_mult     = scalar_store_mult;
+    terms->L_epilogue            = L_epilogue;
+    terms->L_lsu_reduce          = L_lsu_reduce;
+    terms->weight_tile_total     = weight_tile_total;
+    terms->L_tile_total          = L_tile_total;
+  }
+
   if (debug) {
     OLOG_DEBUG("per_wave wgs_per_cu: " << wgs_per_cu);
     OLOG_DEBUG("per_wave simds_busy: " << simds_busy);
@@ -2259,6 +2381,22 @@ double compute_tile_latency(const problem_t& problem,
   }
 
   return L_tile_total;
+}
+
+double compute_tile_latency(const problem_t& problem,
+                            const hardware_t& hardware,
+                            const config_t& config,
+                            const context_t& context) {
+  return tile_latency_impl<false>(problem, hardware, config, context, nullptr);
+}
+
+tile_latency_terms_t compute_tile_latency_terms(const problem_t& problem,
+                                                const hardware_t& hardware,
+                                                const config_t& config,
+                                                const context_t& context) {
+  tile_latency_terms_t terms;
+  tile_latency_impl<true>(problem, hardware, config, context, &terms);
+  return terms;
 }
 
 // Compute the latency of a timestep.
@@ -2392,44 +2530,9 @@ double compute_total_latency(const problem_t& problem,
   const int a_bits  = datatype_to_bits(problem.a_dtype);
   const int b_bits  = datatype_to_bits(problem.b_dtype);
 
-  // 0) Short-circuit
-  // We don't need to compute latency for all MTs. With this, we can shortcut.
-  bool shortCircuit = true;
-  if (shortCircuit) {
-    // When problem dimensions are small enough that we can fit them in one tile, we should do
-    // so. This short circuit condition also decreases selection latency when problems are very
-    // small :)
-    // TODO 256 and 256 here should be largest M and N tile dimensions in library
-    if (M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N))
-      return std::numeric_limits<double>::max();
-
-    // Use Dot2 only for M < 3
-    if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return std::numeric_limits<double>::max();
-
-    constexpr size_t cache_line_bits = heuristic_defaults_t::CACHE_LINE_BYTES * 8;  // 128 B in bits
-    size_t K_mod_128bytes    = K * a_bits % cache_line_bits;
-    size_t MT_K_mod_128bytes = MT_K * a_bits % cache_line_bits;
-    if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
-      // avoid division by 0 if K == 0
-      if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
-        // Use nontemporal B, if the library has one to use
-        if (config.non_temporal_b_available && !(config.cache_hints_b == 4)) {
-          return std::numeric_limits<double>::max();
-        }
-      } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
-        // Use Non Temporal A, if the library has one to use
-        if (config.non_temporal_a_available && !(config.cache_hints_a == 4)) {
-          return std::numeric_limits<double>::max();
-        }
-      } else {
-        // Never use Non Temporal
-        if (config.cache_hints_a || config.cache_hints_b) {
-          return std::numeric_limits<double>::max();
-        }
-      }
-    } else if (config.cache_hints_a || config.cache_hints_b) {
-      return std::numeric_limits<double>::max();
-    }
+  // 0) Short-circuit — drop infeasible configs before latency work.
+  if (!is_config_feasible(problem, config)) {
+    return std::numeric_limits<double>::max();
   }
 
   // 1) Setup context (computes grid dims, launch params, WGM, etc.)
