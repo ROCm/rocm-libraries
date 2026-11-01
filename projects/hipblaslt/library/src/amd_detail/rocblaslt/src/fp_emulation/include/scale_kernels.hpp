@@ -13,12 +13,12 @@
  *
  * Four kernels named by the transpose value they handle:
  *   scale_A_T_kernel  TRANS_A=true  (k-fast coalesced, blockDim=512, TILE_M=8)
- *   scale_A_N_kernel  TRANS_A=false (SHMEM transposition, blockDim=256, TILE_M=16)
+ *   scale_A_N_kernel  TRANS_A=false (SHMEM transposition, blockDim=512, TILE_M=16)
  *   scale_B_N_kernel  TRANS_B=false (j-fast coalesced, blockDim=512, TILE_M=8)
- *   scale_B_T_kernel  TRANS_B=true  (SHMEM transposition, blockDim=256, TILE_M=16)
+ *   scale_B_T_kernel  TRANS_B=true  (SHMEM transposition, blockDim=512, TILE_M=16)
  *
  * Coalesced kernels: no SHMEM → low LDS → good latency hiding.
- * SHMEM kernels: TILE_M=16, K_UNROLL=4 → blockDim=256; 8.7 KB LDS per block.
+ * SHMEM kernels: TILE_K=128, TILE_M=16, K_UNROLL=4 → blockDim=512; 16.5 KB LDS per block.
  *
  * This header must be compiled as HIP.
  */
@@ -141,16 +141,21 @@ namespace FixedPointEmulation
         }
     }
 
-    /* ── A_N: TRANS_A=false, SHMEM transposition, blockDim=256, TILE_M=16, K_UNROLL=4 ──
+    /* ── A_N: TRANS_A=false, SHMEM transposition, blockDim=512, TILE_M=16, K_UNROLL=4 ──
      * Each thread loads K_UNROLL=4 consecutive k-positions into SHMEM, then in the
      * write phase reads 4 SHMEM entries, computes 4 int8 residues, and stores them as a
      * single uint32_t NT write (4 bytes per store instead of 1).
-     * blockDim = (TILE_K / K_UNROLL) * TILE_M = 16 * 16 = 256.
+     * blockDim = (TILE_K / K_UNROLL) * TILE_M = 32 * 16 = 512.
      *
-     * Load phase: k_grp = t/TILE_M (0..15), m_loc = t%TILE_M (0..15).
-     *   Each thread fills shmem[k_grp*4+p][m_loc] for p=0..3 (4 coalesced column loads).
-     * Write phase: k_wb = (t%16)*4 (always 4-aligned), m_wr = t/16 (0..15).
-     *   Thread reads 4 shmem entries for the same row, packs 4 int8 → uint32_t.
+     * The tile is stored row-major, shmem[m][k], so the write phase reads each
+     * thread's 4 k-positions as one contiguous 32-byte block; the +1 padding
+     * spreads the load-phase stores (16 rows apart) across LDS banks.
+     *
+     * Load phase: k_grp = t/TILE_M (0..31), m_loc = t%TILE_M (0..15).
+     *   Each thread fills shmem[m_loc][k_grp*4+p] for p=0..3 (4 coalesced column loads).
+     * Write phase: k_wb = (t%32)*4 (always 4-aligned), m_wr = t/32 (0..15).
+     *   Thread reads 4 shmem entries for the same row, packs 4 int8 → uint32_t; the 32
+     *   threads of a row write 128 contiguous bytes per modulus.
      *   j_out = blockIdx.x*TILE_K + k_wb is always 4-aligned → uint32_t aligned.
      *   Out-of-bounds shmem entries are pre-zeroed in the load phase (stored 0.0 for j≥k),
      *   so the extra bytes in the padding region [k, lda8i) are harmlessly zero. */
@@ -165,16 +170,16 @@ namespace FixedPointEmulation
                                             int64_t  k,
                                             unsigned t_start)
     {
-        static constexpr int TILE_K   = OZ2_SCALE_TILE_K; /* 64 */
+        static constexpr int TILE_K   = OZ2_SCALE_SHMEM_TILE_K; /* 128 */
         static constexpr int TILE_M   = OZ2_SCALE_SHMEM_TILE_M; /* 16 */
         static constexpr int K_UNROLL = 4;
-        /* blockDim = OZ2_SCALE_SHMEM_BLOCK_DIM = (TILE_K/K_UNROLL)*TILE_M = 256 */
-        __shared__ double  shmem[TILE_K][TILE_M + 1]; /* always double — values widened at load */
+        /* blockDim = OZ2_SCALE_SHMEM_BLOCK_DIM = (TILE_K/K_UNROLL)*TILE_M = 512 */
+        __shared__ double  shmem[TILE_M][TILE_K + 1]; /* always double — values widened at load */
         __shared__ int16_t s_sft[TILE_M];
 
         const int     t      = static_cast<int>(threadIdx.x);
         const int64_t m_base = static_cast<int64_t>(blockIdx.y) * TILE_M;
-        const int     k_grp  = t / TILE_M; /* 0..TILE_K/K_UNROLL-1 = 0..15 */
+        const int     k_grp  = t / TILE_M; /* 0..TILE_K/K_UNROLL-1 = 0..31 */
         const int     m_loc  = t % TILE_M; /* 0..TILE_M-1 = 0..15           */
         const int64_t i      = m_base + m_loc;
 
@@ -185,7 +190,7 @@ namespace FixedPointEmulation
         for(int p = 0; p < K_UNROLL; p++)
         {
             const int64_t j = static_cast<int64_t>(blockIdx.x) * TILE_K + k_grp * K_UNROLL + p;
-            shmem[k_grp * K_UNROLL + p][m_loc]
+            shmem[m_loc][k_grp * K_UNROLL + p]
                 = (i < m && j < k) ? static_cast<double>(A[i + j * lda]) : 0.0;
         }
         if(k_grp == 0 && i < m)
@@ -195,8 +200,8 @@ namespace FixedPointEmulation
         /* Write phase: k_wb is always K_UNROLL-aligned so j_out is always 4-aligned.
          * lda8i = pad(k) is 128-aligned → offset is 4-aligned → uint32_t aligned.
          * Out-of-bounds positions have shmem=0.0 → ival=0.0 → b[p]=0.            */
-        const int     k_wb  = (t % (TILE_K / K_UNROLL)) * K_UNROLL; /* 0,4,8,...,60 */
-        const int     m_wr  = t / (TILE_K / K_UNROLL); /* 0..15         */
+        const int     k_wb  = (t % (TILE_K / K_UNROLL)) * K_UNROLL; /* 0,4,8,...,124 */
+        const int     m_wr  = t / (TILE_K / K_UNROLL); /* 0..15          */
         const int64_t j_out = static_cast<int64_t>(blockIdx.x) * TILE_K + k_wb;
         const int64_t i_out = m_base + m_wr;
         if(i_out < m && j_out < k)
@@ -209,7 +214,7 @@ namespace FixedPointEmulation
 #pragma unroll
             for(int p = 0; p < K_UNROLL; p++)
             {
-                ival[p] = trunc(ldexp(shmem[k_wb + p][m_wr], sft));
+                ival[p] = trunc(ldexp(shmem[m_wr][k_wb + p], sft));
                 lv[p]   = split_int88(ival[p]);
             }
 
@@ -329,15 +334,16 @@ namespace FixedPointEmulation
         }
     }
 
-    /* ── B_T: TRANS_B=true, SHMEM transposition, blockDim=256, TILE_M=16, K_UNROLL=4 ──
+    /* ── B_T: TRANS_B=true, SHMEM transposition, blockDim=512, TILE_M=16, K_UNROLL=4 ──
      * Mirrors scale_A_N_kernel exactly, but operates on B (col-fast layout).
      * Each thread loads K_UNROLL=4 consecutive k-positions for one column into SHMEM,
      * then in the write phase reads 4 SHMEM entries and packs them as a uint32_t NT store.
-     * blockDim = OZ2_SCALE_SHMEM_BLOCK_DIM = (TILE_K/K_UNROLL)*TILE_M = 256.
+     * blockDim = OZ2_SCALE_SHMEM_BLOCK_DIM = (TILE_K/K_UNROLL)*TILE_M = 512.
+     * The tile is stored per column, shmem[l][k] (see scale_A_N_kernel).
      *
-     * Load phase: k_grp = t/TILE_M (0..15), l_loc = t%TILE_M (0..15).
-     *   Each thread fills shmem[k_grp*4+p][l_loc] for p=0..3 (coalesced col-fast loads).
-     * Write phase: k_wb = (t%16)*4 (always 4-aligned), l_wr = t/16 (0..15).
+     * Load phase: k_grp = t/TILE_M (0..31), l_loc = t%TILE_M (0..15).
+     *   Each thread fills shmem[l_loc][k_grp*4+p] for p=0..3 (coalesced col-fast loads).
+     * Write phase: k_wb = (t%32)*4 (always 4-aligned), l_wr = t/32 (0..15).
      *   Thread reads 4 shmem entries for the same column, packs 4 int8 → uint32_t.
      *   j_out = blockIdx.x*TILE_K + k_wb is always 4-aligned → uint32_t aligned.
      *   Out-of-bounds shmem entries are pre-zeroed in the load phase (stored 0.0 for j≥k),
@@ -352,16 +358,16 @@ namespace FixedPointEmulation
                                             int64_t  k,
                                             unsigned t_start)
     {
-        static constexpr int TILE_K   = OZ2_SCALE_TILE_K; /* 64 */
+        static constexpr int TILE_K   = OZ2_SCALE_SHMEM_TILE_K; /* 128 */
         static constexpr int TILE_M   = OZ2_SCALE_SHMEM_TILE_M; /* 16 */
         static constexpr int K_UNROLL = 4;
-        /* blockDim = OZ2_SCALE_SHMEM_BLOCK_DIM = (TILE_K/K_UNROLL)*TILE_M = 256 */
-        __shared__ double  shmem[TILE_K][TILE_M + 1]; /* always double — values widened at load */
+        /* blockDim = OZ2_SCALE_SHMEM_BLOCK_DIM = (TILE_K/K_UNROLL)*TILE_M = 512 */
+        __shared__ double  shmem[TILE_M][TILE_K + 1]; /* always double — values widened at load */
         __shared__ int16_t s_sft[TILE_M];
 
         const int     t      = static_cast<int>(threadIdx.x);
         const int64_t n_base = static_cast<int64_t>(blockIdx.y) * TILE_M;
-        const int     k_grp  = t / TILE_M; /* 0..TILE_K/K_UNROLL-1 = 0..15 */
+        const int     k_grp  = t / TILE_M; /* 0..TILE_K/K_UNROLL-1 = 0..31 */
         const int     l_loc  = t % TILE_M; /* 0..TILE_M-1 = 0..15           */
         const int64_t col    = n_base + l_loc;
 
@@ -372,7 +378,7 @@ namespace FixedPointEmulation
         for(int p = 0; p < K_UNROLL; p++)
         {
             const int64_t j = static_cast<int64_t>(blockIdx.x) * TILE_K + k_grp * K_UNROLL + p;
-            shmem[k_grp * K_UNROLL + p][l_loc]
+            shmem[l_loc][k_grp * K_UNROLL + p]
                 = (col < n && j < k) ? static_cast<double>(B[col + j * ldb]) : 0.0;
         }
         if(k_grp == 0 && col < n)
@@ -382,8 +388,8 @@ namespace FixedPointEmulation
         /* Write phase: k_wb is always K_UNROLL-aligned so j_out is always 4-aligned.
          * ldb8i = pad(k) is 128-aligned → offset is 4-aligned → uint32_t aligned.
          * Out-of-bounds positions have shmem=0.0 → ival=0.0 → b[p]=0.            */
-        const int     k_wb  = (t % (TILE_K / K_UNROLL)) * K_UNROLL; /* 0,4,8,...,60 */
-        const int     l_wr  = t / (TILE_K / K_UNROLL); /* 0..15         */
+        const int     k_wb  = (t % (TILE_K / K_UNROLL)) * K_UNROLL; /* 0,4,8,...,124 */
+        const int     l_wr  = t / (TILE_K / K_UNROLL); /* 0..15          */
         const int64_t j_out = static_cast<int64_t>(blockIdx.x) * TILE_K + k_wb;
         const int64_t c_out = n_base + l_wr;
         if(c_out < n && j_out < k)
@@ -396,7 +402,7 @@ namespace FixedPointEmulation
 #pragma unroll
             for(int p = 0; p < K_UNROLL; p++)
             {
-                ival[p] = trunc(ldexp(shmem[k_wb + p][l_wr], sft));
+                ival[p] = trunc(ldexp(shmem[l_wr][k_wb + p], sft));
                 lv[p]   = split_int88(ival[p]);
             }
 

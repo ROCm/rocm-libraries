@@ -769,7 +769,8 @@ namespace FixedPointEmulation
     {
         const unsigned k_c
             = static_cast<unsigned>((k + 4u * OZ2_SCALE_TILE_K - 1u) / (4u * OZ2_SCALE_TILE_K));
-        const unsigned k_x = static_cast<unsigned>((k + OZ2_SCALE_TILE_K - 1) / OZ2_SCALE_TILE_K);
+        const unsigned k_x
+            = static_cast<unsigned>((k + OZ2_SCALE_SHMEM_TILE_K - 1) / OZ2_SCALE_SHMEM_TILE_K);
         if(tA)
             hipLaunchKernelGGL((scale_A_T_kernel<TC, T>),
                                dim3(k_c,
@@ -820,7 +821,8 @@ namespace FixedPointEmulation
     {
         const unsigned k_c
             = static_cast<unsigned>((k + 4u * OZ2_SCALE_TILE_K - 1u) / (4u * OZ2_SCALE_TILE_K));
-        const unsigned k_x = static_cast<unsigned>((k + OZ2_SCALE_TILE_K - 1) / OZ2_SCALE_TILE_K);
+        const unsigned k_x
+            = static_cast<unsigned>((k + OZ2_SCALE_SHMEM_TILE_K - 1) / OZ2_SCALE_SHMEM_TILE_K);
         if(!tB)
             hipLaunchKernelGGL((scale_B_N_kernel<TC, T>),
                                dim3(k_c,
