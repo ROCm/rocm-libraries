@@ -1016,6 +1016,10 @@ static void op_tile_buffer_rsrc(rocke_lower_t* L, const rocke_op_t* op)
     const char* intrinsic;
     const char* nb_text;
     int word3;
+    /* Python _op_tile_buffer_rsrc. The p1 overload names ptr addrspace(1), so
+     * a constant-space parameter (ptr addrspace(4) in the header) is refused. */
+    if(!ll_require_global_header_ptr(L, "buffer_rsrc", ptr))
+        return;
     rocke_ll_need(L, "make.buffer.rsrc.p1");
     if(rocke_ll_flavor_is_modern(L->flavor))
     {
@@ -1040,7 +1044,19 @@ static void op_tile_buffer_rsrc(rocke_lower_t* L, const rocke_op_t* op)
     }
     else
     {
+        /* llvm20's intrinsic takes an i32 num_records; any other operand
+         * printed as i32 would not match its own definition. */
+        const char* nb_ty = rocke_ll_llvm_type(L, num_bytes->type);
         intrinsic = "llvm.amdgcn.make.buffer.rsrc.p1";
+        if(strcmp(nb_ty, "i32") != 0)
+        {
+            rocke_ll_fail(
+                L,
+                ROCKE_ERR_VALUE,
+                "tile.buffer_rsrc num_bytes must be i32 at llvm20, got %s; the llvm20 "
+                "make.buffer.rsrc takes an i32 num_records, so pass the byte count as i32",
+                nb_ty);
+        }
         nb_text = rocke_arena_printf(&L->arena, "i32 %s", rocke_ll_operand(L, num_bytes));
     }
     word3 = L->backend->buffer_rsrc_word3;
