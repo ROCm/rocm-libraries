@@ -11,6 +11,7 @@ states those rules as the hooks of the shared
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, fields as _dataclass_fields, replace
 from functools import lru_cache
 from itertools import product
@@ -101,15 +102,18 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "interleave": lambda s: bool(s.persistent) and bool(s.causal),
             # A knob only where the variant leaves the order to auto: a variant
             # that sets it (qbminor) keeps it in sweeps and ignores the knob.
-            "nonpersist_decode": lambda s: not s.persistent
-            and s.nonpersist_decode == "auto",
+            "nonpersist_decode": lambda s: (
+                not s.persistent and s.nonpersist_decode == "auto"
+            ),
             # Wide DMA locks the K/V slab pads.
             "lds_k_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
             "lds_v_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
             "lds_k_group_pad": lambda s: int(s.head_size) < 128,
             # Sliding window keeps its own three-phase band loop.
-            "causal_diag_split": lambda s: bool(s.causal)
-            and int(s.sliding_window) == 0,
+            "causal_diag_split": lambda s: (
+                bool(s.causal) and int(s.sliding_window) == 0
+            ),
+            "kv_segments": lambda s: _kv_segments_in_scope(s),
         },
         policy_knobs=(
             "exp_per_pv_step",
@@ -135,13 +139,64 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "use_cfvst": lambda s: s.resolved_use_cfvst(),
             "use_v_swizzle": lambda s: s.resolved_use_cfvst(),
             "v_row_pad": lambda s: s.resolved_use_cfvst(),
-            "causal_diag_split": lambda s: bool(s.causal)
-            and int(s.sliding_window) == 0,
+            "causal_diag_split": lambda s: (
+                bool(s.causal) and int(s.sliding_window) == 0
+            ),
+            "kv_segments": lambda s: _kv_segments_in_scope(s),
+            "window_wave_skip": lambda s: bool(s.causal) and int(s.sliding_window) > 0,
         },
         policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),
         inert=_gfx942_dense_inert_knobs,
     ),
 }
+
+
+def _kv_segments_in_scope(spec) -> bool:
+    """The KV-segment split exists only on the plain default grid."""
+    return not (
+        spec.persistent
+        or int(spec.sliding_window)
+        or spec.use_sinks
+        or spec.emit_lse
+        or spec.ragged
+        or spec.varlen
+        or spec.paged
+    )
+
+
+def dense_kv_segments(work_items: int, num_cus: int, max_segments: int = 8) -> int:
+    """KV-segment count for a default-grid dense launch of ``work_items`` CTAs.
+
+    Splits only a grid with fewer work items than CUs, aiming at about two CTAs per
+    CU: the power of two nearest ``2 * num_cus / work_items``, capped at
+    ``max_segments``. A grid that already covers the device runs unsplit, since the
+    split's partial-output traffic and combine pass then cost more than they buy."""
+    if work_items <= 0 or num_cus <= 0 or work_items >= num_cus:
+        return 1
+    ratio = 2.0 * num_cus / work_items
+    return max(1, min(max_segments, 1 << max(0, round(math.log2(ratio)))))
+
+
+def dense_wave_segments(
+    work_items: int, num_cus: int, max_segments: int = 8, target: float = 0.8
+) -> int:
+    """KV-segment count by wave quantization: the smallest power of two ``S`` whose
+    ``work_items * S`` CTAs fill their last wave on ``num_cus`` CUs to at least
+    ``target``, else the most efficient ``S`` (smallest on ties). A grid that
+    already fills its waves keeps one segment."""
+    if work_items <= 0 or num_cus <= 0:
+        return 1
+    best, best_eff = 1, 0.0
+    s = 1
+    while s <= max_segments:
+        ctas = work_items * s
+        eff = ctas / (-(-ctas // num_cus) * num_cus)
+        if eff >= target:
+            return s
+        if eff > best_eff + 1e-9:
+            best, best_eff = s, eff
+        s *= 2
+    return best
 
 
 def _dense_arch(arch: str) -> _DenseTuningArch:
@@ -314,7 +369,19 @@ class DenseSpace(WavesPerEuSpace):
     ] = None
 
     def recorded(self, base):
-        return self.recorded_fields
+        # A moving bottom-right diagonal on the default grid resolves its query
+        # tile and KV-segment count per problem (the short-chunk rule), so both
+        # are recorded there. Every other base keeps its key unchanged.
+        moving = getattr(base, "causal_bottom_right", False) and int(
+            base.seqlen_q
+        ) != int(base.seqlen_kv)
+        fields = self.recorded_fields
+        if moving and self.arch == "gfx942":
+            # gfx942 also turns the diagonal split on for every moving diagonal.
+            fields = fields | {"causal_diag_split"}
+        if moving and not base.persistent:
+            fields = fields | {"block_m", "kv_segments"}
+        return fields
 
     def axes(self, base):
         return _dense_axes_for(base, self.arch)
@@ -336,7 +403,9 @@ class DenseSpace(WavesPerEuSpace):
         return axis_knob_names(tuning_axes(self.arch, "dense"))
 
     def defaults(self, base, kernel):
-        return dict(_dense_defaults(base, self.recorded_fields))
+        # The fields recorded per problem carry their value in the knobs, so the
+        # fingerprint must not also hash this problem's default for them.
+        return dict(_dense_defaults(base, self.recorded(base)))
 
     def build(self, base, knobs):
         extra = self.derived(base, knobs) if self.derived is not None else {}
