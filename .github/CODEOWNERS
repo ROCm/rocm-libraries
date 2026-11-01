@@ -12,13 +12,16 @@
 
 # Team specific CI ownership
 /.github/workflows/*docs*.yml                       @ROCm/rocm-documentation
-/.github/docs-config.json                           @ROCm/rocm-documentation
 /.github/workflows/*hipblaslt*.yml                  @ROCm/hipblaslt-reviewers
 /.github/workflows/*hipdnn*.yml                     @ROCm/hipdnn-reviewers
-/.github/requirements-hipdnn-superbuild-ci.txt      @ROCm/hipdnn-reviewers
 /.github/workflows/*miopen*.yml                     @ROCm/miopen-reviewers
 /.github/workflows/*therock*.yml                    @ROCm/therock-infra-write @ROCm/rocm-math-lib-build-infra
 /.github/workflows/therock-rocjitsu-race-check-linux.yml   @ROCm/therock-infra-write @ROCm/hipblaslt-reviewers
+
+# Scripts and other supporting files
+/.github/docs-config.json                           @ROCm/rocm-documentation
+/.github/requirements-hipdnn-superbuild-ci.txt      @ROCm/hipdnn-reviewers
+/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh      @ROCm/hipblaslt-reviewers
 
 # Component CI ownership
 /.github/workflows/*component-ci*.yml               @ROCm/rocm-math-lib-build-infra
