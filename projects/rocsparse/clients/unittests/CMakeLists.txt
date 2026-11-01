@@ -288,6 +288,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- ELL triangular solve / sliced-ELL SpMV [ROCM-33114] ------------------
+  # Distinct anchor (right after the level-2 host tests) so this leaf does not
+  # conflict with sibling unit-test branches. Drives rocsparse_sptrsv on
+  # rocsparse_format_ell and rocsparse_v2_spmv on rocsparse_format_sell
+  # through the public generic descriptor API; no compile-in TUs.
+  unit_test_internal_level2_ell_sell.cpp
   # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # sibling branches appending elsewhere. Needs the defining library TU in
