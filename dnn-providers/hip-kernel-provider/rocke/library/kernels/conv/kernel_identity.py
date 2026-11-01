@@ -1155,6 +1155,11 @@ def identity_supports_problem(
             )
             if dy_bound >= (1 << 30):
                 return False, "xh_tap_rsrc serves dY below 2^30 elements"
+        if getattr(identity, "xh_yring", 0) and identity.direction == "dgrad":
+            # The dgrad y-ring is built for one dX row width (its slots and
+            # loads per y step are baked).
+            if int(getattr(problem, "Wi", 0)) != identity.xh_yring % 1000:
+                return False, "xh_yring (dgrad) serves Wi == its ring width only"
         if identity.tapk_pp_xhalo >= 2 and int(getattr(problem, "Wi", 0)) < 32:
             # The gapped halo tile is sized for W rows of >= 32 pixels
             # (conv_implicit_gemm_dgrad.PP_XHALO_GAP_MIN_WI).
@@ -1293,6 +1298,9 @@ IDENTITY_CAPABILITY_FIELDS = (
     "xwin_rows",
     "xwin_mrow",
     "m_band",
+    "xwin_kband",
+    "xh_tap_rsrc",
+    "xh_yring",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.
