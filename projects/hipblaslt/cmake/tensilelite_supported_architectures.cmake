@@ -7,6 +7,7 @@ set(SUPPORTED_ARCHITECTURES
     "gfx90a"
     "gfx942"
     "gfx950"
+    "gfx1030"
     "gfx1100"
     "gfx1101"
     "gfx1102"
@@ -38,6 +39,12 @@ set(BASE_ARCHITECTURES)
 # gfx10XX architectures (e.g., gfx1010, gfx1011, gfx1030, etc...) are technically supported by tensilelite,
 # but are NOT included in the default "all" build in hipBLASLt. This is because "extops" builds are not supported
 # for legacy devices. Including these architectures would result in build failures or incomplete feature support.
+#
+# gfx1030 (RDNA2) can be built: it has no matrix instructions, so it uses the
+# non-MatrixInstruction (V_DOT2 / FMA) kernel path.  The ExtOp device-library
+# generators take their architecture from GPU_TARGETS, and both the wavefront
+# size they emit and the assembly flags in device-library/extops/CMakeLists.txt
+# cover gfx1030.
 if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
     # For device address sanitizer builds, "all" is just the architectures that
     # support xnack+.

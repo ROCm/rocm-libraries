@@ -1280,14 +1280,63 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "MacroTile mismatch")
 
     # dot2: currently only support fp16 with HPA on gfx942 or fp16 &bf16 on gfx950/gfx11
+    # gfx1030 (RDNA2) has v_dot2_f32_f16 / v_dot2c_f32_f16 but no matrix instruction,
+    # so it needs the dot2 path as much as gfx11 does.
     state["UseDotInstruction"] = (not state["EnableMatrixInstruction"]) \
       and state["ProblemType"]["HighPrecisionAccumulate"] \
       and ((state["ISA"] == IsaVersion(9,4,2) and state["ProblemType"]["DataType"].isHalf()) \
-      or ((state["ISA"] == IsaVersion(9,5,0) or state["ISA"][0] == 11) \
+      or ((state["ISA"] == IsaVersion(9,5,0) or state["ISA"][0] == 11 or state["ISA"] == IsaVersion(10,3,0)) \
           and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
     if state["UseDotInstruction"]:
       # need modification for dot4 or dot8
       state["NumDotElements"] = 2
+    # int8 dot4: LocalDotLayout=4 asks for the four-way signed 8-bit dot product
+    # (v_dot4c_i32_i8), which needs four consecutive K elements of a row in one
+    # VGPR.  gfx1030 (ISA 10.3) has v_dot4c_i32_i8.
+    #
+    # The classic non-matrix-instruction int8 path (FMA_I8_HPA: unpack each
+    # byte to int32, then v_mad_i32_i24) is broken in TensileLite 5: the
+    # local-read/local-write layout it generates for packed int8 does not
+    # match the register layout that MAC assumes, so only one byte in every
+    # four reaches the accumulator.  It is the path upstream's own navi21
+    # int8 kernels used to take, and AMD's shipped gfx1030 int8 kernel is
+    # built with v_dot4c_i32_i8 instead.  So on an architecture that has
+    # v_dot4c_i32_i8 the dot4 path is not an optimisation, it is the only
+    # correct one, and a solution that cannot take it is dropped rather than
+    # built with the broken MAC.
+    int8Dot4Candidate = (not state["EnableMatrixInstruction"]) \
+      and (not state["UseDotInstruction"]) \
+      and state["ProblemType"]["HighPrecisionAccumulate"] \
+      and state["ProblemType"]["DataType"].isInt8() \
+      and state.get("LocalDotLayout", 1) == 4 \
+      and isaInfoMap[state["ISA"]].asmCaps.get("v_dot4c_i32_i8", False)
+    if int8Dot4Candidate:
+        state["UseDotInstruction"] = True
+        state["NumDotElements"] = 4
+        # One dot4 group per inner unroll step, so that
+        # LocalReadVectorWidth == NumDotElements * InnerUnroll holds.
+        state["InnerUnroll"] = 1
+        # The dot path needs K contiguous in LDS; TransposeLDS 2 selects
+        # UnrollMajorLDS.  The shipped int8 logic files do not select it.
+        state["TransposeLDS"] = 2
+        # The dot path's local read address assignment only handles a scalar
+        # global read, the same restriction the fp16 dot2 path has.
+        state["VectorWidthA"] = 1
+        state["VectorWidthB"] = 1
+        state["GlobalReadVectorWidthA"] = 1
+        state["GlobalReadVectorWidthB"] = 1
+        # One dot4 group per local read; LocalReadVectorWidth has to match
+        # NumDotElements * InnerUnroll.
+        state["LocalReadVectorWidth"] = 4
+        state["LocalReadVectorWidthA"] = 4
+        state["LocalReadVectorWidthB"] = 4
+        # The dot4 group is four consecutive K elements of one row, so the LDS
+        # must hold them one byte apart (the "2" variants would give every
+        # element a two byte slot and break the group).
+        state["LocalRead2A"] = False
+        state["LocalWrite2A"] = False
+        state["LocalRead2B"] = False
+        state["LocalWrite2B"] = False
     if not state["UseDotInstruction"] and state["WaveSplitK"]:
       reject(state, "WaveSplitK currently only support dot2 kernel.")
       return
@@ -3007,6 +3056,28 @@ class Solution(collections.abc.Mapping):
       if state["EnableMatrixInstruction"]:
         state["MIWaveTileA"] = state["MIWaveTile"][1]
         state["MIWaveTileB"] = state["MIWaveTile"][0]
+
+    if not state["EnableMatrixInstruction"]:
+      # A non-MI (mac/dot) kernel has no matrix instruction, but the assembly
+      # writer's packed (<4 byte) data path still reads the matrix-tile state:
+      # KernelWriterAssembly sizes the packed value registers with
+      #   ceil(VectorWidthA * bpe / bpr) * MIWaveTileA // VectorWidthA
+      # over MIInputPerThreadA elements, and Solution's own register budget
+      # uses MIWaveTileA * MIInputPerThreadA * bpe // bpr.
+      #
+      # Without a matrix instruction there is exactly one wave tile, and each
+      # thread holds ThreadTileA (resp. ThreadTileB) elements of the operand.
+      # Setting those keeps the packed path's arithmetic identical to the
+      # non-MI valu allocation, which is ThreadTileA * bpe // bpr.
+      #
+      # This is what a wave32 architecture without any matrix instruction
+      # needs -- gfx1030 (RDNA2) has V_DOT2 but no MFMA and no WMMA -- and
+      # there is no such logic file in the tree to have exercised it before.
+      state["MIWaveTileA"] = 1
+      state["MIWaveTileB"] = 1
+      state["MIInputPerThread"] = state["ThreadTileA"]
+      state["MIInputPerThreadA"] = state["ThreadTileA"]
+      state["MIInputPerThreadB"] = state["ThreadTileB"]
 
     if state["ProblemType"]["Sparse"] == 2 and state["DirectToVgprSparseMetadata"]:
       reject(state, printRejectionReason, "Sparse B does not supprot DirectToVgprSparseMetadata")
@@ -5735,9 +5806,10 @@ class Solution(collections.abc.Mapping):
       if not bufferLoad:
         reject(state, "dot2 kernel only support bufferLoad!")
       if not ((isaInfoMap[isa].asmCaps['v_dot2_f32_f16'] and state["ProblemType"]["DataType"].isHalf()) \
-      or (isaInfoMap[isa].asmCaps['v_dot2_f32_bf16'] and state["ProblemType"]["DataType"].isBFloat16())) \
+      or (isaInfoMap[isa].asmCaps['v_dot2_f32_bf16'] and state["ProblemType"]["DataType"].isBFloat16()) \
+      or (isaInfoMap[isa].asmCaps.get('v_dot4c_i32_i8', False) and state["ProblemType"]["DataType"].isInt8())) \
       and state["ProblemType"]["HighPrecisionAccumulate"]:
-        reject(state, "dot2 kernel only support DataType fp16 or bf16 with HPA")
+        reject(state, "dot kernel only support DataType fp16, bf16 or int8 with HPA")
       if state["InnerUnroll"] not in [1,2,4]:
         reject(state, "dot2 kernel requires InnerUnroll = 1,2 or 4")
       if state["NumWaveSplitK"] not in [1,2,4,8,16,32,64]:
@@ -7616,7 +7688,7 @@ class Solution(collections.abc.Mapping):
       # if not bufferLoad or not state["GuaranteeNoPartialA"]:
       # Restrict GRVW/VW combos so shift-ptr logic will work.
       # gfx11 dot2 with K-contiguous operands reads along K and never shifts pointers.
-      gfx11Dot = state["UseDotInstruction"] and state["ISA"][0] == 11
+      gfx11Dot = state["UseDotInstruction"] and (state["ISA"][0] == 11 or state["ISA"] == IsaVersion(10,3,0))
       dotNoShiftA = gfx11Dot and not state["ProblemType"]["TLUA"]
       dotNoShiftB = gfx11Dot and not state["ProblemType"]["TLUB"]
       if state["GlobalReadVectorWidthA"] > 1 and not dotNoShiftA \

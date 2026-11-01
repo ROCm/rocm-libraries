@@ -26,6 +26,7 @@
 
 #include <cassert>
 #include <regex>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -347,6 +348,13 @@ namespace rocisa
                 auto it = macros.find(macroInst->name);
                 assert(it != macros.end()
                        && "macroToInstruction: MacroInstruction references undefined macro");
+                // The assert is compiled out of a release build, so the check
+                // is made again here: dereferencing the end of the lookup is
+                // what turned a missing macro into a segmentation fault.
+                if(it == macros.end())
+                    throw std::runtime_error("macroToInstruction: MacroInstruction references "
+                                             "undefined macro '"
+                                             + macroInst->name + "'");
                 auto& macro      = std::get<0>(it->second);
                 auto& defaults   = std::get<1>(it->second);
                 auto  params     = std::make_shared<MacroParams>(*defaults);

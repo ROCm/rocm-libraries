@@ -221,6 +221,13 @@ def fast_yaml_dump(solutionStates, f):
             else:
                 prefix = '  '
             if isinstance(v, dict):
+                if not v:
+                    # An empty mapping has to be written out.  "key:" on its own
+                    # reads back as null, not as an empty mapping, and a null
+                    # where a mapping is expected fails the solution's own
+                    # validation on the way back in.
+                    f.write(f'{prefix}{k}: {{}}\n')
+                    continue
                 f.write(f'{prefix}{k}:\n')
                 for k2 in sorted(v.keys()):
                     f.write(f'    {k2}: {_fast_yaml_scalar(v[k2])}\n')
