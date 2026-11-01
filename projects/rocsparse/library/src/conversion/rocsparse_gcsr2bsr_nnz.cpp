@@ -41,7 +41,8 @@ namespace rocsparse
                                            int64_t                   block_dim,
                                            const rocsparse_mat_descr bsr_descr,
                                            I*                        bsr_row_ptr,
-                                           I*                        nnzb)
+                                           I*                        nnzb,
+                                           rocsparse_pointer_mode    bsr_nnz_pointer_mode)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -67,7 +68,8 @@ namespace rocsparse
                                                                   (TYPE)block_dim,          \
                                                                   bsr_descr,                \
                                                                   bsr_row_ptr,              \
-                                                                  nnzb));                   \
+                                                                  nnzb,                     \
+                                                                  bsr_nnz_pointer_mode));   \
         return rocsparse_status_success;                                                    \
     }
 
@@ -94,7 +96,8 @@ rocsparse_status rocsparse::gcsr2bsr_nnz(rocsparse_handle          handle,
                                          const rocsparse_mat_descr bsr_descr,
                                          rocsparse_indextype       bsr_row_ptr_indextype,
                                          void*                     bsr_row_ptr,
-                                         int64_t*                  bsr_nnz)
+                                         int64_t*                  bsr_nnz,
+                                         rocsparse_pointer_mode    bsr_nnz_pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -110,24 +113,25 @@ rocsparse_status rocsparse::gcsr2bsr_nnz(rocsparse_handle          handle,
     }
     // LCOV_EXCL_STOP
 
-#define CASE(VAL, I)                                                               \
-    case VAL:                                                                      \
-    {                                                                              \
-        I local_bsr_nnz;                                                           \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsr2bsr_nnz_a(handle,                \
-                                                            direction,             \
-                                                            m,                     \
-                                                            n,                     \
-                                                            csr_descr,             \
-                                                            (const I*)csr_row_ptr, \
-                                                            csr_col_ind_indextype, \
-                                                            csr_col_ind,           \
-                                                            block_dim,             \
-                                                            bsr_descr,             \
-                                                            (I*)bsr_row_ptr,       \
-                                                            &local_bsr_nnz));      \
-        bsr_nnz[0] = local_bsr_nnz;                                                \
-        return rocsparse_status_success;                                           \
+#define CASE(VAL, I)                                                                \
+    case VAL:                                                                       \
+    {                                                                               \
+        I local_bsr_nnz;                                                            \
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsr2bsr_nnz_a(handle,                 \
+                                                            direction,              \
+                                                            m,                      \
+                                                            n,                      \
+                                                            csr_descr,              \
+                                                            (const I*)csr_row_ptr,  \
+                                                            csr_col_ind_indextype,  \
+                                                            csr_col_ind,            \
+                                                            block_dim,              \
+                                                            bsr_descr,              \
+                                                            (I*)bsr_row_ptr,        \
+                                                            &local_bsr_nnz,         \
+                                                            bsr_nnz_pointer_mode)); \
+        bsr_nnz[0] = local_bsr_nnz;                                                 \
+        return rocsparse_status_success;                                            \
     }
 
         CASE(rocsparse_indextype_i32, int32_t);
