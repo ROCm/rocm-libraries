@@ -32,6 +32,7 @@ The hipSPARSELt public repository is located at `<https://github.com/ROCm/rocm-l
 
     * :doc:`Storage formats <./conceptual/storage-format>`
     * :doc:`Features for the Instinct MI300 series <./conceptual/mi300-features>`
+    * :doc:`Gate residual epilogue <./conceptual/gate-residual>`
 
   .. grid-item-card:: How to
 
