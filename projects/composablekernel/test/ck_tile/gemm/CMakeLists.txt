@@ -199,16 +199,19 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
                 test_gemm_pipeline_comp_tdm_v3_wmma.cpp)
             add_gtest_executable(test_ck_tile_gemm_pipeline_comp_tdm_v3_longk_wmma
                 test_gemm_pipeline_comp_tdm_v3_longk_wmma.cpp)
-            # bf16 instances in every A/B layout: short shapes (SMOKE_TEST) and 4096^3
-            # (REGRESSION_TEST).
+            # bf16 instances in every A/B layout: short shapes and ragged shapes (SMOKE_TEST) and
+            # 4096^3 (REGRESSION_TEST).
             add_gtest_executable(test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_wmma
                 test_gemm_pipeline_comp_tdm_v3_bf16_wmma.cpp)
             add_gtest_executable(test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_large_wmma
                 test_gemm_pipeline_comp_tdm_v3_bf16_large_wmma.cpp)
+            add_gtest_executable(test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_ragged_wmma
+                test_gemm_pipeline_comp_tdm_v3_bf16_ragged_wmma.cpp)
             foreach(test_target test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma
                                 test_ck_tile_gemm_pipeline_comp_tdm_v3_longk_wmma
                                 test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_wmma
-                                test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_large_wmma)
+                                test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_large_wmma
+                                test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_ragged_wmma)
                 target_compile_options(${test_target} PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
                 # Re-enable, for these targets only, the post-RA machine scheduler that the top-level
                 # CMakeLists turns off (-enable-post-misched=0; the later option wins). It issues the
@@ -283,7 +286,8 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
     foreach(test_target test_ck_tile_gemm_pipeline_comp_tdm_v3_wmma
                         test_ck_tile_gemm_pipeline_comp_tdm_v3_longk_wmma
                         test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_wmma
-                        test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_large_wmma)
+                        test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_large_wmma
+                        test_ck_tile_gemm_pipeline_comp_tdm_v3_bf16_ragged_wmma)
         if(TEST ${test_target})
             set_property(TEST ${test_target} APPEND PROPERTY LABELS "CK_TILE_GEMM_TESTS")
             list(APPEND CK_TILE_GEMM_TEST_TARGETS ${test_target})
