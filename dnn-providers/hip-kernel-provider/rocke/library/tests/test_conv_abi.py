@@ -1863,6 +1863,35 @@ def test_cache_async_chunk_must_divide_cpg():
     assert narrow_arch == {"async_chunk_a": 2, "async_chunk_b": 2}
 
 
+def test_wmma_wgrad_keeps_the_default_grid_and_covers_the_new_variants():
+    """gfx1250 wgrad: every geometry keeps its synchronous default-epilogue
+    kernels; cshuffle, two-stage and the async loop come only on the cover.
+
+    Walks the real (unshrunk) wgrad generator and :func:`aj.count_jobs`, which
+    must agree on gfx1250 too.
+    """
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx("gfx1250")
+    split_ks = aj.CACHE_WGRAD_SPLIT_KS
+    geos = set()
+    walked = 0
+    for job in aj._wgrad_jobs("gfx1250", "bf16", 32, "wmma", target, split_ks):
+        walked += 1
+        i = job.identity
+        geo = (i.tile_m, i.tile_n, i.tile_k, i.warp_m, i.warp_n)
+        geos.add(geo)
+        # The group-merged depthwise candidates are develop's, walked on every
+        # geometry as before (WMMA rejects them at validation).
+        new_variant = i.epilogue != "default" or i.two_stage or i.async_dma
+        if new_variant and not i.group_merge:
+            assert geo in aj.CACHE_WGRAD_WMMA_GEOMETRIES, i
+    assert set(aj.CACHE_WGRAD_WMMA_GEOMETRIES) < geos
+    assert walked == aj.count_jobs(
+        dtype="bf16", target=target, directions=["wgrad"], split_ks=split_ks
+    )
+
+
 @pytest.mark.parametrize(
     "directions", [("fwd",), ("wgrad",), ("dgrad",), ("fwd", "wgrad", "dgrad")]
 )

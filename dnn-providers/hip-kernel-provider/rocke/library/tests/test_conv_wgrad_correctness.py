@@ -831,7 +831,7 @@ class TestConvWgradCorrectness(unittest.TestCase):
         at that degree rather than at the cache's ``split_k=2`` marker; the
         degree is a kernarg, so the IR is the same.
 
-        These are the 2x2-warp tiles, and the bf16 problems are sized so the
+        These are 2x2-warp tiles of the gfx1250 cover, and the bf16 problems are sized so the
         degree lands on its cap. The last bf16 problem (small channels, deep
         reduction) asks for 128 before the cap; all-positive partials miss the
         tolerance there. fp16 takes its own policy (fill to 1024 CTAs, 2048
@@ -861,9 +861,9 @@ class TestConvWgradCorrectness(unittest.TestCase):
         #  expected degree); -1 is the resolver's pick.
         cases = [
             (32, 32, 64, 96, 1, "bf16", (32, 64, 64), -1, 12),
-            (32, 32, 64, 128, 1, "fp16", (64, 64, 64), -1, 56),
-            (32, 32, 64, 64, 4, "bf16", (32, 32, 32), -1, 12),
-            (32, 32, 64, 64, 4, "fp16", (32, 32, 32), -1, 64),
+            (32, 32, 64, 128, 1, "fp16", (64, 128, 64), -1, 64),
+            (32, 32, 64, 64, 4, "bf16", (32, 128, 32), -1, 12),
+            (32, 32, 64, 64, 4, "fp16", (32, 128, 32), -1, 64),
             (64, 64, 16, 16, 1, "bf16", (32, 64, 64), -1, 12),
         ]
         ran = 0
@@ -879,14 +879,17 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     and g[5] == 16
                     and g[6:8] == ("mem", "default")
                 ]
-                # The cache's split-K binaries for this geometry that would be
-                # built (spec validity) and offered for this problem (lookup).
+                # The cache's packed-atomic split-K binaries for this geometry
+                # (synchronous K loop) that would be built (spec validity) and
+                # offered for this problem (lookup).
                 jobs = [
                     j
                     for j in aot_jobs._direction_jobs(
                         "wgrad", GPU_ARCH, dtype, target, (2,), 1, geometries=geometries
                     )
-                    if aot_jobs._spec_is_valid(j, GPU_ARCH, dtype)
+                    if not j.identity.two_stage
+                    and not j.identity.async_dma
+                    and aot_jobs._spec_is_valid(j, GPU_ARCH, dtype)
                     and identity_supports_problem(j.identity, problem)[0]
                 ]
                 self.assertTrue(jobs, f"no cached split-K kernel serves {problem}")
