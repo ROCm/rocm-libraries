@@ -60,7 +60,7 @@ static void emit_operand(rocke_strbuf_t* out, const rocke_value_t* v)
  *
  * %.*e conveniently hands us the significant digits and the decimal exponent
  * directly, which map onto CPython's `digits`/`decpt` with `decpt = exp + 1`. */
-static void emit_float(rocke_strbuf_t* out, double f)
+void rocke_append_python_float(rocke_strbuf_t* out, double f)
 {
     /* NaN: CPython repr -> "nan" (no sign). */
     if(f != f)
@@ -227,7 +227,7 @@ static void emit_repr_value(rocke_strbuf_t* out, const rocke_attr_value_t* v)
         rocke_strbuf_appendf(out, "%lld", (long long)v->u.i);
         break;
     case ROCKE_ATTR_FLOAT:
-        emit_float(out, v->u.f);
+        rocke_append_python_float(out, v->u.f);
         break;
     case ROCKE_ATTR_LIST:
     {
@@ -309,7 +309,7 @@ static void emit_attr_value(rocke_strbuf_t* out, const rocke_attr_value_t* v)
         rocke_strbuf_appendf(out, "%lld", (long long)v->u.i);
         break;
     case ROCKE_ATTR_FLOAT:
-        emit_float(out, v->u.f);
+        rocke_append_python_float(out, v->u.f);
         break;
     case ROCKE_ATTR_LIST:
         /* Python _attr_value falls through to str(value); for a list attr

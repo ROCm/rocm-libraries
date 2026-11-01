@@ -39,6 +39,7 @@
 #include "rocke/error.hpp" /* ckc::Error boundary translation */
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
+#include "rocke/ir_print.h" /* rocke_append_python_float */
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
 #include "rocke/strbuf.h"
@@ -543,6 +544,29 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
 
 /* ============================== literals ============================= */
 
+/* repr(val) followed by `suffix`, copied into the lowerer's arena. Finite values
+ * only; the callers spell nan and the infinities as <math.h> macros first. */
+static const char* h_python_float_literal(rocke_h_lowerer_t* lw, double val, const char* suffix)
+{
+    rocke_strbuf_t text;
+    char* out;
+    if(rocke_strbuf_init(&text, 32) != 0)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "float literal: out of memory");
+        return "";
+    }
+    rocke_append_python_float(&text, val);
+    rocke_strbuf_append(&text, suffix);
+    out = text.oom ? NULL : rocke_arena_strdup(&lw->b->arena, rocke_strbuf_cstr(&text));
+    rocke_strbuf_free(&text);
+    if(!out)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "float literal: out of memory");
+        return "";
+    }
+    return out;
+}
+
 const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val)
 {
     char* out;
@@ -561,10 +585,8 @@ const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val)
                                  val < 0 ? "((float)-INFINITY)" : "((float)INFINITY)");
         return out ? out : "";
     }
-    /* NOTE(port): Python emits repr(float)+"f"; %g is a close approximation but
-     * NOT guaranteed byte-identical to CPython repr. Known port hazard. */
-    out = rocke_arena_printf(&lw->b->arena, "%gf", val);
-    return out ? out : "";
+    /* Python: f"{val}f" -- repr(val) with the float suffix. */
+    return h_python_float_literal(lw, val, "f");
 }
 
 const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val)
@@ -585,15 +607,8 @@ const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val)
                                  val < 0 ? "((double)-INFINITY)" : "((double)INFINITY)");
         return out ? out : "";
     }
-    if(val == 0.0 && signbit(val))
-    {
-        out = rocke_arena_strdup(&lw->b->arena, "-0.0");
-        return out ? out : "";
-    }
-    /* NOTE(port): Python emits repr(float); %.17g is a close approximation but
-     * NOT guaranteed byte-identical to CPython repr. Known port hazard. */
-    out = rocke_arena_printf(&lw->b->arena, "%.17g", val);
-    return out ? out : "";
+    /* Python: repr(val). */
+    return h_python_float_literal(lw, val, "");
 }
 
 /* ============================== waitcnt encoders ===================== */
