@@ -215,11 +215,7 @@ namespace TensileLite
                     }
                 }
 
-                if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-                {
-                    solution->requiredHostWorkspaceSizePerProblem
-                        = solution->requiredHostSizeGroupedGemmSingle(problems[0], hardware);
-                }
+                solution->ensureRequiredHostWorkspaceSize(problems[0], hardware);
 
                 if(debug)
                     PredicateDebugger::printFooter(std::cout, true);
@@ -322,7 +318,7 @@ namespace TensileLite
                             useSolution = false;
                     }
                 }
-                else if(searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY)
+                else if(isGemmTypeOnlySearch(searchType))
                 {
                     if(!isGemmTypeSame((*solution), problems[0]))
                         useSolution = false;
@@ -349,11 +345,7 @@ namespace TensileLite
 
             if(useSolution)
             {
-                if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-                {
-                    solution->requiredHostWorkspaceSizePerProblem
-                        = solution->requiredHostSizeGroupedGemmSingle(problems[0], hardware);
-                }
+                solution->ensureRequiredHostWorkspaceSize(problems[0], hardware);
                 return SolutionSet<MySolution>({solution});
             }
 

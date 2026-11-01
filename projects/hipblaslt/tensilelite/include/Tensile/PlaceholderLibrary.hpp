@@ -31,15 +31,24 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 
-#include <atomic>
 #include <algorithm>
+#include <atomic>
 #include <iterator>
 #include <map>
+#include <mutex>
+#include <thread>
 
 #include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
+    // When non-null, publishing a placeholder library stores the raw pointer,
+    // sets *gate to 1, and waits until *gate is no longer 1 before storing the
+    // owning pointer. placeholderEarlyUse counts a member access that saw the
+    // raw pointer without the owning pointer. Both stay unused in production.
+    inline std::atomic<std::atomic<int>*> placeholderPublishGate{nullptr};
+    inline std::atomic<int>               placeholderEarlyUse{0};
+
     // Which placeholder libraries should be initialized at start
     // To be extended in the future
     enum class LazyLoadingInit
@@ -160,11 +169,61 @@ namespace TensileLite
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     struct PlaceholderLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
-        mutable std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> library;
+        struct Published
+        {
+            using Lib = SolutionLibrary<MyProblem, MySolution>;
+
+            std::shared_ptr<Lib> owned;
+            std::atomic<Lib*>    raw{nullptr};
+
+            Published()                            = default;
+            Published(Published const&)            = delete;
+            Published& operator=(Published const&) = delete;
+
+            Published& operator=(std::shared_ptr<Lib> next)
+            {
+                raw.store(next.get(), std::memory_order_release);
+                if(auto* gate = placeholderPublishGate.load(std::memory_order_acquire))
+                {
+                    if(gate->load(std::memory_order_acquire) == 0)
+                    {
+                        gate->store(1, std::memory_order_release);
+                        while(gate->load(std::memory_order_acquire) == 1)
+                            std::this_thread::yield();
+                    }
+                }
+                owned = std::move(next);
+                return *this;
+            }
+
+            explicit operator bool() const
+            {
+                return raw.load(std::memory_order_acquire) != nullptr;
+            }
+
+            // A caller that uses the member without waiting for the load can
+            // observe the raw pointer while owned is still empty.
+            Lib* operator->() const
+            {
+                if(raw.load(std::memory_order_acquire) != nullptr && !owned)
+                {
+                    placeholderEarlyUse.fetch_add(1, std::memory_order_relaxed);
+                    return nullptr;
+                }
+                return owned.get();
+            }
+
+            operator std::shared_ptr<Lib>() const
+            {
+                return owned;
+            }
+        };
+
+        mutable Published library;
         mutable std::set<std::string>*                                  loadedFiles;
         mutable SolutionMap<MySolution>*                                masterSolutions;
         mutable std::mutex*                                             solutionsGuard;
-        mutable std::mutex                                              lazyLoadingGuard;
+        mutable std::once_flag                                          lazyLoadOnce;
         std::string                                                     filePrefix;
 
         // Where to publish an indexed shard's blob cache, keyed by file prefix,
@@ -175,20 +234,23 @@ namespace TensileLite
             solutionSources = nullptr;
         std::string                                                     suffix;
         std::string                                                     libraryDirectory;
-        mutable std::atomic<bool>                                       lastFindTopRetAll = false;
 
         mutable std::map<std::string, std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>*
             indexLoadedLibraries;
 
         PlaceholderLibrary() = default;
 
-        bool loadPlaceholderLibrary() const
+        // Loads the shard the first time it is needed and returns the published
+        // library. A caller that arrives while the load is running waits for it.
+        // After that, this is a pointer copy. The search runs on the returned
+        // pointer, not under the load.
+        std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> loadPlaceholderLibrary() const
         {
-            std::lock_guard<std::mutex> lock(lazyLoadingGuard);
-            // If condition in case two threads got into this function
-            if(!library)
-            {
-                std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
+            std::call_once(lazyLoadOnce, [this] {
+            if(library)
+                return;
+
+            std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
                 auto        newLibrary = LoadLibraryFile<MyProblem, MySolution>(path);
                 auto        mLibrary
                     = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
@@ -218,7 +280,7 @@ namespace TensileLite
                         // Keeping this shard's own tree, so its cache is the one
                         // the leaves reference.
                         publishShardCache();
-                        return true;
+                        return;
                     }
                     // Adopting the tree the master loaded means adopting the
                     // cache the master already published; ours is dropped.
@@ -229,7 +291,7 @@ namespace TensileLite
                     if(Debug::Instance().printCodeObjectInfo())
                         std::cout << "load placeholder library " << filePrefix
                                   << " from MasterLibrary cache" << std::endl;
-                    return true;
+                    return;
                 }
 
                 publishShardCache();
@@ -249,11 +311,9 @@ namespace TensileLite
                 if(Debug::Instance().printCodeObjectInfo())
                     std::cout << "load placeholder library " << path << std::endl
                               << mLibrary->solutions.size() << " solutions loaded" << std::endl;
+            });
 
-                return mLibrary;
-            }
-
-            return false;
+            return library;
         }
 
         std::string getCodeObjectFileName() const
@@ -265,10 +325,9 @@ namespace TensileLite
                                                                Hardware const&  hardware,
                                                                const int index) const override
         {
-            if(!library)
-                loadPlaceholderLibrary();
+            auto lib = loadPlaceholderLibrary();
 
-            auto solution = library->getSolutionByIndex(problem, hardware, index);
+            auto solution = lib->getSolutionByIndex(problem, hardware, index);
 
             if(solution)
                 solution->codeObjectFilename = getCodeObjectFileName();
@@ -281,10 +340,9 @@ namespace TensileLite
                                                              double*          fitness
                                                              = nullptr) const override
         {
-            if(!library)
-                loadPlaceholderLibrary();
+            auto lib = loadPlaceholderLibrary();
 
-            auto solution = library->findBestSolution(problem, hardware, fitness);
+            auto solution = lib->findBestSolution(problem, hardware, fitness);
 
             if(solution)
                 solution->codeObjectFilename = getCodeObjectFileName();
@@ -304,12 +362,9 @@ namespace TensileLite
                              SolutionLibrarySearchType searchType
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
-            if(!library)
-            {
-                loadPlaceholderLibrary();
-            }
+            auto lib = loadPlaceholderLibrary();
 
-            auto solutions = library->findAllSolutions(problem, hardware, searchType);
+            auto solutions = lib->findAllSolutions(problem, hardware, searchType);
 
             for(auto& solution : solutions)
             {
@@ -325,12 +380,9 @@ namespace TensileLite
                                         SolutionLibrarySearchType     searchType
                                         = SolutionLibrarySearchType::DEFAULT) const override
         {
-            if(!library)
-            {
-                loadPlaceholderLibrary();
-            }
+            auto lib = loadPlaceholderLibrary();
 
-            auto solutions = library->findAllSolutionsGroupedGemm(problems, hardware, searchType);
+            auto solutions = lib->findAllSolutionsGroupedGemm(problems, hardware, searchType);
 
             for(auto& solution : solutions)
             {
@@ -340,30 +392,20 @@ namespace TensileLite
             return solutions;
         }
 
-        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
-                                                            Hardware const&  hardware,
-                                                            int numSolutions) const override
+        virtual TopSolutionsResult<MySolution> findTopSolutions(MyProblem const& problem,
+                                                                Hardware const&  hardware,
+                                                                int numSolutions) const override
         {
-            if(!library)
-            {
-                loadPlaceholderLibrary();
-            }
+            auto lib = loadPlaceholderLibrary();
 
-            auto solutions = library->findTopSolutions(problem, hardware, numSolutions);
+            auto result = lib->findTopSolutions(problem, hardware, numSolutions);
 
-            for(auto& solution : solutions)
+            for(auto& solution : result.solutions)
             {
                 solution->codeObjectFilename = getCodeObjectFileName();
             }
 
-            // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (solutions.size() < numSolutions);
-            return solutions;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
+            return result;
         }
 
         virtual SolutionVector<MySolution>
@@ -371,12 +413,9 @@ namespace TensileLite
                                         Hardware const&               hardware,
                                         int                           numSolutions) const override
         {
-            if(!library)
-            {
-                loadPlaceholderLibrary();
-            }
+            auto lib = loadPlaceholderLibrary();
 
-            auto solutions = library->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
+            auto solutions = lib->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
 
             for(auto& solution : solutions)
             {

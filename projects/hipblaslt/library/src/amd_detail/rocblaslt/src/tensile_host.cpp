@@ -7246,7 +7246,8 @@ inline auto getSolutions(
     if(reportEmpty)
         TensileLite::uniformSummationOrderSelectionTallyReset();
 
-    auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+    auto solutions
+        = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount).solutions;
 
     // Library logic can rank a custom kernel ahead of the kernels it replaces. For
     // a pointer-array problem drop it and widen the search, so the caller still
@@ -7266,7 +7267,7 @@ inline auto getSolutions(
            || found < static_cast<size_t>(request))
             break;
         request += static_cast<int>(dropped);
-        solutions = library->findTopSolutions(tensile_prob, *hardware, request);
+        solutions = library->findTopSolutions(tensile_prob, *hardware, request).solutions;
     }
 
     if(reportEmpty && solutions.empty())
@@ -7515,12 +7516,24 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     return rocblaslt_status_success;
 }
 
+namespace
+{
+    std::atomic<int> g_lastGetAllSearchType{-1};
+}
+
+extern "C" __attribute__((visibility("default"))) int rocblaslt_testing_last_get_all_search_type()
+{
+    return g_lastGetAllSearchType.load(std::memory_order_relaxed);
+}
+
 template <typename MyProblem>
 rocblaslt_status getAllSolutions(MyProblem&                                      prob,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
+    g_lastGetAllSearchType.store(static_cast<int>(searchType), std::memory_order_relaxed);
     log_api(__func__, "Entering function");
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
@@ -7544,13 +7557,11 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 
     if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
     {
-        solutions = library->findAllSolutions(
-            prob, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+        solutions = library->findAllSolutions(prob, *hardware, searchType);
     }
     else if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGroupedGemm>::value)
     {
-        solutions = library->findAllSolutionsGroupedGemm(
-            prob.gemms, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+        solutions = library->findAllSolutionsGroupedGemm(prob.gemms, *hardware, searchType);
     }
     log_api(__func__, "Found hardware solutions: ", solutions.size());
 
@@ -7560,14 +7571,12 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         prob.setF32XdlMathOp(rocisa::DataType::Float);
         if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
         {
-            solutions = library->findAllSolutions(
-                prob, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+            solutions = library->findAllSolutions(prob, *hardware, searchType);
         }
         else if constexpr(std::is_same<MyProblem,
                                        TensileLite::ContractionProblemGroupedGemm>::value)
         {
-            solutions = library->findAllSolutionsGroupedGemm(
-                prob.gemms, *hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
+            solutions = library->findAllSolutionsGroupedGemm(prob.gemms, *hardware, searchType);
         }
     }
 
@@ -7643,7 +7652,8 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 rocblaslt_status getAllSolutions(RocblasltContractionProblem&                    prob,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
@@ -7663,13 +7673,14 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
     }
 #endif
     auto tensile_prob = ConstructTensileProblem(prob);
-    return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes);
+    return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes, searchType);
 }
 
 rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&       probs,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
     TensileLite::ContractionProblemGroupedGemm tensile_probs;
     for(int i = 0; i < probs.size(); i++)
@@ -7677,26 +7688,29 @@ rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&      
         tensile_probs.gemms.push_back(ConstructTensileProblem(probs[i]));
         tensile_probs.gemms[i].setGroupedGemm(true);
     }
-    return getAllSolutions(tensile_probs, handle, heuristicResults, maxWorkSpaceBytes);
+    return getAllSolutions(tensile_probs, handle, heuristicResults, maxWorkSpaceBytes, searchType);
 }
 
 rocblaslt_status getAllSolutions(std::shared_ptr<void>                           gemmData,
                                  rocblaslt_handle                                handle,
                                  rocblaslt::RocGemmType                          gemmType,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes)
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType)
 {
     rocblaslt_status status = rocblaslt_status_success;
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
+        status                                = getAllSolutions(
+            data->problem, handle, heuristicResults, maxWorkSpaceBytes, searchType);
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
         std::shared_ptr<TensileDataGroupedGemm> data
             = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
-        status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
+        status = getAllSolutions(
+            data->problem, handle, heuristicResults, maxWorkSpaceBytes, searchType);
     }
     else
     {

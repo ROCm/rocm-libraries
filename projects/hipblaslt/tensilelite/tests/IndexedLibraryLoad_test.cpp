@@ -44,12 +44,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -69,6 +72,7 @@
 // For Serialization::objectToMap, used to walk a legacy document's top level.
 #include <Tensile/msgpack/MessagePack.hpp>
 
+#include "FallbackTestUtils.hpp"
 #include "SolutionIterator.hpp"
 #include "TestData.hpp"
 
@@ -532,7 +536,11 @@ namespace
     /// Rewrites a legacy {solutions, library} msgpack document into the indexed
     /// layout, re-packing each solution object into the blob. Mirrors what
     /// LibraryIO.writeMsgPackIndexed does on the Python side.
-    std::vector<uint8_t> toIndexed(msgpack::object const& legacy)
+    ///
+    /// With singleTree, the tree is one Single leaf for the lowest index
+    /// instead of the legacy tree. A Single leaf answers getSolutionByIndex
+    /// from the index alone, so a caller needs no matching problem.
+    std::vector<uint8_t> toIndexed(msgpack::object const& legacy, bool singleTree = false)
     {
         std::unordered_map<std::string, msgpack::object> top;
         Serialization::objectToMap(legacy, top);
@@ -575,7 +583,19 @@ namespace
         packer.pack_bin(static_cast<uint32_t>(blob.size()));
         packer.pack_bin_body(blob.data(), static_cast<uint32_t>(blob.size()));
         packer.pack(std::string("library"));
-        packer.pack(top.at("library"));
+        if(singleTree)
+        {
+            int64_t lowest = table.at(0);
+            for(size_t i = 0; i < table.size(); i += 3)
+                lowest = std::min(lowest, table[i]);
+            packer.pack_map(2);
+            packer.pack(std::string("type"));
+            packer.pack(std::string("Single"));
+            packer.pack(std::string("index"));
+            packer.pack(static_cast<int>(lowest));
+        }
+        else
+            packer.pack(top.at("library"));
 
         return std::vector<uint8_t>(out.data(), out.data() + out.size());
     }
@@ -743,6 +763,7 @@ namespace
     struct PlaceholderIndexedShardTest : public TempDirTest
     {
         std::vector<int> shardIndices;
+        bool             singleTree = false;
 
         fs::path masterPath() const
         {
@@ -766,7 +787,7 @@ namespace
             in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 
             auto handle  = msgpack::unpack(bytes.data(), bytes.size());
-            auto indexed = toIndexed(handle.get());
+            auto indexed = toIndexed(handle.get(), singleTree);
             if(indexed.empty())
                 return false;
 
@@ -853,6 +874,107 @@ TEST_F(PlaceholderIndexedShardTest, PlaceholderFirstPublishesItsCacheToTheParent
     // selects through the tree and re-fetches by index from getting two.
     auto viaCache = master->solutionSources.begin()->second->get(index);
     EXPECT_EQ(solution, viaCache) << "index lookup and the shard's own cache disagree";
+}
+
+// The publish gate makes the raw pointer visible before the owning pointer is
+// stored. Threads that call loadPlaceholderLibrary wait for that store. A use
+// of the member in the gap is counted in placeholderEarlyUse and must stay zero,
+// and every thread must receive the solution.
+TEST_F(PlaceholderIndexedShardTest, ConcurrentColdLookupsAllSeeTheLoadedShard)
+{
+    singleTree = true;
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    const int    index   = *std::min_element(shardIndices.begin(), shardIndices.end());
+    const AMDGPU device  = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+
+    struct Gate
+    {
+        std::atomic<int> value{0};
+        Gate()
+        {
+            placeholderEarlyUse.store(0);
+            placeholderPublishGate.store(&value);
+        }
+        ~Gate()
+        {
+            value.store(2);
+            placeholderPublishGate.store(nullptr);
+        }
+    } gate;
+
+    // A placeholder that has not been loaded yet. The one inside a master read
+    // from disk may already have run its load, which would close the gap.
+    Master fresh;
+    Holder cold;
+    cold.filePrefix          = kShardPrefix;
+    cold.libraryDirectory    = tmpDir.string();
+    if(cold.libraryDirectory.back() != '/')
+        cold.libraryDirectory.push_back('/');
+    cold.suffix              = ".dat";
+    cold.solutionsGuard      = &fresh.solutionsGuard;
+    cold.loadedFiles         = &fresh.loadedFiles;
+    cold.masterSolutions     = &fresh.solutions;
+    cold.solutionSources     = &fresh.solutionSources;
+    cold.indexLoadedLibraries = &fresh.indexLoadedLibraries;
+
+    std::atomic<int> bad{0};
+    std::mutex       errorMu;
+    std::string      error;
+    std::thread      loader([&] {
+        try
+        {
+            if(!cold.getSolutionByIndex(problem, device, index))
+                bad.fetch_add(1);
+        }
+        catch(std::exception const& ex)
+        {
+            bad.fetch_add(1);
+            std::lock_guard<std::mutex> lock(errorMu);
+            error = ex.what();
+        }
+        catch(...)
+        {
+            bad.fetch_add(1);
+            std::lock_guard<std::mutex> lock(errorMu);
+            error = "unknown exception";
+        }
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while(gate.value.load() == 0 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    ASSERT_EQ(gate.value.load(), 1) << "load did not reach the publish gap; error=" << error
+                                    << " bad=" << bad.load();
+
+    constexpr int            kReaders = 7;
+    std::vector<std::thread> readers;
+    for(int t = 0; t < kReaders; ++t)
+    {
+        readers.emplace_back([&] {
+            try
+            {
+                if(!cold.getSolutionByIndex(problem, device, index))
+                    bad.fetch_add(1);
+            }
+            catch(...)
+            {
+                bad.fetch_add(1);
+            }
+        });
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    gate.value.store(2);
+    loader.join();
+    for(auto& th : readers)
+        th.join();
+
+    EXPECT_EQ(placeholderEarlyUse.load(), 0);
+    EXPECT_EQ(bad.load(), 0);
 }
 
 TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)

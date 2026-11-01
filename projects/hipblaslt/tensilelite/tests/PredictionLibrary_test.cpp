@@ -313,7 +313,7 @@ TEST(PredictionLibraryTest, SpatialPaddingChangesRankingButNotExplicitIndexLooku
     problem.setParams().setUniformSummationOrder(0);
     problem.setComputeInputTypeA(rocisa::DataType::Float);
     problem.setComputeInputTypeB(rocisa::DataType::Float);
-    const auto ranked = lib.findTopSolutions(problem, device, 2);
+    const auto ranked = lib.findTopSolutions(problem, device, 2).solutions;
     ASSERT_EQ(ranked.size(), 2u);
     EXPECT_EQ(ranked[0], plain);
     EXPECT_EQ(ranked[1], clustered);

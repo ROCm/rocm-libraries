@@ -36,9 +36,14 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -396,5 +401,308 @@ namespace
         }
 
         EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
+
+    // Four threads, each with its own handle and non-blocking stream, run
+    // heuristic selection and matmul together. Shapes differ per thread and
+    // rotate per iteration. A and B are all ones, so every element of D equals K.
+    constexpr int kConcurrentThreads    = 4;
+    constexpr int kConcurrentIterations = 40;
+    constexpr int kConcurrentAlgos      = 4;
+
+    // K stays in {256, 512, 768, 1024}: sums of ones up to there are exact in bf16.
+    struct ConcurrentShape
+    {
+        int64_t m, n, k;
+    };
+    constexpr ConcurrentShape kConcurrentShapes[] = {
+        {512, 512, 256}, {1024, 256, 768}, {256, 1024, 512}, {768, 768, 1024}};
+    constexpr int     kConcurrentShapeCount = 4;
+    constexpr int64_t kConcurrentMaxElems   = 1 << 20;
+
+    constexpr uint16_t kBf16One = 0x3F80;
+
+    uint16_t bf16FromExactInt(int64_t v)
+    {
+        const float f   = static_cast<float>(v);
+        uint32_t    raw = 0;
+        static_assert(sizeof(raw) == sizeof(f), "float is 32 bits");
+        std::memcpy(&raw, &f, sizeof(raw));
+        return static_cast<uint16_t>(raw >> 16);
+    }
+
+    struct ConcurrentWorker
+    {
+        int         id        = 0;
+        bool        noSolution = false;
+        int         completed = 0;
+        std::string error; // first failure; gtest assertions stay on the main thread
+    };
+
+    void runConcurrentWorker(ConcurrentWorker&   w,
+                             std::atomic<int>&   ready,
+                             std::atomic<bool>&  go,
+                             std::atomic<bool>&  abortAll,
+                             const std::chrono::steady_clock::time_point deadline)
+    {
+        auto fail = [&](const std::string& what) {
+            if(w.error.empty())
+                w.error = what;
+            abortAll = true;
+        };
+        auto hipOk = [&](hipError_t e, const char* what) {
+            if(e == hipSuccess)
+                return true;
+            fail(std::string(what) + ": " + hipGetErrorString(e));
+            return false;
+        };
+        auto blasOk = [&](hipblasStatus_t s, const char* what) {
+            if(s == HIPBLAS_STATUS_SUCCESS)
+                return true;
+            fail(std::string(what) + ": hipblasStatus " + std::to_string(static_cast<int>(s)));
+            return false;
+        };
+
+        // The gate is released even on a setup failure, or the other threads
+        // would wait on this one forever.
+        bool arrived = false;
+        auto arrive  = [&] {
+            if(!arrived)
+            {
+                arrived = true;
+                ++ready;
+            }
+        };
+
+        hipblasLtHandle_t           handle = nullptr;
+        hipblasLtMatmulPreference_t pref   = nullptr;
+        hipStream_t                 stream = nullptr;
+        void *                      dA = nullptr, *dB = nullptr, *dD = nullptr, *dWs = nullptr;
+        size_t                      wsBytes = 0;
+
+        auto cleanup = [&] {
+            if(stream)
+                static_cast<void>(hipStreamSynchronize(stream));
+            static_cast<void>(hipFree(dA));
+            static_cast<void>(hipFree(dB));
+            static_cast<void>(hipFree(dD));
+            static_cast<void>(hipFree(dWs));
+            if(pref)
+                hipblasLtMatmulPreferenceDestroy(pref);
+            if(stream)
+                static_cast<void>(hipStreamDestroy(stream));
+            if(handle)
+                hipblasLtDestroy(handle);
+        };
+
+        const size_t bytes = static_cast<size_t>(kConcurrentMaxElems) * sizeof(uint16_t);
+        bool         setup = hipOk(hipSetDevice(0), "hipSetDevice")
+                     && blasOk(hipblasLtCreate(&handle), "hipblasLtCreate")
+                     && hipOk(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking),
+                              "hipStreamCreateWithFlags")
+                     && blasOk(hipblasLtMatmulPreferenceCreate(&pref), "PreferenceCreate")
+                     && hipOk(hipMalloc(&dA, bytes), "hipMalloc A")
+                     && hipOk(hipMalloc(&dB, bytes), "hipMalloc B")
+                     && hipOk(hipMalloc(&dD, bytes), "hipMalloc D");
+        if(setup)
+        {
+            const uint64_t wsBudget = kWsBudgetBytes;
+            hipblasLtMatmulPreferenceSetAttribute(
+                pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsBudget, sizeof(wsBudget));
+
+            std::vector<uint16_t> ones(static_cast<size_t>(kConcurrentMaxElems), kBf16One);
+            setup = hipOk(hipMemcpy(dA, ones.data(), bytes, hipMemcpyHostToDevice), "memcpy A")
+                    && hipOk(hipMemcpy(dB, ones.data(), bytes, hipMemcpyHostToDevice), "memcpy B");
+        }
+
+        arrive();
+        while(!go)
+            std::this_thread::yield();
+        if(!setup || abortAll)
+        {
+            cleanup();
+            return;
+        }
+
+        const float alpha = 1.0f, beta = 0.0f;
+        for(int iter = 0; iter < kConcurrentIterations && !abortAll; ++iter)
+        {
+            const ConcurrentShape sh = kConcurrentShapes[(w.id + iter) % kConcurrentShapeCount];
+
+            hipblasLtMatmulDesc_t   desc = nullptr;
+            hipblasLtMatrixLayout_t layA = nullptr, layB = nullptr, layD = nullptr;
+
+            bool ok = blasOk(hipblasLtMatrixLayoutCreate(&layA, HIP_R_16BF, sh.m, sh.k, sh.m),
+                             "LayoutCreate A")
+                      && blasOk(hipblasLtMatrixLayoutCreate(&layB, HIP_R_16BF, sh.k, sh.n, sh.k),
+                                "LayoutCreate B")
+                      && blasOk(hipblasLtMatrixLayoutCreate(&layD, HIP_R_16BF, sh.m, sh.n, sh.m),
+                                "LayoutCreate D")
+                      && blasOk(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                                "DescCreate");
+
+            hipblasLtMatmulHeuristicResult_t heuristic[kConcurrentAlgos]{};
+            int                              returned = 0;
+            if(ok)
+            {
+                const hipblasOperation_t opN = HIPBLAS_OP_N;
+                hipblasLtMatmulDescSetAttribute(
+                    desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN));
+                hipblasLtMatmulDescSetAttribute(
+                    desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
+                ok = blasOk(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                            desc,
+                                                            layA,
+                                                            layB,
+                                                            layD,
+                                                            layD,
+                                                            pref,
+                                                            kConcurrentAlgos,
+                                                            heuristic,
+                                                            &returned),
+                            "AlgoGetHeuristic");
+            }
+            if(ok && returned == 0)
+            {
+                w.noSolution = true;
+                ok           = false;
+            }
+
+            if(ok && heuristic[0].workspaceSize > wsBytes)
+            {
+                static_cast<void>(hipFree(dWs));
+                dWs     = nullptr;
+                wsBytes = heuristic[0].workspaceSize;
+                ok      = hipOk(hipMalloc(&dWs, wsBytes), "hipMalloc workspace");
+            }
+
+            if(ok)
+                ok = hipOk(hipMemsetAsync(dD, 0, bytes, stream), "memset D")
+                     && blasOk(hipblasLtMatmul(handle,
+                                               desc,
+                                               &alpha,
+                                               dA,
+                                               layA,
+                                               dB,
+                                               layB,
+                                               &beta,
+                                               dD,
+                                               layD,
+                                               dD,
+                                               layD,
+                                               &heuristic[0].algo,
+                                               dWs,
+                                               heuristic[0].workspaceSize,
+                                               stream),
+                               "hipblasLtMatmul");
+
+            std::vector<uint16_t> out;
+            if(ok)
+            {
+                out.assign(static_cast<size_t>(sh.m * sh.n), 0);
+                ok = hipOk(hipMemcpyAsync(out.data(),
+                                          dD,
+                                          out.size() * sizeof(uint16_t),
+                                          hipMemcpyDeviceToHost,
+                                          stream),
+                           "memcpy D");
+            }
+            if(ok)
+            {
+                // Poll against the deadline, as above: a wedged queue must fail
+                // the test with a message rather than hang the job.
+                hipError_t q = hipStreamQuery(stream);
+                while(q == hipErrorNotReady)
+                {
+                    if(std::chrono::steady_clock::now() > deadline)
+                    {
+                        std::fprintf(stderr,
+                                     "\n[  FAILED  ] StreamKMultiStream.smoke_ConcurrentHandlesMatmul\n"
+                                     "  thread %d made no progress at iteration %d of %d.\n"
+                                     "  Exiting without cleanup because the queue is wedged.\n\n",
+                                     w.id,
+                                     iter,
+                                     kConcurrentIterations);
+                        std::fflush(stderr);
+                        std::_Exit(1);
+                    }
+                    std::this_thread::yield();
+                    q = hipStreamQuery(stream);
+                }
+                ok = hipOk(q, "hipStreamQuery");
+            }
+            if(ok)
+            {
+                const uint16_t want = bf16FromExactInt(sh.k);
+                for(size_t i = 0; i < out.size(); ++i)
+                    if(out[i] != want)
+                    {
+                        char bits[64];
+                        std::snprintf(bits, sizeof(bits), "got bf16 0x%04x, want 0x%04x", out[i], want);
+                        fail("wrong result at iteration " + std::to_string(iter) + ", shape "
+                             + std::to_string(sh.m) + "x" + std::to_string(sh.n) + "x"
+                             + std::to_string(sh.k) + ", element " + std::to_string(i) + ": "
+                             + bits);
+                        ok = false;
+                        break;
+                    }
+            }
+            if(ok)
+                ++w.completed;
+
+            if(layA)
+                hipblasLtMatrixLayoutDestroy(layA);
+            if(layB)
+                hipblasLtMatrixLayoutDestroy(layB);
+            if(layD)
+                hipblasLtMatrixLayoutDestroy(layD);
+            if(desc)
+                hipblasLtMatmulDescDestroy(desc);
+            if(!ok)
+                break;
+        }
+        cleanup();
+    }
+
+    TEST(StreamKMultiStream, smoke_ConcurrentHandlesMatmul)
+    {
+        if(!gpuAvailable())
+            GTEST_SKIP() << "No GPU available";
+
+        std::atomic<int>  ready{0};
+        std::atomic<bool> go{false};
+        std::atomic<bool> abortAll{false};
+        const auto        deadline
+            = std::chrono::steady_clock::now() + std::chrono::seconds(kDeadlineSeconds);
+
+        std::vector<ConcurrentWorker> workers(kConcurrentThreads);
+        std::vector<std::thread>      threads;
+        for(int i = 0; i < kConcurrentThreads; ++i)
+        {
+            workers[i].id = i;
+            threads.emplace_back(runConcurrentWorker,
+                                 std::ref(workers[i]),
+                                 std::ref(ready),
+                                 std::ref(go),
+                                 std::ref(abortAll),
+                                 deadline);
+        }
+        while(ready < kConcurrentThreads)
+            std::this_thread::yield();
+        go = true;
+        for(auto& t : threads)
+            t.join();
+
+        bool anySkip = false;
+        for(const auto& w : workers)
+        {
+            anySkip = anySkip || w.noSolution;
+            EXPECT_TRUE(w.error.empty()) << "thread " << w.id << ": " << w.error;
+        }
+        if(anySkip)
+            GTEST_SKIP() << "No solution for one of the test shapes on this device";
+        for(const auto& w : workers)
+            EXPECT_EQ(w.completed, kConcurrentIterations) << "thread " << w.id;
+        EXPECT_EQ(hipGetLastError(), hipSuccess);
     }
 } // namespace

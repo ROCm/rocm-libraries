@@ -139,11 +139,7 @@ namespace TensileLite
                 return false;
             }
 
-            if(solution.requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-            {
-                solution.requiredHostWorkspaceSizePerProblem
-                    = solution.requiredHostSizeGroupedGemmSingle(problem, *m_hardware);
-            }
+            solution.ensureRequiredHostWorkspaceSize(problem, *m_hardware);
             return true;
         }
 
@@ -633,14 +629,16 @@ namespace TensileLite
                 if(m_predictionThreshold > 1.0)
                 {
                     m_solutions
-                        = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions);
+                        = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions)
+                              .solutions;
                 }
                 else
                 {
                     if(m_numSolutions != -1)
                     {
                         m_solutions
-                            = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions);
+                            = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions)
+                              .solutions;
                     }
                 }
             }

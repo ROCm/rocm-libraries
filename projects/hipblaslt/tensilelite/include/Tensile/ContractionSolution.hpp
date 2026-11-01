@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
@@ -1040,6 +1041,19 @@ namespace TensileLite
         size_t requiredHostSizeGroupedGemmSingle(Problem const&  problem,
                                                  Hardware const& hardware) const;
 
+        // Publishes the host argument bytes for one grouped-GEMM problem of this
+        // solution. The first stored value is kept.
+        void ensureRequiredHostWorkspaceSize(Problem const& problem, Hardware const& hardware)
+        {
+            if(requiredHostWorkspaceSizePerProblem.load(std::memory_order_acquire)
+               != static_cast<size_t>(-1))
+                return;
+            size_t expected = static_cast<size_t>(-1);
+            size_t computed = requiredHostSizeGroupedGemmSingle(problem, hardware);
+            requiredHostWorkspaceSizePerProblem.compare_exchange_strong(
+                expected, computed, std::memory_order_release, std::memory_order_relaxed);
+        }
+
         size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
         void                 calculateTiles(dim3& tiles,
@@ -1479,8 +1493,9 @@ namespace TensileLite
 
         ProblemType problemType;
 
-        // This will be calculated when getSolution is called
-        size_t requiredHostWorkspaceSizePerProblem = static_cast<size_t>(-1);
+        // Host argument bytes for one grouped-GEMM problem of this solution.
+        // ensureRequiredHostWorkspaceSize publishes the first value and keeps it.
+        std::atomic<size_t> requiredHostWorkspaceSizePerProblem{static_cast<size_t>(-1)};
 
         /// Debugging purposes.  Shouldn't contain any vital information that isn't
         /// somewhere else.
