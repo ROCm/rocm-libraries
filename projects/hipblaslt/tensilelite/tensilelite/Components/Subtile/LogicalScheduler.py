@@ -4618,6 +4618,15 @@ class LogicalScheduler:
             if self.config.numSubIterK >= 2 and has_ab_holes:
                 return {}, self._operandLendVgprs(dead_ids)
             return None, self._operandLendVgprs(None)
+        # Small tile (MT<=256x256): normally no lend (the loop has headroom).  But the
+        # DPP store-coalesce needs a >=4-entry fused-store batch (two M-pairs) to coalesce,
+        # and availableBlockMaxVgpr only reaches that once the dead operand tiles are
+        # freed.  Small tiles have no woven tail (every MFMA already retired), so lending
+        # all operand tiles is safe; the batch sizer then grows to a coalesce-capable size.
+        # The coalesce is always compiled in for eligible subtile kernels (runtime branch on
+        # M,N > 4096 selects between coalesce and non-coalesce at dispatch time), so always lend.
+        if kernel.get("UseSubtileImpl"):
+            return None, self._operandLendVgprs(None)
         return {}, []
 
     def _plsinStagedStoreCount(self, weaveGroups, lendTiles, storeCfg=None):
@@ -4992,7 +5001,7 @@ class LogicalScheduler:
                 return
             name = getattr(mod, "name", "") or ""
             # Both woven store forms use the Phase1(converts)/PlsinGap_/Phase2 shape.
-            if name in ("16bitSubtilePairedStoreWoven", "16bitSubtilePairedStoreRepack"):
+            if name in ("16bitSubtilePairedStoreWoven", "16bitSubtilePairedStoreCoalesce"):
                 if self._rewriteOneWovenPair(mod, valuPerGap):
                     rewritten += 1
                 return
@@ -5008,11 +5017,11 @@ class LogicalScheduler:
         others = []
         for child in list(woven.items()):
             cname = getattr(child, "name", "") or ""
-            if cname in ("16bitSubtilePairedStorePhase1", "16bitSubtileRepackPhase1"):
+            if cname in ("16bitSubtilePairedStorePhase1", "16bitSubtileCoalescePhase1"):
                 phase1 = child
             elif cname.startswith("PlsinGap_"):
                 gap = child
-            elif cname in ("16bitSubtilePairedStorePhase2", "16bitSubtileRepackPhase2"):
+            elif cname in ("16bitSubtilePairedStorePhase2", "16bitSubtileCoalescePhase2"):
                 phase2 = child
             else:
                 others.append(child)
@@ -5747,22 +5756,22 @@ class LogicalScheduler:
         #
         # Must run before the deepcopy below, which snapshots _preloop_emitted.
         if (self.config.pgr >= 1
-                and not getattr(self, "_foldInjectedIntoPreloop", False)
+                and not getattr(self, "_coalesceInjectedIntoPreloop", False)
                 and hasattr(writer, "_plsinFusedFlagEligible")
                 and writer._plsinFusedFlagEligible(kernel)
                 and self._preloop_emitted
                 and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
-            fold_module = writer.computePostLoopFusedStore(kernel)
+            coalesce_module = writer.computePostLoopFusedStore(kernel)
             em_list = self._preloop_emitted[0][0]
             drain_idx = next((i for i, em in enumerate(em_list)
                               if em.opType == 'wait_gr'), len(em_list))
             new_id = max((em.moduleId for em in em_list), default=-1) + 1
             em_list.insert(drain_idx,
                            EmittedModule(moduleId=new_id,
-                                         instructions=[fold_module],
+                                         instructions=[coalesce_module],
                                          before=None,
                                          source=None))
-            self._foldInjectedIntoPreloop = True
+            self._coalesceInjectedIntoPreloop = True
 
             # Pre-loop scheduling (Change B): computePostLoopFusedStore may have split the
             # scale-pointer load off from the guard body (isScalarScale + hoist enabled).
@@ -5891,11 +5900,11 @@ class LogicalScheduler:
                 # after it, letting the fast path branch in and the slow path fall
                 # through. The fold stays in the global-read shadow either way, since
                 # it is still ahead of wait_gr.
-                fold_idx = next((i for i, em in enumerate(em_list)
+                coalesce_idx = next((i for i, em in enumerate(em_list)
                                  if em.instructions
                                  and getattr(em.instructions[0], 'name', None)
                                      == 'computePostLoopFusedStore'), None)
-                split_idx = wait_idx if fold_idx is None else fold_idx
+                split_idx = wait_idx if coalesce_idx is None else coalesce_idx
 
                 # Insert SBranch PreloopEnd at the split (end of the fast path).
                 em_list.insert(split_idx, EmittedModule(

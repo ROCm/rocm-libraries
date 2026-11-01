@@ -231,6 +231,11 @@ class GlobalReadGprRecord:
 ################################################################################
 # Assembly Kernel
 ################################################################################
+# MEASUREMENT SWITCH (temporary): True forces the DPP store-coalesce off everywhere, for a
+# no-coalesce baseline build.  Leave False for normal always-coalesce behaviour.
+_COALESCE_MEASURE_OFF = False
+
+
 class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
@@ -17584,7 +17589,7 @@ class KernelWriterAssembly(KernelWriter):
       return False
     return self.states.useBias == DataDirection.READ
 
-  def _plsinFoldDeferredPtrNull(self, kernel, module, fieldName, badSgpr, flagSgpr, offSgpr, extOffset):
+  def _plsinCoalesceDeferredPtrNull(self, kernel, module, fieldName, badSgpr, flagSgpr, offSgpr, extOffset):
     """OR a deferred 64-bit kernarg pointer into *badSgpr* if it is non-null.
 
     *flagSgpr* / *offSgpr* are scratch; they are overwritten. *extOffset* is the
@@ -17768,10 +17773,10 @@ class KernelWriterAssembly(KernelWriter):
             + self.states.userArgsInfo.scaleDSize)
           extBias = extSav + self.states.userArgsInfo.scaleAlphaVecSize
         if kernel["ProblemType"]["UseScaleAlphaVec"]:
-          self._plsinFoldDeferredPtrNull(
+          self._plsinCoalesceDeferredPtrNull(
             kernel, m, "AddressScaleAlphaVec", bad, flag, off, extSav)
         if kernel["ProblemType"]["UseBias"]:
-          self._plsinFoldDeferredPtrNull(
+          self._plsinCoalesceDeferredPtrNull(
             kernel, m, "AddressBias", bad, flag, off, extBias)
         # StreamK: this WG started the tile (LocalStart == 0).
         if useStreamK:
@@ -18159,6 +18164,28 @@ class KernelWriterAssembly(KernelWriter):
                                      comment="numValid16NBlocks = clamped >> 4"))
     self.sgprPool.checkIn(tmpN)
 
+    # DPP store-coalesce size gate: precompute once (here, alongside the guards)
+    # whether the problem is large enough for the coalesce to win, so the plain-path coalesce
+    # dispatch in GlobalWriteBatch branches on ONE SGPR rather than comparing M,N per store.
+    # sizeOk is 1 iff (M > thr and N > thr), else 0.  Only for coalesce-active kernels; left None
+    # otherwise, in which case GlobalWriteBatch leaves the coalesce unconditional.  The SGPR is
+    # freed at batch teardown next to subtileTotalMOffsetSgpr.
+    if getattr(self.states, "subtileCoalesceActive", False):
+      COALESCE_MIN_DIM = 4096
+      sizeOk = self.sgprPool.checkOut(1, "subtileCoalesceSizeOk", preventOverflow=False)
+      edgeModule.addComment0("coalesce size gate: sizeOk = 1 iff (SizeI > %d and SizeJ > %d)" % (COALESCE_MIN_DIM, COALESCE_MIN_DIM))
+      edgeModule.add(SCmpLtU32(src0=hex(COALESCE_MIN_DIM), src1=sgpr("SizeI"),
+                               comment="SizeI(M) > %d ?" % COALESCE_MIN_DIM))
+      edgeModule.add(SCSelectB32(dst=sgpr(sizeOk), src0=1, src1=0,
+                                 comment="sizeOk = (M>thr) ? 1 : 0"))
+      edgeModule.add(SCmpLtU32(src0=hex(COALESCE_MIN_DIM), src1=self.sizeRef(kernel["ProblemType"]["Index1"]),
+                               comment="SizeJ(N) > %d ?" % COALESCE_MIN_DIM))
+      edgeModule.add(SCSelectB32(dst=sgpr(sizeOk), src0=sgpr(sizeOk), src1=0,
+                                 comment="sizeOk &&= (N>thr)"))
+      self.states.subtileCoalesceSizeOkSgpr = sizeOk
+    else:
+      self.states.subtileCoalesceSizeOkSgpr = None
+
     self.states.subtileMBlockSize = mBlockSize
 
   ##############################################################################
@@ -18265,6 +18292,12 @@ class KernelWriterAssembly(KernelWriter):
     vgprAddrScratch: int = -1     # per-store scratch: holds (addrDVgpr scaled + lane_group*8) without modifying addrDVgpr
     vgprPairPackRing: int = -1    # base of the paired-store pack ring (numPairPackQuads 4-vgpr quads)
     numPairPackQuads: int = 1     # quads in that ring; 1 puts every paired store on vgprBf16Temp
+    # DPP store-coalesce extras. Allocated only when isSubtileCoalesce.
+    # coalesceAllocated is a SENTINEL (True == the 9-reg coalesce cvt block was reserved); the blended
+    # store src is NOT a dedicated reg -- it lives in a reused dead ValuC slot (vCoalesceStoreData=sumIdx1).
+    coalesceAllocated: bool = False   # coalesce cvt-block reserved? (gates the coalesce in GlobalWriteBatch)
+    vgprVoff: int = -1            # per-store blended voffset (base vs base+64B by odd-lane mask)
+    vgprBlendTmp: int = -1        # scratch for the quad_perm data/addr blend
 
   class FP8CVTVgprStruct(NamedTuple):
     vgprFp8NanInf: int = -1
@@ -18963,6 +18996,38 @@ class KernelWriterAssembly(KernelWriter):
         # active feature appends its own disjoint sub-window, so no two offsets collide.
         base = 7 if kernel.get("UseSubtileImpl") else 4
         nxt  = base
+        # DPP store-coalesce: append 2 cvt VGPRs for the per-store
+        # voffset blend (vVoff) and the quad_perm blend temp (vBlend).  The blended store data
+        # is NOT a dedicated register -- it reuses a dead ValuC slot (see
+        # _emit16bitSubtilePairedStoreCoalesce).  This cvt footprint is absorbed by the
+        # coalesce's operand lend (see _selectPlsinFusedStorePolicy), so the high-water
+        # does not grow.
+        #
+        # Gate: MIWaveTile[0]==8 is the ONLY config the coalesce's row/half-line geometry is
+        # validated for.  Admit only that -- dropping the earlier `miwt[0]>=4` reg-fit escape,
+        # which shipped an UNPROVEN codegen path to 4/6-high tiles -- and only when the cvt block
+        # actually fits (footprint derived from the layout, not a bare literal).
+        # The coalesce is compiled into every eligible subtile kernel; at dispatch time a runtime
+        # branch on M,N > 4096 (in GlobalWriteBatch) selects the coalesce or non-coalesce store path.
+        COALESCE_MIWT_PROVEN = 8
+        miwt = kernel.get("MIWaveTile", [0, 0])
+        maxVgpr = self.states.regCaps["MaxVgpr"]
+        coalesceCvtTotal = base + 2   # shared staging window (base) + coalesceVoff + coalesceBlend
+        coalesceFits = (self.vgprPool.size() + coalesceCvtTotal) <= maxVgpr
+        # _COALESCE_MEASURE_OFF: measurement switch to force the coalesce off everywhere (no-coalesce
+        # baseline build).  The coalesce is always COMPILE-TIME allocated for eligible kernels; the
+        # coalesce-vs-plain choice on the plain store is a RUNTIME size gate (subtileCoalesceSizeOkSgpr,
+        # computed in _emitSubtileGuards, consumed in GlobalWriteBatch), not a second store build.
+        isSubtileCoalesce = bool(kernel.get("UseSubtileImpl")
+                             and len(miwt) >= 2 and miwt[0] == COALESCE_MIWT_PROVEN
+                             and coalesceFits
+                             and not _COALESCE_MEASURE_OFF)
+        # Published for _emitSubtileGuards (plain-path size-gate predicate is computed only when active).
+        self.states.subtileCoalesceActive = isSubtileCoalesce
+        coalesceVoff = coalesceBlend = -1
+        if isSubtileCoalesce:
+          coalesceVoff, coalesceBlend = nxt, nxt + 1
+          nxt += 2
         numCvtVgprs = nxt if kernel.get("UseSubtileImpl") else 4
         # Paired-store pack ring is blk-sched's permlane16 paired-store mechanism, held in
         # its own allocation rather than appended to the cvt block (growing that block
@@ -18990,7 +19055,10 @@ class KernelWriterAssembly(KernelWriter):
                                                vgprLaneGroupDelta=(cvtVgpr+5) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprPairPackRing=pairRing, \
-                                               numPairPackQuads=pairQuads)
+                                               numPairPackQuads=pairQuads, \
+                                               coalesceAllocated=isSubtileCoalesce, \
+                                               vgprVoff=(cvtVgpr+coalesceVoff) if isSubtileCoalesce else -1, \
+                                               vgprBlendTmp=(cvtVgpr+coalesceBlend) if isSubtileCoalesce else -1)
         module.add(self.emitSubtileStoreLaneMath(kernel, cvtVgprStruct))
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr2")
@@ -19650,6 +19718,7 @@ class KernelWriterAssembly(KernelWriter):
         self.states.subtileN16ValidBlocksSgpr = None
         self.states.subtileTotalMOffsetSgpr = None
         self.states.subtileMBlockSize = 0
+      self.states.subtileCoalesceSizeOkSgpr = None
 
     # Activation
     actLoopEndLabel, actLoopLabelModules, actLoopEnumStrList = self.initActivationLoop(kernel, beta)
@@ -19823,6 +19892,9 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.subtileTotalMOffsetSgpr is not None:
       self.sgprPool.checkIn(self.states.subtileTotalMOffsetSgpr)
       self.states.subtileTotalMOffsetSgpr = None
+    if getattr(self.states, "subtileCoalesceSizeOkSgpr", None) is not None:
+      self.sgprPool.checkIn(self.states.subtileCoalesceSizeOkSgpr)
+      self.states.subtileCoalesceSizeOkSgpr = None
     if self.states.subtileM32ValidBlocksSgpr is not None and "SubtileMGuard" not in self.sgprs:
       self.sgprPool.checkIn(self.states.subtileM32ValidBlocksSgpr)
       self.sgprPool.checkIn(self.states.subtileN16ValidBlocksSgpr)
