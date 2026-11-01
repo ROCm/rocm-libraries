@@ -527,6 +527,8 @@ OVERLAPPING_TOTALS_ORDER = [
     "python_kernel_build_src_co.setup",
     "python_kernel_build_src_co.cache_check",
     "python_kernel_build_src_co.cache_hit",
+    # Looking up (and on a miss, building) the HIP-header PCH the compile uses.
+    "python_kernel_build_src_co.pch",
     "python_kernel_build_src_co.compile",
     "python_kernel_build_src_co.unbundle",
     "python_kernel_build_src_co.move",
