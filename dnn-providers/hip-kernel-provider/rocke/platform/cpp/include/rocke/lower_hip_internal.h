@@ -194,15 +194,14 @@ void rocke_h_reject_f64(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char*
 
 /* --------------------------------------------------------- literals / encode */
 
-/* Python _f32_literal(val): C++ float-literal text for a double, special-casing
- * nan -> "((float)NAN)", +/-inf -> "((float)+/-INFINITY)", else "<repr>f".
- * NOTE(port): Python emits repr(float) for the finite case; matching that text
- * byte-for-byte is a known port hazard (see notes / unported). Returns an
- * arena-owned string. */
+/* Python _f32_literal(val): C++ float-literal text for a double:
+ * "((float)NAN)", "((float)INFINITY)", "((float)-INFINITY)", else repr(val)
+ * followed by "f". Returns an arena-owned string. */
 const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val);
 
-/* Python _f64_literal(val): C++ double-literal text for a double, special-casing
- * nan / +/-inf like rocke_h_f32_literal. Returns an arena-owned string. */
+/* Python _f64_literal(val): C++ double-literal text for a double, spelled like
+ * rocke_h_f32_literal with "double" and no suffix. Returns an arena-owned
+ * string. */
 const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val);
 
 /* Python _encode_waitcnt: arch-aware s_waitcnt immediate. Selects the gfx9/10

@@ -15,6 +15,7 @@ IR's `KernelDef.params`. Body locals are named after IR SSA values
 
 from __future__ import annotations
 
+import math
 from typing import List, Optional
 
 from .arch.target import integer_mma_op_ids
@@ -365,36 +366,28 @@ def _reject_f64(op: Op, tname: str) -> None:
         raise NotImplementedError(f"{op.name} does not support f64")
 
 
-def _f32_literal(val: float) -> str:
-    """Format a Python float for C++ float literal context.
+def _hip_float_literal(val: float, c_type: str, suffix: str) -> str:
+    """Format a Python float as a C++ literal of type ``c_type``.
 
-    Special-cases ``inf`` / ``-inf`` / ``nan`` because Python's
-    ``repr(float('inf'))`` is ``'inf'`` which would emit ``"inff"``
-    (invalid C++). Instead emit the standard ``<math.h>`` macros.
+    Finite values are ``repr(val)`` (the shortest round-trip form) followed by
+    ``suffix``. ``repr`` spells nan and the infinities ``nan`` / ``inf``, which
+    are not C++, so those become the ``<math.h>`` macros cast to ``c_type``.
     """
-    import math
-
     if math.isnan(val):
-        return "((float)NAN)"
+        return f"(({c_type})NAN)"
     if math.isinf(val):
-        return "((float)-INFINITY)" if val < 0 else "((float)INFINITY)"
-    return f"{val}f"
+        return f"(({c_type})-INFINITY)" if val < 0 else f"(({c_type})INFINITY)"
+    return f"{val!r}{suffix}"
+
+
+def _f32_literal(val: float) -> str:
+    """Format a Python float for C++ float literal context (``f`` suffix)."""
+    return _hip_float_literal(val, "float", "f")
 
 
 def _f64_literal(val: float) -> str:
-    """Format a Python float for C++ double literal context.
-
-    ``repr`` is the shortest round-trip form, so finite values are exact;
-    ``inf`` / ``-inf`` / ``nan`` use the ``<math.h>`` macros as in
-    :func:`_f32_literal`.
-    """
-    import math
-
-    if math.isnan(val):
-        return "((double)NAN)"
-    if math.isinf(val):
-        return "((double)-INFINITY)" if val < 0 else "((double)INFINITY)"
-    return repr(val)
+    """Format a Python float for C++ double literal context (no suffix)."""
+    return _hip_float_literal(val, "double", "")
 
 
 def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:

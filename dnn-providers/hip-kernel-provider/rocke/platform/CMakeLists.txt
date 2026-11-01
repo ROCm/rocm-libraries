@@ -701,6 +701,7 @@ if(ROCKE_INSTALL_TESTS)
       foreach(_rocke_native_parity
               "ROCKE_STORAGE_TEST=rocke_storage"
               "ROCKE_IR_TYPES_TEST=rocke_ir_types"
+              "ROCKE_FLOAT_FORMAT_TEST=rocke_float_format"
               "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
               "ROCKE_UNSIGNED_INT_OPS_CLI=rocke_unsigned_int_ops"
               "ROCKE_INTEXPR_CLI=rocke_intexpr"

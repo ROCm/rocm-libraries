@@ -180,6 +180,17 @@ if(BUILD_TESTING)
   install(TARGETS rocke_ir_types RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_ir_types)
 
+  add_executable(rocke_float_format core/test_float_format.cpp)
+  target_link_libraries(rocke_float_format PRIVATE rocke_core)
+  add_test(NAME rocke_float_format COMMAND rocke_float_format)
+  set_tests_properties(rocke_float_format PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_float_format)
+  set_target_properties(rocke_float_format
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_float_format
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_float_format)
+
   add_executable(rocke_dtypes core/test_dtypes.cpp)
   target_link_libraries(rocke_dtypes PRIVATE rocke_core)
   add_test(NAME rocke_dtypes COMMAND rocke_dtypes)

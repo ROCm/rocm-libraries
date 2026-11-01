@@ -19,9 +19,9 @@
  *   rocke_ir_canonicalize(text, &out)    str -> normalized str (stable SSA ids,
  *                                                              loc stripped)
  *
- * Float attrs format identically to Python repr(float) (shortest round-trip
- * decimal); the C side reuses the same probe-%.*e-then-shorten algorithm the
- * IR printer already validated against ~200k CPython repr() samples.
+ * Float attrs are written with rocke_append_python_float_repr
+ * (rocke/float_format.h), the formatter the IR printer and the HIP lowerer also
+ * use: the same text as Python repr(float), independent of the C locale.
  */
 #ifndef ROCKE_IR_SERIALIZE_H
 #define ROCKE_IR_SERIALIZE_H
