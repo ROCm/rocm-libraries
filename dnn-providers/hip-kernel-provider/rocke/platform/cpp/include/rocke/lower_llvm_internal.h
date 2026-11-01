@@ -422,6 +422,12 @@ struct rocke_lower
      * points at the specific tile.sync op to skip, or NULL. */
     const rocke_op_t* unroll_elide_sync_op;
 
+    /* Inside a trip of an unrolled scf.for: the trip's name suffix (one
+     * ".unrollN" per enclosing unrolled loop), which a rolled scf.for nested
+     * in that trip adds to the names its header defines (Python
+     * _unroll_suffix). "" outside any unrolled loop. */
+    const char* unroll_suffix;
+
     /* DWARF line-table metadata, or NULL when the kernel was built without
      * location capture (Python self._debug). */
     rocke_ll_debug_t* debug;
