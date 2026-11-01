@@ -687,7 +687,7 @@ WGRAD_W32_ROWS_PER_SYNC = (1, 3)
 WGRAD_W32_ROW_BLOCKS = (1, 2, 4, 16)
 WGRAD_W32_TDM_STAGES = (0, 3)
 WGRAD_W32_WS_REPLICAS = 8
-# Small-channel wgrad (C=3 stems; wave32). ((waves_k, waves_c, wave_tiles_k,
+# Small-channel wgrad (C=3 / C=4 stems; wave32). ((waves_k, waves_c, wave_tiles_k,
 # wave_tiles_c, vec_x, sub_steps, ws_replicas, uniform_wave), row_blocks):
 # the winners of the stem sweeps, from a narrow 3x3/s2 stem (one 16-wide K
 # tile) to the wide patchify stems (K up to 1152), each with the pixel-range
@@ -701,7 +701,10 @@ WGRAD_SMALL_C_CONFIGS = (
     ((4, 4, 2, 2, 8, 4, 4, True), (8, 16, 32)),
     ((4, 4, 2, 2, 8, 2, 4, True), (8, 16, 32)),
     ((4, 4, 2, 2, 4, 2, 4, True), (8, 16, 32)),
-    ((4, 4, 2, 2, 4, 4, 4, True), (8, 16, 32)),
+    # uniform_wave=False here: with it on, this 16-wave vec_x=4 / sub_steps=4
+    # tile spills SGPRs into VGPR lanes at the 128-VGPR cap and the binary
+    # returns an all-zero dW. Off, it verifies.
+    ((4, 4, 2, 2, 4, 4, 4, False), (8, 16, 32)),
 )
 # Depthwise wgrad, VALU kernel (wave32). (chan_per_lane, waves, rows_per_wave,
 # wo_chunk, r_split, ws_replicas, prefetch, carry): the winners of the
@@ -934,11 +937,19 @@ _GROUPED_MFMA_CHANNELS = (4, 8)
 # transformer-style networks (4x4/s4, 14x14/s14, 16x16/s16).
 _SMALL_C_STEMS = (
     (3, 2, 1, (16, 24, 32, 48, 64)),
+    # The stride-1 3x3 input layers of the UNet / VAE / super-resolution
+    # networks and the unpadded 3x3/s2 Inception stem.
+    (3, 1, 1, (32, 64)),
+    (3, 2, 0, (32,)),
     (7, 2, 3, (64,)),
     (4, 4, 0, (96, 128, 192)),
     (14, 14, 0, (1024, 1152, 1280)),
     (16, 16, 0, (768, 1024)),
 )
+# Stems with 4 input channels (filter, stride, padding, output channels): the
+# latent-space input convolution of the latent diffusion UNets (4 latent
+# channels -> 320, and the 512-wide variant).
+_SMALL_C4_STEMS = ((3, 1, 1, (320, 512)),)
 # Depthwise wgrad filters (VALU kernel), stride 1 and 2.
 _DW_WGRAD_FILTERS = (3, 5, 7)
 # Dilated 3x3 rows of the non-grouped kernel: (PAD, stride, dil_h, dil_w). The
@@ -1310,13 +1321,18 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _col_pads(k)
         ),
     ),
-    # Small-channel stems (groups == 1, cpg == 3), wave32 only: one row per
-    # stem, channel counts baked.
+    # Small-channel stems (groups == 1, cpg == 3 or 4), wave32 only: one row
+    # per stem, channel counts baked.
     "direct_wgrad_small_c": (
         "wgrad",
         tuple(
             DirectCaps(KH=k, PAD=pad, stride=s, cpg=3, kpg=kpg)
             for k, s, pad, kpgs in _SMALL_C_STEMS
+            for kpg in kpgs
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=4, kpg=kpg)
+            for k, s, pad, kpgs in _SMALL_C4_STEMS
             for kpg in kpgs
         ),
     ),

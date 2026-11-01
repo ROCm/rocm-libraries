@@ -24,7 +24,8 @@
  * rocke_direct_depthwise_dgrad_stream_spec_t, scalar and channel-packed, and
  * rocke_direct_depthwise_tiled_spec_t with dgrad = true on large, non-square
  * and per-axis-padded filters; from index 201 the gfx1250 wave32 and
- * image-per-block wgrad spec and from index 232 the depthwise wgrad spec)
+ * image-per-block wgrad spec, from index 232 the depthwise wgrad spec and
+ * from index 239 the small-C wgrad stems of the AOT grid)
  * identically to the Python emitter
  * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
@@ -159,6 +160,9 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
 #define WGRAD_W32_CFG_BASE 201
 /* Direct depthwise wgrad configs follow the 31 wave32 wgrad ones. */
 #define DW_WGRAD_CFG_BASE 232
+/* gfx1250 small-C wgrad stems of the AOT grid follow the 7 depthwise wgrad
+ * ones. */
+#define WGRAD_STEM_CFG_BASE 239
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
  * W=13, groups = C, cpg = kpg. */
@@ -288,6 +292,48 @@ static rocke_direct_conv_problem_t
     p.stride = stride;
     p.dtype = dtype;
     return p;
+}
+
+/* gfx1250 small-C wgrad stems, emitted as WGRAD_STEM_CFG_BASE + idx (see
+ * _wgrad_stem_spec in the Python emitter): 3x3 stems with the uniform wave
+ * index off. Returns 0 on success, -1 if unknown. */
+static int make_wgrad_stem_cfg(int idx, rocke_direct_conv_wgrad_spec_t* swg, const char** arch)
+{
+    /* waves_k, waves_c, wave_tiles_k, wave_tiles_c, vec_x, sub_steps,
+     * ws_replicas, row_blocks */
+    static const int knobs[3][8] = {
+        {4, 4, 2, 2, 4, 4, 4, 8},
+        {8, 1, 1, 3, 4, 2, 32, 4},
+        {2, 4, 2, 3, 8, 1, 32, 2},
+    };
+    *swg = rocke_direct_conv_wgrad_spec_default();
+    *arch = "gfx1250";
+    switch(idx)
+    {
+    case 0:
+        swg->problem = mk_w32_sc_problem(4, 64, 3, 1, 1, "fp16");
+        break;
+    case 1:
+        swg->problem = mk_w32_sc_problem(3, 32, 3, 1, 1, "bf16");
+        break;
+    case 2:
+        swg->problem = mk_w32_sc_problem(3, 32, 3, 2, 0, "fp16");
+        break;
+    default:
+        return -1;
+    }
+    swg->wave_size = 32;
+    swg->small_c = 1;
+    swg->waves_k = knobs[idx][0];
+    swg->waves_c = knobs[idx][1];
+    swg->wave_tiles_k = knobs[idx][2];
+    swg->wave_tiles_c = knobs[idx][3];
+    swg->vec_x = knobs[idx][4];
+    swg->sub_steps = knobs[idx][5];
+    swg->ws_replicas = knobs[idx][6];
+    swg->row_blocks = knobs[idx][7];
+    swg->uniform_wave = 0;
+    return 0;
 }
 
 /* gfx1250 direct wgrad configs, emitted as WGRAD_W32_CFG_BASE + idx (see
@@ -2809,7 +2855,16 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     rocke_direct_depthwise_wgrad_spec_t sdww;
     const char* arch = "gfx950";
-    if(idx >= DW_WGRAD_CFG_BASE)
+    if(idx >= WGRAD_STEM_CFG_BASE)
+    {
+        if(make_wgrad_stem_cfg(idx - WGRAD_STEM_CFG_BASE, &swg, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        kind = KIND_WGRAD;
+    }
+    else if(idx >= DW_WGRAD_CFG_BASE)
     {
         if(make_dw_wgrad_cfg(idx - DW_WGRAD_CFG_BASE, &sdww, &arch) != 0)
         {

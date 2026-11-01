@@ -24,8 +24,8 @@
 # DirectDepthwiseDgradStreamSpec, scalar and channel-packed, and
 # DirectDepthwiseTiledSpec(dgrad=True) with large and non-square filters and
 # per-axis padding, from index 201 the gfx1250 wave32 and image-per-block
-# DirectConvWgradSpec and from index 232 DirectDepthwiseWgradSpec), builds the
-# kernel via the matching build_direct_conv_* function (arch=<cfg arch>) and
+# DirectConvWgradSpec, from index 232 DirectDepthwiseWgradSpec and from index
+# 239 the small-C wgrad stems of the AOT grid), builds the kernel via the matching build_direct_conv_* function (arch=<cfg arch>) and
 # prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -2014,8 +2014,66 @@ def _dw_wgrad_spec(idx: int):
     return ("dw_wgrad", sel[0], sel[1])
 
 
+# ---------------------------------------------------------------------------
+# gfx1250 small-C wgrad stems of the AOT grid, indices 239..241: a C=4 3x3
+# stride-1 stem on the 16-wave vec_x=4 / sub_steps=4 tile with the uniform wave
+# index off, the stride-1 and the unpadded stride-2 C=3 3x3 stems.
+# ---------------------------------------------------------------------------
+_WGRAD_STEM_CFG_BASE = 239
+
+
+def _wgrad_stem_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_STEM_CFG_BASE + idx``, or None."""
+
+    def sprob(cpg, kpg, *, stride, PAD, dtype):
+        return DirectConvProblem(
+            N=2,
+            H=13,
+            W=37,
+            groups=1,
+            cpg=cpg,
+            kpg=kpg,
+            KH=3,
+            KW=3,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+
+    def ws(problem, waves_k, waves_c, tiles_k, tiles_c, vec_x, sub_steps, wsr, rb):
+        return DirectConvWgradSpec(
+            problem=problem,
+            wave_size=32,
+            small_c=True,
+            waves_k=waves_k,
+            waves_c=waves_c,
+            wave_tiles_k=tiles_k,
+            wave_tiles_c=tiles_c,
+            vec_x=vec_x,
+            sub_steps=sub_steps,
+            ws_replicas=wsr,
+            row_blocks=rb,
+            uniform_wave=False,
+        )
+
+    table = {
+        0: ws(sprob(4, 64, stride=1, PAD=1, dtype="fp16"), 4, 4, 2, 2, 4, 4, 4, 8),
+        1: ws(sprob(3, 32, stride=1, PAD=1, dtype="bf16"), 8, 1, 1, 3, 4, 2, 32, 4),
+        2: ws(sprob(3, 32, stride=2, PAD=0, dtype="fp16"), 2, 4, 2, 3, 8, 1, 32, 2),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("wgrad", sel, "gfx1250")
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _WGRAD_STEM_CFG_BASE:
+        sel = _wgrad_stem_spec(idx - _WGRAD_STEM_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _DW_WGRAD_CFG_BASE:
         sel = _dw_wgrad_spec(idx - _DW_WGRAD_CFG_BASE)
         if sel is not None:

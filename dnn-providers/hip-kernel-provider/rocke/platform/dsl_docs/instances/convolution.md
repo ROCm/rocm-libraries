@@ -1460,7 +1460,7 @@ kernels of the direct-conv AOT sweep on gfx1250, all taking the
 | Spec / variant | Serves | Output |
 |---|---|---|
 | `DirectConvWgradSpec(image_per_block=True)` / `direct_wgrad` | dense and grouped, stride 1, 1x1..7x7 | `ws_replicas` fp32 scratch slabs, or the zeroed fp32 `dW` at one replica |
-| `DirectConvWgradSpec(small_c=True)` / `direct_wgrad_small_c` | ungrouped stems with 3 input channels, any stride and padding (channel counts baked) | `ws_replicas` fp32 scratch slabs |
+| `DirectConvWgradSpec(small_c=True)` / `direct_wgrad_small_c` | ungrouped stems with 3 or 4 input channels, any stride and padding (channel counts baked) | `ws_replicas` fp32 scratch slabs |
 | `DirectDepthwiseWgradSpec` / `direct_depthwise_wgrad` | depthwise (`cpg = kpg = 1`, channel count from the kernargs), stride 1 and 2 | `ws_replicas` fp32 scratch slabs |
 
 - **Image per block.** One workgroup per image and `k x c` tile on WMMA
@@ -1488,7 +1488,7 @@ C++ engine twins: `rocke_dconv_wgrad_build_image`
 `rocke_dconv_wgrad_build_small_c` (`conv_direct_grouped_build_wgrad_small_c.cpp`),
 `rocke_build_direct_depthwise_wgrad` (`conv_direct_grouped_build_depthwise_wgrad.cpp`);
 byte-identity gated by `library/tests/parity/conv_direct_grouped_emit.{c,py}`
-(configs 201+), Python IR golden `conv_direct_wgrad/gfx1250/*`. Served by the
+(configs 201..241), Python IR golden `conv_direct_wgrad/gfx1250/*`. Served by the
 direct-conv AOT cache (`--directions wgrad --arch gfx1250`), not the dispatcher.
 On-GPU numeric coverage: `TestDirectConvWgradCorrectness` in
 `library/tests/test_direct_conv_correctness.py`; the launch plans:

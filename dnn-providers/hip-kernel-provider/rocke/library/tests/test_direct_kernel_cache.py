@@ -1959,3 +1959,33 @@ def test_w32_small_c_serves_only_its_stems(w32_cache):
         w32_cache, DirectConvProblem(kpg=40, **stem), "wgrad", _W32
     )
     assert not any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
+
+
+@pytest.mark.parametrize(
+    "cpg, kpg, PAD, stride",
+    [(4, 320, 1, 1), (4, 512, 1, 1), (3, 32, 1, 1), (3, 64, 1, 1), (3, 32, 0, 2)],
+)
+def test_w32_small_c_serves_the_3x3_stems(w32_cache, cpg, kpg, PAD, stride):
+    """The 3x3 stems with 3 and 4 input channels have small-C binaries."""
+    problem = DirectConvProblem(
+        N=2, H=64, W=64, groups=1, cpg=cpg, kpg=kpg, KH=3, KW=3, PAD=PAD, stride=stride
+    )
+    plans, _ = dks.direct_plans(w32_cache, problem, "wgrad", _W32)
+    assert any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
+
+
+def test_w32_small_c_16_wave_tile_has_no_uniform_wave(w32_jobs):
+    """The 16-wave vec_x=4 / sub_steps=4 small-C tile is cached with the
+    uniform wave index off (with it on, that binary returns a zero dW)."""
+    knobs = [
+        json.loads(j.identity.knobs)
+        for j in w32_jobs
+        if j.identity.algorithm == "direct_wgrad_small_c"
+    ]
+    tile = [
+        k
+        for k in knobs
+        if (k["waves_k"], k["waves_c"], k["vec_x"], k["sub_steps"]) == (4, 4, 4, 4)
+    ]
+    assert tile
+    assert not any(k["uniform_wave"] for k in tile)
