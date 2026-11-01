@@ -24,6 +24,7 @@ struct BlockFmhaBwdConvertQGrad
     static constexpr bool kPadSeqLenQ      = Problem::kPadSeqLenQ;
     static constexpr bool kPadHeadDimQ     = Problem::kPadHeadDimQ;
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
+    static constexpr bool kDetTileSplit    = Problem::kDetTileSplit;
 
     static constexpr index_t kAlignmentQGradAcc =
         kPadHeadDimQ ? 1 : Policy::template GetAlignmentPostQGradAcc<Problem>();
@@ -85,35 +86,57 @@ struct BlockFmhaBwdConvertQGrad
         clear_tile(dq_acc);
 
         constexpr auto dq_acc_spans = decltype(dq_acc)::get_distributed_spans();
-        index_t i_total_loops       = 0;
-        auto dq_acc_buf             = load_tile(dq_acc_dram_window);
-        move_tile_window(dq_acc_dram_window, {1, 0, 0});
 
-        do
-        {
+        auto add_into = [&](auto& dst, auto& src) {
             sweep_tile_span(dq_acc_spans[number<0>{}], [&](auto idx0) {
                 sweep_tile_span(dq_acc_spans[number<1>{}], [&](auto idx1) {
                     sweep_tile_span(dq_acc_spans[number<2>{}], [&](auto idx2) {
                         constexpr auto n_i_j_idx = make_tuple(idx0, idx1, idx2);
-                        dq_acc(n_i_j_idx) += dq_acc_buf(n_i_j_idx);
+                        dst(n_i_j_idx) += src(n_i_j_idx);
                     });
                 });
             });
+        };
 
-            dq_acc_buf = load_tile(dq_acc_dram_window);
+        if constexpr(kDetTileSplit)
+        {
+            auto acc1       = dq_acc; // both already cleared
+            index_t i_split = 0;
+            for(; i_split + 2 <= nsplits; i_split += 2)
+            {
+                auto b0 = load_tile(dq_acc_dram_window);
+                move_tile_window(dq_acc_dram_window, {1, 0, 0});
+                auto b1 = load_tile(dq_acc_dram_window);
+                move_tile_window(dq_acc_dram_window, {1, 0, 0});
+                add_into(dq_acc, b0);
+                add_into(acc1, b1);
+            }
+            if(i_split < nsplits) // odd tail
+            {
+                auto b = load_tile(dq_acc_dram_window);
+                move_tile_window(dq_acc_dram_window, {1, 0, 0});
+                add_into(dq_acc, b);
+            }
+            add_into(dq_acc, acc1);
+        }
+        else
+        {
+            index_t i_total_loops = 0;
+            auto dq_acc_buf       = load_tile(dq_acc_dram_window);
             move_tile_window(dq_acc_dram_window, {1, 0, 0});
 
-            i_total_loops += 1;
-        } while(i_total_loops < (nsplits - 1));
+            do
+            {
+                add_into(dq_acc, dq_acc_buf);
 
-        sweep_tile_span(dq_acc_spans[number<0>{}], [&](auto idx0) {
-            sweep_tile_span(dq_acc_spans[number<1>{}], [&](auto idx1) {
-                sweep_tile_span(dq_acc_spans[number<2>{}], [&](auto idx2) {
-                    constexpr auto n_i_j_idx = make_tuple(idx0, idx1, idx2);
-                    dq_acc(n_i_j_idx) += dq_acc_buf(n_i_j_idx);
-                });
-            });
-        });
+                dq_acc_buf = load_tile(dq_acc_dram_window);
+                move_tile_window(dq_acc_dram_window, {1, 0, 0});
+
+                i_total_loops += 1;
+            } while(i_total_loops < (nsplits - 1));
+
+            add_into(dq_acc, dq_acc_buf);
+        }
 
         // declare dq
         constexpr auto dq_converted_dstr =

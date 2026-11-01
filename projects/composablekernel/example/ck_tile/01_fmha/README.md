@@ -173,7 +173,7 @@ args:
                 'b:l,r', bottom-r sliding window attn(swa) with FA style left right size
                 'xt:window_size', xformer style masking from top-left, window_size negative is causal, positive is swa
                 'xb:window_size', xformer style masking from bottom-r, window_size negative is causal, positive is swa
-                'g:y,x', generic attention mask coordinate with y/x size (only debug purpose for now)
+                'g:l,r', generic window with FA style left right size, bottom-r aligned like 'b:l,r' (only debug purpose for now)
     -vlayout    r for row-major(seqlen*hdim), c for col-major(hdim*seqlen) (default:r)
         -lse    0 not store lse, 1 store lse (default:0)
       -kname    if set to 1 will print kernel name (default:0)
@@ -324,7 +324,7 @@ arguments match `tile_example_fmha_fwd`, with these differences:
 | `-scale` | named `-scale_s` in the forward example |
 | `-dbias` | `1` also produces the bias gradient (requires elementwise bias) |
 | `-p_drop` | dropout probability; the forward example has no dropout argument |
-| `-deterministic` | `1` reduces `dQ` through per-block buffers instead of atomics, making the result bit-reproducible |
+| `-deterministic` | `1` reduces `dQ` through per-block buffers instead of atomics, making the result bit-reproducible. The algorithm depends on the arch: gfx1250 uses tile split (one buffer per kv tile), every other arch uses the persistent kernel (one buffer per worker). Group mode, decode shapes, runs with bias, dbias or dropout, and runs too long for the tile-split workspace cap always use the persistent algorithm (see [deterministic workspace](#deterministic-workspace)). The two sum in a different order, so their results differ in the low bits |
 | `-sink_grad` | `1` computes and validates the attention-sink gradient (see below) |
 | absent | `-vlayout`, `-lse`, `-qscale`, `-num_splits`, `-q_eff_lens`, `-kv_eff_lens` |
 
@@ -334,6 +334,30 @@ seqlen 4096, hdim 128, fp16.
 Example 2: `./bin/tile_example_fmha_bwd -mode=1 -b=2 -h=8 -h_k=2 -s=1024,2048 -d=64 -mask=1`
 runs group mode with GQA (8 query heads over 2 kv heads), per-batch seqlens, and a top-left causal
 mask.
+
+### deterministic workspace
+
+A deterministic run reduces `dQ` through fp32 buffers ("slots") in the workspace, each one a full
+`[batch, nhead, seqlen_q, hdim]` copy of `dQ`, summed in a fixed order at the end. The persistent
+kernel needs `CUs / (batch * nhead)` slots, so its workspace grows with `seqlen_q` only. Tile split
+needs one slot per kv tile, `seqlen_k / kN0`, so its workspace grows with `seqlen_q * seqlen_k`:
+for `b=2 h=32 d=128` it is 16 GiB at 8K and 256 GiB at 32K.
+
+The launcher keeps it in check by splitting a tile-split run into batch/head chunks that take
+turns on one workspace (bit-identical to the unsplit run). It aims for a budget of 4 GiB per 128 of
+hdim, and goes over it only as far as needed to give every CU two workgroups per launch: with one,
+a causal mask leaves CUs idle and the run is up to 1.7x slower. It never exceeds the cap of 16 GiB
+per 128 of hdim; when a single batch and head alone would, which is around 64K tokens at hdim 128,
+the dispatch picks the persistent kernel instead.
+
+| environment variable | effect |
+|---|---|
+| `CK_DET_WS_BUDGET_MB` | the budget, in MiB |
+| `CK_DET_WS_CAP_MB` | the cap, in MiB |
+| `CK_DET_HEAD_CHUNK` | heads per launch, a divisor of `nhead`; `0` turns splitting off |
+| `CK_DET_BATCH_CHUNK` | batches per launch, a divisor of `batch` |
+
+The example prints the choice after `deterministic:`, for instance `1(tile_split,chunk:b1h2)`.
 
 ### attention sink gradient
 
@@ -347,13 +371,16 @@ P_sink[h,q] = exp(sink[h] - LSE[h,q])
 d_sink[h]   = -sum_q P_sink[h,q] * D[h,q]
 ```
 
-The sum runs over every query row of every batch, so `d_sink` has shape `[nhead]` and is
-accumulated with `atomicAdd` from `fmha_bwd_dot_do_o`. Two consequences follow:
+The sum runs over every query row of every batch, so `d_sink` has shape `[nhead]`.
+`fmha_bwd_dot_do_o` stores one partial sum per block in the workspace, and the partials are added
+in a fixed order afterwards, by `fmha_bwd_convert_dq` or, for kernel sets without it, by the last
+`fmha_bwd_dot_do_o` block of each head. That makes `d_sink` bit-reproducible. The launcher takes
+this path for every deterministic run, and otherwise only when the traits set `has_sink_grad` and
+the kernel set has `fmha_bwd_convert_dq`; other runs accumulate with `atomicAdd`, whose result
+varies in the low bits from run to run.
 
 - **The caller must zero `d_sink_ptr` before the call.** The kernel only accumulates into it and
   never initialises it.
-- `d_sink` is not bit-reproducible across runs even with `-deterministic=1`, because that flag
-  controls the `dQ` reduction only.
 
 The `LSE` handed to the backward call must be the **post-sink** `LSE`, that is
 `log(exp(LSE_nosink) + exp(sink))`, which is what the forward kernel writes when a sink is

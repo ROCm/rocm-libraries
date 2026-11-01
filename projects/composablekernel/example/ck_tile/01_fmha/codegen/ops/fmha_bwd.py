@@ -5,7 +5,7 @@ import copy
 import fnmatch
 import itertools
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import List, Tuple, Dict, Literal, Any
 
@@ -23,6 +23,36 @@ from codegen.cpp_symbol_map import (
     BOOL_MAP,
 )
 from codegen.utils import check_duplicates_and_paddings, if_, indent, update_file
+
+
+# Which archs get tile split for a deterministic request; every other arch gets persistent.
+# Decided here, per arch, rather than by a build option, so a fat build gets the right
+# algorithm for each of its targets. Measured: gfx1250 is ~28% faster with tile split over
+# 20 shapes; gfx950 is 1.1-2.5x slower and uses 2-5x the workspace even when not chunked, and
+# gfx942 has not been measured. Tile split is chosen only where that was shown to pay.
+# Names are codegen's arch families (ArchTrait.name): "gfx125" is the gfx1250 family and
+# "gfx9" covers gfx942 and gfx90a, so neither is listed here by chip name.
+DET_TILE_SPLIT_ARCHS = ("gfx125",)
+
+
+def uses_tile_split(
+    arch_name: str, mode: str, tile, bias: str, dbias: str, dropout: str
+) -> bool:
+    """Whether a deterministic instance on this arch/mode/tile uses tile split: one dq_acc
+    slot per kv tile, instead of the persistent kernel's one slot per worker.
+
+    Tile split is a batch-mode layout, and the QrQtrDor (decode) tiles write dq directly, so
+    neither has a tile-split variant. Bias, dbias and dropout stay persistent too: the
+    launcher cannot split those runs into chunks, so the per-kv-tile workspace would be
+    unbounded.
+
+    Every tile-split instance also gets a persistent twin, dispatched when the tile-split
+    workspace cannot fit the cap (see fmha_bwd_tile_split_fits)."""
+    if arch_name not in DET_TILE_SPLIT_ARCHS:
+        return False
+    if bias != "no" or dbias != "f" or dropout != "no":
+        return False
+    return mode == "batch" and tile.max_seq_q == 0
 
 
 FMHA_BWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
@@ -131,7 +161,8 @@ using fmha_bwd_dq_dk_dv_kernel_{F_idx} =
     ck_tile::FmhaBwdDQDKDVKernel<fmha_bwd_pipeline_{F_idx},
                                  fmha_bwd_dk_epilogue_{F_idx},
                                  fmha_bwd_dv_epilogue_{F_idx},
-                                 fmha_bwd_dq_epilogue_{F_idx}>;
+                                 fmha_bwd_dq_epilogue_{F_idx},
+                                 {F_tile_split}>;
 
 using dq_dk_dv_trait_{F_idx} = fmha_bwd_dq_dk_dv_traits_<{F_hdim},
                                                          {F_dtype},
@@ -145,14 +176,15 @@ using dq_dk_dv_trait_{F_idx} = fmha_bwd_dq_dk_dv_traits_<{F_hdim},
                                                          {F_deterministic},
                                                          {F_trload},
                                                          {F_tagq},
-                                                         {F_bn0}>;
+                                                         {F_bn0},
+                                                         {F_tile_split}>;
 
 template <>
 float fmha_bwd_dq_dk_dv_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_bwd_args a)
 {{
     using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
     if(s.log_level_ > 0)
-        std::cout << ", " << k_::GetName() << std::flush;
+        std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids]                    = fmha_bwd_dq_dk_dv_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
@@ -251,8 +283,7 @@ bool fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(
 template <>
 std::string fmha_bwd_dq_dk_dv_get_name_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>()
 {{
-    using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
-    return k_::GetName();
+    return "{F_kname}";
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -290,8 +321,8 @@ def FMHA_BWD_API_COND_STATEMENT(F_cond: str, F_body: str, *, if_i=0) -> str:
 FMHA_BWD_API_INNER_DISPATCH_COMMON = """{F_if}((t.is_group_mode == {F_mode}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_dbias == {F_dbias}) && ({F_dropout_check}) &&
         ({F_scheck}) && ({F_dcheck}) && ({F_dvcheck}) && (t.is_deterministic == {F_deterministic}){F_max_seq_q_cond}{F_cond_extra}) {{
     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dvpad} > 0)>;
-    using dq_dk_dv_trait_ = fmha_bwd_dq_dk_dv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_mask}, {F_dropout}, {F_bias}, {F_dbias}, {F_dpad}, {F_dvpad}, {F_deterministic}, {F_trload}, {F_tagq}, {F_bn0}>;
-    using convert_dq_trait_ = fmha_bwd_convert_dq_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dpad} > 0), {F_deterministic}>;
+    using dq_dk_dv_trait_ = fmha_bwd_dq_dk_dv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_mask}, {F_dropout}, {F_bias}, {F_dbias}, {F_dpad}, {F_dvpad}, {F_deterministic}, {F_trload}, {F_tagq}, {F_bn0}, {F_tile_split}>;
+    using convert_dq_trait_ = fmha_bwd_convert_dq_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dpad} > 0), {F_deterministic}, {F_tile_split}>;
 """
 FMHA_BWD_API_INNER_DISPATCH_RUN = """
     r = fmha_bwd_<dot_do_o_trait_, dq_dk_dv_trait_, std::conditional_t<{F_convert_dq_enabled}, convert_dq_trait_, void>, {F_arch.tag}>(s, a);
@@ -390,10 +421,12 @@ class FmhaBwdDQDKDVKernel:
     F_deterministic: str  #
     mask_impl: str  #
     F_trload: str  #
+    F_tile_split: bool = False  # deterministic only: one dq_acc slot per kv tile
 
     @property
     def template(self) -> str:
         return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_DQ_DK_DV_KERNEL_BODY.format(
+            F_kname=self.name,
             F_idx=self.F_idx,
             F_arch=self.F_arch,
             F_hdim=self.F_hdim,
@@ -432,6 +465,7 @@ class FmhaBwdDQDKDVKernel:
             F_mask=get_mask_map(self.mask_impl)[self.F_mask],
             F_mode=MODE_MAP[self.F_mode],
             F_deterministic=BOOL_MAP[self.F_deterministic],
+            F_tile_split=BOOL_MAP[self.F_tile_split],
             F_trload=BOOL_MAP[self.F_trload],
             F_tdm_kr_ktr=BOOL_MAP["t" if self.F_tile.tdm_kr_ktr else "f"],
             F_tdm_decode=BOOL_MAP["t" if self.F_tile.tdm_decode else "f"],
@@ -485,7 +519,7 @@ class FmhaBwdDQDKDVKernel:
             n += "_ndropout"
 
         if self.F_deterministic == "t":
-            n += "_deterministic"
+            n += "_deterministic_ts" if self.F_tile_split else "_deterministic"
         else:
             n += "_ndeterministic"
 
@@ -665,7 +699,7 @@ float fmha_bwd_dot_do_o_<dot_do_o_trait_{F_idx}, {F_arch.tag}>(const ck_tile::st
 {{
     using k_ = fmha_bwd_dot_do_o_kernel_{F_idx};
     if(s.log_level_ > 0)
-        std::cout << ", " << k_::GetName() << std::flush;
+        std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids]                    = fmha_bwd_dot_do_o_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
@@ -687,8 +721,14 @@ void fmha_bwd_dot_do_o_oneshot_<dot_do_o_trait_{F_idx}, {F_arch.tag}>(const ck_t
 template <>
 std::string fmha_bwd_dot_do_o_get_name_<dot_do_o_trait_{F_idx}, {F_arch.tag}>()
 {{
+    return "{F_kname}";
+}}
+
+template <>
+ck_tile::index_t fmha_bwd_dot_do_o_m0_<dot_do_o_trait_{F_idx}, {F_arch.tag}>()
+{{
     using k_ = fmha_bwd_dot_do_o_kernel_{F_idx};
-    return k_::GetName();
+    return k_::kM0;
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -710,6 +750,7 @@ class FmhaBwdOGradDotOKernel:
     @property
     def template(self) -> str:
         return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_DOT_DO_O_KERNEL_BODY.format(
+            F_kname=self.name,
             F_idx=self.F_idx,
             F_arch=self.F_arch,
             F_hdim=self.F_hdim,
@@ -767,7 +808,8 @@ using fmha_bwd_convert_dq_pipeline_problem_{F_idx} =
         {F_hdim},
         {F_mode},
         {F_deterministic},
-        fmha_bwd_convert_dq_trait_{F_idx}>;
+        fmha_bwd_convert_dq_trait_{F_idx},
+        {F_tile_split}>;
 
 using fmha_bwd_convert_dq_{F_idx} =
     typename ck_tile::BlockFmhaBwdConvertQGrad<fmha_bwd_convert_dq_pipeline_problem_{F_idx}>;
@@ -780,14 +822,15 @@ using convert_dq_trait_{F_idx} = fmha_bwd_convert_dq_traits_<{F_hdim},
                                                              {F_mode},
                                                              {F_spad},
                                                              {F_dpad},
-                                                             {F_deterministic}>;
+                                                             {F_deterministic},
+                                                             {F_tile_split}>;
 
 template <>
 float fmha_bwd_convert_dq_<convert_dq_trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_bwd_args a)
 {{
     using k_ = fmha_bwd_convert_dq_kernel_{F_idx};
     if(s.log_level_ > 0)
-        std::cout << ", " << k_::GetName() << std::flush;
+        std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids]                    = fmha_bwd_convert_dq_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
@@ -809,8 +852,7 @@ void fmha_bwd_convert_dq_oneshot_<convert_dq_trait_{F_idx}, {F_arch.tag}>(const 
 template <>
 std::string fmha_bwd_convert_dq_get_name_<convert_dq_trait_{F_idx}, {F_arch.tag}>()
 {{
-    using k_ = fmha_bwd_convert_dq_kernel_{F_idx};
-    return k_::GetName();
+    return "{F_kname}";
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -830,10 +872,12 @@ class FmhaBwdConvertQGradKernel:
     F_occupancy: int  #
     F_deterministic: str  #
     disabled: bool  # sometimes this kernel is not used
+    F_tile_split: bool = False  # deterministic only: one dq_acc slot per kv tile
 
     @property
     def template(self) -> str:
         return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_CONVERT_DQ_KERNEL_BODY.format(
+            F_kname=self.name,
             F_idx=self.F_idx,
             F_arch=self.F_arch,
             F_hdim=self.F_hdim,
@@ -844,6 +888,7 @@ class FmhaBwdConvertQGradKernel:
             F_mode=MODE_MAP[self.F_mode],
             F_occupancy=self.F_occupancy,
             F_deterministic=BOOL_MAP[self.F_deterministic],
+            F_tile_split=BOOL_MAP[self.F_tile_split],
         )
 
     @property
@@ -867,7 +912,7 @@ class FmhaBwdConvertQGradKernel:
         else:
             n += "_npad"
         if self.F_deterministic == "t":
-            n += "_deterministic"
+            n += "_deterministic_ts" if self.F_tile_split else "_deterministic"
         else:
             n += "_ndeterministic"
         return n
@@ -896,6 +941,9 @@ class FmhaBwdApiTrait:
     deterministic: str
     mask_impl: str
     tr_load: str
+    tile_split: bool = False  # deterministic only: one dq_acc slot per kv tile
+    # persistent instance standing in for a tile-split one whose workspace does not fit
+    tile_split_twin: bool = False
 
     @property
     def bm0(self) -> int:
@@ -950,13 +998,17 @@ class FmhaBwdApiTrait:
 
     @property
     def extra_cond(self) -> str:
+        cond = ""
         if self.tr_load == "t" and self.tile.max_seq_q == 0 and self.tile.F_bn0 == 128 and self.tile.F_bhdq == 128:
             if self.mode == "group":
-                return " && (t.max_seqlen_k <= 256)"
+                cond = " && (t.max_seqlen_k <= 256)"
             else:
-                return " && (t.seqlen_k <= 256)"
-        else:
-            return ""
+                cond = " && (t.seqlen_k <= 256)"
+        if self.tile_split:
+            cond += f" && fmha_bwd_tile_split_fits(t, {self.bn0})"
+        elif self.tile_split_twin:
+            cond += f" && !fmha_bwd_tile_split_fits(t, {self.bn0})"
+        return cond
 
     @property
     def dot_do_o_kernel(self) -> FmhaBwdOGradDotOKernel:
@@ -996,6 +1048,7 @@ class FmhaBwdApiTrait:
             F_deterministic=self.deterministic,
             mask_impl=self.mask_impl,
             F_trload=self.tr_load,
+            F_tile_split=self.tile_split,
         )
 
     @property
@@ -1018,6 +1071,7 @@ class FmhaBwdApiTrait:
             F_occupancy=get_occupancy(self.dtype, self.hdim),
             F_deterministic=self.deterministic,
             disabled=self.tile.max_seq_q != 0,
+            F_tile_split=self.tile_split,
         )
 
 
@@ -1059,6 +1113,7 @@ class FmhaBwdApiPool:
                 F_dpad=trait.dpad,
                 F_dvpad=trait.dvpad,
                 F_deterministic=BOOL_MAP[trait.deterministic],
+                F_tile_split=BOOL_MAP[trait.tile_split],
                 F_trload=BOOL_MAP[trait.tr_load],
                 F_tagq=trait.tile.seq_q_limit,
                 F_max_seq_q_cond=trait.max_seq_q_cond,
@@ -1210,14 +1265,13 @@ def get_bwd_blobs(
                 deterministic=deterministic,
                 mask_impl=mask_impl,
                 tr_load=tr_load,
+                tile_split=(
+                    deterministic == "t"
+                    and uses_tile_split(
+                        factory.arch.name, mode, tile, bias, dbias, dropout
+                    )
+                ),
             )
-
-            if not fnmatch.fnmatch(t.dot_do_o_kernel.name, filter_dot_do_o):
-                continue
-            if not fnmatch.fnmatch(t.convert_dq_kernel.name, filter_convert_dq):
-                continue
-            if not fnmatch.fnmatch(t.dq_dk_dv_kernel.name, filter_dq_dk_dv):
-                continue
 
             # Flash attention integration
             if receipt == 2:
@@ -1292,11 +1346,21 @@ def get_bwd_blobs(
                 if dtype == "fp32":
                     continue
 
-            gen_dot_do_o[t.dot_do_o_kernel] = True
-            gen_dq_dk_dv[t.dq_dk_dv_kernel] = True
-            if not t.convert_dq_kernel.disabled:
-                gen_convert_dq[t.convert_dq_kernel] = True
-            api_pool.register_dq_dk_dv_traits(t)
+            variants = [t]
+            if t.tile_split:
+                variants.append(replace(t, tile_split=False, tile_split_twin=True))
+            for v in variants:
+                if not fnmatch.fnmatch(v.dot_do_o_kernel.name, filter_dot_do_o):
+                    continue
+                if not fnmatch.fnmatch(v.convert_dq_kernel.name, filter_convert_dq):
+                    continue
+                if not fnmatch.fnmatch(v.dq_dk_dv_kernel.name, filter_dq_dk_dv):
+                    continue
+                gen_dot_do_o[v.dot_do_o_kernel] = True
+                gen_dq_dk_dv[v.dq_dk_dv_kernel] = True
+                if not v.convert_dq_kernel.disabled:
+                    gen_convert_dq[v.convert_dq_kernel] = True
+                api_pool.register_dq_dk_dv_traits(v)
 
     return (
         api_pool,
