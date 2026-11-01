@@ -6,6 +6,12 @@
 
 name: hipDNN Superbuild CI
 
+# Dispatch runs name who started them and which lanes ran; for every other event
+# this is empty, and GitHub falls back to its default run name.
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && format('hipDNN Superbuild CI ({0}) lanes={1}',
+  inputs.trigger_source || github.actor, inputs.lanes) || '' }}
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -15,8 +21,23 @@ on:
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
   schedule:
-    - cron: '17 7 * * *'
+    - cron: '17 7 * * *' # Daily at 07:17 UTC
+  # Both inputs are optional; a bare dispatch runs both lanes, like the schedule.
   workflow_dispatch:
+    inputs:
+      trigger_source:
+        description: 'Who or what started this run, shown in the run name (e.g. hipdnn-trigger-ci). Defaults to the dispatching user.'
+        type: string
+        required: false
+        default: ''
+      lanes:
+        description: 'Which lanes to run.'
+        type: choice
+        options:
+          - both
+          - linux
+          - windows
+        default: both
 permissions:
   contents: read
 
@@ -69,7 +90,8 @@ jobs:
   hipdnn-windows-superbuild:
     name: HipDNN Windows Superbuild
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    # inputs.lanes is empty outside workflow_dispatch, so other events run both lanes.
+    if: ${{ needs.changes.outputs.run == 'true' && inputs.lanes != 'linux' }}
     runs-on: azure-windows-scale-rocm
     defaults:
       run:
@@ -345,7 +367,8 @@ jobs:
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    # inputs.lanes is empty outside workflow_dispatch, so other events run both lanes.
+    if: ${{ needs.changes.outputs.run == 'true' && inputs.lanes != 'windows' }}
     runs-on: azure-linux-scale-rocm
     env:
       # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
