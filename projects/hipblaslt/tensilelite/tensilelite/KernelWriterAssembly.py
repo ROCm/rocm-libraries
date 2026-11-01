@@ -1726,7 +1726,8 @@ class KernelWriterAssembly(KernelWriter):
                 for iui in range(0, kernel["InnerUnroll"]):
                   moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuB_X0_I0_D0_PACK", ri))
                   ri += self.states.b.numVgprValuPerBlock
-
+        if self.states.b.valuNegTempOffset is not None:
+          moduleVgprMacroValuB.add(RegSet("v", "vgprValuBNeg", "vgprValuB_X0_I0_BASE", self.states.b.valuNegTempOffset))
 
       # T reg definition for F32XEmu
       self.macroAndSetF32XEmuTreg(kernel, tPA, tPB)

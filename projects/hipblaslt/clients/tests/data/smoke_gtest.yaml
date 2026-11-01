@@ -158,7 +158,7 @@ Tests:
   use_ext_setproblem: true
   algo_method: 1
   unit_check: 1
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 - name: matmul_smoke
   category: smoke
