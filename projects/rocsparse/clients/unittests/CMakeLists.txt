@@ -263,6 +263,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_level3_mm_grid_y.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
+  # gebsrmv / gebsr2csr / bsrgeam grid.x clamp
+  unit_test_internal_gebsr_grid_clamp.cpp
   unit_test_internal_extra_csrgemm_bitmap.cpp
   # --- bsrgemm scaling-copy grid.x clamp [AISPARSE-676] ---------------------
   # Distinct anchor (after the geam internal tests) so this leaf does not

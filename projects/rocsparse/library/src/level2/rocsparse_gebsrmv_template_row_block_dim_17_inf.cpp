@@ -23,6 +23,7 @@
 
 #include "gebsrmv_device.h"
 
+#include "rocsparse_grid.hpp"
 #include "rocsparse_handle.hpp"
 
 #include "rocsparse_utility.hpp"
@@ -34,7 +35,7 @@ namespace rocsparse
 #define LAUNCH_GEBSRMV_GENERAL_KERNEL(BLOCKSIZE, WFSIZE)              \
     THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                \
         (gebsrmvn_general_kernel<BLOCKSIZE, WFSIZE>),                 \
-        dim3(mb),                                                     \
+        dim3(rocsparse::get_grid_size_x(handle, mb, BLOCKSIZE)),      \
         dim3(BLOCKSIZE),                                              \
         0,                                                            \
         handle->stream,                                               \
@@ -76,17 +77,22 @@ namespace rocsparse
             return;
         }
 
-        rocsparse::gebsrmvn_general_device<BLOCKSIZE, WFSIZE>(dir,
-                                                              alpha,
-                                                              bsr_row_ptr,
-                                                              bsr_col_ind,
-                                                              bsr_val,
-                                                              row_block_dim,
-                                                              col_block_dim,
-                                                              x,
-                                                              beta,
-                                                              y,
-                                                              idx_base);
+        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
+        for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
+        {
+            rocsparse::gebsrmvn_general_device<BLOCKSIZE, WFSIZE>(static_cast<rocsparse_int>(row),
+                                                                  dir,
+                                                                  alpha,
+                                                                  bsr_row_ptr,
+                                                                  bsr_col_ind,
+                                                                  bsr_val,
+                                                                  row_block_dim,
+                                                                  col_block_dim,
+                                                                  x,
+                                                                  beta,
+                                                                  y,
+                                                                  idx_base);
+        }
     }
 
     template <typename T>
