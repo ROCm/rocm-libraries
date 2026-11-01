@@ -109,6 +109,23 @@ def test_declined_feature_is_declined_with_a_declined_features_reason(feature):
     assert reason.split(":")[0] in req.features() & set(_DECLINED)
 
 
+# A NOT_YET_IMPLEMENTED decline names an implementation shortcut with its own
+# follow-on (a reference oracle, a schema), not a permanent kernel/ABI limit.
+_NOT_YET_IMPLEMENTED_FEATURES = {"bias", "bias_broadcast", "alibi", "sinks", "paged"}
+
+
+@pytest.mark.parametrize("feature", sorted(_NOT_YET_IMPLEMENTED_FEATURES))
+def test_shortcut_declines_are_tagged_not_yet_implemented(feature):
+    assert "NOT_YET_IMPLEMENTED" in _DECLINED[feature]
+
+
+@pytest.mark.parametrize(
+    "feature", sorted(set(_DECLINED) - _NOT_YET_IMPLEMENTED_FEATURES)
+)
+def test_permanent_declines_are_not_tagged_not_yet_implemented(feature):
+    assert "NOT_YET_IMPLEMENTED" not in _DECLINED[feature]
+
+
 # --- head_dim / arch validity ------------------------------------------------
 
 
