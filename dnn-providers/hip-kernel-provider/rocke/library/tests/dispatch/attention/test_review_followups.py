@@ -418,14 +418,14 @@ class TestFp8DenseGuards(unittest.TestCase):
         self.assertIn("block_n*head_size", reason)
         self.assertIn("block_n=32", reason)
 
-    def _bind_unified_fp8(self, **bind_kwargs):
+    def _bind_unified_fp8(self, *, use_fp8=True, **bind_kwargs):
         """Bind the unified tuning path for an fp8 problem with the paged-tensor
         validators stubbed out, so only the scale handling is exercised."""
         from dispatch.attention.bindings import bind_tuning_attention_torch
 
-        req = self._fp8_req()
+        req = self._fp8_req(use_fp8=use_fp8)
         problem = _problem(req)
-        self.assertTrue(problem.use_fp8)
+        self.assertEqual(problem.use_fp8, use_fp8)
         spec = SimpleNamespace(
             path="2d", launch_grid=lambda _p: (1, 1, 1), launch_block=lambda: (64, 1, 1)
         )
@@ -457,5 +457,18 @@ class TestFp8DenseGuards(unittest.TestCase):
             side_effect=lambda **call: captured.update(call),
         ):
             self._bind_unified_fp8(k_scale=0.5, v_scale=0.25).launch()
+        self.assertEqual(captured.get("k_scale"), 0.5)
+        self.assertEqual(captured.get("v_scale"), 0.25)
+
+    def test_unified_binding_keeps_forwarding_non_fp8_bind_scales(self):
+        # The fp8 hardening above must not narrow the non-fp8 path: the runner
+        # only folds the scale in under fp8, but the strided decode path refuses a
+        # non-unit scale, and swallowing the kwarg here would swallow that error.
+        captured = {}
+        with mock.patch(
+            "kernels.common.attention_unified.run_unified_attention_torch",
+            side_effect=lambda **call: captured.update(call),
+        ):
+            self._bind_unified_fp8(use_fp8=False, k_scale=0.5, v_scale=0.25).launch()
         self.assertEqual(captured.get("k_scale"), 0.5)
         self.assertEqual(captured.get("v_scale"), 0.25)
