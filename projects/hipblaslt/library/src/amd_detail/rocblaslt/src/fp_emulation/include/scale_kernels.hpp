@@ -23,8 +23,7 @@
  * This header must be compiled as HIP.
  */
 
-#include "kernel_common.hpp"
-#include "tables.hpp" /* neg_mod, inv_mod, inv_mod_f */
+#include "kernel_common.hpp" /* split_int88, int8_residue */
 
 #include <hip/hip_runtime.h>
 
@@ -38,7 +37,7 @@ namespace FixedPointEmulation
      * j0 = blockIdx.x * 4*TILE_K + (t%TILE_K)*4  →  always 4-aligned.
      * Loads:  two double2 reads (j0..j0+1 and j0+2..j0+3), each 128-bit, each aligned.
      * Stores: one uint32_t NT store per modulus (packs INT8[j0..j0+3]) = 128 bytes/warp.
-     * Moduli loop is OUTER so nm/im/imf are loaded once per modulus, and only
+     * Moduli loop is OUTER so the per-modulus constants are loaded once, and only
      * TILE_M=8 NT write-combine buffers are needed simultaneously.               */
     template <unsigned T_COUNT, typename T>
     __global__ static void scale_A_T_kernel(const T* __restrict__ A,
@@ -62,7 +61,8 @@ namespace FixedPointEmulation
         if(i >= m || j0 >= k)
             return;
         const int sft = static_cast<int>(sftA[i]);
-        /* Load and widen to double immediately — all residue arithmetic stays in double.
+        /* Load, widen to double and scale; the residues are then computed from integer
+         * limbs of these values (split_int88).
          * FP64: double2 (2 × 8 bytes = 128-bit).  FP32: float2 (2 × 4 bytes = 64-bit). */
         double ival[4];
         if constexpr(std::is_same_v<T, double>)
@@ -107,27 +107,26 @@ namespace FixedPointEmulation
                 ival[3] = 0.0;
             }
         }
+        /* Split each value into integer limbs once; the per-modulus residues then
+         * need only integer and FP32 arithmetic (see int8_residue).            */
+        Int88Limbs lv[4];
+#pragma unroll
+        for(int p = 0; p < 4; ++p)
+            lv[p] = split_int88(ival[p]);
         const size_t stride   = lda8i * cola8i;
         const size_t off_base = static_cast<size_t>(i) * lda8i;
         const size_t off0 = static_cast<size_t>(j0) + off_base; /* 4-aligned → uint32_t aligned */
-        /* Outer loop over moduli — sequential (no unroll) so nm/im/imf loaded once per modulus,
-         * keeping register pressure low and WCB usage at TILE_M=8 entries simultaneously.   */
+        /* Outer loop over moduli — sequential (no unroll) so the per-modulus constants are
+         * loaded once per modulus, keeping register pressure low and WCB usage at TILE_M=8
+         * entries simultaneously.                                                         */
         for(unsigned t_local = 0; t_local < T_COUNT; ++t_local)
         {
             const unsigned tidx = t_start + t_local;
-            const double   nm   = neg_mod(tidx);
-            const double   im   = inv_mod(tidx);
-            const float    imf  = inv_mod_f(tidx);
             /* Compute INT8 residues for all four k-positions. */
             int8_t b[4];
 #pragma unroll
             for(int p = 0; p < 4; ++p)
-            {
-                const double rp  = fma(nm, rint(ival[p] * im), ival[p]);
-                const float  rfp = static_cast<float>(rp);
-                b[p]             = static_cast<int8_t>(
-                    static_cast<int32_t>(fmaf(rintf(rfp * imf), static_cast<float>(nm), rfp)));
-            }
+                b[p] = int8_residue(lv[p], ival[p], tidx);
             /* Pack and store: always write 4 bytes as uint32_t.
              * Out-of-bounds b[p] are zero (ival[p] was pre-zeroed for p >= valid count),
              * so the extra bytes land harmlessly in the [k, lda8i) padding region.
@@ -205,30 +204,26 @@ namespace FixedPointEmulation
             const int sft = static_cast<int>(s_sft[m_wr]);
             /* Read K_UNROLL scaled values from SHMEM; shmem already contains 0.0 for
              * out-of-bounds j≥k positions set during the load phase above.         */
-            double ival[K_UNROLL];
+            double     ival[K_UNROLL];
+            Int88Limbs lv[K_UNROLL];
 #pragma unroll
             for(int p = 0; p < K_UNROLL; p++)
+            {
                 ival[p] = trunc(ldexp(shmem[k_wb + p][m_wr], sft));
+                lv[p]   = split_int88(ival[p]);
+            }
 
             const size_t stride = lda8i * cola8i;
             const size_t offset = static_cast<size_t>(j_out) + static_cast<size_t>(i_out) * lda8i;
-            /* Outer loop over moduli: nm/im/imf loaded once per modulus, reused for
-             * all K_UNROLL=4 k-positions.  Pack 4 int8 bytes as one uint32_t NT store. */
+            /* Outer loop over moduli: per-modulus constants loaded once per modulus, reused
+             * for all K_UNROLL=4 k-positions.  Pack 4 int8 bytes as one uint32_t NT store. */
             for(unsigned t_local = 0; t_local < T_COUNT; ++t_local)
             {
                 const unsigned tidx = t_start + t_local;
-                const double   nm   = neg_mod(tidx);
-                const double   im   = inv_mod(tidx);
-                const float    imf  = inv_mod_f(tidx);
                 int8_t         b[K_UNROLL];
 #pragma unroll
                 for(int p = 0; p < K_UNROLL; p++)
-                {
-                    const double rp  = fma(nm, rint(ival[p] * im), ival[p]);
-                    const float  rfp = static_cast<float>(rp);
-                    b[p]             = static_cast<int8_t>(
-                        static_cast<int32_t>(fmaf(rintf(rfp * imf), static_cast<float>(nm), rfp)));
-                }
+                    b[p] = int8_residue(lv[p], ival[p], tidx);
                 /* Pack and store: always write 4 bytes as uint32_t.
                  * Out-of-bounds b[p] are zero (ival[p]=0.0 from pre-zeroed shmem),
                  * so extra bytes land harmlessly in the [k, lda8i) padding region. */
@@ -265,7 +260,7 @@ namespace FixedPointEmulation
         if(col >= n || j0 >= k)
             return;
         const int sft = static_cast<int>(sftB[col]);
-        /* Load and widen to double immediately — all residue arithmetic stays in double. */
+        /* Load, widen to double and scale; residues come from integer limbs (split_int88). */
         double ival[4];
         if constexpr(std::is_same_v<T, double>)
         {
@@ -305,24 +300,21 @@ namespace FixedPointEmulation
                 ival[3] = 0.0;
             }
         }
+        /* Split each value into integer limbs once (see scale_A_T_kernel). */
+        Int88Limbs lv[4];
+#pragma unroll
+        for(int p = 0; p < 4; ++p)
+            lv[p] = split_int88(ival[p]);
         const size_t stride   = ldb8i * static_cast<size_t>(n);
         const size_t off_base = static_cast<size_t>(col) * ldb8i;
         const size_t off0 = static_cast<size_t>(j0) + off_base; /* 4-aligned → uint32_t aligned */
         for(unsigned t_local = 0; t_local < T_COUNT; ++t_local)
         {
             const unsigned tidx = t_start + t_local;
-            const double   nm   = neg_mod(tidx);
-            const double   im   = inv_mod(tidx);
-            const float    imf  = inv_mod_f(tidx);
             int8_t         b[4];
 #pragma unroll
             for(int p = 0; p < 4; ++p)
-            {
-                const double rp  = fma(nm, rint(ival[p] * im), ival[p]);
-                const float  rfp = static_cast<float>(rp);
-                b[p]             = static_cast<int8_t>(
-                    static_cast<int32_t>(fmaf(rintf(rfp * imf), static_cast<float>(nm), rfp)));
-            }
+                b[p] = int8_residue(lv[p], ival[p], tidx);
             /* Pack and store: always write 4 bytes as uint32_t.
              * Out-of-bounds b[p] are zero (ival[p] was pre-zeroed for p >= valid count),
              * so the extra bytes land harmlessly in the [k, ldb8i) padding region.
@@ -399,30 +391,26 @@ namespace FixedPointEmulation
             const int sft = static_cast<int>(s_sft[l_wr]);
             /* Read K_UNROLL scaled values from SHMEM; shmem already contains 0.0 for
              * out-of-bounds j≥k positions set during the load phase above.         */
-            double ival[K_UNROLL];
+            double     ival[K_UNROLL];
+            Int88Limbs lv[K_UNROLL];
 #pragma unroll
             for(int p = 0; p < K_UNROLL; p++)
+            {
                 ival[p] = trunc(ldexp(shmem[k_wb + p][l_wr], sft));
+                lv[p]   = split_int88(ival[p]);
+            }
 
             const size_t stride = ldb8i * static_cast<size_t>(n);
             const size_t offset = static_cast<size_t>(j_out) + static_cast<size_t>(c_out) * ldb8i;
-            /* Outer loop over moduli: nm/im/imf loaded once per modulus, reused for
-             * all K_UNROLL=4 k-positions.  Pack 4 int8 bytes as one uint32_t NT store. */
+            /* Outer loop over moduli: per-modulus constants loaded once per modulus, reused
+             * for all K_UNROLL=4 k-positions.  Pack 4 int8 bytes as one uint32_t NT store. */
             for(unsigned t_local = 0; t_local < T_COUNT; ++t_local)
             {
                 const unsigned tidx = t_start + t_local;
-                const double   nm   = neg_mod(tidx);
-                const double   im   = inv_mod(tidx);
-                const float    imf  = inv_mod_f(tidx);
                 int8_t         b[K_UNROLL];
 #pragma unroll
                 for(int p = 0; p < K_UNROLL; p++)
-                {
-                    const double rp  = fma(nm, rint(ival[p] * im), ival[p]);
-                    const float  rfp = static_cast<float>(rp);
-                    b[p]             = static_cast<int8_t>(
-                        static_cast<int32_t>(fmaf(rintf(rfp * imf), static_cast<float>(nm), rfp)));
-                }
+                    b[p] = int8_residue(lv[p], ival[p], tidx);
                 /* Pack and store: always write 4 bytes as uint32_t.
                  * Out-of-bounds b[p] are zero (ival[p]=0.0 from pre-zeroed shmem),
                  * so extra bytes land harmlessly in the [k, ldb8i) padding region. */

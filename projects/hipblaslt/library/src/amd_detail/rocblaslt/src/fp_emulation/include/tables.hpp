@@ -113,6 +113,31 @@ namespace FixedPointEmulation
         return v[i];
     }
 
+    /* Width of the integer limbs used by the integer residue path (int8_residue
+     * in kernel_common.hpp): four limbs cover integers below 2^88.            */
+    static constexpr unsigned LIMB_BITS = 22u;
+
+    /* Weight of limb j for modulus i: 2^(LIMB_BITS * j) mod m_i, so that
+     * X mod m_i = sum_j limb_j * limb_weight(i, j) mod m_i.                     */
+    __device__ __forceinline__ uint32_t limb_weight(unsigned i, unsigned j) noexcept
+    {
+        static constexpr auto v = []() constexpr {
+            std::array<std::array<uint32_t, 4>, S_MAX> a{};
+            for(unsigned k = 0; k < S_MAX; ++k)
+            {
+                const uint64_t mk = static_cast<uint64_t>(moduli[k]);
+                uint64_t       p  = 1u;
+                for(unsigned l = 0; l < 4; ++l)
+                {
+                    a[k][l] = static_cast<uint32_t>(p % mk);
+                    p       = (p << LIMB_BITS) % mk;
+                }
+            }
+            return a;
+        }();
+        return v[i][j];
+    }
+
     // UInt256: compile-time 256-bit unsigned integer (4 x uint64_t, little-endian).
     struct UInt256
     {
