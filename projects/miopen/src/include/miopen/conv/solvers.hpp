@@ -4632,6 +4632,75 @@ struct MIOPEN_INTERNALS_EXPORT ConvDirectDepthwiseFwd2D final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
+struct PerformanceConfigConvGenericDepthwiseFwd2D
+    : PerfConfigBase<PerformanceConfigConvGenericDepthwiseFwd2D>
+{
+    int use_lds; // 0: read the input through the cache, 1: stage an input tile in LDS
+
+    PerformanceConfigConvGenericDepthwiseFwd2D(int lds) : use_lds(lds) {}
+    PerformanceConfigConvGenericDepthwiseFwd2D() : PerformanceConfigConvGenericDepthwiseFwd2D(-1) {}
+    PerformanceConfigConvGenericDepthwiseFwd2D(bool) : PerformanceConfigConvGenericDepthwiseFwd2D(0)
+    {
+    }
+
+    template <class Self, class F>
+    static void Visit(Self&& self, F f)
+    {
+        f(self.use_lds, "use_lds");
+    }
+
+    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
+                                               const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const ExecutionContext&,
+                                         const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool
+    operator==(const PerformanceConfigConvGenericDepthwiseFwd2D& other) const;
+};
+
+/// General-shape forward 2D depthwise convolution (channels-per-group == 1) for gfx950, a plain
+/// HIP kernel kept apart from the CK-based ConvDepthwiseFwd2D.
+struct MIOPEN_INTERNALS_EXPORT ConvGenericDepthwiseFwd2D final
+    : ConvTunableSolver<PerformanceConfigConvGenericDepthwiseFwd2D>
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvGenericDepthwiseFwd2D>();
+    }
+
+    PerformanceConfigConvGenericDepthwiseFwd2D
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConfigConvGenericDepthwiseFwd2D&) const override;
+    PerformanceConfigConvGenericDepthwiseFwd2D
+    Search(const ExecutionContext&,
+           const miopen::conv::ProblemDescription&,
+           const AnyInvokeParams& invoke_ctx) const override;
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    /// Use very small fixed value enough to backup GEMM for cases when
+    /// GEMM is disabled.
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    bool MayNeedWorkspace() const override { return false; }
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override
+    {
+        return 0;
+    }
+
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConfigConvGenericDepthwiseFwd2D&) const override;
+};
+
 /// Placeholder forward 3D depthwise convolution (FP16/BF16, default/NCDHW layout); stub kernel.
 struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
 {
