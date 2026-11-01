@@ -32,6 +32,7 @@
 //
 #pragma once
 
+#include "../include/rocsparse_clients_log.hpp"
 #include "rocsparse.h"
 
 #include <cstdint>
@@ -40,6 +41,8 @@
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #ifdef _WIN32
@@ -47,6 +50,37 @@
 #else
 #include <unistd.h>
 #endif
+
+// gtest reports what() for an exception that escapes a test body, so the message
+// names the failing call.
+inline void unit_test_throw_hip_error(const char* call, hipError_t status)
+{
+    if(status == hipSuccess)
+    {
+        return;
+    }
+
+    // Consume the error so that it is not reported again by the next test.
+    (void)hipGetLastError();
+
+    std::ostringstream message;
+    message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
+            << ")";
+    throw std::runtime_error(message.str());
+}
+
+inline void unit_test_throw_rocsparse_error(const char* call, rocsparse_status status)
+{
+    if(status == rocsparse_status_success)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << call << " failed: " << rocsparse_get_status_name(status) << " ("
+            << static_cast<int>(status) << ")";
+    throw std::runtime_error(message.str());
+}
 
 namespace rocsparse_ut
 {
@@ -133,6 +167,8 @@ namespace rocsparse_ut
     }
 
     // ----- tiny device buffer RAII ------------------------------------------
+    // Both constructors throw std::runtime_error if hipMalloc or hipMemcpy fails,
+    // so ptr is null only for an empty buffer.
     template <typename T>
     struct device_vector
     {
@@ -143,25 +179,26 @@ namespace rocsparse_ut
         explicit device_vector(const std::vector<T>& host)
         {
             n = host.size();
-            if(hipMalloc(&ptr, n * sizeof(T)) != hipSuccess)
+            unit_test_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
+            const hipError_t copy_status
+                = hipMemcpy(ptr, host.data(), n * sizeof(T), hipMemcpyHostToDevice);
+            if(copy_status != hipSuccess)
             {
-                ptr = nullptr;
-                return;
+                rocsparse_clients_log_hip_error("hipFree", hipFree(ptr));
+                unit_test_throw_hip_error("hipMemcpy", copy_status);
             }
-            (void)hipMemcpy(ptr, host.data(), n * sizeof(T), hipMemcpyHostToDevice);
         }
         explicit device_vector(size_t count)
             : n(count)
         {
-            if(hipMalloc(&ptr, n * sizeof(T)) != hipSuccess)
-                ptr = nullptr;
+            unit_test_throw_hip_error("hipMalloc", hipMalloc(&ptr, n * sizeof(T)));
         }
         device_vector(const device_vector&) = delete;
         device_vector& operator=(const device_vector&) = delete;
         ~device_vector()
         {
             if(ptr)
-                (void)hipFree(ptr);
+                rocsparse_clients_log_hip_error("hipFree", hipFree(ptr));
         }
         operator T*() const
         {
@@ -178,9 +215,9 @@ namespace rocsparse_ut
         std::vector<T> host(count);
         if(count > 0 && device_ptr != nullptr)
         {
-            const hipError_t status
-                = hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost);
-            EXPECT_EQ(status, hipSuccess) << hipGetErrorString(status);
+            unit_test_throw_hip_error(
+                "hipMemcpy",
+                hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost));
         }
         return host;
     }
@@ -308,6 +345,8 @@ namespace rocsparse_ut
     template <typename Kernel, typename... Args>
     hipError_t launch_single_block(Kernel kernel, unsigned int block_dim, Args... args)
     {
+        // Clear any error left pending by an earlier test, so it isn't blamed on this launch.
+        (void)hipGetLastError();
         hipLaunchKernelGGL(kernel, dim3(1), dim3(block_dim), 0, 0, args...);
         const hipError_t launch = hipGetLastError();
         if(launch != hipSuccess)
