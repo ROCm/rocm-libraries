@@ -307,6 +307,20 @@ def _f64_literal(val: float) -> str:
     return _hip_float_literal(val, "double", "")
 
 
+def _inline_asm_string_attr(op: Op, key: str) -> str:
+    """String attr ``key`` of the tile.inline_asm ``op``.
+
+    Raises ``KeyError`` when the op has no such attr and ``TypeError`` when it
+    holds something other than a string.
+    """
+    if key not in op.attrs:
+        raise KeyError(f"tile.inline_asm: missing '{key}' attr")
+    value = op.attrs[key]
+    if not isinstance(value, str):
+        raise TypeError(f"tile.inline_asm: '{key}' must be a string")
+    return value
+
+
 def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     """Encode `s_waitcnt` for the gfx9/gfx10 layout used by gfx950.
 
@@ -1525,15 +1539,22 @@ class _Lowerer:
                 f"got {len(op.results)} (inline_asm_multi not yet lowered)"
             )
 
-        template = _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
-        parts = [c.strip() for c in op.attrs["constraints"].split(",") if c.strip()]
+        template = _re.sub(r"\$(\d+)", r"%\1", _inline_asm_string_attr(op, "template"))
+        parts = [
+            c.strip()
+            for c in _inline_asm_string_attr(op, "constraints").split(",")
+            if c.strip()
+        ]
         side = "volatile " if op.attrs.get("sideeffect", True) else ""
         in_names = [_name(o) for o in op.operands]
-        clob = op.attrs.get(
-            "clobber", "memory" if op.attrs.get("sideeffect", True) else ""
-        )
+        if "clobber" in op.attrs:
+            clob = _inline_asm_string_attr(op, "clobber")
+        else:
+            clob = "memory" if op.attrs.get("sideeffect", True) else ""
         clob_str = f' : "{clob}"' if clob else ""
         if op.results:
+            if not parts:
+                raise ValueError("tile.inline_asm: no output constraint")
             out_c = parts[0]
             in_cs = parts[1:]
             res = op.results[0]
