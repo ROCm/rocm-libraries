@@ -25,10 +25,13 @@
 
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HwReg.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250ReplayGroup.hpp"
 
 using namespace stinkytofu;
 
@@ -298,5 +301,86 @@ st.func @smem_self_overlap() {
     }
 }
 #endif
+
+// ---------------------------------------------------------------------------
+// Replay-mode guard: the pass models single-group replay only
+// ---------------------------------------------------------------------------
+
+struct ModeWrite {
+    uint16_t id;
+    uint16_t offset;
+    uint16_t size;
+    int value;
+};
+
+static void prependSetreg(Function& func, GfxArchID archId, const ModeWrite& w) {
+    BasicBlock& bb = *func.begin();
+    StinkyInstruction* first = nullptr;
+    for (IRBase& ir : bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst != nullptr && !isPseudoInst(inst)) {
+            first = inst;
+            break;
+        }
+    }
+    ASSERT_NE(first, nullptr);
+    AsmIRBuilder builder(bb, archId);
+    StinkyInstruction* setreg =
+        builder.create(getMCIDByUOp(GFX::s_setreg_IMM32_b32, archId), first);
+    setreg->addDestReg(StinkyRegister::Hwreg(w.id, w.offset, w.size));
+    setreg->addSrcReg(StinkyRegister(w.value));
+}
+
+TEST_F(Gfx1250HazardPassTest, MultiGroupReplayModeWriteAborts) {
+    const std::string irString = R"(
+st.func @replay_mode() {
+^entry:
+  s[8:9] = "st.s_load_b64"(s[0:1])
+  v0 = "st.v_add_f32"(v1, v2)
+}
+)";
+    const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+    AsmCapsConfig caps;
+    caps.enableXnackReplay = true;
+
+    for (const ModeWrite& w :
+         {ModeWrite{HwReg::ID_MODE, 25, 1, 1}, ModeWrite{HwReg::ID_MODE, 24, 2, 0b10}}) {
+        StinkyIRConverter converter(arch);
+        Function* func = converter.convertToFunction(irString);
+        ASSERT_NE(func, nullptr);
+        prependSetreg(*func, archId, w);
+        EXPECT_DEATH(runPass(*func, caps), "MODE.REPLAY_MODE");
+    }
+
+    for (const ModeWrite& w :
+         {ModeWrite{HwReg::ID_MODE, 25, 1, 0}, ModeWrite{HwReg::ID_MODE, 24, 2, 0b01},
+          ModeWrite{HwReg::ID_MODE, 0, 4, 0xf}, ModeWrite{HwReg::ID_SCHED_MODE_GFX12, 0, 2, 2}}) {
+        StinkyIRConverter converter(arch);
+        Function* func = converter.convertToFunction(irString);
+        ASSERT_NE(func, nullptr);
+        prependSetreg(*func, archId, w);
+        runPass(*func, caps);  // single-group still holds; must not abort
+    }
+}
+
+TEST(Gfx1250ReplayGroupTest, TextModeWriteDetection) {
+    const char* const modeWrites[] = {
+        "s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1",
+        "s_setreg_IMM32_b32 hwreg(1, 25, 1), 1",
+        "s_setreg_b32 hwreg(1), s4",
+    };
+    for (const char* text : modeWrites) {
+        EXPECT_TRUE(gfx1250::textMayWriteMode(text)) << text;
+    }
+
+    const char* const otherRegAccesses[] = {
+        "s_setreg_IMM32_b32 hwreg(26, 0, 2), 2",
+        "s_setreg_IMM32_b32 hwreg(12, 0, 2), 2",
+        "s_getreg_b32 s6, hwreg(HW_REG_IB_STS2, 6, 4)",
+    };
+    for (const char* text : otherRegAccesses) {
+        EXPECT_FALSE(gfx1250::textMayWriteMode(text)) << text;
+    }
+}
 
 }  // namespace

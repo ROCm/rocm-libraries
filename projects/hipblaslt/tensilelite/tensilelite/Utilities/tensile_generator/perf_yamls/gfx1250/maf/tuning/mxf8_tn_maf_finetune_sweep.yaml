@@ -21,8 +21,8 @@ GlobalParameters:
   DataInitTypeMXSB: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
-  NumWarmups: 160
-  EnqueuesPerSync: 1600
+  NumWarmups: 50
+  EnqueuesPerSync: 200
   PrintWinnersOnly: True
   Architecture: gfx1250
   KeepBuildTmp: True
@@ -94,14 +94,14 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - ExpandPointerSwap: [False]
         - PreloadKernArgs: [True]
+        - InitCIterWmma: [0, 1]
+        - SwInstructionPrefetch: [0, 1, -1]
 
         - CompactLoopStore: [True, False]
         - NumElementsPerBatchStore: [16]
         - GroupLoadStore: [True, False]
         - InterleaveAlpha: [2]
         # - PrefetchGL2SAddr: [True, False]
-        - InitCIterWmma: [0]
-        - SwInstructionPrefetch: [0]
         - ClusterDim: [[4,4],[2,4]]
         - ClusterAIDMapping: [-1, -2]
         - PrefetchGL2: [1,2]
