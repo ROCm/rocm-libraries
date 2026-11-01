@@ -151,6 +151,7 @@ namespace FixedPointEmulation
             {0x75a3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx950-mi355x
             {0x75b3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx950-mi355x
             {0x745eu, {1.591, 15.62, 159.7, 1.3e6, 3.3e6, 1.4e6, 6.6e6, 2.7e7}}, // gfx1100-w7800
+            {0x7550u, {1.36, 39.86, 332.0, 1.4e6, 4.2e6, 1.8e6, 1.6e7, 5.6e7}}, // gfx1201-rx9070xt
         };
         static std::optional<std::optional<PerfModelDeviceParams>> device_params_cache[64];
 
