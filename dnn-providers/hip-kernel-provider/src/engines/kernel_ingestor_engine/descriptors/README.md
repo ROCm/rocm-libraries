@@ -15,13 +15,7 @@ the cache variable below is pointed elsewhere:
 | `rocKE/gfx950_attention_dense/` | `hipkernel:Gfx950AttentionDense` | `packs/Gfx950AttentionDenseNative.cpp` |
 | `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
-| `rocKE/gfx950_conv_fwd/` | `hipkernel:Gfx950ConvFwd` | `packs/Gfx950ConvFwdNative.cpp` |
-| `rocKE/gfx950_conv_fwd_aot/` | `hipkernel:Gfx950ConvFwdAot` | `packs/Gfx950ConvFwdNative.cpp` |
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/Gfx950ConvDgradNative.cpp` |
-
-`rocKE/gfx950_conv_fwd/` is generated from
-`projects/hipdnn/tools/IngestorGenerator/configs/gfx950_conv_fwd.yaml`; see
-`docs/gfx950_conv_fwd/README.md` for its catalog scope and regeneration procedure.
 
 ## Authoring a bundle
 

@@ -609,11 +609,9 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     using hipdnn_plugin_sdk::ingestor::SavedKernelCode;
     using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 
-    constexpr std::array<std::string_view, 8> PACK_DISPATCH_SYMBOLS{
+    constexpr std::array<std::string_view, 6> PACK_DISPATCH_SYMBOLS{
         "hipkernel.pointwise.dispatch",
         "hipkernel.conv_fwd.dispatch",
-        "hipkernel.gfx950_conv_fwd.dispatch",
-        "hipkernel.gfx950_conv_fwd_aot.dispatch",
         "hipkernel.gfx950_conv_dgrad_aot.dispatch",
         "hipkernel.gfx950_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",

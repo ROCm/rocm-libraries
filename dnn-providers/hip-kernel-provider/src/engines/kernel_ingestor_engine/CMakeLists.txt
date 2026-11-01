@@ -13,13 +13,12 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/KernelIngestorEngine.cpp
     # Pointwise and Conv descriptors are test fixtures under test_descriptors/; a Pointwise
     # bundle also sits in descriptor-packaging/examples/descriptors, where the superbuild CI
-    # lane points the production source root. Gfx950AttentionDense, Gfx950ConvFwd and
+    # lane points the production source root. Gfx950AttentionDense and
     # Gfx950ConvDgradAot ship from descriptors/.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx1151WmmaAttentionNative.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950ConvFwdNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950ConvDgradNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanCodec.cpp

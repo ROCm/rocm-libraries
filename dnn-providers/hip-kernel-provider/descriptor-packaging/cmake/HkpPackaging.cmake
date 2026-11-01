@@ -1487,45 +1487,12 @@ function(_hkp_root_ships_for_gfx950 out_var root engine)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_gfx950_conv_fwd_available(<out>)
-#   TRUE when this configuration actually ships the gfx950 forward-convolution bundle,
-#   hipkernel:Gfx950ConvFwd, from the `product` root; see _hkp_root_ships_for_gfx950().
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_conv_fwd_available out_var)
-    _hkp_root_ships_for_gfx950(_ships product "hipkernel:Gfx950ConvFwd")
-    set(${out_var} "${_ships}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
-# hkp_gfx950_conv_fwd_aot_available(<out>)
-#   The same predicate for the shape-generic AOT-instance engine,
-#   hipkernel:Gfx950ConvFwdAot, which ships its own bundle.
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_conv_fwd_aot_available out_var)
-    _hkp_root_ships_for_gfx950(_ships product "hipkernel:Gfx950ConvFwdAot")
-    set(${out_var} "${_ships}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
 # hkp_gfx950_conv_dgrad_aot_available(<out>)
 #   The same predicate for the shape-generic AOT-instance backward-data engine,
 #   hipkernel:Gfx950ConvDgradAot, which ships its own bundle.
 # ---------------------------------------------------------------------------
 function(hkp_gfx950_conv_dgrad_aot_available out_var)
     _hkp_root_ships_for_gfx950(_ships product "hipkernel:Gfx950ConvDgradAot")
-    set(${out_var} "${_ships}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
-# hkp_gfx950_conv_fwd_aot_seed_available(<out>)
-#   TRUE when the `integration` test root ships hipkernel:Gfx950ConvFwdAotSeed for
-#   gfx950: the small seed catalog over hipkernel:Gfx950ConvFwdAot's native code that the
-#   integration binary pins instance by instance. Arch-aware, unlike
-#   hkp_product_offers_engine(): the test roots are always this build's own content, so
-#   a build that does not pack gfx950 has no seed to run against.
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_conv_fwd_aot_seed_available out_var)
-    _hkp_root_ships_for_gfx950(_ships integration "hipkernel:Gfx950ConvFwdAotSeed")
     set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 
