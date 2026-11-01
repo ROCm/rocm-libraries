@@ -474,7 +474,7 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
                 l_w *= tmp;
                 static_for<0, kOBlocks, 1>{}([&](auto i_d) { o_t[i_d] *= tmp; });
             }
-            const float row_max = m_w == -numeric<float>::infinity() ? 0.f : exp_scale * m_w;
+            const float row_max = m_w < -numeric<float>::max() ? 0.f : exp_scale * m_w;
 
             RawX16 p;
             static_for<0, kKeyBlock * 8, 1>{}([&](auto i) {
@@ -534,7 +534,7 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
             const float m_o      = x[i_q * 2 + 0];
             m_q                  = max(m_w, m_o);
             const auto rescale   = [&](float m_i) {
-                return m_i == -numeric<float>::infinity() ? 0.f : exp2(exp_scale * (m_i - m_q));
+                return m_i < -numeric<float>::max() ? 0.f : exp2(exp_scale * (m_i - m_q));
             };
             const float f_w = rescale(m_w);
             const float f_o = rescale(m_o);
@@ -554,7 +554,7 @@ struct BlockFmhaPipelineQRKSVSTdmKVShared : BlockFmhaPipelineQRKSVSTdmPingPong<P
         {
             // natural log, as StoreLse; a fully masked row stores -inf, from log(0)
             constexpr float kLn2 = 1.f / log2e_v<float>;
-            const float m_lse    = m_q == -numeric<float>::infinity() ? 0.f : m_q;
+            const float m_lse    = m_q < -numeric<float>::max() ? 0.f : m_q;
             auto lse = make_static_distributed_tensor<LSEDataType>(MakeLseDistribution());
             lse.get_thread_buffer()[0] =
                 m_lse * (kScaledScores ? kLn2 : scale_s * kLn2) + log(l_sum);
