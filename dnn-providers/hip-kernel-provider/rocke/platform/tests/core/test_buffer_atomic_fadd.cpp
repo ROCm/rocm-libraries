@@ -4,6 +4,9 @@
  * tests/core/test_buffer_atomic_fadd.cpp -- the C++ side of
  * tests/core/test_buffer_atomic_fadd.py for tile.buffer_atomic_fadd_f32.
  *
+ * Linked into the rocke_buffer_rsrc_hip test binary, whose self-check calls
+ * rocke_test_buffer_atomic_fadd(); it has no main() of its own.
+ *
  * The byte-identity gate compares the kernels both engines build, so it does
  * not see the builder's refusal of a cache-policy immediate outside 0..31 (no
  * kernel is built). This checks, as the Python test does, that:
@@ -115,16 +118,17 @@ void check_refuses_out_of_range_cachepolicy()
 
 } // namespace
 
-int main()
+int rocke_test_buffer_atomic_fadd()
 {
+    g_failures = 0;
     check_lowering(0);
     /* CPOL_ATOMIC_CASCADE_DEV: th = TH_ATOMIC_CASCADE (4), scope = SCOPE_DEV (2) << 3. */
     check_lowering(20);
     check_refuses_out_of_range_cachepolicy();
     if(g_failures != 0)
     {
-        fprintf(stderr, "%d check(s) failed\n", g_failures);
-        return 1;
+        fprintf(stderr, "buffer_atomic_fadd: %d check(s) failed\n", g_failures);
+        return g_failures;
     }
     printf("buffer_atomic_fadd: OK\n");
     return 0;
