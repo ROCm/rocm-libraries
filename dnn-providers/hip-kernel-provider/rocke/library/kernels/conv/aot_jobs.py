@@ -545,14 +545,24 @@ def _fwd_k_loops(pipeline: str) -> List[Tuple[bool, bool]]:
     return k_loops
 
 
-def _wgrad_k_loops(wave_size: int, pipeline: str, two_stage: bool) -> List[dict]:
+def _wgrad_k_loops(
+    wave_size: int, pipeline: str, two_stage: bool, target
+) -> List[dict]:
     """K-loop variants built per wgrad configuration.
 
     The base loop always. On wave32 (WMMA) next to "mem", except under
-    two-stage: the gfx1250 ``async_dma`` loop (global_load_async_to_lds).
+    two-stage, and only on a target with ``global_load_async_to_lds``
+    (gfx1250): the ``async_dma`` loop. :func:`_wgrad_jobs` and
+    :func:`count_jobs` both take the variants from here, so the count stays
+    the number of jobs the walk yields.
     """
     loops: List[dict] = [{}]
-    if wave_size == 32 and pipeline == "mem" and not two_stage:
+    if (
+        wave_size == 32
+        and pipeline == "mem"
+        and not two_stage
+        and target.memory.has_async_global_lds
+    ):
         loops.append({"async_dma": True})
     return loops
 
@@ -1239,7 +1249,9 @@ def _wgrad_jobs(
                     # sizes the scratch and Stage 2 from what was compiled.
                     cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
                 k_loops = (
-                    _wgrad_k_loops(wave_size, pipeline, two_stage) if in_cover else [{}]
+                    _wgrad_k_loops(wave_size, pipeline, two_stage, target)
+                    if in_cover
+                    else [{}]
                 )
                 for k_loop in k_loops:
                     kcfg = dict(cfg, **k_loop)
@@ -1851,7 +1863,7 @@ def count_jobs(
                     stages = sum(len(_wgrad_two_stages(sk)) for sk in split_ks)
                     # The async loop: once per non-two-stage configuration.
                     asyncs = len(split_ks) * (
-                        len(_wgrad_k_loops(wave_size, pipeline, False)) - 1
+                        len(_wgrad_k_loops(wave_size, pipeline, False, target)) - 1
                     )
                 else:
                     stages, asyncs = len(split_ks), 0

@@ -1892,6 +1892,28 @@ def test_wmma_wgrad_keeps_the_default_grid_and_covers_the_new_variants():
     )
 
 
+@pytest.mark.parametrize("gfx", ["gfx1250", "gfx1151", "gfx1201"])
+def test_wmma_wgrad_count_matches_the_walk(gfx):
+    """:func:`aj.count_jobs` counts exactly the wgrad jobs the generator
+    yields on every wave32 target. The async loop is built only where the
+    target has ``global_load_async_to_lds`` (gfx1250); gfx1151 / gfx1201 get
+    none, and the count must not include them either.
+    """
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(gfx)
+    split_ks = aj.CACHE_WGRAD_SPLIT_KS
+    jobs = list(aj._wgrad_jobs(gfx, "fp16", 32, "wmma", target, split_ks))
+    n_async = sum(1 for job in jobs if job.identity.async_dma)
+    if target.memory.has_async_global_lds:
+        assert n_async > 0
+    else:
+        assert n_async == 0
+    assert len(jobs) == aj.count_jobs(
+        dtype="fp16", target=target, directions=["wgrad"], split_ks=split_ks
+    )
+
+
 @pytest.mark.parametrize(
     "directions", [("fwd",), ("wgrad",), ("dgrad",), ("fwd", "wgrad", "dgrad")]
 )
