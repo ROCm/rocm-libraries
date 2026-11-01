@@ -2,6 +2,12 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-5.1.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* Fixed `CachingDeviceAllocator` handing a block that was still in use to a different host thread when both threads used `hipStreamPerThread`, or stream `0` with per-thread default streams. These handles name a different stream on each thread, so cached blocks are now reused without waiting for their ready event only on the thread that last used them.
+
 ## hipCUB-5.0.0 for ROCm 10.2.0
 
 ### Added
