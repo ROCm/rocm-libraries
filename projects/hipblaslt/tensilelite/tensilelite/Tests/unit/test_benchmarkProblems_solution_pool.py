@@ -149,7 +149,7 @@ def test_constructAllPoolSolutions_flattens_multiple_solutions_in_one_file(pool_
 def test_constructAllPoolSolutions_keeps_duplicate_solutions(pool_env):
     # Identical solutions are intentionally NOT de-duplicated here: this helper
     # only gathers candidates, and duplicate kernels are collapsed later by the
-    # kernel builder (writeSolutionsAndKernels dedups by BaseName). So the same
+    # kernel builder (prepareSolutionsAndKernels dedups by BaseName). So the same
     # file listed twice yields two separate Solution objects at this stage.
     poolEntries = next(iter(bp._loadSolutionPool([POOL_FILE, POOL_FILE]).values()))
 

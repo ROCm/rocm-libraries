@@ -23,6 +23,7 @@
 ################################################################################
 
 import hashlib
+import functools
 import json
 import os
 import shutil
@@ -33,9 +34,10 @@ import itertools
 
 import rocisa
 
+from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
-from typing import Dict, List, Optional, TypedDict
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, TypedDict
 
 from . import SolutionLibrary, LibraryIO
 from .KernelWriter import DebugConfig
@@ -54,7 +56,9 @@ from .backends.config import parse_backend_config
 from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
-from .TensileCreateLibrary import benchmarkPoolSize, copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
+from .TensileCreateLibrary import BenchmarkKernelBuild, benchmarkPoolSize, copyStaticFiles, \
+        finishSolutionsAndKernels, generateBenchmarkKernels, helperCompileExecutor, libraryDir, \
+        prepareSolutionsAndKernels, tensileLibraryFile
 from .CustomKernels import getCustomKernelConfig
 from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
@@ -84,8 +88,8 @@ _CPU_ONLY_SYNTHETIC_GFLOPS = 1000.0
 
 
 def _poolSize():
-    """Size of this module's process pools: the same as writeSolutionsAndKernels' pools, so the
-    worker pool is not resized between them (see benchmarkPoolSize)."""
+    """Size of this module's process pools: the same as the kernel build's pools, so the worker
+    pool is not resized between them (see benchmarkPoolSize)."""
     return benchmarkPoolSize(globalParameters["GenerateSourcesAndExit"])
 
 
@@ -488,7 +492,27 @@ def _loadSolutionPool(solutionPoolFiles):
         poolIndex.setdefault(ptStr, []).append((poolFile, data))
     return poolIndex
 
-def writeBenchmarkFiles(
+class BenchmarkFilesBuild(NamedTuple):
+    """A benchmark step's files between kernel generation's phases (prepareBenchmarkFiles)."""
+
+    kernels: BenchmarkKernelBuild
+    # Writes the rest once the kernels are generated; returns (codeObjectFiles, libraryFileRel).
+    finish: Callable[[], Tuple[List[str], str]]
+
+
+def writeBenchmarkFiles(*args, **kwargs):
+    """Write all the files needed for a given benchmarking step.
+
+    Takes prepareBenchmarkFiles' arguments but helperExecutor, and does all of its work: prepare,
+    generate the step's kernels, finish. Returns (codeObjectFiles, libraryFileRel).
+    """
+    with helperCompileExecutor() as helperExecutor:
+        build = prepareBenchmarkFiles(*args, helperExecutor=helperExecutor, **kwargs)
+        generateBenchmarkKernels([build.kernels])
+        return build.finish()
+
+
+def prepareBenchmarkFiles(
         stepBaseDir,
         solutions,
         problemSizes,
@@ -509,8 +533,13 @@ def writeBenchmarkFiles(
         probSolMap: dict,
         archNames: Optional[List[str]] = None,
         writeResultsFile: bool = True,
-    ):
-    """Write all the files needed for a given benchmarking step
+        *,
+        helperExecutor,
+    ) -> BenchmarkFilesBuild:
+    """Write the files needed for a given benchmarking step, up to the generation of its kernels
+    (generateBenchmarkKernels, which may take the kernels of several steps at once): the step's
+    kernel and helper-kernel lists, with the helper kernels written and their compile queued on
+    helperExecutor (helperCompileExecutor). The returned finish function writes the rest.
 
     writeResultsFile: False makes ClientParameters.ini ask the client for no results CSV.
     """
@@ -545,7 +574,7 @@ def writeBenchmarkFiles(
         cmdLineArchs = cmdLineArchsFor(archNames, isaInfoMap)
     # write solution, kernels and CMake
     problemType = solutions[0]["ProblemType"]
-    codeObjectFiles, _= writeSolutionsAndKernels( \
+    kernelBuild = prepareSolutionsAndKernels( \
                             sourcePath,
                             asmToolchain,
                             srcToolchain,
@@ -555,12 +584,29 @@ def writeBenchmarkFiles(
                             kernelWriterAssembly,
                             debugConfig.splitGSU,
                             cmdLineArchs,
+                            helperExecutor,
                             disableAsmComments=globalParameters["DisableAsmComments"],
                             errorTolerant=True,
                             generateSourcesAndExit=globalParameters["GenerateSourcesAndExit"], # put in debug config
                             compress=False,
                             removeTemporaries=not globalParameters["KeepBuildTmp"],
                         )
+    finish = functools.partial(_finishBenchmarkFiles, kernelBuild, stepBaseDir, solutions,
+                               problemSizes, biasTypeArgs, factorDimArgs, activationArgs,
+                               icacheFlushArgs, stepName, solutionSummationSizes, asmToolchain,
+                               sourcePath, debugConfig, gateTypeArgs, deviceId, gfxName,
+                               isaInfoMap, probSolMap, writeResultsFile, problemType, cmdLineArchs)
+    return BenchmarkFilesBuild(kernelBuild, finish)
+
+
+def _finishBenchmarkFiles(kernelBuild, stepBaseDir, solutions, problemSizes, biasTypeArgs,
+                          factorDimArgs, activationArgs, icacheFlushArgs, stepName,
+                          solutionSummationSizes, asmToolchain, sourcePath, debugConfig,
+                          gateTypeArgs, deviceId, gfxName, isaInfoMap, probSolMap,
+                          writeResultsFile, problemType, cmdLineArchs):
+    """The rest of prepareBenchmarkFiles once the step's kernels are generated: assemble and link
+    them, then write the library and the client configuration."""
+    codeObjectFiles, _ = finishSolutionsAndKernels(kernelBuild)
     # ^ this is where solutions is mutated
     with timing_context("python_kernel_bench_postprocess"):
         with timing_context("python_benchpost_naming"):
@@ -633,6 +679,106 @@ def writeBenchmarkFiles(
     return codeObjectFiles, libraryFileRel
 
 
+class _StepBatch:
+    """Benchmark steps whose kernels are generated in one pool (timing_runs/DECISIONS.md topic 7,
+    C). _benchmarkProblemType prepares each step into the batch (solutions, helper kernels written
+    and their compile queued on helperExecutor), and main ends each problem size group with the
+    function that collects its results. finish() then generates the kernels of all prepared steps
+    at once and does the rest of their work in order (assembly, library, client run, results
+    copy), as when each step was built on its own.
+
+    A step that would read what an earlier unfinished one writes has to wait for it: its caller
+    finishes the batch first (buildsInto, collectsInto)."""
+
+    def __init__(self, helperExecutor):
+        self.helperExecutor = helperExecutor
+        self._kernelBuilds = []
+        # In order: (step finish function, None) or (None, (benchmarkErrors, collect)).
+        self._pending = []
+        self._cacheDirs = set()
+        self._resultsFiles = set()
+        # Failed client runs of finished steps whose group is not collected yet.
+        self._failedSteps = 0
+
+    def addStep(self, cacheDir, kernelBuild: Optional[BenchmarkKernelBuild],
+                finish: Callable[[], Tuple[str, int]]):
+        """A prepared step: the directory it builds into, its kernels (None for a --use-cache hit:
+        nothing to generate) and the function that finishes it, returning (resultsFileName,
+        client return code)."""
+        self._cacheDirs.add(cacheDir)
+        if kernelBuild is not None:
+            self._kernelBuilds.append(kernelBuild)
+        self._pending.append((finish, None))
+
+    def endGroup(self, newResultsFileName, benchmarkErrors: int, collect: Callable[[int], None]):
+        """The steps added since the last group end make a problem size group whose results go to
+        newResultsFileName: collect(errors) runs after them, with errors = benchmarkErrors plus
+        their failed client runs."""
+        self._resultsFiles.add(newResultsFileName)
+        self._pending.append((None, (benchmarkErrors, collect)))
+
+    def buildsInto(self, cacheDir) -> bool:
+        """Whether an unfinished step builds into cacheDir."""
+        return cacheDir in self._cacheDirs
+
+    def collectsInto(self, newResultsFileName) -> bool:
+        """Whether an unfinished group's results go to newResultsFileName."""
+        return newResultsFileName in self._resultsFiles
+
+    def finish(self):
+        """Generate the kernels of the unfinished steps in one pool, then finish the steps and
+        collect their groups, in order. The steps are taken off the batch first: after an error
+        in here, finishing again does nothing. Returns whether there was anything to finish."""
+        kernelBuilds, self._kernelBuilds = self._kernelBuilds, []
+        pending, self._pending = self._pending, []
+        hadSteps = bool(pending)
+        self._cacheDirs.clear()
+        self._resultsFiles.clear()
+        if kernelBuilds:
+            with timing_context("python_kernel_compilation"):
+                generateBenchmarkKernels(kernelBuilds)
+        while pending:
+            finishStep, groupEnd = pending.pop(0)
+            if finishStep is not None:
+                _, returncode = finishStep()
+                if returncode:
+                    self._failedSteps += 1
+            else:
+                benchmarkErrors, collect = groupEnd
+                collect(benchmarkErrors + self._failedSteps)
+                self._failedSteps = 0
+        return hadSteps
+
+
+@contextmanager
+def _stepBatchFor(batchSteps: bool):
+    """The _StepBatch of a BenchmarkProblems run (None unless batchSteps), finished when the block
+    ends. If preparing a step fails (an exception or printExit), the steps prepared before it are
+    finished first (built, client run, results collected), as when every step was built before
+    the next one was prepared; then the error goes on. An error while finishing (in the shared
+    codegen pool, or a step's assembly, helper compile or client run) is not finished around: the
+    steps whose kernels were not generated, or that come after the failing one, stay unfinished.
+
+    printExit has printed its FATAL line before the steps are finished here: a closing FATAL
+    line then points back to it, so a run's log still ends with the reason it stopped."""
+    with helperCompileExecutor() as helperExecutor:
+        stepBatch = _StepBatch(helperExecutor) if batchSteps else None
+        try:
+            yield stepBatch
+        except SystemExit:
+            if stepBatch is not None and stepBatch.finish():
+                print("Tensile::FATAL: stopped by the error above, after finishing the steps"
+                      " prepared before it")
+                sys.stdout.flush()
+            raise
+        except Exception:
+            if stepBatch is not None:
+                stepBatch.finish()
+            raise
+        if stepBatch is not None:
+            stepBatch.finish()
+
+
 def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx,
                           outerBenchmarkIdx, configPath, useCache,
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
@@ -643,6 +789,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                          solutionPoolIndex: dict = None,
                          archNames: Optional[List[str]] = None,
                          writeResultsFile: bool = True,
+                         stepBatch: Optional["_StepBatch"] = None,
     ):
     """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config
 
@@ -652,6 +799,9 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
             Only the matched file's solutions are constructed (on demand).
         writeResultsFile: If False, the client writes no results CSV
             (ClientParameters.ini sets no-results-file).
+        stepBatch: Only prepare the steps into this batch (_StepBatch), for a backend that
+            does not use the benchmark results: the caller generates the kernels and finishes
+            the steps, and the returned fail count covers none of them.
     """
     if solutionPoolIndex is None:
         solutionPoolIndex = {}
@@ -684,7 +834,10 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
     print1("# Done Creating BenchmarkProcess Object")
     print1(HR)
 
-    for benchmarkStepIdx in range(0, totalBenchmarkSteps):
+    def runStep(benchmarkStepIdx):
+        """One benchmark step. A function of its own, so that the functions it leaves in
+        stepBatch keep this step's variables."""
+        nonlocal resultsFileBaseFinal
         benchmarkStep = benchmarkProcess[benchmarkStepIdx]
         stepName = str(benchmarkStep)
         shortName = stepName
@@ -723,6 +876,10 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
         cacheKey = _computeCacheKey(benchmarkStep, cmdLineArchsFor(archNames, isaInfoMap))
         cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
         sourcePath = Path(cacheDir) / "source"
+        if stepBatch is not None and stepBatch.buildsInto(cacheDir):
+            # An earlier step of the batch builds into the same directory (the cache key leaves
+            # out the problem sizes): finish it before this step resets or reads the directory.
+            stepBatch.finish()
         
         with timing_context("python_cache_check"):
             cacheValid = False
@@ -743,6 +900,10 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
             This function is backend-agnostic: receives pre-computed solutions
             and handles compilation, library creation, and benchmarking.
             
+            With stepBatch, it only prepares the step (solutions checked, helper kernels written
+            and their compile queued): the kernels are generated with the other steps of
+            stepBatch, and stepBatch's caller runs the rest (finishStep).
+            
             Args:
                 solutions: List of Solution objects to compile and benchmark
                 isCached: If True, indicates that the solutions are cached
@@ -751,9 +912,13 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
             Returns:
                 - resultsFileName: Path to benchmark results CSV
                 - returncode: Benchmark client return code (0=success)
+                None with stepBatch.
             """
-            nonlocal benchmarkTestFails, codeObjectFiles, cachedLibraryFile
+            nonlocal benchmarkTestFails
             
+            writeFiles = None
+            kernelBuild = None
+            prevCount = None
             if not isCached:
                  # New compiles always go to the hash-keyed dir, never overwrite legacy in place.
                 _resetCacheDir(cacheDir)
@@ -767,21 +932,50 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                     else:
                         msg += "\nYou should re-run with \"PrintSolutionRejectionReason: True\"" \
                                 "to see why each parameter combination was rejected."
+                    if stepBatch is not None:
+                        # Finish the earlier steps first, so that the FATAL line comes last.
+                        stepBatch.finish()
                     printExit(msg)
 
                 for solution in solutions:
                     print2("#    ({}:{}) {}".format(0, 0, getSolutionNameMin(solution, debugConfig.splitGSU)))
                 print2(HR)
 
-                # write benchmarkFiles (kernel generation and compilation)
                 prevCount = len(solutions)
+                filesArgs = (stepBaseDir, solutions, \
+                        benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
+                        benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
+                        benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
+                        sourcePath, debugConfig, getattr(benchmarkStep, "gateTypeArgs", None), deviceId, gfxName, isaInfoMap, probSolMap, archNames)
+                if stepBatch is None:
+                    writeFiles = functools.partial(writeBenchmarkFiles, *filesArgs,
+                                                   writeResultsFile=writeResultsFile)
+                else:
+                    with timing_context("python_kernel_compilation"):
+                        filesBuild = prepareBenchmarkFiles(*filesArgs, writeResultsFile=writeResultsFile,
+                                                           helperExecutor=stepBatch.helperExecutor)
+                    kernelBuild = filesBuild.kernels
+                    writeFiles = filesBuild.finish
+
+            finish = functools.partial(finishStep, solutions, isCached, buildOnly, writeFiles, prevCount)
+            if stepBatch is not None:
+                stepBatch.addStep(cacheDir, kernelBuild, finish)
+                return None
+            resultsFileName, returncode = finish()
+            if returncode:
+                benchmarkTestFails += 1
+            return resultsFileName, returncode
+
+        def finishStep(solutions, isCached, buildOnly, writeFiles, prevCount):
+            """benchmark_runner's work from kernel generation on (writeFiles generates the kernels,
+            or finishes a stepBatch build). Returns what benchmark_runner returns without
+            stepBatch."""
+            nonlocal codeObjectFiles, cachedLibraryFile
+
+            if not isCached:
+                # write benchmarkFiles (kernel generation and compilation)
                 with timing_context("python_kernel_compilation"):
-                    codeObjectFiles, libraryFileRel = writeBenchmarkFiles(stepBaseDir, solutions, \
-                            benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
-                            benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
-                            benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                            sourcePath, debugConfig, getattr(benchmarkStep, "gateTypeArgs", None), deviceId, gfxName, isaInfoMap, probSolMap, archNames,
-                            writeResultsFile=writeResultsFile)
+                    codeObjectFiles, libraryFileRel = writeFiles()
                 # ^ this mutates solutions
 
                 # write cache data
@@ -878,7 +1072,6 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                                             gfxName, numSolutions)
 
                 if returncode:
-                    benchmarkTestFails += 1
                     printWarning("BenchmarkProblems: Benchmark Process exited with code {}" \
                             .format(returncode))
             else:
@@ -923,6 +1116,9 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
         elapsedTime = currentTime - startTime
         print1("{}\n# {}\n# {}: End - {:.3f}s\n{}\n" \
                 .format(HR, groupName, shortName, elapsedTime, HR))
+
+    for benchmarkStepIdx in range(0, totalBenchmarkSteps):
+        runStep(benchmarkStepIdx)
 
     return (resultsFileBaseFinal, benchmarkTestFails)
 
@@ -988,82 +1184,107 @@ def main(
     if isinstance(configPath, (list, tuple)):
         configPath = configPath[0] if configPath else ""
 
-    for outerIdx, benchmarkProblemTypeConfig in enumerate(config):
-        problemTypeConfig = benchmarkProblemTypeConfig[0]
-        if len(benchmarkProblemTypeConfig) < 2:
-            problemSizeGroupConfigs = [{}]
+    def collectResults(resultsFileBaseFinal, newResultsFileName, newSolutionsFileName,
+                       newGranularityFileName, benchmarkErrors):
+        """A problem size group's benchmark steps are done: count their failures and copy
+        their results to 2_BenchmarkData."""
+        nonlocal totalTestFails
+        totalTestFails += benchmarkErrors
+
+        if buildOnly:
+            print1("# Build-only mode: skipping result collection.")
         else:
-            problemSizeGroupConfigs = benchmarkProblemTypeConfig[1:]
+            print("clientExit={} {} for {}" \
+                    .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
+                    globalParameters["ConfigPath"]) )
 
-        for idx, sizeGroupConfig in enumerate(problemSizeGroupConfigs):
-            print2("ProblemTypeConfig: {}".format(problemTypeConfig))
-            problemTypeObj = ProblemType(problemTypeConfig, debugConfig.printIndexAssignmentInfo)
+            # copy data
+            resultsFileBase = resultsFileBaseFinal
+            resultsFileName = resultsFileBase + ".csv"
+            solutionsFileName = resultsFileBase + ".yaml"
+            granularityFileName = resultsFileBase + "_Granularity.csv"
+            if os.path.isfile(resultsFileName):
+                shutil.copy(resultsFileName, newResultsFileName)
+            elif not writeResultsFile and os.path.isfile(newResultsFileName):
+                # From an earlier run (ForceRedoBenchmarkProblems): not this run's results.
+                os.remove(newResultsFileName)
+            shutil.copy(solutionsFileName, newSolutionsFileName)
+            if os.path.isfile(granularityFileName):
+                shutil.copy(granularityFileName, newGranularityFileName)
 
-            # using a suffix to check the csv version (for later addFromCSV())
-            csvSuffix = "_CSVWinner" if globalParameters["CSVExportWinner"] else ""
-            # results files will be named
-            newResultsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.csv" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
-            newSolutionsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.yaml" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
-            newGranularityFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.gsp" \
-                    .format(str(problemTypeObj), idx, csvSuffix) )
+    # A backend that does not use the benchmark results (TensileBackend) leaves the steps
+    # independent of each other: they are all prepared first, their kernels generated in one
+    # pool (timing_runs/DECISIONS.md topic 7, C), then each is finished in order (_StepBatch).
+    batchSteps = not BackendFactory.create(backend_name).uses_benchmark_results()
 
-            # skip if possible
-            if globalParameters["ForceRedoBenchmarkProblems"] \
-                    or not os.path.exists(newResultsFileName):
-
-                # benchmark problem size group
-                benchmarkProblemsPath = ensurePath(outputPath / BENCHMARK_PROBLEMS_DIR)
-                (resultsFileBaseFinal, benchmarkErrors) = \
-                        _benchmarkProblemType(
-                            backendConfig=backend,
-                            problemTypeConfig=problemTypeConfig,
-                            problemSizeGroupConfig=sizeGroupConfig,
-                            problemSizeGroupIdx=idx,
-                            outerBenchmarkIdx=outerIdx,
-                            configPath=configPath,
-                            useCache=useCache,
-                            asmToolchain=asmToolchain,
-                            srcToolchain=srcToolchain,
-                            cCompiler=cCompiler,
-                            buildTmpPath=buildTmpPath,
-                            benchmarkProblemsPath=benchmarkProblemsPath,
-                            debugConfig=debugConfig,
-                            deviceId=deviceId,
-                            gfxName=gfxName,
-                            isaInfoMap=isaInfoMap,
-                            probSolMap=probSolMap,
-                            buildOnly=buildOnly,
-                            solutionPoolIndex=solutionPoolIndex,
-                            archNames=archNames,
-                            writeResultsFile=writeResultsFile,
-                        )
-                totalTestFails += benchmarkErrors
-
-                if buildOnly:
-                    print1("# Build-only mode: skipping result collection.")
-                else:
-                    print("clientExit={} {} for {}" \
-                            .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
-                            globalParameters["ConfigPath"]) )
-
-                    # copy data
-                    resultsFileBase = resultsFileBaseFinal
-                    resultsFileName = resultsFileBase + ".csv"
-                    solutionsFileName = resultsFileBase + ".yaml"
-                    granularityFileName = resultsFileBase + "_Granularity.csv"
-                    if os.path.isfile(resultsFileName):
-                        shutil.copy(resultsFileName, newResultsFileName)
-                    elif not writeResultsFile and os.path.isfile(newResultsFileName):
-                        # From an earlier run (ForceRedoBenchmarkProblems): not this run's results.
-                        os.remove(newResultsFileName)
-                    shutil.copy(solutionsFileName, newSolutionsFileName)
-                    if os.path.isfile(granularityFileName):
-                        shutil.copy(granularityFileName, newGranularityFileName)
+    with _stepBatchFor(batchSteps) as stepBatch:
+        for outerIdx, benchmarkProblemTypeConfig in enumerate(config):
+            problemTypeConfig = benchmarkProblemTypeConfig[0]
+            if len(benchmarkProblemTypeConfig) < 2:
+                problemSizeGroupConfigs = [{}]
             else:
-                print1("# {}_{:02d} already benchmarked; skipping." \
-                        .format(str(problemTypeObj), idx) )
+                problemSizeGroupConfigs = benchmarkProblemTypeConfig[1:]
+
+            for idx, sizeGroupConfig in enumerate(problemSizeGroupConfigs):
+                print2("ProblemTypeConfig: {}".format(problemTypeConfig))
+                problemTypeObj = ProblemType(problemTypeConfig, debugConfig.printIndexAssignmentInfo)
+
+                # using a suffix to check the csv version (for later addFromCSV())
+                csvSuffix = "_CSVWinner" if globalParameters["CSVExportWinner"] else ""
+                # results files will be named
+                newResultsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.csv" \
+                        .format(str(problemTypeObj), idx, csvSuffix) )
+                newSolutionsFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.yaml" \
+                        .format(str(problemTypeObj), idx, csvSuffix) )
+                newGranularityFileName = os.path.join(benchmarkDataPath, "{}_{:02d}{}.gsp" \
+                        .format(str(problemTypeObj), idx, csvSuffix) )
+
+                # The check below reads the results of an earlier group of the same name.
+                if stepBatch is not None and not globalParameters["ForceRedoBenchmarkProblems"] \
+                        and stepBatch.collectsInto(newResultsFileName):
+                    stepBatch.finish()
+
+                # skip if possible
+                if globalParameters["ForceRedoBenchmarkProblems"] \
+                        or not os.path.exists(newResultsFileName):
+
+                    # benchmark problem size group
+                    benchmarkProblemsPath = ensurePath(outputPath / BENCHMARK_PROBLEMS_DIR)
+                    (resultsFileBaseFinal, benchmarkErrors) = \
+                            _benchmarkProblemType(
+                                backendConfig=backend,
+                                problemTypeConfig=problemTypeConfig,
+                                problemSizeGroupConfig=sizeGroupConfig,
+                                problemSizeGroupIdx=idx,
+                                outerBenchmarkIdx=outerIdx,
+                                configPath=configPath,
+                                useCache=useCache,
+                                asmToolchain=asmToolchain,
+                                srcToolchain=srcToolchain,
+                                cCompiler=cCompiler,
+                                buildTmpPath=buildTmpPath,
+                                benchmarkProblemsPath=benchmarkProblemsPath,
+                                debugConfig=debugConfig,
+                                deviceId=deviceId,
+                                gfxName=gfxName,
+                                isaInfoMap=isaInfoMap,
+                                probSolMap=probSolMap,
+                                buildOnly=buildOnly,
+                                solutionPoolIndex=solutionPoolIndex,
+                                archNames=archNames,
+                                writeResultsFile=writeResultsFile,
+                                stepBatch=stepBatch,
+                            )
+                    collect = functools.partial(collectResults, resultsFileBaseFinal,
+                                                newResultsFileName, newSolutionsFileName,
+                                                newGranularityFileName)
+                    if stepBatch is None:
+                        collect(benchmarkErrors)
+                    else:
+                        stepBatch.endGroup(newResultsFileName, benchmarkErrors, collect)
+                else:
+                    print1("# {}_{:02d} already benchmarked; skipping." \
+                            .format(str(problemTypeObj), idx) )
 
     if globalParameters["ExitOnFails"] and totalTestFails:
         sys.exit(1)
