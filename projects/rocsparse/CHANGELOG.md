@@ -6,6 +6,7 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.3.0
 
 ### Changed
+* `rocsparse_spmv` with the default algorithm (`rocsparse_spmv_alg_default`), for non-transposed CSR and for transposed CSC, now selects the nnz-split algorithm when the CSR-adaptive row-block partition is a poor fit. That is when row blocks covering mostly empty rows span a substantial share of the matrix, or when many row blocks are closed by a long-row to short-row transition before they contain a full block of non-zeros. An empty prefix or suffix that the adaptive algorithm already skips does not cause the switch. Explicit algorithm selections, including `rocsparse_spmv_alg_csr_adaptive`, are unchanged, as are the transpose and conjugate-transpose defaults.
 * The incomplete factorization kernels used by `rocsparse_spic0`, `rocsparse_spilu0`, and `rocsparse_spildlt0` (`csric0`, `csrilu0`, `csrildlt0`, `bsric0`, and `bsrilu0`) now clamp the batch dimension of their launch grids to the device limit and cover the remaining batch instances with a grid-stride loop. The singularity-position initialization grid-strides as well, so these routines support batch counts above the grid limit.
 
 ### Resolved issues
