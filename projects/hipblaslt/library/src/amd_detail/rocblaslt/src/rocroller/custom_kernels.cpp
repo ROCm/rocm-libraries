@@ -4,6 +4,7 @@
 #include "custom_kernels.hpp"
 
 #include "rocblaslt_secure_env.hpp"
+#include "utility.hpp"
 
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
@@ -90,23 +91,29 @@ std::string getKernelName(const std::string& baseName, bool nonTemporalA, bool n
 // Need to specify the KernelType and SolutionIndexParameters
 void preloadCustomKernels(SolutionCache& cache)
 {
+    // The pre-swizzled 32-block E8M0 scaling format. The tile sizes come from
+    // the same helpers genKernelType uses, so a problem that asks for this
+    // format produces a KernelType equal to this one.
+    using ScalingFormat = RocblasltContractionProblem::ScalingFormat;
+    constexpr auto mxfp4Scale = ScalingFormat::Block_32_UE8M0_32_8_EXT;
+
     KernelType mxfp4Kernel;
-    mxfp4Kernel.typeA                     = rocRoller::DataType::FP4;
-    mxfp4Kernel.typeB                     = rocRoller::DataType::FP4;
-    mxfp4Kernel.typeC                     = rocRoller::DataType::BFloat16;
-    mxfp4Kernel.typeD                     = rocRoller::DataType::BFloat16;
+    mxfp4Kernel.typeA                     = HIP_R_4F_E2M1;
+    mxfp4Kernel.typeB                     = HIP_R_4F_E2M1;
+    mxfp4Kernel.typeC                     = HIP_R_16BF;
+    mxfp4Kernel.typeD                     = HIP_R_16BF;
     mxfp4Kernel.transA                    = true;
     mxfp4Kernel.transB                    = false;
-    mxfp4Kernel.scaleTypeA.mode           = rocRoller::Operations::ScaleMode::Separate;
-    mxfp4Kernel.scaleTypeA.blockRowSize   = 32;
+    mxfp4Kernel.scaleTypeA.format         = mxfp4Scale;
+    mxfp4Kernel.scaleTypeA.blockRowSize   = blockSize(mxfp4Scale);
     mxfp4Kernel.scaleTypeA.blockColSize   = 1;
-    mxfp4Kernel.scaleTypeA.preSwizzleTile = {32, 8, 4};
-    mxfp4Kernel.scaleTypeA.preTile        = {32, 8};
-    mxfp4Kernel.scaleTypeB.mode           = rocRoller::Operations::ScaleMode::Separate;
+    mxfp4Kernel.scaleTypeA.preSwizzleTile = preSwizzleSizeForScale(mxfp4Scale);
+    mxfp4Kernel.scaleTypeA.preTile        = preTileSizeForScaleA(mxfp4Scale);
+    mxfp4Kernel.scaleTypeB.format         = mxfp4Scale;
     mxfp4Kernel.scaleTypeB.blockRowSize   = 1;
-    mxfp4Kernel.scaleTypeB.blockColSize   = 32;
-    mxfp4Kernel.scaleTypeB.preSwizzleTile = {32, 8, 4};
-    mxfp4Kernel.scaleTypeB.preTile        = {8, 32};
+    mxfp4Kernel.scaleTypeB.blockColSize   = blockSize(mxfp4Scale);
+    mxfp4Kernel.scaleTypeB.preSwizzleTile = preSwizzleSizeForScale(mxfp4Scale);
+    mxfp4Kernel.scaleTypeB.preTile        = preTileSizeForScaleB(mxfp4Scale);
 
     SolutionIndexParameters params;
    
