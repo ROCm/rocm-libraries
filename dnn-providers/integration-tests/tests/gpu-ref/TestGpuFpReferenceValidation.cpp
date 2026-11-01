@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/Allocators.hpp>
 #include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -16,7 +17,9 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <new>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -490,23 +493,328 @@ TEST(TestGpuValidatorFactory, TemplatedCreatesInt32)
 }
 
 // ============================================================================
-// Ragged rejection tests
+// Ragged (RFC 0014) validation tests
 // ============================================================================
 
+// Logical [B, H, S, D] = [2, 2, 3, 2] in the BSHD physical layout (sequence stride 4).
 const std::vector<int64_t> K_RAGGED_DIMS = {2, 2, 3, 2};
 const std::vector<int64_t> K_RAGGED_STRIDES = {12, 2, 4, 1};
+// Batch 0 stores 2 sequence rows and batch 1 stores 3, so batch 0's third row is out of block.
+const std::vector<int32_t> K_RAGGED_OFFSETS = {0, 8, 20};
+// Batch 0 stores all 3 sequence rows and batch 1 stores 2, so the out-of-block third row of
+// the last batch lies past the end of the 20-element buffer instead of aliasing another
+// batch's rows.
+const std::vector<int32_t> K_SHORT_LAST_BATCH_OFFSETS = {0, 12, 20};
 
-template <typename T>
-RaggedTensor<T> makeRaggedTensor()
+// One sequence row of K_RAGGED_DIMS in the K_RAGGED_STRIDES layout (the sequence stride).
+constexpr size_t K_TAIL_ELEMENTS = 4;
+
+// Device allocator that over-allocates by one sequence row and sets every byte of the
+// allocation to FillByte. The tensor copies only its stored elements to the device, so the
+// slack past them keeps FillByte, and a kernel that reads past the stored elements sees a
+// value the test chose instead of whatever the allocation happened to hold.
+template <typename T, unsigned char FillByte>
+class TailFilledDeviceAllocator : public IDeviceAllocator<T>
 {
-    const std::vector<int32_t> offsets = {0, 8, 20};
+public:
+    [[nodiscard]] T* allocate(std::size_t n) override
+    {
+        const size_t bytes = (n + K_TAIL_ELEMENTS) * sizeof(T);
+        void* ptr = nullptr;
+        if(hipMalloc(&ptr, bytes) != hipSuccess)
+        {
+            throw std::bad_alloc();
+        }
+        // Synchronize so the fill cannot land after the tensor's host-to-device copy, which
+        // may run on another stream.
+        if(hipMemset(ptr, FillByte, bytes) != hipSuccess || hipDeviceSynchronize() != hipSuccess)
+        {
+            std::ignore = hipFree(ptr);
+            throw std::bad_alloc();
+        }
+        return static_cast<T*>(ptr);
+    }
+
+    void deallocate(T* p, [[maybe_unused]] std::size_t n) noexcept override
+    {
+        std::ignore = hipFree(p);
+    }
+};
+
+template <typename T, typename DeviceAlloc = DeviceAllocator<T>>
+RaggedTensor<T, HostAllocator<T>, DeviceAlloc>
+    makeRaggedTensor(const std::vector<int32_t>& offsets = K_RAGGED_OFFSETS,
+                     const std::vector<int64_t>& strides = K_RAGGED_STRIDES)
+{
     auto offsetTensor = std::make_shared<Tensor<int32_t>>(
         std::vector<int64_t>{static_cast<int64_t>(offsets.size()), 1, 1, 1});
     for(size_t i = 0; i < offsets.size(); ++i)
     {
         offsetTensor->setHostValue(offsets[i], static_cast<int64_t>(i), 0, 0, 0);
     }
-    return RaggedTensor<T>(K_RAGGED_DIMS, K_RAGGED_STRIDES, SDPA_SEQ_AXIS, offsetTensor);
+    return RaggedTensor<T, HostAllocator<T>, DeviceAlloc>(
+        K_RAGGED_DIMS, strides, SDPA_SEQ_AXIS, offsetTensor);
+}
+
+// Writes value(i) to the i-th stored element. A ragged buffer is packed by batch, so every
+// stored element is an in-block logical position.
+template <typename T, typename ValueFn>
+void fillStored(RaggedTensorBase<T>& tensor, ValueFn value)
+{
+    auto* host = tensor.memory().hostData();
+    for(size_t i = 0; i < tensor.elementCount(); ++i)
+    {
+        host[i] = static_cast<T>(value(i));
+    }
+}
+
+template <typename T>
+class TestGpuFpRaggedValidation : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(TestGpuFpRaggedValidation, FpTypes, );
+
+TYPED_TEST(TestGpuFpRaggedValidation, MatchPasses)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>();
+    auto impl = makeRaggedTensor<TypeParam>();
+    fillStored(ref, [](size_t i) { return static_cast<float>(i) * 0.25f; });
+    fillStored(impl, [](size_t i) { return static_cast<float>(i) * 0.25f; });
+
+    const GpuFpReferenceValidation<TypeParam> validator(0.0f, 0.0f);
+    EXPECT_TRUE(validator.allClose(ref, impl));
+}
+
+// The last stored element belongs to the last row of the last batch, so the kernel must
+// base batch 1 at its row offset to reach it.
+TYPED_TEST(TestGpuFpRaggedValidation, MismatchInLastBatchFails)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>();
+    auto impl = makeRaggedTensor<TypeParam>();
+    fillStored(ref, [](size_t) { return 1.0f; });
+    fillStored(impl, [](size_t) { return 1.0f; });
+    impl.memory().hostData()[impl.elementCount() - 1] = static_cast<TypeParam>(2.0f);
+
+    const GpuFpReferenceValidation<TypeParam> validator(1e-3f, 0.0f);
+    EXPECT_FALSE(validator.allClose(ref, impl));
+}
+
+// A ragged reference marks the positions it leaves undefined with NaN; whatever the
+// implementation wrote there is not graded.
+TYPED_TEST(TestGpuFpRaggedValidation, NaNInReferenceIsSkipped)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>();
+    auto impl = makeRaggedTensor<TypeParam>();
+    fillStored(ref, [](size_t) { return 1.0f; });
+    fillStored(impl, [](size_t) { return 1.0f; });
+    ref(1, 1, 2, 1) = static_cast<TypeParam>(std::numeric_limits<float>::quiet_NaN());
+    impl(1, 1, 2, 1) = static_cast<TypeParam>(123.0f);
+
+    const GpuFpReferenceValidation<TypeParam> gpu(0.0f, 0.0f);
+    const CpuFpReferenceValidation<TypeParam> cpu(0.0f, 0.0f);
+    EXPECT_TRUE(gpu.allClose(ref, impl));
+    EXPECT_TRUE(cpu.allClose(ref, impl));
+}
+
+TYPED_TEST(TestGpuFpRaggedValidation, NaNInImplementationFails)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>();
+    auto impl = makeRaggedTensor<TypeParam>();
+    fillStored(ref, [](size_t) { return 1.0f; });
+    fillStored(impl, [](size_t) { return 1.0f; });
+    impl(0, 1, 1, 0) = static_cast<TypeParam>(std::numeric_limits<float>::quiet_NaN());
+
+    const GpuFpReferenceValidation<TypeParam> validator(1.0f, 1.0f);
+    EXPECT_FALSE(validator.allClose(ref, impl));
+}
+
+// Nothing graded is not a pass.
+TYPED_TEST(TestGpuFpRaggedValidation, AllNaNReferenceFails)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>();
+    auto impl = makeRaggedTensor<TypeParam>();
+    fillStored(ref, [](size_t) { return std::numeric_limits<float>::quiet_NaN(); });
+    fillStored(impl, [](size_t) { return 1.0f; });
+
+    const GpuFpReferenceValidation<TypeParam> gpu(1.0f, 1.0f);
+    const CpuFpReferenceValidation<TypeParam> cpu(1.0f, 1.0f);
+    EXPECT_FALSE(gpu.allClose(ref, impl));
+    EXPECT_FALSE(cpu.allClose(ref, impl));
+}
+
+// A batch with no stored rows has every logical position out of block.
+TYPED_TEST(TestGpuFpRaggedValidation, EmptyBatchPasses)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>({0, 0, 12});
+    auto impl = makeRaggedTensor<TypeParam>({0, 0, 12});
+    fillStored(ref, [](size_t i) { return static_cast<float>(i); });
+    fillStored(impl, [](size_t i) { return static_cast<float>(i); });
+
+    const GpuFpReferenceValidation<TypeParam> validator(0.0f, 0.0f);
+    EXPECT_TRUE(validator.allClose(ref, impl));
+}
+
+// With a short last batch, an out-of-block position has no batch after it to alias: reading
+// it would run past the stored elements. The slack there holds 0 in the reference and a
+// nonzero value in the implementation, so the comparison passes only if those positions are
+// skipped rather than read.
+TYPED_TEST(TestGpuFpRaggedValidation, ShortLastBatchDoesNotReadPastBuffer)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam, TailFilledDeviceAllocator<TypeParam, 0x00>>(
+        K_SHORT_LAST_BATCH_OFFSETS);
+    auto impl = makeRaggedTensor<TypeParam, TailFilledDeviceAllocator<TypeParam, 0x40>>(
+        K_SHORT_LAST_BATCH_OFFSETS);
+    fillStored(ref, [](size_t i) { return static_cast<float>(i) * 0.25f; });
+    fillStored(impl, [](size_t i) { return static_cast<float>(i) * 0.25f; });
+
+    const GpuFpReferenceValidation<TypeParam> validator(0.0f, 0.0f);
+    EXPECT_TRUE(validator.allClose(ref, impl));
+}
+
+// Same ragged layout (row offsets and sequence stride) but H and D strides swapped: the
+// kernel must pair elements by logical index, not by stored position.
+TYPED_TEST(TestGpuFpRaggedValidation, DifferentInnerStridesCompareLogically)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>();
+    auto impl = makeRaggedTensor<TypeParam>(K_RAGGED_OFFSETS, {12, 1, 4, 2});
+    ASSERT_EQ(ref.raggedIterationInfo(), impl.raggedIterationInfo());
+
+    const auto layout = ref.raggedIterationInfo();
+    float next = 0.0f;
+    for(int64_t b = 0; b < K_RAGGED_DIMS[0]; ++b)
+    {
+        for(int64_t h = 0; h < K_RAGGED_DIMS[1]; ++h)
+        {
+            for(int64_t s = 0; s < layout->seqExtent(b); ++s)
+            {
+                for(int64_t d = 0; d < K_RAGGED_DIMS[3]; ++d)
+                {
+                    ref(b, h, s, d) = static_cast<TypeParam>(next);
+                    impl(b, h, s, d) = static_cast<TypeParam>(next);
+                    next += 1.0f;
+                }
+            }
+        }
+    }
+
+    const GpuFpReferenceValidation<TypeParam> validator(0.0f, 0.0f);
+    EXPECT_TRUE(validator.allClose(ref, impl));
+}
+
+TYPED_TEST(TestGpuFpRaggedValidation, DifferentRaggedLayoutsFail)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>();
+    auto impl = makeRaggedTensor<TypeParam>({0, 12, 20});
+    fillStored(ref, [](size_t) { return 1.0f; });
+    fillStored(impl, [](size_t) { return 1.0f; });
+
+    const GpuFpReferenceValidation<TypeParam> validator(1.0f, 1.0f);
+    EXPECT_FALSE(validator.allClose(ref, impl));
+}
+
+TEST(TestGpuValidationRagged, RaggedAgainstDenseFails)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ragged = makeRaggedTensor<float>();
+    Tensor<float> dense(K_RAGGED_DIMS, K_RAGGED_STRIDES);
+
+    const GpuFpReferenceValidation<float> validator(1.0f, 1.0f);
+    EXPECT_FALSE(validator.allClose(dense, ragged));
+    EXPECT_FALSE(validator.allClose(ragged, dense));
+}
+
+TYPED_TEST(TestGpuFpRaggedValidation, AgreesWithCpuOnPassAndFail)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>();
+    auto impl = makeRaggedTensor<TypeParam>();
+    fillStored(ref, [](size_t i) { return static_cast<float>(i) * 0.01f; });
+    fillStored(impl, [](size_t i) { return static_cast<float>(i) * 0.01f + 1e-7f; });
+    ref(0, 0, 1, 1) = static_cast<TypeParam>(std::numeric_limits<float>::quiet_NaN());
+
+    const GpuFpReferenceValidation<TypeParam> gpu(1e-4f, 0.0f);
+    const CpuFpReferenceValidation<TypeParam> cpu(1e-4f, 0.0f);
+    EXPECT_TRUE(gpu.allClose(ref, impl));
+    EXPECT_TRUE(cpu.allClose(ref, impl));
+
+    impl(1, 0, 2, 0) = static_cast<TypeParam>(5.0f);
+    impl.markHostModified();
+    EXPECT_FALSE(gpu.allClose(ref, impl));
+    EXPECT_FALSE(cpu.allClose(ref, impl));
+}
+
+template <typename T>
+class TestGpuIntRaggedValidation : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(TestGpuIntRaggedValidation, IntTypes, );
+
+TYPED_TEST(TestGpuIntRaggedValidation, MatchPassesAndMismatchFails)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>();
+    auto impl = makeRaggedTensor<TypeParam>();
+    fillStored(ref, [](size_t i) { return i % 10; });
+    fillStored(impl, [](size_t i) { return i % 10; });
+
+    const GpuIntReferenceValidation<TypeParam> validator;
+    EXPECT_TRUE(validator.allClose(ref, impl));
+
+    impl.memory().hostData()[impl.elementCount() - 1] = static_cast<TypeParam>(42);
+    impl.markHostModified();
+    EXPECT_FALSE(validator.allClose(ref, impl));
+}
+
+// Integer counterpart of ShortLastBatchDoesNotReadPastBuffer for validateExact.
+TYPED_TEST(TestGpuIntRaggedValidation, ShortLastBatchDoesNotReadPastBuffer)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam, TailFilledDeviceAllocator<TypeParam, 0x00>>(
+        K_SHORT_LAST_BATCH_OFFSETS);
+    auto impl = makeRaggedTensor<TypeParam, TailFilledDeviceAllocator<TypeParam, 0x40>>(
+        K_SHORT_LAST_BATCH_OFFSETS);
+    fillStored(ref, [](size_t i) { return i % 10; });
+    fillStored(impl, [](size_t i) { return i % 10; });
+
+    const GpuIntReferenceValidation<TypeParam> validator;
+    EXPECT_TRUE(validator.allClose(ref, impl));
+}
+
+TYPED_TEST(TestGpuIntRaggedValidation, DifferentRaggedLayoutsFail)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam>();
+    auto impl = makeRaggedTensor<TypeParam>({0, 12, 20});
+    fillStored(ref, [](size_t) { return 1; });
+    fillStored(impl, [](size_t) { return 1; });
+
+    const GpuIntReferenceValidation<TypeParam> validator;
+    EXPECT_FALSE(validator.allClose(ref, impl));
 }
 
 template <typename T>
@@ -518,20 +826,6 @@ void expectRaggedRejected(const IReferenceValidation& validator)
 
     Tensor<T> dense(K_RAGGED_DIMS, K_RAGGED_STRIDES);
     EXPECT_THROW(validator.allClose(dense, implementation), std::invalid_argument);
-}
-
-TEST(TestGpuValidationRaggedRejection, FpValidatorThrowsOnRaggedTensors)
-{
-    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::FLOAT);
-    ASSERT_NE(validator, nullptr);
-    expectRaggedRejected<float>(*validator);
-}
-
-TEST(TestGpuValidationRaggedRejection, IntValidatorThrowsOnRaggedTensors)
-{
-    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT32);
-    ASSERT_NE(validator, nullptr);
-    expectRaggedRejected<int32_t>(*validator);
 }
 
 TEST(TestGpuValidationRaggedRejection, RmsValidatorThrowsOnRaggedTensors)

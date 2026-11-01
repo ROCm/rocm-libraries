@@ -1293,10 +1293,13 @@ Integer ragged outputs get the layout and in-block rules but no
 sentinel skip, so every in-block position is compared (see
 [§7.3](#73-improve-cpu-validation-sentinel-value-handling)).
 
-Ragged comparison is host-only. The device-side validators reject
-ragged tensors, and a comparison that resolves to the device
-validation site reports the ragged output as unsupported there
-(rerun with the CPU validator) rather than comparing it.
+The device-side floating-point `allClose` and integer exact
+validators apply the same rules as their host counterparts, so a
+ragged output compares at either validation site. The device-side
+relative-RMS validator is dense-only: it rejects ragged tensors,
+and an RMS comparison that resolves to the device validation site
+reports the ragged output as unsupported there (rerun with the CPU
+validator) rather than comparing it.
 
 Sentinel-skip is the only validation mechanism in this design.
 Because `seq_lens` is not attached to the ragged primary, there

@@ -17,10 +17,10 @@ bool GpuIntReferenceValidation<T>::allClose(
     hipdnn_data_sdk::utilities::ITensor& reference,
     hipdnn_data_sdk::utilities::ITensor& implementation) const
 {
-    detail::throwIfRagged(reference, implementation);
-
+    const auto raggedLayout = reference.raggedIterationInfo();
     if(reference.elementCount() != implementation.elementCount()
-       || reference.dims() != implementation.dims())
+       || reference.dims() != implementation.dims()
+       || raggedLayout != implementation.raggedIterationInfo())
     {
         return false;
     }
@@ -30,13 +30,14 @@ bool GpuIntReferenceValidation<T>::allClose(
         return true;
     }
 
-    return gpuExact(reference, implementation);
+    return gpuExact(reference, implementation, raggedLayout);
 }
 
 template <class T>
 bool GpuIntReferenceValidation<T>::gpuExact(
     hipdnn_data_sdk::utilities::ITensor& reference,
-    hipdnn_data_sdk::utilities::ITensor& implementation) const
+    hipdnn_data_sdk::utilities::ITensor& implementation,
+    const std::optional<hipdnn_data_sdk::utilities::RaggedIterationInfo>& raggedLayout) const
 {
     auto totalElements = static_cast<int64_t>(reference.elementCount());
 
@@ -62,7 +63,13 @@ bool GpuIntReferenceValidation<T>::gpuExact(
 
     detail::setStridedLayout(args, reference, implementation);
 
-    detail::launchValidatorKernel(kernel.function(), totalElements, args);
+    hipdnn_data_sdk::utilities::MigratableMemory<long long> rowOffsetsBuf;
+    if(raggedLayout.has_value())
+    {
+        detail::setRaggedLayout(args, *raggedLayout, reference.dims(), rowOffsetsBuf);
+    }
+
+    detail::launchValidatorKernel(kernel.function(), args.totalElements, args);
 
     // Read back single failure flag
     flagBuf.markDeviceModified();
