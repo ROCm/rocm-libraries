@@ -669,6 +669,41 @@ _CASES = (
     ),
 )
 
+# Packed small groups at stride 2 with the widest pack: 8 groups of 4
+# channels per super-group (cpg = kpg = 4, pack_groups 8), one case per dtype
+# on ragged extents (odd H and W, an odd W alone), with the knobs of two
+# DGRAD_WMMA_PACKED_STRIDED_KNOBS rows (the second with prefetch).
+_PACK8_STRIDED_CASES = (
+    (
+        dict(N=2, H=13, W=21, C=64, K=64, groups=16, stride=2),
+        dict(waves_c=1, waves_p=4, tiles_c=2, tiles_p=2, tile_w=16, pack_groups=8),
+    ),
+    (
+        dict(N=3, H=12, W=17, C=32, K=32, groups=8, stride=2, dtype="fp16"),
+        dict(
+            waves_c=1,
+            waves_p=4,
+            tiles_c=2,
+            tiles_p=4,
+            tile_w=16,
+            pack_groups=8,
+            prefetch=True,
+            sched="iterative-ilp",
+        ),
+    ),
+)
+
+
+class TestDgradWmmaPack8Strided(unittest.TestCase):
+    def test_cases_validate_and_lower(self):
+        for pkw, knobs in _PACK8_STRIDED_CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                p = _problem(**pkw)
+                self.assertEqual((p.cpg, p.kpg, p.stride), (4, 4, 2))
+                spec = DirectDgradWmmaSpec(problem=p, **knobs)
+                self.assertIsNone(dgrad_wmma_reason(spec, "gfx1250"))
+                build_direct_dgrad_wmma(spec, "gfx1250")
+
 
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestDgradWmmaGpu(unittest.TestCase):
@@ -729,6 +764,11 @@ class TestDgradWmmaGpu(unittest.TestCase):
 
     def test_cases(self):
         for pkw, knobs in _CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                self._check(pkw, knobs)
+
+    def test_pack8_strided_cases(self):
+        for pkw, knobs in _PACK8_STRIDED_CASES:
             with self.subTest(problem=pkw, knobs=knobs):
                 self._check(pkw, knobs)
 
