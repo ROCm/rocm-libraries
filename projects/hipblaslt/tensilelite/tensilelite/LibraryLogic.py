@@ -637,27 +637,40 @@ class LogicAnalyzer:
             # effLike = winnerGFlops / Frequency(MHz)
             try:
               if not deviceMaxFreq or deviceMaxFreq <= 0 or math.isnan(deviceMaxFreq):
-                performance_metric = round(float(winnerGFlops))
+                exact_score = float(winnerGFlops)
+                performance_metric = round(exact_score)
                 print("Error when retrieving device frequency, fall back to winnerGFlops.")
               else:
-                performance_metric = round(float(winnerGFlops) / deviceMaxFreq, 2)
+                exact_score = float(winnerGFlops) / deviceMaxFreq
+                performance_metric = round(exact_score, 2)
             except:
               print1("Error: Could not convert winnerGFlops to float.")
+              exact_score = float('nan')
               performance_metric = float('nan')
           else:
             try:
-              performance_metric = float(winnerGFlops)
+              exact_score = float(winnerGFlops)
+              performance_metric = exact_score
             except:
               print1("Error: Could not convert winnerGFlops to float.")
+              exact_score = float('nan')
               performance_metric = float('nan')
 
           if winnerIdx != -1:
+            # Compare on the unrounded score. performance_metric is rounded to two
+            # decimals for the logic file, which at effLike quantises to steps of
+            # 0.01 * deviceMaxFreq GFlops, so two kernels that differ by less than a
+            # step would tie and the earlier one would be kept whatever its speed.
+            if not hasattr(self, "exactWinnerScores"):
+              self.exactWinnerScores = {}
             if problemSize in self.exactWinners:
-              if winnerGFlops > self.exactWinners[problemSize][1]:
+              if exact_score > self.exactWinnerScores.get(problemSize, float('-inf')):
                 #print "update exact", problemSize, "CSV index=", winnerIdx, self.exactWinners[problemSize], "->", solutionMap[winnerIdx], winnerGFlops
                 self.exactWinners[problemSize] = [solutionMap[winnerIdx], performance_metric]
+                self.exactWinnerScores[problemSize] = exact_score
             else:
               self.exactWinners[problemSize] = [solutionMap[winnerIdx], performance_metric]
+              self.exactWinnerScores[problemSize] = exact_score
               #print "new exact", problemSize, "CSV index=", winnerIdx, self.exactWinners[problemSize]
 
         # Range Problem Size
