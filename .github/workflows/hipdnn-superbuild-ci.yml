@@ -60,7 +60,7 @@ jobs:
           predicate-quantifier: every
           filters: |
             code:
-              - '{projects/hipdnn/**,dnn-providers/**,.github/workflows/hipdnn-superbuild-ci.yml}'
+              - '{projects/hipdnn/**,dnn-providers/**,.github/workflows/hipdnn-superbuild-ci.yml,.github/requirements-hipdnn-superbuild-ci.txt}'
               - '!**/*.md'
               - '!**/*.rst'
               - '!projects/hipdnn/docs/**'
@@ -253,8 +253,9 @@ jobs:
           dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
 
       # Must precede configure: configuration fails if pytest is not importable
-      # by the interpreter descriptor-packaging registers its tests under. The
-      # interpreter is named explicitly because it must be the one passed as
+      # by the interpreter descriptor-packaging registers its tests under, and,
+      # with HIPDNN_REQUIRE_UHD_GEN_TESTS=ON, if uhd_gen's requirements are not.
+      # The interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
       - name: Install Python dependencies
@@ -275,6 +276,7 @@ jobs:
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON \
             -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
@@ -517,8 +519,9 @@ jobs:
           echo "Fetched $count rocKE KDP(s)"
 
       # Must precede configure: configuration fails if pytest is not importable
-      # by the interpreter descriptor-packaging registers its tests under. The
-      # interpreter is named explicitly because it must be the one passed as
+      # by the interpreter descriptor-packaging registers its tests under, and,
+      # with HIPDNN_REQUIRE_UHD_GEN_TESTS=ON, if uhd_gen's requirements are not.
+      # The interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
       - name: Install Python dependencies
@@ -539,6 +542,7 @@ jobs:
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON \
             -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
