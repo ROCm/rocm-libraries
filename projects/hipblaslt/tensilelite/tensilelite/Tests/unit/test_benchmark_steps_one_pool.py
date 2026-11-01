@@ -399,7 +399,7 @@ def _benchmarkProblemType(tmp_path, stepBatch, useCache=False, problemSizeGroupI
         configPath="/tmp/cfg.yaml",
         useCache=useCache,
         asmToolchain=types.SimpleNamespace(assembler=object()),
-        srcToolchain=types.SimpleNamespace(compiler="cc"),
+        srcToolchain=types.SimpleNamespace(compiler=types.SimpleNamespace(default_args=[])),
         cCompiler="cc",
         buildTmpPath=tmp_path / "build_tmp",
         benchmarkProblemsPath=tmp_path / "bench",

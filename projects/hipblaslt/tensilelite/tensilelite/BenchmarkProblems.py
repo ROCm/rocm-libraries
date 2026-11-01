@@ -42,7 +42,7 @@ from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, TypedDict
 from . import SolutionLibrary, LibraryIO
 from .KernelWriter import DebugConfig
 from .KernelHelperNaming import KernelHelperEnum, HelperKernelObjectsMemo
-from .Toolchain.Component import Assembler
+from .Toolchain.Component import Assembler, Compiler
 from .SolutionStructs.Problem import ProblemType, ProblemSizes
 from .SolutionStructs.Solution import Solution
 from .Common.TypeValidationErrors import ConfigTypeError
@@ -149,20 +149,31 @@ def _cacheDataMatches(cacheData, benchmarkStep):
     )
 
 
-def cmdLineArchsFor(archNames, isaInfoMap) -> List[str]:
+def cmdLineArchsFor(archNames, isaInfoMap, compiler: Compiler) -> List[str]:
     """The compiler targets a build for these ISAs will actually be given.
 
     A stepping shares its architecture's ISA, so the ISA-derived name would tune
     with the other stepping's compiler target and produce code objects the
     tuned-for silicon cannot load. The requested names win where they cover an
     ISA; the rest fall back to that ISA's own name.
+
+    The targets carry no xnack feature, so the helper kernels are compiled once,
+    xnack-agnostic, as the library build compiles them for GPU_TARGETS; the
+    runtime looks for Kernels.so-000-<arch>.hsaco first. Under a sanitizer the
+    library build asks for xnack+ on the architectures that have it, which the
+    device address sanitizer needs, and so does this.
     """
     buildArchNames = archNamesByIsa(archNames or [])
-    return [
-        var
-        for isa in isaInfoMap.keys()
-        for var in gfxToVariants(buildArchNames.get(isa) or isaToGfx(isa))
-    ]
+    targets = [buildArchNames.get(isa) or isaToGfx(isa) for isa in isaInfoMap.keys()]
+    if any(str(arg).startswith("-fsanitize=") for arg in compiler.default_args):
+        return [_xnackOnTarget(gfx) for gfx in targets]
+    return targets
+
+
+def _xnackOnTarget(gfx: str) -> str:
+    """gfx:xnack+ where gfx has an xnack+ variant, else gfx."""
+    xnackOn = f"{gfx}:xnack+"
+    return xnackOn if xnackOn in gfxToVariants(gfx) else gfx
 
 
 def _computeCacheKey(benchmarkStep, cmdLineArchs):
@@ -571,7 +582,7 @@ def prepareBenchmarkFiles(
 
         kernelWriterAssembly = KernelWriterAssembly(asmToolchain.assembler, debugConfig)
 
-        cmdLineArchs = cmdLineArchsFor(archNames, isaInfoMap)
+        cmdLineArchs = cmdLineArchsFor(archNames, isaInfoMap, srcToolchain.compiler)
     # write solution, kernels and CMake
     problemType = solutions[0]["ProblemType"]
     kernelBuild = prepareSolutionsAndKernels( \
@@ -873,7 +884,8 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
         backend_name = str(backendConfig.get("Name", "tensile")).lower()
 
         # check if a solution cache exists and if it matches our solution parameters
-        cacheKey = _computeCacheKey(benchmarkStep, cmdLineArchsFor(archNames, isaInfoMap))
+        cacheKey = _computeCacheKey(
+            benchmarkStep, cmdLineArchsFor(archNames, isaInfoMap, srcToolchain.compiler))
         cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
         sourcePath = Path(cacheDir) / "source"
         if stepBatch is not None and stepBatch.buildsInto(cacheDir):
