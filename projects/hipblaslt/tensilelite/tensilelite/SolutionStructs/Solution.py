@@ -4441,8 +4441,15 @@ class Solution(collections.abc.Mapping):
         ldsPadA = state["LdsPadA"]
         ldsPadB = state["LdsPadB"]
         ldsPadM = state["LdsPadMetadata"]
+        hasWmma = isaInfoMap[isa].asmCaps['HasWMMA']
         optPadA = lrvwA
         optPadB = lrvwB
+        if hasWmma and not wmmaV3:
+          # WMMA V1/V2 issue a local read wider than ds_load_b128 (e.g. fp16
+          # LRVW=16 on gfx11) as several b128 reads, and each one is what meets
+          # the banks. Pad by one instruction's width, not the whole vector.
+          optPadA = min(optPadA, int(Solution.MAX_NUM_DS_LOAD_BYTES // numBytesA))
+          optPadB = min(optPadB, int(Solution.MAX_NUM_DS_LOAD_BYTES // numBytesB))
         readRegsA = int(lrvwA * state["ProblemType"]["MacDataTypeA"].numBytes() // 4)
         readRegsB = int(lrvwB * state["ProblemType"]["MacDataTypeB"].numBytes() // 4)
         if state["ProblemType"]["Sparse"]:
@@ -4457,12 +4464,17 @@ class Solution(collections.abc.Mapping):
           return ldsPadA, ldsPadB, ldsPadM, 0, 0
         if state["EnableMatrixInstruction"]:
           # MI16x16xNx1 needs double padding to avoid bank conflict:
-          # WMMA_V3 doubles when readRegs == 2; other ISAs double when readRegs in {1, 4}.
+          # WMMA_V3 doubles when readRegs == 2; MFMA doubles when readRegs in {1, 4};
+          # WMMA V1/V2 never doubles.
           if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
             if wmmaV3:
               if readRegsA == 2: optPadA *= 2
               if readRegsB == 2: optPadB *= 2
-            else:
+            elif not hasWmma:
+              # MFMA only. WMMA V1/V2 is skipped: a b128 read padded by its own
+              # width already shifts one 4-bank window per row, and doubling makes
+              # the row stride 4*even banks, a 2-way conflict. A b32 read
+              # (readRegs == 1) is below the smallest LRVW WMMA accepts.
               if readRegsA in (1, 4): optPadA *= 2
               if readRegsB in (1, 4): optPadB *= 2
 
