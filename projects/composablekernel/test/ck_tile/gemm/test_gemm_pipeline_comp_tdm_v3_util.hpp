@@ -14,6 +14,11 @@
 // (kRefillPoint = AfterArrive). All of these are fp8 x fp8; bf8 x bf8 runs at 16 and 4 waves and
 // fp8 x bf8 and bf8 x fp8 at 16 waves, with the default policy.
 //
+// bf16 x bf16 -> bf16 instances (V3Bf16Configs, V3Bf16LargeConfigs) use the warp tile 16x16x32 and
+// K tiles of 64 and 128, in every A/B layout (RCR, RRR, CRR, CCR); their shapes are one, two and
+// three K tiles and 512x512x1024 in test_gemm_pipeline_comp_tdm_v3_bf16_wmma.cpp (SMOKE_TEST) and
+// 4096x4096x4096 in test_gemm_pipeline_comp_tdm_v3_bf16_large_wmma.cpp (REGRESSION_TEST).
+//
 // Split-K (k_batch != 1) must be rejected by IsSupportedArgument.
 //
 // Shapes: K = 256, 512 and 768 (one, two and three K tiles: both tail paths, with and without the
@@ -23,7 +28,7 @@
 // gfx1250 emulator).
 //
 // Inputs:
-// - Int: integers in [-5, 5], exact in fp8 and bf8. Every product and every partial sum is an
+// - Int: integers in [-5, 5], exact in fp8, bf8 and bf16. Every product and every partial sum is an
 // integer
 //   below 2^24, so the fp32 accumulation is exact whatever the order, and the result must equal
 //   the exact sum rounded to bf16, bit for bit.
@@ -31,9 +36,12 @@
 // reference with a
 //   tolerance for bf16 rounding and fp32 accumulation.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <random>
+#include <string>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -81,45 +89,81 @@ namespace {
 
 using AccDataType = float;
 using CDataType   = ck_tile::bf16_t;
-using ALayout     = ck_tile::tensor_layout::gemm::RowMajor;
-using BLayout     = ck_tile::tensor_layout::gemm::ColumnMajor;
-using CLayout     = ck_tile::tensor_layout::gemm::RowMajor;
+using RowMajor    = ck_tile::tensor_layout::gemm::RowMajor;
+using ColumnMajor = ck_tile::tensor_layout::gemm::ColumnMajor;
+using CLayout     = RowMajor;
 
+// The defaults after the data types are the fp8 setup: K tile 256, warp tile 32x32x128, A
+// row-major, B column-major. The 16-bit instances set them (warp tile 16x16x32, the only bf16/fp16
+// WMMA warp tile on gfx1250, and a K tile of 64 or 128 so two LDS stages fit).
 template <ck_tile::index_t TileM_,
           ck_tile::index_t TileN_,
           ck_tile::index_t WarpsM_,
           ck_tile::index_t WarpsN_,
           typename Policy_,
-          typename ADataType_ = ck_tile::fp8_t,
-          typename BDataType_ = ck_tile::fp8_t>
+          typename ADataType_         = ck_tile::fp8_t,
+          typename BDataType_         = ck_tile::fp8_t,
+          ck_tile::index_t TileK_     = 256,
+          ck_tile::index_t WarpTileM_ = 32,
+          ck_tile::index_t WarpTileN_ = 32,
+          ck_tile::index_t WarpTileK_ = 128,
+          typename ALayout_           = RowMajor,
+          typename BLayout_           = ColumnMajor>
 struct V3Config
 {
-    using ADataType                          = ADataType_;
-    using BDataType                          = BDataType_;
-    static constexpr ck_tile::index_t TileM  = TileM_;
-    static constexpr ck_tile::index_t TileN  = TileN_;
-    static constexpr ck_tile::index_t TileK  = 256;
-    static constexpr ck_tile::index_t WarpsM = WarpsM_;
-    static constexpr ck_tile::index_t WarpsN = WarpsN_;
-    using Policy                             = Policy_;
+    using ADataType                             = ADataType_;
+    using BDataType                             = BDataType_;
+    using ALayout                               = ALayout_;
+    using BLayout                               = BLayout_;
+    static constexpr ck_tile::index_t TileM     = TileM_;
+    static constexpr ck_tile::index_t TileN     = TileN_;
+    static constexpr ck_tile::index_t TileK     = TileK_;
+    static constexpr ck_tile::index_t WarpsM    = WarpsM_;
+    static constexpr ck_tile::index_t WarpsN    = WarpsN_;
+    static constexpr ck_tile::index_t WarpTileM = WarpTileM_;
+    static constexpr ck_tile::index_t WarpTileN = WarpTileN_;
+    static constexpr ck_tile::index_t WarpTileK = WarpTileK_;
+    using Policy                                = Policy_;
 };
+
+// bf16 instance: warp tile 16x16x32 and the given K tile and A/B layouts.
+template <ck_tile::index_t TileM,
+          ck_tile::index_t TileN,
+          ck_tile::index_t TileK,
+          ck_tile::index_t WarpsM,
+          ck_tile::index_t WarpsN,
+          typename ALayout,
+          typename BLayout>
+using V3Bf16Config = V3Config<TileM,
+                              TileN,
+                              WarpsM,
+                              WarpsN,
+                              ck_tile::GemmPipelineAgBgCrCompTDMV3Policy,
+                              ck_tile::bf16_t,
+                              ck_tile::bf16_t,
+                              TileK,
+                              16,
+                              16,
+                              32,
+                              ALayout,
+                              BLayout>;
 
 template <typename Config>
 struct V3KernelOf
 {
     using ADataType = typename Config::ADataType;
     using BDataType = typename Config::BDataType;
-    using TileShape =
-        ck_tile::TileGemmShape<ck_tile::sequence<Config::TileM, Config::TileN, Config::TileK>,
-                               ck_tile::sequence<Config::WarpsM, Config::WarpsN, 1>,
-                               ck_tile::sequence<32, 32, 128>>;
+    using TileShape = ck_tile::TileGemmShape<
+        ck_tile::sequence<Config::TileM, Config::TileN, Config::TileK>,
+        ck_tile::sequence<Config::WarpsM, Config::WarpsN, 1>,
+        ck_tile::sequence<Config::WarpTileM, Config::WarpTileN, Config::WarpTileK>>;
     using Partitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
     using Traits      = ck_tile::TileGemmUniversalTraits<false,
                                                          false,
                                                          false,
                                                          true, // DoubleSmemBuffer
-                                                         ALayout,
-                                                         BLayout,
+                                                         typename Config::ALayout,
+                                                         typename Config::BLayout,
                                                          CLayout>;
     using Problem =
         ck_tile::UniversalGemmPipelineProblem<ADataType,
@@ -141,9 +185,9 @@ struct V3KernelOf
                                                              Config::TileN,
                                                              Config::WarpsM,
                                                              Config::WarpsN,
-                                                             32,
-                                                             32,
-                                                             128,
+                                                             Config::WarpTileM,
+                                                             Config::WarpTileN,
+                                                             Config::WarpTileK,
                                                              false, // isCTransposed
                                                              1,     // kNumWaveGroups
                                                              false, // FixedVectorSize
@@ -187,25 +231,32 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
     protected:
     void Run(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K, Init init)
     {
-        using ADataType = typename Config::ADataType;
-        using BDataType = typename Config::BDataType;
-        // A is M x K row-major, B is N x K (K x N column-major), both packed.
+        using ADataType            = typename Config::ADataType;
+        using BDataType            = typename Config::BDataType;
+        constexpr bool a_row_major = std::is_same_v<typename Config::ALayout, RowMajor>;
+        constexpr bool b_col_major = std::is_same_v<typename Config::BLayout, ColumnMajor>;
+        // af is A as M x K and bf is B as N x K, both row-major, whatever the device layouts: the
+        // values are drawn in that order, then packed into a and b in A's and B's layouts.
         std::mt19937 gen(0xC0FFEE + M + N + K + static_cast<int>(init));
         std::vector<ADataType> a(static_cast<size_t>(M) * K);
         std::vector<BDataType> b(static_cast<size_t>(N) * K);
-        std::vector<float> af(a.size()), bf(b.size()); // the fp8/bf8 values, decoded
-        auto fill = [&](auto& v, std::vector<float>& vf) {
+        std::vector<float> af(a.size()), bf(b.size()); // the A/B values, decoded
+        auto fill = [&](auto& v, std::vector<float>& vf, ck_tile::index_t rows, bool packed_rows) {
             std::uniform_int_distribution<int> di(-5, 5);
             std::uniform_real_distribution<float> dr(-2.f, 2.f);
+            using T = typename std::decay_t<decltype(v)>::value_type;
             for(size_t i = 0; i < v.size(); ++i)
             {
                 const float x = init == Init::Int ? static_cast<float>(di(gen)) : dr(gen);
-                v[i]  = ck_tile::type_convert<typename std::decay_t<decltype(v)>::value_type>(x);
-                vf[i] = ck_tile::type_convert<float>(v[i]);
+                const T e     = ck_tile::type_convert<T>(x);
+                vf[i]         = ck_tile::type_convert<float>(e);
+                // row r = i / K, k = i % K; the transposed layout stores it at k * rows + r
+                const size_t r = i / static_cast<size_t>(K), k = i % static_cast<size_t>(K);
+                v[packed_rows ? i : k * static_cast<size_t>(rows) + r] = e;
             }
         };
-        fill(a, af);
-        fill(b, bf);
+        fill(a, af, M, a_row_major);
+        fill(b, bf, N, b_col_major);
 
         ck_tile::DeviceMem a_dev(a.size() * sizeof(ADataType));
         ck_tile::DeviceMem b_dev(b.size() * sizeof(BDataType));
@@ -221,47 +272,71 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
                                    M,
                                    N,
                                    K,
-                                   K,  // stride A
-                                   K,  // stride B
-                                   N); // stride C
+                                   a_row_major ? K : M, // stride A
+                                   b_col_major ? K : N, // stride B
+                                   N);                  // stride C
         run_v3_gemm<Config>(args);
 
         std::vector<CDataType> c(static_cast<size_t>(M) * N);
         c_dev.FromDevice(c.data());
 
-        size_t bad = 0;
+        // The reference splits rows across threads, so a 4096^3 check takes seconds.
+        std::vector<size_t> bad_rows(static_cast<size_t>(M), 0);
+        std::vector<std::string> first_bad(static_cast<size_t>(M));
+        auto check_rows = [&](ck_tile::index_t m0, ck_tile::index_t m1) {
+            for(ck_tile::index_t m = m0; m < m1; ++m)
+            {
+                for(ck_tile::index_t n = 0; n < N; ++n)
+                {
+                    const float* pa = &af[static_cast<size_t>(m) * K];
+                    const float* pb = &bf[static_cast<size_t>(n) * K];
+                    double sum = 0, sum_abs = 0;
+                    for(ck_tile::index_t k = 0; k < K; ++k)
+                    {
+                        const double p = static_cast<double>(pa[k]) * pb[k];
+                        sum += p;
+                        sum_abs += std::abs(p);
+                    }
+                    const CDataType got = c[static_cast<size_t>(m) * N + n];
+                    bool ok;
+                    if(init == Init::Int)
+                    {
+                        // exact integer sum, rounded once to bf16 (round to nearest even)
+                        ok = ck_tile::bit_cast<uint16_t>(got) == bf16_rne(static_cast<float>(sum));
+                    }
+                    else
+                    {
+                        // bf16 rounding of the result plus fp32 rounding along the K sum
+                        const double tol = std::abs(sum) * 0x1p-7 + sum_abs * 0x1p-16;
+                        ok               = std::abs(ck_tile::type_convert<float>(got) - sum) <= tol;
+                    }
+                    if(!ok && bad_rows[static_cast<size_t>(m)]++ == 0)
+                    {
+                        first_bad[static_cast<size_t>(m)] =
+                            "m=" + std::to_string(m) + " n=" + std::to_string(n) +
+                            " ref=" + std::to_string(sum) +
+                            " got=" + std::to_string(ck_tile::type_convert<float>(got));
+                    }
+                }
+            }
+        };
+        const ck_tile::index_t workers = static_cast<ck_tile::index_t>(
+            std::max(1u, std::min(std::thread::hardware_concurrency(), 64u)));
+        const ck_tile::index_t rows_per = (M + workers - 1) / workers;
+        std::vector<std::thread> pool;
+        for(ck_tile::index_t m0 = 0; m0 < M; m0 += rows_per)
+            pool.emplace_back(check_rows, m0, std::min(M, m0 + rows_per));
+        for(auto& t : pool)
+            t.join();
+
+        size_t bad = 0, shown = 0;
         for(ck_tile::index_t m = 0; m < M; ++m)
         {
-            for(ck_tile::index_t n = 0; n < N; ++n)
+            bad += bad_rows[static_cast<size_t>(m)];
+            if(bad_rows[static_cast<size_t>(m)] != 0 && shown++ < 5)
             {
-                const float* pa = &af[static_cast<size_t>(m) * K];
-                const float* pb = &bf[static_cast<size_t>(n) * K];
-                double sum = 0, sum_abs = 0;
-                for(ck_tile::index_t k = 0; k < K; ++k)
-                {
-                    const double p = static_cast<double>(pa[k]) * pb[k];
-                    sum += p;
-                    sum_abs += std::abs(p);
-                }
-                const CDataType got = c[static_cast<size_t>(m) * N + n];
-                bool ok;
-                if(init == Init::Int)
-                {
-                    // exact integer sum, rounded once to bf16 (round to nearest even)
-                    ok = ck_tile::bit_cast<uint16_t>(got) == bf16_rne(static_cast<float>(sum));
-                }
-                else
-                {
-                    // bf16 rounding of the result plus fp32 rounding along the K sum
-                    const double tol = std::abs(sum) * 0x1p-7 + sum_abs * 0x1p-16;
-                    ok               = std::abs(ck_tile::type_convert<float>(got) - sum) <= tol;
-                }
-                if(!ok && bad++ < 5)
-                {
-                    ADD_FAILURE() << "M=" << M << " N=" << N << " K=" << K << " m=" << m
-                                  << " n=" << n << " ref=" << sum
-                                  << " got=" << ck_tile::type_convert<float>(got);
-                }
+                ADD_FAILURE() << "M=" << M << " N=" << N << " K=" << K << " "
+                              << first_bad[static_cast<size_t>(m)];
             }
         }
         EXPECT_EQ(bad, 0u) << "mismatches at M=" << M << " N=" << N << " K=" << K;
@@ -307,5 +382,34 @@ using V3LongKConfigs =
                      V3Config<256, 256, 4, 4, comp_tdm_v3_test::TensorWaitIssuersOnlyPolicy>,
                      V3Config<256, 256, 4, 4, comp_tdm_v3_test::RefillAfterArrivePolicy>,
                      V3Config<256, 256, 4, 4, DefaultPolicy, ck_tile::bf8_t, ck_tile::bf8_t>>;
+
+// bf16 x bf16 -> bf16, default policy, every A/B layout: 16 waves at 256x256 (K tiles 64 and 128)
+// and 4 waves at 128x128 (K tile 64) for each layout, plus the other 128-K tiles in RCR. CCR stops
+// at the 64-K tile: at 256x256x128 it spills.
+using RM            = RowMajor;
+using CM            = ColumnMajor;
+using V3Bf16Configs = ::testing::Types<V3Bf16Config<256, 256, 64, 4, 4, RM, CM>,
+                                       V3Bf16Config<256, 256, 128, 4, 4, RM, CM>,
+                                       V3Bf16Config<256, 128, 128, 4, 4, RM, CM>,
+                                       V3Bf16Config<128, 256, 128, 4, 4, RM, CM>,
+                                       V3Bf16Config<128, 128, 64, 2, 2, RM, CM>,
+                                       V3Bf16Config<128, 128, 128, 2, 2, RM, CM>,
+                                       V3Bf16Config<256, 256, 64, 4, 4, RM, RM>,
+                                       V3Bf16Config<256, 256, 128, 4, 4, RM, RM>,
+                                       V3Bf16Config<128, 128, 64, 2, 2, RM, RM>,
+                                       V3Bf16Config<256, 256, 64, 4, 4, CM, RM>,
+                                       V3Bf16Config<256, 256, 128, 4, 4, CM, RM>,
+                                       V3Bf16Config<128, 128, 64, 2, 2, CM, RM>,
+                                       V3Bf16Config<256, 256, 64, 4, 4, CM, CM>,
+                                       V3Bf16Config<128, 128, 64, 2, 2, CM, CM>>;
+
+// The 4096^3 set: the three RCR tiles that matter for large shapes, and 256x256x64 in each other
+// layout.
+using V3Bf16LargeConfigs = ::testing::Types<V3Bf16Config<256, 256, 64, 4, 4, RM, CM>,
+                                            V3Bf16Config<256, 256, 128, 4, 4, RM, CM>,
+                                            V3Bf16Config<128, 128, 128, 2, 2, RM, CM>,
+                                            V3Bf16Config<256, 256, 64, 4, 4, RM, RM>,
+                                            V3Bf16Config<256, 256, 64, 4, 4, CM, RM>,
+                                            V3Bf16Config<256, 256, 64, 4, 4, CM, CM>>;
 
 } // namespace
