@@ -2612,9 +2612,14 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
             identity.dtype_a,
         )
     rebuilt = replace(rebuilt, llvm_flavor=identity.llvm_flavor)
-    if (caps.kw or caps.pad_w >= 0) and identity.algorithm != _DW_TILED_DGRAD:
-        # Only the rotated-filter depthwise dgrad rows carry a non-square
-        # filter or per-axis padding.
+    if (caps.kw or caps.pad_w >= 0) and identity.algorithm not in (
+        _DW_TILED_DGRAD,
+        _FWD_WMMA,
+        _FWD_SMALLK,
+    ):
+        # Only the rotated-filter depthwise dgrad and the WMMA forward rows
+        # (1 x R, rectangular, small-K) carry a non-square filter or per-axis
+        # padding; the spec validation below still checks those.
         raise LookupError(
             f"the direct grid cannot build this identity: "
             f"{caps.KH}x{caps.KW} filter, padding {caps.PAD}x{caps.PAD_W}"
