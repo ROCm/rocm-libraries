@@ -2934,7 +2934,8 @@ def _run_dw_wgrad_one(
     out = ws_cpu.view(R, C, p.KH * p.KW).sum(dim=0)
     rel_err = float((out - ref).abs().max() / ref.abs().max().clamp(min=1.0))
     tol = _TOL_BF16 if dtype == "bf16" else _TOL
-    if rel_err >= tol:
+    # `not <` so a NaN rel_err (non-finite output) fails too.
+    if not rel_err < tol:
         return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
     return True, ""
 
