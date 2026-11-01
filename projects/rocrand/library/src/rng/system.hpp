@@ -71,6 +71,18 @@ inline rocrand_status is_stream_blocking(hipStream_t stream, bool& is_blocking)
     return ROCRAND_STATUS_SUCCESS;
 }
 
+inline rocrand_status is_stream_capturing(hipStream_t stream, bool& is_capturing)
+{
+    hipStreamCaptureStatus capture_status;
+    const hipError_t       error = hipStreamIsCapturing(stream, &capture_status);
+    if(error != hipSuccess)
+    {
+        return ROCRAND_STATUS_INTERNAL_ERROR;
+    }
+    is_capturing = capture_status != hipStreamCaptureStatusNone;
+    return ROCRAND_STATUS_SUCCESS;
+}
+
 } // namespace detail
 
 /// \tparam UseHostFunc If true, launching will enqueue the kernel in the stream. Otherwise,
@@ -258,6 +270,20 @@ struct host_system
         }
         return ROCRAND_STATUS_SUCCESS;
     }
+
+    static rocrand_status is_stream_capturing([[maybe_unused]] hipStream_t stream,
+                                              bool&                        is_capturing)
+    {
+        if constexpr(UseHostFunc)
+        {
+            return detail::is_stream_capturing(stream, is_capturing);
+        }
+        else
+        {
+            is_capturing = false;
+        }
+        return ROCRAND_STATUS_SUCCESS;
+    }
 };
 
 namespace detail
@@ -370,6 +396,11 @@ struct device_system
     static rocrand_status is_host_func_blocking(hipStream_t stream, bool& is_blocking)
     {
         return detail::is_stream_blocking(stream, is_blocking);
+    }
+
+    static rocrand_status is_stream_capturing(hipStream_t stream, bool& is_capturing)
+    {
+        return detail::is_stream_capturing(stream, is_capturing);
     }
 };
 
