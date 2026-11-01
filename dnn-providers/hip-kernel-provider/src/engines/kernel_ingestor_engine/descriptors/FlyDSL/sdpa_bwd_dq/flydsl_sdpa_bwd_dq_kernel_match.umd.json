@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "ebb70883-2a0a-5813-a000-496088249139",
+  "name": "flydsl sdpa_bwd_dq: kernel variant fits the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_sdpa_bwd_split.dq.kernel_match"
+}

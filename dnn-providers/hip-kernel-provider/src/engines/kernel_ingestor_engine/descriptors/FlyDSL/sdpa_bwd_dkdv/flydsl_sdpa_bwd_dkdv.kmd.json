@@ -1,0 +1,92 @@
+{
+  "version": "1.0",
+  "id": "df3383c6-3bca-5b83-8832-e5f237096398",
+  "name": "flydsl sdpa_bwd_dkdv variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_dim",
+      "type": "int"
+    },
+    {
+      "name": "head_dim_v",
+      "type": "int"
+    },
+    {
+      "name": "causal",
+      "type": "int"
+    },
+    {
+      "name": "has_bias",
+      "type": "int"
+    },
+    {
+      "name": "dropout",
+      "type": "int"
+    },
+    {
+      "name": "padded",
+      "type": "int"
+    },
+    {
+      "name": "hints",
+      "type": "int"
+    },
+    {
+      "name": "floor",
+      "type": "string"
+    },
+    {
+      "name": "dform",
+      "type": "string"
+    },
+    {
+      "name": "num_waves",
+      "type": "int"
+    },
+    {
+      "name": "mfma_rows",
+      "type": "int"
+    },
+    {
+      "name": "dkv_shards",
+      "type": "int"
+    },
+    {
+      "name": "block_q",
+      "type": "int"
+    },
+    {
+      "name": "waves_per_eu",
+      "type": "int"
+    },
+    {
+      "name": "tight_registers",
+      "type": "int"
+    },
+    {
+      "name": "num_stream_buffers",
+      "type": "int"
+    },
+    {
+      "name": "gqa_pack",
+      "type": "int"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "block_kv",
+      "type": "int"
+    },
+    {
+      "name": "grid",
+      "type": "string"
+    }
+  ]
+}

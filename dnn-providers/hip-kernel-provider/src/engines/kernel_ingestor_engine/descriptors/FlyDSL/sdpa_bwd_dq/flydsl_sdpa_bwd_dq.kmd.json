@@ -1,0 +1,88 @@
+{
+  "version": "1.0",
+  "id": "8da45ce1-8683-521f-94bb-f27dfd070750",
+  "name": "flydsl sdpa_bwd_dq variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_dim",
+      "type": "int"
+    },
+    {
+      "name": "head_dim_v",
+      "type": "int"
+    },
+    {
+      "name": "causal",
+      "type": "int"
+    },
+    {
+      "name": "has_bias",
+      "type": "int"
+    },
+    {
+      "name": "dropout",
+      "type": "int"
+    },
+    {
+      "name": "padded",
+      "type": "int"
+    },
+    {
+      "name": "hints",
+      "type": "int"
+    },
+    {
+      "name": "floor",
+      "type": "string"
+    },
+    {
+      "name": "dform",
+      "type": "string"
+    },
+    {
+      "name": "num_waves",
+      "type": "int"
+    },
+    {
+      "name": "block_m",
+      "type": "int"
+    },
+    {
+      "name": "block_n",
+      "type": "int"
+    },
+    {
+      "name": "mfma_rows",
+      "type": "int"
+    },
+    {
+      "name": "waves_per_eu",
+      "type": "int"
+    },
+    {
+      "name": "store_db",
+      "type": "int"
+    },
+    {
+      "name": "bias_stage",
+      "type": "string"
+    },
+    {
+      "name": "reduce_symbol",
+      "type": "string"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "grid",
+      "type": "string"
+    }
+  ]
+}

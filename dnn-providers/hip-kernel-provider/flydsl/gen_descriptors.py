@@ -47,6 +47,16 @@ Layout, per op:
   the objects themselves with ``manifest.json``: generated content, stored with DVC.
   Its readable summary, ``<arch>.SOURCE.md``, sits beside the folder.
 
+**The split engine** (``hipkernel:flydsl_sdpa_bwd_split``) is slotted (RFC 0021). Its three
+slots are the ops ``sdpa_bwd_prep``, ``sdpa_bwd_dkdv`` and ``sdpa_bwd_dq`` (``SPLIT_SLOT_OPS``),
+each keeping its own manifest and content folder. A slot op's folder holds the slot's KMD,
+UDD and kernel matcher (the symbols are ``hipkernel.flydsl_sdpa_bwd_split.<slot>.*``), and
+its arch pack is a KDP 1.1 naming the slot. The engine's one UED 1.1 lives in the
+descriptor-only folder ``<content>/sdpa_bwd_split/`` (no objects, no manifest): the slots,
+each with its KMD and its knobs (the tuning fields plus the op's ``ALTERNATIVE_KNOBS``), the
+shared workspace token and the native graph match, and none of the members a slotted UED may not carry. It is derived whenever an
+arch holds the content of the slot ops, and then of all three.
+
 ``--check`` re-derives the documents and compares them to what is checked in,
 then runs the packer's own authoring validator over the whole FlyDSL folder.
 """
@@ -95,9 +105,31 @@ SDPA_OPS = (
     "sdpa_cdna_dualwave",
     "sdpa_cdna_decode",
     "sdpa_aiw",
+    "sdpa_bwd_merged",
 )
 PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm",) + SDPA_OPS
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
+
+# The slotted descriptor formats (RFC 0021 section 9): UED and KDP are 1.1 only when
+# slotted; every other document stays at DESCRIPTOR_VERSION.
+SLOTTED_VERSION = "1.1"
+# The slotted split engine: its descriptor-only content folder, and the ops that are its
+# slots in declaration (launch) order. A slot is named as its op minus the common prefix.
+SPLIT_ENGINE = "sdpa_bwd_split"
+SPLIT_SLOT_OPS = ("sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq")
+SPLIT_SHARED_WORKSPACE = "ws.bytes"
+# The slot ops whose rows may be multi-launch: a dQ row that stores dB through a standalone reduce object (a
+# manifest ``companions`` entry) is authored in its own pack, on its own dispatch (RFC 0021: a pack's launch set is
+# uniform). The launches of such a row, in launch order, and the document that names the dispatch.
+SPLIT_REDUCE_OPS = ("sdpa_bwd_dq",)
+REDUCE_LAUNCHES = ("dq", "dbias_reduce")
+REDUCE_SUFFIX = "reduce"
+
+
+def slot_of(op: str) -> str | None:
+    """The split engine's slot a content op is, or None for an unslotted op."""
+    return op.removeprefix("sdpa_bwd_") if op in SPLIT_SLOT_OPS else None
+
 
 MANIFEST_NAME = "manifest.json"
 
@@ -111,6 +143,14 @@ GENERIC_N = 0
 # `GENERIC_N` sentinel; a null anywhere else is a generator bug, not a tier.
 SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 
+# **What a knob is.** A knob is a performance alternative with overlapping coverage: two
+# kernels that serve the same graph and differ in it are interchangeable, and autotune
+# chooses between them. A knob is never a feature field, one that decides whether a kernel
+# serves a graph at all (dtype, causal or window, dropout, has_bias, the reduce kernel).
+# The runtime also requires the kernels that serve one graph to have distinct knob tuples
+# (GenericPlanBuilder's enumeration), so a field that tells apart kernels serving the same
+# graph must be a knob, whatever else it is; ALTERNATIVE_KNOBS below lists those per op.
+#
 # Fields the graph fixes rather than the tuner choosing. They belong in the
 # metadata schema -- the matcher needs every one of them to pick a variant --
 # but not in the engine's `knobs` list, which names what autotune may vary.
@@ -123,7 +163,14 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 # `bias_kstrided`) are fixed by whether and how the graph adds a bias or a sink. The
 # tier bounds and capability flags (`n_max`, `head_dim_max`, `any_diagonal`,
 # `kv_align`) say which graphs an object can serve: the matcher gates on them, and
-# autotune compares the objects they distinguish as separate catalog entries.
+# autotune compares the objects they distinguish as separate catalog entries. For the
+# SDPA backward, `dropout`, `padded`, `floor` and `dform` are fixed by the graph and the
+# head-size ladder, and `store_db` and `gqa_pack` say which graphs an object serves (a
+# dBias graph needs a dB-storing object; a packed-GQA object serves dense GQA only);
+# `sink` selects the prep twin that writes the dSink term, and `bias_stage` is gated on
+# the bias layout (an LDS-staged bias needs the 16-byte row contract). The matchers keep
+# reading all of them; the ones several kernels of an SDPA backward op share a graph on
+# are also knobs of that op (ALTERNATIVE_KNOBS).
 GRAPH_DETERMINED_FIELDS = {
     "N",
     "dtype",
@@ -145,6 +192,15 @@ GRAPH_DETERMINED_FIELDS = {
     "has_sink",
     "merge_symbol",
     "kernel",
+    "dropout",
+    "padded",
+    "floor",
+    "dform",
+    "store_db",
+    "gqa_pack",
+    "sink",
+    "bias_stage",
+    "grid",
 }
 
 # Fields that say when an object is preferred rather than how it was built: the
@@ -169,7 +225,50 @@ TUNING_FIELDS = {
     "k_prefetch_dist",
     "v_prefetch_dist",
     "kv_addr_hoist",
+    "block_kv",
+    "role_order",
+    "hints",
+    "num_waves",
+    "mfma_rows",
+    "dkv_shards",
+    "block_q",
+    "tight_registers",
+    "num_stream_buffers",
 }
+
+# Graph-determined fields that are also knobs of one op, because kernels of that op with
+# overlapping coverage differ in them. The matcher still reads each as a graph fact, so a
+# dBias graph matches only dB-storing rows; the knob only addresses the alternatives among
+# the rows that match. Per op and graph, the distinct values are:
+#   padded      an exact tile and the padded tile of the same size serve a graph of that size
+#               (merged: the tile-32 pair)
+#   head_dim    the tile: a graph is served by its own tile and, for padded and `g1` rows, by
+#               larger ones. It is the build tile (head_dim_v is not a function of it: a dQ
+#               row carries the rung below its tile there)
+#   floor       tail and `g1` rows of one tile
+#   dform       a baked-dropout and a runtime-dropout row
+#   gqa_pack    a packed and an unpacked dK/dV (and merged) row serve a grouped graph
+#   store_db    a dB-storing and a dB-less dQ (and merged) row serve a bias graph without dBias
+#   bias_stage  a staged and a direct bias row
+# `tests/test_sdpa_bwd_enumeration.py` checks both directions over the shipped catalogue.
+ALTERNATIVE_KNOBS: dict[str, frozenset[str]] = {
+    "sdpa_bwd_prep": frozenset({"padded"}),
+    "sdpa_bwd_dkdv": frozenset({"head_dim", "padded", "floor", "dform", "gqa_pack"}),
+    "sdpa_bwd_dq": frozenset(
+        {"head_dim", "padded", "floor", "dform", "bias_stage", "store_db"}
+    ),
+    "sdpa_bwd_merged": frozenset({"padded", "gqa_pack", "store_db"}),
+}
+
+
+def knob_fields(op: str, fields: Any) -> list[str]:
+    """The fields of @p fields that @p op's engine exposes as knobs, in schema order."""
+    return [
+        f
+        for f in fields
+        if f in TUNING_FIELDS or f in ALTERNATIVE_KNOBS.get(op, frozenset())
+    ]
+
 
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
@@ -193,6 +292,9 @@ class KernelEntry(NamedTuple):
     path: Path
     data: bytes
     record: dict[str, Any]
+    # The standalone reduce object of a row that stores dB through one (its manifest ``companions`` entry
+    # plus the path of the object), else None.
+    companion: dict[str, Any] | None = None
 
 
 def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
@@ -239,7 +341,9 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
             )
         # An object the manifest no longer names is left behind when an instance is
         # renamed or dropped; the generators write objects but never delete them.
+        companions = manifest.get("companions", [])
         named = {record["file"] for record in manifest["instances"]}
+        named |= {companion["file"] for companion in companions}
         stray = sorted(
             p.name for p in manifest_path.parent.glob("*.hsaco") if p.name not in named
         )
@@ -249,6 +353,28 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
                 f"name, e.g. '{stray[0]}'. Delete them: they are left over from a "
                 "previous generation and would ship unreferenced."
             )
+        by_dtype: dict[str, dict[str, Any]] = {}
+        for companion in companions:
+            path = manifest_path.parent / companion["file"]
+            if not path.is_file():
+                raise FileNotFoundError(
+                    f"{manifest_path} names companion '{companion['file']}' but {path} does not exist"
+                )
+            data = path.read_bytes()
+            actual = hashlib.sha256(data).hexdigest()
+            if actual != companion["sha256"]:
+                raise ValueError(
+                    f"{path}: SHA256 {actual} does not match the {companion['sha256']} "
+                    f"recorded in {manifest_path}. Regenerate the object rather than "
+                    "editing the manifest."
+                )
+            where = str(path)
+            verify_arch(describe(data, where, companion["symbol"]), arch, where)
+            verify_generic(data, arch, where)
+            dtype = companion["spec"].split(",")[1]
+            if dtype in by_dtype:
+                raise ValueError(f"{manifest_path}: two companions for dtype {dtype}")
+            by_dtype[dtype] = {**companion, "path": path}
         for record in manifest["instances"]:
             path = manifest_path.parent / record["file"]
             if not path.is_file():
@@ -268,7 +394,19 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
             where = str(path)
             verify_arch(describe(data, where, record["symbol"]), arch, where)
             verify_generic(data, arch, where)
-            entries.append(KernelEntry(op, path, data, record))
+            companion = None
+            if companions and record["knobs"].get("reduce_symbol"):
+                companion = by_dtype.get(record["dtype"])
+                if (
+                    companion is None
+                    or companion["symbol"] != record["knobs"]["reduce_symbol"]
+                ):
+                    raise ValueError(
+                        f"{path}: names reduce symbol {record['knobs']['reduce_symbol']!r}, "
+                        f"the {record['dtype']} companion is "
+                        f"{companion and companion['symbol']!r}"
+                    )
+            entries.append(KernelEntry(op, path, data, record, companion))
     return entries
 
 
@@ -304,6 +442,9 @@ def _metadata_value(key: str, value: Any) -> Any:
 class OpDescriptors:
     """The one-per-op descriptors: schema, engine, heuristic, dispatch, matcher.
 
+    A slot op of the split engine owns only the slot's share: its KMD, dispatch and
+    kernel matcher, on the engine's symbols, ids and shared UED (``SplitEngine``).
+
     Shared by every arch's pack of the op and authored once, under ``<op>/``.
     The packer copies them into each shard whose pack reaches them, so the ids
     are deliberately *not* arch-scoped: two shards carrying the same engine with
@@ -313,17 +454,35 @@ class OpDescriptors:
 
     def __init__(self, op: str, fields: dict[str, str]) -> None:
         self.op = op
+        self.slot = slot_of(op)
         self.stem = f"flydsl_{op}"
-        self.symbols = f"hipkernel.{self.stem}"
         self.fields = fields
+        if self.slot is None:
+            self.symbols = f"hipkernel.{self.stem}"
+            engine = op
+        else:
+            engine = SPLIT_ENGINE
+            self.symbols = f"hipkernel.flydsl_{engine}.{self.slot}"
 
         self.kmd_id = _uuid(f"kmd/{op}")
         self.uhd_id = _uuid(f"uhd/{op}")
         self.udd_id = _uuid(f"udd/{op}")
-        self.ued_id = _uuid(f"ued/{op}")
+        self.reduce_udd_id = _uuid(f"udd/{op}/{REDUCE_SUFFIX}")
+        self.ued_id = _uuid(f"ued/{engine}")
         self.umd_id = _uuid(f"umd/{op}/kernel")
 
     def documents(self) -> dict[str, dict[str, Any]]:
+        documents = self._documents()
+        if self.slot is None:
+            return documents
+        # A slot's share: the engine's UED and ranker are the split engine's own.
+        return {
+            name: document
+            for name, document in documents.items()
+            if name.endswith((".kmd.json", ".udd.json", ".umd.json"))
+        }
+
+    def _documents(self) -> dict[str, dict[str, Any]]:
         ued: dict[str, Any] = {
             "version": DESCRIPTOR_VERSION,
             "id": self.ued_id,
@@ -346,7 +505,22 @@ class OpDescriptors:
                 field["default_value"] = 256
             kmd_fields.append(field)
 
+        # The dispatch of the multi-launch rows of a slot (``SPLIT_REDUCE_OPS``): a shared document, authored with
+        # every arch's pack of the op whether or not that arch has such rows.
+        reduce_udd = (
+            {
+                f"{self.stem}_{REDUCE_SUFFIX}.udd.json": {
+                    "version": DESCRIPTOR_VERSION,
+                    "id": self.reduce_udd_id,
+                    "name": f"flydsl {self.op} {REDUCE_SUFFIX} dispatch",
+                    "dispatch_symbol": f"{self.symbols}_{REDUCE_SUFFIX}.dispatch",
+                }
+            }
+            if self.op in SPLIT_REDUCE_OPS
+            else {}
+        )
         return {
+            **reduce_udd,
             f"{self.stem}.kmd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.kmd_id,
@@ -375,7 +549,7 @@ class OpDescriptors:
                 # The UHD that orders the engine's kernel catalog, on every arch.
                 "sort_kernel_catalog": {"default": self.uhd_id},
                 "metadata": self.kmd_id,
-                "knobs": [f for f in self.fields if f in TUNING_FIELDS],
+                "knobs": knob_fields(self.op, self.fields),
             },
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,
@@ -448,7 +622,8 @@ def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
             raise HkpPackError(
                 f"{entries[0].op}: metadata field '{name}' must be in exactly one of "
                 f"GRAPH_DETERMINED_FIELDS, SELECTION_FIELDS and TUNING_FIELDS "
-                f"(found in {homes or 'none'}); only TUNING_FIELDS become knobs"
+                f"(found in {homes or 'none'}); only TUNING_FIELDS and the op's "
+                f"ALTERNATIVE_KNOBS become knobs"
             )
     return fields
 
@@ -463,6 +638,7 @@ def _arch_documents(
     kernel, and the packaging probes take only inline UKDs.
     """
     kernels: list[dict[str, Any]] = []
+    reduce_kernels: list[dict[str, Any]] = []
     # A generic target's objects run on every member, so the pack and each UKD
     # list them all and the packer ships the bytes into each member's shard.
     runs_on = list(families.members(arch))
@@ -477,36 +653,141 @@ def _arch_documents(
         for key, value in record["knobs"].items():
             metadata[key] = _metadata_value(key, value)
 
-        kernels.append(
-            {
-                "version": DESCRIPTOR_VERSION,
-                "id": ukd_id,
-                "name": record["name"],
-                "arch": runs_on,
-                "kernel_source": {
+        document = {
+            "version": DESCRIPTOR_VERSION,
+            "id": ukd_id,
+            "name": record["name"],
+            "arch": runs_on,
+        }
+        if entry.companion is None:
+            document["kernel_source"] = {
+                "kind": "hsaco",
+                # Beside the KDP: the packer resolves an inline kernel's file
+                # relative to the folder of the KDP that holds it.
+                "file": record["file"],
+                "symbol": record["symbol"],
+            }
+        else:
+            # A dB-storing row whose dBias reduce is a standalone object: two launches
+            # (`REDUCE_LAUNCHES`), the row's own object and the companion's.
+            if record["knobs"]["reduce_symbol"] != entry.companion["symbol"]:
+                raise HkpPackError(
+                    f"{record['name']}: reduce_symbol {record['knobs']['reduce_symbol']!r} "
+                    f"is not the symbol {entry.companion['symbol']!r} of its dbias_reduce source"
+                )
+            document["sources"] = {
+                REDUCE_LAUNCHES[0]: {
                     "kind": "hsaco",
-                    # Beside the KDP: the packer resolves an inline kernel's file
-                    # relative to the folder of the KDP that holds it.
                     "file": record["file"],
                     "symbol": record["symbol"],
                 },
-                "metadata": metadata,
-                "priority": record["priority"],
+                REDUCE_LAUNCHES[1]: {
+                    "kind": "hsaco",
+                    "file": entry.companion["file"],
+                    "symbol": entry.companion["symbol"],
+                },
             }
-        )
+        document["metadata"] = metadata
+        document["priority"] = record["priority"]
+        (kernels if entry.companion is None else reduce_kernels).append(document)
 
-    kdp = {
-        "version": DESCRIPTOR_VERSION,
-        "id": _uuid(f"kdp/{op.op}/{arch}"),
-        "name": f"flydsl {op.op} kernels ({arch})",
-        "arch": runs_on,
-        "matchers": [op.umd_id],
-        "engine": op.ued_id,
-        "dispatch": op.udd_id,
-        "provenance": op.provenance(),
-        "kernelDescriptors": kernels,
-    }
-    return {f"{op.stem}.kdp.json": kdp}
+    def pack(suffix: str, dispatch: str, descriptors: list[dict[str, Any]]):
+        kdp = {
+            "version": DESCRIPTOR_VERSION if op.slot is None else SLOTTED_VERSION,
+            "id": _uuid(f"kdp/{op.op}/{arch}{suffix}"),
+            "name": f"flydsl {op.op} kernels ({arch})",
+            "arch": runs_on,
+            "matchers": [op.umd_id],
+            "engine": op.ued_id,
+            "dispatch": dispatch,
+            "provenance": op.provenance(),
+            "kernelDescriptors": descriptors,
+        }
+        if op.slot is not None:
+            kdp["slot"] = op.slot
+        return kdp
+
+    documents = {f"{op.stem}.kdp.json": pack("", op.udd_id, kernels)}
+    if reduce_kernels:
+        if op.op not in SPLIT_REDUCE_OPS:
+            raise HkpPackError(f"{op.op} has no multi-launch dispatch for its rows")
+        documents[f"{arch}.{REDUCE_SUFFIX}.kdp.json"] = pack(
+            f"/{REDUCE_SUFFIX}", op.reduce_udd_id, reduce_kernels
+        )
+    return documents
+
+
+def _require_injective_slot(op: OpDescriptors, kdps: list[dict[str, Any]]) -> None:
+    """A slot's KMD tuples are unique among its kernels, across the packs of the slot.
+
+    The loader drops a slotted pack whose metadata tuple repeats one in its slot, so a
+    generator that emitted two such rows would ship neither silently.
+    """
+    seen: dict[str, str] = {}
+    for kernel in (k for kdp in kdps for k in kdp["kernelDescriptors"]):
+        key = json.dumps(kernel["metadata"], sort_keys=True)
+        if key in seen:
+            raise HkpPackError(
+                f"slot '{op.slot}' ({op.op}): {kernel['name']} and {seen[key]} have the "
+                f"same metadata {key}; a slot's kernels must differ in their metadata"
+            )
+        seen[key] = kernel["name"]
+
+
+def _require_disjoint_ids(slots: dict[str, list[dict[str, Any]]]) -> None:
+    """No kernel id (nor pack id) appears in two slots of the engine, or twice in one."""
+    owner: dict[str, str] = {}
+    for slot, kdps in slots.items():
+        ids = [
+            identity
+            for kdp in kdps
+            for identity in (kdp["id"], *(k["id"] for k in kdp["kernelDescriptors"]))
+        ]
+        for identity in ids:
+            if identity in owner:
+                raise HkpPackError(
+                    f"id {identity} is used by slot '{owner[identity]}' and slot '{slot}'"
+                    if owner[identity] != slot
+                    else f"id {identity} is used twice in slot '{slot}'"
+                )
+            owner[identity] = slot
+
+
+class SplitEngine:
+    """The split engine's descriptor-only content: its UED 1.1.
+
+    Each slot names its own KMD and carries only the tuning fields of its own schema as
+    knobs. The engine has no ranker (the loader falls back to priority, then id), no
+    top-level ``metadata``, ``sort_kernel_catalog``, ``knobs`` or
+    ``predict_applicable_kernels``, and does not author the serialization note: a slotted
+    engine's plans cannot be saved.
+    """
+
+    def __init__(self, slot_ops: dict[str, OpDescriptors]) -> None:
+        self.slot_ops = slot_ops
+        self.stem = f"flydsl_{SPLIT_ENGINE}"
+        self.symbols = f"hipkernel.{self.stem}"
+
+    def documents(self) -> dict[str, dict[str, Any]]:
+        return {
+            f"{self.stem}.ued.json": {
+                "version": SLOTTED_VERSION,
+                "id": _uuid(f"ued/{SPLIT_ENGINE}"),
+                "name": f"hipkernel:{self.stem}",
+                # Pass-by-value scalars (softmax scale, dropout seed and offset).
+                "sdk_version": PASS_BY_VALUE_SDK_VERSION,
+                "graph_match": {"native": f"{self.symbols}.graph_match"},
+                "shared_workspace": SPLIT_SHARED_WORKSPACE,
+                "slots": [
+                    {
+                        "name": slot.slot,
+                        "metadata": slot.kmd_id,
+                        "knobs": knob_fields(slot.op, slot.fields),
+                    }
+                    for slot in self.slot_ops.values()
+                ],
+            }
+        }
 
 
 def build_documents(
@@ -519,10 +800,31 @@ def build_documents(
         by_op.setdefault(entry.op, []).append(entry)
 
     folders: dict[Path, dict[str, dict[str, Any]]] = {}
+    slot_ops: dict[str, OpDescriptors] = {}
+    slot_packs: dict[str, list[dict[str, Any]]] = {}
     for op_name, op_entries in sorted(by_op.items()):
         op = OpDescriptors(op_name, _fields_for_op(op_entries))
         folders[Path(op_name)] = op.documents()
-        folders[Path(op_name) / arch] = _arch_documents(op_entries, op, arch)
+        folders[Path(op_name) / arch] = pack = _arch_documents(op_entries, op, arch)
+        if op.slot is not None:
+            slot_ops[op_name] = op
+            slot_packs[op.slot] = [
+                document
+                for name, document in pack.items()
+                if name.endswith(".kdp.json")
+            ]
+            _require_injective_slot(op, slot_packs[op.slot])
+
+    if slot_ops:
+        missing = [op for op in SPLIT_SLOT_OPS if op not in slot_ops]
+        if missing:
+            raise HkpPackError(
+                f"{arch}: the split engine's slots are {list(SPLIT_SLOT_OPS)}; "
+                f"no content for {missing}"
+            )
+        _require_disjoint_ids(slot_packs)
+        engine = SplitEngine({op: slot_ops[op] for op in SPLIT_SLOT_OPS})
+        folders[Path(SPLIT_ENGINE)] = engine.documents()
     return folders
 
 

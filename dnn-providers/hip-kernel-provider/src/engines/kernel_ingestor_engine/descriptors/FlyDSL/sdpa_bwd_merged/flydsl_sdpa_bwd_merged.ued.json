@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "id": "528f29fd-f955-5c99-a39d-36f02bbdb5a5",
+  "name": "hipkernel:flydsl_sdpa_bwd_merged",
+  "sdk_version": "1.2.0",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_bwd_merged.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "fb66d0b3-de14-5e9d-ad55-d5b427fbecd3"
+  },
+  "metadata": "331def97-6b65-540e-abda-13651841e429",
+  "knobs": [
+    "padded",
+    "hints",
+    "num_waves",
+    "mfma_rows",
+    "dkv_shards",
+    "role_order",
+    "store_db",
+    "gqa_pack",
+    "block_threads",
+    "block_kv",
+    "block_m"
+  ]
+}

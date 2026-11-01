@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "fb66d0b3-de14-5e9d-ad55-d5b427fbecd3",
+  "name": "flydsl sdpa_bwd_merged selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_sdpa_bwd_merged.score"
+  }
+}

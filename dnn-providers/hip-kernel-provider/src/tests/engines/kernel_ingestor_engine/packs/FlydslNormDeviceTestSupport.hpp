@@ -53,7 +53,7 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties packedArchDeviceProperties(
     return properties;
 }
 
-/// Every kernel @p engineName staged for this device, promoted from the loaded descriptors.
+/// The kernels of @p packs staged for this device, promoted from the loaded descriptors.
 ///
 /// Promoted rather than hand-written because a kpack source is only usable with the
 /// packer's own `library`, `toc_key`, `symbol`, `sha256` and the two loader-filled path
@@ -61,16 +61,11 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties packedArchDeviceProperties(
 /// so an empty list on the kernel means "the pack's". A build for several arches loads
 /// every arch's shard, so a kernel staged for another device is passed over.
 inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
-    stagedKernels(std::string_view engineName)
+    stagedKernelsOf(const std::vector<hipdnn_plugin_sdk::ingestor::KernelDescriptorPack>& packs)
 {
     std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
-    const auto* staged = findLoadedSet(engineName);
-    if(staged == nullptr)
-    {
-        return kernels;
-    }
     const auto device = packedArchDeviceProperties().gcnArchName;
-    for(const auto& pack : staged->packs)
+    for(const auto& pack : packs)
     {
         for(const auto& kernel : pack.kernels)
         {
@@ -94,6 +89,34 @@ inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
         }
     }
     return kernels;
+}
+
+/// Every kernel @p engineName staged for this device (see stagedKernelsOf).
+inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
+    stagedKernels(std::string_view engineName)
+{
+    const auto* staged = findLoadedSet(engineName);
+    return staged == nullptr ? std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>{}
+                             : stagedKernelsOf(staged->packs);
+}
+
+/// Every kernel slot @p slotName of the slotted engine @p engineName staged for this device.
+inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
+    stagedSlotKernels(std::string_view engineName, std::string_view slotName)
+{
+    const auto* staged = findLoadedSet(engineName);
+    if(staged == nullptr)
+    {
+        return {};
+    }
+    for(const auto& slot : staged->slots)
+    {
+        if(slot.name == slotName)
+        {
+            return stagedKernelsOf(slot.packs);
+        }
+    }
+    return {};
 }
 
 /// The worst element of a comparison, and where it is.
@@ -143,7 +166,7 @@ inline std::vector<std::string> flydslShippedArches(std::string_view op)
 {
     // A table, not an if/else chain: the two ops usually ship the same arches, and
     // identical branch bodies trip bugprone-branch-clone.
-    constexpr std::array<std::pair<std::string_view, std::string_view>, 8> SHIPPED{{
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 12> SHIPPED{{
         {"rmsnorm", HIPKERNELPROVIDER_FLYDSL_ARCHS_RMSNORM},
         {"rmsnorm_bwd", HIPKERNELPROVIDER_FLYDSL_ARCHS_RMSNORM_BWD},
         {"sdpa_cdna", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_CDNA},
@@ -152,6 +175,10 @@ inline std::vector<std::string> flydslShippedArches(std::string_view op)
         {"sdpa_rdna", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_RDNA},
         {"sdpa_rdna_decode", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_RDNA_DECODE},
         {"sdpa_aiw", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_AIW},
+        {"sdpa_bwd_merged", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_BWD_MERGED},
+        {"sdpa_bwd_prep", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_BWD_PREP},
+        {"sdpa_bwd_dkdv", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_BWD_DKDV},
+        {"sdpa_bwd_dq", HIPKERNELPROVIDER_FLYDSL_ARCHS_SDPA_BWD_DQ},
     }};
     std::string list;
     bool known = false;

@@ -14,7 +14,7 @@ RDNA families **SDPA forward**, prefill and decode engines (156 per family, §5)
 `gfx12-generic` also **AOTriton's gfx1201 kernel** as an engine of its own (72, §5.6).
 **SDPA forward on CDNA** (§7) is three engines -- the generic kernel's prefill, gfx950's
 dual-wave kernel and the split-KV decode -- built per arch for gfx950, gfx942 and gfx90a
-from FlyDSL's own CDNA kernels. Every graph a pack accepts is
+from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,724 objects; the split engine also on gfx11-generic). Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -246,7 +246,7 @@ do not compute, declined rather than approximated.
 | **Gamma that does not encode a normalised shape** (e.g. `[1,2,1,3]` against `[1,2,3,3]`) | Not a broadcast the kernel performs; the frontend rejects it too. |
 | **Multi-node graphs, fused add+RMSNorm** | One node per kernel. Fusion would be its own pack. |
 | **Architectures outside gfx11-generic, gfx12-generic, gfx90a, gfx942 and gfx950** | Objects ship for the gfx11 generic family (gfx1100–gfx1103, gfx1150–gfx1153), the gfx12 one (gfx1200, gfx1201), and the CDNA targets gfx90a, gfx942 and gfx950. gfx1170/gfx1171 belong to `gfx11-7-generic`. With `GPU_TARGETS` naming no arch we ship kernels for, the integration reports dormant at configure time and stages nothing — it does not fail, and it does not silently produce an empty shard. Adding a family is a regeneration ([REGEN.md](REGEN.md) §3), not a code change. |
-| **Ops other than RMSNorm** | Not these packs': `OPS` in `_instances.py` holds RMSNorm forward and backward and the SDPA forward families (§5, §7), each an engine of its own. |
+| **Ops other than RMSNorm** | Not these packs': `OPS` in `_instances.py` holds RMSNorm forward and backward, the SDPA forward families (§5, §7) and the SDPA backward ops (§9), each engine its own. |
 
 ---
 
@@ -1031,3 +1031,73 @@ Approved for this integration.
 | Deviation | What FlyDSL does instead | Status |
 |---|---|---|
 | **Two-launch objects name their second kernel in metadata, not in RFC 0017 §15.1 `sources`.** RMSNorm backward (partial, then reduce) and both split-KV decode engines (split, then merge) launch two kernels compiled into one `.hsaco`. | Each UKD's `kernel_source` names the first kernel; the KMD field `reduce_symbol` (§2a) or `merge_symbol` (§5, §7) names the second, in the same packed object. The native `prepare()` loads both and `launch()` runs them in order on the plan stream. The generators verify both symbols exist in the object, with their recorded argument layouts, before writing it; the packer and the state manager's launch-set check see only the first symbol. | This is the form RFC 0021 §3 (kernel slots, draft) names as an accepted alternative to `sources` for dependent kernels: one UKD whose code object holds them, launched by its native handler through symbol names its KMD records, with a split-KV kernel and its reduction as the example. Optional later move: `hsaco` entries in `sources`, once the packer accepts them (proposed in #14215), which would bring both kernels under the packer's and loader's launch-set checks. The objects would not change. |
+
+---
+
+## 9. SDPA backward — `hipkernel:flydsl_sdpa_bwd_merged` and `hipkernel:flydsl_sdpa_bwd_split`
+
+Split and merged ship for gfx950; split alone also ships for gfx11-generic. Both engines share one graph matcher
+([`FlydslSdpaBwdCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp)),
+a pure function of the graph that either computes the problem or says why it declines; what
+belongs to one engine (tile routing, bias staging, workspace bounds) is that engine's.
+
+| Engine | Launches | Ops (objects) |
+|---|---|---|
+| `hipkernel:flydsl_sdpa_bwd_merged` | one: dK, dV, dQ and, on a bias graph, dBias in one grid, with no prep kernel | `sdpa_bwd_merged` (309) |
+| `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,319), `sdpa_bwd_dq` (1,010); `sdpa_bwd_split` carries the descriptors only |
+
+Neither engine's plans can be serialized: the merged engine's dispatch handler does not
+implement plan saving, and the split engine is slotted (RFC 0021). A
+broadcast dBias is summed by the dBias reduce kernel, a second symbol of the code object
+that launches it (the generator op `sdpa_bwd_dbias_reduce` builds 3 standalone pins, the
+fp32 family has its own); the dSink reduce is the generator op `sdpa_bwd_dsink_reduce` (2
+pins). Neither ships content: the reduce kernels ride inside the objects that launch them. The 16-bit families cover bf16 and f16;
+fp32 is a native f32 MFMA family. A graph none of the shipped rows can compute is
+declined with a named cause (data type, operand layout, mask, workspace overflow), so
+another engine gets the plan where one exists (on gfx11 the split engine is the only SDPA
+backward engine). The kernels and how the shipped objects are pinned are in
+[`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
+the split ops also carry the gfx11-generic set (432 objects: prep 33, dK/dV 198, dQ 198 and the 3 standalone dBias reduce objects, which are companions of the dQ op), built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
+
+### 9.1 What the matcher accepts and declines
+
+The rule IDs below are the ones in the doc comments of the check functions of
+[`FlydslSdpaBwdCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp);
+the decline cause in brackets is the one a refused graph reports.
+
+| Feature | Accepted | Declined |
+|---|---|---|
+| Data type | f16 or bf16 on every tensor (DT-1); f32 on the split engine only (DT-2) | FP8 and mixed types, and f32 on the merged engine (DT-2, DT-3) [data_type] |
+| Heads | unequal Dqk and Dv (DT-5); any GQA group size (DT-6); head dims that are not a multiple of 8 (4 for f32) when the smallest stride is at least the rounded-up dim (DT-8) | max(Dqk, Dv) above 512 (DT-4) [head_size]; a query head count that is not a multiple of the key/value heads (DT-6) [gqa] |
+| Layout | packed Q/K/V views and shared dQ/dK/dV buffers (LY-4) | alignment below 16 bytes (LY-1) [operand]; overlapping outputs (LY-5), strides that are not multiples of 8 elements (LY-3) [layout] |
+| Mask | causal flags (MW-2); windows in cuDNN's convention (MW-5 to MW-8, MW-9a); top-left and bottom-right alignment (MW-4) | both deprecated causal flags (MW-1); a bound below -1 (MW-3); left bound 0 with right bound 0 or unbounded (MW-9b, MW-9c) [mask]; a window with bottom-right alignment under `padding_mask` (MW-13); ALiBi (MW-12) [alibi_mask] |
+| Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1) | the flag without the tensors or the reverse (PV-2); ragged offsets on any operand (PV-3, PV-8) [varlen] |
+| Bias | bias of rank 1 to 4 (BI-1); a bias broadcast over batch or head with dBias (BI-3) | dBias without a bias (BI-6) or with a row-broadcast bias (BI-4) [dbias]; bias with a causal or window mask (MW-10) [mask]; bias with `padding_mask` (PV-10) [varlen] |
+| Dropout | probability in [0, 1) with INT32 or INT64 seed and offset, device or pass-by-value (DR-1 to DR-6); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
+| Scale | `attn_scale_value` or a pass-by-value scale tensor, zero and negative included (SC-1, SC-4) | a device scale tensor (SC-2); both forms (SC-3); a non-finite value or one above 2^20 (SC-5) [scale] |
+
+Six accepted forms are ones cuDNN's backward node rejects: dropout with a bottom-right
+causal mask (MW-11); bottom-right causal alignment or a window with `Sq > Skv` and no
+`padding_mask` (the matcher has no rule against it); head dims that are not a multiple of
+8 (DT-8); head dims above 256 up to 512 (cuDNN v1.24.0 rejects above 256 on SM9x);
+`s_q = s_kv = 1` (the matcher has no rule against it); f32
+data (DT-2, split engine; the v1.24.0 frontend has no data-type check, so whether cuDNN
+serves f32 is unverified). The declines of ALiBi, bias with a mask, bias
+or dBias with `padding_mask`, a dropout mask tensor, ragged offsets and a device scale
+tensor (SC-2) are graphs cuDNN serves; no other hipDNN engine serves SDPA backward on
+gfx950 or gfx11 (asm_sdpa's backward builder is gfx942 only). These are recorded in
+[KNOWN_DIVERGENCES.md](../../../projects/hipdnn/docs/KNOWN_DIVERGENCES.md).
+
+Dropout regenerates the mask in the kernel with the Philox layout of AOTriton (seed and
+offset as AOTriton's backward takes them), not cuDNN's random stream. The gradient is
+correct only when the forward pass drew its mask with the same layout.
+
+### 9.2 Known issues
+
+- **Neither engine's plans can be serialized.** The merged engine's dispatch handler does
+  not implement plan saving (SDK default `supportsSaving()` is false), and an object computing a
+  broadcast dBias uses a second (reduce) launch. The split engine is slotted, and RFC 0021 defers saving a
+  slot program, so a save of its plan is refused.
+- **gfx11-generic is verified on device on gfx1100 only.** The other members it ships to
+  (gfx1101 to gfx1103, gfx1150 to gfx1153) run the same object and have no device run of
+  their own.

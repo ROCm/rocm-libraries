@@ -19,6 +19,7 @@ tests read the product pack this build produced, which CMake names through
 
 from __future__ import annotations
 
+import csv
 import functools
 import hashlib
 import json
@@ -45,6 +46,10 @@ sys.path.insert(0, str(PROVIDER / "descriptor-packaging" / "python"))
 from hkp_pack import provenance_sidecar  # noqa: E402
 
 MANIFEST_NAME = "manifest.json"
+REFERENCE_CSV = Path(__file__).resolve().parent / "data" / "sdpa_bwd_reference.csv"
+GFX11_REFERENCE_CSV = (
+    Path(__file__).resolve().parent / "data" / "sdpa_bwd_gfx11_reference.csv"
+)
 # ELF64 header offset of e_flags, and its EF_AMDGPU_MACH field.
 E_FLAGS_OFFSET = 48
 EF_AMDGPU_MACH = 0x0FF
@@ -248,6 +253,201 @@ def test_check_refuses_a_descriptor_the_authoring_validator_rejects(
     # the whole content tree, can refuse it.
     (content / "orphan.uhd.json").write_text("{}\n", encoding="utf-8")
     _refused(_check(content), "descriptor validation failed")
+
+
+def _reference_rows(path: Path, prefix: str) -> dict[str, str]:
+    """The reference's pinned sha256 by spec, for the specs of one kernel kind."""
+    with path.open(newline="", encoding="utf-8") as handle:
+        return {
+            row["spec"]: row["sha256"]
+            for row in csv.DictReader(handle)
+            if row["spec"].startswith(prefix)
+        }
+
+
+def _pin_problems(manifests: list[Path], reference: dict[str, str]) -> list[str]:
+    """Where the shipped rows of one op's manifests disagree with the reference rows.
+
+    The shipped rows are the reference's specs, no more and no fewer. A row that ships a combined dQ + dBias reduce object (a
+    ``reduce_symbol``) is judged against its pin: the manifest names the reference's pin and the per-kernel gate (dQ bytes,
+    resource row, KD and metadata equal the pin's; the reduce's resource row equals its pin's) is green. Every other row ships the
+    build's own bytes, so its sha256 is not compared with the pin's.
+    """
+    problems = []
+    for path in manifests:
+        shipped = set()
+        for record in json.loads(path.read_text(encoding="utf-8"))["instances"]:
+            spec, where = record["spec"], f"{path.parent.name}: {record['spec']}"
+            shipped.add(spec)
+            if spec not in reference:
+                problems.append(f"{where}: not a reference row")
+            if record["knobs"].get("reduce_symbol"):
+                gate = record.get("gates", {}).get("pin_gate", {})
+                if reference.get(spec) != record.get("pin_sha256"):
+                    problems.append(
+                        f"{where}: gated against pin {record.get('pin_sha256')}, reference {reference.get(spec)}"
+                    )
+                if record.get("ship") != "combined" or gate.get("verdict") != "ok":
+                    problems.append(
+                        f"{where}: combined row's pin gate is not green: "
+                        f"ship {record.get('ship')}, {gate.get('verdict')} {gate.get('problems')}"
+                    )
+        for spec in sorted(set(reference) - shipped):
+            problems.append(f"{path.parent.name}: ships no row for {spec}")
+    return problems
+
+
+def test_merged_rows_are_the_reference_rows() -> None:
+    # A re-pinned sha256 under an unchanged Spec does not change the op's inputs digest,
+    # so --check cannot stale the shipped descriptors; this compares the rows with the reference.
+    manifests = sorted(CONTENT.glob(f"sdpa_bwd_merged/gfx950/{MANIFEST_NAME}"))
+    if not manifests:
+        pytest.skip(f"no sdpa_bwd_merged content under {CONTENT}")
+    reference = _reference_rows(REFERENCE_CSV, "merged,")
+    problems = _pin_problems(manifests, reference)
+    assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
+
+
+# The split engine's slot ops and the kernel kind each one's reference rows are keyed by.
+SPLIT_KINDS = {"sdpa_bwd_prep": "prep,", "sdpa_bwd_dkdv": "dkdv,", "sdpa_bwd_dq": "dq,"}
+
+
+@pytest.mark.parametrize("op", SPLIT_KINDS)
+def test_split_rows_are_the_reference_rows(op: str) -> None:
+    manifests = sorted(CONTENT.glob(f"{op}/gfx950/{MANIFEST_NAME}"))
+    if not manifests:
+        pytest.skip(f"no {op} gfx950 content under {CONTENT}")
+    reference = _reference_rows(REFERENCE_CSV, SPLIT_KINDS[op])
+    problems = _pin_problems(manifests, reference)
+    assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
+
+
+def _gfx11_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[str]:
+    """Where a gfx11-generic manifest differs from the S1 reference: every row and companion is a reference spec, ships the
+    reference's sha256 (a gfx11 object is its pin byte for byte), and no reference spec of the op's kinds is missing.
+    """
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    problems = []
+    shipped = set()
+    for record in [*manifest["instances"], *manifest.get("companions", [])]:
+        spec = record["spec"]
+        shipped.add(spec)
+        if spec not in reference:
+            problems.append(f"{spec}: not a reference row")
+        elif record["sha256"] != reference[spec]:
+            problems.append(
+                f"{spec}: ships {record['sha256']}, the pin is {reference[spec]}"
+            )
+    for spec in sorted(set(reference) - shipped):
+        problems.append(f"ships no row for {spec}")
+    return problems
+
+
+@pytest.mark.parametrize("op", SPLIT_KINDS)
+def test_gfx11_split_rows_are_the_reference_pins(op: str) -> None:
+    path = CONTENT / op / "gfx11-generic" / MANIFEST_NAME
+    if not path.is_file():
+        pytest.skip(f"no {op} gfx11-generic content under {CONTENT}")
+    kinds = [SPLIT_KINDS[op]] + (["dbias_reduce,"] if op == "sdpa_bwd_dq" else [])
+    reference = {
+        spec: sha
+        for kind in kinds
+        for spec, sha in _reference_rows(GFX11_REFERENCE_CSV, kind).items()
+    }
+    problems = _gfx11_pin_problems(path, reference)
+    assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
+
+
+def test_a_gfx11_row_that_is_not_its_pin_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / MANIFEST_NAME
+    path.write_text(
+        json.dumps(
+            {
+                "instances": [{"spec": "dq,bf16,16", "sha256": "a" * 64}],
+                "companions": [{"spec": "dbias_reduce,bf16", "sha256": "b" * 64}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    reference = {
+        "dq,bf16,16": "c" * 64,
+        "dbias_reduce,bf16": "b" * 64,
+        "dq,bf16,32": "d" * 64,
+    }
+    assert _gfx11_pin_problems(path, reference) == [
+        f"dq,bf16,16: ships {'a' * 64}, the pin is {'c' * 64}",
+        "ships no row for dq,bf16,32",
+    ]
+
+
+def _synthetic_split_op(
+    tmp_path: Path, rows: list[dict]
+) -> tuple[list[Path], dict[str, str]]:
+    """A one-arch dq manifest of @p rows and the reference rows its specs are pinned by."""
+    folder = tmp_path / "sdpa_bwd_dq" / "gfx950"
+    folder.mkdir(parents=True)
+    manifest = folder / MANIFEST_NAME
+    instances = []
+    reference = {}
+    for index, row in enumerate(rows):
+        pin = f"{index:064x}"
+        spec = f"dq,bf16,{index}"
+        reference[spec] = pin
+        combined = row.get("combined", False)
+        record = {
+            "spec": spec,
+            "knobs": {"reduce_symbol": "dbias_reduce" if combined else ""},
+        }
+        if combined:
+            record.update(
+                {
+                    "pin_sha256": row.get("pin_sha256", pin),
+                    "ship": row.get("ship", "combined"),
+                    "gates": {"pin_gate": {"verdict": row.get("verdict", "ok")}},
+                }
+            )
+        instances.append(record)
+    manifest.write_text(json.dumps({"instances": instances}), encoding="utf-8")
+    return [manifest], reference
+
+
+def test_row_check_accepts_built_rows_and_gated_combined_rows(tmp_path: Path) -> None:
+    # A plain row ships the build's bytes, so only a combined row's pin facts are checked.
+    manifests, reference = _synthetic_split_op(
+        tmp_path, [{}, {"combined": True}, {"combined": True}]
+    )
+    assert _pin_problems(manifests, reference) == []
+
+
+@pytest.mark.parametrize(
+    "row, diagnostic",
+    [
+        ({"combined": True, "pin_sha256": "f" * 64}, "gated against pin"),
+        ({"combined": True, "verdict": "red"}, "pin gate is not green"),
+        ({"combined": True, "ship": "rebuild"}, "pin gate is not green"),
+    ],
+    ids=["stale-pin", "red-gate", "combined-row-not-gated"],
+)
+def test_row_check_refuses(tmp_path: Path, row: dict, diagnostic: str) -> None:
+    manifests, reference = _synthetic_split_op(tmp_path, [{}, row])
+    problems = _pin_problems(manifests, reference)
+    assert problems and diagnostic in problems[0], problems
+
+
+def test_row_check_refuses_a_missing_row(tmp_path: Path) -> None:
+    manifests, reference = _synthetic_split_op(tmp_path, [{}])
+    reference["dq,bf16,99"] = "a" * 64
+    assert _pin_problems(manifests, reference) == [
+        "gfx950: ships no row for dq,bf16,99"
+    ]
+
+
+def test_row_check_refuses_a_row_outside_the_reference(tmp_path: Path) -> None:
+    manifests, reference = _synthetic_split_op(tmp_path, [{}, {}])
+    del reference["dq,bf16,1"]
+    assert _pin_problems(manifests, reference) == [
+        "gfx950: dq,bf16,1: not a reference row"
+    ]
 
 
 # ---------------------------------------------------------------------------

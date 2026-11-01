@@ -18,6 +18,12 @@ hold one shipped UKD per manifest instance, and each must
   the packer computed from the bytes it put in the archive, and the one the
   runtime verifies at load.
 
+A multi-launch UKD (a dQ row whose dBias reduce is a standalone object) lists its
+objects under ``sources`` and carries, in its provenance, ``origin_kind`` ``hsaco``
+and ``sources``: per launch the packed ``file``, ``sha256`` and ``symbol``. Each
+launch must be the checked-in object it names: the row's own for ``dq``, the manifest's
+companion of the row's reduce symbol and dtype for ``dbias_reduce``.
+
 So for a generic target, every member's shard is shown to ship the one shared
 object set, byte for byte, and no member is left without it.
 """
@@ -47,6 +53,58 @@ def _manifests(content_dir: Path) -> list[tuple[str, str, dict]]:
         manifest = json.loads(path.read_text(encoding="utf-8"))
         found.append((path.parent.parent.name, path.parent.name, manifest))
     return found
+
+
+# The launches of a multi-launch row: the row's own object, then its standalone reduce object.
+OWN_LAUNCH = "dq"
+REDUCE_LAUNCH = "dbias_reduce"
+
+
+def _launch_problems(where, name, document, record, companions, want_dir) -> list[str]:
+    """What is wrong with the ``sources`` UKD @p document of the manifest row @p record."""
+    provenance = document.get("provenance", {})
+    if provenance.get("origin_kind") != "hsaco":
+        return [f"{where}: {name} was not packed from an hsaco"]
+    reduce_symbol = record["knobs"].get("reduce_symbol", "")
+    companion = next(
+        (
+            c
+            for c in companions
+            if c["symbol"] == reduce_symbol
+            and c["spec"].split(",")[1] == record["dtype"]
+        ),
+        None,
+    )
+    if companion is None:
+        return [f"{where}: {name} has no companion for reduce symbol {reduce_symbol!r}"]
+    wanted = {
+        OWN_LAUNCH: (record["file"], record["sha256"], record["symbol"]),
+        REDUCE_LAUNCH: (companion["file"], companion["sha256"], companion["symbol"]),
+    }
+    problems = []
+    packed = provenance.get("sources", {})
+    if set(packed) != set(wanted) or set(document.get("sources", {})) != set(wanted):
+        return [
+            f"{where}: {name} ships launches {sorted(packed)}, not {sorted(wanted)}"
+        ]
+    for launch, (file, digest, symbol) in wanted.items():
+        entry = packed[launch]
+        shipped = document["sources"][launch]
+        if entry.get("file") != f"{want_dir}/{file}":
+            problems.append(
+                f"{where}: {name} launch {launch} was packed from {entry.get('file')!r}, "
+                f"not {want_dir + '/' + file!r}"
+            )
+        if entry.get("sha256") != digest or shipped.get("sha256") != digest:
+            problems.append(
+                f"{where}: {name} launch {launch} ships payload {entry.get('sha256')}, "
+                f"but the checked-in object is {digest}"
+            )
+        if entry.get("symbol") != symbol:
+            problems.append(
+                f"{where}: {name} launch {launch} is symbol {entry.get('symbol')!r}, not {symbol!r}"
+            )
+    return problems
 
 
 def check(content_dir: Path, out_root: Path, arches: list[str]) -> list[str]:
@@ -81,10 +139,26 @@ def check(content_dir: Path, out_root: Path, arches: list[str]) -> list[str]:
                 document, record = shipped[name], expected[name]
                 provenance = document.get("provenance", {})
                 source = document.get("kernel_source", {})
-                want_file = f"{content_dir.name}/{op}/{target}/{record['file']}"
+                want_dir = f"{content_dir.name}/{op}/{target}"
+                want_file = f"{want_dir}/{record['file']}"
                 if document.get("arch") != [arch]:
                     problems.append(
                         f"{where}: {name} lists arch {document.get('arch')}"
+                    )
+                if "sources" in document:
+                    problems += _launch_problems(
+                        where,
+                        name,
+                        document,
+                        record,
+                        manifest.get("companions", []),
+                        want_dir,
+                    )
+                    continue
+                if manifest.get("companions") and record["knobs"].get("reduce_symbol"):
+                    problems.append(
+                        f"{where}: {name} stores dB through a standalone reduce object "
+                        "but ships as one launch"
                     )
                 if provenance.get("origin_kind") != "hsaco":
                     problems.append(f"{where}: {name} was not packed from an hsaco")

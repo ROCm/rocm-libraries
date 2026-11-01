@@ -183,7 +183,18 @@ def test_a_new_generator_module_changes_only_the_ops_that_import_it(
         ("generators/_codeobject.py", set(OP_KERNEL_DIRS)),
         ("generators/_ops.py", set()),
         ("kernels_src/kernels/norm/rmsnorm_kernel.py", {"rmsnorm", "rmsnorm_bwd"}),
-        ("kernels_src/kernels/attention_rdna4/philox.py", {"sdpa_aiw"}),
+        (
+            "kernels_src/kernels/attention_rdna4/philox.py",
+            {"sdpa_aiw", "sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq"},
+        ),
+        (
+            "kernels_src/kernels/attention_bwd_rdna/fmha_bwd_dkdv_gfx11.py",
+            {"sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq"},
+        ),
+        (
+            "generators/_sdpa_bwd_rdna_build.py",
+            {"sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq"},
+        ),
         ("kernels_src/kernels/common/kernels_common.py", set(OP_KERNEL_DIRS)),
     ],
 )
