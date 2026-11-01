@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -110,6 +108,59 @@
       "expected_failures": {}
     },
     "llvm23": {
+      "cases": {
+        "conv_winograd_fwd_rt/gfx1250/bf16_k2a": {
+          "arch": "gfx1250",
+          "bytes": 6253,
+          "family": "conv_winograd_fwd_rt",
+          "kernel_name": "wino_rt_pmax_bf16_v8",
+          "sha256": "c1ff39de4529279f930d8a298065cae9f62d954445d76fc976a1e36b671367e3",
+          "status": "ok"
+        },
+        "conv_winograd_fwd_rt/gfx1250/f2_lds_k2": {
+          "arch": "gfx1250",
+          "bytes": 231155,
+          "family": "conv_winograd_fwd_rt",
+          "kernel_name": "wino_rt_input_f2_fp16_opfp16_v8_lds4x8_ll16_t4",
+          "sha256": "face2b28826e42ecf5ce95fcbe83cb070eb663fdb0a0c39b002420a661474218",
+          "status": "ok"
+        },
+        "conv_winograd_fwd_rt/gfx1250/f4_bf16_fused_prescale_k2": {
+          "arch": "gfx1250",
+          "bytes": 138443,
+          "family": "conv_winograd_fwd_rt",
+          "kernel_name": "wino_rt_input_f4_bf16_opfp16_v4_b256_r1_psf",
+          "sha256": "455b377ae4439439e12fc3a140e3c25ca968647271ed1f784b1051ae3b83b678",
+          "status": "ok"
+        },
+        "conv_winograd_fwd_rt/gfx1250/f4_k1": {
+          "arch": "gfx1250",
+          "bytes": 58876,
+          "family": "conv_winograd_fwd_rt",
+          "kernel_name": "wino_rt_filter_f4_fp16_opfp16_v8_fr2",
+          "sha256": "d86adca253c7e86d3dffe005f0f8291140201e6f4393ac726dbae6cb1ee55a6c",
+          "status": "ok"
+        },
+        "conv_winograd_fwd_rt/gfx1250/f4_k2": {
+          "arch": "gfx1250",
+          "bytes": 102999,
+          "family": "conv_winograd_fwd_rt",
+          "kernel_name": "wino_rt_input_f4_fp16_opfp16_v4_b256_r1",
+          "sha256": "a0c9029f858812440da5b775d95e61acc636fa0c5bdb5aa1b40ac68072fc297c",
+          "status": "ok"
+        },
+        "conv_winograd_fwd_rt/gfx1250/f6x4_bf16_prescale_k4": {
+          "arch": "gfx1250",
+          "bytes": 131049,
+          "family": "conv_winograd_fwd_rt",
+          "kernel_name": "wino_rt_output_f6x4_bf16_opfp16_v4_b256_ps",
+          "sha256": "1b87a48cf46fa9ccfcaa822f677bdd0f603e7c99e2dc2df50c7150b704e29ec2",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "conv_winograd_fwd_rt/gfx1250/bf16_k2a": {
           "arch": "gfx1250",
