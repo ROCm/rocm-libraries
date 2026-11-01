@@ -18,7 +18,8 @@
  * This header must be compiled as HIP.
  */
 
-#include "tables.hpp" /* neg_mod, inv_mod, qpi, inv_P, P_dd */
+#include "kernel_common.hpp" /* balanced_residue_i32 */
+#include "tables.hpp" /* qpi, inv_P, P_dd */
 
 #include <hip/hip_runtime.h>
 
@@ -43,18 +44,20 @@ namespace FixedPointEmulation
         const size_t idx          = static_cast<size_t>(i) + static_cast<size_t>(l) * ldc32i;
         const size_t slice_stride = ldc32i * static_cast<size_t>(n);
         /* Two-pass: dc_s[CS] caches balanced residues from independent HBM loads.
-         * Pass 1: all CS loads + rint+fma issued simultaneously (MLP, ~200cy latency);
-         *   FP64 compute overlaps HBM latency. Uses CS×2 VGPRs (~52 for CS=16).
+         * Pass 1: all CS loads + residue reductions issued simultaneously (MLP, ~200cy
+         *   latency); the integer/FP32 reduction (balanced_residue_i32) overlaps HBM
+         *   latency. Uses CS×2 VGPRs (~52 for CS=16).
          * Pass 2: pure register TwoSum, loop-carried dep through Zhi only.
          * Note: storing dc as int32 (dc_int_s) was tested — same performance at all
-         * sizes (kernel is HBM-bandwidth-limited; higher occupancy does not help). */
+         * sizes on gfx950 (kernel is HBM-bandwidth-limited there; higher occupancy does
+         * not help). */
         double dc_s[CHUNK_SIZE];
 #pragma unroll
         for(unsigned t_local = 0; t_local < CHUNK_SIZE; ++t_local)
         {
-            const unsigned t      = chunk_start + t_local;
-            const double   dc_raw = static_cast<double>(C32i_batch[t_local * slice_stride + idx]);
-            dc_s[t_local]         = fma(neg_mod(t), rint(dc_raw * inv_mod(t)), dc_raw);
+            const unsigned t = chunk_start + t_local;
+            dc_s[t_local]    = static_cast<double>(
+                balanced_residue_i32(C32i_batch[t_local * slice_stride + idx], t));
         }
         double Zhi = 0.0, Zlo = 0.0;
 #pragma unroll
@@ -126,9 +129,9 @@ namespace FixedPointEmulation
 #pragma unroll
         for(unsigned t_local = 0; t_local < CHUNK_SIZE; ++t_local)
         {
-            const unsigned t      = chunk_start + t_local;
-            const double   dc_raw = static_cast<double>(C32i_batch[t_local * slice_stride + idx]);
-            dc_s[t_local]         = fma(neg_mod(t), rint(dc_raw * inv_mod(t)), dc_raw);
+            const unsigned t = chunk_start + t_local;
+            dc_s[t_local]    = static_cast<double>(
+                balanced_residue_i32(C32i_batch[t_local * slice_stride + idx], t));
         }
         double Zhi = 0.0, Zlo = 0.0;
 #pragma unroll
