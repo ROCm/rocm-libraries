@@ -41,6 +41,7 @@ __device__ static constexpr int WarpSize = 64;
 __device__ static constexpr int WarpSize = 32;
 #endif
 
+#include "rocsolver_logger.hpp"
 ROCSOLVER_BEGIN_NAMESPACE
 
 /*
@@ -853,13 +854,28 @@ ROCSOLVER_KERNEL void init_ident(const rocblas_int m,
 }
 
 template <typename T, typename I, typename U>
-ROCSOLVER_KERNEL void reset_info(T* info, const I n, U val, I incr = 0)
+ROCSOLVER_KERNEL void reset_info_kernel(T* info, const I n, U val, I incr = 0)
 {
     I idx = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
     I stride = hipGridDim_x * static_cast<I>(hipBlockDim_x);
 
     for(I i = idx; i < n; i += stride)
         info[i] = T(val) + incr * i;
+}
+
+template <typename T, typename I, typename U>
+void reset_info(rocblas_handle handle, T* info, const I n, U val, I incr = 0)
+{
+    hipStream_t stream{};
+    rocblas_get_stream(handle, &stream);
+
+    I const max_nblocks_x = 64 * 1024 - 1;
+
+    I const nthreads_x = std::max(I(1), std::min(I(BS1), I(n)));
+    I const nblocks_x = std::max(I(1), std::min(I(max_nblocks_x), I(ceildiv(n, nthreads_x))));
+
+    ROCSOLVER_LAUNCH_KERNEL(reset_info_kernel, dim3(nblocks_x, 1, 1), dim3(nthreads_x, 1, 1), 0,
+                            stream, info, n, val, incr);
 }
 
 template <typename T, typename I, typename S, typename U>
