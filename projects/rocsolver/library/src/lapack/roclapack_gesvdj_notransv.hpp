@@ -251,11 +251,9 @@ rocblas_status rocsolver_gesvdj_notransv_template(rocblas_handle handle,
         dim3 gridReset(blocksReset, 1, 1);
         dim3 threadsReset(BS1, 1, 1);
 
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, residual,
-                                batch_count, 0);
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, n_sweeps,
-                                batch_count, 0);
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, info, batch_count, 0);
+        reset_info(handle, residual, batch_count, 0);
+        reset_info(handle, n_sweeps, batch_count, 0);
+        reset_info(handle, info, batch_count, 0);
 
         return rocblas_status_success;
     }

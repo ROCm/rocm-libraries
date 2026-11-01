@@ -2290,11 +2290,9 @@ rocblas_status rocsolver_syevj_heevj_template(rocblas_handle handle,
         dim3 gridReset(blocksReset, 1, 1);
         dim3 threadsReset(BS1, 1, 1);
 
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, residual,
-                                batch_count, 0);
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, n_sweeps,
-                                batch_count, 0);
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, info, batch_count, 0);
+        reset_info(handle, residual, batch_count, 0);
+        reset_info(handle, n_sweeps, batch_count, 0);
+        reset_info(handle, info, batch_count, 0);
 
         // scalar case
         if(n == 1)
@@ -2418,8 +2416,7 @@ rocblas_status rocsolver_syevj_heevj_template(rocblas_handle handle,
         rocblas_int h_completed = 0;
 
         // set completed = 0
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, completed,
-                                batch_count + 1, 0);
+        reset_info(handle, completed, batch_count + 1, 0);
 
         // copy A to Acpy, set A to identity (if applicable), compute initial residual, and
         // initialize top/bottom pairs (if applicable)
