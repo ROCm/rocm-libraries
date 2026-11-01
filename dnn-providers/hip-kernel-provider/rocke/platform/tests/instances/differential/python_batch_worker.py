@@ -115,7 +115,9 @@ def main() -> int:
         help="also report each output's canonical ck.dsl.ir/v1 hash",
     )
     parser.add_argument("emitter", type=Path)
-    parser.add_argument("mode", choices=("ll", "ir", "verify"))
+    # The emitter owns its mode list (``_emit_common.MODES`` for most) and
+    # answers an unknown one with "unknown mode", which callers rely on.
+    parser.add_argument("mode")
     parser.add_argument("indices", nargs="+", type=int)
     args = parser.parse_args()
 
