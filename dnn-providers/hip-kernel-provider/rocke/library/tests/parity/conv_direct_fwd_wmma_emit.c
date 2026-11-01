@@ -50,6 +50,19 @@ static rocke_direct_conv_problem_t make_problem(int KH,
     return p;
 }
 
+/* make_problem_1d(R, dilation, column padding, stride, cpg, kpg, dtype): the
+ * Python emitter's _p1d() (1 x R on a 1 x 300 signal, PAD 0). */
+static rocke_direct_conv_problem_t
+    make_problem_1d(int R, int d, int pw, int stride, int cpg, int kpg, const char* dtype)
+{
+    rocke_direct_conv_problem_t p = make_problem(1, 0, stride, 1, cpg, kpg, 1, d, dtype);
+    p.H = 1;
+    p.W = 300;
+    p.KW = R;
+    p.pad_w = pw;
+    return p;
+}
+
 static void knobs(
     rocke_direct_fwd_wmma_spec_t* s, int wk, int wp, int tk, int tp, int tw, int tn, int ck, int st)
 {
@@ -195,6 +208,35 @@ static int make_cfg(int idx, rocke_direct_fwd_wmma_spec_t* s, const char** arch)
         knobs(s, 1, 4, 2, 4, 16, 1, 32, 2);
         s->prefetch = true;
         s->sched = "max-ilp";
+        return 0;
+    case 22:
+        s->problem = make_problem_1d(3, 1, 1, 1, 64, 96, "bf16");
+        knobs(s, 1, 4, 2, 4, 256, 1, 32, 2);
+        return 0;
+    case 23:
+        s->problem = make_problem_1d(7, 3, 9, 1, 64, 96, "fp16");
+        knobs(s, 2, 4, 4, 4, 256, 1, 32, 3);
+        s->prefetch = true;
+        s->split_barrier = true;
+        return 0;
+    case 24:
+        s->problem = make_problem_1d(11, 1, 5, 1, 64, 96, "bf16");
+        knobs(s, 2, 4, 4, 8, 512, 1, 32, 2);
+        s->pingpong = true;
+        return 0;
+    case 25:
+        s->problem = make_problem_1d(3, 1, 1, 1, 128, 128, "fp16");
+        knobs(s, 2, 4, 4, 4, 256, 1, 64, 2);
+        return 0;
+    case 26:
+        s->problem = make_problem_1d(3, 3, 3, 2, 64, 96, "bf16");
+        return 0;
+    case 27:
+        s->problem = make_problem_1d(7, 3, 19, 1, 64, 96, "bf16");
+        return 0;
+    case 28:
+        s->problem = make_problem_1d(11, 5, 25, 1, 64, 96, "fp16");
+        knobs(s, 1, 8, 2, 4, 512, 1, 32, 2);
         return 0;
     default:
         return -1;

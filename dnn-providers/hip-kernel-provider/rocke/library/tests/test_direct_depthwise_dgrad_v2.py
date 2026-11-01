@@ -158,8 +158,8 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
         )
 
     def test_wmma_kernels_refuse_per_axis_padding(self):
-        # The WMMA convolutions offset columns by PAD, except the small-K
-        # forward (see test_wmma_kernels_take_per_axis_padding).
+        # The WMMA convolutions offset columns by PAD, except the forwards
+        # checked at the end.
         from kernels.common.conv_direct_dgrad_wmma import (
             DirectDgradWmmaSpec,
             dgrad_wmma_reason,
@@ -181,7 +181,6 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
             )
 
         cases = (
-            (DirectFwdWmmaSpec, fwd_wmma_reason, {}),
             (DirectDgradWmmaSpec, dgrad_wmma_reason, {}),
             (FwdSmallcWmmaSpec, fwd_smallc_reason, dict(H=32, W=48, C=3, K=64)),
         )
@@ -192,7 +191,9 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
                 why = reason(cls(problem=dense(0, **shape)))
                 self.assertEqual(why, "one padding for both axes (got PAD=1x0)")
                 self.assertIn("pad_w", reason(cls(problem=dense(-2, **shape))))
-        # The small-K forward offsets columns by PAD_W.
+        # The direct and small-K WMMA forwards offset columns by PAD_W.
+        self.assertIsNone(fwd_wmma_reason(DirectFwdWmmaSpec(problem=dense(0))))
+        self.assertIn("pad_w", fwd_wmma_reason(DirectFwdWmmaSpec(problem=dense(-2))))
         shape = dict(H=32, W=48, C=64, K=4)
         self.assertIsNone(
             fwd_smallk_reason(FwdSmallkWmmaSpec(problem=dense(0, **shape)))

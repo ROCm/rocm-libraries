@@ -5351,6 +5351,19 @@ def cases():
             dict(PAD=2, dil_w=2),
             dict(waves_k=1, tiles_k=2, tap_reuse=True, tap_shift=True),
         ),
+        (
+            "fp16_1x7_dil3_pw9",
+            dict(H=1, W=300, KH=1, KW=7, PAD=0, pad_w=9, dil_w=3, dtype="fp16"),
+            dict(
+                waves_k=2,
+                tiles_k=4,
+                tiles_p=4,
+                tile_w=256,
+                stages=3,
+                prefetch=True,
+                split_barrier=True,
+            ),
+        ),
     ):
         add(
             "conv_direct_fwd_wmma",

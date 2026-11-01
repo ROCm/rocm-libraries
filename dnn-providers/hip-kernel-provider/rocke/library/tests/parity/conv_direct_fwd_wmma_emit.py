@@ -34,6 +34,15 @@
 #  19  rejected by both engines: gfx950 (wave64, no TDM)
 #  20  rejected by both engines: stride 3
 #  21  bf16, 5x5 PAD 2, prefetch + max-ilp
+#  1 x R on a 1-D signal (H 1, W 300, PAD 0, "same" column padding):
+#  (one output row per block: tile_w = the block's pixels)
+#  22  bf16, 1x3, 1x4 waves, 2x4 tiles
+#  23  fp16, 1x7 dilation 3, 3 stages, prefetch + split_barrier
+#  24  bf16, 1x11, pingpong, 4x8 tiles
+#  25  fp16, 1x3, cpg = kpg = 128, ck 64
+#  26  rejected by both engines: 1x3 dilation 3 stride 2
+#  27  rejected by both engines: 1x7 dilation 3, column PAD 19
+#  28  fp16, 1x11 dilation 5, 1x8 waves
 from _emit_common import run_emit
 from kernels.common.conv_direct_fwd_wmma import (
     DirectFwdWmmaSpec,
@@ -68,6 +77,24 @@ def _p(
         dtype=dtype,
         dil_h=dil_h,
         dil_w=dil_w,
+    )
+
+
+def _p1d(R, d, pw, *, dtype="bf16", stride=1, cpg=64, kpg=96):
+    return DirectConvProblem(
+        N=2,
+        H=1,
+        W=300,
+        groups=1,
+        cpg=cpg,
+        kpg=kpg,
+        KH=1,
+        KW=R,
+        PAD=0,
+        pad_w=pw,
+        stride=stride,
+        dtype=dtype,
+        dil_w=d,
     )
 
 
@@ -243,6 +270,31 @@ def _spec(idx: int):
                 problem=_p(KH=5, PAD=2),
                 **_k(1, 4, 2, 4, 16, 1, 32, 2, prefetch=True, sched="max-ilp"),
             ),
+            "gfx1250",
+        ),
+        22: (S(problem=_p1d(3, 1, 1), **_k(1, 4, 2, 4, 256, 1, 32, 2)), "gfx1250"),
+        23: (
+            S(
+                problem=_p1d(7, 3, 9, dtype="fp16"),
+                **_k(2, 4, 4, 4, 256, 1, 32, 3, prefetch=True, split_barrier=True),
+            ),
+            "gfx1250",
+        ),
+        24: (
+            S(problem=_p1d(11, 1, 5), **_k(2, 4, 4, 8, 512, 1, 32, 2, pingpong=True)),
+            "gfx1250",
+        ),
+        25: (
+            S(
+                problem=_p1d(3, 1, 1, dtype="fp16", cpg=128, kpg=128),
+                **_k(2, 4, 4, 4, 256, 1, 64, 2),
+            ),
+            "gfx1250",
+        ),
+        26: (S(problem=_p1d(3, 3, 3, stride=2)), "gfx1250"),
+        27: (S(problem=_p1d(7, 3, 19)), "gfx1250"),
+        28: (
+            S(problem=_p1d(11, 5, 25, dtype="fp16"), **_k(1, 8, 2, 4, 512, 1, 32, 2)),
             "gfx1250",
         ),
     }

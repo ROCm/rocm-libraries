@@ -20,6 +20,10 @@
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
           "type": "ValueError"
         },
+        "conv_direct_fwd_wmma/gfx1250/fp16_1x7_dil3_pw9": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
         "conv_direct_fwd_wmma/gfx1250/fp16_tn2_sb_we_pf": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
           "type": "ValueError"
@@ -42,6 +46,10 @@
           "type": "ValueError"
         },
         "conv_direct_fwd_wmma/gfx1250/bf16_tu_tsh_dil": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
+        "conv_direct_fwd_wmma/gfx1250/fp16_1x7_dil3_pw9": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
           "type": "ValueError"
         },
@@ -83,6 +91,14 @@
           "family": "conv_direct_fwd_wmma",
           "kernel_name": "direct_fwd_wmma_f3x3_p2_wk1_wp4_tk2_tp4_tw16_ck32_st2_dil1x2_tu_tsh_bf16",
           "sha256": "dccd98b256c9685003a9943c3af2af9053a961468baf5724b24ddbf6ebd171e3",
+          "status": "ok"
+        },
+        "conv_direct_fwd_wmma/gfx1250/fp16_1x7_dil3_pw9": {
+          "arch": "gfx1250",
+          "bytes": 227927,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f1x7_p0_pw9_wk2_wp4_tk4_tp4_tw256_ck32_st3_pf_dil1x3_sb",
+          "sha256": "6aef1a4f0abe3b98d0d79c1df1eedddb5dac7454af150110e1af551a2efab1c1",
           "status": "ok"
         },
         "conv_direct_fwd_wmma/gfx1250/fp16_tn2_sb_we_pf": {
@@ -128,6 +144,14 @@
           "family": "conv_direct_fwd_wmma",
           "kernel_name": "direct_fwd_wmma_f3x3_p2_wk1_wp4_tk2_tp4_tw16_ck32_st2_dil1x2_tu_tsh_bf16",
           "sha256": "dccd98b256c9685003a9943c3af2af9053a961468baf5724b24ddbf6ebd171e3",
+          "status": "ok"
+        },
+        "conv_direct_fwd_wmma/gfx1250/fp16_1x7_dil3_pw9": {
+          "arch": "gfx1250",
+          "bytes": 227927,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f1x7_p0_pw9_wk2_wp4_tk4_tp4_tw256_ck32_st3_pf_dil1x3_sb",
+          "sha256": "6aef1a4f0abe3b98d0d79c1df1eedddb5dac7454af150110e1af551a2efab1c1",
           "status": "ok"
         },
         "conv_direct_fwd_wmma/gfx1250/fp16_tn2_sb_we_pf": {

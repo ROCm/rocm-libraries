@@ -1281,9 +1281,16 @@ Knobs beyond the tile geometry (`prefetch`, `sched` as in the dgrad):
   wave); `tap_shift` builds the next filter column's fragments with an
   in-wave lane rotation (`v_permlane16`).
 
+Besides square filters it serves 1 x R filters on 1-D signals (stride 1,
+unpacked, no `phase_split` / `tap_reuse`) with a column padding of their own
+(`pad_w`, in 0..(R-1)*dil_w): the halo's column origin, the left-edge shift
+and its wrap slack follow `PAD_W`. Their AOT rows (`FWD_WMMA_1D_FILTERS`,
+`FWD_WMMA_1D_KNOBS`) put one output row in a block, the tile as wide as the
+block.
+
 Runtime (kernargs): batch, extents, the group count and both channel counts
-(unless packed). Build-time: filter (square), stride 1 or 2, per-axis
-dilation, `PAD` in 0..(K-1)*dil, dtype and the tile geometry. Constraints:
+(unless packed). Build-time: filter (square or 1 x R), stride 1 or 2,
+per-axis dilation, `PAD` in 0..(K-1)*dil, dtype and the tile geometry. Constraints:
 `cpg` and `kpg` (after packing) multiples of 8, `ck` a multiple of 32, every
 tensor below 2 GiB (i32 byte offsets), and the ring and the staged Y tile
 within the LDS. The AOT grid is `FWD_WMMA_*_KNOBS` (variant

@@ -655,6 +655,23 @@ FWD_WMMA_DILATED_STRIDED_KNOBS = (
     (2, 1, 1, 4, 16, 1, 64, 2, True, False, False, False, False),
     (4, 1, 1, 4, 16, 2, 32, 2, True, False, False, False, False),
 )
+# 1 x R filters on 1-D signals, (R, dilation), "same" padding: the HiFi-GAN
+# resblock / generator layers.
+FWD_WMMA_1D_FILTERS = tuple((r, d) for r in (3, 7, 11) for d in (1, 3, 5))
+# (waves_k, waves_p, tiles_k, tiles_p, ck, stages, mode): tile_h = 1, tile_w =
+# the block's pixels. 32-64 channels: small K blocks over long strips (memory
+# bound); 128-256 channels: the dense 3x3 schedules.
+FWD_WMMA_1D_KNOBS = (
+    (1, 4, 2, 4, 32, 2, ""),
+    (1, 8, 2, 4, 32, 2, ""),
+    (1, 4, 2, 8, 32, 2, ""),
+    (1, 4, 4, 4, 32, 2, ""),
+    (2, 4, 4, 4, 32, 3, "pfsb"),
+    (2, 4, 4, 4, 64, 2, ""),
+    (1, 8, 8, 4, 32, 2, "pfsb"),
+    (2, 4, 4, 8, 32, 2, "pp"),
+    (2, 4, 4, 10, 32, 2, "pp"),
+)
 # END FWD_WMMA TABLES
 
 # Tiled direct wgrad (DirectWgradTiledSpec): (wave_k16, wave_c16, waves_k,
@@ -1259,6 +1276,20 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         + tuple(
             DirectCaps(KH=3, PAD=pad, stride=s, cpg=0, kpg=0, dil_h=dh, dil_w=dw)
             for pad, s, dh, dw in FWD_WMMA_DILATIONS
+        )
+        # 1 x R "same" filters on 1-D signals (H = 1), dilated or not.
+        + tuple(
+            DirectCaps(
+                KH=1,
+                kw=r,
+                PAD=0,
+                pad_w=(r - 1) * d // 2,
+                stride=1,
+                cpg=0,
+                kpg=0,
+                dil_w=d,
+            )
+            for r, d in FWD_WMMA_1D_FILTERS
         ),
     ),
     # Wgrad (grouped and non-grouped), channel counts runtime. The kernel is a
@@ -1321,6 +1352,30 @@ def dgrad_rtc_spills(knobs: dict, KH: int, KW: int, arch: str) -> bool:
     waves = knobs["block_groups"] * knobs["waves_q"] * knobs["waves_k"]
     budget = limits.vgprs // -(-waves // 4)  # waves of a block share 4 SIMDs
     return dgrad_rtc_vgprs(knobs, KH, KW) > DGRAD_RTC_VGPR_FILL * budget
+
+
+def _fwd_wmma_1d_knobs(kw: int = 3) -> Iterator[dict]:
+    """1 x R rows: one output row per block, the tile as wide as the block.
+    The weight slot grows with the filter width: the 64-channel chunk rows
+    only fit LDS (and only win) for 1x3 filters, the three-stage and the
+    widest pingpong rows not for 1x11."""
+    for wk, wp, tk, tp, ck, st, mode in FWD_WMMA_1D_KNOBS:
+        if (ck > 32 and kw > 3) or (kw > 7 and (st > 2 or tp >= 10)):
+            continue
+        knobs = dict(
+            waves_k=wk,
+            waves_p=wp,
+            tiles_k=tk,
+            tiles_p=tp,
+            tile_w=wp * tp * 16,
+            ck=ck,
+            stages=st,
+        )
+        if mode == "pp":
+            knobs["pingpong"] = True
+        elif mode == "pfsb":
+            knobs.update(prefetch=True, split_barrier=True)
+        yield knobs
 
 
 def _dgrad_wmma_knobs(rows, pack_groups: int = 1) -> Iterator[dict]:
@@ -1688,7 +1743,10 @@ def _knob_grid(
 
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return  # a wave32 kernel: no tuning for this arch at all
-        if caps is not None and caps.cpg > 0:
+        if caps is not None and caps.KH != caps.KW:
+            # 1 x R rows on 1-D signals.
+            yield from _fwd_wmma_1d_knobs(caps.KW)
+        elif caps is not None and caps.cpg > 0:
             # Pack groups up to one 32-channel WMMA K step.
             yield from _fwd_wmma_knobs(
                 (
@@ -2251,6 +2309,7 @@ def probe_problem(
             dtype=dtype,
             dil_h=caps.dil_h,
             dil_w=caps.dil_w,
+            pad_w=caps.pad_w,
         )
     n_images = 1
     if variant == "direct_depthwise_spatial":
