@@ -3,10 +3,10 @@
 Two levels. The `quick` tests drive the parser against synthesised objects, so
 every branch -- bundle unwrapping, hidden-argument exclusion, absent names, the
 error paths -- is reachable without a toolchain and without depending on what a
-particular compiler happened to emit. The hipcc-gated test is the oracle that
-matters: it compiles a kernel, changes its signature, recompiles, and asserts
-the extracted signature followed. That is what proves the field is derived from
-the object rather than from anything an author wrote.
+particular compiler happened to emit. The compiler-gated test is the oracle
+that matters: it compiles a kernel, changes its signature, recompiles, and
+asserts the extracted signature followed. That is what proves the field is
+derived from the object rather than from anything an author wrote.
 """
 
 import pytest
@@ -151,7 +151,7 @@ def test_the_named_kernel_is_selected_from_several():
 
 @pytest.mark.quick
 def test_reads_through_a_clang_offload_bundle():
-    """What hipcc --genco actually writes, and what the packer stores."""
+    """What clang++ --offload-device-only actually writes, and what the packer stores."""
     inner = _object([_kernel("PointwiseAdd", THREE_BUFFERS)])
     code = _bundle(
         [
@@ -262,7 +262,9 @@ extern "C" __global__ void SignatureProbe(float* a, float* b, float* out{extra})
 """
 
 
-def _compile_probe(hipcc, tmp_path, extra_parameters, tag):
+def _compile_probe(
+    hip_compiler, hip_path, device_lib_path, tmp_path, extra_parameters, tag
+):
     source_root = tmp_path / tag
     source_root.mkdir(parents=True, exist_ok=True)
     (source_root / "probe.hip").write_text(
@@ -271,12 +273,22 @@ def _compile_probe(hipcc, tmp_path, extra_parameters, tag):
     out_dir = tmp_path / f"{tag}-out"
     out_dir.mkdir(parents=True, exist_ok=True)
     co_path = compile_hip_variant(
-        hipcc, source_root, "", "probe.hip", {}, ARCH, out_dir
+        hip_compiler,
+        source_root,
+        "",
+        "probe.hip",
+        {},
+        ARCH,
+        out_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     return co_path.read_bytes()
 
 
-def test_signature_follows_the_kernel_it_was_compiled_from(hipcc, tmp_path):
+def test_signature_follows_the_kernel_it_was_compiled_from(
+    hip_compiler, hip_path, device_lib_path, tmp_path
+):
     """The oracle for this stream.
 
     Compile, change the signature, recompile, and assert the extracted
@@ -284,10 +296,16 @@ def test_signature_follows_the_kernel_it_was_compiled_from(hipcc, tmp_path):
     would be identical across both compiles.
     """
     baseline = kernel_signature(
-        _compile_probe(hipcc, tmp_path, "", "baseline"), "SignatureProbe", WHERE
+        _compile_probe(
+            hip_compiler, hip_path, device_lib_path, tmp_path, "", "baseline"
+        ),
+        "SignatureProbe",
+        WHERE,
     )
     widened = kernel_signature(
-        _compile_probe(hipcc, tmp_path, ", int count", "widened"),
+        _compile_probe(
+            hip_compiler, hip_path, device_lib_path, tmp_path, ", int count", "widened"
+        ),
         "SignatureProbe",
         WHERE,
     )
@@ -298,14 +316,18 @@ def test_signature_follows_the_kernel_it_was_compiled_from(hipcc, tmp_path):
     assert baseline != widened
 
 
-def test_hip_kernels_carry_no_argument_names(hipcc, tmp_path):
+def test_hip_kernels_carry_no_argument_names(
+    hip_compiler, hip_path, device_lib_path, tmp_path
+):
     """Pins the producer-dependence the recorded shape is designed around.
 
     If a future toolchain starts emitting names on the hip path, this fails and
     the omit-when-absent branch stops being the hip path's normal case.
     """
     signature = kernel_signature(
-        _compile_probe(hipcc, tmp_path, "", "names"), "SignatureProbe", WHERE
+        _compile_probe(hip_compiler, hip_path, device_lib_path, tmp_path, "", "names"),
+        "SignatureProbe",
+        WHERE,
     )
 
     assert all("name" not in argument for argument in signature)

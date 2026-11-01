@@ -29,7 +29,7 @@ from pack_helpers import (
 )
 
 CO_NAME = "HsacoFixture.co"
-NO_HIPCC = "hipcc-not-invoked"
+NO_COMPILER = "compiler-not-invoked"
 KDP = "solo.kdp.json"
 
 PAIR_CPP = """\
@@ -100,12 +100,21 @@ def _add_fixture_file(root, hsaco_fixture_dir, name=CO_NAME):
     return dest
 
 
-def _pack(root, tmp_path, rocm_kpack_dir, hipcc=NO_HIPCC):
+def _pack(
+    root,
+    tmp_path,
+    rocm_kpack_dir,
+    hip_compiler=NO_COMPILER,
+    hip_path=None,
+    device_lib_path=None,
+):
     return run_pipeline(
         source_root=root,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
@@ -133,7 +142,12 @@ def _assert_passes_the_desk_check(tmp_path, rocm_kpack_dir):
 
 # --- hip: compiled for real -------------------------------------------------------
 def test_two_launches_on_one_unit_share_a_blob_and_keep_their_own_symbols(
-    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """One translation unit and build is one compile and one toc_key. Each launch
     keeps its authored `entry` and the argument list of that kernel, so a signature
@@ -145,7 +159,9 @@ def test_two_launches_on_one_unit_share_a_blob_and_keep_their_own_symbols(
     }
     root = _root(tmp_path, empty_arch_fixture, entries)
 
-    results = _pack(root, tmp_path, rocm_kpack_dir, hipcc)
+    results = _pack(
+        root, tmp_path, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path
+    )
 
     ukd = _shipped(tmp_path)
     assert "kernel_source" not in ukd and ukd["version"] == "1.1"
@@ -171,13 +187,21 @@ def test_two_launches_on_one_unit_share_a_blob_and_keep_their_own_symbols(
     ids=["other-unit", "other-build"],
 )
 def test_launches_on_distinct_compiles_pack_distinct_blobs(
-    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir, other
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    other,
 ):
     root = _root(
         tmp_path, empty_arch_fixture, {"first": _hip(entry="KernelAdd"), "next": other}
     )
 
-    results = _pack(root, tmp_path, rocm_kpack_dir, hipcc)
+    results = _pack(
+        root, tmp_path, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path
+    )
 
     sources = _shipped(tmp_path)["sources"]
     assert sources["first"]["toc_key"] != sources["next"]["toc_key"]
@@ -188,7 +212,12 @@ def test_launches_on_distinct_compiles_pack_distinct_blobs(
 
 
 def test_a_hip_sources_ukd_records_each_launchs_authored_identity(
-    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """Provenance names the shared kind and what each launch asked for. No
     compiler observed anything about the kernels, so there is no
@@ -200,7 +229,7 @@ def test_a_hip_sources_ukd_records_each_launchs_authored_identity(
     root = _root(tmp_path, empty_arch_fixture, entries)
     authored = _read(root / KDP)["kernelDescriptors"][0]["provenance"]
 
-    _pack(root, tmp_path, rocm_kpack_dir, hipcc)
+    _pack(root, tmp_path, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path)
 
     provenance = _shipped(tmp_path)["provenance"]
     assert provenance["origin_kind"] == "hip"
@@ -208,7 +237,7 @@ def test_a_hip_sources_ukd_records_each_launchs_authored_identity(
         name: {"source": ks["source"], "entry": ks["entry"], "build": ks["build"]}
         for name, ks in entries.items()
     }
-    assert provenance["hipcc_version"]
+    assert provenance["hip_version"]
     assert "effective_spec" not in provenance
     assert provenance["specialization_contract"] == authored["specialization_contract"]
     _assert_passes_the_desk_check(tmp_path, rocm_kpack_dir)
@@ -249,7 +278,7 @@ def test_one_file_serves_two_launches_as_one_entry(
         "add": {"file": CO_NAME, "sha256": digest, "symbol": "HsacoFixtureAdd"},
         "scale": {"file": CO_NAME, "sha256": digest, "symbol": "HsacoFixtureScale"},
     }
-    assert "hipcc_version" not in provenance and "effective_spec" not in provenance
+    assert "hip_version" not in provenance and "effective_spec" not in provenance
 
     assert not list((tmp_path / "out").rglob("*.co"))
     assert not list((tmp_path / "inter" / ARCH).rglob("*.co"))
@@ -331,4 +360,4 @@ def test_a_declaration_binding_compiled_fields_is_refused(
     flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError, match="source cannot fulfil"):
-        compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
+        compile_intermediate(flat, root, ARCH, NO_COMPILER, tmp_path / "inter")

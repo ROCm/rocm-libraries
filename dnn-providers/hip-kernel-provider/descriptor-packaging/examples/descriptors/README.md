@@ -1,7 +1,7 @@
 # Example production descriptor tree
 
 A minimal but **real** authored source root for `hkp_pack`. Both producers are
-exercised end to end: the hip half compiles a `.cpp` with `hipcc`, the rocKE half
+exercised end to end: the hip half compiles a `.cpp` with `clang++`, the rocKE half
 lowers a real rocKE builder through comgr. Placeholder shapes, real code paths.
 
 This tree drives the production packaging path with fixtures. Without a source root

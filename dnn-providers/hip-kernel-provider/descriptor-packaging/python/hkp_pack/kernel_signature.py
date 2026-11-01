@@ -6,7 +6,7 @@ same assumption that drifted -- the author edits the kernel and updates the
 descriptor, or does neither -- so it catches typos and nothing else.
 
 What the producer stores differs by kind, and both shapes appear in this tree:
-hipcc `--genco` emits a clang offload bundle wrapping the device ELF, while the
+clang++ `--offload-device-only` emits a clang offload bundle wrapping the device ELF, while the
 ASM producers store a bare ELF. Sniff, do not assume.
 
 Argument NAMES are producer-dependent: clang emits `.args[].name` for OpenCL,

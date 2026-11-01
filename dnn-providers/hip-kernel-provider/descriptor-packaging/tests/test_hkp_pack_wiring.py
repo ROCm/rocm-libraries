@@ -61,7 +61,7 @@ hkp_wire_pack_target(
     NAME off
     SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/authored"
     OUT_ROOT "${CMAKE_CURRENT_BINARY_DIR}/off"
-    ARCHES gfx942 HIPCC unused
+    ARCHES gfx942 HIP_COMPILER unused
     ROCM_KPACK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/kpack with spaces"
     """
             + rocke_keywords
@@ -73,7 +73,7 @@ hkp_wire_pack_target(
             f"""enable_testing()
 set(HIPKERNELPROVIDER_ENABLE_TESTS ON)
 set(HIPKERNELPROVIDER_ENABLE_ROCKE {enable_rocke})
-hkp_register_tests("" unused "")
+hkp_register_tests("" unused "" "" "")
 """
         )
 
@@ -295,7 +295,7 @@ _hkp_wire_root(
     OUT_ROOT "${{CMAKE_CURRENT_BINARY_DIR}}/{name}"
     ARCHES "{arches}"
     ENABLE_ROCKE {enable_rocke}
-    HIPCC unused
+    HIP_COMPILER unused
     ROCM_KPACK_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}/kpack with spaces"
     {keywords}
     EXCLUDE_FOLDERS {exclude})

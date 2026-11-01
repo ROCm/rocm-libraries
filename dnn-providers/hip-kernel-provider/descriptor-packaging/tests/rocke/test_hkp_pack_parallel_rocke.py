@@ -88,7 +88,7 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
             flat,
             failing_corpus,
             TARGET_ARCH,
-            "hipcc",
+            "compiler-not-invoked",
             tmp_path / "inter",
             log=_silent,
         )
@@ -239,7 +239,10 @@ def _serial_pool(monkeypatch, between=None):
 def _editable_jobs(corpus, out_dir):
     flat = load_flat_input(corpus, GENERIC_TARGETS, log=_silent)
     jobs = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)
-    return flat, [replace(job, out_dir=str(out_dir), hipcc="hipcc") for job in jobs]
+    return flat, [
+        replace(job, out_dir=str(out_dir), hip_compiler="compiler-not-invoked")
+        for job in jobs
+    ]
 
 
 @pytest.mark.quick
@@ -294,7 +297,7 @@ def test_pool_rejects_variants_built_by_different_producer_revisions(
             load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
             corpus,
             TARGET_ARCH,
-            "hipcc",
+            "compiler-not-invoked",
             tmp_path / "inter",
             log=_silent,
         )
@@ -320,7 +323,7 @@ def test_pool_accepts_variants_built_by_one_producer_revision(
         load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
-        "hipcc",
+        "compiler-not-invoked",
         tmp_path / "inter",
         log=_silent,
     )

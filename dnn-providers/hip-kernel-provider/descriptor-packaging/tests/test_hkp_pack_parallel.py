@@ -647,8 +647,10 @@ _HSACO_SOURCE = "hsaco_kernel.cpp"
 def hsaco_corpus(tmp_path):
     """A KDP carrying an hsaco UKD ahead of a compilable hip one.
 
-    Kept out of the selection corpus deliberately: its hsaco entry has no
-    compile, so it yields no prewarm job, and only the hip sibling does.
+    Kept out of the selection corpus deliberately: it makes
+    `compile_intermediate` raise, which would stop the golden-sequence corpus
+    from being walkable. The hsaco entry is authored first so the walk reaches
+    its error before it would need a real compiler for the hip entry.
     """
     dest = tmp_path / "hsaco-corpus"
     dest.mkdir()
@@ -707,7 +709,7 @@ def _synthetic_job(corpus, block):
         rel_dir=".",
         source_root=str(corpus),
         out_dir="",
-        hipcc="",
+        hip_compiler="",
         arch=TARGET_ARCH,
     )
 
@@ -742,7 +744,9 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
     tally = tmp_path / "tally"
     tally.mkdir()
     failing = jobs[3]
-    hipcc = _stub_hipcc(tmp_path, fail_out=f"{failing.vk}.co", delay=1.0, tally=tally)
+    hip_compiler = _stub_hip_compiler(
+        tmp_path, fail_out=f"{failing.vk}.co", delay=1.0, tally=tally
+    )
 
     variant_co = {}
     variant_symbol = {}
@@ -752,7 +756,7 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
             flat,
             corpus,
             TARGET_ARCH,
-            hipcc,
+            hip_compiler,
             tmp_path / "inter",
             variant_co,
             variant_symbol,
@@ -835,6 +839,73 @@ def test_worker_inherits_parent_sys_path(tmp_path, monkeypatch):
     assert str(probe) in child_path
 
 
+_MISSING_MODULE = "hkp_parallel_absent/kernels/nowhere.py"
+
+
+@pytest.fixture
+def failing_corpus(tmp_path):
+    """A KDP with two rocke UKDs naming a module that does not exist.
+
+    Two entries rather than one because the prewarm returns without a pool for
+    a single job, and the failure has to come from a real worker process. They
+    carry different specs so they key apart and stay two jobs. The module is
+    absent, so the child raises before it reaches the rocKE compiler and the
+    case needs no toolchain at all.
+    """
+    dest = tmp_path / "failing-corpus"
+    dest.mkdir()
+    entries = [
+        _ukd(
+            f"ukd-absent-{tile}",
+            {
+                "kind": "rocke",
+                "source": _MISSING_MODULE,
+                "builder": _ROCKE_STUB_BUILDER,
+                "spec": {"tile": tile},
+            },
+        )
+        for tile in (64, 128)
+    ]
+    _write_json(dest, "absent.kdp.json", _kdp("kdp-absent", [TARGET_ARCH], entries))
+    return dest
+
+
+@pytest.mark.quick
+def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
+    """A pool failure names one variant, not N tracebacks.
+
+    Which variant is named is not host-dependent and is asserted exactly: it is
+    the first failure in submission order, which is walk order, so the parallel
+    path names the variant the serial path would have named. How many others
+    would have failed is deliberately not asserted, and the message carries no
+    count.
+
+    No `PYTHONPATH` export: children inherit the parent's `sys.path` under both
+    start methods, which `test_worker_inherits_parent_sys_path` is the detector
+    for.
+    """
+    monkeypatch.setenv("HKP_PACK_JOBS", "2")
+    flat = load_flat_input(failing_corpus, GENERIC_TARGETS, log=_silent)
+
+    jobs = pipeline._prewarm_jobs(flat, failing_corpus, TARGET_ARCH)
+    assert len(jobs) >= 2, "a single job returns before starting a pool"
+
+    with pytest.raises(HkpPackError) as excinfo:
+        pipeline.compile_intermediate(
+            flat,
+            failing_corpus,
+            TARGET_ARCH,
+            "compiler-not-invoked",
+            tmp_path / "inter",
+            log=_silent,
+        )
+
+    message = str(excinfo.value)
+    assert re.search(rf"variant '\S+' failed to compile for {TARGET_ARCH}", message)
+    assert f"'{jobs[0].ukd['id']}'" in message
+    assert "module not importable" in message
+
+
 @pytest.mark.quick
 def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monkeypatch):
     """The worker returns its failure and never computes a key.
@@ -864,7 +935,7 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monke
         rel_dir=".",
         source_root=str(tmp_path),
         out_dir=str(tmp_path / "inter"),
-        hipcc="hipcc",
+        hip_compiler="compiler-not-invoked",
         arch=TARGET_ARCH,
     )
 
@@ -882,7 +953,7 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monke
     assert origins == {}
 
 
-_STUB_HIPCC_BODY = r"""
+_STUB_HIP_COMPILER_BODY = r"""
 import hashlib
 import os
 import sys
@@ -906,7 +977,7 @@ if TALLY:
 if name == SLOW_FAIL_OUT:
     time.sleep(DELAY)
 if name in (FAIL_OUT, SLOW_FAIL_OUT):
-    sys.stderr.write("stub hipcc: refusing " + name + chr(10))
+    sys.stderr.write("stub compiler: refusing " + name + chr(10))
     sys.exit(2)
 
 if DELAY:
@@ -918,8 +989,10 @@ with open(out, "wb") as fh:
 """
 
 
-def _stub_hipcc(tmp_path, *, fail_out=None, slow_fail_out=None, delay=0.0, tally=None):
-    """Path to a hipcc stand-in that writes a .co and exits 0.
+def _stub_hip_compiler(
+    tmp_path, *, fail_out=None, slow_fail_out=None, delay=0.0, tally=None
+):
+    """Path to a HIP compiler stand-in that writes a .co and exits 0.
 
     Lets the pool run to success on a box with no toolchain, which is what makes
     the success path testable at all. The bytes are derived from every argument
@@ -935,11 +1008,11 @@ def _stub_hipcc(tmp_path, *, fail_out=None, slow_fail_out=None, delay=0.0, tally
     can be made to finish later.
 
     A launcher script rather than the interpreter directly, because the producer
-    invokes `hipcc` as argv[0] of a subprocess.
+    invokes the compiler as argv[0] of a subprocess.
     """
-    stub = tmp_path / "stub_hipcc.py"
+    stub = tmp_path / "stub_hip_compiler.py"
     stub.write_text(
-        _STUB_HIPCC_BODY.format(
+        _STUB_HIP_COMPILER_BODY.format(
             fail_out=fail_out,
             slow_fail_out=slow_fail_out,
             delay=delay,
@@ -948,12 +1021,12 @@ def _stub_hipcc(tmp_path, *, fail_out=None, slow_fail_out=None, delay=0.0, tally
         encoding="utf-8",
     )
     if sys.platform == "win32":
-        launcher = tmp_path / "stub_hipcc.bat"
+        launcher = tmp_path / "stub_hip_compiler.bat"
         launcher.write_text(
             f'@echo off\r\n"{sys.executable}" "{stub}" %*\r\n', encoding="utf-8"
         )
     else:
-        launcher = tmp_path / "stub_hipcc.sh"
+        launcher = tmp_path / "stub_hip_compiler.sh"
         launcher.write_text(
             f'#!/bin/sh\nexec "{sys.executable}" "{stub}" "$@"\n', encoding="utf-8"
         )
@@ -977,7 +1050,7 @@ def test_the_pool_names_the_first_failure_in_walk_order(tmp_path, monkeypatch):
     flat = load_flat_input(corpus, GENERIC_TARGETS, log=_silent)
 
     first, second = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)[:2]
-    hipcc = _stub_hipcc(
+    hip_compiler = _stub_hip_compiler(
         tmp_path,
         fail_out=f"{second.vk}.co",
         slow_fail_out=f"{first.vk}.co",
@@ -989,7 +1062,7 @@ def test_the_pool_names_the_first_failure_in_walk_order(tmp_path, monkeypatch):
             flat,
             corpus,
             TARGET_ARCH,
-            hipcc,
+            hip_compiler,
             tmp_path / "inter",
             log=_silent,
         )
@@ -1026,7 +1099,7 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
         load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
-        _stub_hipcc(tmp_path),
+        _stub_hip_compiler(tmp_path),
         tmp_path / "inter",
         variant_co,
         variant_symbol,
@@ -1062,7 +1135,7 @@ def _staged_tree(corpus, out_dir):
         load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
-        _stub_hipcc(out_dir.parent),
+        _stub_hip_compiler(out_dir.parent),
         out_dir,
         log=_silent,
     )
@@ -1157,7 +1230,7 @@ def test_pack_jobs_one_starts_no_pool(tmp_path, monkeypatch):
         load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
-        _stub_hipcc(tmp_path),
+        _stub_hip_compiler(tmp_path),
         tmp_path / "inter",
         variant_co,
         {},

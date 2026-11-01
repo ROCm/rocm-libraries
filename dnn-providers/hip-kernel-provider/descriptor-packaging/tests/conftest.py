@@ -24,23 +24,37 @@ def rocm_kpack_dir():
 
 
 @pytest.fixture(scope="session")
-def hipcc():
-    """The hipcc driver used for real --genco compilation.
+def hip_compiler():
+    """The HIP compiler (clang++/amdclang++) used for --offload-device-only compilation.
 
-    Resolved from HKP_HIPCC (set by CMake) or PATH; a missing hipcc is a hard
-    failure. A real hipcc compile error is not caught here — it surfaces from
-    the pipeline as a failure.
+    Resolved from HKP_HIP_COMPILER (set by CMake) or PATH; a missing compiler
+    is a hard failure. A real compile error is not caught here — it surfaces
+    from the pipeline as a failure.
     """
-    exe = os.environ.get("HKP_HIPCC")
+    exe = os.environ.get("HKP_HIP_COMPILER")
     if not exe:
-        for name in ("hipcc", "hipcc.bat"):
+        for name in ("amdclang++", "clang++"):
             found = shutil.which(name)
             if found:
                 exe = found
                 break
     if not exe:
-        pytest.fail("hipcc not found (set HKP_HIPCC or put hipcc on PATH)")
+        pytest.fail(
+            "HIP compiler not found (set HKP_HIP_COMPILER or put amdclang++/clang++ on PATH)"
+        )
     return exe
+
+
+@pytest.fixture(scope="session")
+def hip_path():
+    """The HIP runtime root for --hip-path, or None."""
+    return os.environ.get("HKP_HIP_PATH") or None
+
+
+@pytest.fixture(scope="session")
+def device_lib_path():
+    """The device bitcode library directory for --hip-device-lib-path, or None."""
+    return os.environ.get("HKP_DEVICE_LIB_PATH") or None
 
 
 @pytest.fixture(scope="session")

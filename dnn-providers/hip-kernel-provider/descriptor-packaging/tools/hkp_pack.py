@@ -100,9 +100,21 @@ def _parse_args(argv):
         "internally over the full list in one run. Empty installs nothing.",
     )
     p.add_argument(
-        "--hipcc",
+        "--hip-compiler",
         required=True,
-        help="Path to the hipcc driver used for --genco compilation.",
+        help="Path to the HIP compiler (clang++ or amdclang++) used for "
+        "--offload-device-only compilation.",
+    )
+    p.add_argument(
+        "--hip-path",
+        default=None,
+        help="HIP runtime root passed as --hip-path to the compiler.",
+    )
+    p.add_argument(
+        "--hip-device-lib-path",
+        default=None,
+        help="Device bitcode library directory passed as "
+        "--hip-device-lib-path to the compiler.",
     )
     p.add_argument(
         "--inter-root",
@@ -175,7 +187,7 @@ def main(argv=None):
         source_root=Path(args.source_root),
         arches=arches,
         out_root=Path(args.out_root),
-        hipcc=args.hipcc,
+        hip_compiler=args.hip_compiler,
         generic_targets_json=Path(args.generic_targets_json),
         rocm_kpack_dir=args.kpack_python_dir,
         inter_root=Path(args.inter_root),
@@ -184,6 +196,8 @@ def main(argv=None):
         source_label=args.source_label,
         exclude_folders=tuple(args.exclude_folder),
         disabled_kinds=tuple(args.disable_kind),
+        hip_path=args.hip_path,
+        device_lib_path=args.hip_device_lib_path,
     )
     return 0
 
