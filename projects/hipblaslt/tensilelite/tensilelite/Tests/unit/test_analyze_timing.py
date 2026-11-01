@@ -359,6 +359,37 @@ TIMING:python_benchmark_problems:5000.0
             assert phase in child_names, f"{phase} not in benchpost children"
 
 
+class TestHelperCompileOverlap:
+    """The helper-kernel compile runs concurrently with codegen: only the wait for it is part of
+    python_kernel_compilation; the compile itself is an overlapping total."""
+
+    TIMINGS = {
+        "python_benchmark_problems": [2000.0],
+        "python_kernel_compilation": [1000.0],
+        "python_kernel_codegen": [700.0],
+        "python_kernel_build_co": [100.0],
+        "python_kernel_build_src_co_wait": [150.0],
+        "python_kernel_build_src_co": [850.0],
+        "python_kernel_build_src_co.compile": [840.0],
+    }
+
+    def test_only_the_wait_is_in_the_tree(self):
+        pbp = next(n for n in build_hierarchy(dict(self.TIMINGS))
+                   if n.name == "python_benchmark_problems")
+        kc = next(c for c in pbp.children if c.name == "python_kernel_compilation")
+        child_ms = {c.name: c.total_ms for c in kc.children}
+        assert child_ms == {"python_kernel_codegen": 700.0, "python_kernel_build_co": 100.0,
+                            "python_kernel_build_src_co_wait": 150.0, "(untracked)": 50.0}
+
+    def test_compile_is_an_overlapping_total(self):
+        tree = timings_to_tree(dict(self.TIMINGS))
+        assert tree["overlapping_totals"] == {
+            "python_kernel_build_src_co": {"count": 1, "total_ms": 850.0},
+            "python_kernel_build_src_co.compile": {"count": 1, "total_ms": 840.0},
+        }
+        assert tree["unknown_categories"] == {}
+
+
 class TestGzipLogs:
     """analyze_timing_file reads .gz logs the same as plain text."""
 

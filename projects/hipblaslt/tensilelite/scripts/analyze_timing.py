@@ -64,15 +64,9 @@ TIMING_HIERARCHY = {
             "python_kernel_write_assemble": {},
             "python_kernel_write_helpers": {},
             "python_kernel_build_co": {},
-            "python_kernel_build_src_co": {
-                "python_kernel_build_src_co.setup": {},
-                "python_kernel_build_src_co.cache_check": {},
-                "python_kernel_build_src_co.cache_hit": {},
-                "python_kernel_build_src_co.compile": {},
-                "python_kernel_build_src_co.unbundle": {},
-                "python_kernel_build_src_co.move": {},
-                "python_kernel_build_src_co.cache_populate": {},
-            },
+            # The helper-kernel compile (python_kernel_build_src_co, in OVERLAPPING_TOTALS) runs
+            # in a background thread during codegen; this is the time the build then waits for it.
+            "python_kernel_build_src_co_wait": {},
             "python_kernel_bench_postprocess": {
                 "python_benchpost_naming": {},
                 "python_benchpost_lib_construction": {},
@@ -511,11 +505,15 @@ def _categories_with_children(d, out=None):
 
 CATEGORIES_WITH_CHILDREN = _categories_with_children(TIMING_HIERARCHY)
 
-# Timers that wrap other timers (diagnostics added to localize untracked time).
+# Timers that wrap other timers (diagnostics added to localize untracked time), and timers that run
+# concurrently with the tree's timers.
 # python_client_subprocess = process_startup + main_total + flush + main_teardown_locals + process_exit
 # main_total              = parse_args + calibration + factory + setup + problem_total + finalize
 # problem_total           = problem children + solution_total
 # solution_total          = solution children + run_iteration_total
+# python_kernel_build_src_co (and its parts) = the helper-kernel compile, which runs in a background
+#   thread during codegen (the tree has python_kernel_build_src_co_wait). Older logs ran it after
+#   the assembly build, so there its time shows as untracked in python_kernel_compilation.
 OVERLAPPING_TOTALS_ORDER = [
     "python_client_subprocess",
     "main_total",
@@ -525,6 +523,14 @@ OVERLAPPING_TOTALS_ORDER = [
     # ReferenceValidator's validateSolution(): wraps the per-tensor timers below it.
     "validate_total",
     "validate_check_results_typed",
+    "python_kernel_build_src_co",
+    "python_kernel_build_src_co.setup",
+    "python_kernel_build_src_co.cache_check",
+    "python_kernel_build_src_co.cache_hit",
+    "python_kernel_build_src_co.compile",
+    "python_kernel_build_src_co.unbundle",
+    "python_kernel_build_src_co.move",
+    "python_kernel_build_src_co.cache_populate",
 ]
 OVERLAPPING_TOTALS = set(OVERLAPPING_TOTALS_ORDER)
 
@@ -1300,11 +1306,12 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         for cat, count, total_ms, mean_ms, pct in unknown_rows:
             fmt_row(0, cat, count, total_ms, mean_ms, pct, None)
 
-    # Overlapping totals: wrap other timers, so they are not part of the tree (they would be
-    # double counted) but are useful to check that the tree accounts for all the time.
+    # Overlapping totals: wrap other timers or run concurrently with them, so they are not part of
+    # the tree (they would be double counted). The wrappers are useful to check that the tree
+    # accounts for all the time.
     if overlapping_rows:
         print()
-        print("  Overlapping Totals (wrap other timers; not summed into the tree)")
+        print("  Overlapping Totals (wrap or overlap other timers; not summed into the tree)")
         print(f"  {'-' * (TABLE_WIDTH - 2)}")
         for cat, count, total_ms, mean_ms, pct in overlapping_rows:
             fmt_row(0, cat, count, total_ms, mean_ms, pct, None)
