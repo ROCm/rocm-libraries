@@ -33,7 +33,7 @@ def requires_msgpack():
     callers reaching one down a single branch call this at that branch rather
     than marking the module.
 
-    Fails rather than skips, matching the hipcc and rocke fixtures: msgpack ships
+    Fails rather than skips, matching the hip_compiler and rocke fixtures: msgpack ships
     as a rocm_kpack dependency, so it cannot be legitimately absent where the
     packer itself is importable, and a skip here would quietly retire the
     signature-parsing coverage instead of reporting a broken environment.

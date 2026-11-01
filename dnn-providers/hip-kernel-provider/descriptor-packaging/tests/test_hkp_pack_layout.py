@@ -48,11 +48,34 @@ from pack_helpers import (
     _load_kpack,
     _nest,
     _read,
-    _run,
     _silent,
     read_shipped,
     run_pipeline,
 )
+
+
+def _run(
+    source_root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    arches,
+    hip_path=None,
+    device_lib_path=None,
+    source_label=None,
+):
+    """Pack one root. Overrides pack_helpers._run with hip_compiler API."""
+    return run_pipeline(
+        source_root=source_root,
+        arches=list(arches),
+        out_root=tmp_path / "out",
+        hip_compiler=hip_compiler,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+        source_label=source_label,
+    )
 
 
 def _rename_ids(folder, stem, new_stem):
@@ -186,12 +209,25 @@ def test_a_non_descriptor_json_is_skipped_and_logged(tmp_path, empty_arch_fixtur
 
 # --- B. Path-preserving output (real compile) -------------------------------
 def test_output_mirrors_authored_subpath(
-    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     root = tmp_path / "root"
     _nest(root, "hip/solo_add", empty_arch_fixture)
 
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
+    _run(
+        root,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        [ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     out = tmp_path / "out" / ARCH
 
     # The authored subpath is carried through verbatim...
@@ -202,7 +238,12 @@ def test_output_mirrors_authored_subpath(
 
 
 def test_hip_source_resolves_relative_to_its_descriptor(
-    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """Two folders, same source relpath and build, different .cpp bytes.
 
@@ -226,7 +267,15 @@ def test_hip_source_resolves_relative_to_its_descriptor(
     cpp_b.write_text(mutated, encoding="utf-8")
     assert (a / "PointwiseAdd.cpp").read_bytes() != cpp_b.read_bytes()
 
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
+    _run(
+        root,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        [ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     out = tmp_path / "out" / ARCH
     ukd_a = _read(out / "hip" / "a" / "solo.kdp.json")["kernelDescriptors"][0]
     ukd_b = _read(out / "hip" / "b" / "solob.kdp.json")["kernelDescriptors"][0]
@@ -260,7 +309,7 @@ def test_missing_descriptor_local_source_is_an_error(tmp_path, empty_arch_fixtur
 
     with pytest.raises(HkpPackError, match="source not found"):
         compile_hip_variant(
-            "hipcc-not-invoked",
+            "compiler-not-invoked",
             root,
             "hip/a",
             "PointwiseAdd.cpp",
@@ -280,7 +329,7 @@ def test_source_escaping_the_root_is_rejected(tmp_path, empty_arch_fixture):
 
     with pytest.raises(HkpPackError, match="escapes the source root"):
         compile_hip_variant(
-            "hipcc-not-invoked",
+            "compiler-not-invoked",
             root,
             "hip/a",
             "../../../outside.cpp",
@@ -291,7 +340,12 @@ def test_source_escaping_the_root_is_rejected(tmp_path, empty_arch_fixture):
 
 
 def test_variant_key_is_location_independent(
-    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     # The key hashes the ROOT-RELATIVE source path and the build — never the
     # absolute path and never a root ordinal — so the same tree packs to the
@@ -311,9 +365,11 @@ def test_variant_key_is_location_independent(
             source_root=root,
             arches=[ARCH],
             out_root=parent / "out",
-            hipcc=hipcc,
+            hip_compiler=hip_compiler,
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=parent / "inter",
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
         )
         ukd = _read(parent / "out" / ARCH / "hip" / "solo_add" / "solo.kdp.json")[
             "kernelDescriptors"
@@ -350,7 +406,12 @@ def test_flat_layout_keys_on_source_alone(empty_arch_fixture):
 
 # --- C. Child folders sharing one arch's output (real compile) --------------
 def test_same_filename_in_two_folders_both_ship(
-    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """The packed half of the same-filename case: loading keeps both, and so must
     writing the shard. An output keyed on filename alone writes one folder's
@@ -363,7 +424,15 @@ def test_same_filename_in_two_folders_both_ship(
     for src in sorted(b.glob("solob.*")):
         src.rename(b / src.name.replace("solob.", "solo.", 1))
 
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
+    _run(
+        root,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        [ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
 
     out = tmp_path / "out" / ARCH
     authored = sorted(p.name for p in empty_arch_fixture.glob("solo.*.json"))
@@ -374,7 +443,13 @@ def test_same_filename_in_two_folders_both_ship(
 
 
 def test_non_hkp_failure_still_leaves_no_partial_tree(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+    tmp_path,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    monkeypatch,
 ):
     """Staging must protect the output even when no cleanup handler runs.
 
@@ -404,9 +479,11 @@ def test_non_hkp_failure_still_leaves_no_partial_tree(
             source_root=root,
             arches=[ARCH],
             out_root=out_root,
-            hipcc=hipcc,
+            hip_compiler=hip_compiler,
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
         )
 
     # The shipped path must not exist. A staging directory may survive -- it is
@@ -419,7 +496,13 @@ def test_non_hkp_failure_still_leaves_no_partial_tree(
 
 # --- D. Per-arch atomicity and isolation ------------------------------------
 def test_failed_arch_leaves_no_partial_tree(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+    tmp_path,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    monkeypatch,
 ):
     """A failing arch must leave NO directory behind, not an empty one.
 
@@ -453,9 +536,11 @@ def test_failed_arch_leaves_no_partial_tree(
             source_root=root,
             arches=["gfx942", "gfx950"],
             out_root=out_root,
-            hipcc=hipcc,
+            hip_compiler=hip_compiler,
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
         )
 
     # The good arch survived...
@@ -468,7 +553,13 @@ def test_failed_arch_leaves_no_partial_tree(
 
 
 def test_failed_arch_removes_its_previous_good_output(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+    tmp_path,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    monkeypatch,
 ):
     """A re-pack that fails must delete the shard its last good run wrote.
 
@@ -492,9 +583,11 @@ def test_failed_arch_removes_its_previous_good_output(
         source_root=root,
         arches=[ARCH],
         out_root=out_root,
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     good_shard = out_root / ARCH
     assert good_shard.is_dir() and any(good_shard.rglob("*.kpack"))
@@ -509,9 +602,11 @@ def test_failed_arch_removes_its_previous_good_output(
             source_root=root,
             arches=[ARCH],
             out_root=out_root,
-            hipcc=hipcc,
+            hip_compiler=hip_compiler,
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
         )
 
     assert (
@@ -520,7 +615,13 @@ def test_failed_arch_removes_its_previous_good_output(
 
 
 def test_failure_names_every_failed_arch(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+    tmp_path,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    monkeypatch,
 ):
     """Exit non-zero listing which arches failed -- a silent 0 would hide it."""
     from hkp_pack import pipeline
@@ -538,9 +639,11 @@ def test_failure_names_every_failed_arch(
             source_root=root,
             arches=["gfx942", "gfx950"],
             out_root=tmp_path / "out",
-            hipcc=hipcc,
+            hip_compiler=hip_compiler,
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
         )
 
     message = str(exc.value)
@@ -569,7 +672,13 @@ def test_example_tree_is_self_consistent():
     assert "hip/pointwise_add" in rel_dirs
 
 
-def test_example_hip_tree_packs_end_to_end(tmp_path, hipcc, rocm_kpack_dir):
+def test_example_hip_tree_packs_end_to_end(
+    tmp_path,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+):
     """The example tree's hip subtree must drive the hip producer end to end.
 
     Packing the real committed tree -- not a fixture -- is what keeps it honest:
@@ -579,7 +688,15 @@ def test_example_hip_tree_packs_end_to_end(tmp_path, hipcc, rocm_kpack_dir):
     root = tmp_path / "root"
     shutil.copytree(EXAMPLE_ROOT / "hip", root / "hip")
 
-    results = _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
+    results = _run(
+        root,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        [ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     assert not results[ARCH].skipped
 
     out = tmp_path / "out" / ARCH
@@ -606,16 +723,21 @@ def test_example_hip_tree_packs_end_to_end(tmp_path, hipcc, rocm_kpack_dir):
 
 
 # --- F. Toolchain provenance ------------------------------------------------
-def test_provenance_records_the_hipcc_that_built_each_kernel(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+def test_provenance_records_the_toolchain_that_built_each_kernel(
+    tmp_path,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """Authored fields say what was asked for; this says what answered.
 
     Without it two builds of byte-identical descriptors are indistinguishable
-    after the fact, even though a hipcc change may be the whole difference
+    after the fact, even though a compiler change may be the whole difference
     between them. The wheel stamp is supplied so a rocKE field could appear: a
-    hip kernel must carry the hipcc record and nothing from the rocKE toolchain
-    or the rocKE provenance shape.
+    hip kernel must carry the hip_version record and nothing from the rocKE
+    toolchain or the rocKE provenance shape.
     """
     from hkp_pack import toolchain
 
@@ -626,14 +748,16 @@ def test_provenance_records_the_hipcc_that_built_each_kernel(
         source_root=main_fixture,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         rocke_wheel_stamp=stamp,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
-    expected = toolchain.hipcc_version(hipcc)
-    assert expected, "the hipcc under test reports no version to record"
+    expected = toolchain.hip_version(hip_path)
+    assert expected, "the hip compiler under test reports no version to record"
     out = tmp_path / "out" / ARCH
     shipped = [
         ukd
@@ -645,7 +769,7 @@ def test_provenance_records_the_hipcc_that_built_each_kernel(
     for ukd in shipped:
         prov = ukd["provenance"]
         assert prov["origin_kind"] == "hip"
-        assert prov["hipcc_version"] == expected, ukd["id"]
+        assert prov["hip_version"] == expected, ukd["id"]
         leaked = {
             "comgr_path",
             "comgr_rocm_version",
@@ -671,12 +795,12 @@ def test_wheel_digest_absent_stamp_is_not_fatal(tmp_path):
 
 
 @pytest.mark.quick
-def test_hipcc_version_probe_is_best_effort():
+def test_hip_version_probe_is_best_effort():
     from hkp_pack import toolchain
 
-    toolchain.hipcc_version.cache_clear()
-    assert toolchain.hipcc_version(None) is None
-    assert toolchain.hipcc_version("/nonexistent/hipcc") is None
+    toolchain.hip_version.cache_clear()
+    assert toolchain.hip_version(None) is None
+    assert toolchain.hip_version("/nonexistent/path") is None
 
 
 # --- G. The library field, resolved the way the runtime resolves it ---------
@@ -724,7 +848,12 @@ def _assert_runtime_would_load(descriptor_path, library, tree_root):
 
 
 def test_library_resolves_from_a_nested_descriptor(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """A packed UKD's `library` must resolve against ITS OWN directory.
 
@@ -741,9 +870,11 @@ def test_library_resolves_from_a_nested_descriptor(
         source_root=root,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
     out = tmp_path / "out" / ARCH
@@ -761,7 +892,12 @@ def test_library_resolves_from_a_nested_descriptor(
 
 
 def test_library_resolves_for_a_flat_descriptor(
-    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     root = tmp_path / "root"
     shutil.copytree(empty_arch_fixture, root)
@@ -770,9 +906,11 @@ def test_library_resolves_for_a_flat_descriptor(
         source_root=root,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
     out = tmp_path / "out" / ARCH
@@ -919,7 +1057,12 @@ def test_example_tree_native_symbols_are_registered():
 
 
 def test_library_resolves_for_a_nested_standalone_ukd(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """The standalone-UKD branch of the library rule.
 
@@ -934,9 +1077,11 @@ def test_library_resolves_for_a_nested_standalone_ukd(
         source_root=root,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
     out = tmp_path / "out" / ARCH
@@ -952,7 +1097,12 @@ def test_library_resolves_for_a_nested_standalone_ukd(
 
 
 def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """A standalone UKD in a different folder from the KDP that references it.
 
@@ -985,9 +1135,11 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
         source_root=root,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
     out = tmp_path / "out" / ARCH
@@ -1196,7 +1348,12 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
 
 
 def test_a_model_uhds_artifact_reaches_the_shipped_tree(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """The model a UHD names ships in the arch output, not only the intermediate."""
     root = tmp_path / "root"
@@ -1234,7 +1391,15 @@ def test_a_model_uhds_artifact_reaches_the_shipped_tree(
     )
     (dest / "shared_model.bin").write_bytes(b"HGBM-arch")
 
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
+    _run(
+        root,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        [ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
 
     shipped = tmp_path / "out" / ARCH / "hip" / "pointwise"
     assert (shipped / "shared.uhd.json").is_file(), "the UHD itself must ship"
@@ -1350,7 +1515,9 @@ def test_a_kind_no_producer_handles_fails_the_compile(
     flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError) as excinfo:
-        compile_intermediate(flat, root, ARCH, "hipcc-not-invoked", tmp_path / "inter")
+        compile_intermediate(
+            flat, root, ARCH, "compiler-not-invoked", tmp_path / "inter"
+        )
 
     message = str(excinfo.value)
     assert f"kernel_source has unsupported kind '{kind}'" in message
@@ -1384,7 +1551,7 @@ def test_a_passthrough_kind_carries_no_specialization_obligation(
     assert _agreement_inputs(flat, ARCH) == ({}, {})
 
     inter = compile_intermediate(
-        flat, root, ARCH, "hipcc-not-invoked", tmp_path / "inter"
+        flat, root, ARCH, "compiler-not-invoked", tmp_path / "inter"
     )
     [entry] = inter.kdps[0].entries
     assert entry.doc["kernel_source"] == _EMBEDDED_SOURCE
@@ -1403,7 +1570,9 @@ def test_a_compiling_kind_without_a_contract_is_still_refused(
     flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError, match="missing/invalid specialization_contract"):
-        compile_intermediate(flat, root, ARCH, "hipcc-not-invoked", tmp_path / "inter")
+        compile_intermediate(
+            flat, root, ARCH, "compiler-not-invoked", tmp_path / "inter"
+        )
 
 
 @pytest.mark.quick
@@ -1566,12 +1735,12 @@ def _add_sharing_embedded_kdp(folder):
 
 
 def _pack_embedded(root, tmp_path, rocm_kpack_dir, arches, log=print, out="out"):
-    """Pack a root that compiles nothing, so hipcc must never be invoked."""
+    """Pack a root that compiles nothing, so the compiler must never be invoked."""
     return run_pipeline(
         source_root=root,
         arches=list(arches),
         out_root=tmp_path / out,
-        hipcc="hipcc-not-invoked",
+        hip_compiler="compiler-not-invoked",
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / f"inter-{out}",
         source_label=_LABEL,
@@ -1754,7 +1923,13 @@ def test_standalone_passthrough_two_kdps_share_is_emitted_once(
 
 
 def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
-    tmp_path, empty_arch_fixture, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    empty_arch_fixture,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """One invocation over a root holding both dialects.
 
@@ -1765,7 +1940,16 @@ def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
     _nest(root, "hip/pointwise", main_fixture)
     _make_embedded(_nest(root, "embedded/pointwise", empty_arch_fixture))
 
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH], source_label=_LABEL)
+    _run(
+        root,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        [ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+        source_label=_LABEL,
+    )
 
     out = tmp_path / "out" / ARCH
     assert (out / "kpack" / f"hip_kernel_provider_{ARCH}.kpack").is_file()
@@ -1781,7 +1965,13 @@ def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
 
 
 def test_every_directory_holding_a_packed_descriptor_holds_the_marker(
-    tmp_path, empty_arch_fixture, main_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    empty_arch_fixture,
+    main_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """A reader takes a descriptor as packed only from the marker in its own
     directory, so the compiled and the pass-through halves both need one, and
@@ -1790,7 +1980,16 @@ def test_every_directory_holding_a_packed_descriptor_holds_the_marker(
     _nest(root, "hip/pointwise", main_fixture)
     _make_embedded(_nest(root, "embedded/pointwise", empty_arch_fixture))
 
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH], source_label=_LABEL)
+    _run(
+        root,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        [ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+        source_label=_LABEL,
+    )
 
     out = tmp_path / "out" / ARCH
     holding = {
@@ -1883,7 +2082,7 @@ def test_packing_without_a_source_label_is_refused(
             source_root=root,
             arches=[ARCH],
             out_root=tmp_path / "out",
-            hipcc="hipcc-not-invoked",
+            hip_compiler="compiler-not-invoked",
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
         )
@@ -1908,7 +2107,7 @@ def test_a_root_that_prunes_for_every_arch_packs_nothing_cleanly(
     _nest(root, "hip/pointwise", empty_arch_fixture)
 
     results = _run(
-        root, tmp_path, "hipcc-not-invoked", rocm_kpack_dir, ["gfx90a", "gfx1100"]
+        root, tmp_path, "compiler-not-invoked", rocm_kpack_dir, ["gfx90a", "gfx1100"]
     )
 
     assert all(r.skipped for r in results.values())
@@ -1933,7 +2132,7 @@ def test_a_shard_that_selected_a_compiling_ukd_but_wrote_no_archive_fails(
     monkeypatch.setattr(pipeline, "pack_arch", pack_nothing)
 
     with pytest.raises(HkpPackError, match="wrote descriptors but no archive"):
-        _run(root, tmp_path, "hipcc-not-invoked", rocm_kpack_dir, ["gfx942"])
+        _run(root, tmp_path, "compiler-not-invoked", rocm_kpack_dir, ["gfx942"])
 
 
 @pytest.mark.quick
@@ -1956,8 +2155,8 @@ def test_a_passthrough_only_root_passes_with_no_archive(
 
 # --- L. The build's filters through the real command line --------------------
 def _hkp_pack_cli(root, tmp_path, arch, rocm_kpack_dir, *flags):
-    """`tools/hkp_pack.py` as the build launches it. The hipcc is a name nothing
-    can run: every root here compiles nothing."""
+    """`tools/hkp_pack.py` as the build launches it. The compiler is a name
+    nothing can run: every root here compiles nothing."""
     argv = [
         sys.executable,
         str(PACKAGING / "tools" / "hkp_pack.py"),
@@ -1967,8 +2166,8 @@ def _hkp_pack_cli(root, tmp_path, arch, rocm_kpack_dir, *flags):
         str(tmp_path / "out"),
         "--arches",
         arch,
-        "--hipcc",
-        "hipcc-not-invoked",
+        "--hip-compiler",
+        "compiler-not-invoked",
         "--generic-targets-json",
         str(GENERIC_TARGETS_JSON),
         "--inter-root",
@@ -2137,7 +2336,7 @@ def test_the_disabled_kind_flag_leaves_a_rocke_only_root_with_nothing_to_pack(
     tmp_path, rocke_fixture, rocm_kpack_dir
 ):
     """A build with no rocKE producer packs a rocKE-only root as nothing, and says
-    so; no hipcc or rocke is reached."""
+    so; no compiler or rocke is reached."""
     root = tmp_path / "root"
     _nest(root, "rocKE/attention", rocke_fixture)
 
@@ -2313,7 +2512,7 @@ def test_a_kdp_left_with_no_enabled_kind_does_not_ship(
         source_root=root,
         arches=[ROCKE_ARCH],
         out_root=tmp_path / "out",
-        hipcc="hipcc-not-invoked",
+        hip_compiler="compiler-not-invoked",
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         disabled_kinds=("rocke",),
