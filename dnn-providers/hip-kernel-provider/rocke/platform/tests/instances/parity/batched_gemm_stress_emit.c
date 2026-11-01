@@ -200,7 +200,7 @@ static int make_spec(int idx, rocke_batched_gemm_spec_t* spec)
         break;
     case 23:
         spec->name = "b23";
-        spec->tile = TILE(128, 128, 32, 2, 2, 1, 16, 16, 32); /* 16x16x16 + swizzle rejected */
+        spec->tile = TILE(128, 128, 32, 2, 2, 1, 16, 16, 16);
         spec->trait.pipeline = "compv4";
         spec->trait.epilogue = "default";
         spec->trait.lds_swizzle = true;

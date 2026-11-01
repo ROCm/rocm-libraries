@@ -81,15 +81,17 @@ static rocke_value_t* rocke_gemm_fe_apply_vec(rocke_ir_builder_t* b,
  * epilogue functions stay self-contained, matching the Python module).
  * ===================================================================== */
 
-/* _dtype_ir(name) -> io_ir_type(name). */
+/* _dtype_ir(name) -> F64 for fp64, else io_ir_type(name). */
 static const rocke_type_t* gemm_dtype_ir(rocke_ir_builder_t* b, const char* name)
 {
+    if(name != NULL && strcmp(name, "fp64") == 0)
+        return rocke_f64();
     return rocke_b_io_ir_type(b, name);
 }
 
-/* _storage_dtype(spec): validates homogeneous A/B/C dtypes, fp32 acc, RCR
- * layout, then resolves the A dtype to its IR type. Returns NULL with the
- * builder sticky error set on failure.
+/* _storage_dtype(spec): validates homogeneous A/B/C dtypes, fp32 acc (fp64 acc
+ * for fp64 storage), RCR layout, then resolves the A dtype to its IR type.
+ * Returns NULL with the builder sticky error set on failure.
  *
  * Note: in Python the three validation branches raise ValueError directly. The
  * C port has no public sticky-error setter, so on a homogeneity / acc / layout
@@ -121,7 +123,10 @@ static const rocke_type_t* gemm_storage_dtype(rocke_ir_builder_t* b,
 
     ab_ne = (a == NULL || bb == NULL) ? (a != bb) : (strcmp(a, bb) != 0);
     ac_ne = (a == NULL || c == NULL) ? (a != c) : (strcmp(a, c) != 0);
-    acc_ok = acc != NULL && (strcmp(acc, "fp32") == 0 || strcmp(acc, "f32") == 0);
+    if(a != NULL && strcmp(a, "fp64") == 0)
+        acc_ok = acc != NULL && (strcmp(acc, "fp64") == 0 || strcmp(acc, "f64") == 0);
+    else
+        acc_ok = acc != NULL && (strcmp(acc, "fp32") == 0 || strcmp(acc, "f32") == 0);
     /* GEMM_LAYOUTS: RCR and the MN-contiguous RRR / CRR / CCR */
     layout_ok = d->layout != NULL
                 && (strcmp(d->layout, "RCR") == 0 || strcmp(d->layout, "RRR") == 0
@@ -278,7 +283,7 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
      *   base_m = add(m_base_off, mi*warp_tile_m)
      *   for ni in range(mfmas_n):
      *     acc = accs[flat]; flat += 1
-     *     acc_h = vec_cast_f32_to(acc, storage_dtype)
+     *     acc_h = acc if acc.elem == storage_dtype else vec_cast_f32_to(acc, storage_dtype)
      *     c_n = (n_base_first) ? add(add(n_base_off, ni*wtn), col_in_atom)
      *                          : add(n_base_off, add(ni*wtn, col_in_atom))
      *     for i in range(c_per_lane):
@@ -297,7 +302,8 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                 rocke_value_t* acc_h;
                 rocke_value_t* c_n;
                 flat += 1;
-                acc_h = rocke_type_eq(storage_dtype, rocke_f32())
+                acc_h = (rocke_type_eq(storage_dtype, rocke_f32())
+                         || (acc != NULL && rocke_type_eq(acc->type->elem, storage_dtype)))
                             ? acc
                             : rocke_b_vec_cast_f32_to(b, acc, storage_dtype);
                 if(n_base_first)
@@ -1146,6 +1152,7 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
     rocke_value_t* warp_n_off;
     gemm_cshuffle_smem_user_t smem_user;
 
+    int elem_bytes;
     int threads;
     int store_vec;
     rocke_value_t* tid;
@@ -1161,6 +1168,7 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
     (void)num_accs;
     if(!rocke_ir_builder_ok(b))
         return;
+    elem_bytes = rocke_gemm_elem_bytes(spec);
 
     if(fused_epilogue != NULL)
     {
@@ -1222,7 +1230,7 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
 
     /* ---- step 4: wide global stores. ---- */
     threads = spec->block_size;
-    store_vec = 8;
+    store_vec = 16 / elem_bytes;
     while(store_vec > 1
           && ((t->tile_n % store_vec != 0) || ((t->tile_m * t->tile_n) / store_vec < threads)
               || (((t->tile_m * t->tile_n) / store_vec) % threads)))
@@ -1297,12 +1305,12 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                 {
                     rocke_if_t iff = rocke_b_scf_if(b, in_bounds);
                     rocke_b_region_enter(b, iff.then_region);
-                    rocke_b_global_store(b, C, c_off, h, 2);
+                    rocke_b_global_store(b, C, c_off, h, elem_bytes);
                     rocke_b_region_leave(b);
                 }
                 else
                 {
-                    rocke_b_global_store(b, C, c_off, h, 2);
+                    rocke_b_global_store(b, C, c_off, h, elem_bytes);
                 }
             }
             else
@@ -1334,7 +1342,7 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                         {
                             rocke_if_t iff = rocke_b_scf_if(b, elem_in_bounds);
                             rocke_b_region_enter(b, iff.then_region);
-                            rocke_b_global_store(b, C, c_off_i, h, 2);
+                            rocke_b_global_store(b, C, c_off_i, h, elem_bytes);
                             rocke_b_region_leave(b);
                         }
                     }

@@ -320,11 +320,12 @@ converted to that type exactly, the scaling, the operators and the binary operat
 rounded once, to nearest even, from it. So f16 and bf16 data with f16 or bf16 scalars give the results of
 f32 scalars of the same values, and an intermediate result that only exceeds D's range (for example the sum
 of two large f16 values that a third input brings back into range) stays finite. The Composable Kernel
-backend serves the f16, f32 and f64 permutation rows with scalars of the data type (and f16 with f32
-scalars), the binary rows of one data type except bf16, and the trinary rows of one data type with scalars
-of that type. It declines the others: with the Composable Kernel backend (the default selection, or
-``HIPTENSOR_BACKEND=ck``), ``hiptensorCreatePlan`` returns ``HIPTENSOR_STATUS_NOT_SUPPORTED`` for them, and
-``HIPTENSOR_BACKEND=rocke`` runs them on the rocKE backend. Other combinations, for example a bf16
+backend serves the rows whose tensors all share one data type: f16 and bf16 data with scalars of the data
+type or f32, f32 data with f32 scalars, and f64 data with f64 scalars, for permutations and elementwise
+binary and trinary operations. It declines the others (the rows with several data types): with the
+Composable Kernel backend (the default selection, or ``HIPTENSOR_BACKEND=ck``), ``hiptensorCreatePlan``
+returns ``HIPTENSOR_STATUS_NOT_SUPPORTED`` for them, and ``HIPTENSOR_BACKEND=rocke`` runs them on the rocKE
+backend. Other combinations, for example a bf16
 permutation into f32 data, a trinary operation of mixed data types, or an f64 permutation into f32 data,
 are declined by both backends: ``hiptensorCreatePlan`` returns ``HIPTENSOR_STATUS_NOT_SUPPORTED`` (with
 the rocKE backend selected, ``hiptensorEstimateWorkspaceSize`` too).

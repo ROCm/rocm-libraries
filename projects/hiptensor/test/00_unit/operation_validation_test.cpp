@@ -70,19 +70,19 @@ namespace
 
         hiptensorOperationDescriptor_t op     = nullptr;
         auto                           status = hiptensorCreateContraction(api.handle,
-                                                         &op,
-                                                         descA,
-                                                         c.modeA.data(),
-                                                         HIPTENSOR_OP_IDENTITY,
-                                                         descB,
-                                                         c.modeB.data(),
-                                                         HIPTENSOR_OP_IDENTITY,
-                                                         nullptr,
-                                                         nullptr,
-                                                         HIPTENSOR_OP_IDENTITY,
-                                                         descD,
-                                                         c.modeD.data(),
-                                                         HIPTENSOR_COMPUTE_DESC_32F);
+                                                 &op,
+                                                 descA,
+                                                 c.modeA.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 descB,
+                                                 c.modeB.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 nullptr,
+                                                 nullptr,
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 descD,
+                                                 c.modeD.data(),
+                                                 HIPTENSOR_COMPUTE_DESC_32F);
         api.keep(op);
         if(status != HIPTENSOR_STATUS_SUCCESS && op != nullptr)
         {
@@ -112,9 +112,9 @@ TEST(TensorDescriptorValidationTest, RejectsMissingOrInvalidExtentsAndStrides)
     ApiObjects                  api;
     hiptensorTensorDescriptor_t desc = nullptr;
 
-    EXPECT_EQ(hiptensorCreateTensorDescriptor(
-                  api.handle, &desc, 2, nullptr, nullptr, HIPTENSOR_R_32F, 0),
-              HIPTENSOR_STATUS_INVALID_VALUE);
+    EXPECT_EQ(
+        hiptensorCreateTensorDescriptor(api.handle, &desc, 2, nullptr, nullptr, HIPTENSOR_R_32F, 0),
+        HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(desc, nullptr);
 
     int64_t const zeroExtent[]     = {4, 0};
@@ -139,9 +139,9 @@ TEST(TensorDescriptorValidationTest, RejectsMissingOrInvalidExtentsAndStrides)
         HIPTENSOR_STATUS_NOT_INITIALIZED);
 
     // A rank-0 tensor needs no extents.
-    EXPECT_EQ(hiptensorCreateTensorDescriptor(
-                  api.handle, &desc, 0, nullptr, nullptr, HIPTENSOR_R_32F, 0),
-              HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_EQ(
+        hiptensorCreateTensorDescriptor(api.handle, &desc, 0, nullptr, nullptr, HIPTENSOR_R_32F, 0),
+        HIPTENSOR_STATUS_SUCCESS);
     if(desc != nullptr)
     {
         hiptensorDestroyTensorDescriptor(desc);
@@ -157,9 +157,9 @@ TEST(ContractionModeValidationTest, RejectsModesTheKernelsCannotAddress)
     }
 
     // Seven M, N or K modes (the kernels address six per group).
-    auto m7 = modeRange('a', 7);
-    auto n7 = modeRange('A', 7);
-    auto k7 = modeRange('0', 7);
+    auto m7  = modeRange('a', 7);
+    auto n7  = modeRange('A', 7);
+    auto k7  = modeRange('0', 7);
     auto two = [](std::size_t n) { return std::vector<int64_t>(n, 2); };
 
     struct Named
@@ -327,9 +327,9 @@ TEST(ContractionModeValidationTest, OuterProductRuns)
     }
 
     constexpr int64_t M = 12, N = 10;
-    auto              descA = api.tensor({M}, {1}, HIPTENSOR_R_32F);
-    auto              descB = api.tensor({N}, {1}, HIPTENSOR_R_32F);
-    auto              descD = api.tensor({M, N}, {1, M}, HIPTENSOR_R_32F);
+    auto              descA   = api.tensor({M}, {1}, HIPTENSOR_R_32F);
+    auto              descB   = api.tensor({N}, {1}, HIPTENSOR_R_32F);
+    auto              descD   = api.tensor({M, N}, {1, M}, HIPTENSOR_R_32F);
     int32_t const     modeA[] = {'m'}, modeB[] = {'n'}, modeD[] = {'m', 'n'};
 
     hiptensorOperationDescriptor_t op = nullptr;
@@ -507,9 +507,9 @@ TEST(ElementwisePlanValidationTest, PlansOnlyProblemsAKernelRuns)
 
     // Rank-1 permutation: B = 2 * A.
     {
-        constexpr int64_t  n = 16;
-        auto               desc     = api.tensor({n}, {1}, HIPTENSOR_R_32F);
-        int32_t const      modes[]  = {'m'};
+        constexpr int64_t  n       = 16;
+        auto               desc    = api.tensor({n}, {1}, HIPTENSOR_R_32F);
+        int32_t const      modes[] = {'m'};
         std::vector<float> a(n);
         for(int64_t i = 0; i < n; ++i)
         {
@@ -631,10 +631,10 @@ TEST(ElementwisePlanValidationTest, PlansOnlyProblemsAKernelRuns)
 
     // Permutation into a tensor of a different, unimplemented type (f16 into f64).
     {
-        constexpr int64_t M = 8, N = 4;
-        auto              descA   = api.tensor({M, N}, {}, HIPTENSOR_R_16F);
-        auto              descB   = api.tensor({M, N}, {}, HIPTENSOR_R_64F);
-        int32_t const     modes[] = {'m', 'n'};
+        constexpr int64_t     M = 8, N = 4;
+        auto                  descA   = api.tensor({M, N}, {}, HIPTENSOR_R_16F);
+        auto                  descB   = api.tensor({M, N}, {}, HIPTENSOR_R_64F);
+        int32_t const         modes[] = {'m', 'n'};
         std::vector<_Float16> a;
         for(int64_t i = 0; i < M * N; ++i)
         {
@@ -684,44 +684,80 @@ TEST(ReductionPlanValidationTest, RefusesMalformedReductionsAtPlanTime)
 
     struct Case
     {
-        char const*                 name;
-        hiptensorTensorDescriptor_t a;
-        std::vector<int32_t>        modeA;
-        hiptensorTensorDescriptor_t c;
-        std::vector<int32_t>        modeC, modeD;
+        char const*                  name;
+        hiptensorTensorDescriptor_t  a;
+        std::vector<int32_t>         modeA;
+        hiptensorTensorDescriptor_t  c;
+        std::vector<int32_t>         modeC, modeD;
         hiptensorComputeDescriptor_t compute;
-        hiptensorStatus_t           expected;
+        hiptensorStatus_t            expected;
     };
     std::vector<Case> cases = {
-        {"valid", descA, {'m', 'k'}, descC, {'m'}, {'m'}, HIPTENSOR_COMPUTE_DESC_32F,
+        {"valid",
+         descA,
+         {'m', 'k'},
+         descC,
+         {'m'},
+         {'m'},
+         HIPTENSOR_COMPUTE_DESC_32F,
          HIPTENSOR_STATUS_SUCCESS},
-        {"kept mode with another extent", descA, {'m', 'k'}, descC5, {'m'}, {'m'},
-         HIPTENSOR_COMPUTE_DESC_32F, HIPTENSOR_STATUS_INVALID_VALUE},
-        {"mode repeated in A", descA3, {'m', 'm', 'k'}, descC, {'m'}, {'m'},
-         HIPTENSOR_COMPUTE_DESC_32F, HIPTENSOR_STATUS_NOT_SUPPORTED},
-        {"D with modes other than C's", descA, {'m', 'k'}, descC, {'m'}, {'x'},
-         HIPTENSOR_COMPUTE_DESC_32F, HIPTENSOR_STATUS_NOT_SUPPORTED},
-        {"C mode not in A", descA, {'m', 'k'}, descCK, {'x'}, {'x'}, HIPTENSOR_COMPUTE_DESC_32F,
+        {"kept mode with another extent",
+         descA,
+         {'m', 'k'},
+         descC5,
+         {'m'},
+         {'m'},
+         HIPTENSOR_COMPUTE_DESC_32F,
+         HIPTENSOR_STATUS_INVALID_VALUE},
+        {"mode repeated in A",
+         descA3,
+         {'m', 'm', 'k'},
+         descC,
+         {'m'},
+         {'m'},
+         HIPTENSOR_COMPUTE_DESC_32F,
          HIPTENSOR_STATUS_NOT_SUPPORTED},
-        {"f32 data with f64 compute", descA, {'m', 'k'}, descC, {'m'}, {'m'},
-         HIPTENSOR_COMPUTE_DESC_64F, HIPTENSOR_STATUS_NOT_SUPPORTED},
+        {"D with modes other than C's",
+         descA,
+         {'m', 'k'},
+         descC,
+         {'m'},
+         {'x'},
+         HIPTENSOR_COMPUTE_DESC_32F,
+         HIPTENSOR_STATUS_NOT_SUPPORTED},
+        {"C mode not in A",
+         descA,
+         {'m', 'k'},
+         descCK,
+         {'x'},
+         {'x'},
+         HIPTENSOR_COMPUTE_DESC_32F,
+         HIPTENSOR_STATUS_NOT_SUPPORTED},
+        {"f32 data with f64 compute",
+         descA,
+         {'m', 'k'},
+         descC,
+         {'m'},
+         {'m'},
+         HIPTENSOR_COMPUTE_DESC_64F,
+         HIPTENSOR_STATUS_NOT_SUPPORTED},
     };
 
     for(auto const& c : cases)
     {
         hiptensorOperationDescriptor_t op     = nullptr;
         auto                           status = hiptensorCreateReduction(api.handle,
-                                                         &op,
-                                                         c.a,
-                                                         c.modeA.data(),
-                                                         HIPTENSOR_OP_IDENTITY,
-                                                         c.c,
-                                                         c.modeC.data(),
-                                                         HIPTENSOR_OP_IDENTITY,
-                                                         c.c,
-                                                         c.modeD.data(),
-                                                         HIPTENSOR_OP_ADD,
-                                                         c.compute);
+                                               &op,
+                                               c.a,
+                                               c.modeA.data(),
+                                               HIPTENSOR_OP_IDENTITY,
+                                               c.c,
+                                               c.modeC.data(),
+                                               HIPTENSOR_OP_IDENTITY,
+                                               c.c,
+                                               c.modeD.data(),
+                                               HIPTENSOR_OP_ADD,
+                                               c.compute);
         api.keep(op);
         ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS) << c.name;
         hiptensorPlan_t plan = nullptr;
@@ -735,15 +771,18 @@ TEST(ReductionPlanValidationTest, RefusesMalformedReductionsAtPlanTime)
 
 namespace
 {
-    // The elementwise data type rows of cuTENSOR 2.x that the API accepts beyond the Composable
-    // Kernel backend's rows: the rocKE backend serves them, the Composable Kernel backend declines
-    // them when the plan is created.
+    // The elementwise data type rows of cuTENSOR 2.x that the API accepts beyond the original
+    // Composable Kernel rows: the rocKE backend serves them all. The Composable Kernel backend
+    // serves the rows whose tensors share one data type (bf16 permutations, f16 trinary operations
+    // with f32 scalars, bf16 trinary operations: `ck`), and declines the others when the plan is
+    // created.
     struct ExtendedRow
     {
         char const*         name;
         int                 arity; // 1 permutation, 2 binary, 3 trinary
         hiptensorDataType_t a, c, d; // C: B and C of a trinary operation, C of a binary one
         hiptensorComputeDescriptor_t compute;
+        bool                         ck; // served by the Composable Kernel backend too
     };
 
     std::vector<ExtendedRow> extendedRows()
@@ -751,14 +790,44 @@ namespace
         auto const f16 = HIPTENSOR_R_16F, bf16 = HIPTENSOR_R_16BF;
         auto const f32 = HIPTENSOR_R_32F, f64 = HIPTENSOR_R_64F;
         return {
-            {"bf16 permutation, bf16 scalars", 1, bf16, bf16, bf16, HIPTENSOR_COMPUTE_DESC_16BF},
-            {"bf16 permutation, f32 scalars", 1, bf16, bf16, bf16, HIPTENSOR_COMPUTE_DESC_32F},
-            {"f32 into f64 permutation, f64 scalars", 1, f32, f32, f64, HIPTENSOR_COMPUTE_DESC_64F},
-            {"binary f32 A, f16 C, f32 scalars", 2, f32, f16, f16, HIPTENSOR_COMPUTE_DESC_32F},
-            {"binary f64 A, f32 C, f64 scalars", 2, f64, f32, f32, HIPTENSOR_COMPUTE_DESC_64F},
-            {"f16 trinary, f32 scalars", 3, f16, f16, f16, HIPTENSOR_COMPUTE_DESC_32F},
-            {"bf16 trinary, bf16 scalars", 3, bf16, bf16, bf16, HIPTENSOR_COMPUTE_DESC_16BF},
-            {"bf16 trinary, f32 scalars", 3, bf16, bf16, bf16, HIPTENSOR_COMPUTE_DESC_32F}};
+            {"bf16 permutation, bf16 scalars",
+             1,
+             bf16,
+             bf16,
+             bf16,
+             HIPTENSOR_COMPUTE_DESC_16BF,
+             true},
+            {"bf16 permutation, f32 scalars",
+             1,
+             bf16,
+             bf16,
+             bf16,
+             HIPTENSOR_COMPUTE_DESC_32F,
+             true},
+            {"f32 into f64 permutation, f64 scalars",
+             1,
+             f32,
+             f32,
+             f64,
+             HIPTENSOR_COMPUTE_DESC_64F,
+             false},
+            {"binary f32 A, f16 C, f32 scalars",
+             2,
+             f32,
+             f16,
+             f16,
+             HIPTENSOR_COMPUTE_DESC_32F,
+             false},
+            {"binary f64 A, f32 C, f64 scalars",
+             2,
+             f64,
+             f32,
+             f32,
+             HIPTENSOR_COMPUTE_DESC_64F,
+             false},
+            {"f16 trinary, f32 scalars", 3, f16, f16, f16, HIPTENSOR_COMPUTE_DESC_32F, true},
+            {"bf16 trinary, bf16 scalars", 3, bf16, bf16, bf16, HIPTENSOR_COMPUTE_DESC_16BF, true},
+            {"bf16 trinary, f32 scalars", 3, bf16, bf16, bf16, HIPTENSOR_COMPUTE_DESC_32F, true}};
     }
 
     size_t bytesOf(hiptensorDataType_t t)
@@ -978,8 +1047,9 @@ namespace
 } // namespace
 
 // The Composable Kernel backend declines the rows that only the rocKE backend serves when the plan
-// is created: with the default selection and with HIPTENSOR_BACKEND=ck, with and without the
-// fallback (which only falls back to the Composable Kernel backend).
+// is created, and serves the rows of one data type with the loop's result: with the default
+// selection and with HIPTENSOR_BACKEND=ck, with and without the fallback (which only falls back to
+// the Composable Kernel backend).
 TEST(ElementwiseTypeRowsTest, CkBackendDeclinesTheRocKERows)
 {
     for(char const* selection : {static_cast<char const*>(nullptr), "ck"})
@@ -994,7 +1064,9 @@ TEST(ElementwiseTypeRowsTest, CkBackendDeclinesTheRocKERows)
                 SCOPED_TRACE(std::string(selection == nullptr ? "default selection" : selection)
                              + (fallback == nullptr ? ", fallback" : ", no fallback"));
                 auto out = planAndRun(row);
-                EXPECT_EQ(out.plan, HIPTENSOR_STATUS_NOT_SUPPORTED) << row.name;
+                EXPECT_EQ(out.plan,
+                          row.ck ? HIPTENSOR_STATUS_SUCCESS : HIPTENSOR_STATUS_NOT_SUPPORTED)
+                    << row.name;
             }
         }
     }

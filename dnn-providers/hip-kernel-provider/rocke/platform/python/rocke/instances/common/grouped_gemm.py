@@ -73,7 +73,7 @@ changing their input plumbing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, List, Sequence, Tuple
 
 from ...core.ir import KernelDef
@@ -128,7 +128,10 @@ class GroupedGemmSpec(WarpTileBlockSizeMixin):
         self._init_block_size()
 
     def _data_spec(self) -> DataSpec:
-        return mono_data_spec(self.dtype)
+        data = mono_data_spec(self.dtype)
+        if data.dtype_a == "fp64":
+            return replace(data, dtype_acc="fp64")
+        return data
 
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
@@ -177,7 +180,7 @@ def build_grouped_gemm(spec: GroupedGemmSpec, arch: str = "gfx950") -> KernelDef
 def grouped_gemm_signature(spec: GroupedGemmSpec):
     from ...helpers.spec import SignatureBuilder
 
-    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
+    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16", "fp64") else "f16"
     return (
         SignatureBuilder()
         .ptr("A", ptr_dt)
@@ -317,7 +320,7 @@ def grouped_gemm_single_launch_signature(spec: GroupedGemmSpec):
     """
     from ...helpers.spec import SignatureBuilder
 
-    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
+    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16", "fp64") else "f16"
     return (
         SignatureBuilder()
         .ptr("A", ptr_dt)
@@ -345,9 +348,11 @@ class GroupedGemmSingleLaunchRunner:
     ``(M, N, K)``.
     """
 
-    def __init__(self, *, hsaco: bytes, spec: GroupedGemmSpec) -> None:
+    def __init__(
+        self, *, hsaco: bytes, spec: GroupedGemmSpec, arch: str = "gfx950"
+    ) -> None:
         self._spec = spec
-        kernel_name = build_grouped_gemm_single_launch(spec).name
+        kernel_name = build_grouped_gemm_single_launch(spec, arch=arch).name
         self._launcher = KernelLauncher(
             hsaco=hsaco,
             kernel_name=kernel_name,

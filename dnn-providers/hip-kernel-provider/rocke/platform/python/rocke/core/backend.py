@@ -286,11 +286,14 @@ def _lower_via_cpp_engine(
 
     if flavor not in LLVM_FLAVORS:
         raise ValueError(f"unknown LLVM flavor {flavor!r}")
+    refused = getattr(engine, "ArchDomainError", None)
     try:
         return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
     except (
         Exception
     ) as e:  # noqa: BLE001 -- augment a stale-binary footgun, then re-raise
+        if refused is not None and isinstance(e, refused):
+            raise _arch_domain_refusal(str(e)) from None
         msg = str(e)
         if "unknown opcode" in msg:
             so = getattr(engine, "__file__", "<unknown>")
@@ -300,6 +303,36 @@ def _lower_via_cpp_engine(
                 f"it (the .so predates the opcode). Loaded from: {so}"
             ) from e
         raise
+
+
+def _arch_domain_refusal(message: str) -> Exception:
+    """The C++ engine's arch-domain refusal, as the Python lowerer raises it.
+
+    The engine passes only its message, which ``domain.message`` formats and
+    ``domain.parse_message`` reads back. The cell is then looked up again in
+    this checkout's table, so a refusal the Python side would not make -- an
+    extension built from other columns or waivers -- is reported as the
+    engines disagreeing rather than passed off as a verdict.
+    """
+    from .arch import domain as arch_domain
+    from .lower_llvm import ArchDomainError
+
+    parsed = arch_domain.parse_message(message)
+    table = arch_domain.load(parsed[2]) if parsed is not None else None
+    cell = table.lookup(parsed[0], parsed[1]) if table is not None else None
+    if (
+        parsed is None
+        or cell is None
+        or not arch_domain.is_negative(cell.status)
+        or arch_domain.is_waived(*parsed[:3])
+    ):
+        return BackendMismatch(
+            "the C++ engine refused a lowering that this checkout's arch-domain "
+            f"table does not refuse ({message!r}); the rocke_engine extension "
+            "was built from other columns or waivers -- rebuild it"
+        )
+    key, arch, flavor, _ = parsed
+    return ArchDomainError(key, arch, flavor, cell.status, cell.evidence)
 
 
 def _effective_flavor(llvm_flavor: Optional[str]) -> str:
@@ -357,9 +390,9 @@ def lower_kernel_via_backend(
     # The Python lowerer reads the mode only for a kernel that demands an
     # intrinsic and the C++ path only in its post-pass, so one bad value used to
     # raise for some kernels and some backends and be ignored by the rest.
-    from .lower_llvm import _arch_domain_mode
+    from .arch import domain as arch_domain
 
-    _arch_domain_mode()
+    arch_domain.mode()
 
     chosen = resolve_backend()
 
@@ -376,12 +409,18 @@ def lower_kernel_via_backend(
 
     # The serialized artifact is the family-agnostic hand-off to the C++ engine.
     from .ir_serialize import serialize
+    from .lower_llvm import ArchDomainError
 
     if chosen == BACKEND_CPP:
         try:
             ir_text = serialize(kernel)
             flavor = _effective_flavor(llvm_flavor)
             out = _lower_via_cpp_engine(ir_text, _arch, flavor)
+        except ArchDomainError:
+            # A verdict about the kernel, not an engine failure. The Python
+            # lowerer reads the same table and would refuse the same kernel, so
+            # falling back would only print a misleading "fell back" line first.
+            raise
         except BaseException as e:  # noqa: BLE001 -- includes BackendError
             if _cpp_strict():
                 raise
@@ -408,10 +447,39 @@ def lower_kernel_via_backend(
     # One flavor for both engines: each resolving for itself could compare IR
     # lowered at two different flavors and report the gap as a parity failure.
     flavor = _effective_flavor(llvm_flavor)
-    py_ll = python_lower(kernel, llvm_flavor=flavor, arch=arch)
+    #
+    # An arch-domain refusal is compared like the IR is: both engines must
+    # refuse, over the same intrinsic, or this is a mismatch. The refusal is
+    # what `both` returns then, as the other modes do.
+    try:
+        py_ll = python_lower(kernel, llvm_flavor=flavor, arch=arch)
+    except ArchDomainError as py_refusal:
+        try:
+            _lower_via_cpp_engine(serialize(kernel), _arch, flavor)
+        except ArchDomainError as cpp_refusal:
+            if (cpp_refusal.key, cpp_refusal.arch, cpp_refusal.flavor) == (
+                py_refusal.key,
+                py_refusal.arch,
+                py_refusal.flavor,
+            ):
+                raise py_refusal from None
+            raise BackendMismatch(
+                f"python vs cpp engine refused kernel '{name}' on {_arch} over "
+                f"different intrinsics: python {py_refusal.key!r}, cpp "
+                f"{cpp_refusal.key!r}"
+            ) from py_refusal
+        raise BackendMismatch(
+            f"the python lowerer refused kernel '{name}' on {_arch} and the cpp "
+            f"engine lowered it: {py_refusal}"
+        ) from py_refusal
     ir_text = serialize(kernel)
     try:
         cpp_ll = _lower_via_cpp_engine(ir_text, _arch, flavor)
+    except ArchDomainError as cpp_refusal:
+        raise BackendMismatch(
+            f"the cpp engine refused kernel '{name}' on {_arch} and the python "
+            f"lowerer lowered it: {cpp_refusal}"
+        ) from cpp_refusal
     except ValueError:
         raise
     except BaseException as e:  # noqa: BLE001 -- includes BackendError
@@ -1120,6 +1188,17 @@ def _conv_problem_to_dict(p: Any) -> Dict[str, Any]:
     return d
 
 
+def _conv_acc_epilogue_to_dict(epi: Any) -> Dict[str, Any]:
+    """:class:`ConvAccumulatorEpilogue` -> dict (clamp bounds None when unset)."""
+    return dict(
+        bias=float(epi.bias),
+        scale=float(epi.scale),
+        relu=bool(epi.relu),
+        clamp_min=None if epi.clamp_min is None else float(epi.clamp_min),
+        clamp_max=None if epi.clamp_max is None else float(epi.clamp_max),
+    )
+
+
 def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`ImplicitGemmConvSpec` -> flat dict (problem nested). Optional
     fields (lds_k_pad/waves_per_eu/vector_size_*) are forwarded when set; the
@@ -1149,6 +1228,16 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         # Changes the emitted kernel and its launch grid; dropped, the engine
         # would build an unmerged kernel under a merged spec's name and grid.
         group_merge=getattr(spec, "group_merge", 1),
+        # The split-K forward binary (its own ABI and epilogue) and its cluster
+        # form; dropped, the engine would build the plain kernel. Read
+        # directly: a spec without them is malformed, not unsplit.
+        split_k=spec.split_k,
+        split_k_cluster=spec.split_k_cluster,
+        # The wavelet load-wave count changes the launch block and the loaders.
+        num_load_waves=spec.num_load_waves,
+        # The fused accumulator epilogue changes the emitted epilogue (and
+        # split-K admission); dropped, the engine would build the identity.
+        acc_epilogue=_conv_acc_epilogue_to_dict(spec.acc_epilogue),
     )
     # dtype_* and the vector-size/optional knobs are merge-target additions
     # (#8624); forward them only when this branch's spec exposes them so the
@@ -1235,6 +1324,133 @@ def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
     return d
 
 
+def _fwd_small_problem_dict(p: Any) -> Dict[str, Any]:
+    return dict(
+        N=p.N,
+        H=p.H,
+        W=p.W,
+        groups=p.groups,
+        cpg=p.cpg,
+        kpg=p.kpg,
+        KH=p.KH,
+        KW=p.KW,
+        PAD=p.PAD,
+        stride=p.stride,
+        dil_h=p.dil_h,
+        dil_w=p.dil_w,
+        dtype=p.dtype,
+    )
+
+
+def conv_direct_fwd_smallc_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FwdSmallcWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves_k=spec.waves_k,
+        waves_p=spec.waves_p,
+        tiles_k=spec.tiles_k,
+        tiles_p=spec.tiles_p,
+        out_h=spec.out_h,
+        out_w=spec.out_w,
+        tiles_per_block=spec.tiles_per_block,
+        tdm_store=spec.tdm_store,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+    )
+
+
+def conv_direct_fwd_smallk_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FwdSmallkWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves_c=spec.waves_c,
+        waves_p=spec.waves_p,
+        tiles_c=spec.tiles_c,
+        tiles_p=spec.tiles_p,
+        out_h=spec.out_h,
+        out_w=spec.out_w,
+        ck=spec.ck,
+        stages=spec.stages,
+        prefetch=spec.prefetch,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+    )
+
+
+def conv_dgrad_patch_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DgradPatchWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        waves_c=spec.waves_c,
+        waves_p=spec.waves_p,
+        tiles_c=spec.tiles_c,
+        tiles_p=spec.tiles_p,
+        tile_w=spec.tile_w,
+        r_blk=spec.r_blk,
+        ck=spec.ck,
+        stages=spec.stages,
+        prefetch=spec.prefetch,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+    )
+
+
+def conv_dgrad_smallc_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DgradSmallcWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        waves_c=spec.waves_c,
+        waves_p=spec.waves_p,
+        tiles_c=spec.tiles_c,
+        tiles_p=spec.tiles_p,
+        out_h=spec.out_h,
+        out_w=spec.out_w,
+        ck=spec.ck,
+        stages=spec.stages,
+        prefetch=spec.prefetch,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+    )
+
+
 def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DirectDgradWmmaSpec` -> flat dict (problem nested, dtype included).
     ``sched`` is forwarded as-is; ``None`` means the backend default."""
@@ -1267,6 +1483,54 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         prefetch=spec.prefetch,
         sched=spec.sched,
         wave_size=spec.wave_size,
+        pack_groups=spec.pack_groups,
+        split_barrier=spec.split_barrier,
+        wave_epilogue=spec.wave_epilogue,
+    )
+
+
+def conv_direct_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DirectFwdWmmaSpec` -> flat dict (problem nested, dtype included).
+    ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        waves_k=spec.waves_k,
+        waves_p=spec.waves_p,
+        tiles_k=spec.tiles_k,
+        tiles_p=spec.tiles_p,
+        tile_w=spec.tile_w,
+        tile_n=spec.tile_n,
+        ck=spec.ck,
+        stages=spec.stages,
+        prefetch=spec.prefetch,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+        pack_groups=spec.pack_groups,
+        split_barrier=spec.split_barrier,
+        wave_epilogue=spec.wave_epilogue,
+        phase_split=spec.phase_split,
+        row_ring=spec.row_ring,
+        tap_ring=spec.tap_ring,
+        pingpong=spec.pingpong,
+        pp_group=spec.pp_group,
+        tap_reuse=spec.tap_reuse,
+        tap_shift=spec.tap_shift,
     )
 
 
@@ -1830,6 +2094,12 @@ def lower_conv_implicit_gemm(
             ir = serialize(k)
         return ll, ir
 
+    if spec.split_k == -1:
+        # Auto split-K is resolved on the Python side for both engines, so the
+        # C++ engine (explicit degrees only) builds the same kernel.
+        from kernels.common.conv_implicit_gemm import resolve_fwd_split_k_spec
+
+        spec = resolve_fwd_split_k_spec(spec, arch)
     eng = _import_engine()
     sd = conv_implicit_gemm_spec_to_dict(spec)
     return _lower_family(
@@ -1930,6 +2200,154 @@ def lower_conv_direct_nongrouped(
     )
 
 
+def lower_conv_direct_fwd_smallc_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`FwdSmallcWmmaSpec` (the gfx1250 WMMA small-C forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_fwd_small_wmma import build_fwd_smallc_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_fwd_smallc_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_fwd_smallc_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_fwd_smallc_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_fwd_smallc_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_fwd_smallc_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_fwd_smallk_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`FwdSmallkWmmaSpec` (the gfx1250 WMMA small-K forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_fwd_small_wmma import build_fwd_smallk_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_fwd_smallk_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_fwd_smallk_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_fwd_smallk_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_fwd_smallk_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_fwd_smallk_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_dgrad_patch_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DgradPatchWmmaSpec` (the gfx1250 WMMA patch-embedding dgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_dgrad_patch_wmma import build_dgrad_patch_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_dgrad_patch_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_dgrad_patch_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_dgrad_patch_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_dgrad_patch_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_dgrad_patch_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_dgrad_smallc_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DgradSmallcWmmaSpec` (the gfx1250 WMMA small-C stem dgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_dgrad_smallc_wmma import build_dgrad_smallc_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_dgrad_smallc_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_dgrad_smallc_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_dgrad_smallc_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_dgrad_smallc_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_dgrad_smallc_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
 def lower_conv_direct_dgrad_wmma(
     spec: Any,
     *,
@@ -1963,6 +2381,415 @@ def lower_conv_direct_dgrad_wmma(
         py_fn,
         lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
         lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_fwd_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DirectFwdWmmaSpec` (the gfx1250 WMMA direct forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_fwd_wmma import build_direct_fwd_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_direct_fwd_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_fwd_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_fwd_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_fwd_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_fwd_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def conv_winograd_fwd_spec_to_dict(spec: Any, stages: Any) -> Dict[str, Any]:
+    """:class:`WinogradFwdSpec` + its stage (``"K1"`` / ``"K2a"`` / ``"K2"`` /
+    ``"K4"``) or a sequence of stage names (a merged launch) -> flat dict
+    (problem nested)."""
+    p = spec.problem
+    d = dict(
+        problem=dict(
+            N=p.N,
+            Hi=p.Hi,
+            Wi=p.Wi,
+            C=p.C,
+            K=p.K,
+            Y=p.Y,
+            X=p.X,
+            sH=p.sH,
+            sW=p.sW,
+            pH=p.pH,
+            pW=p.pW,
+            dH=p.dH,
+            dW=p.dW,
+            groups=p.groups,
+            Di=p.Di,
+        ),
+        m=spec.m,
+        m_w=spec.m_w,
+        io_dtype=spec.io_dtype,
+        operand_dtype=spec.operand_dtype,
+        vec=spec.vec,
+        block_size=spec.block_size,
+        prescale=spec.prescale,
+        tiles_per_thread=spec.tiles_per_thread,
+        prescale_mode=spec.prescale_mode,
+        input_block_tiles=list(spec.input_block_tiles),
+        wg_tile_rows=spec.wg_tile_rows,
+        nt_stores=spec.nt_stores,
+        lds_lanes=spec.lds_lanes,
+        filter_rows=spec.filter_rows,
+        filter_vec=spec.filter_vec,
+        name=spec.name,
+    )
+    if isinstance(stages, str):
+        d["stage"] = stages
+    else:
+        d["merged"] = list(stages)
+    return d
+
+
+def lower_conv_winograd_fwd(
+    spec: Any,
+    stages: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower one Winograd forward transform stage (``stages`` = ``"K1"`` /
+    ``"K2a"`` / ``"K2"`` / ``"K4"``) or a merged launch (``stages`` = a
+    sequence of stage names) of a :class:`WinogradFwdSpec`."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common import conv_winograd_fwd as wf
+        from .lower_llvm import lower_kernel_to_llvm
+
+        if isinstance(stages, str):
+            build = {
+                "K1": wf.build_winograd_filter_transform,
+                "K2a": wf.build_winograd_prescale,
+                "K2": wf.build_winograd_input_transform,
+                "K4": wf.build_winograd_output_transform,
+            }[stages]
+            k = build(spec, arch=arch)
+        else:
+            k = wf.build_winograd_merged(
+                wf.WinogradMergedSpec(spec, tuple(stages)), arch=arch
+            )
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_winograd_fwd_spec_to_dict(spec, stages)
+    return _lower_family(
+        "conv_winograd_fwd",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_winograd_fwd_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_winograd_fwd_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def conv_winograd_gemm_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`WinogradGemmWmmaSpec` -> flat dict (the Winograd K3 GEMM).
+    ``sched`` is forwarded as-is; ``None`` means no scheduler strategy."""
+    return dict(
+        dtype=spec.dtype,
+        name=spec.name,
+        waves_m=spec.waves_m,
+        waves_n=spec.waves_n,
+        frags_m=spec.frags_m,
+        frags_n=spec.frags_n,
+        tile_k=spec.tile_k,
+        stages=spec.stages,
+        lds_pad=spec.lds_pad,
+        epilogue=spec.epilogue,
+        split_k=spec.split_k,
+        prefetch=spec.prefetch,
+        xcd_remap=spec.xcd_remap,
+        num_xcds=spec.num_xcds,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+        taps=spec.taps,
+    )
+
+
+def lower_conv_winograd_gemm_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`WinogradGemmWmmaSpec` (the gfx1250 Winograd K3 GEMM)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_winograd_gemm_wmma import build_winograd_gemm_wmma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_winograd_gemm_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_winograd_gemm_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_winograd_gemm_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_winograd_gemm_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_winograd_gemm_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_winograd_gemm_reduce(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`WinogradGemmReduceSpec` (the split-K slab reduce of the
+    Winograd K3 GEMM)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_winograd_gemm_wmma import build_winograd_gemm_reduce
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_winograd_gemm_reduce(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = dict(dtype=spec.dtype)
+    return _lower_family(
+        "conv_winograd_gemm_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_winograd_gemm_reduce_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_winograd_gemm_reduce_serialize_ir(sd, arch=arch),
+        "wino_gemm_reduce",
+    )
+
+
+_WINOGRAD_GEN_STAGES = ("K1", "K2", "K4")
+
+
+def conv_winograd_gen_spec_to_dict(spec: Any, stage: str) -> Dict[str, Any]:
+    """:class:`WinogradGenSpec` + stage (``K1`` / ``K2`` / ``K4``) -> dict
+    (problem and axes nested). The C++ engine has the default Toom-Cook
+    points only, so an axis with explicit ``pts`` is rejected."""
+    if stage not in _WINOGRAD_GEN_STAGES:
+        raise ValueError(f"stage must be one of {_WINOGRAD_GEN_STAGES}, got {stage!r}")
+    p = spec.problem
+    axes = {}
+    for key in ("ax_y", "ax_x"):
+        a = getattr(spec, key)
+        if a.pts is not None:
+            raise ValueError(
+                "the C++ engine supports the default Winograd points only "
+                f"({key} has pts={a.pts!r})"
+            )
+        axes[key] = dict(m=a.m, r=a.r, seg=a.seg)
+    return dict(
+        problem=dict(
+            N=p.N,
+            Hi=p.Hi,
+            Wi=p.Wi,
+            C=p.C,
+            K=p.K,
+            Y=p.Y,
+            X=p.X,
+            sH=p.sH,
+            sW=p.sW,
+            pH=p.pH,
+            pW=p.pW,
+            dH=p.dH,
+            dW=p.dW,
+            groups=p.groups,
+            Di=p.Di,
+        ),
+        **axes,
+        io_dtype=spec.io_dtype,
+        operand_dtype=spec.operand_dtype,
+        vec=spec.vec,
+        block_size=spec.block_size,
+        nt_stores=spec.nt_stores,
+        name=spec.name,
+        stage=stage,
+    )
+
+
+def lower_conv_winograd_gen(
+    spec: Any,
+    stage: str,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower one stage (``K1`` filter, ``K2`` input, ``K4`` output transform)
+    of a :class:`WinogradGenSpec` (the generalized Winograd forward)."""
+    sd = conv_winograd_gen_spec_to_dict(spec, stage)
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common import conv_winograd_gen as G
+        from .lower_llvm import lower_kernel_to_llvm
+
+        build = {
+            "K1": G.build_filter_transform,
+            "K2": G.build_input_transform,
+            "K4": G.build_output_transform,
+        }[stage]
+        k = build(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    return _lower_family(
+        "conv_winograd_gen",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_winograd_gen_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_winograd_gen_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def conv_winograd_fused_1d_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FusedWino1DSpec` -> flat dict (problem and W axis nested).
+
+    The C++ engine carries the default Toom-Cook interpolation points only, so
+    an axis with explicit ``pts`` is refused here rather than built with other
+    points."""
+    p = spec.problem
+    ax = spec.ax
+    if getattr(ax, "pts", None) is not None:
+        raise ValueError(
+            "conv_winograd_fused_1d_wmma: the C++ engine supports the default "
+            "interpolation points only (ax.pts must be None)"
+        )
+    return dict(
+        problem=dict(
+            N=p.N,
+            Hi=p.Hi,
+            Wi=p.Wi,
+            C=p.C,
+            K=p.K,
+            Y=p.Y,
+            X=p.X,
+            sH=p.sH,
+            sW=p.sW,
+            pH=p.pH,
+            pW=p.pW,
+            dH=p.dH,
+            dW=p.dW,
+            groups=p.groups,
+            Di=p.Di,
+        ),
+        ax=dict(m=ax.m, r=ax.r, seg=ax.seg, pts=None),
+        q=spec.q,
+        fk=spec.fk,
+        grid_blocks=spec.grid_blocks,
+        prefetch=spec.prefetch,
+        m_f16=spec.m_f16,
+        xf=spec.xf,
+        xf_batch=spec.xf_batch,
+        merge=spec.merge,
+        waves=spec.waves,
+        waves_per_eu=spec.waves_per_eu,
+        name=spec.name,
+    )
+
+
+def lower_conv_winograd_fused_1d_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`FusedWino1DSpec` (the gfx1250 fused 1-D Winograd fwd)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_winograd_fused_1d_wmma import build_fused_wino_1d
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_fused_wino_1d(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_winograd_fused_1d_spec_to_dict(spec)
+    return _lower_family(
+        "conv_winograd_fused_1d_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_winograd_fused_1d_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_winograd_fused_1d_wmma_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 

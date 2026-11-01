@@ -34,6 +34,7 @@
 #include "elementwise_solution.hpp"
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
+#include "elementwise_type_support.hpp"
 #include "handle.hpp"
 #include "hip_error.hpp"
 #include "hiptensor_element_wise_operation.hpp"
@@ -64,8 +65,7 @@ namespace hiptensor
             }
         }
 
-        std::vector<std::vector<int32_t>>
-            elementwiseModes(hiptensorOperationDescriptor const& desc)
+        std::vector<std::vector<int32_t>> elementwiseModes(hiptensorOperationDescriptor const& desc)
         {
             switch(desc.mOperationType)
             {
@@ -102,65 +102,25 @@ namespace hiptensor
     hiptensorStatus_t checkElementwiseDataTypes(hiptensorOperationDescriptor const& desc,
                                                 char const*                         apiFuncName)
     {
-        auto const typeScalar = desc.mScalarType;
-        bool       supported  = false;
-
-        switch(desc.mOperationType)
+        // The rows this backend's kernels serve (elementwise_type_support.hpp): every tensor of
+        // the operation has one data type T, and the scalars are T, or f32 when T is 16-bit.
+        std::vector<hiptensorDataType_t> types;
+        for(auto const* tensor : elementwiseTensors(desc))
         {
-        case HIPTENSOR_PERMUTATION:
-        {
-            // typeA, typeScalar
-            constexpr std::array<std::array<hiptensorDataType_t, 2>, 4> validDataTypes
-                = {{{HIPTENSOR_R_16F, HIPTENSOR_R_16F},
-                    {HIPTENSOR_R_16F, HIPTENSOR_R_32F},
-                    {HIPTENSOR_R_32F, HIPTENSOR_R_32F},
-                    {HIPTENSOR_R_64F, HIPTENSOR_R_64F}}};
-            std::array<hiptensorDataType_t, 2> types = {desc.mDescA->mType, typeScalar};
-            supported = std::find(validDataTypes.cbegin(), validDataTypes.cend(), types)
-                        != validDataTypes.cend();
-            break;
-        }
-        case HIPTENSOR_ELEMENTWISE_BINARY:
-        {
-            // typeA, typeC, typeScalar; D has C's type
-            constexpr std::array<std::array<hiptensorDataType_t, 3>, 6> validDataTypes
-                = {{{HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
-                    {HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_32F},
-                    {HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_16BF},
-                    {HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_32F},
-                    {HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
-                    {HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F}}};
-            std::array<hiptensorDataType_t, 3> types
-                = {desc.mDescA->mType, desc.mDescC->mType, typeScalar};
-            supported = desc.mDescC->mType == desc.mDescD->mType
-                        && std::find(validDataTypes.cbegin(), validDataTypes.cend(), types)
-                               != validDataTypes.cend();
-            break;
-        }
-        case HIPTENSOR_ELEMENTWISE_TRINARY:
-        {
-            // typeA, typeB, typeC, typeScalar
-            constexpr std::array<std::array<hiptensorDataType_t, 4>, 3> validDataTypes
-                = {{{HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
-                    {HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
-                    {HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F}}};
-            std::array<hiptensorDataType_t, 4> types
-                = {desc.mDescA->mType, desc.mDescB->mType, desc.mDescC->mType, typeScalar};
-            supported = std::find(validDataTypes.cbegin(), validDataTypes.cend(), types)
-                        != validDataTypes.cend();
-            break;
-        }
-        default:
-            break;
+            types.push_back(tensor->mType);
         }
 
-        if(!supported)
+        if(!isSupportedElementwiseTypeCombination(types, desc.mScalarType))
         {
-            char msg[256];
+            char msg[512];
             snprintf(msg,
                      sizeof(msg),
                      "Unsupported Data Type Error : The combination of data types of the tensors "
-                     "and the scalars is not supported (%s)",
+                     "and the scalars is not supported. "
+                     "See the link for details "
+                     "https://rocm.docs.amd.com/projects/hipTensor/en/latest/api-reference/"
+                     "api-reference.html "
+                     "(%s)",
                      hiptensorGetErrorString(HIPTENSOR_STATUS_NOT_SUPPORTED));
             Logger::instance()->logError(apiFuncName, msg);
             return HIPTENSOR_STATUS_NOT_SUPPORTED;
@@ -193,9 +153,9 @@ namespace hiptensor
         auto  solutions = instances->query(scalars,
                                           tensors[0]->mLengths,
                                           inTypes,
-                                          {tensors.back()->mType},
+                                           {tensors.back()->mType},
                                           inModes,
-                                          {modes.back()},
+                                           {modes.back()},
                                           elementwiseQueryOperators(desc),
                                           ElementwiseExecutionSpaceType_t::DEVICE);
         if(solutions.empty())
@@ -318,8 +278,7 @@ namespace hiptensor
         std::vector<std::vector<int32_t>>     inModes;
         std::vector<hiptensorDataType_t>      inTypes;
         std::vector<void const*>              inData;
-        std::size_t                           bytesPerElement
-            = hiptensorDataTypeSize(output.desc->mType);
+        std::size_t bytesPerElement = hiptensorDataTypeSize(output.desc->mType);
         for(auto const& in : inputs)
         {
             inLengths.push_back(in.desc->mLengths);
@@ -345,9 +304,9 @@ namespace hiptensor
             return instances->query(queryScalars,
                                     inLengths[0],
                                     inTypes,
-                                    {output.desc->mType},
+                                         {output.desc->mType},
                                     inModes,
-                                    {output.modes},
+                                         {output.modes},
                                     queryOperators,
                                     ElementwiseExecutionSpaceType_t::DEVICE);
         };

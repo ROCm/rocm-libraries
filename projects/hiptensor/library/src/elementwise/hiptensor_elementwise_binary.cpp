@@ -218,8 +218,7 @@ namespace hiptensor
             return status;
         }
 
-        autotuneMgr->setAutotune<ElementwiseSolution>(
-            AutotuneOps::Autotune_BinaryOp, handle, plan);
+        autotuneMgr->setAutotune<ElementwiseSolution>(AutotuneOps::Autotune_BinaryOp, handle, plan);
 
         return runElementwise(handle,
                               plan,

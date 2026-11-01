@@ -32,12 +32,69 @@
 #include <hip/hip_runtime.h>
 #include <hiptensor/hiptensor.h>
 
+#include <cstdlib>
+#include <string>
 #include <utility>
 
 constexpr int32_t mMode = 'm';
 constexpr int32_t nMode = 'n';
 
 constexpr uint32_t alignment = 256;
+
+// Runs `cleanup` when it goes out of scope, so an ASSERT_* that returns early cannot leak.
+template <typename F>
+struct ScopeExit
+{
+    F cleanup;
+    ~ScopeExit()
+    {
+        cleanup();
+    }
+};
+template <typename F>
+ScopeExit(F) -> ScopeExit<F>;
+
+// Sets an environment variable for the life of the object (restoring the previous value).
+struct ScopedEnvironment
+{
+    ScopedEnvironment(char const* name, char const* value)
+        : mName(name)
+    {
+        if(char const* old = std::getenv(name))
+        {
+            mOld    = old;
+            mHadOld = true;
+        }
+        set(value);
+    }
+    ~ScopedEnvironment()
+    {
+        set(mHadOld ? mOld.c_str() : nullptr);
+    }
+    ScopedEnvironment(ScopedEnvironment const&)            = delete;
+    ScopedEnvironment& operator=(ScopedEnvironment const&) = delete;
+
+private:
+    void set(char const* value)
+    {
+#ifdef _WIN32
+        _putenv_s(mName, value == nullptr ? "" : value);
+#else
+        if(value == nullptr)
+        {
+            unsetenv(mName);
+        }
+        else
+        {
+            setenv(mName, value, 1);
+        }
+#endif
+    }
+
+    char const* mName;
+    std::string mOld;
+    bool        mHadOld = false;
+};
 
 // Fixture holding the descriptors shared by every case: a rank-2 {m,n} tensor, a rank-2 {n,m}
 // tensor that only reorders those modes, a rank-1 {n} tensor holding a strict subset of them,
@@ -165,6 +222,58 @@ TEST_F(ElementwiseModeTest, PermutationWithReorderedModesIsSupported)
                                          HIPTENSOR_COMPUTE_DESC_32F),
               HIPTENSOR_STATUS_SUCCESS);
     hiptensorDestroyOperationDescriptor(opDesc);
+}
+
+// Permute does not convert types from bf16, so an output whose data type differs from the input's
+// has no matching kernel on either backend and must be rejected up front: when the plan is created
+// (the backends check the data types then) or, at the latest, when it is executed.
+TEST_F(ElementwiseModeTest, PermutationWithMismatchedOutputTypeReturnsNotSupported)
+{
+    int64_t                     lengths[2] = {2, 3};
+    hiptensorTensorDescriptor_t bf16Desc{};
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                  mHandle, &bf16Desc, 2, lengths, nullptr, HIPTENSOR_R_16BF, alignment),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyBf16Desc{[&] { hiptensorDestroyTensorDescriptor(bf16Desc); }};
+
+    hiptensorOperationDescriptor_t opDesc{};
+    ASSERT_EQ(hiptensorCreatePermutation(mHandle,
+                                         &opDesc,
+                                         bf16Desc,
+                                         mFullModes,
+                                         HIPTENSOR_OP_IDENTITY,
+                                         mFull,
+                                         mFullModes,
+                                         HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyOpDesc{[&] { hiptensorDestroyOperationDescriptor(opDesc); }};
+
+    hiptensorPlanPreference_t pref{};
+    ASSERT_EQ(hiptensorCreatePlanPreference(
+                  mHandle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyPref{[&] { hiptensorDestroyPlanPreference(pref); }};
+
+    hiptensorPlan_t plan{};
+    auto const      planStatus = hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0);
+    if(planStatus != HIPTENSOR_STATUS_SUCCESS)
+    {
+        EXPECT_EQ(planStatus, HIPTENSOR_STATUS_NOT_SUPPORTED);
+        return;
+    }
+    ScopeExit destroyPlan{[&] { hiptensorDestroyPlan(plan); }};
+
+    void* a = nullptr;
+    ASSERT_EQ(hipMalloc(&a, 2 * 3 * sizeof(uint16_t)), hipSuccess);
+    ScopeExit freeA{[&] { EXPECT_EQ(hipFree(a), hipSuccess); }};
+
+    void* b = nullptr;
+    ASSERT_EQ(hipMalloc(&b, 2 * 3 * sizeof(float)), hipSuccess);
+    ScopeExit freeB{[&] { EXPECT_EQ(hipFree(b), hipSuccess); }};
+
+    float alpha = 2.0f;
+    EXPECT_EQ(hiptensorPermute(mHandle, plan, &alpha, a, b, nullptr),
+              HIPTENSOR_STATUS_NOT_SUPPORTED);
 }
 
 TEST_F(ElementwiseModeTest, BinaryWithSubsetModesIsSupported)
@@ -414,4 +523,69 @@ TEST_F(ElementwiseModeTest, TrinaryWithBinaryOperatorsIsSupported)
             hiptensorDestroyOperationDescriptor(opDesc);
         }
     }
+}
+
+// D must have the same data type as C on the Composable Kernel backend: no CK instance converts
+// types on output, so a mismatch is rejected up front (when the plan is created) instead of
+// failing later in kernel selection. The rocKE backend serves this row (f32 A, B and C into an
+// f16 D), so the CK backend is selected without fallback here.
+TEST_F(ElementwiseModeTest, TrinaryWithMismatchedOutputTypeReturnsNotSupported)
+{
+    ScopedEnvironment backend("HIPTENSOR_BACKEND", "ck");
+    ScopedEnvironment fallback("HIPTENSOR_BACKEND_FALLBACK", "0");
+
+    int64_t                     lengths[2] = {2, 3};
+    hiptensorTensorDescriptor_t f16Desc{};
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                  mHandle, &f16Desc, 2, lengths, nullptr, HIPTENSOR_R_16F, alignment),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyF16Desc{[&] { hiptensorDestroyTensorDescriptor(f16Desc); }};
+
+    hiptensorOperationDescriptor_t opDesc{};
+    ASSERT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+                                                &opDesc,
+                                                mFull,
+                                                mFullModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mFull,
+                                                mFullModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mFull,
+                                                mFullModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                f16Desc,
+                                                mFullModes,
+                                                HIPTENSOR_OP_ADD,
+                                                HIPTENSOR_OP_ADD,
+                                                HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyOpDesc{[&] { hiptensorDestroyOperationDescriptor(opDesc); }};
+
+    hiptensorPlanPreference_t pref{};
+    ASSERT_EQ(hiptensorCreatePlanPreference(
+                  mHandle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+              HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyPref{[&] { hiptensorDestroyPlanPreference(pref); }};
+
+    hiptensorPlan_t plan{};
+    auto const      planStatus = hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0);
+    if(planStatus != HIPTENSOR_STATUS_SUCCESS)
+    {
+        EXPECT_EQ(planStatus, HIPTENSOR_STATUS_NOT_SUPPORTED);
+        return;
+    }
+    ScopeExit destroyPlan{[&] { hiptensorDestroyPlan(plan); }};
+
+    void* abc = nullptr;
+    ASSERT_EQ(hipMalloc(&abc, 2 * 3 * sizeof(float)), hipSuccess);
+    ScopeExit freeAbc{[&] { EXPECT_EQ(hipFree(abc), hipSuccess); }};
+
+    void* d = nullptr;
+    ASSERT_EQ(hipMalloc(&d, 2 * 3 * sizeof(uint16_t)), hipSuccess);
+    ScopeExit freeD{[&] { EXPECT_EQ(hipFree(d), hipSuccess); }};
+
+    float scalar = 1.0f;
+    EXPECT_EQ(hiptensorElementwiseTrinaryExecute(
+                  mHandle, plan, &scalar, abc, &scalar, abc, &scalar, abc, d, nullptr),
+              HIPTENSOR_STATUS_NOT_SUPPORTED);
 }

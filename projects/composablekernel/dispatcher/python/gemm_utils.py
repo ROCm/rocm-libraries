@@ -2286,6 +2286,9 @@ def setup_multiple_gemm_dispatchers(
     configs: List[GemmKernelConfig],
     verbose: bool = True,
     max_workers: Optional[int] = None,
+    *,
+    errors: Optional[Dict[str, str]] = None,
+    build_timeout: Optional[int] = None,
 ) -> List[Optional[Path]]:
     """Codegen + compile each config into its own .so. Returns .so paths.
 
@@ -2293,11 +2296,45 @@ def setup_multiple_gemm_dispatchers(
     codegen + hipcc, run massively in parallel -- and returns only ``Path``
     objects (``None`` for configs that failed to generate/compile), aligned to
     the input order. Benchmarking happens later, in an isolated worker.
+
+    ``errors`` is an optional out-parameter: pass a dict and it is filled with
+    ``{config.name: reason}`` for every config that ends up with a ``None``
+    path. An out-parameter rather than a richer return type because ~15 call
+    sites index, zip and tuple-unpack the returned list (the tile_engine
+    *_full_benchmark.py drivers, the examples bridge, eight tests); changing
+    the return type to carry the reasons would have to touch every one of them
+    to deliver information only the search-space sweep consumes. Keyword-only
+    so a stray positional third argument can never land in it. The dict is not
+    required to be empty, but every name in ``configs`` is cleared from it
+    first, so on return it describes *this* call for those names and nothing
+    else; entries for names this call never saw are left alone.
+
+    Without this the reasons are computed and thrown away unless verbose=True
+    -- which is how a TheRock image with a bad HIP_CLANG_PATH produced 64 lines
+    of "build_fail" with an empty reason instead of one "clang++: not found".
+
+    ``build_timeout`` (seconds) replaces the per-step limits of every kernel's
+    codegen, compile and link. ``None`` keeps them: 300 s each, except 1200 s to
+    compile a fixed-vector-width kernel. Each step is a wall-clock limit, so a
+    build sharing the host with many parallel workers may need a larger one. A
+    step that times out is reported as ``Timeout: <step> exceeded N s``.
     """
     import sys
 
     n = len(configs)
     results: List[Optional[Path]] = [None] * n
+
+    # Only failures are written below, so a caller that reuses one dict across
+    # calls -- a sweep retrying a config after a toolchain fix, say -- would
+    # keep reading last call's reason for a config that now builds clean. Drop
+    # every name this call is about before anything is recorded, so "absent"
+    # means "built" rather than "never asked". Done before the n == 0 and
+    # permute_n exits too: a call that produced no verdict must not leave an
+    # older one standing in for it.
+    if errors is not None:
+        for c in configs:
+            errors.pop(c.name, None)
+
     if n == 0:
         return results
 
@@ -2398,12 +2435,20 @@ def setup_multiple_gemm_dispatchers(
                 "variant": c.variant,
             }
         )
+        if build_timeout:
+            codegen_args[-1]["timeout"] = build_timeout
 
     if verbose:
         print(
             f"[gemm-bridge] codegen: {len(codegen_args)} headers "
             f"(workers={max_workers})..."
         )
+
+    # Why a config has no .so, keyed by its index in `configs`. Kept whether or
+    # not `errors` was passed: the cost is one short string per failure, and
+    # deciding at the top which failures are worth remembering is exactly the
+    # mistake `verbose` already made.
+    failures: Dict[int, str] = {}
 
     headers: Dict[int, Path] = {}
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
@@ -2418,8 +2463,10 @@ def setup_multiple_gemm_dispatchers(
                 headers[i] = Path(hdr)
                 if verbose:
                     print(f"  OK  codegen [{i}] {configs[i].name}")
-            elif verbose:
-                print(f"  FAIL codegen [{i}] {configs[i].name}: {err}")
+            else:
+                failures[i] = err or "codegen failed with no reason reported"
+                if verbose:
+                    print(f"  FAIL codegen [{i}] {configs[i].name}: {err}")
 
     # -- Step 2: parallel compile + link -----------------------------------
     compile_jobs = []
@@ -2429,6 +2476,8 @@ def setup_multiple_gemm_dispatchers(
         if hdr is None:
             continue
         job, _ = _build_compile_jobs(configs[i], hdr)
+        if build_timeout:
+            job["compile_timeout"] = job["link_timeout"] = build_timeout
         compile_jobs.append(job)
         job_index.append(i)
 
@@ -2450,13 +2499,28 @@ def setup_multiple_gemm_dispatchers(
                 results[i] = Path(lp)
                 if verbose:
                     print(f"  OK  compile [{i}] {Path(lp).name}")
-            elif verbose:
-                print(f"  FAIL compile [{i}] {configs[i].name}: {err}")
+            else:
+                failures[i] = err or "compile failed with no reason reported"
+                if verbose:
+                    print(f"  FAIL compile [{i}] {configs[i].name}: {err}")
 
     # -- Fan the deduped result back out to every input index --------------
     for i, c in enumerate(configs):
         if results[i] is None:
             results[i] = results[first_index[c.name]]
+
+    # Mirror that fan-out for the reasons: a config that was never compiled in
+    # its own right (it shares a .name with an earlier one) inherits that one's
+    # reason exactly as it inherits its path. Keyed by name, not index, because
+    # the sweep's results list is keyed by name too.
+    if errors is not None:
+        for i, c in enumerate(configs):
+            if results[i] is None:
+                errors[c.name] = (
+                    failures.get(i)
+                    or failures.get(first_index[c.name])
+                    or "build failed with no reason reported"
+                )
 
     if verbose:
         ok_count = sum(1 for r in results if r is not None)
@@ -2581,13 +2645,16 @@ def _gfx1250_pipeline_supported(
     layout: str = "",
     dtype: str = "",
     warp_tile_k: int = 0,
+    warp_tile_m: int = 0,
+    warp_tile_n: int = 0,
 ) -> bool:
     """False iff the (pipeline, epilogue) pair is a gfx1250 combination that
     the codegen would reject for this arch/variant/trait.
 
     ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
     comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
-    8-bit warp_tile_k rule; an empty dtype skips it."""
+    8-bit warp_tile_k rule; an empty dtype skips it. ``warp_tile_m``/
+    ``warp_tile_n`` feed the comp_async 8-bit warp_tile_m/n rule; 0 skips it."""
     reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
@@ -2595,6 +2662,8 @@ def _gfx1250_pipeline_supported(
         scheduler,
         num_waves=wave_m * wave_n * wave_k,
         warp_tile_k=warp_tile_k,
+        warp_tile_m=warp_tile_m,
+        warp_tile_n=warp_tile_n,
         dtype_a=dtype,
         dtype_b=dtype,
         layout=layout,
@@ -2880,6 +2949,8 @@ def expand_sweep(
             layout=layout,
             dtype=dtype,
             warp_tile_k=wtk,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
         ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(

@@ -71,6 +71,11 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 .. note::
     f16 represents equivalent support for both _Float16 and __half types.
 
+.. note::
+    For element-wise operations (permutation, binary, and trinary), the compute type is the type
+    of the alpha, beta, and gamma scalars. On the Composable Kernel backend all tensors share one
+    data type; the rows with several data types are served by the rocKE backend.
+
 .. tabularcolumns::
    |C|C|C|C|
 
@@ -102,19 +107,19 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 +---------------------+------------------------------+---------------------+---------------------+
 |                     |     f16 / f16 / f16          |  gfx9 gfx11 gfx12   | Rank2 - Rank6       |
 | Element-wise        +------------------------------+                     |                     |
-| Operations          |     f16 / f16 / f32          |                     |                     |
-| (permutation,       +------------------------------+                     |                     |
-| binary, trinary)    |     f16 / f32 / f32          |                     |                     |
+| (Permutation,       |     f16 / f16 / f32          |                     |                     |
+| binary, trinary)    +------------------------------+                     |                     |
+|                     |     bf16 / bf16 / bf16       |                     |                     |
+|                     +------------------------------+                     |                     |
+|                     |     bf16 / bf16 / f32        |                     |                     |
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / f32          |                     |                     |
 |                     +------------------------------+---------------------+                     |
-|                     |     f64 / f64 / f64          |  gfx90a+            |                     |
+|                     |     f64 / f64 / f64          |  gfx90a+ gfx1250    |                     |
 |                     +------------------------------+---------------------+                     |
-|                     |     bf16 / bf16 / bf16       |  gfx90a gfx942      |                     |
+|                     |     f16 / f32 / f32          |  gfx90a gfx942      |                     |
 |                     +------------------------------+  gfx950             |                     |
-|                     |     bf16 / bf16 / f32        |  (rocKE backend)    |                     |
-|                     +------------------------------+                     |                     |
-|                     |     f32 / f64 / f64          |                     |                     |
+|                     |     f32 / f64 / f64          |  (rocKE backend)    |                     |
 |                     +------------------------------+                     |                     |
 |                     |     f32, f16 / f16 / f32     |                     |                     |
 |                     +------------------------------+                     |                     |

@@ -128,7 +128,7 @@ void universal_lds_bytes(const UGemm& s,
                          int64_t* ab,
                          int64_t* c);
 /* gemm_universal.ab_double_buffer_decision */
-bool ab_double_buffer_decision(const UGemm& s, int64_t lds_cap);
+bool ab_double_buffer_decision(const UGemm& s, int64_t lds_cap, int64_t eb_a, int64_t eb_b);
 
 /* gemm_mn_operand.MnLayout */
 struct MnLayout

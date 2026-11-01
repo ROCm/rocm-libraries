@@ -32,6 +32,7 @@
 #include "data_types.hpp"
 #include "elementwise/elementwise_cpu_reference.hpp"
 #include "elementwise_trinary_op_test.hpp"
+#include "elementwise_type_dispatch.hpp"
 #include "hiptensor_options.hpp"
 #include "util.hpp"
 #include "utils.hpp"
@@ -61,9 +62,7 @@ namespace hiptensor
     // False = skip test
     bool ElementwiseTrinaryOpTest::checkDevice(hiptensorDataType_t datatype) const
     {
-        return (isF16Supported() && (datatype == HIPTENSOR_R_16F))
-               || (isF32Supported() && (datatype == HIPTENSOR_R_32F))
-               || (isF64Supported() && (datatype == HIPTENSOR_R_64F));
+        return isElementwiseTypeSupportedOnDevice(datatype);
     }
 
     bool ElementwiseTrinaryOpTest::checkSizes() const
@@ -237,94 +236,14 @@ namespace hiptensor
             if(mPrintElements)
             {
                 auto resource = getResource();
-
-                size_t elementsA   = resource->getCurrentMatrixElement();
-                size_t elementsB   = elementsA;
-                size_t elementsC   = elementsA;
-                size_t elementsD   = elementsA;
-                size_t elementsRef = elementsA;
-
-                if(dataType == HIPTENSOR_R_64F)
-                {
-                    stream << "Tensor A elements (" << elementsA << "):\n";
-                    hiptensorPrintArrayElements<double>(
-                        stream, (double*)resource->hostInput1().get(), elementsA);
-                    stream << std::endl;
-
-                    stream << "Tensor B elements (" << elementsB << "):\n";
-                    hiptensorPrintArrayElements<double>(
-                        stream, (double*)resource->hostInput2().get(), elementsB);
-                    stream << std::endl;
-
-                    stream << "Tensor C elements (" << elementsC << "):\n";
-                    hiptensorPrintArrayElements<double>(
-                        stream, (double*)resource->hostInput3().get(), elementsC);
-                    stream << std::endl;
-
-                    stream << "Tensor D elements (" << elementsD << "):\n";
-                    hiptensorPrintArrayElements<double>(
-                        stream, (double*)resource->hostOutput().get(), elementsD);
-                    stream << std::endl;
-
-                    stream << "Tensor ref elements (" << elementsRef << "):\n";
-                    hiptensorPrintArrayElements<double>(
-                        stream, (double*)resource->hostReference().get(), elementsRef);
-                    stream << std::endl;
-                }
-                else if(dataType == HIPTENSOR_R_32F)
-                {
-                    stream << "Tensor A elements (" << elementsA << "):\n";
-                    hiptensorPrintArrayElements<float>(
-                        stream, (float*)resource->hostInput1().get(), elementsA);
-                    stream << std::endl;
-
-                    stream << "Tensor B elements (" << elementsB << "):\n";
-                    hiptensorPrintArrayElements<float>(
-                        stream, (float*)resource->hostInput2().get(), elementsB);
-                    stream << std::endl;
-
-                    stream << "Tensor C elements (" << elementsC << "):\n";
-                    hiptensorPrintArrayElements<float>(
-                        stream, (float*)resource->hostInput3().get(), elementsC);
-                    stream << std::endl;
-
-                    stream << "Tensor D elements (" << elementsD << "):\n";
-                    hiptensorPrintArrayElements<float>(
-                        stream, (float*)resource->hostOutput().get(), elementsD);
-                    stream << std::endl;
-
-                    stream << "Tensor ref elements (" << elementsRef << "):\n";
-                    hiptensorPrintArrayElements<float>(
-                        stream, (float*)resource->hostReference().get(), elementsRef);
-                    stream << std::endl;
-                }
-                else if(dataType == HIPTENSOR_R_16F)
-                {
-                    stream << "Tensor A elements (" << elementsA << "):\n";
-                    hiptensorPrintArrayElements<_Float16>(
-                        stream, (_Float16*)resource->hostInput1().get(), elementsA);
-                    stream << std::endl;
-
-                    stream << "Tensor B elements (" << elementsB << "):\n";
-                    hiptensorPrintArrayElements<_Float16>(
-                        stream, (_Float16*)resource->hostInput2().get(), elementsB);
-                    stream << std::endl;
-
-                    stream << "Tensor C elements (" << elementsC << "):\n";
-                    hiptensorPrintArrayElements<_Float16>(
-                        stream, (_Float16*)resource->hostInput3().get(), elementsC);
-                    stream << std::endl;
-
-                    stream << "Tensor D elements (" << elementsD << "):\n";
-                    hiptensorPrintArrayElements<_Float16>(
-                        stream, (_Float16*)resource->hostOutput().get(), elementsD);
-                    stream << std::endl;
-
-                    stream << "Tensor ref elements (" << elementsRef << "):\n";
-                    hiptensorPrintArrayElements<_Float16>(
-                        stream, (_Float16*)resource->hostReference().get(), elementsRef);
-                    stream << std::endl;
-                }
+                printElementwiseTensors(stream,
+                                        dataType,
+                                        resource->getCurrentMatrixElement(),
+                                        {{"A", resource->hostInput1().get()},
+                                         {"B", resource->hostInput2().get()},
+                                         {"C", resource->hostInput3().get()},
+                                         {"D", resource->hostOutput().get()},
+                                         {"ref", resource->hostReference().get()}});
             }
         }
     }
@@ -508,45 +427,14 @@ namespace hiptensor
             }
             CHECK_HIPTENSOR_ERROR(planStatus);
 
-            // 8-byte storage so the R_64F (double) write below cannot overflow the buffer
             double alphaValue{};
-            if(computeDataType == HIPTENSOR_R_16F)
-            {
-                *(reinterpret_cast<_Float16*>(&alphaValue)) = static_cast<_Float16>(alpha);
-            }
-            else if(computeDataType == HIPTENSOR_R_32F)
-            {
-                *(reinterpret_cast<float*>(&alphaValue)) = static_cast<float>(alpha);
-            }
-            else if(computeDataType == HIPTENSOR_R_64F)
-            {
-                *(reinterpret_cast<double*>(&alphaValue)) = static_cast<double>(alpha);
-            }
             double betaValue{};
-            if(computeDataType == HIPTENSOR_R_16F)
-            {
-                *(reinterpret_cast<_Float16*>(&betaValue)) = static_cast<_Float16>(beta);
-            }
-            else if(computeDataType == HIPTENSOR_R_32F)
-            {
-                *(reinterpret_cast<float*>(&betaValue)) = static_cast<float>(beta);
-            }
-            else if(computeDataType == HIPTENSOR_R_64F)
-            {
-                *(reinterpret_cast<double*>(&betaValue)) = static_cast<double>(beta);
-            }
             double gammaValue{};
-            if(computeDataType == HIPTENSOR_R_16F)
+            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha)
+               || !writeElementwiseScalar(betaValue, computeDataType, beta)
+               || !writeElementwiseScalar(gammaValue, computeDataType, gamma))
             {
-                *(reinterpret_cast<_Float16*>(&gammaValue)) = static_cast<_Float16>(gamma);
-            }
-            else if(computeDataType == HIPTENSOR_R_32F)
-            {
-                *(reinterpret_cast<float*>(&gammaValue)) = static_cast<float>(gamma);
-            }
-            else if(computeDataType == HIPTENSOR_R_64F)
-            {
-                *(reinterpret_cast<double*>(&gammaValue)) = static_cast<double>(gamma);
+                FAIL() << "Unexpected compute data type: " << computeDataType;
             }
 
             auto& opts     = HiptensorOptions::instance();
@@ -627,108 +515,33 @@ namespace hiptensor
             {
                 resource->copyOutputToHost();
 
-                if(dataType == HIPTENSOR_R_64F)
-                {
-                    CHECK_HIPTENSOR_ERROR(hiptensorElementwiseTrinaryOpReference(
-                        &alphaValue,
-                        (const double*)resource->hostInput1().get(),
-                        descA,
-                        modeA.data(),
-                        Aop,
-                        &betaValue,
-                        (const double*)resource->hostInput2().get(),
-                        descB,
-                        modeB.data(),
-                        Bop,
-                        &gammaValue,
-                        (const double*)resource->hostInput3().get(),
-                        descC,
-                        modeC.data(),
-                        Cop,
-                        (double*)resource->hostReference().get(),
-                        descD,
-                        modeD.data(),
-                        ABop,
-                        ABCop,
-                        computeDataType,
-                        0 /* stream */));
+                CHECK_HIPTENSOR_ERROR(
+                    hiptensorElementwiseTrinaryOpReference(&alphaValue,
+                                                           resource->hostInput1().get(),
+                                                           descA,
+                                                           modeA.data(),
+                                                           Aop,
+                                                           &betaValue,
+                                                           resource->hostInput2().get(),
+                                                           descB,
+                                                           modeB.data(),
+                                                           Bop,
+                                                           &gammaValue,
+                                                           resource->hostInput3().get(),
+                                                           descC,
+                                                           modeC.data(),
+                                                           Cop,
+                                                           resource->hostReference().get(),
+                                                           descD,
+                                                           modeD.data(),
+                                                           ABop,
+                                                           ABCop,
+                                                           computeDataType,
+                                                           0 /* stream */));
 
-                    resource->copyReferenceToDevice();
-                    std::tie(mValidationResult, mMaxRelativeError)
-                        = compareEqualLaunchKernel<double>(
-                            (double*)resource->deviceOutput().get(),
-                            (double*)resource->deviceReference().get(),
-                            resource->getCurrentMatrixElement(),
-                            convertToComputeType(computeDataType));
-                }
-                else if(dataType == HIPTENSOR_R_32F)
-                {
-                    CHECK_HIPTENSOR_ERROR(hiptensorElementwiseTrinaryOpReference(
-                        &alphaValue,
-                        (const float*)resource->hostInput1().get(),
-                        descA,
-                        modeA.data(),
-                        Aop,
-                        &betaValue,
-                        (const float*)resource->hostInput2().get(),
-                        descB,
-                        modeB.data(),
-                        Bop,
-                        &gammaValue,
-                        (const float*)resource->hostInput3().get(),
-                        descC,
-                        modeC.data(),
-                        Cop,
-                        (float*)resource->hostReference().get(),
-                        descD,
-                        modeD.data(),
-                        ABop,
-                        ABCop,
-                        computeDataType,
-                        0 /* stream */));
-
-                    resource->copyReferenceToDevice();
-                    std::tie(mValidationResult, mMaxRelativeError)
-                        = compareEqualLaunchKernel<float>((float*)resource->deviceOutput().get(),
-                                                          (float*)resource->deviceReference().get(),
-                                                          resource->getCurrentMatrixElement(),
-                                                          convertToComputeType(computeDataType));
-                }
-                else if(dataType == HIPTENSOR_R_16F)
-                {
-                    CHECK_HIPTENSOR_ERROR(hiptensorElementwiseTrinaryOpReference(
-                        &alphaValue,
-                        (const _Float16*)resource->hostInput1().get(),
-                        descA,
-                        modeA.data(),
-                        Aop,
-                        &betaValue,
-                        (const _Float16*)resource->hostInput2().get(),
-                        descB,
-                        modeB.data(),
-                        Bop,
-                        &gammaValue,
-                        (const _Float16*)resource->hostInput3().get(),
-                        descC,
-                        modeC.data(),
-                        Cop,
-                        (_Float16*)resource->hostReference().get(),
-                        descD,
-                        modeD.data(),
-                        ABop,
-                        ABCop,
-                        computeDataType,
-                        0 /* stream */));
-
-                    resource->copyReferenceToDevice();
-
-                    std::tie(mValidationResult, mMaxRelativeError)
-                        = compareEqualLaunchKernel<_Float16>(
-                            (_Float16*)resource->deviceOutput().get(),
-                            (_Float16*)resource->deviceReference().get(),
-                            resource->getCurrentMatrixElement(),
-                            convertToComputeType(computeDataType));
-                }
+                resource->copyReferenceToDevice();
+                std::tie(mValidationResult, mMaxRelativeError)
+                    = compareElementwiseOutputWithReference(resource, dataType, computeDataType);
                 EXPECT_TRUE(mValidationResult) << "Max relative error: " << mMaxRelativeError;
             } // if (testOptions->performValidation())
 

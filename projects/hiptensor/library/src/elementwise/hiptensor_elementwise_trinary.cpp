@@ -189,11 +189,11 @@ hiptensorStatus_t hiptensor::ckbackend::elementwiseTrinary(hiptensorHandle_t    
         return hiptensor::elementwiseZeroOutput(*descD, D, stream);
     }
 
-    auto output    = hiptensor::ElementwiseTensor{descD, opDes->mModeD, D};
-    auto inputs    = std::vector<hiptensor::ElementwiseTensor>{
+    auto output = hiptensor::ElementwiseTensor{descD, opDes->mModeD, D};
+    auto inputs = std::vector<hiptensor::ElementwiseTensor>{
         {descA, opDes->mModeA, A}, {descB, opDes->mModeB, B}, {descC, opDes->mModeC, C}};
-    auto operators = std::vector<hiptensorOperator_t>{
-        opABC, opAB, opDes->mOpA, opDes->mOpB, opDes->mOpC};
+    auto operators
+        = std::vector<hiptensorOperator_t>{opABC, opAB, opDes->mOpA, opDes->mOpB, opDes->mOpC};
     if(auto status = hiptensor::applyZeroScales(scalars, inputs, {2, 3, 4}, operators, output);
        status != HIPTENSOR_STATUS_SUCCESS)
     {

@@ -2182,6 +2182,51 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->block_size = 256;
         spec->batched = false;
         break;
+    case 72: /* test_f64: fp64 compv4 / default / pad_m,n,k on gfx942 */
+        spec->name = "test_f64";
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 64,
+                                              .tile_n = 64,
+                                              .tile_k = 16,
+                                              .warp_m = 2,
+                                              .warp_n = 2,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 4};
+        spec->trait.pipeline = "compv4";
+        spec->trait.epilogue = "default";
+        spec->trait.pad_m = true;
+        spec->trait.pad_n = true;
+        spec->trait.pad_k = true;
+        spec->data.dtype_a = "fp64";
+        spec->data.dtype_b = "fp64";
+        spec->data.dtype_c = "fp64";
+        spec->data.dtype_acc = "fp64";
+        spec->wave_size = 64;
+        spec->block_size = 256;
+        spec->batched = false;
+        break;
+    case 73: /* test_f64_cshuffle: fp64 single-wave compv3 / cshuffle on gfx942 */
+        spec->name = "test_f64_cshuffle";
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 16,
+                                              .tile_n = 16,
+                                              .tile_k = 4,
+                                              .warp_m = 1,
+                                              .warp_n = 1,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 4};
+        spec->trait.pipeline = "compv3";
+        spec->trait.epilogue = "cshuffle";
+        spec->data.dtype_a = "fp64";
+        spec->data.dtype_b = "fp64";
+        spec->data.dtype_c = "fp64";
+        spec->data.dtype_acc = "fp64";
+        spec->wave_size = 64;
+        spec->block_size = 64;
+        spec->batched = false;
+        break;
     default:
         return -1;
     }
@@ -2189,14 +2234,14 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Configs 9, 16, 24, 32, 43..45, 47 and 55 exercise gfx942, config 46 gfx90a (rejected by both
- * engines); all others use the gfx950 baseline. */
+/* Configs 9, 16, 24, 32, 43..45, 47, 55, 72 and 73 exercise gfx942, config 46 gfx90a (rejected
+ * by both engines); all others use the gfx950 baseline. */
 static const char* arch_for(int idx)
 {
     if(idx == 46)
         return "gfx90a";
     return (idx == 9 || idx == 16 || idx == 24 || idx == 32 || (idx >= 43 && idx <= 45) || idx == 47
-            || idx == 55)
+            || idx == 55 || idx == 72 || idx == 73)
                ? "gfx942"
                : "gfx950";
 }
@@ -2205,7 +2250,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..71>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..73>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

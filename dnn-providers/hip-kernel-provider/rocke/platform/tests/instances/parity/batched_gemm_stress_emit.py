@@ -204,10 +204,9 @@ def _specs():
         block_size=256,
     )
     # ---- knob: lds_swizzle ----
-    # (16x16x16 + swizzle is rejected: 4-half XOR group < 8-half LDS store)
     add(
         "b23",
-        (128, 128, 32, 2, 2, 1, 16, 16, 32),
+        (128, 128, 32, 2, 2, 1, 16, 16, 16),
         TraitSpec(pipeline="compv4", epilogue="default", lds_swizzle=True),
         block_size=256,
     )

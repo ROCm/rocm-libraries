@@ -528,9 +528,8 @@ def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
 # hints that must be preserved verbatim.
 _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_32x32x16_bf16": "acc32",
-    "mfma_f32_16x16x128_fp4": "acc4",
-    "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
+    "mfma_f32_16x16x128_fp4fp6fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
 }
 
@@ -575,6 +574,16 @@ def _check_cachepolicy(op: str, value: int) -> int:
     if not 0 <= v <= 0x1F:
         raise ValueError(f"{op} cachepolicy must be in 0..31, got {v}")
     return v
+
+
+def _with_cachepolicy(attrs: Optional[dict], op: str, cachepolicy: int):
+    """``attrs`` plus a non-zero ``cachepolicy`` (0 leaves the op unchanged)."""
+    v = _check_cachepolicy(op, cachepolicy)
+    if not v:
+        return attrs
+    out = dict(attrs or {})
+    out["cachepolicy"] = v
+    return out
 
 
 def _check_axis(op: str, axis: object) -> str:
@@ -754,6 +763,301 @@ def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> No
             f"({target_bits} bits) changes the bit width -- a bitcast keeps every "
             f"bit; {hint}"
         )
+
+
+def _is_buffer_descriptor(value: "Value") -> bool:
+    """True when ``value`` is a buffer descriptor: the result of a
+    ``tile.buffer_rsrc`` op.
+
+    A descriptor is a ``<4 x i32>`` in the IR but an opaque
+    ``ptr addrspace(8)`` (HIP ``rsrc_t``) once lowered, so a value of that
+    vector type that does not come from ``tile.buffer_rsrc`` is not one.
+    """
+    return value.op is not None and value.op.name == "tile.buffer_rsrc"
+
+
+def _loop_carried_descriptor_message(index: int) -> str:
+    """The refusal for a buffer descriptor as ``scf.for`` iter_arg ``index``,
+    either as its initial value or as the value a loop iteration yields to it.
+
+    A loop cannot carry a descriptor: the phi (LLVM) or the ``i32x4`` variable
+    (HIP) that holds a loop-carried value cannot hold the lowered descriptor,
+    and the compiler refuses the module. Carrying one is never needed either:
+    no op edits an existing descriptor, so a loop can only use the one built
+    before it (advancing the offset it passes to each access) or build a new
+    one in its body.
+    """
+    return (
+        f"scf.for iter_arg {index} is a buffer descriptor, which a loop cannot "
+        "carry; build the descriptor before the loop and advance the offset, or "
+        "rebuild it inside the loop body"
+    )
+
+
+def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
+    """The refusal for the ``scf.for`` ``op`` when it carries a buffer
+    descriptor, or None when it does not.
+
+    It checks each iter_arg's initial value (the operands after lower, upper
+    and step) and each value an ``scf.yield`` directly in the loop body yields.
+    It only slices the operand and region lists, so it accepts any counts:
+    serialized IR reaches the verifier and the lowerings without passing the
+    builder. The verifier and every lowering of ``scf.for`` use it, and the C++
+    engine reports the same text (``rocke_i_scf_for_carried_descriptor_error``).
+    """
+    for index, init in enumerate(op.operands[3:]):
+        if _is_buffer_descriptor(init):
+            return _loop_carried_descriptor_message(index)
+    for body in op.regions[:1]:
+        for body_op in body.ops:
+            if body_op.name != "scf.yield":
+                continue
+            for index, value in enumerate(body_op.operands):
+                if _is_buffer_descriptor(value):
+                    return _loop_carried_descriptor_message(index)
+    return None
+
+
+# The sizes one raw buffer load or store moves: the i8, i16, i32, v2i32 and v4i32
+# forms of the raw buffer intrinsics. The hardware range-checks an access of 4
+# bytes or more per 4-byte component and a 1- or 2-byte access whole, so the
+# narrow forms are the ones that keep a byte-exact last element.
+_BUFFER_ACCESS_BYTES = (1, 2, 4, 8, 16)
+
+# MMA scale encodings: whole bytes, but no value form in the IR (neither engine
+# maps them to an LLVM or HIP type), so a buffer access cannot produce or take a
+# vector of them. Their bytes move as u8.
+_SCALE_ENCODING_SCALARS = ("e8m0", "e5m3")
+
+
+def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
+    """The bytes one buffer access of ``count`` ``elem`` elements moves, or refuse it.
+
+    The element is any scalar whose width is whole bytes and that has a value
+    form (not one of :data:`_SCALE_ENCODING_SCALARS`); ``count`` is an int and
+    ``count`` elements together must make one of :data:`_BUFFER_ACCESS_BYTES`.
+    The C++ builder (``rocke_i_buffer_access_bytes``, whose count is a C int)
+    refuses with the same texts.
+    """
+    if isinstance(elem, (VectorType, PtrType, SmemType)):
+        raise TypeError(
+            f"{op_name}: the element type must be a scalar, got {elem.name}"
+        )
+    if elem.name in _SCALE_ENCODING_SCALARS:
+        raise TypeError(
+            f"{op_name}: {elem.name} is an MMA scale encoding with no value form; "
+            "move its bytes as u8"
+        )
+    bits = type_bits(elem)
+    if bits % 8 != 0:
+        raise ValueError(
+            f"{op_name}: {elem.name} elements are {bits} bits, not whole bytes; "
+            "a buffer access moves whole bytes"
+        )
+    if isinstance(count, bool) or not isinstance(count, int):
+        raise TypeError(f"{op_name}: n must be an int, got {count!r}")
+    if count < 1:
+        raise ValueError(f"{op_name}: n must be at least 1, got {count}")
+    nbytes = count * bits // 8
+    if nbytes not in _BUFFER_ACCESS_BYTES:
+        raise ValueError(
+            f"{op_name}: {count} x {elem.name} is {nbytes} bytes; a buffer access "
+            "moves 1, 2, 4, 8 or 16 bytes"
+        )
+    return nbytes
+
+
+def _buffer_vector_bytes(op_name: str, role: str, vector_type: Type) -> int:
+    """The bytes a buffer access whose ``role`` (the loaded result, the stored
+    value) has type ``vector_type`` moves, or refuse it.
+
+    Both are vectors; their elements and width follow
+    :func:`_buffer_access_bytes`. The C++ engine refuses with the same texts.
+    """
+    if not isinstance(vector_type, VectorType):
+        raise TypeError(
+            f"{op_name}: the {role} must be a vector, got {vector_type.name}; "
+            "a one-element vector is vector_splat(x, 1)"
+        )
+    return _buffer_access_bytes(op_name, vector_type.elem, vector_type.count)
+
+
+def _buffer_op_bytes(op: Op) -> int:
+    """:func:`_buffer_vector_bytes` for a built ``tile.buffer_load_vN`` (three
+    operands, one result: the loaded vector) or ``tile.buffer_store_vN`` (four
+    operands, the last the stored vector, no result), after its operand and
+    result counts: serialized IR reaches the verifier and the lowerings without
+    passing the builder. The C++ engine (``rocke_i_buffer_op_bytes``) refuses
+    with the same texts."""
+    if op.name == "tile.buffer_load_vN":
+        operands, results, role = 3, 1, "result"
+        expected = "3 operands / 1 result"
+    elif op.name == "tile.buffer_store_vN":
+        operands, results, role = 4, 0, "value"
+        expected = "4 operands / 0 results"
+    else:
+        raise ValueError(f"{op.name} is not a buffer_load_vN or buffer_store_vN op")
+    if len(op.operands) != operands or len(op.results) != results:
+        raise ValueError(
+            f"{op.name}: expected {expected}, got {len(op.operands)} / "
+            f"{len(op.results)}"
+        )
+    access_type = op.results[0].type if results else op.operands[3].type
+    return _buffer_vector_bytes(op.name, role, access_type)
+
+
+def _global_ptr_offset_error(
+    ptr_type: Type, byte_off_type: Type, result_type: Optional[Type] = None
+) -> Optional[str]:
+    """The error for a ``global_ptr_offset`` whose operands (and, once built,
+    result) have these types, or None when they are valid.
+
+    The pointer is a global pointer and the result has its type. The offset is
+    i64 and is not widened implicitly: it may be negative (the result may point
+    before the allocation), and zero-extending an i32 would turn -1 into 4 GiB.
+    The builder, the verifier and every lowering use this rule, and the C++
+    engine (``rocke_i_global_ptr_offset_error``) reports the same texts.
+    """
+    if not isinstance(ptr_type, PtrType) or ptr_type.space != "global":
+        return f"global_ptr_offset ptr must be a global pointer, got {ptr_type.name}"
+    if byte_off_type != I64:
+        return (
+            f"global_ptr_offset byte_off must be i64, got {byte_off_type.name}; "
+            "widen it with sext (a signed offset) or zext (an unsigned one)"
+        )
+    if result_type is not None and result_type != ptr_type:
+        return (
+            "global_ptr_offset result must have the pointer's type "
+            f"{ptr_type.name}, got {result_type.name}"
+        )
+    return None
+
+
+def _global_ptr_offset_op_error(op: "Op") -> Optional[str]:
+    """:func:`_global_ptr_offset_error` for a built ``tile.global_ptr_offset``
+    op, after its operand and result counts: serialized IR reaches the verifier
+    and the lowerings without passing the builder."""
+    if len(op.operands) != 2 or len(op.results) != 1:
+        return "global_ptr_offset expects two operands and one result"
+    ptr, byte_off = op.operands
+    return _global_ptr_offset_error(ptr.type, byte_off.type, op.results[0].type)
+
+
+def _global_ptr_to_i64_error(
+    ptr_type: Type, result_type: Optional[Type] = None
+) -> Optional[str]:
+    """The error for a ``global_ptr_to_i64`` whose operand (and, once built,
+    result) have these types, or None when they are valid: a global pointer
+    and an i64 result. The builder, the verifier and every lowering use this
+    rule, and the C++ engine (``rocke_i_global_ptr_to_i64_error``) reports the
+    same texts.
+    """
+    if not isinstance(ptr_type, PtrType) or ptr_type.space != "global":
+        return f"global_ptr_to_i64 ptr must be a global pointer, got {ptr_type.name}"
+    if result_type is not None and result_type != I64:
+        return f"global_ptr_to_i64 result must be i64, got {result_type.name}"
+    return None
+
+
+def _global_ptr_to_i64_op_error(op: "Op") -> Optional[str]:
+    """:func:`_global_ptr_to_i64_error` for a built ``tile.global_ptr_to_i64``
+    op, after its operand and result counts: serialized IR reaches the verifier
+    and the lowerings without passing the builder."""
+    if len(op.operands) != 1 or len(op.results) != 1:
+        return "global_ptr_to_i64 expects one operand and one result"
+    return _global_ptr_to_i64_error(op.operands[0].type, op.results[0].type)
+
+
+def _trap_op_error(op: "Op") -> Optional[str]:
+    """The error for a built ``tile.trap`` op that is not bare, or None.
+
+    A trap takes no operands, defines no results and holds no regions; the
+    lowerings emit only the trap call, so a result would reach its uses
+    undefined. Serialized IR reaches the verifier and the lowerings without
+    passing the builder, so they all use this rule, and the C++ engine
+    (``rocke_i_trap_op_error``) reports the same text.
+    """
+    if op.operands or op.results or op.regions:
+        return "trap takes no operands, results or regions"
+    return None
+
+
+# The two branches of an scf.if_else, in region order.
+_IF_ELSE_BRANCHES = ("then", "else")
+
+
+def _if_else_result_type_error(index: int, result_type: Type) -> Optional[str]:
+    """The refusal for an ``scf.if_else`` result ``index`` of type
+    ``result_type``, or None when an if/else can carry it.
+
+    An LDS allocation is a name the lowerings resolve to its base, not a value:
+    neither the phi (LLVM) nor the variable (HIP) that holds a result can hold
+    one. The builder and :func:`_if_else_branch_yield` use this rule, and the
+    C++ engine (``rocke_i_if_else_result_type_error``) reports the same text.
+    """
+    if isinstance(result_type, SmemType):
+        return (
+            f"scf.if_else result {index} is an LDS allocation, which an if/else "
+            "cannot carry; allocate before the if/else and yield an offset into "
+            "the allocation instead"
+        )
+    return None
+
+
+def _if_else_branch_yield(op: Op, branch: int) -> Optional[Op]:
+    """The ``scf.yield`` that gives ``op``'s results their values on branch
+    ``branch`` (0 then, 1 else), or None when the ``scf.if_else`` ``op`` has no
+    results.
+
+    Every ``scf.if_else`` has one condition and two branches. One with results
+    ends each branch in an ``scf.yield`` of one value per result, of the
+    result's type, and never a buffer descriptor
+    (:func:`_is_buffer_descriptor`): neither the phi (LLVM) nor the variable
+    (HIP) that holds a result can hold the lowered descriptor. No result is an
+    LDS allocation (:func:`_if_else_result_type_error`). The builder, the
+    verifier and every lowering refuse anything else with these texts, in both
+    engines (``rocke_i_if_else_branch_yield``); the counts are checked first,
+    as serialized IR reaches the verifier and the lowerings without passing the
+    builder.
+    """
+    if len(op.operands) != 1 or len(op.regions) != 2:
+        raise ValueError(
+            f"scf.if_else: expected 1 condition / 2 branches, got "
+            f"{len(op.operands)} / {len(op.regions)}"
+        )
+    if not op.results:
+        return None
+    for index, result in enumerate(op.results):
+        error = _if_else_result_type_error(index, result.type)
+        if error is not None:
+            raise ValueError(error)
+    name = _IF_ELSE_BRANCHES[branch]
+    count = len(op.results)
+    region = op.regions[branch]
+    if not region.ops or region.ops[-1].name != "scf.yield":
+        raise ValueError(
+            f"scf.if_else has {count} results, so its {name} branch must end in "
+            f"scf.yield of {count} values"
+        )
+    yld = region.ops[-1]
+    if len(yld.operands) != count:
+        raise ValueError(
+            f"scf.if_else has {count} results, but its {name} branch yields "
+            f"{len(yld.operands)} values"
+        )
+    for index, (result, value) in enumerate(zip(op.results, yld.operands)):
+        if _is_buffer_descriptor(value):
+            raise ValueError(
+                f"scf.if_else result {index}: its {name} branch yields a buffer "
+                "descriptor, which an if/else cannot carry; yield the values the "
+                "descriptor is built from and build it after the if/else"
+            )
+        if value.type != result.type:
+            raise ValueError(
+                f"scf.if_else result {index} is {result.type.name}, but its {name} "
+                f"branch yields {value.type.name}"
+            )
+    return yld
 
 
 # ----------------------------- Values / Ops ------------------------------
@@ -2865,6 +3169,7 @@ class IRBuilder:
         b: Value,
         c: Value,
         *extra: Value,
+        attrs: Optional[Dict[str, Any]] = None,
     ) -> Value:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
@@ -2890,6 +3195,8 @@ class IRBuilder:
 
         ``*extra`` carries the additional operands the scaled MX atoms need
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
+        ``attrs`` adds op attributes next to ``op_id``; the MX op uses it for
+        ``a_format`` and ``b_format``.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
         from .tf32 import tf32_mma_error
@@ -2919,7 +3226,7 @@ class IRBuilder:
             "tile.mma",
             [a, b, c, *extra],
             [VectorType(c_elem, c_frag_len)],
-            attrs={"op_id": op_id},
+            attrs={"op_id": op_id, **(attrs or {})},
             result_name_hint=hint,
         ).result
 
@@ -3247,7 +3554,7 @@ class IRBuilder:
                 "sideeffect": True,
                 "convergent": False,
                 "required_arch": "gfx1250",
-                "required_llvm_flavor": "llvm23",
+                "minimum_llvm_flavor": "llvm23",
             },
         )
 
@@ -3274,33 +3581,95 @@ class IRBuilder:
         c: Value,
         a_scale: Value,
         b_scale: Value,
+        *,
+        a_format: str = "fp8e4m3",
+        b_format: str = "fp8e4m3",
     ) -> Value:
-        """Existing gfx950 16x16x128 MFMA with in-instruction scales (P15).
+        """gfx950 16x16x128 MFMA with in-instruction E8M0 scales (the MX op).
 
-        This fixed-operation wrapper delegates to ``mma``. LLVM lowering
-        uses two ``<8 x i32>`` payloads, a ``<4 x float>`` accumulator and
-        separate i32 scale operands; A/B format selectors are fixed to zero.
-        It lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
+        The instruction multiplies by ``2^(e - 127)`` for each scale byte ``e``.
+        The value ``e = 0`` gives ``2^-127``, not 1.0. If both scales are
+        literal 0, the backend selects the unscaled instruction instead.
+
+        ``a_format`` and ``b_format`` name the data type of A and B: ``fp8e4m3``,
+        ``bf8e5m2``, ``fp6e2m3``, ``fp6e3m2`` or ``fp4e2m1``. They set the
+        ``cbsz`` and ``blgp`` format selectors.
+
+        **A and B must use the same format in this version.** A call with
+        different values raises ``ValueError``. The signature already has both
+        arguments, so a later change can allow mixed formats without changing it.
+
+        ``a`` and ``b`` hold 256 bits per lane for every format (an ``<8 x i32>``
+        or any type of that width). fp8 and bf8 data fill all 8 dwords. fp6 data
+        fills the low 6 dwords and fp4 data the low 4. The instruction ignores
+        the remaining dwords. Any other width raises ``ValueError``. ``a_scale``
+        and ``b_scale`` are i32 values. The result is ``<4 x float>``.
 
         For 32x32x64 with independently selected A/B formats and K32 E8M0
         scales, resolve a ``mfma_scaled`` catalog atom and call ``mma``
         with that atom and both scales. See ``reference/mma_metadata.md``.
         """
-        return self.mma("mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale)
+        attrs = self._f8f6f4_16x16x128_attrs(a, b, a_format, b_format)
+        return self.mma(
+            "mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale, attrs=attrs
+        )
 
-    def mfma_f32_16x16x128_fp4(self, a: Value, b: Value, c: Value) -> Value:
-        """fp4 MX MFMA (gfx950+, P52).
+    def mfma_f32_16x16x128_fp4fp6fp8(
+        self,
+        a: Value,
+        b: Value,
+        c: Value,
+        *,
+        a_format: str = "fp8e4m3",
+        b_format: str = "fp8e4m3",
+    ) -> Value:
+        """gfx950 unscaled 16x16x128 MFMA for fp8, bf8, fp6 and fp4.
 
-        Operands are 64-bit packed `<16 x fp4>` per lane;
-        accumulator is `<4 x float>`. Scales are applied separately
-        via :meth:`mfma_scale_f32_16x16x128_f8f6f4` for the
-        production MX path.
+        The instruction applies no scale. The lowering passes literal 0 for both
+        scale operands of ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``, and
+        the backend then selects the unscaled instruction
+        ``v_mfma_f32_16x16x128_f8f6f4``. The op always passes the literal. A
+        loaded or computed 0 would mean the factor ``2^-127``, so use
+        :meth:`mfma_scale_f32_16x16x128_f8f6f4` when the scale is not a literal.
+
+        ``a_format`` and ``b_format`` name the data type of A and B: ``fp8e4m3``,
+        ``bf8e5m2``, ``fp6e2m3``, ``fp6e3m2`` or ``fp4e2m1``. They set the
+        ``cbsz`` and ``blgp`` format selectors.
+
+        **A and B must use the same format in this version.** A call with
+        different values raises ``ValueError``. The signature already has both
+        arguments, so a later change can allow mixed formats without changing it.
+
+        ``a`` and ``b`` hold 256 bits per lane for every format (an ``<8 x i32>``
+        or any type of that width). fp8 and bf8 data fill all 8 dwords. fp6 data
+        fills the low 6 dwords and fp4 data the low 4. The instruction ignores
+        the remaining dwords. Any other width raises ``ValueError``. The result
+        is ``<4 x float>``.
         """
-        return self.mma("mfma_f32_16x16x128_fp4", a, b, c)
+        attrs = self._f8f6f4_16x16x128_attrs(a, b, a_format, b_format)
+        return self.mma("mfma_f32_16x16x128_fp4fp6fp8", a, b, c, attrs=attrs)
 
-    def mfma_f32_16x16x96_fp6(self, a: Value, b: Value, c: Value) -> Value:
-        """fp6 MX MFMA (gfx950+, P52)."""
-        return self.mma("mfma_f32_16x16x96_fp6", a, b, c)
+    def _f8f6f4_16x16x128_attrs(
+        self, a: Value, b: Value, a_format: str, b_format: str
+    ) -> Dict[str, Any]:
+        """Check the formats and operand widths; return the op attributes.
+
+        The attributes are empty for the default formats, so existing serialized
+        IR does not change.
+        """
+        from .arch.mfma_scale import (
+            DEFAULT_MATRIX_FORMAT,
+            f8f6f4_16x16x128_operand_error,
+            f8f6f4_16x16x128_selectors,
+        )
+
+        f8f6f4_16x16x128_selectors(a_format, b_format)
+        error = f8f6f4_16x16x128_operand_error(a, b)
+        if error:
+            raise ValueError(error)
+        if a_format == DEFAULT_MATRIX_FORMAT and b_format == DEFAULT_MATRIX_FORMAT:
+            return {}
+        return {"a_format": a_format, "b_format": b_format}
 
     def register_p_from_qk_c(self, qk_c: Value, target_dtype: Type) -> Value:
         """Lane-XOR + bit-transpose to convert a `<16 x f32>` QK-MFMA
@@ -4304,21 +4673,26 @@ class IRBuilder:
         raise ValueError(f"warp_shuffle_xor: unsupported type {v.type.name}")
 
     def vop2_f32_dpp_xor(self, v: Value, xor_mask: int, mnemonic: str) -> Value:
-        """One **fused** VALU reduce step: ``<mnemonic>_dpp d, v, v
-        row_xmask:mask`` — the cross-lane XOR shuffle *and* the f32 combine in
-        a single instruction (``v_max_f32_dpp`` / ``v_add_f32_dpp``).
+        """One softmax row-reduce stage, ``d = mnemonic(shuffle(v), v)``: the
+        in-row XOR shuffle of :meth:`warp_shuffle_xor_dpp` (``row_xmask:mask``
+        on targets that have it) followed by ``fmax`` (``v_max_f32``) or
+        ``fadd`` (``v_add_f32``).
 
-        This is the fused form of a softmax row-reduce stage. LLVM's
-        GCNDPPCombine pass refuses to fold a ``row_xmask`` ``v_mov_b32_dpp``
-        into the consuming ``v_max``/``v_add`` (verified on gfx1250: the mov
-        survives), so we emit the fused op directly via inline asm — halving
-        the VALU op count of the reduction vs the unfused
-        :meth:`warp_shuffle_xor_dpp` + ``fmax``/``fadd``.
+        LLVM's GCNDPPCombine pass folds the shuffle's ``v_mov_b32_dpp`` into the
+        consumer, giving the fused ``v_add_f32_dpp`` / ``v_max_num_f32_dpp``
+        (gfx1250), when both sit in the same block under the same EXEC. Some
+        compilers first quiet the shuffled value for ``llvm.maxnum`` with a
+        separate ``v_max_num_f32 v, v, v``, so the max stage stays a
+        ``v_mov_b32_dpp`` + ``v_max_num_f32`` pair; upstream LLVM fuses it.
 
-        The DPP modifier applies to the first source, so ``d = mnemonic(
-        shuffle(v), v)`` — correct for the commutative max/add reduction.
-        ``convergent`` (reads other lanes), ``bound_ctrl:1`` (partner always
-        in-row for mask 1..15). Operand + result are f32."""
+        This used to be inline asm (``<mnemonic>_dpp $0, $1, $1 row_xmask:..``).
+        LLVM's hazard recognizer does not look inside inline asm, so on gfx1250
+        the asm could overwrite a WMMA source operand before the required VALU
+        gap without LLVM adding the wait states; as real instructions the DPP
+        ops are covered by the WMMA co-execution hazard check.
+
+        The DPP modifier applies to the first source, so the shuffle is the
+        first operand; max and add are commutative. Operand + result are f32."""
         if v.type.name != "f32":
             raise ValueError("vop2_f32_dpp_xor requires f32 data")
         if not (1 <= xor_mask <= 15):
@@ -4328,19 +4702,10 @@ class IRBuilder:
                 f"vop2_f32_dpp_xor mnemonic must be v_max_f32/v_add_f32, "
                 f"got {mnemonic!r}"
             )
-        tmpl = (
-            f"{mnemonic}_dpp $0, $1, $1 "
-            f"row_xmask:{xor_mask} row_mask:0xf bank_mask:0xf bound_ctrl:1"
-        )
-        return self.inline_asm(
-            tmpl,
-            "=v,v",
-            [v],
-            result_type=F32,
-            sideeffect=False,
-            convergent=True,
-            result_name_hint="dppr",
-        )
+        shuffled = self.warp_shuffle_xor_dpp(v, xor_mask)
+        if mnemonic == "v_max_f32":
+            return self.fmax(shuffled, v)
+        return self.fadd(shuffled, v)
 
     def warp_shuffle_xor_dpp(self, v: Value, lane_xor: int) -> Value:
         """VALU XOR shuffle: lane ``l`` gets ``v`` from lane ``l ^ lane_xor``
@@ -5198,6 +5563,20 @@ class IRBuilder:
             raise ValueError("s_setprio level must be in 0..3")
         self._op("tile.s_setprio", attrs={"level": int(level)})
 
+    def trap(self) -> None:
+        """Abort the kernel: ``call void @llvm.trap()`` (HIP
+        ``__builtin_trap()``), ``s_trap 2`` on the GPU.
+
+        A taken trap ends the kernel with a hardware exception. What the host
+        sees depends on the HIP runtime: the launch reports an error, or the
+        runtime aborts the process. Either way the process cannot use the GPU
+        afterwards. So a trap is the last resort, for a condition the host
+        checks before the launch and that must still never reach a memory
+        access on the device. Put it under a branch on that condition
+        (``scf_if``).
+        """
+        self._op("tile.trap")
+
     # ----- buffer resources + async DRAM->LDS -----
 
     def global_ptr_add(self, ptr: Value, byte_off: Value) -> Value:
@@ -5219,12 +5598,34 @@ class IRBuilder:
             result_name_hint="gptr",
         ).result
 
+    def global_ptr_offset(self, ptr: Value, byte_off: Value) -> Value:
+        """Return ``ptr`` moved by ``byte_off`` bytes as a new global pointer
+        (same type), which may point outside the allocation ``ptr`` points into.
+
+        Lowers to ``getelementptr i8, ptr addrspace(1) ptr, i64 byte_off``
+        without ``inbounds``. :meth:`global_ptr_add` promises the compiler that
+        its result stays inside the allocation (a result outside it is poison,
+        and the compiler may fold on that promise); this op makes no such
+        promise. Use it for an address that may land outside the tensor: one
+        that is only compared, converted to an integer, or handed to a buffer
+        descriptor that range-checks every access. ``byte_off`` is i64 and may
+        be negative; widen an i32 offset with :meth:`sext` or :meth:`zext`.
+        """
+        error = _global_ptr_offset_error(ptr.type, byte_off.type)
+        if error:
+            raise TypeError(error)
+        return self._op(
+            "tile.global_ptr_offset",
+            [ptr, byte_off],
+            [ptr.type],
+            result_name_hint="gptr",
+        ).result
+
     def global_ptr_to_i64(self, ptr: Value) -> Value:
         """Return the 64-bit address of a global pointer (``ptrtoint``)."""
-        if not isinstance(ptr.type, PtrType) or ptr.type.space != "global":
-            raise TypeError(
-                f"global_ptr_to_i64 ptr must be a global pointer, got {ptr.type}"
-            )
+        error = _global_ptr_to_i64_error(ptr.type)
+        if error:
+            raise TypeError(error)
         return self._op(
             "tile.global_ptr_to_i64",
             [ptr],
@@ -5267,35 +5668,32 @@ class IRBuilder:
     ) -> Value:
         """Dtype-generic vectorised `raw_ptr_buffer_load` of N elements.
 
-        Supported dtypes and widths:
-          - f16 / bf16 (2-byte): n in {2, 4, 8} → dwords = n // 2
-          - f32 / i32  (4-byte): n in {1, 2, 4} → dwords = n
+        ``dtype`` is any scalar whose width is whole bytes (i8, u8, fp8, bf8,
+        i16, f16, bf16, i32, f32, i64, f64), and the ``n`` elements together
+        move 1, 2, 4, 8 or 16 bytes. The access is one ``i8``, ``i16``,
+        ``i32``, ``<2 x i32>`` or ``<4 x i32>`` load, bitcast to the
+        ``<n x dtype>`` result. The HIP lowering has no vector type for u8 or
+        i64 elements, so those two lower through LLVM only.
 
-        The raw `<dwords x i32>` payload is bitcast to `<n x dtype>` so
-        the returned Value has the correct IR type for the smem store.
-        Bounds-checked: an out-of-range voffset returns 0 (the
-        runbook §6.1 lever for tail-safe loads).
+        Out of range bytes read 0. The hardware checks an access of 4 bytes
+        or more per 4-byte component and a 1- or 2-byte access whole, so a
+        load that straddles the end of the buffer keeps only its whole
+        in-range components, and only a 1- or 2-byte load reads a last
+        element that ends off a 4-byte boundary.
+
+        Attrs: ``elem_type``, and ``dwords`` for an access of whole dwords.
+        Both lowerings take the access width from the result type.
         """
-        _elem_bytes = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
-        eb = _elem_bytes.get(dtype.name)
-        if eb is None:
-            raise ValueError(f"buffer_load_vN: unsupported dtype {dtype.name!r}")
-        if n <= 0 or (n * eb) % 4 != 0:
-            raise ValueError(
-                f"buffer_load_vN: n={n} dtype={dtype.name} is not a whole number "
-                "of dwords"
-            )
-        dwords = (n * eb) // 4
-        if dwords not in (1, 2, 4):
-            raise ValueError(
-                f"buffer_load_vN: n={n} dtype={dtype.name} → dwords={dwords} "
-                "must be 1, 2, or 4"
-            )
+        nbytes = _buffer_access_bytes("buffer_load_vN", dtype, n)
+        attrs: dict[str, Any] = {}
+        if nbytes >= 4:
+            attrs["dwords"] = nbytes // 4
+        attrs["elem_type"] = dtype.name
         return self._op(
             "tile.buffer_load_vN",
             [rsrc, voffset, soffset],
             [VectorType(dtype, n)],
-            attrs={"dwords": int(dwords), "elem_type": dtype.name},
+            attrs=attrs,
             result_name_hint=f"bl{n}",
         ).result
 
@@ -5393,47 +5791,82 @@ class IRBuilder:
         ).result
 
     def buffer_store_vN_f16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, dwords: int
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        dwords: int,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
         """Vectorised `raw_ptr_buffer_store`. dwords in {1,2,4}; each
         dword is two halves. Out-of-range voffsets are *silently
         dropped* by the AMD buffer rsrc — the runbook §6.2 lever
         ("vectorise the epilogue") for tail-safe stores.
+
+        ``cachepolicy`` is the intrinsic's aux immediate (on gfx12: bits[0:2]
+        = th, bits[3:4] = scope; 1 = ``th:TH_STORE_NT``). 0 records nothing.
         """
         if dwords not in (1, 2, 4):
             raise ValueError(f"buffer_store dwords must be 1, 2, or 4 (got {dwords})")
         self._op(
             "tile.buffer_store_vN_f16",
             [rsrc, voffset, soffset, value],
-            attrs={"dwords": int(dwords)},
+            attrs=_with_cachepolicy(
+                {"dwords": int(dwords)}, "buffer_store_vN_f16", cachepolicy
+            ),
         )
 
     def buffer_store_f16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
         """Single-half buffer store, OOB-clamped. The epilogue path
         for per-lane direct stores (4 halves per accumulator slot)
         uses this when the kernel layout doesn't align to a 32-bit
-        vector boundary."""
+        vector boundary. ``cachepolicy`` as for :meth:`buffer_store_vN_f16`."""
         self._op(
             "tile.buffer_store_f16",
             [rsrc, voffset, soffset, value],
+            attrs=_with_cachepolicy(None, "buffer_store_f16", cachepolicy),
         )
 
     def buffer_store_bf16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
-        """Single bf16 buffer store via raw_ptr_buffer_store.i16, OOB-dropped."""
+        """Single bf16 buffer store via raw_ptr_buffer_store.i16, OOB-dropped.
+        ``cachepolicy`` as for :meth:`buffer_store_vN_f16`."""
         self._op(
             "tile.buffer_store_bf16",
             [rsrc, voffset, soffset, value],
+            attrs=_with_cachepolicy(None, "buffer_store_bf16", cachepolicy),
         )
 
     def buffer_store_vN_bf16(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, dwords: int
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        dwords: int,
+        *,
+        cachepolicy: int = 0,
     ) -> None:
         """Vectorised bf16 buffer store. dwords in {1, 2, 4}; each dword
-        holds two bf16 elements. OOB voffsets are silently dropped."""
+        holds two bf16 elements. OOB voffsets are silently dropped.
+        ``cachepolicy`` as for :meth:`buffer_store_vN_f16`."""
         if dwords not in (1, 2, 4):
             raise ValueError(
                 f"buffer_store_vN_bf16 dwords must be 1, 2, or 4 (got {dwords})"
@@ -5441,7 +5874,9 @@ class IRBuilder:
         self._op(
             "tile.buffer_store_vN_bf16",
             [rsrc, voffset, soffset, value],
-            attrs={"dwords": int(dwords)},
+            attrs=_with_cachepolicy(
+                {"dwords": int(dwords)}, "buffer_store_vN_bf16", cachepolicy
+            ),
         )
 
     def buffer_store_f32(
@@ -5465,6 +5900,24 @@ class IRBuilder:
             [rsrc, voffset, soffset, value],
             attrs={"dwords": int(n)},
         )
+
+    def buffer_store_vN(
+        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+    ) -> None:
+        """Dtype-generic vectorised `raw_ptr_buffer_store` of a vector value.
+
+        The store twin of :meth:`buffer_load_vN`: ``value`` is a vector of any
+        scalar whose width is whole bytes, 1, 2, 4, 8 or 16 bytes in all. It is
+        bitcast to one ``i8``, ``i16``, ``i32``, ``<2 x i32>`` or ``<4 x i32>``
+        and stored with the matching raw buffer store.
+
+        Out of range bytes are not written. The hardware checks a store of 4
+        bytes or more per 4-byte component and a 1- or 2-byte store whole: a
+        store that straddles the end of the buffer writes only its whole
+        in-range components and leaves every other byte untouched.
+        """
+        _buffer_vector_bytes("buffer_store_vN", "value", value.type)
+        self._op("tile.buffer_store_vN", [rsrc, voffset, soffset, value])
 
     def zero_vec_f16(self, n: int) -> Value:
         """A `<n x half>` zero constant — the canonical "mask out OOB
@@ -5846,7 +6299,13 @@ class IRBuilder:
         elide_trailing_barrier: Phase 4 optimization (default: True)
         - True: automatically elide trailing sync() in non-final iterations
         - False: preserve all barriers (for manually optimized kernels)
+
+        No init may be a buffer descriptor (see
+        :func:`_loop_carried_descriptor_message`).
         """
+        for index, (_, init) in enumerate(iter_args):
+            if _is_buffer_descriptor(init):
+                raise ValueError(_loop_carried_descriptor_message(index))
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
         iter_vars: List[Value] = []
@@ -5881,7 +6340,32 @@ class IRBuilder:
         return _ForBuilder(self, op, iv, body, iter_vars)
 
     def scf_yield(self, *values: Value) -> None:
+        """End the current region by yielding ``values`` to its owner.
+
+        In an ``scf.for`` body they become the next iteration's iter_args, so
+        none may be a buffer descriptor (see
+        :func:`_loop_carried_descriptor_message`).
+        """
+        if self._current_region_is_loop_body():
+            for index, value in enumerate(values):
+                if _is_buffer_descriptor(value):
+                    raise ValueError(_loop_carried_descriptor_message(index))
         self._op("scf.yield", list(values), [], attrs={"num": len(values)})
+
+    def _current_region_is_loop_body(self) -> bool:
+        """True while the builder is emitting into an ``scf.for`` body.
+
+        The loop op is the last op of the region that encloses its body: it was
+        emitted there before its body was entered, and every op since went into
+        the body.
+        """
+        if len(self._region_stack) < 2:
+            return False
+        enclosing = self._region_stack[-2].ops
+        if not enclosing or enclosing[-1].name != "scf.for":
+            return False
+        loop_regions = enclosing[-1].regions
+        return bool(loop_regions) and loop_regions[0] is self._region_stack[-1]
 
     def static_if(
         self,
@@ -5911,7 +6395,7 @@ class IRBuilder:
         self._emit(op)
         return _IfBuilder(self, op, then_r)
 
-    def scf_if_else(self, cond: Value):
+    def scf_if_else(self, cond: Value, result_types: Sequence[Type] = ()):
         """Runtime if/else branch (converging control flow).
 
         Both the ``then`` and ``else`` regions converge at the same join
@@ -5929,10 +6413,39 @@ class IRBuilder:
                 with else_ctx:
                     # code executed when cond is false
                     b.sync()
+
+        With ``result_types`` the if/else yields one value per type: each
+        branch ends in ``scf_yield`` of values of those types, and the
+        returned builder's ``results`` are the values of the branch that ran
+        (an LLVM ``phi``; in HIP, variables declared before the ``if`` and
+        assigned in both branches)::
+
+            branch = b.scf_if_else(ok, result_types=[VectorType(F16, 8)])
+            with branch as (then_ctx, else_ctx):
+                with then_ctx:
+                    b.scf_yield(b.buffer_load_vN(rsrc, voffset, soffset, F16, 8))
+                with else_ctx:
+                    b.scf_yield(b.zero_vec_f16(8))
+            (value,) = branch.results
+
+        Leaving the ``with`` refuses a branch that does not end that way.
         """
+        for index, t in enumerate(result_types):
+            _refuse_packed_only_value("scf.if_else", t)
+            error = _if_else_result_type_error(index, t)
+            if error is not None:
+                raise ValueError(error)
+        results = [Value(self._fresh("if"), t) for t in result_types]
         then_r = Region("then")
         else_r = Region("else")
-        op = Op(name="scf.if_else", operands=[cond], regions=[then_r, else_r])
+        op = Op(
+            name="scf.if_else",
+            operands=[cond],
+            results=results,
+            regions=[then_r, else_r],
+        )
+        for r in results:
+            r.op = op
         self._emit(op)
         return _IfElseBuilder(self, op, then_r, else_r)
 
@@ -6025,6 +6538,7 @@ PURE_OP_NAMES = {
     "tile.smem_addr_of",
     "tile.smem_ptr_add",
     "tile.global_ptr_to_i64",
+    "tile.global_ptr_offset",
     "tile.lane_id",
     "tile.ds_bpermute",
     "tile.ds_read_tr16_b64",
@@ -6159,4 +6673,13 @@ class _IfElseBuilder:
         return self._then_ctx, self._else_ctx
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        pass  # regions were already popped by their own context managers
+        # The regions were already popped by their own context managers. Once
+        # both branches are built, refuse one that does not yield the results.
+        if exc_type is None:
+            for branch in range(len(_IF_ELSE_BRANCHES)):
+                _if_else_branch_yield(self.op, branch)
+
+    @property
+    def results(self) -> List[Value]:
+        """The values the branch that ran yields, one per result type."""
+        return list(self.op.results)

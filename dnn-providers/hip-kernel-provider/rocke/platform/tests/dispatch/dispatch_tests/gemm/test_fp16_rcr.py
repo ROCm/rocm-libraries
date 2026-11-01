@@ -678,16 +678,22 @@ class TestGemmFp16Dispatch(unittest.TestCase):
 
     def test_support_applies_the_builder_gate(self):
         # One source of truth: a spec the hardware/tile predicate accepts but
-        # the builder's validity gate rejects (16x16x16 atoms + lds_swizzle: the
-        # 4-half XOR group splits the 8-half LDS store) is not supported.
+        # the builder's validity gate rejects (a direct-to-LDS tile whose DMA
+        # passes are not full: 64x64x32 has 256 eight-half chunks per operand
+        # against block_size 512) is not supported.
         from dataclasses import replace
 
         from rocke.dispatch.gemm.support import universal_spec_supported
 
         spec = UniversalGemmSpec(
             name="s",
-            tile=TileSpec(128, 128, 32, 2, 2, 1, 16, 16, 16),
-            trait=TraitSpec(pipeline="compv4", epilogue="default", lds_swizzle=True),
+            tile=TileSpec(64, 64, 32, 4, 2, 1, 16, 16, 32),
+            trait=TraitSpec(
+                pipeline="compv4",
+                epilogue="default",
+                direct_to_lds=True,
+                dtl_prefetch=True,
+            ),
             data=mono_data_spec("fp16"),
             wave_size=64,
         )
@@ -699,7 +705,8 @@ class TestGemmFp16Dispatch(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("is_valid_spec", why)
         ok, why = universal_spec_supported(
-            replace(spec, trait=replace(spec.trait, lds_swizzle=False)), arch="gfx950"
+            replace(spec, trait=replace(spec.trait, direct_to_lds=False, dtl_prefetch=False)),
+            arch="gfx950",
         )
         self.assertTrue(ok, why)
 

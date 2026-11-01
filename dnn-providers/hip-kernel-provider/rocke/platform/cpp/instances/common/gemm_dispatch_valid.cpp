@@ -79,14 +79,15 @@ bool choose_load_vec(
 
 /* --------------------------------------------------------------------- LDS plan */
 
-bool ab_double_buffer_decision(const UGemm& s, int64_t lds_cap)
+bool ab_double_buffer_decision(const UGemm& s, int64_t lds_cap, int64_t eb_a, int64_t eb_b)
 {
     const Trait& tr = s.trait;
     if(tr.pipeline != "compv4" || tr.direct_to_lds)
         return false;
     if(tr.ab_double_buffer.has_value())
         return *tr.ab_double_buffer;
-    int64_t ab_single = ((s.tile.tile_m * s.tile.tile_k) + (s.tile.tile_n * s.tile.tile_k)) * 2;
+    int64_t ab_single
+        = (s.tile.tile_m * eb_a + s.tile.tile_n * eb_b) * (s.tile.tile_k + tr.lds_k_pad);
     bool db_fits_2wg = (2 * ab_single) * 2 <= lds_cap;
     return tr.epilogue != "cshuffle" && db_fits_2wg;
 }
@@ -104,7 +105,7 @@ void universal_lds_bytes(const UGemm& s,
     const Tile& t = s.tile;
     int64_t pad = tr.direct_to_lds ? 0 : tr.lds_k_pad;
     int64_t ab_single = (t.tile_m * eb_a + t.tile_n * eb_b) * (t.tile_k + pad);
-    bool db = ab_double_buffer_decision(s, lds_cap);
+    bool db = ab_double_buffer_decision(s, lds_cap, eb_a, eb_b);
     int64_t ab = ab_single * ((tr.dtl_prefetch || db) ? 2 : 1);
     if(tr.direct_to_lds && tr.dtl_prefetch && tr.dtl_stages >= 2)
         ab = ab_single * tr.dtl_stages;
@@ -118,15 +119,20 @@ namespace
 {
 
 /* gemm_universal.lds_swizzle_params */
-void lds_swizzle_params(
-    int64_t a_per_lane, int64_t b_per_lane, int64_t block_k, int64_t* R, int64_t* W, int64_t* L)
+void lds_swizzle_params(int64_t a_per_lane,
+                        int64_t b_per_lane,
+                        int64_t block_k,
+                        int64_t swz_vec,
+                        int64_t* R,
+                        int64_t* W,
+                        int64_t* L)
 {
-    int64_t elem = a_per_lane == b_per_lane ? a_per_lane : 0;
+    int64_t elem = a_per_lane == b_per_lane ? std::max(a_per_lane, swz_vec) : 0;
     int64_t slots = (elem && block_k % elem == 0) ? block_k / elem : 0;
     int64_t al, aw;
     bool okl = ilog2_exact(elem, &al);
     bool okw = ilog2_exact(slots, &aw);
-    if(okl && okw && aw >= 1)
+    if(okl && okw)
     {
         *R = 0;
         *W = aw;
@@ -139,16 +145,23 @@ void lds_swizzle_params(
 }
 
 /* gemm_universal._spec_swizzle_params: lds_swizzle_params with the trait
- * overrides lds_swizzle_r and lds_swizzle_l (W = log2(tile_k >> L)) */
-void spec_swizzle_params(const Trait& tr,
-                         int64_t a_per_lane,
-                         int64_t b_per_lane,
-                         int64_t block_k,
-                         int64_t* R,
-                         int64_t* W,
-                         int64_t* L)
+ * overrides lds_swizzle_r and lds_swizzle_l (W = log2(tile_k >> L)). The
+ * granule covers the LDS store vector (gemm_universal._lds_swizzle_vec): the
+ * load vector with lds_swizzle, except on the register-staged prefetch body
+ * (vgpr_prefetch without DTL), which keeps the fragment granule. */
+void spec_swizzle_params(
+    const UGemm& spec, int64_t a_per_lane, int64_t b_per_lane, int64_t* R, int64_t* W, int64_t* L)
 {
-    lds_swizzle_params(a_per_lane, b_per_lane, block_k, R, W, L);
+    const Trait& tr = spec.trait;
+    const Tile& t = spec.tile;
+    int64_t block_k = t.tile_k;
+    int64_t swz_vec = 0;
+    if(tr.lds_swizzle && !(tr.vgpr_prefetch && !tr.direct_to_lds))
+    {
+        if(!choose_load_vec(t.tile_m, t.tile_n, t.tile_k, spec.block_size, &swz_vec))
+            swz_vec = 0; /* no legal load vector: the gate rejects the spec elsewhere */
+    }
+    lds_swizzle_params(a_per_lane, b_per_lane, block_k, swz_vec, R, W, L);
     if(tr.lds_swizzle_r >= 0)
         *R = tr.lds_swizzle_r;
     if(tr.lds_swizzle_l >= 0)
@@ -1374,7 +1387,7 @@ bool is_valid_spec_x(
         if(tr.lds_swizzle)
         {
             int64_t R, W, L;
-            spec_swizzle_params(tr, a_frag, b_frag, t.tile_k, &R, &W, &L);
+            spec_swizzle_params(spec, a_frag, b_frag, &R, &W, &L);
             if(t.tile_m % (int64_t(1) << (R + W)) || t.tile_n % (int64_t(1) << (R + W)))
                 return set_why(why,
                                "vgpr_prefetch with lds_swizzle: tile_m / tile_n must be multiples "
@@ -1399,7 +1412,7 @@ bool is_valid_spec_x(
                || tr.epilogue != "default")
                 return set_why(why, "vgpr_prefetch 4 is the single-LDS-buffer body");
         }
-        else if(!ab_double_buffer_decision(spec, target.lds_capacity_bytes))
+        else if(!ab_double_buffer_decision(spec, target.lds_capacity_bytes, 2, 2))
             return set_why(why, "vgpr_prefetch 1 / 2 / 3 require the AB LDS double buffer");
         if(tr.preshuffle_b || tr.active_tile_skip || tr.lds_k_pad)
             return set_why(why,
@@ -1816,7 +1829,7 @@ bool is_valid_spec_x(
     if(tr.lds_swizzle)
     {
         int64_t R, W, L;
-        spec_swizzle_params(tr, a_frag, b_frag, t.tile_k, &R, &W, &L);
+        spec_swizzle_params(spec, a_frag, b_frag, &R, &W, &L);
         int64_t chunk;
         if(tr.direct_to_lds)
             chunk = dtl_h;

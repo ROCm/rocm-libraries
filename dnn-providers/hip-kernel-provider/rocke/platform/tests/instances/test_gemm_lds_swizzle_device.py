@@ -6,17 +6,21 @@
 ``lds_swizzle`` XORs whole ``2^L``-half groups of an LDS row; the LDS write
 chunk (the DTL chunk, or the ``load_vec`` store of the global-load path) must
 not be wider than a group, or one chunk is scattered over several groups and
-the fragment reads fetch the wrong elements. ``is_valid_spec`` refuses such
-specs (16x16x16 and 32x32x8 atoms give ``L = 2`` against 8-half chunks).
+the fragment reads fetch the wrong elements. The geometry rule
+(:func:`lds_swizzle_params`) therefore widens the group to the LDS store vector
+(:func:`_lds_swizzle_vec`), so the narrow-fragment atoms (16x16x16, 32x32x8:
+``L = 2`` from the fragment) get ``L = 3`` against 8-half chunks; the gate
+(``is_valid_spec``) still refuses any spec whose group stays narrower than its
+chunk.
 
-* ``test_refused_specs_are_refused``: the gate refuses every spec of
-  :data:`_REFUSED` (CPU).
-* ``test_refused_specs_compute_wrong_without_the_rule``: the same specs built
-  with the gate bypassed compute wrong outputs on the device. Removing the
-  rule would admit them, so together with the test above this pins the rule
-  to observed wrong results, not to a guess.
-* ``test_admitted_neighbours_compute_right``: the neighbours the gate admits
-  (the wide atoms with the swizzle, the narrow atoms without it, the
+* ``test_narrow_atoms_get_a_chunk_wide_group``: every spec of :data:`_NARROW`
+  is admitted and its group holds the LDS write chunk (CPU).
+* ``test_fragment_group_computes_wrong``: the same specs built with the old
+  fragment-sized group (``CK_SWZ_*`` debug overrides) compute wrong outputs on
+  the device where the chunk is wider than the fragment, which pins the rule to
+  observed wrong results, not to a guess.
+* ``test_admitted_specs_compute_right``: the narrow-atom specs and their
+  neighbours (the wide atoms, the narrow atoms without the swizzle, the
   ``vgpr_prefetch`` group-sized LDS writes) are exact against a float64
   reference.
 
@@ -67,11 +71,12 @@ _DTL = TraitSpec(
     dtl_cache_b=0,
 )
 
-# (label, tile, trait, arches): swizzle groups narrower than the LDS write
-# chunk on ``arches``. The global-load path stores 8-half vectors on every
-# arch; the DTL chunk is 8 halves on gfx950 (16-byte LDS DMA) but 2 halves on
-# gfx942 (4-byte LDS DMA), where the 4-half group is wide enough.
-_REFUSED = [
+# (label, tile, trait, arches): specs whose fragment-sized (4-half) group is
+# narrower than the LDS write chunk on ``arches``. The global-load path stores
+# 8-half vectors on every arch; the DTL chunk is 8 halves on gfx950 (16-byte
+# LDS DMA) but 2 halves on gfx942 (4-byte LDS DMA), where a 4-half group is
+# wide enough.
+_NARROW = [
     (
         f"{path}_{'x'.join(map(str, atom))}",
         TileSpec(128, 128, 32, 2, 2, 1, *atom),
@@ -102,9 +107,6 @@ _ADMITTED = [
         TileSpec(128, 128, 32, 2, 2, 1, 32, 32, 8),
         replace(_VGPR, lds_swizzle=False),
     ),
-    # gfx942 only: 4-byte LDS DMA chunks fit the 4-half group
-    ("dtl_16x16x16", TileSpec(128, 128, 32, 2, 2, 1, 16, 16, 16), _DTL),
-    ("dtl_32x32x8", TileSpec(128, 128, 32, 2, 2, 1, 32, 32, 8), _DTL),
 ]
 
 
@@ -122,32 +124,44 @@ def _arch():
     return _ARCH if _DEVICE else "gfx950"
 
 
-@pytest.mark.parametrize(
-    "label,tile,trait,arches", _REFUSED, ids=[r[0] for r in _REFUSED]
-)
-def test_refused_specs_are_refused(label, tile, trait, arches):
+def _write_chunk(spec, arch):
+    """The LDS write chunk in halves: the DTL chunk, else the load vector."""
+    from rocke.core.arch import ArchTarget
+
+    if spec.trait.direct_to_lds:
+        return min(4, ArchTarget.from_gfx(arch).async_lds_max_dwords) * 2
+    return GU._choose_load_vec(spec)
+
+
+@pytest.mark.parametrize("label,tile,trait,arches", _NARROW, ids=[r[0] for r in _NARROW])
+def test_narrow_atoms_get_a_chunk_wide_group(label, tile, trait, arches):
     for arch in ("gfx942", "gfx950"):
-        ok, why = is_valid_spec(_spec(label, tile, trait), arch=arch)
+        spec = _spec(label, tile, trait)
+        ok, why = is_valid_spec(spec, arch=arch)
+        assert ok, (arch, label, why)
+        op = GU._resolve_mma_op(spec, arch)
+        _r, _w, l_ = GU._spec_swizzle_params(spec, op.a_frag_len, op.b_frag_len)
+        assert (1 << l_) % _write_chunk(spec, arch) == 0, (arch, label, l_)
         if arch in arches:
-            assert not ok, (arch, label)
-            assert "lds_swizzle: XOR group" in why, why
-        else:
-            assert ok, (arch, label, why)
+            # the fragment alone would give a narrower group than the chunk
+            assert op.a_frag_len < _write_chunk(spec, arch), (arch, label)
 
 
-def _run(spec, monkeypatch=None):
-    """Build (with the gate bypassed when ``monkeypatch`` is given), run once
-    on random data and return the worst error relative to the f64 bound."""
+def _run(spec, monkeypatch=None, swz=None):
+    """Build (with the debug ``CK_SWZ_R/W/L`` overrides ``swz`` when given),
+    run once on random data and return the worst error relative to the f64
+    bound."""
     import torch
 
     from rocke.core.ir import PtrType
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-    if monkeypatch is not None:
-        monkeypatch.setattr(GU, "is_valid_spec", lambda s, arch="gfx950": (True, ""))
+    if swz is not None:
+        for k, v in zip(("CK_SWZ_R", "CK_SWZ_W", "CK_SWZ_L"), swz):
+            monkeypatch.setenv(k, str(v))
     kd = build_universal_gemm(spec, arch=_arch())
-    if monkeypatch is not None:
+    if swz is not None:
         monkeypatch.undo()
     art = compile_kernel(kd, arch=_arch(), capture_ir_text=False, backend="python")
     sig = []
@@ -188,29 +202,31 @@ def _run(spec, monkeypatch=None):
 
 
 @_device
-@pytest.mark.parametrize(
-    "label,tile,trait,arches", _REFUSED, ids=[r[0] for r in _REFUSED]
-)
-def test_refused_specs_compute_wrong_without_the_rule(
-    label, tile, trait, arches, monkeypatch
-):
+@pytest.mark.parametrize("label,tile,trait,arches", _NARROW, ids=[r[0] for r in _NARROW])
+def test_fragment_group_computes_wrong(label, tile, trait, arches, monkeypatch):
     if _ARCH not in arches:
-        pytest.skip(f"admitted on {_ARCH}")
-    try:
-        worst = _run(_spec(label, tile, trait), monkeypatch)
-    except (ValueError, NotImplementedError) as e:  # the emitter itself refuses
-        pytest.skip(f"not buildable without the gate: {e}")
-    assert worst > 1.0, f"{label}: forced build was exact (worst {worst})"
+        pytest.skip(f"the fragment group holds the chunk on {_ARCH}")
+    spec = _spec(label, tile, trait)
+    op = GU._resolve_mma_op(spec, _ARCH)
+    if op is None:
+        pytest.skip(f"no {label} atom on {_ARCH}")
+    # the old geometry rule: the group of one fragment (lds_swizzle_params
+    # without the store vector)
+    swz = GU.lds_swizzle_params(op.a_frag_len, op.b_frag_len, tile.tile_k)
+    worst = _run(spec, monkeypatch, swz=swz)
+    assert worst > 1.0, f"{label}: fragment-group build was exact (worst {worst})"
 
 
 @_device
-@pytest.mark.parametrize("label,tile,trait", _ADMITTED, ids=[r[0] for r in _ADMITTED])
-def test_admitted_neighbours_compute_right(label, tile, trait):
+@pytest.mark.parametrize(
+    "label,tile,trait",
+    [r[:3] for r in _NARROW] + _ADMITTED,
+    ids=[r[0] for r in _NARROW] + [r[0] for r in _ADMITTED],
+)
+def test_admitted_specs_compute_right(label, tile, trait):
     spec = _spec(label, tile, trait)
     ok, why = is_valid_spec(spec, arch=_arch())
     if not ok and "unsupported" in why:
         pytest.skip(why)  # the atom does not exist on this arch
-    if label in ("dtl_16x16x16", "dtl_32x32x8") and _arch() != "gfx942":
-        pytest.skip("refused on this arch (see _REFUSED)")
     assert ok, why
     assert _run(spec) <= 1.0, label

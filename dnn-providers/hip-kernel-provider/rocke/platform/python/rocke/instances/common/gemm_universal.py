@@ -31,7 +31,8 @@ wave64).
 What this file implements *now*:
   - tile geometries 64..256 x 64..256 x 16..128
   - warp grids 1x1, 2x1, 1x2, 2x2, 4x1, 1x4, 2x4, 4x2, 4x4
-  - MFMA atoms 16x16x16, 16x16x32, 32x32x8, 32x32x16 f16
+  - MFMA atoms 16x16x16, 16x16x32, 32x32x8, 32x32x16 f16; 16x16x4 fp64
+    (gfx942, fp64 accumulation)
   - pipeline `mem` (single buffer, sync), `compv3` (single buffer +
     scheduler hints), `compv4` (double-buffer LDS + sched_group_barrier
     interleave between MFMA/DS_read/DS_write/VMEM)
@@ -64,10 +65,12 @@ import warnings
 from dataclasses import dataclass, field, replace as _dc_replace
 from typing import Dict, Iterator, List, Literal, Optional, Sequence, Tuple
 
+from ...core.dtypes import dtype_info
 from ...core.ir import (
     BF16,
     F16,
     F32,
+    F64,
     I32,
     IRBuilder,
     KernelDef,
@@ -75,6 +78,7 @@ from ...core.ir import (
     Type,
     Value,
     VectorType,
+    dtype_to_ir_type,
     type_bits,
 )
 from ...helpers.io import io_ir_type
@@ -235,7 +239,7 @@ class TraitSpec:
     # rows with bit 3 set so consecutive-row MFMA ds_reads hit different banks.
     # ZERO LDS overhead (unlike lds_k_pad). Applied identically to the LDS
     # store and ds_read columns -> bit-exact. Helps square fp16/bf16 shapes.
-    # Default off (golden-gate-safe). Non-DTL only; 2-byte dtypes.
+    # Default off (golden-gate-safe). f16, bf16 and fp64.
     lds_swizzle: bool = False
     # Split-K over the production universal body. When > 1, the kernel:
     #   * takes a third grid dim ``block_id_z`` in [0, split_k) selecting
@@ -2122,9 +2126,21 @@ def _dtype_ir(name: str) -> Type:
     """Resolve GEMM storage dtype strings to IR types.
 
     Universal GEMM currently supports homogeneous A/B/C storage dtypes
-    for f16 and bf16 with f32 accumulation.
+    for f16 and bf16 with f32 accumulation, and fp64 with fp64 accumulation.
     """
+    if name == "fp64":
+        return F64
     return io_ir_type(name)
+
+
+def _acc_dtype(spec: UniversalGemmSpec) -> str:
+    """Catalog accumulator dtype for ``spec`` (validated in :func:`_storage_dtype`)."""
+    return "fp64" if spec.data.dtype_a == "fp64" else "fp32"
+
+
+def _elem_bytes(spec: UniversalGemmSpec) -> int:
+    """Storage element size in bytes of the homogeneous A/B/C dtype."""
+    return dtype_info(spec.data.dtype_a).encoded_bits // 8
 
 
 def _mma_family(arch: str) -> str:
@@ -2159,7 +2175,7 @@ def _resolve_mma_op(spec: "UniversalGemmSpec", arch: str):
         family=_mma_family(arch),
         a_dtype=a_name,
         b_dtype=a_name,
-        c_dtype="fp32",
+        c_dtype=_acc_dtype(spec),
         m=t.warp_tile_m,
         n=t.warp_tile_n,
         k=t.warp_tile_k,
@@ -2173,7 +2189,13 @@ def _storage_dtype(spec: UniversalGemmSpec) -> Type:
             "UniversalGemmSpec currently requires homogeneous A/B/C dtypes; "
             f"got A={d.dtype_a}, B={d.dtype_b}, C={d.dtype_c}"
         )
-    if d.dtype_acc not in ("fp32", "f32"):
+    if d.dtype_a == "fp64":
+        if d.dtype_acc not in ("fp64", "f64"):
+            raise ValueError(
+                "UniversalGemmSpec only supports fp64 accumulation for fp64, "
+                f"got {d.dtype_acc!r}"
+            )
+    elif d.dtype_acc not in ("fp32", "f32"):
         raise ValueError(
             f"UniversalGemmSpec only supports fp32 accumulation, got {d.dtype_acc!r}"
         )
@@ -2203,15 +2225,19 @@ def ab_double_buffer_decision(
     direct_to_lds: bool,
     ab_double_buffer: Optional[bool],
     lds_cap: int,
+    lds_k_pad: int = 0,
+    elem_bytes_a: int = 2,
+    elem_bytes_b: int = 2,
 ) -> bool:
     """Whether the compv4 VGPR-staged AB LDS double buffer (``_emit_kloop_db``)
     is emitted. Pure ints/bools, shared by the validity gate, the emitter and
     the dispatcher support predicate (and mirrored by the C++ engine's
     ``rocke_gemm_ab_db_decision``).
 
-    * ``ab_double_buffer is None`` -- the historical automatic rule, kept
-      byte-identical: compv4, direct epilogue, not DTL, and the doubled AB still
-      fits 2 WG/CU (``2 * (2 * ab_single) <= lds_cap``).
+    * ``ab_double_buffer is None`` -- the automatic rule: compv4, direct
+      epilogue, not DTL, and the doubled AB still fits 2 WG/CU
+      (``2 * (2 * ab_single) <= lds_cap``, ``ab_single`` the padded AB region
+      ``(tile_m * eA + tile_n * eB) * (tile_k + lds_k_pad)``).
     * ``True`` / ``False`` -- explicit (only legal on compv4 without DTL; the
       validity gate rejects it elsewhere so it can never be a silent no-op).
     """
@@ -2219,7 +2245,9 @@ def ab_double_buffer_decision(
         return False
     if ab_double_buffer is not None:
         return bool(ab_double_buffer)
-    ab_single = ((tile_m * tile_k) + (tile_n * tile_k)) * 2
+    ab_single = (tile_m * elem_bytes_a + tile_n * elem_bytes_b) * (
+        tile_k + int(lds_k_pad)
+    )
     db_fits_2wg = (2 * ab_single) * 2 <= lds_cap
     return epilogue != "cshuffle" and db_fits_2wg
 
@@ -2252,9 +2280,9 @@ def universal_lds_bytes(
       ``cshuffle_no_alias`` marks it exclusive, so the pool is ``max(ab, c)``
       by default and ``ab + c`` only with ``cshuffle_no_alias``.
 
-    The element sizes default to 2 bytes (the f16 / bf16 body this module
-    emits; the validity gate always uses the defaults). The dispatcher support
-    predicate passes the request's sizes so 1- / 4-byte queries are sized
+    The element sizes default to 2 bytes (the f16 / bf16 body); the validity
+    gate passes the spec's storage size (8 bytes for fp64) and the dispatcher
+    support predicate the request's sizes, so 1- / 4-byte queries are sized
     rather than rejected.
     """
     pad = 0 if direct_to_lds else int(lds_k_pad)
@@ -2268,6 +2296,9 @@ def universal_lds_bytes(
         direct_to_lds=direct_to_lds,
         ab_double_buffer=ab_double_buffer,
         lds_cap=lds_cap,
+        lds_k_pad=pad,
+        elem_bytes_a=elem_bytes_a,
+        elem_bytes_b=elem_bytes_b,
     )
     ab = ab_single * (2 if (bool(dtl_prefetch) or db) else 1)
     if direct_to_lds and dtl_prefetch and dtl_stages >= 2:
@@ -2283,8 +2314,9 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
 
     Returns ``(ab_single, db, two_buf)`` as pure Python ints/bools:
 
-    * ``ab_single`` — bytes for one (single-buffered, unpadded) AB LDS region,
-      ``(tile_m*tile_k + tile_n*tile_k) * 2``.
+    * ``ab_single`` — bytes for one (single-buffered) AB LDS region,
+      ``(tile_m + tile_n) * (tile_k + lds_pad) * elem_bytes`` where
+      ``lds_pad`` is ``lds_k_pad`` (0 for DirectToLDS).
     * ``db`` — whether the compv4 software-pipelined double buffer is
       enabled (:func:`ab_double_buffer_decision`).
     * ``two_buf`` — whether the AB LDS is double-buffered at all
@@ -2297,7 +2329,8 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
     from ...core.arch import ArchTarget
 
     t = spec.tile
-    ab_single = ((t.tile_m * t.tile_k) + (t.tile_n * t.tile_k)) * 2
+    lds_pad = 0 if spec.trait.direct_to_lds else spec.trait.lds_k_pad
+    ab_single = (t.tile_m + t.tile_n) * (t.tile_k + lds_pad) * _elem_bytes(spec)
     lds_cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
     db = ab_double_buffer_decision(
         t.tile_m,
@@ -2308,6 +2341,9 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
         direct_to_lds=spec.trait.direct_to_lds,
         ab_double_buffer=spec.trait.ab_double_buffer,
         lds_cap=lds_cap,
+        lds_k_pad=lds_pad,
+        elem_bytes_a=_elem_bytes(spec),
+        elem_bytes_b=_elem_bytes(spec),
     )
     two_buf = bool(spec.trait.dtl_prefetch) or db
     return ab_single, db, two_buf
@@ -2319,7 +2355,7 @@ def _ilog2_exact(x: int) -> Optional[int]:
 
 
 def lds_swizzle_params(
-    a_per_lane: int, b_per_lane: int, block_k: int
+    a_per_lane: int, b_per_lane: int, block_k: int, swz_vec: int = 0
 ) -> Tuple[int, int, int]:
     """Geometry-derived ``(R, W, L)`` of the ``lds_swizzle`` permutation
     ``col ^= ((row >> R) % 2^W) << L`` (pure; mirrored by the C++ engine's
@@ -2330,19 +2366,36 @@ def lds_swizzle_params(
     (which never reads the environment, so validity and dispatch are
     environment-independent). The permutation moves whole ``2^L``-half groups.
 
-    * ``L = log2(elem)`` -- swizzle whole ``elem``-half fragment slots;
-    * ``W = log2(block_k / elem)`` -- use all element slots of a row;
+    * ``L = log2(elem)`` -- swizzle whole ``elem``-half slots, ``elem`` the
+      fragment length widened to the LDS store vector ``swz_vec`` (see
+      :func:`_lds_swizzle_vec`), so one store never straddles two groups;
+    * ``W = log2(block_k / elem)`` -- use all element slots of a row (one slot,
+      ``W = 0``: the swizzle is the identity);
     * ``R = 0`` -- key on the low row bits.
 
     Fallback (``elem`` / slots not a clean power-of-two split): the 2-slot
     toggle ``(3, 1, 4)``.
     """
-    elem = a_per_lane if a_per_lane == b_per_lane else 0
+    elem = max(a_per_lane, swz_vec) if a_per_lane == b_per_lane else 0
     slots = (block_k // elem) if (elem and block_k % elem == 0) else 0
     auto_l, auto_w = _ilog2_exact(elem), _ilog2_exact(slots)
-    if auto_l is not None and auto_w is not None and auto_w >= 1:
+    if auto_l is not None and auto_w is not None:
         return 0, auto_w, auto_l
     return 3, 1, 4
+
+
+def _lds_swizzle_vec(spec: "UniversalGemmSpec", load_vec: int) -> int:
+    """The LDS store vector the ``lds_swizzle`` granule must cover
+    (:func:`lds_swizzle_params` ``swz_vec``): the global load vector
+    ``load_vec`` when ``lds_swizzle`` is on, except on the register-staged
+    prefetch body (``vgpr_prefetch`` without DTL), which splits each loaded
+    vector into XOR-group-sized LDS writes and so keeps the fragment-sized
+    granule; 0 (fragment granule) otherwise. Mirrored by the C++ engine's
+    ``rocke_gemm_lds_swizzle_vec``."""
+    tr = spec.trait
+    if not tr.lds_swizzle or (tr.vgpr_prefetch and not tr.direct_to_lds):
+        return 0
+    return load_vec
 
 
 def _spec_swizzle_params(
@@ -2352,7 +2405,11 @@ def _spec_swizzle_params(
     (``lds_swizzle_r``; ``lds_swizzle_l``, which also sets W = log2(tile_k >>
     L)); environment-free (the emitter's CK_SWZ_* debug overrides excluded)."""
     tr = spec.trait
-    r, w, l_ = lds_swizzle_params(a_per_lane, b_per_lane, spec.tile.tile_k)
+    try:
+        swz_vec = _lds_swizzle_vec(spec, _choose_load_vec(spec))
+    except ValueError:
+        swz_vec = 0  # no legal load vector: the gate rejects the spec elsewhere
+    r, w, l_ = lds_swizzle_params(a_per_lane, b_per_lane, spec.tile.tile_k, swz_vec)
     if tr.lds_swizzle_r >= 0:
         r = tr.lds_swizzle_r
     if tr.lds_swizzle_l >= 0:
@@ -2435,14 +2492,15 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # resolves to an MFMA op_id on gfx942/gfx950 and a WMMA op_id on gfx1151.
     family = _mma_family(arch)
     a_name = spec.data.dtype_a  # homogeneous A/B/C (checked above)
+    acc_name = _acc_dtype(spec)
     atom = (t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
-    if not target.supports_dtype_combo(a_name, a_name, "fp32", family=family):
+    if not target.supports_dtype_combo(a_name, a_name, acc_name, family=family):
         return False, f"unsupported GEMM dtype {a_name!r} on {arch}"
     if not target.mma.has_shape(
         family=family,
         a_dtype=a_name,
         b_dtype=a_name,
-        c_dtype="fp32",
+        c_dtype=acc_name,
         m=t.warp_tile_m,
         n=t.warp_tile_n,
         k=t.warp_tile_k,
@@ -2494,6 +2552,34 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
 
+    # fp64 is limited to the 16x16x4 MFMA atom, the mem / compv3 / compv4
+    # pipelines, DirectToLDS without pad_k and the matmul-only default /
+    # cshuffle epilogues.
+    if a_name == "fp64":
+        # the f64 atoms are also in the gfx90a / gfx950 catalogs (the f64 GETT
+        # family uses them); this body is validated on gfx942 only
+        if arch != "gfx942":
+            return False, f"fp64 GEMM is supported on gfx942 only (got {arch})"
+        if atom != (16, 16, 4):
+            return False, (
+                f"fp64 GEMM supports only warp_tile (16, 16, 4) (got {atom}) on {arch}"
+            )
+        if spec.trait.pipeline not in ("mem", "compv3", "compv4"):
+            return False, (
+                "fp64 GEMM supports only the 'mem', 'compv3' and 'compv4' pipelines "
+                f"(got {spec.trait.pipeline!r}) on {arch}"
+            )
+        for flag, label in (
+            (spec.trait.split_k > 1, "split_k > 1"),
+            (getattr(spec, "_fused_epilogue", None) is not None, "fused epilogues"),
+            (
+                spec.trait.direct_to_lds and spec.trait.pad_k,
+                "direct_to_lds with pad_k",
+            ),
+        ):
+            if flag:
+                return False, f"fp64 GEMM does not support {label} on {arch}"
+
     # DirectToLDS: the emitter bakes a fixed per-lane chunk width into the
     # kernel at build time (see build_universal_gemm), capped at the arch's
     # own buffer_load_lds width (ArchTarget.async_lds_max_dwords). Asking for
@@ -2503,8 +2589,9 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     if spec.trait.direct_to_lds:
         if target.async_lds_max_dwords < 1:
             return False, f"direct_to_lds: {arch} has no DRAM->LDS DMA instruction"
-        _dtl_halves = min(4, target.async_lds_max_dwords) * 2
-        if t.tile_k % _dtl_halves != 0:
+        _dtl_chunk_bytes = min(4, target.async_lds_max_dwords) * 4
+        _dtl_halves = _dtl_chunk_bytes // _elem_bytes(spec)
+        if _dtl_halves and t.tile_k % _dtl_halves != 0:
             return False, (
                 f"direct_to_lds requires tile_k % {_dtl_halves} == 0 (got "
                 f"{t.tile_k}) with {target.async_lds_max_dwords} dword(s)/lane "
@@ -3478,10 +3565,13 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     #     be wider than a group, or one chunk is scattered across groups (the
     #     16x16x16 / 32x32x8 atoms give L=2 against 8-half chunks).
     if family == "mma":
-        _dtl_h = min(4, target.async_lds_max_dwords) * 2
+        # the DTL chunk in elements (at least 1: an fp64 element spans several
+        # 1-dword gfx942 chunks)
+        _dtl_chunk_bytes = min(4, target.async_lds_max_dwords) * 4
+        _dtl_h = max(1, _dtl_chunk_bytes // _elem_bytes(spec))
         if spec.trait.direct_to_lds:
             for _nm, _rows in (("A", t.tile_m), ("B", t.tile_n)):
-                _chunks = (_rows * t.tile_k) // _dtl_h
+                _chunks = (_rows * t.tile_k * _elem_bytes(spec)) // _dtl_chunk_bytes
                 if _chunks % spec.block_size:
                     return False, (
                         f"direct_to_lds: the {_nm} tile has {_chunks} {_dtl_h}-half "
@@ -3534,6 +3624,9 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         cshuffle_no_alias=spec.trait.cshuffle_no_alias,
         lds_k_pad=spec.trait.lds_k_pad,
         lds_cap=target.lds_capacity_bytes,
+        elem_bytes_a=_elem_bytes(spec),
+        elem_bytes_b=_elem_bytes(spec),
+        elem_bytes_c=_elem_bytes(spec),
         dtl_stages=spec.trait.dtl_stages,
     )
     if spec.trait.sched_strategy:
@@ -3825,27 +3918,32 @@ def _emit_mma(b: IRBuilder, op, a: Value, bb: Value, c: Value) -> Value:
 
 
 def _emit_zero_acc_op(b: IRBuilder, op) -> Value:
-    """Zero accumulator vector sized from the resolved op's ``c_frag_len``."""
-    return b.zero_vec_f32(op.c_frag_len)
+    """Zero accumulator vector sized from the resolved op's ``c_frag_len`` and
+    typed from its ``c_dtype``."""
+    return b.zero_vec(dtype_to_ir_type(op.c_dtype), op.c_frag_len)
 
 
 def _choose_load_vec(spec: UniversalGemmSpec) -> int:
     """Choose the widest naturally-aligned global-load width for this
-    block shape. f16 -> we can vectorise up to 8 halves per lane.
+    block shape: up to 16 bytes per lane (8 halves, 2 doubles).
 
     Thin adapter over :func:`rocke.helpers.spec.choose_load_vec`, the shared
     single-source picker; kept so callers (incl. ``moe_gemm_fused``) that
     pass a whole spec stay unchanged."""
     t = spec.tile
-    return choose_load_vec(t.tile_m, t.tile_n, t.tile_k, spec.block_size)
+    return choose_load_vec(
+        t.tile_m, t.tile_n, t.tile_k, spec.block_size, elem_bytes=_elem_bytes(spec)
+    )
 
 
 def _emit_smem_load(
     b: IRBuilder, smem: Value, row: Value, col: Value, n: int, dtype: Type
 ) -> Value:
+    """LDS fragment load; a one-element fragment is returned as a scalar."""
     if dtype == F16 and n == 4:
         return b.smem_load_v4_f16(smem, row, col)
-    return b.smem_load_vN(smem, row, col, dtype=dtype, n=n)
+    v = b.smem_load_vN(smem, row, col, dtype=dtype, n=n)
+    return b.vec_extract(v, 0) if n == 1 else v
 
 
 def _hotloop_inst_list(spec: UniversalGemmSpec, load_vec: int):
@@ -4272,7 +4370,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # gate's write-granularity rule.)
     import os as _os
 
-    _def_r, _def_w, _def_l = lds_swizzle_params(a_per_lane, b_per_lane, block_k)
+    load_vec = _choose_load_vec(spec)
+    _def_r, _def_w, _def_l = lds_swizzle_params(
+        a_per_lane, b_per_lane, block_k, _lds_swizzle_vec(spec, load_vec)
+    )
     if spec.trait.lds_swizzle_r >= 0:
         _def_r = spec.trait.lds_swizzle_r
     if spec.trait.lds_swizzle_l >= 0:
@@ -4631,7 +4732,6 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
     # Global -> LDS coalesced copy plan.
     threads = spec.block_size
-    load_vec = _choose_load_vec(spec)
     a_total = block_m * block_k
     b_total = block_n * block_k
     a_vec_total = a_total // load_vec
@@ -4699,14 +4799,18 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # already checked tile_k divides it): CDNA4 (gfx950) has the full
         # dword=4 (16 bytes/lane) form, CDNA3 (gfx942) only dword=1.
         _DTL_DWORDS = min(4, ArchTarget.from_gfx(arch).async_lds_max_dwords)
-        _DTL_HALVES = _DTL_DWORDS * 2  # dwords*2 halves (bf16 elements) per lane chunk
         _DTL_BYTES_PER_LANE = _DTL_DWORDS * 4
-        if (block_k % _DTL_HALVES) != 0:
+        _dtl_elem_bytes = _elem_bytes(spec)
+        # A lane chunk smaller than one element (f64 on a 1-dword target) is
+        # addressed in bytes; otherwise in elements.
+        _dtl_sub_elem = _dtl_elem_bytes > _DTL_BYTES_PER_LANE
+        _DTL_HALVES = 0 if _dtl_sub_elem else _DTL_BYTES_PER_LANE // _dtl_elem_bytes
+        if not _dtl_sub_elem and (block_k % _DTL_HALVES) != 0:
             raise ValueError(
                 f"direct_to_lds requires block_k % {_DTL_HALVES} == 0 (got {block_k})"
             )
-        _dtl_a_chunks = (block_m * block_k) // _DTL_HALVES
-        _dtl_b_chunks = (block_n * block_k) // _DTL_HALVES
+        _dtl_a_chunks = (block_m * block_k * _dtl_elem_bytes) // _DTL_BYTES_PER_LANE
+        _dtl_b_chunks = (block_n * block_k * _dtl_elem_bytes) // _DTL_BYTES_PER_LANE
         _dtl_a_passes = (_dtl_a_chunks + spec.block_size - 1) // spec.block_size
         _dtl_b_passes = (_dtl_b_chunks + spec.block_size - 1) // spec.block_size
         # block_size lanes write block_size * BYTES_PER_LANE bytes per pass
@@ -4719,10 +4823,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         _dtl_a_lds_base = b.smem_addr_of(A_smem)
         _dtl_b_lds_base = b.smem_addr_of(B_smem)
         _dtl_zero_soff = b.const_i32(0)
-        # chunks-per-row in halves: block_k halves wide / chunk width
-        _dtl_chunks_per_row = block_k // _DTL_HALVES
+        # chunks-per-row: row bytes / chunk bytes
+        _dtl_chunks_per_row = block_k * _dtl_elem_bytes // _DTL_BYTES_PER_LANE
         _dtl_c_chunks_per_row = b.const_i32(_dtl_chunks_per_row)
-        _dtl_c_halves_per_chunk = b.const_i32(_DTL_HALVES)
+        _dtl_c_cols_per_chunk = b.const_i32(
+            _DTL_BYTES_PER_LANE if _dtl_sub_elem else _DTL_HALVES
+        )
+        # The DTL ring / staged paths address in elements (they are never
+        # sub-element), where cols-per-chunk is _DTL_HALVES.
+        _dtl_c_halves_per_chunk = _dtl_c_cols_per_chunk
         _dtl_c_block_size = b.const_i32(spec.block_size)
 
     def emit_load_phase(A_dst: Value, B_dst: Value, k_off: Value, lds_parity=0) -> None:
@@ -4754,8 +4863,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # ``lds_parity`` may be a Python int (compile-time) or an i32
             # Value (runtime, carried as a scf.for iter-arg).
             _parity_is_value = isinstance(lds_parity, Value)
-            a_half_bytes = block_m * block_k * 2
-            b_half_bytes = block_n * block_k * 2
+            a_half_bytes = block_m * block_k * _dtl_elem_bytes
+            b_half_bytes = block_n * block_k * _dtl_elem_bytes
             if _prefetch and _parity_is_value:
                 # Runtime parity: precompute a single i64 byte offset and
                 # add it once to the LDS base per pass.
@@ -4772,7 +4881,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             b_parity_bytes_static = (
                 lds_parity * b_half_bytes if _prefetch and not _parity_is_value else 0
             )
-            c2 = b.const_i32(2)
+            c_eb = b.const_i32(_dtl_elem_bytes)
             # Per-wave LDS offset. ``async_buffer_load_lds_addr`` is a
             # wave-level intrinsic: every wave writes
             # ``wave_size * BYTES_PER_LANE`` contiguous bytes starting
@@ -4793,6 +4902,37 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             else:
                 a_lds_wave_base = a_lds_par_base
                 b_lds_wave_base = b_lds_par_base
+
+            def _dtl_off_bytes(batch_off, blk_off, row, col, rowmap=None):
+                # ``rowmap``: global operand row of a tile row (complex B:
+                # :func:`_brow`); identity when None.
+                g_row = b.add(blk_off, row)
+                if rowmap is not None:
+                    g_row = rowmap(g_row)
+                if _dtl_sub_elem:
+                    off_elems = b.add(
+                        batch_off,
+                        b.add(b.mul(g_row, K), k_off),
+                    )
+                    col_b = col
+                    if _SWZ:
+                        col_b = b.xor(
+                            col,
+                            b.shl(
+                                b.mod(b.lshr(row, _c_swr), _c_swmod),
+                                b.const_i32(_swz_l + _ilog2_exact(_dtl_elem_bytes)),
+                            ),
+                        )
+                    return b.add(b.mul(off_elems, c_eb), col_b)
+                off_elems = b.add(
+                    batch_off,
+                    b.add(
+                        b.mul(g_row, K),
+                        b.add(k_off, _swz_col(col, row)),
+                    ),
+                )
+                return b.mul(off_elems, c_eb)
+
             for p in range(_dtl_a_passes):
                 pass_off_bytes = p * _dtl_pass_bytes + a_parity_bytes_static
                 pass_lds_a = (
@@ -4805,19 +4945,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 chunk_idx = b.add(tid, b.const_i32(p * spec.block_size))
                 row = b.div(chunk_idx, _dtl_c_chunks_per_row)
                 col_v = b.mod(chunk_idx, _dtl_c_chunks_per_row)
-                col = b.mul(col_v, _dtl_c_halves_per_chunk)
+                col = b.mul(col_v, _dtl_c_cols_per_chunk)
                 # element offset for A row in halves. With lds_swizzle, load the
                 # global element at col^f(row) into the lane-linear LDS slot so
                 # the swizzled ds_read (col_base^f(row)) fetches it back (XOR is
                 # its own inverse) -- the LDS dest stays wave-contiguous.
-                off_elems = b.add(
-                    batch_off_a,
-                    b.add(
-                        b.mul(b.add(block_m_off, row), K),
-                        b.add(k_off, _swz_col(col, row)),
-                    ),
-                )
-                off_bytes = b.mul(off_elems, c2)
+                off_bytes = _dtl_off_bytes(batch_off_a, block_m_off, row, col)
                 b.async_buffer_load_lds_addr(
                     _dtl_a_rsrc,
                     pass_lds_a,
@@ -4838,15 +4971,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 chunk_idx = b.add(tid, b.const_i32(p * spec.block_size))
                 row = b.div(chunk_idx, _dtl_c_chunks_per_row)
                 col_v = b.mod(chunk_idx, _dtl_c_chunks_per_row)
-                col = b.mul(col_v, _dtl_c_halves_per_chunk)
-                off_elems = b.add(
-                    batch_off_b,
-                    b.add(
-                        b.mul(_brow(b.add(block_n_off, row)), K),
-                        b.add(k_off, _swz_col(col, row)),
-                    ),
+                col = b.mul(col_v, _dtl_c_cols_per_chunk)
+                off_bytes = _dtl_off_bytes(
+                    batch_off_b, block_n_off, row, col, rowmap=_brow
                 )
-                off_bytes = b.mul(off_elems, c2)
                 b.async_buffer_load_lds_addr(
                     _dtl_b_rsrc,
                     pass_lds_b,
@@ -4925,6 +5053,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             return b.cmp_lt(b.add(k_off, elem_col), K)
 
         def _zero_storage_scalar() -> Value:
+            if storage_dtype == F64:
+                return b.const_f64(0.0)
             return b.cast_f32_to(b.const_f32(0.0), storage_dtype)
 
         def _mask_storage_scalar(value: Value, valid: Value) -> Value:
@@ -10320,9 +10450,9 @@ def _emit_mfma_acc_scatter(
     t = spec.tile
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
-    # The CWarpDstrEncoding is keyed on the warp-tile (m, n) only (the lane/
-    # slot -> (row, col) layout is dtype-independent), so resolve the atom by
-    # the spec's input dtype + warp-tile shape.
+    # The CWarpDstrEncoding is keyed on the warp-tile (m, n) and the
+    # accumulator dtype, so resolve the atom by the spec's input dtype +
+    # warp-tile shape.
     atom = mfma_atom(
         spec.data.dtype_a,
         t.warp_tile_m,
@@ -10358,7 +10488,9 @@ def _emit_mfma_acc_scatter(
             acc = _acc_agpr_out(b, spec, accs[flat])
             flat += 1
             acc_h = (
-                acc if storage_dtype == F32 else b.vec_cast_f32_to(acc, storage_dtype)
+                acc
+                if storage_dtype == F32 or acc.type.elem == storage_dtype
+                else b.vec_cast_f32_to(acc, storage_dtype)
             )
             if n_base_first:
                 c_n = b.add(
@@ -11189,6 +11321,7 @@ def _emit_epilogue_cshuffle(
     """
     t = spec.tile
     storage_dtype = _storage_dtype(spec)
+    elem_bytes = _elem_bytes(spec)
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
 
@@ -11274,9 +11407,9 @@ def _emit_epilogue_cshuffle(
 
     # ---- step 4: wide global stores. ----
     # STORE_VECS = (tile_m * tile_n) / store_vec. We pick store_vec as
-    # wide as we can naturally align (8 halves = 16 B).
+    # wide as we can naturally align (16 B: 8 halves, 2 doubles).
     threads = spec.block_size
-    store_vec = 8
+    store_vec = 16 // elem_bytes
     while store_vec > 1 and (
         (t.tile_n % store_vec != 0)
         or ((t.tile_m * t.tile_n) // store_vec < threads)
@@ -11345,9 +11478,9 @@ def _emit_epilogue_cshuffle(
                 h = fused_epilogue.apply_scalar(b, h, c_m, c_n)
             if in_bounds is not None:
                 with b.scf_if(in_bounds):
-                    b.global_store(C, c_off, h, align=2)
+                    b.global_store(C, c_off, h, align=elem_bytes)
             else:
-                b.global_store(C, c_off, h, align=2)
+                b.global_store(C, c_off, h, align=elem_bytes)
         else:
             hv = _load_smem_vec(b, Cs, row, col, store_vec, storage_dtype)
             if pad_n:
@@ -11365,7 +11498,7 @@ def _emit_epilogue_cshuffle(
                         checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
                     )
                     with b.scf_if(elem_in_bounds):
-                        b.global_store(C, c_off_i, h, align=2)
+                        b.global_store(C, c_off_i, h, align=elem_bytes)
             else:
                 if fused_epilogue is not None:
                     hv = fused_epilogue.apply_vec(b, hv, c_m, c_n, n_elems=store_vec)

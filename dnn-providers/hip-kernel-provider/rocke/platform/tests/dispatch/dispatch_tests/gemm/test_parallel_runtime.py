@@ -4,9 +4,7 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
-import sys
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,7 +14,10 @@ from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
 from rocke.dispatch.gemm import build_kernel
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
 from rocke.runtime.hip_module import get_device_arch
-
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 # The runtime bodies below build+launch a gfx950 code object, so gate on the exact arch
 # (via the rocke HIP runtime, no torch): on any other device the launch would fail with
@@ -90,9 +91,9 @@ def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
         extra={"dispatcher_kernel_id": result.kernel_id.as_dict()},
     )
     write_artifact(artifact, work_dir, manifest)
+    env = rocke_subprocess_env()
     proc = subprocess.run(
-        [
-            sys.executable,
+        rocke_python_command(
             "-m",
             "rocke.run_manifest",
             str(work_dir / f"{artifact.kernel_name}.hsaco"),
@@ -100,7 +101,7 @@ def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
             "--shape",
             ",".join(str(x) for x in shape),
             "--verify",
-        ],
+        ),
         text=True,
         capture_output=True,
         timeout=180,

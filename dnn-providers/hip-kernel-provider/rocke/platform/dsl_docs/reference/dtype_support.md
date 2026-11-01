@@ -27,9 +27,9 @@ estimates, shipping order, and acceptance checklists are maintained separately.
 logical dtype and native gfx942 atoms added after the original basis snapshot.
 Other scores and source line numbers retain their stated historical basis.
 
-**FP64 coverage update.** The f64 entries in §1, §2.5, §4B, and §4C reflect the
-IR type, arithmetic, memory, elementwise/reduce2d, and gfx942 MFMA atom support
-added after the original basis snapshot. The §2.4 f64 row retains its stated historical basis.
+**FP64 coverage update.** The f64 entries in §1, §2.5, §4B, §4C, and §5 reflect the
+IR type, arithmetic, memory, elementwise/reduce2d, gfx942 MFMA atom, and gfx942
+universal GEMM support added after the original basis snapshot. The §2.4 f64 row retains its stated historical basis.
 
 ---
 
@@ -334,8 +334,8 @@ mode. The missing selector and precision contract are described in §2.5.
   criterion. C2=1 reflects the i4 (`iu4`) WMMA on gfx1151/gfx11-generic; the MFMA targets
   and gfx1250 have no native INT4 matrix instruction (§4A).
 - **`fp4` / `fp6` / `bf6` C5=0** — the widest silicon-to-software gap in the
-  matrix. The gfx950 atoms exist (`mfma_f32_16x16x128_fp4`,
-  `mfma_f32_16x16x96_fp6`) and the hipBLASLt provider already maps
+  matrix. The gfx950 instructions exist (`mfma_scale_f32_16x16x128_f8f6f4`
+  and `mfma_f32_16x16x128_fp4fp6fp8`) and the hipBLASLt provider already maps
   `FP4_E2M1`→`HIP_R_4F_E2M1` and `FP6_E3M2`→`HIP_R_6F_E3M2`, so the interface and
   the silicon are both ready — but **no rocKE kernel instance ships**.
 - **`fp4` C3=1** — `unpack_fp4_byte_to_pair_f32` (`i4_dequant.py:252`) decodes a
@@ -385,21 +385,21 @@ mode. The missing selector and precision contract are described in §2.5.
   the mode is exposed; see [§1](#1-the-canonical-dtype-set).
 - **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected by the
   MIOpen provider, and not requested by any family.
-- **`f64` — IR, memory, math, elementwise/reduce2d, the f64 MFMA atoms and the
-  GETT family.** The IR type, `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/
-  `fneg`/`fabs`/`fmax`/`fmin`/`fcmp`/`select` and `vector_add`/`vector_sub`/
-  `vector_mul`, global/LDS memory up to 2-element vectors, f64 kernel scalars
-  (`f64` signature entries), and HIP lowering are present. `fma`,
-  `vector_fma` (`llvm.fma`, always fused), `fmax3` / `fmin3`, `sqrt`, `rsqrt`
-  (IEEE `1 / sqrt`), `rcp` and the transcendentals `exp`, `exp2`, `log`,
-  `log2`, `tanh` compute in f64 in both lowerings: the transcendentals expand
-  to the fixed instruction programs of `rocke/core/f64_math.py` (no libcall,
-  within 1 ulp; `sqrt` correctly rounded; the C++ engine
-  reads the same programs from `cpp/core/lower_llvm/f64_math_programs.inc`),
-  HIP uses the double-precision device library. `rcp_fast` and `exp2_fast`
-  (single-instruction approximations) reject f64. Elementwise accepts f64 with
-  `vec=2` for every op except the f32-constant activations, and reduce2d
-  accepts f64 with `vec=2`
+- **`f64` — IR, memory, math, elementwise/reduce2d, the f64 MFMA atoms, the
+  GETT family and gfx942 universal GEMM.** The IR type, `const_f64`, f64
+  `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fabs`/`fmax`/`fmin`/`fcmp`/`select` and
+  `vector_add`/`vector_sub`/`vector_mul`, global/LDS memory up to 2-element
+  vectors, f64 kernel scalars (`f64` signature entries), and HIP lowering are
+  present. `fma`, `vector_fma` (`llvm.fma`, always fused), `fmax3` / `fmin3`,
+  `sqrt`, `rsqrt` (IEEE `1 / sqrt`), `rcp` and the transcendentals `exp`,
+  `exp2`, `log`, `log2`, `tanh` compute in f64 in both lowerings: the
+  transcendentals expand to the fixed instruction programs of
+  `rocke/core/f64_math.py` (no libcall, within 1 ulp; `sqrt` correctly
+  rounded; the C++ engine reads the same programs from
+  `cpp/core/lower_llvm/f64_math_programs.inc`), HIP uses the double-precision
+  device library. `rcp_fast` and `exp2_fast` (single-instruction
+  approximations) reject f64. Elementwise accepts f64 with `vec=2` for every op
+  except the f32-constant activations, and reduce2d accepts f64 with `vec=2`
   ([SUPPORT_MATRIX](../../python/rocke/instances/SUPPORT_MATRIX.md)).
   `cvt_f32_to_f64` (exact) and `cvt_f64_to_f32` (round to nearest even) are
   the only conversions; `cast_to_f32` / `cast_f32_to` refuse f64, and there
@@ -408,7 +408,9 @@ mode. The missing selector and precision contract are described in §2.5.
   declare `mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; the
   [f64 GETT family](../instances/gett_f64.md) (strided GEMM and tensor
   contraction, real and interleaved complex) uses the 16x16x4 atom (§4C.6);
-  its f32 form uses gfx942 / gfx950's `mfma_f32_16x16x4_f32`.
+  its f32 form uses gfx942 / gfx950's `mfma_f32_16x16x4_f32`. On gfx942,
+  universal GEMM and its batched/grouped wrappers select
+  `mfma_f64_16x16x4_f64` with fp64 accumulation (§5).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
   `gfx1251-gemm-insts` (§4A).
 
@@ -514,10 +516,9 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 |---|---|---|
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` + `mfma_f64_{16x16x4,4x4x4}_f64` | f16, bf16, **f64** |
 | `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, **f64** |
-| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4` + `mfma_f32_16x16x96_fp6` | f32, f16, bf16, fp8, bf8, **fp4, fp6**, f64 |
+| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, **fp4, fp6**, f64 |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **i8, i4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
-| `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4 |
 | `gfx12-generic` | same as `gfx1201` | f16, bf16 |
 
@@ -632,7 +633,7 @@ scheduled to gain.
 
 | Family | Supported | Not supported |
 |---|---|---|
-| Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum) | **fp8/bf8** — `NotImplementedError` at `:659` for any dtype that is not `F16`/`BF16` |
+| Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum); fp64 on gfx942 when the spec's dtype is `fp64` (A/B/C homogeneous, fp64 accum; 16x16x4 warp tile; mem, compv3 and compv4 pipelines) | **fp8/bf8** — rejected (only f16, bf16 and fp64 are accepted); **fp64** with split-K, fused epilogues or `direct_to_lds` with `pad_k`, or on other targets |
 | MFMA GEMM (`mfma_gemm.py`) | f16, bf16 (`_SUPPORTED_DTYPES`, `:178`) | **fp8/bf8** — rejected at `:192-195`; `:62-65` records the missing lane-decode and byte-wise A/B loads, but that docstring is itself stale (it still calls `f16` "the only shipped option" after bf16 landed) |
 | Integer WMMA GEMM ([wmma_gemm_iu8.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8.py)) | Signed int8 A/B packed four values per i32 → i32 accumulation/output; gfx1151 and gfx11-generic (`iu8` WMMA atom) | Raw byte-pointer inputs; targets without this atom; requires complete 16×16 tiles and K a multiple of 16 |
 | Integer WMMA GEMM with dequantization ([wmma_gemm_iu8_dequant.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py)) | Same packed int8 input and i32 accumulation, runtime per-tensor scales → f16 output | Same target and packing constraints; no arbitrary output dtype selector |

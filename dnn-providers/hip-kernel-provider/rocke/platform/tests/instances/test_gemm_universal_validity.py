@@ -243,22 +243,29 @@ class TestWriteGranularity(unittest.TestCase):
         self.assertEqual(lds_swizzle_params(8, 8, 32), (0, 2, 3))
         self.assertEqual(lds_swizzle_params(4, 4, 32), (0, 3, 2))
         self.assertEqual(lds_swizzle_params(8, 4, 32), (3, 1, 4))
+        # the group is widened to the LDS store vector; one slot is the identity
+        self.assertEqual(lds_swizzle_params(4, 4, 32, 8), (0, 2, 3))
+        self.assertEqual(lds_swizzle_params(8, 8, 8), (0, 0, 3))
 
     def test_gate_ignores_swizzle_debug_env(self):
-        good = _spec(
-            TileSpec(128, 128, 32, 2, 2, 1, 16, 16, 32),
-            TraitSpec(pipeline="compv4", epilogue="default", lds_swizzle=True),
+        tr = TraitSpec(
+            pipeline="compv4", epilogue="default", lds_swizzle=True, vgpr_prefetch=1
         )
+        good = _spec(TileSpec(128, 128, 32, 2, 2, 1, 16, 16, 32), tr)
+        # lds_swizzle_l = 1: a 2-half group under an 8-half fragment
         bad = _spec(
-            TileSpec(128, 128, 32, 2, 2, 1, 16, 16, 16),
-            TraitSpec(pipeline="compv4", epilogue="default", lds_swizzle=True),
+            TileSpec(128, 128, 32, 2, 2, 1, 16, 16, 32), replace(tr, lds_swizzle_l=1)
         )
         for v in ("1", "5"):
             with self.subTest(CK_SWZ_L=v), mock.patch.dict(os.environ, {"CK_SWZ_L": v}):
                 self.assertTrue(is_valid_spec(good, "gfx950")[0])
                 self.assertFalse(is_valid_spec(bad, "gfx950")[0])
 
-    def test_swizzle_group_narrower_than_store_rejected(self):
+    def test_narrow_atoms_widen_the_swizzle_group(self):
+        # 16x16x16 / 32x32x8: a 4-half fragment against the 8-half LDS store;
+        # the group is widened to the store (L = 3), so the spec is admitted
+        from rocke.instances.common.gemm_universal import _spec_swizzle_params
+
         for atom in ((16, 16, 16), (32, 32, 8)):
             s = _spec(
                 TileSpec(128, 128, 32, 2, 2, 1, *atom),
@@ -266,8 +273,8 @@ class TestWriteGranularity(unittest.TestCase):
             )
             with self.subTest(atom=atom):
                 ok, why = is_valid_spec(s, "gfx950")
-                self.assertFalse(ok)
-                self.assertIn("lds_swizzle: XOR group", why)
+                self.assertTrue(ok, why)
+                self.assertEqual(_spec_swizzle_params(s, 4, 4)[2], 3)
 
     def test_swizzle_wide_atom_accepted(self):
         s = _spec(

@@ -1,12 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """f64 MFMA atom contracts and native parity, independent of GPU access."""
+
 import pytest
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import F32, F64, IRBuilder, VectorType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.instances.common.f64_mma_probe import (
     F64_MFMA_ARCHS,
     F64MmaProbeSpec,
@@ -162,7 +163,7 @@ def test_both_builders_and_lowerers(m, k, arch):
     )
     native = pytest.importorskip("rocke_engine")
     assert native.f64_mma_probe_serialize_ir(m, k, arch) == ir
-    for flavor in ("llvm20", "llvm22", "llvm23"):
+    for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
         assert native.lower_serialized_ir(ir, arch=arch, flavor=flavor) == ll
         assert ll.count(call) == k // 4

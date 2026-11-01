@@ -292,6 +292,17 @@ bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* ctx,
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        if(spec->emit_lse)
+        {
+            memset(&o, 0, sizeof(o));
+            o.noalias = true;
+            o.noalias_set = true;
+            o.writeonly = true;
+            o.writeonly_set = true;
+            o.align = 4;
+            o.align_set = true;
+            ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
+        }
     }
 
     /* ---- grid ids + wave decomposition (lines 891-904) ---- *
@@ -299,6 +310,17 @@ bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* ctx,
      * q_block_global_idx = block_id_y (no q-major-grid branch). */
     ctx->kv_head_idx = rocke_b_block_id_x(b);
     ctx->q_block_global_idx = rocke_b_block_id_y(b);
+    if(spec->use_qblock_reverse)
+    {
+        /* Longest-first query blocks: y -> num_q_blocks - 1 - y, with the grid y
+         * extent total_q // BLOCK_Q + num_seqs (sequenced to match Python). */
+        rocke_value_t* total_q = rocke_b_global_load_i32(b, ctx->cu_q, ctx->num_seqs_p, 0);
+        rocke_value_t* c_block_q = rocke_b_const_i32(b, BLOCK_Q);
+        rocke_value_t* nqb = rocke_b_add(b, rocke_b_div(b, total_q, c_block_q), ctx->num_seqs_p);
+        rocke_value_t* c_one = rocke_b_const_i32(b, 1);
+        ctx->q_block_global_idx
+            = rocke_b_sub(b, rocke_b_sub(b, nqb, c_one), ctx->q_block_global_idx);
+    }
     ctx->tid = rocke_b_thread_id_x(b);
 
     if(NUM_WARPS == 1)

@@ -69,7 +69,8 @@ function(hiptensor_add_rocke_engine)
     set(engine "${HIPTENSOR_ROCKE_SOURCE_DIR}/platform")
     # The C++ kernel builders, rocKE's tuned and AOT GETT route tables and its reduction route
     # table: data files of rocKE's Python package tree (python/rocke/dispatch/families), which the
-    # engine compiles in. Nothing runs Python; the rocKE tree must still carry those files.
+    # engine compiles in. The rocKE tree must still carry those files. The only Python step is
+    # rocKE's own arch-domain table generator below (standard library only, no rocke package).
     set(tuned_json "${engine}/python/rocke/dispatch/families/tensor_gett_tuned.json")
     set(aot_json "${engine}/python/rocke/dispatch/families/tensor_gett_aot.json")
     set(rreduce_json "${engine}/python/rocke/dispatch/families/hiptensor_rreduce.json")
@@ -138,8 +139,27 @@ function(hiptensor_add_rocke_engine)
         COMMENT "Embedding rocKE's reduction route table"
         VERBATIM)
 
+    # rocKE's intrinsic arch-domain table (cpp/core/arch/domain.cpp includes
+    # rocke/arch_domain_table.inc): generated, as rocKE's own build does, from the committed columns
+    # python/rocke/core/arch/data/intrinsic_arch_domain.*.json by tools/gen_arch_domain_cpp.py, which
+    # loads only the standard-library reader python/rocke/core/arch/domain.py (no rocke package)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(arch_domain_inc "${generated}/rocke/arch_domain_table.inc")
+    file(GLOB arch_domain_columns CONFIGURE_DEPENDS
+         "${engine}/python/rocke/core/arch/data/intrinsic_arch_domain.*.json")
+    add_custom_command(
+        OUTPUT "${arch_domain_inc}"
+        COMMAND "${Python3_EXECUTABLE}" -I "${engine}/tools/gen_arch_domain_cpp.py"
+                --out "${arch_domain_inc}"
+        DEPENDS "${engine}/tools/gen_arch_domain_cpp.py"
+                "${engine}/python/rocke/core/arch/domain.py"
+                "${engine}/python/rocke/core/arch/data/arch_domain_waivers.json"
+                ${arch_domain_columns}
+        COMMENT "Generating rocKE's C++ arch-domain table"
+        VERBATIM)
+
     add_library(hiptensor_rocke_core STATIC ${engine_sources} "${tuned_source}" "${aot_source}"
-                "${rreduce_source}")
+                "${rreduce_source}" "${arch_domain_inc}")
     add_dependencies(hiptensor_rocke_core hiptensor_rocke_build_id)
     set_target_properties(hiptensor_rocke_core PROPERTIES
         CXX_STANDARD 20

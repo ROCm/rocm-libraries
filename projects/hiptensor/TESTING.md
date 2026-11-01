@@ -49,14 +49,14 @@ cmake --install <build_dir> --component tests
 
 **Purpose:** Validate hardware-independent logic without dispatching a GPU kernel.
 
-Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** require a configured GPU to run (the exceptions are `plan_lifetime_test`, `api_safety_test`, `large_tensor_test`, `plan_cache_unit_test`, `contraction_selection_test` and `alloc_failure_test`, noted below). The test binaries are:
+Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** require a configured GPU to run (the exceptions are `plan_lifetime_test`, `elementwise_broadcast_test`, `api_safety_test`, `large_tensor_test`, `plan_cache_unit_test`, `contraction_selection_test` and `alloc_failure_test`, noted below). The test binaries are:
 
 | Binary | What it tests |
 |---|---|
 | `logger_test` | Logger singleton identity, callback registration, log-level filtering, file-sink behavior |
 | `yaml_test` | YAML config parsing and round-trip correctness |
 | `elementwise_op_test` | CPU-side elementwise operator type traits and identity/scale op correctness |
-| `util_test` | Utility helpers (type conversion, index math, stride calculation) |
+| `util_test` | Utility helpers (type conversion, scalar reads per compute type, index math, stride calculation) |
 | `hiptensor_options_test` | CLI/env option parsing (`--hot_runs`, `--cold_runs`, `-y`, `HIPTENSOR_*` env vars) |
 | `plan_lifetime_test` | Plan object lifetime: using a permutation plan after its descriptor or preference object is destroyed. Despite living in `00_unit/`, it allocates device memory and launches a real permute kernel, so it **requires a GPU** and is registered as a device tier test |
 | `api_safety_test` | API misuse and documented-legal calls: operation descriptor attribute sizes and padding, compute descriptors without a scalar type, `hiptensorCreatePlan` with a null preference, one preference shared by several plans, and the contraction workspace-size query. Its plans launch permute and contraction kernels, so it **requires a GPU** and is registered as a device tier test |
@@ -66,6 +66,9 @@ Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_te
 | `device_support_test` | `hiptensorCreate` on a device whose architecture hipTensor does not support (simulated on any GPU with the test-only environment variable `HIPTENSOR_TEST_FORCE_UNSUPPORTED_ARCH=ON`, which can only take support away) returns `HIPTENSOR_STATUS_ARCH_MISMATCH`, and on a host without a visible GPU returns `HIPTENSOR_STATUS_HIP_ERROR`, instead of ending the process when the library is loaded. It has its own `main`, since the shared test main stops on such hosts. CTest also runs it as `device_support_test_no_visible_device`, with `HIP_VISIBLE_DEVICES=-1` and `ROCR_VISIBLE_DEVICES=-1`, which runs the no-device case; in the plain run that case is skipped. Registered as a host test |
 | `elementwise_instance_selection_test` | Host-only lookup of the tuned permutation instance parameters: extents beyond the largest tuned extent use the last table entry instead of reading past the end of the table |
 | `alloc_failure_test` | A device allocation failure inside the library is returned as `HIPTENSOR_STATUS_ALLOC_FAILED` and the library keeps working: it fills the device memory between two executions of a complex contraction plan. It **requires a GPU** with its own device memory (it skips on integrated GPUs) and runs serially (`RUN_SERIAL`), since it fills the device memory that other tests would use |
+| `batched_contraction_test` | `hiptensorCreateContraction` / `hiptensorCreateContractionTrinary` return `HIPTENSOR_STATUS_NOT_SUPPORTED` for batched modes (a mode shared by both inputs and the output) and accept non-batched ones. No kernel launch |
+| `elementwise_mode_test` | Elementwise mode validation: subset and reordered input modes are accepted; a mode missing from the output or repeated within a tensor returns `NOT_SUPPORTED`; a shared mode with mismatched extents returns `INVALID_VALUE`; a permute or trinary op whose output data type differs from its input's returns `NOT_SUPPORTED` on the Composable Kernel backend; a binary or trinary operator other than ADD, MUL, MAX or MIN returns `INVALID_VALUE`. Allocates small device buffers but launches no kernel |
+| `elementwise_broadcast_test` | Elementwise broadcast results for permute, binary, and trinary (inputs carrying a subset of the output modes). Launches kernels, so it **requires a GPU** |
 
 > `interface_test` exists in the source tree but is commented out in `test/00_unit/CMakeLists.txt` — it is not currently built.
 
@@ -147,13 +150,14 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Contraction mode | `contraction_mode_test` | CPU-side mode validation (host test) |
 | Operation validation | `operation_validation_test` | Tensor descriptors without extents or with non-positive extents or negative strides; contraction modes the kernels can't address (more than six per group, no M or N mode, a mode carried by one tensor only, repeated modes, mismatched extents), binary and trinary; an outer product checked exactly against a loop; non-unary operand operators; elementwise and reduction plans either refused or executed with the loop result; the elementwise data type rows only the rocKE backend serves (declined by the Composable Kernel backend when the plan is created; with `HIPTENSOR_BACKEND=rocke` executed with the loop result, or refused by a library without the rocKE backend) |
 | Workspace | `workspace_size_test` | `hiptensorEstimateWorkspaceSize` with a null, fresh and used preference, `HIPTENSOR_PLAN_REQUIRED_WORKSPACE` below a large limit, binary and trinary contractions executed with exactly the reported workspace and checked exactly against a loop; no workspace for elementwise operations and reductions |
-| Elementwise — permute | `rank{2-6}_elementwise_permute_test` | All rank/type combinations |
-| Elementwise — binary op | `rank{2-6}_elementwise_binary_op_test` | Binary elementwise ops |
-| Elementwise — trinary op | `rank{2-6}_elementwise_trinary_op_test` | Trinary elementwise ops |
+| Elementwise — permute | `rank{2-6}_elementwise_permute_test` | FP16/BF16/FP32/FP64; FP16 and BF16 also with an FP32 scalar; ranks 2–6 |
+| Elementwise — binary op | `rank{2-6}_elementwise_binary_op_test` | FP16/BF16/FP32/FP64; FP16 and BF16 also with an FP32 scalar; ranks 2–6 |
+| Elementwise — trinary op | `rank{2-6}_elementwise_trinary_op_test` | FP16/BF16/FP32/FP64; FP16 and BF16 also with an FP32 scalar; ranks 2–6 |
+| Elementwise — output strides | `elementwise_output_strides_test` | User-supplied (gapped and packed) output strides for permute, binary, and trinary (FP32); launches kernels |
 | Elementwise — zero scaling factors | `elementwise_zero_scale_test` | Binary, trinary and permutation with a zero scaling factor and NaN, Inf, or `NULL` in that input (also through `HIPTENSOR_OP_LOG`), reused plans and a broadcast input, checked exactly against an independent loop reference |
 | Elementwise — f64 unary operators | `elementwise_f64_unary_op_test` | Every unary operator in f64 binary, trinary, permutation and reduction operations, against the host `long double` math library within 64 ulp of the terms |
 | Elementwise — scalars and operators | `elementwise_scalar_op_test` | Scalars with a BF16 compute descriptor, the order of `opAB` and `opABC` in trinary operations, and a permutation plan executed again with another `alpha`, checked exactly against an independent loop reference |
-| Elementwise — CPU impl | `elementwise_cpu_test` | CPU reference validation (host test; compiles the `elementwise_cpu_impl`, `elementwise_binary_cpu_impl`, and `elementwise_trinary_cpu_impl` sources into one binary) |
+| Elementwise — CPU impl | `elementwise_cpu_test` | CPU reference validation against fixed expected values (host test; compiles the `elementwise_cpu_impl`, `elementwise_binary_cpu_impl`, and `elementwise_trinary_cpu_impl` sources into one binary). Permute: FP32/FP16/BF16 (with a BF16 or FP32 scalar)/FP64 (checked at FP64 precision); binary and trinary: FP32/FP16/BF16, plus FP16 and BF16 with an FP32 scalar |
 | Reduction | `rank{1-6}_reduction_test` | All rank/type combinations |
 | Reduction — scalars | `reduction_scalar_test` | Scalars with a BF16 compute descriptor, checked exactly against an independent loop reference |
 | Reduction — semantics | `reduction_semantics_test` | C copied to a strided D on a non-blocking stream that is still writing C; zero `alpha` or `beta` with NaN or `NULL` inputs; reductions that keep every mode (rank 1, BF16, permuted output) executed twice, checked exactly against an independent loop reference |
@@ -161,9 +165,9 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 
 All device tests compare GPU results against a CPU reference implementation using a per-type tolerance.
 
-**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`, `api_safety_test`, `large_tensor_test`, `plan_cache_unit_test`, `contraction_selection_test`, `contraction_test_utils_test`, `contraction_layout_test`, `elementwise_scalar_op_test`, `elementwise_zero_scale_test`, `elementwise_f64_unary_op_test`, `reduction_scalar_test`, `reduction_semantics_test`, `operation_validation_test`, `workspace_size_test`, `alloc_failure_test`.
+**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_lifetime_test`, `api_safety_test`, `large_tensor_test`, `plan_cache_unit_test`, `contraction_selection_test`, `contraction_test_utils_test`, `contraction_layout_test`, `elementwise_scalar_op_test`, `elementwise_zero_scale_test`, `elementwise_f64_unary_op_test`, `reduction_scalar_test`, `reduction_semantics_test`, `operation_validation_test`, `workspace_size_test`, `alloc_failure_test`, `elementwise_broadcast_test`, `elementwise_output_strides_test`.
 
-**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`, `elementwise_instance_selection_test`, `device_support_test`). `device_support_test` runs on hosts with or without a GPU, and checks the device only through `hiptensorCreate`.
+**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`, `elementwise_instance_selection_test`, `device_support_test`). `device_support_test` runs on hosts with or without a GPU, and checks the device only through `hiptensorCreate`. `batched_contraction_test` and `elementwise_mode_test` launch no kernels but create a hipTensor handle and descriptors (`elementwise_mode_test` also allocates small device buffers).
 
 **Test tiers (CTest labels):**
 
@@ -228,7 +232,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 
 - No per-architecture performance baseline stored in a queryable format (SQLite, dashboard, etc.).
 - No automated regression threshold enforced in CI.
-- Trinary contraction and unary-ops variants have no bench configs.
+- Trinary contraction and unary-ops contraction variants are not in the bench tier: trinary contraction has bench configs (`test/01_contraction/configs/bench/trinary_*_test_params.yaml`) that are not registered in `_HIPTENSOR_BENCH_TESTS` (`test/CMakeLists.txt`), and unary-ops has no bench configs.
 
 ---
 
@@ -284,6 +288,8 @@ cmake --build build -- -j$(nproc)
 llvm-profdata merge -sparse default.profraw -o coverage.profdata
 llvm-cov report ./bin/<test_binary> -instr-profile=coverage.profdata
 ```
+
+**Coverage test configs:** the `codecoverage` set in `rtest.xml` reads its YAML configs from `<build_dir>/code_coverage_config/`, which the build populates (`copy_code_coverage_config_files` in `cmake/Functions/CopyYamlFolder.cmake`). Contraction and reduction copy from their `configs/code_coverage/` directories; elementwise copies from `configs/emulation/quick/` (permutation, binary_op, trinary_op). `test/02_elementwise/configs/code_coverage/` is not used — edit `emulation/quick` to change elementwise coverage.
 
 **Coverage targets:**
 
@@ -372,7 +378,7 @@ There is no client-side known-bug list (analogous to `known_bugs.yaml` in other 
 | New CPU-side logic (logging, YAML, option parsing, utility math) | Unit test in `test/00_unit/` using GoogleTest |
 | New or changed GPU operation behavior | Integration test: add a YAML config entry in the appropriate `validation/` tier |
 | Bug fix | A regression test (unit if CPU-side, integration config entry if GPU-side) that fails before the fix |
-| New data type or tensor rank | Config entries across all relevant validation tiers; empty config file for tiers where the test is already covered |
+| New data type or tensor rank | Config entries across all relevant validation tiers; empty config file for tiers where the test is already covered. Also add entries to `emulation/quick` **and** `emulation/full` (the FFM tiers do not nest, so `ffm-full` does not inherit `ffm-quick`), to `bench`, and a case in the op's host CPU-reference test (e.g. `elementwise_cpu_test`) where one exists |
 | Performance-sensitive change | Run `ctest -V -O bench.log` from `<prefix>/bin/hiptensor/bench` before and after; include the comparison in the PR description. The `scripts/performance/Benchmark*.sh` scripts are an alternative. |
 | New GPU architecture | Validate on that target; update the Supported Configurations table |
 
@@ -388,9 +394,11 @@ There is no client-side known-bug list (analogous to `known_bugs.yaml` in other 
 | Kernel selection (ActorCritic/DefaultPatient) has no unit test — requires a live device | Medium | Medium | Covered by integration tests; slow feedback |
 | Code coverage not measured in CI | Medium | Medium | None |
 | `interface_test` commented out and not built | Low | Medium | None |
-| Trinary/unary-ops variants have no bench configs | Low | Low | Not performance-gated |
+| Trinary and unary-ops contraction variants are not in the bench tier (trinary configs exist but are unregistered; unary-ops has none) | Low | Low | Not performance-gated |
 | `clang-format` and static analysis not enforced in CI | Low | Low | Manual enforcement in code review |
 | No sanitizer (ASAN/TSAN) gate in CI | Low | High if hit | None; ASAN can be built manually |
+| Permute `bench` configs exceed device memory on smaller GPUs: the binary aborts with a HIP out-of-memory error partway through (gfx908 and gfx1100 already in the FP32 entries; gfx90a in the FP64 entries at ranks 2 and 4, which are listed last so the other types complete) | Low | Medium | Bench results on those targets are incomplete; run bench on MI300-class GPUs |
+| `test/02_elementwise/configs/code_coverage/` is unused (elementwise coverage reads `emulation/quick`) | Low | Low | Documented in the Coverage section |
 
 ---
 

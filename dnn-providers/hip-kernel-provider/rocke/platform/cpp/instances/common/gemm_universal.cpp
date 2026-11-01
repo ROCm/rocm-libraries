@@ -79,16 +79,17 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                          rocke_gemm_mma_family(arch),
                                          a_name,
                                          a_name,
-                                         "fp32",
+                                         (strcmp(a_name, "fp64") == 0) ? "fp64" : "fp32",
                                          t->warp_tile_m,
                                          t->warp_tile_n,
                                          t->warp_tile_k,
                                          nullptr);
 }
 
-/* _storage_dtype(spec): validate homogeneous A/B/C + fp32 acc + RCR layout,
- * then map the storage dtype string to its IR type. On a Python ValueError
- * path this returns NULL and sets the builder's sticky error. */
+/* _storage_dtype(spec): validate homogeneous A/B/C + fp32 acc (fp64 acc for
+ * fp64 storage) + RCR layout, then map the storage dtype string to its IR
+ * type. On a Python ValueError path this returns NULL and sets the builder's
+ * sticky error. */
 static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
                                                     const rocke_gemm_universal_spec_t* spec)
 {
@@ -98,7 +99,14 @@ static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
         /* "requires homogeneous A/B/C dtypes" */
         return rocke_b_io_ir_type(b, "");
     }
-    if(strcmp(d->dtype_acc, "fp32") != 0 && strcmp(d->dtype_acc, "f32") != 0)
+    if(strcmp(d->dtype_a, "fp64") == 0)
+    {
+        if(strcmp(d->dtype_acc, "fp64") != 0 && strcmp(d->dtype_acc, "f64") != 0)
+        {
+            return rocke_b_io_ir_type(b, "");
+        }
+    }
+    else if(strcmp(d->dtype_acc, "fp32") != 0 && strcmp(d->dtype_acc, "f32") != 0)
     {
         return rocke_b_io_ir_type(b, "");
     }
@@ -107,6 +115,10 @@ static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
        && strcmp(d->layout, "CRR") != 0 && strcmp(d->layout, "CCR") != 0)
     {
         return rocke_b_io_ir_type(b, "");
+    }
+    if(strcmp(d->dtype_a, "fp64") == 0)
+    {
+        return rocke_f64();
     }
     return rocke_b_io_ir_type(b, d->dtype_a); /* _dtype_ir == io_ir_type */
 }
@@ -1288,12 +1300,18 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
 
     /* ---- LDS XOR swizzle parameters -- */
     ctx.swz = spec->trait.lds_swizzle;
+    ctx.load_vec = rocke_gemm_choose_load_vec(spec);
     {
         /* lds_swizzle_params (env-free single source shared with the gate);
          * the CK_SWZ_* env vars are debug overrides that bypass the gate. */
         int def_r, def_w, def_l;
-        rocke_gemm_lds_swizzle_params(
-            ctx.a_per_lane, ctx.b_per_lane, ctx.block_k, &def_r, &def_w, &def_l);
+        rocke_gemm_lds_swizzle_params(ctx.a_per_lane,
+                                      ctx.b_per_lane,
+                                      ctx.block_k,
+                                      rocke_gemm_lds_swizzle_vec(spec, ctx.load_vec),
+                                      &def_r,
+                                      &def_w,
+                                      &def_l);
         if(spec->trait.lds_swizzle_r >= 0)
             def_r = spec->trait.lds_swizzle_r; /* AGPR / interleave knob */
         /* lds_swizzle_l (vgpr_prefetch): L and W = log2(tile_k >> L) (0 reads as -1) */
@@ -1385,9 +1403,11 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
          * gemm_universal.py:_ab_lds_plan:
          *
          *   db      = ab_double_buffer_decision(...)  (rocke_gemm_ab_db_decision:
-         *             explicit ab_double_buffer, else the historical rule
+         *             explicit ab_double_buffer, else the automatic rule
          *             compv4 && epilogue!=cshuffle && !direct_to_lds
-         *             && (2*ab_single)*2 <= lds_capacity_bytes)
+         *             && (2*ab_single)*2 <= lds_capacity_bytes, with
+         *             ab_single = (tile_m + tile_n) * (tile_k + lds_pad)
+         *                         * elem_bytes)
          *   two_buf = dtl_prefetch || db
          *
          * One decision function shared with the validity gate and the load-path
@@ -1605,7 +1625,6 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
 
     /* ---- global -> LDS coalesced copy plan -- */
     ctx.threads = spec->block_size;
-    ctx.load_vec = rocke_gemm_choose_load_vec(spec);
     if(ctx.load_vec == 0)
     {
         /* choose_load_vec found no usable width: Python raises
@@ -1680,19 +1699,28 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         {
             ctx.dtl_dwords = 4;
         }
-        ctx.dtl_halves = ctx.dtl_dwords * 2;
         ctx.dtl_bytes_per_lane = ctx.dtl_dwords * 4;
-        if((ctx.block_k % ctx.dtl_halves) != 0)
+        ctx.dtl_elem_bytes = rocke_gemm_elem_bytes(spec);
+        ctx.dtl_elem_log2 = 0;
+        while((1 << ctx.dtl_elem_log2) < ctx.dtl_elem_bytes)
+        {
+            ++ctx.dtl_elem_log2;
+        }
+        ctx.dtl_sub_elem = ctx.dtl_elem_bytes > ctx.dtl_bytes_per_lane;
+        ctx.dtl_halves = ctx.dtl_sub_elem ? 0 : ctx.dtl_bytes_per_lane / ctx.dtl_elem_bytes;
+        if(!ctx.dtl_sub_elem && (ctx.block_k % ctx.dtl_halves) != 0)
         {
             /* "direct_to_lds requires block_k % 8 == 0" -- ValueError path. */
             return NULL;
         }
-        ctx.dtl_a_chunks = (ctx.block_m * ctx.block_k) / ctx.dtl_halves;
-        ctx.dtl_b_chunks = (ctx.block_n * ctx.block_k) / ctx.dtl_halves;
+        ctx.dtl_a_chunks
+            = (ctx.block_m * ctx.block_k * ctx.dtl_elem_bytes) / ctx.dtl_bytes_per_lane;
+        ctx.dtl_b_chunks
+            = (ctx.block_n * ctx.block_k * ctx.dtl_elem_bytes) / ctx.dtl_bytes_per_lane;
         ctx.dtl_a_passes = (ctx.dtl_a_chunks + spec->block_size - 1) / spec->block_size;
         ctx.dtl_b_passes = (ctx.dtl_b_chunks + spec->block_size - 1) / spec->block_size;
         ctx.dtl_pass_bytes = spec->block_size * ctx.dtl_bytes_per_lane;
-        ctx.dtl_chunks_per_row = ctx.block_k / ctx.dtl_halves;
+        ctx.dtl_chunks_per_row = ctx.block_k * ctx.dtl_elem_bytes / ctx.dtl_bytes_per_lane;
 
         ctx.dtl_big_bytes = rocke_b_const_i32(b, ROCKE_GEMM_DTL_BUFFER_NUM_RECORDS);
         ctx.dtl_a_rsrc = rocke_b_buffer_rsrc(b, ctx.A, ctx.dtl_big_bytes);
@@ -1701,7 +1729,8 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.dtl_b_lds_base = rocke_b_smem_addr_of(b, ctx.B_smem);
         ctx.dtl_zero_soff = rocke_b_const_i32(b, 0);
         ctx.dtl_c_chunks_per_row = rocke_b_const_i32(b, ctx.dtl_chunks_per_row);
-        ctx.dtl_c_halves_per_chunk = rocke_b_const_i32(b, ctx.dtl_halves);
+        ctx.dtl_c_cols_per_chunk
+            = rocke_b_const_i32(b, ctx.dtl_sub_elem ? ctx.dtl_bytes_per_lane : ctx.dtl_halves);
         ctx.dtl_c_block_size = rocke_b_const_i32(b, spec->block_size);
     }
 

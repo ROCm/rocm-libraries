@@ -5,12 +5,12 @@
  * rocke.core.lower_llvm. Defines the externs declared in
  * rocke/lower_llvm_internal.h:
  *
- *   - ROCKE_LL_DATALAYOUT / ROCKE_LL_TRIPLE          (Python _DATALAYOUT / _TRIPLE)
  *   - ROCKE_LL_INTRINSIC_DECLS[]   (+ _COUNT)      (Python _INTRINSIC_DECLS)
  *   - ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[]  (+ _COUNT)
  *                                                (Python ..._LLVM22_OVERRIDES)
  *   - ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[]  (+ _COUNT)
- *                                                (Python ..._LLVM23_OVERRIDES)
+ *   - ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[]  (+ _COUNT)
+ *                                                (Python ..._LLVM24_OVERRIDES)
  *
  * The decl table is INSERTION-ORDERED exactly like the Python dict; that order
  * drives finalize()'s emit order. Transcribed verbatim from
@@ -25,63 +25,6 @@
 
 namespace ckc
 {
-
-/* ---------------------------------------------------------------------- */
-/* datalayout / triple (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 /   */
-/* _DATALAYOUT_LLVM23 / _TRIPLE). The AMDGPU datalayout is FLAVOR-KEYED:    */
-/* two fields drift across LLVM flavors:                                    */
-/*   * buffer-resource address space (p8, the 128-bit buffer descriptor --   */
-/*     NOT the p7 fat pointer) gained an index-width field:                  */
-/*       LLVM 20 (ROCm 7.0/7.1):  e-...-p8:128:128-...                       */
-/*       LLVM 22 (ROCm 7.2):      e-...-p8:128:128:128:48-...                */
-/*   * ELF symbol-mangling spec (m:e): absent in LLVM 20 and LLVM 22,        */
-/*     present in LLVM 23 (ROCm 7.13+, AMD clang 23.0.0git):                 */
-/*       LLVM 20 / 22:  e-p:64:64-...                                        */
-/*       LLVM 23:       e-m:e-p:64:64-...                                    */
-/* Pick via rocke_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.*/
-/* ---------------------------------------------------------------------- */
-
-const char* const ROCKE_LL_DATALAYOUT_LLVM20
-    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
-      "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-
-const char* const ROCKE_LL_DATALAYOUT_LLVM22
-    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
-      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-
-/* Layout emitted for rocKE's llvm23 flavor: the llvm22 layout plus the ELF
- * symbol-mangling spec m:e and address spaces p10-p15 (upstream 5bf967cb132b).
- * Older compiler builds may omit p10-p15; see Python _DATALAYOUT_LLVM23 for the
- * full rationale. Must stay byte-identical with it. */
-const char* const ROCKE_LL_DATALAYOUT_LLVM23
-    = "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"
-      "-p12:32:32-p13:32:32-p14:32:32-p15:32:32-i64:64-v16:16-v24:32"
-      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-
-/* Back-compat alias: callers that have not yet been flavor-threaded see the
- * LLVM20 form (the historical hardcoded value). New code keys on the flavor
- * via rocke_ll_datalayout_for_flavor / rocke_isa_datalayout. */
-const char* const ROCKE_LL_DATALAYOUT = ROCKE_LL_DATALAYOUT_LLVM20;
-
-const char* const ROCKE_LL_TRIPLE = "amdgcn-amd-amdhsa";
-
-/* Python _datalayout_for_flavor: LLVM20 returns the legacy p8 layout, LLVM23
- * returns its own m:e form, and anything else (incl. an unexpected value)
- * degrades to the modern LLVM22 form. */
-const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor)
-{
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM20)
-        return ROCKE_LL_DATALAYOUT_LLVM20;
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM23)
-        return ROCKE_LL_DATALAYOUT_LLVM23;
-    return ROCKE_LL_DATALAYOUT_LLVM22;
-}
 
 /* ---------------------------------------------------------------------- */
 /* The base (LLVM20) intrinsic-declaration table (Python _INTRINSIC_DECLS) */
@@ -320,6 +263,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"sched.group.barrier",
      "declare void @llvm.amdgcn.sched.group.barrier(i32 immarg, i32 immarg, i32 immarg)"},
     {"s.setprio", "declare void @llvm.amdgcn.s.setprio(i16 immarg)"},
+    {"trap", "declare void @llvm.trap()"},
     {"s.waitcnt", "declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"},
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1) nocapture "
@@ -345,6 +289,13 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"raw.ptr.buffer.load.f16",
      "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16(ptr addrspace(8) nocapture readonly, i32, "
      "i32, i32 immarg)"},
+    /* 1-byte buffer load and store (Python _INTRINSIC_DECLS, same position). */
+    {"raw.ptr.buffer.load.i8",
+     "declare i8 @llvm.amdgcn.raw.ptr.buffer.load.i8(ptr addrspace(8) nocapture readonly, i32, "
+     "i32, i32 immarg)"},
+    {"raw.ptr.buffer.store.i8",
+     "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8(i8, ptr addrspace(8) nocapture "
+     "writeonly, i32, i32, i32 immarg)"},
     {"raw.ptr.buffer.store.i32",
      "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32, ptr addrspace(8) nocapture "
      "writeonly, i32, i32, i32 immarg)"},
@@ -385,18 +336,11 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mfma.f32.32x32x16.bf16",
      "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf16(<8 x bfloat>, <8 x bfloat>, <16 x "
      "float>, i32 immarg, i32 immarg, i32 immarg)"},
-    {"mfma.scale.f32.16x16x128.f8f6f4",
-     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
-     "float>, i32 immarg, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32, i32 immarg)"},
-    {"mfma.f32.16x16x128.fp4",
-     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x128.fp4(i64, i64, <4 x float>, i32 immarg, "
-     "i32 immarg, i32 immarg)"},
-    {"mfma.f32.16x16x96.fp6",
-     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x96.fp6(<3 x i32>, <3 x i32>, <4 x float>, "
-     "i32 immarg, i32 immarg, i32 immarg)"},
-    {"mfma.f32.16x16x128.fp8.hero",
-     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
-     "float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
+    /* K=128 f8f6f4 MFMA, shared by the MX op and the hero atom. One mangled,
+     * flavor-independent entry: LLVM 20, 22, 23 and 24 all take this form. */
+    {"mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32",
+     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x "
+     "i32>, <4 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
     {"asyncmark", "declare void @llvm.amdgcn.asyncmark()"},
     {"wait.asyncmark", "declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)"},
     {"raw.ptr.buffer.load.async.lds",
@@ -580,30 +524,67 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[] = {
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
      "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
-    {"mfma.scale.f32.16x16x128.f8f6f4",
-     "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4(<8 x i32>, <8 x i32>, <4 x "
-     "float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT
     = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES)
             / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[0]));
 
+/* ---------------------------------------------------------------------- */
+/* LLVM24 overrides (Python _INTRINSIC_DECLS_LLVM24_OVERRIDES)            */
+/* Inherits LLVM23, with addrspace(15) named-barrier pointers.             */
+/* ---------------------------------------------------------------------- */
+
+const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[] = {
+    {"mfma.f32.16x16x32.fp8.fp8",
+     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
+     "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.16x16x32.bf8.bf8",
+     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8("
+     "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.32x32x16.fp8.fp8",
+     "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.fp8.fp8("
+     "i64, i64, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.32x32x16.bf8.bf8",
+     "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf8.bf8("
+     "i64, i64, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"make.buffer.rsrc.p1",
+     "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+     "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
+    {"s.barrier.init",
+     "declare void @llvm.amdgcn.s.barrier.init(ptr addrspace(15) nocapture, i32)"},
+    {"s.barrier.signal.var",
+     "declare void @llvm.amdgcn.s.barrier.signal.var(ptr addrspace(15) nocapture, i32)"},
+    {"s.barrier.join", "declare void @llvm.amdgcn.s.barrier.join(ptr addrspace(15) nocapture)"},
+    {"s.wakeup.barrier", "declare void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(15) nocapture)"},
+};
+
+const int ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT
+    = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES)
+            / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[0]));
+
 /* Resolve the flavor-specific override table (NULL/0 for non-modern flavors),
  * mirroring the Python _Lowerer choosing which OVERRIDES dict to .update(). */
 const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count)
 {
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM22)
+    const rocke_ll_emission_profile_t* profile = rocke_ll_emission_profile(flavor);
+    if(profile && profile->declarations == ROCKE_LL_DECLARATION_ABI_LLVM22)
     {
         if(out_count)
             *out_count = ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
         return ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES;
     }
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM23)
+    if(profile && profile->declarations == ROCKE_LL_DECLARATION_ABI_LLVM23)
     {
         if(out_count)
             *out_count = ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
         return ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES;
+    }
+    if(profile && profile->declarations == ROCKE_LL_DECLARATION_ABI_LLVM24)
+    {
+        if(out_count)
+            *out_count = ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT;
+        return ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES;
     }
     if(out_count)
         *out_count = 0;

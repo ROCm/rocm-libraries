@@ -432,7 +432,7 @@ static void staged_lane_offs(staged_state_t* st, int n_pass, int mf, bool isb, r
             = rocke_b_add(b, ctx->tid, rocke_b_const_i32(b, p * ctx->spec->block_size));
         rocke_value_t* row = rocke_b_div(b, chunk_idx, ctx->dtl_c_chunks_per_row);
         rocke_value_t* cmod = rocke_b_mod(b, chunk_idx, ctx->dtl_c_chunks_per_row);
-        rocke_value_t* col = rocke_b_mul(b, cmod, ctx->dtl_c_halves_per_chunk);
+        rocke_value_t* col = rocke_b_mul(b, cmod, ctx->dtl_c_cols_per_chunk);
         if(ctx->rilv && ctx->spec->trait.rilv_vec_epilogue)
         {
             /* linear rows: the C mapping carries the interleave */

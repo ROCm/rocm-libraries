@@ -1,18 +1,23 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The opt-in tuned candidate every family builds the same way.
+"""The tuned candidate every family builds the same way.
 
-Admitted only when the request names both its ``algorithm`` and ``spec_id``.
-Its configuration comes from the request's ``tuning_knobs`` (rebuilt
-directly), else its ``tuning_id`` (``auto``: the space's default; otherwise a
-search of the space). ``support`` and ``select_spec`` share one resolution per
-request.
+By default it is opt-in: admitted only when the request names both its
+``algorithm`` and ``spec_id``. A family whose ``auto`` is itself one
+configuration of a registered variant passes ``route_auto`` (and optionally
+``auto_knobs``) and gets a candidate that also answers ``auto``. Its
+configuration comes from the request's ``tuning_knobs`` (rebuilt directly),
+else its ``tuning_id`` (``auto``: on an ``auto`` ``spec_id`` with no tuning
+pin, the ``auto_knobs`` stack if given, else the space's default; otherwise a
+search of the space). ``support`` and
+``select_spec`` share one resolution per request.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import lru_cache
-from typing import Any, Callable, Optional, Sequence, Tuple
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
 from ..core import (
     Capability,
@@ -20,6 +25,7 @@ from ..core import (
     OperatorRequest,
     normalize_selector,
     opt_in_probe,
+    selector_matches,
 )
 from .identity import key_of
 from .space import KnobSpace, Verdict
@@ -32,6 +38,12 @@ def explicitly_pinned(req, algorithm: str, spec_id: str) -> bool:
     return normalize_selector(req.spec_id) == normalize_selector(
         spec_id
     ) and normalize_selector(req.algorithm) == normalize_selector(algorithm)
+
+
+def carries_tuning_pin(req) -> bool:
+    """Whether ``req`` pins a configuration itself: a ``tuning_id`` other
+    than ``auto`` (blank counts as ``auto``) or any ``tuning_knobs``."""
+    return (req.tuning_id.strip() or "auto") != "auto" or bool(dict(req.tuning_knobs))
 
 
 def resolve_pinned(
@@ -51,10 +63,10 @@ def resolve_pinned(
     A pin that does not resolve is refused with the reason; the candidate never
     substitutes another configuration.
     """
+    if not carries_tuning_pin(req):
+        return default()
     wanted = req.tuning_id.strip() or "auto"
     knobs = dict(req.tuning_knobs)
-    if wanted == "auto" and not knobs:
-        return default()
     spec, why = canonicalize(knobs)
     if wanted == "auto":
         return spec, why
@@ -106,18 +118,71 @@ def make_tuned_candidate(
     grid: Callable[[Any, Any], Tuple[int, int, int]],
     block: Callable[[Any], Tuple[int, int, int]] = lambda spec: spec.launch_block(),
     precheck: Optional[Callable[[Any], Tuple[bool, str]]] = None,
+    route_auto: Optional[Callable[[Any], Tuple[bool, str]]] = None,
+    auto_knobs: Optional[Callable[[Any], Mapping[str, Any]]] = None,
 ) -> KernelCandidate:
-    """An opt-in candidate over ``space``.
+    """A candidate over ``space``, opt-in unless ``route_auto`` is given.
 
     ``base(req)`` is the input the space builds from for one request (raise
     ``ValueError`` when the request cannot have one). It must be a pure function
     of the request's hash/equality-visible fields: the result is memoized and
     shared by pin resolution, sweeps and sampling. Device or process state must
     first be normalized into the request. ``precheck(req)`` is any request-level
-    gate to run before resolving (a backend coverage check). The remaining
-    callables are the family's build, signature, grid and Torch binding for its
-    tuned spec.
+    gate to run before resolving (a backend coverage check); it sees the request
+    pinned to this candidate. The remaining callables are the family's build,
+    signature, grid and Torch binding for its tuned spec.
+
+    ``route_auto(req)`` makes the candidate answer production ``auto`` too
+    (``opt_in=False``): a request whose ``algorithm`` / ``spec_id`` are ``auto``
+    or name this candidate is resolved as if it pinned both, and for one whose
+    ``spec_id`` is ``auto``, ``route_auto`` says whether this candidate takes it
+    (``(False, why)`` leaves it to another candidate). Without it the candidate
+    is opt-in. ``auto_knobs(req)`` (with ``route_auto`` only) gives the knobs an
+    ``auto`` request with no tuning pin (``tuning_id`` ``auto``, no
+    ``tuning_knobs``) runs on this candidate, resolved as ``tuning_knobs`` are
+    (a knob the request cannot read drops); an empty mapping runs the space's
+    default. A request that carries its own tuning pin resolves it as given.
+    Knobs that do not resolve on a request whose space default does are a
+    family data error and raise ``RuntimeError`` with the reason; ``auto``
+    never quietly runs another configuration. Without ``auto_knobs``, ``auto``
+    runs the space's default.
     """
+    if auto_knobs is not None and route_auto is None:
+        raise ValueError(f"{name}: auto_knobs needs route_auto")
+
+    def routed(req) -> Tuple[Optional[Any], str]:
+        """``req`` pinned to this candidate, or ``(None, why)`` if it does not
+        name (or, with ``route_auto``, route to) this candidate."""
+        if route_auto is None:
+            if not explicitly_pinned(req, algorithm, spec_id):
+                return None, (
+                    f"opt-in: pin algorithm={algorithm!r} and spec_id={spec_id!r}"
+                )
+            return req, "ok"
+        ok, why = selector_matches(req, candidate)
+        if not ok:
+            return None, why
+        if normalize_selector(req.spec_id) == "auto":
+            ok, why = route_auto(req)
+            if not ok:
+                return None, why
+            probe = opt_in_probe(req, candidate)
+            pinned = carries_tuning_pin(req)
+            knobs = auto_knobs(req) if auto_knobs is not None and not pinned else None
+            if knobs:
+                stacked = replace(probe, tuning_knobs=dict(knobs))
+                found, why = resolve(stacked)
+                if found is not None:
+                    return stacked, "ok"
+                # A request the space cannot build at all is refused below with
+                # the base's reason; one it can build must take the stack.
+                if resolve(probe)[0] is not None:
+                    raise RuntimeError(
+                        f"{name}: auto knobs {dict(knobs)!r} do not resolve on "
+                        f"a request whose default configuration does: {why}"
+                    )
+            return probe, "ok"
+        return opt_in_probe(req, candidate), "ok"
 
     @lru_cache(maxsize=32)
     def resolve_base(req):
@@ -142,31 +207,32 @@ def make_tuned_candidate(
         errors = request_errors(req)
         if errors:
             return False, "; ".join(errors)
-        if not explicitly_pinned(req, algorithm, spec_id):
-            return False, f"opt-in: pin algorithm={algorithm!r} and spec_id={spec_id!r}"
+        pinned, why = routed(req)
+        if pinned is None:
+            return False, why
         if precheck is not None:
-            ok, why = precheck(req)
+            ok, why = precheck(pinned)
             if not ok:
                 return False, why
-        spec, why = resolve(req)
+        spec, why = resolve(pinned)
         return spec is not None, why
 
     def select(req: OperatorRequest):
         ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
-        return resolve(req)[0]
+        return resolve(routed(req)[0])[0]
 
     def sweep(req: OperatorRequest):
         if not candidate.admits(req)[0]:
             return ()
-        b, _why = resolve_base(req)
+        b, _why = resolve_base(routed(req)[0])
         return space.stream(b, current_sweep_level())
 
     def sample(req: OperatorRequest, n: int, seed: int):
         if not candidate.admits(req)[0]:
             return ()
-        b, _why = resolve_base(req)
+        b, _why = resolve_base(routed(req)[0])
         return space.sample(b, n, seed)
 
     def search(req: OperatorRequest):
@@ -197,6 +263,6 @@ def make_tuned_candidate(
         search_space=search,
         build=build,
         bind_torch=bind_torch,
-        opt_in=True,
+        opt_in=route_auto is None,
     )
     return candidate

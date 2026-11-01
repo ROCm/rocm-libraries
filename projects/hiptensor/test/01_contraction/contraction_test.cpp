@@ -129,6 +129,7 @@ namespace hiptensor
     void ContractionTest::reset()
     {
         handle    = nullptr;
+        plan      = nullptr;
         workspace = nullptr;
 
         worksize = 0u;
@@ -381,8 +382,8 @@ namespace hiptensor
             CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
                 logLevel
                 & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
-                                                     // PERF_TRACE so the CK backend does not run its
-                                                     // internal cold/hot timed loop
+                // PERF_TRACE so the CK backend does not run its
+                // internal cold/hot timed loop
 
             uint32_t alignmentRequirement = 1;
             // lengths - m, n, u, v, h, k
@@ -863,9 +864,14 @@ namespace hiptensor
                                                         sizeof(hiptensorCacheMode_t)));
             }
 
+            // RunKernel may be called more than once per test (e.g. plan cache tests)
+            if(plan)
+            {
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
+                plan = nullptr;
+            }
             // No plan is created for tensors the kernels cannot address, which the bench
             // configurations include. TearDown releases the rest.
-            plan            = nullptr;
             auto planStatus = hiptensorCreatePlan(handle, &plan, desc, planPref, worksize);
             if(planStatus == HIPTENSOR_STATUS_NOT_SUPPORTED && exceedsCkTensorLimits(*desc))
             {
@@ -916,8 +922,8 @@ namespace hiptensor
             auto timeMs = 0.0f;
             CHECK_HIP_ERROR(hipEventElapsedTime(&timeMs, startEvent, stopEvent));
 
-            mElapsedTimeMs        = float64_t(timeMs) / hotRuns;
-            mTotalGFlops          = contractionGFlops(
+            mElapsedTimeMs = float64_t(timeMs) / hotRuns;
+            mTotalGFlops   = contractionGFlops(
                 desc->mModeA, a_ms_ks->mLengths, desc->mModeB, b_ns_ks->mLengths, computeType);
             mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
 
@@ -1148,10 +1154,14 @@ namespace hiptensor
     {
         if(mRunFlag)
         {
-            CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+            if(plan)
+            {
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
+                plan = nullptr;
+            }
             CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
-            CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
             CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
+            CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
 
             if(a_ms_ks)
             {

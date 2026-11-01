@@ -100,10 +100,17 @@ class TestVgprPrefetchValidity(unittest.TestCase):
             )[0]
         )
 
-    def test_swizzle_split_writes_admitted_only_with_vgpr_prefetch(self):
+    def test_swizzle_split_writes_only_with_vgpr_prefetch(self):
+        # 16x16x16: a 4-half fragment against 8-half global-load vectors. The
+        # VGPR-staged body widens the swizzle group to the load vector; the
+        # register-staged prefetch body keeps the fragment group and splits
+        # each loaded vector into group-sized LDS writes.
+        from rocke.instances.common.gemm_universal import _spec_swizzle_params
+
         sw = dict(lds_swizzle=True, lds_swizzle_r=1)
-        self.assertFalse(is_valid_spec(_spec(**sw), arch="gfx942")[0])
-        self.assertTrue(is_valid_spec(_spec(vgpr_prefetch=1, **sw), arch="gfx942")[0])
+        for spec, l_ in ((_spec(**sw), 3), (_spec(vgpr_prefetch=1, **sw), 2)):
+            self.assertTrue(is_valid_spec(spec, arch="gfx942")[0])
+            self.assertEqual(_spec_swizzle_params(spec, 4, 4)[2], l_)
 
     def test_mode4_single_buffer(self):
         for geo in (

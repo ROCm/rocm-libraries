@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "id": "b3d34f00-1ed9-46df-b52a-8c5e5433b654",
+  "name": "hipkernel:two_stage",
+  "arch": [],
+  "matchers": [],
+  "engine": "8d6e99f0-a31a-424b-9892-e5c1cca8ec4d",
+  "dispatch": "2545616f-55c7-4ca7-9c53-f0387ede882a",
+  "kernelDescriptors": [
+    "8acc1edb-8d0a-4aae-a912-a370661b18af"
+  ]
+}

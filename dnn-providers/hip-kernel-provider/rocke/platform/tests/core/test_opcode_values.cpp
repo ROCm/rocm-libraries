@@ -10,10 +10,11 @@
  * integer means (see "when to bump" in rocke/abi.h).
  *
  * The table below lists every opcode with its value, its dotted name and its
- * purity as they stood before any opcode was appended. It must never change: a
- * failure here means an opcode was inserted, removed or reordered. Opcodes
- * appended later are not listed; the second check covers them by requiring
- * that every opcode, old or new, has a name that maps back to it.
+ * purity. A row never changes once it is added: a failure here means an opcode
+ * was inserted, removed or reordered. A change that appends an opcode adds its
+ * row in the same change, so two changes that each append one cannot land in
+ * an order that renumbers the opcode that landed first. The second check
+ * requires that every opcode has a name that maps back to it.
  */
 
 #include "rocke/ir.h"
@@ -249,7 +250,20 @@ constexpr PinnedOpcode kPinned[] = {
     {ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, 215, "memref.global_flag_wait_eq", false},
     {ROCKE_OP_VECTOR_UNDEF, 216, "vector.undef", false},
     {ROCKE_OP_TILE_BUFFER_LOAD_F16_D16, 217, "tile.buffer_load_f16_d16", false},
-    {ROCKE_OP_TILE_BUFFER_LOAD, 228, "tile.buffer_load", false},
+    {ROCKE_OP_ARITH_CVT_F32_TO_F64, 218, "arith.cvt_f32_to_f64", true},
+    {ROCKE_OP_ARITH_CVT_F64_TO_F32, 219, "arith.cvt_f64_to_f32", true},
+    {ROCKE_OP_ARITH_UMAX, 220, "arith.umax", true},
+    {ROCKE_OP_ARITH_UMIN, 221, "arith.umin", true},
+    {ROCKE_OP_ARITH_UITOFP_F32, 222, "arith.uitofp_f32", true},
+    {ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT, 223, "arith.cvt_f32_to_u8_sat", true},
+    {ROCKE_OP_ARITH_ASSUME_RANGE, 224, "arith.assume_range", true},
+    {ROCKE_OP_ARITH_FDOT2, 225, "arith.fdot2", false},
+    {ROCKE_OP_TILE_BUFFER_LOAD, 226, "tile.buffer_load", false},
+    {ROCKE_OP_TILE_BUFFER_STORE_VN, 227, "tile.buffer_store_vN", false},
+    {ROCKE_OP_TILE_GLOBAL_PTR_OFFSET, 228, "tile.global_ptr_offset", true},
+    {ROCKE_OP_TILE_TRAP, 229, "tile.trap", false},
+    {ROCKE_OP_MATH_EXP, 230, "math.exp", true},
+    {ROCKE_OP_MATH_LOG, 231, "math.log", true},
 };
 
 /* Each pinned opcode keeps its value, its name and its purity. */

@@ -36,7 +36,7 @@
  * is part of the layout is known. */
 #if INTPTR_MAX == INT64_MAX
 static_assert(sizeof(rocke_gemm_trait_spec_t) == 296 && sizeof(rocke_gemm_universal_spec_t) == 432
-                  && ROCKE_ABI_VERSION >= 6,
+                  && ROCKE_ABI_VERSION >= 7,
               "a GEMM spec struct changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
               "update this pin");
 #endif
