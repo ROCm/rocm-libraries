@@ -1247,6 +1247,10 @@ static rocke_status_t rocke_h_op_tile_sync_lds_only(rocke_h_lowerer_t* lw, const
 {
     int mask;
     mask = rocke_h_encode_waitcnt(lw, -1, -1, 0);
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
     rocke_h_emitf(lw, "__builtin_amdgcn_s_waitcnt(%d);", mask);
     rocke_h_emit(lw, "__syncthreads();");
     rocke_h_emit_barrier_clobber(lw, op);
@@ -1283,6 +1287,10 @@ static rocke_status_t rocke_h_op_tile_s_waitcnt(rocke_h_lowerer_t* lw, const roc
     rocke_attr_get_int(&op->attrs, "lgkmcnt", &lk);
     rocke_attr_get_int(&op->attrs, "expcnt", &ec);
     mask = rocke_h_encode_waitcnt(lw, (int)vm, (int)ec, (int)lk);
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
     rocke_h_emitf(lw, "__builtin_amdgcn_s_waitcnt(%d);", mask);
     return lw->status;
 }
