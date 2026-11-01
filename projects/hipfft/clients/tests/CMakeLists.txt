@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 # #############################################################################
 
-cmake_minimum_required( VERSION 3.16 )
+cmake_minimum_required( VERSION 3.25 )
 
 # This should appear before the project command, because it does not
 # use FORCE
@@ -32,9 +32,16 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
-# Dependencies
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( hipfft-clients-tests LANGUAGES CXX )
+  find_package( hipfft REQUIRED CONFIG PATHS )
+  include( ../../cmake/buildopts.cmake )
+endif()
 
-find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS /opt/rocm )
+find_package( ROCmCMakeBuildTools CONFIG PATHS /opt/rocm )
+if( NOT ROCmCMakeBuildTools_FOUND )
+  include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-rocmcmake.cmake )
+endif( )
 include(ROCMInstallTargets)
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake )
 
@@ -95,11 +102,6 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( hipfft-clients-tests LANGUAGES CXX )
-
-if( NOT HIPFFT_BUILD_SCOPE )
-  find_package( hipfft REQUIRED CONFIG PATHS )
-endif()
 
 # searching FFTW with FindFFTW.cmake that is provided by project
 # because distro versions of FFTW does not include the cmake specific
@@ -159,6 +161,10 @@ set( BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
+if( HIPFFT_MPI_ENABLE AND NOT MPI_FOUND )
+  find_package( MPI REQUIRED )
+endif()
+
 # MPI worker for MPI tests
 if( HIPFFT_MPI_ENABLE )
   # build MPI worker to support the tests
@@ -188,9 +194,7 @@ endif()
 target_link_libraries( hipfft-test PRIVATE ${HIPFFT_RTC_LIB} )
 
 if( HIPFFT_BUILD_SCOPE )
-  set( TESTS_OUT_DIR "/../staging" )
-elseif( HIPFFT_CLIENTS_BUILD_SCOPE )
-  set( TESTS_OUT_DIR "/../bin" )
+  set( TESTS_OUT_DIR "/clients/staging" )
 else()
   set( TESTS_OUT_DIR "/bin" )
 endif()
@@ -366,18 +370,20 @@ else()
   endif()
 endif()
 
-find_package( GTest 1.11.0 )
+find_package( GTest 1.17 QUIET )
 
 if( GTest_FOUND )
-  target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
   target_link_libraries( hipfft-test PRIVATE GTest::gtest )
 else()
-  # gtest build by the hipFFT
-  add_dependencies( hipfft-test gtest )
-  target_include_directories( hipfft-test PRIVATE hipfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
-  target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
+  if( ALLOW_BUILD_DEPS )
+    set( GTEST_TARGET hipfft-test )
+    set( GTEST_LINK_MAIN OFF )
+    include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-gtest.cmake )
+  else()
+    message(FATAL_ERROR "GTest was not found and ALLOW_BUILD_DEPS is disabled")
+  endif()
 endif()
-
+  
 # tests have callback functions, which need to be built as relocatable device code
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
   target_compile_options( hipfft-test PRIVATE -dc )
