@@ -27,6 +27,9 @@ from .KernelWriterBase import KernelWriterBase
 
 class KernelWriterActivationEnumHeader(KernelWriterBase):
 
+  # The activation enum, used by the activation functions and the conversion kernels.
+  sharedHeader = True
+
   def __init__(self, state):
     super().__init__()
     self.state["ProblemType"] = deepcopy(state["ProblemType"])

@@ -31,6 +31,10 @@ KERNEL_HELPER_FILENAME_H: str = "Kernels.h"
 
 class KernelWriterBase(ABC):
 
+  # True if getHeaderFileString defines code the other helpers' kernels use (rather than only
+  # declaring this helper's own kernels): a chunked helper compile then puts it in every chunk.
+  sharedHeader = False
+
   def __init__(self):
     super().__init__()
 

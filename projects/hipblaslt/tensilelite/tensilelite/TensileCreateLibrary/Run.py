@@ -85,6 +85,7 @@ from ..SolutionStructs.Solution import (
 )
 from ..verify_stinky_comment_vs_elf_text import verify_stinky_paths
 from ..Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
+from ..Toolchain.HelperKernelChunks import chunkOf, supportsChunkedCompile
 from ..Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
 from ..Toolchain.Validators import (
     ToolchainDefaults,
@@ -588,22 +589,46 @@ def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
     minResult = KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
     return path, isa, wfsize, minResult
 
+
+# The start of Kernels.h and of every chunk header (see _writeHelperChunks).
+_HELPER_HEADER_PREAMBLE = (
+    "#pragma once\n"
+    "#include <hip/hip_runtime.h>\n"
+    "#include <hip/hip_ext.h>\n\n"
+    '#include "KernelHeader.h"\n\n'
+)
+
+
+class _HelperText(NamedTuple):
+    name: str
+    sharedHeader: bool
+    header: str
+    source: str
+
+
 def writeHelpers(
-    outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H
-):
+    outputPath,
+    kernelHelperObjs,
+    KERNEL_HELPER_FILENAME_CPP,
+    KERNEL_HELPER_FILENAME_H,
+    chunkCount: int = 1,
+    chunkDir: Optional[Path] = None,
+) -> List[Path]:
+    """Writes the helper kernels to KERNEL_HELPER_FILENAME_CPP and KERNEL_HELPER_FILENAME_H in
+    outputPath. With chunkCount > 1, also splits them into up to chunkCount chunks in chunkDir
+    for a chunked compile (see _writeHelperChunks) and returns the chunk sources, or [] if fewer
+    than two chunks have kernels."""
     kernelSourceFilename = os.path.join(os.path.normcase(outputPath), KERNEL_HELPER_FILENAME_CPP)
     kernelHeaderFilename = os.path.join(os.path.normcase(outputPath), KERNEL_HELPER_FILENAME_H)
 
+    helpers = []
     with open(kernelHeaderFilename, "w", encoding="utf-8") as kernelHeaderFile, open(
         kernelSourceFilename, "w", encoding="utf-8"
     ) as kernelSourceFile:
         kernelSourceFile.write(CHeader)
         kernelHeaderFile.write(CHeader)
         kernelSourceFile.write('#include "Kernels.h"\n')
-        kernelHeaderFile.write("#pragma once\n")
-        kernelHeaderFile.write("#include <hip/hip_runtime.h>\n")
-        kernelHeaderFile.write("#include <hip/hip_ext.h>\n\n")
-        kernelHeaderFile.write('#include "KernelHeader.h"\n\n')
+        kernelHeaderFile.write(_HELPER_HEADER_PREAMBLE)
         HeaderText = ""
         for ko in kernelHelperObjs:
             kernelName = ko.getKernelName()
@@ -612,8 +637,57 @@ def writeHelpers(
             kernelSourceFile.write(src)
             if err:
                 print("*** warning: invalid kernel#%u" % kernelName)
-            HeaderText += ko.getHeaderFileString()
+            header = ko.getHeaderFileString()
+            HeaderText += header
+            if chunkCount > 1:
+                helpers.append(_HelperText(kernelName, ko.sharedHeader, header, src))
         kernelHeaderFile.write(HeaderText)
+
+    if chunkCount < 2:
+        return []
+    return _writeHelperChunks(Path(chunkDir), helpers, chunkCount)
+
+
+def _writeLines(file, text: str):
+    """Writes text and ends it with a line break if it has none: not every helper text does
+    (the activation helpers' placeholder source), and a chunk joins texts that were not adjacent
+    in Kernels.cpp/Kernels.h."""
+    file.write(text)
+    if not text.endswith("\n"):
+        file.write("\n")
+
+
+def _writeHelperChunks(chunkDir: Path, helpers: List[_HelperText], chunkCount: int) -> List[Path]:
+    """Splits the helper kernels into chunks: Kernels_chunk<i>.cpp with the sources of the
+    helpers in chunk i (chunkOf their name: adding or removing a helper changes its chunk only)
+    and Kernels_chunk<i>.h with only what they need: the header of Kernels.h with the static
+    headers, the shared headers (activation enum and functions, see
+    KernelWriterBase.sharedHeader) and their own declarations and argument structs, all in
+    Kernels.h's order. A shared helper's source (a placeholder) goes into the first chunk.
+    Returns the chunk sources in chunk order, or [] if fewer than two chunks have helpers."""
+    chunkIndices = [None if h.sharedHeader else chunkOf(h.name, chunkCount) for h in helpers]
+    usedChunks = sorted({index for index in chunkIndices if index is not None})
+    if len(usedChunks) < 2:
+        return []
+    chunkIndices = [usedChunks[0] if index is None else index for index in chunkIndices]
+    ensurePath(chunkDir)
+    chunkPaths = []
+    for chunk in usedChunks:
+        stem = f"Kernels_chunk{chunk}"
+        with open(chunkDir / f"{stem}.h", "w", encoding="utf-8") as header:
+            header.write(CHeader)
+            header.write(_HELPER_HEADER_PREAMBLE)
+            for helper, index in zip(helpers, chunkIndices):
+                if helper.sharedHeader or index == chunk:
+                    _writeLines(header, helper.header)
+        with open(chunkDir / f"{stem}.cpp", "w", encoding="utf-8") as source:
+            source.write(CHeader)
+            source.write(f'#include "{stem}.h"\n')
+            for helper, index in zip(helpers, chunkIndices):
+                if index == chunk:
+                    _writeLines(source, helper.source)
+        chunkPaths.append(chunkDir / f"{stem}.cpp")
+    return chunkPaths
 
 
 def _timedBuildSourceCodeObjectFiles(*args):
@@ -625,8 +699,29 @@ def _timedBuildSourceCodeObjectFiles(*args):
 
 def overlapsHelperCompile() -> bool:
     """Whether the benchmark helper kernels are compiled while the pools run: only with a pool
-    budget above one, since the compile takes one slot of it."""
+    budget above one, since the compile takes slots of it (helperCompileJobs)."""
     return CPUThreadCount() > 1
+
+
+# Most chunks one benchmark helper compile is split into: the compile wall time stops improving
+# beyond 4 (timing_runs/python_kernel_build_src_co_investigation.md, option C), while every chunk
+# adds the fixed per-file compile cost.
+MAX_HELPER_CHUNKS = 4
+# Pool budget per helper chunk process. Chunks shorten the helper compile that a build with little
+# codegen waits for, but their slots come out of the pools for the whole run (measured at a budget
+# of 24, 4 chunks: bf16_gradient_bias 20.1 -> 12.1 s, dtl 132 -> 137 s). One per 6 gives 4 chunks
+# from a budget of 24 and 2 from CI's 12 (25 CPUs, 4 xdist workers).
+_BUDGET_PER_HELPER_CHUNK = 6
+
+
+def helperCompileJobs() -> int:
+    """How many processes a benchmark helper compile runs at once: its chunks (writeHelpers),
+    each compiled by one process. They overlap the pools, so they come out of the pool budget
+    (benchmarkPoolSize): one slot per _BUDGET_PER_HELPER_CHUNK of it, at least one and at most
+    MAX_HELPER_CHUNKS. Without overlap (a budget of one) the compile runs alone, in one piece."""
+    if not overlapsHelperCompile():
+        return 1
+    return max(1, min(MAX_HELPER_CHUNKS, CPUThreadCount() // _BUDGET_PER_HELPER_CHUNK))
 
 
 def benchmarkPoolSize(generateSourcesAndExit: bool) -> int:
@@ -634,14 +729,17 @@ def benchmarkPoolSize(generateSourcesAndExit: bool) -> int:
     BenchmarkProblems, codegen (generateBenchmarkKernels) and the invalid-kernel check and
     assembly (finishSolutionsAndKernels).
 
-    When the helper compiles overlap (overlapsHelperCompile) they take one slot of the budget
-    (helperCompileExecutor runs one at a time), so the pools get one process less. All pools of
-    the run use that size, also those that never run beside a compile: joblib resizes its worker
-    pool whenever the size changes (stopping a worker, then starting one that imports Tensile
-    again), and alternating sizes every benchmark step made subtile_mxfp4's build 85 -> 150 s."""
+    When the helper compiles overlap (overlapsHelperCompile) they take helperCompileJobs slots of
+    the budget (helperCompileExecutor runs one compile at a time, with up to that many chunk
+    processes), so the pools get that many processes less. All pools of the run use that size,
+    also those that never run beside a compile: joblib resizes its worker pool whenever the size
+    changes (stopping a worker, then starting one that imports Tensile again), and alternating
+    sizes every benchmark step made subtile_mxfp4's build 85 -> 150 s. For the same reason the
+    slots stay reserved while no compile runs, and also when a compile cannot be chunked
+    (HelperKernelChunks.supportsChunkedCompile)."""
     budget = CPUThreadCount()
     if overlapsHelperCompile() and not generateSourcesAndExit:
-        return budget - 1
+        return budget - helperCompileJobs()
     return budget
 
 
@@ -649,10 +747,11 @@ def benchmarkPoolSize(generateSourcesAndExit: bool) -> int:
 def helperCompileExecutor():
     """The thread that compiles the benchmark helper kernels (Kernels.cpp) of the builds prepared
     with it (prepareSolutionsAndKernels), one after the other and in the order they were
-    prepared: the compiles take one slot of the pool budget (benchmarkPoolSize), and a step whose
-    helper kernels an earlier step already compiled hits the helper-kernel cache, as when the
-    steps were built one after the other. Leaving the block, also through an exception, waits
-    for the running compile and cancels the queued ones, so no compile is left running."""
+    prepared: the compiles take helperCompileJobs slots of the pool budget (benchmarkPoolSize),
+    and a step whose helper kernels an earlier step already compiled hits the helper-kernel
+    cache, as when the steps were built one after the other. Leaving the block, also through an
+    exception, waits for the running compile and cancels the queued ones, so no compile is left
+    running."""
     executor = ThreadPoolExecutor(max_workers=1)
     try:
         yield executor
@@ -769,8 +868,20 @@ def prepareSolutionsAndKernels(
         numKernels = len(asmKernels)
         assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
 
+    # The helper kernels are split into one chunk per helper-compile process, if the compile
+    # can be chunked (it falls back to Kernels.cpp in one piece if the chunked compile fails).
+    chunkCount = 1
+    if not generateSourcesAndExit and supportsChunkedCompile(srcToolchain.compiler, cmdlineArchs):
+        chunkCount = helperCompileJobs()
     with timing_context("python_kernel_write_helpers"):
-        writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
+        chunkPaths = writeHelpers(
+            outputPath,
+            kernelHelperObjs,
+            KERNEL_HELPER_FILENAME_CPP,
+            KERNEL_HELPER_FILENAME_H,
+            chunkCount,
+            buildTmpPath / "helper_chunks",
+        )
     srcKernelFile = outputPath / "Kernels.cpp"
 
     helperBuild = None
@@ -784,6 +895,7 @@ def prepareSolutionsAndKernels(
             outputPath,
             srcKernelFile,
             cmdlineArchs,
+            chunkPaths,
         )
         if not overlapsHelperCompile():
             with timing_context("python_kernel_build_src_co_wait"):

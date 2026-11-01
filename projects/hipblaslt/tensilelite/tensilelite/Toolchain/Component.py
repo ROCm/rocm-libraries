@@ -28,7 +28,7 @@ from os import name as os_name
 from pathlib import Path
 from re import IGNORECASE, MULTILINE, match, search, sub
 from shlex import split
-from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
+from subprocess import DEVNULL, PIPE, STDOUT, CalledProcessError, check_output, run
 from typing import List, Optional, Union
 
 from Tensile.Common import SemanticVersion, print2
@@ -54,6 +54,18 @@ def _invoke(args: List[str], desc: str=""):
           f"Failed command: {' '.join(args)}"
       )
   return out
+
+
+def driverJobs(args: List[str]) -> List[List[str]]:
+    """The jobs (each a command line) the compiler driver command args would run (`-###`).
+
+    Raises:
+        CalledProcessError: If the driver rejects the command.
+    """
+    out = run(
+        [*map(str, args), "-###"], stdin=DEVNULL, stdout=PIPE, stderr=STDOUT, check=True
+    ).stdout.decode()
+    return [split(line) for line in out.splitlines() if line.startswith(' "')]
 
 
 def _getVersion(executable: str, versionFlag: str, regex: str) -> str:
@@ -328,6 +340,9 @@ class Compiler(Component):
     __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str,
              pch_path: Optional[str]=None):
         Invokes the compiler on the provided arguments, with a precompiled header if given
+    compileArgs(self, include_path: str, target_list: List[str], srcPath: str, destPath: str,
+                pch_path: Optional[str]=None):
+        The command __call__ runs
     pchArgs(self, target_list: List[str]):
         The command that builds a precompiled header for target_list from stdin to stdout
     buildPch(self, target_list: List[str], source: bytes, pchPath: Union[Path, str]):
@@ -398,6 +413,17 @@ class Compiler(Component):
                 f"Failed command: {' '.join(map(str, args))}"
             )
 
+    def compileArgs(self, include_path: str, target_list: List[str], srcPath: str, destPath: str,
+                    pch_path: Optional[str]=None) -> List[str]:
+        """The command that compiles a source file into an object file (see __call__)."""
+        pchFlags = [] if pch_path is None else [
+            "-include-pch", str(pch_path), "-Xclang", "-fmodules-validate-system-headers"
+        ]
+        return [
+            *(self.default_args), "-I", include_path, *self._targetArgs(target_list), *pchFlags,
+            srcPath, "-c", "-o", destPath
+        ]
+
     def __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str,
                  pch_path: Optional[str]=None):
         """Compiles a source file into an object file.
@@ -413,13 +439,7 @@ class Compiler(Component):
         Raises:
             RuntimeError: If the compilation command fails.
         """
-        pchFlags = [] if pch_path is None else [
-            "-include-pch", str(pch_path), "-Xclang", "-fmodules-validate-system-headers"
-        ]
-        args = [
-            *(self.default_args), "-I", include_path, *self._targetArgs(target_list), *pchFlags,
-            srcPath, "-c", "-o", destPath
-        ]
+        args = self.compileArgs(include_path, target_list, srcPath, destPath, pch_path)
         return _invoke(args, f"Compiling HIP source kernels into objects (.cpp -> .o)")
 
 

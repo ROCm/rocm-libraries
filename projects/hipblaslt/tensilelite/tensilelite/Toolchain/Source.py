@@ -27,7 +27,7 @@ import shutil
 
 from pathlib import Path
 from timeit import default_timer as timer
-from typing import List, Union, NamedTuple
+from typing import List, NamedTuple, Sequence, Union
 
 from ..Common import print1, ensurePath
 from ..Common.Architectures import baseArchName, compilerTargetOf
@@ -35,6 +35,7 @@ from ..Common.TimingInstrumentation import timing_context
 
 from .Component import Compiler, Bundler
 from .HelperKernelCache import HelperKernelCache
+from .HelperKernelChunks import compileHelperChunks, supportsChunkedCompile
 from .HelperKernelPch import HelperKernelPch
 
 class SourceToolchain(NamedTuple):
@@ -130,6 +131,31 @@ def _compileHelperSource(
         pch.discard(pchPath)
 
 
+def _compileHelperChunks(
+        compiler: Compiler,
+        pchPath: Union[Path, None],
+        includeDir: str,
+        cmdlineArchs: List[str],
+        chunkPaths: Sequence[Union[Path, str]],
+        objPath: str,
+    ) -> bool:
+    """Compiles the chunks of the helper-kernel source (see HelperKernelChunks) into objPath.
+
+    Returns False if that fails in any way (a compile error, a stale PCH, a driver whose jobs
+    are not the expected ones): the caller then compiles the whole source in one piece, which
+    reports a real error in it as before.
+    """
+    try:
+        compileHelperChunks(
+            compiler, includeDir, cmdlineArchs[0], chunkPaths, objPath,
+            None if pchPath is None else str(pchPath)
+        )
+        return True
+    except Exception as err:
+        print1(f"# Helper kernel chunked compile failed, compiling in one piece: {err}")
+        return False
+
+
 def buildSourceCodeObjectFiles(
         compiler: Compiler,
         bundler: Bundler,
@@ -138,6 +164,7 @@ def buildSourceCodeObjectFiles(
         includeDir: Union[Path, str],
         kernelPath: Union[Path, str],
         cmdlineArchs: List[str],
+        chunkPaths: Sequence[Union[Path, str]] = (),
     ) -> List[str]:
     """Compiles a HIP source code file into a code object file.
 
@@ -150,6 +177,9 @@ def buildSourceCodeObjectFiles(
         tmpObjDir: The directory where HIP source object files are created.
         includeDir: The include directory path.
         kernelPath: The path to the kernel source file.
+        chunkPaths: The same kernels split into chunks (writeHelpers), compiled in parallel
+            instead of kernelPath when there are two or more; kernelPath is compiled if that
+            fails. Only for a single target (HelperKernelChunks.supportsChunkedCompile).
 
     Returns:
         List of paths to the created code objects.
@@ -181,9 +211,13 @@ def buildSourceCodeObjectFiles(
     with timing_context("python_kernel_build_src_co.pch"):
         pchPath = pch.get(compiler, cmdlineArchs)
     with timing_context("python_kernel_build_src_co.compile"):
-        _compileHelperSource(
-            compiler, pch, pchPath, str(includeDir), cmdlineArchs, str(kernelPath), objPath
-        )
+        chunked = len(chunkPaths) >= 2 and supportsChunkedCompile(compiler, cmdlineArchs)
+        if not chunked or not _compileHelperChunks(
+            compiler, pchPath, str(includeDir), cmdlineArchs, chunkPaths, objPath
+        ):
+            _compileHelperSource(
+                compiler, pch, pchPath, str(includeDir), cmdlineArchs, str(kernelPath), objPath
+            )
 
     # The bundler names the compiler target; an alias writes under its own name.
     outDirs = {compilerTargetOf(baseArchName(a)): baseArchName(a) for a in cmdlineArchs}
