@@ -18,6 +18,7 @@ try:
 except ImportError:  # pragma: no cover - older reference tree
     from rocke import lower_kernel_to_llvm as _native_lower
 from rocke.core.ir_serialize import serialize
+from _emit_common import MODES, target_ir
 from rocke.core.verify import verify
 
 
@@ -82,7 +83,7 @@ def _spec(idx: int) -> LayerNorm2DSpec:
 def main() -> int:
     if len(sys.argv) < 2:
         sys.stderr.write(
-            f"usage: layernorm2d_emit.py <config_index 0..{len(CONFIGS) - 1}> [ll|ir|verify]\n"
+            f"usage: layernorm2d_emit.py <config_index 0..{len(CONFIGS) - 1}> [ll|ir|verify|target-ir]\n"
         )
         return 2
     if sys.argv[1] == "--count":
@@ -90,7 +91,7 @@ def main() -> int:
         return 0
     idx = int(sys.argv[1])
     mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    if mode not in ("ll", "ir", "verify"):
+    if mode not in MODES:
         sys.stderr.write(f"unknown mode {mode}\n")
         return 2
     spec = _spec(idx)
@@ -100,6 +101,8 @@ def main() -> int:
         sys.stdout.write(text)
     elif mode == "ir":
         sys.stdout.write(serialize(kernel))
+    elif mode == "target-ir":
+        sys.stdout.write(target_ir(kernel, "gfx950"))
     else:  # verify
         sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
     return 0

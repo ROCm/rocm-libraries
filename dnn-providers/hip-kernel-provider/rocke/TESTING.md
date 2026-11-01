@@ -325,6 +325,11 @@ Key semantics:
 - **Property/fuzz generation**
   ([`fuzz_diff.py`](platform/tests/instances/differential/fuzz_diff.py)) feeds the
   differential oracle with generated `(spec, arch)` inputs rather than a fixed list.
+- **The HIP-source route has its own identity test.** Both engines also lower a
+  kernel to HIP source. [`test_hip_source_identity.py`](platform/tests/instances/differential/test_hip_source_identity.py)
+  runs every parity emitter in its `target-ir` mode and lowers each Python-built
+  kernel through both HIP lowerers: the text must match, or both must refuse. It
+  runs in the platform pytest pass and skips without `rocke_engine`.
 
 ### 4.4 Is the emitted IR legal? (the toolchain gate)
 
