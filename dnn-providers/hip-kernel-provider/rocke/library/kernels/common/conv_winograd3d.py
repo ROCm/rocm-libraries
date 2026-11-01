@@ -658,6 +658,27 @@ class WinogradYxSpec:
     # one voxel, lanes (ox, 8-channel group, tile row) -- 2 stores per lane and plane, not 4;
     # the two b128 LDS reads of a lane are ordered by ox (bank-disjoint halves)
     epi16: bool = False
+    # lds16: linear tile mapping -- a block's 32 tiles are the consecutive 2-D tiles
+    # t0 .. t0+31 of the plane in row-major order, for any TX (rows wrap inside a block;
+    # the last tile of a row reads its right-hand column pair from a "seam" slot). The last
+    # block of a plane may be partial (its extra tiles are computed on wrapped rows and
+    # never stored). For dgrad as a forward conv of padded dY (TX = 2^n + 1).
+    lin: bool = False
+    # yc8h halo width (1: the next forward conv's input; 2: the next dgrad's padded dY)
+    yc8h_halo: int = 1
+    # yc8h: drop the outermost ring of the output (z, y or x at 0 or the last index) -- a
+    # chained BWD-data: this dgrad's dX minus its halo-form ring is the next dgrad's dY,
+    # and with yc8h_halo 1 the buffer is that dY padded by 2 (ring slots stay zero)
+    yc8h_crop: bool = False
+    # lds16 (default double-buffered path): split the C chunks over ``ksplit`` workgroups
+    # (grid x ksplit, split index slowest); each writes its f32 partial sums to slice
+    # ``ks`` of an f32 workspace [ksplit][Do][Ho][Wo][K] (the "Y" argument, f32), and
+    # build_ks_reduce sums the slices into the bf16 NDHWC output. For small grids (s7/s8).
+    ksplit: int = 1
+    # f32 kernel argument OS multiplied into the output (A^T coefficients of the epilogue,
+    # free): with a relayout that scales X by 1/OS (a power of two, exact) the f16 operands
+    # stay in the f16 normal range for tiny tensors (dgrad's dY) -- per-tensor scaling
+    oscale: bool = False
     # debugging / attribution only (wrong results): "nofill" skips the LDS fill,
     # "nomfma" skips the MFMAs, "nowait" uses no barriers in the main loop
     dbg: str = ""
@@ -730,6 +751,11 @@ class WinogradYxSpec:
             *(["bp2"] if self.bpf2 else []),
             *(["yc8h"] if self.yc8h else []),
             *(["e16"] if self.epi16 else []),
+            *(["lin"] if self.lin else []),
+            *([f"yh{self.yc8h_halo}"] if self.yc8h_halo != 1 else []),
+            *(["crop"] if self.yc8h_crop else []),
+            *([f"ks{self.ksplit}"] if self.ksplit != 1 else []),
+            *(["os"] if self.oscale else []),
             *([f"dbg{self.dbg}"] if self.dbg else []),
         )
 
@@ -748,7 +774,10 @@ def is_valid_yx_spec(spec: WinogradYxSpec) -> Tuple[bool, str]:
         g = spec.waves // 4
         if spec.waves % 4 or g % nn or spec.z_tile % (g // nn):
             return False, "lds16: waves/4 groups must split as nn x (divisor of z_tile)"
-    if spec.tiles2d % spec.tiles_per_wg:
+    if spec.lin and (spec.stage != "lds16" or spec.fhalf or spec.bf_fill or spec.frel
+                     or spec.persist or spec.ppad or spec.b16 or spec.bshare):
+        return False, "lin: plain lds16 (no fhalf / bf_fill / frel / persist / ppad / b16)"
+    if spec.tiles2d % spec.tiles_per_wg and not spec.lin:
         return False, f"2-D tiles {spec.tiles2d} not a multiple of {spec.tiles_per_wg}"
     _nz = (spec.waves // 4) // (2 if spec.nsplit else spec.nn) if spec.stage in (
         "lds16", "wlds") else (
@@ -782,6 +811,13 @@ def is_valid_yx_spec(spec: WinogradYxSpec) -> Tuple[bool, str]:
     if spec.yc8h and (spec.stage != "lds16" or not spec.epi_vec or spec.frel
                       or spec.Do % spec.z_tile or spec.K % 8):
         return False, "yc8h: lds16 epi_vec (no frel), z_tile dividing Do"
+    if spec.ksplit != 1 and (spec.stage != "lds16" or not spec.epi_vec or spec.yc8h
+                             or spec.Do % spec.z_tile or (spec.C // 8) % spec.ksplit
+                             or not spec.nfast or spec.persist or spec.frel
+                             or spec.single_buf or spec.b16 or spec.boff or spec.ksplit < 1):
+        return False, "ksplit: lds16 nfast epi_vec NDHWC, z_tile | Do, ksplit | C/8"
+    if spec.yc8h_crop and not spec.yc8h:
+        return False, "yc8h_crop needs yc8h"
     if spec.epi16 and not spec.yc8h:
         return False, "epi16 needs yc8h"
     if spec.yf16 and (spec.stage != "lds16" or not spec.pkrtz):
@@ -807,7 +843,7 @@ def is_valid_yx_spec(spec: WinogradYxSpec) -> Tuple[bool, str]:
         return False, f"unknown stage {spec.stage!r}"
     if spec.stage in ("lds", "lds16", "wlds"):
         tx = spec.Wo // 2
-        if not (tx % 32 == 0 or 32 % tx == 0):
+        if not (tx % 32 == 0 or 32 % tx == 0 or spec.lin):
             return False, "lds stage needs TX a multiple or divisor of 32"
         fl = {"lds16": _yx_lds16_floats, "wlds": _yx_wlds_floats}.get(
             spec.stage, _yx_lds_floats)(spec)
@@ -868,8 +904,21 @@ def _frel_plan(spec):
     return None
 
 
+def _yx_ntb(spec) -> int:
+    """2-D tile blocks per plane (the last one partial under ``lin``)."""
+    return -(-spec.tiles2d // spec.tiles_per_wg)
+
+
+def _yx_lin_seams(spec) -> int:
+    """lin: most row ends (other than at the block's last tile) inside one block."""
+    if not getattr(spec, "lin", False):
+        return 0
+    TX = spec.Wo // 2
+    return -(-(spec.tiles_per_wg - 1) // TX)
+
+
 def _yx_nblocks(spec) -> int:
-    return ((spec.tiles2d // spec.tiles_per_wg) * (-(-spec.Do // spec.z_tile))
+    return (_yx_ntb(spec) * (-(-spec.Do // spec.z_tile))
             * (spec.K // spec.n_tile))
 
 
@@ -878,13 +927,13 @@ def winograd_yx_grid(spec: WinogradYxSpec) -> Tuple[int, int, int]:
         return (min(spec.persist, _yx_nblocks(spec)), 1, 1)
     if spec.nfast:
         return (
-            (spec.tiles2d // spec.tiles_per_wg) * (-(-spec.Do // spec.z_tile))
-            * (spec.K // spec.n_tile),
+            _yx_ntb(spec) * (-(-spec.Do // spec.z_tile))
+            * (spec.K // spec.n_tile) * spec.ksplit,
             1,
             1,
         )
     return (
-        (spec.tiles2d // spec.tiles_per_wg) * (-(-spec.Do // spec.z_tile)),
+        _yx_ntb(spec) * (-(-spec.Do // spec.z_tile)),
         spec.K // spec.n_tile,
         1,
     )
@@ -899,7 +948,7 @@ def _pack4_f16_rtz(b, vals):
 
 def _yx_epilogue(
     b, spec, acc, wave, lane, kq, tb, z0, n_glob, Y, lds_flat=None, zt_w=None, wb=None,
-    zh=None, gpr=None,
+    zh=None, gpr=None, ks_i=None, oscale=None,
 ):
     """``zt_w``: output planes of this wave (default z_tile); ``wb``: the wave's y-point
     index b (default ``wave``); ``zh``: its z group (waves zh*4 .. zh*4+3 combine)."""
@@ -912,7 +961,10 @@ def _yx_epilogue(
     wbase = ci(0) if zh is None else b.mul(zh, ci(4))
     TX = Wo // 2
     if getattr(spec, "yc8h", False):
-        ry = b.buffer_rsrc(Y, ci((spec.Do + 2) * (Ho + 2) * (Wo + 2) * K * 2))
+        h2 = 2 * getattr(spec, "yc8h_halo", 1)
+        ry = b.buffer_rsrc(Y, ci((spec.Do + h2) * (Ho + h2) * (Wo + h2) * K * 2))
+    elif getattr(spec, "ksplit", 1) > 1:
+        ry = b.buffer_rsrc(Y, ci(spec.ksplit * spec.Do * Ho * Wo * K * 4))
     else:
         ry = b.buffer_rsrc(Y, ci(spec.Do * Ho * Wo * K * 2))
     # Epilogue (branch-free, one output plane zo per round). Every wave applies A^T along
@@ -945,6 +997,7 @@ def _yx_epilogue(
         ld.ld4 = ld4
         ld.n_base = b.sub(n_glob, b.mod(lane, ci(32)))
         ld.lane = lane
+        ld.ks_i = ks_i
     oy = b.div(wb, ci(2))
     ih = b.mod(wb, ci(2))
     # AT[oy][bb] as wave-uniform f32 coefficients
@@ -954,6 +1007,8 @@ def _yx_epilogue(
             b.select(b.cmp_eq(oy, ci(0)), b.const_f32(float(AT[0][bb])),
                      b.const_f32(float(AT[1][bb])))
         )
+    if oscale is not None:
+        coef = [b.fmul(cf, oscale) for cf in coef]
     # A^T along x for every slot right away (256 accumulators -> 128 VGPR values), so
     # no accumulator is live across the epilogue's barriers.
     pxs = {}
@@ -1040,15 +1095,24 @@ def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry):
                 if getattr(spec, "yc8h", False):
                     # [K/8][Do+2][Ho+2][Wo+2][8], interior: channel kk = n_base + 4 nq
                     kb = b.add(b.div(ld.n_base, ci(8)), b.div(nq, ci(2)))
+                    hh = getattr(spec, "yc8h_halo", 1)
                     vox = b.add(b.mul(b.add(b.mul(b.add(b.mul(
-                        kb, ci(spec.Do + 2)), b.add(zz, ci(1))), ci(Ho + 2)),
-                        b.add(yo, ci(1))), ci(Wo + 2)), b.add(xo, ci(1)))
+                        kb, ci(spec.Do + 2 * hh)), b.add(zz, ci(hh))), ci(Ho + 2 * hh)),
+                        b.add(yo, ci(hh))), ci(Wo + 2 * hh)), b.add(xo, ci(hh)))
                     yoff = b.add(b.mul(vox, ci(8)), b.mul(b.mod(nq, ci(2)), ci(4)))
+                    yoff = _yx_crop_mask(b, spec, zz, yo, xo, yoff, 1)
                 else:
                     yoff = b.add(
                         b.mul(b.add(b.mul(b.add(b.mul(zz, ci(Ho)), yo), ci(Wo)), xo), ci(K)),
                         b.add(ld.n_base, b.mul(nq, ci(4))),
                     )
+                if getattr(spec, "ksplit", 1) > 1:
+                    nel = spec.Do * Ho * Wo * K
+                    yoff = b.add(yoff, b.mul(ld.ks_i, ci(nel)))
+                    yoff = _yx_lin_mask(b, spec, tt, yoff, 1, total=spec.ksplit * nel)
+                    b.buffer_store_vN_f32(ry, b.mul(yoff, ci(4)), ci(0), out, 4)
+                    continue
+                yoff = _yx_lin_mask(b, spec, tt, yoff, 1)
                 b.buffer_store_vN_bf16(
                     ry, b.mul(yoff, ci(2)), ci(0), b.vec_trunc_f32_to_bf16(out), 2
                 )
@@ -1078,7 +1142,36 @@ def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry):
                     n_glob,
                 )
                 # out-of-range z (last block when z_tile does not divide Do) is dropped
+                yoff = _yx_lin_mask(b, spec, tt, yoff, 1)
                 b.buffer_store_bf16(ry, b.mul(yoff, ci(2)), ci(0), b.trunc_f32_to_bf16(out))
+
+
+def _yx_crop_mask(b, spec, zz, yo, xo, off, unit):
+    """yc8h_crop: outputs on the outer ring store out of range."""
+    if not getattr(spec, "yc8h_crop", False):
+        return off
+    ci = b.const_i32
+    h2 = 2 * getattr(spec, "yc8h_halo", 1)
+    nel = (spec.Do + h2) * (spec.Ho + h2) * (spec.Wo + h2) * spec.K
+    ok = b.land(b.land(b.land(b.cmp_ge(zz, ci(1)), b.cmp_lt(zz, ci(spec.Do - 1))),
+                       b.land(b.cmp_ge(yo, ci(1)), b.cmp_lt(yo, ci(spec.Ho - 1)))),
+                b.land(b.cmp_ge(xo, ci(1)), b.cmp_lt(xo, ci(spec.Wo - 1))))
+    return b.select(ok, off, ci(-(-nel // unit)))
+
+
+def _yx_lin_mask(b, spec, tt, off, unit, total=None):
+    """lin: tiles past the plane's last one (partial last block) store out of range."""
+    if not getattr(spec, "lin", False) or spec.tiles2d % spec.tiles_per_wg == 0:
+        return off
+    if total is not None:
+        nel = total
+    elif getattr(spec, "yc8h", False):
+        h2 = 2 * getattr(spec, "yc8h_halo", 1)
+        nel = (spec.Do + h2) * (spec.Ho + h2) * (spec.Wo + h2) * spec.K
+    else:
+        nel = spec.Do * spec.Ho * spec.Wo * spec.K
+    return b.select(b.cmp_lt(tt, b.const_i32(spec.tiles2d)), off,
+                    b.const_i32(-(-nel // unit)))
 
 
 def _yx_epi_store16(b, spec, zo, ld, wbase, ih, oy, coef, tb, z0, ry):
@@ -1116,9 +1209,12 @@ def _yx_epi_store16(b, spec, zo, ld, wbase, ih, oy, coef, tb, z0, ry):
             ob = b.vector_mul(cvec[bb], pb) if ob is None else b.vector_fma(cvec[bb], pb, ob)
         lo = b.select(is1, ob, oa)
         hi = b.select(is1, oa, ob)
+        hh = getattr(spec, "yc8h_halo", 1)
         vox = b.add(b.mul(b.add(b.mul(b.add(b.mul(
-            kb, ci(spec.Do + 2)), b.add(zz, ci(1))), ci(Ho + 2)),
-            b.add(yo, ci(1))), ci(Wo + 2)), b.add(xo, ci(1)))
+            kb, ci(spec.Do + 2 * hh)), b.add(zz, ci(hh))), ci(Ho + 2 * hh)),
+            b.add(yo, ci(hh))), ci(Wo + 2 * hh)), b.add(xo, ci(hh)))
+        vox = _yx_lin_mask(b, spec, tt, vox, 8)
+        vox = _yx_crop_mask(b, spec, zz, yo, xo, vox, 8)
         b.buffer_store_vN_bf16(
             ry, b.mul(vox, ci(16)), ci(0), b.vec_trunc_f32_to_bf16(b.vec_concat(lo, hi)), 4
         )
@@ -1312,6 +1408,8 @@ def build_winograd_yx_fwd(spec: WinogradYxSpec) -> KernelDef:
 
 def _yx_lds_geom(spec):
     TX = spec.Wo // 2
+    if getattr(spec, "lin", False):
+        return TX, 32, 1
     TCx = min(TX, 32)
     TR = 32 // TCx
     return TX, TCx, TR
@@ -1866,7 +1964,7 @@ def build_winograd_yx_lds16p_fwd(spec: WinogradYxSpec) -> KernelDef:
 def _yx_lds16_ps(spec) -> int:
     """Column-parity stride (8-byte slots) of the lds16 staging buffers."""
     _, TCx, _ = _yx_lds_geom(spec)
-    ps = TCx + 1
+    ps = TCx + 1 + _yx_lin_seams(spec)
     if getattr(spec, "ppad", False):
         while ps % 16 != 8:
             ps += 1
@@ -1912,7 +2010,11 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     NC = 2 * TCx + 2
     HC = _yx_lds16_ps(spec)  # parity stride (slots); TCx + 1 unless ppad
     BUF = _yx_lds16_buf(spec)
-    n_tb = spec.tiles2d // spec.tiles_per_wg
+    n_tb = _yx_ntb(spec)
+    LIN = spec.lin
+    NSEAM = _yx_lin_seams(spec)
+    if LIN:
+        NC = 2 * TCx + 2 + 2 * NSEAM  # 66 virtual columns + the seam column pairs
     items = NPL * TR * NC
     rounds = (items + spec.block_size - 1) // spec.block_size
 
@@ -1926,12 +2028,15 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     else:
         X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     U = b.param("U", PtrType(op_t, "global"), noalias=True, readonly=True, align=16)
-    Y = b.param("Y", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
+    KS = spec.ksplit
+    Y = b.param("Y", PtrType(F32 if KS > 1 else BF16, "global"), noalias=True, writeonly=True,
+                align=16)
     if spec.frel:
         Xn = b.param("Xn", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
         Fl = b.param("F", PtrType(I32, "global"), noalias=True, align=4)
     if spec.boff:
         BOFF = b.param("BOFF", I32)
+    OS = b.param("OS", F32) if spec.oscale else None
 
     ci = b.const_i32
     tid = b.thread_id_x()
@@ -1949,9 +2054,21 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     if spec.nfast:
         nb_ = spec.K // spec.n_tile
         pid = b.block_id_x()
+        ks_i = None
+        if KS > 1 and spec.xcd:
+            # ksplit + xcd: remap the whole (split-major) grid first, then split it
+            nwg = winograd_yx_grid(spec)[0]
+            q_, r_ = nwg // spec.xcd, nwg % spec.xcd
+            xx = b.mod(pid, ci(spec.xcd))
+            kk = b.div(pid, ci(spec.xcd))
+            pid = b.add(b.add(b.mul(xx, ci(q_)), b.smin(xx, ci(r_))), kk)
+        if KS > 1:
+            nwg0 = winograd_yx_grid(spec)[0] // KS
+            ks_i = b.div(pid, ci(nwg0))
+            pid = b.mod(pid, ci(nwg0))
         if spec.boff:
             pid = b.add(pid, BOFF)
-        if spec.xcd:
+        if spec.xcd and KS == 1:
             nwg = winograd_yx_grid(spec)[0]
             q_, r_ = nwg // spec.xcd, nwg % spec.xcd
             xx = b.mod(pid, ci(spec.xcd))
@@ -2014,6 +2131,40 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
         tmp = b.div(it, ci(NC))
         tr = b.mod(tmp, ci(TR))
         zi = b.div(tmp, ci(TR))
+        if LIN:
+            # virtual column v < 66: lane mm = min(v // 2, 31), its column e = v - 2 mm of
+            # tile t0 + mm; seam pair s (v >= 66): the right-hand columns 2 TX, 2 TX + 1 of
+            # the s-th row end inside the block (lane m0 + s TX, m0 = TX - 1 - tx0)
+            NV = 2 * TCx + 2
+            is_sm = b.cmp_ge(col, ci(NV))
+            sv = b.smax(b.sub(col, ci(NV)), ci(0))
+            s_ = b.div(sv, ci(2))
+            es = b.mod(sv, ci(2))
+            m_s = b.add(b.sub(ci(TX - 1), tx0), b.mul(s_, ci(TX)))
+            mm = b.smin(b.div(col, ci(2)), ci(TCx - 1))
+            e_ = b.sub(col, b.mul(mm, ci(2)))
+            lt = b.select(is_sm, m_s, mm)
+            tt_ = b.add(t0, lt)
+            tyy = b.div(tt_, ci(TX))
+            txx = b.mod(tt_, ci(TX))
+            xcol = b.select(is_sm, b.add(ci(2 * TX), es), b.add(b.mul(txx, ci(2)), e_))
+            voff = b.add(
+                b.add(b.mul(b.add(z0, zi), ci(plane_b)), b.mul(b.mul(tyy, ci(2)), ci(row_b))),
+                b.mul(xcol, ci(vox_b)),
+            )
+            par = b.select(is_sm, es, b.mod(col, ci(2)))
+            half = b.select(is_sm, b.add(ci(TCx + 1), s_), b.div(col, ci(2)))
+            lbase = b.add(
+                b.mul(b.add(b.mul(b.mul(b.mul(zi, ci(4)), ci(2)), ci(2)), par), ci(HC * 2)),
+                b.mul(half, ci(2)),
+            )
+            ok_sm = b.lor(b.cmp_lt(col, ci(NV)), b.cmp_lt(m_s, ci(TCx - 1)))
+            if spec.fill_il:
+                valid = b.land(valid, ok_sm)
+            else:
+                valid = b.land(valid, ok_sm)
+            fill.append((valid, voff, lbase))
+            continue
         voff = b.add(
             b.add(
                 b.mul(b.add(z0, zi), ci(plane_b)),
@@ -2159,6 +2310,15 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
 
     l_tr = b.div(m, ci(TCx))
     l_hx = b.mod(m, ci(TCx))
+    l_hx1 = b.add(l_hx, ci(1))
+    if LIN:
+        # the last tile of a row (not the block's last lane) reads its right-hand column
+        # pair from the seam slot of that row end
+        dm = b.sub(m, b.sub(ci(TX - 1), tx0))
+        seam_l = b.land(b.land(b.cmp_ge(dm, ci(0)), b.cmp_eq(b.mod(b.smax(dm, ci(0)), ci(TX)),
+                                                              ci(0))),
+                        b.cmp_lt(m, ci(TCx - 1)))
+        l_hx1 = b.select(seam_l, b.add(ci(TCx + 1), b.div(b.smax(dm, ci(0)), ci(TX))), l_hx1)
 
     def read_plane(zl, bufoff):
         zi = b.add(b.mul(zh, ci(ZTW)), ci(zl))
@@ -2169,7 +2329,8 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
         vs = []
         for x in range(4):
             off = b.add(
-                b.mul(b.add(b.mul(b.add(rowbase, ci(x % 2)), ci(HC)), b.add(l_hx, ci(x // 2))),
+                b.mul(b.add(b.mul(b.add(rowbase, ci(x % 2)), ci(HC)),
+                            l_hx if x < 2 else l_hx1),
                       ci(2)),
                 bufoff,
             )
@@ -2187,6 +2348,16 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
         ]
 
     n_chunks = C // spec.c_chunk
+    if KS > 1:
+        n_chunks //= KS
+        cbase = b.mul(ks_i, ci(n_chunks))
+        _lf, _lb = load_fill, load_b
+
+        def load_fill(cc):
+            return _lf(b.add(cbase, cc))
+
+        def load_b(cc):
+            return _lb(b.add(cbase, cc))
     bkeys = [(dz, c) for dz in range(3) for c in range(4)]
     if spec.single_buf and spec.bshare:
         # weight fragments of one chunk in LDS after the plane buffer:
@@ -2452,7 +2623,8 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
             b.global_flag_store(Fl, pidr, ci(1))
     _yx_epilogue(
         b, spec, acc, wave, lane, kq, tb, b.add(z0, b.mul(zh, ci(ZTW))), n_glob, Y,
-        lds_flat=lds, zt_w=ZTW, wb=wb, zh=grp, gpr=2,
+        lds_flat=lds, zt_w=ZTW, wb=wb, zh=grp, gpr=2, ks_i=ks_i if KS > 1 else None,
+        oscale=OS,
     )
     b.ret()
     return b.kernel
@@ -2796,17 +2968,21 @@ def x_to_c8_grid(D, H, W, C):
     return (-(-(D * H * W) // 64), 1, 1)
 
 
-def build_x_to_c8_lds(D: int, H: int, W: int, C: int, block_bytes=None) -> KernelDef:
+def build_x_to_c8_lds(D: int, H: int, W: int, C: int, block_bytes=None,
+                      halo: int = 0, scale: bool = False) -> KernelDef:
     """LDS-transposed X [D][H][W][C] -> X8 [C/8][D][H][W][8]: a block of VB voxels is read
     fully coalesced (16 B per lane, consecutive), transposed through LDS and written as
     C/8 runs of VB * 16 contiguous bytes. Block 256, grid ceil(V / VB)."""
     V = D * H * W
-    b = IRBuilder(f"wino_x_to_c8l_V{V}C{C}" + (f"_bb{block_bytes}" if block_bytes else ""))
+    b = IRBuilder(f"wino_x_to_c8l_V{V}C{C}" + (f"_bb{block_bytes}" if block_bytes else "")
+                  + (f"_h{halo}" if halo else "") + ("_s" if scale else ""))
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     X8 = b.param("X8", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
+    S = b.param("S", F32) if scale else None
     lds = b.smem_alloc(F32, [_x_to_c8_lds_words(C, block_bytes)], name_hint="x8_t")
-    _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, b.block_id_x(), block_bytes)
+    _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, b.block_id_x(), block_bytes, halo=halo,
+                      scale=S)
     b.ret()
     return b.kernel
 
@@ -2823,8 +2999,12 @@ def _x_to_c8_lds_words(C, block_bytes=None):
 
 
 def _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, blk, block_bytes=None, vlim=None,
-                      nthr=256):
+                      nthr=256, halo=0, scale=None):
+    """``halo``: X8 is [C/8][D+2h][H+2h][W+2h][8] and only its interior is written (the
+    caller zeroes the halo once) -- dgrad's dY padded by 2 for the flipped-weight conv."""
     V = D * H * W
+    hp = halo
+    Vp = (D + 2 * hp) * (H + 2 * hp) * (W + 2 * hp)
     VL = V if vlim is None else vlim  # voxels [0, VL) are relayouted (strides use V)
     NCB = C // 8
     VB = _x8_vb(C, block_bytes)  # voxels per block
@@ -2833,8 +3013,8 @@ def _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, blk, block_bytes=None, vlim=Non
     tid = b.thread_id_x()
     v0 = b.mul(blk, ci(VB))
     rx = b.buffer_rsrc(X, ci(V * C * 2))
-    ry = b.buffer_rsrc(X8, ci(V * C * 2))
-    nb = V * C * 2
+    ry = b.buffer_rsrc(X8, ci(Vp * C * 2))
+    nb = Vp * C * 2
     for r in range(-(-n16 // nthr)):
         e = b.add(tid, ci(r * nthr))  # element in input order: (v_local, cb)
         ok = b.cmp_lt(e, ci(n16))
@@ -2854,7 +3034,24 @@ def _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, blk, block_bytes=None, vlim=Non
         v = b.add(v0, vl)
         with b.scf_if(ok):
             val = b.smem_load_vN_f32(lds, b.mul(e, ci(4)), n=4)
-            ooff = b.select(b.cmp_lt(v, ci(VL)), b.add(b.mul(cb, ci(V * 16)), b.mul(v, ci(16))),
+            if scale is not None:  # x * S (S a power of two: exact in bf16)
+                vi = b.vec_bitcast(val, VectorType(I32, 4))
+                ws_ = []
+                for q in range(4):
+                    d = b.vec_extract(vi, q)
+                    lo = b.bitcast(b.fmul(b.bitcast(b.shl(d, ci(16)), F32), scale), I32)
+                    hi = b.bitcast(b.fmul(b.bitcast(b.land(d, ci(-65536)), F32), scale), I32)
+                    ws_.append(b.lor(b.land(hi, ci(-65536)), b.lshr(lo, ci(16))))
+                val = b.vec_bitcast(b.vec_pack(ws_, I32), VectorType(F32, 4))
+            if hp:
+                xx_ = b.mod(v, ci(W))
+                yy_ = b.mod(b.div(v, ci(W)), ci(H))
+                zz_ = b.div(v, ci(H * W))
+                vp = b.add(b.mul(b.add(b.mul(b.add(zz_, ci(hp)), ci(H + 2 * hp)),
+                                       b.add(yy_, ci(hp))), ci(W + 2 * hp)), b.add(xx_, ci(hp)))
+            else:
+                vp = v
+            ooff = b.select(b.cmp_lt(v, ci(VL)), b.add(b.mul(cb, ci(Vp * 16)), b.mul(vp, ci(16))),
                             ci(nb))
             b._op(
                 "tile.buffer_store_vN_bf16",
@@ -2872,31 +3069,41 @@ def x_to_c8_lds_grid(D, H, W, C, block_bytes=None):
 
 def build_yx_weight_transform(K: int, C: int, *, out_dtype: str = "f16",
                               fold: bool = False, u16: bool = False,
-                              uc: bool = False) -> KernelDef:
+                              uc: bool = False, flip: bool = False) -> KernelDef:
     """W [K][3][3][3][C] bf16 -> U [3 dz][4 b][4 c][C/8][K][8] (``out_dtype``).
     One thread per (k, c): 27 loads, G (x) G on (y, x), 48 stores. Grid (C*K/256)."""
     from rocke.core.ir import F16
 
     odt = F16 if out_dtype == "f16" else BF16
-    b = IRBuilder(f"wino_yx_wt_K{K}C{C}_{out_dtype}{'_fold' if fold else ''}{'_u16' if u16 else ''}{'_uc' if uc else ''}")
+    b = IRBuilder(f"wino_yx_wt_K{K}C{C}_{out_dtype}{'_fold' if fold else ''}{'_u16' if u16 else ''}{'_uc' if uc else ''}{'_flip' if flip else ''}")
     b.kernel.attrs["max_workgroup_size"] = 256
     W = b.param("W", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     Uo = b.param("U", PtrType(odt, "global"), noalias=True, writeonly=True, align=16)
-    _emit_yx_wt(b, W, Uo, K, C, out_dtype, fold, u16, uc, b.block_id_x())
+    _emit_yx_wt(b, W, Uo, K, C, out_dtype, fold, u16, uc, b.block_id_x(), flip=flip)
     b.ret()
     return b.kernel
 
 
-def _emit_yx_wt(b, W, Uo, K, C, out_dtype, fold, u16, uc, blk):
+def _emit_yx_wt(b, W, Uo, K, C, out_dtype, fold, u16, uc, blk, flip=False):
+    """``flip``: dgrad weights -- W is the forward filter [C][3][3][3][K] (forward K = this
+    transform's C), transformed as Wd[k][dz][dy][dx][c] = W[c][2-dz][2-dy][2-dx][k]."""
     ci = b.const_i32
     t = b.add(b.mul(blk, ci(256)), b.thread_id_x())
-    c = b.mod(t, ci(C))
-    k = b.div(t, ci(C))
+    if flip:  # consecutive threads read consecutive k (contiguous in the forward filter)
+        k = b.mod(t, ci(K))
+        c = b.div(t, ci(K))
+    else:
+        c = b.mod(t, ci(C))
+        k = b.div(t, ci(C))
     w = {}
     for z in range(3):
         for y in range(3):
             for x in range(3):
-                idx = b.add(b.mul(b.add(b.mul(k, ci(27)), ci((z * 3 + y) * 3 + x)), ci(C)), c)
+                if flip:
+                    tap = ((2 - z) * 3 + (2 - y)) * 3 + (2 - x)
+                    idx = b.add(b.mul(b.add(b.mul(c, ci(27)), ci(tap)), ci(K)), k)
+                else:
+                    idx = b.add(b.mul(b.add(b.mul(k, ci(27)), ci((z * 3 + y) * 3 + x)), ci(C)), c)
                 w[(z, y, x)] = b.cast_to_f32(b.global_load(W, idx, BF16, align=2))
     sgn = ZS0 if fold else (1.0, 1.0, 1.0, 1.0)
     if uc:  # [dz][b][C/8][K][2 kq][4 c][4]: point stride differs, handled below
@@ -2948,6 +3155,114 @@ def _emit_yx_wt(b, W, Uo, K, C, out_dtype, fold, u16, uc, blk):
                 b.global_store(Uo, off, cvt, align=2)
 
 
+
+
+def build_yx_weight_transform_v3(K: int, C: int, *, flip: bool = False,
+                                 swz: bool = False) -> KernelDef:
+    """W -> U [3][4][4][C/8][K][8] f16 (lds16 layout, no fold), one thread per (k, 8-channel
+    group), consecutive threads = consecutive k, so every U store is a 16-byte lane store and
+    a wave writes 1 KiB contiguous. Loads: 16 bytes per tap (forward filter, ``flip=False``)
+    or, for dgrad (``flip``: W is the forward filter [C][3][3][3][K]), 8 coalesced 2-byte
+    loads per tap. Same arithmetic order as _emit_yx_wt. Grid (ceil(K*C/8/256))."""
+    from rocke.core.ir import F16
+
+    b = IRBuilder(f"wino_yx_wt3_K{K}C{C}{'_flip' if flip else ''}{'_swz' if swz else ''}")
+    b.kernel.attrs["max_workgroup_size"] = 256
+    W = b.param("W", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
+    Uo = b.param("U", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    _emit_yx_wt3(b, W, Uo, K, C, flip, b.block_id_x(), swz=swz)
+    b.ret()
+    return b.kernel
+
+
+def yx_weight_transform_v3_grid(K, C):
+    # one thread per (dz, k, 8-channel group)
+    return (-(-(3 * K * C // 8) // 256), 1, 1)
+
+
+def yx_wt3_swz_ok(K, C, flip=False):
+    return not flip and K % 8 == 0 and (C // 8) % 8 == 0
+
+
+def _emit_yx_wt3(b, W, Uo, K, C, flip, blk, swz=False):
+    from rocke.core.ir import F16
+
+    ci = b.const_i32
+    NCB = C // 8
+    t = b.add(b.mul(blk, ci(256)), b.thread_id_x())
+    ok = b.cmp_lt(t, ci(3 * K * NCB))
+    tt = b.select(ok, t, ci(0))
+    if swz and yx_wt3_swz_ok(K, C, flip):
+        # 8x8 lane swizzle (forward filter): each 64-lane group takes 8 k x 8 channel groups,
+        # so 8 lanes read 128 contiguous bytes of W[k][tap][:] and 8 lanes write 128
+        # contiguous bytes of U[pt][cb][:][8] (wt3 alone: coalesced writes, 16 B per line reads)
+        ln = b.mod(tt, ci(64))
+        g = b.div(tt, ci(64))
+        k = b.add(b.mul(b.mod(g, ci(K // 8)), ci(8)), b.div(ln, ci(8)))
+        rest = b.div(g, ci(K // 8))
+        cb = b.add(b.mul(b.mod(rest, ci(NCB // 8)), ci(8)), b.mod(ln, ci(8)))
+        dzv = b.div(rest, ci(NCB // 8))
+    else:
+        k = b.mod(tt, ci(K))
+        cb = b.mod(b.div(tt, ci(K)), ci(NCB))
+        dzv = b.div(tt, ci(K * NCB))  # this thread's z tap (3x the threads: latency-bound otherwise)
+    rw = b.buffer_rsrc(W, ci(K * 27 * C * 2))
+    ru = b.buffer_rsrc(Uo, ci(48 * C * K * 2))
+    w = {}
+    for z in range(1):
+        for y in range(3):
+            for x in range(3):
+                # tap (dzv, y, x): runtime z
+                tap = b.add(b.mul(dzv, ci(9)), ci(y * 3 + x))
+                if flip:
+                    ftap = b.sub(ci(26), tap)  # (2-z, 2-y, 2-x)
+                    vals = []
+                    for j in range(8):
+                        idx = b.add(b.mul(b.add(b.mul(b.add(b.mul(cb, ci(8)), ci(j)), ci(27)),
+                                                ftap), ci(K)), k)
+                        vals.append(b.cast_to_f32(b.global_load(W, idx, BF16, align=2)))
+                    w[(z, y, x)] = vals
+                else:
+                    off = b.mul(b.add(b.mul(b.add(b.mul(k, ci(27)), tap), ci(C)),
+                                      b.mul(cb, ci(8))), ci(2))
+                    d = b.buffer_load_vN(rw, off, ci(0), I32, 4)
+                    vals = []
+                    for q in range(4):
+                        dq = b.vec_extract(d, q)
+                        vals.append(b.bitcast(b.shl(dq, ci(16)), F32))
+                        vals.append(b.bitcast(b.land(dq, ci(-65536)), F32))
+                    w[(z, y, x)] = vals
+    so = b.select(ok, b.add(b.mul(b.add(b.mul(cb, ci(K)), k), ci(16)),
+                            b.mul(dzv, ci(16 * C * K * 2))), ci(48 * C * K * 2))
+    for dz in range(1):
+        gx = {}
+        for y in range(3):
+            for cc in range(4):
+                for j in range(8):
+                    acc = None
+                    for x in range(3):
+                        g = G[cc][x]
+                        if g == 0.0:
+                            continue
+                        term = b.fmul(b.const_f32(g), w[(dz, y, x)][j])
+                        acc = term if acc is None else b.fadd(acc, term)
+                    gx[(y, cc, j)] = acc
+        for bb in range(4):
+            for cc in range(4):
+                outs = []
+                for j in range(8):
+                    acc = None
+                    for y in range(3):
+                        g = G[bb][y]
+                        if g == 0.0:
+                            continue
+                        term = b.fmul(b.const_f32(g), gx[(y, cc, j)])
+                        acc = term if acc is None else b.fadd(acc, term)
+                    outs.append(acc)
+                pt = (dz * 4 + bb) * 4 + cc
+                for hh in range(2):
+                    h = b.vec_cast_f32_to(b.vec_pack(outs[4 * hh:4 * hh + 4], F32), F16)
+                    b.buffer_store_vN_f16(ru, so, ci(pt * C * K * 2 + 8 * hh), h, 2)
 
 
 def build_yx_weight_transform_v2(K: int, C: int, *, out_dtype: str = "f16",
@@ -3024,7 +3339,8 @@ def yx_weight_transform_v2_grid(K, C):
 
 
 def build_yx_aux(D: int, H: int, W: int, C: int, K: int, *, out_dtype: str = "f16",
-                 fold: bool = False, rev: bool = False) -> KernelDef:
+                 fold: bool = False, rev: bool = False, halo: int = 0,
+                 flip: bool = False, wtv: int = 1, scale: bool = False) -> KernelDef:
     """One launch for both auxiliary passes of the yx kernel: blocks [0, NX) relayout X to c8
     (LDS-transposed), blocks [NX, NX + NW) transform the weights -- the two run side by side
     instead of back to back. Signature (X, X8, W, U); grid yx_aux_grid()."""
@@ -3033,21 +3349,27 @@ def build_yx_aux(D: int, H: int, W: int, C: int, K: int, *, out_dtype: str = "f1
     odt = F16 if out_dtype == "f16" else BF16
     nx = x_to_c8_lds_grid(D, H, W, C)[0]
     b = IRBuilder(f"wino_yx_aux_V{D * H * W}C{C}K{K}_{out_dtype}{'_fold' if fold else ''}"
-                  f"{'_rev' if rev else ''}")
+                  f"{'_rev' if rev else ''}{f'_h{halo}' if halo else ''}{'_flip' if flip else ''}"
+                  f"{'_wt3' if wtv == 3 else ''}{'_wt4' if wtv == 4 else ''}{'_s' if scale else ''}")
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     X8 = b.param("X8", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
     Wp = b.param("W", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     Uo = b.param("U", PtrType(odt, "global"), noalias=True, writeonly=True, align=16)
+    S = b.param("S", F32) if scale else None
     lds = b.smem_alloc(F32, [_x_to_c8_lds_words(C)], name_hint="x8_t")
     ci = b.const_i32
     bid = b.block_id_x()
     with b.scf_if_else(b.cmp_lt(bid, ci(nx))) as (then_ctx, else_ctx):
         with then_ctx:
             _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C,
-                              b.sub(ci(nx - 1), bid) if rev else bid)
+                              b.sub(ci(nx - 1), bid) if rev else bid, halo=halo, scale=S)
         with else_ctx:
-            _emit_yx_wt(b, Wp, Uo, K, C, out_dtype, fold, False, False, b.sub(bid, ci(nx)))
+            if wtv in (3, 4):
+                _emit_yx_wt3(b, Wp, Uo, K, C, flip, b.sub(bid, ci(nx)), swz=wtv == 4)
+            else:
+                _emit_yx_wt(b, Wp, Uo, K, C, out_dtype, fold, False, False, b.sub(bid, ci(nx)),
+                            flip=flip)
     b.ret()
     return b.kernel
 
@@ -3091,13 +3413,42 @@ def build_yx_frel_aux(spec: WinogradYxSpec) -> KernelDef:
     return b.kernel
 
 
+def build_ks_reduce(nel: int, ks: int) -> KernelDef:
+    """Split-K reduction: P [ks][nel] f32 -> Y [nel] bf16 (8 elements per thread)."""
+    b = IRBuilder(f"wino_ks_reduce_n{nel}_k{ks}")
+    b.kernel.attrs["max_workgroup_size"] = 256
+    P = b.param("P", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
+    Yo = b.param("Y", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
+    ci = b.const_i32
+    e = b.mul(b.add(b.mul(b.block_id_x(), ci(256)), b.thread_id_x()), ci(8))
+    rp = b.buffer_rsrc(P, ci(ks * nel * 4))
+    ry = b.buffer_rsrc(Yo, ci(nel * 2))
+    ok = b.cmp_lt(e, ci(nel))
+    eo = b.select(ok, e, ci(nel))
+    acc = None
+    for k in range(ks):
+        o = b.select(ok, b.mul(b.add(e, ci(k * nel)), ci(4)), ci(ks * nel * 4))
+        v0 = b.buffer_load_vN(rp, o, ci(0), F32, 4)
+        v1 = b.buffer_load_vN(rp, o, ci(16), F32, 4)
+        acc = (v0, v1) if acc is None else (b.vector_add(acc[0], v0), b.vector_add(acc[1], v1))
+    b.buffer_store_vN_bf16(ry, b.mul(eo, ci(2)), ci(0),
+                           b.vec_trunc_f32_to_bf16(b.vec_concat(acc[0], acc[1])), 4)
+    b.ret()
+    return b.kernel
+
+
+def ks_reduce_grid(nel: int):
+    return (-(-nel // 2048), 1, 1)
+
+
 def yx_frel_aux_grid(spec: WinogradYxSpec):
     A, base, vpw, nwg = _frel_plan(spec)
     return (-(-base // _x8_vb(spec.C)) + yx_weight_transform_grid(spec.K, spec.C)[0] + 1, 1, 1)
 
 
-def yx_aux_grid(D, H, W, C, K):
-    return (x_to_c8_lds_grid(D, H, W, C)[0] + yx_weight_transform_grid(K, C)[0], 1, 1)
+def yx_aux_grid(D, H, W, C, K, wtv=1):
+    nw = (yx_weight_transform_v3_grid if wtv in (3, 4) else yx_weight_transform_grid)(K, C)[0]
+    return (x_to_c8_lds_grid(D, H, W, C)[0] + nw, 1, 1)
 
 
 def yx_weight_transform_grid(K, C):
