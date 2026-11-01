@@ -5527,10 +5527,13 @@ def _widest_vector_sizes(candidates):
     thread) only in narrower copies. Narrower access does not win, so only the
     kernels at the problem's widest combination are run.
 
-    "Widest" is taken per kernel kind -- direction, epilogue, split-K mode and
-    group merging -- because the kind caps some widths regardless of the
-    problem: the default epilogue stores scalar (c = 1), and a group-merged
-    kernel derives its widths in the builder (recorded as 0). Default-epilogue
+    "Widest" is taken per kernel kind -- direction, epilogue, split-K mode,
+    group merging and the K loop (synchronous or async-DMA) -- because the
+    kind caps some widths regardless of the problem: the default epilogue
+    stores scalar (c = 1), a group-merged kernel derives its widths in the
+    builder (recorded as 0), and an async-DMA kernel records the chunk widths
+    its copies use where a synchronous one records its width caps, which its
+    loader can narrow at build time, so the two do not compare. Default-epilogue
     kernels are dropped altogether where a kernel of the same kind can store
     wider than 1 for this problem.
     ``supports_problem`` has already dropped widths the problem cannot take,
@@ -5548,14 +5551,14 @@ def _widest_vector_sizes(candidates):
             ident.group_merge,
             ident.streamk,
             ident.streamk_reduction,
+            bool(getattr(ident, "async_dma", False)),
         )
 
     def rank(ident):
         # An async-DMA binary leaves A / B unset and records the chunk widths
-        # its copies use instead; it ranks by those, as a synchronous kernel
-        # with the same load widths. (Ranking it as 8 wide let it outrank, and
-        # so filter out, the widest synchronous kernels of a problem whose
-        # channel run caps the loads below 8.)
+        # its copies use instead; it ranks by those against the other async
+        # binaries of its kind (kind() keeps it apart from the synchronous
+        # kernels, whose recorded caps are not their effective load widths).
         a = ident.vector_size_a
         b = ident.vector_size_b
         if a is None:
