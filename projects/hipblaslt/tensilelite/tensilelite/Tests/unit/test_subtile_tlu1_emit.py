@@ -86,6 +86,11 @@ class _Writer:
         from rocisa.container import sgpr
         return sgpr("Stride%s%s" % (tc, idx))
 
+    def sizeRef(self, idx):
+        from rocisa.container import sgpr
+        from tensilelite.Common import INDEX_CHARS
+        return sgpr("Size%s" % INDEX_CHARS[idx])
+
     def isConstUnitStride(self, ref):
         return False
 
@@ -115,7 +120,7 @@ def _kernel(miWaveGroup=(1, 1)):
         "MacroTile0": 256, "MacroTile1": 256,
         "_DepthUA": 256, "_DepthUB": 256,
         "MIWaveGroup": list(miWaveGroup), "WavefrontSize": 64,
-        "ProblemType": {"IndexUnroll": 2},
+        "ProblemType": {"Index0": 0, "Index1": 1, "IndexUnroll": 2},
         "NonTemporalA": 0, "NonTemporalB": 0,
         "BufferLoad": True, "DirectToLds": False,
     }
@@ -186,6 +191,158 @@ def test_gr_addressing_is_emitted_for_either_operand(tc):
     """NN and TT pair a TLU=1 operand with a row-major one, on either side."""
     _, _, module, _ = _emitGR(_COL_SCATTER_STACK, tc=tc)
     assert module.items()
+
+
+# --- M/N edge mask ----------------------------------------------------------
+#
+# The free dim is contiguous on TLU=1, so a lane past the real M/N wraps into the
+# next K row instead of off the tensor.  The SRD limit keeps that address, so the
+# read costs full bandwidth unless the lane is sent to BufferOOB explicitly.
+
+def test_gr_sends_lanes_past_the_free_dim_size_to_buffer_oob():
+    _, _, module, _ = _emitGR(_COL_SCATTER_STACK)
+    text = str(module)
+    assert "v_cmp_lt_u32" in text, "no runtime compare against the free-dim size"
+    assert "BufferOOB" in text, "out-of-range lanes are not pointed at the buffer bound"
+    assert "v_cndmask_b32" in text, "the compare never selects the OOB offset"
+
+
+@pytest.mark.parametrize("tc,sizeSgpr", [("A", "SizeI"), ("B", "SizeJ")])
+def test_gr_edge_mask_compares_against_that_operands_size(tc, sizeSgpr):
+    """A is bounded by M and B by N; swapping them would corrupt the other edge."""
+    _, _, module, _ = _emitGR(_COL_SCATTER_STACK, tc=tc)
+    assert sizeSgpr in str(module)
+
+
+@pytest.mark.parametrize("tc,wgSgpr", [("A", "WorkGroup0"), ("B", "WorkGroup1")])
+def test_gr_edge_mask_is_tile_relative(tc, wgSgpr):
+    """The tile start is already in the SRD base, so the bound is size - WG*MT."""
+    text = str(_emitGR(_COL_SCATTER_STACK, tc=tc)[2])
+    assert wgSgpr in text, "the bound does not account for this workgroup's tile"
+    assert "s_sub_u32" in text, "the size is never reduced to the tile-relative bound"
+
+
+def _emitGRNamed(geoName, tc="A", miWaveGroup=(1, 1)):
+    """Emit TLU=1 GR for a geometry by name, not by fp4 stack height."""
+    from tensilelite.Components.Subtile.Kernel import AB_GEOMETRY_MAP
+    kernel = _kernel(miWaveGroup=miWaveGroup)
+    writer = _Writer()
+    ti = TileInfo(AB_GEOMETRY_MAP[geoName], tc, writer, kernel)
+    GR._allocGROffsetRegisters(ti.gr.config.tag, ti.gr, ti, writer, kernel)
+    before = (set(writer.vgprPool.outstanding), set(writer.sgprPool.outstanding))
+    return writer, ti, GR._graTileAssignment_tlu(writer, kernel, ti), before
+
+
+@pytest.mark.parametrize("tc", ["A", "B"])
+def test_gr_edge_mask_covers_the_split_k_row_layout(tc):
+    """AB_B4_TLU1_4x1 splits the K row, so its lanes own maskable M/N blocks.
+
+    This shape bypasses column-scatter, so it would keep its edge lanes if only
+    the column-scatter path carried the mask.
+    """
+    _, ti, module, _ = _emitGRNamed("AB_B4_TLU1_4x1", tc=tc)
+    assert selectTLUColScatter(ti) is None, "fixture no longer bypasses column-scatter"
+    text = str(module)
+    assert "drop GR lanes past the real M/N" in text
+    assert "v_cmp_lt_u32" in text
+    assert "past-M/N lane" in text
+
+
+@pytest.mark.parametrize("mt,wg", [(192, (2, 2)), (192, (1, 1)), (320, (2, 2)), (384, (1, 1))])
+def test_gr_edge_mask_handles_non_power_of_two_wave_strides(mt, wg):
+    """MT192 at [2,2] gives three 32-element strips per wave, so elemsPerId is 96.
+
+    A shift-only wave offset cannot express that, and asserting on it aborts
+    kernel generation for every one of these shapes.
+    """
+    from tensilelite.Components.Subtile.Kernel import AB_GEOMETRY_MAP
+    from tensilelite.Components.Subtile.SubtileGeometry import GRTag_TLU1
+    emitted = 0
+    for geo in AB_GEOMETRY_MAP.values():
+        for tc in ("A", "B"):
+            kernel = _kernel(miWaveGroup=wg)
+            for key in ("MacroTile0", "MacroTile1", "MacroTileA", "MacroTileB"):
+                kernel[key] = mt
+            writer = _Writer()
+            try:
+                ti = TileInfo(geo, tc, writer, kernel)
+            except Exception:
+                continue
+            if not isinstance(ti.gr.config.tag, GRTag_TLU1):
+                continue
+            GR._allocGROffsetRegisters(ti.gr.config.tag, ti.gr, ti, writer, kernel)
+            before = (set(writer.vgprPool.outstanding), set(writer.sgprPool.outstanding))
+            assert GR._graTileAssignment_tlu(writer, kernel, ti).items()
+            assert writer.vgprPool.outstanding == before[0]
+            assert writer.sgprPool.outstanding == before[1]
+            emitted += 1
+    assert emitted, "no TLU=1 geometry emitted for MT%u %s" % (mt, wg)
+
+
+@pytest.mark.parametrize("stack", [_XOR_STACK, _COL_SCATTER_STACK])
+def test_gr_edge_mask_is_dropped_under_prefetch_across_persistent(stack):
+    """PAP reuses these offsets for the next tile after rebuilding the
+
+    descriptors, so a mask built from this workgroup's M/N bound would keep
+    lanes at BufferOOB that the next tile needs.
+    """
+    kernel = _kernel()
+    kernel["PrefetchAcrossPersistent"] = 1
+    writer, ti = _tile(stack, "A", kernel)
+    GR._allocGROffsetRegisters(ti.gr.config.tag, ti.gr, ti, writer, kernel)
+    text = str(GR._graTileAssignment_tlu(writer, kernel, ti))
+    assert "drop GR lanes past the real M/N" not in text
+    assert "lane inside the real M/N?" not in text
+
+
+def _emitSubtileOffsets(stack, tc="A", kernel=None):
+    kernel = kernel or _kernel()
+    writer, ti = _tile(stack, tc, kernel)
+    GR._allocGROffsetRegisters(ti.gr.config.tag, ti.gr, ti, writer, kernel)
+    before = (set(writer.vgprPool.outstanding), set(writer.sgprPool.outstanding))
+    module = Module()
+    GR._grComputeSubtileOffsets_tlu(writer, module, ti, kernel)
+    return writer, ti, module, before
+
+
+def test_subtile_rows_wholly_past_the_size_are_dropped():
+    """Rows share the GR offset VGPR and differ only by a scalar soffset, so a
+    per-lane mask cannot vary by row. A row that is entirely past M/N needs no
+    per-lane test: its start is scalar, so its soffset can go out of bounds."""
+    _, ti, module, _ = _emitSubtileOffsets(_XOR_STACK)
+    nonEmptyRows = sum(1 for rl in ti.localSubtilesRegister if len(rl))
+    assert nonEmptyRows > 1, "fixture no longer has multiple subtile rows"
+    text = str(module)
+    assert text.count("wholly past the real M/N") == nonEmptyRows
+    assert "BufferOOB" in text
+
+
+def test_subtile_row_drop_is_scalar_only_and_leaks_nothing():
+    """It must not cost an offset VGPR per row; that is why it is not per lane."""
+    writer, _, module, (vbefore, sbefore) = _emitSubtileOffsets(_XOR_STACK)
+    assert writer.vgprPool.outstanding == vbefore
+    assert writer.sgprPool.outstanding == sbefore
+    assert "v_cmp" not in str(module)
+
+
+def test_subtile_row_drop_is_skipped_under_prefetch_across_persistent():
+    kernel = _kernel()
+    kernel["PrefetchAcrossPersistent"] = 1
+    _, _, module, _ = _emitSubtileOffsets(_XOR_STACK, kernel=kernel)
+    assert "wholly past the real M/N" not in str(module)
+
+
+def test_gr_edge_mask_split_k_row_does_not_leak_registers():
+    writer, _, _, (vbefore, sbefore) = _emitGRNamed("AB_B4_TLU1_4x1")
+    assert writer.vgprPool.outstanding == vbefore
+    assert writer.sgprPool.outstanding == sbefore
+
+
+def test_gr_edge_mask_does_not_leak_registers():
+    """The mask needs scratch on top of the pad path's; all of it must come back."""
+    writer, _, _, (vbefore, sbefore) = _emitGR(_COL_SCATTER_STACK)
+    assert writer.vgprPool.outstanding == vbefore
+    assert writer.sgprPool.outstanding == sbefore
 
 
 # --- local read -------------------------------------------------------------
