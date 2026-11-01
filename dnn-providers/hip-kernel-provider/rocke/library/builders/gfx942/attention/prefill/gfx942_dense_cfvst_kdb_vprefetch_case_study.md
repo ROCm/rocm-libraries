@@ -168,6 +168,7 @@ These results are consistent with reduced synchronization overhead and improved 
 
 ## Results
 
+> **Dated results.** Every timing, static count and trace below was measured at `cc84e2621e8fd9ce83f9bf43dbc1564c690c290d`, before this branch merged #14367. At that commit production dispatch resolved BF16 D128 CFVST **off**, so B1 was production dispatch and B2 added CFVST. Since #14367 production resolves CFVST **on**: the harness now pins `use_cfvst=False` for B1 and A, and B2 *is* production dispatch. The arm definitions (resolved CFVST/KDB/VPF per arm) are unchanged, but kernel sources have changed since `cc84e262`, so these numbers are not re-measured at the PR head and `--verify-provenance` against it reports the source changes.
 
 All workloads use **BF16, Hq=32, D=128, persistent=True, causal attention** on (gfx942).
 
@@ -239,8 +240,8 @@ For each of the twelve shapes (the five shapes without a Step-0 winner skip `A` 
    | Arm | Variant | `use_cfvst` | `lds_num_buffers` (K) | `v_reg_prefetch` | `lds_row_pad` | `causal_diag_split` |
    |---:|---|---:|---:|---:|---|---|
    | A | `A` (Step-0 winner) | `False` | 1 | `False` | Shape-specific winner | Shape-specific winner |
-   | B1 | `baseline` | `False` | 1 | `False` | Production dispatch | Production dispatch |
-   | B2 | `cfvst` | `True` | 1 | `False` | Production dispatch | Production dispatch |
+   | B1 | `baseline` | `False` (pinned) | 1 | `False` | Production dispatch | Production dispatch |
+   | B2 | `cfvst` | `True` (production policy since #14367) | 1 | `False` | Production dispatch | Production dispatch |
    | B3 | `cfvst_kdb` | `True` | 2 | `False` | Production dispatch | Production dispatch |
    | B4 | `cfvst_vpf` | `True` | 1 | `True` | Production dispatch | Production dispatch |
    | B5 | `pipeline` | `True` | 2 | `True` | Production dispatch | Production dispatch |
@@ -295,7 +296,7 @@ For each of the twelve shapes (the five shapes without a Step-0 winner skip `A` 
 | Component | Configuration |
 | :--- | :--- |
 | Hardware target | gfx942, 304 CUs |
-| Benchmarked source HEAD | `cc84e2621e8fd9ce83f9bf43dbc1564c690c290d` (clean working tree; `--verify-provenance` passed) |
+| Benchmarked source HEAD | `cc84e2621e8fd9ce83f9bf43dbc1564c690c290d` (clean working tree; `--verify-provenance` passed at that commit; predates the #14367 merge, see *Dated results*) |
 | Kernel source SHA-256 | `8bf80337c529fdab6e3adf65d942bf423eac9623b324c6cd650d0987adb71d2e` |
 | Benchmark harness SHA-256 | `888b484dab6a0dc76e5544de1660047e03956b10f9f898cf8cb3cb228ec61130` |
 | ROCm stack | 10.0.0 |

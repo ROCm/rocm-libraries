@@ -2,13 +2,16 @@
 """Eight-arm persistent gfx942 BF16 D128 attention: Step-0 winner A vs seven-stage B ablation.
 
 A uses the seven validated shape-specific Step-0 winners from the
-2026-10-28 staged sweep (no CFVST/KDB/VPF). B[1..7] always start from the CURRENT
-per-shape production-dispatch baseline, independently of A. Thus this is a
-fair new same-source A/B measurement, NOT a claim about cross-commit timings.
+2026-10-28 staged sweep (no CFVST/KDB/VPF). That sweep predates #14367, so A
+pins ``use_cfvst=False`` to rebuild the recorded winner. B[1..7] always start
+from the CURRENT per-shape production-dispatch spec, independently of A. Since
+#14367, production resolves CFVST ON for BF16 D128, so B1 forces it off to give
+the CFVST-off reference and B2 IS production dispatch. Thus this is a fair new
+same-source A/B measurement, NOT a claim about cross-commit timings.
 
-   A sweep_winner        per-shape best preexisting levers (new pipeline off)
-   1 baseline            production dispatch (CFVST/KDB/VPF off)
-   2 cfvst               baseline + CFVST
+   A sweep_winner        per-shape best preexisting levers (CFVST/KDB/VPF off)
+   1 baseline            production dispatch with CFVST forced off (use_cfvst=False)
+   2 cfvst               production dispatch (CFVST on by policy; KDB/VPF off)
    3 cfvst_kdb           CFVST + K LDS double buffering
    4 cfvst_vpf           CFVST + V register prefetch (KDB off)
    5 pipeline            CFVST + KDB + V register prefetch
@@ -82,8 +85,8 @@ STAGE_NUMBERS = {"A": 0, **{name: i for i, name in enumerate(B_VARIANTS, start=1
 
 STAGE_DESCRIPTIONS = {
     "A": "Per-shape best existing-lever sweep winner (CFVST/KDB/VPF off)",
-    "baseline": "Production-dispatch baseline, without CFVST/KDB/VPF",
-    "cfvst": "Baseline + conflict-free V store transpose",
+    "baseline": "Production dispatch with CFVST forced off (use_cfvst=False)",
+    "cfvst": "Production dispatch: CFVST on by policy, KDB/VPF off",
     "cfvst_kdb": "CFVST + K LDS double buffering (no V prefetch)",
     "cfvst_vpf": "CFVST + V register prefetch (no K double buffering)",
     "pipeline": "CFVST + K LDS double buffering + V register prefetch",
@@ -104,21 +107,22 @@ PARENT_VARIANT = {
     "pipeline_pad_dsplit": "pipeline_pad",
 }
 
+# Field deltas against the production spec. Production leaves use_cfvst=None,
+# which _use_cfvst resolves ON at BF16 D128 (#14367); dispatch canonicalizes a
+# redundant use_cfvst=True pin back to None, so only the CFVST-off stage pins it.
 STAGE_OVERRIDES = {
     "A": {},  # Separate sweep-winner specification; not a B stage.
-    "baseline": {},
-    "cfvst": {"use_cfvst": True},
-    "cfvst_kdb": {"use_cfvst": True, "lds_num_buffers": 2},
-    "cfvst_vpf": {"use_cfvst": True, "v_reg_prefetch": True},
-    "pipeline": {"use_cfvst": True, "lds_num_buffers": 2, "v_reg_prefetch": True},
+    "baseline": {"use_cfvst": False},
+    "cfvst": {},
+    "cfvst_kdb": {"lds_num_buffers": 2},
+    "cfvst_vpf": {"v_reg_prefetch": True},
+    "pipeline": {"lds_num_buffers": 2, "v_reg_prefetch": True},
     "pipeline_pad": {
-        "use_cfvst": True,
         "lds_num_buffers": 2,
         "v_reg_prefetch": True,
         "lds_row_pad": 4,
     },
     "pipeline_pad_dsplit": {
-        "use_cfvst": True,
         "lds_num_buffers": 2,
         "v_reg_prefetch": True,
         "lds_row_pad": 4,
@@ -192,7 +196,7 @@ A_COMMON = dict(
     o_store_width=4,
     lazy_rescale=True,
     interleave=False,
-    use_cfvst=None,
+    use_cfvst=False,  # the sweep predates #14367: its winners ran CFVST off.
     use_exp2_fast=None,
     use_v_swizzle=None,
     v_row_pad=None,
@@ -213,10 +217,13 @@ WINNING_LEVERS = {
     (16, 4096, 16): dict(waves_per_eu=2, pv_priority=3),
 }
 
-# Expected ORIGINAL kernel symbols are used for auditing only. The current
-# emitter may produce a different symbol if policy or implementation changed.
+# Expected kernel symbols, used for auditing only: the recorded Step-0 winner
+# symbols plus the ``cfvst0`` token, which kernel_name() adds because A now pins
+# use_cfvst=False explicitly (the recorded winners resolved CFVST off from None,
+# before #14367). The current emitter may produce a different symbol if policy
+# or implementation changed.
 _A_PREFIX = "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_"
-_A_SUFFIX = "_krowpad4_iglp1_iglpm1_pvkmaj_prio"
+_A_SUFFIX = "_krowpad4_cfvst0_iglp1_iglpm1_pvkmaj_prio"
 EXPECTED_A_KERNEL = {
     (1, 4096, 8): _A_PREFIX + "bthkvmin_gfx942_wpe3" + _A_SUFFIX + "1_dsplit",
     (1, 4096, 16): _A_PREFIX + "bthkvmin_gfx942_wpe2" + _A_SUFFIX + "1_dsplit",
@@ -1151,13 +1158,14 @@ def _run_shapes(
                 )
 
         if (
-            production.resolved_use_cfvst()
+            not production.resolved_use_cfvst()
             or production.lds_num_buffers != 1
             or production.v_reg_prefetch
         ):
             raise RuntimeError(
-                f"{shape.label}: production dispatch already enables some "
-                "CFVST/KDB/VPF pipeline knobs. Cannot label it a clean baseline."
+                f"{shape.label}: production dispatch is not CFVST-on with KDB/VPF "
+                "off. B2 must equal production dispatch; refusing a misleading "
+                "ablation."
             )
         expected_steps = (
             ("baseline", "cfvst", {"use_cfvst"}),
@@ -1187,7 +1195,8 @@ def _run_shapes(
                 bool(spec.v_reg_prefetch),
             )
             expected_pipeline = (
-                bool(expected.get("use_cfvst", False)),
+                # Unpinned use_cfvst resolves ON at BF16 D128 (_use_cfvst).
+                bool(expected.get("use_cfvst", True)),
                 int(expected.get("lds_num_buffers", 1)),
                 bool(expected.get("v_reg_prefetch", False)),
             )
