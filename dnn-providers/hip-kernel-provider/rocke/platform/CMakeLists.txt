@@ -344,13 +344,15 @@ if(ROCKE_INSTALL_TESTS)
     # Host-only golden IR byte-stability gate. The relocatable runner rebuilds the
     # representative IR from the co-located rocke package and compares digests to
     # the committed golden. It needs the parity harness module (imported by name)
-    # and the golden JSON co-located next to it; no GPU and no examples required.
+    # and the golden's per-family JSON shards co-located next to it; no GPU and no
+    # examples required.
     install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tests/rocke_installed_golden_test.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/instances/rocke_ir_parity_harness.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
-            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden
+            FILES_MATCHING PATTERN "*.json")
 
     # Host-only differential golden check (Python reference emitters only; no
     # compiler). The rest of tests/instances/differential needs the C++ build and
@@ -642,8 +644,9 @@ if(ROCKE_INSTALL_TESTS)
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
     # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
-    # and K/V cache policy, and the scalar fallback's cache key and block-table
-    # stride kernarg.
+    # and K/V cache policy, the scalar fallback's cache key and block-table
+    # stride kernarg, the unified attention running-max carry and keyless
+    # guards on the emitted IR, and the tiled 2D LSE store on the emitted IR.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -652,7 +655,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
-        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py")
+        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
+        "tests/library/tests/test_attention_unified_masked_tile_ir.py"
+        "tests/library/tests/test_attention_unified_2d_lse_ir.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -857,6 +862,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
         "tests/library/tests/test_conv_dgrad_depthwise_windowed.py"
+        "tests/library/tests/test_direct_depthwise_dgrad_v2.py"
         "tests/library/tests/test_conv_dgrad_4c.py"
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
@@ -878,6 +884,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
         "tests/library/tests/test_attention_tiled_3d_running_max.py"
+        "tests/library/tests/test_attention_unified_2d_masked_tile_numeric.py"
+        "tests/library/tests/test_attention_unified_scalar_masked_tile_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_wave_page_id_load.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"

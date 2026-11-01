@@ -275,6 +275,60 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_kv_lds_swizzle = true;
         s->use_wave_page_id_load = true;
         break;
+    case 16:
+        /* num_queries_per_kv=5 does not divide BLOCK_M=16: padded q-block. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 40;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
+    /* head_size=192 MHA decode selector spec */
+    case 17:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 96;
+        s->num_kv_heads = 96;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_segments = 16;
+        s->num_seqs = 1;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        break;
+    case 18:
+        /* Reduce with emit_lse (see make_reduce_spec): bf16 D128 GQA. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
+    case 19:
+        /* Reduce with emit_lse (see make_reduce_spec): fp16 D64. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        break;
     default:
         return -1;
     }
@@ -282,8 +336,10 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
 }
 
 /* Derive the reduce spec from the segment spec, exactly as the Python emitter
- * (head_size / num_query_heads / num_kv_heads / dtype / num_segments). */
-static void make_reduce_spec(const rocke_unified_attention_3d_tiled_spec_t* s,
+ * (head_size / num_query_heads / num_kv_heads / dtype / num_segments /
+ * waves_per_eu; configs 18-19 also set emit_lse, as _REDUCE_LSE does). */
+static void make_reduce_spec(int idx,
+                             const rocke_unified_attention_3d_tiled_spec_t* s,
                              rocke_unified_attention_reduce_tiled_spec_t* r)
 {
     *r = rocke_unified_attention_reduce_tiled_spec_default();
@@ -292,6 +348,9 @@ static void make_reduce_spec(const rocke_unified_attention_3d_tiled_spec_t* s,
     r->num_kv_heads = s->num_kv_heads;
     r->dtype = s->dtype;
     r->num_segments = s->num_segments;
+    r->has_waves_per_eu = s->has_waves_per_eu;
+    r->waves_per_eu = s->waves_per_eu;
+    r->emit_lse = (idx == 18 || idx == 19);
 }
 
 /* Build kernel via `which` (0=segment, 1=reduce), lower to .ll, print to stdout.
@@ -374,7 +433,7 @@ int main(int argc, char** argv)
     }
 
     rocke_unified_attention_reduce_tiled_spec_t r;
-    make_reduce_spec(&s, &r);
+    make_reduce_spec(idx, &s, &r);
 
     if(strcmp(mode, "ll") == 0)
     {

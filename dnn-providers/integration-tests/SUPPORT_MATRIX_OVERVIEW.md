@@ -14,20 +14,20 @@ Generated from the committed support claims (11177 graphs, 486 catalogued option
 
 ### RDNA (consumer)
 
-| Op group (options) | [gfx1151-windows](#gpu-gfx1151-windows) | [gfx1150-linux](#gpu-gfx1150-linux) | [gfx1151-linux](#gpu-gfx1151-linux) | [gfx1101-windows](#gpu-gfx1101-windows) | [gfx1200-linux](#gpu-gfx1200-linux) | [gfx1100-linux](#gpu-gfx1100-linux) | [gfx1101-linux](#gpu-gfx1101-linux) | [gfx1030-windows](#gpu-gfx1030-windows) | [gfx1201-linux](#gpu-gfx1201-linux) |
+| Op group (options) | [gfx1151-linux](#gpu-gfx1151-linux) | [gfx1151-windows](#gpu-gfx1151-windows) | [gfx1150-linux](#gpu-gfx1150-linux) | [gfx1101-windows](#gpu-gfx1101-windows) | [gfx1200-linux](#gpu-gfx1200-linux) | [gfx1100-linux](#gpu-gfx1100-linux) | [gfx1101-linux](#gpu-gfx1101-linux) | [gfx1030-windows](#gpu-gfx1030-windows) | [gfx1201-linux](#gpu-gfx1201-linux) |
 |---|---|---|---|---|---|---|---|---|---|
-| **[Attention](#group-attention)** (61) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **[Attention](#group-attention)** (61) | 🟡 27% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **[Batchnorm](#group-batchnorm)** (54) | 🟡 79% | 🟡 79% | 🟡 79% | 🟡 68% | 🟡 68% | 🟡 68% | 🟡 77% | 🟡 77% | 🟡 77% |
 | **[Block scale](#group-block-scale)** (39) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **[Convolution](#group-convolution)** (51) | 🟡 76% | 🟡 76% | 🟡 76% | ❌ | ❌ | ❌ | 🟡 76% | 🟡 76% | 🟡 76% |
 | **[CustomOp](#group-customop)** (8) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **[Layernorm](#group-layernorm)** (45) | 🟡 71% | 🟡 35% | 🟡 35% | 🟡 35% | 🟡 35% | 🟡 35% | ❌ | ❌ | ❌ |
+| **[Layernorm](#group-layernorm)** (45) | 🟡 35% | 🟡 71% | 🟡 35% | 🟡 35% | 🟡 35% | 🟡 35% | ❌ | ❌ | ❌ |
 | **[Linear attention](#group-linear-attention)** (37) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **[Matmul](#group-matmul)** (35) | ❌ | 🟡 37% | 🟡 37% | 🟡 37% | 🟡 37% | ❌ | 🟡 37% | ❌ | ❌ |
-| **[Pointwise](#group-pointwise)** (58) | 🟡 17% | 🟡 20% | 🟡 20% | 🟡 20% | 🟡 20% | 🟡 13% | 🟡 20% | 🟡 17% | 🟡 17% |
+| **[Matmul](#group-matmul)** (35) | 🟡 37% | ❌ | 🟡 37% | 🟡 37% | 🟡 37% | ❌ | 🟡 37% | ❌ | ❌ |
+| **[Pointwise](#group-pointwise)** (58) | 🟡 20% | 🟡 17% | 🟡 20% | 🟡 20% | 🟡 20% | 🟡 13% | 🟡 20% | 🟡 17% | 🟡 17% |
 | **[Reduction](#group-reduction)** (26) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **[Resample](#group-resample)** (34) | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | ❌ | ❌ | ❌ |
-| **[RMSNorm](#group-rmsnorm)** (38) | 🟡 89% | 🟡 86% | 🟡 86% | 🟡 86% | 🟡 86% | 🟡 86% | ❌ | ❌ | ❌ |
+| **[RMSNorm](#group-rmsnorm)** (38) | 🟡 89% | 🟡 89% | 🟡 86% | 🟡 86% | 🟡 86% | 🟡 86% | ❌ | ❌ | ❌ |
 
 ### CDNA (data center)
 
@@ -48,7 +48,7 @@ Generated from the committed support claims (11177 graphs, 486 catalogued option
 
 ## By engine
 
-**Engines:** [ASM_SDPA_ENGINE](#asm_sdpa_engine) · [HIPBLASLT_ENGINE](#hipblaslt_engine) · [HIP_MLOPS_ENGINE](#hip_mlops_engine) · [MIOPEN_ENGINE](#miopen_engine) · [MIOPEN_ENGINE_DETERMINISTIC](#miopen_engine_deterministic) · [hipkernel:Gfx950AttentionDense](#hipkernelgfx950attentiondense)
+**Engines:** [ASM_SDPA_ENGINE](#asm_sdpa_engine) · [HIPBLASLT_ENGINE](#hipblaslt_engine) · [HIP_MLOPS_ENGINE](#hip_mlops_engine) · [MIOPEN_ENGINE](#miopen_engine) · [MIOPEN_ENGINE_DETERMINISTIC](#miopen_engine_deterministic) · [hipkernel:Gfx950AttentionDense](#hipkernelgfx950attentiondense) · [hipkernel:flydsl_rmsnorm](#hipkernelflydsl_rmsnorm) · [hipkernel:flydsl_rmsnorm_bwd](#hipkernelflydsl_rmsnorm_bwd) · [hipkernel:flydsl_sdpa_rdna](#hipkernelflydsl_sdpa_rdna) · [hipkernel:flydsl_sdpa_rdna_decode](#hipkernelflydsl_sdpa_rdna_decode)
 
 - **Op (options)**: the number is how many options the op offers in the API, listed in [Options per op](#options-per-op).
 - **GPU columns**: share of the op's options that a graph this engine claims on that GPU and OS uses. `✅` all · `🟡 72%` 72% · `❌` none. L = Linux, W = Windows.
@@ -110,6 +110,30 @@ An op appears under an engine that claims at least one of its graphs somewhere.
 | Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **[Sdpa](#op-sdpa)** (36) | ❌ | ❌ | 🟡 38% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+### hipkernel:flydsl_rmsnorm
+
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[RMSNorm](#op-rmsnorm)** (21) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 71% | ❌ | ❌ | ❌ |
+
+### hipkernel:flydsl_rmsnorm_bwd
+
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[RMSNormBackward](#op-rmsnormbackward)** (17) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 70% | ❌ | ❌ | ❌ |
+
+### hipkernel:flydsl_sdpa_rdna
+
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Sdpa](#op-sdpa)** (36) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 47% | ❌ | ❌ | ❌ |
+
+### hipkernel:flydsl_sdpa_rdna_decode
+
+| Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **[Sdpa](#op-sdpa)** (36) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 44% | ❌ | ❌ | ❌ |
 
 ## Op groups
 

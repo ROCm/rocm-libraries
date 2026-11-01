@@ -655,6 +655,7 @@ Arguments:
   - fast_check_repeat: c_int32
   - fast_check_inject: c_int32
   - requires_streamk: c_int8
+  - skip_launch_solution: c_int32
   - integer_exact_pattern: c_char*16
   - allow_no_solution: c_int8
   - timing: c_int8
@@ -773,6 +774,7 @@ Defaults:
   fast_check_repeat: 1
   fast_check_inject: -1
   requires_streamk: 0
+  skip_launch_solution: -1
   integer_exact_pattern: ''
   allow_no_solution: 0
   timing: 0

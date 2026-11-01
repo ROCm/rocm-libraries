@@ -27,11 +27,11 @@ from rocke.core.ir import F32, I1, I8, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_print import print_ir
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.core.passes import optimize_kernel
 from rocke.core.verify import ERROR, verify
 
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 
 
 def _two_op_kernel(int_type):
