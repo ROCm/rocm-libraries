@@ -104,6 +104,9 @@ class WgradReduceSpec:
     # launcher then skips its per-launch scratch clear (the allocation clear
     # covers the first). vec > 1 path only. Default 0: unchanged.
     rezero: int = 0
+    # The Stage 1 slabs hold bf16 partials (WgradConvSpec.ws_store 2): load
+    # bf16, fold in f32. Needs vec > 1. Default False: unchanged.
+    ws_bf16: bool = False
 
     @property
     def block_size(self) -> int:
@@ -128,6 +131,8 @@ class WgradReduceSpec:
             parts.append(f"v{self.vec}")
         if self.rezero:
             parts.append(f"rz{self.rezero}")
+        if self.ws_bf16:
+            parts.append("wsb")
         parts.append(self.dtype_d)
         return kernel_name_join(self.name, *parts)
 
@@ -159,6 +164,8 @@ def build_conv_wgrad_workspace_reduce(
 
     if spec.rezero and spec.vec <= 1:
         raise ValueError("WgradReduceSpec.rezero needs vec > 1")
+    if spec.rezero and spec.ws_bf16:
+        raise ValueError("WgradReduceSpec.rezero stores f32 zeros; not with ws_bf16 scratch")
     ws_ptr = (
         b.param("ws_ptr", PtrType(F32, "global"), noalias=True, align=16)
         if spec.rezero
@@ -270,18 +277,34 @@ def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, gr
             if reps == 1
             else b.add(b.mul(b.mul(grp_id, b.const_i32(reps)), grp_stride), elem_in_slab)
         )
-        parts = [
-            b.global_load_vN(
-                ws_ptr,
-                ws_base if r == 0 else b.add(ws_base, b.mul(b.const_i32(r), grp_stride)),
-                F32,
-                v,
-            )
-            for r in range(reps)
-        ]
-        tot = [b.vec_extract(parts[0], i) for i in range(v)]
-        for pv in parts[1:]:
-            tot = [b.fadd(t, b.vec_extract(pv, i)) for i, t in enumerate(tot)]
+        if spec.ws_bf16:
+            from rocke.core.ir import BF16
+
+            parts = [
+                b.global_load_vN(
+                    ws_ptr,
+                    ws_base if r == 0 else b.add(ws_base, b.mul(b.const_i32(r), grp_stride)),
+                    BF16,
+                    v,
+                )
+                for r in range(reps)
+            ]
+            tot = [b.cast_to_f32(b.vec_extract(parts[0], i)) for i in range(v)]
+            for pv in parts[1:]:
+                tot = [b.fadd(t, b.cast_to_f32(b.vec_extract(pv, i))) for i, t in enumerate(tot)]
+        else:
+            parts = [
+                b.global_load_vN(
+                    ws_ptr,
+                    ws_base if r == 0 else b.add(ws_base, b.mul(b.const_i32(r), grp_stride)),
+                    F32,
+                    v,
+                )
+                for r in range(reps)
+            ]
+            tot = [b.vec_extract(parts[0], i) for i in range(v)]
+            for pv in parts[1:]:
+                tot = [b.fadd(t, b.vec_extract(pv, i)) for i, t in enumerate(tot)]
         if spec.rezero:
             z = b.zero_vec_f32(v)
             for r in range(reps):

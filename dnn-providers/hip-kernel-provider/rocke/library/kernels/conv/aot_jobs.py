@@ -503,6 +503,8 @@ def _dgrad_pp_knob_cfg(knobs, *, epilogue: str):
         # Round 5: linear dX store offsets on the dense pp epilogue.
         cfg["xh_epi_lin"] = True
     if d.get("elb"):
+        # LDS-only epilogue barriers (DgradConvSpec.epi_lds_barriers): dense,
+        # pp_boxes (r5-small) and split-K ping-pong cshuffle epilogues.
         cfg["epi_lds_barriers"] = True
     if d.get("psk"):
         # Stream-K persistent grid (DgradConvSpec.pp_streamk).
@@ -2494,12 +2496,24 @@ def _wgrad_jobs(
 # ROCKE_AOT_WGRAD_PPP_WSS=1: the two-stage plain_pp copies also get a
 # ws_store=1 twin (per-slice slabs, plain stores, no scratch clear).
 _WGRAD_PPP_WSS = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_WSS", "0") or 0)
+# ROCKE_AOT_WGRAD_PPP_WSB=1: the two-stage plain_pp copies also get a
+# ws_store=2 twin (bf16 per-slice slabs, folded in f32 by Stage 2).
+_WGRAD_PPP_WSB = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_WSB", "0") or 0)
+# ROCKE_AOT_WGRAD_PPP_KPL=8 (r5): kp_line=8 twins (line-major lane decode of
+# the k-packed global reads: 8 lanes per 128-byte line) of the plain_pp copies
+# (after the ws_store twins, so those get one too).
+_WGRAD_PPP_KPL = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_KPL", "0") or 0)
 _WGRAD_PPP = tuple(int(x) for x in (_os.environ.get("ROCKE_AOT_WGRAD_PPP", "") or "").split(",") if x.strip() and int(x))
 _WGRAD_PPP_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_MIN_MN", "0") or 0)
-# ROCKE_AOT_WGRAD_PPP_KPL=8 (r5): kp_line=8 twins (line-major lane decode of
-# the k-packed global reads: 8 lanes per 128-byte line) of the plain_pp copies.
-_WGRAD_PPP_KPL = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_KPL", "0") or 0)
 _WGRAD_EQX = int(_os.environ.get("ROCKE_AOT_WGRAD_EQX", "0") or 0)
+# ROCKE_AOT_WGRAD_ESF=1 with ROCKE_AOT_WGRAD_ESF_MIN_MN=<n>: also an
+# epi_store_fast copy (in-bounds dense-dW store, no per-element bounds or
+# address decode) of the plain_pp variants of the unsplit default-epilogue
+# 16x16x16 jobs with tile_m * tile_n >= n.
+# Unset: no jobs.
+_WGRAD_ESF = int(_os.environ.get("ROCKE_AOT_WGRAD_ESF", "0") or 0)
+_WGRAD_ESF_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_ESF_MIN_MN", "0") or 0)
+
 _WGRAD_EQX_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_EQX_MIN_MN", "0") or 0)
 
 
@@ -2519,12 +2533,16 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
             if v.get("prefetch_regs") == 1 and not v.get("xwin") and not v.get("pfr_sched")
             and not v.get("lds_bswz") and not v.get("waves_per_eu")
         )
+        _pp0 = _pp
         if _WGRAD_PPP_WSS and cfg.get("two_stage"):
-            _pp = _pp + tuple(dict(v, ws_store=1) for v in _pp)
-        if _WGRAD_PPP_KPL and cfg.get("tile_k", 0) >= 32 and not cfg.get("two_stage"):
-            # (at tile_k 16 the k-packed loader has no line-major form: the
-            # twins would be the same binaries; the split two-stage copies
-            # (s7) measured +0.8% over 6 official rounds -> unsplit only)
+            _pp = _pp + tuple(dict(v, ws_store=1) for v in _pp0)
+        if _WGRAD_PPP_WSB and cfg.get("two_stage"):
+            _pp = _pp + tuple(dict(v, ws_store=2) for v in _pp0)
+        if _WGRAD_PPP_KPL and cfg.get("tile_k", 0) >= 32:
+            # (tile_k >= 32 only, as r5-wgrad scoped it: at tile_k 16 the
+            # k-packed loader has no line-major form, so the twins would be the
+            # same binaries under a kpl8 label. Two-stage and ws_store copies
+            # are kept, as r5-small built them: W7's winner is a kpl8 wss2 twin)
             _pp = _pp + tuple(dict(v, kp_line=_WGRAD_PPP_KPL) for v in _pp if not v.get("kp_line"))
         variants = variants + _pp
     if (
@@ -2538,6 +2556,19 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
     ):
         variants = variants + ({"epi_quad_xpose": _WGRAD_EQX},) + tuple(
             dict(v, epi_quad_xpose=_WGRAD_EQX) for v in variants if not v.get("xwin")
+        )
+    if (
+        _WGRAD_ESF
+        and cfg.get("split_k", 1) == 1
+        and not cfg.get("two_stage")
+        and cfg.get("epilogue") == "default"
+        and cfg.get("warp_tile_m") == 16
+        and cfg.get("warp_tile_k") == 16
+        and cfg.get("tile_m", 0) * cfg.get("tile_n", 0) >= _WGRAD_ESF_MIN_MN
+    ):
+        variants = variants + tuple(
+            dict(v, epi_store_fast=True) for v in variants
+            if v.get("plain_pp") and not v.get("xwin") and not v.get("epi_quad_xpose")
         )
     return variants
 

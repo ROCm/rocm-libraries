@@ -5874,7 +5874,7 @@ def _wgrad_s2_rezero() -> bool:
     return os.environ.get("ROCKE_WGRAD_S2_REZERO", "0") not in ("", "0")
 
 
-def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas, rezero_ok=True):
+def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas, rezero_ok=True, ws_bf16=False):
     """Stage 2 (scratch fold + cast to dW) for a cached two-stage wgrad kernel.
 
     The reduce kernel takes wg_M / wg_N / groups as kernargs, so its IR
@@ -5900,6 +5900,8 @@ def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas
     # ROCKE_WGRAD_S2_REZERO=1 (r5, opt-in): the fold leaves the scratch zero
     # (WgradReduceSpec.rezero) and the launcher skips its per-launch clear.
     rz = 1 if (vec > 1 and rezero_ok and _wgrad_s2_rezero()) else 0
+    if ws_bf16 and vec <= 1:
+        raise ValueError("bf16 scratch slabs (ws_store 2) need the vector Stage 2 (wg_N % 4 == 0)")
     spec = WgradReduceSpec(
         problem=problem,
         dtype_d=dtype_d,
@@ -5907,8 +5909,9 @@ def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas
         ws_replicas=ws_replicas,
         **({"vec": vec} if vec > 1 else {}),
         **({"rezero": rz} if rz else {}),
+        **({"ws_bf16": True} if ws_bf16 else {}),
     )
-    key = (dtype_d, ws_replicas, vec, rz)
+    key = (dtype_d, ws_replicas, vec, rz) + (("wsb",) if ws_bf16 else ())
     if key not in compiled:
         art = compile_kernel(build_conv_wgrad_workspace_reduce(spec), arch=arch)
         compiled[key] = KernelLauncher(
@@ -6742,6 +6745,7 @@ def _cached_bind(
             KernelLauncher,
             extras.get("ws_slabs", _ws_replicas_of(ident)),
             rezero_ok=not getattr(ident, "ws_store", 0),
+            ws_bf16=getattr(ident, "ws_store", 0) == 2,
         )
         s2_values, s2_cfg = _stage2_launch(
             s2_spec,

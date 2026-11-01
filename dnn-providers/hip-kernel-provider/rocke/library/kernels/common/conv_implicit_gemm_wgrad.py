@@ -732,7 +732,11 @@ class WgradConvSpec:
     # (one slab per slice) and groups == 1 (host rules). No atomics, no
     # scratch clear (every element of the min(R, split_k) slabs Stage 2 folds
     # is written). For small split degrees, where the f32 atomics bound
-    # Stage 1. Tags ``wss1``. Default 0: byte-identical.
+    # Stage 1. Tags ``wss1``. 2 = 1 with the slice partials rounded to
+    # bf16 in the slabs (half the slab bytes Stage 1 writes and Stage 2
+    # reads; Stage 2 folds them in f32 -- the rounding of each partial is
+    # that of a bf16 split-K atomic). Tags ``wss2``. Default 0:
+    # byte-identical.
     ws_store: int = 0
     # Unsplit default epilogue on 16x16x16 atoms, 16-bit dW: each lane quad
     # transposes its 4x4 accumulator block (two DPP exchanges + v_perm_b32,
@@ -740,6 +744,14 @@ class WgradConvSpec:
     # of one row and writes them with one 8-byte buffer_store instead of four
     # 2-byte ones. Needs cpg % 4 == 0 (host rule). Tags ``eqx1``. Default 0.
     epi_quad_xpose: int = 0
+    # Unsplit default epilogue on 16x16x16 atoms, 16-bit dW: a tile that
+    # lies wholly inside dW stores through a lane-constant voffset and a
+    # scalar soffset per (atom row, slot) -- no per-element bounds checks or
+    # dW address decode (the generic path runs the KZYXC descriptor and two
+    # compares per element) -- when the launch's dW is dense KZYXC
+    # (checked at run time, uniform); any other tile / layout takes the
+    # default store. Tags ``esf``. Default False: byte-identical.
+    epi_store_fast: bool = False
     # xwin, 3-D, N == 1 (host rule, with Ho % xwin_kband == 0): the reduction
     # (output voxel) order of the K loop is (band of xwin_kband output rows,
     # depth, row in band, column) instead of (depth, row, column), so a
@@ -1043,6 +1055,7 @@ class WgradConvSpec:
                 f"wsf{self.ws_fuse}": self.ws_fuse > 0,
                 f"wss{self.ws_store}": self.ws_store > 0,
                 f"eqx{self.epi_quad_xpose}": self.epi_quad_xpose > 0,
+                "esf": self.epi_store_fast,
                 f"xkb{self.xwin_kband}": self.xwin_kband > 0,
                 f"ppp{self.plain_pp}": self.plain_pp > 0,
                 f"xbq{self.xwin_bq}": self.xwin_bq > 0,
@@ -1677,10 +1690,10 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
     )):
         # (ungrouped launches only: the host refuses groups > 1)
         return "ws_fuse is 0 or 1 and needs two_stage, ws_replicas 1, one tile per workgroup"
-    if spec.ws_store not in (0, 1) or (spec.ws_store and (
+    if spec.ws_store not in (0, 1, 2) or (spec.ws_store and (
         not spec.two_stage or spec.streamk != "off" or spec.group_merge > 1 or spec.ws_fuse
     )):
-        return "ws_store is 0 or 1 and needs the two_stage grid-per-tile kernel (no group_merge / ws_fuse)"
+        return "ws_store is 0..2 and needs the two_stage grid-per-tile kernel (no group_merge / ws_fuse)"
     if spec.epi_quad_xpose not in (0, 1) or (spec.epi_quad_xpose and (
         spec.split_k > 1
         or spec.two_stage
@@ -1692,6 +1705,18 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
         or spec.data.dtype_d not in ("bf16", "fp16")
     )):
         return "epi_quad_xpose (wgrad) is 0 or 1: unsplit default epilogue, 16x16x16 atoms, 16-bit dW"
+    if spec.epi_store_fast and (
+        spec.split_k > 1
+        or spec.two_stage
+        or spec.streamk != "off"
+        or spec.epilogue != "default"
+        or spec.xwin
+        or spec.group_merge > 1
+        or spec.epi_quad_xpose
+        or (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) != (16, 16, 16)
+        or spec.data.dtype_d not in ("bf16", "fp16")
+    ):
+        return "epi_store_fast (wgrad): unsplit default epilogue, 16x16x16 MFMA atoms, 16-bit dW, no epi_quad_xpose"
     if spec.plain_pp not in (0, 1, 2, 3, 4) or (spec.plain_pp and (
         spec.xwin
         or spec.prefetch_regs != 1
@@ -5825,6 +5850,7 @@ def build_implicit_gemm_conv_wgrad(
         _emit_wgrad_direct_epilogue(
             b, spec, final_accs, grid, dw_rsrc, params, group=group_v,
             **({"quad_xpose": (lane, block_m_off_v, block_n_off_v)} if spec.epi_quad_xpose else {}),
+            **({"fast_store": (lane, block_m_off_v, block_n_off_v)} if spec.epi_store_fast else {}),
         )
 
     return b.kernel
@@ -6211,6 +6237,7 @@ def _emit_wgrad_direct_epilogue(
     params: Dict[str, Value],
     group: Optional[Value] = None,
     quad_xpose=None,
+    fast_store=None,
 ) -> None:
     """Per-lane scalar store to dW via the weight-gradient descriptor.
 
@@ -6253,6 +6280,19 @@ def _emit_wgrad_direct_epilogue(
 
     if quad_xpose is not None:
         _emit_wgrad_quad_xpose_store(b, spec, accs, grid, dw_rsrc, params, dw_addr, *quad_xpose)
+        return
+
+    def _generic():
+        DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
+            b,
+            accs=accs,
+            addr_fn=dw_addr,
+            d_rsrc=dw_rsrc,
+            bounds=_grid_mn_runtime(b, spec, params),
+        )
+
+    if fast_store is not None:
+        _emit_wgrad_fast_store(b, spec, accs, grid, dw_rsrc, params, *fast_store, _generic)
         return
 
     DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
@@ -6626,7 +6666,9 @@ def _emit_wgrad_workspace_store_epilogue(
                         ws_off = b.add(b.mul(c_m, wg_N_v), c_n)
                         if slab_off is not None:
                             ws_off = b.add(slab_off, ws_off)
-                        if spec.ws_store:
+                        if spec.ws_store == 2:
+                            b.global_store(ws_ptr, ws_off, b.trunc_f32_to_bf16(val_f32), align=2)
+                        elif spec.ws_store:
                             b.global_store(ws_ptr, ws_off, val_f32, align=4)
                         else:
                             b.global_atomic_add(ws_ptr, ws_off, val_f32)
@@ -6949,3 +6991,61 @@ def _emit_wgrad_quad_xpose_store(
                 b.buffer_store_vN_bf16(dw_rsrc, safe, c0, v, 2)
             else:
                 b.buffer_store_vN_f16(dw_rsrc, safe, c0, v, 2)
+
+
+def _emit_wgrad_fast_store(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    accs: Sequence[Value],
+    grid: WarpGrid,
+    dw_rsrc: Value,
+    params: Dict[str, Value],
+    lane: Value,
+    block_m_off: Value,
+    block_n_off: Value,
+    generic,
+) -> None:
+    """``WgradConvSpec.epi_store_fast``: the in-bounds dense-dW store.
+
+    16x16x16 atom layout: lane l, slot i holds C[4 (l / 16) + i][l % 16].
+    With dW dense KZYXC the element (m, n) sits at m * wg_N + n, so a lane's
+    stores are one lane-constant voffset (its row-in-atom / column) plus a
+    uniform soffset per (atom row, slot) and a constant per atom column --
+    no per-element compares or descriptor decode. Taken when the whole tile
+    is in bounds and the strides are the dense ones (both uniform); every
+    other tile runs ``generic``."""
+    p = spec.problem
+    c0 = b.const_i32(0)
+    wg_M, wg_N = params["p_wg_M"], params["p_wg_N"]
+    p_C, p_X = params["p_C"], params["p_X"]
+    s_x, s_y, s_k = params["p_dW_stride_x"], params["p_dW_stride_y"], params["p_dW_stride_k"]
+    dense = b.land(b.cmp_eq(s_x, p_C), b.cmp_eq(s_y, b.mul(p_X, p_C)))
+    if p.is_3d:
+        dense = b.land(dense, b.cmp_eq(params["p_dW_stride_z"], b.mul(params["p_Y"], s_y)))
+    dense = b.land(dense, b.cmp_eq(s_k, wg_N))
+    dense = b.land(dense, b.cmp_eq(params["p_groups"], b.const_i32(1)))
+    inb = b.land(
+        b.cmp_le(b.add(block_m_off, b.const_i32(spec.tile_m)), wg_M),
+        b.cmp_le(b.add(block_n_off, b.const_i32(spec.tile_n)), wg_N),
+    )
+    c_eb = b.const_i32(2)
+    with b.scf_if_else(b.land(dense, inb)) as (f_ctx, g_ctx):
+        with f_ctx:
+            m_lane = b.add(grid.warp_m_off(b), b.mul(b.div(lane, b.const_i32(16)), b.const_i32(4)))
+            n_lane = b.add(grid.warp_n_off(b), b.land(lane, b.const_i32(15)))
+            v_off = b.mul(b.add(b.mul(m_lane, wg_N), n_lane), c_eb)
+            row_b = b.mul(wg_N, c_eb)
+            s_base = b.mul(b.add(b.mul(block_m_off, wg_N), block_n_off), c_eb)
+            mfmas_m, mfmas_n = spec.mfmas_per_warp_m, spec.mfmas_per_warp_n
+            for mi in range(mfmas_m):
+                for i in range(4):
+                    s_row = b.add(s_base, b.mul(row_b, b.const_i32(mi * 16 + i)))
+                    for ni in range(mfmas_n):
+                        v = b.vec_extract(accs[mi * mfmas_n + ni], i)
+                        s_off = b.add(s_row, b.const_i32(ni * 16 * 2))
+                        if spec.data.dtype_d == "bf16":
+                            b.buffer_store_bf16(dw_rsrc, v_off, s_off, b.trunc_f32_to_bf16(v))
+                        else:
+                            b.buffer_store_f16(dw_rsrc, v_off, s_off, b.trunc_f32_to_f16(v))
+        with g_ctx:
+            generic()

@@ -353,7 +353,7 @@ class KernelIdentity:
     fb_skip_empty: bool = False
     # fwd only (ImplicitGemmConvSpec.pp_end_guard). Left out of the hash while False.
     pp_end_guard: bool = False
-    # fwd and dgrad (ImplicitGemmConvSpec.epi_lds_barriers, DgradConvSpec.epi_lds_barriers). Left out of the hash while False.
+    # fwd and dgrad (ImplicitGemmConvSpec.epi_lds_barriers, DgradConvSpec.epi_lds_barriers: x-halo and pp_boxes epilogues). Left out of the hash while False.
     epi_lds_barriers: bool = False
     # fwd only (ImplicitGemmConvSpec.split_hybrid). Left out of the hash at 0.
     split_hybrid: int = 0
