@@ -506,6 +506,10 @@ the prebuilt `tensilelite-client`. It is a separate job from the unit-tree `tens
 failure cannot hide a GEMM result the way it can in `preliminary`. Selection is `-m common` plus each
 config's own `skip-gfxNNNN` marks for the arch `rocm_agent_enumerator` reports, the same mechanism
 `preliminary` uses.
+A config that fails on one product of an architecture (MI300A and MI300X are both gfx942) can carry a
+device-tag mark instead, `skip-mi300a` today (gfx942 with 228 CUs, found from `rocminfo`). It skips the
+config on that product only. `TENSILE_TEST_DEVICE_TAGS` (semicolon-separated, empty for none) replaces the
+detection. Put the ROCM ticket for the bug in a comment beside the mark.
 
 The job is opt-in per family: gfx90a, gfx94X, gfx950, and gfx120X, matching `preliminary`. It has to
 be, because a family whose configs declare no `skip-` marks for it (gfx1103, gfx115X) would try to run
