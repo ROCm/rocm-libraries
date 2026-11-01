@@ -762,6 +762,22 @@ _NESTED: dict[str, type] = {
 }
 
 
+def _request_errors(req: OperatorRequest) -> list[str]:
+    """Family-level validity, independent of any candidate.
+
+    Only things that make a request *malformed* enough that translating it
+    to an ``AttentionRequest`` cannot be trusted. Every field is already type-
+    and value-checked at construction (``SdpaRequest.__post_init__`` and the
+    ``_check_*`` helpers above); the type check here is for a caller that
+    passes something else entirely. Whether any kernel can serve a
+    well-formed request is the unified/dense admission gate's question, not
+    this one's.
+    """
+    if not isinstance(req, SdpaRequest):
+        return [f"expected an SdpaRequest, got {type(req).__name__}"]
+    return []
+
+
 def _tensor_from(payload: dict[str, Any]) -> SdpaTensor:
     offset = payload.get("ragged_offset")
     if isinstance(offset, dict):
