@@ -26,6 +26,11 @@
 # 40: xcd_tiles on gfx942, 44: waves_m = 2 with kpg = 16) and develop's forms
 # (41: persistent grid with the runtime K loop, 42: waves_q = waves_k = 2,
 # 43: runtime channels).
+# Indices 45..53: the Toeplitz WMMA form of DirectDepthwiseDgradWindowedSpec
+# (mfma=True at wave_size 32, gfx1250): 5x5 and 7x7, 1 / 4 / 8 waves, the tall
+# 28- and 32-row tiles and shorter ones, every w_fold, fp16 and bf16, and a
+# 3x3 single pass; 51 (9x9: the fragments exceed the VGPR cap), 52 (wave32
+# on gfx950) and 53 (wave64 on gfx1250) both reject.
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
@@ -293,22 +298,34 @@ def _generic_spec(idx: int):
     return DirectConvSpec(problem=problem, **knobs), arch
 
 
-def _build(spec, arch):
-    if isinstance(spec, DirectConv4cSpec):
-        return build_direct_conv_4c(spec, arch=arch)
-    if isinstance(spec, DirectConvSpec):
-        return build_direct_conv(spec, arch=arch)
-    return build_direct_depthwise_dgrad_windowed(spec, arch=arch)
+# Toeplitz WMMA configs from index _WMMA_WIN_CFG_BASE, in the _WIN_CFGS
+# columns (the knobs carry the wave size).
+_WMMA_WIN_CFG_BASE = _GENERIC_CFG_BASE + len(_GENERIC_CFGS)
+_W32 = dict(mfma=True, wave_size=32)
+_WMMA_WIN_CFGS = (
+    # 7x7, 28-row tiles over 30 rows (a ragged second tile), 8 waves.
+    (2, 30, 33, 64, 7, 7, 3, "bf16", "gfx1250", dict(block_waves=8, w_fold=1, prefetch_rows=2, block_h=28, **_W32)),
+    # 7x7, 32-row tiles, w_fold 2 with odd N, 4 waves.
+    (3, 32, 20, 32, 7, 7, 3, "fp16", "gfx1250", dict(block_waves=4, w_fold=2, prefetch_rows=2, block_h=32, **_W32)),
+    # 5x5, w_fold 4, a partial channel block (40 groups over 32 channels).
+    (5, 13, 9, 40, 5, 5, 2, "bf16", "gfx1250", dict(block_waves=4, w_fold=4, prefetch_rows=2, block_h=8, **_W32)),
+    # 5x5, 8 waves, one row in flight.
+    (2, 14, 14, 64, 5, 5, 2, "fp16", "gfx1250", dict(block_waves=8, w_fold=2, prefetch_rows=1, block_h=14, **_W32)),
+    # 7x7, short ragged row tiles.
+    (1, 13, 13, 64, 7, 7, 3, "fp16", "gfx1250", dict(block_waves=8, w_fold=2, prefetch_rows=2, block_h=4, **_W32)),
+    # 3x3 PAD 0 (single pass), one wave.
+    (1, 9, 12, 8, 3, 3, 0, "bf16", "gfx1250", dict(block_waves=1, w_fold=2, prefetch_rows=1, block_h=9, **_W32)),
+    # 9x9: the wave32 fragments exceed the VGPR cap, both engines reject.
+    (2, 10, 11, 16, 9, 9, 4, "bf16", "gfx1250", dict(block_waves=2, w_fold=4, prefetch_rows=1, block_h=5, **_W32)),
+    # wave32 on gfx950: both engines reject.
+    (2, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", dict(block_waves=8, w_fold=2, prefetch_rows=2, block_h=14, **_W32)),
+    # wave64 (the MFMA form) on gfx1250: both engines reject.
+    (2, 14, 14, 64, 7, 7, 3, "bf16", "gfx1250", dict(mfma=True, block_waves=8, w_fold=2, prefetch_rows=2, block_h=14)),
+)  # fmt: skip
 
 
-def _spec(idx: int):
-    if _GENERIC_CFG_BASE <= idx < _GENERIC_CFG_BASE + len(_GENERIC_CFGS):
-        return _generic_spec(idx - _GENERIC_CFG_BASE)
-    if _FOURC_CFG_BASE <= idx < _FOURC_CFG_BASE + len(_FOURC_CFGS):
-        return _fourc_spec(idx - _FOURC_CFG_BASE)
-    if not 0 <= idx < len(_WIN_CFGS):
-        raise SystemExit(f"unknown config index {idx}")
-    N, H, W, G, KH, KW, PAD, dtype, arch, knobs = _WIN_CFGS[idx]
+def _win_spec(cfg):
+    N, H, W, G, KH, KW, PAD, dtype, arch, knobs = cfg
     problem = DirectConvProblem(
         N=N,
         H=H,
@@ -323,6 +340,26 @@ def _spec(idx: int):
         dtype=dtype,
     )
     return DirectDepthwiseDgradWindowedSpec(problem=problem, **knobs), arch
+
+
+def _build(spec, arch):
+    if isinstance(spec, DirectConv4cSpec):
+        return build_direct_conv_4c(spec, arch=arch)
+    if isinstance(spec, DirectConvSpec):
+        return build_direct_conv(spec, arch=arch)
+    return build_direct_depthwise_dgrad_windowed(spec, arch=arch)
+
+
+def _spec(idx: int):
+    if _WMMA_WIN_CFG_BASE <= idx < _WMMA_WIN_CFG_BASE + len(_WMMA_WIN_CFGS):
+        return _win_spec(_WMMA_WIN_CFGS[idx - _WMMA_WIN_CFG_BASE])
+    if _GENERIC_CFG_BASE <= idx < _GENERIC_CFG_BASE + len(_GENERIC_CFGS):
+        return _generic_spec(idx - _GENERIC_CFG_BASE)
+    if _FOURC_CFG_BASE <= idx < _FOURC_CFG_BASE + len(_FOURC_CFGS):
+        return _fourc_spec(idx - _FOURC_CFG_BASE)
+    if not 0 <= idx < len(_WIN_CFGS):
+        raise SystemExit(f"unknown config index {idx}")
+    return _win_spec(_WIN_CFGS[idx])
 
 
 def main() -> int:

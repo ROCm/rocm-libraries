@@ -30,6 +30,11 @@ channel of its 8-channel group, in its receptive field widened to
 4 * ceil((KW + 1) / 4) columns (the zero-weight taps of its passes);
 TestNonFiniteGradients asserts that bound for it.
 
+The same Toeplitz form on the wave32 16x16x32 WMMA (``mfma`` with
+``wave_size=32``, gfx1250) is checked host-side (arch / wave rules, fragment
+budget, lowering) and, on gfx1250, numerically on the MFMA set where it fits
+the fragment budget plus large 5x5 / 7x7 layers with 28- and 32-row tiles.
+
 Run (GPU part as a script, as the other numeric suites):
     PYTHONPATH=rocke/platform/python:rocke/library python \\
         rocke/library/tests/test_conv_dgrad_depthwise_windowed.py
@@ -294,6 +299,76 @@ class TestMfmaSpec(unittest.TestCase):
                 build_direct_depthwise_dgrad_windowed(spec), arch="gfx950"
             )
             self.assertIn(f"@llvm.amdgcn.mfma.f32.{intrin}", ll)
+            self.assertIn("addrspace(3)", ll)
+
+
+class TestWmmaSpec(unittest.TestCase):
+    """Host-only checks of the Toeplitz form on the wave32 WMMA (gfx1250)."""
+
+    def _wmma(self, problem=None, **kw):
+        base = {
+            "block_waves": 8,
+            "block_h": 28,
+            "mfma": True,
+            "w_fold": 1,
+            "prefetch_rows": 2,
+            "wave_size": 32,
+        }
+        base.update(kw)
+        return DirectDepthwiseDgradWindowedSpec(
+            problem=problem or _problem(4, 56, 56, 128, 7, 7, 3, "bf16"), **base
+        )
+
+    def test_wave32_form_is_gfx1250_only(self):
+        ok, why = is_valid_depthwise_dgrad_win_spec(self._wmma(), arch="gfx1250")
+        self.assertTrue(ok, why)
+        ok, why = is_valid_depthwise_dgrad_win_spec(self._wmma(), arch="gfx950")
+        self.assertFalse(ok)
+        self.assertIn("wave32 mfma needs one of ('gfx1250',)", why)
+        # The wave64 MFMA form stays gfx950-only.
+        ok, why = is_valid_depthwise_dgrad_win_spec(
+            self._wmma(wave_size=64), arch="gfx1250"
+        )
+        self.assertFalse(ok)
+        self.assertIn("mfma needs one of ('gfx950',)", why)
+
+    def test_fragments_are_twice_the_wave64_ones(self):
+        # 7x7: 2 passes per filter row; A, accumulator and B fragments take
+        # 8 VGPRs each on wave32 (4 on wave64), the dY rows 4 per load.
+        for wave, frag in ((32, 8), (64, 4)):
+            spec = self._wmma(wave_size=wave)
+            rows = spec.prefetch_rows * spec._mfma_in_passes()
+            self.assertEqual(
+                spec.mfma_frag_vgprs(), frag * (7 * 2 + 7 + 2) + 4 * rows, wave
+            )
+        # 9x9 (3 passes per row) exceeds the fragment budget at wave32.
+        ok, why = is_valid_depthwise_dgrad_win_spec(
+            self._wmma(_problem(2, 18, 18, 64, 9, 9, 4, "bf16"), block_h=8),
+            arch="gfx1250",
+        )
+        self.assertFalse(ok)
+        self.assertIn("VGPRs", why)
+
+    def test_grid_threads_and_name(self):
+        spec = self._wmma(block_waves=4, w_fold=2)
+        self.assertEqual(spec.threads_per_block, 4 * 32)
+        self.assertEqual(spec.block_ch, 4 * DW_DGRAD_MFMA_CH)
+        # 16-column W tiles, 32-channel blocks, 2 image tiles of 2 row tiles.
+        self.assertEqual(spec.grid(), (4, 4, 4))
+        for part in ("r7s7p3", "wv4", "bh28", "f2", "pf2", "mfma", "bf16"):
+            self.assertIn(part, spec.kernel_name())
+
+    def test_lowers_to_wmma_with_lds_staging(self):
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for dtype, ab in (("bf16", "bf16"), ("fp16", "f16")):
+            spec = self._wmma(_problem(2, 7, 9, 16, 5, 5, 2, dtype), block_waves=2)
+            ll = _lower_kernel_to_llvm_python(
+                build_direct_depthwise_dgrad_windowed(spec, arch="gfx1250"),
+                arch="gfx1250",
+            )
+            self.assertIn("@llvm.amdgcn.wmma.f32.16x16x32." + ab, ll)
+            self.assertNotIn("mfma", ll.replace(spec.kernel_name(), ""))
             self.assertIn("addrspace(3)", ll)
 
 
@@ -597,6 +672,41 @@ class TestMfmaNumerics(unittest.TestCase):
                 with self.subTest(fold=fold, shape=(N, H, W, C)):
                     bad, max_err = run_windowed(spec, GPU_ARCH, problem=p)
                     self.assertEqual(bad, 0, f"bad={bad} max_err={max_err:.3e}")
+
+
+# The wave32 WMMA form at the ConvNeXt-style 7x7 layers it is cached for
+# (the 28- and 32-row tiles included) and 5x5, fp16 and bf16.
+_WMMA_CASES = (
+    _MfmaCase("7x7_c128_64sq_bh32", 16, 64, 64, 128, 7, 7, 3, "bf16", 8, 1, 2, 32),
+    _MfmaCase("7x7_c256_32sq_bh32", 16, 32, 32, 256, 7, 7, 3, "fp16", 8, 2, 2, 32),
+    _MfmaCase("7x7_c128_56sq_bh28", 16, 56, 56, 128, 7, 7, 3, "bf16", 4, 2, 2, 28),
+    _MfmaCase("7x7_c128_56sq_bh28_f16", 16, 56, 56, 128, 7, 7, 3, "fp16", 8, 1, 2, 28),
+    _MfmaCase("5x5_c64_28sq_bh14", 8, 28, 28, 64, 5, 5, 2, "fp16", 4, 2, 2, 14),
+    _MfmaCase("5x5_partial_ch_ragged", 3, 13, 15, 40, 5, 5, 2, "bf16", 4, 4, 2, 4),
+)
+
+
+@unittest.skipUnless(GPU_ARCH == "gfx1250", f"needs gfx1250, got {GPU_ARCH!r}")
+class TestWmmaNumerics(unittest.TestCase):
+    def test_mfma_cases_at_wave32(self):
+        """The MFMA form's adversarial set, on the WMMA where it fits."""
+        n = 0
+        for c in _MFMA_CASES:
+            spec = replace(_mfma_spec(c), wave_size=32)
+            if not is_valid_depthwise_dgrad_win_spec(spec, arch=GPU_ARCH)[0]:
+                continue  # 9x9 / 11x11: past the wave32 fragment budget
+            n += 1
+            with self.subTest(case=c.id):
+                bad, max_err = run_windowed(spec, GPU_ARCH)
+                self.assertEqual(bad, 0, f"{c.id}: bad={bad} max_err={max_err:.3e}")
+        self.assertGreater(n, 8)
+
+    def test_large_layers(self):
+        for c in _WMMA_CASES:
+            spec = replace(_mfma_spec(c), wave_size=32)
+            with self.subTest(case=c.id):
+                bad, max_err = run_windowed(spec, GPU_ARCH)
+                self.assertEqual(bad, 0, f"{c.id}: bad={bad} max_err={max_err:.3e}")
 
 
 def _mfma_spread_zone(p: DirectConvProblem, bad_inputs) -> np.ndarray:

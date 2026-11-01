@@ -176,6 +176,10 @@ DW_WIN_MFMA_FILTERS = (5, 7, 9)
 DW_WIN_MFMA_FOLDS = (1, 2, 4)
 DW_WIN_MFMA_WAVES = (4, 8)
 DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
+# Taller row tiles for the wave32 WMMA form only (gfx1250): they keep 28- and
+# 32-row maps whole or chunk the large ones in fewer tiles. The gfx950 MFMA
+# grid stays at DW_WIN_MFMA_BLOCK_H.
+DW_WIN_WMMA_BLOCK_H = (28, 32)
 DW_WIN_MFMA_PREFETCH = 2
 # 4c dgrad (direct_grouped_dgrad_4c, cpg = kpg = 4): the 4x4x4 MFMA kernel on
 # the transposed problem with fused weights. The cache carries the image of
@@ -1409,8 +1413,13 @@ def _knob_grid(
             yield dict(
                 block_w=bw, block_h=bh, block_waves=waves, ch_per_lane=2, dot2=False
             )
+        from kernels.common.conv_direct_grouped import DW_DGRAD_WMMA_ARCHES
+
+        block_hs = DW_WIN_MFMA_BLOCK_H
+        if arch in DW_DGRAD_WMMA_ARCHES:
+            block_hs += DW_WIN_WMMA_BLOCK_H
         for fold, waves, bh in itertools.product(
-            DW_WIN_MFMA_FOLDS, DW_WIN_MFMA_WAVES, DW_WIN_MFMA_BLOCK_H
+            DW_WIN_MFMA_FOLDS, DW_WIN_MFMA_WAVES, block_hs
         ):
             yield dict(
                 mfma=True,

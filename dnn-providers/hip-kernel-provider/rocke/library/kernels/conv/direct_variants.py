@@ -222,6 +222,11 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
             problem=problem, name="rocke_direct_dw_dgrad", **knobs
         )
     if variant == "direct_depthwise_dgrad_win":
+        # The VALU form groups threads in logical wave64s on every target; the
+        # Toeplitz matrix form follows the target's waves (MFMA on wave64,
+        # WMMA on wave32), so it takes the target's wave size.
+        if knobs.get("mfma") and wave_size == 32:
+            knobs = dict(knobs, wave_size=32)
         return dc.DirectDepthwiseDgradWindowedSpec(
             problem=problem, name="rocke_direct_dw_dgrad_win", **knobs
         )
