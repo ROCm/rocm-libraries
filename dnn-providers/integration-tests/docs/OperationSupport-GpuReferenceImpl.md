@@ -56,6 +56,7 @@ The following table lists the operations currently executable through the GPU gr
 | BatchNorm Forward Inference | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean and variance are required inputs |
 | BatchNorm Forward Inference with Variance | FP16, BFP16, FP32 | Stride-based | GPU Reference | Same signatures as BatchNorm Forward Inference |
 | BatchNorm Forward Training | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/variance outputs optional |
+| BlockScale Quantize / Dequantize | FP4 E2M1, FP6 E2M3/E3M2, FP8 E4M3/E5M2, FP16, BFP16, FP32 | Stride-based | GPU Reference | Compact MX formats use FP8 E8M0 scales; FP32 compute |
 | Layernorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/inv-variance outputs optional |
 | Layernorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/inv-variance optional |
 | RMSNorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
@@ -74,7 +75,6 @@ The following table lists the operations currently executable through the GPU gr
 | Convolution Backward Weights | `ReferenceCapabilityError` | `GpuFpReferenceConvolution::wgrad` exists |
 | BatchNorm Backward | `ReferenceCapabilityError` | `GpuFpReferenceBatchnorm::backward` exists |
 | SDPA Backward | `ReferenceCapabilityError` | None |
-| BlockScale Quantize / Dequantize | `ReferenceCapabilityError` | None |
 | Resample Forward | "Unsupported node type" error | `GpuFpReferenceResample::forward` exists |
 | Resample Backward | "Unsupported node type" error | None |
 | MoE Grouped Matmul (forward and backward) | "Unsupported node type" error | None |
@@ -196,7 +196,7 @@ host validator.
 | Resample Backward | Yes | No |
 | SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; no variable seq. len., no ragged) | Yes (dense; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | No |
-| BlockScale Quantize / Dequantize | Yes | No |
+| BlockScale Quantize / Dequantize | Yes | Yes |
 | Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |
 | Pointwise Binary | Yes (incl. MAX, MIN, CMP_GT) | Yes (ADD, SUB, MUL and the three backward modes) |
 | Pointwise Ternary | Yes (BINARY_SELECT) | No |
