@@ -195,8 +195,8 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                                const miopen::batchnorm::ProblemDescription& problem,
                                                const PerformanceConfigBnBwdBackward& config) const
 {
-    const auto& handle      = context.GetStream();
-    const unsigned wavesize = (miopen::StartsWith(handle.GetDeviceName(), "gfx10") ? 32 : 64);
+    const auto& handle  = context.GetStream();
+    const auto wavesize = handle.GetWavefrontWidth();
 
     bool bfpmixparm   = false;
     bool bbfpmixparam = false;
@@ -277,7 +277,8 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                       in_cstride,
                                       ylocalsize,
                                       zlocalsize,
-                                      nelements);
+                                      nelements,
+                                      vectorsize);
 
         // WG size for Final kernels (NHWC)
         if(problem.IsLayoutNHWC() && c % 2 == 0 && xlocalsize % 2 == 0)
@@ -302,6 +303,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
 
         auto build_params =
             KernelBuildParameters{{"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
+                                  {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
                                   {"MIOPEN_USE_FP32", static_cast<int>(bfp32parm)},
                                   {"MIOPEN_USE_FPMIX", static_cast<int>(bfpmixparm)},
                                   {"MIOPEN_USE_BFPMIX", static_cast<int>(bbfpmixparam)},

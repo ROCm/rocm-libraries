@@ -30,6 +30,16 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
   ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
   does the weight tensor in every case.
+* [BatchNorm] Fixed incorrect NHWC FP16/BF16 spatial batch normalization results (forward training
+  and backward) when `C / vectorsize` is odd and the batch is too small to hold the intermediate
+  statistics. Solver applicability and stash-method selection now use the kernel's parity, so
+  configurations without enough space are rejected and a valid fallback is selected.
+* [BatchNorm] Fixed BF16 batch normalization output being truncated on the device while the host
+  reference rounded to nearest-even. All batchnorm solvers now receive `MIOPEN_USE_RNE_BFLOAT16`,
+  so device and host conversion match. In default builds (RNE ON), BF16 batchnorm results change
+  by up to one BF16 ulp.
+* [BatchNorm] Fixed the spatial backward-training CPU reference omitting `epsilon` when recomputing
+  the inverse variance, and reduced the `bn_driver` verification epsilon from `1e-3` to `1e-5`.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for

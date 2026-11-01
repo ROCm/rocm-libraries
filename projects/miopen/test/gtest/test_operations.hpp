@@ -104,6 +104,7 @@ void ComputeCPUBNBwd(DLModule& dl_module)
                                      dl_module.bnBias,
                                      dl_module.dScale_ref,
                                      dl_module.dBias_ref,
+                                     dl_module.epsilon,
                                      dl_module.savedMean,
                                      dl_module.savedInvVar,
                                      dl_module.activ_mode,

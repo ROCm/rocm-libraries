@@ -85,6 +85,11 @@ use ``apt-get install hipblaslt``. In addition to installing hipBLASLt, you must
 install :doc:`hipBLAS <hipblas:index>`. To install the hipBLAS minimum release, use ``apt-get install hipblas``.
 To disable hipBLASLt, set the configuration flag ``-DMIOPEN_USE_HIPBLASLT=Off``.
 
+MIOpen converts FP32 values to BF16 using round-to-nearest, ties-to-even (RNE) by default, on both the
+host and the device. To use truncation instead, set the configuration flag
+``-DMIOPEN_USE_RNE_BFLOAT16=Off``. The setting is passed to the device kernels as a compile option,
+so host and device conversion stay consistent in either configuration.
+
 Building MIOpen
 ================================================
 

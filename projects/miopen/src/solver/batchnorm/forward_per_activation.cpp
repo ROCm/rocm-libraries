@@ -100,6 +100,7 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
         std::size_t zgridsize  = 1;
 
         const auto build_params = KernelBuildParameters{
+            {"MIOPEN_USE_RNE_BFLOAT16", MIOPEN_USE_RNE_BFLOAT16},
             {"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
             {"MIOPEN_USE_FP32", static_cast<int>(bfp32parm)},
             {"MIOPEN_USE_FPMIX", static_cast<int>(bfpmixparm)},
