@@ -13,7 +13,9 @@ from probe_support import (  # noqa: F401 (pytest fixtures)
     MULTI_LAUNCH_FIXTURES,
     comgr_lib,
     derive_and_pack,
-    hipcc,
+    device_lib_path,
+    hip_compiler,
+    hip_path,
     rocm_kpack_dir,
     run_assert,
 )
@@ -24,9 +26,25 @@ ARCH = "gfx1151"
 @pytest.fixture(
     params=MULTI_LAUNCH_FIXTURES, ids=[f.name for f in MULTI_LAUNCH_FIXTURES]
 )
-def probe(request, tmp_path, rocm_kpack_dir, hipcc, comgr_lib):
+def probe(
+    request,
+    tmp_path,
+    rocm_kpack_dir,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    comgr_lib,
+):
     out, expect = derive_and_pack(
-        request.param, tmp_path, rocm_kpack_dir, hipcc, comgr_lib, rocke=True, arch=ARCH
+        request.param,
+        tmp_path,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+        rocke=True,
+        arch=ARCH,
     )
     return request.param.name, out, expect
 

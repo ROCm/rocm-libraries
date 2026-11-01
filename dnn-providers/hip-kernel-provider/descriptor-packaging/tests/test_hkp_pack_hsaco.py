@@ -5,8 +5,8 @@ kpack` UKD whose archive entry is byte-identical to the file the descriptor
 named.
 
 Every test here is compiler-free. The code objects are the committed fixtures
-under `fixtures/hsaco/`, and packing goes through `run_pipeline` with a hipcc
-path nothing may invoke.
+under `fixtures/hsaco/`, and packing goes through `run_pipeline` with a
+compiler path nothing may invoke.
 """
 
 import copy
@@ -28,7 +28,7 @@ from pack_helpers import GENERIC_TARGETS, read_shipped, run_pipeline
 ARCH = "gfx942"
 OTHER_ARCH = "gfx950"
 CO_NAME = "HsacoFixture.co"
-NO_HIPCC = "hipcc-not-invoked"
+NO_COMPILER = "compiler-not-invoked"
 
 
 def _read(path):
@@ -51,7 +51,9 @@ def _run(source_root, tmp_path, rocm_kpack_dir, arches=(ARCH,), **kwargs):
         source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
-        hipcc=NO_HIPCC,
+        hip_compiler=NO_COMPILER,
+        hip_path=None,
+        device_lib_path=None,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         **kwargs,
@@ -122,11 +124,9 @@ def test_inline_hsaco_round_trips_byte_identical(
     tmp_path, empty_arch_fixture, hsaco_fixture_dir, rocm_kpack_dir, monkeypatch
 ):
     """The archive entry is the authored file, and provenance names only it."""
-    monkeypatch.setattr(
-        toolchain, "hipcc_version", lambda _h: "HIP version: 0.0.0-test"
-    )
-    # Under the patch a hip UKD would carry `hipcc_version`, so its absence below
-    # is a statement about hsaco and not about an unreachable hipcc.
+    monkeypatch.setattr(toolchain, "hip_version", lambda _h: "HIP version: 0.0.0-test")
+    # Under the patch a hip UKD would carry `hip_version`, so its absence below
+    # is a statement about hsaco and not about an unreachable compiler.
     assert toolchain.hip_provenance("x")
 
     root = _hsaco_root(tmp_path, empty_arch_fixture, hsaco_fixture_dir)
@@ -157,7 +157,7 @@ def test_inline_hsaco_round_trips_byte_identical(
         "sha256": digest,
         "symbol": "HsacoFixtureAdd",
     }
-    assert "hipcc_version" not in shipped["provenance"]
+    assert "hip_version" not in shipped["provenance"]
 
     # Packed from the authored file: no copy of it anywhere in either tree.
     assert not list((tmp_path / "out").rglob("*.co"))
@@ -266,7 +266,15 @@ def test_missing_file_has_no_root_fallback(
     flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError) as excinfo:
-        compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
+        compile_intermediate(
+            flat,
+            root,
+            ARCH,
+            NO_COMPILER,
+            tmp_path / "inter",
+            hip_path=None,
+            device_lib_path=None,
+        )
     message = str(excinfo.value)
     assert "hsaco file not found" in message
     assert "ukd-solo-add-f32-b64" in message
@@ -279,7 +287,15 @@ def test_missing_file_has_no_root_fallback(
     flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError, match="hsaco file escapes the source root"):
-        compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
+        compile_intermediate(
+            flat,
+            root,
+            ARCH,
+            NO_COMPILER,
+            tmp_path / "inter",
+            hip_path=None,
+            device_lib_path=None,
+        )
 
 
 @pytest.mark.quick
@@ -303,7 +319,15 @@ def test_same_key_for_two_files_is_refused_in_the_walk(
     monkeypatch.setattr(pipeline, "hsaco_variant_key", lambda *a, **k: "COLLIDE")
 
     with pytest.raises(HkpPackError) as excinfo:
-        compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
+        compile_intermediate(
+            flat,
+            root,
+            ARCH,
+            NO_COMPILER,
+            tmp_path / "inter",
+            hip_path=None,
+            device_lib_path=None,
+        )
     message = str(excinfo.value)
     assert "toc_key collision: hsaco key 'COLLIDE'" in message
     assert str((root / "solo" / CO_NAME).resolve()) in message
@@ -362,7 +386,7 @@ def test_hsaco_and_hip_on_one_key_collide_at_pack(
     """An hsaco key reused by a hip UKD is caught by pack_arch's signature check.
 
     The hsaco UKD is authored first, so the hip arm finds the key taken and
-    skips its compile: no hipcc runs, and only the pack-time check can object.
+    skips its compile: no compiler runs, and only the pack-time check can object.
     """
 
     def hsaco_then_hip(doc, template):
@@ -396,7 +420,15 @@ def test_hsaco_cannot_fulfil_compiled_bindings(
     flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError, match="a 'hsaco' source cannot fulfil"):
-        compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
+        compile_intermediate(
+            flat,
+            root,
+            ARCH,
+            NO_COMPILER,
+            tmp_path / "inter",
+            hip_path=None,
+            device_lib_path=None,
+        )
 
 
 @pytest.mark.parametrize(
@@ -468,7 +500,15 @@ def test_symlink_leaving_the_root_is_refused(
     flat = load_flat_input(root, GENERIC_TARGETS)
 
     with pytest.raises(HkpPackError, match="hsaco file escapes the source root"):
-        compile_intermediate(flat, root, ARCH, NO_HIPCC, tmp_path / "inter")
+        compile_intermediate(
+            flat,
+            root,
+            ARCH,
+            NO_COMPILER,
+            tmp_path / "inter",
+            hip_path=None,
+            device_lib_path=None,
+        )
 
 
 @pytest.mark.quick
@@ -487,8 +527,10 @@ def test_unresolvable_file_name_is_refused(
             load_flat_input(root, GENERIC_TARGETS),
             root,
             ARCH,
-            NO_HIPCC,
+            NO_COMPILER,
             tmp_path / "inter",
+            hip_path=None,
+            device_lib_path=None,
         )
 
 

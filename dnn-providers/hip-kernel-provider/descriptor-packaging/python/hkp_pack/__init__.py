@@ -4,10 +4,10 @@ hkp = Hip Kernel-provider Packaging; the hkp_ prefix (package, CLI, and CMake
 hkp_/HKP_ symbols) marks internal parts of this kpack-packaging module.
 
 Consumes a flat authored source folder (KDPs with inline UKDs, by-Id generic
-descriptors, and HIP sources), compiles each hip kernel via hipcc --genco and each
-rocKE kernel via comgr per targeted arch, prunes each per-arch intermediate to what
-that arch needs, packs the code objects into a per-arch rocm_kpack archive, and
-rewrites the UKDs into self-describing kpack form (library/toc_key/symbol/sha256),
+descriptors, and HIP sources), compiles each hip kernel via clang++ --offload-device-only
+and each rocKE kernel via comgr per targeted arch, prunes each per-arch intermediate
+to what that arch needs, packs the code objects into a per-arch rocm_kpack archive,
+and rewrites the UKDs into self-describing kpack form (library/toc_key/symbol/sha256),
 with each UKD's provenance in a sidecar beside its descriptor
 (`foo.kdp.provenance.json.gz` for `foo.kdp.json`).
 No manifest is emitted. Provider-internal; no public API.

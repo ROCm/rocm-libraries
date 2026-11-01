@@ -277,7 +277,9 @@ def _pack(root, tmp_path, rocm_kpack_dir):
         source_root=root,
         arches=[ARCH],
         out_root=tmp_path / "out",
-        hipcc="hipcc-not-invoked",
+        hip_compiler="compiler-not-invoked",
+        hip_path=None,
+        device_lib_path=None,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )

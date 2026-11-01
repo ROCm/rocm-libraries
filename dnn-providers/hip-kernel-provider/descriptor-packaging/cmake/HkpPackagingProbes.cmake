@@ -251,7 +251,9 @@ function(hkp_add_packaging_probe)
     _hkp_probe_check_ukds("${ARG_NAME}" "${ARG_UKDS}")
 
     get_property(_kpack_dir GLOBAL PROPERTY HKP_PROBE_ROCM_KPACK_DIR)
-    get_property(_hipcc GLOBAL PROPERTY HKP_PROBE_HIPCC)
+    get_property(_hip_compiler GLOBAL PROPERTY HKP_PROBE_HIP_COMPILER)
+    get_property(_hip_path GLOBAL PROPERTY HKP_PROBE_HIP_PATH)
+    get_property(_device_lib_path GLOBAL PROPERTY HKP_PROBE_DEVICE_LIB_PATH)
     get_property(_root_args GLOBAL PROPERTY HKP_PROBE_ROOT_ARGS)
 
     set(_probe_dir "${CMAKE_BINARY_DIR}/hkp-probes/${ARG_NAME}")
@@ -275,7 +277,9 @@ function(hkp_add_packaging_probe)
         NAME "probe_${ARG_NAME}"
         SOURCE_ROOT "${_root}"
         ARCHES "${ARG_ARCH}"
-        HIPCC "${_hipcc}"
+        HIP_COMPILER "${_hip_compiler}"
+        HIP_PATH "${_hip_path}"
+        DEVICE_LIB_PATH "${_device_lib_path}"
         ROCM_KPACK_DIR "${_kpack_dir}"
         OUT_ROOT "${_out_root}"
         ${_root_args}
@@ -396,7 +400,8 @@ function(_hkp_probe_filter_args out_var enable_rocke)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_load_packaging_probes(<rocm_kpack_dir> <hipcc> <rocke_comgr_lib> [<root args>...])
+# hkp_load_packaging_probes(<rocm_kpack_dir> <hip_compiler> <hip_path>
+#                           <device_lib_path> <rocke_comgr_lib> [<root args>...])
 #   Store the toolchain hkp_add_packaging resolved (<root args> are the keywords every
 #   production root is wired with: ENABLE_ROCKE, the ROCKE_* toolchain when ON, and
 #   EXCLUDE_FOLDERS). A build lacking a producer (rocKE OFF) still probes: derive and the
@@ -414,9 +419,12 @@ endfunction()
 #   for more. Configuration fails when the production root cannot be read, pytest is not
 #   importable by Python3_EXECUTABLE, or fewer probes are declared than that minimum.
 # ---------------------------------------------------------------------------
-function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
+# cmake-lint: disable=R0915
+function(hkp_load_packaging_probes rocm_kpack_dir hip_compiler hip_path device_lib_path rocke_comgr_lib)
     set_property(GLOBAL PROPERTY HKP_PROBE_ROCM_KPACK_DIR "${rocm_kpack_dir}")
-    set_property(GLOBAL PROPERTY HKP_PROBE_HIPCC "${hipcc}")
+    set_property(GLOBAL PROPERTY HKP_PROBE_HIP_COMPILER "${hip_compiler}")
+    set_property(GLOBAL PROPERTY HKP_PROBE_HIP_PATH "${hip_path}")
+    set_property(GLOBAL PROPERTY HKP_PROBE_DEVICE_LIB_PATH "${device_lib_path}")
     set_property(GLOBAL PROPERTY HKP_PROBE_COMGR_LIB "${rocke_comgr_lib}")
     set_property(GLOBAL PROPERTY HKP_PROBE_ROOT_ARGS "${ARGN}")
     # The filters the production roots were wired with, read from those very arguments:
@@ -464,8 +472,17 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     endif()
 
     # Same environment contract as the pytest entries of hkp_register_tests: the probe
-    # tooling tests read the kpack dir, hipcc and comgr from it and fail when absent.
-    set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}" "HKP_HIPCC=${hipcc}")
+    # tooling tests read the kpack dir, hip_compiler and comgr from it and fail when absent.
+    set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}")
+    if(hip_compiler)
+        list(APPEND _pyenv "HKP_HIP_COMPILER=${hip_compiler}")
+    endif()
+    if(hip_path)
+        list(APPEND _pyenv "HKP_HIP_PATH=${hip_path}")
+    endif()
+    if(device_lib_path)
+        list(APPEND _pyenv "HKP_DEVICE_LIB_PATH=${device_lib_path}")
+    endif()
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")
     endif()
