@@ -496,18 +496,16 @@ rocke_value_t* rocke_mfma_k_loop(rocke_ir_builder_t* b,
  *         else:
  *             b.global_store(C, addr, val, align=4 if out_dtype=="f32" else 2)
  *
- * lane_to_output inlined (atoms.py:536-591).
+ * lane_to_output is rocke_mfma_atom_lane_to_output.
  */
 
-/* Inline of MfmaAtom.lane_to_output(b, lane, i): writes (row_in, col_in) for
- * accumulator slot i. Returns true on a supported (m,n); false sets the sticky
- * NotImplementedError (the Python `raise NotImplementedError` path). */
-static bool rocke_i_lane_to_output(rocke_ir_builder_t* b,
-                                   const rocke_mfma_atom_t* atom,
-                                   rocke_value_t* lane,
-                                   int i,
-                                   rocke_value_t** out_row,
-                                   rocke_value_t** out_col)
+/* MfmaAtom.lane_to_output(b, lane, i); see the header. */
+bool rocke_mfma_atom_lane_to_output(rocke_ir_builder_t* b,
+                                    const rocke_mfma_atom_t* atom,
+                                    rocke_value_t* lane,
+                                    int i,
+                                    rocke_value_t** out_row,
+                                    rocke_value_t** out_col)
 {
     if((atom->m == 16 && atom->n == 16))
     {
@@ -631,7 +629,7 @@ rocke_status_t rocke_store_acc_to_global(rocke_ir_builder_t* b,
         rocke_value_t* c_f32;
         rocke_value_t* val;
 
-        if(!rocke_i_lane_to_output(b, atom, lane_decode->lane, i, &row_in, &col_in))
+        if(!rocke_mfma_atom_lane_to_output(b, atom, lane_decode->lane, i, &row_in, &col_in))
         {
             return b->status;
         }

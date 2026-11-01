@@ -367,6 +367,11 @@ all f32 output); the i4 mantissa variants and the
 helpers (``i4_dequant``, ``mx_scale``, ``preshuffle``) are the
 pieces the v2 body composes.
 
+Each output is scaled with the A scale of its own row and the B scale of its
+own column. A lane of the 16x16 MFMA loads A from one row but holds outputs
+of four other rows (``MfmaAtom.lane_to_output``), so it loads one A scale per
+output it holds and one B scale for its column.
+
 ## MX GEMM `instances/mx_gemm.py::MxGemmSpec` matches CK Tile ``42_mx_gemm``. Uses
 the OCP MX-spec shared-exponent format: each 32-element mantissa
 block carries one 8-bit biased E8M0 scale (bias 127). v1 supports fp8 and bf8

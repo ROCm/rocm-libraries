@@ -39,7 +39,6 @@ rocke_block_scale_gemm_spec_t rocke_block_scale_gemm_spec_default(void)
     s.block_tile_m = 16;
     s.block_tile_n = 16;
     s.name = "rocke_block_scale_gemm";
-    s.per_input_row = true;
     return s;
 }
 
@@ -351,6 +350,11 @@ bool rocke_block_scale_gemm_is_valid_spec(rocke_ir_builder_t* b,
  *  in C that environment is this struct, threaded through the load callbacks'
  *  `user` pointer.
  * ===================================================================== */
+
+/* The most accumulator slots per lane the builder handles (the 16x16 atom
+ * holds 4). */
+#define ROCKE_BSG_MAX_C_PER_LANE 4
+
 typedef struct rocke_bsg_load_ctx
 {
     rocke_value_t* A;
@@ -387,6 +391,85 @@ static rocke_value_t*
         b, c->Bp, c->atom, c->lane_decode, c->n_tile_base, k_tile_base, c->N);
 }
 
+/* K groups whose A scales the K-group loop reads with one load per output row
+ * (Python _GROUPS_PER_A_SCALE_LOAD): a row's scales of consecutive K groups
+ * are adjacent, so two groups take one 8-byte load. Each group of a load is
+ * one more copy of the group's MFMA loop in the kernel; four groups per
+ * 16-byte load measured slower than two on some shapes. */
+#define ROCKE_BSG_GROUPS_PER_A_SCALE_LOAD 2
+
+/* What _accumulate_group reads from build_block_scale_gemm's scope. */
+typedef struct rocke_bsg_group_ctx
+{
+    rocke_bsg_load_ctx_t load; /* k_group_base is set per group */
+    rocke_value_t* b_scale_rsrc;
+    rocke_value_t* b_scale_col_offset;
+    int n_scale_count_b;
+    int gk;
+} rocke_bsg_group_ctx_t;
+
+/* _accumulate_group(b, kg, a_scales, acc, loop_suffix): add K group kg to acc.
+ * Load the group's B scale, run its gk / atom.k MFMAs on a fresh accumulator,
+ * scale the result by a_scales[i] * b_scale per output i and add it to acc.
+ * loop_suffix keeps the names of the group's MFMA loop unique when a K-group
+ * loop iteration runs more than one group. Each builder call is bound to a
+ * temporary in Python's evaluation order:
+ *   b_group_offset = kg * (n_scale_count_b * 4)
+ *   b_scale_v      = buffer_load(b_scale_rsrc, b_scale_col_offset, b_group_offset)
+ *   ab_scale_vec   = vec_pack([a_scales[i] * b_scale_v ...], F32)
+ *   k_group_base   = kg * gk
+ *   group_acc      = mfma_k_loop(b, K=gk, ..., "kk<suffix>", "gacc<suffix>")
+ *   result         = vector_add(acc, vector_mul(group_acc, ab_scale_vec)) */
+static rocke_value_t* rocke_bsg_accumulate_group(rocke_ir_builder_t* b,
+                                                 rocke_bsg_group_ctx_t* g,
+                                                 rocke_value_t* kg,
+                                                 rocke_value_t* const* a_scales,
+                                                 rocke_value_t* acc,
+                                                 const char* loop_suffix)
+{
+    const rocke_mfma_atom_t* atom = g->load.atom;
+    rocke_value_t* ab_scales[ROCKE_BSG_MAX_C_PER_LANE];
+    rocke_value_t* b_group_offset;
+    rocke_value_t* b_scale_v;
+    rocke_value_t* ab_scale_vec;
+    rocke_value_t* group_acc;
+    rocke_value_t* scaled_group;
+    char iv_name[16];
+    char acc_name[16];
+    int i;
+
+    b_group_offset = rocke_b_mul(b, kg, rocke_b_const_i32(b, g->n_scale_count_b * 4));
+    b_scale_v = rocke_b_buffer_load(
+        b, g->b_scale_rsrc, g->b_scale_col_offset, b_group_offset, rocke_f32());
+    for(i = 0; i < atom->c_per_lane; ++i)
+    {
+        ab_scales[i] = rocke_b_fmul(b, a_scales[i], b_scale_v);
+    }
+    ab_scale_vec = rocke_b_vec_pack(b, ab_scales, atom->c_per_lane, rocke_f32());
+
+    /* The group's K range is [kg * gk, (kg + 1) * gk). */
+    g->load.k_group_base = rocke_b_mul(b, kg, rocke_b_const_i32(b, g->gk));
+
+    snprintf(iv_name, sizeof(iv_name), "kk%s", loop_suffix);
+    snprintf(acc_name, sizeof(acc_name), "gacc%s", loop_suffix);
+    group_acc = rocke_mfma_k_loop(b,
+                                  g->gk,
+                                  atom,
+                                  rocke_bsg_load_a_in_group,
+                                  rocke_bsg_load_b_in_group,
+                                  /*per_tile_post_mfma=*/NULL,
+                                  /*initial_acc=*/NULL,
+                                  iv_name,
+                                  acc_name,
+                                  &g->load);
+
+    /* group_acc, acc and ab_scale_vec are <c_per_lane x f32> per-lane vectors
+     * (element i belongs to output i); one vector fmul and one vector fadd
+     * lower to packed v_pk_mul_f32 / v_pk_add_f32 on AMDGPU. */
+    scaled_group = rocke_b_vector_mul(b, group_acc, ab_scale_vec);
+    return rocke_b_vector_add(b, acc, scaled_group);
+}
+
 rocke_kernel_def_t* rocke_build_block_scale_gemm(rocke_ir_builder_t* b,
                                                  const rocke_block_scale_gemm_spec_t* spec,
                                                  const char* arch)
@@ -416,13 +499,17 @@ rocke_kernel_def_t* rocke_build_block_scale_gemm(rocke_ir_builder_t* b,
     rocke_param_opts_t opts;
     const rocke_type_t* a_store_ty;
     const rocke_type_t* b_store_ty;
-    rocke_iter_arg_t outer_args[1];
-    rocke_value_t* loop_lb;
-    rocke_value_t* loop_ub;
-    rocke_value_t* loop_step;
-    rocke_for_t outer;
     rocke_value_t* acc_final;
-    rocke_bsg_load_ctx_t lctx;
+    rocke_bsg_group_ctx_t gctx;
+    int groups_per_load;
+    int num_group_runs;
+    /* One A-scale row base per accumulator slot; c_per_lane is 4 for the 16x16
+     * atom, the only atom rocke_block_scale_gemm_spec_atom returns. */
+    rocke_value_t* a_scale_rsrc;
+    rocke_value_t* b_scale_rsrc;
+    rocke_value_t* a_scale_row_offsets[ROCKE_BSG_MAX_C_PER_LANE];
+    rocke_value_t* b_scale_col_offset;
+    int i;
 
     if(!rocke_i_live(b))
     {
@@ -584,119 +671,208 @@ rocke_kernel_def_t* rocke_build_block_scale_gemm(rocke_ir_builder_t* b,
     num_groups = spec->K / gk;
     c_atom_k = rocke_b_const_i32(b, atom->k);
 
-    /* outer = b.scf_for_iter(0, num_groups, 1, [("acc", atom.zero_acc(b))], "kg")
-     *   atom.zero_acc(b) -> b.zero_vec_f32(atom.c_per_lane)
-     * Python evaluates scf_for_iter's positional args left-to-right, so the
-     * three bound constants (0, num_groups, 1) are emitted BEFORE the
-     * zero_vec inside the iter-arg list. Emit them first here so the global
-     * value counter for the zero_vec matches Python (C arg-eval order is
-     * unspecified). */
-    loop_lb = rocke_b_const_i32(b, 0);
-    loop_ub = rocke_b_const_i32(b, num_groups);
-    loop_step = rocke_b_const_i32(b, 1);
-    outer_args[0].name = "acc";
-    outer_args[0].init = rocke_b_zero_vec_f32(b, atom->c_per_lane);
-    outer = rocke_b_scf_for_iter(b,
-                                 loop_lb,
-                                 loop_ub,
-                                 loop_step,
-                                 outer_args,
-                                 1,
-                                 "kg",
-                                 /*unroll=*/false,
-                                 /*elide_trailing_barrier=*/true);
-
-    rocke_b_region_enter(b, outer.body);
+    /* Each lane scales the outputs it holds, so it needs the A scale of each
+     * output's row and the B scale of each output's column. In the 16x16 atom a
+     * lane's c_per_lane outputs sit in c_per_lane rows of one column
+     * (rocke_mfma_atom_lane_to_output, the mapping the store uses): the rows are
+     * not the row the lane loads A from (m_in_atom), so the lane loads one A
+     * scale per output, while its column is the one it loads B from
+     * (n_in_atom), so one B scale serves all its outputs.
+     *
+     * The scales are read with buffer loads: the per-lane byte offset of each
+     * scale row (A) or column (B) is computed once, before the K-group loop, and
+     * the K group's byte offset, the same for every lane, goes in the load's
+     * scalar offset, so a K group adds no per-lane address arithmetic for its
+     * scales. The scale tensors are (ceil(M / gm), K / gk)
+     * (A) and (K / gk, ceil(N / gn)) (B), f32, row-major. gk is a multiple of
+     * atom->k (32), so each is at most an eighth of the size in bytes of A or
+     * B: they fit a buffer's 32-bit byte range whenever A and B fit the 32-bit
+     * element index the kernel already uses for them.
+     *
+     * Each builder call is bound to a temporary in Python's left-to-right
+     * evaluation order (C argument order is unspecified):
+     *   a_scale_rsrc           = buffer_rsrc(AScale, ceil(M / gm) * k_scale_count_a * 4)
+     *   b_scale_rsrc           = buffer_rsrc(BScale, num_groups * n_scale_count_b * 4)
+     *   a_scale_row_offsets[i] = ((m_tile_base + row_in_atom(i)) / gm)
+     *                            * (k_scale_count_a * 4)
+     *   b_scale_col_offset     = ((n_tile_base + n_in_atom) / gn) * 4 */
+    if(atom->c_per_lane > ROCKE_BSG_MAX_C_PER_LANE)
     {
-        rocke_value_t* kg = outer.iv;
-        rocke_value_t* outer_acc = outer.iter_vars[0];
-        rocke_value_t* a_scale_off;
-        rocke_value_t* b_scale_off;
-        rocke_value_t* a_scale_v;
-        rocke_value_t* b_scale_v;
-        rocke_value_t* ab_scale;
-        rocke_value_t* k_group_base;
-        rocke_value_t* a_scale_inner_add;
-        rocke_value_t* a_scale_div;
-        rocke_value_t* a_scale_mul;
-        rocke_value_t* b_scale_mul;
-        rocke_value_t* b_scale_inner_add;
-        rocke_value_t* b_scale_div;
-        rocke_value_t* group_acc;
-        rocke_value_t* ab_scale_vec;
-        rocke_value_t* scaled_group;
-        rocke_value_t* new_outer;
-        rocke_value_t* yield_vals[1];
-
-        /* a_scale_off = ((m_tile_base + m_in_atom)/gm) * k_scale_count_a + kg
-         * Python evaluates the nested b.add/b.mul/b.div args left-to-right, so
-         * the emission order is: add(m_tile_base,m_in_atom), const(gm), div,
-         * const(k_scale_count_a), mul, then kg (already a value). C arg-eval
-         * order is unspecified, so bind each sub-expression to a temporary in
-         * that exact order to match Python's value numbering. */
-        a_scale_inner_add = rocke_b_add(b, m_tile_base, lane_decode.m_in_atom);
-        a_scale_div = rocke_b_div(b, a_scale_inner_add, rocke_b_const_i32(b, gm));
-        a_scale_mul = rocke_b_mul(b, a_scale_div, rocke_b_const_i32(b, k_scale_count_a));
-        a_scale_off = rocke_b_add(b, a_scale_mul, kg);
-        /* b_scale_off = kg * n_scale_count_b + ((n_tile_base + n_in_atom)/gn)
-         * Python evaluates b.add's args left-to-right, so the mul (kg *
-         * n_scale_count_b) is emitted BEFORE the div(add) operand. C arg
-         * evaluation order is unspecified, so bind the mul to a temporary
-         * first to force the same emission order. */
-        b_scale_mul = rocke_b_mul(b, kg, rocke_b_const_i32(b, n_scale_count_b));
-        b_scale_inner_add = rocke_b_add(b, n_tile_base, lane_decode.n_in_atom);
-        b_scale_div = rocke_b_div(b, b_scale_inner_add, rocke_b_const_i32(b, gn));
-        b_scale_off = rocke_b_add(b, b_scale_mul, b_scale_div);
-
-        a_scale_v = rocke_b_global_load_f32(b, AScale, a_scale_off, /*align=*/0);
-        b_scale_v = rocke_b_global_load_f32(b, BScale, b_scale_off, /*align=*/0);
-        ab_scale = rocke_b_fmul(b, a_scale_v, b_scale_v);
-
-        /* k_group_base = kg * gk */
-        k_group_base = rocke_b_mul(b, kg, rocke_b_const_i32(b, gk));
-
-        /* group_acc = mfma_k_loop(b, K=gk, atom, _load_a_in_group,
-         *     _load_b_in_group, iv_name="kk", acc_name="gacc") */
-        lctx.A = A;
-        lctx.Bp = Bp;
-        lctx.atom = atom;
-        lctx.lane_decode = &lane_decode;
-        lctx.m_tile_base = m_tile_base;
-        lctx.n_tile_base = n_tile_base;
-        lctx.k_group_base = k_group_base;
-        lctx.c_atom_k = c_atom_k;
-        lctx.K = spec->K;
-        lctx.N = spec->N;
-
-        group_acc = rocke_mfma_k_loop(b,
-                                      gk,
-                                      atom,
-                                      rocke_bsg_load_a_in_group,
-                                      rocke_bsg_load_b_in_group,
-                                      /*per_tile_post_mfma=*/NULL,
-                                      /*initial_acc=*/NULL,
-                                      "kk",
-                                      "gacc",
-                                      &lctx);
-
-        /* ab_scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
-         * scaled_group = b.vector_mul(group_acc, ab_scale_vec)
-         * new_outer    = b.vector_add(outer_acc, scaled_group) */
-        ab_scale_vec = rocke_b_vector_splat(b, ab_scale, atom->c_per_lane);
-        scaled_group = rocke_b_vector_mul(b, group_acc, ab_scale_vec);
-        new_outer = rocke_b_vector_add(b, outer_acc, scaled_group);
-
-        yield_vals[0] = new_outer;
-        rocke_b_scf_yield(b, yield_vals, 1);
+        return (rocke_kernel_def_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "block_scale_gemm: atom c_per_lane %d exceeds %d",
+            atom->c_per_lane,
+            ROCKE_BSG_MAX_C_PER_LANE);
     }
-    rocke_b_region_leave(b);
-
-    /* acc_final = outer.results[0] */
-    if(!rocke_i_live(b) || outer.op == NULL || outer.op->num_results < 1)
+    a_scale_rsrc = rocke_b_buffer_rsrc(
+        b, AScale, rocke_b_const_i32(b, ((spec->M + gm - 1) / gm) * k_scale_count_a * 4));
+    b_scale_rsrc
+        = rocke_b_buffer_rsrc(b, BScale, rocke_b_const_i32(b, num_groups * n_scale_count_b * 4));
+    for(i = 0; i < atom->c_per_lane; ++i)
     {
-        return NULL;
+        rocke_value_t* row_in_atom;
+        rocke_value_t* col_in_atom;
+        rocke_value_t* row;
+        rocke_value_t* row_group;
+
+        if(!rocke_mfma_atom_lane_to_output(
+               b, atom, lane_decode.lane, i, &row_in_atom, &col_in_atom))
+        {
+            return NULL;
+        }
+        row = rocke_b_add(b, m_tile_base, row_in_atom);
+        row_group = rocke_b_div(b, row, rocke_b_const_i32(b, gm));
+        a_scale_row_offsets[i]
+            = rocke_b_mul(b, row_group, rocke_b_const_i32(b, k_scale_count_a * 4));
     }
-    acc_final = outer.op->results[0];
+    {
+        rocke_value_t* col = rocke_b_add(b, n_tile_base, lane_decode.n_in_atom);
+        rocke_value_t* col_group = rocke_b_div(b, col, rocke_b_const_i32(b, gn));
+        b_scale_col_offset = rocke_b_mul(b, col_group, rocke_b_const_i32(b, 4));
+    }
+
+    gctx.load.A = A;
+    gctx.load.Bp = Bp;
+    gctx.load.atom = atom;
+    gctx.load.lane_decode = &lane_decode;
+    gctx.load.m_tile_base = m_tile_base;
+    gctx.load.n_tile_base = n_tile_base;
+    gctx.load.k_group_base = NULL;
+    gctx.load.c_atom_k = c_atom_k;
+    gctx.load.K = spec->K;
+    gctx.load.N = spec->N;
+    gctx.b_scale_rsrc = b_scale_rsrc;
+    gctx.b_scale_col_offset = b_scale_col_offset;
+    gctx.n_scale_count_b = n_scale_count_b;
+    gctx.gk = gk;
+
+    /* A row's A scales of consecutive K groups are adjacent, so the main
+     * K-group loop runs groups_per_load groups per iteration and reads each
+     * output row's A scales for all of them with one load. The last
+     * num_groups % groups_per_load groups run one per iteration, with one
+     * 4-byte load per row.
+     *   acc = atom.zero_acc(b)    (emitted before the loops' bound constants) */
+    groups_per_load = ROCKE_BSG_GROUPS_PER_A_SCALE_LOAD;
+    num_group_runs = num_groups / groups_per_load;
+    acc_final = rocke_b_zero_vec_f32(b, atom->c_per_lane);
+    if(num_group_runs > 0)
+    {
+        /* run_loop = b.scf_for_iter(0, num_group_runs, 1, [("acc", acc)], "kr") */
+        rocke_value_t* lb = rocke_b_const_i32(b, 0);
+        rocke_value_t* ub = rocke_b_const_i32(b, num_group_runs);
+        rocke_value_t* step = rocke_b_const_i32(b, 1);
+        rocke_iter_arg_t run_args[1];
+        rocke_for_t run_loop;
+
+        run_args[0].name = "acc";
+        run_args[0].init = acc_final;
+        run_loop = rocke_b_scf_for_iter(b,
+                                        lb,
+                                        ub,
+                                        step,
+                                        run_args,
+                                        1,
+                                        "kr",
+                                        /*unroll=*/false,
+                                        /*elide_trailing_barrier=*/true);
+        rocke_b_region_enter(b, run_loop.body);
+        {
+            rocke_value_t* kr = run_loop.iv;
+            rocke_value_t* run_acc = run_loop.iter_vars[0];
+            rocke_value_t* a_scale_runs[ROCKE_BSG_MAX_C_PER_LANE];
+            rocke_value_t* a_scales[ROCKE_BSG_MAX_C_PER_LANE];
+            rocke_value_t* a_run_offset;
+            rocke_value_t* first_kg;
+            rocke_value_t* yield_vals[1];
+            int j;
+
+            /* a_run_offset    = kr * (groups_per_load * 4)
+             * a_scale_runs[i] = buffer_load_vN(a_scale_rsrc, a_scale_row_offsets[i],
+             *                                  a_run_offset, F32, groups_per_load)
+             * first_kg        = kr * groups_per_load */
+            a_run_offset = rocke_b_mul(b, kr, rocke_b_const_i32(b, groups_per_load * 4));
+            for(i = 0; i < atom->c_per_lane; ++i)
+            {
+                a_scale_runs[i] = rocke_b_buffer_load_vN(b,
+                                                         a_scale_rsrc,
+                                                         a_scale_row_offsets[i],
+                                                         a_run_offset,
+                                                         rocke_f32(),
+                                                         groups_per_load);
+            }
+            first_kg = rocke_b_mul(b, kr, rocke_b_const_i32(b, groups_per_load));
+            for(j = 0; j < groups_per_load; ++j)
+            {
+                /* kg = first_kg + j; a_scales[i] = vec_extract(a_scale_runs[i], j) */
+                char loop_suffix[8];
+                rocke_value_t* kg = rocke_b_add(b, first_kg, rocke_b_const_i32(b, j));
+
+                for(i = 0; i < atom->c_per_lane; ++i)
+                {
+                    a_scales[i] = rocke_b_vec_extract(b, a_scale_runs[i], j);
+                }
+                snprintf(loop_suffix, sizeof(loop_suffix), "%d", j);
+                run_acc = rocke_bsg_accumulate_group(b, &gctx, kg, a_scales, run_acc, loop_suffix);
+            }
+            yield_vals[0] = run_acc;
+            rocke_b_scf_yield(b, yield_vals, 1);
+        }
+        rocke_b_region_leave(b);
+        if(!rocke_i_live(b) || run_loop.op == NULL || run_loop.op->num_results < 1)
+        {
+            return NULL;
+        }
+        acc_final = run_loop.op->results[0];
+    }
+    if(num_groups % groups_per_load != 0)
+    {
+        /* tail_loop = b.scf_for_iter(num_group_runs * groups_per_load, num_groups, 1,
+         *                            [("tail_acc", acc)], "kg") */
+        rocke_value_t* lb = rocke_b_const_i32(b, num_group_runs * groups_per_load);
+        rocke_value_t* ub = rocke_b_const_i32(b, num_groups);
+        rocke_value_t* step = rocke_b_const_i32(b, 1);
+        rocke_iter_arg_t tail_args[1];
+        rocke_for_t tail_loop;
+
+        tail_args[0].name = "tail_acc";
+        tail_args[0].init = acc_final;
+        tail_loop = rocke_b_scf_for_iter(b,
+                                         lb,
+                                         ub,
+                                         step,
+                                         tail_args,
+                                         1,
+                                         "kg",
+                                         /*unroll=*/false,
+                                         /*elide_trailing_barrier=*/true);
+        rocke_b_region_enter(b, tail_loop.body);
+        {
+            rocke_value_t* kg = tail_loop.iv;
+            rocke_value_t* a_scales[ROCKE_BSG_MAX_C_PER_LANE];
+            rocke_value_t* a_group_offset;
+            rocke_value_t* yield_vals[1];
+
+            /* a_group_offset = kg * 4
+             * a_scales[i]    = buffer_load(a_scale_rsrc, a_scale_row_offsets[i],
+             *                              a_group_offset) */
+            a_group_offset = rocke_b_mul(b, kg, rocke_b_const_i32(b, 4));
+            for(i = 0; i < atom->c_per_lane; ++i)
+            {
+                a_scales[i] = rocke_b_buffer_load(
+                    b, a_scale_rsrc, a_scale_row_offsets[i], a_group_offset, rocke_f32());
+            }
+            yield_vals[0]
+                = rocke_bsg_accumulate_group(b, &gctx, kg, a_scales, tail_loop.iter_vars[0], "");
+            rocke_b_scf_yield(b, yield_vals, 1);
+        }
+        rocke_b_region_leave(b);
+        if(!rocke_i_live(b) || tail_loop.op == NULL || tail_loop.op->num_results < 1)
+        {
+            return NULL;
+        }
+        acc_final = tail_loop.op->results[0];
+    }
 
     /* store_acc_to_global(b, C, atom, lane_decode, m_tile_base, n_tile_base,
      *     acc_final, N=spec.N, out_dtype="f32") */
