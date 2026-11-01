@@ -35,6 +35,7 @@ from ..Common.TimingInstrumentation import timing_context
 
 from .Component import Compiler, Bundler
 from .HelperKernelCache import HelperKernelCache
+from .HelperKernelPch import HelperKernelPch
 
 class SourceToolchain(NamedTuple):
    compiler: Compiler
@@ -101,6 +102,34 @@ def _computeSourceCodeObjectFilename(target: str, base: str, buildPath: Union[Pa
     return coPath
 
 
+def _compileHelperSource(
+        compiler: Compiler,
+        pch: HelperKernelPch,
+        pchPath: Union[Path, None],
+        includeDir: str,
+        cmdlineArchs: List[str],
+        kernelPath: str,
+        objPath: str,
+    ):
+    """Compiles the helper-kernel source, with pchPath (from pch.get) unless it is None.
+
+    If the compile with the PCH fails, compiles without it: a stale PCH (e.g. HIP headers
+    reinstalled since it was built) must never fail a build. If that compile succeeds, the PCH
+    was the problem and is discarded, so the next compile builds a new one (once: a second
+    rejection turns the PCH off for the rest of the process, see HelperKernelPch.discard); if it
+    fails too, its error is raised.
+    """
+    if pchPath is not None:
+        try:
+            compiler(includeDir, cmdlineArchs, kernelPath, objPath, pch_path=str(pchPath))
+            return
+        except RuntimeError as err:
+            print1(f"# Helper kernel compile with the PCH failed, retrying without it: {err}")
+    compiler(includeDir, cmdlineArchs, kernelPath, objPath)
+    if pchPath is not None:
+        pch.discard(pchPath)
+
+
 def buildSourceCodeObjectFiles(
         compiler: Compiler,
         bundler: Bundler,
@@ -148,8 +177,13 @@ def buildSourceCodeObjectFiles(
         return coPaths
 
     objPath = str(tmpObjDir / objFilename)
+    pch = HelperKernelPch()
+    with timing_context("python_kernel_build_src_co.pch"):
+        pchPath = pch.get(compiler, cmdlineArchs)
     with timing_context("python_kernel_build_src_co.compile"):
-        compiler(str(includeDir), cmdlineArchs, str(kernelPath), objPath)
+        _compileHelperSource(
+            compiler, pch, pchPath, str(includeDir), cmdlineArchs, str(kernelPath), objPath
+        )
 
     # The bundler names the compiler target; an alias writes under its own name.
     outDirs = {compilerTargetOf(baseArchName(a)): baseArchName(a) for a in cmdlineArchs}

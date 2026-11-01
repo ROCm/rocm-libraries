@@ -9,9 +9,11 @@
 #   ART          build artifact dir (split build phase writes it, the run phases read it). The
 #                default is the measured baseline, which check_rm_target refuses to delete, so
 #                split/run_split.sh needs ART set to a new dir.
-#   TENSILE_CACHE      Tensile's cache root, cleared by clear_caches. TENSILE_HELPER_CACHE_DIR is
-#                      always exported as $TENSILE_CACHE/helper_cache (an inherited value is ignored),
-#                      so clearing TENSILE_CACHE clears the helper-kernel cache Tensile really uses.
+#   TENSILE_CACHE      Tensile's cache root, cleared by clear_caches. TENSILE_HELPER_CACHE_DIR and
+#                      TENSILE_HELPER_PCH_DIR are always exported as $TENSILE_CACHE/helper_cache and
+#                      $TENSILE_CACHE/helper_pch (inherited values are ignored), so clearing
+#                      TENSILE_CACHE clears the helper-kernel cache and HIP-header PCH Tensile really
+#                      uses. TENSILE_DISABLE_HELPER_PCH=1 is passed through (compiles without a PCH).
 #   TENSILELITE_CACHE  ~/.tensilelite, cleared by clear_caches as before (current TensileLite
 #                      sources neither read nor write it).
 # OUT, LIST and SCRATCH are set by the scripts themselves (their defaults depend on the script);
@@ -22,6 +24,7 @@ ART=${ART:-/tmp/tl_split_gfx950/artifacts}
 TENSILE_CACHE=${TENSILE_CACHE:-/home/alvasile/.tensile}
 TENSILELITE_CACHE=${TENSILELITE_CACHE:-/home/alvasile/.tensilelite}
 export TENSILE_HELPER_CACHE_DIR=$TENSILE_CACHE/helper_cache
+export TENSILE_HELPER_PCH_DIR=$TENSILE_CACHE/helper_pch
 MEASURE_DIR=$(dirname "$(realpath -- "${BASH_SOURCE[0]}")")
 # Measured baseline client build and artifacts; never deleted.
 BASELINE_DIRS=(/tmp/tl_client_msgpack /tmp/tl_split_gfx950/artifacts)

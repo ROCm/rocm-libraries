@@ -29,7 +29,7 @@ from pathlib import Path
 from re import IGNORECASE, MULTILINE, match, search, sub
 from shlex import split
 from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from Tensile.Common import SemanticVersion, print2
 from Tensile.Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
@@ -320,19 +320,27 @@ class Compiler(Component):
         the ROCm version
     path : str
         path to compiler
+    launcher : List[str]
+        the Tensile_CXX_COMPILER_LAUNCHER command the compiler runs under (empty if none)
 
     Methods
     -------
-    __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str):
-        Invokes the compiler on the provided arguments
+    __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str,
+             pch_path: Optional[str]=None):
+        Invokes the compiler on the provided arguments, with a precompiled header if given
+    pchArgs(self, target_list: List[str]):
+        The command that builds a precompiled header for target_list from stdin to stdout
+    buildPch(self, target_list: List[str], source: bytes, pchPath: Union[Path, str]):
+        Builds a precompiled header of source for target_list into pchPath
     """
 
     def __init__(self, compiler_path: Path, build_id_kind: str, asan_build: bool=False, save_temps: bool=False):
         """Constructs an instance of a Compiler."""
         super(Compiler, self).__init__(compiler_path)
 
+        self.launcher = split(environ.get("Tensile_CXX_COMPILER_LAUNCHER", ""))
         self.default_args = [
-            *split(environ.get("Tensile_CXX_COMPILER_LAUNCHER", "")),
+            *self.launcher,
              compiler_path,
             "-D__HIP_HCC_COMPAT_MODE__=1",
             "--offload-device-only",
@@ -354,7 +362,44 @@ class Compiler(Component):
                 self.default_args.append(f"--rocm-path={rocm_path}")
 
 
-    def __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str):
+    def _targetArgs(self, target_list: List[str]) -> List[str]:
+        archFlags = [f"--offload-arch={compilerTargetOf(gfx)}" for gfx in target_list]
+        # -Xclang reaches every device compile; an alias always builds alone.
+        features = [f for gfx in target_list for f in deviceTargetFeaturesOf(gfx)]
+        featureFlags = [a for f in features for a in ("-Xclang", "-target-feature", "-Xclang", f)]
+        return [*archFlags, *featureFlags]
+
+    def pchArgs(self, target_list: List[str]) -> List[str]:
+        """The command that builds a precompiled header for target_list from stdin to stdout.
+
+        The same arguments as a compile for target_list, minus -I and the files: clang refuses a
+        PCH built with another target, -O or -std, and silently keeps a -D the PCH was built
+        with in a compile that does not define it.
+        """
+        return [
+            *(self.default_args), *self._targetArgs(target_list),
+            "-fpch-instantiate-templates", "-Xclang", "-emit-pch", "-fsyntax-only", "-"
+        ]
+
+    def buildPch(self, target_list: List[str], source: bytes, pchPath: Union[Path, str]):
+        """Builds a precompiled header of source for target_list into pchPath.
+
+        Raises:
+            RuntimeError: If building the precompiled header fails.
+        """
+        args = self.pchArgs(target_list)
+        desc = "Building the HIP header precompiled header (.h -> .pch)"
+        print2(f"{desc}: {' '.join(map(str, args))}")
+        with open(pchPath, "wb") as pch:
+            result = run(args, input=source, stdout=pch, stderr=PIPE)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Error with {desc}: {result.stderr}\n"
+                f"Failed command: {' '.join(map(str, args))}"
+            )
+
+    def __call__(self, include_path: str, target_list: List[str], srcPath: str, destPath: str,
+                 pch_path: Optional[str]=None):
         """Compiles a source file into an object file.
 
         Args:
@@ -362,15 +407,18 @@ class Compiler(Component):
             target_list: List of offload architectures of the form gfxXYZ e.g. gfx942.
             sercPath: The path to the source file.
             destPath: Path to the object file output during compilation.
+            pch_path: A precompiled header from buildPch for the same target_list to compile
+                with, or None. Clang then checks every header in it (including system headers)
+                and fails if one changed since it was built.
         Raises:
             RuntimeError: If the compilation command fails.
         """
-        archFlags = [f"--offload-arch={compilerTargetOf(gfx)}" for gfx in target_list]
-        # -Xclang reaches every device compile; an alias always builds alone.
-        features = [f for gfx in target_list for f in deviceTargetFeaturesOf(gfx)]
-        featureFlags = [a for f in features for a in ("-Xclang", "-target-feature", "-Xclang", f)]
+        pchFlags = [] if pch_path is None else [
+            "-include-pch", str(pch_path), "-Xclang", "-fmodules-validate-system-headers"
+        ]
         args = [
-            *(self.default_args), "-I", include_path, *archFlags, *featureFlags, srcPath, "-c", "-o", destPath
+            *(self.default_args), "-I", include_path, *self._targetArgs(target_list), *pchFlags,
+            srcPath, "-c", "-o", destPath
         ]
         return _invoke(args, f"Compiling HIP source kernels into objects (.cpp -> .o)")
 
