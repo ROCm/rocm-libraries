@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding, opt_in_probe
+from rocke.runtime.torch_interop import empty_workspace, resolve_stream
 
 from dispatch.attention import ATTENTION_ROUTE_REGISTRY, AttentionRequest
 from dispatch.attention.candidate import (
@@ -45,6 +46,7 @@ from .bind_shared import (
     band_text,
     keeps_asked_keys,
     to_attention_request,
+    torch_dtype,
     value_rejects,
 )
 
@@ -100,11 +102,11 @@ _DECLINED = {
     "bias": "bias: no dense candidate declares additive-bias support",
     "bias_broadcast": "bias_broadcast: no dense candidate declares additive-bias support",
     "alibi": "alibi: no dense candidate declares alibi support",
-    "sinks": "sinks: no reference oracle for sink tokens yet",
+    "sinks": "sinks: NOT_YET_IMPLEMENTED: no reference oracle for sink tokens",
     "padded": "padded: the dense candidates take one sequence length per batch",
     "ragged": "ragged: the dense candidates take one sequence length per batch",
     "dropout": "dropout: the dense kernels have no dropout",
-    "paged": "paged: the page-table format is not mapped yet (see SdpaPaged)",
+    "paged": "paged: NOT_YET_IMPLEMENTED: the page-table format is not mapped (see SdpaPaged)",
     "block_mask": "block_mask: the dense kernels take no block mask",
     "fp8": "fp8: the dense kernels take no descale/scale tensors",
     "fp8_s_o": "fp8_s_o: the dense kernels take no softmax/output quantization",
@@ -245,9 +247,7 @@ class _DensePlan:
     """
 
     def __init__(self, req: SdpaRequest, tensors: Mapping[str, Any]) -> None:
-        import torch
-
-        dtype = getattr(torch, TORCH_DTYPES[req.dtype])
+        dtype = torch_dtype(TORCH_DTYPES[req.dtype])
         device = tensors["q"].device
         for name in ("q", "k", "v", "o"):
             t = tensors[name]
@@ -266,22 +266,25 @@ class _DensePlan:
             if bshd.is_contiguous() and bshd.data_ptr() % 16 == 0:
                 self.views[name] = bshd
             else:
-                self.views[name] = torch.empty(bshd.shape, dtype=dtype, device=device)
+                self.views[name] = empty_workspace(
+                    bshd.shape, dtype=dtype, device=device
+                )
                 self.copied.add(name)
 
         self.stats = None
         self.lse = None
         if req.stats is not None:
             self.stats = Operand("stats", req.stats, tensors["stats"]).tensor
+            fp32 = torch_dtype("float32")
             in_place = (
-                self.stats.dtype == torch.float32
+                self.stats.dtype == fp32
                 and self.stats.device == device
                 and self.stats.is_contiguous()
             )
             self.lse = (
                 self.stats
                 if in_place
-                else torch.empty(self.stats.shape, dtype=torch.float32, device=device)
+                else empty_workspace(self.stats.shape, dtype=fp32, device=device)
             )
 
     def kernel_tensors(self) -> dict[str, Any]:
@@ -320,8 +323,6 @@ def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBindin
     if not served:
         raise ValueError(reason)
 
-    import torch
-
     from dispatch.attention.bindings import bind_dense_attention_torch
 
     _, probe, spec = served[0]
@@ -333,7 +334,7 @@ def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBindin
 
     def launch(**_kw: Any) -> None:
         plan.pack()
-        binding.launch(stream=int(torch.cuda.current_stream(device).cuda_stream))
+        binding.launch(stream=resolve_stream(0, device=device))
         plan.unpack()
 
     return TorchBinding(launch=launch, grid=binding.grid, block=binding.block)

@@ -29,6 +29,7 @@ __all__ = [
     "keeps_asked_keys",
     "kept_keys",
     "to_attention_request",
+    "torch_dtype",
     "value_rejects",
 ]
 
@@ -36,6 +37,17 @@ __all__ = [
 _DISPATCH_PINS = ("algorithm", "spec_id", "tuning_id")
 
 TORCH_DTYPES = {"fp16": "float16", "bf16": "bfloat16"}
+
+
+def torch_dtype(name: str):
+    """A ``torch.dtype`` by attribute name (e.g. ``"float16"``, ``"float32"``).
+
+    The one place the unified and dense bindings import torch to resolve a
+    dtype, so neither binding module needs its own ``import torch`` for this.
+    """
+    import torch
+
+    return getattr(torch, name)
 
 
 def to_attention_request(req: SdpaRequest) -> AttentionRequest:
