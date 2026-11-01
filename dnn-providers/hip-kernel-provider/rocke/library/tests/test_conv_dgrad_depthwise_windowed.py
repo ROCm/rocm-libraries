@@ -332,6 +332,29 @@ class TestWmmaSpec(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("mfma needs one of ('gfx950',)", why)
 
+    def test_make_direct_spec_takes_the_target_wave_size(self):
+        """The AOT spec factory gives the matrix form the target's wave size
+        and rejects an explicit wave_size knob that conflicts with it."""
+        from kernels.conv.direct_variants import make_direct_spec
+
+        problem = _problem(4, 56, 56, 128, 7, 7, 3, "bf16")
+        knobs = dict(block_waves=8, block_h=28, mfma=True, w_fold=1, prefetch_rows=2)
+        variant = "direct_depthwise_dgrad_win"
+        for wave in (32, 64):
+            spec = make_direct_spec(variant, problem, knobs, wave)
+            self.assertEqual(spec.wave_size, wave)
+            spec = make_direct_spec(variant, problem, dict(knobs, wave_size=wave), wave)
+            self.assertEqual(spec.wave_size, wave)
+        for knob, wave in ((64, 32), (32, 64), (16, 32)):
+            with self.subTest(knob=knob, wave=wave):
+                with self.assertRaisesRegex(ValueError, "conflicts with wave_size"):
+                    make_direct_spec(
+                        variant, problem, dict(knobs, wave_size=knob), wave
+                    )
+        # The VALU form keeps its logical wave64 on a wave32 target.
+        valu = dict(block_w=16, block_h=4, block_waves=4, ch_per_lane=2)
+        self.assertEqual(make_direct_spec(variant, problem, valu, 32).wave_size, 64)
+
     def test_fragments_are_twice_the_wave64_ones(self):
         # 7x7: 2 passes per filter row; A, accumulator and B fragments take
         # 8 VGPRs each on wave32 (4 on wave64), the dY rows 4 per load.
@@ -686,20 +709,41 @@ _WMMA_CASES = (
 )
 
 
+# The MFMA cases the wave32 WMMA form does not take: 9x9 and 11x11 are past
+# its fragment budget. Every other case must validate at wave32.
+_WMMA_UNSUPPORTED_MFMA_CASES = frozenset({"9x9_fold2", "11x11_fold4_split"})
+
+
+class TestWmmaMfmaCaseCoverage(unittest.TestCase):
+    """Host-only: the wave32 form takes every MFMA case except the
+    explicitly unsupported filters, so none drops out of the GPU set."""
+
+    def test_only_the_unsupported_filters_are_rejected(self):
+        ids = {c.id for c in _MFMA_CASES}
+        self.assertLessEqual(_WMMA_UNSUPPORTED_MFMA_CASES, ids)
+        for c in _MFMA_CASES:
+            spec = replace(_mfma_spec(c), wave_size=32)
+            ok, why = is_valid_depthwise_dgrad_win_spec(spec, arch="gfx1250")
+            with self.subTest(case=c.id):
+                if c.id in _WMMA_UNSUPPORTED_MFMA_CASES:
+                    self.assertFalse(ok, f"{c.id} now validates at wave32")
+                else:
+                    self.assertTrue(ok, f"{c.id}: {why}")
+
+
 @unittest.skipUnless(GPU_ARCH == "gfx1250", f"needs gfx1250, got {GPU_ARCH!r}")
 class TestWmmaNumerics(unittest.TestCase):
     def test_mfma_cases_at_wave32(self):
         """The MFMA form's adversarial set, on the WMMA where it fits."""
-        n = 0
         for c in _MFMA_CASES:
-            spec = replace(_mfma_spec(c), wave_size=32)
-            if not is_valid_depthwise_dgrad_win_spec(spec, arch=GPU_ARCH)[0]:
+            if c.id in _WMMA_UNSUPPORTED_MFMA_CASES:
                 continue  # 9x9 / 11x11: past the wave32 fragment budget
-            n += 1
+            spec = replace(_mfma_spec(c), wave_size=32)
             with self.subTest(case=c.id):
+                ok, why = is_valid_depthwise_dgrad_win_spec(spec, arch=GPU_ARCH)
+                self.assertTrue(ok, f"{c.id}: {why}")
                 bad, max_err = run_windowed(spec, GPU_ARCH)
                 self.assertEqual(bad, 0, f"{c.id}: bad={bad} max_err={max_err:.3e}")
-        self.assertGreater(n, 8)
 
     def test_large_layers(self):
         for c in _WMMA_CASES:
