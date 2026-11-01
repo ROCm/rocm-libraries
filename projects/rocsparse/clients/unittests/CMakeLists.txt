@@ -278,6 +278,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_level3_bsrmm_grids.cpp
   #10158: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_level3.cpp
+  # bsrsm solve / copy_scale / bsr_gather forced grid.x clamp [AISPARSE-670]
+  unit_test_internal_level3_bsrsm.cpp
   unit_test_internal_level2_extras.cpp
   # csrmv LRB / adaptive partial_scale_y forced grid.x clamp [AISPARSE-662]
   unit_test_internal_level2_csrmv_lrb_grids.cpp
