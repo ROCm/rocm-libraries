@@ -54,21 +54,47 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1,  2,  4,  2, 2]   # 64x128, waves [2,2]
-          - [16, 16, 128, 1,  1,  4,  4,  1, 4]   # 64x256, waves [1,4]
-          - [16, 16, 128, 1,  1,  1, 32,  4, 1]   # 64x512, waves [4,1]
-        - DepthU: [256, 512, 1024]
+        # Pairwise cover of the full parameter grid, written by scripts/sparsify_fork_grid.py.
+        # Every pair of values that is valid together appears in at least one row.
+        - Groups:
+          -
+            - {ClusterDim: [[1, 1]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: 0, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 4, StaggerU: 32, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: 1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 16, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 1024, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 4, 4, 1, 4]], PrefetchGlobalRead: 2, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 4, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 512, InitCIterWmma: 1, LDSSegmentInterleave: 0, MatrixInstruction: [[16, 16, 128, 1, 1, 4, 4, 1, 4]], PrefetchGlobalRead: 2, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 3, StaggerU: 16, TDMFuse: 0}
+            - {ClusterDim: [[2, 4]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: 0, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[2, 4]], DepthU: 1024, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[4, 2]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: 0, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[4, 4]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: 0, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 3, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: 1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 4, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 512, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: 1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 4, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 1024, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: 1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 4, StaggerU: 16, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 512, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: 2, PrefetchGlobalReadB: -1, ScheduleIterAlg: 4, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: 1, ScheduleIterAlg: 4, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 512, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: 1, ScheduleIterAlg: 4, StaggerU: 0, TDMFuse: 0}
+            - {ClusterDim: [[1, 1]], DepthU: 256, InitCIterWmma: 1, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 4, 4, 1, 4]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: 1, ScheduleIterAlg: 4, StaggerU: 32, TDMFuse: 0}
+            - {ClusterDim: [[2, 4]], DepthU: 512, InitCIterWmma: 1, LDSSegmentInterleave: 1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 3, StaggerU: 0, TDMFuse: 1}
+            - {ClusterDim: [[4, 2]], DepthU: 512, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 0, TDMFuse: 1}
+            - {ClusterDim: [[4, 4]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 4, 4, 1, 4]], PrefetchGlobalRead: 2, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 4, StaggerU: 0, TDMFuse: 1}
+            - {ClusterDim: [[1, 1]], DepthU: 256, InitCIterWmma: 1, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 4, 4, 1, 4]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: 1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 32, TDMFuse: 1}
+            - {ClusterDim: [[1, 1]], DepthU: 512, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: 2, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 16, TDMFuse: 1}
+            - {ClusterDim: [[1, 1]], DepthU: 512, InitCIterWmma: 1, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: 2, PrefetchGlobalReadB: -1, ScheduleIterAlg: 4, StaggerU: 32, TDMFuse: 1}
+            - {ClusterDim: [[1, 1]], DepthU: 1024, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: 1, ScheduleIterAlg: 0, StaggerU: 16, TDMFuse: 1}
+            - {ClusterDim: [[1, 1]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 2, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 16, TDMFuse: 2}
+            - {ClusterDim: [[1, 1]], DepthU: 1024, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 3, StaggerU: 32, TDMFuse: 2}
+            - {ClusterDim: [[2, 4]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: 1, MatrixInstruction: [[16, 16, 128, 1, 1, 4, 4, 1, 4]], PrefetchGlobalRead: 2, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 4, StaggerU: 0, TDMFuse: 2}
+            - {ClusterDim: [[4, 2]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 0, TDMFuse: 2}
+            - {ClusterDim: [[4, 4]], DepthU: 512, InitCIterWmma: 1, LDSSegmentInterleave: 1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 0, TDMFuse: 2}
+            - {ClusterDim: [[1, 1]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 16, TDMFuse: 3}
+            - {ClusterDim: [[1, 1]], DepthU: 512, InitCIterWmma: 0, LDSSegmentInterleave: 1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 2, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 32, TDMFuse: 3}
+            - {ClusterDim: [[2, 4]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 1, 32, 4, 1]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 0, TDMFuse: 3}
+            - {ClusterDim: [[4, 2]], DepthU: 256, InitCIterWmma: 0, LDSSegmentInterleave: 1, MatrixInstruction: [[16, 16, 128, 1, 1, 4, 4, 1, 4]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 4, StaggerU: 0, TDMFuse: 3}
+            - {ClusterDim: [[4, 2]], DepthU: 1024, InitCIterWmma: 1, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 2, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 3, StaggerU: 0, TDMFuse: 3}
+            - {ClusterDim: [[4, 4]], DepthU: 1024, InitCIterWmma: 0, LDSSegmentInterleave: -1, MatrixInstruction: [[16, 16, 128, 1, 1, 2, 4, 2, 2]], PrefetchGlobalRead: 1, PrefetchGlobalReadA: -1, PrefetchGlobalReadB: -1, ScheduleIterAlg: 0, StaggerU: 0, TDMFuse: 3}
         - TDMInst: [3]
         - TDMSplit: [False]
         # PrefetchGlobalReadA/B=-1 selects auto; scalar PrefetchGlobalRead stays concrete.
-        - PrefetchGlobalRead: [1, 2]
-        - PrefetchGlobalReadA: [-1, 1, 2]
-        - PrefetchGlobalReadB: [-1, 1, 2]
-        - TDMFuse: [0, 1, 2, 3]
-        - ScheduleIterAlg: [0, 3, 4]
-        - StaggerU: [0, 16, 32]
-        - InitCIterWmma: [0, 1]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -94,8 +120,6 @@ BenchmarkProblems:
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - ExpandPointerSwap: [False]
-        - ClusterDim: [[1, 1], [2, 4], [4, 2], [4, 4]]
-        - LDSSegmentInterleave: [-1, 0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

@@ -77,24 +77,46 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [0]
-        - DepthU: [ 32, 64 ]
+        # Pairwise cover of the full parameter grid, written by scripts/sparsify_fork_grid.py.
+        # Every pair of values that is valid together appears in at least one row.
+        - Groups:
+          -
+            - {DepthU: 32, GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 0}
+            - {DepthU: 32, GlobalReadVectorWidthA: 8, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 0}
+            - {DepthU: 32, GlobalReadVectorWidthA: 8, GlobalReadVectorWidthB: 8, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 1}
+            - {DepthU: 32, GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 2}
+            - {DepthU: 32, GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 8, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 4}
+            - {DepthU: 32, GlobalReadVectorWidthA: 8, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 4, SourceSwap: true, WorkGroupMapping: 4}
+            - {DepthU: 32, GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 8}
+            - {DepthU: 32, GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 16}
+            - {DepthU: 32, GlobalReadVectorWidthA: 8, GlobalReadVectorWidthB: 8, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 16}
+            - {DepthU: 32, GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 8, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 32}
+            - {DepthU: 32, GlobalReadVectorWidthA: 8, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 4, SourceSwap: true, WorkGroupMapping: 32}
+            - {DepthU: 32, GlobalReadVectorWidthA: 8, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 64}
+            - {DepthU: 64, GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 4, SourceSwap: true, WorkGroupMapping: 1}
+            - {DepthU: 64, GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 2}
+            - {DepthU: 64, GlobalReadVectorWidthA: 8, GlobalReadVectorWidthB: 8, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 8}
+            - {DepthU: 64, GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 8, ScheduleIterAlg: 0, SourceSwap: true, WorkGroupMapping: 64}
+            - {DepthU: 32, GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 0, SourceSwap: false, WorkGroupMapping: 1}
+            - {DepthU: 32, GlobalReadVectorWidthA: 8, GlobalReadVectorWidthB: 8, ScheduleIterAlg: 4, SourceSwap: false, WorkGroupMapping: 2}
+            - {DepthU: 32, GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 4, SourceSwap: false, WorkGroupMapping: 8}
+            - {DepthU: 32, GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 4, SourceSwap: false, WorkGroupMapping: 64}
+            - {DepthU: 64, GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 8, ScheduleIterAlg: 4, SourceSwap: false, WorkGroupMapping: 0}
+            - {DepthU: 64, GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 0, SourceSwap: false, WorkGroupMapping: 4}
+            - {DepthU: 64, GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 4, SourceSwap: false, WorkGroupMapping: 16}
+            - {DepthU: 64, GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 0, SourceSwap: false, WorkGroupMapping: 32}
         - ExpandPointerSwap: [False]
-        - GlobalReadVectorWidthA: [2, 4, 8]
-        - GlobalReadVectorWidthB: [2, 4, 8]
         - GlobalSplitU: [0]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4,4, 1,2]
         - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [0, 4]
-        - SourceSwap: [True, False]
         - StoreRemapVectorWidth: [0]
         - TileProcessingStrategy: [StreamK]
         - WorkAssignment: [DynamicWorkQueue]
         - TransposeLDS: [0]
         - WavefrontSize: [32]
-        - WorkGroupMapping: [0, 1, 2, 4, 8, 16, 32, 64]
 
       BenchmarkForkParameters:
       JoinParameters:
