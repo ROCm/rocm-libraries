@@ -133,17 +133,32 @@ def atomic_rounding_degree_cap(fraction_bits: int, tol: float = WGRAD_TOLERANCE)
 # inputs then exceed that tolerance (at 16, one 1.0 partial followed by fifteen
 # 2**-8 ones rounds back to 1.0, a 5.5% error).
 #
-# fp16 is not split automatically (cap 1). Its packed atomic does not scale
-# like bf16's here: the best degree ranges from 16 on a tiny dW down to no
-# split at all, where every degree is slower than split_k=1 on a mid-size
-# dW, and no single cap avoids that loss. An explicit split_k still uses it.
+# fp16 has its own policy (_WGRAD_SPLIT_POLICY_BY_DTYPE below).
 _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
     "gfx1250": WgradSplitPolicy(
         target_ctas=2048,
         grouped_target_ctas=4096,
         min_slice_k=2048,
         max_degree=128,
-        max_degree_by_dtype=(("bf16", atomic_rounding_degree_cap(7)), ("fp16", 1)),
+        max_degree_by_dtype=(("bf16", atomic_rounding_degree_cap(7)),),
+    ),
+}
+
+# Per-dtype overrides of _WGRAD_SPLIT_POLICY, keyed by (arch, dW dtype).
+#
+# gfx1250 fp16: fill to 1024 CTAs (2048 grouped) with K slices as shallow as
+# 512, up to degree 128. Fitted on a sample of wgrad shapes with every cached
+# split-K binary timed at every degree 2..128 and verified, once the packed
+# fp16 atomic was no longer fenced (it is an atomicrmw now). fp16 was not split
+# automatically before (cap 1): that cap was a symptom of the fenced atomic.
+# No fp16 degree failed the 5e-2 verification on those shapes, so the packed
+# fp16 atomic's rounding is not the binding limit there.
+_WGRAD_SPLIT_POLICY_BY_DTYPE: dict[tuple[str, str], WgradSplitPolicy] = {
+    ("gfx1250", "fp16"): WgradSplitPolicy(
+        target_ctas=1024,
+        grouped_target_ctas=2048,
+        min_slice_k=512,
+        max_degree=128,
     ),
 }
 
@@ -437,7 +452,11 @@ def select_split_k_wgrad(
     if base_grid <= 0:
         return SplitKDecision(1, base_grid, max_capacity, "empty grid")
 
-    policy = _WGRAD_SPLIT_POLICY.get(arch) if dtype_d is not None else None
+    policy = (
+        _WGRAD_SPLIT_POLICY_BY_DTYPE.get((arch, dtype_d), _WGRAD_SPLIT_POLICY.get(arch))
+        if dtype_d is not None
+        else None
+    )
     if policy is not None:
         if isinstance(groups, bool) or not isinstance(groups, int) or groups < 1:
             raise ValueError(f"groups must be a positive integer (got {groups!r})")

@@ -234,12 +234,30 @@ class TestGfx1250Policy(unittest.TestCase):
 
     def test_dtype_caps(self):
         # A 4-tile grid on a long reduction asks for far more than any cap:
-        # each 16-bit dtype takes its own cap, and fp32 the general one. fp16's
-        # cap of 1 keeps it unsplit even here, where the demand is highest.
+        # bf16 takes its accuracy cap, and fp16 and fp32 the general one.
         args = (24, 9 * 24, 42 * 240 * 320)
         self.assertEqual(self._pick(*args, dtype_d="bf16").split_k, 12)
-        self.assertEqual(self._pick(*args, dtype_d="fp16").split_k, 1)
+        self.assertEqual(self._pick(*args, dtype_d="fp16").split_k, 128)
         self.assertEqual(self._pick(*args, dtype_d="fp32").split_k, 128)
+
+    def test_fp16_policy(self):
+        # fp16 has its own gfx1250 policy: fill to 1024 CTAs (2048 grouped),
+        # K slices down to 512, up to 128.
+        # Fill: base grid 2 x 18 = 36 tiles -> floor(1024 / 36) = 28 (fp32
+        # fills to 2048 -> 56).
+        d = self._pick(128, 9 * 128, 42 * 120 * 160, dtype_d="fp16")
+        self.assertEqual(d.split_k, 28, d.reason)
+        # Slice depth: a 12288-deep reduction allows 12288 / 512 = 24 slices
+        # (fp32's 2048-element floor allows only 6).
+        d = self._pick(64, 9 * 64, 12288, dtype_d="fp16")
+        self.assertEqual(d.split_k, 24, d.reason)
+        self.assertEqual(self._pick(64, 9 * 64, 12288, dtype_d="fp32").split_k, 6)
+        # Grouped: 4 groups of a 1 x 3 tile grid -> floor(2048 / 12) = 170,
+        # capped at 128.
+        d = self._pick(16, 9 * 16, 42 * 240 * 320, tile=64, groups=4, dtype_d="fp16")
+        self.assertEqual(d.split_k, 128, d.reason)
+        d = self._pick(64, 9 * 64, 42 * 240 * 320, tile=64, groups=8, dtype_d="fp16")
+        self.assertEqual(d.split_k, 28, d.reason)
 
     def test_bf16_degree_stays_within_tolerance(self):
         # N=64, 64x64, C=K=16, 3x3: wg_M=16, wg_N=144, wg_K=262144. Fill and

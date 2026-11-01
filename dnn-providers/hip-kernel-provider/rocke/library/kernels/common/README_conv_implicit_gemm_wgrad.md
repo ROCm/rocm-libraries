@@ -102,13 +102,13 @@ dW rows, and the extra memory transactions outweigh the halved atomic count.
   degree that keeps that bound under the suite's 5e-2 tolerance
   (`atomic_rounding_degree_cap`); higher degrees miss it on all-positive
   inputs. fp32 takes the general cap of 128.
-- fp16 is not split automatically: its cap is 1, so `--split-k -1` (and every
-  auto caller) runs it unsplit. The fp16 packed atomic does not scale like
-  bf16's on gfx1250. In a degree sweep the best fp16 degree ranged from 16 on
-  a tiny dW down to none at all, where every degree was slower than
-  `split_k=1`. No single cap avoids that loss. The split-K binaries are still
-  built, and an explicit degree launches them for callers whose shape gains.
-  The two-stage f32 path is the planned fp16 reduction.
+- fp16 has its own policy: fill to 1024 CTAs (2048 grouped) with K slices
+  down to 512, up to degree 128. Earlier fp16 was not split automatically
+  (cap 1), because the packed fp16 atomic was lowered as a fenced atomic
+  (`global_wb` / `global_inv` around every add). It is now an agent-scope
+  monotonic `atomicrmw`, like bf16's, and the policy was refitted on a degree
+  sweep of the cached split-K binaries; no fp16 degree failed the 5e-2
+  verification there.
 - Reachability: as on gfx950, wgrad has no dispatcher instance list; it is
   served from the AOT cache. The cache grid (`kernels/conv/aot_jobs.py`) builds
   one split-K binary per geometry, and the degree is resolved at launch by

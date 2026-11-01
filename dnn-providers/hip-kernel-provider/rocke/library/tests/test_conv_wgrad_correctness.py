@@ -834,9 +834,9 @@ class TestConvWgradCorrectness(unittest.TestCase):
         These are the 2x2-warp tiles, and the bf16 problems are sized so the
         degree lands on its cap. The last bf16 problem (small channels, deep
         reduction) asks for 128 before the cap; all-positive partials miss the
-        tolerance there. fp16 is not split automatically (its cap is 1), so its
-        cases check that the resolver launches no split-K binary, then run the
-        binary at an explicit degree, as a caller that opts in would. The inputs are all-positive -- same-sign partials
+        tolerance there. fp16 takes its own policy (fill to 1024 CTAs, 2048
+        grouped, slices down to 512, up to 128); its cases run at the degree the
+        resolver picks. The inputs are all-positive -- same-sign partials
         do not cancel their 16-bit rounding -- so this also bounds the accuracy
         at the cap.
         """
@@ -861,9 +861,9 @@ class TestConvWgradCorrectness(unittest.TestCase):
         #  expected degree); -1 is the resolver's pick.
         cases = [
             (32, 32, 64, 96, 1, "bf16", (32, 64, 64), -1, 12),
-            (32, 32, 64, 128, 1, "fp16", (64, 64, 64), 8, 8),
+            (32, 32, 64, 128, 1, "fp16", (64, 64, 64), -1, 56),
             (32, 32, 64, 64, 4, "bf16", (32, 32, 32), -1, 12),
-            (32, 32, 64, 64, 4, "fp16", (32, 32, 32), 8, 8),
+            (32, 32, 64, 64, 4, "fp16", (32, 32, 32), -1, 64),
             (64, 64, 16, 16, 1, "bf16", (32, 64, 64), -1, 12),
         ]
         ran = 0
