@@ -45,9 +45,23 @@ def fill_w(t, dtype: str, generator=None):
     return t.uniform_(-1.0, 1.0, generator=generator)
 
 
-def ref_floor() -> float:
-    """Floor of the reference peak in the peak-normalised verify error."""
-    return 1e-30 if _MODE == "miopen" else 1.0
+def fwd_operands(x_shape, w_shape, dtype: str, torch_dtype=None):
+    """``(x, w)`` of a forward benchmark: new tensors of ``torch_dtype``
+    (default fp32) of the given shapes, filled per the mode, x first (the
+    draw order of the seeded RNG)."""
+    import torch
+
+    kw = {} if torch_dtype is None else {"dtype": torch_dtype}
+    x = fill_x(torch.empty(*x_shape, **kw))
+    return x, fill_w(torch.empty(*w_shape, **kw), dtype)
+
+
+def ref_floor(direction: str = "fwd") -> float:
+    """Floor of the reference peak in the peak-normalised verify error.
+
+    ``--fill`` only sets the forward inputs; dgrad / wgrad stay on U(-1, 1),
+    so their verify keeps the floor of 1."""
+    return 1e-30 if _MODE == "miopen" and direction == "fwd" else 1.0
 
 
 def add_argument(parser) -> None:
