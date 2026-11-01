@@ -241,6 +241,59 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnWrongFileIdentifier)
     EXPECT_EQ(adapter, nullptr);
 }
 
+/// RFC 0019 §12: each refusal is the only trace of the fallback, so every one reports at
+/// ERROR with its reason. The caller's own message ("built no scorer") does not say why.
+TEST_F(TestTreeDataAdapter, EveryRefusedArtifactReportsWhyAtError)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const auto good = GbdtModelBuilder()
+                          .setNumFeatures(2)
+                          .setFeaturesHash(TEST_HASH)
+                          .addTree(makeLeafTree(1.0))
+                          .build();
+    // The control: the untouched buffer loads without an error.
+    ASSERT_NE(TreeDataAdapter::loadFromBuffer(good.data(), good.size(), TEST_HASH), nullptr);
+    ASSERT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0U)
+        << recorder.getRecordedLogsAsString();
+
+    auto wrongIdentifier = good;
+    wrongIdentifier[4] = 'X';
+    // Keeps the identifier but cuts off the tables the root offset points into.
+    const std::vector<uint8_t> truncated(good.begin(), good.begin() + 12);
+    const auto nonfiniteBase = GbdtModelBuilder()
+                                   .setNumFeatures(2)
+                                   .setFeaturesHash(TEST_HASH)
+                                   .setBaseScore(std::numeric_limits<double>::infinity())
+                                   .addTree(makeLeafTree(1.0))
+                                   .build();
+    const std::vector<uint8_t> garbage = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+
+    const std::vector<std::pair<const char*, std::vector<uint8_t>>> refused
+        = {{"empty", {}},
+           {"garbage", garbage},
+           {"wrong identifier", wrongIdentifier},
+           {"truncated", truncated},
+           {"nonfinite base_score", nonfiniteBase}};
+    for(const auto& [what, bytes] : refused)
+    {
+        recorder.clearLogs();
+        EXPECT_EQ(TreeDataAdapter::loadFromBuffer(bytes.data(), bytes.size(), TEST_HASH), nullptr)
+            << what;
+        EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+            << what << " must report at ERROR:\n"
+            << recorder.getRecordedLogsAsString();
+    }
+
+    // A missing file goes through load(), which reads the bytes first.
+    recorder.clearLogs();
+    EXPECT_EQ(TreeDataAdapter::load("/nonexistent/uhd/model.bin", TEST_HASH), nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+        << "an unreadable file must report at ERROR:\n"
+        << recorder.getRecordedLogsAsString();
+}
+
 // ========== Single Tree Scoring Tests ==========
 
 TEST_F(TestTreeDataAdapter, ScoreLeafOnlyTree)
@@ -746,6 +799,41 @@ TEST_F(TestTreeDataAdapter, RealisticBatchScoringMatchesSingle)
     {
         const double singleScore = adapter->score(batch[i]);
         EXPECT_DOUBLE_EQ(batchScores[i], singleScore) << "Batch score mismatch at index " << i;
+    }
+}
+
+TEST_F(TestTreeDataAdapter, BatchScoresAreBitwiseTheSingleRowScoresForEveryRowShape)
+{
+    const std::string realisticHash = "sha256:batch_bitwise_test";
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(5)
+                      .setFeaturesHash(realisticHash)
+                      .setBaseScore(0.1)
+                      .addTree(makeRealisticTree1())
+                      .addTree(makeRealisticTree2())
+                      .addTree(makeRealisticTree3())
+                      .build();
+
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
+    ASSERT_NE(adapter, nullptr);
+
+    // Full-width, missing-value and short rows mixed, so the batch takes the checked path for
+    // some rows and the unchecked path for others.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::vector<std::vector<double>> batch = {
+        {256.0, 512.0, 128.0, 32.0, 40.0},
+        {1024.0, 2048.0},
+        {nan, 512.0, nan, 64.0, 80.0},
+        {},
+        {800.0, 512.0, 512.0, 64.0, 80.0, 7.0},
+    };
+
+    const auto batchScores = adapter->scoreBatch(batch);
+    ASSERT_EQ(batchScores.size(), batch.size());
+    for(size_t i = 0; i < batch.size(); ++i)
+    {
+        // Exact equality: tree-major batching must keep each row's summation order.
+        EXPECT_EQ(batchScores[i], adapter->score(batch[i])) << "row " << i;
     }
 }
 

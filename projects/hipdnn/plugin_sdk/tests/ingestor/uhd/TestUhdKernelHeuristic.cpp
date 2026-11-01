@@ -2339,6 +2339,164 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ADegradedRankingReportsNoGroup)
     }
 }
 
+/// rankWith binds per candidate only the `$kernel.*` names its signature reads; each must get
+/// exactly what binding the kernel's whole metadata gives it, including where that binds
+/// nothing (a stale value would then be read in place of failing closed).
+TEST(TestIngestorUhdKernelHeuristic, PerSlotKernelBindingMatchesWholeMetadataBinding)
+{
+    KernelDefinition plain;
+    plain.priority = 7;
+    plain.metadata["tile"] = std::vector<int64_t>{16, 32};
+    plain.metadata["tile[0]"] = int64_t{99}; // a scalar of an element's name wins
+    plain.metadata["a[1]"] = std::vector<int64_t>{5};
+    plain.metadata["flag"] = true;
+    plain.metadata["ratio"] = 0.5;
+    plain.metadata["name"] = std::string("xdl");
+    plain.metadata[""] = std::vector<int64_t>{3};
+    KernelDefinition scalarPriority = plain;
+    scalarPriority.metadata["priority"] = int64_t{42};
+    KernelDefinition arrayPriority = plain;
+    arrayPriority.metadata["priority"] = std::vector<int64_t>{1, 2};
+
+    const std::vector<std::string> names
+        = {"tile",        "tile[0]", "tile[1]", "tile[2]",  "tile[01]",
+           "tile[-1]",    "tile[]",  "tile[0",  "tile[1]]", "tile[99999999999999999999]",
+           "a[1]",        "a[1][0]", "a[1][1]", "flag",     "ratio",
+           "name",        "[0]",     "[1]",     "priority", "priority[0]",
+           "priority[1]", "unknown", "id"};
+
+    for(const auto* kernel : {&plain, &scalarPriority, &arrayPriority})
+    {
+        const auto whole = detail::kernelVarsFrom(*kernel);
+        for(const auto& name : names)
+        {
+            const auto slot = detail::kernelVarSlot("kernel." + name);
+            EXPECT_EQ(slot.boundName, "kernel." + name);
+            const auto bound = detail::kernelVarOf(*kernel, slot);
+            const auto expected = whole.find(name);
+            if(expected == whole.end())
+            {
+                EXPECT_FALSE(bound.has_value()) << name;
+            }
+            else
+            {
+                ASSERT_TRUE(bound.has_value()) << name;
+                EXPECT_EQ(*bound, expected->second) << name;
+            }
+        }
+    }
+}
+
+namespace detail
+{
+
+/// Builds a heuristic around a caller's adapter, which create() never does.
+class UhdKernelHeuristicAccess
+{
+public:
+    static std::shared_ptr<UhdKernelHeuristic>
+        withAdapter(const std::vector<nlohmann::json>& signature,
+                    std::shared_ptr<const uhd::IUhdAdapter> adapter)
+    {
+        uhd::UhdConfig config;
+        config.featuresSignature = signature;
+        config.featuresHash = uhd::FeatureExtractor::computeHash(signature);
+        config.objective = "max";
+        config.scoreTransform = "identity";
+        config.adapterType = "test";
+        auto extractor = std::make_shared<const uhd::FeatureExtractor>(signature);
+        return std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
+            std::move(config), std::move(adapter), std::move(extractor), "miscounting adapter"));
+    }
+};
+
+} // namespace detail
+
+namespace
+{
+
+/// Scores a row by its first feature, but returns one score more or one fewer than it was
+/// given rows, which no shipped adapter does.
+class MiscountingAdapter : public uhd::IUhdAdapter
+{
+public:
+    MiscountingAdapter(size_t featureCount, std::string featuresHash, bool overcount)
+        : _featureCount(featureCount)
+        , _featuresHash(std::move(featuresHash))
+        , _overcount(overcount)
+    {
+    }
+
+    double score(const std::vector<double>& features) const override
+    {
+        return features.at(0);
+    }
+
+    std::vector<double> scoreBatch(const std::vector<std::vector<double>>& batch) const override
+    {
+        auto scores = IUhdAdapter::scoreBatch(batch);
+        // A large extra score would win the ranking if it were ever read.
+        scores.resize(_overcount ? batch.size() + 1 : batch.size() - 1, 1.0e6);
+        return scores;
+    }
+
+    size_t expectedFeatureCount() const override
+    {
+        return _featureCount;
+    }
+
+    const std::string& getFeaturesHash() const override
+    {
+        return _featuresHash;
+    }
+
+private:
+    size_t _featureCount;
+    std::string _featuresHash;
+    bool _overcount;
+};
+
+/// Ranks two kernels whose model order is the reverse of declared order with an adapter
+/// that miscounts its scores, and checks the ranking fell back to declared order.
+void expectMiscountedScoresDegradeToDeclaredOrder(bool overcount)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto heuristic = detail::UhdKernelHeuristicAccess::withAdapter(
+        ENGINE_SIGNATURE,
+        std::make_shared<MiscountingAdapter>(ENGINE_SIGNATURE.size(),
+                                             uhd::FeatureExtractor::computeHash(ENGINE_SIGNATURE),
+                                             overcount));
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_EQ(scored[0].kernelId, testId(0x01)); // priority 100, though the model prefers 0x02
+    EXPECT_EQ(scored[1].kernelId, testId(0x02));
+    for(const auto& candidate : scored)
+    {
+        EXPECT_EQ(candidate.score, 0.0); // no measurement
+    }
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          std::string("returned ") + (overcount ? "3" : "1")
+                                              + " scores for 2 candidates"));
+}
+
+} // namespace
+
+TEST(TestIngestorUhdKernelHeuristic, AnAdapterReturningExtraScoresDegradesToDeclaredOrder)
+{
+    expectMiscountedScoresDegradeToDeclaredOrder(true);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AnAdapterReturningTooFewScoresDegradesToDeclaredOrder)
+{
+    expectMiscountedScoresDegradeToDeclaredOrder(false);
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
