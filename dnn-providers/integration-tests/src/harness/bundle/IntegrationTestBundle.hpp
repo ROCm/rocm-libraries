@@ -234,7 +234,7 @@ inline std::vector<int64_t> allTensorUids(const nlohmann::json& graphJson)
 
 // Replaces test_sdk's getOutputTensorUidsFromGraph(), which assumes every
 // node wraps output UIDs in an "outputs" sub-object. ReductionAttributes,
-// ResampleFwdAttributes, and CustomOpAttributes emit flat keys instead,
+// ResampleFwdAttributes, ResampleBwdAttributes, and CustomOpAttributes emit flat keys instead,
 // causing node.at("outputs") to throw for those ops.
 inline std::vector<int64_t> extractOutputUidsFromJson(const nlohmann::json& graphJson)
 {
@@ -274,8 +274,8 @@ inline std::vector<int64_t> extractOutputUidsFromJson(const nlohmann::json& grap
         }
 
         // Flat scalar fallback: Reduction ("out_tensor_uid"),
-        // ResampleFwd ("y_tensor_uid")
-        for(const auto& key : {"out_tensor_uid", "y_tensor_uid"})
+        // ResampleFwd ("y_tensor_uid"), ResampleBwd ("dx_tensor_uid")
+        for(const auto& key : {"out_tensor_uid", "y_tensor_uid", "dx_tensor_uid"})
         {
             if(node.contains(key) && node.at(key).is_number_integer())
             {
@@ -879,7 +879,8 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     bundle.graphBuffer = std::move(graphBuffer);
 
     // Mirror the direct-bundle path: extractOutputUidsFromJson handles flat-uid
-    // ops (Reduction/ResampleFwd/CustomOp) that getOutputTensorUidsFromGraph throws on.
+    // ops (Reduction/ResampleFwd/ResampleBwd/CustomOp) that getOutputTensorUidsFromGraph
+    // throws on.
     {
         auto allOutputUids = detail::extractOutputUidsFromJson(expandedGraph);
         const auto wrapper = bundle.graphWrapper();
