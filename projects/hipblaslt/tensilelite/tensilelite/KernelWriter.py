@@ -48,6 +48,7 @@ from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
 
 from .KernelWriterModules import *
+from .KernelWriterModules import COMPLEX_MFMA_TERMS
 
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
@@ -1921,6 +1922,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if isinstance(macIterItems[0], SNop):
           macIterItems.pop(0)
 
+      secondWaitIndex = kernel["MIWaveTileA"] // kernel["numSubTiles"]
+      if kernel["ProblemType"]["DataType"].isComplex():
+        mfmas = getMFMAs(macIterCode)
+        if mfmas:
+          firstProduct = mfmas[0].parent
+          assert firstProduct.name == "complexProduct"
+          # Include the emitted negations and MFMAs before advancing B.
+          secondWaitIndex = macIterItems.index(firstProduct.flatitems()[-1]) + 1
+
       ####
       # scheduled local read to previous iterations
       ####
@@ -2330,9 +2340,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               iterCode.add(waitDsRead)
         else:
           if (kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"])) and not kernel["UseF32XEmulation"]:
-            # Complex products use four MFMAs before advancing B. Negations add
-            # scheduler slots, so waiting at index 4 also covers every conjugation.
-            secondWaitIndex = 4 if kernel["ProblemType"]["DataType"].isComplex() else kernel["MIWaveTileA"] // kernel["numSubTiles"]
             if iteration == 0 and i == secondWaitIndex:
               # add 1 more waitcnt before using ds read data
               waitCode2 = deepcopy(waitCode)
@@ -8018,7 +8025,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     if kernel["_ScheduleIterAlg"] == 3 or kernel["_ScheduleIterAlg"] == 2:
       self.states.numMfmaPerIter = kernel["MIWaveTile"][0] * kernel["MIWaveTile"][1] * kernel["InnerUnroll"]
-      if kernel["ProblemType"]["DataType"].isComplex(): self.states.numMfmaPerIter *= 4
+      if kernel["ProblemType"]["DataType"].isComplex(): self.states.numMfmaPerIter *= len(COMPLEX_MFMA_TERMS)
       elif kernel["UseF32XEmulation"]: self.states.numMfmaPerIter *= 3
 
     if kernel["ForceUnrollSubIter"]:
