@@ -50,6 +50,7 @@ from .ir import (
     I1,
     I16,
     I32,
+    I64,
     TF32,
     KernelDef,
     Op,
@@ -6015,16 +6016,26 @@ class _Lowerer:
         loop = self._new_block("poll.loop")
         cur.emit(f"  br label %{loop.label}")
         cur.terminated = True
+        reload = str(op.attrs.get("reload", ""))
         bad = None
         for k, w in enumerate(widths):
             rsrc, voff = rest[2 * k], rest[2 * k + 1]
             key, ty = self._cp_buffer_intrinsic("load", w)
             self._need(key)
             res = op.results[k].name
+            voff_text = self._operand(voff)
+            if reload == "launder":
+                # a loop-variant address: the load stays in the loop
+                lv = self._fresh("poll.voff")
+                loop.emit(
+                    f'  {lv} = call i32 asm sideeffect "; tagged_poll reload $0", '
+                    f'"=v,0"(i32 {voff_text})'
+                )
+                voff_text = lv
             loop.emit(
                 f"  {res} = call {ty} @llvm.amdgcn.{key}("
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voff)}, i32 0, i32 {aux})"
+                f"i32 {voff_text}, i32 0, i32 {aux})"
             )
             for lane in range(1, w, 2):
                 got = self._fresh("poll.tag")
@@ -6042,9 +6053,70 @@ class _Lowerer:
         loop.emit(f"  br i1 {bad}, label %{retry.label}, label %{done.label}")
         loop.terminated = True
         pause = _escape_llvm_asm_string(str(op.attrs.get("pause", "s_nop 0")))
-        retry.emit(f'  call void asm sideeffect "{pause}", ""()')
+        clobber = "~{memory}" if reload == "launder" else ""
+        retry.emit(f'  call void asm sideeffect "{pause}", "{clobber}"()')
         retry.emit(f"  br label %{loop.label}")
         retry.terminated = True
+
+    # ----- device ops as IR ops (``ir.IRBuilder.s_getreg`` ..) -----
+    # Each lowers to the inline asm of its ``helpers.device_ops`` helper, so
+    # the LLVM text is the asm build's.
+
+    def _device_asm(self, op: Op, template: str, constraints: str) -> None:
+        self._op_tile_inline_asm(
+            Op(
+                name="tile.inline_asm",
+                operands=list(op.operands),
+                results=list(op.results),
+                attrs={
+                    "template": template,
+                    "constraints": constraints,
+                    "sideeffect": True,
+                    "convergent": False,
+                },
+            )
+        )
+
+    def _op_tile_s_getreg(self, op: Op) -> None:
+        """``tile.s_getreg``: ``device_ops.xcc_id`` / ``hw_id``'s asm."""
+        self._device_asm(op, f"s_getreg_b32 $0, hwreg(HW_REG_{op.attrs['hwreg']})", "=s")
+
+    def _op_tile_s_sleep(self, op: Op) -> None:
+        """``tile.s_sleep``: ``device_ops.s_sleep``'s asm."""
+        units, steps = int(op.attrs["units"]), []
+        while units > 0:
+            steps.append(min(units, 127))
+            units -= steps[-1]
+        self._device_asm(op, "\n".join(f"s_sleep {s}" for s in steps), "")
+
+    def _op_tile_memrealtime(self, op: Op) -> None:
+        """``tile.memrealtime``: ``device_ops.memrealtime``'s asm."""
+        self._device_asm(op, "s_memrealtime $0\ns_waitcnt lgkmcnt(0)", "=s")
+
+    def _op_tile_global_atomic_add_scoped(self, op: Op) -> None:
+        """``tile.global_atomic_add_scoped``: ``device_ops.atomic_add_scoped``'s
+        asm (``_x2`` for an i64 value)."""
+        x2 = "_x2" if op.operands[1].type == I64 else ""
+        bits = ["sc1"] if op.attrs["scope"] == "system" else []
+        if not op.attrs["returns"]:
+            cp = (" " + " ".join(bits)) if bits else ""
+            self._device_asm(op, f"global_atomic_add{x2} $0, $1, $2{cp}", "v,v,s,~{memory}")
+            return
+        cp = " " + " ".join(["sc0", *bits])
+        self._device_asm(
+            op,
+            f"global_atomic_add{x2} $0, $1, $2, $3{cp}\ns_waitcnt vmcnt(0)",
+            "=&v,v,v,s,~{memory}",
+        )
+
+    def _op_tile_l2_touch_load(self, op: Op) -> None:
+        """``tile.l2_touch_load``: the toy chain's prefetch asm."""
+        self._device_asm(op, "global_load_dwordx4 $0, $1, $2", "=&v,v,s")
+
+    def _op_tile_l2_touch_drain(self, op: Op) -> None:
+        """``tile.l2_touch_drain``: the toy chain's ``vmcnt(0)`` asm over the
+        prefetch destinations."""
+        self._device_asm(op, "s_waitcnt vmcnt(0)", ",".join(["v"] * len(op.operands)))
 
     def _op_tile_buffer_rsrc(self, op: Op) -> None:
         """Build a buffer resource descriptor for a global pointer.

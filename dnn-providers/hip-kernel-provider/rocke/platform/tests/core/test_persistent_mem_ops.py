@@ -149,7 +149,103 @@ def test_python_only_opcodes_are_detected():
         "arith.cvt_scalef32_pk_bf16_fp4",
         "tile.permlane16_swap",
         "math.exp",
+        # device ops as IR ops (the Python lowering emits device_ops' asm).
+        "tile.s_getreg",
+        "tile.s_sleep",
+        "tile.memrealtime",
+        "tile.global_atomic_add_scoped",
+        "tile.l2_touch_load",
+        "tile.l2_touch_drain",
     } == set(PYTHON_ONLY_OPCODES)
+
+
+def _device_ops_kernel(ir: bool):
+    """Every device op the IR forms replace, as ``device_ops`` asm or as the
+    IR ops (same value names: the same result hints)."""
+    from rocke.core.ir import I64, VectorType
+    from rocke.helpers import device_ops as dops
+
+    b = IRBuilder("pmo_device_ops")
+    p = b.param("p", PtrType(I32, "global"))
+    base = b.readfirstlane(b.global_ptr_to_i64(p))
+    tid = b.thread_id_x()
+    if ir:
+        xcc = b.land(b.s_getreg("XCC_ID"), b.const_i32(0xF))
+        hw = b.s_getreg("HW_ID")
+        b.s_sleep(300)
+        t0 = b.memrealtime()
+        old = b.global_atomic_add_scoped(base, tid, b.const_i32(1), scope="system", returns=True)
+        b.global_atomic_add_scoped(base, tid, b.const_i32(2), scope="agent")
+        old64 = b.global_atomic_add_scoped(
+            base, b.const_i32(0), b.const_i64(1), scope="system", returns=True, result_name_hint="aold64"
+        )
+        loads = [b.l2_touch_load(base, b.mul(tid, b.const_i32(16))) for _ in range(3)]
+        b.l2_touch_drain(loads)
+    else:
+        xcc = dops.xcc_id(b)
+        hw = dops.hw_id(b)
+        dops.s_sleep(b, 300)
+        t0 = dops.memrealtime(b)
+        old = dops.atomic_add_scoped(b, base, tid, b.const_i32(1), scope="system", returns=True)
+        dops.atomic_add_scoped(b, base, tid, b.const_i32(2), scope="agent")
+        old64 = b.inline_asm(
+            "global_atomic_add_x2 $0, $1, $2, $3 sc0 sc1\ns_waitcnt vmcnt(0)",
+            "=&v,v,v,s,~{memory}",
+            [b.const_i32(0), b.const_i64(1), base],
+            I64,
+            result_name_hint="aold64",
+        )
+        loads = [
+            b.inline_asm("global_load_dwordx4 $0, $1, $2", "=&v,v,s", [b.mul(tid, b.const_i32(16)), base], VectorType(I32, 4))
+            for _ in range(3)
+        ]
+        b.inline_asm("s_waitcnt vmcnt(0)", "v,v,v", loads)
+    s = b.add(b.add(xcc, hw), b.add(old, b.trunc(b.add(t0, old64), I32)))
+    b.global_store(p, tid, s)
+    b.ret()
+    return b.kernel
+
+
+def test_device_ir_ops_lower_to_the_device_ops_asm():
+    """Each IR form lowers to its ``device_ops`` helper's inline asm: the LLVM
+    text of the two kernels is the same."""
+    a = lower_kernel_to_llvm(_device_ops_kernel(False), arch="gfx950", llvm_flavor="llvm22")
+    b = lower_kernel_to_llvm(_device_ops_kernel(True), arch="gfx950", llvm_flavor="llvm22")
+    assert a == b
+    assert uses_python_only_ops(_device_ops_kernel(True)) == [
+        "tile.global_atomic_add_scoped",
+        "tile.l2_touch_drain",
+        "tile.l2_touch_load",
+        "tile.memrealtime",
+        "tile.s_getreg",
+        "tile.s_sleep",
+    ]
+
+
+def test_device_ir_ops_validate():
+    from rocke.core.ir import I64
+
+    b = IRBuilder("v")
+    p = b.param("p", PtrType(I32, "global"))
+    base = b.global_ptr_to_i64(p)
+    with pytest.raises(ValueError):
+        b.s_getreg("MODE")
+    for units in (0, -1, True, 1.5):
+        with pytest.raises(ValueError):
+            b.s_sleep(units)
+    with pytest.raises(ValueError):
+        b.global_atomic_add_scoped(base, b.const_i32(0), b.const_i32(1), scope="cluster")
+    with pytest.raises(TypeError):
+        b.global_atomic_add_scoped(b.const_i32(0), b.const_i32(0), b.const_i32(1))
+    with pytest.raises(TypeError):
+        b.global_atomic_add_scoped(base, b.const_i64(0), b.const_i32(1))
+    with pytest.raises(TypeError):
+        b.l2_touch_load(base, b.const_i64(0))
+    with pytest.raises(TypeError):
+        b.l2_touch_drain([])
+    with pytest.raises(TypeError):
+        b.l2_touch_drain([b.const_i64(0)])
+    assert b.global_atomic_add_scoped(base, b.const_i32(0), b.const_i64(1), returns=True).type == I64
 
 
 def test_builder_validation():

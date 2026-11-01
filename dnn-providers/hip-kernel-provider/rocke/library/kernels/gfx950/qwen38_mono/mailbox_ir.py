@@ -16,6 +16,11 @@ engines). This module adds the compiler-visible one, built on opcodes in
 Importing this module registers ``"ir"`` with
 :func:`rocke.helpers.mailbox.register_impl`, so
 ``MailboxKnobs(impl="ir")`` (kernel-name suffix ``mbir``) selects it.
+It also registers ``"irf"`` (suffix ``mbirf``): the same puts and polls with
+the ``tagged_poll`` reload fix (``reload="launder"``: every retry re-derives
+the load addresses through a side-effecting asm, so LLVM cannot hoist the
+polled loads out of the loop; the ``ir`` poll can compile to a spin that never
+reloads, true-mono probe P2 finding 1). ``"ir"`` builds are unchanged.
 
 Compliance (the family README has the full exemption note): a build that
 uses it compiles with ``compile_kernel(..., backend="python")``
@@ -39,7 +44,14 @@ from rocke.core.ir import (
 from rocke.helpers import device_ops as dops
 from rocke.helpers import mailbox as M
 
-__all__ = ["IR_IMPL", "IrMailboxImpl", "backend_for", "ptr_from_i64_ir"]
+__all__ = [
+    "IRF_IMPL",
+    "IR_IMPL",
+    "IrMailboxImpl",
+    "IrfMailboxImpl",
+    "backend_for",
+    "ptr_from_i64_ir",
+]
 
 
 def ptr_from_i64_ir(b: IRBuilder, addr: Value, *, pointee=I32) -> Value:
@@ -88,6 +100,37 @@ class IrMailboxImpl(M.MailboxImpl):
 
 
 IR_IMPL = M.register_impl(IrMailboxImpl())
+
+
+class IrfMailboxImpl(IrMailboxImpl):
+    """``ir`` with the ``tagged_poll`` reload fix (``reload="launder"``)."""
+
+    name = "irf"
+    reload = "launder"
+
+    def poll_batch(self, b, specs, tag, knobs):
+        tspecs = []
+        for mb, i, n in specs:
+            if mb.rsrc is None:
+                raise ValueError("impl='irf' needs a mailbox built with impl='irf'")
+            off = M.pair_offset(b, i)
+            if mb.copy_off is not None:
+                off = b.add(off, mb.copy_off)
+            tspecs.append((mb.rsrc, off, 2 * n))
+        vecs = b.tagged_poll(
+            tag,
+            tspecs,
+            aux=knobs.cpol,
+            pause=dops.PAUSES[knobs.pause],
+            reload=self.reload,
+        )
+        return [
+            [b.vec_extract(v, 2 * q) for q in range(n)]
+            for v, (_, _, n) in zip(vecs, specs)
+        ]
+
+
+IRF_IMPL = M.register_impl(IrfMailboxImpl())
 
 
 def backend_for(kernel: KernelDef) -> str | None:

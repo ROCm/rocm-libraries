@@ -190,7 +190,11 @@ class MxDecodeGemvSpec:
     keeps the mono MFMA order), ``smask`` (clear the sign and mantissa
     bits of the convert's scale operand; the convert reads only its exponent
     field, so off is the default), ``fsync`` (``fused`` launch
-    synchronization, ``FSYNCS``), ``pro`` (prologue order, ``PROS``).
+    synchronization, ``FSYNCS``), ``pro`` (prologue order, ``PROS``),
+    ``irops`` (the ``fused`` epilogue's scoped atomics as
+    ``IRBuilder.global_atomic_add_scoped`` IR ops instead of inline asm: the
+    same LLVM text, and no asm left for the direct code-object compiler but
+    the empty ``fresh`` pins).
     """
 
     n: int
@@ -216,6 +220,7 @@ class MxDecodeGemvSpec:
     ksplit: int = 1
     pro: str = "x_first"
     fsync: str = "counter64"
+    irops: bool = False
 
     # ------------------------------------------------------------------ derived
     @property
@@ -286,6 +291,7 @@ class MxDecodeGemvSpec:
             "ksplit": "ks",
             "fsync": "fs",
             "pro": "pro",
+            "irops": "ir",
         }
         for f in fields(self):
             if f.name in short and getattr(self, f.name) != getattr(default, f.name):
@@ -526,9 +532,14 @@ def _reduce16(b: IRBuilder, k: Value, c: Value):
     return k, c
 
 
-def _atomic_inc64(b: IRBuilder, base: Value) -> Value:
+def _atomic_inc64(b: IRBuilder, base: Value, irops: bool = False) -> Value:
     """System-scope ``global_atomic_add_x2`` of 1 at the uniform i64 address
     ``base``; returns the pre-add i64 (waits for it inside the asm)."""
+    if irops:
+        return b.global_atomic_add_scoped(
+            base, b.const_i32(0), b.const_i64(1), scope="system", returns=True,
+            result_name_hint="aold64",
+        )  # fmt: skip
     return b.inline_asm(
         "global_atomic_add_x2 $0, $1, $2, $3 sc0 sc1\ns_waitcnt vmcnt(0)",
         "=&v,v,v,s,~{memory}",
@@ -536,6 +547,14 @@ def _atomic_inc64(b: IRBuilder, base: Value) -> Value:
         I64,
         result_name_hint="aold64",
     )
+
+
+def _scoped_add(b: IRBuilder, base: Value, voff: Value, value: Value, irops: bool, *, returns=False):
+    """System-scope i32 ``global_atomic_add`` (``device_ops.atomic_add_scoped``,
+    or its IR op with ``irops``)."""
+    if irops:
+        return b.global_atomic_add_scoped(base, voff, value, scope="system", returns=returns)
+    return dops.atomic_add_scoped(b, base, voff, value, scope="system", returns=returns)
 
 
 def _reduce64(b: IRBuilder, k: Value, c: Value):
@@ -998,15 +1017,15 @@ def build_mx_decode_gemv(spec: MxDecodeGemvSpec) -> KernelDef:
     with b.scf_if(b.cmp_eq(tid, c0)):
         ws64 = dops.uniform(b, b.global_ptr_to_i64(wsp))
         if epoch:  # the epoch first: the last CTA advances it only after every arrival
-            ep = dops.atomic_add_scoped(b, ws64, _ci(b, 4), c0, scope="system", returns=True)
+            ep = _scoped_add(b, ws64, _ci(b, 4), c0, s.irops, returns=True)
             b.smem_store_vN(flag, [c1], ep, 1)
         if c64:  # flag = (count % G, count / G)
-            cnt = _atomic_inc64(b, ws64)
+            cnt = _atomic_inc64(b, ws64, s.irops)
             gq = b.const_i64(G)
             b.smem_store_vN(flag, [c0], b.trunc(b.mod(cnt, gq), I32), 1)
             b.smem_store_vN(flag, [c1], b.trunc(b.div(cnt, gq), I32), 1)
         else:
-            old = dops.atomic_add_scoped(b, ws64, c0, c1, scope="system", returns=True)
+            old = _scoped_add(b, ws64, c0, c1, s.irops, returns=True)
             b.smem_store_vN(flag, [c0], old, 1)
     b.sync()
     old = b.readfirstlane(b.vec_extract(b.smem_load_vN(flag, c0, dtype=I32, n=1), 0))
@@ -1059,6 +1078,6 @@ def build_mx_decode_gemv(spec: MxDecodeGemvSpec) -> KernelDef:
             # every CTA has arrived and published: reset the counter, then the next epoch
             with b.scf_if(b.cmp_eq(tid, c0)):
                 ws64 = dops.uniform(b, b.global_ptr_to_i64(wsp))
-                dops.atomic_add_scoped(b, ws64, c0, _ci(b, -G), scope="system")
-                dops.atomic_add_scoped(b, ws64, _ci(b, 4), c1, scope="system")
+                _scoped_add(b, ws64, c0, _ci(b, -G), s.irops)
+                _scoped_add(b, ws64, _ci(b, 4), c1, s.irops)
     return b.kernel

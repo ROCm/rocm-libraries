@@ -225,6 +225,16 @@ def make_tuned_candidate(
         b, _why = resolve_base(routed(req)[0])
         return space.sample(b, n, seed)
 
+    def search(req: OperatorRequest):
+        probe = opt_in_probe(req, candidate)
+        ok, why = candidate.admits(probe)
+        if not ok:
+            raise ValueError(f"{name} does not admit the request: {why}")
+        b, why = resolve_base(probe)
+        if b is None:
+            raise ValueError(f"{name} has no tuning base for the request: {why}")
+        return space, b
+
     candidate = KernelCandidate(
         name=name,
         family=family,
@@ -240,6 +250,7 @@ def make_tuned_candidate(
         block=block,
         sweep_space=sweep,
         sample_space=sample,
+        search_space=search,
         build=build,
         bind_torch=bind_torch,
         opt_in=route_auto is None,

@@ -1,0 +1,622 @@
+# gfx11 instruction description for the direct compiler (rust/rocke-codeobj).
+# Written by `platform/tools/isa_tables.py import` from the Rust sources and isa/gfx11.overlay;
+# keep hand-written knowledge in the overlay. After `switch`, this file is the
+# source of the opcode rows, VOPD forms and latency classes. Keys are
+# documented in the overlay.
+
+[meta]
+# Target facts.
+meta target gfx1151
+meta isa gfx11
+meta wave 32
+
+[flags]
+# Compiler flag bits (mir.rs F_*), with the implicit register each one states.
+flag DEF_SCC bit=0 imp=def:scc
+flag USE_SCC bit=1 imp=use:scc
+flag USE_VCC bit=2 imp=use:vcc
+flag DEF_EXEC bit=3 imp=def:exec
+flag USE_EXEC bit=4 imp=use:exec
+flag VMEM_LOAD bit=5
+flag VMEM_STORE bit=6
+flag LDS bit=7
+flag SMEM bit=8
+flag BRANCH bit=9
+flag TRANS bit=10
+flag WMMA bit=11
+flag TIED bit=12
+flag 64BIT_SRC bit=13
+flag 16BIT_DST bit=14
+flag 16BIT_SRC bit=15
+flag END bit=16
+flag EARLY bit=17
+flag FENCE bit=18
+
+[alias]
+# Flag aliases (mir.rs `const NAME: u32 = F_..`).
+alias VALU flags=USE_EXEC
+
+[mods]
+# MInst modifier bits (mir.rs M_*).
+mod NEG0 bit=0
+mod NEG1 bit=1
+mod NEG2 bit=2
+mod OPSEL_SRC0 bit=4
+mod OPSEL_SRC1 bit=5
+mod OPSEL_SRC2 bit=6
+mod OPSEL_DST bit=7
+mod SADDR bit=8
+mod MIX_F16_0 bit=9
+mod GLC bit=12
+
+[modset]
+# Modifier sets an instruction may accept (`m=`), by M_ bit.
+modset neg "neg (VOP3) or neg_lo (VOP3P) of sources 0-2" bits=0,1,2
+modset opsel "op_sel: the high half of sources 0-2" bits=4,5,6
+modset opsel_dst "op_sel: the high half of the destination" bits=7
+modset saddr "global address through saddr: SGPR base plus 32-bit VGPR offset" bits=8
+modset mix "v_fma_mix: f16 sources (op_sel_hi)" bits=9,10,11
+modset glc "GLC: an atomic returns the old value" bits=12
+
+[fmt]
+# Rust formats (mir.rs Fmt) and their encodings.
+fmt Sop1 enc=SOP1
+fmt Sop2 enc=SOP2
+fmt Sopc enc=SOPC
+fmt Sopk enc=SOPK
+fmt Sopp enc=SOPP
+fmt Smem enc=SMEM
+fmt Vop1 enc=VOP1 vop3=0x180
+fmt Vop2 enc=VOP2 vop3=0x100
+fmt Vop3 enc=VOP3
+fmt Vop3b enc=VOP3SD
+fmt Vopc enc=VOPC layout=VOP3
+fmt Vop3p enc=VOP3P
+fmt Vopd enc=VOPD
+fmt Ds enc=DS imp=use:exec
+fmt Global enc=GLOBAL imp=use:exec
+fmt Mubuf enc=MUBUF imp=use:exec
+fmt Pseudo enc=PSEUDO table=no
+
+[enc]
+# Encoding layouts: fixed bits per word, fields as name:word:lsb:width.
+enc SOP1 "sdst = op(ssrc0)" words=1 fixed=0xbe800000 fields=ssrc0:0:0:8,op:0:8:8,sdst:0:16:7
+enc SOP2 "sdst = op(ssrc0, ssrc1)" words=1 fixed=0x80000000 fields=ssrc0:0:0:8,ssrc1:0:8:8,sdst:0:16:7,op:0:23:7
+enc SOPC "scc = op(ssrc0, ssrc1)" words=1 fixed=0xbf000000 fields=ssrc0:0:0:8,ssrc1:0:8:8,op:0:16:7
+enc SOPK "sdst and a 16-bit immediate" words=1 fixed=0xb0000000 fields=simm16:0:0:16,sdst:0:16:7,op:0:23:5
+enc SOPP "program control with a 16-bit immediate" words=1 fixed=0xbf800000 fields=simm16:0:0:16,op:0:16:7
+enc SMEM "scalar memory" words=2 fixed=0xf4000000,0x00000000 fields=sbase:0:0:6,sdata:0:6:7,dlc:0:13:1,glc:0:14:1,op:0:18:8,offset:1:0:21,soffset:1:25:7
+enc VOP1 "vdst = op(src0)" words=1 fixed=0x7e000000 fields=src0:0:0:9,op:0:9:8,vdst:0:17:8
+enc VOP2 "vdst = op(src0, vsrc1)" words=1 fixed=0x00000000 fields=src0:0:0:9,vsrc1:0:9:8,vdst:0:17:8,op:0:25:6
+enc VOPC "vcc = op(src0, vsrc1); the compiler always uses the VOP3 form" words=1 fixed=0x7c000000 fields=src0:0:0:9,vsrc1:0:9:8,op:0:17:8
+enc VOP3 "three-source VALU (also VOP1, VOP2 and VOPC promoted)" words=2 fixed=0xd4000000,0x00000000 fields=vdst:0:0:8,abs:0:8:3,op_sel:0:11:4,clamp:0:15:1,op:0:16:10,src0:1:0:9,src1:1:9:9,src2:1:18:9,omod:1:27:2,neg:1:29:3
+enc VOP3SD "VOP3 with a scalar destination (carry, div_scale flag)" words=2 fixed=0xd4000000,0x00000000 fields=vdst:0:0:8,sdst:0:8:7,clamp:0:15:1,op:0:16:10,src0:1:0:9,src1:1:9:9,src2:1:18:9,omod:1:27:2,neg:1:29:3
+enc VOP3P "packed and mixed-precision VALU, WMMA" words=2 fixed=0xcc000000,0x00000000 fields=vdst:0:0:8,neg_hi:0:8:3,op_sel:0:11:3,op_sel_hi2:0:14:1,clamp:0:15:1,op:0:16:7,src0:1:0:9,src1:1:9:9,src2:1:18:9,op_sel_hi:1:27:2,neg:1:29:3
+enc VOPD "two VALU operations issued together" words=2 fixed=0xc8000000,0x00000000 fields=src0x:0:0:9,vsrc1x:0:9:8,opy:0:17:5,opx:0:22:4,src0y:1:0:9,vsrc1y:1:9:8,vdsty:1:17:7,vdstx:1:24:8
+enc DPP16 "second word of a VOP1 with a DPP16 source" words=1 fixed=0x00000000 fields=src0:0:0:8,ctrl:0:8:24
+enc DPP8 "second word of a VOP1 with a DPP8 source" words=1 fixed=0x00000000 fields=src0:0:0:8,sel:0:8:24
+enc DS "local data share" words=2 fixed=0xd8000000,0x00000000 fields=offset:0:0:16,gds:0:17:1,op:0:18:8,addr:1:0:8,data0:1:8:8,data1:1:16:8,vdst:1:24:8
+enc FLAT "flat memory (segment 0)" words=2 fixed=0xdc000000,0x00000000 fields=offset:0:0:13,dlc:0:13:1,glc:0:14:1,slc:0:15:1,op:0:18:8,addr:1:0:8,data:1:8:8,saddr:1:16:7,sve:1:23:1,vdst:1:24:8
+enc SCRATCH "scratch memory (FLAT segment 1)" words=2 fixed=0xdc010000,0x00000000 fields=offset:0:0:13,dlc:0:13:1,glc:0:14:1,slc:0:15:1,op:0:18:8,addr:1:0:8,data:1:8:8,saddr:1:16:7,sve:1:23:1,vdst:1:24:8
+enc GLOBAL "global memory (FLAT segment 2)" words=2 fixed=0xdc020000,0x00000000 fields=offset:0:0:13,dlc:0:13:1,glc:0:14:1,slc:0:15:1,op:0:18:8,addr:1:0:8,data:1:8:8,saddr:1:16:7,sve:1:23:1,vdst:1:24:8
+enc MUBUF "buffer memory" words=2 fixed=0xe0000000,0x00000000 fields=offset:0:0:12,slc:0:12:1,dlc:0:13:1,glc:0:14:1,op:0:18:8,vaddr:1:0:8,vdata:1:8:8,srsrc:1:16:5,tfe:1:21:1,offen:1:22:1,idxen:1:23:1,soffset:1:24:8
+
+[opnd]
+# Operand codes and classes.
+reg vcc_lo code=106
+reg vcc_hi code=107
+reg null code=124
+reg m0 code=125
+reg exec_lo code=126
+reg exec_hi code=127
+reg scc code=253
+src sgpr=0 vgpr=256 literal=255 dpp16=250 dpp8=233 half_hi=128
+inline_int lo=-16 hi=64 zero=128 neg=192
+inline_f32 0x3f000000=240 0xbf000000=241 0x3f800000=242 0xbf800000=243 0x40000000=244 0xc0000000=245 0x40800000=246 0xc0800000=247 0x3e22f983=248
+inline_f64 0x3fe00000=240 0xbfe00000=241 0x3ff00000=242 0xbff00000=243 0x40000000=244 0xc0000000=245 0x40100000=246 0xc0100000=247
+class s "SGPR tuple; as a 1-dword destination also vcc_lo, exec_lo, m0 or null"
+class ss "scalar source: SGPR, special register, inline constant or literal"
+class v "VGPR tuple"
+class vs "vector source: VGPR, SGPR, special register, inline constant or literal"
+class vi "vector source without a literal: VGPR, SGPR or inline constant"
+class vh "16-bit half of a VGPR (op_sel or .h picks the high half)"
+class vsh "16-bit vector source: a VGPR half, SGPR or inline constant"
+class x "EXEC, named as an explicit operand"
+class a "any register (pseudo)"
+imm simm16 "16-bit immediate field"
+imm soff21 "21-bit signed byte offset"
+imm off16 "16-bit unsigned byte offset"
+imm off2x8 "two 8-bit dword offsets: offset0 | offset1 << 8"
+imm off13s "13-bit signed byte offset"
+imm off12 "12-bit unsigned byte offset"
+imm label "branch target block (resolved to a word offset by the assembler)"
+imm nop "wait states minus one"
+imm clause "instructions in the clause minus one"
+imm delay "s_delay_alu instid0, instskip, instid1"
+imm waitcnt "vmcnt, expcnt, lgkmcnt"
+imm sendmsg "message id"
+imm swizzle "ds_swizzle pattern"
+imm vopd "X and Y component opcodes in bits 7:0 and 15:8"
+imm dpp16 "DPP16 control: bits 31:8 of word 1"
+imm dpp8 "DPP8 lane selects"
+form plain "the format's general encoding"
+form noshort "a VOP2 opcode always encoded as VOP3 (its lane mask is explicit)"
+form dpp16 "VOP1 with a DPP16 source: imm holds bits 31:8 of word 1"
+form dpp8 "VOP1 with a DPP8 source: imm holds the 24-bit lane selects"
+form writelane "VOP3 with two encoded sources and no f32 inline constants"
+form mix "VOP3P taking op_sel and op_sel_hi from the modifiers"
+form ds_data "DS with both a result and data0 (returning atomics, bpermute)"
+form ds_2addr "DS with data0 and data1 (two-address store)"
+form scratch "SCRATCH (FLAT segment 1) with no address operands: the offset is in imm"
+form b64 "SALU with 64-bit integer sources: no f32 inline constants (a literal is zero-extended)"
+form b64_shift "SALU 64-bit shift: source 0 as in b64, source 1 the 32-bit shift amount"
+form f64 "VALU with f64 sources: a non-inline-integer immediate is the high dword (an f64 inline constant or a literal)"
+form f64_i32 "as f64, but source 1 is the 32-bit integer exponent (v_ldexp_f64)"
+form dot2 "VOP3P with 16-bit pair sources 0 and 1 (no f32 inline constants) and an f32 source 2"
+form vscnt "SOPK whose register must be null (s_waitcnt_vscnt)"
+
+[unit]
+# Execution units.
+unit VALU "vector ALU" issue=1
+unit TRANS "transcendental unit" issue=4
+unit WMMA "matrix unit (WMMA)" issue=34
+unit SALU "scalar ALU" issue=1
+unit SMEM "scalar memory" issue=5
+unit VMEM "vector memory (global, buffer, scratch)" issue=5
+unit LDS "local data share" issue=4
+unit BRANCH branch issue=1
+unit CTRL "program control: waits, hints, barriers, priority, end" issue=0
+unit PSEUDO "pseudo instruction, expanded or dropped before encoding" issue=0
+unit OTHER other issue=1
+
+[lat]
+# Latency classes: scheduler result latency, s_delay_alu class and cycles, wait counters.
+lat pseudo "pseudo without a result latency (copies, implicit defs, scheduling barriers)" sched=0 delay=skip
+lat pseudo_valu "pseudo expanded into VALU instructions" sched=5 delay=skip
+lat salu "scalar ALU" sched=2 delay=salu:2
+lat ctrl "program control (SOPP): no result; s_delay_alu counts it as SALU" sched=5 delay=salu:2
+lat valu "vector ALU" sched=5 delay=valu:5
+lat trans transcendental sched=10 delay=trans:10
+lat wmma "WMMA: the scheduler waits 16 cycles; s_delay_alu treats it as VALU" sched=16 delay=valu:5
+lat smem "scalar load: lgkmcnt, returns out of order" sched=40 delay=other wait=lgkm,smem
+lat lds "LDS access: lgkmcnt" sched=40 delay=other clear=yes wait=lgkm
+lat vmem_load "vector memory load or returning atomic: vmcnt" sched=300 delay=other clear=yes wait=vm
+lat vmem_store "vector memory store, atomic without return or cache control" sched=5 delay=other clear=yes
+
+[hazard]
+# Hazards and where the compiler handles them.
+hazard wmma_d "WMMA result: the producer side of wmma_ab" modeled=post.rs:fix_wmma_hazards
+hazard wmma_ab "a WMMA reading as A or B the result of the immediately preceding VALU, if that is a WMMA, needs a v_nop between them" modeled=post.rs:fix_wmma_hazards
+
+[vopd]
+# VOPD components: code, mnemonic, half (x: either, y: Y only); named=yes when mir.rs names it.
+vopd 0 v_dual_fmac_f32 x named=yes
+vopd 1 v_dual_fmaak_f32 x
+vopd 2 v_dual_fmamk_f32 x
+vopd 3 v_dual_mul_f32 x named=yes
+vopd 4 v_dual_add_f32 x named=yes
+vopd 5 v_dual_sub_f32 x named=yes
+vopd 6 v_dual_subrev_f32 x named=yes
+vopd 7 v_dual_mul_dx9_zero_f32 x
+vopd 8 v_dual_mov_b32 x named=yes
+vopd 9 v_dual_cndmask_b32 x
+vopd 10 v_dual_max_f32 x named=yes
+vopd 11 v_dual_min_f32 x named=yes
+vopd 12 v_dual_dot2acc_f32_f16 x
+vopd 13 v_dual_dot2acc_f32_bf16 x
+vopd 16 v_dual_add_nc_u32 y named=yes
+vopd 17 v_dual_lshlrev_b32 y named=yes
+vopd 18 v_dual_and_b32 y named=yes
+
+[vcmp]
+# VOPC compares the compiler names (Opc::VCmp(code)).
+vcmp 0x10 v_cmp_f_f32 src=f32
+vcmp 0x11 v_cmp_lt_f32 src=f32
+vcmp 0x12 v_cmp_eq_f32 src=f32
+vcmp 0x13 v_cmp_le_f32 src=f32
+vcmp 0x14 v_cmp_gt_f32 src=f32
+vcmp 0x15 v_cmp_lg_f32 src=f32
+vcmp 0x16 v_cmp_ge_f32 src=f32
+vcmp 0x17 v_cmp_o_f32 src=f32
+vcmp 0x18 v_cmp_u_f32 src=f32
+vcmp 0x19 v_cmp_nge_f32 src=f32
+vcmp 0x1a v_cmp_nlg_f32 src=f32
+vcmp 0x1b v_cmp_ngt_f32 src=f32
+vcmp 0x1c v_cmp_nle_f32 src=f32
+vcmp 0x1d v_cmp_neq_f32 src=f32
+vcmp 0x1e v_cmp_nlt_f32 src=f32
+vcmp 0x1f v_cmp_t_f32 src=f32
+vcmp 0x40 v_cmp_f_i32 src=i32
+vcmp 0x41 v_cmp_lt_i32 src=i32
+vcmp 0x42 v_cmp_eq_i32 src=i32
+vcmp 0x43 v_cmp_le_i32 src=i32
+vcmp 0x44 v_cmp_gt_i32 src=i32
+vcmp 0x45 v_cmp_ne_i32 src=i32
+vcmp 0x46 v_cmp_ge_i32 src=i32
+vcmp 0x47 v_cmp_t_i32 src=i32
+vcmp 0x48 v_cmp_f_u32 src=u32
+vcmp 0x49 v_cmp_lt_u32 src=u32
+vcmp 0x4a v_cmp_eq_u32 src=u32
+vcmp 0x4b v_cmp_le_u32 src=u32
+vcmp 0x4c v_cmp_gt_u32 src=u32
+vcmp 0x4d v_cmp_ne_u32 src=u32
+vcmp 0x4e v_cmp_ge_u32 src=u32
+vcmp 0x4f v_cmp_t_u32 src=u32
+vcmp 0x50 v_cmp_f_i64 src=i64
+vcmp 0x51 v_cmp_lt_i64 src=i64
+vcmp 0x52 v_cmp_eq_i64 src=i64
+vcmp 0x53 v_cmp_le_i64 src=i64
+vcmp 0x54 v_cmp_gt_i64 src=i64
+vcmp 0x55 v_cmp_ne_i64 src=i64
+vcmp 0x56 v_cmp_ge_i64 src=i64
+vcmp 0x57 v_cmp_t_i64 src=i64
+vcmp 0x58 v_cmp_f_u64 src=u64
+vcmp 0x59 v_cmp_lt_u64 src=u64
+vcmp 0x5a v_cmp_eq_u64 src=u64
+vcmp 0x5b v_cmp_le_u64 src=u64
+vcmp 0x5c v_cmp_gt_u64 src=u64
+vcmp 0x5d v_cmp_ne_u64 src=u64
+vcmp 0x5e v_cmp_ge_u64 src=u64
+vcmp 0x5f v_cmp_t_u64 src=u64
+vcmp 0x7e v_cmp_class_f32 src=f32
+
+[inst]
+# Instructions: variant, mnemonic, encoding, opcode, then key=value facts (keys in the overlay header).
+group SOP1
+inst   SMovB32           s_mov_b32                 SOP1    0x00   flags=0 d=sdst:s1 u=ssrc0:ss1 unit=SALU lat=salu
+inst   SMovB64           s_mov_b64                 SOP1    0x01   flags=0 d=sdst:s2 u=ssrc0:ss2 unit=SALU lat=salu form=b64
+inst   SNotB32           s_not_b32                 SOP1    0x1e   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1 imp=def:scc unit=SALU lat=salu
+inst   SAndSaveexecB32   s_and_saveexec_b32        SOP1    0x20   flags=DEF_SCC|DEF_EXEC|USE_EXEC d=sdst:s1,exec:x1 u=ssrc0:ss1,exec:x1 imp=def:exec,def:scc,use:exec unit=SALU lat=salu
+group SOP2
+inst   SAddU32           s_add_u32                 SOP2    0x00   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SSubU32           s_sub_u32                 SOP2    0x01   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SAddI32           s_add_i32                 SOP2    0x02   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SSubI32           s_sub_i32                 SOP2    0x03   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SAddcU32          s_addc_u32                SOP2    0x04   flags=DEF_SCC|USE_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc,use:scc unit=SALU lat=salu
+inst   SSubbU32          s_subb_u32                SOP2    0x05   flags=DEF_SCC|USE_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc,use:scc unit=SALU lat=salu
+inst   SLshlB32          s_lshl_b32                SOP2    0x08   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SLshlB64          s_lshl_b64                SOP2    0x09   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss1 imp=def:scc unit=SALU lat=salu form=b64_shift
+inst   SLshrB32          s_lshr_b32                SOP2    0x0a   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SLshrB64          s_lshr_b64                SOP2    0x0b   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss1 imp=def:scc unit=SALU lat=salu form=b64_shift
+inst   SAshrI32          s_ashr_i32                SOP2    0x0c   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SAshrI64          s_ashr_i64                SOP2    0x0d   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss1 imp=def:scc unit=SALU lat=salu form=b64_shift
+inst   SLshl1AddU32      s_lshl1_add_u32           SOP2    0x0e   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SLshl2AddU32      s_lshl2_add_u32           SOP2    0x0f   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SLshl3AddU32      s_lshl3_add_u32           SOP2    0x10   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SLshl4AddU32      s_lshl4_add_u32           SOP2    0x11   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SMinI32           s_min_i32                 SOP2    0x12   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SMinU32           s_min_u32                 SOP2    0x13   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SMaxI32           s_max_i32                 SOP2    0x14   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SMaxU32           s_max_u32                 SOP2    0x15   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SAndB32           s_and_b32                 SOP2    0x16   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SAndB64           s_and_b64                 SOP2    0x17   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   SOrB32            s_or_b32                  SOP2    0x18   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SOrB64            s_or_b64                  SOP2    0x19   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   SXorB32           s_xor_b32                 SOP2    0x1a   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SXorB64           s_xor_b64                 SOP2    0x1b   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   SAndNot1B32       s_and_not1_b32            SOP2    0x22   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SOrNot1B32        s_or_not1_b32             SOP2    0x24   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SBfeU32           s_bfe_u32                 SOP2    0x26   flags=DEF_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SMulI32           s_mul_i32                 SOP2    0x2c   flags=0 d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 unit=SALU lat=salu issue=2
+inst   SMulHiU32         s_mul_hi_u32              SOP2    0x2d   flags=0 d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 unit=SALU lat=salu issue=2
+inst   SMulHiI32         s_mul_hi_i32              SOP2    0x2e   flags=0 d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 unit=SALU lat=salu issue=2
+inst   SCselectB32       s_cselect_b32             SOP2    0x30   flags=USE_SCC d=sdst:s1 u=ssrc0:ss1,ssrc1:ss1 imp=use:scc unit=SALU lat=salu
+inst   SCselectB64       s_cselect_b64             SOP2    0x31   flags=USE_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss2 imp=use:scc unit=SALU lat=salu form=b64
+group SOPC
+inst   SCmpEqI32         s_cmp_eq_i32              SOPC    0x00   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpLgI32         s_cmp_lg_i32              SOPC    0x01   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpGtI32         s_cmp_gt_i32              SOPC    0x02   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpGeI32         s_cmp_ge_i32              SOPC    0x03   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpLtI32         s_cmp_lt_i32              SOPC    0x04   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpLeI32         s_cmp_le_i32              SOPC    0x05   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpEqU32         s_cmp_eq_u32              SOPC    0x06   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpLgU32         s_cmp_lg_u32              SOPC    0x07   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpGtU32         s_cmp_gt_u32              SOPC    0x08   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpGeU32         s_cmp_ge_u32              SOPC    0x09   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpLtU32         s_cmp_lt_u32              SOPC    0x0a   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpLeU32         s_cmp_le_u32              SOPC    0x0b   flags=DEF_SCC u=ssrc0:ss1,ssrc1:ss1 imp=def:scc unit=SALU lat=salu
+inst   SCmpEqU64         s_cmp_eq_u64              SOPC    0x10   flags=DEF_SCC u=ssrc0:ss2,ssrc1:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   SCmpLgU64         s_cmp_lg_u64              SOPC    0x11   flags=DEF_SCC u=ssrc0:ss2,ssrc1:ss2 imp=def:scc unit=SALU lat=salu form=b64
+group SOPK
+inst   SMovkI32          s_movk_i32                SOPK    0x00   flags=0 d=sdst:s1 imm=simm16 unit=SALU lat=salu
+inst   SWaitcntVscnt     s_waitcnt_vscnt           SOPK    0x18   flags=FENCE d=sdst:s1 imm=simm16 unit=SALU lat=salu form=vscnt note="Waits for the outstanding stores (defs: null); every outstanding load completes before it too (`post::insert_waitcnt`)."
+group SOPP
+inst   SNop              s_nop                     SOPP    0x00   flags=0 imm=nop unit=CTRL lat=ctrl
+inst   SClause           s_clause                  SOPP    0x05   flags=0 imm=clause unit=CTRL lat=ctrl
+inst   SDelayAlu         s_delay_alu               SOPP    0x07   flags=0 imm=delay unit=CTRL lat=ctrl
+inst   SWaitcnt          s_waitcnt                 SOPP    0x09   flags=0 imm=waitcnt unit=CTRL lat=ctrl
+inst   SCodeEnd          s_code_end                SOPP    0x1f   flags=0 unit=CTRL lat=ctrl
+inst   SBranch           s_branch                  SOPP    0x20   flags=BRANCH imm=label unit=BRANCH lat=ctrl
+inst   SCbranchScc0      s_cbranch_scc0            SOPP    0x21   flags=BRANCH|USE_SCC imm=label imp=use:scc unit=BRANCH lat=ctrl
+inst   SCbranchScc1      s_cbranch_scc1            SOPP    0x22   flags=BRANCH|USE_SCC imm=label imp=use:scc unit=BRANCH lat=ctrl
+inst   SCbranchExecz     s_cbranch_execz           SOPP    0x25   flags=BRANCH|USE_EXEC imm=label imp=use:exec unit=BRANCH lat=ctrl
+inst   SCbranchExecnz    s_cbranch_execnz          SOPP    0x26   flags=BRANCH|USE_EXEC imm=label imp=use:exec unit=BRANCH lat=ctrl
+inst   SEndpgm           s_endpgm                  SOPP    0x30   flags=END unit=CTRL lat=ctrl
+inst   SSendmsg          s_sendmsg                 SOPP    0x36   flags=0 imm=sendmsg unit=CTRL lat=ctrl
+inst   SBarrier          s_barrier                 SOPP    0x3d   flags=0 unit=CTRL lat=ctrl
+inst   SBarrierLds       s_barrier                 SOPP    0x3d   flags=FENCE unit=CTRL lat=ctrl note="`s_barrier` that waits only for LDS (lgkmcnt), so VMEM loads stay in flight."
+inst   SBarrierBare      s_barrier                 SOPP    0x3d   flags=FENCE unit=CTRL lat=ctrl note="`s_barrier` that waits for nothing (`tile.s_barrier_bare`)."
+inst   SSetprio          s_setprio                 SOPP    0x35   flags=FENCE imm=simm16 unit=CTRL lat=ctrl
+inst   SWaitcntExplicit  s_waitcnt                 SOPP    0x09   flags=FENCE imm=waitcnt unit=CTRL lat=ctrl note="An `s_waitcnt` the kernel asked for; it stays where it was written."
+group SMEM
+inst   SLoadB32          s_load_b32                SMEM    0x00   flags=SMEM d=sdata:s1 u=sbase:s2 imm=soff21 unit=SMEM lat=smem
+inst   SLoadB64          s_load_b64                SMEM    0x01   flags=SMEM d=sdata:s2 u=sbase:s2 imm=soff21 unit=SMEM lat=smem
+inst   SLoadB128         s_load_b128               SMEM    0x02   flags=SMEM d=sdata:s4 u=sbase:s2 imm=soff21 unit=SMEM lat=smem
+inst   SLoadB256         s_load_b256               SMEM    0x03   flags=SMEM d=sdata:s8 u=sbase:s2 imm=soff21 unit=SMEM lat=smem
+inst   SLoadB512         s_load_b512               SMEM    0x04   flags=SMEM d=sdata:s16 u=sbase:s2 imm=soff21 unit=SMEM lat=smem
+group VOP1
+inst   VNop              v_nop                     VOP1    0x00   flags=VALU imp=use:exec unit=VALU lat=valu
+inst   VMovB32           v_mov_b32                 VOP1    0x01   flags=VALU d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd=8
+inst   VReadfirstlaneB32 v_readfirstlane_b32       VOP1    0x02   flags=VALU d=sdst:s1 u=src0:v1 imp=use:exec unit=VALU lat=valu
+inst   VCvtF32I32        v_cvt_f32_i32             VOP1    0x05   flags=VALU d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VCvtF32U32        v_cvt_f32_u32             VOP1    0x06   flags=VALU d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VCvtU32F32        v_cvt_u32_f32             VOP1    0x07   flags=VALU d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VCvtI32F32        v_cvt_i32_f32             VOP1    0x08   flags=VALU d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VCvtF16F32        v_cvt_f16_f32             VOP1    0x0a   flags=VALU|16BIT_DST d=vdst:vh u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VCvtF32F16        v_cvt_f32_f16             VOP1    0x0b   flags=VALU|16BIT_SRC d=vdst:v1 u=src0:vsh m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMovB16           v_mov_b16                 VOP1    0x1c   flags=VALU|16BIT_DST|16BIT_SRC d=vdst:vh u=src0:vsh m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VTruncF32         v_trunc_f32               VOP1    0x21   flags=VALU d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMovB32Dpp        v_mov_b32_dpp             VOP1    0x01   flags=VALU d=vdst:v1 u=src0:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16 issue=3 note="`v_mov_b32` with a DPP16 source; `imm` holds bits 31:8 of word 1 (`dpp16_ctrl`)."
+inst   VMovB32Dpp8       v_mov_b32_dpp8            VOP1    0x01   flags=VALU d=vdst:v1 u=src0:v1 imm=dpp8 imp=use:exec unit=VALU lat=valu form=dpp8 issue=3 note="`v_mov_b32` with a DPP8 source; `imm` holds the 24-bit lane selects."
+inst   VExpF32           v_exp_f32                 VOP1    0x25   flags=VALU|TRANS d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=TRANS lat=trans
+inst   VLogF32           v_log_f32                 VOP1    0x27   flags=VALU|TRANS d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=TRANS lat=trans
+inst   VRcpF32           v_rcp_f32                 VOP1    0x2a   flags=VALU|TRANS d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=TRANS lat=trans
+inst   VRcpIflagF32      v_rcp_iflag_f32           VOP1    0x2b   flags=VALU|TRANS d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=TRANS lat=trans
+inst   VRsqF32           v_rsq_f32                 VOP1    0x2e   flags=VALU|TRANS d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=TRANS lat=trans
+inst   VNotB32           v_not_b32                 VOP1    0x37   flags=VALU d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+group VOP2
+inst   VCndmaskB32       v_cndmask_b32             VOP2    0x01   flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:s1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu form=noshort
+inst   VAddF32           v_add_f32                 VOP2    0x03   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd=4
+inst   VSubF32           v_sub_f32                 VOP2    0x04   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd=5
+inst   VSubrevF32        v_subrev_f32              VOP2    0x05   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd=6
+inst   VMulF32           v_mul_f32                 VOP2    0x08   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd=3
+inst   VMulI32I24        v_mul_i32_i24             VOP2    0x09   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMulU32U24        v_mul_u32_u24             VOP2    0x0b   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMulHiU32U24      v_mul_hi_u32_u24          VOP2    0x0c   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMinF32           v_min_f32                 VOP2    0x0f   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd=11
+inst   VMaxF32           v_max_f32                 VOP2    0x10   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd=10
+inst   VMinI32           v_min_i32                 VOP2    0x11   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMaxI32           v_max_i32                 VOP2    0x12   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMinU32           v_min_u32                 VOP2    0x13   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMaxU32           v_max_u32                 VOP2    0x14   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VLshlrevB32       v_lshlrev_b32             VOP2    0x18   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd=17y
+inst   VLshrrevB32       v_lshrrev_b32             VOP2    0x19   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VAshrrevI32       v_ashrrev_i32             VOP2    0x1a   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VAndB32           v_and_b32                 VOP2    0x1b   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd=18y
+inst   VOrB32            v_or_b32                  VOP2    0x1c   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VXorB32           v_xor_b32                 VOP2    0x1d   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VAddCoCiU32       v_add_co_ci_u32           VOP3SD  0x120  flags=VALU d=vdst:v1,sdst:s1 u=src0:vs1,src1:vs1,src2:s1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VSubCoCiU32       v_sub_co_ci_u32           VOP3SD  0x121  flags=VALU d=vdst:v1,sdst:s1 u=src0:vs1,src1:vs1,src2:s1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VAddNcU32         v_add_nc_u32              VOP2    0x25   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd=16y
+inst   VSubNcU32         v_sub_nc_u32              VOP2    0x26   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VSubrevNcU32      v_subrev_nc_u32           VOP2    0x27   flags=VALU d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VFmacF32          v_fmac_f32                VOP2    0x2b   flags=VALU|TIED d=vdst:v1 u=src0:vs1,vsrc1:v1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+group VOP3
+inst   VMadU32U24        v_mad_u32_u24             VOP3    0x20b  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VBfeU32           v_bfe_u32                 VOP3    0x210  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VBfeI32           v_bfe_i32                 VOP3    0x211  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VFmaF32           v_fma_f32                 VOP3    0x213  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu vopd_special=0
+inst   VMin3F32          v_min3_f32                VOP3    0x219  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMax3F32          v_max3_f32                VOP3    0x21c  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMed3I32          v_med3_i32                VOP3    0x220  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VDivFixupF32      v_div_fixup_f32           VOP3    0x227  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VDivFmasF32       v_div_fmas_f32            VOP3    0x237  flags=VALU|USE_VCC d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec,use:vcc unit=VALU lat=valu
+inst   VPermB32          v_perm_b32                VOP3    0x244  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VLshlAddU32       v_lshl_add_u32            VOP3    0x246  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VAddLshlU32       v_add_lshl_u32            VOP3    0x247  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VAdd3U32          v_add3_u32                VOP3    0x255  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VLshlOrB32        v_lshl_or_b32             VOP3    0x256  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VAndOrB32         v_and_or_b32              VOP3    0x257  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VOr3B32           v_or3_b32                 VOP3    0x258  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMaxminI32        v_maxmin_i32              VOP3    0x264  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMinmaxI32        v_minmax_i32              VOP3    0x265  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VPermlane16B32    v_permlane16_b32          VOP3    0x25b  flags=VALU d=vdst:v1 u=src0:v1,src1:ss1,src2:ss1,old:v1 m=opsel imp=use:exec unit=VALU lat=valu issue=3 note="(src, lane select lo, lane select hi); op_sel bit 0 = fi, bit 1 = bound_ctrl."
+inst   VPermlanex16B32   v_permlanex16_b32         VOP3    0x25c  flags=VALU d=vdst:v1 u=src0:v1,src1:ss1,src2:ss1,old:v1 m=opsel imp=use:exec unit=VALU lat=valu issue=3
+inst   VMbcntLoU32B32    v_mbcnt_lo_u32_b32        VOP3    0x31f  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VDivScaleF32      v_div_scale_f32           VOP3SD  0x2fc  flags=VALU d=vdst:v1,sdst:s1 u=src0:vs1,src1:vs1,src2:vs1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VMadU64U32        v_mad_u64_u32             VOP3SD  0x2fe  flags=VALU|64BIT_SRC d=vdst:v2,sdst:s1 u=src0:vs1,src1:vs1,src2:vs2 m=neg imp=use:exec unit=VALU lat=valu issue=4
+inst   VMadI64I32        v_mad_i64_i32             VOP3SD  0x2ff  flags=VALU|64BIT_SRC d=vdst:v2,sdst:s1 u=src0:vs1,src1:vs1,src2:vs2 m=neg imp=use:exec unit=VALU lat=valu issue=4
+inst   VAddCoU32         v_add_co_u32              VOP3SD  0x300  flags=VALU d=vdst:v1,sdst:s1 u=src0:vs1,src1:vs1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VSubCoU32         v_sub_co_u32              VOP3SD  0x301  flags=VALU d=vdst:v1,sdst:s1 u=src0:vs1,src1:vs1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VSubrevCoU32      v_subrev_co_u32           VOP3SD  0x302  flags=VALU d=vdst:v1,sdst:s1 u=src0:vs1,src1:vs1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VPackB32F16       v_pack_b32_f16            VOP3    0x311  flags=VALU d=vdst:v1 u=src0:vsh,src1:vsh m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VLdexpF32         v_ldexp_f32               VOP3    0x31c  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   VMulLoU32         v_mul_lo_u32              VOP3    0x32c  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu issue=4
+inst   VMulHiU32         v_mul_hi_u32              VOP3    0x32d  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu issue=4
+inst   VMulHiI32         v_mul_hi_i32              VOP3    0x32e  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu issue=4
+inst   VLshlrevB64       v_lshlrev_b64             VOP3    0x33c  flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs1,src1:vs2 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu issue=2
+inst   VLshrrevB64       v_lshrrev_b64             VOP3    0x33d  flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs1,src1:vs2 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu issue=2
+inst   VAshrrevI64       v_ashrrev_i64             VOP3    0x33e  flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs1,src1:vs2 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu issue=2
+group VOP3P
+inst   VPkFmaF16         v_pk_fma_f16              VOP3P   0x0e   flags=VALU|16BIT_SRC d=vdst:v1 u=src0:vi1,src1:vi1,src2:vi1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VPkAddF16         v_pk_add_f16              VOP3P   0x0f   flags=VALU|16BIT_SRC d=vdst:v1 u=src0:vi1,src1:vi1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VPkMulF16         v_pk_mul_f16              VOP3P   0x10   flags=VALU|16BIT_SRC d=vdst:v1 u=src0:vi1,src1:vi1 m=neg imp=use:exec unit=VALU lat=valu
+inst   VDot2F32F16       v_dot2_f32_f16            VOP3P   0x13   flags=VALU d=vdst:v1 u=src0:vi1,src1:vi1,src2:vi1 m=neg imp=use:exec unit=VALU lat=valu form=dot2
+inst   VFmaMixF32        v_fma_mix_f32             VOP3P   0x20   flags=VALU d=vdst:v1 u=src0:vi1,src1:vi1,src2:vi1 m=neg,opsel,mix imp=use:exec unit=VALU lat=valu form=mix
+inst   VFmaMixloF16      v_fma_mixlo_f16           VOP3P   0x21   flags=VALU d=vdst:v1 u=src0:vi1,src1:vi1,src2:vi1 m=neg,opsel,mix imp=use:exec unit=VALU lat=valu form=mix note="f16 result of an fma (f32 sources here) into the low / high half; the other half is kept, so mixhi also reads its destination (fourth use)."
+inst   VFmaMixhiF16      v_fma_mixhi_f16           VOP3P   0x22   flags=VALU|TIED d=vdst:v1 u=src0:vi1,src1:vi1,src2:vi1,old:v1 m=neg,opsel,mix imp=use:exec unit=VALU lat=valu form=mix
+inst   VWmmaF32F16       v_wmma_f32_16x16x16_f16   VOP3P   0x40   flags=VALU|WMMA d=vdst:v8 u=src0:v8,src1:v8,src2:v8 m=neg imp=use:exec unit=WMMA lat=wmma haz=wmma_d,wmma_ab
+inst   VWmmaF32F16Early  v_wmma_f32_16x16x16_f16   VOP3P   0x40   flags=VALU|WMMA|EARLY d=vdst:v8 u=src0:v8,src1:v8,src2:v8 m=neg imp=use:exec unit=WMMA lat=wmma haz=wmma_d,wmma_ab note="Three-address form: D must not overlap A, B or C."
+inst   VDual             v_dual                    VOPD    0x00   flags=VALU d=vdstx:v1,vdsty:v1 u=srcx:vs1,srcy:vs1 imm=vopd imp=use:exec unit=VALU lat=valu note="VOPD: defs [x, y]; the first `mods` uses are x's sources, the rest y's; `imm` holds the x and y opcodes in bits 7:0 and 15:8."
+group DS
+inst   DsAddU32          ds_add_u32                DS      0x00   flags=LDS u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsAddF32          ds_add_f32                DS      0x15   flags=LDS u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsAddRtnU32       ds_add_rtn_u32            DS      0x20   flags=LDS|FENCE d=vdst:v1 u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds form=ds_data note="Returning atomics read and write LDS: nothing is reordered around them."
+inst   DsAddRtnF32       ds_add_rtn_f32            DS      0x79   flags=LDS|FENCE d=vdst:v1 u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds form=ds_data
+inst   DsStoreB32        ds_store_b32              DS      0x0d   flags=LDS u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsStore2addrB32   ds_store_2addr_b32        DS      0x0e   flags=LDS u=addr:v1,data0:v1,data1:v1 imm=off2x8 imp=use:exec unit=LDS lat=lds form=ds_2addr note="[addr, data0, data1]; imm = offset0 | offset1 << 8, in dwords."
+inst   DsStoreB16        ds_store_b16              DS      0x1f   flags=LDS u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsSwizzleB32      ds_swizzle_b32            DS      0x35   flags=LDS|USE_EXEC d=vdst:v1 u=addr:v1 imm=swizzle imp=use:exec unit=LDS lat=lds
+inst   DsLoadB32         ds_load_b32               DS      0x36   flags=LDS d=vdst:v1 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsLoadU16         ds_load_u16               DS      0x3c   flags=LDS d=vdst:v1 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsStoreB64        ds_store_b64              DS      0x4d   flags=LDS u=addr:v1,data0:v2 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsLoadB64         ds_load_b64               DS      0x76   flags=LDS d=vdst:v2 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsStoreB16D16Hi   ds_store_b16_d16_hi       DS      0xa1   flags=LDS u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsLoadU16D16      ds_load_u16_d16           DS      0xa6   flags=LDS|TIED d=vdst:v1 u=addr:v1,vdst:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsLoadU16D16Hi    ds_load_u16_d16_hi        DS      0xa7   flags=LDS|TIED d=vdst:v1 u=addr:v1,vdst:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsBpermuteB32     ds_bpermute_b32           DS      0xb3   flags=LDS|USE_EXEC d=vdst:v1 u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds form=ds_data note="(byte address of the source lane, data); reads no LDS memory."
+inst   DsStoreB128       ds_store_b128             DS      0xdf   flags=LDS u=addr:v1,data0:v4 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsLoadB128        ds_load_b128              DS      0xff   flags=LDS d=vdst:v4 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+group GLOBAL
+inst   GLoadU16          global_load_u16           GLOBAL  0x12   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB32          global_load_b32           GLOBAL  0x14   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB64          global_load_b64           GLOBAL  0x15   flags=VMEM_LOAD d=vdst:v2 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB96          global_load_b96           GLOBAL  0x16   flags=VMEM_LOAD d=vdst:v3 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadB128         global_load_b128          GLOBAL  0x17   flags=VMEM_LOAD d=vdst:v4 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
+inst   GStoreB16         global_store_b16          GLOBAL  0x19   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB32         global_store_b32          GLOBAL  0x1a   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB64         global_store_b64          GLOBAL  0x1b   flags=VMEM_STORE u=vaddr:v2,vdata:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB96         global_store_b96          GLOBAL  0x1c   flags=VMEM_STORE u=vaddr:v2,vdata:v3 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreB128        global_store_b128         GLOBAL  0x1d   flags=VMEM_STORE u=vaddr:v2,vdata:v4 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GLoadD16B16       global_load_d16_b16       GLOBAL  0x20   flags=VMEM_LOAD|TIED d=vdst:v1 u=vaddr:v2,vdst:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
+inst   GLoadD16HiB16     global_load_d16_hi_b16    GLOBAL  0x23   flags=VMEM_LOAD|TIED d=vdst:v1 u=vaddr:v2,vdst:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
+inst   GStoreD16HiB16    global_store_d16_hi_b16   GLOBAL  0x25   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GAtomicAddU32     global_atomic_add_u32     GLOBAL  0x35   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GAtomicAddF32     global_atomic_add_f32     GLOBAL  0x56   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   ScratchLoadB32    scratch_load_b32          SCRATCH 0x14   fmt=Global flags=VMEM_LOAD d=vdst:v1 imm=off13s imp=use:exec unit=VMEM lat=vmem_load form=scratch note="SCRATCH (FLAT segment 1), spill slots only: no address operands (`off, off`), the per-lane byte offset in `imm`."
+inst   ScratchLoadB64    scratch_load_b64          SCRATCH 0x15   fmt=Global flags=VMEM_LOAD d=vdst:v2 imm=off13s imp=use:exec unit=VMEM lat=vmem_load form=scratch
+inst   ScratchLoadB96    scratch_load_b96          SCRATCH 0x16   fmt=Global flags=VMEM_LOAD d=vdst:v3 imm=off13s imp=use:exec unit=VMEM lat=vmem_load form=scratch
+inst   ScratchLoadB128   scratch_load_b128         SCRATCH 0x17   fmt=Global flags=VMEM_LOAD d=vdst:v4 imm=off13s imp=use:exec unit=VMEM lat=vmem_load form=scratch
+inst   ScratchStoreB32   scratch_store_b32         SCRATCH 0x1a   fmt=Global flags=VMEM_STORE u=vdata:v1 imm=off13s imp=use:exec unit=VMEM lat=vmem_store form=scratch
+inst   ScratchStoreB64   scratch_store_b64         SCRATCH 0x1b   fmt=Global flags=VMEM_STORE u=vdata:v2 imm=off13s imp=use:exec unit=VMEM lat=vmem_store form=scratch
+inst   ScratchStoreB96   scratch_store_b96         SCRATCH 0x1c   fmt=Global flags=VMEM_STORE u=vdata:v3 imm=off13s imp=use:exec unit=VMEM lat=vmem_store form=scratch
+inst   ScratchStoreB128  scratch_store_b128        SCRATCH 0x1d   fmt=Global flags=VMEM_STORE u=vdata:v4 imm=off13s imp=use:exec unit=VMEM lat=vmem_store form=scratch
+inst   VReadlaneB32      v_readlane_b32            VOP3    0x360  fmt=Vopc flags=VALU d=sdst:s1 u=src0:v1,src1:ss1 imp=use:exec unit=VALU lat=valu note="SGPR spill lanes, EXEC-independent: (sdst, [vgpr, lane]) and (vdst, [sgpr, lane, vdst]); the writelane's third use (the lanes it keeps) only orders liveness and is not encoded."
+inst   VWritelaneB32     v_writelane_b32           VOP3    0x361  flags=VALU|TIED d=vdst:v1 u=src0:ss1,src1:ss1,old:v1 imp=use:exec unit=VALU lat=valu form=writelane
+inst   GAtomicAddU32Rtn  global_atomic_add_u32     GLOBAL  0x35   flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc imp=use:exec unit=VMEM lat=vmem_load note="Returning forms (with M_GLC): the old value comes back like a load."
+inst   GAtomicAddF32Rtn  global_atomic_add_f32     GLOBAL  0x56   flags=VMEM_LOAD|VMEM_STORE d=vdst:v1 u=vaddr:v2,vdata:v1 imm=off13s m=saddr,glc imp=use:exec unit=VMEM lat=vmem_load
+group MUBUF
+inst   BufLoadB32        buffer_load_b32           MUBUF   0x14   flags=VMEM_LOAD d=vdata:v1 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
+inst   BufLoadB64        buffer_load_b64           MUBUF   0x15   flags=VMEM_LOAD d=vdata:v2 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
+inst   BufLoadB128       buffer_load_b128          MUBUF   0x17   flags=VMEM_LOAD d=vdata:v4 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
+inst   BufStoreB16       buffer_store_b16          MUBUF   0x19   flags=VMEM_STORE u=vdata:v1,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_store
+inst   BufStoreB32       buffer_store_b32          MUBUF   0x1a   flags=VMEM_STORE u=vdata:v1,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_store
+inst   BufStoreB64       buffer_store_b64          MUBUF   0x1b   flags=VMEM_STORE u=vdata:v2,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_store
+inst   BufStoreB128      buffer_store_b128         MUBUF   0x1d   flags=VMEM_STORE u=vdata:v4,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_store
+inst   VWmmaF32Bf16      v_wmma_f32_16x16x16_bf16  VOP3P   0x41   flags=VALU|WMMA d=vdst:v8 u=src0:v8,src1:v8,src2:v8 m=neg imp=use:exec unit=WMMA lat=wmma haz=wmma_d,wmma_ab note="element types beyond f16/f32 (census W02, W09, W17, W18, W19)"
+inst   VWmmaF32Bf16Early v_wmma_f32_16x16x16_bf16  VOP3P   0x41   flags=VALU|WMMA|EARLY d=vdst:v8 u=src0:v8,src1:v8,src2:v8 m=neg imp=use:exec unit=WMMA lat=wmma haz=wmma_d,wmma_ab note="Three-address form: D must not overlap A, B or C."
+inst   BufLoadU16        buffer_load_u16           MUBUF   0x12   flags=VMEM_LOAD d=vdata:v1 u=vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
+inst   BufLoadD16B16     buffer_load_d16_b16       MUBUF   0x20   flags=VMEM_LOAD|TIED d=vdata:v1 u=vaddr:v1,srsrc:s4,soffset:ss1,vdata:v1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
+inst   BufLoadD16HiB16   buffer_load_d16_hi_b16    MUBUF   0x23   flags=VMEM_LOAD|TIED d=vdata:v1 u=vaddr:v1,srsrc:s4,soffset:ss1,vdata:v1 imm=off12 imp=use:exec unit=VMEM lat=vmem_load
+inst   BufStoreD16HiB16  buffer_store_d16_hi_b16   MUBUF   0x25   flags=VMEM_STORE u=vdata:v1,vaddr:v1,srsrc:s4,soffset:ss1 imm=off12 imp=use:exec unit=VMEM lat=vmem_store
+inst   VWmmaI32Iu8       v_wmma_i32_16x16x16_iu8   VOP3P   0x44   flags=VALU|WMMA d=vdst:v8 u=src0:v4,src1:v4,src2:v8 m=neg imp=use:exec unit=WMMA lat=wmma haz=wmma_d,wmma_ab note="Integer WMMA: neg_lo bits 0/1 (M_NEG0/M_NEG1) mark A/B signed."
+inst   VWmmaI32Iu8Early  v_wmma_i32_16x16x16_iu8   VOP3P   0x44   flags=VALU|WMMA|EARLY d=vdst:v8 u=src0:v4,src1:v4,src2:v8 m=neg imp=use:exec unit=WMMA lat=wmma haz=wmma_d,wmma_ab
+inst   VWmmaI32Iu4       v_wmma_i32_16x16x16_iu4   VOP3P   0x45   flags=VALU|WMMA d=vdst:v8 u=src0:v2,src1:v2,src2:v8 m=neg imp=use:exec unit=WMMA lat=wmma haz=wmma_d,wmma_ab issue=18
+inst   VWmmaI32Iu4Early  v_wmma_i32_16x16x16_iu4   VOP3P   0x45   flags=VALU|WMMA|EARLY d=vdst:v8 u=src0:v2,src1:v2,src2:v8 m=neg imp=use:exec unit=WMMA lat=wmma haz=wmma_d,wmma_ab issue=18
+inst   VRndneF32         v_rndne_f32               VOP1    0x23   flags=VALU d=vdst:v1 u=src0:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+inst   GLoadU8           global_load_u8            GLOBAL  0x10   flags=VMEM_LOAD d=vdst:v1 u=vaddr:v2 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_load
+inst   GStoreB8          global_store_b8           GLOBAL  0x18   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   GStoreD16HiB8     global_store_d16_hi_b8    GLOBAL  0x24   flags=VMEM_STORE u=vaddr:v2,vdata:v1 imm=off13s m=saddr imp=use:exec unit=VMEM lat=vmem_store
+inst   DsLoadU8          ds_load_u8                DS      0x3a   flags=LDS d=vdst:v1 u=addr:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsStoreB8         ds_store_b8               DS      0x1e   flags=LDS u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   DsStoreB8D16Hi    ds_store_b8_d16_hi        DS      0xa0   flags=LDS u=addr:v1,data0:v1 imm=off16 imp=use:exec unit=LDS lat=lds
+inst   VFmaF64           v_fma_f64                 VOP3    0x214  flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs2,src1:vs2,src2:vs2 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu form=f64 issue=32
+inst   VAddF64           v_add_f64                 VOP3    0x327  flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs2,src1:vs2 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu form=f64 issue=32
+inst   VMulF64           v_mul_f64                 VOP3    0x328  flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs2,src1:vs2 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu form=f64 issue=32
+inst   VMaxF64           v_max_f64                 VOP3    0x32a  flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs2,src1:vs2 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu form=f64 issue=32
+inst   VMinF64           v_min_f64                 VOP3    0x329  flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs2,src1:vs2 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu form=f64 issue=32
+inst   VLdexpF64         v_ldexp_f64               VOP3    0x32b  flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs2,src1:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu form=f64_i32 issue=32 note="src1 is the i32 exponent."
+inst   VRcpF64           v_rcp_f64                 VOP1    0x2f   flags=VALU|TRANS|64BIT_SRC d=vdst:v2 u=src0:vs2 m=neg,opsel,opsel_dst imp=use:exec unit=TRANS lat=trans form=f64
+inst   VDivScaleF64      v_div_scale_f64           VOP3SD  0x2fd  flags=VALU|64BIT_SRC d=vdst:v2,sdst:s1 u=src0:vs2,src1:vs2,src2:vs2 m=neg imp=use:exec unit=VALU lat=valu form=f64 issue=32
+inst   VDivFmasF64       v_div_fmas_f64            VOP3    0x238  flags=VALU|USE_VCC|64BIT_SRC d=vdst:v2 u=src0:vs2,src1:vs2,src2:vs2 m=neg,opsel,opsel_dst imp=use:exec,use:vcc unit=VALU lat=valu form=f64 issue=32
+inst   VDivFixupF64      v_div_fixup_f64           VOP3    0x228  flags=VALU|64BIT_SRC d=vdst:v2 u=src0:vs2,src1:vs2,src2:vs2 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu form=f64 issue=32
+inst   VDot2F32Bf16      v_dot2_f32_bf16           VOP3P   0x1a   flags=VALU d=vdst:v1 u=src0:vi1,src1:vi1,src2:vi1 m=neg imp=use:exec unit=VALU lat=valu form=dot2
+inst   BufferGl0Inv      buffer_gl0_inv            MUBUF   0x2b   flags=FENCE imp=use:exec unit=VMEM lat=vmem_store note="Cache invalidations of an acquire fence (no operands)."
+inst   BufferGl1Inv      buffer_gl1_inv            MUBUF   0x2c   flags=FENCE imp=use:exec unit=VMEM lat=vmem_store
+inst   SAndSaveexecB64   s_and_saveexec_b64        SOP1    0x21   flags=DEF_SCC|DEF_EXEC|USE_EXEC d=sdst:s2,exec:x2 u=ssrc0:ss2,exec:x2 imp=def:exec,def:scc,use:exec unit=SALU lat=salu form=b64 note="Wave64 lane masks: selected for gfx950 only."
+inst   SNotB64           s_not_b64                 SOP1    0x1f   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   SAndNot1B64       s_and_not1_b64            SOP2    0x23   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   SOrNot1B64        s_or_not1_b64             SOP2    0x25   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   VMbcntHiU32B32    v_mbcnt_hi_u32_b32        VOP3    0x320  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
+group pseudo
+inst   Copy              COPY                      PSEUDO  0x00   flags=0 d=dst:a1 u=src:a1 unit=PSEUDO lat=pseudo
+inst   ImplicitDef       IMPLICIT_DEF              PSEUDO  0x00   flags=0 d=dst:a1 unit=PSEUDO lat=pseudo note="Defines a register whose contents are never read before overwritten."
+inst   PackF16           PACK_F16                  PSEUDO  0x00   flags=VALU|EARLY d=vdst:v1 u=src0:vs1,src1:vs1 imp=use:exec unit=PSEUDO lat=pseudo_valu note="dst <- {cvt_f16(src0), cvt_f16(src1)}; dst must not overlap the sources."
+inst   SchedBarrier      SCHED_BARRIER             PSEUDO  0x00   flags=FENCE unit=PSEUDO lat=pseudo note="`tile.sched_barrier` with mask 0: a scheduling boundary that emits nothing."
+family VCmp              v_cmp_*                   VOPC    code   flags=macro d=sdst:s1 u=src0:vs1,src1:vs1 m=neg,opsel imp=use:exec unit=VALU lat=valu
+
+[burs]
+# BURS grammar for integer and address arithmetic (see the overlay header).
+nt s "uniform value in an SGPR"
+nt v "value in a VGPR"
+nt k constant
+nt ssrc "SALU source: an SGPR or a constant"
+nt vsrc "VALU source: a VGPR, an SGPR or a constant"
+term add kind=Add
+term sub kind=Sub
+term mul kind=Mul
+term mulhu kind=UmulHi
+term mulhi kind=SmulHi
+term and kind=And
+term or kind=Or
+term xor kind=Xor
+term shl kind=Shl
+term lshr kind=Lshr
+term ashr kind=Ashr
+term smin kind=Smin
+term smax kind=Smax
+term konst leaf=konst
+term sreg leaf=sreg
+term vreg leaf=vreg
+weight VALU 2
+weight TRANS 2
+weight WMMA 2
+weight SALU 1
+pred u24 "both values are known to be below 2^24 (opt.rs ranges)"
+pred shift1to4 "a constant shift amount of 1 to 4"
+pred fits3 "three sources within VOP3's scalar limit: two SGPRs or literals, one literal"
+rule s sreg
+rule v vreg
+rule k konst
+rule ssrc s
+rule ssrc k
+rule vsrc v
+rule vsrc s
+rule vsrc k
+rule s add(a:ssrc,b:ssrc) emit=hand inst=SAddI32
+rule s sub(a:ssrc,b:ssrc) emit=hand inst=SSubI32
+rule s mul(a:ssrc,b:ssrc) emit=hand inst=SMulI32
+rule s mulhu(a:ssrc,b:ssrc) emit=hand inst=SMulHiU32
+rule s mulhi(a:ssrc,b:ssrc) emit=hand inst=SMulHiI32
+rule s and(a:ssrc,b:ssrc) emit=hand inst=SAndB32
+rule s or(a:ssrc,b:ssrc) emit=hand inst=SOrB32
+rule s xor(a:ssrc,b:ssrc) emit=hand inst=SXorB32
+rule s shl(a:ssrc,b:ssrc) emit=hand inst=SLshlB32
+rule s lshr(a:ssrc,b:ssrc) emit=hand inst=SLshrB32
+rule s ashr(a:ssrc,b:ssrc) emit=hand inst=SAshrI32
+rule s smin(a:ssrc,b:ssrc) emit=hand inst=SMinI32
+rule s smax(a:ssrc,b:ssrc) emit=hand inst=SMaxI32
+rule s add(shl(a:ssrc,n:k),b:ssrc) if=shift1to4(n) emit=lshladd(a,n,b) inst=SLshl1AddU32
+rule s add(b:ssrc,shl(a:ssrc,n:k)) if=shift1to4(n) emit=lshladd(a,n,b) inst=SLshl1AddU32
+rule v add(a:vsrc,b:vsrc) emit=hand inst=VAddNcU32
+rule v sub(a:vsrc,b:vsrc) emit=hand inst=VSubNcU32
+rule v mul(a:vsrc,b:vsrc) if=u24(a,b) emit=hand inst=VMulU32U24
+rule v mul(a:vsrc,b:vsrc) if=!u24(a,b) emit=hand inst=VMulLoU32
+rule v mulhu(a:vsrc,b:vsrc) if=u24(a,b) emit=hand inst=VMulHiU32U24
+rule v mulhu(a:vsrc,b:vsrc) if=!u24(a,b) emit=hand inst=VMulHiU32
+rule v mulhi(a:vsrc,b:vsrc) emit=hand inst=VMulHiI32
+rule v and(a:vsrc,b:vsrc) emit=hand inst=VAndB32
+rule v or(a:vsrc,b:vsrc) emit=hand inst=VOrB32
+rule v xor(a:vsrc,b:vsrc) emit=hand inst=VXorB32
+rule v shl(a:vsrc,b:vsrc) emit=hand inst=VLshlrevB32
+rule v lshr(a:vsrc,b:vsrc) emit=hand inst=VLshrrevB32
+rule v ashr(a:vsrc,b:vsrc) emit=hand inst=VAshrrevI32
+rule v smin(a:vsrc,b:vsrc) emit=hand inst=VMinI32
+rule v smax(a:vsrc,b:vsrc) emit=hand inst=VMaxI32
+rule v add(add(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VAdd3U32
+rule v add(c:vsrc,add(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VAdd3U32
+rule v add(shl(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3(a,b,c) inst=VLshlAddU32
+rule v add(c:vsrc,shl(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3(a,b,c) inst=VLshlAddU32
+rule v shl(add(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VAddLshlU32
+rule v or(shl(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3(a,b,c) inst=VLshlOrB32
+rule v or(c:vsrc,shl(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3(a,b,c) inst=VLshlOrB32
+rule v or(and(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VAndOrB32
+rule v or(c:vsrc,and(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VAndOrB32
+rule v or(or(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VOr3B32
+rule v or(c:vsrc,or(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VOr3B32
+rule v add(mul(a:vsrc,b:vsrc),c:vsrc) if=u24(a,b)&fits3(a,b,c) emit=v3c(a,b,c) inst=VMadU32U24
+rule v add(c:vsrc,mul(a:vsrc,b:vsrc)) if=u24(a,b)&fits3(a,b,c) emit=v3c(a,b,c) inst=VMadU32U24
+rule v smax(smin(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VMinmaxI32
+rule v smax(c:vsrc,smin(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VMinmaxI32
+rule v smin(smax(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VMaxminI32
+rule v smin(c:vsrc,smax(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VMaxminI32

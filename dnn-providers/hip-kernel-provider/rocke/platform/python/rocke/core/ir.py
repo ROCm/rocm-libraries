@@ -469,6 +469,10 @@ CPOL_SC0 = 1
 CPOL_NT = 2
 CPOL_SC1 = 16
 
+# ``IRBuilder.tagged_poll(reload=...)``: "" = the original op (no attribute),
+# "launder" = the reload-fix variant (see its docstring).
+TAGGED_POLL_RELOADS = ("", "launder")
+
 # Opcodes the Python engine lowers and the C++ engine does not (see the
 # "persistent-kernel memory ops" section of ``IRBuilder``). A kernel using any
 # of them must compile with ``backend="python"``; ``uses_python_only_ops``
@@ -490,8 +494,21 @@ PYTHON_ONLY_OPCODES = frozenset(
         "tile.permlane16_swap",
         # Natural exp (``IRBuilder.exp``, ``llvm.exp.f32``).
         "math.exp",
+        # Device ops as IR ops (``IRBuilder.s_getreg`` .. ``l2_touch_drain``):
+        # the Python lowering emits the inline asm of the matching
+        # ``helpers.device_ops`` helper (the same LLVM text), the direct
+        # code-object compiler lowers them natively.
+        "tile.s_getreg",
+        "tile.s_sleep",
+        "tile.memrealtime",
+        "tile.global_atomic_add_scoped",
+        "tile.l2_touch_load",
+        "tile.l2_touch_drain",
     }
 )
+
+#: ``IRBuilder.s_getreg`` hardware registers.
+S_GETREG_HWREGS = ("XCC_ID", "HW_ID")
 
 
 # Kernel parameter attributes only the Python lowering emits (the C++ engine
@@ -796,6 +813,19 @@ class KernelDef:
 # are unwanted by default, so this stays off unless a caller asks for it.
 LOC_CAPTURE_ENV = "ROCKE_DEBUG_LOC"
 
+# The op attribute of the Rust direct compiler's lever scopes
+# (``IRBuilder.lever_scope``; ``rir::lever`` in ``rocke-codeobj``).
+LEVER_SCOPE_ATTR = "dlevers"
+
+
+def _lever_scope_text(levers) -> Optional[str]:
+    """A lever scope (a list or a ``,`` / ``+`` joined string) as the
+    attribute's text, or None when it names nothing."""
+    if isinstance(levers, (list, tuple)):
+        levers = ",".join(str(x).strip() for x in levers if str(x).strip())
+    names = [x.strip() for x in (levers or "").replace("+", ",").split(",") if x.strip()]
+    return ",".join(names) or None
+
 # Frames inside ``core/`` are the builder machinery itself (this file, the
 # helpers it calls, the isa backends), never the code that asked for an op.
 _CORE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1002,6 +1032,9 @@ class IRBuilder:
         # emission of every other kernel.
         self.fence_barriers: Optional[str] = None
         self._counter = 0
+        # The direct compiler's lever scope of the ops being emitted
+        # (``lever_scope``); None: the kernel's levers.
+        self._lever_scope: Optional[str] = None
         self._region_stack: List[Region] = []
         self._params: List[Param] = []
         self._param_values: Dict[str, Value] = {}
@@ -1034,7 +1067,43 @@ class IRBuilder:
         # the one place a location has to be stamped.
         if self._capture_loc and op.loc is None:
             op.loc = current_source_loc()
+        if self._lever_scope is not None and LEVER_SCOPE_ATTR not in op.attrs:
+            op.attrs = {**op.attrs, LEVER_SCOPE_ATTR: self._lever_scope}
         self._region_stack[-1].ops.append(op)
+
+    def lever_scope(self, levers):
+        """Context manager: the ops emitted inside carry the Rust direct
+        compiler lever scope ``levers`` (attribute ``dlevers``): a list or a
+        ``,`` / ``+`` joined string of ``ROCKE_DIRECT_LEVERS`` names, ``-name``
+        turning a kernel lever off. The scope overrides the kernel's levers for
+        those ops only (e.g. ``nofence`` for the MoE stage of a monokernel and
+        not for its head); COMGR builds ignore it (``helpers.compile`` strips
+        it). Scopes nest: an inner one replaces the outer one. ``None`` or an
+        empty value emits nothing (byte-identical IR)."""
+        import contextlib
+
+        text = _lever_scope_text(levers)
+
+        @contextlib.contextmanager
+        def scope():
+            saved = self._lever_scope
+            if text is not None:
+                self._lever_scope = text
+            try:
+                yield
+            finally:
+                self._lever_scope = saved
+
+        return scope()
+
+    def set_lever_scope(self, levers) -> Optional[str]:
+        """Sets the lever scope of the ops emitted from here on (as
+        :meth:`lever_scope`, without a ``with`` block: a phase marker that
+        holds until the next one); ``None`` / empty: the kernel's levers.
+        Returns the previous scope."""
+        saved = self._lever_scope
+        self._lever_scope = _lever_scope_text(levers)
+        return saved
 
     def push_region(self, region: Region) -> None:
         self._region_stack.append(region)
@@ -5319,6 +5388,7 @@ class IRBuilder:
         *,
         aux: int = 16,
         pause: str = "s_nop 0",
+        reload: str = "",
     ) -> "List[Value]":
         """Spin until every ``(payload, tag)`` pair named by ``specs`` carries
         ``tag``; return the loaded words.
@@ -5334,7 +5404,24 @@ class IRBuilder:
         structured IR stays ``scf.for`` / ``scf.if`` only. Returns one
         ``<dwords x i32>`` per spec (payload words at even indices).
         Python engine only.
+
+        ``reload`` (the reload-fix op variant; empty = the original op, whose
+        IR is unchanged): LLVM may hoist the original op's loads out of the
+        loop and leave a spin that never reloads (seen on gfx950: Qwen3.8
+        true-mono probe P2, finding 1). The polled buffer is usually a
+        ``noalias`` kernel parameter, so no asm in the loop (memory clobber or
+        not) may write it as far as alias analysis can tell, and the loads'
+        volatile ``aux`` bit is invisible to the IR passes: neither keeps the
+        loads in the loop (checked on gfx950 code objects). ``"launder"``
+        passes every load's ``voffset`` through a side-effecting asm copy at
+        the top of each retry (the address is loop-variant, so the load cannot
+        be hoisted or forwarded) and gives the pause asm a ``~{memory}``
+        clobber.
         """
+        if reload not in TAGGED_POLL_RELOADS:
+            raise ValueError(
+                f"tagged_poll reload must be one of {TAGGED_POLL_RELOADS}, got {reload!r}"
+            )
         if tag.type != I32:
             raise TypeError(f"tagged_poll tag must be i32, got {tag.type}")
         if not specs:
@@ -5346,18 +5433,108 @@ class IRBuilder:
                 raise ValueError(f"tagged_poll dwords must be 2 or 4, got {dwords}")
             operands += [rsrc, voff]
             widths.append(int(dwords))
+        attrs = {
+            "dwords": widths,
+            "aux": _check_cachepolicy("tagged_poll", aux),
+            "pause": str(pause),
+        }
+        if reload:
+            # only the variant carries the attribute: the original op's IR
+            # (and every existing build's) stays byte-identical
+            attrs["reload"] = reload
         op = self._op(
             "tile.tagged_poll",
             operands,
             [VectorType(I32, w) for w in widths],
-            attrs={
-                "dwords": widths,
-                "aux": _check_cachepolicy("tagged_poll", aux),
-                "pause": str(pause),
-            },
+            attrs=attrs,
             result_name_hint="poll",
         )
         return list(op.results)
+
+    # ----- device ops as IR ops (Python engine only) -----
+    # Each is the IR form of a ``helpers.device_ops`` inline-asm helper: the
+    # Python lowering emits that helper's asm (the same LLVM text, so a COMGR
+    # build is the asm build's), and a compiler that reads rocKE IR (the
+    # direct code-object compiler) lowers the op itself instead of refusing
+    # an asm template.
+
+    def s_getreg(self, hwreg: str) -> Value:
+        """``s_getreg_b32 hwreg(HW_REG_<hwreg>)``, ``hwreg`` in
+        :data:`S_GETREG_HWREGS`: a uniform i32 (``device_ops.xcc_id``'s raw
+        read, ``device_ops.hw_id``). Side-effecting: never merged or hoisted.
+        Python engine only."""
+        if hwreg not in S_GETREG_HWREGS:
+            raise ValueError(f"s_getreg hwreg must be one of {S_GETREG_HWREGS}, got {hwreg!r}")
+        hint = {"XCC_ID": "xcc", "HW_ID": "hwid"}[hwreg]
+        return self._op(
+            "tile.s_getreg", [], [I32], attrs={"hwreg": hwreg}, result_name_hint=hint
+        ).result
+
+    def s_sleep(self, units: int) -> None:
+        """Sleep ``units`` x 64 clocks (``device_ops.s_sleep``: ``s_sleep``
+        chained in steps of at most 127). ``units`` >= 1. Python engine only."""
+        if isinstance(units, bool) or not isinstance(units, int) or units < 1:
+            raise ValueError(f"s_sleep units must be an int >= 1, got {units!r}")
+        self._op("tile.s_sleep", [], [], attrs={"units": int(units)})
+
+    def memrealtime(self) -> Value:
+        """``s_memrealtime`` and its ``lgkmcnt(0)`` (``device_ops.memrealtime``):
+        the device-wide 100 MHz clock as a uniform i64. Python engine only."""
+        return self._op("tile.memrealtime", [], [I64], result_name_hint="rtc").result
+
+    def global_atomic_add_scoped(
+        self,
+        base: Value,
+        voff: Value,
+        value: Value,
+        *,
+        scope: str = "agent",
+        returns: bool = False,
+        result_name_hint: str = "aold",
+    ) -> Optional[Value]:
+        """``global_atomic_add`` (i32 ``value``) or ``global_atomic_add_x2``
+        (i64) at ``base`` (uniform i64 address) + ``voff`` (i32 bytes), at a
+        memory scope, monotonic: ``device_ops.atomic_add_scoped``'s cache bits
+        (``system``: ``sc1``; ``returns``: ``sc0`` and the pre-add value,
+        waited for). Python engine only."""
+        if scope not in ("workgroup", "agent", "system"):
+            raise ValueError(f"global_atomic_add_scoped scope {scope!r}")
+        if base.type != I64 or voff.type != I32 or value.type not in (I32, I64):
+            raise TypeError(
+                "global_atomic_add_scoped expects (i64 base, i32 voff, i32 or i64 value)"
+            )
+        op = self._op(
+            "tile.global_atomic_add_scoped",
+            [voff, value, base],
+            [value.type] if returns else [],
+            attrs={"scope": scope, "returns": bool(returns)},
+            result_name_hint=result_name_hint,
+        )
+        return op.result if returns else None
+
+    def l2_touch_load(self, base: Value, voff: Value) -> Value:
+        """``global_load_dwordx4`` at ``base`` (uniform i64 address) +
+        ``voff`` (i32 bytes) that only warms the caches: a ``<4 x i32>`` the
+        kernel never reads, which no pass may delete. Its destination stays
+        allocated until :meth:`l2_touch_drain` takes it (the toy chain's
+        ``prefetch="l2_touch"``). Python engine only."""
+        if base.type != I64 or voff.type != I32:
+            raise TypeError("l2_touch_load expects (i64 base, i32 voff)")
+        return self._op(
+            "tile.l2_touch_load",
+            [voff, base],
+            [VectorType(I32, 4)],
+            attrs={"dwords": 4},
+            result_name_hint="asm",
+        ).result
+
+    def l2_touch_drain(self, values: "Sequence[Value]") -> None:
+        """``s_waitcnt vmcnt(0)`` that keeps the :meth:`l2_touch_load`
+        destinations ``values`` allocated until it retires. Python engine only."""
+        values = list(values)
+        if not values or any(v.type != VectorType(I32, 4) for v in values):
+            raise TypeError("l2_touch_drain takes l2_touch_load results")
+        self._op("tile.l2_touch_drain", values, [])
 
     # ----- buffer resources + async DRAM->LDS -----
 

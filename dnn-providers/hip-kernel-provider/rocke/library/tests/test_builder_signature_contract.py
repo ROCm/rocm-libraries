@@ -68,6 +68,17 @@ ALLOWED_PARAMS = {"spec", "arch"}
 # form: a descriptor that omits the field then auto-tracks whatever ships, rather
 # than freezing the value that happened to be the default the day it was written.
 REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    # Qwen3.8 in-kernel collectives: rank count and payload shape.
+    "kernels.gfx950.qwen38_mono.ccl.layout.AllGatherSpec": ("cols", "ranks", "rows"),
+    "kernels.gfx950.qwen38_mono.ccl.layout.AllReduceSpec": ("cols", "ranks", "rows"),
+    "kernels.gfx950.qwen38_mono.ccl.layout.ArgmaxSpec": ("ranks", "rows"),
+    "kernels.gfx950.qwen38_mono.ccl.layout.CclKnobs": (),
+    "kernels.gfx950.qwen38_mono.ccl.lm_probe.LinkBwSpec": (),
+    # Qwen3.8 true-mono probe P5 (coherence): every field defaulted.
+    "kernels.gfx950.qwen38_mono.probes.p5_coherence.HostSpec": (),
+    "kernels.gfx950.qwen38_mono.probes.p5_coherence.HostWriterSpec": (),
+    "kernels.gfx950.qwen38_mono.probes.p5_coherence.KvSpec": (),
+    "kernels.gfx950.qwen38_mono.probes.p5_coherence.ScSpec": (),
     "kernels.common._fmha_common.FmhaCommonSpec": ("shape",),
     "kernels.common._fmha_common.FmhaShape": (
         "head_size",

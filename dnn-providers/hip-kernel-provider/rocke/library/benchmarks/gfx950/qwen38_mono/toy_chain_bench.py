@@ -218,6 +218,47 @@ def check_state(dev: H.Dev, bufs: ToyBufs, step: int, layers0: list[int],
     return errs
 
 
+def check_launch(dev: H.Dev, bufs: ToyBufs, step: int, layers0: list[int], k: int) -> list[str]:
+    """Every mailbox launch ``k`` of a chain left behind (the slots no later
+    layer of that launch reused) against the host model, read right after
+    that launch (search/INVENTORY.md merge item M10: :func:`check_state` reads
+    only the LAST launch's mailboxes, and at depth >= 8 with P = 160 a fault
+    confined to an earlier launch vanishes mod 2^32 from every later value,
+    since each level multiplies ``r_prev`` by ``P (P + 1) / 2 = 2^4 x 805``).
+    Pair with :func:`run_chain_checked`."""
+    s = bufs.spec
+    lay = T.toy_layout(s)
+    o = model_chain(bufs, step, layers0)[k]
+    errs = []
+    for li in range(s.layers):
+        slot = (li & 1) if (s.layers > 1 and s.parity) else 0
+        if any(((l2 & 1) if s.parity else 0) == slot for l2 in range(li + 1, s.layers)):
+            continue
+        tag = step * mbx.LAYER_SLOTS + layers0[k] + li + 1
+        for i in range(s.depth):
+            raw = read_i32(dev, bufs.scratch + lay.offset(f"y{i}", 0, slot), 2 * s.producers).reshape(-1, 2)
+            if not (raw[:, 1].astype(np.int64) == wrap32(tag)).all():
+                errs.append(f"launch {k} layer {li} y{i}: tags != {tag}")
+            if not (raw[:, 0] == o["y"][li][i]).all():
+                bad = int(np.nonzero(raw[:, 0] != o["y"][li][i])[0][0])
+                errs.append(f"launch {k} layer {li} y{i}[{bad}] {raw[bad, 0]} != {o['y'][li][i][bad]}")
+    return errs
+
+
+def run_chain_checked(dev, bufs, art, *, step: int, layers0: list[int]) -> list[str]:
+    """:func:`run_chain_once`, one launch at a time, with :func:`check_launch`
+    after every launch and :func:`check_state` at the end: no fault in any
+    launch of the chain can hide (M10)."""
+    fn = dev.function(art)
+    dev.write(bufs.step, np.array([step], np.int32))
+    errs = []
+    for k, l0 in enumerate(layers0):
+        dev.launch(fn, bufs.spec.grid, bufs.spec.threads, launch_args(bufs, k, l0))
+        dev.sync()
+        errs += check_launch(dev, bufs, step, layers0, k)
+    return errs + check_state(dev, bufs, step, layers0)
+
+
 def compile_art(spec_or_kernel, backend=None):
     k = spec_or_kernel if not isinstance(spec_or_kernel, T.ToyChainSpec) else T.build_toy_chain(spec_or_kernel)
     return H.compile_for(k, ARCH, backend)

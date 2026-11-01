@@ -66,6 +66,8 @@ that exports every symbol:
 
 from __future__ import annotations
 
+import dataclasses
+import os
 import re
 import subprocess
 import tempfile
@@ -97,6 +99,51 @@ from ..runtime.comgr import build_hsaco_from_llvm_ir, build_hsaco_from_llvm_modu
 # the LLVM IR is the same with or without it.
 COMGR_FRESH_PROCESS_ATTR = "comgr_fresh_process"
 
+# A builder's request for the code-object backend of one kernel (a knob such as
+# ``qwen38_mono.framework.FrameworkKnobs.code_object_backend``). It is a Python
+# attribute of the ``KernelDef`` object, not a kernel attribute: the IR text,
+# its serialization and the LLVM lowering never see it, so an unmarked kernel
+# and a marked one lower to the same bytes. ``compile_kernel`` uses it when the
+# call names no ``code_object_backend``.
+_CODE_OBJECT_BACKEND_REQUEST = "_rocke_code_object_backend"
+
+# The direct code-object backend (``rocke.runtime.code_object``, the Rust
+# compiler of rocKE IR; ``code_object_backend="direct"``):
+# - ``DIRECT_LEVERS_ATTR``: a kernel's own direct-compiler levers (a list or a
+#   ``,`` / ``+`` joined string of ``ROCKE_DIRECT_LEVERS`` names), joined to the
+#   environment's for its compile only; not IR (stripped before serialization).
+# - ``DIRECT_SCOPES_ATTR`` + the op attribute ``SCOPE_OP_ATTR``: per-op lever
+#   scopes by name (``"<scope>:<lever>+<lever>;..."`` on the kernel, the scope
+#   name on its ops; ``qwen38_mono.persist.knobs.RustScope``). The direct
+#   backend turns them into the compiler's ``dlevers`` op scopes; the LLVM
+#   lowering ignores both, so COMGR objects do not change.
+# - ``DIRECT_DEFAULT_LEVERS``: levers the direct backend turns on for every
+#   kernel (D0.6; rust-track INTEGRATION.md 5 items 1-2): ``acqfence`` (an
+#   acquire-only fence lowers as LLVM's: wait + ``buffer_inv``, no L2
+#   write-back) and ``bufoffany`` (LLVM's buffer offset split).
+#   ``ROCKE_DIRECT_DEFAULT_LEVERS`` replaces the set (``""``: none, the plain
+#   direct object).
+DIRECT_LEVERS_ATTR = "direct_levers"
+DIRECT_SCOPES_ATTR = "direct_scopes"
+SCOPE_OP_ATTR = "rocke.scope"
+DIRECT_DEFAULT_LEVERS = ("acqfence", "bufoffany")
+_DIRECT_DEFAULTS_ENV = "ROCKE_DIRECT_DEFAULT_LEVERS"
+
+
+def request_code_object_backend(kernel: KernelDef, backend: str) -> KernelDef:
+    """Mark ``kernel`` to compile with ``backend`` (``"comgr"`` | ``"direct"``)
+    when ``compile_kernel`` is not told otherwise; returns ``kernel``."""
+    if backend not in ("comgr", "direct"):
+        raise ValueError(f"code-object backend must be 'comgr' or 'direct', not {backend!r}")
+    setattr(kernel, _CODE_OBJECT_BACKEND_REQUEST, backend)
+    return kernel
+
+
+def requested_code_object_backend(kernel: KernelDef) -> Optional[str]:
+    """The backend :func:`request_code_object_backend` marked ``kernel`` with,
+    or ``None``."""
+    return getattr(kernel, _CODE_OBJECT_BACKEND_REQUEST, None)
+
 
 @dataclass
 class KernelArtifact:
@@ -104,6 +151,10 @@ class KernelArtifact:
 
     ``isa`` records the COMGR ISA name for the compiler target used to build
     ``hsaco``, including any target features. It is not a device query result.
+    ``code_object_backend`` is the compiler that built ``hsaco`` (``"comgr"``
+    or ``"direct"``); when the direct backend was asked for but does not
+    compile the kernel for the target, COMGR built it and ``direct_fallback``
+    holds the direct compiler's reason.
     """
 
     kernel: KernelDef
@@ -113,6 +164,8 @@ class KernelArtifact:
     timings: Dict[str, float] = field(default_factory=dict)
     pass_stats: PassStats = field(default_factory=PassStats)
     isa: str = "amdgcn-amd-amdhsa--gfx950"
+    code_object_backend: str = "comgr"
+    direct_fallback: str = ""
 
     @property
     def kernel_name(self) -> str:
@@ -132,6 +185,7 @@ def compile_kernel(
     optimize_ir: bool = False,
     backend: Optional[str] = None,
     spec: Optional[object] = None,
+    code_object_backend: Optional[str] = None,
 ) -> KernelArtifact:
     """Lower `kernel` to a `KernelArtifact` ready for HIP module load.
 
@@ -166,8 +220,42 @@ def compile_kernel(
     A kernel carrying ``COMGR_FRESH_PROCESS_ATTR`` is compiled in a fresh
     process (``build_hsaco_from_llvm_ir(..., fresh_process=True)``); every
     other kernel compiles in this process.
+
+    `code_object_backend` (``"comgr"`` | ``"direct"``): when unset, the
+    kernel's :func:`request_code_object_backend` mark, else
+    ``ROCKE_CODEOBJ_BACKEND``, else COMGR. ``"direct"`` compiles the
+    serialized rocKE IR with the Rust direct compiler (no LLVM; see
+    ``DIRECT_LEVERS_ATTR`` for its levers and scopes); when it refuses the
+    kernel (``DirectUnsupported``), COMGR compiles it and
+    ``artifact.direct_fallback`` holds the refusal (``ROCKE_DIRECT_STRICT=1``
+    raises instead). The COMGR path is the same code with or without this.
     """
     _lower_arch, isa = _resolve_compile_target(arch, isa)
+    if _selected_code_object_backend(code_object_backend, kernel) == "direct":
+        from ..runtime.code_object import DirectUnsupported
+
+        try:
+            return _compile_kernel_direct(
+                kernel, isa=isa, capture_ir_text=capture_ir_text, optimize_ir=optimize_ir
+            )
+        except DirectUnsupported as refused:
+            # ``ROCKE_DIRECT_STRICT=1`` (validation runs): a refusal is an error, not a COMGR fallback.
+            if os.environ.get("ROCKE_DIRECT_STRICT", "0") == "1":
+                raise
+            # The passes ran on `kernel` before the direct compiler refused it.
+            artifact = compile_kernel(
+                kernel,
+                arch=arch,
+                isa=isa,
+                capture_ir_text=capture_ir_text,
+                optimize_ir=False,
+                backend=backend,
+                spec=spec,
+                code_object_backend="comgr",
+            )
+            artifact.pass_stats = getattr(refused, "pass_stats", artifact.pass_stats)
+            artifact.direct_fallback = str(refused)
+            return artifact
 
     timings: Dict[str, float] = {}
 
@@ -204,6 +292,152 @@ def compile_kernel(
         timings=timings,
         pass_stats=pass_stats,
         isa=isa,
+    )
+
+
+def _selected_code_object_backend(code_object_backend: Optional[str], kernel: KernelDef) -> str:
+    """``code_object_backend``, else the kernel's mark, else the environment
+    (``ROCKE_CODEOBJ_BACKEND``), else ``"comgr"``; validated."""
+    if code_object_backend is None:
+        code_object_backend = requested_code_object_backend(kernel)
+    if code_object_backend is None and not os.environ.get("ROCKE_CODEOBJ_BACKEND"):
+        return "comgr"
+    from ..runtime.code_object import resolve_code_object_backend
+
+    return resolve_code_object_backend(code_object_backend)
+
+
+def _lever_names(value) -> List[str]:
+    """A lever list (a list / tuple or a ``,`` / ``+`` joined string) as names."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = value.replace("+", ",").split(",")
+    return [str(x).strip() for x in value if str(x).strip()]
+
+
+def direct_default_levers() -> List[str]:
+    """The levers the direct backend turns on for every kernel:
+    ``ROCKE_DIRECT_DEFAULT_LEVERS`` if set (``""``: none), else
+    ``DIRECT_DEFAULT_LEVERS``."""
+    env = os.environ.get(_DIRECT_DEFAULTS_ENV)
+    return _lever_names(env) if env is not None else list(DIRECT_DEFAULT_LEVERS)
+
+
+def parse_direct_scopes(text: str) -> Dict[str, List[str]]:
+    """``attrs["direct_scopes"]`` (``"<scope>:<lever>+<lever>;..."``) as
+    scope name -> lever names (``-name`` turns a kernel lever off)."""
+    out: Dict[str, List[str]] = {}
+    for part in filter(None, (x.strip() for x in str(text or "").split(";"))):
+        name, sep, levers = part.partition(":")
+        if not sep or not name.strip():
+            raise ValueError(f"direct_scopes: {part!r} is not <scope>:<levers>")
+        out[name.strip()] = _lever_names(levers)
+    return out
+
+
+def direct_source(kernel: KernelDef) -> KernelDef:
+    """The kernel the direct compiler reads: a copy of ``kernel`` (which keeps
+    its attributes for a COMGR fallback) whose ops carry their named scope's
+    levers as the compiler's ``dlevers`` (an op's own ``dlevers``, from
+    ``IRBuilder.lever_scope``, wins), without any ``rocke.*`` op attribute
+    (markers such as ``rocke.kv`` / ``rocke.scope``: IR the compiler does not
+    read) and without the kernel's ``direct_scopes`` / ``direct_levers``.
+    ``kernel`` itself when there is nothing to change."""
+    from ..core.ir import LEVER_SCOPE_ATTR, Region
+
+    scopes = parse_direct_scopes(kernel.attrs.get(DIRECT_SCOPES_ATTR, ""))
+    text = {k: ",".join(v) for k, v in scopes.items() if v}
+
+    def op_of(op):
+        attrs = op.attrs
+        if any(k.startswith("rocke.") for k in attrs):
+            sc = attrs.get(SCOPE_OP_ATTR)
+            attrs = {k: v for k, v in attrs.items() if not k.startswith("rocke.")}
+            if sc is not None and LEVER_SCOPE_ATTR not in attrs and text.get(str(sc)):
+                attrs[LEVER_SCOPE_ATTR] = text[str(sc)]
+        regions = [region_of(r) for r in op.regions] if op.regions else op.regions
+        if attrs is op.attrs and all(a is b for a, b in zip(regions, op.regions)):
+            return op
+        return dataclasses.replace(op, attrs=attrs, regions=regions)
+
+    def region_of(region):
+        ops = [op_of(o) for o in region.ops]
+        if all(a is b for a, b in zip(ops, region.ops)):
+            return region
+        return Region(label=region.label, ops=ops)
+
+    body = region_of(kernel.body)
+    attrs = {k: v for k, v in kernel.attrs.items() if k not in (DIRECT_SCOPES_ATTR, DIRECT_LEVERS_ATTR)}
+    if body is kernel.body and len(attrs) == len(kernel.attrs):
+        return kernel
+    return dataclasses.replace(kernel, body=body, attrs=attrs, params=list(kernel.params))
+
+
+def _compile_kernel_direct(
+    kernel: KernelDef,
+    *,
+    isa: str,
+    capture_ir_text: bool,
+    optimize_ir: bool,
+) -> KernelArtifact:
+    """``compile_kernel`` for ``code_object_backend="direct"``: no LLVM text."""
+    from ..core.ir_serialize import serialize
+    from ..runtime.code_object import DirectUnsupported, build_direct_rocke_ir_hsaco
+    from ..runtime.direct_lift import lift, lift_enabled
+
+    timings: Dict[str, float] = {}
+    t0 = time.perf_counter()
+    pass_stats = optimize_kernel(kernel) if optimize_ir else PassStats()
+    t_pass = time.perf_counter()
+    ir_text = print_ir(kernel) if capture_ir_text else ""
+    t1 = time.perf_counter()
+    # The backend's defaults and the kernel's own levers (``attrs["direct_levers"]``)
+    # join the environment's for this compile; named op scopes become ``dlevers``
+    # before the lifting (a lifted asm statement keeps its scope).
+    levers = direct_default_levers() + _lever_names(kernel.attrs.get(DIRECT_LEVERS_ATTR))
+    source = direct_source(kernel)
+    # Inline-asm idioms the direct compiler lowers as IR ops, on a copy
+    # (`kernel` itself keeps its asm for a COMGR fallback).
+    if lift_enabled():
+        source = lift(source)
+    serialized = serialize(source)
+    t2 = time.perf_counter()
+    saved = os.environ.get("ROCKE_DIRECT_LEVERS")
+    if levers:
+        merged = _lever_names(saved)
+        os.environ["ROCKE_DIRECT_LEVERS"] = ",".join(dict.fromkeys(merged + levers))
+    try:
+        hsaco, codeobj_t, _info, _resources = build_direct_rocke_ir_hsaco(serialized, isa=isa)
+    except DirectUnsupported as refused:
+        refused.pass_stats = pass_stats
+        raise
+    finally:
+        if levers:
+            if saved is None:
+                os.environ.pop("ROCKE_DIRECT_LEVERS", None)
+            else:
+                os.environ["ROCKE_DIRECT_LEVERS"] = saved
+    t3 = time.perf_counter()
+
+    timings["ir_opt"] = (t_pass - t0) * 1000.0
+    timings["ir_build"] = (t1 - t_pass) * 1000.0
+    timings["ir_serialize"] = (t2 - t1) * 1000.0
+    timings["ir_lower_llvm"] = 0.0
+    timings["comgr_bc"] = 0.0
+    timings["comgr_relocatable"] = 0.0
+    timings["comgr_executable"] = 0.0
+    timings["codeobj_executable"] = codeobj_t.executable * 1000.0
+    timings["total"] = (t3 - t0) * 1000.0
+    return KernelArtifact(
+        kernel=kernel,
+        ir_text=ir_text,
+        llvm_text="",
+        hsaco=hsaco,
+        timings=timings,
+        pass_stats=pass_stats,
+        isa=isa,
+        code_object_backend="direct",
     )
 
 
@@ -503,6 +737,11 @@ def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:
     agpr_alloc = kernel.attrs.get("agpr_alloc")
     if kernel.attrs.get("mfma_vgpr_form") or _is_zero_agpr_alloc(agpr_alloc):
         options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
+    if kernel.attrs.get("machine_licm") == "off":
+        # Qwen3.8 true-mono platform rule R4 (P6): persistent round modules
+        # compile without MachineLICM (free on hardware; it hoists id math out
+        # of the layer loop and holds it live across every layer)
+        options.extend(["-mllvm", "-disable-machine-licm"])
     return options
 
 

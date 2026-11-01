@@ -133,7 +133,7 @@ def _count_uses(region: Region) -> Dict[str, int]:
 
 def _cse_key(op: Op) -> Tuple:
     attrs = tuple(
-        sorted((k, _freeze_attr(v)) for k, v in op.attrs.items() if k != "loc")
+        sorted((k, _freeze_attr(v)) for k, v in op.attrs.items() if k not in ("loc", "dlevers"))
     )
     operands = tuple(v.name for v in op.operands)
     result_types = tuple(v.type.name for v in op.results)

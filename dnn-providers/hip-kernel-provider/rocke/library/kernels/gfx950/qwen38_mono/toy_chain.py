@@ -49,6 +49,8 @@ from rocke.helpers import device_ops as dops
 from rocke.helpers.lds_arena import LdsEntry
 from rocke.helpers.task_schedule import Dep, Stage, TaskTable
 
+from . import irops as iro
+
 from .framework import (
     FrameworkKnobs,
     LayerCtx,
@@ -286,8 +288,8 @@ def _fan_total(b, ctx: LayerCtx, n: int) -> Value:
     return s
 
 
-def _store_word(b: IRBuilder, addr: Value, idx_words: int, v: Value) -> None:
-    ptr = dops.ptr_from_i64(b, addr)
+def _store_word(b: IRBuilder, addr: Value, idx_words: int, v: Value, irops: bool = False) -> None:
+    ptr = iro.ptr(b, addr, irops)
     b.global_store(ptr, b.const_i32(idx_words), v, align=4)
 
 
@@ -411,7 +413,7 @@ def _gemv_emit(spec: ToyChainSpec, i: int):
                 p.addr("w_down"),
                 b.mul(b.zext(row, I64), b.const_i64(spec.row_words * 4)),
             )
-            wp = dops.ptr_from_i64(b, b.readfirstlane(wbase))
+            wp = iro.ptr(b, b.readfirstlane(wbase), spec.knobs.irops)
             xp = p.ptr(b, "w_up")
             for j in range(W):
                 k = b.add(tid, b.const_i32(j * T))
@@ -476,9 +478,9 @@ def _publish(b, ctx: LayerCtx, p: Params, spec: ToyChainSpec, i: int, t, y) -> N
     ctx.put(ctx.mb(f"y{i}"), t, y)
     if spec.hop == "last_arriver":
         b.s_waitcnt(vmcnt=0)
-        old = dops.atomic_add_scoped(
+        old = iro.atomic_add_scoped(
             b, b.readfirstlane(ctx.region_addr(f"c{i}")), b.const_i32(0),
-            b.const_i32(1), scope="agent", returns=True,
+            b.const_i32(1), spec.knobs.irops, scope="agent", returns=True,
         )  # fmt: skip
         ctx.lds.st_i32(b, "la", 8 * _pb(ctx), old)
 
@@ -492,7 +494,8 @@ def _arrive(b, ctx: LayerCtx, p: Params, spec: ToyChainSpec, i: int) -> None:
         with b.scf_if(b.cmp_eq(ctx.wave, b.const_i32(0))):
             r = _fan_in_sum(b, ctx, f"y{i}", P, ctx.slot, ctx.tag, "wave0", spec.reduce)
             with b.scf_if(b.cmp_eq(ctx.lane, b.const_i32(0))):
-                _store_word(b, b.readfirstlane(ctx.region_addr(f"c{i}")), 0, b.const_i32(0))
+                _store_word(b, b.readfirstlane(ctx.region_addr(f"c{i}")), 0, b.const_i32(0),
+                            spec.knobs.irops)  # fmt: skip
                 b.s_waitcnt(vmcnt=0)
                 ctx.put(ctx.mb(f"r{i}"), 0, r)
                 if i == spec.depth - 1:
@@ -570,15 +573,14 @@ def _prefetch_prologue(spec: ToyChainSpec):
                         k = b.add(ctx.tid, b.const_i32(c * spec.threads))
                         if (c + 1) * spec.threads > chunks:
                             k = b.smin(k, b.const_i32(chunks - 1))
-                        pending.append(b.inline_asm(
-                            "global_load_dwordx4 $0, $1, $2", "=&v,v,s",
-                            [b.mul(k, b.const_i32(16)), a], _V4,
+                        pending.append(iro.l2_touch_load(
+                            b, a, b.mul(k, b.const_i32(16)), spec.knobs.irops, _V4,
                         ))  # fmt: skip
                         if len(pending) == PREFETCH_BATCH:
-                            _drain(b, pending)
+                            iro.l2_touch_drain(b, pending, spec.knobs.irops)
                             pending = []
             if pending:
-                _drain(b, pending)
+                iro.l2_touch_drain(b, pending, spec.knobs.irops)
 
     return prologue
 
@@ -671,7 +673,7 @@ def _early_entry(spec: ToyChainSpec):
         tc = b.select(has, t, b.const_i32(0))
         wbase = b.add(p.addr("w_down"), b.mul(b.zext(tc, I64), b.const_i64(spec.row_words * 4)))
         base = b.select(has, wbase, p.addr("w_up"))
-        wp = dops.ptr_from_i64(b, b.readfirstlane(base))
+        wp = iro.ptr(b, b.readfirstlane(base), spec.knobs.irops)
         xp = p.ptr(b, "w_up")
         prods = []
         for j in range(spec.work):

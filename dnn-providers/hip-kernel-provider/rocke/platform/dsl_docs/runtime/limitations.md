@@ -230,6 +230,16 @@ What does **not** work:
 
 In summary: **`rocke` is a single-device kernel DSL.** It composes cleanly with multi-GPU PyTorch programs that use `torch.distributed` + RCCL for collectives, but it does not provide collectives, sharding helpers, peer-access wrappers, or fused communication kernels of its own. If you need collectives in the inner loop, wire them in around the DSL kernel via `torch.distributed`; if you need a fused all-reduce-GEMM today, this DSL is not the right tool yet.
 
+### Update: IPC peer mailboxes and in-kernel collectives (Qwen3.8 family, gfx950)
+
+Two additions lift part of the list above for persistent kernels; the core DSL and `rocke.helpers` are unchanged:
+
+- `rocke.runtime.peer` (host only, ctypes): `PeerGroup` (one process per GPU; HIP IPC of an uncached, fine-grained or coarse arena per rank; peer bases; collective `reset` / `close`; a host-mapped error record; file or `torch.distributed` gloo rendezvous), `P2PGroup` (one process, several devices, `hipDeviceEnablePeerAccess`), `topology()` (`hipDeviceCanAccessPeer` matrix, PCI bus ids).
+- `library/kernels/gfx950/qwen38_mono/ccl/`: in-kernel all-reduce (one-shot / two-shot), all-gather and vocab-parallel argmax merge as rocKE kernels (Python engine). Peers are reached through 64-bit global addresses passed as kernel arguments (`global_*` with an SGPR base), never through buffer descriptors, so the descriptor clamping described above does not apply to them; a lint (`ccl/lint.py`) rejects buffer descriptors, scalar loads, atomics and loads or stores without system-scope bits on peer-derived addresses, and receive-arena loads or stores without system-scope bits. Rank-ordered f32 sums give bitwise-identical results on every rank. A launch header (on by default) turns ranks launched with different shapes into a `CCL_MISMATCH` error, and a wave that records an error stops publishing for the rest of the launch.
+- Multi-process suite, microbenchmark against RCCL and case study: `platform/python/rocke/examples/gfx950/ccl/`.
+
+Still not provided: collectives in `rocke.helpers` or the IR, a C++ engine path for these kernels, and fused GEMM + all-reduce kernels outside the Qwen3.8 family.
+
 ## Benchmark Methodology
 
 Benchmark numbers are only meaningful when methodology is labeled. Always label:

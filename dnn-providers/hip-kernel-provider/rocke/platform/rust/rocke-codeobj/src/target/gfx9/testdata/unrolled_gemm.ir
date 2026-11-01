@@ -1,0 +1,140 @@
+ckdsl.ir v1
+kernel @rocke_mfma_gemm_M256N256K256_f16_atom16x16x16 {
+  attrs { max_workgroup_size = i:64 }
+  params {
+    %A : ptr<f16,global> { align = i:16, noalias = b:true, readonly = b:true }
+    %B : ptr<f16,global> { align = i:16, noalias = b:true, readonly = b:true }
+    %C : ptr<f16,global> { align = i:16, noalias = b:true, writeonly = b:true }
+    %M : i32
+    %N : i32
+    %K : i32
+  }
+  region @entry {
+    %tid1 : i32 = gpu.thread_id (  ) { axis = s:"x" }
+    %bid2 : i32 = gpu.block_id (  ) { axis = s:"x" }
+    %bid3 : i32 = gpu.block_id (  ) { axis = s:"y" }
+    %c4 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %mul5 : i32 = arith.mul ( %bid3, %c4 )
+    %c6 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %mul7 : i32 = arith.mul ( %bid2, %c6 )
+    %c8 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %c9 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %mod10 : i32 = arith.mod ( %tid1, %c8 )
+    %mod11 : i32 = arith.mod ( %tid1, %c9 )
+    %div12 : i32 = arith.div ( %tid1, %c8 )
+    %c13 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %cz414 : vec<f32x4> = arith.constant_vec (  ) { elem = s:"f32", fill = f:0.0, vec = i:4 }
+    %c15 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %c16 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %c17 : i32 = arith.constant (  ) { ity = s:"i32", value = i:1 }
+    %for18 : vec<f32x4> = scf.for ( %c15, %c16, %c17, %cz414 ) { elide_trailing_barrier = b:true, iter_args = l:[ { name = s:"%acc", type = s:"vec<f32x4>" } ], iv = s:"%kt", iv_type = s:"i32", num_iter_args = i:1, unroll = b:false }
+      region @body {
+        %mul19 : i32 = arith.mul ( %kt, %c13 )
+        %add20 : i32 = arith.add ( %mul5, %mod10 )
+        %c21 : i32 = arith.constant (  ) { ity = s:"i32", value = i:4 }
+        %mul22 : i32 = arith.mul ( %div12, %c21 )
+        %add23 : i32 = arith.add ( %mul19, %mul22 )
+        %c24 : i32 = arith.constant (  ) { ity = s:"i32", value = i:256 }
+        %mul25 : i32 = arith.mul ( %add20, %c24 )
+        %add26 : i32 = arith.add ( %mul25, %add23 )
+        %gv427 : vec<f16x4> = memref.global_load_vN ( %A, %add26 ) { align = i:8, elem_type = s:"f16", vec = i:4 }
+        %mul28 : i32 = arith.mul ( %kt, %c13 )
+        %add29 : i32 = arith.add ( %mul7, %mod11 )
+        %c30 : i32 = arith.constant (  ) { ity = s:"i32", value = i:4 }
+        %mul31 : i32 = arith.mul ( %div12, %c30 )
+        %add32 : i32 = arith.add ( %mul28, %mul31 )
+        %cz433 : vec<f16x4> = arith.constant_vec (  ) { elem = s:"f16", fill = f:0.0, vec = i:4 }
+        %c34 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+        %add35 : i32 = arith.add ( %add32, %c34 )
+        %c36 : i32 = arith.constant (  ) { ity = s:"i32", value = i:256 }
+        %mul37 : i32 = arith.mul ( %add35, %c36 )
+        %add38 : i32 = arith.add ( %mul37, %add29 )
+        %gl39 : f16 = memref.global_load_typed ( %B, %add38 ) { align = i:2, elem_type = s:"f16" }
+        %vi40 : vec<f16x4> = vector.insert ( %cz433, %gl39 ) { index = i:0 }
+        %c41 : i32 = arith.constant (  ) { ity = s:"i32", value = i:1 }
+        %add42 : i32 = arith.add ( %add32, %c41 )
+        %c43 : i32 = arith.constant (  ) { ity = s:"i32", value = i:256 }
+        %mul44 : i32 = arith.mul ( %add42, %c43 )
+        %add45 : i32 = arith.add ( %mul44, %add29 )
+        %gl46 : f16 = memref.global_load_typed ( %B, %add45 ) { align = i:2, elem_type = s:"f16" }
+        %vi47 : vec<f16x4> = vector.insert ( %vi40, %gl46 ) { index = i:1 }
+        %c48 : i32 = arith.constant (  ) { ity = s:"i32", value = i:2 }
+        %add49 : i32 = arith.add ( %add32, %c48 )
+        %c50 : i32 = arith.constant (  ) { ity = s:"i32", value = i:256 }
+        %mul51 : i32 = arith.mul ( %add49, %c50 )
+        %add52 : i32 = arith.add ( %mul51, %add29 )
+        %gl53 : f16 = memref.global_load_typed ( %B, %add52 ) { align = i:2, elem_type = s:"f16" }
+        %vi54 : vec<f16x4> = vector.insert ( %vi47, %gl53 ) { index = i:2 }
+        %c55 : i32 = arith.constant (  ) { ity = s:"i32", value = i:3 }
+        %add56 : i32 = arith.add ( %add32, %c55 )
+        %c57 : i32 = arith.constant (  ) { ity = s:"i32", value = i:256 }
+        %mul58 : i32 = arith.mul ( %add56, %c57 )
+        %add59 : i32 = arith.add ( %mul58, %add29 )
+        %gl60 : f16 = memref.global_load_typed ( %B, %add59 ) { align = i:2, elem_type = s:"f16" }
+        %vi61 : vec<f16x4> = vector.insert ( %vi54, %gl60 ) { index = i:3 }
+        %acc62 : vec<f32x4> = tile.mma ( %gv427, %vi61, %acc ) { op_id = s:"mfma_f32_16x16x16_f16" }
+        scf.yield ( %acc62 ) { num = i:1 }
+      }
+    %c63 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %mod64 : i32 = arith.mod ( %tid1, %c63 )
+    %div65 : i32 = arith.div ( %tid1, %c63 )
+    %c66 : i32 = arith.constant (  ) { ity = s:"i32", value = i:4 }
+    %mul67 : i32 = arith.mul ( %div65, %c66 )
+    %c68 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %add69 : i32 = arith.add ( %mul67, %c68 )
+    %add70 : i32 = arith.add ( %mul5, %add69 )
+    %add71 : i32 = arith.add ( %mul7, %mod64 )
+    %c72 : i32 = arith.constant (  ) { ity = s:"i32", value = i:256 }
+    %mul73 : i32 = arith.mul ( %add70, %c72 )
+    %add74 : i32 = arith.add ( %mul73, %add71 )
+    %e75 : f32 = vector.extract ( %for18 ) { index = i:0 }
+    %cast76 : f16 = arith.cast_f32_to ( %e75 ) { target = s:"f16" }
+    memref.global_store_typed ( %C, %add74, %cast76 ) { align = i:2, elem_type = s:"f16" }
+    %c77 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %mod78 : i32 = arith.mod ( %tid1, %c77 )
+    %div79 : i32 = arith.div ( %tid1, %c77 )
+    %c80 : i32 = arith.constant (  ) { ity = s:"i32", value = i:4 }
+    %mul81 : i32 = arith.mul ( %div79, %c80 )
+    %c82 : i32 = arith.constant (  ) { ity = s:"i32", value = i:1 }
+    %add83 : i32 = arith.add ( %mul81, %c82 )
+    %add84 : i32 = arith.add ( %mul5, %add83 )
+    %add85 : i32 = arith.add ( %mul7, %mod78 )
+    %c86 : i32 = arith.constant (  ) { ity = s:"i32", value = i:256 }
+    %mul87 : i32 = arith.mul ( %add84, %c86 )
+    %add88 : i32 = arith.add ( %mul87, %add85 )
+    %e89 : f32 = vector.extract ( %for18 ) { index = i:1 }
+    %cast90 : f16 = arith.cast_f32_to ( %e89 ) { target = s:"f16" }
+    memref.global_store_typed ( %C, %add88, %cast90 ) { align = i:2, elem_type = s:"f16" }
+    %c91 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %mod92 : i32 = arith.mod ( %tid1, %c91 )
+    %div93 : i32 = arith.div ( %tid1, %c91 )
+    %c94 : i32 = arith.constant (  ) { ity = s:"i32", value = i:4 }
+    %mul95 : i32 = arith.mul ( %div93, %c94 )
+    %c96 : i32 = arith.constant (  ) { ity = s:"i32", value = i:2 }
+    %add97 : i32 = arith.add ( %mul95, %c96 )
+    %add98 : i32 = arith.add ( %mul5, %add97 )
+    %add99 : i32 = arith.add ( %mul7, %mod92 )
+    %c100 : i32 = arith.constant (  ) { ity = s:"i32", value = i:256 }
+    %mul101 : i32 = arith.mul ( %add98, %c100 )
+    %add102 : i32 = arith.add ( %mul101, %add99 )
+    %e103 : f32 = vector.extract ( %for18 ) { index = i:2 }
+    %cast104 : f16 = arith.cast_f32_to ( %e103 ) { target = s:"f16" }
+    memref.global_store_typed ( %C, %add102, %cast104 ) { align = i:2, elem_type = s:"f16" }
+    %c105 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %mod106 : i32 = arith.mod ( %tid1, %c105 )
+    %div107 : i32 = arith.div ( %tid1, %c105 )
+    %c108 : i32 = arith.constant (  ) { ity = s:"i32", value = i:4 }
+    %mul109 : i32 = arith.mul ( %div107, %c108 )
+    %c110 : i32 = arith.constant (  ) { ity = s:"i32", value = i:3 }
+    %add111 : i32 = arith.add ( %mul109, %c110 )
+    %add112 : i32 = arith.add ( %mul5, %add111 )
+    %add113 : i32 = arith.add ( %mul7, %mod106 )
+    %c114 : i32 = arith.constant (  ) { ity = s:"i32", value = i:256 }
+    %mul115 : i32 = arith.mul ( %add112, %c114 )
+    %add116 : i32 = arith.add ( %mul115, %add113 )
+    %e117 : f32 = vector.extract ( %for18 ) { index = i:3 }
+    %cast118 : f16 = arith.cast_f32_to ( %e117 ) { target = s:"f16" }
+    memref.global_store_typed ( %C, %add116, %cast118 ) { align = i:2, elem_type = s:"f16" }
+    cf.return (  )
+  }
+}

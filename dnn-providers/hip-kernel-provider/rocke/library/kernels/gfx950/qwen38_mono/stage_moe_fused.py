@@ -113,7 +113,9 @@ def build_function(stage: str, rows: int, seq: bool, knobs: MF.FusedKnobs, *, ex
 
 
 def pair_id(variant: str, knobs: MF.FusedKnobs) -> str:
-    return hashlib.sha256(json.dumps(["fused", variant, repr(knobs)]).encode()).hexdigest()[:16]
+    key = ["fused", variant, repr(knobs)] + ([["m3_rows", knobs.m3_rows]] if knobs.m3_rows else [])  # not in repr
+    key += [["route", knobs.route]] if knobs.route != "cta" else []  # P15, not in repr
+    return hashlib.sha256(json.dumps(key).encode()).hexdigest()[:16]
 
 
 def sidecar_extra(stage: str, pair: str, knobs: MF.FusedKnobs | None = None) -> dict:

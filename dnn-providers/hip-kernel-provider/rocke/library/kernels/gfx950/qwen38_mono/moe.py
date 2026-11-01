@@ -101,7 +101,10 @@ class MoeKnobs:
     m4_base / m5_base / m3_base: first CTA of the stage (-1 = mono's).
     m3_rows: request rows per M3 task (0 = mono's ``m3_task_rows``).
     m3_ept: router rows (experts) per M3 task: 8 (mono) | 4 (twice the tasks,
-      half the bytes each; waves 4-7 take the second half of the rows).
+      half the bytes each; waves 4-7 take the second half of the rows) | 2
+      (probe P15, the N3b router: two experts a task, the shared gate a third
+      router row of the last task, ``experts / 2`` tasks a row set: every CTA
+      at 512 experts with ``m3_rows`` = rows; :func:`_emit_m3_n`).
     w_cpol: cache-policy bits of the weight loads (``buffer_load_cp`` aux:
       0 mono; 2 nt, 16 sc1, 1 sc0, or a sum).
     shared_first: the shared expert is slot 0 (its M4 units on the first M4
@@ -201,8 +204,8 @@ class MoeKnobs:
             raise ValueError(f"m4_map must be mono|balanced, got {self.m4_map!r}")
         if self.m4_map == "mono" and self.m4_waves != 8 and self.m4_j:
             raise ValueError("m4_map=mono with 4-wave units takes m4_j=0")
-        if self.m3_ept not in (4, 8):
-            raise ValueError("m3_ept must be 4 or 8")
+        if self.m3_ept not in (2, 4, 8):
+            raise ValueError("m3_ept must be 2, 4 or 8")
         if self.w_cpol not in (0, 1, 2, 3, 16, 17, 18, 19):
             raise ValueError(f"w_cpol must be a sum of sc0 1, nt 2, sc1 16, got {self.w_cpol}")
         if self.m5_issue not in ("mono", "early", "late"):
@@ -322,7 +325,9 @@ class MoePlan:
 
     @property
     def m3_tasks(self) -> int:
-        return (self.experts // self.knobs.m3_ept + 1) * (self.rows // self.m3_rows)
+        ept = self.knobs.m3_ept
+        per_set = self.experts // ept if ept == 2 else self.experts // ept + 1  # ept 2: the gate in the last task
+        return per_set * (self.rows // self.m3_rows)
 
     def base(self, stage: str) -> int:
         v = getattr(self.knobs, f"{stage}_base")
@@ -692,11 +697,12 @@ def _ugt(e: MoeCtx, a: Value, b_: Value) -> Value:
     return e.b.cmp_gt(e.b.xor(a, m), e.b.xor(b_, m))
 
 
-def top10(e: MoeCtx, words) -> list:
+def top10(e: MoeCtx, words, extra: int = 0) -> list:
     """The top 10 of a row's logits as wave-uniform keys, in rank order
     (mono ``moe.top10``). ``words``: this lane's 4 logit words (logits
     ``8 l .. 8 l + 7``, low half first). A key is the logit's monotone bits
-    with ``511 - idx`` in the 9 low bits: equal logits go to the lower expert."""
+    with ``511 - idx`` in the 9 low bits: equal logits go to the lower expert.
+    ``extra``: that many picks past the 10th (test mutants, probe P15)."""
     b, lane = e.b, e.lane
     ks = []
     for i in range(8):
@@ -711,7 +717,7 @@ def top10(e: MoeCtx, words) -> list:
         ks[x], ks[y] = b.select(first, kx, ky), b.select(first, ky, kx)
     ks = ks + [e.c(0)]
     picks = []
-    for _ in range(A.TOP_K):
+    for _ in range(A.TOP_K + extra):
         m = D.wave_umax_dpp(b, ks[0])
         hit = b.cmp_eq(ks[0], m)
         ks = [b.select(hit, ks[i + 1], ks[i]) for i in range(8)] + [ks[8]]
@@ -803,7 +809,7 @@ def _route_gate(e: MoeCtx) -> None:
     M.pre_poll(b, hint, per_row * e.R, e.tag, kn)
 
 
-def _route_rows(e: MoeCtx, weights: bool, gate: bool = False, keys: bool = False) -> None:
+def _route_rows(e: MoeCtx, weights: bool, gate: bool = False, keys: bool = False, k11: bool = False) -> None:
     """Waves ``r < R``: row r's top 10 into LDS ``ids`` (and, ``weights``, the
     bf16 router weights into ``tw``). Every lane runs it; no barrier (``gate``:
     :func:`_route_gate` first, which barriers)."""
@@ -814,7 +820,9 @@ def _route_rows(e: MoeCtx, weights: bool, gate: bool = False, keys: bool = False
         r = e.wave
         j = e.imin(e.lane, e.E // 8 - 1)
         got = e.poll([(e.pix("lg", e.mul(j, 4), r), 2), (e.pix("lg", e.add(e.mul(j, 4), 2), r), 2)], route=True)
-        picks = top10(e, got[0] + got[1])
+        picks = top10(e, got[0] + got[1], extra=1 if k11 else 0)
+        if k11:  # test mutant (probe P15): the 11th pick in place of the 10th
+            picks = picks[: A.TOP_K - 1] + [picks[A.TOP_K]]
         ws = router_weights(e, picks) if weights else None
         with b.scf_if(e.eq(e.lane, 0)):
             for k in range(A.TOP_K):
@@ -1007,12 +1015,126 @@ def _part(e: MoeCtx, k: Value):
     return p, first
 
 
+def _ksum_order(e: MoeCtx) -> list:
+    """K-part order of a router logit's lane sum: 0 .. 15 (the mono's). Test mutants of the fused MoE
+    (``FusedKnobs.mutate``, probe P15): ``router_ksum`` reversed (a 1-ulp f32 change that the bf16 rounding of the
+    logit usually hides), ``router_kdrop`` part 15 left out (the ``lg`` payload must differ)."""
+    fk = getattr(e, "fk", None)
+    if fk is not None and fk.mutate == "router_ksum":
+        return list(range(15, -1, -1))
+    if fk is not None and fk.mutate == "router_kdrop":
+        return list(range(15))
+    return list(range(16))
+
+
+def _emit_m3_n(e: MoeCtx) -> None:
+    """M3 at ``m3_ept=2`` (probe P15, the N3b router): the 513 router rows split over ``experts / 2`` tasks (every
+    CTA at 512 experts). Task ``t`` computes router rows ``2 t, 2 t + 1`` and, on the last task, row ``experts``
+    (the shared gate) for ``m3_rows`` request rows. Wave ``w``: router row ``w % 4`` of the task (past its 2 or 3
+    rows: idle), request rows ``(w // 4) rpw ..`` on lanes ``16 i + q`` (part q). The weight loads, the mixed-row
+    poll, the LDS staging, each logit's 16 K-part fma chains and their lane-ordered sum are :func:`emit_m3`'s, so
+    the logits and the shared gate are the mono's bit for bit."""
+    b = e.b
+    plan = e.plan
+    rows3 = plan.m3_rows
+    NT = e.E // 2
+    split = rows3 < e.R
+    rpw = -(-rows3 // 2)  # request rows per wave (two wave groups)
+    loads = -(-3 * ROW_CHUNKS // A.THREADS)
+    task = e.umod(e.add(e.bid, A.GRID - plan.base("m3")), A.GRID)
+    with b.scf_if(e.lt(task, plan.m3_tasks)):
+        if split:
+            t = e.umod(task, NT)
+            h0 = e.mul(e.udiv(task, NT), rows3)
+        else:
+            t, h0 = task, e.c(0)
+        last = e.eq(t, NT - 1)
+        nch = e.sel(last, 3 * ROW_CHUNKS, 2 * ROW_CHUNKS)
+        rs = _rsrc(e, e.addr["r_w"], -1)
+        ws = []
+        for m in range(loads):
+            j = e.imin(e.add(e.tid, m * A.THREADS), b.sub(nch, e.c(1)))
+            g = e.add(e.mul(t, 2), e.udiv(j, ROW_CHUNKS))  # the last task's third row: the gate (row experts)
+            off = e.add(e.mul(g, A.ROW_WORDS), e.mul(e.umod(j, ROW_CHUNKS), 4))
+            ws.append(_wload(e, rs, e.mul(off, 4), 4))
+        e.barrier()  # payload_wait: rows <= 4 only barrier (as emit_m3)
+        hi = e.imin(e.add(e.tid, A.THREADS), RX_LOADS - 1)
+        specs = [(e.pix("mxbf", e.mul(j, 2), e.add(h0, r)), 2) for r in range(rows3) for j in (e.tid, hi)]
+        v = e.poll(specs)
+        for r in range(rows3):
+            for q, j in enumerate((e.tid, hi)):
+                words = v[2 * r + q]
+                x0, x1 = M.bf2_f32(b, words[0])
+                x2, x3 = M.bf2_f32(b, words[1])
+                part, first = _part(e, e.mul(j, 4))
+                idx = e.ix("rx", b.sub(e.add(e.mul(part, A.RX_PART), e.mul(j, 4)), first), r)
+                e.st(idx, b.vec_pack([x0, x1, x2, x3], F32), 4)
+        for m in range(loads):
+            j = e.add(e.tid, m * A.THREADS)
+            jc = e.umod(j, ROW_CHUNKS)
+            part, first = _part(e, e.mul(jc, 8))
+            off = e.add(
+                e.mul(e.udiv(j, ROW_CHUNKS), A.RW_ROW),
+                e.mul(part, A.RW_PART),
+                b.lshr(b.sub(e.mul(jc, 8), first), e.c(1)),
+            )
+            if (m + 1) * A.THREADS <= 2 * ROW_CHUNKS:
+                e.st(e.ix("rw", off), ws[m], 4)
+            else:
+                with b.scf_if(e.lt(j, nch)):
+                    e.st(e.ix("rw", off), ws[m], 4)
+        e.barrier()
+        wrow_ix = e.umod(e.wave, 4)
+        rblk = e.udiv(e.wave, 4)
+        nrow = e.sel(last, 3, 2)
+        # lane 16 i + q: part q of weight row ``wrow_ix`` for request row rblk * rpw + i
+        with b.scf_if(b.land(e.lt(e.lane, 16 * rpw), e.lt(wrow_ix, nrow))):
+            lp = e.umod(e.lane, 16)
+            big = e.lt(lp, 8)
+            rr = e.add(e.mul(rblk, rpw), e.udiv(e.lane, 16))
+            rr_c = e.imin(rr, rows3 - 1)
+            wrow = e.ix("rw", e.add(e.mul(wrow_ix, A.RW_ROW), e.mul(lp, A.RW_PART)))
+            xrow = e.ix("rx", e.mul(lp, A.RX_PART), rr_c)
+            acc = e.f(0.0)
+            for st_ in range(CHAIN_STEPS):
+                wv = e.ldn(e.add(wrow, st_ * 4), 4)
+                w8 = bf16x8(e, [b.vec_extract(wv, i) for i in range(4)])
+                xa = e.ldn(e.add(xrow, st_ * 8), 4, F32)
+                xb = e.ldn(e.add(xrow, st_ * 8 + 4), 4, F32)
+                x8 = [b.vec_extract(xa, i) for i in range(4)] + [b.vec_extract(xb, i) for i in range(4)]
+                new = acc
+                for i in range(8):
+                    new = b.fma(w8[i], x8[i], new)
+                acc = new if st_ < SHORT_STEPS else b.select(big, new, acc)
+            bits = b.bitcast(acc, I32)
+            qs = _ksum_order(e)
+            for i in range(rpw):
+                total = b.bitcast(b.readlane(bits, e.c(16 * i + qs[0])), F32)
+                for q in qs[1:]:
+                    total = b.fadd(total, b.bitcast(b.readlane(bits, e.c(16 * i + q)), F32))
+                row_i = e.add(e.mul(rblk, rpw), i)
+                with b.scf_if(b.land(e.eq(e.lane, 0), e.lt(row_i, rows3))):
+                    e.st(e.ix("lgl", wrow_ix, row_i), bf16r(b, total))
+        e.barrier()
+        # the task's 2 logits of a row = 1 pair (threads 0 ..); the gate (last task, wave 1: threads 64 ..)
+        with b.scf_if(e.lt(e.tid, rows3)):
+            lg = e.ldn(e.ix("lgl", 0, e.tid), 2, F32)
+            e.put(e.pix("lg", t, e.add(h0, e.tid)), M.bf16_pair(b, b.vec_extract(lg, 0), b.vec_extract(lg, 1)))
+        rg_ = b.sub(e.tid, e.c(64))
+        with b.scf_if(b.land(last, b.land(e.ge(e.tid, 64), e.lt(e.tid, 64 + rows3)))):
+            gl = e.ld(e.ix("lgl", 2, rg_), F32)
+            e.put(e.pix("sg", 0, e.add(h0, rg_)), bf16r(b, sigmoid_acc(e, gl)))
+
+
 def emit_m3(e: MoeCtx) -> None:
     """M3 (mono ``moe.m3``): task ``t`` of a row set computes router logits
     ``ept t .. ept t + ept - 1`` (the last task: the shared expert's gate) of
     ``m3_rows`` request rows. Wave ``w``: weight row ``w % ept``, request rows
     ``(w // ept) rpw ..`` on lanes ``16 i + q`` (part q); each logit's 16 K-part
     fma chains and their lane-ordered sum are mono's, whatever the grouping."""
+    if e.plan.knobs.m3_ept == 2:
+        _emit_m3_n(e)
+        return
     b = e.b
     plan = e.plan
     rows3 = plan.m3_rows
@@ -1086,9 +1208,10 @@ def emit_m3(e: MoeCtx) -> None:
                     new = b.fma(w8[i], x8[i], new)
                 acc = new if st_ < SHORT_STEPS else b.select(big, new, acc)
             bits = b.bitcast(acc, I32)
+            qs = _ksum_order(e)
             for i in range(rpw):
-                total = b.bitcast(b.readlane(bits, e.c(16 * i)), F32)
-                for q in range(1, 16):
+                total = b.bitcast(b.readlane(bits, e.c(16 * i + qs[0])), F32)
+                for q in qs[1:]:
                     total = b.fadd(total, b.bitcast(b.readlane(bits, e.c(16 * i + q)), F32))
                 row_i = e.add(e.mul(rblk, rpw), i)
                 with b.scf_if(b.land(e.eq(e.lane, 0), e.lt(row_i, rows3))):

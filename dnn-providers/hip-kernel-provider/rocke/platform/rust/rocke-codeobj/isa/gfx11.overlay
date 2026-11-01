@@ -1,0 +1,436 @@
+# gfx11 instruction description: the hand-written knowledge.
+#
+# `platform/tools/isa_tables.py import` merges this overlay with what the Rust
+# sources state (opcode rows and flags in mir.rs, VOPD forms in vopd.rs, the
+# classifications of post.rs, the special cases of asm.rs's hand encoder) into
+# isa/gfx11.isa; `generate` then writes src/rir/gen_opcodes.rs and
+# src/rir/gen_isa.rs (and src/rir/gen_burs.rs) from that description. Edit
+# this file, not the description, for anything listed below, then run
+# `import` and `generate`; `check` fails while either would change a file.
+#
+# Records: a kind word, positional fields, then key=value fields. Values have
+# no blanks unless double-quoted; lists are comma-separated.
+#
+# Sections
+#   [meta]     meta KEY VALUE
+#   [flagimp]  flagimp FLAG imp=def:R|use:R    implicit register a compiler flag (F_*) states
+#   [modset]   modset NAME "doc" bits=B,...    modifier sets for `m=`, by M_* bit
+#   [fmt]      fmt RUSTFMT enc=ENC [layout=ENC] [vop3=0xN] [imp=...] [table=no]
+#              enc: encoding family; layout: the [enc] layout it packs into (default enc);
+#              vop3: opcode offset of the VOP3 form; imp: hardware implicit registers of
+#              every instruction of the format; table=no: encoded by asm.rs's hand encoder
+#   [enc]      enc NAME "doc" words=N fixed=0x..[,0x..] fields=name:word:lsb:width,...
+#   [opnd]     reg NAME code=N            register operand code
+#              src KEY=N ...              source operand codes (sgpr, vgpr, literal, dpp markers)
+#              inline_int lo= hi= zero= neg=      inline integer constants
+#              inline_f32 BITS=CODE ...           inline f32 constants
+#              inline_f64 HI=CODE ...             inline f64 constants by high dword (low dword zero)
+#              class NAME "doc" | imm NAME "doc" | form NAME "doc"
+#   [unit]     unit NAME "doc"
+#   [lat]      lat NAME "doc" sched=N delay=KIND[:CYCLES] [clear=yes] [wait=vm,lgkm,smem]
+#              The model of a latency class: post.rs's scheduler result latency, its
+#              s_delay_alu class (valu, trans, salu, other, skip) and cycles, whether the
+#              instruction clears the s_delay_alu state, the wait counters it increments.
+#              `import` gives each instruction the first class whose model post.rs gives it.
+#   [hazard]   hazard NAME "doc" modeled=WHERE
+#   [vopd]     vopd CODE MNEMONIC x|y         hardware VOPD components (x: X or Y, y: Y only)
+#   [inst]     inst VARIANT key=value ...     per-instruction knowledge; keys:
+#       enc=ENC         encoding family when the Rust format is a different one
+#       d=, u=          defs and uses in MInst order: role:class<dwords>, comma-separated
+#                       (classes in [opnd]; a role named `old` is read but not encoded)
+#       imm=KIND        what MInst::imm holds (kinds in [opnd])
+#       m=SET,...       modifier sets the instruction accepts ("-" for none)
+#       imp+=R,...      implicit registers beyond those its flags state
+#       haz=H,...       hazards it takes part in
+#       form=FORM       its encoding form within the format (forms in [opnd]); every opcode
+#                       asm.rs's hand encoder singles out needs one, else it stays there
+#       vopd_special=C  VOPD component of a form vopd.rs pairs through its own path
+#       lat=CLASS       a class name for its model (the model itself comes from post.rs)
+#       issue=N         issue cycles on one SIMD, when not its unit's (see [unit])
+#       note="..."      comment written above its row in gen_opcodes.rs
+#   [burs]     the BURS grammar for 32-bit integer arithmetic (platform/tools/isa_burs.py):
+#              nt NAME "doc"                      a nonterminal: a form a value can take
+#              term NAME kind=OpKind | leaf=KIND  an IR operation, or a leaf (konst, sreg, vreg)
+#              pred NAME "doc"                    a predicate burs.rs evaluates
+#              weight UNIT N                      cost weight of an issue cycle on UNIT (default 1)
+#              rule LHS PATTERN [if=[!]PRED(VARS)[&...]] [emit=hand|v3(X,Y,Z)|lshladd(A,K,B)] [inst=Opc]
+#              PATTERN is a term with child patterns, `var:nt`, a nonterminal (a chain
+#              rule) or a leaf term. A rule's cost is the issue cycles of `inst` times its unit's weight. `hand`
+#              emits through isel's own int_bin; v3 a three-source VOP3; lshladd
+#              s_lshl<k>_add_u32. LHS s rules apply at uniform nodes, v rules at divergent ones.
+#
+# Issue cycles (`issue=` in [unit] and [inst]) are the model agent's gfx1151 measurements
+# (src/rir/model.rs, not wired in). Only the BURS prototype reads them; the default compile
+# path and post.rs's model do not.
+
+[meta]
+meta target gfx1151
+meta isa gfx11
+meta wave 32
+
+[flagimp]
+flagimp DEF_SCC imp=def:scc
+flagimp USE_SCC imp=use:scc
+flagimp USE_VCC imp=use:vcc
+flagimp DEF_EXEC imp=def:exec
+flagimp USE_EXEC imp=use:exec
+
+[modset]
+modset neg "neg (VOP3) or neg_lo (VOP3P) of sources 0-2" bits=0,1,2
+modset opsel "op_sel: the high half of sources 0-2" bits=4,5,6
+modset opsel_dst "op_sel: the high half of the destination" bits=7
+modset saddr "global address through saddr: SGPR base plus 32-bit VGPR offset" bits=8
+modset mix "v_fma_mix: f16 sources (op_sel_hi)" bits=9,10,11
+modset glc "GLC: an atomic returns the old value" bits=12
+
+[fmt]
+fmt Sop1 enc=SOP1
+fmt Sop2 enc=SOP2
+fmt Sopc enc=SOPC
+fmt Sopk enc=SOPK
+fmt Sopp enc=SOPP
+fmt Smem enc=SMEM
+fmt Vop1 enc=VOP1 vop3=0x180
+fmt Vop2 enc=VOP2 vop3=0x100
+fmt Vop3 enc=VOP3
+fmt Vop3b enc=VOP3SD
+fmt Vopc enc=VOPC layout=VOP3
+fmt Vop3p enc=VOP3P
+fmt Vopd enc=VOPD
+fmt Ds enc=DS imp=use:exec
+fmt Global enc=GLOBAL imp=use:exec
+fmt Mubuf enc=MUBUF imp=use:exec
+fmt Pseudo enc=PSEUDO table=no
+
+[enc]
+enc SOP1 "sdst = op(ssrc0)" words=1 fixed=0xbe800000 fields=ssrc0:0:0:8,op:0:8:8,sdst:0:16:7
+enc SOP2 "sdst = op(ssrc0, ssrc1)" words=1 fixed=0x80000000 fields=ssrc0:0:0:8,ssrc1:0:8:8,sdst:0:16:7,op:0:23:7
+enc SOPC "scc = op(ssrc0, ssrc1)" words=1 fixed=0xbf000000 fields=ssrc0:0:0:8,ssrc1:0:8:8,op:0:16:7
+enc SOPK "sdst and a 16-bit immediate" words=1 fixed=0xb0000000 fields=simm16:0:0:16,sdst:0:16:7,op:0:23:5
+enc SOPP "program control with a 16-bit immediate" words=1 fixed=0xbf800000 fields=simm16:0:0:16,op:0:16:7
+enc SMEM "scalar memory" words=2 fixed=0xf4000000,0x00000000 fields=sbase:0:0:6,sdata:0:6:7,dlc:0:13:1,glc:0:14:1,op:0:18:8,offset:1:0:21,soffset:1:25:7
+enc VOP1 "vdst = op(src0)" words=1 fixed=0x7e000000 fields=src0:0:0:9,op:0:9:8,vdst:0:17:8
+enc VOP2 "vdst = op(src0, vsrc1)" words=1 fixed=0x00000000 fields=src0:0:0:9,vsrc1:0:9:8,vdst:0:17:8,op:0:25:6
+enc VOPC "vcc = op(src0, vsrc1); the compiler always uses the VOP3 form" words=1 fixed=0x7c000000 fields=src0:0:0:9,vsrc1:0:9:8,op:0:17:8
+enc VOP3 "three-source VALU (also VOP1, VOP2 and VOPC promoted)" words=2 fixed=0xd4000000,0x00000000 fields=vdst:0:0:8,abs:0:8:3,op_sel:0:11:4,clamp:0:15:1,op:0:16:10,src0:1:0:9,src1:1:9:9,src2:1:18:9,omod:1:27:2,neg:1:29:3
+enc VOP3SD "VOP3 with a scalar destination (carry, div_scale flag)" words=2 fixed=0xd4000000,0x00000000 fields=vdst:0:0:8,sdst:0:8:7,clamp:0:15:1,op:0:16:10,src0:1:0:9,src1:1:9:9,src2:1:18:9,omod:1:27:2,neg:1:29:3
+enc VOP3P "packed and mixed-precision VALU, WMMA" words=2 fixed=0xcc000000,0x00000000 fields=vdst:0:0:8,neg_hi:0:8:3,op_sel:0:11:3,op_sel_hi2:0:14:1,clamp:0:15:1,op:0:16:7,src0:1:0:9,src1:1:9:9,src2:1:18:9,op_sel_hi:1:27:2,neg:1:29:3
+enc VOPD "two VALU operations issued together" words=2 fixed=0xc8000000,0x00000000 fields=src0x:0:0:9,vsrc1x:0:9:8,opy:0:17:5,opx:0:22:4,src0y:1:0:9,vsrc1y:1:9:8,vdsty:1:17:7,vdstx:1:24:8
+enc DPP16 "second word of a VOP1 with a DPP16 source" words=1 fixed=0x00000000 fields=src0:0:0:8,ctrl:0:8:24
+enc DPP8 "second word of a VOP1 with a DPP8 source" words=1 fixed=0x00000000 fields=src0:0:0:8,sel:0:8:24
+enc DS "local data share" words=2 fixed=0xd8000000,0x00000000 fields=offset:0:0:16,gds:0:17:1,op:0:18:8,addr:1:0:8,data0:1:8:8,data1:1:16:8,vdst:1:24:8
+enc FLAT "flat memory (segment 0)" words=2 fixed=0xdc000000,0x00000000 fields=offset:0:0:13,dlc:0:13:1,glc:0:14:1,slc:0:15:1,op:0:18:8,addr:1:0:8,data:1:8:8,saddr:1:16:7,sve:1:23:1,vdst:1:24:8
+enc SCRATCH "scratch memory (FLAT segment 1)" words=2 fixed=0xdc010000,0x00000000 fields=offset:0:0:13,dlc:0:13:1,glc:0:14:1,slc:0:15:1,op:0:18:8,addr:1:0:8,data:1:8:8,saddr:1:16:7,sve:1:23:1,vdst:1:24:8
+enc GLOBAL "global memory (FLAT segment 2)" words=2 fixed=0xdc020000,0x00000000 fields=offset:0:0:13,dlc:0:13:1,glc:0:14:1,slc:0:15:1,op:0:18:8,addr:1:0:8,data:1:8:8,saddr:1:16:7,sve:1:23:1,vdst:1:24:8
+enc MUBUF "buffer memory" words=2 fixed=0xe0000000,0x00000000 fields=offset:0:0:12,slc:0:12:1,dlc:0:13:1,glc:0:14:1,op:0:18:8,vaddr:1:0:8,vdata:1:8:8,srsrc:1:16:5,tfe:1:21:1,offen:1:22:1,idxen:1:23:1,soffset:1:24:8
+
+[opnd]
+reg vcc_lo code=106
+reg vcc_hi code=107
+reg null code=124
+reg m0 code=125
+reg exec_lo code=126
+reg exec_hi code=127
+reg scc code=253
+src sgpr=0 vgpr=256 literal=255 dpp16=250 dpp8=233 half_hi=128
+inline_int lo=-16 hi=64 zero=128 neg=192
+inline_f32 0x3f000000=240 0xbf000000=241 0x3f800000=242 0xbf800000=243 0x40000000=244 0xc0000000=245 0x40800000=246 0xc0800000=247 0x3e22f983=248
+inline_f64 0x3fe00000=240 0xbfe00000=241 0x3ff00000=242 0xbff00000=243 0x40000000=244 0xc0000000=245 0x40100000=246 0xc0100000=247
+class s "SGPR tuple; as a 1-dword destination also vcc_lo, exec_lo, m0 or null"
+class ss "scalar source: SGPR, special register, inline constant or literal"
+class v "VGPR tuple"
+class vs "vector source: VGPR, SGPR, special register, inline constant or literal"
+class vi "vector source without a literal: VGPR, SGPR or inline constant"
+class vh "16-bit half of a VGPR (op_sel or .h picks the high half)"
+class vsh "16-bit vector source: a VGPR half, SGPR or inline constant"
+class x "EXEC, named as an explicit operand"
+class a "any register (pseudo)"
+imm simm16 "16-bit immediate field"
+imm soff21 "21-bit signed byte offset"
+imm off16 "16-bit unsigned byte offset"
+imm off2x8 "two 8-bit dword offsets: offset0 | offset1 << 8"
+imm off13s "13-bit signed byte offset"
+imm off12 "12-bit unsigned byte offset"
+imm label "branch target block (resolved to a word offset by the assembler)"
+imm nop "wait states minus one"
+imm clause "instructions in the clause minus one"
+imm delay "s_delay_alu instid0, instskip, instid1"
+imm waitcnt "vmcnt, expcnt, lgkmcnt"
+imm sendmsg "message id"
+imm swizzle "ds_swizzle pattern"
+imm vopd "X and Y component opcodes in bits 7:0 and 15:8"
+imm dpp16 "DPP16 control: bits 31:8 of word 1"
+imm dpp8 "DPP8 lane selects"
+form plain "the format's general encoding"
+form noshort "a VOP2 opcode always encoded as VOP3 (its lane mask is explicit)"
+form dpp16 "VOP1 with a DPP16 source: imm holds bits 31:8 of word 1"
+form dpp8 "VOP1 with a DPP8 source: imm holds the 24-bit lane selects"
+form writelane "VOP3 with two encoded sources and no f32 inline constants"
+form mix "VOP3P taking op_sel and op_sel_hi from the modifiers"
+form ds_data "DS with both a result and data0 (returning atomics, bpermute)"
+form ds_2addr "DS with data0 and data1 (two-address store)"
+form scratch "SCRATCH (FLAT segment 1) with no address operands: the offset is in imm"
+form b64 "SALU with 64-bit integer sources: no f32 inline constants (a literal is zero-extended)"
+form b64_shift "SALU 64-bit shift: source 0 as in b64, source 1 the 32-bit shift amount"
+form f64 "VALU with f64 sources: a non-inline-integer immediate is the high dword (an f64 inline constant or a literal)"
+form f64_i32 "as f64, but source 1 is the 32-bit integer exponent (v_ldexp_f64)"
+form dot2 "VOP3P with 16-bit pair sources 0 and 1 (no f32 inline constants) and an f32 source 2"
+form vscnt "SOPK whose register must be null (s_waitcnt_vscnt)"
+
+[unit]
+unit VALU "vector ALU" issue=1
+unit TRANS "transcendental unit" issue=4
+unit WMMA "matrix unit (WMMA)" issue=34
+unit SALU "scalar ALU" issue=1
+unit SMEM "scalar memory" issue=5
+unit VMEM "vector memory (global, buffer, scratch)" issue=5
+unit LDS "local data share" issue=4
+unit BRANCH "branch" issue=1
+unit CTRL "program control: waits, hints, barriers, priority, end" issue=0
+unit PSEUDO "pseudo instruction, expanded or dropped before encoding" issue=0
+unit OTHER "other" issue=1
+
+[lat]
+lat pseudo "pseudo without a result latency (copies, implicit defs, scheduling barriers)" sched=0 delay=skip
+lat pseudo_valu "pseudo expanded into VALU instructions" sched=5 delay=skip
+lat salu "scalar ALU" sched=2 delay=salu:2
+lat ctrl "program control (SOPP): no result; s_delay_alu counts it as SALU" sched=5 delay=salu:2
+lat valu "vector ALU" sched=5 delay=valu:5
+lat trans "transcendental" sched=10 delay=trans:10
+lat wmma "WMMA: the scheduler waits 16 cycles; s_delay_alu treats it as VALU" sched=16 delay=valu:5
+lat smem "scalar load: lgkmcnt, returns out of order" sched=40 delay=other wait=lgkm,smem
+lat lds "LDS access: lgkmcnt" sched=40 delay=other clear=yes wait=lgkm
+lat vmem_load "vector memory load or returning atomic: vmcnt" sched=300 delay=other clear=yes wait=vm
+lat vmem_store "vector memory store, atomic without return or cache control" sched=5 delay=other clear=yes
+
+[hazard]
+hazard wmma_d "WMMA result: the producer side of wmma_ab" modeled=post.rs:fix_wmma_hazards
+hazard wmma_ab "a WMMA reading as A or B the result of the immediately preceding VALU, if that is a WMMA, needs a v_nop between them" modeled=post.rs:fix_wmma_hazards
+
+[vopd]
+vopd 0 v_dual_fmac_f32 x
+vopd 1 v_dual_fmaak_f32 x
+vopd 2 v_dual_fmamk_f32 x
+vopd 3 v_dual_mul_f32 x
+vopd 4 v_dual_add_f32 x
+vopd 5 v_dual_sub_f32 x
+vopd 6 v_dual_subrev_f32 x
+vopd 7 v_dual_mul_dx9_zero_f32 x
+vopd 8 v_dual_mov_b32 x
+vopd 9 v_dual_cndmask_b32 x
+vopd 10 v_dual_max_f32 x
+vopd 11 v_dual_min_f32 x
+vopd 12 v_dual_dot2acc_f32_f16 x
+vopd 13 v_dual_dot2acc_f32_bf16 x
+vopd 16 v_dual_add_nc_u32 y
+vopd 17 v_dual_lshlrev_b32 y
+vopd 18 v_dual_and_b32 y
+
+[inst]
+# SOP1
+inst SAndSaveexecB32 d=sdst:s1,exec:x1 u=ssrc0:ss1,exec:x1
+inst SMovB64 form=b64
+inst SAndSaveexecB64 d=sdst:s2,exec:x2 u=ssrc0:ss2,exec:x2 form=b64
+inst SNotB64 form=b64
+# SOP2
+inst SLshlB64 form=b64_shift
+inst SLshrB64 form=b64_shift
+inst SAshrI64 form=b64_shift
+inst SAndB64 form=b64
+inst SOrB64 form=b64
+inst SXorB64 form=b64
+inst SCselectB64 form=b64
+inst SAndNot1B64 form=b64
+inst SOrNot1B64 form=b64
+# SOPC
+inst SCmpEqU64 form=b64
+inst SCmpLgU64 form=b64
+# SOPK
+inst SWaitcntVscnt form=vscnt
+# VOP1
+inst VReadfirstlaneB32 d=sdst:s1 u=src0:v1 m=-
+inst VMovB32Dpp u=src0:v1 imm=dpp16 m=- form=dpp16 issue=3
+inst VMovB32Dpp8 u=src0:v1 imm=dpp8 m=- form=dpp8 issue=3
+inst VRcpF64 form=f64
+# VOP2
+inst VCndmaskB32 u=src0:vs1,src1:vs1,src2:s1 form=noshort
+inst VAddCoCiU32 u=src0:vs1,src1:vs1,src2:s1
+inst VSubCoCiU32 u=src0:vs1,src1:vs1,src2:s1
+# VOP3
+inst VMadU32U24 u=src0:vs1,src1:vs1,src2:vs1
+inst VBfeU32 u=src0:vs1,src1:vs1,src2:vs1
+inst VBfeI32 u=src0:vs1,src1:vs1,src2:vs1
+inst VFmaF32 u=src0:vs1,src1:vs1,src2:vs1 vopd_special=0
+inst VMin3F32 u=src0:vs1,src1:vs1,src2:vs1
+inst VMax3F32 u=src0:vs1,src1:vs1,src2:vs1
+inst VMed3I32 u=src0:vs1,src1:vs1,src2:vs1
+inst VDivFixupF32 u=src0:vs1,src1:vs1,src2:vs1
+inst VDivFmasF32 u=src0:vs1,src1:vs1,src2:vs1
+inst VPermB32 u=src0:vs1,src1:vs1,src2:vs1
+inst VLshlAddU32 u=src0:vs1,src1:vs1,src2:vs1
+inst VAddLshlU32 u=src0:vs1,src1:vs1,src2:vs1
+inst VAdd3U32 u=src0:vs1,src1:vs1,src2:vs1
+inst VLshlOrB32 u=src0:vs1,src1:vs1,src2:vs1
+inst VAndOrB32 u=src0:vs1,src1:vs1,src2:vs1
+inst VOr3B32 u=src0:vs1,src1:vs1,src2:vs1
+inst VMaxminI32 u=src0:vs1,src1:vs1,src2:vs1
+inst VMinmaxI32 u=src0:vs1,src1:vs1,src2:vs1
+inst VPermlane16B32 u=src0:v1,src1:ss1,src2:ss1,old:v1 m=opsel issue=3
+inst VPermlanex16B32 u=src0:v1,src1:ss1,src2:ss1,old:v1 m=opsel issue=3
+inst VReadlaneB32 enc=VOP3 d=sdst:s1 u=src0:v1,src1:ss1 m=-
+inst VWritelaneB32 u=src0:ss1,src1:ss1,old:v1 m=- form=writelane
+inst VDivScaleF32 u=src0:vs1,src1:vs1,src2:vs1
+inst VMadU64U32 u=src0:vs1,src1:vs1,src2:vs2 issue=4
+inst VMadI64I32 u=src0:vs1,src1:vs1,src2:vs2 issue=4
+inst VPackB32F16 u=src0:vsh,src1:vsh
+inst VLshlrevB64 u=src0:vs1,src1:vs2 issue=2
+inst VLshrrevB64 u=src0:vs1,src1:vs2 issue=2
+inst VAshrrevI64 u=src0:vs1,src1:vs2 issue=2
+inst VFmaF64 u=src0:vs2,src1:vs2,src2:vs2 form=f64 issue=32
+inst VAddF64 u=src0:vs2,src1:vs2 form=f64 issue=32
+inst VMulF64 u=src0:vs2,src1:vs2 form=f64 issue=32
+inst VMaxF64 u=src0:vs2,src1:vs2 form=f64 issue=32
+inst VMinF64 u=src0:vs2,src1:vs2 form=f64 issue=32
+inst VLdexpF64 u=src0:vs2,src1:vs1 form=f64_i32 issue=32
+inst VDivScaleF64 u=src0:vs2,src1:vs2,src2:vs2 form=f64 issue=32
+inst VDivFmasF64 u=src0:vs2,src1:vs2,src2:vs2 form=f64 issue=32
+inst VDivFixupF64 u=src0:vs2,src1:vs2,src2:vs2 form=f64 issue=32
+# VOP3P
+inst VPkAddF16 u=src0:vi1,src1:vi1
+inst VPkMulF16 u=src0:vi1,src1:vi1
+inst VDot2F32F16 form=dot2
+inst VDot2F32Bf16 form=dot2
+inst VFmaMixF32 m=neg,opsel,mix form=mix
+inst VFmaMixloF16 m=neg,opsel,mix form=mix
+inst VFmaMixhiF16 u=src0:vi1,src1:vi1,src2:vi1,old:v1 m=neg,opsel,mix form=mix
+inst VWmmaF32F16 d=vdst:v8 u=src0:v8,src1:v8,src2:v8
+inst VWmmaF32F16Early d=vdst:v8 u=src0:v8,src1:v8,src2:v8
+inst VWmmaF32Bf16 d=vdst:v8 u=src0:v8,src1:v8,src2:v8
+inst VWmmaF32Bf16Early d=vdst:v8 u=src0:v8,src1:v8,src2:v8
+inst VWmmaI32Iu8 d=vdst:v8 u=src0:v4,src1:v4,src2:v8
+inst VWmmaI32Iu8Early d=vdst:v8 u=src0:v4,src1:v4,src2:v8
+inst VWmmaI32Iu4 d=vdst:v8 u=src0:v2,src1:v2,src2:v8 issue=18
+inst VWmmaI32Iu4Early d=vdst:v8 u=src0:v2,src1:v2,src2:v8 issue=18
+# DS
+inst DsAddRtnU32 d=vdst:v1 u=addr:v1,data0:v1 form=ds_data
+inst DsAddRtnF32 d=vdst:v1 u=addr:v1,data0:v1 form=ds_data
+inst DsStore2addrB32 u=addr:v1,data0:v1,data1:v1 imm=off2x8 form=ds_2addr
+inst DsSwizzleB32 d=vdst:v1 u=addr:v1 imm=swizzle
+inst DsBpermuteB32 d=vdst:v1 u=addr:v1,data0:v1 form=ds_data
+# SCRATCH
+inst ScratchLoadB32 enc=SCRATCH form=scratch
+inst ScratchLoadB64 enc=SCRATCH form=scratch
+inst ScratchLoadB96 enc=SCRATCH form=scratch
+inst ScratchLoadB128 enc=SCRATCH form=scratch
+inst ScratchStoreB32 enc=SCRATCH form=scratch
+inst ScratchStoreB64 enc=SCRATCH form=scratch
+inst ScratchStoreB96 enc=SCRATCH form=scratch
+inst ScratchStoreB128 enc=SCRATCH form=scratch
+# measured issue cycles of opcodes the BURS grammar weighs
+inst VMulLoU32 issue=4
+inst VMulHiU32 issue=4
+inst VMulHiI32 issue=4
+inst SMulI32 issue=2
+inst SMulHiU32 issue=2
+inst SMulHiI32 issue=2
+# pseudo
+inst Copy d=dst:a1 u=src:a1
+inst ImplicitDef d=dst:a1
+inst PackF16 d=vdst:v1 u=src0:vs1,src1:vs1
+
+[burs]
+# Nonterminals: the forms a 32-bit integer value takes.
+nt s "uniform value in an SGPR"
+nt v "value in a VGPR"
+nt k "constant"
+nt ssrc "SALU source: an SGPR or a constant"
+nt vsrc "VALU source: a VGPR, an SGPR or a constant"
+# Terminals: rocKE integer operations, and the leaves of a tree (values computed
+# elsewhere: constants, uniform and divergent registers).
+term add kind=Add
+term sub kind=Sub
+term mul kind=Mul
+term mulhu kind=UmulHi
+term mulhi kind=SmulHi
+term and kind=And
+term or kind=Or
+term xor kind=Xor
+term shl kind=Shl
+term lshr kind=Lshr
+term ashr kind=Ashr
+term smin kind=Smin
+term smax kind=Smax
+term konst leaf=konst
+term sreg leaf=sreg
+term vreg leaf=vreg
+# Cost weights per unit: a rule costs the issue cycles of its instruction times
+# its unit's weight. The VALU is the throughput limit, SALU work overlaps it: a
+# VALU cycle costs twice a SALU cycle.
+weight VALU 2
+weight TRANS 2
+weight WMMA 2
+weight SALU 1
+pred u24 "both values are known to be below 2^24 (opt.rs ranges)"
+pred shift1to4 "a constant shift amount of 1 to 4"
+pred fits3 "three sources within VOP3's scalar limit: two SGPRs or literals, one literal"
+# Leaves and chains.
+rule s sreg
+rule v vreg
+rule k konst
+rule ssrc s
+rule ssrc k
+rule vsrc v
+rule vsrc s
+rule vsrc k
+# SALU: one instruction per operation, as isel selects it.
+rule s add(a:ssrc,b:ssrc) emit=hand inst=SAddI32
+rule s sub(a:ssrc,b:ssrc) emit=hand inst=SSubI32
+rule s mul(a:ssrc,b:ssrc) emit=hand inst=SMulI32
+rule s mulhu(a:ssrc,b:ssrc) emit=hand inst=SMulHiU32
+rule s mulhi(a:ssrc,b:ssrc) emit=hand inst=SMulHiI32
+rule s and(a:ssrc,b:ssrc) emit=hand inst=SAndB32
+rule s or(a:ssrc,b:ssrc) emit=hand inst=SOrB32
+rule s xor(a:ssrc,b:ssrc) emit=hand inst=SXorB32
+rule s shl(a:ssrc,b:ssrc) emit=hand inst=SLshlB32
+rule s lshr(a:ssrc,b:ssrc) emit=hand inst=SLshrB32
+rule s ashr(a:ssrc,b:ssrc) emit=hand inst=SAshrI32
+rule s smin(a:ssrc,b:ssrc) emit=hand inst=SMinI32
+rule s smax(a:ssrc,b:ssrc) emit=hand inst=SMaxI32
+# SALU: a shift by 1 to 4 and an add in one instruction.
+rule s add(shl(a:ssrc,n:k),b:ssrc) if=shift1to4(n) emit=lshladd(a,n,b) inst=SLshl1AddU32
+rule s add(b:ssrc,shl(a:ssrc,n:k)) if=shift1to4(n) emit=lshladd(a,n,b) inst=SLshl1AddU32
+# VALU: one instruction per operation, as isel selects it.
+rule v add(a:vsrc,b:vsrc) emit=hand inst=VAddNcU32
+rule v sub(a:vsrc,b:vsrc) emit=hand inst=VSubNcU32
+rule v mul(a:vsrc,b:vsrc) if=u24(a,b) emit=hand inst=VMulU32U24
+rule v mul(a:vsrc,b:vsrc) if=!u24(a,b) emit=hand inst=VMulLoU32
+rule v mulhu(a:vsrc,b:vsrc) if=u24(a,b) emit=hand inst=VMulHiU32U24
+rule v mulhu(a:vsrc,b:vsrc) if=!u24(a,b) emit=hand inst=VMulHiU32
+rule v mulhi(a:vsrc,b:vsrc) emit=hand inst=VMulHiI32
+rule v and(a:vsrc,b:vsrc) emit=hand inst=VAndB32
+rule v or(a:vsrc,b:vsrc) emit=hand inst=VOrB32
+rule v xor(a:vsrc,b:vsrc) emit=hand inst=VXorB32
+rule v shl(a:vsrc,b:vsrc) emit=hand inst=VLshlrevB32
+rule v lshr(a:vsrc,b:vsrc) emit=hand inst=VLshrrevB32
+rule v ashr(a:vsrc,b:vsrc) emit=hand inst=VAshrrevI32
+rule v smin(a:vsrc,b:vsrc) emit=hand inst=VMinI32
+rule v smax(a:vsrc,b:vsrc) emit=hand inst=VMaxI32
+# VALU: two operations in one three-source VOP3 (v3c: a commutative inner
+# operation, whose VGPR source goes second as isel orders it).
+rule v add(add(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VAdd3U32
+rule v add(c:vsrc,add(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VAdd3U32
+rule v add(shl(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3(a,b,c) inst=VLshlAddU32
+rule v add(c:vsrc,shl(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3(a,b,c) inst=VLshlAddU32
+rule v shl(add(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VAddLshlU32
+rule v or(shl(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3(a,b,c) inst=VLshlOrB32
+rule v or(c:vsrc,shl(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3(a,b,c) inst=VLshlOrB32
+rule v or(and(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VAndOrB32
+rule v or(c:vsrc,and(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VAndOrB32
+rule v or(or(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VOr3B32
+rule v or(c:vsrc,or(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VOr3B32
+rule v add(mul(a:vsrc,b:vsrc),c:vsrc) if=u24(a,b)&fits3(a,b,c) emit=v3c(a,b,c) inst=VMadU32U24
+rule v add(c:vsrc,mul(a:vsrc,b:vsrc)) if=u24(a,b)&fits3(a,b,c) emit=v3c(a,b,c) inst=VMadU32U24
+rule v smax(smin(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VMinmaxI32
+rule v smax(c:vsrc,smin(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VMinmaxI32
+rule v smin(smax(a:vsrc,b:vsrc),c:vsrc) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VMaxminI32
+rule v smin(c:vsrc,smax(a:vsrc,b:vsrc)) if=fits3(a,b,c) emit=v3c(a,b,c) inst=VMaxminI32

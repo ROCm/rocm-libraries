@@ -2252,6 +2252,23 @@ knobs canonicalize to the default, and `config_key` survives a change of
 problem. It does not exercise a production `auto` with `auto_knobs`; the
 family's own dispatch tests cover that.
 
+**Searching instead of sweeping.** Every tuned candidate also exposes
+`search_space(req) -> (knob_space, base)`, which
+`rocke.dispatch.tuning.search` turns into a `KnobSearchSpace`: mixed
+ordinal/categorical/bool/gated parameters derived from the axes, with the
+space's own `canonicalize` as validity and `config_key` as identity. The
+search strategies (differential evolution, successive halving with racing,
+TPE / GP with a selector prior, hill climbing with combination re-sweeps, a
+bandit portfolio) measure a budgeted handful of configs instead of the full
+walk, and `tune_candidate` records the winner as a `TunedRecord` (with its
+confirmed paired speedup over the candidate's default and that speedup's
+p-value) that `TuningDB.serve` / `TuningDB.pin` turn back into a pinned
+request, so dispatch serves it through the normal pin path above. Only a pick
+that beat the default beyond noise is served, and a stale record is refused,
+never substituted. The
+design, API and C++ port notes are in `dsl_docs/autotune/overview.md`
+("Search engine").
+
 Worked examples: the toy family in
 `platform/tests/dispatch/dispatch_tests/tuning/test_tuning_template.py` (every
 piece in one file) and attention (`library/dispatch/attention`: `DenseSpace`

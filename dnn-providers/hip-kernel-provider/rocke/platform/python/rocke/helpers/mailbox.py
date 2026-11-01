@@ -369,17 +369,18 @@ def _poll_offset(b: IRBuilder, mb: Mailbox, i: IntOrValue) -> Value:
 NUMA_COPY_BYTES = 8192
 
 
-def iod_id(b: IRBuilder) -> Value:
-    """Uniform i32: 0 on XCDs 0-3, 1 on XCDs 4-7."""
-    return b.select(
-        b.cmp_lt(dops.xcc_id(b), b.const_i32(4)), b.const_i32(0), b.const_i32(1)
-    )
+def iod_id(b: IRBuilder, xcc_id=None) -> Value:
+    """Uniform i32: 0 on XCDs 0-3, 1 on XCDs 4-7. ``xcc_id(b)`` reads the
+    XCD id (default ``device_ops.xcc_id``)."""
+    xcc = (xcc_id or dops.xcc_id)(b)
+    return b.select(b.cmp_lt(xcc, b.const_i32(4)), b.const_i32(0), b.const_i32(1))
 
 
-def local_copy(b: IRBuilder, mb: Mailbox, flip: IntOrValue = 0) -> Mailbox:
+def local_copy(b: IRBuilder, mb: Mailbox, flip: IntOrValue = 0, xcc_id=None) -> Mailbox:
     """The view of a ``numa_copies=2`` mailbox a consumer polls: copy
-    ``iod_id ^ flip`` (``flip`` uniform i32 or int)."""
-    idx = b.xor(iod_id(b), _i32(b, flip))
+    ``iod_id ^ flip`` (``flip`` uniform i32 or int; ``xcc_id`` as in
+    :func:`iod_id`)."""
+    idx = b.xor(iod_id(b, xcc_id), _i32(b, flip))
     return replace(mb, copy_off=b.mul(idx, b.const_i32(NUMA_COPY_BYTES)))
 
 

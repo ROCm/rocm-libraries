@@ -1,0 +1,158 @@
+rust==HEAD	library/benchmarks/gfx950/qwen38_mono/toy_chain_bench.py	0	41	clean
+mono==HEAD	library/kernels/gfx950/mx_decode_gemv.py	33	0	clean
+both	library/kernels/gfx950/qwen38_mono/README.md	1	8	clean
+untracked-both	library/kernels/gfx950/qwen38_mono/ccl/collectives.py	84		
+untracked-both	library/kernels/gfx950/qwen38_mono/ccl/layout.py	160		
+untracked-both	library/kernels/gfx950/qwen38_mono/ccl/lint.py	20		
+untracked-both	library/kernels/gfx950/qwen38_mono/ccl/lm_probe.py	21		
+untracked-both	library/kernels/gfx950/qwen38_mono/ccl/ref.py	22		
+untracked-both	library/kernels/gfx950/qwen38_mono/ccl/wire.py	19		
+rust-only	library/kernels/gfx950/qwen38_mono/direct_pilot.py			
+both	library/kernels/gfx950/qwen38_mono/framework.py	118	327	CONFLICT(6)
+rust-only	library/kernels/gfx950/qwen38_mono/irops.py			
+untracked-both	library/kernels/gfx950/qwen38_mono/large_batch/__init__.py	6		
+rust==HEAD	library/kernels/gfx950/qwen38_mono/mailbox_ir.py	0	45	clean
+rust==HEAD	library/kernels/gfx950/qwen38_mono/moe.py	0	145	clean
+both	library/kernels/gfx950/qwen38_mono/moe_fused.py	40	87	CONFLICT(3)
+untracked-both	library/kernels/gfx950/qwen38_mono/probes/p2_head.py	35		
+rust==HEAD	library/kernels/gfx950/qwen38_mono/stage_moe_fused.py	0	4	clean
+mono==HEAD	library/kernels/gfx950/qwen38_mono/stamps.py	17	0	clean
+mono==HEAD	library/kernels/gfx950/qwen38_mono/toy_chain.py	26	0	clean
+untracked-both	library/kernels/gfx950/qwen38_mono/tune/__main__.py	1		
+untracked-both	library/kernels/gfx950/qwen38_mono/tune/catalog.py	14		
+untracked-both	library/kernels/gfx950/qwen38_mono/tune/evaluate.py	7		
+untracked-both	library/kernels/gfx950/qwen38_mono/tune/knobs.py	67		
+untracked-both	library/kernels/gfx950/qwen38_mono/tune/strategies.py	357		
+untracked-both	library/kernels/gfx950/qwen38_mono/tune/tdb.py	13		
+rust-only	library/tests/test_qwen38_direct_pilot.py			
+untracked-both	library/tests/test_qwen38_lb_bytes_model.py	1		
+rust-only	library/tests/test_qwen38_lever_scopes.py			
+untracked-both	library/tests/test_qwen38_tune.py	226		
+rust==HEAD	platform/dsl_docs/autotune/overview.md	0	632	clean
+rust==HEAD	platform/dsl_docs/optimization/arch/gfx950.md	0	14	clean
+mono==HEAD	platform/dsl_docs/reference/env_flags.md	16	0	clean
+rust-only	platform/dsl_docs/runtime/code_object_compiler.md			
+rust-only	platform/dsl_docs/runtime/direct_compiler.md			
+mono==HEAD	platform/pyproject.toml	2	0	clean
+mono==HEAD	platform/python/rocke/__init__.py	28	0	clean
+mono==HEAD	platform/python/rocke/core/backend.py	5	0	clean
+both	platform/python/rocke/core/ir.py	150	39	clean
+mono==HEAD	platform/python/rocke/core/ir_serialize.py	106	0	clean
+mono==HEAD	platform/python/rocke/core/isa/backend.py	19	0	clean
+both	platform/python/rocke/core/lower_llvm.py	61	15	clean
+mono==HEAD	platform/python/rocke/core/passes.py	2	0	clean
+rust==HEAD	platform/python/rocke/dispatch/ARCHITECTURE.md	0	17	clean
+rust==HEAD	platform/python/rocke/dispatch/core.py	0	9	clean
+rust==HEAD	platform/python/rocke/dispatch/tuning/__init__.py	0	3	clean
+rust==HEAD	platform/python/rocke/dispatch/tuning/candidate.py	0	11	clean
+mono==HEAD	platform/python/rocke/examples/common/ck_tile_parity.py	2	0	clean
+mono==HEAD	platform/python/rocke/examples/common/distribution_2d_add_demo.py	2	0	clean
+mono==HEAD	platform/python/rocke/examples/common/distribution_reduce_demo.py	2	0	clean
+mono==HEAD	platform/python/rocke/examples/gfx1151/gemm/scripts/01_f16_verify.py	20	0	clean
+mono==HEAD	platform/python/rocke/examples/gfx942/tf32_numerics.py	12	0	clean
+untracked-both	platform/python/rocke/examples/gfx950/ccl/README.md	27		
+untracked-both	platform/python/rocke/examples/gfx950/ccl/bench_ccl.py	175		
+untracked-both	platform/python/rocke/examples/gfx950/ccl/bench_ccl_lm.py	362		
+untracked-both	platform/python/rocke/examples/gfx950/ccl/ccl_case_study.md	68		
+untracked-both	platform/python/rocke/examples/gfx950/ccl/harness.py	25		
+mono==HEAD	platform/python/rocke/examples/gfx950/moe/test_active_tile_skip.py	2	0	clean
+mono==HEAD	platform/python/rocke/examples/gfx950/moe/test_preshuffle_b.py	2	0	clean
+mono==HEAD	platform/python/rocke/examples/gfx950/xf32/bf16x3_parity.py	2	0	clean
+mono==HEAD	platform/python/rocke/helpers/__init__.py	8	0	clean
+rust==HEAD	platform/python/rocke/helpers/autotune.py	0	130	clean
+both	platform/python/rocke/helpers/compile.py	252	5	clean
+rust-only	platform/python/rocke/helpers/direct_gemm.py			
+mono==HEAD	platform/python/rocke/helpers/mailbox.py	21	0	clean
+mono==HEAD	platform/python/rocke/portable_ir/drivers/bench_jit_validation.py	2	0	clean
+mono==HEAD	platform/python/rocke/portable_ir/drivers/gpu_replay.py	14	0	clean
+mono==HEAD	platform/python/rocke/portable_ir/drivers/launch_from_bundle.py	2	0	clean
+mono==HEAD	platform/python/rocke/portable_ir/drivers/parity_matrix.py	2	0	clean
+mono==HEAD	platform/python/rocke/portable_ir/drivers/roll_hsaco_parity.py	4	0	clean
+mono==HEAD	platform/python/rocke/portable_ir/drivers/roll_kernel.py	2	0	clean
+mono==HEAD	platform/python/rocke/runtime/__init__.py	35	0	clean
+rust-only	platform/python/rocke/runtime/code_object.py			
+rust-only	platform/python/rocke/runtime/code_object_elf.py			
+mono==HEAD	platform/python/rocke/runtime/comgr.py	35	0	clean
+rust-only	platform/python/rocke/runtime/direct_lift.py			
+rust-only	platform/python/rocke/runtime/direct_session.py			
+rust==HEAD	platform/python/rocke/sweep.py	0	38	clean
+crate-new	platform/rust/rocke-codeobj/Cargo.lock			
+crate-new	platform/rust/rocke-codeobj/Cargo.toml			
+crate-new	platform/rust/rocke-codeobj/README.md			
+crate-new	platform/rust/rocke-codeobj/examples/bench950.rs			
+crate-new	platform/rust/rocke-codeobj/examples/bench_corpus.rs			
+crate-new	platform/rust/rocke-codeobj/examples/hazard_corpus.rs			
+crate-new	platform/rust/rocke-codeobj/examples/isa_xcheck.rs			
+crate-new	platform/rust/rocke-codeobj/examples/lds_conflicts.rs			
+crate-new	platform/rust/rocke-codeobj/examples/mb_hsaco.rs			
+crate-new	platform/rust/rocke-codeobj/examples/mir_dump.rs			
+crate-new	platform/rust/rocke-codeobj/examples/model_check.rs			
+crate-new	platform/rust/rocke-codeobj/examples/rir_compile.rs			
+crate-new	platform/rust/rocke-codeobj/examples/target_compile.rs			
+crate-new	platform/rust/rocke-codeobj/examples/unroll_stats.rs			
+crate-new	platform/rust/rocke-codeobj/isa/gfx11.isa			
+crate-new	platform/rust/rocke-codeobj/isa/gfx11.overlay			
+crate-new	platform/rust/rocke-codeobj/isa/gfx950.isa			
+crate-new	platform/rust/rocke-codeobj/src/direct_gemm.rs			
+crate-new	platform/rust/rocke-codeobj/src/elf.rs			
+crate-new	platform/rust/rocke-codeobj/src/error.rs			
+crate-new	platform/rust/rocke-codeobj/src/gfx1151_isa.rs			
+crate-new	platform/rust/rocke-codeobj/src/gfx1151_wmma_gemm.hex			
+crate-new	platform/rust/rocke-codeobj/src/gfx1151_wmma_gemm.ir			
+crate-new	platform/rust/rocke-codeobj/src/hsaco_writer.rs			
+crate-new	platform/rust/rocke-codeobj/src/lib.rs			
+crate-new	platform/rust/rocke-codeobj/src/native.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/alias.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/analysis.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/asm.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/ast.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/burs.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/div_bypass.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/fma_chains.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/fma_mix.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/fx.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/gen_burs.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/gen_isa.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/gen_opcodes.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/hashcons.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/isa.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/isel.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/isel_asm.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/lds_swizzle.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/loadorder.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/mir.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/mma_order.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/mod.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/model.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/opt.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/parse.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/parse_par.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/peephole.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/peephole_table.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/post.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/print.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/regalloc.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/reload.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/scan.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/scan_line.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/session.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/spill.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/stream.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/uniform_masks.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/unroll.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/validate.rs			
+crate-new	platform/rust/rocke-codeobj/src/rir/vopd.rs			
+mono==HEAD	platform/tests/core/test_compile_target_selection.py	56	0	clean
+mono==HEAD	platform/tests/core/test_persistent_mem_ops.py	96	0	clean
+rust-only	platform/tests/runtime/test_code_object.py			
+rust-only	platform/tests/runtime/test_code_object_elf.py			
+rust-only	platform/tests/runtime/test_direct_gemm.py			
+rust-only	platform/tests/runtime/test_direct_session.py			
+rust-only	platform/tests/runtime/test_direct_targets.py			
+rust-only	platform/tests/tools/test_isa_burs.py			
+rust-only	platform/tests/tools/test_isa_tables.py			
+rust-only	platform/tests/tools/test_isa_xcheck.py			
+rust-only	platform/tools/isa_burs.py			
+rust-only	platform/tools/isa_tables.py			
+rust-only	platform/tools/isa_xcheck.py			
+rust-only	platform/tools/lever_scope_check.py			

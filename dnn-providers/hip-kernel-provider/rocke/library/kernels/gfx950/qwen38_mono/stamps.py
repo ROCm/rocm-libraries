@@ -27,6 +27,8 @@ from rocke.core.ir import I32, I64, IRBuilder, Value
 from rocke.helpers import device_ops as dops
 from rocke.helpers.lds_arena import LdsEntry, LdsView
 
+from . import irops as iro
+
 __all__ = [
     "GRID",
     "LAYER_SLOTS",
@@ -73,11 +75,12 @@ class Stamps:
     it lives across every LDS phase). All methods are called by every thread
     (each guards itself)."""
 
-    def __init__(self, b: IRBuilder, lds: LdsView, stages: int):
+    def __init__(self, b: IRBuilder, lds: LdsView, stages: int, irops: bool = False):
         if stages > MAX_STAGES:
             raise ValueError(f"at most {MAX_STAGES} stamped stages, got {stages}")
         self.b = b
         self.lds = lds
+        self.irops = irops  # clock reads and the flush pointer as IR ops (``irops``)
         self.stages = stages
 
     def _st(self, k: int | Value, v64: Value) -> None:
@@ -100,7 +103,7 @@ class Stamps:
             for i in range(self.stages):
                 self._st(enter_ix(i), zero)
                 self._st(exit_ix(i), zero)
-            self._st(0, dops.memrealtime(b))
+            self._st(0, iro.memrealtime(b, self.irops))
         # each wave zeroes its own ready points (in program order before them)
         with b.scf_if(b.cmp_eq(b.lane_id(), b.const_i32(0))):
             w = dops.wave_id(b)
@@ -109,18 +112,18 @@ class Stamps:
 
     def enter(self, i: int) -> None:
         with self.b.scf_if(dops.is_thread0(self.b)):
-            self._st(enter_ix(i), dops.memrealtime(self.b))
+            self._st(enter_ix(i), iro.memrealtime(self.b, self.irops))
 
     def leave(self, i: int) -> None:
         with self.b.scf_if(dops.is_thread0(self.b)):
-            self._st(exit_ix(i), dops.memrealtime(self.b))
+            self._st(exit_ix(i), iro.memrealtime(self.b, self.irops))
 
     def ready(self, i: int) -> None:
         """Lane 0 of the calling wave: its inputs of stage ``i`` arrived."""
         b = self.b
         with b.scf_if(b.cmp_eq(b.lane_id(), b.const_i32(0))):
             w = dops.wave_id(b)
-            self._st(b.add(w, b.const_i32(ready_ix(i))), dops.memrealtime(b))
+            self._st(b.add(w, b.const_i32(ready_ix(i))), iro.memrealtime(b, self.irops))
 
     def flush(self, scratch: Value, base: int, layer: Value, bid: Value) -> None:
         """Kernel (or layer) end: an LDS barrier, then threads ``< POINTS``
@@ -135,8 +138,8 @@ class Stamps:
                 b, LDS_NAME, b.add(b.mul(tid, b.const_i32(2)), b.const_i32(1))
             )
             v = b.lor(b.zext(lo, I64), b.shl(b.zext(hi, I64), b.const_i64(32)))
-            ptr = dops.ptr_from_i64(
-                b, b.readfirstlane(b.add(scratch, b.const_i64(base))), pointee=I64
+            ptr = iro.ptr(
+                b, b.readfirstlane(b.add(scratch, b.const_i64(base))), self.irops, pointee=I64
             )
             idx = b.add(
                 b.mul(b.add(b.mul(layer, b.const_i32(GRID)), bid), b.const_i32(POINTS)),

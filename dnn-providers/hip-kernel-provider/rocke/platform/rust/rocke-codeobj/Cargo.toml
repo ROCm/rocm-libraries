@@ -1,0 +1,11 @@
+[package]
+name = "rocke-codeobj"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Direct rocKE IR to HSACO compiler with no LLVM dependency"
+publish = false
+
+[lib]
+name = "rocke_codeobj_ffi"
+crate-type = ["rlib", "cdylib"]

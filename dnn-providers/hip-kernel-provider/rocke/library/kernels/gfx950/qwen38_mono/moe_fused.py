@@ -128,6 +128,12 @@ class FusedKnobs:
       (:class:`.moe.MoeKnobs` ``w_cpol``, ``mailbox``, ``a_pre``,
       ``m4_interleave``, ``m4_apipe``, ``m3_ept``); defaults = the port's tuned
       rows > 1 set.
+    m3_rows: request rows per router (M3) task: 0 (the mono's
+      ``m3_task_rows``: 1 at rows <= 3, 2 at rows 4) | 1..4 (a divisor of the
+      rows). Router tasks = (experts / ``m3_ept`` + 1) x rows / ``m3_rows``,
+      at most one per CTA: ``m3_ept=4`` needs ``m3_rows`` = rows at rows > 1
+      (129 tasks, half the router bytes each; probe P10). Not in ``repr``
+      (the stage functions' pair ids of the ``m3_rows=0`` builds stay).
     router: include M3 (False: a split suffix behind a FlyDSL ``a1 .. m3``
       prefix, for injected real routing).
     w_null: measurement only (WaveScope W0): every expert weight load reads
@@ -167,7 +173,12 @@ class FusedKnobs:
     mutate: test only: ``combine_swap`` (ranks 0 and 1 swapped in the
       combine order: must differ from the mono) | ``xtag_or`` (the private
       tag ``tag | 2^31`` of the first version, equal to the launch tag once
-      the step counter reaches 2^25: QSA layers then read Q5's pairs as ys).
+      the step counter reaches 2^25: QSA layers then read Q5's pairs as ys)
+      | router mutants (probe P15): ``router_kdrop`` (K part 15 left out of
+      every router logit: the ``lg`` payload must differ) | ``router_ksum``
+      (the K-part lane sum in reverse order: a 1-ulp f32 change, mostly
+      hidden by the logit's bf16 rounding; informational) | ``route_k11``
+      (every routing pass takes the 11th pick for the 10th).
     numa: 0 | 1 = the mailbox layout of a mono build with ATOM's ``numa=1``
       schedule lever (``ATOM_Q38_SCHED``): every mailbox the body shares with
       the mono's stages (``mxbf``, ``mx8``, ``mxe``, ``w``, ``minj``) is read
@@ -198,6 +209,23 @@ class FusedKnobs:
       HBM -> LDS (buffer-to-LDS DMA, issued with the gate_up chains, no
       VGPRs held); the rest as ``after_epi``. LDS cost 1280 words per unit and
       wave (refused past the mono arena).
+    route: (probe P15, the N3b router form) ``cta`` (waves ``r < rows``
+      route row r into LDS, then a CTA barrier) | ``wave`` (every routed wave
+      polls the logits of every row and runs its own top-10, writing the same
+      LDS words, so it issues its gate_up loads without waiting for the other
+      waves; the barrier moves to just before the gate_up MFMAs, which read
+      the other waves' x fill). Needs ``slots`` arith | wave,
+      ``route_gate=none``, ``spec=off``. With ``m3_ept=2, m3_rows=rows`` (the
+      router over every CTA) this is N3b. Not in ``repr`` (the pair ids of
+      the ``cta`` builds stay); in the suffix and the pair id when set.
+    phase_levers: Rust direct compiler only: lever scopes per phase,
+      ``"<phase>=<levers>;..."`` with phases of :data:`PHASES` and levers
+      ``+`` / ``,`` joined ``ROCKE_DIRECT_LEVERS`` names (``-name`` turns a
+      kernel lever off); phase ``PHASES[i]`` is the code between phase
+      points ``i - 1`` and ``i`` (``entry``: up to point 0), the phase-stamp
+      points (``IRBuilder.set_lever_scope``). COMGR builds ignore it;
+      ``""``: byte-identical IR. Not in the kernel name (the same symbol for
+      every scope set).
     """
 
     map: str = "line"
@@ -238,6 +266,9 @@ class FusedKnobs:
     sh_join: int = 0
     dn_lds: int = 1
     ys_home: str = "single"
+    m3_rows: int = field(default=0, repr=False)
+    route: str = field(default="cta", repr=False)
+    phase_levers: str = field(default="", repr=False)
 
     @property
     def uses_area(self) -> bool:
@@ -267,6 +298,8 @@ class FusedKnobs:
             raise ValueError("numa_hdr must be a non-negative multiple of 256")
         if self.line_order not in ("slot", "router_dn"):
             raise ValueError(f"line_order must be slot|router_dn, got {self.line_order!r}")
+        if not 0 <= self.m3_rows <= A.MAX_ROWS:
+            raise ValueError(f"m3_rows must be in 0..{A.MAX_ROWS}")
         if not 0 <= self.sh_join <= 8:
             raise ValueError("sh_join must be in 0..8")
         if self.sh_join and self.combine == "sh":
@@ -297,15 +330,30 @@ class FusedKnobs:
             raise ValueError(f"xchg_pre must be hint|none, got {self.xchg_pre!r}")
         if self.guard not in ("none", "loads"):
             raise ValueError(f"guard must be none|loads, got {self.guard!r}")
-        if self.mutate not in ("", "combine_swap", "xtag_or"):
-            raise ValueError(f"mutate must be ''|combine_swap|xtag_or, got {self.mutate!r}")
+        if self.mutate not in ("", "combine_swap", "xtag_or", "router_ksum", "router_kdrop", "route_k11"):
+            raise ValueError(f"mutate must be ''|combine_swap|xtag_or|router_ksum|router_kdrop|route_k11, got {self.mutate!r}")
+        if self.route not in ("cta", "wave"):
+            raise ValueError(f"route must be cta|wave, got {self.route!r}")
+        if self.route == "wave" and (self.slots == "table" or self.route_gate != "none" or self.spec != "off"):
+            raise ValueError("route=wave needs slots arith|wave, route_gate=none and spec=off")
+        self.phase_lever_map()  # checks the phases
         self.moe_knobs(1)  # the port's checks of the shared knobs
+
+    def phase_lever_map(self) -> dict:
+        """``phase_levers`` as phase -> lever scope text."""
+        out = {}
+        for part in filter(None, (x.strip() for x in self.phase_levers.split(";"))):
+            name, sep, levers = part.partition("=")
+            if not sep or name.strip() not in PHASES:
+                raise ValueError(f"phase_levers: {part!r} is not <phase>=<levers> with a phase of {PHASES}")
+            out[name.strip()] = levers.strip()
+        return out
 
     def moe_knobs(self, rows: int) -> MO.MoeKnobs:
         """The port knobs the reused emitters read."""
         return MO.MoeKnobs(
             dedupe=rows > 1, union_order="id", shared_first=True, m4_waves=4, m4_map="balanced",
-            m3_ept=self.m3_ept, w_cpol=self.w_cpol, mailbox=self.mailbox, m5_ranks="pre", a_pre=self.a_pre,
+            m3_ept=self.m3_ept, m3_rows=self.m3_rows, w_cpol=self.w_cpol, mailbox=self.mailbox, m5_ranks="pre", a_pre=self.a_pre,
             m4_guard="none", m4_interleave=self.gu_interleave, m4_apipe=self.gu_apipe,
             route_pause=self.route_pause, route_gate=self.route_gate,
         )  # fmt: skip
@@ -317,7 +365,7 @@ class FusedKnobs:
                      "extras", "route_gate", "route_pause", "tw_at", "line_impl", "slots", "w_cpol", "a_pre",
                      "gu_interleave", "gu_apipe", "m3_ept", "router", "w_null", "phase_stamps", "mutate", "guard", "xchg_pre", "router_knobs", "combine", "spec", "spec_loads",
                      "spec_keep", "numa", "lg_copy", "xchg_home", "numa_hdr", "line_order", "sh_join", "dn_lds",
-                     "ys_home"):
+                     "ys_home", "m3_rows", "route"):
             v = getattr(self, name)
             if v != getattr(d, name):
                 parts.append(f"{name}{v}".replace("_", ""))
@@ -565,7 +613,8 @@ _BOUNDS: dict = {}
 def _bounds(plan: FusedPlan) -> dict:
     k = plan.knobs
     key = (plan.rows, plan.experts, k.map, k.iod_split, k.sh_ctas, k.sh_base, k.line_order, k.sh_join,
-           k.m3_ept if k.line_order == "router_dn" else None)  # fmt: skip
+           k.m3_ept if k.line_order == "router_dn" else None,
+           k.m3_rows if k.line_order == "router_dn" else None)  # fmt: skip
     if key not in _BOUNDS:
         _BOUNDS[key] = plan.bounds()
     return _BOUNDS[key]
@@ -729,7 +778,13 @@ class FusedCtx(MO.MoeCtx):
         return self.add(self.mul(r, A.ROW_PAIRS), base, self.mul(rank, YS_PAIRS), cp)
 
     def phase(self, i: int) -> None:
-        """Phase stamp ``i`` (knob ``phase_stamps``): thread 0, one 8-byte store."""
+        """Phase point ``i``: the end of phase ``PHASES[i]``: the next phase's lever scope (knob
+        ``phase_levers``; past the last, the body's caller's), then the stamp (knob ``phase_stamps``):
+        thread 0, one 8-byte store."""
+        if self.fk.phase_levers:
+            outer = getattr(self, "_outer_scope", None)
+            nxt = self.fk.phase_lever_map().get(PHASES[i + 1]) if i + 1 < len(PHASES) else None
+            self.b.set_lever_scope(nxt or outer)
         if not self.fk.phase_stamps:
             return
         b = self.b
@@ -1267,13 +1322,41 @@ def _route_gate_area(e: FusedCtx) -> None:
 def _route(e: FusedCtx, weights: bool, keys: bool = False) -> None:
     """:func:`.moe._route_rows` with this build's route gate (the area's local logits with ``lg_copy=numa2``)."""
     gate = e.fk.route_gate == "pre_poll"
+    k11 = e.fk.mutate == "route_k11"
     if gate and e.in_area("lg"):
         _route_gate_area(e)
-        MO._route_rows(e, weights=weights, gate=False, keys=keys)
+        MO._route_rows(e, weights=weights, gate=False, keys=keys, k11=k11)
     elif keys:
-        MO._route_rows(e, weights=weights, gate=gate, keys=keys)
+        MO._route_rows(e, weights=weights, gate=gate, keys=keys, k11=k11)
     else:
-        MO._route_rows(e, weights=weights, gate=gate)
+        MO._route_rows(e, weights=weights, gate=gate, k11=k11)
+
+
+def _route_wave(e: FusedCtx, weights: bool, keys: bool) -> None:
+    """``route=wave`` (probe P15, N3b): every wave polls the logits of every row and runs each row's top-10 itself;
+    lane 0 writes the ids (and weights / keys), the same words every wave writes, so no wave waits for another
+    before its gate_up issue. Mutant ``route_k11`` (every wave): the 11th pick for the 10th. No single-wave mutant:
+    the waves share these LDS words (one wave's write shows only if it lands last), and at rows > 1 a wave-divergent
+    union deadlocks the line (probe P15, on hardware)."""
+    b = e.b
+    j = e.imin(e.lane, e.E // 8 - 1)
+    specs = []
+    for r in range(e.R):
+        specs += [(e.pix("lg", e.mul(j, 4), r), 2), (e.pix("lg", e.add(e.mul(j, 4), 2), r), 2)]
+    got = e.poll(specs, route=True)
+    mut = e.fk.mutate
+    for r in range(e.R):
+        picks = MO.top10(e, got[2 * r] + got[2 * r + 1], extra=1 if mut == "route_k11" else 0)
+        if mut == "route_k11":
+            picks = picks[: A.TOP_K - 1] + [picks[A.TOP_K]]
+        ws = MO.router_weights(e, picks) if weights else None
+        with b.scf_if(e.eq(e.lane, 0)):
+            for k in range(A.TOP_K):
+                e.st(e.ix("ids", k, r), MO.key_expert(e, picks[k]))
+                if ws is not None:
+                    e.st(e.ix("tw", k, r), ws[k])
+                if keys:
+                    e.st(e.ix("keys", k, r), picks[k])
 
 
 def _dn_unit(e: FusedCtx, kk: int, d0, n_dn, dn_last, lo, is_sh, rot, sl0, tag: str, lds_kk=None):
@@ -1457,6 +1540,18 @@ def _combine_listed(e: FusedCtx) -> None:
 
 
 def emit_fused(e: FusedCtx) -> None:
+    """The fused body; the lever scope in force before it (knob ``phase_levers``) is back after it."""
+    saved = e.b._lever_scope
+    e._outer_scope = saved
+    if e.fk.phase_levers:
+        e.b.set_lever_scope(e.fk.phase_lever_map().get(PHASES[0]) or saved)
+    try:
+        _emit_fused(e)
+    finally:
+        e.b.set_lever_scope(saved)
+
+
+def _emit_fused(e: FusedCtx) -> None:
     b, fp, fk = e.b, e.fplan, e.fk
     R = e.R
     J = fp.j
@@ -1492,8 +1587,12 @@ def emit_fused(e: FusedCtx) -> None:
             MO._m5_extras(e, ct)
     pf = _spec_prefetch(e, routed) if fk.spec == "prev" else None
     with b.scf_if(routed):
-        _route(e, weights=fk.tw_at == "route", keys=fk.tw_at in ("late", "epi"))
-    e.barrier()
+        if fk.route == "wave":  # every wave routes every row itself: no barrier here (it moves before the MFMAs)
+            _route_wave(e, weights=fk.tw_at == "route", keys=fk.tw_at in ("late", "epi"))
+        else:
+            _route(e, weights=fk.tw_at == "route", keys=fk.tw_at in ("late", "epi"))
+    if fk.route != "wave":
+        e.barrier()
     if pf is not None:
         _spec_sink(e, pf)
         _spec_record(e)
@@ -1557,6 +1656,8 @@ def emit_fused(e: FusedCtx) -> None:
         with b.scf_if(routed if last else b.land(has_comb, routed)):
             MO._late_weights(e)
     e.phase(3)
+    if fk.route == "wave":  # the MFMAs read the x fill (gx8 / gxe) of the other waves
+        e.barrier()
     # ---- gate_up MFMAs into gred (row r: unit k's block w4 at k * 64 + w4 * 16)
     r_l = e.imin(e.umod(e.lane, 16), R - 1)
     x8 = e.ix("gx8", 0, r_l)
@@ -1704,7 +1805,7 @@ def _combine_sh(e: FusedCtx, is_sh, q) -> None:
     G = A.THREADS // per
     order = [1, 0] + list(range(2, A.TOP_K)) if fk.mutate == "combine_swap" else None
     with b.scf_if(is_sh):
-        MO._route_rows(e, weights=True, gate=fk.route_gate == "pre_poll")
+        MO._route_rows(e, weights=True, gate=fk.route_gate == "pre_poll", k11=fk.mutate == "route_k11")
         e.barrier()
         loc = e.umod(e.tid, per)
         grp = e.udiv(e.tid, per)

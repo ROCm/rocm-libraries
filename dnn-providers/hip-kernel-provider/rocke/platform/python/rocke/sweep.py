@@ -337,3 +337,41 @@ def build_default_dispatcher_set(
         )
     )
     return build_all_instances(specs, cache_dir=cache_dir, isa=isa, parallel=parallel)
+
+# ---------------------------------------------------------------------
+# Search instead of sweep
+# ---------------------------------------------------------------------
+
+
+def search_instances(
+    specs: Sequence[UniversalGemmSpec],
+    *,
+    measure,
+    check,
+    strategy: str = "portfolio",
+    budget: int = 64,
+    seed: int = 0,
+    **search_options,
+):
+    """Measure at most ``budget`` of ``specs``, chosen by a search strategy,
+    instead of building and timing all of them.
+
+    ``measure(spec, fidelity) -> ms or per-rep ms`` builds (cached), checks
+    nothing and times one spec; ``check(spec) -> bool | (bool, why)`` is the
+    mandatory numeric check (run once per spec before its first timing).
+    Returns ``(best_spec or None, SearchResult)``; the result's trace lists
+    every measured spec. The search engine is
+    :mod:`rocke.dispatch.tuning.search` (``search_configs``).
+    """
+    from .dispatch.tuning.search import Budget, search_configs
+
+    index, result = search_configs(
+        list(specs),
+        measure=measure,
+        check=check,
+        strategy=strategy,
+        budget=Budget(evaluations=int(budget)),
+        seed=seed,
+        **search_options,
+    )
+    return (None if index is None else specs[index]), result
