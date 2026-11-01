@@ -58,3 +58,18 @@ Known bugs:
   # size-1 M or N free dim.
   # REMOVE once gfx950 gets a width-1 NT complex kernel.
   - { name: matmul_batch_complex_general_batch_edge, function: matmul, transA: N, transB: T, known_bug_platforms: gfx950 }
+  # The gfx1030 (RDNA2) int8 GEMM path.
+  #
+  # The int8 dot4 code path in tensilelite works after #4, but no gfx1030 int8
+  # logic tree selects it yet.  The tree lands in the next pull request of this
+  # series, and that one removes this entry.
+  #
+  # Until the tree lands, the int8 matmul case has no correct solution on
+  # gfx1030: the device library has no int8 solution at all.  If that pull
+  # request is merged on its own, its int8 tree is built with the unfixed
+  # generator, which returns a wrong result rather than no solution, so the
+  # entry also holds the lane in that order.
+  #
+  # Tracked by #3.  REMOVE this entry when the gfx1030 int8 logic tree lands.
+  # Review by 2026-12-15.
+  - { function: matmul, a_type: i8_r, b_type: i8_r, known_bug_platforms: "gfx1030" }
