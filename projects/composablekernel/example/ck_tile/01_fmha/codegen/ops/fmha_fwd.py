@@ -1432,12 +1432,11 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
         if dtype in cls._DT_FP16_BF16:
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
-                ( 32,  32) : [FmhaFwdTileSize( 64,  64,  16,  32,  32,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint("a.max_seqlen_q < 4096")),
-                              FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                (128, 128) : [FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
+                ( 32,  32) : [FmhaFwdTileSize(256,  64,  16,  32,  64,   32,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                ( 64,  64) : [FmhaFwdTileSize(256,  64,  32,  64,  64,   64,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                (128, 128) : [FmhaFwdTileSize(128,  64,  64, 128,  64,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
                 (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                (256, 256) : [FmhaFwdTileSize(128,  64,  32, 256,  32,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)]
+                (256, 256) : [FmhaFwdTileSize(128,  64, 128, 256,  64,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)]
             }  # fmt: skip
         else:
             raise ValueError(f"unsupported dtype={dtype}")
@@ -1474,8 +1473,10 @@ class KernelComponentFactoryGfx115(KernelComponentFactoryGfx11):
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         result = super().get_hdim_tile_size_dict(dtype)
         if dtype in cls._DT_FP16_BF16:
-            result[(64, 64)] = [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)]  # fmt: skip
-            result[(256, 256)] = [FmhaFwdTileSize(128,  64,  32, 256,  32,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)]  # fmt: skip
+            result[(32, 32)] = [FmhaFwdTileSize( 64,  64,  16,  32,  32,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)]  # fmt: skip
+            result[(64, 64)] = [FmhaFwdTileSize(128, 128,  32,  64, 128,   64,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)]  # fmt: skip
+            result[(128, 128)] = [FmhaFwdTileSize(128,  64,  64, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)]  # fmt: skip
+            result[(256, 256)] = [FmhaFwdTileSize(128,  64, 128, 256,  32,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)]  # fmt: skip
         return result
 
 
@@ -1491,15 +1492,48 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
         return cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32
 
     @classmethod
+    def get_rules(cls) -> List[CompatibilityRule]:
+        rules = super().get_rules()
+
+        def check_hdim_tile(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            if (
+                cls is KernelComponentFactoryGfx12
+                and problem_ctx.dtype in cls._DT_FP16_BF16
+                and (problem_ctx.hdim, problem_ctx.hdim_v) in ((64, 64), (128, 128))
+            ):
+                # Dropout selects M64; omit unused large-tile kernels.
+                return (
+                    kernel_ctx.tile.F_bm0 == 64 or kernel_ctx.pipeline.F_dropout == "f"
+                )
+            return True
+
+        rules.append(check_hdim_tile)
+        return rules
+
+    @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         if dtype in cls._DT_FP16_BF16:
+            # Use M64 for dropout or short Q; otherwise use M128.
+            m64_d64_constraint = "t.has_dropout || a.max_seqlen_q < 1024"
+            # Use M64 for dropout, short Q, or too few M256 blocks; otherwise use M256.
+            m64_d128_constraint = (
+                "t.has_dropout || a.max_seqlen_q < 1024 || "
+                "get_num_thread_blocks(a.batch, "
+                "a.num_head_q_total > 0 ? a.num_head_q_total : a.nhead_q, "
+                "a.max_seqlen_q, 256) <= "
+                "(t.mask_type == mask_enum::no_mask ? 2 : 4) * num_cus"
+            )
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
-                ( 32,  32) : [FmhaFwdTileSize( 64,  64,  16,  32,  32,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                (128, 128) : [FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
-                (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                ( 32,  32) : [FmhaFwdTileSize(256,  64,  16,  32,  64,   32, 16, 1, 1, 16, 1, 1,  16, 16, 16,  16, 16, 16,   8)],
+                ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(m64_d64_constraint)),
+                              FmhaFwdTileSize(128, 128,  32,  64, 128,   64,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  16,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,   4, CppConstraint(m64_d128_constraint)),
+                              FmhaFwdTileSize(256,  64,  64, 128,  64,  128, 16, 1, 1, 16, 1, 1,  16, 16, 16,  16, 16, 16,   8)],
+                (192, 128) : [FmhaFwdTileSize(128,  64,  64, 128,  64,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
+                (256, 256) : [FmhaFwdTileSize(256,  64,  64, 256,  64,  256, 16, 1, 1, 16, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
             }  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16:
             return {
