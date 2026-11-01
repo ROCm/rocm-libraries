@@ -47,8 +47,8 @@ native GEMM automatically.
 | --- | --- |
 | `emulation.cpp` | Host orchestration: performance model, workspace/budget logic, kernel launch helpers, the recursive `emulated_gemm_impl`, the public `fp64EmulatedGemm` / `fp32EmulatedGemm` entry points, and env-var / descriptor-attribute resolution. Compiled as HIP. |
 | `include/emulation.hpp` | Public host-side interface (intentionally free of HIP device types so it can be included from plain C++ units). Declares the public entry points, the decision/settings structs, and the env-var parsers. |
-| `include/tables.hpp` | Compile-time CRT constant tables: the moduli, `UInt256` big-integer helper, and the derived `qpi`, `P_dd`, `inv_P`, `crt_capacity_bits`, `neg_mod`, `inv_mod`, `pad`, etc. |
-| `include/kernel_common.hpp` | Shared device helpers (`floor_log2`, `warp_reduce_max_abs`, `block_reduce_max`, `adp_atomicMaxF`) and kernel tuning constants (`OZ2_PRELIM_*`, `OZ2_SCALE_*`). |
+| `include/tables.hpp` | Compile-time CRT constant tables: the moduli, `UInt256` big-integer helper, and the derived `qpi`, `P_dd`, `inv_P`, `crt_capacity_bits`, `neg_mod`, `inv_mod`, `limb_weight`, `pad`, etc. |
+| `include/kernel_common.hpp` | Shared device helpers (`floor_log2`, `warp_reduce_max_abs`, `block_reduce_max`, `adp_atomicMaxF`), the integer residue helpers used by stages 4 and 6 (`split_int88`, `int8_residue`, `balanced_residue_i32`), and kernel tuning constants (`OZ2_PRELIM_*`, `OZ2_SCALE_*`). |
 | `include/prelim_kernels.hpp` | Stage 1 — preliminary shift + INT8 extraction kernels (`accu_prelim_A/B_T/N_kernel`). |
 | `include/shift_refine_kernels.hpp` | Stage 3 — shift refinement + ADP kernels (`refine_sftA_partial_kernel`, `col_max_kernel`, `adp_reduce_A/B_kernel`, `refine_sftA_apply_kernel`, `refine_sftB_kernel`). |
 | `include/scale_kernels.hpp` | Stage 4 — multi-modulus scaling kernels (`scale_A/B_T/N_kernel`). |
