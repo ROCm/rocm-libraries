@@ -302,8 +302,12 @@ inline std::map<std::string, int>
         = tryAssembler(isaVersion, assemblerPath, "v_dot2c_f32_bf16 v47, v36, v34", isDebug)
           || tryAssembler(isaVersion, assemblerPath, "v_dot2acc_f32_bf16 v47, v36, v34", isDebug);
 
+    // v_dot4_i32_i8 has no three-operand encoding: the assembler rejects that
+    // form on every target ("too few operands for instruction"), so probing it
+    // that way reported the capability as absent everywhere.  The instruction
+    // exists only in the VOP3 form, with an explicit accumulator source.
     rv["v_dot4_i32_i8"]
-        = tryAssembler(isaVersion, assemblerPath, "v_dot4_i32_i8 v47, v36, v34", isDebug);
+        = tryAssembler(isaVersion, assemblerPath, "v_dot4_i32_i8 v47, v36, v34, v47", isDebug);
     rv["v_dot4c_i32_i8"]
         = tryAssembler(isaVersion, assemblerPath, "v_dot4c_i32_i8 v47, v36, v34", isDebug);
     rv["VOP3v_dot4_i32_i8"]

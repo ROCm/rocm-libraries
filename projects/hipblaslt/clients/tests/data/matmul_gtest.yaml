@@ -1794,7 +1794,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
-  gpu_arch_exclude: '11\d{2}|120\d{1}'
+  gpu_arch_exclude: '11\d{2}|120\d{1}|1030'
 
 - name: matmul_groupedgemm
   category: pre_checkin
@@ -1809,7 +1809,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [0, 2]
-  gpu_arch_exclude: '11\d{2}|120\d{1}'
+  gpu_arch_exclude: '11\d{2}|120\d{1}|1030'
 
 - name: matmul_groupedgemm_f8_fnuz
   category: pre_checkin
@@ -1872,7 +1872,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 - name: matmul_extapi_groupedgemm
   category: pre_checkin
@@ -1888,7 +1888,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 - name: matmul_extapi_groupedgemm
   category: pre_checkin
@@ -1905,7 +1905,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 - name: matmul_bias_gelu_aux_fp16
   category: pre_checkin
@@ -2130,7 +2130,7 @@ Tests:
   gradient: 1
   activation_type: gelu
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 - name: matmul_drelu_fp16
   category: pre_checkin
@@ -2146,7 +2146,7 @@ Tests:
   gradient: 1
   activation_type: relu
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 - name: matmul_bias_stride
   category: pre_checkin
@@ -2182,7 +2182,7 @@ Tests:
   bias_type: f32_r
   unit_check: 0
   norm_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 - name: matmul_dgelu_bias_bf16
   category: pre_checkin
@@ -2254,7 +2254,7 @@ Tests:
   bias_type: f32_r
   unit_check: 0
   norm_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 - name: matmul_drelu_bias_bf16
   category: pre_checkin
@@ -2309,7 +2309,7 @@ Tests:
   bias_type: f32_r
   bias_source: a
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 - name: matmul_bgrada_bf16
   category: pre_checkin
@@ -2490,7 +2490,7 @@ Tests:
   bias_type: [f16_r, f32_r]
   bias_source: b
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 - name: matmul_bgradb_16_f32d_NT
   category: pre_checkin
@@ -2694,7 +2694,8 @@ Tests:
   scaleAlpha_vector: [0, 1]
   activation_type: relu
   unit_check: 1
-  gpu_arch: '1[1-2]\d{2}'
+  # gfx1030 ships both int8 destination kinds; both were measured on a V620.
+  gpu_arch: '1030|1[1-2]\d{2}'
 
 - name: matmul_gemm_i8_dst_i32_1xxx
   category: pre_checkin
@@ -2711,7 +2712,8 @@ Tests:
   scaleAlpha_vector: [0, 1]
   activation_type: relu
   unit_check: 1
-  gpu_arch: '1[1-2]\d{2}'
+  # gfx1030 ships both int8 destination kinds; both were measured on a V620.
+  gpu_arch: '1030|1[1-2]\d{2}'
 
 - name: matmul_gemm_mix_precisions
   category: pre_checkin
@@ -2878,7 +2880,7 @@ Tests:
   alpha: 1
   beta: 2.0
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 - name: matmul_heuristic_all_solutions_no_workspace
   category: nightly
@@ -3154,8 +3156,9 @@ Tests:
     - {a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
     - {a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r }
     - {a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
-    - {a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r }
-    - {a_type: bf16_r, b_type: bf16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r }
+    # RDNA2 has no bf16 hardware.
+    - {a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r , gpu_arch_exclude: '1030'}
+    - {a_type: bf16_r, b_type: bf16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r , gpu_arch_exclude: '1030'}
   M: [128, 129]
   N: [128, 129]
   K: [128, 129]
@@ -4342,7 +4345,7 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   fast_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '11\d\d|12[^5]\d|1030'
 
 # gfx942 and gfx950 offer a bf16 bias gradient only from B with B transposed, and
 # none in f32. gfx1250 offers the bf16 one in every layout, also none in f32.
