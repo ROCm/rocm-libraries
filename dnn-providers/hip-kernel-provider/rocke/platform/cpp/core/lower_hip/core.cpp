@@ -37,6 +37,7 @@
 #include "rocke/arch_target.h" /* arch catalog lookup for the arch seam guard */
 #include "rocke/arena.h"
 #include "rocke/error.hpp" /* ckc::Error boundary translation */
+#include "rocke/float_format.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_hip.h"
@@ -543,57 +544,55 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
 
 /* ============================== literals ============================= */
 
-const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val)
+/* Python _hip_float_literal(val, c_type, suffix): the C++ literal text for a
+ * float constant of C type `c_type`, copied into the lowerer's arena. repr()
+ * has no C++ spelling for nan and the infinities, so those become the
+ * <math.h> macros cast to `c_type`; finite values are repr(val) + `suffix`. */
+static const char*
+    h_hip_float_literal(rocke_h_lowerer_t* lw, double val, const char* c_type, const char* suffix)
 {
+    rocke_strbuf_t text;
     char* out;
     if(!lw || !lw->b)
     {
         return "";
     }
+    if(rocke_strbuf_init(&text, 32) != 0)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "float literal: out of memory");
+        return "";
+    }
     if(isnan(val))
     {
-        out = rocke_arena_strdup(&lw->b->arena, "((float)NAN)");
-        return out ? out : "";
+        rocke_strbuf_appendf(&text, "((%s)NAN)", c_type);
     }
-    if(isinf(val))
+    else if(isinf(val))
     {
-        out = rocke_arena_strdup(&lw->b->arena,
-                                 val < 0 ? "((float)-INFINITY)" : "((float)INFINITY)");
-        return out ? out : "";
+        rocke_strbuf_appendf(&text, "((%s)%sINFINITY)", c_type, val < 0 ? "-" : "");
     }
-    /* NOTE(port): Python emits repr(float)+"f"; %g is a close approximation but
-     * NOT guaranteed byte-identical to CPython repr. Known port hazard. */
-    out = rocke_arena_printf(&lw->b->arena, "%gf", val);
-    return out ? out : "";
+    else
+    {
+        rocke_append_python_float_repr(&text, val);
+        rocke_strbuf_append(&text, suffix);
+    }
+    out = text.oom ? NULL : rocke_arena_strdup(&lw->b->arena, rocke_strbuf_cstr(&text));
+    rocke_strbuf_free(&text);
+    if(!out)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "float literal: out of memory");
+        return "";
+    }
+    return out;
+}
+
+const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val)
+{
+    return h_hip_float_literal(lw, val, "float", "f");
 }
 
 const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val)
 {
-    char* out;
-    if(!lw || !lw->b)
-    {
-        return "";
-    }
-    if(isnan(val))
-    {
-        out = rocke_arena_strdup(&lw->b->arena, "((double)NAN)");
-        return out ? out : "";
-    }
-    if(isinf(val))
-    {
-        out = rocke_arena_strdup(&lw->b->arena,
-                                 val < 0 ? "((double)-INFINITY)" : "((double)INFINITY)");
-        return out ? out : "";
-    }
-    if(val == 0.0 && signbit(val))
-    {
-        out = rocke_arena_strdup(&lw->b->arena, "-0.0");
-        return out ? out : "";
-    }
-    /* NOTE(port): Python emits repr(float); %.17g is a close approximation but
-     * NOT guaranteed byte-identical to CPython repr. Known port hazard. */
-    out = rocke_arena_printf(&lw->b->arena, "%.17g", val);
-    return out ? out : "";
+    return h_hip_float_literal(lw, val, "double", "");
 }
 
 /* ============================== waitcnt encoders ===================== */
