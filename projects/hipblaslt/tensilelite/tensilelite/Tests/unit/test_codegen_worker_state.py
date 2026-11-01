@@ -13,7 +13,8 @@ Both ways are run here on kernels of real configs and the complete state of ever
 (all attributes, compared deeply) must match, so a value codegen writes onto the kernel that
 the copy-back misses fails the test, not only the ones known when it was written (LdsNumBytes
 from the subtile LDS layout, LoopIters from ForceUnrollSubIter, _subtileUnitScaleVgpr from
-plain-FP8 subtile kernels, LdsOffsetBias from the GlobalSplitU epilogue).
+plain-FP8 subtile kernels, LdsOffsetBias from the GlobalSplitU epilogue), and a key the
+copy-back adds although in-process codegen would not (custom kernels have none of these).
 """
 
 import enum
@@ -24,10 +25,13 @@ import pytest
 from codegen_harness import _init_rocisa_for
 from config_harness import (
     _isolated_globals_with_isa,
+    _load_config,
     _solutions_from_config_unguarded,
     _toolchain_for,
 )
-from Tensile.Common.Types import DebugConfig
+from Tensile.BenchmarkProblems import _generateCustomKernelSolutions
+from Tensile.BenchmarkStructs import BenchmarkProcess
+from Tensile.Common.Types import DebugConfig, makeDebugConfig
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.TensileCreateLibrary.Run import (
     groupKernelRecords,
@@ -101,13 +105,41 @@ def _codegen(solutions, assembler, inWorker):
         result = processKernelSource(*args)
         assert result.err == 0, result.name
         results.append(result)
+    keysBefore = [set(solution._state) for solution in solutions]
     passPostKernelInfoToSolution(results, representatives, solutions, False)
+    if not inWorker:
+        # In-process a generated kernel is its solution: the copy-back may update values
+        # codegen left on it, but must not add a key codegen did not set. (Placement aliases
+        # are not generated; some keys are fanned out to them by design.)
+        generated = {id(kernel) for kernel in representatives}
+        added = {
+            index: sorted(set(solution._state) - keys)
+            for index, (solution, keys) in enumerate(zip(solutions, keysBefore))
+            if id(solution) in generated
+        }
+        assert not any(added.values()), added
 
 
 def _solutions(config, problemIndex, limit, assembler, isaInfoMap):
-    return _solutions_from_config_unguarded(
+    """The forked solutions of the problem, then its CustomKernels, as the Tensile backend
+    builds them."""
+    solutions = _solutions_from_config_unguarded(
         _COMMON + config, assembler, isaInfoMap, limit, problemIndex
     )
+    configDict = _load_config(_COMMON + config)
+    problemTypeConfig, problemSizeGroupConfig = configDict["BenchmarkProblems"][problemIndex][:2]
+    benchmarkProcess = BenchmarkProcess(problemTypeConfig, problemSizeGroupConfig, False)
+    benchmarkStep = benchmarkProcess[0]
+    solutions += _generateCustomKernelSolutions(
+        benchmarkProcess.problemType,
+        benchmarkStep.customKernels,
+        benchmarkStep.internalSupportParams,
+        not benchmarkStep.customKernelWildcard,
+        assembler,
+        makeDebugConfig(configDict.get("GlobalParameters", {})),
+        isaInfoMap,
+    )
+    return solutions
 
 
 @pytest.mark.parametrize(
@@ -123,6 +155,9 @@ def _solutions(config, problemIndex, limit, assembler, isaInfoMap):
         # GlobalSplitU 2 kernels with a bias epilogue: the epilogue codegen switches
         # LdsOffsetBias between LdsOffsetBiasGSU / LdsOffsetBiasNonGSU and leaves the last.
         ("sparse/gfx94x/bf16_activation.yaml", 0, None, "LdsOffsetBias"),
+        # Custom kernel (assembly read from a file): it never gets LdsNumBytes, LoopIters or
+        # LdsOffsetBias, in-process or in a worker; codegen sets CUOccupancy.
+        ("gemm/gfx950/custom_xfp32.yaml", 0, None, "CUOccupancy"),
     ],
 )
 def test_worker_codegen_leaves_solutions_as_in_process(config, problemIndex, limit, changedKey):

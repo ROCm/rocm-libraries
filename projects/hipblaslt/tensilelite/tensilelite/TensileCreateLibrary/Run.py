@@ -230,7 +230,8 @@ class KernelCodeGenResult(NamedTuple):
     mathclk: int
     customKernelDef: Optional[dict] = None
     # Set on the kernel during codegen (subtile LDS layout / ForceUnrollSubIter); a worker
-    # process's kernel is a copy, so passPostKernelInfoToSolution copies them back.
+    # process's kernel is a copy, so passPostKernelInfoToSolution copies them back. None when
+    # the kernel has no such key (custom kernels read from a file never set these three).
     ldsNumBytes: Optional[int] = None
     loopIters: Optional[int] = None
     # Unit-scale VGPR of plain-FP8 subtile kernels (Components/Subtile/Kernel.py); None when
@@ -414,8 +415,8 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
         kernel["WavefrontSize"], cuocc, \
         pgr, kernel["MathClocksUnrolledLoop"], \
-        customKernelDef, kernel["LdsNumBytes"], kernel["LoopIters"], \
-        kernel._state.get("_subtileUnitScaleVgpr"), kernel["LdsOffsetBias"]
+        customKernelDef, kernel._state.get("LdsNumBytes"), kernel._state.get("LoopIters"), \
+        kernel._state.get("_subtileUnitScaleVgpr"), kernel._state.get("LdsOffsetBias")
     )
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
@@ -484,12 +485,17 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
             solution._state["MathClocksUnrolledLoop"] = result.mathclk
-            solution._state["LdsNumBytes"] = result.ldsNumBytes
-            solution._state["LoopIters"] = result.loopIters
+            # Copied only when the generated kernel has them, so a solution never gets a key
+            # in-process codegen would not leave on it.
+            if result.ldsNumBytes is not None:
+                solution._state["LdsNumBytes"] = result.ldsNumBytes
+            if result.loopIters is not None:
+                solution._state["LoopIters"] = result.loopIters
             # Codegen leaves these on the kernel it generated only (in-process, that is this
             # solution itself); placement aliases keep their own values, as they do in-process.
             if kernel is generated:
-                solution._state["LdsOffsetBias"] = result.ldsOffsetBias
+                if result.ldsOffsetBias is not None:
+                    solution._state["LdsOffsetBias"] = result.ldsOffsetBias
                 if result.subtileUnitScaleVgpr is not None:
                     solution._state["_subtileUnitScaleVgpr"] = result.subtileUnitScaleVgpr
             if result.customKernelDef is not None:
