@@ -939,6 +939,34 @@ _WGRAD_WSF = int(_os.environ.get("ROCKE_AOT_WGRAD_WSF", "0") or 0)
 _WGRAD_MB_PP: Tuple[int, ...] = tuple(
     int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_MB_PP", "") or "").split(",") if v
 )
+# ROCKE_AOT_WGRAD_XWIN_BQ=<v>[,<v>...]: xwin_bq=<v> twins (X window
+# staged in quads, b64 transposed stores) of the xwin ping-pong copies.
+_WGRAD_XWIN_BQ: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_BQ", "") or "").split(",") if v
+)
+# ROCKE_AOT_WGRAD_XWIN_PPS=<v>[,...]: xwin_pps=<v> twins (ping-pong
+# schedule variants) of the xwin ping-pong copies.
+_WGRAD_XWIN_PPS: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_PPS", "") or "").split(",") if v
+)
+# ROCKE_AOT_WGRAD_XWIN_ROT=1: xwin_rot=1 twins (plane-rotated slice
+# order) of the xwin ping-pong copies (and of their BQ/AQ/PPS twins).
+_WGRAD_XWIN_ROT: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_ROT", "") or "").split(",") if v
+)
+# ROCKE_AOT_WGRAD_XWIN_KORD=1: xwin_kord=1 twins (row-fastest K order)
+# of the xwin ping-pong copies (and of their BQ/AQ/PPS/ROT twins).
+_WGRAD_XWIN_KORD: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_KORD", "") or "").split(",") if v
+)
+# ROCKE_AOT_WGRAD_XWIN_TWIN_MAX_M=<m>: the BQ/AQ/PPS/ROT/KORD twins only
+# for xwin ping-pong copies with tile_m <= m (default: all).
+_WGRAD_XWIN_TWIN_MAX_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_TWIN_MAX_M", "0") or 0)
+# ROCKE_AOT_WGRAD_XWIN_AQ=1: xwin_aq=1 twins (leader-only dY stores) of
+# the xwin_gn=2 ping-pong copies (and of their xwin_bq twins).
+_WGRAD_XWIN_AQ: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_AQ", "") or "").split(",") if v
+)
 # ROCKE_AOT_WGRAD_XWIN_KBAND=<n>[,<n>...]: also an xwin_kband=<n> copy (K
 # order banded by n output rows: a split-K slice runs one band through the
 # depth planes) of the multi-group ping-pong xwin copies (ROCKE_AOT_WGRAD_XWIN_PP).
@@ -2943,6 +2971,9 @@ def _wgrad_prefetch_global_regs(arch: str, cfg: dict) -> bool:
 _WGRAD_PPP_WSS = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_WSS", "0") or 0)
 _WGRAD_PPP = tuple(int(x) for x in (_os.environ.get("ROCKE_AOT_WGRAD_PPP", "") or "").split(",") if x.strip() and int(x))
 _WGRAD_PPP_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_MIN_MN", "0") or 0)
+# ROCKE_AOT_WGRAD_PPP_KPL=8: kp_line=8 twins (line-major lane decode of
+# the k-packed global reads: 8 lanes per 128-byte line) of the plain_pp copies.
+_WGRAD_PPP_KPL = int(_os.environ.get("ROCKE_AOT_WGRAD_PPP_KPL", "0") or 0)
 _WGRAD_EQX = int(_os.environ.get("ROCKE_AOT_WGRAD_EQX", "0") or 0)
 _WGRAD_EQX_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_EQX_MIN_MN", "0") or 0)
 
@@ -2965,6 +2996,11 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
         )
         if _WGRAD_PPP_WSS and cfg.get("two_stage"):
             _pp = _pp + tuple(dict(v, ws_store=1) for v in _pp)
+        if _WGRAD_PPP_KPL and cfg.get("tile_k", 0) >= 32 and not cfg.get("two_stage"):
+            # (at tile_k 16 the k-packed loader has no line-major form: the
+            # twins would be the same binaries; the split two-stage copies
+            # (s7) are left out -> unsplit only)
+            _pp = _pp + tuple(dict(v, kp_line=_WGRAD_PPP_KPL) for v in _pp if not v.get("kp_line"))
         variants = variants + _pp
     if (
         _WGRAD_EQX
@@ -3142,6 +3178,37 @@ def _wgrad_kloop_variants_base(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     for m in _WGRAD_MB_PP
                     for v in _pp
                     if v.get("xwin_gn") and not v.get("m_band") and not v.get("xwin_kband")
+                )
+                _twin_ok = not _WGRAD_XWIN_TWIN_MAX_M or cfg.get("tile_m", 0) <= _WGRAD_XWIN_TWIN_MAX_M
+                _pp = _pp + tuple(
+                    dict(v, xwin_bq=q)
+                    for q in _WGRAD_XWIN_BQ
+                    for v in _pp
+                    if _twin_ok and not v.get("m_band") and not v.get("xwin_kband")
+                )
+                _pp = _pp + tuple(
+                    dict(v, xwin_aq=q)
+                    for q in _WGRAD_XWIN_AQ
+                    for v in _pp
+                    if _twin_ok and v.get("xwin_gn") == 2 and not v.get("m_band") and not v.get("xwin_kband")
+                )
+                _pp = _pp + tuple(
+                    dict(v, xwin_pps=q)
+                    for q in _WGRAD_XWIN_PPS
+                    for v in _pp
+                    if _twin_ok and not v.get("m_band") and not v.get("xwin_kband")
+                )
+                _pp = _pp + tuple(
+                    dict(v, xwin_rot=q)
+                    for q in _WGRAD_XWIN_ROT
+                    for v in _pp
+                    if _twin_ok and not v.get("m_band") and not v.get("xwin_kband")
+                )
+                _pp = _pp + tuple(
+                    dict(v, xwin_kord=q)
+                    for q in _WGRAD_XWIN_KORD
+                    for v in _pp
+                    if _twin_ok and not v.get("m_band") and not v.get("xwin_kband")
                 )
                 xw = xw + _pp
             if _WGRAD_XWIN_MROW and cfg.get("tile_m", 0) >= _WGRAD_XWIN_MROW_MIN_M:
