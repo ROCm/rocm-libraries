@@ -433,8 +433,12 @@ namespace TensileLite
         }
     }
 
-    StreamKStaticSplit streamKStaticSplit(
-        size_t tiles, size_t itersPerTile, size_t skGrid, int skFullTiles, bool forceDPOnly)
+    StreamKStaticSplit streamKStaticSplit(size_t tiles,
+                                          size_t itersPerTile,
+                                          size_t skGrid,
+                                          int    skFullTiles,
+                                          bool   forceDPOnly,
+                                          size_t kGranularity)
     {
         StreamKStaticSplit split;
         if(skGrid == 0)
@@ -456,8 +460,16 @@ namespace TensileLite
             skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
         }
 
-        split.skTiles      = skTiles;
-        split.skItersPerWG = static_cast<uint32_t>(skTiles * itersPerTile / skGrid);
+        split.skTiles = skTiles;
+        // Rounded down to a whole number of K units. A kernel whose K unit spans
+        // several iterations cannot start a workgroup partway through one, and
+        // the device hands the leftover out a whole unit at a time, so both the
+        // stride and the remainder have to be multiples of the unit. skKUnit
+        // drops the unit back to one iteration when the tile's K is not a whole
+        // number of units, where quantising would strand the fraction.
+        const size_t skIters = static_cast<size_t>(skTiles) * itersPerTile;
+        const size_t g       = skKUnit(itersPerTile, kGranularity);
+        split.skItersPerWG   = static_cast<uint32_t>(g * (skIters / g / skGrid));
         // Global leftover under the historical first-E mapping. The device may
         // redistribute these extras within each tile when
         // InternalArgsSupport::perTileExtraIters is set and skGrid % skTiles == 0;
@@ -554,15 +566,21 @@ namespace TensileLite
                                                         size_t itersPerTile,
                                                         size_t skGrid,
                                                         bool   perTileCapable,
-                                                        bool   uniformSummationOrder)
+                                                        bool   uniformSummationOrder,
+                                                        size_t kGranularity)
     {
         StreamKWorkgroupIterRange range;
-        if(skGrid == 0 || tiles == 0)
+        if(skGrid == 0 || tiles == 0 || kGranularity == 0)
             return range;
 
+        const size_t g          = skKUnit(itersPerTile, kGranularity);
         const size_t totalIters = tiles * itersPerTile;
-        const size_t W          = totalIters / skGrid;
-        const size_t E          = totalIters - W * skGrid;
+        // Both the stride and the leftover are whole K units: the device adds
+        // g, not 1, to the long chunks, and E/g workgroups get one. g is 1 when
+        // the tile's K is not a whole number of units (skKUnit), which is also
+        // the only case the device cannot place on a unit boundary at all.
+        const size_t W          = g * (totalIters / g / skGrid);
+        const size_t E          = (totalIters - W * skGrid) / g;
 
         // The device takes the per-tile branch only when the kernel supports it
         // AND the packed uniform-summation-order bit is set. Mirror both terms,
@@ -575,22 +593,22 @@ namespace TensileLite
             const size_t F    = skGrid / tiles;
             const size_t q    = w / F;
             const size_t s    = w % F;
-            const size_t remI = itersPerTile % F;
-            const size_t base = itersPerTile / F;
-            range.start       = q * itersPerTile + s * base + std::min(s, remI);
-            range.end = range.start + base + (s < remI ? size_t{1} : size_t{0});
+            const size_t base = g * (itersPerTile / g / F);
+            const size_t remI = (itersPerTile - base * F) / g;
+            range.start       = q * itersPerTile + s * base + g * std::min(s, remI);
+            range.end         = range.start + base + (s < remI ? g : size_t{0});
             return range;
         }
 
         // Historical global first-E mapping.
         if(w < E)
         {
-            range.start = w * (W + 1);
-            range.end   = range.start + (W + 1);
+            range.start = w * (W + g);
+            range.end   = range.start + (W + g);
         }
         else
         {
-            range.start = E * (W + 1) + (w - E) * W;
+            range.start = E * (W + g) + (w - E) * W;
             range.end   = range.start + W;
         }
         return range;
@@ -1467,8 +1485,15 @@ namespace TensileLite
                     skTiles = overrideTiles;
                 if (overrideSplit > -1)
                     skSplit = overrideSplit;
-                // Calculate number of stream-k iterations per workitem
-                uint32_t skItersPerWI = CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit);
+                // Calculate number of stream-k iterations per workitem, rounded up
+                // to a whole number of K units so that every chunk boundary
+                // p*skItersPerWI lands on one (see skKGranularity(), skKUnit()).
+                const uint32_t kGran
+                    = static_cast<uint32_t>(skKUnit(itersPerTile, skKGranularity()));
+                uint32_t skItersPerWI
+                    = kGran
+                      * CeilDivide(CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit),
+                                   kGran);
                 // Calculate real splitting factor in case iterations don't divide evenly
                 skSplit = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
                 uint32_t totalItems = (tiles - skTiles) + skTiles * skSplit;
@@ -1508,9 +1533,13 @@ namespace TensileLite
                         sk4_skTiles = overrideTiles;
                     if(overrideSplit > -1)
                         sk4_skSplit = overrideSplit;
-                    uint32_t sk4_skItersPerWI
-                        = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
-                                     sk4_skSplit);
+                    const uint32_t sk4_kGran
+                        = static_cast<uint32_t>(skKUnit(sk3_itersPerTile, skKGranularity()));
+                    uint32_t       sk4_skItersPerWI
+                        = sk4_kGran
+                          * CeilDivide(CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
+                                                  sk4_skSplit),
+                                       sk4_kGran);
                     sk4_skSplit
                         = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
                                      sk4_skItersPerWI);
@@ -1564,8 +1593,11 @@ namespace TensileLite
                     {
                         uint32_t skSplit
                             = static_cast<uint32_t>(launch.grid / sk3_tiles);
+                        const uint32_t kGranP
+                            = static_cast<uint32_t>(skKUnit(sk3_itersPerTile, skKGranularity()));
                         sk3_skItersPerWG
-                            = static_cast<uint32_t>(sk3_itersPerTile) / skSplit;
+                            = kGranP
+                              * (static_cast<uint32_t>(sk3_itersPerTile) / kGranP / skSplit);
                         sk3_skTiles = skSplit;
                     }
                     else
@@ -1575,7 +1607,8 @@ namespace TensileLite
                             sk3_itersPerTile,
                             launch.grid,
                             pAMDGPU->skFullTiles,
-                            false);
+                            false,
+                            skKGranularity());
                         sk3_skTiles      = sk3_split.skTiles;
                         sk3_skItersPerWG = sk3_split.skItersPerWG;
                     }
@@ -1642,7 +1675,12 @@ namespace TensileLite
                 {
                     uint32_t skSplit
                         = launch.grid / tiles; // skTiles is skSplit in parallel reduction path
-                    uint32_t skItersPerWG = itersPerTile / skSplit;
+                    // Rounded down to a whole K unit, like the two-tile split:
+                    // the device lays partials out at p*W and hands the
+                    // remainder out a unit at a time (StreamK.py skAssignIters).
+                    const uint32_t kGranP
+                        = static_cast<uint32_t>(skKUnit(itersPerTile, skKGranularity()));
+                    uint32_t skItersPerWG = kGranP * (itersPerTile / kGranP / skSplit);
 
                     args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
                     args.template append<uint32_t>("skGrid", launch.grid);
@@ -1657,7 +1695,8 @@ namespace TensileLite
                         = usesStreamKSpatialCluster()
                               ? launch.clusterSchedule.split
                               : streamKStaticSplit(tiles, itersPerTile, launch.grid,
-                                                   pAMDGPU->skFullTiles, false);
+                                                   pAMDGPU->skFullTiles, false,
+                                                   skKGranularity());
 
                     args.template append<uint32_t>("SKItersPerWG", split.skItersPerWG);
                     args.template append<uint32_t>("skGrid", launch.grid);
@@ -3036,8 +3075,11 @@ namespace TensileLite
                 if(launch.reduction == origami::reduction_t::parallel)
                 {
                     uint32_t skSplit = static_cast<uint32_t>(launch.grid / numTiles);
-                    skItersPerWG     = itersPerTile / max(skSplit, uint32_t(1));
-                    skTotalTiles     = skSplit;
+                    // Same K-unit quantisation as the other parallel-reduction packer.
+                    const uint32_t kGranP
+                        = static_cast<uint32_t>(skKUnit(itersPerTile, skKGranularity()));
+                    skItersPerWG = kGranP * (itersPerTile / kGranP / max(skSplit, uint32_t(1)));
+                    skTotalTiles = skSplit;
                 }
                 else
                 {
@@ -7037,11 +7079,28 @@ namespace TensileLite
                 // Solution validation already forces this for MX fp4 (duUnit =
                 // numSubIterK * MatrixInstK * LocalSplitU = 256) but admits
                 // DepthU=128 for MX fp8, so assert it here.
+                //
+                // What a cut has to land on is the K span StreamK treats as
+                // indivisible, not DepthU. skKGranularity() is the number of
+                // iterations in one scale epoch, and every host packer and
+                // device mapping site rounds its K chunk to it, so the cut
+                // quantum is DepthU * the unit that actually applies here.
+                //
+                // That unit is skKUnit(), not skKGranularity() itself: a tile
+                // whose K is not a whole number of epochs has a leftover the
+                // device's whole-epoch distribution cannot place, so the split
+                // falls back to single iterations and a cut can land inside a
+                // granule again. Such a problem is still refused.
                 constexpr size_t mxScaleSwizzleGranuleK = 256; // lrSubtileShape[1](2) * instK(128)
-                if(sizeMapping.depthU % mxScaleSwizzleGranuleK != 0)
+                const size_t     itersPerTile
+                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+                const size_t skKCutQuantumK
+                    = sizeMapping.depthU * skKUnit(itersPerTile, solution.skKGranularity());
+                if(skKCutQuantumK % mxScaleSwizzleGranuleK != 0)
                     return refuse("MXScaleSwizzleGranule",
-                                  "DepthU=" + std::to_string(sizeMapping.depthU)
-                                      + " is not a multiple of the MX scale swizzle granule (256 "
+                                  "StreamK K-cut quantum " + std::to_string(skKCutQuantumK)
+                                      + " (DepthU=" + std::to_string(sizeMapping.depthU)
+                                      + ") is not a multiple of the MX scale swizzle granule (256 "
                                         "K elements), so a StreamK K-cut can land inside a "
                                         "granule");
             }
@@ -7225,7 +7284,8 @@ namespace TensileLite
                         = usesStreamKSpatialCluster() ? launch.clusterSchedule.split
                           : streamKStaticSplit(tiles, itersPerTile, launch.grid,
                                                pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
-                                               sizeMapping.isPersistentDataParallel());
+                                               sizeMapping.isPersistentDataParallel(),
+                                               skKGranularity());
 
                     // Capability AND the mode bit: the packer only sets
                     // MagicShiftItersPerTile bit 29 -- the bit the kernel
@@ -8049,8 +8109,11 @@ namespace TensileLite
                 skTiles = static_cast<uint32_t>(overrideT);
             if(overrideS > -1)
                 skSplit = static_cast<uint32_t>(overrideS);
-            uint32_t skItersPerWI = CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit);
-            skSplit               = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
+            const uint32_t kGran = static_cast<uint32_t>(skKUnit(itersPerTile, skKGranularity()));
+            uint32_t       skItersPerWI
+                = kGran
+                  * CeilDivide(CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit), kGran);
+            skSplit = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
             d.skTiles             = skTiles;
             d.skSplit             = skSplit;
             d.totalItems          = (tiles - skTiles) + static_cast<size_t>(skTiles) * skSplit;
@@ -8070,7 +8133,8 @@ namespace TensileLite
             AMDGPU const*            pAMDGPU   = dynamic_cast<AMDGPU const*>(&hardware);
             const int                fullTiles = pAMDGPU ? pAMDGPU->skFullTiles : 1;
             const StreamKStaticSplit split
-                = streamKStaticSplit(tiles, itersPerTile, grid, fullTiles, forceDPOnly);
+                = streamKStaticSplit(
+                    tiles, itersPerTile, grid, fullTiles, forceDPOnly, skKGranularity());
             d.skTiles    = split.skTiles;
             d.skSplit    = 1;
             d.totalItems = tiles;

@@ -1457,6 +1457,32 @@ class Solution(collections.abc.Mapping):
       state["Use64bShadowLimit"] = False
       state["Use64bShadowLimitMX"] = False
 
+      # Dual-period MXFP8 (gfx950, HostPreSwizzle, PGR2): the data loop runs
+      # single-DU at DepthU (128) K per iteration, while the pre-shuffled scale
+      # epoch spans 2*DepthU (256) K and is reused by two data iterations.
+      # Breaking the MX K=2 coupling here lets numSubIterK (and therefore the DU
+      # unit) be derived from the data operands alone, so DepthU=128 is legal and
+      # the kernel stays single-DU (isSubtileMultiDU False) → PGR2 remains legal.
+      # PGR2 is the opt-in: the existing multi-DU AB_B8 path always rejects PGR2,
+      # so this gate cannot change any previously accepted solution.
+      #
+      # NOTE: MXScaleFormat is still "Auto" here (it is resolved later, inside
+      # assignDerivedParameters, before depthUIteration runs).  On gfx950 an MX
+      # (MXBlock) subtile solution always resolves to the HostPreSwizzle
+      # BufferLoad pipeline, so the format term is deferred to depthUIteration,
+      # which re-confirms MXScaleFormat == "HostPreSwizzle" before applying the
+      # dual-period data/scale split.
+      dualPeriodMXFP8 = (
+          isgfx950
+          and state["PrefetchGlobalRead"] == 2
+          and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
+          and state["ProblemType"]["DataTypeA"].is8bitFloat()
+          and state["ProblemType"]["DataTypeB"].is8bitFloat()
+          and not state["ProblemType"]["TLUA"]
+          and not state["ProblemType"]["TLUB"]
+          and state["MatrixInstM"] == 16 and state["MatrixInstN"] == 16)
+      state["_DualPeriodMXFP8"] = dualPeriodMXFP8
+
       # DepthU must be a multiple of numSubIterK * MIK * LSU, where numSubIterK is
       # the subtileShape K of the geometry picked below.
       #
@@ -1464,7 +1490,7 @@ class Solution(collections.abc.Mapping):
       # NN and TT mix layouts, so answering for A alone under-sizes the unit on
       # NN, where A is TLU=1 and asks for 1 while the row-major B still needs 2.
       def subIterKFor(tc):
-        if state["ProblemType"][f"MXBlock{tc}"]:
+        if state["ProblemType"][f"MXBlock{tc}"] and not dualPeriodMXFP8:
           return 2  # a scale local read covers 2 scale MMA tiles in K
         if state["ProblemType"][f"TLU{tc}"]:
           return 1  # one MFMA-K per DU iteration
@@ -1541,12 +1567,15 @@ class Solution(collections.abc.Mapping):
           return
 
       bytesLoaded = state["NumThreads"] * 16
+      # One scale GR epoch covers the scale period: the fixed 256-K HostPreSwizzle
+      # scale swizzle tile in the dual-period path, else the loop DepthU.
+      scalePeriodKForLoad = 256 if dualPeriodMXFP8 else state["DepthU"]
       if state["ProblemType"]["MXBlockA"]:
-        numBytesMXSA = (state["DepthU"] // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
+        numBytesMXSA = (scalePeriodKForLoad // state["ProblemType"]["MXBlockA"]) * state["MacroTile0"]
         if bytesLoaded < numBytesMXSA:
           reject(state, printRejectionReason, "Unable to load MXSA scales using one load per wave")
       if state["ProblemType"]["MXBlockB"]:
-        numBytesMXSB = (state["DepthU"] // state["ProblemType"]["MXBlockB"]) * state["MacroTile1"]
+        numBytesMXSB = (scalePeriodKForLoad // state["ProblemType"]["MXBlockB"]) * state["MacroTile1"]
         if bytesLoaded < numBytesMXSB:
           reject(state, printRejectionReason, "Unable to load MXSB scales using one load per wave")
 
@@ -3949,6 +3978,12 @@ class Solution(collections.abc.Mapping):
 
     # backup UsePLRPack from yaml before calling hasCustomSchedule
     backup_UsePLRPack = state["UsePLRPack"]
+    # UseSubtileImpl has its own main loop scheduler; CMS is never used.
+    # Resolve the -1 auto value to 0 up front so the hasCustomSchedule probe
+    # below does not flip it to 1 (which it does for PLR=0), which would then
+    # be rejected by the subtile/CMS incompatibility check.
+    if state["UseSubtileImpl"] and state["UseCustomMainLoopSchedule"] == -1:
+      state["UseCustomMainLoopSchedule"] = 0
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       # initialize CMS related config parameters (for CMS only)
@@ -4249,14 +4284,46 @@ class Solution(collections.abc.Mapping):
         else:
           depthUA = depthUA // 2
           depthUM = depthUA if state["DirectToVgprSparseMetadata"] else depthUA // 4
+      # Confirm the dual-period gate now that MXScaleFormat is resolved: it only
+      # applies on the gfx950 HostPreSwizzle pipeline.  The scale swizzle tile
+      # spans a fixed 256 K, so dual-period only applies when the data unroll is
+      # finer than that tile (ScaleReuse >= 2, i.e. the target DepthU=128).
+      # DepthU=256 (reuse 1) stays on the legacy multi-DU path, which rejects
+      # PGR2 exactly as before.  Keep the state flag in sync so downstream
+      # codegen reads the authoritative value.
+      SCALE_SWIZZLE_K = 256
+      dualPeriodMXFP8 = (state.get("_DualPeriodMXFP8", False)
+                         and state["MXScaleFormat"] == "HostPreSwizzle"
+                         and depthU > 0
+                         and SCALE_SWIZZLE_K % depthU == 0
+                         and SCALE_SWIZZLE_K // depthU >= 2)
+      state["_DualPeriodMXFP8"] = dualPeriodMXFP8
+
+      # Scale epoch period, in K.  The dual-period path decouples the scale
+      # cadence from the data unroll: it loads the fixed 256-K swizzle tile,
+      # which then feeds (256/depthU) consecutive data iterations.  Every other
+      # path keeps scales in lockstep with the data, so the epoch is the data
+      # unroll and each fetch is consumed once.  Both cases are recorded here so
+      # downstream code reads the period directly instead of re-deriving it from
+      # the dual-period flag.
+      scalePeriod = SCALE_SWIZZLE_K if dualPeriodMXFP8 else depthU
+      state["_ScalePeriodUA"] = scalePeriod
+      state["_ScalePeriodUB"] = scalePeriod
+      scaleReuse = scalePeriod // depthU if depthU > 0 else 1
+      state["_ScaleReuseA"] = scaleReuse
+      state["_ScaleReuseB"] = scaleReuse
+
       if state["MXScaleFormat"] == "HostPreSwizzle":
         mxBlock = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
         # MXFP8 subtile (AB_B8): 256B K swizzle tiles → dataDU=128 < DepthU=256.
         # MXFP4/BF16 subtile (AB_B4/B16) use a different data layout; keep full DepthU.
+        # The dual-period MXFP8 path deliberately stays single-DU (data==scale SRDs
+        # advance independently), so it must NOT take the multi-DU split below.
         enableMultiDu = (
           state.get("UseSubtileImpl")
           and state.get("_ABTilePairA") == "AB_B8"
           and state.get("_ABTilePairB") == "AB_B8"
+          and not dualPeriodMXFP8
         )
         if mxBlock and enableMultiDu:
           swizzleSize1 = 256
@@ -4283,12 +4350,15 @@ class Solution(collections.abc.Mapping):
       if not _validateMX2DTdmMSplit(state, printRejectionReason):
         return
 
+      # Scales are sized by their epoch period, so _DepthUMXS* counts the scale
+      # rows in one epoch: 256/32 = 8 on the dual-period path, even though the
+      # data unroll there is only depthU (128).
       state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:
-        state["_DepthUMXSA"] = depthU // state["ProblemType"]["MXBlockA"]
+        state["_DepthUMXSA"] = state["_ScalePeriodUA"] // state["ProblemType"]["MXBlockA"]
       state["_DepthUB"] = depthUB# internal — data SRD advance
       if state["ProblemType"]["MXBlockB"]:
-        state["_DepthUMXSB"] = depthU // state["ProblemType"]["MXBlockB"]
+        state["_DepthUMXSB"] = state["_ScalePeriodUB"] // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
       # Runs here (not earlier) because it needs MacroTileA/B and _DepthUA/B,
@@ -7334,7 +7404,7 @@ class Solution(collections.abc.Mapping):
 
     # Since we use PLR >= LoopIters for allocating numberOfIters vgprBuffer for a while
     # we need to support both PLR >= LoopIters and CLR parameter for solutions in rocBLAS
-    if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["_ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"]:
+    if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["_ScheduleIterAlg"] == 2 and not state["ForceUnrollSubIter"] and not state.get("_DualPeriodMXFP8"):
       # Reject configuration: DTV enabled on one side is incompatible with PLR = 0
       if state["DirectToVgprA"] ^ state["DirectToVgprB"]:
         reject(state, printRejectionReason, "DirectToVgpr does not work with PrefetchLocalRead(%u) >= LoopIters(%u)"%(state["PrefetchLocalRead"], state["LoopIters"]))

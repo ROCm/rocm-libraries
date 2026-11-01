@@ -255,8 +255,41 @@ class SchedulerConfig:
     partitionSizeM: Union[int, List[int]] = 0  # partition size(s) in M dimension (0 = full dim)
     partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
+    # Prefetch Local Read: number of operand (A/B/scale) VGPR sets.
+    #   plr=1 -> double-buffered local reads (two operand sets).
+    #   plr=0 -> single operand set (no local-read prefetch).
+    # -1 (default) auto-derives from pgr (0 when pgr==0, else 1) to preserve
+    # legacy behavior.  plr is independent of pgr: a PGR2+PLR0 pipeline
+    # prefetches global reads two DUs deep into LDS while keeping one operand
+    # set, matching the non-subtile F8 MT256x256 kernel's register profile.
+    plr: int = -1
+    # Per-tensor operand double-buffering overlay on top of a plr=0 base.
+    #   Tensors listed here get TWO operand VGPR sets (num_sets=2) with an
+    #   mtIteration=1 prefetch local read, while all other tensors keep the
+    #   single-set, blocking PLR0 behavior.  This realizes the asymmetric
+    #   "double-buffer B, single-buffer A" hybrid: B's ds_read latency is
+    #   hidden by prefetch (B tiles stay live across the whole MFMA sweep and
+    #   cannot be prefetched in-place), while A stays single-set (A tiles free
+    #   early and are handled by in-place prefetch).  Requires plr==0 base and
+    #   numPartitions==1.  Empty tuple = legacy behavior.
+    doubleBufferTensors: tuple = ()
+    # Partition-directed local-read prefetch.  Unlike conventional PLR, the
+    # lookahead axis is the compute partition: partition pi loads operands for
+    # pi+1 in the same MT; the final partition wraps to partition 0 of MT n+1.
+    # This is intentionally independent of PGR's global-read lookahead.
+    prefetchNextPartition: bool = False
+    # Physical traversal of the 2-D partition grid.  "m-major" preserves the
+    # legacy order (M varies fastest).  "n-major" matches FlyDSL's
+    # c00,c01,c10,c11 order (N varies fastest).
+    partitionOrder: str = "m-major"
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
+    # Dual-period MXFP8: how many data (DepthU) iterations share one 256-K scale
+    # epoch.  >1 decouples the data K cadence from the scale cadence: numSubIterK
+    # / numUnroll are then derived from the DATA tensors only, and the scale
+    # tensors advance / reload once per epoch (every scaleReuse data iterations)
+    # rather than every data iteration.  1 = legacy single-period behavior.
+    scaleReuse: int = 1
     blockSched: bool = False  # Tile is scoped for block scheduling (see plsinBlockSchedTile)
     # Kernel is on the MXF4 subtile path (see isMxf4SubtilePath). Optimizations
     # that change the schedule for every subtile kernel, not just this PR's
@@ -292,6 +325,26 @@ class SchedulerConfig:
     def _data_tensors_multi_du(numUnroll: dict) -> bool:
         """True when A/B use numUnroll > 1 (MX multi-DU data path)."""
         return numUnroll.get('A', 1) > 1 or numUnroll.get('B', 1) > 1
+
+    @staticmethod
+    def _even_split_size(total: int, mn: int = 1) -> int:
+        """Half of `total`, rounded UP to the local-read granularity `mn`.
+
+        Feeding this to _normalize_partition_sizes splits `total` into an even
+        number of partitions (or a single one, when `total` is not a multiple of
+        `mn` and no split happens at all).
+
+        Partition-directed prefetch forms a cycle: partition pi local-reads the
+        operands for pi+1, and the last partition wraps to partition 0 of the
+        next DepthU.  The operand VGPR set is picked by partition-index parity,
+        so the cycle is 2-colourable only when its length is even.  Rounding the
+        half DOWN instead yields an odd three-way split whenever total/mn is odd
+        (6, 10, 14, 18 -> [2,2,2], [4,2,4], [6,2,6], [8,2,8]), and the last
+        partition would then prefetch into the set it is still reading.
+        """
+        mn = max(1, mn)
+        half = -(-total // 2)  # ceil(total / 2)
+        return max(1, min(total, ((half + mn - 1) // mn) * mn))
 
     @staticmethod
     def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str,
@@ -335,25 +388,41 @@ class SchedulerConfig:
     def __post_init__(self):
         assert self.pgr in (0, 1, 2), f"pgr must be 0, 1, or 2, got {self.pgr}"
 
+        assert self.scaleReuse >= 1, f"scaleReuse must be >= 1, got {self.scaleReuse}"
+        # Dual-period MXFP8: the scale epoch (256 K) spans scaleReuse data
+        # iterations.  The data K unroll (numSubIterK / numUnroll) must then be
+        # derived from the DATA tensors only; a scale gr.k > 1 must NOT expand
+        # the data K axis.  Scales carry their own epoch cadence (scaleReuse).
+        self.dualPeriodScale = self.hasScale and self.scaleReuse > 1
+
         grans = {'A': self.grA, 'B': self.grB}
         if self.hasScale:
             grans['SA'] = self.grSA
             grans['SB'] = self.grSB
 
-        maxGrK = max(g.k for g in grans.values())
-        for t, g in grans.items():
+        # Grans that drive the data K-unroll derivation (data-only in the
+        # dual-period path, all tensors in the legacy single-period path).
+        derivGrans = {'A': self.grA, 'B': self.grB} if self.dualPeriodScale else grans
+
+        maxGrK = max(g.k for g in derivGrans.values())
+        for t, g in derivGrans.items():
             assert maxGrK % g.k == 0, \
                 f"grGran[{t}].k={g.k} must divide max(grGran.k)={maxGrK}"
         assert self.numSubIterK % maxGrK == 0 or maxGrK % self.numSubIterK == 0, \
             f"numSubIterK={self.numSubIterK} and max(grGran.k)={maxGrK} must be multiples of each other"
 
         original_numSubIterK = self.numSubIterK
-        defaultReads = {t: original_numSubIterK // g.k for t, g in grans.items()}
+        defaultReads = {t: original_numSubIterK // g.k for t, g in derivGrans.items()}
         expanded_k = max(original_numSubIterK, maxGrK)
         numUnroll = {}
-        for t, g in grans.items():
+        for t, g in derivGrans.items():
             reads = expanded_k // g.k
             numUnroll[t] = reads // (defaultReads[t] if defaultReads[t] != 0 else 1)
+        # Scales never expand the data K unroll in the dual-period path; they are
+        # scheduled at the epoch cadence (scaleReuse) instead.
+        if self.dualPeriodScale:
+            numUnroll['SA'] = 1
+            numUnroll['SB'] = 1
 
         data_multi_du = self._data_tensors_multi_du(numUnroll)
         if data_multi_du:
@@ -373,8 +442,13 @@ class SchedulerConfig:
             remainder_last=data_multi_du)
         self._prefixM = self._build_prefix(self._partitionSizesM)
         self._prefixN = self._build_prefix(self._partitionSizesN)
+        assert self.partitionOrder in ("m-major", "n-major"), \
+            f"partitionOrder must be m-major or n-major, got {self.partitionOrder}"
 
-        self.plr = 0 if self.pgr == 0 else 1
+        # plr=-1 auto-derives from pgr (legacy: 0 when pgr==0, else 1).
+        if self.plr == -1:
+            self.plr = 0 if self.pgr == 0 else 1
+        assert self.plr in (0, 1), f"plr must be 0 or 1, got {self.plr}"
         self.offsetPartition = 1 if self.pgr >= 2 else 0
         if self.spanNgllMerge:
             # Block scheduling merges NGLL into NLL, so the tail is four
@@ -386,6 +460,35 @@ class SchedulerConfig:
             self.offsetPartition = self.numPartitions
         if self.pgr == 0:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
+        # A single operand set (plr=0) uses the single-partition LR placement
+        # (_place_LRs_PLR0), so it requires one partition regardless of pgr.
+        if self.plr == 0 and not self.prefetchNextPartition:
+            assert self.numPartitions == 1, "plr=0 requires numPartitions=1"
+        if self.prefetchNextPartition:
+            assert self.numPartitions > 1, \
+                "prefetchNextPartition requires more than one partition"
+            assert self.numSubIterK == 1, \
+                "initial prefetchNextPartition implementation requires numSubIterK=1"
+
+        # Per-tensor double-buffer overlay (hybrid PLR): validate.
+        self.doubleBufferTensors = tuple(self.doubleBufferTensors)
+        if self.doubleBufferTensors:
+            assert self.plr == 0, \
+                "doubleBufferTensors requires a plr=0 base (hybrid overlay)"
+            assert self.numPartitions == 1 or self.prefetchNextPartition, \
+                "multi-partition doubleBufferTensors requires prefetchNextPartition"
+            valid = set(['A', 'B'] + (['SA', 'SB'] if self.hasScale else []))
+            assert set(self.doubleBufferTensors) <= valid, \
+                f"doubleBufferTensors {self.doubleBufferTensors} not in {valid}"
+        if self.prefetchNextPartition:
+            assert {'A', 'B'} <= set(self.doubleBufferTensors), \
+                "prefetchNextPartition requires double-buffered A and B"
+
+    def _num_operand_sets(self, tensor: str) -> int:
+        """Operand VGPR sets for a tensor: 2 when double-buffered, else plr-based."""
+        if tensor in self.doubleBufferTensors:
+            return 2
+        return 1 if self.plr == 0 else 2
 
     @property
     def spanNgllMerge(self) -> bool:
@@ -430,6 +533,13 @@ class SchedulerConfig:
     @property
     def numPartitions(self) -> int:
         return self.numPartitionsM * self.numPartitionsN
+
+    def partition_coords(self, pi: int) -> Tuple[int, int]:
+        """Return (M-partition, N-partition) in configured execution order."""
+        assert 0 <= pi < self.numPartitions
+        if self.partitionOrder == "n-major":
+            return pi // self.numPartitionsN, pi % self.numPartitionsN
+        return pi % self.numPartitionsM, pi // self.numPartitionsM
 
     @staticmethod
     def get_partition_candidates(tileInfoA, tileInfoB) -> list:
@@ -492,6 +602,7 @@ class LRPlacement(Emittable):
     tiles: MFMATileRange
     subIterK_slot: int         # which subIterK this LR is placed in
     partition: int = 0         # which partition this LR belongs to
+    targetPartition: int = 0   # partition that consumes the loaded operands
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
@@ -817,12 +928,12 @@ class LogicalScheduler:
     def _partition_tile_range(self, pi: int) -> dict:
         """Return {'A': (start, end), 'B': (start, end)} for partition pi.
 
-        Uses COLUMN_MAJOR ordering: M (A) varies fastest, N (B) varies slowest.
-        Tile ranges are derived from prefix sums of partition sizes.
+        Tile ranges are derived from prefix sums and the configured traversal
+        order.  The default is M-major; N-major is used by the FlyDSL-like
+        2x2 experiment.
         """
         cfg = self.config
-        piM = pi % cfg.numPartitionsM
-        piN = pi // cfg.numPartitionsM
+        piM, piN = cfg.partition_coords(pi)
         return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
                 'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
 
@@ -843,7 +954,7 @@ class LogicalScheduler:
           placed so far across partitions. Skips redundant K-prefetch when
           the same data was already loaded by an earlier partition.
         """
-        if self.config.plr == 0:
+        if self.config.plr == 0 and not self.config.prefetchNextPartition:
             return self._place_LRs_PLR0()
 
         cfg = self.config
@@ -875,8 +986,9 @@ class LogicalScheduler:
                 load[side] = (is_last or not side_retained[side]
                               or nxt[side] not in loaded_ranges[side])
 
-            slots = self._place_LRs_for_partition(cur, nxt, is_last, load,
-                                                  placed, retained)
+            next_pi = (pi + 1) % numP
+            slots = self._place_LRs_for_partition(
+                cur, nxt, is_last, load, placed, pi, next_pi, retained)
             for slot in slots:
                 for lr in slot.lrs:
                     lr.partition = pi
@@ -886,9 +998,42 @@ class LogicalScheduler:
                 if load[side]:
                     loaded_ranges[side] = {cur[side], nxt[side]}
 
+        if cfg.dualPeriodScale:
+            self._place_scale_LRs_epoch(partitions)
+
         self._partitions = partitions
         return partitions
 
+    def _place_scale_LRs_epoch(self, partitions):
+        """Place the per-epoch scale LRs for the dual-period MXFP8 path.
+
+        Scales live on the 256-K epoch, not on the data subIterK axis, so the
+        per-partition K-chunk placement never emits them (numSubIterK=1 while the
+        scale LR spans k=0..lrS.k).  Instead, read every mn-group across the full
+        free dimension exactly once at the epoch start (partition 0, slot 0):
+        for MIWT 8x4 that is 4 scale-A groups + 2 scale-B groups = six packed
+        ds_reads, each covering both K phases (k=0..lrS.k).  These VGPRs are then
+        reused by every partition and both K phases of the epoch.
+        """
+        cfg = self.config
+        slot0 = partitions[0][0]
+        # The scale LR physically reads a dword spanning both K phases of the
+        # epoch, but the logical schedule has a single data subIterK slot: tie
+        # the LR to that slot (k=0..numSubIterK) so MFMA->LR / GR->LR deps match.
+        # K-phase 0/1 selection within the epoch is an ISA detail handled by the
+        # MFMA scale-byte selector, not by a second subIterK slot.
+        for tensor, gran, numTiles in (('SA', cfg.lrSA, cfg.numMFMATilesM),
+                                       ('SB', cfg.lrSB, cfg.numMFMATilesN)):
+            for g in range(0, numTiles, gran.mn):
+                lr = LRPlacement(
+                    tensor=tensor,
+                    mtIteration=0,
+                    tiles=MFMATileRange(0, cfg.numSubIterK, g, g + gran.mn),
+                    subIterK_slot=0,
+                    targetPartition=0,
+                )
+                lr.partition = 0
+                slot0.lrs.append(lr)
     def _lr_tensors_retained_across_partitions(self) -> set:
         """Tensors a later partition may read out of registers, not from LDS.
 
@@ -1029,13 +1174,17 @@ class LogicalScheduler:
             ts, te = cur[side_key]
             k_gran = gran.k
             num_chunks = numK // k_gran
+            # Double-buffered tensors prefetch the NEXT MT iteration's data
+            # (mtIteration=1) into the alternate operand set; single-set tensors
+            # read the current iteration (mtIteration=0, blocking consume).
+            lr_mt = 1 if tensor in cfg.doubleBufferTensors else 0
             for chunk_idx in range(num_chunks):
                 lr_k_start = chunk_idx * k_gran
                 lr_k_end = lr_k_start + k_gran
                 slot_k = lr_k_start
                 lr = LRPlacement(
                     tensor=tensor,
-                    mtIteration=0,
+                    mtIteration=lr_mt,
                     tiles=MFMATileRange(lr_k_start, lr_k_end, ts, te),
                     subIterK_slot=slot_k,
                 )
@@ -1048,6 +1197,8 @@ class LogicalScheduler:
                                   is_last: bool,
                                   load: dict,
                                   placed: set,
+                                  current_pi: int,
+                                  next_pi: int,
                                   retained: set = frozenset()) -> List[SubIterKSlot]:
         """Place MFMAs and LRs for one partition."""
         cfg = self.config
@@ -1136,6 +1287,7 @@ class LogicalScheduler:
                             mtIteration=lr_mt,
                             tiles=MFMATileRange(lr_k_start, lr_k_end, ts, te),
                             subIterK_slot=lr_slot,
+                            targetPartition=(next_pi if is_wrap else current_pi),
                         )
                         slots[lr_slot].lrs.append(lr)
                         slot_mt[lr_slot] = lr_mt
@@ -1363,6 +1515,26 @@ class LogicalScheduler:
             use_global_pos = {t: (numP > 1) and any_single_k_chunk
                               for t in self.tensors}
 
+        # Partition-directed PLR forces per-partition LOCAL vgpr positions even
+        # for the single-k-chunk case. Partitions then REUSE operand registers
+        # (peak = one partition's footprint) instead of each getting distinct
+        # positions. This is the register-saving path; correctness relies on
+        # partition liveness not overlapping (WAR deps may be needed).
+        forced_local_pos = False
+        if cfg.prefetchNextPartition and any(use_global_pos.values()):
+            forced_local_pos = True
+            use_global_pos = {t: False for t in self.tensors}
+
+        # Dual-period scales are read once per 256-K epoch (partition 0) and
+        # reused by every partition and both K phases, so each scale group must
+        # hold a DISTINCT VGPR position across the whole free dim (the six-read
+        # set: 4 A + 2 B), independent of the data operands' partition-local
+        # register reuse.  Give SA/SB global positions even when A/B are local.
+        if cfg.dualPeriodScale:
+            for t in ('SA', 'SB'):
+                if t in use_global_pos:
+                    use_global_pos[t] = True
+
         # A tensor that varies but separates itself by k chunk takes the
         # cheaper alternation instead of a full copy per partition.
         parity_double_buffer = {
@@ -1400,11 +1572,19 @@ class LogicalScheduler:
         for tensor in self.tensors:
             num_k_groups[tensor] = numK // lr_grans[tensor].k
 
+        # Per-tensor operand-set count: a double-buffered tensor always gets 2
+        # sets; otherwise plr drives it (plr=0 -> 1 set, plr=1 -> 2 sets).
+        num_sets_for = {t: cfg._num_operand_sets(t) for t in self.tensors}
+        plr0 = cfg.plr == 0
+
         unroll_factor = 1
         for tensor in self.tensors:
-            if num_k_groups[tensor] % 2 != 0:
+            # Only double-buffered (2-set) tensors need loop unrolling to
+            # alternate their operand set across iterations.
+            if num_sets_for[tensor] == 2 and num_k_groups[tensor] % 2 != 0:
                 unroll_factor = 2
                 break
+
         if self._span_ngll_merge_enabled():
             # A merging tensor holds sets [0, nkg) for one unroll iteration and
             # [nkg, 2*nkg) for the next, so the assignment only closes after two
@@ -1415,14 +1595,44 @@ class LogicalScheduler:
         if pgr0:
             unroll_factor = 1
 
-        num_sets = {t: self._lr_tile_set_count(num_k_groups[t], t)
+        # Partition-directed PLR keeps the operand-set count it was designed
+        # against: 2 for the double-buffered data tensors, 1 for the
+        # epoch-granular scales.  Every other kernel takes the span-merge-aware
+        # count, which is what it had before this path existed.
+        num_sets = {t: (num_sets_for[t] if cfg.prefetchNextPartition
+                        else self._lr_tile_set_count(num_k_groups[t], t))
                     for t in self.tensors}
 
-        def _tile_set_idx(tensor, unroll_iter, k_chunk, gran):
-            if pgr0:
+        # When partitions share LOCAL vgpr positions (B2 register-saving path),
+        # color each tensor by its own partition-grid coordinate.  A follows
+        # piM, B follows piN, so partitions sharing an operand range also share
+        # its physical VGPR set.  This supports both one-dimensional splits and
+        # a FlyDSL-like 2x2 traversal without inferring the consumer from tile
+        # ranges.
+        # Scoped strictly to the env-gated experimental flip above: the natural
+        # use_global_pos=False case (e.g. MXFP4 numSubIterK>=2) must keep the
+        # original set formula untouched.
+        partition_sets = forced_local_pos and (numP > 1)
+        tensor_is_partitioned = {}
+        for _t in self.tensors:
+            _side = TENSOR_SIDE[_t]
+            _ranges = set(tuple(part_ranges[_pi][_side]) for _pi in range(numP))
+            tensor_is_partitioned[_t] = len(_ranges) > 1
+
+        def _tile_set_idx(tensor, unroll_iter, k_chunk, gran, pi=0):
+            # Single-set tensors always map to set 0 (no double buffer).
+            if pgr0 or num_sets[tensor] == 1:
                 return 0
             nkg = num_k_groups[tensor]
-            return (unroll_iter * nkg + k_chunk // gran.k) % num_sets[tensor]
+            part = 0
+            mt = unroll_iter
+            if partition_sets:
+                piM, piN = cfg.partition_coords(pi)
+                if tensor_is_partitioned[tensor]:
+                    part = piM if TENSOR_SIDE[tensor] == 'A' else piN
+                    mt = 0
+            return (mt * nkg + k_chunk // gran.k + part) % num_sets[tensor]
+
 
         def _tile_id(tensor, set_idx, pos):
             return set_idx * max_groups[tensor] + pos
@@ -1435,7 +1645,7 @@ class LogicalScheduler:
                     if slot.mfma:
                         for tensor in self.tensors:
                             gran = lr_grans[tensor]
-                            set_idx = _tile_set_idx(tensor, unroll_iter, k, gran)
+                            set_idx = _tile_set_idx(tensor, unroll_iter, k, gran, pi)
                             side = TENSOR_SIDE[tensor]
                             tileRange = (slot.mfma.tileA if side == 'A'
                                          else slot.mfma.tileB)
@@ -1452,7 +1662,8 @@ class LogicalScheduler:
                         gran = lr_grans[tensor]
                         target_mt = unroll_iter + lr.mtIteration
                         target_k = lr.tiles.subIterK_start
-                        set_idx = _tile_set_idx(tensor, target_mt, target_k, gran)
+                        set_idx = _tile_set_idx(tensor, target_mt, target_k, gran,
+                                                lr.targetPartition)
 
                         tile_map = {}
                         for t in lr.tiles.tileId_list:
@@ -1651,8 +1862,7 @@ class LogicalScheduler:
 
         mfma_per_partition = []
         for pi in range(numP):
-            piM = pi % cfg.numPartitionsM
-            piN = pi // cfg.numPartitionsM
+            piM, piN = cfg.partition_coords(pi)
             mfma_per_partition.append(cfg.partitionSizesM[piM] * cfg.partitionSizesN[piN])
 
         weight_prefix = [0]
@@ -2611,24 +2821,47 @@ class LogicalScheduler:
             for (tensor, uid), gr in last_gr.items():
                 gr.postOps.append(GRIncOp(tensor=tensor, unrollId=uid))
 
-        if self.config.pgr == 0:
-            last_gr_per_key = {}
-            for slots in self._partitions:
-                for slot in slots:
-                    for gr in slot.grs:
-                        last_gr_per_key[(gr.tensor, gr.unrollId)] = gr
+        # ---- LR buffer-swap placement (keyed off plr, NOT pgr) ----
+        # plr==0 (single operand set): the read has no double buffer, so the
+        #   LDS-read-offset swap must happen AFTER the read (postOp on the last
+        #   LR). Each iteration reads its own buffer, consumes it via MFMA, then
+        #   advances the read pointer for the next iteration.
+        # plr>=1 (double-buffered reads): the swap happens BEFORE the read
+        #   (preOp on the first LR) so the read prefetches the next buffer while
+        #   MFMA consumes the operands read in the previous iteration.
+        if self.config.plr == 0 and not self.config.prefetchNextPartition:
             for tensor in self._LR_GR_ORDER:
-                if tensor in last_lr and tensor in last_lr_mt:
+                if tensor not in last_lr or tensor not in last_lr_mt:
+                    continue
+                if tensor in self.config.doubleBufferTensors:
+                    # Double-buffered tensor: swap the LDS read offset BEFORE the
+                    # read (preOp on the first LR) so this iteration prefetches
+                    # the next buffer while MFMA consumes the previous set.
+                    lr = first_lr[tensor]
+                    first_uid = lr.tiles.subIterK_start // self._per_uid_k(tensor)
+                    lr.preOps.append(LRIncOp(tensor=tensor, unrollId=first_uid))
+                else:
+                    # Single operand set: swap AFTER the read (postOp).
                     last_lr[tensor].postOps.append(
                         LRIncOp(tensor=tensor, unrollId=last_lr_uid.get(tensor, 0)))
-            for (tensor, uid), gr in last_gr_per_key.items():
-                if (tensor, uid) in last_gr_mt:
-                    gr.postOps.append(GRIncOp(tensor=tensor, unrollId=uid))
         else:
             for tensor, lr in first_lr.items():
                 if tensor not in lr_inc_tensors:
-                    first_uid = lr.tiles.subIterK_start // self._per_uid_k(tensor)
-                    lr.preOps.append(LRIncOp(tensor=tensor, unrollId=first_uid))
+                    # Dual-period MXFP8 scales use a SINGLE operand set read
+                    # synchronously (read epoch N, compute, then advance), so the
+                    # LDS read-offset swap must come AFTER the read — a postOp on
+                    # the last scale LR — exactly like the plr==0 single-set path.
+                    # Putting it before the read (preOp) would toggle the read
+                    # pointer to the next epoch's LDS half before consuming the
+                    # current epoch, reading one epoch too early.
+                    if self.config.dualPeriodScale and tensor in ('SA', 'SB'):
+                        last = last_lr[tensor]
+                        last.postOps.append(
+                            LRIncOp(tensor=tensor,
+                                    unrollId=last_lr_uid.get(tensor, 0)))
+                    else:
+                        first_uid = lr.tiles.subIterK_start // self._per_uid_k(tensor)
+                        lr.preOps.append(LRIncOp(tensor=tensor, unrollId=first_uid))
 
             if self._is_multi_du():
                 for tensor, lr in first_lr.items():
@@ -2636,6 +2869,20 @@ class LogicalScheduler:
                     first_uid = lr.tiles.subIterK_start // per_uid_k
                     if first_uid != 0:
                         lr.preOps.insert(0, LRIncOp(tensor=tensor, isUnrollSwap=True, unrollId=first_uid))
+
+        # ---- GR buffer-swap placement (keyed off pgr) ----
+        # PGR=0 (no prefetch): the global load happens in-loop, so the GR write
+        #   buffer swap is a postOp on the last GR.  PGR>=1 handles gr_inc via
+        #   the MT-transition walk above (and the multiDU postOp path).
+        if self.config.pgr == 0:
+            last_gr_per_key = {}
+            for slots in self._partitions:
+                for slot in slots:
+                    for gr in slot.grs:
+                        last_gr_per_key[(gr.tensor, gr.unrollId)] = gr
+            for (tensor, uid), gr in last_gr_per_key.items():
+                if (tensor, uid) in last_gr_mt:
+                    gr.postOps.append(GRIncOp(tensor=tensor, unrollId=uid))
 
         # GL2 prefetch: append increment + load ops after the last GR in
         # the schedule so they fire once per iteration after all GR_INCs.
@@ -3708,6 +3955,8 @@ class LogicalScheduler:
         """Create LR placements for first partition.
 
         tiles: per-tensor MFMATileRange, e.g. {'A': MFMATileRange(0, k, mn0, mn1), ...}
+        A tensor omitted from `tiles` gets no placement, which is how the caller
+        keeps a tensor out of the pre-loop entirely.
 
         Uses the first MFMA's vgpr tile maps (the preloop loads data consumed
         by the first MFMA, not the next subIterK like mainloop LRs).
@@ -3716,6 +3965,8 @@ class LogicalScheduler:
 
         placements = []
         for tensor in self.tensors:
+            if tensor not in tiles:
+                continue
             lr = LRPlacement(
                 tensor=tensor, mtIteration=0,
                 tiles=tiles[tensor],
@@ -4118,7 +4369,14 @@ class LogicalScheduler:
             'A':  MFMATileRange(0, cfg.lrA.k, *part0['A']),
             'B':  MFMATileRange(0, cfg.lrB.k, *part0['B']),
         }
-        if cfg.hasScale:
+        if cfg.hasScale and not cfg.prefetchNextPartition:
+            # Scales are left out of the partition-directed prefetch.  Data local
+            # reads are partition-granular, so the pre-loop's copies feed the
+            # first partition's MFMAs and are genuinely live.  Scale local reads
+            # are epoch-granular instead: every entry point re-reads the whole
+            # group set before consuming it -- the mainloop at its C0 head, and
+            # the NLL, NGLL and tail paths at theirs -- so a pre-loop copy would
+            # be overwritten before use on every path out of here.
             lr_tiles['SA'] = MFMATileRange(0, cfg.lrSA.k, *part0['A'])
             lr_tiles['SB'] = MFMATileRange(0, cfg.lrSB.k, *part0['B'])
 
