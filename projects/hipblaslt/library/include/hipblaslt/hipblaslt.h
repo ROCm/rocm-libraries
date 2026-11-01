@@ -252,11 +252,11 @@ typedef enum {
 
   /** Memory order of the data. See ``hipblasLtOrder_t``.
    *
-   * ``hipblasLtMatmul``, ``hipblasLtMatmulAlgoGetHeuristic``, and the ``hipblaslt_ext`` ``Gemm`` and
+   * ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic`` accept ``HIPBLASLT_ORDER_ROW`` for A
+   * and B; see ``hipblasLtOrder_t`` for the limits. The ``hipblaslt_ext`` ``Gemm`` and
    * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
-   * ``HIPBLASLT_ORDER_ROW``. Only ``hipblasLtMatrixTransform`` accepts ``HIPBLASLT_ORDER_ROW``.
-   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only ``HIPBLASLT_ORDER_COL`` and return
-   * ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
+   * ``HIPBLASLT_ORDER_ROW``. Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only
+   * ``HIPBLASLT_ORDER_COL`` and return ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
    *
    * ``int32_t``, default: ``HIPBLASLT_ORDER_COL``.
    */
@@ -487,10 +487,17 @@ typedef enum {
    *
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
    *
-   * Supported by ``hipblasLtMatrixTransform`` only. Matmul does not support this order and returns
-   * ``HIPBLAS_STATUS_NOT_SUPPORTED``. To multiply row-major data, keep ``HIPBLASLT_ORDER_COL`` and
-   * use the identity ``(A * B)^T = B^T * A^T``: swap A and B, swap ``m`` and ``n``, and describe each
-   * matrix as its column-major transpose.
+   * Supported by ``hipblasLtMatrixTransform``, and by ``hipblasLtMatmul`` and
+   * ``hipblasLtMatmulAlgoGetHeuristic`` for A and B. Matmul computes a row-major A or B as its
+   * column-major transpose. C and D must be column-major: a row-major C or D returns
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED``, except with a fused all-to-all epilogue, whose own check
+   * runs first and returns ``HIPBLAS_STATUS_INVALID_VALUE`` for a row-major D. Matmul also returns it for a row-major A or B combined with
+   * an operation other than ``HIPBLAS_OP_N`` or ``HIPBLAS_OP_T``, a block or vector scale mode, or
+   * an ``HIP_R_4I`` matrix.
+   *
+   * Argument errors such as a null handle, descriptor, layout, or data pointer keep their usual
+   * status, and so does ``HIPBLASLT_OPERATION_INVALID``. The ``hipblaslt_ext`` APIs return
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` for this order.
    */
   HIPBLASLT_ORDER_ROW = 1,
   
