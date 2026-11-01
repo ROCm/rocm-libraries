@@ -5,6 +5,15 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.42
 
+### Changed
+
+* Multi-device plans are now built as independent per-brick transforms, without any data movement
+  between devices, when no input or output brick splits a transform length and every input brick
+  has an output brick on the same device covering the same batch range.
+* Multi-dimensional, multi-device transforms whose bricks split no transform length, but cannot be
+  paired as above, now redistribute data between devices instead of gathering the entire transform
+  on a single device.
+
 ### Resolved issues
 
 * Fixed multi-device plans whose per-device sub-transforms have lengths involving large prime
