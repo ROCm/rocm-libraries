@@ -1235,12 +1235,15 @@ static rocke_status_t h_vec_minmax(rocke_h_lowerer_t* lw, const rocke_op_t* op, 
     return lw->status;
 }
 
+/* smax / smin are signed, so they refuse a u8 operand. */
 static rocke_status_t rocke_h_op_vector_smax(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    rocke_i_refuse_unsigned_operands(op, NULL);
     return h_vec_minmax(lw, op, ">");
 }
 static rocke_status_t rocke_h_op_vector_smin(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    rocke_i_refuse_unsigned_operands(op, NULL);
     return h_vec_minmax(lw, op, "<");
 }
 /* vector.max shares the smax ">" form in the Python lowerer. */
@@ -1311,6 +1314,7 @@ static rocke_status_t rocke_h_op_vector_trunc(rocke_h_lowerer_t* lw, const rocke
 }
 static rocke_status_t rocke_h_op_vector_sext(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    rocke_i_refuse_unsigned_operands(op, NULL);
     return h_vec_elem_cast(lw, op);
 }
 

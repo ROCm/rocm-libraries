@@ -118,6 +118,8 @@ _VEC_PREFIX = {
     "tf32": "i32x",
     "i16": "i16x",
     "i8": "i8x",
+    "u8": "u8x",
+    "i64": "i64x",
     "fp8e4m3": "i8x",
     "bf8e5m2": "i8x",
 }
@@ -2645,6 +2647,7 @@ class _Lowerer:
             )
 
     def _op_vector_smax(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         a, bb = op.operands
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
         res_t = _type_to_hip(op.result.type)
@@ -2657,6 +2660,7 @@ class _Lowerer:
             )
 
     def _op_vector_smin(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         a, bb = op.operands
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
         res_t = _type_to_hip(op.result.type)
@@ -2690,6 +2694,7 @@ class _Lowerer:
             self._emit(f"{nice}[{i}] = ({elem_cpp}){_name(v)}[{i}];")
 
     def _op_vector_sext(self, op: Op) -> None:
+        _refuse_unsigned_operands(op)
         (v,) = op.operands
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
         res_t = _type_to_hip(op.result.type)

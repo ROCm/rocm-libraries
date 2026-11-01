@@ -5,10 +5,11 @@
 
 LLVM's ``lshr <N x iW>`` shifts zeros in at bit ``W - 1``. The HIP lowering
 reads each lane through the unsigned type of its width before shifting, so a
-negative i8 or i16 lane does not shift its sign bits in. Covers the HIP source
-of both engines, that hipcc accepts it, and, when a GPU is present, that the
-LLVM route and hipcc on the HIP source both engines emit compute the same
-lanes as numpy, on negative and positive lanes alike.
+negative i8 or i16 lane does not shift its sign bits in and an i64 lane keeps
+its high 32 bits. Covers the HIP source of both engines, that hipcc accepts
+it, and, when a GPU is present, that the LLVM route and hipcc on the HIP
+source both engines emit compute the same lanes as numpy, on lanes with the
+top bit set and clear alike.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from rocke.core.arch.target import (
     base_arch_from_target_id,
     compiler_target_from_target_id,
 )
-from rocke.core.ir import I8, I16, I32, IRBuilder, PtrType
+from rocke.core.ir import I8, I16, I32, I64, U8, IRBuilder, PtrType
 from rocke.tests.engines import lower_hip_with_both_engines
 
 _LANES = 64
@@ -32,8 +33,10 @@ _LANES = 64
 # (element type, lanes per vector, unsigned C type, numpy dtype of the element)
 CASES = (
     (I8, 4, "uint8_t", np.int8),
+    (U8, 4, "uint8_t", np.uint8),
     (I16, 2, "uint16_t", np.int16),
     (I32, 2, "uint32_t", np.int32),
+    (I64, 2, "uint64_t", np.int64),
 )
 
 
@@ -161,7 +164,8 @@ def test_gpu_matches_a_logical_shift(tmp_path, case, route):
     raw = rng.integers(0, 256, _LANES * n * bits // 8, dtype=np.uint8)
     x = raw.view(np_dtype).copy()
     x.view(unsigned)[0] = 1 << (bits - 1)  # the top bit alone, in every type
-    assert (x < 0).any() and (x > 0).any()
+    top_bit = x.view(unsigned) >> (bits - 1)
+    assert top_bit.any() and not top_bit.all()
     s = rng.integers(0, bits, x.size).astype(np_dtype)
     expected = (x.view(unsigned) >> s.astype(unsigned)).view(np_dtype)
     np.testing.assert_array_equal(_run(blob, kernel.name, x, s), expected)
