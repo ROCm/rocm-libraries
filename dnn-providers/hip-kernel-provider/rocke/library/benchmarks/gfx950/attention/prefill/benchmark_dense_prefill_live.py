@@ -63,6 +63,7 @@ from kernels.gfx950.attention_dense import (  # noqa: E402
     supports_attention_dense,
 )
 from rocke.helpers.compile import compile_kernel  # noqa: E402
+from rocke.helpers.quant import quant_max_abs  # noqa: E402
 from rocke.runtime import (  # noqa: E402
     KernelLauncher,
     LaunchConfig,
@@ -71,7 +72,7 @@ from rocke.runtime import (  # noqa: E402
 )
 
 _TOL = 2e-2
-_FP8_E4M3_MAX = 448.0
+_FP8_E4M3_MAX = quant_max_abs("fp8e4m3")
 
 
 def _quantize_fp8(t):
