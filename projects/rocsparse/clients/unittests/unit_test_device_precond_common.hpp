@@ -323,24 +323,6 @@ namespace precond_ut
         return a;
     }
 
-    // Precondition of the generators below: the longest row does not have exactly
-    // 32, 64, 128, 256 or 512 entries (the slot counts of the csric0 / csrildlt0
-    // hash tables on a wavefront of 32; AISPARSE-896).
-    inline bool is_hash_table_size(int32_t row_length)
-    {
-        return row_length == 32 || row_length == 64 || row_length == 128 || row_length == 256
-               || row_length == 512;
-    }
-
-    inline void require_safe_row_length(int32_t row_length)
-    {
-        if(is_hash_table_size(row_length))
-        {
-            throw std::invalid_argument("row length " + std::to_string(row_length)
-                                        + " equals a csric0/csrildlt0 hash table size");
-        }
-    }
-
     // Lower-triangular matrix (stored pattern includes the diagonal) whose last
     // row holds `fat` entries and every other row `band` + 1 entries
     // (r - band .. r). The longest row, `fat`, selects between the hash kernels
@@ -350,7 +332,6 @@ namespace precond_ut
     template <typename T>
     csr_matrix<T> make_fat_row_matrix(int32_t fat, bool imag = true, int32_t band = 1)
     {
-        require_safe_row_length(fat);
         csr_matrix<T> a;
         a.n = fat + 1;
         a.ptr.push_back(0);
@@ -380,7 +361,6 @@ namespace precond_ut
     template <typename T>
     csr_matrix<T> make_lower_band_matrix(int32_t n, int32_t w, bool imag = true)
     {
-        require_safe_row_length(std::min(n, w + 1));
         csr_matrix<T> a;
         a.n = n;
         a.ptr.push_back(0);
