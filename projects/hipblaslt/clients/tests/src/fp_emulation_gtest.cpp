@@ -54,12 +54,12 @@ namespace
             return emulated ? rocblaslt_compute_f32_emulated_fixedpoint : rocblaslt_compute_f32;
         return emulated ? rocblaslt_compute_f64_emulated_fixedpoint : rocblaslt_compute_f64;
     }
-    // Returns true only when a HIP device exists AND it is in the emulation
-    // hardware support table.  Uses EAGER to bypass the cost model so the probe
-    // GEMM size (16³) never influences the result — only the device table check
-    // matters.  Note: fixedPointEmulationDecision checks get_perf_model_params()
-    // unconditionally before the eager short-circuit, so EAGER only skips the
-    // performance-model comparison, not the device support lookup.
+    // Returns true only when a HIP device exists AND the emulation device lookup
+    // finds it (chip row or architecture row).  Uses EAGER to bypass the
+    // cost model so the probe GEMM size (16³) never influences the result — only
+    // the device lookup matters.  Note: fixedPointEmulationDecision checks the
+    // device lookup unconditionally before the eager short-circuit, so EAGER only
+    // skips the performance-model comparison, not the device support lookup.
     bool has_supported_device()
     {
         int count = 0;
@@ -158,6 +158,55 @@ namespace
                   FIXED_POINT_EMULATION_ENV_INVALID);
     }
 
+    // Device lookup: a chip row overrides the architecture row's values,
+    // the architecture's policy applies either way, and target features in the
+    // gfx name are ignored.  Architecture rows use the generic Radeon values, in
+    // which native FP64 is never competitive; chip rows use measured values.
+    TEST_F(FixedPointEmulationHostTest, DeviceLookupChipAndArch)
+    {
+        /* Radeon Pro W7800: chip row, RDNA 3 policy. */
+        const auto w7800 = fixedPointEmulationLookupDevice(0x745eu, "gfx1100");
+        EXPECT_EQ(w7800.match, FIXED_POINT_EMULATION_DEVICE_CHIP);
+        EXPECT_GT(w7800.fp64_default_min_mnk, 0.0);
+        EXPECT_TRUE(w7800.fp64_native_competitive);
+        /* Unknown gfx1100 card: RDNA 3 architecture row, generic values. */
+        const auto gfx1100 = fixedPointEmulationLookupDevice(0xFFFFu, "gfx1100:sramecc-:xnack-");
+        EXPECT_EQ(gfx1100.match, FIXED_POINT_EMULATION_DEVICE_ARCH);
+        EXPECT_EQ(gfx1100.fp64_default_min_mnk, w7800.fp64_default_min_mnk);
+        EXPECT_FALSE(gfx1100.fp64_native_competitive);
+        /* RDNA 3.5 architecture row. */
+        const auto gfx1151 = fixedPointEmulationLookupDevice(0xFFFFu, "gfx1151");
+        EXPECT_EQ(gfx1151.match, FIXED_POINT_EMULATION_DEVICE_ARCH);
+        EXPECT_GT(gfx1151.fp64_default_min_mnk, 0.0);
+        EXPECT_FALSE(gfx1151.fp64_native_competitive);
+        /* Radeon RX 9070 XT: chip row, RDNA 4 policy. */
+        const auto rx9070xt = fixedPointEmulationLookupDevice(0x7550u, "gfx1201");
+        EXPECT_EQ(rx9070xt.match, FIXED_POINT_EMULATION_DEVICE_CHIP);
+        EXPECT_GT(rx9070xt.fp64_default_min_mnk, 0.0);
+        EXPECT_TRUE(rx9070xt.fp64_native_competitive);
+        /* Unknown gfx1201 and gfx1200 cards: RDNA 4 architecture rows, same policy. */
+        const auto gfx1201 = fixedPointEmulationLookupDevice(0xFFFFu, "gfx1201");
+        EXPECT_EQ(gfx1201.match, FIXED_POINT_EMULATION_DEVICE_ARCH);
+        EXPECT_EQ(gfx1201.fp64_default_min_mnk, rx9070xt.fp64_default_min_mnk);
+        EXPECT_FALSE(gfx1201.fp64_native_competitive);
+        const auto gfx1200 = fixedPointEmulationLookupDevice(0xFFFFu, "gfx1200");
+        EXPECT_EQ(gfx1200.match, FIXED_POINT_EMULATION_DEVICE_ARCH);
+        EXPECT_EQ(gfx1200.fp64_default_min_mnk, rx9070xt.fp64_default_min_mnk);
+        /* MI355X: chip row, no architecture policy. */
+        const auto mi355x = fixedPointEmulationLookupDevice(0x75a3u, "gfx950:sramecc+:xnack-");
+        EXPECT_EQ(mi355x.match, FIXED_POINT_EMULATION_DEVICE_CHIP);
+        EXPECT_EQ(mi355x.fp64_default_min_mnk, 0.0);
+        EXPECT_TRUE(mi355x.fp64_native_competitive);
+        /* Unsupported: no chip row, no architecture row; prefixes of a gfx name
+         * do not match. */
+        EXPECT_EQ(fixedPointEmulationLookupDevice(0xFFFFu, "gfx942").match,
+                  FIXED_POINT_EMULATION_DEVICE_NONE);
+        EXPECT_EQ(fixedPointEmulationLookupDevice(0xFFFFu, "gfx110").match,
+                  FIXED_POINT_EMULATION_DEVICE_NONE);
+        EXPECT_EQ(fixedPointEmulationLookupDevice(0xFFFFu, nullptr).match,
+                  FIXED_POINT_EMULATION_DEVICE_NONE);
+    }
+
     // -----------------------------------------------------------------------
     // Handle fixture: isolated setup/teardown, reusable by future tests.
     // -----------------------------------------------------------------------
@@ -205,6 +254,15 @@ namespace
         void set_strategy(hipblasEmulationStrategy_t s)
         {
             emulSetStrategy(m_ed, s);
+        }
+
+        /* False on devices whose performance-model values mark native FP64 as
+         * never competitive (generic Radeon architecture values).                  */
+        static bool fp64_native_competitive()
+        {
+            int dev = 0;
+            return hipGetDevice(&dev) == hipSuccess
+                   && fixedPointEmulationDeviceSupport(dev).fp64_native_competitive;
         }
 
         bool would_apply(hipDataType t, int64_t m, int64_t n, int64_t k, int32_t batch)
@@ -307,9 +365,14 @@ namespace
         set_enabled(true);
 
         // ── FP64 ──────────────────────────────────────────────────────────────
-        // Cost model must reject a small FP64 GEMM under PERFORMANT.
+        // Cost model must reject a small FP64 GEMM under PERFORMANT, unless the
+        // device's values mark native FP64 as never competitive (generic Radeon
+        // architecture values), in which case PERFORMANT always emulates FP64.
         set_strategy(HIPBLAS_EMULATION_STRATEGY_PERFORMANT);
-        EXPECT_FALSE(would_apply(HIP_R_64F, 16, 16, 16, 1));
+        if(fp64_native_competitive())
+            EXPECT_FALSE(would_apply(HIP_R_64F, 16, 16, 16, 1));
+        else
+            EXPECT_TRUE(would_apply(HIP_R_64F, 16, 16, 16, 1));
         // EAGER must accept it — proving it bypasses the cost model.
         set_strategy(HIPBLAS_EMULATION_STRATEGY_EAGER);
         EXPECT_TRUE(would_apply(HIP_R_64F, 16, 16, 16, 1));
@@ -334,6 +397,8 @@ namespace
     // PERFORMANT strategy uses the cost model; small GEMMs should be rejected.
     TEST_F(FixedPointEmulationTest, WouldApply_PerformantSmallReturnsFalse)
     {
+        if(!fp64_native_competitive())
+            GTEST_SKIP() << "Native FP64 marked never competitive (generic architecture values)";
         set_enabled(true);
         set_strategy(HIPBLAS_EMULATION_STRATEGY_PERFORMANT);
         EXPECT_FALSE(would_apply(HIP_R_64F, 16, 16, 16, 1));
@@ -345,6 +410,29 @@ namespace
         set_enabled(true);
         set_strategy(HIPBLAS_EMULATION_STRATEGY_PERFORMANT);
         EXPECT_TRUE(would_apply(HIP_R_64F, 4096, 4096, 4096, 1));
+    }
+
+    // With no strategy set, an architecture FP64 policy (Radeon) emulates
+    // exactly the problems at or above its m * n * k threshold.  An explicit
+    // EAGER strategy still emulates below it.
+    TEST_F(FixedPointEmulationTest, WouldApply_ArchitectureFp64Threshold)
+    {
+        int dev = 0;
+        ASSERT_EQ(hipGetDevice(&dev), hipSuccess);
+        const double min_mnk = fixedPointEmulationDeviceSupport(dev).fp64_default_min_mnk;
+        if(min_mnk <= 0.0)
+            GTEST_SKIP() << "No FP64 architecture policy for this device";
+        if(fixedPointEmulationEnvStrategy() != HIPBLAS_EMULATION_STRATEGY_DEFAULT)
+            GTEST_SKIP() << "HIPBLAS_EMULATION_STRATEGY is set";
+        const int64_t edge  = static_cast<int64_t>(std::cbrt(min_mnk));
+        const int64_t large = edge + 2;
+        const int64_t small = edge / 2;
+        set_enabled(true);
+        set_strategy(HIPBLAS_EMULATION_STRATEGY_DEFAULT);
+        EXPECT_TRUE(would_apply(HIP_R_64F, large, large, large, 1));
+        EXPECT_FALSE(would_apply(HIP_R_64F, small, small, small, 1));
+        set_strategy(HIPBLAS_EMULATION_STRATEGY_EAGER);
+        EXPECT_TRUE(would_apply(HIP_R_64F, small, small, small, 1));
     }
 
     TEST_F(FixedPointEmulationTest, EmulatedGemm_SmokeIdentity)

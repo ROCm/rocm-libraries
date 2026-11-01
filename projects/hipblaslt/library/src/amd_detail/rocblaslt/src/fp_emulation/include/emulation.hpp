@@ -109,6 +109,45 @@ bool fixedPointEmulationPerformanceCheck(const _rocblaslt_handle*      h,
  * Shared for both FP32 and FP64.  Env var cached on first call.           */
 bool fixedPointEmulationIsEager();
 
+/* Returns the strategy set by HIPBLAS_EMULATION_STRATEGY: EAGER or PERFORMANT
+ * for "eager" or "performant", PERFORMANT for any other value, and DEFAULT
+ * when the variable is unset, so that the device's architecture policy
+ * applies.  Cached on first call.                                          */
+hipblasEmulationStrategy_t fixedPointEmulationEnvStrategy();
+
+/* Device support for fixed-point emulation.
+ * A device is supported when its PCI device ID has a chip row (values
+ * measured on that card) or its gfx target has an architecture row.  A chip
+ * row overrides the architecture's performance-model values; the
+ * architecture's policy applies either way.                                */
+enum FixedPointEmulationDeviceMatch
+{
+    FIXED_POINT_EMULATION_DEVICE_NONE = 0, /* not supported: never emulated  */
+    FIXED_POINT_EMULATION_DEVICE_CHIP = 1, /* PCI device ID row              */
+    FIXED_POINT_EMULATION_DEVICE_ARCH = 2, /* gfx target (architecture) row  */
+};
+
+struct FixedPointEmulationDeviceSupport
+{
+    FixedPointEmulationDeviceMatch match;
+    /* Architecture policy for FP64 when no strategy is set (descriptor or
+     * HIPBLAS_EMULATION_STRATEGY): emulate exactly when m * n * k is at least
+     * this value, without the performance model.  0 = performance model.   */
+    double fp64_default_min_mnk;
+    /* False when the device's performance-model values mark native FP64 as
+     * never competitive (ai_fp64 = 0, as in the generic Radeon architecture
+     * values): the performance model then always emulates FP64.            */
+    bool fp64_native_competitive;
+};
+
+/* Pure lookup, for tests: gcn_arch_name may carry target features
+ * ("gfx1100:sramecc-:xnack-") or be nullptr.                               */
+FixedPointEmulationDeviceSupport fixedPointEmulationLookupDevice(uint32_t    pci_device_id,
+                                                                 const char* gcn_arch_name);
+
+/* Lookup for a HIP device index, cached per device.                        */
+FixedPointEmulationDeviceSupport fixedPointEmulationDeviceSupport(int device);
+
 /* Returns the special-values support mask from
  * HIPBLAS_EMULATION_SPECIAL_VALUES_SUPPORT_MASK (default: 0x3).
  *   bit 0 = Inf detection enabled
@@ -149,7 +188,7 @@ struct FixedPointEmulationSettings
     rocblaslt_status                         status;      /* invalid_value on bad env            */
     bool                                     apply;       /* true -> use emulation; false -> native path */
     uint32_t                                 sv_support;  /* resolved special-values bitmask (bit 0 = Inf, bit 1 = NaN) */
-    hipblasEmulationStrategy_t             strategy;    /* PERFORMANT or EAGER (resolved from desc/env; never DEFAULT) */
+    hipblasEmulationStrategy_t             strategy;    /* PERFORMANT or EAGER (resolved from desc/env/architecture policy; never DEFAULT) */
     void*                                    workspace;   /* caller workspace ptr; nullptr until filled before GEMM dispatch */
     size_t                                   workspace_bytes; /* caller workspace size; ~size_t{0} = no budget constraint */
     /* ADP target precision in mantissa bits.
@@ -174,7 +213,8 @@ struct FixedPointEmulationSettings
  * Setting precedence (highest to lowest):
  *   1. Per-matmul descriptor fields (desc->emulation_*; sentinel = inherit)
  *   2. Environment variables (read once, process-wide)
- *   3. Built-in defaults (ADP mode, S_MAX moduli, sv_support = DEFAULT)
+ *   3. Built-in defaults (ADP mode, S_MAX moduli, sv_support = DEFAULT;
+ *      strategy from the device's architecture policy, otherwise PERFORMANT)
  *
  * desc may be nullptr when called from code that has no matmul desc
  * (e.g. workspace size query with no attached desc).
