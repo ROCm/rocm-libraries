@@ -1490,14 +1490,22 @@ static void op_tile_buffer_store_f32(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, soffset));
 }
 
-/* Python _op_tile_buffer_atomic_fadd_f32: the pre-add result is unused. */
+/* Python _op_tile_buffer_atomic_fadd_f32: the pre-add result is unused. The
+ * cachepolicy attr must be an integer in 0..31; a missing, non-integer or
+ * out-of-range value (hand-built or imported IR) is rejected, not coerced. */
 static void op_tile_buffer_atomic_fadd_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* rsrc = op->operands[0];
     const rocke_value_t* voffset = op->operands[1];
     const rocke_value_t* soffset = op->operands[2];
     const rocke_value_t* val = op->operands[3];
-    int64_t cp = ll_attr_int(op, "cachepolicy", 0);
+    const rocke_attr_value_t* cpv = rocke_attr_get(&op->attrs, "cachepolicy");
+    if(!cpv || cpv->kind != ROCKE_ATTR_INT || cpv->u.i < 0 || cpv->u.i > 0x1F)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s: cachepolicy attr must be an integer in 0..31",
+                      rocke_opcode_name(op->opcode));
+    const int64_t cp = cpv->u.i;
     const char* r;
     rocke_ll_need(L, "raw.ptr.buffer.atomic.fadd.f32");
     r = rocke_ll_fresh(L, "bafadd");

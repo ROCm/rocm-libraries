@@ -6325,9 +6325,19 @@ class _Lowerer:
         )
 
     def _op_tile_buffer_atomic_fadd_f32(self, op: Op) -> None:
-        """f32 buffer atomic add; the pre-add result is unused (no-return form)."""
+        """f32 buffer atomic add; the pre-add result is unused (no-return form).
+
+        The ``cachepolicy`` attr is the intrinsic's immediate and must be an
+        integer in 0..31 (the builder always sets it); a missing, non-integer
+        or out-of-range value from hand-built or imported IR is rejected rather
+        than coerced.
+        """
         rsrc, voffset, soffset, val = op.operands
-        cp = int(op.attrs.get("cachepolicy", 0))
+        cp = op.attrs.get("cachepolicy")
+        if isinstance(cp, bool) or not isinstance(cp, int) or not 0 <= cp <= 0x1F:
+            raise ValueError(
+                f"{op.name}: cachepolicy attr must be an integer in 0..31, got {cp!r}"
+            )
         self._need("raw.ptr.buffer.atomic.fadd.f32")
         r = self._fresh("bafadd")
         self._current().emit(

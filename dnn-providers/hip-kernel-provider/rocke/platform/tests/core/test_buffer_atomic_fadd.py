@@ -42,6 +42,22 @@ class TestBufferAtomicFaddF32(unittest.TestCase):
                 )
                 self.assertIn(f", i32 {cp})", ll)
 
+    def test_lowering_rejects_an_invalid_cachepolicy_attr(self):
+        # Hand-built or imported IR can carry any attr value; the lowerer
+        # (like the C++ one) must refuse it rather than coerce it to an int.
+        for bad in (20.9, 32, -1, True, "20", None):
+            with self.subTest(cachepolicy=bad):
+                k = _kernel(0)
+                (op,) = [
+                    o for o in k.body.ops if o.name == "tile.buffer_atomic_fadd_f32"
+                ]
+                if bad is None:
+                    del op.attrs["cachepolicy"]
+                else:
+                    op.attrs["cachepolicy"] = bad
+                with self.assertRaisesRegex(ValueError, "cachepolicy attr"):
+                    lower_kernel_to_llvm(k, arch="gfx1250")
+
     def test_rejects_out_of_range_cachepolicy(self):
         b = IRBuilder("bad_cp")
         out = b.param("out", PtrType(F32, "global"))
