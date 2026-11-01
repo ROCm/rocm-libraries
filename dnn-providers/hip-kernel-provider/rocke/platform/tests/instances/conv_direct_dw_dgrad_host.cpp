@@ -20,10 +20,12 @@
  *   - a per-axis padding given to the WMMA convolutions, which offset
  *     columns by PAD and must refuse it.
  */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/abi.h"
 #include "rocke/instance_conv_dgrad_patch_wmma.h"
 #include "rocke/instance_conv_dgrad_smallc_wmma.h"
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
@@ -35,6 +37,18 @@
 
 #define ERR_CAP 1024
 #define NAME_CAP 512
+
+/* Layout canary for the public wgrad spec, like the MMA catalog ones in
+ * tests/core/test_mma_catalog_lookup.cpp: a caller allocates
+ * rocke_direct_conv_wgrad_spec_t from its own header, so growing it must move
+ * ROCKE_ABI_VERSION too. Editing the struct fails the build here; the fix is
+ * to bump ROCKE_ABI_VERSION in rocke/abi.h and BINARY_ABI in
+ * python/rocke/portable_ir/src/abi.py, then update this pin. 64-bit only. */
+#if INTPTR_MAX == INT64_MAX
+static_assert(sizeof(rocke_direct_conv_wgrad_spec_t) == 160 && ROCKE_ABI_VERSION >= 7,
+              "rocke_direct_conv_wgrad_spec_t changed size: bump ROCKE_ABI_VERSION in "
+              "rocke/abi.h, then update this pin");
+#endif
 
 static int g_failures = 0;
 

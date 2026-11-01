@@ -157,6 +157,9 @@ def test_every_capability_row_is_built(jobs):
             # No tuning for this arch at all (see the gfx1250 test below).
             assert not any(True for _ in _knob_grid(variant, _ARCH, "fp16"))
             continue
+        if not any(True for _ in _knob_grid(variant, _ARCH, "fp16")):
+            # A wave32-only wgrad variant (see the gfx1250 wgrad tests below).
+            continue
         for c in caps_list:
             assert (variant, c.KH, c.PAD, c.stride, c.cpg, c.kpg) in built, (variant, c)
 
@@ -1656,7 +1659,8 @@ def test_run_from_cache_batch_chunks_are_balanced():
     assert (_TENSOR_LIMIT - 1) // per_image == 15
     chunks = _batch_chunks(big, "fwd")
     assert chunks == [11, 10, 10]
-    assert _batch_chunks(big, "wgrad") == [31]
+    # wgrad reduces over N: its chunks accumulate into one dW.
+    assert _batch_chunks(big, "wgrad") == [11, 10, 10]
     assert _batch_chunks(replace(big, N=15), "fwd") == [15]
     assert _batch_chunks(replace(big, N=16), "dgrad") == [8, 8]
     # A prime N past the limit no longer degrades to one image per launch.
@@ -1674,6 +1678,124 @@ def test_run_from_cache_batch_chunks_are_balanced():
         assert (p_i["w"], s_i["w"]) == (ptrs["w"], sizes["w"])
         n0 += n
     assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (ptrs, sizes)
+
+
+def test_run_from_cache_wgrad_chunks_accumulate_into_one_dw():
+    """A wgrad problem past the 2 GiB limit runs as batch chunks on slices of
+    dY and X that all add into the whole dW, zeroed once; only the one-step
+    plans that accumulate into dW (no fold, reduce or scratch) are offered."""
+    from types import SimpleNamespace
+
+    _need_benchmark_direct_conv()
+    from benchmarks.common.benchmark_direct_conv import (
+        _accumulates_dw,
+        _chunk_buffers,
+        _wgrad_chunk_plans,
+    )
+
+    per_image = 1 << 27
+    chunks = [11, 10, 10]
+    inputs = {"dy": None, "x": None}
+    ptrs = {"dy": 0x1000_0000_0000, "x": 0x2000_0000_0000, "dw": 0x3000}
+    sizes = {"dy": 31 * per_image, "x": 31 * per_image, "dw": 4096}
+    n0 = 0
+    for i, n in enumerate(chunks):
+        p_i, s_i = _chunk_buffers(ptrs, sizes, inputs, "dw", chunks, i)
+        for name in ("dy", "x"):
+            assert p_i[name] == ptrs[name] + n0 * per_image
+            assert s_i[name] == n * per_image
+        assert (p_i["dw"], s_i["dw"]) == (ptrs["dw"], sizes["dw"])
+        n0 += n
+
+    def plan(label, steps=1, workspaces=None, zeroed=()):
+        return SimpleNamespace(
+            label=label,
+            identity=label,
+            steps=(None,) * steps,
+            workspaces=workspaces or {},
+            zeroed=zeroed,
+        )
+
+    atomic = plan("atomic")
+    two_stage = plan(
+        "two_stage", steps=2, workspaces={"ws_wgrad": 64}, zeroed=("ws_wgrad",)
+    )
+    folded = plan("folded", steps=2, workspaces={"ws": 64})
+    assert _accumulates_dw(atomic)
+    assert not _accumulates_dw(two_stage) and not _accumulates_dw(folded)
+    plans = [atomic, two_stage, folded]
+    per_chunk = {pl.label: [pl] * len(chunks) for pl in plans}
+    kept, rejected = _wgrad_chunk_plans(plans, [], per_chunk, chunks)
+    assert kept == [atomic]
+    assert {r[0] for r in rejected} == {"two_stage", "folded"}
+    assert all("accumulates into dW" in why for _, why in rejected)
+    # One launch: every plan stays.
+    assert _wgrad_chunk_plans(plans, [], per_chunk, [31]) == (plans, [])
+
+
+def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsys):
+    """A kernarg past its packed width (a byte extent over 2^31 on an i32
+    field) skips that plan; the sweep goes on with the next one."""
+    import struct
+    from types import SimpleNamespace
+
+    _need_benchmark_direct_conv()
+    from benchmarks.common import benchmark_direct_conv as bdc
+
+    monkeypatch.setattr(dks, "launch_values", lambda st, ptrs, sizes: {"A": 0})
+
+    class Launcher:
+        def __init__(self, fits):
+            self.fits = fits
+
+        def bind(self, values, config):
+            if not self.fits:
+                raise struct.error("'i' format requires -2147483648 <= number")
+            return lambda: None
+
+    class Modules:
+        def launcher(self, *, hsaco_path, kernel_name, signature):
+            return Launcher(kernel_name != "too_big")
+
+    measured = []
+
+    class Stop:
+        def measure(self, run, **kw):
+            measured.append(run)
+            return None
+
+        def report(self, label):
+            pass
+
+    def plan(label, kernel_name):
+        step = SimpleNamespace(
+            hsaco_path=None, kernel_name=kernel_name, signature=None, grid=(1, 1, 1)
+        )
+        step.block = (64, 1, 1)
+        return SimpleNamespace(label=label, steps=(step,), zeroed=())
+
+    plans = [plan("big", "too_big"), plan("fits", "fits")]
+    results, rc = bdc._measure_plans(
+        args=SimpleNamespace(fast_rank=False, warmup=1, iters=1),
+        plans=plans,
+        modules=Modules(),
+        rt=None,
+        ptrs={},
+        sizes={},
+        inputs={},
+        out_name="dw",
+        Out_t=None,
+        ref_out=None,
+        flop=1.0,
+        bytes_xfer=1.0,
+        stop=Stop(),
+        u8=None,
+        chunks=[1],
+        per_chunk={pl.label: [pl] for pl in plans},
+    )
+    assert (results, rc) == ([], 0)
+    assert len(measured) == 1
+    assert "[skip] big: kernarg does not fit" in capsys.readouterr().out
 
 
 def test_run_from_cache_plans_each_chunk_size():
@@ -1822,3 +1944,207 @@ def test_wave32_plans_launch_wave32_blocks(tmp_path, wave32_jobs, groups):
         (step,) = plan.steps
         waves = json.loads(plan.identity.knobs)["block_waves"]
         assert step.block == (waves * 32, 1, 1), plan.identity.label()
+
+
+# ---------------------------------------------------------------------------
+# gfx1250 (wave32) wgrad: image-per-block, small-C stems and depthwise, all
+# two-stage (replicated fp32 scratch + a cached reduce helper)
+# ---------------------------------------------------------------------------
+
+_W32 = "gfx1250"
+_W32_WGRAD = (
+    "direct_wgrad",
+    "direct_wgrad_small_c",
+    "direct_depthwise_wgrad",
+)
+
+
+@pytest.fixture(scope="module")
+def w32_jobs():
+    return dks.enumerate_direct_jobs(
+        arch=_W32, target=ArchTarget.from_gfx(_W32), directions=("wgrad",)
+    )
+
+
+@pytest.fixture
+def w32_cache(tmp_path, w32_jobs):
+    c = KernelCache(tmp_path, _W32)
+    for job in w32_jobs:
+        c.put(job.identity, b"placeholder", {"kernel_name": job.identity.label()})
+    return c
+
+
+def test_w32_wgrad_rows_are_built_with_their_reduce_helpers(w32_jobs):
+    from kernels.conv.direct_variants import DIRECT_WGRAD_REDUCE
+
+    built = {
+        (j.identity.algorithm, j.identity.filter_h, j.identity.pad_h)
+        + (j.identity.stride_h, j.identity.cpg, j.identity.kpg)
+        for j in w32_jobs
+    }
+    for variant in _W32_WGRAD:
+        for c in dks.DIRECT_CAPABILITIES[variant][1]:
+            row = (variant, c.KH, c.PAD, c.stride, c.cpg, c.kpg)
+            if variant == "direct_wgrad" and c.KH > 3:
+                # The image kernel's accumulators and fragments of a 5x5 tap
+                # set already pass its VGPR budget: wave32 serves 3x3 only.
+                assert row not in built, row
+                continue
+            assert row in built, row
+    replicas = {
+        json.loads(j.identity.knobs).get("ws_replicas", 1)
+        for j in w32_jobs
+        if j.identity.algorithm in _W32_WGRAD
+    }
+    helpers = {
+        json.loads(j.identity.knobs)["ws_replicas"]
+        for j in w32_jobs
+        if j.identity.algorithm == DIRECT_WGRAD_REDUCE
+    }
+    assert helpers == replicas - {1}
+    for job in w32_jobs:
+        # Every job reads back off its identity (what --compile-all rebuilds).
+        assert dks.direct_job_for_identity(job.identity) == job
+
+
+def test_w32_wgrad_grid_skips_the_spilling_16_wave_register_staged_tiles(w32_jobs):
+    """A block of more than 8 waves caps a wave at 256 VGPRs, which the
+    register-staged multi-tile image body needs more than: those direct-epilogue
+    fallbacks would spill, so they are not cached. The TDM-staged fallback of
+    the same tiling fits and is still cached."""
+    from kernels.conv import direct_aot_jobs as A
+
+    image = [
+        json.loads(j.identity.knobs)
+        for j in w32_jobs
+        if j.identity.algorithm == "direct_wgrad"
+        and json.loads(j.identity.knobs).get("image_per_block")
+    ]
+    assert image
+
+    def big_tiled(k):
+        return (
+            k["waves_k"] * k["waves_c"] > A.WGRAD_W32_UNCAPPED_WAVES
+            and k["wave_tiles_k"] * k["wave_tiles_c"] > 1
+        )
+
+    assert not [k for k in image if big_tiled(k) and k["tdm_stages"] == 0]
+    tdm = [k for k in image if big_tiled(k) and k["tdm_stages"]]
+    assert tdm and not any(k["lds_epilogue"] for k in tdm)
+    # The filter is narrow: 8-wave register-staged multi-tile bodies and
+    # 16-wave single-tile ones are still built.
+    assert any(
+        k["waves_k"] * k["waves_c"] == A.WGRAD_W32_UNCAPPED_WAVES
+        and k["wave_tiles_k"] * k["wave_tiles_c"] > 1
+        and k["tdm_stages"] == 0
+        for k in image
+    )
+    assert any(
+        k["waves_k"] * k["waves_c"] > A.WGRAD_W32_UNCAPPED_WAVES
+        and k["wave_tiles_k"] * k["wave_tiles_c"] == 1
+        and k["tdm_stages"] == 0
+        for k in image
+    )
+
+
+@pytest.mark.parametrize(
+    "problem,variant",
+    [
+        (_problem(groups=1, cpg=64, kpg=64), "direct_wgrad"),
+        (_problem(groups=4, cpg=32, kpg=32, PAD=0), "direct_wgrad"),
+        (
+            DirectConvProblem(
+                N=2, H=64, W=64, groups=1, cpg=3, kpg=64, KH=7, KW=7, PAD=3, stride=2
+            ),
+            "direct_wgrad_small_c",
+        ),
+        (
+            DirectConvProblem(
+                N=2, H=32, W=32, groups=96, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=2
+            ),
+            "direct_depthwise_wgrad",
+        ),
+    ],
+)
+def test_w32_two_stage_wgrad_plans(w32_cache, problem, variant):
+    """A two-stage kernel writes the zeroed scratch, the reduce helper folds it
+    into dW, and both steps pack against their signatures."""
+    from kernels.conv.direct_variants import direct_wgrad_reduce_dims
+
+    plans, _ = dks.direct_plans(w32_cache, problem, "wgrad", _W32)
+    plans = [p for p in plans if p.identity.algorithm == variant]
+    assert plans
+    wg_m, wg_n, groups = direct_wgrad_reduce_dims(variant, problem)
+    names = ("dy", "x", "dw", "ws_wgrad")
+    ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
+    sizes = {n: 1 << 20 for n in names}
+    for plan in plans:
+        replicas = json.loads(plan.identity.knobs).get("ws_replicas", 1)
+        if replicas == 1:
+            (step,) = plan.steps
+            assert step.buffers == ("dy", "x", "dw")
+            continue
+        conv, fold = plan.steps
+        assert conv.buffers == ("dy", "x", "ws_wgrad")
+        assert fold.buffers == ("ws_wgrad", None, "dw")
+        assert plan.zeroed == ("ws_wgrad",)
+        assert plan.workspaces["ws_wgrad"] == 4 * groups * replicas * wg_m * wg_n
+        assert dict(fold.scalars) == {"wg_M": wg_m, "wg_N": wg_n, "groups": groups}
+        for step in plan.steps:
+            compile_packer(step.signature)(dks.launch_values(step, ptrs, sizes))
+            assert all(g > 0 for g in step.grid)
+
+
+def test_w32_depthwise_wgrad_channels_are_runtime(w32_cache):
+    """One depthwise binary serves every channel count its lane width divides."""
+    seen = []
+    for groups in (96, 384, 1536):
+        problem = DirectConvProblem(
+            N=2, H=16, W=16, groups=groups, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=1
+        )
+        plans, _ = dks.direct_plans(w32_cache, problem, "wgrad", _W32)
+        seen.append({p.identity for p in plans if "depthwise" in p.identity.algorithm})
+    assert seen[0] and seen[0] == seen[1] == seen[2]
+
+
+def test_w32_small_c_serves_only_its_stems(w32_cache):
+    stem = dict(N=2, H=64, W=64, groups=1, cpg=3, KH=3, KW=3, PAD=1, stride=2)
+    plans, _ = dks.direct_plans(
+        w32_cache, DirectConvProblem(kpg=32, **stem), "wgrad", _W32
+    )
+    assert any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
+    # A K the cache has no stem row for (channels are baked).
+    plans, _ = dks.direct_plans(
+        w32_cache, DirectConvProblem(kpg=40, **stem), "wgrad", _W32
+    )
+    assert not any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
+
+
+@pytest.mark.parametrize(
+    "cpg, kpg, PAD, stride",
+    [(4, 320, 1, 1), (4, 512, 1, 1), (3, 32, 1, 1), (3, 64, 1, 1), (3, 32, 0, 2)],
+)
+def test_w32_small_c_serves_the_3x3_stems(w32_cache, cpg, kpg, PAD, stride):
+    """The 3x3 stems with 3 and 4 input channels have small-C binaries."""
+    problem = DirectConvProblem(
+        N=2, H=64, W=64, groups=1, cpg=cpg, kpg=kpg, KH=3, KW=3, PAD=PAD, stride=stride
+    )
+    plans, _ = dks.direct_plans(w32_cache, problem, "wgrad", _W32)
+    assert any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
+
+
+def test_w32_small_c_16_wave_tile_has_no_uniform_wave(w32_jobs):
+    """The 16-wave vec_x=4 / sub_steps=4 small-C tile is cached with the
+    uniform wave index off (with it on, that binary returns a zero dW)."""
+    knobs = [
+        json.loads(j.identity.knobs)
+        for j in w32_jobs
+        if j.identity.algorithm == "direct_wgrad_small_c"
+    ]
+    tile = [
+        k
+        for k in knobs
+        if (k["waves_k"], k["waves_c"], k["vec_x"], k["sub_steps"]) == (4, 4, 4, 4)
+    ]
+    assert tile
+    assert not any(k["uniform_wave"] for k in tile)

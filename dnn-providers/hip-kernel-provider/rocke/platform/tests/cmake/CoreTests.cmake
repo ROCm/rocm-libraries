@@ -238,9 +238,12 @@ if(BUILD_TESTING)
   endif()
 
   # The buffer descriptor word (DWORD3) the HIP lowerer emits per target, and
-  # its agreement with the LLVM lowerer's word.
+  # its agreement with the LLVM lowerer's word; plus tile.buffer_atomic_fadd_f32:
+  # its LLVM lowering with the cache policy, and the refusal of a policy
+  # outside 0..31 by the builder and of a bad cachepolicy attr by the lowerer.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_buffer_rsrc_hip.cpp")
-    add_executable(rocke_buffer_rsrc_hip core/test_buffer_rsrc_hip.cpp)
+    add_executable(rocke_buffer_rsrc_hip core/test_buffer_rsrc_hip.cpp
+                                         core/test_buffer_atomic_fadd.cpp)
     target_link_libraries(rocke_buffer_rsrc_hip PRIVATE rocke_core)
     add_test(NAME rocke_buffer_rsrc_hip COMMAND rocke_buffer_rsrc_hip)
     set_tests_properties(rocke_buffer_rsrc_hip PROPERTIES LABELS "ckc;unit;host")

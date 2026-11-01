@@ -670,6 +670,10 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
         "i32, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
     ),
+    "raw.ptr.buffer.atomic.fadd.f32": (
+        "declare float @llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32("
+        "float, ptr addrspace(8) nocapture, i32, i32, i32 immarg)"
+    ),
     "raw.ptr.buffer.store.v2i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.v2i32("
         "<2 x i32>, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
@@ -6318,6 +6322,31 @@ class _Lowerer:
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
             f"i32 0)"
+        )
+
+    def _op_tile_buffer_atomic_fadd_f32(self, op: Op) -> None:
+        """f32 buffer atomic add; the pre-add result is unused (no-return form).
+
+        The ``cachepolicy`` attr is the intrinsic's immediate and must be an
+        integer in 0..31 (the builder always sets it); a missing, non-integer
+        or out-of-range value from hand-built or imported IR is rejected rather
+        than coerced.
+        """
+        rsrc, voffset, soffset, val = op.operands
+        cp = op.attrs.get("cachepolicy")
+        if isinstance(cp, bool) or not isinstance(cp, int) or not 0 <= cp <= 0x1F:
+            raise ValueError(
+                f"{op.name}: cachepolicy attr must be an integer in 0..31, got {cp!r}"
+            )
+        self._need("raw.ptr.buffer.atomic.fadd.f32")
+        r = self._fresh("bafadd")
+        self._current().emit(
+            f"  {r} = call float @llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32("
+            f"float {self._operand(val)}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 {cp})"
         )
 
     def _op_tile_buffer_store_vN_f32(self, op: Op) -> None:

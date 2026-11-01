@@ -23,7 +23,7 @@ import ctypes
 import importlib.util
 import unittest
 from dataclasses import dataclass, replace
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from rocke.runtime.hip_module import get_device_arch
 
@@ -2576,16 +2576,22 @@ class TestDirectConvValidation(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-# wgrad needs ds_read_tr16_b64 for its LDS transpose staging, which is gfx950+.
-# It therefore gets its own class gate rather than reusing _SKIP_REASON: that one
-# is empty on gfx942, so every case would come back as a per-subtest validator
-# rejection and the suite would report green without ever compiling or launching
-# a kernel.
+# wgrad needs an LDS transpose read: ds_read_tr16_b64 (gfx950, wave64 MFMA) or
+# ds_load_tr16_b128 (gfx1250, wave32 WMMA). It therefore gets its own class gate
+# rather than reusing _SKIP_REASON: that one is empty on gfx942, so every case
+# would come back as a per-subtest validator rejection and the suite would
+# report green without ever compiling or launching a kernel.
+_WGRAD_ARCHES = ("gfx950", "gfx1250")
+
+
 def _wgrad_skip_reason() -> str:
-    if _SKIP_REASON:
-        return _SKIP_REASON
-    if GPU_ARCH != "gfx950":
-        return f"wgrad needs gfx950 (ds_read_tr16_b64), got {GPU_ARCH!r}"
+    # Not _SKIP_REASON: that one requires an MFMA arch, and gfx1250 is WMMA.
+    if not GPU_ARCH:
+        return "no ROCm GPU detected"
+    if not _HAS_TORCH:
+        return "torch not importable"
+    if GPU_ARCH not in _WGRAD_ARCHES:
+        return f"wgrad needs one of {_WGRAD_ARCHES}, got {GPU_ARCH!r}"
     return ""
 
 
@@ -2650,10 +2656,12 @@ def _run_wgrad_one(
     dtype: str = "fp16",
     cfg: Tuple[int, int, int, int, int] = (1, 1, 1, 32, 4),
     runtime_channels: bool = False,
+    extra: Optional[dict] = None,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify the direct wgrad kernel.
 
-    ``cfg`` is (waves_k, waves_c, waves_q, mfma_k, ho_per_block).
+    ``cfg`` is (waves_k, waves_c, waves_q, mfma_k, ho_per_block); ``extra``
+    sets further spec fields (the image-per-block knobs).
 
     With ``runtime_channels`` the kernel is built the way the AOT cache builds
     it -- on a probe problem with other channel counts, group count and image
@@ -2666,6 +2674,7 @@ def _run_wgrad_one(
     import torch
 
     from rocke import compile_kernel
+    from rocke.core.arch import ArchTarget
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_direct_grouped import (
@@ -2705,6 +2714,8 @@ def _run_wgrad_one(
         mfma_k=mfma_k,
         ho_per_block=hpb,
         runtime_channels=runtime_channels,
+        wave_size=ArchTarget.from_gfx(arch).wave_size,
+        **(extra or {}),
     )
 
     ok, reason = is_valid_wgrad_spec(spec, arch=arch)
@@ -2755,13 +2766,19 @@ def _run_wgrad_one(
     # Convert to [K, KH, KW, cpg] layout to match dW
     ref_dw_krsc = ref_dw.permute(0, 2, 3, 1).contiguous().cpu()
 
+    # With ws_replicas = R, D is the two-stage scratch: R replica slabs of
+    # each group's dW slab, which the reduce kernel would fold. The test folds
+    # them on the host, so it checks the stage-1 layout on its own.
+    R = spec.ws_replicas
+    ws_nbytes = dW.nbytes * R
+
     rt = Runtime()
     X_dev = rt.alloc(X.nbytes)
     dY_dev = rt.alloc(dY.nbytes)
-    dW_dev = rt.alloc(dW.nbytes)
+    dW_dev = rt.alloc(ws_nbytes)
     rt.memcpy_h2d(X_dev, _u8(X), X.nbytes)
     rt.memcpy_h2d(dY_dev, _u8(dY), dY.nbytes)
-    rt.memset(dW_dev, 0, dW.nbytes)  # caller must zero dW
+    rt.memset(dW_dev, 0, ws_nbytes)  # caller must zero dW
 
     # Direct conv is AOT: the whole shape travels as kernargs. D is the fp32
     # dW accumulator rather than an io-typed tensor.
@@ -2786,12 +2803,13 @@ def _run_wgrad_one(
         int(dW_dev),
         dY.nbytes,
         X.nbytes,
-        dW.nbytes,
+        ws_nbytes,
     )
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
-    dW_cpu = torch.empty_like(dW)
-    rt.memcpy_d2h(_u8(dW_cpu), dW_dev, dW.nbytes)
+    ws_cpu = torch.empty(ws_nbytes // 4, dtype=torch.float32)
+    rt.memcpy_d2h(_u8(ws_cpu), dW_dev, ws_nbytes)
+    dW_cpu = ws_cpu.view(p.groups, R, -1).sum(dim=1).view_as(dW)
     rt.free(X_dev)
     rt.free(dY_dev)
     rt.free(dW_dev)
@@ -2815,6 +2833,113 @@ def _run_wgrad_one(
     return True, ""
 
 
+def _run_dw_wgrad_one(
+    arch: str,
+    shape: _Shape,
+    dtype: str = "fp16",
+    extra: Optional[dict] = None,
+) -> Tuple[bool, str]:
+    """Build, launch and verify the direct depthwise wgrad kernel.
+
+    D is the ``[ws_replicas][C][KH * KW]`` fp32 scratch; the test folds the
+    replicas on the host, so it checks the stage-1 layout on its own.
+    Returns ``(passed, reason)``.
+    """
+    import torch
+
+    from rocke import compile_kernel
+    from rocke.core.arch import ArchTarget
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_direct_grouped import (
+        DirectConvProblem,
+        DirectDepthwiseWgradSpec,
+        build_direct_depthwise_wgrad,
+        direct_launch_geometry,
+        is_valid_depthwise_wgrad_spec,
+    )
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    C = shape.groups
+    p = DirectConvProblem(
+        N=shape.N,
+        H=shape.H,
+        W=shape.W,
+        groups=C,
+        cpg=1,
+        kpg=1,
+        KH=shape.KH,
+        KW=shape.KW,
+        PAD=shape.PAD,
+        stride=shape.stride,
+        dtype=dtype,
+    )
+    spec = DirectDepthwiseWgradSpec(
+        problem=p,
+        name=f"test_dw_wgrad_{shape.id}",
+        wave_size=ArchTarget.from_gfx(arch).wave_size,
+        **(extra or {}),
+    )
+    ok, reason = is_valid_depthwise_wgrad_spec(spec, arch=arch)
+    if not ok:
+        return False, f"skip invalid spec: {reason}"
+    try:
+        artifact = compile_kernel(
+            build_direct_depthwise_wgrad(spec, arch=arch), arch=arch
+        )
+    except Exception as e:
+        return False, f"build/compile failed: {e}"
+
+    torch.manual_seed(42)
+    _td = torch.bfloat16 if dtype == "bf16" else torch.float16
+    X = torch.empty(p.N, p.H, p.W, C, dtype=_td).uniform_(-0.5, 0.5)
+    dY = torch.empty(p.N, p.Ho, p.Wo, C, dtype=_td).uniform_(-0.5, 0.5)
+    ref = torch.nn.grad.conv2d_weight(
+        X.float().cuda().permute(0, 3, 1, 2),
+        (C, 1, p.KH, p.KW),
+        dY.float().cuda().permute(0, 3, 1, 2),
+        stride=p.stride,
+        padding=p.PAD,
+        groups=C,
+    )
+    ref = ref.reshape(C, p.KH * p.KW).cpu()
+
+    R = spec.ws_replicas
+    ws_nbytes = R * C * p.KH * p.KW * 4
+    rt = Runtime()
+    X_dev = rt.alloc(X.nbytes)
+    dY_dev = rt.alloc(dY.nbytes)
+    ws_dev = rt.alloc(ws_nbytes)
+    rt.memcpy_h2d(X_dev, _u8(X), X.nbytes)
+    rt.memcpy_h2d(dY_dev, _u8(dY), dY.nbytes)
+    rt.memset(ws_dev, 0, ws_nbytes)
+    launcher = KernelLauncher(
+        hsaco=artifact.hsaco,
+        kernel_name=artifact.kernel_name,
+        signature=conv_direct_args_signature(dtype, direction="wgrad"),
+    )
+    grid, block = direct_launch_geometry(spec)
+    values = ConvArgs.from_problem(p, direction="wgrad").to_launch_values(
+        int(dY_dev), int(X_dev), int(ws_dev), dY.nbytes, X.nbytes, ws_nbytes
+    )
+    launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+    ws_cpu = torch.empty(ws_nbytes // 4, dtype=torch.float32)
+    rt.memcpy_d2h(_u8(ws_cpu), ws_dev, ws_nbytes)
+    for d in (X_dev, dY_dev, ws_dev):
+        rt.free(d)
+    synchronize_and_release(0)
+
+    out = ws_cpu.view(R, C, p.KH * p.KW).sum(dim=0)
+    rel_err = float((out - ref).abs().max() / ref.abs().max().clamp(min=1.0))
+    tol = _TOL_BF16 if dtype == "bf16" else _TOL
+    # `not <` so a NaN rel_err (non-finite output) fails too.
+    if not rel_err < tol:
+        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
+    return True, ""
+
+
 @unittest.skipUnless(not _WGRAD_SKIP_REASON, _WGRAD_SKIP_REASON or "no GPU")
 class TestDirectConvWgradCorrectness(unittest.TestCase):
     """Correctness tests for direct conv backward weights (wgrad)."""
@@ -2826,11 +2951,18 @@ class TestDirectConvWgradCorrectness(unittest.TestCase):
         self._ran = 0
 
     def _run_wgrad(
-        self, shape: _Shape, dtype: str = "fp16", cfg=None, runtime_channels=False
+        self,
+        shape: _Shape,
+        dtype: str = "fp16",
+        cfg=None,
+        runtime_channels=False,
+        extra=None,
     ) -> None:
         kwargs = {"dtype": dtype, "runtime_channels": runtime_channels}
         if cfg is not None:
             kwargs["cfg"] = cfg
+        if extra is not None:
+            kwargs["extra"] = extra
         passed, reason = _run_wgrad_one(GPU_ARCH, shape, **kwargs)
         if reason.startswith("skip"):
             self.skipTest(reason)
@@ -2848,6 +2980,234 @@ class TestDirectConvWgradCorrectness(unittest.TestCase):
             0,
             f"no wgrad case ran on {GPU_ARCH} -- every spec was rejected",
         )
+
+    def test_wgrad_image_per_block(self):
+        """Image-per-block (gfx1250): runtime wo-tile and row loops, register
+        blocking, KH rows staged per synchronisation, batch-only split.
+
+        H=8 is not a multiple of KH=3 (the row loop walks zero-filled tail
+        rows), W=37 leaves a ragged last wo tile, and wave_tiles_k=2 /
+        wave_tiles_c=2 put two 16-wide tiles in one wave on each axis.
+        """
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(f"image_per_block is wave32-only; running on {GPU_ARCH}")
+        shapes = [
+            s
+            for s in _WGRAD_SHAPES
+            if s.id in ("wg_16c_N2H8W8_g8", "wg_g1_c48k192", "wg_oddW37", "wg_5x5")
+        ]
+        knobs = [
+            (2, 2, dict(image_per_block=True)),
+            (4, 2, dict(image_per_block=True, rows_per_sync=3)),
+            (2, 1, dict(image_per_block=True, wave_tiles_k=2)),
+            (1, 2, dict(image_per_block=True, wave_tiles_c=2)),
+        ]
+        for dtype in ("fp16", "bf16"):
+            for s in shapes:
+                for wk, wc, extra in knobs:
+                    for rtc in (False, True):
+                        with self.subTest(
+                            shape=s.id, dtype=dtype, wk=wk, wc=wc, rtc=rtc, **extra
+                        ):
+                            ex = dict(extra)
+                            if ex.get("rows_per_sync") and s.KH != 3:
+                                ex["rows_per_sync"] = s.KH
+                            self._run_wgrad(
+                                s,
+                                dtype=dtype,
+                                cfg=(wk, wc, 1, 32, 1),
+                                runtime_channels=rtc,
+                                extra=ex,
+                            )
+        self._assert_ran()
+
+    def test_wgrad_image_row_split_tdm(self):
+        """Image-per-block row split (grid y blocks of whole KH-row steps, each
+        with its own dY ring prologue) and TDM staging (an LDS ring filled by
+        tensor_load_to_lds), alone and together, and the replicated two-stage
+        scratch (ws_replicas) and the LDS-staged coalesced epilogue
+        (lds_epilogue) on top of both.
+
+        H=8 / H=9 split into 2 or 3 blocks leaves a short last block; W=37
+        makes wo tile 0 start left of the image (the TDM strip lands PAD rows
+        down) and the last tile ragged. The 1x1 PAD=2 shape puts the last wo
+        tile's strip past the right edge, which needs a zero TDM extent.
+        """
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(f"image_per_block is wave32-only; running on {GPU_ARCH}")
+        shapes = [
+            s for s in _WGRAD_SHAPES if s.id in ("wg_g1_c48k192", "wg_oddW37", "wg_5x5")
+        ]
+        shapes.append(
+            _Shape(
+                "wg_1x1_pad2",
+                N=1,
+                H=9,
+                W=29,
+                groups=1,
+                cpg=16,
+                kpg=32,
+                KH=1,
+                KW=1,
+                PAD=2,
+            )
+        )
+        knobs = [
+            (2, 2, dict(row_blocks=2)),
+            (4, 2, dict(rows_per_sync=3, row_blocks=3)),
+            (2, 2, dict(tdm_stages=2)),
+            (4, 2, dict(rows_per_sync=3, tdm_stages=3)),
+            (2, 2, dict(tdm_stages=2, row_blocks=2)),
+            (2, 2, dict(rows_per_sync=3, row_blocks=2, ws_replicas=4)),
+            (4, 2, dict(rows_per_sync=3, tdm_stages=3, ws_replicas=8)),
+            (2, 2, dict(rows_per_sync=3, lds_epilogue=True)),
+            (
+                4,
+                2,
+                dict(
+                    rows_per_sync=3,
+                    row_blocks=2,
+                    tdm_stages=3,
+                    ws_replicas=4,
+                    lds_epilogue=True,
+                ),
+            ),
+        ]
+        for dtype in ("fp16", "bf16"):
+            for s in shapes:
+                for wk, wc, extra in knobs:
+                    for rtc in (False, True):
+                        with self.subTest(
+                            shape=s.id, dtype=dtype, wk=wk, wc=wc, rtc=rtc, **extra
+                        ):
+                            ex = dict(extra, image_per_block=True)
+                            if ex.get("rows_per_sync") and s.KH != 3:
+                                ex["rows_per_sync"] = s.KH
+                            self._run_wgrad(
+                                s,
+                                dtype=dtype,
+                                cfg=(wk, wc, 1, 32, 1),
+                                runtime_channels=rtc,
+                                extra=ex,
+                            )
+        self._assert_ran()
+
+    def test_wgrad_small_c(self):
+        """Small-channel variant (gfx1250): dW as one GEMM over every output
+        pixel for stems whose cpg is too small for the 16-channel tiles.
+
+        The shapes cover C=3 at strides 2 and 4 (with padding and a patchify
+        filter whose taps never overlap), C=1 at stride 1, a 7x7 filter whose
+        21-column runs pad to 24 under vec_x, and odd extents so the last pixel
+        step is ragged. The knobs cover gathered and vector X loads, several
+        pixel chunks per synchronisation, register blocking, two N tiles, a
+        uniform wave index and a pixel split over scratch replicas. With
+        vec_x, the first and last images exercise the gathering edge loops.
+        """
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(f"small_c is wave32-only; running on {GPU_ARCH}")
+        shapes = [
+            _Shape(
+                "sc_c3_3x3s2", N=3, H=17, W=23, groups=1, cpg=3, kpg=24, PAD=1, stride=2
+            ),
+            _Shape(
+                "sc_c3_4x4s4",
+                N=2,
+                H=16,
+                W=20,
+                groups=1,
+                cpg=3,
+                kpg=32,
+                KH=4,
+                KW=4,
+                PAD=0,
+                stride=4,
+            ),
+            _Shape(
+                "sc_c3_7x7s2",
+                N=2,
+                H=15,
+                W=19,
+                groups=1,
+                cpg=3,
+                kpg=64,
+                KH=7,
+                KW=7,
+                PAD=3,
+                stride=2,
+            ),
+            _Shape("sc_c1_3x3s1", N=2, H=11, W=9, groups=1, cpg=1, kpg=16, PAD=1),
+        ]
+        knobs = [
+            (2, 2, dict(row_blocks=5, ws_replicas=4)),
+            (1, 2, dict(wave_tiles_k=2, wave_tiles_c=2, row_blocks=3, vec_x=4)),
+            (2, 1, dict(wave_tiles_c=3, sub_steps=2, vec_x=8, ws_replicas=2)),
+            (
+                1,
+                1,
+                dict(wave_tiles_k=2, wave_tiles_c=2, sub_steps=3, uniform_wave=True),
+            ),
+            (2, 2, dict(row_blocks=2, sub_steps=2, vec_x=4, uniform_wave=True)),
+        ]
+        for dtype in ("fp16", "bf16"):
+            for s in shapes:
+                for wk, wc, extra in knobs:
+                    with self.subTest(shape=s.id, dtype=dtype, wk=wk, wc=wc, **extra):
+                        self._run_wgrad(
+                            s,
+                            dtype=dtype,
+                            cfg=(wk, wc, 1, 32, 1),
+                            extra=dict(extra, small_c=True),
+                        )
+        self._assert_ran()
+
+    def test_wgrad_depthwise(self):
+        """Direct depthwise wgrad: channels across the lanes, every tap in
+        fp32 registers, filter rows split over wave groups, the X window
+        carried across wo chunks and the next chunk prefetched.
+
+        The shapes cover 3x3 at strides 1 and 2, 5x5 and 7x7 filters (7 rows
+        split over 2 and 4 groups do not divide evenly), odd extents whose
+        last wo chunk and last row block are partial, and a channel count that
+        leaves the last lane chunk partly empty.
+        """
+        shapes = [
+            _Shape("dw_3x3s1", N=2, H=11, W=13, groups=72, cpg=1),
+            _Shape("dw_3x3s2", N=3, H=12, W=17, groups=128, cpg=1, stride=2),
+            _Shape(
+                "dw_5x5s2",
+                N=2,
+                H=10,
+                W=9,
+                groups=40,
+                cpg=1,
+                KH=5,
+                KW=5,
+                PAD=2,
+                stride=2,
+            ),
+            _Shape("dw_7x7s1", N=2, H=9, W=15, groups=96, cpg=1, KH=7, KW=7, PAD=3),
+        ]
+        knobs = [
+            dict(waves=4, rows_per_wave=2, wo_chunk=4, ws_replicas=4),
+            dict(chan_per_lane=4, waves=8, rows_per_wave=1, wo_chunk=8, prefetch=False),
+            dict(waves=4, rows_per_wave=3, wo_chunk=8, r_split=2, carry=False),
+            dict(chan_per_lane=4, waves=8, rows_per_wave=4, wo_chunk=4, r_split=4),
+            dict(chan_per_lane=8, waves=2, rows_per_wave=8, wo_chunk=3, ws_replicas=1),
+        ]
+        ran = 0
+        for dtype in ("fp16", "bf16"):
+            for s in shapes:
+                for extra in knobs:
+                    with self.subTest(shape=s.id, dtype=dtype, **extra):
+                        passed, reason = _run_dw_wgrad_one(GPU_ARCH, s, dtype, extra)
+                        if reason.startswith("skip"):
+                            continue
+                        ran += 1
+                        self.assertTrue(
+                            passed, f"FAIL dw wgrad {s.id} {dtype} {extra}: {reason}"
+                        )
+        self.assertGreater(ran, 0, f"no depthwise wgrad case ran on {GPU_ARCH}")
 
     def test_wgrad(self):
         """Every shape on the default single-wave spread."""
@@ -3488,7 +3848,14 @@ def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
     return float(((got - ref).abs().max() / scale).nan_to_num(float("inf")))
 
 
-@unittest.skipUnless(not _WGRAD_SKIP_REASON, _WGRAD_SKIP_REASON or "no GPU")
+# The cases below are the gfx950 (wave64 MFMA) AOT wgrad kernels; the gfx1250
+# kernels have their own cases in TestDirectConvWgradCorrectness.
+_AOT_WGRAD_SKIP_REASON = _WGRAD_SKIP_REASON or (
+    "" if GPU_ARCH == "gfx950" else f"gfx950 AOT wgrad kernels, got {GPU_ARCH!r}"
+)
+
+
+@unittest.skipUnless(not _AOT_WGRAD_SKIP_REASON, _AOT_WGRAD_SKIP_REASON or "no GPU")
 class TestDirectWgradAotKernelsCorrectness(unittest.TestCase):
     """The tiled, depthwise and gather direct wgrad kernels of the AOT sweep."""
 

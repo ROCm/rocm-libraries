@@ -102,6 +102,7 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     direct_job_for_identity,
     direct_kernel_for_job,
     probe_problem,
+    wgrad_reduce_identity,
     wgrad_waves,
 )
 from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_spec re-exported)
@@ -120,6 +121,9 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     direct_dgrad_workspaces,
     direct_entry_wave_reason,
     direct_spec_for_problem,
+    direct_wgrad_reduce_spec,
+    direct_wgrad_replicas,
+    direct_wgrad_workspaces,
     make_direct_spec as make_spec,
     validate_direct_spec as validate_spec,
 )
@@ -392,7 +396,9 @@ class DirectStep:
     ``buffers`` names the buffers bound to the A, B and D kernarg slots (B is
     ``None`` for the two-operand weight transforms). ``conv_args`` is ``None``
     for those too; a conv kernel takes its extents from it. ``scalars`` are
-    the transforms' remaining kernargs (name, value), if any.
+    the transforms' remaining kernargs (name, value), if any, and
+    ``operand_args`` the kernarg names the A and D buffers and their sizes
+    bind to when there is no ``conv_args``.
     """
 
     kernel_name: str
@@ -407,6 +413,7 @@ class DirectStep:
     # buffer the step binds, or None for the whole buffer: a batch-split
     # launch sees only its images (see _batch_chunks).
     views: Tuple[Optional[Tuple[int, int]], ...] = ()
+    operand_args: Tuple[str, str, str, str] = ("A", "D", "A_bytes", "D_bytes")
 
 
 @dataclass(frozen=True)
@@ -415,12 +422,14 @@ class DirectPlan:
 
     Buffer names: ``x``/``w``/``y`` for forward, ``dy``/``w``/``dx`` for
     dgrad, ``dy``/``x``/``dw`` (fp32) for wgrad, plus the scratch buffers in
-    ``workspaces`` (name -> bytes).
+    ``workspaces`` (name -> bytes). The caller zeroes the ``zeroed`` ones
+    before a run, as it zeroes wgrad's dW.
     """
 
     identity: KernelIdentity
     steps: Tuple[DirectStep, ...]
     workspaces: Dict[str, int] = field(default_factory=dict)
+    zeroed: Tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
@@ -596,11 +605,51 @@ def plan_for(
         return DirectPlan(identity, (main, fold), {"ws": spec.workspace_bytes()}), "ok"
     if identity.direction == "direct_wgrad":
         # dY rides A, X rides B, and D is the fp32 dW the kernel accumulates
-        # into atomically (the caller zeroes it).
-        step = _conv_step(
-            identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "dw")
+        # into atomically (the caller zeroes it) -- or, for a two-stage
+        # kernel, the replicated fp32 scratch the reduce helper then folds
+        # into dW.
+        replicas = direct_wgrad_replicas(spec)
+        if replicas == 1:
+            step = _conv_step(
+                identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "dw")
+            )
+            return DirectPlan(identity, (step,)), "ok"
+        from kernels.common.conv_wgrad_workspace_reduce import (
+            wgrad_reduce_grid,
+            wgrad_reduce_signature,
         )
-        return DirectPlan(identity, (step,)), "ok"
+
+        reduce_id = wgrad_reduce_identity(
+            identity.arch, identity.wave_size, replicas, identity.dtype_a
+        )
+        entry = cache.entry_meta(reduce_id)
+        if entry is None:
+            return None, "missing cached wgrad reduce helper (rebuild the cache)"
+        rspec = direct_wgrad_reduce_spec(variant, problem, replicas)
+        reduce_step = DirectStep(
+            kernel_name=entry["kernel_name"],
+            hsaco_path=cache.hsaco_path(reduce_id),
+            signature=wgrad_reduce_signature(rspec),
+            grid=wgrad_reduce_grid(rspec),
+            block=(rspec.block_size, 1, 1),
+            buffers=("ws_wgrad", None, "dw"),
+            scalars=(
+                ("wg_M", rspec.wg_M),
+                ("wg_N", rspec.wg_N),
+                ("groups", rspec.groups),
+            ),
+            operand_args=("ws_ptr", "dw_ptr", "ws_bytes", "dw_bytes"),
+        )
+        step = _conv_step(
+            identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "ws_wgrad")
+        )
+        workspaces = direct_wgrad_workspaces(variant, spec)
+        return (
+            DirectPlan(
+                identity, (step, reduce_step), workspaces, zeroed=tuple(workspaces)
+            ),
+            "ok",
+        )
     if variant in _DGRAD_FPROP_SINGLE:
         # A single forward kernel over the transposed problem that reads the
         # original weights itself: forward ABI, transposed extents.
@@ -741,11 +790,12 @@ def launch_values(
 
     (a_ptr, a_bytes), (d_ptr, d_bytes) = bind(0, a), bind(2, d)
     if step.conv_args is None:
+        a_key, d_key, a_bytes_key, d_bytes_key = step.operand_args
         return {
-            "A": a_ptr,
-            "D": d_ptr,
-            "A_bytes": a_bytes,
-            "D_bytes": d_bytes,
+            a_key: a_ptr,
+            d_key: d_ptr,
+            a_bytes_key: a_bytes,
+            d_bytes_key: d_bytes,
             **dict(step.scalars),
         }
     b_ptr, b_bytes = bind(1, b)

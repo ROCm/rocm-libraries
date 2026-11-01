@@ -35,6 +35,7 @@ import argparse
 import dataclasses
 import itertools
 import os
+import struct
 import sys
 from dataclasses import dataclass
 from typing import List
@@ -1305,6 +1306,7 @@ def _run_wgrad_sweep(
     """Benchmark the direct wgrad kernel."""
     import torch
 
+    from rocke.core.arch import ArchTarget
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -1356,12 +1358,15 @@ def _run_wgrad_sweep(
     _WAVES = sorted({w for w in _WAVES if w[1] <= n_c_tiles_1})
     _HPB = [30, 60, 120]
     _MK = [32]
+    # wave64 MFMA on gfx950, wave32 WMMA on gfx1250: the block-size cap and the
+    # spec both follow the arch.
+    _wave = ArchTarget.from_gfx(arch).wave_size
     combos = [
         (wk, wc, wq, hpb, mk)
         for wk, wc, wq in _WAVES
         for hpb in _HPB
         for mk in _MK
-        if wk * wc <= 16 and wk * wc * wq * 64 <= 1024
+        if wk * wc <= 16 and wk * wc * wq * _wave <= 1024
     ]
 
     print(
@@ -1380,6 +1385,7 @@ def _run_wgrad_sweep(
             waves_q=waves_q,
             ho_per_block=hpb,
             mfma_k=mk,
+            wave_size=_wave,
         )
         ok, _ = is_valid_wgrad_spec(spec, arch=arch)
         if not ok:
@@ -2253,10 +2259,15 @@ def _measure_plans(
             return None
 
         # Each step packed once: a timed loop that packs per launch times the
-        # host, not a short kernel.
-        bound = [
-            launcher.bind(values, config=cfg) for launcher, values, cfg in launches
-        ]
+        # host, not a short kernel. A kernarg past its packed width (a byte
+        # extent over 2^31 on an i32 field) skips the plan, not the sweep.
+        try:
+            bound = [
+                launcher.bind(values, config=cfg) for launcher, values, cfg in launches
+            ]
+        except struct.error as e:
+            print(f"  [skip] {plan.label}: kernarg does not fit ({e})", flush=True)
+            return None
 
         def run(bound=bound):
             for launch in bound:
@@ -2269,6 +2280,10 @@ def _measure_plans(
         nonlocal rc
 
         rt.memset(ptrs[out_name], 0, Out_t.nbytes)
+        # Two-stage wgrad scratch accumulates too: zeroed again for the
+        # verified launch, as the target is.
+        for name in plan.zeroed:
+            rt.memset(ptrs[name], 0, sizes[name])
         run()
         synchronize_and_release(0)
         out_cpu = torch.empty_like(Out_t)
@@ -2466,6 +2481,7 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
             "direct_dgrad_helper",
             "direct_fwd_helper",
             "direct_wgrad",
+            "direct_wgrad_helper",
         ),
     )
     if rc:
@@ -2478,13 +2494,14 @@ _TENSOR_LIMIT = 1 << 31
 
 def _batch_chunks(p, direction: str) -> List[int]:
     """Images per launch: the fewest balanced batch chunks that keep every
-    activation under 2 GiB (``[N]`` when one launch fits, and for wgrad).
+    activation under 2 GiB (``[N]`` when one launch fits).
 
     The chunks need not divide N; they differ by at most one image (N=31 that
-    fits 15 images per launch runs as 11 + 10 + 10).
+    fits 15 images per launch runs as 11 + 10 + 10). wgrad reduces over N, so
+    its chunks are not independent launches, but they can accumulate: every
+    chunk adds into the one dW, zeroed once, which only a kernel that adds
+    into dW can do (:func:`_accumulates_dw`).
     """
-    if direction == "wgrad":
-        return [p.N]
     elem = 2
     per_image = max(p.H * p.W * p.total_c, p.Ho * p.Wo * p.total_k) * elem
     per_launch = (_TENSOR_LIMIT - 1) // per_image
@@ -2502,7 +2519,9 @@ def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i):
         return ptrs, sizes
     ptrs, sizes = dict(ptrs), dict(sizes)
     n_total, n0 = sum(chunks), sum(chunks[:i])
-    for name in [n for n in inputs if n != "w"] + [out_name]:
+    # wgrad's dW has no batch: every chunk adds into the whole of it.
+    batched = [out_name] if out_name != "dw" else []
+    for name in [n for n in inputs if n != "w"] + batched:
         per_image = sizes[name] // n_total
         ptrs[name] = ptrs[name] + n0 * per_image
         sizes[name] = chunks[i] * per_image
@@ -2535,6 +2554,31 @@ def _chunk_plans(plan_fn, p, chunks):
         plans = [pl for pl in plans if pl.label in labels[n]]
     per_chunk = {pl.label: [labels[n][pl.label] for n in chunks] for pl in plans}
     return plans, rejected, per_chunk
+
+
+def _accumulates_dw(plan) -> bool:
+    """A one-step wgrad plan with no scratch: its kernel adds its tiles into
+    the zeroed fp32 dW (atomics), so its launches over batch chunks sum. A fold
+    or reduce step, or a scratch slab, writes dW instead."""
+    return len(plan.steps) == 1 and not plan.workspaces and not plan.zeroed
+
+
+def _wgrad_chunk_plans(plans, rejected, per_chunk, chunks):
+    """``(plans, rejected)`` for a wgrad problem run as ``chunks``: past one
+    chunk, only the plans whose every chunk accumulates into dW."""
+    if len(chunks) == 1:
+        return plans, rejected
+    keep = [pl for pl in plans if all(map(_accumulates_dw, per_chunk[pl.label]))]
+    rejected = list(rejected) + [
+        (
+            pl.identity,
+            f"a wgrad batch run as {len(chunks)} chunks needs a kernel that "
+            f"accumulates into dW",
+        )
+        for pl in plans
+        if pl not in keep
+    ]
+    return keep, rejected
 
 
 def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
@@ -2599,6 +2643,8 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 p,
                 chunks,
             )
+            if direction == "wgrad":
+                plans, rejected = _wgrad_chunk_plans(plans, rejected, per_chunk, chunks)
             if not plans:
                 why = _no_plan_reason(rejected, dtype, variants)
                 print(
@@ -2665,6 +2711,10 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                         sizes[name] = max(sizes.get(name, 0), nbytes)
             for name in set(sizes) - set(ptrs):
                 ptrs[name] = rt.alloc(sizes[name])
+            # Two-stage wgrad scratch: zeroed like dW (once for timing, again
+            # before each verified run).
+            for name in {n for plan in plans for n in plan.zeroed}:
+                rt.memset(ptrs[name], 0, sizes[name])
 
             flop = float(p.flops)
             bytes_xfer = float(sum(t.nbytes for t in inputs.values()) + Out_t.nbytes)

@@ -262,6 +262,7 @@ constexpr PinnedOpcode kPinned[] = {
     {ROCKE_OP_TILE_BUFFER_STORE_VN, 227, "tile.buffer_store_vN", false},
     {ROCKE_OP_TILE_GLOBAL_PTR_OFFSET, 228, "tile.global_ptr_offset", true},
     {ROCKE_OP_TILE_TRAP, 229, "tile.trap", false},
+    {ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32, 230, "tile.buffer_atomic_fadd_f32", false},
 };
 
 /* Each pinned opcode keeps its value, its name and its purity. */
