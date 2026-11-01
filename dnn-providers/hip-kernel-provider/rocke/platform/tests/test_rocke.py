@@ -70,6 +70,10 @@ from rocke.helpers import (
     make_gemm_manifest,
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConv16cSpec,
@@ -366,6 +370,44 @@ define amdgpu_kernel void @k() {
         self.assertEqual(res.sgpr_count, 48)
         self.assertEqual(res.lds_bytes, 32768)
 
+    def test_parse_isa_rdna_gfx12(self):
+        # Verbatim llvm-objdump lines from gfx1201/gfx1151 WMMA FMHA builds. RDNA
+        # spells LDS ops ds_load/ds_store, uses global_* memory ops, and gfx12
+        # splits barriers and memory waits into separate instructions.
+        asm = """
+\tv_wmma_f32_16x16x16_f16 v[32:39], v[40:43], v[91:94], 0    // 000000001D90: CC404020 1A02B728
+\tglobal_load_b128 v[40:43], v[0:1], off                     // 000000001C50: EE05C07C 00000028 00000000
+\tglobal_store_b16 v[46:47], v50, off                        // 000000002CE4: EE06407C 19000000 0000002E
+\tscratch_load_b128 v[154:157], off, off                     // 000000001F5C: DC5D0000 9A7C0000
+\tscratch_store_b128 off, v[2:5], off                        // 000000001DE0: DC750000 007C0200
+\tds_load_b128 v[84:87], v82                                 // 00000000297C: DBFC0000 54000052
+\tds_store_b128 v80, v[91:94] offset:512                     // 000000002864: DB7C0200 00005B50
+\ts_wait_loadcnt 0x0                                         // 000000001D8C: BFC00000
+\ts_wait_dscnt 0x0                                           // 000000001E6C: BFC60000
+\ts_wait_kmcnt 0x0                                           // 000000001A58: BFC70000
+\ts_wait_alu 0xfffe                                          // 000000001BBC: BF88FFFE
+\ts_barrier_signal -1                                        // 000000002974: BE804EC1
+\ts_barrier_wait 0xffff                                      // 000000002978: BF94FFFF
+\ts_mov_b32 s13, 0                                           // 000000001A90: BE8D0080
+"""
+        isa = parse_isa(asm)
+        self.assertEqual(isa.wmma, 1)
+        self.assertEqual(isa.mfma, 0)
+        self.assertEqual(isa.global_load, 1)
+        self.assertEqual(isa.global_store, 1)
+        self.assertEqual(isa.scratch_load, 1)
+        self.assertEqual(isa.scratch_store, 1)
+        self.assertEqual(isa.ds_read, 1)
+        self.assertEqual(isa.ds_write, 1)
+        # Three split memory waits; s_wait_alu is an ALU dependency hint.
+        self.assertEqual(isa.s_waitcnt, 3)
+        self.assertEqual(isa.s_wait_alu, 1)
+        # One split barrier (signal + wait) is one barrier.
+        self.assertEqual(isa.s_barrier, 1)
+        # WMMA is not VALU; waits/barriers are not SALU.
+        self.assertEqual(isa.valu, 0)
+        self.assertEqual(isa.salu, 1)
+
     def test_benchmark_summary_discards_first_and_reports_spread(self):
         s = summarize_runs(
             ms=[1.0, 0.5, 0.25],
@@ -403,6 +445,60 @@ define amdgpu_kernel void @k() {
         rows = compare_variant_reports([report])
         self.assertEqual(rows[0]["median_tflops"], 123.0)
         self.assertEqual(rows[0]["llvm_mfma"], 1)
+
+    def test_resources_and_report_expose_compiled_workgroup_bound(self):
+        # Verbatim llvm-readelf --notes lines from a one-wave (32-thread) gfx1201
+        # kernel whose flat-work-group-size range was invalid, so LLVM budgeted
+        # registers for its 1024-thread default.
+        notes = """
+    .max_flat_workgroup_size: 1024
+    .private_segment_fixed_size: 216
+    .vgpr_count:     192
+    .wavefront_size: 32
+"""
+        res = parse_resources(notes)
+        self.assertEqual(res.max_flat_workgroup_size, 1024)
+        self.assertEqual(res.as_dict()["max_flat_workgroup_size"], 1024)
+
+        b = IRBuilder("one_wave")
+        b.kernel.attrs["max_workgroup_size"] = 32
+        artifact = KernelArtifact(
+            kernel=b.kernel, ir_text="", llvm_text="", hsaco=b"", timings={}
+        )
+        report = VariantReport(
+            name="one_wave", spec={}, artifact=artifact, resources=res
+        )
+        row = compare_variant_reports([report])[0]
+        self.assertEqual(row["wg_bound"], 32)
+        self.assertEqual(row["wg_compiled"], 1024)
+        # The kernel records only a bound; without a launch size the row
+        # does not invent one.
+        self.assertIsNone(row["wg_launch"])
+
+    def test_report_compares_compiled_bound_with_actual_launch(self):
+        # A kernel left at the 256 default bound but launched with 64 threads:
+        # the compiler budgets for 256, four times the launch.
+        b = IRBuilder("default_bound")
+        artifact = KernelArtifact(
+            kernel=b.kernel, ir_text="", llvm_text="", hsaco=b"", timings={}
+        )
+        report = VariantReport(
+            name="default_bound",
+            spec={},
+            artifact=artifact,
+            resources=parse_resources("    .max_flat_workgroup_size: 256\n"),
+            launch_block_size=64,
+        )
+        row = compare_variant_reports([report])[0]
+        self.assertEqual(row["wg_bound"], 256)
+        self.assertEqual(row["wg_launch"], 64)
+        self.assertEqual(row["wg_compiled"], 256)
+        self.assertEqual(report.as_dict()["launch_block_size"], 64)
+        # from_artifact forwards the launch size the caller supplies.
+        forwarded = VariantReport.from_artifact(
+            name="default_bound", spec={}, artifact=artifact, launch_block_size=64
+        )
+        self.assertEqual(forwarded.launch_block_size, 64)
 
 
 # ---------------------------------------------------------------------
@@ -2096,10 +2192,10 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         env.update(env_overrides)
         env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
         out = subprocess.run(
-            [sys.executable, "-c", _FLAVOR_AUTO_PROBE],
+            rocke_python_command("-c", _FLAVOR_AUTO_PROBE),
             capture_output=True,
             text=True,
-            env=env,
+            env=rocke_subprocess_env(env),
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         py_dl, cpp_dl = out.stdout.strip().splitlines()[-2:]
@@ -4009,6 +4105,55 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                         arch=arch,
                     )
                     self.assertIn(self._DPP_CALL.format(0x160 | mask), ll)
+
+    # ---- vop2_f32_dpp_xor (softmax row-reduce step) ----
+    def test_vop2_f32_dpp_xor_is_update_dpp_then_fmax_or_fadd(self):
+        """One reduce step is the in-row ``update.dpp`` shuffle (``row_xmask``
+        on gfx1250) followed by ``maxnum`` / ``fadd`` -- never inline asm,
+        which LLVM's gfx1250 WMMA co-execution hazard check cannot see. The
+        shuffled value is the first operand: DPP applies to ``src0``, so that
+        is the operand GCNDPPCombine folds into the fused DPP instruction."""
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        combine = {
+            "v_max_f32": r"call float @llvm\.maxnum\.f32\(float {s}, float ",
+            "v_add_f32": r"= fadd float {s}, ",
+        }
+        for mnemonic, pattern in combine.items():
+            for mask in (1, 2, 4, 8):
+                with self.subTest(mnemonic=mnemonic, mask=mask):
+                    # Assert on the Python lowering first: _lower would skip the
+                    # subtest before these checks when the C++ engine is absent.
+                    b = self._builder(f"vop2dpp_{mnemonic}_{mask}")
+                    b.vop2_f32_dpp_xor(b.const_f32(1.0), mask, mnemonic)
+                    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx1250")
+                    self.assertNotIn(" asm ", ll)
+                    self.assertNotIn("_dpp $0", ll)
+                    calls = re.findall(
+                        r"(%[\w.]+) = call i32 @llvm\.amdgcn\.update\.dpp\.i32\("
+                        r"i32 [^,]+, i32 [^,]+, i32 (\d+), i32 15, i32 15, i1 true\)",
+                        ll,
+                    )
+                    self.assertEqual(len(calls), 1, ll)
+                    dpp, ctrl = calls[0]
+                    self.assertEqual(int(ctrl), 0x160 | mask)
+                    shuffled = re.search(
+                        rf"(%[\w.]+) = bitcast i32 {re.escape(dpp)} to float", ll
+                    )
+                    self.assertIsNotNone(shuffled, ll)
+                    self.assertRegex(ll, pattern.format(s=re.escape(shuffled.group(1))))
+                    _assert_ir_assembles(self, ll, b.kernel.name)
+                    _assert_engines_agree(self, b.kernel, ll, arch="gfx1250")
+
+    def test_vop2_f32_dpp_xor_rejects_bad_inputs(self):
+        b = self._builder("vop2dpp_bad")
+        with self.assertRaisesRegex(ValueError, "requires f32 data"):
+            b.vop2_f32_dpp_xor(b.const_i32(1), 1, "v_add_f32")
+        for mask in (0, 16):
+            with self.assertRaisesRegex(ValueError, "xor_mask must be 1..15"):
+                b.vop2_f32_dpp_xor(b.const_f32(1.0), mask, "v_add_f32")
+        with self.assertRaisesRegex(ValueError, "must be v_max_f32/v_add_f32"):
+            b.vop2_f32_dpp_xor(b.const_f32(1.0), 1, "v_min_f32")
 
     def test_warp_shuffle_xor_dpp_emits_hip_builtin(self):
         from rocke.core.ir import IRBuilder
@@ -6834,13 +6979,17 @@ class TestLauncherBind(unittest.TestCase):
             return b"\x01\x02"
 
         class FakeRuntime:
-            def prepare_launch(self, fn, grid, block, args, *, shared_bytes, stream):
+            def prepare_launch(
+                self, fn, grid, block, args, *, shared_bytes, stream, cluster=None
+            ):
                 self.prepared = (fn, grid, block, args, shared_bytes, stream)
+                self.cluster = cluster
                 return lambda: enqueued.append(1)
 
         launcher = L.KernelLauncher.__new__(L.KernelLauncher)
         launcher._fn = "fn"
         launcher._packer = packer
+        launcher._cluster_dims = None
         rt = FakeRuntime()
         cfg = L.LaunchConfig(grid=(2, 1, 1), block=(64, 1, 1), stream=7)
         with mock.patch.object(L, "_runtime", return_value=rt):
@@ -6851,6 +7000,13 @@ class TestLauncherBind(unittest.TestCase):
         self.assertEqual(packed, [{"a": 1}])
         self.assertEqual(len(enqueued), 3)
         self.assertEqual(rt.prepared, ("fn", (2, 1, 1), (64, 1, 1), b"\x01\x02", 0, 7))
+        self.assertIsNone(rt.cluster)
+
+        # A clustered kernel keeps its cluster shape on the prepared launch.
+        launcher._cluster_dims = (1, 1, 2)
+        with mock.patch.object(L, "_runtime", return_value=rt):
+            launcher.bind({"a": 1}, config=cfg)
+        self.assertEqual(rt.cluster, (1, 1, 2))
 
 
 class TestLauncherFenceContract(unittest.TestCase):

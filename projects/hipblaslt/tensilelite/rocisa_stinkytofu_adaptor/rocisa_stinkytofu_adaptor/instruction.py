@@ -5290,17 +5290,18 @@ class SAtomicUmaxX2(Instruction):
         return dup
 
 
-# --- TensorLoadToLds: rocisa(group0, group1, group2, group3, comment) ---
+# --- TensorLoadToLds: rocisa(group0, group1, group2, group3, comment, tensor) ---
 def _make_tensor_load_class():
     def __init__(self, group0: Any = None, group1: Any = None,
                  group2: Any = None, group3: Any = None,
-                 comment: str = "", **kw):
+                 comment: str = "", tensor: Any = None, **kw):
         _ = kw
         CommonInstruction.__init__(
             self, instType=InstType.INST_NOTYPE, dst=group0,
             srcs=[group1, group2, group3], dpp=None, sdwa=None,
             vop3=None, comment=comment)
         self.setInst("tensor_load_to_lds")
+        self.tensor = tensor
 
     def getArgStr(self) -> str:
         # Native getParams drops group2 and group3 unless both are set.
@@ -5310,7 +5311,11 @@ def _make_tensor_load_class():
         operands = [self.dst, self.srcs[0]]
         if group2 is not None and group3 is not None:
             operands.extend((group2, group3))
-        return ", ".join(_input_to_str(operand) for operand in operands if operand is not None)
+        argStr = ", ".join(_input_to_str(operand) for operand in operands if operand is not None)
+        tensor = getattr(self, "tensor", None)
+        if tensor is not None and hasattr(tensor, "toString"):
+            argStr += tensor.toString()
+        return argStr
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
@@ -5329,6 +5334,10 @@ def _make_tensor_load_class():
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             **kwargs)
+        tensor = getattr(self, "tensor", None)
+        if tensor is not None:
+            logical.set_tensor(scope=int(tensor.scope), th=int(tensor.th),
+                               nv=int(tensor.nv) != 0, is_store=bool(tensor.isStore))
         return logical
 
     def __deepcopy__(self, memo):

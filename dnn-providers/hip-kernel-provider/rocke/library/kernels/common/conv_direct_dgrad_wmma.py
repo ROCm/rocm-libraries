@@ -102,6 +102,7 @@ from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _io_type,
     emit_direct_params,
+    one_padding_reason,
 )
 
 WMMA_K = 32  # K of the 16x16x32 atom
@@ -348,6 +349,9 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
         return f"filter {p.KH}x{p.KW} is not positive"
     if p.PAD < 0 or spec.plan_h[2] < 0 or spec.plan_w[2] < 0:
         return f"PAD {p.PAD} outside 0..(K-1)*dilation"
+    why = one_padding_reason(p)
+    if why is not None:
+        return why
     G = spec.pack_groups
     if G < 1:
         return f"pack_groups {G} < 1"
