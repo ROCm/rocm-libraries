@@ -1074,6 +1074,23 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
     }
     ptr = op->operands[0];
     num_bytes = op->operands[1];
+    /* num_records is an int, so the (int) cast would truncate an i64 byte
+     * count at every LLVM version. A constant-space ptr is kept: the HIP
+     * signature declares every pointer parameter the same way, and the builtin
+     * takes a void*. */
+    {
+        const char* nb_ty
+            = (num_bytes->type && num_bytes->type->name) ? num_bytes->type->name : "(null)";
+        if(strcmp(nb_ty, "i32") != 0)
+        {
+            return rocke_h_fail(lw,
+                                ROCKE_ERR_VALUE,
+                                "tile.buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
+                                "%s; the HIP builtin takes an int num_records, so the byte count "
+                                "would be truncated at every LLVM version; pass it as i32",
+                                nb_ty);
+        }
+    }
     /* The flags word is the rsrc DWORD3, whose format / out-of-bounds encoding
      * is ISA-specific. Take it from the target's ISA backend, the same source
      * the LLVM lowerer's tile.buffer_rsrc reads, so both routes agree. */
