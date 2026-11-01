@@ -91,6 +91,7 @@ void inline compare_k(InputVector input, OutputVector output, SizeOut k)
 
 namespace std
 {
+#if !defined(_GLIBCXX_RELEASE) || _GLIBCXX_RELEASE < 16
 template<>
 struct hash<rocprim::int128_t>
 {
@@ -113,6 +114,7 @@ struct hash<rocprim::uint128_t>
         return (hash<std::uint64_t>{}(low) * 31) + hash<std::uint64_t>{}(high);
     }
 };
+#endif
 
 template<>
 struct hash<rocprim::half>
