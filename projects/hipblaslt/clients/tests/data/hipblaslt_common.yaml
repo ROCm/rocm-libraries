@@ -655,6 +655,7 @@ Arguments:
   - fast_check_repeat: c_int32
   - fast_check_inject: c_int32
   - requires_streamk: c_int8
+  - skip_launch_solution: c_int32
   - integer_exact_pattern: c_char*16
   - allow_no_solution: c_int8
   - timing: c_int8
@@ -694,6 +695,7 @@ Arguments:
   - rotating: c_int32
   - use_gpu_timer: c_bool
   - skip_slow_solution_ratio: c_float
+  - uniform_summation_order: c_int32
   - gsu_vector: c_int32*32
   - wgm_vector: c_int32*32
   - print_solution_found: c_bool
@@ -772,6 +774,7 @@ Defaults:
   fast_check_repeat: 1
   fast_check_inject: -1
   requires_streamk: 0
+  skip_launch_solution: -1
   integer_exact_pattern: ''
   allow_no_solution: 0
   timing: 0
@@ -833,6 +836,7 @@ Defaults:
   rotating: 0
   use_gpu_timer: false
   skip_slow_solution_ratio: 0.0
+  uniform_summation_order: -1
   gsu_vector: 0
   wgm_vector: 0
   print_solution_found: false

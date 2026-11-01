@@ -43,12 +43,12 @@ def test_production_variants_derive_from_the_dispatched_tile():
         names=("fused", "precomputed", "simple"),
     )
 
-    assert result.candidate.spec_id == "kda_w512"
+    assert result.candidate.spec_id == "kda_nw1_wtk16_bpv8"
     fused = variants["fused"]
     raw = variants["precomputed"]
     simple = variants["simple"]
     tile = (fused.num_warps, fused.warp_threads_k, fused.blocks_per_v_dim)
-    assert tile == (1, 16, 4)
+    assert tile == (1, 16, 8)
     assert (raw.num_warps, raw.warp_threads_k, raw.blocks_per_v_dim) == tile
     assert raw.fuse_gate is False
     assert simple.simple is True
