@@ -55,6 +55,22 @@ struct LayoutFromDataType<DataType, K, false>
     static constexpr index_t kK0PerLane = K / (kK1PerLane * kKLane);
 };
 
+struct LayoutFrom8BitK64
+{
+    static constexpr index_t kK1PerLane = 16;
+    static constexpr index_t kK0PerLane = 2;
+};
+
+template <>
+struct LayoutFromDataType<fp8_t, 64, false> : LayoutFrom8BitK64
+{
+};
+
+template <>
+struct LayoutFromDataType<bf8_t, 64, false> : LayoutFrom8BitK64
+{
+};
+
 template <typename Arch,
           typename ADType,
           typename BDType,
