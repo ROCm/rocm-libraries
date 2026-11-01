@@ -26,10 +26,13 @@
 #include "internal/precond/rocsparse_gtsv.h"
 #include "rocsparse_grid.hpp"
 
+#include "gtsv_nopivot_index.hpp"
 #include "gtsv_nopivot_strided_batch_device.h"
 #include "gtsv_nopivot_strided_batch_medium_device.h"
 #include "gtsv_nopivot_thomas_device.h"
 
+#include <cstdint>
+#include <limits>
 #include <map>
 
 namespace rocsparse
@@ -513,22 +516,46 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <uint32_t BLOCKSIZE, typename T>
-    rocsparse_status launch_backward_substitution_kernel(rocsparse_handle handle,
-                                                         rocsparse_int    m,
-                                                         rocsparse_int    batch_count,
-                                                         int64_t          ldb,
-                                                         int              num_spikes,
-                                                         const T*         dl_modified,
-                                                         const T*         d_modified,
-                                                         const T*         du_modified,
-                                                         const T*         B_modified,
-                                                         const T*         B_spike,
-                                                         T*               B)
+    // Straight-line batch offsets for the workspace arrays are rocsparse_int
+    // multiplies by hipBlockIdx_y, as before the grid clamp. The user strides
+    // stay int64 on that path. When the workspace index would overflow, or the
+    // batch does not fit in grid.y, the grid-stride kernel widens the index.
+    static bool gtsv_no_pivot_strided_medium_straight(rocsparse_handle handle,
+                                                      rocsparse_int    m,
+                                                      rocsparse_int    batch_count,
+                                                      int64_t          num_spikes,
+                                                      uint32_t&        grid_y)
+    {
+        grid_y = rocsparse::get_grid_size_y(handle, batch_count);
+        if(batch_count <= 0 || static_cast<int64_t>(grid_y) < static_cast<int64_t>(batch_count))
+        {
+            return false;
+        }
+
+        const int64_t last  = static_cast<int64_t>(batch_count) - 1;
+        const int64_t limit = std::numeric_limits<rocsparse_int>::max();
+        return gtsv_index_fits(static_cast<int64_t>(m), last, static_cast<int64_t>(m) - 1, limit)
+               && gtsv_index_fits(num_spikes, last, num_spikes - 1, limit);
+    }
+
+    template <uint32_t BLOCKSIZE, typename T, bool GRID_STRIDE>
+    rocsparse_status launch_strided_backward_kernel(rocsparse_handle handle,
+                                                    uint32_t         grid_y,
+                                                    rocsparse_int    m,
+                                                    rocsparse_int    batch_count,
+                                                    int64_t          ldb,
+                                                    int              num_spikes,
+                                                    const T*         dl_modified,
+                                                    const T*         d_modified,
+                                                    const T*         du_modified,
+                                                    const T*         B_modified,
+                                                    const T*         B_spike,
+                                                    T*               B)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_backward_kernel<BLOCKSIZE>),
-            dim3((m - 1) / BLOCKSIZE + 1, rocsparse::get_grid_size_y(handle, batch_count), 1),
+            (rocsparse::
+                 gtsv_nopivot_strided_batch_pcr_tiled_backward_kernel<BLOCKSIZE, T, GRID_STRIDE>),
+            dim3((m - 1) / BLOCKSIZE + 1, grid_y, 1),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
@@ -542,6 +569,97 @@ namespace rocsparse
             B_modified,
             B_spike,
             B);
+        return rocsparse_status_success;
+    }
+
+    template <uint32_t BLOCKSIZE, typename T>
+    rocsparse_status launch_backward_substitution_kernel(rocsparse_handle handle,
+                                                         rocsparse_int    m,
+                                                         rocsparse_int    batch_count,
+                                                         int64_t          ldb,
+                                                         int              num_spikes,
+                                                         const T*         dl_modified,
+                                                         const T*         d_modified,
+                                                         const T*         du_modified,
+                                                         const T*         B_modified,
+                                                         const T*         B_spike,
+                                                         T*               B)
+    {
+        uint32_t grid_y = 0;
+        if(gtsv_no_pivot_strided_medium_straight(handle, m, batch_count, num_spikes, grid_y))
+        {
+            return launch_strided_backward_kernel<BLOCKSIZE, T, false>(handle,
+                                                                       grid_y,
+                                                                       m,
+                                                                       batch_count,
+                                                                       ldb,
+                                                                       num_spikes,
+                                                                       dl_modified,
+                                                                       d_modified,
+                                                                       du_modified,
+                                                                       B_modified,
+                                                                       B_spike,
+                                                                       B);
+        }
+        return launch_strided_backward_kernel<BLOCKSIZE, T, true>(handle,
+                                                                  grid_y,
+                                                                  m,
+                                                                  batch_count,
+                                                                  ldb,
+                                                                  num_spikes,
+                                                                  dl_modified,
+                                                                  d_modified,
+                                                                  du_modified,
+                                                                  B_modified,
+                                                                  B_spike,
+                                                                  B);
+    }
+
+    template <uint32_t BLOCKSIZE, typename T, bool GRID_STRIDE>
+    rocsparse_status launch_strided_forward_kernel(rocsparse_handle handle,
+                                                   uint32_t         grid_y,
+                                                   rocsparse_int    m,
+                                                   rocsparse_int    batch_count,
+                                                   int64_t          batch_stride,
+                                                   int64_t          ldb,
+                                                   rocsparse_int    num_spikes,
+                                                   const T*         dl,
+                                                   const T*         d,
+                                                   const T*         du,
+                                                   const T*         B,
+                                                   T*               dl_modified,
+                                                   T*               d_modified,
+                                                   T*               du_modified,
+                                                   T*               B_modified,
+                                                   T*               dl_spike,
+                                                   T*               d_spike,
+                                                   T*               du_spike,
+                                                   T*               B_spike)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::
+                 gtsv_nopivot_strided_batch_pcr_tiled_forward_kernel<BLOCKSIZE, T, GRID_STRIDE>),
+            dim3((m - 1) / BLOCKSIZE + 1, grid_y, 1),
+            dim3(BLOCKSIZE),
+            0,
+            handle->stream,
+            m,
+            batch_count,
+            batch_stride,
+            ldb,
+            num_spikes,
+            dl,
+            d,
+            du,
+            B,
+            dl_modified,
+            d_modified,
+            du_modified,
+            B_modified,
+            dl_spike,
+            d_spike,
+            du_spike,
+            B_spike);
         return rocsparse_status_success;
     }
 
@@ -565,30 +683,48 @@ namespace rocsparse
                                                        T*               du_spike,
                                                        T*               B_spike)
     {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_forward_kernel<BLOCKSIZE>),
-            dim3((m - 1) / BLOCKSIZE + 1, rocsparse::get_grid_size_y(handle, batch_count), 1),
-            dim3(BLOCKSIZE),
-            0,
-            handle->stream,
-            m,
-            batch_count,
-            batch_stride,
-            ldb,
-            num_spikes,
-            dl,
-            d,
-            du,
-            B,
-            dl_modified,
-            d_modified,
-            du_modified,
-            B_modified,
-            dl_spike,
-            d_spike,
-            du_spike,
-            B_spike);
-        return rocsparse_status_success;
+        uint32_t grid_y = 0;
+        if(gtsv_no_pivot_strided_medium_straight(handle, m, batch_count, num_spikes, grid_y))
+        {
+            return launch_strided_forward_kernel<BLOCKSIZE, T, false>(handle,
+                                                                      grid_y,
+                                                                      m,
+                                                                      batch_count,
+                                                                      batch_stride,
+                                                                      ldb,
+                                                                      num_spikes,
+                                                                      dl,
+                                                                      d,
+                                                                      du,
+                                                                      B,
+                                                                      dl_modified,
+                                                                      d_modified,
+                                                                      du_modified,
+                                                                      B_modified,
+                                                                      dl_spike,
+                                                                      d_spike,
+                                                                      du_spike,
+                                                                      B_spike);
+        }
+        return launch_strided_forward_kernel<BLOCKSIZE, T, true>(handle,
+                                                                 grid_y,
+                                                                 m,
+                                                                 batch_count,
+                                                                 batch_stride,
+                                                                 ldb,
+                                                                 num_spikes,
+                                                                 dl,
+                                                                 d,
+                                                                 du,
+                                                                 B,
+                                                                 dl_modified,
+                                                                 d_modified,
+                                                                 du_modified,
+                                                                 B_modified,
+                                                                 dl_spike,
+                                                                 d_spike,
+                                                                 du_spike,
+                                                                 B_spike);
     }
 
     template <uint32_t BLOCKSIZE, typename T>
