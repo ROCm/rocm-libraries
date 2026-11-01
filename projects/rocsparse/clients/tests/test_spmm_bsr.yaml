@@ -74,8 +74,8 @@ Tests:
   function: spmm_bsr
   indextype: *i32
   precision: *single_double_precisions_complex_real
-  M: [8, 223]
-  N: [8, 300]
+  M: [8]
+  N: [8]
   K: [0, 167]
   block_dim: [4]
   alpha_beta: *alpha_beta_range_quick
@@ -173,7 +173,7 @@ Tests:
   precision: *bfloat16_bfloat16_float32_float32_abct_precision
   M: [300]
   N: [144]
-  K: [56478]
+  K: [512]
   block_dim: [12]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]

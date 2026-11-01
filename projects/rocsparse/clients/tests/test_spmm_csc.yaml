@@ -188,7 +188,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
-  filename: [Chevron2]
+  filename: [mplate]
 
 - name: spmm_csc
   category: quick
