@@ -82,6 +82,11 @@ flag_management:
       statuses:
       - type: project
         target: 80%
+    - name: rocALUTION
+      carryforward: true
+      statuses:
+      - type: project
+        target: 80%
     - name: hipFFT
       carryforward: true
       statuses:

@@ -276,6 +276,9 @@ else()
   add_test(rocalution-test rocalution-test)
 endif()
 
+# clients/unittests appends the unit-test binaries to this file
+set(ROCALUTION_CTEST_INSTALL_FILE "${ROCALUTION_CTEST_INSTALL_FILE}" PARENT_SCOPE)
+
 # Install CTestTestfile.cmake to bin/rocalution/ for TheRock
 if(ROCALUTION_CTEST_INSTALL_FILE)
   rocm_install(

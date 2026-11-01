@@ -152,8 +152,39 @@ if(SUPPORT_HIP)
 endif()
 
 if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage -lgcov)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "BUILD_CODE_COVERAGE requires a clang compiler, e.g. amdclang++")
+  endif()
+
+  # Locate the host profile runtime so coverage targets can link it directly.
+  # Passing -fprofile-instr-generate to a HIP link instead puts the device
+  # profile runtime into the device image, and the HIP runtime then aborts while
+  # dumping the profile at process exit (AISPARSE-778).
+  #
+  # The profile runtime is not self-contained: its ROCm platform object pulls in
+  # the device-drain and symbol-interception helpers, so those archives have to
+  # be named too. Link them as a group, since they reference each other.
+  set(ROCALUTION_PROFILE_RUNTIME)
+  foreach(_rt clang_rt.profile clang_rt.profile_rocm
+              clang_rt.interception clang_rt.sanitizer_common)
+    foreach(_suffix "-x86_64" "")
+      execute_process(COMMAND ${CMAKE_CXX_COMPILER}
+                              --print-file-name=lib${_rt}${_suffix}.a
+                      OUTPUT_VARIABLE _rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(EXISTS "${_rt_path}")
+        list(APPEND ROCALUTION_PROFILE_RUNTIME "${_rt_path}")
+        break()
+      endif()
+    endforeach()
+  endforeach()
+  if(NOT ROCALUTION_PROFILE_RUNTIME)
+    message(FATAL_ERROR
+      "BUILD_CODE_COVERAGE: could not locate the clang profile runtime")
+  endif()
+  message(STATUS "Host profile runtime: ${ROCALUTION_PROFILE_RUNTIME}")
+  set(ROCALUTION_PROFILE_RUNTIME
+      -Wl,--start-group ${ROCALUTION_PROFILE_RUNTIME} -Wl,--end-group
+      ${CMAKE_DL_LIBS} -lpthread -lrt)
 endif()
 
 if(BUILD_ADDRESS_SANITIZER)
@@ -255,48 +286,109 @@ if(BUILD_CODE_COVERAGE)
   # > make coverage GTEST_FILTER=<>
   # will run:
   #  > make coverage_analysis GTEST_FILTER=<> (analyze tests)
-  #  > make coverage_output (generate html documentation)
+  # and then write the lcov and html reports to coverage-report
   #
+
+  # The unit tests run unfiltered: GTEST_FILTER selects rocalution-test cases,
+  # and make passes it to the environment, where gtest would read it. The
+  # lifecycle tests run through CTest, one process per test. The executables
+  # contain the same library objects as librocalution, and so the same %m
+  # signature, so their profiles get names of their own.
+  set(COVERAGE_UNIT_TEST_COMMANDS)
+  if(TARGET rocalution-unit-test)
+    set(COVERAGE_UNIT_TEST_COMMANDS
+      COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_unit_%m.profraw" ./clients/staging/rocalution-unit-test
+      COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="${CMAKE_BINARY_DIR}/coverage-report/profraw/rocalution-coverage_lifecycle_%m.profraw" ${CMAKE_CTEST_COMMAND} -R "^lifecycle" --output-on-failure
+    )
+  endif()
 
   #
   # Run coverage analysis
   #
   add_custom_target(coverage_analysis
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ./clients/staging/rocalution-test --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_%m.profraw" ./clients/staging/rocalution-test --gtest_filter=\"\${GTEST_FILTER}\"
+    ${COVERAGE_UNIT_TEST_COMMANDS}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running rocalution coverage analysis"
     )
 
   add_dependencies(coverage_analysis rocalution)
+  if(TARGET rocalution-unit-test)
+    add_dependencies(coverage_analysis rocalution-unit-test rocalution-unit-test-lifecycle)
+  endif()
 
-  #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  #
-  add_custom_target(coverage_output
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  # Each instrumented library writes its own profile (%m), and llvm-cov needs
+  # every one of them as an object to attribute the counters
+  set(COVERAGE_OBJECTS -object $<TARGET_FILE:rocalution>)
+  if(TARGET rocalution_hip)
+    list(APPEND COVERAGE_OBJECTS -object $<TARGET_FILE:rocalution_hip>)
+  endif()
+  # The unit tests link the library objects instead of the library
+  if(TARGET rocalution-unit-test)
+    list(APPEND COVERAGE_OBJECTS
+      -object $<TARGET_FILE:rocalution-unit-test>
+      -object $<TARGET_FILE:rocalution-unit-test-lifecycle>)
+  endif()
+
+  # llvm-cov does not process the LCOV_EXCL_START/LCOV_EXCL_STOP markers. The
+  # exported report is filtered for those, and for sources that are not part of
+  # the library, e.g. ROCm headers or the logging utilities
+  set(COVERAGE_FILTER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/filter_lcov_exclusions.py")
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+  # Multi-node code can only run in a build with MPI, so it is excluded otherwise
+  set(COVERAGE_FILTER_OPTIONS)
+  if(NOT SUPPORT_MPI)
+    list(APPEND COVERAGE_FILTER_OPTIONS --no-mpi)
+  endif()
+  find_program(GENHTML genhtml)
+
+  if(GENHTML)
+    set(COVERAGE_HTML_COMMAND
+      COMMAND ${GENHTML} ./coverage-report/coverage.info --output-directory ./coverage-report --title rocalution --legend --demangle-cpp --quiet
+    )
+  else()
+    message(STATUS "genhtml not found - using llvm-cov show (exclusion markers not reflected in HTML)")
+    set(COVERAGE_HTML_COMMAND
+      COMMAND ${LLVM_COV} show ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocalution.profdata -format=html -output-dir=coverage-report
+    )
+  endif()
+
+  add_custom_target(
+    coverage
     DEPENDS coverage_analysis
-    COMMAND mkdir -p lcoverage
-    COMMENT "Preparing coverage output directory"
-    )
-
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory . --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'${CMAKE_SOURCE_DIR}/src/utils/*'" "'${CMAKE_SOURCE_DIR}/src/base/host/host_io.*'" "'${CMAKE_SOURCE_DIR}/clients/*'" "'${CMAKE_SOURCE_DIR}/build/*'" "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
-    COMMENT "Generating HTML coverage report"
-    )
-
-  add_custom_target(coverage DEPENDS coverage_output COMMENT "Building coverage report")
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocalution-coverage_*.profraw -o ./coverage-report/rocalution.profdata
+    COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocalution.profdata
+    COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocalution.profdata -format=lcov > ./coverage-report/coverage-raw.info
+    COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ${COVERAGE_FILTER_OPTIONS} ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
+    ${COVERAGE_HTML_COMMAND}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Building coverage report"
+  )
 
   #
   # Coverage cleanup
   #
   add_custom_target(coverage_cleanup
-    COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Cleaning up coverage data files"
     )
