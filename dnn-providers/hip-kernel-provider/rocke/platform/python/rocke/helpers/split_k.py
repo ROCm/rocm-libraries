@@ -147,18 +147,24 @@ _WGRAD_SPLIT_POLICY: dict[str, WgradSplitPolicy] = {
 # Per-dtype overrides of _WGRAD_SPLIT_POLICY, keyed by (arch, dW dtype).
 #
 # gfx1250 fp16: fill to 1024 CTAs (2048 grouped) with K slices as shallow as
-# 512, up to degree 128. Fitted on a sample of wgrad shapes with every cached
-# split-K binary timed at every degree 2..128 and verified, once the packed
-# fp16 atomic was no longer fenced (it is an atomicrmw now). fp16 was not split
-# automatically before (cap 1): that cap was a symptom of the fenced atomic.
-# No fp16 degree failed the 5e-2 verification on those shapes, so the packed
-# fp16 atomic's rounding is not the binding limit there.
+# 512. Fitted on a sample of wgrad shapes with every cached split-K binary
+# timed at every degree 2..128 and verified, once the packed fp16 atomic was
+# no longer fenced (it is an atomicrmw now). fp16 was not split automatically
+# before (cap 1): that cap was a symptom of the fenced atomic.
+#
+# The degree is capped by the packed fp16 atomic's rounding, as bf16's is: fp16
+# has 10 fraction bits (unit roundoff 2**-11), so 97 same-sign partials stay
+# within the 5e-2 tolerance. Beyond it valid inputs can miss it even where the
+# fitted shapes did not (at 128, one 1.0 partial followed by 127 partials of
+# 2**-11 rounds back to 1.0, a 5.8% error). The cap binds only the atomic
+# reduction: the f32 workspace (two-stage) degree is resolved as fp32 dW.
 _WGRAD_SPLIT_POLICY_BY_DTYPE: dict[tuple[str, str], WgradSplitPolicy] = {
     ("gfx1250", "fp16"): WgradSplitPolicy(
         target_ctas=1024,
         grouped_target_ctas=2048,
         min_slice_k=512,
         max_degree=128,
+        max_degree_by_dtype=(("fp16", atomic_rounding_degree_cap(10)),),
     ),
 }
 

@@ -650,6 +650,27 @@ def test_wmma_auto_without_a_reduction_runs_unsplit(dtype):
         resolve_conv_split_k("wgrad", p, allow_unsplit=False, **kw)
 
 
+def test_wmma_fp16_atomic_degree_is_capped_for_accuracy():
+    # gfx1250 fp16 dW, pointwise C=K=16 over a deep reduction (N*Ho*Wo =
+    # 262144) on one tile: the fill and slice terms ask for far more than the
+    # packed fp16 atomic's accuracy cap (97, see atomic_rounding_degree_cap),
+    # so the automatic atomic degree stops there. The f32 workspace reduction
+    # resolves as fp32 dW and keeps the general cap of 128.
+    p = ConvProblem(N=64, Hi=64, Wi=64, C=16, K=16, Y=1, X=1)
+    kw = {
+        "arch": "gfx1250",
+        "dtype": "fp16",
+        "tile_m": 64,
+        "tile_n": 128,
+        "tile_k": 64,
+        "block_size": 256,
+    }
+    atomic = resolve_conv_split_k("wgrad", p, reduction="atomic", **kw)
+    assert (atomic.split_k, atomic.two_stage) == (97, False)
+    ws = resolve_conv_split_k("wgrad", p, reduction="workspace", **kw)
+    assert (ws.split_k, ws.two_stage) == (128, True)
+
+
 @pytest.mark.parametrize("arch", ["gfx1151", "gfx1201"])
 def test_wmma_auto_without_float_atomics_runs_unsplit(arch):
     # A wave32 arch whose catalog has no has_global_float_atomic_add: the dW
