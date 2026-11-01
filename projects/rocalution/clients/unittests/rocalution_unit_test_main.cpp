@@ -26,6 +26,20 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
+
+// The tests compare printed numbers, and the Tensile kernel selection in rocBLAS
+// leaves std::cout in fixed notation with two digits, so every test starts with
+// the default format
+class DefaultCoutFormat : public ::testing::EmptyTestEventListener
+{
+    void OnTestStart(const ::testing::TestInfo&) override
+    {
+        std::cout.flags(std::ios_base::dec | std::ios_base::skipws);
+        std::cout.precision(6);
+        std::cout.fill(' ');
+    }
+};
 
 class RocalutionEnvironment : public ::testing::Environment
 {
@@ -67,6 +81,7 @@ int main(int argc, char** argv)
     }
 
     ::testing::AddGlobalTestEnvironment(new RocalutionEnvironment(device));
+    ::testing::UnitTest::GetInstance()->listeners().Append(new DefaultCoutFormat);
 
     return RUN_ALL_TESTS();
 }
