@@ -1679,6 +1679,71 @@ def test_run_from_cache_batch_chunks_are_balanced():
     assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (ptrs, sizes)
 
 
+def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsys):
+    """A kernarg past its packed width (a byte extent over 2^31 on an i32
+    field) skips that plan; the sweep goes on with the next one."""
+    import struct
+    from types import SimpleNamespace
+
+    _need_benchmark_direct_conv()
+    from benchmarks.common import benchmark_direct_conv as bdc
+
+    monkeypatch.setattr(dks, "launch_values", lambda st, ptrs, sizes: {"A": 0})
+
+    class Launcher:
+        def __init__(self, fits):
+            self.fits = fits
+
+        def bind(self, values, config):
+            if not self.fits:
+                raise struct.error("'i' format requires -2147483648 <= number")
+            return lambda: None
+
+    class Modules:
+        def launcher(self, *, hsaco_path, kernel_name, signature):
+            return Launcher(kernel_name != "too_big")
+
+    measured = []
+
+    class Stop:
+        def measure(self, run, **kw):
+            measured.append(run)
+            return None
+
+        def report(self, label):
+            pass
+
+    def plan(label, kernel_name):
+        step = SimpleNamespace(
+            hsaco_path=None, kernel_name=kernel_name, signature=None, grid=(1, 1, 1)
+        )
+        step.block = (64, 1, 1)
+        return SimpleNamespace(label=label, steps=(step,), zeroed=())
+
+    plans = [plan("big", "too_big"), plan("fits", "fits")]
+    results, rc = bdc._measure_plans(
+        args=SimpleNamespace(fast_rank=False, warmup=1, iters=1),
+        plans=plans,
+        modules=Modules(),
+        rt=None,
+        ptrs={},
+        sizes={},
+        inputs={},
+        out_name="dw",
+        Out_t=None,
+        ref_out=None,
+        flop=1.0,
+        bytes_xfer=1.0,
+        stop=Stop(),
+        u8=None,
+        chunks=[1],
+        per_chunk={pl.label: [pl] for pl in plans},
+    )
+    assert (results, rc) == ([], 0)
+    assert len(measured) == 1
+    assert "[skip] big: kernarg does not fit" in capsys.readouterr().out
+
+
 def test_run_from_cache_plans_each_chunk_size():
     """Each distinct chunk size is planned on its own batch; only kernels that
     serve every chunk are offered, each launch with its chunk's plan."""
