@@ -233,8 +233,8 @@ public:
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowSink;
         if(_params.sinkTensor.has_value())
         {
-            shallowSink = createShallowTensor<float>(*_params.sinkTensor,
-                                                     variantPack.at(_params.sinkTensor->uid));
+            // FLOAT in place; a BFLOAT16 or HALF sink widened exactly to FLOAT (SEM-022).
+            shallowSink = bindHostSinkAsFloat(*_params.sinkTensor, variantPack);
         }
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDropoutMask;

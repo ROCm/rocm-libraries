@@ -108,6 +108,8 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `Graph::get_name`, `get_io_data_type`, `get_compute_data_type`, `get_intermediate_data_type`.
 - `Graph::deserialize(data, enforce_precompiled)` without a handle.
 - `HIPDNN_COMPATIBILITY_CUDNN_FRONTEND` macro.
+- SDPA forward with paged K/V and a ragged Q validates with `seq_len_kv` alone; the query lengths come from Q's ragged offset. cuDNN frontend v1.24.0 requires `seq_len_q` as well (v1.25 accepts the same form as `cu_seq_len_q`). See [SEM-026](./SdpaSemanticsRegister.md#sem-026-paged-kv-under-a-ragged-q-without-seq_len_q).
+- SDPA forward with a ragged Q over non-paged K/V validates with `seq_len_kv` alone (PyTorch's varlen `seqused_k`); the query lengths come from Q's ragged offset. cuDNN frontend v1.24.0 requires `seq_len_q` as well. See [SEM-028](./SdpaSemanticsRegister.md#sem-028-ragged-q-with-seq_len_kv-alone-non-paged-kv).
 
 Code that must also compile against NVIDIA cuDNN cannot use these.
 

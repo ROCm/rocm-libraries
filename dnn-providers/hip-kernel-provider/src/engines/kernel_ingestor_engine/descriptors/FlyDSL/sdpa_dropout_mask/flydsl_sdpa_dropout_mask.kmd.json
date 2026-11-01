@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "id": "18dfab86-c8d6-5af5-a3e3-a63d1e66a241",
+  "name": "flydsl sdpa_dropout_mask variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    }
+  ]
+}

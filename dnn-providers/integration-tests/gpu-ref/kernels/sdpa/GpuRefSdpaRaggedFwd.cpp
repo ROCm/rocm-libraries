@@ -207,6 +207,13 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
         return s;
     };
 
+    // Whether the band removes key skv (the rule score() applies). A removed key's V is never
+    // read: 0 * NaN would leak whatever it holds (SEM-027).
+    auto bandRemoves = [&](long long skv) -> bool {
+        return (args.rightBound >= 0 && skv >= sq + 1 + windowOffset + args.rightBound)
+               || (args.leftBound >= 0 && skv <= sq + windowOffset - args.leftBound);
+    };
+
     // Pass 1: row max for a stable softmax.
     COMPUTE_TYPE maxVal = negInf;
     for(long long skv = 0; skv < seqKv; ++skv)
@@ -257,6 +264,10 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
     COMPUTE_TYPE weighted = static_cast<COMPUTE_TYPE>(0);
     for(long long skv = 0; skv < seqKv; ++skv)
     {
+        if(bandRemoves(skv))
+        {
+            continue;
+        }
         COMPUTE_TYPE s = score(skv);
         COMPUTE_TYPE probability = expf(s - maxVal) / sumExp;
         probability = storeSoftmaxProbability(probability);

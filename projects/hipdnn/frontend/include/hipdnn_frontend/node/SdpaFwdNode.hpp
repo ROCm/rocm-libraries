@@ -156,7 +156,8 @@ public:
         HIPDNN_CHECK_ERROR(
             validateSeqLenTensor(attributes.get_seq_len_kv(), "seq_len_kv", qDims[0]));
 
-        // Rule 4c: attention sink (cuDNN): one FLOAT logit per query head, [1, H_q, 1, 1].
+        // Rule 4c: attention sink: one logit per query head, [1, H_q, 1, 1]; FLOAT (cuDNN) or a
+        // model's BFLOAT16/HALF parameter for any Q dtype (SEM-022).
         HIPDNN_CHECK_ERROR(validateSinkToken(numHeads));
 
         // Rule 5: Optional attention mask validation
@@ -260,7 +261,10 @@ private:
         return dataType == DataType::NOT_SET ? graph_attributes.get_io_data_type() : dataType;
     }
 
-    // sink_token, when present: FLOAT [1, H_q, 1, 1] (cuDNN).
+    // sink_token, when present: [1, H_q, 1, 1] in FLOAT (cuDNN), BFLOAT16 or HALF, whatever the
+    // Q dtype. The 16-bit forms are hipDNN's superset of cuDNN for the model-dtype sink parameters
+    // that vLLM and HF keep (and the bf16 sink FlashAttention 4 takes with an fp16 Q); every
+    // engine widens the logit exactly to f32 (SdpaSemanticsRegister.md SEM-022).
     Error validateSinkToken(int64_t numHeadsQ) const
     {
         const auto sink = attributes.get_sink_token();
@@ -274,9 +278,13 @@ private:
                               ErrorCode::INVALID_VALUE,
                               "SdpaFwdNode: sink_token must have dims [1, H_q, 1, 1] with H_q="
                                   + std::to_string(numHeadsQ));
-        HIPDNN_RETURN_IF_TRUE(effectiveDataType(sink) != DataType::FLOAT,
-                              ErrorCode::INVALID_VALUE,
-                              std::string("SdpaFwdNode: sink_token must have FLOAT data type"));
+        const auto dataType = effectiveDataType(sink);
+        HIPDNN_RETURN_IF_TRUE(
+            dataType != DataType::FLOAT && dataType != DataType::BFLOAT16
+                && dataType != DataType::HALF,
+            ErrorCode::INVALID_VALUE,
+            std::string("SdpaFwdNode: sink_token must have FLOAT, BFLOAT16 or HALF "
+                        "data type"));
         return {};
     }
 
@@ -301,11 +309,23 @@ private:
         return {};
     }
 
+    // The lengths paged K/V needs: seq_len_kv, and seq_len_q unless Q has a ragged offset, whose
+    // differences are the query lengths. The ragged-Q form without seq_len_q is a vLLM extension
+    // beyond cuDNN 1.24, which needs both (cuDNN 9.25's cu_seq_len_q + seq_len_kv is the same
+    // form; SdpaSemanticsRegister.md SEM-026). Ragged Q with seq_len_q keeps cuDNN's meaning.
+    bool hasPagedKvLengths() const
+    {
+        const auto q = attributes.get_q();
+        return attributes.get_seq_len_kv()
+               && (attributes.get_seq_len_q() || (q && q->has_ragged_offset()));
+    }
+
     // Paged K/V (cuDNN): each page table is INT32 [B, 1, max_blocks_per_seq, 1] (it may be packed
     // with a ragged offset, which cuDNN 9.10.2+ accepts; an engine that cannot read a packed table
     // declines the graph), and when max_seq_len_kv is given it is exactly
     // ceil(max_seq_len_kv / block_size) wide
-    // (block_size = that side's container dim 2). Paging needs both seq_len tensors;
+    // (block_size = that side's container dim 2). Paging needs both seq_len tensors (seq_len_q
+    // may be omitted when Q is ragged, hasPagedKvLengths);
     // max_seq_len_kv without paging is rejected. K or V may be paged alone, with its own block
     // size, and an unset max_seq_len_kv is inferred by the engine (as cuDNN does).
     Error validatePagedKv(int64_t batch,
@@ -322,9 +342,10 @@ private:
                                               "paged K/V (page_table_k / page_table_v)"));
             return {};
         }
-        HIPDNN_RETURN_IF_TRUE(!attributes.get_seq_len_q() || !attributes.get_seq_len_kv(),
+        HIPDNN_RETURN_IF_TRUE(!hasPagedKvLengths(),
                               ErrorCode::ATTRIBUTE_NOT_SET,
-                              std::string("SdpaFwdNode: paged K/V needs seq_len_q and seq_len_kv"));
+                              std::string("SdpaFwdNode: paged K/V needs seq_len_kv, and seq_len_q "
+                                          "unless Q is ragged"));
         HIPDNN_RETURN_IF_TRUE(attributes.max_seq_len_kv.has_value()
                                   && attributes.max_seq_len_kv.value() <= 0,
                               ErrorCode::INVALID_VALUE,

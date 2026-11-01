@@ -136,6 +136,47 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> bindOption
     return bindShallowTensor<float>(*operand, variantPack);
 }
 
+/// Binds an SDPA attention sink [1, H, 1, 1] that lives in host memory as FLOAT. A FLOAT sink
+/// is viewed in place; a BFLOAT16 or HALF one (hipDNN's superset of cuDNN, SEM-022) is widened
+/// exactly into a dense FLOAT copy, so the reference reads the same f32 logit for the same value
+/// whatever the sink's dtype. Throws std::invalid_argument for another dtype or rank.
+inline std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>>
+    bindHostSinkAsFloat(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& sink,
+                        const std::unordered_map<int64_t, void*>& variantPack)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    if(sink.data_type == DataType::FLOAT)
+    {
+        return bindShallowTensor<float>(sink, variantPack);
+    }
+    if(sink.dims.size() != 4 || sink.strides.size() != 4
+       || (sink.data_type != DataType::BFLOAT16 && sink.data_type != DataType::HALF))
+    {
+        throw std::invalid_argument(
+            "SDPA sink must be FLOAT, BFLOAT16 or HALF [1, H, 1, 1] to be widened");
+    }
+    auto widened = std::make_unique<hipdnn_data_sdk::utilities::Tensor<float>>(sink.dims);
+    const auto widen = [&](auto typeTag) {
+        using SourceType = decltype(typeTag);
+        const hipdnn_data_sdk::utilities::ShallowTensor<SourceType> view(
+            variantPack.at(sink.uid), sink.dims, sink.strides);
+        for(int64_t h = 0; h < sink.dims[1]; ++h)
+        {
+            // bf16 and fp16 to f32 are exact.
+            widened->setHostValue(static_cast<float>(view.getHostValue(0, h, 0, 0)), 0, h, 0, 0);
+        }
+    };
+    if(sink.data_type == DataType::BFLOAT16)
+    {
+        widen(hipdnn_data_sdk::types::bfloat16{});
+    }
+    else
+    {
+        widen(hipdnn_data_sdk::types::half{});
+    }
+    return widened;
+}
+
 template <typename T>
 struct TypeTag
 {

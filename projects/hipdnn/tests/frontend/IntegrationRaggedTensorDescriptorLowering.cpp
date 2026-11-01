@@ -6,7 +6,10 @@
 #include <hip/hip_runtime.h>
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
@@ -413,3 +416,121 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, VirtualRaggedOffsetRejectedInL
     auto graph = makeBinaryPointwiseGraph(AuxWiring::VIRTUAL);
     expectLoweringRejected(*graph, _handle);
 }
+
+#ifdef HIPDNN_ENABLE_SDPA
+// The THD SDPA form as a JSON graph file carries it (RFC 0014): Q/O and the LSE packed
+// through one offset table, K/V through another, each with its token stride as its
+// multiplier, and a 4-byte-aligned LSE. Graph::deserialize() without a handle -- what
+// from_json(json) runs -- lifts the backend graph into frontend nodes, and
+// build_operation_graph() then re-lowers those nodes; every ragged link, multiplier and
+// alignment must survive both, or the engines get a dense graph with no offset tables
+// and read every sequence at the padded length.
+TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndRelower)
+{
+    constexpr int64_t K_BATCH = 3;
+    constexpr int64_t K_HEADS = 2;
+    constexpr int64_t K_SEQ = 64;
+    constexpr int64_t K_HEAD_DIM = 64;
+    constexpr int64_t K_TOKEN_STRIDE = K_HEADS * K_HEAD_DIM;
+    constexpr int64_t K_OFFSETS_Q_UID = 20;
+    constexpr int64_t K_OFFSETS_KV_UID = 21;
+    constexpr int64_t K_LSE_ALIGNMENT = 4;
+
+    auto graph = std::make_shared<TestableGraphLowering>();
+    graph->set_name("PackedSdpaLiftGraph")
+        .set_io_data_type(DataType::HALF)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+
+    auto offsets = [](int64_t uid, const std::string& name) {
+        auto t = std::make_shared<TensorAttributes>();
+        t->set_uid(uid)
+            .set_name(name)
+            .set_data_type(DataType::INT32)
+            .set_dim({K_BATCH + 1, 1, 1, 1})
+            .set_stride({1, 1, 1, 1})
+            .set_alignment(4);
+        return t;
+    };
+    const auto offsetsQ = offsets(K_OFFSETS_Q_UID, "OffsetsQ");
+    const auto offsetsKv = offsets(K_OFFSETS_KV_UID, "OffsetsKv");
+    const std::vector<int64_t> dims{K_BATCH, K_HEADS, K_SEQ, K_HEAD_DIM};
+    const std::vector<int64_t> strides{K_SEQ * K_TOKEN_STRIDE, K_HEAD_DIM, K_TOKEN_STRIDE, 1};
+    auto packed = [&](int64_t uid, const std::string& name, const auto& table) {
+        auto t = std::make_shared<TensorAttributes>();
+        t->set_uid(uid)
+            .set_name(name)
+            .set_data_type(DataType::HALF)
+            .set_dim(dims)
+            .set_stride(strides);
+        t->set_ragged_offset(table).set_ragged_offset_multiplier(K_TOKEN_STRIDE);
+        return t;
+    };
+    auto q = packed(1, "Q", offsetsQ);
+    auto k = packed(2, "K", offsetsKv);
+    auto v = packed(3, "V", offsetsKv);
+
+    SdpaAttributes attributes;
+    attributes.set_name("sdpa").set_attn_scale(0.125F).set_generate_stats(true);
+    auto outputs = graph->sdpa(q, k, v, attributes);
+    outputs[0]->set_uid(4).set_name("O").set_output(true).set_data_type(DataType::HALF);
+    outputs[0]->set_dim(dims).set_stride(strides);
+    outputs[0]->set_ragged_offset(offsetsQ).set_ragged_offset_multiplier(K_TOKEN_STRIDE);
+    outputs[1]->set_uid(5).set_name("LSE").set_output(true).set_data_type(DataType::FLOAT);
+    outputs[1]
+        ->set_dim({K_BATCH, K_HEADS, K_SEQ, 1})
+        .set_stride({K_SEQ * K_HEADS, 1, K_HEADS, 1})
+        .set_alignment(K_LSE_ALIGNMENT);
+    outputs[1]->set_ragged_offset(offsetsQ).set_ragged_offset_multiplier(K_HEADS);
+
+    ASSERT_EQ(graph->validate().code, ErrorCode::OK);
+    std::string originalJson;
+    auto result = graph->serialize(originalJson);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // The dnn-benchmarking / Python from_json(json) path: structure-only deserialize, then
+    // build_operation_graph(handle), which re-lowers from the lifted nodes.
+    auto lifted = std::make_shared<TestableGraphLowering>();
+    result = lifted->deserialize(originalJson);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_EQ(lifted->validate().code, ErrorCode::OK);
+    result = lifted->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    std::string reloweredJson;
+    result = lifted->serialize(reloweredJson);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto byUid = [](const std::string& json) {
+        std::map<int64_t, nlohmann::json> tensors;
+        const auto parsed = nlohmann::json::parse(json);
+        for(const auto& t : parsed.at("tensors"))
+        {
+            tensors[t.at("uid").get<int64_t>()] = t;
+        }
+        return tensors;
+    };
+    const auto before = byUid(originalJson);
+    const auto after = byUid(reloweredJson);
+    ASSERT_EQ(before.size(), 7u) << "Q, K, V, O, LSE and the two offset tables";
+    ASSERT_EQ(after.size(), before.size()) << "an offset table was dropped: " << reloweredJson;
+    for(const auto& [uid, tensor] : before)
+    {
+        ASSERT_EQ(after.count(uid), 1u) << "tensor " << uid << " dropped";
+        for(const char* field : {"ragged_offset_tensor_uid",
+                                 "ragged_offset_multiplier",
+                                 "alignment",
+                                 "dims",
+                                 "strides",
+                                 "data_type"})
+        {
+            const auto want = tensor.contains(field) ? tensor.at(field) : nlohmann::json();
+            const auto got
+                = after.at(uid).contains(field) ? after.at(uid).at(field) : nlohmann::json();
+            EXPECT_EQ(got, want) << "tensor " << uid << " field " << field;
+        }
+    }
+    EXPECT_EQ(after.at(5).at("ragged_offset_tensor_uid").get<int64_t>(), K_OFFSETS_Q_UID);
+    EXPECT_EQ(after.at(2).at("ragged_offset_tensor_uid").get<int64_t>(), K_OFFSETS_KV_UID);
+    EXPECT_EQ(after.at(5).at("alignment").get<int64_t>(), K_LSE_ALIGNMENT);
+}
+#endif // HIPDNN_ENABLE_SDPA

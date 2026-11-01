@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "4a92101f-c468-5623-a112-54f1907ed9b9",
+  "name": "flydsl sdpa_head_pad selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_sdpa_head_pad.score"
+  }
+}

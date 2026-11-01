@@ -208,6 +208,12 @@ public:
                         auto acc = static_cast<ComputeDataType>(0);
                         for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
+                            // A key the band removes is never read: 0 * NaN would leak
+                            // whatever it holds (SdpaSemanticsRegister.md SEM-027).
+                            if(isMasked(sq, skv, leftBound, rightBound, windowOffset))
+                            {
+                                continue;
+                            }
                             const auto vv = static_cast<ComputeDataType>(
                                 v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dvIdx}));
                             acc += probs[static_cast<size_t>(skv)] * vv;

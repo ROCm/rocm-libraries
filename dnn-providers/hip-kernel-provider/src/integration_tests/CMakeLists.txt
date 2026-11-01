@@ -92,6 +92,14 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
     endif()
+    # The FlyDSL SDPA engines end to end through the frontend Graph API (Graph::sdpa needs
+    # HIPDNN_ENABLE_SDPA; the source compiles empty without it).
+    if(HIPKERNELPROVIDER_ENABLE_FLYDSL AND HIPDNN_ENABLE_SDPA)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuFlydslSdpaFrontend.cpp
+            kernel_ingestor_engine/IntegrationGpuFlydslSdpaFrontendFeatures.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp

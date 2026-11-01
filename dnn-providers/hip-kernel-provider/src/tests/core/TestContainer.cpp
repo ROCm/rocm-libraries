@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <iostream>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -12,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include "core/Container.hpp"
+#include "core/GraphSchema.hpp"
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
@@ -31,6 +34,7 @@
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 #ifdef HIPDNN_ENGINE_FLYDSL
 #include "tests/engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
 #endif
 #endif
 
@@ -364,6 +368,43 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
+// The provider's schema guard's opt-in list (GraphSchema.hpp): the six FlyDSL SDPA engines claim
+// graph schema 1.4.0, the SDK's newest (their UEDs' sdk_version, their matchers reviewed against
+// every field up to it); every other engine stays at or below the 1.2.0 the provider declared
+// before, so ragged, aligned and multiplier graphs never reach it. Opting an engine in is an edit
+// here, reviewed with that engine's matchers.
+TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
+{
+    const std::map<std::string, std::string> optedIn{
+        {"hipkernel:flydsl_sdpa_rdna", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_rdna_decode", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_aiw", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_cdna", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_cdna_dualwave", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_cdna_decode", "1.4.0"}};
+    Container container;
+    auto& manager = container.getEngineManager();
+    const auto baseline = providerBaselineGraphSchema();
+    for(const auto engineId : manager.getAllEngineIds())
+    {
+        const char* name = nullptr;
+        ASSERT_EQ(Container::getEngineName(engineId, &name), HIPDNN_PLUGIN_STATUS_SUCCESS);
+        const auto declared = manager.maxGraphSchema(engineId);
+        std::cout << "[ schema   ] " << name << " " << declared.str() << "\n";
+        const auto opted = optedIn.find(name);
+        if(opted != optedIn.end())
+        {
+            EXPECT_EQ(declared.str(), opted->second) << name;
+        }
+        else
+        {
+            EXPECT_FALSE(baseline < declared)
+                << name << " claims graph schema " << declared.str()
+                << " past the provider baseline without being on the opt-in list";
+        }
+    }
+}
+
 TEST(TestContainer, GetEngineManagerReturnsValidReference)
 {
     Container container;
@@ -485,3 +526,38 @@ TEST(TestContainer, GetAllEngineIds)
             << "engine '" << name << "' is missing from the engine manager";
     }
 }
+
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
+// The provider at engine plugin API 1.4.0 with its schema guard (core/GraphSchema.hpp): a packed
+// (THD) SDPA graph, schema 1.4.0 through its ragged offset multipliers, reaches the FlyDSL SDPA
+// engines, which opted in, and no other engine claims it.
+TEST(TestContainer, RoutesAPackedSdpaGraphOnlyToTheFlydslEngines)
+{
+    SKIP_IF_NO_DEVICES();
+    using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
+    SdpaGraphSpec spec;
+    setPacked(spec, {128, 37}, {100, 128});
+    const auto buffer = buildFlydslSdpaRdnaGraph(spec);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        buffer.GetBufferPointer(), buffer.GetSize());
+    ASSERT_EQ(graphSchemaFloor(graph).str(), "1.4.0");
+    Handle handle;
+    Container container;
+    const auto applicable = container.getEngineManager().getApplicableEngineIds(handle, graph);
+    bool rdna = false;
+    for(const auto engineId : applicable)
+    {
+        const char* name = nullptr;
+        ASSERT_EQ(Container::getEngineName(engineId, &name), HIPDNN_PLUGIN_STATUS_SUCCESS);
+        EXPECT_EQ(std::string_view(name).rfind("hipkernel:flydsl_sdpa", 0), 0U)
+            << name << " claims a graph past its schema";
+        rdna = rdna || std::string_view(name) == FLYDSL_SDPA_RDNA.engineName;
+    }
+    // The RDNA prefill objects serve packed sequences on every gfx11 device this build ships.
+    if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) == 0
+       && findLoadedSet(FLYDSL_SDPA_RDNA.engineName) != nullptr)
+    {
+        EXPECT_TRUE(rdna) << "the RDNA prefill engine declined a packed graph it serves";
+    }
+}
+#endif

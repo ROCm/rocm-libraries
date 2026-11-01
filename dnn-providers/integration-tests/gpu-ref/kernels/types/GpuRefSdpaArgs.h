@@ -18,6 +18,11 @@ struct SdpaStrides
 };
 // NOLINTEND(modernize-avoid-c-arrays)
 
+// --- Attention-sink dtype (SdpaFwdArgs::sinkType) ---
+constexpr int SDPA_SINK_FLOAT = 0;
+constexpr int SDPA_SINK_BFLOAT16 = 1;
+constexpr int SDPA_SINK_HALF = 2;
+
 // --- Score pipeline parameters shared by the forward and backward kernels ---
 // GpuRefSdpaCommon.hpp applies them: (q . k) * scale, softcap, + bias, + ALiBi, then the band.
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes,
@@ -82,9 +87,12 @@ struct SdpaFwdArgs
     const int* pageTableV;
     long long pageTableKStrB, pageTableKStrT, blockSizeK;
     long long pageTableVStrB, pageTableVStrT, blockSizeV;
-    // Optional attention sink (cuDNN): one fp32 logit per query head, read at h * sinkStride.
-    const float* sink;
+    // Optional attention sink: one logit per query head, read at h * sinkStride (elements) in
+    // sinkType's dtype (SDPA_SINK_*: FLOAT as cuDNN, or a model's BFLOAT16/HALF parameter for
+    // any Q dtype, SEM-022) and widened exactly to float.
+    const void* sink;
     long long sinkStride;
+    int sinkType;
     // Optional explicit-mask dropout (cuDNN custom dropout): FLOAT mask [B|1, H|1, Sq, Skv]
     // (a size-1 dim has stride 0 here) and scale; O uses P * dropoutScale * mask.
     const float* dropoutMask;

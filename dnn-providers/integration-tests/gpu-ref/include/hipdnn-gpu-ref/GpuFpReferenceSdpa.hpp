@@ -79,6 +79,15 @@ struct SdpaPagedSide
     int64_t blockSize = 0;
 };
 
+/// The attention sink's dtype (the kernel's SDPA_SINK_* values): FLOAT as cuDNN, or a model's
+/// BFLOAT16 / HALF sink parameter for any Q dtype (SEM-022). The kernel widens it exactly.
+enum class GpuSdpaSinkType : int
+{
+    FLOAT = 0,
+    BFLOAT16 = 1,
+    HALF = 2,
+};
+
 /// Named options for GpuFpReferenceSdpa::fprop, mirroring the CPU reference's SdpaFwdOptions (same
 /// fields and setters) plus the GPU-only probability mode and paged K/V. Every field defaults to
 /// "feature off". Pointers are non-const because uploading a tensor needs deviceData().
@@ -97,7 +106,10 @@ struct GpuSdpaFwdOptions
     hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableK = nullptr;
     hipdnn_data_sdk::utilities::TensorBase<int32_t>* pageTableV = nullptr;
     int64_t pagedMaxSeqKv = 0;
-    hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr;
+    /// Attention sink [1, H, 1, 1]: FLOAT (cuDNN), or a BFLOAT16 / HALF model parameter for any
+    /// Q dtype (SEM-022); sinkType names its dtype. Widened exactly to float.
+    hipdnn_data_sdk::utilities::ITensor* sinkToken = nullptr;
+    GpuSdpaSinkType sinkType = GpuSdpaSinkType::FLOAT;
     hipdnn_data_sdk::utilities::TensorBase<float>* dropoutMask = nullptr;
     std::optional<float> dropoutScale;
     std::optional<float> softcap;
@@ -160,6 +172,21 @@ struct GpuSdpaFwdOptions
     GpuSdpaFwdOptions& setSink(hipdnn_data_sdk::utilities::TensorBase<float>* value)
     {
         sinkToken = value;
+        sinkType = GpuSdpaSinkType::FLOAT;
+        return *this;
+    }
+    GpuSdpaFwdOptions&
+        setSink(hipdnn_data_sdk::utilities::TensorBase<hipdnn_data_sdk::types::bfloat16>* value)
+    {
+        sinkToken = value;
+        sinkType = GpuSdpaSinkType::BFLOAT16;
+        return *this;
+    }
+    GpuSdpaFwdOptions&
+        setSink(hipdnn_data_sdk::utilities::TensorBase<hipdnn_data_sdk::types::half>* value)
+    {
+        sinkToken = value;
+        sinkType = GpuSdpaSinkType::HALF;
         return *this;
     }
     GpuSdpaFwdOptions& setDropout(hipdnn_data_sdk::utilities::TensorBase<float>* mask,
@@ -517,8 +544,9 @@ public:
             seqLenKvStride = options.seqLenKv->strides()[0];
         }
 
-        // Attention sink (cuDNN): FLOAT [1, H, 1, 1], one logit per query head.
-        const float* sinkPtr = nullptr;
+        // Attention sink: [1, H, 1, 1], one logit per query head, FLOAT or a 16-bit model
+        // parameter (SEM-022); the kernel widens it exactly.
+        const void* sinkPtr = nullptr;
         int64_t sinkStride = 0;
         if(options.sinkToken != nullptr)
         {
@@ -527,7 +555,7 @@ public:
             {
                 throw std::invalid_argument("GpuFpReferenceSdpa: sinkToken must be [1, H, 1, 1]");
             }
-            sinkPtr = static_cast<const float*>(options.sinkToken->memory().deviceData());
+            sinkPtr = options.sinkToken->rawDeviceData();
             sinkStride = options.sinkToken->strides()[1];
         }
 
@@ -566,6 +594,7 @@ public:
             pagedVSide,
             sinkPtr,
             sinkStride,
+            options.sinkType,
             dropoutMaskPointer(options.dropoutMask, batch, numHeads, seqQ, seqKv),
             dropoutMaskStrides(options.dropoutMask),
             options.dropoutScale.value_or(1.0F),
@@ -957,8 +986,9 @@ private:
                               int64_t seqLenKvStride = 0,
                               const SdpaPagedSide& pagedK = {},
                               const SdpaPagedSide& pagedV = {},
-                              const float* sinkPtr = nullptr,
+                              const void* sinkPtr = nullptr,
                               int64_t sinkStride = 0,
+                              GpuSdpaSinkType sinkType = GpuSdpaSinkType::FLOAT,
                               const float* dropoutMaskPtr = nullptr,
                               const std::vector<int64_t>& dropoutMaskStrides = {},
                               float dropoutScale = 1.0F,

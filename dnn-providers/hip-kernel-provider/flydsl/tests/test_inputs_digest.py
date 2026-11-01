@@ -97,16 +97,24 @@ def test_generators_read_no_data_file_the_digest_misses() -> None:
 @pytest.mark.parametrize("op", sorted(OP_KERNEL_DIRS))
 def test_an_op_imports_kernels_only_from_its_declared_directories(op: str) -> None:
     """Kernel packages are digested by directory, so a kernel import from a directory
-    the op does not declare would be an input the digest misses."""
+    the op does not declare would be an input the digest misses. A row may also declare
+    one file of another directory (``dir/module.py``); then that module, and only it, may
+    be imported from there."""
     allowed = set(OP_KERNEL_DIRS[op]) | SHARED_KERNEL_PACKAGES
+    files = {entry for entry in OP_KERNEL_DIRS[op] if entry.endswith(".py")}
     sources = list(_manifest.generator_modules(FLYDSL, op))
     for directory in OP_KERNEL_DIRS[op]:
-        sources += sorted((KERNELS / directory).rglob("*.py"))
+        if directory in files:
+            sources.append(KERNELS / directory)
+        else:
+            sources += sorted((KERNELS / directory).rglob("*.py"))
     for path in sources:
         for level, module, names in _manifest._imports(path):
             if level != 0 or not (module == "kernels" or module.startswith("kernels.")):
                 continue
             parts = module.split(".")
+            if len(parts) == 3 and f"{parts[1]}/{parts[2]}.py" in files:
+                continue
             packages = {parts[1]} if len(parts) > 1 else set(names)
             assert packages <= allowed, (
                 f"{path.relative_to(FLYDSL)} imports kernels.{sorted(packages - allowed)} "
@@ -183,7 +191,30 @@ def test_a_new_generator_module_changes_only_the_ops_that_import_it(
         ("generators/_codeobject.py", set(OP_KERNEL_DIRS)),
         ("generators/_ops.py", set()),
         ("kernels_src/kernels/norm/rmsnorm_kernel.py", {"rmsnorm", "rmsnorm_bwd"}),
-        ("kernels_src/kernels/attention_rdna4/philox.py", {"sdpa_aiw"}),
+        # The RDNA and CDNA kernels and the RNG dump's mask writer import the aiw directory's
+        # Philox by file (decision Q7: one source for the dropout stream).
+        (
+            "kernels_src/kernels/attention_rdna4/philox.py",
+            {
+                "sdpa_aiw",
+                "sdpa_rdna",
+                "sdpa_rdna_decode",
+                "sdpa_cdna",
+                "sdpa_cdna_dualwave",
+                "sdpa_cdna_decode",
+                "sdpa_dropout_mask",
+            },
+        ),
+        # The mask writer's own directory restamps it alone.
+        (
+            "kernels_src/kernels/dropout_mask/sdpa_dropout_mask.py",
+            {"sdpa_dropout_mask"},
+        ),
+        # The head-dim padding copy's directory restamps it alone.
+        (
+            "kernels_src/kernels/head_pad/sdpa_head_pad.py",
+            {"sdpa_head_pad"},
+        ),
         ("kernels_src/kernels/common/kernels_common.py", set(OP_KERNEL_DIRS)),
     ],
 )

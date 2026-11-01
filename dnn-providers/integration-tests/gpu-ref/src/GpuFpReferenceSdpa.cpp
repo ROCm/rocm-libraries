@@ -22,6 +22,11 @@ namespace
 // Shared argument and stride structs — single definition used by both host and device (HipRTC).
 #include <GpuRefSdpaArgs.h> // NOLINT(misc-include-cleaner)
 
+static_assert(static_cast<int>(GpuSdpaSinkType::FLOAT) == SDPA_SINK_FLOAT
+                  && static_cast<int>(GpuSdpaSinkType::BFLOAT16) == SDPA_SINK_BFLOAT16
+                  && static_cast<int>(GpuSdpaSinkType::HALF) == SDPA_SINK_HALF,
+              "GpuSdpaSinkType must match the kernel's SDPA_SINK_* values");
+
 // RAII fp32 device scratch for the backward row stats.
 struct DeviceScratch
 {
@@ -92,8 +97,9 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
                                        int64_t seqLenKvStride,
                                        const SdpaPagedSide& pagedK,
                                        const SdpaPagedSide& pagedV,
-                                       const float* sinkPtr,
+                                       const void* sinkPtr,
                                        int64_t sinkStride,
+                                       GpuSdpaSinkType sinkType,
                                        const float* dropoutMaskPtr,
                                        const std::vector<int64_t>& dropoutMaskStrides,
                                        float dropoutScale,
@@ -154,6 +160,7 @@ void GpuFpReferenceSdpa::launchSdpaFwd(const void* qPtr,
     args.blockSizeV = static_cast<long long>(pagedV.blockSize);
     args.sink = sinkPtr;
     args.sinkStride = static_cast<long long>(sinkStride);
+    args.sinkType = static_cast<int>(sinkType);
     args.dropoutMask = dropoutMaskPtr;
     args.dropoutMaskStr = toSdpaStrides(dropoutMaskStrides);
     args.dropoutScale = dropoutScale;

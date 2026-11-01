@@ -828,12 +828,41 @@ TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
     }
     EXPECT_EQ(validate({8}, DataType::FLOAT, DataType::HALF), error_code_t::INVALID_VALUE)
         << "rank 4";
-    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::HALF, DataType::HALF), error_code_t::INVALID_VALUE)
-        << "FLOAT only, as cuDNN";
-    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::BFLOAT16),
+    EXPECT_EQ(validate({8}, DataType::BFLOAT16, DataType::BFLOAT16), error_code_t::INVALID_VALUE)
+        << "rank 4 for a 16-bit sink too";
+    EXPECT_EQ(validate({1, 2, 1, 1}, DataType::HALF, DataType::HALF), error_code_t::INVALID_VALUE)
+        << "one 16-bit logit per query head";
+    // FLOAT (cuDNN) or a model's BFLOAT16/HALF parameter, whatever the io dtype (SEM-022): the
+    // FLOAT sink with a 16-bit Q, the Q-dtype sink, and FlashAttention 4's bf16 sink with an
+    // fp16 Q (and the mirror case).
+    for(const auto io : {DataType::HALF, DataType::BFLOAT16, DataType::FLOAT})
+    {
+        for(const auto type : {DataType::FLOAT, DataType::BFLOAT16, DataType::HALF})
+        {
+            EXPECT_EQ(validate({1, 8, 1, 1}, type, io), error_code_t::OK)
+                << "sink " << static_cast<int>(type) << " with io " << static_cast<int>(io);
+        }
+        for(const auto type : {DataType::DOUBLE,
+                               DataType::FP8_E4M3,
+                               DataType::FP8_E5M2,
+                               DataType::INT32,
+                               DataType::INT8,
+                               DataType::UINT8})
+        {
+            EXPECT_EQ(validate({1, 8, 1, 1}, type, io), error_code_t::INVALID_VALUE)
+                << "no model stores a sink as " << static_cast<int>(type)
+                << " (DOUBLE would be narrowed)";
+        }
+    }
+    // An unset dtype becomes the io type: accepted for the three sink dtypes, rejected for FP8.
+    for(const auto io : {DataType::FLOAT, DataType::BFLOAT16, DataType::HALF})
+    {
+        EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, io), error_code_t::OK)
+            << "an unset dtype becomes the io type " << static_cast<int>(io);
+    }
+    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::FP8_E4M3),
               error_code_t::INVALID_VALUE)
-        << "an unset dtype becomes the io type";
-    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::FLOAT), error_code_t::OK);
+        << "an unset dtype becomes the FP8 io type";
 }
 
 TEST(TestSdpaFwdNode, GetNodeTypeReturnsSdpaFwd)

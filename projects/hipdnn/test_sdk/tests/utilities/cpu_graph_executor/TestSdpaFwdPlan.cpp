@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -1173,8 +1174,9 @@ TEST(TestSdpaFwdPlanBand, LeftBoundZeroIsRejected)
     EXPECT_THROW(extract(-2), std::invalid_argument);
 }
 
-// Attention sink: FLOAT [1, H, 1, 1] (cuDNN). The raw graph has H = 2.
-TEST(TestSdpaFwdPlanSink, ApplicabilityFollowsCudnnShape)
+// Attention sink: [1, H, 1, 1] (cuDNN's shape) in FLOAT (cuDNN's dtype), BFLOAT16 or HALF
+// (hipDNN's superset, SEM-022), whatever the Q dtype (FLOAT here). The raw graph has H = 2.
+TEST(TestSdpaFwdPlanSink, ApplicabilityFollowsTheSinkContract)
 {
     const auto applicable = [](DataType type, const std::vector<int64_t>& dims) {
         SdpaAttributesT attrs;
@@ -1184,10 +1186,134 @@ TEST(TestSdpaFwdPlanSink, ApplicabilityFollowsCudnnShape)
         CpuReferenceGraphExecutor executor;
         return executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     };
-    EXPECT_TRUE(applicable(DataType::FLOAT, {1, 2, 1, 1}));
-    EXPECT_FALSE(applicable(DataType::HALF, {1, 2, 1, 1}));
-    EXPECT_FALSE(applicable(DataType::FLOAT, {1, 1, 1, 1}));
-    EXPECT_FALSE(applicable(DataType::FLOAT, {2}));
+    for(const auto type : {DataType::FLOAT, DataType::BFLOAT16, DataType::HALF})
+    {
+        EXPECT_TRUE(applicable(type, {1, 2, 1, 1})) << EnumNameDataType(type);
+        EXPECT_FALSE(applicable(type, {1, 1, 1, 1})) << EnumNameDataType(type);
+        EXPECT_FALSE(applicable(type, {2})) << EnumNameDataType(type);
+    }
+    for(const auto type : {DataType::DOUBLE, DataType::FP8_E4M3, DataType::INT32})
+    {
+        EXPECT_FALSE(applicable(type, {1, 2, 1, 1})) << EnumNameDataType(type);
+    }
+}
+
+// A BFLOAT16 or HALF sink is widened exactly: the executor's O and LSE equal, bit for bit, those
+// of the FLOAT sink holding the same values (SEM-022), on rows with keys and on rows no key
+// reaches (a padded graph with no keys: LSE = the sink). Values: one exactly representable in
+// both 16-bit dtypes, one only in HALF (bf16 rounds it), a large one, and -inf (no sink for that
+// head).
+TEST(TestSdpaFwdPlanSink, SixteenBitSinksEqualTheFloatSinkBitForBit)
+{
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    Tensor<float> q(dims);
+    Tensor<float> k(dims);
+    Tensor<float> v(dims);
+    q.fillWithRandomValues(-1.0F, 1.0F, 41);
+    k.fillWithRandomValues(-1.0F, 1.0F, 42);
+    v.fillWithRandomValues(-1.0F, 1.0F, 43);
+    const auto run = [&](DataType sinkType,
+                         void* sinkData,
+                         Tensor<float>& o,
+                         Tensor<float>& lse,
+                         int32_t keys) {
+        SdpaAttributesT attrs;
+        attrs.sink_token_tensor_uid = 10;
+        attrs.stats_tensor_uid = 11;
+        attrs.generate_stats = true;
+        attrs.padding_mask = true;
+        auto graphBuilder = makeRawSdpaFwdGraph(attrs,
+                                                std::nullopt,
+                                                RawSeqLenSpec{DataType::INT32, {1, 1, 1, 1}},
+                                                RawSinkSpec{sinkType, {1, 2, 1, 1}},
+                                                {{11, "Stats", DataType::FLOAT, {1, 2, 4, 1}}});
+        Tensor<int32_t> seqLenQ({1, 1, 1, 1});
+        Tensor<int32_t> seqLenKv({1, 1, 1, 1});
+        seqLenQ.fillWithValue(4);
+        seqLenKv.fillWithValue(keys);
+        CpuReferenceGraphExecutor executor;
+        ASSERT_TRUE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+        o.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+        lse.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+        const std::unordered_map<int64_t, void*> variantPack = {{1, q.memory().hostData()},
+                                                                {2, k.memory().hostData()},
+                                                                {3, v.memory().hostData()},
+                                                                {4, o.memory().hostData()},
+                                                                {6, seqLenQ.memory().hostData()},
+                                                                {7, seqLenKv.memory().hostData()},
+                                                                {10, sinkData},
+                                                                {11, lse.memory().hostData()}};
+        executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), variantPack);
+    };
+    const auto bitsEqual = [](Tensor<float>& a, Tensor<float>& b) {
+        const auto* x = a.memory().hostData();
+        const auto* y = b.memory().hostData();
+        for(size_t i = 0; i < a.elementCount(); ++i)
+        {
+            uint32_t xBits = 0;
+            uint32_t yBits = 0;
+            std::memcpy(&xBits, &x[i], sizeof(xBits));
+            std::memcpy(&yBits, &y[i], sizeof(yBits));
+            if(xBits != yBits)
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+    // {0.75, 0.0009765625 + 2^-20}: the second is exact in HALF (2^-10 + 2^-20 is 11 bits) but
+    // not in bf16, so each 16-bit run takes its own dtype's value. {300, -inf}: large, and no sink.
+    for(const auto& values : {std::vector<float>{0.75F, 0.0009765625F + 9.5367431640625e-07F},
+                              std::vector<float>{300.0F, -std::numeric_limits<float>::infinity()}})
+    {
+        // Four keys, then none: every row keyless.
+        for(const int32_t keys : {4, 0})
+        {
+            for(const auto sinkType : {DataType::BFLOAT16, DataType::HALF})
+            {
+                SCOPED_TRACE(std::string(EnumNameDataType(sinkType)) + ", values "
+                             + std::to_string(values[0]) + ", keys " + std::to_string(keys));
+                Tensor<hipdnn_data_sdk::types::bfloat16> sinkBf16({1, 2, 1, 1});
+                Tensor<hipdnn_data_sdk::types::half> sinkHalf({1, 2, 1, 1});
+                Tensor<float> sinkFloat({1, 2, 1, 1});
+                for(int64_t h = 0; h < 2; ++h)
+                {
+                    const auto value = values[static_cast<size_t>(h)];
+                    sinkBf16.setHostValue(hipdnn_data_sdk::types::bfloat16(value), 0, h, 0, 0);
+                    sinkHalf.setHostValue(hipdnn_data_sdk::types::half(value), 0, h, 0, 0);
+                    // The FLOAT sink holds the 16-bit sink's value, widened by hand.
+                    sinkFloat.setHostValue(
+                        sinkType == DataType::BFLOAT16
+                            ? static_cast<float>(sinkBf16.getHostValue(0, h, 0, 0))
+                            : static_cast<float>(sinkHalf.getHostValue(0, h, 0, 0)),
+                        0,
+                        h,
+                        0,
+                        0);
+                }
+                Tensor<float> o16(dims);
+                Tensor<float> lse16({1, 2, 4, 1});
+                Tensor<float> o32(dims);
+                Tensor<float> lse32({1, 2, 4, 1});
+                run(sinkType,
+                    sinkType == DataType::BFLOAT16
+                        ? sinkBf16.memory().hostData()
+                        : static_cast<void*>(sinkHalf.memory().hostData()),
+                    o16,
+                    lse16,
+                    keys);
+                run(DataType::FLOAT, sinkFloat.memory().hostData(), o32, lse32, keys);
+                EXPECT_TRUE(bitsEqual(o16, o32));
+                EXPECT_TRUE(bitsEqual(lse16, lse32));
+                if(keys == 0 && std::isfinite(values[0]))
+                {
+                    // No key: head 0's LSE is the sink, O is 0.
+                    EXPECT_EQ(lse16.getHostValue(0, 0, 0, 0), sinkFloat.getHostValue(0, 0, 0, 0));
+                    EXPECT_EQ(o16.getHostValue(0, 0, 0, 0), 0.0F);
+                }
+            }
+        }
+    }
 }
 
 // Dropout: cuDNN's explicit-mask form (FLOAT mask [B|1, H|1, Sq, Skv] + one-element FLOAT

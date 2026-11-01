@@ -32,6 +32,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -1929,6 +1930,99 @@ INSTANTIATE_TEST_SUITE_P(,
 // Attention sink: GPU reference vs CPU reference, with GQA, padding, and a row
 // whose keys are all masked by the bias (O = 0, LSE = sink).
 // ============================================================================
+
+// A BFLOAT16 or HALF sink (hipDNN's superset of cuDNN, SEM-022), with bf16 Q/K/V, is widened
+// exactly in the kernel: O and LSE equal, bit for bit, those of the FLOAT sink holding the same
+// values, including a row the bias leaves keyless (LSE = the sink) and a head whose sink is -inf.
+TEST(TestGpuSdpaFwdSinkBfp16, SixteenBitSinksEqualTheFloatSinkBitForBit)
+{
+    SKIP_IF_NO_DEVICES();
+    constexpr int64_t H = 4;
+    constexpr int64_t SQ = 6;
+    constexpr int64_t SKV = 9;
+    constexpr int64_t D = 16;
+    const float negInf = -std::numeric_limits<float>::infinity();
+
+    Tensor<BFloat16Type> q({1, H, SQ, D});
+    Tensor<BFloat16Type> k({1, H, SKV, D});
+    Tensor<BFloat16Type> v({1, H, SKV, D});
+    Tensor<float> bias({SQ, SKV});
+    q.fillWithRandomValues(BFloat16Type(-1.0f), BFloat16Type(1.0f), SEED_Q);
+    k.fillWithRandomValues(BFloat16Type(-1.0f), BFloat16Type(1.0f), SEED_K);
+    v.fillWithRandomValues(BFloat16Type(-1.0f), BFloat16Type(1.0f), SEED_K + 1);
+    bias.fillWithRandomValues(-1.0f, 1.0f, SEED_K + 2);
+    for(int64_t j = 0; j < SKV; ++j)
+    {
+        bias.setHostValue(negInf, 1, j); // query row 1 has no live key
+    }
+    // 2^-10 + 2^-20 is exact in HALF but not in bf16; 300 is large; -inf is no sink.
+    const std::array<float, H> values{0.75f, 0.0009765625f + 9.5367431640625e-07f, 300.0f, negInf};
+
+    const auto floatBits = [](float value) {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+    const auto run = [&](auto& sink, Tensor<BFloat16Type>& o, Tensor<float>& lse) {
+        o.fillWithValue(BFloat16Type(std::numeric_limits<float>::quiet_NaN()));
+        lse.fillWithValue(std::numeric_limits<float>::quiet_NaN());
+        GpuFpReferenceSdpa::fprop(q,
+                                  k,
+                                  v,
+                                  o,
+                                  GpuSdpaFwdOptions<float>{}
+                                      .setScale(0.25f)
+                                      .setMask(static_cast<TensorBase<float>*>(&bias))
+                                      .setSink(&sink)
+                                      .setLse(&lse));
+        o.memory().hostData();
+        lse.memory().hostData();
+    };
+    const auto runSixteenBit = [&](auto sinkTag) {
+        using SinkType = decltype(sinkTag);
+        Tensor<SinkType> sink16({1, H, 1, 1});
+        Tensor<float> sink32({1, H, 1, 1});
+        for(int64_t h = 0; h < H; ++h)
+        {
+            sink16.setHostValue(SinkType(values[static_cast<size_t>(h)]), 0, h, 0, 0);
+            sink32.setHostValue(static_cast<float>(sink16.getHostValue(0, h, 0, 0)), 0, h, 0, 0);
+        }
+        Tensor<BFloat16Type> o16({1, H, SQ, D});
+        Tensor<BFloat16Type> o32({1, H, SQ, D});
+        Tensor<float> lse16({1, H, SQ});
+        Tensor<float> lse32({1, H, SQ});
+        run(sink16, o16, lse16);
+        run(sink32, o32, lse32);
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t s = 0; s < SQ; ++s)
+            {
+                const float a = lse16.getHostValue(0, h, s);
+                const float b = lse32.getHostValue(0, h, s);
+                EXPECT_EQ(floatBits(a), floatBits(b))
+                    << "LSE h=" << h << " s=" << s << ": " << a << " vs " << b;
+                for(int64_t d = 0; d < D; ++d)
+                {
+                    EXPECT_EQ(o16.getHostValue(0, h, s, d).data, o32.getHostValue(0, h, s, d).data)
+                        << "O h=" << h << " s=" << s << " d=" << d;
+                }
+            }
+            if(h < 3)
+            {
+                // Row 1 has no live key: its LSE is the sink (widened), O is 0.
+                EXPECT_EQ(lse16.getHostValue(0, h, 1), sink32.getHostValue(0, h, 0, 0));
+            }
+        }
+    };
+    {
+        SCOPED_TRACE("BFLOAT16 sink");
+        runSixteenBit(BFloat16Type{});
+    }
+    {
+        SCOPED_TRACE("HALF sink, bf16 Q/K/V");
+        runSixteenBit(HalfType{});
+    }
+}
 
 TEST(TestGpuSdpaFwdSinkFp32, MatchesCpuReference)
 {

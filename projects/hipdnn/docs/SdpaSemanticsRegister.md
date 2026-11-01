@@ -255,6 +255,13 @@ batch when `seq_len_q/kv` are set).
   support RNG_DUMP. Without RNG_DUMP the references decline (no exact oracle). The integration harness checks the
   dumped mask (values in {0, 1}, keep rate within a 6-sigma binomial bound of `1−p`), copies it into the reference
   run and does not compare `rng_dump` itself (`harness/bundle/RngDumpHandoff.hpp`).
+- **Probability 0 (hipDNN reference choice):** a forward graph with `dropout_probability = 0` and no `rng_dump`,
+  explicit mask or `dropout_scale` drops nothing, so the CPU and GPU forward references compute it as no dropout
+  (`isSdpaZeroProbabilityDropout`): bit-identical to the graph without dropout fields. A seed and an offset may be
+  given or absent; they are not read, but a named one must be in the graph. Being no dropout, it also combines with
+  cuDNN's sdpa_fp8 softmax / output scaling (SEM-024), which declines every other dropout form: O and the amax
+  outputs are bit-identical to the scaled graph without dropout. cuDNN documents no behaviour at 0. Pinned by
+  `TestSdpaFwdPlanZeroDropout` and `TestGpuSdpaFwdPlanZeroDropout`. The backward references are unchanged.
 
 ## Score modifiers (extensions and conventions)
 
@@ -287,17 +294,28 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-022: Attention sinks
 
-- **Status:** Aligned (CPU and dense GPU forward references).
+- **Status:** Aligned (FLOAT sink semantics, CPU and dense GPU forward references); Extension (BFLOAT16 and HALF
+  sinks for any Q dtype, vLLM/model; a superset of cuDNN).
 - **Agreed semantics:** one unscaled logit per head, counted in the softmax denominator only, with no V row,
   and included in the LSE. cuDNN shape `[1, H_q, 1, 1]`, fp32 (cudnn-frontend `test/python/sdpa/fp16_ref.py`):
   `M = max(max_j s_j, sink)`, denominator `Σ exp(s_j − M) + exp(sink − M)`.
 - **Consequence:** a row with no live key but a finite sink has O = 0 and **LSE = sink**, not -inf. Padded query
   rows stay O = 0, LSE = -inf.
-- **hipDNN today:** both references implement it for a FLOAT `[1, H, 1, 1]` sink, and the frontend rejects other
-  shapes and dtypes, as cuDNN does (vLLM's model-dtype sinks are converted by the adapter). Pinned by
-  `SinkWithUniformScores`, `SinkOnFullyMaskedRow`, `SinkEqualsExtraZeroValueKey`, CPU/GPU parity and the paged sink
-  golden bundles.
-- **vLLM:** sinks are in the model dtype and kernels upcast them.
+- **hipDNN:** the sink is `[1, H_q, 1, 1]` in FLOAT, **BFLOAT16 or HALF, whatever the Q dtype** (an unset dtype
+  takes the graph's io type). FLOAT is cuDNN's form; the two 16-bit forms are a **vLLM/model extension, a superset
+  of cuDNN**: every cuDNN-valid sink keeps its meaning. Every engine and both references widen the logit exactly to
+  f32 and run the softmax in f32, so a 16-bit sink and the FLOAT sink holding the same value give bit-identical
+  results; an engine that cannot read a dtype declines the graph rather than narrowing or reinterpreting it. A sink
+  of -inf is exactly "no sink" for that head (vLLM pads tensor-parallel heads with -inf). Other shapes, DOUBLE, FP8
+  and integer sinks are rejected. Pinned by `SinkWithUniformScores`, `SinkOnFullyMaskedRow`,
+  `SinkEqualsExtraZeroValueKey`, the 16-bit-equals-FLOAT reference tests, CPU/GPU parity and the paged sink golden
+  bundles.
+- **Why the extension:** models keep the sink parameter in the model dtype (vLLM `make_attention_sink` under the
+  model's default dtype, HF gpt-oss, MiMo-V2-Flash, Granite-SWA) or in fp32 (DeepSeek-V4, GGUF). FlashAttention 4
+  requires a bf16 sink even with an fp16 Q, and vLLM's Triton and RDNA segmented kernels read any of the three
+  dtypes. Taking them as they are avoids a cast at the adapter and never narrows a value.
+- **vLLM:** sinks are in the model dtype, `[H_q]` per tensor-parallel rank; kernels upcast them. A 1-D sink is
+  described without a copy as `[1, H_q, 1, 1]` with strides `{H_q, 1, 1, 1}`.
 - **Open:** the dSink definition. AITER's test uses an LSE without the sink; do not follow it.
 
 ### SEM-023: Max and Sum_exp row statistics
@@ -328,7 +346,8 @@ batch when `seq_len_q/kv` are set).
   amax_s = max exp(S - Max) over live keys before scale_s (1 for any row whose max is a key; below 1 when the sink
   dominates). Encoding is round-to-nearest-even and saturating (hipdnn_data_sdk); PyTorch's cast does not
   saturate, which only matters past the fp8 range. scale_s / descale_s need fp8 inputs; scale_o and the amax
-  outputs are accepted with any fp8 graph. Dropout with fp8 scaling is declined.
+  outputs are accepted with any fp8 graph. Dropout with fp8 scaling is declined, except probability-0 dropout
+  without an rng_dump, which is no dropout (SEM-015).
 - **Contract:** cuDNN for <= 128 keys. A tile-faithful mode would need the tile size as an input.
 
 ### SEM-025: Block-sparse mask
@@ -343,6 +362,77 @@ batch when `seq_len_q/kv` are set).
   SEM-010. The plans check the dtype and shape; the golden generator's `--block-mask` expansion is identical to
   cuDNN's code.
 - **Contract:** cuDNN.
+
+## vLLM forms
+
+### SEM-026: Paged K/V under a ragged Q without `seq_len_q`
+
+- **Status:** Extension (vLLM; a superset of cuDNN frontend 1.24).
+- **cuDNN:** frontend 1.24 requires both seq_len tensors with paged K/V (SEM-009). cuDNN 9.25 / frontend 1.25 add a
+  "mixed" form, `cu_seq_len_q` (cumulative query offsets) with a per-batch `seq_len_kv`, which FlashInfer uses
+  (`flashinfer/cudnn/prefill.py`).
+- **vLLM:** passes `query_start_loc` (cumulative query offsets, `[B + 1]`) and `seq_lens` (the KV lengths); it has no
+  per-request query-length tensor. A request with no query tokens repeats the previous offset.
+- **hipDNN:** with paged K/V, `seq_len_kv` is required; `seq_len_q` may be omitted when Q has a ragged offset, whose
+  differences are the query lengths (`SdpaFwdNode::hasPagedKvLengths`). This is cuDNN 9.25's mixed form spelled with
+  hipDNN's ragged offset. A dense Q still needs `seq_len_q`; a ragged Q with `seq_len_q` keeps cuDNN's meaning (each
+  offset span a slot, `seq_len_q` its live rows). Every graph cuDNN 1.24 accepts keeps its meaning. The CPU and GPU
+  references derive `seq_len_q` from the offsets (the dense rewrite, `RaggedSdpaDensify.hpp`): bit-identical to the
+  same graph with `seq_len_q = diff(offsets)`. Pinned by `TestSdpaFwdNodeVllmExtensions` (accept and decline) and
+  `TestSdpaFwdPlanVllmForm` / `TestGpuSdpaFwdPlanVllmForm` (`PagedKvUnderARaggedQueryNeedsNoSeqLenQ`).
+- **Conversion:** `query_start_loc` becomes Q's (and O's) ragged offset, `[B + 1, 1, 1, 1]` with multiplier Q's token
+  stride; `seq_lens` becomes `seq_len_kv` `[B, 1, 1, 1]`. Both are views, no copy.
+- **Engines:** a FlyDSL SDPA engine declines paged K/V today.
+
+### SEM-027: FlashAttention / vLLM sliding windows
+
+- **Status:** Adapter.
+- **FlashAttention:** `window_size = (left, right)`, -1 unbounded; query row `i` sees keys
+  `[i + Skv - Sq - left, i + Skv - Sq + right]` inclusive, always anchored at the bottom-right diagonal
+  (`flash_attn_interface.py`). FA turns a non-causal `(w, 0)` into `(w, w)`.
+- **vLLM:** stores sliding window `W` as `(W - 1, 0)` on decoder layers and `(W - 1, W - 1)` on encoder layers, so a
+  decoder row sees W keys, the diagonal included; no window is `(-1, -1)`. Its hybrid allocator nulls the blocks a
+  window has left behind in the block table.
+- **Mapping** (`left_bound` counts the diagonal, SEM-001; BOTTOM_RIGHT for every row):
+
+  | FA / vLLM | `left_bound` | `right_bound` | `diagonal_alignment` |
+  |---|---|---|---|
+  | decoder `(W - 1, 0)` | `W` | `0` | BOTTOM_RIGHT |
+  | encoder `(W - 1, W - 1)` | `W` | `W - 1` | BOTTOM_RIGHT |
+  | non-causal FA `(w, w)` | `w + 1` | `w` | BOTTOM_RIGHT |
+  | causal `(-1, 0)` | unset | `0` | BOTTOM_RIGHT |
+  | any `(l, r)` | `l + 1`, unset if `l = -1` | `r`, unset if `r = -1` | BOTTOM_RIGHT |
+  | none `(-1, -1)` | unset | unset | either |
+
+- **hipDNN:** no rule change; the bounds already express every FA window. The references with this mapping equal an
+  oracle written in FA's terms, dense and paged, padded and ragged (`FaWindowsMapToHipdnnBounds` in
+  `TestSdpaFwdPlanVllmForm` and `TestGpuSdpaFwdPlanVllmForm`). Keys no row sees (outside every row's window, past
+  `seq_len_kv`, in null or unreferenced blocks) are never read into the result: NaN or infinity there gives the same
+  bits as zeros (`KeysNoRowSeesDoNotLeak`).
+
+### SEM-028: Ragged Q with `seq_len_kv` alone, non-paged K/V
+
+- **Status:** Extension (PyTorch / AOTriton varlen `seqused_k`, vLLM's non-paged call; a superset of cuDNN frontend
+  1.24).
+- **cuDNN:** frontend 1.24 requires both seq_len tensors with `padding_mask` (SEM-008), ragged operands included
+  (`node/sdpa_support_surface.h`); cuDNN 9.25's `cu_seq_len_q` + `seq_len_kv` is the same form (SEM-026).
+- **PyTorch / AOTriton:** varlen attention packs Q through `cu_seqlens_q` and K/V through `cu_seqlens_k`; `seqused_k`
+  gives each sequence's used keys (at most its K slot) and there is no `seqused_q`. AOTriton reads Q's lengths from
+  `cu_seqlens_q` and K's from `seqused_k` (its `varlen_seqused_k` bits). vLLM's non-paged call has dense or packed
+  K/V with `seq_lens` and only `query_start_loc` for Q.
+- **hipDNN:** a ragged Q may come with `seq_len_kv` and no `seq_len_q`, K/V packed (`seqused_k`) or dense, with or
+  without `padding_mask`: each sequence's query rows are the differences of Q's ragged offsets, its keys the first
+  `seq_len_kv[b]` of its slot (or of the dense extent), and a bottom-right diagonal sits at `seq_len_kv[b] - Sq_b`.
+  The forward node never required both lengths without paging (only `validatePagedKv` does, SEM-026), so no
+  frontend rule changes; `TestSdpaFwdNodeVllmExtensions.NonPagedKvWithRaggedQueryNeedsOnlySeqLenKv` pins it. The CPU
+  and GPU references derive `seq_len_q` from the offsets (`RaggedSdpaDensify.hpp`): bit-identical to the same graph
+  with `seq_len_q = diff(offsets)`, equal to an oracle in FlashAttention's terms, and keys past `seq_len_kv`
+  holding NaN or infinity are never read (`TestSdpaFwdPlanSeqLenKvOnly`, `TestGpuSdpaFwdPlanSeqLenKvOnly`). A
+  `seq_len_kv` past its slot is an error, as PyTorch forbids it.
+- **Engines:** the FlyDSL RDNA prefill (gfx11, gfx12), aiw (gfx12) and CDNA generic prefill engines serve the
+  packed form; a dense K/V beside the ragged Q declines there (the references serve it).
+- **Conversion:** `cu_seqlens_q` / `query_start_loc` becomes Q's (and O's, the LSE's) ragged offset; `cu_seqlens_k`
+  K's and V's; `seqused_k` / `seq_lens` becomes `seq_len_kv` `[B, 1, 1, 1]`. All views, no copy.
 
 ## Process
 

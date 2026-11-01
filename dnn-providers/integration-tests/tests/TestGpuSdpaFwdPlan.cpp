@@ -1111,8 +1111,9 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecutePhiloxDropoutMatchesCpuOnDumpedMask)
         << "Plan output differs from the CPU executor on the same dumped keep mask";
 }
 
-// Attention sink: FLOAT [1, H, 1, 1] (cuDNN), the same rule as the CPU plan. DIMS has H = 2.
-TEST(TestGpuSdpaFwdPlanBuilder, SinkApplicabilityFollowsCudnnShape)
+// Attention sink: [1, H, 1, 1] (cuDNN's shape) in FLOAT, BFLOAT16 or HALF for any Q dtype
+// (SEM-022), the same rule as the CPU plan; the kernel widens a 16-bit sink exactly. DIMS has H = 2.
+TEST(TestGpuSdpaFwdPlanBuilder, SinkApplicabilityFollowsTheSinkContract)
 {
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
@@ -1124,10 +1125,82 @@ TEST(TestGpuSdpaFwdPlanBuilder, SinkApplicabilityFollowsCudnnShape)
             graph.GetBufferPointer(), graph.GetSize());
         return floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
     };
-    EXPECT_TRUE(applicable(DataType::FLOAT, {1, 2, 1, 1}));
-    EXPECT_FALSE(applicable(DataType::HALF, {1, 2, 1, 1})) << "FLOAT only";
-    EXPECT_FALSE(applicable(DataType::FLOAT, {1, 1, 1, 1})) << "one value per head";
-    EXPECT_FALSE(applicable(DataType::FLOAT, {2})) << "rank 4";
+    for(const auto type : {DataType::FLOAT, DataType::BFLOAT16, DataType::HALF})
+    {
+        EXPECT_TRUE(applicable(type, {1, 2, 1, 1})) << EnumNameDataType(type);
+        EXPECT_FALSE(applicable(type, {1, 1, 1, 1})) << "one value per head";
+        EXPECT_FALSE(applicable(type, {2})) << "rank 4";
+    }
+    EXPECT_FALSE(applicable(DataType::DOUBLE, {1, 2, 1, 1})) << "no DOUBLE sink";
+    EXPECT_FALSE(applicable(DataType::FP8_E4M3, {1, 2, 1, 1})) << "no FP8 sink";
+}
+
+// A BFLOAT16 or HALF sink through the plan (bound in its own dtype) gives, bit for bit, the O of
+// the FLOAT sink holding the same values, and matches the CPU executor on the 16-bit graph.
+TEST(TestGpuSdpaFwdPlanBuilder, ExecutesSixteenBitSinksAsTheFloatSink)
+{
+    SKIP_IF_NO_DEVICES();
+    using hipdnn_data_sdk::utilities::Tensor;
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    Tensor<float> q(DIMS);
+    Tensor<float> k(DIMS);
+    Tensor<float> v(DIMS);
+    fillWithRandomValues(q, -1.0f, 1.0f, /*seed=*/41);
+    fillWithRandomValues(k, -1.0f, 1.0f, /*seed=*/42);
+    fillWithRandomValues(v, -1.0f, 1.0f, /*seed=*/43);
+    // Head 0 well above the scores, head 1 a value bf16 rounds (exact in HALF).
+    const std::vector<float> values{3.5f, 0.0009765625f + 9.5367431640625e-07f};
+
+    const auto runPlan = [&](DataType sinkType, void* sinkDevice, Tensor<float>& o) {
+        SdpaAttributesT attrs;
+        attrs.sink_token_tensor_uid = SINK_UID;
+        auto graph = makeGraphWithExtras(attrs, {{SINK_UID, sinkType, {1, 2, 1, 1}}});
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graph.GetBufferPointer(), graph.GetSize());
+        ASSERT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+        auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+        const std::unordered_map<int64_t, void*> variantPack{{Q_UID, q.memory().deviceData()},
+                                                             {K_UID, k.memory().deviceData()},
+                                                             {V_UID, v.memory().deviceData()},
+                                                             {O_UID, o.memory().deviceData()},
+                                                             {SINK_UID, sinkDevice}};
+        plan->execute(variantPack);
+        o.markDeviceModified();
+    };
+    const auto check = [&](auto sinkTag, DataType sinkType) {
+        using SinkType = decltype(sinkTag);
+        Tensor<SinkType> sink16({1, 2, 1, 1});
+        Tensor<float> sink32({1, 2, 1, 1});
+        for(int64_t h = 0; h < 2; ++h)
+        {
+            sink16.setHostValue(SinkType(values[static_cast<size_t>(h)]), 0, h, 0, 0);
+            sink32.setHostValue(static_cast<float>(sink16.getHostValue(0, h, 0, 0)), 0, h, 0, 0);
+        }
+        // The CPU executor on the 16-bit graph reads host data, so it runs first.
+        SdpaAttributesT attrs;
+        attrs.sink_token_tensor_uid = SINK_UID;
+        auto graph = makeGraphWithExtras(attrs, {{SINK_UID, sinkType, {1, 2, 1, 1}}});
+        Tensor<float> oCpu(DIMS);
+        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+            graph.GetBufferPointer(),
+            graph.GetSize(),
+            {{Q_UID, q.memory().hostData()},
+             {K_UID, k.memory().hostData()},
+             {V_UID, v.memory().hostData()},
+             {O_UID, oCpu.memory().hostData()},
+             {SINK_UID, sink16.memory().hostData()}});
+        Tensor<float> o16(DIMS);
+        Tensor<float> o32(DIMS);
+        runPlan(sinkType, sink16.memory().deviceData(), o16);
+        runPlan(DataType::FLOAT, sink32.memory().deviceData(), o32);
+        const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> exact(0.0f, 0.0f);
+        EXPECT_TRUE(exact.allClose(o32, o16)) << EnumNameDataType(sinkType);
+        const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> close(2e-5f, 2e-5f);
+        EXPECT_TRUE(close.allClose(oCpu, o16)) << EnumNameDataType(sinkType);
+    };
+    check(hipdnn_data_sdk::types::bfloat16{}, DataType::BFLOAT16);
+    check(hipdnn_data_sdk::types::half{}, DataType::HALF);
 }
 
 // A pass-by-value descale's variant-pack slot holds a host pointer and a baked one has no slot,

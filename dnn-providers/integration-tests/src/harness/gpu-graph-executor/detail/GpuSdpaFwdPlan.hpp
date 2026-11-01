@@ -13,6 +13,7 @@
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 #include <hipdnn-gpu-ref/ShallowGpuTensor.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
+#include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
@@ -76,6 +77,54 @@ constexpr hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode providerSdpaProbabilityMode
         return hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode::FLOAT;
     }
 }
+
+// An SDPA attention sink bound in its own dtype: FLOAT (cuDNN), or a BFLOAT16 / HALF model
+// parameter for any Q dtype (hipDNN's superset, SEM-022). applyTo() hands it to the forward
+// options with its dtype; the reference kernel widens the logit exactly to float.
+struct GpuSdpaSinkBinding
+{
+    std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> asFloat;
+    std::optional<hipdnn_gpu_ref::ShallowGpuTensor<hipdnn_data_sdk::types::bfloat16>> asBfloat16;
+    std::optional<hipdnn_gpu_ref::ShallowGpuTensor<hipdnn_data_sdk::types::half>> asHalf;
+
+    void bind(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& attributes,
+              void* deviceData)
+    {
+        using hipdnn_flatbuffers_sdk::data_objects::DataType;
+        switch(attributes.data_type)
+        {
+        case DataType::FLOAT:
+            asFloat.emplace(deviceData, attributes.dims, attributes.strides);
+            return;
+        case DataType::BFLOAT16:
+            asBfloat16.emplace(deviceData, attributes.dims, attributes.strides);
+            return;
+        case DataType::HALF:
+            asHalf.emplace(deviceData, attributes.dims, attributes.strides);
+            return;
+        default:
+            throw std::invalid_argument("SDPA sink must be FLOAT, BFLOAT16 or HALF");
+        }
+    }
+
+    template <class Options>
+    Options applyTo(Options options)
+    {
+        if(asFloat.has_value())
+        {
+            options.setSink(&asFloat.value());
+        }
+        else if(asBfloat16.has_value())
+        {
+            options.setSink(&asBfloat16.value());
+        }
+        else if(asHalf.has_value())
+        {
+            options.setSink(&asHalf.value());
+        }
+        return options;
+    }
+};
 
 struct GpuSdpaFwdParams
 {
@@ -258,12 +307,12 @@ public:
             }
         }
 
-        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> sinkTensor;
+        // The sink in its own dtype: FLOAT, or a BFLOAT16 / HALF model parameter for any Q dtype
+        // (SEM-022); the kernel widens it exactly.
+        GpuSdpaSinkBinding sink;
         if(_params.sinkTensor.has_value())
         {
-            sinkTensor.emplace(variantPack.at(_params.sinkTensor->uid),
-                               _params.sinkTensor->dims,
-                               _params.sinkTensor->strides);
+            sink.bind(*_params.sinkTensor, variantPack.at(_params.sinkTensor->uid));
         }
 
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> dropoutMask;
@@ -351,30 +400,30 @@ public:
                 kTensor,
                 vTensor,
                 oTensor,
-                hipdnn_gpu_ref::GpuSdpaFwdOptions<MaskDataType>{}
-                    .setScale(attnScale)
-                    .setMask(attnMaskTensor.has_value() ? &attnMaskTensor.value() : nullptr)
-                    .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
-                    .setSeqLens(seqLenQTensor.has_value() ? &seqLenQTensor.value() : nullptr,
-                                seqLenKvTensor.has_value() ? &seqLenKvTensor.value() : nullptr)
-                    .setPaged(pageTableK.has_value() ? &pageTableK.value() : nullptr,
-                              pageTableV.has_value() ? &pageTableV.value() : nullptr,
-                              _params.pagedMaxSeqKv)
-                    .setSink(sinkTensor.has_value() ? &sinkTensor.value() : nullptr)
-                    .setDropout(dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
-                                dropoutScale)
-                    .setAlibi(_params.alibi)
-                    .setBlockMask(blockMask.has_value() ? &blockMask.value() : nullptr)
-                    .setLse(lseTensor.has_value() ? &lseTensor.value() : nullptr)
-                    .setRowStats(maxTensor.has_value() ? &maxTensor.value() : nullptr,
-                                 sumExpTensor.has_value() ? &sumExpTensor.value() : nullptr)
-                    .setProbabilityMode(REFERENCE_SDPA_PROBABILITY_MODE)
-                    .setDescales(descaleQ, descaleK, descaleV)
-                    .setSoftmaxScales(scalar(_params.scaleSTensor, "SDPA scale_s"),
-                                      scalar(_params.descaleSTensor, "SDPA descale_s"))
-                    .setOutputScale(scalar(_params.scaleOTensor, "SDPA scale_o"))
-                    .setAmax(amaxS.has_value() ? &amaxS.value() : nullptr,
-                             amaxO.has_value() ? &amaxO.value() : nullptr));
+                sink.applyTo(
+                    hipdnn_gpu_ref::GpuSdpaFwdOptions<MaskDataType>{}
+                        .setScale(attnScale)
+                        .setMask(attnMaskTensor.has_value() ? &attnMaskTensor.value() : nullptr)
+                        .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
+                        .setSeqLens(seqLenQTensor.has_value() ? &seqLenQTensor.value() : nullptr,
+                                    seqLenKvTensor.has_value() ? &seqLenKvTensor.value() : nullptr)
+                        .setPaged(pageTableK.has_value() ? &pageTableK.value() : nullptr,
+                                  pageTableV.has_value() ? &pageTableV.value() : nullptr,
+                                  _params.pagedMaxSeqKv)
+                        .setDropout(dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
+                                    dropoutScale)
+                        .setAlibi(_params.alibi)
+                        .setBlockMask(blockMask.has_value() ? &blockMask.value() : nullptr)
+                        .setLse(lseTensor.has_value() ? &lseTensor.value() : nullptr)
+                        .setRowStats(maxTensor.has_value() ? &maxTensor.value() : nullptr,
+                                     sumExpTensor.has_value() ? &sumExpTensor.value() : nullptr)
+                        .setProbabilityMode(REFERENCE_SDPA_PROBABILITY_MODE)
+                        .setDescales(descaleQ, descaleK, descaleV)
+                        .setSoftmaxScales(scalar(_params.scaleSTensor, "SDPA scale_s"),
+                                          scalar(_params.descaleSTensor, "SDPA descale_s"))
+                        .setOutputScale(scalar(_params.scaleOTensor, "SDPA scale_o"))
+                        .setAmax(amaxS.has_value() ? &amaxS.value() : nullptr,
+                                 amaxO.has_value() ? &amaxO.value() : nullptr)));
     }
 
 private:

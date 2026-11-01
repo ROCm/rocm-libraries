@@ -29,7 +29,7 @@ descriptor and predicates the tail.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 # Ranking is `score desc -> priority desc -> kernelId asc`, and with no
 # heuristic model every score ties, so priority is what orders the catalog.
@@ -109,6 +109,8 @@ _ABBREV = {
     "has_sink": "sink",
     "bias_f32": "f32bias",
     "bias_kstrided": "kstrbias",
+    "has_dropout": "dropout",
+    "v_mask": "vmask",
     "scale_f32": "f32scale",
     "store_rstd": "rstd",
     "n_max": "nmax",
@@ -137,6 +139,8 @@ _NAME_OMITTED_WHEN = {
     "has_sink": lambda knobs: knobs["has_sink"] == 0,
     "bias_f32": lambda knobs: knobs["bias_f32"] == 0,
     "bias_kstrided": lambda knobs: knobs["bias_kstrided"] == 0,
+    "has_dropout": lambda knobs: knobs["has_dropout"] == 0,
+    "v_mask": lambda knobs: knobs["v_mask"] == 0,
     "scale_f32": lambda knobs: knobs["scale_f32"] == 0,
     "store_rstd": lambda knobs: knobs["store_rstd"] == 0,
     # The generic backward tiers' width bound; a baked object's equals its N.
@@ -149,6 +153,8 @@ _NAME_OMITTED_WHEN = {
     "prefer_max": lambda knobs: True,
     # A symbol, not a choice: the object's name already says it is a decode one.
     "merge_symbol": lambda knobs: True,
+    # A symbol, not a choice: every aiw object carries the same padded-row fill kernel.
+    "fill_symbol": lambda knobs: True,
 }
 
 
@@ -306,7 +312,10 @@ def sdpa_prefill_schedule(head_dim: int, causal: int, has_bias: int) -> tuple:
 # columns across two workgroups, because its masked loads on top of the d256
 # schedule do not fit the register file in one, which is why 224 is a tier of its
 # own. Below the specialized tier in priority, and each narrower one above the
-# wider, so the narrowest object that serves a head is the one chosen.
+# wider, so the narrowest object that serves a head is the one chosen. Each tier
+# ships without a bias and with one (f32, or the query's dtype), as the specialized
+# head dims do, so a bias graph is served at every head_dim its plain twin is; the
+# plain objects build as before.
 SDPA_GENERIC_HEAD_DIM_MAX = {
     64: (64, 1, 0),
     96: (128, 1, 0),
@@ -324,6 +333,17 @@ PRIORITY_SDPA_GENERIC = {
     256: PRIORITY_GENERIC,
 }
 
+
+def sdpa_generic_schedule(head_dim_max: int, has_bias: int) -> tuple:
+    """A generic tier's schedule (block_m, dv_split, hd_pair). A bias object up to 64
+    takes the 128-row tile the specialized head_dim 64 bias object takes (the schedule
+    measured for it, `sdpa_prefill_schedule`); every other tier keeps its plain object's
+    schedule, as the specialized bias objects above 64 keep theirs."""
+    if has_bias and head_dim_max == 64:
+        return SDPA_BLOCK_M, 1, 0
+    return SDPA_GENERIC_HEAD_DIM_MAX[head_dim_max]
+
+
 # The decode family (flash_attn_decode_rdna.py): split-KV with the GQA group packed
 # into 16-row tiles (g * Sq rows; a bias object takes one tile). Its own kernel and its
 # own launch geometry, so a separate set of objects in its own engine
@@ -337,10 +357,18 @@ SDPA_DECODE_HEAD_DIMS = (64, 96, 128, 256)
 # Generic decode objects for every other head_dim that is a multiple of 8: up to 96,
 # and above it up to 256 with the d256 column split. Columns past the actual head_dim
 # are never fetched, so a decode step reads only the bytes its head has; an up-to-128
-# tier does not fit the register file. No bias, as for the generic prefill tier. Below
+# tier does not fit the register file. Without a bias and with one, as the generic
+# prefill tiers; a bias object takes one 16-row tile, as at a specialized head_dim. Below
 # the specialized decode objects in priority, the narrower tier above the wider.
 SDPA_DECODE_GENERIC_HEAD_DIM_MAX = {96: 1, 256: 2}
 PRIORITY_SDPA_DECODE_GENERIC = {96: 145, 256: 140}
+# A generic decode tier up to 512 (H4, kernel modification 30): every multiple of 8 from 264
+# to 512, which no RDNA prefill object serves (AOTriton's FlyDSL gfx1201 build serves 384 and
+# 512; on gfx11 nothing does), at decode-tile speed and any query length; the output columns
+# split four ways as on the 512/512 objects. No bias (as the wide decode objects, N4) and no
+# sink. Below the 256 tier and the exact 512/512 objects in priority.
+SDPA_DECODE_WIDE_GENERIC_HEAD_DIM_MAX = {512: 4}
+PRIORITY_SDPA_DECODE_WIDE_GENERIC = {512: 135}
 SDPA_DECODE_MERGE_SYMBOL = "flash_attn_decode_merge_rdna_kernel_1"
 # Absorbed multi-head latent attention (DeepSeek-V2/V3, Kimi, GLM: Q/K 576 = a 512-wide
 # latent and a 64-wide rotary part, V 512 = the latent) and DeepSeek-V4's 512/512, both
@@ -444,31 +472,62 @@ def _sdpa_rdna_rows() -> list[Instance]:
                         },
                     )
                 )
-        # Generic head_dim, without a bias: a bias on a head no specialized
-        # object serves declines.
-        for head_dim_max, schedule in SDPA_GENERIC_HEAD_DIM_MAX.items():
-            block_m, dv_split, hd_pair = schedule
+        # MLA with an additive bias (N2): the same pair and schedule, an f32 bias and one
+        # in the query's dtype.
+        for head_dim, head_dim_v in SDPA_MLA_HEAD_DIMS:
             for causal in SDPA_CAUSAL:
-                instances.append(
-                    Instance(
-                        op="sdpa_rdna",
-                        dtype=dtype,
-                        priority=PRIORITY_SDPA_GENERIC[head_dim_max],
-                        knobs={
-                            "head_dim": None,
-                            "causal": causal,
-                            "block_m": block_m,
-                            "block_n": SDPA_BLOCK_N,
-                            "dv_split": dv_split,
-                            "has_bias": 0,
-                            "head_dim_max": head_dim_max,
-                            "decode": 0,
-                            "merge_symbol": "",
-                            "hd_pair": hd_pair,
-                            "bias_q": 0,
-                        },
+                block_m, dv_split, hd_pair = sdpa_prefill_schedule(head_dim, causal, 1)
+                for bias_q in SDPA_BIAS_Q:
+                    instances.append(
+                        Instance(
+                            op="sdpa_rdna",
+                            dtype=dtype,
+                            priority=PRIORITY_SPECIALIZED,
+                            knobs={
+                                "head_dim": head_dim,
+                                "causal": causal,
+                                "block_m": block_m,
+                                "block_n": SDPA_BLOCK_N,
+                                "dv_split": dv_split,
+                                "has_bias": 1,
+                                "head_dim_max": head_dim,
+                                "decode": 0,
+                                "merge_symbol": "",
+                                "hd_pair": hd_pair,
+                                "bias_q": bias_q,
+                                "head_dim_v": head_dim_v,
+                            },
+                        )
                     )
-                )
+        # Generic head_dim, without a bias and with one (f32, or the query's dtype), as
+        # the specialized head dims have them.
+        for head_dim_max in SDPA_GENERIC_HEAD_DIM_MAX:
+            for causal in SDPA_CAUSAL:
+                for has_bias in SDPA_HAS_BIAS:
+                    block_m, dv_split, hd_pair = sdpa_generic_schedule(
+                        head_dim_max, has_bias
+                    )
+                    for bias_q in SDPA_BIAS_Q if has_bias else (0,):
+                        instances.append(
+                            Instance(
+                                op="sdpa_rdna",
+                                dtype=dtype,
+                                priority=PRIORITY_SDPA_GENERIC[head_dim_max],
+                                knobs={
+                                    "head_dim": None,
+                                    "causal": causal,
+                                    "block_m": block_m,
+                                    "block_n": SDPA_BLOCK_N,
+                                    "dv_split": dv_split,
+                                    "has_bias": has_bias,
+                                    "head_dim_max": head_dim_max,
+                                    "decode": 0,
+                                    "merge_symbol": "",
+                                    "hd_pair": hd_pair,
+                                    "bias_q": bias_q,
+                                },
+                            )
+                        )
         for head_dim in SDPA_DECODE_HEAD_DIMS:
             for causal in SDPA_CAUSAL:
                 for has_bias in SDPA_HAS_BIAS:
@@ -547,28 +606,95 @@ def _sdpa_rdna_rows() -> list[Instance]:
                             },
                         )
                     )
+        # A bias with a sink (N1): the sink head dims, both bias dtypes, prefill and decode,
+        # each on its bias schedule; the kernels compose the two (the sink epilogue already
+        # takes the bias's natural-log domain). CDNA serves the pair since its item 5.
+        for head_dim in SDPA_SINK_HEAD_DIMS:
+            for causal in SDPA_CAUSAL:
+                block_m, dv_split, hd_pair = sdpa_prefill_schedule(head_dim, causal, 1)
+                for bias_q in SDPA_BIAS_Q:
+                    for decode in (0, 1):
+                        instances.append(
+                            Instance(
+                                op="sdpa_rdna",
+                                dtype=dtype,
+                                priority=(
+                                    PRIORITY_SDPA_DECODE
+                                    if decode
+                                    else PRIORITY_SPECIALIZED
+                                ),
+                                knobs={
+                                    "head_dim": head_dim,
+                                    "causal": causal,
+                                    "block_m": SDPA_DECODE_ROWS if decode else block_m,
+                                    "block_n": SDPA_BLOCK_N,
+                                    "dv_split": (
+                                        sdpa_dv_split(head_dim) if decode else dv_split
+                                    ),
+                                    "has_bias": 1,
+                                    "head_dim_max": head_dim,
+                                    "decode": decode,
+                                    "merge_symbol": (
+                                        SDPA_DECODE_MERGE_SYMBOL if decode else ""
+                                    ),
+                                    "hd_pair": 0 if decode else hd_pair,
+                                    "bias_q": bias_q,
+                                    "has_sink": 1,
+                                },
+                            )
+                        )
         for head_dim_max, dv_split in SDPA_DECODE_GENERIC_HEAD_DIM_MAX.items():
             for causal in SDPA_CAUSAL:
-                instances.append(
-                    Instance(
-                        op="sdpa_rdna",
-                        dtype=dtype,
-                        priority=PRIORITY_SDPA_DECODE_GENERIC[head_dim_max],
-                        knobs={
-                            "head_dim": None,
-                            "causal": causal,
-                            "block_m": SDPA_DECODE_ROWS,
-                            "block_n": SDPA_BLOCK_N,
-                            "dv_split": dv_split,
-                            "has_bias": 0,
-                            "head_dim_max": head_dim_max,
-                            "decode": 1,
-                            "merge_symbol": SDPA_DECODE_MERGE_SYMBOL,
-                            "hd_pair": 0,
-                            "bias_q": 0,
-                        },
-                    )
-                )
+                for has_bias in SDPA_HAS_BIAS:
+                    for bias_q in SDPA_BIAS_Q if has_bias else (0,):
+                        instances.append(
+                            Instance(
+                                op="sdpa_rdna",
+                                dtype=dtype,
+                                priority=PRIORITY_SDPA_DECODE_GENERIC[head_dim_max],
+                                knobs={
+                                    "head_dim": None,
+                                    "causal": causal,
+                                    "block_m": SDPA_DECODE_ROWS,
+                                    "block_n": SDPA_BLOCK_N,
+                                    "dv_split": dv_split,
+                                    "has_bias": has_bias,
+                                    "head_dim_max": head_dim_max,
+                                    "decode": 1,
+                                    "merge_symbol": SDPA_DECODE_MERGE_SYMBOL,
+                                    "hd_pair": 0,
+                                    "bias_q": bias_q,
+                                },
+                            )
+                        )
+        # The wide tier with a bias too (the parity gaps, E4: on gfx11 nothing else serves
+        # 264-504, and a bias there declined), f32 or the query's dtype, as the generic tiers.
+        for head_dim_max, dv_split in SDPA_DECODE_WIDE_GENERIC_HEAD_DIM_MAX.items():
+            for causal in SDPA_CAUSAL:
+                for has_bias in SDPA_HAS_BIAS:
+                    for bias_q in SDPA_BIAS_Q if has_bias else (0,):
+                        instances.append(
+                            Instance(
+                                op="sdpa_rdna",
+                                dtype=dtype,
+                                priority=PRIORITY_SDPA_DECODE_WIDE_GENERIC[
+                                    head_dim_max
+                                ],
+                                knobs={
+                                    "head_dim": None,
+                                    "causal": causal,
+                                    "block_m": SDPA_DECODE_ROWS,
+                                    "block_n": SDPA_BLOCK_N,
+                                    "dv_split": dv_split,
+                                    "has_bias": has_bias,
+                                    "head_dim_max": head_dim_max,
+                                    "decode": 1,
+                                    "merge_symbol": SDPA_DECODE_MERGE_SYMBOL,
+                                    "hd_pair": 0,
+                                    "bias_q": bias_q,
+                                },
+                            )
+                        )
     # Every other object's V is as wide as its Q and K (a generic one's too: both
     # are the runtime head_dim).
     # Only the sink objects add one.
@@ -598,13 +724,219 @@ def _without(instance: Instance, op: str, dropped: tuple[str, ...]) -> Instance:
     )
 
 
-def sdpa_instances() -> list[Instance]:
-    """The RDNA SDPA prefill table: (dtype, head_dim, causal, has_bias, has_sink)."""
-    instances = [
-        _without(row, "sdpa_rdna", _SDPA_RDNA_PREFILL_ONLY)
-        for row in _sdpa_rdna_rows()
-        if not row.knobs["decode"]
-    ]
+# RDNA prefill dropout twins (has_dropout, kernel modification 27), the training forward's
+# common classes: the specialized head dims, no bias, no sink. gfx11-generic only: on gfx12 the
+# aiw objects serve dropout (decision Q3). Every other class declines a dropping graph.
+SDPA_RDNA_DROPOUT_TARGETS = ("gfx11-generic",)
+# The 256 twins' (block_m, dv_split, hd_pair) per dtype: head-dim pairs without a column
+# split, so QK^T and the Philox draws run once per row rather than once per column half
+# (1.5-1.9x faster on gfx1101); f16 takes the 32-row tile, where 64 rows spill 3 VGPRs.
+SDPA_RDNA_DROPOUT_256 = {"bf16": (64, 1, 1), "f16": (32, 1, 1)}
+# Dropout on the generic tiers (AOTriton's dropout widths: every multiple of 8 up to 256, the
+# in-contract ones 8-96, 160, 192, 224 beside the exact 64/96/128/256): each tier's plain
+# schedule (sdpa_generic_schedule), without a bias and with one (f32, or the query's dtype), as
+# the generic tiers have them. No 128 tier (it would serve only 104-120, which AOTriton's suite
+# does not run) and no 224 tier (its plain objects already sit at 243-256 VGPRs and cannot split
+# their columns): 168-248 run on the 256 tier, whose extra columns cost 14-33% at 192-224
+# (COVERAGE.md section 5.8, deferred). Ranked as the tiers.
+SDPA_RDNA_DROPOUT_GENERIC_TIERS = (64, 96, 160, 256)
+# Where a tier's schedule spills with the Philox draws (the prefill objects take no spill), the
+# next that holds them, keyed by (head_dim_max, causal, has_bias, dtype).
+SDPA_RDNA_DROPOUT_GENERIC_OVERRIDES: dict[tuple[int, int, int, str], tuple] = {}
+
+# Any Q/K head dim apart from V's (PyTorch's memory-efficient SDPA admits every pair; AOTriton
+# serves each on the rung that holds the wider, gfx11 up to 256; MiniCPM3's 96/64, say): pair
+# tiers whose Q and K are masked at Q/K's runtime width and V and O at V's (kernel
+# modification 32), each a multiple of 8 up to the tier, on the generic tiers' schedules.
+# Prefill only (a pair at a decode step runs on them too); no bias or sink, as MLA. They serve
+# only pairs whose widths differ, so no equal-width graph gains a candidate; below every generic
+# tier, the narrower first. On gfx12 the aiw objects serve every pair to 512 as well.
+SDPA_PAIR_HEAD_DIM_MAX = (64, 128, 256)
+PRIORITY_SDPA_PAIR = {64: 8, 128: 7, 256: 6}
+# The pair tiers with a bias (the parity gaps, E5), f32 or the query's dtype, on the generic
+# tiers' bias schedules: gfx11-generic only, as on gfx12 the aiw padded tiers serve a pair
+# with a mask.
+SDPA_PAIR_BIAS_TARGETS = ("gfx11-generic",)
+
+# Exact f32 (kernel modification 34: both products as f32 FMAs on the VALU, as AOTriton runs
+# f32 on RDNA), on gfx11-generic and gfx12-generic: generic tiers whose Q/K/V width is any
+# multiple of 8 up to the tier, causal or not, without and with an f32 bias, without and with
+# dropout. No sink, no head-dim pairs, no V width of its own. Ranked as the generic tiers;
+# they serve only f32 graphs, which nothing else on RDNA takes.
+SDPA_RDNA_F32_TIERS = (64, 128, 256)
+# Each tier's (block_m, dv_split); 256 splits its output columns, as the 16-bit 256 objects.
+SDPA_RDNA_F32_SCHEDULE = {64: (128, 1), 128: (128, 1), 256: (128, 2)}
+
+
+def sdpa_instances(arch: str) -> list[Instance]:
+    """The RDNA SDPA prefill table for one target: (dtype, head_dim, causal, has_bias,
+    has_sink, has_dropout)."""
+    instances = []
+    for row in _sdpa_rdna_rows():
+        if row.knobs["decode"]:
+            continue
+        instance = _without(row, "sdpa_rdna", _SDPA_RDNA_PREFILL_ONLY)
+        instance.knobs["has_dropout"] = 0
+        instance.knobs["v_mask"] = 0
+        instances.append(instance)
+    # The pair tiers (kernel modification 32): any Q/K and V head dims that differ.
+    pair_bias = (0, 1) if arch in SDPA_PAIR_BIAS_TARGETS else (0,)
+    for dtype in DTYPES:
+        for head_dim_max in SDPA_PAIR_HEAD_DIM_MAX:
+            for has_bias in pair_bias:
+                block_m, dv_split, hd_pair = sdpa_generic_schedule(
+                    head_dim_max, has_bias
+                )
+                for bias_q in SDPA_BIAS_Q if has_bias else (0,):
+                    for causal in SDPA_CAUSAL:
+                        instances.append(
+                            Instance(
+                                op="sdpa_rdna",
+                                dtype=dtype,
+                                priority=PRIORITY_SDPA_PAIR[head_dim_max],
+                                knobs={
+                                    "head_dim": None,
+                                    "causal": causal,
+                                    "block_m": block_m,
+                                    "block_n": SDPA_BLOCK_N,
+                                    "dv_split": dv_split,
+                                    "has_bias": has_bias,
+                                    "head_dim_max": head_dim_max,
+                                    "hd_pair": hd_pair,
+                                    "bias_q": bias_q,
+                                    "head_dim_v": None,
+                                    "has_sink": 0,
+                                    "has_dropout": 0,
+                                    "v_mask": 1,
+                                },
+                            )
+                        )
+    if arch in SDPA_RDNA_DROPOUT_TARGETS:
+        for dtype in DTYPES:
+            for head_dim in SDPA_HEAD_DIMS:
+                for causal in SDPA_CAUSAL:
+                    # The plain twin's schedule; at 256 the head-dim pairs per dtype
+                    # (SDPA_RDNA_DROPOUT_256).
+                    block_m, dv_split, hd_pair = (
+                        SDPA_RDNA_DROPOUT_256[dtype]
+                        if head_dim == 256
+                        else sdpa_prefill_schedule(head_dim, causal, 0)
+                    )
+                    instances.append(
+                        Instance(
+                            op="sdpa_rdna",
+                            dtype=dtype,
+                            priority=PRIORITY_SPECIALIZED,
+                            knobs={
+                                "head_dim": head_dim,
+                                "causal": causal,
+                                "block_m": block_m,
+                                "block_n": SDPA_BLOCK_N,
+                                "dv_split": dv_split,
+                                "has_bias": 0,
+                                "head_dim_max": head_dim,
+                                "hd_pair": hd_pair,
+                                "bias_q": 0,
+                                "head_dim_v": head_dim,
+                                "has_sink": 0,
+                                "has_dropout": 1,
+                                "v_mask": 0,
+                            },
+                        )
+                    )
+                    # Dropout with an additive bias (R2), f32 and in the query's dtype:
+                    # the bias schedule, but at 256 a two-way column split (the bias and
+                    # the keep masks on top of the head-dim pairs' registers spill).
+                    block_m, dv_split, hd_pair = (
+                        (64, 2, 1)
+                        if head_dim == 256
+                        else sdpa_prefill_schedule(head_dim, causal, 1)
+                    )
+                    for bias_q in SDPA_BIAS_Q:
+                        instances.append(
+                            Instance(
+                                op="sdpa_rdna",
+                                dtype=dtype,
+                                priority=PRIORITY_SPECIALIZED,
+                                knobs={
+                                    "head_dim": head_dim,
+                                    "causal": causal,
+                                    "block_m": block_m,
+                                    "block_n": SDPA_BLOCK_N,
+                                    "dv_split": dv_split,
+                                    "has_bias": 1,
+                                    "head_dim_max": head_dim,
+                                    "hd_pair": hd_pair,
+                                    "bias_q": bias_q,
+                                    "head_dim_v": head_dim,
+                                    "has_sink": 0,
+                                    "has_dropout": 1,
+                                    "v_mask": 0,
+                                },
+                            )
+                        )
+    if arch in SDPA_RDNA_DROPOUT_TARGETS:
+        for dtype in DTYPES:
+            for head_dim_max in SDPA_RDNA_DROPOUT_GENERIC_TIERS:
+                for causal in SDPA_CAUSAL:
+                    for has_bias in SDPA_HAS_BIAS:
+                        block_m, dv_split, hd_pair = (
+                            SDPA_RDNA_DROPOUT_GENERIC_OVERRIDES.get(
+                                (head_dim_max, causal, has_bias, dtype)
+                            )
+                            or sdpa_generic_schedule(head_dim_max, has_bias)
+                        )
+                        for bias_q in SDPA_BIAS_Q if has_bias else (0,):
+                            instances.append(
+                                Instance(
+                                    op="sdpa_rdna",
+                                    dtype=dtype,
+                                    priority=PRIORITY_SDPA_GENERIC[head_dim_max],
+                                    knobs={
+                                        "head_dim": None,
+                                        "causal": causal,
+                                        "block_m": block_m,
+                                        "block_n": SDPA_BLOCK_N,
+                                        "dv_split": dv_split,
+                                        "has_bias": has_bias,
+                                        "head_dim_max": head_dim_max,
+                                        "hd_pair": hd_pair,
+                                        "bias_q": bias_q,
+                                        "head_dim_v": None,
+                                        "has_sink": 0,
+                                        "has_dropout": 1,
+                                        "v_mask": 0,
+                                    },
+                                )
+                            )
+    # Exact f32 (kernel modification 34), on both targets.
+    for head_dim_max in SDPA_RDNA_F32_TIERS:
+        block_m, dv_split = SDPA_RDNA_F32_SCHEDULE[head_dim_max]
+        for causal in SDPA_CAUSAL:
+            for has_bias in SDPA_HAS_BIAS:
+                for has_dropout in (0, 1):
+                    instances.append(
+                        Instance(
+                            op="sdpa_rdna",
+                            dtype="f32",
+                            priority=PRIORITY_SDPA_GENERIC[head_dim_max],
+                            knobs={
+                                "head_dim": None,
+                                "causal": causal,
+                                "block_m": block_m,
+                                "block_n": SDPA_BLOCK_N,
+                                "dv_split": dv_split,
+                                "has_bias": has_bias,
+                                "head_dim_max": head_dim_max,
+                                "hd_pair": 0,
+                                "bias_q": 0,
+                                "head_dim_v": None,
+                                "has_sink": 0,
+                                "has_dropout": has_dropout,
+                                "v_mask": 0,
+                            },
+                        )
+                    )
     _assert_unique(instances)
     return instances
 
@@ -765,6 +1097,12 @@ class CdnaTier:
     # Adds an attention sink's logit to the softmax (generic only; vendored-kernel
     # modification 19).
     has_sink: int = 0
+    # A bias read one key at a time, at a runtime key stride, in f32 or the query's dtype
+    # (generic bias builds only; vendored-kernel modification 31).
+    bias_kstrided: int = 0
+    # Drops attention probabilities, AOTriton's Philox mask (generic prefill builds
+    # only; vendored-kernel modification 33).
+    has_dropout: int = 0
 
 
 SDPA_CDNA_KV_ALIGN = 64
@@ -819,8 +1157,11 @@ SDPA_CDNA_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
             CdnaTier(_GEN, 256, waves_per_eu=3, kv_gpfetch=0),
             CdnaTier(_GEN, 128, waves_per_eu=1),
         ),
-        (256, 0): (CdnaTier(_GEN, 128, waves_per_eu=3),),
-        (256, 1): (CdnaTier(_GEN, 128, waves_per_eu=1),),
+        # K in 128-column chunks with both LDS tiles padded, as on gfx942: 1.4-2.0x faster
+        # than the whole K tile unpadded, at every measured shape (no 64-row companion: the
+        # 128-row tile is the faster at every size measured).
+        (256, 0): (CdnaTier(_GEN, 128, kv_gpfetch=0, k_chunk=128, kv_aligned=True),),
+        (256, 1): (CdnaTier(_GEN, 128, kv_gpfetch=0, k_chunk=128),),
     },
     "gfx950": {
         **_SDPA_CDNA_DUALWAVE,
@@ -854,17 +1195,52 @@ SDPA_CDNA_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
             CdnaTier(_GEN, 64, prefer=("rows", 0, 18432)),
             CdnaTier(_GEN, 256, prefer=("rows", 49152, 0)),
         ),
-        # head_dim 256 fits gfx942's 64 KiB of LDS only with the K and V tiles unpadded
-        # (gen_sdpa_cdna._GENERIC_LDS_PADS); the 256-row tile spills.
+        # head_dim 256 on gfx942's 64 KiB of LDS: K staged in 128-column chunks
+        # (modification 18, without the KV global prefetch, which the chunked loads do not
+        # take) keeps the K and transposed-V tiles padded (_sdpa_cdna_build._lds_pads), so
+        # the V^T reads do not conflict. 1.7-2.1x faster than the whole K tile with both
+        # unpadded on every measured shape (COVERAGE.md section 7.5, item 6).
         (256, 0): (
-            CdnaTier(_GEN, 128, kv_aligned=True),
-            CdnaTier(_GEN, 64, kv_aligned=True, prefer=("rows", 0, 24576)),
+            CdnaTier(_GEN, 128, kv_gpfetch=0, k_chunk=128, kv_aligned=True),
+            CdnaTier(
+                _GEN,
+                64,
+                kv_gpfetch=0,
+                k_chunk=128,
+                kv_aligned=True,
+                prefer=("rows", 0, 24576),
+            ),
         ),
         (256, 1): (
-            CdnaTier(_GEN, 128),
-            CdnaTier(_GEN, 64, prefer=("rows", 0, 24576)),
+            CdnaTier(_GEN, 128, kv_gpfetch=0, k_chunk=128),
+            CdnaTier(_GEN, 64, kv_gpfetch=0, k_chunk=128, prefer=("rows", 0, 24576)),
         ),
     },
+}
+# head_dim 256 on gfx950's dual-wave kernel: AOTriton's geometry for it, 4 waves of 32 rows
+# (a 128-row tile), one wave per SIMD to hold the 133 KiB of K and V tiles (vendored-kernel
+# modification 43). Its own classes, so the generic objects at 256 keep their ranks; each
+# engine ranks only its own objects. No bias (its staging tile does not fit beside them).
+SDPA_CDNA_DUALWAVE_WIDE_TIERS: dict[
+    str, dict[tuple[int, int], tuple[CdnaTier, ...]]
+] = {
+    "gfx950": {
+        # Non-causal: setprio off measured 0.5% faster, as at 64 and 128.
+        (256, 0): (CdnaTier(_DW, 128, waves_per_eu=1, setprio=0),),
+        # Causal: the offset-0 build 1-5% faster than the any-diagonal one, ranked above it.
+        (256, 1): (CdnaTier(_DW, 128, waves_per_eu=1, offset_zero=True),),
+    },
+    "gfx942": {},
+    "gfx90a": {},
+}
+# The head_dim 256 tiles gfx942 and gfx90a shipped before K was staged in chunks there (both
+# LDS tiles unpadded). The dropout objects at 256 keep them (SDPA_CDNA_DROPOUT_OVERRIDES): the
+# chunked tile was measured without the Philox draws.
+_SDPA_CDNA_256_WHOLE_K = {
+    ("gfx942", 0): CdnaTier(_GEN, 128, kv_aligned=True),
+    ("gfx942", 1): CdnaTier(_GEN, 128),
+    ("gfx90a", 0): CdnaTier(_GEN, 128, waves_per_eu=3),
+    ("gfx90a", 1): CdnaTier(_GEN, 128, waves_per_eu=1),
 }
 # An additive bias in the query's dtype is a compile-time axis of both kernels (the
 # dual-wave kernel upstream's, the generic one modification 12). Bias graphs are rare in
@@ -985,6 +1361,26 @@ SDPA_CDNA_WIDE_TIERS: dict[str, dict[tuple[int, int, int], tuple[CdnaTier, ...]]
     },
 }
 
+# Prefill at an exact 512/512 head dim (the Stable Diffusion / Flux VAE mid-block, one head
+# x 512 channels): the generic kernel's prefill tile with O's 512 columns split four ways
+# across workgroups (`dv_split`, modification 16) and Q streamed past 256 columns. gfx950's
+# 160 KiB of LDS holds the whole K tile; gfx942's and gfx90a's 64 KiB stage K in 256-column
+# chunks (`k_chunk`, modification 18), without the KV global prefetch. The decode engine's
+# wide objects serve 512/512 too; both are candidates. Keyed (head_dim, causal).
+SDPA_CDNA_WIDE_PREFILL_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
+    "gfx950": {
+        (512, causal): (CdnaTier(_GEN, 128, waves_per_eu=1, dv_split=4),)
+        for causal in (0, 1)
+    },
+    **{
+        arch: {
+            (512, causal): (CdnaTier(_GEN, 128, dv_split=4, kv_gpfetch=0, k_chunk=256),)
+            for causal in (0, 1)
+        }
+        for arch in ("gfx942", "gfx90a")
+    },
+}
+
 # Every other head dim that is a multiple of 8 (vendored-kernel modifications 13, 17, 26):
 # objects built for a bucket width whose Q, K and V widths are all the graph's runtime head
 # dim, ranked below every object built for an exact head dim. A bucket serves every head
@@ -1000,8 +1396,45 @@ PRIORITY_SDPA_CDNA_BUCKET = {
     192: 72,
     224: 71,
     256: 70,
+    512: 69,
 }
 PRIORITY_SDPA_CDNA_BUCKET_COMPANION_OFFSET = 10
+
+# Head dims 264-504 (every multiple of 8 between the 256 bucket and the exact 512/512
+# objects): a 512 bucket whose V and O follow Q and K's runtime width while O's columns are
+# split four ways (vendored-kernel modification 39), on the exact 512/512 objects' tiles. The
+# grid launches only the column slices that hold the graph's width (264-384 take three).
+# AOTriton's Triton kernel serves this range on its 512 rung the same way. Keyed
+# (bucket, causal).
+SDPA_CDNA_WIDE_BUCKET_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = (
+    SDPA_CDNA_WIDE_PREFILL_TIERS
+)
+
+# Any Q/K head dim apart from V's (PyTorch's memory-efficient SDPA admits every pair, and
+# AOTriton serves each on the rung that holds the wider; MiniCPM3's 96/64, say): bucket
+# objects whose Q and K are masked at Q/K's runtime width and V and O at V's
+# (vendored-kernel modification 40), both multiples of 8 up to the bucket. Each bucket's
+# default tier (the 512 bucket's for 512). They serve only pairs whose widths differ: equal
+# widths keep the buckets above, so no equal-width graph gains a candidate. The narrower
+# bucket ranks first; the exact MLA 192/128 objects rank above them all.
+SDPA_CDNA_PAIR_BUCKETS = tuple(
+    (bucket, causal) for bucket in (64, 128, 256, 512) for causal in (0, 1)
+)
+PRIORITY_SDPA_CDNA_PAIR = {64: 56, 128: 55, 256: 54, 512: 53}
+# Three waves per EU spill with V's own width (2-6 VGPRs, non-causal); the kernel's default
+# does not, as on the d64 bias buckets.
+SDPA_CDNA_PAIR_OVERRIDES: dict[tuple[str, int, int], CdnaTier] = {
+    (arch, 64, causal): CdnaTier(_GEN, 128)
+    for arch in ("gfx942", "gfx90a")
+    for causal in (0, 1)
+}
+
+
+def _pair_bucket_tier(arch: str, bucket: int, causal: int) -> CdnaTier:
+    tiers = SDPA_CDNA_WIDE_BUCKET_TIERS if bucket == 512 else SDPA_CDNA_BUCKET_TIERS
+    return SDPA_CDNA_PAIR_OVERRIDES.get(
+        (arch, bucket, causal), tiers[arch][(bucket, causal)][0]
+    )
 
 
 def _bucket(*tiers: CdnaTier) -> tuple[CdnaTier, ...]:
@@ -1048,6 +1481,25 @@ SDPA_CDNA_BUCKET_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] =
         (192, 1): _bucket(CdnaTier(_GEN, 128, waves_per_eu=3)),
         (224, 0): _bucket(CdnaTier(_GEN, 128, waves_per_eu=2)),
         (224, 1): _bucket(CdnaTier(_GEN, 128, waves_per_eu=3)),
+    },
+}
+
+
+# A bias on the bucket objects: one bias object beside each bucket class's default tier,
+# so a bias graph at a head dim no exact object serves runs as RDNA's generic head-dim
+# tiers serve it. The tier is the plain bucket's where it holds the bias without a spill,
+# else the next that does (`_bucket_bias_tier`); the plain bucket objects are unchanged.
+def _bucket_bias_tier(arch: str, bucket: int, causal: int) -> CdnaTier:
+    tier = SDPA_CDNA_BUCKET_TIERS[arch][(bucket, causal)][0]
+    return SDPA_CDNA_BUCKET_BIAS_OVERRIDES.get((arch, bucket, causal), tier)
+
+
+SDPA_CDNA_BUCKET_BIAS_OVERRIDES: dict[tuple[str, int, int], CdnaTier] = {
+    # Three waves per EU spill with a bias, as on the exact d64 bias objects.
+    **{
+        (arch, 64, causal): CdnaTier(_GEN, 128)
+        for arch in ("gfx942", "gfx90a")
+        for causal in (0, 1)
     },
 }
 
@@ -1110,6 +1562,286 @@ SDPA_CDNA_SINK_TIERS: dict[str, dict[tuple[int, int], tuple[CdnaTier, ...]]] = {
     },
 }
 
+
+# A bias and a sink together (vendored-kernel modification 19 under 28): a bias object
+# beside each prefill sink object, its tier, or the next that holds both without a spill.
+# The decode sink tiers pack the GQA group into rows, which addresses no per-head bias, so
+# a bias with a sink runs on these at any query length.
+def _sink_bias_tiers(arch: str, key: tuple[int, int]) -> tuple[CdnaTier, ...]:
+    tiers = [t for t in SDPA_CDNA_SINK_TIERS[arch][key] if not t.split_kv]
+    return tuple(SDPA_CDNA_SINK_BIAS_OVERRIDES.get((arch, *key), t) for t in tiers)
+
+
+SDPA_CDNA_SINK_BIAS_OVERRIDES: dict[tuple[str, int, int], CdnaTier] = {
+    # Three waves per EU spill with a bias, as on the exact d64 bias objects.
+    **{
+        (arch, 64, causal): CdnaTier(_GEN, 128, has_sink=1)
+        for arch in ("gfx942", "gfx90a")
+        for causal in (0, 1)
+    },
+    # The 64-row tile spills here with a bias and a sink; one wave per SIMD holds 128
+    # rows, as on the exact bias objects.
+    ("gfx950", 128, 1): CdnaTier(_GEN, 128, waves_per_eu=1, has_sink=1),
+}
+
+# A bias read one key at a time (vendored-kernel modification 31): a broadcast along the
+# keys, any key length and row pitch, and an f32 bias, which the vectorized bias objects
+# above decline. One object per bucket class at 64, 128 and 256 (Q, K and V following
+# the graph's head dim), so every head dim the buckets serve takes any bias; the bucket's
+# bias tier, ranked below every vectorized bias object (`PRIORITY_SDPA_CDNA_BIAS_KSTRIDED`).
+SDPA_CDNA_KSTRIDED_BUCKETS = (64, 128, 256)
+PRIORITY_SDPA_CDNA_BIAS_KSTRIDED_OFFSET = 20
+# Where the bucket's bias tier spills with the bias read one key at a time.
+SDPA_CDNA_KSTRIDED_OVERRIDES: dict[tuple[str, int, int], CdnaTier] = {
+    # One wave per SIMD holds 128 rows, as on the exact bias objects.
+    ("gfx950", 128, causal): CdnaTier(_GEN, 128, waves_per_eu=1, bias_kstrided=1)
+    for causal in (0, 1)
+}
+
+# A sink with a bias the vectorized objects do not read -- f32, broadcast along the keys, a
+# key length or row pitch off their vectors (COVERAGE.md section 7.5 item 16): a strided
+# build (vendored-kernel modification 31) of each prefill sink-and-bias tier, ranked below
+# its vectorized twin as the strided buckets are below theirs.
+# Where the tier spills with the bias read one key at a time, the next that holds it.
+SDPA_CDNA_SINK_KSTRIDED_OVERRIDES: dict[tuple[str, int, int], CdnaTier] = {
+    ("gfx950", 128, causal): CdnaTier(
+        _GEN, 128, waves_per_eu=1, has_sink=1, bias_kstrided=1
+    )
+    for causal in (0, 1)
+}
+
+
+def _sink_kstrided_tiers(arch: str, key: tuple[int, int]) -> tuple[CdnaTier, ...]:
+    return tuple(
+        SDPA_CDNA_SINK_KSTRIDED_OVERRIDES.get((arch, *key), replace(t, bias_kstrided=1))
+        for t in _sink_bias_tiers(arch, key)
+    )
+
+
+# Dropout (vendored-kernel modification 33), the first wave COVERAGE.md section 7.9 states:
+# bf16/f16 x causal or not x head_dim 64, 128 and 256, no bias, no sink, each class's first
+# generic tier (gfx950's dual-wave objects take no dropout, so there its generic companion's)
+# with the KV tail masked. Every other class declines a dropping graph until a model needs it.
+SDPA_CDNA_DROPOUT_HEAD_DIMS = (64, 128, 256)
+# Where the class's tier spills with the Philox draws, the next that holds them.
+SDPA_CDNA_DROPOUT_OVERRIDES: dict[tuple[str, int, int], CdnaTier] = {
+    # The whole-K 256 tiles the dropout objects were measured on (_SDPA_CDNA_256_WHOLE_K).
+    **{
+        (arch, 256, causal): tier
+        for (arch, causal), tier in _SDPA_CDNA_256_WHOLE_K.items()
+    },
+    # Three waves per EU spill, as with a bias; the kernel's default does not.
+    **{
+        (arch, 64, causal): CdnaTier(_GEN, 128)
+        for arch in ("gfx942", "gfx90a")
+        for causal in (0, 1)
+    },
+    # gfx90a's 256-row tile spills at 128; the bias classes' 128-row tiles do not.
+    ("gfx90a", 128, 0): CdnaTier(_GEN, 128),
+    ("gfx90a", 128, 1): CdnaTier(_GEN, 128, kv_gpfetch=0),
+    # The 64-row tile spills 6 here; one wave per SIMD holds 128 rows, as with a bias.
+    ("gfx950", 128, 1): CdnaTier(_GEN, 128, waves_per_eu=1),
+}
+
+
+def _dropout_tier(arch: str, head_dim: int, causal: int) -> CdnaTier:
+    tier = SDPA_CDNA_DROPOUT_OVERRIDES.get((arch, head_dim, causal)) or next(
+        t for t in SDPA_CDNA_TIERS[arch][(head_dim, causal)] if t.kernel == _GEN
+    )
+    return replace(
+        tier,
+        has_dropout=1,
+        kv_aligned=False,
+        offset_zero=False,
+        prefer=("none", 0, 0),
+    )
+
+
+# The dropout objects without a bias, tuned against AOTriton's own dropout cost (COVERAGE.md
+# section 7.9, cost): on gfx942 and gfx950 each non-causal one also ships the key-aligned
+# build its plain class has, ranked above it (3-6% faster at key lengths a multiple of 64).
+SDPA_CDNA_DROPOUT_KV_ALIGNED_ARCHS = ("gfx942", "gfx950")
+# Where another tile holds the Philox draws faster than the class's: gfx950's 64-row tile at
+# 64 (its class's generic companion) is ~20% slower than the 128-row one at S1024-S4096.
+SDPA_CDNA_DROPOUT_UNBIASED_OVERRIDES: dict[tuple[str, int, int], CdnaTier] = {
+    ("gfx950", 64, 0): CdnaTier(_GEN, 128, kv_aligned=True),
+}
+# Companions with the plain class's preference rule: gfx942's 256-row tile at 128 (without
+# the KV global prefetch, which spills with the Philox draws) is ~20% faster from 49152 rows
+# on and much slower below.
+SDPA_CDNA_DROPOUT_COMPANIONS: dict[tuple[str, int, int], tuple[CdnaTier, ...]] = {
+    ("gfx942", 128, 0): (
+        CdnaTier(_GEN, 256, kv_gpfetch=0, kv_aligned=True, prefer=("rows", 49152, 0)),
+    ),
+}
+
+
+def _dropout_tiers(arch: str, head_dim: int, causal: int) -> tuple[CdnaTier, ...]:
+    """A dropout class's objects (no bias): its tier, then its companions."""
+    key = (arch, head_dim, causal)
+    tier = _dropout_tier(arch, head_dim, causal)
+    if key in SDPA_CDNA_DROPOUT_UNBIASED_OVERRIDES:
+        tier = replace(SDPA_CDNA_DROPOUT_UNBIASED_OVERRIDES[key], has_dropout=1)
+    elif arch in SDPA_CDNA_DROPOUT_KV_ALIGNED_ARCHS:
+        class_tier = next(t for t in SDPA_CDNA_TIERS[arch][key[1:]] if t.kernel == _GEN)
+        tier = replace(tier, kv_aligned=class_tier.kv_aligned)
+    return (tier,) + tuple(
+        replace(t, has_dropout=1) for t in SDPA_CDNA_DROPOUT_COMPANIONS.get(key, ())
+    )
+
+
+# Dropout on the buckets (the parity gaps: E1, E3, and G3's dropout): a dropout build of each
+# bucket at 64, 128 and 256 (Q, K and V the graph's runtime head dim, so every multiple of 8
+# up to them, and V with heads of its own, vendored-kernel modification 42), plain, with a
+# vectorized bias and with a bias read one key at a time (f32, broadcast along the keys, off
+# the 16-byte rows). Each ranks as its bucket does, so the exact dropout objects (a class
+# default's priority) stay first wherever they apply; the strided build below the vectorized.
+SDPA_CDNA_DROPOUT_BUCKETS = (64, 128, 256)
+# Where the bucket's tier spills with the Philox draws (and the bias), the next that holds them.
+SDPA_CDNA_DROPOUT_BUCKET_OVERRIDES: dict[tuple[str, int, int, int, int], CdnaTier] = {
+    # As the exact dropout objects: three waves per EU spill at 64 (the kernel's default
+    # occupancy does not); gfx90a's 128 takes 128 rows (causal without the KV global
+    # prefetch); gfx950's causal 128 one wave per SIMD on 128 rows.
+    **{
+        (arch, 64, causal, 0, 0): CdnaTier(_GEN, 128, has_dropout=1)
+        for arch in ("gfx942", "gfx90a")
+        for causal in (0, 1)
+    },
+    ("gfx90a", 128, 0, 0, 0): CdnaTier(_GEN, 128, has_dropout=1),
+    ("gfx90a", 128, 1, 0, 0): CdnaTier(_GEN, 128, kv_gpfetch=0, has_dropout=1),
+    ("gfx950", 128, 1, 0, 0): CdnaTier(_GEN, 128, waves_per_eu=1, has_dropout=1),
+}
+
+
+def _dropout_bucket_tier(
+    arch: str, bucket: int, causal: int, has_bias: int, kstrided: int
+) -> CdnaTier:
+    key = (arch, bucket, causal, has_bias, kstrided)
+    if key in SDPA_CDNA_DROPOUT_BUCKET_OVERRIDES:
+        return SDPA_CDNA_DROPOUT_BUCKET_OVERRIDES[key]
+    if kstrided:
+        base = SDPA_CDNA_KSTRIDED_OVERRIDES.get(
+            (arch, bucket, causal),
+            replace(_bucket_bias_tier(arch, bucket, causal), bias_kstrided=1),
+        )
+    elif has_bias:
+        base = _bucket_bias_tier(arch, bucket, causal)
+    else:
+        base = SDPA_CDNA_BUCKET_TIERS[arch][(bucket, causal)][0]
+    return replace(
+        base,
+        has_dropout=1,
+        kv_aligned=False,
+        offset_zero=False,
+        prefer=("none", 0, 0),
+    )
+
+
+# A bias on the 512 bucket and the pair buckets (the parity gaps: E4, E5 and E6), vectorized
+# and read one key at a time, on each bucket's default tier, ranked as the bucket's own and
+# the strided below. The pair buckets with a bias serve un-absorbed MLA 192/128 with a bias
+# (on the 256 pair bucket) too.
+SDPA_CDNA_WIDE_BIAS_OVERRIDES: dict[tuple[str, int, int, int], CdnaTier] = {}
+SDPA_CDNA_PAIR_BIAS_OVERRIDES: dict[tuple[str, int, int, int], CdnaTier] = {
+    # One wave per SIMD holds 128 rows with the bias read one key at a time, as on the
+    # strided buckets.
+    ("gfx950", 128, causal, 1): CdnaTier(_GEN, 128, waves_per_eu=1, bias_kstrided=1)
+    for causal in (0, 1)
+}
+
+
+# Exact f32 operands (vendored-kernel modification 35), the first wave COVERAGE.md section
+# 7.11 states: no bias, sink or dropout. f32 runs the generic kernel's gfx942-class path on
+# every arch, at about a quarter of bf16's rate (f32 MFMA), so the tiles are chosen for
+# occupancy: on gfx942 and gfx90a every f32 tile fills most of the 64 KiB LDS, one workgroup
+# per CU, and only a 256-row tile (8 waves) puts two waves on each SIMD. Per arch: the
+# buckets up to 64 and 128 (`qk_mask`, V following Q/K, so any multiple of 8 up to them),
+# and up to 256 on gfx950; on gfx942 and gfx90a head_dim 256 exactly, Q re-read per K-step,
+# K chunked and O's columns split across two workgroups (`dv_split`), which a bucket cannot
+# take (modification 17). On gfx942 and gfx90a the causal 64 bucket keeps 128 rows (the
+# 256-row tile measured slower there), and so does the 128 bucket, whose 256-row tile spills
+# 37-38 VGPRs with the bucket's masks; gfx950's 160 KiB holds 256 rows everywhere unspilled.
+_F32_942 = {
+    (64, 0): CdnaTier(_GEN, 256),
+    (64, 1): CdnaTier(_GEN, 128),
+    (128, 0): CdnaTier(_GEN, 128, k_chunk=64),
+    (128, 1): CdnaTier(_GEN, 128, k_chunk=64),
+    (256, 0): CdnaTier(_GEN, 256, k_chunk=64, dv_split=2),
+    (256, 1): CdnaTier(_GEN, 256, k_chunk=64, dv_split=2),
+}
+SDPA_CDNA_F32_TIERS: dict[str, dict[tuple[int, int], CdnaTier]] = {
+    "gfx942": _F32_942,
+    # gfx942's: the same 64 KiB LDS and code path.
+    "gfx90a": dict(_F32_942),
+    # Timed on gfx950 against the other tiles that hold (B1 H32 S4096, B4 H16 S1024): the causal
+    # 64 and 128 classes on 128 rows (the 128 unchunked, 66 KiB) by 14-21%; at 256 one unsplit
+    # 128-row bucket, one wave per SIMD (the 160 KiB holds the whole tile): 17-19% faster than
+    # the split one and, unsplit, a bucket, so every head dim to 256 is served.
+    "gfx950": {
+        (64, 0): CdnaTier(_GEN, 256),
+        (64, 1): CdnaTier(_GEN, 128),
+        (128, 0): CdnaTier(_GEN, 256, k_chunk=64),
+        (128, 1): CdnaTier(_GEN, 128),
+        (256, 0): CdnaTier(_GEN, 128, waves_per_eu=1),
+        (256, 1): CdnaTier(_GEN, 128, waves_per_eu=1),
+    },
+}
+
+# f32 with dropout and with a bias (AOTriton's fp32 suite runs both, and both together:
+# `test_op_fwd_with_matrix_bias` drops at p 0.5), and at a scale that needs scaled scores,
+# which reroutes to the bias builds with a zero bias. Builds of the f32 buckets: dropout, a
+# bias read one key at a time (f32, at any key stride and row pitch; the vectorized bias
+# reads 2-byte elements, so f32 takes the strided one), and both, causal and not. On gfx942
+# and gfx90a the exact 256 tile is also built as a 256 bucket: modification 39 lets a bucket
+# split O's columns, so every f32 head dim from 136 to 248 has an object there too (its LDS
+# is the exact tile's).
+SDPA_CDNA_F32_BUCKET_256: dict[str, dict[tuple[int, int], CdnaTier]] = {
+    arch: {
+        (256, causal): CdnaTier(_GEN, 256, k_chunk=64, dv_split=2) for causal in (0, 1)
+    }
+    for arch in ("gfx942", "gfx90a")
+}
+# Where an f32 bucket's tier spills with the Philox draws or the strided bias, the next
+# that holds them, keyed by (arch, bucket, causal, has_dropout, bias_kstrided).
+SDPA_CDNA_F32_VARIANT_OVERRIDES: dict[tuple[str, int, int, int, int], CdnaTier] = {
+    # The non-causal 256 bucket's 256-row tile spills 24-26 VGPRs with the strided bias (with
+    # and without dropout); 128 rows hold it (the same LDS).
+    (arch, 256, 0, dropout, 1): CdnaTier(
+        _GEN, 128, k_chunk=64, dv_split=2, bias_kstrided=1, has_dropout=dropout
+    )
+    for arch in ("gfx942", "gfx90a")
+    for dropout in (0, 1)
+} | {
+    # gfx950's 128 bucket: the non-causal 256-row tile spills 50-52 with the strided bias (66-68
+    # at 128 rows), and the causal 128-row tile 2-26 with dropout or the bias; one wave per
+    # SIMD holds each, as the 16-bit causal 128 bucket's dropout build.
+    **{
+        ("gfx950", 128, 0, dropout, 1): CdnaTier(
+            _GEN, 128, waves_per_eu=1, k_chunk=64, bias_kstrided=1, has_dropout=dropout
+        )
+        for dropout in (0, 1)
+    },
+    **{
+        ("gfx950", 128, 1, dropout, kstrided): CdnaTier(
+            _GEN, 128, waves_per_eu=1, bias_kstrided=kstrided, has_dropout=dropout
+        )
+        for dropout, kstrided in ((1, 0), (0, 1), (1, 1))
+    },
+}
+
+
+def _f32_bucket_tiers(arch: str) -> dict[tuple[int, int], CdnaTier]:
+    """The f32 buckets of @p arch: the tiers that keep O's columns whole, and the 256 bucket
+    that splits them where the exact 256 does."""
+    tiers = {
+        key: tier
+        for key, tier in SDPA_CDNA_F32_TIERS[arch].items()
+        if tier.dv_split == 1
+    }
+    tiers.update(SDPA_CDNA_F32_BUCKET_256.get(arch, {}))
+    return tiers
+
+
 SDPA_CDNA_MERGE_SYMBOL = "flash_attn_generic_merge_kernel_1"
 
 # Everything else is a kernel argument (vendored-kernel modifications 2-8).
@@ -1127,6 +1859,7 @@ def _cdna_instance(
     any_diagonal,
     head_dim_v=None,
     qk_mask=0,
+    v_mask=0,
 ):
     feature, low, high = tier.prefer
     return Instance(
@@ -1154,6 +1887,11 @@ def _cdna_instance(
             "dv_split": tier.dv_split,
             "k_chunk": tier.k_chunk,
             "has_sink": tier.has_sink,
+            "bias_kstrided": tier.bias_kstrided,
+            "has_dropout": tier.has_dropout,
+            # V and O at a runtime width of their own, apart from Q and K's (a pair
+            # bucket; vendored-kernel modification 40).
+            "v_mask": v_mask,
             # The split objects' second kernel, which combines the splits; same code
             # object (vendored-kernel modification 14).
             "merge_symbol": SDPA_CDNA_MERGE_SYMBOL if tier.split_kv else "",
@@ -1176,6 +1914,28 @@ def _sdpa_cdna_rows(arch: str) -> list[Instance]:
     ]
     classes += [(key, 1, tiers) for key, tiers in SDPA_CDNA_BIAS_TIERS[arch].items()]
     classes += [(key, 0, tiers) for key, tiers in SDPA_CDNA_SINK_TIERS[arch].items()]
+    classes += [
+        (key, 1, _sink_bias_tiers(arch, key)) for key in SDPA_CDNA_SINK_TIERS[arch]
+    ]
+    # The dropout objects: each class's tier is its default; gfx942's 128 companion ranks below.
+    classes += [
+        ((head_dim, causal), 0, _dropout_tiers(arch, head_dim, causal))
+        for head_dim in SDPA_CDNA_DROPOUT_HEAD_DIMS
+        for causal in (0, 1)
+    ]
+    # Dropout with a bias (COVERAGE.md section 7.9's second wave): a vectorized-bias build of
+    # each dropout object, the bias in the query's dtype added to the scores and the mask drawn
+    # after the softmax's sum, as AOTriton composes them; each its class's only object. Every
+    # dropout tier holds the bias without a spill. A bias only the strided objects read
+    # declines with dropout until a model needs it.
+    classes += [
+        ((head_dim, causal), 1, (_dropout_tier(arch, head_dim, causal),))
+        for head_dim in SDPA_CDNA_DROPOUT_HEAD_DIMS
+        for causal in (0, 1)
+    ]
+    classes += [
+        (key, 0, tiers) for key, tiers in SDPA_CDNA_DUALWAVE_WIDE_TIERS[arch].items()
+    ]
     instances: list[Instance] = []
     for dtype in SDPA_CDNA_DTYPES:
         for (head_dim, causal), has_bias, tiers in classes:
@@ -1253,6 +2013,228 @@ def _sdpa_cdna_rows(arch: str) -> list[Instance]:
                         qk_mask=1,
                     )
                 )
+        for bucket, causal in SDPA_CDNA_BUCKET_TIERS[arch]:
+            tier = _bucket_bias_tier(arch, bucket, causal)
+            variants = [(tier, PRIORITY_SDPA_CDNA_BUCKET[bucket])]
+            if bucket in SDPA_CDNA_KSTRIDED_BUCKETS:
+                variants.append(
+                    (
+                        SDPA_CDNA_KSTRIDED_OVERRIDES.get(
+                            (arch, bucket, causal), replace(tier, bias_kstrided=1)
+                        ),
+                        PRIORITY_SDPA_CDNA_BUCKET[bucket]
+                        - PRIORITY_SDPA_CDNA_BIAS_KSTRIDED_OFFSET,
+                    )
+                )
+            for variant, priority in variants:
+                instances.append(
+                    _cdna_instance(
+                        dtype,
+                        bucket,
+                        causal,
+                        1,
+                        variant,
+                        priority,
+                        0,
+                        1,
+                        head_dim_v=bucket,
+                        qk_mask=1,
+                    )
+                )
+        # The exact 512/512 prefill objects.
+        for (head_dim, causal), tiers in SDPA_CDNA_WIDE_PREFILL_TIERS[arch].items():
+            for index, tier in enumerate(tiers):
+                instances.append(
+                    _cdna_instance(
+                        dtype,
+                        head_dim,
+                        causal,
+                        0,
+                        tier,
+                        (
+                            PRIORITY_SDPA_CDNA_DEFAULT
+                            if index == 0
+                            else PRIORITY_SDPA_CDNA_COMPANION
+                        ),
+                        0,
+                        1,
+                        head_dim_v=head_dim,
+                    )
+                )
+        # The 512 bucket (head dims 264-504).
+        for (bucket, causal), tiers in SDPA_CDNA_WIDE_BUCKET_TIERS[arch].items():
+            for index, tier in enumerate(tiers):
+                instances.append(
+                    _cdna_instance(
+                        dtype,
+                        bucket,
+                        causal,
+                        0,
+                        tier,
+                        PRIORITY_SDPA_CDNA_BUCKET[bucket]
+                        - (PRIORITY_SDPA_CDNA_BUCKET_COMPANION_OFFSET if index else 0),
+                        0,
+                        1,
+                        head_dim_v=bucket,
+                        qk_mask=1,
+                    )
+                )
+        # The pair buckets (any Q/K and V head dims that differ): each bucket's default
+        # tier, built to read V's width apart from Q and K's.
+        for bucket, causal in SDPA_CDNA_PAIR_BUCKETS:
+            instances.append(
+                _cdna_instance(
+                    dtype,
+                    bucket,
+                    causal,
+                    0,
+                    _pair_bucket_tier(arch, bucket, causal),
+                    PRIORITY_SDPA_CDNA_PAIR[bucket],
+                    0,
+                    1,
+                    head_dim_v=bucket,
+                    qk_mask=1,
+                    v_mask=1,
+                )
+            )
+        # The parity-gap rows: dropout on the buckets; a bias on the 512 bucket and the pair
+        # buckets.
+        for bucket in SDPA_CDNA_DROPOUT_BUCKETS:
+            for causal in (0, 1):
+                for has_bias, kstrided in ((0, 0), (1, 0), (1, 1)):
+                    instances.append(
+                        _cdna_instance(
+                            dtype,
+                            bucket,
+                            causal,
+                            has_bias,
+                            _dropout_bucket_tier(
+                                arch, bucket, causal, has_bias, kstrided
+                            ),
+                            PRIORITY_SDPA_CDNA_BUCKET[bucket]
+                            - (
+                                PRIORITY_SDPA_CDNA_BIAS_KSTRIDED_OFFSET
+                                if kstrided
+                                else 0
+                            ),
+                            0,
+                            1,
+                            head_dim_v=bucket,
+                            qk_mask=1,
+                        )
+                    )
+        for (bucket, causal), tiers in SDPA_CDNA_WIDE_BUCKET_TIERS[arch].items():
+            for kstrided in (0, 1):
+                tier = SDPA_CDNA_WIDE_BIAS_OVERRIDES.get(
+                    (arch, bucket, causal, kstrided),
+                    replace(tiers[0], bias_kstrided=kstrided),
+                )
+                instances.append(
+                    _cdna_instance(
+                        dtype,
+                        bucket,
+                        causal,
+                        1,
+                        tier,
+                        PRIORITY_SDPA_CDNA_BUCKET[bucket]
+                        - (PRIORITY_SDPA_CDNA_BIAS_KSTRIDED_OFFSET if kstrided else 0),
+                        0,
+                        1,
+                        head_dim_v=bucket,
+                        qk_mask=1,
+                    )
+                )
+        for bucket, causal in SDPA_CDNA_PAIR_BUCKETS:
+            for kstrided in (0, 1):
+                tier = SDPA_CDNA_PAIR_BIAS_OVERRIDES.get(
+                    (arch, bucket, causal, kstrided),
+                    replace(
+                        _pair_bucket_tier(arch, bucket, causal), bias_kstrided=kstrided
+                    ),
+                )
+                instances.append(
+                    _cdna_instance(
+                        dtype,
+                        bucket,
+                        causal,
+                        1,
+                        tier,
+                        PRIORITY_SDPA_CDNA_PAIR[bucket]
+                        - (PRIORITY_SDPA_CDNA_BIAS_KSTRIDED_OFFSET if kstrided else 0),
+                        0,
+                        1,
+                        head_dim_v=bucket,
+                        qk_mask=1,
+                        v_mask=1,
+                    )
+                )
+        # The strided sink-and-bias objects (COVERAGE.md section 7.5 item 16).
+        for head_dim, causal in SDPA_CDNA_SINK_TIERS[arch]:
+            for tier in _sink_kstrided_tiers(arch, (head_dim, causal)):
+                instances.append(
+                    _cdna_instance(
+                        dtype,
+                        head_dim,
+                        causal,
+                        1,
+                        tier,
+                        PRIORITY_SDPA_CDNA_DEFAULT
+                        - PRIORITY_SDPA_CDNA_BIAS_KSTRIDED_OFFSET,
+                        0,
+                        1,
+                    )
+                )
+    # Exact f32 (modification 35): every tile that keeps O's columns whole is a bucket, ranked
+    # as the 16-bit buckets are; a split one serves its head dim exactly, as a class default.
+    for (head_dim, causal), tier in SDPA_CDNA_F32_TIERS[arch].items():
+        bucket = tier.dv_split == 1
+        instances.append(
+            _cdna_instance(
+                "f32",
+                head_dim,
+                causal,
+                0,
+                tier,
+                (
+                    PRIORITY_SDPA_CDNA_BUCKET[head_dim]
+                    if bucket
+                    else PRIORITY_SDPA_CDNA_DEFAULT
+                ),
+                0,
+                1,
+                head_dim_v=head_dim,
+                qk_mask=int(bucket),
+            )
+        )
+    # f32 with dropout, a strided bias, or both, on every f32 bucket; and the 256 bucket that
+    # splits O's columns, plain, where the exact 256 does (gfx942, gfx90a).
+    for (bucket, causal), tier in _f32_bucket_tiers(arch).items():
+        variants = (
+            [(0, 0)]
+            if (bucket, causal) not in SDPA_CDNA_F32_TIERS[arch]
+            or (SDPA_CDNA_F32_TIERS[arch][(bucket, causal)].dv_split != 1)
+            else []
+        )
+        variants += [(1, 0), (0, 1), (1, 1)]
+        for has_dropout, kstrided in variants:
+            instances.append(
+                _cdna_instance(
+                    "f32",
+                    bucket,
+                    causal,
+                    kstrided,
+                    SDPA_CDNA_F32_VARIANT_OVERRIDES.get(
+                        (arch, bucket, causal, has_dropout, kstrided),
+                        replace(tier, has_dropout=has_dropout, bias_kstrided=kstrided),
+                    ),
+                    PRIORITY_SDPA_CDNA_BUCKET[bucket]
+                    - (PRIORITY_SDPA_CDNA_BIAS_KSTRIDED_OFFSET if kstrided else 0),
+                    0,
+                    1,
+                    head_dim_v=bucket,
+                    qk_mask=1,
+                )
+            )
     return instances
 
 
@@ -1288,6 +2270,9 @@ SDPA_CDNA_FAMILY_CONSTANTS = {
         "dv_split": 1,
         "k_chunk": 0,
         "has_sink": 0,
+        "bias_kstrided": 0,
+        "has_dropout": 0,
+        "v_mask": 0,
         "merge_symbol": "",
         "prefer_feature": "none",
         "prefer_min": 0,
@@ -1300,6 +2285,9 @@ SDPA_CDNA_FAMILY_CONSTANTS = {
         "kv_align": 0,
         "split_kv": 1,
         "pack_gqa": 1,
+        "bias_kstrided": 0,
+        "has_dropout": 0,
+        "v_mask": 0,
     },
 }
 # The decode objects' rule preferred them over the prefill objects for short queries;
@@ -1362,16 +2350,20 @@ def sdpa_cdna_decode_instances(arch: str) -> list[Instance]:
 # generator records it with the object, as knobs a ranker can read.
 #
 # Rows, bf16 and f16 x causal 0/1: the exact head dims 64, 128 and 256, each plain, with an
-# additive mask in the query's dtype and with an f32 one; attention sinks at 64 and 128;
+# additive mask in the query's dtype and with an f32 one; attention sinks at 64 and 128,
+# each plain or with either mask (the kernel takes the sink and the mask in one
+# natural-log domain, README modification 9);
 # multi-head latent attention's un-absorbed 192/128; and padded tiers -- an object built
 # for a tile on the kernel's ladder that serves any head_dim up to it that is a multiple of
-# 8, the real one a runtime argument -- at the RDNA generic tiers' widths. A padded tier
-# ranks below an exact object, the narrower tier above the wider.
+# 8, the real one a runtime argument -- at the RDNA generic tiers' widths and at the
+# kernel's 384 and 512 tiles (head dims 264-512, which AOTriton's gfx1201 build ships and no
+# other family serves at a prefill tile), each plain and with either mask, as the exact head
+# dims. A padded tier ranks below an exact object, the narrower tier above the wider.
 SDPA_AIW_TARGETS = ("gfx12-generic",)
 SDPA_AIW_HEAD_DIMS = (64, 128, 256)
 SDPA_AIW_SINK_HEAD_DIMS = (64, 128)
 SDPA_AIW_MLA_HEAD_DIMS = ((192, 128),)
-SDPA_AIW_PADDED_TIERS = (64, 96, 128, 160, 224, 256)
+SDPA_AIW_PADDED_TIERS = (64, 96, 128, 160, 224, 256, 384, 512)
 PRIORITY_SDPA_AIW_PADDED = {
     64: 40,
     96: 30,
@@ -1379,9 +2371,26 @@ PRIORITY_SDPA_AIW_PADDED = {
     160: 15,
     224: 12,
     256: PRIORITY_GENERIC,
+    384: 8,
+    512: 6,
 }
 # Mask variants: (has_bias, bias_f32). The mask in Q's dtype is (1, 0).
 SDPA_AIW_BIAS = ((0, 0), (1, 0), (1, 1))
+# Dropout twins (AOTriton's ENABLE_DROPOUT, a Philox draw per score, so a compile-time axis):
+# the training forward's common classes, the exact head dims with no mask and no sink. Every
+# other class declines a dropout graph until a model needs it (COVERAGE §5.10).
+SDPA_AIW_DROPOUT_HEAD_DIMS = (64, 128, 256)
+# The parity gaps on gfx12, where only these objects drop (decision Q3): dropout with a mask
+# whose keys are strided (E2: the mask read one key at a time, `bias_kstrided`, ranked below
+# its contiguous twin), and dropout at head_dim 96 and the other multiples of 8 up to it (E3:
+# the padded 96 tier's dropout builds, plain and with either mask); and AOTriton's dropout
+# widths 136-248 (160, 192 and 224 in its suite) on the padded 160 and 224 tiers' dropout
+# builds, alike (192 runs on the 224 tier).
+PRIORITY_SDPA_AIW_KSTRIDED_OFFSET = 20
+SDPA_AIW_DROPOUT_PADDED_TIERS = (96, 160, 224)
+# The padded-row fill kernel every aiw object carries beside its main kernel (aiw
+# modification 10), launched by the native for padded graphs.
+SDPA_AIW_FILL_SYMBOL = "flash_attn_aiw_padfill_kernel_1"
 
 
 def _aiw_instance(
@@ -1394,6 +2403,8 @@ def _aiw_instance(
     has_bias=0,
     bias_f32=0,
     has_sink=0,
+    has_dropout=0,
+    bias_kstrided=0,
 ) -> Instance:
     return Instance(
         op="sdpa_aiw",
@@ -1406,8 +2417,10 @@ def _aiw_instance(
             "head_dim_v": head_dim if head_dim_v is None else head_dim_v,
             "has_bias": has_bias,
             "bias_f32": bias_f32,
-            "bias_kstrided": 0,
+            "bias_kstrided": bias_kstrided,
             "has_sink": has_sink,
+            "has_dropout": has_dropout,
+            "fill_symbol": SDPA_AIW_FILL_SYMBOL,
         },
     )
 
@@ -1433,16 +2446,19 @@ def sdpa_aiw_instances(arch: str) -> list[Instance]:
                         )
                     )
             for head_dim in SDPA_AIW_SINK_HEAD_DIMS:
-                instances.append(
-                    _aiw_instance(
-                        dtype,
-                        head_dim,
-                        causal,
-                        PRIORITY_SPECIALIZED,
-                        head_dim,
-                        has_sink=1,
+                for has_bias, bias_f32 in SDPA_AIW_BIAS:
+                    instances.append(
+                        _aiw_instance(
+                            dtype,
+                            head_dim,
+                            causal,
+                            PRIORITY_SPECIALIZED,
+                            head_dim,
+                            has_bias=has_bias,
+                            bias_f32=bias_f32,
+                            has_sink=1,
+                        )
                     )
-                )
             for head_dim, head_dim_v in SDPA_AIW_MLA_HEAD_DIMS:
                 instances.append(
                     _aiw_instance(
@@ -1454,14 +2470,112 @@ def sdpa_aiw_instances(arch: str) -> list[Instance]:
                         head_dim_v=head_dim_v,
                     )
                 )
-            for tier in SDPA_AIW_PADDED_TIERS:
+            for head_dim in SDPA_AIW_DROPOUT_HEAD_DIMS:
                 instances.append(
                     _aiw_instance(
-                        dtype, None, causal, PRIORITY_SDPA_AIW_PADDED[tier], tier
+                        dtype,
+                        head_dim,
+                        causal,
+                        PRIORITY_SPECIALIZED,
+                        head_dim,
+                        has_dropout=1,
                     )
                 )
+            # Dropout with an additive mask (R1): BERT-class fine-tuning passes a padding
+            # mask with dropout_p. Both mask dtypes, both causal variants; no sink, no MLA,
+            # no padded tier.
+            for head_dim in SDPA_AIW_DROPOUT_HEAD_DIMS:
+                for has_bias, bias_f32 in SDPA_AIW_BIAS:
+                    if not has_bias:
+                        continue
+                    instances.append(
+                        _aiw_instance(
+                            dtype,
+                            head_dim,
+                            causal,
+                            PRIORITY_SPECIALIZED,
+                            head_dim,
+                            has_bias=has_bias,
+                            bias_f32=bias_f32,
+                            has_dropout=1,
+                        )
+                    )
+                    instances.append(
+                        _aiw_instance(
+                            dtype,
+                            head_dim,
+                            causal,
+                            PRIORITY_SPECIALIZED - PRIORITY_SDPA_AIW_KSTRIDED_OFFSET,
+                            head_dim,
+                            has_bias=has_bias,
+                            bias_f32=bias_f32,
+                            has_dropout=1,
+                            bias_kstrided=1,
+                        )
+                    )
+            for tier in SDPA_AIW_DROPOUT_PADDED_TIERS:
+                for has_bias, bias_f32 in SDPA_AIW_BIAS:
+                    instances.append(
+                        _aiw_instance(
+                            dtype,
+                            None,
+                            causal,
+                            PRIORITY_SDPA_AIW_PADDED[tier],
+                            tier,
+                            has_bias=has_bias,
+                            bias_f32=bias_f32,
+                            has_dropout=1,
+                        )
+                    )
+            for tier in SDPA_AIW_PADDED_TIERS:
+                for has_bias, bias_f32 in SDPA_AIW_BIAS:
+                    instances.append(
+                        _aiw_instance(
+                            dtype,
+                            None,
+                            causal,
+                            PRIORITY_SDPA_AIW_PADDED[tier],
+                            tier,
+                            has_bias=has_bias,
+                            bias_f32=bias_f32,
+                        )
+                    )
     _assert_unique(instances)
     return instances
+
+
+def sdpa_dropout_mask_instances() -> list[Instance]:
+    """The RNG dump's keep-mask writer: one object per target, every value at runtime.
+
+    Not an attention axis and never selected for a graph: the dropping SDPA engines' natives
+    launch it after the attention launch when the graph names an RNG dump. f32 is the dump's
+    dtype, the only one hipDNN's references read."""
+    return [
+        Instance(
+            op="sdpa_dropout_mask",
+            dtype="f32",
+            priority=PRIORITY_SPECIALIZED,
+            knobs={"block_threads": 256},
+        )
+    ]
+
+
+def sdpa_head_pad_instances() -> list[Instance]:
+    """The head-dim padding copy: one object per target, every value at runtime.
+
+    Not an attention axis and never selected for a graph: the SDPA engines' natives launch it
+    around an attention launch for a graph whose Q/K or V/O head dim is not a multiple of 8,
+    copying the operands into a padded workspace and O back (FlydslSdpaHeadPad.hpp). It moves
+    16-bit units, so its one object serves every dtype the attention objects take; the row
+    names it f16."""
+    return [
+        Instance(
+            op="sdpa_head_pad",
+            dtype="f16",
+            priority=PRIORITY_SPECIALIZED,
+            knobs={"block_threads": 256},
+        )
+    ]
 
 
 OPS = {
@@ -1473,9 +2587,17 @@ OPS = {
     "sdpa_cdna_dualwave": sdpa_cdna_dualwave_instances,
     "sdpa_cdna_decode": sdpa_cdna_decode_instances,
     "sdpa_aiw": sdpa_aiw_instances,
+    "sdpa_dropout_mask": sdpa_dropout_mask_instances,
+    "sdpa_head_pad": sdpa_head_pad_instances,
 }
 # Ops whose table differs by target and so takes the arch.
-_PER_TARGET_OPS = {"sdpa_cdna", "sdpa_cdna_dualwave", "sdpa_cdna_decode", "sdpa_aiw"}
+_PER_TARGET_OPS = {
+    "sdpa_cdna",
+    "sdpa_cdna_dualwave",
+    "sdpa_cdna_decode",
+    "sdpa_aiw",
+    "sdpa_rdna",
+}
 
 
 def instances_for(op: str, arch: str | None = None) -> list[Instance]:

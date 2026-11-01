@@ -143,7 +143,7 @@ Design, the full feature table for both references, and how they are tested:
 | Additive attention bias (`attn_mask`) | Supported | Through the dense rewrite | Supported |
 | Bias gradient (`dbias` output) | - | - | Supported when a bias is set; `dbias` must have the bias tensor's shape and dtype |
 | Paged KV cache (cuDNN layout; requires both seq_len tensors) | Supported: K, V or both, each with its own block size; table width `ceil(max_seq_len_kv / block_size)`; an unset extent is inferred as cuDNN does (SEM-009) | Through the dense rewrite (ragged Q over paged K/V) | - |
-| Attention sink (`sink_token`, FLOAT [1, H, 1, 1]) | Supported | Through the dense rewrite | - |
+| Attention sink (`sink_token`, [1, H, 1, 1]; FLOAT, BFLOAT16 or HALF, widened exactly to f32) | Supported | Through the dense rewrite | - |
 | Block-sparse attention (`block_mask`, UINT8, one bit per 128 x 128 tile; SEM-025) | Supported | Through the dense rewrite (below) | - |
 | Softmax max / sum-exp stats outputs (cuDNN `Max`, `Sum_exp`; FLOAT [B, H, Sq, 1]) | Supported: `Max` includes the sink logit; a row with no live key and no sink has `Max` = -inf, `Sum_exp` = 0 | Through the dense rewrite (below) | - |
 | Ragged tensors | Through the dense rewrite (below) | Required on every Q/K/V/O | Through the dense rewrite (below) |

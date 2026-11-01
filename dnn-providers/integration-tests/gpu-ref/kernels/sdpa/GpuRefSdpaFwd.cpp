@@ -60,6 +60,24 @@ __device__ inline COMPUTE_TYPE storeSoftmaxProbability(COMPUTE_TYPE probability)
 
 // cuDNN Max / Sum_exp outputs (CpuFpReferenceSdpa rowMax / rowSumExp), written by the dv == 0
 // thread of each row like the LSE.
+// Query head h's attention-sink logit, widened exactly to float from the sink's dtype
+// (SDPA_SINK_*: FLOAT, or a BFLOAT16 / HALF model parameter for any Q dtype, SEM-022).
+__device__ inline float loadSinkLogit(const SdpaFwdArgs& args, long long h)
+{
+    const long long index = h * args.sinkStride;
+    if(args.sinkType == SDPA_SINK_BFLOAT16)
+    {
+        const auto bits
+            = static_cast<unsigned int>(static_cast<const unsigned short*>(args.sink)[index]);
+        return __builtin_bit_cast(float, bits << 16);
+    }
+    if(args.sinkType == SDPA_SINK_HALF)
+    {
+        return static_cast<float>(static_cast<const _Float16*>(args.sink)[index]);
+    }
+    return static_cast<const float*>(args.sink)[index];
+}
+
 __device__ inline void writeRowStats(const SdpaFwdArgs& args,
                                      long long b,
                                      long long h,
@@ -177,7 +195,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     // PASS 1: numerically stable softmax maximum. Keys past liveKv are padding: never read.
     // An attention sink joins the max and the denominator but has no value row.
     const COMPUTE_TYPE sink
-        = args.sink != nullptr ? static_cast<COMPUTE_TYPE>(args.sink[h * args.sinkStride]) : negInf;
+        = args.sink != nullptr ? static_cast<COMPUTE_TYPE>(loadSinkLogit(args, h)) : negInf;
     COMPUTE_TYPE maxVal = sink;
     for(long long skv = 0; skv < liveKv; ++skv)
     {
@@ -229,6 +247,14 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
     COMPUTE_TYPE rowAmax = static_cast<COMPUTE_TYPE>(0);
     for(long long skv = 0; skv < liveKv; ++skv)
     {
+        // A key the band or block mask removes is never read: its V may hold anything (vLLM's
+        // nulled or stale cache blocks), and 0 * NaN would leak (SEM-027). Its e is 0, so
+        // skipping it changes no other result.
+        if(sdpa_common::bandMasked(args.score, sq, skv, liveQ, liveKv)
+           || sdpa_common::blockMasked(args.score, b, h, sq, skv))
+        {
+            continue;
+        }
         COMPUTE_TYPE s = score(skv);
         COMPUTE_TYPE e = expf(s - maxVal);
         rowAmax = e > rowAmax ? e : rowAmax;
