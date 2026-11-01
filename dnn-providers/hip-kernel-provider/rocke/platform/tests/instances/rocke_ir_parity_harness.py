@@ -4932,7 +4932,8 @@ def cases():
         ),
     )
     # --- conv_direct_dgrad: windowed depthwise dgrad (stride 1) ---
-    # The dot2 VALU form and the Toeplitz MFMA form, both gfx950; the branch
+    # The dot2 VALU form and the Toeplitz MFMA form (gfx950) and its wave32
+    # WMMA form (gfx1250); the branch
     # matrix and the C++ twin live in library/tests/parity/conv_direct_dgrad_ext_emit.*.
     add(
         "conv_direct_dgrad",
@@ -4972,6 +4973,52 @@ def cases():
             mfma=True,
             w_fold=2,
             prefetch_rows=2,
+        ),
+    )
+    # The Toeplitz form on the wave32 WMMA (gfx1250): a 28-row 7x7 tile and a
+    # 5x5 fp16 one.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx1250/dw_dgrad_win_wmma_k7",
+        "gfx1250",
+        build_direct_depthwise_dgrad_win(
+            "irhash_dw_dgrad_win_1250_wmma_k7",
+            "gfx1250",
+            N=2,
+            H=30,
+            W=33,
+            groups=64,
+            KH=7,
+            PAD=3,
+            dtype="bf16",
+            block_waves=8,
+            block_h=28,
+            mfma=True,
+            w_fold=1,
+            prefetch_rows=2,
+            wave_size=32,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx1250/dw_dgrad_win_wmma_k5",
+        "gfx1250",
+        build_direct_depthwise_dgrad_win(
+            "irhash_dw_dgrad_win_1250_wmma_k5",
+            "gfx1250",
+            N=5,
+            H=13,
+            W=9,
+            groups=40,
+            KH=5,
+            PAD=2,
+            dtype="fp16",
+            block_waves=4,
+            block_h=8,
+            mfma=True,
+            w_fold=4,
+            prefetch_rows=2,
+            wave_size=32,
         ),
     )
 
@@ -5525,8 +5572,9 @@ def cases():
         )
 
     # Stride 2 (3x3 phases and the 2x2 patch merge), dilation, packed small
-    # groups, the split barrier with and without the per-wave epilogue, and
-    # tile widths that are not a power of two. Also llvm23-only.
+    # groups (also at stride 2), the split barrier with and without the
+    # per-wave epilogue, and tile widths that are not a power of two. Also
+    # llvm23-only.
     def build_direct_dgrad_wmma_ext_case(prob_kw, **spec_kw):
         def _build():
             from kernels.common.conv_direct_dgrad_wmma import (
@@ -5567,6 +5615,16 @@ def cases():
             "bf16_pg4_c8k8",
             dict(groups=8, cpg=8, kpg=8),
             dict(waves_c=1, waves_p=8, tiles_c=2, tiles_p=4, tile_n=2, pack_groups=4),
+        ),
+        (
+            "bf16_s2_pg4_c8k8",
+            dict(stride=2, groups=8, cpg=8, kpg=8),
+            dict(waves_c=1, waves_p=8, tiles_c=2, tiles_p=4, tile_w=8, pack_groups=4),
+        ),
+        (
+            "fp16_s2_pg8_c4k4",
+            dict(dtype="fp16", stride=2, groups=16, cpg=4, kpg=4),
+            dict(waves_c=2, waves_p=4, tiles_c=1, tiles_p=4, tile_n=2, pack_groups=8),
         ),
         (
             "bf16_s2_3x3",

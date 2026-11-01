@@ -7736,6 +7736,8 @@ DW_DGRAD_WIN_DOT2_ARCHES = ("gfx950",)
 # atom), the arches with that 16-bit atom, and the form's limits.
 DW_DGRAD_MFMA_CH = 8
 DW_DGRAD_MFMA_ARCHES = ("gfx950",)
+# The same Toeplitz form on the wave32 16x16x32 WMMA (_build_dw_dgrad_win_wmma).
+DW_DGRAD_WMMA_ARCHES = ("gfx1250",)
 DW_DGRAD_MFMA_W_FOLDS = (1, 2, 4)
 # Statically unrolled MFMAs per wave (rows x KH x passes).
 DW_DGRAD_MFMA_MAX_UNROLL = 512
@@ -7790,8 +7792,9 @@ class DirectDepthwiseDgradWindowedSpec:
     ch_per_lane: int = 1
     block_h: int = 8  # dX rows per block (a tile height; must be > 0)
     dot2: bool = False
-    # Toeplitz MFMA form (default off); w_fold and prefetch_rows apply to it
-    # only and must stay 1 otherwise.
+    # Toeplitz matrix form (default off): the MFMA at wave64 (gfx950), the
+    # wave32 WMMA at wave_size 32 (gfx1250); w_fold and prefetch_rows apply
+    # to it only and must stay 1 otherwise.
     mfma: bool = False
     # Images per block sharing one 16x16 tile (tile_w = 32 / w_fold columns).
     w_fold: int = 1
@@ -7850,11 +7853,15 @@ class DirectDepthwiseDgradWindowedSpec:
     def mfma_frag_vgprs(self) -> int:
         """VGPRs of the register-resident fragments (MFMA form): the one-hot
         weights (KH x passes), the KH accumulator tiles, one row of B
-        fragments and the prefetched dY rows, 4 VGPRs each."""
+        fragments and the prefetched dY rows, 4 VGPRs each (the fragments 8
+        each on the wave32 WMMA)."""
         p = self.problem
         kwp = _dw_mfma_passes(p.KW)
         rows = self.prefetch_rows * self._mfma_in_passes()
-        return 4 * (p.KH * kwp + p.KH + kwp + rows)
+        # wave32 WMMA (16x16x32): 16-element A / B fragments and 8 f32
+        # accumulators per lane, twice the wave64 MFMA's.
+        frag = 8 if self.wave_size == 32 else 4
+        return frag * (p.KH * kwp + p.KH + kwp) + 4 * rows
 
     def mfma_lds_bytes(self) -> int:
         """LDS bytes of the MFMA form: double-buffered dY window rows and dX
@@ -8009,8 +8016,15 @@ def is_valid_depthwise_dgrad_win_spec(
         return False, str(e)
     if spec.dot2 and arch not in DW_DGRAD_WIN_DOT2_ARCHES:
         return False, f"dot2 needs one of {DW_DGRAD_WIN_DOT2_ARCHES} (got {arch})"
-    if spec.mfma and arch not in DW_DGRAD_MFMA_ARCHES:
-        return False, f"mfma needs one of {DW_DGRAD_MFMA_ARCHES} (got {arch})"
+    if spec.mfma:
+        if spec.wave_size == 32:
+            if arch not in DW_DGRAD_WMMA_ARCHES:
+                return (
+                    False,
+                    f"wave32 mfma needs one of {DW_DGRAD_WMMA_ARCHES} (got {arch})",
+                )
+        elif arch not in DW_DGRAD_MFMA_ARCHES:
+            return False, f"mfma needs one of {DW_DGRAD_MFMA_ARCHES} (got {arch})"
     return _depthwise_dgrad_win_check(spec)
 
 
@@ -8063,6 +8077,8 @@ def build_direct_depthwise_dgrad_windowed(
     ok, why = is_valid_depthwise_dgrad_win_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid DirectDepthwiseDgradWindowedSpec for {arch}: {why}")
+    if spec.mfma and spec.wave_size == 32:
+        return _build_dw_dgrad_win_wmma(spec, arch)
     if spec.mfma:
         return _build_dw_dgrad_win_mfma(spec)
 
@@ -8612,6 +8628,301 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     if pend_out is not None:
         buf = b.const_i32(n_rows % 2)
         b.smem_store_vN(o_smem, [buf, o_col, o_ch], pend_out[0], 4)
+        b.sync_lds_only()
+        drain_out(buf, pend_out[1])
+    return b.kernel
+
+
+def _build_dw_dgrad_win_wmma(
+    spec: DirectDepthwiseDgradWindowedSpec, arch: str
+) -> KernelDef:
+    """Toeplitz WMMA form of the windowed depthwise dgrad kernel (``spec.mfma``
+    on a wave32 WMMA target: gfx1250).
+
+    The gfx950 MFMA form (:func:`_build_dw_dgrad_win_mfma`) on the wave32
+    ``16x16x32`` WMMA. Tile rows, columns, passes and the LDS staging are the
+    same; only the fragments differ. A wave32 lane ``l`` (``t = l // 16``) carries
+    16 K elements, ``K = 16 t .. 16 t + 15``, i.e. two 8-channel chunks ``j``:
+
+    - A: the one-hot weight ``W[k, r, KW - 1 - s]`` at slot ``8 j + k`` with
+      ``s = 4 ph + 2 t + j - q`` (zero outside ``[0, KW)``);
+    - B: the 8 channels of window columns ``2 (n % SUB) + 2 t + j + 4 ph``,
+      ``j = 0, 1`` (two ``ds_load_b128``);
+    - D: the 8 channels of the wave at column ``2 (n % SUB) + t`` (tile rows
+      ``8 t .. 8 t + 7`` = channels 0..7 at column parity ``t``).
+
+    So ``u = 2 t + j`` plays the role of the MFMA form's ``t``: the passes, the
+    receptive field and the non-finite semantics are unchanged.
+    """
+    from rocke.core.arch import ArchTarget
+
+    p = spec.problem
+    KH, KW, PAD = p.KH, p.KW, p.PAD
+    F = spec.w_fold
+    SUB = 16 // F
+    TW = spec.tile_w
+    KWP = _dw_mfma_passes(KW)
+    U = TW + 4 * KWP - 2  # window columns per image
+    ROWS = spec.block_h
+    THREADS = spec.threads_per_block
+    BLOCK_CH = spec.block_ch
+    PER_PX = BLOCK_CH // DW_DGRAD_MFMA_CH  # 16-byte channel chunks per pixel
+    CH_PAD = BLOCK_CH + DW_DGRAD_MFMA_CH
+    io_type = _io_type(p.dtype)
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = THREADS
+    params = emit_direct_params(b, direction="dgrad", io_type=io_type)
+    p_N = params["p_N"]
+    p_Hi = params["p_Hi"]
+    p_Wi = params["p_Wi"]
+    p_Ho = params["p_Ho"]
+    p_Wo = params["p_Wo"]
+    p_G = params["p_groups"]
+
+    c0 = b.const_i32(0)
+    oob_lane = b.const_i32(DW_DGRAD_WIN_OOB_LANE)
+    oob_uniform = b.const_i32(DW_DGRAD_WIN_OOB_UNIFORM)
+    zero_acc = b.zero_vec_f32(8)
+    ab = "bf16" if p.dtype == "bf16" else "f16"
+    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
+        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
+    )
+    zero_f32 = b.const_f32(0.0)
+    if p.dtype == "bf16":
+        zero_half = b.trunc_f32_to_bf16(zero_f32)
+    else:
+        zero_half = b.trunc_f32_to_f16(zero_f32)
+
+    tid = b.thread_id_x()
+    bx = b.block_id_x()
+    by = b.block_id_y()
+    n_tile, h0 = _dw_win_tile(b, p_Hi, ROWS)
+    c32 = b.const_i32(32)
+    lane = b.mod(tid, c32)
+    wave = b.div(tid, c32)
+    x0 = b.mul(bx, b.const_i32(TW))
+    img0 = b.mul(n_tile, b.const_i32(F))
+    ch_blk = b.mul(by, b.const_i32(BLOCK_CH))
+    wave_ch = b.mul(wave, b.const_i32(DW_DGRAD_MFMA_CH))
+    c_wave = b.add(ch_blk, wave_ch)
+    ch_ok = b.cmp_lt(c_wave, p_G)
+    c16 = b.const_i32(16)
+    c8 = b.const_i32(8)
+    col16 = b.mod(lane, c16)  # tile row m (A) / tile column n (B, D)
+    t = b.div(lane, c16)  # K half of A/B, row octet (column parity) of D
+    k = b.mod(col16, c8)
+    q = b.div(col16, c8)
+    dy_img, dy_row_bytes, dy_px, dx_img, dx_row_bytes, dx_px = _dw_win_byte_strides(
+        b, params
+    )
+
+    a_rsrc = b.buffer_rsrc(params["A"], params["A_bytes"])
+    b_rsrc = b.buffer_rsrc(params["B"], params["B_bytes"])
+    d_rsrc = b.buffer_rsrc(params["D"], params["D_bytes"])
+
+    # One-hot A fragments weights[r][ph]: W[k, r, KW - 1 - s] at slot k.
+    w_base = b.mul(b.add(c_wave, k), b.const_i32(KH * KW * 2))
+    c_KW = b.const_i32(KW)
+    is_k = [b.cmp_eq(k, b.const_i32(j)) for j in range(DW_DGRAD_MFMA_CH)]
+    weights: List[List[Value]] = []
+    for r in range(KH):
+        row: List[Value] = []
+        for ph in range(KWP):
+            comps = []
+            for j in range(2):
+                s = b.sub(b.add(b.mul(t, b.const_i32(2)), b.const_i32(4 * ph + j)), q)
+                ok = b.land(ch_ok, b.land(b.cmp_ge(s, c0), b.cmp_lt(s, c_KW)))
+                tap = b.sub(b.const_i32(r * KW + KW - 1), s)
+                off = b.select(ok, b.add(w_base, b.mul(tap, b.const_i32(2))), oob_lane)
+                if p.dtype == "bf16":
+                    w = b.buffer_load_bf16(b_rsrc, off, c0)
+                else:
+                    w = b.buffer_load_f16(b_rsrc, off, c0)
+                comps += [
+                    b.select(is_k[i], w, zero_half) for i in range(DW_DGRAD_MFMA_CH)
+                ]
+            row.append(b.vec_pack(comps, io_type))
+        weights.append(row)
+
+    # Lane parts shared by the B reads and the D staging.
+    c_sub = b.const_i32(SUB)
+    f = b.div(col16, c_sub)
+    pair2 = b.mul(b.mod(col16, c_sub), b.const_i32(2))
+    c_per_px = b.const_i32(PER_PX)
+
+    # dX staging [buffer, image column, channel]: lane (n, t) writes its 4
+    # channels of column 2 (n % SUB) + t // 2; the block then drains each
+    # pixel's BLOCK_CH channels in 16-byte chunks.
+    o_smem = b.smem_alloc(io_type, [2, F * TW, CH_PAD], name_hint="dx_stage")
+    o_col = b.add(b.mul(f, b.const_i32(TW)), b.add(pair2, t))
+    o_ch = wave_ch
+    n_out = F * TW * PER_PX
+    c_TW = b.const_i32(TW)
+    drain: List[Tuple[Value, Value, Value]] = []
+    for i in range(-(-n_out // THREADS)):
+        idx = b.add(tid, b.const_i32(i * THREADS))
+        px = b.div(idx, c_per_px)
+        ch8 = b.mul(b.mod(idx, c_per_px), c8)
+        img_o = b.add(img0, b.div(px, c_TW))
+        wi_o = b.add(x0, b.mod(px, c_TW))
+        ch_o = b.add(ch_blk, ch8)
+        ok = b.land(
+            b.land(b.cmp_lt(idx, b.const_i32(n_out)), b.cmp_lt(img_o, p_N)),
+            b.land(b.cmp_lt(wi_o, p_Wi), b.cmp_lt(ch_o, p_G)),
+        )
+        g_off = b.add(
+            b.mul(img_o, dx_img),
+            b.add(b.mul(wi_o, dx_px), b.mul(ch_o, b.const_i32(2))),
+        )
+        drain.append((px, ch8, b.select(ok, g_off, oob_lane)))
+
+    # dY staging [buffer, window column, channel]: the block loads the U
+    # window columns of each image with 16-byte chunks; padding columns,
+    # images past p_N and channels past p_groups read zero through the lane
+    # sentinel.
+    n_in = F * U * PER_PX
+    in_passes = -(-n_in // THREADS)
+    in_px = -(-in_passes * THREADS // PER_PX)
+    i_smem = b.smem_alloc(io_type, [2, in_px, CH_PAD], name_hint="dy_stage")
+    c_U = b.const_i32(U)
+    in_plan: List[Tuple[Value, Value, Value]] = []
+    for i in range(in_passes):
+        idx = b.add(tid, b.const_i32(i * THREADS))
+        px = b.div(idx, c_per_px)
+        ch8 = b.mul(b.mod(idx, c_per_px), c8)
+        img_i = b.add(img0, b.div(px, c_U))
+        wo = b.add(x0, b.add(b.mod(px, c_U), b.const_i32(PAD - (KW - 1))))
+        ch_i = b.add(ch_blk, ch8)
+        ok = b.land(
+            b.land(b.cmp_lt(idx, b.const_i32(n_in)), b.cmp_lt(img_i, p_N)),
+            b.land(b.land(b.cmp_ge(wo, c0), b.cmp_lt(wo, p_Wo)), b.cmp_lt(ch_i, p_G)),
+        )
+        g_off = b.add(
+            b.mul(img_i, dy_img),
+            b.add(b.mul(wo, dy_px), b.mul(ch_i, b.const_i32(2))),
+        )
+        in_plan.append((px, ch8, b.select(ok, g_off, oob_lane)))
+    f_u = b.mul(f, c_U)
+    t2 = b.mul(t, b.const_i32(2))
+    b_px = [
+        [b.add(f_u, b.add(pair2, b.add(t2, b.const_i32(4 * ph + j)))) for j in range(2)]
+        for ph in range(KWP)
+    ]
+
+    row_ok: Dict[int, Value] = {}
+
+    def load_row(y: int) -> List[Value]:
+        """Issue the 16-byte dY window loads of local row ``y``."""
+        rel_ho = y + PAD - (KH - 1)
+        ho = b.add(h0, b.const_i32(rel_ho))
+        ok = b.cmp_lt(ho, p_Ho)
+        if rel_ho < 0:
+            ok = b.land(b.cmp_ge(ho, c0), ok)
+        row_ok[y] = ok
+        dy_row = b.select(ok, b.mul(ho, dy_row_bytes), oob_uniform)
+        vals = [
+            _buf_load_vN(b, p.dtype, a_rsrc, b.add(off, dy_row), c0, 4)
+            for _, _, off in in_plan
+        ]
+        b.sched_barrier(0)
+        return vals
+
+    def dx_row_part(hi_local: int) -> Value:
+        hi = b.add(h0, b.const_i32(hi_local))
+        part = b.mul(hi, dx_row_bytes)
+        return b.select(b.cmp_lt(hi, p_Hi), part, oob_uniform)
+
+    def drain_out(buf: Value, dx_row: Value) -> None:
+        for px, ch8, g_off in drain:
+            v = b.smem_load_vN(o_smem, buf, px, ch8, dtype=io_type, n=8)
+            _buf_store_vN(b, p.dtype, d_rsrc, b.add(g_off, dx_row), c0, v, 4)
+
+    n_rows = ROWS + KH - 1
+    PF = spec.prefetch_rows
+    pending: Dict[int, List[Value]] = {}
+    for y in range(min(PF, n_rows)):
+        pending[y] = load_row(y)
+
+    def stage_row(raw: List[Value], buf: Value) -> None:
+        for (px, ch8, _), v in zip(in_plan, raw):
+            b.smem_store_vN(i_smem, [buf, px, ch8], v, 8)
+
+    def multiply(accs: List[Value], buf: Value, rs: List[int]) -> List[Value]:
+        xs = [
+            b.vec_concat(
+                *(
+                    b.smem_load_vN(
+                        i_smem, buf, b_px[ph][j], wave_ch, dtype=io_type, n=8
+                    )
+                    for j in range(2)
+                )
+            )
+            for ph in range(KWP)
+        ]
+        out = list(accs)
+        for ph in range(KWP):
+            for i, r in enumerate(rs):
+                out[i] = b.mma(wmma_op, weights[r][ph], xs[ph], out[i])
+        return out
+
+    # The KH - 1 halo rows of the dY window (the rows outside the tile's own
+    # dX rows) are the ones that fall outside the image when a tile covers
+    # it: such a row adds nothing, so its LDS staging and its MFMAs run under
+    # a block-uniform guard -- the staging under an scf.if, the B reads and
+    # MFMAs in a one-trip loop carrying the accumulator tiles they touch.
+    # Every phase still syncs and drains its finished dX row, so the double
+    # buffers keep alternating. (A row inside the tile but past the image
+    # still multiplies zeros; guarding it would cost every full tile.)
+    c1 = b.const_i32(1)
+    pend_out: Optional[Tuple[Value, Value]] = None
+    acc: List[Value] = [zero_acc] * KH
+    for y in range(n_rows):
+        rs = [r for r in range(KH) if 0 <= y + r - (KH - 1) < ROWS]
+        slots = [(y + r - (KH - 1)) % KH for r in rs]
+        raw = pending.pop(y)
+        buf = b.const_i32(y % 2)
+        rel_ho = y + PAD - (KH - 1)
+        halo = rel_ho < 0 or rel_ho >= ROWS
+
+        if halo:
+            with b.scf_if(row_ok[y]):
+                stage_row(raw, buf)
+        else:
+            stage_row(raw, buf)
+        if pend_out is not None:
+            b.smem_store_vN(o_smem, [buf, o_col, o_ch], pend_out[0], 8)
+        b.sync_lds_only()
+        if pend_out is not None:
+            drain_out(buf, pend_out[1])
+            pend_out = None
+        if y + PF < n_rows:
+            pending[y + PF] = load_row(y + PF)
+        if halo:
+            trip = b.select(row_ok[y], c1, c0)
+            loop = b.scf_for_iter(
+                c0,
+                trip,
+                c1,
+                [(f"dwm_y{y}_{i}", acc[sl]) for i, sl in enumerate(slots)],
+                iv_name=f"dwm_y{y}",
+            )
+            with loop as (_, accs):
+                b.scf_yield(*multiply(accs, buf, rs))
+            new = loop.results
+        else:
+            new = multiply([acc[sl] for sl in slots], buf, rs)
+        for sl, v in zip(slots, new):
+            acc[sl] = v
+        hi_local = y - (KH - 1)
+        if not 0 <= hi_local < ROWS:
+            continue
+        slot = hi_local % KH
+        pend_out = (_trunc_f32(b, p.dtype, acc[slot]), dx_row_part(hi_local))
+        acc[slot] = zero_acc
+    if pend_out is not None:
+        buf = b.const_i32(n_rows % 2)
+        b.smem_store_vN(o_smem, [buf, o_col, o_ch], pend_out[0], 8)
         b.sync_lds_only()
         drain_out(buf, pend_out[1])
     return b.kernel

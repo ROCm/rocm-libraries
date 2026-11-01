@@ -436,6 +436,10 @@ def _ceil(a, b):
         (dict(C=128, K=128, groups=32), 8),
         (dict(C=256, K=256, groups=32), 4),
         (dict(C=256, K=256, groups=16), 2),
+        # Small groups at stride 2: packed super-group + phase decomposition.
+        (dict(C=128, K=128, groups=32, stride=2), 8),
+        (dict(C=256, K=256, groups=32, stride=2), 4),
+        (dict(C=512, K=512, groups=32, stride=2), 2),
     ],
 )
 def test_aot_cache_plans_launch(wmma_cache, pkw, pack):
@@ -582,6 +586,32 @@ _CASES = (
         dict(N=2, H=9, W=12, C=64, K=64, groups=4, dtype="fp16"),
         dict(tiles_c=1, pack_groups=2, prefetch=True, sched="iterative-ilp"),
     ),
+    # Packed small groups at stride 2 (4 phases of accumulators per block):
+    # 4 groups of 8 with ragged extents, 2 groups of 16 in fp16 with
+    # prefetch, and the ResNeXt downsampling layers (cpg 8 and 16).
+    (
+        dict(N=2, H=13, W=21, C=64, K=64, groups=8, stride=2),
+        dict(waves_c=1, tiles_c=2, tiles_p=2, pack_groups=4),
+    ),
+    (
+        dict(N=3, H=12, W=17, C=64, K=64, groups=4, stride=2, dtype="fp16"),
+        dict(
+            waves_c=1,
+            tiles_c=2,
+            tiles_p=4,
+            pack_groups=2,
+            prefetch=True,
+            sched="iterative-ilp",
+        ),
+    ),
+    (
+        dict(N=16, H=56, W=56, C=256, K=256, groups=32, stride=2),
+        dict(waves_c=1, waves_p=4, tiles_c=2, tiles_p=4, pack_groups=4),
+    ),
+    (
+        dict(N=16, H=28, W=28, C=512, K=512, groups=32, stride=2, dtype="fp16"),
+        dict(waves_c=1, waves_p=8, tiles_c=2, tiles_p=4, tile_w=8, pack_groups=2),
+    ),
     # Stride 2: odd and even extents, several images per block, the 2x2
     # patch merge, and fp16 with prefetch.
     (dict(N=2, H=13, W=21, C=64, K=96, stride=2), dict(tiles_c=1, tiles_p=2)),
@@ -638,6 +668,41 @@ _CASES = (
         dict(tiles_c=1, tiles_p=2, tile_w=8, wave_epilogue=True),
     ),
 )
+
+# Packed small groups at stride 2 with the widest pack: 8 groups of 4
+# channels per super-group (cpg = kpg = 4, pack_groups 8), one case per dtype
+# on ragged extents (odd H and W, an odd W alone), with the knobs of two
+# DGRAD_WMMA_PACKED_STRIDED_KNOBS rows (the second with prefetch).
+_PACK8_STRIDED_CASES = (
+    (
+        dict(N=2, H=13, W=21, C=64, K=64, groups=16, stride=2),
+        dict(waves_c=1, waves_p=4, tiles_c=2, tiles_p=2, tile_w=16, pack_groups=8),
+    ),
+    (
+        dict(N=3, H=12, W=17, C=32, K=32, groups=8, stride=2, dtype="fp16"),
+        dict(
+            waves_c=1,
+            waves_p=4,
+            tiles_c=2,
+            tiles_p=4,
+            tile_w=16,
+            pack_groups=8,
+            prefetch=True,
+            sched="iterative-ilp",
+        ),
+    ),
+)
+
+
+class TestDgradWmmaPack8Strided(unittest.TestCase):
+    def test_cases_validate_and_lower(self):
+        for pkw, knobs in _PACK8_STRIDED_CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                p = _problem(**pkw)
+                self.assertEqual((p.cpg, p.kpg, p.stride), (4, 4, 2))
+                spec = DirectDgradWmmaSpec(problem=p, **knobs)
+                self.assertIsNone(dgrad_wmma_reason(spec, "gfx1250"))
+                build_direct_dgrad_wmma(spec, "gfx1250")
 
 
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
@@ -699,6 +764,11 @@ class TestDgradWmmaGpu(unittest.TestCase):
 
     def test_cases(self):
         for pkw, knobs in _CASES:
+            with self.subTest(problem=pkw, knobs=knobs):
+                self._check(pkw, knobs)
+
+    def test_pack8_strided_cases(self):
+        for pkw, knobs in _PACK8_STRIDED_CASES:
             with self.subTest(problem=pkw, knobs=knobs):
                 self._check(pkw, knobs)
 

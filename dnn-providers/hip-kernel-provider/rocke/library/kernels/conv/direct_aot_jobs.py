@@ -176,6 +176,10 @@ DW_WIN_MFMA_FILTERS = (5, 7, 9)
 DW_WIN_MFMA_FOLDS = (1, 2, 4)
 DW_WIN_MFMA_WAVES = (4, 8)
 DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
+# Taller row tiles for the wave32 WMMA form only (gfx1250): they keep 28- and
+# 32-row maps whole or chunk the large ones in fewer tiles. The gfx950 MFMA
+# grid stays at DW_WIN_MFMA_BLOCK_H.
+DW_WIN_WMMA_BLOCK_H = (28, 32)
 DW_WIN_MFMA_PREFETCH = 2
 # 4c dgrad (direct_grouped_dgrad_4c, cpg = kpg = 4): the 4x4x4 MFMA kernel on
 # the transposed problem with fused weights. The cache carries the image of
@@ -450,6 +454,24 @@ DGRAD_WMMA_PACKED_KNOBS = (
     (1, 8, 2, 4, 16, 4, 32, 2, True),
     (1, 8, 2, 4, 32, 2, 32, 2, True),
     (2, 4, 1, 8, 16, 2, 32, 2, True),
+)
+# Small groups at stride 2 (ResNeXt / RegNet downsampling 3x3 at 8 or 16
+# channels per group): the packed super-group of DGRAD_WMMA_PACKED_KNOBS under
+# the stride-2 phase decomposition, so every block holds 4 x tiles_c x tiles_p
+# accumulators: fewer pixel tiles per wave than the stride-1 packed rows.
+DGRAD_WMMA_PACKED_STRIDED_KNOBS = (
+    (1, 4, 2, 2, 16, 1, 32, 2, False),
+    (1, 4, 2, 4, 8, 1, 32, 2, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, False),
+    (1, 4, 2, 4, 16, 2, 32, 2, False),
+    (1, 4, 2, 4, 16, 1, 32, 2, True),
+    (1, 8, 2, 2, 16, 1, 32, 2, False),
+    (1, 8, 2, 4, 8, 1, 32, 2, False),
+    (1, 8, 2, 4, 16, 1, 32, 2, False),
+    (2, 4, 1, 4, 16, 1, 32, 2, False),
+    (2, 4, 1, 4, 16, 2, 32, 2, False),
+    (1, 2, 2, 4, 16, 1, 32, 2, False),
+    (1, 4, 2, 3, 16, 1, 32, 2, False),
 )
 # Stride 2 (phase decomposition: every block computes all four output phases
 # from one dY halo, so it holds 4 x tiles_c x tiles_p accumulators).
@@ -1107,6 +1129,11 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=3, PAD=1, stride=1, cpg=c, kpg=c)
             for c in DGRAD_WMMA_PACKED_CHANNELS
         )
+        # Small groups at stride 2: packed super-group + phase decomposition.
+        + tuple(
+            DirectCaps(KH=3, PAD=1, stride=2, cpg=c, kpg=c)
+            for c in DGRAD_WMMA_PACKED_CHANNELS
+        )
         # Stride 2 by phase decomposition: 3x3 "same" and the 2x2 patch-merge.
         + (
             DirectCaps(KH=3, PAD=1, stride=2, cpg=0, kpg=0),
@@ -1386,8 +1413,13 @@ def _knob_grid(
             yield dict(
                 block_w=bw, block_h=bh, block_waves=waves, ch_per_lane=2, dot2=False
             )
+        from kernels.common.conv_direct_grouped import DW_DGRAD_WMMA_ARCHES
+
+        block_hs = DW_WIN_MFMA_BLOCK_H
+        if arch in DW_DGRAD_WMMA_ARCHES:
+            block_hs += DW_WIN_WMMA_BLOCK_H
         for fold, waves, bh in itertools.product(
-            DW_WIN_MFMA_FOLDS, DW_WIN_MFMA_WAVES, DW_WIN_MFMA_BLOCK_H
+            DW_WIN_MFMA_FOLDS, DW_WIN_MFMA_WAVES, block_hs
         ):
             yield dict(
                 mfma=True,
@@ -1497,7 +1529,12 @@ def _knob_grid(
         if caps is not None and caps.cpg > 0:
             # Pack groups up to one 32-channel WMMA K step.
             yield from _dgrad_wmma_knobs(
-                DGRAD_WMMA_PACKED_KNOBS, pack_groups=max(1, 32 // caps.cpg)
+                (
+                    DGRAD_WMMA_PACKED_STRIDED_KNOBS
+                    if caps.stride > 1
+                    else DGRAD_WMMA_PACKED_KNOBS
+                ),
+                pack_groups=max(1, 32 // caps.cpg),
             )
         elif caps is not None and caps.stride > 1 and caps.KH == caps.stride:
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_PATCH2_KNOBS)

@@ -650,7 +650,8 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
  *      ch_per_lane: int = 1
  *      block_h: int = 8          # dX rows per block (a tile; must be > 0)
  *      dot2: bool = False        # fdot2 tap pairs (gfx950)
- *      mfma: bool = False        # Toeplitz MFMA form (gfx950)
+ *      mfma: bool = False        # Toeplitz form: MFMA at wave64 (gfx950),
+ *                                # WMMA 16x16x32 at wave_size 32 (gfx1250)
  *      w_fold: int = 1           # images per MFMA tile (mfma only)
  *      prefetch_rows: int = 1    # dY rows in flight (mfma only)
  *      wave_size: int = 64
@@ -911,7 +912,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_new(
 
 /* build_direct_depthwise_dgrad_windowed(spec, arch). Windowed depthwise dgrad
  * (stride 1, cpg=kpg=1): a block streams the dY rows of a tile of block_h dX
- * rows once each; VALU, fdot2 or Toeplitz MFMA form. _new validates the spec
+ * rows once each; VALU, fdot2 or Toeplitz form (MFMA at wave64, wave32 WMMA
+ * at wave_size 32). _new validates the spec
  * (as the Python builder does) and names the kernel. */
 rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_win(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_win_spec_t* spec, const char* arch);

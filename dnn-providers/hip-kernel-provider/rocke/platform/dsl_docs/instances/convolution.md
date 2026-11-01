@@ -920,7 +920,8 @@ class DirectDepthwiseDgradWindowedSpec:
     ch_per_lane: int = 1    # 1/2/4/8 adjacent channels per lane (vector I/O)
     block_h: int = 8        # dX rows per block: a tile height, must be > 0
     dot2: bool = False      # tap pairs on arith.fdot2 (gfx950 only)
-    mfma: bool = False      # Toeplitz MFMA form (gfx950, groups % 8 == 0)
+    mfma: bool = False      # Toeplitz form (groups % 8 == 0): MFMA (gfx950),
+                            # wave32 WMMA at wave_size 32 (gfx1250)
     w_fold: int = 1         # mfma: images per 16x16 tile (1, 2, 4)
     prefetch_rows: int = 1  # mfma: dY rows in flight
     wave_size: int = 64
@@ -997,12 +998,25 @@ group, in its receptive-field rows and over `4 * ceil((KW + 1) / 4)` columns
 (the zero-weight taps of the passes; `0 * Inf = NaN`). Finite inputs agree
 with the VALU form up to fp32 summation order.
 
+**Toeplitz WMMA form (`mfma=True`, `wave_size=32`, gfx1250).** The same form on
+the wave32 `wmma_f32_16x16x32_{f16,bf16}` (`_build_dw_dgrad_win_wmma` / C++
+`dw_win_build_wmma`): tile rows, columns, passes, LDS staging, grid and kernel
+name are unchanged, and the knob keeps its name `mfma`. A wave32 lane carries
+16 K elements, two 8-channel window-column chunks `u = 2 t + j`: the A
+fragment holds two one-hot weight chunks, B is two `ds_load_b128` reads, and
+D is one 16-byte LDS store of the wave's 8 channels per lane. The fragments
+take twice the wave64 VGPRs (`mfma_frag_vgprs()`), so 9x9 and larger filters
+exceed `DW_DGRAD_MFMA_MAX_FRAG_VGPRS` at wave32. The AOT build gives this form
+the target's wave size (`direct_variants.make_direct_spec`); the VALU form
+keeps its logical wave64. The non-finite semantics are those of the MFMA form.
+
 AOT cache image (`library/kernels/conv/direct_aot_jobs.py`): the square
 filters `_DEPTHWISE_FILTERS` with every padding; for the VALU form the `(block_w, block_h)` tiles of
 `DW_WIN_TILES` with and without `dot2` at `DW_WIN_WAVES` waves and with
 channel pairs at `DW_WIN_PAIR_WAVES`; for the MFMA form every
 `DW_WIN_MFMA_FOLDS` x `DW_WIN_MFMA_WAVES` x `DW_WIN_MFMA_BLOCK_H` at
-`prefetch_rows = DW_WIN_MFMA_PREFETCH`, filtered by `_dw_win_policy_reason`.
+`prefetch_rows = DW_WIN_MFMA_PREFETCH`, filtered by `_dw_win_policy_reason`
+(on gfx1250, the WMMA form, the row tiles also take `DW_WIN_WMMA_BLOCK_H`).
 
 Choosing between the forms is left to the dispatcher rework. The MFMA form
 was measured ahead of the `dot2` VALU kernel, with warm and with cold caches,
@@ -1014,7 +1028,9 @@ point. Stride 2 runs the row-streaming kernel (`direct_depthwise_dgrad`).
 Parity gate: configs 0-19 of
 `library/tests/parity/conv_direct_dgrad_ext_emit.{c,py}` (0-10 the VALU and
 `dot2` forms, 11-19 the MFMA form, including the gfx942, `groups % 8 != 0` and
-`block_h = 0` configs both engines reject). Case study:
+`block_h = 0` configs both engines reject) and 45-53 (the wave32 WMMA form;
+51-53 -- 9x9 past the fragment budget, wave32 on gfx950, wave64 on gfx1250 --
+both reject). Case study:
 [`depthwise_windowed_dgrad_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/depthwise_windowed_dgrad_case_study.md).
 
 ### Row-Streaming Depthwise Dgrad Kernel (`DirectDepthwiseDgradStreamSpec`)
@@ -1242,7 +1258,9 @@ byte offsets), `pack_groups * cpg` and `pack_groups * kpg` multiples of 8
 and `pack_groups * cpg <= block_c`), `split_barrier` / `wave_epilogue` on
 stride-1 unpacked tiles only, and the ring and the staged dX tile within the
 320 KB LDS. The AOT grid is `DGRAD_WMMA_KNOBS` plus `DGRAD_WMMA_SB_KNOBS`
-(split barrier), `DGRAD_WMMA_PACKED_KNOBS`, `DGRAD_WMMA_STRIDED_KNOBS`,
+(split barrier), `DGRAD_WMMA_PACKED_KNOBS` (4 / 8 / 16 channels per group at
+stride 1), `DGRAD_WMMA_PACKED_STRIDED_KNOBS` (the same small groups at stride 2:
+packed super-group under the phase decomposition), `DGRAD_WMMA_STRIDED_KNOBS`,
 `DGRAD_WMMA_PATCH2_KNOBS` and `DGRAD_WMMA_DILATED_KNOBS`
 (`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_wmma`). The C++ twin
 covers every knob; the byte-identity gate is

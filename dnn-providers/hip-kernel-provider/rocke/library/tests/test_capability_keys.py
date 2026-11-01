@@ -178,6 +178,8 @@ def _direct_problems() -> list:
         DirectConvProblem(
             N=2, H=32, W=32, groups=8, cpg=8, kpg=8, dil_h=2, dil_w=2, PAD=2
         ),
+        # Small groups at stride 2 (the packed direct WMMA dgrad rows).
+        DirectConvProblem(N=2, H=28, W=28, groups=32, cpg=8, kpg=8, stride=2),
     ]
 
 
