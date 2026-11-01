@@ -109,11 +109,16 @@ if(ROCBLAS_ENABLE_FORTRAN)
   target_sources(
     rocblas-fortran-module
     PRIVATE
-      ${_CMAKE_CURRENT_SOURCE_DIR}/include/rocblas_module.f90
+      ${_CMAKE_CURRENT_SOURCE_DIR}/../fortran/rocblas.F90
   )
   set_target_properties(rocblas-fortran-module PROPERTIES
     Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/modules
+    # rocblas.F90 is uppercase: the array overloads sit behind preprocessor
+    # guards, so the source must go through the C preprocessor.
+    Fortran_PREPROCESS ON
     POSITION_INDEPENDENT_CODE ON)
+  # Same tier as ../fortran's default; define only one of USE_ASSUMED_SHAPE/RANK.
+  target_compile_definitions(rocblas-fortran-module PRIVATE USE_ASSUMED_SHAPE=1)
 
   target_include_directories(rocblas-fortran-module
     PUBLIC
