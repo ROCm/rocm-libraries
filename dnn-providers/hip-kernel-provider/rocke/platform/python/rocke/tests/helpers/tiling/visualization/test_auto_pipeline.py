@@ -12,12 +12,22 @@ import dataclasses
 
 import pytest
 
+from rocke.core.ir import BF8E5M2, F16, F32, FP8E4M3, IRBuilder, PtrType
+from rocke.helpers.tiling import (
+    fill_fragment,
+    load_fragment,
+    make_fragment,
+    make_tensor_desc,
+    make_window,
+    store_fragment,
+)
 from rocke.helpers.tiling import tiling_recorder as tr
 from rocke.helpers.tiling.kernels.tiling_gemm_crc_demo.crc_interleaved_gemm import (
     b32_swizzle,
     b64_swizzle,
     build_crc_gemm,
 )
+from rocke.helpers.tiling.mma import TileMma
 from rocke.helpers.tiling.visualization import auto_pipeline as ap
 from rocke.helpers.tiling import (
     analysis as an,
@@ -137,6 +147,7 @@ def test_roundtrip_replays_a_read_with_its_own_descriptor():
         an.verify_lds_roundtrip(pipe, sid, tile_k=32)
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_view_prefetch_flow_and_lds_store_block(tmp_path):
     """view() takes only SELECTION (block XOR flow + scope/operand/buffer/wave); it DERIVES every physical
     fact from the recording. The PREFETCH flow (global load -> LDS store) renders at macro + wave scope; the
@@ -184,6 +195,7 @@ def test_view_prefetch_flow_and_lds_store_block(tmp_path):
         )
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_view_compute_flow_builds_tee_from_the_recording(tmp_path):
     """flow='compute' builds the MMA tee from the RECORDED op alone (a_enc/b_enc/c_enc + canonical refs +
     derived dtypes -- no TileMma object) and renders A x B -> derived C; filename == the given out_path.
@@ -213,6 +225,7 @@ def test_view_compute_flow_builds_tee_from_the_recording(tmp_path):
     )
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_view_epilogue_flow_classifies_and_renders(tmp_path):
     """flow='epilogue' (small, once at the end): C native -> {reorder} -> global store C, built recording-
     only (c_native from the tee, C-store dist from the recorded reorder op), f32 in the name.
@@ -228,7 +241,72 @@ def test_view_epilogue_flow_classifies_and_renders(tmp_path):
     )
 
 
+def test_recorded_mma_carries_its_operand_dtypes():
+    """The recorder stores the MMA's A and B dtypes on the op: the one home the views read operand
+    widths and labels from."""
+    _k, _m, pipe = _record()
+    mma_ops = [o for o in pipe.ops if o.kind == "mma"]
+    assert mma_ops
+    assert all(o.a_dtype is F16 and o.b_dtype is F16 for o in mma_ops)
+
+
+@pytest.mark.parametrize("flow", ["compute", "epilogue"])
+def test_views_refuse_an_mma_op_without_dtypes(tmp_path, flow):
+    """A recorded MMA op without A/B dtypes cannot be drawn: neither view guesses them from a memory
+    access."""
+    _k, _m, pipe = _record()
+    pipe.nodes = [
+        (
+            dataclasses.replace(n, a_dtype=None, b_dtype=None)
+            if getattr(n, "kind", None) == "mma"
+            else n
+        )
+        for n in pipe.nodes
+    ]
+    with pytest.raises(ValueError, match="the recorded MMA op carries no A/B dtypes"):
+        ap.view(pipe, flow=flow, out_path=str(tmp_path / f"{flow}.png"))
+
+
+def _mixed_fp8_bf8_wave_tile():
+    """One wave computes C = A * B^T with fp8 A and bf8 B on gfx942, from global memory."""
+    mma = TileMma((16, 16, 32), a=FP8E4M3, b=BF8E5M2, c=F32, target="gfx942")
+    wave_m, wave_n, wave_k = mma.shape
+    b = IRBuilder("mixed_fp8_bf8_wave_tile")
+    b.kernel.attrs["max_workgroup_size"] = mma.wave_size
+    a_ptr = b.param("A", PtrType(FP8E4M3, "global"), noalias=True, readonly=True)
+    b_ptr = b.param("B", PtrType(BF8E5M2, "global"), noalias=True, readonly=True)
+    c_ptr = b.param("C", PtrType(F32, "global"), noalias=True, writeonly=True)
+    lane = b.thread_id_x()
+    zero = b.const_i32(0)
+    a_td = make_tensor_desc((wave_m, wave_k), (wave_k, 1), FP8E4M3)
+    b_td = make_tensor_desc((wave_n, wave_k), (wave_k, 1), BF8E5M2)
+    c_td = make_tensor_desc((wave_m, wave_n), (wave_n, 1), F32)
+    acc = make_fragment(mma.c_desc, F32)
+    fill_fragment(b, acc, 0)
+    fa = load_fragment(b, a_ptr, make_window(a_td, (zero, zero)), mma.a_desc, lane)
+    fb = load_fragment(b, b_ptr, make_window(b_td, (zero, zero)), mma.b_desc, lane)
+    acc = mma(b, fa, fb, acc)
+    store_fragment(b, c_ptr, make_window(c_td, (zero, zero)), acc, lane)
+    b.ret()
+    return b.kernel, mma
+
+
+@pytest.mark.usefixtures("requires_matplotlib")
+def test_mixed_recording_draws_each_operand_at_its_own_dtype(tmp_path):
+    """A recorded fp8 x bf8 MMA: the compute tee sizes A and B from their own 8-bit dtypes and labels
+    the inputs with both, and the view renders."""
+    import pathlib
+
+    (_kernel, _mma), pipe = tr.record_build(_mixed_fp8_bf8_wave_tile)
+    tee = ap._compute_flow_tee(pipe)
+    assert (tee.a_dtype_bits, tee.b_dtype_bits, tee.c_dtype_bits) == (8, 8, 32)
+    assert (tee.in_dtype, tee.out_dtype) == ("fp8e4m3/bf8e5m2", "f32")
+    got = ap.view(pipe, flow="compute", out_path=str(tmp_path / "compute.png"))
+    assert pathlib.Path(got).exists() and pathlib.Path(got).stat().st_size > 0
+
+
 @pytest.mark.parametrize("operand,free", [("A", "M"), ("B", "N")])
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_lds_store_is_a_reposition_with_invariant_labels(tmp_path, operand, free):
     """The store is a REPOSITION into LDS (register slot -> LDS address), the datum's logical (free,K) LABEL
     invariant across the register file and the LDS view. On CRC there is NO transpose -- the free-contiguous
@@ -313,6 +391,7 @@ def test_pipeline_label_gate_blocks_position_derived_labels():
     ).check_label_invariance()
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_ab_swap_C_is_derived_not_hand_relabeled(tmp_path):
     """AB-swap is the EXPLICIT input-relabel exemplar (A<->B, M<->N). C is NOT relabeled by hand -- it falls
     out of the fixed machine via derive_c_distribution. Recording the crossed build and building the tee from

@@ -223,7 +223,7 @@ The MMA issue path is the reference implementation of Parts 1–5.
      |
      +--> mma_operand_layout_sound(layout, canon, role)                 one operand vs the machine
      +--> mma_accumulator_flow_consistent(c, a, b, a_canon,b_canon,c_canon)  C from the PASSED a, b
-          mma_pair_k_aligned(a, b)                          A vs B agree on K   (takes no canon)
+          mma_pair_k_aligned(a, b, a_canon, b_canon)        A vs B agree on K   (canon = coupling)
           _assert_atom_contiguous(a) / (b)                  atom-slice contract (A and B only)
                          |
                          v
