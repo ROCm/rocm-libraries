@@ -69,7 +69,7 @@ endif()
 
 # RPP Version
 # NOTE: package version and rpp_version.h is generated with this version
-set(VERSION "3.2.0")
+set(VERSION "3.3.0")
 
 # Set Project Version and Language
 project(rpp VERSION ${VERSION} LANGUAGES CXX)
@@ -95,8 +95,6 @@ endif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 # RPP Default Options
 set(DEFAULT_BUILD_TYPE "Release")
 
-### RPP_AUDIO_SUPPORT - default = OFF, NOTE: enabled automatically when FFTS is found
-option(RPP_AUDIO_SUPPORT      "Build RPP with Audio Support"         OFF)
 
 ### CODE_COVERAGE - default = OFF, instruments librpp.so for LLVM coverage
 option(CODE_COVERAGE          "Build RPP with code coverage instrumentation (LLVM)"  OFF)
@@ -124,7 +122,6 @@ endif()
 if(APPLE)
     set(CMAKE_MACOSX_RPATH 1)
     set(BACKEND "CPU")
-    set(RPP_AUDIO_SUPPORT OFF)
     message("-- ${Magenta}Apple macOS Detected -- GPU Support turned OFF${ColourReset}")
 endif()
 
@@ -192,25 +189,14 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 # Half (HALF::half carries INTERFACE include dirs for transitive use via rpp::rpp)
 find_package(HALF REQUIRED)
 
-# Check for FFTS and enable audio support if found
-find_package(FFTS QUIET)
-if(FFTS_FOUND)
-    set(RPP_AUDIO_SUPPORT ON)
-    add_definitions(-DAUDIO_SUPPORT)        # For compile flags in RPP
-    set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)  # For cmakedefine01 in rpp_audio_augmentations_support.h.in
-    message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT${ColourReset}")
-else()
-    if(RPP_AUDIO_SUPPORT)
-        message(FATAL_ERROR "${Red}RPP_AUDIO_SUPPORT=ON but FFTS was not found. Please ensure FFTS is available or set -DRPP_AUDIO_SUPPORT=OFF${ColourReset}")
-    else()
-        message("-- ${Yellow}FFTS not found. ${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT${ColourReset}")
-    endif()
-endif()
+# Audio augmentations support is always enabled
+set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)                    # For cmakedefine01 in rpp_audio_augmentations_support.h.in
+
+message("-- ${Green}${PROJECT_NAME} set to build with audio support (in-house CPU FFT, rocFFT for GPU)${ColourReset}")
 
 message("-- ${Cyan}RPP Developer Options${ColourReset}")
 message("-- ${Cyan}     -D BACKEND=${BACKEND} [Select RPP Backend [options:CPU/HIP](default:HIP)]${ColourReset}")
 message("-- ${Cyan}     -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} [Select RPP build type [options:Debug/Release](default:Release)]${ColourReset}")
-message("-- ${Cyan}     -D RPP_AUDIO_SUPPORT=${RPP_AUDIO_SUPPORT} [Select RPP audio support [options:ON/OFF](default:ON)]${ColourReset}")
 message("-- ${Cyan}     -D CODE_COVERAGE=${CODE_COVERAGE} [Select RPP code coverage instrumentation [options:ON/OFF](default:OFF)]${ColourReset}")
 message("-- ${Cyan}     -D RPP_HIP_FATBIN_LAYOUT=${RPP_HIP_FATBIN_LAYOUT} [Select RPP HIP fat binary section placement [options:ON/OFF](default:ON)]${ColourReset}")
 
@@ -315,6 +301,10 @@ if("${BACKEND}" STREQUAL "HIP")
     set (HIP_PLATFORM amd CACHE STRING "HIP platform")
     find_package(HIP QUIET)
     if(HIP_FOUND)
+        # rocFFT is deliberately not looked for: the HIP spectrogram kernel resolves librocfft at
+        # runtime via dlopen (see src/modules/rocfft_dlopen/), so RPP needs neither its headers nor
+        # its import library to build, and rocFFT stays out of RPP's build graph.
+
         message("-- ${White}${PROJECT_NAME} -- Using HIP - Path:" ${HIP_PATH} "\tVersion:" ${HIP_VERSION} "\tCompiler:" ${HIP_COMPILER}${ColourReset})
         # TBD: Set external flag to notify GPU_SUPPORT and HIP backend availability - Compatible with rocAL and MIVisionX
         add_definitions(-DGPU_SUPPORT)
@@ -411,12 +401,14 @@ if(USING_THE_ROCK)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
 endif()
 
-if(RPP_AUDIO_SUPPORT)
-    target_link_libraries(${PROJECT_NAME} PRIVATE FFTS::FFTS)
-    message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT${ColourReset}")
-else()
-    message("-- ${Yellow}${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT${ColourReset}")
+# rocFFT backs the HIP spectrogram kernel and is dlopen-ed at runtime, so nothing links it here.
+if("${BACKEND}" STREQUAL "HIP")
+    # dlopen/dlsym live in libdl on glibc older than 2.34 and in libc after it;
+    # CMAKE_DL_LIBS resolves to whichever applies.
+    target_link_libraries(${PROJECT_NAME} PRIVATE $<$<PLATFORM_ID:Linux>:${CMAKE_DL_LIBS}>)
+    message("-- ${Green}${PROJECT_NAME} will load rocFFT at runtime (HIP, dlopen)${ColourReset}")
 endif()
+message("-- ${Green}${PROJECT_NAME} set to build with audio support${ColourReset}")
 
 set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
 
@@ -488,13 +480,6 @@ endif()
 set(CPACK_RESOURCE_FILE_LICENSE  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
 install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan)
-if(RPP_AUDIO_SUPPORT AND FFTS_FOUND)
-    set(CPACK_RESOURCE_FILE_FFTS_LICENSE  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffts/COPYRIGHT")
-    if(EXISTS ${CPACK_RESOURCE_FILE_FFTS_LICENSE})
-        install(FILES ${CPACK_RESOURCE_FILE_FFTS_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
-        install(FILES ${CPACK_RESOURCE_FILE_FFTS_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan)
-    endif()
-endif()
 
 # Cmake module config file configurations
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/" CACHE INTERNAL "Default module path.")
@@ -510,8 +495,8 @@ set(BIN_INSTALL_DIR  "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
 
 # Backend string for package config (HIP or CPU after HIP fallback)
 set(RPP_PACKAGE_BACKEND_TYPE "${BACKEND}")
-# Audio augmentations (same effective flag as RPP_AUDIO_SUPPORT / rpp_audio_augmentations_support.h)
-set(RPP_PACKAGE_AUDIO_AUGMENTATIONS_SUPPORT "${RPP_AUDIO_SUPPORT}")
+# Audio augmentations are always enabled
+set(RPP_PACKAGE_AUDIO_AUGMENTATIONS_SUPPORT ON)
 if(RPP_SIMDE_TARGET)
     set(RPP_PACKAGE_SIMDE ON)
 else()
@@ -570,6 +555,14 @@ endif()
 # Set the dependent packages
 set(RPP_DEBIAN_PACKAGE_LIST  "hip-runtime-amd, openmp-extras-runtime")
 set(RPP_RPM_PACKAGE_LIST     "hip-runtime-amd, openmp-extras-runtime")
+
+# rocFFT backs the HIP spectrogram kernel, but is dlopen-ed rather than linked, so RPP installs
+# and runs without it: every RPP function except the HIP spectrogram works with rocFFT absent.
+# It is therefore recommended/suggested rather than required.
+if("${BACKEND}" STREQUAL "HIP")
+    set(RPP_DEBIAN_SOFT_PACKAGE_LIST "rocfft")
+    set(RPP_RPM_SOFT_PACKAGE_LIST    "rocfft")
+endif()
 set(RPP_DEBIAN_DEV_PACKAGE_LIST  "hip-dev, openmp-extras-dev, half")
 set(RPP_RPM_DEV_PACKAGE_LIST     "hip-devel, openmp-extras-devel, half")
 set(RPP_DEBIAN_TEST_PACKAGE_LIST  "cmake, python3-dev, python3-pip, python3-pandas, libopencv-dev, libsndfile1-dev")
@@ -614,6 +607,9 @@ set(CPACK_RPM_PACKAGE_AUTOREQPROV   "no")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "rocm-core, ${RPP_DEBIAN_PACKAGE_LIST}")
+if(RPP_DEBIAN_SOFT_PACKAGE_LIST)
+    set(CPACK_DEBIAN_RUNTIME_PACKAGE_RECOMMENDS "${RPP_DEBIAN_SOFT_PACKAGE_LIST}")
+endif()
 set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${PROJECT_NAME}-dev")
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "rocm-core, ${PROJECT_NAME}, ${RPP_DEBIAN_DEV_PACKAGE_LIST}")
 set(CPACK_DEBIAN_TEST_PACKAGE_NAME "${PROJECT_NAME}-test")
@@ -626,6 +622,9 @@ set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "rocm-core-asan" )
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_RPM_RUNTIME_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_RPM_RUNTIME_PACKAGE_REQUIRES "rocm-core, ${RPP_RPM_PACKAGE_LIST}")
+if(RPP_RPM_SOFT_PACKAGE_LIST)
+    set(CPACK_RPM_RUNTIME_PACKAGE_SUGGESTS "${RPP_RPM_SOFT_PACKAGE_LIST}")
+endif()
 set(CPACK_RPM_DEV_PACKAGE_NAME "${PROJECT_NAME}-devel")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES "rocm-core, ${PROJECT_NAME}, ${RPP_RPM_DEV_PACKAGE_LIST}")
 set(CPACK_RPM_TEST_PACKAGE_NAME "${PROJECT_NAME}-test")
