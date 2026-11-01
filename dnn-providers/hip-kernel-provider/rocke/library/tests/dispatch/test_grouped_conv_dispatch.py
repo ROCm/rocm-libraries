@@ -7,15 +7,16 @@
 binaries, named by their lossless labels, forward and dgrad. These tests pin
 down that:
 
-* each registry is exactly its lists, in list order, and every instance has
+* each registry is exactly its lists, as a set, and every instance has
   the AOT build job ``--compile-all`` makes its binary from;
-* the list files are canonical and their loader refuses a broken one;
+* the list files are canonical (sorted by label) and their loader refuses a
+  broken one;
 * nothing outside the lists (another arch, another direction) dispatches;
 * the dispatcher admits a shape exactly when the AOT cache's run path would
   launch that binary on it, with the same kernels, grids, blocks, signatures,
   buffers, kernarg values and scratch -- the binaries were built and verified
   through that path;
-* pins and the priority order behave.
+* pins and the deterministic (sorted-label) default-pick order behave.
 
 CPU only: nothing is compiled or launched.
 """
@@ -144,11 +145,14 @@ def _case_req(arch: str, direction: str, shape: str) -> gc.ConvGroupedRequest:
 # ---------------------------------------------------------------------------
 
 
-def test_registry_is_exactly_the_instance_lists_in_order():
+def test_registry_is_exactly_the_instance_lists():
+    """A registered list is a set: the registry holds exactly its names, with
+    no dependence on their on-disk order."""
     for (arch, direction), path in _LISTS.items():
         names = _listed_names(path)
         got = gc.registered_conv_grouped_instances(arch, direction=direction)
-        assert [s.name for s in got] == names
+        assert {s.name for s in got} == set(names)
+        assert len(got) == len(names)
     for direction in ("fwd", "dgrad"):
         for candidate in gc.conv_grouped_candidates(direction):
             assert candidate.spec_id == candidate.name
@@ -669,8 +673,10 @@ def test_launch_plan_of_the_patch_dgrad():
 # ---------------------------------------------------------------------------
 
 
-def test_default_pick_is_the_first_admitted_instance_in_list_order():
-    order = {name: i for i, name in enumerate(_listed_names())}
+def test_default_pick_is_the_first_admitted_instance_by_label_order():
+    """With no ranker, the default pick is deterministic (sorted by label),
+    not dependent on the list file's on-disk order (a list is a set)."""
+    order = {name: i for i, name in enumerate(sorted(_listed_names()))}
     for kw in _SHAPES.values():
         req = _req(**kw)
         admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
@@ -683,14 +689,17 @@ def test_default_pick_is_the_first_admitted_instance_in_list_order():
     "shape",
     [s for s in _SHAPES if s.startswith("depthwise")],
 )
-def test_depthwise_shapes_default_to_the_direct_depthwise_kernel(shape):
-    """A depthwise-shaped request must not fall back to a generic IGEMM tile
-    just because it happens to sort earlier in the list -- direct_depthwise_tiled
-    candidates are admitted only for genuinely depthwise shapes (cpg=kpg=1), so
-    they are listed ahead of implicit_gemm so they win whenever both are admitted.
+def test_depthwise_shapes_default_to_a_direct_depthwise_kernel(shape):
+    """A depthwise-shaped request must not fall back to a generic IGEMM tile:
+    the direct depthwise candidates are admitted only for genuinely depthwise
+    shapes (cpg=kpg=1), so one of them is always among the admitted set and
+    wins the label-order default pick over implicit_gemm ("direct" < "implicit"
+    alphabetically). *Which* direct_depthwise variant wins is deliberately a
+    deterministic (sorted-label) tie-break, not a hand-tuned family
+    preference -- see test_default_pick_is_the_first_admitted_instance_by_label_order.
     """
     req = _req(**_SHAPES[shape])
-    assert gc.dispatch_conv_grouped(req).spec.algorithm == "direct_depthwise_tiled"
+    assert gc.dispatch_conv_grouped(req).spec.algorithm.startswith("direct_depthwise")
 
 
 def test_spec_id_pins_one_instance():
@@ -839,17 +848,19 @@ def test_registered_list_must_declare_its_arch_and_direction(tmp_path, monkeypat
 
 
 def test_instance_list_tool_adds_labels_and_rebuilds_lists(tmp_path, capsys):
+    """Add order never matters: the written file is always sorted by label,
+    regardless of what order names were added in (a list is a set)."""
     names = _listed_names()
     labels = tmp_path / "labels.txt"
     labels.write_text("# picked\n" + "\n".join(names[:3]) + "\n", encoding="utf-8")
     path = tmp_path / "new.json"
     instance_list.main(["new", str(path), "--from", str(labels)])
-    instance_list.main(["add", str(path), names[3], "--at", "1"])
+    instance_list.main(["add", str(path), names[3]])
     with pytest.raises(SystemExit, match="already listed"):
         instance_list.main(["add", str(path), names[0]])
     capsys.readouterr()
     instance_list.main(["labels", str(path)])
-    assert capsys.readouterr().out.split() == [names[0], names[3], *names[1:3]]
+    assert capsys.readouterr().out.split() == sorted(names[:4])
     instance_list.main(["format", "--check", str(path)])
     lst = gc.load_instance_list(path)
     assert lst.defaults == gc.load_instance_list(_LIST).defaults

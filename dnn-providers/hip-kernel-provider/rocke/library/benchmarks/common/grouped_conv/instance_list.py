@@ -3,15 +3,19 @@
 """Edit the grouped-convolution dispatcher's instance lists.
 
 A list (``dispatch/grouped_convolution_instances/<arch>_<direction>.json``)
-holds one JSON record per instance, in priority order: the fields of its
-:class:`KernelIdentity` that leave the family's baseline (format:
-:class:`dispatch.grouped_convolution.InstanceList`). Benchmark tables and logs
-name kernels by their lossless labels instead; this tool moves between the two.
+holds one JSON record per instance -- a set, not a priority order: the
+dispatcher's default pick (no ``ranker``) is the first by a deterministic key
+(the instance's label), not by position in the file, and a canonically
+written list (``format``, or any write this tool makes) is always sorted by
+that same key. The fields each record spells are the ones that leave the
+family's baseline (format: :class:`dispatch.grouped_convolution.InstanceList`).
+Benchmark tables and logs name kernels by their lossless labels instead; this
+tool moves between the two.
 
-  labels LIST                 print the instances' labels, in priority order
-  add LIST [LABEL...]         append the labelled kernels (--at N inserts them
-                              at position N); --from FILE reads one label per
-                              line, '#' starting a comment
+  labels LIST                 print the instances' labels, sorted
+  add LIST [LABEL...]         add the labelled kernels (position does not
+                              matter -- the write sorts); --from FILE reads
+                              one label per line, '#' starting a comment
   new LIST [LABEL...]         write a new list of the labelled kernels; arch
                               and direction come from the labels, and the
                               LLVM flavor and wave size they share become the
@@ -94,7 +98,9 @@ def _write(path: Path, lst: InstanceList) -> None:
 
 
 def _cmd_labels(args: argparse.Namespace) -> None:
-    for identity in load_instance_list(args.list).identities:
+    for identity in sorted(
+        load_instance_list(args.list).identities, key=lambda i: i.label()
+    ):
         print(identity.label())
 
 
@@ -106,9 +112,6 @@ def _cmd_add(args: argparse.Namespace) -> None:
         if identity in current:
             raise SystemExit(f"error: {identity.label()} is already listed")
         current.append(identity)
-    if args.at is not None:
-        current = current[: -len(added)]
-        current[args.at : args.at] = added
     _write(args.list, dataclasses.replace(lst, identities=tuple(current)))
 
 
@@ -165,8 +168,6 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("list", type=Path)
         p.add_argument("label", nargs="*")
         p.add_argument("--from", dest="from_file", help="file of labels")
-        if name == "add":
-            p.add_argument("--at", type=int, help="insert at this position")
         p.set_defaults(run=run)
 
     p = sub.add_parser("format", help="rewrite a list canonically")

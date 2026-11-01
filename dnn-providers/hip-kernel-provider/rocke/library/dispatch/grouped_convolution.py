@@ -44,9 +44,12 @@ WHAT DISPATCH DECIDES
   built for): a request for another flavor admits none of them. Selection is
   a pure function of the request -- it never probes the process
   (``ROCKE_LLVM_FLAVOR``, COMGR) for a flavor.
-* **Selection** among admitted instances is the list order: the first listed
-  wins. That is a placeholder policy until measured rankings exist; the
-  ``ranker`` hook of :func:`dispatch_conv_grouped` is where one plugs in.
+* **Selection** among admitted instances, with no ``ranker``, is the first one
+  by a deterministic key (the instance's label, sorted; see
+  ``_instance_sort_key``) -- a registered list is a set, not a priority order,
+  so its on-disk position carries no meaning. That is a placeholder policy
+  until measured rankings exist; the ``ranker`` hook of
+  :func:`dispatch_conv_grouped` is where one plugs in.
 
 Compiling the instances is not done here: their binaries come from the AOT
 build (``benchmarks/common/grouped_conv/benchmark_grouped_conv.py
@@ -80,6 +83,7 @@ from kernels.conv.direct_aot_jobs import (
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_variants import (
+    DIRECT_DGRAD_FPROP_SINGLE,
     DIRECT_MFMA_DGRAD,
     direct_dgrad_weight_transforms,
     direct_dgrad_workspaces,
@@ -546,8 +550,19 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
                 spec.dtype, direction=spec.direction, is_3d=spec.identity.is_3d
             )
         )
-    # The MFMA dgrad's own kernel is a forward pass over the transposed problem.
-    direction = "fwd" if spec.helpers else spec.direction
+    # The MFMA dgrad's own kernel, and the FPROP_SINGLE dgrad variants
+    # (direct_grouped_dgrad_4c / _fused, built by dc.build_direct_conv[_4c] --
+    # the forward builder, reused for dgrad over the transposed problem), are
+    # both a forward pass; ``spec.helpers`` alone used to gate this (true only
+    # for the MFMA ones, which run weight-transform kernels first), silently
+    # mislabeling the FPROP_SINGLE pair's dgrad-shaped kernargs as the fwd
+    # names until the v3 dgrad catalog first registered one for a request this
+    # test suite exercises (test_launch_plan_matches_the_aot_run_path).
+    direction = (
+        "fwd"
+        if spec.helpers or spec.identity.algorithm in DIRECT_DGRAD_FPROP_SINGLE
+        else spec.direction
+    )
     return tuple(conv_direct_args_signature(spec.dtype, direction=direction))
 
 
@@ -690,7 +705,13 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
         )
     problem, _ = _direct_problem(req)
     if not spec.helpers:
-        args = ConvArgs.from_problem(problem, direction=spec.direction)
+        # FPROP_SINGLE dgrad (direct_grouped_dgrad_4c / _fused) is a forward
+        # pass over the transposed problem too, with no weight-transform
+        # helpers to gate on -- see _signature()'s matching branch.
+        args_direction = (
+            "fwd" if ident.algorithm in DIRECT_DGRAD_FPROP_SINGLE else spec.direction
+        )
+        args = ConvArgs.from_problem(problem, direction=args_direction)
         return ConvLaunchPlan((step(args),))
 
     # MFMA dgrad: the weight transforms, then a forward pass over the
@@ -852,7 +873,8 @@ class InstanceListError(ValueError):
 class InstanceList:
     """One instance list file: ``grouped_convolution_instances/<arch>_<dir>.json``.
 
-    ``identities`` are in priority order. ``defaults`` are field values every
+    ``identities`` are a set, no position meaning carried; stored sorted by
+    label (:func:`_instance_sort_key`) for diff stability. ``defaults`` are field values every
     record shares unless it spells its own (``llvm_flavor``, ``wave_size``);
     a record spells only the fields that leave the family's baseline
     (:func:`kernels.conv.kernel_label.field_baseline`) or ``defaults``,
@@ -965,7 +987,9 @@ class InstanceList:
 
 
 def load_instance_list(path: Path) -> InstanceList:
-    """The instance list in ``path``, its identities in priority order.
+    """The instance list in ``path``: a set of identities, in on-disk order
+    (canonically sorted by :func:`_instance_sort_key` when the file was
+    written by :func:`format_instance_list`, but not re-sorted on load).
 
     Fails on a broken list rather than skipping an entry: a record that does
     not spell an identity of the list's arch and direction, or one that repeats an
@@ -1026,8 +1050,24 @@ def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _instance_sort_key(identity: KernelIdentity) -> str:
+    """The deterministic key the registered instances are a set under.
+
+    A list's ``identities`` carry no selection meaning by position; a
+    record's file order is irrelevant. ``label()`` is already the canonical,
+    unique, lossless name every identity has (used for dedup in
+    :func:`load_instance_list`), so it doubles as the sort key that makes the
+    on-disk file -- and the default (no ``ranker``) pick among admitted
+    candidates -- reproducible regardless of edit/append order.
+    """
+    return identity.label()
+
+
 def format_instance_list(lst: InstanceList) -> str:
-    """``lst`` as its file's text: canonical records, one per line."""
+    """``lst`` as its file's text: canonical records, one per line, sorted by
+    :func:`_instance_sort_key` -- a set, not the order ``lst.identities`` happens
+    to hold (insertion/append order is not preserved)."""
+    identities = sorted(lst.identities, key=_instance_sort_key)
     lines = ["{"]
     if lst.comment:
         lines.append('  "comment": [')
@@ -1038,9 +1078,9 @@ def format_instance_list(lst: InstanceList) -> str:
     lines.append(f'  "direction": {_json(lst.direction)},')
     if lst.defaults:
         lines.append(f'  "defaults": {_json(lst.defaults)},')
-    if lst.identities:
+    if identities:
         lines.append('  "instances": [')
-        lines += [f"    {_json(lst.record(i))}," for i in lst.identities]
+        lines += [f"    {_json(lst.record(i))}," for i in identities]
         lines[-1] = lines[-1].rstrip(",")
         lines.append("  ]")
     else:
@@ -1050,7 +1090,8 @@ def format_instance_list(lst: InstanceList) -> str:
 
 
 def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]:
-    """The registered instances of ``(arch, direction)``, in priority order.
+    """The registered instances of ``(arch, direction)``: a set, sorted by
+    :func:`_instance_sort_key` for a deterministic default order.
 
     Fails at import rather than at a first request: a list that does not
     load, or that declares another arch or direction than it is registered
@@ -1063,7 +1104,7 @@ def _read_instance_list(arch: str, direction: str) -> tuple[KernelIdentity, ...]
             f"{path.name}: declares {lst.arch} {lst.direction}, "
             f"registered as {arch} {direction}"
         )
-    return lst.identities
+    return tuple(sorted(lst.identities, key=_instance_sort_key))
 
 
 _CONV_DIM_VOCABULARY = (
@@ -1117,6 +1158,9 @@ CONV_FWD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["fwd"]
 CONV_DGRAD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["dgrad"]
 
 # Registered instances by name; a candidate's spec does not depend on the request.
+# ``priority`` here is the index in _read_instance_list's deterministic
+# (sorted-by-label) order, not file position -- a list is a set on disk; see
+# _instance_sort_key.
 _INSTANCE_SPECS: dict[str, ConvInstanceSpec] = {}
 for (_arch, _direction), _ in _INSTANCE_LISTS.items():
     for _priority, _identity in enumerate(_read_instance_list(_arch, _direction)):
@@ -1149,7 +1193,7 @@ def _registry(req: ConvGroupedRequest) -> CandidateRegistry:
 
 
 def conv_grouped_candidates(direction: str = "fwd") -> tuple[KernelCandidate, ...]:
-    """Every registered candidate of ``direction``, in priority order."""
+    """Every registered candidate of ``direction``, in deterministic (sorted-label) order."""
     registry = _REGISTRIES.get(direction)
     return registry.candidates() if registry is not None else ()
 
@@ -1157,7 +1201,7 @@ def conv_grouped_candidates(direction: str = "fwd") -> tuple[KernelCandidate, ..
 def registered_conv_grouped_instances(
     arch: str | None = None, direction: str = "fwd"
 ) -> tuple[ConvInstanceSpec, ...]:
-    """Every registered instance (optionally of one ``arch``), in priority order.
+    """Every registered instance (optionally of one ``arch``), in deterministic (sorted-label) order.
 
     What an AOT build compiles: request-independent, no GPU needed.
     """
@@ -1171,14 +1215,14 @@ def registered_conv_grouped_instances(
 def registered_conv_grouped_combos(
     req: OperatorRequest,
 ) -> tuple[tuple[KernelCandidate, ConvInstanceSpec], ...]:
-    """Every registered ``(candidate, spec)`` that can run ``req``, in priority order."""
+    """Every registered ``(candidate, spec)`` that can run ``req``, in deterministic (sorted-label) order."""
     if _request_errors(req):
         return ()
     return _registry(req).combos(req)
 
 
 def conv_grouped_sweep_space(req: OperatorRequest) -> Sequence[ConvInstanceSpec]:
-    """Every registered instance that can run ``req``, in priority order."""
+    """Every registered instance that can run ``req``, in deterministic (sorted-label) order."""
     if _request_errors(req):
         return ()
     return _registry(req).sweep_space(req, spec_key=lambda spec: spec.name)
@@ -1187,7 +1231,7 @@ def conv_grouped_sweep_space(req: OperatorRequest) -> Sequence[ConvInstanceSpec]
 def dispatch_conv_grouped_all(req: ConvGroupedRequest) -> tuple[DispatchResult, ...]:
     """A :class:`DispatchResult` for every instance that can run ``req``.
 
-    In priority order, each with its own launch geometry and signature -- the
+    In deterministic (sorted-label) order, each with its own launch geometry and signature -- the
     benchmark primitive.
     """
     if _request_errors(req):
