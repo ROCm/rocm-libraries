@@ -105,8 +105,6 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
       - ProblemSizes:
         - Exact: [256, 256, 1, 512]
-        - Exact: [512, 512, 1, 1024]
-        - Exact: [1024, 1024, 1, 2048]
         - Exact: [255, 257, 1, 513]
         - Exact: [258, 257, 1, 513]
         - Range:
@@ -381,10 +379,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
-        - Exact: [368, 368, 1, 2304]
-        - Exact: [736, 736, 1, 2304]
         - Exact: [128, 192, 2, 256]
-        - Exact: [130, 368, 1, 2304]
+        - Exact: [136, 368, 1, 1024]
       - BiasTypeArgs: [s, b]
       - ActivationArgs:
         - - Enum: relu
