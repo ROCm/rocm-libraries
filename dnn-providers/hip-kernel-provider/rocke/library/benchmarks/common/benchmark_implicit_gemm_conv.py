@@ -1390,7 +1390,8 @@ def main() -> int:
             "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce), "
             "also for --run-from-cache: "
             "auto = two-stage only when C/groups is odd (where the packed atomic "
-            "cannot be built); "
+            "cannot be built) -- and, from the cache on wave32, for bf16 (whose "
+            "packed atomic is degree-capped for accuracy); "
             "always = time the two-stage kernels alongside the packed-atomic ones "
             "(nothing is dropped), so both split-K reductions compete; "
             "never = skip two-stage entirely (default: auto)"
@@ -4790,7 +4791,15 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # "never" drops them outright; "always" keeps them alongside
                 # the packed-atomic ones, so both reductions compete.
                 odd = (problem.C // max(1, problem.groups)) % 2 != 0
-                if args.two_stage == "never" or not odd:
+                # On wave32 (gfx1250) bf16 also runs the two-stage kernels: the
+                # packed bf16 atomic is degree-capped for accuracy (12), and the
+                # f32 workspace is the accuracy-safe way past that cap.
+                from rocke.core.arch import ArchTarget
+
+                deep_bf16 = (
+                    case_dtype == "bf16" and ArchTarget.from_gfx(arch).wave_size == 32
+                )
+                if args.two_stage == "never" or not (odd or deep_bf16):
                     candidates = [c for c in candidates if not c[0].two_stage]
                 if not candidates:
                     print(
@@ -5518,10 +5527,13 @@ def _widest_vector_sizes(candidates):
     thread) only in narrower copies. Narrower access does not win, so only the
     kernels at the problem's widest combination are run.
 
-    "Widest" is taken per kernel kind -- direction, epilogue, split-K mode and
-    group merging -- because the kind caps some widths regardless of the
-    problem: the default epilogue stores scalar (c = 1), and a group-merged
-    kernel derives its widths in the builder (recorded as 0). Default-epilogue
+    "Widest" is taken per kernel kind -- direction, epilogue, split-K mode,
+    group merging and the K loop (synchronous or async-DMA) -- because the
+    kind caps some widths regardless of the problem: the default epilogue
+    stores scalar (c = 1), a group-merged kernel derives its widths in the
+    builder (recorded as 0), and an async-DMA kernel records the chunk widths
+    its copies use where a synchronous one records its width caps, which its
+    loader can narrow at build time, so the two do not compare. Default-epilogue
     kernels are dropped altogether where a kernel of the same kind can store
     wider than 1 for this problem.
     ``supports_problem`` has already dropped widths the problem cannot take,
@@ -5539,15 +5551,22 @@ def _widest_vector_sizes(candidates):
             ident.group_merge,
             ident.streamk,
             ident.streamk_reduction,
+            bool(getattr(ident, "async_dma", False)),
         )
 
     def rank(ident):
-        return (
-            ident.vector_size_a + ident.vector_size_b + ident.vector_size_c,
-            ident.vector_size_a,
-            ident.vector_size_b,
-            ident.vector_size_c,
-        )
+        # An async-DMA binary leaves A / B unset and records the chunk widths
+        # its copies use instead; it ranks by those against the other async
+        # binaries of its kind (kind() keeps it apart from the synchronous
+        # kernels, whose recorded caps are not their effective load widths).
+        a = ident.vector_size_a
+        b = ident.vector_size_b
+        if a is None:
+            a = getattr(ident, "async_chunk_a", 0) or 8
+        if b is None:
+            b = getattr(ident, "async_chunk_b", 0) or 8
+        c = ident.vector_size_c or 0
+        return (a + b + c, a, b, c)
 
     # The default epilogue stores scalar (c = 1) straight from the MMA
     # accumulators. Where the same kind of kernel can store wider -- a

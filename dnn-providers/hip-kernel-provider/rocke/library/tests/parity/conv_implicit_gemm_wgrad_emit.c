@@ -412,6 +412,136 @@ static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
         spec->split_k = 4;
         *arch = idx == 52 ? "gfx1201" : idx == 53 ? "gfx1250" : "gfx1151";
         return 0;
+    case 55:
+    case 56:
+    case 57:
+    case 67:
+    {
+        /* gfx1250 WMMA async K loop. Must match the Python emitter's 55-57
+         * and 67 (55 with bf16 operands). */
+        const bool big = idx == 56;
+        if(idx == 57)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 3, 32, 3, 3);
+        else if(idx == 55 || idx == 67)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        else
+            spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = idx == 67 ? "bf16" : "fp16";
+        spec->dtype_b = idx == 67 ? "bf16" : "fp16";
+        spec->dtype_d = "fp32";
+        spec->tile_m = big ? 64 : 32;
+        spec->tile_n = big ? 64 : 32;
+        spec->tile_k = big ? 64 : 32;
+        spec->warp_m = big ? 2 : 1;
+        spec->warp_n = big ? 2 : 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        spec->split_k = big ? 4 : 2;
+        spec->lds_k_outer = true;
+        spec->async_dma = true;
+        *arch = "gfx1250";
+        return 0;
+    }
+    case 58:
+    case 59:
+    case 60:
+    case 61:
+    {
+        /* WMMA cshuffle epilogue. Must match the Python emitter's 58-61. */
+        const bool gfx1250 = idx != 61;
+        if(idx == 60)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        else
+            spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = idx == 59 ? "bf16" : "fp16";
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->tile_k = 64;
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = gfx1250 ? 32 : 16;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "cshuffle";
+        spec->split_k = idx == 58 ? 1 : (idx == 60 ? 2 : 4);
+        spec->lds_k_outer = gfx1250;
+        spec->async_dma = idx == 60;
+        *arch = gfx1250 ? "gfx1250" : "gfx1201";
+        return 0;
+    }
+    case 62:
+        /* WMMA cshuffle split-K with an odd store vector. Must match the
+         * Python emitter's 62 (both engines reject). */
+        spec->problem = rocke_conv_problem_default(4, 12, 12, 3, 32, 2, 2);
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = "fp16";
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "cshuffle";
+        spec->split_k = 4;
+        *arch = "gfx1250";
+        return 0;
+    case 63:
+    case 64:
+    case 65:
+    case 66:
+    {
+        /* Two-stage (f32 workspace) split-K on WMMA. Must match the Python
+         * emitter's 63-66. */
+        const bool gfx1250 = idx != 66;
+        const bool big = idx == 64;
+        if(idx == 63)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 3, 32, 3, 3);
+        else if(idx == 65)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        else
+            spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = idx == 64 ? "bf16" : "fp16";
+        spec->tile_m = big ? 64 : 32;
+        spec->tile_n = big ? 64 : 32;
+        spec->tile_k = big ? 64 : 32;
+        spec->warp_m = big ? 2 : 1;
+        spec->warp_n = big ? 2 : 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = gfx1250 ? 32 : 16;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        spec->split_k = 4;
+        spec->two_stage = true;
+        spec->lds_k_outer = idx == 64 || idx == 65;
+        spec->async_dma = idx == 65;
+        if(idx == 65)
+            spec->ws_replicas = 1;
+        *arch = gfx1250 ? "gfx1250" : "gfx1151";
+        return 0;
+    }
     default:
         return -1;
     }

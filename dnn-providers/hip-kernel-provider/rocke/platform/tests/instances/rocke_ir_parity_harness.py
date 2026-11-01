@@ -196,6 +196,7 @@ def build_conv_wgrad(
     streamk="off",
     streamk_reduction="linear",
     streamk_ctas=-1,
+    **spec_extra,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm_wgrad import (
@@ -228,6 +229,7 @@ def build_conv_wgrad(
             streamk=streamk,
             streamk_reduction=streamk_reduction,
             streamk_ctas=streamk_ctas,
+            **spec_extra,
         )
         return build_implicit_gemm_conv_wgrad(spec, arch=arch)
 
@@ -2810,6 +2812,49 @@ def cases():
             dtype_d="bf16",
         ),
     )
+    # WMMA split-K over the gfx1250 async K loop (global_load_async_to_lds).
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1250/n1h8c16k32r3_spk4_async",
+        "gfx1250",
+        build_conv_wgrad(
+            "irhash_wgrad_1250_spk4_async",
+            "gfx1250",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            split_k=4,
+            dtype_d="bf16",
+            lds_k_outer=True,
+            async_dma=True,
+        ),
+    )
+    # WMMA split-K through the cshuffle epilogue (paired atomics from LDS).
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1250/n1h8c16k32r3_spk4_cshuffle",
+        "gfx1250",
+        build_conv_wgrad(
+            "irhash_wgrad_1250_spk4_cshuffle",
+            "gfx1250",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            split_k=4,
+            dtype_d="fp16",
+            epilogue="cshuffle",
+        ),
+    )
 
     # Dgrad: backward-data implicit-GEMM.  Problem args match the forward conv
     # set; atoms chosen to be valid on each arch.  Stride=2 exercises the tiled
@@ -3092,6 +3137,27 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            split_k=4,
+            two_stage=True,
+        ),
+    )
+
+    # gfx1250 WMMA: the scratch epilogue decodes the WMMA C fragment.
+    add(
+        "conv_wgrad_two_stage",
+        "conv_wgrad_two_stage/gfx1250/n1h8c16k32r3_spk4",
+        "gfx1250",
+        build_conv_wgrad(
+            "irhash_wgrad_1250_twostage_spk4",
+            "gfx1250",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
             split_k=4,
             two_stage=True,
         ),

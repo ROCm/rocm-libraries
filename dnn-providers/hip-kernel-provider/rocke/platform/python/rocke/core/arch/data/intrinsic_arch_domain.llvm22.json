@@ -63,7 +63,6 @@
     "fmuladd.v8bf16": "llvm.fmuladd.v8bf16",
     "fmuladd.v8f16": "llvm.fmuladd.v8f16",
     "fmuladd.v8f32": "llvm.fmuladd.v8f32",
-    "global.atomic.fadd.v2f16": "(auto-upgraded)",
     "global.load.async.to.lds.b128": "llvm.amdgcn.global.load.async.to.lds.b128",
     "global.load.async.to.lds.b32": "llvm.amdgcn.global.load.async.to.lds.b32",
     "global.load.async.to.lds.b64": "llvm.amdgcn.global.load.async.to.lds.b64",
@@ -2612,40 +2611,6 @@
       }
     },
     "fmuladd.v8f32": {
-      "gfx11-generic": {
-        "status": "ok",
-        "verified_on": "llvm22"
-      },
-      "gfx1151": {
-        "status": "ok",
-        "verified_on": "llvm22"
-      },
-      "gfx12-generic": {
-        "status": "ok",
-        "verified_on": "llvm22"
-      },
-      "gfx1201": {
-        "status": "ok",
-        "verified_on": "llvm22"
-      },
-      "gfx1250": {
-        "status": "ok",
-        "verified_on": "llvm22"
-      },
-      "gfx90a": {
-        "status": "ok",
-        "verified_on": "llvm22"
-      },
-      "gfx942": {
-        "status": "ok",
-        "verified_on": "llvm22"
-      },
-      "gfx950": {
-        "status": "ok",
-        "verified_on": "llvm22"
-      }
-    },
-    "global.atomic.fadd.v2f16": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm22"
