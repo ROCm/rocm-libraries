@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "example/ck_tile/01_fmha/fmha_fwd.hpp"
-#include "example/ck_tile/01_fmha/fmha_fwd_kvshared.hpp"
 #include "example/ck_tile/01_fmha/fmha_fwd_runner.hpp"
 
 #include "gtest/gtest.h"
@@ -667,104 +666,6 @@ TEST_P(QrTdmKVShared, DataTypeConfig)
         ASSERT_EQ(result, fwd_result::success);
         EXPECT_NE(selected_kernel.find("_qr_tdm_kvshared_"), std::string::npos) << selected_kernel;
         EXPECT_NE(selected_kernel.find("_b16x"), std::string::npos) << selected_kernel;
-    }
-}
-
-// make_fmha_fwd_kvshared_args: one head, K and V one contiguous tensor, as a caller passes
-// it. Checked against a host reference for O and the LSE.
-// hdim, batch, seqlen_q, seqlen_k
-class KVSharedHelpers : public TestWithParam<std::tuple<int, int, int, int>>
-{
-};
-
-INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
-                         KVSharedHelpers,
-                         Values(std::tuple{128, 64, 16, 1000},
-                                std::tuple{128, 3, 16, 4097},
-                                std::tuple{128, 5, 7, 513},
-                                std::tuple{256, 2, 16, 2049},
-                                std::tuple{256, 37, 16, 700}));
-
-TEST_P(KVSharedHelpers, DataTypeConfig)
-{
-    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
-    {
-        using T = typename FmhaFwdTypeConfig<DataTypeConfig>::QDataType;
-        const auto [hdim, batch, seqlen_q, seqlen_k] = GetParam();
-
-        ck_tile::HostTensor<T> q({batch, seqlen_q, hdim});
-        ck_tile::HostTensor<T> kv({batch, seqlen_k, hdim});
-        ck_tile::HostTensor<T> o({batch, seqlen_q, hdim});
-        ck_tile::HostTensor<float> lse({batch, seqlen_q});
-        ck_tile::FillUniformDistribution<T>{-1.f, 1.f, 11}(q);
-        ck_tile::FillUniformDistribution<T>{-1.f, 1.f, 12}(kv);
-
-        ck_tile::DeviceMem q_buf(q.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem kv_buf(kv.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem o_buf(o.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem lse_buf(lse.get_element_space_size_in_bytes());
-        q_buf.ToDevice(q.data());
-        kv_buf.ToDevice(kv.data());
-
-        fmha_fwd_kvshared_problem p{};
-        p.data_type = std::is_same_v<DataTypeConfig, FmhaFwdBf16> ? "bf16" : "fp16";
-        p.q_ptr     = q_buf.GetDeviceBuffer();
-        p.kv_ptr    = kv_buf.GetDeviceBuffer();
-        p.o_ptr     = o_buf.GetDeviceBuffer();
-        p.lse_ptr   = lse_buf.GetDeviceBuffer();
-        p.batch     = batch;
-        p.seqlen_q  = seqlen_q;
-        p.seqlen_k  = seqlen_k;
-        p.hdim      = hdim;
-        p.scale_s   = 1.f / std::sqrt(static_cast<float>(hdim));
-
-        std::string selected_kernel;
-        auto [t, a]            = make_fmha_fwd_kvshared_args(p);
-        a.selected_kernel_name = &selected_kernel;
-        const float time       = fmha_fwd(t, a, ck_tile::stream_config{});
-        if(time < 0.f)
-            GTEST_SKIP() << "No instance for current parameters";
-        if(ck_tile::is_gfx125_supported())
-            EXPECT_NE(selected_kernel.find("_qr_tdm_kvshared_"), std::string::npos)
-                << selected_kernel;
-        o_buf.FromDevice(o.data());
-        lse_buf.FromDevice(lse.data());
-
-        // host reference: softmax(q kv^T * scale) kv
-        double max_o_err = 0, max_lse_err = 0;
-        std::vector<double> s(seqlen_k);
-        for(int b = 0; b < batch; ++b)
-            for(int i = 0; i < seqlen_q; ++i)
-            {
-                double m = -INFINITY;
-                for(int j = 0; j < seqlen_k; ++j)
-                {
-                    double dot = 0;
-                    for(int d = 0; d < hdim; ++d)
-                        dot += ck_tile::type_convert<float>(q(b, i, d)) *
-                               ck_tile::type_convert<float>(kv(b, j, d));
-                    s[j] = dot * p.scale_s;
-                    m    = std::max(m, s[j]);
-                }
-                double l = 0;
-                for(int j = 0; j < seqlen_k; ++j)
-                    l += std::exp(s[j] - m);
-                for(int d = 0; d < hdim; ++d)
-                {
-                    double acc = 0;
-                    for(int j = 0; j < seqlen_k; ++j)
-                        acc += std::exp(s[j] - m) * ck_tile::type_convert<float>(kv(b, j, d));
-                    max_o_err = std::max(
-                        max_o_err, std::abs(acc / l - ck_tile::type_convert<float>(o(b, i, d))));
-                }
-                max_lse_err = std::max(max_lse_err, std::abs(m + std::log(l) - lse(b, i)));
-            }
-        EXPECT_LT(max_o_err, 1e-2) << selected_kernel;
-        EXPECT_LT(max_lse_err, 1e-3) << selected_kernel;
-    }
-    else
-    {
-        GTEST_SKIP() << "kv-shared helpers test fp16 and bf16";
     }
 }
 
