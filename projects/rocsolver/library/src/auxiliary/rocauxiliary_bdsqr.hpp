@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     June 2017
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -1264,8 +1264,7 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
     dim3 threadsVUC((nvuc_max ? std::min(nvuc_max, BS1) : 1), 1, 1);
 
     // set completed = 0
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, completed,
-                            batch_count + 2, 0);
+    reset_info(handle, completed, batch_count + 2, 0);
 
     // check for NaNs and Infs in input
     ROCSOLVER_LAUNCH_KERNEL((bdsqr_init<T>), gridBasic, threadsBasic, 0, stream, n, D, strideD, E,
