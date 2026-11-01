@@ -20,6 +20,8 @@ from dispatch.sdpa.bind_unified import (
     sdpa_unified_admits,
     sdpa_unified_bind,
 )
+from rocke.core.arch import base_arch_from_target_id
+
 from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
 from tests.sdpa.binding_harness import bind_tensors, outputs
@@ -29,8 +31,8 @@ from tests.sdpa.request_bridge import request_from_case
 def _arch():
     if not torch.cuda.is_available():
         return None
-    name = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return next((a for a in ("gfx942", "gfx950") if a in name), None)
+    arch = base_arch_from_target_id(torch.cuda.get_device_properties(0).gcnArchName)
+    return arch if arch in ("gfx942", "gfx950") else None
 
 
 ARCH = _arch()
