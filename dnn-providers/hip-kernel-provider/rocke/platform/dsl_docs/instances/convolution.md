@@ -1476,7 +1476,9 @@ kernels of the direct-conv AOT sweep on gfx1250, all taking the
   groups), with an LDS reduction over the waves.
 - **Two-stage reduction.** The blocks add into one of `ws_replicas` fp32 slabs
   with `buffer_atomic_fadd_f32` (the `tile.buffer_atomic_fadd_f32` IR op, with a
-  cache policy), spreading the same-address atomics; the cached
+  cache policy; the kernels guard each atomic with `scf_if` because an atomic
+  at the out-of-range sentinel faults on gfx1250, where a load reads 0),
+  spreading the same-address atomics; the cached
   `direct_wgrad_reduce` helper (`WgradReduceSpec`, one binary per replica
   count) folds the slabs into `dW`. The run-from-cache plan zeroes the scratch
   (`DirectPlan.zeroed`) and launches both steps.

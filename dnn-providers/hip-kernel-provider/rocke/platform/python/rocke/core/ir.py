@@ -5883,8 +5883,10 @@ class IRBuilder:
     ) -> None:
         """f32 atomic add through a buffer resource (``raw_ptr_buffer_atomic_fadd``).
 
-        ``voffset`` / ``soffset`` are byte offsets; an out-of-range voffset is
-        dropped by the resource's range check. ``cachepolicy`` is the raw
+        ``voffset`` / ``soffset`` are byte offsets. Callers must guard invalid
+        offsets (e.g. with ``scf_if``) instead of steering them out of range:
+        unlike a buffer load, which reads 0 there, a buffer atomic at the
+        out-of-range sentinel offset faults on gfx1250. ``cachepolicy`` is the raw
         immediate the intrinsic takes -- on gfx12+ bits [2:0] are th and [4:3]
         scope, e.g. :data:`CPOL_ATOMIC_CASCADE_DEV`. The returned pre-add value
         is discarded, so the backend selects the no-return form.
