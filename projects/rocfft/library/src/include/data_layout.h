@@ -353,7 +353,9 @@ struct data_layout_t
      * @throw An `std::logic_error` is thrown if the current object is an empty
      * layout or has any non-zero lower bound for a length axis.
      * An `std::invalid_argument` is thrown if `fft_type` is not an expected value
-     * or if `other_io` is not an expected value.
+     * or if `other_io` is not an expected value, or if a real layout is to be returned
+     * for a Hermitian innermost length of 1 with `other_innermost_length_is_odd` set
+     * to `false` (would result in a real innermost length of 0).
      * 
      */
     std::optional<data_layout_t> get_other_inplace_layout_for(io_data_label         other_io,
