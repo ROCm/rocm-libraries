@@ -187,7 +187,12 @@ def test_attention_ir_cpp_python_byte_identity():
     assert pipeline, "gfx942 golden declares no KDB/VPF cases"
     for cid, build in pipeline.items():
         cases.append(
-            {"family": "attention_dense", "case_id": cid, "arch": "gfx942", "build": build}
+            {
+                "family": "attention_dense",
+                "case_id": cid,
+                "arch": "gfx942",
+                "build": build,
+            }
         )
 
     prev = os.environ.get("ROCKE_CPP_STRICT")
