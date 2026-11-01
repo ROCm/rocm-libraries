@@ -209,24 +209,28 @@ namespace FixedPointEmulation
          * work proportional to m * n per modulus, so a GEMM with a small k
          * stays faster natively however large m * n * k is.  A square FP64
          * GEMM of size n has an intensity of n / 12.
-         * FP64, from eager emulation against native FP64:
-         *   RDNA 3:   on the Radeon Pro W7800, emulated FP64 is slower than
-         *             native at 512^3 (43) and faster at 640^3 (53).
+         * FP64: the smallest measured intensity from which emulated FP64 is
+         * faster than native, for square GEMMs (TN and NN) and for
+         * 8192 x 8192 x k:
+         *   RDNA 3:   on the Radeon Pro W7800, emulation is slower at 512^3
+         *             (43) and faster from 576^3 (48) on; at 8192 x 8192 x k
+         *             it is slower up to k = 128 (31) and faster at k = 256.
          *   RDNA 3.5: copied from RDNA 3; not yet measured on RDNA 3.5.
-         *   RDNA 4:   on the Radeon RX 9070 XT, emulation ties native FP64 at
-         *             512^3 (43) and is faster at 640^3 (53).
+         *   RDNA 4:   on the Radeon RX 9070 XT, emulation is faster from
+         *             384^3 (32) on; at 8192 x 8192 x k it is slower up to
+         *             k = 64 (16) and faster from k = 128 (31) on.
          * FP32: never; emulated FP32 is slower than native FP32 in the TN and
          * NN layouts on both cards.                                          */
         constexpr double NEVER = FIXED_POINT_EMULATION_NEVER;
         static const ArchRow rows[] = {
-            {"gfx1100", 52.0, NEVER}, // RDNA 3
-            {"gfx1101", 52.0, NEVER}, // RDNA 3
-            {"gfx1102", 52.0, NEVER}, // RDNA 3
-            {"gfx1150", 52.0, NEVER}, // RDNA 3.5
-            {"gfx1151", 52.0, NEVER}, // RDNA 3.5
-            {"gfx1152", 52.0, NEVER}, // RDNA 3.5
-            {"gfx1200", 48.0, NEVER}, // RDNA 4
-            {"gfx1201", 48.0, NEVER}, // RDNA 4
+            {"gfx1100", 48.0, NEVER}, // RDNA 3
+            {"gfx1101", 48.0, NEVER}, // RDNA 3
+            {"gfx1102", 48.0, NEVER}, // RDNA 3
+            {"gfx1150", 48.0, NEVER}, // RDNA 3.5
+            {"gfx1151", 48.0, NEVER}, // RDNA 3.5
+            {"gfx1152", 48.0, NEVER}, // RDNA 3.5
+            {"gfx1200", 30.0, NEVER}, // RDNA 4
+            {"gfx1201", 30.0, NEVER}, // RDNA 4
         };
         if(gcn_arch_name == nullptr)
             return nullptr;
