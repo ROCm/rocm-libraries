@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,10 +23,12 @@
  * ************************************************************************ */
 
 #include "rocsparse_bsrxmv_spzl.hpp"
+#include "rocsparse_grid.hpp"
 
 namespace rocsparse
 {
     // BSRXMV kernel for BSR block dimension of 16
+    // row_offset is the (masked) block row this block handles.
     template <uint32_t BLOCKSIZE,
               typename T,
               typename I,
@@ -34,7 +36,8 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y>
-    ROCSPARSE_DEVICE_ILF void bsrxmvn_16x16_device(J                   mb,
+    ROCSPARSE_DEVICE_ILF void bsrxmvn_16x16_device(J                   row_offset,
+                                                   J                   mb,
                                                    rocsparse_direction dir,
                                                    T                   alpha,
                                                    J                   size_of_mask,
@@ -58,7 +61,7 @@ namespace rocsparse
         J idx = (dir == rocsparse_direction_column) ? ((hipThreadIdx_x / BSRDIM) % BSRDIM) : lid;
 
         // Each thread block processes a single BSR row
-        J row = hipBlockIdx_x;
+        J row = row_offset;
 
         if(bsr_mask_ptr != nullptr)
         {
@@ -177,19 +180,36 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha != static_cast<T>(0) || beta != static_cast<T>(1))
         {
-            rocsparse::bsrxmvn_16x16_device<BLOCKSIZE>(mb,
-                                                       dir,
-                                                       alpha,
-                                                       size_of_mask,
-                                                       bsr_mask_ptr,
-                                                       bsr_row_ptr,
-                                                       bsr_end_ptr,
-                                                       bsr_col_ind,
-                                                       bsr_val,
-                                                       x,
-                                                       beta,
-                                                       y,
-                                                       idx_base);
+            // Number of block rows this launch must cover. Mirrors the host-side
+            // grid sizing: without a mask every block row is processed, with a
+            // mask only the size_of_mask entries the mask selects.
+            const J nblockrows = (bsr_mask_ptr == nullptr) ? mb : size_of_mask;
+
+            // Grid-stride over block rows; grid.x comes from get_grid_size_x. The
+            // bound is block uniform, so every thread reaches the __syncthreads() below.
+            for(int64_t row_offset = hipBlockIdx_x; row_offset < nblockrows;
+                row_offset += hipGridDim_x)
+            {
+                rocsparse::bsrxmvn_16x16_device<BLOCKSIZE>(static_cast<J>(row_offset),
+                                                           mb,
+                                                           dir,
+                                                           alpha,
+                                                           size_of_mask,
+                                                           bsr_mask_ptr,
+                                                           bsr_row_ptr,
+                                                           bsr_end_ptr,
+                                                           bsr_col_ind,
+                                                           bsr_val,
+                                                           x,
+                                                           beta,
+                                                           y,
+                                                           idx_base);
+
+                // The device function reduces through a __shared__ sdata array
+                // that the next iteration overwrites with its first store. Fence
+                // this iteration's trailing reads against those writes.
+                __syncthreads();
+            }
         }
     }
 }
@@ -214,8 +234,16 @@ void rocsparse::bsrxmvn_16x16(rocsparse_handle     handle,
     ROCSPARSE_ROUTINE_TRACE;
 
     const J size = (bsr_mask_ptr == nullptr) ? mb : size_of_mask;
+
+    // An empty mask selects no block rows, and a zero-sized grid is an invalid launch.
+    if(size == 0)
+    {
+        return;
+    }
+
+    // Clamped by get_grid_size_x; the kernel grid-strides (see rocsparse_grid.hpp).
     THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmvn_16x16_kernel<256, T>),
-                                      dim3(size),
+                                      dim3(rocsparse::get_grid_size_x(handle, size, 256)),
                                       dim3(256),
                                       0,
                                       handle->stream,
