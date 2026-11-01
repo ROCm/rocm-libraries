@@ -405,8 +405,16 @@ class _Lowerer:
 
         CDNA (gfx9/gfx10) uses the split-VMCNT layout; RDNA gfx11 (gfx1151)
         uses the contiguous layout. Selection keys off the resolved
-        :class:`ArchTarget` ``target_family`` so CDNA output is unchanged.
+        :class:`ArchTarget` ``target_family`` so CDNA output is unchanged. A
+        target whose ISA backend has no monolithic ``s_waitcnt`` (gfx1250) is
+        refused: clang cannot select the builtin there.
         """
+        if not backend_for(self.arch).emits_legacy_s_waitcnt:
+            raise NotImplementedError(
+                f"s_waitcnt is not available on {self.arch.gfx}: the target "
+                "replaced it with split wait counters, which the HIP lowering "
+                "does not emit; lower through the LLVM path"
+            )
         if self.arch.target_family in ("gfx11_rdna", "gfx12_rdna"):
             return _encode_waitcnt_gfx11(vmcnt, expcnt, lgkmcnt)
         return _encode_waitcnt_gfx9_10(vmcnt, expcnt, lgkmcnt)

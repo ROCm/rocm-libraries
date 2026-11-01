@@ -42,6 +42,7 @@
 #include "rocke/ir_print.h" /* rocke_append_python_float */
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/lower_llvm_internal.h" /* rocke_ll_backend_for: the ISA backend facts */
 #include "rocke/strbuf.h"
 #include "rocke/vec.h"
 
@@ -642,8 +643,18 @@ int rocke_h_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt)
     return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10);
 }
 
-int rocke_h_encode_waitcnt(const rocke_h_lowerer_t* lw, int vmcnt, int expcnt, int lgkmcnt)
+int rocke_h_encode_waitcnt(rocke_h_lowerer_t* lw, int vmcnt, int expcnt, int lgkmcnt)
 {
+    if(lw && lw->arch.waitcnt_family == ROCKE_HIP_WAITCNT_NONE)
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_NOTIMPL,
+                     "s_waitcnt is not available on %s: the target replaced it with split "
+                     "wait counters, which the HIP lowering does not emit; lower through "
+                     "the LLVM path",
+                     lw->arch.gfx);
+        return 0;
+    }
     if(lw && lw->arch.waitcnt_family == ROCKE_HIP_WAITCNT_GFX11)
     {
         return rocke_h_encode_waitcnt_gfx11(vmcnt, expcnt, lgkmcnt);
@@ -985,6 +996,16 @@ rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
         a.has_ds_read_tr = false;
         a.has_wmma = true;
         a.family = "rdna";
+    }
+    /* Python _encode_waitcnt asks the ISA backend: a target whose backend does
+     * not emit the monolithic s_waitcnt (gfx1250) has no immediate to encode. */
+    {
+        rocke_status_t st = ROCKE_OK;
+        const ckc::rocke_isa_backend_t* backend = ckc::rocke_ll_backend_for(gfx, &st);
+        if(backend && !backend->emits_legacy_s_waitcnt)
+        {
+            a.waitcnt_family = ROCKE_HIP_WAITCNT_NONE;
+        }
     }
     /* Anything unrecognised keeps the gfx950 default facts (per the header).
      * rocke_lower_kernel_to_hip rejects such a string before it gets here, so

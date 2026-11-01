@@ -204,8 +204,10 @@ const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val);
 
 /* Python _encode_waitcnt: arch-aware s_waitcnt immediate. Selects the gfx9/10
  * split-VMCNT layout or the gfx11 contiguous layout off lw->arch. -1 on any
- * counter means "no wait" (encoded as that field's architectural max). */
-int rocke_h_encode_waitcnt(const rocke_h_lowerer_t* lw, int vmcnt, int expcnt, int lgkmcnt);
+ * counter means "no wait" (encoded as that field's architectural max). On a
+ * target without the monolithic s_waitcnt (ROCKE_HIP_WAITCNT_NONE) it fails `lw`
+ * with ROCKE_ERR_NOTIMPL and returns 0; check rocke_h_live afterwards. */
+int rocke_h_encode_waitcnt(rocke_h_lowerer_t* lw, int vmcnt, int expcnt, int lgkmcnt);
 
 /* The two raw encoders behind rocke_h_encode_waitcnt, exposed for any direct
  * callers / tests (Python _encode_waitcnt_gfx9_10 / _encode_waitcnt_gfx11). */
