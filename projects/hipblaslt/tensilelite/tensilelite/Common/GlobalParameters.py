@@ -177,7 +177,15 @@ globalParameters["CSVMergeSameProblemID"] = False
 # See ClientWriter.py, the DataInitName(Enum) for a list of initialization patterns
 #       - Problem-Independent: 0=0, 1=1, 2=2, 3=rand, 4=Nan, 5=Infinity, 6=BadInput(Nan), 7=BadOutput(Inf), 16=RandomNarrow,
 #                              21=RandomNegPosLimited(-128~128 or -1~1), 23~26=Ind Cos/Sin Abs or Not
-#       - Problem-dependent: 8=SerialID, 9=SerialDim0, 10=SerialDim1, 11=Identity, 12~15= Cos/Sin, Abs or Not
+#       - Problem-dependent: 8=SerialID, 9=SerialDim0, 10=SerialDim1, 11=Identity, 12~15= Cos/Sin, Abs or Not,
+#                            28=Maf2_0 (MAF2.0: N(0,1) for Double/Float/Half/BFloat16/FP8, MX sides from
+#                               mxDataGenerator; fixed-seed, A/B/C get different seeds),
+#                            29=Maf2_0UnitScale (MAF2.0 FP4 non-scaled: MX FP4 sides get unit block scales
+#                               and N(0,1) data; otherwise as 28)
+#                            30=Maf1_0 (MAF1.0: no RNG; A = sin(idx), other tensors cos(idx), idx = logical
+#                               index i + j*rows + b*rows*cols; ScaleA/ScaleB = 0.5 when their own
+#                               DataInitTypeScaleA/B is 30 (A/B init does not set it); MX sides from
+#                               mxDataGenerator with every block scale 0.5)
 #       For A, B, C, D: All the InitMode (0~16) can be used
 #       For Alpha/Beta: Only problem-independent init (0~7, 16, 23~26) can be used,
 #                       problem-dependent init (8~15) would cause a exception (Invalid InitMode) in New Client

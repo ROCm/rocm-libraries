@@ -329,7 +329,11 @@ namespace DGen
         //     the scale-byte derivation is undefined for NaN inputs and
         //     `__amd_cvt_*_scale` doesn't expose a way to pick a specific
         //     NaN payload or the Inf encoding.
-        // Route those four through the host CPU `DataGenerator<DTYPE>` and
+        //   * Maf2_0 draws scale bytes and data encodings directly, with
+        //     no float value per element to quantise.
+        //   * Maf1_0 fixes every scale byte and rounds each element at a
+        //     scale of one, not to a block-max-derived scale.
+        // Route those through the host CPU `DataGenerator<DTYPE>` and
         // then hipMemcpy the bytes to device.
         inline bool requiresHostFallback(DataInitMode const& initMode)
         {
@@ -337,7 +341,8 @@ namespace DGen
                 [](auto const& mode) -> bool {
                     using T = std::decay_t<decltype(mode)>;
                     return std::is_same_v<T, DenormMins> || std::is_same_v<T, DenormMaxs>
-                           || std::is_same_v<T, NaNs> || std::is_same_v<T, Infs>;
+                           || std::is_same_v<T, NaNs> || std::is_same_v<T, Infs>
+                           || std::is_same_v<T, Maf2_0> || std::is_same_v<T, Maf1_0>;
                 },
                 initMode);
         }
@@ -1281,6 +1286,16 @@ namespace DGen
             hostGen.generate(sizes, strides, options);
             auto hostData  = hostGen.getDataBytes();
             auto hostScale = hostGen.getScaleBytes();
+            // The CPU generator lays out scale blocks per contiguous row, so a contiguous
+            // dimension that isn't a multiple of blockScaling needs more scale bytes (sizes
+            // {40, 4}, block 32: 2 per row, 8 in all) than the flat arraySize / blockScaling
+            // that getScaleBufferBytes promises the caller (5). Refuse rather than overrun.
+            if(hostData.size() > getDataBufferBytes(sizes, strides, options)
+               || hostScale.size() > getScaleBufferBytes(sizes, strides, options))
+                throw std::invalid_argument(
+                    "DataGeneratorGPU::generateInto: this init mode is generated on the host, "
+                    "and its scale-block layout for these sizes does not fit the device "
+                    "buffers; the contiguous dimension must be a multiple of blockScaling");
             DGEN_DETAIL_CHECK_HIP_(hipMemcpyAsync(
                 devData, hostData.data(), hostData.size(), hipMemcpyHostToDevice, stream));
             if(devScale != nullptr && !hostScale.empty())
