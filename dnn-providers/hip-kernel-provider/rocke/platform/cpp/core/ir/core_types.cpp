@@ -1151,7 +1151,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.global_ptr_offset",
 
     /* tile.* kernel abort */
-    "tile.trap"};
+    "tile.trap",
+
+    /* tile.* buffer f32 atomic add with a cache policy */
+    "tile.buffer_atomic_fadd_f32"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1445,7 +1448,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_ptr_offset          */ true,
 
     /* tile.* kernel abort (effectful) */
-    /* trap                       */ false};
+    /* trap                       */ false,
+
+    /* tile.* buffer f32 atomic add (effectful) */
+    /* buffer_atomic_fadd_f32     */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

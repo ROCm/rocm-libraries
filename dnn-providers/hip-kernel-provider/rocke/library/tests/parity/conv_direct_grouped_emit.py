@@ -23,8 +23,10 @@
 # cpl > 1 forms, and from index 179 the depthwise dgrad kernels:
 # DirectDepthwiseDgradStreamSpec, scalar and channel-packed, and
 # DirectDepthwiseTiledSpec(dgrad=True) with large and non-square filters and
-# per-axis padding), builds the kernel
-# via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
+# per-axis padding, from index 201 the gfx1250 wave32 and image-per-block
+# DirectConvWgradSpec and from index 232 DirectDepthwiseWgradSpec), builds the
+# kernel via the matching build_direct_conv_* function (arch=<cfg arch>) and
+# prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
 import sys
@@ -44,6 +46,7 @@ from kernels.common.conv_direct_grouped import (
     DirectConvSpec,
     DirectDepthwiseDgradSpec,
     DirectDepthwiseDgradStreamSpec,
+    DirectDepthwiseWgradSpec,
     DirectReorganizeWeightsSpec,
     DirectTransposeWeightsDgradSpec,
     build_direct_conv,
@@ -59,6 +62,7 @@ from kernels.common.conv_direct_grouped import (
     build_direct_conv_dgrad,
     build_direct_depthwise_dgrad,
     build_direct_depthwise_dgrad_streaming,
+    build_direct_depthwise_wgrad,
     build_direct_reorganize_weights,
     build_direct_transpose_weights_dgrad,
 )
@@ -762,6 +766,387 @@ def _dw_dgrad_spec(idx: int):
     }
     sel = table.get(idx)
     return None if sel is None else sel()
+
+
+# ---------------------------------------------------------------------------
+# gfx1250 (wave32) direct wgrad, indices 201..231: the WMMA 16x16x32 port of
+# build_direct_conv_wgrad, the image-per-block variant with register blocking
+# and multi-row LDS staging, and two specs both engines must reject (201..208);
+# then the image-per-block row split (row_blocks) and the TDM-staged LDS ring
+# (tdm_stages), with two more must-reject specs (209..216); then the
+# replicated two-stage scratch (ws_replicas) and its must-reject (217..219);
+# then the LDS-staged coalesced epilogue (lds_epilogue) and its two
+# must-reject specs (220..224); then the small-channel variant (small_c) and
+# its three must-reject specs (225..231).
+# A ragged W (37) leaves a partial last wo tile.
+# ---------------------------------------------------------------------------
+_WGRAD_W32_CFG_BASE = 201
+
+
+def _wgrad_w32_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_W32_CFG_BASE + idx``, or None."""
+
+    def prob(groups, cpg, kpg, *, KH=3, KW=3, PAD=1, dtype="fp16", H=8):
+        return DirectConvProblem(
+            N=2,
+            H=H,
+            W=37,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=1,
+            dtype=dtype,
+        )
+
+    def sprob(cpg, kpg, *, F, stride, PAD, dtype="fp16"):
+        """Small-C problem: one group, F x F filter, any stride."""
+        return DirectConvProblem(
+            N=2,
+            H=13,
+            W=37,
+            groups=1,
+            cpg=cpg,
+            kpg=kpg,
+            KH=F,
+            KW=F,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+
+    ws = DirectConvWgradSpec
+    table = {
+        # (a) The wave32 port, bf16, two groups.
+        0: (ws(problem=prob(2, 32, 32, dtype="bf16"), wave_size=32), "gfx1250"),
+        # (b) fp16, K/C/Q split (waves_c=3) with runtime channels.
+        1: (
+            ws(
+                problem=prob(1, 48, 64),
+                wave_size=32,
+                waves_k=2,
+                waves_c=3,
+                waves_q=2,
+                ho_per_block=3,
+                runtime_channels=True,
+            ),
+            "gfx1250",
+        ),
+        # (c) 5x5 filter: three strip passes per row on wave32.
+        2: (
+            ws(
+                problem=prob(1, 32, 32, KH=5, KW=5, PAD=2),
+                wave_size=32,
+                ho_per_block=5,
+            ),
+            "gfx1250",
+        ),
+        # (d) Image per block, 4x4 waves, KH rows behind one barrier pair.
+        3: (
+            ws(
+                problem=prob(1, 64, 64, dtype="bf16"),
+                wave_size=32,
+                waves_k=4,
+                waves_c=4,
+                image_per_block=True,
+                rows_per_sync=3,
+            ),
+            "gfx1250",
+        ),
+        # (e) Image per block with two k tiles per wave, one row per sync.
+        4: (
+            ws(
+                problem=prob(1, 32, 64),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                wave_tiles_k=2,
+            ),
+            "gfx1250",
+        ),
+        # (f) Image per block with two c tiles per wave and runtime channels.
+        5: (
+            ws(
+                problem=prob(2, 32, 32, dtype="bf16"),
+                wave_size=32,
+                waves_k=2,
+                image_per_block=True,
+                wave_tiles_c=2,
+                runtime_channels=True,
+            ),
+            "gfx1250",
+        ),
+        # (g) Must reject: wave32 has no 16-wide (mfma_k=16) atom.
+        6: (ws(problem=prob(2, 32, 32), wave_size=32, mfma_k=16), "gfx1250"),
+        # (h) Must reject: image_per_block is wave32-only.
+        7: (ws(problem=prob(2, 32, 32), image_per_block=True), "gfx950"),
+        # (i) Row split over three blocks, register staging, KH rows per sync.
+        8: (
+            ws(
+                problem=prob(1, 64, 64, dtype="bf16", H=12),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                row_blocks=3,
+            ),
+            "gfx1250",
+        ),
+        # (j) Row split over two blocks, one row per sync, runtime channels.
+        9: (
+            ws(
+                problem=prob(2, 32, 48, H=10),
+                wave_size=32,
+                waves_k=2,
+                image_per_block=True,
+                row_blocks=2,
+                runtime_channels=True,
+            ),
+            "gfx1250",
+        ),
+        # (k) Two-stage TDM ring, one row per sync, 2x2 waves.
+        10: (
+            ws(
+                problem=prob(1, 64, 64, dtype="bf16"),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                tdm_stages=2,
+            ),
+            "gfx1250",
+        ),
+        # (l) Three-stage TDM ring, KH rows per sync, 4x2 waves (one per
+        # transfer of a step).
+        11: (
+            ws(
+                problem=prob(1, 64, 64),
+                wave_size=32,
+                waves_k=4,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                tdm_stages=3,
+            ),
+            "gfx1250",
+        ),
+        # (m) Three-stage TDM ring with a row split and two k tiles per wave.
+        12: (
+            ws(
+                problem=prob(1, 64, 128, dtype="bf16", H=12),
+                wave_size=32,
+                waves_k=4,
+                waves_c=2,
+                image_per_block=True,
+                wave_tiles_k=2,
+                row_blocks=2,
+                tdm_stages=3,
+            ),
+            "gfx1250",
+        ),
+        # (n) Two groups, ragged channels, runtime channels, TDM with KH rows
+        # per sync.
+        13: (
+            ws(
+                problem=prob(2, 48, 40),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                tdm_stages=2,
+                runtime_channels=True,
+            ),
+            "gfx1250",
+        ),
+        # (o) Must reject: a three-stage TDM ring needs a wave per transfer of
+        # a step (2 * rows_per_sync = 6), and this has 2.
+        14: (
+            ws(
+                problem=prob(1, 32, 32),
+                wave_size=32,
+                waves_k=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                tdm_stages=3,
+            ),
+            "gfx1250",
+        ),
+        # (p) Must reject: row_blocks needs image_per_block.
+        15: (ws(problem=prob(2, 32, 32), wave_size=32, row_blocks=2), "gfx1250"),
+        # (q) Four scratch replicas, register staging, a row split.
+        16: (
+            ws(
+                problem=prob(1, 64, 64, dtype="bf16", H=12),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                row_blocks=2,
+                ws_replicas=4,
+            ),
+            "gfx1250",
+        ),
+        # (r) Eight scratch replicas over two groups, three-stage TDM ring,
+        # runtime channels.
+        17: (
+            ws(
+                problem=prob(2, 32, 64),
+                wave_size=32,
+                waves_k=4,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                tdm_stages=3,
+                ws_replicas=8,
+                runtime_channels=True,
+            ),
+            "gfx1250",
+        ),
+        # (s) Must reject: ws_replicas needs image_per_block.
+        18: (ws(problem=prob(2, 32, 32), wave_size=32, ws_replicas=2), "gfx1250"),
+        # (t) LDS-staged coalesced epilogue on the register path.
+        19: (
+            ws(
+                problem=prob(1, 64, 64, dtype="bf16"),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                lds_epilogue=True,
+            ),
+            "gfx1250",
+        ),
+        # (u) LDS epilogue into four scratch replicas, a row split and a
+        # three-stage TDM ring.
+        20: (
+            ws(
+                problem=prob(1, 64, 64, H=12),
+                wave_size=32,
+                waves_k=4,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                row_blocks=2,
+                tdm_stages=3,
+                ws_replicas=4,
+                lds_epilogue=True,
+            ),
+            "gfx1250",
+        ),
+        # (v) LDS epilogue with runtime channels over two groups of ragged
+        # channel counts.
+        21: (
+            ws(
+                problem=prob(2, 48, 40),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                image_per_block=True,
+                rows_per_sync=3,
+                runtime_channels=True,
+                lds_epilogue=True,
+            ),
+            "gfx1250",
+        ),
+        # (w) Must reject: lds_epilogue needs image_per_block.
+        22: (ws(problem=prob(2, 32, 32), wave_size=32, lds_epilogue=True), "gfx1250"),
+        # (x) Must reject: the staged 128 x 9 x (64 + 4) fp32 dW tile is over
+        # the LDS epilogue budget.
+        23: (
+            ws(
+                problem=prob(1, 64, 128),
+                wave_size=32,
+                waves_k=8,
+                waves_c=2,
+                wave_tiles_c=2,
+                image_per_block=True,
+                lds_epilogue=True,
+            ),
+            "gfx1250",
+        ),  # (y) Small-C stem: C=3, 3x3 stride 2, gathered X, a row split into four
+        # pixel blocks over four scratch replicas.
+        24: (
+            ws(
+                problem=sprob(3, 24, F=3, stride=2, PAD=1, dtype="bf16"),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                small_c=True,
+                row_blocks=4,
+                ws_replicas=4,
+            ),
+            "gfx1250",
+        ),
+        # (z) Small-C 7x7 stride 2: 16 B vector X runs padded 21 -> 24, two
+        # pixel chunks per sync, register blocking, two N tiles.
+        25: (
+            ws(
+                problem=sprob(3, 64, F=7, stride=2, PAD=3),
+                wave_size=32,
+                waves_k=2,
+                waves_c=2,
+                wave_tiles_k=2,
+                wave_tiles_c=3,
+                small_c=True,
+                row_blocks=3,
+                ws_replicas=2,
+                sub_steps=2,
+                vec_x=8,
+            ),
+            "gfx1250",
+        ),
+        # (aa) Small-C patchify (4x4 stride 4): 8 B vector runs, a uniform wave
+        # index, three chunks per sync on a single wave.
+        26: (
+            ws(
+                problem=sprob(3, 32, F=4, stride=4, PAD=0, dtype="bf16"),
+                wave_size=32,
+                wave_tiles_k=2,
+                wave_tiles_c=3,
+                small_c=True,
+                row_blocks=2,
+                sub_steps=3,
+                vec_x=4,
+                uniform_wave=True,
+            ),
+            "gfx1250",
+        ),
+        # (ab) Small-C, C=1 at stride 1: runs padded 3 -> 4 and remapped in the
+        # epilogue.
+        27: (
+            ws(
+                problem=sprob(1, 16, F=3, stride=1, PAD=1),
+                wave_size=32,
+                waves_c=2,
+                small_c=True,
+                vec_x=4,
+            ),
+            "gfx1250",
+        ),
+        # (ac) Must reject: small_c needs groups=1.
+        28: (
+            ws(problem=prob(2, 3, 16), wave_size=32, small_c=True),
+            "gfx1250",
+        ),
+        # (ad) Must reject: vec_x needs small_c.
+        29: (ws(problem=prob(2, 32, 32), wave_size=32, vec_x=4), "gfx1250"),
+        # (ae) Must reject: small_c is wave32 gfx1250 only.
+        30: (
+            ws(problem=sprob(3, 24, F=3, stride=2, PAD=1), wave_size=32, small_c=True),
+            "gfx950",
+        ),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("wgrad", sel[0], sel[1])
 
 
 def _gp(groups, cpg, kpg, *, N=2, H=20, W=24, KH=3, PAD=1, dtype="fp16"):
@@ -1529,8 +1914,118 @@ def _nongrouped_spec(idx: int):
     return None
 
 
+# ---------------------------------------------------------------------------
+# Direct depthwise wgrad (DirectDepthwiseWgradSpec), indices 232..238: wave32
+# gfx1250 and wave64 gfx950 builds over the filter-row split, the carried X
+# window and the prefetch, then three specs both engines must reject.
+# ---------------------------------------------------------------------------
+_DW_WGRAD_CFG_BASE = 232
+
+
+def _dw_wgrad_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_DW_WGRAD_CFG_BASE + idx``, or None."""
+
+    def prob(C, *, F, stride, PAD, dtype="fp16", cpg=1):
+        return DirectConvProblem(
+            N=2,
+            H=9,
+            W=13,
+            groups=C,
+            cpg=cpg,
+            kpg=cpg,
+            KH=F,
+            KW=F,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+
+    ds = DirectDepthwiseWgradSpec
+    table = {
+        # (a) 3x3 stride 1, bf16, two rows per wave over four replicas.
+        0: (
+            ds(
+                problem=prob(64, F=3, stride=1, PAD=1, dtype="bf16"),
+                wave_size=32,
+                waves=4,
+                rows_per_wave=2,
+                wo_chunk=4,
+                ws_replicas=4,
+            ),
+            "gfx1250",
+        ),
+        # (b) 7x7 over four filter-row groups (7 rows do not split evenly),
+        # 8 B loads, no prefetch.
+        1: (
+            ds(
+                problem=prob(32, F=7, stride=1, PAD=3),
+                wave_size=32,
+                chan_per_lane=4,
+                rows_per_wave=1,
+                r_split=4,
+                prefetch=False,
+            ),
+            "gfx1250",
+        ),
+        # (c) 3x3 stride 2 without the carried window, 16 B loads, three
+        # filter-row groups of one row.
+        2: (
+            ds(
+                problem=prob(48, F=3, stride=2, PAD=1, dtype="bf16"),
+                wave_size=32,
+                chan_per_lane=8,
+                waves=3,
+                rows_per_wave=3,
+                wo_chunk=3,
+                r_split=3,
+                carry=False,
+            ),
+            "gfx1250",
+        ),
+        # (d) wave64 (gfx950), 5x5 stride 2, a single replica.
+        3: (
+            ds(
+                problem=prob(128, F=5, stride=2, PAD=2),
+                waves=4,
+                rows_per_wave=2,
+                ws_replicas=1,
+            ),
+            "gfx950",
+        ),
+        # (e) Must reject: not depthwise (cpg = 2).
+        4: (ds(problem=prob(32, F=3, stride=1, PAD=1, cpg=2)), "gfx950"),
+        # (f) Must reject: wave_size 32 on wave64 gfx950.
+        5: (ds(problem=prob(64, F=3, stride=1, PAD=1), wave_size=32), "gfx950"),
+        # (g) Must reject: the 14 waves' 49-tap fp32 tiles exceed the LDS.
+        6: (
+            ds(
+                problem=prob(256, F=7, stride=1, PAD=3),
+                wave_size=32,
+                chan_per_lane=8,
+                waves=14,
+                r_split=7,
+            ),
+            "gfx1250",
+        ),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("dw_wgrad", sel[0], sel[1])
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _DW_WGRAD_CFG_BASE:
+        sel = _dw_wgrad_spec(idx - _DW_WGRAD_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _WGRAD_W32_CFG_BASE:
+        sel = _wgrad_w32_spec(idx - _WGRAD_W32_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx == 0:
         p = DirectConvProblem(
             N=32, H=200, W=200, groups=16, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
@@ -2197,6 +2692,8 @@ def main() -> int:
         kernel = build_direct_conv_8c(spec, arch=arch)
     elif kind == "32c":
         kernel = build_direct_conv_32c(spec, arch=arch)
+    elif kind == "dw_wgrad":
+        kernel = build_direct_depthwise_wgrad(spec, arch=arch)
     elif kind == "wgrad":
         kernel = build_direct_conv_wgrad(spec, arch=arch)
     elif kind == "spatial":

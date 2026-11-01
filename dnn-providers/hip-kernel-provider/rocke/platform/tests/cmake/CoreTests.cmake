@@ -253,6 +253,22 @@ if(BUILD_TESTING)
                  rocke_buffer_rsrc_hip)
   endif()
 
+  # tile.buffer_atomic_fadd_f32: its LLVM lowering with the cache policy, and
+  # the builder's refusal of a policy outside 0..31.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_buffer_atomic_fadd.cpp")
+    add_executable(rocke_buffer_atomic_fadd core/test_buffer_atomic_fadd.cpp)
+    target_link_libraries(rocke_buffer_atomic_fadd PRIVATE rocke_core)
+    add_test(NAME rocke_buffer_atomic_fadd COMMAND rocke_buffer_atomic_fadd)
+    set_tests_properties(rocke_buffer_atomic_fadd PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_buffer_atomic_fadd)
+    set_target_properties(rocke_buffer_atomic_fadd
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_buffer_atomic_fadd
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_buffer_atomic_fadd)
+  endif()
+
   # A buffer descriptor refused as a loop-carried value by the C++ builder and
   # verifier.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_loop_carried_descriptor.cpp")

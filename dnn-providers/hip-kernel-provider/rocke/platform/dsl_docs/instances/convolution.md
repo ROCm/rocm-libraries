@@ -1451,6 +1451,49 @@ On-GPU numeric coverage: `TestDirectWgradAotKernelsCorrectness` in
 launched on other shapes); the two-step plans:
 `library/tests/test_direct_kernel_cache.py`.
 
+### gfx1250 (wave32) direct wgrad
+
+Source: `library/kernels/common/conv_direct_grouped.py`. Three wave32 weight-gradient
+kernels of the direct-conv AOT sweep on gfx1250, all taking the
+`conv_direct_arg_names("wgrad")` kernargs and accumulating in fp32:
+
+| Spec / variant | Serves | Output |
+|---|---|---|
+| `DirectConvWgradSpec(image_per_block=True)` / `direct_wgrad` | dense and grouped, stride 1, 1x1..7x7 | `ws_replicas` fp32 scratch slabs, or the zeroed fp32 `dW` at one replica |
+| `DirectConvWgradSpec(small_c=True)` / `direct_wgrad_small_c` | ungrouped stems with 3 input channels, any stride and padding (channel counts baked) | `ws_replicas` fp32 scratch slabs |
+| `DirectDepthwiseWgradSpec` / `direct_depthwise_wgrad` | depthwise (`cpg = kpg = 1`, channel count from the kernargs), stride 1 and 2 | `ws_replicas` fp32 scratch slabs |
+
+- **Image per block.** One workgroup per image and `k x c` tile on WMMA
+  16x16x32, with register blocking (`wave_tiles_k` / `wave_tiles_c`),
+  `rows_per_sync` input rows staged behind one barrier pair, a row split over
+  grid y (`row_blocks`), an optional TDM ring (`tdm_stages`, llvm23) and an
+  LDS-staged coalesced epilogue (`lds_epilogue`).
+- **Small C.** A GEMM over the flattened `(r, s, c)` filter row, with
+  vectorised X loads (`vec_x`), `sub_steps` staging, an optional uniform wave
+  index (`uniform_wave`) and a pixel-range split over grid y (`row_blocks`).
+- **Depthwise VALU.** Lanes own `chan_per_lane` channels and accumulate the
+  filter taps in fp32 registers (`r_split` splits the filter rows over wave
+  groups), with an LDS reduction over the waves.
+- **Two-stage reduction.** The blocks add into one of `ws_replicas` fp32 slabs
+  with `buffer_atomic_fadd_f32` (the `tile.buffer_atomic_fadd_f32` IR op, with a
+  cache policy), spreading the same-address atomics; the cached
+  `direct_wgrad_reduce` helper (`WgradReduceSpec`, one binary per replica
+  count) folds the slabs into `dW`. The run-from-cache plan zeroes the scratch
+  (`DirectPlan.zeroed`) and launches both steps.
+- A problem whose column padding differs from its row padding is refused
+  (`direct_spec_for_problem`).
+
+C++ engine twins: `rocke_dconv_wgrad_build_image`
+(`cpp/instances/common/conv_direct_grouped_build_wgrad_image.cpp`),
+`rocke_dconv_wgrad_build_small_c` (`conv_direct_grouped_build_wgrad_small_c.cpp`),
+`rocke_build_direct_depthwise_wgrad` (`conv_direct_grouped_build_depthwise_wgrad.cpp`);
+byte-identity gated by `library/tests/parity/conv_direct_grouped_emit.{c,py}`
+(configs 201+), Python IR golden `conv_direct_wgrad/gfx1250/*`. Served by the
+direct-conv AOT cache (`--directions wgrad --arch gfx1250`), not the dispatcher.
+On-GPU numeric coverage: `TestDirectConvWgradCorrectness` in
+`library/tests/test_direct_conv_correctness.py`; the launch plans:
+`library/tests/test_direct_kernel_cache.py`.
+
 ## Img2Col
 
 Source: `library/kernels/common/img2col.py`.

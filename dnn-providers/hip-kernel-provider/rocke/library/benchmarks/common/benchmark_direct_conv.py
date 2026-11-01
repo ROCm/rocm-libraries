@@ -1305,6 +1305,7 @@ def _run_wgrad_sweep(
     """Benchmark the direct wgrad kernel."""
     import torch
 
+    from rocke.core.arch import ArchTarget
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -1356,12 +1357,15 @@ def _run_wgrad_sweep(
     _WAVES = sorted({w for w in _WAVES if w[1] <= n_c_tiles_1})
     _HPB = [30, 60, 120]
     _MK = [32]
+    # wave64 MFMA on gfx950, wave32 WMMA on gfx1250: the block-size cap and the
+    # spec both follow the arch.
+    _wave = ArchTarget.from_gfx(arch).wave_size
     combos = [
         (wk, wc, wq, hpb, mk)
         for wk, wc, wq in _WAVES
         for hpb in _HPB
         for mk in _MK
-        if wk * wc <= 16 and wk * wc * wq * 64 <= 1024
+        if wk * wc <= 16 and wk * wc * wq * _wave <= 1024
     ]
 
     print(
@@ -1380,6 +1384,7 @@ def _run_wgrad_sweep(
             waves_q=waves_q,
             ho_per_block=hpb,
             mfma_k=mk,
+            wave_size=_wave,
         )
         ok, _ = is_valid_wgrad_spec(spec, arch=arch)
         if not ok:
@@ -2269,6 +2274,10 @@ def _measure_plans(
         nonlocal rc
 
         rt.memset(ptrs[out_name], 0, Out_t.nbytes)
+        # Two-stage wgrad scratch accumulates too: zeroed again for the
+        # verified launch, as the target is.
+        for name in plan.zeroed:
+            rt.memset(ptrs[name], 0, sizes[name])
         run()
         synchronize_and_release(0)
         out_cpu = torch.empty_like(Out_t)
@@ -2466,6 +2475,7 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
             "direct_dgrad_helper",
             "direct_fwd_helper",
             "direct_wgrad",
+            "direct_wgrad_helper",
         ),
     )
     if rc:
@@ -2665,6 +2675,10 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                         sizes[name] = max(sizes.get(name, 0), nbytes)
             for name in set(sizes) - set(ptrs):
                 ptrs[name] = rt.alloc(sizes[name])
+            # Two-stage wgrad scratch: zeroed like dW (once for timing, again
+            # before each verified run).
+            for name in {n for plan in plans for n in plan.zeroed}:
+                rt.memset(ptrs[name], 0, sizes[name])
 
             flop = float(p.flops)
             bytes_xfer = float(sum(t.nbytes for t in inputs.values()) + Out_t.nbytes)
