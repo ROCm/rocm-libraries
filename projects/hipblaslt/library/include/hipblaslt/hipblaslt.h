@@ -252,6 +252,12 @@ typedef enum {
 
   /** Memory order of the data. See ``hipblasLtOrder_t``.
    *
+   * ``hipblasLtMatmul``, ``hipblasLtMatmulAlgoGetHeuristic``, and the ``hipblaslt_ext`` ``Gemm`` and
+   * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
+   * ``HIPBLASLT_ORDER_ROW``. Only ``hipblasLtMatrixTransform`` accepts ``HIPBLASLT_ORDER_ROW``.
+   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only ``HIPBLASLT_ORDER_COL`` and return
+   * ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
+   *
    * ``int32_t``, default: ``HIPBLASLT_ORDER_COL``.
    */
   HIPBLASLT_MATRIX_LAYOUT_ORDER = 3,
@@ -480,6 +486,11 @@ typedef enum {
   /** Row-major.
    *
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
+   *
+   * Supported by ``hipblasLtMatrixTransform`` only. Matmul does not support this order and returns
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED``. To multiply row-major data, keep ``HIPBLASLT_ORDER_COL`` and
+   * use the identity ``(A * B)^T = B^T * A^T``: swap A and B, swap ``m`` and ``n``, and describe each
+   * matrix as its column-major transpose.
    */
   HIPBLASLT_ORDER_ROW = 1,
   
