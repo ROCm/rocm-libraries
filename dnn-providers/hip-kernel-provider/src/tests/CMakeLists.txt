@@ -453,6 +453,83 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
+    # Census for the gfx950 unified-attention 2D production pack, gated and narrowed exactly
+    # as the dense one above.
+    hkp_gfx950_attention_unified_2d_available(_hkp_gfx950_attention_unified_2d)
+    if(_hkp_gfx950_attention_unified_2d)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950AttentionUnified2DPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+
+        # Hand-written companion census over the same shard: every shipped kernel's geometry
+        # passes the engine's own isSupportedGfx950Unified2DGeometry() check and bakes the
+        # batch capacity the manifest promises.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950AttentionUnified2DCatalogTiles
+            EXPECTED_CASES
+                EveryShippedKernelsGeometryIsOneTheEngineLaunches
+                EveryShippedKernelServesTheManifestsBatchCapacity
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950AttentionUnified2D for "
+            "gfx950, so its census is not registered.")
+    endif()
+
+    # Census for the gfx950 unified-attention 3D (split-KV decode) production pack, gated
+    # and narrowed as the 2D one above.
+    hkp_gfx950_attention_unified_3d_available(_hkp_gfx950_attention_unified_3d)
+    if(_hkp_gfx950_attention_unified_3d)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950AttentionUnified3DPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+
+        # Hand-written companion census over the same shard: every shipped kernel is a decode
+        # geometry the engine launches and carries its segment and reduce launches.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950AttentionUnified3DCatalogTiles
+            EXPECTED_CASES
+                EveryShippedKernelsGeometryIsOneTheEngineLaunches
+                EveryEntryLaunchesItsSegmentAndReduceKernels
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950AttentionUnified3D for "
+            "gfx950, so its census is not registered.")
+    endif()
+
     # One generic kernel set per RDNA family ships in every RDNA3/3.5 and RDNA4 shard,
     # as two engines: the prefill objects and the split-KV decode objects (the wide-Q
     # prefill and D256 decode geometries differ per family). The census checks each wired
