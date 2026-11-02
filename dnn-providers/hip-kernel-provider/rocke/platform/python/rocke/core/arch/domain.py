@@ -167,6 +167,11 @@ class ArchDomain:
         for a key the column does not cover."""
         return tuple(self._keys.get(key, ()))
 
+    def processors(self) -> tuple[str, ...]:
+        """Every processor name this column recorded an answer for, in file
+        order; :meth:`accepts_processor` gives each one's answer."""
+        return tuple(self._processors)
+
     def accepts_processor(self, arch: str) -> bool | None:
         """Whether this flavor's compiler accepts ``arch`` as a processor name.
 

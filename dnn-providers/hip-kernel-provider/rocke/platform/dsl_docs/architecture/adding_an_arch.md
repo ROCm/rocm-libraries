@@ -191,8 +191,8 @@ Each target compiles for itself where the LLVM flavor's compiler accepts its
 processor name. `tools/gen_arch_domain.py` records that per target in each
 column's `processors`; where a flavor rejects a member's name,
 `compiler_target_for_flavor()` (C++: `rocke_compiler_target_for_flavor()`,
-whose rejection list `rocke_ati_rejected_processors` mirrors the columns; the
-`rocke_arch_data_mirror` ctest fails when the two differ) compiles it as the
+which reads the rejections the build generates from the same columns through
+`tools/gen_arch_domain_cpp.py`) compiles it as the
 generic its row points at, with a message saying so, and refuses a target with
 no such generic. Each compile helper passes the flavor of the compiler it runs:
 the one COMGR loads for `compile_kernel`, hipcc's own clang for the hipcc helpers.

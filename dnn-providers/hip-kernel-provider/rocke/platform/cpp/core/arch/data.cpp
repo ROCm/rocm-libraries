@@ -3869,17 +3869,3 @@ const rocke_ati_generic_row_t rocke_ati_generic_targets[] = {
     {"gfx12-generic", k_generic_gfx12_members},
     {NULL, NULL}, /* terminator */
 };
-
-/* Mirror of "processors" in the committed intrinsic_arch_domain.<flavor>.json
- * columns, which tools/gen_arch_domain.py measures with one empty-kernel probe
- * per target: the processor names a flavor's compiler does not accept. Every
- * other (flavor, target) pair was measured as accepted. The rocke_arch_data_mirror
- * ctest compares this list with the columns, so update it whenever a column is
- * regenerated. */
-const rocke_ati_rejected_processor_t rocke_ati_rejected_processors[] = {
-    {"llvm20", "gfx1154"},
-    {"llvm20", "gfx1250"},
-    {"llvm22", "gfx1154"},
-    {"llvm23", "gfx1154"},
-    {NULL, NULL}, /* terminator */
-};

@@ -71,18 +71,6 @@ typedef struct rocke_ati_generic_row
  * bucket 0. */
 extern const rocke_ati_generic_row_t rocke_ati_generic_targets[];
 
-/* One processor name an LLVM flavor's compiler does not accept. */
-typedef struct rocke_ati_rejected_processor
-{
-    const char* llvm_flavor;
-    const char* gfx;
-} rocke_ati_rejected_processor_t;
-
-/* Mirror of "processors" in every committed intrinsic_arch_domain.<flavor>.json:
- * the (flavor, target) pairs measured as not accepted. Terminated by a row whose
- * .llvm_flavor == NULL. Defined in bucket 0. */
-extern const rocke_ati_rejected_processor_t rocke_ati_rejected_processors[];
-
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

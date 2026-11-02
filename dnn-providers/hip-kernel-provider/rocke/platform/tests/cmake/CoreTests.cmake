@@ -129,8 +129,8 @@ if(BUILD_TESTING)
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_arch_target_identity)
 
-  # The C++ copies of the arch data files' facts, compared with the files.
-  # It reads the files from the source tree, so it runs from the build tree
+  # The C++ copy of arch_specs.json's generic targets, compared with the file.
+  # It reads the file from the source tree, so it runs from the build tree
   # only and is not installed.
   add_executable(rocke_arch_data_mirror core/arch_data_mirror.cpp)
   target_link_libraries(rocke_arch_data_mirror PRIVATE rocke_core)

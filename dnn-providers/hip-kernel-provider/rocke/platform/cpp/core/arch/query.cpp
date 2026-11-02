@@ -863,24 +863,6 @@ const char* rocke_base_arch_from_target_id(const char* target_id, char* out, siz
     return rocke_copy_target(target_id, rocke_base_arch_length(target_id), out, out_cap);
 }
 
-/* True when the llvm_flavor compiler was measured not to accept the processor
- * named by the first len bytes of gfx (rocke_ati_rejected_processors). A lane
- * with no column of its own enforces the column it borrows (Python
- * arch_domain.load), so the measurement is looked up under that column. */
-static bool rocke_processor_rejected(const char* llvm_flavor, const char* gfx, size_t len)
-{
-    const char* column = rocke_arch_domain_column_flavor(llvm_flavor);
-    for(const rocke_ati_rejected_processor_t* row = rocke_ati_rejected_processors;
-        row->llvm_flavor != NULL;
-        ++row)
-    {
-        if(strcmp(row->llvm_flavor, column) == 0 && strlen(row->gfx) == len
-           && strncmp(row->gfx, gfx, len) == 0)
-            return true;
-    }
-    return false;
-}
-
 /* The generic target the row named by the first len bytes of gfx points at
  * (arch_specs.json "facts_of"), or NULL. */
 static const char* rocke_row_facts_of(const char* gfx, size_t len)
@@ -950,11 +932,12 @@ const char* rocke_compiler_target_for_flavor(const char* target_id,
     size_t name_len = rocke_compiler_processor_length(target_id);
     const char* features = target_id + strcspn(target_id, ":");
     const char* name = target_id;
-    if(rocke_processor_rejected(llvm_flavor, target_id, name_len))
+    if(rocke_arch_domain_rejects_processor(llvm_flavor, target_id, name_len))
     {
         const char* generic = rocke_row_facts_of(target_id, name_len);
         const int len = (int)name_len;
-        if(generic == NULL || rocke_processor_rejected(llvm_flavor, generic, strlen(generic)))
+        if(generic == NULL
+           || rocke_arch_domain_rejects_processor(llvm_flavor, generic, strlen(generic)))
         {
             rocke_set_message(message,
                               message_cap,
