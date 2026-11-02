@@ -1124,7 +1124,7 @@ namespace TensileLite
             uint32_t magicShift = 0;
             const uint32_t magic = solution.magicNumber(2, itersPerTile, &magicShift);
             if(solution.internalArgsSupport.perTileExtraIters
-               && problem.getParams().uniformSummationOrder())
+               && problem.getParams().uniformSummationOrder() != 0)
                 magicShift |= 0x20000000u;
             args.template append<uint32_t>("itersPerTile", itersPerTile);
             args.template append<uint32_t>("magicNumberItersPerTile", magic);
@@ -1555,7 +1555,7 @@ namespace TensileLite
                     // AND mode, so a kernel without the runtime gate never sees
                     // the bit.
                     if(internalArgsSupport.perTileExtraIters
-                       && problem.getParams().uniformSummationOrder())
+                       && problem.getParams().uniformSummationOrder() != 0)
                         magicShiftItersPerTile |= 0x20000000u;
 
                     uint32_t sk3_skItersPerWG;
@@ -2231,7 +2231,7 @@ namespace TensileLite
         // could reintroduce a stagger, and BELOW the staggerUParamsCache write,
         // so the cache keeps holding the real origami prediction rather than
         // this mode's zeros for concurrent callers who did not request it.
-        if(problem.getParams().uniformSummationOrder())
+        if(problem.getParams().uniformSummationOrder() != 0)
         {
             const bool rowUniformStaggerCapable
                 = internalArgsSupport.staggerU
@@ -6327,7 +6327,7 @@ namespace TensileLite
         // force tree so query (requiredWorkspaceSize) and launch (solve)
         // stay on the steered tree path. Mirror the gate's
         // staticTwoTilePacking predicate.
-        if(problem.getParams().uniformSummationOrder())
+        if(problem.getParams().uniformSummationOrder() != 0)
         {
             const bool effectiveDynamic
                 = (sizeMapping.hasHybridAssignment()) ? streamK5EffectiveDynamic(problem, hardware)
@@ -7053,7 +7053,7 @@ namespace TensileLite
     bool ContractionSolution::uniformSummationOrderSupported(Problem const&  problem,
                                                              Hardware const& hardware) const
     {
-        if(!problem.getParams().uniformSummationOrder())
+        if(problem.getParams().uniformSummationOrder() == 0)
             return true;
 
         PersistentLaunchSettings launch;
@@ -7236,13 +7236,13 @@ namespace TensileLite
                     // helper keeps meaning "the mapping the device will perform"
                     // if this region is ever refactored.
                     const bool perTileActive = internalArgsSupport.perTileExtraIters
-                                               && problem.getParams().uniformSummationOrder();
+                                               && problem.getParams().uniformSummationOrder() != 0;
                     if(!streamKStaticSplitRowUniform(split,
                                                      tiles,
                                                      itersPerTile,
                                                      launch.grid,
                                                      internalArgsSupport.perTileExtraIters,
-                                                     problem.getParams().uniformSummationOrder()))
+                                                     problem.getParams().uniformSummationOrder() != 0))
                         return refuse(
                             "StaticSplitNotRowUniform",
                             "the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
@@ -7252,18 +7252,6 @@ namespace TensileLite
                                 + " skItersPerWG=" + std::to_string(split.skItersPerWG)
                                 + " extraIters=" + std::to_string(split.extraIters)
                                 + " perTileExtraIters=" + (perTileActive ? "1" : "0"));
-                }
-                else if(tiles % launch.grid != 0)
-                {
-                    // SK4 and SK5-dynamic pack SKTiles/SKSplit/SKItersPerWI, which
-                    // the derivation above does not describe. They are additionally
-                    // held to SKTiles == 0 below, so the divisibility test is
-                    // redundant for them, but redundant and fail-closed is the
-                    // right side to err on.
-                    return refuse("GridDoesNotDivideTiles",
-                                  "StreamK grid " + std::to_string(launch.grid)
-                                      + " does not divide the tile count "
-                                      + std::to_string(tiles));
                 }
 
                 // Mirrors the arg-packing condition: the ws/Flags pair is only
@@ -7361,7 +7349,11 @@ namespace TensileLite
                                                          uint32_t    gsu,
                                                          void const* synchronizer) const
     {
-        if(!problem.getParams().uniformSummationOrder())
+        if(problem.getParams().uniformSummationOrder() == 0)
+            return;
+
+        // Dynamic work queue currently processes full tiles only
+        if(launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue)
             return;
 
         const std::string reason = uniformSummationOrderLaunchObstacle(
@@ -7650,7 +7642,7 @@ namespace TensileLite
             // run before the magic-division guard below so that guard still
             // validates the final grid (a snap after it can emit out-of-range
             // itersPerWG). Same ABI predicate as checkUniformSummationOrder.
-            if(problem.getParams().uniformSummationOrder() && tiles > 0 && grid > 0)
+            if(problem.getParams().uniformSummationOrder() != 0 && tiles > 0 && grid > 0)
             {
                 const bool effectiveDynamic
                     = (self.sizeMapping.hasHybridAssignment())
@@ -7674,7 +7666,7 @@ namespace TensileLite
                     // the enclosing uniformSummationOrder() test but keeps the
                     // local meaning what the search below assumes.
                     const bool perTileExtraIters = self.internalArgsSupport.perTileExtraIters
-                                                   && problem.getParams().uniformSummationOrder();
+                                                   && problem.getParams().uniformSummationOrder() != 0;
 
                     // The flag-region bound is a constraint ON this selection, not
                     // a correction applied after it. Every grid this snap can emit

@@ -79,6 +79,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import ClassVar
 
+from kernels.common._bf16_rne import bf16x4_rne_finite
 from kernels.common.attention_arch import attention_lds_capacity_bytes
 from kernels.common.attention_dense_spec import INT32_LIMIT
 from rocke.core.ir import BF16, F32, I32, I64, IRBuilder, KernelDef, PtrType
@@ -92,23 +93,21 @@ from rocke.helpers.spec import SignatureBuilder
 
 from .mla_decode_combine import NEG_INIT, WAVE_SIZE, MlaDecodeCombineSpec
 
-# The prefill kernel's fragment helpers and layout facts (atom shape, LDS
-# pads, staging width): the decode pipeline is that kernel's one-wave-per-head
-# loop, so its fragments are laid out the same way. They are private to that
-# module, so a prefill change to them moves decode IR (the decode goldens catch
-# it); a shared kernels/mla module holding them under public names is the
-# cleaner home.
-from .mla_prefill_gfx942 import (
+# The MLA family's shared core (atom shape, LDS pads, staging width, fragment
+# helpers): the decode pipeline is the prefill's one-wave-per-head loop, so its
+# fragments are laid out the same way. The helpers emit their ops in an order the
+# MLA goldens pin, so a change to one moves decode IR as well (the decode goldens
+# catch it).
+from ._mla_body import (
     C_PER_LANE,
     C_STAGE_W,
     MFMA_K,
     MFMA_N,
     V8_PAD,
     WT_PAD,
-    _bf16x4_rne_finite,
-    _pick4,
-    _query_reduce,
-    _shift,
+    pick4,
+    query_reduce,
+    shift,
 )
 
 # Decode's own schedule knobs. Most start at the prefill's values -- the same
@@ -644,11 +643,11 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
         lane_ks,
     )
     qa_frags = [
-        b.global_load_vN(qa_ptr, _shift(b, t * SK, q_base), dtype, SW)
+        b.global_load_vN(qa_ptr, shift(b, t * SK, q_base), dtype, SW)
         for t in range(N_LAT_STEPS)
     ]
     rope_frags = [
-        b.global_load_vN(qa_ptr, _shift(b, R_KV + j * SK, q_base), dtype, SW)
+        b.global_load_vN(qa_ptr, shift(b, R_KV + j * SK, q_base), dtype, SW)
         for j in range(ROPE_K_ITERS)
     ]
     # Q_rope is parked in LDS and re-read every key tile, as in the prefill:
@@ -657,7 +656,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
     qr_lds = b.smem_alloc(dtype, [BLOCK_H, D_ROPE + PAD], name_hint="qr_lds")
     qr_row = b.add(b.mul(wave, b.const_i32(HPW)), lane_row)
     for j in range(ROPE_K_ITERS):
-        b.smem_store_vN(qr_lds, [qr_row, _shift(b, j * SK, lane_ks)], rope_frags[j], SW)
+        b.smem_store_vN(qr_lds, [qr_row, shift(b, j * SK, lane_ks)], rope_frags[j], SW)
 
     scale_log2 = b.fmul(scale_p, b.const_f32(LOG2E))
     neg_init = b.const_f32(NEG_INIT)
@@ -752,7 +751,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
 
     def _stage_store(staged, valid_rows=None):
         for j in range(c_chunks):
-            m = _shift(b, j * C_ROWS_PER_CHUNK, c_m0)
+            m = shift(b, j * C_ROWS_PER_CHUNK, c_m0)
             v = staged[j]
             if valid_rows is not None:
                 # Rows past S_k on the tail page hold whatever the cache does.
@@ -762,7 +761,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
             b.smem_store_vN(kv_lds, [m, c_r0], v, C_STAGE_W)
         kr_col = b.add(kr_d0, b.const_i32(R_KV))
         for j in range(kr_chunks):
-            m = _shift(b, j * KR_ROWS_PER_CHUNK, kr_m0)
+            m = shift(b, j * KR_ROWS_PER_CHUNK, kr_m0)
             b.smem_store_vN(kv_lds, [m, kr_col], staged[c_chunks + j], KR_W)
 
     # Page lookups never index past the segment, and an empty segment (or
@@ -817,14 +816,14 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
                 q_v = b.smem_load_vN(
                     qr_lds,
                     qr_row,
-                    _shift(b, (kk - N_LAT_STEPS) * SK, lane_ks),
+                    shift(b, (kk - N_LAT_STEPS) * SK, lane_ks),
                     dtype=dtype,
                     n=SW,
                 )
-            col = _shift(b, kk * SK, lane_ks)
+            col = shift(b, kk * SK, lane_ks)
             k_vs = [
                 b.smem_load_vN(
-                    kv_lds, _shift(b, kt * MFMA_N, lane_row), col, dtype=dtype, n=SW
+                    kv_lds, shift(b, kt * MFMA_N, lane_row), col, dtype=dtype, n=SW
                 )
                 for kt in range(K_TILES)
             ]
@@ -862,17 +861,17 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
                     b.ds_read_tr16_b64(
                         kv_lds,
                         row,
-                        _shift(b, (4 * w + e) * MFMA_N, tr.col),
+                        shift(b, (4 * w + e) * MFMA_N, tr.col),
                         dtype=dtype,
                     )
                     for e in range(4)
                 ]
-            a_col = _shift(b, kt * MFMA_N, lane_kq)
+            a_col = shift(b, kt * MFMA_N, lane_kq)
             return [
                 b.smem_load_vN(
                     kv_lds,
-                    _shift(b, i, a_col),
-                    _shift(b, 64 * w, lane_row4),
+                    shift(b, i, a_col),
+                    shift(b, 64 * w, lane_row4),
                     dtype=dtype,
                     n=4,
                 )
@@ -886,14 +885,14 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
 
         # ---- online softmax, one head per n column ----------------------------
         # Lane l holds head l % 16 and keys 4 (l // 16) + r of each key tile;
-        # _query_reduce folds the four lane groups, i.e. over the keys.
+        # query_reduce folds the four lane groups, i.e. over the keys.
         s_v = []
         keep = []
         for kt in range(K_TILES):
             for r in range(C_PER_LANE):
                 s_scaled = b.fmul(b.vec_extract(s_acc[kt], r), scale_log2)
                 if masked:
-                    k_abs = b.add(kb_start, _shift(b, kt * MFMA_N + r, lane_kq))
+                    k_abs = b.add(kb_start, shift(b, kt * MFMA_N + r, lane_kq))
                     keep.append(b.cmp_lt(k_abs, s_k))
                     s_v.append(b.select(keep[-1], s_scaled, neg_init))
                 else:
@@ -901,7 +900,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
         local_max = s_v[0]
         for v in s_v[1:]:
             local_max = b.fmax(local_max, v)
-        m_new = b.fmax(m_run, _query_reduce(b, local_max, combine="max"))
+        m_new = b.fmax(m_run, query_reduce(b, local_max, combine="max"))
         # Lazy rescale (DECODE_LAZY_TAU): keep the max in use unless the new one is
         # far enough above it. A stale max scales acc and l alike, so it cancels
         # in acc / l (and in the combine, which merges each partial at its own
@@ -919,7 +918,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
         local_sum = p_v[0]
         for v in p_v[1:]:
             local_sum = b.fadd(local_sum, v)
-        l_new = b.fadd(b.fmul(l_run, alpha), _query_reduce(b, local_sum, combine="sum"))
+        l_new = b.fadd(b.fmul(l_run, alpha), query_reduce(b, local_sum, combine="sum"))
         # The accumulator rescale runs only when some lane of the wave moved its
         # max: a zero- or one-trip loop on a wave-uniform count, which carries
         # the accumulator as its iteration arguments. Lanes that did not move
@@ -944,7 +943,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
             b.scf_yield(*scaled)
         accs = list(rs_loop.results)
         p_frags = [
-            _bf16x4_rne_finite(b, p_v[kt * C_PER_LANE : (kt + 1) * C_PER_LANE])
+            bf16x4_rne_finite(b, p_v[kt * C_PER_LANE : (kt + 1) * C_PER_LANE])
             for kt in range(K_TILES)
         ]
 
@@ -956,7 +955,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
                 )
             xs = pv_pre.pop(gi)
             for e in range(4):
-                c_t = xs[e] if TR_PV else _pick4(b, xs, e, dtype)
+                c_t = xs[e] if TR_PV else pick4(b, xs, e, dtype)
                 accs[4 * w + e] = _mfma_16x16x16(
                     b, dtype, c_t, p_frags[kt], accs[4 * w + e]
                 )
@@ -1019,7 +1018,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
                 vals = b.vec_pack(
                     [b.vec_extract(accs[t], reg) for t, reg in elems], F32
                 )
-                b.global_store_vN(part_acc, _shift(b, off, row), vals, 4, align=16)
+                b.global_store_vN(part_acc, shift(b, off, row), vals, 4, align=16)
         # One writer per head: the wave's first 16-lane group.
         with b.scf_if(b.cmp_lt(lane, b.const_i32(16))):
             b.global_store_vN(
@@ -1039,7 +1038,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
                 [b.fmul(b.vec_extract(accs[t], reg), inv) for t, reg in elems], F32
             )
             b.global_store_vN(
-                out, _shift(b, off, row), b.vec_trunc_f32_to_bf16(vals), 4, align=8
+                out, shift(b, off, row), b.vec_trunc_f32_to_bf16(vals), 4, align=8
             )
         # S_k = 0 leaves l = 0, so log2(l) = -inf and the LSE is -inf.
         with b.scf_if(b.cmp_lt(lane, b.const_i32(16))):

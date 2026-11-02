@@ -78,11 +78,10 @@ def dispatch_gdn_decode_all(req: GdnDecodeRequest) -> Tuple[DispatchResult, ...]
     ``axes.py``).
 
     Tiles come in registry priority order, and each tile's base configuration
-    (every knob at its default, what ``auto`` runs on that tile) comes first
-    among its configurations. Each result's request is pinned to its spec
-    (``spec_id``, ``tuning_id``, ``tuning_knobs``), so dispatching it again
-    selects exactly that kernel. :func:`dispatch_gdn_decode_bases` keeps only
-    the base configurations.
+    (every knob at its default) comes first among its configurations. Each
+    result's request is pinned to its spec (``spec_id``, ``tuning_id``,
+    ``tuning_knobs``), so dispatching it again selects exactly that kernel.
+    :func:`dispatch_gdn_decode_bases` keeps only the base configurations.
     """
     if request_errors(req):
         return ()
@@ -90,8 +89,8 @@ def dispatch_gdn_decode_all(req: GdnDecodeRequest) -> Tuple[DispatchResult, ...]
 
 
 def dispatch_gdn_decode_bases(req: GdnDecodeRequest) -> Tuple[DispatchResult, ...]:
-    """Each legal registered tile's base configuration (no knobs: what ``auto``
-    runs on that tile), one result per tile in registry priority order. What a
+    """Each legal registered tile's base configuration (no knobs: what a bare
+    ``spec_id`` pin runs), one result per tile in registry priority order. What a
     caller that compares tiles wants, rather than every configuration
     :func:`dispatch_gdn_decode_all` lists.
 
@@ -142,14 +141,14 @@ def dispatch_gdn_decode(
 ) -> DispatchResult:
     """Select a registered GDN decode configuration for ``req``.
 
-    ``auto`` returns the static tile's base configuration (every knob at its
-    default). A ``spec_id`` pin (with optional ``tuning_id`` /
-    ``tuning_knobs``) returns exactly that configuration or raises
-    :class:`rocke.dispatch.core.PinRefused` with the candidate's reason; it
-    never falls back to another kernel. The result's request is pinned to the
-    selected spec, so it replays the same kernel; ``result.spec`` is a
-    :class:`GdnDecodeTunedSpec`, whose ``kernel_spec`` is what the builder and
-    launcher read.
+    ``auto`` returns the request's case default (``axes.AUTO_DEFAULTS``: one
+    tile plus a knob stack per gate kind x fused x state width). A
+    ``spec_id`` pin (with optional ``tuning_id`` / ``tuning_knobs``) returns
+    exactly that configuration or raises :class:`rocke.dispatch.core.PinRefused`
+    with the candidate's reason; it never falls back to another kernel. The
+    result's request is pinned to the selected spec, so it replays the same
+    kernel; ``result.spec`` is a :class:`GdnDecodeTunedSpec`, whose
+    ``kernel_spec`` is what the builder and launcher read.
     """
     candidate = GDN_REGISTRY.select(req, ranker=ranker)
     spec = candidate.select_spec(req)

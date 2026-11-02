@@ -10,6 +10,8 @@ and Torch binding; admission, pin resolution and sweeping are shared.
 
 from __future__ import annotations
 
+import dataclasses
+
 from typing import Callable, Mapping, Optional
 
 from kernels.common.attention_unified import (
@@ -44,11 +46,10 @@ DENSE_PERSIST_ALGORITHM = "attention_dense_persist"
 
 
 def _tuning_precheck(variant: AttentionGeometryVariant):
-    """Coverage for one geometry variant. The scalar coverage check knows nothing
-    about the LSE output, so an LSE request also has to pass the gate of the
-    variant's own path: the split-KV gate owns which arches and features can
-    write LSE, and the 2D gate refuses it. That holds even if a 2D variant ever
-    declared the ``lse`` feature by mistake."""
+    """Coverage for one geometry variant. The scalar coverage check refuses LSE
+    (the scalar kernel writes none), so it is asked about the LSE-off problem
+    and an LSE request must also pass the gate of the variant's own path: the
+    split-KV or tiled 2D gate owns which arches and features can write LSE."""
     path_gate = (
         supports_native_unified_attention_3d_tiled
         if variant.path == "3d"
@@ -57,8 +58,12 @@ def _tuning_precheck(variant: AttentionGeometryVariant):
 
     def precheck(req):
         problem = _tuning_problem(req)
-        ok, why = supports_native_unified_attention(problem, arch=variant.arch)
-        if ok and problem.emit_lse:
+        if not problem.emit_lse:
+            return supports_native_unified_attention(problem, arch=variant.arch)
+        ok, why = supports_native_unified_attention(
+            dataclasses.replace(problem, emit_lse=False), arch=variant.arch
+        )
+        if ok:
             return path_gate(problem, arch=variant.arch)
         return ok, why
 
@@ -88,6 +93,7 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
             include_bt_stride=True,
             include_qq_bias_stride=True,
             kv_dtype=spec.kernel_spec.kv_storage_dtype,
+            emit_lse=bool(getattr(spec.kernel_spec, "emit_lse", False)),
         )
 
     def bind_torch(request, spec, tensors, **kwargs):
@@ -112,11 +118,12 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            # Only split-KV variants write LSE; 2D variants refuse the feature.
+            # Every unified variant writes LSE except the gfx942 4-warp GQA
+            # builder (see _GFX942_4WARP_LSE_REFUSAL).
             supports_features=(
-                ATTENTION_FEATURES | {"lse"}
-                if variant.path == "3d"
-                else ATTENTION_FEATURES
+                ATTENTION_FEATURES
+                if variant.builder_kind == "gfx942_4warp_gqa"
+                else ATTENTION_FEATURES | {"lse"}
             ),
         ),
         space=unified_space(variant),
@@ -147,7 +154,8 @@ def make_dense_candidate(
 ) -> KernelCandidate:
     """One dense candidate. ``base_spec(req)`` is its default kernel spec (raise
     ``ValueError`` when the request cannot have one); ``supports`` is the
-    kernel's own validator; ``features`` is the capability's feature set;
+    kernel's own validator; ``features`` is the capability's feature set
+    (``layout_dense`` is added: every dense kernel reads contiguous tensors);
     ``algorithm`` the selector a pin names it by; ``recorded`` names the
     fields ``base_spec`` resolves per problem (see
     :meth:`rocke.dispatch.tuning.KnobSpace.recorded`); ``derived`` recomputes
@@ -166,7 +174,9 @@ def make_dense_candidate(
         abi_version=ATTENTION_ABI_VERSION,
         priority=3,
         capability=Capability(
-            arches=(arch,), dtypes=("bf16", "fp16"), supports_features=features
+            arches=(arch,),
+            dtypes=("bf16", "fp16"),
+            supports_features=frozenset(features) | {"layout_dense"},
         ),
         space=DenseSpace(
             abi=ATTENTION_ABI_VERSION,
