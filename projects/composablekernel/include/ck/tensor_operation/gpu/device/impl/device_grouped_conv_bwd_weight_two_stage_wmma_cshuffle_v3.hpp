@@ -66,14 +66,10 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
         const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch,
         const index_t num_k_per_block)
 {
-#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
-#if defined(__gfx11__)
-    // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions; split-K partial sums
-    // go to the AccDataType workspace, so only a 16-bit AccDataType has to be excluded.
-    using e_data_type = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
-    if constexpr(!(CGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
-                   (std::is_same_v<e_data_type, ck::half_t> ||
-                    std::is_same_v<e_data_type, ck::bhalf_t>)))
+#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__) || \
+    defined(__gfx117__))
+#if defined(__gfx11__) || defined(__gfx117__)
+    if constexpr(CGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd)
     {
 #endif
         using SelectedEpilogue = get_epilogue_t<EpilogueType::CShuffle, GridwiseGemm>;
@@ -114,7 +110,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
                 karg,
                 epilogue_args);
         }
-#if defined(__gfx11__)
+#if defined(__gfx11__) || defined(__gfx117__)
     }
 #endif
 #else
@@ -124,7 +120,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     ignore = c_grid_desc_mblock_mperblock_nblock_nperblock;
     ignore = compute_ptr_offset_of_batch;
     ignore = num_k_per_block;
-#endif // end of if (defined(__gfx11__) || defined(__gfx12__))
+#endif // end of if (defined(__gfx11__) || defined(__gfx12__) || defined(__gfx117__))
 }
 
 template <ck::index_t NDimSpatial,
@@ -495,7 +491,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
     {
         ActiveWorkgroupsPerCU()
         {
-            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+            if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx117_supported())
             {
                 return;
             }
@@ -1221,7 +1217,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
             }
         }
 
-        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported())
+        if(!ck::is_gfx11_supported() && !ck::is_gfx12_supported() && !ck::is_gfx117_supported())
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
@@ -1230,19 +1226,14 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
             return false;
         }
 
-        // Stage one accumulates split-K partial sums atomically into the AccDataType workspace.
-        if constexpr(std::is_same_v<AccDataType, ck::half_t> ||
-                     std::is_same_v<AccDataType, ck::bhalf_t>)
+        if(arg.k_batch_ > 1 && (ck::is_gfx11_supported() || ck::is_gfx117_supported()))
         {
-            if(arg.k_batch_ > 1 && ck::is_gfx11_supported())
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {
-                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
-                {
-                    std::cout << "Unsupported splitK on gfx11." << std::endl;
-                }
-                // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
-                return false;
+                std::cout << "Unsupported splitK on gfx11." << std::endl;
             }
+            // gfx11/gfx117 do not support *_atomic_pk_add_f16/bf16 instructions
+            return false;
         }
 
         // Check this here, it allows to use other instances from factory even
@@ -1262,7 +1253,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
         if constexpr(std::is_same_v<ComputeTypeA, f8_t> || std::is_same_v<ComputeTypeA, bf8_t> ||
                      std::is_same_v<ComputeTypeB, f8_t> || std::is_same_v<ComputeTypeB, bf8_t>)
         {
-            if(ck::is_gfx11_supported())
+            if(ck::is_gfx11_supported() || ck::is_gfx117_supported())
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {

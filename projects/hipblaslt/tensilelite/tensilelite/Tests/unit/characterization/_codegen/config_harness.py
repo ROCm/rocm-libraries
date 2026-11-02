@@ -8,13 +8,13 @@ This is *not* a test module (no ``test_`` prefix, not collected). It exercises
 the **config-driven** solution-generation surface that the logic-driven
 :mod:`codegen_harness` does not touch:
 
-    Tensile config YAML  ->  BenchmarkProcess (BenchmarkStructs)
+    TensileLite config YAML  ->  BenchmarkProcess (BenchmarkStructs)
                          ->  constructForkPermutations
                          ->  _generateForkedSolutions  ->  Solution(s)
                          ->  generateKernelObjectsFromSolutions  ->  kernel dict(s)
-                         ->  processKernelSource  ->  assembly text
+                         ->  codegen_harness.emit_prepared_kernels  ->  assembly text
 
-A Tensile ``BenchmarkProblems`` entry is a ``[ProblemType, ProblemSizeGroup]``
+A TensileLite ``BenchmarkProblems`` entry is a ``[ProblemType, ProblemSizeGroup]``
 pair. The ``ForkParameters`` block is a cartesian product of single-element
 value lists, so each fork permutation yields exactly one ``Solution`` (CPU-only;
 no GPU, no benchmarking, no compile). We then hand the resulting ``Solution``
@@ -115,7 +115,7 @@ def _isolated_globals_with_isa(isaInfoMap):
 
 
 def _load_config(config_path):
-    """Read a Tensile config YAML into a dict (GlobalParameters/BenchmarkProblems)."""
+    """Read a TensileLite config YAML into a dict (GlobalParameters/BenchmarkProblems)."""
     from tensilelite import LibraryIO
 
     return LibraryIO.read(str(resolve_tensile_path(config_path)))
@@ -279,7 +279,7 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
     _generateForkedSolutions -> Solution(s)`` then emits each via the *same*
     path :mod:`codegen_harness` uses (``generateKernelObjectsFromSolutions`` +
-    ``processKernelSource``), returning ``[(basename, source, err), ...]`` sorted
+    ``emit_prepared_kernels``), returning ``[(basename, source, err), ...]`` sorted
     by basename.
 
     ``err`` is the emitter return code (0 == ok). ``limit`` bounds both the
@@ -296,7 +296,6 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     ``problem_fingerprint`` selects a stable problem-group identity and takes
     precedence over the positional ``problem_index``.
     """
-    import rocisa  # noqa: F401  (ensures the singleton module is importable here)
     from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig
@@ -304,7 +303,6 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
 
     assembler, iim = _toolchain_for(arch)
 
-    results = []
     with _isolated_globals_with_isa(iim):
         sols = _solutions_from_config_unguarded(
             config_path,
@@ -323,34 +321,17 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
         if limit is not None:
             kernels = sorted(kernels, key=lambda k: getKernelFileBase(splitGSU, k))[:limit]
         kwa = KernelWriterAssembly(assembler, DebugConfig())
-
-        for kernel in kernels:
-            results.append(_emit_one(kwa, kernel, splitGSU, canonical))
+        results = _ch.emit_prepared_kernels(
+            kwa, kernels, splitGSU=splitGSU, canonical=canonical
+        )
 
     results.sort(key=lambda t: t[0])
     return results
 
 
 def _emit_one(kwa, kernel, splitGSU, canonical):
-    """Emit a single kernel via the codegen_harness machinery.
-
-    Reuses ``codegen_harness._init_rocisa_for`` (per-kernel rocisa init),
-    ``_prepare_kernel`` (sets BaseName), and ``canonicalize_asm`` so the emitted
-    text matches the logic-driven harness exactly.
-    """
-    from tensilelite.TensileCreateLibrary.Run import processKernelSource
-
-    ri = _ch._init_rocisa_for(kernel)
-    data = ri.getData()
-    outOptions = ri.getOutputOptions()
-    base = _ch._prepare_kernel(kernel, splitGSU)
-    res = processKernelSource(kwa, data, outOptions, splitGSU, kernel)
-    src = res.src
-    if canonical:
-        src = _ch.canonicalize_asm(src)
-    elif isinstance(src, (bytes, bytearray)):
-        src = src.decode(errors="replace")
-    return base, src, res.err
+    """Emit one kernel via :func:`codegen_harness.emit_one_kernel`."""
+    return _ch.emit_one_kernel(kwa, kernel, splitGSU=splitGSU, canonical=canonical)
 
 
 _CLONE_TARGET_RE = re.compile(r"^label_([A-Za-z0-9]+)_target_\d+:", re.M)
@@ -611,6 +592,77 @@ def assert_assembles(src, base):
             assembler(target.group(1), waveSize, srcPath, os.path.join(tmpDir, "kernel.o"))
         except RuntimeError as exc:
             pytest.fail(f"Kernel {base!r} does not assemble for {target.group(1)}: {exc}")
+
+
+_SYMBOL_BREADCRUMB_RE = re.compile(
+    r"([sv](?:\d+|\[\d+:\d+\])) was (\w+(?:\+-?\d+)*) \((?:unresolved \.set|split)\)"
+)
+# Same operand and the same ``was``, any reason: catches a reason string the
+# allocator grows that the pattern above does not know, which would otherwise
+# leave the operand numeric and fail an assertion for a reason nobody can see.
+_BREADCRUMB_SHAPE_RE = re.compile(r"[sv](?:\d+|\[\d+:\d+\]) was \S+ \([^)]*\)")
+_OPERAND_RE = re.compile(r"(?<!\w)[sv](?:\d+|\[\d+:\d+\])(?!\w)")
+
+
+def with_symbol_names(src):
+    """Return ``src`` with allocator-renumbered operands spelled by name again.
+
+    A kernel with ``StinkyTofuRegisterAllocation >= 2`` compacts SGPRs, and an operand it moves
+    loses its symbolic name whenever the name's ``.set`` cannot be resolved --
+    which is most of them, because TensileLite ends a name's scope with a second
+    ``.set NAME, UNDEF``. So ``s[sgprMulticastMaskA]`` prints as ``s0``. The
+    instruction is unchanged; only the spelling is, and every assertion that
+    matches assembly text by name stops matching.
+
+    The allocator records what it renamed in a trailing ``s0 was
+    sgprMulticastMaskA (unresolved .set)`` note, so the original spelling is
+    recoverable: substitute each renamed operand back on the line that documents
+    it. With no such notes -- allocation off, or an arch that does not emit them
+    -- the text is returned byte-identical, so an assertion reads the same in
+    both modes.
+
+    Match names against this view and assemble the real text
+    (``assert_assembles``), which is the only check that can tell the two apart.
+    """
+    out = []
+    for line in src.splitlines(keepends=True):
+        code, sep, note = line.partition("//")
+        crumbs = _SYMBOL_BREADCRUMB_RE.findall(note)
+        shapes = len(_BREADCRUMB_SHAPE_RE.findall(note))
+        assert shapes == len(crumbs), (
+            f"unrecognized allocator breadcrumb, so this operand would stay "
+            f"numeric and every name-matching assertion on it would fail "
+            f"silently: {note.strip()!r}"
+        )
+        if not crumbs:
+            out.append(line)
+            continue
+
+        # One physical register can carry two names on one line, e.g. a
+        # destination the allocator moved to where a source's symbol also
+        # landed. The allocator writes its notes in operand order (destinations
+        # then sources, and one note per distinct fact), so consume them in that
+        # order rather than substituting a name everywhere it fits -- which
+        # would spell the second operand with the first operand's symbol.
+        pending = {}
+        for physical, name in crumbs:
+            pending.setdefault(physical, []).append(name)
+
+        def spell(match):
+            names = pending.get(match.group(0))
+            if not names:
+                return match.group(0)
+            # A single note covers every occurrence: it is either the only use
+            # or two uses the allocator deduplicated because they agree.
+            name = names.pop(0) if len(names) > 1 else names[0]
+            span = re.fullmatch(r"([sv])\[(\d+):(\d+)\]", match.group(0))
+            if span:
+                width = int(span.group(3)) - int(span.group(2))
+                return f"{span.group(1)}[{name}:{name}+{width}]"
+            return f"{match.group(0)[0]}[{name}]"
+
+        out.append(_OPERAND_RE.sub(spell, code) + sep + note)
+    return "".join(out)
 
 
 def assert_split_multicast_masks(src, base):

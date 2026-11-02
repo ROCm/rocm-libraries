@@ -18,7 +18,9 @@
 
 #include <limits>
 #include <memory>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace hip_kernel_provider::test_utilities
 {
@@ -48,12 +50,30 @@ private:
         /// A caller-supplied validator is never rebuilt from the tolerances above; any
         /// later registration for the same output is rejected.
         bool suppliedByCaller = false;
-        std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
+        std::shared_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
     };
 
     hipdnn_frontend::graph::Graph& _graph;
     std::unordered_map<std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>, Registration>
         _registrations;
+};
+
+// The tensors and output validators of one verification. It keeps no reference to a graph,
+// a context or a handle. It stays valid after all three are destroyed.
+struct VerificationRun
+{
+    struct Output
+    {
+        int64_t uid = 0;
+        std::string name;
+        std::shared_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
+    };
+
+    hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle;
+    hipdnn_test_sdk::utilities::GraphTensorBundle cpuBundle;
+    std::vector<Output> outputs;
+    // The first executeAndValidate call computes the CPU reference and sets this flag.
+    bool referenceReady = false;
 };
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
@@ -109,33 +129,74 @@ protected:
     /// Uses the same verification path after a caller builds its engine-pinned plans.
     void verifyBuiltGraph(GraphVerificationContext& context, unsigned int seed)
     {
+        VerificationRun run;
+        ASSERT_NO_FATAL_FAILURE(prepareVerification(context, seed, run));
+        ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, context._graph, _handle));
+    }
+
+    // Split in two so a test can work out the right answers once, then check several runs
+    // against them, even runs of a plan loaded after the original graph and handle are gone.
+
+    // Creates and seeds the tensors of the context's graph and resolves a validator for each
+    // output. It seeds the GPU tensors before the CPU tensors. It runs no graph.
+    void prepareVerification(GraphVerificationContext& context,
+                             unsigned int seed,
+                             VerificationRun& run)
+    {
+        run = VerificationRun{};
         auto& graph = context._graph;
-        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle;
-        hipdnn_test_sdk::utilities::GraphTensorBundle cpuBundle;
         std::vector<OutputTensor> outputs;
 
-        generateBundles(graph, cpuBundle, gpuBundle, outputs);
+        generateBundles(graph, run.cpuBundle, run.gpuBundle, outputs);
 
-        initializeBundle(graph, gpuBundle, seed);
-        initializeBundle(graph, cpuBundle, seed);
-
-        ASSERT_NO_FATAL_FAILURE(executeGpuGraph(_handle, graph, gpuBundle));
-        ASSERT_NO_FATAL_FAILURE(executeCpuGraph(graph, cpuBundle));
+        initializeBundle(graph, run.gpuBundle, seed);
+        initializeBundle(graph, run.cpuBundle, seed);
 
         ASSERT_NO_FATAL_FAILURE(resolveOutputValidators(context, outputs));
 
-        HIPDNN_PLUGIN_LOG_INFO("Validating " << outputs.size() << " output tensors");
-
         for(const auto& output : outputs)
         {
-            auto& cpuTensor = cpuBundle.tensors.at(output.uid);
-            auto& gpuTensor = gpuBundle.tensors.at(output.uid);
+            run.gpuBundle.outputTensorIds.insert(output.uid);
+            run.outputs.push_back({output.uid,
+                                   output.attr->get_name(),
+                                   context._registrations.at(output.attr).validator});
+        }
+    }
+
+    // Executes graph on the GPU and compares each output with the CPU reference. The first
+    // call computes the reference from its graph, after the GPU run. Later calls use that
+    // reference again and do not serialize graph. Before a later call executes, it fills each
+    // GPU output with a sentinel, so an output that the execute does not write fails.
+    void executeAndValidate(VerificationRun& run,
+                            hipdnn_frontend::graph::Graph& graph,
+                            hipdnnHandle_t handle)
+    {
+        ASSERT_FALSE(run.outputs.empty())
+            << "The run has no outputs. Call prepareVerification() first.";
+
+        if(run.referenceReady)
+        {
+            run.gpuBundle.sentinelFillOutputTensors();
+        }
+        ASSERT_NO_FATAL_FAILURE(executeGpuGraph(handle, graph, run.gpuBundle));
+
+        if(!run.referenceReady)
+        {
+            ASSERT_NO_FATAL_FAILURE(executeCpuGraph(graph, run.cpuBundle));
+            run.referenceReady = true;
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("Validating " << run.outputs.size() << " output tensors");
+
+        for(const auto& output : run.outputs)
+        {
+            auto& cpuTensor = run.cpuBundle.tensors.at(output.uid);
+            auto& gpuTensor = run.gpuBundle.tensors.at(output.uid);
             gpuTensor->markDeviceModified();
 
-            const auto& registration = context._registrations.at(output.attr);
-            const bool valid = registration.validator->allClose(*cpuTensor, *gpuTensor);
+            const bool valid = output.validator->allClose(*cpuTensor, *gpuTensor);
             ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << output.uid
-                               << ", name: " << output.attr->get_name();
+                               << ", name: " << output.name;
         }
     }
 

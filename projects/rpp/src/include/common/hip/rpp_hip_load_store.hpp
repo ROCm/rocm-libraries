@@ -444,10 +444,10 @@ __device__ __forceinline__ uint rpp_hip_pack(float4 src) {
 template <typename RoundingPolicy = NoRounding>
 __device__ __forceinline__ uint rpp_hip_pack_i8(float4 src) {
     char4 dst_c4;
-    dst_c4.w = (schar)(src.w);
-    dst_c4.z = (schar)(src.z);
-    dst_c4.y = (schar)(src.y);
-    dst_c4.x = (schar)(src.x);
+    dst_c4.w = (schar)(fmaxf(fminf(src.w, 127.0f), -128.0f));
+    dst_c4.z = (schar)(fmaxf(fminf(src.z, 127.0f), -128.0f));
+    dst_c4.y = (schar)(fmaxf(fminf(src.y, 127.0f), -128.0f));
+    dst_c4.x = (schar)(fmaxf(fminf(src.x, 127.0f), -128.0f));
 
     return *(uint*)&dst_c4;
 }
@@ -455,10 +455,10 @@ __device__ __forceinline__ uint rpp_hip_pack_i8(float4 src) {
 template <>
 __device__ __forceinline__ uint rpp_hip_pack_i8<RoundToNearest>(float4 src) {
     char4 dst_c4;
-    dst_c4.w = (schar)(__builtin_rintf(src.w));
-    dst_c4.z = (schar)(__builtin_rintf(src.z));
-    dst_c4.y = (schar)(__builtin_rintf(src.y));
-    dst_c4.x = (schar)(__builtin_rintf(src.x));
+    dst_c4.w = (schar)(fmaxf(fminf(__builtin_rintf(src.w), 127.0f), -128.0f));
+    dst_c4.z = (schar)(fmaxf(fminf(__builtin_rintf(src.z), 127.0f), -128.0f));
+    dst_c4.y = (schar)(fmaxf(fminf(__builtin_rintf(src.y), 127.0f), -128.0f));
+    dst_c4.x = (schar)(fmaxf(fminf(__builtin_rintf(src.x), 127.0f), -128.0f));
 
     return *(uint*)&dst_c4;
 }

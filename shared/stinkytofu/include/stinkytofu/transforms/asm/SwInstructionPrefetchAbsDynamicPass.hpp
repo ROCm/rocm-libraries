@@ -74,8 +74,14 @@ class StinkyAsmModule;
 /// \p baseSgpr  Low index of the reserved 64-bit SGPR pair. Pass -1 to no-op.
 /// \p cpBoundaryCover  Enable the near-boundary cover (the unconditional dynamic-width
 ///                     burst prepended to the branch chain). Default off (staged rollout).
+/// \p afterSgprCompact  SGPR compact has renumbered the kernel, so \p baseSgpr is only
+///                     a "prefetch enabled" flag. The entry cover then reuses a block
+///                     inside the kernel's range (absPrefetchEntrySgprBase); the ladder
+///                     runs mid-kernel, where an allocated register may still hold a
+///                     value, so it takes a block above everything named.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwInstructionPrefetchAbsDynamicPass(
-    int baseSgpr, const std::string& debugOutputPath = {}, bool cpBoundaryCover = false);
+    int baseSgpr, const std::string& debugOutputPath = {}, bool cpBoundaryCover = false,
+    bool afterSgprCompact = false);
 
 /// Overload that reads base SGPR and debug path from \p module options:
 /// `SwInstructionPrefetchAbsBaseSgpr` and `StinkyTofuCostOutputDir`.

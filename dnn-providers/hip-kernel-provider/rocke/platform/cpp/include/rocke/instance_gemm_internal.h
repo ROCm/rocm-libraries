@@ -211,14 +211,17 @@ typedef struct rocke_gemm_build_ctx
     /* ---- DirectToLDS (DTLA/DTLB) plumbing (direct_to_lds only) -- */
     bool dtl; /* spec.trait.direct_to_lds                  */
     int dtl_dwords; /* _DTL_DWORDS = 4                           */
-    int dtl_halves; /* _DTL_HALVES = dtl_dwords*2                */
+    int dtl_halves; /* _DTL_HALVES (0 when a chunk is under one element) */
     int dtl_bytes_per_lane; /* _DTL_BYTES_PER_LANE = dtl_dwords*4        */
-    int dtl_a_chunks; /* (block_m*block_k)/dtl_halves              */
-    int dtl_b_chunks; /* (block_n*block_k)/dtl_halves              */
+    int dtl_elem_bytes; /* _dtl_elem_bytes                           */
+    int dtl_elem_log2; /* log2(dtl_elem_bytes)                      */
+    bool dtl_sub_elem; /* _dtl_sub_elem: chunk smaller than an element */
+    int dtl_a_chunks; /* (block_m*block_k*elem_bytes)/bytes_per_lane */
+    int dtl_b_chunks; /* (block_n*block_k*elem_bytes)/bytes_per_lane */
     int dtl_a_passes; /* ceil(dtl_a_chunks / block_size)          */
     int dtl_b_passes; /* ceil(dtl_b_chunks / block_size)          */
     int dtl_pass_bytes; /* block_size * dtl_bytes_per_lane           */
-    int dtl_chunks_per_row; /* block_k / dtl_halves                      */
+    int dtl_chunks_per_row; /* block_k*elem_bytes / bytes_per_lane       */
     rocke_value_t* dtl_big_bytes; /* const_i32(0x7FFF0000)        */
     rocke_value_t* dtl_a_rsrc; /* buffer_rsrc(A, big_bytes)    */
     rocke_value_t* dtl_b_rsrc; /* buffer_rsrc(Bp, big_bytes)   */
@@ -226,7 +229,7 @@ typedef struct rocke_gemm_build_ctx
     rocke_value_t* dtl_b_lds_base; /* smem_addr_of(B_smem)         */
     rocke_value_t* dtl_zero_soff; /* const_i32(0)                 */
     rocke_value_t* dtl_c_chunks_per_row; /* const_i32(dtl_chunks_per_row)*/
-    rocke_value_t* dtl_c_halves_per_chunk; /* const_i32(dtl_halves)        */
+    rocke_value_t* dtl_c_cols_per_chunk; /* const_i32(elems or bytes)    */
     rocke_value_t* dtl_c_block_size; /* const_i32(block_size)        */
 
     /* ---- active-tile gate (batched && active_tile_skip) -- */
@@ -256,7 +259,7 @@ typedef struct rocke_gemm_build_ctx
 /* _atom_frag_lengths(op) -> (a,b,c)_frag_len. Pure; fills out-params. */
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag);
 
-/* _emit_zero_acc_op(b, op): zero_vec_f32(op->c_frag_len). Used to build
+/* _emit_zero_acc_op(b, op): zero_vec(op->c_dtype, op->c_frag_len). Used to build
  * acc_init. (The MFMA-only _emit_zero_acc / _mfma_atom_widths variants are not
  * reached by the contract-driven body; kept here for parity with the Python
  * module surface.) */
@@ -282,10 +285,15 @@ rocke_value_t* rocke_gemm_emit_mfma(rocke_ir_builder_t* b,
 rocke_value_t* rocke_gemm_emit_zero_acc(rocke_ir_builder_t* b,
                                         const rocke_gemm_universal_spec_t* spec);
 
+/* _elem_bytes(spec): storage element size in bytes of the homogeneous A/B/C
+ * dtype. */
+int rocke_gemm_elem_bytes(const rocke_gemm_universal_spec_t* spec);
+
 /* _choose_load_vec(spec) -> width. Thin adapter over rocke_choose_load_vec. */
 int rocke_gemm_choose_load_vec(const rocke_gemm_universal_spec_t* spec);
 
-/* _emit_smem_load(b, smem, row, col, n, dtype): f16/n==4 fast path else vN. */
+/* _emit_smem_load(b, smem, row, col, n, dtype): f16/n==4 fast path else vN;
+ * a one-element fragment is returned as a scalar. */
 rocke_value_t* rocke_gemm_emit_smem_load(rocke_ir_builder_t* b,
                                          rocke_value_t* smem,
                                          rocke_value_t* row,

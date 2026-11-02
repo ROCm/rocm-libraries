@@ -34,6 +34,19 @@ namespace
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 
+/// Catalog entries reference definitions they do not own, so @p definitions must outlive
+/// every catalog built from the result.
+std::vector<const KernelDefinition*> pointersTo(const std::vector<KernelDefinition>& definitions)
+{
+    std::vector<const KernelDefinition*> pointers;
+    pointers.reserve(definitions.size());
+    for(const auto& definition : definitions)
+    {
+        pointers.push_back(&definition);
+    }
+    return pointers;
+}
+
 TEST(TestIngestorKernelHeuristic, RefusesToConstructAgainstAnUnregisteredSymbol)
 {
     // Eager resolution turns an unshipped scorer symbol into a load-time exclusion,
@@ -75,13 +88,15 @@ TEST(TestIngestorKernelHeuristic, RanksHigherScoringKernelsFirst)
     Catalog catalog;
     const auto lowId = testId(0x01);
     const auto highId = testId(0x02);
-    catalog.entries = {makeDefinition(lowId, 64), makeDefinition(highId, 256)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(lowId, 64),
+                                                    makeDefinition(highId, 256)};
+    catalog.entries = pointersTo(definitions);
 
     const NativeKernelHeuristic heuristic(SCORE_SYMBOL);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, highId);
+    EXPECT_EQ(ranked.front()->kernelId, highId);
 }
 
 /// Scoring sees what the engine's graph match bound, so a heuristic can rank on graph
@@ -107,14 +122,16 @@ TEST(TestIngestorKernelHeuristic, ScoresFromTheTokensTheGraphMatchBound)
     Catalog catalog;
     const auto smallId = testId(0x01);
     const auto largeId = testId(0x02);
-    catalog.entries = {makeDefinition(smallId, 64), makeDefinition(largeId, 256)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(smallId, 64),
+                                                    makeDefinition(largeId, 256)};
+    catalog.entries = pointersTo(definitions);
     catalog.bound["test.preferred_block_size"] = int64_t{64};
 
     const NativeKernelHeuristic heuristic(TOKEN_SCORE_SYMBOL);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, smallId);
+    EXPECT_EQ(ranked.front()->kernelId, smallId);
 
     ScoreRegistry::unregisterSymbol(TOKEN_SCORE_SYMBOL);
 }
@@ -129,13 +146,15 @@ TEST(TestIngestorKernelHeuristic, BreaksScoreTiesOnPriority)
     Catalog catalog;
     const auto lowPriorityId = testId(0x01);
     const auto highPriorityId = testId(0x02);
-    catalog.entries = {makeDefinition(lowPriorityId, 64, 1), makeDefinition(highPriorityId, 64, 5)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(lowPriorityId, 64, 1),
+                                                    makeDefinition(highPriorityId, 64, 5)};
+    catalog.entries = pointersTo(definitions);
 
     const NativeKernelHeuristic heuristic(CONSTANT_SCORE_SYMBOL);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, highPriorityId);
+    EXPECT_EQ(ranked.front()->kernelId, highPriorityId);
 }
 
 TEST(TestIngestorKernelHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcrossRuns)
@@ -148,13 +167,15 @@ TEST(TestIngestorKernelHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcros
     Catalog catalog;
     const auto lowerId = testId(0x01);
     const auto higherId = testId(0x02);
-    catalog.entries = {makeDefinition(higherId, 64), makeDefinition(lowerId, 64)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(higherId, 64),
+                                                    makeDefinition(lowerId, 64)};
+    catalog.entries = pointersTo(definitions);
 
     const NativeKernelHeuristic heuristic(CONSTANT_SCORE_SYMBOL);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, lowerId);
+    EXPECT_EQ(ranked.front()->kernelId, lowerId);
 }
 
 TEST(TestIngestorKernelHeuristic, RanksNanScoringKernelsBelowEveryFiniteScore)
@@ -171,17 +192,18 @@ TEST(TestIngestorKernelHeuristic, RanksNanScoringKernelsBelowEveryFiniteScore)
     const auto nanId = testId(0x01);
     const auto smallId = testId(0x02);
     const auto largeId = testId(0x03);
-    catalog.entries
-        = {makeDefinition(nanId, 4096), makeDefinition(smallId, 64), makeDefinition(largeId, 256)};
+    const std::vector<KernelDefinition> definitions{
+        makeDefinition(nanId, 4096), makeDefinition(smallId, 64), makeDefinition(largeId, 256)};
+    catalog.entries = pointersTo(definitions);
 
     const NativeKernelHeuristic heuristic(NAN_SCORE_SYMBOL);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 3U);
     // The finite kernels keep their own order, and the NaN one sinks to the back.
-    EXPECT_EQ(ranked[0].kernelId, largeId);
-    EXPECT_EQ(ranked[1].kernelId, smallId);
-    EXPECT_EQ(ranked[2].kernelId, nanId);
+    EXPECT_EQ(ranked[0]->kernelId, largeId);
+    EXPECT_EQ(ranked[1]->kernelId, smallId);
+    EXPECT_EQ(ranked[2]->kernelId, nanId);
 }
 
 TEST(TestIngestorKernelHeuristic, KeepsFiniteScoresOrderedWhenAScorerReturnsNan)
@@ -200,16 +222,18 @@ TEST(TestIngestorKernelHeuristic, KeepsFiniteScoresOrderedWhenAScorerReturnsNan)
     const MatchContext context{graph, 0, properties};
 
     Catalog catalog;
+    std::vector<KernelDefinition> definitions;
     std::vector<DescriptorId> nanIds;
     for(uint8_t seed = 1; seed <= 6; ++seed)
     {
         const bool scoresNan = (seed % 2 == 0);
-        catalog.entries.push_back(makeDefinition(testId(seed), scoresNan ? 4096 : 64 * seed));
+        definitions.push_back(makeDefinition(testId(seed), scoresNan ? 4096 : 64 * seed));
         if(scoresNan)
         {
             nanIds.push_back(testId(seed));
         }
     }
+    catalog.entries = pointersTo(definitions);
 
     const NativeKernelHeuristic heuristic(NAN_SCORE_SYMBOL);
     const auto ranked = heuristic.rank(catalog, context);
@@ -221,16 +245,16 @@ TEST(TestIngestorKernelHeuristic, KeepsFiniteScoresOrderedWhenAScorerReturnsNan)
 
     int64_t previousBlockSize = std::numeric_limits<int64_t>::max();
     bool seenNan = false;
-    for(const auto& entry : ranked)
+    for(const KernelDefinition* entry : ranked)
     {
-        if(scoresNan(entry.kernelId))
+        if(scoresNan(entry->kernelId))
         {
             seenNan = true;
             continue;
         }
         // Every finite kernel must outrank every NaN one, and stay ordered among its peers.
         EXPECT_FALSE(seenNan) << "a finite score ranked below a NaN score";
-        const int64_t blockSize = entry.getIntMetadata(BLOCK_SIZE);
+        const int64_t blockSize = entry->getIntMetadata(BLOCK_SIZE);
         EXPECT_LE(blockSize, previousBlockSize) << "finite scores are no longer descending";
         previousBlockSize = blockSize;
     }
@@ -240,7 +264,7 @@ TEST(TestIngestorKernelHeuristic, KeepsFiniteScoresOrderedWhenAScorerReturnsNan)
     ASSERT_EQ(repeated.size(), ranked.size());
     for(size_t i = 0; i < ranked.size(); ++i)
     {
-        EXPECT_EQ(ranked[i].kernelId, repeated[i].kernelId) << "ranking diverged at index " << i;
+        EXPECT_EQ(ranked[i]->kernelId, repeated[i]->kernelId) << "ranking diverged at index " << i;
     }
 }
 
@@ -259,17 +283,18 @@ TEST(TestIngestorKernelHeuristic, BreaksTiesAmongNanScoringKernelsOnPriorityThen
     const auto tiedHigherId = testId(0x03);
     // Listed with the higher id first, so passing requires the tie-break to reorder them
     // rather than merely preserving input order.
-    catalog.entries = {makeDefinition(lowPriorityId, 4096, 1),
-                       makeDefinition(tiedHigherId, 4096, 5),
-                       makeDefinition(tiedLowerId, 4096, 5)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(lowPriorityId, 4096, 1),
+                                                    makeDefinition(tiedHigherId, 4096, 5),
+                                                    makeDefinition(tiedLowerId, 4096, 5)};
+    catalog.entries = pointersTo(definitions);
 
     const NativeKernelHeuristic heuristic(NAN_SCORE_SYMBOL);
     const auto ranked = heuristic.rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 3U);
-    EXPECT_EQ(ranked[0].kernelId, tiedLowerId); // priority 5, lower id wins the tie
-    EXPECT_EQ(ranked[1].kernelId, tiedHigherId); // priority 5
-    EXPECT_EQ(ranked[2].kernelId, lowPriorityId); // priority 1 sinks despite the id order
+    EXPECT_EQ(ranked[0]->kernelId, tiedLowerId); // priority 5, lower id wins the tie
+    EXPECT_EQ(ranked[1]->kernelId, tiedHigherId); // priority 5
+    EXPECT_EQ(ranked[2]->kernelId, lowPriorityId); // priority 1 sinks despite the id order
 }
 
 /// RFC 0019 §5 step 4: an infinite score is not a "must pick" sentinel. Both infinities carry
@@ -297,9 +322,10 @@ TEST(TestIngestorKernelHeuristic, RanksInfiniteScoresLastWhateverTheirKernelId)
     const auto positiveInfinityId = testId(0x01);
     const auto negativeInfinityId = testId(0x02);
     const auto finiteId = testId(0x03);
-    catalog.entries = {makeDefinition(finiteId, 64),
-                       makeDefinition(positiveInfinityId, 4096),
-                       makeDefinition(negativeInfinityId, 128)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(finiteId, 64),
+                                                    makeDefinition(positiveInfinityId, 4096),
+                                                    makeDefinition(negativeInfinityId, 128)};
+    catalog.entries = pointersTo(definitions);
 
     // Metric-less `max` and `min` build NativeKernelHeuristic directly; `time` is a physical
     // `min` score ranked through UhdKernelHeuristic.
@@ -408,7 +434,9 @@ TEST(TestIngestorKernelHeuristic, ANativeMinScorerRanksTheCheapestKernelFirst)
     Catalog catalog;
     const auto slowId = testId(0x01);
     const auto fastId = testId(0x02);
-    catalog.entries = {makeDefinition(slowId, 64), makeDefinition(fastId, 256)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(slowId, 64),
+                                                    makeDefinition(fastId, 256)};
+    catalog.entries = pointersTo(definitions);
 
     for(const std::string metric : {"", "time"})
     {
@@ -419,7 +447,7 @@ TEST(TestIngestorKernelHeuristic, ANativeMinScorerRanksTheCheapestKernelFirst)
 
         const auto ranked = heuristic->rank(catalog, context);
         ASSERT_EQ(ranked.size(), 2U);
-        EXPECT_EQ(ranked.front().kernelId, fastId) << "the 10 ms kernel outranked the 1 ms one";
+        EXPECT_EQ(ranked.front()->kernelId, fastId) << "the 10 ms kernel outranked the 1 ms one";
     }
 }
 
@@ -433,7 +461,9 @@ TEST(TestIngestorKernelHeuristic, ACalibratedNativeTimeScorerReportsAscendingMil
     const MatchContext context{graph, 0, properties, "time"};
 
     Catalog catalog;
-    catalog.entries = {makeDefinition(testId(0x01), 64), makeDefinition(testId(0x02), 256)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(testId(0x01), 64),
+                                                    makeDefinition(testId(0x02), 256)};
+    catalog.entries = pointersTo(definitions);
 
     const auto heuristic = makeKernelHeuristic(millisecondsDescriptor("time"));
     std::string modelId;
@@ -461,7 +491,9 @@ TEST(TestIngestorKernelHeuristic, ATransformedZeroIsAMeasurementNotItsAbsence)
     const MatchContext context{graph, 0, properties, "time"};
 
     Catalog catalog;
-    catalog.entries = {makeDefinition(testId(0x01), 64), makeDefinition(testId(0x02), 256)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(testId(0x01), 64),
+                                                    makeDefinition(testId(0x02), 256)};
+    catalog.entries = pointersTo(definitions);
 
     auto descriptor = millisecondsDescriptor("time");
     descriptor.nativeSymbol = LOG_MILLISECONDS_SYMBOL;
@@ -504,9 +536,10 @@ TEST(TestIngestorKernelHeuristic, ANativeMinScorerHoldsOnlyAPhysicalCostPositive
     const auto positiveId = testId(0x01);
     const auto zeroId = testId(0x02);
     const auto negativeId = testId(0x03);
-    catalog.entries = {makeDefinition(positiveId, 256),
-                       makeDefinition(zeroId, 128),
-                       makeDefinition(negativeId, 64)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(positiveId, 256),
+                                                    makeDefinition(zeroId, 128),
+                                                    makeDefinition(negativeId, 64)};
+    catalog.entries = pointersTo(definitions);
 
     auto descriptor = millisecondsDescriptor("");
     descriptor.nativeSymbol = SIGNED_COST_SYMBOL;
@@ -557,12 +590,14 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicDegradesWhenAModelCannotBeB
     Catalog catalog;
     const auto lowPriorityId = testId(0x01);
     const auto highPriorityId = testId(0x02);
-    catalog.entries = {makeDefinition(lowPriorityId, 64, 1), makeDefinition(highPriorityId, 64, 5)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(lowPriorityId, 64, 1),
+                                                    makeDefinition(highPriorityId, 64, 5)};
+    catalog.entries = pointersTo(definitions);
 
     const auto ranked = heuristic->rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, highPriorityId);
+    EXPECT_EQ(ranked.front()->kernelId, highPriorityId);
 }
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicFallsBackWhenNoDescriptorIsSupplied)
@@ -605,14 +640,15 @@ TEST(TestIngestorKernelHeuristic, UnrankedFallsToPriorityWhenNoHeuristicIsSuppli
     // Declared low-first, so insertion order cannot make this pass. The block sizes
     // differ and favour the loser, so a fallback that scored on kernel metadata instead
     // of returning a constant would outrank priority and fail here.
-    catalog.entries
-        = {makeDefinition(lowPriorityId, 4096, 1), makeDefinition(highPriorityId, 64, 5)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(lowPriorityId, 4096, 1),
+                                                    makeDefinition(highPriorityId, 64, 5)};
+    catalog.entries = pointersTo(definitions);
 
     const auto heuristic = makeKernelHeuristic(std::nullopt);
     const auto ranked = heuristic->rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, highPriorityId);
+    EXPECT_EQ(ranked.front()->kernelId, highPriorityId);
 }
 
 TEST(TestIngestorKernelHeuristic, UnrankedFallsToKernelIdWhenPriorityTies)
@@ -627,13 +663,15 @@ TEST(TestIngestorKernelHeuristic, UnrankedFallsToKernelIdWhenPriorityTies)
     // Equal priority, declared higher-id first, block sizes differing and favouring the
     // loser: only the id tie-break can produce the expected order, and any metadata-
     // sensitive score would break it.
-    catalog.entries = {makeDefinition(higherId, 4096), makeDefinition(lowerId, 64)};
+    const std::vector<KernelDefinition> definitions{makeDefinition(higherId, 4096),
+                                                    makeDefinition(lowerId, 64)};
+    catalog.entries = pointersTo(definitions);
 
     const auto heuristic = makeKernelHeuristic(std::nullopt);
     const auto ranked = heuristic->rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, lowerId);
+    EXPECT_EQ(ranked.front()->kernelId, lowerId);
 }
 
 TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
@@ -655,8 +693,9 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 
     // Equal priority, so the ascending-id tiebreak must decide, not a leaked NaN.
     Catalog catalog;
-    catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
-    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+    const std::vector<KernelDefinition> definitions{makeDefinition(testId(0x02), 4096),
+                                                    makeDefinition(testId(0x01), 64)};
+    catalog.entries = pointersTo(definitions);
     const auto ranked = heuristic.rankScored(catalog, context);
     ASSERT_EQ(ranked.size(), 2U);
     EXPECT_EQ(ranked.front().kernelId, testId(0x01)) << "the id tiebreak did not decide";
@@ -683,8 +722,9 @@ TEST(TestIngestorKernelHeuristic, AThrowingScorerDegradesInsteadOfFailingTheRequ
     const MatchContext context{graph, 0, properties};
 
     Catalog catalog;
-    catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
-    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+    const std::vector<KernelDefinition> definitions{makeDefinition(testId(0x02), 4096),
+                                                    makeDefinition(testId(0x01), 64)};
+    catalog.entries = pointersTo(definitions);
 
     const ThrowingHeuristic heuristic;
 
@@ -712,7 +752,8 @@ TEST(TestIngestorKernelHeuristic, AThrowingScorerIsReportedRatherThanSwallowed)
     const MatchContext context{graph, 0, properties};
 
     Catalog catalog;
-    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+    const std::vector<KernelDefinition> definitions{makeDefinition(testId(0x01), 64)};
+    catalog.entries = pointersTo(definitions);
 
     const ThrowingHeuristic heuristic;
     (void)heuristic.rankScored(catalog, context);
@@ -734,14 +775,15 @@ TEST(TestIngestorKernelHeuristic, RankAlsoSurvivesAThrowingScorer)
     const MatchContext context{graph, 0, properties};
 
     Catalog catalog;
-    catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
-    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+    const std::vector<KernelDefinition> definitions{makeDefinition(testId(0x02), 4096),
+                                                    makeDefinition(testId(0x01), 64)};
+    catalog.entries = pointersTo(definitions);
 
     const ThrowingHeuristic heuristic;
-    std::vector<KernelDefinition> ordered;
+    std::vector<const KernelDefinition*> ordered;
     ASSERT_NO_THROW(ordered = heuristic.rank(catalog, context));
     ASSERT_EQ(ordered.size(), 2U);
-    EXPECT_EQ(ordered.front().kernelId, testId(0x01));
+    EXPECT_EQ(ordered.front()->kernelId, testId(0x01));
 }
 
 } // namespace

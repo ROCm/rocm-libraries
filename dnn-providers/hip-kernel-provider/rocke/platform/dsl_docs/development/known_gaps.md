@@ -244,6 +244,45 @@ mirrors; until then, keep emission changes gated by the two tests above.
 
 ---
 
+## 7. Unified attention LSE output (`emit_lse`) — not requestable from C
+
+**Subsystem:** `instances/common/attention_unified_selectors.cpp` (and its
+header), `rocke_unified_attn_problem_t`
+
+The C engine builds every LSE-on unified attention kernel byte-identically to
+Python: the split-KV reduce (gfx942, gfx950) and the default tiled 2D builders
+(gfx942, gfx950, including the gfx950 `fastkv_regp` wrapper). They share
+`include/rocke/instance_lse_store_internal.h`, the C twin of
+`kernels/common/_lse_store.py`. The parity emitters build LSE-on configs for
+each store site (`gfx9{42,50}_attention_tiled_2d_emit`, the gfx950
+`_fastkv_regp_emit`, `gfx9{42,50}_attention_tiled_3d_emit`), so
+`check_byte_identity` gates them.
+
+What is still Python-only is *asking* for LSE: the request side.
+
+| What's missing | Where |
+|---|---|
+| `emit_lse` on the unified problem, the `_reject_lse` support gate, and the gfx942 4-warp cohort exclusion (`library/kernels/common/attention_unified.py`: `_gfx942_4warp_eligible` is false under LSE, so the D256 bf16 and D128 sliding-window cohorts take the default 2D builder) | `rocke_unified_attn_problem_t`; the C selectors have no support gates yet, and `d256_gfx942_fast` (`attention_unified_selectors.cpp`) has no LSE clause. No C selector sets `emit_lse`, so a C-selected spec is always LSE-off and C output is unaffected |
+
+Out of scope here: the gfx950 tiled 2D C twin has no additive-bias params at
+all (the Python builder's `use_additive_bias` has no field on the C spec), so
+additive bias + LSE is built by Python only. That belongs to the additive-bias
+gap (5).
+
+**Why deferred:** the C entry points take selector output, and no C caller
+requests LSE today; the Python host and dispatcher are the only request path.
+
+**What closes it:** an `emit_lse` field on `rocke_unified_attn_problem_t`, the
+support-gate refusals mirrored into the C selectors, `!emit_lse` mirrored into
+`d256_gfx942_fast` (without it the C selector would keep the 4-warp cohort's
+tile size for an LSE request while Python picks the default builder's spec),
+and selector parity cases with LSE on.
+
+**Sign-off:** avirgoel (owner), 2026-10-20 (reduce, Python-only); 2026-10-28
+(reduce and tiled 2D kernels mirrored in C; request side remains).
+
+---
+
 ## Structural debt (not per-family gaps)
 
 These are codebase-level risks worth tracking independently of any single

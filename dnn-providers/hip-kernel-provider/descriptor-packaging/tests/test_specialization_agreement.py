@@ -31,6 +31,10 @@ from hkp_pack.desk_check import compiled_agreement, load_kernels
 from hkp_pack.kpack_resolver import load_kpack
 from pack_helpers import GENERIC_TARGETS, GENERIC_TARGETS_JSON, write_shipped
 
+# quick: no hipcc/comgr (the marker's definition); TestRealArchiveReaders needs only
+# rocm_kpack, as other quick files do.
+pytestmark = pytest.mark.quick
+
 ARCH = "gfx942"
 PAYLOAD = b"\x7fELF-not-really-a-code-object"
 PAYLOAD_SHA = hashlib.sha256(PAYLOAD).hexdigest()

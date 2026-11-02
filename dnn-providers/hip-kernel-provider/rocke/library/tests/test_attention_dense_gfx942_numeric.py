@@ -90,6 +90,9 @@ _SWA_COHORT = [
     ("bf16", 64, 16, 4, True, 128, None),
     ("bf16", 128, 16, 4, False, 128, 1.0),
     ("bf16", 64, 16, 4, True, 128, 1.0),
+    # W well past block_m: non-empty mask-free middle phase of the band loop.
+    ("bf16", 128, 16, 4, False, 512, None),
+    ("fp16", 128, 16, 4, True, 512, None),
 ]
 
 # (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal): full-sink
@@ -134,6 +137,7 @@ def _spec(
     sliding_window=0,
     use_sinks=False,
     persist_decode="auto",
+    bottom_right=False,
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
     candidate (``gfx942_dense`` via ``dispatch.attention``) rather than hand-rolled.
@@ -160,6 +164,11 @@ def _spec(
     shipped path folds in. ``persist_decode`` stays "auto" unless a test pins one
     order to hold it fixed across shapes "auto" would resolve differently; a pinned
     order is set on the spec, since the knob refuses one that restates "auto".
+
+    Pinning the persistent grid also pins ``kv_segments=1``: the KV-segment split
+    runs on the default grid only, and dispatch picks one (dropping persistent) for
+    short bottom-right chunks, so the persistent pin alone would ask for a
+    combination dispatch never produces.
     """
     # Imported lazily, mirroring the golden sibling: keeps module import (and hence
     # CPU collection of this gpu-marked file) independent of the dispatch package.
@@ -175,13 +184,13 @@ def _spec(
             hdim_q=d,
             hdim_v=d,
             arch="gfx942",
-            mask_type=1 if causal else 0,
+            mask_type=(2 if bottom_right else 1) if causal else 0,
             dtype=dtype,
             sliding_window=sliding_window,
             use_sinks=use_sinks,
         ),
         "gfx942_dense",
-        {"persistent": bool(persistent)},
+        {"persistent": True, "kv_segments": 1} if persistent else {"persistent": False},
     ).kernel_spec
     if persist_decode == "auto":
         return spec
@@ -321,6 +330,172 @@ def test_dense_fp16_d128_large_equal_scores(persistent):
         f"fp16 D128 equal scores scale=16 "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e}"
     )
+
+
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, causal_diag_split,
+# seqlen_q, seqlen_kv): bottom-right causal, seqlen_q < seqlen_kv (chunked prefill).
+# The diagonal offset seqlen_kv - seqlen_q is a runtime value: block-aligned (512,
+# 3584) and not (64, 576), both grids, with and without the unmasked-body split.
+_BOTTOM_RIGHT_COHORT = [
+    ("bf16", 128, 16, 4, False, False, 512, 1024),
+    ("bf16", 128, 16, 4, False, True, 512, 1088),
+    ("bf16", 128, 16, 4, True, False, 512, 576),
+    ("bf16", 128, 16, 4, True, True, 256, 3840),
+    ("fp16", 128, 16, 4, False, True, 512, 1024),
+    ("fp16", 128, 16, 4, True, True, 512, 1088),
+    ("bf16", 64, 16, 4, False, True, 512, 576),
+    ("bf16", 64, 16, 4, True, False, 256, 1024),
+]
+
+
+def _bottom_right_keep(sq, sk, device):
+    """Boolean keep-mask: query q sees key k iff k <= q + (sk - sq)."""
+    import torch
+
+    qi = torch.arange(sq, device=device).view(sq, 1)
+    ki = torch.arange(sk, device=device).view(1, sk)
+    return ki <= qi + (sk - sq)
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,diag_split,sq,sk", _BOTTOM_RIGHT_COHORT
+)
+def test_dense_bottom_right_numeric_vs_fp32_sdpa(
+    dtype, d, hq, hkv, persistent, diag_split, sq, sk
+):
+    import torch
+
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    B = 1
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+    q = torch.randn(B, sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
+    out = torch.empty(B, sq, hq, d, device="cuda", dtype=tdt)
+
+    spec = _spec(dtype, d, hq, hkv, persistent, sq=sq, sk=sk, bottom_right=True)
+    assert spec.causal_bottom_right
+    spec = dataclasses.replace(spec, causal_diag_split=diag_split)
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+
+    keep = _bottom_right_keep(sq, sk, q.device)
+    ref = _sdpa_reference(q, k, v, scale, attn_mask=keep)
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, (
+        f"{dtype} D{d} GQA{hq}/{hkv} bottom-right sq={sq} sk={sk} "
+        f"{'persist' if persistent else 'default'} split={diag_split}: "
+        f"max_abs={max_abs:.3e} >= {tol}"
+    )
+
+
+# (dtype, head_size, num_query_heads, num_kv_heads, mask, causal_diag_split,
+# kv_segments, seqlen_q, seqlen_kv): the KV-segment split on the default grid. mask
+# is "br" (bottom-right causal), "tl" (top-left causal, where early query blocks
+# leave trailing segments empty) or "full".
+_KV_SEGMENT_COHORT = [
+    ("bf16", 128, 16, 4, "br", True, 4, 512, 4096),
+    ("bf16", 128, 16, 4, "br", False, 3, 256, 1088),
+    ("fp16", 128, 16, 4, "br", True, 8, 512, 2048),
+    ("bf16", 64, 16, 4, "br", True, 4, 512, 2048),
+    ("bf16", 128, 16, 4, "tl", True, 4, 1024, 1024),
+    ("fp16", 128, 16, 16, "full", False, 2, 1024, 1024),
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,mask,diag_split,segments,sq,sk", _KV_SEGMENT_COHORT
+)
+def test_dense_kv_segments_numeric_vs_fp32_sdpa(
+    dtype, d, hq, hkv, mask, diag_split, segments, sq, sk
+):
+    import torch
+
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+    q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+    out = torch.empty(1, sq, hq, d, device="cuda", dtype=tdt)
+
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        False,
+        causal=mask != "full",
+        sq=sq,
+        sk=sk,
+        bottom_right=mask == "br",
+    )
+    spec = dataclasses.replace(
+        spec,
+        causal_diag_split=diag_split,
+        kv_segments=segments,
+        block_m=128,
+    )
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+
+    if mask == "br":
+        ref = _sdpa_reference(
+            q, k, v, scale, attn_mask=_bottom_right_keep(sq, sk, q.device)
+        )
+    else:
+        ref = _sdpa_reference(q, k, v, scale, causal=mask == "tl")
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, (
+        f"{dtype} D{d} {mask} split={diag_split} segments={segments} sq={sq} "
+        f"sk={sk}: max_abs={max_abs:.3e} >= {tol}"
+    )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+def test_one_bottom_right_binary_serves_every_chunk_length():
+    """The diagonal offset is read from the shape params, so one compiled binary
+    must serve chunks with different seqlen_kv - seqlen_q, each correctly."""
+    import torch
+
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+    dtype, d, hq, hkv = "bf16", 128, 16, 4
+    tol = 4e-2
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    shapes = ((512, 1024), (256, 4096), (512, 576))
+    specs = [
+        _as_gfx942_spec(_spec(dtype, d, hq, hkv, False, sq=a, sk=c, bottom_right=True))
+        for a, c in shapes
+    ]
+    keys = {attention_dense_cache_key(s, arch="gfx942") for s in specs}
+    assert len(keys) == 1, f"chunk lengths {shapes} did not share a cache key"
+    launchers = []
+    for (sq, sk), spec in zip(shapes, specs):
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+        out = torch.empty(1, sq, hq, d, device="cuda", dtype=tdt)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        launchers.append(_launcher_for(spec))
+        ref = _sdpa_reference(
+            q, k, v, scale, attn_mask=_bottom_right_keep(sq, sk, q.device)
+        )
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, f"sq={sq} sk={sk}: max_abs={max_abs:.3e} >= {tol}"
+    assert launchers[0] is not None
+    assert all(x is launchers[0] for x in launchers)
 
 
 def _launcher_for(spec):
@@ -881,23 +1056,57 @@ _PERSIST_CONFIGS = (
     (2, 1024, 15, 5),
 )
 
-# (dtype, persist_decode, interleave, sliding_window). Both decode orders pinned
-# explicitly: "auto" resolves per shape, which would split the set across two keys.
-# interleave only changes the qb_major body, so it rides that order alone.
+# hq_minor_swz needs Hq divisible by the XCD count and an even NQB under causal
+# masking, so it gets its own set, straddling NP the same way:
+#   W=80 < NP; W=320 and W=608 (pair fold, even NQB); MHA W=384; W=1536, W % NP = 16
+_SWZ_CONFIGS = (
+    (1, 512, 40, 8),
+    (2, 1024, 40, 8),
+    (2, 1536, 32, 32),
+    (19, 512, 16, 4),
+    (3, 2048, 64, 8),
+)
+
+# (dtype, persist_decode, interleave, sliding_window, configs). Every decode order
+# pinned explicitly: "auto" resolves per shape, which would split the set across
+# keys. interleave only changes the qb_major body, so it rides that order alone. A
+# window of 1024 is at least as long as the keys for some configs and shorter for
+# others, so one binary balances causal work for some launches and not for others.
 _PERSIST_ONE_BINARY = [
-    pytest.param("fp16", "hkv_major", False, 0, id="hkv_major"),
-    pytest.param("fp16", "qb_major", False, 0, id="qb_major"),
-    pytest.param("fp16", "qb_major", True, 0, id="qb_major-interleave"),
-    pytest.param("bf16", "hkv_major", False, 128, id="hkv_major-swa128"),
-    pytest.param("bf16", "qb_major", False, 128, id="qb_major-swa128"),
+    pytest.param("fp16", "hkv_major", False, 0, _PERSIST_CONFIGS, id="hkv_major"),
+    pytest.param("fp16", "qb_major", False, 0, _PERSIST_CONFIGS, id="qb_major"),
+    pytest.param(
+        "fp16", "qb_major", True, 0, _PERSIST_CONFIGS, id="qb_major-interleave"
+    ),
+    pytest.param("fp16", "bt_hkv_minor", False, 0, _PERSIST_CONFIGS, id="bt_hkv_minor"),
+    pytest.param("fp16", "hq_minor_swz", False, 0, _SWZ_CONFIGS, id="hq_minor_swz"),
+    pytest.param(
+        "bf16", "hkv_major", False, 128, _PERSIST_CONFIGS, id="hkv_major-swa128"
+    ),
+    pytest.param(
+        "bf16", "qb_major", False, 128, _PERSIST_CONFIGS, id="qb_major-swa128"
+    ),
+    *(
+        pytest.param(
+            "bf16",
+            name,
+            False,
+            1024,
+            _SWZ_CONFIGS if name == "hq_minor_swz" else _PERSIST_CONFIGS,
+            id=f"{name}-swa1024",
+        )
+        for name in ("qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz")
+    ),
 ]
 
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("dtype,persist_decode,interleave,window", _PERSIST_ONE_BINARY)
+@pytest.mark.parametrize(
+    "dtype,persist_decode,interleave,window,configs", _PERSIST_ONE_BINARY
+)
 def test_one_persistent_binary_serves_every_shape_and_head_config(
-    dtype, persist_decode, interleave, window
+    dtype, persist_decode, interleave, window, configs
 ):
     """The persistent-grid twin of the one-binary tests above.
 
@@ -938,8 +1147,11 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
                 )
             ),
             interleave=interleave,
+            # One query tile for every config: the default picks a 128-row tile
+            # for under-filled shapes, which is a different binary.
+            block_m=256,
         )
-        for b, s, hq, hkv in _PERSIST_CONFIGS
+        for b, s, hq, hkv in configs
     ]
 
     # Preconditions: persistent, on the runtime path, the pinned order, one key --
@@ -956,13 +1168,13 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
     keys = [attention_dense_cache_key(s, arch="gfx942") for s in specs]
     assert (
         len(set(keys)) == 1
-    ), f"persistent configs {_PERSIST_CONFIGS} did not share a cache key"
+    ), f"persistent configs {configs} did not share a cache key"
 
     _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
     before = set(_DENSE_LAUNCHER_CACHE)
 
     launchers = []
-    for (B, S, hq, hkv), spec in zip(_PERSIST_CONFIGS, specs):
+    for (B, S, hq, hkv), spec in zip(configs, specs):
         torch.manual_seed(0)
         q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
         k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
@@ -999,7 +1211,7 @@ def test_one_persistent_binary_serves_every_shape_and_head_config(
         "longer keyed by attention_dense_cache_key and this test is blind"
     )
     assert all(lau is launchers[0] for lau in launchers), (
-        f"persistent configs {_PERSIST_CONFIGS} share a cache key but were served "
+        f"persistent configs {configs} share a cache key but were served "
         "by DIFFERENT launcher objects -- the persistent kernel recompiled per config"
     )
     assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (

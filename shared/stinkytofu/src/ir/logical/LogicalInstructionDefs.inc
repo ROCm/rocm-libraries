@@ -2291,6 +2291,16 @@
              false,
              "IF_MUBUFAtomic"},
 
+                                    {"BufferAtomicPkAddBF16",
+             "BufferAtomicPkAddBF16",
+             2,
+             true,
+             "Memory Arithmetic",
+             false,
+             false,
+             false,
+             "IF_MUBUFStore"},
+
                                     {"FlatLoadU8",
              "FlatLoadU8",
              1,
@@ -3063,6 +3073,16 @@
 
                                     {"SSetRegIMM32B32",
              "SSetRegIMM32B32",
+             1,
+             true,
+             "Scalar Control",
+             false,
+             false,
+             false,
+             "IF_HasSideEffect"},
+
+                                    {"SSendMsgRtnB32",
+             "SSendMsgRtnB32",
              1,
              true,
              "Scalar Control",

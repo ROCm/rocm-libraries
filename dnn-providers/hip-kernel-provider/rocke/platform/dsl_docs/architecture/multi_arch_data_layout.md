@@ -58,7 +58,7 @@ instances/                 HYBRID
                            (e.g. transpose-LDS attention, MX fp4 GEMM).
   gfx942/                  gfx942-specific algorithm variants.
   gfx1151/                 RDNA3.5 wave32/WMMA-specific algorithm variants
-                           (e.g. wmma_fmha_fwd adapter).
+                           (e.g. wmma_fmha_fwd_v2 prefill, wmma_fmha_decode).
   common/gemm_policy.py    per-family capability filtering (GemmPipelinePolicy,
                            AttentionPipelinePolicy) — arch-agnostic code that
                            READS ArchTarget facts. Policy modules live under

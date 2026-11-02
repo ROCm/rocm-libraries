@@ -13,6 +13,10 @@ from __future__ import annotations
 import unittest
 
 from rocke.run_manifest import register_manifest_runner, registered_manifest_kinds
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 # Every kind the pre-registry branch chain handled. Losing one of these is a
 # silent loss of the ability to run an already-emitted manifest, so the list is
@@ -81,26 +85,19 @@ class TestRunnerRegistry(unittest.TestCase):
         # `bind` ever became a precondition rather than one more registerable
         # adapter, those all break. Importing dispatch here is the first step
         # down that road, so fail on it directly.
-        import os
         import subprocess
-        import sys
 
         probe = (
             "import rocke.run_manifest, sys; "
             "leaked = sorted(m for m in sys.modules if m.startswith('rocke.dispatch')); "
             "print(leaked)"
         )
-        # A fresh interpreter inherits the environment but not the sys.path this
-        # suite arranges, so hand that down. Without it `import rocke` fails in a
-        # checkout and the probe reports an import error rather than a leak.
-        env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
         out = subprocess.run(
-            [sys.executable, "-c", probe],
+            rocke_python_command("-c", probe),
             capture_output=True,
             text=True,
             check=True,
-            env=env,
+            env=rocke_subprocess_env(),
         )
         self.assertEqual(
             out.stdout.strip(), "[]", "run_manifest must not pull in dispatch"

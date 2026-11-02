@@ -32,13 +32,12 @@ from rocke.portable_ir.drivers.hsaco_parity import (
 
 # One arch's worth of pinned expectations: two kernels that cannot compile, one
 # the lowerer declines on purpose, and 40 that do compile.
-BASE = {
-    "gfx942": {
-        "compared": 40,
-        "uncompilable": {"mfma_gemm": "Cannot select: intrinsic", "moe_fp8": "OOM"},
-        "refused": ["gfx1151_wmma_gemm"],
-    }
+_PINNED = {
+    "compared": 40,
+    "uncompilable": {"mfma_gemm": "Cannot select: intrinsic", "moe_fp8": "OOM"},
+    "refused": ["gfx1151_wmma_gemm"],
 }
+BASE = {"gfx942": _PINNED, "gfx950": _PINNED}
 AS_PINNED = {
     "mfma_gemm": "uncompilable",
     "moe_fp8": "uncompilable",
@@ -47,16 +46,18 @@ AS_PINNED = {
 
 
 class TestBaselineVerdict(unittest.TestCase):
+    ARCH = "gfx942"
+
     def test_the_pinned_state_passes(self):
         """The known-broken set, unchanged, is not a failure."""
-        self.assertEqual(check_baseline("gfx942", {"cmp": 40}, AS_PINNED, BASE), [])
+        self.assertEqual(check_baseline(self.ARCH, {"cmp": 40}, AS_PINNED, BASE), [])
 
     def test_a_newly_uncompilable_kernel_fails(self):
         """The regression this gate exists to catch. One cause should produce
         one message: the kernel is also missing from the comparison count, but
         naming it twice makes a CI log harder to read, not more informative."""
         seen = dict(AS_PINNED, batched_gemm="uncompilable")
-        fails = check_baseline("gfx942", {"cmp": 39}, seen, BASE)
+        fails = check_baseline(self.ARCH, {"cmp": 39}, seen, BASE)
         self.assertEqual(len(fails), 1)
         self.assertIn("batched_gemm", fails[0])
         self.assertIn("newly fail to compile", fails[0])
@@ -64,13 +65,13 @@ class TestBaselineVerdict(unittest.TestCase):
     def test_a_newly_declined_kernel_fails(self):
         """Coverage lost to the lowerer declining is still coverage lost."""
         seen = dict(AS_PINNED, batched_gemm="refused")
-        fails = check_baseline("gfx942", {"cmp": 39}, seen, BASE)
+        fails = check_baseline(self.ARCH, {"cmp": 39}, seen, BASE)
         self.assertTrue(any("newly declined" in f for f in fails))
 
     def test_shrinking_coverage_fails_even_with_no_new_breakage(self):
         """Catches a kernel disappearing from the sweep entirely, which leaves
         no name behind to compare and so is invisible to the set difference."""
-        fails = check_baseline("gfx942", {"cmp": 31}, AS_PINNED, BASE)
+        fails = check_baseline(self.ARCH, {"cmp": 31}, AS_PINNED, BASE)
         self.assertEqual(len(fails), 1)
         self.assertIn("coverage shrank", fails[0])
 
@@ -79,7 +80,7 @@ class TestBaselineVerdict(unittest.TestCase):
         is why the baseline pins names and not just numbers."""
         seen = {k: v for k, v in AS_PINNED.items() if k != "mfma_gemm"}
         seen["batched_gemm"] = "uncompilable"
-        fails = check_baseline("gfx942", {"cmp": 40}, seen, BASE)
+        fails = check_baseline(self.ARCH, {"cmp": 40}, seen, BASE)
         self.assertTrue(any("batched_gemm" in f for f in fails))
 
     def test_a_missing_arch_entry_fails_rather_than_silently_passing(self):
@@ -93,11 +94,15 @@ class TestBaselineVerdict(unittest.TestCase):
         """A kernel getting fixed must never block a merge; it should ask for a
         baseline update."""
         seen = {k: v for k, v in AS_PINNED.items() if k != "moe_fp8"}
-        self.assertEqual(check_baseline("gfx942", {"cmp": 41}, seen, BASE), [])
-        notes = baseline_improvements("gfx942", seen, BASE)
+        self.assertEqual(check_baseline(self.ARCH, {"cmp": 41}, seen, BASE), [])
+        notes = baseline_improvements(self.ARCH, seen, BASE)
         self.assertEqual(len(notes), 1)
         self.assertIn("moe_fp8", notes[0])
         self.assertIn("drop it from the baseline", notes[0])
+
+
+class TestBaselineVerdictGfx950(TestBaselineVerdict):
+    ARCH = "gfx950"
 
 
 class TestCrashReasons(unittest.TestCase):
