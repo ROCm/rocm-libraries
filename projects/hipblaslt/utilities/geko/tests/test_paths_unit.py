@@ -138,13 +138,16 @@ def test_locate_returns_none_without_a_checkout(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_locate_returns_none_when_anchor_has_no_checkout(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An anchor outside every hipBLASLt checkout does not invent a root.
 
+    The anchor sits on the filesystem root. Pytest ``tmp_path`` is not used:
+    tox sets ``--basetemp`` inside ``projects/hipblaslt``, and a parent walk
+    from there finds ``tensilelite/``.
+
     Args:
         monkeypatch: Pytest monkeypatch fixture.
-        tmp_path: Pytest temporary-directory fixture.
 
     Returns:
         None.
@@ -153,5 +156,6 @@ def test_locate_returns_none_when_anchor_has_no_checkout(
         AssertionError: If a parent directory is treated as a checkout.
     """
     monkeypatch.delenv(paths.HIPBLASLT_PATH_ENV_VAR, raising=False)
+    anchor = Path(Path.cwd().anchor) / "geko_outside_checkout" / "outside.py"
 
-    assert paths.locate_hipblaslt_root(anchor=tmp_path / "outside.py") is None
+    assert paths.locate_hipblaslt_root(anchor=anchor) is None
