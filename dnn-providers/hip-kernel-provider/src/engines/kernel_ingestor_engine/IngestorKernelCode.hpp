@@ -83,6 +83,15 @@ inline int launchDeviceOrdinal(hipStream_t stream)
 /// reading one archive would answer each other's lookups.
 compilation::KpackModuleCache& pointwiseKpackModuleCache();
 compilation::KpackModuleCache& convFwdKpackModuleCache();
+compilation::KpackModuleCache& flydslRmsNormKpackModuleCache();
+compilation::KpackModuleCache& flydslRmsNormBwdKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaRdnaKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaRdnaDecodeKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaAiwKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaDualwaveKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaDecodeKpackModuleCache();
+
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
 compilation::KpackModuleCache& gfx950ConvDgradAotKpackModuleCache();
 
@@ -751,7 +760,8 @@ inline IngestorKernelCode buildForSourceKind(
 
     // A multi-launch kernel has no `source`: the default one would compile nothing and read
     // as a missing file. The pack launches an entry through launchKernelDefinition().
-    if(!kernel.sources.empty())
+    const auto* single = hipdnn_plugin_sdk::ingestor::singleLaunchSource(kernel);
+    if(single == nullptr)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
@@ -759,8 +769,9 @@ inline IngestorKernelCode buildForSourceKind(
                 + " carries several launches ('sources'); pass one launch's definition from "
                   "launchKernelDefinition() to buildIngestorKernelCode");
     }
+    const auto& source = *single;
 
-    switch(kernel.source.kind)
+    switch(source.kind)
     {
     case KernelSourceKind::EMBEDDED_SOURCE:
     {
@@ -774,8 +785,8 @@ inline IngestorKernelCode buildForSourceKind(
                     + " has source kind 'embedded_source', but its pack supplies no "
                       "source-compilation inputs");
         }
-        auto program = compiler->compile(kernel.source.sourceFile, *options);
-        auto runnableKernel = program->getKernel(kernel.source.entryPoint);
+        auto program = compiler->compile(source.sourceFile, *options);
+        auto runnableKernel = program->getKernel(source.entryPoint);
         return IngestorKernelCode{std::move(program), std::move(runnableKernel)};
     }
     case KernelSourceKind::KPACK:
@@ -788,7 +799,7 @@ inline IngestorKernelCode buildForSourceKind(
         const std::filesystem::path origin
             = std::filesystem::weakly_canonical(kernel.originDirectory, ignored);
         const std::filesystem::path resolved
-            = std::filesystem::weakly_canonical(origin / kernel.source.library, ignored);
+            = std::filesystem::weakly_canonical(origin / source.library, ignored);
 
         const std::string label = hipdnn_plugin_sdk::ingestor::describeDescriptor(
             "kernel", kernel.name, kernel.kernelId);
@@ -818,7 +829,7 @@ inline IngestorKernelCode buildForSourceKind(
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                "kpack kernel source for " + label + ": library '" + kernel.source.library
+                "kpack kernel source for " + label + ": library '" + source.library
                     + "' resolves to '" + resolved.string()
                     + "', which is outside the descriptor tree '" + boundary.string() + "'");
         }
@@ -838,7 +849,7 @@ inline IngestorKernelCode buildForSourceKind(
         // time-of-check/time-of-use race: kpack_open is path-only, with no fd or handle
         // overload anywhere in the kpack C API.
         std::filesystem::path prefix;
-        for(const auto& component : origin / kernel.source.library)
+        for(const auto& component : origin / source.library)
         {
             prefix /= component;
             if(component == "." || component == "..")
@@ -863,7 +874,7 @@ inline IngestorKernelCode buildForSourceKind(
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                    "kpack kernel source for " + label + ": library '" + kernel.source.library
+                    "kpack kernel source for " + label + ": library '" + source.library
                         + "' reaches its archive through the link '" + prefix.string()
                         + "' inside the descriptor tree '" + boundary.string() + "'");
             }
@@ -871,22 +882,21 @@ inline IngestorKernelCode buildForSourceKind(
 
         // Ahead of the load: the descriptor and the pack already disagree, and opening an
         // archive to confirm it would only delay the same diagnostic.
-        requireSignatureMatch(
-            kernel.source.signature, expectedSignature, kernel.source.symbol, label);
+        requireSignatureMatch(source.signature, expectedSignature, source.symbol, label);
 
         auto program = kpackLoader.load(resolved,
-                                        kernel.source.tocKey,
+                                        source.tocKey,
                                         context.deviceProperties.gcnArchName,
                                         context.deviceId,
-                                        kernel.source.symbol,
-                                        kernel.source.sha256,
+                                        source.symbol,
+                                        source.sha256,
                                         label);
-        auto runnableKernel = program->getKernel(kernel.source.symbol);
+        auto runnableKernel = program->getKernel(source.symbol);
         return IngestorKernelCode{kpackLoader,
                                   KpackSource{resolved,
-                                              kernel.source.tocKey,
-                                              kernel.source.symbol,
-                                              kernel.source.sha256,
+                                              source.tocKey,
+                                              source.symbol,
+                                              source.sha256,
                                               label,
                                               std::string(hipdnn_plugin_sdk::stripArchFeatures(
                                                   context.deviceProperties.gcnArchName)),

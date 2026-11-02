@@ -440,12 +440,7 @@ private:
                 };
                 // A multi-launch kernel keeps no `source`: every launch entry answers for
                 // itself, and one this build cannot adapt costs the whole kernel.
-                if(kernel.sources.empty() ? !isAdaptable(kernel.source)
-                                          : !std::all_of(kernel.sources.begin(),
-                                                         kernel.sources.end(),
-                                                         [&](const auto& launch) {
-                                                             return isAdaptable(launch.second);
-                                                         }))
+                if(!allLaunchSources(kernel, isAdaptable))
                 {
                     // Dropped, not thrown: an unadaptable kernel costs only itself, so its
                     // pack keeps serving whichever siblings this build can dispatch.
@@ -461,11 +456,7 @@ private:
                 // exactly the launches it declares, so a kernel carrying any other set --
                 // fewer, more, or the same number under other names -- is dropped here,
                 // before applicability, rather than failing at plan build.
-                std::set<std::string> kernelLaunches;
-                for(const auto& launch : kernel.sources)
-                {
-                    kernelLaunches.insert(launch.first);
-                }
+                const std::set<std::string> kernelLaunches = launchNamesOf(kernel.sources);
                 if(kernelLaunches != handlerLaunches)
                 {
                     const auto spell = [](const std::set<std::string>& names) {
@@ -844,8 +835,6 @@ public:
         return _heuristic.calibratedModelId(metric, arch);
     }
 
-
-
     /// The kernels that apply to the graph and device @p context names, unordered, as a
     /// shared snapshot that points into the shared state rather than copying it. The
     /// first call for a (graph, device) matches every kernel once; later calls return
@@ -896,10 +885,10 @@ public:
     /// nullopt on a miss.
     std::optional<bool> cachedVerdict(const MatchContext& context, const CatalogKey& key) const
     {
-        auto verdict = _catalogCache.visit(
-            key, [](const std::shared_ptr<const CatalogView>& catalog) {
-                return !catalog->entries.empty();
-            });
+        auto verdict
+            = _catalogCache.visit(key, [](const std::shared_ptr<const CatalogView>& catalog) {
+                  return !catalog->entries.empty();
+              });
         if(verdict.has_value())
         {
             HIPDNN_PLUGIN_LOG_TRACE("ingestor: catalog cache hit for device " << context.deviceId);
@@ -935,7 +924,8 @@ public:
                        const CatalogKey& key,
                        CatalogGraphStage stage) const
     {
-        auto catalog = std::make_shared<const CatalogView>(matchVariants(context, std::move(stage)));
+        auto catalog
+            = std::make_shared<const CatalogView>(matchVariants(context, std::move(stage)));
         const bool applicable = !catalog->entries.empty();
         // putIfAbsent, as in catalogFor: a racing writer may already hold a sorted one.
         _catalogCache.putIfAbsent(key, std::move(catalog));
@@ -948,9 +938,6 @@ public:
     {
         return !catalogFor(context, std::nullopt)->entries.empty();
     }
-
-
-
 
     /// catalogView(), best first: a benchmarked record covering the whole catalog
     /// supplies a measured order and `rank()` is never called; otherwise the heuristic
@@ -1005,8 +992,7 @@ public:
 
     /// measuredCatalogView() for a caller that already built @p key from @p context.
     std::shared_ptr<const CatalogView>
-        measuredCatalogView(const MatchContext& context,
-                            const std::optional<CatalogKey>& key) const
+        measuredCatalogView(const MatchContext& context, const std::optional<CatalogKey>& key) const
     {
         auto view = catalogFor(context, key);
         // A heuristic order is provisional (a sweep can postdate it), so look up a record

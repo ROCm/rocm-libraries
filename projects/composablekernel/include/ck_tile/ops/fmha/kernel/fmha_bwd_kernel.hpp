@@ -1608,6 +1608,7 @@ struct FmhaBwdDQDKDVKernel
                         if(i_tile_n_ == 0) // reset dq_acc writing idx when starting a new head
                             i_split = 0;
                         run_(kargs, dim3(i_tile_n, i_nhead, i_batch), i_split, n_splits);
+                        ck_tile::s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
                     } while(++job_id < end_job_id);
                 }
                 else
@@ -2210,7 +2211,7 @@ struct FmhaBwdDQDKDVKernel
                                                              scale_rp_undrop,
                                                              dropout);
 
-#if defined(__gfx11__) || defined(__gfx12__)
+#if defined(__gfx11__) || defined(__gfx12__) || defined(__gfx117__)
             // Workaround for a compiler bug (SWDEV-559729): v_wmma instructions can be incorrectly
             // placed in divergent branches used to store padded tensors (when some lanes are
             // inactive due to padding). Inline asm with dummy dependencies on VGPRs of the tensors

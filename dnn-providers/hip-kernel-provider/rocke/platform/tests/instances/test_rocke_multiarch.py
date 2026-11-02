@@ -762,6 +762,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         from rocke.core.lower_llvm import (
             LLVM_FLAVOR_LLVM23,
             _datalayout_for_flavor,
+            _emission_profile,
             _flavor_for_llvm,
         )
         from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
@@ -788,13 +789,16 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             self.skipTest("cannot determine reference hipcc's LLVM version")
         detected_flavor = _flavor_for_llvm(int(match[1]))
         rocke_dl = _datalayout_for_flavor(detected_flavor)
+        uses_llvm23_profile = _emission_profile(detected_flavor) is _emission_profile(
+            LLVM_FLAVOR_LLVM23
+        )
         # The address spaces LLVM gained in 5bf967cb132b. Bound unconditionally:
         # the per-arch loop below reads it on the llvm23 path too.
         expected_p10_p15 = (
             "-p10:32:32-p11:32:32-p12:32:32-p13:32:32-p14:32:32-p15:32:32"
         )
 
-        if detected_flavor == LLVM_FLAVOR_LLVM23:
+        if uses_llvm23_profile:
             # rocKE's llvm23 constant is the llvm22 one with TWO independent
             # additions -- the ELF symbol-mangling spec `m:e` after the leading
             # endianness field, and address spaces p10-p15 (upstream
@@ -837,7 +841,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
                     self.skipTest(f"hipcc cannot target {arch} on this toolchain: {e}")
                 toolchain_dl = self._extract_datalayout_from_ir(ir)
                 if (
-                    detected_flavor == LLVM_FLAVOR_LLVM23
+                    uses_llvm23_profile
                     and toolchain_dl != rocke_dl
                     and toolchain_dl.replace("-i64:64", expected_p10_p15 + "-i64:64", 1)
                     == rocke_dl

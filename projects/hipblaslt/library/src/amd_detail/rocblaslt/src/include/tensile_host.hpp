@@ -354,6 +354,9 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
                                int*                               indexes,
                                size_t                             count);
 
+// Memoised adaptive re-selections held by a TensileDataGemm.
+size_t adaptiveReselectionCount(std::shared_ptr<void> gemmData);
+
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 
 // Push the GemmPreference-supplied StreamK tile scheduling mode onto every
@@ -369,4 +372,4 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 // desc- or handle-level enable.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value);
+                                int32_t                value);
