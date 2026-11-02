@@ -511,6 +511,9 @@ defaultInternalSupportParams = {
 # same parameter for all solution b/c depends only on compiler
 defaultBenchmarkCommonParameters = [
     {"InnerUnroll": [1]},
+    # Arrange elements in LDS so N elements consecutive in U-dim are adjacent.
+    # 1 (the default) keeps the classic layout; 4 selects the int8 dot4 MAC.
+    {"LocalDotLayout": [1]},
     {"KernelLanguage": ["Assembly"]},
     {"LdsPadA": [-1]},
     {"LdsPadMXSA": [ -1 ] },
