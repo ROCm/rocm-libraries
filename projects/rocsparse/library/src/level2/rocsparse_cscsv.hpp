@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_csc_to_csr_descr.hpp"
+#include "rocsparse_cscsv_info.hpp"
 #include "rocsparse_csrsv.hpp"
 
 namespace rocsparse
@@ -171,4 +172,39 @@ namespace rocsparse
                                                          force_conj));
         return rocsparse_status_success;
     }
+}
+
+namespace rocsparse
+{
+    // CSC triangular solve without transpose, on the columns of the matrix.
+    size_t cscsv_column_analysis_buffer_size();
+
+    size_t cscsv_column_solve_buffer_size(rocsparse_const_spmat_descr A, int64_t batch_count);
+
+    rocsparse_status cscsv_column_analysis(rocsparse_handle            handle,
+                                           rocsparse_const_spmat_descr A,
+                                           rocsparse_cscsv_info        info,
+                                           void*                       temp_buffer);
+
+    rocsparse_status cscsv_column_solve(rocsparse_handle            handle,
+                                        rocsparse_datatype          alpha_datatype,
+                                        const void*                 alpha,
+                                        rocsparse_const_spmat_descr A,
+                                        rocsparse_const_dnvec_descr x,
+                                        rocsparse_dnvec_descr       y,
+                                        rocsparse_cscsv_info        info,
+                                        void*                       temp_buffer);
+
+    rocsparse_status cscsv_column_diagonal_solve(rocsparse_handle            handle,
+                                                 rocsparse_diagonal_modifier modifier,
+                                                 const void*                 alpha,
+                                                 rocsparse_const_spmat_descr A,
+                                                 rocsparse_const_dnvec_descr x,
+                                                 rocsparse_dnvec_descr       y,
+                                                 rocsparse_cscsv_info        info);
+
+    rocsparse_status cscsv_column_zero_pivot(rocsparse_handle     handle,
+                                             rocsparse_cscsv_info info,
+                                             rocsparse_indextype  indextype,
+                                             void*                position);
 }
