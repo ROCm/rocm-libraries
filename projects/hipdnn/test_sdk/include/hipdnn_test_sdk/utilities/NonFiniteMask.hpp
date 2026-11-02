@@ -137,7 +137,7 @@ void requireSentinelFits([[maybe_unused]] const NonFiniteMask& nonFiniteMask)
 ///
 /// Exactly float, double, half and bfloat16 (both rounding modes) have one. Every other type
 /// returns std::nullopt: the fp8 formats (e4m3 has the single NaN encoding 0x7F/0xFF; e5m2 has
-/// payload encodings, but no validator factory grades fp8, so none is offered; see NonFiniteMask
+/// payload encodings, but none is offered for fp8; see NonFiniteMask
 /// for what a caller grading such a type directly does), the FNUZ fp8 formats (single NaN 0x80),
 /// fp8 e8m0 (single NaN 0xFF), fp6, fp4 and the integer types.
 ///

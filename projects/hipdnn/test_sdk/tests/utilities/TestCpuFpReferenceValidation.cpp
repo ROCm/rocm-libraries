@@ -1384,9 +1384,9 @@ TEST(TestPayloadNanSentinel, DataTypeOverloadMatchesTypedHelper)
     EXPECT_EQ(payloadNanSentinelBits(DataType::BFLOAT16), payloadNanSentinelBits<bfloat16>());
 }
 
-// Bug caught: reporting a payload sentinel for types that have none or that no validator
-// factory grades (every fp8 format): a caller filling with it would get an output no validator
-// can check, and a hand-written list elsewhere could drift from this one.
+// Bug caught: reporting a payload sentinel for types that have none or for which none is offered
+// (every fp8 format): a caller filling with it would get an output the validator cannot tell
+// from a computed NaN, and a hand-written list elsewhere could drift from this one.
 TEST(TestPayloadNanSentinel, TypesWithoutPayloadNaNReportNone)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -1472,8 +1472,8 @@ TYPED_TEST(CpuFpReferenceValidationRagged, MaskFailsWhenEveryReferenceValueIsNaN
 
 /* ======== Eight-bit float tests ======== */
 
-// fp8 e5m2 has three NaN encodings (0x7D, 0x7E, 0x7F). payloadNanSentinelBits offers none (no
-// validator factory grades fp8), but a caller grading it directly can pass 0x7D explicitly.
+// fp8 e5m2 has three NaN encodings (0x7D, 0x7E, 0x7F). payloadNanSentinelBits offers none for
+// fp8, but a caller grading it directly can pass 0x7D explicitly.
 //
 // Bug caught: the sentinel check or the NaN and Inf matching not working for a one-byte type,
 // or the sentinel being compared against the wrong bits.
@@ -1558,3 +1558,25 @@ TEST(TestCpuFpReferenceValidationNonFiniteMaskFp8E4m3, FiniteSentinelFlagsOnlyIt
 }
 
 /* ================================================= */
+// fp8 outputs (cuDNN sdpa_fp8 O) get a validator from the data-type factory, which compares
+// decoded values: one fp8 step apart fails a tight tolerance and passes a loose one.
+TEST(TestCpuFpReferenceValidationFp8, FactoryComparesDecodedValues)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto check = [](DataType dataType, auto tag) {
+        using Fp8 = decltype(tag);
+        Tensor<Fp8> a({4});
+        Tensor<Fp8> b({4});
+        for(int64_t i = 0; i < 4; ++i)
+        {
+            a.setHostValue(Fp8(1.0f + static_cast<float>(i)), i);
+            b.setHostValue(Fp8(1.0f + static_cast<float>(i)), i);
+        }
+        EXPECT_TRUE(createAllCloseValidator(dataType, 1e-3f, 1e-3f)->allClose(a, b));
+        b.setHostValue(Fp8(4.5f), 3); // the next E4M3 value after 4
+        EXPECT_FALSE(createAllCloseValidator(dataType, 1e-3f, 1e-3f)->allClose(a, b));
+        EXPECT_TRUE(createAllCloseValidator(dataType, 0.0f, 0.13f)->allClose(a, b));
+    };
+    check(DataType::FP8_E4M3, fp8_e4m3{});
+    check(DataType::FP8_E4M3_FNUZ, fp8_e4m3_fnuz{});
+}

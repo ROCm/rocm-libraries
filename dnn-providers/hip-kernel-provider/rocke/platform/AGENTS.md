@@ -145,6 +145,17 @@ python tests/run_all.py --build-root /tmp/rocke
 python -m pytest tests/instances/test_rocke_multiarch.py   # a fast CPU-only suite
 ```
 
+`tests/conftest.py` makes source imports work only in the pytest process; its
+`sys.path` change is not inherited by child interpreters. A Python subprocess
+launched by a test must use
+`rocke.tests.subprocess_launcher.rocke_python_command()` together with
+`rocke_subprocess_env()` so it resolves the same source or relocated package as
+its parent, ahead of its script directory and working directory. Do not rely on
+an editable install or ambient `PYTHONPATH`, and do not derive a source-only
+`platform/python` path in a test that also runs from an installed artifact.
+Differential/parity tools that intentionally execute a separately selected
+reference tree keep that explicit tree-selection contract instead.
+
 C++ test registration is deliberately distributed to reduce PR contention.
 Keep `tests/CMakeLists.txt` as a stable orchestrator: add or change registrations
 in `tests/cmake/CoreTests.cmake`, `PortableIrTests.cmake`, or

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/RngDumpHandoff.hpp"
 
 #include <algorithm>
 #include <initializer_list>
@@ -623,7 +624,7 @@ VerificationOutcome
         const bool lastResort = i + 1 == chain.candidates.size();
 
         OutputTensors refOutputs;
-        const RefRunResult result = runReferenceCapturingOutputs(*ref, refOutputs);
+        const RefRunResult result = runReferenceCapturingOutputs(*ref, engineOutputs, refOutputs);
         const std::string label = refLabel(ref->type);
         switch(result.status)
         {
@@ -1033,8 +1034,8 @@ IntegrationBundleVerificationHarness::EngineRunResult
 }
 
 IntegrationBundleVerificationHarness::RefRunResult
-    IntegrationBundleVerificationHarness::runReferenceCapturingOutputs(const ResolvedReference& ref,
-                                                                       OutputTensors& refOutputs)
+    IntegrationBundleVerificationHarness::runReferenceCapturingOutputs(
+        const ResolvedReference& ref, const OutputTensors& engineOutputs, OutputTensors& refOutputs)
 {
     // Only an executor that asks for device pointers gets them. Handing host memory
     // to an executor that wants device memory — or the reverse — is a silent crash,
@@ -1048,6 +1049,11 @@ IntegrationBundleVerificationHarness::RefRunResult
         IReferenceGraphExecutor& executor = *ref.executor;
         useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
         refOutputs = allocateSentinelOutputs(useDevice);
+        // Philox dropout: the reference runs on the engine's dumped keep mask (SEM-015).
+        if(const auto dump = bundle::findSdpaRngDump(_bundle->graphWrapper()); dump.has_value())
+        {
+            bundle::copyRngDump(*engineOutputs.at(dump->uid), *refOutputs.at(dump->uid));
+        }
         auto variantPack = buildVariantPack(refOutputs, useDevice);
         executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }
@@ -1138,9 +1144,21 @@ VerificationOutcome
               return matchNonFinite ? withNonFiniteMask(resolved, dataType) : resolved;
           };
 
+    // A Philox rng_dump is the oracle's input, not a result: sanity-check it, do not compare it.
+    const auto dump = bundle::findSdpaRngDump(wrapper);
+    if(dump.has_value())
+    {
+        const auto problem
+            = bundle::checkRngDump(*engineOutputs.at(dump->uid), dump->dropoutProbability);
+        if(!problem.empty())
+        {
+            ADD_FAILURE() << "Bundle: " << _bundlePath.string() << ": " << problem;
+            return comparisonOutcome(false, verifier);
+        }
+    }
     const auto mismatches = bundle::compareOutputs(
         wrapper,
-        _bundle->outputTensorUids,
+        bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
         engineOutputs,
         expectedFor,
         toleranceFor,
