@@ -14,6 +14,12 @@
 namespace asm_sdpa_engine
 {
 
+struct SdpaFwdGroupModeParams
+{
+    int64_t qoRaggedOffsetUid;
+    int64_t kvRaggedOffsetUid;
+};
+
 /**
  * @brief Parameters for SDPA forward kernel execution.
  *
@@ -27,7 +33,8 @@ struct SdpaFwdParams
     int64_t kUid;
     int64_t vUid;
     int64_t oUid;
-    int64_t lseUid = -1; // LSE output, -1 = disabled
+    std::optional<int64_t> lseUid;
+    std::optional<SdpaFwdGroupModeParams> group;
 
     /// FP8 Q/K/V descale tensor UIDs. The three are always set together or all absent
     /// (the non-fp8 path), so they are modeled as one optional struct rather than three
