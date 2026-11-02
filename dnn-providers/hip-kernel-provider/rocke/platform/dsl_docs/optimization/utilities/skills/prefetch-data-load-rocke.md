@@ -214,8 +214,10 @@ other way out: async DMA is synchronised only by the explicit marks.
 `async_buffer_load_lds_addr` takes the buffer cache-policy bits (`coherency=`). Name
 them with `cache_policy_from_name` (`"all"`, `"global"`, `"stream"`, `"nt"`; the bits
 per arch are in [`ir_model.md`](../../../ir_lowering/ir_model.md)). Use `"stream"`
-(the NT bit only; `"nt"` also sets SC0) for data that is read exactly once, such as
-the K/V of single-token decode, so it does not evict lines something else will reuse.
+(the NT bit only; `"nt"` also sets SC0) for data that is read exactly once per call and
+is larger than the last-level cache, such as the K/V of a large single-token decode
+(`_kv_cache_policy_3d` streams only above 256 MiB; smaller K/V keeps `"all"` so the next
+call can hit in it), so it does not evict lines something else will reuse.
 Judge it on data that is
 not cache-resident between launches: replaying the same small input keeps it warm for
 the baseline and makes the hint look like a regression. See runbook

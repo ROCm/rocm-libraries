@@ -129,8 +129,9 @@ CUs are defined in [Terms](#terms).
 | Default | gfx950 | gfx942 |
 |---|---|---|
 | Decode grid, `use_decode_grid` | on, whatever the K/V dtype, sliding window or `target_ctas` | same |
-| K/V cache policy, `kv_cache_policy` | `"stream"`; fp8 K/V keeps `"all"` | same |
+| K/V cache policy, `kv_cache_policy` | `"stream"` when the call reads more than 256 MiB of K/V (the size of the last-level cache), else `"all"`; fp8 K/V keeps `"all"` | same |
 | Split rule, `num_segments` | `block_size` 16, no sliding window, no `target_ctas`; head size 128, or 256 when $w \cdot 32 > \text{CUs}$ | the same, with head size 64 or 128, and either $w \ge \text{CUs}/16$ or fewer than 8K KV tokens |
+| Segments at head size 256 outside the rule (decode, `block_size` 16, no sliding window, no `target_ctas`) | where $w \cdot 32 \le \text{CUs}$: the previous count, limited to two pages per segment, $\max(1, \min(\text{previous count}, \lfloor \text{KV tokens}/32 \rfloor))$ | $\max(2, \min(\lfloor 2\,\text{CUs}/w \rfloor, 128, \lfloor \text{KV tokens}/32 \rfloor))$ |
 | KV tile, `tile_size_override` | one page; 64 tokens in the rule's scope when $w \cdot 32 \le \text{CUs}$ | one page; half a page at head size 128 and above with `block_size` 32 and above (any 3D problem) |
 | K/V feed (gfx942: `use_wide_kv_load`) | async copies | wide feed up to head size 128; async copies above 128 (any 3D problem), for strided K/V, and with `HIPDNN_GFX942_3D_WKV=0` |
 | K/V LDS swizzle, `use_kv_lds_swizzle` | on with the 64-token tile, paged K/V only | on with the wide feed at head size 64 and 128; at 256 with page-sized tiles (`block_size` 16), always together with the page-id window |
@@ -160,7 +161,7 @@ Outcomes by lever (the conditions are in the table above):
 | Lever | Arch | Outcome |
 |---|---|---|
 | Decode grid, `use_decode_grid` | both | Kept. Large gains at 16 query heads per KV head, neutral elsewhere. |
-| Streaming K/V, `kv_cache_policy="stream"` | both | Kept. gfx950: faster on batched decode, neutral on single-sequence decode. gfx942: neutral to slightly faster. Both measured with K/V that is not cache-resident between calls (§4). |
+| Streaming K/V, `kv_cache_policy="stream"` | both | Kept. gfx950: faster on batched decode, neutral on single-sequence decode. gfx942: neutral to slightly faster. Both measured with K/V that is not cache-resident between calls (§4). These outcomes are for the series' policy, which did not depend on the K/V size, and this study has no measurement of the 256 MiB limit; [#14367](https://github.com/ROCm/rocm-libraries/pull/14367) later limited the default to calls that read more than 256 MiB of K/V (table above), so K/V that fits the last-level cache keeps `"all"` and the next decode step can hit in it. |
 | K/V LDS swizzle, `use_kv_lds_swizzle` | both | gfx950: conditional. Neutral at page-sized tiles, faster at multi-page tiles, most on single-sequence and head-size-256 decode; that A/B set the multi-page tiles by explicit spec, since default dispatch then selected none, and default dispatch now gives them only to head size 128 (table above). Strided K/V: slower in the segment-by-knob sweeps (the best arm with the swizzle was behind the best arm overall, clearly so on the worst shape), so default dispatch leaves it off; there is no gfx942 strided measurement. gfx942: kept for all-decode problems (conditions in the table above). Head size 128: faster alone, and faster still with the page-id window. Head size 64: no separate outcome recorded. Head size 256 (async copies): alone it is slightly faster under LLVM 22 but clearly slower under LLVM 23; the window alone is neutral under LLVM 22 and slightly faster under LLVM 23; the pair is slightly faster under LLVM 22 and faster under LLVM 23, which is why the two ship together. |
 | Wave page-id window, `use_wave_page_id_load` | both | Kept. gfx950: only the pair with the retune to about 4 workgroups per CU (below) paid. The window alone, at the then-current about 8 workgroups per CU, was slightly slower on batched decode, and halving the segments without the window was slower too; the pair was faster on batched decode and unchanged on single-sequence decode and outside the rule's scope. gfx942, head size 128: alone neutral on batched decode and faster on a single-sequence row; with the swizzle faster than the swizzle alone. Head size 64: no separate outcome recorded; head size 256: see the swizzle row. |
 | Multi-page KV tiles | gfx950 | Conditional, under revision. 64-token tiles with 64 segments and the swizzle off: faster than the previous kernel on single-sequence decode (the single-sequence tune, below). The swizzle adds a little more at 64-token tiles and is neutral at 16-token tiles. The tile was not separated from the 64 segments (§7). Overlaps the open decoupled-KV-pages work (§7). |
@@ -183,10 +184,11 @@ Decode split rule history:
   behind). The later extension added KV below 4K tokens, head size 256 and strided K/V,
   and it changed the counts to what ships: $\lfloor 4\,\text{CUs}/w \rfloor$ without the
   power-of-two rounding, at least 2 and at most 64 (128 from 8K KV tokens), and with few
-  workgroups at most one segment per 64-token tile. Against the previous counts, on the
-  shapes whose count changed, it was faster on the changed decode rows (no losses), on a
-  synthetic paged sweep (a few shapes slightly slower) and on a synthetic strided sweep,
-  and similarly under LLVM 23. The series-wide comparison covers the final rule.
+  workgroups at most one segment per 64-token tile (and at least 1). Against the
+  previous counts, on the shapes whose count changed, it was faster on the changed
+  decode rows (no losses), on a synthetic paged sweep (a few shapes slightly slower) and
+  on a synthetic strided sweep, and similarly under LLVM 23. The series-wide comparison
+  covers the final rule.
 - gfx942: scoped to where it measured well on net (enough workgroups per segment, or KV
   below 8K tokens); the previous counts stay elsewhere. Against the previous counts it
   was faster on the changed decode rows (no losses), on a synthetic paged sweep (a few
@@ -273,17 +275,24 @@ Decode split rule history:
   reaches the zone on gfx950: with 256 CUs and 8K or more KV tokens it returns 113, 102,
   93, 85, 78, 73 and 68 segments at 9 to 15 workgroups per segment, so under LLVM 22 head
   size 256 serializes for 11 to 15 workgroups (partly for 10) and head size 128 for 10. On
-  gfx942 the rule's counts above 64 occur only at head size 64, which does not serialize,
-  and head size 256 is outside the rule. No shape of the series' benchmark set landed in
-  the zone. A reduce redesign is a follow-up (§7).
+  gfx942 the rule's counts above 64 occur only at head size 64, which does not serialize.
+  gfx942 head size 256 is outside the rule, but
+  [#14367](https://github.com/ROCm/rocm-libraries/pull/14367) later gave it a decode count
+  of its own, about two workgroups per CU (§2.2), and that count lands in the zone: on 304
+  CUs, $w = 6$ to 9 gives 101, 86, 76 and 67 segments from 3232 KV tokens, so one
+  sequence with 8 KV heads ($w = 8$) gets 76. Recompiled on the current tree as described
+  above, 67, 76, 86 and 101 serialized under LLVM 22 (two LLVM 22 builds agreed), while
+  38 and 57 did not serialize and 112 and 128 stayed rolled. Under the series' own rule
+  no shape of the series' benchmark set landed in the zone. A reduce redesign is a
+  follow-up (§7).
 - **Coverage.**
   - The series-wide comparison used one device per architecture and one compiler build
     (an LLVM 23 COMGR, per the series' author; the PR names only the benchmark's ROCm
     build). The per-lever A/Bs from the gfx950 K/V swizzle on, and all gfx942 ones, ran
     with the LLVM 22 COMGR bundled with torch, several also under LLVM 23; the earlier
     gfx950 A/Bs recorded only the node's ROCm with torch loaded. The gfx942 head-size-256
-    loader was compared across LLVM 22 and 23 (§2.2). A GQA ratio that does not divide 16
-    runs the tiled 2D kernel in both arms, not the 3D path (§7).
+    loader was compared across LLVM 22 and 23 (§2.2). At the compared commits, a GQA ratio
+    that does not divide 16 ran the tiled 2D kernel in both arms, not the 3D path (§7).
   - The kernel-body rewrites of §2.1 are not decode-gated: they run for every problem
     routed to the 3D path (prefill, speculative decode, mixed batches), subject only to
     their own conditions (paged fp16/bf16 K/V for page ids a tile ahead; tiles of 32 or
@@ -293,12 +302,19 @@ Decode split rule history:
     apply to fp8 K/V, sliding windows, an explicit `target_ctas` or non-decode problems,
     nor outside its head sizes (gfx950: 128, and 256 with enough workgroups; gfx942: 64
     and 128), its `block_size` of 16 and, on gfx942, few workgroups at long KV; those
-    problems keep their previous segment counts and tiles.
-  - Other defaults reach further: the decode grid and, for fp16/bf16 K/V, the
-    non-temporal policy follow `all_decode` alone; on gfx942 the K/V swizzle and the
-    page-id window follow `all_decode`, the head size and the K/V feed, so head size 256
-    (page-sized tiles) gets them although the rule does not cover it; and gfx942 at head
-    size 256 uses the async copies for every 3D problem, decode or not.
+    problems keep their previous segment counts and tiles, except for two later changes
+    of [#14367](https://github.com/ROCm/rocm-libraries/pull/14367) (table in §2.2;
+    [gfx950 §6.1](../../gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule),
+    [gfx942 §8.3](../../gfx942/attention/ALGORITHM.md#83-the-decode-split-rule)): decode at
+    head size 256 has a count of its own (on gfx950 where few workgroups leave it out of
+    the rule, on gfx942 always), and on gfx942 the ceiling the prefill-derived count is
+    clamped to counts one q-block per sequence for decode.
+  - Other defaults reach further: the decode grid follows `all_decode` alone, and so does
+    the non-temporal policy for fp16/bf16 K/V, though only above 256 MiB of K/V; on gfx942
+    the K/V swizzle and the page-id window follow `all_decode`, the head size and the K/V
+    feed, so head size 256 (page-sized tiles) gets them although the rule does not cover
+    it; and gfx942 at head size 256 uses the async copies for every 3D problem, decode or
+    not.
 
 ## 5. Method and correctness gate
 
@@ -349,8 +365,10 @@ The PR description does not say the following; it comes from the series author's
 - The forced-3D parity run, on gfx950 only: `parity_unified_attention.py --paths 3d
   --set all`, once per scenario, without the nine `pr9233_*` scenarios, which fault when
   forced to 3D on develop too. That leaves 48 scenarios, 45 of which produce a 3D result
-  (the three `gqa_nqk` scenarios with ratios 3, 5 and 7 fail the 3D gate and produce
-  none). The harness has no pass/fail and exits 0 whenever it runs to the end, so the
+  (at that commit the three `gqa_nqk` scenarios with ratios 3, 5 and 7 failed the 3D
+  gate and produced none;
+  [#14367](https://github.com/ROCm/rocm-libraries/pull/14367) has since admitted these
+  ratios, §7). The harness has no pass/fail and exits 0 whenever it runs to the end, so the
   author judged each scenario's max-abs against the previous commit's run.
 - gfx942 3D correctness. The gfx942 parity harness is 2D-only (§6), so no forced-3D
   parity ran there, which the #13492 test plan overstated. The 3D kernels rest on the
@@ -377,9 +395,9 @@ from HIP-graph replay. The cohorts on the 3D path were:
 | Decode, head size 256 | 7 |
 | Prefill routed to 3D | 1 on gfx950, 3 on gfx942 |
 
-Another 15 decode shapes have query heads per KV head that do not divide 16. They are not
-on the 3D path: both arms ran the tiled 2D kernel on them, or the scalar kernels where 2D
-rejects the shape (§7).
+Another 15 decode shapes have query heads per KV head that do not divide 16. At the
+compared commits they were not on the 3D path: both arms ran the tiled 2D kernel on them,
+or the scalar kernels where 2D rejects the shape (§7).
 
 **Step 0.** The series' commit messages and PR description record no
 [Step 0](../../../../platform/dsl_docs/optimization/optimization_runbook.md#step-0--exhaust-the-existing-lever-space-first-do-this-before-touching-the-algorithm-or-structure)
@@ -416,7 +434,7 @@ python tools/run_checks.py --steps guard,gate,ir-validity,arch-domain,parity,pyt
 # Representative IR goldens (prints "IR parity OK" with the flavors it checked).
 PYTHONPATH=platform/python:library \
   python platform/tests/instances/rocke_ir_parity_harness.py \
-    --check platform/tests/golden/rocke_representative_ir_sha256.json
+    --check platform/tests/golden/rocke_representative_ir_sha256/
 ```
 
 The pytest stage picks up the new tests by itself, and the gate stage picks up the
@@ -574,7 +592,10 @@ and note what this harness does and does not do:
   memory-side last-level cache), prepare one launch per copy and rotate through them
   between calls (the runbook's rotating buffers,
   [§6.6](../../../../platform/dsl_docs/optimization/optimization_runbook.md#66-caches)),
-  so that a call does not find an earlier call's K/V in the caches.
+  so that a call does not find an earlier call's K/V in the caches. On the current tree
+  the default policy is `"stream"` only when a call reads more than 256 MiB of K/V (§2.2),
+  so set `kv_cache_policy` explicitly in both arms; below that size both arms would
+  otherwise run `"all"`.
 - `decode_shapes.json` holds only single-sequence shapes (batch 1, head sizes 128 and
   256, `block_size` 16), while most outcomes in §2 are about batched decode. The gfx950
   harness covers them with `--batch <N>`, which overrides every shape's batch. The gfx942
@@ -587,21 +608,21 @@ and note what this harness does and does not do:
 
 ## 7. Open items
 
-- **GQA ratios that do not divide 16.** On gfx942 and gfx950, a decode problem whose
-  query heads per KV head is outside 1…16 or does not divide `BLOCK_M = 16` (for
-  example 5) is rejected by `supports_tiled_3d`. `backend="3d"` raises with the gate's
-  reason; `backend="auto"` falls back, without saying so, to the tiled 2D kernel, where
-  one workgroup per sequence and KV head walks the whole KV range, and to the scalar
-  kernels only where 2D rejects the problem too (a ratio above 16, or another 2D limit,
-  for example gfx942 head size 256 with 64-token pages exceeding LDS). `select_path()`
-  still labels these shapes "3d". None of the levers above reach them, as before the
-  series. The open
-  [#14367](https://github.com/ROCm/rocm-libraries/pull/14367) adds split-KV support for
-  these ratios (with padded rows); when it lands, this item and the matching entry in
-  [`limitations.md`](../../../../platform/dsl_docs/runtime/limitations.md) need updating.
+- **GQA ratios that do not divide 16 are unmeasured on the 3D path.** The series left
+  them on the tiled 2D kernel, because `supports_tiled_3d` rejected a ratio that does not
+  divide `BLOCK_M = 16` (for example 5), so none of its levers reached them and the
+  outcomes in §2 say nothing about them.
+  [#14367](https://github.com/ROCm/rocm-libraries/pull/14367) has since admitted every
+  ratio from 1 to 16 to the 3D path: the unused rows of a q-block are padding, and the
+  kernel masks their stores. Re-run the per-lever A/Bs on such a ratio (5, 6 or 12)
+  before assuming the defaults suit it. A ratio above 16 is still rejected:
+  `backend="3d"` raises with the gate's reason, and `backend="auto"` falls back, without
+  saying so, to the scalar kernels, because the tiled 2D gate rejects it too.
+  `select_path()` still labels these shapes "3d". The matching entry in
+  [`limitations.md`](../../../../platform/dsl_docs/runtime/limitations.md) says the same.
 - **Reduce kernel.** The series changes only its `exp2`. The follow-up is the slow zone
-  of §4 plus the reduce's share of small-batch decode time, not only a faster reduce
-  kernel.
+  of §4, which the gfx942 head-size-256 decode count now reaches by default, plus the
+  reduce's share of small-batch decode time, not only a faster reduce kernel.
 - **Host launch overhead per call** (§4) is a follow-up. The 3D binary cache key is
   computed on every launch, and it now also recomputes the five derived settings the
   series added (decode grid, cache policy, gfx950 tile, swizzle and page-id window),
@@ -662,5 +683,4 @@ not recorded; no shape on the 3D path was slower in device time. The losses of �
 (strided K/V at 64-token tiles under LLVM 22, the small split-rule losses at short KV)
 and the reduce-kernel slow zone are documented, not fixed. §7 lists the open A/Bs, the
 Step 0 sweep and the reduce redesign. Revisit when the decoupled-KV-pages work lands, on
-a compiler upgrade, if the GQA gate is widened, and when those A/Bs, the sweep or the
-redesign run.
+a compiler upgrade, and when those A/Bs, the sweep or the redesign run.

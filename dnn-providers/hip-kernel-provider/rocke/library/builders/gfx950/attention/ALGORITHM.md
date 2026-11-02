@@ -375,7 +375,7 @@ explicit `target_ctas`:
 | when | segments | KV tile |
 |---|---|---|
 | $w \cdot 32 > \text{CUs}$ | $\lfloor 4\,\text{CUs} / w \rfloor$, at least 2, at most 64 below 8K KV tokens and 128 from 8K | one page |
-| $w \cdot 32 \le \text{CUs}$ (64 segments would give at most two workgroups per CU) | 64; 128 from 64K KV tokens when also $w \cdot 64 \le \text{CUs}$ (64 segments would give at most one workgroup per CU); at most one segment per 64-token tile ($\lfloor \text{KV tokens} / 64 \rfloor$) | 64 tokens; paged K/V also turns the K/V LDS swizzle on (strided K/V does not) |
+| $w \cdot 32 \le \text{CUs}$ (64 segments would give at most two workgroups per CU) | 64; 128 from 64K KV tokens when also $w \cdot 64 \le \text{CUs}$ (64 segments would give at most one workgroup per CU); at most one segment per 64-token tile, but at least 1 ($\max(1, \lfloor \text{KV tokens} / 64 \rfloor)$, so 1 below 64 KV tokens) | 64 tokens; paged K/V also turns the K/V LDS swizzle on (strided K/V does not) |
 
 In the second row each workgroup's KV loop is latency-bound, so the tile widens to 64
 tokens; the swizzle is neutral at page-sized tiles and pays at multi-page ones. The
@@ -401,9 +401,16 @@ under LLVM 22, head size 256 is affected from $w = 10$ (partly) to 15 and head s
 at $w = 10$ ([case study §4](../../common/attention_3d_decode/CASE_STUDY.md#4-caveats-and-honest-losses)).
 
 Every other problem — fp8 K/V, sliding windows, an explicit `target_ctas`, non-decode,
-head size 64, head size 256 with $w \cdot 32 \le \text{CUs}$, a `block_size` other than
-16 — keeps the segment count and tile it had before the series (the prefill-derived
-formula in `_num_segments`). The constants are tuning results. `_num_segments`, its
+head size 64, a `block_size` other than 16 — keeps the segment count and tile it had
+before the series (the prefill-derived formula in `_num_segments`). Decode at head size
+256 with $w \cdot 32 \le \text{CUs}$, fp16/bf16 K/V, `block_size` 16, no sliding window
+and no explicit `target_ctas` starts from that same count but keeps at least two pages
+per segment, so at most $\lfloor \text{KV tokens} / 32 \rfloor$ segments, and
+at least 1 (the code comment's reason: one-page segments leave the segment kernel
+latency-bound and double the reduce input).
+[`test_attn_decode_route_3d.py`](../../../tests/test_attn_decode_route_3d.py)
+pins the two-page limit at 512, 2048 and 16384 KV tokens. The
+constants are tuning results. `_num_segments`, its
 scope helper `_gfx950_3d_decode_ctas_per_segment` and the tile helper
 `_gfx950_3d_tile_size_override`
 ([`attention_unified.py`](../../../kernels/common/attention_unified.py)) are the source

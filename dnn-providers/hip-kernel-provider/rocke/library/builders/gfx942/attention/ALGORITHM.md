@@ -494,18 +494,38 @@ $\lfloor 4 \cdot 304 / 32 \rfloor = 38$ segments (a row of the
 [split-rule test](../../../tests/test_attention_tiled_3d_decode_split.py)).
 
 The rule's counts above 64 occur only at head size 64 (at most 96, because
-$w \ge \text{CUs}/16$ at long KV), where the reduce kernel does not serialize its loads;
-at head size 256 some counts below about 100 make it do so, depending on the compiler
+$w \ge \text{CUs}/16$ at long KV), where the reduce kernel does not serialize its loads.
+
+Head size 256 is outside the rule but has a decode count of its own (every sequence has
+one query token, K/V is fp16/bf16 with `block_size` 16, no sliding window, no explicit
+`target_ctas`): about two workgroups per CU (half of head size 128's four (head size 64
+uses six), because its LDS footprint halves the resident workgroups), and at least two
+pages per segment:
+
+$$
+\text{segments} = \max\!\Big(2,\ \min\big(\lfloor 2\,\text{CUs} / w \rfloor,\ 128,\ \lfloor \text{KV tokens} / 32 \rfloor\big)\Big).
+$$
+
+On 304 CUs, 1 sequence with 8 KV heads gives $w = 8$ and 76 segments at 2432 KV tokens
+or more (fewer KV tokens lower it to $\lfloor \text{KV tokens}/32 \rfloor$). Unlike the
+rule's counts, this one reaches the range where the reduce kernel unrolls its segment
+loop into one load wait per load: $w = 6$ to 9 gives 101, 86, 76 and 67 segments from
+3232 KV tokens, which serialized under LLVM 22
 ([case study §4](../../common/attention_3d_decode/CASE_STUDY.md#4-caveats-and-honest-losses)).
 
-Outside the scope (fp8 K/V, a sliding window, an explicit `target_ctas`, head size 256,
-a `block_size` other than 16, non-decode problems, and $w < \text{CUs}/16$ with 8K or
-more KV tokens) the count is what `_num_segments` gave before the series: the
-prefill-derived formula, clamped for some head sizes and KV lengths. For few workgroups
-at long KV those counts measured as good. `_num_segments` and its scope helper
+Outside the scope (fp8 K/V, a sliding window, an explicit `target_ctas`, a `block_size`
+other than 16, non-decode problems, and $w < \text{CUs}/16$ with 8K or more KV tokens)
+the count is what `_num_segments` gave before the series: the prefill-derived formula,
+clamped for some head sizes and KV lengths. For decode without a sliding window, the
+clamp's ceiling counts one q-block per sequence, as the decode grid launches them,
+instead of the prefill upper bound; at 16 query heads per KV head (one query row per
+q-block) that doubles the ceiling, up to its cap of 128. For few
+workgroups at long KV those counts measured as good. `_num_segments` and its scope helper
 `_gfx942_3d_decode_ctas_per_segment`
 ([`attention_unified.py`](../../../kernels/common/attention_unified.py)) are the source
-of truth for the constants, and the test pins them.
+of truth for the constants; the split-rule test pins the rule, and
+[`test_attn_decode_route_3d.py`](../../../tests/test_attn_decode_route_3d.py) pins the
+head-size-256 count and the decode clamp.
 
 The gfx942 parity harness
 ([`prefill/parity_unified_attention.py`](prefill/parity_unified_attention.py)) builds and

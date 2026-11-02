@@ -103,15 +103,19 @@ problem by default, with outcomes, caveats and the replay, is in the
 
 **`kv_cache_policy`** (3D) — Cache policy of the K/V copies, by the same names
 as the 2D field. `_kv_cache_policy_3d` picks `"stream"` (the non-temporal bit only;
-`"nt"` also sets SC0 and is a different policy) when every sequence decodes and K/V is
-fp16/bf16: each K/V byte is read once, so caching it only evicts other
-data. The fp8 K/V loader keeps `"all"`; the gfx942 wide loader takes `"all"` or
-`"stream"`.
+`"nt"` also sets SC0 and is a different policy) when every sequence decodes, K/V is
+fp16/bf16 and the call's K/V is larger than the 256 MiB last-level cache. The size is
+`2 × num_seqs × max_seqlen_k × num_kv_heads × head_size × 2` bytes (K and V, the longest
+sequence's length for every sequence, 2 bytes per element). Each K/V byte is read once
+per call, so caching K/V that does not fit only evicts other data. A K/V that fits keeps
+`"all"`, so the next call over the same cache can hit in the last-level cache. The fp8
+K/V loader keeps `"all"`; the gfx942 wide loader takes `"all"` or `"stream"`.
 
 **`use_kv_lds_swizzle`** (3D) — Stores each K/V LDS row's 16-byte chunks
 XOR-permuted by the row, which spreads the QK and PV reads over the LDS banks.
 The copies fetch permuted source chunks, so the tiles need no padding. fp16/bf16
-K/V, paged or strided. Selected by `_kv_lds_swizzle_3d`.
+K/V, paged or strided; `head_size / 8` must be a power of two (the spec rejects, for
+example, head size 192). Selected by `_kv_lds_swizzle_3d`.
 
 **`use_wave_page_id_load`** (3D) — The wave loads the segment's page-table
 entries 64 at a time, one per lane (the *wave page-id window*, unrelated to a sliding

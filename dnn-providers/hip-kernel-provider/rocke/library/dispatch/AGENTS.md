@@ -475,7 +475,8 @@ and [gfx942 §8.3](../builders/gfx942/attention/ALGORITHM.md#83-the-decode-split
 describe it, and the
 [3D decode case study](../builders/common/attention_3d_decode/CASE_STUDY.md) has the
 replay recipe. Tuning candidate `0` takes the count `_num_segments` picks (the rule's,
-where it applies; the prefill-derived count elsewhere), at the request's `num_cus` or,
+where it applies; elsewhere the prefill-derived count, except for the two decode
+refinements the ALGORITHM sections list), at the request's `num_cus` or,
 without one, the architecture's full-part CU count.
 
 ## Attention backward: registry, routing and tuning

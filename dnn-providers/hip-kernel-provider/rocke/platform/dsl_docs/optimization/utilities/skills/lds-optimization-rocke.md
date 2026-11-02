@@ -266,7 +266,10 @@ slot `n`, so the destination address cannot be swizzled (gfx1250's
 instead: the lane that writes LDS chunk `c` of row `r` fetches global chunk
 `c ^ (r % chunks_per_row)` (XOR is its own inverse), and every LDS read applies the
 same permutation to its column. The copies stay contiguous and the tile needs no
-padding. The attention 3D decode kernels use this (`use_kv_lds_swizzle`); see runbook
+padding. `chunks_per_row` must be a power of two, or the XOR can leave the row (with 24
+chunks, row 8 and chunk 16 map to chunk 24). The attention 3D decode kernels use this
+(`use_kv_lds_swizzle`) and enforce it: the spec needs `head_size / 8` to be a power of
+two, so head size 192 cannot use it. See runbook
 [§6.4a](../../optimization_runbook.md#64a-lds-swizzle-strategy-selection-xor-vs-padding)
 and [§12.1.K2](../../optimization_runbook.md#121k2-attention-3d-split-kv-levers-ua-3d-specific).
 
