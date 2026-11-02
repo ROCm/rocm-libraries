@@ -47,7 +47,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
-option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE descriptor is not pulled" OFF)
+option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE or FlyDSL descriptor is not pulled" OFF)
 # A TheRock build compiles the committed serialization headers by default.
 if(DEFINED THEROCK_SUBPROJECT_TARGET)
     set(_hkp_generate_serialize_default OFF)
@@ -62,6 +62,15 @@ option(HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS
 # Gates the generic kernel ingestor. The ingestor engine compiles its kernel
 # through the HIP kernel engine's compiler, so it only builds alongside that engine.
 option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
+
+# A second kernel set for the ingestor, independent of rocKE: prebuilt FlyDSL
+# AOT objects, fetched with `dvc pull` (flydsl/README.md), packed and staged by
+# flydsl/. OFF by default, like rocKE: TheRock's feature flags can only turn an
+# option ON, so TheRock enables it through its HIPKERNELPROVIDER_ENABLE_FLYDSL
+# flag and can switch it off there. Only the ingestor loads its shard, so with
+# HIPDNN_ENABLE_KERNEL_INGESTOR OFF it builds nothing.
+option(HIPKERNELPROVIDER_ENABLE_FLYDSL
+       "Pack the prebuilt FlyDSL kernels for the kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
@@ -356,20 +365,28 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
 
-    # Large rocKE bundle files (KDPs, kernel objects, heuristic models) are DVC outputs,
-    # each a file with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. With
-    # ENABLE_ROCKE ON, warn when one is missing or differs from its pointer (file size, or
-    # folder file count) so the shipped bundle is not silently left out; tests still
-    # configure and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for
-    # release builds. Only the root this build packs from is checked.
+    # Large rocKE bundle files (KDPs, kernel objects, heuristic models) and FlyDSL's
+    # per-target content directories (objects, manifest, KDP) are DVC outputs, each a file
+    # with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. For each enabled
+    # producer, warn when one is missing or differs from its pointer (file size, or folder
+    # file count) so the shipped bundle is not silently left out; tests still configure
+    # and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for release builds.
+    # Only the root this build packs from is checked.
+    if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
+        set(_dvc_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+    else()
+        set(_dvc_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
+    endif()
+    set(_dvc_producers "")
     if(HIPKERNELPROVIDER_ENABLE_ROCKE)
-        if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
-            set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
-        else()
-            set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
-        endif()
-        file(GLOB_RECURSE _rocke_pointers "${_rocke_root}/rocKE/*.dvc")
-        foreach(_pointer IN LISTS _rocke_pointers)
+        list(APPEND _dvc_producers rocKE)
+    endif()
+    if(HIPKERNELPROVIDER_ENABLE_FLYDSL)
+        list(APPEND _dvc_producers FlyDSL)
+    endif()
+    foreach(_producer IN LISTS _dvc_producers)
+        file(GLOB_RECURSE _dvc_pointers "${_dvc_root}/${_producer}/*.dvc")
+        foreach(_pointer IN LISTS _dvc_pointers)
             string(REGEX REPLACE "\\.dvc$" "" _output "${_pointer}")
             file(STRINGS "${_pointer}" _nfiles_line REGEX "^  nfiles: [0-9]+$")
             file(STRINGS "${_pointer}" _size_line REGEX "^  size: [0-9]+$")
@@ -393,13 +410,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                     set(_level WARNING)
                 endif()
                 message(${_level}
-                    "hip-kernel-provider: rocKE DVC output ${_output} is missing or "
+                    "hip-kernel-provider: ${_producer} DVC output ${_output} is missing or "
                     "incomplete (found ${_actual}, expected ${_expected}; bytes for a "
-                    "file, file count for a folder). The shipped rocKE bundle will NOT "
-                    "be packed. Run: dvc pull -r ingestor ${_pointer}")
+                    "file, file count for a folder). What it holds will NOT be packed. "
+                    "Run: dvc pull -r ingestor ${_pointer}")
             endif()
         endforeach()
-    endif()
+    endforeach()
 
     # The name of each authored set, which is also the name it stages under. Named here
     # only because the test subdirectories compile these same segments into their binaries
@@ -521,11 +538,44 @@ endif()
 #
 # descriptor-packaging resolves the packer separately, from the rocm_kpack Python
 # package. Both halves come from the platform, so nothing here pins a ref.
+
+# What src/ and src/tests/ gate the FlyDSL engines and their suites on, rather than the
+# option above. flydsl/ raises it when the production root holds FlyDSL content at all,
+# whatever GPU_TARGETS asks for: the engines are host code, and a multi-arch build
+# (TheRock RFC 0008) ships the host half of one architecture's shard to every
+# architecture, so it must not depend on which one was picked. What this build packs is
+# HIPKERNELPROVIDER_FLYDSL_ARCHS. INTERNAL implies FORCE, so this resets on every
+# configure and a stale TRUE cannot survive a flag flip.
+set(HIPKERNELPROVIDER_FLYDSL_ACTIVE FALSE CACHE INTERNAL
+    "The FlyDSL engines and tests are compiled (the production root has FlyDSL content)")
+
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
         find_package(rocm-kpack CONFIG REQUIRED)
     endif()
+
+    # The descriptor packer rides the ingestor gate, not the rocKE gate: it packs
+    # whichever kernel sets this build enables. hkp_add_packaging() wires each
+    # root with ENABLE_ROCKE reflecting HIPKERNELPROVIDER_ENABLE_ROCKE, and with
+    # it OFF the hip producer packs alone, rocKE descriptors prune, and the rocKE
+    # wheel toolchain is never asserted. The rocKE block above must still precede
+    # this one, since that assertion reads cache variables rocke/ sets.
+    list(APPEND CMAKE_MODULE_PATH
+         "${CMAKE_CURRENT_SOURCE_DIR}/descriptor-packaging/cmake")
+    include(HkpPackaging)
     add_subdirectory(descriptor-packaging)
+
+    # FlyDSL's pre-built objects are a bundle of the production descriptor root,
+    # packed by the packer above as `hsaco` UKDs. flydsl/ only decides whether
+    # this build ships them, which it reads off the wired product pack -- hence
+    # after descriptor-packaging.
+    if(HIPKERNELPROVIDER_ENABLE_FLYDSL)
+        add_subdirectory(flydsl)
+    endif()
+elseif(HIPKERNELPROVIDER_ENABLE_FLYDSL)
+    message(STATUS
+        "flydsl: not built -- HIPDNN_ENABLE_KERNEL_INGESTOR is OFF, and only the "
+        "ingestor engine loads the FlyDSL shard")
 endif()
 
 add_subdirectory(src)

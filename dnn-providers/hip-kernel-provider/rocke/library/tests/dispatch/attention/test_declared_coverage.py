@@ -39,7 +39,7 @@ _PATH_CANDIDATES = frozenset({"attention_unified_2d", "attention_unified_3d"})
 
 def _requests(arch: str):
     for dtype in ("fp16", "bf16"):
-        for hdim in (64, 128, 256):
+        for hdim in (64, 128, 192, 256):
             for block in (16, 32, 64):
                 for sq, sk in ((1, 4096), (512, 512), (2048, 2048)):
                     for algorithm in _ALGORITHMS:
@@ -153,7 +153,7 @@ class TestDeclaredHeadSizes(unittest.TestCase):
     def test_the_unified_paths_declare_the_backend_head_sizes(self):
         shapes = ATTENTION_REGISTRY.get("attention_unified_2d").capability.shapes
         self.assertIn(
-            {"dims": ["hdim_q"], "allowed": [64, 128, 256]},
+            {"dims": ["hdim_q"], "allowed": [64, 128, 192, 256]},
             [s.as_dict() for s in shapes],
         )
 
