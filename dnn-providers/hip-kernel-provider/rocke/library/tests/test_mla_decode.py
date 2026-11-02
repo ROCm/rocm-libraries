@@ -448,8 +448,11 @@ class TestEmptySegments:
 
 # Compile + introspect one kernel in a child process: comgr's option parser
 # calls exit(1) on a flag the loaded LLVM does not know, which no except can
-# catch and which would otherwise end the whole pytest run. Exit code 77 is a
-# skip; anything else non-zero is a failure, reported with the child's output.
+# catch and which would otherwise end the whole pytest run. Exit code 77: the
+# host takes a different LLVM version or IR flavor than decode serves, always a
+# skip. Exit code 78: a tool the gate needs is missing, a skip unless the run
+# requires the tools. Anything else non-zero is a failure, reported with the
+# child's output.
 _RESOURCE_PROBE = r"""
 import json
 import sys
@@ -465,14 +468,14 @@ try:
     from rocke.helpers.compile import compile_kernel
 except ImportError as exc:
     print(f"comgr / resource tools unavailable: {exc}")
-    sys.exit(77)
+    sys.exit(78)
 from rocke.core.lower_llvm import _resolve_llvm_flavor
 from dispatch.mla.decode import DECODE_LLVM_FLAVORS
 try:
     flavor = _resolve_llvm_flavor()
 except RuntimeError as exc:
     print(f"LLVM flavor undeterminable: {exc}")
-    sys.exit(77)
+    sys.exit(78)
 if flavor not in DECODE_LLVM_FLAVORS:
     print(f"decode is served at {DECODE_LLVM_FLAVORS} only; host lowers {flavor}")
     sys.exit(77)
@@ -484,7 +487,7 @@ try:
     art = compile_kernel(kernel, arch=arch, capture_ir_text=False)
 except ImportError as exc:
     print(f"comgr toolchain unavailable: {exc}")
-    sys.exit(77)
+    sys.exit(78)
 except RuntimeError as exc:
     # A forced ROCKE_LLVM_FLAVOR the loaded comgr cannot take is an
     # environment mismatch; any other compile failure is real.
@@ -499,15 +502,48 @@ with tempfile.TemporaryDirectory() as tmp:
         res = analyze_hsaco(path).resources
     except (FileNotFoundError, RuntimeError) as exc:
         print(f"HSACO introspection unavailable: {exc}")
-        sys.exit(77)
+        sys.exit(78)
 print(json.dumps({"scratch": res.scratch_bytes, "vgpr": res.vgpr_count,
                   "lds": res.lds_bytes}))
 """
 
 
 #: Set by the CTest entries that put ROCm's compiler tools on PATH: there, a
-#: probe that cannot compile or inspect is a broken gate, not a missing tool.
+#: gate whose tools are missing is a broken gate, not a skip. The same variable
+#: and rule as the prefill resource guards in test_mla_prefill_gfx942.py.
 _REQUIRE_ENV = "ROCKE_REQUIRE_COMPILER_TOOLS"
+#: The probe's exit codes (see the comment above ``_RESOURCE_PROBE``).
+_EXIT_HOST_MISMATCH = 77
+_EXIT_TOOLS_MISSING = 78
+
+
+def _probe_could_not_run(
+    returncode: int, stdout: str, stderr: str, *, require_tools: bool
+) -> tuple[str, str] | None:
+    """``("skip" | "fail", reason)`` when the probe could not run the gate, else None.
+
+    A missing tool fails where the run requires the tools and skips elsewhere. A
+    host whose LLVM version or IR flavor decode does not take always skips: no
+    tool is missing there, so the gate has nothing to check.
+    """
+    output = (stdout + stderr).strip()
+    # The probe prints its reason on stdout; stderr may end in an unrelated
+    # warning.
+    reason = (stdout.strip().splitlines() or [output])[-1]
+    if returncode == _EXIT_TOOLS_MISSING:
+        return ("fail" if require_tools else "skip"), reason
+    if returncode == _EXIT_HOST_MISMATCH:
+        return "skip", reason
+    if (
+        # comgr's option parser exit(1)s with this message and no Python
+        # traceback; a traceback is a real failure, whatever its text. It is a
+        # comgr too old for the flags decode compiles with: a version mismatch.
+        returncode == 1
+        and "Unknown command line argument" in stderr
+        and "Traceback" not in stderr
+    ):
+        return "skip", f"the loaded comgr rejects a compile option: {output[-300:]}"
+    return None
 
 
 class TestResources:
@@ -515,9 +551,10 @@ class TestResources:
 
     Zero scratch, and at most 256 VGPRs and 32 KiB of LDS, which is what two
     workgroups of four waves need per CU on both arches. Skipped where comgr,
-    llvm-objdump or the IR flavor's compiler is missing -- unless
+    llvm-objdump or llvm-readelf is missing -- unless
     ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` (set by the CTest entry when it supplies
-    ROCm's tools), which turns every skip into a failure.
+    ROCm's tools), which turns a missing tool into a failure. A host whose LLVM
+    version or IR flavor decode does not serve skips either way.
     """
 
     @pytest.mark.parametrize("arch", sorted(SPECS))
@@ -539,21 +576,15 @@ class TestResources:
                 f"resource probe timed out after 90 s: {(exc.stderr or '')[-1000:]}"
             )
         output = (proc.stdout + proc.stderr).strip()
-        reason = None
-        if proc.returncode == 77:
-            # The probe prints its reason on stdout; stderr may end in an
-            # unrelated warning.
-            reason = (proc.stdout.strip().splitlines() or [output])[-1]
-        elif (
-            # comgr's option parser exit(1)s with this message and no Python
-            # traceback; a traceback is a real failure, whatever its text.
-            proc.returncode == 1
-            and "Unknown command line argument" in proc.stderr
-            and "Traceback" not in proc.stderr
-        ):
-            reason = f"the loaded comgr rejects a compile option: {output[-300:]}"
-        if reason is not None:
-            if os.environ.get(_REQUIRE_ENV) == "1":
+        verdict = _probe_could_not_run(
+            proc.returncode,
+            proc.stdout,
+            proc.stderr,
+            require_tools=os.environ.get(_REQUIRE_ENV) == "1",
+        )
+        if verdict is not None:
+            kind, reason = verdict
+            if kind == "fail":
                 pytest.fail(
                     f"{_REQUIRE_ENV}=1, but the resource gate cannot run: {reason}"
                 )
@@ -563,3 +594,57 @@ class TestResources:
         assert res["scratch"] == 0
         assert res["vgpr"] <= 256
         assert res["lds"] <= 32768
+
+
+class TestResourceGateVerdict:
+    """What the resource gate does when its probe could not run.
+
+    The rule shared with the prefill resource guards: a missing tool fails where
+    the run requires the tools (``ROCKE_REQUIRE_COMPILER_TOOLS=1``) and skips
+    elsewhere; a host that takes a different LLVM version or IR flavor skips
+    either way, because no tool is missing there.
+    """
+
+    _OPTION_ERROR = "error: Unknown command line argument '-amdgpu-foo'"
+
+    @pytest.mark.parametrize("require_tools", [False, True])
+    def test_host_mismatch_always_skips(self, require_tools):
+        verdict = _probe_could_not_run(
+            _EXIT_HOST_MISMATCH,
+            "decode is served at ('llvm22', 'llvm23') only; host lowers llvm20\n",
+            "",
+            require_tools=require_tools,
+        )
+        assert verdict == (
+            "skip",
+            "decode is served at ('llvm22', 'llvm23') only; host lowers llvm20",
+        )
+
+    @pytest.mark.parametrize(
+        ("require_tools", "kind"), [(False, "skip"), (True, "fail")]
+    )
+    def test_missing_tool_fails_only_where_required(self, require_tools, kind):
+        verdict = _probe_could_not_run(
+            _EXIT_TOOLS_MISSING,
+            "HSACO introspection unavailable: llvm-objdump failed\n",
+            "a trailing warning\n",
+            require_tools=require_tools,
+        )
+        assert verdict == (kind, "HSACO introspection unavailable: llvm-objdump failed")
+
+    @pytest.mark.parametrize("require_tools", [False, True])
+    def test_comgr_rejecting_a_compile_option_always_skips(self, require_tools):
+        verdict = _probe_could_not_run(
+            1, "", self._OPTION_ERROR, require_tools=require_tools
+        )
+        assert verdict is not None and verdict[0] == "skip"
+        assert self._OPTION_ERROR in verdict[1]
+
+    @pytest.mark.parametrize("require_tools", [False, True])
+    def test_a_traceback_is_a_real_failure(self, require_tools):
+        stderr = f"Traceback (most recent call last):\n  ...\n{self._OPTION_ERROR}\n"
+        assert _probe_could_not_run(1, "", stderr, require_tools=require_tools) is None
+
+    @pytest.mark.parametrize("returncode", [0, 2, 134])
+    def test_other_exits_are_not_the_gate_declining(self, returncode):
+        assert _probe_could_not_run(returncode, "", "", require_tools=True) is None
