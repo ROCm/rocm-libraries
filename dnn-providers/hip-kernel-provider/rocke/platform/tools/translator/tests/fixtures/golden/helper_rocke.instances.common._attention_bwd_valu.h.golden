@@ -1,0 +1,88 @@
+/* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ * rocke/helper_rocke.instances.common._attention_bwd_valu.h -- first draft by tr/abi.py from
+ * library/kernels/common/_attention_bwd_valu.py (sha256 8b3fa5c1c86d);
+ * hand-maintained from here.
+ *
+ * Rules: designs/generated_abi.md of the translator. Lists a function
+ * returns are owned by the caller (free with free(); a list of strings:
+ * free each string, then the list); errors of entries
+ * that take the builder are recorded on it (false / NULL / -1), the
+ * others fill reason.
+ */
+#ifndef ROCKE_HELPER_ROCKE_INSTANCES_COMMON__ATTENTION_BWD_VALU_H
+#define ROCKE_HELPER_ROCKE_INSTANCES_COMMON__ATTENTION_BWD_VALU_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "rocke/arch_target.h"
+#include "rocke/ir.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+#define ROCKE_ATTN_BWD_BF16_CASTS_N 2
+extern const char* const ROCKE_ATTN_BWD_BF16_CASTS[ROCKE_ATTN_BWD_BF16_CASTS_N];
+
+#define ROCKE_ATTN_BWD_BWD_EXP2S_N 2
+extern const char* const ROCKE_ATTN_BWD_BWD_EXP2S[ROCKE_ATTN_BWD_BWD_EXP2S_N];
+
+#define ROCKE_ATTN_BWD_STATS_VECS_N 3
+extern const int ROCKE_ATTN_BWD_STATS_VECS[ROCKE_ATTN_BWD_STATS_VECS_N];
+
+#define ROCKE_ATTN_BWD_NATIVE_BF16_CVT_ARCHS_N 1
+extern const char* const
+    ROCKE_ATTN_BWD_NATIVE_BF16_CVT_ARCHS[ROCKE_ATTN_BWD_NATIVE_BF16_CVT_ARCHS_N];
+
+/* py: batched_stats_rows. ``(lse2, Dsum)`` of q-step rows ``rows``, one vector load per run. */
+bool rocke_attn_bwd_batched_stats_rows(rocke_ir_builder_t* b,
+                                       const rocke_attn_bwd_workspace_addr_t* lse2,
+                                       const rocke_attn_bwd_workspace_addr_t* dsum,
+                                       rocke_value_t* h,
+                                       rocke_attn_bwd_iv_t q0,
+                                       rocke_value_t* const* rows,
+                                       int n_rows,
+                                       int width,
+                                       rocke_attn_bwd_iv_t n_heads,
+                                       rocke_value_t*** out_0,
+                                       rocke_value_t*** out_1,
+                                       int* n_out);
+
+/* py: cast_c_frag. Round an fp32 C fragment to the I/O dtype ``elem`` under ``bf16_cast``. */
+rocke_value_t* rocke_attn_bwd_cast_c_frag(rocke_ir_builder_t* b,
+                                          rocke_value_t* frag,
+                                          const rocke_type_t* elem,
+                                          const char* bf16_cast);
+
+/* py: check_stats_vec_layout. Raise unless every lane's C slots form runs of ``width`` consecutive rows. */
+bool rocke_attn_bwd_check_stats_vec_layout(rocke_ir_builder_t* b,
+                                           const rocke_mma_op_t* op,
+                                           int width);
+
+/* py: rne_noguard_bf16. ``<n x f32>`` -> ``<n x bf16>`` (``n`` even), round to nearest even, no NaN guard (see the module docstring for the NaN results). */
+rocke_value_t* rocke_attn_bwd_rne_noguard_bf16(rocke_ir_builder_t* b, rocke_value_t* frag);
+
+/* py: softmax_p. ``P = exp2(S * scale_log2 - lse2)`` of one element. */
+rocke_value_t* rocke_attn_bwd_softmax_p(rocke_ir_builder_t* b,
+                                        rocke_value_t* sv,
+                                        rocke_value_t* scale_log2,
+                                        rocke_value_t* lse2,
+                                        rocke_value_t* neg_lse2,
+                                        const char* bwd_exp2);
+
+/* py: stats_rows_neg. ``{key: -lse2}`` of a stats dict ``{key: (lse2, Dsum)}`` (``stats_fma``). */
+bool rocke_attn_bwd_stats_rows_neg(rocke_ir_builder_t* b,
+                                   const int* stats_keys,
+                                   rocke_value_t* const* stats_vals_0,
+                                   rocke_value_t* const* stats_vals_1,
+                                   int n_stats,
+                                   int** out_keys,
+                                   rocke_value_t*** out_vals,
+                                   int* n_out);
+#ifdef __cplusplus
+}
+#endif
+#endif /* ROCKE_HELPER_ROCKE_INSTANCES_COMMON__ATTENTION_BWD_VALU_H */
