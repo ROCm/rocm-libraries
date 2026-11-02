@@ -21,10 +21,10 @@
         },
         "attention_d256/gfx950/pad_interleave": {
           "arch": "gfx950",
-          "bytes": 562453,
+          "bytes": 564277,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg_qrev",
-          "sha256": "417eec6bd531f86d3f8c05d25c3ea6764b2651ed48c605745250bdae0859e9db",
+          "sha256": "0839e3e63cf3cc485e37bfb35ee325bdef4a9cfaaa9eb927a4c994bec4fbc485",
           "status": "ok"
         }
       },
@@ -50,10 +50,10 @@
         },
         "attention_d256/gfx950/pad_interleave": {
           "arch": "gfx950",
-          "bytes": 562553,
+          "bytes": 564377,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg_qrev",
-          "sha256": "d0817b212933158d7bb3e7b83f52fe09921d95b12c9fcb7107647cdcaddb5a00",
+          "sha256": "d303760365c5ad5110561b498911a3cc852d7d05ce24365dcd1c66dda9029459",
           "status": "ok"
         }
       },
@@ -79,10 +79,10 @@
         },
         "attention_d256/gfx950/pad_interleave": {
           "arch": "gfx950",
-          "bytes": 562617,
+          "bytes": 564441,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg_qrev",
-          "sha256": "01e2d825c52280c077c2b6ee95a43321bbb054e3900a0fc8fcad187b532057a7",
+          "sha256": "e68e673f88cb2623c16705ff45980135bbdc2076533245ed34a28cc728086f24",
           "status": "ok"
         }
       },
@@ -108,10 +108,10 @@
         },
         "attention_d256/gfx950/pad_interleave": {
           "arch": "gfx950",
-          "bytes": 562617,
+          "bytes": 564441,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg_qrev",
-          "sha256": "01e2d825c52280c077c2b6ee95a43321bbb054e3900a0fc8fcad187b532057a7",
+          "sha256": "e68e673f88cb2623c16705ff45980135bbdc2076533245ed34a28cc728086f24",
           "status": "ok"
         }
       },

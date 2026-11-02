@@ -40,6 +40,7 @@
  * Lifetime: every emitted node is arena-owned (rocke_ir_builder_t.arena). Nothing
  * is freed individually; the arena bulk-frees the whole graph.
  */
+#include "rocke/instance_attention_kv_seq_tail_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
 #include <cstdio>
@@ -993,10 +994,31 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
        && !rocke__tile_page_ids(ctx, kv_tile_idx, kv_calls_per_tile, ctx->HD, &pages))
         return;
 
+    /* Rows past the sequence load zero (_attention_kv_seq_tail). When a copy covers
+     * whole rows, its row is the lane's first row plus an immediate; with one row per
+     * copy the bound is wave-uniform (not on the i64 page-resource path). */
+    bool whole_rows = kv_halves_per_call % ctx->HD == 0;
+    bool uniform_rows = kv_halves_per_call == ctx->HD && !page_rsrc;
+    rocke_value_t* v_rows = rocke_kv_rows_in_sequence(b, ctx->seq_len, kv_tile_idx, ctx->T);
+    rocke_value_t* rows_left = NULL;
+    if(whole_rows)
+    {
+        rocke_value_t* lane_row;
+        if(uniform_rows)
+            lane_row = rocke_b_const_i32(b, 0);
+        else
+        {
+            rocke_value_t* hd = rocke_b_const_i32(b, ctx->HD);
+            lane_row = rocke_b_div(b, lane_half_base, hd);
+        }
+        rows_left = rocke_b_sub(b, v_rows, lane_row);
+    }
+
     for(int call = 0; call < kv_calls_per_tile; ++call)
     {
         rocke_value_t* v_rsrc = ctx->v_rsrc;
         rocke_value_t* voff = NULL;
+        rocke_value_t* linear_half = NULL;
         if(ctx->FAST_PAGED_KV_DESC)
         {
             rocke_value_t* base_i64 = NULL;
@@ -1019,7 +1041,7 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
              * paged_kv_desc.offset(tile_idx=, linear_half=call*KV_HALVES_PER_CALL+
              * lane_half_base, kv_head=). i32-only: I64_KV_ADDR takes the per-page path
              * above. */
-            rocke_value_t* linear_half
+            linear_half
                 = rocke_b_add(b, rocke_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
             if(ctx->LANE_FREE_PAGES)
             {
@@ -1041,6 +1063,20 @@ void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* c
                        b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
                     return;
             }
+        }
+        if(whole_rows)
+        {
+            voff = rocke_kv_buffer_offset_in_rows_left(
+                b, voff, rows_left, call * (kv_halves_per_call / ctx->HD), uniform_rows);
+        }
+        else
+        {
+            if(linear_half == NULL)
+                linear_half = rocke_b_add(
+                    b, rocke_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
+            rocke_value_t* hd = rocke_b_const_i32(b, ctx->HD);
+            rocke_value_t* row = rocke_b_div(b, linear_half, hd);
+            voff = rocke_kv_buffer_offset_in_sequence(b, voff, row, v_rows);
         }
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(
             b, V_wave_base, rocke_b_const_i64(b, (int64_t)call * v_bytes_per_call_swz));

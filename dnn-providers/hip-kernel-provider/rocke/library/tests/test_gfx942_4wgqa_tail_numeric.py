@@ -7,33 +7,24 @@ An over-read only faults when it leaves Q's allocation and the pages behind it a
 That is only reliable if Q's allocation is the first one of a fresh process and ends exactly at
 its segment's end, so each case runs in its own spawned process (all of them at once).
 
-K/V: the last KV tile spans keys past the sequence. They are masked to P = 0, but 0 * NaN is NaN,
-so their K/V has to come from the sequence's own blocks. The K/V cases surround each sequence
-with hostile data: NaN in the cache slots after its last key, and block-table entries past its
-own blocks (in every row, also of shorter sequences) that point to a NaN block or to a block id
-far outside the cache.
+K/V: the K/V cases surround each sequence with hostile cache data (``_paged_kv_tail``).
 """
 
 from __future__ import annotations
 
-import concurrent.futures as cf
 import math
-import multiprocessing as mp
 import os
-import time
 
 import pytest
 
 from _gpu_gate import requires_gpu
+from _paged_kv_tail import own_blocks, poison, result, spawn_results
 from test_gfx942_gqa_head_fold_numeric import _load_windowed_harness
 
 requires_gfx942_gpu = requires_gpu("gfx942")
 
 TOL = 4e-2  # repo-wide bf16 attention gate
 FOUR_WARP_SPEC_ID = "gfx942_u2d_gfx942_4warp_nw1_mw32_t64_llvm"
-FAR_BLOCK = 100_000  # outside any cache here, but within i32 element addressing
-# The cases take seconds; an out-of-bounds read can hang a worker instead of faulting.
-RESULTS_TIMEOUT_S = 300
 
 
 def _tail_buffer(numel, dtype):
@@ -45,42 +36,6 @@ def _tail_buffer(numel, dtype):
     seg = max(12 << 20, (numel * esize + (2 << 20) - 1) // (2 << 20) * (2 << 20))
     buf = torch.empty(seg // esize, dtype=dtype, device="cuda")
     return buf[buf.numel() - numel :]
-
-
-def _own_blocks(kv_lens, bs, num_blocks):
-    """Block table giving each sequence its own blocks; the cache's last block stays unused."""
-    import torch
-
-    need = [(kl + bs - 1) // bs for kl in kv_lens]
-    perm = torch.randperm(num_blocks - 1, device="cuda").int()
-    table = torch.zeros(len(kv_lens), max(need), dtype=torch.int32, device="cuda")
-    start = 0
-    for i, n in enumerate(need):
-        table[i, :n] = perm[start : start + n]
-        start += n
-    return table
-
-
-def _poison(k, v, table, kv_lens, bs, mode):
-    """Return the block table padded with hostile entries, after making the cache around each
-    sequence hostile (see the module docstring)."""
-    import torch
-
-    spare = k.shape[0] - 1
-    if mode == "nan":
-        k[spare] = float("nan")
-        v[spare] = float("nan")
-        for i, kl in enumerate(kv_lens):
-            if kl % bs:
-                blk = int(table[i, (kl - 1) // bs])
-                k[blk, kl % bs :] = float("nan")
-                v[blk, kl % bs :] = float("nan")
-    pad = spare if mode == "nan" else FAR_BLOCK
-    table = table.clone()
-    for i, kl in enumerate(kv_lens):
-        table[i, (kl + bs - 1) // bs :] = pad
-    extra = torch.full((table.shape[0], 8), pad, dtype=table.dtype, device=table.device)
-    return torch.cat([table, extra], 1).contiguous()
 
 
 def _prefill(case):
@@ -103,18 +58,18 @@ def _prefill(case):
     q_tail = _tail_buffer(total_q * s.num_query_heads * s.head_size, s.dtype)
     data = H.make_inputs(s, seed=0)
     kv_lens = [x[1] for x in s.seq_lens]
-    poison = case.get("kv_poison")
-    if poison:
-        data["block_tables"] = _own_blocks(kv_lens, s.block_size, s.num_blocks)
+    kv_poison = case.get("kv_poison")
+    if kv_poison:
+        data["block_tables"] = own_blocks(kv_lens, s.block_size, s.num_blocks)
     ref = H.run_reference(s, data)
-    if poison:
-        data["block_tables"] = _poison(
+    if kv_poison:
+        data["block_tables"] = poison(
             data["key_cache"],
             data["value_cache"],
             data["block_tables"],
             kv_lens,
             s.block_size,
-            poison,
+            kv_poison,
         )
     q_tail = q_tail.view(data["query"].shape)
     q_tail.copy_(data["query"])
@@ -137,7 +92,7 @@ def _pinned_decode(case):
     bps = (skv + bs - 1) // bs
     k = torch.randn(B * bps + 1, bs, hk, d, dtype=dt, device="cuda") * 0.3
     v = torch.randn_like(k)
-    table = _own_blocks([skv] * B, bs, k.shape[0])
+    table = own_blocks([skv] * B, bs, k.shape[0])
 
     def seq(cache):
         return cache[table.long()].reshape(B, bps * bs, hk, d)[:, :skv]
@@ -148,7 +103,7 @@ def _pinned_decode(case):
         q.float().unsqueeze(2), kc, vc
     )
     if case.get("kv_poison"):
-        table = _poison(k, v, table, [skv] * B, bs, case["kv_poison"])
+        table = poison(k, v, table, [skv] * B, bs, case["kv_poison"])
     out = torch.empty_like(q)
     cu = torch.arange(B + 1, dtype=torch.int32, device="cuda")
     lens = torch.full((B,), skv, dtype=torch.int32, device="cuda")
@@ -240,45 +195,20 @@ def results(request):
     ]
     if _load_windowed_harness() is None:
         selected = [(fn, case) for fn, case in selected if fn is not _prefill]
-    env_names = ("PYTORCH_HIP_ALLOC_CONF", "PYTORCH_CUDA_ALLOC_CONF")
-    saved = {name: os.environ.get(name) for name in env_names}
-    # submit() below starts each spawned worker, which takes the environment set here.
-    for name in env_names:
-        os.environ[name] = _without_expandable_segments(saved[name])
-    ctx = mp.get_context("spawn")  # fork after the parent touched the GPU is unsafe
-    pools, futures = [], {}
-    try:
-        for fn, case in selected:
-            pool = cf.ProcessPoolExecutor(max_workers=1, mp_context=ctx)
-            pools.append(pool)
-            futures[(fn.__name__, case["id"])] = pool.submit(fn, case)
-    finally:
-        for name, value in saved.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
-    yield futures, time.monotonic() + RESULTS_TIMEOUT_S
-    for pool in pools:
-        # A hung worker would block a waiting shutdown forever.
-        for proc in getattr(pool, "_processes", {}).values():
-            if proc.is_alive():
-                proc.kill()
-        pool.shutdown(wait=False, cancel_futures=True)
+    env = {
+        name: _without_expandable_segments(os.environ.get(name))
+        for name in ("PYTORCH_HIP_ALLOC_CONF", "PYTORCH_CUDA_ALLOC_CONF")
+    }
+    yield from spawn_results(
+        {(fn.__name__, case["id"]): (fn, case) for fn, case in selected}, env
+    )
 
 
 def _max_abs(results, fn, case):
-    futures, deadline = results
     key = (fn.__name__, case["id"])
-    if key not in futures:
+    if key not in results[0]:
         pytest.skip("windowed parity harness not present in this checkout")
-    # A fault in the worker re-raises here; a hard abort raises BrokenProcessPool.
-    try:
-        return futures[key].result(timeout=max(0.0, deadline - time.monotonic()))
-    except cf.TimeoutError:
-        pytest.fail(
-            f"no result within {RESULTS_TIMEOUT_S} s: the kernel likely read out of bounds"
-        )
+    return result(results, key)
 
 
 @requires_gfx942_gpu

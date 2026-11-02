@@ -81,6 +81,13 @@ from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
 
+from kernels.common._attention_kv_seq_tail import (
+    buffer_offset_in_rows_left,
+    buffer_offset_in_sequence,
+    last_row_in_sequence,
+    rows_in_sequence,
+)
+
 
 MFMA_M = 16
 MFMA_N = 16
@@ -2121,7 +2128,7 @@ def build_unified_attention_2d_tiled(
     # next row, or padding). GUARD the indirect lookup with the sequence's
     # entries, and the table's end, so those lookups return ``0`` (a
     # guaranteed-valid block id). Downstream causal / in_prefix masks
-    # discard the tokens.
+    # discard the tokens; V loads zero for them (_attention_kv_seq_tail).
     block_table_max_idx = b.to_sgpr_u32(
         b.smin(
             b.add(
@@ -2368,7 +2375,9 @@ def build_unified_attention_2d_tiled(
                 k_rsrc, k_dst, voff, zero_soff, 4, coherency=CACHE_STREAM
             )
 
-    def _issue_v_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_v_load_runtime(
+        kv_tile_idx: Value, buf_idx: Value, v_tail: bool = True
+    ) -> None:
         """Issue async V loads for one tile into V_lds[0] (single-buffered).
 
         When V is single-buffered, ``buf_idx`` is ignored (always slot 0):
@@ -2390,8 +2399,25 @@ def build_unified_attention_2d_tiled(
         elif LANE_FREE_PAGES:
             blocks = [_copy_block(c, HD) for c in range(kv_calls_per_tile)]
             page_ids = _tile_page_ids(kv_tile_idx, blocks)
+        # Rows past the sequence load zero: see _attention_kv_seq_tail.
+        whole_rows = KV_HALVES_PER_CALL % HD == 0
+        if v_tail:
+            v_rows = rows_in_sequence(b, seq_len, kv_tile_idx, T)
+            if whole_rows:
+                # A copy covers whole rows, so its row is the lane's first row plus an
+                # immediate: one subtraction per tile, then one compare with an immediate
+                # per copy. With one row per copy every lane's row is 0 and the bound is
+                # wave-uniform.
+                uniform_rows = KV_HALVES_PER_CALL == HD
+                lane_row = (
+                    b.const_i32(0)
+                    if uniform_rows
+                    else b.div(lane_half_base, b.const_i32(HD))
+                )
+                rows_left = b.sub(v_rows, lane_row)
         for call in range(kv_calls_per_tile):
             v_rsrc = value_rsrc
+            linear_half = None
             if FAST_PAGED_KV_DESC:
                 base_i64, voff = _fast_paged_kv_voff(call, fast_block0, fast_block1)
                 if base_i64 is not None:
@@ -2428,6 +2454,21 @@ def build_unified_attention_2d_tiled(
                         linear_half=linear_half,
                         kv_head=kv_head_idx,
                     )
+            if v_tail and whole_rows:
+                voff = buffer_offset_in_rows_left(
+                    b,
+                    voff,
+                    rows_left,
+                    call * (KV_HALVES_PER_CALL // HD),
+                    uniform=uniform_rows,
+                )
+            elif v_tail:
+                if linear_half is None:
+                    linear_half = b.add(
+                        b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
+                    )
+                row = b.div(linear_half, b.const_i32(HD))
+                voff = buffer_offset_in_sequence(b, voff, row, v_rows)
             v_dst = b.smem_ptr_add(V_wave_base, b.const_i64(call * bytes_per_call))
             # CACHE_STREAM (SLC): V is consumed once per iter and never
             # re-read within this kernel; see _issue_k_load_runtime for
@@ -2660,6 +2701,8 @@ def build_unified_attention_2d_tiled(
             f"{fp8_elems_per_chunk}); the packed-cvt path needs the chunk "
             f"to split cleanly into 2× <4 x fp8> sub-chunks."
         )
+        if lds_token == "V":  # V rows past the sequence read its last row instead
+            v_last_row = last_row_in_sequence(b, seq_len, kv_tile_idx, T)
         for call in range(fp8_chunks_per_thread):
             chunk_id = b.add(
                 b.mul(b.const_i32(call), b.const_i32(THREADS)),
@@ -2670,8 +2713,10 @@ def build_unified_attention_2d_tiled(
                 b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
                 b.const_i32(fp8_elems_per_chunk),
             )
+            # V: the global row it is read from; the LDS row stays ``row``.
+            src_row = b.smin(row, v_last_row) if lds_token == "V" else row
             linear_half_first = b.add(
-                b.mul(row, b.const_i32(HD)),
+                b.mul(src_row, b.const_i32(HD)),
                 col,
             )
             if I64_KV_ADDR:
@@ -2851,6 +2896,8 @@ def build_unified_attention_2d_tiled(
         row), col%16 is always 0 or 8 — both 8-byte-aligned, so the LDS
         vec store stays b64 and there is no scalar-byte regression.
         """
+        # Rows past the sequence read its last row instead.
+        last_row = last_row_in_sequence(b, seq_len, kv_tile_idx, T)
         for call in range(fp8_chunks_per_thread):
             chunk_id = b.add(
                 b.mul(b.const_i32(call), b.const_i32(THREADS)),
@@ -2861,7 +2908,9 @@ def build_unified_attention_2d_tiled(
                 b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
                 b.const_i32(fp8_elems_per_chunk),
             )
-            linear_first = b.add(b.mul(token, b.const_i32(HD)), col)
+            # The global row it is read from; the LDS row stays ``token``.
+            src_token = b.smin(token, last_row)
+            linear_first = b.add(b.mul(src_token, b.const_i32(HD)), col)
             voff, _ = paged_kv_desc.offset(
                 b,
                 tile_idx=kv_tile_idx,
@@ -2900,7 +2949,7 @@ def build_unified_attention_2d_tiled(
         else:
             _issue_k_load_runtime(tile_idx, buf_idx)
 
-    def _issue_v(tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_v(tile_idx: Value, buf_idx: Value, v_tail: bool = True) -> None:
         """Issue a V load (single-buffered). See `_issue_k` for FP8 notes.
 
         ``V_lds`` is allocated with ``V_BUFS=1`` so only slot 0 is valid.
@@ -2923,7 +2972,7 @@ def build_unified_attention_2d_tiled(
         elif KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, b.const_i32(0), "V")
         else:
-            _issue_v_load_runtime(tile_idx, buf_idx)
+            _issue_v_load_runtime(tile_idx, buf_idx, v_tail)
 
     def _read_k8_mfma_operand(buf_idx: Value, k_row: Value, k_off: Value) -> Value:
         """Read 8 K elements from K_lds as the bf16 MFMA operand.
@@ -3282,7 +3331,7 @@ def build_unified_attention_2d_tiled(
     # Kept as a single masked loop. ``skip_mask`` is wired through (always
     # False here) so the experiment can be re-tried behind a flag if a future
     # change makes the kernel throughput-bound.
-    def _emit_kv_body(kv_tile_iv, carry, skip_mask):
+    def _emit_kv_body(kv_tile_iv, carry, skip_mask, v_tail=True):
         m_vals = [carry[2 * r] for r in range(SOFTMAX_STATE_SLOTS)]
         l_vals = [carry[2 * r + 1] for r in range(SOFTMAX_STATE_SLOTS)]
         ml_count = 2 * SOFTMAX_STATE_SLOTS
@@ -3428,12 +3477,12 @@ def build_unified_attention_2d_tiled(
                 # and is now drained-ready by the iter-start wait above. Prefetch
                 # V[i+1] into the alternate slot so it overlaps this whole iter
                 # (QK + softmax + PV) and is ready at the next iter-start drain.
-                _issue_v(safe_next_tile, nxt_buf)
+                _issue_v(safe_next_tile, nxt_buf, v_tail)
             else:
                 # V_lds is single-buffered. The iter-start full drain guarantees
                 # the previous PV's V reads retired, so current V can be issued
                 # before QK and overlap with QK + softmax.
-                _issue_v(kv_tile_iv, cur_buf)
+                _issue_v(kv_tile_iv, cur_buf, v_tail)
         if GROUPED_KV2:
             # Prototype schedule: while QK0 reads cur_buf, prefetch QK1 into
             # nxt_buf. This keeps the two K tiles resident simultaneously but
@@ -3892,10 +3941,10 @@ def build_unified_attention_2d_tiled(
             # (ring_pf_buf == (cur_buf+2)%3) so 3 K tiles stay resident. V[i] is
             # issued BEFORE the K prefetch so it is the older op in the queue and
             # the PV partial-wait can drain it while K[i+2] streams.
-            _issue_v(kv_tile_iv, cur_buf)
+            _issue_v(kv_tile_iv, cur_buf, v_tail)
             _issue_k(ring_pf_tile, ring_pf_buf)
         elif GROUPED_KV2:
-            _issue_v(kv_tile_iv, cur_buf)
+            _issue_v(kv_tile_iv, cur_buf, v_tail)
             # Both K buffers have been consumed by QK0/QK1. Refill cur_buf
             # with the next group's first K tile and carry cur_buf forward.
             _issue_k(safe_next_tile, cur_buf)
@@ -3906,11 +3955,11 @@ def build_unified_attention_2d_tiled(
             # op at the next iter-start (lets the staggered partial wait drain
             # only K and leave V streaming). PV reads V[i] from cur_buf.
             _issue_k(safe_next_tile, nxt_buf)
-            _issue_v(safe_next_tile, nxt_buf)
+            _issue_v(safe_next_tile, nxt_buf, v_tail)
         elif V_DOUBLE_BUF:
             # V[i] (cur_buf) already prefetched; prefetch V[i+1] + K[i+1] into
             # the alternate slot to overlap this iter (PV reads V[i] from cur_buf).
-            _issue_v(safe_next_tile, nxt_buf)
+            _issue_v(safe_next_tile, nxt_buf, v_tail)
             _issue_k(safe_next_tile, nxt_buf)
         elif K_SINGLE_BUFFER:
             # single K slot: issue V[i] now (overlaps softmax), but DEFER the
@@ -3918,9 +3967,9 @@ def build_unified_attention_2d_tiled(
             # WAR-race QK[i]'s ds_reads (the documented gfx942 naive-single-buffer
             # race). K[i+1] is re-issued after the PV-wait s_barrier below, where
             # all QK[i] reads are guaranteed retired. K[i+1] then overlaps PV[i].
-            _issue_v(kv_tile_iv, cur_buf)
+            _issue_v(kv_tile_iv, cur_buf, v_tail)
         else:
-            _issue_v(kv_tile_iv, cur_buf)
+            _issue_v(kv_tile_iv, cur_buf, v_tail)
             _issue_k(safe_next_tile, nxt_buf)
 
         # ---- mask / scale / softcap / alibi / qq-bias ----
@@ -4341,7 +4390,7 @@ def build_unified_attention_2d_tiled(
                     # accumulate tile1's PV into the already scaled block acc.
                     b.s_waitcnt(lgkmcnt=0)
                     b.sync()
-                    _issue_v(safe_tile1, nxt_buf)
+                    _issue_v(safe_tile1, nxt_buf, v_tail)
                     b.s_waitcnt(vmcnt=0, lgkmcnt=0)
                     b.sync()
                     for n in range(ACC_N_TILES):
@@ -4595,6 +4644,8 @@ def build_unified_attention_2d_tiled(
     # softmax/acc/buffer carry is threaded from one phase into the next via
     # ``scf_for_iter`` results so the second loop resumes exactly where the
     # first left off (same K/V double-buffer slot, same online-softmax state).
+    # 1 when the body also loads the next tile's V, which may reach past the sequence.
+    v_lookahead = 1 if (GROUPED_KV2 or V_DOUBLE_BUF) else 0
     MASK_PHASE_SPLIT = (
         bool(spec.use_mask_phase_split)
         and TRANSPOSED_MASK_LIMIT
@@ -4630,7 +4681,9 @@ def build_unified_attention_2d_tiled(
             tile_start, split, kv_step, iter_args, iv_name="kv_tile_f"
         )
         with loop1 as (kv_tile_iv, carry):
-            _emit_kv_body(kv_tile_iv, carry, True)
+            # Its tiles lie inside the sequence: V needs no tail handling there
+            # unless the body also loads the next tile's V.
+            _emit_kv_body(kv_tile_iv, carry, True, v_tail=v_lookahead > 0)
         # thread loop1 results into loop2's iter_args. The iter_arg NAMES seed the
         # minted SSA value names, so loop2 MUST use distinct names or the two
         # loops collide ("multiple definition of local value 'm0'"). Suffix them.
