@@ -194,5 +194,52 @@ def bench_yaml(problems: Iterable[GemmProblem]) -> str:
             row["aux_type"] = _datatype_name(problem, problem.aux_type)
         row.update(zip(("lda", "ldb", "ldc", "ldd"), problem.leading_dimensions))
         row.update(zip(("stride_a", "stride_b", "stride_c", "stride_d"), problem.batch_strides))
+        if problem.grouped_members is not None:
+            members = problem.grouped_members
+            if not 2 <= len(members) <= 32 or members[0] != (problem.m, problem.n, problem.k):
+                raise ValueError(
+                    "Grouped problems need 2–32 members and the first descriptor shape"
+                )
+            if any(
+                len(member) != 3 or any(type(size) is not int or size <= 0 for size in member)
+                for member in members
+            ):
+                raise ValueError("Grouped member sizes must be three positive integers")
+            for key in (
+                "M",
+                "N",
+                "K",
+                "lda",
+                "ldb",
+                "ldc",
+                "ldd",
+                "stride_a",
+                "stride_b",
+                "stride_c",
+                "stride_d",
+            ):
+                del row[key]
+            row["grouped_gemm"] = len(members)
+            row["matrix_size"] = [dict(zip(("M", "N", "K"), member)) for member in members]
+            # Grouped GEMM uses the extension API and derives each member's
+            # packed leading dimensions and strides from matrix_size.
+            row["use_ext"] = True
+            if problem.a_type != problem.b_type:
+                # The descriptor-based grouped API rejects mixed A/B storage.
+                # The dimension-based C++ API derives both compute inputs from
+                # its compute enum rather than the descriptor overrides.
+                inputs = (problem.compute_input_a, problem.compute_input_b)
+                mixed_compute = {
+                    ("Half", "Half"): "c_f32_fast_f16_r",
+                    ("BFloat16", "BFloat16"): "c_f32_fast_bf16_r",
+                }
+                if problem.compute_type != "Float" or inputs not in mixed_compute:
+                    raise UnsupportedBenchProblem(
+                        problem.solution_index, f"mixed grouped compute inputs {inputs}"
+                    )
+                row["use_ext_setproblem"] = True
+                row["compute_type"] = mixed_compute[inputs]
+            if problem.scale_ab is not None:
+                row["scaleA"] = row["scaleB"] = problem.scale_ab
         rows.append(row)
     return yaml.dump(rows, Dumper=getattr(yaml, "CSafeDumper", yaml.SafeDumper), sort_keys=False)

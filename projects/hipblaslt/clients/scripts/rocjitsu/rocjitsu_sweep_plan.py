@@ -547,9 +547,16 @@ def make_plan(
                 problem, job["bench_yaml"] = planned
                 job["target_dispatches_per_case"] = 1
                 job["cases"] = [{"id": "regular", "shape": [problem.m, problem.n, 1, problem.k]}]
-                if (
-                    problem.m * problem.k + problem.n * problem.k + 2 * problem.m * problem.n
-                ) * 16 > 128 * 1024 * 1024:
+                if problem.grouped_members is not None:
+                    job["cases"][0]["grouped_shapes"] = [
+                        [m, n, 1, k] for m, n, k in problem.grouped_members
+                    ]
+                members = (
+                    problem.grouped_members
+                    if problem.grouped_members is not None
+                    else ((problem.m, problem.n, problem.k),)
+                )
+                if sum(m * k + n * k + 2 * m * n for m, n, k in members) * 16 > 128 * 1024 * 1024:
                     raise ValueError("Case exceeds 128 MiB estimated data-buffer budget")
             elif not ordinary_problem(s["problemType"]):
                 job["planning_outcome"] = "UNSUPPORTED_FEATURE"

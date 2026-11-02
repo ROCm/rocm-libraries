@@ -161,6 +161,81 @@ def failure_list():
 
 class SweepTests(unittest.TestCase):
 
+    def grouped_job_and_log(self, status="PASSED"):
+        j = job()
+        j.update(
+            target_dispatches_per_case=1,
+            cases=[
+                {
+                    "id": "regular",
+                    "shape": [64, 96, 1, 96],
+                    "grouped_shapes": [[64, 96, 1, 96], [128, 192, 1, 192]],
+                }
+            ],
+        )
+        text = bench_case_log([j], [status])
+        text = text.replace("[0]:m,n,batch_count,k,", "[0]:grouped_gemm,m,n,batch_count,k,")
+        text = text.replace("64,96,1,96,", "2,(64,128),(96,192),1,(96,192),")
+        return j, text
+
+    def test_grouped_bench_validates_every_member_and_one_dispatch(self):
+        j, text = self.grouped_job_and_log()
+        (result,) = sweep.classify_bench_batch([j], text, 0)
+        self.assertEqual(result["outcome"], "PASS")
+        self.assertEqual(result["cases"][0]["grouped_shapes"], j["cases"][0]["grouped_shapes"])
+        self.assertEqual(result["target_dispatches"], 1)
+        changes = [
+            ("(64,128)", "(64,64)"),
+            ("(96,192)", "(96,96)"),
+            ("2,(64,128)", "3,(64,128)"),
+            ("2,(64,128)", "2,64"),
+            ("(96,192),1,", "(96,192),2,"),
+            ("--Solution index: 7", "--Solution index: 8"),
+            (sweep.target_dispatch_line(j), ""),
+            ("[hipblaslt-case-v1] RESULT 7 PASSED\n", ""),
+        ]
+        for before, after in changes:
+            with self.subTest(change=after):
+                (result,) = sweep.classify_bench_batch([j], text.replace(before, after), 0)
+                self.assertTrue(result["failed"])
+        ordinary = copy.deepcopy(j)
+        del ordinary["cases"][0]["grouped_shapes"]
+        self.assertTrue(sweep.classify_bench(ordinary, text, 0)["failed"])
+        self.assertTrue(sweep.classify_bench(j, bench_case_log([j]), 0)["failed"])
+
+    def test_grouped_bench_requires_native_verdict_and_preserves_failure(self):
+        j, text = self.grouped_job_and_log("FAILED")
+        (result,) = sweep.classify_bench_batch([j], text, 1)
+        self.assertEqual(result["outcome"], "NUMERICAL_FAILED")
+        self.assertEqual(result["cases"][0]["status"], "FAILED")
+        self.assertEqual(result["cases"][0]["grouped_shapes"], j["cases"][0]["grouped_shapes"])
+        j, text = self.grouped_job_and_log()
+        legacy = "\n".join(
+            line for line in text.splitlines() if not line.startswith("[hipblaslt-case-v1]")
+        )
+        self.assertTrue(sweep.classify_bench(j, legacy, 0)["failed"])
+
+    def test_grouped_plan_records_members_and_counts_all_buffer_memory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [
+                solution(7),
+                solution(8, tile=(1536, 1536, 1)),
+                solution(9, tile=(1536, 1536, 1)),
+            ]
+            for record in records[:2]:
+                record["problemType"]["groupedGemm"] = True
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"object")
+            manifest = plan.make_plan(root, "gfx942", {}, 7, 10, policy=plan.REGULAR_POLICY)
+            grouped, oversized, ordinary = manifest["jobs"]
+            self.assertEqual(grouped["cases"][0]["grouped_shapes"], [[64, 96, 1, 256]] * 2)
+            self.assertEqual(yaml.safe_load(grouped["bench_yaml"])[0]["grouped_gemm"], 2)
+            self.assertEqual(oversized["planning_outcome"], "INVALID_INPUT")
+            self.assertIn("data-buffer budget", oversized["planning_error"])
+            self.assertNotIn("planning_error", ordinary)
+
     def protocol_jobs(self, count=3):
         jobs = []
         for i in range(count):

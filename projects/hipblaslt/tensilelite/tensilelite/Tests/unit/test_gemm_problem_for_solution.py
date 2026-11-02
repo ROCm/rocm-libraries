@@ -258,7 +258,6 @@ def test_legacy_persistent_scheduling_matches_canonical(tmp_path, mode, force, s
 @pytest.mark.parametrize(
     "key,value",
     [
-        ("groupedGemm", True),
         ("sparse", 1),
         ("useE", True),
         ("activationType", "Gelu"),
@@ -354,6 +353,74 @@ def test_aux_requires_an_allowed_relu(tmp_path):
     write_shard(tmp_path, [epilogue_solution(aux=True, sources=(3,), activations=["Gelu"])])
     with pytest.raises(UnsupportedSolution, match="Relu not allowed"):
         load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+
+
+@pytest.mark.parametrize("bias,scaling", [(False, ""), (True, ""), (True, "Scalar")])
+def test_grouped_problem_uses_two_packed_members_and_required_options(tmp_path, bias, scaling):
+    record = solution(trans_a=True, split=4)
+    record["problemType"].update(
+        groupedGemm=True,
+        useBias=int(bias),
+        biasDataTypeWhiteList=["Half", "Float"],
+        biasSrcWhiteList=[3],
+        useScaleAB=scaling,
+    )
+    write_shard(tmp_path, [record])
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(
+        17, reduction_blocks=3, alpha=2, beta=1
+    )
+    assert problem.grouped_members == ((128, 96, 384), (128, 96, 384))
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert row["matrix_size"] == [{"M": 128, "N": 96, "K": 384}] * 2
+    assert (row["grouped_gemm"], row["batch_count"], row["use_ext"]) == (2, 1, True)
+    assert (row["alpha"], row["beta"]) == (2, 1)
+    assert row["bias_vector"] == bias
+    if bias:
+        assert (row["bias_type"], row["bias_source"]) == ("f32_r", "d")
+    assert row["scaleA"] == row["scaleB"] == (scaling or "none")
+    assert not set(row) & {"M", "N", "K", "lda", "ldb", "ldc", "ldd", "stride_a"}
+    assert row["norm_check"] and row["norm_check_assert"] and row["allclose_check"]
+    assert (row["iters"], row["cold_iters"], row["solution_index"]) == (0, 0, 17)
+
+
+def test_grouped_bench_derives_layouts_for_each_member(tmp_path):
+    write_shard(tmp_path, [solution()])
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    problem = replace(problem, grouped_members=((128, 96, 256), (256, 192, 512)))
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert row["matrix_size"] == [{"M": 128, "N": 96, "K": 256}, {"M": 256, "N": 192, "K": 512}]
+    with pytest.raises(ValueError, match="first descriptor"):
+        bench_yaml([replace(problem, grouped_members=((256, 192, 512), (128, 96, 256)))])
+    with pytest.raises(ValueError, match="positive integers"):
+        bench_yaml([replace(problem, grouped_members=((128, 96, 256), (256, 192, 0)))])
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("output", ["Half", "Float"])
+def test_mixed_grouped_fp8_fp16_uses_cpp_api_with_half_compute_inputs(tmp_path, reverse, output):
+    record = solution()
+    record["problemType"].update(
+        groupedGemm=True,
+        aType="Half" if reverse else "Float8_fnuz",
+        bType="Float8_fnuz" if reverse else "Half",
+        cType=output,
+        dType=output,
+        computeInputTypeA="Half",
+        computeInputTypeB="Half",
+        useScaleAB="Scalar",
+    )
+    write_shard(tmp_path, [record])
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert row["use_ext"] and row["use_ext_setproblem"]
+    assert row["compute_type"] == "c_f32_fast_f16_r"
+    assert row["compute_input_typeA"] == row["compute_input_typeB"] == "f16_r"
+    assert (row["a_type"], row["b_type"]) == (
+        ("f16_r", "f8_fnuz_r") if reverse else ("f8_fnuz_r", "f16_r")
+    )
+    assert row["scaleA"] == row["scaleB"] == "Scalar"
+    with pytest.raises(UnsupportedBenchProblem, match="mixed grouped compute inputs"):
+        bench_yaml([replace(problem, compute_input_a="Float8_fnuz")])
 
 
 @pytest.mark.parametrize("dtype", ["Float4", "Float8"])
@@ -785,7 +852,7 @@ def test_sweep_can_continue_only_for_explicit_unsupported_cases(tmp_path):
         except UnsupportedSolution as error:
             gaps[error.solution_index] = error.reasons
     assert [p.solution_index for p in executed] == [17]
-    assert set(gaps[9]) == {"groupedGemm", "useGateResidual"}
+    assert set(gaps[9]) == {"useGateResidual"}
     # A broken record must escape the sweep's UnsupportedSolution handler.
     broken = solution(0)
     del broken["sizeMapping"]["depthU"]

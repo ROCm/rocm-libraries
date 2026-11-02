@@ -20,12 +20,19 @@ print(problem.m, problem.n, problem.k)
 ```
 
 Keep `library` and reuse it for subsequent indices. `library.indices` lists the
-loaded indices, including features not implemented yet, such as grouped GEMM
-and required gradient operations. Repeating a choice with the same
+loaded indices, including features not implemented yet, such as required gradient
+operations. Repeating a choice with the same
 arguments returns an equal problem description, without more file reads or GPU
 work. `reduction_blocks` requests a number of complete K blocks;
 changing it changes the chosen K size as described below. The optional `alpha`
 and `beta` arguments select real scalar values; they default to 1 and 0.
+
+For a grouped solution, the descriptor includes two `(M, N, K)` members in
+`grouped_members`. Both have the chosen shape and independent buffers. The
+bench adapter derives each member's packed layout, enables a supported bias
+datatype and scalar input scaling, and validates both outputs in one dispatch.
+Mixed FP8/FP16 storage uses the C++ grouped API with the solution's FP16 compute
+inputs; the descriptor-based grouped API requires matching A/B storage types.
 
 If the indices are already known, load them together:
 
@@ -290,7 +297,7 @@ else:
     print("Every loaded index produced a problem")
 ```
 
-Current exclusions include adaptive split-K, grouped or sparse GEMM,
+Current exclusions include adaptive split-K, sparse GEMM,
 gate residuals, unusual
 layouts and contractions, and different C/D storage types. Record the reason
 and continue a sweep if desired. Catch only `UnsupportedSolution`; malformed

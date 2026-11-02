@@ -73,8 +73,13 @@ report record these parameters and each chosen shape; resume rejects a changed
 workload. Nonzero beta exercises reading C. Integer computation requires integral
 scalars, and complex imaginary parts remain zero. The native runtime assigns persistent work;
 this small shape does not exercise every Stream-K scheduling/reduction path.
-Optional epilogues are disabled; gradient, E and amaxD outputs that a solution
-requires are enabled with their bias and ReLU. This supports double, complex, FNUZ and MX
+Grouped solutions run two independent members of the chosen shape in one group.
+The bench checks both outputs, and the parser requires every reported member's
+dimensions to match the plan, an explicit native verdict and one target dispatch.
+Grouped bias uses a supported datatype from the solution's whitelist, and scalar
+input scaling is enabled when its metadata requires it. Other optional epilogues
+are disabled, except that gradient, E and amaxD outputs that a solution requires
+are enabled with their bias and ReLU. This supports double, complex, FNUZ and MX
 operands as well as the initial real types. MX block sizes, scale datatypes and
 scale layout come from metadata; the native client initializes the operands and
 scales and computes the numerical reference. MX uses bounded HPL input values.

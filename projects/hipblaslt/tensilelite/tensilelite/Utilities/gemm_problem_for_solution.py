@@ -242,7 +242,7 @@ class GemmBias:
 
 @dataclass(frozen=True, slots=True)
 class GemmProblem:
-    """A packed matrix multiplication and the information needed to select its kernel.
+    """Packed matrix multiplications and the information needed to select their kernel.
 
     The index, solution/kernel names, library directory and GPU target identify
     the chosen solution within one library build.
@@ -251,11 +251,13 @@ class GemmProblem:
     follows the solution's outputs: ``gradient`` computes a bias gradient;
     ``aux_type`` is the E tensor's type when the solution has E (written
     forward, read with a gradient), otherwise None; ``bias`` accompanies
-    gradient and E; ``activation`` is "Relu" with E, meaning its derivative when
+    gradient and E, and grouped solutions that use one; ``activation`` is "Relu" with E, meaning its derivative when
     ``gradient`` is set; ``amax_d`` also returns the absolute maximum of D.
     Native execution still checks solution support.
     MX block sizes of zero mean unscaled operands. MX scale format is 0 for
     ordinary scales, 1 for host-preswizzled gfx950 scales, or 2 for gfx1250 TDM.
+    ``grouped_members`` is None for a single GEMM, or the ordered (M, N, K)
+    shapes in a grouped dispatch. The scalar dimensions describe its first member.
     """
 
     solution_index: int
@@ -290,6 +292,8 @@ class GemmProblem:
     bias: GemmBias | None = None
     activation: str = "None"
     amax_d: bool = False
+    grouped_members: tuple[tuple[int, int, int], ...] | None = None
+    scale_ab: str | None = None
 
     @property
     def leading_dimensions(self) -> tuple[int, int, int, int]:
@@ -353,6 +357,8 @@ class LibraryMetadata:
 
         Raise UnsupportedSolution for explicitly unimplemented features. Invalid
         indices, missing fields and malformed metadata remain ordinary errors.
+        A grouped solution gets two members of the chosen shape with independent
+        buffers, using its supported bias datatype and scalar input scaling.
         """
         if type(solution_index) is not int or solution_index < 0:
             raise ValueError("solution_index must be a nonnegative integer")
@@ -401,10 +407,9 @@ class LibraryMetadata:
         reasons = []
         if mapping.get("adaptiveGemmGSUA", 0):
             reasons.append("adaptive split-K")
-        # TODO(newling): Add grouped and sparse GEMM, gate residuals and the
-        # excluded matrix layouts (AIHPBLAS-3605).
+        # TODO(newling): Add sparse GEMM, gate residuals and the excluded matrix
+        # layouts (AIHPBLAS-3605).
         unsupported = (
-            "groupedGemm",
             "fusedGemmA2A",
             "sparse",
             "useGateResidual",
@@ -466,6 +471,24 @@ class LibraryMetadata:
             reduction_multiple,
             record.get("sizePredicates", ()),
         )
+        grouped_members, scale_ab = None, None
+        if p.get("groupedGemm"):
+            # Two independent buffers exercise the grouped dispatch; each member
+            # satisfies the same serialized size predicates as the first.
+            grouped_members = ((m, n, k), (m, n, k))
+            if p.get("useBias") and "bias" not in epilogue:
+                if p["useBias"] != 1 or 3 not in p["biasSrcWhiteList"]:
+                    raise UnsupportedSolution(solution_index, ["grouped bias outside D rows"])
+                choices = p["biasDataTypeWhiteList"] or [p["computeType"]]
+                bias_type = p["computeType"] if p["computeType"] in choices else choices[0]
+                if bias_type not in TYPE_PROPERTIES:
+                    raise ValueError(
+                        f"Solution {solution_index}: unknown bias datatype {bias_type!r}"
+                    )
+                epilogue["bias"] = GemmBias(bias_type, "D")
+            scale_ab = p.get("useScaleAB") or None
+            if scale_ab not in {None, "Scalar"}:
+                raise UnsupportedSolution(solution_index, [f"grouped input scaling {scale_ab}"])
         return GemmProblem(
             solution_index,
             record["name"],
@@ -495,6 +518,8 @@ class LibraryMetadata:
             alpha=alpha,
             beta=beta,
             **epilogue,
+            grouped_members=grouped_members,
+            scale_ab=scale_ab,
         )
 
 

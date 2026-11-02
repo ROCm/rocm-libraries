@@ -597,8 +597,8 @@ def classify_bench(job, text, returncode):
             headers = next(csv.reader([header[1]]))
             continue
         if headers is not None:
-            # Bench prints complex alpha/beta as unquoted (real,imag) scalars.
-            # Protect those commas before parsing its otherwise scalar CSV row.
+            # Bench prints grouped dimensions and complex scalars in unquoted
+            # parentheses. Keep their commas inside one CSV field.
             row = next(
                 csv.reader(
                     [
@@ -627,9 +627,27 @@ def classify_bench(job, text, returncode):
     solution = job["solutions"][0]
     for row in records:
         try:
-            shape = tuple(int(row[k]) for k in ("m", "n", "batch_count", "k"))
+            group_size = int(row.get("grouped_gemm", 0))
+            grouped_shapes = None
+            if group_size:
+                dimensions = []
+                for key in ("m", "n", "k"):
+                    value = row[key]
+                    if not re.fullmatch(r"\(\d+(?:,\d+)+\)", value):
+                        raise ValueError(f"Invalid grouped {key} dimensions: {value}")
+                    sizes = tuple(map(int, value[1:-1].split(",")))
+                    if len(sizes) != group_size:
+                        raise ValueError(f"Grouped {key} count differs from grouped_gemm")
+                    dimensions.append(sizes)
+                batch = int(row["batch_count"])
+                grouped_shapes = [[m, n, batch, k] for m, n, k in zip(*dimensions)]
+                shape = tuple(grouped_shapes[0])
+            else:
+                shape = tuple(int(row[k]) for k in ("m", "n", "batch_count", "k"))
             if shape not in expected:
                 raise ValueError(f"Unplanned bench case: {shape}")
+            if grouped_shapes != expected[shape].get("grouped_shapes"):
+                raise ValueError(f"Grouped bench members differ from the planned shapes: {shape}")
             if shape in cases:
                 raise ValueError(f"Duplicate bench case: {shape}")
             if (
@@ -639,7 +657,7 @@ def classify_bench(job, text, returncode):
             ):
                 raise ValueError(f"Wrong bench solution/kernel identity: {shape}")
             native = row["native_verdict"]
-            if explicit_verdicts and (
+            if (explicit_verdicts or grouped_shapes is not None) and (
                 native is None
                 or native[0] != solution["index"]
                 or native[1] not in {"PASSED", "FAILED", "NOT_CHECKED"}
@@ -675,6 +693,8 @@ def classify_bench(job, text, returncode):
                 "solution_name": row["Solution name"],
                 "kernel": row["kernel name"],
             }
+            if grouped_shapes is not None:
+                cases[shape]["grouped_shapes"] = grouped_shapes
             if row["target_dispatches"] != job.get("target_dispatches_per_case", 2):
                 errors.append(
                     f"Case {shape}: unexpected target dispatches ({row['target_dispatches']})"
