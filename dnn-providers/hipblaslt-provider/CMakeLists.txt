@@ -100,6 +100,7 @@ list(
     -Wunreachable-code # Warn about unreachable code
     -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
     -Wswitch-default # Warn if a switch statement does not have a default case
+    -Wundef # Warn about #if on an undefined macro, e.g. a deleted WORKAROUND_ISSUE_* switch
     -Wno-ignored-attributes # disable warning about unused declspec(dllexport)
 )
 

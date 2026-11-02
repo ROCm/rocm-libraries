@@ -38,6 +38,19 @@
 // `TestGpuHipblasltMxMatmulPlanBuilder.IsApplicableRejectsFp8AWithFp6B` and add the
 // four `MxMixedConfig<FP8_*, FP6_*>` pairings to `MxMixedConfigs` in that same file.
 // ----------------------------------------------------------------------------
+// ROCm/rocm-libraries#14286 — hipBLASLt selects MX kernels without matching their
+// scale layout to the scale mode. A Tensile MX kernel reads one of three layouts
+// (NoSwizzle, gfx950 HostPreSwizzle, gfx1250 InMemorySwizzle), and the heuristic
+// ignores it: with HIPBLASLT_USE_ROCROLLER=0 on gfx950, VEC32_UE8M0 (documented as
+// natural scales) selects HostPreSwizzle kernels, and on gfx1250 it selects
+// InMemorySwizzle kernels, whose layout no scale mode documents. Both silently
+// return wrong results unless the scales match the kernel.
+//
+// WORKAROUND_ISSUE_14286 enables a guard in the MX plan: it reads the selected
+// kernel's layout from its name (the `_MXSF` token, or rocRoller), declines when it
+// does not match the scales the plan prepares, and feeds natural scales to a gfx1250
+// NoSwizzle kernel.
+// ----------------------------------------------------------------------------
 
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
@@ -93,3 +106,5 @@
             return false;                                                           \
         }                                                                           \
     } while(0)
+
+#define WORKAROUND_ISSUE_14286 1
