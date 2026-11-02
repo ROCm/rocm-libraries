@@ -107,10 +107,23 @@ class WgradReduceSpec:
     # The Stage 1 slabs hold bf16 partials (WgradConvSpec.ws_store 2): load
     # bf16, fold in f32. Needs vec > 1. Default False: unchanged.
     ws_bf16: bool = False
+    # Deterministic many-slab fold (det-wgrad): > 0 = the R slabs are folded
+    # by a loop instead of the flat unroll -- ``fold_loop`` slab loads per
+    # iteration, each thread summing its slabs strictly in slab order -- for
+    # the per-slice slabs of ws_store at large split degrees, where R loads
+    # per thread would not fit the registers. Needs vec > 1. Tags ``fl<n>``.
+    # Default 0: unchanged.
+    fold_loop: int = 0
+    # With fold_loop: the slabs are spread over ``slab_par`` thread groups
+    # of tile_m * tile_n threads (group p folds slabs p, p + P, ... in
+    # order); the P partials are then summed in group order through LDS.
+    # The workgroup is tile_m * tile_n * slab_par threads. Tags ``sp<n>``.
+    # Default 1.
+    slab_par: int = 1
 
     @property
     def block_size(self) -> int:
-        return self.tile_m * self.tile_n
+        return self.tile_m * self.tile_n * max(1, self.slab_par)
 
     @property
     def wg_M(self) -> int:
@@ -133,6 +146,10 @@ class WgradReduceSpec:
             parts.append(f"rz{self.rezero}")
         if self.ws_bf16:
             parts.append("wsb")
+        if self.fold_loop:
+            parts.append(f"fl{self.fold_loop}")
+        if self.slab_par > 1:
+            parts.append(f"sp{self.slab_par}")
         parts.append(self.dtype_d)
         return kernel_name_join(self.name, *parts)
 
@@ -195,6 +212,9 @@ def build_conv_wgrad_workspace_reduce(
 
     # Thread flat index within the workgroup.
     tid = b.thread_id_x()
+    if spec.fold_loop:
+        _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid)
+        return b.kernel
 
     # Grid is (ceil(wg_N/tile_n), ceil(wg_M/tile_m), groups):
     #   blockIdx.x — N tiles, blockIdx.y — M tiles (local within group),
@@ -314,6 +334,112 @@ def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, gr
             b.global_store_vN(dw_ptr, dw_off, b.vec_pack(tot, F32), v)
         else:
             b.global_store_vN(dw_ptr, dw_off, pack_f32_to(b, tot, dtype=spec.dtype_d), v)
+
+
+def _emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, tid):
+    """``fold_loop``: deterministic fold of R = ws_replicas slabs (ungrouped).
+
+    Thread (p, e): e = tid % (tile_m * tile_n) owns ``vec`` consecutive N
+    elements of the tile (as the vector fold), p = tid // (tile_m * tile_n)
+    folds slabs p, p + P, p + 2P, ... in that order into an f32 accumulator.
+    The P partials are added in p order (LDS). Every association is fixed at
+    compile time: the result is bitwise reproducible.
+    """
+    from rocke.helpers.io import pack_f32_to
+
+    if spec.vec <= 1:
+        raise ValueError("WgradReduceSpec.fold_loop needs vec > 1")
+    if spec.rezero or spec.groups > 1:
+        raise ValueError("WgradReduceSpec.fold_loop: no rezero, ungrouped only")
+    v = spec.vec
+    R = spec.ws_replicas
+    P = max(1, spec.slab_par)
+    U = spec.fold_loop
+    TE = spec.tile_m * spec.tile_n
+    p_v = b.div(tid, b.const_i32(TE)) if P > 1 else None
+    e_v = b.mod(tid, b.const_i32(TE)) if P > 1 else tid
+    t_m = b.div(e_v, b.const_i32(spec.tile_n))
+    t_n = b.mod(e_v, b.const_i32(spec.tile_n))
+    c_m = b.add(b.mul(b.block_id_y(), b.const_i32(spec.tile_m)), t_m)
+    c_n = b.mul(b.add(b.mul(b.block_id_x(), b.const_i32(spec.tile_n)), t_n), b.const_i32(v))
+    in_bounds = b.land(b.cmp_lt(c_m, wg_M_param), b.cmp_lt(c_n, wg_N_param))
+    slab = b.mul(wg_M_param, wg_N_param)
+    elem = b.add(b.mul(c_m, wg_N_param), c_n)
+    # Out-of-bounds threads read element 0 (in range) and store nothing; the
+    # LDS exchange needs every thread at the barrier.
+    elem_safe = b.select(in_bounds, elem, b.const_i32(0))
+    base = elem_safe if P == 1 else b.add(elem_safe, b.mul(p_v, slab))
+    step_slabs = P * U  # slabs per loop iteration (all groups)
+    n_main = R // step_slabs
+    if spec.ws_bf16:
+        from rocke.core.ir import BF16
+
+        def load(off):
+            pv = b.global_load_vN(ws_ptr, off, BF16, v)
+            return [b.cast_to_f32(b.vec_extract(pv, i)) for i in range(v)]
+    else:
+        def load(off):
+            pv = b.global_load_vN(ws_ptr, off, F32, v)
+            return [b.vec_extract(pv, i) for i in range(v)]
+
+    acc = None
+    if n_main:
+        stride_it = b.mul(slab, b.const_i32(step_slabs))
+        init = b.zero_vec_f32(v)
+        loop = b.scf_for_iter(
+            b.const_i32(0), b.const_i32(n_main), b.const_i32(1),
+            [("fold_acc", init)], iv_name="fold_it",
+        )
+        with loop as (it, (acc_v,)):
+            off0 = b.add(base, b.mul(it, stride_it))
+            vals = [
+                load(off0 if u == 0 else b.add(off0, b.mul(slab, b.const_i32(u * P))))
+                for u in range(U)
+            ]
+            tot = [b.vec_extract(acc_v, i) for i in range(v)]
+            for vv in vals:
+                tot = [b.fadd(t, x) for t, x in zip(tot, vv)]
+            b.scf_yield(b.vec_pack(tot, F32))
+        acc = [b.vec_extract(loop.results[0], i) for i in range(v)]
+    # Remainder slabs r = n_main * P * U + u * P + p (< R), in order.
+    rem = R - n_main * step_slabs
+    if rem:
+        zero = b.const_f32(0.0)
+        r0 = n_main * step_slabs
+        for u in range(-(-rem // P)):
+            r_first = r0 + u * P  # slab of group 0
+            off = b.add(base, b.mul(slab, b.const_i32(r_first)))
+            if r_first + P <= R:
+                vals = load(off)
+            else:
+                ok = b.cmp_lt(p_v, b.const_i32(R - r_first)) if P > 1 else None
+                # clamp the slab to the last one for the groups past R
+                off_c = off if ok is None else b.select(ok, off, b.add(elem_safe, b.mul(slab, b.const_i32(R - 1))))
+                vals = load(off_c)
+                if ok is not None:
+                    vals = [b.select(ok, x, zero) for x in vals]
+            acc = vals if acc is None else [b.fadd(t, x) for t, x in zip(acc, vals)]
+    if P > 1:
+        sm = b.smem_alloc_f32([P, TE * v], name_hint="fold_part")
+        b.smem_store_vN_f32(sm, [p_v, b.mul(e_v, b.const_i32(v))], b.vec_pack(acc, F32), v)
+        b.sync()
+        with b.scf_if(b.land(in_bounds, b.cmp_eq(p_v, b.const_i32(0)))):
+            tot = None
+            for q in range(P):
+                pv = b.smem_load_vN_f32(sm, b.const_i32(q), b.mul(e_v, b.const_i32(v)), n=v)
+                xs = [b.vec_extract(pv, i) for i in range(v)]
+                tot = xs if tot is None else [b.fadd(t, x) for t, x in zip(tot, xs)]
+            _fold_store(b, spec, dw_ptr, elem, tot, v, pack_f32_to)
+    else:
+        with b.scf_if(in_bounds):
+            _fold_store(b, spec, dw_ptr, elem, acc, v, pack_f32_to)
+
+
+def _fold_store(b, spec, dw_ptr, off, tot, v, pack_f32_to):
+    if spec.dtype_d in ("fp32", "f32"):
+        b.global_store_vN(dw_ptr, off, b.vec_pack(tot, F32), v)
+    else:
+        b.global_store_vN(dw_ptr, off, pack_f32_to(b, tot, dtype=spec.dtype_d), v)
 
 
 def wgrad_reduce_grid(spec: WgradReduceSpec) -> Tuple[int, int, int]:

@@ -399,7 +399,7 @@ class TestTapOuterKIdentity(unittest.TestCase):
             "xwin_rot",
             "xwin_kord",
             "ws_lc",
-            "ws_gred",
+            "ws_gred", "ws_tree",
             "reg_prefetch",
             "lds_xor",
             "split_addr_k_decode",

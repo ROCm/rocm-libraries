@@ -1194,6 +1194,18 @@ def main() -> int:
         "cannot reach those widths are skipped).",
     )
     parser.add_argument(
+        "--deterministic",
+        nargs="?",
+        const="any",
+        default=None,
+        choices=["any", "f32"],
+        help="--run-from-cache, opt-in: offer only kernels and launches whose "
+        "reduction is bitwise deterministic (no atomics into the output or "
+        "into order-dependent scratch; benchmarks/common/det_classify.py, "
+        "conservative). 'f32' also drops reductions whose partial sums are "
+        "rounded below f32 (bf16 scratch slabs).",
+    )
+    parser.add_argument(
         "--pins",
         default=None,
         metavar="JSON",
@@ -1763,6 +1775,10 @@ def main() -> int:
             "(the JIT sweep writes --csv instead)",
             file=sys.stderr,
         )
+        return 2
+    if getattr(args, "deterministic", False) and not args.run_from_cache:
+        print("error: --deterministic filters the kernels of an AOT cache; "
+              "pass --run-from-cache DIR", file=sys.stderr)
         return 2
     if args.fast_rank and not args.run_from_cache:
         # The JIT sweep builds and loads its kernels one at a time, so
@@ -4960,6 +4976,17 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     overall_rc = 1
                     continue
             args._pin_launch = pin
+            if getattr(args, "deterministic", False):
+                from benchmarks.common.det_classify import is_deterministic
+
+                n_before = len(candidates)
+                candidates = [c for c in candidates if is_deterministic(direction, c[0], None, args.deterministic)]
+                print(
+                    f"  --deterministic: {len(candidates)} of {n_before} kernels kept",
+                    flush=True,
+                )
+                if not candidates:
+                    continue
             n_compatible = len(candidates)
             n_vec_pruned = 0
             if not args.all_vector_sizes:
@@ -5178,6 +5205,11 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 for split_k in degrees:
                     if _prune_stop:
                         break
+                    if getattr(args, "deterministic", False):
+                        from benchmarks.common.det_classify import is_deterministic
+
+                        if not is_deterministic(direction, ident, split_k, args.deterministic):
+                            continue
                     # Free the previous launch config's scratch before
                     # allocating the next. Every path that gets here has
                     # drained the device after its last launch: _verify_kernel
@@ -5480,6 +5512,11 @@ def _fast_rank_candidates(
         else:
             degrees = (None,)
         for split_k in degrees:
+            if getattr(args, "deterministic", False):
+                from benchmarks.common.det_classify import is_deterministic
+
+                if not is_deterministic(direction, ident, split_k, args.deterministic):
+                    continue
             items.append((ident, hsaco_path, meta, split_k))
 
     pin = getattr(args, "_pin_launch", None)
@@ -5815,7 +5852,7 @@ def _signature_for_identity(ident, dtype):
             is_3d=ident.is_3d,
             two_stage=ident.two_stage,
             streamk=ident.streamk_reduction if ident.streamk != "off" else None,
-            **({"split_flags": True} if getattr(ident, "ws_fuse", 0) else {}),
+            **({"split_flags": True} if (getattr(ident, "ws_fuse", 0) or getattr(ident, "ws_tree", 0)) else {}),
         )
     if ident.direction == "dgrad":
         return conv_args_signature(dtype, direction="dgrad", is_3d=ident.is_3d)
@@ -5902,6 +5939,22 @@ def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas
     rz = 1 if (vec > 1 and rezero_ok and _wgrad_s2_rezero()) else 0
     if ws_bf16 and vec <= 1:
         raise ValueError("bf16 scratch slabs (ws_store 2) need the vector Stage 2 (wg_N % 4 == 0)")
+    # Many slabs (ws_store at a large split degree, det-wgrad): a looped,
+    # slab-parallel ordered fold instead of the flat R-load unroll. Only
+    # above ROCKE_WGRAD_S2_FOLD_MIN slabs (default 16; every existing
+    # binary folds <= 8), so existing launches are unchanged.
+    _fold = {}
+    if (
+        vec > 1
+        and not rz
+        and max(1, problem.groups) == 1
+        and ws_replicas > int(os.environ.get("ROCKE_WGRAD_S2_FOLD_MIN", "16") or 16)
+    ):
+        _fold = {
+            "fold_loop": int(os.environ.get("ROCKE_WGRAD_S2_FOLD_U", "4") or 4),
+            "slab_par": int(os.environ.get("ROCKE_WGRAD_S2_FOLD_P", "4") or 4),
+            "tile_m": int(os.environ.get("ROCKE_WGRAD_S2_FOLD_TM", "1") or 1),
+        }
     spec = WgradReduceSpec(
         problem=problem,
         dtype_d=dtype_d,
@@ -5910,8 +5963,9 @@ def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas
         **({"vec": vec} if vec > 1 else {}),
         **({"rezero": rz} if rz else {}),
         **({"ws_bf16": True} if ws_bf16 else {}),
+        **_fold,
     )
-    key = (dtype_d, ws_replicas, vec, rz) + (("wsb",) if ws_bf16 else ())
+    key = (dtype_d, ws_replicas, vec, rz) + (("wsb",) if ws_bf16 else ()) + tuple(sorted(_fold.items()))
     if key not in compiled:
         art = compile_kernel(build_conv_wgrad_workspace_reduce(spec), arch=arch)
         compiled[key] = KernelLauncher(
@@ -6749,8 +6803,8 @@ def _cached_bind(
         )
         s2_values, s2_cfg = _stage2_launch(
             s2_spec,
-            ws_ptr=extras["ws_ptr"],
-            ws_bytes=extras["ws_bytes"],
+            ws_ptr=extras["ws_ptr"] + extras.get("ws_s2_off", 0),
+            ws_bytes=extras["ws_bytes"] - extras.get("ws_s2_off", 0),
             dw_ptr=ptrs[2],
             dw_bytes=sizes[2],
         )
@@ -6971,6 +7025,23 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
             ws_slabs = _ws_slabs_used(problem, ident, split_k)
             ws_bytes = wgrad_workspace_nbytes(problem, ws_slabs)
             extras["ws_slabs"] = ws_slabs
+            if getattr(ident, "ws_tree", 0):
+                # ws_tree: per-level slab regions; Stage 2 folds the last one.
+                from kernels.common.conv_implicit_gemm_wgrad import (
+                    wgrad_ws_tree_flags,
+                    wgrad_ws_tree_slabs,
+                )
+
+                _tot, _fin = wgrad_ws_tree_slabs(split_k, ident.ws_tree)
+                ws_bytes = wgrad_workspace_nbytes(problem, _tot)
+                extras["ws_slabs"] = _fin
+                extras["ws_s2_off"] = wgrad_workspace_nbytes(problem, _tot - _fin)
+                _gx, _gy, _ = _grid_for(direction, problem, ident, split_k)
+                nb = 4 * wgrad_ws_tree_flags(split_k, ident.ws_tree, _gx * _gy)
+                fl = rt.alloc(nb)
+                rt.memset(fl, 0, nb)
+                extras["sk_flags"] = fl
+                extras["sk_flags_bytes"] = nb
             if (getattr(ident, "ws_fuse", 0) or getattr(ident, "ws_store", 0)) and max(1, problem.groups) > 1:
                 raise ValueError("ws_fuse / ws_store serve ungrouped problems only")
             if getattr(ident, "ws_store", 0) and split_k > _ws_replicas_of(ident):

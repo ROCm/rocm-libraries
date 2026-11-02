@@ -738,6 +738,23 @@ class WgradConvSpec:
     # that of a bf16 split-K atomic). Tags ``wss2``. Default 0:
     # byte-identical.
     ws_store: int = 0
+    # ws_store 1, one group per workgroup (det-wgrad): a commutative pairwise
+    # reduction tree of ``ws_tree`` levels in the Stage 1 epilogue. Slices
+    # (2j, 2j+1) of a tile form a pair: each device-coherently (sc1) stores
+    # its partial into its level-0 slab and takes a ticket from a per-(level,
+    # pair, tile) counter in ``sk_flags``; the second to arrive loads its
+    # partner's partial, adds it (a + b == b + a: the sum's bits do not depend
+    # on who arrived second), resets the counter and goes on to level 1 with
+    # pair j; the first leaves. An unpaired last item goes up alone. The
+    # last level's values land in ceil(S / 2^L) slabs that Stage 2 folds in
+    # order. Nothing waits; every association is fixed: bitwise
+    # deterministic. Slab regions per level follow each other in the scratch
+    # (wgrad_ws_tree_slabs). Appends the ``sk_flags`` kernarg. Tags
+    # ``wst<L>``. Default 0: byte-identical. Measured (WRW s3, t128x192
+    # pfs1): bitwise deterministic, but +17-40% over plain ws_store -- the
+    # sc1 element stores/loads and the epilogue handshakes cost more than
+    # the Stage 2 slab reads they save. Kept opt-in for reference.
+    ws_tree: int = 0
     # Unsplit default epilogue on 16x16x16 atoms, 16-bit dW: each lane quad
     # transposes its 4x4 accumulator block (two DPP exchanges + v_perm_b32,
     # as fwd's epi_quad_xpose 1), so a lane holds 4 consecutive dW columns
@@ -1054,6 +1071,7 @@ class WgradConvSpec:
                 f"xpp{self.xwin_pp}": self.xwin_pp > 0,
                 f"wsf{self.ws_fuse}": self.ws_fuse > 0,
                 f"wss{self.ws_store}": self.ws_store > 0,
+                f"wst{self.ws_tree}": self.ws_tree > 0,
                 f"eqx{self.epi_quad_xpose}": self.epi_quad_xpose > 0,
                 "esf": self.epi_store_fast,
                 f"xkb{self.xwin_kband}": self.xwin_kband > 0,
@@ -1694,6 +1712,10 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
         not spec.two_stage or spec.streamk != "off" or spec.group_merge > 1 or spec.ws_fuse
     )):
         return "ws_store is 0..2 and needs the two_stage grid-per-tile kernel (no group_merge / ws_fuse)"
+    if spec.ws_tree not in (0, 1, 2, 3) or (spec.ws_tree and (
+        spec.ws_store != 1 or max(1, spec.xwin_groups) != 1 or spec.ws_lc or spec.ws_gred
+    )):
+        return "ws_tree is 0..3 and needs ws_store 1 and one group per workgroup (no ws_lc / ws_gred)"
     if spec.epi_quad_xpose not in (0, 1) or (spec.epi_quad_xpose and (
         spec.split_k > 1
         or spec.two_stage
@@ -2825,7 +2847,7 @@ def build_implicit_gemm_conv_wgrad(
             is_3d=p.is_3d,
             two_stage=_is_two_stage,
             streamk=spec.streamk_reduction if _is_streamk else None,
-            **({"split_flags": True} if spec.ws_fuse else {}),
+            **({"split_flags": True} if (spec.ws_fuse or spec.ws_tree) else {}),
         ),
         declare_ptr=_declare_wgrad_ptr,
     )
@@ -3129,7 +3151,7 @@ def build_implicit_gemm_conv_wgrad(
     A_smem = b.smem_alloc(ir_dtype_a, _a_shape, name_hint="A_smem")
     B_smem = b.smem_alloc(ir_dtype_b, _b_shape, name_hint="B_smem")
     # ws_fuse: the slice's arrival order, broadcast to the workgroup.
-    wsf_smem = b.smem_alloc(I32, (4,), name_hint="wsf_role") if spec.ws_fuse else None
+    wsf_smem = b.smem_alloc(I32, (4,), name_hint="wsf_role") if (spec.ws_fuse or spec.ws_tree) else None
     # See the LDS budget note in is_valid_*_spec: "compv4" alone does not reach a
     # buffer-alternating K-loop, so allocating a second tile for it produced a
     # dead allocation that the LDS pool then stripped anyway.
@@ -5779,6 +5801,18 @@ def build_implicit_gemm_conv_wgrad(
                 smem=wsf_smem,
                 dw_rsrc=dw_rsrc,
             )} if spec.ws_fuse else {}),
+            **({"tree": dict(
+                flags=sk_flags,
+                tile=b.to_sgpr_u32(b.add(
+                    b.mul(b.div(block_m_off_v, b.const_i32(block_m)), p_num_pid_n),
+                    b.div(block_n_off_v, b.const_i32(block_n)),
+                )),
+                tiles=b.to_sgpr_u32(b.mul(p_num_pid_m, p_num_pid_n)),
+                ks_count=_ks_count_param,
+                item=b.to_sgpr_u32(slice_id),
+                tid=tid,
+                smem=wsf_smem,
+            )} if spec.ws_tree else {}),
         )
     elif _is_split_k and op.family == "wmma":
         # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
@@ -6477,6 +6511,7 @@ def _emit_wgrad_workspace_store_epilogue(
     fused: Optional[dict] = None,
     lc_wave: Optional[Value] = None,
     gred: Optional[Tuple[Value, Value]] = None,
+    tree: Optional[dict] = None,
 ) -> None:
     """Two-stage Stage 1 epilogue: f32 atomic-add into the scratch accumulator.
 
@@ -6626,6 +6661,24 @@ def _emit_wgrad_workspace_store_epilogue(
                                b.vec_extract(acc, i))
         rows_, cols_ = rows, cols
         _emit_ws_fused_reduction(b, spec, _elems, wg_M_v, wg_N_v, ws_ptr, fused)
+        return
+
+    if spec.ws_tree and tree is not None and gm == 1:
+        els = []
+        flat = 0
+        for mi in range(mfmas_m):
+            atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
+            for ni in range(mfmas_n):
+                acc = accs[flat]
+                flat += 1
+                if n_base_fn is not None:
+                    atom_n_base = n_base_fn(ni)
+                else:
+                    atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
+                for i in range(c_per_lane):
+                    els.append((b.add(atom_m_base, rows[i]), b.add(atom_n_base, cols[i]),
+                                b.vec_extract(acc, i)))
+        _emit_ws_tree_reduction(b, spec, els, wg_M_v, wg_N_v, ws_ptr, tree)
         return
 
     if spec.ws_gred and gred is not None and gm == 1:
@@ -6926,6 +6979,91 @@ def _emit_ws_fused_reduction(
 
 
 _WS_FUSE_CHUNK = 32
+
+
+def wgrad_ws_tree_slabs(split_k: int, levels: int) -> Tuple[int, int]:
+    """``(scratch slabs, Stage 2 slabs)`` of a ws_tree launch at ``split_k``:
+    level l's region holds ceil(S / 2^l) slabs (l = 0..L), the last one the
+    slabs Stage 2 folds; they follow each other in the scratch."""
+    n, total = int(split_k), 0
+    for _ in range(levels):
+        total += n
+        n = -(-n // 2)
+    return total + n, n
+
+
+def wgrad_ws_tree_flags(split_k: int, levels: int, tiles: int) -> int:
+    """i32 counters a ws_tree launch needs (zeroed once; they reset themselves)."""
+    return max(1, levels) * max(1, -(-int(split_k) // 2)) * max(1, tiles)
+
+
+def _emit_ws_tree_reduction(b, spec, els, wg_M_v, wg_N_v, ws_ptr, tz) -> None:
+    """``WgradConvSpec.ws_tree``: see the field. ``els`` = (c_m, c_n, value)."""
+    flags, tid, smem = tz["flags"], tz["tid"], tz["smem"]
+    c0, c1, c4 = b.const_i32(0), b.const_i32(1), b.const_i32(4)
+    slab = b.mul(wg_M_v, wg_N_v)
+    oks, offs, safes = [], [], []
+    for c_m, c_n, _ in els:
+        ok = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
+        off = b.add(b.mul(c_m, wg_N_v), c_n)
+        oks.append(ok)
+        offs.append(off)
+        safes.append(b.select(ok, off, c0))
+    L = spec.ws_tree
+    n_pairs_max = b.div(b.add(tz["ks_count"], c1), b.const_i32(2))
+
+    def _store_sc1(base, vals):
+        for ok, off, v in zip(oks, offs, vals):
+            with b.scf_if(ok):
+                pt = b.global_ptr_add(ws_ptr, b.mul(b.add(base, off), c4))
+                b.inline_asm("global_store_dword $0, $1, off sc1", "v,v", [pt, v], None)
+
+    def _load_sc1(base):
+        out = []
+        for k in range(0, len(safes), _WS_FUSE_CHUNK):
+            ptrs = [b.global_ptr_add(ws_ptr, b.mul(b.add(base, sf), c4))
+                    for sf in safes[k:k + _WS_FUSE_CHUNK]]
+            raw = [b.inline_asm("global_load_dword $0, $1, off sc1", "=v,v", [pt], F32)
+                   for pt in ptrs]
+            n = len(raw)
+            out += b.inline_asm_multi(
+                "s_waitcnt vmcnt(0)",
+                ",".join(["=v"] * n + [str(q) for q in range(n)]),
+                raw,
+                result_types=[F32] * n,
+            )
+        return out
+
+    def _level(lv, item, vals, base, n):
+        if lv == L:
+            for ok, off, v in zip(oks, offs, vals):
+                with b.scf_if(ok):
+                    b.global_store(ws_ptr, b.add(b.add(base, b.mul(item, slab)), off), v, align=4)
+            return
+        partner = b.xor(item, c1)
+        alone = b.cmp_ge(partner, n)
+        _store_sc1(b.add(base, b.mul(item, slab)), vals)
+        b.s_waitcnt(vmcnt=0)
+        b.sync()
+        node = b.div(item, b.const_i32(2))
+        cidx = b.to_sgpr_u32(b.add(
+            b.mul(b.add(b.mul(b.const_i32(lv), n_pairs_max), node), tz["tiles"]), tz["tile"]))
+        with b.scf_if(b.land(b.cmp_eq(tid, c0), b.lnot(alone))):
+            tk = b.global_atomic_add(flags, cidx, c1)
+            b.smem_store_vN(smem, [c0], tk, 1)
+        b.sync()
+        ticket = b.to_sgpr_u32(b.vec_extract(b.smem_load_vN(smem, c0, dtype=I32, n=1), 0))
+        go = b.lor(alone, b.cmp_eq(ticket, c1))
+        with b.scf_if(go):
+            with b.scf_if(b.land(b.cmp_eq(tid, c0), b.cmp_lt(partner, n))):
+                b.global_flag_store(flags, cidx, c0, ordering="monotonic")
+            # alone: read our own slot back (valid memory), keep our value
+            pv = _load_sc1(b.add(base, b.mul(b.select(alone, item, partner), slab)))
+            new = [b.select(alone, v, b.fadd(v, q)) for v, q in zip(vals, pv)]
+            _level(lv + 1, b.div(item, b.const_i32(2)), new, b.add(base, b.mul(n, slab)),
+                   b.div(b.add(n, c1), b.const_i32(2)))
+
+    _level(0, tz["item"], [v for _, _, v in els], c0, tz["ks_count"])
 
 
 def _emit_wgrad_quad_xpose_store(

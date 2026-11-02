@@ -2521,8 +2521,50 @@ _WGRAD_ESF_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_ESF_MIN_MN", "0") or 0)
 _WGRAD_EQX_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_EQX_MIN_MN", "0") or 0)
 
 
+# ROCKE_AOT_WGRAD_DET_WSS=<r> (det-wgrad): deterministic twins of the
+# two-stage xwin variants -- ws_store=<m> (one plain-stored scratch slab per
+# split-K slice, folded in slab order by Stage 2) with ws_replicas=<r>, so a
+# launch may split up to r ways. ROCKE_AOT_WGRAD_DET_WSS_MODE=<m>[,<m>]
+# (default 1; 2 = bf16 slabs); ROCKE_AOT_WGRAD_DET_WSS_TILES=<MxN>[,<MxN>]
+# limits them to those block tiles. Twins of variants with ws_fuse / ws_lc /
+# ws_gred / ws_store are not made. Unset: no jobs.
+_WGRAD_DET_WSS = int(_os.environ.get("ROCKE_AOT_WGRAD_DET_WSS", "0") or 0)
+_WGRAD_DET_WSS_MODE: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_DET_WSS_MODE", "1") or "1").split(",") if v
+)
+_WGRAD_DET_WSS_TILES: Tuple[str, ...] = tuple(
+    v.strip() for v in (_os.environ.get("ROCKE_AOT_WGRAD_DET_WSS_TILES", "") or "").split(",") if v.strip()
+)
+
+
+def _wgrad_det_wss_twins(cfg: dict, variants: tuple) -> tuple:
+    if not _WGRAD_DET_WSS or not cfg.get("two_stage"):
+        return ()
+    if _WGRAD_DET_WSS_TILES and f"{cfg.get('tile_m')}x{cfg.get('tile_n')}" not in _WGRAD_DET_WSS_TILES:
+        return ()
+    out, seen = [], set()
+    for v in variants:
+        if not v.get("xwin") or any(
+            v.get(k) for k in ("ws_fuse", "ws_lc", "ws_gred", "ws_store", "group_merge")
+        ):
+            continue
+        for m in _WGRAD_DET_WSS_MODE:
+            t = dict(v, ws_store=m, ws_replicas=_WGRAD_DET_WSS)
+            key = repr(sorted(t.items()))
+            if key not in seen:
+                seen.add(key)
+                out.append(t)
+    return tuple(out)
+
+
 def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
-    """:func:`_wgrad_kloop_variants_base` plus the ROCKE_AOT_WGRAD_EQX copies."""
+    """:func:`_wgrad_kloop_variants_base` plus the ROCKE_AOT_WGRAD_EQX copies
+    (and the ROCKE_AOT_WGRAD_DET_WSS deterministic twins)."""
+    variants = _wgrad_kloop_variants_core(arch, cfg)
+    return variants + _wgrad_det_wss_twins(cfg, variants)
+
+
+def _wgrad_kloop_variants_core(arch: str, cfg: dict) -> Tuple[dict, ...]:
     variants = _wgrad_kloop_variants_base(arch, cfg)
     if (
         _WGRAD_PPP

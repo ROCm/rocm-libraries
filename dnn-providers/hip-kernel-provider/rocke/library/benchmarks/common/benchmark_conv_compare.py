@@ -281,6 +281,8 @@ def _build_implicit_only_args(args) -> list[str]:
         a += ["--split-k-degrees", args.split_k_degrees]
     if args.two_stage is not None:
         a += ["--two-stage", args.two_stage]
+    if args.deterministic:
+        a += ["--deterministic", args.deterministic]
     if args.split_k_prune is not None:
         a += ["--split-k-prune", str(args.split_k_prune)]
     if args.streamk == "off" and (
@@ -673,6 +675,18 @@ def main() -> int:
         ),
     )
     implicit_grp.add_argument(
+        "--deterministic",
+        nargs="?",
+        const="any",
+        default=None,
+        choices=["any", "f32"],
+        help=(
+            "only kernels/launches with a bitwise-deterministic reduction "
+            "(det_classify.py). Forwarded to implicit-GEMM only; direct conv "
+            "is skipped (its wgrad/split paths use atomics)."
+        ),
+    )
+    implicit_grp.add_argument(
         "--split-k-prune",
         type=float,
         default=None,
@@ -757,6 +771,8 @@ def main() -> int:
         return 2
 
     using_miopen = args.miopen_cmd is not None or args.miopen_file is not None
+    if args.deterministic:
+        args.skip_direct = True
 
     implicit_only = _build_implicit_only_args(args)
 

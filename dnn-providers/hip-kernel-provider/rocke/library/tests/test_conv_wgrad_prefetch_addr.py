@@ -325,7 +325,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["dy_halo_setprio"], fields["dy_halo_kouter_pad"]
         del fields["split_k_cluster"]  # cluster split-K forward, off
         del fields["streamk"], fields["streamk_reduction"]  # stream-K, off
-        del fields["prefetch_regs"], fields["lds_kpack"], fields["xcd_remap"], fields["sep_addr"], fields["pfr_sched"], fields["lds_bswz"], fields["kp_line"], fields["xwin"], fields["xwin_rows"], fields["xwin_groups"], fields["xwin_pp"], fields["xwin_mrow"], fields["xwin_gn"], fields["ws_fuse"], fields["ws_store"], fields["xwin_kband"], fields["plain_pp"], fields["xwin_bq"], fields["xwin_aq"], fields["xwin_pps"], fields["xwin_rot"], fields["xwin_kord"], fields["ws_lc"], fields["ws_gred"]  # wgrad knobs, off
+        del fields["prefetch_regs"], fields["lds_kpack"], fields["xcd_remap"], fields["sep_addr"], fields["pfr_sched"], fields["lds_bswz"], fields["kp_line"], fields["xwin"], fields["xwin_rows"], fields["xwin_groups"], fields["xwin_pp"], fields["xwin_mrow"], fields["xwin_gn"], fields["ws_fuse"], fields["ws_store"], fields["ws_tree"], fields["xwin_kband"], fields["plain_pp"], fields["xwin_bq"], fields["xwin_aq"], fields["xwin_pps"], fields["xwin_rot"], fields["xwin_kord"], fields["ws_lc"], fields["ws_gred"]  # wgrad knobs, off
         del fields["tapk_prefetch"], fields["tapk_xhalo"], fields["b_kpack"]  # dgrad knobs, off
         del fields["reg_prefetch"], fields["lds_xor"]  # fwd K-loop knobs, off
         del fields["split_addr_k_decode"]

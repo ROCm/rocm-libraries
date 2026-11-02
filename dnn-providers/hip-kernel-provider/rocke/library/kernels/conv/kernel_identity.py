@@ -188,6 +188,8 @@ class KernelIdentity:
     ws_fuse: int = 0
     # wgrad only (WgradConvSpec.ws_store): plain-store per-slice scratch slabs. Left out of the hash at 0.
     ws_store: int = 0
+    # wgrad only (WgradConvSpec.ws_tree): commutative pairwise reduction tree. Left out of the hash at 0.
+    ws_tree: int = 0
     # wgrad only (WgradConvSpec.xwin_kband): banded K order. Left out of the hash at 0.
     xwin_kband: int = 0
     # wgrad only (WgradConvSpec.plain_pp): plain-loop block ping-pong. Left out of the hash at 0.
@@ -522,6 +524,8 @@ class KernelIdentity:
             del fields["ws_fuse"]
         if not fields["ws_store"]:
             del fields["ws_store"]
+        if not fields["ws_tree"]:
+            del fields["ws_tree"]
         if not fields["xwin_kband"]:
             del fields["xwin_kband"]
         if not fields["plain_pp"]:
