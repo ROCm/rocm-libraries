@@ -80,6 +80,7 @@ from types import MappingProxyType
 from typing import ClassVar
 
 from kernels.common._bf16_rne import bf16x4_rne_finite
+from kernels.common._read_ahead import read_ahead
 from kernels.common.attention_arch import attention_lds_capacity_bytes
 from kernels.common.attention_dense_spec import INT32_LIMIT
 from rocke.core.ir import BF16, F32, I32, I64, IRBuilder, KernelDef, PtrType
@@ -829,13 +830,9 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
             ]
             return q_v, k_vs
 
-        score_pre = {
-            kk: _score_operands(kk) for kk in range(min(SCORE_PREFETCH, SCORE_K_ITERS))
-        }
+        take_score = read_ahead(SCORE_K_ITERS, SCORE_PREFETCH, _score_operands)
         for kk in range(SCORE_K_ITERS):
-            if kk + SCORE_PREFETCH < SCORE_K_ITERS:
-                score_pre[kk + SCORE_PREFETCH] = _score_operands(kk + SCORE_PREFETCH)
-            q_v, k_vs = score_pre.pop(kk)
+            q_v, k_vs = take_score(kk)
             for kt in range(K_TILES):
                 s_acc[kt] = score_mfma(b, dtype, k_vs[kt], q_v, s_acc[kt])
             if (kk + 1) % SCORE_FENCE_EVERY == 0:
@@ -878,10 +875,9 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
                 for i in range(4)
             ]
 
-        pv_pre = {
-            gi: _pv_reads(*pv_groups[gi])
-            for gi in range(min(DECODE_PV_PREFETCH, len(pv_groups)))
-        }
+        take_pv = read_ahead(
+            len(pv_groups), DECODE_PV_PREFETCH, lambda gi: _pv_reads(*pv_groups[gi])
+        )
 
         # ---- online softmax, one head per n column ----------------------------
         # Lane l holds head l % 16 and keys 4 (l // 16) + r of each key tile;
@@ -949,11 +945,7 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
 
         # ---- accᵀ += Cᵀ · Pᵀ over every latent tile ---------------------------
         for gi, (kt, w) in enumerate(pv_groups):
-            if gi + DECODE_PV_PREFETCH < len(pv_groups):
-                pv_pre[gi + DECODE_PV_PREFETCH] = _pv_reads(
-                    *pv_groups[gi + DECODE_PV_PREFETCH]
-                )
-            xs = pv_pre.pop(gi)
+            xs = take_pv(gi)
             for e in range(4):
                 c_t = xs[e] if TR_PV else pick4(b, xs, e, dtype)
                 accs[4 * w + e] = _mfma_16x16x16(
