@@ -65,6 +65,15 @@
 namespace hipblaslt_plugin::hipblaslt_utils
 {
 
+// Matches hipMalloc's 256-byte alignment guarantee; regions carved out of a
+// caller's workspace are aligned to it so each is as aligned as an allocation.
+constexpr size_t WORKSPACE_ALIGNMENT = 256;
+
+constexpr size_t alignUp(size_t value, size_t alignment)
+{
+    return ((value + alignment - 1) / alignment) * alignment;
+}
+
 inline const char* hipblasStatusToString(hipblasStatus_t status)
 {
 #define CASE(x) \

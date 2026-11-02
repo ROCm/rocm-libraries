@@ -186,6 +186,7 @@ add_library(
     engines/plans/HipblasltMatmulPlanBuilder.cpp
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxScaleLayout.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:compilation/Kernel.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:compilation/Program.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:compilation/ProgramCache.cpp>
