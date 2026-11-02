@@ -1074,9 +1074,9 @@ struct DeviceInputFiller::Impl
         }
 
         // The kernel addresses elements through dims and strides only.
-        constexpr auto maxRank
+        constexpr auto MAX_RANK
             = hipdnn_gpu_ref::common::gpu_fp_reference_tensor::FILL_KIND_MAX_RANK;
-        if(tensor.raggedIterationInfo().has_value() || tensor.dims().size() > maxRank)
+        if(tensor.raggedIterationInfo().has_value() || tensor.dims().size() > MAX_RANK)
         {
             return false;
         }

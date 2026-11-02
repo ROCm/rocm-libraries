@@ -28,7 +28,10 @@ enum class FillKind : int
 };
 
 /// Most dimensions a filled tensor can have.
-#define GPU_REF_FILL_MAX_RANK 8
+enum FillKindLimits : int
+{
+    GPU_REF_FILL_MAX_RANK = 8
+};
 
 /// One tensor's fill. The kernel runs one thread per logical element, in row-major order, and
 /// writes it at the offset the dims and strides give, so the bytes between elements of a padded

@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +30,15 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/input-init/FillInputs.hpp"
+
+// The fp8 tensors below are named by the typed suite before any member is used, which
+// instantiates Tensor<T> but not its (and its MigratableMemory's) virtual members, which
+// portability-template-virtual-member-function rejects. Explicitly instantiating them defines
+// every member, as FillInputs.cpp does for the sub-byte tensors. Valid at global scope only.
+template class hipdnn_data_sdk::utilities::Tensor<hipdnn_data_sdk::types::fp8_e4m3>;
+template class hipdnn_data_sdk::utilities::Tensor<hipdnn_data_sdk::types::fp8_e5m2>;
+template class hipdnn_data_sdk::utilities::Tensor<hipdnn_data_sdk::types::fp8_e4m3_fnuz>;
+template class hipdnn_data_sdk::utilities::Tensor<hipdnn_data_sdk::types::fp8_e5m2_fnuz>;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -300,8 +310,9 @@ TYPED_TEST(TestGpuDeviceInputFillKinds, LargeBeyondTheTypesMaximumIsCappedAtIt)
 TYPED_TEST(TestGpuDeviceInputFillKinds, SubnormalFillsEveryElementBelowTheSmallestNormal)
 {
     SKIP_IF_NO_DEVICE_FILL();
-    const double smallestNormal = asFloat(std::numeric_limits<TypeParam>::min());
-    const double smallest = asFloat(std::numeric_limits<TypeParam>::denorm_min());
+    const auto smallestNormal = static_cast<double>(asFloat(std::numeric_limits<TypeParam>::min()));
+    const auto smallest
+        = static_cast<double>(asFloat(std::numeric_limits<TypeParam>::denorm_min()));
     const auto codes = static_cast<std::size_t>(smallestNormal / smallest) - 1;
     for(const auto& layout : layouts())
     {
@@ -312,7 +323,7 @@ TYPED_TEST(TestGpuDeviceInputFillKinds, SubnormalFillsEveryElementBelowTheSmalle
         std::size_t negative = 0;
         for(const auto v : filled.elements)
         {
-            const double f = asFloat(v);
+            const auto f = static_cast<double>(asFloat(v));
             ASSERT_NE(f, 0.0);
             ASSERT_LT(std::fabs(f), smallestNormal);
             magnitudes.insert(std::fabs(f));
@@ -390,12 +401,13 @@ TYPED_TEST(TestGpuDeviceInputFillKinds, SpecialInfinitiesKeepTheirSignOrAreDecli
 {
     SKIP_IF_NO_DEVICE_FILL();
     const Layout layout{"packed", {256, 256}, {256, 1}};
-    const struct
+    struct SignedSpecial
     {
         FillRecipe::SpecialValue special;
         float sign;
-    } cases[] = {{FillRecipe::SpecialValue::POS_INF, 1.0f},
-                 {FillRecipe::SpecialValue::NEG_INF, -1.0f}}; // NOLINT(modernize-avoid-c-arrays)
+    };
+    const std::array<SignedSpecial, 2> cases
+        = {{{FillRecipe::SpecialValue::POS_INF, 1.0f}, {FillRecipe::SpecialValue::NEG_INF, -1.0f}}};
     for(const auto& c : cases)
     {
         const auto filled
