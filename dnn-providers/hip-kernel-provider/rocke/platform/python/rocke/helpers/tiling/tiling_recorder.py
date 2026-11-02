@@ -110,9 +110,6 @@ class PipelineOp:
         1  # free-dim atom counts (m_sub / n_sub) -- for the per-atom K-match soundness gate
     )
     b_free_atoms: int = 1
-    # The MMA's A and B math dtypes (IR types): the one home views read operand widths and labels from.
-    a_dtype: Any = None
-    b_dtype: Any = None
     note: str = ""
     produces: int | None = (
         None  # id() of the SSA Value this op yields (transform / mma output)
@@ -308,8 +305,6 @@ class _Recorder:
                 atom_count=atom_count,
                 a_free_atoms=m_sub,
                 b_free_atoms=n_sub,
-                a_dtype=mma.a_dtype,
-                b_dtype=mma.b_dtype,
                 note="TileMma",
                 produces=produces,
                 consumes=tuple(consumes),
