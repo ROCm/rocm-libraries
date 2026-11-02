@@ -163,8 +163,8 @@ TEST(TestIngestorPlanCapture, RefusesARestoredPlan)
         handler, std::make_unique<PreparedDispatch>(), 0, "restored test plan");
 
     expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "loaded from a saved payload");
-    const std::string message
-        = expectSaveRefusal(plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "keep the original bytes");
+    const std::string message = expectSaveRefusal(
+        plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "does not call the provider");
 
     // The benchmarking advice does not apply to a restored plan.
     EXPECT_EQ(message.find(NO_WINNER_PHRASE), std::string::npos) << message;
@@ -206,6 +206,24 @@ INSTANTIATE_TEST_SUITE_P(,
                                         ? std::string("KPACK")
                                         : std::string("EMBEDDED_SOURCE");
                          });
+
+TEST(TestIngestorPlanCapture, RefusesAMultiLaunchKernelAsMultiLaunch)
+{
+    // Every launch is a kpack entry, and `source` stays default as the loader leaves it. A
+    // capture that read `source` would see an embedded_source kernel and refuse it as one.
+    hipdnn_plugin_sdk::ingestor::KernelSource launch;
+    launch.kind = KernelSourceKind::KPACK;
+    auto kernel = packs::stubKernel(0x06, KernelSourceKind::KPACK);
+    kernel.source = {};
+    kernel.sources = {{"produce", launch}, {"consume", launch}};
+
+    const packs::StubDispatchHandler handler;
+    const auto plan = makeStubPlan(handler, std::move(kernel));
+
+    const std::string message
+        = expectSaveRefusal(*plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "several launches");
+    EXPECT_EQ(message.find("embedded_source"), std::string::npos) << message;
+}
 
 // ---------------------------------------------------------------------------
 // Real kpack plans

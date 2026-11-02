@@ -76,6 +76,27 @@ def comgr_lib():
     return os.environ.get("ROCKE_COMGR_LIB") or None
 
 
+def tool_module(name):
+    """The probe tool `tools/<name>.py`, imported as a module, so a test can drive
+    its check functions directly."""
+    sys.path.insert(0, str(PROBE_ASSERT.parent))
+    try:
+        return __import__(name)
+    finally:
+        sys.path.pop(0)
+
+
+class StandInArchive:
+    """A kpack archive for hkp_probe_assert's checks: `get_kernel` returns the blob
+    held under the toc_key, for any arch."""
+
+    def __init__(self, blobs):
+        self._blobs = blobs
+
+    def get_kernel(self, toc_key, arch):
+        return self._blobs.get(toc_key)
+
+
 def pack_root(
     src,
     work,
