@@ -335,7 +335,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
                      "tapk_pingpong", "tapk_pp_sched", "tapk_pp_epi", "tapk_pp_persist", "tapk_pp_xhalo",
                      "tapk_ztrim", "tapk_pp_bslab", "xh_fast_a", "xh_epi", "xh_persist",
                      "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus",
-                     "pp_box_order"):  # dgrad x-halo and ping-pong knobs, off
+                     "pp_box_order", "pp_box_det"):  # dgrad x-halo and ping-pong knobs, off
             del fields[name]
         for name in ("defer_mfma", "defer_mfma_per_write", "lds_ahead", "lds_kpack_read", "rpf_fetch_late",
                      "rpf_lds_barrier", "rpf_setprio", "split_tail", "uk_chunk_group", "uk_nopad", "uk_xhalo",

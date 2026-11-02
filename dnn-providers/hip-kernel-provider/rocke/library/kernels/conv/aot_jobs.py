@@ -419,7 +419,7 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
 # ignored, so the plain grid never grows by accident). Unset = none.
 def _parse_dgrad_pp_knobs(text: str):
     keys = {"bpp", "pps", "ppe", "ppp", "ppx", "zt", "pbs", "xcd", "kpad", "lxor", "mch", "wpe", "sk", "sapl", "mb",
-            "psk", "pskm", "pzs", "pbx", "pbc", "pbo", "xel", "elb"}
+            "psk", "pskm", "pzs", "pbx", "pbc", "pbo", "pbd", "xel", "elb"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -499,6 +499,11 @@ def _dgrad_pp_knob_cfg(knobs, *, epilogue: str):
             cfg["pp_box_cus"] = d["pbc"]
         if d.get("pbo"):
             cfg["pp_box_order"] = d["pbo"]
+    if d.get("pbd"):
+        # det-dgrad: deterministic box split-K (DgradConvSpec.pp_box_det).
+        if not d.get("pbx") or d.get("sk", 1) <= 1:
+            return None
+        cfg["pp_box_det"] = d["pbd"]
     if d.get("pzs"):
         if not d.get("bpp"):
             return None

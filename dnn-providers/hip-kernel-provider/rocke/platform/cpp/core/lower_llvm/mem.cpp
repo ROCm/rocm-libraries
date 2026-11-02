@@ -1522,11 +1522,12 @@ static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_emitf(L, "  %s = bitcast float %s to i32", bc, scalar);
         rocke_ll_emitf(L,
                        "  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
-                       "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                        bc,
                        rocke_ll_operand(L, rsrc),
                        rocke_ll_operand(L, voffset),
-                       rocke_ll_operand(L, soffset));
+                       rocke_ll_operand(L, soffset),
+                       (long long)ll_attr_int(op, "aux", 0));
     }
     else
     {

@@ -441,6 +441,8 @@ class KernelIdentity:
     pp_box_cus: int = 0
     # Dgrad only (DgradConvSpec.pp_box_order). Left out of the hash at 0.
     pp_box_order: int = 0
+    # Dgrad only (DgradConvSpec.pp_box_det). Left out of the hash at 0.
+    pp_box_det: int = 0
     # async_dma only: elements per DRAM->LDS chunk of the A and B loaders. The
     # width is picked from the build-time cpg so a chunk never straddles a
     # filter position, and is baked into the ISA -- a binary is only correct
@@ -615,7 +617,7 @@ class KernelIdentity:
         ):
             if not fields[name]:
                 del fields[name]
-        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo", "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order"):
+        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo", "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order", "pp_box_det"):
             if not fields[name]:
                 del fields[name]
         if not fields["split_k_cluster"]:

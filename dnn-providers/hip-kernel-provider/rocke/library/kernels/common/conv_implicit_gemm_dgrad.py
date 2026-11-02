@@ -1804,6 +1804,24 @@ class DgradConvSpec:
     # first XCDs only the longest boxes' tiles: several full rounds there,
     # short tiles elsewhere). Default 0; tags ``pbo<n>``.
     pp_box_order: int = 0
+    # With pp_boxes and split_k > 1 (det-dgrad): deterministic split-K. A
+    # split box's slices do not atomically add into dX: each stores its f32
+    # accumulators, in the MFMA register layout, to its own workspace slot
+    # (one tile per workgroup, slot = the logical block id) behind the record
+    # table (word offset in the header word after the magic table, see
+    # pp_box_det_pack), and a second kernel (conv_dgrad_box_det_reduce) adds
+    # each split tile's slots in slice order and stores dX once in bf16.
+    # Unsplit boxes store as before, dX is not zeroed. Bitwise deterministic;
+    # one f32 sum, one rounding. Needs 16x16 MFMA atoms (4 f32 per lane).
+    # 2: the slots hold bf16 partials (half the workspace traffic; each
+    # partial rounded once, summed in f32 -- still deterministic).
+    # 3 (f32) / 4 (bf16 slots): no second kernel -- the slot stores and
+    # loads are device-coherent (SC1), each slice counts itself in on a
+    # per-tile counter after its stores complete, and the last one loads
+    # the tile's slots in slice order, adds them and stores dX (the counter
+    # resets itself). Sum order fixed, so still bitwise deterministic.
+    # Default 0; tags ``pbd<n>``.
+    pp_box_det: int = 0
     # (epi_lds_barriers, declared with the x-halo knobs above, also covers
     # pp_boxes (r5-small): the first epilogue barrier does not wait for the
     # ping-pong loop's last over-fetched global loads, nor an m-chunk for the
@@ -2137,6 +2155,7 @@ class DgradConvSpec:
                 # pp_boxes 7: rows from the record's pixel list (own binary)
                 "pbl": self.pp_boxes in (7, 77),
                 f"pbo{self.pp_box_order}": self.pp_box_order > 0,
+                f"pbd{self.pp_box_det}": self.pp_box_det > 0,
             },
         ) + ("_elb" if self.epi_lds_barriers and self.pp_boxes else "")
         # (elb on pp_boxes is named last, as r5-small built it; elsewhere
@@ -2634,6 +2653,16 @@ def _pp_streamk_conflict(spec: DgradConvSpec) -> str:
         )
     # (epi_lds_barriers on pp_boxes is admitted by _xhalo_knob_conflict's
     # _pp_elb_ok: any ping-pong cshuffle epilogue without a persistent loop.)
+    if spec.pp_box_det and not (
+        spec.pp_box_det in (1, 2, 3, 4)
+        and spec.pp_boxes
+        and spec.split_k > 1
+        and spec.wave_size == 64
+        and spec.warp_tile_m == 16
+        and spec.warp_tile_n == 16
+    ):
+        # (a pp_boxes binary serves groups == 1 only, as the split box store)
+        return "pp_box_det is 0..4 and needs pp_boxes, split_k > 1, wave64 16x16 MFMA atoms"
     if spec.pp_sk_mode and not spec.pp_streamk:
         return "pp_sk_mode needs pp_streamk"
     if not spec.pp_streamk:
@@ -3814,7 +3843,9 @@ def _build_tilde_dgrad(
                         name,
                         PtrType(I32, "global"),
                         noalias=True,
-                        readonly=not (_psk_fixup and name == "sub_gemm_buf"),
+                        readonly=not (
+                            (_psk_fixup or spec.pp_box_det) and name == "sub_gemm_buf"
+                        ),
                         align=4,
                     )
                 )
@@ -4038,6 +4069,10 @@ def _build_tilde_dgrad(
             b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS + _MAGIC_FIELDS)),
             num_sub_gemms_param,
         )
+        if spec.pp_box_det:
+            # pp_box_det: the header words (workspace and counter offsets)
+            # precede the row tables (pp_box_det_pack).
+            _rm_tab = b.add(_rm_tab, b.const_i32(2))
         _rm_base = b.add(
             _rm_tab,
             b.global_load_i32(sub_gemm_buf, b.add(b.sub(_rm_tab, num_sub_gemms_param), sg_idx)),
@@ -5035,6 +5070,98 @@ def _build_tilde_dgrad(
         return new_accs
 
     # ---- epilogue dispatch helper (shared by wavelet and standard paths) ----
+    def _pbd_fixup(fa, box_store) -> None:
+        """pp_box_det 3/4: store this slice's slot (SC1), count in, and the
+        last slice of the tile folds the slots in slice order and stores."""
+        _sc1 = 16  # buffer aux bit 4 = SC1 on gfx94x: device-coherent
+        _eb = 2 if spec.pp_box_det == 4 else 4
+        n_w = spec.warp_m * spec.warp_n
+        tile_elems = block_m * block_n
+        ws = make_buffer_resource(b, sub_gemm_buf, num_bytes=b.const_i32(0x7FFFFFF0))
+        _hdr = b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS + _MAGIC_FIELDS))
+        ws_word = b.readfirstlane(b.global_load_i32(sub_gemm_buf, _hdr))
+        cnt_word = b.readfirstlane(b.global_load_i32(sub_gemm_buf, b.add(_hdr, b.const_i32(1))))
+        wave = b.readfirstlane(b.div(tid, b.const_i32(spec.wave_size)))
+        lane_off = b.mul(b.add(b.mul(wave, b.const_i32(64)), lane), b.const_i32(4 * _eb))
+        acc_stride = n_w * 64 * 4 * _eb
+        ws_bytes0 = b.mul(ws_word, b.const_i32(4))
+
+        def _slot_base(slot):
+            return b.add(b.add(ws_bytes0, b.mul(slot, b.const_i32(tile_elems * _eb))), lane_off)
+
+        base = _slot_base(flat_block_id)
+        for j, acc in enumerate(fa):
+            off = b.add(base, b.const_i32(j * acc_stride))
+            if _eb == 2:
+                b.buffer_store_vN_bf16(ws.rsrc, off, c0, b.vec_trunc_f32_to_bf16(acc), 2, cachepolicy=_sc1)
+            else:
+                b.buffer_store_vN_f32(ws.rsrc, off, c0, acc, 4, aux=_sc1)
+        b.s_waitcnt(vmcnt=0)
+        b.sync()
+        step = rec_num_m_tiles if spec.pp_box_order & 1 else b.const_i32(1)
+        slot0 = b.sub(flat_block_id, b.mul(bx_slice, step))
+        cnt_idx = b.add(cnt_word, slot0)
+        flag = b.smem_alloc(I32, (1,), name_hint="pbd_flag")
+        c1f = b.const_i32(1)
+        with b.scf_if(b.cmp_eq(tid, c0)):
+            old = b.global_atomic_add(sub_gemm_buf, cnt_idx, c1f, ordering="monotonic")
+            b.smem_store_vN(flag, [c0], old, 1)
+        b.sync()
+        old_u = b.readfirstlane(b.vec_extract(b.smem_load_vN(flag, c0, dtype=I32, n=1), 0))
+        with b.scf_if(b.cmp_eq(old_u, b.sub(bx_sk, c1f))):
+            it = [(f"pbd_a{j}", b.zero_vec_f32(4)) for j in range(len(fa))]
+            red = b.scf_for_iter(c0, bx_sk, c1f, it, iv_name="pbs")
+            with red as (sv, accs_s):
+                bs = _slot_base(b.add(slot0, b.mul(sv, step)))
+                new = []
+                for j, a in enumerate(accs_s):
+                    off = b.add(bs, b.const_i32(j * acc_stride))
+                    if _eb == 2:
+                        v = b.buffer_load_vN(ws.rsrc, off, c0, BF16, 4, aux=_sc1)
+                        pv = b.vec_pack([b.cast_to_f32(b.vec_extract(v, i)) for i in range(4)], F32)
+                    else:
+                        pv = b.buffer_load_vN(ws.rsrc, off, c0, F32, 4, aux=_sc1)
+                    new.append(b.fadd(a, pv))
+                b.scf_yield(*new)
+            with b.scf_if(b.cmp_eq(tid, c0)):
+                b.global_store(sub_gemm_buf, cnt_idx, c0, align=4)
+            box_store(list(red.results))
+
+    def _pbd_store_slot(fa) -> None:
+        """pp_box_det: this split slice's f32 accumulators, as the lanes
+        hold them, into workspace slot ``flat_block_id`` (tile_m * tile_n
+        f32; the word offset of slot 0 is the header word after the magic
+        table). conv_dgrad_box_det_reduce adds a tile's slots in slice
+        order with the same warp grid, so the layout never leaves it."""
+        n_w = spec.warp_m * spec.warp_n
+        tile_elems = block_m * block_n
+        _eb = 2 if spec.pp_box_det == 2 else 4  # slot element bytes
+        ws = make_buffer_resource(b, sub_gemm_buf, num_bytes=b.const_i32(0x7FFFFFF0))
+        ws_word = b.readfirstlane(
+            b.global_load_i32(
+                sub_gemm_buf,
+                b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS + _MAGIC_FIELDS)),
+            )
+        )
+        wave = b.readfirstlane(b.div(tid, b.const_i32(spec.wave_size)))
+        lane_off = b.mul(b.add(b.mul(wave, b.const_i32(64)), lane), b.const_i32(4 * _eb))
+        acc_stride = n_w * 64 * 4 * _eb
+        slot_base = b.add(
+            b.mul(ws_word, b.const_i32(4)),
+            b.mul(flat_block_id, b.const_i32(tile_elems * _eb)),
+        )
+        base = b.add(slot_base, lane_off)
+        for j, acc in enumerate(fa):
+            if _eb == 2:
+                b.buffer_store_vN_bf16(
+                    ws.rsrc, b.add(base, b.const_i32(j * acc_stride)), c0,
+                    b.vec_trunc_f32_to_bf16(acc), 2,
+                )
+            else:
+                b.buffer_store_vN_f32(
+                    ws.rsrc, b.add(base, b.const_i32(j * acc_stride)), c0, acc, 4
+                )
+
     def _dispatch_dgrad_epilogue(final_accs):
         _tilde_kwargs = dict(
             bounds_m=rec_gemm_m,
@@ -5106,10 +5233,22 @@ def _build_tilde_dgrad(
                     )
                 with b.scf_if_else(b.cmp_gt(bx_sk, b.const_i32(1))) as (_t, _e):
                     with _t:
-                        _epi.atomic_store(
-                            b, accs=final_accs, dw_ptr=dX, wg_N=c_C,
-                            bounds=(rec_gemm_m, c_dg_N), row_map=_box_row,
-                        )
+                        if spec.pp_box_det >= 3:
+                            _pbd_fixup(
+                                final_accs,
+                                lambda accs_: _emit_dgrad_box_cshuffle_epilogue(
+                                    b, spec, atom, grid, accs_, dx_rsrc,
+                                    n_map=_bx_nval, **_tilde_kwargs,
+                                    **({"m_map": _rm_map} if _rm_map is not None else {}),
+                                ),
+                            )
+                        elif spec.pp_box_det:
+                            _pbd_store_slot(final_accs)
+                        else:
+                            _epi.atomic_store(
+                                b, accs=final_accs, dw_ptr=dX, wg_N=c_C,
+                                bounds=(rec_gemm_m, c_dg_N), row_map=_box_row,
+                            )
                     with _e:
                         _emit_dgrad_box_cshuffle_epilogue(
                             b, spec, atom, grid, final_accs, dx_rsrc,

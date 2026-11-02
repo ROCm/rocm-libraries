@@ -5977,6 +5977,75 @@ def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas
     return compiled[key], spec
 
 
+def _pbd_msplit(ident) -> int:
+    """Stage-2 workgroups per split tile: ROCKE_PBD_S2_MSPLIT, else every
+    MFMA row block of a warp its own (at most 4)."""
+    mfm = ident.tile_m // (ident.warp_m * ident.warp_tile_m)
+    want = int(os.environ.get("ROCKE_PBD_S2_MSPLIT", "0") or 0) or min(4, mfm)
+    while mfm % want:
+        want -= 1
+    return max(1, want)
+
+
+def _pbd_stage2_run(run1, ident, problem, extras, ptrs, sizes, arch, compiled, KernelLauncher,
+                    LaunchConfig):
+    """``run1`` followed by the pp_box_det stage-2 fold (conv_dgrad_box_det),
+    compiled once per tile geometry in a run (``compiled`` memoises it)."""
+    from rocke import compile_kernel
+    from kernels.common.conv_dgrad_box_det import (
+        DgradBoxDetReduceSpec,
+        build_dgrad_box_det_reduce,
+        dgrad_box_det_reduce_signature,
+    )
+
+    lay = extras["pbd"]
+    if ident.pp_box_det >= 3:
+        return run1  # (the last slice of a tile folds in-kernel)
+    if not lay["n_tiles"] or os.environ.get("ROCKE_PBD_DEBUG_SKIP_S2"):
+        # (ROCKE_PBD_DEBUG_SKIP_S2: timing of stage 1 alone -- wrong dX)
+        return run1
+    dt = ident.dtype_d
+    vec = ident.vector_size_c or 8
+    msplit = _pbd_msplit(ident)
+    g = ident.tile_m // (ident.warp_m * ident.warp_tile_m) // msplit
+    mch = max(1, int(os.environ.get("ROCKE_PBD_S2_MCH", "0") or 0) or getattr(ident, "cshuffle_m_chunks", 1) or 1)
+    while g % mch:
+        mch -= 1
+    spec = DgradBoxDetReduceSpec(
+        tile_m=ident.tile_m, tile_n=ident.tile_n, warp_m=ident.warp_m, warp_n=ident.warp_n,
+        dtype_d=dt, store_vec=vec, m_chunks=mch, wave_size=ident.wave_size,
+        msplit=msplit, unroll=int(os.environ.get("ROCKE_PBD_S2_UNROLL", "1") or 1),
+        wave_wg=os.environ.get("ROCKE_PBD_S2_WWG", "0") == "1",
+        slot_bytes=2 if ident.pp_box_det == 2 else 4,
+        load_aux=int(os.environ.get("ROCKE_PBD_S2_LOAD_AUX", "0") or 0),
+        pix_pre=os.environ.get("ROCKE_PBD_S2_PIXPRE", "1") == "1",
+    )
+    key = ("pbd", spec)
+    if key not in compiled:
+        art = compile_kernel(build_dgrad_box_det_reduce(spec, arch=arch), arch=arch)
+        compiled[key] = KernelLauncher(
+            hsaco=art.hsaco, kernel_name=art.kernel_name,
+            signature=dgrad_box_det_reduce_signature(spec),
+        )
+    s2 = compiled[key]
+    values = {
+        "ws": extras["sub_gemm_buf"], "dx": ptrs[2], "tab_word": lay["tab_word"],
+        "ws_word": lay["ws_word"], "C": problem.C, "dx_bytes": sizes[2],
+    }
+    cfg = LaunchConfig(
+        grid=(lay["n_tiles"], spec.msplit, spec.warp_m * spec.warp_n if spec.wave_wg else 1),
+        block=(spec.block_size, 1, 1), stream=0,
+    )
+
+    run2 = s2.bind(values, config=cfg)  # kernargs packed once
+
+    def run(run1=run1, run2=run2):
+        run1()
+        run2()
+
+    return run
+
+
 def _stage2_launch(s2_spec, *, ws_ptr, ws_bytes, dw_ptr, dw_bytes):
     """``(values, config)`` of the Stage 2 fold of ``s2_spec`` into dW.
 
@@ -6801,6 +6870,13 @@ def _cached_bind(
                 rt.memset_async(dx_ptr, 0, dx_bytes, stream)
             _launch()
 
+    elif direction == "dgrad" and extras.get("pbd") is not None:
+        # Deterministic box split-K (pp_box_det): stage 1, then the fixed-order
+        # fold of every split tile's slots into dX. No dX clear.
+        run = _pbd_stage2_run(
+            run, ident, problem, extras, ptrs, sizes, arch, stage2_kernels, KernelLauncher,
+            LaunchConfig,
+        )
     elif direction == "dgrad" and (
         ident.split_k > 1 or (ident.pp_streamk and not ident.pp_sk_mode & 1)
     ):
@@ -6982,14 +7058,33 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
 
             extra = pp_streamk_fixup_words(ident, problem) - flat.size
             flat = np.concatenate([flat, np.zeros(max(0, extra), np.int32)])
-        buf = rt.alloc(flat.nbytes)
+        _alloc_bytes = flat.nbytes
+        if getattr(ident, "pp_box_det", 0):
+            # Deterministic box split-K: header, stage-2 table and the f32
+            # slots follow the table (conv_dgrad_box_det.pp_box_det_pack);
+            # the slots are fully written by stage 1, never cleared.
+            from kernels.common.conv_dgrad_box_det import pp_box_det_pack
+
+            _w, _lay = pp_box_det_pack(
+                sub_gemms, problem, tile_m=ident.tile_m, tile_n=ident.tile_n,
+                pp_box_order=getattr(ident, "pp_box_order", 0),
+                slot_bytes=2 if ident.pp_box_det in (2, 4) else 4,
+            )
+            flat = np.array(_w, dtype=np.int32)
+            _alloc_bytes = int(_lay["total_words"]) * 4
+            extras["pbd"] = _lay
+        buf = rt.alloc(_alloc_bytes)
         rt.memcpy_h2d(buf, flat.ctypes.data, flat.nbytes)
+        if extras.get("pbd") is not None:
+            # pp_box_det 3/4 tile counters: zeroed once, reset by the kernel.
+            _l = extras["pbd"]
+            rt.memset(buf + 4 * _l["cnt_word"], 0, 4 * _l["blocks"])
         extras["sub_gemm_buf"] = buf
         extras["num_sub_gemms"] = len(sub_gemms)
         # Not a kernarg: what a batched ranking charges this config's scratch
         # budget (see _extras_bytes). The table is small, but the accounting
         # should name everything it holds.
-        extras["sub_gemm_bytes"] = int(flat.nbytes)
+        extras["sub_gemm_bytes"] = int(_alloc_bytes)
         blocks = sum(
             -(-sg.gemm_m // ident.tile_m) * -(-sg.gemm_n // ident.tile_n)
             for sg in sub_gemms
