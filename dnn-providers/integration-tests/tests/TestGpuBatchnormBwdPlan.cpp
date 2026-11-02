@@ -3,9 +3,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <iostream>
+#include <limits>
+#include <tuple>
+
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -39,45 +45,48 @@ using FloatPlanBuilder = GpuBatchnormBwdPlanBuilder<DataType::FLOAT,
                                                     DataType::FLOAT,
                                                     DataType::FLOAT>;
 
-template <typename DType>
-void runPlanExecuteVsCpuRef(const TensorLayout& layout, bool useSavedStats)
+template <typename Dy, typename X, typename Dx>
+void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
+                            const TensorLayout& layout,
+                            bool useSavedStats)
 {
-    const std::vector<int64_t> dims{2, 3, 4, 5};
     const auto strides = generateStrides(dims, layout.strideOrder);
-    const auto dataType = nativeTypeToDataType<DType>();
     auto builder = createValidBatchnormBwdGraph(
-        strides, dims, useSavedStats, dataType, DataType::FLOAT, DataType::FLOAT);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
-    const auto& tensorMap = graph.getTensorMap();
-
-    GpuBatchnormBwdParams params(*tensorMap.at(DY_UID),
-                                 *tensorMap.at(X_UID),
-                                 *tensorMap.at(SCALE_UID),
-                                 *tensorMap.at(DX_UID),
-                                 *tensorMap.at(DSCALE_UID),
-                                 *tensorMap.at(DBIAS_UID),
-                                 useSavedStats ? tensorMap.at(MEAN_UID) : nullptr,
-                                 useSavedStats ? tensorMap.at(INV_VARIANCE_UID) : nullptr);
-    GpuBatchnormBwdPlan<DType, DType, float, float, DType, float> gpuPlan(std::move(params));
+        strides, dims, useSavedStats, nativeTypeToDataType<X>(), DataType::FLOAT, DataType::FLOAT);
+    auto graph = UnPackGraph(builder.GetBufferPointer());
+    for(auto& tensor : graph->tensors)
+    {
+        if(tensor->uid == DY_UID)
+        {
+            tensor->data_type = nativeTypeToDataType<Dy>();
+        }
+        else if(tensor->uid == DX_UID)
+        {
+            tensor->data_type = nativeTypeToDataType<Dx>();
+        }
+    }
+    builder.Clear();
+    builder.Finish(Graph::Pack(builder, graph.get()));
+    hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor gpuExecutor;
+    ASSERT_TRUE(gpuExecutor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 
     const auto affineDims = getDerivedShape(dims);
     const auto affineStrides = generateStrides(affineDims, layout.strideOrder);
-    Tensor<DType> dy(dims, strides);
-    Tensor<DType> x(dims, strides);
+    Tensor<Dy> dy(dims, strides);
+    Tensor<X> x(dims, strides);
     Tensor<float> scale(affineDims, affineStrides);
     Tensor<float> mean(affineDims, affineStrides);
     Tensor<float> invVariance(affineDims, affineStrides);
-    Tensor<DType> cpuDx(dims, strides);
-    Tensor<DType> gpuDx(dims, strides);
+    Tensor<Dx> cpuDx(dims, strides);
+    Tensor<Dx> gpuDx(dims, strides);
     Tensor<float> cpuDscale(affineDims, affineStrides);
     Tensor<float> gpuDscale(affineDims, affineStrides);
     Tensor<float> cpuDbias(affineDims, affineStrides);
     Tensor<float> gpuDbias(affineDims, affineStrides);
 
     const auto seed = getGlobalTestSeed();
-    dy.fillWithRandomValues(static_cast<DType>(-1.0f), static_cast<DType>(1.0f), seed);
-    x.fillWithRandomValues(static_cast<DType>(-1.0f), static_cast<DType>(1.0f), seed + 1);
+    dy.fillWithRandomValues(static_cast<Dy>(-1.0f), static_cast<Dy>(1.0f), seed);
+    x.fillWithRandomValues(static_cast<X>(-1.0f), static_cast<X>(1.0f), seed + 1);
     scale.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
     mean.fillWithRandomValues(-1.0f, 1.0f, seed + 3);
     invVariance.fillWithRandomValues(0.25f, 2.0f, seed + 4);
@@ -102,7 +111,7 @@ void runPlanExecuteVsCpuRef(const TensorLayout& layout, bool useSavedStats)
         cpuVariantPack.emplace(INV_VARIANCE_UID, invVariance.rawHostData());
     }
 
-    gpuPlan.execute(gpuVariantPack);
+    gpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), gpuVariantPack);
     gpuDx.markDeviceModified();
     gpuDscale.markDeviceModified();
     gpuDbias.markDeviceModified();
@@ -113,9 +122,28 @@ void runPlanExecuteVsCpuRef(const TensorLayout& layout, bool useSavedStats)
     cpuDscale.markHostModified();
     cpuDbias.markHostModified();
 
-    assertAllClose(cpuDx, gpuDx, batchnorm::getToleranceBackward<DType>());
-    assertAllClose(cpuDscale, gpuDscale, batchnorm::getToleranceBackward<float>());
-    assertAllClose(cpuDbias, gpuDbias, batchnorm::getToleranceBackward<float>());
+    {
+        SCOPED_TRACE("dx");
+        const auto tolerance = batchnorm::getToleranceBackward<Dx>();
+        // Different FP32 reduction orders can straddle a low-precision output rounding boundary.
+        const auto relativeTolerance
+            = std::max(tolerance, static_cast<float>(std::numeric_limits<Dx>::epsilon()));
+        const hipdnn_gpu_ref::GpuFpReferenceValidation<Dx> validator(tolerance, relativeTolerance);
+        const bool matches = validator.allClose(cpuDx, gpuDx);
+        if(!matches)
+        {
+            printTensorDiff<Dx>(std::cerr, "dx", cpuDx, gpuDx, tolerance, relativeTolerance);
+        }
+        EXPECT_TRUE(matches);
+    }
+    {
+        SCOPED_TRACE("dscale");
+        assertAllClose(cpuDscale, gpuDscale, batchnorm::getToleranceBackward<float>());
+    }
+    {
+        SCOPED_TRACE("dbias");
+        assertAllClose(cpuDbias, gpuDbias, batchnorm::getToleranceBackward<float>());
+    }
 }
 
 } // namespace
@@ -194,8 +222,12 @@ TEST_P(TestGpuBatchnormBwdPlanRequiredTensorType, MismatchedTypeIsNotApplicable)
         {48, 16, 4, 1}, {2, 3, 4, 4}, true, DataType::FLOAT, DataType::FLOAT, DataType::HALF);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
+    const auto halfBuilder = createValidBatchnormBwdGraph(
+        {48, 16, 4, 1}, {2, 3, 4, 4}, true, DataType::HALF, DataType::HALF, DataType::HALF);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper halfGraph(
+        halfBuilder.GetBufferPointer(), halfBuilder.GetSize());
     auto tensorMap = graph.getTensorMap();
-    tensorMap[GetParam()] = tensorMap.at(MEAN_UID);
+    tensorMap[GetParam()] = halfGraph.getTensorMap().at(GetParam());
 
     const GpuBatchnormBwdPlanBuilder<DataType::FLOAT,
                                      DataType::FLOAT,
@@ -204,6 +236,7 @@ TEST_P(TestGpuBatchnormBwdPlanRequiredTensorType, MismatchedTypeIsNotApplicable)
                                      DataType::FLOAT,
                                      DataType::FLOAT>
         planBuilder;
+    ASSERT_TRUE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
     EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), tensorMap));
 }
 
@@ -260,27 +293,27 @@ TEST(TestGpuBatchnormBwdPlanBuilder, PeerStatisticsAreNotApplicable)
     EXPECT_FALSE(FloatPlanBuilder().isApplicable(graph.getNode(0), graph.getTensorMap()));
 }
 
-TEST(TestGpuBatchnormBwdPlanBuilder, UnsupportedMetadataIsNotApplicable)
+TEST(TestGpuBatchnormBwdPlanBuilder, UnsupportedMetadataValidationIsDeferredToOperation)
 {
     const FloatPlanBuilder planBuilder;
 
     auto rankBuilder = createValidBatchnormBwdGraph({3, 1}, {2, 3});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper rankGraph(
         rankBuilder.GetBufferPointer(), rankBuilder.GetSize());
-    EXPECT_FALSE(planBuilder.isApplicable(rankGraph.getNode(0), rankGraph.getTensorMap()));
+    EXPECT_TRUE(planBuilder.isApplicable(rankGraph.getNode(0), rankGraph.getTensorMap()));
 
     auto unpackedBuilder = createValidBatchnormBwdGraph({24, 8, 1}, {2, 3, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper unpackedGraph(
         unpackedBuilder.GetBufferPointer(), unpackedBuilder.GetSize());
-    EXPECT_FALSE(planBuilder.isApplicable(unpackedGraph.getNode(0), unpackedGraph.getTensorMap()));
+    EXPECT_TRUE(planBuilder.isApplicable(unpackedGraph.getNode(0), unpackedGraph.getTensorMap()));
 
     auto layoutBuilder = createValidBatchnormBwdGraph({60, 5, 15, 1}, {2, 3, 4, 5});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper layoutGraph(
         layoutBuilder.GetBufferPointer(), layoutBuilder.GetSize());
-    EXPECT_FALSE(planBuilder.isApplicable(layoutGraph.getNode(0), layoutGraph.getTensorMap()));
+    EXPECT_TRUE(planBuilder.isApplicable(layoutGraph.getNode(0), layoutGraph.getTensorMap()));
 }
 
-TEST(TestGpuBatchnormBwdPlanBuilder, MismatchedShapesAreNotApplicable)
+TEST(TestGpuBatchnormBwdPlanBuilder, MismatchedShapeValidationIsDeferredToOperation)
 {
     auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -289,18 +322,18 @@ TEST(TestGpuBatchnormBwdPlanBuilder, MismatchedShapesAreNotApplicable)
 
     auto tensorMap = graph.getTensorMap();
     tensorMap[DX_UID] = tensorMap.at(SCALE_UID);
-    EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), tensorMap));
+    EXPECT_TRUE(planBuilder.isApplicable(graph.getNode(0), tensorMap));
 
     tensorMap = graph.getTensorMap();
     tensorMap[DY_UID] = tensorMap.at(SCALE_UID);
-    EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), tensorMap));
+    EXPECT_TRUE(planBuilder.isApplicable(graph.getNode(0), tensorMap));
 
     tensorMap = graph.getTensorMap();
     tensorMap[SCALE_UID] = tensorMap.at(X_UID);
-    EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), tensorMap));
+    EXPECT_TRUE(planBuilder.isApplicable(graph.getNode(0), tensorMap));
 }
 
-TEST(TestGpuBatchnormBwdPlanBuilder, InconsistentOperandLayoutIsNotApplicable)
+TEST(TestGpuBatchnormBwdPlanBuilder, InconsistentOperandLayoutValidationIsDeferredToOperation)
 {
     const std::vector<int64_t> dims{2, 3, 4, 5};
     auto nchwBuilder = createValidBatchnormBwdGraph({60, 20, 5, 1}, dims);
@@ -312,7 +345,7 @@ TEST(TestGpuBatchnormBwdPlanBuilder, InconsistentOperandLayoutIsNotApplicable)
     auto tensorMap = nchwGraph.getTensorMap();
     tensorMap[DY_UID] = nhwcGraph.getTensorMap().at(DY_UID);
 
-    EXPECT_FALSE(FloatPlanBuilder().isApplicable(nchwGraph.getNode(0), tensorMap));
+    EXPECT_TRUE(FloatPlanBuilder().isApplicable(nchwGraph.getNode(0), tensorMap));
 }
 
 TEST(TestGpuBatchnormBwdPlan, MissingVariantPackTensorsThrow)
@@ -344,38 +377,41 @@ TEST(TestGpuBatchnormBwdPlan, ExecutorIsApplicable)
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
 
-TEST(TestGpuBatchnormBwdPlanFp32, ExecutePlanNchwWithoutSavedStats)
+template <typename Types>
+class TestGpuBatchnormBwdPlanExecute : public testing::Test
 {
-    SKIP_IF_NO_DEVICES();
-    runPlanExecuteVsCpuRef<float>(TensorLayout::NCHW, false);
-}
+};
 
-TEST(TestGpuBatchnormBwdPlanFp32, ExecutePlanNhwcWithSavedStats)
-{
-    SKIP_IF_NO_DEVICES();
-    runPlanExecuteVsCpuRef<float>(TensorLayout::NHWC, true);
-}
+using RegisteredBatchnormBwdTypes = testing::Types<std::tuple<float, float, float>,
+                                                   std::tuple<half, half, half>,
+                                                   std::tuple<bfloat16, bfloat16, bfloat16>,
+                                                   std::tuple<half, half, float>,
+                                                   std::tuple<bfloat16, bfloat16, float>,
+                                                   std::tuple<float, bfloat16, bfloat16>,
+                                                   std::tuple<float, half, half>>;
+TYPED_TEST_SUITE(TestGpuBatchnormBwdPlanExecute, RegisteredBatchnormBwdTypes, );
 
-TEST(TestGpuBatchnormBwdPlanFp16, ExecutePlanNchw)
+TYPED_TEST(TestGpuBatchnormBwdPlanExecute, ExecutorMatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
-    runPlanExecuteVsCpuRef<half>(TensorLayout::NCHW, true);
-}
-
-TEST(TestGpuBatchnormBwdPlanFp16, ExecutePlanNhwc)
-{
-    SKIP_IF_NO_DEVICES();
-    runPlanExecuteVsCpuRef<half>(TensorLayout::NHWC, true);
-}
-
-TEST(TestGpuBatchnormBwdPlanBfp16, ExecutePlanNchw)
-{
-    SKIP_IF_NO_DEVICES();
-    runPlanExecuteVsCpuRef<bfloat16>(TensorLayout::NCHW, true);
-}
-
-TEST(TestGpuBatchnormBwdPlanBfp16, ExecutePlanNhwc)
-{
-    SKIP_IF_NO_DEVICES();
-    runPlanExecuteVsCpuRef<bfloat16>(TensorLayout::NHWC, true);
+    using Dy = std::tuple_element_t<0, TypeParam>;
+    using X = std::tuple_element_t<1, TypeParam>;
+    using Dx = std::tuple_element_t<2, TypeParam>;
+    const std::vector<std::vector<int64_t>> shapes{{2, 3, 4, 5}, {4, 5, 17, 19}, {3, 2, 5, 7, 11}};
+    for(const auto& dims : shapes)
+    {
+        SCOPED_TRACE(testing::PrintToString(dims));
+        const auto layouts
+            = dims.size() == 5 ? std::vector<TensorLayout>{TensorLayout::NCDHW, TensorLayout::NDHWC}
+                               : std::vector<TensorLayout>{TensorLayout::NCHW, TensorLayout::NHWC};
+        for(const auto& layout : layouts)
+        {
+            SCOPED_TRACE(testing::PrintToString(layout));
+            for(const bool useSavedStats : {false, true})
+            {
+                SCOPED_TRACE(useSavedStats);
+                runPlanExecuteVsCpuRef<Dy, X, Dx>(dims, layout, useSavedStats);
+            }
+        }
+    }
 }

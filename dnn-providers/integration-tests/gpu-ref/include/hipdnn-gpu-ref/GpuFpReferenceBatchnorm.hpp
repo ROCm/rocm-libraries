@@ -231,8 +231,7 @@ public:
               class ScaleBiasDataType,
               class MeanVarianceDataType = ScaleBiasDataType,
               class DxDataType = XDataType,
-              class ComputeDataType
-              = std::conditional_t<std::is_same_v<MeanVarianceDataType, double>, double, float>>
+              class ComputeDataType = MeanVarianceDataType>
     static void backward(hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
                          hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
                          hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
