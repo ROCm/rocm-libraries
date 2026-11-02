@@ -71,7 +71,7 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
 from .Common.GlobalParameters import globalParameters
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from .Common.Architectures import ARCH_CAP_OVERRIDES
-from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, splatFirst
+from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxsbRotateSplit, splatFirst
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
 from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
@@ -9308,6 +9308,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           mxStates.numVgprLocalReadAddr = Component.LocalRead.find(self).getMxNumVectorsPerTile(
               kernel, mxTc, tile01, self.states.asmCaps)
 
+      # Split MXSB B-rotate: +0/+1 address the two vIdx halves (rebuilt by _lraFanOut), not +64K copies.
+      if mxsbRotateSplit(kernel):
+        assert self.states.mxsb.numVgprLocalReadAddr == 1, \
+          "LDSSegmentBRotate: split MXSB needs local-read offsets below 64K"
+        self.states.mxsb.numVgprLocalReadAddr = 2
+
       # do not allocate local read address register if DirectToVgpr is enabled
       if kernel["DirectToVgprA"]:
         self.states.a.numVgprLocalReadAddr = 0
@@ -10522,6 +10528,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0.
       # Defined here (not in defineVariableSgprs) because lraDeclareAddresses is emitted first.
       self.defineSgpr("BRotateLRDelta", 1)
+      if mxsbRotateSplit(kernel):
+        self.defineSgpr("MXSBRotateLRDelta", 1)
     if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
       # A/B descriptors alias on separate waves; each wave keeps its own ping/pong mask.
       self.defineSgpr("PairedTDMSwap", 1)

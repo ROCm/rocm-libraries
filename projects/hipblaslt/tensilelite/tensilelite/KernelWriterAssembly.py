@@ -75,7 +75,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsKStride, mxTdmTile0, mxTdmTileM, \
-  mxLraFreeShift, mxSegmentSplit
+  mxLraFreeShift, mxSegmentSplit, mxsbRotateSplit
 from .Components.LraTileAssignment import mx2dFreeOffset
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
@@ -7241,6 +7241,11 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VAddU32(dst=vgpr("LocalReadAddrB+1"), src0=sgpr("BRotateLRDelta"), src1=vgpr("LocalReadAddrB+0"), \
                          comment="B-rotate: other component"))
       return module
+    if tc == "MXSB" and mxsbRotateSplit(kernel):
+      assert numLra == 2, "LDSSegmentBRotate: split MXSB needs exactly 2 local-read addresses"
+      module.add(VAddU32(dst=vgpr("LocalReadAddrMXSB+1"), src0=sgpr("MXSBRotateLRDelta"), \
+                         src1=vgpr("LocalReadAddrMXSB+0"), comment="MXSB-rotate: other vIdx half"))
+      return module
     windows = (kernel.get("LDSSegInterleaveOffsets") or {}).get("readAddressWindows" + tc)
     if windows is not None:
       assert len(windows) == numLra and windows[0] == 0
@@ -7362,6 +7367,23 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SMulI32(dst=pairSgpr, src0=pairSgpr, src1=compStride, comment="B-rotate: pair * S"))
           module.add(VAddU32(dst=vgpr("LocalReadAddrB+0"), src0=pairSgpr, src1=vgpr("LocalReadAddrB+0"), \
                              comment="B-rotate: pair 1 reads the other component first"))
+      if tc == "MXSB" and mxsbRotateSplit(kernel):
+        # Split MXSB: vIdx half h reads +h at the in-half immediate (localReadMX). The scales
+        # follow the rotated B halves: pair p needs +0 = root + p*H and +1 = +0 + H - p*2H.
+        halfStride = Component.LocalRead.find(self).getMxsbRotateHalfStride(kernel)
+        with self.allocTmpSgpr(1, tag="mxsbRotatePair") as tmpSgprInfo:
+          pairSgpr = sgpr(tmpSgprInfo.idx)
+          module.add(VReadfirstlaneB32(dst=pairSgpr, src=vgpr("Serial"), comment="MXSB-rotate: tId"))
+          module.add(SLShiftRightB32(dst=pairSgpr, shiftHex=log2(kernel["WavefrontSize"]), src=pairSgpr, \
+                                     comment="MXSB-rotate: wave id"))
+          module.add(SAndB32(dst=pairSgpr, src0=pairSgpr, src1=1, comment="MXSB-rotate: pair = wave id & 1"))
+          module.add(SMulI32(dst=sgpr("MXSBRotateLRDelta"), src0=pairSgpr, src1=2 * halfStride, \
+                             comment="MXSB-rotate: pair * 2H"))
+          module.add(SSubU32(dst=sgpr("MXSBRotateLRDelta"), src0=halfStride, \
+                             src1=sgpr("MXSBRotateLRDelta"), comment="MXSB-rotate: H - pair*2H"))
+          module.add(SMulI32(dst=pairSgpr, src0=pairSgpr, src1=halfStride, comment="MXSB-rotate: pair * H"))
+          module.add(VAddU32(dst=vgpr("LocalReadAddrMXSB+0"), src0=pairSgpr, src1=vgpr("LocalReadAddrMXSB+0"), \
+                             comment="MXSB-rotate: pair 1 reads the other vIdx half first"))
 
     if tP["isA"]:
       numVgpr = self.states.a.numVgprLocalReadAddr
@@ -15137,6 +15159,8 @@ class KernelWriterAssembly(KernelWriter):
       numLra = self.states.b.numVgprLocalReadAddr
     elif tP["isM"]:
       numLra = self.states.m.numVgprLocalReadAddr
+    elif tP["isMXSB"] and mxsbRotateSplit(kernel):
+      numLra = self.states.mxsb.numVgprLocalReadAddr
 
     module.add(self._lraFanOut(kernel, tc, numLra))
 

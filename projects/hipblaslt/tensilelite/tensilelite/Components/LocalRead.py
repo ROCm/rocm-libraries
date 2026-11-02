@@ -32,7 +32,7 @@ from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftO
                             ECvtPkFP8toF32, ECvtF32toF16, DSLoadU8
 
 from ..Component import LocalRead
-from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxsbRotateSplit
 
 from math import ceil
 
@@ -169,6 +169,17 @@ class LocalReadMFMA(LocalRead):
         if tileSpanInfo is not None:
             return tileSpanInfo["numGroups"]
         return kernel["MIWaveTile"][tile01] // kernel["VectorWidth%s" % tc]
+
+    @staticmethod
+    def getMxsbRotateHalfStride(kernel):
+        """Byte distance between the two vIdx halves of a split (non-TileSpan) MXSB read.
+
+        Same per-vIdx step as localReadMX (MIWaveGroupShape[1] * mxUnit) times half the vIdx count.
+        """
+        mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"]
+        vStep = kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]
+        half = kernel["MIWaveTile"][1] // kernel["VectorWidthB"] // 2
+        return half * vStep * mxUnit
 
     @staticmethod
     def getMxsTileSpanInfo(kernel, tc, tile01, asmCaps):
@@ -684,11 +695,19 @@ class LocalReadMFMA(LocalRead):
                             kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
         tileSpanInfo = self.getMxsTileSpanInfo(kernel, tc, tile01, writer.states.asmCaps)
         mxsTileSpan = tileSpanInfo is not None
-        if tc == "MXSB" and kernel.get("LDSSegmentBRotate"):
+        rotateSplit = tc == "MXSB" and mxsbRotateSplit(kernel)
+        if tc == "MXSB" and kernel.get("LDSSegmentBRotate") and not rotateSplit:
             # LRA rotates MXSB by flipping the half-wave select, which covers only one group.
             assert mxsTileSpan and tileSpanInfo["numGroups"] == 1 and kernel["MIWaveGroup"][1] > 1, \
                 "LDSSegmentBRotate: MXSB needs the single-group TileSpan wave-split layout"
         numVectorsPerTile = self.getMxNumVectorsPerTile(kernel, tc, tile01, writer.states.asmCaps)
+        if rotateSplit:
+            # Logical half h of the vIdx range reads LocalReadAddrMXSB+h; per pair the two
+            # registers are swapped in LRA, so the immediate carries only the in-half offset.
+            assert not mxsTileSpan and not mx2d and numVectorsPerTile % 2 == 0, \
+                "LDSSegmentBRotate: split MXSB needs a 1D non-TileSpan layout with even vIdx count"
+            rotateHalf = numVectorsPerTile // 2
+            rotateHalfStride = self.getMxsbRotateHalfStride(kernel)
         # 2D phase: each vector reads through its own LocalReadAddr+vIdx, which
         # already holds its scale row (mxPhaseLraFixup); no vIdx immediate.
         mxPhase = mxFreePhase(kernel, tc)
@@ -768,6 +787,13 @@ class LocalReadMFMA(LocalRead):
                 addrIdx = paramList[0] // 65536
                 srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
                 paramList[0] -= addrIdx * 65536
+                if rotateSplit:
+                    assert addrIdx == 0 and (kernel["LdsBlockSizePerPad%s"%tc] == 0 or kernel["LdsPad%s"%tc] == 0), \
+                        "LDSSegmentBRotate: split MXSB needs unpadded offsets below 64K"
+                    half = vIdx // rotateHalf
+                    paramList[0] -= half * rotateHalfStride
+                    assert paramList[0] >= 0
+                    srcAddr = vgpr("LocalReadAddr%s+%u"%(tc, half))
                 if mxPhase:
                     assert addrIdx == 0, "MXS 2D phase: LocalReadAddr+vIdx needs offsets below 64K"
                     srcAddr = vgpr("LocalReadAddr%s+%u"%(tc, vIdx))
