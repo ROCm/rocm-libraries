@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Dispatcher contract for the optional unified split-KV LSE output (host only)."""
+"""Dispatcher contract for the optional unified (split-KV and tiled 2D) LSE output (host only)."""
 
 import dataclasses
 
@@ -48,6 +48,15 @@ def _pinned(req, spec_id):
     return dataclasses.replace(req, algorithm=_TUNING_ALGORITHM, spec_id=spec_id)
 
 
+def _prefill_request(arch, **overrides):
+    """Single-sequence 256-token prefill: routes to tiled 2D."""
+    return _decode_request(arch, batch=1, seqlen_q=256, seqlen_k=256, **overrides)
+
+
+_NARROW_2D_SPEC = "{arch}_u2d_narrow_nw1_mw16_t1xb_llvm"
+_GFX942_4WARP_SPEC = "gfx942_u2d_gfx942_4warp_nw1_mw32_t64_llvm"
+
+
 @pytest.mark.parametrize("arch", _ARCHES)
 def test_unpinned_lse_decode_request_routes_to_split_kv(arch):
     result = dispatch_attention(_decode_request(arch, emit_lse=True))
@@ -87,7 +96,7 @@ def test_pinned_split_kv_spec_follows_the_request(arch):
 
 # What a long-lived cache stored for ``_decode_request`` before emit_lse existed:
 # the unpinned spec_hash, and the split-KV pin with its spec_hash. These are
-# develop's own values (gfx950's split-KV config_key moved with #13120's
+# develop's own values (gfx950's split-KV config_key moved with the
 # additive-bias field); emit_lse must leave them exactly as develop computes them.
 # Both split-KV config_keys moved again once decode kept K/V cacheable when it
 # fits the last-level cache: this shape's 64 MiB of K/V now records
@@ -114,32 +123,148 @@ def test_pre_lse_cache_entries_still_resolve_with_lse_off(arch):
     assert dispatch_attention(pinned).kernel_id.spec_hash == spec_hash
 
 
+# What a long-lived cache stored for ``_prefill_request`` before the 2D specs
+# had emit_lse: unpinned spec_hash, narrow pin + hash. Develop's own values
+# (gfx950's pin moved with the additive-bias field, then with use_qblock_reverse).
+_PRE_LSE_2D_UNPINNED_SPEC_HASH = "c7dd16a4a52afb9d"
+_PRE_LSE_2D_PIN = {
+    "gfx942": (
+        "narrow_nw1_mw16_t1xb_llvm_wpenone@98141a2e646271d9",
+        "738d09721910c8ad",
+    ),
+    "gfx950": (
+        "narrow_nw1_mw16_t1xb_llvm_wpenone@7a7cfcc8a5d56e43",
+        "c97e33ec12b3b1a4",
+    ),
+}
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_pre_lse_2d_cache_entries_still_resolve_with_lse_off(arch):
+    unpinned = dispatch_attention(_prefill_request(arch))
+    assert unpinned.kernel_id.spec_hash == _PRE_LSE_2D_UNPINNED_SPEC_HASH
+    tuning_id, spec_hash = _PRE_LSE_2D_PIN[arch]
+    pinned = dataclasses.replace(
+        _pinned(_prefill_request(arch), _NARROW_2D_SPEC.format(arch=arch)),
+        tuning_id=tuning_id,
+    )
+    assert dispatch_attention(pinned).kernel_id.spec_hash == spec_hash
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_unpinned_lse_prefill_request_routes_to_tiled_2d(arch):
+    on = dispatch_attention(_prefill_request(arch, emit_lse=True))
+    off = dispatch_attention(_prefill_request(arch))
+    assert on.spec.path == "2d" and on.spec.emit_lse is True
+    assert on.spec.kernel_name() == off.spec.kernel_name() + "_lse"
+    assert on.kernel_id.spec_hash != off.kernel_id.spec_hash
+
+
 @pytest.mark.parametrize("arch", _ARCHES)
 @pytest.mark.parametrize("emit_lse", [False, True])
 def test_split_kv_sweep_keeps_the_requested_output(arch, emit_lse):
     """A tuning sweep varies performance knobs only; it must never add or drop
-    the LSE output. With LSE requested, no 2D configuration may be offered."""
+    the LSE output, on either path."""
     results = dispatch_attention_all(
         _decode_request(arch, emit_lse=emit_lse), candidate_prefix="attention_"
     )
     split_kv = [r for r in results if r.spec.path == "3d"]
     assert split_kv, "no split-KV configuration was enumerated"
     assert {r.spec.reduce_spec.emit_lse for r in split_kv} == {emit_lse}
+    two_d = [r for r in results if r.spec.path == "2d"]
+    assert {r.spec.kernel_spec.emit_lse for r in two_d} <= {emit_lse}
     if emit_lse:
-        assert not [r for r in results if r.spec.path == "2d"]
+        assert not [r for r in two_d if r.spec.builder_kind == "gfx942_4warp_gqa"]
 
 
 @pytest.mark.parametrize("arch", _ARCHES)
-def test_pinned_2d_spec_refuses_lse(arch):
-    prefill = _decode_request(arch, batch=1, seqlen_q=256, seqlen_k=256)
-    spec_id = f"{arch}_u2d_narrow_nw1_mw16_t1xb_llvm"
-    dispatch_attention(_pinned(prefill, spec_id))  # served without LSE
-    # Refused by the missing ``lse`` feature or, should a 2D variant ever declare
-    # it, by the 2D gate ("LSE output is not implemented ..."): either is a refusal.
+def test_pinned_2d_spec_follows_the_request(arch):
+    spec_id = _NARROW_2D_SPEC.format(arch=arch)
+    on = dispatch_attention(_pinned(_prefill_request(arch, emit_lse=True), spec_id))
+    off = dispatch_attention(_pinned(_prefill_request(arch), spec_id))
+    assert on.spec.kernel_spec.emit_lse is True
+    assert off.spec.kernel_spec.emit_lse is False
+    # Same configuration (emit_lse is an output, not a knob), distinct binary.
+    assert on.spec.config_key == off.spec.config_key
+    assert on.spec.kernel_name() == off.spec.kernel_name() + "_lse"
+    assert on.spec.cache_key() != off.spec.cache_key()
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_2d_lse_sweep_carries_the_output(arch):
+    results = dispatch_attention_all(
+        _prefill_request(arch, emit_lse=True), candidate_prefix="attention_"
+    )
+    two_d = [r for r in results if r.spec.path == "2d"]
+    assert two_d, "no tiled 2D configuration was enumerated"
+    assert {r.spec.kernel_spec.emit_lse for r in two_d} == {True}
+
+
+def test_pinned_gfx942_4warp_spec_refuses_lse():
+    req = _prefill_request("gfx942", hdim_q=256, hdim_v=256)
     with pytest.raises(ValueError, match="(?i)lse"):
         dispatch_attention(
-            _pinned(dataclasses.replace(prefill, emit_lse=True), spec_id)
+            _pinned(dataclasses.replace(req, emit_lse=True), _GFX942_4WARP_SPEC)
         )
+
+
+def test_explicit_4warp_spec_builder_refuses_lse():
+    from dispatch.attention.common import _tuning_problem
+    from dispatch.attention.tuning_specs import (
+        ExplicitAttention2DConfig,
+        make_explicit_attention_2d_spec,
+    )
+
+    problem = _tuning_problem(
+        _prefill_request("gfx942", hdim_q=256, hdim_v=256, emit_lse=True)
+    )
+    config = ExplicitAttention2DConfig(
+        num_warps=1,
+        block_m_per_warp=32,
+        tile_policy="64",
+        builder_kind="gfx942_4warp_gqa",
+    )
+    with pytest.raises(ValueError, match="4-warp GQA builder"):
+        make_explicit_attention_2d_spec(problem, config, arch="gfx942")
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_lse_with_sinks_is_refused_on_2d(arch):
+    with pytest.raises(ValueError, match="LSE output with attention sinks"):
+        dispatch_attention(_prefill_request(arch, emit_lse=True, use_sinks=True))
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_binding_rejects_a_2d_kernel_spec_that_disagrees_on_lse(arch):
+    from dispatch.attention.bindings import validate_tuning_attention_contract
+    from dispatch.attention.common import _tuning_problem
+
+    request = _prefill_request(arch, emit_lse=True)
+    result = dispatch_attention(_pinned(request, _NARROW_2D_SPEC.format(arch=arch)))
+    spec = dataclasses.replace(
+        result.spec,
+        kernel_spec=dataclasses.replace(result.spec.kernel_spec, emit_lse=False),
+    )
+    with pytest.raises(ValueError, match="kernel_spec.emit_lse"):
+        validate_tuning_attention_contract(request, _tuning_problem(request), spec)
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_binding_forwards_the_lse_buffer_on_2d(arch, monkeypatch):
+    from dispatch.attention.common import _tuning_problem
+    from kernels.common import attention_unified as au
+
+    seen = {}
+    monkeypatch.setattr(au, "run_unified_attention_torch", lambda **kw: seen.update(kw))
+    request = _pinned(
+        _prefill_request(arch, emit_lse=True), _NARROW_2D_SPEC.format(arch=arch)
+    )
+    problem = _tuning_problem(request)
+    lse = object()
+    tensors = {**_paged_tensors(problem), "lse": lse}
+    tensors["cu_seqlens_q"] = _FakeTensor((2,), "torch.int32", [0, problem.total_q])
+    dispatch_attention(request).bind_torch(tensors).launch()
+    assert seen["lse"] is lse and seen["backend"] == "tiled"
 
 
 @pytest.mark.parametrize("arch", _ARCHES)

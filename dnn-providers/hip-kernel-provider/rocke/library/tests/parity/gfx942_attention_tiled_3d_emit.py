@@ -18,6 +18,10 @@
 # Each kernel is lowered with _native_lower(kernel, arch="gfx942") and the two
 # .ll texts are concatenated (segment first, then reduce) to stdout so they can
 # be byte-compared with the C emitter gfx942_attention_tiled_3d_emit.c.
+# prove_parity_binding keeps a copy of _CONFIGS (with emit_lse set for the
+# _REDUCE_LSE configs) in platform/cpp/bindings/attention_tiled_parity_configs.py;
+# update it in step.
+import dataclasses
 import sys
 
 from kernels.gfx942.attention_tiled_3d import (
@@ -332,7 +336,51 @@ _CONFIGS = {
         use_decode_grid=True,
         kv_cache_policy="stream",
     ),
+    20: dict(
+        # Reduce with emit_lse (see _REDUCE_LSE): bf16 D128 GQA.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    21: dict(
+        # Reduce with emit_lse (see _REDUCE_LSE): fp16 D64.
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    22: dict(
+        # Decode GQA with waves_per_eu, which the reduce inherits.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        waves_per_eu=2,
+    ),
 }
+
+# Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
+_REDUCE_LSE = frozenset({20, 21})
 
 
 def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32, 8)):
@@ -357,20 +405,21 @@ def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32,
     )
 
 
-# 20-28: representative strided decode specs spanning the catalog's D x block
-# axes (D64/128/256 x block 16/32/64); 29 is 24 with waves_per_eu=2.
+# 23-31: representative strided decode specs spanning the catalog's D x block
+# axes (D64/128/256 x block 16/32/64); 32 is 27 with waves_per_eu=2. They
+# follow the paged configs (0-22): new keys only, never overwrite one.
 _CONFIGS.update(
     {
-        20: _strided_decode(64, 16, None, "fp16", 64),
-        21: _strided_decode(64, 32, None, "bf16", 16),
-        22: _strided_decode(64, 64, None, "fp16", 8),
-        23: _strided_decode(128, 16, None, "bf16", 60, heads=(16, 16)),
-        24: _strided_decode(128, 32, 16, "fp16", 16),
-        25: _strided_decode(128, 64, 32, "bf16", 2),
-        26: _strided_decode(256, 16, None, "fp16", 22),
-        27: _strided_decode(256, 32, 16, "bf16", 64, heads=(64, 4)),
-        28: _strided_decode(256, 64, 32, "fp16", 8),
-        29: dict(_strided_decode(128, 32, 16, "fp16", 16), waves_per_eu=2),
+        23: _strided_decode(64, 16, None, "fp16", 64),
+        24: _strided_decode(64, 32, None, "bf16", 16),
+        25: _strided_decode(64, 64, None, "fp16", 8),
+        26: _strided_decode(128, 16, None, "bf16", 60, heads=(16, 16)),
+        27: _strided_decode(128, 32, 16, "fp16", 16),
+        28: _strided_decode(128, 64, 32, "bf16", 2),
+        29: _strided_decode(256, 16, None, "fp16", 22),
+        30: _strided_decode(256, 32, 16, "bf16", 64, heads=(64, 4)),
+        31: _strided_decode(256, 64, 32, "fp16", 8),
+        32: dict(_strided_decode(128, 32, 16, "fp16", 16), waves_per_eu=2),
     }
 )
 
@@ -381,9 +430,10 @@ def _kernels(idx: int):
     cfg = _CONFIGS[idx]
     spec = UnifiedAttention3DTiledSpec(**cfg)
     seg_kernel = build_unified_attention_3d_tiled(spec, arch="gfx942")
-    red_kernel = build_unified_attention_reduce_tiled(
-        reduce_spec_for_segment(spec), arch="gfx942"
-    )
+    red_spec = reduce_spec_for_segment(spec)
+    if idx in _REDUCE_LSE:
+        red_spec = dataclasses.replace(red_spec, emit_lse=True)
+    red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx942")
     return seg_kernel, red_kernel
 
 

@@ -9,12 +9,13 @@
  *   1. the segment kernel via
  *      rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm (paged K/V)
  *      or rocke_build_unified_attention_3d_tiled_strided_gfx942 (configs
- *      20-29: strided K/V, the Python kv_layout="strided"), then
+ *      23-32: strided K/V, the Python kv_layout="strided"), then
  *   2. the reduce kernel via
  *      rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm, with a
  *      rocke_unified_attention_reduce_tiled_spec_t derived from the same config
  *      (head_size / num_query_heads / num_kv_heads / dtype / num_segments /
- *      waves_per_eu, as the Python reduce_spec_for_segment)
+ *      waves_per_eu, as the Python reduce_spec_for_segment; configs 20-21 also
+ *      set emit_lse, as _REDUCE_LSE does)
  * (arch gfx942, flavor AUTO), printing the .ll to stdout for byte comparison.
  */
 #include <stdio.h>
@@ -363,36 +364,78 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* 
         s->use_decode_grid = true;
         s->kv_cache_policy = "stream";
         break;
-    /* 20-28: representative strided decode specs spanning the catalog's D x block
-     * axes (D64/128/256 x block 16/32/64); 29 is 24 with waves_per_eu=2. */
     case 20:
-        strided_decode(s, 64, 16, 0, "fp16", 64, 32, 8);
+        /* Reduce with emit_lse (see make_reduce_spec): bf16 D128 GQA. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
         break;
     case 21:
-        strided_decode(s, 64, 32, 0, "bf16", 16, 32, 8);
+        /* Reduce with emit_lse (see make_reduce_spec): fp16 D64. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
         break;
     case 22:
-        strided_decode(s, 64, 64, 0, "fp16", 8, 32, 8);
+        /* Decode GQA with waves_per_eu, which the reduce inherits. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
         break;
+    /* 23-31: representative strided decode specs spanning the catalog's D x block
+     * axes (D64/128/256 x block 16/32/64); 32 is 27 with waves_per_eu=2. */
     case 23:
-        strided_decode(s, 128, 16, 0, "bf16", 60, 16, 16);
+        strided_decode(s, 64, 16, 0, "fp16", 64, 32, 8);
         break;
     case 24:
-        strided_decode(s, 128, 32, 16, "fp16", 16, 32, 8);
+        strided_decode(s, 64, 32, 0, "bf16", 16, 32, 8);
         break;
     case 25:
-        strided_decode(s, 128, 64, 32, "bf16", 2, 32, 8);
+        strided_decode(s, 64, 64, 0, "fp16", 8, 32, 8);
         break;
     case 26:
-        strided_decode(s, 256, 16, 0, "fp16", 22, 32, 8);
+        strided_decode(s, 128, 16, 0, "bf16", 60, 16, 16);
         break;
     case 27:
-        strided_decode(s, 256, 32, 16, "bf16", 64, 64, 4);
+        strided_decode(s, 128, 32, 16, "fp16", 16, 32, 8);
         break;
     case 28:
-        strided_decode(s, 256, 64, 32, "fp16", 8, 32, 8);
+        strided_decode(s, 128, 64, 32, "bf16", 2, 32, 8);
         break;
     case 29:
+        strided_decode(s, 256, 16, 0, "fp16", 22, 32, 8);
+        break;
+    case 30:
+        strided_decode(s, 256, 32, 16, "bf16", 64, 64, 4);
+        break;
+    case 31:
+        strided_decode(s, 256, 64, 32, "fp16", 8, 32, 8);
+        break;
+    case 32:
         strided_decode(s, 128, 32, 16, "fp16", 16, 32, 8);
         s->has_waves_per_eu = true;
         s->waves_per_eu = 2;
@@ -400,15 +443,17 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* 
     default:
         return -1;
     }
-    if(idx >= 20)
+    if(idx >= 23)
         *strided = true;
     return 0;
 }
 
 /* Derive the reduce spec from the segment spec, exactly as the Python
  * reduce_spec_for_segment (head_size / num_query_heads / num_kv_heads / dtype /
- * num_segments / waves_per_eu). */
-static void make_reduce_spec(const rocke_unified_attention_3d_tiled_spec_t* s,
+ * num_segments / waves_per_eu); configs 20-21 also set emit_lse, as
+ * _REDUCE_LSE does. */
+static void make_reduce_spec(int idx,
+                             const rocke_unified_attention_3d_tiled_spec_t* s,
                              rocke_unified_attention_reduce_tiled_spec_t* r)
 {
     *r = rocke_unified_attention_reduce_tiled_spec_default();
@@ -419,6 +464,7 @@ static void make_reduce_spec(const rocke_unified_attention_3d_tiled_spec_t* s,
     r->num_segments = s->num_segments;
     r->has_waves_per_eu = s->has_waves_per_eu;
     r->waves_per_eu = s->waves_per_eu;
+    r->emit_lse = (idx == 20 || idx == 21);
 }
 
 /* Build the segment kernel into `b` (initialised here, named by the spec):
@@ -532,7 +578,7 @@ int main(int argc, char** argv)
         return 1;
     }
     rocke_unified_attention_reduce_tiled_spec_t r;
-    make_reduce_spec(&s, &r);
+    make_reduce_spec(idx, &s, &r);
 
     if(strcmp(mode, "ll") == 0 && !strided)
     {
