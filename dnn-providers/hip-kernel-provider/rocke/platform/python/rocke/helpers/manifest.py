@@ -57,6 +57,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from ..runtime.contract import parameter_contract
 from .compile import KernelArtifact
 
 
@@ -488,7 +489,17 @@ def write_artifact(
 
     Returns the paths written, keyed by short name (`hsaco`, `ir`,
     `ll`, `manifest`).
+
+    Refuses a kernel that states parameter facts or an exact workgroup size:
+    the written `.hsaco` does not carry them, so a launch from the file would
+    go unchecked. Launch such a kernel with `KernelLauncher.from_artifact`.
     """
+    if parameter_contract(artifact.kernel).states_facts:
+        raise ValueError(
+            f"{artifact.kernel_name}: this kernel states parameter facts, and a "
+            "written .hsaco does not carry them yet, so a launch from the file "
+            "would go unchecked. Launch it with KernelLauncher.from_artifact(artifact)."
+        )
     out_dir.mkdir(parents=True, exist_ok=True)
     name = artifact.kernel_name
     paths: Dict[str, Path] = {}

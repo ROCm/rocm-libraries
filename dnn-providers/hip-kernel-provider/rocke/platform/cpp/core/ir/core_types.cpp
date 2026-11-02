@@ -1499,13 +1499,16 @@ bool rocke_op_is_pure(const rocke_op_t* op)
     return rocke_opcode_is_pure(op->opcode);
 }
 
-/* Python @property KernelDef.max_workgroup_size: attrs["max_workgroup_size"],
- * default 256. */
+/* Python @property KernelDef.max_workgroup_size: attrs["workgroup_size"] (the
+ * exact block size) when set, else attrs["max_workgroup_size"] (an upper bound),
+ * else 256. The verifier refuses a kernel that sets both. */
 int rocke_kernel_max_workgroup_size(const rocke_kernel_def_t* k)
 {
     int64_t v;
     if(!k)
         return 256;
+    if(rocke_attr_get_int(&k->attrs, "workgroup_size", &v))
+        return (int)v;
     if(rocke_attr_get_int(&k->attrs, "max_workgroup_size", &v))
         return (int)v;
     return 256;

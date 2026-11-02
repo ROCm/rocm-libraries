@@ -89,14 +89,22 @@ extern "C" {
  *    which changes its size and that of every struct embedding a view.
  * 6: rocke_attention_tiled_2d_spec_t (gfx942) and
  *    rocke_unified_attention_reduce_tiled_spec_t (gfx942, gfx950) gained
- *    emit_lse at their end, which changes their size. */
-#define ROCKE_ABI_VERSION 6
+ *    emit_lse at their end, which changes their size.
+ * 8: rocke_param_opts_t gained nocapture, nonnull and dereferenceable (each
+ *    with a *_set flag) and the integer facts (rocke_int_facts_t) at its end,
+ *    which changes its size. */
+#define ROCKE_ABI_VERSION 8
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
  * 3: the scf_if_else instruction (converging runtime if/else, scf.if_else);
- *    older engines reject it as an unknown instruction op. */
-#define ROCKE_RECIPE_ABI 3
+ *    older engines reject it as an unknown instruction op.
+ * 4: the workgroup_size kernel attr (the exact launch block size); an older
+ *    lowerer ignores it and sizes the kernel for max_workgroup_size instead.
+ *    And the integer facts on a param instruction (ge, gt, le, lt, eq,
+ *    multiple_of); an older reader drops a param attr it does not know, so it
+ *    would replay the kernel and plan a launch that checks none of them. */
+#define ROCKE_RECIPE_ABI 4
 
 /* The values the LOADED library was compiled with. A caller compares these
  * against the ROCKE_* macros it was itself compiled with; they differ exactly

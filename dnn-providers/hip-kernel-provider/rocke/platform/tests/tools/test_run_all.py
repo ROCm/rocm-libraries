@@ -52,6 +52,12 @@ def test_runner_passes_registered_fixture_to_both_backends(
     nontemporal.touch()
     unsigned_int_ops = tmp_path / "Debug" / "rocke_unsigned_int_ops"
     unsigned_int_ops.touch()
+    intexpr = tmp_path / "Debug" / "rocke_intexpr"
+    intexpr.touch()
+    param_facts = tmp_path / "Debug" / "rocke_param_facts"
+    param_facts.touch()
+    gpu_checked_value = tmp_path / "Debug" / "rocke_gpu_checked_value"
+    gpu_checked_value.touch()
     target_identity = tmp_path / "Debug" / "rocke_arch_target_identity"
     target_identity.touch()
     shared = tmp_path / "librocke.so"
@@ -79,6 +85,12 @@ def test_runner_passes_registered_fixture_to_both_backends(
                 {
                     "name": "rocke_unsigned_int_ops",
                     "command": [str(unsigned_int_ops)],
+                },
+                {"name": "rocke_intexpr", "command": [str(intexpr)]},
+                {"name": "rocke_param_facts", "command": [str(param_facts)]},
+                {
+                    "name": "rocke_gpu_checked_value",
+                    "command": [str(gpu_checked_value)],
                 },
                 {
                     "name": "rocke_arch_target_identity",
@@ -118,6 +130,12 @@ def test_runner_passes_registered_fixture_to_both_backends(
     assert all(env["ROCKE_TEST_ENGINE_ARCHIVE"] == str(archive) for _, env in children)
     assert all(
         env["ROCKE_UNSIGNED_INT_OPS_CLI"] == str(unsigned_int_ops)
+        for _, env in children
+    )
+    assert all(env["ROCKE_INTEXPR_CLI"] == str(intexpr) for _, env in children)
+    assert all(env["ROCKE_PARAM_FACTS_CLI"] == str(param_facts) for _, env in children)
+    assert all(
+        env["ROCKE_GPU_CHECKED_VALUE_CLI"] == str(gpu_checked_value)
         for _, env in children
     )
     assert all(
@@ -459,6 +477,9 @@ def test_fresh_build_prepares_entire_ctest_suite(
         'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
         "foreach(name rocke_storage rocke_ir_types rocke_nontemporal_hip\n"
         "             rocke_unsigned_int_ops rocke_arch_target_identity rocke_buffer_rsrc_hip\n"
+        "             rocke_intexpr\n"
+        "             rocke_param_facts\n"
+        "             rocke_gpu_checked_value\n"
         "             rocke_dtypes)\n"
         '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
         '  add_custom_command(OUTPUT "${output}"\n'
@@ -487,6 +508,9 @@ def test_fresh_build_prepares_entire_ctest_suite(
     assert Path(env["ROCKE_IR_TYPES_TEST"]).is_file()
     assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
     assert Path(env["ROCKE_UNSIGNED_INT_OPS_CLI"]).is_file()
+    assert Path(env["ROCKE_INTEXPR_CLI"]).is_file()
+    assert Path(env["ROCKE_PARAM_FACTS_CLI"]).is_file()
+    assert Path(env["ROCKE_GPU_CHECKED_VALUE_CLI"]).is_file()
     assert Path(env["ROCKE_ARCH_TARGET_TEST_EXE"]).is_file()
     assert Path(env["ROCKE_BUFFER_RSRC_HIP_TEST"]).is_file()
     if override:

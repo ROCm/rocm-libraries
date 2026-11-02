@@ -6989,7 +6989,9 @@ class TestLauncherBind(unittest.TestCase):
         launcher = L.KernelLauncher.__new__(L.KernelLauncher)
         launcher._fn = "fn"
         launcher._packer = packer
+        launcher._kernel_name = "k"
         launcher._cluster_dims = None
+        launcher._contract = None
         rt = FakeRuntime()
         cfg = L.LaunchConfig(grid=(2, 1, 1), block=(64, 1, 1), stream=7)
         with mock.patch.object(L, "_runtime", return_value=rt):

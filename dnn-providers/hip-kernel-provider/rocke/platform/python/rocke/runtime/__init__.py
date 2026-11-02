@@ -40,6 +40,11 @@ edge:
                       `pack_args_kernelparams`) for the AMDGPU kernarg
                       ABI. Used by both the numpy and torch paths.
 
+  - ``contract``    : a kernel's parameter contract -- the facts, pointer
+                      alignments and exact workgroup size it states, which
+                      the host checks before every launch
+                      (`parameter_contract`, `LaunchRefused`).
+
   - ``torch_interop``: torch-tensor launch glue -- `resolve_stream`
                       (collapses ``stream=0`` to torch's current stream
                       so the caching allocator sees our launches),
@@ -52,7 +57,10 @@ edge:
                         * :class:`KernelLauncher`  -- owns one compiled
                           HSACO + loaded HIP module + function entry.
                           Construct once per (problem-shape, dtype),
-                          call many times.
+                          call many times. ``from_artifact`` builds one
+                          that checks the kernel's parameter contract.
+                        * :func:`first_supported` -- the first launcher
+                          whose contract accepts a launch.
                         * :class:`PipelineLauncher` -- N stages on one
                           stream (split-KV attention's seg+reduce,
                           grouped GEMM's k-fixup, ...).
@@ -91,6 +99,12 @@ When to drop to the lower-level APIs:
 from __future__ import annotations
 
 from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
+from .contract import (
+    LaunchRefused,
+    LaunchSupport,
+    ParameterContract,
+    parameter_contract,
+)
 from .device_info import DeviceInfo, get_device_info
 from .hip_module import HipError, Runtime
 from .launcher import (
@@ -100,6 +114,7 @@ from .launcher import (
     LaunchSummary,
     PipelineLauncher,
     WorkspacePool,
+    first_supported,
     no_fence,
     release_retained_for_stream,
     synchronize_and_release,
@@ -123,7 +138,10 @@ __all__ = [
     "HipError",
     "KernelLauncher",
     "LaunchConfig",
+    "LaunchRefused",
     "LaunchSummary",
+    "LaunchSupport",
+    "ParameterContract",
     "PipelineLauncher",
     "Runtime",
     "StallGate",
@@ -132,10 +150,12 @@ __all__ = [
     "WorkspacePool",
     "build_hsaco_from_llvm_ir",
     "empty_workspace",
+    "first_supported",
     "get_device_info",
     "launch_torch_kernel",
     "no_fence",
     "pack_args",
+    "parameter_contract",
     "release_retained_for_stream",
     "resolve_stream",
     "synchronize_and_release",

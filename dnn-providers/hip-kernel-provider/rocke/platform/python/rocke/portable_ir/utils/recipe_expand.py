@@ -18,35 +18,19 @@
 # Supported instrs (same set as recipe_vm.c): param, const_i32, const_f32,
 # thread_id_x, alias, ret, static_for, static_if, scf_for, scf_if, scf_if_else,
 # emit.
-# intexpr: number | {spec} | {var} | {spec_str_eq:[n,lit]} | {OP:[a,b]} for
-# OP in add/sub/mul/div/mod/eq/ne/lt/le/gt/ge.
+# Integer expressions (sizes, bounds, guard rules) are evaluated by
+# rocke.core.intexpr.eval_intexpr, the one Python evaluator; its failures raise
+# IntExprError.
 
 from __future__ import annotations
 
 import copy
 from typing import Any, Dict, List, Optional
 
+from rocke.core.intexpr import IntExprError, eval_intexpr
 from rocke.portable_ir.src import abi as _abi
 
 RECIPE_SCHEMA = "rocke.recipe/v1"
-
-
-# --------------------------------------------------------------------------
-# intexpr evaluation (mirrors rv_int in recipe_vm.c)
-# --------------------------------------------------------------------------
-_BIN = {
-    "add": lambda a, b: a + b,
-    "sub": lambda a, b: a - b,
-    "mul": lambda a, b: a * b,
-    "div": lambda a, b: (a // b if b else 0),
-    "mod": lambda a, b: (a % b if b else 0),
-    "eq": lambda a, b: int(a == b),
-    "ne": lambda a, b: int(a != b),
-    "lt": lambda a, b: int(a < b),
-    "le": lambda a, b: int(a <= b),
-    "gt": lambda a, b: int(a > b),
-    "ge": lambda a, b: int(a >= b),
-}
 
 
 class ExpandError(RuntimeError):
@@ -60,73 +44,6 @@ class GuardRejected(ExpandError):
     is the expected answer for a configuration the kernel never supported. A JIT
     caller should treat it as "this recipe does not serve that shape", not as an
     engine failure."""
-
-
-def magic_division_constants(divisor: int) -> tuple:
-    """`(multiplier_i32, shift)` for a strength-reduced unsigned `n // divisor`.
-
-    The canonical mirror of `helpers/magic_division.py::calculate_magic_numbers` plus
-    `do_magic_division`'s two's-complement wrap (itself a port of CK Tile's
-    `magic_division32_bit_range`). Kernels bake these two integers in as
-    `const_i32` operands of `(umul_hi(n, M) + n) >> s`, so a recipe that wants to
-    stay parametric in the divisor has to regenerate them rather than fit them --
-    the shift is logarithmic and the multiplier depends on the divisor's odd part.
-
-    `recipe_vm.cpp` implements the same two lines; `roller.py` imports this for
-    recognition. A test pins all three against the DSL helper.
-    """
-    # The upper bound keeps this inside the int64 range the C VM computes in, so
-    # both mirrors agree everywhere they are defined.
-    if divisor < 1 or divisor > 0x7FFFFFFF:
-        raise ExpandError(f"magic division needs 1 <= divisor < 2^31, got {divisor}")
-    shift = 0
-    while (1 << shift) < divisor:
-        shift += 1
-    mult = (((1 << shift) - divisor) << 32) // divisor + 1
-    return (mult - (1 << 32) if mult >= (1 << 31) else mult), shift
-
-
-_UN = {
-    "magic_multiplier": lambda d: magic_division_constants(d)[0],
-    "magic_shift": lambda d: magic_division_constants(d)[1],
-}
-
-
-def eval_intexpr(
-    node: Any, ivars: Dict[str, int], spec_int: Dict[str, int], spec_str: Dict[str, str]
-) -> int:
-    if isinstance(node, bool):
-        return int(node)
-    if isinstance(node, (int,)):
-        return node
-    if isinstance(node, float):
-        return int(node)
-    if isinstance(node, dict):
-        if "spec" in node:
-            name = node["spec"]
-            if name not in spec_int:
-                raise ExpandError(f"unknown spec int '{name}'")
-            return spec_int[name]
-        if "var" in node:
-            name = node["var"]
-            if name not in ivars:
-                raise ExpandError(f"unknown loop var '{name}'")
-            return ivars[name]
-        if "spec_str_eq" in node:
-            n, lit = node["spec_str_eq"]
-            return int(spec_str.get(n) == lit)
-        # unary functions take the operand directly, not a 2-element array
-        for k, ufn in _UN.items():
-            if k in node:
-                return ufn(eval_intexpr(node[k], ivars, spec_int, spec_str))
-        for k, fn in _BIN.items():
-            if k in node:
-                a, b = node[k]
-                return fn(
-                    eval_intexpr(a, ivars, spec_int, spec_str),
-                    eval_intexpr(b, ivars, spec_int, spec_str),
-                )
-    raise ExpandError(f"bad intexpr: {node!r}")
 
 
 # --------------------------------------------------------------------------
@@ -160,16 +77,12 @@ def check_guard(
          policy: it trades the whole rolled interior for "every accepted point
          was verified byte-for-byte at generation time".
 
-    On negative inputs: `mod` and `div` do not agree between this evaluator and
-    the C one for a negative left operand (Python floors, C truncates), which
-    has never mattered because spec values are sizes -- and a guard is the first
-    thing to be handed a hostile one. Two properties keep it from mattering
-    here, and a new kind of rule has to preserve both. Guards only ever test
-    `mod(x, k) == 0`, and whether k divides x is the same question in either
-    convention; and the emitter puts a bounds rule ahead of the divisibility
-    rule on an axis, which combined with stopping at the first failure means a
-    negative never reaches the `mod` at all. A rule that used `div`, or compared
-    `mod` against something other than zero, would have neither protection."""
+    On negative inputs: both evaluators refuse a `div` or `mod` with a negative
+    operand (Python floors, C truncates), so a rule that reaches one refuses the
+    binding as "did not evaluate" in both engines, with the same reason. The
+    emitter puts a bounds rule ahead of the divisibility rule on an axis, which
+    combined with stopping at the first failure means a negative is refused by
+    the bounds rule, with its own reason, before it reaches the `mod`."""
     if not guard:
         return True, ""
     schema = guard.get("schema")
@@ -180,11 +93,11 @@ def check_guard(
         if axis not in spec_int and axis not in spec_str:
             return False, f"free axis '{axis}' not bound"
 
-    for rule in guard.get("rules", []):
+    for i, rule in enumerate(guard.get("rules", [])):
         try:
             ok = eval_intexpr(rule["pred"], {}, spec_int, spec_str)
-        except ExpandError as e:
-            return False, f"guard rule failed to evaluate: {e}"
+        except IntExprError as e:
+            return False, f"guard rule {i} did not evaluate: {e}"
         if not ok:
             return False, rule.get("reason", "guard rule rejected")
 

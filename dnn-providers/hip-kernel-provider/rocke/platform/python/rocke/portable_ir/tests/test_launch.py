@@ -134,6 +134,106 @@ class TestSignature(unittest.TestCase):
         self.assertIn("f16", str(cm.exception))
 
 
+def facts_recipe():
+    """A recorded kernel whose integer parameters state facts, one as an int
+    and one as a relation over an earlier parameter, with launch geometry."""
+    from rocke.core.intexpr import product_of
+    from rocke.core.ir import F32, I32, IRBuilder, PtrType
+    from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+    b = IRBuilder("facts_kernel")
+    x = b.param("X", PtrType(F32, "global"), align=16)
+    m = b.param("M", I32, ge=1, multiple_of=64)
+    b.param("ld", I32, ge=product_of(m, 2))
+    b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+    b.ret()
+    return launch.attach_launch(
+        kerneldef_to_recipe(b.kernel), grid=[1, 1, 1], block=[64, 1, 1]
+    )
+
+
+FACTS_REFUSAL = (
+    "facts_kernel: parameters carry facts, which the C++ launch plan cannot "
+    "check yet -- launch it through KernelLauncher.from_artifact"
+)
+
+
+class TestStatedFacts(unittest.TestCase):
+    """The caller packs the arguments itself, so a plan cannot check the facts
+    a parameter states; the plan is refused rather than handed out unchecked."""
+
+    def test_a_recipe_whose_params_state_facts_is_refused(self):
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(facts_recipe(), {}, {})
+        self.assertEqual(str(cm.exception), FACTS_REFUSAL)
+
+    def test_one_fact_on_one_param_is_enough(self):
+        r = mixed_signature_recipe()
+        r["program"][1]["attrs"] = {"le": 4096}
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(r, {"D": 1}, {})
+        self.assertIn("mixed_1: parameters carry facts", str(cm.exception))
+
+    def test_pointer_attributes_are_not_facts(self):
+        """The toy kernel's pointers carry noalias / readonly / align, which
+        recipes carried before facts existed; it plans as before."""
+        p = launch.plan(toy(), {"D": 256}, {"dtype": "f32"})
+        self.assertEqual(p["geometry"]["grid"], (4, 1, 1))
+
+
+def exact_block_recipe(block=(64, 1, 1)):
+    """A recorded kernel that states an exact workgroup_size of 64, launched
+    with ``block``, or with no launch geometry when ``block`` is None."""
+    from rocke.core.ir import F32, IRBuilder, PtrType
+    from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+    b = IRBuilder("exact_block")
+    b.kernel.attrs["workgroup_size"] = 64
+    x = b.param("X", PtrType(F32, "global"), align=16)
+    b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+    b.ret()
+    recipe = kerneldef_to_recipe(b.kernel)
+    if block is None:
+        return recipe
+    return launch.attach_launch(recipe, grid=[1, 1, 1], block=list(block))
+
+
+NO_BLOCK_REFUSAL = (
+    "exact_block: the kernel states workgroup_size 64 but the recipe carries no "
+    "launch block to check it against -- record the launch geometry, or launch "
+    "it through KernelLauncher.from_artifact"
+)
+
+
+def wrong_block_refusal(block):
+    return (
+        f"exact_block: recipe block {block} differs from the kernel's "
+        "workgroup_size 64 -- the block must be (64, 1, 1)"
+    )
+
+
+class TestExactWorkgroupSize(unittest.TestCase):
+    """A kernel stating workgroup_size N is compiled for exactly N threads, so a
+    plan hands out only the block (N, 1, 1): a smaller block would run it with
+    threads missing, a larger one would fail at launch."""
+
+    def test_the_stated_block_plans(self):
+        p = launch.plan(exact_block_recipe(), {}, {})
+        self.assertEqual(p["geometry"]["block"], (64, 1, 1))
+
+    def test_any_other_block_is_refused(self):
+        for block in ((128, 1, 1), (32, 1, 1), (32, 2, 1)):
+            with self.assertRaises(ExpandError) as cm:
+                launch.plan(exact_block_recipe(block), {}, {})
+            self.assertEqual(str(cm.exception), wrong_block_refusal(block))
+
+    def test_a_recipe_without_a_block_is_refused(self):
+        """The caller would pick the block, and the plan could not check it."""
+        with self.assertRaises(ExpandError) as cm:
+            launch.plan(exact_block_recipe(None), {}, {})
+        self.assertEqual(str(cm.exception), NO_BLOCK_REFUSAL)
+
+
 def int_list(*vals):
     """A kernel list attr as rocke.core.ir_export._attrs_to_json writes it."""
     return {"t": "l", "v": [{"_": {"t": "i", "v": v}} for v in vals]}
@@ -314,6 +414,51 @@ class TestCEngineAgrees(unittest.TestCase):
             cbor_encode(toy()), ints={"D": 256}, strs={"dtype": "f32"}
         )
         self.assertIsNone(c["cluster"])
+
+    def test_stated_facts_refused_by_c_too_with_the_same_message(self):
+        blob = cbor_encode(facts_recipe())
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(blob)
+        self.assertTrue(str(cm.exception).endswith(FACTS_REFUSAL), str(cm.exception))
+        bundle = cbor_encode(
+            build_bundle([{"key": "facts", "arch": "gfx950", "recipe": facts_recipe()}])
+        )
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(bundle, "facts", arch="gfx950")
+        self.assertTrue(str(cm.exception).endswith(FACTS_REFUSAL), str(cm.exception))
+
+    def test_exact_workgroup_size_checked_by_c_too_with_the_same_messages(self):
+        blob = cbor_encode(exact_block_recipe())
+        self.assertEqual(
+            self.online.plan_launch(blob), launch.plan(exact_block_recipe(), {}, {})
+        )
+        for block in ((128, 1, 1), (32, 1, 1), (32, 2, 1)):
+            with self.assertRaises(RuntimeError) as cm:
+                self.online.plan_launch(cbor_encode(exact_block_recipe(block)))
+            self.assertTrue(
+                str(cm.exception).endswith(wrong_block_refusal(block)),
+                str(cm.exception),
+            )
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(cbor_encode(exact_block_recipe(None)))
+        self.assertTrue(str(cm.exception).endswith(NO_BLOCK_REFUSAL), str(cm.exception))
+        bundle = cbor_encode(
+            build_bundle(
+                [
+                    {
+                        "key": "wg",
+                        "arch": "gfx950",
+                        "recipe": exact_block_recipe((32, 1, 1)),
+                    }
+                ]
+            )
+        )
+        with self.assertRaises(RuntimeError) as cm:
+            self.online.plan_launch(bundle, "wg", arch="gfx950")
+        self.assertTrue(
+            str(cm.exception).endswith(wrong_block_refusal((32, 1, 1))),
+            str(cm.exception),
+        )
 
     def test_partial_cluster_refused_by_c_too(self):
         with self.assertRaises(RuntimeError) as cm:
