@@ -5,14 +5,15 @@
 
 An MI is *buildable* for a GEMM type when TensileLite code generation builds at least one kernel
 for it with every other parameter inside geko's generic (GA) tuning ranges, i.e. a kernel a geko
-GA run can produce. Kernels that cannot build fail with register / LDS / occupancy overflows.
+GA run can produce. Kernels fail over a resource limit (registers, LDS, occupancy) or on a validity rule.
 Lists are generated with StreamK off, which also covers StreamK-on runs; heuristic runs read the
 same list. Subtile kernels are not covered.
 
 Search per MI, stopping at the first kernel that builds:
-  1. Presets: three settings that build most tiles.
+  1. Presets: settings that build most tiles.
   2. Factorial: every combination of the parameters that decide register and LDS use, over the
      values the architecture's space tunes.
+  R. Repair: the nearest settings TensileLite accepts to each refused one (validation only), code-generated.
   3. One parameter at a time, starting from the kernels closest to fitting.
 Each buildable MI is then searched at every DepthU of the space (buildable_depthus).
 """
@@ -26,6 +27,7 @@ import itertools
 import json
 import math
 import multiprocessing as mp
+import os
 import re
 import tempfile
 from dataclasses import dataclass, field, replace
@@ -33,13 +35,18 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from geko.config_generator.constants import dataSize, library_logic_architecture
+from geko.config_generator.fork_params import get_profile_class
+from geko.config_generator.fork_params.hw_profiles.gfx942.optimization_param import GFX942GAParams
+from geko.config_generator.fork_params.hw_profiles.gfx950.optimization_param import GFX950GAParams
+from geko.config_generator.fork_params.hw_profiles.gfx1250.optimization_param import GFX1250GAParams
 from geko.config_generator.mi_candidates import MI, enumerate_candidate_mis
 
 # Any ordinary size: the generic ranges do not depend on it (M or N = 1 drops DepthU on gfx942).
 PROBE_SIZE = [4096, 4096, 1, 4096]
 
-# DepthU "K" = smallest legal DepthU; positive read widths are 2-byte elements, scaled to the type.
-PRESETS = [
+# Settings tried first, per generic (GA) profile: DepthU "K" = the smallest legal DepthU, positive read widths in
+# 2-byte elements. They only order the search; a profile without an entry starts from the factorial.
+_GFX9_PRESETS = [
     {
         "DepthU": "K",
         "PrefetchGlobalRead": 2,
@@ -71,9 +78,15 @@ PRESETS = [
         "UseSgprForGRO": 0,
     },
 ]
+LIST_PRESETS = {
+    GFX950GAParams: _GFX9_PRESETS,
+    GFX942GAParams: _GFX9_PRESETS,
+    # HalfPLR x ClusterLocalRead: the only register levers gfx1250's space tunes (sweeps over 220 MIs, 6 non-FP4 types).
+    GFX1250GAParams: [{"DepthU": "K", "HalfPLR": h, "ClusterLocalRead": c} for c in (0, 1) for h in (0, 2, 1, 3)],
+}
 
-# Base values of parameters outside the factorial: the cheapest the space allows. Stage 3 tries
-# the rest (e.g. SourceSwap / TailloopInNll, which save the last few VGPRs of some tiles).
+# Base value of each parameter outside the factorial: the cheapest the space allows (parameters a space does not tune
+# are ignored). Every kernel the search tries starts from these values, so they shape what it reaches, not just order.
 LOW_RESOURCE = {
     "MIArchVgpr": False,
     "TransposeLDS": -1,
@@ -89,10 +102,20 @@ LOW_RESOURCE = {
     "StorePriorityOpt": False,
     "StoreSyncOpt": 0,
     "WorkGroupMapping": 0,
+    "PrefetchGL2": 0,
+    "TDMIterateMode": 0,
+    "LDSSegmentInterleave": 0,
+    "AdaptiveGemm": 0,
 }
+
 
 OFAT_PASSES = 2
 MULTI_STARTS = 4
+
+# Repair limits: refusals repaired per MI, accepted settings kept per repair, validations for pairs of changes.
+REPAIRS = 8
+REPAIR_KEEP = 4
+REPAIR_PAIRS = 2000
 
 # Stop after _initKernel when a register pool is this far over its cap: pools only grow, so the
 # kernel cannot build. Near misses are generated in full so stage 3 can rank them by overflow.
@@ -115,6 +138,7 @@ class TuningSpace:
     fork: Dict[str, List[Any]]  # fork parameter -> its values, in config order
     groups: Dict[str, List[Dict[str, Any]]]  # non-MI group name -> its entries
     mi_group: str  # group carrying MatrixInstruction
+    wavefront: int = 64  # lanes per wave: MI Designer's WorkGroup and the DirectToVgpr read widths depend on it
 
 
 def write_probe_config(
@@ -127,6 +151,7 @@ def write_probe_config(
     Returns (config path, the prepared config, with GemmProblems).
     """
     from geko.config_generator.config_generator import run
+    from geko.config_generator.constants import ENV_UPDATABLE_KEYS
     from geko.config_generator.load_input_config import (
         apply_input_config_defaults,
         get_gemm_problem,
@@ -144,11 +169,17 @@ def write_probe_config(
         BUILDABLE_MIS=False,
         StreamK=LIST_STREAMK,
     )
-    validate_input_config(cfg)
-    apply_input_config_defaults(cfg)
-    get_gemm_problem(cfg)
-    workdir.mkdir(parents=True, exist_ok=True)
-    run(cfg, hipblaslt_path, workdir, write_shell_scripts=False)
+    # geko lets same-name environment variables override these keys (StreamK, BUILDABLE_MIS, ...): hide them so
+    # the probe holds exactly the settings above, whatever the shell exports.
+    hidden = {k: os.environ.pop(k) for k in ENV_UPDATABLE_KEYS if k in os.environ}
+    try:
+        validate_input_config(cfg)
+        apply_input_config_defaults(cfg)
+        get_gemm_problem(cfg)
+        workdir.mkdir(parents=True, exist_ok=True)
+        run(cfg, hipblaslt_path, workdir, write_shell_scripts=False)
+    finally:
+        os.environ.update(hidden)
     name = cfg["GemmProblems"][0].name
     paths = list(workdir.glob(f"{name}_*.yaml"))
     if len(paths) != 1:
@@ -167,7 +198,7 @@ def _is_cms(entry: Dict[str, Any]) -> bool:
 # ---------------------------------------------------------------------------- code generation
 @dataclass
 class Measurement:
-    err: int  # 0 builds; -1 rejected before code generation; N KernelWriter error; -4 other exception
+    err: int  # 0 builds; -1 refused before code generation; N overflowedResources code; -4 other exception
     vgpr: Optional[int] = None
     agpr: Optional[int] = None
     sgpr: Optional[int] = None
@@ -175,15 +206,17 @@ class Measurement:
     vgpr_cap: Optional[int] = None
     sgpr_cap: Optional[int] = None
     lds_cap: Optional[int] = None
+    occ_regs: Optional[int] = None  # registers per lane as the occupancy check counts them (_occupancy)
+    occ_cap: Optional[int] = None  # per-lane register budget for one workgroup per execution unit
     reason: str = ""
 
     def _usage(self) -> Dict[str, float]:
-        """Each resource's use as a fraction of its cap (VGPRs, SGPRs, LDS, VGPR + AGPR file of 512 per lane)."""
+        """Each modelled resource limit (TensileLite overflow codes 1, 2, 4, 8) as the fraction of its cap in use."""
         return {
             "vgpr": self.vgpr / self.vgpr_cap,
             "sgpr": self.sgpr / self.sgpr_cap,
             "lds": self.lds / self.lds_cap,
-            "vgpr+agpr": (math.ceil(self.vgpr / 8) * 8 + self.agpr) / 512,
+            "occupancy": self.occ_regs / self.occ_cap,
         }
 
     def overflow(self) -> float:
@@ -201,6 +234,14 @@ class Measurement:
             return "lds" if self.lds is not None and self.lds_cap else ""
         usage = self._usage()
         return max(usage, key=usage.get)
+
+
+def _occupancy(kw, sol) -> Tuple[int, int]:
+    """Registers per lane and their budget, as TensileLite's occupancy check (checkResources, code 4) counts them."""
+    v, a = kw.vgprPool.size(), kw.agprPool.size()
+    regs = math.ceil(v / 8) * 8 + a if kw.states.archCaps["ArchAccUnifiedRegs"] else max(v, a)
+    per_unit = kw.states.regCaps["PhysicalMaxVgprCU"] * (2 if kw.states.asmCaps["HasWMMA"] else 1)
+    return regs, per_unit // sol["NumThreads"]
 
 
 class CodegenChecker:
@@ -265,8 +306,8 @@ class CodegenChecker:
 
     def lds_lower_bound(self, perm: Dict[str, Any]) -> Optional[int]:
         """LDS bytes any kernel for ``perm`` needs at least: one DepthU slice of A and of B, except
-        an operand DirectToVgpr loads straight into registers. Never above TensileLite's own count
-        (checked on 1.39M gfx950 / gfx942 settings), so a bound over the cap cannot build."""
+        an operand DirectToVgpr loads straight into registers. Only the LDS distance of a setting TensileLite
+        refuses without counts; TensileLite decides every setting."""
         du = perm.get("DepthU", self.constant.get("DepthU"))
         if self.lds_bytes is None or not isinstance(du, int):
             return None
@@ -308,24 +349,16 @@ class CodegenChecker:
                 del fork[k]
         for k in fork:
             self.constant.pop(k, None)
-        return TuningSpace(config_path, fork, groups, mi_group)
+        wavefront = (fork.get("WavefrontSize") or [self.constant.get("WavefrontSize", 64)])[0]
+        return TuningSpace(config_path, fork, groups, mi_group, int(wavefront))
 
-    def measure(self, perm: Dict[str, Any]) -> Measurement:
-        """Code-generate one kernel. ``perm`` maps fork parameters to values and group names
-        (including ``space.mi_group``) to entries, as a Ductile GA sample does."""
+    def _initialised(self, perm: Dict[str, Any], buf: io.StringIO):
+        """Validate ``perm`` and set up its kernel writer, as Ductile's ``_validate_solution`` does without code
+        generation. Returns (solution, writer) or a refusal."""
         from tensilelite.backends.ductile_backend import _generate_single_solution_with_groups
         from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
-        perm = dict(perm)
         lb = self.lds_lower_bound(perm)
-        if lb is not None and lb > self.lds_cap:  # skips TensileLite's validation (~10 ms)
-            return Measurement(
-                err=-1,
-                lds=lb,
-                lds_cap=self.lds_cap,
-                reason=f"needs at least {lb} > {self.lds_cap} bytes of LDS (validation skipped)",
-            )
-        buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             try:
                 sol = _generate_single_solution_with_groups(
@@ -340,7 +373,10 @@ class CodegenChecker:
             except SystemExit:
                 sol = None
             if sol is None:
-                return _rejected(buf.getvalue())
+                m = _rejected(buf.getvalue())
+                if m.lds is None and lb is not None and lb > self.lds_cap:  # e.g. "no LDS-feasible pair"
+                    m.lds, m.lds_cap = lb, self.lds_cap
+                return m
             kw = KernelWriterAssembly(self.assembler, self.debug)
             try:
                 kw._initKernel(sol, {}, {})
@@ -350,27 +386,46 @@ class CodegenChecker:
                 return Measurement(
                     err=-4, reason=f"TensileLite {type(e).__name__} in _initKernel: {e}"
                 )
-            vcap, scap = kw.states.regCaps["MaxVgpr"], kw.states.regCaps["MaxSgpr"]
-            over_v = kw.vgprPool.size() > EARLY_EXIT_MARGIN * vcap
-            if over_v or kw.sgprPool.size() > EARLY_EXIT_MARGIN * scap:
+        return sol, kw
+
+    def accepts(self, perm: Dict[str, Any]) -> bool:
+        """Whether TensileLite accepts ``perm`` before code generation (milliseconds; a full measure takes seconds)."""
+        return not isinstance(self._initialised(dict(perm), io.StringIO()), Measurement)
+
+    def measure(self, perm: Dict[str, Any]) -> Measurement:
+        """Code-generate one kernel. ``perm`` maps fork parameters to values and group names
+        (including ``space.mi_group``) to entries, as a Ductile GA sample does."""
+        buf = io.StringIO()
+        init = self._initialised(dict(perm), buf)
+        if isinstance(init, Measurement):
+            return init
+        sol, kw = init
+        counts = dict(
+            vgpr_cap=kw.states.regCaps["MaxVgpr"],
+            sgpr_cap=kw.states.regCaps["MaxSgpr"],
+            lds_cap=sol["MaxLDS"],  # TensileLite's LDS limit for this solution (DeviceLDS unless the config lowers it)
+        )
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            over_v = kw.vgprPool.size() > EARLY_EXIT_MARGIN * counts["vgpr_cap"]
+            if over_v or kw.sgprPool.size() > EARLY_EXIT_MARGIN * counts["sgpr_cap"]:
                 # Register counts are lower bounds: the body would only add to them.
+                regs, budget = _occupancy(kw, sol)
                 return Measurement(
                     err=1 if over_v else 2,
                     vgpr=kw.vgprPool.size(),
                     agpr=kw.agprPool.size(),
                     sgpr=kw.sgprPool.size(),
                     lds=sol["LdsNumBytes"],
-                    vgpr_cap=vcap,
-                    sgpr_cap=scap,
-                    lds_cap=kw.states.archCaps["DeviceLDS"],
+                    occ_regs=regs,
+                    occ_cap=budget,
                     reason=f"too many {'vgprs' if over_v else 'sgprs'} after _initKernel (body skipped)",
+                    **counts,
                 )
             try:
                 kw._getKernelSource(sol)
                 err = 0
-            except RuntimeError as e:
-                tail = str(e).rsplit(" ", 1)[-1]
-                err = int(tail) if tail.lstrip("-").isdigit() else -3
+            except RuntimeError:
+                err = kw.states.overflowedResources or -3  # the code TensileLite's error message reports
             except SystemExit:
                 err = -3
             except Exception as e:  # e.g. an internal assert: this setting yields no kernel
@@ -379,16 +434,17 @@ class CodegenChecker:
                 )
             # checkResources records an overflow and generation finishes the body, so the pools
             # hold the counts that decided the verdict.
+            regs, budget = _occupancy(kw, sol)
             return Measurement(
                 err=err,
                 vgpr=kw.vgprPool.size(),
                 agpr=kw.agprPool.size(),
                 sgpr=kw.sgprPool.size(),
                 lds=sol["LdsNumBytes"],
-                vgpr_cap=kw.states.regCaps["MaxVgpr"],
-                sgpr_cap=kw.states.regCaps["MaxSgpr"],
-                lds_cap=kw.states.archCaps["DeviceLDS"],
+                occ_regs=regs,
+                occ_cap=budget,
                 reason=_last_reason(buf.getvalue()),
+                **counts,
             )
 
 
@@ -412,7 +468,7 @@ def _rejected(text: str) -> Measurement:
 
 # ---------------------------------------------------------------------------- search
 class SettingSearch:
-    """The kernels to try for one MI, in order: presets, core factorial, then one parameter at a time.
+    """The kernels to try for one MI, in order: presets, core factorial, then changes of one or two parameters.
 
     Each kernel is a full GA sample: every fork parameter, one entry of every group, and one of the MI
     group entries MI Designer can emit for the MI (``mi_entries``).
@@ -423,6 +479,7 @@ class SettingSearch:
         self.gemm_type = config["GemmProblems"][0].gemm_type
         self.elem_bytes = dataSize[self.gemm_type.data_type]
         self.depthu: Optional[int] = None  # set by pinned(): the one DepthU every kernel uses
+        self.presets_table = LIST_PRESETS.get(get_profile_class(config["ARCH"], LIST_SEARCH_SPACE), [])
 
     def pinned(self, depthu: int) -> "SettingSearch":
         """This search with every kernel at ``depthu``: the space's only DepthU, and only the MI
@@ -434,7 +491,8 @@ class SettingSearch:
 
     @staticmethod
     def _min_depthu(entry: Dict[str, Any]) -> int:
-        """Smallest DepthU with at least one loop iteration: MFMA K x local split U."""
+        """Smallest DepthU with at least one loop iteration: MFMA K x local split U (TensileLite rejects
+        LoopIters = DepthU / LSU / MatrixInstK < 1, SolutionStructs/Solution.py)."""
         return entry["MatrixInstruction"][2] * entry.get("WorkGroup", [0, 0, 1])[2]
 
     def read_width(self, bf16_elements: int) -> int:
@@ -451,7 +509,7 @@ class SettingSearch:
         from geko.config_generator.mi_designer import MFMA, MIDesign
 
         m = MFMA.from_list(mi)
-        p = MIDesign.calculate_mfma_parameters(m)
+        p = MIDesign.calculate_mfma_parameters(m, waveFrontSize=self.space.wavefront)
         entries = []
         for lsu in range(1, int(4 / (m.waveM * m.waveN)) + 1):
             if lsu == 3:
@@ -488,7 +546,7 @@ class SettingSearch:
     def presets(self, mi: MI, entry: Dict[str, Any]) -> List[Dict[str, Any]]:
         out = []
         legal_du = self._legal_depthu(entry)
-        for p in PRESETS:
+        for p in self.presets_table:
             s = self._base(entry)
             ok = True
             for name, v in p.items():
@@ -531,6 +589,7 @@ class SettingSearch:
             "DirectToVgprA": [False, True],
             "DirectToVgprB": [False, True],
             "MIArchVgpr": [False],
+            "HalfPLR": [0, 1, 2, 3],  # bit mask: halve the prefetch-local-read buffer of A = 1, B = 2, both = 3
         }
         values = {
             name: ([v for v in vals if v in env[name]] or [env[name][0]])
@@ -538,12 +597,12 @@ class SettingSearch:
             if name in env
         }
         # DirectToVgpr loads an operand straight into the registers its MFMA reads, so that operand's
-        # global-read width must match the MFMA's input per thread (M or N x K x B / 64 lanes), or twice
+        # global-read width must match the MFMA's input per thread (M or N x K x B / wavefront lanes), or twice
         # it for small-K FP32 MFMAs; neither factorial width gives it. Tried only with DirectToVgpr on.
-        m = entry["MatrixInstruction"]
+        m, lanes = entry["MatrixInstruction"], self.space.wavefront
         dtv_widths = {
             ab: [w for w in (per, 2 * per) if w in env.get(f"GlobalReadVectorWidth{ab}", [])]
-            for ab, per in (("A", m[0] * m[2] * m[3] // 64), ("B", m[1] * m[2] * m[3] // 64))
+            for ab, per in (("A", m[0] * m[2] * m[3] // lanes), ("B", m[1] * m[2] * m[3] // lanes))
         }
         names = list(values) + list(self.space.groups)
         choices = list(values.values()) + list(self.space.groups.values())
@@ -559,9 +618,10 @@ class SettingSearch:
                         if w not in values[grvw]:
                             yield dict(s, **{grvw: w})
 
-    def one_at_a_time(
+    def changes(
         self, start: Dict[str, Any], entries: Sequence[Dict[str, Any]]
-    ) -> Iterable[Dict[str, Any]]:
+    ) -> Iterable[Tuple[str, Any]]:
+        """Every single change of ``start`` within the space: (fork parameter or group, new value)."""
         dims = (
             list(self.space.fork.items())
             + list(self.space.groups.items())
@@ -570,27 +630,36 @@ class SettingSearch:
         for name, values in dims:
             for v in values:
                 if v != start.get(name):
-                    s = dict(start)
-                    s[name] = v
-                    yield s
+                    yield name, v
+
+    def one_at_a_time(
+        self, start: Dict[str, Any], entries: Sequence[Dict[str, Any]]
+    ) -> Iterable[Dict[str, Any]]:
+        for name, v in self.changes(start, entries):
+            yield {**start, name: v}
 
 
 @dataclass
 class Verdict:
     mi: MI
     buildable: bool
-    stage: str  # preset / core / one-at-a-time / "" (unbuildable)
+    stage: str  # preset / core / repair / one-at-a-time / "" (unbuildable)
     checks: int
     witness: Dict[str, Any] = field(default_factory=dict)
     overflow: float = math.inf  # closest kernel's Measurement.overflow() (unbuildable MIs)
     reason: str = ""
     depthu: List[int] = field(default_factory=list)  # DepthUs it builds at (buildable_depthus)
+    validations: int = 0  # validation-only checks (repair), besides the ``checks`` code generations
+    unmodelled: Dict[int, int] = field(default_factory=dict)  # failures with every resource fitting, per error code
+    # Resources over their cap in the kernel that built: TensileLite no longer enforces the limit as modelled
+    # (the early exit and the overflow measure would then misjudge kernels).
+    over_cap: List[str] = field(default_factory=list)
 
 
 def _starts(failures: Sequence[Tuple[float, str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """Up to MULTI_STARTS failed kernels to start the one-at-a-time stage from: the closest to fitting
     for each over-used resource, then the next closest overall. Refusals with every resource under its
-    cap (negative overflow) rank last: they never led to a build."""
+    cap (negative overflow) rank last: they never led to a build. Refused settings are never starts."""
     ranked = sorted((f for f in failures if f[0] != math.inf), key=lambda f: (f[0] < 0, f[0]))
     starts, resources = [], set()
     for ov, res, s in ranked:
@@ -606,6 +675,56 @@ def _starts(failures: Sequence[Tuple[float, str, Dict[str, Any]]]) -> List[Dict[
     return starts[:MULTI_STARTS]
 
 
+def _key(setting: Dict[str, Any]) -> str:
+    return json.dumps(setting, sort_keys=True, default=str)
+
+
+def _named(name: str, value: Any, reason: str) -> bool:
+    """Whether a refusal message names the parameter a change sets (for a group, a key of its new entry)."""
+    return any(k in reason for k in (value if isinstance(value, dict) else (name,)))
+
+
+def repair(
+    checker: CodegenChecker,
+    search: SettingSearch,
+    refused: Dict[str, Any],
+    reason: str,
+    entries: Sequence[Dict[str, Any]],
+    accepted: Dict[str, bool],
+) -> List[Dict[str, Any]]:
+    """Up to REPAIR_KEEP accepted settings nearest ``refused`` (validation only): single changes, those to a
+    parameter ``reason`` names first, else pairs within REPAIR_PAIRS validations. ``accepted`` caches verdicts."""
+
+    def ok(s: Dict[str, Any]) -> bool:
+        k = _key(s)
+        if k not in accepted:
+            accepted[k] = checker.accepts(s)
+        return accepted[k]
+
+    singles = sorted(search.changes(refused, entries), key=lambda c: not _named(*c, reason))
+    found: List[Dict[str, Any]] = []
+    for name, v in singles:
+        s = {**refused, name: v}
+        if ok(s):
+            found.append(s)
+            if len(found) == REPAIR_KEEP:
+                return found
+    if found:
+        return found
+    budget = len(accepted) + REPAIR_PAIRS
+    for (n1, v1), (n2, v2) in itertools.combinations(singles, 2):
+        if len(accepted) >= budget:
+            break
+        if n1 == n2:
+            continue
+        s = {**refused, n1: v1, n2: v2}
+        if ok(s):
+            found.append(s)
+            if len(found) == REPAIR_KEEP:
+                break
+    return found
+
+
 def classify(checker: CodegenChecker, search: SettingSearch, mi: MI) -> Verdict:
     """Try kernels for one MI until one builds."""
     entries = search.mi_entries(mi)
@@ -613,43 +732,73 @@ def classify(checker: CodegenChecker, search: SettingSearch, mi: MI) -> Verdict:
         return Verdict(mi, False, "", 0, reason="MI Designer emits no entry for this MI")
     checks, best, best_m, seen = 0, None, None, set()
     failures: List[Tuple[float, str, Dict[str, Any]]] = []  # (overflow, resource, setting)
+    refused: List[Tuple[Dict[str, Any], str]] = []  # (setting, reason): failures without resource counts
+    accepted: Dict[str, bool] = {}  # the repair stage's validation verdicts
+    unmodelled: Dict[int, int] = {}
 
     def attempt(perms: Iterable[Dict[str, Any]], stage: str) -> Optional[Verdict]:
         nonlocal checks, best, best_m
         for s in perms:
-            key = json.dumps(s, sort_keys=True, default=str)
+            key = _key(s)
             if key in seen:
                 continue
             seen.add(key)
             m = checker.measure(s)
             checks += 1
             if m.err == 0:
-                return Verdict(mi, True, stage, checks, s)
+                v = Verdict(mi, True, stage, checks, s)
+                if m.vgpr is not None:
+                    v.over_cap = sorted(r for r, u in m._usage().items() if u > 1)
+                return v
             failures.append((m.overflow(), m.resource(), s))
+            if m.overflow() == math.inf:
+                refused.append((s, m.reason))
             if best_m is None or m.overflow() < best_m.overflow():
                 best, best_m = s, m
+            if m.vgpr is not None and m.overflow() <= 0:
+                unmodelled[m.err] = unmodelled.get(m.err, 0) + 1
         return None
 
-    for stage, perms in (
-        ("preset", lambda e: search.presets(mi, e)),
-        ("core", lambda e: search.core(mi, e)),
-    ):
-        for entry in entries:
-            v = attempt(perms(entry), stage)
-            if v:
-                return v
-    for start in _starts(failures):
-        for _ in range(OFAT_PASSES):
-            n = len(failures)
-            v = attempt(search.one_at_a_time(start, entries), "one-at-a-time")
-            if v:
-                return v
-            closer = min(failures[n:], key=lambda f: f[0], default=None)
-            start_ov = next(f[0] for f in failures if f[2] is start)
-            if closer is None or closer[0] >= start_ov:
+    def stages() -> Optional[Verdict]:
+        for stage, perms in (
+            ("preset", lambda e: search.presets(mi, e)),
+            ("core", lambda e: search.core(mi, e)),
+        ):
+            for entry in entries:
+                v = attempt(perms(entry), stage)
+                if v:
+                    return v
+        # Refused settings give stage 3 no distance: repair one per (MI entry, DepthU, rule), numbers masked
+        # so one rule broken with different values counts once.
+        repaired, before_repair = set(), len(failures)
+        for s, reason in list(refused):
+            group = (_key(s[search.space.mi_group]), s.get("DepthU"), re.sub(r"\d+", "#", reason))
+            if group in repaired:
+                continue
+            if len(repaired) == REPAIRS:
                 break
-            start = closer[2]
-    return Verdict(
+            repaired.add(group)
+            v = attempt(repair(checker, search, s, reason, entries, accepted), "repair")
+            if v:
+                return v
+        # The failures stages 1-2 measured come first, so repair-generated kernels never crowd out a start
+        # the search would have used without them; repair-generated ones fill the remaining slots.
+        starts = _starts(failures[:before_repair])
+        starts += [s for s in _starts(failures[before_repair:]) if not any(s is t for t in starts)]
+        for start in starts[:MULTI_STARTS]:
+            for _ in range(OFAT_PASSES):
+                n = len(failures)
+                v = attempt(search.one_at_a_time(start, entries), "one-at-a-time")
+                if v:
+                    return v
+                closer = min(failures[n:], key=lambda f: f[0], default=None)
+                start_ov = next(f[0] for f in failures if f[2] is start)
+                if closer is None or closer[0] >= start_ov:
+                    break
+                start = closer[2]
+        return None
+
+    v = stages() or Verdict(
         mi,
         False,
         "",
@@ -658,6 +807,13 @@ def classify(checker: CodegenChecker, search: SettingSearch, mi: MI) -> Verdict:
         best_m.overflow() if best_m else math.inf,
         best_m.reason if best_m else "",
     )
+    v.validations, v.unmodelled = len(accepted), unmodelled
+    return v
+
+
+def searched_depthu(space: TuningSpace) -> List[int]:
+    """The DepthUs buildable_depthus tries: every integer DepthU of the space, ascending."""
+    return sorted(d for d in space.fork.get("DepthU", []) if isinstance(d, int))
 
 
 def buildable_depthus(
@@ -672,7 +828,7 @@ def buildable_depthus(
     roughly doubles a list's generation time. On gfx950, 0 of 481 sampled stops built under a much
     deeper search (3,000 attempts each).
     """
-    dus = sorted(d for d in search.space.fork.get("DepthU", []) if isinstance(d, int))
+    dus = searched_depthu(search.space)
     w = witness.get("DepthU")
     if w not in dus:
         return []
@@ -748,8 +904,10 @@ def write_buildable_list(
     arch: str,
     gemm_name: str,
     source: str,
+    depthu: Sequence[int],
 ) -> None:
-    """Write the list MI Designer reads: buildable MIs in enumeration order, unbuildable ones as comments."""
+    """Write the list MI Designer reads: the DepthUs searched, then the buildable MIs in enumeration order with
+    the DepthUs each builds at, then the unbuildable ones as comments."""
     from geko.config_generator.mi_designer import MFMA, MIDesign
 
     def mt(mi: MI) -> str:
@@ -760,20 +918,23 @@ def write_buildable_list(
     lines = [
         f"# Buildable MatrixInstructions for {gemm_name} on {library_logic_architecture(arch)}:\n",
         "# MIs with at least one kernel TensileLite builds within geko's generic (GA) ranges.\n",
-        "# MI Designer proposes only these. Each line: MI, macro tile, DepthUs it builds at.\n",
+        "# MI Designer proposes only these, each only at the DepthUs it builds at (DepthUs the search did\n",
+        "# not try stay allowed).\n",
         f"# {len(buildable)} of {len(verdicts)} candidates buildable; the rest are at the end.\n",
         "# From scripts/generate_buildable_mis.py; rerun when TensileLite or geko changes.\n",
         "\n",
         f"Architecture: {library_logic_architecture(arch)}\n",
         f"GemmType: {gemm_name}\n",
         f"Source: {source}\n",
-        "MatrixInstructions:\n",
+        f"DepthU: [{', '.join(map(str, depthu))}]  # searched\n",
+        "MatrixInstructions:\n" if buildable else "MatrixInstructions: []\n",
     ]
 
-    def note(v: Verdict) -> str:
-        return mt(v.mi) + (f"  DepthU {','.join(map(str, v.depthu))}" if v.depthu else "")
+    def entry(v: Verdict) -> str:
+        du = f", DepthU: [{', '.join(map(str, v.depthu))}]" if v.depthu else ""
+        return f"  - {{MatrixInstruction: [{', '.join(map(str, v.mi))}]{du}}}  # {mt(v.mi)}\n"
 
-    lines += [f"  - [{', '.join(map(str, v.mi))}]  # {note(v)}\n" for v in buildable]
+    lines += [entry(v) for v in buildable]
     lines.append(
         "\n# Not buildable (closest kernel: overflow of its most over-used resource, and why):\n"
     )
@@ -787,16 +948,17 @@ def write_buildable_list(
 
 
 def write_report(path: Path, verdicts: Sequence[Verdict]) -> None:
-    """Every MI's verdict, the stage that decided it, code generations used, the witness setting
-    (the setting that built, or for unbuildable MIs the one closest to fitting) and, when recorded,
-    the DepthUs it builds at."""
+    """Every MI's verdict, the stage that decided it, code generations and validation-only checks used,
+    the witness setting (the setting that built, or for unbuildable MIs the one closest to fitting),
+    when recorded the DepthUs it builds at, and the failures no modelled resource explains (per error code)."""
     import csv
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(
-            ["mi", "buildable", "stage", "checks", "overflow", "reason", "witness", "depthu"]
+            ["mi", "buildable", "stage", "checks", "overflow", "reason", "witness", "depthu", "validations", "unmodelled",
+             "over_cap"]
         )
         for v in verdicts:
             w.writerow(
@@ -809,5 +971,8 @@ def write_report(path: Path, verdicts: Sequence[Verdict]) -> None:
                     v.reason,
                     json.dumps(v.witness, sort_keys=True, default=str),
                     ",".join(map(str, v.depthu)),
+                    v.validations,
+                    json.dumps(v.unmodelled, sort_keys=True),
+                    ",".join(v.over_cap),
                 ]
             )

@@ -18,6 +18,7 @@ Usage:
 import argparse
 import datetime
 import logging
+import math
 import os
 import subprocess
 import sys
@@ -117,16 +118,41 @@ def main() -> None:
                 print(f"  skipped: {e}", flush=True)
                 continue
             path = buildable_list_path(args.arch, name)
-            B.write_buildable_list(path, verdicts, arch=args.arch, gemm_name=name, source=source)
+            B.write_buildable_list(path, verdicts, arch=args.arch, gemm_name=name, source=source,
+                                   depthu=B.searched_depthu(space))
             stages = {}
             for v in verdicts:
                 stages[v.stage or "unbuildable"] = stages.get(v.stage or "unbuildable", 0) + 1
             print(
                 f"  -> {path} ({sum(v.buildable for v in verdicts)} of {len(verdicts)} buildable; "
                 f"decided by {stages}; {sum(v.checks for v in verdicts):,} code generations, "
-                f"{time.time() - t0:.0f}s)",
+                f"{sum(v.validations for v in verdicts):,} validations, {time.time() - t0:.0f}s)",
                 flush=True,
             )
+            # Decided by validity rules alone: check these first.
+            refused = sum(not v.buildable and math.isinf(v.overflow) for v in verdicts)
+            if refused:
+                print(
+                    f"  note: {refused} MIs rejected without a measured kernel (refused before code generation)",
+                    flush=True,
+                )
+            # Many under one code suggest a resource limit buildability does not model.
+            unmodelled = {}
+            for v in verdicts:
+                for code, n in v.unmodelled.items():
+                    unmodelled[code] = unmodelled.get(code, 0) + n
+            if unmodelled:
+                print(
+                    f"  note: failures no modelled resource explains, by TensileLite error code: {dict(sorted(unmodelled.items()))}",
+                    flush=True,
+                )
+            # Should be empty: a kernel that builds over a modelled cap means TensileLite changed that limit.
+            over_cap = {}
+            for v in verdicts:
+                for r in v.over_cap:
+                    over_cap[r] = over_cap.get(r, 0) + 1
+            if over_cap:
+                print(f"  WARNING: MIs whose kernel built over a modelled cap, by resource: {over_cap}", flush=True)
             if args.report_dir:
                 B.write_report(args.report_dir / args.arch / f"{name}.csv", verdicts)
 

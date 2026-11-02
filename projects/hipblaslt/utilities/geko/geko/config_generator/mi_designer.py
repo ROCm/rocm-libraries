@@ -179,11 +179,15 @@ class MIDesign:
       smallest_M_in_MFMA, smallest_N_in_MFMA = smallest_mfma_dims(allowable)
 
       mis = None
+      self._buildable = None  # the buildable-MI list in use: its DepthUs restrict the MI groups (_create_mi_groups)
       if self.config.get("BUILDABLE_MIS", False) and not self._subtile_enabled:
           gemm_name = self.config["GemmProblem"].name
+          gt = self.config["GemmProblem"].gemm_type
           path = buildable_list_path(arch, gemm_name)
-          if not path.exists():
-              gt = self.config["GemmProblem"].gemm_type
+          if gemm_name != gt.gemm_name:
+              logger.warning(" Buildable-MI lists do not cover MX formats (%s on %s): using every candidate MI.",
+                             gemm_name, arch)
+          elif not path.exists():
               layout = "".join("T" if str(t).upper() in ("T", "TRUE") else "N" for t in (gt.transA, gt.transB))
               logger.warning(" No buildable-MI list for %s on %s: using every candidate MI, including ones "
                              "TensileLite cannot build. Generate it (CPU only) with: python3 "
@@ -194,9 +198,13 @@ class MIDesign:
               logger.info(" MFMA override %s is outside the ARCH allowlist, so %s does not cover it: "
                           "using every candidate MI.", override, path.name)
           else:
-              mis = [tuple(mi) for mi in load_buildable_list(path)["MatrixInstructions"]
-                     if list(mi[:4]) in allowable]
-              logger.info(" Buildable MatrixInstructions from %s: %s", path, len(mis))
+              buildable = load_buildable_list(path)
+              if not buildable.mis:
+                  logger.warning(" Buildable-MI list %s lists no MI: using every candidate MI.", path)
+              else:
+                  mis = [mi for mi in buildable.mis if list(mi[:4]) in allowable]
+                  self._buildable = buildable
+                  logger.info(" Buildable MatrixInstructions from %s: %s", path, len(mis))
       if mis is None:
           mis = enumerate_candidate_mis(arch, data_type, search_space, override)
 
@@ -571,6 +579,10 @@ class MIDesign:
         if mx_or_subtile:
             valid_depthu_list = _get_valid_depthu_for_mfma(mfma_cand)
             depthu_to_emit = valid_depthu_list if valid_depthu_list else []
+        elif self._buildable is not None and depthu_values:
+            # One group per DepthU the buildable-MI list allows for this MI, so the GA never pairs it with a
+            # DepthU TensileLite cannot build (the post-processor then drops the DepthU fork axis).
+            depthu_to_emit = self._buildable.allowed_depthu(base_mfma_dict["MatrixInstruction"], depthu_values)
         else:
             depthu_to_emit = [None]
 
@@ -599,6 +611,8 @@ class MIDesign:
                 }
                 if depthu is not None:
                     meta["DepthU"] = depthu
+                    if not mx_or_subtile:
+                        meta["ListDepthU"] = True  # one of the MI's DepthU variants (sampling offsets)
                 metadata.append(meta)
 
     with open(mi_log_path,'w') as out:

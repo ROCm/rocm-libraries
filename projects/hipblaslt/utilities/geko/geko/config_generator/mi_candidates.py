@@ -11,14 +11,15 @@ Two sources, both independent of the problem size:
   checked here.
 * Buildable-MI lists (``mi_lists/<arch>/<GEMM name>.yaml``): the subset of those
   candidates for which TensileLite code generation builds at least one kernel
-  within the generic (GA) search space's fork-parameter ranges. Produced by
-  ``scripts/generate_buildable_mis.py``; MI Designer reads them instead of
-  enumerating when one exists for the active GEMM type (except for the subtile
-  search space, whose kernels the lists do not cover).
+  within the generic (GA) search space's fork-parameter ranges, each with the
+  DepthUs it builds at. Produced by ``scripts/generate_buildable_mis.py``; MI
+  Designer reads them instead of enumerating when one exists for the active GEMM
+  type (except for the subtile search space, whose kernels the lists do not cover).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -132,10 +133,39 @@ def buildable_list_path(arch: str, gemm_name: str) -> Path:
     return MI_LISTS_DIR / library_logic_architecture(arch) / f"{gemm_name}.yaml"
 
 
-def load_buildable_list(path: Path) -> Dict[str, Any]:
-    """Read a buildable-MI list. ``MatrixInstructions`` holds the buildable MIs as 9-element lists."""
+@dataclass
+class BuildableList:
+    """A buildable-MI list: the buildable MIs in list order, the DepthUs each builds at (when recorded), and the
+    DepthUs the search tried."""
+
+    mis: List[MI]
+    depthu: Dict[MI, List[int]] = field(default_factory=dict)
+    searched_depthu: List[int] = field(default_factory=list)
+
+    def allowed_depthu(self, mi: Sequence[int], offered: Sequence[Any]) -> List[Any]:
+        """The offered DepthUs ``mi`` may build at: those the list records for it, and any the search did not
+        try (a heuristic space can offer DepthUs the generic one lacks). All of them when none are recorded."""
+        built = self.depthu.get(tuple(mi))
+        if built is None:
+            return list(offered)
+        return [d for d in offered if d in built or d not in self.searched_depthu]
+
+
+def load_buildable_list(path: Path) -> BuildableList:
+    """Read a buildable-MI list: ``DepthU`` (the DepthUs searched) and ``MatrixInstructions``, each entry
+    ``{MatrixInstruction: <9 ints>, DepthU: <DepthUs it builds at>}``."""
     with open(path) as f:
         data = yaml.safe_load(f)
-    if not isinstance(data, dict) or not isinstance(data.get("MatrixInstructions"), list):
-        raise ValueError(f"{path}: not a buildable-MI list (no MatrixInstructions list)")
-    return data
+    entries = data.get("MatrixInstructions") if isinstance(data, dict) else None
+    if not isinstance(entries, list) or not all(
+        isinstance(e, dict) and isinstance(e.get("MatrixInstruction"), list) and len(e["MatrixInstruction"]) == 9
+        for e in entries
+    ):
+        raise ValueError(f"{path}: not a buildable-MI list (MatrixInstructions entries need a 9-element "
+                         "MatrixInstruction; regenerate lists written in the older format)")
+    mis = [tuple(e["MatrixInstruction"]) for e in entries]
+    return BuildableList(
+        mis,
+        {tuple(e["MatrixInstruction"]): list(e["DepthU"]) for e in entries if "DepthU" in e},
+        list(data.get("DepthU") or []),
+    )

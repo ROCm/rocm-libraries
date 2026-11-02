@@ -137,7 +137,9 @@ build a kernel for an MI: large tiles often overflow registers or LDS for every 
 tuning run then spends its budget on kernels that fail code generation. With `BUILDABLE_MIS: True`, for GEMM types
 with a list in [`mi_lists/`](mi_lists/)`<arch>/<GEMM name>.yaml`, MI Designer uses only the MIs in it: those for which
 TensileLite code generation builds at least one kernel with every other parameter inside the generic (GA)
-search space's fork ranges. One list serves generic (GA) and heuristic runs: it is computed for the generic
+search space's fork ranges. It also pairs each MI only with the DepthUs it builds at: one MI group per DepthU
+replaces the DepthU fork axis (the MI's sampling weight is shared across its groups), and DepthUs the list's search
+did not try stay allowed. One list serves generic (GA) and heuristic runs: it is computed for the generic
 space, and the heuristic space (the older exhaustive search, rarely used) offers only a few values generic does
 not, e.g. FP32 DepthU 16, so a heuristic run can miss the rare MI that builds only with one of them. Subtile kernels (the subtile search space and
 gfx950 MX) are not covered and keep every candidate. Lists are generated with StreamK off: the persistent
@@ -160,14 +162,16 @@ python3 scripts/generate_buildable_mis.py --hipblaslt /path/to/hipblaslt --arch 
   --types B:B:S H:H:S F8:B:S --layouts TN NN NT TT --workers 64
 ```
 
-Each list names the rocm-libraries commit it was generated from, gives every buildable MI's DepthUs in its
-comment (e.g. `# MT256x128  DepthU 64,128`; MI Designer ignores comments), and ends with the unbuildable MIs
-and why the setting closest to fitting failed. Finding where each MI stops building roughly doubles the time.
+Each list names the rocm-libraries commit it was generated from and the DepthUs searched, gives every buildable MI
+as `{MatrixInstruction: [...], DepthU: [...]}` (the DepthUs it builds at; macro tile as a comment), and ends with the
+unbuildable MIs and why the setting closest to fitting failed (`no resource counts` when TensileLite refused every
+setting tried before code generation; the generator prints how many, since validity rules alone decided those MIs).
+Finding where each MI stops building roughly doubles the time.
 On 352 workers: about 7 h for all 96 gfx950 lists, 3 h for the 52 gfx942 lists. Each MI runs in a fresh worker
 process; a worker can still need several GB for a large tile (the gfx1250 FP4 lists peak around 1.7 TB at 352
 workers), so lower `--workers` on machines with less memory. GEMM types MI Designer tunes only as subtile kernels
 (gfx950 MX, e.g. FP4) are skipped: they never read a list. `--report-dir` also writes every MI's verdict and witness
-setting as CSV, which lets a later TensileLite change be rechecked by replaying the witnesses instead of regenerating.
+setting as CSV.
 
 ---
 

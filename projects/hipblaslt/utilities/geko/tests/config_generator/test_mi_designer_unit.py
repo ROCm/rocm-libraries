@@ -43,11 +43,16 @@ def test_calculate_granularities_and_mfma_parameters() -> None:
     assert params.MT0 > 0 and params.MT1 > 0
 
 
-def _write_list(cfg: dict, mis: list) -> Path:
-    """A buildable-MI list for cfg's ARCH and GEMM type (under the patched MI_LISTS_DIR)."""
+def _write_list(cfg: dict, mis: list, depthu: dict = None, searched: list = ()) -> Path:
+    """A buildable-MI list for cfg's ARCH and GEMM type (under the patched MI_LISTS_DIR); ``depthu`` maps an MI
+    to the DepthUs it builds at, ``searched`` lists the DepthUs searched."""
+    depthu = depthu or {}
     path = mi_candidates.buildable_list_path(cfg["ARCH"], cfg["GemmProblem"].name)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("MatrixInstructions:\n" + "".join(f"  - {list(m)}\n" for m in mis))
+    entries = "".join(
+        f"  - {{MatrixInstruction: {list(m)}" + (f", DepthU: {depthu[m]}" if m in depthu else "") + "}\n" for m in mis
+    )
+    path.write_text(f"DepthU: {list(searched)}\nMatrixInstructions:\n{entries}")
     return path
 
 
@@ -116,17 +121,70 @@ def test_load_candidate_mfmas_enumerates_by_default_without_list_or_when_disable
     assert "generate_buildable_mis.py --arch gfx950 --types H:H:S --layouts NN" in caplog.text
 
 
+def test_load_candidate_mfmas_falls_back_when_the_list_is_empty(monkeypatch, tmp_path: Path, caplog) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    cfg = _config()
+    cfg["BUILDABLE_MIS"] = True
+    _write_list(cfg, []).write_text("MatrixInstructions: []\n")
+    with caplog.at_level("WARNING", logger="GEKO"):
+        valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == mi_candidates.enumerate_candidate_mis("gfx950", "H", None)
+    assert "lists no MI" in caplog.text
+
+
+def test_load_candidate_mfmas_does_not_suggest_generating_mx_lists(monkeypatch, tmp_path: Path, caplog) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    gt = GemmType.from_tensile("T", "N", "F8", "B", "S")
+    cfg = dict(_config(), ARCH="gfx1250", BUILDABLE_MIS=True, GemmProblem=GemmConfig(gt, [[16, 16, 1, 16]], mx_block=32))
+    with caplog.at_level("WARNING", logger="GEKO"):
+        valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == mi_candidates.enumerate_candidate_mis("gfx1250", "F8", None)
+    assert "do not cover MX formats (F8BS_MXE8B32_TN" in caplog.text and "generate_buildable_mis" not in caplog.text
+
+
+def _pairs(groups) -> set:
+    return {(tuple(g["MatrixInstruction"].values), g["DepthU"].values[0] if "DepthU" in g else None) for g in groups}
+
+
+def test_buildable_list_restricts_each_mi_to_its_depthus(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    cfg = dict(_config(), BUILDABLE_MIS=True, MI_FILTER=0)
+    a, b, c = (16, 16, 32, 1, 1, 1, 1, 4, 1), (32, 32, 16, 1, 1, 1, 1, 4, 1), (16, 16, 32, 1, 1, 2, 1, 4, 1)
+    _write_list(cfg, [a, b, c], depthu={a: [64, 128], b: [512]}, searched=[32, 64, 128, 256, 512])
+    d = mid.MIDesign(tmp_path, cfg)
+    pairs = _pairs(d.generate_for_size((4096, 4096, 1, 4096), depthu_values=[16, 64, 256]))
+    # a: its DepthU 64, plus 16, which the search never tried; b: no recorded DepthU offered, so only 16;
+    # c: no DepthUs recorded, so every offered one.
+    assert pairs == {(a, 16), (a, 64), (b, 16), (c, 16), (c, 64), (c, 256)}
+    groups = d.generate_for_size((4096, 4096, 1, 4096), depthu_values=None)  # no DepthU axis: nothing to restrict
+    assert {du for _, du in _pairs(groups)} == {None}
+
+
+def test_without_a_list_mi_groups_keep_the_depthu_axis(tmp_path: Path) -> None:
+    groups = mid.MIDesign(tmp_path, dict(_config(), MI_FILTER=0)).generate_for_size((4096, 4096, 1, 4096), [16, 64])
+    assert {du for _, du in _pairs(groups)} == {None}
+
+
+
 def test_buildable_list_path_is_per_compiler_target(tmp_path: Path) -> None:
     a = mi_candidates.buildable_list_path("gfx950_128cu", "BBS_TN")
     b = mi_candidates.buildable_list_path("gfx950", "BBS_TN")
     assert a == b and a.parts[-2:] == ("gfx950", "BBS_TN.yaml")
 
 
-def test_load_buildable_list_rejects_malformed_file(tmp_path: Path) -> None:
+def test_load_buildable_list_rejects_malformed_and_old_format_files(tmp_path: Path) -> None:
     p = tmp_path / "bad.yaml"
-    p.write_text("Architecture: gfx950\n")
-    with pytest.raises(ValueError, match="no MatrixInstructions"):
-        mi_candidates.load_buildable_list(p)
+    for text in ("Architecture: gfx950\n", "MatrixInstructions:\n  - [16, 16, 32, 1, 1, 1, 1, 4, 1]\n"):
+        p.write_text(text)
+        with pytest.raises(ValueError, match="not a buildable-MI list"):
+            mi_candidates.load_buildable_list(p)
+
+
+def test_allowed_depthu_keeps_depthus_the_search_did_not_try() -> None:
+    mi = (16, 16, 32, 1, 1, 1, 1, 4, 1)
+    bl = mi_candidates.BuildableList([mi], {mi: [64, 128]}, [32, 64, 128, 256])
+    assert bl.allowed_depthu(mi, [16, 32, 64, 128, 256, 512]) == [16, 64, 128, 512]
+    assert bl.allowed_depthu((32, 32, 16, 1, 1, 1, 1, 4, 1), [32, 64]) == [32, 64]  # nothing recorded for it
 
 
 def test_sort_and_remove_gsu_duplicates_and_log_path(tmp_path: Path) -> None:
