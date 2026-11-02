@@ -40,6 +40,18 @@ def paged_cache_bytes(spec) -> int:
     return spec.num_kv_blocks * spec.block_size * spec.num_kv_heads * spec.head_size * 2
 
 
+def paged_tile_fits(block_size: int, block_m: int, block_n: int) -> bool:
+    """Whether pages of ``block_size`` keys fit a ``block_m`` x ``block_n`` tile, as the
+    spec's paged validation requires: whole pages per KV tile, and each wave's rows
+    of a tile (one wave per 32 query rows) inside one page."""
+    rows_per_wave = block_n // (block_m // 32)
+    return (
+        block_n % block_size == 0
+        and block_size >= rows_per_wave
+        and block_size % rows_per_wave == 0
+    )
+
+
 def paged_seq_setup(b, bt, kv_lens, bt_stride, block_size: int):
     """Return ``(seq_base, n_pages)``: the sequence's block-table row offset and its
     live page count ``ceil(kv_lens[bt] / block_size)``, which bounds every lookup."""

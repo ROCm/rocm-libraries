@@ -3890,6 +3890,18 @@ def cases():
                 "sliding_window": 256,
             },
         ),
+        # Paged K/V on the sliding-window tile dispatch picks for small grids.
+        (
+            "paged_swa_fp16_bm128_sq512",
+            {
+                "geometry": "bm128",
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
         # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
         # band on the top-left diagonal. causal=False is the unbounded right side.
         # Non-causal (left-only) window: default + persistent grids.
@@ -4055,6 +4067,43 @@ def cases():
                 "block_size": 16,
                 "num_kv_blocks": 32,
                 "sliding_window": 256,
+            },
+        ),
+        # Paged K/V on the smaller tiles dispatch picks: half-height (under-filled
+        # grid), narrow window with the wave skip (D128), narrow window (bf16 D64).
+        (
+            "paged_causal_fp16_bm128_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "block_m": 128,
+            },
+        ),
+        (
+            "paged_swa_fp16_bm128_bn32_wskip_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "block_m": 128,
+                "block_n": 32,
+                "window_wave_skip": True,
+            },
+        ),
+        (
+            "paged_swa_bf16_d64_bm64_sq512",
+            {
+                "head_size": 64,
+                "paged": True,
+                "block_size": 32,
+                "num_kv_blocks": 16,
+                "sliding_window": 256,
+                "block_m": 64,
+                "waves_per_eu": 4,
             },
         ),
     ):

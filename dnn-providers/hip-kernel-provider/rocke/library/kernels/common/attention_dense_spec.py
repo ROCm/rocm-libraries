@@ -241,6 +241,8 @@ class AttentionDenseSpec:
                 raise ValueError(
                     f"paged block_size ({self.block_size}) must be a power of two"
                 )
+            if self.block_size < 16:
+                raise ValueError(f"paged block_size ({self.block_size}) must be >= 16")
             if self.block_n % self.block_size:
                 raise ValueError(
                     f"block_n ({self.block_n}) must be a multiple of page "

@@ -87,8 +87,9 @@ def test_persistent_variants_decline_paged(spec_id):
         dict(batch=2),
         dict(mask_type=0, sliding_window=0),
         dict(seqlen_q=1000, seqlen_k=1000),
+        dict(kv_block_size=8),
     ],
-    ids=["multi_seq", "non_causal", "partial_kv_tile"],
+    ids=["multi_seq", "non_causal", "partial_kv_tile", "page_8"],
 )
 def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides):
     with pytest.raises(ValueError):
@@ -106,21 +107,84 @@ def test_paged_ragged_query_tail_follows_the_contiguous_kernel(arch, spec_id):
         assert spec.paged and spec.ragged
 
 
+_SMALL = dict(seqlen_q=512, seqlen_k=512, nhead_q=8, nhead_k=2, num_cus=256)
+_D64_BF16 = dict(hdim_q=64, hdim_v=64, dtype="bf16")
+
+
+def _tiles(arch, spec_id, **overrides):
+    """``(block_m, block_n, window_wave_skip)`` dispatch picks for a small paged
+    request and for its contiguous twin."""
+    req = _request(arch, **{**_SMALL, **overrides})
+    tiles = []
+    for r in (req, dataclasses.replace(req, layout="auto")):
+        s = dispatch_attention(_pinned(r, spec_id)).spec.kernel_spec
+        tiles.append((s.block_m, s.block_n, getattr(s, "window_wave_skip", False)))
+    return tiles
+
+
 @pytest.mark.parametrize("arch,spec_id", _CASES)
-@pytest.mark.parametrize("window", [0, 256])
-def test_paged_keeps_the_default_tile(arch, spec_id, window):
-    """Paged K/V stays on the 256x64 tile where a small contiguous request takes a
-    smaller one (gfx942: half-height tile or narrow window; gfx950: window tile)."""
-    small = dict(seqlen_q=512, seqlen_k=512, nhead_q=8, nhead_k=2, num_cus=256)
-    req = _request(arch, sliding_window=window, **small)
-    spec = dispatch_attention(_pinned(req, spec_id)).spec.kernel_spec
-    assert (spec.block_m, spec.block_n) == (256, 64)
-    assert not getattr(spec, "window_wave_skip", False)
-    contiguous = dispatch_attention(
-        _pinned(dataclasses.replace(req, layout="auto"), spec_id)
-    )
-    if arch == "gfx942" or window:
-        assert contiguous.spec.kernel_spec.block_m < 256
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        dict(sliding_window=0),
+        dict(sliding_window=256),
+        dict(sliding_window=256, kv_block_size=32, **_D64_BF16),
+    ],
+    ids=["causal", "swa", "swa_d64_bf16"],
+)
+def test_paged_takes_the_contiguous_tile_when_its_pages_fit(arch, spec_id, overrides):
+    paged, contiguous = _tiles(arch, spec_id, **overrides)
+    assert paged == contiguous
+    if arch == "gfx942" or overrides["sliding_window"]:
+        assert paged[0] < 256  # a smaller tile, not the default one
+
+
+@pytest.mark.parametrize(
+    "arch,spec_id,overrides",
+    [
+        ("gfx942", "gfx942_dense", dict(sliding_window=256, kv_block_size=64)),
+        (
+            "gfx942",
+            "gfx942_dense",
+            dict(sliding_window=256, kv_block_size=16, **_D64_BF16),
+        ),
+    ],
+    ids=["128x32_page64", "64x64_page16"],
+)
+def test_paged_keeps_the_default_tile_when_its_pages_do_not_fit(
+    arch, spec_id, overrides
+):
+    paged, contiguous = _tiles(arch, spec_id, **overrides)
+    assert paged == (256, 64, False)
+    assert contiguous[:2] != (256, 64)
+
+
+@pytest.mark.parametrize("block_m,block_n", [(256, 64), (128, 64), (128, 32), (64, 64)])
+@pytest.mark.parametrize("block_size", [16, 32, 64, 128])
+def test_paged_tile_fits_agrees_with_the_spec(block_m, block_n, block_size):
+    from kernels.common._attention_dense_paged import paged_tile_fits
+    from kernels.common.attention_dense_spec import AttentionDenseSpec
+
+    try:
+        AttentionDenseSpec(
+            batch=1,
+            seqlen_q=1024,
+            seqlen_kv=1024,
+            num_query_heads=8,
+            num_kv_heads=2,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            block_m=block_m,
+            block_n=block_n,
+            paged=True,
+            block_size=block_size,
+            num_kv_blocks=1024,
+        )
+        admitted = True
+    except ValueError:
+        admitted = False
+    assert paged_tile_fits(block_size, block_m, block_n) == admitted
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)

@@ -153,7 +153,9 @@ problem.
 
 A `layout="paged"` request reaches the non-persistent dense body on both arches
 (`layout_paged`: the gfx950 grid variants and the gfx942 candidate, which then
-starts on the default grid). The paged kernel bakes the cache extent, so binding
+starts on the default grid). It takes the same tile as a contiguous request where
+its pages fit that tile (whole pages per KV tile, each wave's rows in one page),
+else the default 256×64 tile. The paged kernel bakes the cache extent, so binding
 retargets `num_kv_blocks` from `k.shape[0]`; `block_tables` and `kv_lens` come
 in with the tensors. The request carries no cache size, so a cache past the 2 GiB
 i32 limit is refused at binding, not at selection. As for the unified path, the

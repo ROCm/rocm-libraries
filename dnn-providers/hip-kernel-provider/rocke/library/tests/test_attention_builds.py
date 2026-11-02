@@ -1812,6 +1812,70 @@ class TestAttentionHelpers(unittest.TestCase):
                         self.assertGreater(art.hsaco_bytes, 0)
                         _assert_resources_fit(art, arch=arch, kernel_name=k.name)
 
+    def test_dense_paged_smaller_tiles_compile_and_fit_budget(self):
+        """comgr build + resource-budget net for paged K/V on the smaller tiles
+        dispatch picks (gfx942 half-height, narrow window with the wave skip,
+        bf16 D64 narrow window; gfx950 window tile), with each tile's page limit."""
+        shape = dict(
+            batch=1,
+            seqlen_q=1024,
+            seqlen_kv=1024,
+            num_query_heads=16,
+            num_kv_heads=4,
+            causal=True,
+            paged=True,
+            num_kv_blocks=128,
+        )
+        g942 = importlib.import_module("kernels.gfx942.attention_dense")
+        cases = [
+            (
+                "gfx942",
+                dict(head_size=128, block_m=128, block_size=16),
+                ("fp16", "bf16"),
+            ),
+            (
+                "gfx942",
+                dict(
+                    head_size=128,
+                    block_m=128,
+                    block_n=32,
+                    sliding_window=256,
+                    window_wave_skip=True,
+                    block_size=16,
+                ),
+                ("fp16", "bf16"),
+            ),
+            (
+                "gfx942",
+                dict(head_size=64, block_m=64, sliding_window=256, block_size=32),
+                ("bf16",),
+            ),
+            (
+                "gfx950",
+                dict(head_size=128, block_m=128, sliding_window=256, block_size=16),
+                ("fp16", "bf16"),
+            ),
+            (
+                "gfx950",
+                dict(head_size=64, block_m=128, sliding_window=256, block_size=16),
+                ("fp16",),
+            ),
+        ]
+        for arch, tile, dtypes in cases:
+            ad = importlib.import_module(f"kernels.{arch}.attention_dense")
+            Spec = _dense_arch_spec_class(ad)
+            for dt in dtypes:
+                kw = dict(shape, dtype=dt, **tile)
+                if arch == "gfx942":
+                    kw["waves_per_eu"] = g942._tuned_waves_per_eu(kw["head_size"], dt)
+                spec = Spec(**kw)
+                with self.subTest(arch=arch, dtype=dt, name=spec.kernel_name()):
+                    ok, why = ad.supports_attention_dense(spec, arch=arch)
+                    self.assertTrue(ok, why)
+                    k = ad.build_attention_dense(spec, arch=arch)
+                    art = _compile_or_skip(k, arch=arch)
+                    _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+
     def test_dense_paged_launcher_rejects_kv_cache_shape_mismatch(self):
         """The launcher must reject a paged K/V cache whose shape disagrees with
         the spec that sizes the buffer-resource bound

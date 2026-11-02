@@ -32,7 +32,12 @@ from .candidate import (
     make_dense_candidate,
 )
 from .common import AttentionRequest, normalize_band
-from .dense_rules import dense_kv_segments, dense_paged_fields, dense_wave_segments
+from .dense_rules import (
+    dense_kv_segments,
+    dense_paged_fields,
+    dense_paged_tile_fits,
+    dense_wave_segments,
+)
 
 _DENSE_LAYOUT = "default"
 _DENSE_TILE = "default"
@@ -207,12 +212,14 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     shared_bm = int(DENSE_TILE_GEOMETRIES[_DENSE_TILE]["block_m"])
     shared_ctas = -(-sq // shared_bm) * int(req.nhead_q) * int(req.batch)
     num_cus = int(req.num_cus) or _DEFAULT_NUM_PERSISTENT
-    # Paged K/V keeps the shared tile: the window tile was measured and tested on
-    # contiguous K/V only.
+    window_geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE]
+    # A paged request whose pages do not fit the window tile keeps the shared one.
     window_tile = (
         bool(window)
-        and not dense_paged_fields(req)
         and shared_ctas < _WINDOW_TILE_MAX_CTAS_PER_CU * num_cus
+        and dense_paged_tile_fits(
+            req, int(window_geometry["block_m"]), int(window_geometry["block_n"])
+        )
     )
     geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE if window_tile else _DENSE_TILE]
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]

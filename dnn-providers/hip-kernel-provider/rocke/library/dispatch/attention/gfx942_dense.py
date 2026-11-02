@@ -22,7 +22,7 @@ from __future__ import annotations
 from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
 from .candidate import make_dense_candidate
-from .dense_rules import dense_paged_fields
+from .dense_rules import dense_paged_fields, dense_paged_tile_fits
 from .common import (
     AttentionMaskType,
     AttentionRequest,
@@ -55,23 +55,20 @@ def _default_block_m(req: AttentionRequest) -> int:
     diagonal no item gets shorter, and the doubled work only adds a second
     persistent round. Window requests keep the shared tile (narrow windows have
     their own geometry below), and so do bottom-right (chunked) requests, whose
-    KV split below is sized for it.
+    KV split below is sized for it, and paged requests whose pages do not fit the
+    128-row tile.
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
     bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
-    if (
-        int(req.sliding_window)
-        or "causal_bottom_right" in req.features()
-        or dense_paged_fields(req)
-    ):
+    if int(req.sliding_window) or "causal_bottom_right" in req.features():
         return bm
     causal = _parse_attention_mask_type(req.mask_type) != AttentionMaskType.NO_MASK
     if bool(req.use_sinks) and not causal and int(req.hdim_q) == 128:
         return bm
     num_cus = int(req.num_cus) or _GFX942_NUM_PERSISTENT
     work = -(-int(req.seqlen_q) // bm) * int(req.nhead_q) * int(req.batch)
-    if work < num_cus:
+    if work < num_cus and dense_paged_tile_fits(req, bm // 2, _DENSE_BLOCK_N):
         return bm // 2
     return bm
 
@@ -120,8 +117,7 @@ def _base_spec(req: AttentionRequest):
         )
     head_size = int(req.hdim_q)
     # The persistent grid measured ahead at D128 for every batch and mask; at
-    # D64 the non-persistent grid did. Paged K/V keeps the default tile on the
-    # default grid: the other tiles were measured and tested on contiguous K/V only.
+    # D64 the non-persistent grid did. Paged K/V runs on the default grid.
     paged = bool(dense_paged_fields(req))
     spec = _make_spec(
         req,
@@ -129,12 +125,13 @@ def _base_spec(req: AttentionRequest):
         _DENSE_BLOCK_N,
         persistent=head_size == 128 and not paged,
     )
-    if not paged and 0 < int(req.sliding_window) <= _NARROW_WINDOW:
+    if 0 < int(req.sliding_window) <= _NARROW_WINDOW:
         bm, bn, skip = _narrow_window_geometry(head_size, req.dtype.lower())
-        narrow = _make_spec(req, bm, bn, persistent=False, window_wave_skip=skip)
         # Keep the default geometry for any request the narrow one cannot serve.
-        if _supports(narrow, arch="gfx942")[0]:
-            spec = narrow
+        if dense_paged_tile_fits(req, bm, bn):
+            narrow = _make_spec(req, bm, bn, persistent=False, window_wave_skip=skip)
+            if _supports(narrow, arch="gfx942")[0]:
+                spec = narrow
     return spec
 
 
