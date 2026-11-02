@@ -507,3 +507,22 @@ if __name__ == "__main__":
     test_instruction_global_wb()
     test_instruction_global_inv()
     test_instruction_scalar_float()
+
+
+def test_instruction_literal_operands():
+    from rocisa.instruction import VAndOrB32, VLShiftLeftOrB32, VPermB32
+
+    insts = [
+        (VAndOrB32(dst=vgpr(1), src0=vgpr(2), src1=sgpr(3), src2="0x64006400"),
+         "v_and_or_b32 v1, v2, s3, 0x64006400"),
+        (VPermB32(dst=vgpr(1), src0=vgpr(2), src1=vgpr(3), src2="0x07060302"),
+         "v_perm_b32 v1, v2, v3, 0x07060302"),
+    ]
+    for inst, text in insts:
+        assert str(inst).startswith(text)
+        assert str(deepcopy(inst)) == str(inst)
+
+    # Lowered to v_lshlrev_b32 + v_or_b32 when the ISA has no v_lshl_or_b32.
+    inst = VLShiftLeftOrB32(dst=vgpr(1), shiftHex=16, src0=vgpr(2), src1="0x80008000")
+    assert "0x80008000" in str(inst)
+    assert str(deepcopy(inst)) == str(inst)
