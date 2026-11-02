@@ -598,14 +598,14 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
 {
     SKIP_IF_NO_DEVICES();
 
-    // SdpaBwd has no GPU plan yet - should throw
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
+    // ConvolutionBwd has no GPU plan yet - should throw
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
 
     const std::unordered_map<int64_t, void*> variantPack;
 
     GpuReferenceGraphExecutor executor;
     EXPECT_THROW(executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack),
-                 std::runtime_error);
+                 hipdnn_integration_tests::ReferenceCapabilityError);
 }
 
 TEST(TestGpuReferenceGraphExecutor, MissingVariantPackEntryThrows)
