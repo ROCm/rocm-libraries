@@ -287,7 +287,7 @@ TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
     EXPECT_FALSE(lib.origami_config_list[1].non_temporal_b_available);
 }
 
-TEST(PredictionLibraryTest, SpatialPaddingChangesRankingButNotExplicitIndexLookup)
+TEST(PredictionLibraryTest, SpatialPaddingPreservesOrigamiRankingAndExplicitIndexLookup)
 {
     auto clustered = makeMappedSolution(42, TensileLite::dim3(8, 1, 1));
     auto plain = makeMappedSolution(7);
@@ -313,10 +313,85 @@ TEST(PredictionLibraryTest, SpatialPaddingChangesRankingButNotExplicitIndexLooku
     problem.setParams().setUniformSummationOrder(0);
     problem.setComputeInputTypeA(rocisa::DataType::Float);
     problem.setComputeInputTypeB(rocisa::DataType::Float);
+    const origami::problem_t analyticalProblem = {
+        .size = {1, 8192, 8192},
+        .batch = 1,
+        .a_transpose = origami::transpose_t::N,
+        .b_transpose = origami::transpose_t::N,
+        .a_dtype = origami::data_type_t::Float,
+        .b_dtype = origami::data_type_t::Float,
+        .c_dtype = origami::data_type_t::Float,
+        .d_dtype = origami::data_type_t::Float,
+        .mi_dtype = origami::data_type_t::Float,
+    };
+    const auto expected = origami::rank_configs(
+        analyticalProblem, *device.analyticalHardware, lib.origami_config_list);
+    ASSERT_EQ(expected.size(), 2u);
     const auto ranked = lib.findTopSolutions(problem, device, 2);
-    ASSERT_EQ(ranked.size(), 2u);
-    EXPECT_EQ(ranked[0], plain);
-    EXPECT_EQ(ranked[1], clustered);
+    ASSERT_EQ(ranked.size(), expected.size());
+    for(size_t i = 0; i < expected.size(); ++i)
+        EXPECT_EQ(ranked[i], lib.solution_list.at(expected[i].config.index).second);
+    EXPECT_EQ(lib.findBestSolution(problem, device), ranked.front());
+    // Filtering an ineligible first choice still returns the next Origami
+    // candidate, even when only one solution was requested.
+    ranked.front()->hardwarePredicate = std::make_shared<Predicates::False<Hardware>>();
+    EXPECT_EQ(lib.findBestSolution(problem, device), ranked.back());
     EXPECT_EQ(lib.getSolutionByIndex(problem, device, 42), clustered);
     EXPECT_EQ(clustered->sizeMapping.clusterDim.x, 8u);
+}
+
+TEST(PredictionLibraryTest, PreservesOrigamiPreferenceOverStrictLatencyOrder)
+{
+    // Deliberately widen Origami's near-tie window so its tile preference wins
+    // over latency. The adapter must preserve that decision for plain kernels too.
+    struct ScopedVariance
+    {
+        double saved = origami::runtime_options::get().heuristics_variance;
+        ~ScopedVariance()
+        {
+            origami::runtime_options::get().heuristics_variance = saved;
+        }
+    } restoreVariance;
+    origami::runtime_options::get().heuristics_variance = 10.0;
+
+    auto large = makeMappedSolution(42);
+    auto small = makeMappedSolution(7);
+    small->sizeMapping.macroTile = {128, 128, 1};
+    for(auto const& solution : {large, small})
+    {
+        solution->hardwarePredicate = std::make_shared<Predicates::True<Hardware>>();
+        solution->problemPredicate = std::make_shared<Predicates::True<ContractionProblemGemm>>();
+    }
+    SolutionMap<ContractionSolution> solutions{{42, large}, {7, small}};
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42, 7}, solutions, lib);
+    hip::HipAMDGPU device;
+    device.computeUnitCount = 256;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::architecture_t::gfx950, 256, 163840, 262144,
+        8, 1.0, 1.0, 1.0, 4000000, 1.2, 1, std::make_tuple(0.0, 0.008, 0.0));
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 128, 128, 4096, 128, 4096, 128, 1.0, false, 1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    const origami::problem_t analyticalProblem = {
+        .size = {128, 128, 4096},
+        .batch = 1,
+        .a_transpose = origami::transpose_t::N,
+        .b_transpose = origami::transpose_t::N,
+        .a_dtype = origami::data_type_t::Float,
+        .b_dtype = origami::data_type_t::Float,
+        .c_dtype = origami::data_type_t::Float,
+        .d_dtype = origami::data_type_t::Float,
+        .mi_dtype = origami::data_type_t::Float,
+    };
+    const auto expected = origami::rank_configs(
+        analyticalProblem, *device.analyticalHardware, lib.origami_config_list);
+    ASSERT_EQ(expected.size(), 2u);
+    ASSERT_GT(expected[0].latency, expected[1].latency);
+    const auto ranked = lib.findTopSolutions(problem, device, 2);
+    ASSERT_EQ(ranked.size(), expected.size());
+    for(size_t i = 0; i < expected.size(); ++i)
+        EXPECT_EQ(ranked[i], lib.solution_list.at(expected[i].config.index).second);
+    EXPECT_EQ(lib.findBestSolution(problem, device), ranked.front());
 }
