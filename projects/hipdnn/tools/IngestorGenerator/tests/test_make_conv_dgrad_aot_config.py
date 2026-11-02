@@ -75,7 +75,7 @@ def specs(identities):
 def shipped():
     """instance_id -> (shard, kernel descriptor) of the shipped bundle."""
     out = {}
-    for kdp in sorted(_SHIPPED_DIR.glob("*.kdp.json")):
+    for kdp in sorted((_SHIPPED_DIR / "artifacts").glob("*.kdp.json")):
         document = json.loads(kdp.read_text())
         shard = kdp.name[: -len(".kdp.json")][len(_SLUG) + 1 :]
         assert document["name"] == f"hipkernel:{_SLUG}_{shard}"
@@ -88,18 +88,17 @@ def _document(kind):
     return json.loads((_SHIPPED_DIR / f"{_SLUG}.{kind}.json").read_text())
 
 
-def test_the_catalog_is_227_selectable_kernels_and_4_helpers_per_dtype(specs):
-    """227 (164 implicit-GEMM + 63 direct) selectable kernels and 4 helpers per dtype,
-    the set in docs/dgrad_instances_v3.txt (454 instances total), replacing the
-    prune-150 catalog (203) on 2026-10-30 -- see
-    docs/HANDOFF-conv-instance-catalog.md."""
+def test_the_catalog_is_203_selectable_kernels_and_4_helpers_per_dtype(specs):
+    """203 (141 implicit-GEMM + 62 direct) selectable kernels and 4 helpers per dtype,
+    the prune-150 catalog's backward-greedy reduction from 320/dtype -- see
+    docs/dgrad-aot-catalog-prune-150-plan.md."""
     by_dtype = collections.defaultdict(collections.Counter)
     for spec in specs:
         by_dtype[spec.dtype][(spec.kernel_family, spec.direct_variant)] += 1
     for dtype in ("bf16", "fp16"):
         assert by_dtype[dtype] == {
-            (0, "none"): 164,
-            (1, "depthwise_dgrad"): 10,
+            (0, "none"): 141,
+            (1, "depthwise_dgrad"): 9,
             (1, "depthwise_dgrad_win"): 31,
             (1, "grouped_dgrad_fused"): 16,
             (1, "grouped_dgrad_mfma"): 3,
@@ -110,8 +109,8 @@ def test_the_catalog_is_227_selectable_kernels_and_4_helpers_per_dtype(specs):
             (2, "transpose_rtc"): 1,
             (2, "reorganize_rtc"): 1,
         }
-    assert sum(1 for s in specs if not s.is_helper) == 454
-    assert len(specs) == 462
+    assert sum(1 for s in specs if not s.is_helper) == 406
+    assert len(specs) == 414
 
 
 def test_instance_id_is_the_identity_stable_hash(identities):
@@ -152,10 +151,13 @@ def test_the_shipped_bundle_is_its_catalog_with_instance_derived_ids(specs, ship
 
 
 def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(specs):
-    # A promoted model packet adds a heuristics/ folder next to the bundle; the bundle's
-    # own files are the top-level ones.
+    # The generated KDPs (one per shard) and a promoted model packet's heuristics/
+    # both live under DVC, each pinned by its own top-level pointer; the bundle's
+    # directly-committed files are the small, hand-authored ones beside them.
     names = sorted(
-        path.name for path in _SHIPPED_DIR.iterdir() if path.name != "heuristics"
+        path.name
+        for path in _SHIPPED_DIR.iterdir()
+        if path.name not in ("artifacts", "heuristics")
     )
     shards = {tool.shard_name(spec) for spec in specs}
     assert shards == {
@@ -165,8 +167,12 @@ def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(specs):
     }
     assert names == sorted(
         [f"{_SLUG}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
-        + [f"{_SLUG}_{shard}.kdp.json" for shard in shards]
-        + ["kernel_dtype_matches_graph.umd.json"]
+        + [
+            "kernel_dtype_matches_graph.umd.json",
+            "artifacts.dvc",
+            "heuristics.dvc",
+            ".gitignore",
+        ]
     )
     matcher = json.loads(
         (_SHIPPED_DIR / "kernel_dtype_matches_graph.umd.json").read_text()
@@ -174,7 +180,7 @@ def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(specs):
     top_level = [path for path in _SHIPPED_DIR.iterdir() if path.is_file()]
     for path in top_level + _INSTANCES + [_CENSUS]:
         assert path.stat().st_size < _FILE_SIZE_LIMIT, path.name
-    for kdp in _SHIPPED_DIR.glob("*.kdp.json"):
+    for kdp in (_SHIPPED_DIR / "artifacts").glob("*.kdp.json"):
         document = json.loads(kdp.read_text())
         assert document["matchers"] == [matcher["id"]]
         assert document["engine"] == _document("ued")["id"]
@@ -192,9 +198,12 @@ def test_the_bundle_names_its_own_native_symbols():
     assert uhd["native"] == {"symbol": "hipkernel.gfx950_conv_dgrad_aot.score"}
     assert umd["match_symbol"] == "hipkernel.gfx950_conv_dgrad_aot.kernel_match"
     assert ued["metadata"] == kmd["id"]
-    # The native fallback scorer comes first; a promoted model packet appends its own.
+    # The native fallback scorer comes first; a promoted model packet appends its own
+    # id after it instead of replacing it, so "default" is a list once one ships.
     assert list(ued["sort_kernel_catalog"]) == ["default"]
-    assert ued["sort_kernel_catalog"]["default"] == uhd["id"]
+    default = ued["sort_kernel_catalog"]["default"]
+    assert isinstance(default, list) and default[0] == uhd["id"]
+    assert all(isinstance(i, str) for i in default)
     assert ued["knobs"] == list(tool.engine_knobs())
     kmd_names = [f["name"] for f in kmd["fields"]]
     assert kmd_names == [f["name"] for f in tool.kmd_fields()]
@@ -287,7 +296,7 @@ def test_knob_tuples_are_unique_within_every_dtype_family_and_capability(shipped
             if kernel["metadata"]["dtype"] == dtype
             and kernel["metadata"].get("kernel_family", 0) == 0
         ]
-        assert len(implicit) == 247
+        assert len(implicit) == 141
 
 
 def test_the_mfma_row_tile_is_the_knob_token_not_the_identity_field(identities, specs):
@@ -357,7 +366,7 @@ def test_the_census_names_every_pack_and_kernel(shipped):
     text = _CENSUS.read_text()
     for _, kernel in shipped.values():
         assert f'"{kernel["name"]}"' in text
-    for kdp in _SHIPPED_DIR.glob("*.kdp.json"):
+    for kdp in (_SHIPPED_DIR / "artifacts").glob("*.kdp.json"):
         assert f'"{json.loads(kdp.read_text())["name"]}"' in text
     assert '"hipkernel:Gfx950ConvDgradAot"' in text
     assert "hipkernel.gfx950_conv_dgrad_aot.score" in text
@@ -505,7 +514,7 @@ def test_main_dedups_and_refuses_unsupported_unless_asked(tmp_path, identities, 
 
 
 def test_stabilize_ids_derives_product_ids_and_matches_the_shipped_kdp(tmp_path):
-    shipped = sorted(_SHIPPED_DIR.glob("*_direct.kdp.json"))[0]
+    shipped = sorted((_SHIPPED_DIR / "artifacts").glob("*_direct.kdp.json"))[0]
     document = json.loads(shipped.read_text())
     for kernel in document["kernelDescriptors"]:
         kernel["id"] = str(uuid.uuid4())
