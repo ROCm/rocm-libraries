@@ -51,10 +51,10 @@ inline void compute_fog_48_host(__m256* p, __m256* pFogAlphaMask, __m256* pFogIn
     pGray[0] = _mm256_mul_ps(pGray[0], pGrayFactor);
     pGray[1] = _mm256_mul_ps(pGray[1], pGrayFactor);
     p[0] = _mm256_fmadd_ps(p[0], pOneMinusGrayFactor, pGray[0]);
-    p[1] = _mm256_fmadd_ps(p[1], pOneMinusGrayFactor, pGray[0]);
+    p[1] = _mm256_fmadd_ps(p[1], pOneMinusGrayFactor, pGray[1]);
     p[2] = _mm256_fmadd_ps(p[2], pOneMinusGrayFactor, pGray[0]);
     p[3] = _mm256_fmadd_ps(p[3], pOneMinusGrayFactor, pGray[1]);
-    p[4] = _mm256_fmadd_ps(p[4], pOneMinusGrayFactor, pGray[1]);
+    p[4] = _mm256_fmadd_ps(p[4], pOneMinusGrayFactor, pGray[0]);
     p[5] = _mm256_fmadd_ps(p[5], pOneMinusGrayFactor, pGray[1]);
     pAlphaMaskFactor[0] = _mm256_sub_ps(avx_p1, pFogFactor[0]);
     pAlphaMaskFactor[1] = _mm256_sub_ps(avx_p1, pFogFactor[1]);
