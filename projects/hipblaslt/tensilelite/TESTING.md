@@ -434,8 +434,18 @@ across whatever set of builds happen to run on a given pull request.
 What the placement costs is visibility and strictness. There is no check name in the pull request, no
 test report, and no way for CI to run it in isolation. It also cannot be tightened in place, because
 `--strict-known-bugs` would fail local developer builds over a stale entry someone else owns, which is
-not a reasonable thing to do to a person trying to build. Both costs point at the same answer, and
-that answer is a second lane rather than a different home for this one.
+not a reasonable thing to do to a person trying to build.
+
+**So the same check runs in two places, on purpose.** The
+[logic-corpus lane](#logic-corpus-consistency-regression-tests) runs `TensileLogic --check-all` on
+pull requests that touch the logic or its validators: strict, under its own check name, and on the
+architectures the change touched whether or not any build targets them. The build keeps its copy
+because it covers what the lane cannot. hipSPARSELt's logic goes through the same
+`create_device_library()` and is checked only here. So is every build that never becomes a pull
+request in this repository: a tuning engineer's local edits, TheRock and downstream source builds,
+Math CI, release branches. The build step also checks the files actually being compiled, after any
+`--logic-filter` or architecture selection. Scoped to the build's architectures and cached by its
+stamp file, it costs seconds. Removing it would trade that for code generation over unchecked input.
 
 The cross-file checks named in
 [Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests)
@@ -469,13 +479,12 @@ keys survive library re-tuning instead of drifting with a positional index, and 
 a fixed bug is detected rather than skipped forever. The list is currently empty because those gfx950
 validation-drift entries were removed after becoming stale.
 
-`--strict-known-bugs` turns that detection into a failure, but it defaults off and nothing passes it
-today, so a stale entry only warns. Enforcing it is tracked in AIHPBLAS-4196, which proposes the
-right fix: a dedicated GitHub Actions job running
-[`run_tensile_logic_check.py`](../scripts/run_tensile_logic_check.py) with the flag, rather than
-tightening the in-build command. That ticket also names a remaining hole, which is that an orphaned
-entry whose `solution_name` resolves to nothing currently matches nothing and is silently ignored, so
-strict mode is not yet a complete dead-entry detector. Extending the gate to cover derived-parameter
+`--strict-known-bugs` turns that detection into a failure. The build-wired call leaves it off, for
+the reason above, so a stale entry only warns there. The logic-corpus lane passes it through
+[`run_tensile_logic_check.py`](../scripts/run_tensile_logic_check.py), so a stale entry fails the
+pull request whose logic fixed the bug (AIHPBLAS-4196). One hole remains: an orphaned entry whose
+`solution_name` resolves to nothing currently matches nothing and is silently ignored, so strict mode
+is not yet a complete dead-entry detector. Extending the gate to cover derived-parameter
 assignment is tracked in AIHPBLAS-3575.
 
 ## Pre-submit / CI Gates
@@ -812,7 +821,7 @@ testing there (AIHPBLAS-3354) rather than at changes to Math CI itself.
 
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
-| A stale `TensileLogic` known-bugs entry only warns, because `--strict-known-bugs` defaults off | Low | Low | The checker re-validates and reports stale entries on every build | AIHPBLAS-4196 |
+| A stale `TensileLogic` known-bugs entry only warns in the build, which leaves `--strict-known-bugs` off; and an orphaned entry, whose `solution_name` matches nothing, is ignored everywhere | Low | Low | The logic-corpus lane runs with `--strict-known-bugs`, so a stale entry fails the pull request that touched that logic; the build still reports stale entries as warnings | AIHPBLAS-4196 |
 | The library logic gate has no check name, no test report, and cannot be run in isolation by CI | Low | Medium | It runs on every kernel-generating build including local ones, which gives it good reach | AIHPBLAS-4196 |
 | The library logic gate checks matrix instructions, work-group shapes, and the XCC work-group mapping, but does not run derived-parameter assignment (`Solution.assignDerivedParameters`), so a logic entry that fails there still passes the gate | Medium | Medium | Such an entry fails later in the build, during code generation, rather than at the gate | AIHPBLAS-3575 |
 
