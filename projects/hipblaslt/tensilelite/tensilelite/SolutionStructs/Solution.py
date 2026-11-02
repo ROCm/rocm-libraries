@@ -3374,7 +3374,35 @@ class Solution(collections.abc.Mapping):
     # VectorWidthA: 1 with AccumShuffle 1 or 2 must not get its own kernel name.
     # Checked here rather than with the other VectorWidthA preconditions because
     # StoreRemapVectorWidth is not final until the block just above.
-    if not (state["enableLDSTrA"] and state["VectorWidthA"] > 1 and state["SourceSwap"]) or state["StoreRemapVectorWidth"] > 0:
+    if not (state["enableLDSTrA"] and state["VectorWidthA"] > 1 and state["SourceSwap"] \
+      and not state["ProblemType"]["MXBlockA"]) or state["StoreRemapVectorWidth"] > 0:
+      # Say why, but only when the yaml actually asked for the shuffle. The default is 0, so
+      # warning unconditionally would fire for every kernel that never wanted it.
+      if state["AccumShuffle"]:
+        if not state["enableLDSTrA"]:
+          _asWhy = "enableLDSTrA is off (needs LDSTrInst, a 1- or 2-byte MacDataTypeA, " \
+                   "UnrollMajorLDSA off and DirectToVgprA off)"
+        elif state["VectorWidthA"] <= 1:
+          _asWhy = "VectorWidthA is %u -- the shuffle is a no-op at 1" % state["VectorWidthA"]
+        elif not state["SourceSwap"]:
+          _asWhy = "SourceSwap is off (the store takes vectorWidth0 = VectorWidthA only in " \
+                   "SourceSwap mode)"
+        elif state["ProblemType"]["MXBlockA"]:
+          _asWhy = "MXBlockA is set: A would be read in the ds_read_tr VW=1 row order while " \
+                   "VectorWidthMXSA inherits VectorWidthA and the scale reads stay " \
+                   "VW-interleaved (enableLDSTrMXSA is always False), so rows would be " \
+                   "scaled wrongly and the epilogue shuffle cannot undo it"
+        elif state["StoreRemapVectorWidth"] > 0:
+          _asWhy = "StoreRemapVectorWidth is %u -- storeRemap is the alternative bridge, " \
+                   "not a companion" % state["StoreRemapVectorWidth"]
+        else:
+          _asWhy = "UnKnown"
+        # The clamp below only moves VectorWidthA when it is currently > 1; saying so when the
+        # reason IS that it is already 1 would be nonsense.
+        _asClamp = " VectorWidthA %u will be clamped to 1." % state["VectorWidthA"] \
+                   if (state["enableLDSTrA"] and state["VectorWidthA"] > 1) else ""
+        printWarning("AccumShuffle %u requested but disabled: %s.%s"
+                     % (state["AccumShuffle"], _asWhy, _asClamp))
       state["AccumShuffle"] = 0
 
     # enableLDSTrA used to clamp VectorWidthA unconditionally: ds_read_tr fixes the lane->row
@@ -3522,7 +3550,7 @@ class Solution(collections.abc.Mapping):
     # it; its cost grows as VW*VW per group of VW tiles, so the wider settings want a
     # benchmark before use. Placed after the sparse block above because SourceSwap is not
     # final until then.
-    if state["enableLDSTrA"] and state["VectorWidthA"] > 1 and state["SourceSwap"]:
+    if state["AccumShuffle"]:
       vwA = state["VectorWidthA"]
       if vwA not in (2, 4, 8):
         reject(state, printRejectionReason, \
