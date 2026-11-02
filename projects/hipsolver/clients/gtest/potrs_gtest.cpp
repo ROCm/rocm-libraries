@@ -306,6 +306,23 @@ TEST_F(checkin_misc_POTRS_64, info_is_set)
     EXPECT_ROCBLAS_STATUS(hipsolverDnCreate(&handle), HIPSOLVER_STATUS_SUCCESS);
     EXPECT_ROCBLAS_STATUS(hipsolverDnCreateParams(&params), HIPSOLVER_STATUS_SUCCESS);
 
+    // cuSOLVER needs the workspace, which the rocSOLVER backend would otherwise manage
+    size_t lworkOnDevice = 0, lworkOnHost = 0;
+    EXPECT_ROCBLAS_STATUS(hipsolverDnXpotrf_bufferSize(handle,
+                                                       params,
+                                                       HIPSOLVER_FILL_MODE_LOWER,
+                                                       n,
+                                                       HIP_R_64F,
+                                                       dA,
+                                                       n,
+                                                       HIP_R_64F,
+                                                       &lworkOnDevice,
+                                                       &lworkOnHost),
+                          HIPSOLVER_STATUS_SUCCESS);
+    void*             workOnDevice = nullptr;
+    std::vector<char> workOnHost(lworkOnHost);
+    ASSERT_EQ(hipMalloc(&workOnDevice, std::max(lworkOnDevice, size_t(1))), hipSuccess);
+
     EXPECT_ROCBLAS_STATUS(hipsolverDnXpotrf(handle,
                                             params,
                                             HIPSOLVER_FILL_MODE_LOWER,
@@ -314,10 +331,10 @@ TEST_F(checkin_misc_POTRS_64, info_is_set)
                                             dA,
                                             n,
                                             HIP_R_64F,
-                                            nullptr,
-                                            0,
-                                            nullptr,
-                                            0,
+                                            workOnDevice,
+                                            lworkOnDevice,
+                                            workOnHost.data(),
+                                            lworkOnHost,
                                             dInfo),
                           HIPSOLVER_STATUS_SUCCESS);
 
@@ -348,4 +365,5 @@ TEST_F(checkin_misc_POTRS_64, info_is_set)
     ASSERT_EQ(hipFree(dA), hipSuccess);
     ASSERT_EQ(hipFree(dB), hipSuccess);
     ASSERT_EQ(hipFree(dInfo), hipSuccess);
+    ASSERT_EQ(hipFree(workOnDevice), hipSuccess);
 }
