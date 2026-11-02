@@ -431,6 +431,8 @@ struct _rocblaslt_matmul_desc
     // Fused epilogue attached via ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE. Non-owning:
     // the descriptor is the caller's and must outlive every matmul using this desc.
     const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
+    // Attached via ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE; non-owning, as above.
+    const struct hipblasLtFusedEpilogueDescriptor* fused_prologue = nullptr;
 #endif
 
     std::shared_ptr<void> m_data; // Tensile data
@@ -474,6 +476,7 @@ struct _rocblaslt_matmul_desc
         this->grouped_launch.reset();
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
+        this->fused_prologue          = src.fused_prologue;
 #endif
     }
 };
@@ -483,7 +486,7 @@ struct _rocblaslt_matmul_desc
 inline bool rocblaslt_resolve_fused_a2a(const _rocblaslt_matmul_desc& desc,
                                         RocblasltFusedEpilogueInfo&   out)
 {
-    return rocblaslt_resolve_fused_epilogue(desc.fused_epilogue, out)
+    return rocblaslt_resolve_fused_epilogue(desc.fused_epilogue, desc.fused_prologue, out)
            && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
 }
 #endif

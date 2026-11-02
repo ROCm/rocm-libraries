@@ -259,6 +259,7 @@ namespace
 struct hipblasLtFusedEpilogueDescriptor
 {
     std::vector<hipblasLtFuseableEpilogue_t> stages;
+    std::vector<hipblasLtFuseablePrologue_t> prologue_stages;
 
     // HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX parameters. The per-rank arrays are
     // sized by the caller's SetAttribute call; that their length is the
@@ -269,6 +270,10 @@ struct hipblasLtFusedEpilogueDescriptor
     uint32_t                          comm_channel   = 0;
     std::vector<void*>                a2a_recv_ptrs;
     std::vector<hipblasLtSdmaQueue_t> a2a_queues;
+
+    // HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX parameters.
+    std::vector<void*> a2a_peer_b_ptrs;
+    void*              a2a_gather_buffer = nullptr;
 };
 
 namespace
@@ -282,11 +287,30 @@ namespace
         return false;
     }
 
+    bool fused_prologue_has_stage(const hipblasLtFusedEpilogueDescriptor* d,
+                                  hipblasLtFuseablePrologue_t             p)
+    {
+        for(auto s : d->prologue_stages)
+            if(s == p)
+                return true;
+        return false;
+    }
+
     bool fused_epilogue_stage_recognized(hipblasLtFuseableEpilogue_t stage)
     {
         switch(stage)
         {
         case HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX:
+            return true;
+        }
+        return false;
+    }
+
+    bool fused_prologue_stage_recognized(hipblasLtFuseablePrologue_t stage)
+    {
+        switch(stage)
+        {
+        case HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX:
             return true;
         }
         return false;
@@ -432,27 +456,124 @@ namespace
         return HIPBLAS_STATUS_SUCCESS;
     }
 
-    // Runs the checks a matmul carrying a fused epilogue owes before it is
-    // dispatched. A descriptor with no communicating stage passes through.
+    hipblasStatus_t validate_fused_prologue_launch(rocblaslt_handle                        handle,
+                                                   const hipblasLtFusedEpilogueDescriptor* desc,
+                                                   rocblaslt_matrix_layout                 matB,
+                                                   rocblaslt_matrix_layout                 matD)
+    {
+        if(handle == nullptr || matB == nullptr || matD == nullptr)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+
+        const uint32_t world = handle->device_comm_world;
+        if(world == 0)
+        {
+            log_error(__func__, "all-to-all stage requires hipblasLtSetDeviceComm on this handle");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+
+        if(desc->comm_channel >= handle->device_comm_channels)
+        {
+            log_error(__func__, "comm channel out of range", (int)desc->comm_channel);
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+
+        if(desc->a2a_peer_b_ptrs.size() != world)
+        {
+            log_error(__func__, "all-to-all peer-B array does not have world entries");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+        for(size_t j = 0; j < desc->a2a_peer_b_ptrs.size(); ++j)
+        {
+            if(j != handle->device_comm_rank && desc->a2a_peer_b_ptrs[j] == nullptr)
+            {
+                log_error(__func__, "null all-to-all peer-B pointer for rank", (int)j);
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            }
+        }
+
+        if(desc->a2a_gather_buffer == nullptr)
+        {
+            log_error(__func__, "all-to-all prologue is missing its gather buffer");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+
+        if(!desc->a2a_queues.empty())
+        {
+            if(desc->a2a_queues.size() != world)
+            {
+                log_error(__func__, "all-to-all SDMA queue array does not have world entries");
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            }
+            for(size_t j = 0; j < desc->a2a_queues.size(); ++j)
+            {
+                const hipblasLtSdmaQueue_t& q = desc->a2a_queues[j];
+                if(j != handle->device_comm_rank
+                   && (q.queueBuf == nullptr || q.rptr == nullptr || q.wptr == nullptr
+                       || q.doorbell == nullptr))
+                {
+                    log_error(__func__, "incomplete all-to-all SDMA queue for rank", (int)j);
+                    return HIPBLAS_STATUS_INVALID_VALUE;
+                }
+            }
+        }
+
+        if(matB->batch_count > 1 || matD->batch_count > 1)
+        {
+            log_error(__func__, "all-to-all does not support batched GEMM");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+
+        if(matB->type != HIP_R_16BF)
+        {
+            log_error(__func__, "all-to-all prologue supports a BF16 B only", (int)matB->type);
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+
+        return HIPBLAS_STATUS_SUCCESS;
+    }
+
+    // Runs the checks a matmul carrying a fused epilogue or prologue owes before
+    // it is dispatched. A descriptor with no communicating stage passes through.
     hipblasStatus_t validate_fused_epilogue_dispatch(hipblasLtHandle_t       handle,
                                                      hipblasLtMatmulDesc_t   matmulDesc,
+                                                     hipblasLtMatrixLayout_t Bdesc,
                                                      hipblasLtMatrixLayout_t Ddesc)
     {
         if(matmulDesc == nullptr)
             return HIPBLAS_STATUS_SUCCESS;
 
-        const hipblasLtFusedEpilogueDescriptor* desc
-            = ((rocblaslt_matmul_desc)matmulDesc)->fused_epilogue;
-        if(desc == nullptr
-           || !fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX))
+        const rocblaslt_matmul_desc desc = (rocblaslt_matmul_desc)matmulDesc;
+        RocblasltFusedEpilogueInfo  info;
+        if(!rocblaslt_resolve_fused_epilogue(desc->fused_epilogue, desc->fused_prologue, info))
             return HIPBLAS_STATUS_SUCCESS;
 
-        const hipblasStatus_t contents = validate_fused_epilogue_contents(desc);
-        if(contents != HIPBLAS_STATUS_SUCCESS)
-            return contents;
+        if(info.misattached)
+        {
+            log_error(__func__,
+                      "fused stages attached through the wrong attribute, or an all-to-all on "
+                      "both sides");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
 
-        return validate_fused_a2a_launch(
-            (rocblaslt_handle)handle, desc, (rocblaslt_matrix_layout)Ddesc);
+        switch(info.mode)
+        {
+        case RocblasltFusedEpilogueInfo::Mode::GemmA2A:
+        {
+            const hipblasStatus_t contents = validate_fused_epilogue_contents(desc->fused_epilogue);
+            if(contents != HIPBLAS_STATUS_SUCCESS)
+                return contents;
+            return validate_fused_a2a_launch(
+                (rocblaslt_handle)handle, desc->fused_epilogue, (rocblaslt_matrix_layout)Ddesc);
+        }
+        case RocblasltFusedEpilogueInfo::Mode::A2AGemm:
+            return validate_fused_prologue_launch((rocblaslt_handle)handle,
+                                                  desc->fused_prologue,
+                                                  (rocblaslt_matrix_layout)Bdesc,
+                                                  (rocblaslt_matrix_layout)Ddesc);
+        case RocblasltFusedEpilogueInfo::Mode::Disabled:
+            break;
+        }
+        return HIPBLAS_STATUS_SUCCESS;
     }
 
     /****************************************************************************
@@ -505,19 +626,33 @@ namespace
     }
 }
 
-// The two pointers alias the descriptor's own storage; they stay valid only as long as
+// The pointers alias the descriptor's own storage; they stay valid only as long as
 // the descriptor does.
-bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* desc,
+bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* epilogue,
+                                      const hipblasLtFusedEpilogueDescriptor* prologue,
                                       RocblasltFusedEpilogueInfo&             out)
 {
-    if(desc == nullptr)
+    if(epilogue == nullptr && prologue == nullptr)
         return false;
 
-    out.mode              = fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX)
-                                ? RocblasltFusedEpilogueInfo::Mode::GemmA2A
-                                : RocblasltFusedEpilogueInfo::Mode::Disabled;
+    const bool gemmA2A
+        = epilogue && fused_epilogue_has_stage(epilogue, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX);
+    const bool a2aGemm
+        = prologue && fused_prologue_has_stage(prologue, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX);
+
+    out.misattached = (epilogue && !epilogue->prologue_stages.empty())
+                      || (prologue && !prologue->stages.empty()) || (gemmA2A && a2aGemm);
+    out.mode = a2aGemm   ? RocblasltFusedEpilogueInfo::Mode::A2AGemm
+               : gemmA2A ? RocblasltFusedEpilogueInfo::Mode::GemmA2A
+                         : RocblasltFusedEpilogueInfo::Mode::Disabled;
+
+    const hipblasLtFusedEpilogueDescriptor* desc
+        = a2aGemm || epilogue == nullptr ? prologue : epilogue;
     out.a2aSdmaQueues     = desc->a2a_queues.empty() ? nullptr : desc->a2a_queues.data();
     out.a2aRecvPtrs       = desc->a2a_recv_ptrs.empty() ? nullptr : desc->a2a_recv_ptrs.data();
+    out.a2aPeerBPtrs      = desc->a2a_peer_b_ptrs.empty() ? nullptr : desc->a2a_peer_b_ptrs.data();
+    out.a2aPeerBCount     = desc->a2a_peer_b_ptrs.size();
+    out.a2aGatherBuffer   = desc->a2a_gather_buffer;
     out.a2aExtent         = desc->a2a_extent;
     out.a2aCompletionMode = desc->a2a_completion;
     out.commChannel       = desc->comm_channel;
@@ -526,10 +661,12 @@ bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* de
 
 rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
                                                             rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matB,
                                                             rocblaslt_matrix_layout matD)
 {
     return validate_fused_epilogue_dispatch((hipblasLtHandle_t)handle,
                                             (hipblasLtMatmulDesc_t)matmulDesc,
+                                            (hipblasLtMatrixLayout_t)matB,
                                             (hipblasLtMatrixLayout_t)matD)
                    == HIPBLAS_STATUS_SUCCESS
                ? rocblaslt_status_success
@@ -966,7 +1103,7 @@ try
         status = HIPBLAS_STATUS_INVALID_VALUE;
     }
     else if(fused_epilogue_has_stage(desc, epilogue)
-            || !fused_epilogue_stage_composes(desc, epilogue))
+            || !fused_epilogue_stage_composes(desc, epilogue) || !desc->prologue_stages.empty())
     {
         log_error(__func__, "epilogue stage does not compose with the stages already added");
         status = HIPBLAS_STATUS_INVALID_VALUE;
@@ -974,6 +1111,35 @@ try
     else
     {
         desc->stages.push_back(epilogue);
+    }
+
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtFusedPrologueAdd(hipblasLtFusedEpilogueDescriptor_t desc,
+                                          hipblasLtFuseablePrologue_t        prologue)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedPrologueAdd");
+    hipblasStatus_t status = HIPBLAS_STATUS_SUCCESS;
+
+    if(desc == nullptr || !fused_prologue_stage_recognized(prologue))
+    {
+        status = HIPBLAS_STATUS_INVALID_VALUE;
+    }
+    else if(!desc->prologue_stages.empty() || !desc->stages.empty())
+    {
+        log_error(__func__, "prologue stage does not compose with the stages already added");
+        status = HIPBLAS_STATUS_INVALID_VALUE;
+    }
+    else
+    {
+        desc->prologue_stages.push_back(prologue);
     }
 
     rocblaslt::Debug::Instance().markerStop();
@@ -1080,6 +1246,39 @@ try
         const size_t count = sizeInBytes / sizeof(hipblasLtSdmaQueue_t);
         desc->a2a_queues.assign(count, hipblasLtSdmaQueue_t{});
         memcpy(desc->a2a_queues.data(), buf, sizeInBytes);
+        break;
+    }
+    case HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS:
+    {
+        if(sizeInBytes == 0 || sizeInBytes % sizeof(void*) != 0
+           || sizeInBytes / sizeof(void*) > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
+        {
+            log_error(__func__, "invalid all-to-all peer-B array size", sizeInBytes);
+            status = HIPBLAS_STATUS_INVALID_VALUE;
+            break;
+        }
+        const size_t count = sizeInBytes / sizeof(void*);
+        desc->a2a_peer_b_ptrs.assign(count, nullptr);
+        memcpy(desc->a2a_peer_b_ptrs.data(), buf, sizeInBytes);
+        break;
+    }
+    case HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER:
+    {
+        if(sizeInBytes < sizeof(void*))
+        {
+            log_error(__func__, "invalid all-to-all gather buffer buf size", sizeInBytes);
+            status = HIPBLAS_STATUS_INVALID_VALUE;
+            break;
+        }
+        void* buffer = nullptr;
+        memcpy(&buffer, buf, sizeof(buffer));
+        if(reinterpret_cast<uintptr_t>(buffer) % 128 != 0)
+        {
+            log_error(__func__, "all-to-all gather buffer must be 128-byte aligned");
+            status = HIPBLAS_STATUS_INVALID_VALUE;
+            break;
+        }
+        desc->a2a_gather_buffer = buffer;
         break;
     }
     default:
@@ -1354,7 +1553,7 @@ try
     // is judged here: an all-to-all's extent participates in tile selection, so a
     // request that cannot be served must not come back as a usable algo.
     hipblasStatus_t fused_status
-        = validate_fused_epilogue_dispatch(handle, matmulDesc, Ddesc);
+        = validate_fused_epilogue_dispatch(handle, matmulDesc, Bdesc, Ddesc);
     if(fused_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
@@ -1419,7 +1618,7 @@ try
     hipblasStatus_t return_status = HIPBLAS_STATUS_SUCCESS;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    return_status = validate_fused_epilogue_dispatch(handle, matmul_descr, matD);
+    return_status = validate_fused_epilogue_dispatch(handle, matmul_descr, matB, matD);
     if(return_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
