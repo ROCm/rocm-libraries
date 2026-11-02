@@ -95,6 +95,16 @@ def _make_data(kind, xs, ws, dev):
     elif base == "tr":
         X = torch.randn(*xs, device=dev)
         W = torch.randn(*ws, device=dev) * (2.0 / (27 * ws[-1])) ** 0.5
+    elif base.startswith("tv"):
+        # tv<b>: training-like with a smooth spatial magnitude field 2^(b s(z,y,x)), s in
+        # [-1, 1] (gradients whose magnitude varies by +-b binades across the volume)
+        import math
+        bnd = float(base[2:])
+        g = [torch.linspace(0, math.pi * 1.7, n, device=dev) for n in xs[:3]]
+        zz, yy, xx = torch.meshgrid(*g, indexing="ij")
+        sf = torch.sin(zz + 0.3) * torch.cos(1.3 * yy) * torch.sin(0.7 * xx + 1.0)
+        X = torch.randn(*xs, device=dev) * (2.0 ** (bnd * sf))[..., None]
+        W = torch.randn(*ws, device=dev) * (2.0 / (27 * ws[-1])) ** 0.5
     else:
         raise ValueError(kind)
     if e:
@@ -209,6 +219,12 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
     osc = variant == "yx" and getattr(spec, "oscale", False)
     if osc:
         sigb = sigb.scalar("OS", "f32")
+    bps = variant == "yx" and getattr(spec, "bps", 0)
+    bpo = variant == "yx" and getattr(spec, "bps_out", False)
+    if bps:
+        sigb = sigb.ptr("E", "i32")
+    if bpo:
+        sigb = sigb.ptr("EO", "i32")
     SX = 2.0 ** scale_exp  # relayout scale (power of two); the main kernel multiplies by 1/SX
     sig = sigb.build()
     launcher = KernelLauncher(hsaco=art.hsaco, kernel_name=kern.name, signature=sig)
@@ -220,6 +236,12 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
     else:
         Y = torch.zeros(spec.Do, spec.Ho, spec.Wo, K, device=dev, dtype=torch.bfloat16)
     U = wt()
+    if bps == 2 and not dgrad:  # chained input: the producer's yc8h halo is zero
+        hb = spec.bps_halo
+        Xh = torch.zeros_like(X)
+        Xh[hb:Di - hb, hb:Hi - hb, hb:Wi - hb] = X[hb:Di - hb, hb:Hi - hb, hb:Wi - hb]
+        X = Xh
+        del Xh
     if dgrad:
         Xk = cw.winograd3d_x_to_c8(torch.nn.functional.pad(X * SX, (0, 0, 2, 2, 2, 2, 2, 2)))
     else:
@@ -231,6 +253,48 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         args["BOFF"] = 0
     if osc:
         args["OS"] = 1.0 / SX
+
+    def _absbits(t):  # |x| bf16 bit patterns as int32
+        return (t.contiguous().view(torch.int16).to(torch.int32) & 0x7FFF)
+
+    if bps and osc:
+        raise ValueError("bps replaces oscale: use one of them")
+    if bps == 1:
+        hb = spec.bps_halo
+        if hb != (2 if dgrad else 0):
+            raise ValueError("bps=1: bps_halo must be 2 with --dgrad, else 0")
+        src = (X * SX) if osc else X
+        n_ent = cw.x_to_c8_lds_grid(Di - 2 * hb, Hi - 2 * hb, Wi - 2 * hb, C)[0]
+        vb = cw._x8_vb(C)
+        Em = torch.zeros(n_ent * vb, device=dev, dtype=torch.int32)
+        am = _absbits(src).amax(-1).reshape(-1)
+        Em[:am.numel()] = am
+        E_ref = Em.reshape(n_ent, vb).amax(1)
+        E = torch.zeros(n_ent, device=dev, dtype=torch.int32)
+        args["E"] = E
+        del Em, am
+    elif bps == 2:
+        hb = spec.bps_halo
+        Xin = (torch.nn.functional.pad(X * SX, (0, 0, 2, 2, 2, 2, 2, 2)) if dgrad
+               else (X * SX if osc else X))
+        P = Xin[hb:Di - hb, hb:Hi - hb, hb:Wi - hb]  # the producer's output
+        Dp, Hp, Wp = P.shape[:3]
+        ZTp = spec.bps_pz or spec.z_tile
+        NBp = spec.bps_pn or C // spec.n_tile
+        a_ = _absbits(P).reshape(Dp, Hp // 2, 2, Wp // 2, 2, C).amax(4).amax(2)
+        a_ = a_.reshape(Dp, -1, C)
+        ntbp = -(-a_.shape[1] // 32)
+        a_ = torch.nn.functional.pad(a_, (0, 0, 0, ntbp * 32 - a_.shape[1], 0,
+                                          -(-Dp // ZTp) * ZTp - Dp))
+        E = a_.reshape(-1, ZTp, ntbp, 32, NBp, C // NBp).amax(5).amax(3).amax(1).reshape(-1)
+        E = E.contiguous()
+        assert E.numel() == cw.bps_map_entries(spec), (E.numel(), cw.bps_map_entries(spec))
+        args["E"] = E
+        del Xin, P, a_
+    if bpo:
+        EO = torch.zeros(grid[0] * (grid[1] if len(grid) > 1 else 1), device=dev,
+                         dtype=torch.int32)
+        args["EO"] = EO
     if frel:
         Fl = torch.zeros(grid[0], device=dev, dtype=torch.int32)
         args.update({"Xn": X, "F": Fl})
@@ -273,19 +337,24 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         aux = (lx, cx, lwx, cwx)
     if variant == "yx":
         # rocKE auxiliary kernels for the whole call: X relayout + weight transform
+        am1 = bps == 1
         if dgrad:
-            kx = cw.build_x_to_c8_lds(Di - 4, Hi - 4, Wi - 4, C, halo=2, scale=osc)
+            kx = cw.build_x_to_c8_lds(Di - 4, Hi - 4, Wi - 4, C, halo=2, scale=osc, amax=am1)
             xgrid = cw.x_to_c8_lds_grid(Di - 4, Hi - 4, Wi - 4, C)
         elif lay == "r8":
             kx = cw.build_x_to_c8(Di, Hi, Wi, C, rows=True)
             xgrid = cw.x_to_c8_grid(Di, Hi, Wi, C)
         else:  # LDS-transposed relayout (coalesced reads and writes)
-            kx = cw.build_x_to_c8_lds(Di, Hi, Wi, C, scale=osc)
+            kx = cw.build_x_to_c8_lds(Di, Hi, Wi, C, scale=osc, amax=am1)
             xgrid = cw.x_to_c8_lds_grid(Di, Hi, Wi, C)
+        sgx = SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16")
+        if osc:
+            sgx = sgx.scalar("S", "f32")
+        if am1:
+            sgx = sgx.ptr("E", "i32")
         lx = KernelLauncher(
             hsaco=compile_kernel(kx, arch=arch).hsaco, kernel_name=kx.name,
-            signature=(SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16").scalar("S", "f32")
-                       if osc else SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16")).build(),
+            signature=sgx.build(),
         )
         odt = "f16" if spec.op_dtype == "f16" else "bf16"
         wt3 = wtv in (3, 4) and odt == "f16" and spec.stage == "lds16" and not spec.b16 \
@@ -321,11 +390,13 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
                                  fold=spec.stage in ("reg", "wlds"),
                                  rev=getattr(spec, "xrev", False),
                                  halo=2 if dgrad else 0, flip=dgrad, wtv=(wtv if wt3 else 1),
-                                 scale=osc)
+                                 scale=osc, amax=am1)
             sga = (SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16")
                    .ptr("W", "bf16").ptr("U", odt))
             if osc:
                 sga = sga.scalar("S", "f32")
+            if am1:
+                sga = sga.ptr("E", "i32")
             la = KernelLauncher(
                 hsaco=compile_kernel(ka, arch=arch).hsaco, kernel_name=ka.name,
                 signature=sga.build(),
@@ -339,12 +410,13 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         if aux[0] == "frel":
             aux[1]({"X": X, "X8": Xk, "W": W, "U": U, "F": Fl}, config=aux[2])
             return
+        ea = {"E": args["E"]} if bps == 1 else {}
         if aux[0] == "one":
-            aux[1]({"X": X, "X8": Xk, "W": W, "U": U, **({"S": SX} if osc else {})},
+            aux[1]({"X": X, "X8": Xk, "W": W, "U": U, **({"S": SX} if osc else {}), **ea},
                    config=aux[2])
             return
         if lay in ("c8", "r8"):
-            aux[0]({"X": X, "X8": Xk, **({"S": SX} if osc else {})}, config=aux[1])
+            aux[0]({"X": X, "X8": Xk, **({"S": SX} if osc else {}), **ea}, config=aux[1])
         aux[2]({"W": W, "U": U}, config=aux[3])
 
     def full():
@@ -458,6 +530,8 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         U.zero_()
         aux_only()
         torch.cuda.synchronize()
+        if bps == 1:
+            res["map_exact"] = bool(torch.equal(args["E"], E_ref))
         res["aux_exact"] = bool(torch.equal(Xk, X8r)) and bool(
             (U.float() - Ur.float()).abs().max().item() <= 1e-3 * Ur.float().abs().max().item()
         )
@@ -487,6 +561,19 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
             del Yc, hal
         else:
             Yv = Y.float()
+        if bpo:  # the output map this producer wrote vs torch on its bf16 output
+            Yb = Yv.to(torch.bfloat16)
+            ZT_ = spec.z_tile
+            Dq = -(-spec.Do // ZT_) * ZT_
+            a_ = _absbits(Yb).reshape(spec.Do, spec.Ho // 2, 2, spec.Wo // 2, 2, K).amax(4).amax(2)
+            a_ = a_.reshape(spec.Do, -1, K)
+            ntb_ = -(-a_.shape[1] // 32)
+            a_ = torch.nn.functional.pad(a_, (0, 0, 0, ntb_ * 32 - a_.shape[1], 0, Dq - spec.Do))
+            ref_eo = a_.reshape(-1, ZT_, ntb_, 32, K // spec.n_tile, spec.n_tile).amax(5).amax(3)
+            ref_eo = ref_eo.amax(1).reshape(-1)
+            d_ = EO.to(torch.int64) - ref_eo.to(torch.int64)
+            res["map_out_ok"] = bool((d_ >= 0).all().item() and (d_ <= 1).all().item())
+            del Yb, a_, ref_eo, d_
         err = (Yv - ref).abs()
         scale = max(ref.abs().max().item(), 1.0)
         rel = err.max().item() / scale

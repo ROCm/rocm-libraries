@@ -679,6 +679,27 @@ class WinogradYxSpec:
     # free): with a relayout that scales X by 1/OS (a power of two, exact) the f16 operands
     # stay in the f16 normal range for tiny tensors (dgrad's dY) -- per-tensor scaling
     oscale: bool = False
+    # Per-block power-of-two prescale, instead of a per-tensor oscale. Every
+    # workgroup scales its input by 2^-e before the f16 conversion and its output by 2^e
+    # (A^T coefficients, free), e = ceil(log2(amax)) + 2 - bps_l from the max |x| over its
+    # input region (planes z0 .. z0+ZT+1, its tile rows' input rows, all channels), so the
+    # transformed operands stay in the f16 normal range whatever the data magnitude (tiny
+    # gradients, large activations). amax comes from a map E (kernel argument, i32 per
+    # entry = max of the |x| bf16 bit patterns of the entry's voxels):
+    #   bps=1: one entry per relayout block (x_to_c8_lds with amax=True writes it): voxels
+    #          [j VB, (j+1) VB) of the unpadded source, which has a zero halo of bps_halo
+    #          (dgrad: 2) in this kernel's input coordinates;
+    #   bps=2: one entry per workgroup (zb, tb, nb) of the producer conv (bps_out), whose
+    #          yc8h output with halo bps_halo is this kernel's input (chained mode). The
+    #          producer's z_tile / n blocks: bps_pz / bps_pn (0: own z_tile / C // n_tile).
+    # Exact (power-of-two) and deterministic (max is order-free); entries are plain stores.
+    bps: int = 0
+    bps_halo: int = 0
+    bps_l: int = 14
+    bps_pz: int = 0
+    bps_pn: int = 0
+    # epilogue: write this workgroup's output amax entry (map layout bps=2) to EO
+    bps_out: bool = False
     # debugging / attribution only (wrong results): "nofill" skips the LDS fill,
     # "nomfma" skips the MFMAs, "nowait" uses no barriers in the main loop
     dbg: str = ""
@@ -756,6 +777,10 @@ class WinogradYxSpec:
             *(["crop"] if self.yc8h_crop else []),
             *([f"ks{self.ksplit}"] if self.ksplit != 1 else []),
             *(["os"] if self.oscale else []),
+            *([f"bps{self.bps}h{self.bps_halo}" + (f"l{self.bps_l}" if self.bps_l != 14 else "")
+               + (f"p{self.bps_pz}n{self.bps_pn}" if self.bps == 2 else "")]
+              if self.bps else []),
+            *(["bpo"] if self.bps_out else []),
             *([f"dbg{self.dbg}"] if self.dbg else []),
         )
 
@@ -816,6 +841,13 @@ def is_valid_yx_spec(spec: WinogradYxSpec) -> Tuple[bool, str]:
                              or not spec.nfast or spec.persist or spec.frel
                              or spec.single_buf or spec.b16 or spec.boff or spec.ksplit < 1):
         return False, "ksplit: lds16 nfast epi_vec NDHWC, z_tile | Do, ksplit | C/8"
+    if (spec.bps or spec.bps_out) and (
+            spec.stage != "lds16" or spec.single_buf or spec.b16 or spec.frel or spec.persist
+            or spec.fhalf or spec.bf_fill or spec.bshare or not spec.epi_vec
+            or spec.bps not in (0, 1, 2) or spec.bps_halo < 0 or spec.waves > 8):
+        return False, "bps: plain double-buffered lds16 epi_vec (no fhalf / bf_fill / frel)"
+    if spec.bps_out and not spec.yc8h:
+        return False, "bps_out writes the next layer's map: yc8h output only"
     if spec.yc8h_crop and not spec.yc8h:
         return False, "yc8h_crop needs yc8h"
     if spec.epi16 and not spec.yc8h:
@@ -948,7 +980,7 @@ def _pack4_f16_rtz(b, vals):
 
 def _yx_epilogue(
     b, spec, acc, wave, lane, kq, tb, z0, n_glob, Y, lds_flat=None, zt_w=None, wb=None,
-    zh=None, gpr=None, ks_i=None, oscale=None,
+    zh=None, gpr=None, ks_i=None, oscale=None, amax_out=None,
 ):
     """``zt_w``: output planes of this wave (default z_tile); ``wb``: the wave's y-point
     index b (default ``wave``); ``zh``: its z group (waves zh*4 .. zh*4+3 combine)."""
@@ -998,6 +1030,8 @@ def _yx_epilogue(
         ld.n_base = b.sub(n_glob, b.mod(lane, ci(32)))
         ld.lane = lane
         ld.ks_i = ks_i
+        if amax_out is not None:
+            ld.amax = [ci(0)]
     oy = b.div(wb, ci(2))
     ih = b.mod(wb, ci(2))
     # AT[oy][bb] as wave-uniform f32 coefficients
@@ -1021,7 +1055,10 @@ def _yx_epilogue(
     if gpr is None or gpr >= groups:
         _yx_epi_rounds(b, spec, ZT, pxs, st, ld, wave, wbase, ih, oy, coef, kq, tb, z0,
                        n_glob, ry, None)
+        if amax_out is not None:
+            _yx_amax_store(b, spec, ld.amax[0], amax_out)
         return
+    assert amax_out is None, "bps_out: waves <= 8"
     # Groups (4 waves each) take turns in LDS, gpr groups per round.
     grp = b.div(wave, ci(4))
     for r in range(-(-groups // gpr)):
@@ -1092,6 +1129,8 @@ def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry):
                     out = (b.vector_mul(cvec[bb], pv) if out is None
                            else b.vector_fma(cvec[bb], pv, out))
                 xo = b.add(b.mul(ttx, ci(2)), ci(ox))
+                if hasattr(ld, "amax"):
+                    _yx_amax_acc(b, ld, out, tt, spec)
                 if getattr(spec, "yc8h", False):
                     # [K/8][Do+2][Ho+2][Wo+2][8], interior: channel kk = n_base + 4 nq
                     kb = b.add(b.div(ld.n_base, ci(8)), b.div(nq, ci(2)))
@@ -1144,6 +1183,40 @@ def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry):
                 # out-of-range z (last block when z_tile does not divide Do) is dropped
                 yoff = _yx_lin_mask(b, spec, tt, yoff, 1)
                 b.buffer_store_bf16(ry, b.mul(yoff, ci(2)), ci(0), b.trunc_f32_to_bf16(out))
+
+
+def _yx_amax_acc(b, ld, vec4, tt, spec):
+    """bps_out: running max of the |f32| bit patterns of this lane's stored outputs (tiles
+    past the plane's end under lin are excluded)."""
+    ci = b.const_i32
+    vi = b.vec_bitcast(vec4, VectorType(I32, 4))
+    m = ld.amax[0]
+    for q in range(4):
+        a = b.land(b.vec_extract(vi, q), ci(0x7FFFFFFF))
+        if getattr(spec, "lin", False) and spec.tiles2d % spec.tiles_per_wg:
+            a = b.select(b.cmp_lt(tt, ci(spec.tiles2d)), a, ci(0))
+        m = b.smax(m, a)
+    ld.amax[0] = m
+
+
+def _yx_amax_store(b, spec, m, amax_out):
+    """bps_out: the workgroup's output amax as a bf16 |x| pattern rounded up (an upper bound
+    of every stored bf16 value), stored to EO[entry] by thread 0 (plain store, no atomics)."""
+    ci = b.const_i32
+    EO, entry, lds, slot0, wave, tid = amax_out
+    wm = b.readfirstlane(b.wave_reduce(m, "max"))
+    b.sync()  # the slots reuse the epilogue's staging area: every wave is done reading it
+    with b.scf_if(b.cmp_eq(b.mod(tid, ci(64)), ci(0))):
+        b.smem_store_vN_f32(lds, [b.add(ci(slot0), wave)], b.bitcast(wm, F32), 1)
+    b.sync()
+    with b.scf_if(b.cmp_eq(tid, ci(0))):
+        mx = ci(0)
+        for w in range(spec.waves):
+            v = b.bitcast(b.vec_extract(b.smem_load_vN_f32(lds, ci(slot0 + w), n=1), 0), I32)
+            mx = b.smax(mx, v)
+        hi = b.lshr(mx, ci(16))
+        up = b.select(b.cmp_ne(b.land(mx, ci(0xFFFF)), ci(0)), ci(1), ci(0))
+        b.global_store(EO, entry, b.smin(b.add(hi, up), ci(0x7F80)), align=4)
 
 
 def _yx_crop_mask(b, spec, zz, yo, xo, off, unit):
@@ -1209,6 +1282,9 @@ def _yx_epi_store16(b, spec, zo, ld, wbase, ih, oy, coef, tb, z0, ry):
             ob = b.vector_mul(cvec[bb], pb) if ob is None else b.vector_fma(cvec[bb], pb, ob)
         lo = b.select(is1, ob, oa)
         hi = b.select(is1, oa, ob)
+        if hasattr(ld, "amax"):
+            _yx_amax_acc(b, ld, lo, tt, spec)
+            _yx_amax_acc(b, ld, hi, tt, spec)
         hh = getattr(spec, "yc8h_halo", 1)
         vox = b.add(b.mul(b.add(b.mul(b.add(b.mul(
             kb, ci(spec.Do + 2 * hh)), b.add(zz, ci(hh))), ci(Ho + 2 * hh)),
@@ -1985,6 +2061,126 @@ def _yx_lds16_floats(spec) -> int:
     return f
 
 
+def _bps_block_rows(spec, tb):
+    """Input rows [r_lo, r_hi] (this kernel's coordinates) of tile block ``tb``."""
+    TX, TCx, TR = _yx_lds_geom(spec)
+    t0 = tb * spec.tiles_per_wg
+    if spec.lin:
+        tl = min(t0 + spec.tiles_per_wg - 1, spec.tiles2d - 1)
+        return 2 * (t0 // TX), 2 * (tl // TX) + 3
+    return 2 * (t0 // TX), 2 * (t0 // TX) + 2 * TR + 1
+
+
+def _bps_plane_range(spec, zi, r_lo, r_hi):
+    """Map entries [e_lo, e_hi] holding input plane ``zi``, rows [r_lo, r_hi] (python ints;
+    None when the plane is all halo). Mirrors _bps_scales' device arithmetic."""
+    h = spec.bps_halo
+    if spec.bps == 1:
+        Ds, Hs, Ws = spec.Di - 2 * h, spec.Hi - 2 * h, spec.Wi - 2 * h
+        zs, ylo, yhi = zi - h, max(r_lo - h, 0), min(r_hi - h, Hs - 1)
+        if not (0 <= zs < Ds) or ylo > yhi:
+            return None
+        vb = _x8_vb(spec.C)
+        return ((zs * Hs + ylo) * Ws) // vb, ((zs * Hs + yhi + 1) * Ws - 1) // vb
+    Do, Ho, Wo = spec.Di - 2 * h, spec.Hi - 2 * h, spec.Wi - 2 * h
+    TXp = Wo // 2
+    ntbp = -(-(Ho // 2) * TXp // 32)
+    ZTp = spec.bps_pz or spec.z_tile
+    NBp = spec.bps_pn or spec.C // spec.n_tile
+    zo, ylo, yhi = zi - h, max(r_lo - h, 0), min(r_hi - h, Ho - 1)
+    if not (0 <= zo < Do) or ylo > yhi:
+        return None
+    tba, tbb = ((ylo // 2) * TXp) // 32, ((yhi // 2 + 1) * TXp - 1) // 32
+    zb = zo // ZTp
+    return (zb * ntbp + tba) * NBp, (zb * ntbp + tbb) * NBp + NBp - 1
+
+
+def _bps_maxe(spec) -> int:
+    """Most map entries one input plane of a block needs (compile-time bound)."""
+    mx = 1
+    for tb in range(_yx_ntb(spec)):
+        r_lo, r_hi = _bps_block_rows(spec, tb)
+        for zi in range(spec.Di):
+            rg = _bps_plane_range(spec, zi, r_lo, r_hi)
+            if rg is not None:
+                mx = max(mx, rg[1] - rg[0] + 1)
+    return mx
+
+
+def bps_map_entries(spec) -> int:
+    """Entries of the map a bps=2 consumer reads = workgroups of the producer (bps_out)."""
+    h = spec.bps_halo
+    Do, Ho, Wo = spec.Di - 2 * h, spec.Hi - 2 * h, spec.Wi - 2 * h
+    ntbp = -(-(Ho // 2) * (Wo // 2) // 32)
+    ZTp = spec.bps_pz or spec.z_tile
+    return (-(-Do // ZTp)) * ntbp * (spec.bps_pn or spec.C // spec.n_tile)
+
+
+def _bps_scales(b, spec, E, z0, tb, lane, n_entries):
+    """Per-block prescale: (s_in = 2^-e, s_out = 2^e) as wave-uniform f32 from the max of
+    the map entries covering this block's input region (every wave reduces it itself)."""
+    ci = b.const_i32
+    h = spec.bps_halo
+    NPL = spec.z_tile + 2
+    TX, TCx, TR = _yx_lds_geom(spec)
+    t0 = b.mul(tb, ci(spec.tiles_per_wg))
+    if spec.lin:
+        tl = b.smin(b.add(t0, ci(spec.tiles_per_wg - 1)), ci(spec.tiles2d - 1))
+        r_lo = b.mul(b.div(t0, ci(TX)), ci(2))
+        r_hi = b.add(b.mul(b.div(tl, ci(TX)), ci(2)), ci(3))
+    else:
+        r_lo = b.mul(b.div(t0, ci(TX)), ci(2))
+        r_hi = b.add(r_lo, ci(2 * TR + 1))
+    MAXE = _bps_maxe(spec)
+    re = b.buffer_rsrc(E, ci(n_entries * 4))
+    mx = ci(0)
+    for r in range(-(-NPL * MAXE // 64)):
+        idx = b.add(lane, ci(r * 64))
+        p_ = b.div(idx, ci(MAXE))
+        k_ = b.mod(idx, ci(MAXE))
+        zi = b.add(z0, p_)
+        if spec.bps == 1:
+            Ds, Hs, Ws = spec.Di - 2 * h, spec.Hi - 2 * h, spec.Wi - 2 * h
+            vb = _x8_vb(spec.C)
+            zs = b.sub(zi, ci(h))
+            ylo = b.smax(b.sub(r_lo, ci(h)), ci(0))
+            yhi = b.smin(b.sub(r_hi, ci(h)), ci(Hs - 1))
+            ok = b.land(b.land(b.cmp_ge(zs, ci(0)), b.cmp_lt(zs, ci(Ds))), b.cmp_le(ylo, yhi))
+            zsc = b.smax(zs, ci(0))
+            e_lo = b.div(b.mul(b.add(b.mul(zsc, ci(Hs)), ylo), ci(Ws)), ci(vb))
+            e_hi = b.div(b.sub(b.mul(b.add(b.add(b.mul(zsc, ci(Hs)), yhi), ci(1)), ci(Ws)),
+                               ci(1)), ci(vb))
+        else:
+            Do, Ho, Wo = spec.Di - 2 * h, spec.Hi - 2 * h, spec.Wi - 2 * h
+            TXp = Wo // 2
+            ntbp = -(-(Ho // 2) * TXp // 32)
+            ZTp = spec.bps_pz or spec.z_tile
+            NBp = spec.bps_pn or spec.C // spec.n_tile
+            zo = b.sub(zi, ci(h))
+            ylo = b.smax(b.sub(r_lo, ci(h)), ci(0))
+            yhi = b.smin(b.sub(r_hi, ci(h)), ci(Ho - 1))
+            ok = b.land(b.land(b.cmp_ge(zo, ci(0)), b.cmp_lt(zo, ci(Do))), b.cmp_le(ylo, yhi))
+            zb = b.div(b.smax(zo, ci(0)), ci(ZTp))
+            tba = b.div(b.mul(b.div(ylo, ci(2)), ci(TXp)), ci(32))
+            tbb = b.div(b.sub(b.mul(b.add(b.div(yhi, ci(2)), ci(1)), ci(TXp)), ci(1)), ci(32))
+            base = b.mul(zb, ci(ntbp))
+            e_lo = b.mul(b.add(base, tba), ci(NBp))
+            e_hi = b.add(b.mul(b.add(base, tbb), ci(NBp)), ci(NBp - 1))
+        ent = b.add(e_lo, k_)
+        ok = b.land(b.land(ok, b.cmp_lt(p_, ci(NPL))), b.cmp_le(ent, e_hi))
+        off = b.select(ok, b.mul(ent, ci(4)), ci(n_entries * 4))
+        v = b.vec_extract(b.buffer_load_vN(re, off, ci(0), I32, 1), 0)
+        mx = b.smax(mx, v)
+    mx = b.readfirstlane(b.wave_reduce(mx, "max"))
+    bexp = b.land(b.lshr(mx, ci(7)), ci(0xFF))
+    e = b.sub(bexp, ci(126 - 2 + spec.bps_l))  # ceil(log2 amax) + log2(beta=4) - L
+    e = b.select(b.cmp_eq(mx, ci(0)), ci(0), e)
+    e = b.smin(b.smax(e, ci(-120)), ci(120))
+    s_in = b.bitcast(b.shl(b.sub(ci(127), e), ci(23)), F32)
+    s_out = b.bitcast(b.shl(b.add(ci(127), e), ci(23)), F32)
+    return s_in, s_out
+
+
 def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     """F(2x2,3x3) on (y,x) + direct z with f16 staging (``stage="lds16"``).
 
@@ -2037,6 +2233,10 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     if spec.boff:
         BOFF = b.param("BOFF", I32)
     OS = b.param("OS", F32) if spec.oscale else None
+    E = b.param("E", PtrType(I32, "global"), noalias=True, readonly=True, align=4) \
+        if spec.bps else None
+    EO = b.param("EO", PtrType(I32, "global"), noalias=True, writeonly=True, align=4) \
+        if spec.bps_out else None
 
     ci = b.const_i32
     tid = b.thread_id_x()
@@ -2090,6 +2290,18 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     if spec.bf_fill:
         lds_words = max(lds_words, 2 * BUF + 8 * 2 * HC * 2)
     lds = b.smem_alloc(F32, [lds_words], name_hint="winoyx16_planes")
+    S_IN = S_OUT = None
+    if spec.bps:
+        if spec.bps == 1:
+            hh_ = spec.bps_halo
+            n_ent = x_to_c8_lds_grid(Di - 2 * hh_, Hi - 2 * hh_, Wi - 2 * hh_, C)[0]
+        else:
+            n_ent = bps_map_entries(spec)
+        S_IN, S_OUT = _bps_scales(b, spec, E, z0, tb, lane, n_ent)
+    if OS is not None and S_OUT is not None:
+        OS = b.fmul(OS, S_OUT)
+    elif S_OUT is not None:
+        OS = S_OUT
 
     xn = spec.xin == "ndhwc"
     r8 = spec.xin == "r8"
@@ -2204,6 +2416,8 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     def bf16x2_to_f32(d):
         lo = b.bitcast(b.shl(d, ci(16)), F32)
         hi = b.bitcast(b.land(d, ci(-65536)), F32)
+        if S_IN is not None:  # per-block prescale (exact: a power of two)
+            return [b.fmul(lo, S_IN), b.fmul(hi, S_IN)]
         return [lo, hi]
 
     def store_fill(raw, bufoff, pred=None):
@@ -2621,10 +2835,14 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
         b.sync()
         with b.scf_if(b.cmp_eq(wave, ci(0))):
             b.global_flag_store(Fl, pidr, ci(1))
+    amax_out = None
+    if spec.bps_out:
+        amax_out = (EO, b.add(b.mul(bid, ci(spec.K // spec.n_tile)), bid_n), lds, 0,
+                    wave, tid)
     _yx_epilogue(
         b, spec, acc, wave, lane, kq, tb, b.add(z0, b.mul(zh, ci(ZTW))), n_glob, Y,
         lds_flat=lds, zt_w=ZTW, wb=wb, zh=grp, gpr=2, ks_i=ks_i if KS > 1 else None,
-        oscale=OS,
+        oscale=OS, amax_out=amax_out,
     )
     b.ret()
     return b.kernel
@@ -2969,20 +3187,25 @@ def x_to_c8_grid(D, H, W, C):
 
 
 def build_x_to_c8_lds(D: int, H: int, W: int, C: int, block_bytes=None,
-                      halo: int = 0, scale: bool = False) -> KernelDef:
+                      halo: int = 0, scale: bool = False, amax: bool = False) -> KernelDef:
     """LDS-transposed X [D][H][W][C] -> X8 [C/8][D][H][W][8]: a block of VB voxels is read
     fully coalesced (16 B per lane, consecutive), transposed through LDS and written as
-    C/8 runs of VB * 16 contiguous bytes. Block 256, grid ceil(V / VB)."""
+    C/8 runs of VB * 16 contiguous bytes. Block 256, grid ceil(V / VB). ``amax``: also
+    E[block] = max of the |x| bf16 bit patterns of the block's voxels (the bps=1 map)."""
     V = D * H * W
     b = IRBuilder(f"wino_x_to_c8l_V{V}C{C}" + (f"_bb{block_bytes}" if block_bytes else "")
-                  + (f"_h{halo}" if halo else "") + ("_s" if scale else ""))
+                  + (f"_h{halo}" if halo else "") + ("_s" if scale else "")
+                  + ("_am" if amax else ""))
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     X8 = b.param("X8", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
     S = b.param("S", F32) if scale else None
-    lds = b.smem_alloc(F32, [_x_to_c8_lds_words(C, block_bytes)], name_hint="x8_t")
+    E = b.param("E", PtrType(I32, "global"), noalias=True, writeonly=True, align=4) \
+        if amax else None
+    lds = b.smem_alloc(F32, [_x_to_c8_lds_words(C, block_bytes) + (8 if amax else 0)],
+                       name_hint="x8_t")
     _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, b.block_id_x(), block_bytes, halo=halo,
-                      scale=S)
+                      scale=S, amax=E)
     b.ret()
     return b.kernel
 
@@ -2999,7 +3222,7 @@ def _x_to_c8_lds_words(C, block_bytes=None):
 
 
 def _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, blk, block_bytes=None, vlim=None,
-                      nthr=256, halo=0, scale=None):
+                      nthr=256, halo=0, scale=None, amax=None):
     """``halo``: X8 is [C/8][D+2h][H+2h][W+2h][8] and only its interior is written (the
     caller zeroes the halo once) -- dgrad's dY padded by 2 for the flipped-weight conv."""
     V = D * H * W
@@ -3022,10 +3245,28 @@ def _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, blk, block_bytes=None, vlim=Non
         cb = b.mod(e, ci(NCB))
         goff = b.add(b.mul(b.add(v0, vl), ci(C * 2)), b.mul(cb, ci(16)))
         val = b.buffer_load_vN(rx, goff, ci(0), I32, 4)
+        if amax is not None:  # max |x| bit pattern (16-bit halves, sign cleared)
+            for q in range(4):
+                a_ = b.land(b.vec_extract(val, q), ci(0x7FFF7FFF))
+                a_ = b.smax(b.land(a_, ci(0xFFFF)), b.lshr(a_, ci(16)))
+                am_ = b.select(ok, b.smax(am_, a_), am_) if (r or q) else b.select(ok, a_, ci(0))
         with b.scf_if(ok):
             b.smem_store_vN_f32(lds, [b.mul(b.add(b.mul(cb, ci(VB)), vl), ci(4))],
                                 b.vec_bitcast(val, VectorType(F32, 4)), 4)
+    if amax is not None:
+        slot0 = _x_to_c8_lds_words(C, block_bytes)
+        wm = b.readfirstlane(b.wave_reduce(am_, "max"))
+        with b.scf_if(b.cmp_eq(b.mod(tid, ci(64)), ci(0))):
+            b.smem_store_vN_f32(lds, [b.add(ci(slot0), b.div(tid, ci(64)))],
+                                b.bitcast(wm, F32), 1)
     b.sync()
+    if amax is not None:
+        with b.scf_if(b.cmp_eq(tid, ci(0))):
+            mx_ = ci(0)
+            for w in range(nthr // 64):
+                mx_ = b.smax(mx_, b.bitcast(b.vec_extract(
+                    b.smem_load_vN_f32(lds, ci(slot0 + w), n=1), 0), I32))
+            b.global_store(amax, blk, mx_, align=4)
     for r in range(-(-n16 // nthr)):
         e = b.add(tid, ci(r * nthr))  # element in output order: (cb, v_local)
         ok = b.cmp_lt(e, ci(n16))
@@ -3340,7 +3581,8 @@ def yx_weight_transform_v2_grid(K, C):
 
 def build_yx_aux(D: int, H: int, W: int, C: int, K: int, *, out_dtype: str = "f16",
                  fold: bool = False, rev: bool = False, halo: int = 0,
-                 flip: bool = False, wtv: int = 1, scale: bool = False) -> KernelDef:
+                 flip: bool = False, wtv: int = 1, scale: bool = False,
+                 amax: bool = False) -> KernelDef:
     """One launch for both auxiliary passes of the yx kernel: blocks [0, NX) relayout X to c8
     (LDS-transposed), blocks [NX, NX + NW) transform the weights -- the two run side by side
     instead of back to back. Signature (X, X8, W, U); grid yx_aux_grid()."""
@@ -3350,20 +3592,24 @@ def build_yx_aux(D: int, H: int, W: int, C: int, K: int, *, out_dtype: str = "f1
     nx = x_to_c8_lds_grid(D, H, W, C)[0]
     b = IRBuilder(f"wino_yx_aux_V{D * H * W}C{C}K{K}_{out_dtype}{'_fold' if fold else ''}"
                   f"{'_rev' if rev else ''}{f'_h{halo}' if halo else ''}{'_flip' if flip else ''}"
-                  f"{'_wt3' if wtv == 3 else ''}{'_wt4' if wtv == 4 else ''}{'_s' if scale else ''}")
+                  f"{'_wt3' if wtv == 3 else ''}{'_wt4' if wtv == 4 else ''}{'_s' if scale else ''}"
+                  f"{'_am' if amax else ''}")
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     X8 = b.param("X8", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
     Wp = b.param("W", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     Uo = b.param("U", PtrType(odt, "global"), noalias=True, writeonly=True, align=16)
     S = b.param("S", F32) if scale else None
-    lds = b.smem_alloc(F32, [_x_to_c8_lds_words(C)], name_hint="x8_t")
+    E = b.param("E", PtrType(I32, "global"), noalias=True, writeonly=True, align=4) \
+        if amax else None
+    lds = b.smem_alloc(F32, [_x_to_c8_lds_words(C) + (8 if amax else 0)], name_hint="x8_t")
     ci = b.const_i32
     bid = b.block_id_x()
     with b.scf_if_else(b.cmp_lt(bid, ci(nx))) as (then_ctx, else_ctx):
         with then_ctx:
             _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C,
-                              b.sub(ci(nx - 1), bid) if rev else bid, halo=halo, scale=S)
+                              b.sub(ci(nx - 1), bid) if rev else bid, halo=halo, scale=S,
+                              amax=E)
         with else_ctx:
             if wtv in (3, 4):
                 _emit_yx_wt3(b, Wp, Uo, K, C, flip, b.sub(bid, ci(nx)), swz=wtv == 4)
