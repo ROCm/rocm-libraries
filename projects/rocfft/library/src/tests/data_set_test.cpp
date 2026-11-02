@@ -1238,11 +1238,10 @@ TEST_F(data_set_test, offsets_enforce_invariant)
         else
         {
             EXPECT_EQ(data_set.get_offset(), 3u);
-            EXPECT_THROW(with_type(data_set_t({0, 0}, {4, 3}, {1, 4}),
-                                   type,
-                                   rocfft_precision_double,
-                                   {3, 5}),
-                         std::invalid_argument);
+            EXPECT_THROW(
+                with_type(
+                    data_set_t({0, 0}, {4, 3}, {1, 4}), type, rocfft_precision_double, {3, 5}),
+                std::invalid_argument);
         }
     }
 }
@@ -1346,7 +1345,7 @@ TEST_F(data_set_test, offsets_inplace_mapping)
     const auto herm      = with_type(data_set_t::default_full_range({9}, 4),
                                 rocfft_array_type_hermitian_interleaved,
                                 rocfft_precision_single,
-                                     {5, 0});
+                                {5, 0});
     const auto from_herm = herm.get_other_inplace_data_set_for(io_data_label::OUTPUT,
                                                                rocfft_transform_type_real_inverse);
     ASSERT_TRUE(from_herm.has_value());
