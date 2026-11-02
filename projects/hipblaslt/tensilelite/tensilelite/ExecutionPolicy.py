@@ -116,6 +116,16 @@ def usesStreamKArrivalFixup(debugStreamK, hasSAtomic, prefetchAcrossPersistent):
     return debugStreamK == 0 and bool(hasSAtomic) and not prefetchAcrossPersistent
 
 
+def usesStreamKDynamicParallel(debugStreamK, streamKAtomic, prefetchAcrossPersistent):
+    """Whether a StreamK Hybrid kernel can reduce its dynamic sub-mode's split
+    tiles in parallel (PostGSU) instead of by last arrival. The parts store
+    through the non-atomic static parallel path; PAP's prefetch detects parallel
+    reduction by AddressFlags == 0, which the work queues keep non-zero; and
+    DebugStreamK keeps its debug fixups. Shared by
+    StreamKHybrid.usesDynamicParallel and SupportStreamKDynamicParallel."""
+    return debugStreamK == 0 and not streamKAtomic and not prefetchAcrossPersistent
+
+
 def requiresPartialReduction(state):
     return isStreamK(state) and not state.get("StreamKAtomic", 0)
 

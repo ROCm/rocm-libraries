@@ -352,6 +352,35 @@ namespace TensileLite
                    || (sizeMapping.hasHybridAssignment() && effectiveDynamic);
         }
 
+        // Dynamic work-queue launches run tree reduction unless the
+        // decomposition chose parallel (StreamKDynamicSplit::parallel).
+        inline bool streamKDynamicParallel(PersistentLaunchSettings const& launch)
+        {
+            return launch.reduction == origami::reduction_t::parallel
+                   && launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue;
+        }
+
+        // Static parallel reduction passes Flags == nullptr, which is how its
+        // kernels tell it from tree reduction; the dynamic path keeps the Flags
+        // for its work queues and signals parallel reduction with a mode bit.
+        inline bool streamKParallelWithoutFlags(PersistentLaunchSettings const& launch)
+        {
+            return launch.reduction == origami::reduction_t::parallel
+                   && !streamKDynamicParallel(launch);
+        }
+
+        // Parts per tile of a parallel reduction, the gsu of its PostGSU kernel.
+        inline size_t streamKParallelSplit(ContractionSolution const&          solution,
+                                           ContractionSolution::Problem const& problem,
+                                           Hardware const&                     hardware,
+                                           PersistentLaunchSettings const&     launch,
+                                           size_t                              tiles)
+        {
+            if(streamKDynamicParallel(launch))
+                return solution.streamKDynamicDecomposition(problem, hardware, tiles).skSplit;
+            return tiles > 0 ? launch.grid / tiles : 0;
+        }
+
         // Work item i sits in queue i % numQueues, and a workgroup pops only its
         // home queue (rank % numQueues) or, with stealing, the next one. A queue
         // without a home workgroup is never drained, and the counters' auto-reset
@@ -482,10 +511,16 @@ namespace TensileLite
         // Every tile whole, packed with split 2.
         const StreamKDynamicSplit whole = decompose(0, 2);
 
-        // The partials a split needs must fit the workspace and the flag region.
-        auto fits = [&](size_t skTiles, size_t split) {
+        // Parallel reduction needs every tile split into at least two parts.
+        auto parallelFor = [&](StreamKDynamicSplit const& d) {
+            return in.allowParallel && d.skTiles > 0 && d.skTiles == in.tiles && d.skSplit >= 2;
+        };
+
+        // The partials a split needs must fit the workspace and, for the
+        // arrival fixup, the flag region.
+        auto fits = [&](size_t skTiles, size_t split, bool parallel) {
             const size_t slots = skTiles * split;
-            return slots <= in.flagSlots
+            return (parallel || slots <= in.flagSlots)
                    && slots * in.partialTileBytes <= in.workspaceBytes;
         };
 
@@ -494,28 +529,50 @@ namespace TensileLite
             const size_t skTiles
                 = std::min(in.tiles, size_t(in.overrideTiles > -1 ? in.overrideTiles : 0));
             StreamKDynamicSplit d = decompose(skTiles, in.overrideSplit > -1 ? in.overrideSplit : 2);
+            d.parallel            = parallelFor(d);
             // Uniform summation order ignores overrides that split only some
             // tiles, or split where the gate below would not.
             if(!in.uniformSummationOrder || d.skTiles == 0
-               || (streamKDynamicSplitRowUniform(d, in.tiles) && in.allowSplit))
+               || (streamKDynamicSplitRowUniform(d, in.tiles) && (in.allowSplit || d.parallel)))
             {
-                if(d.skTiles > 0 && !fits(d.skTiles, d.skSplit))
+                if(d.skTiles > 0 && !fits(d.skTiles, d.skSplit, d.parallel))
                     return whole;
                 return d;
             }
         }
 
-        if(!in.allowSplit || in.tiles == 0 || in.splitCUs == 0 || in.tiles >= in.splitCUs)
+        if((!in.allowSplit && !in.allowParallel) || in.tiles == 0 || in.splitCUs == 0
+           || in.tiles >= in.splitCUs)
             return whole;
 
-        // Largest factor that fits (origami grid_k_split_aware).
+        // Parallel where origami select_reduction picks it, with its split
+        // shrunk to the workspace.
+        if(in.allowParallel && in.tiles <= in.splitCUs / StreamKDynamicParallelCUsPerTile
+           && itersPerTile >= StreamKDynamicParallelMinIters)
+        {
+            size_t split = std::min(in.splitCUs / in.tiles,
+                                    itersPerTile / StreamKDynamicMinItersPerWI);
+            if(in.partialTileBytes > 0)
+                split = std::min(split, in.workspaceBytes / (in.tiles * in.partialTileBytes));
+            if(split >= 2)
+            {
+                StreamKDynamicSplit d = decompose(in.tiles, split);
+                d.parallel            = parallelFor(d);
+                if(d.parallel && fits(d.skTiles, d.skSplit, true))
+                    return d;
+            }
+        }
+        if(!in.allowSplit)
+            return whole;
+
+        // Arrival fixup: largest factor that fits (origami grid_k_split_aware).
         for(const size_t split : StreamKDynamicSplitFactors)
         {
             if(in.tiles * split > in.splitCUs
                || itersPerTile / split < StreamKDynamicMinItersPerWI)
                 continue;
             const StreamKDynamicSplit d = decompose(in.tiles, split);
-            if(d.skSplit >= 2 && fits(d.skTiles, d.skSplit))
+            if(d.skSplit >= 2 && fits(d.skTiles, d.skSplit, false))
                 return d;
         }
         return whole;
@@ -1387,7 +1444,7 @@ namespace TensileLite
                 // which is what keeps two concurrent Stream-K kernels from clearing
                 // each other's flags.
                 args.template append<void const*>("ws", inputs.ws);
-                if(launch.reduction == origami::reduction_t::parallel)
+                if(streamKParallelWithoutFlags(launch))
                     args.template append<void*>("Flags", nullptr);
                 else
                     args.template append<void*>("Flags", inputs.Synchronizer);
@@ -1476,7 +1533,7 @@ namespace TensileLite
                 // For now grouped gemm is not supported and passes nullptr
                 TENSILE_ASSERT_EXC(hardware != nullptr);
 
-                if(launch.reduction == origami::reduction_t::parallel)
+                if(streamKParallelWithoutFlags(launch))
                     args.template append<void*>("Flags", nullptr);
                 else
                     args.template append<void*>("Flags", inputs.Synchronizer);
@@ -1586,14 +1643,24 @@ namespace TensileLite
 
                     // Slot 2 aliases MagicShiftItersPerTile on the static
                     // sub-path, whose top three bits are abit(31), the SK5 mode
-                    // bit(30) and the uniform-summation-order bit(29). The
-                    // dynamic sub-path never sets bit 29 -- the device reads 0
-                    // and takes the global mapping, which is all it has -- but
-                    // skTiles must still not collide with it. Free in practice:
-                    // dyn.skTiles <= tiles and a 2^29 tile count is unreachable.
+                    // bit(30) and the uniform-summation-order bit(29). In the
+                    // dynamic sub-mode bit 29 selects the parallel reduction
+                    // instead. skTiles must not collide with the three bits.
+                    // Free in practice: dyn.skTiles <= tiles and a 2^29 tile
+                    // count is unreachable.
                     TENSILE_ASSERT_EXC((dyn.skTiles & 0xE0000000u) == 0u
                                        && "SK5 SK4 skTiles collides with mode/magic bits");
                     uint32_t packedSkTiles = dyn.skTiles | 0x40000000u;
+                    if(dyn.parallel)
+                    {
+                        // Only for kernels that honour the bit, every tile split
+                        // and a launch sized for it (D/C are the workspace).
+                        TENSILE_ASSERT_EXC(internalArgsSupport.dynamicParallel
+                                           && dyn.skTiles == sk3_tiles && dyn.skSplit >= 2
+                                           && launch.reduction == origami::reduction_t::parallel
+                                           && "Hybrid dynamic parallel reduction not expressible");
+                        packedSkTiles |= 0x20000000u;
+                    }
 
                     args.template append<uint32_t>("ItersPerTile",
                                                    sk3_itersPerTile);
@@ -4386,6 +4453,7 @@ namespace TensileLite
                                                        ContractionInputs const&            inputs,
                                                        uint32_t const&        workspaceOffsetInByte,
                                                        KA&                    args,
+                                                       Hardware const&        hardware,
                                                        PersistentLaunchSettings const& sk,
                                                        uint32_t               autoGsuVal,
                                                        size_t                 resolvedGlobalAccumulation,
@@ -4580,7 +4648,7 @@ namespace TensileLite
             if(usesStreamKSpatialCluster())
                 gsu = sk.clusterSchedule.parallelSplits;
             else if(tiles > 0)
-                gsu = sk.grid / tiles;
+                gsu = static_cast<uint32_t>(streamKParallelSplit(*this, problem, hardware, sk, tiles));
         }
 
         args.template append<uint32_t>(concatenate_if<T_Debug>("gsu"), gsu);
@@ -4615,6 +4683,7 @@ namespace TensileLite
     KernelInvocation
         ContractionSolution::generateOutputConversionCall(Problem const&           problem,
                                                           ContractionInputs const& inputs,
+                                                          Hardware const&          hardware,
                                                           PersistentLaunchSettings const&   sk,
                                                           uint32_t                 autoGsuVal,
                                                           size_t resolvedGlobalAccumulation) const
@@ -4663,8 +4732,10 @@ namespace TensileLite
             // If using post kernel with stream-k then it is doing parallel reduciton
             // Calculate the splitting factor
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            gsu = usesStreamKSpatialCluster() ? sk.clusterSchedule.parallelSplits
-                                             : sk.grid / tiles;
+            gsu = usesStreamKSpatialCluster()
+                      ? sk.clusterSchedule.parallelSplits
+                      : static_cast<uint32_t>(
+                          streamKParallelSplit(*this, problem, hardware, sk, tiles));
         }
         rv.kernelName = outputConversionKernelName(problem, inputs, vw, gsu);
         int additionalPaddingPerBatchGeneralBatch = 0;
@@ -4683,7 +4754,7 @@ namespace TensileLite
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
-        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal,
+        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, hardware, sk, autoGsuVal,
                                           resolvedGlobalAccumulation,
                                           additionalPaddingPerBatchGeneralBatch);
 
@@ -4849,6 +4920,7 @@ namespace TensileLite
                                               inputs.grouped[idx],
                                               workspaceOffsetInByte,
                                               h_args,
+                                              hardware,
                                               sk,
                                               autoGsuVal,
                                               sizeMapping.globalAccumulation);
@@ -5601,7 +5673,11 @@ namespace TensileLite
             const size_t reductionTiles = usesStreamKSpatialCluster()
                 ? launch.clusterSchedule.blocks : tiles;
             if(launch.reduction == origami::reduction_t::parallel
-               && (reductionTiles == 0 || launch.grid / reductionTiles < 2))
+               && (reductionTiles == 0
+                   || (usesStreamKSpatialCluster()
+                           ? launch.grid / reductionTiles
+                           : streamKParallelSplit(*this, problem, hardware, launch, tiles))
+                          < 2))
             {
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
                                          "StreamK kernel with splitting factor < 2\n");
@@ -5661,10 +5737,10 @@ namespace TensileLite
         {
             if(debug)
                 rv.push_back(generateOutputConversionCall<true>(
-                    problem, inputs, launch, autoGsuVal, gsuSettings.globalAccumulation));
+                    problem, inputs, hardware, launch, autoGsuVal, gsuSettings.globalAccumulation));
             else
                 rv.push_back(generateOutputConversionCall<false>(
-                    problem, inputs, launch, autoGsuVal, gsuSettings.globalAccumulation));
+                    problem, inputs, hardware, launch, autoGsuVal, gsuSettings.globalAccumulation));
         }
 
         // The reduction of A is done in ConversionKernel when GSU > 1 in MultipleBuffer mode
@@ -6893,22 +6969,25 @@ namespace TensileLite
                                 sk.reduction,
                                 sizeMapping.hasHybridAssignment() ? &effectiveDynamic : nullptr,
                                 nullptr, nullptr, &sk.clusterGridClamp, &sk.selectedGrid);
-        // Same reconciliation, same helper, same triple as
-        // requiredWorkspaceSize(). Must run before the workspace-fit fallback
-        // below so that fallback sees the reduction the launch will use.
-        sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
-
-        // A dynamic split reserves one partial tile per part (see computeStreamKDecisions).
+        // A dynamic split reserves one partial tile per part (see
+        // computeStreamKDecisions) and already chose its reduction.
         if(!handwrittenCustomKernel()
            && streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
         {
             const StreamKDynamicSplit dyn = streamKDynamicDecomposition(problem, hardware, tiles);
             if(dyn.skTiles > 0)
             {
+                sk.reduction      = dyn.parallel ? origami::reduction_t::parallel
+                                                 : origami::reduction_t::tree;
                 sk.workspaceBytes = partialTileSize(dyn.partialSlots());
                 return sk;
             }
         }
+
+        // Same reconciliation, same helper, same triple as
+        // requiredWorkspaceSize(). Must run before the workspace-fit fallback
+        // below so that fallback sees the reduction the launch will use.
+        sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
@@ -7281,7 +7360,19 @@ namespace TensileLite
             const size_t tiles = usesStreamKSpatialCluster()
                 ? launch.clusterSchedule.blocks : problem.getNumTiles(sizeMapping, 1);
 
-            if(launch.reduction == origami::reduction_t::parallel)
+            const bool dynamicQueue = sizeMapping.hasDynamicAssignment() || effectiveDynamic;
+            if(launch.reduction == origami::reduction_t::parallel && dynamicQueue)
+            {
+                // Hybrid's dynamic parallel reduction splits every tile alike
+                // and PostGSU sums the parts in part order.
+                const StreamKDynamicSplit dyn = streamKDynamicDecomposition(problem, hardware, tiles);
+                if(!dyn.parallel || !streamKDynamicSplitRowUniform(dyn, tiles))
+                    return refuse("DynamicQueueSKTiles",
+                                  "the dynamic-queue StreamK parallel reduction is packing SKTiles="
+                                      + std::to_string(dyn.skTiles) + " of "
+                                      + std::to_string(tiles) + " tiles");
+            }
+            else if(launch.reduction == origami::reduction_t::parallel)
             {
                 // Parallel packs AddressFlags == 0 and does not use the tree
                 // static-split model. Admit only when the shared helper proves
@@ -7354,7 +7445,7 @@ namespace TensileLite
 
                 // The dynamic-queue variants are row-uniform while every output
                 // tile stays whole (SKTiles 0) or every tile splits alike.
-                if(sizeMapping.hasDynamicAssignment() || effectiveDynamic)
+                if(dynamicQueue)
                 {
                     const StreamKDynamicSplit dyn
                         = streamKDynamicDecomposition(problem, hardware, tiles);
@@ -8027,10 +8118,10 @@ namespace TensileLite
         //
         // Uniform summation order holds as every tile splits alike (skTiles ==
         // tiles, one SKSplit/SKItersPerWI) and sums its parts in part order:
-        // the fixup adds p0, p1, ... in turn, and partials are stored as the
-        // raw accumulator bits, so a last part 0/1 adding its registers
-        // matches a re-read. Not for atomic partials (arrival order), or
-        // 16-bit compute types under HPA, whose fixup widens the partial.
+        // the fixup and PostGSU both add p0, p1, ... in turn, and partials are
+        // stored as the raw accumulator bits, so a last part 0/1 adding its
+        // registers matches a re-read. Not for atomic partials (arrival order),
+        // or 16-bit compute types under HPA, whose fixup widens the partial.
         const bool uso = problem.getParams().uniformSummationOrder() != 0;
         const bool usoSafe
             = !uso
@@ -8038,10 +8129,18 @@ namespace TensileLite
                   && !(problemType.highPrecisionAccumulate
                        && (problemType.computeType == rocisa::DataType::Half
                            || problemType.computeType == rocisa::DataType::BFloat16)));
+        const bool splittable = streamKUsesDynamicQueue(sizeMapping, /*effectiveDynamic=*/true)
+                                && usoSafe && !problem.groupedGemm();
         in.uniformSummationOrder = uso;
-        in.allowSplit = internalArgsSupport.arrivalFixup
-                        && streamKUsesDynamicQueue(sizeMapping, /*effectiveDynamic=*/true)
-                        && usoSafe && !problem.groupedGemm();
+        in.allowSplit = internalArgsSupport.arrivalFixup && splittable;
+        // Parallel reduction (Hybrid only) stores through the static parallel
+        // reduction's D-is-workspace arguments (strided batches only); its
+        // bias-gradient and amaxD stores assume one tile per workgroup.
+        in.allowParallel = internalArgsSupport.dynamicParallel && splittable
+                           && sizeMapping.hasHybridAssignment() && problemType.stridedBatched
+                           && problem.batchMode() == ContractionProblemGemm::BATCHMODE::STRIDED
+                           && !(problemType.useGradient && problemType.useBias)
+                           && !problemType.outputAmaxD;
         // Arrival counters (and per-part flags) start after the queue counters.
         const size_t prefixEntries = streamKQueueRegionBytes(hardware) / sizeof(int);
         in.flagSlots = prefixEntries < StreamKFlagElements ? StreamKFlagElements - prefixEntries : 0;
@@ -8187,6 +8286,7 @@ namespace TensileLite
         {
             needPartials   = true;
             idealWorkspace = partialTileSize(dyn.partialSlots());
+            reduction = dyn.parallel ? origami::reduction_t::parallel : origami::reduction_t::tree;
         }
         else if(grid > 0
            && (reduction == origami::reduction_t::parallel
