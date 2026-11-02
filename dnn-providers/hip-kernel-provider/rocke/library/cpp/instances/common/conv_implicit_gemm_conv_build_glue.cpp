@@ -358,6 +358,19 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         /* Split-K launch block, appended after the problem block (conv_abi). */
         ctx->fwd_p_ks = rocke_b_param(b, "ks", rocke_i32(), NULL);
         ctx->fwd_p_ks_count = rocke_b_param(b, "ks_count", rocke_i32(), NULL);
+        if(spec->split_tail)
+            ctx->fwd_p_full_tiles = rocke_b_param(b, "full_tiles", rocke_i32(), NULL);
+        if(spec->split_det)
+        {
+            rocke_param_opts_t fo;
+            memset(&fo, 0, sizeof(fo));
+            fo.noalias = true;
+            fo.noalias_set = true;
+            ctx->fwd_p_sk_flags = rocke_b_param(
+                b, "sk_flags", rocke_ptr_type(b, rocke_i32(), "global"), &fo);
+            ctx->fwd_p_sk_partials = rocke_b_param(
+                b, "sk_partials", rocke_ptr_type(b, rocke_f32(), "global"), &fo);
+        }
     }
     ctx->fwd_split = spec->split_k > 1 && !ctx->fwd_asplit;
     if(ctx->fwd_split)
@@ -573,10 +586,31 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         rocke_value_t* mul_y = rocke_b_mul(b, bid_y, ctx->p_num_pid_n);
         rocke_value_t* bid_x = rocke_b_block_id_x(b);
         rocke_value_t* wgid_flat = rocke_b_add(b, mul_y, bid_x);
-        rocke_value_t* logical
-            = rocke_chiplet_transform_chunked_runtime(b, wgid_flat, num_wgs, spec->xcd_remap, NULL);
+        rocke_value_t* logical;
+        if(spec->split_tail)
+        {
+            /* Remap the full tiles among themselves only; the split tail keeps
+             * launch order. */
+            rocke_value_t* is_f = rocke_b_cmp_lt(b, wgid_flat, ctx->fwd_p_full_tiles);
+            rocke_value_t* rm = rocke_chiplet_transform_chunked_runtime(
+                b, wgid_flat, ctx->fwd_p_full_tiles, spec->xcd_remap, NULL);
+            logical = rocke_b_select(b, is_f, rm, wgid_flat);
+        }
+        else
+            logical = rocke_chiplet_transform_chunked_runtime(
+                b, wgid_flat, num_wgs, spec->xcd_remap, NULL);
         rocke_value_t* mt = rocke_b_div(b, logical, ctx->p_num_pid_n);
-        if(spec->m_band)
+        if(spec->m_band && spec->split_tail)
+        {
+            /* Band order over the full tiles' whole M rows only. */
+            rocke_value_t* is_f = rocke_b_cmp_lt(b, wgid_flat, ctx->fwd_p_full_tiles);
+            rocke_value_t* nmt = rocke_b_div(b, ctx->fwd_p_full_tiles, ctx->p_num_pid_n);
+            rocke_value_t* plane = rocke_b_mul(b, ctx->p_Ho, ctx->p_Wo);
+            rocke_value_t* bo
+                = rocke_conv_emit_m_band_order(b, mt, nmt, plane, ctx->block_m, NULL, spec->m_band);
+            mt = rocke_b_select(b, is_f, bo, mt);
+        }
+        else if(spec->m_band)
         {
             rocke_value_t* plane = rocke_b_mul(b, ctx->p_Ho, ctx->p_Wo);
             mt = rocke_conv_emit_m_band_order(
@@ -636,6 +670,22 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->fwd_slice_id = slice;
         ctx->kloop_k_lo = rocke_b_mul(b, slice, ctx->fwd_p_ks);
         ctx->kloop_k_hi = rocke_b_add(b, ctx->kloop_k_lo, ctx->fwd_p_ks);
+        if(spec->split_tail)
+        {
+            /* Launch-order tile index: the first full_tiles tiles run whole in
+             * slice 0; slices > 0 of them exit. */
+            rocke_value_t* by = rocke_b_block_id_y(b);
+            rocke_value_t* wy = rocke_b_mul(b, by, ctx->p_num_pid_n);
+            rocke_value_t* wg_lin = rocke_b_add(b, wy, rocke_b_block_id_x(b));
+            ctx->fwd_is_full = rocke_b_cmp_lt(b, wg_lin, ctx->fwd_p_full_tiles);
+            rocke_value_t* nz = rocke_b_cmp_ne(b, slice, ctx->c0);
+            rocke_if_t ex = rocke_b_scf_if(b, rocke_b_land(b, ctx->fwd_is_full, nz));
+            rocke_b_region_enter(b, ex.then_region);
+            rocke_b_ret(b);
+            rocke_b_region_leave(b);
+            ctx->kloop_k_lo = rocke_b_select(b, ctx->fwd_is_full, ctx->c0, ctx->kloop_k_lo);
+            ctx->kloop_k_hi = rocke_b_select(b, ctx->fwd_is_full, ctx->c_K_gemm, ctx->kloop_k_hi);
+        }
     }
     if(ctx->grouped)
     {

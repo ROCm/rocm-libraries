@@ -980,6 +980,28 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
             break;
         }
         return 0;
+    case 92:
+    case 93:
+    case 94:
+    case 95:
+    case 96:
+    case 97:
+        if(make_cfg_3d(idx == 94 ? 85 : (idx == 95 || idx == 96) ? 83 : 84, spec, arch) != 0)
+            return -1;
+        spec->split_tail = idx == 92 || idx == 93 || idx == 96;
+        spec->split_atomic_pairs = idx == 92 || idx == 93 || idx == 95;
+        spec->split_det = (idx == 92 || idx == 96) ? 2 : idx == 94 ? 1 : 0;
+        if(idx == 96)
+            spec->m_band = 32;
+        if(idx == 97)
+            spec->uk_chunk_group = 2;
+        return 0;
+    case 98:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->split_det = 2;
+        return 0;
     case 90:
         if(make_cfg_3d_base(54, spec, arch) != 0)
             return -1;

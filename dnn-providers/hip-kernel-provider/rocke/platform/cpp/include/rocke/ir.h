@@ -1078,6 +1078,14 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
                                  rocke_value_t* idx,
                                  rocke_value_t* expect,
                                  const char* scope);
+/* global_flag_wait_eq(..., ordering=): "acquire" (default, NULL) or
+ * "monotonic" (relaxed spin; the caller places one acquire fence after). */
+void rocke_b_global_flag_wait_eq_ord(rocke_ir_builder_t* b,
+                                     rocke_value_t* ptr,
+                                     rocke_value_t* idx,
+                                     rocke_value_t* expect,
+                                     const char* scope,
+                                     const char* ordering);
 
 /* ----- atomics ----- */
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
@@ -1703,6 +1711,14 @@ rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* soffset,
                                       const rocke_type_t* dtype,
                                       int n);
+/* buffer_load_vN(..., aux=): cache-policy bits of a >= 8-byte load (0 = none). */
+rocke_value_t* rocke_b_buffer_load_vN_aux(rocke_ir_builder_t* b,
+                                          rocke_value_t* rsrc,
+                                          rocke_value_t* voffset,
+                                          rocke_value_t* soffset,
+                                          const rocke_type_t* dtype,
+                                          int n,
+                                          int aux);
 rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
@@ -1811,6 +1827,14 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* soffset,
                                  rocke_value_t* value,
                                  int n);
+/* buffer_store_vN_f32(..., aux=): cache-policy bits (n >= 2; 0 = none). */
+void rocke_b_buffer_store_vN_f32_aux(rocke_ir_builder_t* b,
+                                     rocke_value_t* rsrc,
+                                     rocke_value_t* voffset,
+                                     rocke_value_t* soffset,
+                                     rocke_value_t* value,
+                                     int n,
+                                     int aux);
 /* Dtype-generic vectorised buffer store (Python IRBuilder.buffer_store_vN),
  * the store twin of rocke_b_buffer_load_vN: `value` is a vector of any scalar
  * whose width is whole bytes, 1, 2, 4, 8 or 16 bytes in all. Out-of-range

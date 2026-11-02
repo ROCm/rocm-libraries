@@ -180,6 +180,9 @@ typedef struct rocke_cshuffle_epilogue
      * exclusive LDS bytes (not aliased onto A/B) and the step-0 reuse barrier is
      * elided. Default false keeps the aliased/low-LDS behavior (byte-identical). */
     bool no_alias; /* default false */
+    /* atomic_store step 3 as lane-contiguous bf16 pairs (Python
+     * atomic_pair_lanes, the checked form). Default false. */
+    bool atomic_pair_lanes;
 } rocke_cshuffle_epilogue_t;
 
 /* Construct with the Python defaults (store_vec=8, smem_name_hint="C_smem",

@@ -904,6 +904,57 @@ static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
     rocke_b_sync(b);
 
     /* ---- step 3: atomic-adds from LDS. ---- */
+    if(epi->atomic_pair_lanes && _bf16_out)
+    {
+        /* Python _atomic_pairs -> _atomic_pairs_checked: bf16 pairs,
+         * lane-contiguous along N (one 4-byte LDS read per pair). */
+        const int thr = rocke_warp_grid_block_size(grid);
+        const int ppr = grid->tile_n / 2;
+        const int total = grid->tile_m * ppr;
+        if(grid->tile_n % 2 || total % thr)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "atomic_pair_lanes: tile does not distribute");
+            return;
+        }
+        /* _atomic_pairs binds c_threads / c_ppr, then _atomic_pairs_checked
+         * binds its own pair. */
+        (void)rocke_b_const_i32(b, thr);
+        (void)rocke_b_const_i32(b, ppr);
+        rocke_value_t* c_thr = rocke_b_const_i32(b, thr);
+        rocke_value_t* c_ppr = rocke_b_const_i32(b, ppr);
+        for(int e = 0; e < total / thr; ++e)
+        {
+            rocke_value_t* pidx = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_thr), grid->tid);
+            rocke_value_t* row = rocke_b_div(b, pidx, c_ppr);
+            rocke_value_t* cm = rocke_b_mod(b, pidx, c_ppr);
+            rocke_value_t* col = rocke_b_mul(b, cm, rocke_b_const_i32(b, 2));
+            rocke_value_t* m_val = rocke_b_add(b, grid->block_m_off, row);
+            rocke_value_t* n_even = rocke_b_add(b, grid->block_n_off, col);
+            rocke_value_t* m_ok = bounds_m ? rocke_b_cmp_lt(b, m_val, bounds_m) : NULL;
+            rocke_value_t* n_ok = NULL;
+            if(bounds_n)
+            {
+                rocke_value_t* n1 = rocke_b_add(b, n_even, rocke_b_const_i32(b, 1));
+                n_ok = rocke_b_cmp_lt(b, n1, bounds_n);
+            }
+            rocke_value_t* ok
+                = (m_ok && n_ok) ? rocke_b_land(b, m_ok, n_ok) : (m_ok ? m_ok : n_ok);
+            rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_even);
+            if(col_offset != NULL)
+                c_off = rocke_b_add(b, c_off, col_offset);
+            if(ok != NULL)
+            {
+                rocke_if_t if_op = rocke_b_scf_if(b, ok);
+                rocke_b_region_enter(b, if_op.then_region);
+            }
+            rocke_value_t* idx[2] = {row, col};
+            rocke_value_t* vec = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_bf16(), 2);
+            rocke_b_global_atomic_add_pk_bf16(b, dw_ptr, c_off, vec, NULL);
+            if(ok != NULL)
+                rocke_b_region_leave(b);
+        }
+        return;
+    }
     threads = rocke_warp_grid_block_size(grid);
     sv = epi->store_vec;
     if((grid->tile_n % sv) || ((grid->tile_m * grid->tile_n) / sv < threads)

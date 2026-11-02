@@ -1624,6 +1624,13 @@ void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
     u->is3 = is3;
     rocke_value_t* c_bk_mask = rocke_b_const_i32(b, ctx->block_k - 1);
     rocke_value_t* uk_ok = rocke_b_cmp_eq(b, rocke_b_land(b, ctx->p_cpg, c_bk_mask), c0);
+    if(ctx->fwd_asplit && spec->uk_chunk_group)
+    {
+        /* The split start decode below assumes whole channel groups. */
+        rocke_value_t* gm = rocke_b_const_i32(b, spec->uk_chunk_group * ctx->block_k - 1);
+        rocke_value_t* g_ok = rocke_b_cmp_eq(b, rocke_b_land(b, ctx->p_cpg, gm), c0);
+        uk_ok = rocke_b_land(b, uk_ok, g_ok);
+    }
     rocke_value_t* uk_hi = rocke_b_select(b, uk_ok, ctx->c_K_gemm, c0);
     u->a_ystep = rocke_b_mul(b, ctx->p_dH, ctx->p_A_stride_hi);
     u->a_xstep = rocke_b_mul(b, ctx->p_dW, ctx->p_A_stride_wi);
@@ -1652,7 +1659,25 @@ void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
     rocke_value_t* t_lo = rocke_b_div(b, k_lo, ctx->c_block_k);
     rocke_value_t* n_taps_xy = rocke_b_mul(b, ctx->p_X, ctx->p_Y);
     rocke_value_t *c_s, *x_s, *y_s, *z_s = NULL;
-    if(spec->uk_tap_fast)
+    if(spec->uk_tap_fast && spec->uk_chunk_group)
+    {
+        /* Grouped tap-fast order: uk_chunk_group chunks fastest, then the tap,
+         * then the next group (cpg a multiple of the group span). */
+        rocke_value_t* c_g = rocke_b_const_i32(b, spec->uk_chunk_group);
+        rocke_value_t* n_taps = rocke_b_mul(b, n_taps_xy, ctx->p_Z);
+        rocke_value_t* g_tiles = rocke_b_mul(b, n_taps, c_g);
+        rocke_value_t* grp = rocke_b_div(b, t_lo, g_tiles);
+        rocke_value_t* g_r = rocke_b_mod(b, t_lo, g_tiles);
+        rocke_value_t* tap = rocke_b_div(b, g_r, c_g);
+        rocke_value_t* gg = rocke_b_mul(b, grp, c_g);
+        rocke_value_t* gsum = rocke_b_add(b, gg, rocke_b_mod(b, g_r, c_g));
+        c_s = rocke_b_mul(b, gsum, ctx->c_block_k);
+        x_s = rocke_b_mod(b, tap, ctx->p_X);
+        y_s = rocke_b_mod(b, rocke_b_div(b, tap, ctx->p_X), ctx->p_Y);
+        z_s = rocke_b_div(b, tap, n_taps_xy);
+        z_s = rocke_b_select(b, rocke_b_cmp_ge(b, c_s, ctx->p_cpg), ctx->p_Z, z_s);
+    }
+    else if(spec->uk_tap_fast)
     {
         rocke_value_t* n_taps = rocke_b_mul(b, n_taps_xy, ctx->p_Z);
         rocke_value_t* tap = rocke_b_mod(b, t_lo, n_taps);

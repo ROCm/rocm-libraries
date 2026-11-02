@@ -369,6 +369,10 @@ typedef struct rocke_conv_build_ctx
      * follow the problem block and there is no workspace. Exclusive with
      * fwd_split (the two-stage workspace split). */
     bool fwd_asplit;
+    rocke_value_t* fwd_p_full_tiles; /* split_tail kernarg              */
+    rocke_value_t* fwd_is_full; /* split_tail: tile runs unsplit         */
+    rocke_value_t* fwd_p_sk_flags; /* split_det counters                */
+    rocke_value_t* fwd_p_sk_partials; /* split_det f32 partial slots    */
     rocke_value_t* fwd_p_ws;
     rocke_value_t* fwd_p_ws_bytes;
     rocke_value_t* fwd_p_ks;
@@ -963,7 +967,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        rocke_value_t* bound_n,
                                        /* atomic split: D and its row pitch (NULL => store) */
                                        rocke_value_t* atomic_d,
-                                       rocke_value_t* atomic_row_pitch);
+                                       rocke_value_t* atomic_row_pitch,
+                                       struct rocke_conv_build_ctx* sctx);
 
 /* ----- driver-internal ctx population (the build prologue, lines 787-1032) ----
  * Splitting the long prologue out of the public entry keeps the glue TU small;

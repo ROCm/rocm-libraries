@@ -459,7 +459,9 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->reg_prefetch > 0, "rpf%d", s->reg_prefetch);
     ROCKE_FLAG(s->xcd_remap > 0, "xcd%d", s->xcd_remap);
     ROCKE_FLAG(s->lds_xor, "lxor");
-    /* (pfr, spt, sakd, adir: Python-only, off.) */
+    /* (pfr: Python-only, off.) */
+    ROCKE_FLAG(s->split_tail, "spt");
+    /* (sakd, adir: Python-only, off.) */
     ROCKE_FLAG(s->uk_tap_fast, "tapf");
     ROCKE_FLAG(s->uk_chunk_group > 0, "cg%d", s->uk_chunk_group);
     /* (lah, dfr: Python-only, off.) */
@@ -471,10 +473,12 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->pp_pre_mfma > 0, "ppm%d", s->pp_pre_mfma);
     ROCKE_FLAG(s->pp_b_double, "ppbd");
     ROCKE_FLAG(s->lds_xor_rowkey, "lxrk");
-    /* (mch, xws, saa, sapl, sapf, esf, skx, fsk, sfs, szf, xsub, ppfd:
-     *  Python-only knobs, off.) */
+    /* (mch, xws, saa: Python-only knobs, off.) */
+    ROCKE_FLAG(s->split_atomic_pairs, "sapl");
+    /* (sapf, esf, skx, fsk, sfs, szf, xsub, ppfd: Python-only knobs, off.) */
     ROCKE_FLAG(s->fb_skip_empty, "fbse");
-    /* (ppeg, elb, shy, mss, stc, sdet: Python-only knobs, off.) */
+    /* (ppeg, elb, shy, mss, stc: Python-only knobs, off.) */
+    ROCKE_FLAG(s->split_det > 0, "sdet%d", s->split_det);
     ROCKE_FLAG(s->pp_split_fetch > 0, "psf%d", s->pp_split_fetch);
     /* (nag: Python-only, off.) */
     ROCKE_FLAG(s->m_band > 0, "mb%d", s->m_band);
@@ -1088,9 +1092,50 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                         "split_atomic selects the wave64 MFMA atomic split-K for a 2-D "
                         "problem: it needs split_k > 1, wave_size 64 and no split_k_cluster "
                         "(a 3-D split is always atomic)");
-    if(s->split_k == 1 || s->split_k == -1 || !rocke_conv_fwd_split_k_atomic(s)
+    const bool knobs = s->split_tail || s->split_atomic_pairs || s->split_det;
+    if(s->split_k == 1)
+    {
+        if(s->split_det)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split_xcd_remap / split_streamk / split_flag_store need the split-K "
+                            "binary");
+        if(s->split_atomic_pairs)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split_atomic_agent/split_atomic_pairs need the split-K binary "
+                            "(split_k > 1)");
+        if(s->split_tail)
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "split_tail needs the split-K binary (split_k > 1)");
+        return true;
+    }
+    if(s->split_k == -1 || !rocke_conv_fwd_split_k_atomic(s)
        || (s->pipeline != NULL && strcmp(s->pipeline, "wavelet") == 0))
+    {
+        if(knobs)
+            ROCKE_SPEC_FAIL(reason, reason_cap, "knobs of the wave64 MFMA atomic split-K forward");
         return true; /* not the atomic split: fwd_split_k_reason's */
+    }
+    {
+        const char* d = s->dtype_d ? s->dtype_d : "fp16";
+        if(s->split_det && (strcmp(d, "bf16") != 0 || s->split_det < 1 || s->split_det > 3))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split_det: plain / split_tail / split_hybrid grids, bf16 D, no other "
+                            "split store");
+        if(s->split_det == 3)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split_det 3 (slab store + fold) is not ported to the C engine");
+        if(s->split_atomic_pairs && strcmp(d, "bf16") != 0)
+            ROCKE_SPEC_FAIL(reason, reason_cap, "split_atomic_pairs is the bf16 atomic store only");
+        if(s->split_tail && s->chiplet_swizzle)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split_tail keeps the tail in launch order; use xcd_remap, not "
+                            "chiplet_swizzle");
+    }
     if(s->split_k < 1)
         ROCKE_SPEC_FAIL(reason, reason_cap, "split_k must be >= 1 (got %d)", s->split_k);
     if(s->epilogue == NULL || strcmp(s->epilogue, "cshuffle") != 0)
@@ -1181,7 +1226,7 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             "uk_chunk_group groups the chunks of the uk_tap_fast order only");
         if(g < 2 || (g & (g - 1)))
             ROCKE_SPEC_FAIL(reason, reason_cap, "uk_chunk_group must be a power of two >= 2");
-        if(s->split_k > 1) /* the uk_nopad rpf_pingpong loops only (not ported) */
+        if(s->split_k > 1 && !(s->uk_nopad && s->rpf_pingpong))
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "uk_chunk_group with split_k: the uk_nopad rpf_pingpong loops only");

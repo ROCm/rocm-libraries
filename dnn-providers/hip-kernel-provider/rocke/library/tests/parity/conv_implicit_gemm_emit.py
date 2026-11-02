@@ -980,6 +980,13 @@ _GFX942_3D_OFFSET = 32
 #   89: 83 + rpf_pingpong=5, vmem_interleave=5, pp_split_fetch=10
 #   90: 54 + compv3, reg_prefetch=1, vmem_interleave=2, rpf_setprio=1
 #   91: 83 + rpf_pingpong=5 without vmem_interleave: rejected by both engines
+#   92: 84 + split_tail, split_atomic_pairs, split_det=2
+#   93: 84 + split_tail, split_atomic_pairs (atomic pair stores, plain stores of full tiles)
+#   94: 85 + split_det=1
+#   95: 83 + split_atomic_pairs
+#   96: 83 + split_tail, split_det=2, m_band=32
+#   97: 84 + uk_chunk_group=2 (split slices in the grouped tap order)
+#   98: 54 + split_k=2, split_det=2 (fp16 D): rejected by both engines
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1071,6 +1078,17 @@ def _gfx942_3d_spec(idx: int):
         89: dict(rpf_pingpong=5, vmem_interleave=5, pp_split_fetch=10),
         91: dict(rpf_pingpong=5),
     }
+    _p84 = dict(rpf_pingpong=5, vmem_interleave=5, pp_b_double=True, pp_split_fetch=3)
+    _p85 = dict(rpf_pingpong=5, vmem_interleave=6, pp_b_double=True, pp_split_fetch=4)
+    _pp.update({
+        92: dict(_p84, split_tail=True, split_atomic_pairs=True, split_det=2),
+        93: dict(_p84, split_tail=True, split_atomic_pairs=True),
+        94: dict(_p85, split_det=1),
+        95: dict(split_atomic_pairs=True),
+        96: dict(split_tail=True, split_det=2, m_band=32),
+        97: dict(_p84, uk_chunk_group=2),
+    })
+    knobs[98] = (54, dict(split_k=2, split_det=2))
     if idx in _pp:
         knobs[idx] = (55, dict(_s3, **_pp[idx]))
     extra = {}
