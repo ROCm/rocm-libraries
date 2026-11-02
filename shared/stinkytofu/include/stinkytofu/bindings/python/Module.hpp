@@ -154,7 +154,7 @@
     X(QueueStartForceWmmaBurst, bool,                                                              \
       false)                           /* loop head / barrier wait burst ignores ds windows */     \
     X(QueueStartBurstEveryRegion, bool,                                                            \
-      false) /* with QueueStartForceWmmaBurst, burst at every WMMA region start */                 \
+      false) /* burst at every WMMA region start, not only loop head / barrier wait */             \
     X(QueueStartMinWmmaBurst, int, -1) /* forced burst min WMMAs: 1..depth, -1 = depth */          \
     X(QueueStartCalibratedIssueCycles, int, 0) /* forced burst: cycles per pick; 0 = off */        \
     X(MergeDscnt, bool, true) /* forced burst: one wait before the run; false = one per WMMA */    \
