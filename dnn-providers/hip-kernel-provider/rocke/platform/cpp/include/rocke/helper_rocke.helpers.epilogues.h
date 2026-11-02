@@ -183,6 +183,12 @@ typedef struct rocke_cshuffle_epilogue
     /* atomic_store step 3 as lane-contiguous bf16 pairs (Python
      * atomic_pair_lanes, the checked form). Default false. */
     bool atomic_pair_lanes;
+    /* Stage the C tile in m_chunks slabs of tile_m / m_chunks rows (Python
+     * m_chunks; MFMA bf16 / fp32-store output). Default 1 (0 reads as 1). */
+    int m_chunks;
+    /* Workgroup barriers of the epilogue as LDS-only barriers (Python
+     * lds_barriers -> sync_lds_only). Default false. */
+    bool lds_barriers;
 } rocke_cshuffle_epilogue_t;
 
 /* Construct with the Python defaults (store_vec=8, smem_name_hint="C_smem",

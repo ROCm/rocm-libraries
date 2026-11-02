@@ -301,6 +301,12 @@ typedef struct rocke_implicit_gemm_conv_spec
      * partials through agent-coherent (SC1) buffer accesses. Appends sk_flags
      * and sk_partials. 3 (per-slice slabs + a separate fold) is Python-only. */
     int split_det; /* default 0 */
+
+    /* cshuffle_m_chunks: stage the cshuffle C tile in that many row slabs
+     * (bf16 wave64 MFMA cshuffle). Default 1 (0 reads as 1). */
+    int cshuffle_m_chunks; /* default 1 */
+    /* epi_lds_barriers: the cshuffle epilogue's barriers as LDS-only ones. */
+    bool epi_lds_barriers; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

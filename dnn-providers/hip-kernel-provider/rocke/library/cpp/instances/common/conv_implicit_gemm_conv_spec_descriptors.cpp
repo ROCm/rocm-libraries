@@ -303,6 +303,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.group_merge = 1; /* inert: every merged-aware site reduces to the unmerged form */
     s.split_k = 1; /* inert: the plain (unsplit) forward binary */
     s.split_k_cluster = 0;
+    s.cshuffle_m_chunks = 1;
 
     /* #8624 vector-sizes-as-args: default None => auto-select. */
     s.has_vector_size_a = false;
@@ -473,11 +474,17 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->pp_pre_mfma > 0, "ppm%d", s->pp_pre_mfma);
     ROCKE_FLAG(s->pp_b_double, "ppbd");
     ROCKE_FLAG(s->lds_xor_rowkey, "lxrk");
-    /* (mch, xws, saa: Python-only knobs, off.) */
+    {
+        const int mch = s->cshuffle_m_chunks > 1 ? s->cshuffle_m_chunks : 1;
+        ROCKE_FLAG(mch > 1, "mch%d", mch);
+    }
+    /* (xws, saa: Python-only knobs, off.) */
     ROCKE_FLAG(s->split_atomic_pairs, "sapl");
     /* (sapf, esf, skx, fsk, sfs, szf, xsub, ppfd: Python-only knobs, off.) */
     ROCKE_FLAG(s->fb_skip_empty, "fbse");
-    /* (ppeg, elb, shy, mss, stc: Python-only knobs, off.) */
+    /* (ppeg: Python-only, off.) */
+    ROCKE_FLAG(s->epi_lds_barriers, "elb");
+    /* (shy, mss, stc: Python-only knobs, off.) */
     ROCKE_FLAG(s->split_det > 0, "sdet%d", s->split_det);
     ROCKE_FLAG(s->pp_split_fetch > 0, "psf%d", s->pp_split_fetch);
     /* (nag: Python-only, off.) */
@@ -1277,6 +1284,26 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             "pp_b_double: the plain rpf_pingpong loop with k-packed reads and an "
                             "even number of kk pairs per half");
     }
+    {
+        const int mc = s->cshuffle_m_chunks;
+        if(mc != 1 && mc != 0)
+        {
+            const int mpw = s->tile_m / s->warp_m / s->warp_tile_m;
+            if(mc < 1 || s->epilogue == NULL || strcmp(s->epilogue, "cshuffle") != 0
+               || s->dtype_d == NULL || strcmp(s->dtype_d, "bf16") != 0 || s->wave_size != 64
+               || (s->pipeline && strcmp(s->pipeline, "wavelet") == 0) || mpw % mc)
+                ROCKE_SPEC_FAIL(reason,
+                                reason_cap,
+                                "cshuffle_m_chunks needs the bf16 wave64 MFMA cshuffle epilogue "
+                                "and must divide the MFMAs per warp along M");
+            if(s->split_k > 1 && s->warp_n > 2 && !s->split_atomic_pairs)
+                ROCKE_SPEC_FAIL(reason,
+                                reason_cap,
+                                "cshuffle_m_chunks with split_k is verified for warp_n <= 2 only");
+        }
+    }
+    if(s->epi_lds_barriers && (s->epilogue == NULL || strcmp(s->epilogue, "cshuffle") != 0))
+        ROCKE_SPEC_FAIL(reason, reason_cap, "epi_lds_barriers shapes the cshuffle epilogue");
     if(s->pp_pre_mfma && !s->rpf_pingpong)
         ROCKE_SPEC_FAIL(reason, reason_cap, "pp_pre_mfma shapes the rpf_pingpong loop");
     if(s->pp_split_fetch
@@ -1642,7 +1669,8 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                                  || (s->split_k > 1 && !rocke_conv_fwd_split_k_atomic(s)))
                                     ? 4
                                     : 2;
-            c_lds = is_cshuffle ? (s->tile_m * s->tile_n * c_dtype_bytes) : 0;
+            const int mch = s->cshuffle_m_chunks > 1 ? s->cshuffle_m_chunks : 1;
+            c_lds = is_cshuffle ? (s->tile_m / mch * s->tile_n * c_dtype_bytes) : 0;
         }
         {
             /* wavelet keeps A/B live across the whole scf_if_else, so the LDS

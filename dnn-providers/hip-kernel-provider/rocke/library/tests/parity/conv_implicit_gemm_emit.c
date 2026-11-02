@@ -996,6 +996,26 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         if(idx == 97)
             spec->uk_chunk_group = 2;
         return 0;
+    case 99:
+    case 100:
+    case 101:
+        if(make_cfg_3d(idx == 99 ? 92 : idx == 100 ? 93 : 83, spec, arch) != 0)
+            return -1;
+        spec->cshuffle_m_chunks = idx == 100 ? 4 : 2;
+        spec->epi_lds_barriers = idx == 99;
+        return 0;
+    case 102:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->reg_prefetch = 1;
+        spec->cshuffle_m_chunks = 2;
+        spec->epi_lds_barriers = true;
+        return 0;
+    case 103:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->cshuffle_m_chunks = 2;
+        return 0;
     case 98:
         if(make_cfg_3d_base(54, spec, arch) != 0)
             return -1;

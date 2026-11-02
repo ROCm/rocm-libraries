@@ -707,6 +707,9 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     epi.out_dtype = store_dtype;
     epi.no_alias = spec->cshuffle_no_alias;
     epi.war_barriers = _war_barriers;
+    if(spec->cshuffle_m_chunks > 1)
+        epi.m_chunks = spec->cshuffle_m_chunks;
+    epi.lds_barriers = spec->epi_lds_barriers;
 
     /* AOT: the D descriptor, the grouped k_out base and the store bounds all
      * come from the build context. Python builds them before the K-loop (so

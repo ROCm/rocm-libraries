@@ -987,6 +987,11 @@ _GFX942_3D_OFFSET = 32
 #   96: 83 + split_tail, split_det=2, m_band=32
 #   97: 84 + uk_chunk_group=2 (split slices in the grouped tap order)
 #   98: 54 + split_k=2, split_det=2 (fp16 D): rejected by both engines
+#   99: 92 + cshuffle_m_chunks=2, epi_lds_barriers
+#  100: 93 + cshuffle_m_chunks=4 (chunked atomic pairs)
+#  101: 83 + cshuffle_m_chunks=2 (chunked packed atomics)
+#  102: 55 + reg_prefetch=1, cshuffle_m_chunks=2, epi_lds_barriers (chunked store)
+#  103: 54 + cshuffle_m_chunks=2 (fp16 D): rejected by both engines
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1089,6 +1094,14 @@ def _gfx942_3d_spec(idx: int):
         97: dict(_p84, uk_chunk_group=2),
     })
     knobs[98] = (54, dict(split_k=2, split_det=2))
+    _pp.update({
+        99: dict(_p84, split_tail=True, split_atomic_pairs=True, split_det=2,
+                 cshuffle_m_chunks=2, epi_lds_barriers=True),
+        100: dict(_p84, split_tail=True, split_atomic_pairs=True, cshuffle_m_chunks=4),
+        101: dict(cshuffle_m_chunks=2),
+    })
+    knobs[102] = (55, dict(reg_prefetch=1, cshuffle_m_chunks=2, epi_lds_barriers=True))
+    knobs[103] = (54, dict(cshuffle_m_chunks=2))
     if idx in _pp:
         knobs[idx] = (55, dict(_s3, **_pp[idx]))
     extra = {}
