@@ -770,7 +770,10 @@ def _pp_planned_sub_gemms(
 
     if not p.is_3d or p.groups != 1:
         return None
-    res = plan_boxes(p, tile_m, tile_n, tile_k, max_split, cus or PP_BOX_SPLIT_CUS)
+    res = plan_boxes(
+        p, tile_m, tile_n, tile_k, max_split, cus or PP_BOX_SPLIT_CUS,
+        round_cus=PP_BOX_SPLIT_CUS,
+    )
     if res is None:
         return None
     _T, plan = res

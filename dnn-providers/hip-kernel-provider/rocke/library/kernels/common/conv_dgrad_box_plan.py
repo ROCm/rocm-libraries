@@ -114,9 +114,30 @@ def _solve_milp(counts: Dict[Box, int], boxes: Sequence[Box], cost: Dict[Box, in
     return plan
 
 
+def _makespan(plan, cost, taps_k, n_tiles: int, cus: int) -> int:
+    """K tiles per CU of the launch: its blocks (records longest slice first, a
+    record's tiles x N tiles x slices) dispatched in order to the CU that frees
+    first."""
+    import heapq
+
+    recs = sorted(plan, key=lambda e: (-_ceil_div(taps_k[e[0]], cost[e[0]]), e[0]))
+    h = [(0, i) for i in range(cus)]
+    mk = 0
+    for b, t, _m in recs:
+        S = cost[b]
+        per = _ceil_div(taps_k[b], S)
+        for _ in range(t * n_tiles):
+            for s_ in range(S):
+                ln = max(0, min(per, taps_k[b] - s_ * per))
+                t0, c = heapq.heappop(h)
+                heapq.heappush(h, (t0 + ln, c))
+                mk = max(mk, t0 + ln)
+    return mk
+
+
 @lru_cache(maxsize=64)
 def _plan_cached(key) -> Tuple:
-    (counts_items, tile_m, n_tiles, kpt, max_split, budget) = key
+    (counts_items, tile_m, n_tiles, kpt, max_split, budget, round_cus) = key
     counts = dict(counts_items)
     classes = list(counts)
     # candidate boxes: per axis an interval [lo, hi] from the class bounds.
@@ -129,22 +150,37 @@ def _plan_cached(key) -> Tuple:
     boxes = [b for b in boxes if any(_contains(b, c) for c in classes)]
     taps_k = {b: box_taps(b) * kpt for b in boxes}
     need = max(taps_k[c] for c in classes)  # the longest class must fit max_split
-    for T in range(_ceil_div(need, max_split), max(taps_k.values()) + 1):
+    full = [b for b in boxes if all(_contains(b, c) for c in classes)]
+    # Candidate slice lengths: those at which some box's slices are exact.
+    cands = sorted({_ceil_div(taps_k[b], k) for b in boxes for k in range(1, max_split + 1)})
+    cands = [t for t in cands if t >= _ceil_div(need, max_split)]
+    best = None
+    for T in cands:
+        if best is not None and T >= best[0][0]:
+            break  # the makespan is at least T
         cost = {b: _ceil_div(taps_k[b], T) for b in boxes}
         cand = [b for b in boxes if cost[b] <= max_split]
+        if not any(b in cand for b in full):
+            continue  # every class needs a home: the full box must be allowed
         plan = _solve_milp(counts, cand, cost, taps_k, tile_m, n_tiles, budget)
-        if plan is not None:
-            return T, tuple((b, t, tuple(m)) for b, t, m in plan)
+        if plan is None:
+            continue
+        mk = _makespan(plan, cost, taps_k, n_tiles, round_cus)
+        steps = sum(t * taps_k[b] for b, t, _ in plan)
+        if best is None or (mk, steps) < best[0]:
+            best = ((mk, steps), T, tuple((b, t, tuple(m)) for b, t, m in plan))
+    if best is not None:
+        return best[1], best[2]
     return None
 
 
-def plan_boxes(p, tile_m: int, tile_n: int, tile_k: int, max_split: int, cus: int):
+def plan_boxes(p, tile_m: int, tile_n: int, tile_k: int, max_split: int, cus: int, round_cus: int = 228):
     """``(T, [(box, tiles, split, [pixel rows])])`` of the ``pp_boxes`` 8 plan, or None."""
     cl = pixel_classes(p)
     counts = tuple(sorted((c, len(v)) for c, v in cl.items()))
     kpt = _ceil_div(p.kpg, tile_k)
     n_tiles = _ceil_div(p.cpg, tile_n)
-    res = _plan_cached((counts, tile_m, n_tiles, kpt, max(1, max_split), cus))
+    res = _plan_cached((counts, tile_m, n_tiles, kpt, max(1, max_split), cus, round_cus))
     if res is None:
         return None
     T, plan = res
