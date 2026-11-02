@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -186,6 +187,38 @@ namespace
 #ifndef _WIN32
     constexpr uint64_t kGiB = uint64_t(1) << 30;
 
+    // Sets HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT, or unsets it for nullptr, for one scope, and then
+    // restores the value the run started with.
+    class ScopedLimit
+    {
+    public:
+        explicit ScopedLimit(const char* value)
+        {
+            if(const char* old = std::getenv(kName))
+                saved = old;
+            set(value);
+        }
+        ~ScopedLimit()
+        {
+            set(saved ? saved->c_str() : nullptr);
+        }
+        ScopedLimit(const ScopedLimit&)            = delete;
+        ScopedLimit& operator=(const ScopedLimit&) = delete;
+
+    private:
+        static constexpr const char* kName = "HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT";
+
+        static void set(const char* value)
+        {
+            if(value)
+                setenv(kName, value, 1);
+            else
+                unsetenv(kName);
+        }
+
+        std::optional<std::string> saved;
+    };
+
     // A temporary stand-in for /proc/meminfo, /proc/self/cgroup and /sys/fs/cgroup.
     class FakeHost
     {
@@ -239,6 +272,10 @@ namespace
 
         std::filesystem::path dir;
         HostMemorySources     sources;
+
+    private:
+        // A limit set for the whole run would cap every query here.
+        ScopedLimit no_limit{nullptr};
     };
 
     TEST(HostMemory_pre_checkin, query_reads_mem_available_without_a_cgroup)
@@ -330,20 +367,6 @@ namespace
         EXPECT_LE(*available, available_host_memory_bytes(meminfo_only.sources).value_or(0) + kGiB);
     }
 
-    // Sets HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT for one scope.
-    class ScopedLimit
-    {
-    public:
-        explicit ScopedLimit(const char* value)
-        {
-            setenv("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", value, 1);
-        }
-        ~ScopedLimit()
-        {
-            unsetenv("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT");
-        }
-    };
-
     TEST(HostMemory_pre_checkin, limit_is_a_byte_count_with_an_optional_suffix)
     {
         EXPECT_EQ(parse_host_memory_size("1024"), size_t(1024));
@@ -393,7 +416,10 @@ namespace
 
     TEST(HostMemory_pre_checkin, limit_makes_the_preflight_skip)
     {
-        EXPECT_EQ(fast_check_memory_shortfall(0, 2 * kGiB), "");
+        {
+            ScopedLimit no_limit(nullptr);
+            EXPECT_EQ(fast_check_memory_shortfall(0, 2 * kGiB), "");
+        }
         ScopedLimit limit("1G");
         std::string why = fast_check_memory_shortfall(0, 2 * kGiB);
         EXPECT_NE(why.find("needs 2 GiB of host memory and 1 GiB is available"), std::string::npos)
