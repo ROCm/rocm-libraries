@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -156,7 +156,7 @@ rocblas_status rocsolver_csrrf_sumlu_template(rocblas_handle handle,
         rocblas_int blocks = n / BS1 + 1;
         dim3 grid(blocks, 1, 1);
         dim3 threads(BS1, 1, 1);
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, grid, threads, 0, stream, ptrT, n + 1, 0);
+        reset_info(handle, ptrT, n + 1, 0);
 
         return rocblas_status_success;
     }

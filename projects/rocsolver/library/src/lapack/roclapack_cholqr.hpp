@@ -783,7 +783,7 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
 
     // set nr=0
     I blocks = ceil(batch_count, BS1);
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocks), dim3(BS1), 0, stream, nr, batch_count, 0);
+    reset_info(handle, nr, batch_count, 0);
 
     // quick return if no dimensions
     if(m == 0 || n == 0)

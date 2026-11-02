@@ -2,6 +2,19 @@
 
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
+## (Unreleased) rocSOLVER
+
+### Added
+### Changed
+
+* Renamed GPU kernel "reset_info" to "reset_info_kernel" and a  host
+  function "reset_info" is used to determine the valid launch configuration
+  and launch "reset_info_kernel".
+
+### Removed
+### Optimized
+### Resolved issues
+
 
 ## rocSOLVER 3.38.0 for ROCm 10.2.0
 

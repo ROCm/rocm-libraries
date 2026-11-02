@@ -1,5 +1,5 @@
 /************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -1653,7 +1653,7 @@ rocblas_status rocsolver_stedcj_template(rocblas_handle handle,
     dim3 threads(BS1, 1, 1);
 
     // info = 0
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, info, batch_count, 0);
+    reset_info(handle, info, batch_count, 0);
 
     // quick return
     if(n == 1 && evect != rocblas_evect_none)
