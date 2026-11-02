@@ -1506,9 +1506,11 @@ def main() -> int:
         torch.cuda.empty_cache()
 
         if args.set:
-            # Mask sets: production dispatcher, no explicit spec. A dispatcher
-            # rejection (e.g. right_bound with ALiBi) is reported as SKIP with its
-            # reason; anything else propagates.
+            # Mask sets: production dispatcher, no explicit spec. A request no
+            # kernel serves (e.g. right_bound with ALiBi) is refused by the support
+            # gates of run_unified_attention_torch with NotImplementedError and is
+            # reported as SKIP with its reason. Anything else, including the
+            # ValueError of a malformed input, propagates.
             config = f"dispatch_{args.path}"
             data = make_inputs(s)
             try:
@@ -1520,7 +1522,7 @@ def main() -> int:
                         warmup=args.warmup,
                         attempts=args.attempts,
                     )
-            except (NotImplementedError, ValueError) as e:
+            except NotImplementedError as e:
                 print(f"  SKIP (dispatcher refused): {e}")
                 results.append({"name": s.name, "status": "skip", "reason": str(e)})
                 continue
