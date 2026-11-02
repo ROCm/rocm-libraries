@@ -53,25 +53,45 @@ QV_FIELDS = ("q_tensor_uid", "v_tensor_uid")
 DTYPES = {
     "bfloat16": "bf16",
     "half": "fp16",
+    "float": "fp32",
     "fp8_e4m3": "fp8e4m3",
     "fp8_e4m3_fnuz": "fp8e4m3_fnuz",
     "fp8_e5m2": "fp8e5m2",
     "fp8_e5m2_fnuz": "fp8e5m2_fnuz",
 }
-# (q / k head dim, v head dim) -> head_dim value. v may be narrower than q / k:
-# the ASM kernels run 192 x 128 (fmha_v3_*/*.csv).
+# (q / k head dim, v head dim) -> head_dim value. A v head dim that is not
+# q's gives its own value: the ASM kernels run 192 x 128 (fmha_v3_*/*.csv).
+_SQUARE_HEAD_DIMS = (1, 64, 128, 192, 256)
+_PAIRED_HEAD_DIMS = (
+    (1, 64),
+    (1, 128),
+    (1, 256),
+    (64, 1),
+    (64, 128),
+    (64, 192),
+    (64, 256),
+    (128, 1),
+    (128, 64),
+    (128, 192),
+    (128, 256),
+    (192, 1),
+    (192, 64),
+    (192, 128),
+    (192, 256),
+    (256, 128),
+)
 HEAD_DIMS = {
-    (64, 64): "64",
-    (128, 128): "128",
-    (192, 192): "192",
-    (192, 128): "192x128",
+    **{(d, d): str(d) for d in _SQUARE_HEAD_DIMS},
+    **{(qk, v): f"{qk}x{v}" for qk, v in _PAIRED_HEAD_DIMS},
 }
-# Order of q's dims by decreasing stride -> layout name. Dims are (b, h, s, d).
-LAYOUTS = {(0, 1, 2, 3): "bhsd", (0, 2, 1, 3): "bshd"}
+# Order of q's dims by decreasing stride -> layout name. Dims are (b, h, s, d),
+# so the name spells the dims from the largest stride to the smallest.
+LAYOUTS = {(0, 1, 2, 3): "bhsd", (0, 2, 1, 3): "bshd", (2, 0, 1, 3): "sbhd"}
 
 FEATURES = (
     Feature("dtype:bf16", ("q_tensor_uid",)),
     Feature("dtype:fp16", ("q_tensor_uid",)),
+    Feature("dtype:fp32", ("q_tensor_uid",)),
     Feature("dtype:fp8e4m3", ("q_tensor_uid",) + _FP8_SCALES),
     Feature("dtype:fp8e4m3_fnuz", ("q_tensor_uid",) + _FP8_SCALES),
     Feature("dtype:fp8e5m2", ("q_tensor_uid",) + _FP8_SCALES),
