@@ -75,7 +75,10 @@ test_categories:
     description: "Complete ASM SDPA external integration coverage"
     test_patterns:
       - "*Sdpa*"
-    exclude: *common_excludes
+    exclude:
+      - "*DISABLED*"
+      # dnn-benchmarking workloads run in their own `workloads` category (too slow for full).
+      - "workloads_*"
     labels:
       - "full"
       - "all"
