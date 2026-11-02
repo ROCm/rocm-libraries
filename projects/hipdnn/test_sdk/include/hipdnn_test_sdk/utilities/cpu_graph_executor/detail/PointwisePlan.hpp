@@ -116,7 +116,7 @@ private:
             }
 
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
-                _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, _params.axis.value());
+                _params.mode, *shallowOut0Tensor, _params.axis.value());
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
@@ -338,42 +338,12 @@ public:
            && (nodeAttributes->relu_lower_clip().has_value()
                || nodeAttributes->relu_upper_clip().has_value()
                || nodeAttributes->relu_lower_clip_slope().has_value()
-               || nodeAttributes->swish_beta().has_value()))
+               || nodeAttributes->swish_beta().has_value()
+               || nodeAttributes->elu_alpha().has_value()
+               || nodeAttributes->softplus_beta().has_value()))
         {
             throw std::runtime_error("Parameterized ternary pointwise operations are not supported "
                                      "in PointwisePlanBuilder for the Cpu Graph Executor");
-        }
-
-        using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
-        if(nodeAttributes->elu_alpha().has_value()
-           && nodeAttributes->operation() != PointwiseMode::ELU_FWD
-           && nodeAttributes->operation() != PointwiseMode::ELU_BWD)
-        {
-            throw std::runtime_error("elu_alpha is only supported for ELU_FWD and ELU_BWD in "
-                                     "PointwisePlanBuilder for the Cpu Graph Executor");
-        }
-
-        if(nodeAttributes->softplus_beta().has_value()
-           && nodeAttributes->operation() != PointwiseMode::SOFTPLUS_FWD
-           && nodeAttributes->operation() != PointwiseMode::SOFTPLUS_BWD)
-        {
-            throw std::runtime_error(
-                "softplus_beta is only supported for SOFTPLUS_FWD and SOFTPLUS_BWD in "
-                "PointwisePlanBuilder for the Cpu Graph Executor");
-        }
-
-        if(nodeAttributes->operation() == PointwiseMode::GEN_INDEX
-           && !nodeAttributes->axis_tensor_uid().has_value())
-        {
-            throw std::runtime_error("GEN_INDEX requires an axis in "
-                                     "PointwisePlanBuilder for the Cpu Graph Executor");
-        }
-
-        if(nodeAttributes->operation() != PointwiseMode::GEN_INDEX
-           && nodeAttributes->axis_tensor_uid().has_value())
-        {
-            throw std::runtime_error("axis is only supported for GEN_INDEX in "
-                                     "PointwisePlanBuilder for the Cpu Graph Executor");
         }
 
         return std::make_unique<PointwisePlan<Input0Type, Input1Type, Input2Type, OutputType>>(

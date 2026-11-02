@@ -130,7 +130,7 @@ public:
         hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, outputDims)();
     }
 
-    // Fills output with the coordinate of each element along the given axis.
+    // Fills output with the index of each element along the given axis
     void executeGenerateIndex(hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
                               int64_t axis)
     {
