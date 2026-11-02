@@ -104,6 +104,11 @@ struct RTCCache
     // many compilations in parallel when building the library
     void enable_write_mostly();
 
+    // Batch the writes produced by one AOT helper invocation. This is
+    // separate from the runtime cache path.
+    void begin_aot_cache_transaction();
+    void commit_aot_cache_transaction();
+
     // write out kernels in the current cache to the output path.
     // this copies the kernels in a consistent order and clears out
     // the timestamp fields so that the resulting file is a

@@ -781,6 +781,7 @@ int main(int argc, char** argv)
     RTCCache::single = std::make_unique<RTCCache>();
 
     RTCCache::single->enable_write_mostly();
+    RTCCache::single->begin_aot_cache_transaction();
 
     CompileQueue queue;
 
@@ -831,6 +832,8 @@ int main(int argc, char** argv)
         queue.push({});
     for(size_t i = 0; i < NUM_THREADS; ++i)
         threads[i].join();
+
+    RTCCache::single->commit_aot_cache_transaction();
 
     // write the output file using what we collected in the temporary
     // cache
