@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only tests of captured kernel names against ranked tiles.
+// Host-only tests of checked-in kernel traits against ranked tiles.
 // The relative include avoids shadowing the clients' utility.hpp with the
 // library's internal header of the same name.
 
@@ -9,73 +9,42 @@
 
 #include <gtest/gtest.h>
 
-#include <string>
+#include <algorithm>
 #include <vector>
 
 namespace
 {
-    // Up to and including the trailing "_Float_", as matchesRocRollerSelectedKernel
-    // builds it for a TN problem.
-    const std::string fp8Prefix = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_";
-    const std::string fp4Prefix = "RR_GEMM_TN_FP4_FP4_Float_Float_Float_";
-
-    // Names as the kernels are actually checked in (MX scales on both operands).
-    const char* const plainFp8_16x16
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2";
-    const char* const skFp8_16x16
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_16x16x128_UR_2";
-    const char* const skFp8_64x32
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_64x32x128_UR_2";
-    const char* const wgmFp8_256x256
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_";
-    const char* const skFp4_16x32
-        = "RR_GEMM_TN_FP4_FP4_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_16x32x128_UR_2";
-    const char* const skFp4_256x192
-        = "RR_GEMM_TN_FP4_FP4_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_256x192x128_UR_4";
-    // A pre-swizzled-scale kernel: identical tile token, extra PSTA_/PTA_/PSTB_/PTB_
-    // tokens ahead of it. None are checked in today.
-    const char* const preSwizzledFp8_16x16
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_PSTA_32x8x4_PTA_32x8_SB_BE8M0_32_"
-          "PSTB_32x8x4_PTB_8x32_WGT_16x16x128_UR_2";
-
-    // MX block-32 on both operands. Unroll defaults to 2, which is what every
-    // checked-in name here carries except the 256x192 FP4 kernel (UR_4).
-    constexpr RocRollerSelectedTile mxTile(int  m,
-                                           int  n,
-                                           int  k,
-                                           bool wgm,
-                                           bool sk,
-                                           int  unroll       = 2,
-                                           int  scaleARow    = 32,
-                                           int  scaleACol    = 1,
-                                           int  scaleBCol    = 32,
-                                           int  scaleBRow    = 1)
+    constexpr RocRollerKernelTraits kernel(int m, int n, int k, bool wgm)
     {
-        RocRollerSelectedTile tile{};
-        tile.m              = m;
-        tile.n              = n;
-        tile.k              = k;
-        tile.workgroupMapping = wgm;
-        tile.streamK        = sk;
-        tile.unroll         = unroll;
-        tile.scaleABlockRow = scaleARow;
-        tile.scaleABlockCol = scaleACol;
-        tile.scaleBBlockCol = scaleBCol;
-        tile.scaleBBlockRow = scaleBRow;
-        return tile;
+        RocRollerKernelTraits traits{};
+        traits.m                = m;
+        traits.n                = n;
+        traits.k                = k;
+        traits.workgroupMapping = wgm;
+        return traits;
     }
 
-    constexpr RocRollerSelectedTile plainTile16x16  = mxTile(16, 16, 128, false, false);
-    constexpr RocRollerSelectedTile skTile16x16     = mxTile(16, 16, 128, true, true);
-    constexpr RocRollerSelectedTile skTile64x32     = mxTile(64, 32, 128, true, true);
-    constexpr RocRollerSelectedTile wgmTile256x256  = mxTile(256, 256, 128, true, false);
-    constexpr RocRollerSelectedTile skTile16x32     = mxTile(16, 32, 128, true, true);
-    constexpr RocRollerSelectedTile skTile256x192   = mxTile(256, 192, 128, true, true, 4);
+    constexpr RocRollerSelectedTile
+        tile(int m, int n, int k, bool wgm, bool sk, bool ntA = false, bool ntB = false)
+    {
+        RocRollerSelectedTile t{};
+        t.m                = m;
+        t.n                = n;
+        t.k                = k;
+        t.workgroupMapping = wgm;
+        t.streamK          = sk;
+        t.nonTemporalA     = ntA;
+        t.nonTemporalB     = ntB;
+        return t;
+    }
+
+    constexpr RocRollerKernelTraits plain16x16 = kernel(16, 16, 128, false);
+    constexpr RocRollerKernelTraits plain64x32 = kernel(64, 32, 128, false);
+    constexpr RocRollerKernelTraits wgm256x256 = kernel(256, 256, 128, true);
 
     struct MatchCase
     {
-        const char*           kernel;
-        const std::string*    prefix;
+        RocRollerKernelTraits kernel;
         RocRollerSelectedTile tile;
         bool                  expected;
         const char*           why;
@@ -84,149 +53,137 @@ namespace
     const std::vector<MatchCase>& matchCases()
     {
         static const std::vector<MatchCase> cases = {
-            {skFp8_16x16, &fp8Prefix, skTile16x16, true, "SK kernel matches its SK tile"},
-            {skFp8_64x32, &fp8Prefix, skTile64x32, true, "SK 64x32x128"},
-            {skFp4_16x32, &fp4Prefix, skTile16x32, true, "FP4 SK 16x32x128"},
-            {skFp4_256x192, &fp4Prefix, skTile256x192, true, "FP4 SK 256x192x128, UR_4"},
-            {plainFp8_16x16, &fp8Prefix, plainTile16x16, true, "plain kernel matches its plain tile"},
-            {wgmFp8_256x256, &fp8Prefix, wgmTile256x256, true, "WGM plain kernel matches its WGM tile"},
-            {plainFp8_16x16,
-             &fp8Prefix,
-             skTile16x16,
+            {plain16x16,
+             tile(16, 16, 128, false, false),
+             true,
+             "plain kernel matches its plain tile"},
+            {wgm256x256, tile(256, 256, 128, true, false), true, "WGM kernel matches its WGM tile"},
+            {plain16x16,
+             tile(16, 16, 128, true, true),
              false,
              "an SK tile must not take the plain kernel of the same tile"},
-            {skFp8_16x16,
-             &fp8Prefix,
-             plainTile16x16,
+            {plain64x32,
+             tile(16, 16, 128, false, false),
              false,
-             "a plain tile must not take the SK kernel of the same tile"},
-            {preSwizzledFp8_16x16,
-             &fp8Prefix,
-             plainTile16x16,
+             "a different tile shape must not match"},
+            {plain16x16,
+             tile(16, 16, 256, false, false),
              false,
-             "a pre-swizzled kernel must not match a problem whose scales are not pre-swizzled"},
-            {skFp8_16x16, &fp4Prefix, skTile16x16, false, "the type prefix must still match"},
-            {skFp8_64x32, &fp8Prefix, skTile16x16, false, "a different tile shape must not match"},
-            {wgmFp8_256x256,
-             &fp8Prefix,
-             mxTile(256, 256, 128, false, false),
+             "a different depth must not match"},
+            {wgm256x256,
+             tile(256, 256, 128, false, false),
              false,
              "a non-WGM tile must not take a WGM kernel"},
-            {plainFp8_16x16,
-             &fp8Prefix,
-             mxTile(16, 16, 128, true, false),
+            {plain16x16,
+             tile(16, 16, 128, true, false),
              false,
-             "a WGM tile must not take a kernel without _WGM_"},
-            {plainFp8_16x16,
-             &fp8Prefix,
-             mxTile(16, 16, 128, false, false, 4),
+             "a WGM tile must not take a kernel without workgroup mapping"},
+            {plain16x16,
+             tile(16, 16, 128, false, false, true, false),
              false,
-             "UR_2 must not match a tile whose unroll is 4"},
-            {skFp4_256x192,
-             &fp4Prefix,
-             mxTile(256, 192, 128, true, true, 2),
+             "no non-temporal-A kernel is checked in"},
+            {plain16x16,
+             tile(16, 16, 128, false, false, false, true),
              false,
-             "UR_4 must not match a tile whose unroll is 2"},
-            {plainFp8_16x16,
-             &fp8Prefix,
-             mxTile(16, 16, 128, false, false, 2, 64),
-             false,
-             "scale block 32 must not match a tile whose block is 64"},
+             "no non-temporal-B kernel is checked in"},
         };
         return cases;
     }
 }
 
-TEST(HostUnitRocRollerKernelMatch, smoke_MatchesOnlyTheKernelDescribingThatTile)
+TEST(HostUnitRocRollerKernelMatch, smoke_MatchesOnlyTheKernelImplementingThatTile)
 {
     for(const auto& c : matchCases())
     {
-        SCOPED_TRACE(::testing::Message() << c.why << "\n  kernel: " << c.kernel << "\n  tile:   "
-                                          << c.tile.m << "x" << c.tile.n << "x" << c.tile.k
-                                          << " wgm=" << c.tile.workgroupMapping
-                                          << " sk=" << c.tile.streamK);
-        EXPECT_EQ(rocRollerKernelNameMatchesTile(c.kernel, *c.prefix, c.tile), c.expected);
+        SCOPED_TRACE(::testing::Message()
+                     << c.why << "\n  kernel: " << c.kernel.m << "x" << c.kernel.n << "x"
+                     << c.kernel.k << " wgm=" << c.kernel.workgroupMapping
+                     << "\n  tile:   " << c.tile.m << "x" << c.tile.n << "x" << c.tile.k
+                     << " wgm=" << c.tile.workgroupMapping << " sk=" << c.tile.streamK);
+        EXPECT_EQ(rocRollerKernelMatchesTile(c.kernel, c.tile), c.expected);
     }
 }
 
-// The tile token alone cannot separate these two names, so pin the pairing
-// directly: each name matches exactly one of the two tiles.
-TEST(HostUnitRocRollerKernelMatch, smoke_StreamKIsNotInterchangeableWithPlain)
+// No StreamK kernel is checked in, so a StreamK tile matches no kernel of its
+// shape, with or without workgroup mapping on either side.
+TEST(HostUnitRocRollerKernelMatch, smoke_NoKernelServesAStreamKTile)
 {
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(skFp8_16x16, fp8Prefix, skTile16x16));
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(skFp8_16x16, fp8Prefix, plainTile16x16));
-
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(plainFp8_16x16, fp8Prefix, plainTile16x16));
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(plainFp8_16x16, fp8Prefix, skTile16x16));
-}
-
-// Each pre-swizzle token on its own is enough to disqualify a kernel: a name
-// carrying only the A-side pair, or only the B-side pair, must still be refused.
-TEST(HostUnitRocRollerKernelMatch, smoke_RejectsEveryPreSwizzledScaleToken)
-{
-    const char* const oneSided[] = {
-        "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_PSTA_32x8x4_SB_BE8M0_32_WGT_16x16x128_UR_2",
-        "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_PTA_32x8_SB_BE8M0_32_WGT_16x16x128_UR_2",
-        "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_PSTB_32x8x4_WGT_16x16x128_UR_2",
-        "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_PTB_8x32_WGT_16x16x128_UR_2",
-    };
-    for(const char* kernel : oneSided)
+    const RocRollerKernelTraits wgm16x16 = kernel(16, 16, 128, true);
+    for(bool tileWgm : {false, true})
     {
-        SCOPED_TRACE(kernel);
-        EXPECT_FALSE(rocRollerKernelNameMatchesTile(kernel, fp8Prefix, plainTile16x16));
+        EXPECT_FALSE(rocRollerKernelMatchesTile(plain16x16, tile(16, 16, 128, tileWgm, true)));
+        EXPECT_FALSE(rocRollerKernelMatchesTile(wgm16x16, tile(16, 16, 128, tileWgm, true)));
     }
 }
 
-// A StreamK kernel never carries _WGM_, so a StreamK tile with workgroupMapping
-// set must still match it. The companion false case covers a StreamK name that
-// did carry _WGM_, which the generator does not emit.
-TEST(HostUnitRocRollerKernelMatch, smoke_StreamKIgnoresWorkgroupMappingOnTheTile)
+// The fallback's order, first difference deciding: ranked position of the
+// kernel's tile, then the larger M x N, then fewer WGM/StreamK differences
+// from what the ranker gives that tile, then the lower solution index.
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackPrefersTheEarliestRankedTile)
 {
-    constexpr RocRollerSelectedTile skWithWgm = mxTile(16, 16, 128, true, true);
-    constexpr RocRollerSelectedTile skNoWgm  = mxTile(16, 16, 128, false, true);
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(skFp8_16x16, fp8Prefix, skWithWgm));
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(skFp8_16x16, fp8Prefix, skNoWgm));
+    const std::vector<RocRollerSelectedTile> ranked
+        = {tile(64, 64, 128, true, false), tile(256, 256, 128, true, false)};
 
-    const std::string skPlusWgm = std::string(skFp8_16x16) + "_WGM_";
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(skPlusWgm, fp8Prefix, skWithWgm));
+    const auto early = rocRollerFallbackRank(kernel(64, 64, 128, false), ranked, 1024, 9);
+    const auto late  = rocRollerFallbackRank(wgm256x256, ranked, 1024, 1);
+    const auto none  = rocRollerFallbackRank(kernel(512, 512, 128, true), ranked, 1024, 0);
+    EXPECT_EQ(early.tilePosition, 0u);
+    EXPECT_EQ(late.tilePosition, 1u);
+    EXPECT_EQ(none.tilePosition, ranked.size());
+    EXPECT_LT(early, late);
+    EXPECT_LT(late, none);
 }
 
-// The tile token is matched whole, delimited by "_WGT_" ahead of it and "_UR_"
-// after the K extent, so a name whose extents merely contain the requested
-// digits is not a match.
-TEST(HostUnitRocRollerKernelMatch, smoke_NearMissExtentsDoNotMatch)
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackPrefersTheLargerTileAmongUnlisted)
 {
-    const char* const widerM
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_216x16x128_UR_2";
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(widerM, fp8Prefix, plainTile16x16));
+    const std::vector<RocRollerSelectedTile> ranked = {tile(32, 32, 128, false, false)};
 
-    const char* const widerK
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x1280_UR_2";
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(widerK, fp8Prefix, plainTile16x16));
+    const auto big   = rocRollerFallbackRank(kernel(256, 128, 128, false), ranked, 1024, 7);
+    const auto small = rocRollerFallbackRank(kernel(128, 128, 128, false), ranked, 1024, 2);
+    EXPECT_EQ(big.area, 256 * 128);
+    EXPECT_LT(big, small);
 }
 
-// "_UR_2" is a prefix of "_UR_20". The depth is part of the tile, and it is
-// delimited so the shorter depth does not accept the longer one.
-TEST(HostUnitRocRollerKernelMatch, smoke_UnrollDepthIsDelimited)
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackCountsDifferencesFromTheRankedVariant)
 {
-    const char* const ur20
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_20";
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(ur20, fp8Prefix, plainTile16x16));
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(ur20, fp8Prefix, mxTile(16, 16, 128, false, false, 20)));
+    // The ranker asks for 128x128 with WGM: the WGM kernel differs in nothing,
+    // the plain one in WGM.
+    const std::vector<RocRollerSelectedTile> ranked = {tile(128, 128, 128, true, false)};
+
+    const auto wgm   = rocRollerFallbackRank(kernel(128, 128, 128, true), ranked, 1024, 5);
+    const auto plain = rocRollerFallbackRank(kernel(128, 128, 128, false), ranked, 1024, 3);
+    EXPECT_EQ(wgm.mismatches, 0);
+    EXPECT_EQ(plain.mismatches, 1);
+    EXPECT_LT(wgm, plain);
+
+    // A StreamK tile wants no workgroup mapping even when the ranker set it,
+    // and every checked-in kernel differs from it in StreamK.
+    const std::vector<RocRollerSelectedTile> skRanked = {tile(128, 128, 128, true, true)};
+    EXPECT_EQ(rocRollerFallbackRank(kernel(128, 128, 128, false), skRanked, 1024, 0).mismatches, 1);
+    EXPECT_EQ(rocRollerFallbackRank(kernel(128, 128, 128, true), skRanked, 1024, 0).mismatches, 2);
 }
 
-// The block-size token is "32" or "32x8". A second extent of 1 is omitted.
-TEST(HostUnitRocRollerKernelMatch, smoke_ScaleBlockExtentIsExact)
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackWantsWgmOnAnUnlistedTileExactlyAtLargeK)
 {
-    const char* const ax
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32x8_SB_BE8M0_32_WGT_16x16x128_UR_2";
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(ax, fp8Prefix, plainTile16x16));
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(
-        ax, fp8Prefix, mxTile(16, 16, 128, false, false, 2, 32, 8)));
+    const std::vector<RocRollerSelectedTile> ranked = {tile(16, 16, 128, false, false)};
+    const RocRollerKernelTraits              wgm    = kernel(128, 128, 128, true);
+    const RocRollerKernelTraits              plain  = kernel(128, 128, 128, false);
 
-    const char* const bOnly
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SB_BE8M0_32_WGT_16x16x128_UR_2";
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(bOnly, fp8Prefix, plainTile16x16));
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(
-        bOnly, fp8Prefix, mxTile(16, 16, 128, false, false, 2, 0, 1, 32, 1)));
+    EXPECT_EQ(rocRollerFallbackRank(wgm, ranked, 4095, 0).mismatches, 1);
+    EXPECT_EQ(rocRollerFallbackRank(plain, ranked, 4095, 0).mismatches, 0);
+    EXPECT_EQ(rocRollerFallbackRank(wgm, ranked, 4096, 0).mismatches, 0);
+    EXPECT_EQ(rocRollerFallbackRank(plain, ranked, 4096, 0).mismatches, 1);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackBreaksAFullTieOnTheSolutionIndex)
+{
+    const std::vector<RocRollerSelectedTile> ranked = {tile(64, 64, 128, false, false)};
+
+    std::vector<RocRollerFallbackRank> ranks = {rocRollerFallbackRank(plain16x16, ranked, 1024, 12),
+                                                rocRollerFallbackRank(plain16x16, ranked, 1024, 4),
+                                                rocRollerFallbackRank(plain16x16, ranked, 1024, 8)};
+    std::sort(ranks.begin(), ranks.end());
+    EXPECT_EQ(ranks[0].solutionIndex, 4);
+    EXPECT_EQ(ranks[1].solutionIndex, 8);
+    EXPECT_EQ(ranks[2].solutionIndex, 12);
 }

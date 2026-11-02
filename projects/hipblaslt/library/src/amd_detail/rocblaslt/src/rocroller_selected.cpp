@@ -36,15 +36,7 @@ rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& p
         return rocblaslt_status_invalid_value;
 
     const KernelType kernelType = genKernelType(prob);
-    const auto ranked = chooseSolutionIndexParameters(kernelType, prob, -1);
-    // Same inputs parameter_selection.cpp feeds preferredUnrolling. The name
-    // records that unroll, so the match has to ask for it.
-    const bool hasPreSwizzle = kernelType.scaleTypeA.preSwizzleTile.size() == 3
-                               && kernelType.scaleTypeB.preSwizzleTile.size() == 3;
-    const bool hasPreTile    = kernelType.scaleTypeA.preTile.size() == 2
-                            && kernelType.scaleTypeB.preTile.size() == 2;
-    const bool blockA = isBlockScaling(kernelType.scaleTypeA.format);
-    const bool blockB = isBlockScaling(kernelType.scaleTypeB.format);
+    const auto       ranked     = chooseSolutionIndexParameters(kernelType, prob, -1);
     tiles.reserve(ranked.size());
     for(const SolutionIndexParameters& params : ranked)
     {
@@ -56,21 +48,6 @@ rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& p
         tile.streamK          = params.streamK;
         tile.nonTemporalA     = params.nonTemporalA;
         tile.nonTemporalB     = params.nonTemporalB;
-        tile.unroll           = preferredUnrolling(kernelType.typeA,
-                                         kernelType.typeB,
-                                         params.workgroupTile,
-                                         hasPreSwizzle,
-                                         hasPreTile);
-        if(blockA)
-        {
-            tile.scaleABlockRow = static_cast<int>(kernelType.scaleTypeA.blockRowSize);
-            tile.scaleABlockCol = static_cast<int>(kernelType.scaleTypeA.blockColSize);
-        }
-        if(blockB)
-        {
-            tile.scaleBBlockCol = static_cast<int>(kernelType.scaleTypeB.blockColSize);
-            tile.scaleBBlockRow = static_cast<int>(kernelType.scaleTypeB.blockRowSize);
-        }
         tiles.push_back(tile);
     }
     return rocblaslt_status_success;

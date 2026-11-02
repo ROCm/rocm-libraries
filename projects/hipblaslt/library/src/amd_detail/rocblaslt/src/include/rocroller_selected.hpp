@@ -5,8 +5,9 @@
 
 #include "rocblaslt.h"
 
-// RocRollerSelectedTile and the kernel-name match, in a header that depends on
-// nothing but <string> so they can be unit-tested GPU-free.
+// RocRollerSelectedTile and the checked-in kernel match, in a header that
+// depends on nothing but the standard library so they can be unit-tested
+// GPU-free.
 #include "rocroller_kernel_match.hpp"
 
 #include <vector>

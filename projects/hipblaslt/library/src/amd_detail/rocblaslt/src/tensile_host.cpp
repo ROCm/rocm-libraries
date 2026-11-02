@@ -3839,7 +3839,7 @@ struct TensileDataGemm
     // The rocblaslt-level problem this object was created from. The object API
     // otherwise drops it at create time and keeps only the Tensile problem, but the
     // whole rocRoller path needs it: useRocRoller() reads scaleAType/scaleBType
-    // together with the operand types, and getRocRollerBestSolutions and
+    // together with the operand types, and getRocRollerSelectedSolutions and
     // runRocRollerContractionProblem take the rocblaslt problem itself rather than
     // the Tensile one. Keeping it lets the object API make, and then act on, the
     // same routing decision as the C API. gemmCreate refreshes it on every
@@ -4176,6 +4176,57 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
     return handle->useRocRoller == 1
            || (handle->useRocRoller == -1
                && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)));
+}
+
+namespace
+{
+    bool isMxOperandType(hipDataType type)
+    {
+        switch(static_cast<int>(type))
+        {
+        case HIP_R_8F_E4M3:
+        case HIP_R_8F_E5M2:
+        case HIP_R_6F_E2M3:
+        case HIP_R_6F_E3M2:
+        case HIP_R_4F_E2M1:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    bool isFp6OrBf6Type(hipDataType type)
+    {
+        return static_cast<int>(type) == HIP_R_6F_E2M3 || static_cast<int>(type) == HIP_R_6F_E3M2;
+    }
+}
+
+// A rocRoller problem that only a checked-in rocRoller kernel may serve: compact
+// (not host-pre-swizzled) block scales on both operands on gfx950, MX operand
+// types on both sides, and an FP6/BF6 operand or a mixed pair. Selection does
+// not fall back to the Tensile heuristic for these; an empty rocRoller list is
+// the answer.
+static bool packedMustUseRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
+{
+    if(!useRocRoller(handle, prob))
+        return false;
+
+    using SF = RocblasltContractionProblem::ScalingFormat;
+    if(prob.scaleAType != SF::Block_32_UE8M0 || prob.scaleBType != SF::Block_32_UE8M0)
+        return false;
+    if(!isMxOperandType(prob.a_type) || !isMxOperandType(prob.b_type))
+        return false;
+    if(!isFp6OrBf6Type(prob.a_type) && !isFp6OrBf6Type(prob.b_type) && prob.a_type == prob.b_type)
+        return false;
+
+    return mxScaleTensorNeedsPaddingFreeDim();
+}
+
+static void logNoRocRollerKernel(const char* func)
+{
+    log_error(func,
+              "no checked-in rocRoller kernel accepts this compact-scale FP6/BF6 or mixed MX "
+              "problem, and it has no Tensile fallback");
 }
 
 namespace
@@ -5961,8 +6012,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // a call that picked no algo is still free to choose.
         if(useRocRoller(handle, prob) && (algo == nullptr || isRocRollerAlgo(algo)))
         {
-            const rocblaslt_status rrStatus
-                = runRocRollerContractionProblem(handle, algo, prob);
+            const rocblaslt_status rrStatus = runRocRollerContractionProblem(handle, algo, prob);
             // not_implemented is rocRoller's "no kernel fits"; anything else,
             // including a launch failure, belongs to the caller. An algo the
             // caller chose is never replaced.
@@ -7642,56 +7692,121 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     return solutions;
 }
 
-static const char* rocRollerTypeToken(hipDataType type)
+namespace
 {
-    if(static_cast<int>(type) == HIP_R_6F_E2M3)
-        return "FP6";
-    if(static_cast<int>(type) == HIP_R_6F_E3M2)
-        return "BF6";
-    if(static_cast<int>(type) == HIP_R_4F_E2M1)
-        return "FP4";
-    switch(type)
+    // A checked-in rocRoller kernel as the selector sees it.
+    struct RocRollerCheckedInKernel
     {
-    case HIP_R_16F:
-        return "Half";
-    case HIP_R_32F:
-        return "Float";
-    case HIP_R_16BF:
-        return "BFloat16";
-    case HIP_R_8F_E4M3:
-    case HIP_R_8F_E4M3_FNUZ:
-        return "FP8";
-    case HIP_R_8F_E5M2:
-    case HIP_R_8F_E5M2_FNUZ:
-        return "BF8";
-    default:
-        return "";
+        RocRollerKernelTraits                             traits;
+        std::shared_ptr<TensileLite::ContractionSolution> solution;
+    };
+
+    RocRollerKernelTraits rocRollerKernelTraits(const TensileLite::ContractionSolution& solution)
+    {
+        const auto&           kernel = solution.customKernel;
+        RocRollerKernelTraits traits;
+        traits.m = static_cast<int>(kernel.macrotile.x);
+        traits.n = static_cast<int>(kernel.macrotile.y);
+        traits.k = static_cast<int>(kernel.macrotile.z);
+        traits.workgroupMapping
+            = std::any_of(kernel.args.begin(), kernel.args.end(), [](const auto& arg) {
+                  return arg.semantic == TensileLite::CustomArgSemantic::RR_WorkgroupMapping;
+              });
+        return traits;
+    }
+
+    // The external custom kernels the library holds for this problem's type,
+    // in solution-index order. The same walk getAllSolutions makes, which loads
+    // only the problem's shards. Generated Tensile solutions are not
+    // candidates: a ranked rocRoller tile can only be served by a captured
+    // kernel.
+    std::vector<RocRollerCheckedInKernel> rocRollerCheckedInKernels(
+        const TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>& library,
+        const TensileLite::ContractionProblemGemm&                                     problem,
+        const TensileLite::Hardware&                                                   hardware)
+    {
+        std::vector<std::shared_ptr<TensileLite::ContractionSolution>> solutions;
+        for(const auto& solution : library.findAllSolutions(
+                problem, hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY))
+        {
+            if(solution && !solution->customKernel.name.empty()
+               && !solution->customKernel.generated)
+                solutions.push_back(solution);
+        }
+        // findAllSolutions returns a set of pointers, whose order is not stable
+        // across processes, and can hold one index twice (see getAllSolutions).
+        std::sort(solutions.begin(), solutions.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs->index < rhs->index;
+        });
+        solutions.erase(
+            std::unique(solutions.begin(),
+                        solutions.end(),
+                        [](const auto& lhs, const auto& rhs) { return lhs->index == rhs->index; }),
+            solutions.end());
+
+        std::vector<RocRollerCheckedInKernel> kernels;
+        kernels.reserve(solutions.size());
+        for(auto& solution : solutions)
+            kernels.push_back({rocRollerKernelTraits(*solution), std::move(solution)});
+        return kernels;
     }
 }
 
-static bool matchesRocRollerSelectedKernel(const std::string&                 kernel,
-                             const RocblasltContractionProblem& prob,
-                             const RocRollerSelectedTile&                     tile)
+// No ranked tile has an accepting checked-in kernel, typically because the
+// ranker asks for a WGM or StreamK variant of a tile that is not checked in.
+// Choose among the accepting kernels in RocRollerFallbackRank order, with M and
+// K whole multiples of the tile as the ranked lookup requires. cap < 0 returns
+// every candidate.
+template <typename Accepts, typename FitsWorkspace>
+static std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
+    selectRocRollerFallback(const RocblasltContractionProblem&           prob,
+                            const std::vector<RocRollerSelectedTile>&    ranked,
+                            const std::vector<RocRollerCheckedInKernel>& kernels,
+                            const Accepts&                               accepts,
+                            const FitsWorkspace&                         fitsWorkspace,
+                            int                                          cap)
 {
-    if(tile.nonTemporalA || tile.nonTemporalB)
-        return false;
-    if(rocRollerTypeToken(prob.a_type)[0] == '\0' || rocRollerTypeToken(prob.c_type)[0] == '\0')
-        return false;
+    std::vector<std::pair<RocRollerFallbackRank, const RocRollerCheckedInKernel*>> candidates;
+    for(const auto& kernel : kernels)
+    {
+        const RocRollerKernelTraits& traits = kernel.traits;
+        if(traits.m <= 0 || traits.n <= 0 || traits.k <= 0)
+            continue;
+        if(prob.m % traits.m != 0 || prob.k % traits.k != 0)
+            continue;
+        if(!accepts(*kernel.solution) || !fitsWorkspace(*kernel.solution))
+            continue;
+        candidates.emplace_back(
+            rocRollerFallbackRank(traits, ranked, prob.k, kernel.solution->index), &kernel);
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
 
-    const char transA = prob.trans_a == HIPBLAS_OP_T ? 'T' : 'N';
-    const char transB = prob.trans_b == HIPBLAS_OP_T ? 'T' : 'N';
-    const std::string prefix = std::string("RR_GEMM_") + transA + transB + "_"
-                               + rocRollerTypeToken(prob.a_type) + "_" + rocRollerTypeToken(prob.b_type) + "_"
-                               + rocRollerTypeToken(prob.c_type) + "_" + rocRollerTypeToken(prob.d_type)
-                               + "_Float_";
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
+    for(const auto& candidate : candidates)
+    {
+        if(cap >= 0 && static_cast<int>(chosen.size()) >= cap)
+            break;
+        chosen.push_back(candidate.second->solution);
+    }
 
-    return rocRollerKernelNameMatchesTile(kernel, prefix, tile);
+    if(!chosen.empty() && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
+    {
+        std::ostringstream msg;
+        msg << "no ranked rocRoller tile has an accepting checked-in kernel; fallback chose "
+            << chosen.front()->KernelName() << " of " << candidates.size() << " candidates";
+        log_info(__func__, msg.str());
+    }
+    return chosen;
 }
 
-// rocRoller-off substitute for getRocRollerBestSolutions. Rank order comes from
-// chooseSolutionIndexParameters. A ranked tile is kept only when a checked-in kernel matches it
-// by name and that kernel's own predicates accept the problem.
-// No match yields an empty list, which the caller reports as not implemented.
+// Checked-in rocRoller selection, the same on both builds. Rank order comes from
+// chooseSolutionIndexParameters. A ranked tile is kept only when exactly one
+// checked-in kernel implements it and that kernel's own predicates accept the
+// problem. When no ranked tile is kept, selectRocRollerFallback picks among the
+// checked-in kernels that accept the problem. Still nothing yields an empty
+// list, and the caller decides whether the Tensile heuristic may answer instead.
 // Problems outside useRocRoller() never reach this function.
 static rocblaslt_status
     getRocRollerSelectedSolutions(rocblaslt_handle                   handle,
@@ -7714,9 +7829,25 @@ static rocblaslt_status
     if(!library || !hardware)
         return rocblaslt_status_invalid_pointer;
 
-    library->materializeAllSolutions();
+    auto       tensileProblem = ConstructTensileProblem(prob);
+    const auto kernels        = rocRollerCheckedInKernels(*library, tensileProblem, *hardware);
 
-    auto tensileProblem = ConstructTensileProblem(prob);
+    // A tile match does not establish eligibility: for example, a one-sided MX
+    // problem must not use a kernel that reads both scale tensors, and the scale
+    // layout, size multiples, batch count and buffer-addressing extent a kernel
+    // was captured under live in its predicates. Hardware and problem only:
+    // taskPredicate needs a Task, which needs the workspace size that is checked
+    // separately.
+    auto accepts = [&](const TensileLite::ContractionSolution& solution) {
+        if(solution.hardwarePredicate && !(*solution.hardwarePredicate)(*hardware))
+            return false;
+        return !solution.problemPredicate || (*solution.problemPredicate)(tensileProblem);
+    };
+    // Heuristic conversion reports workspace requirements but does not filter
+    // them, so reject kernels that exceed the caller's budget here.
+    auto fitsWorkspace = [&](const TensileLite::ContractionSolution& solution) {
+        return solution.requiredWorkspaceSize(tensileProblem, *hardware) <= maxWorkSpaceBytes;
+    };
 
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
     const int cap = requestedAlgoCount < 0 ? static_cast<int>(ranked.size()) : requestedAlgoCount;
@@ -7735,41 +7866,23 @@ static rocblaslt_status
             continue;
 
         std::shared_ptr<TensileLite::ContractionSolution> found;
-        int                                               nameMatches = 0;
+        int                                               matches = 0;
+        for(const auto& kernel : kernels)
         {
-            std::lock_guard<std::mutex> lock(library->solutionsGuard);
-            for(auto const& entry : library->solutions)
-            {
-                if(!entry.second)
-                    continue;
-                if(!matchesRocRollerSelectedKernel(entry.second->KernelName(), prob, tile)
-                   && !matchesRocRollerSelectedKernel(entry.second->name(), prob, tile))
-                    continue;
-
-                // A name match does not establish eligibility: for example, a
-                // one-sided MX problem must not use a kernel that reads both
-                // scale tensors. Workspace is checked separately below.
-                if(entry.second->hardwarePredicate
-                   && !(*entry.second->hardwarePredicate)(*hardware))
-                    continue;
-                if(entry.second->problemPredicate
-                   && !(*entry.second->problemPredicate)(tensileProblem))
-                    continue;
-
-                found = entry.second;
-                ++nameMatches;
-                // Map order is not a rank. A second hit means two kernels still
-                // describe this tile; keep scanning only long enough to know.
-                if(nameMatches > 1)
-                    break;
-            }
+            if(!rocRollerKernelMatchesTile(kernel.traits, tile) || !accepts(*kernel.solution))
+                continue;
+            found = kernel.solution;
+            // A second hit means two kernels still implement this tile; scan
+            // only long enough to know.
+            if(++matches > 1)
+                break;
         }
         // One kernel per ranked tile. Zero is "not checked in". Two or more
-        // is ambiguous: taking the first would launch whichever solution the
-        // map happened to yield.
-        if(nameMatches != 1)
+        // is ambiguous: taking the first would launch whichever solution
+        // happened to come first.
+        if(matches != 1)
         {
-            if(nameMatches > 1 && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
+            if(matches > 1 && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
             {
                 std::ostringstream msg;
                 msg << "skipping rocRoller tile " << tile.m << "x" << tile.n << "x" << tile.k
@@ -7778,13 +7891,15 @@ static rocblaslt_status
             }
             continue;
         }
-        // Heuristic conversion reports workspace requirements but does not
-        // filter them, so reject kernels that exceed the caller's budget here.
-        if(found->requiredWorkspaceSize(tensileProblem, *hardware) > maxWorkSpaceBytes)
+        if(!fitsWorkspace(*found))
             continue;
 
         chosen.push_back(found);
     }
+
+    if(chosen.empty() && !ranked.empty())
+        chosen = selectRocRollerFallback(
+            prob, ranked, kernels, accepts, fitsWorkspace, requestedAlgoCount < 0 ? -1 : cap);
 
     const int convertCount = requestedAlgoCount < 0 ? static_cast<int>(chosen.size())
                                                     : requestedAlgoCount;
@@ -7845,13 +7960,19 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     if(useRocRoller(handle, prob))
     {
 #ifdef HIPBLASLT_USE_ROCROLLER
-        const rocblaslt_status rrStatus = getRocRollerBestSolutions(
-            handle, prob, requestedAlgoCount, heuristicResultsArray, maxWorkSpaceBytes,
-            returnAlgoCount);
+        const rocblaslt_status rrStatus = getRocRollerBestSolutions(handle,
+                                                                    prob,
+                                                                    requestedAlgoCount,
+                                                                    heuristicResultsArray,
+                                                                    maxWorkSpaceBytes,
+                                                                    returnAlgoCount);
 #else
-        const rocblaslt_status rrStatus = getRocRollerSelectedSolutions(
-            handle, prob, requestedAlgoCount, heuristicResultsArray, maxWorkSpaceBytes,
-            returnAlgoCount);
+        const rocblaslt_status rrStatus = getRocRollerSelectedSolutions(handle,
+                                                                        prob,
+                                                                        requestedAlgoCount,
+                                                                        heuristicResultsArray,
+                                                                        maxWorkSpaceBytes,
+                                                                        returnAlgoCount);
 #endif
         if(rrStatus == rocblaslt_status_success && *returnAlgoCount > 0)
             return rrStatus;
@@ -7865,6 +7986,11 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                    0,
                    sizeof(rocblaslt_matmul_heuristic_result) * requestedAlgoCount);
         *returnAlgoCount = 0;
+        if(packedMustUseRocRoller(handle, prob))
+        {
+            logNoRocRollerKernel(__func__);
+            return rocblaslt_status_not_implemented;
+        }
     }
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
@@ -8059,10 +8185,17 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
         const rocblaslt_status                         rrStatus
             = getAllSolutionsRocRoller(prob, handle, ranked, maxWorkSpaceBytes);
 #else
+        // The array bounds the request: a fallback list is every accepting
+        // kernel, not one per ranked tile.
         std::vector<rocblaslt_matmul_heuristic_result> ranked(160);
         int                                            count    = 0;
-        const rocblaslt_status                         rrStatus = getRocRollerSelectedSolutions(
-            handle, prob, -1, ranked.data(), maxWorkSpaceBytes, &count);
+        const rocblaslt_status                         rrStatus
+            = getRocRollerSelectedSolutions(handle,
+                                            prob,
+                                            static_cast<int>(ranked.size()),
+                                            ranked.data(),
+                                            maxWorkSpaceBytes,
+                                            &count);
         ranked.resize(static_cast<size_t>(std::max(count, 0)));
 #endif
         // Same fallback as getBestSolutions: an empty rocRoller list means no
@@ -8071,6 +8204,12 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
         {
             heuristicResults = std::move(ranked);
             return rocblaslt_status_success;
+        }
+        if(packedMustUseRocRoller(handle, prob))
+        {
+            logNoRocRollerKernel(__func__);
+            heuristicResults.clear();
+            return rocblaslt_status_not_implemented;
         }
     }
     auto tensile_prob = ConstructTensileProblem(prob);
@@ -8573,9 +8712,9 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
 
 #ifdef HIPBLASLT_USE_ROCROLLER
         // Mirrors the C API: a JIT solution is not in the Tensile library, so the
-        // Tensile predicate check below cannot validate it. OFF needs no branch --
-        // its rocRoller selections are ordinary Tensile solutions.
-        if(gemmDataUsesRocRoller(handle, data))
+        // Tensile predicate check below cannot validate it. A checked-in
+        // rocRoller selection is an ordinary Tensile solution on both builds.
+        if(gemmDataUsesRocRoller(handle, data) && isRocRollerAlgo(&algo))
             return isRocRollerSolutionSupported(
                 handle, *data->rocProblem, &algo, &workspaceSizeInBytes);
 #endif
@@ -8677,12 +8816,17 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
             const rocblaslt_status rrStatus = rocRollerBestSolutionsVector(
                 handle, *data->rocProblem, requestedAlgoCount, workspaceBytes, heuristicResults);
             // Only commit to rocRoller when it actually produced something. The
-            // rocRoller-off matcher keeps a name-matched kernel only when that
-            // kernel's own hardware and problem predicates accept the problem, so it
+            // checked-in selector keeps a kernel only when that kernel's own
+            // hardware and problem predicates accept the problem, so it
             // legitimately declines sizes outside them; without this the object API
             // would go from a working Tensile solution to none at all for those.
             if(rrStatus != rocblaslt_status_success || !heuristicResults.empty())
                 return rrStatus;
+            if(packedMustUseRocRoller(handle, *data->rocProblem))
+            {
+                logNoRocRollerKernel(__func__);
+                return rocblaslt_status_not_implemented;
+            }
         }
 
         data->problem.setWorkspaceSize(workspaceBytes);
