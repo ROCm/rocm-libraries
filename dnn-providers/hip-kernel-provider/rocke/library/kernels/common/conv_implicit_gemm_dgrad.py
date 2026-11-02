@@ -615,6 +615,7 @@ def pp_box_sub_gemms(
     tile_k: int = 32,
     max_split: int = 1,
     cus: int = 0,
+    interior: bool = False,
 ) -> List[SubGemmParams]:
     """The sub-GEMM records of a ``pp_boxes`` binary (stride 1, dilation 1).
 
@@ -628,16 +629,20 @@ def pp_box_sub_gemms(
     [yb, yb + ys) and columns [xb, xb + xs) (y_dot_slice / b_y_offset,
     x_dot_slice / b_x_offset), dX row h = htl + hb (d_h_offset); K runs the
     full depth (Z) of the filter.
+
+    ``interior`` (KernelIdentity.dx_interior, a halo-form problem): the
+    records cover only the dX voxels at least (F - 1) / 2 from every border
+    of each axis; the halo shell gets no record.
     """
 
-    def runs(n_in, n_out, pad, filt, nclass):
-        rng = []
-        for h in range(n_in):
+    def runs(n_in, n_out, pad, filt, nclass, skip=0):
+        rng = {}
+        for h in range(skip, n_in - skip):
             lo = max(0, h + pad - n_out + 1)
             hi = min(filt - 1, h + pad)
-            rng.append((lo, hi))
+            rng[h] = (lo, hi)
         out = []  # (begin, size, flo, fhi)
-        for h, r in enumerate(rng):
+        for h, r in rng.items():
             if out and (out[-1][2], out[-1][3]) == r and out[-1][0] + out[-1][1] == h:
                 b0, sz, lo, hi = out[-1]
                 out[-1] = (b0, sz + 1, lo, hi)
@@ -646,7 +651,7 @@ def pp_box_sub_gemms(
         if nclass == 1:
             lo = min(q[2] for q in out)
             hi = max(q[3] for q in out)
-            return [(0, n_in, lo, hi)]
+            return [(skip, n_in - 2 * skip, lo, hi)]
         if nclass == 3 and len(out) > 3:
             # interior = the largest run; merge everything before / after it.
             k = max(range(len(out)), key=lambda i: out[i][1])
@@ -680,7 +685,7 @@ def pp_box_sub_gemms(
     if nclass in (7, 77):
         return _pp_pixel_list_sub_gemms(
             p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus,
-            axis_runs=runs, cheap_tail=nclass == 77,
+            axis_runs=runs, cheap_tail=nclass == 77, interior=interior,
         )
     # Classes per axis (D, H, W): 3 / 5 = (1, n, n); 33 / 55 = (n, n, n);
     # three digits ``dhw`` = per axis (1 = one run, 3, 5), e.g. 131 = H only.
@@ -690,10 +695,11 @@ def pp_box_sub_gemms(
         dc = hc = wc = nclass // 11
     else:
         dc, hc, wc = 1, nclass, nclass
-    hr = runs(p.Hi, p.Ho, p.pH, p.Y, hc)
-    wr = runs(p.Wi, p.Wo, p.pW, p.X, wc)
+    _sk = (lambda f: (f - 1) // 2) if interior else (lambda f: 0)
+    hr = runs(p.Hi, p.Ho, p.pH, p.Y, hc, _sk(p.Y))
+    wr = runs(p.Wi, p.Wo, p.pW, p.X, wc, _sk(p.X))
     if p.is_3d:
-        dr = runs(p.Di, p.Do, p.pD, p.Z, dc)
+        dr = runs(p.Di, p.Do, p.pD, p.Z, dc, _sk(p.Z))
     else:
         dr = [(0, 1, 0, 0)]
     boxes = [(d, h, w) for d in dr for h in hr for w in wr]
@@ -843,6 +849,7 @@ def _pp_pixel_list_sub_gemms(
     cus: int,
     axis_runs,
     cheap_tail: bool = False,
+    interior: bool = False,
 ) -> List[SubGemmParams]:
     """``pp_boxes`` 7 (77: ``cheap_tail``): records of M tiles of up to ``tile_m`` dX pixels
     that need not form a box (their indices ride in the record's row list),
@@ -857,12 +864,13 @@ def _pp_pixel_list_sub_gemms(
     offsets are the tile's union ranges. Split-K degrees and the order are
     pp_boxes' (longest slice first, within ``cus`` workgroups).
     """
+    _sk = (lambda f: (f - 1) // 2) if interior else (lambda f: 0)
     if p.is_3d:
-        dr = axis_runs(p.Di, p.Do, p.pD, p.Z, 5)
+        dr = axis_runs(p.Di, p.Do, p.pD, p.Z, 5, _sk(p.Z))
     else:
         dr = [(0, 1, 0, 0)]
-    hr = axis_runs(p.Hi, p.Ho, p.pH, p.Y, 5)
-    wr = axis_runs(p.Wi, p.Wo, p.pW, p.X, 5)
+    hr = axis_runs(p.Hi, p.Ho, p.pH, p.Y, 5, _sk(p.Y))
+    wr = axis_runs(p.Wi, p.Wo, p.pW, p.X, 5, _sk(p.X))
     Di = p.Di if p.is_3d else 1
     hw = p.Hi * p.Wi
     classes = []  # (pixel list, (zlo, zhi, ylo, yhi, xlo, xhi))

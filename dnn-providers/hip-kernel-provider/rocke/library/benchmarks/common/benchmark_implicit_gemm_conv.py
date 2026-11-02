@@ -7058,6 +7058,7 @@ def _cached_bind_interior(
         build_dgrad_halo_zero,
         dgrad_halo_zero_signature,
         dx_interior_keeps_w,
+        dx_interior_uses_view,
         halo_zero_launch,
         interior_view_dx,
         interior_view_problem,
@@ -7066,17 +7067,21 @@ def _cached_bind_interior(
 
     from benchmarks.common.kernel_sweep import _launch_values_for
 
-    keep_w = dx_interior_keeps_w(ident)
-    vp = interior_view_problem(problem, keep_w)
-    off_e, stride_vals = interior_view_dx(problem, keep_w)
     n_elem = problem.N * (problem.Di if problem.is_3d else 1) * problem.Hi * problem.Wi * problem.C
     eb = sizes[2] // n_elem
+    if dx_interior_uses_view(ident):
+        keep_w = dx_interior_keeps_w(ident)
+        vp = interior_view_problem(problem, keep_w)
+        off_e, stride_vals = interior_view_dx(problem, keep_w)
+        pix_map = view_pixel_map(problem, keep_w)
+    else:
+        # pp_boxes: interior records of the halo problem (dgrad_sub_gemms).
+        vp, off_e, stride_vals, pix_map = problem, 0, {}, None
     vptrs = (ptrs[0], ptrs[1], ptrs[2] + off_e * eb)
     vsizes = (sizes[0], sizes[1], sizes[2] - off_e * eb)
     try:
         extras, grid = _extras_and_grid(
-            "dgrad", vp, ident, rt, case_dtype, split_k=split_k,
-            pbd_pix_map=view_pixel_map(problem, keep_w),
+            "dgrad", vp, ident, rt, case_dtype, split_k=split_k, pbd_pix_map=pix_map,
         )
     except ValueError as e:
         print(f"  [skip] {ident.label()}: {e}", flush=True)

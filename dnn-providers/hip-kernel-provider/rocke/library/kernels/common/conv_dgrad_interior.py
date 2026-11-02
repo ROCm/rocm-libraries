@@ -11,23 +11,31 @@ dX over the whole input, the halo shell included. When the model discards the
 shell's gradient (it came from a pad whose backward is a slice), only the
 interior is needed.
 
+Two launch forms, both without a binary change:
+
+* ``pp_boxes`` kernels: the records (pp_box_sub_gemms(interior=True)) cover
+  the interior voxels only -- the box runs / pixel classes start and end
+  ``(F - 1) / 2`` inside every axis. The problem, its dense dX store and the
+  pp_box_det stage 2 are the halo problem's own.
+* every other kernel (the x-halo loop): the view problem below.
+
 The interior is itself a dgrad: interior voxel ``(d + hd, h + hh, w + hw)`` of
 the halo problem reads exactly the dY pixels voxel ``(d, h, w)`` of the
 *same-size* problem reads -- input extents = output extents, pads
 ``(hd, hh, hw)``, the same dY and W. So an interior launch is the binary's own
 launch on that **view problem**, with the dX pointer moved to voxel
 ``(hd, hh, hw)`` of the full tensor and the full tensor's dX strides in the
-kernargs (every dgrad kernel takes its dX strides as kernargs). No binary
-changes: ``dx_interior`` is a launch-time identity field, like ``pp_box_cus``.
+kernargs (the x-halo kernels take their dX strides as kernargs; the pp_boxes box
+epilogue does not, hence its record form). ``dx_interior`` is a launch-time
+identity field, like ``pp_box_cus``.
 
 * The x-halo loops (``tapk_xhalo``, ``tapk_pp_xhalo``) serve ``pW == 0`` only,
   so their view keeps the full W rows: pads ``(hd, hh, 0)``, extents
   ``(Do, Ho, Wi)``, offset ``(hd, hh, 0)``. The ``hw`` columns at each end of
   an interior row are computed as before (exact values); the D and H shell is
   skipped.
-* ``pp_box_det`` stage 2 stores by dense dX pixel index: its rows are mapped
-  from view to full-tensor pixel indices (:func:`view_pixel_map`) and it
-  stores through the full tensor.
+* (:func:`view_pixel_map` maps view pixel indices to full-tensor ones, for a
+  dense-index stage such as the pp_box_det stage 2 under a view launch.)
 
 Modes (``dx_interior``): 1 = skip (the shell is not written), 2 = zero-fill
 (after the main launch, :func:`build_dgrad_halo_zero` writes zeros over the
@@ -48,9 +56,16 @@ DXI_ZERO = 2
 DXI_MODES = (DXI_SKIP, DXI_ZERO)
 
 
+def dx_interior_uses_view(identity) -> bool:
+    """Is ``identity``'s interior launched as the view problem? (pp_boxes:
+    no -- its records are restricted to the interior of the halo problem.)"""
+    return not getattr(identity, "pp_boxes", 0)
+
+
 def dx_interior_keeps_w(identity) -> bool:
-    """Does ``identity``'s interior view keep the full W rows (pW == 0 loops)?"""
-    return bool(getattr(identity, "tapk_xhalo", False) or getattr(identity, "tapk_pp_xhalo", 0))
+    """Does ``identity``'s interior launch write the full W rows of interior
+    (d, h) rows? (The x-halo loop serves pW == 0 only, so its view keeps them.)"""
+    return dx_interior_uses_view(identity) and bool(getattr(identity, "tapk_xhalo", False))
 
 
 def halo_widths(p) -> Tuple[int, int, int]:

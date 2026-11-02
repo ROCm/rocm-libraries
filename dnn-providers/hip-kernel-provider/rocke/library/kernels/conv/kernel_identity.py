@@ -719,6 +719,7 @@ def dgrad_sub_gemms(identity: KernelIdentity, problem: object) -> list:
             tile_k=identity.tile_k,
             max_split=max(1, identity.split_k),
             cus=getattr(identity, "pp_box_cus", 0),
+            interior=bool(getattr(identity, "dx_interior", 0)),
         )
     if identity.patch:
         return patch_sub_gemms(
@@ -1157,6 +1158,12 @@ def identity_supports_problem(
         ok, why = dx_interior_problem_ok(problem)
         if not ok:
             return False, why
+        if identity.pp_boxes:
+            # pp_boxes: the halo problem itself, records on the interior only
+            # (pp_box_sub_gemms(interior=True)); the dX store is the dense one.
+            return identity_supports_problem(
+                dataclasses.replace(identity, dx_interior=0), problem, llvm_flavor
+            )
         base = dataclasses.replace(identity, dx_interior=0)
         return identity_supports_problem(
             base, interior_view_problem(problem, dx_interior_keeps_w(identity)), llvm_flavor
