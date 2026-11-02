@@ -7680,3 +7680,208 @@ def test_catalog_flag_misuse_is_a_usage_error(extra, message, capsys):
         fuzz.parse_args(["--binary", "bin", *extra])
     assert info.value.code == 2
     assert message in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# R2: probe expectations (`expect`)
+# --------------------------------------------------------------------------
+
+
+def _expect_run(run, tmp_path, *, expect=None, metadata=None, samples=6, **control):
+    """A driver run of the Toy space (axis ``a`` in 1..3) with ``expect`` and ``metadata``
+    applied; the stub's behaviour per case comes from ``control`` (``match`` rules on ``a``).
+    """
+    spaces = tmp_path / "spaces"
+    spaces.mkdir(exist_ok=True)
+    overrides = {}
+    if expect is not None:
+        overrides["expect"] = expect
+    if metadata is not None:
+        overrides["case"] = {
+            "values": {"a": "${a}", "n": "${n}"},
+            "metadata": metadata,
+        }
+    write_space(spaces, **overrides)
+    run.control(**control)
+    code = run.run("--samples", str(samples), "--spaces-dir", str(spaces), space=None)
+    return code, run.summary["engines"]["STUB_ENGINE"]["spaces"]["Toy/Default"]
+
+
+def _by_a(behaviours):
+    return [
+        {"where": [{"path": "values.a", "op": "==", "value": a}], "behaviour": b}
+        for a, b in behaviours.items()
+    ]
+
+
+def test_a_probe_case_that_misses_its_expect_is_a_reported_violation(run, tmp_path):
+    # bug caught: a probe the engine accepted (or got wrong) where a decline was expected counts
+    # as met, so a rejection gap never shows in the summary
+    code, space = _expect_run(
+        run,
+        tmp_path,
+        expect="declined",
+        match=_by_a({1: "pass", 2: "declined", 3: "wrong"}),
+    )
+    results = {o["case"]: o for o in run.outcome_list}
+    by_a = {}
+    for o in run.outcome_list:
+        by_a.setdefault(o["outcome"], []).append(o["case"])
+    ex = space["expectations"]
+    declined = len(by_a.get("DECLINED", []))
+    assert declined and ex["met"] == declined
+    assert ex["violated"] == len(run.outcome_list) - declined
+    assert {v["case"] for v in ex["violations"]} == {
+        o["case"] for o in run.outcome_list if o["outcome"] != "DECLINED"
+    }
+    reasons = {v["outcome"]: v["reason"] for v in ex["violations"]}
+    assert reasons["PASS"] == "accepted where a decline was expected"
+    assert reasons["WRONG"] == "WRONG"
+    assert all(v["expected"] == "declined" for v in ex["violations"])
+    assert all(
+        results[v["case"]]["expectation"] == "violated" for v in ex["violations"]
+    )
+    assert (
+        code == 1
+    )  # the WRONG case; a violation of another kind never changes the exit status
+
+
+def test_a_declined_or_pass_expectation_is_met_by_a_pass_and_never_by_a_wrong_result(
+    run, tmp_path
+):
+    # bug caught: WRONG or CRASH met an expectation because the case "ran"
+    code, space = _expect_run(
+        run,
+        tmp_path,
+        expect="declined_or_pass",
+        match=_by_a({1: "pass", 2: "declined", 3: "crash_engine"}),
+    )
+    by_outcome = {o["outcome"] for o in run.outcome_list}
+    assert by_outcome <= {"PASS", "DECLINED", "CRASH"}
+    met = [o for o in run.outcome_list if o["outcome"] in ("PASS", "DECLINED")]
+    ex = space["expectations"]
+    assert ex["met"] == len(met) and ex["violated"] == len(run.outcome_list) - len(met)
+    assert {v["outcome"] for v in ex["violations"]} <= {"CRASH"}
+    assert code == 1
+
+
+def test_a_probe_space_without_expect_expects_declined_or_pass(run, tmp_path):
+    # bug caught: an unexercised probe case (nothing verified it) passes as "met" when the space
+    # declares no expectation
+    code, space = _expect_run(
+        run, tmp_path, match=_by_a({1: "unexercised", 2: "pass", 3: "declined"})
+    )
+    ex = space["expectations"]
+    statuses = {o["case"]: o["expectation"] for o in run.outcome_list}
+    assert all(o["expect"] == "declined_or_pass" for o in run.outcome_list)
+    assert {o["outcome"] for o in run.outcome_list if statuses[o["case"]] == "met"} <= {
+        "PASS",
+        "DECLINED",
+    }
+    unexercised = [o for o in run.outcome_list if o["outcome"] == "UNEXERCISED"]
+    assert unexercised and ex["violated"] == len(unexercised)
+    assert all(v["reason"].startswith("unexercised: ") for v in ex["violations"])
+    assert code == 0
+
+
+def test_a_non_probe_space_has_no_expectation(run, tmp_path):
+    # bug caught: a frozen regression case is judged against a probe's expectation
+    code, space = _expect_run(
+        run,
+        tmp_path,
+        metadata={"purpose": "regression"},
+        match=_by_a({1: "unexercised"}),
+    )
+    assert space["expectations"] == {"met": 0, "violated": 0, "violations": []}
+    assert all("expect" not in o for o in run.outcome_list)
+    assert code == 0
+
+
+def test_expect_is_an_expression_evaluated_per_case(run, tmp_path):
+    # bug caught: `expect` read once per space, so every case of a mixed space shares one value
+    code, space = _expect_run(
+        run,
+        tmp_path,
+        expect="${'declined' if a >= 2 else 'declined_or_pass'}",
+        samples=12,
+        default="pass",
+    )
+    seen = {}
+    for o in run.outcome_list:
+        a = sampler.sample(
+            space_lib.load_space(tmp_path / "spaces" / "Toy.space.json"),
+            o["shape_seed"],
+        ).axis_values["a"]
+        assert o["expect"] == ("declined" if a >= 2 else "declined_or_pass")
+        seen.setdefault(o["expect"], set()).add(o["expectation"])
+    assert seen == {"declined": {"violated"}, "declined_or_pass": {"met"}}
+    assert space["expectations"]["met"] + space["expectations"]["violated"] == 12
+
+
+@pytest.mark.parametrize("level", ["buildable", "applicability"])
+def test_an_accepted_probe_below_the_full_level_is_never_a_pass(run, tmp_path, level):
+    # bug caught: an overflow probe above the oracle ceiling (enforcement_level buildable) is
+    # accepted and built, the binary says PASS, and the unverified accept counts as evidence
+    code, space = _expect_run(
+        run,
+        tmp_path,
+        expect="declined",
+        metadata={"purpose": "probe", "enforcement_level": level},
+        match=_by_a({1: "pass", 2: "unclaimed_pass", 3: "declined"}),
+    )
+    outcomes = {o["outcome"] for o in run.outcome_list}
+    assert not outcomes & {"PASS", "UNCLAIMED_PASS"}
+    assert outcomes == {"UNEXERCISED", "DECLINED"}
+    ex = space["expectations"]
+    accepted = [o for o in run.outcome_list if o["outcome"] == "UNEXERCISED"]
+    assert ex["violated"] == len(accepted) and accepted
+    assert all(
+        o["reason"].startswith("accepted above the oracle ceiling") for o in accepted
+    )
+    assert {v["reason"] for v in ex["violations"]} == {
+        "accepted above the oracle ceiling"
+    }
+    assert space["outcomes"]["PASS"] == 0 and space["outcomes"]["UNEXERCISED"] == len(
+        accepted
+    )
+    assert ex["met"] == len(run.outcome_list) - len(accepted)  # the declined ones
+    assert code == 0
+
+
+def test_the_full_level_keeps_an_accepted_probe_a_pass(run, tmp_path):
+    # bug caught: the ceiling rule rewrites every accepted probe, verified ones too
+    code, space = _expect_run(
+        run,
+        tmp_path,
+        expect="declined_or_pass",
+        metadata={"purpose": "probe", "enforcement_level": "full"},
+        default="pass",
+    )
+    assert {o["outcome"] for o in run.outcome_list} == {"PASS"}
+    assert space["expectations"]["violated"] == 0 and code == 0
+
+
+@pytest.mark.parametrize(
+    "expect, message",
+    [
+        ("sometimes", "'expect' must be one of"),
+        ("${'maybe'}", "rendered 'maybe'"),
+        ("${nope}", "unknown name 'nope'"),
+        (3, "'expect' must be one of"),
+    ],
+)
+def test_a_bad_expect_is_an_error_naming_the_space(tmp_path, expect, message):
+    sp_path = write_space(tmp_path, expect=expect)
+    with pytest.raises(space_lib.SpaceError, match=f"Toy/Default.*{message}"):
+        sp = space_lib.load_space(sp_path)
+        sampler.sample(sp, 1)
+
+
+def test_the_expectation_report_prints_each_violation(run, tmp_path, capsys):
+    # bug caught: the violations are in summary.json only, and the console report says nothing
+    _expect_run(
+        run, tmp_path, expect="declined", match=_by_a({1: "pass", 2: "pass", 3: "pass"})
+    )
+    out = capsys.readouterr().out
+    assert "expectations: 0 met, 6 violated" in out
+    assert "violated s" in out and "expected declined: accepted where a decline" in out

@@ -95,8 +95,11 @@ class Sample:
     """One legal sample of a space. ``shape_seed`` is None for one built from explicit axis
     values (``sample_from_axes``)."""
 
-    def __init__(self, space, shape_seed, data_seed, axis_values, row, attempts):
+    def __init__(
+        self, space, shape_seed, data_seed, axis_values, row, attempts, expect=None
+    ):
         self.space = space
+        self.expect = expect
         self.shape_seed = shape_seed
         self.data_seed = data_seed
         self.axis_values = axis_values
@@ -141,20 +144,22 @@ def sample(space, shape_seed, data_seed=None, max_attempts=DEFAULT_MAX_ATTEMPTS)
             rejected[key] = rejected.get(key, 0) + 1
             continue
         case = space.render(env)
+        row = _row(
+            space,
+            case_id(shape_seed),
+            f"shape seed {shape_seed}",
+            data_seed,
+            axis_values,
+            case,
+        )
         return Sample(
             space,
             shape_seed,
             data_seed,
             axis_values,
-            _row(
-                space,
-                case_id(shape_seed),
-                f"shape seed {shape_seed}",
-                data_seed,
-                axis_values,
-                case,
-            ),
+            row,
             attempt,
+            space.expectation(env, row["metadata"]["purpose"]),
         )
     detail = "; ".join(
         f"'{rule}' ({reason}) rejected {n} draws"
@@ -231,21 +236,23 @@ def sample_from_axes(
             f" ({violated.reason})"
         )
     case = space.render(env)
+    row = _row(
+        space,
+        row_case_id,
+        "explicit row" if origin is None else origin,
+        data_seed,
+        axis_values,
+        case,
+        generator,
+    )
     return Sample(
         space,
         None,
         data_seed,
         axis_values,
-        _row(
-            space,
-            row_case_id,
-            "explicit row" if origin is None else origin,
-            data_seed,
-            axis_values,
-            case,
-            generator,
-        ),
+        row,
         1,
+        space.expectation(env, row["metadata"]["purpose"]),
     )
 
 

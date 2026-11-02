@@ -115,6 +115,18 @@ where the record has ``kernels`` the part of each after its last ``/`` should eq
 (``kernel_mismatch``: listed and printed, not a failure, since a log-format difference is not an engine
 bug).
 
+Probe expectations. A space may declare ``expect`` (``space.py``): ``declined`` or ``declined_or_pass`` per
+case, from an expression over the sample's axes. A probe space without ``expect`` expects
+``declined_or_pass``; a case whose ``purpose`` is not ``probe`` has no expectation. ``declined`` is met by
+``DECLINED`` only; ``declined_or_pass`` by ``DECLINED``, ``PASS`` and ``UNCLAIMED_PASS``. ``WRONG`` and
+``CRASH`` always violate it, and so does ``UNEXERCISED``: an accept nothing verified is no evidence. A probe
+case at ``enforcement_level`` ``applicability`` or ``buildable`` that the engine accepted is recorded
+``UNEXERCISED`` with the reason ``accepted above the oracle ceiling``, never ``PASS`` (the binary stops it
+before any comparison). Each record gets ``expect``, ``expectation`` (``met`` or ``violated``) and
+``violation`` (the reason); ``summary.json`` gives each space ``expectations: {met, violated, violations:
+[{case, outcome, expected, reason}]}`` and the report prints them. A violation is a finding to triage; it does
+not change the exit status (only ``WRONG`` and ``CRASH`` do).
+
 Outputs under the work directory: ``outcomes.jsonl`` (one record per sample),
 ``samples.jsonl``, ``summary.json``, ``reports/`` and ``logs/`` (per binary invocation) and
 ``failures/<case>/`` for every ``WRONG`` and ``CRASH`` (and ``shrink/<case>/`` for the candidate
@@ -320,6 +332,35 @@ def kill_tree(proc):
         pass
 
 
+# An accepted case that a bundle's ``enforcement_level`` stopped before the comparison.
+BELOW_FULL_LEVELS = ("applicability", "buildable")
+ACCEPTED_ABOVE_CEILING = "accepted above the oracle ceiling"
+
+
+def expectation_verdict(expect, outcome, reason):
+    """How a case's outcome stands against its ``expect``: ``None`` when the case has no
+    expectation, ``""`` when it met it, else the reason it did not.
+
+    ``WRONG`` and ``CRASH`` always violate. ``declined`` is met by ``DECLINED`` only;
+    ``declined_or_pass`` also by ``PASS`` and ``UNCLAIMED_PASS`` (the output was verified).
+    ``UNEXERCISED`` meets neither: an engine that accepted a case nothing verified, or a case
+    that never ran, is not evidence either way.
+    """
+    if expect is None:
+        return None
+    if outcome in FAILING:
+        return outcome
+    if outcome == "DECLINED":
+        return ""
+    if outcome == "UNEXERCISED":
+        if reason.startswith(ACCEPTED_ABOVE_CEILING):
+            return ACCEPTED_ABOVE_CEILING
+        return "unexercised: " + (reason or "no reason given")
+    if expect == "declined_or_pass":
+        return ""
+    return "accepted where a decline was expected"
+
+
 def reached_execute(result):
     """Whether the binary's record says the case built the engine's plan and went on to run it.
 
@@ -495,6 +536,7 @@ class CandidateSample(sampler.Sample):
             base.axis_values,
             row,
             base.attempts,
+            base.expect,
         )
         self.variant = {"id": variant["id"], "knobs": variant.get("knobs", {})}
 
@@ -1750,6 +1792,27 @@ class Fuzz:
             outcome = "UNEXERCISED"
         self._finish(sp, sample, outcome, stage, reason, record=record, attempt=attempt)
 
+    @staticmethod
+    def _accepted_below_full(sample, outcome, reason):
+        """``(outcome, reason)`` of a probe case run below the ``full`` enforcement level.
+
+        An engine that accepted a case whose bundle stops at ``applicability`` or ``buildable``
+        (an overflow probe above the oracle ceiling) reported ``PASS``, but nothing compared its
+        output: the driver records ``UNEXERCISED`` with ``ACCEPTED_ABOVE_CEILING`` instead, so
+        an unverified accept is never a pass (RFC 0023 section 9.1).
+        """
+        level = sample.row.get("metadata", {}).get("enforcement_level")
+        if (
+            sample.expect is not None
+            and level in BELOW_FULL_LEVELS
+            and outcome in ("PASS", "UNCLAIMED_PASS")
+        ):
+            return (
+                "UNEXERCISED",
+                f"{ACCEPTED_ABOVE_CEILING} (enforcement_level={level})",
+            )
+        return outcome, reason
+
     def _finish(
         self,
         sp,
@@ -1762,6 +1825,8 @@ class Fuzz:
         log=None,
         attempt=None,
     ):
+        outcome, reason = self._accepted_below_full(sample, outcome, reason)
+        verdict = expectation_verdict(sample.expect, outcome, reason)
         engine = (record or {}).get("engine")
         arch = (record or {}).get("arch")
         result = {
@@ -1777,6 +1842,11 @@ class Fuzz:
             "arch": arch,
             "source": "binary" if record is not None else "driver",
         }
+        if verdict is not None:
+            result["expect"] = sample.expect
+            result["expectation"] = "violated" if verdict else "met"
+            if verdict:
+                result["violation"] = verdict
         if record is not None:
             for key in ("purpose", "depth", "origin", "verifier", "platform"):
                 if key in record:
@@ -2318,6 +2388,7 @@ class Fuzz:
                     "crash_reasons": {},
                     "wrong": [],
                     "crash": [],
+                    "expectations": {"met": 0, "violated": 0, "violations": []},
                 },
             )
             for bucket in (e, sp):
@@ -2342,6 +2413,18 @@ class Fuzz:
                 sp["crash"].append(r["case"])
             elif r["outcome"] == "WRONG":
                 sp["wrong"].append(r["case"])
+            expectation = r.get("expectation")
+            if expectation is not None:
+                sp["expectations"][expectation] += 1
+                if expectation == "violated":
+                    sp["expectations"]["violations"].append(
+                        {
+                            "case": r["case"],
+                            "outcome": r["outcome"],
+                            "expected": r["expect"],
+                            "reason": r["violation"],
+                        }
+                    )
         axis_outcomes = {}
         for r in self.results:
             axes = self._outcome_axes.get((r["space"], r["case"]), {})
@@ -2448,6 +2531,21 @@ class Fuzz:
                 ):
                     for reason, n in sorted(sp[key].items(), key=lambda kv: -kv[1]):
                         print(f"      {title} x{n}: {reason}")
+                ex = sp["expectations"]
+                if ex["met"] or ex["violated"]:
+                    print(
+                        f"      expectations: {ex['met']} met, {ex['violated']} violated"
+                    )
+                    for v in ex["violations"][:MAX_PRINTED_FINDINGS]:
+                        print(
+                            f"        violated {v['case']}: {v['outcome']}, expected"
+                            f" {v['expected']}: {v['reason']}"
+                        )
+                    if len(ex["violations"]) > MAX_PRINTED_FINDINGS:
+                        print(
+                            f"        ... {len(ex['violations']) - MAX_PRINTED_FINDINGS}"
+                            " more violations in the summary"
+                        )
         for space_id, cov in summary.get("pair_coverage", {}).items():
             print(
                 f"  pairwise {space_id}: {cov['tuples']} tuples, {cov['illegal']} illegal,"

@@ -425,6 +425,40 @@ padded probe is `PASS` or `DECLINED`, and a `WRONG` is an engine accepting a str
 wrongly. The spaces are probe-only (`purpose: probe`) and never frozen into a bundle. Because
 their graphs vary, the pairwise completeness test covers them.
 
+**Rejection probes (`expect`).** A probe space (`purpose: probe`) may declare a top-level
+`expect`: `declined` (the engine must not take the graph) or `declined_or_pass` (it may take it,
+and then it must be right), as one of the two strings or a `"${expr}"` evaluated per sample over
+the axes and derived values, so one space can hold families with different expectations. A probe
+space without `expect` expects `declined_or_pass`; a case whose `purpose` is not `probe` has none.
+The driver judges each outcome against it and writes `expect`, `expectation` (`met` or
+`violated`) and `violation` into the record:
+
+| Outcome | `declined` | `declined_or_pass` |
+|---|---|---|
+| `DECLINED` | met | met |
+| `PASS`, `UNCLAIMED_PASS` | violated: `accepted where a decline was expected` | met |
+| `WRONG`, `CRASH` | violated | violated |
+| `UNEXERCISED` | violated: nothing verified the accept (or the case never ran) | violated |
+
+`summary.json` gives each space `expectations: {met, violated, violations: [{case, outcome,
+expected, reason}]}` and the report prints it. A violation is a finding to triage, not a failure
+of the run: the exit status is still non-zero only for `WRONG` and `CRASH`.
+
+A case may also set `metadata.enforcement_level` to `applicability` or `buildable`
+([file-formats](file-formats.md#metadata-sidecar--namemetajson)): the binary then stops after the
+applicability query or after the plans compile, and allocates, fills and executes nothing. That is
+how an **overflow probe** (a dimension or stride that does not fit a 32-bit kernel argument, far
+above what the oracle could compute) runs. An engine that accepts and builds such a case reports
+`PASS` at its enforcement level; the driver records it `UNEXERCISED` with the reason `accepted
+above the oracle ceiling` and counts a violation: an unverified accept is not evidence.
+
+The probe spaces are **gauntlet-only**: their files are committed, but their cases are never
+frozen into a checked-in bundle (a frozen finding is a `purpose: regression` case; an illegal
+graph that an engine must reject is a frontend test, not a probe). One space covers one engine
+family and up to four classes: unsupported attributes (through `add_tensors` and `node_patches`,
+for the attributes a template lacks), mixed dtypes, 32-bit index overflow, and dimensions not
+divisible by 4; non-dense strides are the `*Stride` spaces above.
+
 **Per-engine recipes.** Every SDPA engine runs through the same driver; only the engine name, the
 config, the build and the environment differ. `<build>` is the CMake build directory. All of them
 live in the one `hip_kernel_provider` plugin, so `--test-article` is the same file for all of them

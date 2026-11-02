@@ -34,6 +34,13 @@ An axis may carry ``"late": true``: it was added after seeds had been recorded a
 space, and the sampler draws it from a stream of its own so the earlier axes keep their draws.
 Late axes come last.
 
+The optional top-level ``expect`` says what a probe case must do: ``declined`` (the engine must not take
+the graph) or ``declined_or_pass`` (it may take it, and then it must be right). It is one of those two
+strings or a ``"${expr}"`` evaluated per sample over the axes and derived values, so one space can mix
+families with different expectations. A probe (``case.metadata.purpose`` ``probe``, the default) without
+``expect`` expects ``declined_or_pass``; the driver (``run_gauntlet_fuzz.py``) judges each outcome against it.
+Probe spaces are committed, but their cases are never frozen into a checked-in bundle.
+
 The optional ``case.tensor_patches`` is the sweep case's own key of that name: a list of
 ``{"uid": <int>, "set": {"alignment": <int >= 1>}}`` entries (``alignment`` is the only key a
 space may set) whose ``uid`` and ``alignment`` may be ``${expr}`` strings. A rendered patch
@@ -64,6 +71,9 @@ from pathlib import Path
 SPACE_FILE_SUFFIX = ".space.json"
 DEFAULT_SPACE_NAME = "Default"
 SPACE_VERSION = 1
+# What a probe case may be expected to do: the engine declines it, or it declines or passes.
+EXPECT_VALUES = ("declined", "declined_or_pass")
+DEFAULT_PROBE_EXPECT = "declined_or_pass"
 DEFAULT_SPACES_DIR = Path(__file__).resolve().parent / "spaces"
 
 # Case-metadata keys the driver owns; a space that sets one is a load error.
@@ -493,6 +503,7 @@ class Space:
         self.case_add_tensors = None
         self.case_node_patches = None
         self.case_tensor_patches = None
+        self.expect = None
         self.space_sha256 = None
         self.template_sha256 = None
 
@@ -541,6 +552,20 @@ class Space:
             _check_rendered_patches(self, patches)
             row["tensor_patches"] = patches
         return row
+
+    def expectation(self, env, purpose):
+        """What a case of this sample must do, ``declined`` or ``declined_or_pass``: the
+        space's ``expect`` rendered for the sample, else ``declined_or_pass`` for a probe, else
+        ``None`` (no expectation). ``purpose`` is the case's ``metadata.purpose``."""
+        if self.expect is None:
+            return DEFAULT_PROBE_EXPECT if purpose == "probe" else None
+        value = _render_case(self.expect, env)
+        if value not in EXPECT_VALUES:
+            raise SpaceError(
+                f"space '{self.space_id}': 'expect' rendered {value!r}; it must be one of"
+                f" {list(EXPECT_VALUES)}"
+            )
+        return value
 
 
 def _split_file_name(path):
@@ -640,7 +665,7 @@ def load_space(path):
 
     unknown = set(decl) - {
         "version", "operation", "description", "engine", "template",
-        "axes", "derive", "constraints", "case",
+        "axes", "derive", "constraints", "expect", "case",
     }  # fmt: skip
     if unknown:
         raise SpaceError(
@@ -749,6 +774,16 @@ def load_space(path):
         raise SpaceError(
             f"space '{space_name}': 'case.metadata' sets driver-owned keys {clash}"
         )
+    if "expect" in decl:
+        expect = decl["expect"]
+        if not isinstance(expect, str) or not (
+            _is_subst(expect) or expect in EXPECT_VALUES
+        ):
+            raise SpaceError(
+                f"space '{space_name}': 'expect' must be one of {list(EXPECT_VALUES)} or a"
+                " ${expression} that yields one of them"
+            )
+        space.expect = _compile_case(expect, space_name, "expect", known)
     space.case_values = _compile_case(case["values"], space_name, "case.values", known)
     space.case_metadata = _compile_case(metadata, space_name, "case.metadata", known)
     for key in ("add_tensors", "node_patches"):
