@@ -990,7 +990,7 @@ namespace rocalution
             }
         }
 
-        IndexType size = std::min(nrow, ncol);
+        IndexType size = std::max(nrow, ncol);
         *nnz_dia       = size * dst->num_diag;
 
         // Conversion fails if DIA nnz exceeds 5 times CSR nnz

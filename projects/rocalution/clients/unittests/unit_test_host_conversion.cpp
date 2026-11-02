@@ -211,27 +211,16 @@ TYPED_TEST(host_conversion, round_trip_of_wide_and_tall_matrices)
         }
     }
 
-    {
-        SCOPED_TRACE("wide");
-        expect_round_trip(Format{rocalution::DIA, 1}, matrices[0].second);
-    }
-
     // DIA stores max(n, m) entries per diagonal, which SetDataPtrDIA, LeaveDataPtrDIA
     // and the accelerator rely on. The matrices have 3 diagonals.
-    KNOWN_BUG("csr_to_dia sizes the values by the smaller dimension, and a tall matrix writes "
-              "past them, which can end the process");
-    expect_in_child([&] {
-        for(const auto& matrix : matrices)
-        {
-            SCOPED_TRACE(matrix.first);
-            auto A
-                = make_matrix(Backend::Host, Format{rocalution::DIA, 1}, *matrix.second.host_csr());
-            ASSERT_NE(A, nullptr);
-            EXPECT_EQ(A->GetNnz(), 3 * std::max(matrix.second.n, matrix.second.m));
-        }
-        SCOPED_TRACE("tall");
-        expect_round_trip(Format{rocalution::DIA, 1}, matrices[1].second);
-    });
+    for(const auto& matrix : matrices)
+    {
+        SCOPED_TRACE(matrix.first);
+        auto A = make_matrix(Backend::Host, Format{rocalution::DIA, 1}, *matrix.second.host_csr());
+        ASSERT_NE(A, nullptr);
+        EXPECT_EQ(A->GetNnz(), 3 * std::max(matrix.second.n, matrix.second.m));
+        expect_round_trip(Format{rocalution::DIA, 1}, matrix.second);
+    }
 }
 
 TYPED_TEST(host_conversion, conversion_from_the_same_format_copies_the_matrix)

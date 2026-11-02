@@ -1117,18 +1117,17 @@ TEST_P(local_matrix_formats, apply_of_a_rectangular_matrix)
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
-        const Csr<T>         ref = rectangular<T>(8, 12);
-        const std::vector<T> x   = rhs<T>(12);
-        auto                 A   = make(ref);
-        auto                 vx  = vector_of(x);
-        auto                 vy  = vector_of(std::vector<T>(8, 0.0));
-
-        A->Apply(*vx, vy.get());
-        if(backend() == Backend::Host && A->GetFormat() == DIA)
+        for(const Csr<T>& ref : {rectangular<T>(8, 12), rectangular<T>(12, 8)})
         {
-            KNOWN_BUG("host DIA Apply drops the entries in the columns from nrow on");
+            SCOPED_TRACE(std::to_string(ref.n) + " x " + std::to_string(ref.m));
+            const std::vector<T> x  = rhs<T>(ref.m);
+            auto                 A  = make(ref);
+            auto                 vx = vector_of(x);
+            auto                 vy = vector_of(std::vector<T>(ref.n, 0.0));
+
+            A->Apply(*vx, vy.get());
+            expect_vector(*vy, ref.apply(x), backend(), scaled_tol<T>(1e-14));
         }
-        expect_vector(*vy, ref.apply(x), backend(), scaled_tol<T>(1e-14));
     });
 }
 
@@ -1253,49 +1252,37 @@ TEST_P(local_matrix_formats, extracts_sub_matrices)
             expect_kept_or_csr(*R, block(ref, 5, 0, 1, 12), log);
         }
 
-        auto extract_blocks = [&] {
-            const std::vector<int> row_offset = {0, 6, 12};
-            const std::vector<int> col_offset = {0, 4, 8, 12};
+        const std::vector<int> row_offset = {0, 6, 12};
+        const std::vector<int> col_offset = {0, 4, 8, 12};
 
-            LocalMatrix<T>*** blocks = new LocalMatrix<T>**[2];
-            for(int i = 0; i < 2; ++i)
+        LocalMatrix<T>*** blocks = new LocalMatrix<T>**[2];
+        for(int i = 0; i < 2; ++i)
+        {
+            blocks[i] = new LocalMatrix<T>*[3];
+            for(int j = 0; j < 3; ++j)
             {
-                blocks[i] = new LocalMatrix<T>*[3];
-                for(int j = 0; j < 3; ++j)
+                blocks[i][j] = new LocalMatrix<T>;
+                if(backend() == Backend::Accelerator)
                 {
-                    blocks[i][j] = new LocalMatrix<T>;
-                    if(backend() == Backend::Accelerator)
-                    {
-                        blocks[i][j]->MoveToAccelerator();
-                    }
+                    blocks[i][j]->MoveToAccelerator();
                 }
             }
+        }
 
-            auto        M         = make(ref);
-            std::string block_log = logged(
-                [&] { M->ExtractSubMatrices(2, 3, row_offset.data(), col_offset.data(), blocks); });
-            for(int i = 0; i < 2; ++i)
+        auto        M         = make(ref);
+        std::string block_log = logged(
+            [&] { M->ExtractSubMatrices(2, 3, row_offset.data(), col_offset.data(), blocks); });
+        for(int i = 0; i < 2; ++i)
+        {
+            for(int j = 0; j < 3; ++j)
             {
-                for(int j = 0; j < 3; ++j)
-                {
-                    SCOPED_TRACE("block " + std::to_string(i) + "," + std::to_string(j));
-                    expect_kept_or_csr(*blocks[i][j], block(ref, 6 * i, 4 * j, 6, 4), block_log);
-                    delete blocks[i][j];
-                }
-                delete[] blocks[i];
+                SCOPED_TRACE("block " + std::to_string(i) + "," + std::to_string(j));
+                expect_kept_or_csr(*blocks[i][j], block(ref, 6 * i, 4 * j, 6, 4), block_log);
+                delete blocks[i][j];
             }
-            delete[] blocks;
-        };
-
-        if(is(DIA))
-        {
-            KNOWN_BUG("csr_to_dia writes past the values of a matrix with more rows than columns");
-            expect_in_child(extract_blocks);
+            delete[] blocks[i];
         }
-        else
-        {
-            extract_blocks();
-        }
+        delete[] blocks;
     });
 }
 
@@ -3082,10 +3069,6 @@ TYPED_TEST(local_matrix, set_data_ptr_dia_of_a_wide_matrix)
     const std::vector<T> x = {1, 2, 3, 4, 5, 6};
     auto                 y = make_local_vector(this->backend(), std::vector<T>(nrow, 0.0));
     A->Apply(*make_local_vector(this->backend(), x), y.get());
-    if(this->backend() == Backend::Host)
-    {
-        KNOWN_BUG("host DIA Apply drops the entries in the columns from nrow on");
-    }
     expect_vector(*y, ref.apply(x), this->backend(), 0);
 }
 

@@ -448,15 +448,7 @@ namespace
         }
 
         SCOPED_TRACE("wide");
-        const Csr<T> wide = full<T>(6, 12);
-        if(f.id == rocalution::DIA && b == Backend::Host)
-        {
-            KNOWN_BUG("csr_to_dia sizes the values by the smaller dimension, so LeaveDataPtrDIA "
-                      "aborts");
-            expect_in_child([&] { expect_leave_and_set(b, f, wide); });
-            return;
-        }
-        expect_leave_and_set(b, f, wide);
+        expect_leave_and_set(b, f, full<T>(6, 12));
     }
 }
 
