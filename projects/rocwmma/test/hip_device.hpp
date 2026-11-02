@@ -37,6 +37,30 @@
 #include "performance.hpp"
 #include "singleton.hpp"
 
+// Single source of truth for the architectures supported by the test
+// framework. Each entry expands to X(ARCH, FWD_ARG), where ARCH is the
+// hipGcnArch_t enumerator name (matching Constants::AMDGCN_ARCH_ID_<ARCH>).
+// Keep one arch per line so that adding an arch is a one-line change.
+#define ROCWMMA_FOR_EACH_TEST_ARCH(X, FWD_ARG) \
+    X(GFX908, FWD_ARG)                         \
+    X(GFX90A, FWD_ARG)                         \
+    X(GFX942, FWD_ARG)                         \
+    X(GFX950, FWD_ARG)                         \
+    X(GFX1100, FWD_ARG)                        \
+    X(GFX1101, FWD_ARG)                        \
+    X(GFX1102, FWD_ARG)                        \
+    X(GFX1103, FWD_ARG)                        \
+    X(GFX1150, FWD_ARG)                        \
+    X(GFX1151, FWD_ARG)                        \
+    X(GFX1152, FWD_ARG)                        \
+    X(GFX1153, FWD_ARG)                        \
+    X(GFX1170, FWD_ARG)                        \
+    X(GFX1171, FWD_ARG)                        \
+    X(GFX1200, FWD_ARG)                        \
+    X(GFX1201, FWD_ARG)                        \
+    X(GFX1250, FWD_ARG)                        \
+    /* End of list */
+
 namespace rocwmma
 {
 
@@ -48,24 +72,10 @@ namespace rocwmma
 
         enum hipGcnArch_t : uint32_t
         {
-            GFX908           = Constants::AMDGCN_ARCH_ID_GFX908,
-            GFX90A           = Constants::AMDGCN_ARCH_ID_GFX90A,
-            GFX942           = Constants::AMDGCN_ARCH_ID_GFX942,
-            GFX950           = Constants::AMDGCN_ARCH_ID_GFX950,
-            GFX1100          = Constants::AMDGCN_ARCH_ID_GFX1100,
-            GFX1101          = Constants::AMDGCN_ARCH_ID_GFX1101,
-            GFX1102          = Constants::AMDGCN_ARCH_ID_GFX1102,
-            GFX1103          = Constants::AMDGCN_ARCH_ID_GFX1103,
-            GFX1150          = Constants::AMDGCN_ARCH_ID_GFX1150,
-            GFX1151          = Constants::AMDGCN_ARCH_ID_GFX1151,
-            GFX1152          = Constants::AMDGCN_ARCH_ID_GFX1152,
-            GFX1153          = Constants::AMDGCN_ARCH_ID_GFX1153,
-            GFX1170          = Constants::AMDGCN_ARCH_ID_GFX1170,
-            GFX1171          = Constants::AMDGCN_ARCH_ID_GFX1171,
-            GFX1200          = Constants::AMDGCN_ARCH_ID_GFX1200,
-            GFX1201          = Constants::AMDGCN_ARCH_ID_GFX1201,
-            GFX1250          = Constants::AMDGCN_ARCH_ID_GFX1250,
             UNSUPPORTED_ARCH = Constants::AMDGCN_ARCH_ID_NONE,
+#define ROCWMMA_TEST_ARCH_ENUM(ARCH, UNUSED) ARCH = Constants::AMDGCN_ARCH_ID_##ARCH,
+            ROCWMMA_FOR_EACH_TEST_ARCH(ROCWMMA_TEST_ARCH_ENUM, )
+#undef ROCWMMA_TEST_ARCH_ENUM
         };
 
         enum hipWarpSize_t : uint32_t
