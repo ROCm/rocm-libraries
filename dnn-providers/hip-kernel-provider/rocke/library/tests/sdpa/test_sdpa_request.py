@@ -21,6 +21,9 @@ from dispatch.sdpa import (
     SdpaPaged,
     SdpaRequest,
     SdpaTensor,
+    dispatch_sdpa_all,
+    registered_sdpa_combos,
+    sdpa_sweep_space,
 )
 from rocke.dispatch.core import Capability, stable_json_hash
 from tests.sdpa.request_cases import (
@@ -508,6 +511,28 @@ def test_every_all_entry_resolves(module):
     """A stale ``__all__`` name breaks ``from module import *``."""
     mod = importlib.import_module(module)
     assert [name for name in mod.__all__ if not hasattr(mod, name)] == []
+
+
+# --- sweep/dispatch entry points (no SDPA kernel family is registered yet) ------
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_registered_sdpa_combos_is_empty_until_a_registry_is_wired(name):
+    assert registered_sdpa_combos(CASES[name]) == ()
+
+
+def test_sdpa_sweep_space_is_empty_until_a_registry_is_wired():
+    assert sdpa_sweep_space(BASE) == ()
+
+
+def test_dispatch_sdpa_all_is_empty_until_a_registry_is_wired():
+    assert dispatch_sdpa_all(BASE) == ()
+
+
+def test_sweep_and_dispatch_entry_points_reject_a_non_request():
+    for fn in (registered_sdpa_combos, sdpa_sweep_space, dispatch_sdpa_all):
+        with pytest.raises(TypeError):
+            fn("not a request")
 
 
 # --- Capability.check gates on the request --------------------------------------

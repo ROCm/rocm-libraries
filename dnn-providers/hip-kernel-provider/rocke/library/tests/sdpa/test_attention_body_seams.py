@@ -13,8 +13,6 @@ Row epilogues (LSE output) go through ``AttnFwdExt.epilogue_hook``, covered by
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from kernels.common import fmha_mfma
@@ -25,10 +23,16 @@ from rocke.core.lower_llvm import lower_kernel_to_llvm
 # One target per attention body: MFMA (gfx950, gfx942) and WMMA (gfx1151).
 # The test builds and lowers IR on the host and needs no device, HIP or clang,
 # so the default covers every body instead of only the selected device's.
-# ROCKE_SDPA_SEAM_ARCHES overrides this (comma-separated) to pin the test
-# environment to one target, the same convention as portable_ir's
-# parity_matrix.py.
-ARCHES = os.environ.get("ROCKE_SDPA_SEAM_ARCHES", "gfx950,gfx942,gfx1151").split(",")
+# --rocke-seam-arches (registered in tests/conftest.py) overrides this
+# (comma-separated) to pin the test environment to one target.
+_DEFAULT_ARCHES = ("gfx950", "gfx942", "gfx1151")
+
+
+def pytest_generate_tests(metafunc):
+    if "arch" not in metafunc.fixturenames:
+        return
+    raw = metafunc.config.getoption("--rocke-seam-arches")
+    metafunc.parametrize("arch", raw.split(",") if raw else list(_DEFAULT_ARCHES))
 
 
 def _spec(mask_mode: str) -> fmha_mfma.FmhaMfmaSpec:
@@ -55,12 +59,11 @@ def _build_ir(monkeypatch, arch: str, mask_mode: str, **callbacks) -> str:
     return lower_kernel_to_llvm(kernel, arch=arch)
 
 
-@pytest.mark.parametrize("arch", ARCHES)
 @pytest.mark.parametrize("mask_mode", ["none", "causal", "sliding_window"])
 def test_score_coordinates_cost_no_ir(monkeypatch, arch, mask_mode):
     seen = []
 
-    def identity(b, score, kt, row_in_atom, query_pos, key_pos):
+    def identity(_b, score, _kt, row_in_atom, query_pos, key_pos):
         seen.append((row_in_atom, query_pos, key_pos))
         return score
 

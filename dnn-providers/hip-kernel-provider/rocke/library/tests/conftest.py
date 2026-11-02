@@ -65,6 +65,15 @@ def pytest_addoption(parser):
         default=None,
         help="run GDN all-candidate numeric coverage for one stable spec ID",
     )
+    parser.addoption(
+        "--rocke-seam-arches",
+        action="store",
+        default=None,
+        help=(
+            "comma-separated arch list for test_attention_body_seams's "
+            "score-hook IR-identity check (default: gfx950,gfx942,gfx1151)"
+        ),
+    )
 
 
 def pytest_configure(config):
