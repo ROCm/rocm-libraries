@@ -499,130 +499,15 @@ void set_mwgs(E& e, int v)
     rocke_attr_set_int(e.b, &rocke_ir_builder_kernel(e.b)->attrs, "max_workgroup_size", v);
 }
 
-/* _IROps */
-V o_add(E& e, V x, V y)
-{
-    return rocke_b_fadd(e.b, x, y);
-}
-V o_sub(E& e, V x, V y)
-{
-    return rocke_b_fsub(e.b, x, y);
-}
-V o_fma(E& e, double c, V x, V y)
-{
-    V k = cf(e, c);
-    return rocke_b_fma(e.b, k, x, y);
-}
-
-/* _matvec_1d over rows x cols of `mat` (row stride `cols`). */
-VV matvec_1d(E& e, const rocke_wino::Rational* mat, int rows, int cols, const VV& d)
-{
-    VV out;
-    for(int i = 0; i < rows; ++i)
-    {
-        std::vector<std::pair<double, V>> unit, rest;
-        for(int k = 0; k < cols; ++k)
-        {
-            const rocke_wino::Rational& r = mat[i * cols + k];
-            if(r.is_zero())
-                continue;
-            double c = r.value();
-            if(fabs(c) == 1.0)
-                unit.push_back({c, d[k]});
-            else
-                rest.push_back({c, d[k]});
-        }
-        V acc = nullptr;
-        for(auto& t : unit)
-        {
-            if(acc == nullptr)
-            {
-                if(t.first > 0)
-                    acc = t.second;
-                else
-                {
-                    V z = o_sub(e, t.second, t.second);
-                    acc = o_sub(e, z, t.second);
-                }
-            }
-            else
-                acc = t.first > 0 ? o_add(e, acc, t.second) : o_sub(e, acc, t.second);
-        }
-        for(auto& t : rest)
-        {
-            if(acc != nullptr)
-                acc = o_fma(e, t.first, t.second, acc);
-            else
-            {
-                V z = o_sub(e, t.second, t.second);
-                acc = o_fma(e, t.first, t.second, z);
-            }
-        }
-        out.push_back(acc != nullptr ? acc : o_sub(e, d[0], d[0]));
-    }
-    return out;
-}
-
+/* _IROps (the math helpers are shared: rocke_wino::bt_1d / at_1d / ...). */
 VV bt_1d(E& e, int m, const VV& d)
 {
-    if(m == 2)
-    {
-        V a = o_sub(e, d[2], d[0]);
-        V b1 = o_add(e, d[1], d[2]);
-        V c = o_sub(e, d[2], d[1]);
-        V dd = o_sub(e, d[3], d[1]);
-        return {a, b1, c, dd};
-    }
-    if(m == 4)
-    {
-        V s12 = o_add(e, d[1], d[2]);
-        V s34 = o_add(e, d[3], d[4]);
-        V d12 = o_sub(e, d[1], d[2]);
-        V d43 = o_sub(e, d[4], d[3]);
-        V d31 = o_sub(e, d[3], d[1]);
-        V d42 = o_sub(e, d[4], d[2]);
-        VV out;
-        V t = o_fma(e, -5.0, d[2], d[4]);
-        out.push_back(o_fma(e, 4.0, d[0], t));
-        out.push_back(o_fma(e, -4.0, s12, s34));
-        out.push_back(o_fma(e, 4.0, d12, d43));
-        out.push_back(o_fma(e, 2.0, d31, d42));
-        out.push_back(o_fma(e, -2.0, d31, d42));
-        t = o_fma(e, -5.0, d[3], d[5]);
-        out.push_back(o_fma(e, 4.0, d[1], t));
-        return out;
-    }
-    const rocke_wino::ToomCook* tc = rocke_wino::toom_cook(m, 3);
-    return matvec_1d(e, tc->bt, tc->n, tc->n, d);
+    return rocke_wino::bt_1d(e.b, m, d);
 }
 
 VV at_1d(E& e, int m, const VV& d)
 {
-    if(m == 2)
-    {
-        V t = o_add(e, d[0], d[1]);
-        V a = o_add(e, t, d[2]);
-        V u = o_sub(e, d[1], d[2]);
-        V c = o_add(e, u, d[3]);
-        return {a, c};
-    }
-    if(m == 4)
-    {
-        V s12 = o_add(e, d[1], d[2]);
-        V d12 = o_sub(e, d[1], d[2]);
-        V s34 = o_add(e, d[3], d[4]);
-        V d34 = o_sub(e, d[3], d[4]);
-        VV out;
-        V t = o_add(e, d[0], s12);
-        out.push_back(o_add(e, t, s34));
-        out.push_back(o_fma(e, 2.0, d34, d12));
-        out.push_back(o_fma(e, 4.0, s34, s12));
-        t = o_fma(e, 8.0, d34, d12);
-        out.push_back(o_add(e, t, d[5]));
-        return out;
-    }
-    const rocke_wino::ToomCook* tc = rocke_wino::toom_cook(m, 3);
-    return matvec_1d(e, tc->at, tc->m, tc->n, d);
+    return rocke_wino::at_1d(e.b, m, d);
 }
 
 V oob_sel(E& e, V ok, V off)
@@ -636,62 +521,27 @@ V load_raw(E& e, V rsrc, V off, const char* dt, int n)
 
 V pow2_f32(E& e, V x)
 {
-    rocke_ir_builder_t* b = e.b;
-    V c127 = ci(e, 127);
-    V a = rocke_b_add(b, x, c127);
-    V c23 = ci(e, 23);
-    V bits = rocke_b_shl(b, a, c23);
-    return rocke_b_bitcast(b, bits, rocke_f32());
+    return rocke_wino::pow2_f32(e.b, x);
 }
 
 V abs_bits_vec(E& e, V raw, int n)
 {
-    rocke_ir_builder_t* b = e.b;
-    if(n == 1)
-    {
-        V bc = rocke_b_bitcast(b, raw, rocke_i16());
-        V z = rocke_b_zext(b, bc, rocke_i32());
-        V m = ci(e, 0x7FFF);
-        return rocke_b_land(b, z, m);
-    }
-    V bits = rocke_b_vec_bitcast(b, raw, rocke_vector_type(b, rocke_i16(), n));
-    V c = ci(e, 0x7FFF);
-    V t = rocke_b_trunc(b, c, rocke_i16());
-    V mask = rocke_b_vector_splat(b, t, n);
-    return rocke_b_vector_and(b, bits, mask);
+    return rocke_wino::abs_bits_vec(e.b, raw, n);
 }
 
 V max_bits(E& e, V x, V y, int n)
 {
-    return n == 1 ? rocke_b_smax(e.b, x, y) : rocke_b_vector_smax(e.b, x, y);
+    return rocke_wino::max_bits(e.b, x, y, n);
 }
 
 V hmax_bits(E& e, V v, int n)
 {
-    if(n == 1)
-        return v;
-    V acc = nullptr;
-    for(int i = 0; i < n; ++i)
-    {
-        V x = rocke_b_vec_extract(e.b, v, i);
-        V z = rocke_b_zext(e.b, x, rocke_i32());
-        acc = acc == nullptr ? z : rocke_b_smax(e.b, acc, z);
-    }
-    return acc;
+    return rocke_wino::hmax_bits(e.b, v, n);
 }
 
 V bits_to_f32(E& e, V bits, const char* dt)
 {
-    rocke_ir_builder_t* b = e.b;
-    if(strcmp(dt, "bf16") == 0)
-    {
-        V c16 = ci(e, 16);
-        V sh = rocke_b_shl(b, bits, c16);
-        return rocke_b_bitcast(b, sh, rocke_f32());
-    }
-    V t = rocke_b_trunc(b, bits, rocke_i16());
-    V h = rocke_b_bitcast(b, t, rocke_f16());
-    return rocke_b_cast_to_f32(b, h);
+    return rocke_wino::bits_to_f32(e.b, bits, dt);
 }
 
 V prescale_exp(E& e, V amax)
@@ -951,28 +801,7 @@ RunCoords run_coords(E& e, const RunMap& rm)
 
 /* ------------------------------------------------------------ K1 */
 
-/* filter_matrix_int(m): integer numerators of G and their denominator. */
-int64_t filter_matrix_int(int m, std::vector<int64_t>& gi)
-{
-    const rocke_wino::ToomCook* tc = rocke_wino::toom_cook(m, 3);
-    int64_t den = 1;
-    for(int i = 0; i < tc->n * 3; ++i)
-    {
-        int64_t d = tc->g[i].den;
-        int64_t a = den, bb = d;
-        while(bb)
-        {
-            int64_t t = a % bb;
-            a = bb;
-            bb = t;
-        }
-        den = den * d / a;
-    }
-    gi.resize(tc->n * 3);
-    for(int i = 0; i < tc->n * 3; ++i)
-        gi[i] = tc->g[i].num * (den / tc->g[i].den);
-    return den;
-}
+using rocke_wino::filter_matrix_int;
 
 void emit_filter(E& e)
 {

@@ -20,11 +20,13 @@ from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT  # noqa: E4
 from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT  # noqa: E402
 
 from uhd_gen.artifact import (
+    GBDT_MODEL_IDENTIFIER,
     artifact_digest,
     is_grouped_tree,
     verify_tree_artifact,
 )  # noqa: E402
 from uhd_gen.evaluate import load_model  # noqa: E402
+from uhd_gen.tests.model_bin import packed, write_model  # noqa: E402
 
 
 def _stump(left=(1, -1, -1), right=(2, -1, -1)) -> GbdtTreeT:
@@ -40,7 +42,12 @@ def _stump(left=(1, -1, -1), right=(2, -1, -1)) -> GbdtTreeT:
 
 
 def _artifact(
-    path: Path, *, trees=None, grouped=False, identifier=b"HGBM", group_values=(0.0,)
+    path: Path,
+    *,
+    trees=None,
+    grouped=False,
+    identifier=GBDT_MODEL_IDENTIFIER,
+    group_values=(0.0,),
 ) -> Path:
     model = GbdtModelT()
     model.trees = trees or [_stump()]
@@ -55,9 +62,7 @@ def _artifact(
             group.value = value
             group.trees = [_stump()]
             model.groups.append(group)
-    builder = flatbuffers.Builder(1024)
-    builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
-    data = bytearray(builder.Output())
+    data = bytearray(packed(model))
     data[4:8] = identifier
     path.write_bytes(bytes(data))
     return path
@@ -137,7 +142,9 @@ def test_trees_sharing_one_table_past_what_the_buffer_holds_are_refused(tmp_path
     GbdtModel.GbdtModelAddNumFeatures(builder, 2)
     GbdtModel.GbdtModelAddFeaturesHash(builder, digest)
     GbdtModel.GbdtModelAddGroupByFeatureIndex(builder, -1)
-    builder.Finish(GbdtModel.GbdtModelEnd(builder), file_identifier=b"HGBM")
+    builder.Finish(
+        GbdtModel.GbdtModelEnd(builder), file_identifier=GBDT_MODEL_IDENTIFIER
+    )
     path = tmp_path / "model.bin"
     path.write_bytes(bytes(builder.Output()))
     assert 3 * entries > len(path.read_bytes()) // 4
@@ -273,13 +280,6 @@ def test_evaluation_opens_only_an_artifact_the_loader_would(
             load_model(model)
 
 
-def _write(path: Path, model: GbdtModelT) -> Path:
-    builder = flatbuffers.Builder(1024)
-    builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
-    path.write_bytes(bytes(builder.Output()))
-    return path
-
-
 def _model(**changes) -> GbdtModelT:
     model = GbdtModelT()
     model.trees = [_stump()]
@@ -337,9 +337,9 @@ def test_an_artifact_the_runtime_would_not_load_is_refused_with_its_reason(
     tmp_path, model, reason
 ):
     """Each `TreeDataAdapter::loadFromBuffer` refusal, one field off a loadable model."""
-    assert verify_tree_artifact(_write(tmp_path / "base.bin", _model()), None)
+    assert verify_tree_artifact(write_model(_model(), tmp_path / "base.bin"), None)
     with pytest.raises(ValueError, match=reason):
-        verify_tree_artifact(_write(tmp_path / "model.bin", model), None)
+        verify_tree_artifact(write_model(model, tmp_path / "model.bin"), None)
 
 
 def test_an_artifact_is_admitted_up_to_the_runtimes_size_limit_and_no_further(
@@ -349,7 +349,7 @@ def test_an_artifact_is_admitted_up_to_the_runtimes_size_limit_and_no_further(
     from uhd_gen import artifact
 
     assert artifact.MAX_ARTIFACT_BYTES == 256 * 1024 * 1024
-    path = _write(tmp_path / "model.bin", _model())
+    path = write_model(_model(), tmp_path / "model.bin")
     size = path.stat().st_size
     monkeypatch.setattr(artifact, "MAX_ARTIFACT_BYTES", size)
     assert verify_tree_artifact(path, None) == path.read_bytes()

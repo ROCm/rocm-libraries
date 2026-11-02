@@ -93,25 +93,28 @@ def kernel_axes(signature: list) -> set[str]:
 
 
 def require_admissible_kernel_axes(
-    signature: list, knobs, kmd_fields, where: str
+    signature: list, knobs, kmd_fields, where: str, slot: str | None = None
 ) -> None:
     """Refuse a signature the runtime would refuse to rank with (RFC 0019 §6.3 check 2).
 
     Every `$kernel.*` axis other than `$kernel.priority` must be a KMD field AND a knob of
     the shipping UED (not the collection UED, which exposes every field). Graph-bound
-    fields belong in the graph's own column.
+    fields belong in the graph's own column. For a slot ranker (RFC 0021 §8) `kmd_fields`
+    and `knobs` are the slot's own KMD fields and `slots[].knobs`, and `slot` names it.
     """
     axes = kernel_axes(signature)
     undeclared = sorted(axes - set(kmd_fields))
     unexposed = sorted(axes - set(knobs))
+    owner = f"slot '{slot}' of the UED" if slot else "the UED"
     problems = []
     if undeclared:
+        subject = f"the KMD of slot '{slot}'" if slot else "the KMD"
         problems.append(
-            f"reads [{', '.join(undeclared)}], which the KMD does not declare as fields"
+            f"reads [{', '.join(undeclared)}], which {subject} does not declare as fields"
         )
     if unexposed:
         problems.append(
-            f"ranks on [{', '.join(unexposed)}], which the UED does not expose as knobs "
+            f"ranks on [{', '.join(unexposed)}], which {owner} does not expose as knobs "
             f"[{', '.join(sorted(knobs)) or '<none>'}]"
         )
     if problems:
