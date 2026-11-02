@@ -7,6 +7,7 @@ import runpy
 
 import pytest
 
+from rocke.core.backend import _cpp_strict, resolve_backend
 from rocke.core.ir import (
     BF16,
     BF8E5M2,
@@ -292,6 +293,71 @@ def test_hip_assembly_string_matches_native(suffix, escaped, output, hip_engine)
     assert native == python
     prefix = "v_mov_b32 %0, %1" if output else "s_nop 0"
     assert f'asm volatile ("{prefix}{escaped}"' in native
+
+
+def _sideeffect_kernel(sideeffect, outputs):
+    b = IRBuilder("asm_sideeffect")
+    value = b.param("value", F32)
+    b.inline_asm_multi(
+        "" if outputs else "s_nop 0",
+        ("=v,0" if outputs == 1 else "=v,=v,0,1") if outputs else "",
+        [value] * outputs,
+        result_types=[F32] * outputs,
+    )
+    op = b.kernel.body.ops[-1]
+    if sideeffect is None:
+        del op.attrs["sideeffect"]
+    else:
+        op.attrs["sideeffect"] = sideeffect
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("sideeffect", [0, 1, 0.0, 1.0, "", "false"])
+@pytest.mark.parametrize("outputs", [0, 1, 2])
+@pytest.mark.parametrize("roundtrip", [False, True])
+@pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23", "llvm24"])
+def test_llvm_inline_asm_rejects_non_bool_sideeffect(
+    sideeffect, outputs, roundtrip, arch, flavor
+):
+    kernel = _sideeffect_kernel(sideeffect, outputs)
+    if roundtrip:
+        kernel = parse(serialize(kernel))
+    exception = (
+        RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+    )
+    with pytest.raises(exception, match="LLVM inline asm sideeffect must be a boolean"):
+        lower_kernel_to_llvm(kernel, arch=arch, llvm_flavor=flavor)
+
+
+@pytest.mark.parametrize("sideeffect", [0, 1, 0.0, 1.0, "", "false"])
+@pytest.mark.parametrize("outputs", [0, 1, 2])
+@pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23", "llvm24"])
+def test_llvm_native_rejects_non_bool_sideeffect(
+    sideeffect, outputs, arch, flavor, hip_engine
+):
+    kernel = _sideeffect_kernel(sideeffect, outputs)
+    with pytest.raises(
+        RuntimeError, match="LLVM inline asm sideeffect must be a boolean"
+    ):
+        hip_engine.lower_serialized_ir(serialize(kernel), arch=arch, flavor=flavor)
+
+
+@pytest.mark.parametrize("sideeffect", [None, False, True])
+@pytest.mark.parametrize("outputs", [0, 1, 2])
+@pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23", "llvm24"])
+def test_llvm_inline_asm_preserves_boolean_and_default(
+    sideeffect, outputs, arch, flavor
+):
+    kernel = _sideeffect_kernel(sideeffect, outputs)
+    llvm = lower_kernel_to_llvm(kernel, arch=arch, llvm_flavor=flavor)
+    assert ("asm sideeffect" in llvm) == (sideeffect is not False)
+    assert llvm == lower_kernel_to_llvm(
+        parse(serialize(kernel)), arch=arch, llvm_flavor=flavor
+    )
 
 
 def test_hip_assembly_requires_output_constraint(hip_engine):

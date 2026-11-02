@@ -348,7 +348,9 @@ for this epilogue matrix and four for multiline void/single-output assembly on
 gfx950/gfx1250, including quotes and backslashes in the template. Its LLVM/IR
 modes are unchanged. The focused Python tests compare HIP text and rejection
 diagnostics through `lower_serialized_ir_hip`; the `ROCKE_BACKEND=both` LLVM gate
-alone does not perform that HIP comparison.
+alone does not perform that HIP comparison. Both LLVM handlers reject non-boolean
+`sideeffect` attributes for void, single-output, and multi-output assembly at every
+supported flavor; absent, false, and true attributes retain their existing output.
 
 ## Installed pinned-reference suites
 

@@ -240,6 +240,26 @@ static int test_hip_rejects_malformed_attributes()
         rocke_kernel_def_t* kernel = nullptr;
         CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
         free(serialized);
+        if(index >= 7)
+        {
+            const rocke_llvm_flavor_t flavors[] = {ROCKE_LLVM_FLAVOR_LLVM20,
+                                                   ROCKE_LLVM_FLAVOR_LLVM22,
+                                                   ROCKE_LLVM_FLAVOR_LLVM23,
+                                                   ROCKE_LLVM_FLAVOR_LLVM24};
+            for(auto flavor : flavors)
+            {
+                for(auto* candidate : {b.kernel, kernel})
+                {
+                    char* llvm = nullptr;
+                    char err[ROCKE_ERR_MSG_CAP] = {};
+                    CHECK(rocke_lower_kernel_to_llvm_ex(
+                              candidate, flavor, "gfx1250", &llvm, err, sizeof err)
+                          == ROCKE_ERR_VALUE);
+                    CHECK(strcmp(err, "LLVM inline asm sideeffect must be a boolean") == 0);
+                    free(llvm);
+                }
+            }
+        }
         rocke_lower_hip_opts_t opts = {};
         opts.arch = "gfx1250";
         rocke_strbuf_t original = {}, imported = {};
