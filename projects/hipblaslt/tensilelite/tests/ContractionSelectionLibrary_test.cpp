@@ -317,6 +317,7 @@ TEST(ContractionSelectionLibraryTest, DeviceScalarAlphaSelectionWithoutUniformSu
 {
     const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "selection test");
     auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setParams().setUniformSummationOrder(0);
     ASSERT_FALSE(problem.getParams().uniformSummationOrder());
 
     auto solution = std::make_shared<ContractionSolution>();
@@ -351,6 +352,7 @@ TEST(ContractionSelectionLibraryTest, GroupedSelectionRequiresUniformScalarModeA
     };
     const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "selection test");
     auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setParams().setUniformSummationOrder(0);
     problem.setUseScaleAlphaVec(1);
     problem.setGroupedGemm(true);
     auto solution = std::make_shared<SelectionOnlySolution>();
