@@ -2457,6 +2457,27 @@ Tests:
   unit_check: 1
   gpu_arch: '942|1250'
 
+# The norm check of a bias gradient from B compares its N values, one per column
+# of D. Strongly rectangular shapes catch a check that uses M instead.
+- name: matmul_bgradb_bf16_NT_norm_rectangular
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  M: [16, 256]
+  N: [16, 256]
+  K: 128
+  transA: N
+  transB: T
+  alpha: 1
+  beta: 0.0
+  gradient: 1
+  bias_vector: 1
+  bias_type: f32_r
+  bias_source: b
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '942'
+
 - name: matmul_bgradb_bf16_NT
   category: pre_checkin
   function:

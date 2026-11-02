@@ -1594,12 +1594,15 @@ void check(hipStream_t                   stream,
                 }
                 if(arg.gradient && arg.bias_vector)
                 {
+                    // A bias gradient from B has one value per column of D.
+                    const int64_t bias_length
+                        = arg.bias_source == hipblaslt_bias_source::b ? N[gemmIdx] : M[gemmIdx];
                     double norm_error = 0.0;
                     norm_error        = std::abs(norm_check_general('F',
-                                                             M[gemmIdx],
+                                                             bias_length,
                                                              1,
-                                                             M[gemmIdx],
-                                                             M[gemmIdx],
+                                                             bias_length,
+                                                             bias_length,
                                                              hBias_gold[gemmIdx].buf(),
                                                              hBias[gemmIdx].buf(),
                                                              num_batches[gemmIdx],
