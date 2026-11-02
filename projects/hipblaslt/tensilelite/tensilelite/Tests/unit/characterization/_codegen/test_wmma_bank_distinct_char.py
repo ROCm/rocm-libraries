@@ -1,15 +1,18 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""gfx1151 (RDNA3.5 / WMMA V1) WMMA operand VGPR bank ISA characterization.
+"""WMMA operand VGPR bank ISA characterization (gfx1151, gfx1201).
 
-Directly inspects the emitted assembly (CPU-only, no GPU) to verify that every
-emitted ``v_wmma`` reads its three operands (A, B, C) from three distinct VGPR
-banks (bank = vgpr_index % 4). Same-bank operands serialize the WMMA read on
-gfx11 and cost +2 cycles per instruction; the register allocator places A on a
-bank distinct from C (B is already forced odd), so all three should be pairwise
-distinct.
+Directly inspects the emitted assembly (CPU-only, no GPU) and checks the VGPR
+bank (bank = vgpr_index % 4) of each ``v_wmma`` operand (A, B, C):
 
-Config: data/test_data/_designed/gfx1151/wmma_bank_distinct.yaml
+* gfx1151 (WMMA V1): A, B and C are on three distinct banks. Same-bank operands
+  serialize the WMMA read on gfx11 and cost +2 cycles per instruction; the
+  register allocator places A on a bank distinct from C (B is already forced
+  odd).
+* gfx1201 (WMMA V2): A stays on C's bank. Pins the non-gfx11 placement so the
+  gfx11-only rule is not widened by accident.
+
+Configs: data/test_data/_designed/<arch>/wmma_bank_distinct.yaml
   BBS (bf16-in / bf16-out / f32-compute), TN, MatrixInstruction [16,16,16,1]
   MIWaveTile 6x2 (MT96x128x64).
 
@@ -28,16 +31,19 @@ from config_harness import emit_kernels_from_config
 
 pytestmark = pytest.mark.unit
 
-_ARCH = "gfx1151"
+_ARCHS = ["gfx1151", "gfx1201"]
 
-_CONFIG = os.path.join(
-    os.path.dirname(__file__),
-    "data",
-    "test_data",
-    "_designed",
-    "gfx1151",
-    "wmma_bank_distinct.yaml",
-)
+
+def _config(arch):
+    return os.path.join(
+        os.path.dirname(__file__),
+        "data",
+        "test_data",
+        "_designed",
+        arch,
+        "wmma_bank_distinct.yaml",
+    )
+
 
 _NUM_BANKS = 4  # gfx11/gfx12 VGPR file: bank = vgpr_index % 4
 
@@ -112,9 +118,10 @@ def _wmma_operand_banks(src):
         yield line.strip(), banks
 
 
-def test_emits_assembly():
-    """gfx1151 WMMA config emits real assembly, all err==0."""
-    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+@pytest.mark.parametrize("arch", _ARCHS)
+def test_emits_assembly(arch):
+    """WMMA config emits real assembly, all err==0."""
+    results = emit_kernels_from_config(_config(arch), limit=8, arch=arch)
     assert len(results) >= 1, f"Expected >=1 kernel, got {len(results)}"
     assert all(err == 0 for (_b, _s, err) in results), (
         "All kernels must emit with err==0; "
@@ -122,25 +129,38 @@ def test_emits_assembly():
     )
 
 
-def test_all_wmma_operands_on_distinct_banks():
-    """Every emitted v_wmma reads A, B and C from three distinct VGPR banks."""
-    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+def _all_wmma_banks(arch):
+    """Return [(kernel, line, {role: bank})] for every v_wmma emitted for ``arch``."""
+    results = emit_kernels_from_config(_config(arch), limit=8, arch=arch)
     assert len(results) >= 1
 
-    total_wmma = 0
+    out = []
     for base, src, _err in results:
-        wmma_seen = 0
         for line, banks in _wmma_operand_banks(src):
             # Each v_wmma must expose all three operands (A, B, C).
             assert set(banks) == {"A", "B", "C"}, (
                 f"{base}: could not resolve all A/B/C operands for: {line} "
                 f"(got roles {sorted(banks)})"
             )
-            assert len(set(banks.values())) == 3, (
-                f"{base}: v_wmma operands share a VGPR bank "
-                f"(A={banks['A']}, B={banks['B']}, C={banks['C']}) for: {line}"
-            )
-            wmma_seen += 1
-        total_wmma += wmma_seen
+            out.append((base, line, banks))
 
-    assert total_wmma >= 1, "Expected at least one v_wmma instruction across kernels"
+    assert out, "Expected at least one v_wmma instruction across kernels"
+    return out
+
+
+def test_gfx1151_wmma_operands_on_distinct_banks():
+    """gfx1151: every v_wmma reads A, B and C from three distinct VGPR banks."""
+    for base, line, banks in _all_wmma_banks("gfx1151"):
+        assert len(set(banks.values())) == 3, (
+            f"{base}: v_wmma operands share a VGPR bank "
+            f"(A={banks['A']}, B={banks['B']}, C={banks['C']}) for: {line}"
+        )
+
+
+def test_gfx1201_wmma_a_on_c_bank():
+    """gfx1201: A keeps C's VGPR bank; the gfx11 distinct-bank rule must not apply."""
+    for base, line, banks in _all_wmma_banks("gfx1201"):
+        assert banks["A"] == banks["C"], (
+            f"{base}: expected A on C's VGPR bank "
+            f"(A={banks['A']}, B={banks['B']}, C={banks['C']}) for: {line}"
+        )
