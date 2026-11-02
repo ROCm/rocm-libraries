@@ -354,7 +354,7 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
  * case where the GEMM's A/B storage dtype differs from its C storage dtype (see
  * ck_gemm_storage_dtype), and the one case where an element is narrower than
  * the 2 bytes the LDS plan historically hardcoded. */
-static bool ck_gemm_is_fp8_ab(const char* name)
+bool rocke_gemm_is_fp8_ab(const char* name)
 {
     return name != NULL && (strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0);
 }
@@ -376,7 +376,7 @@ static const rocke_type_t* ck_gemm_dtype_ir(const char* name)
     {
         return rocke_f64();
     }
-    if(ck_gemm_is_fp8_ab(name))
+    if(rocke_gemm_is_fp8_ab(name))
     {
         return (strcmp(name, "fp8e4m3") == 0) ? rocke_fp8e4m3() : rocke_bf8e5m2();
     }
@@ -387,13 +387,6 @@ static const rocke_type_t* ck_gemm_dtype_ir(const char* name)
 static const char* ck_gemm_acc_dtype(const rocke_gemm_universal_spec_t* spec)
 {
     return (strcmp(spec->data.dtype_a, "fp64") == 0) ? "fp64" : "fp32";
-}
-
-/* _elem_bytes(spec): storage element size in bytes of the homogeneous A/B/C
- * dtype. */
-static int ck_gemm_elem_bytes(const rocke_gemm_universal_spec_t* spec)
-{
-    return rocke_dtype_info(spec->data.dtype_a)->encoded_bits / 8;
 }
 
 /* _mma_family(arch): "wmma" for the RDNA wave32 targets, "mma" (MFMA) for CDNA.
@@ -423,17 +416,26 @@ static const char* ck_gemm_mma_family(const rocke_archtarget_t* target)
  *
  * On a validation failure returns NULL and (when `reason`/`reason_cap` are
  * non-NULL) writes the Python ValueError text. */
-static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec_t* spec,
-                                                 const rocke_type_t** c_ty_out,
-                                                 char* reason,
-                                                 size_t reason_cap)
+/* The single home of the GEMM storage-dtype rule (declared in
+ * instance_gemm_internal.h): ck_gemm_storage_dtype below, the emitter's
+ * storage dtype (gemm_universal.cpp) and the epilogue's C dtype
+ * (gemm_epilogue.cpp) all call it. */
+bool rocke_gemm_check_storage(const rocke_gemm_universal_spec_t* spec,
+                              char* reason,
+                              size_t reason_cap)
 {
-    const rocke_gemm_data_spec_t* d;
-    const rocke_type_t* ty;
-    const rocke_type_t* c_ty;
+    const rocke_gemm_data_spec_t* d = &spec->data;
 
-    d = &spec->data;
-    if(ck_gemm_is_fp8_ab(d->dtype_a) || ck_gemm_is_fp8_ab(d->dtype_b))
+    if(d->dtype_a == NULL || d->dtype_b == NULL || d->dtype_c == NULL || d->dtype_acc == NULL
+       || d->layout == NULL)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "UniversalGemmSpec has an unset dtype or layout");
+        }
+        return false;
+    }
+    if(rocke_gemm_is_fp8_ab(d->dtype_a) || rocke_gemm_is_fp8_ab(d->dtype_b))
     {
         if(strcmp(d->dtype_a, d->dtype_b) != 0)
         {
@@ -446,7 +448,7 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
                          d->dtype_a,
                          d->dtype_b);
             }
-            return NULL;
+            return false;
         }
         if(strcmp(d->dtype_c, "f16") != 0 && strcmp(d->dtype_c, "fp16") != 0
            && strcmp(d->dtype_c, "bf16") != 0)
@@ -459,7 +461,7 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
                          "(there is no fp8 accumulator), got C=%s",
                          d->dtype_c);
             }
-            return NULL;
+            return false;
         }
     }
     else if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
@@ -474,7 +476,7 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
                      d->dtype_b,
                      d->dtype_c);
         }
-        return NULL;
+        return false;
     }
     if(strcmp(d->dtype_a, "fp64") == 0)
     {
@@ -487,7 +489,7 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
                          "UniversalGemmSpec only supports fp64 accumulation for fp64, got '%s'",
                          d->dtype_acc);
             }
-            return NULL;
+            return false;
         }
     }
     else if(strcmp(d->dtype_acc, "fp32") != 0 && strcmp(d->dtype_acc, "f32") != 0)
@@ -500,7 +502,7 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
                      "UniversalGemmSpec only supports fp32 accumulation, got '%s'",
                      d->dtype_acc);
         }
-        return NULL;
+        return false;
     }
     if(strcmp(d->layout, "RCR") != 0)
     {
@@ -511,6 +513,24 @@ static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec
                      "UniversalGemmSpec only supports RCR layout, got '%s'",
                      d->layout);
         }
+        return false;
+    }
+
+    return true;
+}
+
+static const rocke_type_t* ck_gemm_storage_dtype(const rocke_gemm_universal_spec_t* spec,
+                                                 const rocke_type_t** c_ty_out,
+                                                 char* reason,
+                                                 size_t reason_cap)
+{
+    const rocke_gemm_data_spec_t* d;
+    const rocke_type_t* ty;
+    const rocke_type_t* c_ty;
+
+    d = &spec->data;
+    if(!rocke_gemm_check_storage(spec, reason, reason_cap))
+    {
         return NULL;
     }
 
@@ -595,7 +615,7 @@ static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
      * here. DirectToLDS allocates no pad. Mirrors _ab_lds_plan in
      * gemm_universal.py. */
     lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
-    ab_single = (t->tile_m + t->tile_n) * (t->tile_k + lds_pad) * ck_gemm_elem_bytes(spec);
+    ab_single = (t->tile_m + t->tile_n) * (t->tile_k + lds_pad) * rocke_gemm_elem_bytes(spec);
     lds_cap = (target != NULL) ? (long)target->lds_capacity_bytes : 0;
     db_fits_2wg = ((long)(2 * ab_single) * 2) <= lds_cap;
     db = (strcmp(spec->trait.pipeline, "compv4") == 0)
@@ -724,7 +744,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
      * gfx1250 only. gfx942 / gfx950 carry fp8 MFMA atoms, so the catalog check
      * below would admit them, but nothing there is verified: gfx942 reads FNUZ
      * encodings, and the DirectToLDS path assumes 2-byte elements. */
-    if((ck_gemm_is_fp8_ab(spec->data.dtype_a) || ck_gemm_is_fp8_ab(spec->data.dtype_b))
+    if((rocke_gemm_is_fp8_ab(spec->data.dtype_a) || rocke_gemm_is_fp8_ab(spec->data.dtype_b))
        && strcmp(target->gfx, "gfx1250") != 0)
     {
         CK_GEMM_REJECT("fp8/bf8 A/B GEMM is supported only on gfx1250 (got %s)", arch);
@@ -981,7 +1001,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("direct_to_lds: %s has no DRAM->LDS DMA instruction", arch);
         }
-        dtl_halves = (dtl_max_dwords > 4 ? 4 : dtl_max_dwords) * 4 / ck_gemm_elem_bytes(spec);
+        dtl_halves = (dtl_max_dwords > 4 ? 4 : dtl_max_dwords) * 4 / rocke_gemm_elem_bytes(spec);
         if(dtl_halves != 0 && (t->tile_k % dtl_halves) != 0)
         {
             CK_GEMM_REJECT("direct_to_lds requires tile_k %% %d == 0 (got %d) with "

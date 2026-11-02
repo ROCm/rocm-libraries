@@ -86,13 +86,6 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                          nullptr);
 }
 
-/* _FP8_AB_DTYPES: A/B storage dtypes that are 8-bit floats -- the one case where
- * the GEMM's A/B storage dtype differs from its C storage dtype. */
-static bool rocke_gemm_is_fp8_ab(const char* name)
-{
-    return name != NULL && (strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0);
-}
-
 /* _dtype_ir(name): resolve a GEMM storage dtype string to its IR scalar type.
  * fp64 maps to F64; the 8-bit cases are resolved here rather than in
  * io_ir_type, whose contract is deliberately f16/bf16-only. */
@@ -124,38 +117,9 @@ static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
     const rocke_type_t* ty;
     const rocke_type_t* c_ty;
 
-    if(rocke_gemm_is_fp8_ab(d->dtype_a) || rocke_gemm_is_fp8_ab(d->dtype_b))
+    if(!rocke_gemm_check_storage(spec, NULL, 0))
     {
-        if(strcmp(d->dtype_a, d->dtype_b) != 0)
-        {
-            /* "fp8/bf8 GEMM requires matching A/B dtypes" */
-            return rocke_b_io_ir_type(b, "");
-        }
-        if(strcmp(d->dtype_c, "f16") != 0 && strcmp(d->dtype_c, "fp16") != 0
-           && strcmp(d->dtype_c, "bf16") != 0)
-        {
-            /* "fp8/bf8 GEMM requires an f16/bf16 C dtype" */
-            return rocke_b_io_ir_type(b, "");
-        }
-    }
-    else if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
-    {
-        /* "requires homogeneous A/B/C dtypes" */
-        return rocke_b_io_ir_type(b, "");
-    }
-    if(strcmp(d->dtype_a, "fp64") == 0)
-    {
-        if(strcmp(d->dtype_acc, "fp64") != 0 && strcmp(d->dtype_acc, "f64") != 0)
-        {
-            return rocke_b_io_ir_type(b, "");
-        }
-    }
-    else if(strcmp(d->dtype_acc, "fp32") != 0 && strcmp(d->dtype_acc, "f32") != 0)
-    {
-        return rocke_b_io_ir_type(b, "");
-    }
-    if(strcmp(d->layout, "RCR") != 0)
-    {
+        /* Python ValueError: set the builder's sticky error. */
         return rocke_b_io_ir_type(b, "");
     }
     ty = rocke_gemm_dtype_ir(b, d->dtype_a);
@@ -169,17 +133,6 @@ static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
         *c_ty_out = c_ty;
     }
     return ty;
-}
-
-/* _ab_dtype_bytes(spec): bytes per A/B element -- 2 for f16/bf16, 1 for the
- * fp8/bf8 operands. Python: dtype_info(spec.data.dtype_a).encoded_bits // 8.
- * Non-static: gemm_mma.cpp needs it to size the global load vector. Declared
- * in instance_gemm_internal.h. Same value as rocke_gemm_elem_bytes, except
- * that an unknown dtype falls back to 2. */
-int rocke_gemm_ab_dtype_bytes(const rocke_gemm_universal_spec_t* spec)
-{
-    const rocke_dtype_info_t* info = rocke_dtype_info(spec->data.dtype_a);
-    return (info != NULL) ? (info->encoded_bits / 8) : 2;
 }
 
 /* Mirrors Python _dtype_bytes(dtype). */

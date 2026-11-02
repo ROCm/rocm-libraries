@@ -129,6 +129,35 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
                     _spec(**kw), arch=ARCH, backend="both", want_ir=True
                 )
 
+    def test_both_engines_apply_the_same_storage_rule(self):
+        """One fp8/bf8 storage rule per engine: same verdict and same reason."""
+        import rocke_engine
+
+        from rocke.core.backend import universal_gemm_spec_to_dict
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        base = _spec()
+        cases = {
+            "fp8 x fp8 -> bf16": ("fp8e4m3", "fp8e4m3", "bf16", True),
+            "fp8 x fp8 -> fp16": ("fp8e4m3", "fp8e4m3", "fp16", True),
+            "fp8 x bf8 (mixed)": ("fp8e4m3", "bf8e5m2", "bf16", False),
+            "fp8 x fp8 -> fp32 C": ("fp8e4m3", "fp8e4m3", "fp32", False),
+            "fp8 x fp8 -> fp8 C": ("fp8e4m3", "fp8e4m3", "fp8e4m3", False),
+            "bf16 x fp8 (one side fp8)": ("bf16", "fp8e4m3", "bf16", False),
+        }
+        for label, (a, bb, c, admitted) in cases.items():
+            with self.subTest(label):
+                spec = replace(
+                    base, data=replace(base.data, dtype_a=a, dtype_b=bb, dtype_c=c)
+                )
+                py = is_valid_spec(spec, arch=ARCH)
+                cpp = rocke_engine.gemm_is_valid(
+                    universal_gemm_spec_to_dict(spec), ARCH
+                )
+                self.assertEqual(tuple(cpp), tuple(py))
+                if not admitted:
+                    self.assertFalse(py[0], f"{label} admitted")
+
     def test_both_engines_reject_for_the_same_reason(self):
         import rocke_engine
 

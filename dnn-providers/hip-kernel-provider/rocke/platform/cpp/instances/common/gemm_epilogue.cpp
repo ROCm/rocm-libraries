@@ -95,55 +95,22 @@ static const rocke_type_t* gemm_dtype_ir(rocke_ir_builder_t* b, const char* name
  * both of which read `c_dtype = _c_storage_dtype(spec)`. C stays a 16-bit float
  * even when A/B are 8-bit, so io_ir_type still covers every reachable case.
  *
- * Note: in Python the three validation branches raise ValueError directly. The
- * C port has no public sticky-error setter, so on a homogeneity / acc / layout
- * mismatch we route through rocke_b_io_ir_type with the offending A-dtype: for the
- * (already-validated upstream) GEMM call sites the dtypes are homogeneous fp16 /
- * bf16 with fp32 acc + RCR, so this reduces to io_ir_type(dtype_a) exactly as
- * Python and the emitted IR is byte-identical. NAMED GAP (blocked on shared
- * infra): the heterogeneous-dtype ValueError text is NOT reproduced here because
- * no public _storage_dtype validator exists in a shared header; the ck_gemm_
- * storage_dtype validator in gemm_spec.cpp is the host-side reject surface and is
- * reached before emission, so these emit-path call sites only need the resolved
- * IR type. When a shared _storage_dtype validator lands, call it here so the
- * ValueError messages match byte-for-byte. */
+ * The rule itself is rocke_gemm_check_storage (instance_gemm_internal.h), shared
+ * with the validator and the emitter. In Python a failure raises ValueError; the
+ * C port has no public sticky-error setter, so a failure routes through
+ * rocke_b_io_ir_type to set the builder's sticky error. The call sites are
+ * reached only after is_valid_spec, so the emitted IR is unaffected. */
 static const rocke_type_t* gemm_c_storage_dtype(rocke_ir_builder_t* b,
                                                 const rocke_gemm_universal_spec_t* spec)
 {
-    const rocke_gemm_data_spec_t* d = &spec->data;
-    const char* a = d->dtype_a;
-    const char* bb = d->dtype_b;
-    const char* c = d->dtype_c;
-    const char* acc = d->dtype_acc;
-    bool is_fp8_ab;
-    bool ab_ne;
-    bool ac_ne;
-    bool c_ok;
-    bool acc_ok;
-    bool layout_ok;
-
     if(!rocke_ir_builder_ok(b))
         return NULL;
-
-    is_fp8_ab = (a != NULL && (strcmp(a, "fp8e4m3") == 0 || strcmp(a, "bf8e5m2") == 0))
-                || (bb != NULL && (strcmp(bb, "fp8e4m3") == 0 || strcmp(bb, "bf8e5m2") == 0));
-    ab_ne = (a == NULL || bb == NULL) ? (a != bb) : (strcmp(a, bb) != 0);
-    ac_ne = (a == NULL || c == NULL) ? (a != c) : (strcmp(a, c) != 0);
-    /* The fp8/bf8 path is the one case where A/B and C differ: A/B are 8-bit
-     * floats, C is a 16-bit float (there is no fp8 accumulator). */
-    c_ok = c != NULL && (strcmp(c, "f16") == 0 || strcmp(c, "fp16") == 0 || strcmp(c, "bf16") == 0);
-    if(a != NULL && strcmp(a, "fp64") == 0)
-        acc_ok = acc != NULL && (strcmp(acc, "fp64") == 0 || strcmp(acc, "f64") == 0);
-    else
-        acc_ok = acc != NULL && (strcmp(acc, "fp32") == 0 || strcmp(acc, "f32") == 0);
-    layout_ok = d->layout != NULL && strcmp(d->layout, "RCR") == 0;
-
-    if(ab_ne || (is_fp8_ab ? !c_ok : ac_ne) || !acc_ok || !layout_ok)
+    if(!rocke_gemm_check_storage(spec, NULL, 0))
     {
         /* Force the ValueError-equivalent sticky error through the io helper. */
         return rocke_b_io_ir_type(b, NULL);
     }
-    return gemm_dtype_ir(b, d->dtype_c);
+    return gemm_dtype_ir(b, spec->data.dtype_c);
 }
 
 /* =====================================================================

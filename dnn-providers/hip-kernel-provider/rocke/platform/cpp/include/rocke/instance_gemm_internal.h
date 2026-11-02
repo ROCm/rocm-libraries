@@ -306,9 +306,19 @@ rocke_value_t* rocke_gemm_emit_zero_acc(rocke_ir_builder_t* b,
  * dtype. */
 int rocke_gemm_elem_bytes(const rocke_gemm_universal_spec_t* spec);
 
-/* _ab_dtype_bytes(spec) -> bytes per A/B element (2 for f16/bf16, 1 for
- * fp8/bf8). Defined in gemm_universal.cpp. */
-int rocke_gemm_ab_dtype_bytes(const rocke_gemm_universal_spec_t* spec);
+/* _FP8_AB_DTYPES membership: whether `name` is an 8-bit float A/B storage
+ * dtype (fp8e4m3, bf8e5m2). Defined in gemm_spec.cpp. */
+bool rocke_gemm_is_fp8_ab(const char* name);
+
+/* _validate_storage(spec): the GEMM storage-dtype rule. A/B/C are homogeneous
+ * f16 / bf16 (f32 acc) or fp64 (fp64 acc), except fp8/bf8 A/B, which need
+ * matching A/B and an f16/bf16 C; the layout is RCR. Returns true when the spec
+ * passes; otherwise false, with the Python ValueError text in `reason` when it
+ * is non-NULL. Defined in gemm_spec.cpp; the validator, the emitter and the
+ * epilogue all use it. */
+bool rocke_gemm_check_storage(const rocke_gemm_universal_spec_t* spec,
+                              char* reason,
+                              size_t reason_cap);
 
 /* _dtype_bytes(dtype_str) -> bytes per element for a named dtype string.
  * Mirrors Python _dtype_bytes. */
