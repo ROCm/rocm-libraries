@@ -536,10 +536,9 @@ Python emitter and the compiled C emitter for each config index and diffs the
 4. A default-OFF, unwired knob must produce **no** golden diff — a clean gate
    with no re-bless is the proof it is inert.
 
-> Known layout-independent residuals reproduce on `develop` and are **not** your
+> Known layout-independent residual reproduces on `develop` and is **not** your
 > regression: 7 `TestDatalayoutDriftGuard` subtests on a mismatched local clang
-> vintage, and 6 `conv/*` golden cases when the C++ engine is not built (see
-> [BUILDING.md](BUILDING.md)).
+> vintage (see [BUILDING.md](BUILDING.md)).
 
 ### G. Promote a common optimization to platform
 
