@@ -56,6 +56,7 @@ The following table lists the operations currently executable through the GPU gr
 | BatchNorm Forward Inference | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean and variance are required inputs |
 | BatchNorm Forward Inference with Variance | FP16, BFP16, FP32 | Stride-based | GPU Reference | Same signatures as BatchNorm Forward Inference |
 | BatchNorm Forward Training | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/variance outputs optional |
+| BatchNorm Backward | FP16, BFP16, FP32 | Packed channel-first or channel-last | GPU Reference | Saved mean/inv-variance optional; FP32 compute and scale/bias gradients |
 | Layernorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/inv-variance outputs optional |
 | Layernorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/inv-variance optional |
 | RMSNorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
@@ -73,7 +74,6 @@ The following table lists the operations currently executable through the GPU gr
 |-----------|-------------------|-------------------|
 | Convolution Backward Data | `ReferenceCapabilityError` ("GPU plan not yet implemented") | `GpuFpReferenceConvolution::dgrad` exists |
 | Convolution Backward Weights | `ReferenceCapabilityError` | `GpuFpReferenceConvolution::wgrad` exists |
-| BatchNorm Backward | `ReferenceCapabilityError` | `GpuFpReferenceBatchnorm::backward` exists |
 | BlockScale Quantize / Dequantize | `ReferenceCapabilityError` | None |
 | Resample Forward | "Unsupported node type" error | `GpuFpReferenceResample::forward` exists |
 | Resample Backward | "Unsupported node type" error | None |
@@ -100,6 +100,19 @@ but are not reachable through graph-level verification.
 | BatchNorm Forward Inference | `GpuBatchnormFwdInfPlanBuilder` | `GpuBatchnormFwdInfSignatureKey` | Inference-mode forward pass |
 | BatchNorm Forward Inference with Variance | `GpuBatchnormFwdInfVariancePlanBuilder` | `GpuBatchnormFwdInfVarianceSignatureKey` | Inference-mode with variance forward pass |
 | BatchNorm Forward Training | `GpuBatchnormFwdTrainPlanBuilder` | `GpuBatchnormFwdTrainSignatureKey` | Training-mode forward pass with statistics |
+| BatchNorm Backward | `GpuBatchnormBwdPlanBuilder` | `GpuBatchnormBwdSignatureKey` | Input, scale and bias gradients, with optional saved statistics |
+
+BatchNorm backward registers seven `(dy, x, dx)` combinations: `(FP32, FP32, FP32)`,
+`(FP16, FP16, FP16)`, `(BFP16, BFP16, BFP16)`, `(FP16, FP16, FP32)`,
+`(BFP16, BFP16, FP32)`, `(FP32, BFP16, BFP16)` and `(FP32, FP16, FP16)`.
+Scale, scale/bias gradients, saved statistics and compute use FP32. Without saved statistics,
+the operation computes mean and variance internally. Tensor dimensions and layouts are validated
+by the operation at execution time, not by the graph plan's applicability check.
+
+The direct `GpuFpReferenceBatchnorm::backward` API also supports FP64 data and compute.
+Its compute type defaults to the mean/variance type, as in the other BatchNorm operations.
+Backward compute must be FP32 or FP64; callers using FP16 or BFP16 statistics must explicitly
+select FP32 compute.
 
 ### Normalization Operations
 

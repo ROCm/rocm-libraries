@@ -122,7 +122,7 @@ TEST(TestGpuBatchnormBwdRefValidation, AcceptsRanksThreeThroughFiveAndAffineBroa
         {2, 4, 2, 3, 5}, TensorLayout::NCDHW, false);
 }
 
-TEST(TestGpuBatchnormBwdRefValidation, DefaultsLowPrecisionComputeToFloat)
+TEST(TestGpuBatchnormBwdRefValidation, ExplicitFloatComputeWithLowPrecisionStatisticsDoesntThrow)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -132,8 +132,8 @@ TEST(TestGpuBatchnormBwdRefValidation, DefaultsLowPrecisionComputeToFloat)
     Tensor<half> halfDx({2, 3, 4});
     Tensor<half> halfDscale({1, 3, 1});
     Tensor<half> halfDbias({1, 3, 1});
-    EXPECT_NO_THROW(
-        GpuFpReferenceBatchnorm::backward(halfDy, halfX, halfScale, halfDx, halfDscale, halfDbias));
+    EXPECT_NO_THROW((GpuFpReferenceBatchnorm::backward<half, half, half, half, half, float>(
+        halfDy, halfX, halfScale, halfDx, halfDscale, halfDbias)));
 
     Tensor<bfloat16> bfloat16Dy({2, 3, 4});
     Tensor<bfloat16> bfloat16X({2, 3, 4});
@@ -141,11 +141,12 @@ TEST(TestGpuBatchnormBwdRefValidation, DefaultsLowPrecisionComputeToFloat)
     Tensor<bfloat16> bfloat16Dx({2, 3, 4});
     Tensor<bfloat16> bfloat16Dscale({1, 3, 1});
     Tensor<bfloat16> bfloat16Dbias({1, 3, 1});
-    EXPECT_NO_THROW(GpuFpReferenceBatchnorm::backward(
-        bfloat16Dy, bfloat16X, bfloat16Scale, bfloat16Dx, bfloat16Dscale, bfloat16Dbias));
+    EXPECT_NO_THROW(
+        (GpuFpReferenceBatchnorm::backward<bfloat16, bfloat16, bfloat16, bfloat16, bfloat16, float>(
+            bfloat16Dy, bfloat16X, bfloat16Scale, bfloat16Dx, bfloat16Dscale, bfloat16Dbias)));
 }
 
-TEST(TestGpuBatchnormBwdRefValidation, DefaultsDoubleStatisticsComputeToDouble)
+TEST(TestGpuBatchnormBwdRefValidation, DoubleStatisticsComputationDoesntThrow)
 {
     SKIP_IF_NO_DEVICES();
 

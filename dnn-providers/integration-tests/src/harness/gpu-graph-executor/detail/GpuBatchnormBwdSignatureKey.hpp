@@ -191,6 +191,23 @@ struct GpuBatchnormBwdSignatureKey
                                                           MeanVarianceDataTypeEnum,
                                                           DxDataTypeEnum,
                                                           ComputeDataTypeEnum>>();
+
+        if constexpr(ScaleBiasDataTypeEnum != MeanVarianceDataTypeEnum)
+        {
+            // Without saved statistics, the key uses the scale/bias type for mean/variance.
+            map[GpuBatchnormBwdSignatureKey(DyDataTypeEnum,
+                                            XDataTypeEnum,
+                                            ScaleBiasDataTypeEnum,
+                                            ScaleBiasDataTypeEnum,
+                                            DxDataTypeEnum,
+                                            ComputeDataTypeEnum)]
+                = std::make_unique<GpuBatchnormBwdPlanBuilder<DyDataTypeEnum,
+                                                              XDataTypeEnum,
+                                                              ScaleBiasDataTypeEnum,
+                                                              ScaleBiasDataTypeEnum,
+                                                              DxDataTypeEnum,
+                                                              ComputeDataTypeEnum>>();
+        }
     }
 };
 

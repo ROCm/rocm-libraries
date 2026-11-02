@@ -204,59 +204,7 @@ public:
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);
 
-        if(anyOperandIsRuntimePassByValue(tensorMap, tensorUids))
-        {
-            return false;
-        }
-
-        const auto* meanAttributes
-            = hasMean ? tensorMap.at(nodeAttributes->mean_tensor_uid().value()) : nullptr;
-        const auto* invVarianceAttributes
-            = hasMean ? tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value()) : nullptr;
-        GpuBatchnormBwdParams params(*tensorMap.at(nodeAttributes->dy_tensor_uid()),
-                                     *tensorMap.at(nodeAttributes->x_tensor_uid()),
-                                     *tensorMap.at(nodeAttributes->scale_tensor_uid()),
-                                     *tensorMap.at(nodeAttributes->dx_tensor_uid()),
-                                     *tensorMap.at(nodeAttributes->dscale_tensor_uid()),
-                                     *tensorMap.at(nodeAttributes->dbias_tensor_uid()),
-                                     meanAttributes,
-                                     invVarianceAttributes);
-
-        using TensorProps = hipdnn_gpu_ref::GpuFpReferenceBatchnorm::TensorProps;
-        const TensorProps dyProps("dy", params.dyTensor.dims, params.dyTensor.strides);
-        const TensorProps xProps("input", params.xTensor.dims, params.xTensor.strides);
-        const TensorProps scaleProps("scale", params.scaleTensor.dims, params.scaleTensor.strides);
-        const TensorProps dxProps("dx", params.dxTensor.dims, params.dxTensor.strides);
-        const TensorProps dscaleProps(
-            "dscale", params.dscaleTensor.dims, params.dscaleTensor.strides);
-        const TensorProps dbiasProps("dbias", params.dbiasTensor.dims, params.dbiasTensor.strides);
-        std::optional<TensorProps> meanProps;
-        std::optional<TensorProps> invVarianceProps;
-        if(params.meanTensor.has_value())
-        {
-            meanProps.emplace("mean", params.meanTensor->dims, params.meanTensor->strides);
-            invVarianceProps.emplace(
-                "invVariance", params.invVarianceTensor->dims, params.invVarianceTensor->strides);
-        }
-
-        try
-        {
-            hipdnn_gpu_ref::GpuFpReferenceBatchnorm::validateBackwardMetadata(
-                dyProps,
-                xProps,
-                scaleProps,
-                dxProps,
-                dscaleProps,
-                dbiasProps,
-                meanProps ? &*meanProps : nullptr,
-                invVarianceProps ? &*invVarianceProps : nullptr);
-        }
-        catch(const std::invalid_argument&)
-        {
-            return false;
-        }
-
-        return true;
+        return !anyOperandIsRuntimePassByValue(tensorMap, tensorUids);
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>

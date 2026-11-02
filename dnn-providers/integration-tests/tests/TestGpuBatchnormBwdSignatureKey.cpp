@@ -10,6 +10,7 @@
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
+using hipdnn_data_sdk::types::half;
 
 TEST(TestGpuBatchnormBwdSignatureKey, EqualityAndHash)
 {
@@ -52,14 +53,70 @@ TEST(TestGpuBatchnormBwdSignatureKey, CreateFromNodeWithSavedStatistics)
 
 TEST(TestGpuBatchnormBwdSignatureKey, CreateFromNodeWithoutSavedStatistics)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
-        {12, 4, 2, 1}, {2, 3, 2, 2}, false);
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(
+        {12, 4, 2, 1}, {2, 3, 2, 2}, false, DataType::FLOAT, DataType::HALF, DataType::DOUBLE);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuBatchnormBwdSignatureKey key(graph.getNode(0), graph.getTensorMap());
 
-    EXPECT_EQ(key.meanVarianceDataType, key.scaleBiasDataType);
+    const GpuBatchnormBwdSignatureKey expected{DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::HALF,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT};
+    EXPECT_EQ(key, expected);
+}
+
+TEST(TestGpuBatchnormBwdSignatureKey, RegistersFallbackWithoutSavedStatistics)
+{
+    std::unordered_map<GpuBatchnormBwdSignatureKey,
+                       std::unique_ptr<IGpuGraphNodePlanBuilder>,
+                       GpuBatchnormBwdSignatureKey>
+        builders;
+    GpuBatchnormBwdSignatureKey::addPlanBuilder<DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::HALF,
+                                                DataType::DOUBLE,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT>(builders);
+
+    EXPECT_EQ(builders.size(), 2);
+    for(const bool useSavedStats : {false, true})
+    {
+        SCOPED_TRACE(useSavedStats);
+        const auto builder
+            = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph({12, 4, 2, 1},
+                                                                       {2, 3, 2, 2},
+                                                                       useSavedStats,
+                                                                       DataType::FLOAT,
+                                                                       DataType::HALF,
+                                                                       DataType::DOUBLE);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        const GpuBatchnormBwdSignatureKey key(graph.getNode(0), graph.getTensorMap());
+        const auto it = builders.find(key);
+        ASSERT_NE(it, builders.end());
+        EXPECT_TRUE(it->second->isApplicable(graph.getNode(0), graph.getTensorMap()));
+        const auto plan = it->second->buildNodePlan(graph, graph.getNode(0));
+        if(useSavedStats)
+        {
+            const bool hasExpectedType
+                = dynamic_cast<GpuBatchnormBwdPlan<float, float, half, double, float, float>*>(
+                      plan.get())
+                  != nullptr;
+            EXPECT_TRUE(hasExpectedType);
+        }
+        else
+        {
+            const bool hasExpectedType
+                = dynamic_cast<GpuBatchnormBwdPlan<float, float, half, half, float, float>*>(
+                      plan.get())
+                  != nullptr;
+            EXPECT_TRUE(hasExpectedType);
+        }
+    }
 }
 
 TEST(TestGpuBatchnormBwdSignatureKey, RegistersSupportedComputeTypesOnly)
