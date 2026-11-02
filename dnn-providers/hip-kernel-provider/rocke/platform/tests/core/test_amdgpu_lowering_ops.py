@@ -22,6 +22,11 @@ These are engine-level (not kernel-family) contracts, so they live in
 * ``lower_llvm._op_memref_global_atomic_add_pk_bf16`` -- lowers to a generic
   ``atomicrmw fadd <2 x bfloat>`` (the ``llvm.amdgcn.global.atomic.fadd.v2bf16``
   intrinsic does not exist in the shipping ROCm LLVM).
+* ``lower_llvm._op_memref_global_atomic_add_pk_f16`` -- the same generic
+  ``atomicrmw fadd`` on ``<2 x half>``, at the op's ordering. The legacy
+  ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic auto-upgrades to a
+  system-scope ``seq_cst`` atomic, which fences every add with an L2 writeback
+  and invalidate.
 * ``IRBuilder.ds_read_tr16_*`` result-name hint -- must be ``dtr16`` (not
   ``tr16``) so the fresh-name counter can never collide with an ``arith.trunc``
   result (``tr`` + id).
@@ -38,7 +43,7 @@ import re
 import unittest
 from typing import ClassVar
 
-from rocke.core.ir import BF16, F64, I32, IRBuilder, PtrType
+from rocke.core.ir import BF16, F16, F64, I32, IRBuilder, PtrType
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
@@ -64,6 +69,31 @@ class TestPackedBf16AtomicLowering(unittest.TestCase):
         # This intrinsic is not in the shipping ROCm LLVM; emitting it was the bug.
         ir = lower_kernel_to_llvm(self._kernel(), arch="gfx950")
         self.assertNotIn("llvm.amdgcn.global.atomic.fadd.v2bf16", ir)
+
+
+class TestPackedF16AtomicLowering(unittest.TestCase):
+    def _kernel(self):
+        b = IRBuilder("pk_f16_atomic")
+        p = b.param("p", PtrType(F16, "global"))
+        idx = b.param("idx", I32)
+        val = b.global_load_vN(p, idx, F16, 2, align=4)  # <2 x f16>
+        b.global_atomic_add_pk_f16(p, idx, val)
+        b.ret()
+        return b.kernel
+
+    def test_lowers_to_relaxed_atomicrmw(self):
+        ir = lower_kernel_to_llvm(self._kernel(), arch="gfx950")
+        line = next(ln for ln in ir.splitlines() if "atomicrmw fadd" in ln)
+        self.assertIn("<2 x half>", line)
+        self.assertIn(" monotonic", line)
+        self.assertIn("amdgpu.no.fine.grained.memory", line)
+
+    def test_does_not_emit_fencing_intrinsic(self):
+        # The legacy intrinsic is upgraded to a seq_cst system-scope atomic:
+        # buffer_wbl2 / buffer_inv around every packed add.
+        ir = lower_kernel_to_llvm(self._kernel(), arch="gfx950")
+        self.assertNotIn("llvm.amdgcn.global.atomic.fadd.v2f16", ir)
+        self.assertNotIn("seq_cst", ir)
 
 
 class TestInlineAsmHipLowering(unittest.TestCase):

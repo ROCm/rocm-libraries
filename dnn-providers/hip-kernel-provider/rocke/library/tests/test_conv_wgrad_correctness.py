@@ -2689,33 +2689,43 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
                     )
 
     def test_split_k_atomic(self):
+        # compv3 prefetches the next tile into registers across the MFMAs, so
+        # under split-K it reads one tile past its slice; fp16 covers the
+        # packed fp16 atomic.
         for kouter in self._KOUTER_AXIS:
-            for pipeline in ("mem", "compv4"):
-                for shape in (_SHAPES[0], _SHAPES[2]):
-                    with self.subTest(kouter=kouter, pipeline=pipeline, shape=shape.id):
-                        self._run(
-                            shape,
-                            "bf16",
-                            pipeline,
-                            "cshuffle",
-                            split_k=4,
-                            lds_k_outer=kouter,
-                        )
+            for pipeline in ("mem", "compv3", "compv4"):
+                for dtype in _DTYPES:
+                    for shape in (_SHAPES[0], _SHAPES[2]):
+                        with self.subTest(
+                            kouter=kouter,
+                            pipeline=pipeline,
+                            dtype=dtype,
+                            shape=shape.id,
+                        ):
+                            self._run(
+                                shape,
+                                dtype,
+                                pipeline,
+                                "cshuffle",
+                                split_k=4,
+                                lds_k_outer=kouter,
+                            )
 
     def test_two_stage(self):
         for kouter in self._KOUTER_AXIS:
-            for shape in (_SHAPES[0], _SHAPES[2]):
-                with self.subTest(kouter=kouter, shape=shape.id):
-                    ok, why = _check_two_stage(
-                        shape,
-                        "bf16",
-                        "mem",
-                        split_k=4,
-                        lds_k_outer=kouter,
-                        seed=90,
-                        prefetch_addr=True,
-                    )
-                    _assert_case_ran(self, ok, why)
+            for pipeline in ("mem", "compv3"):
+                for shape in (_SHAPES[0], _SHAPES[2]):
+                    with self.subTest(kouter=kouter, pipeline=pipeline, shape=shape.id):
+                        ok, why = _check_two_stage(
+                            shape,
+                            "bf16",
+                            pipeline,
+                            split_k=4,
+                            lds_k_outer=kouter,
+                            seed=90,
+                            prefetch_addr=True,
+                        )
+                        _assert_case_ran(self, ok, why)
 
     def test_grouped(self):
         shape = _Shape(

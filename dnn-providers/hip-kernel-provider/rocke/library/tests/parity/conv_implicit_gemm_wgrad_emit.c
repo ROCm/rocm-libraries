@@ -50,6 +50,8 @@
  *  51  N4H12W12C24_K32Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=2 fp16 out
  *  52-54  WMMA split-K both engines must reject: gfx1201 bf16 out, gfx1250 bf16 out
  *         with cshuffle, gfx1151 fp32 out. Must match the Python emitter's 52-54.
+ *  55-56  prefetch_addr + compv3: split-K packed fp16 atomic on base 11, and
+ *         two-stage on base 15. Must match the Python emitter's _PFA_BASES.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -113,6 +115,8 @@ static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
     int base = pfa_base(idx);
+    if(idx == 55 || idx == 56)
+        base = idx == 55 ? 11 : 15;
     if(base < 0)
         return make_base_cfg(idx, spec, arch);
     if(make_base_cfg(base, spec, arch) != 0)
@@ -120,8 +124,10 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
     spec->prefetch_addr = true;
     if(idx == 36)
         spec->split_k = 2; /* split-K packed fp16 atomic on the K-outer cshuffle base */
-    if(idx == 43)
+    if(idx == 43 || idx == 55 || idx == 56)
         spec->pipeline = "compv3";
+    if(idx == 55)
+        spec->split_k = 2; /* packed fp16 atomic on the K-outer cshuffle base */
     if(idx == 48)
     {
         /* C = K = 3 on the 128x128x64 base: both operands load scalar, so

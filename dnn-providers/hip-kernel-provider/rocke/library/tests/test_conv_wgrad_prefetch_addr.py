@@ -71,6 +71,42 @@ class TestWgradPrefetchAddrGate(unittest.TestCase):
         # The loads are regrouped, not duplicated.
         self.assertEqual(_buffer_loads(on), _buffer_loads(off))
 
+    def test_compv3_prefetches_the_next_tile_across_the_mfmas(self):
+        mem = _lower(_spec(prefetch_addr=True))
+        cv3 = _lower(_spec(prefetch_addr=True, pipeline="compv3"))
+        # A prologue stages the first tile, so every read appears twice.
+        self.assertEqual(_buffer_loads(cv3), 2 * _buffer_loads(mem))
+        self.assertEqual(len(re.findall(r"%pfa_off\d+ = phi", cv3)), 4)
+
+        def body(ll: str) -> str:
+            # The loop body: the block the header's conditional branch enters,
+            # up to the latch.
+            header = ll.index("%pfa_off0 = phi")
+            start = ll.index("for.body", ll.index("br i1", header))
+            start = ll.index("\nfor.body", start)
+            return ll[start : ll.index("for.latch", start + 1)]
+
+        def order(ll: str) -> tuple:
+            b = body(ll)
+
+            def first(pat: str) -> int:
+                return re.search(pat, b).start()
+
+            return (
+                first(r"amdgcn\.raw\.(?:ptr\.)?buffer\.load"),
+                first(r"llvm\.amdgcn\.mfma"),
+                first(r"store [^\n]*addrspace\(3\)"),
+            )
+
+        load, mfma, lds = order(cv3)
+        # compv3: issue tile k+1, MFMA tile k, then overwrite LDS.
+        self.assertLess(load, mfma)
+        self.assertLess(mfma, lds)
+        load, mfma, lds = order(mem)
+        # Any other pipeline writes LDS before its MFMAs.
+        self.assertLess(load, lds)
+        self.assertLess(lds, mfma)
+
     def test_every_sync_pipeline_is_admitted(self):
         from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
 

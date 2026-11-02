@@ -55,6 +55,9 @@
 #   52-54 -- WMMA split-K both engines must reject: gfx1201 bf16 dW (arch not
 #         enabled), gfx1250 bf16 dW with the cshuffle epilogue (outside the
 #         WMMA wgrad subset), gfx1151 fp32 dW (arch not enabled, any dtype)
+#   55-56 -- prefetch_addr + compv3 (next tile prefetched into registers across
+#         the MFMAs): split-K packed fp16 atomic on the K-outer cshuffle base,
+#         and two-stage
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no case loads bf16 operands. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -70,7 +73,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-54, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-56, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -102,6 +105,8 @@ _PFA_BASES = {
     # 128x128x64 with C = K = 3, so both operands load scalar: 4 accumulators
     # + 64 carried offsets, past the C++ engine's accumulator cap.
     48: (4, {"problem": ConvProblem(N=8, Hi=56, Wi=56, C=3, K=3, Y=3, X=3)}),
+    55: (11, {"split_k": 2, "pipeline": "compv3"}),  # compv3, packed fp16 atomic
+    56: (15, {"pipeline": "compv3"}),  # compv3, two-stage
 }
 
 
