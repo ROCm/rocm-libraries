@@ -91,6 +91,7 @@ add_executable(
     TestSdpaBackwardAttributes.cpp
     TestSdpaBwdNode.cpp
     TestSdpaFwdNode.cpp
+    TestSdpaFwdNodeVllmExtensions.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
     TestReductionAttributes.cpp

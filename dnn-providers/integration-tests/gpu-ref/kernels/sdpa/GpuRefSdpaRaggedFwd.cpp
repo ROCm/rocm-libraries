@@ -182,8 +182,8 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
         // Fold in the fp8 Q/K descale.
         COMPUTE_TYPE s = dot * descaleQK * static_cast<COMPUTE_TYPE>(args.scale);
 
-        // Sliding-window mask, aligned per batch, cuDNN semantics: keeps skv in
-        // [sq + windowOffset - leftBound + 1, sq + windowOffset + rightBound].
+        // Diagonal band, aligned per batch: keep keys in (sq + off - leftBound, sq + off + rightBound],
+        // so leftBound = L keeps L keys including the diagonal (cuDNN).
         // No additive bias: it is gated off on the ASM v3 path.
         if(args.rightBound >= 0)
         {
@@ -205,6 +205,13 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
             }
         }
         return s;
+    };
+
+    // Whether the band removes key skv (the rule score() applies). A removed key's V is never
+    // read: 0 * NaN would leak whatever it holds (SEM-027).
+    auto bandRemoves = [&](long long skv) -> bool {
+        return (args.rightBound >= 0 && skv >= sq + 1 + windowOffset + args.rightBound)
+               || (args.leftBound >= 0 && skv <= sq + windowOffset - args.leftBound);
     };
 
     // Pass 1: row max for a stable softmax.
@@ -257,6 +264,10 @@ extern "C" __global__ void sdpaRaggedFwdRef(SdpaRaggedFwdArgs args)
     COMPUTE_TYPE weighted = static_cast<COMPUTE_TYPE>(0);
     for(long long skv = 0; skv < seqKv; ++skv)
     {
+        if(bandRemoves(skv))
+        {
+            continue;
+        }
         COMPUTE_TYPE s = score(skv);
         COMPUTE_TYPE probability = expf(s - maxVal) / sumExp;
         probability = storeSoftmaxProbability(probability);

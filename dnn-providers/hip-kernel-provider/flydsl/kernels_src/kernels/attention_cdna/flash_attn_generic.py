@@ -41,11 +41,16 @@ from kernels.attention_cdna.flash_attn_utils import (
     GenericQLoader,
     GenericSoftmaxHelper,
     GenericStoreHelper,
+    SINK_F32,
+    SINK_OTHER_16BIT,
+    SINK_QUERY_DTYPE,
     _is_gfx942_class,
+    _load_seq_lens,
     _make_flash_attn_generic_traits,
     _no_keys,
     _waitcnt_vm_n,
     daz_denormal_attr,
+    load_sink_logit,
 )
 from kernels.common.kernels_common import dtype_to_elem_type
 from kernels.common import buffer_ops
@@ -92,6 +97,9 @@ def build_flash_attn_func_module_primary(
     dv_split=1,
     k_chunk=None,
     has_sink=False,
+    bias_kstrided=False,
+    has_dropout=False,
+    v_mask=False,
 ):
     """Build a generic f16/bf16 flash-attention launcher.
 
@@ -146,6 +154,9 @@ def build_flash_attn_func_module_primary(
             dv_split=dv_split,
             k_chunk=k_chunk,
             has_sink=has_sink,
+            bias_kstrided=bias_kstrided,
+            has_dropout=has_dropout,
+            v_mask=v_mask,
         )
         _launcher_m256 = build_flash_attn_func_module_primary(
             num_heads,
@@ -180,6 +191,9 @@ def build_flash_attn_func_module_primary(
             dv_split=dv_split,
             k_chunk=k_chunk,
             has_sink=has_sink,
+            bias_kstrided=bias_kstrided,
+            has_dropout=has_dropout,
+            v_mask=v_mask,
         )
         _bs_threshold = (
             2048 * num_heads if _is_gfx942_class(gpu_arch) else 4096 * num_heads
@@ -246,7 +260,11 @@ def build_flash_attn_func_module_primary(
         256,
         512,
     ), f"flat_work_group_size must be 64, 128, 256, or 512, got {_validate_fwg}"
-    assert dtype_str in ("f16", "bf16"), "flash_attn_func only supports f16 and bf16"
+    assert dtype_str in (
+        "f16",
+        "bf16",
+        "f32",
+    ), "flash_attn_func only supports f16, bf16 and f32"
     assert _validate_block_n_out % 64 == 0
 
     paged = bool(paged)
@@ -288,6 +306,7 @@ def build_flash_attn_func_module_primary(
         pack_gqa=pack_gqa,
         dv_split=dv_split,
         k_chunk=k_chunk,
+        v_mask=v_mask,
     )
     # Chunked K stages on the plain load path (modification 18).
     _k_chunk_cols = traits.HEAD_DIM // traits.K_CHUNKS
@@ -299,9 +318,25 @@ def build_flash_attn_func_module_primary(
     # A packed build addresses Q, O and the LSE per row; the bias per head is not
     # (modification 15).
     assert not (pack_gqa and has_bias), "a packed GQA build takes no bias"
+    # The bias read one key at a time, at a runtime key stride and element type
+    # (modification 31), is a kind of bias build.
+    assert has_bias or not bias_kstrided, "a strided bias build is a bias build"
     # A bias build differs from the plain one in its body only (modification 12), as a
     # sink build does (modification 19).
-    _flash_attn_generic_cache_tag = (traits.cache_tag, bool(has_bias), bool(has_sink))
+    _flash_attn_generic_cache_tag = (
+        traits.cache_tag,
+        bool(has_bias),
+        bool(has_sink),
+        bool(bias_kstrided),
+        bool(has_dropout),
+        # V's own runtime width (modification 40).
+        bool(v_mask),
+    )
+    # Dropout (modification 33) draws on each query row's own position, so a build
+    # that packs a GQA group into rows or splits the keys takes none.
+    assert not (
+        has_dropout and (pack_gqa or split_kv)
+    ), "a dropout build is a prefill build"
 
     def _extract_seq_len(args, kwargs):
         """Return the launch-time seq_len as int, or None if not statically known."""
@@ -347,10 +382,14 @@ def build_flash_attn_func_module_primary(
         LSE: fx.Tensor,
         seq_len: fx.Int32,
         seq_len_kv: fx.Int32,
-        CuSeqQ: fx.Tensor,
-        CuSeqKv: fx.Tensor,
+        # Upstream's cu_seqlens slots, which only a VARLEN build reads as such; a dense
+        # build reads them as the per-batch query and key lengths of a padded launch,
+        # INT32 [B], and the page-table stride slot, which only a PAGED build reads,
+        # as its `varlen_flags` (modification 32).
+        SeqLenQ: fx.Tensor,
+        SeqLenKv: fx.Tensor,
         BlockTable: fx.Tensor,
-        block_table_stride: fx.Int32,
+        varlen_flags: fx.Int32,
         sm_scale: fx.Float32,
         num_heads_q: fx.Int32,
         num_heads_kv: fx.Int32,
@@ -383,6 +422,24 @@ def build_flash_attn_func_module_primary(
         stride_lse_b: fx.Int32,
         stride_lse_h: fx.Int32,
         stride_lse_n: fx.Int32,
+        stride_bias_k: fx.Int32,
+        bias_f32: fx.Int32,
+        # Appended once for the changes that follow (modification 32): packed
+        # sequences' row offsets, INT32 [B + 1], read by the prefill builds under
+        # `VARLEN_PACKED` (modification 34); the Philox seed and offset tensors (8 bytes
+        # each), the offset's by-value part as two words, the keep threshold and the
+        # kept probabilities' scale (modification 33).
+        RowOffQ: fx.Tensor,
+        RowOffKv: fx.Tensor,
+        DropoutSeed: fx.Tensor,
+        DropoutOffset: fx.Tensor,
+        dropout_offset2_lo: fx.Int32,
+        dropout_offset2_hi: fx.Int32,
+        idropout_p: fx.Int32,
+        dropout_scale: fx.Float32,
+        # V's own group size, Hq / Hv, appended once (modification 42): read where V's base
+        # takes its own head stride.
+        v_group: fx.Int32,
     ):
         # Make shape/mode traits visible to the JIT cache key.
         _ = _flash_attn_generic_cache_tag
@@ -420,6 +477,14 @@ def build_flash_attn_func_module_primary(
             sink_stride=sink_stride,
             sink_on=sink_on,
             lse_strides=(stride_lse_b, stride_lse_h, stride_lse_n),
+            # Per-batch lengths (modification 32): a dense build's, not a VARLEN or
+            # PAGED build's, whose slots these are.
+            varlen_flags=(
+                None if const_expr(traits.VARLEN or traits.PAGED) else varlen_flags
+            ),
+            # V's own heads (modification 42) on a build that reads V through its own
+            # strides at runtime head counts; the others take V's head as K's.
+            v_group=v_group,
         )
         ctx.init_types_and_pointers()
         gemm_helper = GenericGemmHelper(ctx)
@@ -433,15 +498,24 @@ def build_flash_attn_func_module_primary(
         ctx.init_lds_view(SharedStorage)
         ctx.init_thread_mapping()
         ctx.init_block_mapping()
-        ctx.init_sequence_lengths(CuSeqQ, CuSeqKv)
+        # Packed sequences (modification 34) on the prefill builds; a split or packed-GQA
+        # (decode) build reads no row offsets.
+        ctx.init_sequence_lengths(
+            SeqLenQ,
+            SeqLenKv,
+            row_offs=(
+                None
+                if const_expr(traits.SPLIT_KV or traits.PACK_GQA)
+                else (RowOffQ, RowOffKv)
+            ),
+        )
         ctx.init_load_mapping()
 
         # Dense/varlen fold batch into raw K/V pointers; paged adds page_id per tile.
         ctx.init_kv_batch_pointers()
         if const_expr(traits.PAGED):
-            kv_gmem_to_lds.page_ids = GenericPageIdLoader(
-                ctx, BlockTable, block_table_stride
-            )
+            # A PAGED build's page-table stride (modification 32's slot).
+            kv_gmem_to_lds.page_ids = GenericPageIdLoader(ctx, BlockTable, varlen_flags)
         if const_expr(traits.KV_VECTORIZED and traits.V_NOMAJOR_DMA):
             kv_gmem_to_lds.init_dma_nomajor()
 
@@ -449,7 +523,16 @@ def build_flash_attn_func_module_primary(
         # resources when DMA is enabled.
         ctx.init_descriptors(Q, O, LSE)
         if const_expr(has_bias):
-            ctx.init_bias(Bias, bias_stride0, stride_bias_b, stride_bias_h)
+            ctx.init_bias(
+                Bias,
+                bias_stride0,
+                stride_bias_b,
+                stride_bias_h,
+                # Read only by a strided bias build (modification 31).
+                kstrided=(
+                    (stride_bias_k, bias_f32) if const_expr(bias_kstrided) else None
+                ),
+            )
         if const_expr(traits.ENABLE_DMA):
             kv_gmem_to_lds.init_dma()
 
@@ -458,6 +541,17 @@ def build_flash_attn_func_module_primary(
         q_b_packs = q_loader.load_all(ctx.q_rsrc, ctx.q_row)
 
         ctx.init_constants(sm_scale)
+        if const_expr(has_dropout):
+            # The Philox key, the row's first counter, the threshold and the scale
+            # (modification 33); every other object takes the arguments unread.
+            ctx.init_dropout(
+                DropoutSeed,
+                DropoutOffset,
+                dropout_offset2_lo,
+                dropout_offset2_hi,
+                idropout_p,
+                dropout_scale,
+            )
         ctx.init_kv_bounds()
         kv_upper = ctx.kv_upper
 
@@ -677,6 +771,12 @@ def build_flash_attn_func_module_primary(
                         )
                     )
                     o_accs, corr_vec = softmax_helper.rescale_o_accs(o_accs, corr)
+                    if const_expr(has_dropout):
+                        # After the row sum, so l and the LSE stay undropped
+                        # (modification 33).
+                        p_vals_lo, p_vals_hi = softmax_helper.apply_dropout(
+                            p_vals_lo, p_vals_hi, kv_start
+                        )
 
                 if const_expr(
                     traits.ENABLE_PREFETCH_3BUF
@@ -740,6 +840,7 @@ def build_flash_attn_func_module_primary(
                         neg_scaled_max,
                         v_base,
                         m_new_raw,
+                        kv_start=kv_start,
                     )
                 else:
                     p_packs_lo = softmax_helper.build_p_packs(p_vals_lo)
@@ -784,11 +885,18 @@ def build_flash_attn_func_module_primary(
         stride_lse_b: fx.Int32,
         stride_lse_h: fx.Int32,
         stride_lse_n: fx.Int32,
+        # Appended once (modification 32): the per-batch query lengths of a padded
+        # launch and its `varlen_flags`, and packed sequences' row offsets, read by no
+        # object yet.
+        SeqLenQ: fx.Tensor,
+        RowOffQ: fx.Tensor,
+        varlen_flags: fx.Int32,
     ):
         """Combine the KV splits' partials of one (batch, head, query) row by their LSEs
         (modification 14): O = sum_i w_i O_i / sum_i w_i with w_i = exp(lse_i - max), and
         LSE = max + ln(sum_i w_i); a row no split reached gets O = 0 and LSE = -inf, and
-        a row a split left NaN gets NaN (modification 29)."""
+        a row a split left NaN gets NaN (modification 29). A padded row -- past its
+        batch's query length -- gets O = 0 and LSE = -inf (modification 32)."""
         elem_dtype = dtype_to_elem_type(traits.DTYPE_STR)
         row = fx.Index(gpu.block_idx.x)  # (b * Hq + h) * Sq + s
         tid = fx.Index(gpu.thread_idx.x)
@@ -799,6 +907,13 @@ def build_flash_attn_func_module_primary(
         bh = row // sq
         h_idx = bh % hq
         b_idx = bh // hq
+        # Whether the row is a real query position of its batch (modification 32): the
+        # batch's own length, read when the launch is padded (the key length's slot is
+        # the query's: only the query length matters here).
+        len_q, _, _ = _load_seq_lens(
+            varlen_flags, (SeqLenQ, SeqLenQ), b_idx, seq_len, seq_len
+        )
+        row_live = fx.Int32(s_idx) < len_q
         wsl = buffer_ops.create_buffer_resource(WsLse, max_size=True)
         wso = buffer_ops.create_buffer_resource(WsO, max_size=True)
         o_rsrc = buffer_ops.create_buffer_resource(O, max_size=True)
@@ -873,15 +988,9 @@ def build_flash_attn_func_module_primary(
         # +inf once the sink leads by more than ~88.7 (modification 29).
         sink_val = c_ninf
         if const_expr(has_sink):
-            sink_rsrc = buffer_ops.create_buffer_resource(Sink, max_size=True)
-            sink_raw = buffer_ops.buffer_load(
-                sink_rsrc,
-                as_mlir_value(fx.Int32(h_idx * fx.Index(sink_stride))),
-                vec_width=1,
-                dtype=elem_dtype,
-            )
-            sink_val = (fx.Int32(sink_on) != fx.Int32(0)).select(
-                fx.Float32(fx.Float32(sink_raw)), c_ninf
+            # In f32 or a 16-bit dtype (modifications 36, 41).
+            sink_val = load_sink_logit(
+                Sink, sink_stride, sink_on, h_idx, elem_dtype, c_ninf
             )
             m_top = fx.Float32(m_all.maximumf(sink_val))
             keep = fx.Float32(fx.math.exp(m_all - m_top))
@@ -893,33 +1002,52 @@ def build_flash_attn_func_module_primary(
             + h_idx * fx.Index(stride_o_h)
             + s_idx * fx.Index(stride_o_n)
         )
-        for j in range_constexpr(cols):
-            d = tid + fx.Index(j * _MERGE_THREADS)
-            val = (fx.Float32(res[1 + j]) * inv).to(elem_dtype)
-            if const_expr(partial and j == cols - 1):
-                if d < fx.Index(traits.HEAD_DIM_V):
-                    buffer_ops.buffer_store(
-                        as_mlir_value(val), o_rsrc, as_mlir_value(fx.Int32(o_base + d))
-                    )
-            else:
-                buffer_ops.buffer_store(
-                    as_mlir_value(val), o_rsrc, as_mlir_value(fx.Int32(o_base + d))
+
+        def store_o(value_of):
+            for j in range_constexpr(cols):
+                d = tid + fx.Index(j * _MERGE_THREADS)
+                # The last pass's columns past V's width store nowhere.
+                in_width = (
+                    d < fx.Index(traits.HEAD_DIM_V)
+                    if const_expr(partial and j == cols - 1)
+                    else None
                 )
+                buffer_ops.buffer_store(
+                    as_mlir_value(value_of(j)),
+                    o_rsrc,
+                    as_mlir_value(fx.Int32(o_base + d)),
+                    mask=in_width,
+                )
+
+        # A padded row (modification 32) gets O = 0 and LSE = -inf, never the sink, by a
+        # branch on the row (one per workgroup) rather than selects: fast math would merge
+        # a select with the no-keys test and, assuming no NaN, lose a NaN row's NaN.
+        if row_live:
+            store_o(lambda j: (fx.Float32(res[1 + j]) * inv).to(elem_dtype))
+        else:
+            store_o(lambda j: c_zero.to(elem_dtype))
         if tid == fx.Index(0):
             if fx.Int32(lse_on) != fx.Int32(0):
-                lse = no_keys.select(sink_val, m_lse + fx.math.log(l_lse))
                 lse_rsrc = buffer_ops.create_buffer_resource(LSE, max_size=True)
                 # Through the LSE's own strides (modification 20).
-                lse_off = (
-                    b_idx * fx.Index(stride_lse_b)
-                    + h_idx * fx.Index(stride_lse_h)
-                    + s_idx * fx.Index(stride_lse_n)
+                lse_off = as_mlir_value(
+                    fx.Int32(
+                        b_idx * fx.Index(stride_lse_b)
+                        + h_idx * fx.Index(stride_lse_h)
+                        + s_idx * fx.Index(stride_lse_n)
+                    )
                 )
-                buffer_ops.buffer_store(
-                    as_mlir_value(fx.Float32(lse)),
-                    lse_rsrc,
-                    as_mlir_value(fx.Int32(lse_off)),
-                )
+                if row_live:
+                    lse = no_keys.select(sink_val, m_lse + fx.math.log(l_lse))
+                    buffer_ops.buffer_store(
+                        as_mlir_value(fx.Float32(lse)), lse_rsrc, lse_off
+                    )
+                else:
+                    buffer_ops.buffer_store(
+                        as_mlir_value(fx.Int32(-8388608)),  # 0xFF800000, -inf
+                        lse_rsrc,
+                        lse_off,
+                    )
 
     @flyc.jit
     def launch_flash_attn_generic(
@@ -928,10 +1056,10 @@ def build_flash_attn_func_module_primary(
         V: fx.Tensor,
         O: fx.Tensor,  # noqa: E741
         LSE: fx.Tensor,
-        CuSeqQ: fx.Tensor,
-        CuSeqKv: fx.Tensor,
+        SeqLenQ: fx.Tensor,
+        SeqLenKv: fx.Tensor,
         BlockTable: fx.Tensor,
-        block_table_stride: fx.Int32,
+        varlen_flags: fx.Int32,
         batch_size: fx.Int32,
         seq_len: fx.Int32,
         seq_len_kv: fx.Int32,
@@ -967,6 +1095,17 @@ def build_flash_attn_func_module_primary(
         stride_lse_b: fx.Int32,
         stride_lse_h: fx.Int32,
         stride_lse_n: fx.Int32,
+        stride_bias_k: fx.Int32,
+        bias_f32: fx.Int32,
+        RowOffQ: fx.Tensor,
+        RowOffKv: fx.Tensor,
+        DropoutSeed: fx.Tensor,
+        DropoutOffset: fx.Tensor,
+        dropout_offset2_lo: fx.Int32,
+        dropout_offset2_hi: fx.Int32,
+        idropout_p: fx.Int32,
+        dropout_scale: fx.Float32,
+        v_group: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
         bs_idx = fx.Index(batch_size)
@@ -996,10 +1135,10 @@ def build_flash_attn_func_module_primary(
             LSE,
             seq_len,
             seq_len_kv,
-            CuSeqQ,
-            CuSeqKv,
+            SeqLenQ,
+            SeqLenKv,
             BlockTable,
-            block_table_stride,
+            varlen_flags,
             sm_scale,
             num_heads_q,
             num_heads_kv,
@@ -1032,6 +1171,17 @@ def build_flash_attn_func_module_primary(
             stride_lse_b,
             stride_lse_h,
             stride_lse_n,
+            stride_bias_k,
+            bias_f32,
+            RowOffQ,
+            RowOffKv,
+            DropoutSeed,
+            DropoutOffset,
+            dropout_offset2_lo,
+            dropout_offset2_hi,
+            idropout_p,
+            dropout_scale,
+            v_group,
             value_attrs={
                 "rocdl.waves_per_eu": waves_per_eu,
                 "rocdl.flat_work_group_size": (
@@ -1040,8 +1190,11 @@ def build_flash_attn_func_module_primary(
                     else None
                 ),
                 "passthrough": passthrough_entries,
+                # f32 (modification 35): exact fp32 keeps f32 denormal inputs (DESIGN F-d).
                 "llvm.denormal_fpenv": (
-                    daz_denormal_attr() if const_expr(daz) else None
+                    daz_denormal_attr()
+                    if const_expr(daz and traits.DTYPE_STR != "f32")
+                    else None
                 ),
             },
         ).launch(
@@ -1070,6 +1223,9 @@ def build_flash_attn_func_module_primary(
                 stride_lse_b,
                 stride_lse_h,
                 stride_lse_n,
+                SeqLenQ,
+                RowOffQ,
+                varlen_flags,
             ).launch(
                 grid=(bs_idx * sl_idx * fx.Index(num_heads_q), 1, 1),
                 block=(_MERGE_THREADS, 1, 1),
@@ -1173,11 +1329,39 @@ def build_flash_attn_func_module_primary(
                 num_splits,
                 sink if sink is not None else Out,
                 1,
-                1 if sink is not None else 0,
+                (
+                    (
+                        SINK_F32
+                        if sink.element_size() == 4
+                        else (
+                            SINK_QUERY_DTYPE
+                            if sink.dtype == Q.dtype
+                            else SINK_OTHER_16BIT
+                        )
+                    )
+                    if sink is not None
+                    else 0
+                ),
                 # Packed [B, H, Sq] LSE (modification 20).
                 traits.NUM_HEADS_Q * seq_len,
                 seq_len,
                 1,
+                # The bias's key stride and element type (modification 31): contiguous,
+                # in the query's dtype.
+                1,
+                0,
+                # Packed sequences' row offsets and the dropout arguments
+                # (modification 32), read by no object yet.
+                Out,
+                Out,
+                Out,
+                Out,
+                0,
+                0,
+                0,
+                1.0,
+                # V's group (modification 42): V's head is K's.
+                traits.NUM_HEADS_Q // traits.NUM_HEADS_KV,
                 fx.Stream(stream),
             )
 
@@ -1253,11 +1437,39 @@ def build_flash_attn_func_module_primary(
                 num_splits,
                 sink if sink is not None else Out,
                 1,
-                1 if sink is not None else 0,
+                (
+                    (
+                        SINK_F32
+                        if sink.element_size() == 4
+                        else (
+                            SINK_QUERY_DTYPE
+                            if sink.dtype == Q.dtype
+                            else SINK_OTHER_16BIT
+                        )
+                    )
+                    if sink is not None
+                    else 0
+                ),
                 # Packed [B, H, Sq] LSE (modification 20).
                 traits.NUM_HEADS_Q * seq_len,
                 seq_len,
                 1,
+                # The bias's key stride and element type (modification 31): contiguous,
+                # in the query's dtype.
+                1,
+                0,
+                # Packed sequences' row offsets and the dropout arguments
+                # (modification 32), read by no object yet.
+                Out,
+                Out,
+                Out,
+                Out,
+                0,
+                0,
+                0,
+                1.0,
+                # V's group (modification 42): V's head is K's.
+                traits.NUM_HEADS_Q // traits.NUM_HEADS_KV,
                 fx.Stream(stream),
             )
 
@@ -1300,6 +1512,9 @@ def build_flash_attn_func_module_primary(
             dv_split=dv_split,
             k_chunk=k_chunk,
             has_sink=has_sink,
+            bias_kstrided=bias_kstrided,
+            has_dropout=has_dropout,
+            v_mask=v_mask,
         )
         _launch_mask = build_flash_attn_func_module_primary(
             num_heads,
@@ -1334,6 +1549,9 @@ def build_flash_attn_func_module_primary(
             dv_split=dv_split,
             k_chunk=k_chunk,
             has_sink=has_sink,
+            bias_kstrided=bias_kstrided,
+            has_dropout=has_dropout,
+            v_mask=v_mask,
         )
 
         def _pad_dispatch(*args, **kwargs):

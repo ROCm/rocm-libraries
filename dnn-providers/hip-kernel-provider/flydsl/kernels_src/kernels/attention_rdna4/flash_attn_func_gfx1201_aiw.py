@@ -168,6 +168,54 @@ def _pointer_store(value: ir.Value, ptr: ir.Value):
     return _llvm.StoreOp(fmha.llvm_value(value), fmha.llvm_value(ptr))
 
 
+# Modification 11: the sink_stride argument's bit that marks an f32 sink. Set, the sink is
+# f32 (cuDNN's and hipDNN's reference's dtype); clear, it is in the query's dtype. The low
+# 32 bits are the head stride in elements.
+SINK_F32_BIT = 32
+# Modification 12: the bit that marks a 16-bit sink in the other 16-bit dtype than the
+# query's (a bf16 sink with an f16 query, or an f16 sink with a bf16 one). Clear, a 16-bit
+# sink is in the query's dtype.
+SINK_OTHER_16BIT_BIT = 33
+
+
+def _load_sink_logit(sink, sink_stride, head, elem_numeric_cls):
+    """Query head ``head``'s attention-sink logit, as f32 (modifications 11, 12): two
+    16-bit loads at the element -- an f32 sink's low and high halves, a 16-bit sink's one
+    element twice -- so neither dtype's load reaches past it, without a branch; a 16-bit
+    sink is the query's dtype or, with ``SINK_OTHER_16BIT_BIT``, the other one. All widen
+    exactly."""
+    packed = fx.Int64(sink_stride)
+    wide = fx.Int32(packed >> fx.Int64(SINK_F32_BIT)) & fx.Int32(1)
+    stride = packed & fx.Int64(0xFFFFFFFF)
+    first = fx.Int64(fx.Int64(head) * stride) << fx.Int64(wide)
+    base = fmha.pointer_to_llvm_ptr(sink)
+    low = elem_numeric_cls(
+        _pointer_load(
+            elem_numeric_cls.ir_type,
+            buffer_ops.get_element_ptr(base, first, elem_type=elem_numeric_cls.ir_type),
+        )
+    )
+    high = fx.Int32(
+        fx.Int16(
+            _pointer_load(
+                fx.Int16.ir_type,
+                buffer_ops.get_element_ptr(
+                    base, first + fx.Int64(wide), elem_type=fx.Int16.ir_type
+                ),
+            )
+        )
+    ) & fx.Int32(0xFFFF)
+    low_bits = fx.Int32(low.bitcast(fx.Int16)) & fx.Int32(0xFFFF)
+    as_f32 = ((high << fx.Int32(16)) | low_bits).bitcast(fx.Float32)
+    # A 16-bit sink: the query's dtype, or the other one (modification 12), both exact.
+    other = fx.Int32(packed >> fx.Int64(SINK_OTHER_16BIT_BIT)) & fx.Int32(1)
+    other_cls = fx.Float16 if elem_numeric_cls is fx.BFloat16 else fx.BFloat16
+    as_query = fx.Float32(low.to(fx.Float32))
+    as_other = fx.Float32(low.bitcast(other_cls).to(fx.Float32))
+    narrow = (other != fx.Int32(0)).select(as_other, as_query)
+    return (wide != fx.Int32(0)).select(as_f32, narrow)
+
+
 # Causal alignment as a *window* sentinel, AOTriton's `WindowValue`. These
 # occupy two values a real bound never takes, so `Window_left`/`Window_right`
 # stay plain signed integers rather than gaining a discriminant.
@@ -2198,18 +2246,8 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         _f32_ty_sink = ir.F32Type.get()
         _o_keep = [None] * ROW_SUBTILES
         if const_expr(HAS_SINK):
-            _sink_raw = fx.Float32(
-                fx.as_dsl_value(
-                    _pointer_load(
-                        elem_type,
-                        buffer_ops.get_element_ptr(
-                            fmha.pointer_to_llvm_ptr(SINK),
-                            fx.Int64(head_q) * fx.Int64(sink_stride),
-                            elem_type=elem_type,
-                        ),
-                    )
-                ).to(fx.Float32)
-            )
+            # In f32 or the query's dtype (modification 11).
+            _sink_raw = _load_sink_logit(SINK, sink_stride, head_q, elem_numeric_cls)
             _c_log2e_sink = fx.Float32(_LOG2E)
             loop_results = list(loop_results)
             for qt in range_constexpr(ROW_SUBTILES):
@@ -2402,6 +2440,88 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                         d_col = fx.Index(D_OFFSET) + d_col
                     fmha.write_v8(o_ap, write_o, q_rows_in_tile[qt], d_col, o_trunc)
 
+    # Modification 10 (hipDNN vendoring): padded rows filled, by a kernel of its
+    # own in the same object. A row past its sequence's length but inside
+    # Max_seqlen_q is written as O = 0 and LSE = -inf, hipDNN's reference
+    # contract (cuDNN >= 9.14), sink builds included: a padded row is not a
+    # keyless row. The main kernel never stores such a row; hipDNN's native
+    # launches this one beside it, by its symbol, for padded graphs only (never
+    # packed: there the rows past a sequence are the next sequence's). Inside the
+    # main kernel the same stores cost a VGPR whatever their form, and at
+    # head_dim 128 that VGPR cut occupancy (19% slower). One workgroup per
+    # (head, 16 rows, sequence): 64 threads per row, 8 columns each, so V's head
+    # dim up to 512; the LSE through its own strides only (hipDNN's form).
+    PADFILL_THREADS = 256
+    PADFILL_ROWS = 16
+
+    @flyc.kernel(known_block_size=[PADFILL_THREADS, 1, 1])
+    def flash_attn_aiw_padfill_kernel(
+        O: fx.Pointer,  # noqa: E741
+        LSE: fx.Pointer,
+        seqlens: fx.Pointer,
+        max_seqlen_q: fx.Int32,
+        hdim_vo: fx.Int32,
+        stride_o_batch: fx.Int64,
+        stride_o_head: fx.Int64,
+        stride_o_seq: fx.Int64,
+        lse_stride_b: fx.Int64,
+        lse_stride_h: fx.Int64,
+        lse_stride_s: fx.Int64,
+    ):
+        head = fx.Int64(gpu.block_idx.x)
+        tile = fx.Int64(gpu.block_idx.y)
+        seq = fx.Int32(gpu.block_idx.z)
+        tid = fx.Int64(gpu.thread_idx.x)
+        chunk = tid % fx.Int64(64)
+        group = tid // fx.Int64(64)
+        # This sequence's length, clamped to [0, Max_seqlen_q] as the main kernel
+        # clamps it; with no array, every row is live and nothing is written.
+        length = fmha.cond_load(
+            fx.Int64(fx.ptrtoint(seqlens)) != fx.Int64(0),
+            fmha.seqinfo_addr(seqlens, seq),
+            fx.Int32(max_seqlen_q),
+        )
+        length = (length < fx.Int32(0)).select(fx.Int32(0), length)
+        length = (length > fx.Int32(max_seqlen_q)).select(
+            fx.Int32(max_seqlen_q), length
+        )
+        col = chunk * fx.Int64(8)
+        has_lse = fx.Int64(fx.ptrtoint(LSE)) != fx.Int64(0)
+        for i in range_constexpr(PADFILL_ROWS // 4):
+            row = (
+                tile * fx.Int64(PADFILL_ROWS)
+                + group * fx.Int64(PADFILL_ROWS // 4)
+                + fx.Int64(i)
+            )
+            pad = (row >= fx.Int64(length)) & (row < fx.Int64(max_seqlen_q))
+            if pad & (col < fx.Int64(hdim_vo)):
+                _pointer_store(
+                    Vec.filled(8, 0.0, elem_numeric_cls).ir_value(),
+                    buffer_ops.get_element_ptr(
+                        fmha.pointer_to_llvm_ptr(O),
+                        fx.Int64(
+                            fx.Int64(seq) * stride_o_batch
+                            + head * stride_o_head
+                            + row * stride_o_seq
+                            + col
+                        ),
+                        elem_type=elem_numeric_cls.ir_type,
+                    ),
+                )
+            if pad & (chunk == fx.Int64(0)) & has_lse:
+                _pointer_store(
+                    fx.as_ir_value(fx.Float32(float("-inf"))),
+                    buffer_ops.get_element_ptr(
+                        fmha.pointer_to_llvm_ptr(LSE),
+                        fx.Int64(
+                            fx.Int64(seq) * lse_stride_b
+                            + head * lse_stride_h
+                            + row * lse_stride_s
+                        ),
+                        elem_type=ir.F32Type.get(),
+                    ),
+                )
+
     @flyc.jit
     def launch_flash_attn_aiw(
         Q: fx.Pointer,
@@ -2588,6 +2708,28 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             block=(BLOCK_SIZE, 1, 1),
             stream=stream,
         )
+        # Modification 10: the padded-row fill, launched here so the object carries
+        # it. This Python path is the generator's compile-only one and passes a
+        # Max_seqlen_q of 0, which fills nothing; hipDNN's native launches it by
+        # its symbol with the real one.
+        padfill = flash_attn_aiw_padfill_kernel(
+            O,
+            LSE,
+            seqinfo_q0,
+            fx.Int32(0),
+            hdim_vo,
+            stride_o_batch,
+            stride_o_head,
+            stride_o_seq,
+            lse_stride_b,
+            lse_stride_h,
+            lse_stride_s,
+        )
+        padfill.launch(
+            grid=(fx.Index(num_head_q), fx.Index(1), nseq_idx),
+            block=(PADFILL_THREADS, 1, 1),
+            stream=stream,
+        )
 
     _fmha_compile_hints = {
         "FAST_FP_MATH": FAST_FP_MATH,
@@ -2766,7 +2908,16 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 _sb1,
                 _sb2,
                 abi.ptr_arg(sink) if sink is not None else abi.NULL_PTR,
-                int(sink.stride(0)) if sink is not None else 0,
+                (
+                    int(sink.stride(0))
+                    | (int(sink.element_size() == 4) << SINK_F32_BIT)
+                    | (
+                        int(sink.element_size() == 2 and sink.dtype != Q.dtype)
+                        << SINK_OTHER_16BIT_BIT
+                    )
+                    if sink is not None
+                    else 0
+                ),
                 _sb3,
                 int(V.shape[1]),
                 *_lse_st,

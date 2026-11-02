@@ -41,9 +41,12 @@ one row per lane, and added to the scaled scores; an object without one ignores 
 A generic object (``generic_head_dim``) is built for the largest head_dim it serves and
 reads the actual one at runtime, skipping the K and V columns past it. ``head_dim_v``
 sizes V, O, the workspace rows and the merge apart from Q/K's ``head_dim``, for
-multi-head latent attention; head dims past 256 (absorbed MLA's 576/512, and 512/512)
-split the output columns into 128-wide workgroups. An attention sink (``has_sink``, a
-compile-time variant: one logit per query head in the query's dtype) joins each row's softmax
+multi-head latent attention; head dims past 256 (absorbed MLA's 576/512, and 512/512, and a
+generic object up to 512: kernel modification 30, numbered with flash_attn_func_rdna.py's
+list, which lifted the generic objects' cap from 256) split the output columns into 128-wide
+workgroups. An attention sink (``has_sink``, a
+compile-time variant: one logit per query head, f32 or 16-bit in either dtype, modifications
+31 and 33 in flash_attn_func_rdna.py's list) joins each row's softmax
 as a key with no value; with one split the main kernel adds it, with more the partials leave
 it out and the merge adds it.
 
@@ -64,6 +67,7 @@ from flydsl.expr.typing import T
 from flydsl.expr.typing import Vector as Vec
 
 from flydsl.runtime.device import get_rocm_arch
+from kernels.attention_rdna.flash_attn_func_rdna import load_lengths, load_sink_logit
 from kernels.common.kernels_common import LOG2E as _LOG2E
 
 _NO_WINDOW = -(1 << 30)
@@ -120,9 +124,14 @@ def build_flash_attn_decode_module(
     # already use the whole register file at 128 and up: the row index they would hold
     # through the KV loop spills there. A bias object serves up to 16 rows.
     ROW_TILES = not HAS_BIAS
-    # Issue the bias loads before the QK product (hidden behind it) or after it. Ahead
-    # pays at 128 and up, where the score epilogue has latency to hide; below, after.
-    BIAS_EARLY = (D >= 128) if bias_early is None else bool(bias_early)
+    # Issue the bias loads before the QK product (hidden behind it) or after it (exposed:
+    # the scores wait on them with nothing left to overlap). Ahead everywhere but the
+    # specialized head_dim 96 objects, where it measured a fraction of a percent slower on
+    # short caches and no faster on long ones; at 64 and on the generic tiers it is up to
+    # 20% faster on long caches (modification 25 in flash_attn_func_rdna.py's header).
+    BIAS_EARLY = (
+        (D != 96 or bool(generic_head_dim)) if bias_early is None else bool(bias_early)
+    )
     # head_dim is then the largest served; the actual one, a multiple of 8, is a
     # runtime argument. K and V columns past it are fetched out of the buffer's
     # range, so the hardware returns zeros without reading memory, and zeroed
@@ -130,7 +139,11 @@ def build_flash_attn_decode_module(
     # Q columns past it are zeroed, O columns past it are not stored, and the
     # split workspace's rows are the actual head_dim wide.
     GENERIC_D = bool(generic_head_dim)
-    assert not (GENERIC_D and (MLA or D > 256)), "MLA and wide heads are baked"
+    # Up to 512 (kernel modification 30): the column handling above holds at any width,
+    # and past 256 the output columns split as the 512/512 objects' do. MLA is baked.
+    assert not (
+        GENERIC_D and (MLA or D > 512)
+    ), "MLA is baked; generic heads stop at 512"
     # Above 128 the output columns are split across DV_SPLIT workgroups, as in the
     # prefill kernel: each computes the whole of QK^T but only DV_TILE columns of O,
     # so it holds and stages only those.
@@ -170,7 +183,7 @@ def build_flash_attn_decode_module(
         right_bound: fx.Int32,
         left_bound: fx.Int32,
         align_br: fx.Int32,
-        lse_on: fx.Int32,
+        flags: fx.Int32,
         num_splits: fx.Int32,
         scale: fx.Float32,
         q_sb: fx.Int64,
@@ -196,6 +209,10 @@ def build_flash_attn_decode_module(
         head_dim_rt: fx.Int32,
         SINK: fx.Pointer,
         sink_stride: fx.Int64,
+        SEQLEN_Q: fx.Pointer,
+        SEQLEN_KV: fx.Pointer,
+        ROW_OFF_Q: fx.Pointer,
+        ROW_OFF_KV: fx.Pointer,
     ):
         elem = elem_cls
 
@@ -289,6 +306,16 @@ def build_flash_attn_decode_module(
         rest = bid_rest // ns
         kvh = rest % hkv_n
         b = rest // hkv_n
+        # Kernel modification 26 (flash_attn_func_rdna.py): this batch's lengths, or the
+        # launch's when the pointers are null. The packed rows and a bias's extents keep
+        # the launch's.
+        sq_max = sq
+        skv_max = skv
+        sq_b_i32, skv_b_i32 = load_lengths(
+            flags, (SEQLEN_Q, SEQLEN_KV), b, (seq_len_q, seq_len_kv)
+        )
+        sq_b = fx.Int64(sq_b_i32)
+        skv = fx.Int64(skv_b_i32)
 
         # Packed row of this lane: query head kvh * g + r // Sq at position r % Sq.
         rows = g * sq
@@ -303,13 +330,23 @@ def build_flash_attn_decode_module(
             r = fx.Int64(row_ok.select(lane16, fx.Int64(0)))
         hq = kvh * g + r // sq
         qpos = r % sq
+        # A row past its batch's query length is padding: computed against nothing it
+        # stores (modification 26). Q is still loaded for it (it is inside Q), so the loads
+        # need not wait on the length.
+        row_load_ok = row_ok
+        row_ok = row_ok & (qpos < sq_b)
+        # Modification 28: with bit 2 of flags a padded row is written as O = 0 and LSE =
+        # -inf -- here with one split, by the merge with several.
+        pad_ok = (
+            row_load_ok
+            & (qpos >= sq_b)
+            & ((fx.Int32(flags) & fx.Int32(4)) != fx.Int32(0))
+        )
 
         # The rows' mask, in the reference's terms (as the prefill kernel).
-        skv_i32 = fx.Int32(seq_len_kv)
+        skv_i32 = skv_b_i32
         align_i32 = fx.Int32(
-            (fx.Int32(align_br) != fx.Int32(0)).select(
-                skv_i32 - fx.Int32(seq_len_q), fx.Int32(0)
-            )
+            (fx.Int32(align_br) != fx.Int32(0)).select(skv_i32 - sq_b_i32, fx.Int32(0))
         )
         coff_i32 = align_i32 + fx.Int32(right_bound)
         wlo_i32 = fx.Int32(
@@ -334,10 +371,12 @@ def build_flash_attn_decode_module(
         _lo = fx.Int64(wlo_i32)
         lo = fx.Int64((_lo > fx.Int64(0)).select(_lo, fx.Int64(0)))
         if const_expr(CAUSAL):
-            _hi = sq - fx.Int64(1) + fx.Int64(coff_i32) + fx.Int64(1)
+            _hi = sq_b - fx.Int64(1) + fx.Int64(coff_i32) + fx.Int64(1)
             hi = fx.Int64((_hi < skv).select(_hi, skv))
         else:
             hi = skv
+        # A batch with no query row has nothing to compute (modification 26).
+        hi = fx.Int64((sq_b > fx.Int64(0)).select(hi, fx.Int64(0)))
         lo_tile = lo // TILE
         hi_tile = (hi + TILE - 1) // TILE
         n_tiles = fx.Int64((hi_tile > lo_tile).select(hi_tile - lo_tile, fx.Int64(0)))
@@ -365,27 +404,34 @@ def build_flash_attn_decode_module(
                 if const_expr(GENERIC_D):
                     ok = col < d_rt
                     raw = gload(q_ptr, q_base + ok.select(col, fx.Int64(0)), 8)
-                    return (row_ok & ok).select(raw, zero8q)
+                    return (row_load_ok & ok).select(raw, zero8q)
                 raw = gload(q_ptr, q_base + col, 8)
-                return row_ok.select(raw, zero8q)
+                return row_load_ok.select(raw, zero8q)
             if const_expr(GENERIC_D):
                 halves = []
                 for h in range_constexpr(2):
                     col = fx.Int64(ks * 16 + h * 8)
                     ok = col < d_rt
                     raw = gload(q_ptr, q_base + ok.select(col, fx.Int64(0)), 8)
-                    halves.append((row_ok & ok).select(raw, zero8e))
+                    halves.append((row_load_ok & ok).select(raw, zero8e))
                 return Vec.from_elements(
                     [halves[0][i] for i in range(8)] + [halves[1][i] for i in range(8)],
                     elem,
                 )
             raw = gload(q_ptr, q_base + fx.Int64(ks * 16), 16)
-            return row_ok.select(raw, zero16)
+            return row_load_ok.select(raw, zero16)
 
-        def kv_load(buf, row_base, col):
+        def kv_load(buf, row_base, col, past=None):
             """Eight columns of one K or V row; past head_dim, zeros without a read."""
             if const_expr(GENERIC_D):
                 ok = col < d_rt
+                if const_expr(D > 256):
+                    # The tier up to 512 (modification 30): a column past head_dim reads at
+                    # the slice's own end, past num_records for any slice, so the hardware
+                    # returns zeros and no select follows -- a select after each load took
+                    # the gfx11 build past the register file (5 spills, 3x slower). The
+                    # tiers below keep theirs, byte for byte.
+                    return gload(buf, ok.select(row_base + col, past), 8)
                 raw = gload(buf, ok.select(row_base + col, past_slice), 8)
                 return ok.select(raw, zero8e)
             return gload(buf, row_base + col, 8)
@@ -397,23 +443,31 @@ def build_flash_attn_decode_module(
 
         k_slice = b * k_sb + kvh * k_sh
         v_slice = b * v_sb + kvh * v_sh
+        # A batch with no key still gets one row's extent, so the slice size cannot go
+        # negative; its scores are all masked.
+        skv_last = fx.Int64((skv > fx.Int64(0)).select(skv - fx.Int64(1), fx.Int64(0)))
+        k_past = v_past = None
         if const_expr(GENERIC_D):
             k_buf = _buf(
                 fx.add_offset(k_ptr, k_slice),
-                ((skv - fx.Int64(1)) * k_ss + d_rt) * fx.Int64(2),
+                (skv_last * k_ss + d_rt) * fx.Int64(2),
             )
             v_buf = _buf(
                 fx.add_offset(v_ptr, v_slice),
-                ((skv - fx.Int64(1)) * v_ss + d_rt) * fx.Int64(2),
+                (skv_last * v_ss + d_rt) * fx.Int64(2),
             )
+            if const_expr(D > 256):
+                # Each slice's end, in elements: kv_load's out-of-range offset there.
+                k_past = skv_last * k_ss + d_rt
+                v_past = skv_last * v_ss + d_rt
         else:
             k_buf = _buf(
                 fx.add_offset(k_ptr, k_slice),
-                ((skv - fx.Int64(1)) * k_ss + fx.Int64(D)) * fx.Int64(2),
+                (skv_last * k_ss + fx.Int64(D)) * fx.Int64(2),
             )
             v_buf = _buf(
                 fx.add_offset(v_ptr, v_slice),
-                ((skv - fx.Int64(1)) * v_ss + fx.Int64(DV)) * fx.Int64(2),
+                (skv_last * v_ss + fx.Int64(DV)) * fx.Int64(2),
             )
 
         c_ninf = fx.Float32(float("-inf"))
@@ -426,8 +480,8 @@ def build_flash_attn_decode_module(
                 fx.add_offset(bias_ptr, b * bias_sb + kvh * g * bias_sh),
                 (
                     (g - fx.Int64(1)) * bias_sh
-                    + (sq - fx.Int64(1)) * bias_sq
-                    + (skv - fx.Int64(1)) * bias_skv
+                    + (sq_max - fx.Int64(1)) * bias_sq
+                    + (skv_max - fx.Int64(1)) * bias_skv
                     + fx.Int64(1)
                 )
                 * fx.Int64(2 if BIAS_Q else 4),
@@ -466,7 +520,9 @@ def build_flash_attn_decode_module(
             v_row = kv0 + lane
             for c in range_constexpr(DV_TILE // 8):
                 if const_expr(GENERIC_D):
-                    vv = kv_load(v_buf, v_row * v_ss, dv_col_base + fx.Int64(c * 8))
+                    vv = kv_load(
+                        v_buf, v_row * v_ss, dv_col_base + fx.Int64(c * 8), v_past
+                    )
                 else:
                     vv = gload(v_buf, v_row * v_ss + dv_col_base + fx.Int64(c * 8), 8)
                 fx.ptr_store(
@@ -506,12 +562,19 @@ def build_flash_attn_decode_module(
                         k_row = kv0 + fx.Int64(a * 16) + lane16
                         if const_expr(WMMA_V8):
                             kp = kv_load(
-                                k_buf, k_row * k_ss, fx.Int64(ks * 16) + klane * 8
+                                k_buf,
+                                k_row * k_ss,
+                                fx.Int64(ks * 16) + klane * 8,
+                                k_past,
                             )
                         else:
                             # Buffer loads cap at 128 bits: two 8-element halves.
-                            k_lo = kv_load(k_buf, k_row * k_ss, fx.Int64(ks * 16))
-                            k_hi = kv_load(k_buf, k_row * k_ss, fx.Int64(ks * 16 + 8))
+                            k_lo = kv_load(
+                                k_buf, k_row * k_ss, fx.Int64(ks * 16), k_past
+                            )
+                            k_hi = kv_load(
+                                k_buf, k_row * k_ss, fx.Int64(ks * 16 + 8), k_past
+                            )
                             kp = Vec.from_elements(
                                 [k_lo[i] for i in range(8)]
                                 + [k_hi[i] for i in range(8)],
@@ -677,12 +740,9 @@ def build_flash_attn_decode_module(
                 # With one split the sink joins here, as one more key with no value,
                 # against the larger of it and the row's max. With more, each partial
                 # leaves it out and the merge adds it.
-                sink_ptr = _as_ptr(SINK, elem)
-                sink_val = fx.Float32(
-                    fx.ptr_load(
-                        sink_ptr
-                        + fx.Int32(row_ok.select(hq, fx.Int64(0)) * sink_stride)
-                    ).to(fx.Float32)
+                # In f32 or a 16-bit dtype (modifications 31, 33).
+                sink_val = load_sink_logit(
+                    SINK, sink_stride, row_ok.select(hq, fx.Int64(0)), elem
                 )
                 m_natural = c_lse_scale * m_all
                 # A sink of -inf on a row with no keys: floored so its term is
@@ -732,6 +792,8 @@ def build_flash_attn_decode_module(
                         )
                 if const_expr(GENERIC_D):
                     o_col = dv_col_base + fx.Int64(dc * 16) + klane * 8
+                    if pad_ok & single & (o_col < d_rt):
+                        gstore(o_ptr, o_base + o_col, Vec.filled(8, 0.0, elem))
                     if row_ok & (o_col < d_rt):
                         if single:
                             out = Vec.from_elements(rows_, fx.Float32).to(elem)
@@ -756,12 +818,26 @@ def build_flash_attn_decode_module(
                             prow * DV + dv_col_base + fx.Int64(dc * 16) + klane * 8,
                             Vec.from_elements(rows_, fx.Float32),
                         )
+                if const_expr(not GENERIC_D):
+                    if pad_ok & single:
+                        gstore(
+                            o_ptr,
+                            o_base + dv_col_base + fx.Int64(dc * 16) + klane * 8,
+                            Vec.filled(8, 0.0, elem),
+                        )
                 fx.rocdl.sched_barrier(0)
 
+            if pad_ok & single & (dv_idx == fx.Int64(0)):
+                if (fx.Int32(flags) & fx.Int32(1)) != fx.Int32(0):
+                    gstore(
+                        lse_ptr,
+                        b * lse_sb + hq * lse_sh + qpos * lse_ss,
+                        Vec.from_elements([fx.Float32(float("-inf"))], fx.Float32),
+                    )
             # Every column tile of a row computes the same LSE; the first writes it.
             if row_ok & (dv_idx == fx.Int64(0)):
                 if single:
-                    if fx.Int32(lse_on) != fx.Int32(0):
+                    if (fx.Int32(flags) & fx.Int32(1)) != fx.Int32(0):
                         gstore(
                             lse_ptr,
                             b * lse_sb + hq * lse_sh + qpos * lse_ss,
@@ -785,7 +861,7 @@ def build_flash_attn_decode_module(
         WS_L: fx.Pointer,
         seq_len_q: fx.Int32,
         num_heads: fx.Int32,
-        lse_on: fx.Int32,
+        flags: fx.Int32,
         num_splits: fx.Int32,
         o_sb: fx.Int64,
         o_ss: fx.Int64,
@@ -796,6 +872,7 @@ def build_flash_attn_decode_module(
         head_dim_rt: fx.Int32,
         SINK: fx.Pointer,
         sink_stride: fx.Int64,
+        SEQLEN_Q: fx.Pointer,
     ):
         def _as_ptr(ptr, ty):
             return fx.recast_iter(
@@ -814,6 +891,11 @@ def build_flash_attn_decode_module(
         s = row % sq
         h = (row // sq) % hq_n
         b = row // (sq * hq_n)
+        # A row past its batch's query length is padding: the main kernel wrote no
+        # partial for it, and nothing is stored (modification 26).
+        row_live = s < fx.Int64(load_lengths(flags, (SEQLEN_Q,), b, (seq_len_q,))[0])
+        # Modification 28: a padded row, written as O = 0 and LSE = -inf with bit 2.
+        row_pad = (~row_live) & ((fx.Int32(flags) & fx.Int32(4)) != fx.Int32(0))
         c_ninf = fx.Float32(float("-inf"))
         c_zero = fx.Float32(0.0)
 
@@ -860,11 +942,7 @@ def build_flash_attn_decode_module(
         has = l_all != c_zero
         if const_expr(HAS_SINK):
             # The partials leave the sink out; it joins here, as in the main kernel.
-            sink_val = fx.Float32(
-                fx.ptr_load(_as_ptr(SINK, elem_cls) + fx.Int32(h * sink_stride)).to(
-                    fx.Float32
-                )
-            )
+            sink_val = load_sink_logit(SINK, sink_stride, h, elem_cls)
             m_top = has.select(
                 fx.Float32(m_all).maximumf(sink_val),
                 sink_val.maximumf(fx.Float32(-3.4028234663852886e38)),
@@ -877,14 +955,27 @@ def build_flash_attn_decode_module(
             inv = has.select(fx.Float32(1.0) / l_all, c_zero)
         for j in range_constexpr(DPT):
             d = tid + fx.Int64(j * MERGE_THREADS)
-            if d < (ws_d if const_expr(GENERIC_D) else fx.Int64(DV)):
+            if row_live & (d < (ws_d if const_expr(GENERIC_D) else fx.Int64(DV))):
                 val = fx.Float32(res[1 + j]) * inv
                 fx.ptr_store(
                     Vec.from_elements([val.to(elem_cls)], elem_cls),
                     o_ptr + fx.Int32(b * o_sb + h * o_sh + s * o_ss + d),
                 )
-        if tid == fx.Int64(0):
-            if fx.Int32(lse_on) != fx.Int32(0):
+        for j in range_constexpr(DPT):
+            d = tid + fx.Int64(j * MERGE_THREADS)
+            if row_pad & (d < (ws_d if const_expr(GENERIC_D) else fx.Int64(DV))):
+                fx.ptr_store(
+                    Vec.from_elements([c_zero.to(elem_cls)], elem_cls),
+                    o_ptr + fx.Int32(b * o_sb + h * o_sh + s * o_ss + d),
+                )
+        if row_pad & (tid == fx.Int64(0)):
+            if (fx.Int32(flags) & fx.Int32(1)) != fx.Int32(0):
+                fx.ptr_store(
+                    Vec.from_elements([c_ninf], fx.Float32),
+                    lse_ptr + fx.Int32(b * lse_sb + h * lse_sh + s * lse_ss),
+                )
+        if row_live & (tid == fx.Int64(0)):
+            if (fx.Int32(flags) & fx.Int32(1)) != fx.Int32(0):
                 if const_expr(HAS_SINK):
                     lse = sink_lse
                 else:
@@ -911,7 +1002,7 @@ def build_flash_attn_decode_module(
         right_bound: fx.Int32,
         left_bound: fx.Int32,
         align_br: fx.Int32,
-        lse_on: fx.Int32,
+        flags: fx.Int32,
         num_splits: fx.Int32,
         scale: fx.Float32,
         q_sb: fx.Int64,
@@ -937,6 +1028,10 @@ def build_flash_attn_decode_module(
         head_dim_rt: fx.Int32,
         SINK: fx.Pointer,
         sink_stride: fx.Int64,
+        SEQLEN_Q: fx.Pointer,
+        SEQLEN_KV: fx.Pointer,
+        ROW_OFF_Q: fx.Pointer,
+        ROW_OFF_KV: fx.Pointer,
         stream: fx.Stream = fx.Stream(None),  # noqa: B008
     ):
         ctx = CompilationContext.get_current()
@@ -967,7 +1062,7 @@ def build_flash_attn_decode_module(
             right_bound,
             left_bound,
             align_br,
-            lse_on,
+            flags,
             num_splits,
             scale,
             q_sb,
@@ -993,6 +1088,10 @@ def build_flash_attn_decode_module(
             head_dim_rt,
             SINK,
             sink_stride,
+            SEQLEN_Q,
+            SEQLEN_KV,
+            ROW_OFF_Q,
+            ROW_OFF_KV,
         )
         merge = flash_attn_decode_merge_rdna_kernel(
             O,
@@ -1001,7 +1100,7 @@ def build_flash_attn_decode_module(
             WS_L,
             seq_len_q,
             num_heads,
-            lse_on,
+            flags,
             num_splits,
             o_sb,
             o_ss,
@@ -1012,6 +1111,7 @@ def build_flash_attn_decode_module(
             head_dim_rt,
             SINK,
             sink_stride,
+            SEQLEN_Q,
         )
         passthrough = []
         if const_expr(daz):

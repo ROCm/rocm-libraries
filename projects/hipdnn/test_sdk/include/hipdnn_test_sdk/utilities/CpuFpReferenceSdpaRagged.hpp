@@ -208,6 +208,12 @@ public:
                         auto acc = static_cast<ComputeDataType>(0);
                         for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
+                            // A key the band removes is never read: 0 * NaN would leak
+                            // whatever it holds (SdpaSemanticsRegister.md SEM-027).
+                            if(isMasked(sq, skv, leftBound, rightBound, windowOffset))
+                            {
+                                continue;
+                            }
                             const auto vv = static_cast<ComputeDataType>(
                                 v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dvIdx}));
                             acc += probs[static_cast<size_t>(skv)] * vv;
@@ -276,8 +282,8 @@ private:
     }
 
     // Same per-batch window mask as the kernel. Keeps skv in
-    // [sq + windowOffset - leftBound + 1, sq + windowOffset + rightBound] (cuDNN: leftBound = L
-    // keeps L keys, diagonal included). A negative bound is open.
+    // (sq + windowOffset - leftBound, sq + windowOffset + rightBound], cuDNN's band: leftBound = L
+    // keeps L keys including the diagonal. A negative bound is open.
     static bool isMasked(
         int64_t sq, int64_t skv, int64_t leftBound, int64_t rightBound, int64_t windowOffset)
     {

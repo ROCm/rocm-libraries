@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "f0d867a7-da53-5dfe-9c8c-2a47b978cf17",
+  "name": "hipkernel:flydsl_sdpa_dropout_mask",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_dropout_mask.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "76b3f4ae-a84d-590a-bccb-6b81d90e13a3"
+  },
+  "metadata": "18dfab86-c8d6-5af5-a3e3-a63d1e66a241",
+  "knobs": [
+    "block_threads"
+  ]
+}
