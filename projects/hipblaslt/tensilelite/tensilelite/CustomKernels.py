@@ -160,6 +160,25 @@ def isExternalCustomKernel(name, directory=None):
     return "Source" in config
 
 
+def customKernelOrigin(name, directory=None):
+    """The ``Source.Origin`` a captured kernel's ``custom.config`` declares.
+
+    ``None`` for a Tensile-generated kernel, which has no ``Source`` block, and
+    for a kernel whose metadata cannot be read, the same conservative reading
+    ``isExternalCustomKernel`` makes. ``getCustomKernelConfig`` drops
+    ``Source`` from the solution state, so a caller holding only the state asks
+    here.
+    """
+    if not name:
+        return None
+    try:
+        config = readCustomKernelConfig(name, directory)
+    except (RuntimeError, OSError):
+        return None
+    source = config.get("Source")
+    return source.get("Origin") if isinstance(source, dict) else None
+
+
 def mxScalesArePackedForSolutions(solutions, directory=None):
     """Whether the benchmark client should allocate MX scales with no padding.
 

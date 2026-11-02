@@ -657,11 +657,15 @@ def test_an_unreadable_file_does_not_fail_the_corpus_check(tmp_path, vcc):
 # rocRoller macrotile agreement
 # ===========================================================================
 
-def _write_rocroller_logic_yaml(path, *, name, macrotile, custom_kernel=True):
+def _write_rocroller_logic_yaml(
+    path, *, name, macrotile, custom_kernel=True, tile=(32, 32, 64)
+):
     """A logic file carrying one solution, enough for the macrotile check.
 
     The real files carry a large header and a fully derived solution state; the
-    check reads only ``Solutions[*].CustomKernel``, so that is all this writes.
+    check reads only ``Solutions[*].CustomKernel`` and the solution's
+    ``MacroTile0``/``MacroTile1``/``DepthU``, so that is all this writes. A
+    ``tile`` of None leaves those three out.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
@@ -671,6 +675,12 @@ def _write_rocroller_logic_yaml(path, *, name, macrotile, custom_kernel=True):
         "Solutions:",
         "- SolutionIndex: 0",
     ]
+    if tile is not None:
+        lines += [
+            f"  MacroTile0: {tile[0]}",
+            f"  MacroTile1: {tile[1]}",
+            f"  DepthU: {tile[2]}",
+        ]
     if custom_kernel:
         lines += ["  CustomKernel:", f"    name: {name}"]
         if macrotile is not None:
@@ -684,14 +694,14 @@ _GOOD_RR_NAME = (
 )
 
 
-def test_a_macrotile_matching_the_kernel_name_is_accepted(tmp_path, vcc):
+def test_a_macrotile_matching_the_solution_tile_is_accepted(tmp_path, vcc):
     f = _write_rocroller_logic_yaml(
         tmp_path / "gfx950" / "a.yaml", name=_GOOD_RR_NAME, macrotile="[32, 32, 64]"
     )
     assert vcc.find_rocroller_macrotile_violations([f], tmp_path) == []
 
 
-def test_a_macrotile_disagreeing_with_the_kernel_name_is_reported(tmp_path, vcc):
+def test_a_macrotile_disagreeing_with_the_solution_tile_is_reported(tmp_path, vcc):
     # The defect this exists for: the predicates bounding M and K are derived
     # from macrotile, so a value that does not match the captured tile bounds
     # the kernel to the wrong sizes without failing anything else.
@@ -703,6 +713,33 @@ def test_a_macrotile_disagreeing_with_the_kernel_name_is_reported(tmp_path, vcc)
     assert len(violations) == 1
     assert "disagrees" in violations[0]
     assert "[64, 32, 64]" in violations[0] and "[32, 32, 64]" in violations[0]
+
+
+@pytest.mark.parametrize("tile", [(32, 32, 128), (32, 64, 64), (16, 32, 64)])
+def test_each_tile_field_is_compared(tmp_path, vcc, tile):
+    f = _write_rocroller_logic_yaml(
+        tmp_path / "gfx950" / "a.yaml",
+        name=_GOOD_RR_NAME,
+        macrotile="[32, 32, 64]",
+        tile=tile,
+    )
+    violations = vcc.find_rocroller_macrotile_violations([f], tmp_path)
+
+    assert len(violations) == 1
+    assert "MacroTile0/MacroTile1/DepthU" in violations[0]
+
+
+def test_a_solution_without_its_tile_fields_is_reported(tmp_path, vcc):
+    f = _write_rocroller_logic_yaml(
+        tmp_path / "gfx950" / "a.yaml",
+        name=_GOOD_RR_NAME,
+        macrotile="[32, 32, 64]",
+        tile=None,
+    )
+    violations = vcc.find_rocroller_macrotile_violations([f], tmp_path)
+
+    assert len(violations) == 1
+    assert "[None, None, None]" in violations[0]
 
 
 @pytest.mark.parametrize("macrotile", [None, "[]", "[32, 32]", "[32, 0, 64]", "foo"])
@@ -718,16 +755,20 @@ def test_an_unusable_macrotile_is_reported(tmp_path, vcc, macrotile):
     assert "expected three positive integers" in violations[0]
 
 
-def test_a_rocroller_kernel_without_a_tile_token_is_reported(tmp_path, vcc):
+@pytest.mark.parametrize(
+    "name",
+    [
+        "RR_GEMM_TN_FP8_FP8_no_tile_here",
+        "RR_GEMM_TN_FP8_FP8_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_64x64x64_UR_2",
+    ],
+)
+def test_the_kernel_name_is_not_read_for_the_tile(tmp_path, vcc, name):
+    # A name with no tile in it, or a different one, is not a violation: the
+    # tile is compared against the solution's fields, never parsed out of it.
     f = _write_rocroller_logic_yaml(
-        tmp_path / "gfx950" / "a.yaml",
-        name="RR_GEMM_TN_FP8_FP8_no_tile_here",
-        macrotile="[32, 32, 64]",
+        tmp_path / "gfx950" / "a.yaml", name=name, macrotile="[32, 32, 64]"
     )
-    violations = vcc.find_rocroller_macrotile_violations([f], tmp_path)
-
-    assert len(violations) == 1
-    assert "_WGT_" in violations[0]
+    assert vcc.find_rocroller_macrotile_violations([f], tmp_path) == []
 
 
 def test_other_kernel_families_are_not_checked(tmp_path, vcc):
