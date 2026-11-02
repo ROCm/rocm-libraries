@@ -80,9 +80,9 @@ Descriptor packaging (`HIPDNN_ENABLE_KERNEL_INGESTOR=ON`) additionally requires 
 
 Packaging probes pack descriptors with the real packer for one explicit architecture, independent of the build's `GPU_TARGETS`, and assert the output. Every architecture named by an explicit `arch` on a production KDP or UKD gets an automatic probe in each build that does not target it; wildcard descriptors (no `arch`) are excluded, since every build's own pack covers them. An automatic probe packs, per compile group, one UKD, or for rocKE enough UKDs that each value of each varying `spec` field is packed once (value combinations are not guaranteed). An integration that needs specific UKDs packed adds a named probe, `hkp_add_packaging_probe(ARCH <gfx> NAME <integration> UKDS <ukd-name>...)`, in `descriptor-packaging/probes/probes.cmake`. Probes are superbuild-only: the `HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES` option is `OFF` by default. They do not cover device behavior, install staging, or standalone-UKD references (probe derive fails configure on those). See the [descriptor-packaging README](descriptor-packaging/README.md#packaging-probes).
 
-### rocKE descriptors (DVC)
+### rocKE and FlyDSL descriptors (DVC)
 
-With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, the shipped rocKE descriptor bundles keep their large files (the KDPs, kernel objects, and heuristic model files) in DVC, not git. Run `dvc pull -r ingestor <pointer>.dvc`, or let TheRock's `fetch_sources` do it, to get them. Without the pull, configure warns and the shipped bundle is not packed; builds and tests still run. Release builds should set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to make a missing file an error. To skip the shipped bundles, set `-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` to another tree, such as `descriptor-packaging/examples/descriptors`. See [Large rocKE files live in DVC](src/engines/kernel_ingestor_engine/descriptors/README.md#large-rocke-files-live-in-dvc).
+With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, the shipped rocKE descriptor bundles keep their large files (the KDPs, kernel objects, and heuristic model files) in DVC, not git. FlyDSL's prebuilt kernels (one folder per op and target, under `descriptors/FlyDSL/`) do the same when `HIPKERNELPROVIDER_ENABLE_FLYDSL` is ON with the kernel ingestor, and are checked the same way. Run `dvc pull -r ingestor <pointer>.dvc`, or let TheRock's `fetch_sources` do it, to get them. Without the pull, configure warns and the shipped bundle is not packed; builds and tests still run. Release builds should set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to make a missing file an error. To skip the shipped bundles, set `-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` to another tree, such as `descriptor-packaging/examples/descriptors`. See [Large rocKE files live in DVC](src/engines/kernel_ingestor_engine/descriptors/README.md#large-rocke-files-live-in-dvc).
 
 ### Testing
 
@@ -108,7 +108,7 @@ You can save a built execution plan to bytes and load it later, in the same proc
 
 ### Supported Engines
 
-Only kernel ingestor engines support saving and loading plans, and only when every kernel of the engine is a kpack code object. Every dispatch handler of the engine must also support saving. The kernel ingestor needs a build with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (off by default). A supported engine reports the behavior note `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. To check the engine of a built plan:
+Only kernel ingestor engines support saving and loading plans, and only when every kernel of the engine is a single-launch kpack code object. A multi-launch kernel cannot be saved yet. Every dispatch handler of the engine must also support saving. The kernel ingestor needs a build with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (off by default). A supported engine reports the behavior note `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. To check the engine of a built plan:
 
 ```cpp
 #include <algorithm>
@@ -175,7 +175,7 @@ A plan-only save of a plan from any other engine of this provider fails. With `H
 ### Rules
 
 - **Benchmarking plans save only after they have chosen a kernel.** A plan built with `global.benchmarking=1` or with `HIPDNN_FORCE_BENCHMARKING=1` usually chooses its kernel at its first `execute()`. (When a stored benchmark result already covers every candidate kernel, the build makes a plain plan that saves at once.) Saving a plan that has not chosen a kernel fails with "the plan has not chosen a kernel yet; execute it once, or build it with benchmarking off, then save". Execute the plan once and then save it, or build it with benchmarking off. For an engine that reports the note, this also makes `to_binary()` fail; it does not fall back to the graph only.
-- **A loaded plan cannot be saved again.** Both `to_compiled_plan_binary()` of a loaded plan and `to_binary()` of a graph loaded with `from_binary(handle, bytes)` fail with "this plan was loaded from a saved payload; re-saving is not supported; keep the original bytes". Keep the bytes you loaded, and reuse them.
+- **Saving a loaded plan again writes the plan bytes it was loaded from.** Both `to_compiled_plan_binary()` of a loaded plan and `to_binary()` of a graph loaded with `from_binary(handle, bytes)` succeed. hipDNN returns the saved plan bytes without calling the provider, so the new save holds the same kernel, the same provider version and the same format versions as the first. If the input was a graph-and-plan container, `to_compiled_plan_binary()` returns only the plan part. To use a newer kernel, build the plan again from its graph and save it.
 - **A loaded plan runs the code it was saved with.** Upgrading the provider does not change the kernel inside a saved plan, even when the upgrade fixes that kernel. To use the new kernel, build the plan again from its graph and save it.
 - **The kpack archive must not change between the plan build and the save.** A save gets the kernel's code object from the kpack archive that the plan build used, and checks it against the kernel's SHA-256. The save can read the archive through the handle that the plan build opened. If the archive changes after the plan build, the save may fail. If the save cannot read the archive, or the bytes do not match, the save fails.
 - **The loading machine must have the same engine.** hipDNN loads a plan only through a plugin that serves the saved engine ID, so the descriptor set that defines the engine must be installed and loaded. The GPU must be able to run the stored code object, and this provider must still recognize the stored dispatch name, kernel arguments and launch values. The format version must be one this provider reads. The provider version does not need to match.
@@ -212,5 +212,4 @@ policies are maintained in hipDNN:
 
 ## License
 
-Copyright © Advanced Micro Devices, Inc., or its affiliates.
-SPDX-License-Identifier: MIT
+This project is licensed under the terms described in [LICENSE](./LICENSE).

@@ -1,0 +1,58 @@
+{
+  "aliases": {},
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "grouped_gemm/gfx950/m8192n1024k512e64": {
+          "arch": "gfx950",
+          "bytes": 267299,
+          "family": "grouped_gemm",
+          "kernel_name": "irhash_grouped_gemm_950",
+          "sha256": "5234f535c1882fc42e7cf473363383f65a069383a31a590d85a0764e2bcc510b",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm22": {
+      "cases": {
+        "grouped_gemm/gfx950/m8192n1024k512e64": {
+          "arch": "gfx950",
+          "bytes": 267395,
+          "family": "grouped_gemm",
+          "kernel_name": "irhash_grouped_gemm_950",
+          "sha256": "89dc74a06fead91ad0c0a3ac019036dd05989c2619deb64942ed8dff047b69ab",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm23": {
+      "cases": {
+        "grouped_gemm/gfx950/m8192n1024k512e64": {
+          "arch": "gfx950",
+          "bytes": 267459,
+          "family": "grouped_gemm",
+          "kernel_name": "irhash_grouped_gemm_950",
+          "sha256": "e260ef4ca6ae29ae67e152ee7e3da958edc0a2bc3799ed310225b30fb137afe2",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
+      "cases": {
+        "grouped_gemm/gfx950/m8192n1024k512e64": {
+          "arch": "gfx950",
+          "bytes": 267459,
+          "family": "grouped_gemm",
+          "kernel_name": "irhash_grouped_gemm_950",
+          "sha256": "e260ef4ca6ae29ae67e152ee7e3da958edc0a2bc3799ed310225b30fb137afe2",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}
