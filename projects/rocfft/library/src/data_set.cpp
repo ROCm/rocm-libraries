@@ -150,7 +150,6 @@ data_set_t::data_set_t(const std::vector<size_t>& lower,
     }
 }
 
-
 data_set_t data_set_t::full_range(const std::vector<size_t>& lengths,
                                   const std::vector<size_t>& strides,
                                   size_t                     batch,
