@@ -310,7 +310,15 @@ inline void log_hipsparse_error(const char* call, hipsparseStatus_t status)
 // Constructors throw so a failed create cannot be used by the rest of the test.
 // Destructors record a failed destroy without throwing, so teardown stays safe
 // while another exception is unwinding.
-inline void throw_if_hipsparse_error(hipsparseStatus_t status, const char* call)
+inline void throw_if_hip_error(const char* call, hipError_t status)
+{
+    if(status != hipSuccess)
+    {
+        throw_hip_error(call, status);
+    }
+}
+
+inline void throw_if_hipsparse_error(const char* call, hipsparseStatus_t status)
 {
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
@@ -318,7 +326,7 @@ inline void throw_if_hipsparse_error(hipsparseStatus_t status, const char* call)
     }
 }
 
-inline void log_if_hipsparse_error(hipsparseStatus_t status, const char* call)
+inline void log_if_hipsparse_error(const char* call, hipsparseStatus_t status)
 {
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {

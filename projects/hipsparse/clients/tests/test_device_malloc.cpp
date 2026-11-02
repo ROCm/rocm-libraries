@@ -33,6 +33,6 @@
 TEST(device_malloc, quick_throws_on_allocation_failure)
 {
     EXPECT_THROW(hipsparse_test::device_malloc(SIZE_MAX), std::runtime_error);
-    // hipMalloc leaves a sticky error. Clear it so later tests do not observe it.
+    // Reset the last error so later tests don't see the failed hipMalloc.
     (void)hipGetLastError();
 }

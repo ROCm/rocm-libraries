@@ -26,8 +26,6 @@
 #define HIPSPARSE_LOCAL_DNVEC_HPP
 
 #include <hipsparse/hipsparse.h>
-#include <sstream>
-#include <stdexcept>
 
 #include "utility.hpp"
 

@@ -102,14 +102,14 @@ namespace hipsparse_test
 
         descr_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateMatDescr(&descr), "hipsparseCreateMatDescr");
+            throw_if_hipsparse_error("hipsparseCreateMatDescr", hipsparseCreateMatDescr(&descr));
         }
 
         ~descr_struct()
         {
             if(descr != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyMatDescr(descr), "hipsparseDestroyMatDescr");
+                log_if_hipsparse_error("hipsparseDestroyMatDescr", hipsparseDestroyMatDescr(descr));
             }
         }
     };
@@ -124,14 +124,14 @@ namespace hipsparse_test
 
         hyb_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateHybMat(&hyb), "hipsparseCreateHybMat");
+            throw_if_hipsparse_error("hipsparseCreateHybMat", hipsparseCreateHybMat(&hyb));
         }
 
         ~hyb_struct()
         {
             if(hyb != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyHybMat(hyb), "hipsparseDestroyHybMat");
+                log_if_hipsparse_error("hipsparseDestroyHybMat", hipsparseDestroyHybMat(hyb));
             }
         }
     };
@@ -146,15 +146,15 @@ namespace hipsparse_test
 
         bsrsv2_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateBsrsv2Info(&info), "hipsparseCreateBsrsv2Info");
+            throw_if_hipsparse_error("hipsparseCreateBsrsv2Info", hipsparseCreateBsrsv2Info(&info));
         }
 
         ~bsrsv2_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyBsrsv2Info(info),
-                                       "hipsparseDestroyBsrsv2Info");
+                log_if_hipsparse_error("hipsparseDestroyBsrsv2Info",
+                                       hipsparseDestroyBsrsv2Info(info));
             }
         }
     };
@@ -168,15 +168,15 @@ namespace hipsparse_test
 
         bsrsm2_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateBsrsm2Info(&info), "hipsparseCreateBsrsm2Info");
+            throw_if_hipsparse_error("hipsparseCreateBsrsm2Info", hipsparseCreateBsrsm2Info(&info));
         }
 
         ~bsrsm2_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyBsrsm2Info(info),
-                                       "hipsparseDestroyBsrsm2Info");
+                log_if_hipsparse_error("hipsparseDestroyBsrsm2Info",
+                                       hipsparseDestroyBsrsm2Info(info));
             }
         }
     };
@@ -191,15 +191,15 @@ namespace hipsparse_test
 
         csrsv2_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateCsrsv2Info(&info), "hipsparseCreateCsrsv2Info");
+            throw_if_hipsparse_error("hipsparseCreateCsrsv2Info", hipsparseCreateCsrsv2Info(&info));
         }
 
         ~csrsv2_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyCsrsv2Info(info),
-                                       "hipsparseDestroyCsrsv2Info");
+                log_if_hipsparse_error("hipsparseDestroyCsrsv2Info",
+                                       hipsparseDestroyCsrsv2Info(info));
             }
         }
     };
@@ -213,15 +213,15 @@ namespace hipsparse_test
 
         csrsm2_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateCsrsm2Info(&info), "hipsparseCreateCsrsm2Info");
+            throw_if_hipsparse_error("hipsparseCreateCsrsm2Info", hipsparseCreateCsrsm2Info(&info));
         }
 
         ~csrsm2_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyCsrsm2Info(info),
-                                       "hipsparseDestroyCsrsm2Info");
+                log_if_hipsparse_error("hipsparseDestroyCsrsm2Info",
+                                       hipsparseDestroyCsrsm2Info(info));
             }
         }
     };
@@ -236,16 +236,16 @@ namespace hipsparse_test
 
         bsrilu02_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateBsrilu02Info(&info),
-                                     "hipsparseCreateBsrilu02Info");
+            throw_if_hipsparse_error("hipsparseCreateBsrilu02Info",
+                                     hipsparseCreateBsrilu02Info(&info));
         }
 
         ~bsrilu02_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyBsrilu02Info(info),
-                                       "hipsparseDestroyBsrilu02Info");
+                log_if_hipsparse_error("hipsparseDestroyBsrilu02Info",
+                                       hipsparseDestroyBsrilu02Info(info));
             }
         }
     };
@@ -259,16 +259,16 @@ namespace hipsparse_test
 
         csrilu02_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateCsrilu02Info(&info),
-                                     "hipsparseCreateCsrilu02Info");
+            throw_if_hipsparse_error("hipsparseCreateCsrilu02Info",
+                                     hipsparseCreateCsrilu02Info(&info));
         }
 
         ~csrilu02_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyCsrilu02Info(info),
-                                       "hipsparseDestroyCsrilu02Info");
+                log_if_hipsparse_error("hipsparseDestroyCsrilu02Info",
+                                       hipsparseDestroyCsrilu02Info(info));
             }
         }
     };
@@ -282,16 +282,16 @@ namespace hipsparse_test
 
         bsric02_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateBsric02Info(&info),
-                                     "hipsparseCreateBsric02Info");
+            throw_if_hipsparse_error("hipsparseCreateBsric02Info",
+                                     hipsparseCreateBsric02Info(&info));
         }
 
         ~bsric02_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyBsric02Info(info),
-                                       "hipsparseDestroyBsric02Info");
+                log_if_hipsparse_error("hipsparseDestroyBsric02Info",
+                                       hipsparseDestroyBsric02Info(info));
             }
         }
     };
@@ -305,16 +305,16 @@ namespace hipsparse_test
 
         csric02_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateCsric02Info(&info),
-                                     "hipsparseCreateCsric02Info");
+            throw_if_hipsparse_error("hipsparseCreateCsric02Info",
+                                     hipsparseCreateCsric02Info(&info));
         }
 
         ~csric02_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyCsric02Info(info),
-                                       "hipsparseDestroyCsric02Info");
+                log_if_hipsparse_error("hipsparseDestroyCsric02Info",
+                                       hipsparseDestroyCsric02Info(info));
             }
         }
     };
@@ -329,16 +329,16 @@ namespace hipsparse_test
 
         csrgemm2_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateCsrgemm2Info(&info),
-                                     "hipsparseCreateCsrgemm2Info");
+            throw_if_hipsparse_error("hipsparseCreateCsrgemm2Info",
+                                     hipsparseCreateCsrgemm2Info(&info));
         }
 
         ~csrgemm2_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyCsrgemm2Info(info),
-                                       "hipsparseDestroyCsrgemm2Info");
+                log_if_hipsparse_error("hipsparseDestroyCsrgemm2Info",
+                                       hipsparseDestroyCsrgemm2Info(info));
             }
         }
     };
@@ -353,15 +353,15 @@ namespace hipsparse_test
 
         prune_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreatePruneInfo(&info), "hipsparseCreatePruneInfo");
+            throw_if_hipsparse_error("hipsparseCreatePruneInfo", hipsparseCreatePruneInfo(&info));
         }
 
         ~prune_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyPruneInfo(info),
-                                       "hipsparseDestroyPruneInfo");
+                log_if_hipsparse_error("hipsparseDestroyPruneInfo",
+                                       hipsparseDestroyPruneInfo(info));
             }
         }
     };
@@ -375,16 +375,16 @@ namespace hipsparse_test
 
         csru2csr_struct()
         {
-            throw_if_hipsparse_error(hipsparseCreateCsru2csrInfo(&info),
-                                     "hipsparseCreateCsru2csrInfo");
+            throw_if_hipsparse_error("hipsparseCreateCsru2csrInfo",
+                                     hipsparseCreateCsru2csrInfo(&info));
         }
 
         ~csru2csr_struct()
         {
             if(info != nullptr)
             {
-                log_if_hipsparse_error(hipsparseDestroyCsru2csrInfo(info),
-                                       "hipsparseDestroyCsru2csrInfo");
+                log_if_hipsparse_error("hipsparseDestroyCsru2csrInfo",
+                                       hipsparseDestroyCsru2csrInfo(info));
             }
         }
     };
@@ -399,16 +399,16 @@ namespace hipsparse_test
 
         spgemm_struct()
         {
-            throw_if_hipsparse_error(hipsparseSpGEMM_createDescr(&descr),
-                                     "hipsparseSpGEMM_createDescr");
+            throw_if_hipsparse_error("hipsparseSpGEMM_createDescr",
+                                     hipsparseSpGEMM_createDescr(&descr));
         }
 
         ~spgemm_struct()
         {
             if(descr != nullptr)
             {
-                log_if_hipsparse_error(hipsparseSpGEMM_destroyDescr(descr),
-                                       "hipsparseSpGEMM_destroyDescr");
+                log_if_hipsparse_error("hipsparseSpGEMM_destroyDescr",
+                                       hipsparseSpGEMM_destroyDescr(descr));
             }
         }
     };
@@ -428,16 +428,16 @@ namespace hipsparse_test
 
         spgeam_struct()
         {
-            throw_if_hipsparse_error(hipsparseSpGEAM_createDescr(&descr),
-                                     "hipsparseSpGEAM_createDescr");
+            throw_if_hipsparse_error("hipsparseSpGEAM_createDescr",
+                                     hipsparseSpGEAM_createDescr(&descr));
         }
 
         ~spgeam_struct()
         {
             if(descr != nullptr)
             {
-                log_if_hipsparse_error(hipsparseSpGEAM_destroyDescr(descr),
-                                       "hipsparseSpGEAM_destroyDescr");
+                log_if_hipsparse_error("hipsparseSpGEAM_destroyDescr",
+                                       hipsparseSpGEAM_destroyDescr(descr));
             }
         }
     };
