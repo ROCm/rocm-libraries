@@ -1308,8 +1308,8 @@ POISON_FRACTION = {
 # magnitude up to about 2. Probed on gfx950 with Q and K wide or large (ASM_SDPA_ENGINE, then
 # Gfx950AttentionDense): V in +-8 or large scale 8 fails 82 of 100 and 21 of 60 samples, V in
 # +-4 fails 41 of 150 and 14 of 60, V in +-2 fails none of 150 and 60. SdpaFwd/Default and
-# SdpaFwd/Gfx950Dense no longer narrow V: their engine TOMLs grade O by a gauntlet-scoped relative
-# RMS instead (test_the_sdpa_forward_output_rms_reaches_fuzz_cases_only). The spaces of the
+# SdpaFwd/Gfx950Dense no longer narrow V: their engine TOMLs grade O by a gauntlet-scoped allclose
+# atol and rtol instead (test_the_sdpa_forward_output_tolerance_reaches_fuzz_cases_only). The spaces of the
 # engines no device here can verify keep the narrowing.
 OPERAND_DOMAIN = {
     ("SdpaFwd/Flash2Region", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
@@ -3184,20 +3184,31 @@ def test_the_batchnorm_backward_gauntlet_entries_reach_fuzz_cases_only(run):
             assert _toml_validator(config, name, tensor) is None, name
 
 
-def test_the_sdpa_forward_output_rms_reaches_fuzz_cases_only(run):
+# The largest subnormal and the unit roundoff of the dtypes the SDPA forward spaces draw.
+SDPA_DTYPE_LIMITS = {
+    "bfloat16": {"max_subnormal": 2.0**-126, "ulp_rel": 2.0**-7},
+    "half": {"max_subnormal": 2.0**-14, "ulp_rel": 2.0**-10},
+}
+SDPA_MAX_ABS_V = 8  # wide draws +-8, large draws 4 to 8 in magnitude
+SDPA_P_ROUNDING = (
+    2.0**-8
+)  # unit roundoff of the bfloat16 P that the P.V product multiplies
+
+
+def test_the_sdpa_forward_output_tolerance_reaches_fuzz_cases_only(run):
     # bug caught: as above for O, where the V narrowing the entries replace is gone: an
-    # unmatched fuzz name grades a wide or large V at atol 0.01 and fails most samples, and a
-    # match on a quick bundle or on the log-sum-exp would loosen what CI and the stats check
+    # unmatched fuzz name grades a wide or large V at atol 0.01 and fails most samples, a
+    # relative RMS fails every subnormal-domain sample (the engine flushes O of order 1e-39
+    # to zero: relative error 100 percent), and a match on a quick bundle or on the
+    # log-sum-exp would loosen what CI and the stats check
     tomllib = pytest.importorskip("tomllib")
+    expected_tolerance = ("allclose", None, 3.125e-2, 3.125e-2)
     for toml_path, space_id, expected in (
-        (ASM_SDPA_TOML, "SdpaFwd/Default", {"bfloat16": ("rms", 8e-3, None, None)}),
+        (ASM_SDPA_TOML, "SdpaFwd/Default", {"bfloat16": expected_tolerance}),
         (
             GFX950_DENSE_TOML,
             "SdpaFwd/Gfx950Dense",
-            {
-                "bfloat16": ("rms", 8e-3, None, None),
-                "half": ("rms", 2e-3, None, None),
-            },
+            {"bfloat16": expected_tolerance, "half": expected_tolerance},
         ),
     ):
         if not toml_path.is_file():
@@ -3206,17 +3217,36 @@ def test_the_sdpa_forward_output_rms_reaches_fuzz_cases_only(run):
         sp = space_by_id(space_id)
         f = _fuzz(run, space=space_id)
         seen = set()
+        domains = set()
         for seed in range(200):
             s = sampler.sample(sp, seed)
             name = f._test_name(sp, s)
             dtype = s.axis_values["dtype"]
             seen.add(dtype)
+            domains.add(s.axis_values["domain"])
             assert (
                 _toml_validator(config, name, "SdpaFwd_0::O") == expected[dtype]
             ), name
             for tensor in ("stats", "Q", "K", "V"):
                 assert _toml_validator(config, name, tensor) is None, (name, tensor)
         assert seen == set(expected)
+        # the hazard the tolerance has to survive is really drawn
+        assert {"subnormal", "zeros", "wide", "large"} <= domains
+
+        # what the resolved tolerance accepts and rejects, per dtype (|impl - ref| <= atol +
+        # rtol * |ref|): (a) one ulp of any O up to max|V| and the P-rounding error of the
+        # widest V pass; (b) a flushed subnormal or zero output passes by atol; (c) an error
+        # of order |O| (a wrong softmax, a missing kv block) fails once |O| is a few hundredths
+        for dtype in expected:
+            _, _, atol, rtol = expected[dtype]
+            limits = SDPA_DTYPE_LIMITS[dtype]
+            assert rtol >= limits["ulp_rel"]
+            assert atol >= SDPA_P_ROUNDING * SDPA_MAX_ABS_V
+            assert atol >= limits["max_subnormal"]
+            assert atol < 0.05
+            assert rtol <= 0.05
+            for magnitude in (0.25, 0.5, 1.0, 4.0, 8.0):
+                assert atol + rtol * magnitude < 0.25 * magnitude, (dtype, magnitude)
 
         # the checked-in bundles of the operation, in any tier, keep the common tolerance
         names = _quick_names("SdpaFwd")

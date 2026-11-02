@@ -21,28 +21,40 @@ version = 1
 # SdpaFwd output O, gauntlet suites only (`*gauntlet*`; the quick bundles keep the common
 # allclose tolerance, tol::sdpa::getToleranceFwd<T>() = 1e-2). This replaces the narrowing of
 # V in the SdpaFwd/Gfx950Dense space (V free(-2, 2) under wide, scale 2 under large instead
-# of the Q and K ranges). The kernel rounds P to the input dtype for the P.V product, which
-# gives each P_j a relative error up to the unit roundoff of that dtype: 2^-8 (rms about
-# 1.5e-3) for bfloat16, 2^-11 (rms about 3e-4) for half. The error of one output element is
-# the P-weighted sum of |V_j| times those errors, so it grows with |V| (a V of magnitude 4
-# or more failed 14 of 60 samples, V in +-8 21 of 60, at atol 0.01: probed on gfx950), while
-# a cancelling sum leaves O itself small. The error tracks the scale of V, not each element
-# of O, so it is graded as a relative RMS, as LayernormBackward does for dscale and dbias.
-# Rounding O to the dtype adds one ulp at most (2^-8 or 2^-11 of |O|), so the expected
-# relative RMS is about 2e-3 for bfloat16 and 5e-4 for half. The thresholds are about three
-# to four times that: 8e-3 for bfloat16 (the bfloat16 relative-RMS tolerance of
-# rmsnorm::getTolerance in TestTolerances.hpp) and 2e-3 for half. A wrong softmax or a
-# missing kv block is a relative error of order 1. The patterns carry the dtype tag the fuzz
-# driver puts in the suite (`gauntlet_SdpaFwd_Gfx950Dense_fp16_cases.s7`); `_fp16_` does not
-# match `_bfp16_`.
+# of the Q and K ranges), graded per element as |impl - ref| <= atol + rtol * |ref| with its
+# own atol and rtol. A relative RMS does not do here: the space also draws the subnormal
+# domain, where O is of order 1e-39 (1e-5 for half) and an engine that flushes it to zero is
+# off by a relative 100 percent; the RMS fails every such sample (it did for the sibling
+# ASM_SDPA engine, 3 of 256), while an atol passes it.
+#
+# atol covers the rounding of P. The kernel rounds the softmax weights P before the P.V
+# product, a relative error of at most the unit roundoff u of the rounding type, 2^-8 for
+# bfloat16, so O_i = sum_j P_j V_j is off by at most u * sum_j P_j |V_j| <= u * max|V|,
+# whatever |O_i| is (a cancelling sum leaves O_i far below that). max|V| is 8 (wide draws
+# +-8, large draws 4 to 8 in magnitude), so atol = 2^-8 * 8 = 0.03125. Probed on gfx950 over
+# 2000 samples, half and bfloat16 alike showed errors of this size (the half kernel is not
+# 8 times tighter than the bfloat16 one): the largest that did not scale with |O| was
+# 0.0186, and atol = 0.0234 with rtol = 0.03125 passes all of them (0.0156 failed one).
+# rtol covers what does scale with |O|: rounding O to the dtype (one ulp, at most 2^-7 of
+# |O| for bfloat16, 2^-10 for half) and the engine's softmax error, which reached 1.7
+# percent of |O| on one row (half, large domain, query row 324 of seed 20190), so
+# rtol = 2^-5 = 0.03125 for both dtypes. Subnormal and all-zero outputs pass by atol (the
+# largest half subnormal is 6.1e-5, bfloat16 1.2e-38). A wrong softmax or a missing kv block
+# is an error of order |O|, which the tolerance fails wherever |O| exceeds a few hundredths;
+# it cannot see an O below atol, as the common tolerance of 1e-2 could not. The patterns
+# carry the dtype tag the fuzz driver puts in the suite
+# (`gauntlet_SdpaFwd_Gfx950Dense_fp16_cases.s7`); `_fp16_` does not match `_bfp16_`, so both
+# entries are written out.
 [[validator_overrides]]
 filters = ["*gauntlet*SdpaFwd*_bfp16_*"]
 tensors = ["*::O"]
-validator = "rms"
-rms_threshold = 8e-3
+validator = "allclose"
+atol = 3.125e-2
+rtol = 3.125e-2
 
 [[validator_overrides]]
 filters = ["*gauntlet*SdpaFwd*_fp16_*"]
 tensors = ["*::O"]
-validator = "rms"
-rms_threshold = 2e-3
+validator = "allclose"
+atol = 3.125e-2
+rtol = 3.125e-2
