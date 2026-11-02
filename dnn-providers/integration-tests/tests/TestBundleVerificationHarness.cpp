@@ -628,15 +628,15 @@ std::vector<PaddedLayout> paddedLayouts()
 {
     return {
         // Matmul A [3, 16, 32] with a leading dimension of 32 + 3, 32 + 4 and 32 + 1
-        {"matmul_pad3", {3, 16, 32}, {16 * 35, 35, 1}},
-        {"matmul_pad4", {3, 16, 32}, {16 * 36, 36, 1}},
-        {"matmul_pad1", {3, 16, 32}, {16 * 33, 33, 1}},
+        {"matmul_pad3", {3, 16, 32}, {int64_t{16} * 35, 35, 1}},
+        {"matmul_pad4", {3, 16, 32}, {int64_t{16} * 36, 36, 1}},
+        {"matmul_pad1", {3, 16, 32}, {int64_t{16} * 33, 33, 1}},
         // SDPA Q [b 2, hq 8, sq 64, d 128], BHSD: row stride d + 5
-        {"bhsd_pad5", {2, 8, 64, 128}, {8 * 64 * 133, 64 * 133, 133, 1}},
+        {"bhsd_pad5", {2, 8, 64, 128}, {int64_t{8} * 64 * 133, int64_t{64} * 133, 133, 1}},
         // the same, BSHD: row stride hq * d + 7, head stride d
-        {"bshd_pad7", {2, 8, 64, 128}, {64 * (8 * 128 + 7), 128, 8 * 128 + 7, 1}},
+        {"bshd_pad7", {2, 8, 64, 128}, {int64_t{64} * (8 * 128 + 7), 128, 8 * 128 + 7, 1}},
         // V [2, 2, 96, 128] BSHD with a row of 2 * 128 + 8
-        {"bshd_pad8", {2, 2, 96, 128}, {96 * (2 * 128 + 8), 128, 2 * 128 + 8, 1}},
+        {"bshd_pad8", {2, 2, 96, 128}, {int64_t{96} * (2 * 128 + 8), 128, 2 * 128 + 8, 1}},
     };
 }
 
@@ -685,6 +685,7 @@ TEST(TestBundleVerificationHarness, AllocatedOutputsOfPaddedStridesCoverEveryPad
         // The largest offset any element reaches is the last byte of the allocation, and the
         // element there holds the sentinel like every other element.
         std::vector<int64_t> last;
+        last.reserve(layout.dims.size());
         for(const int64_t dim : layout.dims)
         {
             last.push_back(dim - 1);
@@ -706,7 +707,7 @@ TEST(TestBundleVerificationHarness, DeviceSentinelOfAPaddedOutputHoldsTheHostSen
 
     for(const auto type : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
     {
-        const PaddedLayout layout{"padded", {3, 5, 7}, {5 * 11, 11, 1}};
+        const PaddedLayout layout{"padded", {3, 5, 7}, {int64_t{5} * 11, 11, 1}};
         auto bundle = makePaddedOutputBundle(layout, type);
         const auto wrapper = bundle->graphWrapper();
         auto hostOutputs = detail::allocateSentinelOutputs(
@@ -750,8 +751,8 @@ TEST(TestBundleVerificationHarness, PlacementOfPaddedTensorsCarriesEveryByteAndT
 
     // [3, 4, 8] floats with a leading stride of 11 (a pad of 3): 129 floats, 96 of them elements
     const std::vector<int64_t> dims = {3, 4, 8};
-    const std::vector<int64_t> strides = {4 * 11, 11, 1};
-    const std::size_t space = static_cast<std::size_t>(elementSpaceOf(dims, strides));
+    const std::vector<int64_t> strides = {int64_t{4} * 11, 11, 1};
+    const auto space = static_cast<std::size_t>(elementSpaceOf(dims, strides));
     ASSERT_EQ(space, 129u);
 
     // the offsets that hold an element
