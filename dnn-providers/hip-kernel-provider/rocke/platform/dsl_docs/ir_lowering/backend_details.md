@@ -37,13 +37,14 @@ The default `compile_kernel` ISA is `amdgcn-amd-amdhsa--gfx950`, and gfx950 (MI3
 
 ## LLVM Intrinsic Flavor
 
-rocKE separates a **compiler lane** from an **emission profile**. A lane records a qualified compiler major; a profile records the structural LLVM IR that rocKE emits: datalayout generation, declaration ABI, call shapes, and admitted target operations. The qualified lanes are `llvm20`, `llvm22`, `llvm23`, and `llvm24`, enumerated by `LLVM_FLAVORS` in `core/llvm_profile.py` and mirrored by the neutral C++ profile registry in `cpp/core/llvm_profile.cpp`. LLVM23 and LLVM24 intentionally share one emission profile because qualification found no structural IR delta between them.
+rocKE separates a **compiler lane** from an **emission profile**. A lane records a qualified compiler major; a profile records the structural LLVM IR that rocKE emits: datalayout generation, declaration ABI, call shapes, and admitted target operations. The qualified lanes are `llvm20`, `llvm22`, `llvm23`, and `llvm24`, enumerated by `LLVM_FLAVORS` in `core/llvm_profile.py` and mirrored by the neutral C++ profile registry in `cpp/core/llvm_profile.cpp`. LLVM24 retains LLVM23's datalayout and target-op surface, but qualification found one structural delta: named-barrier pointer declarations and calls use addrspace(15) instead of addrspace(3).
 
 The profiles capture these differences:
 
 - LLVM20 uses the plain-`p8` datalayout and legacy buffer-resource/FP8 MFMA declarations.
 - LLVM22 uses indexed `p8`, `make.buffer.rsrc.p8.p1` with an `i64` count, scalar-`i64` FP8/BF8 MFMA operands, and the eleven-argument scaled-MFMA form.
 - LLVM23/24 add `m:e` and address spaces `p10`–`p15`, use the nine-argument scaled-MFMA form, and admit the LLVM23-generation target-op surface.
+- LLVM24 casts LDS named-barrier pointers to addrspace(15), matching that compiler's intrinsic declarations; LLVM23 keeps addrspace(3).
 
 The compiler resolver never infers structural compatibility from a lane name. Emission decisions consult the selected profile rather than exact `llvm23` comparisons. Python and C++ must emit byte-identical IR for the same kernel, target, and lane.
 
@@ -59,7 +60,7 @@ Resolution is lazy and compiler evidence is retained with the loaded COMGR handl
 
 When adding a lane, first characterize its real compiler output. Add a lane only for qualification; add a distinct profile only for a structural IR difference. Put declaration and call-shape decisions in the profile instead of branching on a lane name. Python/C++ profile tests, the real-toolchain drift guard, emitted-IR validity, and byte identity cover different contracts and remain independently required.
 
-Goldens store one sub-document per distinct emission profile. A lane in `aliases` is still lowered and compared, but reuses the profile-identical baseline instead of duplicating thousands of hashes. Thus LLVM24 is checked against LLVM23's baseline while remaining a separately exercised compiler lane.
+Goldens store one sub-document per distinct emission profile. A lane in `aliases` is still lowered and compared, but reuses a profile-identical baseline instead of duplicating thousands of hashes. LLVM24 has its own baseline because its named-barrier call shape differs from LLVM23.
 
 ## Wave Size
 
