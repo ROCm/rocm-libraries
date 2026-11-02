@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.TensileCreateLibrary.Run import KernelCompileGroup
+from tensilelite.create_library.run import KernelCompileGroup
 import tensilelite.Toolchain.Assembly as A
 from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
 
