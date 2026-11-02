@@ -82,7 +82,10 @@ namespace TensileLite
                                            * static_cast<uint64_t>(numWorkGroups.x)
                                            * static_cast<uint64_t>(numWorkGroups.y)
                                            * static_cast<uint64_t>(numWorkGroups.z);
-                        return workItems <= std::numeric_limits<uint32_t>::max();
+                        if(workItems > std::numeric_limits<uint32_t>::max())
+                            return false;
+                        // A cluster launch also limits grid y and z to 65535 workgroups.
+                        return task.solution.clusterLaunchGridFits(task.problem, task.hardware);
                     }
 
                     return true;
@@ -105,6 +108,13 @@ namespace TensileLite
                         bool rv = (workItems <= std::numeric_limits<uint32_t>::max());
                         std::ostringstream details;
                         details << "workItems=" << workItems << " <= max=" << std::numeric_limits<uint32_t>::max();
+                        if(rv && !task.solution.clusterLaunchGridFits(task.problem, task.hardware))
+                        {
+                            rv          = false;
+                            dim3 grid   = task.solution.clusterLaunchGrid(task.problem, task.hardware);
+                            details << ", cluster grid y=" << grid.y << " z=" << grid.z
+                                    << " <= max=" << KernelInvocation::MaxClusterGridDimYZ;
+                        }
                         PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                         return rv;
                     }

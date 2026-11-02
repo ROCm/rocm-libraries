@@ -2704,6 +2704,35 @@ namespace TensileLite
         numWorkGroups.y = divideUp(numWorkGroups.y, sizeMapping.macroTile.y);
     }
 
+    dim3 ContractionSolution::clusterLaunchGrid(Problem const&  problem,
+                                                Hardware const& hardware) const
+    {
+        // Mirrors the non-persistent cluster branch of generateSingleCall.
+        dim3 workGroupSize, grid;
+        calculateGrid(workGroupSize, grid, problem);
+
+        uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu()
+                                                     : calculateAutoGSU(problem, &hardware);
+        if(gsu > 0)
+            grid.y = checkedMultiply(grid.y, static_cast<size_t>(gsu));
+
+        grid.x = RoundUpToMultiple(grid.x, sizeMapping.clusterDim.x);
+        grid.y = RoundUpToMultiple(grid.y, sizeMapping.clusterDim.y);
+        return grid;
+    }
+
+    bool ContractionSolution::clusterLaunchGridFits(Problem const&  problem,
+                                                    Hardware const& hardware) const
+    {
+        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+        if(!enableCluster || sizeMapping.isPersistent())
+            return true;
+
+        dim3 grid = clusterLaunchGrid(problem, hardware);
+        return grid.y <= KernelInvocation::MaxClusterGridDimYZ
+               && grid.z <= KernelInvocation::MaxClusterGridDimYZ;
+    }
+
     namespace
     {
         struct SpatialClusterGeometry
