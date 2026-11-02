@@ -285,16 +285,21 @@ def test_stage2_picks_top_k_then_auto_whatever_its_status():
 
 
 class _FakeCold:
-    def __init__(self, samples, copies):
+    def __init__(self, samples, copies, replay_fails=False, close_fails=False):
         self._samples = samples
         self.copies = copies
+        self.replay_fails, self.close_fails = replay_fails, close_fails
         self.closed = False
 
     def replay_us(self):
+        if self.replay_fails:
+            raise RuntimeError("replay failed")
         return next(self._samples)
 
     def close(self):
         self.closed = True
+        if self.close_fails:
+            raise RuntimeError("graph reset failed")
 
 
 class _CaptureUnavailable(RuntimeError):
@@ -311,10 +316,21 @@ class _FakeDriver:
 
     CaptureUnavailable = _CaptureUnavailable
 
-    def __init__(self, samples, *, failing=(), raising=(), no_graph=(), verdicts=None):
+    def __init__(
+        self,
+        samples,
+        *,
+        failing=(),
+        raising=(),
+        no_graph=(),
+        verdicts=None,
+        replay_fails=(),
+        close_fails=(),
+    ):
         # tuning_id -> samples, consumed in order across every capture
         self.samples = {tid: iter(values) for tid, values in samples.items()}
         self.failing, self.raising, self.no_graph = failing, raising, no_graph
+        self.replay_fails, self.close_fails = replay_fails, close_fails
         self.verdicts = verdicts or {}
         self.ids = {}
         self.colds = []
@@ -361,7 +377,9 @@ class _FakeDriver:
         tid = self.name(spec)
         if tid in self.no_graph:
             raise _CaptureUnavailable("RuntimeError: operation not permitted")
-        cold = _FakeCold(self.samples[tid], len(sets))
+        cold = _FakeCold(
+            self.samples[tid], len(sets), tid in self.replay_fails, tid in self.close_fails
+        )
         self.colds.append(cold)
         return cold
 
@@ -463,6 +481,46 @@ def test_stage2_retimes_interleaved_and_reports_the_median_of_run_medians(monkey
     assert [r["stage"] for r in rows] == [2, 2] and rows[1]["auto"]
     assert driver.value_sets_made == 3  # fresh buffers every run
     assert len(driver.colds) == 6 and all(c.closed for c in driver.colds)
+
+
+def _stage2_failure_case(monkeypatch, **kw):
+    args = sweep.options(rotate_mb=1024, s2_rounds=3, runs=2)
+    auto, configs = sweep.shape_configs(SHAPE, args)
+    a, b = configs[0], next(
+        r for r in configs if r.spec.tuning_id == auto.spec.tuning_id
+    )
+    ids = (a.spec.tuning_id, b.spec.tuning_id)
+    kw = {name: {ids[i] for i in picked} for name, picked in kw.items()}
+    driver = _fake(monkeypatch, configs, {tid: [1.0] * 6 for tid in ids}, **kw)
+    rows = sweep.stage2_shape(SHAPE, auto, [(0, a), (5, b)], args, {"rotate_mb": 1024})
+    return driver, rows
+
+
+def test_stage2_replay_failure_is_an_error_row_and_every_graph_closes(monkeypatch):
+    """The graphs of a run replay together, so a failing replay leaves none of
+    the run sound: all its rows are ERROR, every graph is closed, and the rows
+    come back to be written (and the run to fail)."""
+    driver, rows = _stage2_failure_case(monkeypatch, replay_fails=(1,))
+    assert [r["status"] for r in rows] == ["error", "error"]
+    assert all("replay failed" in r["reason"] for r in rows)
+    assert driver.colds and all(c.closed for c in driver.colds)
+    assert sweep.summarize(rows, require_auto=False) == 1
+
+
+def test_stage2_cleanup_failure_flags_the_row_and_still_closes_the_others(monkeypatch):
+    driver, rows = _stage2_failure_case(monkeypatch, close_fails=(0,))
+    assert [r["status"] for r in rows] == ["error", "ok"]
+    assert "graph reset failed" in rows[0]["reason"]
+    assert all(c.closed for c in driver.colds)
+    # A failed release leaves retained references: every row of the shape errors.
+    monkeypatch.setattr(
+        sweep._ShapeInputs,
+        "release",
+        lambda self: (_ for _ in ()).throw(RuntimeError("drain failed")),
+    )
+    _, rows = _stage2_failure_case(monkeypatch)
+    assert [r["status"] for r in rows] == ["error", "error"]
+    assert all("drain failed" in r["reason"] for r in rows)
 
 
 # ---------------------------------------------------------------- files

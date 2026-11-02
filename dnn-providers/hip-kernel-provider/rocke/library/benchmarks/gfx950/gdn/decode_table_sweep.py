@@ -1057,15 +1057,32 @@ def stage2_shape(shape: Shape, auto, picks: list, args, meta) -> list:
                 _error(row, exc)
                 continue
             graphs.append((row, cold))
-        samples = interleaved_samples(
-            [cold.replay_us for _, cold in graphs], args.s2_rounds, run
-        )
-        for (row, cold), got in zip(graphs, samples):
-            row["runs"].append(statistics.median(got))
-            row["copies"] = cold.copies
-            cold.close()
+        try:
+            samples = interleaved_samples(
+                [cold.replay_us for _, cold in graphs], args.s2_rounds, run
+            )
+            for (row, cold), got in zip(graphs, samples):
+                row["runs"].append(statistics.median(got))
+                row["copies"] = cold.copies
+        except Exception as exc:  # the graphs ran together: none of the run is sound
+            for row, _ in graphs:
+                _error(row, exc)
+        finally:
+            # Every cleanup step is tried, and a failure marks the rows ERROR
+            # (the sweep then exits non-zero): a graph or value set that stays
+            # alive keeps launch references and can run a later shape out of memory.
+            for row, cold in graphs:
+                try:
+                    cold.close()
+                except Exception as exc:
+                    if row["status"] != ERROR:
+                        _error(row, exc)
+            try:
+                data.release()
+            except Exception as exc:
+                for row, _, _ in entries:
+                    _error(row, exc)
         del graphs
-        data.release()
     for row, _, _ in entries:
         if row["status"] not in (ERROR, NO_GRAPH):
             row.update(status=OK, us=statistics.median(row["runs"]))

@@ -265,6 +265,22 @@ def test_warm_or_mixed_rotation_rows_withhold_the_proposal(capsys):
     assert "WITHHELD" in capsys.readouterr().out
 
 
+def test_rows_from_different_source_shas_withhold_the_proposal(capsys):
+    """The same case, shape and tuning_id timed at two commits is not one
+    measurement: no proposal, whichever stage-1 rows differ."""
+    args = argparse.Namespace(stage=1, tie=0.01, top=3)
+    mixed = _robust_case()
+    mixed[0]["sha"] = "def"
+    assert report.report(mixed, args) == 1
+    out = capsys.readouterr().out
+    assert "WITHHELD" in out and "2 source shas ['abc', 'def']" in out
+    assert "proposal " not in out and "AutoDefault(" not in out
+    # Another stage's sha does not block the scored stage.
+    other = _robust_case() + [_row(SHAPES[0], "q", 1.0, stage=2)]
+    other[-1]["sha"] = "def"
+    assert report.report(other, args) == 0
+
+
 def test_a_shape_without_a_timed_row_or_with_auto_failing_is_never_dropped(capsys):
     """B16: every configuration failed (no timed row); B64: auto failed the
     gate. Neither may silently shrink the case the score covers."""
