@@ -34,10 +34,11 @@ COMPONENTS = {
     ],
     "miopen": [
         "projects/miopen/**",
-        # The hipDNN MIOpen provider hand-maintains copies of MIOpen's private
-        # entry-point declarations, which MIOpen CI cross-checks against the
-        # originals. A PR touching only the provider is exactly the drift that
-        # gate exists to catch, so it has to trigger this component too.
+        # The hipDNN MIOpen provider carries a copy of MIOpen's rename list,
+        # generated from miopen.h, and hand-written declarations of a few
+        # MIOpen entry points. MIOpen CI checks both against MIOpen. A PR
+        # touching only the provider is exactly the drift that gate exists to
+        # catch, so it has to trigger this component too.
         "dnn-providers/miopen-provider/**",
         ".github/workflows/component-ci-miopen.yml",
     ],
