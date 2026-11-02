@@ -843,6 +843,16 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx);
  * Covers mem, compv3, compv4, and basic (basic now uses the same runtime loop). */
 void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
 
+/* The reg_prefetch K loops (Python _emit_fwd_kloops, the plain "k" loop):
+ * reg_prefetch 1 (one LDS buffer) and 2 (x2-unrolled ping-pong + tail), with
+ * the lds_xor stores. Writes ctx->final_accs. */
+void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx);
+
+/* lds_xor column of tile element (row, col) (Python lds_swz). */
+rocke_value_t* rocke_conv_lds_swz(rocke_conv_build_ctx_t* ctx,
+                                  rocke_value_t* row,
+                                  rocke_value_t* col);
+
 /* async_dma branch (lines 1320-1347): SoftwarePipeline.run_ping_pong over the
  * AsyncTileLoader path. (SoftwarePipeline is a peer port; the driver reproduces
  * its run_ping_pong sequencing inline against ctx until that port lands.) */

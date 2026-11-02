@@ -20,6 +20,9 @@
 #include "rocke/helper_rocke.helpers.pipeline.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
+#include "rocke/arena.h"
+
+#include <stdio.h>
 
 /* ----- shared small helper: copy a working acc array into ctx->final_accs ----
  * Python sets `final_accs = current_accs` (or `for_op.results`); in C the
@@ -603,4 +606,172 @@ void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx)
                         "the exec-mask split path has a data race (single LDS buffer "
                         "overwritten each K iteration with no cross-section barriers).");
     }
+}
+
+/* ===================================================================== *
+ * rocke_conv_emit_fwd_kloops -- Python _emit_fwd_kloops, the plain "k" loop
+ * (uniform_k_decode off): run_loop(k_lo, k_hi, accs, [], plain_fetch,
+ * plain_adv, "k") for reg_prefetch 1 and 2. A prefetch past the end of the
+ * reduction addresses k >= K_gemm and loads zeros without touching memory.
+ * ===================================================================== */
+typedef struct
+{
+    rocke_ctl_staged_t a;
+    rocke_ctl_staged_t b;
+} conv_rpf_staged_t;
+
+/* plain_fetch(k): k_off_capture = k; fetch(a_descriptor, b_descriptor). */
+static void conv_rpf_fetch(rocke_conv_build_ctx_t* ctx, rocke_value_t* k, conv_rpf_staged_t* st)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    ctx->k_off_capture = k;
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->a_sync_loader, ctx->tid, rocke_conv_a_descriptor, ctx, ctx->a_rsrc, NULL, &st->a);
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->b_sync_loader, ctx->tid, rocke_conv_b_descriptor, ctx, ctx->b_rsrc, NULL, &st->b);
+}
+
+/* store(staged, A_dst, B_dst): the loaders' LDS stores, or the lds_xor
+ * swizzled ones (smem_store_vN at [row, lds_swz(row, col)]). */
+static void conv_rpf_store(rocke_conv_build_ctx_t* ctx,
+                           const conv_rpf_staged_t* st,
+                           rocke_value_t* A_dst,
+                           rocke_value_t* B_dst)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    if(!ctx->spec->lds_xor)
+    {
+        rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, A_dst, &st->a);
+        rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, B_dst, &st->b);
+        return;
+    }
+    const rocke_ctl_staged_t* parts[2] = {&st->a, &st->b};
+    rocke_value_t* dsts[2] = {A_dst, B_dst};
+    int vecs[2] = {ctx->a_sync_loader.load_vec, ctx->b_sync_loader.load_vec};
+    for(int o = 0; o < 2; ++o)
+    {
+        for(int e = 0; e < parts[o]->count; ++e)
+        {
+            rocke_value_t* row = parts[o]->vecs[e].row;
+            rocke_value_t* col = rocke_conv_lds_swz(ctx, row, parts[o]->vecs[e].col);
+            rocke_value_t* idx[2] = {row, col};
+            rocke_b_smem_store_vN(b, dsts[o], idx, 2, parts[o]->vecs[e].v, vecs[o]);
+        }
+    }
+}
+
+void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    const int n_acc = ctx->num_accs;
+    const int block_k = ctx->block_k;
+    rocke_value_t* lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+    rocke_value_t* hi = (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm;
+    conv_rpf_staged_t* st
+        = (conv_rpf_staged_t*)rocke_arena_alloc(&b->arena, sizeof(conv_rpf_staged_t));
+    if(st == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv rpf: arena alloc failed");
+        return;
+    }
+    (void)rocke_b_const_i32(b, 1); /* c1 = b.const_i32(1) */
+
+    rocke_iter_arg_t it[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* iv[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* acc_a[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* acc_b[ROCKE_CONV_MAX_ACCS];
+    char nbuf[64];
+
+    /* Prologue: tile `lo` into buffer 0, published. */
+    conv_rpf_fetch(ctx, lo, st);
+    conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
+    rocke_b_sync(b);
+
+    for(int i = 0; i < n_acc; ++i)
+    {
+        snprintf(nbuf, sizeof(nbuf), "k_%s", ctx->acc_names[i]);
+        it[i].name = rocke_arena_strdup(&b->arena, nbuf);
+        it[i].init = ctx->acc_inits[i];
+    }
+
+    if(spec->reg_prefetch == 1)
+    {
+        /* One buffer: read tile t+1 into registers, MFMA tile t, retire every
+         * wave's ds_reads, then overwrite the buffer and publish. */
+        rocke_for_t f = rocke_b_scf_for_iter(b, lo, hi, ctx->c_block_k, it, n_acc, "k_k", false, true);
+        for(int i = 0; i < f.num_iter_vars; ++i)
+            iv[i] = f.iter_vars[i];
+        rocke_b_region_enter(b, f.body);
+        {
+            conv_rpf_fetch(ctx, rocke_b_add(b, f.iv, ctx->c_block_k), st);
+            rocke_b_sched_barrier(b, 0);
+            ctx->k_off_capture = f.iv;
+            rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iv, n_acc, acc_a);
+            rocke_b_sched_barrier(b, 0);
+            rocke_b_sync(b);
+            conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
+            rocke_b_sync(b);
+            rocke_b_scf_yield(b, acc_a, n_acc);
+        }
+        rocke_b_region_leave(b);
+        rocke_conv_set_final_accs(ctx, f.op->results, n_acc);
+        return;
+    }
+
+    /* reg_prefetch == 2: whole pairs of tiles in the unrolled loop; an odd last
+     * tile was prefetched into buffer 0 by the last pair and runs in a 0/1-trip
+     * tail loop. */
+    rocke_value_t* c_2bk = rocke_b_const_i32(b, 2 * block_k);
+    rocke_value_t* span = rocke_b_sub(b, hi, lo);
+    rocke_value_t* span_r = rocke_b_add(b, span, rocke_b_const_i32(b, block_k - 1));
+    rocke_value_t* n_tiles = rocke_b_div(b, span_r, ctx->c_block_k);
+    rocke_value_t* n_pairs = rocke_b_div(b, n_tiles, rocke_b_const_i32(b, 2));
+    rocke_value_t* pair_hi = rocke_b_add(b, lo, rocke_b_mul(b, n_pairs, c_2bk));
+    rocke_value_t* tail_hi = rocke_b_add(b, lo, rocke_b_mul(b, n_tiles, ctx->c_block_k));
+
+    rocke_for_t f = rocke_b_scf_for_iter(b, lo, pair_hi, c_2bk, it, n_acc, "k_k", false, true);
+    for(int i = 0; i < f.num_iter_vars; ++i)
+        iv[i] = f.iter_vars[i];
+    rocke_b_region_enter(b, f.body);
+    {
+        rocke_value_t* k1 = rocke_b_add(b, f.iv, ctx->c_block_k);
+        conv_rpf_fetch(ctx, k1, st);
+        rocke_b_sched_barrier(b, 0);
+        ctx->k_off_capture = f.iv;
+        rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iv, n_acc, acc_a);
+        rocke_b_sched_barrier(b, 0);
+        conv_rpf_store(ctx, st, ctx->A_smem2, ctx->B_smem2);
+        rocke_b_sync(b);
+        rocke_value_t* k2 = rocke_b_add(b, f.iv, c_2bk);
+        conv_rpf_fetch(ctx, k2, st);
+        rocke_b_sched_barrier(b, 0);
+        ctx->k_off_capture = k1;
+        rocke_conv_emit_mfma_phase(ctx, ctx->A_smem2, ctx->B_smem2, acc_a, n_acc, acc_b);
+        rocke_b_sched_barrier(b, 0);
+        conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
+        rocke_b_sync(b);
+        rocke_b_scf_yield(b, acc_b, n_acc);
+    }
+    rocke_b_region_leave(b);
+
+    rocke_iter_arg_t tit[ROCKE_CONV_MAX_ACCS];
+    for(int i = 0; i < n_acc; ++i)
+    {
+        snprintf(nbuf, sizeof(nbuf), "k_t_%s", ctx->acc_names[i]);
+        tit[i].name = rocke_arena_strdup(&b->arena, nbuf);
+        tit[i].init = f.op->results[i];
+    }
+    rocke_for_t t = rocke_b_scf_for_iter(b, pair_hi, tail_hi, ctx->c_block_k, tit, n_acc, "k_kt", false, true);
+    for(int i = 0; i < t.num_iter_vars; ++i)
+        iv[i] = t.iter_vars[i];
+    rocke_b_region_enter(b, t.body);
+    {
+        ctx->k_off_capture = t.iv;
+        rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iv, n_acc, acc_a);
+        rocke_b_sync(b);
+        rocke_b_scf_yield(b, acc_a, n_acc);
+    }
+    rocke_b_region_leave(b);
+    rocke_conv_set_final_accs(ctx, t.op->results, n_acc);
 }

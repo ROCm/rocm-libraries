@@ -443,25 +443,28 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     };
     char fbuf[NF][24];
     int nf = 0;
-#define ROCKE_FLAG(on_, ...)                                       \
-    do                                                              \
-    {                                                               \
-        snprintf(fbuf[nf], sizeof(fbuf[nf]), __VA_ARGS__);          \
-        flag_names[nf] = fbuf[nf];                                  \
-        flag_on[nf] = (on_) ? 1 : 0;                                \
-        ++nf;                                                       \
+#define ROCKE_FLAG(on_, ...)                               \
+    do                                                     \
+    {                                                      \
+        snprintf(fbuf[nf], sizeof(fbuf[nf]), __VA_ARGS__); \
+        flag_names[nf] = fbuf[nf];                         \
+        flag_on[nf] = (on_) ? 1 : 0;                       \
+        ++nf;                                              \
     } while(0)
     ROCKE_FLAG(s->async_dma, "async");
     ROCKE_FLAG(s->cshuffle_no_alias, "noalc");
     /* unroll_k: a different K-loop body under the same name otherwise. */
     ROCKE_FLAG(s->unroll_k, "unroll");
     ROCKE_FLAG(0, "ukd");
-    ROCKE_FLAG(0, "rpf0");
+    ROCKE_FLAG(s->reg_prefetch > 0, "rpf%d", s->reg_prefetch);
     ROCKE_FLAG(s->xcd_remap > 0, "xcd%d", s->xcd_remap);
-    /* (lxor, pfr, spt, sakd, adir, tapf, cg, lah, dfr, vmi, kprd, lbar, flate,
-     *  uxh, xdpp, prio, pp, ppm, ppbd, lxrk, mch, xws, saa, sapl, sapf, esf,
-     *  skx, fsk, sfs, szf, xsub, ppfd, fbse, ppeg, elb, shy, mss, stc, sdet,
-     *  psf, nag: Python-only knobs, off here.) */
+    ROCKE_FLAG(s->lds_xor, "lxor");
+    /* (pfr, spt, sakd, adir, tapf, cg, lah, dfr, vmi: Python-only, off.) */
+    ROCKE_FLAG(s->lds_kpack_read, "kprd");
+    /* (lbar, flate, uxh, xdpp, prio, pp, ppm, ppbd: Python-only, off.) */
+    ROCKE_FLAG(s->lds_xor_rowkey, "lxrk");
+    /* (mch, xws, saa, sapl, sapf, esf, skx, fsk, sfs, szf, xsub, ppfd, fbse,
+     *  ppeg, elb, shy, mss, stc, sdet, psf, nag: Python-only knobs, off.) */
     ROCKE_FLAG(s->m_band > 0, "mb%d", s->m_band);
     /* (xsm, fxd, xyr, eqx, nopad, dpw: Python-only knobs, off here.) */
     /* The occupancy target changes the register allocation. */
@@ -1014,6 +1017,13 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
                         "spec.lds_layout override is not supported in the C port "
                         "(LdsLayout peer port owns it)");
     }
+    else if(s->lds_xor)
+    {
+        /* lds_xor: LdsLayout.padded_k(tile_k, 0) -- the swizzle replaces the pad. */
+        l.logical_cols = s->tile_k;
+        l.k_pad = 0;
+        l.requires_packed_async = false;
+    }
     else if(s->has_lds_k_pad)
     {
         /* LdsLayout.padded_k(logical_cols=tile_k, k_pad=lds_k_pad) */
@@ -1070,18 +1080,23 @@ bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
     if(s->split_k < 1)
         ROCKE_SPEC_FAIL(reason, reason_cap, "split_k must be >= 1 (got %d)", s->split_k);
     if(s->epilogue == NULL || strcmp(s->epilogue, "cshuffle") != 0)
-        ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 needs the cshuffle epilogue (atomic store)");
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "fwd split_k > 1 needs the cshuffle epilogue (atomic store)");
     if(s->unroll_k || s->async_dma)
-        ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 needs the single-tile K loop (no unroll_k / async_dma)");
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "fwd split_k > 1 needs the single-tile K loop (no unroll_k / async_dma)");
     if(s->group_merge > 1)
         ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 does not support group_merge");
     const char* dd = s->dtype_d ? s->dtype_d : "fp16";
     if(strcmp(dd, "fp32") != 0 && strcmp(dd, "bf16") != 0 && strcmp(dd, "fp16") != 0)
-        ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 needs dtype_d fp32/bf16/fp16 (got %s)", dd);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "fwd split_k > 1 needs dtype_d fp32/bf16/fp16 (got %s)", dd);
     if(strcmp(dd, "fp32") != 0 && rocke_conv_problem_kpg(&s->problem) % 2)
         ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 with a 16-bit D needs even kpg");
     if(!rocke_conv_acc_epilogue_is_identity(&s->acc_epilogue))
-        ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 does not support an accumulator epilogue");
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "fwd split_k > 1 does not support an accumulator epilogue");
     return true;
 }
 
@@ -1095,9 +1110,59 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
     if(s->xcd_remap < 0)
         ROCKE_SPEC_FAIL(reason, reason_cap, "xcd_remap must be >= 0");
     if(s->xcd_remap && s->chiplet_swizzle)
-        ROCKE_SPEC_FAIL(reason, reason_cap, "xcd_remap and chiplet_swizzle both remap the grid; set one");
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "xcd_remap and chiplet_swizzle both remap the grid; set one");
     if(s->m_band < 0 || (s->m_band && !s->xcd_remap))
         ROCKE_SPEC_FAIL(reason, reason_cap, "m_band needs xcd_remap");
+    const bool kloops = s->reg_prefetch != 0; /* uniform_k_decode: not ported */
+    if(s->lds_xor)
+    {
+        if(!kloops)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "lds_xor is implemented in the uniform_k_decode / reg_prefetch "
+                            "and single-buffer prefetch_regs loops only");
+        if(s->tile_k < 32 || s->lds_layout != NULL || (s->has_lds_k_pad && s->lds_k_pad))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "lds_xor needs tile_k >= 32 and the default (unpadded) LDS layout");
+    }
+    if(s->lds_xor_rowkey && !(s->lds_xor && s->lds_kpack_read && s->tile_k == 32))
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "lds_xor_rowkey re-keys the k-packed lds_xor swizzle of tile_k 32 only");
+    if(s->lds_kpack_read)
+    {
+        if(!kloops)
+            ROCKE_SPEC_FAIL(
+                reason,
+                reason_cap,
+                "lds_kpack_read is implemented in the uniform_k_decode / reg_prefetch loops only");
+        if(s->warp_tile_k == 0 || (s->tile_k / s->warp_tile_k) % 2)
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "lds_kpack_read needs an even number of kk steps per tile");
+    }
+    if(s->reg_prefetch < 0 || s->reg_prefetch > 2)
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "reg_prefetch must be 0, 1 or 2, got %d", s->reg_prefetch);
+    if(!kloops)
+        return true;
+    if(s->async_dma)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "uniform_k_decode/reg_prefetch rewrite the synchronous K loop; "
+                        "async_dma has its own");
+    if((s->pipeline != NULL && strcmp(s->pipeline, "wavelet") == 0) || s->wave_size != 64)
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "uniform_k_decode/reg_prefetch are wave64 MFMA K loops");
+    if(s->unroll_k)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "reg_prefetch/uniform_k_decode replace the unroll_k loop; set one of them");
+    if(s->group_merge > 1)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "uniform_k_decode/reg_prefetch are not implemented with group_merge");
     return true;
 }
 
@@ -1396,7 +1461,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         ab_bytes = (s->tile_m * lds_layout.row_stride + s->tile_n * lds_layout.row_stride)
                    * ab_dtype_bytes;
 
-        double_buf = (s->async_dma || s->unroll_k) ? 1 : 0;
+        double_buf = (s->async_dma || s->unroll_k || s->reg_prefetch == 2) ? 1 : 0;
         ab_lds = ab_bytes * (double_buf ? 2 : 1);
 
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);

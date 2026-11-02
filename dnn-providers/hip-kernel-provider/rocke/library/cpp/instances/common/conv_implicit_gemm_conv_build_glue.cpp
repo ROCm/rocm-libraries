@@ -705,7 +705,7 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * "mem"/"compv3" and differs only in scheduling hints, so allocating a
          * second A/B tile for it was dead and charged LDS the kernel never used.
          * Mirrors the Python double_buffer condition. */
-        ctx->double_buffer = spec->async_dma || spec->unroll_k;
+        ctx->double_buffer = spec->async_dma || spec->unroll_k || spec->reg_prefetch == 2;
         if(ctx->double_buffer)
         {
             ctx->A_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a_shape, 2, "A_smem2");
@@ -1116,7 +1116,12 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
      *                                  affects schedule hints inside mfma)
      *   else (async)  -> kloop_async  (SoftwarePipeline.run_ping_pong over
      *                                  AsyncTileLoader; no scf.for_iter) */
-    if(spec->unroll_k)
+    if(spec->reg_prefetch)
+    {
+        /* The reg_prefetch K loops (Python _emit_fwd_kloops). */
+        rocke_conv_emit_fwd_kloops(&ctx);
+    }
+    else if(spec->unroll_k)
     {
         rocke_conv_emit_kloop_unroll(&ctx);
     }

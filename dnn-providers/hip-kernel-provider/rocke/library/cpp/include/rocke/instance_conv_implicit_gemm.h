@@ -234,6 +234,23 @@ typedef struct rocke_implicit_gemm_conv_spec
     /* Output-plane band order of the M tiles on top of xcd_remap
      * (kernels/common/conv_m_band.py). 0 (default) = off. */
     int m_band; /* default 0 */
+
+    /* Register-staged global prefetch of the next K tile (Python
+     * ImplicitGemmConvSpec.reg_prefetch): tile t+1's global reads go into
+     * registers ahead of tile t's MFMAs and to LDS after them. 1: one LDS
+     * buffer (a barrier retires the reads, a second publishes); 2: two LDS
+     * buffers, x2-unrolled ping-pong plus a 0/1-trip tail. 0 (default) = off. */
+    int reg_prefetch; /* default 0 */
+    /* XOR-swizzled A/B LDS tiles in place of the +8 row pad (lds_xor): the
+     * 16-byte chunk of tile element (r, c) moves by the row's key. Needs the
+     * reg_prefetch / uniform_k_decode loops and tile_k >= 32. */
+    bool lds_xor; /* default false */
+    /* k-packed fragment reads (lds_kpack_read): one 16-byte LDS read serves
+     * two kk steps. reg_prefetch / uniform_k_decode loops, even kk count. */
+    bool lds_kpack_read; /* default false */
+    /* lds_xor_rowkey: key the k-packed lds_xor swizzle of tile_k 32 on the
+     * row itself (not the 128-byte span). */
+    bool lds_xor_rowkey; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

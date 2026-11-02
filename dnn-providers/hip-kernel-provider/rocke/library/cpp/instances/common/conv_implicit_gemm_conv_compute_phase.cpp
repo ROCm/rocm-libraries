@@ -311,6 +311,38 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
     }
 }
 
+/* Python _ir_dtype(spec.data.dtype_a): the vec_pack element type of the
+ * k-packed fragment halves. */
+static const rocke_type_t* conv_ir_dtype_a(const rocke_implicit_gemm_conv_spec_t* spec)
+{
+    if(spec->dtype_a != NULL && strcmp(spec->dtype_a, "bf16") == 0)
+        return rocke_bf16();
+    if(spec->dtype_a != NULL && strcmp(spec->dtype_a, "fp32") == 0)
+        return rocke_f32();
+    return rocke_f16();
+}
+
+/* Python lds_swz: the lds_xor column of tile element (row, col) -- its 16-byte
+ * chunk XOR the row key (the in-chunk offset is kept). The key is the row's
+ * 256-byte line (128-byte span under lds_kpack_read; the row itself under
+ * lds_xor_rowkey). */
+rocke_value_t* rocke_conv_lds_swz(rocke_conv_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    const int block_k = ctx->block_k;
+    int sh;
+    if(spec->lds_kpack_read)
+        sh = spec->lds_xor_rowkey ? 0 : (block_k == 32 ? 1 : 0);
+    else
+        sh = block_k == 32 ? 2 : (block_k == 64 ? 1 : 0);
+    if(sh)
+        row = rocke_b_lshr(b, row, rocke_b_const_i32(b, sh));
+    rocke_value_t* rmask = rocke_b_land(b, row, rocke_b_const_i32(b, block_k / 8 - 1));
+    rocke_value_t* key = rocke_b_shl(b, rmask, rocke_b_const_i32(b, 3));
+    return rocke_b_xor(b, col, key);
+}
+
 /* ====================================================================== *
  * emit_mfma_phase(A_src, B_src, iter_vars) -> new_accs  (py 1164-1255)
  *
@@ -356,8 +388,83 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
     /* a_operand_override hook + its opaque user (Python `a_operand_override`). */
     const rocke_conv_build_overrides_t* ov = ctx->ov;
 
+    /* lds_kpack_read: the odd kk step's halves, read at the even step. */
+    rocke_value_t* kp_a[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* kp_b[ROCKE_CONV_MAX_ACCS];
+    const bool kprd
+        = spec->lds_kpack_read && !(ov != NULL && ov->a_operand_override != NULL);
+    const rocke_type_t* ir_dtype_a = conv_ir_dtype_a(spec);
+
     for(int kk = 0; kk < ctx->k_atoms; ++kk)
     {
+        if(kprd)
+        {
+            if(kk % 2)
+            {
+                for(int mi = 0; mi < ctx->mfmas_m; ++mi)
+                    a_rows[mi] = kp_a[mi];
+                for(int ni = 0; ni < ctx->mfmas_n; ++ni)
+                    b_cols[ni] = kp_b[ni];
+            }
+            else
+            {
+                /* k-packed: lane group k_blk owns 2*per_lane contiguous k of the
+                 * kk pair (2p, 2p+1); one 16-byte read, split in halves. */
+                rocke_value_t* cb_mul
+                    = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, 2 * ctx->a_per_lane));
+                rocke_value_t* cb_off = rocke_b_const_i32(b, kk * spec->warp_tile_k);
+                rocke_value_t* cb = rocke_b_add(b, cb_mul, cb_off);
+                rocke_value_t* pa[ROCKE_CONV_MAX_ACCS];
+                rocke_value_t* pb[ROCKE_CONV_MAX_ACCS];
+                for(int mi = 0; mi < ctx->mfmas_m; ++mi)
+                {
+                    rocke_value_t* mc = rocke_b_const_i32(b, mi * spec->warp_tile_m);
+                    rocke_value_t* a_row
+                        = rocke_b_add(b, warp_m_off, rocke_b_add(b, mc, m_in_atom));
+                    rocke_value_t* col = spec->lds_xor ? rocke_conv_lds_swz(ctx, a_row, cb) : cb;
+                    pa[mi] = rocke_conv_emit_smem_load(
+                        b, A_src, a_row, col, 2 * ctx->a_per_lane, ctx->smem_dtype);
+                }
+                for(int ni = 0; ni < ctx->mfmas_n; ++ni)
+                {
+                    rocke_value_t* nc = rocke_b_const_i32(b, ni * spec->warp_tile_n);
+                    rocke_value_t* b_row
+                        = rocke_b_add(b, warp_n_off, rocke_b_add(b, nc, n_in_atom));
+                    rocke_value_t* col = spec->lds_xor ? rocke_conv_lds_swz(ctx, b_row, cb) : cb;
+                    pb[ni] = rocke_conv_emit_smem_load(
+                        b, B_src, b_row, col, 2 * ctx->b_per_lane, ctx->smem_dtype);
+                }
+                /* half(v, n, h) = vec_pack([vec_extract(v, h*n + i)], ir_dtype_a):
+                 * the cached odd halves first (A then B), then the even ones. */
+                for(int h = 1; h >= 0; --h)
+                {
+                    for(int mi = 0; mi < ctx->mfmas_m; ++mi)
+                    {
+                        rocke_value_t* el[16];
+                        for(int i = 0; i < ctx->a_per_lane; ++i)
+                            el[i] = rocke_b_vec_extract(b, pa[mi], h * ctx->a_per_lane + i);
+                        rocke_value_t* v = rocke_b_vec_pack(b, el, ctx->a_per_lane, ir_dtype_a);
+                        if(h)
+                            kp_a[mi] = v;
+                        else
+                            a_rows[mi] = v;
+                    }
+                    for(int ni = 0; ni < ctx->mfmas_n; ++ni)
+                    {
+                        rocke_value_t* el[16];
+                        for(int i = 0; i < ctx->b_per_lane; ++i)
+                            el[i] = rocke_b_vec_extract(b, pb[ni], h * ctx->b_per_lane + i);
+                        rocke_value_t* v = rocke_b_vec_pack(b, el, ctx->b_per_lane, ir_dtype_a);
+                        if(h)
+                            kp_b[ni] = v;
+                        else
+                            b_cols[ni] = v;
+                    }
+                }
+            }
+        }
+        else
+        {
         /* col_base = b.add(b.mul(k_blk, const(a_per_lane)),
          *                  const(kk * warp_tile_k))
          *
@@ -413,8 +520,10 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
             }
             else
             {
+                rocke_value_t* a_col
+                    = spec->lds_xor ? rocke_conv_lds_swz(ctx, a_row, col_base) : col_base;
                 a_rows[mi] = rocke_conv_load_mma_operand(
-                    b, A_src, a_row, col_base, ctx->a_per_lane, ctx->smem_dtype, ctx->is_tf32);
+                    b, A_src, a_row, a_col, ctx->a_per_lane, ctx->smem_dtype, ctx->is_tf32);
             }
         }
 
@@ -443,10 +552,13 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
                 b,
                 warp_n_off,
                 rocke_b_add(b, rocke_b_const_i32(b, ni * spec->warp_tile_n), n_in_atom));
+            rocke_value_t* b_col
+                = spec->lds_xor ? rocke_conv_lds_swz(ctx, b_row, col_base) : col_base;
             b_cols[ni] = rocke_conv_load_mma_operand(
-                b, B_src, b_row, col_base, ctx->b_per_lane, ctx->smem_dtype, ctx->is_tf32);
+                b, B_src, b_row, b_col, ctx->b_per_lane, ctx->smem_dtype, ctx->is_tf32);
         }
 
+        }
         int flat = 0;
         for(int mi = 0; mi < ctx->mfmas_m; ++mi)
         {
@@ -459,12 +571,14 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
         }
 
         /* schedule.emit_after_mfma_step(
-         *     b, ds_read_count=(mfmas_m + mfmas_n) * _ds_reads_per_frag,
+         *     b, ds_read_count=_n_dsr(kk) * _ds_reads_per_frag,
          *     mfma_count=mfmas_m * mfmas_n * _mfmas_per_mma) */
+        /* _n_dsr(kk): k-packed reads issue both steps' reads at the even kk. */
+        int n_dsr = (kprd && (kk % 2)) ? 0 : ctx->mfmas_m + ctx->mfmas_n;
         rocke_schedule_policy_emit_after_mfma_step(
             &ctx->schedule,
             b,
-            (ctx->mfmas_m + ctx->mfmas_n) * ctx->ds_reads_per_frag,
+            n_dsr * ctx->ds_reads_per_frag,
             ctx->mfmas_m * ctx->mfmas_n * ctx->mfmas_per_mma);
     }
 }

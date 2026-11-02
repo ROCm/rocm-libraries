@@ -885,6 +885,30 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
             return -1;
         spec->split_k = 2;
         return 0;
+    case 67:
+    case 68:
+    case 69:
+    case 70:
+    case 71:
+    case 73:
+    case 74:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->reg_prefetch = idx == 73 ? 0 : idx == 68 ? 2 : 1;
+        spec->lds_xor = idx >= 69;
+        spec->lds_kpack_read = idx == 70 || idx == 71;
+        spec->lds_xor_rowkey = idx == 70 || idx == 74;
+        spec->xcd_remap = idx == 70 ? 6 : 0;
+        spec->m_band = idx == 70 ? 32 : 0;
+        spec->split_k = idx == 71 ? 2 : 1;
+        return 0;
+    case 72:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->pipeline = "compv3";
+        spec->reg_prefetch = 2;
+        spec->lds_kpack_read = true;
+        return 0;
     default:
         return make_cfg_3d_base(idx, spec, arch);
     }

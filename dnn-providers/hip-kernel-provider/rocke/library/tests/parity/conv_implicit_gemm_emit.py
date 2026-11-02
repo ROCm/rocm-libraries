@@ -954,6 +954,14 @@ _GFX942_3D_OFFSET = 32
 #   64: 54 + split_k=4
 #   65: 55 + split_k=2, xcd_remap=6, m_band=32
 #   66: 56 + split_k=2 (default epilogue): rejected by both engines
+#   67: 55 + reg_prefetch=1
+#   68: 55 + reg_prefetch=2
+#   69: 55 + reg_prefetch=1, lds_xor
+#   70: 55 + reg_prefetch=1, lds_xor, lds_kpack_read, lds_xor_rowkey, xcd_remap=6, m_band=32
+#   71: 55 + split_k=2, reg_prefetch=1, lds_xor, lds_kpack_read
+#   72: 54 + compv3, reg_prefetch=2, lds_kpack_read (schedule hints, k-packed counts)
+#   73: 55 + lds_xor without a reg_prefetch loop: rejected by both engines
+#   74: 55 + reg_prefetch=1, lds_xor, lds_xor_rowkey without lds_kpack_read: rejected
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1007,6 +1015,15 @@ def _gfx942_3d_spec(idx: int):
         64: (54, dict(split_k=4)),
         65: (55, dict(split_k=2, xcd_remap=6, m_band=32)),
         66: (56, dict(split_k=2)),
+        67: (55, dict(reg_prefetch=1)),
+        68: (55, dict(reg_prefetch=2)),
+        69: (55, dict(reg_prefetch=1, lds_xor=True)),
+        70: (55, dict(reg_prefetch=1, lds_xor=True, lds_kpack_read=True,
+                      lds_xor_rowkey=True, xcd_remap=6, m_band=32)),
+        71: (55, dict(split_k=2, reg_prefetch=1, lds_xor=True, lds_kpack_read=True)),
+        72: (54, dict(pipeline="compv3", reg_prefetch=2, lds_kpack_read=True)),
+        73: (55, dict(lds_xor=True)),
+        74: (55, dict(reg_prefetch=1, lds_xor=True, lds_xor_rowkey=True)),
     }
     extra = {}
     if idx in knobs:
