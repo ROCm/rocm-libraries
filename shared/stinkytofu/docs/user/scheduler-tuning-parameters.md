@@ -21,7 +21,7 @@ Defaults below are the production (TensileLite → `Gfx1250Backend`) defaults.
 defaults instead, where `EvenSpreadFillers`, the prefetch lead,
 the wait-alu hold and the knob heuristic are off, `DsSpread` is on, and the WMMA queue model is
 off (`WmmaQueueDepth` 1, `WmmaQueueCoverCycles` 0, `DsReadCyclesPerLoad` 0). The production defaults
-turn the queue on (8, 56, 6), so `stinkytofu-opt` output matches TensileLite only with those three
+turn the queue on (8, -1, 6), where -1 is the automatic refill line, so `stinkytofu-opt` output matches TensileLite only with those three
 set.
 
 ### How an unset value is resolved
@@ -55,9 +55,9 @@ Each parameter resolves independently, first match wins:
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
 | `WmmaQueueDepth` | 8 (`stinkytofu-opt`: 1) | `--wmma-queue-depth=N` | Max WMMAs outstanding in the pipe. A WMMA is appended whenever fewer than N are outstanding; it waits only when the queue is full. 1 = one WMMA at a time (queue model off). |
-| `WmmaQueueCoverCycles` | 56 (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | Cycles of queued WMMA work that must remain before a ds_load, filler or `tensor_load` may issue. Below N, and with room in the queue, the next ready WMMA goes first, so the pipe never runs dry. Forced picks (a promoted barrier) are not held. Useful range is up to about 64 (the pipe buffers ~8 WMMAs of 8 cycles). |
+| `WmmaQueueCoverCycles` | -1 = automatic, (`WmmaQueueDepth` - 1) x the next WMMA's latency (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | Cycles of queued WMMA work that must remain before a ds_load, filler or `tensor_load` may issue. Below N, and with room in the queue, the next ready WMMA goes first, so the pipe never runs dry. Forced picks (a promoted barrier) are not held. Useful range is up to about 64 (the pipe buffers ~8 WMMAs of 8 cycles). |
 
-The queue model runs only with **both** `WmmaQueueDepth > 1` and `WmmaQueueCoverCycles > 0`, which
+The queue model runs only with **both** `WmmaQueueDepth > 1` and `WmmaQueueCoverCycles != 0`, which
 is the production default. With either one off, the schedule is the original single-window one.
 
 ```
