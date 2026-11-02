@@ -384,7 +384,7 @@ appears:
 | Census call gated on the predicate, `PACK_NAME product ARCHES <arch>` | `$PROVIDER/src/tests/CMakeLists.txt` | The census row above, for a shipped bundle |
 | Device test source in `hip_kernel_provider_integration_tests` | `$PROVIDER/src/integration_tests/CMakeLists.txt` (`IntegrationGpuGfx950AttentionDenseKnobs.cpp`) | Explicit-selection cases: forced knobs, exact kernel ID, CPU reference; see stage 5 |
 | `add_external_integration_test_target(TARGET_NAME hip_kernel_provider_<engine>_gpu_ref_integration_tests … ENGINE_NAME … REFERENCE_EXECUTOR gpu GTEST_FILTER …)` in the arch's census shard (`hkp_reserve_census_shard`) | `$PROVIDER/src/integration_tests/CMakeLists.txt` | The engine-pinned bundle run stage 5 executes |
-| `<provider>-<engine>-external-integration-check` with `TEST_CONFIG` and `TEST_CATEGORIES_YAML`, in the same shard | `$PROVIDER/src/CMakeLists.txt` | The engine-pinned tiered suites |
+| `<provider>-<engine>-external-integration-check` with `TEST_CONFIG` and `TEST_CATEGORIES_YAML`, in the same shard; the same TOML also goes to `hkp_reserve_census_shard(... FILES <toml>)` | `$PROVIDER/src/CMakeLists.txt` | The engine-pinned tiered suites. Without `FILES`, configuration fails; the `hkp_reserve_census_shard` header in `HkpPackaging.cmake` says why |
 | Categories YAML variable, its `EXISTS` check and list entry | `$PROVIDER/CMakeLists.txt` | Feeds the YAML categorization; any listed file missing drops the whole provider to legacy CTest labels |
 | New files `hipkernel_<Engine>_test_categories_integration.yaml` and `config/hipkernel_<Engine>.toml` | `$PROVIDER/` | Tier patterns and the per-engine test config |
 | Bundles plus `.support.json` claims naming the engine and arch | `dnn-providers/integration-tests/integration-test-bundles/{quick,standard}/<Op>/…` | Without matching bundles the engine-pinned target selects zero cases |
@@ -831,6 +831,26 @@ provider's default installed CTest root is **`$INSTALL/bin/hip_kernel_provider`*
 `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests`, which is the ASM SDPA engine
 reached by a different path and never ingestor evidence.
 
+A build tree registers the same engine-pinned suites a second time, with absolute paths,
+under `$BUILD/dnn-providers/hip-kernel-provider/src`. The engine label is the engine ID
+with every character outside `[A-Za-z0-9_.-]` mapped to `_`:
+
+```bash
+ctest --test-dir "$BUILD/dnn-providers/hip-kernel-provider/src" -N -L hipkernel_Gfx950AttentionDense
+```
+
+The census shard runs in either tree. In the build tree it is
+`$BUILD/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider/census/<arch>`
+(`$BUILD/bin/...` on Windows), the same relative path as under `$INSTALL`:
+
+```bash
+ctest --test-dir "$BUILD/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider/census/gfx950" \
+  -N -L hipkernel_Gfx950AttentionDense
+```
+
+The provider's `install_CTestTestfile.cmake` (or `CTestTestfile.cmake.install`) in the build
+tree is a staging file for the installed root; CTest does not read it there.
+
 Other bundles in the production root may register their own targets; they are not
 evidence for yours. Replace `<your-bundle-ctest-target>` with the name your own
 registration creates. A gfx942 dense bundle would be shaped like
@@ -995,7 +1015,7 @@ candidate left after knob and workspace filtering, so its cost grows with the ca
 count. Keep the catalog small enough to stay buildable and searchable; when it grows too
 large, reduce it with this stage. A winner cache cannot ship with the engine: it serves
 only the hipDNN build that wrote it and needs a writable `HIPDNN_CACHE_DIR`
-([Environment Configuration](../../../../docs/Environment.md#hipdnn_force_benchmarking)),
+(`HIPDNN_FORCE_BENCHMARKING` in `projects/hipdnn/docs/Environment.md`),
 so users of every new build pay the cold build. Nothing in CI or the build checks
 `reduction.aot_budget_per_arch`. This stage's `variant_reduce.py` and the stage 7
 `generate.py --strict` dry run gate on it, as does `registry_enumerator.py --strict`, and

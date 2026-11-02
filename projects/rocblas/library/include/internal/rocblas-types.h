@@ -256,6 +256,11 @@ typedef enum rocblas_layer_mode_
     rocblas_layer_mode_log_profile = 0x4,
     /*! \brief Outputs to the same stream as trace logging with limited internal API details, such as the GEMM backend that was used. */
     rocblas_layer_mode_log_internal = 0x8,
+    /*! \brief Outputs to the same stream as trace logging a rocblas-bench-replayable line for each
+     * internal GEMM sub-problem dispatched (including those produced by decomposed BLAS3 ops such as
+     * trsm, trmm, syrk, ...), annotated with the selected kernel name (Tensile backend only) and the
+     * source backend (hipblaslt or tensile). */
+    rocblas_layer_mode_log_kernel_select = 0x10,
 } rocblas_layer_mode;
 
 /*! \brief Indicates whether the layer is active by means of a bitmask.*/

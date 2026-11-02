@@ -17,6 +17,14 @@
  * fused-weight dgrad and row-stream knobs, three rejects (39, 40, 44) and
  * develop's persistent / waves_k / runtime-channel forms -- mirrors
  * _GENERIC_CFGS.
+ * Indices 45..49: the Toeplitz MFMA form with fwd (the rotated filter; 48,
+ * fwd without mfma, both reject; 49, a 9x9 depthwise filter) -- mirrors
+ * _WIN_FWD_CFGS.
+ * Indices 50..58: its grouped forward form (cpg = kpg = 8 / 16 / 32; 52
+ * without fwd and 55, a block narrower than a group, both reject) and the
+ * forward form at stride 2 (56..58; 58, an odd block_h, both reject). Indices
+ * 59..61: the non-power-of-two group sizes cpg 24 and cpg 56 (stride 1) and
+ * cpg 64 (stride 2) -- mirrors _WIN_G8_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -229,6 +237,109 @@ static int make_generic_cfg(int idx, rocke_direct_conv_spec_t* spec, const char*
     return 0;
 }
 
+/* The Toeplitz MFMA form with fwd (the rotated filter), emitted as
+ * WIN_FWD_CFG_BASE + idx (mirrors _WIN_FWD_CFGS); 48 (fwd without mfma) both
+ * reject; 49 a 9x9 depthwise filter. */
+#define WIN_FWD_CFG_BASE 45
+static const win_cfg_t WIN_FWD_CFGS[] = {
+    {3, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", 8, 8, 1, 14, 0, 1, 2, 2},
+    {2, 13, 37, 40, 5, 5, 2, "fp16", "gfx950", 8, 4, 1, 4, 0, 1, 1, 1},
+    {1, 13, 13, 64, 3, 3, 1, "fp16", "gfx950", 8, 8, 1, 4, 0, 1, 4, 3},
+    {2, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", 7, 1, 1, 14, 0, 0, 1, 1},
+    {2, 17, 19, 32, 9, 9, 4, "fp16", "gfx950", 8, 4, 1, 8, 0, 1, 1, 2},
+};
+
+static int
+    make_win_fwd_cfg(int idx, rocke_direct_depthwise_dgrad_win_spec_t* spec, const char** arch)
+{
+    const int n = (int)(sizeof(WIN_FWD_CFGS) / sizeof(WIN_FWD_CFGS[0]));
+    if(idx < 0 || idx >= n)
+        return -1;
+    const win_cfg_t* c = &WIN_FWD_CFGS[idx];
+    *spec = rocke_direct_depthwise_dgrad_win_spec_default();
+    spec->problem = rocke_direct_conv_problem_default();
+    spec->problem.N = c->N;
+    spec->problem.H = c->H;
+    spec->problem.W = c->W;
+    spec->problem.groups = c->G;
+    spec->problem.cpg = 1;
+    spec->problem.kpg = 1;
+    spec->problem.KH = c->KH;
+    spec->problem.KW = c->KW;
+    spec->problem.PAD = c->PAD;
+    spec->problem.stride = 1;
+    spec->problem.dtype = c->dtype;
+    spec->block_w = c->block_w;
+    spec->block_waves = c->block_waves;
+    spec->ch_per_lane = c->ch_per_lane;
+    spec->block_h = c->block_h;
+    spec->dot2 = c->dot2 != 0;
+    spec->mfma = c->mfma != 0;
+    spec->w_fold = c->w_fold;
+    spec->prefetch_rows = c->prefetch_rows;
+    spec->fwd = true;
+    *arch = c->arch;
+    return 0;
+}
+
+/* The grouped forward form (cpg = kpg = 8, G counts groups), emitted as
+ * WIN_G8_CFG_BASE + idx (mirrors _WIN_G8_CFGS); WIN_G8_FWD / WIN_G8_CPG /
+ * WIN_G8_STRIDE hold each config's fwd, cpg and out_stride. 52 (no fwd) both
+ * reject. 59..61: cpg 24 and cpg 56 (not powers of two, stride 1) and cpg 64
+ * (the DW_WIN_MAX_GROUP_CH cap, stride 2). */
+#define WIN_G8_CFG_BASE 50
+static const win_cfg_t WIN_G8_CFGS[] = {
+    {2, 13, 21, 10, 3, 3, 1, "fp16", "gfx950", 8, 4, 1, 8, 0, 1, 2, 2},
+    {3, 14, 14, 8, 7, 7, 3, "bf16", "gfx950", 8, 8, 1, 14, 0, 1, 2, 2},
+    {2, 13, 21, 16, 3, 3, 1, "fp16", "gfx950", 8, 4, 1, 8, 0, 1, 1, 1},
+    {2, 13, 21, 6, 3, 3, 1, "fp16", "gfx950", 8, 4, 1, 8, 0, 1, 2, 2},
+    {2, 9, 11, 4, 3, 3, 1, "bf16", "gfx950", 8, 8, 1, 9, 0, 1, 1, 2},
+    {2, 13, 21, 6, 3, 3, 1, "fp16", "gfx950", 8, 1, 1, 8, 0, 1, 1, 1},
+    {2, 14, 22, 64, 3, 3, 1, "fp16", "gfx950", 8, 8, 1, 8, 0, 1, 1, 2},
+    {2, 10, 12, 6, 3, 3, 1, "bf16", "gfx950", 8, 4, 1, 4, 0, 1, 2, 2},
+    {2, 14, 22, 64, 3, 3, 1, "fp16", "gfx950", 8, 8, 1, 7, 0, 1, 1, 2},
+    {2, 12, 14, 3, 3, 3, 1, "fp16", "gfx950", 8, 3, 1, 12, 0, 1, 2, 2},
+    {2, 10, 13, 2, 3, 3, 1, "bf16", "gfx950", 8, 7, 1, 4, 0, 1, 1, 2},
+    {2, 12, 12, 2, 3, 3, 1, "fp16", "gfx950", 8, 8, 1, 8, 0, 1, 2, 2},
+};
+static const int WIN_G8_FWD[] = {1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+static const int WIN_G8_CPG[] = {8, 8, 8, 16, 32, 16, 1, 16, 1, 24, 56, 64};
+static const int WIN_G8_STRIDE[] = {1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 2};
+
+static int
+    make_win_g8_cfg(int idx, rocke_direct_depthwise_dgrad_win_spec_t* spec, const char** arch)
+{
+    const int n = (int)(sizeof(WIN_G8_CFGS) / sizeof(WIN_G8_CFGS[0]));
+    if(idx < 0 || idx >= n)
+        return -1;
+    const win_cfg_t* c = &WIN_G8_CFGS[idx];
+    *spec = rocke_direct_depthwise_dgrad_win_spec_default();
+    spec->problem = rocke_direct_conv_problem_default();
+    spec->problem.N = c->N;
+    spec->problem.H = c->H;
+    spec->problem.W = c->W;
+    spec->problem.groups = c->G;
+    spec->problem.cpg = WIN_G8_CPG[idx];
+    spec->problem.kpg = WIN_G8_CPG[idx];
+    spec->problem.KH = c->KH;
+    spec->problem.KW = c->KW;
+    spec->problem.PAD = c->PAD;
+    spec->problem.stride = 1;
+    spec->problem.dtype = c->dtype;
+    spec->block_w = c->block_w;
+    spec->block_waves = c->block_waves;
+    spec->ch_per_lane = c->ch_per_lane;
+    spec->block_h = c->block_h;
+    spec->dot2 = c->dot2 != 0;
+    spec->mfma = c->mfma != 0;
+    spec->w_fold = c->w_fold;
+    spec->prefetch_rows = c->prefetch_rows;
+    spec->fwd = WIN_G8_FWD[idx] != 0;
+    spec->out_stride = WIN_G8_STRIDE[idx];
+    *arch = c->arch;
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -245,7 +356,15 @@ int main(int argc, char** argv)
     const char* arch = "gfx950";
     int is_4c = 0;
     int is_generic = 0;
-    if(make_generic_cfg(idx - GENERIC_CFG_BASE, &specgen, &arch) == 0)
+    if(make_win_g8_cfg(idx - WIN_G8_CFG_BASE, &spec, &arch) == 0)
+    {
+        /* the windowed kernel, grouped forward form */
+    }
+    else if(make_win_fwd_cfg(idx - WIN_FWD_CFG_BASE, &spec, &arch) == 0)
+    {
+        /* the windowed kernel, rotated filter */
+    }
+    else if(make_generic_cfg(idx - GENERIC_CFG_BASE, &specgen, &arch) == 0)
     {
         is_generic = 1;
     }

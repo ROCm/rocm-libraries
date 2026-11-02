@@ -293,13 +293,13 @@ export HIPDNN_FORCE_BENCHMARKING=0
 - For MIOpen convolution, forcing benchmarking on makes plans without `global.workspace_size_limit` use the maximum workspace MIOpen reports, which can be far larger than the default.
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
-- Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample, so each sample reads what the previous one wrote. The winner runs last, but the final contents are correct only when in-place execution is idempotent.
+- Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample, so each sample reads what the previous one wrote. The winner runs last, but the final contents are correct only when in-place execution is idempotent. `Graph::autotune()` also runs its winner last, after every timed pass, and waits for that run to finish, so on success the buffers you passed hold the winner's output, with the same in-place caveat.
 
 ### Engine Applicability Threading
 
 The hip-kernel-provider finishes its kernel ingestor engines' applicability checks on worker threads when that pays for itself. A check that misses the engine's catalog cache walks every arch-eligible kernel variant, about 0.26 µs per variant. With at least two ingestor engines pending in one call, all but the largest can run beside the calling thread. It does so only when enough variants can be handed off; below that, and with fewer than two ingestor engines, every check still runs on the calling thread. Internally, a provider with two or more ingestor engines reaches that point through a begin-all, finish-all sequence in which the engines share one device lookup and one catalog key, rather than the one-engine-at-a-time loop. This is an implementation detail of the hip-kernel-provider, not a stable interface; it can change without notice, and nothing here depends on it.
 
-Applicability results are identical either way: the same engines, in the same order, and the same error when one fails.
+Applicability results are identical either way: the same engines, in the same order. An engine whose check throws a `std::exception` is skipped with a warning on both paths; any other exception type ends that provider's applicability query, and the host then skips the provider with a warning on the heuristic path.
 
 The threshold is the only setting. A call uses at most min(pending engines, CPUs the process may run on, 9) threads, the calling thread included.
 

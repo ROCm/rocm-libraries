@@ -151,6 +151,20 @@ def render(domain: ModuleType) -> str:
         lines.append(f"    {{{c_string(flavor)}, {name}, {count}}},")
     lines.append("};")
     lines.append("")
+    # Match domain.load(): an alias applies only while its lane has no column
+    # of its own and its source has a committed column.
+    aliases = sorted(
+        (lane, source)
+        for lane, source in getattr(domain, "COLUMN_ALIASES", {}).items()
+        if lane not in flavors and source in flavors
+    )
+    lines.append("/* domain.COLUMN_ALIASES: lanes enforcing another lane's column. */")
+    lines.append("const column_alias_t ROCKE_ARCH_DOMAIN_ALIASES[] = {")
+    for lane, source in aliases:
+        lines.append(f"    {{{c_string(lane)}, {c_string(source)}}},")
+    lines.append("    {nullptr, nullptr},")
+    lines.append("};")
+    lines.append("")
     return "\n".join(lines)
 
 

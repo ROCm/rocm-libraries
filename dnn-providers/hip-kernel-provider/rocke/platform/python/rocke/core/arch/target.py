@@ -1244,6 +1244,11 @@ class MemoryCapabilities:
     has_global_prefetch: bool = False
     has_cluster_launch: bool = False
     has_multicast_load: bool = False
+    # Float add global atomics: scalar f32 ``global_atomic_add`` and the packed
+    # ``<2 x bf16>`` / ``<2 x f16>`` ``global_atomic_pk_add``. Gates the WMMA
+    # split-K wgrad epilogue; MFMA targets reach these atomics through their own
+    # validated epilogues and do not consult it.
+    has_global_float_atomic_add: bool = False
 
 
 @dataclass(frozen=True)
@@ -1793,6 +1798,7 @@ def _build_target(gfx: str) -> ArchTarget:
             has_global_prefetch=mem.get("has_global_prefetch", False),
             has_cluster_launch=mem.get("has_cluster_launch", False),
             has_multicast_load=mem.get("has_multicast_load", False),
+            has_global_float_atomic_add=mem.get("has_global_float_atomic_add", False),
         ),
         limits=ResourceLimits(
             max_threads_per_block=lim["max_threads_per_block"],

@@ -3,7 +3,6 @@
 """Unit tests for the CU-occupancy probe (SupportOccupancyProbe) codegen."""
 
 import os
-import shutil
 from types import SimpleNamespace
 
 import pytest
@@ -12,13 +11,13 @@ import yaml
 # Prime the component registry before StreamK imports (avoids circular import).
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
-import rocisa
 from rocisa.code import Label, SignatureBase
 from rocisa.instruction import GlobalStoreB32, SCBranchSCC0, SCBranchSCC1, SLoadB64, SNop
 from rocisa.label import LabelManager
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, SignatureValueKind as SVK
 
+from gpu_test_helpers import init_rocisa
 from tensilelite.Common.GlobalParameters import defaultInternalSupportParams, globalParameters
 from tensilelite.Components.Signature import addOccupancyProbeArgs
 from tensilelite.Contractions import InternalArgsSupport
@@ -85,9 +84,7 @@ def test_occupancy_probe_absent_without_offset():
 
 
 def test_occupancy_probe_emission():
-    ri = rocisa.rocIsa.getInstance()
-    ri.init((9, 5, 0), shutil.which("amdclang++") or "/opt/rocm/bin/amdclang++")
-    ri.setKernel((9, 5, 0), 64)
+    init_rocisa(target="gfx950", wavesize=64)
     kwa = _probe_writer(PROBE_OFFSET)
     items = list(kwa.occupancyProbe({"WavefrontSize": 64}).flatitems())
     lines = [str(i) for i in items]
@@ -100,9 +97,10 @@ def test_occupancy_probe_emission():
         assert "sgprKernArgAddress" in params[1]
         assert int(params[2], 0) == offset
 
-    # A plain store; every branch goes to the one skip label.
+    # A plain store (native rocisa spells it dword, the StinkyTofu adaptor b32);
+    # every branch goes to the one skip label.
     store = next(line for i, line in zip(items, lines) if isinstance(i, GlobalStoreB32))
-    assert store.startswith("global_store_dword ")
+    assert store.split()[0] in ("global_store_dword", "global_store_b32")
     assert " sc0" not in store and " sc1" not in store and " nt" not in store
     labelName = next(i for i in items if isinstance(i, Label)).getLabelName()
     assert all(labelName in line for i, line in zip(items, lines)
@@ -132,6 +130,7 @@ def _kernarg_metadata(src):
 
 @pytest.mark.parametrize("numU32, padded", [(53, True), (54, False)])
 def test_occupancy_probe_signature_layout(numU32, padded):
+    init_rocisa(target="gfx950", wavesize=64)
     commonArgsSize = 16
     writer = SimpleNamespace(states=SimpleNamespace(probeKernArgOffset=-1))
     sig = SignatureBase(kernelName="probe_layout", kernArgsVersion=3, codeObjectVersion="5",
