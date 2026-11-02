@@ -385,7 +385,10 @@ def _verify_kernel(
     kernel_name: str,
     dump_fail: "str | None",
     u8,
+    ref_floor: float = 1.0,
 ) -> "tuple[bool, bool]":
+    """Launch once and compare against ``ref_out``: max|out - ref| over
+    max|ref| floored at ``ref_floor`` (:func:`conv_fill.ref_floor`)."""
     import torch
 
     from rocke.runtime.launcher import LaunchConfig
@@ -398,7 +401,7 @@ def _verify_kernel(
 
     out_f32 = out_cpu.float().cuda()
     abs_diff = out_f32.sub(ref_out).abs()
-    ref_scale = ref_out.abs().max().clamp(min=1.0)
+    ref_scale = ref_out.abs().max().clamp(min=ref_floor)
     rel_err = float(abs_diff.max() / ref_scale)
     tol = 5e-2
     status = "PASS" if rel_err < tol else f"FAIL(rel_err={rel_err:.2e})"
@@ -611,8 +614,9 @@ def _run_depthwise_sweep(
     _torch_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
 
     torch.manual_seed(42)
-    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
-    B_t = torch.empty(p.total_k, p.KH, p.KW, 1, dtype=_torch_dtype).uniform_(-1.0, 1.0)
+    A_t, B_t = conv_fill.fwd_operands(
+        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, 1), dtype, _torch_dtype
+    )
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
@@ -799,6 +803,7 @@ def _run_depthwise_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=u8,
+                ref_floor=conv_fill.ref_floor(),
             )
             if stopped:
                 rt.free(A_dev)
@@ -896,9 +901,8 @@ def _run_sweep(
 
     torch.manual_seed(42)
     _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
-    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
-    B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_torch_dtype).uniform_(
-        -1.0, 1.0
+    A_t, B_t = conv_fill.fwd_operands(
+        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, p.cpg), dtype, _torch_dtype
     )
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
@@ -1018,6 +1022,7 @@ def _run_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=u8,
+                ref_floor=conv_fill.ref_floor(),
             )
             if stopped:
                 rt.free(A_dev)
@@ -1118,9 +1123,8 @@ def _run_nongrouped_sweep(
 
     torch.manual_seed(42)
     _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
-    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
-    B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_torch_dtype).uniform_(
-        -1.0, 1.0
+    A_t, B_t = conv_fill.fwd_operands(
+        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, p.cpg), dtype, _torch_dtype
     )
     D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
@@ -1232,6 +1236,7 @@ def _run_nongrouped_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=u8,
+                ref_floor=conv_fill.ref_floor(),
             )
             if stopped:
                 rt.free(A_dev)
@@ -2224,6 +2229,7 @@ def _measure_plans(
     u8,
     chunks,
     per_chunk,
+    ref_floor: float = 1.0,
 ):
     """Time every plan of one case. Returns ``(results, rc)``.
 
@@ -2239,6 +2245,9 @@ def _measure_plans(
     ``modules`` is the run's loaded-binary cache: a plan's binaries are
     shape-generic, so a step's module is loaded on the first case that uses
     it and every later case binds against the same one.
+
+    ``ref_floor`` floors the reference peak of the verify error
+    (:func:`conv_fill.ref_floor` of the case's direction).
     """
     import torch
     from benchmarks.common.direct_kernel_sweep import launch_values
@@ -2297,7 +2306,7 @@ def _measure_plans(
         ref_f32 = ref_out.float().cpu()
         rel_err = float(
             (out_cpu.float() - ref_f32).abs().max()
-            / ref_f32.abs().max().clamp(min=conv_fill.ref_floor())
+            / ref_f32.abs().max().clamp(min=ref_floor)
         )
         passed = rel_err < 5e-2
         if not passed:
@@ -2716,6 +2725,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 u8=_u8,
                 chunks=chunks,
                 per_chunk=per_chunk,
+                ref_floor=conv_fill.ref_floor(direction),
             )
             overall_rc = overall_rc or case_rc
             # Safe only here: _measure_plans has drained the device by the
@@ -3054,7 +3064,8 @@ def main() -> int:
     parser.add_argument(
         "--kernels-file",
         default=None,
-        help="--run-from-cache only: run just the cached kernels whose labels the file lists",
+        help="--run-from-cache only: run just the cached kernels whose labels the file "
+        "lists (a label without its fwd-/dgrad-/wgrad- prefix names every direction)",
     )
     args = parser.parse_args()
     conv_fill.set_mode(args.fill)
