@@ -1442,10 +1442,12 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
         int i;
         for(i = 0; i < VEC; ++i)
         {
-            /* Bound in Python's left-to-right order. */
-            rocke_value_t* q_i = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i));
-            rocke_value_t* k_i = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i));
-            score = rocke_b_fadd(b, score, rocke_b_fmul(b, q_i, k_i));
+            score
+                = rocke_b_fadd(b,
+                               score,
+                               rocke_b_fmul(b,
+                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i)),
+                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i))));
         }
     }
     /* Tail scalar fold for head_size not a multiple of VEC (empty for the
