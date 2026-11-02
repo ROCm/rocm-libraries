@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -381,6 +382,69 @@ TEST(TestGpuConvolutionWrwPlanBuilder, IsApplicableFalseWhenComputeTypeMismatche
         patient;
 
     EXPECT_FALSE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+}
+
+TEST(TestGpuConvolutionWrwPlanBuilder, IsApplicableFalseWhenOnlyOneOperandTypeDiffers)
+{
+    const GpuConvolutionWrwPlanBuilder<DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT>
+        patient;
+
+    // Each operand is changed on its own, so every per-operand type check is isolated.
+    for(const auto& [name, uid] :
+        std::vector<std::pair<const char*, int64_t>>{{"x", 10}, {"dy", 11}, {"dw", 12}})
+    {
+        SCOPED_TRACE(name);
+        auto graphBuilder = createCustomConvWrwGraph();
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        ASSERT_TRUE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+
+        auto* tensor = const_cast<TensorAttributes*>(graphWrap.getTensorMap().at(uid));
+        ASSERT_TRUE(tensor->mutate_data_type(DataType::HALF));
+
+        EXPECT_FALSE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+    }
+}
+
+TEST(TestGpuConvolutionWrwPlanBuilder, IsApplicableFalseWhenOperandIsRuntimePassByValue)
+{
+    const GpuConvolutionWrwPlanBuilder<DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT>
+        patient;
+
+    for(const auto& [name, uid] :
+        std::vector<std::pair<const char*, int64_t>>{{"x", 10}, {"dy", 11}, {"dw", 12}})
+    {
+        SCOPED_TRACE(name);
+        auto graphBuilder = createCustomConvWrwGraph();
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        ASSERT_TRUE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+
+        // The flag is not stored when false, so it cannot be mutated in place; swap in a
+        // tensor that is marked pass-by-value instead.
+        flatbuffers::FlatBufferBuilder tensorBuilder;
+        const std::vector<int64_t> dims = {1};
+        tensorBuilder.Finish(CreateTensorAttributesDirect(tensorBuilder,
+                                                          uid,
+                                                          "pbv",
+                                                          DataType::FLOAT,
+                                                          &dims,
+                                                          &dims,
+                                                          /*virtual_=*/false,
+                                                          TensorValue::NONE,
+                                                          /*value=*/0,
+                                                          /*is_runtime_pass_by_value=*/true));
+        auto tensorMap = graphWrap.getTensorMap();
+        tensorMap[uid] = flatbuffers::GetRoot<TensorAttributes>(tensorBuilder.GetBufferPointer());
+
+        EXPECT_FALSE(patient.isApplicable(graphWrap.getNode(0), tensorMap));
+    }
 }
 
 TEST(TestGpuConvolutionWrwPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)

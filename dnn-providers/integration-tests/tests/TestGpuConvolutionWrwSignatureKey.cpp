@@ -87,3 +87,17 @@ TEST(TestGpuConvolutionWrwSignatureKey, CreateFromNodeAndTensorMap)
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }
+
+TEST(TestGpuConvolutionWrwSignatureKey, EqualityDetectsSingleFieldDifference)
+{
+    constexpr auto F = DataType::FLOAT;
+    constexpr auto H = DataType::HALF;
+    const GpuConvolutionWrwSignatureKey base{F, F, F, F};
+
+    // Each key differs from base in exactly one field.
+    EXPECT_FALSE(base == GpuConvolutionWrwSignatureKey(H, F, F, F));
+    EXPECT_FALSE(base == GpuConvolutionWrwSignatureKey(F, H, F, F));
+    EXPECT_FALSE(base == GpuConvolutionWrwSignatureKey(F, F, H, F));
+    EXPECT_FALSE(base == GpuConvolutionWrwSignatureKey(F, F, F, H));
+    EXPECT_TRUE(base == GpuConvolutionWrwSignatureKey(F, F, F, F));
+}
