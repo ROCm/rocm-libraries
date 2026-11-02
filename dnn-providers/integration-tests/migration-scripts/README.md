@@ -149,6 +149,54 @@ appends regardless. For behavior and
 output, see
 [Adding Tests — From a graph you already have](../docs/adding-tests.md#from-a-graph-you-already-have).
 
+### Grouped import for generated cases (opt-in)
+
+Use these flags to put many generated graphs into a small number of sweeps.
+Without them, `import_graph.py` behaves as described above.
+
+```bash
+python3 migration-scripts/import_graph.py \
+    --graph exported/<case>/<case>.json \
+    --bundle-dir integration-test-bundles/ --tier standard \
+    --op-dir SdpaFwdPlan --topology <Topology> --case-id <id> \
+    --template-attributes --template-alignment --skeleton-value-form \
+    --only-op-dir --require-marked-sweep --strict
+```
+
+| Flag | Effect |
+|---|---|
+| `--op-dir NAME` | Operation folder for a new sweep. The default comes from the node types. |
+| `--topology NAME` | Sweep folder for a new sweep. An append must go to the sweep in this folder, else the import fails. The tool never writes into a folder that holds another sweep. |
+| `--template-attributes` | A new template replaces each non-object node attribute value with `${case.attributes.<key>}`. The key is the attribute path, joined with `__`. |
+| `--template-alignment` | A new template replaces each tensor `alignment` with `${case.alignment.<uid>}`. The value comes from the top-level `alignment` object of the case values. |
+| `--skeleton-value-form` | The skeleton hash also records the value form of each tensor: a baked `value`, its `value_type`, and `is_runtime_pass_by_value`. Different forms never share a sweep. A new template replaces each baked `value` with `${case.value}`. |
+| `--only-op-dir` | Match only sweeps under `<bundle-dir>/<tier>/<op-dir>/`. A case never goes into another tier or another operation folder. |
+| `--require-marked-sweep` | Match only sweeps whose `import_mode` equals the `import_mode` of this run. The `format` key is not compared. |
+| `--case-id ID` | Use this case id. The import fails if the sweep already has it. |
+| `--sweep-format {pretty,compact}` | File layout of a new `sweep.json`. Grouped mode writes `compact` unless you give `--sweep-format pretty`. Use it only with another grouped-import flag. |
+
+Matching includes the exact-duplicate check, so these filters apply to it too.
+
+Each of these flags writes an `import_mode` object into a new `sweep.json`.
+The object lists the template and skeleton flags in effect, for example
+`{"grouping": ["skeleton-value-form", "template-alignment", "template-attributes"], "format": "compact"}`.
+The `format` key records the file layout. `pretty` is `json.dump` with an
+indent of 2. `compact` writes each member of a case, and each member of its
+`values`, each on its own compact line. Each tensor of `values.tensors` gets its own
+line. An append keeps the layout of the sweep and ignores `--sweep-format`.
+A marker without `format` is `pretty`. Grouped mode writes `compact` unless
+you give `--sweep-format pretty`.
+A grouped template also replaces the top-level `is_override_shape_enabled` and
+`min_required_engine_api_version` with `${case.<field>}`. hipDNN derives these
+fields from the tensors, so they can differ between cases of one sweep.
+Default mode does not append into sweeps that grouped mode wrote. Default
+mode still reports `DUPLICATE` when a graph equals a case in such a sweep.
+A run with only `--op-dir`, `--topology` or `--case-id` writes
+`{"grouping": []}`, so default mode also never appends into that sweep.
+`retier_bundles.py` keeps the `import_mode` object of a sweep and writes the
+sweep in its layout. It refuses to put cases from sweeps with different
+`grouping` values, or with different layouts, into one sweep.
+
 ## Searching and Running Bundles
 
 ### find_case.py — query cases by any parameter
