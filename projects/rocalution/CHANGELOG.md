@@ -2,6 +2,33 @@
 
 Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
+## (Unreleased) rocALUTION
+
+### Added
+* Added the generic `amdgcnspirv` SPIR-V target to the default list of GPU architectures.
+
+### Changed
+* `LocalMatrix::DiagonalMatrixMultL()` now requires a vector with one entry per row of the matrix, and `LocalMatrix::DiagonalMatrixMultR()` one with one entry per column. Before, both accepted either size.
+* The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
+* ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
+* GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
+
+### Removed
+* Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
+
+### Resolved issues
+* Fixed the HIP backend ignoring the errors returned by rocPRIM calls, such as too small temporary storage, which could lead to allocations of undefined size and to undefined scan, reduction, sort and nonzero count results.
+* Fixed the HIP backend ignoring the errors returned by HIP runtime calls for allocations, frees, memsets, copies, synchronizations and device queries, and not checking several kernel launches for errors.
+* Fixed the ILU0 factorization and the triangular solve analysis of CSR and BCSR matrices on the accelerator ignoring errors from the rocSPARSE buffer size queries.
+* Fixed `info_rocalution()` printing uninitialized memory when the rocBLAS or rocSPARSE version query fails.
+* Fixed `LocalMatrix::ReadFileRSIO()` not checking the element size query when the index or value type of the file differs from the type of the matrix, and leaking temporary buffers when a read fails.
+* Fixed `LocalMatrix::WriteFileRSIO()` reporting success when closing the file fails, for example on a full disk, leaving an incomplete file.
+* Fixed `LocalMatrix::ExtractDiagonal()` and `LocalMatrix::ExtractInverseDiagonal()` aborting on CSR matrices with more rows than columns.
+* Fixed `LocalMatrix::DiagonalMatrixMultL()` rejecting a vector with one entry per row on non-square CSR matrices, and reading out of bounds on CSR matrices with more rows than columns.
+* Fixed `init_rocalution()` reporting an accelerator after `stop_rocalution()` when the accelerator was disabled with `disable_accelerator_rocalution()`.
+* Fixed a HIP stream leak in `init_rocalution()` in multi-node builds when creating the HIP streams fails.
+* Fixed the format warning of `GlobalMatrix::AMGUnsmoothedAggregation()` naming `AMGSmoothedAggregation()`.
+
 ## (Unreleased) rocALUTION 4.1.1
 
 ### Added

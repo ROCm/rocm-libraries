@@ -305,13 +305,17 @@ def _shipped_rocke_checks():
     for path in sorted(_DESCRIPTOR_TREE.rglob("*.kdp.json")):
         pack = json.loads(path.read_text())
         for kernel in pack.get("kernelDescriptors", []):
-            source = kernel["kernel_source"]
-            if source.get("kind") != "rocke":
-                continue
-            target = source.get("target", ROCKE_TARGET_NATIVE)
-            for arch in kernel.get("arch") or pack.get("arch", []):
-                key = (source["source"], source["builder"], target, arch)
-                seen.setdefault(key, source["spec"])
+            # A multi-launch kernel (RFC 0017 section 15.1) names its builder in each
+            # `sources` entry instead of `kernel_source`.
+            for source in kernel.get("sources", {}).values() or [
+                kernel["kernel_source"]
+            ]:
+                if source.get("kind") != "rocke":
+                    continue
+                target = source.get("target", ROCKE_TARGET_NATIVE)
+                for arch in kernel.get("arch") or pack.get("arch", []):
+                    key = (source["source"], source["builder"], target, arch)
+                    seen.setdefault(key, source["spec"])
     return [(*key, spec) for key, spec in seen.items()]
 
 

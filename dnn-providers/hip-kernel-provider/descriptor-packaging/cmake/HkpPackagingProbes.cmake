@@ -408,11 +408,11 @@ endfunction()
 #   and UKDs (hkp_probe_derive_root.py --list-arches; wildcard descriptors name none,
 #   generic targets map to a member, see _hkp_probe_automatic_arches) minus
 #   hkp_selected_arches(), each as hkp_add_packaging_probe(ARCH <arch>). Register
-#   the probe tooling tests, write the manifest of ctest names
-#   (${CMAKE_BINARY_DIR}/hkp-probes/manifest.txt) and define the aggregate target
+#   the probe tooling tests and define the aggregate target
 #   hkp_packaging_probes. Zero probes is valid: every explicit arch is a build target,
-#   so the production pack covers it. Configuration fails when the production root
-#   cannot be read or pytest is not importable by Python3_EXECUTABLE.
+#   so the production pack covers it, unless HIPKERNELPROVIDER_MIN_PACKAGING_PROBES asks
+#   for more. Configuration fails when the production root cannot be read, pytest is not
+#   importable by Python3_EXECUTABLE, or fewer probes are declared than that minimum.
 # ---------------------------------------------------------------------------
 function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     set_property(GLOBAL PROPERTY HKP_PROBE_ROCM_KPACK_DIR "${rocm_kpack_dir}")
@@ -438,6 +438,18 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
     set_property(GLOBAL PROPERTY HKP_PROBE_TOOLCHAIN_SET FALSE)
 
     get_property(_names GLOBAL PROPERTY HKP_PROBE_NAMES)
+
+    # Broken discovery and a build with nothing to probe both declare zero probes; a lane that
+    # must always have one sets the minimum.
+    list(LENGTH _names _probe_count)
+    if(_probe_count LESS HIPKERNELPROVIDER_MIN_PACKAGING_PROBES)
+        message(FATAL_ERROR
+            "hkp: ${_probe_count} packaging probe(s) declared, but "
+            "HIPKERNELPROVIDER_MIN_PACKAGING_PROBES requires at least "
+            "${HIPKERNELPROVIDER_MIN_PACKAGING_PROBES}. If this build now targets every "
+            "architecture the descriptors name, lower the minimum; otherwise probe "
+            "discovery found nothing.")
+    endif()
 
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
@@ -472,15 +484,10 @@ function(hkp_load_packaging_probes rocm_kpack_dir hipcc rocke_comgr_lib)
                      ${_rocke_ignore})
     set_tests_properties(hkp-probe-tools PROPERTIES ENVIRONMENT "${_pyenv}")
 
-    set(_test_names hkp-probe-tools)
     set(_targets "")
     foreach(_name IN LISTS _names)
-        list(APPEND _test_names "hkp-probe-${_name}")
         list(APPEND _targets "hkp_packaging_probe_${_name}")
     endforeach()
-    list(SORT _test_names)
-    string(REPLACE ";" "\n" _manifest "${_test_names}")
-    file(WRITE "${CMAKE_BINARY_DIR}/hkp-probes/manifest.txt" "${_manifest}\n")
 
     add_custom_target(hkp_packaging_probes COMMENT "hkp: packaging probes")
     if(_targets)

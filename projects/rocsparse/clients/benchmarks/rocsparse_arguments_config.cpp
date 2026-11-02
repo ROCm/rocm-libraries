@@ -103,6 +103,8 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->spitsv_alg           = rocsparse_spitsv_alg_default;
         this->spsm_alg             = rocsparse_spsm_alg_default;
         this->sptrsm_alg           = rocsparse_sptrsm_alg_default;
+        this->solve_mode           = rocsparse_solve_mode_triangular;
+        this->diagonal_modifier    = rocsparse_diagonal_modifier_none;
         this->spmm_alg             = rocsparse_spmm_alg_default;
         this->spgemm_alg           = rocsparse_spgemm_alg_default;
         this->spgeam_alg           = rocsparse_spgeam_alg_default;

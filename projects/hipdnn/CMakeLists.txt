@@ -72,6 +72,21 @@ else()
     message(STATUS "hipDNN: kernel ingestor disabled")
 endif()
 
+# uhd_gen's tests (tools/CMakeLists.txt) and TestUhdGenArtifact skip when the trainer's Python
+# dependencies or hipdnn_uhd_features are missing, so a local build without them still passes.
+# Set in CI so a missing prerequisite fails configure or the test instead of passing silently.
+option(HIPDNN_REQUIRE_UHD_GEN_TESTS
+    "Fail, rather than skip, the uhd_gen tests whose prerequisites are missing" OFF
+)
+# How a missing prerequisite is reported, and the modules uhd_gen imports
+# (tools/uhd_gen/requirements.txt), for both places that probe for them.
+if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+    set(HIPDNN_UHD_GEN_MISSING_SEVERITY FATAL_ERROR)
+else()
+    set(HIPDNN_UHD_GEN_MISSING_SEVERITY WARNING)
+endif()
+set(HIPDNN_UHD_GEN_PYTHON_MODULES "lightgbm, flatbuffers, numpy, pandas, pyarrow, sklearn")
+
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
 # tests. The shim sources always exist in the tree; this option controls only
 # whether they are installed and tested.
@@ -214,6 +229,9 @@ if(DEFINED HIP_DNN_SKIP_TESTS)
     message(DEPRECATION "HIP_DNN_SKIP_TESTS has been renamed to HIPDNN_SKIP_TESTS. Please update your build scripts to use -DHIPDNN_SKIP_TESTS instead.")
 endif()
 option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
+option(HIPDNN_ENABLE_TOOLING_TESTS
+       "Register the DescriptorGenerator/IngestorGenerator pytest suites as ctest tests (needs pytest, PyYAML and Jinja2 importable by Python3_EXECUTABLE)"
+       OFF)
 
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
@@ -310,6 +328,8 @@ add_subdirectory(plugin_sdk)
 
 add_subdirectory(tests)
 add_subdirectory(tools)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}" COMPONENT Runtime)
 
 # Python bindings are a standalone CMake project that consumes installed hipDNN
 # artifacts. Configure projects/hipdnn/python/frontend_bindings separately after

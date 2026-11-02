@@ -19,11 +19,11 @@ Paths below are relative to `dnn-providers/hip-kernel-provider/rocke/`.
 | spec | The full description of one kernel to build: every size, flag and setting. Building a spec produces the kernel code. |
 | `algorithm`, `spec_id` | Two fields on the request that name a candidate. Both default to `auto`, meaning "you choose". |
 | opt-in candidate | A candidate the dispatcher never chooses on its own. It is used only when the request names it with both `algorithm` and `spec_id`. Sweeps and benchmarks use these. |
-| tuned candidate | A candidate with many possible settings (a **knob space**) instead of one fixed spec. Each attention tuning geometry and each dense candidate is one. |
+| tuned candidate | A candidate with many possible settings (a **knob space**) instead of one fixed spec. Each attention tuning geometry, each dense candidate, and each GDN/KDA decode tile is one. |
 | knob | One setting of a tuned kernel that changes speed but not the answer, such as an unroll choice or a buffer layout. |
 | knob axis | One knob and the values it may take, declared as data (`KnobAxis`). |
 | configuration | One tuned candidate with specific knob values set. |
-| outer knob | A knob swept on top of every other knob setting because it is cheap to vary. Attention uses `waves_per_eu`, the GPU occupancy hint. |
+| outer knob | A knob swept on top of every other knob setting because it is cheap to vary. Attention and GDN decode use `waves_per_eu`, the GPU occupancy hint. |
 | `tuning_id` | The name of one configuration, for example `narrow_nw1_mw16_t4xb_llvm_wpe2@4910058571931d95`. The part before `@` is for people; the part after is the `config_key`. |
 | `config_key` | A short hash of the candidate's variant and its knob values. Two configurations are the same exactly when their keys match. |
 | `tuning_knobs` | The knob values recorded next to a `tuning_id`, so the configuration can be rebuilt exactly. |
@@ -167,7 +167,7 @@ Every configuration a tuned candidate hands out, whether swept, sampled,
 pinned by knobs or found by id, comes from one place: the candidate's
 `KnobSpace` (`dispatch/tuning/space.py`). A family supplies a subclass with its
 rules; attention has `UnifiedSpace` (`unified_rules.py`) and `DenseSpace`
-(`dense_rules.py`), both built on `WavesPerEuSpace` (`waves.py`).
+(`dense_rules.py`), both built on `WavesPerEuSpace` (`dispatch/tuning/waves.py`).
 
 **Walking.** The knob axes are listed in `library/dispatch/attention/axes.py`,
 with prerequisites first. The walk (`walk.py`) tries axis values one by one and
@@ -198,8 +198,8 @@ settings that produce the same kernel get the same `tuning_id`.
 **The outer knob.** After a setting passes, the space rebuilds it once per
 outer-knob value, without re-running the checks above. For attention the outer
 knob is `waves_per_eu`, and the `_wpe{N}` part of the id shows its value.
-The shared machinery knows nothing about `waves_per_eu`; attention's
-`WavesPerEuSpace` names it.
+`KnobSpace` itself knows nothing about `waves_per_eu`; the shared
+`WavesPerEuSpace` subclass names it, and each family picks the values.
 
 ## 6. "Run it and tell me how fast it is" (benchmarks)
 

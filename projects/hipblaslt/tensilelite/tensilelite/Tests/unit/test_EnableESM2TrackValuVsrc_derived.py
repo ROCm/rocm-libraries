@@ -21,8 +21,8 @@ import os
 
 import pytest
 
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite.Common.Capabilities import makeIsaInfoMap
 
 pytestmark = pytest.mark.unit
 
@@ -49,7 +49,7 @@ _STATES = {}
 
 def _require_toolchain(arch):
     """Skip where amdclang++ cannot target ``arch``; the derivation would raise."""
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     try:
         cxx = validateToolchain("amdclang++")

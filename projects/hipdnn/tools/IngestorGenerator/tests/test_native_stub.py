@@ -5,6 +5,7 @@
 agent or a human fills in to make an engine serve real graphs (see RUNBOOK.md)."""
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -47,15 +48,38 @@ def compile_env():
             "this checkout -- cannot attempt a real compile"
         )
 
-    # Vendored flatbuffers headers: prefer an installed ROCm's, since this
-    # repo does not vendor flatbuffers itself.
-    fb_vendor = None
-    for candidate in (Path("/opt/rocm/include"),):
-        if (candidate / "flatbuffers" / "array.h").is_file():
-            fb_vendor = candidate
-            break
-    if fb_vendor is None:
-        pytest.skip("no flatbuffers/array.h found (checked /opt/rocm/include)")
+    # HIPDNN_INGESTOR_STUB_INCLUDE_FILE (written by tools/CMakeLists.txt) lists the flatbuffers
+    # and HIP include dirs, one per line; a bad value fails rather than skips. Unset, probe an
+    # installed ROCm and skip when it is absent.
+    raw = os.environ.get("HIPDNN_INGESTOR_STUB_INCLUDE_FILE")
+    if raw is not None:
+        include_file = Path(raw)
+        if not include_file.is_file():
+            pytest.fail(
+                f"HIPDNN_INGESTOR_STUB_INCLUDE_FILE is set to {raw!r}, "
+                "which is not an existing file"
+            )
+        stub_includes = [
+            Path(line.strip())
+            for line in include_file.read_text().splitlines()
+            if line.strip()
+        ]
+        for header in ("flatbuffers/array.h", "hip/hip_runtime.h"):
+            if not any((d / header).is_file() for d in stub_includes):
+                pytest.fail(
+                    f"HIPDNN_INGESTOR_STUB_INCLUDE_FILE {raw!r} lists no include "
+                    f"directory containing {header}"
+                )
+    else:
+        # Vendored flatbuffers headers: prefer an installed ROCm's, since this
+        # repo does not vendor flatbuffers itself.
+        stub_includes = []
+        for candidate in (Path("/opt/rocm/include"),):
+            if (candidate / "flatbuffers" / "array.h").is_file():
+                stub_includes.append(candidate)
+                break
+        if not stub_includes:
+            pytest.skip("no flatbuffers/array.h found (checked /opt/rocm/include)")
 
     gen_dir = Path(tempfile.mkdtemp(prefix="ingestor_gen_include_"))
     configure_targets = {
@@ -164,7 +188,7 @@ def compile_env():
             data_sdk,
             flatbuffers_sdk,
             provider_src,
-            fb_vendor,
+            *stub_includes,
         ],
     }
 
@@ -434,6 +458,54 @@ class TestRealCompile:
         assert (
             result.returncode == 0
         ), f"emitted multi-pack native stub failed to compile:\n{result.stderr}"
+
+    def test_multi_launch_stub_compiles(
+        self, compile_env, generator, multi_launch_config, tmp_path
+    ):
+        """The `{% if config.launch_names %}` arms: the `<set>` include and the
+        `launchNames() const override` signature must match IKernelDispatchHandler."""
+        config = multi_launch_config
+        assert config.launch_names, "fixture is no longer a multi-launch one"
+        rendered = generator._render_template(
+            "native.cpp.j2", config, ids=mint_ids(config)
+        )
+        result = _compile(compile_env, rendered, tmp_path)
+        assert (
+            result.returncode == 0
+        ), f"emitted multi-launch native stub failed to compile:\n{result.stderr}"
+
+    def test_multi_launch_stub_declares_exactly_the_configured_launch_names(
+        self, generator, multi_launch_config
+    ):
+        config = multi_launch_config
+        rendered = generator._render_template(
+            "native.cpp.j2", config, ids=mint_ids(config)
+        )
+        body = re.search(
+            r"std::set<std::string>\s+launchNames\(\)\s+const\s+override\s*\{(.*?)\n\s*\}",
+            rendered,
+            re.DOTALL,
+        )
+        assert body, "the multi-launch stub declares no launchNames() override"
+        returned = re.search(r"return\s*\{(.*?)\}\s*;", body.group(1), re.DOTALL)
+        assert returned, "launchNames() does not return a braced set"
+        declared = re.findall(r'"((?:[^"\\]|\\.)*)"', returned.group(1))
+        assert sorted(declared) == sorted(config.launch_names)
+        assert len(declared) > 1, "fixture no longer has several launches"
+
+    def test_multi_launch_census_stub_parses(
+        self, compile_env, generator, multi_launch_config, tmp_path
+    ):
+        """The census's multi-launch arm walks each kernel's `sources` map."""
+        config = multi_launch_config
+        rendered = generator._render_template(
+            "test_packs.cpp.j2", config, ids=mint_ids(config)
+        )
+        assert "kernel.sources" in rendered, "census lost its multi-launch arm"
+        result = _parse_test_stub(compile_env, rendered, tmp_path, "TestPacksLaunches")
+        assert (
+            result.returncode == 0
+        ), f"emitted multi-launch census does not parse:\n{result.stderr}"
 
     def test_compile_catches_a_real_break(
         self, compile_env, generator, scale_add_config, tmp_path

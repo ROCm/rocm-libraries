@@ -231,7 +231,7 @@ class DescriptorGenerator:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             content = self._render_template(template_name, config)
             out_path.write_text(content)
-            written.append(str(rel_path))
+            written.append(rel_path.as_posix())
 
         fragments_dir = output_dir / "fragments"
         fragments_dir.mkdir(parents=True, exist_ok=True)
@@ -277,7 +277,7 @@ class DescriptorGenerator:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             content = self._render_template(template_name, config)
             out_path.write_text(content)
-            written.append(str(rel_path))
+            written.append(rel_path.as_posix())
 
         test_templates = {
             "test_attributes.cpp.j2": Path("frontend/tests")
@@ -295,7 +295,7 @@ class DescriptorGenerator:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             content = self._render_template(template_name, config)
             out_path.write_text(content)
-            written.append(str(rel_path))
+            written.append(rel_path.as_posix())
 
         # Frontend fragment templates
         fragment_templates = {
@@ -375,7 +375,7 @@ class DescriptorGenerator:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         content = self._render_template("constants.hpp.j2", config)
         out_path.write_text(content)
-        return [str(rel_path)]
+        return [rel_path.as_posix()]
 
     def _render_template(self, template_name: str, config: OperationConfig) -> str:
         try:

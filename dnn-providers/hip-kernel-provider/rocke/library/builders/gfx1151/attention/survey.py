@@ -12,10 +12,9 @@ Reports TFLOP/s and % of the ~59 TF f16 WMMA peak for each.
 from __future__ import annotations
 
 
-from .bench_v_staging import _find_objdump
 from .fmha_singlewave import SingleWaveCfg
 from .fmha_pipelined import PipelinedCfg
-from .tune import Shape
+from .tune import Shape, _find_objdump
 from . import tune as opt_tune
 from . import sp_tune
 

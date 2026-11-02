@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 from codegen.config_loader import load_config
-from codegen.generator import IngestorGenerator
+from codegen.generator import IngestorGenerator, resolve_ids
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "tools"))
@@ -168,10 +168,17 @@ def test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults(
 def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     selection, tmp_path_factory, capsys
 ):
+    """Generated with the shipped ids reused, the six descriptors are the shipped ones
+    byte for byte."""
     if not _SHIPPED_KDP.is_file():
         pytest.skip(f"shipped KDP not in this checkout: {_SHIPPED_KDP}")
     out = tmp_path_factory.mktemp("g2")
-    IngestorGenerator(_ROOT / "templates").render(selection, out)
+    generator = IngestorGenerator(_ROOT / "templates")
+    generator.render(
+        selection,
+        out,
+        resolution=resolve_ids(selection, out, ids_from=_SHIPPED_DIR),
+    )
     descriptors = out / selection.descriptor_dir
     (kdp,) = descriptors.glob("*.kdp.json")
     (kmd,) = descriptors.glob("*.kmd.json")
@@ -187,7 +194,7 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
             str(_SHIPPED_KDP),
             "--regenerated",
             str(kdp),
-            "--ignore-ids",
+            "--expect-ids",
             "--strict-spec",
             "--shipped-kmd",
             str(_SHIPPED_KMD),
@@ -197,6 +204,19 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     )
     report = capsys.readouterr()
     assert rc == 0, report.out + report.err
+
+    # The catalog diff covers the KDP's catalog; this covers every byte of all six
+    # files. The KDP's DVC object is LF; the five git-tracked files are compared as
+    # text because an autocrlf checkout holds them as CRLF.
+    assert kdp.read_bytes() == _SHIPPED_KDP.read_bytes()
+    others = sorted(p for p in descriptors.glob("*.json") if p != kdp)
+    assert len(others) == 5, [p.name for p in others]
+    for generated in others:
+        shipped = _SHIPPED_DIR / generated.name
+        assert shipped.is_file(), f"{generated.name} is not a shipped descriptor"
+        assert generated.read_text(encoding="utf-8") == shipped.read_text(
+            encoding="utf-8"
+        ), generated.name
 
 
 def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
@@ -213,8 +233,13 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
     path = out / "registry.yaml"
     path.write_text(yaml.safe_dump(registry_config, sort_keys=False))
     config = load_config(path)
-    IngestorGenerator(_ROOT / "templates").render(config, out / "generated")
-    descriptors = out / "generated" / config.descriptor_dir
+    generated_root = out / "generated"
+    IngestorGenerator(_ROOT / "templates").render(
+        config,
+        generated_root,
+        resolution=resolve_ids(config, generated_root, ids_from=_SHIPPED_DIR),
+    )
+    descriptors = generated_root / config.descriptor_dir
     (kdp,) = descriptors.glob("*.kdp.json")
     (kmd,) = descriptors.glob("*.kmd.json")
     rc = catalog_diff.main(
@@ -223,7 +248,7 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
             str(_SHIPPED_KDP),
             "--regenerated",
             str(kdp),
-            "--ignore-ids",
+            "--expect-ids",
             "--shipped-kmd",
             str(_SHIPPED_KMD),
             "--regenerated-kmd",

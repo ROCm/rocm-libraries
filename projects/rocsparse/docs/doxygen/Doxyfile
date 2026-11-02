@@ -2432,9 +2432,6 @@ INCLUDE_FILE_PATTERNS  =
 PREDEFINED             = __attribute__(x)= \
                          __inline= \
                          ROCSPARSE_EXPORT= \
-                         ROCSPARSE_WITH_SPMAT_SCALE \
-                         ROCSPARSE_WITH_SDDMM_BATCHED \
-                         ROCSPARSE_WITH_DIAGONAL_SOLVE \
                          ROCSPARSE_WITH_SPSORT \
                          ROCSPARSE_WITH_TRSM_REFACTORING
 

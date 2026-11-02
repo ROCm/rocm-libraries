@@ -29,7 +29,7 @@ WAVESIZE_32 = 32
 
 def _init_rocisa_gfx1250():
     from rocisa import rocIsa
-    from Tensile.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Architectures import gfxToIsa
     ri = rocIsa.getInstance()
     isa = gfxToIsa("gfx1250")
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
@@ -90,7 +90,7 @@ class TestClusterBarrierHalves:
 
     def test_signal_has_exactly_one_election_branch(self):
         # insertClusterBarrier asserts on this; lock it at the source.
-        from Tensile.Components.Subtile.ClusterBarrier import subtileClusterBarrierSignal
+        from tensilelite.Components.Subtile.ClusterBarrier import subtileClusterBarrierSignal
         from rocisa.instruction import SCBranchSCC0
         items = subtileClusterBarrierSignal(_make_writer(), kernel={}).flatitems()
         assert sum(isinstance(i, SCBranchSCC0) for i in items) == 1
@@ -99,7 +99,7 @@ class TestInsertClusterBarrier:
     """The post-schedule splice."""
 
     def test_noop_when_disabled(self):
-        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
         mod = _module(_wg_barrier(), _fake_wmma())
         out = insertClusterBarrier(mod, _make_writer(), kernel={})
         # disabled -> returns the very same object, untouched
@@ -108,7 +108,7 @@ class TestInsertClusterBarrier:
         assert "s_barrier_wait -3" not in str(out)
 
     def test_requires_cluster_barrier_cap(self):
-        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
         mod = _module(_wg_barrier(), _fake_wmma())
         writer = _make_writer(has_cluster_barrier=False)
         with pytest.raises(AssertionError):
@@ -116,7 +116,7 @@ class TestInsertClusterBarrier:
 
     def test_branch_placed_after_wmma(self):
         """signal block reuses the wg barrier; election branch hides behind the WMMA."""
-        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
         mod = _module(_wg_barrier(), _fake_wmma("mainloop wmma"), _comment("tail"))
         out = insertClusterBarrier(mod, _make_writer(), kernel={"ClusterBarrier": True})
         lines = [ln for ln in str(out).splitlines() if ln.strip()]
@@ -138,7 +138,7 @@ class TestInsertClusterBarrier:
 
     def test_signal_intact_when_no_wmma_follows(self):
         """No MFMA after the wg barrier: emit the signal block whole (best effort)."""
-        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
         mod = _module(_wg_barrier(), _comment("no wmma here"))
         out = insertClusterBarrier(mod, _make_writer(), kernel={"ClusterBarrier": True})
         lines = [ln for ln in str(out).splitlines() if ln.strip()]
@@ -150,7 +150,7 @@ class TestInsertClusterBarrier:
 
     def test_signal_prepended_when_no_wg_barrier(self):
         """No workgroup barrier to reuse: open the handshake at the very start."""
-        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
         mod = _module(_fake_wmma("lone wmma"), _comment("tail"))
         out = insertClusterBarrier(mod, _make_writer(), kernel={"ClusterBarrier": True})
         lines = [ln for ln in str(out).splitlines() if ln.strip()]
@@ -161,7 +161,7 @@ class TestInsertClusterBarrier:
         assert signal < wmma < wait
 
     def test_input_module_left_untouched(self):
-        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
         mod = _module(_wg_barrier(), _fake_wmma())
         before = str(mod)
         insertClusterBarrier(mod, _make_writer(), kernel={"ClusterBarrier": True})

@@ -8,6 +8,7 @@ mode enum file inclusion, and CLI behavior.
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -328,11 +329,8 @@ class TestCLIBehavior:
 
     @pytest.fixture
     def python_exe(self):
-        """Path to the .venv Python executable."""
-        exe = Path(__file__).parent.parent / ".venv" / "bin" / "python"
-        if not exe.exists():
-            pytest.skip("No .venv/bin/python found; CLI tests require a local venv")
-        return exe
+        """The interpreter running pytest; it already has PyYAML/Jinja2."""
+        return Path(sys.executable)
 
     def test_missing_config_file_exits(self, generate_script, python_exe, tmp_path):
         """--config pointing to a nonexistent file exits with code 1."""

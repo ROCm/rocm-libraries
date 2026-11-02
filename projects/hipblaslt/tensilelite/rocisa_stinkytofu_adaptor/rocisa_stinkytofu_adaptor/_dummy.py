@@ -11,6 +11,19 @@ import enum as _stdenum
 from typing import Any, Iterable, Mapping, Type
 
 
+class _MemberNameIntEnum(_stdenum.IntEnum):
+    """Integer enum whose ``str()`` prints ``ClassName.Member``.
+
+    The value stays an int (``E8 == 22``). Python 3.11+ would otherwise
+    print that int from ``str()``. Pytest parameter ids and
+    ``LibraryIO._fast_yaml_scalar`` both call ``str()`` after seeing an
+    int, so the printed form has to be the member name.
+    """
+
+    def __str__(self) -> str:
+        return f"{type(self).__name__}.{self.name}"
+
+
 def make_dummy_class(full_name: str, *, base: Type[Any] = object) -> Type[Any]:
     """Create a dummy class whose ``__init__`` prints ``full_name``.
 
@@ -109,10 +122,10 @@ def make_dummy_enum(full_name: str, values: Iterable[str]) -> Type[Any]:
     ``DataTypeEnum``, ``CacheScope``, ...).
 
     Note (was originally a "structural-only" dummy):
-        Tensile's import-time machinery in ``Tensile/Common/DataType.py``
+        TensileLite's import-time machinery in ``tensilelite/Common/DataType.py``
         reads ``e['enum'].value`` and ``e['enum'].name`` while building the
         ``DataType`` lookup table, so a bare ``int`` placeholder is not
-        enough to pass ``import Tensile``. ``IntEnum`` gives us both the
+        enough to pass ``import tensilelite``. ``IntEnum`` gives us both the
         attribute surface and the raw-int behaviour the rest of the code
         treats it as.
 
@@ -124,7 +137,7 @@ def make_dummy_enum(full_name: str, values: Iterable[str]) -> Type[Any]:
     values = list(values)
     module = full_name.rsplit(".", 1)[0]
 
-    cls = _stdenum.IntEnum(short, [(v, i) for i, v in enumerate(values)])
+    cls = _MemberNameIntEnum(short, [(v, i) for i, v in enumerate(values)])
     cls.__module__ = module
     cls.__qualname__ = short
     return cls
@@ -146,7 +159,7 @@ def make_bound_enum(
     module = full_name.rsplit(".", 1)[0]
     member_list = list(members)
 
-    cls = _stdenum.IntEnum(short, member_list)
+    cls = _MemberNameIntEnum(short, member_list)
     cls.__module__ = module
     cls.__qualname__ = short
     return cls

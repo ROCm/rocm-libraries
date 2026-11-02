@@ -30,8 +30,6 @@
 
 #include "rocsparse_diagonal_solve.hpp"
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-
 #include "rocsparse_diagonal_solve_device.h"
 #include "rocsparse_indextype_utils.hpp"
 
@@ -499,5 +497,3 @@ rocsparse_status rocsparse::diagonal_solve_csc(rocsparse_handle            handl
                                                batch_count,
                                                conj_x);
 }
-
-#endif
