@@ -136,6 +136,29 @@ inline bool launchKernel(const char* kernelName,
 }
 
 // =============================================================================
+// Kernel launch-limit query
+// =============================================================================
+//
+// Returns the largest block the loaded kernel accepts (the code object's
+// max_flat_workgroup_size, bounded by its register and LDS use), or
+// std::nullopt when HIP cannot report it. Launching with more threads fails
+// at hipModuleLaunchKernel, so callers check this before accepting a shape.
+
+inline std::optional<unsigned int> getMaxThreadsPerBlock(hipFunction_t func)
+{
+    int maxThreads = 0;
+    const hipError_t err
+        = hipFuncGetAttribute(&maxThreads, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, func);
+    if(err != hipSuccess || maxThreads <= 0)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("Failed to query kernel max threads per block, error: "
+                                << hipGetErrorString(err) << ", value: " << maxThreads);
+        return std::nullopt;
+    }
+    return static_cast<unsigned int>(maxThreads);
+}
+
+// =============================================================================
 // HipModuleGuard — RAII wrapper for hipModule_t
 // =============================================================================
 //

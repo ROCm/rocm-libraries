@@ -20,6 +20,14 @@ struct SdpaFwdLaunchParams
     uint32_t tuneOpt;
 };
 
+// hd192x128 kernels use 4 wavefronts (256 threads) on all architectures;
+// hd128 and other kernels use 8 wavefronts (512 threads). Shared with
+// isApplicable, which checks it against the resolved kernel's thread limit.
+inline unsigned int fwdBlockDimX(unsigned int headDimQk, unsigned int headDimV)
+{
+    return (headDimQk == 192 && headDimV == 128) ? 256U : 512U;
+}
+
 // Ports AITER's forward grid math. Causal masks halve the Q-tile grid via
 // ceiling division; the kernel load-balances the full Q range onto the
 // surviving workgroups. The hd192x128 kernel uses 256-wide blocks on all
@@ -70,9 +78,7 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
         std::swap(gridDimX, gridDimY);
     }
 
-    // hd192x128 kernels use 4 wavefronts (256 threads) on all architectures;
-    // hd128 and other kernels use 8 wavefronts (512 threads).
-    lp.blockDimX = isHd192x128 ? 256 : 512;
+    lp.blockDimX = fwdBlockDimX(params.headDimQk, params.headDimV);
 
     lp.gridDimX = gridDimX;
     lp.gridDimY = gridDimY;
