@@ -5224,6 +5224,57 @@ def cases():
             build_fwd_small_wmma_case(_kind, _prob, **_over),
         )
 
+    # --- conv_direct_fwd_tapouter_wmma: tap-outer forward of large dilations
+    # (gfx1250). TDM tap windows + wave32 WMMA; every case needs llvm23 (TDM),
+    # so the other flavors record them as expected failures. The C++ twin is
+    # gated by library/tests/parity/conv_direct_fwd_tapouter_wmma_emit.*.
+    def build_fwd_tapouter_case(dtype, dil, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_fwd_tapouter_wmma import (
+                DirectFwdTapOuterSpec,
+                build_direct_fwd_tapouter_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=33,
+                W=33,
+                groups=1,
+                cpg=64,
+                kpg=96,
+                KH=3,
+                KW=3,
+                PAD=dil,
+                stride=1,
+                dtype=dtype,
+                dil_h=dil,
+                dil_w=dil,
+            )
+            return build_direct_fwd_tapouter_wmma(
+                DirectFwdTapOuterSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _dil, _over in (
+        (
+            "bf16_dil12",
+            "bf16",
+            12,
+            dict(
+                waves_k=2, waves_p=2, tiles_k=4, tiles_p=4, tile_w=16, ck=128, stages=2
+            ),
+        ),
+        ("fp16_dil36_st3_pf", "fp16", 36, dict(prefetch=True)),
+    ):
+        add(
+            "conv_direct_fwd_tapouter_wmma",
+            f"conv_direct_fwd_tapouter_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_fwd_tapouter_case(_dtype, _dil, **_over),
+        )
+
     # --- conv_direct_fwd_gstream_wmma: small-group forward walking row bands
     # (gfx1250). TDM halo ring + wave32 WMMA; every case needs llvm23 (TDM), so
     # the other flavors record them as expected failures. The C++ twin is gated

@@ -27,6 +27,7 @@ from kernels.conv.direct_variants import (
     DIRECT_DEPTHWISE_TILED_DGRAD as _DW_TILED_DGRAD,
     DIRECT_DW_FWD_WMMA as _DW_FWD_WMMA,
     DIRECT_FWD_GSTREAM_WMMA as _FWD_GSTREAM,
+    DIRECT_FWD_TAPOUTER_WMMA as _FWD_TAPOUTER,
     DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
@@ -922,6 +923,31 @@ FWD_SMALLK_LAYERS = (
     (3, 3, 1, 1, 1, 3),
     (1, 7, 0, 3, 1, 1),
 )
+# Tap-outer WMMA forward (direct_fwd_tapouter_wmma): the "same"-padded dilated
+# 3x3 rows of atrous / ASPP layers it serves, (PAD, dil); stride 1.
+FWD_TAPOUTER_DILATIONS = (
+    (2, 2),
+    (4, 4),
+    (6, 6),
+    (12, 12),
+    (18, 18),
+    (24, 24),
+    (36, 36),
+)
+# (waves_k, waves_p, tiles_k, tiles_p, tile_w, ck, stages): the best few per
+# shape of a tuning sweep over dilated 3x3 layers of 2048 -> 256 channels.
+FWD_TAPOUTER_KNOBS = (
+    (1, 4, 8, 2, 16, 64, 2),
+    (1, 4, 8, 2, 16, 128, 2),
+    (2, 2, 4, 2, 16, 128, 2),
+    (2, 2, 4, 4, 8, 128, 2),
+    (2, 2, 4, 4, 16, 64, 2),
+    (2, 2, 4, 4, 16, 128, 2),
+    (2, 2, 4, 4, 32, 128, 2),
+    (2, 4, 4, 2, 16, 64, 2),
+    (4, 1, 4, 4, 16, 128, 2),
+    (4, 2, 4, 4, 16, 64, 2),
+)
 # fwd_smallc_wmma: (waves_k, waves_p, tiles_k, tiles_p, out_h, out_w,
 # tiles_per_block, tdm_store); the best few per stem of a tuning sweep.
 FWD_SMALLC_KNOBS = (
@@ -1505,6 +1531,15 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
         ),
     ),
+    # Tap-outer WMMA forward of large dilations: channels and groups
+    # runtime, the filter, padding and dilation baked.
+    _FWD_TAPOUTER: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0, dil_h=d, dil_w=d)
+            for pad, d in FWD_TAPOUTER_DILATIONS
+        ),
+    ),
     # Small-group forward walking row bands (cpg == kpg baked), 3x3 "same".
     _FWD_GSTREAM: (
         "fwd",
@@ -2037,6 +2072,21 @@ def _knob_grid(
                 if sched:
                     knobs["sched"] = sched
                 yield knobs
+    elif variant == _FWD_TAPOUTER:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        for wk, wp, tk, tp, tw, ck, st in FWD_TAPOUTER_KNOBS:
+            yield dict(
+                waves_k=wk,
+                waves_p=wp,
+                tiles_k=tk,
+                tiles_p=tp,
+                tile_w=tw,
+                ck=ck,
+                stages=st,
+            )
     elif variant == _FWD_GSTREAM:
         from rocke.core.arch import ArchTarget
 

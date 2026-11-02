@@ -36,6 +36,7 @@ from kernels.conv.direct_variants import (
     DIRECT_FWD_GSTREAM_WMMA,
     DIRECT_FWD_SMALLC_WMMA,
     DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_FWD_TAPOUTER_WMMA,
     DIRECT_FWD_WMMA,
 )
 from kernels.conv.kernel_identity import KernelIdentity
@@ -77,6 +78,7 @@ _WAVE32_ONLY = {
     DIRECT_FWD_SMALLK_WMMA: "gfx1250",
     DIRECT_DW_FWD_WMMA: "gfx1250",
     DIRECT_FWD_GSTREAM_WMMA: "gfx1250",
+    DIRECT_FWD_TAPOUTER_WMMA: "gfx1250",
 }
 
 

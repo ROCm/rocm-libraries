@@ -1347,6 +1347,29 @@ the per-layer rows of `FWD_SMALLK_KNOBS_BY_LAYER`) over `FWD_SMALLK_LAYERS`:
 3x3 K=4, 3x3 K=3 and 1x7 K=1 with column padding 3 (variants `direct_fwd_smallc_wmma` /
 `direct_fwd_smallk_wmma`).
 
+### Large dilations (`DirectFwdTapOuterSpec`)
+
+`library/kernels/common/conv_direct_fwd_tapouter_wmma.py` (C++ twin
+`instance_conv_direct_fwd_tapouter_wmma.h`) serves dilated convolutions whose
+`direct_fwd_wmma` halo (`(K - 1) * dilation` extra rows and columns) outgrows
+the LDS, e.g. atrous / ASPP layers at dilation 12..36. It runs the `KH * KW`
+taps as shifted 1x1 GEMMs accumulating into one output tile: each (channel
+chunk, tap) step moves the tap's input window (a plain rectangle, zero-filled
+past the image by the TDM transfer, leading cells zeroed by LDS stores at the
+top / left edges) and the tap's weights into an LDS ring of `stages` slots.
+The taps whose window lies wholly in the padding are skipped per block, and
+channel chunks are the outer loop so the blocks in flight share their input
+slices. The Y tile is staged in LDS and stored with one TDM transfer clipped
+to the image and the group's channels.
+
+Knobs: the tile (`waves_k`, `waves_p`, `tiles_k`, `tiles_p`, `tile_w`), `ck`,
+`stages`, `prefetch`, `sched` and `tdm_split` (window and weight rows cut into
+slabs issued by separate waves). Runtime: batch, extents, the group count and
+both channel counts; baked: filter, padding and dilation (stride 1). The AOT
+grid is `FWD_TAPOUTER_KNOBS` over the "same"-padded dilated 3x3 rows of
+`FWD_TAPOUTER_DILATIONS` (variant `direct_fwd_tapouter_wmma`), filtered per
+problem by tile efficiency.
+
 ### Small groups (`FwdGstreamWmmaSpec`)
 
 `library/kernels/common/conv_direct_fwd_gstream_wmma.py` (C++ twin

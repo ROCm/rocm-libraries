@@ -31,6 +31,7 @@ __all__ = [
     "DIRECT_FWD_WMMA",
     "DIRECT_DW_FWD_WMMA",
     "DIRECT_FWD_GSTREAM_WMMA",
+    "DIRECT_FWD_TAPOUTER_WMMA",
     "DIRECT_GROUPED_HALO",
     "DIRECT_HALO_VARIANTS",
     "DIRECT_MFMA_DGRAD",
@@ -80,6 +81,9 @@ DIRECT_DW_FWD_WMMA = "direct_dw_fwd_wmma"
 # block walks row bands through a ring of halo slots, weights in registers,
 # filter taps paired in the WMMA K below 32 channels per group.
 DIRECT_FWD_GSTREAM_WMMA = "direct_fwd_gstream_wmma"
+# Wave32 WMMA forward of large dilations: the taps as shifted 1x1 GEMMs over
+# TDM windows, the taps whose window lies in the padding skipped.
+DIRECT_FWD_TAPOUTER_WMMA = "direct_fwd_tapouter_wmma"
 # Grouped forward through the non-grouped kernel's LDS-halo pipeline (runtime
 # groups/channels, small cpg merged into one MFMA problem).
 DIRECT_GROUPED_HALO = "direct_grouped_halo"
@@ -202,6 +206,12 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
 
         return FwdGstreamWmmaSpec(
             problem=problem, name="rocke_direct_fwd_gstream_wmma", **knobs
+        )
+    if variant == DIRECT_FWD_TAPOUTER_WMMA:
+        from kernels.common.conv_direct_fwd_tapouter_wmma import DirectFwdTapOuterSpec
+
+        return DirectFwdTapOuterSpec(
+            problem=problem, name="rocke_direct_fwd_tapouter_wmma", **knobs
         )
     if variant == "direct_nongrouped":
         return dn.DirectNongroupedConvSpec(
@@ -504,6 +514,12 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             )
 
             return is_valid_fwd_gstream_spec(spec, arch=arch)
+        if variant == DIRECT_FWD_TAPOUTER_WMMA:
+            from kernels.common.conv_direct_fwd_tapouter_wmma import (
+                is_valid_tapouter_spec,
+            )
+
+            return is_valid_tapouter_spec(spec, arch=arch)
         if variant == "direct_depthwise_spatial":
             return dc.is_valid_depthwise_spatial_spec(spec, arch=arch)
         if variant in ("direct_depthwise_tiled", DIRECT_DEPTHWISE_TILED_DGRAD):
@@ -595,6 +611,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_direct_dgrad_wmma as dwm
     from kernels.common import conv_direct_dw_fwd_wmma as dfw
     from kernels.common import conv_direct_fwd_gstream_wmma as fgs
+    from kernels.common import conv_direct_fwd_tapouter_wmma as ft
     from kernels.common import conv_direct_dw_wgrad as dw
     from kernels.common import conv_direct_dw_wgrad_mfma as dwmf
     from kernels.common import conv_direct_fwd_wmma as fw
@@ -614,6 +631,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         DIRECT_FWD_SMALLK_WMMA: fs.build_fwd_smallk_wmma,
         DIRECT_DW_FWD_WMMA: dfw.build_dw_fwd_wmma,
         DIRECT_FWD_GSTREAM_WMMA: fgs.build_fwd_gstream_wmma,
+        DIRECT_FWD_TAPOUTER_WMMA: ft.build_direct_fwd_tapouter_wmma,
         "direct_wgrad_tiled": wt.build_direct_wgrad_tiled,
         "direct_wgrad_dw": dw.build_dw_wgrad_lds,
         "direct_wgrad_dw_cols": dw.build_dw_wgrad_cols,
@@ -762,6 +780,14 @@ def direct_spec_for_problem(
         )
 
         eff = fwd_gstream_tile_efficiency(spec)
+        if eff < 0.5:
+            return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
+    if variant == DIRECT_FWD_TAPOUTER_WMMA:
+        from kernels.common.conv_direct_fwd_tapouter_wmma import (
+            tapouter_tile_efficiency,
+        )
+
+        eff = tapouter_tile_efficiency(spec)
         if eff < 0.5:
             return None, f"tile efficiency {eff:.2f} < 0.5 on this shape"
     if variant == DIRECT_GROUPED_HALO and spec.tile_k > spec.merged_k:

@@ -1182,6 +1182,26 @@ def conv_direct_fwd_gstream_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
+def conv_direct_fwd_tapouter_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DirectFwdTapOuterSpec` -> flat dict (problem nested, dtype
+    included). ``sched`` is forwarded as-is; ``None`` means the backend default."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves_k=spec.waves_k,
+        waves_p=spec.waves_p,
+        tiles_k=spec.tiles_k,
+        tiles_p=spec.tiles_p,
+        tile_w=spec.tile_w,
+        ck=spec.ck,
+        stages=spec.stages,
+        prefetch=spec.prefetch,
+        sched=spec.sched,
+        wave_size=spec.wave_size,
+        tdm_split=spec.tdm_split,
+    )
+
+
 def conv_dgrad_patch_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DgradPatchWmmaSpec` -> flat dict (problem nested, dtype included).
     ``sched`` is forwarded as-is; ``None`` means the backend default."""
@@ -2149,6 +2169,45 @@ def lower_conv_direct_fwd_gstream_wmma(
         py_fn,
         lambda: eng.conv_direct_fwd_gstream_wmma_lower_llvm(sd, arch=arch),
         lambda: eng.conv_direct_fwd_gstream_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_fwd_tapouter_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DirectFwdTapOuterSpec` (the gfx1250 tap-outer forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_fwd_tapouter_wmma import (
+            build_direct_fwd_tapouter_wmma,
+        )
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_direct_fwd_tapouter_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_fwd_tapouter_wmma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_fwd_tapouter_wmma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_fwd_tapouter_wmma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_fwd_tapouter_wmma_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 
