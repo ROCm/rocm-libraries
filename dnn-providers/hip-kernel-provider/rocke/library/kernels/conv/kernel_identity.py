@@ -1149,8 +1149,8 @@ def identity_supports_problem(
 
         if identity.dx_interior not in DXI_MODES:
             return False, f"dx_interior={identity.dx_interior} is not a mode"
-        if not (identity.tapk_xhalo or identity.pp_boxes):
-            return False, "dx_interior serves the x-halo and pp_boxes kernels only"
+        if not identity.tap_outer_k:
+            return False, "dx_interior serves the stride-1 tap-outer kernels only"
         if identity.split_k > 1 and not (identity.pp_boxes and identity.pp_box_det):
             return False, "dx_interior: split-K only as pp_box_det (no dX zeroing)"
         if identity.pp_streamk or getattr(identity, "tapk_pp_persist", 0) == 2:

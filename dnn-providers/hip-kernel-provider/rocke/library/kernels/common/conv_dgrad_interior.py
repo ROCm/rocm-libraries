@@ -65,7 +65,9 @@ def dx_interior_uses_view(identity) -> bool:
 def dx_interior_keeps_w(identity) -> bool:
     """Does ``identity``'s interior launch write the full W rows of interior
     (d, h) rows? (The x-halo loop serves pW == 0 only, so its view keeps them.)"""
-    return dx_interior_uses_view(identity) and bool(getattr(identity, "tapk_xhalo", False))
+    return dx_interior_uses_view(identity) and bool(
+        getattr(identity, "tapk_xhalo", False) or getattr(identity, "tapk_pp_xhalo", 0)
+    )
 
 
 def halo_widths(p) -> Tuple[int, int, int]:

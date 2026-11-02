@@ -638,7 +638,7 @@ CACHE_DGRAD_DXI_SCOPE = _os.environ.get("ROCKE_AOT_DGRAD_DXI_SCOPE", "")
 
 
 def _dxi_applies(ident) -> bool:
-    if not (ident.tapk_xhalo or ident.pp_boxes):
+    if not ident.tap_outer_k:
         return False
     if ident.split_k > 1 and not (ident.pp_boxes and ident.pp_box_det):
         return False
