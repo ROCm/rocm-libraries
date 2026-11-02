@@ -9,5 +9,10 @@
   "metadata": "3cd28975-c675-4575-b00a-73c829e33f20",
   "sort_kernel_catalog": {
     "default": "251327fd-eb3d-40a1-84e2-225af549bce1"
+  },
+  "predict_engine": {
+    "gfx1151": [
+      "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
+    ]
   }
 }
