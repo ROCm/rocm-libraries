@@ -1330,7 +1330,7 @@ void rocke_b_buffer_store_vN_f16_ex(rocke_ir_builder_t* b,
     rocke_attr_map_t attrs;
     if(!rocke_i_live(b))
         return;
-    if(!(dwords == 1 || dwords == 2 || dwords == 4))
+    if(!rocke_i_is_typed_buffer_store_dwords(dwords))
     {
         rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "buffer_store dwords must be 1, 2, or 4 (got %d)", dwords);
@@ -1487,7 +1487,7 @@ void rocke_b_buffer_store_vN_bf16_ex(rocke_ir_builder_t* b,
     rocke_attr_map_t attrs;
     if(!rocke_i_live(b))
         return;
-    if(!(dwords == 1 || dwords == 2 || dwords == 4))
+    if(!rocke_i_is_typed_buffer_store_dwords(dwords))
     {
         rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "buffer_store_vN_bf16 dwords must be 1, 2, or 4 (got %d)", dwords);
@@ -1533,7 +1533,7 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
     rocke_attr_map_t attrs;
     if(!rocke_i_live(b))
         return;
-    if(!(n == 1 || n == 2 || n == 4))
+    if(!rocke_i_is_typed_buffer_store_dwords(n))
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_store_vN_f32 n must be 1, 2, or 4 (got %d)", n);
         return;

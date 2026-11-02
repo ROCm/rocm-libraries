@@ -661,6 +661,39 @@ def _hipcc_llvm_major() -> int:
     return int(match.group(1))
 
 
+def hipcc_accepts_target(arch: str, *, timeout_s: int = 120) -> bool:
+    """True when the hipcc on ``PATH`` compiles an empty kernel for ``arch``.
+
+    ``arch`` is mapped to hipcc's ``--offload-arch`` as
+    :func:`compile_kernel_via_hipcc` maps it, so a caller can skip a target
+    hipcc does not know before compiling a kernel for it. A target the mapping
+    already knows hipcc's clang refuses is not tried. Requires hipcc on
+    ``PATH``.
+    """
+    try:
+        compiler_target = compiler_target_for_llvm_major(arch, _hipcc_llvm_major())
+    except ValueError:
+        return False
+    with tempfile.TemporaryDirectory() as td:
+        src_path = Path(td) / "empty.hip"
+        src_path.write_text("__global__ void empty_kernel() {}\n", encoding="utf-8")
+        proc = subprocess.run(
+            [
+                "hipcc",
+                f"--offload-arch={compiler_target}",
+                "--genco",
+                str(src_path),
+                "-o",
+                str(Path(td) / "empty.hsaco"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    return proc.returncode == 0
+
+
 def emit_device_llvm_ir_via_hipcc(
     kernel: KernelDef,
     *,

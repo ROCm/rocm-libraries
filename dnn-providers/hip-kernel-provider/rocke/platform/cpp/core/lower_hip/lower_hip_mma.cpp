@@ -41,7 +41,6 @@
 #include "rocke/wmma_scale_internal.h"
 
 #include <stdio.h> /* snprintf */
-#include <stdlib.h> /* atoi     */
 #include <string.h> /* strcmp   */
 
 namespace ckc
@@ -1892,29 +1891,6 @@ static rocke_status_t rocke_h_op_scf_if_else(rocke_h_lowerer_t* lw, const rocke_
     return lw->status;
 }
 
-/* Python local `cpp_type_for(type_name)` inside _op_scf_for:
- *     if type_name.startswith("vec<f32x"): return f"f32x{int(inner)}"
- *     if type_name.startswith("vec<f16x"): return f"f16x{int(inner)}"
- *     return _HIP_TYPE.get(type_name, "auto")
- * The IR vector type name is "vec<<elem>x<n>>", so the inner is the n digits
- * between "vec<f32x"/"vec<f16x" and the trailing ">". Returns an arena string. */
-static const char* h_for_cpp_type(rocke_h_lowerer_t* lw, const char* type_name)
-{
-    const char* hip;
-    if(type_name && !__builtin_strncmp(type_name, "vec<f32x", 8))
-    {
-        int n = atoi(type_name + 8);
-        return rocke_arena_printf(&lw->b->arena, "f32x%d", n);
-    }
-    if(type_name && !__builtin_strncmp(type_name, "vec<f16x", 8))
-    {
-        int n = atoi(type_name + 8);
-        return rocke_arena_printf(&lw->b->arena, "f16x%d", n);
-    }
-    hip = type_name ? rocke_h_hip_scalar(type_name) : NULL;
-    return hip ? hip : "auto";
-}
-
 /* def _op_scf_for(self, op):
  *     num_iter = op.attrs.get("num_iter_args", 0)
  *     lower, upper, step = op.operands[0:3]
@@ -1922,11 +1898,11 @@ static const char* h_for_cpp_type(rocke_h_lowerer_t* lw, const char* type_name)
  *     iter_meta = op.attrs.get("iter_args", [])
  *     iv_name = op.attrs["iv"][1:]
  *     iv_ty = _HIP_TYPE[op.attrs["iv_type"]]
- *     for meta, result in zip(iter_meta, op.results):
- *         self._emit(f"{cpp_type_for(meta['type'])} {_name(result)};")
+ *     for result in op.results[: len(iter_meta)]:
+ *         self._emit(f"{_type_to_hip(result.type)} {_name(result)};")
  *     self._emit("{"); push
- *     for meta, init in zip(iter_meta, iter_inits):
- *         self._emit(f"{cpp_type_for(meta['type'])} {meta['name'][1:]} = {_name(init)};")
+ *     for meta, init, result in zip(iter_meta, iter_inits, op.results):
+ *         self._emit(f"{_type_to_hip(result.type)} {meta['name'][1:]} = {_name(init)};")
  *     self._emit(f"for({iv_ty} {iv_name} = {_name(lower)}; {iv_name} < {_name(upper)};"
  *                f" {iv_name} += {_name(step)}) {{")
  *     push; lower_region(op.regions[0]); pop; self._emit("}")
@@ -1980,25 +1956,28 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
     }
     iv_ty = rocke_h_require_hip_scalar(lw, iv_type);
 
-    /* Declare for-op results in the enclosing scope (zip stops at min length). */
+    /* Declare for-op results in the enclosing scope, one per iter arg. Each is
+     * spelled with its result's type: a declaration without an initializer
+     * cannot use `auto`. */
     for(i = 0; i < meta_n && i < op->num_results; i++)
     {
-        const char* mtype = rocke_attr_get_str(items[i], "type");
-        rocke_h_emitf(lw, "%s %s;", h_for_cpp_type(lw, mtype), rocke_h_name(lw, op->results[i]));
+        rocke_h_emitf(lw,
+                      "%s %s;",
+                      rocke_h_type_to_hip(lw, op->results[i]->type),
+                      rocke_h_name(lw, op->results[i]));
     }
 
     /* Inner C++ block: iter_args, the loop, and assignment back to results. */
     rocke_h_emit(lw, "{");
     rocke_h_push_indent(lw);
-    /* zip(iter_meta, iter_inits): iter_inits = operands[3 : 3 + num_iter]. */
-    for(i = 0; i < meta_n && i < (int)num_iter; i++)
+    /* zip(iter_meta, iter_inits, results): iter_inits = operands[3 : 3 + num_iter]. */
+    for(i = 0; i < meta_n && i < (int)num_iter && i < op->num_results; i++)
     {
-        const char* mtype = rocke_attr_get_str(items[i], "type");
         const char* mname = rocke_attr_get_str(items[i], "name");
         const char* mnm = (mname && mname[0] == '%') ? mname + 1 : (mname ? mname : "");
         rocke_h_emitf(lw,
                       "%s %s = %s;",
-                      h_for_cpp_type(lw, mtype),
+                      rocke_h_type_to_hip(lw, op->results[i]->type),
                       mnm,
                       rocke_h_name(lw, op->operands[3 + i]));
     }

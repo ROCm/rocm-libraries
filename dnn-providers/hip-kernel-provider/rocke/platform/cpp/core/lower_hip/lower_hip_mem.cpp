@@ -61,6 +61,56 @@ static const char* mem_storage_of(rocke_h_lowerer_t* lw, const rocke_value_t* sm
     return rocke_h_smem_storage(lw, smem);
 }
 
+/* Python _retyped: true when a global access moves `value_t` through a pointer
+ * to another element type. The LLVM route steps the pointer by the value's type
+ * (getelementptr <value type>); C++ indexes by the pointer's, so the HIP text
+ * reinterprets the pointer. */
+static bool mem_retyped(const rocke_value_t* ptr, const rocke_type_t* value_t)
+{
+    return ptr->type && ptr->type->kind == ROCKE_TYPE_PTR && ptr->type->pointee
+           && strcmp(ptr->type->pointee->name, value_t->name) != 0;
+}
+
+/* Python _elem_ptr: `ptr` spelled as a pointer to `value_t`. Arena string. */
+static const char*
+    mem_elem_ptr(rocke_h_lowerer_t* lw, const rocke_value_t* ptr, const rocke_type_t* value_t)
+{
+    const char* hip;
+    if(!mem_retyped(ptr, value_t))
+    {
+        return rocke_h_name(lw, ptr);
+    }
+    hip = rocke_h_type_to_hip(lw, value_t);
+    return rocke_arena_printf(
+        &lw->b->arena, "reinterpret_cast<%s*>(%s)", hip, rocke_h_name(lw, ptr));
+}
+
+/* Python _packed_atomic_slot: the address of a packed two-element atomic add of
+ * `elem_name`, stepped by the element and typed as the packed value, so clang
+ * sees the value's alignment. An element pointer asks for a 2-byte aligned
+ * 4-byte atomic, which clang lowers to a compare-exchange library call (gfx942,
+ * gfx950) or refuses (gfx1250). A value that is not <2 x elem_name> is refused
+ * first (rocke_i_packed_atomic_add_value_error). Arena string; NULL after
+ * failing the lowering. */
+static const char* mem_packed_atomic_slot(rocke_h_lowerer_t* lw,
+                                          const rocke_value_t* ptr,
+                                          const rocke_value_t* idx,
+                                          const rocke_value_t* val,
+                                          const char* elem_name)
+{
+    char value_error[ROCKE_ERR_MSG_CAP];
+    const char *step, *packed;
+    if(rocke_i_packed_atomic_add_value_error(elem_name, val->type, value_error, sizeof value_error))
+    {
+        rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", value_error);
+        return NULL;
+    }
+    step = mem_elem_ptr(lw, ptr, val->type->elem);
+    packed = rocke_h_type_to_hip(lw, val->type);
+    return rocke_arena_printf(
+        &lw->b->arena, "reinterpret_cast<%s*>(%s + %s)", packed, step, rocke_h_name(lw, idx));
+}
+
 /* Fetch an int64 attr, defaulting to `dflt` when absent (Python attrs.get). */
 static int64_t mem_attr_int(const rocke_op_t* op, const char* key, int64_t dflt)
 {
@@ -70,6 +120,33 @@ static int64_t mem_attr_int(const rocke_op_t* op, const char* key, int64_t dflt)
         return v;
     }
     return dflt;
+}
+
+/* Python _retyped_access: how the global load or store `op` reaches a
+ * `value_t` value through a pointer to another element type (mem_retyped).
+ * Sets *alias_declaration to the declaration of an alias of the value type at
+ * the op's `align` (1 when absent, the LLVM route's default) that may alias any
+ * type, and returns `ptr` cast to a pointer to that alias. Indexing it moves
+ * the value's bits at the op's alignment, as the LLVM route's
+ * load/store <value type>, align N does. C++ accepts a typedef repeated with
+ * the same meaning, so each access declares the alias it uses. Arena strings. */
+static const char* mem_retyped_access(rocke_h_lowerer_t* lw,
+                                      const rocke_op_t* op,
+                                      const rocke_value_t* ptr,
+                                      const rocke_type_t* value_t,
+                                      const char** alias_declaration)
+{
+    const char* hip_type = rocke_h_type_to_hip(lw, value_t);
+    long long align = (long long)mem_attr_int(op, "align", 1);
+    const char* alias = rocke_arena_printf(&lw->b->arena, "%s_align%lld", hip_type, align);
+    *alias_declaration
+        = rocke_arena_printf(&lw->b->arena,
+                             "typedef %s %s __attribute__((aligned(%lld), may_alias));",
+                             hip_type,
+                             alias,
+                             align);
+    return rocke_arena_printf(
+        &lw->b->arena, "reinterpret_cast<%s*>(%s)", alias, rocke_h_name(lw, ptr));
 }
 
 /* Fetch a string attr, defaulting to `dflt` when absent. */
@@ -519,7 +596,7 @@ static rocke_status_t _op_memref_global_load(rocke_h_lowerer_t* lw, const rocke_
 static rocke_status_t _op_memref_global_load_typed(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     rocke_value_t *ptr, *idx;
-    const char* cpp_t;
+    const char *cpp_t, *access, *alias_declaration;
     if(!rocke_h_live(lw))
     {
         return lw->status;
@@ -532,11 +609,24 @@ static rocke_status_t _op_memref_global_load_typed(rocke_h_lowerer_t* lw, const 
     ptr = op->operands[0];
     idx = op->operands[1];
     cpp_t = rocke_h_type_to_hip(lw, op->results[0]->type);
+    if(!mem_retyped(ptr, op->results[0]->type))
+    {
+        rocke_h_emitf(lw,
+                      "%s %s = %s[%s];",
+                      cpp_t,
+                      rocke_h_name(lw, op->results[0]),
+                      rocke_h_name(lw, ptr),
+                      rocke_h_name(lw, idx));
+        return lw->status;
+    }
+    /* A value of another type than the pointer's element. */
+    access = mem_retyped_access(lw, op, ptr, op->results[0]->type, &alias_declaration);
     rocke_h_emitf(lw,
-                  "%s %s = %s[%s];",
+                  "%s %s %s = %s[%s];",
+                  alias_declaration,
                   cpp_t,
                   rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
+                  access,
                   rocke_h_name(lw, idx));
     return lw->status;
 }
@@ -638,6 +728,7 @@ static rocke_status_t _op_memref_global_store(rocke_h_lowerer_t* lw, const rocke
 static rocke_status_t _op_memref_global_store_typed(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     rocke_value_t *ptr, *idx, *val;
+    const char *access, *alias_declaration;
     if(!rocke_h_live(lw))
     {
         return lw->status;
@@ -649,8 +740,23 @@ static rocke_status_t _op_memref_global_store_typed(rocke_h_lowerer_t* lw, const
     ptr = op->operands[0];
     idx = op->operands[1];
     val = op->operands[2];
-    rocke_h_emitf(
-        lw, "%s[%s] = %s;", rocke_h_name(lw, ptr), rocke_h_name(lw, idx), rocke_h_name(lw, val));
+    if(!mem_retyped(ptr, val->type))
+    {
+        rocke_h_emitf(lw,
+                      "%s[%s] = %s;",
+                      rocke_h_name(lw, ptr),
+                      rocke_h_name(lw, idx),
+                      rocke_h_name(lw, val));
+        return lw->status;
+    }
+    /* A value of another type than the pointer's element. */
+    access = mem_retyped_access(lw, op, ptr, val->type, &alias_declaration);
+    rocke_h_emitf(lw,
+                  "%s %s[%s] = %s;",
+                  alias_declaration,
+                  access,
+                  rocke_h_name(lw, idx),
+                  rocke_h_name(lw, val));
     return lw->status;
 }
 
@@ -751,7 +857,7 @@ static rocke_status_t _op_memref_global_atomic_add(rocke_h_lowerer_t* lw, const 
                   "%s %s = atomicAdd(&%s[%s], %s);",
                   cpp_t,
                   rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
+                  mem_elem_ptr(lw, ptr, val->type),
                   rocke_h_name(lw, idx),
                   rocke_h_name(lw, val));
     return lw->status;
@@ -897,7 +1003,7 @@ static rocke_status_t _op_memref_global_atomic_add_f32(rocke_h_lowerer_t* lw, co
     val = op->operands[2];
     rocke_h_emitf(lw,
                   "atomicAdd(%s + %s, %s);",
-                  rocke_h_name(lw, ptr),
+                  mem_elem_ptr(lw, ptr, val->type),
                   rocke_h_name(lw, idx),
                   rocke_h_name(lw, val));
     return lw->status;
@@ -907,7 +1013,8 @@ static rocke_status_t _op_memref_global_atomic_add_f32(rocke_h_lowerer_t* lw, co
 static rocke_status_t _op_memref_global_atomic_add_pk_bf16(rocke_h_lowerer_t* lw,
                                                            const rocke_op_t* op)
 {
-    rocke_value_t *ptr, *idx, *val;
+    const rocke_value_t* val;
+    const char* slot;
     if(!rocke_h_live(lw))
     {
         return lw->status;
@@ -917,15 +1024,16 @@ static rocke_status_t _op_memref_global_atomic_add_pk_bf16(rocke_h_lowerer_t* lw
         return rocke_h_fail(
             lw, ROCKE_ERR_VALUE, "memref.global_atomic_add_pk_bf16: bad operand/result count");
     }
-    ptr = op->operands[0];
-    idx = op->operands[1];
     val = op->operands[2];
+    slot = mem_packed_atomic_slot(lw, op->operands[0], op->operands[1], val, "bf16");
+    if(slot == NULL)
+    {
+        return lw->status;
+    }
     rocke_h_emitf(lw,
-                  "bf16x2 %s = __builtin_amdgcn_global_atomic_fadd_v2bf16("
-                  "%s + %s, %s);",
+                  "bf16x2 %s = __builtin_amdgcn_global_atomic_fadd_v2bf16(%s, %s);",
                   rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
+                  slot,
                   rocke_h_name(lw, val));
     return lw->status;
 }
@@ -934,7 +1042,8 @@ static rocke_status_t _op_memref_global_atomic_add_pk_bf16(rocke_h_lowerer_t* lw
 static rocke_status_t _op_memref_global_atomic_add_pk_f16(rocke_h_lowerer_t* lw,
                                                           const rocke_op_t* op)
 {
-    rocke_value_t *ptr, *idx, *val;
+    const rocke_value_t* val;
+    const char* slot;
     if(!rocke_h_live(lw))
     {
         return lw->status;
@@ -944,15 +1053,16 @@ static rocke_status_t _op_memref_global_atomic_add_pk_f16(rocke_h_lowerer_t* lw,
         return rocke_h_fail(
             lw, ROCKE_ERR_VALUE, "memref.global_atomic_add_pk_f16: bad operand/result count");
     }
-    ptr = op->operands[0];
-    idx = op->operands[1];
     val = op->operands[2];
+    slot = mem_packed_atomic_slot(lw, op->operands[0], op->operands[1], val, "f16");
+    if(slot == NULL)
+    {
+        return lw->status;
+    }
     rocke_h_emitf(lw,
-                  "half2 %s = __builtin_amdgcn_global_atomic_fadd_v2f16("
-                  "%s + %s, %s);",
+                  "half2 %s = __builtin_amdgcn_global_atomic_fadd_v2f16(%s, %s);",
                   rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
+                  slot,
                   rocke_h_name(lw, val));
     return lw->status;
 }
@@ -992,10 +1102,12 @@ static rocke_status_t _op_memref_cooperative_global_store(rocke_h_lowerer_t* lw,
 
 /* ========================= global pointer arith ========================= */
 
-/* Python _op_tile_global_ptr_add */
+/* Python _op_tile_global_ptr_add: an inbounds byte step whose result keeps the
+ * pointer's element type, so accesses through it index elements. */
 static rocke_status_t _op_tile_global_ptr_add(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     rocke_value_t *ptr, *off;
+    const char* hip_type;
     if(!rocke_h_live(lw))
     {
         return lw->status;
@@ -1006,9 +1118,12 @@ static rocke_status_t _op_tile_global_ptr_add(rocke_h_lowerer_t* lw, const rocke
     }
     ptr = op->operands[0];
     off = op->operands[1];
+    hip_type = rocke_h_type_to_hip(lw, op->results[0]->type);
     rocke_h_emitf(lw,
-                  "const char* %s = (const char*)%s + (int64_t)%s;",
+                  "%s %s = (%s)((char*)%s + (int64_t)%s);",
+                  hip_type,
                   rocke_h_name(lw, op->results[0]),
+                  hip_type,
                   rocke_h_name(lw, ptr),
                   rocke_h_name(lw, off));
     return lw->status;
@@ -1219,26 +1334,89 @@ static const hip_buffer_access_t hip_buffer_accesses[] = {
     {16, "_b128", "i32x4"},
 };
 
-/* The access of the buffer load or store `op` (Python _buffer_op_bytes, then
- * _HIP_BUFFER_ACCESS); NULL after failing the lowering with the Python engine's
- * text. */
+/* Python _hip_buffer_access: the access of `nbytes` for the buffer op `op`;
+ * NULL after failing the lowering with the Python engine's text. */
 static const hip_buffer_access_t*
-    hip_buffer_access(rocke_h_lowerer_t* lw, const rocke_op_t* op, int* nbytes)
+    hip_buffer_access(rocke_h_lowerer_t* lw, const rocke_op_t* op, int nbytes)
 {
-    char err[ROCKE_ERR_MSG_CAP];
-    *nbytes = rocke_i_buffer_op_bytes(op, err, sizeof(err));
-    if(*nbytes == 0)
-    {
-        rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", err);
-        return NULL;
-    }
     for(const hip_buffer_access_t& access : hip_buffer_accesses)
     {
-        if(access.bytes == *nbytes)
+        if(access.bytes == nbytes)
+        {
             return &access;
+        }
     }
-    rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s: no buffer access form for %d bytes", op->name, *nbytes);
+    rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s: no buffer access form for %d bytes", op->name, nbytes);
     return NULL;
+}
+
+/* Python _buffer_op_bytes: the bytes the dtype-generic buffer load or store
+ * `op` moves; 0 after failing the lowering with the Python engine's text. */
+static int hip_buffer_op_bytes(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    char err[ROCKE_ERR_MSG_CAP];
+    int nbytes = rocke_i_buffer_op_bytes(op, err, sizeof(err));
+    if(nbytes == 0)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", err);
+    }
+    return nbytes;
+}
+
+/* Python _typed_buffer_store_bytes: the bytes the typed buffer store `op`
+ * moves; 0 after failing the lowering with the Python engine's text. */
+static int hip_buffer_typed_store_bytes(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    char err[ROCKE_ERR_MSG_CAP];
+    int nbytes = rocke_i_typed_buffer_store_bytes(op, err, sizeof(err));
+    if(nbytes == 0)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", err);
+    }
+    return nbytes;
+}
+
+/* Python _emit_raw_buffer_store: store the buffer store `op`'s value (operands:
+ * descriptor, vector offset, scalar offset, value) as one raw access of
+ * `nbytes`, the value's bytes copied into the integer of that width. The braces
+ * scope the temporary, so two stores of one value in a block do not redeclare
+ * it. Each caller has checked the operand count with its byte count. */
+static rocke_status_t
+    hip_buffer_emit_raw_store(rocke_h_lowerer_t* lw, const rocke_op_t* op, int nbytes)
+{
+    const hip_buffer_access_t* access = hip_buffer_access(lw, op, nbytes);
+    if(access == NULL)
+    {
+        return lw->status;
+    }
+    rocke_h_emitf(lw,
+                  "{ %s _bs; __builtin_memcpy(&_bs, &%s, %d); "
+                  "__builtin_amdgcn_raw_buffer_store%s(_bs, %s, %s, %s, 0); }",
+                  access->raw_type,
+                  rocke_h_name(lw, op->operands[3]),
+                  nbytes,
+                  access->suffix,
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]));
+    return lw->status;
+}
+
+/* The typed buffer stores (Python _op_tile_buffer_store_f16, _bf16, _f32 and
+ * their vN forms): the value stored as one raw access of the op's bytes. */
+static rocke_status_t hip_buffer_store_typed(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    int nbytes;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    nbytes = hip_buffer_typed_store_bytes(lw, op);
+    if(nbytes == 0)
+    {
+        return lw->status;
+    }
+    return hip_buffer_emit_raw_store(lw, op, nbytes);
 }
 
 /* Python _op_tile_buffer_load_vN (dtype-generic): one raw buffer load of the
@@ -1252,9 +1430,16 @@ static rocke_status_t _op_tile_buffer_load_vN(rocke_h_lowerer_t* lw, const rocke
     {
         return lw->status;
     }
-    access = hip_buffer_access(lw, op, &nbytes);
-    if(access == NULL)
+    nbytes = hip_buffer_op_bytes(lw, op);
+    if(nbytes == 0)
+    {
         return lw->status;
+    }
+    access = hip_buffer_access(lw, op, nbytes);
+    if(access == NULL)
+    {
+        return lw->status;
+    }
     result_t = rocke_h_type_to_hip(lw, op->results[0]->type);
     if(!rocke_h_live(lw))
         return lw->status;
@@ -1276,24 +1461,15 @@ static rocke_status_t _op_tile_buffer_load_vN(rocke_h_lowerer_t* lw, const rocke
  * integer of its width and stored; the braces scope the temporary. */
 static rocke_status_t _op_tile_buffer_store_vN(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const hip_buffer_access_t* access;
     int nbytes;
     if(!rocke_h_live(lw))
         return lw->status;
-    access = hip_buffer_access(lw, op, &nbytes);
-    if(access == NULL)
+    nbytes = hip_buffer_op_bytes(lw, op);
+    if(nbytes == 0)
+    {
         return lw->status;
-    rocke_h_emitf(lw,
-                  "{ %s _bs; __builtin_memcpy(&_bs, &%s, %d); "
-                  "__builtin_amdgcn_raw_buffer_store%s(_bs, %s, %s, %s, 0); }",
-                  access->raw_type,
-                  rocke_h_name(lw, op->operands[3]),
-                  nbytes,
-                  access->suffix,
-                  rocke_h_name(lw, op->operands[0]),
-                  rocke_h_name(lw, op->operands[1]),
-                  rocke_h_name(lw, op->operands[2]));
-    return lw->status;
+    }
+    return hip_buffer_emit_raw_store(lw, op, nbytes);
 }
 
 /* Python _op_tile_buffer_load (dtype-generic scalar): 2-byte elements (f16,
@@ -1349,94 +1525,13 @@ static rocke_status_t _op_tile_buffer_load(rocke_h_lowerer_t* lw, const rocke_op
 /* Python _op_tile_buffer_store_f16 */
 static rocke_status_t _op_tile_buffer_store_f16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    rocke_value_t *rsrc, *voffset, *soffset, *val;
-    const char *vname, *tmp;
-    if(!rocke_h_live(lw))
-    {
-        return lw->status;
-    }
-    if(op->num_operands < 4)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_store_f16: too few operands");
-    }
-    rsrc = op->operands[0];
-    voffset = op->operands[1];
-    soffset = op->operands[2];
-    val = op->operands[3];
-    vname = rocke_h_name(lw, val);
-    tmp = rocke_arena_printf(&lw->b->arena, "_u16_%s", vname);
-    rocke_h_emitf(lw,
-                  "unsigned short %s = 0; __builtin_memcpy(&%s, &%s, 2); "
-                  "__builtin_amdgcn_raw_buffer_store_b16(%s, %s, %s, %s, 0);",
-                  tmp,
-                  tmp,
-                  vname,
-                  tmp,
-                  rocke_h_name(lw, rsrc),
-                  rocke_h_name(lw, voffset),
-                  rocke_h_name(lw, soffset));
-    return lw->status;
+    return hip_buffer_store_typed(lw, op);
 }
 
 /* Python _op_tile_buffer_store_vN_f16 */
 static rocke_status_t _op_tile_buffer_store_vN_f16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    rocke_value_t *rsrc, *voffset, *soffset, *val;
-    const char *vname, *b_suffix, *tmp;
-    int64_t dwords;
-    if(!rocke_h_live(lw))
-    {
-        return lw->status;
-    }
-    if(op->num_operands < 4)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_store_vN_f16: too few operands");
-    }
-    rsrc = op->operands[0];
-    voffset = op->operands[1];
-    soffset = op->operands[2];
-    val = op->operands[3];
-    dwords = mem_attr_int(op, "dwords", 0);
-    vname = rocke_h_name(lw, val);
-    tmp = rocke_arena_printf(&lw->b->arena, "_ub_%s", vname);
-    if(dwords == 1)
-    {
-        rocke_h_emitf(lw,
-                      "unsigned int %s = 0; __builtin_memcpy(&%s, &%s, 4); "
-                      "__builtin_amdgcn_raw_buffer_store_b32(%s, %s, %s, %s, 0);",
-                      tmp,
-                      tmp,
-                      vname,
-                      tmp,
-                      rocke_h_name(lw, rsrc),
-                      rocke_h_name(lw, voffset),
-                      rocke_h_name(lw, soffset));
-    }
-    else if(dwords == 2 || dwords == 4)
-    {
-        b_suffix = (dwords == 2) ? "_b64" : "_b128";
-        rocke_h_emitf(lw,
-                      "i32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
-                      "__builtin_amdgcn_raw_buffer_store%s(%s, %s, %s, %s, 0);",
-                      (long long)dwords,
-                      tmp,
-                      tmp,
-                      vname,
-                      (long long)dwords * 4,
-                      b_suffix,
-                      tmp,
-                      rocke_h_name(lw, rsrc),
-                      rocke_h_name(lw, voffset),
-                      rocke_h_name(lw, soffset));
-    }
-    else
-    {
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_KEY,
-                            "tile.buffer_store_vN_f16: unsupported dwords=%lld",
-                            (long long)dwords);
-    }
-    return lw->status;
+    return hip_buffer_store_typed(lw, op);
 }
 
 /* Python _op_tile_buffer_load_bf16 */
@@ -1546,171 +1641,25 @@ static rocke_status_t _op_tile_buffer_load_vN_bf16(rocke_h_lowerer_t* lw, const 
 /* Python _op_tile_buffer_store_bf16 */
 static rocke_status_t _op_tile_buffer_store_bf16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    rocke_value_t *rsrc, *voffset, *soffset, *val;
-    const char *vname, *tmp;
-    if(!rocke_h_live(lw))
-        return lw->status;
-    if(op->num_operands < 4)
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_store_bf16: too few operands");
-    rsrc = op->operands[0];
-    voffset = op->operands[1];
-    soffset = op->operands[2];
-    val = op->operands[3];
-    vname = rocke_h_name(lw, val);
-    tmp = rocke_arena_printf(&lw->b->arena, "_u16bf_%s", vname);
-    rocke_h_emitf(lw,
-                  "unsigned short %s = 0; __builtin_memcpy(&%s, &%s, 2); "
-                  "__builtin_amdgcn_raw_buffer_store_b16(%s, %s, %s, %s, 0);",
-                  tmp,
-                  tmp,
-                  vname,
-                  tmp,
-                  rocke_h_name(lw, rsrc),
-                  rocke_h_name(lw, voffset),
-                  rocke_h_name(lw, soffset));
-    return lw->status;
+    return hip_buffer_store_typed(lw, op);
 }
 
 /* Python _op_tile_buffer_store_vN_bf16 */
 static rocke_status_t _op_tile_buffer_store_vN_bf16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    rocke_value_t *rsrc, *voffset, *soffset, *val;
-    const char *vname, *b_suffix, *tmp;
-    int64_t dwords;
-    if(!rocke_h_live(lw))
-        return lw->status;
-    if(op->num_operands < 4)
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_store_vN_bf16: too few operands");
-    rsrc = op->operands[0];
-    voffset = op->operands[1];
-    soffset = op->operands[2];
-    val = op->operands[3];
-    dwords = mem_attr_int(op, "dwords", 0);
-    vname = rocke_h_name(lw, val);
-    tmp = rocke_arena_printf(&lw->b->arena, "_ubbf16_%s", vname);
-    if(dwords == 1)
-    {
-        rocke_h_emitf(lw,
-                      "unsigned int %s = 0; __builtin_memcpy(&%s, &%s, 4); "
-                      "__builtin_amdgcn_raw_buffer_store_b32(%s, %s, %s, %s, 0);",
-                      tmp,
-                      tmp,
-                      vname,
-                      tmp,
-                      rocke_h_name(lw, rsrc),
-                      rocke_h_name(lw, voffset),
-                      rocke_h_name(lw, soffset));
-    }
-    else if(dwords == 2 || dwords == 4)
-    {
-        b_suffix = (dwords == 2) ? "_b64" : "_b128";
-        rocke_h_emitf(lw,
-                      "i32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
-                      "__builtin_amdgcn_raw_buffer_store%s(%s, %s, %s, %s, 0);",
-                      (long long)dwords,
-                      tmp,
-                      tmp,
-                      vname,
-                      (long long)dwords * 4,
-                      b_suffix,
-                      tmp,
-                      rocke_h_name(lw, rsrc),
-                      rocke_h_name(lw, voffset),
-                      rocke_h_name(lw, soffset));
-    }
-    else
-    {
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_KEY,
-                            "tile.buffer_store_vN_bf16: unsupported dwords=%lld",
-                            (long long)dwords);
-    }
-    return lw->status;
+    return hip_buffer_store_typed(lw, op);
 }
 
 /* Python _op_tile_buffer_store_f32 */
 static rocke_status_t _op_tile_buffer_store_f32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    rocke_value_t *rsrc, *voffset, *soffset, *val;
-    const char *vname, *tmp;
-    if(!rocke_h_live(lw))
-        return lw->status;
-    if(op->num_operands < 4)
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_store_f32: too few operands");
-    rsrc = op->operands[0];
-    voffset = op->operands[1];
-    soffset = op->operands[2];
-    val = op->operands[3];
-    vname = rocke_h_name(lw, val);
-    tmp = rocke_arena_printf(&lw->b->arena, "_u32_%s", vname);
-    rocke_h_emitf(lw,
-                  "unsigned int %s = 0; __builtin_memcpy(&%s, &%s, 4); "
-                  "__builtin_amdgcn_raw_buffer_store_b32(%s, %s, %s, %s, 0);",
-                  tmp,
-                  tmp,
-                  vname,
-                  tmp,
-                  rocke_h_name(lw, rsrc),
-                  rocke_h_name(lw, voffset),
-                  rocke_h_name(lw, soffset));
-    return lw->status;
+    return hip_buffer_store_typed(lw, op);
 }
 
 /* Python _op_tile_buffer_store_vN_f32 */
 static rocke_status_t _op_tile_buffer_store_vN_f32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    rocke_value_t *rsrc, *voffset, *soffset, *val;
-    const char *vname, *b_suffix, *tmp;
-    int64_t dwords;
-    if(!rocke_h_live(lw))
-        return lw->status;
-    if(op->num_operands < 4)
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_store_vN_f32: too few operands");
-    rsrc = op->operands[0];
-    voffset = op->operands[1];
-    soffset = op->operands[2];
-    val = op->operands[3];
-    dwords = mem_attr_int(op, "dwords", 0);
-    vname = rocke_h_name(lw, val);
-    tmp = rocke_arena_printf(&lw->b->arena, "_ub32_%s", vname);
-    if(dwords == 1)
-    {
-        rocke_h_emitf(lw,
-                      "unsigned int %s = 0; __builtin_memcpy(&%s, &%s, 4); "
-                      "__builtin_amdgcn_raw_buffer_store_b32(%s, %s, %s, %s, 0);",
-                      tmp,
-                      tmp,
-                      vname,
-                      tmp,
-                      rocke_h_name(lw, rsrc),
-                      rocke_h_name(lw, voffset),
-                      rocke_h_name(lw, soffset));
-    }
-    else if(dwords == 2 || dwords == 4)
-    {
-        b_suffix = (dwords == 2) ? "_b64" : "_b128";
-        rocke_h_emitf(lw,
-                      "i32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
-                      "__builtin_amdgcn_raw_buffer_store%s(%s, %s, %s, %s, 0);",
-                      (long long)dwords,
-                      tmp,
-                      tmp,
-                      vname,
-                      (long long)dwords * 4,
-                      b_suffix,
-                      tmp,
-                      rocke_h_name(lw, rsrc),
-                      rocke_h_name(lw, voffset),
-                      rocke_h_name(lw, soffset));
-    }
-    else
-    {
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_KEY,
-                            "tile.buffer_store_vN_f32: unsupported dwords=%lld",
-                            (long long)dwords);
-    }
-    return lw->status;
+    return hip_buffer_store_typed(lw, op);
 }
 
 /* ============================ async DRAM->LDS =========================== */

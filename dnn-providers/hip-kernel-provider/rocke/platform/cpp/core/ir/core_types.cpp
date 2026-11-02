@@ -410,6 +410,114 @@ int rocke_i_buffer_op_bytes(const rocke_op_t* op, char* err, size_t err_cap)
         op->name, role, results ? op->results[0]->type : op->operands[3]->type, err, err_cap);
 }
 
+/* Python core/ir.py::_TYPED_BUFFER_STORE_DWORDS. */
+static const int64_t typed_buffer_store_dwords[] = {1, 2, 4};
+
+bool rocke_i_is_typed_buffer_store_dwords(int64_t dwords)
+{
+    for(int64_t admitted : typed_buffer_store_dwords)
+    {
+        if(admitted == dwords)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* typed_buffer_store_dwords as Python prints the tuple, "(1, 2, 4)", into `buf`. */
+static void typed_buffer_store_dwords_text(char* buf, size_t cap)
+{
+    size_t used = 0;
+    const char* separator = "(";
+    for(int64_t admitted : typed_buffer_store_dwords)
+    {
+        used += (size_t)snprintf(
+            buf + used, used < cap ? cap - used : 0, "%s%lld", separator, (long long)admitted);
+        separator = ", ";
+    }
+    snprintf(buf + used, used < cap ? cap - used : 0, ")");
+}
+
+/* Python core/ir.py::_typed_buffer_store_bytes; the texts are the Python engine's. */
+int rocke_i_typed_buffer_store_bytes(const rocke_op_t* op, char* err, size_t err_cap)
+{
+    char admitted[32];
+    int scalar_bytes = 0;
+    int64_t dwords;
+    switch(op->opcode)
+    {
+    case ROCKE_OP_TILE_BUFFER_STORE_F16:
+    case ROCKE_OP_TILE_BUFFER_STORE_BF16:
+        scalar_bytes = 2;
+        break;
+    case ROCKE_OP_TILE_BUFFER_STORE_F32:
+        scalar_bytes = 4;
+        break;
+    case ROCKE_OP_TILE_BUFFER_STORE_VN_F16:
+    case ROCKE_OP_TILE_BUFFER_STORE_VN_BF16:
+    case ROCKE_OP_TILE_BUFFER_STORE_VN_F32:
+        break;
+    default:
+        snprintf(err, err_cap, "%s is not a typed buffer store op", op->name);
+        return 0;
+    }
+    if(op->num_operands != 4 || op->num_results != 0)
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s: expected 4 operands / 0 results, got %d / %d",
+                 op->name,
+                 op->num_operands,
+                 op->num_results);
+        return 0;
+    }
+    if(scalar_bytes != 0)
+    {
+        return scalar_bytes;
+    }
+    typed_buffer_store_dwords_text(admitted, sizeof admitted);
+    if(!rocke_attr_get_int(&op->attrs, "dwords", &dwords))
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s failed - dwords attr missing, expected one of %s",
+                 op->name,
+                 admitted);
+        return 0;
+    }
+    if(!rocke_i_is_typed_buffer_store_dwords(dwords))
+    {
+        snprintf(err,
+                 err_cap,
+                 "%s failed - dwords=%lld, expected one of %s",
+                 op->name,
+                 (long long)dwords,
+                 admitted);
+        return 0;
+    }
+    return (int)(4 * dwords);
+}
+
+/* Python core/ir.py::_packed_atomic_add_value_error; the text is the Python engine's. */
+const char* rocke_i_packed_atomic_add_value_error(const char* elem_name,
+                                                  const rocke_type_t* value_type,
+                                                  char* buf,
+                                                  size_t cap)
+{
+    if(rocke_i_is_vector(value_type, elem_name, 2))
+    {
+        return NULL;
+    }
+    snprintf(buf,
+             cap,
+             "global_atomic_add_pk_%s expects <2 x %s> input, got %s",
+             elem_name,
+             elem_name,
+             value_type->name);
+    return buf;
+}
+
 /* Python core/ir.py::_global_ptr_offset_error; the texts are the Python engine's. */
 const char* rocke_i_global_ptr_offset_error(const rocke_type_t* ptr_type,
                                             const rocke_type_t* byte_off_type,

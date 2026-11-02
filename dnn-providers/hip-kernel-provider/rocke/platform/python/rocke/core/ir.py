@@ -904,6 +904,58 @@ def _buffer_op_bytes(op: Op) -> int:
     return _buffer_vector_bytes(op.name, role, access_type)
 
 
+# The dword counts a typed vector buffer store (``tile.buffer_store_vN_f16``,
+# ``_bf16``, ``_f32``) admits.
+_TYPED_BUFFER_STORE_DWORDS = (1, 2, 4)
+
+# The bytes each scalar typed buffer store moves.
+_TYPED_BUFFER_STORE_SCALAR_BYTES = {
+    "tile.buffer_store_f16": 2,
+    "tile.buffer_store_bf16": 2,
+    "tile.buffer_store_f32": 4,
+}
+
+_TYPED_BUFFER_STORE_VECTOR_OPS = (
+    "tile.buffer_store_vN_f16",
+    "tile.buffer_store_vN_bf16",
+    "tile.buffer_store_vN_f32",
+)
+
+
+def _typed_buffer_store_bytes(op: Op) -> int:
+    """The bytes a built typed buffer store moves: fixed for the scalar forms,
+    four per dword of the ``dwords`` attr for the vector forms, after its
+    operand and result counts (descriptor, vector offset, scalar offset,
+    value; no result) and its ``dwords`` attr: serialized IR reaches the HIP
+    lowerings, which use this rule, without passing the builder. The C++
+    engine (``rocke_i_typed_buffer_store_bytes``) refuses with the same
+    texts."""
+    if (
+        op.name not in _TYPED_BUFFER_STORE_SCALAR_BYTES
+        and op.name not in _TYPED_BUFFER_STORE_VECTOR_OPS
+    ):
+        raise ValueError(f"{op.name} is not a typed buffer store op")
+    if len(op.operands) != 4 or op.results:
+        raise ValueError(
+            f"{op.name}: expected 4 operands / 0 results, got {len(op.operands)} / "
+            f"{len(op.results)}"
+        )
+    if op.name in _TYPED_BUFFER_STORE_SCALAR_BYTES:
+        return _TYPED_BUFFER_STORE_SCALAR_BYTES[op.name]
+    if "dwords" not in op.attrs:
+        raise ValueError(
+            f"{op.name} failed - dwords attr missing, expected one of "
+            f"{_TYPED_BUFFER_STORE_DWORDS}"
+        )
+    dwords = int(op.attrs["dwords"])
+    if dwords not in _TYPED_BUFFER_STORE_DWORDS:
+        raise ValueError(
+            f"{op.name} failed - dwords={dwords}, expected one of "
+            f"{_TYPED_BUFFER_STORE_DWORDS}"
+        )
+    return 4 * dwords
+
+
 def _global_ptr_offset_error(
     ptr_type: Type, byte_off_type: Type, result_type: Optional[Type] = None
 ) -> Optional[str]:
@@ -978,6 +1030,27 @@ def _trap_op_error(op: "Op") -> Optional[str]:
     if op.operands or op.results or op.regions:
         return "trap takes no operands, results or regions"
     return None
+
+
+def _packed_atomic_add_value_error(elem: Type, value_type: Type) -> Optional[str]:
+    """The error for a ``global_atomic_add_pk_<elem>`` whose value has type
+    ``value_type``, or None when it is ``<2 x elem>``.
+
+    The builder and the HIP lowering, which addresses the value as one packed
+    pair, use this rule: serialized IR reaches the lowering without passing
+    the builder. The C++ engine (``rocke_i_packed_atomic_add_value_error``)
+    reports the same text.
+    """
+    if (
+        isinstance(value_type, VectorType)
+        and value_type.elem == elem
+        and value_type.count == 2
+    ):
+        return None
+    return (
+        f"global_atomic_add_pk_{elem.name} expects <2 x {elem.name}> input, "
+        f"got {value_type.name}"
+    )
 
 
 # The two branches of an scf.if_else, in region order.
@@ -2406,16 +2479,9 @@ class IRBuilder:
         """
         if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
             raise ValueError(f"unknown ordering {ordering!r}")
-        if not isinstance(value.type, VectorType):
-            raise ValueError(
-                f"global_atomic_add_pk_bf16 expects <2 x bf16> input, "
-                f"got {value.type.name}"
-            )
-        if value.type.elem != BF16 or value.type.count != 2:
-            raise ValueError(
-                f"global_atomic_add_pk_bf16 expects <2 x bf16> input, "
-                f"got {value.type.name}"
-            )
+        value_error = _packed_atomic_add_value_error(BF16, value.type)
+        if value_error is not None:
+            raise ValueError(value_error)
         return self._op(
             "memref.global_atomic_add_pk_bf16",
             [ptr, idx, value],
@@ -2441,16 +2507,9 @@ class IRBuilder:
         """
         if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
             raise ValueError(f"unknown ordering {ordering!r}")
-        if not isinstance(value.type, VectorType):
-            raise ValueError(
-                f"global_atomic_add_pk_f16 expects <2 x f16> input, "
-                f"got {value.type.name}"
-            )
-        if value.type.elem != F16 or value.type.count != 2:
-            raise ValueError(
-                f"global_atomic_add_pk_f16 expects <2 x f16> input, "
-                f"got {value.type.name}"
-            )
+        value_error = _packed_atomic_add_value_error(F16, value.type)
+        if value_error is not None:
+            raise ValueError(value_error)
         return self._op(
             "memref.global_atomic_add_pk_f16",
             [ptr, idx, value],
@@ -5759,7 +5818,7 @@ class IRBuilder:
         ``cachepolicy`` is the intrinsic's aux immediate (on gfx12: bits[0:2]
         = th, bits[3:4] = scope; 1 = ``th:TH_STORE_NT``). 0 records nothing.
         """
-        if dwords not in (1, 2, 4):
+        if dwords not in _TYPED_BUFFER_STORE_DWORDS:
             raise ValueError(f"buffer_store dwords must be 1, 2, or 4 (got {dwords})")
         self._op(
             "tile.buffer_store_vN_f16",
@@ -5818,7 +5877,7 @@ class IRBuilder:
         """Vectorised bf16 buffer store. dwords in {1, 2, 4}; each dword
         holds two bf16 elements. OOB voffsets are silently dropped.
         ``cachepolicy`` as for :meth:`buffer_store_vN_f16`."""
-        if dwords not in (1, 2, 4):
+        if dwords not in _TYPED_BUFFER_STORE_DWORDS:
             raise ValueError(
                 f"buffer_store_vN_bf16 dwords must be 1, 2, or 4 (got {dwords})"
             )
@@ -5844,7 +5903,7 @@ class IRBuilder:
     ) -> None:
         """Vectorised f32 buffer store. n in {1, 2, 4}; each f32 = 1 dword.
         OOB voffsets are silently dropped (buffer rsrc bounds-check)."""
-        if n not in (1, 2, 4):
+        if n not in _TYPED_BUFFER_STORE_DWORDS:
             raise ValueError(f"buffer_store_vN_f32 n must be 1, 2, or 4 (got {n})")
         self._op(
             "tile.buffer_store_vN_f32",

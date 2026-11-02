@@ -25,6 +25,8 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    BF16,
+    F16,
     F32,
     F64,
     I32,
@@ -39,8 +41,10 @@ from .ir import (
     Value,
     VectorType,
     _buffer_op_bytes,
+    _typed_buffer_store_bytes,
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
+    _packed_atomic_add_value_error,
     _if_else_branch_yield,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -83,8 +87,7 @@ def _hip_scalar_type(type_name: str) -> str:
 
     Every handler that needs a scalar spelling asks here, and
     :func:`_type_to_hip` sends here every type it does not compose itself, so
-    one message refuses them all (only the ``scf.for`` iter-arg declarations
-    fall back to ``auto``). A type with no HIP spelling -- a logical sub-byte
+    one message refuses them all. A type with no HIP spelling -- a logical sub-byte
     type such as ``i4`` whose values travel packed, or a vector of an unmapped
     element -- is refused with the HIP twin of the LLVM lowering's ``no LLVM
     mapping for type <name>``.
@@ -144,6 +147,75 @@ def _type_to_hip(t) -> str:
         # the kernel; the value at the use site is a typed pointer-ish.
         return f"{_type_to_hip(t.elem)}*"
     return _hip_scalar_type(t.name)
+
+
+def _retyped(ptr: Value, value_type: Type) -> bool:
+    """True when a global access moves ``value_type`` through a pointer to
+    another element type.
+
+    The LLVM route steps a global pointer by the type of the value it loads,
+    stores or adds (``getelementptr <value type>``), whatever the pointer's
+    declared element type; C++ indexes by the pointer's type, so the HIP text
+    must reinterpret the pointer whenever the two differ.
+    """
+    return isinstance(ptr.type, PtrType) and ptr.type.pointee.name != value_type.name
+
+
+def _elem_ptr(ptr: Value, value_type: Type) -> str:
+    """Spell ``ptr`` as a pointer to ``value_type`` (see :func:`_retyped`).
+
+    ptr<f32>, f32 value     ->  C
+    ptr<f32>, f32x8 value   ->  reinterpret_cast<f32x8*>(C)
+    """
+    if _retyped(ptr, value_type):
+        return f"reinterpret_cast<{_type_to_hip(value_type)}*>({_name(ptr)})"
+    return _name(ptr)
+
+
+def _packed_atomic_slot(ptr: Value, idx: Value, val: Value, elem: Type) -> str:
+    """Address of a packed two-element atomic add of ``elem``, typed as the
+    packed value; a value that is not ``<2 x elem>`` is refused first
+    (:func:`_packed_atomic_add_value_error`).
+
+    The LLVM route steps the pointer by the element (``getelementptr half``)
+    and adds the whole ``<2 x half>``, which the target needs aligned to its
+    size. Clang takes an atomic builtin's alignment from the pointer type, so
+    the address is cast to the packed type: a ``fp16*`` would ask for a 2-byte
+    aligned 4-byte atomic, which clang lowers to a compare-exchange library
+    call (gfx942, gfx950) or refuses (gfx1250).
+    """
+    value_error = _packed_atomic_add_value_error(elem, val.type)
+    if value_error is not None:
+        raise ValueError(value_error)
+    step = _elem_ptr(ptr, elem)
+    return f"reinterpret_cast<{_type_to_hip(val.type)}*>({step} + {_name(idx)})"
+
+
+def _retyped_access(op: Op, ptr: Value, value_type: Type) -> tuple[str, str]:
+    """How the global load or store ``op`` reaches a ``value_type`` value
+    through a pointer to another element type (see :func:`_retyped`): the
+    declaration of an alias of the value type at the op's ``align`` (1 when
+    absent, the LLVM route's default) that may alias any type, and ``ptr``
+    cast to a pointer to that alias.
+
+    Indexing the cast pointer moves the value's bits at the op's alignment,
+    as the LLVM route's ``load``/``store <value type>, align N`` does.
+    Assigning through the pointer's own element would convert the value, and
+    a plain pointer to the value type would claim that type's alignment and
+    its aliasing rules. C++ accepts a typedef repeated with the same meaning,
+    so each access declares the alias it uses.
+
+    ptr<f32> S, f32x8 value, align 4  ->
+        ("typedef f32x8 f32x8_align4 __attribute__((aligned(4), may_alias));",
+         "reinterpret_cast<f32x8_align4*>(S)")
+    """
+    hip_type = _type_to_hip(value_type)
+    align = int(op.attrs.get("align", 1))
+    alias = f"{hip_type}_align{align}"
+    declaration = (
+        f"typedef {hip_type} {alias} __attribute__((aligned({align}), may_alias));"
+    )
+    return declaration, f"reinterpret_cast<{alias}*>({_name(ptr)})"
 
 
 # Compilable-HIP prologue. Pasted at the top of every lowered source so
@@ -253,6 +325,14 @@ _HIP_BUFFER_ACCESS = {
     8: ("_b64", "i32x2"),
     16: ("_b128", "i32x4"),
 }
+
+
+def _hip_buffer_access(op: Op, nbytes: int) -> tuple[str, str]:
+    """The raw buffer builtin's suffix and integer type that move ``nbytes``
+    for the buffer op ``op`` (:data:`_HIP_BUFFER_ACCESS`)."""
+    if nbytes not in _HIP_BUFFER_ACCESS:
+        raise ValueError(f"{op.name}: no buffer access form for {nbytes} bytes")
+    return _HIP_BUFFER_ACCESS[nbytes]
 
 
 def _nontemporal(op: Op) -> bool:
@@ -1196,13 +1276,16 @@ class _Lowerer:
         self._emit(f"int64_t {_name(op.result)} = {_name(base)} + {_name(off)};")
 
     def _op_tile_global_ptr_add(self, op: Op) -> None:
-        # ptr + byte_off as a new global pointer (byte arithmetic). The
-        # result feeds make_buffer_rsrc (which casts to void*), so a char*
-        # is the right C++ type. byte_off is i64 -> no 2 GiB overflow.
+        # ptr + byte_off as a new global pointer: byte arithmetic (an
+        # inbounds i8 step, as the LLVM route's GEP), then the result keeps
+        # the pointer's element type, so loads, stores and atomics through
+        # it index elements as they do on the operand. byte_off is i64 ->
+        # no 2 GiB overflow.
         ptr, off = op.operands
+        hip_type = _type_to_hip(op.result.type)
         self._emit(
-            f"const char* {_name(op.result)} = "
-            f"(const char*){_name(ptr)} + (int64_t){_name(off)};"
+            f"{hip_type} {_name(op.result)} = "
+            f"({hip_type})((char*){_name(ptr)} + (int64_t){_name(off)});"
         )
 
     def _op_tile_global_ptr_offset(self, op: Op) -> None:
@@ -1269,7 +1352,7 @@ class _Lowerer:
         nbytes = _buffer_op_bytes(op)
         rsrc, voffset, soffset = op.operands
         result_type = op.result.type
-        suffix, raw_t = _HIP_BUFFER_ACCESS[nbytes]
+        suffix, raw_t = _hip_buffer_access(op, nbytes)
         tmp = f"_blraw_{_name(op.result).lstrip('%')}"
         self._emit(
             f"{raw_t} {tmp} = __builtin_amdgcn_raw_buffer_load{suffix}("
@@ -1280,18 +1363,25 @@ class _Lowerer:
             f"__builtin_memcpy(&{_name(op.result)}, &{tmp}, {nbytes});"
         )
 
-    def _op_tile_buffer_store_vN(self, op: Op) -> None:
-        # Dtype-generic vectorised buffer store: the value copied into one
-        # integer of its width (_HIP_BUFFER_ACCESS) and stored. The braces
-        # scope the temporary, so two stores of one value do not redeclare it.
-        nbytes = _buffer_op_bytes(op)
+    def _emit_raw_buffer_store(self, op: Op, nbytes: int) -> None:
+        """Store the buffer store ``op``'s value (operands: descriptor, vector
+        offset, scalar offset, value) as one raw access of ``nbytes``: the
+        value's bytes copied into the integer of that width
+        (:func:`_hip_buffer_access`) and stored. The braces scope the
+        temporary, so two stores of one value in a block do not redeclare it.
+        Each caller has checked the operand count with its byte count.
+        """
         rsrc, voffset, soffset, val = op.operands
-        suffix, raw_t = _HIP_BUFFER_ACCESS[nbytes]
+        suffix, raw_t = _hip_buffer_access(op, nbytes)
         self._emit(
             f"{{ {raw_t} _bs; __builtin_memcpy(&_bs, &{_name(val)}, {nbytes}); "
             f"__builtin_amdgcn_raw_buffer_store{suffix}(_bs, "
             f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0); }}"
         )
+
+    def _op_tile_buffer_store_vN(self, op: Op) -> None:
+        # Dtype-generic vectorised buffer store of the value's width.
+        self._emit_raw_buffer_store(op, _buffer_op_bytes(op))
 
     def _op_tile_buffer_load(self, op: Op) -> None:
         # Dtype-generic scalar buffer load.
@@ -1325,37 +1415,10 @@ class _Lowerer:
             )
 
     def _op_tile_buffer_store_vN_f16(self, op: Op) -> None:
-        # Store ops have no SSA result; use the value operand's name to
-        # disambiguate per-call temporaries (multiple store_vN ops in the
-        # same block would otherwise redeclare ``_ub_x``).
-        rsrc, voffset, soffset, val = op.operands
-        dwords = int(op.attrs["dwords"])
-        tmp = f"_ub_{_name(val).lstrip('%')}"
-        if dwords == 1:
-            self._emit(
-                f"unsigned int {tmp} = 0; "
-                f"__builtin_memcpy(&{tmp}, &{_name(val)}, 4); "
-                f"__builtin_amdgcn_raw_buffer_store_b32({tmp}, "
-                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
-            )
-        else:
-            b_suffix = {2: "_b64", 4: "_b128"}[dwords]
-            self._emit(
-                f"i32x{dwords} {tmp}; "
-                f"__builtin_memcpy(&{tmp}, &{_name(val)}, {dwords * 4}); "
-                f"__builtin_amdgcn_raw_buffer_store{b_suffix}({tmp}, "
-                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
-            )
+        self._emit_raw_buffer_store(op, _typed_buffer_store_bytes(op))
 
     def _op_tile_buffer_store_f16(self, op: Op) -> None:
-        rsrc, voffset, soffset, val = op.operands
-        tmp = f"_u16_{_name(val).lstrip('%')}"
-        self._emit(
-            f"unsigned short {tmp} = 0; "
-            f"__builtin_memcpy(&{tmp}, &{_name(val)}, 2); "
-            f"__builtin_amdgcn_raw_buffer_store_b16({tmp}, "
-            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
-        )
+        self._emit_raw_buffer_store(op, _typed_buffer_store_bytes(op))
 
     def _op_tile_buffer_load_bf16(self, op: Op) -> None:
         rsrc, voffset, soffset = op.operands
@@ -1387,64 +1450,16 @@ class _Lowerer:
         )
 
     def _op_tile_buffer_store_bf16(self, op: Op) -> None:
-        rsrc, voffset, soffset, val = op.operands
-        tmp = f"_u16bf_{_name(val).lstrip('%')}"
-        self._emit(
-            f"unsigned short {tmp} = 0; "
-            f"__builtin_memcpy(&{tmp}, &{_name(val)}, 2); "
-            f"__builtin_amdgcn_raw_buffer_store_b16({tmp}, "
-            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
-        )
+        self._emit_raw_buffer_store(op, _typed_buffer_store_bytes(op))
 
     def _op_tile_buffer_store_vN_bf16(self, op: Op) -> None:
-        rsrc, voffset, soffset, val = op.operands
-        dwords = int(op.attrs["dwords"])
-        tmp = f"_ubbf16_{_name(val).lstrip('%')}"
-        if dwords == 1:
-            self._emit(
-                f"unsigned int {tmp} = 0; "
-                f"__builtin_memcpy(&{tmp}, &{_name(val)}, 4); "
-                f"__builtin_amdgcn_raw_buffer_store_b32({tmp}, "
-                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
-            )
-        else:
-            b_suffix = {2: "_b64", 4: "_b128"}[dwords]
-            self._emit(
-                f"i32x{dwords} {tmp}; "
-                f"__builtin_memcpy(&{tmp}, &{_name(val)}, {dwords * 4}); "
-                f"__builtin_amdgcn_raw_buffer_store{b_suffix}({tmp}, "
-                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
-            )
+        self._emit_raw_buffer_store(op, _typed_buffer_store_bytes(op))
 
     def _op_tile_buffer_store_f32(self, op: Op) -> None:
-        rsrc, voffset, soffset, val = op.operands
-        tmp = f"_u32_{_name(val).lstrip('%')}"
-        self._emit(
-            f"unsigned int {tmp} = 0; "
-            f"__builtin_memcpy(&{tmp}, &{_name(val)}, 4); "
-            f"__builtin_amdgcn_raw_buffer_store_b32({tmp}, "
-            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
-        )
+        self._emit_raw_buffer_store(op, _typed_buffer_store_bytes(op))
 
     def _op_tile_buffer_store_vN_f32(self, op: Op) -> None:
-        rsrc, voffset, soffset, val = op.operands
-        dwords = int(op.attrs["dwords"])
-        tmp = f"_ub32_{_name(val).lstrip('%')}"
-        if dwords == 1:
-            self._emit(
-                f"unsigned int {tmp} = 0; "
-                f"__builtin_memcpy(&{tmp}, &{_name(val)}, 4); "
-                f"__builtin_amdgcn_raw_buffer_store_b32({tmp}, "
-                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
-            )
-        else:
-            b_suffix = {2: "_b64", 4: "_b128"}[dwords]
-            self._emit(
-                f"i32x{dwords} {tmp}; "
-                f"__builtin_memcpy(&{tmp}, &{_name(val)}, {dwords * 4}); "
-                f"__builtin_amdgcn_raw_buffer_store{b_suffix}({tmp}, "
-                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
-            )
+        self._emit_raw_buffer_store(op, _typed_buffer_store_bytes(op))
 
     def _op_tile_async_buffer_load_lds_addr(self, op: Op) -> None:
         # Call the LLVM intrinsic through the prologue's ``_llvm_amdgcn_*``
@@ -2105,7 +2120,14 @@ class _Lowerer:
     def _op_memref_global_load_typed(self, op: Op) -> None:
         ptr, idx = op.operands
         cpp_t = _type_to_hip(op.result.type)
-        self._emit(f"{cpp_t} {_name(op.result)} = {_name(ptr)}[{_name(idx)}];")
+        if not _retyped(ptr, op.result.type):
+            self._emit(f"{cpp_t} {_name(op.result)} = {_name(ptr)}[{_name(idx)}];")
+            return
+        # A value of another type than the pointer's element.
+        alias_declaration, access = _retyped_access(op, ptr, op.result.type)
+        self._emit(
+            f"{alias_declaration} {cpp_t} {_name(op.result)} = {access}[{_name(idx)}];"
+        )
 
     def _op_memref_global_atomic_add(self, op: Op) -> None:
         """Lower ``global_atomic_add`` via HIP's ``atomicAdd``.
@@ -2118,8 +2140,8 @@ class _Lowerer:
         ptr, idx, val = op.operands
         cpp_t = _type_to_hip(val.type)
         self._emit(
-            f"{cpp_t} {_name(op.result)} = atomicAdd(&{_name(ptr)}[{_name(idx)}], "
-            f"{_name(val)});"
+            f"{cpp_t} {_name(op.result)} = "
+            f"atomicAdd(&{_elem_ptr(ptr, val.type)}[{_name(idx)}], {_name(val)});"
         )
 
     def _op_memref_fence(self, op: Op) -> None:
@@ -2162,7 +2184,7 @@ class _Lowerer:
         self._emit(
             f"bf16x2 {_name(op.result)} = "
             f"__builtin_amdgcn_global_atomic_fadd_v2bf16("
-            f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
+            f"{_packed_atomic_slot(ptr, idx, val, BF16)}, {_name(val)});"
         )
 
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
@@ -2177,7 +2199,7 @@ class _Lowerer:
         self._emit(
             f"half2 {_name(op.result)} = "
             f"__builtin_amdgcn_global_atomic_fadd_v2f16("
-            f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
+            f"{_packed_atomic_slot(ptr, idx, val, F16)}, {_name(val)});"
         )
 
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
@@ -2240,7 +2262,12 @@ class _Lowerer:
 
     def _op_memref_global_store_typed(self, op: Op) -> None:
         ptr, idx, val = op.operands
-        self._emit(f"{_name(ptr)}[{_name(idx)}] = {_name(val)};")
+        if not _retyped(ptr, val.type):
+            self._emit(f"{_name(ptr)}[{_name(idx)}] = {_name(val)};")
+            return
+        # A value of another type than the pointer's element.
+        alias_declaration, access = _retyped_access(op, ptr, val.type)
+        self._emit(f"{alias_declaration} {access}[{_name(idx)}] = {_name(val)};")
 
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands
@@ -2277,7 +2304,9 @@ class _Lowerer:
 
     def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
         ptr, idx, val = op.operands
-        self._emit(f"atomicAdd({_name(ptr)} + {_name(idx)}, {_name(val)});")
+        self._emit(
+            f"atomicAdd({_elem_ptr(ptr, val.type)} + {_name(idx)}, {_name(val)});"
+        )
 
     # -------------------- tile: LDS vector load / store --------------------
 
@@ -2836,25 +2865,19 @@ class _Lowerer:
         iv_name = op.attrs["iv"][1:]
         iv_ty = _hip_scalar_type(op.attrs["iv_type"])
 
-        def cpp_type_for(type_name: str) -> str:
-            if type_name.startswith("vec<f32x"):
-                inner = type_name[len("vec<f32x") : -1]
-                return f"f32x{int(inner)}"
-            if type_name.startswith("vec<f16x"):
-                inner = type_name[len("vec<f16x") : -1]
-                return f"f16x{int(inner)}"
-            return _HIP_TYPE.get(type_name, "auto")
-
-        # Declare for-op results in the enclosing scope so subsequent uses see them.
-        for meta, result in zip(iter_meta, op.results):
-            self._emit(f"{cpp_type_for(meta['type'])} {_name(result)};")
+        # Declare for-op results in the enclosing scope so subsequent uses
+        # see them, one per iter arg. Each is spelled with its result's type:
+        # a declaration without an initializer cannot use ``auto``.
+        for result in op.results[: len(iter_meta)]:
+            self._emit(f"{_type_to_hip(result.type)} {_name(result)};")
 
         # Inner C++ block: iter_args, the loop, and assignment back to results.
+        # Each carried variable takes its result's type.
         self._emit("{")
         self._push_indent()
-        for meta, init in zip(iter_meta, iter_inits):
+        for meta, init, result in zip(iter_meta, iter_inits, op.results):
             self._emit(
-                f"{cpp_type_for(meta['type'])} {meta['name'][1:]} = {_name(init)};"
+                f"{_type_to_hip(result.type)} {meta['name'][1:]} = {_name(init)};"
             )
         self._emit(
             f"for({iv_ty} {iv_name} = {_name(lower)}; {iv_name} < {_name(upper)}; {iv_name} += {_name(step)}) {{"
