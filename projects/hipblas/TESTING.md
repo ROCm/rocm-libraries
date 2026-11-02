@@ -407,7 +407,7 @@ Invalid YAML fails the `hipblas-test-data` custom command, because `hipblas_gent
 
 ## Pre-submit / CI Gates
 
-hipBLAS is exercised by TheRock (via `test/therock/test_hipblas.py`) and by Math CI (Jenkins). Job definitions for Jenkins are not in this repository. Exact required GitHub checks depend on branch protection.
+hipBLAS is exercised by TheRock (via `test/therock/test_runner.py`) and by Math CI (Jenkins). Job definitions for Jenkins are not in this repository. Exact required GitHub checks depend on branch protection.
 
 ### Validation Gates and Ownership
 
