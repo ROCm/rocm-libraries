@@ -800,6 +800,8 @@ class SizeMapping:
                  'tileProcessingStrategy',
                  'workAssignment',
                  'streamKAtomic',
+                 'streamKFixupTreeReduction',
+                 'spaceFillingAlgo',
                  'prefetchAcrossPersistent',
                  'sourceKernel',
                  'globalAccumulation',
@@ -908,6 +910,9 @@ class SizeMapping:
                    tileProcessingStrategy   = d['TileProcessingStrategy'],
                    workAssignment           = d['WorkAssignment'],
                    streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
+                   streamKFixupTreeReduction = d.get('StreamKFixupTreeReduction', 0),
+                   spaceFillingAlgo         = sum(o << (4 * i) for i, o in enumerate(d.get('SpaceFillingAlgo', []))) \
+                                              | (len(d.get('SpaceFillingAlgo', [])) << 28),
                    prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',

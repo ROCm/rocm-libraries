@@ -24,7 +24,8 @@ from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersisten
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label, RegSet
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
-from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive
+from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive, \
+    VFmaMixF32, VCvtF32toF16, VPackF16toB32, VLShiftLeftB32
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
@@ -37,6 +38,7 @@ from .WorkAssignment import QueuePartition, StaticPartition
 from .ClusterTileMapping import ClusterTileMapping
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
+from ..KernelWriterModules import hasPackedAccumulators
 import abc
 
 from copy import deepcopy
@@ -313,6 +315,27 @@ class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
         return MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV)
 
 
+# ----------------------------------------------------------------------------
+# f16 accumulation (packed accumulators, two f16 values per accumulator VGPR)
+#
+# The partials of a split tile are added in f32 in K order and the sum is rounded once to f16, as the reduction
+# kernel adds GSU slices. A slot keeps the accumulator register layout, so no arch remapping is needed and every
+# workgroup of a tile agrees on it: dword d of thread t, in its group [d0, d0 + w) of w <= 4 dwords, is at byte
+# 4 * (d0 * NumThreads + t * w + d - d0). Linear slots hold the f16 accumulators; tree slots hold the f32 sums, two
+# dwords per accumulator dword, over twice as many dwords. The fixups work on blocks of accumulator dwords so the
+# f32 sums of a whole tile never have to be live at once.
+# ----------------------------------------------------------------------------
+_F16_FIXUP_BLOCK_DWORDS = 8
+
+def _skF16Groups(numDwords):
+    groups, d = [], 0
+    for w in (4, 2, 1):
+        while numDwords - d >= w and (w == 4 or numDwords - d < 2 * w):
+            groups.append((d, w))
+            d += w
+    return groups
+
+
 class StreamK(TileProcessingStrategy):
     kernel = {"TileProcessingStrategy": "StreamK"}
     """
@@ -345,6 +368,145 @@ class StreamK(TileProcessingStrategy):
 
     def __call__(self):
         assert(0)
+
+    def _skF16SlotIo(self, writer, kernel, load, regOf, groups, sOff, comment):
+        """Loads or stores the slot dwords of `groups` at SrdWS; regOf(d0) is the first register of a group."""
+        module = Module("StreamK f16 slot io")
+        scope = CacheScope.SCOPE_DEV if writer.states.archCaps["DefaultScopeIsCULocal"] else CacheScope.SCOPE_NONE
+        vOff = {}
+        for w in sorted({w for _, w in groups}):
+            vOff[w] = writer.vgprPool.checkOut(1, "StreamK f16 slot offset")
+            module.add(VLShiftLeftB32(dst=vgpr(vOff[w]), shiftHex=hex(log2(4 * w)), src=vgpr("Serial"),
+                                      comment="thread offset in a group of %u dwords" % w))
+        for d0, w in groups:
+            module.add(SMovB32(dst=sgpr(sOff), src=hex(4 * d0 * kernel["NumThreads"]), comment="group at dword %u" % d0))
+            if load:
+                module.add(writer.chooseGlobalRead(True, 4 * w, regOf(d0), vgpr(vOff[w]), sgpr("SrdWS", 4), sgpr(sOff), 0,
+                                                   glc=True, slc=True, scope=scope, comment=comment))
+            else:
+                module.add(writer.chooseGlobalWrite(True, 4 * w, regOf(d0), w, vgpr(vOff[w]), sgpr("SrdWS", 4), 0,
+                                                    soffset=sgpr(sOff), glc=True, slc=True, scope=scope, comment=comment))
+        for v in vOff.values():
+            writer.vgprPool.checkIn(v)
+        return module
+
+    @staticmethod
+    def _skF16AccToSum(sumBase, d0, numDwords, sNegZero=None):
+        """f32 sums of the f16 values of accumulator dwords [d0, d0 + numDwords): from -0.0 (the identity of f32
+        addition) when sNegZero is given, else added to the sums."""
+        module = Module("StreamK f16 accumulators to f32")
+        for i in range(numDwords):
+            for h in range(2):
+                s = sumBase + 2 * i + h
+                module.add(VFmaMixF32(dst=vgpr(s), src0=vgpr("ValuC+%u" % (d0 + i)), src1="1.0",
+                                      src2=sgpr(sNegZero) if sNegZero is not None else vgpr(s),
+                                      vop3=VOP3PModifiers(op_sel=[h, 0, 0], op_sel_hi=[1, 1, 0]), comment="own partial in f32"))
+        return module
+
+    @staticmethod
+    def _skF16AddPartial(sumBase, partialBase, numDwords, f32Slots):
+        module = Module("StreamK f16 add partial")
+        for i in range(numDwords):
+            for h in range(2):
+                s = sumBase + 2 * i + h
+                if f32Slots:
+                    module.add(VAddF32(dst=vgpr(s), src0=vgpr(s), src1=vgpr(partialBase + 2 * i + h), comment="add f32 partial sum"))
+                else:
+                    module.add(VFmaMixF32(dst=vgpr(s), src0=vgpr(partialBase + i), src1="1.0", src2=vgpr(s),
+                                          vop3=VOP3PModifiers(op_sel=[h, 0, 0], op_sel_hi=[1, 1, 0]), comment="add f16 partial in f32"))
+        return module
+
+    @staticmethod
+    def _skF16SumToAcc(sumBase, d0, numDwords):
+        module = Module("StreamK f16 round sums")
+        for i in range(numDwords):
+            s = sumBase + 2 * i
+            module.add(VCvtF32toF16(dst=vgpr(s), src=vgpr(s), comment="round the sum to f16"))
+            module.add(VCvtF32toF16(dst=vgpr(s + 1), src=vgpr(s + 1), comment="round the sum to f16"))
+            module.add(VPackF16toB32(dst=vgpr("ValuC+%u" % (d0 + i)), src0=vgpr(s), src1=vgpr(s + 1), comment="rounded sums"))
+        return module
+
+    def _skF16Fixup(self, writer, kernel, sFirst, sEnd, ownFirst, tree, sIdx=None):
+        """Linear (tree=False): adds slots sFirst .. sEnd - 1, at least one, in that order after this workgroup's own
+        partial when ownFirst, else before it, and rounds the sums into the accumulators.
+        Tree: adds the f32 slots of partners sIdx + 1, sIdx + 2, sIdx + 4, ... below sIdx + sEnd to its own partial;
+        the workgroup that started the tile rounds the sums into its accumulators, any other stores them in slot sIdx."""
+        module = Module("StreamK f16 %s fixup" % ("tree" if tree else "linear"))
+        numDwords = writer.states.c.numVgprValu
+        assert numDwords * 4 * kernel["NumThreads"] == kernel["MacroTile0"] * kernel["MacroTile1"] * writer.states.bpeCinternal
+        slotDwords = 2 * numDwords if tree else numDwords
+        groups = _skF16Groups(slotDwords)
+        blockDwords = min(numDwords, _F16_FIXUP_BLOCK_DWORDS)
+        sums = writer.vgprPool.checkOutAligned(2 * blockDwords, 2, "StreamK f16 sums")
+        partial = writer.vgprPool.checkOutAligned(2 * blockDwords if tree else blockDwords, 2, "StreamK f16 partial")
+        sTmp = writer.sgprPool.checkOut(3, "StreamK f16 fixup")
+        sNegZero, sPeer, sOff = sTmp, sTmp + 1, sTmp + 2
+        elemBytes = 4 if tree else None
+        module.add(SMovB32(dst=sgpr(sNegZero), src=hex(0x80000000), comment="-0.0"))
+        for b0 in range(0, numDwords, blockDwords):
+            nb = min(blockDwords, numDwords - b0)
+            s0, s1 = (2 * b0, 2 * (b0 + nb)) if tree else (b0, b0 + nb)
+            blockGroups = [g for g in groups if s0 <= g[0] < s1]
+            if ownFirst:
+                module.add(self._skF16AccToSum(sums, b0, nb, sNegZero))
+            else:
+                for j in range(2 * nb):
+                    module.add(VMovB32(dst=vgpr(sums + j), src=sgpr(sNegZero), comment="-0.0"))
+            loop = Label(writer.labels.getNameInc("SK_F16_AddPartial"), "")
+            done = Label(writer.labels.getNameInc("SK_F16_AddPartialEnd"), "")
+            module.add(SMovB32(dst=sgpr(sPeer), src=1 if tree else sgpr(sFirst), comment="first partial"))
+            if tree:
+                module.add(SCmpLtU32(src0=sgpr(sPeer), src1=sgpr(sEnd), comment="any partner?"))
+                module.add(SCBranchSCC0(labelName=done.getLabelName(), comment="no partner"))
+            module.add(loop)
+            if tree:
+                module.add(SAddU32(dst=sgpr(sOff), src0=sgpr(sIdx), src1=sgpr(sPeer), comment="partner"))
+                module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sOff), elemBytes=elemBytes))
+            else:
+                module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sPeer)))
+            module.add(self._skF16SlotIo(writer, kernel, True, lambda d: partial + d - s0, blockGroups, sOff, "load partial"))
+            module.add(SWaitCnt(vlcnt=0, comment="partial loaded"))
+            module.add(self._skF16AddPartial(sums, partial, nb, tree))
+            if tree:
+                module.add(SLShiftLeftB32(dst=sgpr(sPeer), src=sgpr(sPeer), shiftHex=1, comment="next partner"))
+            else:
+                module.add(SAddU32(dst=sgpr(sPeer), src0=sgpr(sPeer), src1=1, comment="next partial"))
+            module.add(SCmpLtU32(src0=sgpr(sPeer), src1=sgpr(sEnd), comment="more partials?"))
+            module.add(SCBranchSCC1(labelName=loop.getLabelName(), comment="add the next partial"))
+            module.add(done)
+            if not ownFirst:
+                module.add(self._skF16AccToSum(sums, b0, nb))
+            if tree:
+                storeLabel = Label(writer.labels.getNameInc("SK_F16_StoreSums"), "")
+                nextLabel = Label(writer.labels.getNameInc("SK_F16_BlockEnd"), "")
+                module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
+                module.add(SCBranchSCC0(labelName=storeLabel.getLabelName(), comment="no: store the sums"))
+                module.add(self._skF16SumToAcc(sums, b0, nb))
+                module.add(SBranch(labelName=nextLabel.getLabelName(), comment="block done"))
+                module.add(storeLabel)
+                module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx), elemBytes=elemBytes))
+                module.add(self._skF16SlotIo(writer, kernel, False, lambda d: sums + d - s0, blockGroups, sOff, "store f32 sums"))
+                module.add(nextLabel)
+            else:
+                module.add(self._skF16SumToAcc(sums, b0, nb))
+        writer.sgprPool.checkIn(sTmp)
+        writer.vgprPool.checkIn(partial)
+        writer.vgprPool.checkIn(sums)
+        return module
+
+    def _skF16PartialsData(self, writer, kernel):
+        """Stores the f16 accumulators in the slot at SrdWS; the static tree fixup has already stored its f32 sums."""
+        module = Module("StreamK f16 partials")
+        def store(mod):
+            sOff = writer.sgprPool.checkOut(1, "StreamK f16 partials")
+            mod.add(self._skF16SlotIo(writer, kernel, False, lambda d: "ValuC+%u" % d, _skF16Groups(writer.states.c.numVgprValu),
+                                      sOff, "store f16 partial"))
+            writer.sgprPool.checkIn(sOff)
+        if not kernel["StreamKFixupTreeReduction"] or hasDynamicAssignment(kernel):
+            store(module)
+        elif hasHybridAssignment(kernel):
+            Component.WorkAssignment.find(writer).dispatch(writer, module, "F16Partials", store, lambda mod: None)
+        return module
 
     def tileWork(self, kernel):
         completion = ("StreamKTileIdx", "StreamKPartialIdx") if hasDynamicAssignment(kernel) or hasHybridAssignment(kernel) else ()
@@ -1289,7 +1451,8 @@ class StreamK(TileProcessingStrategy):
             # First, jump to partial write if (partialIdx//2)*2 != partialIdx, i.e. branch if last bit is 1
             module.add(SAndB32(dst=sgpr(tmpSgpr+0), src0=sgpr(sPartialIdx), src1=1))
             module.add(SCmpEQU32(src0=sgpr(tmpSgpr+0), src1=1, comment="partialIdx&1==1?"))
-            module.add(writer.longBranchScc1(skPartialsLabel, posNeg=1))
+            f16TreeDone = Label(writer.labels.getNameInc("SK_F16_TreeFixup"), "") if hasPackedAccumulators(kernel) else None
+            module.add(writer.longBranchScc1(skPartialsLabel if f16TreeDone is None else f16TreeDone, posNeg=1))
             module.add(SLShiftRightB32(dst=sgpr(sPartialIdx), src=sgpr(sPartialIdx), shiftHex=log2(2), comment="sPartialIdx // 2"))
             sIdx = writer.acquirePersistentConstSgpr(kernel, "PersistentWorkGroupIndex")
             if writer.isPersistentConstantsToVgprEnabled(kernel):
@@ -1355,7 +1518,7 @@ class StreamK(TileProcessingStrategy):
             writer.sgprPool.checkIn(tmpSgpr)
 
             # fixup step
-            if kernel["DebugStreamK"] & 1 == 0: # Skip fixup reads if set, need to do the loop if partial writes are enabled
+            if kernel["DebugStreamK"] & 1 == 0 and f16TreeDone is None: # Skip fixup reads if set, need to do the loop if partial writes are enabled
                 fixupEdge = [False] # Test no edge variant
                 module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sFlagIdx))
 
@@ -1366,6 +1529,14 @@ class StreamK(TileProcessingStrategy):
             # If we started the tile, we reduced the partial results to that WG, so global write
             # Otherwise, partial write
             module.add(endFixupLoop)
+            if f16TreeDone is not None:
+                # The partners' flags are all set: add their f32 sums block by block.
+                module.add(f16TreeDone)
+                sIdx = writer.acquirePersistentConstSgpr(kernel, "PersistentWorkGroupIndex")
+                if writer.isPersistentConstantsToVgprEnabled(kernel):
+                    module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"])))
+                module.add(self._skF16Fixup(writer, kernel, None, sIdxOffset, True, True, sIdx))
+                writer.releasePersistentConstSgpr(sIdx)
             # Done fixup loop
             writer.sgprPool.checkIn(sIdxOffset)
             writer.sgprPool.checkIn(sFlagIdx)
@@ -1465,7 +1636,7 @@ class StreamK(TileProcessingStrategy):
                         posLabel = writer.labels.getNameInc("FixupDeferredReturnDir")
                         fixupModule.add(SLongBranch(fixupReturnLabel, tmpSgprInfo, posLabel, comment="return from deferred fixup block"))
                     writer.states.deferredFixupModule = fixupModule
-                else:
+                elif not hasPackedAccumulators(kernel):
                     fixupModule = None
                     module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
 
@@ -1485,6 +1656,17 @@ class StreamK(TileProcessingStrategy):
                 module.add(SCmpLtU32(src0=sgpr(sFixupEnd), src1=sgpr(sIpt), comment="done loading partial tiles?"))
                 writer.releasePersistentConstSgpr(sIpt)
                 module.add(SCBranchSCC1(labelName=skFixupLabel.getLabelName(), comment="Branch to continue fixup loop"))
+
+                if hasPackedAccumulators(kernel):
+                    # The peers' flags are all set: add their partials block by block.
+                    sFirst = writer.sgprPool.checkOut(1, "StreamK f16 first partial")
+                    sIdx = writer.acquirePersistentConstSgpr(kernel, "PersistentWorkGroupIndex")
+                    if writer.isPersistentConstantsToVgprEnabled(kernel):
+                        module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"])))
+                    module.add(SAddU32(dst=sgpr(sFirst), src0=sgpr(sIdx), src1=1, comment="first peer partial"))
+                    writer.releasePersistentConstSgpr(sIdx)
+                    module.add(self._skF16Fixup(writer, kernel, sFirst, sCtaIdx, True, False))
+                    writer.sgprPool.checkIn(sFirst)
 
                 writer.sgprPool.checkIn(sFixupEnd)
                 writer.sgprPool.checkIn(sCtaIdx)
@@ -1573,7 +1755,7 @@ class StreamK(TileProcessingStrategy):
 
         return module
 
-    def computeWorkspaceSrd(self, writer, kernel, sPartialIdx, tmpSgpr = None):
+    def computeWorkspaceSrd(self, writer, kernel, sPartialIdx, tmpSgpr = None, elemBytes = None):
         module = Module("StreamK Common computeWorkspaceSrd")
 
         # Base Address
@@ -1595,7 +1777,7 @@ class StreamK(TileProcessingStrategy):
         # and the peer write / owner read SRD would alias the wrong workspace slot.
         # Compute the high word with SMulHIU32 and fold it (plus the lo-add carry)
         # into SrdWS+1 instead of adding only the carry.
-        offBytes = hex(kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal)
+        offBytes = hex(kernel["MacroTile0"]*kernel["MacroTile1"]*(elemBytes or writer.states.bpeCinternal))
         tmpHi = writer.sgprPool.checkOut(1, "SKSlotOffsetHi")
         slotTmp = None
         if isStreamKSpatialCluster(kernel):
@@ -1617,7 +1799,13 @@ class StreamK(TileProcessingStrategy):
 
     def partialsWriteProcedure(self, writer, kernel, vectorWidths, elements, alpha, beta, edge, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Common partialsWriteProcedure")
-        memOrder = Component.StreamKMemoryOrdering.find(writer)
+
+        if hasPackedAccumulators(kernel):
+            module.add(self._skF16PartialsData(writer, kernel))
+            with writer.allocTmpSgpr(1, tag="StreamK f16 partials flag") as tmpSgprRes:
+                module.add(self._skPartialsSetFlag(writer, kernel, tmpSgprRes.idx))
+            module.add(self._skPartialsEnd(writer, endLabel))
+            return module
 
         # PreLoopVmcntCaseStr = ""
         # # not generate Case 2 if StoreCInUnroll with StoreVectorWidth==1 (Case 2 will be same as Case 3)
@@ -1863,56 +2051,67 @@ class StreamK(TileProcessingStrategy):
             # if self.canOptimizePreLoopLWVmcnt:
             #     kStr += PreLoopVmcntCaseStr
 
-            # Set flag
-            module.add(memOrder.releaseFence(writer))
-            module.add(SBarrier(comment="store all data before setting flag"))
+            module.add(self._skPartialsSetFlag(writer, kernel, tmpSgpr))
 
-            if hasDynamicAssignment(kernel):
-                # TODO modularize this section into abstract function
-                module.add(self.calculatePartialIdx(tmpSgpr))
-                module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(4), comment="flag offset based on partial index"))
-                module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=Component.WorkAssignment.find(writer).flagsBaseOffset(writer, kernel), comment="Offset flags to come after the work queues"))
-            elif hasHybridAssignment(kernel):
-                # SK5 hybrid: dispatch on WorkAssignmentMode bit
-                # (0 = static SK3 -> use PersistentWorkGroupIndex, 1 = dynamic SK4 -> use calculatePartialIdx).
-                sk5FlagStatic = Label(writer.labels.getNameInc("SK5_PartialsFlagStatic"), "")
-                sk5FlagDone   = Label(writer.labels.getNameInc("SK5_PartialsFlagDone"), "")
-                module.add(SCmpEQU32(src0=sgpr("WorkAssignmentMode"), src1=0,
-                                     comment="SK5: mode bit == 0 -> SK3 (static) flag offset"))
-                module.add(SCBranchSCC1(labelName=sk5FlagStatic.getLabelName(),
-                                        comment="SK5: branch to static flag offset"))
-                # SK4 (dynamic) flag offset
-                module.add(self.calculatePartialIdx(tmpSgpr))
-                module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(4),
-                                          comment="SK5/SK4: flag offset based on partial index"))
-                module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=Component.WorkAssignment.find(writer).flagsBaseOffset(writer, kernel),
-                                   comment="SK5/SK4: offset flags to come after the work queues"))
-                module.add(SBranch(labelName=sk5FlagDone.getLabelName(),
-                                   comment="SK5: skip static flag offset"))
-                # SK3 (static) flag offset
-                module.add(sk5FlagStatic)
-                module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr("PersistentWorkGroupIndex"), shiftHex=log2(4),
-                                          comment="SK5/SK3: flag offset based on CTA index"))
-                module.add(sk5FlagDone)
-            else:
-                sIdx = writer.acquirePersistentConstSgpr(kernel, "PersistentWorkGroupIndex")
-                if writer.isPersistentConstantsToVgprEnabled(kernel):
-                    module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"])))
-                module.add(self.flagOffset(kernel, tmpSgpr, sgpr(sIdx)))
-                writer.releasePersistentConstSgpr(sIdx)
+        module.add(self._skPartialsEnd(writer, endLabel))
+        return module
 
-            with writer.allocTmpSgpr(1, tag="StreamKCommon_setFlag_tmpSgprRes") as flagSgprRes:
-                flagSgpr = flagSgprRes.idx
-                skipFlagSet = Label(label=writer.labels.getNameInc("SK_SkipFlagSet"), comment="")
-                module.add(VReadfirstlaneB32(dst=sgpr(flagSgpr), src=vgpr("Serial"), comment="Wave 0 updates flags"))
-                module.add(SCmpEQU32(src0=sgpr(flagSgpr), src1=0, comment="Check for wave 0"))
-                module.add(SCBranchSCC0(labelName=skipFlagSet.getLabelName(), comment="Skip flag set"))
-                module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
-                module.add(self.emitFlagStore(writer, src=sgpr(flagSgpr), soffset=sgpr(tmpSgpr), comment="set flag"))
-                module.add(skipFlagSet)
-            if memOrder.useSmemFlags():
-                module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
+    def _skPartialsSetFlag(self, writer, kernel, tmpSgpr):
+        module = Module("StreamK set partials flag")
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
+        # Set flag
+        module.add(memOrder.releaseFence(writer))
+        module.add(SBarrier(comment="store all data before setting flag"))
 
+        if hasDynamicAssignment(kernel):
+            # TODO modularize this section into abstract function
+            module.add(self.calculatePartialIdx(tmpSgpr))
+            module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(4), comment="flag offset based on partial index"))
+            module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=Component.WorkAssignment.find(writer).flagsBaseOffset(writer, kernel), comment="Offset flags to come after the work queues"))
+        elif hasHybridAssignment(kernel):
+            # SK5 hybrid: dispatch on WorkAssignmentMode bit
+            # (0 = static SK3 -> use PersistentWorkGroupIndex, 1 = dynamic SK4 -> use calculatePartialIdx).
+            sk5FlagStatic = Label(writer.labels.getNameInc("SK5_PartialsFlagStatic"), "")
+            sk5FlagDone   = Label(writer.labels.getNameInc("SK5_PartialsFlagDone"), "")
+            module.add(SCmpEQU32(src0=sgpr("WorkAssignmentMode"), src1=0,
+                                 comment="SK5: mode bit == 0 -> SK3 (static) flag offset"))
+            module.add(SCBranchSCC1(labelName=sk5FlagStatic.getLabelName(),
+                                    comment="SK5: branch to static flag offset"))
+            # SK4 (dynamic) flag offset
+            module.add(self.calculatePartialIdx(tmpSgpr))
+            module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(4),
+                                      comment="SK5/SK4: flag offset based on partial index"))
+            module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=Component.WorkAssignment.find(writer).flagsBaseOffset(writer, kernel),
+                               comment="SK5/SK4: offset flags to come after the work queues"))
+            module.add(SBranch(labelName=sk5FlagDone.getLabelName(),
+                               comment="SK5: skip static flag offset"))
+            # SK3 (static) flag offset
+            module.add(sk5FlagStatic)
+            module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr("PersistentWorkGroupIndex"), shiftHex=log2(4),
+                                      comment="SK5/SK3: flag offset based on CTA index"))
+            module.add(sk5FlagDone)
+        else:
+            sIdx = writer.acquirePersistentConstSgpr(kernel, "PersistentWorkGroupIndex")
+            if writer.isPersistentConstantsToVgprEnabled(kernel):
+                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"])))
+            module.add(self.flagOffset(kernel, tmpSgpr, sgpr(sIdx)))
+            writer.releasePersistentConstSgpr(sIdx)
+
+        with writer.allocTmpSgpr(1, tag="StreamKCommon_setFlag_tmpSgprRes") as flagSgprRes:
+            flagSgpr = flagSgprRes.idx
+            skipFlagSet = Label(label=writer.labels.getNameInc("SK_SkipFlagSet"), comment="")
+            module.add(VReadfirstlaneB32(dst=sgpr(flagSgpr), src=vgpr("Serial"), comment="Wave 0 updates flags"))
+            module.add(SCmpEQU32(src0=sgpr(flagSgpr), src1=0, comment="Check for wave 0"))
+            module.add(SCBranchSCC0(labelName=skipFlagSet.getLabelName(), comment="Skip flag set"))
+            module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
+            module.add(self.emitFlagStore(writer, src=sgpr(flagSgpr), soffset=sgpr(tmpSgpr), comment="set flag"))
+            module.add(skipFlagSet)
+        if memOrder.useSmemFlags():
+            module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
+        return module
+
+    def _skPartialsEnd(self, writer, endLabel):
+        module = Module("StreamK partials end")
         if "Deferred" in endLabel.getLabelName():
             posLabel = writer.labels.getNameInc("PartialsDeferredReturnDir")
             with writer.allocTmpSgpr(3, tag="StreamKCommon_partialsDeferredReturn_tmpSgprInfo") as tmpSgprInfo:
@@ -3639,12 +3838,18 @@ class StreamKDynamic(StreamK):
             module.add(skipFlagReset)
             writer.sgprPool.checkIn(tmpSgpr)
 
-            fixupEdge = [False] # Test no edge variant
-            module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sPartialIdx))
+            if not hasPackedAccumulators(kernel):
+                fixupEdge = [False] # Test no edge variant
+                module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sPartialIdx))
 
             module.add(SAddU32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=1, comment="next partial tile index"))
             module.add(SCmpLtU32(src0=sgpr(sPartialIdx), src1=sgpr(sFixupEnd), comment="done loading partial tiles?"))
             module.add(SCBranchSCC1(labelName=skFixupLabel.getLabelName(), comment="Branch to continue fixup loop"))
+
+            if hasPackedAccumulators(kernel):
+                # The earlier pieces' flags are all set: add them block by block, then this piece.
+                module.add(self.calculateFirstPartialIdx(sPartialIdx))
+                module.add(self._skF16Fixup(writer, kernel, sPartialIdx, sFixupEnd, False, False))
 
             writer.sgprPool.checkIn(sFixupEnd)
             writer.sgprPool.checkIn(sPartialIdx)
@@ -4251,9 +4456,10 @@ class StreamKHybrid(StreamK):
                 mod.add(skipFlagReset)
                 writer.sgprPool.checkIn(tmpSgpr)
 
-                fixupEdge = [False]
-                mod.add(self.fixupStep(writer, kernel, vectorWidths, elements,
-                                       fixupEdge, tmpVgpr, cvtVgprStruct, sPartialIdx))
+                if not hasPackedAccumulators(kernel):
+                    fixupEdge = [False]
+                    mod.add(self.fixupStep(writer, kernel, vectorWidths, elements,
+                                           fixupEdge, tmpVgpr, cvtVgprStruct, sPartialIdx))
 
                 mod.add(SAddU32(dst=sgpr(sPartialIdx), src0=sgpr(sPartialIdx), src1=1,
                                 comment="next partial tile index"))
@@ -4261,6 +4467,10 @@ class StreamKHybrid(StreamK):
                                   comment="done loading partial tiles?"))
                 mod.add(SCBranchSCC1(labelName=skFixupLabel.getLabelName(),
                                      comment="Branch to continue fixup loop"))
+
+                if hasPackedAccumulators(kernel):
+                    mod.add(self.calculateFirstPartialIdx(sPartialIdx))
+                    mod.add(self._skF16Fixup(writer, kernel, sPartialIdx, sFixupEnd, False, False))
 
                 writer.sgprPool.checkIn(sFixupEnd)
                 writer.sgprPool.checkIn(sPartialIdx)

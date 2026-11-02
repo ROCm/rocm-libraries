@@ -30,6 +30,8 @@
 
 #include <Tensile/DataTypes.hpp>
 
+#include "F16AccumulationStep.hpp"
+
 namespace TensileLite
 {
     namespace Client
@@ -162,15 +164,22 @@ namespace TensileLite
         {
             static void SolveCPU(ContractionProblemGemm const& contraction,
                                  ContractionInputs const&      inputs,
-                                 size_t                        elementsToValidate);
+                                 size_t                        elementsToValidate,
+                                 F16AccumulationLaunch const*  launch = nullptr);
             static void SolveCPU(ContractionProblemGroupedGemm const& contractions,
                                  ContractionGroupedInputs const&      inputs,
-                                 size_t                               elementsToValidate);
+                                 size_t                               elementsToValidate,
+                                 F16AccumulationLaunch const*         launch = nullptr);
         };
 
-        void SolveCPU(ContractionProblem const* contraction,
-                      ProblemInputs const*      inputs,
-                      size_t                    elementsToValidate);
+        // launch: the K order of the solution being validated, for f16 accumulation (nullptr: K from 0 upward).
+        void SolveCPU(ContractionProblem const*    contraction,
+                      ProblemInputs const*         inputs,
+                      size_t                       elementsToValidate,
+                      F16AccumulationLaunch const* launch = nullptr);
+
+        // Half compute, no HighPrecisionAccumulate, 8-bit float MAC inputs.
+        bool isF16AccumulationProblem(ContractionProblemGemm const& problem);
 
         // Specialized solver for ungrouped GEMM problems. There are currently 2 implementations
         // of reference CPU GEMM. One is substantially faster but only supports a limited set of
@@ -181,7 +190,8 @@ namespace TensileLite
         void SolveGemmCPU(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs,
                           size_t                        elementsToValidate,
-                          bool                          tryFastPath = true);
+                          bool                          tryFastPath = true,
+                          F16AccumulationLaunch const*  launch      = nullptr);
 
         // Check whether a given contraction problem is eligible for the fast CPU GEMM path.
         // This inspects problem geometry, data types, and feature flags but does not
