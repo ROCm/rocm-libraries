@@ -376,7 +376,9 @@ def cta_arrive(b: IRBuilder, lds0, sync_a: Value, aoff: Value, waves: int, *, va
     multiple-of rule), so no barrier is needed between epochs; it must start
     at 0 (``pad_lds(arrive_word=True)`` and a CTA barrier before the first
     call). Mirrored ops (asm). Hardware-gated through ``GridSync(arrivals=
-    "last")`` (WP1 fix round)."""
+    "last")`` (WP1 fix round), except the ``vmcnt(0)`` ordering: removing it
+    passed every hardware run (W9 re-verification), so its place before the
+    LDS count is checked on the IR (``tests/test_qwen38_persist_w9.py``)."""
     if waves < 1:
         raise ValueError("waves must be >= 1")
     lane0 = b.cmp_eq(b.lane_id(), b.const_i32(0))

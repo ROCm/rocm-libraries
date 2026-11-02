@@ -2439,6 +2439,123 @@ impl<'k> Legalizer<'k> {
         (Some(index), 0)
     }
 
+    /// Lever `dsfold`: `index = base + k` through nested nsw adds and nsw
+    /// multiplies by a constant (`(x + c) * m` = `x * m + c * m`), as LLVM's
+    /// reassociation feeds the DS offset field: the constant parts of every
+    /// level leave the address, and equal remainders become one value (CSE).
+    /// New ops wrap (modular): the address is 32-bit either way.
+    fn split_deep(&mut self, index: ValueId, depth: u32, out: &mut Vec<Op>) -> (Option<ValueId>, i64) {
+        if let Some(k) = self.facts.int(index) {
+            return (None, k);
+        }
+        let Some(d) = (depth < 6).then(|| self.def(index)).flatten() else {
+            return (Some(index), 0);
+        };
+        let i32t = Type::Scalar(Scalar::I32);
+        // Every rewrite below is exact modulo 2^32 (an i32 address), whatever the ops' wrap flags.
+        if *self.kernel.ty(index) != i32t || d.count != 2 {
+            return (Some(index), 0);
+        }
+        match d.kind {
+            OpKind::Add => {
+                let (x, y) = (d.operand(0), d.operand(1));
+                let (bx, kx) = self.split_deep(x, depth + 1, out);
+                let (by, ky) = self.split_deep(y, depth + 1, out);
+                if kx == 0 && ky == 0 {
+                    return (Some(index), 0);
+                }
+                let base = match (bx, by) {
+                    (None, None) => None,
+                    (Some(a), None) | (None, Some(a)) => Some(a),
+                    (Some(a), Some(b)) => Some(self.new_wrapping(OpKind::Add, [a, b], out)),
+                };
+                (base, kx.wrapping_add(ky) as i32 as i64)
+            }
+            OpKind::Mul => {
+                let (a, b) = (d.operand(0), d.operand(1));
+                let (x, c, cv) = match (self.facts.int(a), self.facts.int(b)) {
+                    (_, Some(m)) => (a, b, m),
+                    (Some(m), _) => (b, a, m),
+                    _ => return (Some(index), 0),
+                };
+                let (bx, kx) = self.split_deep(x, depth + 1, out);
+                if kx == 0 {
+                    return (Some(index), 0);
+                }
+                let base = bx.map(|bx| self.new_wrapping(OpKind::Mul, [bx, c], out));
+                (base, kx.wrapping_mul(cv) as i32 as i64)
+            }
+            OpKind::Shl => {
+                let (x, c) = (d.operand(0), d.operand(1));
+                let Some(sh) = self.facts.int(c).filter(|s| (0..32).contains(s)) else {
+                    return (Some(index), 0);
+                };
+                let (bx, kx) = self.split_deep(x, depth + 1, out);
+                if kx == 0 {
+                    return (Some(index), 0);
+                }
+                let base = bx.map(|bx| self.new_wrapping(OpKind::Shl, [bx, c], out));
+                (base, (kx << sh) as i32 as i64)
+            }
+            OpKind::Sub => {
+                let (x, y) = (d.operand(0), d.operand(1));
+                let Some(ky) = self.facts.int(y) else {
+                    return (Some(index), 0);
+                };
+                let (bx, kx) = self.split_deep(x, depth + 1, out);
+                (bx, kx.wrapping_sub(ky))
+            }
+            _ => (Some(index), 0),
+        }
+    }
+
+    /// Lever `addrfold`: a buffer voffset rebuilt as `base + k` (`split_deep`), so that the accesses of one
+    /// base share it and each adds only its constant (as LLVM's reassociated `s_add` + `v_or` per access, one
+    /// VALU add here). A `select(c, x, K)` voffset (the out-of-range guard) folds its `x`. The constant goes to
+    /// the offset field (0..4095) when the base is known non-negative or with `bufoffany`, else into one add.
+    /// `(voffset, offset field)`, or None when nothing folds.
+    fn fold_voffset(&mut self, v: ValueId, out: &mut Vec<Op>) -> Option<(ValueId, i64)> {
+        let i32t = Type::Scalar(Scalar::I32);
+        if *self.kernel.ty(v) != i32t {
+            return None;
+        }
+        if let Some(d) = self.def(v) {
+            if d.kind == OpKind::Select && d.third != ValueId(u32::MAX) && self.facts.int(d.third).is_some() {
+                let (c, x, other) = (d.operand(0), d.operand(1), d.third);
+                let (b, k) = self.split_deep(x, 0, out);
+                let b = b?;
+                if k == 0 {
+                    return None;
+                }
+                let kv = self.konst(i32t.clone(), k, out);
+                let sum = self.new_wrapping(OpKind::Add, [b, kv], out);
+                let uniform = [c, sum, other].iter().all(|&u| self.uni(u));
+                let result = self.kernel.new_value("%a", i32t);
+                self.mark(result, uniform);
+                out.push(mk_op(OpKind::Select, [result], [c, sum, other], []));
+                return Some((result, 0));
+            }
+        }
+        let (b, k) = self.split_deep(v, 0, out);
+        let b = b?;
+        if k == 0 {
+            return None;
+        }
+        if (0..4096).contains(&k) && (self.facts.nonneg(b) || super::lever("bufoffany")) {
+            return Some((b, k));
+        }
+        let kv = self.konst(i32t, k, out);
+        Some((self.new_wrapping(OpKind::Add, [b, kv], out), 0))
+    }
+
+    fn new_wrapping(&mut self, kind: OpKind, operands: [ValueId; 2], out: &mut Vec<Op>) -> ValueId {
+        let uniform = operands.iter().all(|&v| self.uni(v));
+        let result = self.kernel.new_value("%a", Type::Scalar(Scalar::I32));
+        self.mark(result, uniform);
+        out.push(mk_op(kind, [result], operands, modular()));
+        result
+    }
+
     /// `terms` of `index` in lists to hand back with `recycle`.
     fn split_terms(&mut self, index: ValueId) -> Terms {
         let mut parts = (self.spare.pop().unwrap_or_default(), self.spare.pop().unwrap_or_default(), 0);
@@ -2718,7 +2835,7 @@ impl<'k> Legalizer<'k> {
         // lowering's i32 GEP arithmetic does.
         for (dim, &index) in indices.iter().enumerate() {
             let stride = shape[dim + 1..].iter().fold(1i64, |s, &d| s.wrapping_mul(d as i64));
-            let (base, k) = self.split(index);
+            let (base, k) = if super::lever("dsfold") { self.split_deep(index, 0, out) } else { self.split(index) };
             constant = constant.wrapping_add(k.wrapping_mul(stride));
             if let Some(base) = base {
                 let scaled = if stride == 1 {
@@ -2952,6 +3069,14 @@ impl<'k> Legalizer<'k> {
                 OpKind::BufferLoadCp | OpKind::BufferStoreCp => {
                     let at = usize::from(op.kind == OpKind::BufferStoreCp);
                     let voffset = op.operands[at + 1];
+                    if super::lever("addrfold") {
+                        if let Some((v, offset)) = self.fold_voffset(voffset, out) {
+                            op.operands[at + 1] = v;
+                            op.set_attr("offset", Attr::Int(offset));
+                            out.push(op);
+                            return Ok(());
+                        }
+                    }
                     let (base, k) = self.split(voffset);
                     let mut offset = 0;
                     if let Some(base) = base {
@@ -2965,6 +3090,14 @@ impl<'k> Legalizer<'k> {
                 }
                 OpKind::BufferLoadVec | OpKind::BufferStoreVecF16 | OpKind::BufferLoadScalar | OpKind::BufferStoreScalar => {
                     let voffset = op.operands[1];
+                    if super::lever("addrfold") {
+                        if let Some((v, offset)) = self.fold_voffset(voffset, out) {
+                            op.operands[1] = v;
+                            op.set_attr("offset", Attr::Int(offset));
+                            out.push(op);
+                            return Ok(());
+                        }
+                    }
                     let (base, k) = self.split(voffset);
                     let mut offset = 0;
                     if let Some(base) = base {

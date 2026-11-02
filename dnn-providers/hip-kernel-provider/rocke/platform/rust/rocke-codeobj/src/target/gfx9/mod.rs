@@ -45,6 +45,7 @@ pub mod m0_hoist;
 pub mod mfma;
 pub mod bitop3;
 pub mod minmax;
+pub mod minmax3;
 pub mod model;
 pub mod pack;
 pub mod q38;
@@ -79,8 +80,14 @@ pub fn prepare(f: &mut MFunc) {
     if f.lever_anywhere("ldspairs") {
         lds_pairs::merge(f);
     }
+    if f.lever_anywhere("ldspairsfar") {
+        lds_pairs::merge_far(f);
+    }
     if f.lever_anywhere("minmax") {
         minmax::run(f);
+    }
+    if f.lever_anywhere("minmax3") {
+        minmax3::run(f);
     }
     zero_acc::run(f);
     m0_hoist::run(f);
@@ -119,6 +126,10 @@ pub fn finish_lapped(func: &mut MFunc, num_vgprs: u32, lap: &mut dyn FnMut(&'sta
     zero_acc::after_allocation(func);
     zero_wide::after_allocation(func);
     hazards::fix_shift64(func, num_vgprs)?;
+    if func.lever_anywhere("fmac") {
+        func.fill_scopes();
+        shrink_fmac(func);
+    }
     lap("expand");
     waitcnt::insert(func);
     drop_releases(func);
@@ -126,6 +137,40 @@ pub fn finish_lapped(func: &mut MFunc, num_vgprs: u32, lap: &mut dyn FnMut(&'sta
     hazards::insert_nops(func);
     lap("hazards");
     Ok(())
+}
+
+/// Lever `fmac`: each allocated `v_fma_f32 d, a, b, d` without modifiers
+/// whose second factor (either factor: it commutes) is a VGPR becomes the
+/// four-byte VOP2 `v_fmac_f32 d, a, b`, as LLVM's `SIShrinkInstructions`
+/// (gfx1151 does it unconditionally, `rir::vopd::shrink_fmac`). The same
+/// operation and the same rounding; half the code bytes of an FMA-bound
+/// straight-line body (instruction fetch and cache).
+pub fn shrink_fmac(func: &mut crate::rir::mir::MFunc) -> usize {
+    use crate::rir::mir::{Opc, Opnd, Phys};
+    let mut n = 0;
+    let scopes = func.scopes.clone();
+    for inst in func.blocks.iter_mut().flat_map(|b| b.insts.iter_mut()) {
+        if inst.op != Opc::VFmaF32 || !crate::rir::lever_at(&scopes, inst.scope, "fmac") {
+            continue;
+        }
+        let [Opnd::P(Phys::V(dst), 1)] = inst.defs[..] else { continue };
+        let &[a, b, c] = &inst.uses[..] else { continue };
+        if inst.mods != 0 || c != Opnd::P(Phys::V(dst), 1) {
+            continue;
+        }
+        let (src0, vsrc1) = match (a, b) {
+            (_, Opnd::P(Phys::V(r), 1)) => (a, r),
+            (Opnd::P(Phys::V(r), 1), _) => (b, r),
+            _ => continue,
+        };
+        if !matches!(src0, Opnd::P(Phys::V(_) | Phys::S(_), 1) | Opnd::Imm(_)) {
+            continue;
+        }
+        inst.op = Opc::VFmacF32;
+        inst.uses = [src0, Opnd::P(Phys::V(vsrc1), 1)].into();
+        n += 1;
+    }
+    n
 }
 
 /// Drops the `WAIT_RELEASE` markers (lever `wgfence`) once `waitcnt` has

@@ -133,3 +133,13 @@ persistent `pass`/`round` path and the `layers=1` + tail-kernel fallback.
 17. (2026-11-01) Agents never delete files locally (no rm / del / Remove-Item of ISA dumps, temp files,
     __pycache__ or any artifact): deletions prompt the user for approval and stall the agent. Leave artifacts
     as they are and write to new paths instead. Never wait on a permission prompt.
+18. (2026-11-02) The Rust direct compiler must only improve, never regress. (a) Serving guard: a kernel uses
+    `direct` only where a same-job paired A/B on both nodes shows direct <= COMGR; otherwise COMGR (auto-select per
+    kernel family / variant, recorded in the tuning DB). (b) Every case where direct is slower than COMGR is a
+    compiler defect to fix, not a lever verdict: diff direct vs COMGR ISA for that kernel (reverse toolkit), find
+    what LLVM does better (schedule, waitcnt, register allocation, instruction selection, layout) and implement it
+    in the Rust core until direct >= COMGR everywhere (then beat it). Known regressions to close: HC stages
+    1.03-1.11, large-batch MoE 1-8%, head 1.001-1.016, toy d4w8l2.
+19. (2026-11-02) Wrap-up: push the last piece (K=3 CONC 1 >= 1000 tok/s on both nodes, gated), freeze the stack
+    (FINAL-STACK.md), then document and write repro scripts on the user's branches. All other tracks are stopped;
+    their state is recorded in HANDOFF.md for a later restart.

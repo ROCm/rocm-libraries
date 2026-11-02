@@ -681,3 +681,18 @@ inst   VMaxU32Dpp        v_max_u32                 VOP2    0xf    opc=gfx9 flags
 # A workgroup release under lever `wgfence` (target/gfx9/isel_hooks.rs `fence`): the waitcnt pass waits there for
 # LDS (lgkmcnt 0) and for the LDS DMA loads and stores still in flight (not for plain loads), then drops it.
 inst   WaitRelease       WAIT_RELEASE              PSEUDO  0x00   opc=gfx9 flags=FENCE unit=PSEUDO lat=pseudo
+# PLAN decision 18 (the never-regress track): the i32 max / min and u32 min with a DPP source 0 (lever `dppcombinei`,
+# target/gfx9/dpp.rs), and the three-operand integer min / max / median (lever `minmax3`, target/gfx9/minmax3.rs),
+# as LLVM's GCNDPPCombine and its min / max / med3 selection emit them.
+inst   VMaxI32Dpp        v_max_i32                 VOP2    0xd    opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+inst   VMinI32Dpp        v_min_i32                 VOP2    0xc    opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+inst   VMinU32Dpp        v_min_u32                 VOP2    0xe    opc=gfx9 flags=VALU d=vdst:v1 u=src0:v1,vsrc1:v1 imm=dpp16 imp=use:exec unit=VALU lat=valu form=dpp16
+inst   VMin3I32          v_min3_i32                VOP3    0x1d1  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+inst   VMin3U32          v_min3_u32                VOP3    0x1d2  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+inst   VMax3I32          v_max3_i32                VOP3    0x1d4  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+inst   VMax3U32          v_max3_u32                VOP3    0x1d5  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+inst   VMed3U32          v_med3_u32                VOP3    0x1d8  opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu
+# The scaled f32 -> E2M1 pack (`v_cvt_scalef32_pk_fp4_f32`, the large-batch MoE's fp4 requant as inline asm, assembled
+# by rir/isel_asm.rs): two f32 / the scale's exponent into byte 0 of the destination (op_sel selects the byte; the
+# template uses byte 0 and reads only it, so the destination is a plain output here).
+inst   VCvtScalef32PkFp4F32 v_cvt_scalef32_pk_fp4_f32 VOP3 0x23d opc=gfx9 flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1,src2:vs1 imp=use:exec unit=VALU lat=valu

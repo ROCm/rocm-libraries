@@ -18,6 +18,7 @@ All in `hackathon-prep/qwen38/truemono-quick/` (h stage `h-qk-<sfx>`; ATOM `atom
 | `finalH` / `tunedH` | `picksH.json` = picksG + the K=1 / K=2 verify cells (r2s, r3s) | gated (n01-09): K=1 round 0.972, K=2 0.976 |
 | `finalGqd` / `tunedGqd`, `finalHqd` / `tunedHqd` | the same + P13 N4a `qsa:qdense=3` (kind group appended by `gen_tuned.py --kind-extra`; expected build lines include it) | e2e gated (n01-09); superseded by finalIqd |
 | **`finalIqd` / `tunedIqd`** | `picksI.json` = picksH + the grouped K=3 builds (r8g4, r16g4 schedule picks) + qdense + N8 96K + subset head | **current best, gated**: both nodes at K=0..3 CONC 1 (CONC 2 / 4: a gain on n01-09, inside the noise on n07-17); GSM8K, HumanEval, RULER mixes A and B at 8K / 32K inside the hybrid's spread |
+| **`full3_l_rba`** (K >= 1; `hackathon-prep/qwen38/truemono/RB/arms_rb.sh`, ARM_FILES) | the consolidated full stack (finalHqd + P9 verify tail) + the lean draft round + `ATOM_Q38_RB_DEVMETA=1` + `_TRIM` + `_ADV` (round boundary off the host; section "Round boundary") | **best K=3 CONC 1 stack, gated, both nodes** (0.969-0.970 of full3's round; K=1 / K=2 via `full3_rba`); accuracy suites inside the hybrid's spread |
 
 Serving recipe of a `tuned*` arm: `gen_tuned.py --base <e2ecomp2 functions> --picks <picks file> --out <dir>
 [--kind-extra qsa:qdense=3]` writes per-kind function dirs, `sched.txt` and `expect_k<K>.txt`; the server env is
@@ -549,3 +550,157 @@ round time only when the next round no longer waits for the host: a whole round 
 (DESIGN `round` / `loop` modes, WP5c / WP12; an in-graph next-round prologue) or an ATOM-side prepare-ahead of round
 t+1 while round t runs. The boundary idle is 0.07-0.08 of the round, so that work is worth far more than DESIGN's
 "about 0.01, optional" for WP12.
+
+## Round boundary (2026-11-01 night, agent "rb": D0 section 6 item 7, WP5c / WP12 re-scoped)
+
+Ratios only; absolute numbers in `hackathon-prep/private-perf/qwen38-true-mono/quick/ROUND.md`. Harness
+`hackathon-prep/qwen38/truemono/RB/` (`rb_tl.sh` + `rb_tl_an.py` timeline, `rb_gate.sh` + `rb_gate.py` gates,
+`rb_ktrace.sh` kernel-trace-only boundary list, arms `RB/arms_rb.sh` passed as ARM_FILES to `quick.sh`). ATOM-truemono
+knobs, all default off: `ATOM_Q38_HOSTTL=<dir>` (timeline), `ATOM_Q38_RB_DEVMETA=1|check` (+ `_FUSE`, `_TRIM`, `_MUT`).
+
+### 1. The boundary measured without a profiler (job rb-tl1, n01-09; 390 rounds per run, 2 runs per arm)
+
+`ATOM_Q38_HOSTTL` stamps the EngineCore and model-runner processes on one CLOCK_MONOTONIC (scheduler, RPC, prepare,
+the MTP status wait, graph replay, postprocess, propose) and records GPU timing events at five marks, resolved two steps
+later by `query()` (no added sync). Medians, share of the round:
+
+| | hyb_tm | full3 | full3_l (lean draft round) |
+|---|---|---|---|
+| host waits for round t's verify (`recv_mtp_status_async` in round t+1's `prepare_input_ids`) | 0.28 | 0.27-0.28 | 0.43 |
+| host work after that wait until the next graph is launched (metadata build + H2D staging, then `run_model` + replay) | 0.113 | 0.118 | 0.122 |
+| of it: `graph.replay()` itself | 0.003 | 0.002 | 0.002 |
+| GPU drafts (verify done to drafts done) | 0.141 | 0.110 | 0.096 |
+| GPU drained when the host launches the next graph (share of rounds) | 0.00-0.01 | 1.00 | 1.00 |
+| GPU idle at the boundary (from the GPU marks) | ~0 | ~0.01 | ~0.03 |
+
+- The binding chain is: round t's verify completes, the D2H status copy, the host's post-wait preparation of round
+  t+1 (~0.11 of a round of host time: the attention / QSA / GDN / mRoPE metadata and its uploads) and the graph launch.
+  The EngineCore, the scheduler and the RPC (~0.10 together) and the eager drafter's launches are NOT on it: the host
+  waits about 0.27 of every round for the GPU. A sync-debug run (`torch.cuda.set_sync_debug_mode`) found no other
+  synchronizing op; the token / draft-id event waits are ~0.0005 each.
+- The boundary idle is the post-wait host work minus the GPU's draft phase: ~0 for the hybrid drafter (long drafts),
+  ~0.01 for full3, ~0.03 for the lean round, whose draft-phase saving went exactly into idle (GPU fw0 -> prep 1.00 ->
+  2.1x). The profiled traces' 0.07-0.08 came from rocprofv3's HIP API trace slowing the host (alola rule 214).
+
+### 2. Round t+1 prepared without the host waiting: `ATOM_Q38_RB_DEVMETA` (new `truemono/rb_devmeta.py`)
+
+Every accept-dependent value of the step is its full-acceptance value shifted by the request's rejection count r.
+The host prepares round t+1 with r = 0 / bonus = K for carried-over requests (no wait); one Triton kernel, enqueued
+right after `prepare_model` and before the graph, shifts `context_lens`, the mRoPE positions and
+`qsa_logical_positions` by round t's device verdict (through `decode_src`), recomputes `slot_mapping` from the step's
+block table, `kv_indptr`, `num_accepted_tokens` (= bonus + 1) and, fused (`_FUSE`, default), the compressed QSA slots;
+kv_indices is re-derived only at bs > 1 (at bs 1 the r = 0 superset holds every read entry). The status reaches the
+host at the start of `postprocess`, after the next graph launch, where the scheduler's deferred output wants it. v1
+(`_FUSE=0`): the shift kernel plus ATOM's own kv_indices / compressed-slot launches.
+
+Gates (jobs rb-gate2 v1 / rb-gate3 v2, n07-17; `rb_gate.sh`):
+
+| check | result |
+|---|---|
+| unit test vs the host formulas (6 seeds x 6 cases incl. 5 mutants) | 36 / 36 (v2) |
+| check mode: every eligible step prepared twice (device path, then ATOM's host path), every device tensor of `forward_vars`, the metadata builder and the step's attention metadata bit for bit (60 tensors, kv_indices up to its read end) | 64 / 64 steps OK, 0 DIFF on full3, full3_l, full3_d (P9 draft chain), hyb_tm (hybrid verify path), K=1, K=2 (both versions) |
+| ATOM's tail check mode + the tail's deep check with the device path on (served) | 0 CHECK lines; deep checks 256 / 256 (verify tail), 1,728 / 1,728 (lean round, draft chain); gsm8k 7-8 / 8 |
+| transitions greedy -> sampled -> CONC 2 -> greedy in one server | clean (0 tracebacks, every client rc 0) on every arm |
+| K=0 server with the knob on | unaffected (refuses: no MTP status) |
+| must-fail mutants (check mode) | caught: no shift (8-11 / 16 DIFF; r = 0 steps legitimately equal), slot + 1 (16 / 16), accepted = bonus (16 / 16), positions not shifted (8-9 / 16), compressed slot + 1 (16 / 16); v1's skipped re-derivation 9 / 16 |
+
+Timeline with the knob (job rb-tl2, n07-17): the GPU is never drained at the graph launch (share 0.00 of rounds), the
+host's wait moves to `postprocess` (0.24 of the round for full3, 0.41 lean); v1 adds ~0.0075 of GPU work (fw0 -> prep
+1.00 -> 1.37x), so full3 gains only ~0.003 and the lean round ~0.018.
+
+End to end (quick harness, 32 prompts, rotated passes, rnd_med = median ms per round; tok/s per request median):
+
+| arm | rnd_med / hybrid n01-09 (rb-e2e2, 4 passes) | n07-17 (rb-e2e2, 4 passes) | rnd_med / full3, both nodes | tok/s med / hybrid n01-09 / n07-17 |
+|---|---|---|---|---|
+| full3 (best stack before) | 0.945 | 0.949 | 1 | 1.063 / 1.048 |
+| full3_rb (verify tail + device path) | 0.943 | 0.943 | 0.998 / 0.994 | 1.074 / 1.056 |
+| **full3_l_rb** (lean draft round + device path, v2) | **0.930 [0.927-0.932]** | **0.929 [0.928-0.930]** | **0.984 / 0.979** | **1.092 / 1.089** |
+| full3_l_rb1 (v1) | 0.931 | 0.930 | 0.985 / 0.980 | 1.087 / 1.066 |
+| full3_d_rb (P9 draft chain + device path) | 0.931 | 0.931 | 0.985 / 0.981 | 1.083 / 1.077 |
+
+(Job rb-e2e1, n01-09, v1: full3_l 0.946 vs full3_l_rb 0.931; 4 / 4 passes.) Verdict: **WIN on both nodes**: the lean
+draft round, neutral while the boundary went through the host, pays once it does not (decision 15: rejected on base
+full3, accepted on base full3 + device path). v1 vs v2 tie (v2 kept: one kernel). The verify-tail-only stack gains
+little because its boundary idle was ~0.01.
+
+K=1 / K=2 (job rb-k12-n01, n01-09, 3 passes; the tail refuses r2s / r3s, so these are finalHqd + the hybrid verify):
+rnd_med / hybrid at K=1: full3 0.953, **full3_rb 0.875** (0.918 of full3; tok/s per request 1.147 of the hybrid);
+K=2: full3 0.957, **full3_rb 0.926** (0.967 of full3; 1.082). With one or two draft steps the host's post-wait
+preparation outlasts the draft phase far more than at K=3, so the boundary was a larger share there.
+
+### 3. Trimming the step preparation (the boundary's remaining GPU work) and decision-15 re-tests on the new base
+
+With the device path the boundary is GPU work only: the step preparation's 9 H2D copies, 2 packed scatters and ~6 small
+fills / kernels (kernel trace without the API trace, job rb-kt1). `ATOM_Q38_RB_DEVMETA_TRIM=1` skips, on a device-path
+step whose shape repeats the previous one, the GDN graph-padding fills / copies (`spec_state_indices`, masks,
+`spec_query_start_loc`, `num_accepted` padding) and ATOM's own compressed-slot launch (the fused kernel writes them);
+gated bitwise (job rb-gate4 with consecutive checks, then job rb-gate7 with `ATOM_Q38_RB_DEVMETA_CHECK_EVERY=4`: three
+production device-path steps without ATOM's reference pass between checks, so drift a skipped fill would leave reaches
+the check: 64 / 64 OK on full3_l and full3, tail check + 1,728 deep checks equal, transitions clean, a must-fail
+"skipped region not what the fill writes" mutant caught 16 / 16).
+
+Re-tests on base full3_l_rb (job rb-rt1-n07, n07-17, 3 passes; rnd_med / hybrid, base 0.929 [0.928-0.931]):
+
+| lever (earlier verdict, base) | rnd_med / hybrid | verdict on base full3_l_rb |
+|---|---|---|
+| **`_TRIM`** (new) | **0.923 [0.920-0.925]** | **WIN (0.993 of base, 3 / 3 passes)** |
+| P9 verify `hdelay` 8 / 16 (lost / tied on full3) | 0.929 / 0.929 | NEUTRAL |
+| verify head `head_dg` 3 (neutral on full3) | 0.930 | NEUTRAL |
+| N8 64K draft vocab (neutral on full3) | 0.927 | NEUTRAL |
+| P9 draft chain + `_TRIM` (full3_d_rbt) | 0.928 | NEUTRAL vs base; LOSS vs the lean round + `_TRIM` (0.923) |
+| P9 draft chain + draft `hdelay` 8 | 0.932 | NEUTRAL |
+
+### 4. Steady state without the accept-dependent uploads (`ATOM_Q38_RB_DEVMETA_ADV=1`, the WP12 residual)
+
+On a device-path step whose requests, order and width repeat the previous device-path step, `_ADV` skips the uploads
+of `slot_mapping`, `context_lens`, `kv_indptr`, `qsa_logical_positions`, the mRoPE positions and `num_accepted` (an
+`atom/utils/h2d.py` hook, `RB_SUPPRESS`, None unless set; the mha group then carries the block table alone, one DMA
+and no scatter) and ATOM's stale kv_indices launch; the shift kernel instead advances them from a per-request device
+state (round t's true length + q - r, the mRoPE offset) and re-derives kv_indices. Any other step takes the v2 path and
+refreshes the state. Gate (job rb-gate7, n07-17, `CHECK_EVERY=4`): unit tests 48 / 48 (incl. the advance against the
+host formulas and its mutant); check mode 64 / 64 OK with 63-64 of the checked steps advanced (full3_l, full3; K=1 62 /
+62 advanced); tail check + 1,728 deep checks equal; transitions clean; mutant "advance without r" caught 16 / 16; every
+earlier mutant still caught.
+
+End to end (jobs rb-e2e3-n07 / rb-e2e3-n01, 4 passes each; rnd_med / hybrid):
+
+| arm | n07-17 | n01-09 | / full3_l_rb (n07 / n01) | tok/s per request median / hybrid |
+|---|---|---|---|---|
+| full3_l_rb | 0.928 [0.925-0.933] | 0.928 [0.925-0.929] | 1 | 1.071 / 1.091 |
+| + `_TRIM` (full3_l_rbt) | 0.924 [0.922-0.927] | 0.924 [0.922-0.925] | 0.995 / 0.996 | 1.073 / 1.092 |
+| **+ `_TRIM` + `_ADV` (full3_l_rba)** | **0.917 [0.916-0.919]** | **0.920 [0.918-0.921]** | **0.988 / 0.991** | **1.083 / 1.102** |
+
+`_TRIM` and `_ADV` WIN on both nodes (every pass below the base's range). **full3_l_rba is the new best K=3 CONC 1
+stack**: through the same-job chain about 0.97 of full3's round (n07-17: 0.979 x 0.988 = 0.967; n01-09: 0.984 x
+0.991 = 0.975).
+
+### Accuracy of the final arm (K=3 CONC 1, the device path engaged; PLAN decision 1)
+
+| suite (3 runs per arm) | arm - hybrid (mean) | hybrid A-vs-A spread | verdict |
+|---|---|---|---|
+| GSM8K 1,319 5-shot chat, flexible / strict (job rb-accA-n01, full3_l_rbt) | +0.0028 / +0.0033 | 0.0038 / 0.0038 | no regression (one arm run above the hybrid's range, one 0.0023 below its minimum, inside its spread) |
+| HumanEval 164 pass@1 (rb-accA-n01, full3_l_rbt) | -0.0020 | 0.0122 | inside |
+| RULER mix A (5 tasks, 256-token cap) 8K / 32K (job rb-accB-n01, full3_l_rba, 25 samples per task) | -0.016 / -0.015 | 0.046 / 0.034 | inside the spread-widened hybrid range |
+| RULER mix B (4 tasks, 1536-token cap) 8K / 32K (rb-accB-n01, full3_l_rba) | -0.010 / +0.006 | 0.020 / 0.0075 | inside |
+
+The device path serves bitwise the metadata ATOM's own preparation would (check mode), so these differences are the
+served path's run-to-run variation (P11: not token-deterministic within one server); every suite passes PLAN
+decision 1's rule.
+
+### 5. Coverage re-check, the final arm against the previous best, and what failed
+
+- Check mode spread over a whole transition run (job rb-gate9, n07-17: `CHECK_EVERY=8`, checks through greedy, sampled,
+  CONC 2 and greedy again): full3 163, full3_l + `_TRIM` 173, full3_l + `_TRIM` + `_ADV` 173 checked steps (172 advanced),
+  **0 DIFF** each (the gate's 300-step target was not reachable in that run; the DIFF count is the verdict).
+- `_ADV=2`, first version (also skip the token-input group): **FAIL** in the same job (87 of 211 checks DIFF in
+  `cu_seqlens_q` / `input_ids`; CONC 2 gsm8k 0 / 4) although its first-64-steps gate passed: the consecutive-step gate
+  never reached the CONC 2 phase. Level 2 now skips only the QSA token map and GDN spec slots and is NOT gated; do not
+  use it. Its perf arm (0.913 in job rb-e2e4-n01) is void.
+- Final arm vs the previous best stack in one job (rb-e2e4-n01, n01-09, 4 passes): rnd_med / hybrid full3 0.944
+  [0.940-0.949], **full3_l_rba 0.916 [0.915-0.918]**, i.e. **0.970 of full3's round**; tok/s per request median 1.055 ->
+  1.080 of the hybrid.
+- Second node (job rb-e2e4-n07, n07-17, 4 passes): full3 0.947 [0.944-0.951], **full3_l_rba 0.917 [0.914-0.920]**,
+  **0.969 of full3's round**; tok/s per request median 1.054 -> 1.089 of the hybrid.
+- K=1 / K=2 on the second node (job rb-k12c-n07, 3 passes; rnd_med / hybrid): K=1 full3 0.955, full3_rb 0.872,
+  **full3_rba 0.864** (tok/s per request 1.160 of the hybrid); K=2 full3 0.963, full3_rb 0.926, **full3_rba 0.913**
+  (1.094). Both nodes agree with rb-k12-n01 (0.875 / 0.926 for full3_rb).

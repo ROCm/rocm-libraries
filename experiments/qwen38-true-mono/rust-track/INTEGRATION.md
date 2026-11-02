@@ -94,3 +94,82 @@ fused MoE rows 1 only; the fix round confirmed both on both nodes under DESIGN 8
 COMGR path is unchanged and every existing build is byte-identical. Section 1's table is superseded by
 `wave1/WP-R3.md` section 8 (Q2 / framework: LOSS; P4 xl, P5 scalar re-read: WIN; head gap: memory-level parallelism,
 `loadfirst` closes most of logits r16).
+
+## 8. Auto-select per kernel family / variant (PLAN decision 18, 2026-11-02; supersedes sections 1 and 7's table)
+
+The serving guard (`qwen38_mono/persist/rust_guard.py`, DB `persist/rust_backend_db.json`; LEDGER "Never-regress
+track") decides the backend of a keyed kernel: **direct only where the DB holds a same-job paired A/B on BOTH rocke nodes
+with verdict WIN, or TIE at ratio <= 1, for one lever set; COMGR otherwise** (missing node, LOSS, TIE above 1, HOLD).
+Builders call `persist.knobs.rust_family(kernel, family, key=<key>)` (or `rust_guard.guard_kernel`); a kernel without a
+key keeps D0.6's behaviour (`ROCKE_DIRECT_GUARD=1` gates that by the family's keys too; default off until review).
+`python -m kernels.gfx950.qwen38_mono.persist.rust_guard table` prints this table from the DB; `... put` books a run.
+The direct objects are those of crate `rnr-v8` (copy-rocm-lib working tree) with the backend defaults; a crate change
+re-books the keys it moves (the census lists the moved objects per lever).
+
+Lever sets (`+`-joined in the DB): B3 and MoE r1 as section 1; HC: `Z` = B3 + loadfirst + dsfold + addrfold +
+dppcombinei + minmax3 + ldspairsfar; `N6` = Z + fmac; `N7` = N6 + masksall; `ZL` = Z - loadfirst; `ZM` = Z + masksall;
+`ZLv` = ZL + fmac + vmlat60; `ZLP` = ZL + packfar + masksall; `M1Nx` = MoE r1 - nofence + dppcombine + dppcombinef + fmac
++ dsfold + addrfold + dppcombinei + minmax3 + ldspairsfar + packfar + u16zext; `F` = loadfirst + vmemfirst + bufoffany.
+
+| key | n01-09 | n07-17 | backend | set |
+|---|---|---|---|---|
+| `b3.r1.mono` | 0.992 WIN | 0.984 WIN | **direct** | B3 |
+| `b3.r1.tuned` | 0.984 WIN | 0.975 WIN | **direct** | B3 |
+| `b3.r2s.tuned` | 0.962 WIN | 0.960 WIN | **direct** | B3 |
+| `b3.r3s.tuned` | 0.966 WIN | 0.965 WIN | **direct** | B3 |
+| `b3.r4.tuned` | 0.986 WIN | 0.990 WIN | **direct** | B3 |
+| `b3.r4g2.tuned` | 0.989 WIN | 0.988 WIN | **direct** | B3 |
+| `b3.r4s.mono` | 0.940 WIN | 0.943 WIN | **direct** | B3 |
+| `b3.r4s.tuned` | 0.978 WIN | 0.980 WIN | **direct** | B3 |
+| `ccl.pair_os.4x2560` | 0.953 WIN | 0.972 WIN | **direct** | defaults |
+| `fw.b3.r1` | 0.949 WIN | 0.942 WIN | **direct** | B3 |
+| `fw.b3.r4s` | 0.915 WIN | 0.915 WIN | **direct** | B3 |
+| `fw.moe.r1` | 0.967 WIN | 0.980 WIN | **direct** | MoE r1 |
+| `fw.q2.r1` | 1.088 LOSS | 1.072 LOSS | **comgr** | B3 |
+| `fw.q2.r4s` | 1.118 LOSS | 1.113 LOSS | **comgr** | B3 |
+| `hc.delta.attn.r1` | 0.996 TIE | 0.992 TIE | **direct** | ZL |
+| `hc.delta.attn.r2s` | 0.985 WIN | 0.984 WIN | **direct** | ZLv |
+| `hc.delta.attn.r3s` | 0.992 TIE | 0.991 WIN | **direct** | ZLv |
+| `hc.delta.attn.r4s` | 0.996 TIE | 0.997 TIE | **direct** | ZLv |
+| `hc.delta.mlp.r1` | 0.984 TIE | 0.986 TIE | **direct** | Z |
+| `hc.delta.mlp.r2s` | 0.972 WIN | 0.981 WIN | **direct** | N6 |
+| `hc.delta.mlp.r3s` | 0.994 TIE | 0.987 TIE | **direct** | N7 |
+| `hc.delta.mlp.r4s` | 0.992 HOLD | 0.995 HOLD | **comgr** | ZLP |
+| `hc.delta_ple.attn.r1` | 0.993 TIE | 0.996 TIE | **direct** | Z |
+| `hc.delta_ple.attn.r2s` | 0.992 TIE | 0.993 TIE | **direct** | N7 |
+| `hc.delta_ple.attn.r3s` | 0.998 TIE | 0.996 TIE | **direct** | ZL |
+| `hc.delta_ple.attn.r4s` | 1.003 TIE | 1.003 TIE | **comgr** | ZLP |
+| `hc.delta_ple.mlp.r1` | 0.996 TIE | 0.995 TIE | **direct** | Z |
+| `hc.delta_ple.mlp.r2s` | 0.990 TIE | 0.990 WIN | **direct** | N6 |
+| `hc.delta_ple.mlp.r3s` | 0.994 TIE | 0.998 TIE | **direct** | ZM |
+| `hc.delta_ple.mlp.r4s` | 0.998 HOLD | 1.000 HOLD | **comgr** | Z |
+| `hc.qsa.attn.r1` | 0.996 TIE | 0.992 WIN | **direct** | ZLv |
+| `hc.qsa.attn.r2s` | 0.985 WIN | 0.985 WIN | **direct** | ZLv |
+| `hc.qsa.attn.r3s` | 0.990 WIN | 0.993 TIE | **direct** | ZLv |
+| `hc.qsa.attn.r4s` | 0.995 TIE | 0.994 TIE | **direct** | ZLv |
+| `hc.qsa.mlp.r1` | 0.978 TIE | 0.996 TIE | **direct** | ZLv |
+| `hc.qsa.mlp.r2s` | 1.006 TIE | 0.995 HOLD | **comgr** | N7 |
+| `hc.qsa.mlp.r3s` | 0.985 TIE | 0.987 TIE | **direct** | Z |
+| `hc.qsa.mlp.r4s` | 0.994 HOLD | 0.990 HOLD | **comgr** | Z |
+| `head.fused.r16` | 1.006 TIE | 1.006 TIE | **comgr** | WP-R3 head set |
+| `head.fused.r4` | 1.004 TIE | 1.005 TIE | **comgr** | F |
+| `head.logits.r16` | 1.004 TIE | 1.004 TIE | **comgr** | F |
+| `head.logits.r4` | - | 1.001 TIE | **comgr** | defaults |
+| `moe_fused.r1` | 0.968 WIN | 0.974 WIN | **direct** | MoE r1 |
+| `moe_fused.r4` | 0.993 TIE | 0.996 WIN | **direct** | M1Nx |
+| `moe_lb2.tp1.fp4.r16` | 1.002 TIE | 1.006 TIE | **comgr** | M1Nx |
+| `moe_lb2.tp1.fp8.r128` | 1.000 HOLD | 1.000 HOLD | **comgr** | M1Nx |
+| `moe_lb2.tp1.fp8.r16` | 1.011 TIE | 1.010 TIE | **comgr** | M1Nx |
+| `moe_lb2.tp1.fp8.r64` | 1.005 TIE | 1.004 TIE | **comgr** | M1Nx |
+| `moe_lb2.tp2.fp4.r128` | 0.999 HOLD | 1.003 TIE | **comgr** | M1Nx |
+| `moe_lb2.tp2.fp8.r32` | 1.006 TIE | 1.005 TIE | **comgr** | M1Nx |
+| `probe.p4.xl` | 0.858 WIN | 0.860 WIN | **direct** | defaults |
+| `probe.p5.kv` | 1.085 LOSS | 1.088 LOSS | **comgr** | defaults |
+| `probe.p5.sc` | 0.944 WIN | 0.939 WIN | **direct** | defaults |
+| `toy.d4w8l2` | 0.988 TIE | 0.994 TIE | **direct** | B3 |
+| `toy.d8w0` | 0.988 WIN | 0.989 WIN | **direct** | B3 |
+
+Summary: direct for B3 (all variants), fused MoE rows 1 and **rows 4 (new)**, framework-hosted B3 / MoE r1 (still behind
+D0.6's in-situ test for `auto`), **19 of 24 HC framework kernels (new)**, the toy chain, the P4 xl / P5 scalar probes and
+CCL pair_os 4 x 2560. COMGR for the head (0.2-1.1 % behind), Q2, five HC widths (r4s mlp / delta_ple), the P5 kv probe and
+`moe_lb2` (parity after the fixes; HOLD until both-node WINs, coordinator).

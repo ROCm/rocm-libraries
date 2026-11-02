@@ -584,3 +584,151 @@ The verdicts are unchanged.
   - M11: 68234101, 68234102.
 - **Superseded:** 68233869 and 68233875 (the `cluster_job.sh` argv mistake, rc 127), 68233880 (no mutant-B counts),
   68234519 (the duplicate `iv_name`).
+
+## Re-verification (W9, 2026-11-02)
+
+**Verdict: CONFIRMED, with one gap, closed in Fix round 2 below.** Every hardware and identity claim of F1-F7
+reproduces on a GPU and a CPU node that no earlier WP1 job used. The gap: the `vmcnt(0)` wait in `cta_arrive`, which
+makes the arrival come after the wave's stores, is not covered by the hardware gate. No hardware run could see it, and
+no CPU test checked where the wait sits. Also, the tool behind one of the byte-identity proofs was weaker than stated,
+although the claim itself holds.
+
+No git state was changed. Raw logs are in `private-perf/qwen38-true-mono/wave1b/W9-rvWP1/`; they hold counts and
+verdicts only, no timing. The harness is in `hackathon-prep/qwen38/truemono/vWP1-w9/`.
+
+### 1. Hardware gate (job 68246448, n01-09 bus 229, gate only, no timing)
+
+The job ran on a fresh stage of the whole current copy-rocm-lib rocKE tree. Bus 229 on n01-09 is healthy (alola rule
+153); it is the seventh GPU used for WP1, after the six of F1. The job ran WP1's own `gate` and `ptoy3` sections, so
+the ptoy gate ran in 4 fresh processes, 12 steps in all.
+
+- **ptoy: gate PASS, 4 of 4 runs.**
+  - Positive arms: 156 of 156 arm-steps equal the reference on 12/12 layers and are bitwise equal across arms.
+    `static_dl` is clean on 12/12 launches in every step.
+  - `static_mut`: `check_launch` caught 12/12 launches in 12 of 12 steps.
+  - The F1 race is visible again. `static_mut` had 12/12 layers numerically correct in 3 of 12 steps: exactly the
+    steps where every `g` wave timed out (192 timeouts). The other 9 steps had 0/12 correct, with 96-127 timeouts.
+    Keying the verdict on the launch-fatal word is therefore necessary.
+  - `loop_mut`: `poll_timeout` set in 12 of 12 steps.
+  - `wrongw`: 24 of 24 arm-steps fail as required (0/12 layers equal to the reference, 12/12 equal to the mutant's
+    host twin).
+- **ticket:** grid 256 is clean. Grid 257 times out 41 CTAs and grid 512 all 256, both with `ticket_timeout`.
+- **gs:**
+  - The positives pass, and so do the dropped-arrival controls on `gs8`, `gs8w`, `gs8l` and `gs1`.
+  - LDS-poisoned `gs8l_st`: 3/3 launches clean. `gs8l_noinit`: 0/3 clean (1.12-1.15 M mismatches per launch), so it
+    fails as required.
+  - The metadata checks pass, and the `early` mutant fails as required.
+
+### 2. Hand mutants (same job)
+
+The fix round's mutator samples only constants, arithmetic, comparisons and returns. So mutants of asm text and
+call-site edits were never tried. `w9rv_mutants.py` patches symlink-farm copies of the stage, and each mutant runs
+through the gate section that exercises it.
+
+| mutant | edit | result |
+|---|---|---|
+| `first` | `cta_arrive`: the CTA's first wave arrives, not its last | **killed**: `gs8l` positives fail (0.79-0.89 M mismatches), poisoned `gs8l_st` fails 0/3 |
+| `arroff` | `pad_lds(arrive_word=True)` zeroes LDS word 3, not 2 | **killed**: poisoned `gs8l_st` 0/3 clean |
+| `chknop` | `check_launch` never raises | **killed**: `static_mut` caught 0/12 launches in all 3 steps (its numerics were 12/12 correct) |
+| `wwnop` | the `wrongw` mutant uses the right weight row | **killed**: `wrongw` did not fail, in both paths |
+| `nocw` (positive) | the gs kernel's own `vmcnt(0)` after the data store is removed in `last` mode, so `cta_arrive`'s wait is the only ordering left (the real-use form) | gate PASS, as required |
+| `nowait` | `cta_arrive` loses its `s_waitcnt vmcnt(0)` | **SURVIVED**, 2 of 2 runs |
+| `nowait` + `nocw` | neither wait | **SURVIVED**, 3 of 3 runs |
+
+### 3. The survivor is a real defect that hardware cannot see
+
+**ISA** (job 68246595, `llvm-objdump` of the `gs8l` code object):
+- In the clean build, a `vmcnt(0)` wait follows the data store `global_store_dword ... sc1`, and another one
+  precedes `ds_add_rtn_u32`.
+- In `nowait` + `nocw` there is no wait at all between the data store and the arrival `global_atomic_add`.
+- So the mutant is not equivalent: a wave can count itself, and the last wave can arrive, while stores are still in
+  flight.
+
+**Store-burst stress** (`w9_burst.py`, same job). Before its data store, every wave stores B x 64 lanes of `sc1` words,
+so the data store queues behind the burst. B = 64 for the positives; B = 16, 64 and 256 for the mutant (up to about
+134 MB per epoch, 100 epochs). Each arm ran 15 launches: 5 of each delay kind (idle, uniform, one late producer).
+
+| tree | B | failing launches |
+|---|---|---|
+| both waits (positive) | 64 | 0 / 15 |
+| `cta_arrive`'s wait only (positive) | 64 | 0 / 15 |
+| no wait (`nowait` + `nocw`) | 16 / 64 / 256 | 0 / 15 at each B |
+
+**Consequences:**
+- On MI355X, the order "the arrival comes after the stores" cannot be observed in this rig. The docstring claim
+  "Hardware-gated through `GridSync(arrivals="last")`" was too strong for this one property.
+- On CPU, the fix round's `test_cta_arrive_last_wave_rule` does kill `nowait`, because it asserts that the IR contains
+  a `vmcnt(0)`. It does not kill `late`, a mutant that moves the wait after the LDS count; that lets a non-last wave
+  count itself before its stores complete. With `late`, all 110 tests pass (`run_test_with_mut.py`).
+- So the wait's position was untested anywhere. This is alola rule 226.
+
+### 4. Byte identity
+
+- **F6 reproduces exactly** (CPUONLY job 68246638 on `ctr-smc-s26-005`, a copy of the fix round's CPU stage, the same
+  base snapshot):
+  - **87/87 `.text` and 196/196 LLVM IR + serialized IR files are identical.**
+  - Mutant B' is blind in the IR half (196/196 identical) and caught in the ISA half (34 of 87 builds differ).
+- **"The measured kernels are unchanged" (F1, F4):**
+  - `fix/cmp_old_ptoy.py` reproduces: 6/6 builds identical.
+  - **`fix/cmp_old_micro.py` has a loader flaw.** In the old `micro.py`, `from . import sync` reads the package
+    attribute, which still holds the NEW `sync`. So the old micro was built on the new sync, and the old `sync.py` was
+    never part of the comparison.
+  - `vWP1-w9/cmp_old_micro_w9.py` fixes the loader by also rebinding the package attribute. The fix is shown to work:
+    with it, sync-only mutants change the `gs8l` IR. Its result: the 5 measured gs builds and the ticket build are
+    identical. The claim holds; the original tool did not prove it.
+- **Large-batch builds.** The 87-build census set lacked the W6 large-batch builds, as the WP-R3 fix round later found.
+  `vWP1-w9/lb_oldsync.py` checks the fix-round `sync.py` change on them (CPU, LLVM IR):
+  - 11 of the 13 builds in WP-R3's `LB_BUILDS` list are identical under the pre-fix-round `sync.py` (`fix/oldsrc`)
+    and the current one.
+  - `lbf` 4 / 8 call `pad_lds(arrive_word=...)`, so they cannot build on the old file. With `False`, `pad_lds` emits
+    exactly the old bytes (`test_pad_lds_arrive_word_zeroes_the_cta_arrive_counter_only_when_asked`).
+- **CPU tests:** `test_qwen38_persist.py` passes 110/110 on the current tree (run locally).
+
+### 5. The other claims
+
+- **F2.**
+  - `check_launch` and `require_launch_fatal` behave as stated: their tests pass, and the `chknop` mutant is killed on
+    hardware.
+  - **Note:** nothing outside the tests calls `require_launch_fatal` yet. The D0.8 rule holds only where a gate calls
+    it, so the WP2 / WP3 Path B gates must call it.
+- **F3.** Not re-timed. It is a withdrawal, the conservative outcome.
+- **F5.** Not re-run. The earlier verifier's `p2fix` run and the fix round's runs on both nodes agree.
+- **F7.** Rule 181 is in the skill.
+
+## Fix round 2 (W9, 2026-11-02)
+
+- **New CPU test file** `library/tests/test_qwen38_persist_w9.py` (3 tests; a new file, so concurrent edits to the
+  persist tests are untouched):
+  - In `cta_arrive`'s asm block (waves 1 and 8), `s_waitcnt vmcnt(0)` must come first, then `ds_add_rtn_u32`, then
+    `s_waitcnt lgkmcnt(0)`.
+  - The `gs8l` and staggered gate kernels must keep that block.
+- **Mutant check** (`run_test_with_mut.py`, which pre-seeds `sys.modules` with a mutant `sync.py`):
+  - `nowait`: killed (3 of 3 tests fail).
+  - `late`: killed (3 of 3 fail), while all 110 of the fix round's tests pass.
+  - Clean: 3/3 pass.
+  - Both files together pass 113/113.
+- **`sync.cta_arrive` docstring:** it now says that hardware cannot observe the `vmcnt(0)` ordering and names the
+  test. Only the docstring changed:
+  - the gs, ticket and ptoy IR is still identical to the measured sources (`cmp_old_micro_w9.py` re-run);
+  - the large-batch IR hashes are unchanged.
+- **Alola skill:** rule 226.
+- **Left as they were:**
+  - WP1's harness files. `fix/cmp_old_micro.py` keeps its loader flaw; the corrected copy is in `vWP1-w9/`.
+  - D0 and STATUS markers. They still say the fix round was not re-verified; the owner of those files should update
+    them.
+- **Re-run after the edits:** the CPU tests and the identity checks above. No hardware re-run: no kernel byte changed.
+
+### Files and jobs (W9)
+
+- **rocKE:**
+  - `library/tests/test_qwen38_persist_w9.py` (new);
+  - `persist/sync.py` (docstring of `cta_arrive` only).
+- **Harness (`hackathon-prep/qwen38/truemono/vWP1-w9/`):**
+  - `stage_h/`: a copy of `WP1/fix/stage_h`, plus `w9rv_mutants.py`, `w9rv_job.sh`, `w9rv_job2.sh`, `w9_burst.py`
+    and `w9_isa.py`;
+  - `stage_cpu/`: a copy of `WP1/stage_cpu`;
+  - `cmp_old_micro_w9.py`, `ir_effect.py`, `lb_oldsync.py`, `run_test_with_mut.py`.
+- **Jobs:**
+  - rocke GPU: 68246448 (gate, ptoy3, hand mutants) and 68246595 (ISA, burst stress);
+  - CPUONLY: 68246638 (ISA census).
+  - Superseded: 68246553 (the `$STAGE` argv mistake, rc 127).

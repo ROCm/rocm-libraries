@@ -408,30 +408,69 @@ class RustScope:
         return ""
 
 
-def rust_scope_backend(scope: RustScope | None, stages, families: tuple[str, ...] | None = None) -> str:
+def rust_scope_backend(
+    scope: RustScope | None, stages, families: tuple[str, ...] | None = None, guard_keys=None
+) -> str:
     """D0.6's backend of a framework kernel with ``stages`` (stage names) under
     ``scope``: ``"direct"`` when every stage is scoped to a family of
     ``families`` (default :data:`RUST_FRAMEWORK_DIRECT_FAMILIES`: the families
     whose framework-hosted direct builds won; empty today, so ``"comgr"``),
     else ``"comgr"`` (one stage of a family that has not won, e.g. the head,
-    keeps the whole kernel on COMGR)."""
+    keeps the whole kernel on COMGR).
+
+    PLAN decision 18 serving guard (``persist.rust_guard``): with ``guard_keys``
+    (stage name -> guard key, e.g. ``"fw.b3.r1"``) every stage's key must also
+    pass on both rocke nodes; with ``ROCKE_DIRECT_GUARD=1`` and no keys, every
+    stage's ``fw.<family>`` key family must. The guard only ever turns direct
+    into COMGR."""
     stages = tuple(stages)
     fams = RUST_FRAMEWORK_DIRECT_FAMILIES if families is None else tuple(families)
     if scope is None or not scope.enabled or not stages:
         return "comgr"
     ok = all(scope.levers(s) is not None and scope.family(s) in fams for s in stages)
+    if ok and (guard_keys is not None or _guard_on()):
+        from . import rust_guard as G
+
+        recs = G.load_records()
+        for s in stages:
+            k = (guard_keys or {}).get(s)
+            sel = G.select(k, recs) if k else G.select_family(f"fw.{G.KEY_PREFIX.get(scope.family(s), scope.family(s))}", recs)
+            ok = ok and sel.backend == "direct"
     return "direct" if ok else "comgr"
 
 
-def rust_family(kernel, family: str):
+def _guard_on() -> bool:
+    from . import rust_guard as G
+
+    return G.guard_enabled()
+
+
+def rust_family(kernel, family: str, key: str | None = None):
     """D0.6 for a standalone kernel of one family (a new true-mono B3 or fused
     MoE build): when ``family`` is in :data:`RUST_DIRECT_FAMILIES`, mark it for
     the direct backend with the family's set as ``attrs["direct_levers"]``;
     otherwise leave it unchanged (COMGR). Returns ``kernel``. The IR, its LLVM
     lowering and the name do not change (the attribute is stripped by the direct
-    backend and never lowered)."""
+    backend and never lowered).
+
+    PLAN decision 18 serving guard (``persist.rust_guard``): with ``key`` (the
+    kernel's family / variant key, e.g. ``"b3.r4s.mono"``) the tuning DB decides
+    alone: direct with the timed lever set only when both rocke nodes' paired
+    records pass, else an explicit COMGR mark. With ``ROCKE_DIRECT_GUARD=1`` and
+    no key, a family of :data:`RUST_DIRECT_FAMILIES` stays direct only when every
+    recorded key of the family passes (else it is left on COMGR)."""
     if family not in RUST_LEVER_SETS:
         raise ValueError(f"unknown lever-set family {family!r}; one of {sorted(RUST_LEVER_SETS)}")
+    if key is not None:
+        from . import rust_guard as G
+
+        G.guard_kernel(kernel, key)
+        return kernel
+    if family in RUST_DIRECT_FAMILIES and _guard_on():
+        from . import rust_guard as G
+
+        if G.select_family(G.KEY_PREFIX.get(family, family)).backend != "direct":
+            return kernel
     if family in RUST_DIRECT_FAMILIES:
         from rocke.helpers.compile import request_code_object_backend
 

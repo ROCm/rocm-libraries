@@ -45,7 +45,7 @@ import bisect
 import contextlib
 from dataclasses import dataclass, fields
 
-from rocke.core.ir import CPOL_NT, CPOL_SC1, F32, I8, I16, I32, I64, IRBuilder, KernelDef, PtrType, Value, VectorType
+from rocke.core.ir import BF16, CPOL_NT, CPOL_SC1, F32, I8, I16, I32, I64, IRBuilder, KernelDef, PtrType, Value, VectorType
 from rocke.helpers import device_ops as D
 from rocke.helpers import mx_quant as Q
 from rocke.helpers.lds_arena import ONE_CTA_PER_CU_WORDS
@@ -86,10 +86,12 @@ MAXSEG = 6  # segments per item (the line's minimum share keeps every item withi
 DSTR = 16  # desc words per token
 W_ERR, W_EP, W_END = 0, 16, 32
 W_TICK = 48  # deal=dyn: two ticket counters (layer parity)
-CNT_WORDS = 64 + 2 * 128  # + cmb=flow: per-token slot counters, two parities x 128 tokens
+CNT_WORDS = 64 + 2 * 128 + 4  # + cmb=flow: per-token slot counters, two parities x 128 tokens; + router / route counters
 W_TOKC = 64
+W_RTC = 64 + 2 * 128  # entry=router: router units done (two layer parities)
+W_RSC = W_RTC + 2  # rsync=cnt: tokens routed (two layer parities)
 STAMP_PTS = 8
-MUTANTS = ("none", "slot", "sort", "sopsel", "seg", "half", "lone", "mask", "bar", "noacq", "hsc", "desc", "tag", "tick", "flow", "flow0")
+MUTANTS = ("none", "slot", "sort", "sopsel", "seg", "half", "lone", "mask", "bar", "noacq", "hsc", "desc", "tag", "tick", "flow", "flow0", "flowsc", "flowrel", "rsum", "rsc0", "rskip")
 
 
 @dataclass(frozen=True)
@@ -101,7 +103,14 @@ class Moe2Knobs:
     bucket: int = 128  # rows bucket (16 | 32 | 64 | 128)
     pipe: str = "stream"  # "stream" (v2: one weight-load stream per wave across atoms, the down phase and segments; K
     #   halves interleaved by scale group) | "unit" (v1: per-unit rings, atom pairs + a lone K-half atom; other rounding)
-    entry: str = "route"  # "route" (route pairs are inputs) | "logits" (in-kernel top-10, tagged pairs polled by the sort)
+    entry: str = "route"  # "route" (route pairs are inputs) | "logits" (in-kernel top-10, tagged pairs polled by the sort) |
+    #   "router" (in-kernel router GEMM xr . wr^T, then the top-10 as "logits")
+    rks: int = 4  # entry=router: K splits of the router GEMM (units of 16 rows x 16 experts x H / rks)
+    rsync: str = "tag"  # entry != route: the sort waits for the pairs by their tags ("tag", every pair polled), by one
+    #   counter of routed tokens per layer parity ("cnt", one poller per CTA, then sc1 loads), or every CTA routes
+    #   every token itself ("local": no hand-off; wave w takes tokens w, w + 8, ..)
+    rmode: str = "ks"  # entry=router: "ks" (K splits over waves of the grid, rks partial slots) | "cta" (a CTA per tile, K
+    #   over its 8 waves, LDS sum)
     null: str = "none"  # "none" | "oob" (expert weight loads move zero bytes: the fixed overhead)
     tpp: int = 1  # 16-token tiles per pass (1 | 2): x / h LDS and MFMAs per weight load; changes the line (order)
     depth: int = 4  # gate_up chunks of weight loads in flight per wave
@@ -127,15 +136,28 @@ class Moe2Knobs:
     dt: int = 1  # down: output tiles sharing each h fragment (own accumulators; stores after the group)
     doff: str = "mul"  # down load offsets: "mul" (uniform tile x chunk product) | "imm" (tile base SGPR + chunk immediate)
     dlev: str = ""  # direct compiler levers ('+'-joined ROCKE_DIRECT_LEVERS names; kernel attr, no IR change)
+    dls: str = ""  # direct compiler lever scope of the route + sort stage ('+'-joined; '-name' turns a kernel lever off)
+    dlx: str = ""  # direct compiler lever scope of the experts stage (deal, gate_up, down, partial stores)
+    dlc: str = ""  # direct compiler lever scope of the combine stage
     w2d: int = 3  # pipe=w2: chunk steps of loads in flight (gate_up and down)
     w2t: int = 4  # pipe=w2: down output tiles per unit
     dsk: int = 0  # down skew: waves 0-3 own 20 + dsk output tiles, waves 4-7 20 - dsk (the upper waves lag on a shared SIMD)
     pcal: bool = False  # pieces on down-chunk (4-atom) boundaries
+    cspread: bool = False  # combine units spread over every CTA first (CTA u mod 256)
     sskip: bool = False  # pstg: skip the staged store instructions whose rows are all past the item's tokens
     dsq: bool = False  # down scales in the dsq layout (4 tiles per lane contiguous: one dwordx4 per 4 / 2 tiles)
     sdl: bool = False  # down scales loaded after the gate_up (h complete) instead of at the segment start
     shd: bool = False  # shared-expert items split by down columns over two CTAs (when the units fit the last round)
     cmb: str = "gbar"  # combine hand-off: "gbar" (grid barrier) | "flow" (per-token counters, no barrier)
+    cspec: bool = False  # cmb=flow: the combine loads segments 0 and 1 of every slot right after the token's poll, together
+    #   with the descriptor (no address dependence on it): one memory round trip less
+    ehead: bool = False  # deal=rr: the CTA's first unit's weight head issued as soon as the item table exists (before the
+    #   sort's token lists and the x staging)
+    pfh: int = 0  # deal=rr: CTAs without a unit prefetch a busy unit's weights (default cache policy, into MALL / L2):
+    #   1 its down block, 2 its down block + the back half of its gate_up block (unit cta mod U)
+    fnext: bool = False  # combine=fused_next: no combine (cmb=flow counters only); the next stage sums the partials
+    stage: str = "moe"  # "moe" | consumer model of the next stage: "cons_y" (out = res + y) | "cons_part" (out = res + the
+    #   slot / segment sums of the partials after the flow counter: the fused_next consumer)
     gpc: str = "sc0sc1"  # grid-barrier poll loads: "sc0sc1" (system scope) | "sc1" (agent scope)
     gpause: str = "s_sleep1"  # grid-barrier poll pause per miss (ccl.wire pauses: s_sleep1 | s_nop | ...)
     cob: str = ""  # code-object compiler of the build: "" (process default, COMGR) | "direct" (Rust; harness-side, no IR change)
@@ -145,6 +167,7 @@ class Moe2Knobs:
     shs: int = 0  # tokens per shared-expert item (0: 16 x tpp, as routed passes; 4 | 8: more, lighter shared items)
     lrs: bool = False  # buffer resources built at each use (fewer SGPRs held across the kernel)
     pstg: int = 0  # partial stores through a per-wave LDS stage: 0 direct (16 rows x 64 B) | 2 | 4 tiles (rows of 128 | 256 B)
+    pdt: str = "f32"  # partials' type: "f32" | "bf16" (half the partial bytes; accuracy-gated)
     pst: str = "sc1"  # partial stores' cache policy: "sc1" | "nt" | "def" (nt / def: an L2 write-back at the barrier arrival)
     hdbg: int = 0  # heavy-order debug bits: 1 extra barriers, 2 s_nop before mbcnt, 4 perm check (err), 8 check without err
     snap: int = 0  # stream + wl: line cuts within ``snap`` units of an item boundary move onto it
@@ -240,8 +263,14 @@ class Moe2Knobs:
             raise ValueError("pipe stream | unit")
         if self.pipe == "stream" and self.mutant == "lone":
             raise ValueError("mutant lone is a pipe=unit mutant")
-        if self.entry not in ("route", "logits") or self.null not in ("none", "oob"):
-            raise ValueError("entry route | logits, null none | oob")
+        if self.entry not in ("route", "logits", "router") or self.null not in ("none", "oob"):
+            raise ValueError("entry route | logits | router, null none | oob")
+        if self.rsync not in ("tag", "cnt", "local") or (self.mutant == "rsc0" and (self.rsync != "cnt" or self.entry == "route"))                 or (self.mutant == "rskip" and (self.rsync != "local" or self.entry == "route")):
+            raise ValueError("rsync tag | cnt | local; mutant rsc0 needs rsync=cnt, rskip rsync=local (entry logits | router)")
+        if self.rmode not in ("ks", "cta"):
+            raise ValueError("rmode ks | cta")
+        if self.rks not in (1, 2, 4, 8) or (self.mutant == "rsum" and (self.entry != "router" or (self.rks < 2 and self.rmode == "ks"))):
+            raise ValueError("rks 1 | 2 | 4 | 8; mutant rsum needs entry=router, rks >= 2")
         if self.tpp not in (1, 2) or not 1 <= self.depth <= 10 or not 1 <= self.ddepth <= 16:
             raise ValueError("tpp 1 | 2, depth 1..10, ddepth 1..16")
         if self.ab not in (1, 2, 4):
@@ -276,14 +305,33 @@ class Moe2Knobs:
             raise ValueError(f"mutant in {MUTANTS}")
         if self.mutant == "tick" and self.deal != "dyn":
             raise ValueError("mutant tick needs deal=dyn")
-        if self.mutant == "tag" and self.entry != "logits":
-            raise ValueError("mutant tag needs entry=logits")
-        if self.mutant == "noacq" and not self.pretouch:
-            raise ValueError("mutant noacq needs the pretouch twin")
+        if self.mutant == "tag" and self.entry == "route":
+            raise ValueError("mutant tag needs entry=logits | router")
+        if self.mutant == "noacq" and self.pretouch not in (1, 2):
+            raise ValueError("mutant noacq needs the pretouch twin (1 | 2)")
+        if self.mutant == "flowrel" and self.cmb != "flow":
+            raise ValueError("mutant flowrel needs cmb=flow")
+        if self.mutant == "flowsc" and (self.cmb != "flow" or self.pretouch != 3):
+            raise ValueError("mutant flowsc needs cmb=flow and the pretouch-before-poll twin (pretouch 3)")
+        if self.pretouch not in (0, 1, 2, 3) or (self.pretouch == 3) != (self.cmb == "flow" and self.pretouch != 0):
+            raise ValueError("pretouch 0 | 1 | 2 (gbar) | 3 (cmb=flow: before each combine unit's poll)")
         if self.hinit not in ("zero", "dirty"):
             raise ValueError("hinit zero | dirty")
         if self.diag != "none" and not set(self.diag.split("+")) <= {"nox", "nogu", "nodn", "nocmb", "gsink", "dsink", "noep", "nored", "nost"}:
             raise ValueError("diag: + list of nox nogu nodn nocmb gsink dsink noep nored nost")
+        if self.pcal and self.pc > -(-self.na // 4):  # an aligned piece per down chunk at most (else empty pieces)
+            raise ValueError(f"pcal: pc at most the {-(-self.na // 4)} down chunks of an item")
+        if self.cob == "direct" and self.act == "fp4":  # the direct compiler has no v_cvt_scalef32_pk* (inline asm)
+            raise ValueError("cob=direct: act fp8 only (the fp4 requant's inline asm is refused by the direct compiler)")
+        if self.cspec and self.cmb != "flow":
+            raise ValueError("cspec needs cmb=flow")
+        if self.ehead and (self.deal != "rr" or self.uord != "id" or self.gu != "atom" or self.pipe != "stream" or self.wl
+                           or self.xsync != "bar" or self.lka != "tail"):
+            raise ValueError("ehead: deal=rr, uord id, gu atom, pipe stream, xsync bar, lka tail")
+        if self.pfh not in (0, 1, 2) or (self.pfh and self.deal != "rr"):
+            raise ValueError("pfh 0 | 1 | 2 (deal=rr)")
+        if self.pdt not in ("f32", "bf16") or (self.pdt == "bf16" and self.pipe != "stream"):
+            raise ValueError("pdt f32 | bf16 (bf16: pipe=stream)")
         if self.pstg not in (0, 2, 4):
             raise ValueError("pstg 0 | 2 | 4")
         if self.xb and (self.deal != "rr" or self.xh):
@@ -299,8 +347,10 @@ class Moe2Knobs:
         if self.shd and (self.deal not in ("rr", "dyn") or self.uord != "id" or self.dsk or self.shs or self.gu != "atom"
                          or self.dt > 2 or self.pstg > 2):
             raise ValueError("shd: deal rr | dyn, uord id, no dsk / shs, gu atom, dt / pstg <= 2 (10 tiles a wave per half)")
-        if self.cmb not in ("gbar", "flow") or (self.cmb == "flow" and (self.pipe != "stream" or self.tpp != 1 or self.pretouch)):
-            raise ValueError("cmb gbar | flow (flow: pipe=stream, tpp 1, no pretouch twin)")
+        if self.stage not in ("moe", "cons_y", "cons_part") or ((self.fnext or self.stage == "cons_part") and self.cmb != "flow"):
+            raise ValueError("stage moe | cons_y | cons_part; fnext / cons_part need cmb=flow")
+        if self.cmb not in ("gbar", "flow") or (self.cmb == "flow" and (self.pipe != "stream" or self.tpp != 1 or self.pretouch in (1, 2))):
+            raise ValueError("cmb gbar | flow (flow: pipe=stream, tpp 1, pretouch 0 | 3)")
         if self.dsk not in (0, 2, 4, 5) or (H // TILE // WAVES + self.dsk) % self.dt or (self.pstg and self.dsk % self.pstg)                 or (self.dsk and self.pipe != "stream"):
             raise ValueError("dsk 0 | 2 | 4 | 5, dt dividing 20 + dsk")
         if self.dt not in (1, 2, 4, 5) or self.doff not in ("mul", "imm"):
@@ -329,6 +379,10 @@ def kernel_name2(k: Moe2Knobs) -> str:
 def moe2_params(k: Moe2Knobs) -> list[str]:
     """i64 addresses then i32 ``rows, layers, gsync`` (host packs ``<Q...iii``)."""
     p = ["lg", "pr", "x", "xs", "wgu", "sgu", "wdn", "sdn", "part", "desc", "y", "cnt", "gs", "hd", "hds"]
+    if k.stage != "moe":
+        p += ["res", "out"]
+    if k.entry == "router":
+        p += ["xr", "wr", "rp"]  # router input rows (bf16, bucket x H), weights (bf16, per layer LST x H), partial logits
     if k.stamp:
         p.append("stamps")
     return p + ["rows", "layers", "gsync"]
@@ -703,9 +757,55 @@ class _Moe2:
     # ------------------------------------------------------------------ route (entry=logits): P-L4's top-10, tagged pairs
     def route(self, layer: Value) -> None:
         b, k = self.b, self.k
+        if k.rsync == "local":  # every CTA routes every token itself (wave w: tokens w, w + 8, ..): no hand-off
+            if k.entry == "router":
+                with b.scf_if(b.cmp_eq(self.wave, _c(b, 0))):
+                    self.router_wait(layer, b.cmp_eq(self.cta, _c(b, 0)))
+                b.sync_lds_only()
+            with b.scf_for(b.readfirstlane(self.wave), self.rows, _c(b, WAVES), iv_name="rtk") as t:
+                self.route_token(layer, b.readfirstlane(t), poll=False)
+            b.s_waitcnt(vmcnt=0)
+            b.sync_lds_only()  # this CTA's own pair stores complete before its sort reads them
+            return
         r = self.cta
         mine = b.land(b.cmp_lt(r, self.rows), b.cmp_eq(self.wave, _c(b, 0)))
         with b.scf_if(mine):
+            self.route_token(layer, r, poll=True)
+
+    def router_wait(self, layer: Value, zero_next: Value) -> None:
+        """entry=router: lane 0 waits for every router unit of the layer; ``zero_next``: also zero the next layer's
+        counter."""
+        b = self.b
+        par = self.flow_par(layer)
+        with b.scf_if(self.lane0):
+            st = self.gpoll(self.cnt_a, b.mul(b.add(_c(b, W_RTC), par), _c(b, 4)), self.router_units())
+            with b.scf_if(b.cmp_ne(st, _c(b, 0))):
+                self.err()
+            with b.scf_if(zero_next):  # the next layer's counter
+                b.buffer_store_cp(_c(b, 0), self.cnt_rs, b.mul(b.add(_c(b, W_RTC), b.sub(_c(b, 1), par)), _c(b, 4)), _c(b, 0),
+                                  aux=CPOL_SC1)
+
+    def route_token(self, layer: Value, r: Value, poll: bool) -> None:
+        """The top-10 (+ shared gate) of token ``r`` by one wave: its 11 tagged pairs to ``pr``."""
+        b, k = self.b, self.k
+        if k.entry == "router":
+            if poll:
+                self.router_wait(layer, b.cmp_eq(r, _c(b, 0)))
+            rp_rs = _rsrc(b, self.a["rp"], _c(b, k.rks * k.bucket * LST * 4))
+            nks = 1 if k.rmode == "cta" else (k.rks - 1 if k.mutant == "rsum" else k.rks)
+            vals, sgl = None, None
+            for ks in range(nks):
+                base = b.mul(b.add(_c(b, ks * k.bucket), r), _c(b, LST * 4))
+                vk = []
+                for h in range(2):
+                    v = b.buffer_load_cp(rp_rs, b.add(base, b.mul(b.add(b.mul(self.lane, _c(b, 2)), _c(b, h)), _c(b, 16))), _c(b, 0), dwords=4,
+                                         aux=CPOL_SC1)
+                    vf = b.vec_bitcast(v, VectorType(F32, 4))
+                    vk += [b.vec_extract(vf, e) for e in range(4)]
+                sk = b.bitcast(b.buffer_load_cp(rp_rs, b.add(base, _c(b, 4 * E)), _c(b, 0), dwords=1, aux=CPOL_SC1), F32)
+                vals = vk if vals is None else [b.fadd(x_, y_) for x_, y_ in zip(vals, vk)]
+                sgl = sk if sgl is None else b.fadd(sgl, sk)
+        else:
             lg_a = b.add(self.a["lg"], b.mul(_i64(b, layer), self.llg))
             lg_rs = _rsrc(b, lg_a, _c(b, k.bucket * LST * 4))
             base = b.mul(r, _c(b, LST * 4))
@@ -715,42 +815,148 @@ class _Moe2:
                 vf = b.vec_bitcast(v, VectorType(F32, 4))
                 vals += [b.vec_extract(vf, e) for e in range(4)]
             sgl = b.bitcast(b.buffer_load_cp(lg_rs, b.add(base, _c(b, 4 * E)), _c(b, 0), dwords=1), F32)
-            ninf = _f(b, float("-inf"))
-            ids, lgs = [], []
-            for _ in range(TOPK):
-                m = vals[0]
-                for v in vals[1:]:
-                    m = b.fmax(m, v)
-                mx = _wave_all(b, m, "fmax")
-                cand = _c(b, 1 << 20)
-                for j in reversed(range(8)):
-                    cand = b.select(b.fcmp("oeq", vals[j], mx), b.add(b.mul(self.lane, _c(b, 8)), _c(b, j)), cand)
-                best = b.readfirstlane(_wave_all(b, cand, "smin"))
-                ids.append(best)
-                lgs.append(b.readfirstlane(b.bitcast(mx, I32)))
-                own = b.cmp_eq(b.lshr(best, _c(b, 3)), self.lane)
-                bj = b.land(best, _c(b, 7))
-                vals = [b.select(b.land(own, b.cmp_eq(bj, _c(b, j))), ninf, vals[j]) for j in range(8)]
-            lgf = [b.bitcast(v, F32) for v in lgs]
-            ex = [b.exp2(b.fmul(b.fsub(lv, lgf[0]), _f(b, L2E))) for lv in lgf]
-            tot = ex[0]
-            for e_ in ex[1:]:
-                tot = b.fadd(tot, e_)
-            wts = [b.fdiv(e_, tot) for e_ in ex]
-            sg = b.fdiv(_f(b, 1.0), b.fadd(_f(b, 1.0), b.exp2(b.fmul(b.fneg(sgl), _f(b, L2E)))))
-            my_id = _c(b, SH)
-            my_w = sg
-            for j in reversed(range(TOPK)):
-                sel = b.cmp_eq(self.lane, _c(b, j))
-                my_id = b.select(sel, ids[j], my_id)
-                my_w = b.select(sel, wts[j], my_w)
-            tg = self.tag_of(layer)
-            word = b.lor(my_id, b.shl(tg, _c(b, 16)))
-            pr_a = b.add(self.a["pr"], b.mul(_i64(b, layer), self.lpr))
-            pr_rs = _rsrc(b, pr_a, _c(b, k.bucket * PRS * 8))
-            off = b.mul(b.add(b.mul(r, _c(b, PRS)), self.lane), _c(b, 8))
-            ok = b.cmp_le(self.lane, _c(b, TOPK))
+        ninf = _f(b, float("-inf"))
+        ids, lgs = [], []
+        for _ in range(TOPK):
+            m = vals[0]
+            for v in vals[1:]:
+                m = b.fmax(m, v)
+            mx = _wave_all(b, m, "fmax")
+            cand = _c(b, 1 << 20)
+            for j in reversed(range(8)):
+                cand = b.select(b.fcmp("oeq", vals[j], mx), b.add(b.mul(self.lane, _c(b, 8)), _c(b, j)), cand)
+            best = b.readfirstlane(_wave_all(b, cand, "smin"))
+            ids.append(best)
+            lgs.append(b.readfirstlane(b.bitcast(mx, I32)))
+            own = b.cmp_eq(b.lshr(best, _c(b, 3)), self.lane)
+            bj = b.land(best, _c(b, 7))
+            vals = [b.select(b.land(own, b.cmp_eq(bj, _c(b, j))), ninf, vals[j]) for j in range(8)]
+        lgf = [b.bitcast(v, F32) for v in lgs]
+        ex = [b.exp2(b.fmul(b.fsub(lv, lgf[0]), _f(b, L2E))) for lv in lgf]
+        tot = ex[0]
+        for e_ in ex[1:]:
+            tot = b.fadd(tot, e_)
+        wts = [b.fdiv(e_, tot) for e_ in ex]
+        sg = b.fdiv(_f(b, 1.0), b.fadd(_f(b, 1.0), b.exp2(b.fmul(b.fneg(sgl), _f(b, L2E)))))
+        my_id = _c(b, SH)
+        my_w = sg
+        for j in reversed(range(TOPK)):
+            sel = b.cmp_eq(self.lane, _c(b, j))
+            my_id = b.select(sel, ids[j], my_id)
+            my_w = b.select(sel, wts[j], my_w)
+        tg = self.tag_of(layer)
+        word = b.lor(my_id, b.shl(tg, _c(b, 16)))
+        pr_a = b.add(self.a["pr"], b.mul(_i64(b, layer), self.lpr))
+        pr_rs = _rsrc(b, pr_a, _c(b, k.bucket * PRS * 8))
+        off = b.mul(b.add(b.mul(r, _c(b, PRS)), self.lane), _c(b, 8))
+        ok = b.cmp_le(self.lane, _c(b, TOPK))
+        if k.mutant != "rskip":  # rskip: the pairs never stored (the sort reads what was there)
             b.buffer_store_cp(b.vec_pack([word, b.bitcast(my_w, I32)], I32), pr_rs, b.select(ok, off, _c(b, OOB)), _c(b, 0), aux=CPOL_SC1)
+        if k.rsync == "cnt":  # the token's pairs stored, then counted
+            b.s_waitcnt(vmcnt=0)
+            with b.scf_if(self.lane0):
+                _aadd(k, b, self.cnt_a, b.mul(b.add(_c(b, W_RSC), self.flow_par(layer)), _c(b, 4)), _c(b, 1), scope="agent")
+
+    def router_units(self) -> Value:
+        b, k = self.b, self.k
+        per = 1 if k.rmode == "cta" else k.rks
+        return b.readfirstlane(b.mul(b.lshr(b.add(self.rows, _c(b, 15)), _c(b, 4)), _c(b, (LST // TILE) * per)))
+
+    def router_cta(self, layer: Value) -> None:
+        """rmode=cta: CTA unit u = (row tile, expert tile); wave w sums K [320 w, 320 w + 320); the x LDS rows (free until
+        the experts stage x) hold the 8 partial tiles."""
+        b, k = self.b, self.k
+        NT, KC = LST // TILE, H // WAVES
+        nu = self.router_units()
+        xr_rs = _rsrc(b, self.a["xr"], _c(b, k.bucket * H * 2))
+        wr_a = b.readfirstlane(b.add(self.a["wr"], b.mul(_i64(b, layer), b.const_i64(LST * H * 2))))
+        wr_rs = _rsrc(b, wr_a, _c(b, LST * H * 2))
+        rp_rs = _rsrc(b, self.a["rp"], _c(b, k.bucket * LST * 4))
+        BF8 = VectorType(BF16, 8)
+        scr = self.xl
+        nw = WAVES - 1 if k.mutant == "rsum" else WAVES
+        with b.scf_for(self.cta, nu, _c(b, GRID), iv_name="rc") as u:
+            u = b.readfirstlane(u)
+            rt = b.readfirstlane(b.div(u, _c(b, NT)))
+            et = b.readfirstlane(b.sub(u, b.mul(rt, _c(b, NT))))
+            row = b.add(b.mul(rt, _c(b, TILE)), self.l16)
+            kl = b.add(b.mul(self.wave, _c(b, KC)), b.mul(self.g, _c(b, 8)))
+            xo = b.select(b.cmp_lt(row, self.rows), b.mul(b.add(b.mul(row, _c(b, H)), kl), _c(b, 2)), _c(b, OOB))
+            col = b.add(b.mul(et, _c(b, TILE)), self.l16)
+            wo = b.mul(b.add(b.mul(col, _c(b, H)), kl), _c(b, 2))
+            acc = b.zero_vec_f32(4)
+            GRP = 5
+            for c0 in range(0, KC // 32, GRP):
+                cs = range(c0, min(c0 + GRP, KC // 32))
+                av = [b.buffer_load_cp(xr_rs, b.add(xo, _c(b, 64 * c)), _c(b, 0), dwords=4) for c in cs]
+                wv = [b.buffer_load_cp(wr_rs, wo, _c(b, 64 * c), dwords=4) for c in cs]
+                for a_, w_ in zip(av, wv):
+                    acc = b.mfma_f32_16x16x32_bf16(b.vec_bitcast(a_, BF8), b.vec_bitcast(w_, BF8), acc)
+            for i in range(4):
+                idx = b.add(b.mul(self.wave, _c(b, 256)), b.add(b.mul(b.add(b.mul(self.g, _c(b, 4)), _c(b, i)), _c(b, 16)), self.l16))
+                self.lds_put(scr, idx, b.bitcast(b.vec_extract(acc, i), I32))
+            b.sync_lds_only()
+            with b.scf_if(b.cmp_lt(self.tid, _c(b, 256))):
+                sm = None
+                for w in range(nw):
+                    v = b.bitcast(self.lds_i(scr, b.add(_c(b, w * 256), self.tid)), F32)
+                    sm = v if sm is None else b.fadd(sm, v)
+                ro = b.add(b.mul(rt, _c(b, TILE)), b.lshr(self.tid, _c(b, 4)))
+                c_ = b.add(b.mul(et, _c(b, TILE)), b.land(self.tid, _c(b, 15)))
+                o = b.mul(b.add(b.mul(ro, _c(b, LST)), c_), _c(b, 4))
+                b.buffer_store_cp(b.bitcast(sm, I32), rp_rs, b.select(b.cmp_lt(ro, self.rows), o, _c(b, OOB)), _c(b, 0), aux=CPOL_SC1)
+            b.sync_lds_only()
+        b.s_waitcnt(vmcnt=0)
+        b.sync_lds_only()
+        mine = b.readfirstlane(b.select(b.cmp_lt(self.cta, nu), b.add(b.lshr(b.sub(b.sub(nu, _c(b, 1)), self.cta), _c(b, 8)), _c(b, 1)),
+                                        _c(b, 0)))
+        with b.scf_if(b.land(D.is_thread0(b), b.cmp_gt(mine, _c(b, 0)))):
+            _aadd(k, b, self.cnt_a, b.mul(b.add(_c(b, W_RTC), self.flow_par(layer)), _c(b, 4)), mine, scope="agent")
+
+    def router(self, layer: Value) -> None:
+        """entry=router: partial logits of every (16 rows, 16 experts, K split) unit to its ``rp`` slot, then one counter
+        bump per wave by its unit count (after its stores completed)."""
+        b, k = self.b, self.k
+        KS, NT = k.rks, LST // TILE
+        KC = H // KS
+        G = GRID * WAVES
+        nu = self.router_units()
+        gw = b.readfirstlane(b.add(b.mul(self.wave, _c(b, GRID)), self.cta))
+        xr_rs = _rsrc(b, self.a["xr"], _c(b, k.bucket * H * 2))
+        wr_a = b.readfirstlane(b.add(self.a["wr"], b.mul(_i64(b, layer), b.const_i64(LST * H * 2))))
+        wr_rs = _rsrc(b, wr_a, _c(b, LST * H * 2))
+        rp_rs = _rsrc(b, self.a["rp"], _c(b, KS * k.bucket * LST * 4))
+        BF8 = VectorType(BF16, 8)
+        with b.scf_for(gw, nu, _c(b, G), iv_name="ru") as u:
+            u = b.readfirstlane(u)
+            et = b.readfirstlane(b.sub(u, b.mul(b.div(u, _c(b, NT)), _c(b, NT))))
+            r2 = b.readfirstlane(b.div(u, _c(b, NT)))
+            ks = b.readfirstlane(b.land(r2, _c(b, KS - 1)))
+            rt = b.readfirstlane(b.lshr(r2, _c(b, KS.bit_length() - 1)))
+            k0 = b.mul(ks, _c(b, KC))
+            row = b.add(b.mul(rt, _c(b, TILE)), self.l16)
+            kl = b.add(k0, b.mul(self.g, _c(b, 8)))
+            xo = b.select(b.cmp_lt(row, self.rows), b.mul(b.add(b.mul(row, _c(b, H)), kl), _c(b, 2)), _c(b, OOB))
+            col = b.add(b.mul(et, _c(b, TILE)), self.l16)
+            wo = b.mul(b.add(b.mul(col, _c(b, H)), kl), _c(b, 2))
+            acc = b.zero_vec_f32(4)
+            GRP = 4
+            for c0 in range(0, KC // 32, GRP):
+                cs = range(c0, min(c0 + GRP, KC // 32))
+                av = [b.buffer_load_cp(xr_rs, b.add(xo, _c(b, 64 * c)), _c(b, 0), dwords=4) for c in cs]
+                wv = [b.buffer_load_cp(wr_rs, wo, _c(b, 64 * c), dwords=4) for c in cs]
+                for a_, w_ in zip(av, wv):
+                    acc = b.mfma_f32_16x16x32_bf16(b.vec_bitcast(a_, BF8), b.vec_bitcast(w_, BF8), acc)
+            for i in range(4):
+                ro = b.add(b.mul(rt, _c(b, TILE)), b.add(b.mul(self.g, _c(b, 4)), _c(b, i)))
+                o = b.mul(b.add(b.mul(b.add(b.mul(ks, _c(b, k.bucket)), ro), _c(b, LST)), col), _c(b, 4))
+                b.buffer_store_cp(b.bitcast(b.vec_extract(acc, i), I32), rp_rs, b.select(b.cmp_lt(ro, self.rows), o, _c(b, OOB)), _c(b, 0),
+                                  aux=CPOL_SC1)
+        b.s_waitcnt(vmcnt=0)
+        nmine = b.readfirstlane(b.select(b.cmp_lt(gw, nu), b.add(b.lshr(b.sub(b.sub(nu, _c(b, 1)), gw), _c(b, G.bit_length() - 1)), _c(b, 1)),
+                                         _c(b, 0)))
+        with b.scf_if(b.land(self.lane0, b.cmp_gt(nmine, _c(b, 0)))):
+            _aadd(k, b, self.cnt_a, b.mul(b.add(_c(b, W_RTC), self.flow_par(layer)), _c(b, 4)), nmine, scope="agent")
 
     def poll_tag(self, pr_a: Value, voff: Value, tag: Value) -> Value:
         """Every active lane spins until the id word at ``pr_a + voff`` carries ``tag`` (bits 16..30); 2 s deadline.
@@ -800,8 +1006,20 @@ class _Moe2:
         pr_a = b.readfirstlane(b.add(self.a["pr"], b.mul(_i64(b, layer), self.lpr)))
         pr_rs = _rsrc(b, pr_a, _c(b, k.bucket * PRS * 8))
         npairs = b.mul(self.rows, _c(b, TOPK))
-        tg = self.tag_of(layer) if k.entry == "logits" else None
-        aux = CPOL_SC1 if k.entry == "logits" else 0
+        tg = self.tag_of(layer) if k.entry != "route" else None
+        aux = CPOL_SC1 if k.entry != "route" else 0
+        tagp = k.entry != "route" and k.mutant != "tag" and k.rsync == "tag"
+        if k.entry != "route" and k.rsync == "cnt":  # one poller per CTA: every token's pairs counted
+            par = self.flow_par(layer)
+            with b.scf_if(D.is_thread0(b)):
+                if k.mutant != "rsc0":
+                    st = self.gpoll(self.cnt_a, b.mul(b.add(_c(b, W_RSC), par), _c(b, 4)), self.rows)
+                    with b.scf_if(b.cmp_ne(st, _c(b, 0))):
+                        self.err()
+                with b.scf_if(b.cmp_eq(self.cta, _c(b, 0))):  # the next layer's counter
+                    b.buffer_store_cp(_c(b, 0), self.cnt_rs, b.mul(b.add(_c(b, W_RSC), b.sub(_c(b, 1), par)), _c(b, 4)), _c(b, 0),
+                                      aux=CPOL_SC1)
+            b.sync_lds_only()
         pairs = []
         for i in range(-(-(TOPK * k.bucket) // THREADS)):
             p = b.add(tid, _c(b, i * THREADS))
@@ -809,7 +1027,7 @@ class _Moe2:
             tok = b.div(p, _c(b, TOPK))
             kk = b.sub(p, b.mul(tok, _c(b, TOPK)))
             off = b.select(ok, b.mul(b.add(b.mul(tok, _c(b, PRS)), kk), _c(b, 8)), _c(b, OOB))
-            if k.entry == "logits" and k.mutant != "tag":
+            if tagp:
                 with b.scf_if(ok):
                     st = self.poll_tag(pr_a, off, tg)
                     with b.scf_if(b.land(b.cmp_ne(st, _c(b, 0)), self.lane0)):
@@ -823,7 +1041,7 @@ class _Moe2:
             with b.scf_if(ok):
                 b.lds_atomic_add(self.bm, [b.add(b.mul(e, _c(b, nw)), b.lshr(tok, _c(b, 5)))], b.shl(_c(b, 1), b.land(tok, _c(b, 31))))
         # the shared expert's gate (slot 10) of token tid
-        if k.entry == "logits" and k.mutant != "tag":
+        if tagp:
             with b.scf_if(b.cmp_lt(tid, self.rows)):
                 st = self.poll_tag(pr_a, b.mul(b.add(b.mul(tid, _c(b, PRS)), _c(b, TOPK)), _c(b, 8)), tg)
                 with b.scf_if(b.land(b.cmp_ne(st, _c(b, 0)), self.lane0)):
@@ -873,7 +1091,16 @@ class _Moe2:
             self.lds_put(self.eo, _c(b, SH), b.add(off_sh, b.shl(self.rows, _c(b, 16))))
             self.lds_put(self.misc, _c(b, 0), b.add(it_sh, psh))
         b.sync_lds_only()
-        # token lists: rank = popcount of the expert's bitmap below the token
+        if k.ehead:  # the item table is complete: the experts stage issues its first weights, then the token lists
+            self._lists = (pairs, off_sh, sgv)
+            return b.readfirstlane(self.lds_i(self.misc, _c(b, 0)))
+        return self.sort_lists(pairs, off_sh, sgv)
+
+    def sort_lists(self, pairs, off_sh, sgv) -> Value:
+        """The sort's second half: the token lists (rank = popcount of the expert's bitmap below the token) and the
+        shared expert's list; returns the item count."""
+        b, k = self.b, self.k
+        nw, tid = k.nw, self.tid
         for ok, tok, kk, e, w in pairs:
             with b.scf_if(ok):
                 wi = b.lshr(tok, _c(b, 5))
@@ -1898,6 +2125,8 @@ class _Moe2:
             ent = self.lds_i(self.lst, pos)
             toks.append(dict(valid=b.cmp_lt(li, S["cnt"]), tok=b.land(ent, _c(b, 255)), slot=b.lshr(ent, _c(b, 8)),
                              hp=b.add(S["off"], b.add(tb, _c(b, p * TILE)))))
+        if k.mutant == "flowrel":  # the counter released before the partials exist: every combine may read stale partials
+            self.flow_bump(layer, S, toks[0], early=True)
         # the x rows are in LDS once at most ``after_dma`` younger VMEM ops are outstanding (first segment: the head;
         # later ones: the previous segment's down ops issued after its DMA, the minimum over the variants)
         sg_ = it  # the segment's index in this CTA's sequence
@@ -2300,6 +2529,8 @@ class _Moe2:
                 tbd = {}  # the down head in down_stream's step order
                 dring = [(self.dn_load(dw_rs, dvo[kk], j, kk, tbd), None) for (j, kk) in steps[: min(k.ddepth, len(steps))]]
                 sdn = self.load_sdn(S)
+            if self.pnl is self.xl:  # pal: the panel overwrites the x rows: every wave's last x read done first
+                b.sync_lds_only()
             for mi, m in enumerate(sweeps[si]):
                 j = tl[2 * m]
                 gacc, uacc = acc[2 * mi], acc[2 * mi + 1]
@@ -2519,7 +2750,7 @@ class _Moe2:
         i (64 / (4 ST)) + L / (4 ST), 16 bytes at (L % (4 ST)) x 16 of the row's ST x 64 bytes (OOB past the item's tokens)."""
         b, k = self.b, self.k
         ST = k.pstg
-        lpr = ST * 4  # lanes per row
+        lpr = ST * 4 if k.pdt == "f32" else ST * 2  # lanes per row (16 bytes each)
         rpi = 64 // lpr  # rows per instruction
         tb = b.mul(S["ps"], _c(b, TILE * k.tpp))
         cm1 = b.sub(S["cnt"], _c(b, 1))
@@ -2532,7 +2763,10 @@ class _Moe2:
                 ent = self.lds_i(self.lst, b.add(S["off"], b.smin(li, cm1)))
                 tok, slot = b.land(ent, _c(b, 255)), b.lshr(ent, _c(b, 8))
                 prow = b.add(b.mul(b.add(b.mul(tok, _c(b, SLOTS)), slot), _c(b, MAXSEG)), S["jseg"])
-                vo_ = b.mul(b.add(b.mul(prow, _c(b, H)), b.mul(b.land(self.lane, _c(b, lpr - 1)), _c(b, 4))), _c(b, 4))
+                if k.pdt == "f32":
+                    vo_ = b.mul(b.add(b.mul(prow, _c(b, H)), b.mul(b.land(self.lane, _c(b, lpr - 1)), _c(b, 4))), _c(b, 4))
+                else:  # bf16 row of H x 2 bytes, 16 bytes per lane
+                    vo_ = b.add(b.mul(prow, _c(b, H * 2)), b.mul(b.land(self.lane, _c(b, lpr - 1)), _c(b, 16)))
                 first = b.add(b.add(tb, _c(b, p * TILE)), _c(b, i_ * rpi))  # the instruction's first row (uniform)
                 rows.append((r_, b.select(b.cmp_lt(li, S["cnt"]), vo_, _c(b, OOB)), b.cmp_lt(first, S["cnt"])))
             out.append(rows)
@@ -2555,7 +2789,8 @@ class _Moe2:
         for p in range(P):
             tk = toks[p]
             prow = b.add(b.mul(b.add(b.mul(tk["tok"], _c(b, SLOTS)), tk["slot"]), _c(b, MAXSEG)), S["jseg"])
-            pvo.append(b.select(tk["valid"], b.mul(b.add(b.mul(prow, _c(b, H)), b.mul(self.g, _c(b, 4))), _c(b, 4)), _c(b, OOB)))
+            esz = 4 if k.pdt == "f32" else 2
+            pvo.append(b.select(tk["valid"], b.mul(b.add(b.mul(prow, _c(b, H)), b.mul(self.g, _c(b, 4))), _c(b, esz)), _c(b, OOB)))
         stg_rows = self.stage_rows(S, toks) if k.pstg else None
         ring = list(ring)
         for e in range(len(ring), min(Dd, len(steps))):  # top the handoff's entries up to the down depth
@@ -2615,29 +2850,36 @@ class _Moe2:
         P = k.tpp
         ntl = H // TILE // WAVES
         aux = {"sc1": CPOL_SC1, "nt": CPOL_NT, "def": 0}[k.pst]
+        bf = k.pdt == "bf16"
+        esz = 2 if bf else 4
+
+        def dat(v):  # a lane's 4 f32 partials as stored words (4 f32 | 2 packed bf16 pairs)
+            return b.vec_bitcast(b.vec_trunc_f32_to_bf16(v), VectorType(I32, 2)) if bf else b.vec_bitcast(v, VectorType(I32, 4))
+
         if not k.pstg:
             if self.dg("nost"):
                 return
             rt = b.add(self.dn_base(), _c(b, j))
             for p in range(P):
                 vo = pvo[p] if self.dn_live(j) is None else b.select(self.dn_live(j), pvo[p], _c(b, OOB))
-                b.buffer_store_cp(b.vec_bitcast(accj[p], VectorType(I32, 4)), self.part_rs, vo,
-                                  b.readfirstlane(b.mul(rt, _c(b, TILE * 4))), aux=aux)
+                b.buffer_store_cp(dat(accj[p]), self.part_rs, vo, b.readfirstlane(b.mul(rt, _c(b, TILE * esz))), aux=aux)
             return
         ST = k.pstg
+        sgs = self.SGS if not bf else ST * TILE // 2 + 4  # stage row (words)
         for p in range(P):  # the tile into the wave's stage
-            sidx = b.add(b.mul(b.add(b.mul(b.add(b.mul(self.wave, _c(b, P)), _c(b, p)), _c(b, TILE)), self.l16), _c(b, self.SGS)),
-                         b.add(_c(b, (j % ST) * TILE), b.mul(self.g, _c(b, 4))))
-            b.smem_store_vN(self.stg, [sidx], b.vec_bitcast(accj[p], VectorType(I32, 4)), 4)
-        if j % ST == ST - 1 and not self.dg("nost"):  # the stage's rows, ST x 64 B each, contiguous
-            col0 = b.readfirstlane(b.mul(b.add(self.dn_base(), _c(b, j - ST + 1)), _c(b, TILE * 4)))
+            sidx = b.add(b.mul(b.add(b.mul(b.add(b.mul(self.wave, _c(b, P)), _c(b, p)), _c(b, TILE)), self.l16), _c(b, sgs)),
+                         b.add(_c(b, (j % ST) * TILE * esz // 4), b.mul(self.g, _c(b, esz))))
+            b.smem_store_vN(self.stg, [sidx], dat(accj[p]), 4 if not bf else 2)
+        if j % ST == ST - 1 and not self.dg("nost"):  # the stage's rows, ST x 16 x esz bytes each, contiguous
+            col0 = b.readfirstlane(b.mul(b.add(self.dn_base(), _c(b, j - ST + 1)), _c(b, TILE * esz)))
             glv = self.dn_live(j)  # the group's last tile: a group is live or dead as a whole (dsk multiple of pstg)
             for p in range(P):
                 for r_, vo_, any_ in stg_rows[p]:
                     if glv is not None:
                         vo_ = b.select(glv, vo_, _c(b, OOB))
-                    ridx = b.add(b.mul(b.add(b.mul(b.add(b.mul(self.wave, _c(b, P)), _c(b, p)), _c(b, TILE)), r_), _c(b, self.SGS)),
-                                 b.mul(b.land(self.lane, _c(b, ST * 4 - 1)), _c(b, 4)))
+                    lpr = ST * 4 if not bf else ST * 2
+                    ridx = b.add(b.mul(b.add(b.mul(b.add(b.mul(self.wave, _c(b, P)), _c(b, p)), _c(b, TILE)), r_), _c(b, sgs)),
+                                 b.mul(b.land(self.lane, _c(b, lpr - 1)), _c(b, 4)))
                     ctx = b.scf_if(any_) if k.sskip else contextlib.nullcontext()
                     with ctx:  # sskip: no store instruction for rows past the item's tokens
                         b.buffer_store_cp(b.smem_load_vN(self.stg, ridx, dtype=I32, n=4), self.part_rs, vo_, col0, aux=aux)
@@ -2710,10 +2952,20 @@ class _Moe2:
             L = self.xb_unit_v(U, _c(b, 0))
             ln["L"] = L
         S0 = self.useg(layer, L, ln)
-        with b.scf_if(S0["has"]):
-            self.stage_x(S0["off"], S0["cnt"], S0["ps"])
-        head = self.gu_head(S0, Dp) if k.gu == "atom" else []
-        if k.gu == "wt":
+        if k.ehead:  # the first weights in flight while the token lists are built and the x rows staged
+            head = self.gu_head(S0, Dp)
+            self.sort_lists(*self._lists)
+            with b.scf_if(S0["has"]):
+                self.stage_x(S0["off"], S0["cnt"], S0["ps"])
+            b.s_waitcnt(vmcnt=0)
+            b.sync_lds_only()
+        else:
+            with b.scf_if(S0["has"]):
+                self.stage_x(S0["off"], S0["cnt"], S0["ps"])
+            head = self.gu_head(S0, Dp) if k.gu == "atom" else []
+        if k.ehead:
+            pass
+        elif k.gu == "wt":
             b.s_waitcnt(vmcnt=0)
             b.sync_lds_only()
         elif k.lka == "tail" and k.xsync == "cnt":
@@ -2727,6 +2979,9 @@ class _Moe2:
         if k.deal == "rr":
             if not k.xb:
                 nv = b.readfirstlane(b.select(b.cmp_lt(L, U), b.div(b.add(b.sub(U, L), _c(b, GRID - 1)), _c(b, GRID)), _c(b, 0)))
+            if k.pfh:  # an idle CTA (no unit this layer) warms a busy unit's weights
+                with b.scf_if(b.land(b.cmp_eq(nv, _c(b, 0)), b.cmp_gt(U, _c(b, 0)))):
+                    self.prefetch_unit(layer, b.readfirstlane(b.sub(self.cta, b.mul(b.div(self.cta, U), U))), ln)
             if not vals0:  # no carried head (gu=wt)
                 with b.scf_for(_c(b, 0), nv, _c(b, 1), iv_name="segi") as v:
                     v = b.readfirstlane(v)
@@ -2756,6 +3011,28 @@ class _Moe2:
                 nxt = b.readfirstlane(self.lds_i(self.tick, b.land(v, _c(b, 1))))
                 b.scf_yield(nxt, *_flat2(look)[0])
             b.scf_yield(*inner.results)
+
+    def prefetch_unit(self, layer: Value, u: Value, ln: dict) -> None:
+        """pfh: load (default policy) the down block (pfh 2: and the gate_up block's back half) of unit ``u``'s expert,
+        8 KiB per CTA step; the values are folded into a never-true error check (no dead-code elimination)."""
+        b, k, dm = self.b, self.k, self.dm
+        S = self.useg(layer, u, ln)
+        regions = [(S["dw_a"], S["dw_n"], dm["dnb"])]
+        if k.pfh == 2:
+            regions.append((b.add(S["gw_a"], b.const_i64(dm["gub"] // 2)), S["gw_n"], dm["gub"] // 2))
+        acc = _c(b, 0)
+        for ri, (a_, n_, nbytes) in enumerate(regions):
+            rs = _rsrc(b, a_, n_)
+            steps = -(-nbytes // (THREADS * 16))
+            loop = b.scf_for_iter(_c(b, 0), _c(b, steps), _c(b, 1), [(f"pfa{ri}", acc)], iv_name=f"pfi{ri}")
+            with loop as (i, vals):
+                o = b.mul(b.add(b.mul(i, _c(b, THREADS)), self.tid), _c(b, 16))
+                v = b.buffer_load_cp(rs, b.select(b.cmp_lt(o, _c(b, nbytes)), o, _c(b, OOB)), _c(b, 0), dwords=4)
+                b.scf_yield(b.xor(vals[0], b.vec_extract(v, 0)))
+            acc = loop.results[0]
+        b.s_waitcnt(vmcnt=0)
+        with b.scf_if(b.land(self.lane0, b.cmp_eq(acc, _c(b, 0x5EED1234)))):
+            self.err()
 
     def stream_layer(self, layer: Value, nit: Value) -> None:
         b, k = self.b, self.k
@@ -3060,13 +3337,23 @@ class _Moe2:
     # ------------------------------------------------------------------ combine
     def flow_par(self, layer: Value) -> Value:
         b = self.b
-        return b.readfirstlane(b.land(b.add(self.ep, layer), _c(b, 1)))
+        x = b.add(self.ep, layer)
+        if self.k.stage != "moe":  # a consumer launch: the previous (MoE) launch's epoch parity
+            x = b.add(x, _c(b, 1))
+        return b.readfirstlane(b.land(x, _c(b, 1)))
 
-    def flow_bump(self, layer: Value, S: dict, tk: dict) -> None:
-        """cmb=flow: this segment's partials and desc stored (every wave), then + 12 / nseg on each token's counter."""
+    def flow_bump(self, layer: Value, S: dict, tk: dict, early: bool = False) -> None:
+        """cmb=flow: this segment's partials and desc stored (every wave), then + 12 / nseg on each token's counter.
+        Mutant ``flowrel``: the bump at the segment start (``early``), before any partial is computed or stored."""
         b, k = self.b, self.k
-        b.s_waitcnt(vmcnt=0)
-        b.sync_lds_only()
+        if (k.mutant == "flowrel") != early:
+            return
+        if not early:
+            b.s_waitcnt(vmcnt=0)
+            b.sync_lds_only()
+            if k.pst != "sc1":  # plain / nt partial stores: written back from this XCD's L2 before the count (release)
+                with b.scf_if(b.cmp_eq(self.wave, _c(b, 0))):
+                    D.release_l2(b, "agent")
         inc = b.readfirstlane(b.div(_c(b, 12), S["nseg"]))
         if k.shd:
             inc = b.readfirstlane(b.select(b.cmp_eq(S["dh"], _c(b, 0)), inc, b.lshr(inc, _c(b, 1))))
@@ -3077,16 +3364,30 @@ class _Moe2:
     def combine(self, layer: Value) -> None:
         """Units (token, 256 columns) over all waves: y = sum over slots (order) of the slot's segment partials (order)."""
         b, k = self.b, self.k
-        y_a = b.add(self.a["y"], b.mul(_i64(b, layer), self.ly))
+        y_a = b.add(self.a["y" if k.stage == "moe" else "out"], b.mul(_i64(b, layer), self.ly))
         y_rs = _rsrc(b, y_a, _c(b, k.bucket * H * 2))
         ncu = b.readfirstlane(b.mul(self.rows, _c(b, H // 256)))
-        gw = b.add(b.mul(self.cta, _c(b, WAVES)), self.wave)
+        if k.cspread:  # unit u on CTA u mod 256, wave u / 256: every CTA gets combine units (none waits behind a slow CTA)
+            gw = b.readfirstlane(b.add(b.mul(self.wave, _c(b, GRID)), self.cta))
+        else:
+            gw = b.add(b.mul(self.cta, _c(b, WAVES)), self.wave)
         with b.scf_for(gw, ncu, _c(b, GRID * WAVES), iv_name="cu") as u:
             u = b.readfirstlane(u)
             tok = b.div(u, _c(b, H // 256))
             cb = b.sub(u, b.mul(tok, _c(b, H // 256)))
             col = b.add(b.mul(cb, _c(b, 256)), b.mul(self.lane, _c(b, 4)))
             fl = k.cmb == "flow"
+            if fl and k.pretouch == 3:  # stale-read twin: this unit's desc and partial lines loaded (plain) before the poll
+                pacc = b.buffer_load_cp(self.desc_rs, b.mul(b.add(b.mul(tok, _c(b, DSTR)), b.smin(self.lane, _c(b, SLOTS - 1))), _c(b, 4)),
+                                        _c(b, 0), dwords=1)
+                for s_ in range(SLOTS):
+                    for j in range(MAXSEG):
+                        o = b.mul(b.add(b.mul(b.add(b.mul(b.add(b.mul(tok, _c(b, SLOTS)), _c(b, s_)), _c(b, MAXSEG)), _c(b, j)), _c(b, H)), col),
+                                  _c(b, 4))
+                        pacc = b.xor(pacc, b.vec_extract(b.buffer_load_cp(self.part_rs, o, _c(b, 0), dwords=4), 0))
+                b.s_waitcnt(vmcnt=0)
+                with b.scf_if(b.land(self.lane0, b.cmp_eq(pacc, _c(b, 0x5EED1234)))):
+                    self.err()
             if fl:  # wait for the token's 11 slots (132 = 11 x 12), then read coherently
                 par = self.flow_par(layer)
                 cw = b.mul(b.add(_c(b, W_TOKC), b.add(b.mul(par, _c(b, 128)), tok)), _c(b, 4))
@@ -3098,9 +3399,24 @@ class _Moe2:
                 with b.scf_if(b.land(self.lane0, b.cmp_eq(cb, _c(b, 0)))):  # the next layer's counter of this token
                     nw = b.mul(b.add(_c(b, W_TOKC), b.add(b.mul(b.sub(_c(b, 1), par), _c(b, 128)), tok)), _c(b, 4))
                     b.buffer_store_cp(_c(b, 0), self.cnt_rs, nw, _c(b, 0), aux=CPOL_SC1)
-            rdx = CPOL_SC1 if fl else 0
+            rdx = CPOL_SC1 if fl and k.mutant != "flowsc" else 0  # flowsc: plain loads (a pretouched line is read stale)
             dv = b.buffer_load_cp(self.desc_rs, b.mul(b.add(b.mul(tok, _c(b, DSTR)), b.smin(self.lane, _c(b, SLOTS - 1))), _c(b, 4)), _c(b, 0),
                                   dwords=1, aux=rdx)
+            esz_ = 4 if k.pdt == "f32" else 2
+
+            def raw4(s_: int, j: int, colv: Value):
+                """Segment j of slot s_ at 4 columns from colv, unmasked (sc1 under flow), as f32 x 4."""
+                o = b.mul(b.add(b.mul(b.add(b.mul(b.add(b.mul(tok, _c(b, SLOTS)), _c(b, s_)), _c(b, MAXSEG)), _c(b, j)), _c(b, H)), colv), _c(b, esz_))
+                if k.pdt == "bf16":
+                    v = b.buffer_load_cp(self.part_rs, o, _c(b, 0), dwords=2, aux=rdx)
+                    fs = []
+                    for i in range(2):
+                        w_ = b.vec_extract(v, i)
+                        fs += [b.bitcast(b.shl(w_, _c(b, 16)), F32), b.bitcast(b.land(w_, _c(b, -65536)), F32)]
+                    return b.vec_pack(fs, F32)
+                return b.vec_bitcast(b.buffer_load_cp(self.part_rs, o, _c(b, 0), dwords=4, aux=rdx), VectorType(F32, 4))
+
+            pre = {(s_, j): raw4(s_, j, col) for s_ in range(SLOTS) for j in range(2)} if k.cspec else {}
             ns = [b.readlane(dv, _c(b, s_)) for s_ in range(SLOTS)]
             if k.mutant == "desc":
                 ns = [_c(b, 1)] * SLOTS
@@ -3108,17 +3424,29 @@ class _Moe2:
             pr_a = b.readfirstlane(b.add(self.a["pr"], b.mul(_i64(b, layer), self.lpr)))
             pr_rs = _rsrc(b, pr_a, _c(b, k.bucket * PRS * 8))
             wv = b.buffer_load_cp(pr_rs, b.add(b.mul(b.add(b.mul(tok, _c(b, PRS)), b.smin(self.lane, _c(b, SLOTS - 1))), _c(b, 8)), _c(b, 4)),
-                                  _c(b, 0), dwords=1, aux=CPOL_SC1 if k.entry == "logits" else 0)
+                                  _c(b, 0), dwords=1, aux=CPOL_SC1 if k.entry != "route" else 0)
             ws = [b.bitcast(b.readlane(wv, _c(b, s_)), F32) for s_ in range(SLOTS)]
             mx = ns[0]
             for v in ns[1:]:
                 mx = b.smax(mx, v)
 
             def ld(s_: int, j: int, n_s: Value, colv: Value, wd: int):
-                o = b.mul(b.add(b.mul(b.add(b.mul(b.add(b.mul(tok, _c(b, SLOTS)), _c(b, s_)), _c(b, MAXSEG)), _c(b, j)), _c(b, H)), colv), _c(b, 4))
+                esz = 4 if k.pdt == "f32" else 2
+                o = b.mul(b.add(b.mul(b.add(b.mul(b.add(b.mul(tok, _c(b, SLOTS)), _c(b, s_)), _c(b, MAXSEG)), _c(b, j)), _c(b, H)), colv), _c(b, esz))
                 live = b.cmp_lt(_c(b, j), n_s)
                 if k.mutant == "seg" and j > 0:
                     live = b.land(live, b.cmp_lt(_c(b, j), b.sub(n_s, _c(b, 1))))
+                if wd == 4 and colv is col and (s_, j) in pre:  # cspec: loaded with the descriptor; a dead row is masked by live
+                    return pre[(s_, j)], live
+                if k.pdt == "bf16":
+                    v = b.buffer_load_cp(self.part_rs, b.select(live, o, _c(b, OOB)), _c(b, 0), dwords=wd // 2, aux=rdx)
+                    if wd == 2:
+                        v = b.vec_pack([v], I32)
+                    fs = []
+                    for i in range(wd // 2):
+                        w_ = b.vec_extract(v, i)
+                        fs += [b.bitcast(b.shl(w_, _c(b, 16)), F32), b.bitcast(b.land(w_, _c(b, -65536)), F32)]
+                    return b.vec_pack(fs, F32), live
                 v = b.buffer_load_cp(self.part_rs, b.select(live, o, _c(b, OOB)), _c(b, 0), dwords=wd, aux=rdx)
                 return b.vec_bitcast(v, VectorType(F32, wd)), live
 
@@ -3144,6 +3472,8 @@ class _Moe2:
             G2 = (range(0, 6), range(6, SLOTS))
 
             def store(tot, colv: Value, wd: int):
+                if k.stage == "cons_part":
+                    tot = self.add_res(tot, tok, colv, wd)
                 yv = b.vec_bitcast(b.vec_trunc_f32_to_bf16(b.vec_pack(tot, F32)), VectorType(I32, wd // 2))
                 if wd == 2:
                     yv = b.vec_extract(yv, 0)
@@ -3160,6 +3490,43 @@ class _Moe2:
                             for hh in range(2):
                                 c2 = b.add(b.mul(cb, _c(b, 256)), b.add(_c(b, 128 * hh), b.mul(self.lane, _c(b, 2))))
                                 store(total(MAXSEG, c2, 2, G2), c2, 2)
+
+    def add_res(self, tot: list, tok: Value, colv: Value, wd: int) -> list:
+        """tot (f32 x wd, columns colv ..) + the residual's bf16 row of token tok."""
+        b, k = self.b, self.k
+        res_rs = _rsrc(b, self.a["res"], _c(b, k.bucket * H * 2))
+        rv = b.buffer_load_cp(res_rs, b.mul(b.add(b.mul(tok, _c(b, H)), colv), _c(b, 2)), _c(b, 0), dwords=wd // 2)
+        if wd == 2:
+            rv = b.vec_pack([rv], I32)
+        out = []
+        for i in range(wd // 2):
+            w_ = b.vec_extract(rv, i)
+            lo = b.bitcast(b.shl(w_, _c(b, 16)), F32)
+            hi = b.bitcast(b.land(w_, _c(b, -65536)), F32)
+            out += [b.fadd(tot[2 * i], lo), b.fadd(tot[2 * i + 1], hi)]
+        return out
+
+    def consumer_y(self, layer: Value) -> None:
+        """stage=cons_y: out = res + y (bf16), units (token, 256 columns) as the combine's."""
+        b, k = self.b, self.k
+        y_rs = _rsrc(b, b.add(self.a["y"], b.mul(_i64(b, layer), self.ly)), _c(b, k.bucket * H * 2))
+        o_rs = _rsrc(b, b.add(self.a["out"], b.mul(_i64(b, layer), self.ly)), _c(b, k.bucket * H * 2))
+        ncu = b.readfirstlane(b.mul(self.rows, _c(b, H // 256)))
+        gw = b.add(b.mul(self.cta, _c(b, WAVES)), self.wave)
+        with b.scf_for(gw, ncu, _c(b, GRID * WAVES), iv_name="cy") as u:
+            u = b.readfirstlane(u)
+            tok = b.div(u, _c(b, H // 256))
+            cb = b.sub(u, b.mul(tok, _c(b, H // 256)))
+            col = b.add(b.mul(cb, _c(b, 256)), b.mul(self.lane, _c(b, 4)))
+            off = b.mul(b.add(b.mul(tok, _c(b, H)), col), _c(b, 2))
+            yv = b.buffer_load_cp(y_rs, off, _c(b, 0), dwords=2)
+            tot = []
+            for i in range(2):
+                w_ = b.vec_extract(yv, i)
+                tot += [b.bitcast(b.shl(w_, _c(b, 16)), F32), b.bitcast(b.land(w_, _c(b, -65536)), F32)]
+            tot = self.add_res(tot, tok, col, 4)
+            ov = b.vec_bitcast(b.vec_trunc_f32_to_bf16(b.vec_pack(tot, F32)), VectorType(I32, 2))
+            b.buffer_store_cp(ov, o_rs, off, _c(b, 0))
 
     def pretouch_parts(self, layer: Value) -> None:
         """Stale-read twin: the lines this wave's combine units read after the barrier, loaded (plain) before it."""
@@ -3187,6 +3554,14 @@ class _Moe2:
     def build(self) -> KernelDef:
         b, k = self.b, self.k
         zero = _c(b, 0)
+        if k.stage != "moe":  # a consumer launch (one layer per launch): no sort, no experts, the epoch unchanged
+            with b.scf_for(zero, self.L, _c(b, 1), iv_name="layer") as layer:
+                layer = b.readfirstlane(layer)
+                if k.stage == "cons_y":
+                    self.consumer_y(layer)
+                else:
+                    self.combine(layer)
+            return b.kernel
         with b.scf_for(zero, self.L, _c(b, 1), iv_name="layer") as layer:
             layer = b.readfirstlane(layer)
             with b.scf_if(b.land(self.gsync, b.cmp_gt(layer, zero))):
@@ -3196,17 +3571,24 @@ class _Moe2:
                     self.lds_put(self.xcnt, _c(b, 0), _c(b, 0))
             b.sync_lds_only()
             self.stamp(layer, 0)
-            if k.entry == "logits":
-                self.route(layer)
-            nit = self.sort(layer)
+            with b.lever_scope(k.dls or None):
+                if k.entry == "router":
+                    if k.rmode == "cta":
+                        self.router_cta(layer)
+                    else:
+                        self.router(layer)
+                if k.entry != "route":
+                    self.route(layer)
+                nit = self.sort(layer)
             if k.pretouch == 2:
                 self.pretouch_parts(layer)
             self.stamp(layer, 1)
-            self.run_layer_experts(layer, nit)
+            with b.lever_scope(k.dlx or None):
+                self.run_layer_experts(layer, nit)
             if k.prio == "all":
                 b.s_setprio(0)
             self.stamp(layer, 2)
-            if not self.dg("nocmb"):
+            if not self.dg("nocmb") and not k.fnext:
                 pre = (lambda: self.pretouch_parts(layer)) if k.pretouch == 1 else None
                 if k.cmb == "flow":
                     b.s_waitcnt(vmcnt=0)
@@ -3216,7 +3598,8 @@ class _Moe2:
                     self.stamp(layer, 5)  # the partial stores drained, the arrival counted
                     self.gbar_wait(bnd_, True)
                 self.stamp(layer, 3)
-                self.combine(layer)
+                with b.lever_scope(k.dlc or None):
+                    self.combine(layer)
             self.stamp(layer, 4)
             b.sync_lds_only()
         b.s_waitcnt(vmcnt=0)

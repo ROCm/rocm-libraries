@@ -54,10 +54,12 @@ __all__ = [
     "SPREAD_VALUES",
     "build_hc_kernel",
     "hc_lds",
+    "hc_lds_wide",
     "knobs_from_spec",
     "knobs_spec",
     "lower_hc_function",
     "sidecar",
+    "spec_lds",
     "supported",
     "write_hc_functions",
 ]
@@ -196,6 +198,68 @@ def hc_lds(rows: int, seq: bool = False) -> SimpleNamespace:
     )
 
 
+# ------------------------------------------------------------------ the wide builds' arena (``layout_wide.for_wide`` port)
+WIDE_ROWS = 16
+M4_SLICES_WIDE = 2
+INV_ROWS = 12  # ``hc.INV_ROWS``: from 12 rows A1 / M1 hand A2 / M2 the inverse RMS (``inv`` / ``minv`` mailbox)
+INV_TID = 256  # ``hc.INV_TID``: A2 / M2's first thread polling it
+PRE_POLL_MAX = 64 * 12  # ``common_wide.PRE_POLL_MAX`` (ATOM ``mailbox.POLL_MAX`` = 12): hints per pre-poll
+
+
+def _place_n(lds, stride, table, rows, n_of):
+    """``layout_wide._place``: ``n_of.get(name, rows)`` rows of per-row entry ``name`` (its stride that of ``rows``)."""
+    w = 0
+    for name, words in table:
+        assert lds.get(name, w) == w, name
+        lds[name] = w
+        stride[name] = (words + 3) // 4 * 4
+        if rows > 1 and name in _PER_ROW:
+            stride[name] += (16 - stride[name]) % 64
+        w += stride[name] * (n_of.get(name, rows) if name in _PER_ROW else 1)
+    return w
+
+
+def hc_lds_wide(rows: int, group: int) -> SimpleNamespace:
+    """The HC stages' LDS entries of a grouped build (``layout_wide.for_wide``): up to ``MAX_ROWS`` rows the seq
+    build's layout; past it the wide build's phases (each phase's entries from word 0; the HC phase is
+    ``_HC_TABLE``; past ``WAVES`` rows ``n8`` / ``ne`` hold one row), ``words`` the largest phase."""
+    assert group >= 2 and rows % group == 0 and rows // group >= 2 and rows <= WIDE_ROWS, (rows, group)
+    if rows <= A.MAX_ROWS:
+        return hc_lds(rows, seq=True)
+    m3_task_rows = rows // 2 if rows % 2 == 0 else rows
+    n_of = {"n8": 1, "ne": 1} if rows > WAVES else {}
+    n_of["rx"] = min(WAVES, m3_task_rows)
+    tables = {
+        "hc": _HC_TABLE,
+        "d1": _DELTA_TABLE[:3],
+        "d3": tuple((n, _RW_ROW if n == "bax" else w) for n, w in _DELTA_TABLE[3:]),
+        "m3": _MOE[:3],
+        "m45": tuple((n, w * M4_SLICES_WIDE if n == "gred" else w) for n, w in _MOE[3:]),
+        "q34": _QSA,
+        "q57": tuple((n, w + (group - 1) * SEQ_GROW.get(n, 0)) for n, w in _ATTN_QSA),
+        "ple": _PLE,
+    }
+    if _place_n({}, {}, tables["m45"], rows, n_of) > LDS_LIMIT:
+        m45 = tables.pop("m45")
+        tables["m4"] = tuple(e for e in m45 if e[0] in ("top", "gx8", "gxe", "gred"))
+        tables["m5"] = tuple(e for e in m45 if e[0] in ("top", "dn", "ys"))
+    sizes, hc = {}, None
+    for name, table in tables.items():
+        lds, stride = {}, {}
+        sizes[name] = _place_n(lds, stride, table, rows, n_of)
+        assert sizes[name] <= LDS_LIMIT, (name, sizes[name])
+        if name == "hc":
+            hc = (lds, stride)
+    lds, stride = hc
+    return SimpleNamespace(lds={n: lds[n] for n in HC_LDS}, stride={n: stride[n] for n in HC_LDS},
+                           words=max(sizes.values()), split=False)  # fmt: skip
+
+
+def spec_lds(spec) -> SimpleNamespace:
+    """The arena of ``spec``'s build: ``hc_lds_wide`` for a grouped build, else ``hc_lds``."""
+    return hc_lds_wide(spec.rows, spec.group) if spec.group else hc_lds(spec.rows, spec.seq)
+
+
 # ------------------------------------------------------------------ knobs
 POLL_IMPLS = ("asm", "ir", "irf")
 WAITS = ("barrier", "prepoll")
@@ -206,6 +270,10 @@ INVS = ("lds", "regs")
 SHFL4S = ("rowshift", "select")
 STATS = ("streams", "halves")
 PRES = ("none", "args")
+SRCS = ("mem", "xl")
+ORDERS = ("weights", "streams")
+XHOLDS = ("none", "layer", "xpre")
+M5_TASKS = HIDDEN // 16  # 160: the ``xl`` hand-off's producers (M5's tasks)
 MUTANTS = (
     "eps",  # the inverse RMS epsilon times 2^20 (1e-6 -> ~1.05; one epsilon ulp is invisible under the mean square)
     "down_part",  # wave 0 sums partials 0..2 only (drops partial 3)
@@ -260,6 +328,18 @@ class HcKnobs:
       (every wave's norm loads ahead of any weight stream) | 0 = none.
     acc: TOLERANCE CLASS (N1 hook, never a default): K-split accumulators per down chain (1 = FlyDSL; 2 = two
       chains summed at the end: changes the summation order).
+    src: the attention HC's streams (A1 / A2 of the delta and qsa layers): ``mem`` (FlyDSL: the layer input from
+      memory) | ``xl`` (the persistent kernel's cross-layer hand-off, probe P1's ``xl``: the previous layer's M5
+      publishes the output words as tagged pairs and their 16-column square sums into this layer's ``ph`` / ``phs``,
+      160 producers, hint stride 1; the HC runs its polled path on them). DESIGN WP2a ``xpre`` / D0.8.
+    order: a polled A1 / M1's issue order: ``weights`` (FlyDSL: ``w'`` and the down weights, then the stream poll) |
+      ``streams`` (P1's ``a1hf``: poll the streams and load ``w'`` first, CTA barrier, then the down weights; for a
+      source that is (nearly) there when the stage starts, as ``xl`` behind a hold). Bitwise.
+    xhold: the layer-entry hold of an ``xl`` A1 (it runs first in the layer, on every CTA): ``none`` | ``layer``
+      (every CTA's wave 0 spins on every M5 producer's last-row sum pair, then a CTA barrier: no next-layer weight
+      issue before the hand-off) | ``xpre`` (the same for CTAs without an A1 task; A1's CTAs issue their next-layer
+      weights right after their own M5 work and poll the streams themselves: D0.8's default). In a framework kernel
+      the default comes from ``PersistKnobs.xhold``. Bitwise (a hold only waits).
     mutate: test-only mutants (:data:`MUTANTS`) the bitwise gate must catch.
     fn: device-function emission (``lds="arg"``, ``inline="always"``).
     """
@@ -285,6 +365,9 @@ class HcKnobs:
     shfl4: str = "rowshift"
     inv: str = "lds"
     acc: int = 1
+    src: str = "mem"
+    order: str = "weights"
+    xhold: str = "none"
     mutate: str = ""
     fn: DeviceFunctionKnobs = field(default_factory=lambda: DeviceFunctionKnobs(lds="arg", inline="always"))
 
@@ -313,6 +396,9 @@ class HcKnobs:
             raise ValueError("anchor must be 0 or 1")
         if self.acc not in (1, 2):
             raise ValueError("acc must be 1 or 2")
+        for name, allowed in (("src", SRCS), ("order", ORDERS), ("xhold", XHOLDS)):
+            if getattr(self, name) not in allowed:
+                raise ValueError(f"{name} must be one of {allowed}, got {getattr(self, name)!r}")
         if not 0 <= self.pause_sleep <= 127:
             raise ValueError("pause_sleep must be in 0..127")
         for name in ("w_cpol", "wi_cpol", "nw_cpol"):
@@ -378,17 +464,25 @@ def knobs_from_spec(spec: str) -> HcKnobs:
 @dataclass(frozen=True)
 class HcSpec:
     """One stage function: ``stage`` (a1 | a2 | m1 | m2), the layer ``kind`` (delta | delta_ple | qsa: the PLE
-    layer's attention HC is polled from P2), ``rows`` / ``seq`` (the build variant), knobs."""
+    layer's attention HC is polled from P2), ``rows`` / ``seq`` / ``group`` (the build variant), knobs. A grouped
+    build of up to ``MAX_ROWS`` rows has the seq build's layout (``layout_wide.for_wide``) and the narrow code; past
+    ``MAX_ROWS`` rows (up to :data:`WIDE_ROWS`, grouped only) the wide build's layout and A2 (``hc_wide.a2``)."""
 
     stage: str
     kind: str = "delta"
     rows: int = 1
     seq: bool = False
     knobs: HcKnobs = field(default_factory=HcKnobs)
+    group: int = 0  # grouped verify builds (``r<rows>g<S>``, fix round): rows / S requests of S rows
 
     @property
     def variant(self) -> str:
-        return f"r{self.rows}" + ("s" if self.seq else "")
+        return f"r{self.rows}" + ("s" if self.seq else "") + (f"g{self.group}" if self.group else "")
+
+    @property
+    def wide(self) -> bool:
+        """More than ``MAX_ROWS`` rows: ATOM's wide build (``layout_wide.for_wide``, ``hc_wide.a2``)."""
+        return self.rows > A.MAX_ROWS
 
     @property
     def symbol(self) -> str:
@@ -413,11 +507,33 @@ def supported(spec: HcSpec) -> str | None:
         return f"stage {spec.stage!r} is not an HC stage"
     if spec.kind not in ("delta", "delta_ple", "qsa"):
         return f"kind {spec.kind!r}"
-    if not 1 <= spec.rows <= A.MAX_ROWS:
-        return "rows 1..4 (narrow builds; the wide builds run hc_wide)"
+    k = spec.knobs
+    if spec.group:
+        g = spec.group
+        if spec.seq:
+            return "a grouped build is not a seq build (its layout is the seq one)"
+        if g < 2 or spec.rows % g or spec.rows // g < 2 or spec.rows > WIDE_ROWS:
+            return f"grouped builds: rows a multiple of the group, two groups at least, {WIDE_ROWS} rows at most"
+        if k.spread:
+            return "spread: ATOM builds the spread for narrow ungrouped layers only"
+    elif not 1 <= spec.rows <= A.MAX_ROWS:
+        return "rows 1..4 (ungrouped builds; wider builds are grouped)"
     if spec.seq and spec.rows < 2:
         return "a seq build has 2 rows at least"
-    k = spec.knobs
+    if k.src == "xl" and (spec.mlp or spec.kind == "delta_ple"):
+        return "src=xl: the attention HC of the delta / qsa layers (the PLE layer's polls P2; the MLP HC C1)"
+    if k.src == "xl" and spec.group:
+        return "src=xl: narrow ungrouped builds (P1's M5 hand-off)"
+    if k.src == "xl" and k.pre == "args":
+        return "src=xl: the streams are polled, there is no a1_preload"
+    if k.order == "streams" and not (spec.stage in ("a1", "m1") and (spec.mlp or spec.kind == "delta_ple" or k.src == "xl")):
+        return "order=streams: a polled A1 / M1"
+    if k.xhold != "none" and not (spec.stage == "a1" and k.src == "xl"):
+        return "xhold: the layer-entry hold of an src=xl A1"
+    if spec.wide and k.numa:
+        return "numa=1: ATOM drops the numa lever above 4 rows"
+    if spec.wide and k.pre == "args":
+        return "pre=args: a wide build has no a1_preload (ATOM: early only up to 4 rows)"
     if k.pre == "args" and (spec.stage != "a1" or spec.kind == "delta_ple"):
         return "pre=args: A1 of a memory-read attention HC only"
     if k.spread:
@@ -436,6 +552,9 @@ class _Hc:
     def __init__(self, b: IRBuilder, a, spec: HcSpec, lds: SimpleNamespace):
         self.b, self.a, self.spec, self.k = b, a, spec, spec.knobs
         self.rows = spec.rows
+        # wide builds (fix round): kept by the one-row views (``c.L.rows`` / ``hc.wide_inv`` in ATOM)
+        self.wide = spec.rows > A.MAX_ROWS
+        self.wide_inv = spec.rows >= INV_ROWS
         self.L = lds
         self.tid, self.lane, self.wave = a.tid, a.lane, a.wave
         self.tag = a.tag
@@ -749,6 +868,20 @@ class _Hc:
         is redundant there (FlyDSL's two adjacent ``gpu.barrier``s compile to one; rocKE's fenced barriers do not
         merge), so it is left out."""
         b = self.b
+        if self.wide:
+            # ``payload_wait`` / ``pre_poll_wide`` past MAX_ROWS rows: wave 0 spins on the hints in batches of
+            # PRE_POLL_MAX, a CTA barrier after each (the ``wait`` knob is inert there)
+            for first in range(0, n, PRE_POLL_MAX):
+                nb = min(PRE_POLL_MAX, n - first)
+                with b.scf_if(self.eq(self.wave, 0)):
+                    specs = []
+                    for r in range((nb + 63) // 64):
+                        m = self.imin(self.add(self.lane, 64 * r), nb - 1)
+                        reg, i = hint(self.add(m, first) if first else m)
+                        specs.append((reg, i, 1))
+                    self.poll(specs)
+                self.barrier()
+            return
         if self.k.wait != "prepoll" and after_barrier:
             return
         if self.k.wait == "prepoll":
@@ -794,14 +927,17 @@ def _hc(spec: HcSpec) -> SimpleNamespace:
     if spec.mlp:
         return SimpleNamespace(down="m1", up="m2", polled=True, h="w", hs="whs", producers=C1_TILES, hint_stride=1,
                                norm_w="m_norm_w", w_down="m_w_down", s_down="m_s_down", w_up="m_w_up", s_up="m_s_up",
-                               w_inj="m_w_inj", lr8="mlr8", lre="mlre", inj="minj", x8="mx8", xe="mxe", xbf="mxbf")  # fmt: skip
+                               w_inj="m_w_inj", lr8="mlr8", lre="mlre", inj="minj", x8="mx8", xe="mxe", xbf="mxbf",
+                               inv="minv")  # fmt: skip
     if spec.kind == "delta_ple":
         src = dict(polled=True, h="ph", hs="phs", producers=P2_TASKS, hint_stride=2)
+    elif spec.knobs.src == "xl":
+        src = dict(polled=True, h="ph", hs="phs", producers=M5_TASKS, hint_stride=1)
     else:
         src = dict(polled=False, h="h_in", hs=None, producers=0, hint_stride=0)
     return SimpleNamespace(down="a1", up="a2", **src, norm_w="hc_norm_w", w_down="w_down", s_down="s_down",
                            w_up="w_up", s_up="s_up", w_inj="w_inj", lr8="lr8", lre="lre", inj="inj", x8="x8",
-                           xe="xe", xbf="xbf")  # fmt: skip
+                           xe="xe", xbf="xbf", inv="inv")  # fmt: skip
 
 
 # ------------------------------------------------------------------ norm pieces
@@ -1172,7 +1308,14 @@ def _a1_task(e: _Hc, hc, t, rr, live, pre=None):
         part = e.umod(e.wave, 4)
         row = e.b.sub(t, e.c(INJ_TASK))
         down = e.lt(t, INJ_TASK)
-        if hc.polled:
+        if hc.polled and e.k.order == "streams":
+            # P1 ``a1hf``: the streams and w' first, then the CTA barrier, then the down weights
+            (hs,) = _poll_streams(e, hc, [rr])
+            ws = _norm_w(e, hc)
+            b.sched_barrier(0)
+            e.barrier()
+            units = _a1_units(e, hc, down, nb, part)
+        elif hc.polled:
             ws = _norm_w(e, hc)
             units = _a1_units(e, hc, down, nb, part)
             e.wait_producers(lambda m: (hc.hs, e.mb_ix(e.mul(m, hc.hint_stride), rr)), hc.producers)
@@ -1192,6 +1335,10 @@ def _a1_task(e: _Hc, hc, t, rr, live, pre=None):
         else:
             _norm_sums(e, hs)
         _norm_inv(e, 1)
+        if e.wide_inv:
+            # ``put_inv``: task 0 of the row hands A2 / M2 the 4 streams' inverse RMS
+            with b.scf_if(b.land(e.eq(t, 0), e.lt(e.tid, HC_COUNT))):
+                e.put(hc.inv, e.mb_ix(e.tid, rr), _inv_for(e, e.tid, 0))
         with b.scf_if(down):
             _a1_down(e, hc, g, hs, ws, units, rr)
         with b.scf_if(e.ge(t, INJ_TASK)):
@@ -1204,9 +1351,40 @@ def _pre_values(e: _Hc):
     return [w[4 * r : 4 * r + 4] for r in range(3)], [w[12 + 4 * r : 16 + 4 * r] for r in range(3)]
 
 
+def _xhold(e: _Hc, t, tasks):
+    """P1 ``_xhold``: wave 0 spins on every M5 producer's last-row sum pair of this layer's ``phs``, then the CTA
+    barriers; ``xpre``: only the CTAs without an A1 task (``t >= tasks``), the others poll the streams in A1."""
+    b = e.b
+    rl = e.rows - 1
+
+    def hold():
+        with b.scf_if(e.eq(e.wave, 0)):
+            specs = []
+            for r in range((M5_TASKS + 63) // 64):
+                m = e.imin(e.add(e.lane, 64 * r), M5_TASKS - 1)
+                specs.append(("phs", e.mb_ix(m, rl), 1))
+            e.poll(specs)
+        e.barrier()
+
+    if e.k.xhold == "xpre":
+        with b.scf_if(e.ge(t, tasks)):
+            hold()
+    else:
+        hold()
+
+
+def _a1_tasks(e: _Hc) -> int:
+    sv = e.k.spread
+    if sv:
+        return spread_down_tasks(sv, e.rows) + e.rows * HC_COUNT
+    return e.rows * TASKS_HC
+
+
 def _emit_a1(e: _Hc, hc):
     t = e.a.task
     sv = e.k.spread
+    if e.k.xhold != "none":
+        _xhold(e, t, _a1_tasks(e))
     pre = _pre_values(e) if e.k.pre == "args" else None
     if sv:
         return _spread_a1(e, hc, t, sv, pre)
@@ -1400,6 +1578,8 @@ def _spread_pack(e: _Hc, hc, sv):
 
 
 def _emit_a2(e: _Hc, hc):
+    if e.wide:
+        return _emit_a2_wide(e, hc)
     b = e.b
     tid, lane, wave, rows = e.tid, e.lane, e.wave, e.rows
     t = e.a.task
@@ -1518,6 +1698,147 @@ def _emit_a2(e: _Hc, hc):
                 e.put(hc.xe, e.mb_ix(t, rq), ex)
 
 
+def _a2_mix(e: _Hc, hc, t, q, cond):
+    """A2's epilogue for request row ``q`` (where ``cond``): the stream average, its MXFP8 pack and bf16 words
+    (``a2``'s wave ``r`` part; ``hc_wide._a2_out`` past ``WAVES`` rows)."""
+    b = e.b
+    lane = e.lane
+    with b.scf_if(cond):
+        rq = e.imin(q, e.rows - 1)
+        col = e.umod(lane, 32)
+        s = e.f(0.0)
+        for bb in range(HC_COUNT):
+            s = b.fadd(s, e.ld(e.lix("prod", e.add(bb * 32, col), rq), F32))
+        mixed = e.bf16r(b.fmul(s, e.f(0.5 if e.k.mutate == "mix_avg" else 0.25)))
+        amax = e.absmax_start(mixed)
+        for off in (1, 2, 4, 8, 16):
+            amax = e.xred(amax, off, e.absmax2)
+        ex, scale = e.e8m0(e.absmax_end(amax))
+        v8 = e.lane_gather(mixed, e.mul(e.umod(lane, 4), 8), 8)
+        lo, hi = e.fp8_word(*v8[0:4], scale), e.fp8_word(*v8[4:8], scale)
+        v4 = e.lane_gather(mixed, e.mul(e.umod(lane, 8), 4), 4)
+        with b.scf_if(e.lt(lane, 4)):
+            e.put2(hc.x8, e.mb_ix(e.add(e.mul(t, 8), e.mul(lane, 2)), rq), lo, hi)
+        with b.scf_if(e.lt(lane, 8)):
+            e.put2(hc.xbf, e.mb_ix(e.add(e.mul(t, 16), e.mul(lane, 2)), rq),
+                   e.bf16_pair(v4[0], v4[1]), e.bf16_pair(v4[2], v4[3]))  # fmt: skip
+        with b.scf_if(e.eq(lane, 0)):
+            e.put(hc.xe, e.mb_ix(t, rq), ex)
+
+
+def _emit_a2_wide(e: _Hc, hc):
+    """A2 / M2 of a wide build (``hc_wide.a2``, more than ``MAX_ROWS`` rows): ``a2`` with the pre-polls batched
+    (``pre_poll_wide``), request row ``r``'s up result from its lanes of the MFMA tile (``acc[r % 4]`` of lanes
+    ``16 (r // 4) ..``), from ``INV_ROWS`` rows the inverse RMS polled from A1 / M1 (``poll_inv``) instead of rebuilt,
+    and the epilogue in passes of ``WAVES`` rows. Knobs as ``a2`` (no spread: ATOM builds none for grouped layers)."""
+    b = e.b
+    tid, lane, wave, rows = e.tid, e.lane, e.wave, e.rows
+    t = e.a.task
+    stream = e.udiv(wave, 2)
+    atom = e.umod(wave, 2)
+    nb = e.add(e.mul(t, 2), e.mul(stream, UP_NB), atom)
+    j = e.umod(lane, 16)
+    idx = e.add(e.mul(stream, HIDDEN), e.mul(t, 32), e.mul(atom, 16), j)
+    with b.scf_if(e.lt(t, TASKS_UP)):
+        rwu, rsu, rnw = e.rsrc(hc.w_up), e.rsrc(hc.s_up), e.rsrc(hc.norm_w)
+        cp = e.k.w_cpol
+
+        def weights():
+            wu = [e.load(rwu, e.mul(e.add(e.mul(e.add(e.mul(nb, 4), kit), 64), lane), 16), 4, cp) for kit in range(UP_KI)]
+            su = e.load(rsu, e.mul(e.add(e.mul(nb, 64), lane), 4), 1, cp)
+            ww = e.load(rnw, e.mul(e.udiv(idx, 2), 4), 1, e.k.nw_cpol)
+            return wu, su, ww
+
+        def poll_h():
+            return [v[0] for v in e.poll([(hc.h, e.mb_ix(e.udiv(idx, 2), r), 1) for r in range(rows)])]
+
+        h_first = e.k.a2order == "h_first" and not hc.polled
+        if not h_first:
+            wu, su, ww = weights()
+        hws = None
+        if hc.polled:
+            if not e.wide_inv:
+                e.wait_producers(lambda m: (hc.hs, e.mb_ix(e.mul(e.umod(m, hc.producers), hc.hint_stride),
+                                                           e.udiv(m, hc.producers))), hc.producers * rows)  # fmt: skip
+                hws = poll_h()
+                _halves_sums(e, hc)
+        else:
+            rh = e.rsrc(hc.h)
+            hws = [e.load(rh, e.mul(e.row_ix(e.udiv(idx, 2), r, HC_WORDS), 4), 1, e.k.nw_cpol) for r in range(rows)]
+            nl = None
+            if not e.wide_inv and h_first:
+                nl = [_norm_load(e, hc, r) for r in range(rows)]
+            if h_first:
+                wu, su, ww = weights()
+            if not e.wide_inv:
+                for r in range(rows):
+                    _norm_sums(e, nl[r] if h_first else _norm_load(e, hc, r), r)
+        if not e.wide_inv:
+            _norm_inv(e, rows)
+        # the low-rank pack (80 fp8 words then zeros to 96, 10 exponents then 127); from INV_ROWS rows the
+        # streams' inverse RMS (A1's task 0 of each row)
+        e.wait_producers(lambda m: (hc.lre, e.mb_ix(e.umod(m, DOWN_GROUPS), e.udiv(m, DOWN_GROUPS))),
+                         DOWN_GROUPS * rows)  # fmt: skip
+        if hc.polled and e.wide_inv:
+            hws = poll_h()  # A1's tasks of a row polled all its streams before publishing
+        with b.scf_if(e.lt(tid, LOWRANK // 8)):
+            vs = e.poll([(hc.lr8, e.mb_ix(e.mul(tid, 2), r), 2) for r in range(rows)])
+            for r in range(rows):
+                e.st(e.lix("l8", e.mul(tid, 2), r), b.vec_pack(vs[r], I32), 2)
+        with b.scf_if(b.land(e.ge(tid, 64), e.lt(tid, 64 + DOWN_GROUPS))):
+            es = e.poll([(hc.lre, e.mb_ix(b.sub(tid, e.c(64)), r), 1) for r in range(rows)])
+            for r in range(rows):
+                e.st(e.lix("le", b.sub(tid, e.c(64)), r), es[r][0])
+        with b.scf_if(b.land(e.ge(tid, 128), e.lt(tid, 128 + 16))):
+            for r in range(rows):
+                e.st(e.lix("l8", e.add(b.sub(tid, e.c(128)), LOWRANK // 4), r), e.c(0))
+        with b.scf_if(b.land(e.ge(tid, 192), e.lt(tid, 192 + 2))):
+            for r in range(rows):
+                e.st(e.lix("le", e.add(b.sub(tid, e.c(192)), DOWN_GROUPS), r), e.c(SCALE_ONE))
+        if e.wide_inv:
+            # ``poll_inv``: every row's inverse RMS, one value per thread from INV_TID
+            with b.scf_if(b.land(e.ge(tid, INV_TID), e.lt(tid, INV_TID + HC_COUNT * rows))):
+                q = b.sub(tid, e.c(INV_TID))
+                bb, r = e.umod(q, HC_COUNT), e.udiv(q, HC_COUNT)
+                (v,) = e.poll([(hc.inv, e.mb_ix(bb, r), 1)])
+                e.st(e.lix("inv", bb, r), v[0])
+        e.barrier()
+        mr = e.imin(e.umod(lane, 16), rows - 1)
+        xl8 = e.add(e.lbase("l8"), e.mul(mr, e.L.stride["l8"]))
+        xle = e.add(e.lbase("le"), e.mul(mr, e.L.stride["le"]))
+        g = e.udiv(lane, 16)
+        kit_of = (lambda i: 1 if i == 2 else i) if e.k.mutate == "up_kit" else (lambda i: i)
+        sa = (lambda i: (e.ld(e.add(xle, e.mul(kit_of(i), 4), g)), 0))
+        if e.k.scale == "opsel":
+            w3 = [e.ld(e.add(xle, 4 * i, g)) for i in range(UP_KI)]
+            p = b.lor(b.lor(w3[0], b.shl(w3[1], e.c(8))), b.shl(w3[kit_of(2)], e.c(16)))
+            sa = lambda i: (p, i)  # noqa: E731
+        elif e.k.scale == "hoist":
+            hs_ = [e.ld(e.add(xle, e.mul(kit_of(i), 4), g)) for i in range(UP_KI)]
+            sa = lambda i: (hs_[i], 0)  # noqa: E731
+        acc = _chain(e, UP_KI, frag=lambda i: _a_frag(e, xl8, kit_of(i)), scale_a=sa, weight=lambda i: wu[i],
+                     scale_b=lambda i: su, opsel_b=lambda i: i)  # fmt: skip
+        quad = e.udiv(lane, 16)
+        rws = {}  # row r's up result is acc[r % 4] (its lanes): one sigmoid per tile row, as FlyDSL's trace CSEs it
+        for r in range(rows):
+            hw = hws[r]
+            if r % 4 not in rws:
+                rws[r % 4] = e.bf16r(e.sigmoid_acc(e.bf16r(b.vec_extract(acc, r % 4))))
+            rw = rws[r % 4]
+            even = e.eq(e.umod(j, 2), 0)
+            x = b.bitcast(b.select(even, b.shl(hw, e.c(16)), b.land(hw, e.c(-65536))), F32)
+            w = b.bitcast(b.select(even, b.shl(ww, e.c(16)), b.land(ww, e.c(-65536))), F32)
+            inv = _inv_for(e, stream, r)
+            y = e.bf16r(b.fmul(b.fmul(x, inv), w))
+            with b.scf_if(e.eq(quad, r // 4)):  # ``row_lanes``
+                e.st(e.lix("prod", e.add(e.mul(stream, 32), e.mul(atom, 16), j), r), e.bf16r(b.fmul(rw, y)))
+        e.barrier()
+        # lane L (and L + 32): mixed[32 t + L]; wave w mixes request row w + WAVES k in pass k
+        for ek in range(-(-rows // WAVES)):
+            q = e.add(wave, WAVES * ek) if ek else wave
+            _a2_mix(e, hc, t, q, e.lt(q, rows))
+
+
 # ------------------------------------------------------------------ stage bodies, ABI, writer
 PRE_WORDS = 24
 
@@ -1558,7 +1879,7 @@ def build_hc_kernel(spec: HcSpec):
 
 def emit_hc(b: IRBuilder, a, spec: HcSpec, lds: SimpleNamespace | None = None) -> None:
     """Emit the stage body into ``b`` (ABI namespace ``a``: tag, task, the 41 arguments as i64, tid, lane, wave)."""
-    e = _Hc(b, a, spec, lds or hc_lds(spec.rows, spec.seq))
+    e = _Hc(b, a, spec, lds or spec_lds(spec))
     hc = _hc(spec)
     if spec.stage in ("a1", "m1"):
         _emit_a1(e, hc)
@@ -1615,8 +1936,8 @@ def framework_factory(stage: str, knobs: HcKnobs | None = None):
         raise ValueError("pre=args is the hybrid path's extern ABI; not in a framework kernel")
 
     def factory(kind, shape, st):
-        spec = HcSpec(stage, kind, shape.rows, shape.seq, k)
-        why = supported(spec) if not shape.group else "grouped builds run hc_wide"
+        spec = HcSpec(stage, kind, shape.rows, shape.seq, k, group=shape.group)
+        why = supported(spec)
         if why:
             raise ValueError(f"{stage} {kind} {spec.variant}: {why}")
 
@@ -1624,8 +1945,12 @@ def framework_factory(stage: str, knobs: HcKnobs | None = None):
             a = SA._abi(b, ctx, p, t, [b.const_i32(0)] * 4)
             old = b.fence_barriers
             b.fence_barriers = "compiler"
+            sp = spec
+            if stage == "a1" and k.src == "xl" and k.xhold == "none" and getattr(ctx, "persist_knob", None):
+                # the persistent kernel's hold policy (``PersistKnobs.xhold``: xpre | layer) at this layer's entry
+                sp = replace(spec, knobs=replace(k, xhold=ctx.persist_knob("xhold")))
             try:
-                emit_hc(b, a, spec)
+                emit_hc(b, a, sp)
             finally:
                 b.fence_barriers = old
 
@@ -1656,6 +1981,16 @@ def _register():
 _register()
 
 
+def parse_variant(v: str):
+    """``r<rows>[s][g<S>]`` -> (rows, seq, group)."""
+    import re
+
+    m = re.fullmatch(r"r(\d+)(s?)(?:g(\d+))?", v)
+    if not m:
+        raise ValueError(f"variant {v!r}: r<rows>[s][g<S>]")
+    return int(m.group(1)), bool(m.group(2)), int(m.group(3) or 0)
+
+
 def main(argv=None) -> int:
     import argparse
 
@@ -1673,13 +2008,15 @@ def main(argv=None) -> int:
     specs = []
     for kind in a.kinds.split(","):
         for v in a.variants.split(","):
-            rows, seq = int(v[1:].rstrip("s")), v.endswith("s")
+            rows, seq, group = parse_variant(v)
             for st in a.stages.split(","):
                 down = "m1" if st in ("m1", "m2") else "a1"
                 k = replace(base, spread=int(sp[down])) if down in sp else base
-                if k.pre == "args" and (st != "a1" or kind == "delta_ple"):
+                if k.pre == "args" and (st != "a1" or kind == "delta_ple" or rows > A.MAX_ROWS):
                     k = replace(k, pre="none")
-                spec = HcSpec(st, kind, rows, seq, k)
+                if rows > A.MAX_ROWS and k.numa:
+                    k = replace(k, numa=0)  # ATOM drops the numa lever above 4 rows
+                spec = HcSpec(st, kind, rows, seq, k, group=group)
                 if supported(spec) is None:
                     specs.append(spec)
     print(json.dumps(write_hc_functions(a.out, specs, flavor=a.flavor), indent=1))

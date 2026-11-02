@@ -85,3 +85,13 @@ absolute numbers in `hackathon-prep/private-perf/qwen38-true-mono/`.
   RULER mix v1, T4 tolerances). Round-boundary agent launched (host idle 0.07-0.08 of the round; FlyTape-style
   device loop / host prepare-ahead). W9 (run wf_380fde60-245) launched: P16 K=0 hop-cut probe, N4a accuracy gates,
   WP0b-acc remainder, re-verification of WP1 / P11 / WP-R3 fix rounds. Running: W7, W8, W9, MoE rebuild, round boundary.
+- 2026-11-02: W7 done (WP-L1, WP-L2a, WP-L2c confirmed; P-L5 fix round met TP1+TP2 both nodes; DESIGN-LB 15.7 budget:
+  every LB cell range under its bar). MoE rebuild met G-MoE (<=1.00 of FlyTape e+c everywhere), continuing to 0.85.
+  W10 (run wf_505460aa-fed) launched: verify P-L4b + P-L5 fix, WP-L2b/e/f, real routing, WP-L3 TP1 layers, WP-L4 pass.
+  Records: K=3 952 tok/s (n07-17, full3_l_rb: round-boundary prepare-ahead + lean draft), K=0 484 (full0_w8c).
+  Running: W8 (wave 2), W9 (K=0/accuracy), W10, MoE agent, round-boundary agent.
+- 2026-11-02 WRAP-UP (user): push the last piece (K=3 >= 1000) and call it a day. Stopped W8/W9/W10, MoE,
+  round-boundary and Rust agents; cancelled their cluster jobs. Consolidated-push-2 agent (c2) does the last push,
+  gates, and freezes FINAL-STACK.md. Then: documentation + repro scripts on the user's branches
+  (copy-rocm-lib users/vanantha/rocke-monokernels working tree; ATOM-truemono on top of qwen38-megakernels).
+  Best so far: K=3 c2s3/c2s3b 972.6/987.6 (n07-17, hybrid 869.7/880.5), K=0 c2s0b 491.5 (hybrid 431.6).

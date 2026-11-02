@@ -47,6 +47,9 @@ K=0), `U` = active experts per layer, "floor" = per-rank bytes that must cross H
    TP2 B16 0.83 (0.71-0.95); the only family above FlyTape is the MoE (P-L4: 1.05-1.29 of its expert + combine
    phases). The precision-matched (bf16) column is no longer a budget line (P-L3: the bf16 GEMM is slower than
    FlyTape's in-situ phase in 50 of 72 cells).
+   **W7 update (section 15.7):** with the rebuilt MoE (WP-L2d / `P-L4b.md`, G-MoE met) and the W7 emitters, the derived
+   K0 step is 0.81 (0.74-0.87) at TP2 B128 and 0.72 (0.66-0.79) at TP2 B16; every derivable cell's range is now under
+   its bar.
 
 5. **The GDN recurrence is already near its bytes floor in FlyTape** (its recurrence moves the state at a bandwidth
    above its own roofline figure). MFMA or chunkwise forms do not cut bytes at K=0 (each row has its own state; a
@@ -558,6 +561,11 @@ fix round), `WP-C5.md` (in-situ exchange, fix round); `wave1/WP1.md` for the pla
 probe number under the DESIGN 9.1 rule on both rocke nodes; "derived" = arithmetic on measured numbers with the
 assumptions stated next to it. No new hardware run was made for this section.
 
+**W7 status (2026-11-02).** The `W7:` markers in 15.2, 15.4, 15.5 and 15.6 and the new section 15.7 add the results
+of wave LB-1: `WP-L1.md`, `WP-L2a.md`, `WP-L2c.md`, `P-L5.md` (each with its Verification and, for P-L5, Fix round) and
+the MoE rebuild `P-L4b.md` (WP-L2d). The W6 text above each marker is kept as the record of what was known before.
+Wave summary: `large-batch/W7-STATUS.md`.
+
 ### 15.1 The bar per cell (PLAN decisions 4 and 5)
 
 Each value is the per-cell reference over FlyTape's step at the same TP and B (FT = 1), so an LB step below it beats
@@ -589,17 +597,17 @@ move by up to 0.028 between jobs: read these as +-0.015.
 
 | stage (DESIGN-LB 4.2) | FlyTape share of step (TP2 B128 / TP2 B32 / TP1 B32) | measured | source | state |
 |---|---|---|---|---|
-| S9 + S10 experts + combine | about 0.39 / 0.37 / 0.46 (derived: FT MoE family + `moe_combine`, minus router) | best arm, same-job bracket: **1.05-1.29 (gs) / 1.02-1.22 (launch)**; W4A8 TP1 1.06-1.14, TP2 1.07-1.29 (worst TP2 r32, where FlyTape fuses `moe_expert`); 1.51-2.30x the bytes floor; null-bytes build alone 0.47-0.77 of the full kernel; correlated routing widens the floor gap (2.08-3.17x at strong skew) | P-L4 F4, 5.1-5.2, F3 | **at risk: the only family above FlyTape** |
-| S8 router GEMM | about 0.05 / 0.09 / 0.06 | mx 0.53-0.60 of FlyTape's in-situ phase (stream 0.18-0.30); top-k not yet fused | P-L3 6 | on track |
-| S4 GDN recurrence | 0.178 / 0.100 / 0.120 | f32: in situ 0.84-0.94 (best launch), 0.50-0.90 (stream); steady state at the floor for both stacks (LB 1.025-1.046, FlyTape algorithm 1.033-1.085): nothing left at f32. `state=bf16`: 0.51-0.65 in situ (launch), at its own floor, accuracy-gated (N11) | P-L1 4.1, 4.3 | on track |
-| S3 GDN in-proj | about 0.07 / 0.07 / 0.10 | mx in situ: TP1 0.34-0.43 phase (0.20-0.25 stream), TP2 0.59-0.86 (0.35-0.44); conv / gates epilogue not built yet | P-L3 6 | on track |
-| S5 / Q-out out-proj | about 0.03 / 0.04 / 0.05 | mx in situ: TP1 0.78-0.97 phase (0.41-0.53 stream), **TP2 1.39-2.03 phase (0.69-1.36 stream)**; 0.06-0.22 of its bytes floor (latency-bound); bf16 at parity with FlyTape's split-6 plan | P-L3 6 | at risk at TP2 |
-| S1 / S2 / S6 / S7 HC down / up | 0.109 / 0.136 / 0.086 (+ reduce / combine phases) | mx in situ: down 1.22-1.30 phase (0.53-1.03 stream), up 1.06-1.34 (0.30-0.51); 0.03-0.19 of the floor (0.7-7 MB per layer, latency-bound) | P-L3 6 | at risk (phase form) |
-| QSA (proj, core, out) | 0.041 / 0.055 / 0.064 | `qsa_in` mx 0.48-0.60 (TP1) / 0.79-0.95 (TP2) phase; **core not measured** | P-L3 6 | unknown |
-| E10 head | 0.009 / 0.015 / 0.019 | mx 0.32-0.45 phase | P-L3 6 | on track |
+| S9 + S10 experts + combine | about 0.39 / 0.37 / 0.46 (derived: FT MoE family + `moe_combine`, minus router) | best arm, same-job bracket: **1.05-1.29 (gs) / 1.02-1.22 (launch)**; W4A8 TP1 1.06-1.14, TP2 1.07-1.29 (worst TP2 r32, where FlyTape fuses `moe_expert`); 1.51-2.30x the bytes floor; null-bytes build alone 0.47-0.77 of the full kernel; correlated routing widens the floor gap (2.08-3.17x at strong skew) | P-L4 F4, 5.1-5.2, F3 | ~~at risk~~ **W7: G-MoE met** (`P-L4b.md`, not yet independently verified): best arm 0.84-0.98 TP1 / 0.81-0.98 TP2 of FlyTape's e+c, r8 included, both nodes; 0.85 target in 8 / 18 (n01-09), 3 / 18 (n07-17) cells; timed path takes route pairs (top-k in kernel 1.03-1.17x) |
+| S8 router GEMM | about 0.05 / 0.09 / 0.06 | mx 0.53-0.60 of FlyTape's in-situ phase (stream 0.18-0.30); top-k not yet fused | P-L3 6 | on track; **W7: 0.21-0.25** (WP-L2a final picks); top-k fused in the MoE kernel as `entry=logits` (P-L4b 7.2) |
+| S4 GDN recurrence | 0.178 / 0.100 / 0.120 | f32: in situ 0.84-0.94 (best launch), 0.50-0.90 (stream); steady state at the floor for both stacks (LB 1.025-1.046, FlyTape algorithm 1.033-1.085): nothing left at f32. `state=bf16`: 0.51-0.65 in situ (launch), at its own floor, accuracy-gated (N11) | P-L1 4.1, 4.3 | on track; **W7: in the GDN chain 0.51-0.86 TP1 / 0.75-0.87 TP2** of `gdn_recur` with state warm and hand-off (WP-L2c); bf16 state 0.68-0.97 of f32, default off (drift; RULER T2 / T4 owed) |
+| S3 GDN in-proj | about 0.07 / 0.07 / 0.10 | mx in situ: TP1 0.34-0.43 phase (0.20-0.25 stream), TP2 0.59-0.86 (0.35-0.44); conv / gates epilogue not built yet | P-L3 6 | on track; **W7: with conv / gates epilogue 0.32-0.37 TP1 / 0.51-0.71 TP2** of `gdn_proj` in situ (WP-L2c); E1 alone 0.23 / 0.33-0.37 (WP-L2a) |
+| S5 / Q-out out-proj | about 0.03 / 0.04 / 0.05 | mx in situ: TP1 0.78-0.97 phase (0.41-0.53 stream), **TP2 1.39-2.03 phase (0.69-1.36 stream)**; 0.06-0.22 of its bytes floor (latency-bound); bf16 at parity with FlyTape's split-6 plan | P-L3 6 | ~~at risk at TP2~~ **W7: closed in phase form**: E1 TP2 0.68-0.85 (TP1 0.38-0.57), same-job FlyTape, both nodes (WP-L2a); from the GDN hand-off 0.37-0.50 / 0.54-0.85 (WP-L2c); exchange budgeted separately |
+| S1 / S2 / S6 / S7 HC down / up | 0.109 / 0.136 / 0.086 (+ reduce / combine phases) | mx in situ: down 1.22-1.30 phase (0.53-1.03 stream), up 1.06-1.34 (0.30-0.51); 0.03-0.19 of the floor (0.7-7 MB per layer, latency-bound) | P-L3 6 | ~~at risk~~ **W7: closed in phase form**: down 0.69-0.78, up 0.50-0.57 (WP-L2a, both nodes); E2 HC re-association (WP-L2b) not built |
+| QSA (proj, core, out) | 0.041 / 0.055 / 0.064 | `qsa_in` mx 0.48-0.60 (TP1) / 0.79-0.95 (TP2) phase; **core not measured** | P-L3 6 | ~~unknown~~ **W7: core measured** (P-L5, fix round): best / FlyTape structure in rocKE 0.72-0.91 TP1, 0.72-0.88 TP2 (conservative); vs FlyTape in situ 0.60-0.84; `qsa_in` 0.25-0.31 / 0.33-0.36 (WP-L2a); family taken at 0.60-0.85 |
+| E10 head | 0.009 / 0.015 / 0.019 | mx 0.32-0.45 phase | P-L3 6 | on track; **W7: 0.26-0.36** (WP-L2a); fused argmax not built (WP-L2f) |
 | TP exchanges (2 per layer, S5 and S10) | FlyTape's own: 0.060-0.082 (skew floor) to 0.078-0.107 (old proxy) of its TP2 step | in situ, both measured: **96 exchanges = 0.048-0.061 of FlyTape's TP2 step**; out-proj exchange 0.22-0.39 of FlyTape's per-exchange cost at B8-B64, 0.58-0.77 at B128 (link-bound); MoE-down exchange 0.84-4.3x the out-proj one | WP-C5 F2, F4, F5 | on track for the budget; DESIGN-CCL's 0.25 per-exchange gate not met (DESIGN-CCL 10) |
-| stage-to-stage sync | non-work share of FlyTape's layer 0.13-0.21 | `sync=mix` (grid on >= 0.4 edges, per-wave lazy flags) 0.979-0.983 of grid at idle, 0.927 with one late unit; recovers only 0.007-0.034 of a FlyTape layer; the rest is phase-tail imbalance. Sync share of the layer: TP1 LB plan 0.04-0.11, FlyTape plan 0.10-0.22, **TP2 rank shape about 0.2 whatever the plan** | P-L2 3-4 | at risk at TP2 |
-| persistent walk vs one launch per layer | - | MoE: the persistent walk costs 1.04-1.08 of per-layer launches (P-L4 gs vs launch; WP-C5 F4); recurrence: one launch per layer costs 1.01-1.40x the floor vs 1.025-1.046 streamed | P-L4, WP-C5 F4, P-L1 | open (decided in WP-L4) |
+| stage-to-stage sync | non-work share of FlyTape's layer 0.13-0.21 | `sync=mix` (grid on >= 0.4 edges, per-wave lazy flags) 0.979-0.983 of grid at idle, 0.927 with one late unit; recovers only 0.007-0.034 of a FlyTape layer; the rest is phase-tail imbalance. Sync share of the layer: TP1 LB plan 0.04-0.11, FlyTape plan 0.10-0.22, **TP2 rank shape about 0.2 whatever the plan** | P-L2 3-4 | at risk at TP2; **W7 (WP-L1):** the framework's grid barrier is 0.975-0.978 of P-L2's, so `sync=mix` is 1.010-1.013 of it at idle (TIE / LOSS) and 0.940 with one late unit (WIN 15 / 15); `mix` stays default provisionally, WP-L3 decides per edge in situ |
+| persistent walk vs one launch per layer | - | MoE: the persistent walk costs 1.04-1.08 of per-layer launches (P-L4 gs vs launch; WP-C5 F4); recurrence: one launch per layer costs 1.01-1.40x the floor vs 1.025-1.046 streamed | P-L4, WP-C5 F4, P-L1 | open (decided in WP-L4); **W7:** framework runtime layer loop beats one launch per layer (launch / loop 1.018-1.023, WP-L1); GDN chain one launch per step beats per-layer 1.03-1.39x (WP-L2c); MoE `gs` and `launch` agree within 2 % (P-L4b) |
 
 Precision-matched regime (bf16 dense, FlyTape's): the LB bf16 GEMM wins 39, ties 13, mixed 3 of 55 cells against
 FlyTape's plan in the same harness (fold-matched), but is slower than FlyTape's measured in-situ phase in 50 of 72
@@ -678,16 +686,16 @@ estimate of its removable share; "+ bf16 state" adds N11 on top, accuracy-gated)
 
 | stage | state | lever (owner WP) | what closing means |
 |---|---|---|---|
-| MoE experts + combine (S9 / S10) | at risk, decisive | build DESIGN-LB 6.2 as designed, which P-L4 did not: TP2 whole expert per CTA with `h` in LDS, TP1 IOD-local `h` mailbox; MoE input staged once per CTA in LDS (0.09-0.11); K split over waves with an LDS reduction; router top-k fused into the router epilogue (0.05-0.1); `combine=fused_next` with the consumer's read timed; per-layer walk no slower than one launch per layer (WP-C5 F4); union-aware placement for correlated routing (WP-L2d) | <= 1.00 of FlyTape's expert + combine in a same-job bracket at every cell (rows 8-128, TP1 and TP2, W4A8), target 0.85; null-bytes share well below today's 0.47-0.77 |
-| MoE rows 8 bucket | open | build and measure r8 in the same rebuild (WP-L2d) | TP1 / TP2 B8 cells become derivable |
-| out-proj at TP2, HC down / up (latency-bound small GEMMs) | at risk in phase form | tile-flag dataflow with weights issued before the poll (`sync=mix`), the HC per-stream re-association (removes the norm hop and the reduce phase), the LB plan's fewer boundaries (10-11 stages against 14-16), `fuse_out`; `fold=none` only if the in-situ consumer read is timed and wins (P-L3 7) (WP-L2a, WP-L2b, WP-L3) | in-situ phase <= FlyTape's per stage; the P-L3 stream column (0.30-1.03) is the reachable bound |
-| TP2 sync share (about 0.2 of a layer) | at risk | planner balance (P-L2 5.2: the non-work share is phase-tail imbalance, not the barrier); cross-layer overlap in `pass`; partial edges as skew insurance (0.04-0.12 of a layer with one late unit) (WP-L1, WP-L3, WP-L4) | TP2 layer sync share at or below the TP1 LB plan's 0.04-0.11 |
-| TP exchanges | on track for the step budget | defaults fixed at TP2 (lamport one-shot, `cons=pass`, `lay=unit` for the MoE); overlap with the next layer's units for the per-exchange 0.25 target; `ar_dtype=fp8` (0.53x bytes, tolerance) (WP-L5, WP-L8) | per-step share stays below FlyTape's skew floor (0.060-0.082) with both exchanges in situ |
-| GDN recurrence | on track (f32 at the floor) | `lri_ldnt` (`best_knobs`); `state=bf16` (N11, RULER-gated); MTP chain + `snap=last` (WP-L2c, WP-L8, WP-L9) | no further f32 gain exists; bytes are the only lever |
-| GDN in-proj, router GEMM, head | on track | conv / gates and top-k / argmax epilogues on E1; op_sel scale layout in every producer (P-L3 7) (WP-L2a, WP-L2c, WP-L2f) | keep the measured ratios with the epilogues in |
-| QSA core | unknown | new probe P-L5 (below) before WP-L2e | a measured QSA family ratio at p128 and 8K |
+| MoE experts + combine (S9 / S10) | at risk, decisive; **W7: G-MoE met (WP-L2d, `P-L4b.md`), 0.85 target partly** | build DESIGN-LB 6.2 as designed, which P-L4 did not: TP2 whole expert per CTA with `h` in LDS, TP1 IOD-local `h` mailbox; MoE input staged once per CTA in LDS (0.09-0.11); K split over waves with an LDS reduction; router top-k fused into the router epilogue (0.05-0.1); `combine=fused_next` with the consumer's read timed; per-layer walk no slower than one launch per layer (WP-C5 F4); union-aware placement for correlated routing (WP-L2d) | <= 1.00 of FlyTape's expert + combine in a same-job bracket at every cell (rows 8-128, TP1 and TP2, W4A8), target 0.85; null-bytes share well below today's 0.47-0.77 |
+| MoE rows 8 bucket | open; **W7: built and measured** (TP1 0.92-0.94, TP2 0.81-0.84) | build and measure r8 in the same rebuild (WP-L2d) | TP1 / TP2 B8 cells become derivable |
+| out-proj at TP2, HC down / up (latency-bound small GEMMs) | at risk in phase form; **W7: closed in phase form (WP-L2a)**; HC re-association (WP-L2b), `fuse_out`, in-situ consumer read (WP-L3) still open | tile-flag dataflow with weights issued before the poll (`sync=mix`), the HC per-stream re-association (removes the norm hop and the reduce phase), the LB plan's fewer boundaries (10-11 stages against 14-16), `fuse_out`; `fold=none` only if the in-situ consumer read is timed and wins (P-L3 7) (WP-L2a, WP-L2b, WP-L3) | in-situ phase <= FlyTape's per stage; the P-L3 stream column (0.30-1.03) is the reachable bound |
+| TP2 sync share (about 0.2 of a layer) | at risk; **W7: framework built (WP-L1); the in-situ per-edge decision is WP-L3's** (idle: barrier >= `mix`; skew: `mix` wins) | planner balance (P-L2 5.2: the non-work share is phase-tail imbalance, not the barrier); cross-layer overlap in `pass`; partial edges as skew insurance (0.04-0.12 of a layer with one late unit) (WP-L1, WP-L3, WP-L4) | TP2 layer sync share at or below the TP1 LB plan's 0.04-0.11 |
+| TP exchanges | on track for the step budget; W7: unchanged (WP-L5) | defaults fixed at TP2 (lamport one-shot, `cons=pass`, `lay=unit` for the MoE); overlap with the next layer's units for the per-exchange 0.25 target; `ar_dtype=fp8` (0.53x bytes, tolerance) (WP-L5, WP-L8) | per-step share stays below FlyTape's skew floor (0.060-0.082) with both exchanges in situ |
+| GDN recurrence | on track (f32 at the floor); **W7: WP-L2c done** (state warm is the in-situ gain; bf16 state RULER-gated) | `lri_ldnt` (`best_knobs`); `state=bf16` (N11, RULER-gated); MTP chain + `snap=last` (WP-L2c, WP-L8, WP-L9) | no further f32 gain exists; bytes are the only lever |
+| GDN in-proj, router GEMM, head | on track; **W7: conv / gates epilogue built (WP-L2c), top-k in the MoE kernel (P-L4b); head argmax open (WP-L2f)** | conv / gates and top-k / argmax epilogues on E1; op_sel scale layout in every producer (P-L3 7) (WP-L2a, WP-L2c, WP-L2f) | keep the measured ratios with the epilogues in |
+| QSA core | ~~unknown~~ **W7: measured (P-L5), 0.72-0.91 of the FlyTape structure in rocKE**; paged KV not built (WP-L2e) | new probe P-L5 (below) before WP-L2e | a measured QSA family ratio at p128 and 8K |
 | precision-matched bf16 arm | dropped from the budget | kept as `wdtype=bf16` knob; a faster grid barrier (FlyTape's striped sync, cross-phase prefetch) if the arm is ever needed | - |
-| correctness infrastructure | at risk | inline-asm VMEM hazard scan as a compile gate on every LB / CCL build (`hz` on); a deterministic stale-read test (P-L4 F2: the `noacq` twin misses 6 (cell, arm) pairs); host check of the launch-fatal word after every launch / replay (D0.8 amendment) (WP-L1) | every gate run uses them |
+| correctness infrastructure | at risk; **W7: built (WP-L1)**: hazard gate (fired for real), stale-read harness (cache twin caught 100 %), launch-fatal check per launch; 31 host-module mutation survivors unclassified | inline-asm VMEM hazard scan as a compile gate on every LB / CCL build (`hz` on); a deterministic stale-read test (P-L4 F2: the `noacq` twin misses 6 (cell, arm) pairs); host check of the launch-fatal word after every launch / replay (D0.8 amendment) (WP-L1) | every gate run uses them |
 
 ### 15.5 Go / no-go
 
@@ -700,6 +708,11 @@ below FlyTape, and the exchange is already cheaper than FlyTape's own. Condition
    combine phases in a same-job bracket in every cell, both nodes, W4A8; target 0.85. **Kill / re-plan criterion:** if
    the 6.2 shape with its levers still measures above 1.05 in any TP2 cell, the 2-GPU large-batch entry becomes
    LB DP2 + MTP (no CCL on the critical path) and the TP2 budget is re-issued before more TP2 work is spent.
+   **[W7: met on both nodes** (`P-L4b.md` section 3, same-job brackets, dispatcher arm per cell): TP1 0.84-0.98
+   (r8-r64), TP2 0.81-0.98 (r8-r128) of FlyTape's expert + combine; the kill criterion (> 1.05 in a TP2 cell) did not
+   fire, so the 2-GPU entry stays LB TP2 vs LB DP2 per cell. 0.85 is met in 8 / 18 cells on n01-09 and 3 / 18 on
+   n07-17. Open: no independent verification of P-L4b yet; the timed path takes route pairs (`entry=logits` adds
+   1.03-1.17x); no FlyTape correlated-routing trace.]**
 2. **MTP is on the critical path for TP1** (bars 0.85-0.99 of FlyTape, met by K0 only with a thin margin) and for the
    TP2 B8-B16 cells (ATOM DP2 K3 bars). WP-L9 moves from group L5 to directly after WP-L4.
 3. **No-go items (removed or demoted, all kept as default-off knobs):** the precision-matched bf16 budget line;
@@ -722,22 +735,22 @@ it, or waits for W5's WP2 / WP3.
 
 | WP | what | depends | gate |
 |---|---|---|---|
-| WP-L2d (rebuild, first) | DESIGN-LB 6.2's MoE as designed (15.4 row 1), rows 8-128 incl. the r8 bucket, TP1 and TP2, W4A8 + `act=fp4`; in-situ MoE-down exchange on it (`insitu_moe.py` `lay=unit`); new module next to `moe_lb.py` (which stays) | P-L4, WP-C5 F4 | G-MoE (15.5); T0, determinism, deterministic stale-read test, mutants on MI355X in the timing jobs; random + correlated routing |
-| WP-L1 | LB framework on `persist/`: rows buckets, runtime token tiles, masking, task graph with partial edges, `sync=mix` per edge (`gmask_full(plan, 0.4)`, per-wave lazy flags, `s_nop` pause; other arms as knobs), LB validate (WAR + CCL slots via `ccl/war.py`), index-width lint, asm-hazard scan as a compile gate, deterministic stale-read harness, launch-fatal check per launch | WP1 (landed), P-L2 | CPU tests; GPU microbench reproduces P-L2's verdicts; negative controls; existing builds byte-identical |
-| WP-L2a | E1 productized from `gemm.py`: planner with grid fill first, op_sel scale layout for producers and a one-time weight-scale repack, `fold=last` default, `act=fp4` (against aiter `gemm_a4w4` on gdn_in / qsa_in / head r64-128), 32x32x64 MFMA lever, `wdtype=bf16` as a knob | P-L3 | P-L3's numerics suite incl. op_sel mutants; in-situ ratios of 15.2 held |
-| WP-L2c | E3 (conv / gates epilogue on E1) / E4 (`lri_ldnt`, `best_knobs`) / E5; `state=bf16` knob with its RULER plan | WP-L2a (E3, E5), P-L1 | T0 vs fp64 + bitwise vs the exact-order emulation |
-| P-L5 (new probe) | QSA core at LB (row-gang, MFMA QK / PV, indexer, select) at p128 and 8K vs FlyTape's QSA phases; the last unmeasured family | - | T0; WIN rule; same-job FlyTape bracket |
-| WP-L0c remainder | measured U and routing correlation from the real checkpoint (router dump from an ATOM native run on a staged copy; `dev/ATOM` read-only) | - | budget 15.3 re-issued under real routing |
+| WP-L2d (rebuild, first) **[W7: done, G-MoE met; `P-L4b.md`; unverified]** | DESIGN-LB 6.2's MoE as designed (15.4 row 1), rows 8-128 incl. the r8 bucket, TP1 and TP2, W4A8 + `act=fp4`; in-situ MoE-down exchange on it (`insitu_moe.py` `lay=unit`); new module next to `moe_lb.py` (which stays) | P-L4, WP-C5 F4 | G-MoE (15.5); T0, determinism, deterministic stale-read test, mutants on MI355X in the timing jobs; random + correlated routing |
+| WP-L1 **[W7: done, gate met, CONFIRMED]** | LB framework on `persist/`: rows buckets, runtime token tiles, masking, task graph with partial edges, `sync=mix` per edge (`gmask_full(plan, 0.4)`, per-wave lazy flags, `s_nop` pause; other arms as knobs), LB validate (WAR + CCL slots via `ccl/war.py`), index-width lint, asm-hazard scan as a compile gate, deterministic stale-read harness, launch-fatal check per launch | WP1 (landed), P-L2 | CPU tests; GPU microbench reproduces P-L2's verdicts; negative controls; existing builds byte-identical |
+| WP-L2a **[W7: done, gate met, CONFIRMED; `act=fp4` loses to aiter 12 / 12]** | E1 productized from `gemm.py`: planner with grid fill first, op_sel scale layout for producers and a one-time weight-scale repack, `fold=last` default, `act=fp4` (against aiter `gemm_a4w4` on gdn_in / qsa_in / head r64-128), 32x32x64 MFMA lever, `wdtype=bf16` as a knob | P-L3 | P-L3's numerics suite incl. op_sel mutants; in-situ ratios of 15.2 held |
+| WP-L2c **[W7: done, gate met, CONFIRMED; bf16 state RULER owed]** | E3 (conv / gates epilogue on E1) / E4 (`lri_ldnt`, `best_knobs`) / E5; `state=bf16` knob with its RULER plan | WP-L2a (E3, E5), P-L1 | T0 vs fp64 + bitwise vs the exact-order emulation |
+| P-L5 (new probe) **[W7: done; TP1 CONFIRMED, TP2 closed by the fix round (not re-verified)]** | QSA core at LB (row-gang, MFMA QK / PV, indexer, select) at p128 and 8K vs FlyTape's QSA phases; the last unmeasured family | - | T0; WIN rule; same-job FlyTape bracket |
+| WP-L0c remainder **[W7: not started]** | measured U and routing correlation from the real checkpoint (router dump from an ATOM native run on a staged copy; `dev/ATOM` read-only) | - | budget 15.3 re-issued under real routing |
 
 **Wave LB-2: after LB-1 (and the named W5 pieces)**
 
 | WP | what | depends |
 |---|---|---|
-| WP-L2b | E2 HC LB with the per-stream re-association and the faithful-order twin | WP-L2a; reads W5 WP2a's HC semantics (no edits) |
-| WP-L2e | E9 QSA LB | P-L5; W5 WP2c's Q3-Q7 semantics |
-| WP-L2f | E10 head (E1 over vocab rows, fused argmax) can start on WP-L2a; E11 PLE / E12 final mix reuse W5's WP2e / WP2f emitters | WP-L2a; **waits for W5 WP2e / WP2f** |
-| WP-L3 | TP1 `layers=1` layer kernels per bucket; in-situ decisions: sync per edge, `fold=none` with the consumer read timed, `fuse_out`, `combine=fused_next` | WP-L1, WP-L2a-f, G-MoE |
-| WP-L4 | TP1 `pass` on WP1's loop driver and the `layers=1` + head graph; the LB DP2 arm (two TP1 replicas) against ATOM DP2 K3 | WP-L3 |
+| WP-L2b **[W7: can start]** | E2 HC LB with the per-stream re-association and the faithful-order twin | WP-L2a; reads W5 WP2a's HC semantics (no edits) |
+| WP-L2e **[W7: can start]** | E9 QSA LB | P-L5; W5 WP2c's Q3-Q7 semantics |
+| WP-L2f **[W7: E10 can start; E11 / E12 wait for W5 WP2e / WP2f (no report yet)]** | E10 head (E1 over vocab rows, fused argmax) can start on WP-L2a; E11 PLE / E12 final mix reuse W5's WP2e / WP2f emitters | WP-L2a; **waits for W5 WP2e / WP2f** |
+| WP-L3 **[W7: blocked on WP-L2b / L2e / L2f; integration prep can start]** | TP1 `layers=1` layer kernels per bucket; in-situ decisions: sync per edge, `fold=none` with the consumer read timed, `fuse_out`, `combine=fused_next` | WP-L1, WP-L2a-f, G-MoE |
+| WP-L4 **[W7: blocked on WP-L3]** | TP1 `pass` on WP1's loop driver and the `layers=1` + head graph; the LB DP2 arm (two TP1 replicas) against ATOM DP2 K3 | WP-L3 |
 
 **Wave LB-3: TP2, MTP, serving**
 
@@ -750,3 +763,46 @@ it, or waits for W5's WP2 / WP3.
 
 **Next WPs to launch (in this order, at most two workflows at a time):** WP-L2d rebuild and WP-L1 in parallel; then
 WP-L2a + WP-L2c + P-L5; WP-L0c's real-routing measurement alongside whenever a GPU is free.
+
+### 15.7 W7 re-derived budget (2026-11-02; derived, no new hardware run)
+
+Same method as 15.3 (LB step / FT step = sum over families of FlyTape share x LB / FlyTape ratio), with the W7
+measurements in place of the probe ratios. Details, assumptions and the per-family ratio sources:
+`large-batch/W7-STATUS.md` section 3.
+
+- **Ratios used (phase / in-situ metric only; no stream-metric low end this time):** MoE expert + combine = P-L4b's
+  dispatcher arm per cell (W4A8, min-max over both nodes and brackets) x 1.03-1.17 for the in-kernel top-k
+  (`entry=logits`); router GEMM 0.21-0.25 (WP-L2a); GDN family = WP-L2c's chain per cell (f32 state), high end + 0.03
+  for the node spread the verifier saw; HC GEMMs 0.50-0.78 (WP-L2a); QSA family 0.60-0.85 (P-L5 conservative core
+  + WP-L2a `qsa_in`); head 0.26-0.36; other 0.8-1.2; FlyTape's reduce / combine / exchange-wait phases are replaced by
+  LB's 96 in-situ exchanges at TP2 (0.048-0.061, WP-C5 F5) and by 0-0.02 at TP1.
+- **Shares:** as 15.3; the B8 cells borrow the B32 shares (no B8 share trace), so their ranges are the least certain.
+
+| TP | B | bar (1k / 8k) | LB K0 / FT, central (range) | MoE share of the LB step | + `combine=fused_next` (0.917-0.96) | + bf16 state (accuracy-gated) | state |
+|---|---|---|---|---|---|---|---|
+| 2 | 8 | 0.917 / 0.890 | 0.71 (0.65-0.78) | 0.51 | 0.69 | 0.70 | on track (B8 shares borrowed) |
+| 2 | 16 | 0.974 / 0.962 | 0.72 (0.66-0.79) | 0.51 | 0.70 | 0.70 | on track |
+| 2 | 32 | 1.000 / 1.000 | 0.76 (0.69-0.83) | 0.54 | 0.74 | 0.74 | on track |
+| 2 | 64 | 0.993 / 0.997 | 0.74 (0.67-0.80) | 0.50 | 0.71 | 0.69 | on track |
+| 2 | 128 | 1.000 / 1.000 | 0.81 (0.74-0.87) | 0.52 | 0.78 | 0.74 | on track |
+| 1 | 8 | 0.912 / 0.852 | 0.75 (0.68-0.81) | 0.64 | 0.72 | 0.73 | **thin at 8k** (margin 0.04; B8 shares borrowed) |
+| 1 | 16 | 0.914 / 0.923 | 0.78 (0.71-0.86) | 0.65 | 0.75 | 0.76 | **thin** (margin 0.05) |
+| 1 | 32 | 0.955 / 0.951 | 0.73 (0.65-0.81) | 0.61 | 0.70 | 0.69 | on track |
+| 1 | 64 | 0.987 / 0.979 | 0.77 (0.68-0.85) | 0.59 | 0.74 | 0.71 | on track |
+| 1 | 128 | ATOM K3 | LB / ATOM K3 0.74 (0.66-0.82), derived as in 15.3 from TP1 B64 | - | - | - | on track (eta assumption) |
+
+- **Every derivable cell's range is now under its bar** (W6: 5 of 8 touched or crossed it), and the B8 cells are
+  derivable. Against 15.3: TP2 B128 0.91 -> 0.81, TP2 B16 0.82 -> 0.72, TP1 B64 0.89 -> 0.77. The gain is the MoE
+  (1.05-1.29 -> 0.81-0.98 of FlyTape's e+c) and the GEMM rows (WP-L2a closed the TP2 out-proj and HC phase forms).
+- **The MoE is still 0.50-0.65 of the LB step** and the largest lever left: the 0.85 target cells (TP1 r8 / r16,
+  TP2 r32 / r128), `combine=fused_next` (in the column above; WP-L3 measures it in situ), `pdt=bf16` (0.97-0.98,
+  accuracy-gated, not included).
+- **What this budget does not yet contain:** a composed layer (WP-L3 measures the families together, with real edges
+  between them); the TP2 sync tail beyond what each family's own phase form carries; E2's HC re-association and the
+  E10 argmax / E11 PLE / E12 final mix; correlated routing (the rebuild is 0.58-0.78 of the line there, but FlyTape has
+  no such trace); FlyTape's +-0.015 job-to-job drift.
+- **TP1 still needs MTP for a robust margin at B8 / B16** (8k bar 0.852, 1k 0.914); 15.5 condition 2 stands.
+- **Next WPs to launch (W7, at most two workflows at a time):** WP-L2b and WP-L2e first (both unblocked), then WP-L2f's
+  E10 head; WP-L3 integration prep (GDN chain + E1 + `moe_lb2` on the WP-L1 framework, per-edge sync and
+  `combine=fused_next` decided in situ) once WP-L2b lands; E11 / E12 wait for W5's WP2e / WP2f. Independent
+  verification of P-L4b and of P-L5's fix round alongside, before WP-L3 quotes any layer number.

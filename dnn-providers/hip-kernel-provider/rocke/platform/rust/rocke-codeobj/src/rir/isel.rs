@@ -181,6 +181,10 @@ struct Isel<'a> {
     /// Lever `dsrebase`: per block, an LDS address register plus a 64 KiB-aligned constant, and where in the
     /// block it was written (`lds_addr`).
     ds_bases: FxHashMap<(usize, Opnd, i64), (Opnd, usize)>,
+    /// Lever `u16zext` (PLAN decision 18): VGPRs a zero-extending 16-bit load wrote (`buffer_load_ushort`,
+    /// `ds_read_u16`): their high half is already zero, so a zero extension of their low half is the register itself
+    /// (LLVM folds the `and 0xffff`), and no `v_and` waits for the load right after it issues.
+    zero_hi16: crate::rir::fx::FxHashSet<u32>,
 }
 
 /// One half of an f16 pair packed into an i32: an f16 (or i16) value, the
@@ -1027,9 +1031,12 @@ impl<'a> Isel<'a> {
         if self.burs.is_some() && burs::select(self, op)? {
             return Ok(());
         }
-        // i16 is implemented only as the 16-bit view of a scalar f16.
+        // i16 is implemented only as the 16-bit view of a scalar f16. Lever `i16vec` (PLAN decision 18): an
+        // element extract or insert of an i16 vector takes the f16 path (the 16-bit half of its dword), as the
+        // large-batch MoE's x-scale reads (`zext(extract(bitcast(vec<i8x2> -> vec<i16x1>)))`) need.
         let i16_vec = |v: &ValueId| matches!(self.k.ty(*v), Type::Vec(Scalar::I16, _));
-        if op.kind != VecBitcast && (op.results.iter().any(i16_vec) || op.operands.iter().any(i16_vec)) {
+        let i16_ok = matches!(op.kind, Extract | Insert) && super::lever("i16vec");
+        if op.kind != VecBitcast && !i16_ok && (op.results.iter().any(i16_vec) || op.operands.iter().any(i16_vec)) {
             return Err(unsupported(format!("{:?} of i16 vectors", op.kind)));
         }
         match op.kind {
@@ -3162,6 +3169,11 @@ impl<'a> Isel<'a> {
                 }
             };
         }
+        if let (false, false, Opnd::R(x)) = (hi, signed, o) {
+            if x.off == 0 && x.n == 1 && self.zero_hi16.contains(&x.reg) {
+                return o;
+            }
+        }
         match (hi, signed) {
             (false, false) => self.v_bin(Opc::VAndB32, Opnd::Imm(0xffff), o),
             (true, false) => self.v_bin(Opc::VLshrrevB32, Opnd::Imm(16), o),
@@ -3370,6 +3382,9 @@ impl<'a> Isel<'a> {
         };
         let dst = self.vgpr(1);
         self.emit(MInst::new(opc, [r(dst)], uses).with_imm(offset).with_mem(mem));
+        if opc == Opc::BufLoadU16 && super::lever("u16zext") {
+            self.zero_hi16.insert(dst.reg);
+        }
         self.set(v, val(dst));
         Ok(())
     }
@@ -4662,6 +4677,9 @@ impl<'a> Isel<'a> {
         if let Some(&quad) = self.chains.quads.get(&v) {
             return self.lload_quad(op, quad);
         }
+        if let Some(&duo) = self.chains.duos.get(&v) {
+            return self.lload_duo(op, duo);
+        }
         let ty = self.k.ty(v).clone();
         let (addr, offset) = self.lds_addr(op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0))?;
         if self.gathers.contains(&v) {
@@ -4682,6 +4700,9 @@ impl<'a> Isel<'a> {
         }
         if bytes == 2 {
             self.emit(MInst::new(Opc::DsLoadU16, [r(dst)], [addr]).with_imm(offset));
+            if super::lever("u16zext") {
+                self.zero_hi16.insert(dst.reg);
+            }
         } else {
             let unit: u8 = match (dwords, align) {
                 (4, a) if a >= 16 => 4,
@@ -4748,6 +4769,19 @@ impl<'a> Isel<'a> {
         let dst = self.vgpr(4);
         self.emit(MInst::new(Opc::DsLoadB128, [r(dst)], [addr]).with_imm(offset));
         for (k, v) in quad.into_iter().enumerate() {
+            let part = sub(dst, k as u8, 1);
+            self.set(v, if matches!(self.k.ty(v), Type::Vec(..)) { Val::T(part) } else { Val::W(r(part)) });
+        }
+        Ok(())
+    }
+
+    /// The two loads of `find_dword_duos` that start at `op`, as one
+    /// `ds_read_b64` whose dwords they read.
+    fn lload_duo(&mut self, op: &Op, duo: [ValueId; 2]) -> Result<(), CompileError> {
+        let (addr, offset) = self.lds_addr(op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0))?;
+        let dst = self.vgpr(2);
+        self.emit(MInst::new(Opc::DsLoadB64, [r(dst)], [addr]).with_imm(offset));
+        for (k, v) in duo.into_iter().enumerate() {
             let part = sub(dst, k as u8, 1);
             self.set(v, if matches!(self.k.ty(v), Type::Vec(..)) { Val::T(part) } else { Val::W(r(part)) });
         }
@@ -5305,6 +5339,9 @@ struct Chains {
     /// First of four dword LDS loads made one (`find_dword_quads`) -> the four
     /// results; the other three are in `skip`.
     quads: FxHashMap<ValueId, [ValueId; 4]>,
+    /// Lever `ldsduos`: first of two dword LDS loads made one `ds_read_b64`
+    /// (`find_dword_duos`) -> the two results; the second is in `skip`.
+    duos: FxHashMap<ValueId, [ValueId; 2]>,
 }
 
 struct ChainCx<'a> {
@@ -5503,6 +5540,53 @@ fn find_dword_quads(cx: &ChainCx, region: &Region, gathers: &FxHashSet<ValueId>,
         taken.extend([i, rest[0], rest[1], last]);
         out.skip.extend(&quad[1..]);
         out.quads.insert(quad[0], quad);
+    }
+}
+
+/// Two dword LDS loads (f32 or i32, scalar or one-element vectors) of one
+/// address at byte offsets `o` and `o + 4`, in program order with nothing in
+/// between that has a side effect, the address and `o` 8-byte aligned, not
+/// already in a quad: one `ds_read_b64` at the first (lever `ldsduos`).
+fn find_dword_duos(cx: &ChainCx, region: &Region, gathers: &FxHashSet<ValueId>, out: &mut Chains) {
+    for op in &region.ops {
+        for inner in &op.regions {
+            find_dword_duos(cx, inner, gathers, out);
+        }
+    }
+    let dword = |v: ValueId| {
+        matches!(cx.k.ty(v), Type::Scalar(Scalar::F32 | Scalar::I32) | Type::Vec(Scalar::F32 | Scalar::I32, 1))
+    };
+    let in_quad: FxHashSet<ValueId> = out.quads.values().flatten().copied().collect();
+    let mut effects = vec![0u32; region.ops.len() + 1];
+    let mut at: FxHashMap<(ValueId, ValueId, i64), Option<usize>> = FxHashMap::default();
+    for (i, op) in region.ops.iter().enumerate() {
+        effects[i + 1] = effects[i] + has_side_effects(op.kind) as u32;
+        if op.kind == OpKind::LLoad && dword(op.results[0]) && !gathers.contains(&op.results[0]) && !in_quad.contains(&op.results[0]) {
+            let key = (op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0));
+            at.entry(key).and_modify(|p| *p = None).or_insert(Some(i));
+        }
+    }
+    let mut taken = FxHashSet::default();
+    for (i, op) in region.ops.iter().enumerate() {
+        if op.kind != OpKind::LLoad || taken.contains(&i) || !super::op_lever(op, "ldsduos") {
+            continue;
+        }
+        let (smem, addr, first) = (op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0));
+        if at.get(&(smem, addr, first)) != Some(&Some(i)) {
+            continue;
+        }
+        let Some(&base) = cx.lds.get(&smem) else { continue };
+        if (base as i64 + first) % 8 != 0 || known_align(cx, addr, 0) % 8 != 0 {
+            continue;
+        }
+        let Some(second) = at.get(&(smem, addr, first + 4)).copied().flatten() else { continue };
+        if second <= i || effects[second + 1] != effects[i] || taken.contains(&second) || !super::op_lever(&region.ops[second], "ldsduos") {
+            continue;
+        }
+        let duo = [i, second].map(|p| region.ops[p].results[0]);
+        taken.extend([i, second]);
+        out.skip.insert(duo[1]);
+        out.duos.insert(duo[0], duo);
     }
 }
 
@@ -5833,6 +5917,11 @@ pub fn select_for(
     if target == Target::Gfx1151 || super::kernel_lever("ldsquads") || super::scoped_anywhere(kernel, "ldsquads") {
         find_dword_quads(&cx, &kernel.body, &gathers, &mut chains, target == Target::Gfx1151);
     }
+    // Lever `ldsduos` (PLAN decision 18): two aligned dword LDS loads of one address merge into one
+    // `ds_read_b64` (the loads `ldsquads` left), as LLVM's load-store optimizer merges a value / index pair.
+    if target == Target::Gfx950 && (super::kernel_lever("ldsduos") || super::scoped_anywhere(kernel, "ldsduos")) {
+        find_dword_duos(&cx, &kernel.body, &gathers, &mut chains);
+    }
     find_finite_tests(&cx, &kernel.body, &mut chains);
     find_half_packs(&cx, &kernel.body, &uniform, &mut chains);
     let mut packs = FxHashMap::default();
@@ -5880,6 +5969,7 @@ pub fn select_for(
             Target::Gfx1151 => Default::default(),
         },
         ds_bases: FxHashMap::default(),
+        zero_hi16: Default::default(),
     };
     // With lever scopes every op of the source has one (`opt::inherit_scopes`; outside every scope the empty
     // one): scope 0 is left to the ops passes made, whose instructions take their neighbours' (`MFunc::fill_scopes`).

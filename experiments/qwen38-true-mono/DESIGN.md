@@ -680,7 +680,7 @@ WP10 (with a WP10a checkpoint after the first three levers land).
 |---|---|---|---|---|
 | WP10 | accuracy on every cell's final config: the T0-T5 ladder (12.4): GSM8K, HumanEval, RULER 8K/32K/128K/max, acceptance length, non-greedy cells; WP10a checkpoint after WP13-WP15 | WP6, WP7, WP8, WP9, WP13-WP20 | within the cell's A-vs-A spread | 22 G |
 | WP11 | RSI (9.2) on each kind, pass/tail and round | WP3 onward, continuous | bitwise per lever; WIN rule | ongoing, <= 6 GPUs |
-| WP12 | `loop` (optional): on-device request loop, `sc1` bulk rule, round-start grid sync, on-device stop | WP5c, P5 | P5 controls; Tier G; e2e vs `round` | 6 G |
+| WP12 | `loop` (optional): on-device request loop, `sc1` bulk rule, round-start grid sync, on-device stop **[re-scoped 2026-11-01 (D0 section 6 item 7, quick/README.md "Round boundary"): the host-side round boundary is removed by `ATOM_Q38_RB_DEVMETA` (served, gated); WP12's remaining budget is the step preparation's GPU work, ~0.015-0.02 of a K=3 round]** | WP5c, P5 | P5 controls; Tier G; e2e vs `round` | 6 G |
 
 **Critical path:** WP0a -> P1 -> D0 -> WP1 -> WP2a/b/c/f (parallel) -> WP3 -> WP4|WP4B -> WP5a||WP5b -> WP5c -> WP6
 -> WP10. WP0b, P7, P8 run alongside and must report before WP6/WP7 budgets are quoted.

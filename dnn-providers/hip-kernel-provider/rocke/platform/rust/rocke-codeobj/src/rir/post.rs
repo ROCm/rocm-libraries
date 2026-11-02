@@ -466,9 +466,24 @@ pub(super) struct BlockDag {
 }
 
 fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, scratch: &mut DagScratch, scopes: &[std::sync::Arc<super::LeverDelta>]) -> BlockDag {
+    // Levers `vmlat60` / `vmlat100` (PLAN decision 18): a vector memory load's result is taken to arrive after 60
+    // (100) slots instead of the model's 180, as for a stream whose loads were issued several steps ahead: the list
+    // scheduler then keeps a run of MFMAs that read prefetched operands together instead of slotting each MFMA
+    // result's LDS store (and its hazard wait) between them (LLVM's model latency of a VMEM load is in this range).
     let result_latency = |inst: &MInst| match target {
         crate::target::Target::Gfx1151 => result_latency(inst),
-        crate::target::Target::Gfx950 => crate::target::gfx9::model::result_latency(inst),
+        crate::target::Target::Gfx950 => {
+            let l = crate::target::gfx9::model::result_latency(inst);
+            if inst.op.flags() & F_VMEM_LOAD != 0 {
+                if super::lever_at(scopes, inst.scope, "vmlat60") {
+                    return l.min(60);
+                }
+                if super::lever_at(scopes, inst.scope, "vmlat100") {
+                    return l.min(100);
+                }
+            }
+            l
+        }
     };
     let mut mfma = match target {
         crate::target::Target::Gfx1151 => None,
@@ -501,13 +516,30 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
     // `alias` tag). SMEM reads only kernel arguments and memory the kernel
     // does not write.
     let mut lds = (None, Vec::new());
+    // Lever `ldsalias` (PLAN decision 18): LDS accesses of different allocations (their `mem` tags, gfx950's
+    // `lds_dma::tag`) do not order each other, as LLVM's alias analysis of distinct LDS objects lets an MFMA result's
+    // store to a staging buffer sink past the next tile's operand reads. The accesses since the last fence with their
+    // tags, and whether each writes.
+    let alias_on = |inst: &MInst| target == crate::target::Target::Gfx950 && super::lever_at(scopes, inst.scope, "ldsalias");
+    let mut lds_tagged: Vec<(u32, u16, bool)> = Vec::new();
     let mut vmem = super::alias::GlobalOrder::default();
     for (i, inst) in insts.iter().enumerate() {
         let unfenced = m0.is_some() && crate::target::gfx9::m0_order::unfenced(inst);
         let flags = inst.op.flags() & if unfenced { !F_FENCE } else { !0 };
-        if flags & (F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC | F_SMEM | F_FENCE) != 0
-            || matches!(inst.op, Opc::SBarrier | Opc::SSendmsg)
-            || has_phys(inst) && !unfenced
+        // Lever `smemfree` (PLAN decision 18): a scalar load (not a fence, a value result, physical registers only read,
+        // e.g. the kernarg pointer) is no scheduling fence: it reads kernel arguments or memory the kernel does not
+        // write, so only its operands order it, and the independent ones issue together (LLVM issues the kernarg and
+        // table loads of a framework kernel's prologue in parallel; a fence per load made one round trip each).
+        let smem_free = target == crate::target::Target::Gfx950
+            && flags & F_SMEM != 0
+            && flags & (F_FENCE | F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC) == 0
+            && !inst.defs.is_empty()
+            && inst.defs.iter().all(|d| !matches!(d, Opnd::P(..)))
+            && super::lever_at(scopes, inst.scope, "smemfree");
+        if !smem_free
+            && (flags & (F_BRANCH | F_END | F_DEF_EXEC | F_USE_VCC | F_SMEM | F_FENCE) != 0
+                || matches!(inst.op, Opc::SBarrier | Opc::SSendmsg)
+                || has_phys(inst) && !unfenced)
         {
             // Fences stay in order even with nothing between them, as the
             // `s_cbranch_execz` right after its `s_and_saveexec`.
@@ -584,7 +616,30 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
         if let Some(m) = m0.as_mut() {
             m.order(insts, i, &result_latency, &mut edge);
         }
-        let memory = if flags & F_LDS != 0 {
+        let tagged = flags & F_LDS != 0
+            && crate::target::gfx9::lds_dma::accesses_lds_memory(inst.op)
+            && flags & F_FENCE == 0
+            && alias_on(inst);
+        if tagged {
+            // Ordered after the untagged LDS ops (`lds`) as one of them would be, and after every tagged access
+            // that may touch the same bytes where either writes.
+            let is_write = inst.defs.is_empty();
+            if let Some(w) = lds.0 {
+                edge(w, i, 0);
+            }
+            if is_write {
+                for &r in &lds.1 {
+                    edge(r, i, 0);
+                }
+            }
+            for &(p, tag, w) in &lds_tagged {
+                if (w || is_write) && crate::target::gfx9::lds_dma::overlaps(tag, inst.mem) {
+                    edge(p as usize, i, 0);
+                }
+            }
+            lds_tagged.push((i as u32, inst.mem, is_write));
+        }
+        let memory = if flags & F_LDS != 0 && !tagged {
             Some((&mut lds, !inst.defs.is_empty()))
         } else if flags & (F_VMEM_LOAD | F_VMEM_STORE) != 0 {
             vmem.access(i as u32, inst.mem, flags & F_VMEM_STORE == 0, |from| edge(from as usize, i, 0));
@@ -593,6 +648,15 @@ fn block_dag(insts: &[MInst], units: &UnitIndex, target: crate::target::Target, 
             None
         };
         if let Some(((write, reads), is_read)) = memory {
+            // An untagged LDS op orders after every tagged one before it (a write after all, a read after writes).
+            for &(p, _, w) in &lds_tagged {
+                if w || !is_read {
+                    edge(p as usize, i, 0);
+                }
+            }
+            if !is_read {
+                lds_tagged.clear();
+            }
             if let Some(w) = *write {
                 edge(w, i, 0);
             }

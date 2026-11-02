@@ -1334,4 +1334,257 @@ mod tests {
         assert!(ahead(&rir::with_levers(&["loadfirst"], || listing(&text))), "the load ahead of the MFMAs");
         scopes_match_kernel_levers(&text, &["loadfirst"]);
     }
+
+    // ---- PLAN decision 18 (never-regress) levers: each changes its kernel only under the lever, scopes as the
+    // kernel's levers do, and emits the instruction form LLVM emits.
+
+    fn has(listing: &str, mnemonic: &str) -> bool {
+        listing.lines().any(|l| l.trim_start().starts_with(mnemonic))
+    }
+
+    #[test]
+    fn fmac_shrinks_tied_fmas_to_vop2() {
+        let body = concat!(
+            "    %x : f32 = arith.bitcast ( %tid )\n",
+            "    %a1 : f32 = arith.fma ( %x, %x, %x )\n",
+            "    %a2 : f32 = arith.fma ( %x, %x, %a1 )\n",
+            "    %a3 : f32 = arith.fma ( %x, %x, %a2 )\n",
+            "    %r : i32 = arith.bitcast ( %a3 )\n",
+        );
+        let text = kernel("", body);
+        let (plain, lev) = (listing(&text), rir::with_levers(&["fmac"], || listing(&text)));
+        assert!(!has(&plain, "v_fmac_f32") && has(&plain, "v_fma_f32"), "{plain}");
+        assert!(has(&lev, "v_fmac_f32"), "{lev}");
+        scopes_match_kernel_levers(&text, &["fmac"]);
+    }
+
+    #[test]
+    fn dsfold_moves_nested_constants_into_the_offset_field() {
+        // index (tid + 72) * 32 + 5 and (tid + 73) * 32 + 5 of an f32 allocation: with dsfold one base 128 tid
+        // and the fields 4 * 2309 = 9236 and 4 * 2341 = 9364.
+        let body = concat!(
+            "    %lds : smem<f32, [8192]> = tile.smem_alloc (  )\n",
+            "    %k72 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:72 }\n",
+            "    %k73 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:73 }\n",
+            "    %k32 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:32 }\n",
+            "    %k5 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:5 }\n",
+            "    %t1 : i32 = arith.add ( %tid, %k72 )\n",
+            "    %t2 : i32 = arith.add ( %tid, %k73 )\n",
+            "    %m1 : i32 = arith.mul ( %t1, %k32 )\n",
+            "    %m2 : i32 = arith.mul ( %t2, %k32 )\n",
+            "    %u1 : i32 = arith.add ( %n, %m1 )\n",
+            "    %u2 : i32 = arith.add ( %n, %m2 )\n",
+            "    %i1 : i32 = arith.add ( %u1, %k5 )\n",
+            "    %i2 : i32 = arith.add ( %u2, %k5 )\n",
+            "    %y1 : vec<f32x1> = tile.smem_load_vN_f32 ( %lds, %i1 ) { elem_type = s:\"f32\", rank = i:1, vec = i:1 }\n",
+            "    %y2 : vec<f32x1> = tile.smem_load_vN_f32 ( %lds, %i2 ) { elem_type = s:\"f32\", rank = i:1, vec = i:1 }\n",
+            "    %e1 : f32 = vector.extract ( %y1 ) { index = i:0 }\n",
+            "    %e2 : f32 = vector.extract ( %y2 ) { index = i:0 }\n",
+            "    %s : f32 = arith.fadd ( %e1, %e2 )\n",
+            "    %r : i32 = arith.bitcast ( %s )\n",
+        );
+        let text = kernel("    %n : i32\n", body);
+        let offs = |l: &str| -> Vec<u32> {
+            let mut v: Vec<u32> = lines(l, "ds_read").iter().map(|(_, w, _)| w & 0xffff).collect();
+            v.sort_unstable();
+            v
+        };
+        let lev = rir::with_levers(&["dsfold"], || listing(&text));
+        assert_eq!(offs(&lev), [9236, 9364], "{lev}");
+        assert_ne!(offs(&listing(&text)), offs(&lev));
+        scopes_match_kernel_levers(&text, &["dsfold"]);
+    }
+
+    #[test]
+    fn addrfold_shares_a_guarded_voffset_base() {
+        // voffset select(tid < n, ((n + j) * 64 + tid) * 16, 2^30) for j = 1, 2: one base 1024 n + 16 tid, then
+        // + 1024 j (plain: per access a scalar n + j, its shift and a fused add-shift).
+        let mut body = String::from(concat!(
+            "    %k30 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1073741824 }\n",
+            "    %lt : i1 = arith.cmp ( %tid, %n ) { pred = s:\"lt\" }\n",
+            "    %k64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }\n",
+            "    %k16 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:16 }\n",
+        ));
+        for j in 1..=2 {
+            body += &format!("    %kj{j} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{j} }}\n");
+            body += &format!("    %p{j} : i32 = arith.add ( %n, %kj{j} )\n    %q{j} : i32 = arith.mul ( %p{j}, %k64 )\n");
+            body += &format!("    %w{j} : i32 = arith.add ( %q{j}, %tid )\n");
+            body += &format!("    %o{j} : i32 = arith.mul ( %w{j}, %k16 )\n    %g{j} : i32 = arith.select ( %lt, %o{j}, %k30 )\n");
+            body += &format!("    %v{j} : vec<i32x4> = tile.buffer_load_cp ( %rs, %g{j}, %c0 ) {{ aux = i:0, dwords = i:4 }}\n");
+            body += &format!("    %e{j} : i32 = vector.extract ( %v{j} ) {{ index = i:1 }}\n");
+        }
+        body += "    %r : i32 = arith.add ( %e1, %e2 )\n";
+        let text = kernel("    %n : i32\n", &body);
+        let lev = rir::with_levers(&["addrfold"], || listing(&text));
+        let lits = |l: &str, k: &str| l.lines().filter(|x| x.trim_start().starts_with("v_add") && x.contains(k)).count();
+        // the two constants 1024 and 2048 are added to one shared base
+        assert_eq!((lits(&lev, "0x400"), lits(&lev, "0x800")), (1, 1), "{lev}");
+        assert_ne!(listing(&text), lev);
+        scopes_match_kernel_levers(&text, &["addrfold"]);
+    }
+
+    #[test]
+    fn dppcombinei_and_minmax3_fold_integer_max_chains() {
+        let body = concat!(
+            "    %a : i32 = arith.add ( %tid, %c8 )\n",
+            "    %b : i32 = arith.mul ( %tid, %c8 )\n",
+            "    %c : i32 = arith.sub ( %b, %a )\n",
+            "    %m1 : i32 = arith.smax ( %a, %b )\n",
+            "    %m2 : i32 = arith.smax ( %m1, %c )\n",
+            "    %x : i32 = tile.dpp_xor ( %m2 ) { xor_mask = i:1 }\n",
+            "    %r : i32 = arith.smax ( %m2, %x )\n",
+        );
+        let text = kernel("", body);
+        let base = rir::with_levers(&["dppcombine"], || listing(&text));
+        let lev = rir::with_levers(&["dppcombine", "dppcombinei", "minmax3"], || listing(&text));
+        // (the listing names the DPP form by its op and the DPP word: `v_max_i32 ... imm:`)
+        let dpp_max = |l: &str| l.lines().any(|x| x.trim_start().starts_with("v_max_i32") && x.contains("imm:"));
+        assert!(!dpp_max(&base) && !has(&base, "v_max3_i32"), "{base}");
+        assert!(dpp_max(&lev) && has(&lev, "v_max3_i32"), "{lev}");
+        scopes_match_kernel_levers(&text, &["dppcombine", "dppcombinei", "minmax3"]);
+    }
+
+    #[test]
+    fn ldspairsfar_rebases_far_dword_pairs() {
+        let mut body = String::from("    %lds : smem<f32, [16384]> = tile.smem_alloc (  )\n");
+        for (j, k) in [11588, 11604].iter().enumerate() {
+            body += &format!("    %k{j} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{k} }}\n    %i{j} : i32 = arith.add ( %tid, %k{j} )\n");
+            body += &format!("    %y{j} : vec<f32x1> = tile.smem_load_vN_f32 ( %lds, %i{j} ) {{ elem_type = s:\"f32\", rank = i:1, vec = i:1 }}\n");
+            body += &format!("    %e{j} : f32 = vector.extract ( %y{j} ) {{ index = i:0 }}\n");
+        }
+        body += "    %s : f32 = arith.fadd ( %e0, %e1 )\n    %r : i32 = arith.bitcast ( %s )\n";
+        let text = kernel("", &body);
+        let (plain, lev) = (listing(&text), rir::with_levers(&["ldspairs", "ldspairsfar"], || listing(&text)));
+        assert!(!has(&plain, "ds_read2_b32"), "{plain}");
+        assert!(has(&lev, "ds_read2_b32") && !has(&lev, "ds_read_b32"), "{lev}");
+        scopes_match_kernel_levers(&text, &["ldspairsfar"]);
+    }
+
+    #[test]
+    fn u16zext_reads_the_zero_extended_load_as_is() {
+        let body = concat!(
+            "    %hf : f16 = tile.buffer_load_f16 ( %rs, %off, %c0 )\n",
+            "    %h : i16 = arith.bitcast ( %hf )\n",
+            "    %r : i32 = arith.zext ( %h )\n",
+        );
+        let text = kernel("", body);
+        let and16 = |l: &str| l.lines().any(|x| x.trim_start().starts_with("v_and_b32") && x.contains("0xffff"));
+        let (plain, lev) = (listing(&text), rir::with_levers(&["u16zext"], || listing(&text)));
+        assert!(and16(&plain) && has(&plain, "buffer_load_ushort"), "{plain}");
+        assert!(!and16(&lev) && has(&lev, "buffer_load_ushort"), "{lev}");
+        scopes_match_kernel_levers(&text, &["u16zext"]);
+    }
+
+    #[test]
+    fn i16vec_extracts_an_i16_lane() {
+        let body = concat!(
+            "    %lds : smem<i8, [4096]> = tile.smem_alloc (  )\n",
+            "    %b : vec<i8x2> = tile.smem_load_vN ( %lds, %off ) { elem_type = s:\"i8\", rank = i:1, vec = i:2 }\n",
+            "    %w : vec<i16x1> = vector.bitcast ( %b )\n",
+            "    %h : i16 = vector.extract ( %w ) { index = i:0 }\n",
+            "    %r : i32 = arith.zext ( %h )\n",
+        );
+        let text = kernel("", body);
+        let refused = rir::compile_any_target(&text, Target::Gfx950).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(refused.contains("i16 vectors"), "{refused}");
+        let lev = rir::with_levers(&["i16vec"], || listing(&text));
+        assert!(has(&lev, "ds_read_u16"), "{lev}");
+    }
+
+    #[test]
+    fn masksall_evaluates_a_uniform_compare_once_outside_loops() {
+        let mut body = String::from("    %lt : i1 = arith.cmp ( %n, %c8 ) { pred = s:\"lt\" }\n    %acc0 : i32 = arith.add ( %tid, %c0 )\n");
+        for j in 0..4 {
+            body += &format!("    %kk{j} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{} }}\n", j + 3);
+            body += &format!("    %t{j} : i32 = arith.add ( %tid, %kk{j} )\n    %s{j} : i32 = arith.select ( %lt, %t{j}, %tid )\n");
+            body += &format!("    %acc{} : i32 = arith.mul ( %acc{j}, %s{j} )\n", j + 1);
+        }
+        body += "    %r : i32 = arith.add ( %acc4, %c0 )\n";
+        let text = kernel("    %n : i32\n", &body);
+        let cmps = |l: &str| l.lines().filter(|x| x.trim_start().starts_with("s_cmp")).count();
+        let (plain, lev) = (listing(&text), rir::with_levers(&["masksall"], || listing(&text)));
+        assert!(cmps(&lev) < cmps(&plain), "{plain}\n{lev}");
+    }
+
+    #[test]
+    fn ldsduos_reads_an_aligned_dword_pair_as_b64() {
+        // value / index pairs at 8 tid + 20736 and + 20740 bytes of an i32 allocation
+        let body = concat!(
+            "    %lds : smem<i32, [8192]> = tile.smem_alloc (  )\n",
+            "    %k2 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:2 }\n",
+            "    %b : i32 = arith.mul ( %tid, %k2 )\n",
+            "    %ka : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:5184 }\n",
+            "    %kb : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:5185 }\n",
+            "    %ia : i32 = arith.add ( %b, %ka )\n",
+            "    %ib : i32 = arith.add ( %b, %kb )\n",
+            "    %ya : vec<i32x1> = tile.smem_load_vN ( %lds, %ia ) { elem_type = s:\"i32\", rank = i:1, vec = i:1 }\n",
+            "    %yb : vec<i32x1> = tile.smem_load_vN ( %lds, %ib ) { elem_type = s:\"i32\", rank = i:1, vec = i:1 }\n",
+            "    %ea : i32 = vector.extract ( %ya ) { index = i:0 }\n",
+            "    %eb : i32 = vector.extract ( %yb ) { index = i:0 }\n",
+            "    %r : i32 = arith.add ( %ea, %eb )\n",
+        );
+        let text = kernel("", body);
+        let (plain, lev) = (listing(&text), rir::with_levers(&["ldsduos"], || listing(&text)));
+        assert!(!has(&plain, "ds_read_b64") && has(&plain, "ds_read_b32"), "{plain}");
+        assert!(has(&lev, "ds_read_b64") && !has(&lev, "ds_read_b32"), "{lev}");
+        scopes_match_kernel_levers(&text, &["ldsduos"]);
+    }
+
+    #[test]
+    fn packfar_pairs_independent_lanes_that_are_not_adjacent() {
+        // two lanes x_j = w_j * r, y_j = x_j * a_j, each lane's multiplies separated by the other's work
+        let body = concat!(
+            "    %w0 : f32 = arith.bitcast ( %tid )\n",
+            "    %t1 : i32 = arith.add ( %tid, %c8 )\n",
+            "    %w1 : f32 = arith.bitcast ( %t1 )\n",
+            "    %rr : f32 = arith.bitcast ( %n )\n",
+            "    %x0 : f32 = arith.fmul ( %w0, %rr )\n",
+            "    %y0 : f32 = arith.fmul ( %x0, %w0 )\n",
+            "    %x1 : f32 = arith.fmul ( %w1, %rr )\n",
+            "    %y1 : f32 = arith.fmul ( %x1, %w1 )\n",
+            "    %s : f32 = arith.fadd ( %y0, %y1 )\n",
+            "    %r : i32 = arith.bitcast ( %s )\n",
+        );
+        let text = kernel("    %n : i32\n", body);
+        let pk = |l: &str| l.lines().filter(|x| x.trim_start().starts_with("v_pk_mul_f32")).count();
+        let (plain, lev) = (listing(&text), rir::with_levers(&["packfar"], || listing(&text)));
+        assert!(pk(&lev) > pk(&plain), "{plain}\n{lev}");
+        scopes_match_kernel_levers(&text, &["packfar"]);
+    }
+
+    #[test]
+    fn smemfree_issues_independent_scalar_loads_together() {
+        // two constant-table loads (s_load_dwordx4), the second written after a long chain on the first's value:
+        // a scalar load as a scheduling fence keeps it behind the chain (a round trip each, the fw Q2 prologue);
+        // with the lever only its operands order it, so it issues before the first lgkmcnt wait
+        let mut body = String::from(
+            "    %wn : i64 = arith.zext ( %n )\n    %pn : ptr<i32,constant> = tile.int_to_ptr ( %wn )\n    \
+             %c4 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:4 }\n    \
+             %vn : vec<i32x4> = memref.global_load_vN ( %pn, %c4 ) { align = i:4, elem_type = s:\"i32\", vec = i:4 }\n    \
+             %a : i32 = vector.extract ( %vn ) { index = i:3 }\n",
+        );
+        let mut acc = "%a".to_string();
+        for i in 0..12 {
+            body += &format!("    %h{i} : i32 = arith.mul ( {acc}, %tid )\n    %g{i} : i32 = arith.xor ( %h{i}, %a )\n");
+            acc = format!("%g{i}");
+        }
+        body += "    %wm : i64 = arith.zext ( %m )\n    %pm : ptr<i32,constant> = tile.int_to_ptr ( %wm )\n    \
+                 %vm : vec<i32x4> = memref.global_load_vN ( %pm, %c4 ) { align = i:4, elem_type = s:\"i32\", vec = i:4 }\n    \
+                 %b : i32 = vector.extract ( %vm ) { index = i:1 }\n";
+        body += &format!("    %r : i32 = arith.add ( {acc}, %b )\n");
+        let text = kernel("    %n : i32\n    %m : i32\n", &body);
+        // the second table load ahead of the first wait after the first table load (the kernarg load, also an
+        // s_load_dwordx4, and its wait come before both)
+        let early = |l: &str| {
+            let ops: Vec<&str> = l.lines().map(str::trim_start).collect();
+            let loads: Vec<usize> = ops.iter().enumerate().filter(|(_, x)| x.starts_with("s_load_dwordx4")).map(|(i, _)| i).collect();
+            assert_eq!(loads.len(), 3, "the kernarg load, two table loads: {l}");
+            let wait = ops.iter().enumerate().skip(loads[1]).find(|(_, x)| x.starts_with("s_waitcnt")).map(|(i, _)| i);
+            wait.map_or(true, |w| loads[2] < w)
+        };
+        let (plain, lev) = (listing(&text), rir::with_levers(&["smemfree"], || listing(&text)));
+        assert!(!early(&plain), "without the lever the scalar load is a fence: {plain}");
+        assert!(early(&lev), "{lev}");
+        scopes_match_kernel_levers(&text, &["smemfree"]);
+    }
 }

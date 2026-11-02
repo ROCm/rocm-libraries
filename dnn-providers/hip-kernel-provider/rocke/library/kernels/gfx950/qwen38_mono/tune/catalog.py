@@ -50,6 +50,7 @@ __all__ = [
     "framework",
     "framework_knobs",
     "fused_moe",
+    "moe_lb2",
     "moe_port",
     "mx_gemv",
     "sched",
@@ -290,6 +291,124 @@ def moe_port(rows: int) -> DataclassKnobs:
             "m5_base": "placement: covered by the schedule's place.* lever",
             "m4_j": "derived by the balanced map",
             "m3_rows": "derived from rows",
+        },
+    )
+
+
+# ------------------------------------------------------- large-batch MoE (lb2)
+#: the WP-L2d base B5 (P-L4b.md section 0): rr deal, FlyTape-form down, last-round pieces on down-chunk boundaries,
+#: XCD blocks, the per-token flow combine, the dsq down-scale layout
+LB2_BASE = dict(deal="rr", dt=4, doff="imm", pstg=4, pc=0, xb=True, depth=6, pcal=True, cmb="flow", dsq=True)
+#: the Rust direct compiler's lever names a build may set (kernel attr or a stage scope); "" = none
+LB2_DIRECT_LEVERS = ("", "storewait", "loadfirst", "loadorder", "vmemfirst", "dppcombine", "ldspairs", "litshare",
+                     "minmax", "bitop3", "nofence", "nopause", "dppmirror", "ldsquads")
+
+
+def _lb2_legal(built, config) -> tuple[bool, str]:
+    try:
+        built.check()
+    except ValueError as exc:
+        return False, str(exc)
+    return True, ""
+
+
+def moe_lb2(tp: int = 1, act: str = "fp8", bucket: int = 16, base: Mapping | None = None) -> DataclassKnobs:
+    """``Moe2Knobs`` of the large-batch MoE rebuild (``large_batch/moe_lb2.py``) at one cell, over the base B5
+    (``base`` overrides it). Every built value is listed, the losing ones included (P-L4b.md section 2). A base with
+    ``entry=router`` (the whole MoE: router GEMM + top-k in the kernel) adds the router's knobs."""
+    from ..large_batch import moe_lb2 as M2
+
+    b = dict(LB2_BASE if base is None else base)
+    knobs = [
+        _cat("pipe", ("stream", "w2"), structural=True),
+        _cat("w2d", (3, 2, 4, 6), gate="pipe"),
+        _cat("w2t", (4, 2, 5), gate="pipe"),
+        _cat("deal", ("rr", "dyn", "line", "hy"), structural=True),
+        _cat("pc", (0, 1, 2, 3, 4)),
+        _boolon("pcal"),
+        _cat("uord", ("id", "heavy", "hid", "rev", "hchk")),
+        _boolon("xb"),
+        _bool("xh"),
+        _ord("depth", (2, 4, 6, 8, 10)),
+        _ord("ddepth", (4, 8, 12, 16)),
+        _ord("lpf", (1, 2, 3)),
+        _cat("ab", (2, 1, 4)),
+        _cat("lka", ("tail", "early")),
+        _cat("prio", ("none", "dn", "all", "alt")),
+        _bool("tlbp"),
+        _bool("xv"),
+        _cat("xsync", ("bar", "cnt")),
+        _cat("gu", ("atom", "wt"), structural=True),
+        _cat("wdep", (2, 1, 3, 4), gate="gu"),
+        _cat("wg", (0, 1, 2, 3, 4, 5), gate="gu"),
+        _cat("word", ("chunk", "grp"), gate="gu"),
+        _boolon("wpin", gate="gu"),
+        _boolon("pal", gate="gu"),
+        _cat("wk", (0, 1, 2), gate="gu"),
+        _cat("dt", (4, 1, 2, 5)),
+        _cat("doff", ("imm", "mul")),
+        _cat("pstg", (4, 0, 2)),
+        _cat("dsk", (0, 2, 4, 5)),
+        _boolon("dsq"),
+        _bool("sdl"),
+        _bool("shd"),
+        _cat("shs", (0, 4, 8)),
+        _bool("cspread"),
+        _cat("cmb", ("flow", "gbar"), structural=True),
+        _cat("gpc", ("sc0sc1", "sc1")),
+        _cat("gpause", ("s_sleep1", "s_nop", "none", "s_sleep4", "s_sleep16", "s_sleep32", "s_sleep64", "s_sleep127")),
+        _cat("pst", ("sc1", "nt", "def")),
+        _cat("pdt", ("f32", "bf16"), numerics=TOLERANCE),
+        _cat("pfh", (0, 1, 2)),
+        _bool("ehead"),
+        _bool("cspec"),
+        _cat("wcp", ("nt", "default")),
+        _cat("xst", ("dma", "vgpr")),
+        _boolon("lds1"),
+        _bool("lrs"),
+        _cat("tpp", (1, 2)),
+        _cat("cob", ("", "direct"), structural=True),
+        _cat("dlev", LB2_DIRECT_LEVERS, gate="cob"),
+        _cat("dls", LB2_DIRECT_LEVERS, gate="cob"),
+        _cat("dlx", LB2_DIRECT_LEVERS, gate="cob"),
+        _cat("dlc", LB2_DIRECT_LEVERS, gate="cob"),
+    ]
+    if b.get("entry", "route") == "router":
+        knobs += [_cat("rmode", ("ks", "cta")), _cat("rks", (4, 1, 2, 8)), _cat("rsync", ("tag", "cnt", "local"))]
+    built = M2.Moe2Knobs(tp=tp, act=act, bucket=bucket, **b)
+    out = []
+    for kb in knobs:  # a base off B5 (a later climb's start): its value becomes level 0 of every non-ordinal knob
+        bv = getattr(built, kb.path)
+        if kb.kind != ORDINAL and kb.values[0] != bv:
+            vals = (bv,) + tuple(v for v in kb.values if v != bv)
+            kb = dataclasses.replace(kb, values=vals, kind=CATEGORICAL)
+        out.append(kb)
+    knobs = out
+    return DataclassKnobs(
+        "moe_lb2",
+        built,
+        knobs,
+        variant=f"tp{tp}_{act}_b{bucket}",
+        rules=(_lb2_legal,),
+        excluded={
+            "tp": "problem (the rank's intermediate size)",
+            "act": "problem (W4A8 / W4A4 regime)",
+            "bucket": "problem (rows bucket)",
+            "entry": "input contract (route pairs vs in-kernel top-k from logits): a separate track",
+            "null": "measurement only (zero-byte weight loads)",
+            "diag": "measurement only (wrong numerics)",
+            "stamp": "measurement only",
+            "hinit": "numerics twin",
+            "hdump": "numerics twin",
+            "pretouch": "stale-read twin",
+            "mutant": "test only (must-fail mutants)",
+            "tag": "recompiled-control tag",
+            "hdbg": "debug bits",
+            "hz": "off is a known hazard (wrong ranks on MI350X): not a lever",
+            "sskip": "refused by check() (numerics failure, lb2-n49)",
+            "wl": "deal=line weighting (the line loses 1.03-1.48 on every base since B1)",
+            "snap": "deal=line weighting",
+            "ov": "deal=line weighting",
         },
     )
 
@@ -592,6 +711,7 @@ def all_adapters_cpu() -> list[KnobAdapter]:
         sched("delta", "r1"),
         sched("qsa", "r4s"),
         direct(),
+        moe_lb2(1, "fp8", 16),
     ]
     try:
         out.append(fused_moe(1))

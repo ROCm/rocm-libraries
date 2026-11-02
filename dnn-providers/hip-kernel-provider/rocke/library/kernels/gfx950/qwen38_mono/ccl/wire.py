@@ -60,7 +60,8 @@ __all__ = [
 
 ST_OK, ST_TIMEOUT, ST_ABORT, ST_AHEAD = 0, 1, 2, 3
 CHECK_EVERY = 16  # missed rounds between deadline / abort checks (power of two)
-_PAUSE = {"s_nop": "s_nop 0", "s_sleep1": "s_sleep 1", "none": "", "s_sleep4": "s_sleep 4", "s_sleep16": "s_sleep 16"}
+_PAUSE = {"s_nop": "s_nop 0", "s_sleep1": "s_sleep 1", "none": "", "s_sleep4": "s_sleep 4", "s_sleep16": "s_sleep 16",
+          "s_sleep32": "s_sleep 32", "s_sleep64": "s_sleep 64", "s_sleep127": "s_sleep 127"}
 V4 = VectorType(I32, 4)
 
 

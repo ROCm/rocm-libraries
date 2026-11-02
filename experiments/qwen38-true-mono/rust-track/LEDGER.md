@@ -252,3 +252,85 @@ B3 set, DM = direct with the MoE r1 set.
 Plain direct loses (2-10%); the B3 set turns it into a two-node win on d8w0 and a neutral on d4w8l2, where the
 lifted IR itself costs COMGR 2-4% (I) so DB is 3.5-4% faster than COMGR on the same IR.
 
+## Never-regress track (PLAN decision 18, 2026-11-02; W-RNR)
+
+User: "rust should only improve, not deprove anything". (a) A serving guard: direct only where a same-job paired A/B on
+both rocke nodes shows direct <= COMGR; (b) every case where direct is slower is a compiler defect, fixed in the crate.
+Ratios only (direct / COMGR of the same KernelDef, one process, shuffled interleaved rounds, the harnesses' DESIGN 9.1
+verdicts; < 1 is faster). Absolutes and job index: `hackathon-prep/private-perf/qwen38-true-mono/rust-track/rnr/`.
+Harness: `hackathon-prep/qwen38/truemono/RNR/`. No git state was changed. **Base of every verdict below: the
+copy-rocm-lib crate `rnr-v8` (the WP-R3 crate + the levers of this section; the HC confirmation ran on `rnr-v7`,
+whose objects for those sets are the same), backend defaults `acqfence` + `bufoffany`.**
+
+### Serving guard (part a)
+
+- `qwen38_mono/persist/rust_guard.py` (new) + the DB `persist/rust_backend_db.json` (TuningDB format, family
+  `qwen38_mono.codeobj`, one record per key and node: ratio, verdict, the timed lever set, base, job). `select(key)` is
+  direct only when both nodes' records are `WIN`, or `TIE` with ratio <= 1, for one lever set; anything missing,
+  losing, a tie above 1 or `HOLD` (measured, not booked) is COMGR. `guard_kernel(kernel, key)` sets the backend mark
+  (an explicit COMGR mark for the losers, so `ROCKE_CODEOBJ_BACKEND=direct` no longer moves them) and the booked
+  `direct_levers`.
+- Hooks (new code paths, the old behaviour unchanged): `persist.knobs.rust_family(kernel, family, key=...)` (the DB
+  decides) and `rust_scope_backend(..., guard_keys=...)`; `ROCKE_DIRECT_GUARD=1` (default off) also gates the D0.6
+  family defaults (`b3`, `moe_r1`) and framework `auto` by every recorded key of the family.
+- Gates: `library/tests/test_qwen38_rust_guard.py` (14 tests: regressing families fall back to COMGR, the rule's
+  must-fail cases, IR / LLVM text unchanged, COMGR objects byte-identical with the guard (compiled), the env switch
+  ignored for guarded COMGR kernels); `RNR/guard_mutants.py`: 10 / 10 must-fail mutants of the rule and hooks killed;
+  `test_qwen38_wpr3.py` unchanged and passing (D0.6 behaviour with the guard off).
+
+### Compiler levers added (part b; all default-off, `ROCKE_DIRECT_LEVERS` / `dlevers` scopes)
+
+| lever | what LLVM does better (found in the ISA diff) | code |
+|---|---|---|
+| `dsfold` | constants nested in `(x + c) * m` / shifts / subs of an LDS index go to the DS offset field; the remainder is one value (CSE) | `rir/opt.rs` `split_deep` |
+| `addrfold` | a buffer voffset (also under its `select(c, x, 2^30)` guard, `_cp` forms too) rebuilt as one shared base + a constant per access (was 3 SALU + a fused add-shift per load) | `rir/opt.rs` `fold_voffset` |
+| `dppcombinei` | i32 max / min and u32 min fold their DPP move (`v_max_i32_dpp`; new ISA rows) | `target/gfx9/dpp.rs` |
+| `minmax3` | `max(max(a,b),c)` -> `v_max3_i32/u32`, min3, clamps -> `v_med3_i32/u32` (new rows) | `target/gfx9/minmax3.rs` (new) |
+| `ldspairsfar` | dword LDS reads past `ds_read2`'s 8-bit offsets pair through one rebased address per 1 KiB window | `target/gfx9/lds_pairs.rs` `merge_far` |
+| `ldsduos` | two 8-byte-aligned dword LDS reads -> `ds_read_b64` | `rir/isel.rs` `find_dword_duos` |
+| `packfar` | packed f32 (`v_pk_mul/add/fma_f32`) for lanes that are not adjacent (SLP), up to 24 apart | `target/gfx9/pack.rs` `pair_far` |
+| `fmac` | `v_fma_f32 d,a,b,d` -> VOP2 `v_fmac_f32` (code size) | `target/gfx9/mod.rs` `shrink_fmac` |
+| `masksall` | a uniform compare's lane mask evaluated once in straight-line blocks and MFMA kernels too | `target/gfx9/masks.rs` |
+| `u16zext` | the zero extension of a `buffer_load_ushort` / `ds_read_u16` result is the register itself (no `v_and`, which drained `vmcnt(0)` in the LB stream) | `rir/isel.rs` |
+| `i16vec` | element extract / insert of an i16 vector (the LB x-scale reads) | `rir/isel.rs` |
+| `ldsalias` | LDS accesses of different allocations do not order each other in the list scheduler | `rir/post.rs` |
+| `vmlat60` / `vmlat100` | VMEM load latency 60 / 100 slots in the scheduler (model 180) | `rir/post.rs` |
+| (coverage, default) | `v_cvt_scalef32_pk_fp4_f32` row: the LB fp4 requant's inline asm assembles (was a refusal) | `isa/gfx950.isa` |
+
+Gates (CPU job `rnr-cpu-v8`, 68246983): 0 warnings; `cargo test` lib / all / 1 thread 495 each (14 new: 10 lever tests in
+`target/gfx9/q38.rs`, 3 in `minmax3.rs`, 1 in `lds_pairs.rs`); `isa_tables check` both ISAs; census vs the frozen pre-RNR crate:
+**no levers 2,017 + 18 objects byte-identical, the booked B3 and MoE r1 sets byte-identical** (2,017 each), each new lever's
+changed objects listed (fmac 751, addrfold 378, packfar 620, vmlat60 652, ...; 0 status changes, 0 refusal changes);
+lever-scope gate for the old 23 and the 14 new levers: scoped on == env, env scoped off == plain (2,029 each); the 9 new ISA
+rows cross-checked against llvm-mc: 276 match, 0 mismatch. Every timed lever object below is bitwise equal to COMGR
+in its harness (rt_hc vs COMGR and FlyDSL, rt_fmoe, rt_head, pl4b_bench numerics + mutants).
+
+### Root causes, fixes, before / after (n01-09 / n07-17)
+
+| regression | root cause (direct vs COMGR ISA, same IR) | fix | before | after (booked) |
+|---|---|---|---|---|
+| HC A1/A2/M1/M2 (24 framework kernels) | +7-10 % VALU / +40 % SALU: LDS index constants not in DS offsets (130 `v_add_lshl` + 77 `v_add`), per-load scalar voffset chains, amax `v_max_i32` chains (no dpp / max3), far scale reads unpaired, unpacked f32 lanes; `loadfirst` helps some widths and hurts others | `dsfold`, `addrfold`, `dppcombinei`, `minmax3`, `ldspairsfar` (+ per width `loadfirst` on/off, `fmac`, `vmlat60`, `masksall`, `packfar`) | D 1.03-1.12, B3+loadfirst 1.00-1.03 | **19 of 24 direct**: 0.972-0.998 on both nodes (screen rr-hc5 and confirmation rr-hc6, 32 rounds, all <= 1); 5 stay COMGR (below) |
+| fused MoE rows 4 | `nofence` (in the r1 set) lets the scheduler pull stores and phase code apart; the RNR levers remove VALU / SALU | the MoE r1 set without `nofence` + RNR levers (`M1Nx`) | M1 1.002-1.005 / 1.002-1.009 | **0.993 TIE / 0.996 WIN** (rr-fl4, 32 rounds) |
+| large-batch MoE (`moe_lb2`) | `nofence` hoisted each MFMA result's LDS staging store right behind its MFMA: 263 sites of `s_nop 7; s_nop 3` (12 wait states); `buffer_load_ushort` + `v_and 0xffff` forced `vmcnt(0)` in the stream; MFMA scales copied per MFMA (old lever `scalesep` was not in the tried scopes); fp4 refused (asm) | `M1Nx` (no `nofence`, `scalesep`, `u16zext`, RNR levers); fp4 row | dD 1.014-1.075, dlev sets 1.01-1.07 | **parity: 0.994-1.011 / 0.996-1.010**, fp4 compiles and is bitwise; COMGR kept (coordinator: both-node WINs first) |
+| head `mx_decode_gemv` | main loop matches COMGR with `loadfirst` (WP-R3); the epilogue (argmax fold) carries +68 instructions: unvectorized LDS (b32 vs b64), SGPR copies, constant VGPRs | `ldsduos`, `litreuse` (fused r4: instruction count to COMGR's + 5) | 1.002-1.005, fused r16 1.009-1.011 | 1.002-1.004 (fused r4, logits r16), fused r16 1.008-1.010, logits r4 0.998-1.000: **COMGR kept** |
+| toy d4w8l2 | (not re-measured) | - | B3 set 0.988 / 0.994 TIE | the guard books it (TIE <= 1 on both nodes, WP-R3 record) |
+| fw Q2 (not on the list; 4-11 %) | no RNR lever changes its object (aliases); the polls (one dwordx4 tagged poll with a per-lane exit) and framework SALU differ | open | 1.045 / 1.114 (r1 / r4s, n07) | COMGR |
+
+HC kernels still COMGR: `delta mlp r4s` (ZLP 0.992 / 0.995, chosen in its own confirmation run: HOLD until a fresh
+confirmation), `qsa mlp r2s` (screen and confirmation disagree: 0.979 / 0.976 then 1.006 / 0.995), `qsa mlp r4s` (screen
+1.008 on n01), `delta_ple attn r4s` (no set <= 1: best 1.003 / 1.003), `delta_ple mlp r4s` (screen 1.015 / 1.011, confirmation
+0.998 / 1.000: noisy). The booked lever set per HC kernel is in the DB (`rust_guard table`).
+
+### Base-tagged lever verdicts (decision 15: every reject stays in the pools)
+
+- `nofence`: WIN on fused MoE r4 at base plain (rt-s1, -1.6 %); **LOSS at base M1N** (fused r4 0.9959 without vs 0.9995 with,
+  n07) and on `moe_lb2` (dNx vs dN: 1.000-1.011 vs 1.006-1.075); neutral on HC at base N6f (+0.1-0.2 %).
+- `masksall` alone: LOSS on HC attn at base B3L (+0.6-1.0 %); TIE / small WIN at base N6f (qsa attn r4s 0.9955 on n01);
+  in `moe_lb2` it frees SALU but adds SGPR spills (v_readlane +481): LOSS at base dNx (1.007-1.024).
+- `ldspairsfar` alone: LOSS at base B3L (1.019); part of every winning HC set (removing it at base N6f costs 0.4-0.5 %).
+- `loadfirst`: per width: removing it wins on attn r1 / qsa (0.9907-0.9935), loses on mlp r3s (1.0018).
+- `fmac`: neutral at base B3L; in the HC `ZLv` / `N6` sets.
+- `vmlat60` / `vmlat100`, `ldsalias`: no change on HC (aliases) and `moe_lb2`; small WIN with `ZLv` on HC attn.
+- `scalesep` (old lever): the main gain on `moe_lb2` (dS 1.007-1.026 from dD 1.014-1.075).
+- Head: `F2` (ldspairs, ldsquads, dpp, fmac, minmax3, dsfold, addrfold) LOSS at base F (+0.1-0.2 %); `ldsduos` neutral; `ldsduos`
+  + `litreuse` neutral (-0.04 %).

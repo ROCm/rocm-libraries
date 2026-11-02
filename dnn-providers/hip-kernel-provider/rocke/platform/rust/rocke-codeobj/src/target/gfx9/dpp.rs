@@ -61,7 +61,7 @@ pub fn combine(f: &mut MFunc) -> usize {
                 continue;
             };
             let add = &insts[k];
-            let Some(fused_op) = dpp_form(add.op, f.lever(add, "dppcombinef")) else {
+            let Some(fused_op) = dpp_form(add.op, f.lever(add, "dppcombinef"), f.lever(add, "dppcombinei")) else {
                 i += 1;
                 continue;
             };
@@ -92,10 +92,17 @@ pub fn combine(f: &mut MFunc) -> usize {
 /// `dppcombinef` (the rust track) also the commutative f32 add, multiply and
 /// max and the u32 max, as `GCNDPPCombine` folds them (the B3 and MoE wave
 /// sums and scans).
-fn dpp_form(op: Opc, floats: bool) -> Option<Opc> {
+///
+/// Lever `dppcombinei` (PLAN decision 18): the i32 max and min and the u32 min
+/// too (the HC stages' amax scans, as LLVM's `v_max_i32_dpp`).
+fn dpp_form(op: Opc, floats: bool, ints: bool) -> Option<Opc> {
     let g = |x: Gfx9Op| Some(Opc::Gfx9(x));
     match op {
         Opc::VAddNcU32 => g(Gfx9Op::VAddU32Dpp),
+        Opc::VMaxI32 if ints => g(Gfx9Op::VMaxI32Dpp),
+        Opc::VMinI32 if ints => g(Gfx9Op::VMinI32Dpp),
+        Opc::VMinU32 if ints => g(Gfx9Op::VMinU32Dpp),
+        Opc::VMaxU32 if ints => g(Gfx9Op::VMaxU32Dpp),
         _ if !floats => None,
         Opc::VAddF32 => g(Gfx9Op::VAddF32Dpp),
         Opc::VMulF32 => g(Gfx9Op::VMulF32Dpp),
