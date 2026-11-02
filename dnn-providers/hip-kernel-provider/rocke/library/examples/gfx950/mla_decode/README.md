@@ -117,7 +117,7 @@ chose a different split count on each device.
 
 ## Static resources
 
-Compiled through comgr from the llvm22 IR, with the LLVM 24 compiler the CI test lane installs, and read from the code object. Zero scratch, and at most 256 VGPRs and 32 KiB of LDS: two four-wave workgroups per CU. `TestResources` in [`tests/test_mla_decode.py`](../../../tests/test_mla_decode.py) checks this in CI. The latent kernels sit at the 256-VGPR cap, so these counts move with the compiler; that is why the gfx942 score read-ahead is held short.
+Compiled through comgr from the llvm24 IR, with the LLVM 24 compiler the CI test lane installs, and read from the code object. Zero scratch, and at most 256 VGPRs and 32 KiB of LDS: two four-wave workgroups per CU. `TestResources` in [`tests/test_mla_decode.py`](../../../tests/test_mla_decode.py) checks this in CI. The latent kernels sit at the 256-VGPR cap, so these counts move with the compiler; that is why the gfx942 score read-ahead is held short.
 
 | kernel | VGPR | SGPR | LDS (B) | scratch (B) |
 |---|---|---|---|---|

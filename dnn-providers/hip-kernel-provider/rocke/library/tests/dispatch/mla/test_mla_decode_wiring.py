@@ -33,10 +33,16 @@ from dispatch.mla.decode import DECODE_MIN_TILES_PER_SEG
 from kernels.mla.mla_decode import MlaDecodeSpec, mla_decode_signature
 from kernels.mla.mla_decode_combine import MlaDecodeCombineSpec
 from kernels.mla.mla_decode_gfx950 import MlaDecodeGfx950Spec
+from rocke.core.lower_llvm import LLVM_FLAVORS
 
 PREFILL = "mla_prefill_fwd_gfx942"
 DECODE = {"gfx942": "mla_decode_gfx942", "gfx950": "mla_decode_gfx950"}
 SPEC_CLS = {"gfx942": MlaDecodeSpec, "gfx950": MlaDecodeGfx950Spec}
+# The lanes decode serves: every one the platform qualifies except llvm20
+# (``test_llvm20_is_refused``). Read from the platform, not from
+# ``DECODE_LLVM_FLAVORS``, so a lane the platform adds is exercised here until
+# someone refuses it on purpose.
+SERVED_LANES = tuple(f for f in LLVM_FLAVORS if f != "llvm20")
 
 
 @pytest.fixture(autouse=True)
@@ -155,7 +161,7 @@ class TestRouting:
             dispatch_mla(_decode(arch=arch))
 
     @pytest.mark.parametrize("arch", sorted(DECODE))
-    @pytest.mark.parametrize("flavor", ["llvm22", "llvm23"])
+    @pytest.mark.parametrize("flavor", SERVED_LANES)
     def test_supported_flavors_are_admitted(self, monkeypatch, arch, flavor):
         monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
         assert dispatch_mla(_decode(arch=arch)).candidate.name == DECODE[arch]

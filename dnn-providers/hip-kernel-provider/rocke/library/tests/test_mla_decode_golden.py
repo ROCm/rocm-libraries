@@ -17,8 +17,8 @@ IR is built by the Python builders only. Its *lowering* is still dual-engine:
 engines and requires identical bytes (skipped where the C++ engine is not
 built).
 
-Goldens are recorded at the flavors decode serves, llvm22 and llvm23; llvm20
-is refused by dispatch (its backend spills the kernel) and has none.
+Goldens are recorded at every flavor decode serves (``DECODE_LLVM_FLAVORS``);
+llvm20 is refused by dispatch (its backend spills the kernel) and has none.
 
 Re-bless, from ``rocke/library``:
 
@@ -35,9 +35,8 @@ from pathlib import Path
 
 _GOLDEN = Path(__file__).resolve().parent / "golden" / "mla_decode_ir_sha256.json"
 # The flavors decode serves (``dispatch.mla.decode.DECODE_LLVM_FLAVORS``):
-# dispatch refuses llvm20, so it has no golden and a llvm20 host skips the
-# drift check.
-_FLAVORS = ("llvm22", "llvm23")
+# dispatch refuses llvm20, so it has no golden.
+_FLAVORS = ("llvm22", "llvm23", "llvm24")
 _ARCHES = ("gfx942", "gfx950")
 _SCHEMA = "mla_decode.ir_golden_sha256/v1"
 
@@ -128,12 +127,6 @@ def _cases():
     return cases
 
 
-def _current_flavor():
-    from rocke.core.lower_llvm import _resolve_llvm_flavor
-
-    return _resolve_llvm_flavor()
-
-
 def _sha_for(arch, build, flavor):
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -190,21 +183,21 @@ def test_mla_decode_golden_records_no_build_errors():
 
 
 def test_mla_decode_ir_matches_golden():
-    import pytest
-
+    """Every served flavor, from any host: lowering takes the flavor as an
+    argument, so the compiler the host resolves to decides neither which golden
+    columns are checked nor whether any is."""
     golden = _golden()
-    flavor = _current_flavor()
-    gflav = golden.get("flavors", {}).get(flavor)
-    if not gflav:
-        pytest.skip(f"no MLA decode golden recorded for llvm flavor {flavor!r}")
     drift = []
-    for cid, (arch, build) in _cases().items():
-        want = gflav["cases"].get(cid, {}).get("sha256")
-        if want is None:
-            continue  # reported once, by the coverage test
-        got, _ = _sha_for(arch, build, flavor)
-        if got != want:
-            drift.append(f"{cid}: {want} -> {got}")
+    for flavor in _FLAVORS:
+        recorded = golden["flavors"].get(flavor, {}).get("cases")
+        assert recorded, f"no MLA decode golden recorded for llvm flavor {flavor!r}"
+        for cid, (arch, build) in _cases().items():
+            want = recorded.get(cid, {}).get("sha256")
+            if want is None:
+                continue  # reported once, by the coverage test
+            got, _ = _sha_for(arch, build, flavor)
+            if got != want:
+                drift.append(f"{flavor}/{cid}: {want} -> {got}")
     assert not drift, "MLA decode IR drift vs golden:\n  " + "\n  ".join(drift)
 
 
@@ -252,6 +245,26 @@ def test_golden_flavors_are_the_served_ones():
 
     assert _FLAVORS == DECODE_LLVM_FLAVORS
     assert tuple(sorted(_golden()["flavors"])) == DECODE_LLVM_FLAVORS
+
+
+def test_every_platform_lane_is_served_or_refused_on_purpose():
+    """Decode serves or refuses every compiler lane the platform knows.
+
+    A lane that is neither would keep this file green while dispatch refuses
+    decode on a host whose compiler resolves to it, and the resource gate and
+    the numeric lane skip there. When the platform adds a lane, either serve it
+    (add it to ``DECODE_LLVM_FLAVORS`` and ``_FLAVORS``, then bless its golden
+    column with ``--write``) or list it below with the reason.
+    """
+    from dispatch.mla.decode import DECODE_LLVM_FLAVORS
+    from rocke.core.lower_llvm import LLVM_FLAVORS
+
+    # llvm20 ignores ``agpr_alloc``, so the kernel spills.
+    refused = ("llvm20",)
+    assert sorted(LLVM_FLAVORS) == sorted((*DECODE_LLVM_FLAVORS, *refused)), (
+        f"platform lanes {LLVM_FLAVORS} != served {DECODE_LLVM_FLAVORS} "
+        f"+ refused {refused}"
+    )
 
 
 def test_dispatch_cases_track_the_shipped_spec():

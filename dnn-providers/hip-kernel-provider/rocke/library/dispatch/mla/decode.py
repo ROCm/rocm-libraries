@@ -88,7 +88,12 @@ DECODE_NUM_HEADS = (64, 128)
 #: LLVM flavors whose backend keeps the decode kernel out of the AGPR file.
 #: llvm20 ignores ``agpr_alloc``: the same IR then spills and runs one
 #: workgroup per CU instead of the two the split-KV count is sized for.
-DECODE_LLVM_FLAVORS = ("llvm22", "llvm23")
+#: llvm24 lowers decode to the same IR as llvm23: the two lanes differ only in
+#: how named barriers are declared and called, and decode uses none. Equal IR
+#: says nothing about the backend; the resource gate in
+#: ``tests/test_mla_decode.py`` checks that with the host's own compiler. The
+#: golden keeps a separate llvm24 column, so a later divergence is caught.
+DECODE_LLVM_FLAVORS = ("llvm22", "llvm23", "llvm24")
 
 #: Floor on key tiles per split-KV segment: untuned, but bounded by traffic.
 #: A 16-key tile is 16 x 576 bf16 = 18 KiB shared by 64 heads, about 288 B

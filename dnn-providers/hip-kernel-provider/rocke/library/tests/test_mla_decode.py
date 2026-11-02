@@ -23,7 +23,7 @@ import sys
 
 import pytest
 
-from dispatch.mla.decode import choose_num_seg
+from dispatch.mla.decode import DECODE_LLVM_FLAVORS, choose_num_seg
 from kernels.mla.mla_decode import (
     MlaDecodeSpec,
     build_mla_decode,
@@ -611,13 +611,13 @@ class TestResourceGateVerdict:
     def test_host_mismatch_always_skips(self, require_tools):
         verdict = _probe_could_not_run(
             _EXIT_HOST_MISMATCH,
-            "decode is served at ('llvm22', 'llvm23') only; host lowers llvm20\n",
+            f"decode is served at {DECODE_LLVM_FLAVORS} only; host lowers llvm20\n",
             "",
             require_tools=require_tools,
         )
         assert verdict == (
             "skip",
-            "decode is served at ('llvm22', 'llvm23') only; host lowers llvm20",
+            f"decode is served at {DECODE_LLVM_FLAVORS} only; host lowers llvm20",
         )
 
     @pytest.mark.parametrize(

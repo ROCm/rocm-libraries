@@ -51,7 +51,7 @@ pytestmark = [
     ),
     pytest.mark.skipif(
         ARCH is not None and not _decode_flavor_ok(),
-        reason="decode dispatch serves llvm22/llvm23 only (llvm20 spills)",
+        reason="decode dispatch refuses the host's LLVM flavor (llvm20 spills)",
     ),
 ]
 

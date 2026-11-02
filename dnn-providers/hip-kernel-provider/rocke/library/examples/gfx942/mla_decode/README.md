@@ -147,9 +147,9 @@ from `mla_decode_launch(dispatch_mla(req))`.
 ## Reproducing
 
 From `rocke/library`, on a gfx942 node, with ROCm 7.2 or later torch: decode
-needs the llvm22 or llvm23 IR flavor (llvm20 is refused), and torch's bundled
-comgr must match the flavor -- a ROCm 7.1 torch loads an llvm20 comgr and the
-compile fails with a flavor mismatch.
+needs the llvm22, llvm23 or llvm24 IR flavor (llvm20 is refused), and torch's
+bundled comgr must match the flavor -- a ROCm 7.1 torch loads an llvm20 comgr
+and the compile fails with a flavor mismatch.
 
 ```bash
 export ROCKE_LLVM_FLAVOR=llvm22
@@ -250,7 +250,7 @@ zeroes those rows before its PV and is gated on poisoned caches throughout.
 
 ## Static resources
 
-Compiled through comgr from the llvm22 IR, with the LLVM 24 compiler the CI test lane installs, and read from the code object. Zero scratch, and at most 256 VGPRs and 32 KiB of LDS: two four-wave workgroups per CU. `TestResources` in [`tests/test_mla_decode.py`](../../../tests/test_mla_decode.py) checks this in CI. The latent kernels sit at the 256-VGPR cap, so these counts move with the compiler; that is why the gfx942 score loop reads four k-steps ahead, half the prefill's eight, with a fence after every k-step (`DECODE_SCORE_PREFETCH`, `DECODE_SCORE_FENCE_EVERY`).
+Compiled through comgr from the llvm24 IR, with the LLVM 24 compiler the CI test lane installs, and read from the code object. Zero scratch, and at most 256 VGPRs and 32 KiB of LDS: two four-wave workgroups per CU. `TestResources` in [`tests/test_mla_decode.py`](../../../tests/test_mla_decode.py) checks this in CI. The latent kernels sit at the 256-VGPR cap, so these counts move with the compiler; that is why the gfx942 score loop reads four k-steps ahead, half the prefill's eight, with a fence after every k-step (`DECODE_SCORE_PREFETCH`, `DECODE_SCORE_FENCE_EVERY`).
 
 | kernel | VGPR | SGPR | LDS (B) | scratch (B) |
 |---|---|---|---|---|
@@ -291,5 +291,5 @@ Compiled through comgr from the llvm22 IR, with the LLVM 24 compiler the CI test
     name with different arguments: `ref_mla_decode_absorb(q_nope, q_rope, c_kv,
     k_rope, w_uk, block_table, cu_seqlens_q, cu_seqlens_k, scale)`, over the
     projected query and the fused per-head `W_UK`.
-- The llvm22 or llvm23 IR flavor: llvm20 ignores the kernel's `agpr_alloc`, the
-  kernel then spills, and dispatch refuses it.
+- The llvm22, llvm23 or llvm24 IR flavor: llvm20 ignores the kernel's
+  `agpr_alloc`, the kernel then spills, and dispatch refuses it.
