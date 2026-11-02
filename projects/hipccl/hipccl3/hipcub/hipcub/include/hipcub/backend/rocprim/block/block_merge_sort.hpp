@@ -98,7 +98,7 @@ void SerialMerge(KeyIt keys_shared,
    KeyT key1 = keys1_count != 0 ? keys_shared[keys1_beg] : oob_default;
    KeyT key2 = keys2_count != 0 ? keys_shared[keys2_beg] : oob_default;
 
-   HIPCUB_SORT_MAYBE_UNROLL()
+   _CCCL_SORT_MAYBE_UNROLL()
    for (int item = 0; item < ITEMS_PER_THREAD; ++item)
    {
        bool p = (keys2_beg < keys2_end) &&
@@ -412,7 +412,7 @@ public:
       //
       KeyT max_key = oob_default;
 
-      HIPCUB_SORT_MAYBE_UNROLL()
+      _CCCL_SORT_MAYBE_UNROLL()
       for (int item = WARP_SORT ? 1 : 0; item < ITEMS_PER_THREAD; ++item)
       {
         if (ITEMS_PER_THREAD * static_cast<int>(linear_tid) + item < valid_items)
