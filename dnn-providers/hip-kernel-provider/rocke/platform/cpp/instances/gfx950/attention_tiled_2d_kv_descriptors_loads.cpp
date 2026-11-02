@@ -22,7 +22,7 @@
  *   rocke_gfx950_attn2d_issue_v_load_runtime  -- _issue_v_load_runtime (1691-1739).
  *   rocke_gfx950_attn2d_issue_k / _issue_v    -- the loader dispatch wrappers
  *     (2184-2227).
- *   rocke_gfx950_attn2d_read_k8_mfma_operand  -- _read_k8_mfma_operand (2229-2248).
+ *   rocke_gfx950_attn2d_read_k8_mfma_operand  -- _read_k8_mfma_operand.
  *
  * The builder-call sequence is byte-identical to the Python body: same ops, same
  * order, same operands. Because C has no closure capture, the per-call byte/
@@ -766,7 +766,7 @@ void rocke_gfx950_attn2d_issue_v(rocke_gfx950_attn2d_build_ctx_t* ctx,
 }
 
 /* ==========================================================================
- * _read_k8_mfma_operand (Python lines 2229-2248).
+ * _read_k8_mfma_operand (Python builder, attention_tiled_2d.py).
  *
  * Read 8 K elements from K_lds as the bf16 MFMA operand. For the fp8-in-LDS path
  * (K_FP8_MFMA == FP8_MFMA_QK) K_lds holds raw fp8 bytes; dequant in register via
@@ -774,6 +774,10 @@ void rocke_gfx950_attn2d_issue_v(rocke_gfx950_attn2d_build_ctx_t* ctx,
  * a compile-time False on gfx950, so its branch is dead; keep it for parity.
  * Otherwise read bf16 directly. The buf_idx / k_row / k_off are passed by the
  * caller's QK loop (the gfx950 internal-header form takes them as SSA values).
+ *
+ * The Python reader's KQ slab-pad remap and KQ XOR-swizzle branches are
+ * Python-only: the C spec has neither knob, and the rocke_engine binding refuses
+ * use_kq_lds_pad / use_kq_xor_swizzle rather than lower them unpadded.
  * ========================================================================== */
 rocke_value_t* rocke_gfx950_attn2d_read_k8_mfma_operand(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                                         rocke_value_t* buf_idx,
@@ -786,15 +790,15 @@ rocke_value_t* rocke_gfx950_attn2d_read_k8_mfma_operand(rocke_gfx950_attn2d_buil
     idx[1] = k_row;
     idx[2] = k_off;
 
-    /* not K_FP8_MFMA: plain bf16 read (Python 2241-2242). */
+    /* not K_FP8_MFMA: plain bf16 read. */
     if(!ctx->FP8_MFMA_QK)
         return rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
 
-    /* FP8_NATIVE_QK is always False on gfx950 (Python 793 / 2243-2246): the
-     * native-fp8 raw read is dead, but emit it to mirror the source structure. */
+    /* FP8_NATIVE_QK is always False on gfx950: the native-fp8 raw read is
+     * dead, but emit it to mirror the source structure. */
     /* (FP8_NATIVE_QK == False -> fall through to the register dequant path.) */
 
-    /* fp8 register dequant: read 8 raw fp8 then cvt + *k_scale + cast (2247-2248). */
+    /* fp8 register dequant: read 8 raw fp8 then cvt + *k_scale + cast. */
     rocke_value_t* k_fp8 = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, rocke_fp8e4m3(), 8);
     return rocke_dequant_fp8x8_to_dtype(b, k_fp8, ctx->k_scale_p, ctx->dtype);
 }

@@ -149,8 +149,8 @@ configuration). Knobs that compile to the default are dropped (default
 values, restated policies, knobs the body does not read, a gfx950 KQ pad the
 kernel lays out as none); illegal ones are refused with the reason
 (`KNOWN_WRONG_KNOBS`, fields on no axis, codepath-fixed knobs,
-kernel-validator rejections, and on gfx950 2D the LDS budget and padded K with
-aliased Q). So one kernel has one id, and a knob pin cannot reach a
+kernel-validator rejections such as a padded K slot holding Q, and on gfx950
+2D the LDS budget). So one kernel has one id, and a knob pin cannot reach a
 configuration a sweep would not.
 
 gfx950 dense is two algorithms, one per kernel body: `attention_dense_grid`
