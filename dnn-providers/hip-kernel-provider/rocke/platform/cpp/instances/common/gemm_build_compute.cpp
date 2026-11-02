@@ -773,11 +773,15 @@ void rocke_gemm_emit_kloop_tdm_early_refill(rocke_gemm_build_ctx_t* ctx)
 
     /* The loop runs an even number of tiles so every parity is static (a
      * runtime-parity tail spills the steady state at the 256-VGPR budget).
-     * With an odd tile count the last tile lies past K: its descriptor's
-     * remaining-K extent is zero, the mover fills it with zeros, and its
-     * WMMAs add nothing. */
-    rocke_value_t* n_tiles
-        = rocke_b_div(b, rocke_b_sub(b, ctx->k_upper, ctx->k_lo), ctx->c_block_k);
+     * The tile count is rounded up first, so a partial last tile (K not a
+     * multiple of block_k) is loaded; the mover clips it to K. With an odd
+     * count the extra tile lies past K: its descriptor's remaining-K extent
+     * is zero, the mover fills it with zeros, and its WMMAs add nothing. */
+    /* One value per statement: C leaves argument evaluation order unspecified,
+     * and the Python engine creates the sub before the constant. */
+    rocke_value_t* k_span = rocke_b_sub(b, ctx->k_upper, ctx->k_lo);
+    rocke_value_t* c_bk_m1 = rocke_b_const_i32(b, ctx->block_k - 1);
+    rocke_value_t* n_tiles = rocke_b_div(b, rocke_b_add(b, k_span, c_bk_m1), ctx->c_block_k);
     rocke_value_t* n_even = rocke_b_add(b, n_tiles, rocke_b_mod(b, n_tiles, c2));
     rocke_value_t* n_pairs = rocke_b_div(b, rocke_b_sub(b, n_even, c2), c2);
     rocke_value_t* k_pairs_end = rocke_b_add(b, ctx->k_lo, rocke_b_mul(b, n_pairs, bk2));

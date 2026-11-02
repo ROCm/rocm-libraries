@@ -2714,10 +2714,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
         # The loop runs an even number of tiles so every parity is static (a
         # runtime-parity tail spills the steady state at the 256-VGPR budget).
-        # With an odd tile count the last tile lies past K: its descriptor's
-        # remaining-K extent is zero, the mover fills it with zeros, and its
-        # WMMAs add nothing.
-        n_tiles = b.div(b.sub(_k_upper, k_lo), c_block_k)
+        # The tile count is rounded up first, so a partial last tile (K not a
+        # multiple of block_k) is loaded; the mover clips it to K. With an odd
+        # count the extra tile lies past K: its descriptor's remaining-K extent
+        # is zero, the mover fills it with zeros, and its WMMAs add nothing.
+        n_tiles = b.div(
+            b.add(b.sub(_k_upper, k_lo), b.const_i32(block_k - 1)), c_block_k
+        )
         n_even = b.add(n_tiles, b.mod(n_tiles, c2))
         n_pairs = b.div(b.sub(n_even, c2), c2)
         k_pairs_end = b.add(k_lo, b.mul(n_pairs, bk2))

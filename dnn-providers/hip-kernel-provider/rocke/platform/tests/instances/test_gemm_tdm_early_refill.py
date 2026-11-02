@@ -108,6 +108,51 @@ class TestGemmTdmEarlyRefillEmission(unittest.TestCase):
                 self.assertIn(_WAIT, self.body[i - 1])
                 self.assertNotIn(_WAIT, self.body[i - 2])
 
+    def test_tile_count_covers_a_partial_last_tile(self):
+        """The loop covers all of K, rounding the tile count up before making it even.
+
+        The tile count is evaluated from the emitted i32 arithmetic for each K:
+        it feeds the ``srem ..., 2`` that pads it to an even count. Rounding it
+        down dropped the partial last tile when K = 2m * tile_k + r, 0 < r < tile_k.
+        """
+        tile_k = _spec().tile.tile_k
+        defs = {}
+        for l in self.on.splitlines():
+            m = re.match(
+                r"\s*(%[\w.]+) = (add|sub|mul|sdiv|srem)(?: nsw)? i32 (\S+), (\S+)$", l
+            )
+            if m:
+                defs[m.group(1)] = (m.group(2), m.group(3).rstrip(","), m.group(4))
+        evens = [n for n, (op, _, rhs) in defs.items() if op == "srem" and rhs == "2"]
+        self.assertEqual(len(evens), 1, "expected one srem-by-2 (the even-count pad)")
+        n_tiles = defs[evens[0]][1]
+
+        def value(x, K):
+            if x == "%K":
+                return K
+            if re.fullmatch(r"-?\d+", x):
+                return int(x)
+            op, a, c = defs[x]
+            a, c = value(a, K), value(c, K)
+            if op in ("sdiv", "srem"):
+                q = abs(a) // abs(c) * (1 if (a >= 0) == (c >= 0) else -1)
+                return q if op == "sdiv" else a - q * c
+            return {"add": a + c, "sub": a - c, "mul": a * c}[op]
+
+        for tiles in (1, 2, 3, 4, 5):
+            for r in (0, 1, tile_k // 2, tile_k - 1):
+                K = tiles * tile_k + r
+                with self.subTest(K=K):
+                    n = value(n_tiles, K)
+                    n_even = n + n % 2
+                    self.assertGreaterEqual(
+                        n * tile_k, K, "the last partial tile is skipped"
+                    )
+                    self.assertLess(
+                        (n - 1) * tile_k, K, "a whole tile past K is counted"
+                    )
+                    self.assertGreaterEqual(n_even * tile_k, K)
+
 
 if __name__ == "__main__":
     unittest.main()
