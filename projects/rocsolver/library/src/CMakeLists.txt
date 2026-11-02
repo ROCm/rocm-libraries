@@ -176,6 +176,24 @@ set(rocsolver_lapack_source
   lapack/roclapack_gehrd.cpp
   lapack/roclapack_gehrd_batched.cpp
   lapack/roclapack_gehrd_strided_batched.cpp
+  lapack/roclapack_gebal.cpp
+  lapack/roclapack_gebal_batched.cpp
+  lapack/roclapack_gebal_strided_batched.cpp
+  lapack/roclapack_gebak.cpp
+  lapack/roclapack_gebak_batched.cpp
+  lapack/roclapack_gebak_strided_batched.cpp
+  lapack/roclapack_hseqr.cpp
+  lapack/roclapack_hseqr_batched.cpp
+  lapack/roclapack_hseqr_strided_batched.cpp
+  lapack/roclapack_trexc.cpp
+  lapack/roclapack_trexc_batched.cpp
+  lapack/roclapack_trexc_strided_batched.cpp
+  lapack/roclapack_trevc3.cpp
+  lapack/roclapack_trevc3_batched.cpp
+  lapack/roclapack_trevc3_strided_batched.cpp
+  lapack/roclapack_geev.cpp
+  lapack/roclapack_geev_batched.cpp
+  lapack/roclapack_geev_strided_batched.cpp
   #### Singular Value Decomposition ####
   ######################################
   #- classic
@@ -271,6 +289,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_org2l_ung2l.cpp
   auxiliary/rocauxiliary_orgql_ungql.cpp
   auxiliary/rocauxiliary_orgbr_ungbr.cpp
+  auxiliary/rocauxiliary_orghr_unghr.cpp
   auxiliary/rocauxiliary_orgtr_ungtr.cpp
   auxiliary/rocauxiliary_orm2r_unm2r.cpp
   auxiliary/rocauxiliary_ormqr_unmqr.cpp
@@ -528,6 +547,21 @@ if(ROCSOLVER_ENABLE_EIG_2STAGE)
 endif()
 if(ROCSOLVER_ENABLE_HESSENBERG)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
+endif()
+if(ROCSOLVER_ENABLE_XXGHR)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_XXGHR)
+endif()
+if(ROCSOLVER_ENABLE_BALANCE)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_BALANCE)
+endif()
+if(ROCSOLVER_ENABLE_HSEQR)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_HSEQR)
+endif()
+if(ROCSOLVER_ENABLE_TREVC)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_TREVC)
+endif()
+if(ROCSOLVER_ENABLE_GEEV)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_GEEV)
 endif()
 
 target_compile_definitions(rocsolver PRIVATE
