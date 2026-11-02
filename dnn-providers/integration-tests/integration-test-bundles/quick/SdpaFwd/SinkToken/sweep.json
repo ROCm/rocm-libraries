@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "1_2_256_64_bfp16_nchw",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              256,
+              64
+            ],
+            "strides": [
+              32768,
+              16384,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              8,
+              256,
+              64
+            ],
+            "strides": [
+              131072,
+              16384,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8,
+              1,
+              1
+            ],
+            "strides": [
+              8,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              8,
+              256,
+              64
+            ],
+            "strides": [
+              131072,
+              16384,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              8,
+              256,
+              1
+            ],
+            "strides": [
+              2048,
+              256,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              2,
+              256,
+              64
+            ],
+            "strides": [
+              32768,
+              16384,
+              64,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored",
+        "reference_source": "cuDNN sink_token contract (cudnn-frontend samples/cpp/sdpa/fp16_fwd_with_sink_token.cpp); verified against hipDNN CPU reference (CpuFpReferenceSdpa sinkToken)",
+        "notes": "SDPA forward with attention sink [1,H_q,1,1] FP32, GQA 8:2, causal, stats (LSE includes the sink). Graph-only: GPU reference declines sinks, so auto mode verifies against the CPU reference.",
+        "seed": 42
+      }
+    }
+  ]
+}

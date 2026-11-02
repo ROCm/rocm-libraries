@@ -168,6 +168,27 @@ public:
         // Rule 6c: left_bound follows cuDNN and must be -1 or >= 1
         HIPDNN_CHECK_ERROR(detail::validateSdpaLeftBound(attributes.left_bound, "SdpaFwdNode"));
 
+        // Rule 6d: Optional attention sink: one FP32 logit per Q head, shaped [1, H_q, 1, 1]
+        // (cuDNN's sink_token contract). As in cuDNN, the dtype must be set explicitly: the
+        // graph fills an unset input dtype with the IO type, which this rule then rejects.
+        const auto sinkToken = attributes.get_sink_token();
+        if(sinkToken)
+        {
+            const auto& sinkDims = sinkToken->get_dim();
+            HIPDNN_RETURN_IF_TRUE(sinkDims.size() != reqRank || sinkDims[0] != 1
+                                      || sinkDims[1] != numHeads || sinkDims[2] != 1
+                                      || sinkDims[3] != 1,
+                                  ErrorCode::INVALID_VALUE,
+                                  "SdpaFwdNode: SINK_TOKEN must have dims [1, "
+                                      + std::to_string(numHeads) + ", 1, 1]");
+            const auto sinkDataType = sinkToken->get_data_type();
+            HIPDNN_RETURN_IF_TRUE(sinkDataType != DataType::NOT_SET
+                                      && sinkDataType != DataType::FLOAT,
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string("SdpaFwdNode: SINK_TOKEN must be FLOAT, got ")
+                                      + hipdnn_frontend::to_string(sinkDataType));
+        }
+
         // Rule 7: If O has dims already set, validate them
         const auto& oDims = o->get_dim();
         if(!oDims.empty())

@@ -601,6 +601,48 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
     EXPECT_EQ(sdpa->implementation, AttentionImplementationSdk::UNIFIED);
 }
 
+// Exercises the packer path for the attention-sink input: a FLOAT [1, H, 1, 1] sink in a
+// HALF graph lowers with its own dtype, not the graph's IO type.
+TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithSinkTokenRoundTrip)
+{
+    const auto numHeads = K_SDPA_TENSOR_Q_DIMS[1];
+    auto sinkToken = std::make_shared<TensorAttributes>();
+    sinkToken->set_uid(K_SDPA_TENSOR_SINK_TOKEN_UID).set_name("SINK_TOKEN");
+    sinkToken->set_data_type(DataType::FLOAT);
+    sinkToken->set_dim({1, numHeads, 1, 1}).set_stride({numHeads, 1, 1, 1});
+
+    SdpaAttributes sdpaAttrs;
+    sdpaAttrs.set_name("sdpa_with_sink");
+    sdpaAttrs.set_sink_token(sinkToken);
+
+    auto graphT = buildAndDeserializeSdpaGraph(_handle, std::move(sdpaAttrs), DataType::HALF);
+    if(HasFailure())
+    {
+        return;
+    }
+
+    // Q + K + V + O + SINK_TOKEN = 5
+    EXPECT_EQ(graphT.tensors.size(), 5u);
+
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    auto* sdpa = graphT.nodes[0]->attributes.AsSdpaAttributes();
+    ASSERT_NE(sdpa, nullptr);
+    ASSERT_TRUE(sdpa->sink_token_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->sink_token_tensor_uid.value(), K_SDPA_TENSOR_SINK_TOKEN_UID);
+
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT* sinkT = nullptr;
+    for(const auto& t : graphT.tensors)
+    {
+        if(t->uid == K_SDPA_TENSOR_SINK_TOKEN_UID)
+        {
+            sinkT = t.get();
+        }
+    }
+    ASSERT_NE(sinkT, nullptr);
+    EXPECT_EQ(sinkT->dims, (std::vector<int64_t>{1, numHeads, 1, 1}));
+    EXPECT_EQ(sinkT->data_type, DataTypeSdk::FLOAT);
+}
+
 // Exercises packer code paths for FP8 descale/scale tensors, amax output
 // tensors, the optional int32 max_seq_len_kv scalar, and the conditional
 // mma_core_mode enum branch.

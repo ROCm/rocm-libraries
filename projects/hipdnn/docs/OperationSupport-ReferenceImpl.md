@@ -133,6 +133,7 @@ dimension must be reduced.
 | Dropout | Not supported | Not supported |
 | ALiBi / padding mask | Not supported | - |
 | Paged KV cache, block-sparse attention | Not supported | - |
+| Attention sink (`sink_token`, FP32 `[1, H_q, 1, 1]`) | Supported; `stats` includes the sink | Not supported (not in the backward API) |
 | Softmax max / sum-exp stats outputs | Not supported | - |
 | Ragged tensors | - | Rejected |
 | FP8 inputs | Requires Q/K/V descale tensors; descales rejected for non-FP8 inputs | - |
