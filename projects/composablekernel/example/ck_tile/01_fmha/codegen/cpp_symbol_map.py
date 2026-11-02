@@ -10,6 +10,7 @@ FWD_DTYPE_MAP = {
     "fp8bf16": "FmhaFwdFp8Bf16",
     "fp8fp32": "FmhaFwdFp8Fp32",
     "mxfp8": "FmhaFwdMxFp8",
+    "mxfp8bf16": "FmhaFwdMxFp8Bf16",
     "mxfp4": "FmhaFwdMxFp4",
 }
 
@@ -148,6 +149,9 @@ PIPELINE_MAP = {
     "qr_async_trload_v3": "ck_tile::BlockFmhaFwdV3Pipeline",
     "qr_tdm": "ck_tile::BlockFmhaPipelineQRKSVSTdm",
     "qr_tdm_sched": "ck_tile::BlockFmhaPipelineQRKSVSTdmSched",
+    "qr_tdm_fp8_sched": "ck_tile::BlockFmhaPipelineQRKSVSTdmSchedFp8",
+    "qr_tdm_fp8_sched_mgqa": "ck_tile::BlockFmhaPipelineQRKSVSTdmSchedFp8",
+    "qr_tdm_fp8_sched_d1": "ck_tile::BlockFmhaPipelineQRKSVSTdmSchedFp8",
     "qr_tdm_pingpong": "ck_tile::BlockFmhaPipelineQRKSVSTdmPingPong",
 }
 
@@ -162,6 +166,9 @@ PIPELINE_ENUM_MAP = {
     "qr_async_trload_v3": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC_TRLOAD_V3",
     "qr_tdm": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM",
     "qr_tdm_sched": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_SCHED",
+    "qr_tdm_fp8_sched": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_SCHED_FP8",
+    "qr_tdm_fp8_sched_mgqa": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_SCHED_FP8_MGQA",
+    "qr_tdm_fp8_sched_d1": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_SCHED_FP8_D1",
     "qr_tdm_pingpong": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_PINGPONG",
 }
 

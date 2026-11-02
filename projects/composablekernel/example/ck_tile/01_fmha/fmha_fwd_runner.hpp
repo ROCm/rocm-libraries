@@ -116,6 +116,12 @@ auto get_elimit<FmhaFwdMxFp8>(std::string /*init_method*/)
 }
 
 template <>
+auto get_elimit<FmhaFwdMxFp8Bf16>(std::string init_method)
+{
+    return get_elimit<FmhaFwdMxFp8>(init_method);
+}
+
+template <>
 auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
 {
     double rtol = 1e-1;
@@ -280,7 +286,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
     if(selected_kernel_name != nullptr)
         selected_kernel_name->clear();
 
-    constexpr bool is_mx = ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp4>::value;
+    constexpr bool is_mx =
+        ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp8Bf16, FmhaFwdMxFp4>::value;
 
     using QDataType             = typename TypeConfig::QDataType;
     using KDataType             = typename TypeConfig::KDataType;
@@ -324,6 +331,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
             return "fp8fp32";
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp8>)
             return "mxfp8";
+        else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp8Bf16>)
+            return "mxfp8bf16";
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp4>)
             return "mxfp4";
         else
@@ -554,10 +563,16 @@ fwd_result fmha_fwd_run(mode_enum mode,
         std::cerr << "The value of qscale_str cannot be 'mx' for non-MX data types" << std::endl;
         return fwd_result::invalid_args;
     }
-    if(is_mx && is_v_rowmajor)
+    // Row-major MXFP8 V is served by gfx1250 qr_tdm_fp8_sched; packed MXFP4 V stays col-major.
+    if(is_mx && is_v_rowmajor && std::is_same_v<DataTypeConfig, FmhaFwdMxFp4>)
     {
-        std::cerr << "The value of is_v_rowmajor must be 'false' for MX data types" << std::endl;
+        std::cerr << "The value of is_v_rowmajor must be 'false' for MXFP4" << std::endl;
         return fwd_result::invalid_args;
+    }
+    if(is_mx && is_v_rowmajor && !ck_tile::is_gfx125_supported())
+    {
+        std::cerr << "row-major MXFP8 V has instances only on gfx1250" << std::endl;
+        return fwd_result::no_instance;
     }
 
     if(p_drop < 0.0f || p_drop > 1.0f)
@@ -837,7 +852,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                       : std::array<ck_tile::index_t, 5>{1, 1, 1, 1, 1});
 
     const ck_tile::index_t hdim_q_scale = ck_tile::integer_divide_ceil(hdim_q, kQKScaleGranularity);
-    const ck_tile::index_t shape_seqlen_v_scale = seqstart_v_scale_host.back();
+    // batch mode stores V scales per batch; group mode packs all batches along seqlen
+    const ck_tile::index_t shape_seqlen_v_scale =
+        (mode == mode_enum::batch)
+            ? ck_tile::integer_divide_ceil(shape_seqlen_k, kVScaleGranularity)
+            : seqstart_v_scale_host.back();
 
     ck_tile::HostTensor<QScaleDataType> q_descale_host({1});
     ck_tile::HostTensor<KScaleDataType> k_descale_host({1});

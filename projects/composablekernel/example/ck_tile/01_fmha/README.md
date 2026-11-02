@@ -158,7 +158,7 @@ args:
                 pt or 1, per-tensor scale
                 bs or 2, block scale
                 kvbs or 3, Q per-tensor, K/V per-page block scale, only in batch_prefill
-                mx or 4, microscaling (exclusively for mxfp8/mxfp4)
+                mx or 4, microscaling (exclusively for mxfp8/mxfp8bf16/mxfp4)
                 ph or 5, per-head scale
       -iperm    permute input (default:1)
                 if true, will be b*h*s*d, else b*s*h*d
@@ -166,7 +166,7 @@ args:
        -bias    n or 0, no bias (default:n)
                 e(lementwise) or 1, elementwise bias with 1*1*s*s. e:1, 1*h*s*s. e:2, b*h*s*s
                 a(libi) or 2, alibi with 1*h. a:1, b*h
-       -prec    data type. fp32/fp16/bf16/fp8/fp8bf16/fp8fp32/mxfp8/mxfp4 (default:fp16)
+       -prec    data type. fp32/fp16/bf16/fp8/fp8bf16/fp8fp32/mxfp8/mxfp8bf16/mxfp4 (default:fp16)
        -mask    0: no mask, 1: top-left(same as 't'), 2:bottom-right(same as 'b') (default:0)
                 't', top-left causal mask, 'b', bottom-r causal mask
                 't:l,r', top-left sliding window attn(swa) with FA style left right size
@@ -275,10 +275,12 @@ The following quantization scale modes are available via `-qscale`:
 | `pt` or `1` | Per-tensor quantization scale — a single scale factor is applied to the entire tensor |
 | `bs` or `2` | Per-block quantization scale — a scale factor is applied per block of elements |
 | `kvbs` or `3` | Q per-tensor + K/V per-page block scale (batch_prefill only) |
-| `mx` or `4` | Microscaling (MX format), exclusively for `mxfp8` and `mxfp4` data types |
+| `mx` or `4` | Microscaling (MX format), exclusively for `mxfp8`, `mxfp8bf16` and `mxfp4` data types |
 | `ph` or `5` | Per-head quantization scale — one scale factor per (batch, head) |
 
 Currently only `-vlayout=r` (`seqlen*hdim` for V matrix) is supported for fp8 data types.
+MX data types take `-vlayout=c`, except `mxfp8`/`mxfp8bf16` on gfx1250, which need `-vlayout=r`;
+`mxfp8bf16` (MXFP8 inputs, bf16 output) exists only on gfx1250.
 
 ### V scale with `bs` on gfx1250
 
