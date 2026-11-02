@@ -11,7 +11,6 @@ usable clang skips, which is the helper's own contract.
 from __future__ import annotations
 
 import pytest
-
 from rocke.tests.ir_validity import (
     arbiter_verdict,
     assert_target_accepts,

@@ -12,7 +12,6 @@ failure.
 from __future__ import annotations
 
 import pytest
-
 from rocke.core.arch import known_arches
 from rocke.tests.gpu import current_device_arch, current_device_arch_in
 

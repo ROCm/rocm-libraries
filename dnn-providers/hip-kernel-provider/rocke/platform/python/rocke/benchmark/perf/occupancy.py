@@ -178,8 +178,9 @@ def _align_up(n: int, gran: int) -> int:
 # allocated in steps of 4, at most 10 waves per SIMD; its code object's
 # ``.vgpr_count`` is the larger of the VGPR and AGPR counts. Those three fields
 # match the compiler's occupancy report for every VGPR and every AGPR count from 1
-# to 256 (clang 20; test_occupancy.py pins them and re-checks them against the
-# local llc). Its LDS and workgroup fields are not checked against the compiler.
+# to 256 (clang 20; tests/benchmark/test_occupancy_targets.py pins them and
+# re-checks them against the local llc). Its LDS and workgroup fields are not
+# checked against the compiler.
 _ARCH_CAPS = {
     "gfx950": dict(
         lds_per_cu=163840,

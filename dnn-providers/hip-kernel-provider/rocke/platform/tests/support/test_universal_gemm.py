@@ -10,7 +10,6 @@ the C++ engine.
 from __future__ import annotations
 
 import pytest
-
 from rocke.instances.common.gemm_universal import (
     DataSpec,
     TileSpec,
