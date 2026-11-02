@@ -29,6 +29,23 @@
 #define CK_TILE_FMHA_CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
 namespace ck_tile::fmha::torch_api::detail {
+inline void check_alibi(const std::optional<at::Tensor>& slopes,
+                        const at::Tensor& q,
+                        int batch_size,
+                        int num_heads)
+{
+    if(!slopes.has_value())
+        return;
+    const auto& tensor = slopes.value();
+    TORCH_CHECK(tensor.device() == q.device(), "ALiBi slopes must be on the same device as query");
+    TORCH_CHECK(tensor.scalar_type() == at::ScalarType::Float,
+                "ALiBi slopes must have dtype float32");
+    TORCH_CHECK(tensor.sizes() == torch::IntArrayRef({num_heads}) ||
+                    tensor.sizes() == torch::IntArrayRef({batch_size, num_heads}),
+                "ALiBi slopes must have shape [nheads] or [batch_size, nheads]");
+    TORCH_CHECK(tensor.stride(-1) == 1, "ALiBi slopes must have contiguous last dimension");
+}
+
 // Elementwise bias is shared by all batches and heads.
 inline void check_bias(const std::optional<at::Tensor>& bias,
                        const std::optional<at::Tensor>& alibi_slopes,
