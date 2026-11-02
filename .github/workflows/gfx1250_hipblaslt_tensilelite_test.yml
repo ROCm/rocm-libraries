@@ -491,12 +491,15 @@ jobs:
         run: |
           set -o pipefail
           cd projects/hipblaslt/tensilelite
+          if [[ "$TL_PYTEST_K" =~ [[:space:]] ]]; then
+            echo "::error::tensilelite_pytest_k must not contain spaces (tox splits them into separate arguments)"
+            exit 1
+          fi
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
           mkdir -p "$GITHUB_WORKSPACE/tensilelite_test_results"
           # tox builds its own env from tox.ini (deps + rocisa); nothing else is needed here.
-          # Pinned to the version this step was last verified with on gfx1250.
-          pip install "tox==4.67.5"
+          pip install tox
           export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
           # As the nightly: tox builds the client for the reported target
           # (gfx1250-strict here) and runs the common tests against it.
