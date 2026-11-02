@@ -76,8 +76,7 @@ RppStatus slice_host_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr, T* 
                  ((anchor[dimsOrder[1]] + shape[dimsOrder[1]]) > length[dimsOrder[1]]) ||
                  ((anchor[dimsOrder[2]] + shape[dimsOrder[2]]) > length[dimsOrder[2]]));
             if (needPadding && enablePadding)
-                std::fill(dstPtrChannel, dstPtrChannel + dstGenericDescPtr->strides[0] - 1,
-                          *fillValue);
+                std::fill(dstPtrChannel, dstPtrChannel + dstGenericDescPtr->strides[0], *fillValue);
 
             // slice without fused output-layout toggle (NCDHW -> NCDHW)
             if (dstGenericDescPtr->layout == RpptLayout::NCDHW) {
@@ -148,8 +147,7 @@ RppStatus slice_host_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr, T* 
                 ((anchor[dimsOrder[0]] + shape[dimsOrder[0]]) > length[dimsOrder[0]]) ||
                 ((anchor[dimsOrder[1]] + shape[dimsOrder[1]]) > length[dimsOrder[1]]);
             if (needPadding && enablePadding)
-                std::fill(dstPtrChannel, dstPtrChannel + dstGenericDescPtr->strides[0] - 1,
-                          *fillValue);
+                std::fill(dstPtrChannel, dstPtrChannel + dstGenericDescPtr->strides[0], *fillValue);
 
             // slice without fused output-layout toggle (NCHW -> NCHW)
             if (dstGenericDescPtr->layout == RpptLayout::NCHW) {
@@ -191,8 +189,7 @@ RppStatus slice_host_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr, T* 
             bool needPadding =
                 ((anchor[0] + shape[0]) > length[0]) || ((anchor[1] + shape[1]) > length[1]);
             if (needPadding && enablePadding)
-                std::fill(dstPtrChannel, dstPtrChannel + dstGenericDescPtr->strides[0] - 1,
-                          *fillValue);
+                std::fill(dstPtrChannel, dstPtrChannel + dstGenericDescPtr->strides[0], *fillValue);
 
             T* srcPtrRow = srcPtrChannel;
             T* dstPtrRow = dstPtrChannel;
@@ -209,7 +206,7 @@ RppStatus slice_host_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr, T* 
             // if padding is required, fill the buffer with fill value specified
             bool needPadding = ((anchor[0] + shape[0]) > length[0]);
             if (needPadding && enablePadding)
-                std::fill(dstPtrTemp, dstPtrTemp + dstGenericDescPtr->strides[0] - 1, *fillValue);
+                std::fill(dstPtrTemp, dstPtrTemp + dstGenericDescPtr->strides[0], *fillValue);
             memcpy(dstPtrChannel, srcPtrChannel, copyLengthInBytes);
         }
     }
