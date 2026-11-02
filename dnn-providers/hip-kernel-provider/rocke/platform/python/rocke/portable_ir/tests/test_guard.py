@@ -101,11 +101,15 @@ class TestDerivation(unittest.TestCase):
         """On a gate whose structure the candidate rules can express, derivation
         should reproduce it -- not merely stay sound. Sound-but-useless is the
         easy failure mode here, so this pins agreement in both directions."""
-        g = derive_guard(gate, CANDS, gate_name="test", arch="gfx950")
-        self.assertEqual(g["derivation"]["method"], "coupled")
-        report = verify_guard(g, gate, CANDS, samples=2000, seed=99)
-        self.assertEqual(report.unsound, [])
-        self.assertEqual(report.strict, [], "derivation lost coverage it could keep")
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                g = derive_guard(gate, CANDS, gate_name="test", arch=arch)
+                self.assertEqual(g["derivation"]["method"], "coupled")
+                report = verify_guard(g, gate, CANDS, samples=2000, seed=99)
+                self.assertEqual(report.unsound, [])
+                self.assertEqual(
+                    report.strict, [], "derivation lost coverage it could keep"
+                )
 
     def test_finds_the_coupling_rule(self):
         g = derive_guard(gate, CANDS, gate_name="test")

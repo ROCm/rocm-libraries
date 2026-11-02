@@ -80,6 +80,11 @@ inline float rocblas_internal_log_trace_scalar_value(const rocblas_half* value)
     return value ? float(*value) : std::numeric_limits<float>::quiet_NaN();
 }
 
+inline float rocblas_internal_log_trace_scalar_value(const rocblas_bfloat16* value)
+{
+    return value ? float(*value) : std::numeric_limits<float>::quiet_NaN();
+}
+
 template <typename T>
 T rocblas_internal_log_trace_scalar_value(const T* value)
 {
@@ -169,6 +174,12 @@ rocblas_status rocblas_internal_log_trace_alpha_beta_ex(rocblas_datatype        
         betass << rocblas_internal_log_trace_scalar_value(
             reinterpret_cast<const rocblas_half*>(beta));
         break;
+    case rocblas_datatype_bf16_r:
+        alphass << rocblas_internal_log_trace_scalar_value(
+            reinterpret_cast<const rocblas_bfloat16*>(alpha));
+        betass << rocblas_internal_log_trace_scalar_value(
+            reinterpret_cast<const rocblas_bfloat16*>(beta));
+        break;
     case rocblas_datatype_f32_r:
         alphass << rocblas_internal_log_trace_scalar_value(reinterpret_cast<const float*>(alpha));
         betass << rocblas_internal_log_trace_scalar_value(reinterpret_cast<const float*>(beta));
@@ -212,6 +223,12 @@ rocblas_status rocblas_internal_log_bench_alpha_beta_ex(rocblas_datatype compute
             "alpha", reinterpret_cast<const rocblas_half*>(alpha));
         betas = rocblas_internal_log_bench_scalar_value(
             "beta", reinterpret_cast<const rocblas_half*>(beta));
+        break;
+    case rocblas_datatype_bf16_r:
+        alphas = rocblas_internal_log_bench_scalar_value(
+            "alpha", reinterpret_cast<const rocblas_bfloat16*>(alpha));
+        betas = rocblas_internal_log_bench_scalar_value(
+            "beta", reinterpret_cast<const rocblas_bfloat16*>(beta));
         break;
     case rocblas_datatype_f32_r:
         alphas = rocblas_internal_log_bench_scalar_value("alpha",

@@ -19,6 +19,10 @@ from rocke.helpers.tiling.kernels.tiling_gemm_interleaved_demo import (
     _wave_descs_interleaved,
     _transpose_desc,
 )
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 # The winner CRC A local store: macro tile_m=256, tile_k=32, 16 waves; wave read m_sub=4,n_sub=4,k_sub=2.
 TILE_FREE, WTAG, DEPTH16 = 256, "b128", 16
@@ -394,7 +398,8 @@ def test_simulate_mode_needs_no_hardware_and_labels_itself(tmp_path):
     ), "a simulated row must never look like counters"
 
 
-def test_simulate_mode_full_stops_on_an_arch_with_no_validated_model():
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_simulate_mode_full_stops_on_an_arch_with_no_validated_model(arch):
     """The headline rule: an arch we have not validated is a STOP, never an extrapolation from
     gfx90a's constants."""
     with pytest.raises(ValueError, match="no validated LDS model"):
@@ -403,7 +408,7 @@ def test_simulate_mode_full_stops_on_an_arch_with_no_validated_model():
             mode="simulate",
             tile_free=TILE_FREE,
             wtag=WTAG,
-            arch="gfx942",
+            arch=arch,
             kernel_label="CRC",
             operand_label="A",
             dims_label="M",
@@ -615,12 +620,13 @@ def test_analyze_read_origin_is_load_bearing_not_defaulted():
         )
 
 
-def test_analyze_read_full_stops_on_an_arch_with_no_model():
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_analyze_read_full_stops_on_an_arch_with_no_model(arch):
     with pytest.raises(ValueError, match="no validated LDS model"):
         lc.analyze_read(
             _a_descs(),
             tile_free=TILE_FREE,
-            arch="gfx942",
+            arch=arch,
             operand_label="A",
             strides=(TILE_FREE, 1),
             dtype_name="f16",
@@ -814,9 +820,7 @@ def test_gfx90a_read_model_is_registered_at_import():
     sibling tests call `register_read_model` themselves -- so the state under test is repaired by
     whoever ran first, and deleting the module-scope registration leaves the suite green.
     """
-    import os
     import subprocess
-    import sys
 
     probe = (
         "from rocke.helpers.tiling import lds_conflict as lc;"
@@ -824,14 +828,11 @@ def test_gfx90a_read_model_is_registered_at_import():
         "assert 'gfx90a' in lc._READ_MODELS, 'read model NOT registered at import';"
         "print('ok')"
     )
-    # Propagate this interpreter's sys.path: a bare subprocess gets neither the test runner's
-    # rootdir insertion nor an exported PYTHONPATH, so `rocke` is unimportable from any cwd but
-    # platform/python -- which surfaces as a FALSE "not registered at import" rather than an
-    # ImportError. The test would be red on any CI runner and green only on a shell that happens
-    # to export PYTHONPATH.
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
     r = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, env=env
+        rocke_python_command("-c", probe),
+        capture_output=True,
+        text=True,
+        env=rocke_subprocess_env(),
     )
     assert (
         r.returncode == 0
@@ -860,12 +861,14 @@ def test_a_corpus_regression_does_not_break_the_module_import():
         importlib.reload(lc)  # restore module state for later tests
 
 
-def test_register_read_model_refuses_an_arch_with_no_corpus():
-    """gfx942 has no LDS model at all, so `arch_lds` refuses first with ValueError -- an earlier and
-    stricter stop than the read-corpus check. Either way registration must not stick."""
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_register_read_model_refuses_an_arch_with_no_corpus(arch):
+    """gfx942 and gfx950 have no LDS model at all, so `arch_lds` refuses first with ValueError -- an
+    earlier and stricter stop than the read-corpus check. Either way registration must not stick.
+    """
     with pytest.raises(ValueError, match="no validated LDS model"):
-        lc.register_read_model("gfx942")
-    assert "gfx942" not in lc._READ_MODELS
+        lc.register_read_model(arch)
+    assert arch not in lc._READ_MODELS
 
 
 # --------------------------------------------------------------------------------------------------

@@ -1767,7 +1767,11 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 #undef DEBUG_SET_MODULE_OPTION
                 for (auto kv : options) {
                     const std::string key = nb::cast<std::string>(kv.first);
-                    if (isRemovedDsPacingOption(key))
+                    if (key == "WmmaBarrierCoverCycles")
+                        std::cerr << "[StinkyTofu] WARNING: module option '" << key
+                                  << "' was removed; a barrier issues when its threshold is met, "
+                                  << "and the option is ignored\n";
+                    else if (isRemovedDsPacingOption(key))
                         std::cerr
                             << "[StinkyTofu] WARNING: module option '" << key
                             << "' was removed with the legacy ds_load pacing and is ignored\n";

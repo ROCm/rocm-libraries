@@ -119,6 +119,7 @@ typedef struct rocke_gfx942_attn_tiled_3d_config
     int QK_N_TILES; /* T // MFMA_N */
     int PV_K_ITERS; /* T // PV_K_STEP */
     int PV_N_TILES; /* HD // MFMA_N */
+    bool Q_IN_V_SLOT; /* HD == 192 && T >= BLOCK_M: stage Q through V_lds */
 
     int THREADS; /* 64 */
     int binary_search_iters; /* spec.binary_search_iters */
@@ -320,6 +321,7 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* seg_max; /* F32* readonly                             */
     rocke_value_t* seg_l; /* F32* readonly (segm_expsum)               */
     rocke_value_t* red_seq_lens; /* I32* readonly (_seq_lens, unused body)    */
+    rocke_value_t* red_lse; /* F32* noalias writeonly (lse_ptr); NULL unless emit_lse */
 
     /* ---------- grid ids (lines 1032-1034) ---------- */
     rocke_value_t* q_token; /* block_id_x()                              */
