@@ -1458,6 +1458,12 @@ class Fuzz:
             kernels = record.get("kernels")
             if isinstance(kernels, list) and kernels:
                 result["kernels"] = [str(k) for k in kernels]
+            ref_ms = record.get("reference_ms")
+            if isinstance(ref_ms, (int, float)) and not isinstance(ref_ms, bool):
+                result["reference_ms"] = ref_ms
+                ref_lane = record.get("reference_lane")
+                if isinstance(ref_lane, str):
+                    result["reference_lane"] = ref_lane
         if crash_kind:
             result["crash_kind"] = crash_kind
         if self._candidate_sink is not None:

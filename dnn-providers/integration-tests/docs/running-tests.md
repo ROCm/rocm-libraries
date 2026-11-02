@@ -330,6 +330,12 @@ collects the lines between the case's `started` and `finished` records without
 sink, which that variable creates, prints the engines' INFO lines during the cases. `kernels` is
 absent when the case reported none.
 
+A case graded by a reference executor (not golden data) also carries `"reference_ms"` and
+`"reference_lane"` (`"cpu"` or `"gpu"`): the wall time of the reference run that produced the
+outputs the engine was compared with, and the lane it ran on. After a GPU-to-CPU fallback they
+are the CPU run's. They are absent when no reference ran. The gauntlet driver copies both into
+`outcomes.jsonl`.
+
 | Outcome | Meaning |
 |---|---|
 | `PASS` | The engine accepted the graph and its output matched an oracle. For a case with `placement: "under"` it means instead that the backend rejected the misaligned pointer with `BAD_PARAM` (the record carries `expected_status`); see [reading a placement probe](#reading-an-alignment-or-placement-probe). |

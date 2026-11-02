@@ -2513,6 +2513,35 @@ def test_only_cases_that_built_a_plan_name_kernels(run):
     assert all(r["stage"] in ("compare", "execute") for r in with_kernels)
 
 
+def test_reference_time_and_lane_reach_outcomes_only_for_the_cases_that_ran_a_reference(
+    run,
+):
+    # bug caught: the oracle-cost ladder fitting a decline's missing time as 0, or a record
+    # whose reference fields the driver dropped on the way to outcomes.jsonl
+    run.control(
+        cases={"s1000": "wrong", "s1001": "declined", "s1002": "crash_execute"},
+        reference_ms=12.5,
+        reference_lane="cpu",
+    )
+    assert run.run("--samples", "4") == 1
+    by_case = {r["case"]: r for r in run.outcome_list}
+    for case in ("s1000", "s1003"):  # a WRONG and a PASS both ran the reference
+        assert by_case[case]["reference_ms"] == 12.5
+        assert by_case[case]["reference_lane"] == "cpu"
+    # a decline, and a plan that never produced an output
+    for case in ("s1001", "s1002"):
+        assert "reference_ms" not in by_case[case]
+        assert "reference_lane" not in by_case[case]
+
+
+def test_a_record_without_reference_fields_leaves_them_out_of_outcomes(run):
+    # bug caught: a null or 0 reference_ms written for every case graded against golden data
+    assert run.run("--samples", "2") == 0
+    for record in run.outcome_list:
+        assert "reference_ms" not in record
+        assert "reference_lane" not in record
+
+
 def test_a_failure_folder_carries_the_alignment_placement_and_patches(run):
     # bug caught: the graph of a failure folder at the template's alignment 16 although the
     # case ran at another one, or a meta sidecar without the placement that made it fail

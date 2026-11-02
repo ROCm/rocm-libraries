@@ -371,6 +371,43 @@ TEST(TestCaseOutcome, FinishedRecordOmitsKernelsWhenNoneWereReported)
     EXPECT_FALSE(json.contains("kernels"));
 }
 
+// Bug caught: the reference's wall time or lane lost on the way to the record, or written
+// in a shape the driver cannot read (a string for the time, "gpu_ref" for the lane).
+TEST(TestCaseOutcome, FinishedRecordCarriesTheReferenceRunWhenOneRan)
+{
+    auto record = makeUnexercisedRecord(makeIdentity(), OutcomeStage::SETUP, "r");
+    record.reference = ReferenceRun{1234.5, ReferenceLane::CPU};
+
+    const auto json = nlohmann::json::parse(finishedRecordJson(record));
+    ASSERT_TRUE(json.contains("reference_ms"));
+    EXPECT_DOUBLE_EQ(json.at("reference_ms").get<double>(), 1234.5);
+    EXPECT_EQ(json.at("reference_lane"), "cpu");
+
+    record.reference->lane = ReferenceLane::GPU;
+    EXPECT_EQ(nlohmann::json::parse(finishedRecordJson(record)).at("reference_lane"), "gpu");
+}
+
+// Bug caught: a 0 ms reference on every case that never ran one, which the cost fit would
+// read as a free oracle.
+TEST(TestCaseOutcome, FinishedRecordOmitsTheReferenceRunWhenNoneRan)
+{
+    const auto record = makeUnexercisedRecord(makeIdentity(), OutcomeStage::SETUP, "r");
+    const auto json = nlohmann::json::parse(finishedRecordJson(record));
+    EXPECT_FALSE(json.contains("reference_ms"));
+    EXPECT_FALSE(json.contains("reference_lane"));
+}
+
+// Bug caught: makeCaseOutcomeRecord dropping the outcome's reference run.
+TEST(TestCaseOutcome, MakeCaseOutcomeRecordCopiesTheReferenceRun)
+{
+    auto outcome = VerificationOutcome::passed(VerificationDepth::VERIFIED);
+    outcome.reference = ReferenceRun{7.0, ReferenceLane::GPU};
+    const auto record = makeCaseOutcomeRecord(makeIdentity(), outcome, CaseOutcome::PASS, false);
+    ASSERT_TRUE(record.reference.has_value());
+    EXPECT_DOUBLE_EQ(record.reference->ms, 7.0);
+    EXPECT_EQ(record.reference->lane, ReferenceLane::GPU);
+}
+
 // Bug caught: the started record growing the fields only the finished record owns.
 TEST(TestCaseOutcome, StartedRecordNeverCarriesWhatTheCaseAskedFor)
 {

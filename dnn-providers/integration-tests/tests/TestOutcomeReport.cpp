@@ -12,6 +12,8 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -19,6 +21,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -924,6 +927,124 @@ TEST_F(TestOutcomeReport, FailedLoadNamesTheBundleForTheReport)
     const auto identity = detail::syntheticIdentity("suite", "case", "dir/sweep.json#case");
     EXPECT_EQ(identity.test, "suite.case");
     EXPECT_EQ(identity.bundle, "dir/sweep.json#case");
+}
+
+// ---------------------------------------------------------------------------
+// The reference that graded: its wall time and lane (S15, oracle cost)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// A reference that takes `delay` to answer, then writes `value` into the output.
+void referenceAnswersAfter(::testing::NiceMock<MockReferenceGraphExecutor>& reference,
+                           std::chrono::milliseconds delay,
+                           float value)
+{
+    ON_CALL(reference, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([delay, value](void*, size_t, const VariantPack& variantPack) {
+            std::this_thread::sleep_for(delay);
+            auto* ptr = static_cast<float*>(variantPack.at(fixtures::K_OUTPUT_UID));
+            std::fill(ptr, ptr + fixtures::K_OUTPUT_ELEMS, value);
+        });
+}
+
+} // namespace
+
+// Bug caught: a case graded by a reference reporting no cost, or the clock wrapped around
+// something other than the reference (a zero or a build time), which would make the
+// oracle-cost fit meaningless.
+TEST_F(TestOutcomeReport, ReferenceRunTimeAndLaneAreOnTheFinishedRecord)
+{
+    engineWrites(_mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+    referenceAnswersAfter(
+        _mocks.gpuReference, std::chrono::milliseconds(30), fixtures::K_OUTPUT_VALUE);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, bundle(/*includeGoldenOutput=*/false), &results);
+
+    const auto& record = onlyFinished();
+    EXPECT_EQ(record.outcome, CaseOutcome::PASS);
+    ASSERT_TRUE(record.reference.has_value());
+    EXPECT_EQ(record.reference->lane, ReferenceLane::GPU);
+    EXPECT_GE(record.reference->ms, 30.0);
+    const auto json = nlohmann::json::parse(finishedRecordJson(record));
+    EXPECT_EQ(json.at("reference_lane"), "gpu");
+    EXPECT_GE(json.at("reference_ms").get<double>(), 30.0);
+}
+
+// Bug caught: a WRONG case (the rows the cost fit also reads) dropping the timing because
+// only passes were looked at.
+TEST_F(TestOutcomeReport, AMismatchingEngineStillCarriesTheReferenceRun)
+{
+    engineWrites(_mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE + 100.0f);
+    referenceAnswersAfter(
+        _mocks.gpuReference, std::chrono::milliseconds(5), fixtures::K_OUTPUT_VALUE);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, bundle(/*includeGoldenOutput=*/false), &results);
+
+    const auto& record = onlyFinished();
+    EXPECT_EQ(record.outcome, CaseOutcome::WRONG);
+    ASSERT_TRUE(record.reference.has_value());
+    EXPECT_EQ(record.reference->lane, ReferenceLane::GPU);
+}
+
+// Bug caught: the lane read from the first reference tried rather than the one that
+// graded, and the failed GPU attempt's time charged to the CPU lane. The GPU stub burns
+// 300 ms before it errors; the CPU run that grades takes 5 ms.
+TEST_F(TestOutcomeReport, AfterAFallbackTheRecordedLaneAndTimeAreTheGradingOnes)
+{
+    engineWrites(_mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+    ON_CALL(_mocks.gpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t, const VariantPack&) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            throw std::runtime_error("stub: GPU ref crashed");
+        });
+    referenceAnswersAfter(
+        _mocks.cpuReference, std::chrono::milliseconds(5), fixtures::K_OUTPUT_VALUE);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, bundle(/*includeGoldenOutput=*/false), &results);
+
+    const auto& record = onlyFinished();
+    EXPECT_EQ(record.verifier, Verifier::CPU_REFERENCE);
+    ASSERT_TRUE(record.reference.has_value());
+    EXPECT_EQ(record.reference->lane, ReferenceLane::CPU);
+    EXPECT_GE(record.reference->ms, 5.0);
+    EXPECT_LT(record.reference->ms, 250.0);
+}
+
+// Bug caught: golden grading, or a case no reference graded, reporting a made-up reference
+// time (a 0 ms row would drag the cost fit down).
+TEST_F(TestOutcomeReport, NoReferenceFieldsWhenNoReferenceRan)
+{
+    runPinned([](HarnessMocks& mocks) {
+        engineWrites(mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+    });
+
+    const auto& record = onlyFinished();
+    EXPECT_EQ(record.verifier, Verifier::GOLDEN);
+    EXPECT_FALSE(record.reference.has_value());
+    const auto json = nlohmann::json::parse(finishedRecordJson(record));
+    EXPECT_FALSE(json.contains("reference_ms"));
+    EXPECT_FALSE(json.contains("reference_lane"));
+}
+
+TEST_F(TestOutcomeReport, NoReferenceFieldsWhenTheEngineDeclined)
+{
+    runPinned([](HarnessMocks& mocks) {
+        ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+            .WillByDefault(::testing::Return(EngineOpResult::declinedBy("late decline")));
+    });
+
+    EXPECT_FALSE(onlyFinished().reference.has_value());
 }
 
 // NOLINTEND(readability-identifier-naming)

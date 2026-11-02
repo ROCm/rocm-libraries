@@ -5,6 +5,7 @@
 #include "harness/bundle/RngDumpHandoff.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <initializer_list>
 #include <optional>
 #include <ostream>
@@ -624,12 +625,23 @@ VerificationOutcome
         const bool lastResort = i + 1 == chain.candidates.size();
 
         OutputTensors refOutputs;
+        const auto started = std::chrono::steady_clock::now();
         const RefRunResult result = runReferenceCapturingOutputs(*ref, engineOutputs, refOutputs);
+        const auto elapsed = std::chrono::steady_clock::now() - started;
         const std::string label = refLabel(ref->type);
         switch(result.status)
         {
         case RefStatus::RAN:
-            return compareOutputs(engineOutputs, refOutputs, result.site, verifierFor(ref->type));
+        {
+            // Only the run that graded is recorded: a lane that errored or declined
+            // before this one produced no outputs and has no entry here.
+            auto outcome
+                = compareOutputs(engineOutputs, refOutputs, result.site, verifierFor(ref->type));
+            outcome.reference = ReferenceRun{
+                std::chrono::duration<double, std::milli>(elapsed).count(),
+                ref->type == ReferenceExecutorType::GPU ? ReferenceLane::GPU : ReferenceLane::CPU};
+            return outcome;
+        }
         case RefStatus::CAPABILITY_MISS:
             chain.declined(label + " (cannot run this op: " + result.message + ")");
             break;

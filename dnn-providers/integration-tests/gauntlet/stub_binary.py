@@ -51,7 +51,11 @@ so a listing with no filter selects nothing and prints "Error: zero tests ran.")
 ``quiet_load`` (a case skipped at load logs nothing, as the real binary without HIPDNN_LOG_LEVEL),
 ``kernels`` (the kernel names every case that ran the plan puts in its ``finished`` record; none
 by default, as an engine that reports no kernel) and ``kernels_seed_mod`` (``{"m": 2, "map":
-{"0": ["k0"], "1": ["k1"]}}``: the kernels by shape seed modulo ``m``, before ``kernels``).
+{"0": ["k0"], "1": ["k1"]}}``: the kernels by shape seed modulo ``m``, before ``kernels``), and
+``reference_ms`` (the wall time a case that compared against a reference puts in its ``finished``
+record, with ``reference_lane``, ``gpu`` by default; a number, or ``{"a": 2.0, "k": 0.5,
+"product_of": ["values.n", "values.m"]}`` for ``a + k`` times the product of those values of the
+written sweep row; none by default, as a case graded against golden data).
 """
 
 import fnmatch
@@ -71,6 +75,8 @@ BEHAVIOURS = (
 )  # fmt: skip
 # The behaviours that ran the engine's plan and so report kernels when the control names some.
 KERNEL_BEHAVIOURS = ("pass", "unclaimed_pass", "wrong", "crash_execute", "probe_file")
+# The behaviours that compared against a reference and so report its time when the control asks.
+REFERENCE_BEHAVIOURS = ("pass", "unclaimed_pass", "wrong")
 
 
 def sanitize(text):
@@ -205,6 +211,33 @@ def kernels_for(control, case_id, kind):
     return control.get("kernels")
 
 
+def reference_for(control, case, kind):
+    """``(reference_ms, reference_lane)`` of a case that ran a reference, else ``None``.
+
+    Only a behaviour that compared against a reference (``REFERENCE_BEHAVIOURS``) reports one.
+    ``reference_ms`` of the control is a number (every such case) or ``{"a": A, "k": K,
+    "product_of": [dotted row paths]}``: ``A + K * (the product of those values of the written
+    sweep row)``, a linear reference time in a cost the test names. Without it no case reports a
+    reference, as an engine whose graph the harness graded against golden data.
+    """
+    spec = control.get("reference_ms")
+    if spec is None or kind not in REFERENCE_BEHAVIOURS:
+        return None
+    if isinstance(spec, dict):
+        cost = 1
+        for path in spec["product_of"]:
+            found, value = row_value(case, path)
+            if not found:
+                raise SystemExit(
+                    f"stub: reference_ms path {path!r} is absent from the row"
+                )
+            cost *= value
+        milliseconds = spec.get("a", 0.0) + spec["k"] * cost
+    else:
+        milliseconds = spec
+    return float(milliseconds), control.get("reference_lane", "gpu")
+
+
 class Report:
     def __init__(self, path):
         self._file = open(path, "a", encoding="utf-8", newline="\n") if path else None
@@ -271,7 +304,7 @@ def main(argv):
                     f" for case {case_id}\n"
                 )
             continue
-        registered.append((suite, test, case_id, sweep, purpose, kind))
+        registered.append((suite, test, case_id, sweep, purpose, kind, case))
 
     selected = [
         r for r in registered if gtest_matches(f"{r[0]}.{r[1]}", opts["filter"])
@@ -311,7 +344,7 @@ def main(argv):
         os._exit(7)
     report = Report(opts["report"])
     failed = False
-    for suite, test, case_id, sweep, purpose, kind in selected:
+    for suite, test, case_id, sweep, purpose, kind, case in selected:
         name = f"{suite}.{test}"
         bundle = f"{sweep}#{case_id}"
         print(f"[ RUN      ] {name}", flush=True)
@@ -348,6 +381,9 @@ def main(argv):
         kernels = kernels_for(control, case_id, kind)
         if kernels:
             record["kernels"] = kernels
+        reference = reference_for(control, case, kind)
+        if reference is not None:
+            record["reference_ms"], record["reference_lane"] = reference
         report.write(record)
         failed = failed or outcome in ("WRONG", "CRASH")
         print(f"[       {outcome} ] {name}", flush=True)

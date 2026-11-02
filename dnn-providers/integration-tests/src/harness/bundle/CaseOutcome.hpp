@@ -87,6 +87,10 @@ struct CaseOutcomeRecord
     /// lines), distinct and sorted. Empty when the case never built a plan, or the engine
     /// does not report a kernel (HIP_MLOPS); the `finished` record then has no `kernels`.
     std::vector<std::string> kernels;
+    /// The reference that graded the case: its wall time and lane. Empty when no reference
+    /// ran (golden grading, a decline, a failure before the oracle); the `finished` record
+    /// then has no `reference_ms` / `reference_lane`.
+    std::optional<ReferenceRun> reference;
 };
 
 /// Builds the record for a test body that reached an outcome. `reason` is the

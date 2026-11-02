@@ -109,6 +109,7 @@ CaseOutcomeRecord makeCaseOutcomeRecord(CaseIdentity identity,
     record.depth = outcome.depth;
     record.origin = outcome.origin;
     record.verifier = outcome.verifier;
+    record.reference = outcome.reference;
     record.expectedStatus = outcome.expectedStatus;
 
     if(!outcome.message.empty())
@@ -211,6 +212,11 @@ std::string finishedRecordJson(const CaseOutcomeRecord& record)
     if(!record.kernels.empty())
     {
         json["kernels"] = record.kernels;
+    }
+    if(record.reference.has_value())
+    {
+        json["reference_ms"] = record.reference->ms;
+        json["reference_lane"] = toString(record.reference->lane);
     }
     return dumpLine(json);
 }

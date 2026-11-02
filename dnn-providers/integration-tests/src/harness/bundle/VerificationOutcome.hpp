@@ -179,6 +179,27 @@ inline const char* toString(Verifier verifier)
     }
 }
 
+/// The reference lane that produced the outputs an engine was graded against.
+enum class ReferenceLane : uint8_t
+{
+    CPU,
+    GPU,
+};
+
+inline const char* toString(ReferenceLane lane)
+{
+    return lane == ReferenceLane::GPU ? "gpu" : "cpu";
+}
+
+/// One reference execution that produced the outputs a case was graded against: its
+/// wall time and the lane it ran on. After a GPU-to-CPU fallback this is the CPU run
+/// that graded, not the GPU attempt that errored before it.
+struct ReferenceRun
+{
+    double ms = 0.0; ///< wall time of runReferenceCapturingOutputs(), in milliseconds
+    ReferenceLane lane = ReferenceLane::CPU;
+};
+
 /// What one test body did, as a value.
 ///
 /// Everything under TestBody() returns one of these instead of calling GTEST_SKIP()
@@ -219,6 +240,10 @@ struct VerificationOutcome
     /// an under-aligned placement the backend rejected. Empty for every other outcome. A
     /// pass that carries one verified the rejection, not a comparison.
     std::string expectedStatus;
+
+    /// The reference that graded the outputs. Set only when a reference executor ran;
+    /// golden grading, skips and failures before the oracle leave it empty.
+    std::optional<ReferenceRun> reference;
 
     static VerificationOutcome passed(VerificationDepth depth)
     {

@@ -446,6 +446,8 @@ asked to do:
 | `placement_uid` | Present when the metadata sets one. |
 | `expected_status` | `"BAD_PARAM"` on a pass that verified a rejection; absent otherwise. |
 | `kernels` | The distinct kernel names the engine reported while the case ran, sorted. From the engine's `kernel: <engine> <kernel>` INFO line, written once per built plan; see [`kernels` in the outcome report](running-tests.md#outcome-report). Absent when the case reported none (it never built a plan, or the engine logs no kernel). Not a metadata field: the harness fills it. |
+| `reference_ms` | Milliseconds of wall time the reference executor took to produce the outputs the case was graded against (`steady_clock` around the reference run, output allocation included). Present only when a reference ran and produced the outputs the engine was compared with, whatever the verdict (`PASS` and `WRONG` both carry it). Absent for golden grading, a decline, and a failure before the oracle. After an automatic GPU-to-CPU fallback it is the CPU run that graded, not the GPU attempt that failed. Not a metadata field: the harness fills it. |
+| `reference_lane` | `"cpu"` or `"gpu"`: the reference that produced the outputs, the one `reference_ms` timed. Present exactly when `reference_ms` is. |
 
 `validator`, `placement` and `placement_uid` are absent from the record of a bundle
 that failed to load, which has no parsed metadata.
