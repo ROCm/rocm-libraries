@@ -660,6 +660,13 @@ def pp_box_sub_gemms(
             out = merged
         return out
 
+    if nclass == 8:
+        sgs = _pp_planned_sub_gemms(
+            p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus
+        )
+        if sgs is not None:
+            return sgs
+        nclass = 7  # no plan (no scipy / infeasible): the pp_boxes 7 packing
     if nclass in (7, 77):
         return _pp_pixel_list_sub_gemms(
             p, tile_m, tile_n, tile_k=tile_k, max_split=max_split, cus=cus,
@@ -744,6 +751,72 @@ def pp_box_sub_gemms(
                 )
             )
             start += tiles
+    return sgs
+
+
+def _pp_planned_sub_gemms(
+    p: ConvProblem,
+    tile_m: int,
+    tile_n: int,
+    *,
+    tile_k: int,
+    max_split: int,
+    cus: int,
+) -> Optional[List[SubGemmParams]]:
+    """``pp_boxes`` 8: pixel-list records of the makespan plan of
+    :func:`kernels.common.conv_dgrad_box_plan.plan_boxes` (one record per tap
+    box, its split degree from the plan's slice length), or None."""
+    from kernels.common.conv_dgrad_box_plan import plan_boxes
+
+    if not p.is_3d or p.groups != 1:
+        return None
+    res = plan_boxes(p, tile_m, tile_n, tile_k, max_split, cus or PP_BOX_SPLIT_CUS)
+    if res is None:
+        return None
+    _T, plan = res
+    nt = ceil_div(p.cpg, tile_n)
+    # Longest slice first (then the box), as pp_boxes 7 orders its records.
+    kt = ceil_div(p.kpg, tile_k)
+    plan = sorted(
+        plan,
+        key=lambda e: (-ceil_div((e[0][1] - e[0][0] + 1) * (e[0][3] - e[0][2] + 1)
+                                 * (e[0][5] - e[0][4] + 1) * kt, e[2]), e[0]),
+    )
+    sgs: List[SubGemmParams] = []
+    start = 0
+    for (zlo, zhi, ylo, yhi, xlo, xhi), tiles, split, rows in plan:
+        ys, xs = yhi - ylo + 1, xhi - xlo + 1
+        blocks = tiles * nt * split
+        sgs.append(
+            SubGemmParams(
+                i_ytilde=0,
+                i_xtilde=0,
+                y_dot_slice=ys,
+                x_dot_slice=xs,
+                h_tilde_slice_begin=0,
+                h_tilde_slice=p.Hi,
+                w_tilde_slice_begin=0,
+                w_tilde_slice=p.Wi,
+                gemm_m=len(rows),
+                gemm_n=p.cpg,
+                gemm_k=ys * xs * p.kpg,
+                block_start=start,
+                block_end=start + blocks,
+                a_embed_h_coeff=p.Di,  # the box: all of dX
+                a_embed_w_coeff=0,
+                b_y_stride=zlo,
+                b_y_offset=ylo,
+                b_x_stride=split,
+                b_x_offset=xlo,
+                d_h_stride=1,
+                d_h_offset=0,
+                d_w_stride=1,
+                d_w_offset=0,
+                gemm_k_padded=zhi - zlo + 1,
+                row_list=tuple(rows),
+            )
+        )
+        start += blocks
     return sgs
 
 
@@ -1793,7 +1866,10 @@ class DgradConvSpec:
     # (h, w) offsets. Needs split_k 1, no pp_streamk / tapk_pp_epi. Default
     # 0; tags ``pbx<n>``. 7 = pixel lists (_pp_pixel_list_sub_gemms); 77 =
     # the same binary, the launch's one partial tile filled with pixels of
-    # the cheapest class (host-only difference).
+    # the cheapest class (host-only difference). 8 = the same binary, the
+    # records planned for the one-round makespan (conv_dgrad_box_plan:
+    # per-tap-box split degrees, pixels packed into boxes that hold them;
+    # falls back to 7 without a plan).
     pp_boxes: int = 0
     # With pp_boxes and split_k > 1: the workgroup budget the host fills
     # with box split-K slices (pp_box_sub_gemms); 0 = PP_BOX_SPLIT_CUS (one
@@ -2161,7 +2237,7 @@ class DgradConvSpec:
                 # (pp_box_sub_gemms): one binary, one symbol for all of them.
                 "pbx": self.pp_boxes > 0,
                 # pp_boxes 7: rows from the record's pixel list (own binary)
-                "pbl": self.pp_boxes in (7, 77),
+                "pbl": self.pp_boxes in (7, 77, 8),
                 f"pbo{self.pp_box_order}": self.pp_box_order > 0,
                 f"pbd{self.pp_box_det}": self.pp_box_det > 0,
                 # Last, and only when set. The name carries no dtype, and on
@@ -2654,7 +2730,7 @@ def _pp_streamk_conflict(spec: DgradConvSpec) -> str:
     if spec.pp_boxes and not (
         (
             spec.pp_boxes in (3, 5, 33, 55)
-            or (spec.pp_boxes in (7, 77) and not spec.pp_zskip)
+            or (spec.pp_boxes in (7, 77, 8) and not spec.pp_zskip)
             or (
                 100 <= spec.pp_boxes <= 555
                 and all(c in "135" for c in str(spec.pp_boxes))
@@ -4112,7 +4188,7 @@ def _build_tilde_dgrad(
     # row bases, then the rows, see pack_sub_gemm_buffer); a box-local
     # row index m becomes the pixel index the full-dX box decodes.
     _rm_map = None
-    if spec.pp_boxes in (7, 77):
+    if spec.pp_boxes in (7, 77, 8):
         _rm_tab = b.add(
             b.mul(num_sub_gemms_param, b.const_i32(_RECORD_FIELDS + _MAGIC_FIELDS)),
             num_sub_gemms_param,
