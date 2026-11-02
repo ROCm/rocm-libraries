@@ -52,8 +52,8 @@ The following table lists the operations currently executable through the GPU gr
 | Operation | Datatypes | Layouts | Implementation | Notes |
 |-----------|-----------|---------|----------------|-------|
 | Convolution Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference | 1D, 2D and 3D spatial; FP32 output with FP16/BFP16 inputs also registered |
-| Convolution Backward Data | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP16/BFP16 inputs with FP32 or same-type compute |
-| Convolution Backward Weights | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP16/BFP16 inputs with FP32 or same-type compute |
+| Convolution Backward Data | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 compute for all datatypes |
+| Convolution Backward Weights | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 compute for all datatypes |
 | Matmul | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 inputs with FP16/BFP16 output also registered |
 | BatchNorm Forward Inference | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean and variance are required inputs |
 | BatchNorm Forward Inference with Variance | FP16, BFP16, FP32 | Stride-based | GPU Reference | Same signatures as BatchNorm Forward Inference |
