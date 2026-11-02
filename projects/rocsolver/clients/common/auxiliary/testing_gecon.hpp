@@ -250,6 +250,10 @@ void testing_gecon(Arguments& argus)
     I n = argus.get<I>("n");
     I lda = argus.get<I>("lda", n);
 
+    // the handle can be in device pointer mode (the API scalars are on the device in both modes)
+    if(argus.get<char>("pointer_mode", 'H') == 'D')
+        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+
     rocsolver_norm_type norm_type = char2rocsolver_norm_type(norm_typeC);
     rocblas_int hot_calls = argus.iters;
 
