@@ -3,12 +3,6 @@
 Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/index.html).
 
 
-## (Unreleased) hipSOLVER 3.9.0
-
-### Changed
-
-* Documented every parameter of the 64-bit generic dense API (`hipsolver-dense64.h`), including the memory space (host or device) of each pointer argument.
-
 ## hipSOLVER 3.8.0 for ROCm 10.2.0
 
 ### Added
