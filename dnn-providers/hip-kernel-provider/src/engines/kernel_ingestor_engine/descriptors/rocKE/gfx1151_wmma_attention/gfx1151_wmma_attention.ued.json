@@ -11,7 +11,22 @@
     "default": "251327fd-eb3d-40a1-84e2-225af549bce1"
   },
   "predict_engine": {
+    "gfx1100": [
+      "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
+    ],
+    "gfx1101": [
+      "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
+    ],
+    "gfx1102": [
+      "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
+    ],
+    "gfx1150": [
+      "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
+    ],
     "gfx1151": [
+      "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
+    ],
+    "gfx1201": [
       "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
     ]
   }
