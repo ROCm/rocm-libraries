@@ -1,0 +1,140 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""No-GPU tests: every gfx1250 TDM K-loop covers a partial last K tile.
+
+K is a kernel argument, so a K that is not a multiple of tile_k only shows up at
+run time: a loop that counts its tiles rounding down skips the partial last tile
+and silently leaves that K tail out of C (the early-refill loop once did). TDM
+clips the partial tile to K, so a loop only has to reach it.
+
+Each test lowers one K-loop and evaluates its emitted i32 arithmetic for a range
+of K: the K loop's bounds and step (``%k0``), plus the tiles each loop handles
+outside it. The loop must process ceil(K / tile_k) tiles; the early-refill loop
+pads the count to an even number with one zero-filled tile past K. The ring also
+clamps its prologue fills to the last tile origin, which must be the start of the
+partial tile.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+import unittest
+
+# pytest.ini uses --import-mode=importlib, which does not put this directory on
+# sys.path: without the insert the sibling import below only resolves when an
+# earlier-collected module happened to add it.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from test_gemm_split_barrier import _lower, _ring_spec, _spec  # noqa: E402
+
+_ARITH = re.compile(
+    r"\s*(%[\w.]+) = (add|sub|mul|sdiv|srem)(?: nsw)? i32 (\S+), (\S+)$"
+)
+_SMIN = re.compile(r"\s*(%[\w.]+) = call i32 @llvm\.smin\.i32\(i32 (\S+), i32 (\S+)\)$")
+
+
+class _Kernel:
+    """The i32 arithmetic and the K loop of one lowered kernel."""
+
+    def __init__(self, ll: str):
+        self.defs = {}
+        for line in ll.splitlines():
+            m = _ARITH.match(line)
+            if m:
+                self.defs[m.group(1)] = (m.group(2), m.group(3).rstrip(","), m.group(4))
+                continue
+            m = _SMIN.match(line)
+            if m:
+                self.defs[m.group(1)] = ("smin", m.group(2).rstrip(","), m.group(3))
+        phi = re.search(r"%k0 = phi i32 \[ (\S+), [^\]]+\], \[ (%[\w.]+),", ll)
+        assert phi, "no %k0 K loop"
+        self.start, iv_next = phi.group(1), phi.group(2)
+        op, lhs, step = self.defs[iv_next]
+        assert op == "add" and lhs == "%k0", self.defs[iv_next]
+        self.step = step
+        bound = re.search(r"icmp slt i32 %k0, (\S+)$", ll, re.M)
+        assert bound, "no K-loop bound"
+        self.bound = bound.group(1)
+        self.smins = [n for n, d in self.defs.items() if d[0] == "smin"]
+
+    def value(self, x: str, K: int) -> int:
+        if x == "%K":
+            return K
+        if re.fullmatch(r"-?\d+", x):
+            return int(x)
+        op, a, c = self.defs[x]
+        a, c = self.value(a, K), self.value(c, K)
+        if op == "smin":
+            return min(a, c)
+        if op in ("sdiv", "srem"):
+            q = abs(a) // abs(c) * (1 if (a >= 0) == (c >= 0) else -1)
+            return q if op == "sdiv" else a - q * c
+        return {"add": a + c, "sub": a - c, "mul": a * c}[op]
+
+    def trips(self, K: int) -> int:
+        lo, hi, step = (self.value(x, K) for x in (self.start, self.bound, self.step))
+        return max(0, -(-(hi - lo) // step))
+
+
+def _ks(tile_k):
+    """K from one to five tiles, aligned and with every kind of remainder."""
+    for tiles in (1, 2, 3, 4, 5):
+        for r in (0, 1, tile_k // 2, tile_k - 1):
+            K = tiles * tile_k + r
+            yield K, -(-K // tile_k)
+
+
+class TestTdmKLoopsCoverAPartialLastTile(unittest.TestCase):
+    def _check(self, spec, tiles_of, *, pad_even=False):
+        k = _Kernel(_lower(spec))
+        tile_k = spec.tile.tile_k
+        for K, need in _ks(tile_k):
+            with self.subTest(K=K):
+                got = tiles_of(k, K)
+                want = need + need % 2 if pad_even else need
+                self.assertEqual(got, want, f"K={K}: {got} tiles, need {want}")
+        return k
+
+    def test_ping_pong(self):
+        """Depth 2: the loop computes tile i and loads tile i + 1; one more after."""
+        for label, kw in (
+            ("joint barrier", {}),
+            ("split barrier", dict(split_barrier=True)),
+            (
+                "alternating issuers",
+                dict(split_barrier=True, tdm_alternate_issuers=True),
+            ),
+        ):
+            with self.subTest(label):
+                self._check(_ring_spec(2, **kw), lambda k, K: k.trips(K) + 1)
+
+    def test_ring(self):
+        """Depth 3+: one tile per iteration; fills clamp to the last tile origin."""
+        for depth in (3, 4):
+            with self.subTest(depth=depth):
+                spec = _ring_spec(depth)
+                k = self._check(spec, lambda k, K: k.trips(K))
+                tile_k = spec.tile.tile_k
+                last = {k.defs[n][2] for n in k.smins}
+                self.assertEqual(len(last), 1, "fills clamp to one last tile origin")
+                (last_origin,) = last
+                for K, _ in _ks(tile_k):
+                    with self.subTest(depth=depth, K=K):
+                        o = k.value(last_origin, K)
+                        self.assertLess(o, K, "the last fill starts past K")
+                        self.assertGreaterEqual(
+                            o + tile_k, K, "the last fill stops short of K"
+                        )
+
+    def test_early_refill(self):
+        """Two tiles per iteration plus two after, over an even tile count."""
+        spec = _spec(
+            split_barrier=True, tdm_alternate_issuers=True, tdm_early_refill=True
+        )
+        self._check(spec, lambda k, K: 2 * k.trips(K) + 2, pad_even=True)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -2463,6 +2463,27 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             _emit_kloop_simple()
         _emit_epilogue()
 
+    # Workgroup ids of the split barrier: signal / wait the whole workgroup.
+    _WG_SIGNAL, _WG_WAIT = 0xFFFFFFFF, 0xFFFF
+
+    def _tdm_publish(allowed: int) -> None:
+        """Publish TDM fills: wait until at most ``allowed`` are outstanding, then
+        signal the split barrier. Shared by the TDM K-loops."""
+        b.s_wait_tensorcnt(allowed)
+        b.s_barrier_signal(_WG_SIGNAL)
+
+    def _tdm_signal(allowed: int) -> None:
+        """A K tile's split-barrier signal: drain this wave's fragment reads, then
+        publish."""
+        b.s_waitcnt(lgkmcnt=0)
+        _tdm_publish(allowed)
+
+    def _k_tile_count() -> Value:
+        """ceil((K - k_lo) / block_k): the K tiles of this K range. The last one is
+        partial when K is not a multiple of block_k; the mover clips it to K.
+        Shared by the TDM K-loops that count tiles."""
+        return b.div(b.add(b.sub(_k_upper, k_lo), b.const_i32(block_k - 1)), c_block_k)
+
     def _emit_kloop_tdm_ring() -> None:
         """TDM K-loop over a ``tdm_depth``-buffer LDS ring with a partial wait.
 
@@ -2484,11 +2505,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         ahead_k = (D - 1) * block_k
         # Last in-bounds tile origin, block_k-aligned from k_lo.
         last_origin = b.add(
-            k_lo,
-            b.mul(
-                b.div(b.sub(b.sub(_k_upper, k_lo), b.const_i32(1)), c_block_k),
-                c_block_k,
-            ),
+            k_lo, b.mul(b.sub(_k_tile_count(), b.const_i32(1)), c_block_k)
         )
 
         # Prologue: fill ring slots 0 .. D-2 (clamped so every fill is real).
@@ -2507,16 +2524,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # k+D-1) are the same set at both points. The prologue raises the
         # first signal and a wait after the loop consumes the last one.
         split = spec.trait.split_barrier
-        _WG_SIGNAL, _WG_WAIT = 0xFFFFFFFF, 0xFFFF
 
         def _signal_next_tile_ready() -> None:
-            b.s_waitcnt(lgkmcnt=0)
-            b.s_wait_tensorcnt(allowed)
-            b.s_barrier_signal(_WG_SIGNAL)
+            _tdm_signal(allowed)
 
         if split:
-            b.s_wait_tensorcnt(allowed)
-            b.s_barrier_signal(_WG_SIGNAL)
+            _tdm_publish(allowed)
 
         c_ring = b.const_i32(D)
         c_ahead = b.const_i32(D - 1)
@@ -2660,7 +2673,6 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         reads use immediate offsets, over an even tile count (see below).
         """
         nonlocal _for_results
-        sig_all, wait_all = 0xFFFFFFFF, 0xFFFF
         c1 = b.const_i32(1)
         c2 = b.const_i32(2)
         bk2 = b.const_i32(2 * block_k)
@@ -2673,12 +2685,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             return b.sub(c1, p) if isinstance(p, Value) else b.const_i32(1 - p)
 
         def _signal() -> None:
-            b.s_waitcnt(lgkmcnt=0)
-            b.s_wait_tensorcnt(0)
-            b.s_barrier_signal(sig_all)
+            _tdm_signal(0)
 
         def _wait() -> None:
-            b.s_barrier_wait(wait_all)
+            b.s_barrier_wait(_WG_WAIT)
 
         def _top_wait(p) -> None:
             # The pair owning the other half already consumed this phase when
@@ -2714,8 +2724,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # prologue phase here, as if it had refilled half 1 after tile -1.
         emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
         emit_load_phase(A_smem, B_smem, b.add(k_lo, c_block_k), lds_parity=1)
-        b.s_wait_tensorcnt(0)
-        b.s_barrier_signal(sig_all)
+        _tdm_publish(0)
         with b.scf_if(b.cmp_eq(pair, c1)):
             _wait()
 
@@ -2725,9 +2734,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # multiple of block_k) is loaded; the mover clips it to K. With an odd
         # count the extra tile lies past K: its descriptor's remaining-K extent
         # is zero, the mover fills it with zeros, and its WMMAs add nothing.
-        n_tiles = b.div(
-            b.add(b.sub(_k_upper, k_lo), b.const_i32(block_k - 1)), c_block_k
-        )
+        n_tiles = _k_tile_count()
         n_even = b.add(n_tiles, b.mod(n_tiles, c2))
         n_pairs = b.div(b.sub(n_even, c2), c2)
         k_pairs_end = b.add(k_lo, b.mul(n_pairs, bk2))
@@ -2828,16 +2835,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # every wave has finished reading the buffer about to be refilled and
         # the mover's fill of the tile about to be read has landed.
         split = spec.trait.split_barrier
-        _WG_SIGNAL, _WG_WAIT = 0xFFFFFFFF, 0xFFFF
 
         def _signal_tile_done() -> None:
-            b.s_waitcnt(lgkmcnt=0)
-            b.s_wait_tensorcnt(0)
-            b.s_barrier_signal(_WG_SIGNAL)
+            _tdm_signal(0)
 
         if split:
-            b.s_wait_tensorcnt(0)
-            b.s_barrier_signal(_WG_SIGNAL)
+            _tdm_publish(0)
 
         # Loop bounds: iterate k in [k_lo, k_hi - block_k), so the last tile
         # is handled by the epilogue (which doesn't need to issue a

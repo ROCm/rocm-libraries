@@ -23,13 +23,9 @@
 
 #include "rocke/instance_gemm_internal.h"
 
-/* Forward declaration. is_tdm is passed explicitly rather than re-read from
- * ctx->spec->trait.tdm: after the function-entry branch on tdm, the compiler
- * can propagate its cached value and fold the drain's re-check to false even
- * when tdm is true. Passing it as a parameter breaks that folding. */
+/* Forward declarations. rocke_gemm_drain_sync takes is_tdm from K-loops that
+ * already hold it; rocke_gemm_drain_prefetch_and_sync reads it from the spec. */
 static void rocke_gemm_drain_sync(rocke_ir_builder_t* b, bool is_tdm);
-/* Wrapper that reads trait.tdm from ctx; safe to call from functions that do
- * not have an entry-branch optimization hazard (e.g. emit_kloop_simple). */
 static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx);
 
 /* ===================================================================== *
@@ -356,9 +352,7 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
     ctx->num_for_results = for_op.op->num_results;
 }
 
-/* Mirrors Python _sync_after_load / _drain_prefetch_and_sync.
- * is_tdm is passed explicitly rather than read from ctx->spec->trait.tdm
- * so the compiler cannot constant-fold the branch away (see forward decl). */
+/* Mirrors Python _sync_after_load / _drain_prefetch_and_sync. */
 static void rocke_gemm_drain_sync(rocke_ir_builder_t* b, bool is_tdm)
 {
     if(is_tdm)
@@ -381,16 +375,33 @@ static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx)
 #define ROCKE_GEMM_WG_SIGNAL 0xFFFFFFFFu
 #define ROCKE_GEMM_WG_WAIT 0xFFFF
 
-/* The split-barrier signal: drain this wave's fragment reads and wait until at
- * most `*(int*)user` fills are outstanding (the tile about to be read has
- * landed), then arrive. Mirrors Python _signal_next_tile_ready /
- * _signal_tile_done / the early refill's _signal. */
+/* Publish TDM fills: wait until at most `allowed` are outstanding, then signal
+ * the split barrier. Shared by the TDM K-loops. Mirrors Python _tdm_publish. */
+static void rocke_gemm_tdm_publish(rocke_ir_builder_t* b, int allowed)
+{
+    rocke_b_s_wait_tensorcnt(b, allowed);
+    rocke_b_s_barrier_signal(b, ROCKE_GEMM_WG_SIGNAL);
+}
+
+/* A K tile's split-barrier signal: drain this wave's fragment reads, then
+ * publish with at most `*(int*)user` fills outstanding (the tile about to be
+ * read has landed). Mirrors Python _tdm_signal. */
 static void rocke_gemm_split_signal(rocke_gemm_build_ctx_t* ctx, void* user)
 {
+    rocke_b_s_waitcnt(ctx->b, -1, 0, -1);
+    rocke_gemm_tdm_publish(ctx->b, *(const int*)user);
+}
+
+/* ceil((K - k_lo) / block_k): the K tiles of this K range. The last one is
+ * partial when K is not a multiple of block_k; the mover clips it to K. Shared
+ * by the TDM K-loops that count tiles. Mirrors Python _k_tile_count; one value
+ * per statement, in the Python engine's order. */
+static rocke_value_t* rocke_gemm_k_tile_count(rocke_gemm_build_ctx_t* ctx)
+{
     rocke_ir_builder_t* b = ctx->b;
-    rocke_b_s_waitcnt(b, -1, 0, -1);
-    rocke_b_s_wait_tensorcnt(b, *(const int*)user);
-    rocke_b_s_barrier_signal(b, ROCKE_GEMM_WG_SIGNAL);
+    rocke_value_t* k_span = rocke_b_sub(b, ctx->k_upper, ctx->k_lo);
+    rocke_value_t* c_bk_m1 = rocke_b_const_i32(b, ctx->block_k - 1);
+    return rocke_b_div(b, rocke_b_add(b, k_span, c_bk_m1), ctx->c_block_k);
 }
 
 /* ===================================================================== *
@@ -407,9 +418,9 @@ void rocke_gemm_emit_kloop_tdm_ring(rocke_gemm_build_ctx_t* ctx)
     const bool split = ctx->spec->trait.split_barrier;
     rocke_gemm_emit_hook_t signal_next_tile_ready = {rocke_gemm_split_signal, (void*)&allowed};
     rocke_gemm_emit_hook_t none = {NULL, NULL};
-    rocke_value_t* k_span = rocke_b_sub(b, ctx->k_upper, ctx->k_lo);
+    rocke_value_t* n_tiles = rocke_gemm_k_tile_count(ctx);
     rocke_value_t* c_one_k = rocke_b_const_i32(b, 1);
-    rocke_value_t* last_tile = rocke_b_div(b, rocke_b_sub(b, k_span, c_one_k), ctx->c_block_k);
+    rocke_value_t* last_tile = rocke_b_sub(b, n_tiles, c_one_k);
     rocke_value_t* last_origin
         = rocke_b_add(b, ctx->k_lo, rocke_b_mul(b, last_tile, ctx->c_block_k));
     rocke_value_t* c_ring;
@@ -438,8 +449,7 @@ void rocke_gemm_emit_kloop_tdm_ring(rocke_gemm_build_ctx_t* ctx)
      * consumes the last one. */
     if(split)
     {
-        rocke_b_s_wait_tensorcnt(b, allowed);
-        rocke_b_s_barrier_signal(b, ROCKE_GEMM_WG_SIGNAL);
+        rocke_gemm_tdm_publish(b, allowed);
     }
 
     c_ring = rocke_b_const_i32(b, D);
@@ -527,9 +537,6 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     int loads_per_tile;
-    /* Capture is_tdm once at function entry into a local bool so the compiler
-     * cannot constant-fold it away inside the loop based on the entry branch
-     * (see the comment on rocke_gemm_drain_sync). */
     const bool is_tdm = ctx->spec->trait.tdm;
     const bool split = ctx->spec->trait.split_barrier;
     static const int tile_done_allowed = 0;
@@ -573,8 +580,7 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
      * first iteration, then the one inside each iteration's WMMA phase. */
     if(split)
     {
-        rocke_b_s_wait_tensorcnt(b, 0);
-        rocke_b_s_barrier_signal(b, ROCKE_GEMM_WG_SIGNAL);
+        rocke_gemm_tdm_publish(b, 0);
     }
 
     K_minus_one_tile = rocke_b_sub(b, ctx->k_upper, ctx->c_block_k);
@@ -762,8 +768,7 @@ void rocke_gemm_emit_kloop_tdm_early_refill(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* k1 = rocke_b_add(b, ctx->k_lo, ctx->c_block_k);
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k1, 1, NULL);
     }
-    rocke_b_s_wait_tensorcnt(b, 0);
-    rocke_b_s_barrier_signal(b, ROCKE_GEMM_WG_SIGNAL);
+    rocke_gemm_tdm_publish(b, 0);
     {
         rocke_if_t gate = rocke_b_scf_if(b, rocke_b_cmp_eq(b, pair, c1));
         rocke_b_region_enter(b, gate.then_region);
@@ -777,11 +782,7 @@ void rocke_gemm_emit_kloop_tdm_early_refill(rocke_gemm_build_ctx_t* ctx)
      * multiple of block_k) is loaded; the mover clips it to K. With an odd
      * count the extra tile lies past K: its descriptor's remaining-K extent
      * is zero, the mover fills it with zeros, and its WMMAs add nothing. */
-    /* One value per statement: C leaves argument evaluation order unspecified,
-     * and the Python engine creates the sub before the constant. */
-    rocke_value_t* k_span = rocke_b_sub(b, ctx->k_upper, ctx->k_lo);
-    rocke_value_t* c_bk_m1 = rocke_b_const_i32(b, ctx->block_k - 1);
-    rocke_value_t* n_tiles = rocke_b_div(b, rocke_b_add(b, k_span, c_bk_m1), ctx->c_block_k);
+    rocke_value_t* n_tiles = rocke_gemm_k_tile_count(ctx);
     rocke_value_t* n_even = rocke_b_add(b, n_tiles, rocke_b_mod(b, n_tiles, c2));
     rocke_value_t* n_pairs = rocke_b_div(b, rocke_b_sub(b, n_even, c2), c2);
     rocke_value_t* k_pairs_end = rocke_b_add(b, ctx->k_lo, rocke_b_mul(b, n_pairs, bk2));
