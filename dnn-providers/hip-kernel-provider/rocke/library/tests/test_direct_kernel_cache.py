@@ -225,9 +225,10 @@ class _InMemoryEntriesCache(KernelCache):
     metadata file per job is over ten thousand small files, and writing then
     parsing them outlasts the per-test timeout on slow filesystems (Windows
     CI). The tests that build their own cache cover the on-disk layout.
+    ``extra_meta`` is added to every entry's metadata.
     """
 
-    def __init__(self, root, arch, identities):
+    def __init__(self, root, arch, identities, extra_meta=None):
         super().__init__(root, arch)
         key = hashlib.sha256(b"placeholder").hexdigest()
         # The binary's symbol is the first identity's, as when each is put.
@@ -238,6 +239,7 @@ class _InMemoryEntriesCache(KernelCache):
                 "blob": key,
                 "hsaco_bytes": self._blob.stat().st_size,
                 "kernel_name": self.blob_kernel_name(key),
+                **(extra_meta or {}),
             }
             for ident in identities
         }
@@ -1779,15 +1781,13 @@ def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_job
 
 
 def _wave32_cache(tmp_path, jobs, spec_wave_size):
-    """The wave32 jobs with placeholder binaries. ``spec_wave_size`` is the
+    """The wave32 jobs with placeholder binaries, held in memory (thousands
+    of jobs: see :class:`_InMemoryEntriesCache`). ``spec_wave_size`` is the
     wave size the build recorded (``None``: an entry that predates the record)."""
-    c = KernelCache(tmp_path, _WAVE32_ARCH)
-    for job in jobs:
-        meta = {"kernel_name": job.identity.label()}
-        if spec_wave_size is not None:
-            meta["spec_wave_size"] = spec_wave_size
-        c.put(job.identity, b"placeholder", meta)
-    return c
+    extra = {} if spec_wave_size is None else {"spec_wave_size": spec_wave_size}
+    return _InMemoryEntriesCache(
+        tmp_path, _WAVE32_ARCH, [j.identity for j in jobs], extra
+    )
 
 
 def test_wave32_build_records_its_wave_size(wave32_jobs):
