@@ -7,9 +7,9 @@ name records only the mode, off the default."""
 
 import pytest
 
-from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters
-from Tensile.SolutionStructs.Naming import getKernelNameMin
-from Tensile.SolutionStructs.Solution import Solution
+from tensilelite.Common.ValidParameters import checkParametersAreValid, validParameters
+from tensilelite.SolutionStructs.Naming import getKernelNameMin
+from tensilelite.SolutionStructs.Solution import Solution
 
 pytestmark = pytest.mark.unit
 

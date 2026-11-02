@@ -204,8 +204,8 @@ launched work proportional to real tokens. At `T=1` this shrinks the grid from
 ## 8. Implementation details worth the math
 
 ### 8.1 K=128 hero atom
-The MFMA is `f32 = 16×16×128` over fp8 (`mfma_scale_f32_16x16x128_f8f6f4`, scale
-exponents pinned to 0 = unscaled). K=128 per instruction means **4× fewer K-loop
+The MFMA is `f32 = 16×16×128` over fp8 (`mfma_scale_f32_16x16x128_f8f6f4`, both
+scale operands at literal 0 = unscaled instruction). K=128 per instruction means **4× fewer K-loop
 trips** than a 16×16×32 atom, and — by §2 — one MFMA covers exactly one 128-wide
 scale block, so dequant is one f32 multiply per MFMA.
 

@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
@@ -110,10 +111,9 @@ static void call_spmv(hipsparseHandle_t&     handle,
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create dense vectors
-    hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, x_size, dx, xType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, y_size, dy_1, yType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, y_size, dy_2, yType));
+    hipsparseLocalDnVec x(x_size, dx, xType);
+    hipsparseLocalDnVec y1(y_size, dy_1, yType);
+    hipsparseLocalDnVec y2(y_size, dy_2, yType);
 
     // Query SpMV buffer
     size_t bufferSize;
@@ -165,9 +165,6 @@ static void call_spmv(hipsparseHandle_t&     handle,
     unit_check_near(1, y_size, 1, hy_gold.data(), hy_2.data());
 
     CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 }
 
 // Exercises the multi-configuration cache path: query bufferSize once per
@@ -222,9 +219,8 @@ static void call_spmv_shared_buffer(hipsparseHandle_t&                       han
         const J x_size = (op == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? n : m;
         const J y_size = (op == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : n;
 
-        hipsparseDnVecDescr_t x, y;
-        CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, x_size, dx, xType));
-        CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, y_size, dy, yType));
+        hipsparseLocalDnVec x(x_size, dx, xType);
+        hipsparseLocalDnVec y(y_size, dy, yType);
 
         for(hipsparseSpMVAlg_t alg : algs)
         {
@@ -233,9 +229,6 @@ static void call_spmv_shared_buffer(hipsparseHandle_t&                       han
                 handle, op, &alpha, matA, x, &beta, y, computeType, alg, &bufferSize));
             buffer_size_max = std::max(buffer_size_max, bufferSize);
         }
-
-        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
     }
 
     void* buffer = nullptr;
@@ -258,9 +251,8 @@ static void call_spmv_shared_buffer(hipsparseHandle_t&                       han
 
             CHECK_HIP_ERROR(hipMemcpy(dy, hy.data(), sizeof(Y) * y_size, hipMemcpyHostToDevice));
 
-            hipsparseDnVecDescr_t x, y;
-            CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, x_size, dx, xType));
-            CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, y_size, dy, yType));
+            hipsparseLocalDnVec x(x_size, dx, xType);
+            hipsparseLocalDnVec y(y_size, dy, yType);
 
             for(hipsparseSpMVAlg_t alg : algs)
             {
@@ -296,9 +288,6 @@ static void call_spmv_shared_buffer(hipsparseHandle_t&                       han
 
                 unit_check_near(1, y_size, 1, hy_ref.data(), hy_out.data());
             }
-
-            CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-            CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
         }
     }
 

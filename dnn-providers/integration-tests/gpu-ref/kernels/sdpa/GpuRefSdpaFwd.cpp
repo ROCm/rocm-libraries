@@ -126,8 +126,9 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
             s += toAccum(mask[maskOffset]);
         }
 
-        // (b) Sliding-window mask (applied after the additive mask).
-        // Asymmetric: +1 on the right bound, none on the left bound.
+        // (b) Sliding-window mask (applied after the additive mask), cuDNN semantics:
+        // keeps skv in [sq + windowOffset - leftBound + 1, sq + windowOffset + rightBound],
+        // so leftBound = L keeps the L keys ending at the diagonal.
         if(args.rightBound >= 0)
         {
             long long startKv = sq + 1 + windowOffset + args.rightBound;
@@ -142,7 +143,7 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         }
         if(args.leftBound >= 0)
         {
-            if(skv < sq + windowOffset - args.leftBound)
+            if(skv <= sq + windowOffset - args.leftBound)
             {
                 s = negInf;
             }

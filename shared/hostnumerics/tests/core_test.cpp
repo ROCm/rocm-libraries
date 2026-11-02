@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <ostream>
+#include <roc/hostnumerics/layout.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <roc/hostnumerics/version.hpp>
@@ -428,4 +429,194 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
     }
 }
 
+TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
+    std::vector<ptrdiff_t> strides{5, -1};
+    const Layout layout(Shape{2, 3}, strides, 2);
+    const Layout spanCopy(Shape{2, 3}, std::span<const ptrdiff_t>(strides), 2);
+    strides[0] = 9;
+    EXPECT_EQ(layout.stride(0), 5);
+    EXPECT_EQ(spanCopy, layout);
+    EXPECT_EQ((Layout(Shape{2, 3}, std::array<ptrdiff_t, 2>{5, -1}, 2)), layout);
+    EXPECT_EQ((Layout(Shape{2, 3}, {5, -1}, 2)), layout);
+    EXPECT_EQ(Layout(Shape{}, {}, 0), Layout{});
+    const auto offset = layout.elementOffset(std::array<size_t, 2>{1, 2});
+    ASSERT_TRUE(offset);
+    EXPECT_EQ(*offset, 5);
+}
+
+TEST(LayoutCpp, FactoriesAndExplicitOrders) {
+    const Shape shape{2, 3, 5};
+    const Layout rowMajor(shape, {15, 5, 1}, 0);
+    EXPECT_EQ(Layout::contiguous(shape), rowMajor);
+    EXPECT_EQ(Layout::contiguousLastDimensionFastest(shape), rowMajor);
+    EXPECT_EQ(Layout::contiguousFirstDimensionFastest(shape), (Layout(shape, {1, 2, 6}, 0)));
+    const std::array<size_t, 3> order{1, 2, 0};
+    const auto checked = Layout::getContiguousLayout(shape, order);
+    ASSERT_TRUE(checked);
+    EXPECT_EQ(*checked, (Layout(shape, {1, 10, 2}, 0)));
+    EXPECT_EQ(Layout::contiguous(shape, order), *checked);
+    EXPECT_EQ(Layout::contiguous(shape, {1, 2, 0}), *checked);
+    const std::array<size_t, 3> coordinates{1, 2, 3};
+    const auto offset = checked->elementOffset(coordinates);
+    ASSERT_TRUE(offset);
+    EXPECT_EQ(*offset, static_cast<ptrdiff_t>(shape.linearIndex(coordinates, order)));
+    EXPECT_EQ(Layout::contiguous(Shape{}, {}), Layout{});
+    EXPECT_EQ(Layout::contiguousLastDimensionFastest(Shape{2, 0, 3}),
+              (Layout(Shape{2, 0, 3}, {0, 3, 1}, 0)));
+    EXPECT_EQ(Layout::contiguousFirstDimensionFastest(Shape{2, 0, 3}),
+              (Layout(Shape{2, 0, 3}, {1, 2, 0}, 0)));
+}
+
+TEST(LayoutCpp, InvalidStrideRanksAndDimensionsThrow) {
+    const Shape shape{2, 3};
+    EXPECT_THROW((Layout(shape, std::vector<ptrdiff_t>{1}, 0)), std::runtime_error);
+    EXPECT_THROW(Layout(shape, {3, 1}, 0).stride(shape.rank()), std::runtime_error);
+    EXPECT_THROW(Layout::contiguous(shape, {0}), std::runtime_error);
+    EXPECT_THROW(Layout::contiguous(Shape{std::numeric_limits<size_t>::max()}), std::runtime_error);
+}
+
+TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
+    for (const Layout original :
+         {Layout{}, Layout(Shape{}, {}, -7), Layout(Shape{2, 3}, {5, -1}, 2),
+          Layout(Shape{2, 0}, {0, 1}, 4)}) {
+        Layout copied(original);
+        EXPECT_EQ(copied, original);
+        Layout moved(std::move(copied));
+        EXPECT_EQ(moved, original);
+        // Layout moves reset the source to a scalar with zero offset.
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_TRUE(copied == Layout{});
+        EXPECT_EQ(copied.shape().elementCount(), 1);
+        EXPECT_TRUE(copied.strides().empty());
+        const auto copiedOffset = copied.elementOffset({});
+        ASSERT_TRUE(copiedOffset);
+        EXPECT_EQ(*copiedOffset, 0);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+
+        Layout assigned;
+        assigned = original;
+        EXPECT_EQ(assigned, original);
+        Layout moveAssigned(Shape{9}, {1}, 0);
+        moveAssigned = std::move(assigned);
+        EXPECT_EQ(moveAssigned, original);
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_TRUE(assigned == Layout{});
+        EXPECT_EQ(assigned.shape().elementCount(), 1);
+        EXPECT_TRUE(assigned.strides().empty());
+        const auto assignedOffset = assigned.elementOffset({});
+        ASSERT_TRUE(assignedOffset);
+        EXPECT_EQ(*assignedOffset, 0);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        Layout& self = moveAssigned;
+        moveAssigned = std::move(self);
+        EXPECT_EQ(moveAssigned, original);
+    }
+}
+
+TEST(LayoutCpp, ContiguousFailureIsReturnedBeforeBoundaryReporting) {
+    using namespace roc::hostnumerics::detail;
+    const auto result = Layout::getContiguousLayout(Shape{std::numeric_limits<size_t>::max()});
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().error, LayoutError::ExtentOutOfRange);
+    EXPECT_EQ(result.error().dimension, 0);
+    EXPECT_EQ(result.error().value, std::numeric_limits<size_t>::max());
+    EXPECT_EQ(result.error().limit, static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()));
+    const auto valid = Layout::getContiguousLayout(Shape{2, 3});
+    ASSERT_TRUE(valid);
+    EXPECT_EQ(valid->stride(0), 3);
+    EXPECT_EQ(valid->stride(1), 1);
+    const auto invalidOrder = Layout::getContiguousLayout(Shape{2, 3}, std::array<size_t, 2>{1, 1});
+    ASSERT_FALSE(invalidOrder);
+    EXPECT_EQ(invalidOrder.error().error, LayoutError::InvalidOrder);
+    EXPECT_EQ(invalidOrder.error().dimension, 1);
+    EXPECT_EQ(invalidOrder.error().value, 1);
+    EXPECT_EQ(invalidOrder.error().limit, 2);
+    const auto outside = Layout::getContiguousLayout(Shape{2, 3}, {0, 2});
+    ASSERT_FALSE(outside);
+    EXPECT_EQ(outside.error().error, LayoutError::InvalidOrder);
+    EXPECT_EQ(outside.error().value, 2);
+    const auto rank = Layout::getContiguousLayout(Shape{2, 3}, {0});
+    ASSERT_FALSE(rank);
+    EXPECT_EQ(rank.error().error, LayoutError::OrderRankMismatch);
+    EXPECT_EQ(rank.error().value, 1);
+    EXPECT_EQ(rank.error().limit, 2);
+    const size_t halfRange = (static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) + 1) / 2;
+    const auto overflow = Layout::getContiguousLayout(Shape{2, halfRange});
+    ASSERT_FALSE(overflow);
+    EXPECT_EQ(overflow.error().error, LayoutError::ContiguousStrideOverflow);
+    EXPECT_EQ(overflow.error().dimension, 0);
+    static_assert(noexcept(std::declval<const Layout&>() == std::declval<const Layout&>()));
+}
+
+TEST(LayoutCpp, OffsetFailuresCarryContextWithoutThrowing) {
+    using namespace roc::hostnumerics::detail;
+    static_assert(noexcept(std::declval<const Layout&>().elementOffset({})));
+    static_assert(std::is_nothrow_constructible_v<Expected<ptrdiff_t, LayoutFailure>, ptrdiff_t>);
+    static_assert(std::is_nothrow_constructible_v<Expected<ptrdiff_t, LayoutFailure>,
+                                                  Unexpected<LayoutFailure>>);
+    const Layout layout(Shape{3, 3}, {std::numeric_limits<ptrdiff_t>::max(), 1}, 0);
+    const auto rank = layout.elementOffset(std::array<size_t, 1>{0});
+    ASSERT_FALSE(rank);
+    EXPECT_EQ(rank.error().error, LayoutError::CoordinateRankMismatch);
+    EXPECT_EQ(rank.error().value, 1);
+    EXPECT_EQ(rank.error().limit, 2);
+    const auto bounds = layout.elementOffset(std::array<size_t, 2>{2, 3});
+    ASSERT_FALSE(bounds);
+    EXPECT_EQ(bounds.error().error, LayoutError::CoordinateOutOfRange);
+    EXPECT_EQ(bounds.error().dimension, 1);
+    EXPECT_EQ(bounds.error().value, 3);
+    EXPECT_EQ(bounds.error().limit, 3);
+    const auto multiply = layout.elementOffset(std::array<size_t, 2>{2, 0});
+    ASSERT_FALSE(multiply);
+    EXPECT_EQ(multiply.error().error, LayoutError::OffsetMultiplyOverflow);
+    EXPECT_EQ(multiply.error().dimension, 0);
+    const auto add = layout.elementOffset(std::array<size_t, 2>{1, 1});
+    ASSERT_FALSE(add);
+    EXPECT_EQ(add.error().error, LayoutError::OffsetAddOverflow);
+    EXPECT_EQ(add.error().dimension, 1);
+    const auto secondAxis = Layout(Shape{2, 3}, {0, std::numeric_limits<ptrdiff_t>::max()}, 0)
+                                .elementOffset(std::array<size_t, 2>{0, 2});
+    ASSERT_FALSE(secondAxis);
+    EXPECT_EQ(secondAxis.error().error, LayoutError::OffsetMultiplyOverflow);
+    EXPECT_EQ(secondAxis.error().dimension, 1);
+}
+
+TEST(LayoutCpp, ReachableBoundsAndOverflowContext) {
+    using namespace roc::hostnumerics::detail;
+    static_assert(noexcept(std::declval<const Layout&>().getElementBounds()));
+    for (const auto& [layout, expected] :
+         {std::pair{Layout{}, std::pair<ptrdiff_t, ptrdiff_t>{0, 0}},
+          std::pair{Layout(Shape{}, {}, -7), std::pair<ptrdiff_t, ptrdiff_t>{-7, -7}},
+          std::pair{Layout(Shape{2, 3}, {-3, 1}, 3), std::pair<ptrdiff_t, ptrdiff_t>{0, 5}},
+          std::pair{Layout(Shape{2, 3}, {0, 0}, 4), std::pair<ptrdiff_t, ptrdiff_t>{4, 4}},
+          std::pair{Layout(Shape{2, 0}, {1, 1}, 9), std::pair<ptrdiff_t, ptrdiff_t>{0, -1}}}) {
+        const auto bounds = layout.getElementBounds();
+        ASSERT_TRUE(bounds);
+        EXPECT_EQ(*bounds, expected);
+    }
+    const auto maximum = std::numeric_limits<ptrdiff_t>::max();
+    const size_t halfRange = (static_cast<size_t>(maximum) + 1) / 2;
+    const auto boundary =
+        Layout(Shape{2, halfRange}, {static_cast<ptrdiff_t>(halfRange), 1}, 0).getElementBounds();
+    ASSERT_TRUE(boundary);
+    EXPECT_EQ(boundary->first, 0);
+    EXPECT_EQ(boundary->second, maximum);
+    const auto multiply = Layout(Shape{2, 3}, {0, maximum}, 0).getElementBounds();
+    ASSERT_FALSE(multiply);
+    EXPECT_EQ(multiply.error().error, LayoutError::OffsetMultiplyOverflow);
+    EXPECT_EQ(multiply.error().dimension, 1);
+    const auto add = Layout(Shape{2, 2}, {0, 1}, maximum).getElementBounds();
+    ASSERT_FALSE(add);
+    EXPECT_EQ(add.error().error, LayoutError::OffsetAddOverflow);
+    EXPECT_EQ(add.error().dimension, 1);
+    const auto minimum = std::numeric_limits<ptrdiff_t>::min();
+    const auto negative = Layout(Shape{2}, {minimum}, 0).getElementBounds();
+    ASSERT_TRUE(negative);
+    EXPECT_EQ(negative->first, minimum);
+    EXPECT_EQ(negative->second, 0);
+    const auto negativeOverflow = Layout(Shape{2, 2}, {0, -1}, minimum).getElementBounds();
+    ASSERT_FALSE(negativeOverflow);
+    EXPECT_EQ(negativeOverflow.error().error, LayoutError::OffsetAddOverflow);
+    EXPECT_EQ(negativeOverflow.error().dimension, 1);
+}
 }  // namespace

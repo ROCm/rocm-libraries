@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Benchmark registered GDN single-token decode candidates.
+"""Benchmark registered GDN single-token decode tiles.
 
-Candidate enumeration comes only from the dispatch registry. Production
-``auto`` is reported separately and remains a static policy.
+Candidate enumeration comes only from the dispatch registry: each registered
+tile's base configuration (every knob at its default). Production ``auto`` is
+reported separately and remains a static policy.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import sys
 from dispatch.gdn import (
     GdnDecodeRequest,
     dispatch_gdn_decode,
-    dispatch_gdn_decode_all,
+    dispatch_gdn_decode_bases,
 )
 from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
@@ -27,8 +28,9 @@ DEFAULT_BATCHES = (1, 16, 64, 256)
 
 
 def registered_results(req: GdnDecodeRequest):
-    """Return the exact registry results consumed by candidate benchmarking."""
-    return dispatch_gdn_decode_all(req)
+    """Return the exact registry results consumed by candidate benchmarking:
+    each registered tile's base configuration, in registry order."""
+    return dispatch_gdn_decode_bases(req)
 
 
 def eager_us(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
@@ -145,7 +147,7 @@ def main() -> int:
 
         auto = dispatch_gdn_decode(request)
         for result in (auto, *results):
-            spec: GdnDecodeSpec = result.spec
+            spec: GdnDecodeSpec = result.spec.kernel_spec
             arm = "auto" if result is auto else "cand"
             tile = f"{spec.num_warps},{spec.warp_threads_k},{spec.blocks_per_v_dim}"
             grid = result.grid[0]

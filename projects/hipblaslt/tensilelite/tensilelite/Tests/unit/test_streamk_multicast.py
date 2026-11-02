@@ -49,16 +49,10 @@ _CK1_CLUSTER = [4, 1]
 # --- registration ----------------------------------------------------------
 
 class TestRegistration:
-    def test_not_a_valid_parameter(self):
-        """StreamKMulticast is derived-only (ClusterBarrier precedent): it must
-        NOT be a user/benchmark-settable validParameter."""
+    def test_multicast_settings_are_derived_only(self):
         from tensilelite.Common.ValidParameters import validParameters
-        assert "StreamKMulticast" not in validParameters
-
-    def test_not_a_default_benchmark_parameter(self):
-        """Not in defaultSolution either -- it is seeded/derived on state only by
-        Solution.assignProblemIndependentDerivedParameters."""
         from tensilelite.Common.GlobalParameters import defaultSolution
+        assert "StreamKMulticast" not in validParameters
         assert "StreamKMulticast" not in defaultSolution
 
 
@@ -142,6 +136,48 @@ class TestValidation:
             # The cooperative multicast pairs the B-broadcast masks with the
             # cluster-scope barrier handshake, so ClusterBarrier is derived on.
             assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
+
+    @pytest.mark.parametrize("shape", [[2, 1], [2, 2], [1, 2], [1, 4], [1, 8]])
+    def test_streamk_spatial_clusters_enable_multicast(self, tmp_path, shape):
+        cfg = _write_variant(tmp_path, "streamk.yaml", fork_overrides={
+            "TileProcessingStrategy": ["StreamK"], "ClusterDim": [shape],
+            "StreamKFixupTreeReduction": [1]})
+        states = _derive_states(cfg)
+        assert states
+        for state in states:
+            assert streamKCluster(state)
+            assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 2
+            assert state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] is True
+            assert state["Multicast"] is True
+            assert state["ClusterBarrier"] is True
+
+    @pytest.mark.parametrize("overrides", [
+        {"ClusterDim": [4, 8]}, {"PrefetchAcrossPersistent": 1},
+        {"PrefetchGlobalRead": 0}, {"StreamKAtomic": 1},
+        {"ReuseAcrossPersistent": 1}, {"SpaceFillingAlgo": [1]},
+        {"TDMInst": 2}, {"DebugStreamK": 1},
+        {"ProblemType": {"OutputAmaxD": True}},
+        {"ProblemType": {"Gradient": True, "UseBias": True}},
+    ])
+    def test_unsupported_spatial_capabilities_fail_explicitly(self, overrides):
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
+        state = _mc_state(TileProcessingStrategy="StreamK", StreamKFixupTreeReduction=1)
+        state.update(overrides)
+        assert not _validateStreamKMulticast(state, False, _isa_map())
+
+    def test_sixteen_n_peers_are_rejected_during_solution_derivation(self, tmp_path):
+        from pathlib import Path
+        import yaml
+        from config_harness import derive_states
+
+        fixture = Path(__file__).parents[1] / "common/streamk/gfx1250/static_streamk_cluster_multicast_boundaries.yaml"
+        config = yaml.safe_load(fixture.read_text())
+        config["BenchmarkProblems"][0] = config["BenchmarkProblems"][0][:2]
+        fork = config["BenchmarkProblems"][0][1]["ForkParameters"]
+        fork[:] = [entry for entry in fork if "ClusterDim" not in entry] + [{"ClusterDim": [[1, 16]]}]
+        path = tmp_path / "n_only_cluster.yaml"
+        path.write_text(yaml.safe_dump(config))
+        assert derive_states(str(path), arch="gfx1250", limit_solutions=1) == []
 
     def test_reject_atomic(self, tmp_path):
         cfg = _write_variant(tmp_path, "atomic.yaml",
@@ -292,12 +328,48 @@ class TestMulticastGate:
         st = _mc_state(Multicast=True)
         assert streamKMulticast(st)
 
-    def test_next_tile_arrive_inert_without_cluster(self):
+    @pytest.mark.parametrize("cluster", [[1, 1], [2, 1]])
+    def test_inert_handshake_without_cooperative_loads(self, cluster):
         from tensilelite.Components.WorkAssignment import StaticGrid
-        mod = StaticGrid().persistentClusterNextTileArrive(
-            writer=None, kernel=_mc_state(ClusterDim=[1, 1]))
-        items = mod.flatitems() if hasattr(mod, "flatitems") else mod.items()
-        assert list(items) == []
+        assignment = StaticGrid()
+        for method in (assignment.persistentMulticastPrologueSignal,
+                       assignment.persistentClusterNextTileArrive,
+                       assignment.persistentMulticastZeroIterClusterWait):
+            module = method(writer=None, kernel=_mc_state(ClusterDim=cluster, ClusterBarrier=False))
+            assert not list(module.flatitems())
+
+
+def test_cluster_flags_and_workspace_address_the_same_physical_peer():
+    from rocisa.code import Module
+    from rocisa.container import sgpr
+    from rocisa.instruction import SAddCU32, SAddU32, SLShiftLeftB32, SMulHIU32, SMulI32
+    from tensilelite.Components.StreamK import StreamKTwoTileDPFirst
+    from test_data_parallel_static import _SKWriter
+
+    kernel = {"TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid",
+              "ClusterDim": [4, 2], "BufferStore": True, "MacroTile0": 128, "MacroTile1": 64}
+    component = StreamKTwoTileDPFirst()
+    flags = list(component.flagOffset(kernel, "FlagOffset", sgpr("Producer")).flatitems())
+    assert [type(i) for i in flags] == [SLShiftLeftB32, SAddU32, SLShiftLeftB32]
+    assert [list(i.getParams()) for i in flags] == [
+        [sgpr("FlagOffset"), sgpr("Producer"), 3],
+        [sgpr("FlagOffset"), sgpr("FlagOffset"), sgpr("StreamKClusterPeer")],
+        [sgpr("FlagOffset"), sgpr("FlagOffset"), 2],
+    ]
+
+    writer = _SKWriter()
+    writer.states.bpeCinternal = 4
+    writer.shiftSrd = lambda _: Module("No base shift")
+    items = list(component.computeWorkspaceSrd(writer, kernel, sgpr("Producer")).flatitems())
+    shift, peer, low, high, add, carry = items[-6:]
+    assert [type(i) for i in (shift, peer, low, high, add, carry)] == [
+        SLShiftLeftB32, SAddU32, SMulI32, SMulHIU32, SAddU32, SAddCU32]
+    slot = shift.getParams()[0]
+    assert list(shift.getParams()) == [slot, sgpr("Producer"), 3]
+    assert list(peer.getParams()) == [slot, slot, sgpr("StreamKClusterPeer")]
+    assert list(low.getParams())[1:] == list(high.getParams())[1:] == ["0x8000", slot]
+    assert list(add.getParams()) == [sgpr("SrdWS+0"), sgpr("SrdWS+0"), low.getParams()[0]]
+    assert list(carry.getParams()) == [sgpr("SrdWS+1"), sgpr("SrdWS+1"), high.getParams()[0]]
 
 
 # --- emitted assembly ------------------------------------------------------

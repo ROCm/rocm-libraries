@@ -141,14 +141,13 @@ namespace TensileLite
         void ProgressListener::preWarmup() {}
 
         void ProgressListener::postWarmup(TimingEvents const& startEvents,
-                                          TimingEvents const& stopEvents,
-                                          hipStream_t const&  stream)
+                                          TimingEvents const& stopEvents)
         {
         }
 
-        void ProgressListener::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                               TimingEvents const&            startEvents,
-                                               TimingEvents const&            stopEvents)
+        void ProgressListener::validateWarmups(std::vector<size_t> const& slots,
+                                               TimingEvents const&        startEvents,
+                                               TimingEvents const&        stopEvents)
         {
         }
 
@@ -170,17 +169,16 @@ namespace TensileLite
 
         void ProgressListener::setNumEnqueuesPerSync(size_t count) {}
 
-        void ProgressListener::preEnqueues(hipStream_t const& stream) {}
+        void ProgressListener::preEnqueues() {}
 
         void ProgressListener::postEnqueues(TimingEvents const& startEvents,
-                                            TimingEvents const& stopEvents,
-                                            hipStream_t const&  stream)
+                                            TimingEvents const& stopEvents)
         {
         }
 
-        void ProgressListener::validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                                TimingEvents const&            startEvents,
-                                                TimingEvents const&            stopEvents)
+        void ProgressListener::validateEnqueues(std::vector<size_t> const& slots,
+                                                TimingEvents const&        startEvents,
+                                                TimingEvents const&        stopEvents)
         {
             struct timeval tmnow;
             struct tm*     tm;

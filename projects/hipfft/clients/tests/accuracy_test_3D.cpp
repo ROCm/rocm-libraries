@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,9 +53,6 @@ static std::vector<std::vector<size_t>> stride_range = {{1}};
 static std::vector<std::vector<size_t>> ioffset_range_zero = {{0, 0}};
 static std::vector<std::vector<size_t>> ooffset_range_zero = {{0, 0}};
 
-static std::vector<std::vector<size_t>> ioffset_range = {{0, 0}, {1, 1}};
-static std::vector<std::vector<size_t>> ooffset_range = {{0, 0}, {1, 1}};
-
 INSTANTIATE_TEST_SUITE_P(
     pow2_3D,
     accuracy_test,
@@ -67,20 +64,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         stride_range,
                                         ioffset_range_zero,
                                         ooffset_range_zero,
-                                        place_range,
-                                        false)),
-    accuracy_test::TestName);
-INSTANTIATE_TEST_SUITE_P(
-    DISABLED_offset_pow2_3D,
-    accuracy_test,
-    ::testing::ValuesIn(param_generator(test_prob,
-                                        generate_lengths({pow2_range, pow2_range, pow2_range}),
-                                        precision_range_full,
-                                        batch_range,
-                                        stride_range,
-                                        stride_range,
-                                        ioffset_range,
-                                        ooffset_range,
                                         place_range,
                                         false)),
     accuracy_test::TestName);
@@ -99,20 +82,6 @@ INSTANTIATE_TEST_SUITE_P(pow2_3D_half,
                              place_range,
                              false)),
                          accuracy_test::TestName);
-INSTANTIATE_TEST_SUITE_P(DISABLED_offset_pow2_3D_half,
-                         accuracy_test,
-                         ::testing::ValuesIn(param_generator(
-                             test_prob,
-                             generate_lengths({pow2_range_half, pow2_range_half, pow2_range_half}),
-                             {fft_precision_half},
-                             batch_range,
-                             stride_range,
-                             stride_range,
-                             ioffset_range,
-                             ooffset_range,
-                             place_range,
-                             false)),
-                         accuracy_test::TestName);
 
 INSTANTIATE_TEST_SUITE_P(
     pow3_3D,
@@ -128,20 +97,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         place_range,
                                         false)),
     accuracy_test::TestName);
-INSTANTIATE_TEST_SUITE_P(
-    DISABLED_offset_pow3_3D,
-    accuracy_test,
-    ::testing::ValuesIn(param_generator(test_prob,
-                                        generate_lengths({pow3_range, pow3_range, pow3_range}),
-                                        precision_range_full,
-                                        batch_range,
-                                        stride_range,
-                                        stride_range,
-                                        ioffset_range,
-                                        ooffset_range,
-                                        place_range,
-                                        false)),
-    accuracy_test::TestName);
 
 INSTANTIATE_TEST_SUITE_P(
     pow5_3D,
@@ -154,20 +109,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         stride_range,
                                         ioffset_range_zero,
                                         ooffset_range_zero,
-                                        place_range,
-                                        false)),
-    accuracy_test::TestName);
-INSTANTIATE_TEST_SUITE_P(
-    DISABLED_offset_pow5_3D,
-    accuracy_test,
-    ::testing::ValuesIn(param_generator(test_prob,
-                                        generate_lengths({pow5_range, pow5_range, pow5_range}),
-                                        precision_range_full,
-                                        batch_range,
-                                        stride_range,
-                                        stride_range,
-                                        ioffset_range,
-                                        ooffset_range,
                                         place_range,
                                         false)),
     accuracy_test::TestName);
@@ -187,7 +128,7 @@ INSTANTIATE_TEST_SUITE_P(
                                         false)),
     accuracy_test::TestName);
 INSTANTIATE_TEST_SUITE_P(
-    DISABLED_offset_prime_3D,
+    DISABLED_prime_3D,
     accuracy_test,
     ::testing::ValuesIn(param_generator(test_prob,
                                         generate_lengths({prime_range, prime_range, prime_range}),
@@ -212,20 +153,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         stride_range,
                                         ioffset_range_zero,
                                         ooffset_range_zero,
-                                        place_range,
-                                        false)),
-    accuracy_test::TestName);
-INSTANTIATE_TEST_SUITE_P(
-    DISABLED_offset_mix_3D,
-    accuracy_test,
-    ::testing::ValuesIn(param_generator(test_prob,
-                                        generate_lengths({pow2_range, pow3_range, prime_range}),
-                                        precision_range_full,
-                                        batch_range,
-                                        stride_range,
-                                        stride_range,
-                                        ioffset_range,
-                                        ooffset_range,
                                         place_range,
                                         false)),
     accuracy_test::TestName);

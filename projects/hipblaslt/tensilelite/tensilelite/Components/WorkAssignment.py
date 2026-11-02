@@ -12,7 +12,7 @@ from ..Component import Component
 from ..Common import log2, clusterEnabled, persistentSpatialCluster
 from rocisa.enum import CacheScope
 from rocisa.functions import scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder
-from ..ExecutionPolicy import hasDynamicAssignment, hasHybridAssignment
+from ..ExecutionPolicy import hasDynamicAssignment, hasHybridAssignment, isStreamKSpatialCluster
 
 @dataclass(frozen=True)
 class QueuePartition:
@@ -136,7 +136,7 @@ class WorkAssignment(Component):
 
     def persistentMulticastPrologueSignal(self, writer, kernel):
         module = Module('Persistent multicast prologue signal')
-        if not persistentSpatialCluster(kernel):
+        if not (persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)):
             return module
         assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
         module.addComment0('cluster B-multicast: elect wave 0 to signal the cluster barrier (pairs first-load wait)')
@@ -152,7 +152,7 @@ class WorkAssignment(Component):
         test is uniform across the cluster and the last tile leaves no arrive.
         """
         module = Module('Persistent cluster next-tile arrive')
-        if not persistentSpatialCluster(kernel):
+        if not (persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)):
             return module
         assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
         partition = Component.TileProcessingStrategy.find(writer).staticPartition()
@@ -168,7 +168,7 @@ class WorkAssignment(Component):
 
     def persistentMulticastZeroIterClusterWait(self, writer, kernel):
         module = Module('Persistent multicast zero-iteration cluster wait')
-        if not persistentSpatialCluster(kernel):
+        if not (persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)):
             return module
         assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
         module.addComment0('cluster B-multicast: zero-iteration skip path consumes the prologue cluster arrive (pairs prologue arrive)')
@@ -711,7 +711,18 @@ class StaticGrid(WorkAssignment):
         # cluster remap WorkGroup0 = cluster*Cs + peerX and WorkGroup1 = peerY. Fold
         # them into the cluster-block rank the DataParallel decode expects:
         #   rank = cluster*(Cs*Ck) + peerY*Cs + peerX
-        if persistentSpatialCluster(kernel):
+        if isStreamKSpatialCluster(kernel):
+            cs = kernel["ClusterDim"][0]
+            with writer.allocTmpSgpr(1, tag="ClusterPeer") as tmp:
+                module.add(SAndB32(dst=sgpr("StreamKClusterPeer"), src0=sgpr("WorkGroup0"), src1=cs - 1,
+                                   comment="cluster peerX"))
+                module.add(SLShiftLeftB32(dst=sgpr(tmp.idx), src=sgpr("WorkGroup1"), shiftHex=log2(cs),
+                                          comment="cluster peerY * Cs"))
+                module.add(SAddU32(dst=sgpr("StreamKClusterPeer"), src0=sgpr("StreamKClusterPeer"), src1=sgpr(tmp.idx),
+                                   comment="physical peer = peerY * Cs + peerX"))
+                module.add(SLShiftRightB32(dst=sgpr("WorkGroup0"), src=sgpr("WorkGroup0"), shiftHex=log2(cs),
+                                           comment="logical StreamK worker = hardware cluster"))
+        elif persistentSpatialCluster(kernel):
             cs, ck = kernel["ClusterDim"]
             with writer.allocTmpSgpr(1, tag="ClusterDPFold") as tRes:
                 t0 = tRes.idx
@@ -738,10 +749,10 @@ class StaticGrid(WorkAssignment):
         # Cluster multicast: arrive once per workgroup at the cluster split barrier
         # here in the prologue, before the first tensor_load_to_lds, so it pairs
         # the cluster-barrier pass's first-load wait. Every later tile's wait pairs
-        # the arrive at the persistent loop close.
-        if persistentSpatialCluster(kernel):
+        # the arrive at the persistent loop close. ABI2 validates the logical
+        # worker's range first, so an idle cluster never signals a barrier.
+        if persistentSpatialCluster(kernel) and not isStreamKSpatialCluster(kernel):
             module.add(self.persistentMulticastPrologueSignal(writer, kernel))
-
 
         if partition.tile_units:
             module.add(processing.computeTotalTiles(writer, kernel, partition.bound))
@@ -749,6 +760,8 @@ class StaticGrid(WorkAssignment):
             module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
         else:
             module.add(processing.initializePartition(writer, kernel))
+        if isStreamKSpatialCluster(kernel):
+            module.add(self.persistentMulticastPrologueSignal(writer, kernel))
         return module
 
     def activateReservedOrAcquire(self, writer, kernel, processing, tPA, tPB):
