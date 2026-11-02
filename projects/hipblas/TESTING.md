@@ -469,7 +469,7 @@ GPU-side sanitizer behavior is limited by the ROCm stack. Host marshalling and t
 
 ## Why We Test This Way
 
-hipBLAS is a thin, multi-backend API. One data-driven binary can instance the same harness for every precision, transpose, batch form, pointer mode, and language binding, and can drop cases that do not exist on the backend being built. The host reference is what makes a marshalling bug visible: a swapped leading dimension or a missed Fortran entry point disagrees with CBLAS even when the backend itself is correct. CTest (`shared/ctest`) and the install-tree `CTestTestfile.cmake` are how monorepo automation and packaged builds select a tier. The TheRock script is intentionally narrower than `rtest.py -t psdb`; that split is recorded above so a green PR is not read as "every YAML `quick` case ran."
+hipBLAS is a thin, multi-backend API. One data-driven binary can instance the same harness for every precision, transpose, batch form, pointer mode, and language binding, and can drop cases that do not exist on the backend being built. The host reference is what makes a marshalling bug visible: a swapped leading dimension or a missed Fortran entry point disagrees with CBLAS even when the backend itself is correct. CTest (`shared/ctest`) and the install-tree `CTestTestfile.cmake` are how monorepo automation and packaged builds select a tier. The TheRock script is intentionally narrower than `rtest.py -t psdb`; that split is recorded above so a green PR is not read as "every YAML `quick` case ran".
 
 ## Key Quality Concerns
 
