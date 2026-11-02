@@ -789,6 +789,22 @@ void RTCCache::enable_write_mostly()
     sqlite3_step(wal_stmt.get());
 }
 
+void RTCCache::begin_aot_cache_transaction()
+{
+    auto begin_stmt = prepare_stmt(db_user, "BEGIN IMMEDIATE");
+    if(sqlite3_step(begin_stmt.get()) != SQLITE_DONE)
+        throw std::runtime_error(std::string("begin_aot_cache_transaction: ")
+                                 + sqlite3_errmsg(db_user));
+}
+
+void RTCCache::commit_aot_cache_transaction()
+{
+    auto commit_stmt = prepare_stmt(db_user, "COMMIT");
+    if(sqlite3_step(commit_stmt.get()) != SQLITE_DONE)
+        throw std::runtime_error(std::string("commit_aot_cache_transaction: ")
+                                 + sqlite3_errmsg(db_user));
+}
+
 void RTCCache::write_aot_cache(const std::string&              output_path,
                                const std::array<char, 32>&     generator_sum,
                                const std::vector<std::string>& gpu_archs)
