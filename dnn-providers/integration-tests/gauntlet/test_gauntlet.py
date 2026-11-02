@@ -7023,3 +7023,508 @@ def test_every_shipped_cost_space_gets_a_legal_ladder_to_its_ceiling(space_id):
         assert (driver.source, driver.ceiling) == ("b*hq*sq*skv*(d+d)", 2**29)
     if space_id == "Matmul/Align":
         assert drivers == []
+
+
+# --------------------------------------------------------------------------
+# R1 S8: the catalog sweep (--catalog, --catalog-shard)
+# --------------------------------------------------------------------------
+
+CATALOG_ENGINE = ("--test-engine", "STUB_ENGINE")
+CATALOG_SPACE = "SdpaFwd/Default"
+
+
+def _catalog_run(run, *extra, space=CATALOG_SPACE, seed=1000):
+    return run.run("--catalog", *CATALOG_ENGINE, *extra, space=space, seed=seed)
+
+
+def _catalog_cases(work):
+    """Every sweep case under the work directory's bundle root, by case id."""
+    return {
+        case["id"]: case
+        for sweep in (work / "bundles" / "gauntlet").rglob("sweep.json")
+        for case in json.loads(sweep.read_text())["cases"]
+    }
+
+
+def _candidate_ids(count):
+    return [f"kernel_{j:02d}" for j in range(count)]
+
+
+def test_the_driver_lists_the_graphs_first_then_runs_one_case_per_candidate(run):
+    # bug caught: a sweep that runs the heuristic pick once per graph, or one case per graph that
+    # names no candidate, so a candidate the heuristic never ranks first is never exercised
+    run.control(catalog={"count": 3})
+    assert _catalog_run(run, "--samples", "2", "--test-article", "ART") == 0
+    cases = [f"s{seed}c{k}" for seed in (1000, 1001) for k in range(3)]
+    assert [o["case"] for o in run.outcome_list] == cases
+    assert {o["outcome"] for o in run.outcome_list} == {"PASS"}
+    for o in run.outcome_list:
+        k = int(o["case"][-1])
+        assert o["forced_candidate"] == o["candidate"] == f"kernel_{k:02d}"
+    # the listing came first, over the two graph cases, with the run's own flags
+    modes = [(i["mode"], i["tests"]) for i in run.invocations]
+    listing = [i for i in run.invocations if i["mode"] == "catalog"]
+    assert len(listing) == 1
+    assert sorted(t.rsplit(".", 1)[-1] for t in listing[0]["tests"]) == [
+        "s1000",
+        "s1001",
+    ]
+    argv = listing[0]["argv"]
+    assert argv[argv.index("--test-engine") + 1] == "STUB_ENGINE"
+    assert argv[argv.index("--test-article") + 1] == "ART"
+    assert "--list-candidates" in argv and "--outcome-report" not in argv
+    assert [m for m, _ in modes].index("catalog") < [m for m, _ in modes].index("run")
+    ran = sorted(
+        t.rsplit(".", 1)[-1]
+        for i in run.invocations
+        if i["mode"] == "run"
+        for t in i["tests"]
+    )
+    assert ran == sorted(cases)
+    # each case forces its candidate: the id and the complete knob tuple of the listing
+    written = _catalog_cases(run.work)
+    for case_id in cases:
+        k = int(case_id[-1])
+        assert written[case_id]["metadata"]["engine_variant"] == {
+            "id": f"kernel_{k:02d}",
+            "knobs": {"kernel": f"kernel_{k:02d}", "tile": k},
+        }
+    assert {
+        l["case"]: l.get("engine_variant")
+        for l in (
+            json.loads(x) for x in (run.work / "samples.jsonl").read_text().splitlines()
+        )
+    } == {c: f"kernel_{int(c[-1]):02d}" for c in cases}
+
+
+def test_the_summary_reconciles_every_graph_with_an_outcome_per_candidate(run):
+    # bug caught: a candidate that is listed and never gets an outcome, or a catalog size that
+    # counts the shard's share
+    run.control(
+        catalog={"count": 3, "cases": {"s1001": {"count": 4}}},
+        cases={"s1000c1": "declined", "s1001c3": "wrong"},
+    )
+    assert _catalog_run(run, "--samples", "2") == 1
+    summary = run.summary
+    catalog = summary["catalog"]
+    first, second = catalog["graphs"]
+    assert (first["graph"], first["status"], first["candidates"]) == ("s1000", "ok", 3)
+    assert first["outcomes"] == {
+        "kernel_00": "PASS", "kernel_01": "DECLINED", "kernel_02": "PASS"
+    }  # fmt: skip
+    assert (second["graph"], second["candidates"]) == ("s1001", 4)
+    assert second["outcomes"]["kernel_03"] == "WRONG" and len(second["outcomes"]) == 4
+    assert first["selected"] == first["catalog"] == _candidate_ids(3)
+    engine = catalog["engines"]["STUB_ENGINE"]
+    assert (engine["graphs"], engine["candidates"], engine["cases"]) == (2, 7, 7)
+    assert {k: v for k, v in engine["outcomes"].items() if v} == {
+        "PASS": 5, "DECLINED": 1, "WRONG": 1
+    }  # fmt: skip
+    assert catalog["reconciled"] and catalog["shard"] is None
+    assert summary["reconciled"] and summary["samples"] == 7
+    assert summary["candidate_mismatch"] == [] and summary["kernel_mismatch"] == []
+    assert [f["case"] for f in summary["findings"]] == ["s1001c3"]
+
+
+def test_an_engine_that_cannot_enumerate_is_a_one_entry_default_catalog(run):
+    # bug caught: a graph the engine cannot enumerate dropped from the sweep (or run with no
+    # engine_variant, so its record names no candidate)
+    run.control(catalog={"cases": {"s1000": {"status": "not_enumerable"}}})
+    assert _catalog_run(run, "--samples", "1") == 0
+    (outcome,) = run.outcome_list
+    assert (outcome["case"], outcome["outcome"]) == ("s1000c0", "PASS")
+    assert outcome["forced_candidate"] == outcome["candidate"] == "default"
+    row = _catalog_cases(run.work)["s1000c0"]
+    assert row["metadata"]["engine_variant"] == {"id": "default"}
+    (graph,) = run.summary["catalog"]["graphs"]
+    assert (graph["status"], graph["candidates"]) == ("not_enumerable", 1)
+    assert (
+        graph["outcomes"] == {"default": "PASS"} and "does not take" in graph["reason"]
+    )
+
+
+def test_a_graph_whose_listing_errs_is_unexercised_with_the_reason(run):
+    # bug caught: a graph the listing could not read silently vanishes from the counts, or runs
+    # with the heuristic pick and reports a PASS for a catalog nobody saw
+    run.control(
+        catalog={
+            "count": 2,
+            "cases": {
+                "s1001": {"status": "error", "reason": "the graph did not load: boom"}
+            },
+        }
+    )
+    assert _catalog_run(run, "--samples", "3") == 0
+    by_case = {o["case"]: o for o in run.outcome_list}
+    assert sorted(by_case) == ["s1000c0", "s1000c1", "s1001", "s1002c0", "s1002c1"]
+    err = by_case["s1001"]
+    assert err["outcome"] == "UNEXERCISED" and err["stage"] == "setup"
+    assert err["reason"] == "catalog listing: the graph did not load: boom"
+    assert err["source"] == "driver"
+    summary = run.summary
+    graph = next(g for g in summary["catalog"]["graphs"] if g["graph"] == "s1001")
+    assert graph["status"] == "error" and graph["graph_outcome"] == "UNEXERCISED"
+    assert graph["candidates"] == 0 and graph["outcomes"] == {}
+    engine = summary["catalog"]["engines"]["STUB_ENGINE"]
+    assert (engine["unexercised_graphs"], engine["outcomes"]["UNEXERCISED"]) == (1, 1)
+    assert summary["reconciled"] and summary["catalog"]["reconciled"]
+    assert summary["samples"] == 5
+
+
+def test_a_listing_with_no_candidates_leaves_the_graph_unexercised(run):
+    # bug caught: an engine that matched but listed nothing yields zero cases and no outcome
+    run.control(catalog={"cases": {"s1000": {"count": 0}}})
+    assert _catalog_run(run, "--samples", "1") == 0
+    (outcome,) = run.outcome_list
+    assert outcome["outcome"] == "UNEXERCISED" and "no candidates" in outcome["reason"]
+
+
+def test_a_graph_that_kills_the_listing_is_unexercised_and_the_others_are_listed(run):
+    # bug caught: one graph that crashes the enumeration costs the listing of every graph after
+    # it in its batch
+    run.control(catalog={"count": 2}, cases={"s1001": "list_crash"})
+    assert _catalog_run(run, "--samples", "4", "--batch-size", "4") == 0
+    by_case = {o["case"]: o for o in run.outcome_list}
+    assert sorted(by_case) == [
+        "s1000c0", "s1000c1", "s1001", "s1002c0", "s1002c1", "s1003c0", "s1003c1"
+    ]  # fmt: skip
+    assert by_case["s1001"]["outcome"] == "UNEXERCISED"
+    assert "died (exit code 139) while listing candidates" in by_case["s1001"]["reason"]
+    assert {c for c, o in by_case.items() if o["outcome"] == "PASS"} == set(by_case) - {
+        "s1001"
+    }
+
+
+def test_a_candidate_that_crashes_the_binary_costs_only_that_case(run):
+    # bug caught: crash isolation lost for candidate cases: the cases after the crashing
+    # candidate, or the graph's other candidates, get no outcome
+    run.control(catalog={"count": 3}, cases={"s1000c1": "crash"})
+    assert _catalog_run(run, "--samples", "2") == 1
+    outcomes = {o["case"]: o["outcome"] for o in run.outcome_list}
+    assert outcomes == {
+        "s1000c0": "PASS", "s1000c1": "CRASH", "s1000c2": "PASS",
+        "s1001c0": "PASS", "s1001c1": "PASS", "s1001c2": "PASS",
+    }  # fmt: skip
+    assert (run.failure_dir("s1000c1") / "repro.json").is_file()
+
+
+@pytest.mark.parametrize("shards", [1, 2, 3, 5])
+def test_shards_split_every_graphs_candidates_with_none_lost_or_repeated(
+    run, tmp_path, shards
+):
+    # bug caught: a shard filter that drops or repeats a candidate, so the union of the shard
+    # runs is not the full catalog (or the catalog of a graph shorter than n is lost)
+    run.control(
+        catalog={
+            "count": 4,
+            "cases": {
+                "s1000": {"count": 7},
+                "s1001": {"count": 1},
+                "s1002": {"status": "not_enumerable"},
+                "s1003": {"status": "error", "reason": "listing failed"},
+            },
+        }
+    )
+    run.work = tmp_path / "unsharded"
+    assert _catalog_run(run, "--samples", "5") == 0
+    full = [(o["case"], o["outcome"]) for o in run.outcome_list]
+    assert len(full) == 7 + 1 + 1 + 1 + 4
+    seen = []
+    for shard in range(shards):
+        run.work = tmp_path / f"shard{shard}"
+        assert (
+            _catalog_run(run, "--samples", "5", "--catalog-shard", f"{shard}/{shards}")
+            == 0
+        )
+        summary = run.summary
+        assert summary["catalog"]["shard"] == f"{shard}/{shards}"
+        assert summary["reconciled"] and summary["catalog"]["reconciled"]
+        for graph in summary["catalog"]["graphs"]:
+            # the catalog is the whole one; the shard runs the candidates with k % n == shard
+            assert graph["selected"] == graph["catalog"][shard::shards]
+        seen += [(o["case"], o["outcome"]) for o in run.outcome_list]
+    assert sorted(seen) == sorted(full)
+    assert len(seen) == len(set(seen))
+    # the graph that could not be listed is reported by shard 0 only
+    unlisted = [c for c, _ in seen if c == "s1003"]
+    assert unlisted == ["s1003"]
+
+
+@pytest.mark.parametrize("n", range(1, 9))
+def test_shard_candidates_partition_a_list_of_any_length(n):
+    # bug caught: an off-by-one in the modulo split that loses the last candidate of a list whose
+    # length is not a multiple of n
+    for length in range(0, 20):
+        candidates = [{"id": f"k{j}", "knobs": {}} for j in range(length)]
+        kept = [fuzz.shard_candidates(candidates, (i, n)) for i in range(n)]
+        flat = [k for part in kept for k, _ in part]
+        assert sorted(flat) == list(range(length))
+        for i, part in enumerate(kept):
+            assert all(k % n == i for k, _ in part)
+            assert [c["id"] for _, c in part] == [f"k{k}" for k, _ in part]
+    assert [k for k, _ in fuzz.shard_candidates(candidates, None)] == list(range(19))
+
+
+@pytest.mark.parametrize(
+    "text, shard",
+    [("0/1", (0, 1)), ("2/4", (2, 4)), (" 1 / 3 ", (1, 3))],
+)
+def test_catalog_shard_text_parses(text, shard):
+    assert fuzz.parse_catalog_shard(text) == shard
+
+
+@pytest.mark.parametrize("text", ["2/2", "0/0", "-1/2", "a/b", "1", "1/2/3", ""])
+def test_a_text_that_is_no_shard_is_refused(text):
+    with pytest.raises(ValueError):
+        fuzz.parse_catalog_shard(text)
+
+
+def _record(**fields):
+    return {
+        "test": "S.s1", "bundle": "b", "engine": "E", "status": "ok", "total": 2,
+        "candidates": [{"id": "a", "knobs": {"x": 1}}, {"id": "b", "knobs": {}}],
+        "reason": "", **fields,
+    }  # fmt: skip
+
+
+def test_a_listing_record_is_parsed_into_its_catalog():
+    status, reason, candidates, engine = fuzz.catalog_from_record(_record())
+    assert (status, reason, engine) == ("ok", "", "E")
+    assert candidates == [{"id": "a", "knobs": {"x": 1}}, {"id": "b", "knobs": {}}]
+    status, _, candidates, _ = fuzz.catalog_from_record(
+        _record(status="not_enumerable", candidates=[], total=0, reason="n/a")
+    )
+    assert (status, candidates) == ("not_enumerable", [{"id": "default", "knobs": {}}])
+    assert fuzz.catalog_from_record(_record(status="error", reason="why"))[:3] == (
+        "error", "why", []
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "fields, reason",
+    [
+        ({"status": "weird"}, "unrecognized listing status"),
+        ({"candidates": []}, "no candidates"),
+        (
+            {"candidates": [{"id": "a", "knobs": {}}, {"id": "a", "knobs": {}}]},
+            "listed twice",
+        ),
+        ({"candidates": [{"id": "default", "knobs": {}}]}, "reserved"),
+        ({"candidates": [{"knobs": {}}]}, "malformed candidate"),
+        ({"candidates": [{"id": "a", "knobs": []}]}, "malformed candidate"),
+        ({"candidates": "no"}, "no candidates"),
+    ],
+)
+def test_a_listing_record_no_catalog_can_be_built_from_is_an_error(fields, reason):
+    # bug caught: a malformed or ambiguous listing becomes a sweep that runs the wrong set
+    status, why, candidates, _ = fuzz.catalog_from_record(_record(**fields))
+    assert status == "error" and candidates == [] and reason in why
+
+
+def test_a_record_naming_another_candidate_is_a_failure_of_the_run(run, capsys):
+    # bug caught: a forced case whose record says it ran another candidate (the force did not
+    # reach the engine) is counted as a pass
+    run.control(
+        catalog={"count": 3},
+        candidate_echo={"s1000c1": "kernel_09", "s1000c2": None},
+    )
+    assert _catalog_run(run, "--samples", "1") == 1
+    summary = run.summary
+    assert summary["candidate_mismatch"] == [
+        {"space": CATALOG_SPACE, "case": "s1000c1", "forced": "kernel_01", "reported": "kernel_09"},
+        {"space": CATALOG_SPACE, "case": "s1000c2", "forced": "kernel_02", "reported": None},
+    ]  # fmt: skip
+    assert summary["exit_code"] == 1
+    # the outcomes themselves are what the engine said: no finding, no failure folder
+    assert {o["outcome"] for o in run.outcome_list} == {"PASS"} and summary[
+        "findings"
+    ] == []
+    out = capsys.readouterr().out
+    assert "CANDIDATE MISMATCH: SdpaFwd/Default s1000c1 forced 'kernel_01'" in out
+
+
+def test_a_forced_candidate_that_ran_another_kernel_is_listed_and_does_not_fail(
+    run, capsys
+):
+    # bug caught: a log-format difference between the id and the kernel line fails the run; or a
+    # real disagreement goes unreported
+    run.control(
+        catalog={"count": 3},
+        kernels_by_candidate={
+            "prefix": "dense/",
+            "cases": {"s1000c2": ["dense/kernel_00"]},
+        },
+    )
+    assert _catalog_run(run, "--samples", "1") == 0
+    summary = run.summary
+    assert summary["kernel_mismatch"] == [
+        {"space": CATALOG_SPACE, "case": "s1000c2", "forced": "kernel_02", "kernels": ["dense/kernel_00"]}
+    ]  # fmt: skip
+    assert summary["candidate_mismatch"] == [] and summary["exit_code"] == 0
+    kernels = {o["case"]: o["kernels"] for o in run.outcome_list}
+    assert kernels["s1000c0"] == ["dense/kernel_00"] and kernels["s1000c1"] == [
+        "dense/kernel_01"
+    ]
+    assert (
+        "kernel mismatch (not a failure): SdpaFwd/Default s1000c2"
+        in capsys.readouterr().out
+    )
+
+
+def test_a_declined_candidate_without_kernels_has_nothing_to_compare(run):
+    # bug caught: a case that never built a plan is reported as a kernel mismatch
+    run.control(
+        catalog={"count": 2}, default="declined", kernels_by_candidate={"prefix": "d/"}
+    )
+    assert _catalog_run(run, "--samples", "1") == 0
+    assert run.summary["kernel_mismatch"] == []
+    assert {o["outcome"] for o in run.outcome_list} == {"DECLINED"}
+
+
+def test_a_candidate_failure_replays_forcing_the_same_candidate(run):
+    # bug caught: a failure folder whose replay runs the heuristic pick (or regenerates the graph
+    # but not the candidate), so a failure of the fourth candidate reproduces as a pass
+    run.control(
+        catalog={"count": 4},
+        cases={"s1000c2": "wrong"},
+        kernels_by_candidate={"prefix": "dense/"},
+    )
+    assert _catalog_run(run, "--samples", "1", "--test-article", "ART") == 1
+    folder = run.failure_dir("s1000c2")
+    repro = json.loads((folder / "repro.json").read_text())
+    knobs = {"kernel": "kernel_02", "tile": 2}
+    variant = {"id": "kernel_02", "knobs": knobs}
+    assert repro["row"] == json.loads((folder / "row.json").read_text())
+    assert (
+        repro["row"]["engine_variant"] == variant
+        and repro["row"]["case_id"] == "s1000c2"
+    )
+    assert repro["sweep_row"]["metadata"]["engine_variant"] == variant
+    assert repro["shape_seed"] == 1000 and repro["gtest_name"].endswith(".s1000c2")
+    argv = repro["replay"]["argv"]
+    assert argv[argv.index("--row") + 1] == str(folder / "row.json")
+    assert not {
+        "--seed",
+        "--filter",
+        "--samples",
+        "--catalog",
+        "--catalog-shard",
+    } & set(argv)
+    assert argv[argv.index("--test-engine") + 1] == "STUB_ENGINE"
+    assert '--row "$D/row.json"' in (folder / "replay.sh").read_text()
+    meta = json.loads((folder / "SdpaFwd_Default_s1000c2.meta.json").read_text())
+    assert meta["engine_variant"] == variant
+    finding = run.summary["findings"][0]
+    assert finding["case"] == "s1000c2" and "--row" in finding["replay"]
+
+    _, work, done = _replay(folder)
+    assert done.returncode == 1, done.stdout + done.stderr
+    (again,) = [
+        json.loads(l) for l in (work / "outcomes.jsonl").read_text().splitlines()
+    ]
+    original = next(o for o in run.outcome_list if o["case"] == "s1000c2")
+    assert (again["test"], again["outcome"]) == (original["test"], "WRONG")
+    # the replay forced the same candidate, by id and by knobs, and its record says so
+    assert again["forced_candidate"] == again["candidate"] == "kernel_02"
+    assert _catalog_cases(work)["s1000c2"]["metadata"]["engine_variant"] == variant
+    record = json.loads(
+        (work / "failures" / "SdpaFwd_Default_s1000c2" / "outcome.json").read_text()
+    )["record"]
+    assert record["candidate"] == "kernel_02" and record["kernels"] == [
+        "dense/kernel_02"
+    ]
+    summary = json.loads((work / "summary.json").read_text())
+    assert summary["candidate_mismatch"] == [] and "catalog" not in summary
+
+
+def test_a_row_that_names_a_candidate_forces_it_and_a_row_catalog_lists_the_graph(
+    run, tmp_path
+):
+    # bug caught: the row path ignores engine_variant (the heuristic pick runs under the
+    # candidate's name), or --row with --catalog cannot sweep the one graph
+    sample = sampler.sample(space_by_id(CATALOG_SPACE), 31)
+    run.control(catalog={"count": 3})
+    path = _write_row(
+        tmp_path,
+        **_row_of(
+            sample,
+            case_id="rw",
+            engine_variant={"id": "kernel_01", "knobs": {"tile": 1}},
+        ),
+    )
+    assert _run_row(run, path, *CATALOG_ENGINE) == 0
+    (outcome,) = run.outcome_list
+    assert (outcome["case"], outcome["forced_candidate"], outcome["candidate"]) == (
+        "rw",
+        "kernel_01",
+        "kernel_01",
+    )
+    assert _catalog_cases(run.work)["rw"]["metadata"]["engine_variant"] == {
+        "id": "kernel_01", "knobs": {"tile": 1}
+    }  # fmt: skip
+    assert run.summary["row"]["engine_variant"]["id"] == "kernel_01"
+
+    plain = _write_row(tmp_path, name="plain.json", **_row_of(sample, case_id="rw"))
+    run.work = tmp_path / "catalog-row"
+    assert _run_row(run, plain, "--catalog", *CATALOG_ENGINE) == 0
+    assert [o["case"] for o in run.outcome_list] == ["rwc0", "rwc1", "rwc2"]
+
+    assert _run_row(run, path, "--catalog", *CATALOG_ENGINE) == 2
+
+
+def test_a_row_file_engine_variant_is_validated(run, tmp_path, capsys):
+    sample = sampler.sample(space_by_id(CATALOG_SPACE), 31)
+    for bad in (
+        {"id": ""},
+        {"id": "a", "knobs": []},
+        {"id": "default", "knobs": {"x": 1}},
+        {"id": "a", "extra": 1},
+        "a",
+    ):
+        path = _write_row(tmp_path, **_row_of(sample, engine_variant=bad))
+        with pytest.raises(SystemExit) as info:
+            _run_row(run, path)
+        assert info.value.code == 2, bad
+    assert "engine_variant" in capsys.readouterr().err
+
+
+def test_a_pairwise_run_sweeps_each_rows_catalog(run, tmp_path):
+    # bug caught: the pairwise path bypasses the catalog (a row is a graph like any other), or
+    # the coverage lookups choke on the candidate case ids
+    spaces = _pw_spaces(tmp_path)
+    run.control(catalog={"count": 2})
+    assert _pw_run(run, spaces, "--catalog", *CATALOG_ENGINE) == 0
+    cases = [o["case"] for o in run.outcome_list]
+    assert cases and all(re.fullmatch(r"pw\d+c[01]", c) for c in cases)
+    rows = {c.rsplit("c", 1)[0] for c in cases}
+    assert len(cases) == 2 * len(rows)
+    summary = run.summary
+    assert summary["mode"] == "pairwise" and summary["reconciled"]
+    assert summary["catalog"]["reconciled"] and len(
+        summary["catalog"]["graphs"]
+    ) == len(rows)
+    assert summary["pair_coverage"]["Toy/Default"]["passed"] > 0
+
+
+@pytest.mark.parametrize(
+    "extra, message",
+    [
+        (["--catalog-shard", "0/2"], "--catalog-shard needs --catalog"),
+        (["--catalog", "--catalog-shard", "2/2"], "not a shard"),
+        (["--catalog", "--catalog-shard", "x"], "expected i/n"),
+        (["--catalog"], "needs --test-engine"),
+        (
+            ["--catalog", "--test-engine", "E", "--shrink", "3"],
+            "cannot be combined with --shrink",
+        ),
+        (
+            ["--catalog", "--test-engine", "E", "--pairwise", "--generate-only"],
+            "--generate-only",
+        ),
+    ],
+)
+def test_catalog_flag_misuse_is_a_usage_error(extra, message, capsys):
+    with pytest.raises(SystemExit) as info:
+        fuzz.parse_args(["--binary", "bin", *extra])
+    assert info.value.code == 2
+    assert message in capsys.readouterr().err

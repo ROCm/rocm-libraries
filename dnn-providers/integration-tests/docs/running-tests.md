@@ -228,6 +228,7 @@ Otherwise, you test the old tree.
 | `--fail-on-unsupported` | | off | Fail instead of skip when no engine supports a graph. **C++ graph tests only.** |
 | `--generate-support-matrix[=file]` | | off | Write a markdown matrix. **C++ graph tests only**; on a default build it writes an empty table. |
 | `--capture-bundles <dir>` | | off | Dump compiled-in C++ graph tests as bundle JSON (see [Adding Tests](adding-tests.md#from-an-existing-c-graph-test)). |
+| `--list-candidates <file>` | | off | Write the engine's candidate catalog for every bundle case this run would execute (`--gtest_filter` applies) to `<file>`, one JSON object per line, and exit 0 without building or executing anything. The engine is the one `--test-engine` names. See [`--list-candidates`](file-formats.md#--list-candidates-output). The [gauntlet driver](#catalog-sweeps---catalog) runs it. |
 | `--benchmark` | | off | Time each verified test. See [Time the engine](#4-time-the-engine---benchmark). |
 | `--benchmark-iterations` | | 20 | Timed executions per test. Requires `--benchmark`. |
 | `--benchmark-warmup` | | 30 | Untimed executions before timing. Requires `--benchmark`. |
@@ -244,6 +245,9 @@ The binary refuses these flag combinations (exit 1):
   `--benchmark-iterations` less than 1, or `--benchmark-warmup` less than 0.
 - `--benchmark` together with `--skip-graph-validation`, `--capture-bundles`
   or `--write-support-claims`. These modes do not execute the graph.
+- `--list-candidates` without `--test-engine`, or together with `--write-support-claims`; and an
+  unwritable listing file. A case the engine cannot list is `status: "error"` in the file, not a
+  failure of the run (exit 0).
 
 `--enforce-support-claims=false` is accepted in every combination. If
 enforcement is only inherited and there is no `--test-engine`, the run
@@ -329,6 +333,10 @@ collects the lines between the case's `started` and `finished` records without
 `HIPDNN_LOG_LEVEL` is restored exactly; with it at `warn` or above the backend's own console
 sink, which that variable creates, prints the engines' INFO lines during the cases. `kernels` is
 absent when the case reported none.
+
+A case that carries [`metadata.engine_variant`](file-formats.md#engine_variant--force-one-catalog-candidate)
+also has `"candidate"` in its `finished` record: the id of the candidate it was asked to build
+(`"default"` for the engine's own pick). The gauntlet driver checks it against the id it forced.
 
 A case graded by a reference executor (not golden data) also carries `"reference_ms"` and
 `"reference_lane"` (`"cpu"` or `"gpu"`): the wall time of the reference run that produced the
@@ -781,6 +789,68 @@ pair is so by a search coded apart from the generator, is tested for the SDPA fo
 illegal and dead sets of every space are pinned. A brute force over the whole product of small toy
 spaces checks the proofs, including toys that only the effective-reads search and the component
 split settle within a small cap.
+
+### Catalog sweeps (`--catalog`)
+
+A random or pairwise run exercises each graph with the one plan the engine's heuristic picks. An
+engine that can build a graph several ways (the kernel-ingestor engines list one candidate per
+kernel that matches) has candidates that pick never reaches. `--catalog` runs **every candidate
+the engine matches for each drawn graph**, not the pick. It needs `--test-engine`, works with
+random, `--pairwise` and `--row` runs, and cannot be combined with `--shrink`.
+
+```bash
+python3 dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py \
+    --binary build/bin/hipdnn_integration_tests --test-article <plugin> \
+    --test-engine hipkernel:Gfx950AttentionDense --test-config <its TOML> \
+    --filter '^SdpaFwd/Gfx950Dense$' --samples 8 --catalog --work-dir gauntlet-runs/catalog
+# the same sweep split in four runs (on four machines, say): shard 0 of 4 .. shard 3 of 4
+... --catalog --catalog-shard 0/4
+```
+
+**What a run does.** For each batch of drawn graphs (a fuzz sample, a pairwise row, or the
+`--row` sample) the driver first writes the graphs as cases and runs the binary once with
+`--list-candidates` (the run's own engine, article and config flags, and a gtest filter naming
+the batch's graphs). Each graph's [listing record](file-formats.md#--list-candidates-output) says:
+
+| `status` | What the driver does |
+|---|---|
+| `ok` | One case per candidate, `<graph case id>c<k>` (`s123c0`, `s123c1`, ..., `pw4c2`), where `k` is the candidate's index in the listing. The catalog is sorted by kernel id, so `k` is stable. The case is the graph's own case (same axes, same data seed) plus `metadata.engine_variant = {"id", "knobs"}` of the candidate, so the binary builds exactly that candidate and not the heuristic pick. |
+| `not_enumerable` | The engine cannot enumerate its candidates for this graph. A one-entry catalog: the case `<graph>c0` with `engine_variant {"id": "default"}`, the engine's own pick. |
+| `error` | The graph is `UNEXERCISED` (stage `setup`) with the listing's reason, `catalog listing: <reason>`. A graph that lists no candidates, a listing the driver cannot read (a duplicate id, a malformed candidate), and a graph whose listing killed or hung the binary (the driver lists the rest again in halves to isolate it) end the same way. |
+
+The candidate cases run through the normal batch path, so crash isolation, `failures/<case>/`
+folders and the summary work per candidate. A failure folder's `replay.sh` calls the driver with
+`--row` on its `row.json`, which carries the `engine_variant` (id **and** knobs) next to the axes
+and the case id, so the replay forces the same candidate without listing again. `--row` accepts
+`engine_variant` for that reason (a row file that has one cannot be combined with `--catalog`).
+
+**`--catalog-shard i/n`.** Keeps, of each graph's candidate list, the candidates whose index `k`
+satisfies `k % n == i` (`0 <= i < n`). Every shard draws and lists the same graphs, so running the
+shards `0/n` .. `(n-1)/n` runs each candidate of each graph exactly once, none lost and none
+repeated. A graph that could not be listed (`error`) has one entry, at `k = 0`: it is reported by
+shard `0` only. Run the shards with different `--work-dir`s.
+
+**Reconciliation in `summary.json`.** A catalog run adds a `catalog` block and the two checks:
+
+| Key | Content |
+|---|---|
+| `catalog.shard` | `"i/n"`, or `null`. |
+| `catalog.graphs[]` | One entry per graph listed: `space`, `graph` (its case id), `status` (`ok`, `not_enumerable`, `error`), `candidates` (the size of the **whole** catalog), `catalog` (every candidate id, in listing order), `selected` (the ids this shard ran), `outcomes` (candidate id -> `PASS`, `DECLINED`, `WRONG`, `CRASH`, `UNCLAIMED_PASS` or `UNEXERCISED`), `reason`, and for an `error` graph `graph_outcome: "UNEXERCISED"` with no candidates. |
+| `catalog.engines` | Per engine: `graphs`, `candidates` (listed), `cases` (run), `unexercised_graphs` and `outcomes` (the totals by outcome, a graph that could not be listed counted `UNEXERCISED`). |
+| `catalog.reconciled` | True when every selected candidate of every graph has exactly one outcome. The top-level `reconciled` and `samples` count candidate cases (and graphs that could not be listed) in a catalog run. |
+| `candidate_mismatch` | The cases whose `finished` record's `candidate` is not the forced id (`space`, `case`, `forced`, `reported`; `reported` is `null` when the record has none). The force did not reach the engine, so this **fails the run** (exit 1) and is printed as `CANDIDATE MISMATCH`. |
+| `kernel_mismatch` | The cases whose `kernels` include one whose text after its last `/` is not the forced id (`space`, `case`, `forced`, `kernels`). **Listed and printed, not a failure**: a difference between the id and the log line is a log-format question, not an engine bug. Cases with the `default` candidate, and cases that reported no kernel, are not checked. |
+
+`candidate_mismatch` and `kernel_mismatch` are also written, outside a catalog run, by any run that
+forces a candidate (a `--row` file with an `engine_variant`). Each case in `outcomes.jsonl` carries
+`forced_candidate` (the id it forced) and `candidate` (what its record said), and a line of
+`samples.jsonl` names `engine_variant`.
+
+**What is tested.** The listing parse, one case per candidate, a not-enumerable and an erroring
+graph, a listing that kills the binary, the shard split (no candidate lost or repeated, for several
+`n`), the mismatch checks, the pairwise and `--row` paths and the replay of a candidate failure
+(`test_gauntlet.py`, stub binary, no GPU). On a device, the sweep's kernel for each candidate is
+the one `kernels` shows, which the `kernel_mismatch` check reads.
 
 ### Measuring the oracle's cost
 

@@ -316,6 +316,7 @@ parses it.
 | `validator` | string | `default` (when absent) or `match_nonfinite`: how float outputs are graded beyond the tolerance; see [`validator`](#validator). Any other value rejects the metadata. |
 | `placement` | string | `default` (when absent), `exact` or `under`: where the engine run's device pointers sit relative to each tensor's declared `alignment`; see [`placement` and `placement_uid`](#placement-and-placement_uid). Any other value rejects the metadata. |
 | `placement_uid` | int | The tensor `placement: "under"` misaligns. **Required** when `placement` is `under`; ignored by every other placement, so a space can always render it. A non-integer rejects the metadata. |
+| `engine_variant` | object | `{"id": "<candidate id>", "knobs": {"<knob>": <value>}}`; absent when not set (the engine's own pick). Forces the one catalog candidate the engine must build for the case; see [`engine_variant`](#engine_variant--force-one-catalog-candidate). A malformed value rejects the metadata. |
 | `generator`, `generator_version`, `generated_at`, `reference_source`, `reference_source_hash`, `reference_strategy`, `rocm_version`, `operation`, `generation_command`, `notes` | string | Provenance only; no effect on the run. |
 
 A bundle without its metadata is an error. These fields are required:
@@ -432,6 +433,28 @@ scalar (a host pointer), an input of the sub-byte packed set, or has no declared
 alignment. A `placement_uid` that names such a tensor, or no tensor of the run, or an
 `under` tensor with N < 2, cannot be set up: the case is `UNEXERCISED` at stage `setup`.
 
+### `engine_variant` — force one catalog candidate
+
+A case that carries `metadata.engine_variant` is built as exactly one candidate of the engine's
+catalog, not the plan its heuristic ranks first. The [gauntlet driver](running-tests.md#catalog-sweeps---catalog)
+writes one such case per candidate (`--catalog`); the candidates come from
+[`--list-candidates`](#--list-candidates-output).
+
+```json
+"metadata": {"format_version": 1, "...": "...",
+             "engine_variant": {"id": "gfx950_fwd_d128", "knobs": {"kernel_id": "gfx950_fwd_d128", "tile_m": 128}}}
+```
+
+| Key | Type | Meaning |
+|---|---|---|
+| `id` | string | **Required**, non-empty. The candidate's id (the engine's kernel id). It names the candidate in the case's `finished` record (`candidate`); the engine selects by `knobs`, not by `id`. `"default"` means the engine's own heuristic pick, the same plan creation a case without an `engine_variant` gets. |
+| `knobs` | object | The candidate's complete knob tuple, knob name to value, exactly as the listing prints it. Optional (an empty tuple); **must be empty** for `default`. A value is an integer, a finite number or a string (a JSON integer is a knob integer and a JSON real a knob real, so the listing's values select the same candidate when read back); a boolean, `null` or an integer beyond int64 rejects the metadata. |
+
+Any other key, a missing or empty `id`, `knobs` that is not an object, or knobs on `default` reject the
+metadata, so a typo cannot silently run the engine's own pick while the record claims another
+candidate. A candidate is built with `create_execution_plan_ext(engineId, knobs)` on the engine the
+run names with `--test-engine`; without `--test-engine` the case fails with that message.
+
 ### Finished-record fields
 
 The harness echoes these into the `finished` record of the
@@ -444,6 +467,7 @@ asked to do:
 | `validator` | `"default"` or `"match_nonfinite"`, as the metadata spells it. |
 | `placement` | `"default"`, `"exact"` or `"under"`. |
 | `placement_uid` | Present when the metadata sets one. |
+| `candidate` | The `id` of the case's `engine_variant` (`"default"` for the engine's own pick). Absent when the case names no `engine_variant`. Not a metadata field: the harness echoes it. |
 | `expected_status` | `"BAD_PARAM"` on a pass that verified a rejection; absent otherwise. |
 | `kernels` | The distinct kernel names the engine reported while the case ran, sorted. From the engine's `kernel: <engine> <kernel>` INFO line, written once per built plan; see [`kernels` in the outcome report](running-tests.md#outcome-report). Absent when the case reported none (it never built a plan, or the engine logs no kernel). Not a metadata field: the harness fills it. |
 | `reference_ms` | Milliseconds of wall time the reference executor took to produce the outputs the case was graded against (`steady_clock` around the reference run, output allocation included). Present only when a reference ran and produced the outputs the engine was compared with, whatever the verdict (`PASS` and `WRONG` both carry it). Absent for golden grading, a decline, and a failure before the oracle. After an automatic GPU-to-CPU fallback it is the CPU run that graded, not the GPU attempt that failed. Not a metadata field: the harness fills it. |
@@ -458,6 +482,29 @@ engine accepted the graph and the backend then rejected the misaligned pointer o
 `expected_status: "BAD_PARAM"`, and nothing was compared. Every other result is a
 failure: the backend executed the graph with the pointer below its alignment, the engine
 declined after being handed the graph, or `BAD_PARAM` named another uid or another error.
+
+### `--list-candidates` output
+
+`hipdnn_integration_tests --test-engine <engine> --list-candidates <file> [--gtest_filter=...]` writes
+one JSON object per line for each bundle case the run would execute, and builds and executes
+nothing (exit 0; a case it cannot list has `status: "error"`):
+
+```json
+{"test":"gauntlet_SdpaFwd_Gfx950Dense_fp16_cases.s123","bundle":".../sweep.json#s123","engine":"hipkernel:Gfx950AttentionDense","status":"ok","total":2,"candidates":[{"id":"kern_a","knobs":{"kernel_id":"kern_a","tile_m":64}},{"id":"kern_b","knobs":{"kernel_id":"kern_b","tile_m":128}}],"reason":""}
+```
+
+| Field | Content |
+|---|---|
+| `test` | The GTest name `--gtest_filter` selects on. |
+| `bundle` | `<sweep or graph file>#<case id>`, as in the outcome report. |
+| `engine` | The engine under test. |
+| `status` | `"ok"`: the engine enumerated its catalog, every page read (`getEngineCandidates`, pages of up to 10000). `"not_enumerable"`: the engine cannot enumerate its candidates for this graph (it does not enumerate at all, or it does not take the graph): the catalog is one entry, the engine's own pick, `candidate: "default"`; `candidates` is empty and `reason` says why. `"error"`: the graph did not load or the enumeration broke (a changed total, a repeated id, a page that did not advance); `candidates` is empty and `reason` says why. |
+| `total` | The catalog size the engine reported; equal to `len(candidates)` for `ok`, `0` otherwise. |
+| `candidates` | `[{"id", "knobs"}]` in the engine's order, which is sorted by kernel id, so a candidate's index is stable. `knobs` is its complete knob tuple, which `metadata.engine_variant.knobs` takes back verbatim. |
+| `reason` | Empty for `ok`; otherwise why the listing is not `ok`. |
+
+The file is truncated first and flushed per record, so a crash keeps every earlier line. The
+gauntlet driver reads it ([Catalog sweeps](running-tests.md#catalog-sweeps---catalog)).
 
 ## Golden data — `.tensors.dvc` and `.bin`
 

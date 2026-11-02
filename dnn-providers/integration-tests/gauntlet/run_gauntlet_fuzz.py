@@ -25,6 +25,8 @@ Synopsis::
         (write the covering sets as sweeps; no binary)
     run_gauntlet_fuzz.py --coverage-of WORK_DIR --levels-from REPORT [--first N]
         (the pair coverage of an earlier run, offline)
+    run_gauntlet_fuzz.py --binary BIN --test-engine E ... --catalog [--catalog-shard i/n]
+        (every candidate the engine can build for each drawn graph, see below)
 
 Control (a flag overrides its environment variable)::
 
@@ -90,6 +92,29 @@ and outcomes of an earlier run (a random one, to compare with a pairwise run) ag
 of a pairwise report (a file, or a directory of them); ``--first N`` counts only each space's
 first N samples.
 
+``--catalog`` (it needs ``--test-engine``; not with ``--shrink``) sweeps the engine's catalog: for each
+drawn graph (a fuzz sample, a pairwise row or the ``--row`` sample) the graph is first written as a
+case and the binary runs with ``--list-candidates`` (the run's own engine, article and config flags and
+a gtest filter for the graphs of the batch), which prints, per case, the candidates the engine can
+build for that graph (``status`` ``ok``), a one-entry catalog (``not_enumerable``: an engine that
+cannot enumerate its candidates, so the heuristic pick, candidate ``default``) or the reason it could
+not tell (``error``). The graph then becomes one case per candidate, ``<graph case id>c<k>`` with ``k``
+the candidate's index in the listing (the catalog is sorted by kernel id, so ``k`` is stable), whose
+``metadata.engine_variant`` is ``{"id", "knobs"}`` of that candidate: the binary builds exactly it, not
+the engine's pick (the ``default`` id is the pick). These cases run through the normal batch path, so
+crash isolation, failure folders and ``--shrink``-free replay work per candidate: a candidate failure's
+``replay.sh`` calls ``--row`` on a row file that carries the ``engine_variant``, so a replay forces the
+same candidate. A graph whose listing ended in ``error`` (or listed no candidates, or whose binary died
+or hung while listing it) is ``UNEXERCISED`` with the reason. ``--catalog-shard i/n`` keeps, of each
+graph's candidate list, the candidates whose index ``k`` satisfies ``k % n == i``: running the shards
+``0/n`` .. ``(n-1)/n`` runs every candidate of every graph exactly once (a graph that is ``UNEXERCISED``
+is reported by shard ``0``, where its one entry would be ``k = 0``). The summary's ``catalog`` block
+gives per graph the catalog size and an outcome per candidate id, and per engine the totals. Every
+finished record's ``candidate`` must equal the forced id (``candidate_mismatch``: a failure of the run);
+where the record has ``kernels`` the part of each after its last ``/`` should equal it too
+(``kernel_mismatch``: listed and printed, not a failure, since a log-format difference is not an engine
+bug).
+
 Outputs under the work directory: ``outcomes.jsonl`` (one record per sample),
 ``samples.jsonl``, ``summary.json``, ``reports/`` and ``logs/`` (per binary invocation) and
 ``failures/<case>/`` for every ``WRONG`` and ``CRASH`` (and ``shrink/<case>/`` for the candidate
@@ -98,6 +123,7 @@ usage and space errors).
 """
 
 import argparse
+import copy
 import datetime
 import hashlib
 import importlib.util
@@ -145,6 +171,10 @@ GTEST_FILTER_LINE = re.compile(r"\s*gtest_filter:")
 DTYPE_TAG_AXES = ("x_dtype", "dtype")
 POLL_SECONDS = 0.05
 MAX_PRINTED_FINDINGS = 20
+DEFAULT_CANDIDATE = (
+    "default"  # the id of the engine's own pick (the binary's DEFAULT_CANDIDATE_ID)
+)
+MAX_PRINTED_GRAPHS = 20
 
 
 class DriverError(Exception):
@@ -434,9 +464,118 @@ MAX_LISTED_TUPLES = 50
 
 def is_explicit_row(sample):
     """Whether a sample was built from given axis values (a ``--row`` file, a pairwise row)
-    and not drawn from a shape seed. It has no seed to replay from, so its failure folder keeps a
-    ``row.json`` and ``replay.sh`` calls the driver with ``--row``."""
-    return sample.shape_seed is None
+    and not drawn from a shape seed, or forces a catalog candidate (``CandidateSample``). It has no
+    seed to replay from, so its failure folder keeps a ``row.json`` and ``replay.sh`` calls the
+    driver with ``--row``."""
+    return sample.shape_seed is None or getattr(sample, "variant", None) is not None
+
+
+def engine_variant_json(variant):
+    """``metadata.engine_variant`` of a candidate ``{"id", "knobs"}``: the default candidate is
+    just its id, since it takes no knobs."""
+    if variant["id"] == DEFAULT_CANDIDATE:
+        return {"id": DEFAULT_CANDIDATE}
+    return {"id": variant["id"], "knobs": variant["knobs"]}
+
+
+class CandidateSample(sampler.Sample):
+    """A sample that forces one catalog candidate: the graph sample ``base`` under the case id
+    ``case_id``, its ``metadata.engine_variant`` the candidate ``variant`` (``{"id", "knobs"}``).
+    The axes and seeds are the graph's, so a candidate's outcome compares with its siblings'.
+    """
+
+    def __init__(self, base, case_id, variant):
+        row = copy.deepcopy(base.row)
+        row["id"] = case_id
+        row.setdefault("metadata", {})["engine_variant"] = engine_variant_json(variant)
+        super().__init__(
+            base.space,
+            base.shape_seed,
+            base.data_seed,
+            base.axis_values,
+            row,
+            base.attempts,
+        )
+        self.variant = {"id": variant["id"], "knobs": variant.get("knobs", {})}
+
+
+def check_engine_variant(value, where):
+    """The ``{"id", "knobs"}`` of a row file's ``engine_variant``, or a ``DriverError``."""
+    if not isinstance(value, dict) or set(value) - {"id", "knobs"}:
+        raise DriverError(
+            f"{where}: 'engine_variant' must be an object with 'id' and optionally 'knobs'"
+        )
+    ident = value.get("id")
+    if not isinstance(ident, str) or not ident:
+        raise DriverError(f"{where}: 'engine_variant.id' must be a non-empty string")
+    knobs = value.get("knobs", {})
+    if not isinstance(knobs, dict):
+        raise DriverError(f"{where}: 'engine_variant.knobs' must be an object")
+    if ident == DEFAULT_CANDIDATE and knobs:
+        raise DriverError(
+            f"{where}: the '{DEFAULT_CANDIDATE}' candidate is the engine's own pick and takes no knobs"
+        )
+    return {"id": ident, "knobs": knobs}
+
+
+def parse_catalog_shard(text):
+    """``(i, n)`` of ``--catalog-shard i/n``: ``n >= 1`` and ``0 <= i < n``."""
+    match = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", str(text))
+    if not match:
+        raise ValueError(f"expected i/n (for example 0/4), got {text!r}")
+    i, n = int(match.group(1)), int(match.group(2))
+    if n < 1 or i >= n:
+        raise ValueError(f"shard {i}/{n} is not a shard (need n >= 1 and 0 <= i < n)")
+    return i, n
+
+
+def shard_candidates(candidates, shard):
+    """``[(k, candidate)]`` of the candidates a shard ``(i, n)`` keeps: those whose index ``k``
+    satisfies ``k % n == i`` (every candidate with no shard). Across the shards ``0..n-1`` each
+    candidate is kept by exactly one."""
+    i, n = shard if shard is not None else (0, 1)
+    return [(k, c) for k, c in enumerate(candidates) if k % n == i]
+
+
+def catalog_from_record(record):
+    """``(status, reason, candidates, engine)`` of one ``--list-candidates`` record: the status
+    ``ok`` (with the candidates, each ``{"id", "knobs"}``, in listing order), ``not_enumerable``
+    (with the single default candidate) or ``error`` (no candidates; the reason says why, also when
+    the record is not one a catalog can be built from)."""
+    status = record.get("status")
+    reason = str(record.get("reason") or "")
+    engine = record.get("engine") if isinstance(record.get("engine"), str) else None
+    if status == "not_enumerable":
+        return (
+            "not_enumerable",
+            reason,
+            [{"id": DEFAULT_CANDIDATE, "knobs": {}}],
+            engine,
+        )
+    if status == "error":
+        return "error", reason or "the binary gave no reason", [], engine
+    if status != "ok":
+        return "error", f"unrecognized listing status {status!r}", [], engine
+    raw = record.get("candidates")
+    if not isinstance(raw, list) or not raw:
+        return "error", "the engine listed no candidates for this graph", [], engine
+    seen = set()
+    candidates = []
+    for c in raw:
+        ident = c.get("id") if isinstance(c, dict) else None
+        knobs = c.get("knobs", {}) if isinstance(c, dict) else None
+        if not isinstance(ident, str) or not ident or not isinstance(knobs, dict):
+            return "error", f"malformed candidate {c!r} in the listing", [], engine
+        if ident == DEFAULT_CANDIDATE or ident in seen:
+            what = (
+                "reserved for the engine's own pick"
+                if ident == DEFAULT_CANDIDATE
+                else "listed twice"
+            )
+            return "error", f"candidate id {ident!r} is {what}", [], engine
+        seen.add(ident)
+        candidates.append({"id": ident, "knobs": knobs})
+    return "ok", reason, candidates, engine
 
 
 def write_sweeps(root, sp, samples):
@@ -807,6 +946,13 @@ class Fuzz:
         self._coverage_axes = {}
         # space id -> PairwiseSpace, once a pairwise run has built its rows
         self._pairwise = {}
+        # One entry per graph a catalog run listed (see ``_catalog_batch``), in run order.
+        self._catalog_graphs = []
+        # Candidate cases whose finished record named another candidate than the forced one, and
+        # those whose kernels' ids differ from it; the number of cases that forced a candidate.
+        self._candidate_mismatch = []
+        self._kernel_mismatch = []
+        self._forced = 0
 
     # -- control ---------------------------------------------------------
 
@@ -853,6 +999,14 @@ class Fuzz:
         error = None
         try:
             self._print_header()
+            if self.args.catalog:
+                shard = self.args.catalog_shard
+                print(
+                    "  catalog sweep: every candidate of engine"
+                    f" {self.args.test_engine} for each graph"
+                    + (f"; shard {shard[0]}/{shard[1]}" if shard else ""),
+                    flush=True,
+                )
             self._preflight()
             if self.row_sample is not None:
                 self._run_row()
@@ -978,25 +1132,15 @@ class Fuzz:
                     self.stop_reason = "time-budget"
                     return False
                 samples = source.take(a.batch_size)
-                self.generated[sp.space_id] = self.generated.get(sp.space_id, 0) + len(
-                    samples
-                )
-                for s in samples:
-                    self._samples_file.write(
-                        json.dumps(
-                            {
-                                "space": sp.space_id,
-                                "case": s.case_id,
-                                "shape_seed": s.shape_seed,
-                                "data_seed": s.data_seed,
-                                "axes": s.axis_values,
-                            }
-                        )
-                        + "\n"
-                    )
-                self._samples_file.flush()
                 before = len(self.results)
-                self._execute(sp, samples)
+                if a.catalog:
+                    self._execute(sp, self._catalog_batch(sp, samples))
+                else:
+                    self.generated[sp.space_id] = self.generated.get(
+                        sp.space_id, 0
+                    ) + len(samples)
+                    self._write_samples(sp, samples)
+                    self._execute(sp, samples)
                 ran = True
                 self._print_batch(sp, samples, self.results[before:])
                 self._shrink_pending()
@@ -1007,26 +1151,202 @@ class Fuzz:
         """The one explicit sample of ``--row``: through the same bundle, binary and outcome
         path as a drawn batch of one."""
         sp, s = self.spaces[0], self.row_sample
-        self.generated[sp.space_id] = 1
-        self._samples_file.write(
-            json.dumps(
-                {
-                    "space": sp.space_id,
-                    "case": s.case_id,
-                    "shape_seed": None,
-                    "data_seed": s.data_seed,
-                    "axes": s.axis_values,
-                }
-            )
-            + "\n"
-        )
-        self._samples_file.flush()
         before = len(self.results)
-        self._execute(sp, [s])
+        if self.args.catalog:
+            self._execute(sp, self._catalog_batch(sp, [s]))
+        else:
+            self.generated[sp.space_id] = 1
+            self._write_samples(sp, [s])
+            self._execute(sp, [s])
         self._shrink_pending()
         self.stop_reason = self.stop_reason or "row"
-        (result,) = self.results[before:]
-        print(f"row {sp.space_id} {s.case_id}: {result['outcome']}", flush=True)
+        for result in self.results[before:]:
+            print(
+                f"row {sp.space_id} {result['case']}: {result['outcome']}", flush=True
+            )
+
+    def _write_samples(self, sp, samples):
+        """One ``samples.jsonl`` line per sample; a candidate case names its forced id."""
+        for s in samples:
+            line = {
+                "space": sp.space_id,
+                "case": s.case_id,
+                "shape_seed": s.shape_seed,
+                "data_seed": s.data_seed,
+                "axes": s.axis_values,
+            }
+            variant = getattr(s, "variant", None)
+            if variant is not None:
+                line["engine_variant"] = variant["id"]
+            self._samples_file.write(json.dumps(line) + "\n")
+        self._samples_file.flush()
+
+    # -- catalog ---------------------------------------------------------
+
+    def _catalog_batch(self, sp, samples):
+        """The candidate cases of the graphs ``samples`` (``CandidateSample``, ``<graph>c<k>``),
+        in graph order, for the candidates this run's shard keeps of each graph's catalog. The
+        graphs are listed first (``_list_catalogs``). A graph that could not be listed is
+        finished ``UNEXERCISED`` here, in shard 0 only (its one entry would be ``k = 0``). The
+        run's sample counts and ``samples.jsonl`` count the cases this returns and those graphs.
+        """
+        listed = {}
+        self._list_catalogs(sp, samples, listed)
+        shard = self.args.catalog_shard
+        cases = []
+        for s in samples:
+            status, reason, catalog, engine = listed[s.case_id]
+            if status == "error":
+                if shard is not None and shard[0] != 0:
+                    continue
+                self._catalog_graphs.append(
+                    {
+                        "space": sp.space_id,
+                        "graph": s.case_id,
+                        "status": status,
+                        "reason": reason,
+                        "engine": engine,
+                        "catalog": [],
+                        "selected": [],
+                    }
+                )
+                self.generated[sp.space_id] = self.generated.get(sp.space_id, 0) + 1
+                self._write_samples(sp, [s])
+                self._finish(
+                    sp, s, "UNEXERCISED", "setup", f"catalog listing: {reason}"
+                )
+                continue
+            kept = [
+                CandidateSample(s, f"{s.case_id}c{k}", c)
+                for k, c in shard_candidates(catalog, shard)
+            ]
+            self._catalog_graphs.append(
+                {
+                    "space": sp.space_id,
+                    "graph": s.case_id,
+                    "status": status,
+                    "reason": reason,
+                    "engine": engine,
+                    "catalog": [c["id"] for c in catalog],
+                    "selected": [(c.case_id, c.variant["id"]) for c in kept],
+                }
+            )
+            self.generated[sp.space_id] = self.generated.get(sp.space_id, 0) + len(kept)
+            self._write_samples(sp, kept)
+            cases.extend(kept)
+        return cases
+
+    def _list_catalogs(self, sp, samples, out):
+        """``out[case id] = catalog_from_record(...)`` for every graph of ``samples``: one
+        ``--list-candidates`` run over their bundle. The records the binary wrote before it died
+        or hung count; the graphs it left without one are listed again in halves until the one
+        that kills the listing is alone (``error``), as ``_isolate`` does for a batch.
+        """
+        if not samples:
+            return
+        if self.abort.is_set():
+            for s in samples:
+                out[s.case_id] = (
+                    "error",
+                    "interrupted before the graph was listed",
+                    [],
+                    None,
+                )
+            return
+        self._write_bundle(sp, samples)
+        names = {self._test_name(sp, s): s for s in samples}
+        log_path, listing_path = self._next_invocation("catalog")
+        attempt = self._spawn(
+            self._command("catalog", list(names), candidates=listing_path),
+            log_path,
+            listing_path,
+        )
+        found = {r["test"]: r for r in attempt.records}
+        unresolved = []
+        for name, s in names.items():
+            if name in found:
+                out[s.case_id] = catalog_from_record(found[name])
+            else:
+                unresolved.append(s)
+        if not unresolved:
+            return
+        if attempt.aborted:
+            for s in unresolved:
+                out[s.case_id] = (
+                    "error",
+                    "interrupted before the graph was listed",
+                    [],
+                    None,
+                )
+            return
+        if not (attempt.hung or attempt.returncode != 0):
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+            for s in unresolved:
+                message = self._load_message(
+                    text,
+                    s,
+                    "the binary wrote no listing record for this case (the harness skipped"
+                    " it at load)",
+                )
+                out[s.case_id] = ("error", message, [], None)
+            return
+        if len(unresolved) == 1:
+            what = "hung" if attempt.hung else f"died (exit code {attempt.returncode})"
+            last = [
+                ln.strip()
+                for ln in log_tail(attempt.log_path).splitlines()
+                if ln.strip()
+            ][-3:]
+            out[unresolved[0].case_id] = (
+                "error",
+                f"the binary {what} while listing candidates with only this case in the bundle"
+                + (f"; last output: {' | '.join(last)[:300]}" if last else ""),
+                [],
+                None,
+            )
+            return
+        mid = len(unresolved) // 2
+        self._list_catalogs(sp, unresolved[:mid], out)
+        self._list_catalogs(sp, unresolved[mid:], out)
+
+    def _check_forced(self, sp, sample, variant, result):
+        """A forced candidate's outcome record must say it ran that candidate
+        (``candidate_mismatch``, a failure of the run); its kernels, where it names any, should
+        carry that id after their last ``/`` (``kernel_mismatch``, only listed)."""
+        self._forced += 1
+        forced = variant["id"]
+        reported = result.get("candidate")
+        if reported != forced:
+            self._candidate_mismatch.append(
+                {
+                    "space": sp.space_id,
+                    "case": sample.case_id,
+                    "forced": forced,
+                    "reported": reported,
+                }
+            )
+            print(
+                f"  CANDIDATE MISMATCH: {sp.space_id} {sample.case_id} forced {forced!r}, the"
+                f" outcome record says {reported!r}",
+                flush=True,
+            )
+        kernels = result.get("kernels", [])
+        if forced != DEFAULT_CANDIDATE and any(
+            k.rsplit("/", 1)[-1] != forced for k in kernels
+        ):
+            self._kernel_mismatch.append(
+                {
+                    "space": sp.space_id,
+                    "case": sample.case_id,
+                    "forced": forced,
+                    "kernels": kernels,
+                }
+            )
+            print(
+                f"  kernel mismatch (not a failure): {sp.space_id} {sample.case_id} forced"
+                f" {forced!r}, kernels {kernels}",
+                flush=True,
+            )
 
     # -- pairwise --------------------------------------------------------
 
@@ -1171,11 +1491,13 @@ class Fuzz:
         stem = f"{self._invocation:05d}-{kind}"
         return self.logs / f"{stem}.log", self.reports / f"{stem}.jsonl"
 
-    def _command(self, kind, names, report=None, bundles=None):
+    def _command(self, kind, names, report=None, bundles=None, candidates=None):
         root = self.bundles if bundles is None else bundles
         cmd = list(self.binary_cmd) + ["--golden-data-dir", str(root)]
         if report is not None:
             cmd += ["--outcome-report", str(report)]
+        if candidates is not None:
+            cmd += ["--list-candidates", str(candidates)]
         if names is not None:
             cmd.append("--gtest_filter=" + ":".join(names))
         if kind in ("list", "preflight"):
@@ -1397,7 +1719,11 @@ class Fuzz:
         self._execute(sp, samples[mid:])
 
     @staticmethod
-    def _load_message(listing_text, sample):
+    def _load_message(
+        listing_text,
+        sample,
+        default="absent from --gtest_list_tests (the harness skipped the case at load)",
+    ):
         pattern = re.compile(
             r"(?<![A-Za-z0-9_])" + re.escape(sample.case_id) + r"(?![A-Za-z0-9_])"
         )
@@ -1411,7 +1737,7 @@ class Fuzz:
         ]
         if lines:
             return " | ".join(lines[:3])[:400]
-        return "absent from --gtest_list_tests (the harness skipped the case at load)"
+        return default
 
     # -- outcomes --------------------------------------------------------
 
@@ -1464,6 +1790,11 @@ class Fuzz:
                 ref_lane = record.get("reference_lane")
                 if isinstance(ref_lane, str):
                     result["reference_lane"] = ref_lane
+        variant = getattr(sample, "variant", None)
+        if variant is not None:
+            result["forced_candidate"] = variant["id"]
+        if record is not None and isinstance(record.get("candidate"), str):
+            result["candidate"] = record["candidate"]
         if crash_kind:
             result["crash_kind"] = crash_kind
         if self._candidate_sink is not None:
@@ -1475,6 +1806,8 @@ class Fuzz:
             self.engines_seen[engine] = self.engines_seen.get(engine, 0) + 1
         if arch and self.arch_seen is None:
             self.arch_seen = arch
+        if variant is not None and record is not None:
+            self._check_forced(sp, sample, variant, result)
         self._outcome_axes[(sp.space_id, sample.case_id)] = {
             name: sample.axis_values[name]
             for name, axis in sp.axes.items()
@@ -1526,12 +1859,16 @@ class Fuzz:
 
     def _row_spec(self, sp, sample):
         """The ``--row`` file content that renders ``sample`` again."""
-        return {
+        spec = {
             "space": sp.space_id,
             "axes": sample.axis_values,
             "data_seed": sample.data_seed,
             "case_id": sample.case_id,
         }
+        variant = getattr(sample, "variant", None)
+        if variant is not None:
+            spec["engine_variant"] = {"id": variant["id"], "knobs": variant["knobs"]}
+        return spec
 
     def _replay_argv(self, sp, sample, work_dir, row_path, as_row=False):
         a = self.args
@@ -1895,6 +2232,66 @@ class Fuzz:
             :300
         ]
 
+    def _catalog_summary(self, run_engine):
+        """``summary.json`` ``catalog``: per graph the size of its catalog (``candidates``), the
+        candidate ids this run's shard kept (``selected``) and the outcome of each
+        (``outcomes``: candidate id -> outcome); per engine the graphs, the candidates listed, the
+        cases run and the outcome totals. A graph whose listing failed has no candidates and
+        ``graph_outcome`` ``UNEXERCISED``. ``reconciled`` is true when every selected candidate
+        of every graph got exactly one outcome."""
+        by_case = {(r["space"], r["case"]): r for r in self.results}
+        graphs = []
+        engines = {}
+        reconciled = True
+        for g in self._catalog_graphs:
+            engine = g["engine"] or run_engine
+            e = engines.setdefault(
+                engine,
+                {
+                    "graphs": 0,
+                    "candidates": 0,
+                    "cases": 0,
+                    "unexercised_graphs": 0,
+                    "outcomes": dict.fromkeys(OUTCOMES, 0),
+                },
+            )
+            e["graphs"] += 1
+            entry = {
+                "space": g["space"],
+                "graph": g["graph"],
+                "status": g["status"],
+                "candidates": len(g["catalog"]),
+                "catalog": g["catalog"],
+                "selected": [cid for _, cid in g["selected"]],
+                "outcomes": {},
+            }
+            if g["reason"]:
+                entry["reason"] = g["reason"]
+            if g["status"] == "error":
+                r = by_case.get((g["space"], g["graph"]))
+                entry["graph_outcome"] = r["outcome"] if r else None
+                e["outcomes"]["UNEXERCISED"] += 1
+                e["unexercised_graphs"] += 1
+                reconciled = reconciled and r is not None
+            else:
+                e["candidates"] += len(g["catalog"])
+                for case_id, cid in g["selected"]:
+                    r = by_case.get((g["space"], case_id))
+                    if r is None:
+                        reconciled = False
+                        continue
+                    entry["outcomes"][cid] = r["outcome"]
+                    e["outcomes"][r["outcome"]] += 1
+                    e["cases"] += 1
+            graphs.append(entry)
+        shard = self.args.catalog_shard
+        return {
+            "shard": f"{shard[0]}/{shard[1]}" if shard else None,
+            "graphs": graphs,
+            "engines": engines,
+            "reconciled": reconciled,
+        }
+
     def summarize(self):
         run_engine = self._run_engine() or "unknown"
         engines = {}
@@ -1979,7 +2376,7 @@ class Fuzz:
                     }
                 findings.append(finding)
         a = self.args
-        failed = bool(totals["WRONG"] or totals["CRASH"])
+        failed = bool(totals["WRONG"] or totals["CRASH"] or self._candidate_mismatch)
         return {
             "mode": "pairwise" if a.pairwise else "row" if a.row_spec else "random",
             "seed": a.seed,
@@ -2009,6 +2406,15 @@ class Fuzz:
             "engines": engines,
             "findings": findings,
             **({"pair_coverage": self._pair_coverage()} if a.pairwise else {}),
+            **({"catalog": self._catalog_summary(run_engine)} if a.catalog else {}),
+            **(
+                {
+                    "candidate_mismatch": self._candidate_mismatch,
+                    "kernel_mismatch": self._kernel_mismatch,
+                }
+                if a.catalog or self._forced
+                else {}
+            ),
             "work_dir": str(self.work),
             "exit_code": 1 if failed else 0,
         }
@@ -2050,6 +2456,42 @@ class Fuzz:
                 f" {cov['never_passed']}; {cov['rows']} rows + {cov['repair_rows']} repair"
                 + ("" if cov["complete"] else " (INCOMPLETE: the run stopped early)")
             )
+        catalog = summary.get("catalog")
+        if catalog is not None:
+            for engine, e in catalog["engines"].items():
+                counts = ", ".join(f"{k} {n}" for k, n in e["outcomes"].items() if n)
+                print(
+                    f"  catalog {engine}: {e['graphs']} graphs, {e['candidates']} candidates"
+                    f" listed, {e['cases']} run ({counts or 'none'})"
+                    + (
+                        f"; {e['unexercised_graphs']} graphs could not be listed"
+                        if e["unexercised_graphs"]
+                        else ""
+                    )
+                )
+            for g in catalog["graphs"][:MAX_PRINTED_GRAPHS]:
+                counts = {}
+                for outcome in g["outcomes"].values():
+                    counts[outcome] = counts.get(outcome, 0) + 1
+                text = ", ".join(f"{k} {counts[k]}" for k in OUTCOMES if k in counts)
+                if g["status"] == "error":
+                    text = f"{g['graph_outcome']}: {g['reason']}"
+                print(
+                    f"    {g['space']} {g['graph']} [{g['status']}]: {len(g['selected'])} of"
+                    f" {g['candidates']} candidates: {text or 'none run'}"
+                )
+            if len(catalog["graphs"]) > MAX_PRINTED_GRAPHS:
+                print(
+                    f"    ... {len(catalog['graphs']) - MAX_PRINTED_GRAPHS} more graphs in the summary"
+                )
+            if not catalog["reconciled"]:
+                print("  WARNING: a listed candidate has no outcome")
+        for title, key in (
+            ("CANDIDATE MISMATCH", "candidate_mismatch"),
+            ("kernel mismatch (not a failure)", "kernel_mismatch"),
+        ):
+            for m in summary.get(key, [])[:MAX_PRINTED_FINDINGS]:
+                print(f"  {title}: {m['space']} {m['case']} forced {m['forced']!r}")
         if not summary["reconciled"]:
             print("  WARNING: outcomes do not add up to samples")
         shown = summary["findings"][:MAX_PRINTED_FINDINGS]
@@ -2184,6 +2626,21 @@ def build_parser():
         " (--binary is not needed)",
     )
     p.add_argument(
+        "--catalog",
+        action="store_true",
+        help="sweep the engine's catalog: per drawn graph (a fuzz sample, a pairwise row or the"
+        " --row sample) list the engine's candidates with the binary's --list-candidates and run"
+        " one case per candidate, forced through metadata.engine_variant, instead of the"
+        " engine's own pick (needs --test-engine; not with --shrink)",
+    )
+    p.add_argument(
+        "--catalog-shard",
+        metavar="i/n",
+        help="with --catalog: of each graph's candidate list keep the candidates whose index k"
+        " satisfies k %% n == i (0 <= i < n); the shards 0/n .. (n-1)/n together run every"
+        " candidate of every graph once",
+    )
+    p.add_argument(
         "--coverage-of",
         metavar="WORK_DIR",
         help="offline: print the pair coverage of the samples and outcomes of an earlier run's"
@@ -2207,7 +2664,7 @@ def build_parser():
     return p
 
 
-ROW_KEYS = ("space", "axes", "data_seed", "case_id")
+ROW_KEYS = ("space", "axes", "data_seed", "case_id", "engine_variant")
 
 
 def load_row_file(path):
@@ -2239,7 +2696,7 @@ def load_row_file(path):
                 )
                 if part
             )
-            + f" (the keys are {', '.join(ROW_KEYS)}; case_id is optional)"
+            + f" (the keys are {', '.join(ROW_KEYS)}; case_id and engine_variant are optional)"
         )
     if not isinstance(spec["space"], str) or not spec["space"]:
         raise DriverError(f"--row {path}: 'space' must be an <Op>/<Space> string")
@@ -2249,6 +2706,10 @@ def load_row_file(path):
         sampler.check_data_seed(spec["data_seed"])
     except ValueError as e:
         raise DriverError(f"--row {path}: {e}") from None
+    if "engine_variant" in spec:
+        spec["engine_variant"] = check_engine_variant(
+            spec["engine_variant"], f"--row {path}"
+        )
     spec.setdefault("case_id", sampler.DEFAULT_ROW_CASE_ID)
     return spec
 
@@ -2257,6 +2718,22 @@ def parse_args(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     args.row_spec = None
+    if args.catalog_shard is not None:
+        if not args.catalog:
+            parser.error("--catalog-shard needs --catalog")
+        try:
+            args.catalog_shard = parse_catalog_shard(args.catalog_shard)
+        except ValueError as e:
+            parser.error(f"--catalog-shard: {e}")
+    if args.catalog:
+        if args.coverage_of is not None or args.generate_only:
+            parser.error(
+                "--catalog runs a binary and cannot be combined with --coverage-of or --generate-only"
+            )
+        if not args.test_engine:
+            parser.error(
+                "--catalog lists the candidates of one engine: it needs --test-engine"
+            )
     if args.coverage_of is not None:
         if args.levels_from is None:
             parser.error("--coverage-of needs --levels-from")
@@ -2321,6 +2798,11 @@ def parse_args(argv=None):
         args.shrink = 0
     if args.shrink < 0:
         parser.error("--shrink must be >= 0")
+    if args.catalog and args.shrink:
+        parser.error(
+            "--catalog cannot be combined with --shrink (a shrunk graph has another catalog,"
+            " so the candidate it was found under means nothing there)"
+        )
 
     if args.row_spec is None:
         # A pairwise run runs every row of the generator: the sample count is no control of it.
@@ -2418,6 +2900,17 @@ def main(argv=None):
                 args.row_spec["data_seed"],
                 args.row_spec["case_id"],
             )
+            if "engine_variant" in args.row_spec:
+                if args.catalog:
+                    raise DriverError(
+                        f"--row {args.row}: the row already forces a candidate"
+                        " (engine_variant), so --catalog has nothing to list"
+                    )
+                row_sample = CandidateSample(
+                    row_sample,
+                    row_sample.case_id,
+                    args.row_spec["engine_variant"],
+                )
         return Fuzz(args, spaces, row_sample).run()
     except (
         DriverError,

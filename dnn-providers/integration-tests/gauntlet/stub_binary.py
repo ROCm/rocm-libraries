@@ -7,7 +7,7 @@ Stand-in for ``hipdnn_integration_tests`` used by the gauntlet tests. No GPU nee
 It honors the command line the fuzz driver uses:
 
     stub_binary.py --golden-data-dir DIR --outcome-report FILE
-                   [--gtest_filter=PATTERNS] [--gtest_list_tests]
+                   [--gtest_filter=PATTERNS] [--gtest_list_tests] [--list-candidates FILE]
                    [--test-article X] [--test-engine Y] [--test-config Z]
 
 It discovers template-sweep cases under ``--golden-data-dir`` the way
@@ -56,6 +56,28 @@ by default, as an engine that reports no kernel) and ``kernels_seed_mod`` (``{"m
 record, with ``reference_lane``, ``gpu`` by default; a number, or ``{"a": 2.0, "k": 0.5,
 "product_of": ["values.n", "values.m"]}`` for ``a + k`` times the product of those values of the
 written sweep row; none by default, as a case graded against golden data).
+
+``--list-candidates FILE`` (needs the cases of ``--golden-data-dir`` selected by the filter; runs
+and builds nothing) writes one JSON line per selected case, as the real binary does: ``{"test",
+"bundle", "engine", "status", "total", "candidates": [{"id", "knobs"}], "reason"}``, exit status 0.
+What a case lists comes from the control's ``catalog``::
+
+    "catalog": {"count": 3,                                   # candidates of every graph (default 3)
+                "cases": {"s5": {"count": 5},                 # by graph case id, overriding the above
+                          "s6": {"status": "not_enumerable"},
+                          "s7": {"status": "error", "reason": "engine blew up"}}}
+
+An ``ok`` listing holds ``count`` candidates with ids ``kernel_00``, ``kernel_01``, ... (sorted, as
+the real catalog is) and knobs ``{"kernel": <id>, "tile": <index>}``. ``not_enumerable`` lists none,
+``error`` none with the reason. The behaviour ``list_crash`` makes the listing die (``os._exit``)
+when it reaches that case, after the records of the cases before it; a run of the case itself is
+a ``pass``.
+
+A case whose ``metadata.engine_variant`` names a candidate runs as that candidate: its ``finished``
+record carries ``candidate`` (the id). The control's ``candidate_echo`` (``{"<case id>": "other"}``,
+``null`` leaves ``candidate`` out) makes a case report another one, and ``kernels_by_candidate``
+(``{"prefix": "dense/", "cases": {"<case id>": ["dense/kernel_9"]}}``) makes a forced, non-default
+candidate report the kernel ``prefix`` + its id (or the case's own list) before ``kernels`` applies.
 """
 
 import fnmatch
@@ -71,7 +93,7 @@ BUILTIN_TEST = "StubBuiltin.Smoke"
 BEHAVIOURS = (
     "pass", "unclaimed_pass", "declined", "wrong", "unexercised",
     "crash_engine", "crash_execute", "crash", "hang", "load_skip", "reg_crash", "probe_file",
-    "run_start_crash",
+    "run_start_crash", "list_crash",
 )  # fmt: skip
 # The behaviours that ran the engine's plan and so report kernels when the control names some.
 KERNEL_BEHAVIOURS = ("pass", "unclaimed_pass", "wrong", "crash_execute", "probe_file")
@@ -87,6 +109,7 @@ def parse_args(argv):
     opts = {
         "filter": "*",
         "list": False,
+        "candidates": None,
         "report": None,
         "golden": None,
         "passthrough": {},
@@ -98,9 +121,14 @@ def parse_args(argv):
             opts["filter"] = a.split("=", 1)[1]
         elif a == "--gtest_list_tests":
             opts["list"] = True
-        elif a in ("--golden-data-dir", "--outcome-report"):
+        elif a in ("--golden-data-dir", "--outcome-report", "--list-candidates"):
             i += 1
-            opts["golden" if a == "--golden-data-dir" else "report"] = argv[i]
+            key = {
+                "--golden-data-dir": "golden",
+                "--outcome-report": "report",
+                "--list-candidates": "candidates",
+            }[a]
+            opts[key] = argv[i]
         elif a in ("--test-article", "--test-engine", "--test-config"):
             i += 1
             opts["passthrough"][a] = argv[i]
@@ -196,12 +224,19 @@ def discover(golden):
     return found
 
 
-def kernels_for(control, case_id, kind):
+def kernels_for(control, case_id, kind, case=None):
     """The kernels a case reports: only a behaviour that built the plan (``KERNEL_BEHAVIOURS``)
-    reports any, from ``kernels`` (every such case) or ``kernels_seed_mod`` (by shape seed).
+    reports any. A forced, non-default candidate reports what ``kernels_by_candidate`` names; else
+    they come from ``kernels`` (every such case) or ``kernels_seed_mod`` (by shape seed).
     """
     if kind not in KERNEL_BEHAVIOURS:
         return None
+    by_candidate = control.get("kernels_by_candidate")
+    variant = engine_variant_of(case) if case is not None else None
+    if by_candidate and variant and variant.get("id") != "default":
+        if case_id in by_candidate.get("cases", {}):
+            return by_candidate["cases"][case_id]
+        return [by_candidate.get("prefix", "") + variant["id"]]
     seed_mod = control.get("kernels_seed_mod")
     match = re.fullmatch(r"s(\d+)", case_id)
     if seed_mod and match:
@@ -209,6 +244,40 @@ def kernels_for(control, case_id, kind):
         if mapped is not None:
             return mapped
     return control.get("kernels")
+
+
+def engine_variant_of(case):
+    """The ``metadata.engine_variant`` of a sweep case (``{"id", "knobs"}``), or None."""
+    variant = case.get("metadata", {}).get("engine_variant")
+    return variant if isinstance(variant, dict) else None
+
+
+def catalog_record(control, case_id, test, bundle, engine):
+    """The ``--list-candidates`` record of a graph case (see the module docstring)."""
+    spec = dict(control.get("catalog", {}))
+    spec.update(spec.pop("cases", {}).get(case_id, {}))
+    status = spec.get("status", "ok")
+    candidates = []
+    reason = ""
+    if status == "ok":
+        for j in range(int(spec.get("count", 3))):
+            ident = f"kernel_{j:02d}"
+            candidates.append({"id": ident, "knobs": {"kernel": ident, "tile": j}})
+    elif status == "not_enumerable":
+        reason = f"engine {engine} does not take this graph: not applicable"
+    elif status == "error":
+        reason = spec.get("reason", "stub listing error")
+    else:
+        raise SystemExit(f"stub: unknown catalog status {status!r}")
+    return {
+        "test": test,
+        "bundle": bundle,
+        "engine": engine,
+        "status": status,
+        "total": len(candidates),
+        "candidates": candidates,
+        "reason": reason,
+    }
 
 
 def reference_for(control, case, kind):
@@ -310,6 +379,25 @@ def main(argv):
         r for r in registered if gtest_matches(f"{r[0]}.{r[1]}", opts["filter"])
     ]
 
+    if opts["candidates"] is not None:
+        if log:
+            _log(log, argv, "catalog", [f"{r[0]}.{r[1]}" for r in selected])
+        with open(opts["candidates"], "w", encoding="utf-8", newline="\n") as out:
+            for suite, test, case_id, sweep, purpose, kind, case in selected:
+                if kind == "list_crash":
+                    out.flush()
+                    sys.stderr.write(
+                        f"stub: segmentation fault listing {suite}.{test}\n"
+                    )
+                    sys.stderr.flush()
+                    os._exit(139)
+                record = catalog_record(
+                    control, case_id, f"{suite}.{test}", f"{sweep}#{case_id}", engine
+                )
+                out.write(json.dumps(record) + "\n")
+                out.flush()
+        return 0
+
     # Like the real binary, which has C++ tests compiled in: with a filter that selects
     # nothing at all it prints "Error: zero tests ran." and exits 1, listing or running.
     builtin = not control.get("no_builtin") and gtest_matches(
@@ -378,9 +466,16 @@ def main(argv):
         }
         if purpose is not None:
             record["purpose"] = purpose
-        kernels = kernels_for(control, case_id, kind)
+        kernels = kernels_for(control, case_id, kind, case)
         if kernels:
             record["kernels"] = kernels
+        variant = engine_variant_of(case)
+        candidate = variant.get("id") if variant else None
+        echo = control.get("candidate_echo", {})
+        if case_id in echo:
+            candidate = echo[case_id]
+        if candidate is not None:
+            record["candidate"] = candidate
         reference = reference_for(control, case, kind)
         if reference is not None:
             record["reference_ms"], record["reference_lane"] = reference
