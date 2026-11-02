@@ -559,6 +559,30 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+hipblasStatus_t hipblasLtGroupedMatrixLayoutCreate(hipblasLtMatrixLayout_t* matLayout,
+                                                   hipDataType              type,
+                                                   int                      groupCount,
+                                                   const void*              rowsArray,
+                                                   const void*              colsArray,
+                                                   const void*              ldArray)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedMatrixLayoutCreate");
+    auto status = RocBlasLtStatusToHIPStatus(
+        rocblaslt_grouped_matrix_layout_create((rocblaslt_matrix_layout*)matLayout,
+                                               type,
+                                               groupCount,
+                                               rowsArray,
+                                               colsArray,
+                                               ldArray));
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
 hipblasStatus_t hipblasLtMatrixLayoutDestroy(const hipblasLtMatrixLayout_t descr)
 try
 {

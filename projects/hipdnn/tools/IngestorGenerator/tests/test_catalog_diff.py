@@ -3,11 +3,11 @@
 
 """What `catalog_diff.py` calls the same catalog, and what it refuses to.
 
-The gate exists because byte comparison cannot work here: `generator.py` mints
-every descriptor id with `uuid.uuid4()`, so two runs of one config differ
-everywhere. Masking ids is therefore the premise, and the risk that comes with
-it is a mask that hides a real change. Each case below is one thing the mask
-must NOT swallow.
+The gate exists because output generated with new ids (`--new-ids`, or nothing to
+reuse) differs from the shipped bundle in every id, so byte comparison fails (a run
+that reused the previous bundle's ids needs no mask). Masking ids is
+therefore the premise, and the risk that comes with it is a mask that hides a
+real change. Each case below is one thing the mask must NOT swallow.
 """
 
 from __future__ import annotations
@@ -81,8 +81,9 @@ def run(tmp_path):
 
 class TestTheMaskHidesIdsAndNothingElse:
     def test_regenerated_ids_alone_are_not_a_difference(self, run):
-        """The premise. Every id differs between two runs of one config, so if
-        this failed the gate could never pass and would be abandoned."""
+        """The premise. Every id differs between two runs of one config that
+        reuse nothing, so if this failed the gate could never pass and would be
+        abandoned."""
         shipped = _kdp([_entry("k0")])
         regenerated = json.loads(json.dumps(shipped))
         regenerated["id"] = "fresh-kdp-id"
@@ -92,8 +93,8 @@ class TestTheMaskHidesIdsAndNothingElse:
 
     @pytest.mark.parametrize("key", ["engine_id", "kmd_id"])
     def test_the_contract_consumer_ids_are_masked(self, run, key):
-        """The contract references the freshly minted UED and KMD, so a straight
-        generate.py output differs from the shipped KDP in these two keys."""
+        """The contract references the UED and KMD ids, so output generated
+        with new ids differs from the shipped KDP in these two keys."""
         shipped = _kdp([_entry("k0")])
         regenerated = json.loads(json.dumps(shipped))
         consumer = regenerated["provenance"]["specialization_contract"]["consumers"][0]
@@ -222,9 +223,10 @@ class TestTheDuplicateSpecCheck:
 
 class TestExpectIds:
     def test_preserved_ids_pass_and_fresh_ones_fail(self, run, capsys):
-        """`--expect-ids` is for checking a SPLICE, where reusing the shipped
-        UUIDs is the obligation -- `extend.md`'s 'resolve by UUID, not
-        filename' made checkable rather than left to review."""
+        """`--expect-ids` is for checking a splice or a `generate.py` run that
+        reused the previous ids, where reusing the shipped UUIDs is the
+        obligation -- `extend.md`'s 'resolve by UUID, not filename' made
+        checkable rather than left to review."""
         shipped = _kdp([_entry("k0")])
         assert run(shipped, json.loads(json.dumps(shipped)), "--expect-ids") == 0
 
@@ -639,3 +641,90 @@ def test_subset(run, capsys, change, rc):
 def test_subset_excludes_strict_spec(run):
     kdp = _kdp([_entry("k0")])
     assert run(kdp, kdp, "--subset", "--strict-spec") == 2
+
+
+def _multi_entry(name: str = "k0") -> dict:
+    """A multi-launch entry: `sources` in place of `kernel_source`, at UKD 1.1."""
+    entry = _entry(name)
+    source = entry.pop("kernel_source")
+    entry["version"] = "1.1"
+    entry["sources"] = {
+        "segment": source,
+        "reduce": {
+            "kind": "rocke",
+            "source": "kernels/gfx950/attention_dense.py",
+            "builder": "build_reduce",
+            "spec": {"num_splits": 4},
+            "role": "reduce",
+        },
+    }
+    return entry
+
+
+class TestMultiLaunchEntries:
+    """An entry naming its kernels in `sources` is compared launch by launch: an
+    entry key that read only `kernel_source` would call two different
+    multi-launch catalogs the same."""
+
+    def test_equal_multi_launch_catalogs_are_the_same(self, run):
+        assert run(_kdp([_multi_entry()]), _kdp([_multi_entry()]), "--ignore-ids") == 0
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            lambda e: e["sources"]["reduce"].update(role="merge"),
+            lambda e: e["sources"]["reduce"].update(builder="build_other"),
+            lambda e: e["sources"]["reduce"]["spec"].update(num_splits=8),
+            lambda e: e["sources"]["segment"]["spec"].update(block_n=32),
+            lambda e: e["sources"].pop("reduce"),
+            lambda e: e["sources"].update(merge=e["sources"].pop("reduce")),
+            lambda e: e.update(
+                kernel_source=e.pop("sources")["segment"], version="1.0"
+            ),
+        ],
+        ids=[
+            "role",
+            "builder",
+            "second_launch_spec",
+            "first_launch_spec",
+            "dropped_launch",
+            "renamed_launch",
+            "collapsed_to_kernel_source",
+        ],
+    )
+    @pytest.mark.parametrize("flags", [(), ("--subset",), ("--strict-spec",)])
+    def test_a_change_to_any_launch_is_caught(self, run, edit, flags):
+        shipped = _kdp([_multi_entry()])
+        regenerated = json.loads(json.dumps(shipped))
+        edit(regenerated["kernelDescriptors"][0])
+        assert run(shipped, regenerated, "--ignore-ids", *flags) == 1
+
+    def test_a_spec_field_only_a_launch_carries_is_keyed_by_default(self, run):
+        """The shipped catalog's spec fields decide what is compared; a field only
+        its second launch carries must be among them."""
+        shipped = _kdp([_multi_entry()])
+        regenerated = json.loads(json.dumps(shipped))
+        regenerated["kernelDescriptors"][0]["sources"]["reduce"]["spec"] = {
+            "num_splits": 8
+        }
+        assert run(shipped, regenerated, "--ignore-ids") == 1
+
+    def test_two_entries_with_one_set_of_launches_are_duplicates(self, capsys):
+        kdp = _kdp([_multi_entry("a"), _multi_entry("b")])
+        assert len(catalog_diff.find_duplicate_specs(kdp)) == 1
+
+    def test_an_entry_with_both_spellings_is_refused(self, run):
+        entry = _multi_entry()
+        entry["kernel_source"] = entry["sources"]["segment"]
+        assert run(_kdp([entry]), _kdp([entry]), "--ignore-ids") == 2
+
+    @pytest.mark.parametrize(
+        "sources",
+        [[], "x", None, {"a": "x"}, {"a": {"spec": []}}],
+        ids=["list", "string", "null", "launch_not_object", "spec_not_object"],
+    )
+    def test_malformed_sources_exit_2(self, run, sources):
+        entry = _entry("k0")
+        entry.pop("kernel_source")
+        entry["sources"] = sources
+        assert run(_kdp([entry]), _kdp([entry]), "--ignore-ids") == 2

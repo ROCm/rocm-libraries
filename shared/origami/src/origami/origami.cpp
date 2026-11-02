@@ -756,6 +756,24 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
 
   // Sort top candidates by arithmetic intensity (descending - highest first)
   if (num_the_same > 1) {
+    // Buffer load/store preference is the lowest-priority tie-break, so sort by
+    // it first: the subsequent stable sorts (AI, problem dimension, MT/occupancy)
+    // will preserve this ordering among configs that remain tied on those higher
+    // priority criteria, effectively applying the buffer preference within every
+    // tied subgroup (not just the leading one).
+    if (results.front().config.has_tensile_params()) {
+      std::stable_sort(
+          results.begin(),
+          results.begin() + num_the_same,
+          [](const prediction_result_t& a, const prediction_result_t& b) {
+            auto rank = [](bool bufferLoad, bool bufferStore) {
+              return (static_cast<int>(!bufferLoad) << 1) | static_cast<int>(!bufferStore);
+            };
+            return rank(a.config.tensile().buffer_load, a.config.tensile().buffer_store) <
+                   rank(b.config.tensile().buffer_load, b.config.tensile().buffer_store);
+          });
+    }
+
     std::stable_sort(results.begin(),
                      results.begin() + num_the_same,
                      [&compute_arithmetic_intensity](const prediction_result_t& a,

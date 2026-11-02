@@ -190,6 +190,28 @@ def assign_gpu_to_worker(worker_id, worker_gpu_id):
         print(f"Warning: Could not parse worker_id '{worker_id}' for GPU assignment")
 
 @pytest.fixture(autouse=True)
+def _restore_valid_parameters_isa():
+    """Put ``validParameters["ISA"]`` back after each test.
+
+    ``assignGlobalParameters`` rebinds that entry to the isa map it was given.
+    ``test_valid_parameters_structure`` snapshots the static list, whose second
+    entry is gfx803. A gfx942 assignment that does not restore leaves the next
+    test on this worker comparing against ``(9, 4, *)``.
+    """
+    from Tensile.Common.ValidParameters import validParameters
+
+    saved = validParameters.get("ISA")
+    saved_isa = None if saved is None else list(saved)
+    try:
+        yield
+    finally:
+        if saved_isa is None:
+            validParameters.pop("ISA", None)
+        else:
+            validParameters["ISA"] = saved_isa
+
+
+@pytest.fixture(autouse=True)
 def clear_ffm_memfile_per_test():
    """
    Unlinks the worker's HSA_MODEL_MEMFILE after each test so the next
@@ -275,6 +297,86 @@ def commSkipMark(config):
         return pytest.mark.skip(
             reason=f"comm tests need 2+ visible HIP devices, found {count}")
     return None
+
+def _host_sees_gfx1250():
+    """True when ``rocm_agent_enumerator`` reports a gfx1250 GPU.
+
+    Same probe ``rocisa`` uses to auto-select the stinkytofu backend. A missing
+    enumerator or a failed probe does not count as seeing gfx1250. Cached: the
+    answer cannot change during a session.
+    """
+    cached = getattr(_host_sees_gfx1250, "_cached", None)
+    if cached is not None:
+        return cached
+    import subprocess
+    rocmpath = os.environ.get(
+        "TENSILE_ROCM_PATH", os.environ.get("ROCM_PATH", "/opt/rocm")
+    )
+    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
+    seen = False
+    if os.path.exists(enumerator):
+        try:
+            output = subprocess.check_output(
+                [enumerator, "-t", "GPU"], timeout=5, stderr=subprocess.DEVNULL,
+            )
+            seen = "gfx1250" in output.decode()
+        except (OSError, subprocess.SubprocessError):
+            seen = False
+    _host_sees_gfx1250._cached = seen
+    return seen
+
+
+def _gfx1250_native_guard(exc):
+    """The unset-env guard refusing to emit a gfx1250 kernel on native rocisa.
+
+    Matches both ``loaded=True`` and ``loaded=False``. An explicit
+    ``ROCISA_BACKEND`` mismatch uses a different message and stays a failure.
+    """
+    if not isinstance(exc, RuntimeError):
+        return False
+    text = str(exc)
+    return "gfx1250 kernel" in text and "expected the stinkytofu backend" in text
+
+
+def _skip_gfx1250_codegen_on_this_host(exc):
+    """Skip gfx1250 codegen when this process auto-selected native rocisa.
+
+    ``ROCISA_BACKEND`` left unset means the backend followed hardware detection.
+    Coverage and ``tox -e unit`` set it to ``stinkytofu``, so those lanes still
+    emit. A host that reports gfx1250 keeps the guard as a failure.
+    """
+    if os.environ.get("ROCISA_BACKEND", "").strip():
+        return False
+    if _host_sees_gfx1250():
+        return False
+    return _gfx1250_native_guard(exc)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Skip gfx1250 codegen on a non-gfx1250 host using native rocisa.
+
+    TheRock's gfx94X tensilelite job runs ``Tests/unit`` in one native process.
+    Characterization tests still ask for gfx1250 assembly. The guard in
+    ``TensileCreateLibrary/Run.py`` raises because that host did not select the
+    stinkytofu backend. Skipping here leaves the guard a hard error when
+    ``ROCISA_BACKEND`` is set and on hosts that report gfx1250.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if report.when == "teardown" or not report.failed:
+        return
+    excinfo = getattr(call, "excinfo", None)
+    if excinfo is None or not _skip_gfx1250_codegen_on_this_host(excinfo.value):
+        return
+    filename, lineno, _name = item.location
+    report.outcome = "skipped"
+    report.longrepr = (
+        filename,
+        lineno,
+        "Skipped: gfx1250 codegen uses the stinkytofu backend; this host is not gfx1250 and ROCISA_BACKEND is unset",
+    )
+
 
 def pytest_collection_modifyitems(config, items):
     """

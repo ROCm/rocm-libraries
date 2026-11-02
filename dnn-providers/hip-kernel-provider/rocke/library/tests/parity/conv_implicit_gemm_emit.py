@@ -9,6 +9,7 @@
 # lower_kernel_to_llvm(arch=<cfg arch>) to stdout so it can be byte-compared
 # with the C emitter conv_implicit_gemm_emit.c.
 from kernels.common.conv_implicit_gemm import (
+    ConvAccumulatorEpilogue,
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
@@ -498,7 +499,211 @@ def _spec_raw(idx: int):
             ),
             "gfx950",
         )
+    if idx in (29, 30, 31, 32):
+        # Group merging on WMMA (wave32). Same depthwise problem as 21-28.
+        # 29: gfx1250 mem/cshuffle, 30: gfx1250 wavelet/cshuffle, 31: gfx1250
+        # direct epilogue (vector_size_c pinned to 1), 32: gfx1151 (gfx11
+        # WMMA, 16x16x16 atom) mem/cshuffle.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+        gm = {29: 8, 30: 16, 31: 4, 32: 8}[idx]
+        kw = {"vector_size_c": 1} if idx == 31 else {}
+        if idx == 30:
+            kw["num_load_waves"] = 2
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16 if idx == 32 else 32,
+                wave_size=32,
+                pipeline="wavelet" if idx == 30 else "mem",
+                epilogue="default" if idx == 31 else "cshuffle",
+                group_merge=gm,
+                **kw,
+            ),
+            "gfx1151" if idx == 32 else "gfx1250",
+        )
+    if idx in (33, 34, 35):
+        # Grid-per-group WMMA (unmerged) on gfx1250 grouped problems.
+        # 33: groups=4 (cpg=kpg=16) mem/cshuffle, 34:
+        # depthwise (cpg=kpg=1) mem/default, 35: groups=4 wavelet/cshuffle.
+        if idx == 34:
+            p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=64)
+        else:
+            p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=3, fx=3, pH=1, pW=1, groups=4)
+        kw = {"num_load_waves": 2} if idx == 35 else {}
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=2,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="wavelet" if idx == 35 else "mem",
+                epilogue="default" if idx == 34 else "cshuffle",
+                **kw,
+            ),
+            "gfx1250",
+        )
+    if idx in (36, 37, 38):
+        # Grouped pointwise (1x1, stride 1, no pad): the flat fast path with the
+        # group's channel slab on A, the within-group filter bound on B and the
+        # group's columns in D's K-wide rows. groups=4, cpg=kpg=16. 36: direct
+        # store, 37: cshuffle store, 38: async_dma loaders.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=1, fx=1, groups=4)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle" if idx == 37 else "default",
+                async_dma=(idx == 38),
+            ),
+            "gfx950",
+        )
+    if idx == 39:
+        # Grouped pointwise on the WMMA direct store, whose C++ port spells the
+        # pointwise D offset out inline rather than through d_addr.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, fy=1, fx=1, groups=4)
+        return (
+            ImplicitGemmConvSpec(
+                problem=p,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=2,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            "gfx1250",
+        )
+    if 40 <= idx <= 53:
+        return _split_k_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
+
+
+# Split-K forward (split_k > 1) and its single-launch cluster form
+# (split_k_cluster) on gfx1250 WMMA, plus one MFMA rejection. Keep in lockstep
+# with make_cfg_split_k() in conv_implicit_gemm_emit.c.
+#   40: wavelet/cshuffle, 16x16x64 tile (small M, deep K)
+#   41: mem/cshuffle, 64x64 tile, 2x2 warps
+#   42: mem/default (vector_size_c=1), 32x32x32 tile
+#   43: grouped (groups=2) wavelet/cshuffle
+#   44: cluster S=4, mem/cshuffle, 16x16x64 tile
+#   45: cluster S=8, mem/cshuffle, 64x64 tile
+#   46: cluster S=15, mem/cshuffle, 16x16x64 tile
+#   47: cluster S=4, grouped (groups=2), 32x32 tile, 1x2 warps
+#   48: cluster S=12, mem/default, 32x32x32 tile
+#   49: split_k=2 on gfx950 (MFMA): rejected by both engines
+#   50: split_k=2 with a bias acc_epilogue: rejected by both engines
+#   51: split_k=0: rejected by both engines
+#   52: cluster S=4 with K=kpg=10 (not a multiple of 4): rejected by both
+#   53: cluster S=4 on gfx1201 (no cluster launch): rejected by both engines
+_SMALL_M = dict(N=1, Hi=7, Wi=7, C=256, K=64, fy=3, fx=3, pH=1, pW=1)
+_CSH_64 = dict(N=2, Hi=12, Wi=12, C=128, K=96, fy=3, fx=3, pH=1, pW=1)
+_DEFAULT = dict(N=1, Hi=9, Wi=9, C=64, K=40, fy=3, fx=3, pH=1, pW=1)
+_GROUPED = dict(N=1, Hi=10, Wi=10, C=128, K=64, fy=3, fx=3, pH=1, pW=1, groups=2)
+_ODD_K = dict(N=1, Hi=7, Wi=7, C=256, K=10, fy=3, fx=3, pH=1, pW=1)
+
+
+def _split_k_spec(idx: int):
+    base = dict(
+        tile_m=16,
+        tile_n=16,
+        tile_k=64,
+        warp_m=1,
+        warp_n=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        wave_size=32,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        pipeline="wavelet",
+        epilogue="cshuffle",
+        num_load_waves=1,
+        split_k=2,
+    )
+    tile_64 = dict(tile_m=64, tile_n=64, warp_m=2, warp_n=2)
+    tile_def = dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warp_m=2,
+        warp_n=1,
+        epilogue="default",
+        vector_size_c=1,
+    )
+    prob, kw = {
+        40: (_SMALL_M, {}),
+        41: (_CSH_64, dict(tile_64, pipeline="mem")),
+        42: (_DEFAULT, dict(tile_def, pipeline="mem")),
+        43: (_GROUPED, {}),
+        44: (_SMALL_M, dict(pipeline="mem", split_k_cluster=4)),
+        45: (_CSH_64, dict(tile_64, pipeline="mem", split_k_cluster=8)),
+        46: (_SMALL_M, dict(pipeline="mem", split_k_cluster=15)),
+        47: (
+            _GROUPED,
+            dict(
+                tile_m=32,
+                tile_n=32,
+                warp_m=1,
+                warp_n=2,
+                pipeline="mem",
+                split_k_cluster=4,
+            ),
+        ),
+        48: (_DEFAULT, dict(tile_def, pipeline="mem", split_k_cluster=12)),
+        49: (
+            _CSH_64,
+            dict(
+                tile_m=64,
+                tile_n=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                wave_size=64,
+                pipeline="mem",
+            ),
+        ),
+        50: (
+            _SMALL_M,
+            dict(pipeline="mem", acc_epilogue=ConvAccumulatorEpilogue(bias=1.0)),
+        ),
+        51: (_SMALL_M, dict(split_k=0)),
+        52: (_ODD_K, dict(pipeline="mem", split_k_cluster=4, vector_size_c=2)),
+        53: (_SMALL_M, dict(pipeline="mem", split_k_cluster=4, warp_tile_k=16)),
+    }[idx]
+    cfg = dict(base, **kw)
+    return (
+        ImplicitGemmConvSpec(problem=_cp(**prob), **cfg),
+        {49: "gfx950", 53: "gfx1201"}.get(idx, "gfx1250"),
+    )
 
 
 def main() -> int:

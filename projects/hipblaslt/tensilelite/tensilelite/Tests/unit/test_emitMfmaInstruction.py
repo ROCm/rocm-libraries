@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 ################################################################################
-# Unit tests for Tensile.Components.Subtile.Kernel.emitMfmaInstruction.
+# Unit tests for tensilelite.Components.Subtile.Kernel.emitMfmaInstruction.
 ################################################################################
 
 import os
@@ -11,8 +11,8 @@ import pytest
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
-from Tensile.Common.DataType import DataType
-from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
+from tensilelite.Common.DataType import DataType
+from tensilelite.Components.Subtile.Kernel import emitMfmaInstruction
 from gpu_test_helpers import init_rocisa, preserve_rocisa_kernel_state
 
 

@@ -173,13 +173,67 @@ if(Python3_FOUND)
     )
     set(HIPDNN_IT_SUPPORT_SIDECAR_TEST hipdnn_support_sidecar_python_tests)
 
-    # Skips itself when PyTorch, which the generator needs, is not installed.
+    # pytest-style suites (fixtures, parametrize), so they run under -m pytest
+    # rather than as scripts; a bare `python file.py` would collect nothing.
     add_test(
-        NAME hipdnn_golden_generator_python_tests
+        NAME hipdnn_bundle_discovery_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_bundle_discovery.py
+    )
+    set(HIPDNN_IT_BUNDLE_DISCOVERY_TEST hipdnn_bundle_discovery_python_tests)
+
+    add_test(
+        NAME hipdnn_support_matrix_renderer_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_render_support_matrix.py
+    )
+    set(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST hipdnn_support_matrix_renderer_python_tests)
+
+    add_test(
+        NAME hipdnn_support_features_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_support_features.py
+    )
+    set(HIPDNN_IT_SUPPORT_FEATURES_TEST hipdnn_support_features_python_tests)
+
+    # None of these suites uses a third-party plugin; don't let a broken one
+    # installed in the developer's environment fail them.
+    set_tests_properties(
+        hipdnn_bundle_discovery_python_tests hipdnn_support_matrix_renderer_python_tests
+        hipdnn_support_features_python_tests
+        PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
+    )
+
+    # Skips itself (exit 77) when PyTorch, which the generator needs, is not installed.
+    add_test(
+        NAME hipdnn_golden_sdpa_fwd_generator_python_tests
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_fwd_golden.py
     )
-    set(HIPDNN_IT_GOLDEN_GENERATOR_TEST hipdnn_golden_generator_python_tests)
+    set_tests_properties(hipdnn_golden_sdpa_fwd_generator_python_tests
+                         PROPERTIES SKIP_RETURN_CODE 77)
+    set(HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST hipdnn_golden_sdpa_fwd_generator_python_tests)
+
+    # Skips itself (exit 77) when PyTorch, which the generator needs, is not installed.
+    add_test(
+        NAME hipdnn_golden_sdpa_bwd_generator_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_bwd_golden.py
+    )
+    set_tests_properties(hipdnn_golden_sdpa_bwd_generator_python_tests
+                         PROPERTIES SKIP_RETURN_CODE 77)
+    set(HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST hipdnn_golden_sdpa_bwd_generator_python_tests)
+
+    # Skips itself (exit 77) when PyTorch, which the generator needs, is not installed.
+    add_test(
+        NAME hipdnn_golden_sdpa_fwd_paged_generator_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_fwd_paged_golden.py
+    )
+    set_tests_properties(hipdnn_golden_sdpa_fwd_paged_generator_python_tests
+                         PROPERTIES SKIP_RETURN_CODE 77)
+    set(HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST
+        hipdnn_golden_sdpa_fwd_paged_generator_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -206,6 +260,7 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/input-init/SdpaBackwardInputs.cpp
 )
 
 # Golden-data validation: validates our checked-in .bin data against our own
@@ -232,6 +287,7 @@ add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/input-init/SdpaBackwardInputs.cpp
     src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     src/harness/reference-validation/GoldenDataPlan.cpp
     src/harness/reference-validation/GoldenDataRegistration.cpp
@@ -327,8 +383,23 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
     endif()
-    if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})
+    if(HIPDNN_IT_BUNDLE_DISCOVERY_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_DISCOVERY_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_FEATURES_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_FEATURES_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_FWD_GENERATOR_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_BWD_GENERATOR_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_SDPA_FWD_PAGED_GENERATOR_TEST})
     endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")

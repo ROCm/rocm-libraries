@@ -14,6 +14,11 @@ registration patterns, not another engine's applicability rules.
 | Native score | `double(const MatchContext&, const BoundTokens&, const KernelDefinition&)` | Rank surviving candidates for `heuristic: native` |
 | Dispatch | `IKernelDispatchHandler<Handle>` | Workspace, owned preparation and exact launch |
 
+A multi-launch pack (descriptors carrying `sources`) overrides `launchNames()` to return
+the launch names of its kernels' `sources` maps, the same set for every kernel; the state
+manager drops a kernel whose set differs. The handler owns launch order and the workspace
+between launches. See [Multi-launch handler](#multi-launch-handler).
+
 Complete reachable placeholders. Zero workspace is valid only when none is needed. A
 native scorer ranks on justified free axes; higher wins. `heuristic: none` means no UHD
 and no score declaration, body, constant or registration. Loading alone cannot prove
@@ -98,6 +103,115 @@ test; its checker proves structure, not semantic equivalence.
 guards for a conditional ABI; retain every slot for a fixed ABI, including unused
 pointers. Record each synthesized buffer's source, lifetime and enforced preconditions.
 Prepared state must remain immutable across concurrent launches.
+
+### Multi-launch handler
+
+A kernel whose UKD carries a `sources` map launches several kernels in order. The sketch
+is a pack whose kernels carry `decode` and `merge` launches; the decode launch writes
+partial results to a workspace slice and the merge launch reads them. `Binding`,
+`intermediateBytes`, `decodeSignature`, `mergeSignature`, `bindOperands`,
+`configureDecode` and `configureMerge` stand for pack-local types and helpers
+(matching, signatures and geometry follow `ConvNative.cpp`).
+`Gfx1151WmmaAttentionNative.cpp` is a shipped decode and merge handler.
+
+```cpp
+class PreparedDecodeMerge : public PreparedDispatch
+{
+public:
+    PreparedDecodeMerge(IngestorKernelCode decode, IngestorKernelCode merge, Binding binding)
+        : _decode(std::move(decode))
+        , _merge(std::move(merge))
+        , _binding(binding)
+    {
+    }
+
+    const IngestorKernelCode& decode() const { return _decode; }
+    const IngestorKernelCode& merge() const { return _merge; }
+    const Binding& binding() const { return _binding; }
+
+private:
+    IngestorKernelCode _decode;
+    IngestorKernelCode _merge;
+    Binding _binding;
+};
+
+class DecodeMergeDispatchHandler : public IKernelDispatchHandler<Handle>
+{
+public:
+    explicit DecodeMergeDispatchHandler(const compilation::KpackKernelLoader& kpackLoader)
+        : _kpackLoader(kpackLoader)
+    {
+    }
+
+    // The same set for every kernel of the pack; a kernel with another set is dropped.
+    std::set<std::string> launchNames() const override
+    {
+        return {"decode", "merge"};
+    }
+
+    // The slice between the launches. Sized from the graph, not from the kernel.
+    size_t workspaceBytes(const MatchContext& context,
+                          const BoundTokens& bound,
+                          const KernelDefinition& /*kernel*/) const override
+    {
+        return intermediateBytes(context, bound);
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
+                                              const BoundTokens& bound,
+                                              const KernelDefinition& kernel) const override
+    {
+        // Each launch resolves through the ordinary kpack path, one definition at a time.
+        auto decode = buildIngestorKernelCode(_kpackLoader,
+                                              context,
+                                              launchKernelDefinition(kernel, "decode"),
+                                              decodeSignature());
+        auto merge = buildIngestorKernelCode(
+            _kpackLoader, context, launchKernelDefinition(kernel, "merge"), mergeSignature());
+
+        const auto binding = bindOperands(context, bound);
+        configureDecode(decode, context, binding); // setBlockSize / setGridSize
+        configureMerge(merge, context, binding);
+
+        return std::make_unique<PreparedDecodeMerge>(
+            std::move(decode), std::move(merge), binding);
+    }
+
+    void launch(const Handle& handle,
+                const PreparedDispatch& prepared,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* workspace) const override
+    {
+        const auto& dispatch = dynamic_cast<const PreparedDecodeMerge&>(prepared);
+        const auto& binding = dispatch.binding();
+
+        const auto in
+            = hipdnn_plugin_sdk::findDeviceBuffer(binding.in, deviceBuffers, numDeviceBuffers);
+        const auto out
+            = hipdnn_plugin_sdk::findDeviceBuffer(binding.out, deviceBuffers, numDeviceBuffers);
+
+        const hipStream_t stream = handle.getStream();
+
+        // Order is the handler's: decode writes the workspace slice, then merge reads it,
+        // on the one stream of the handle.
+        dispatch.decode().kernelForStream(stream).launch(stream, in.ptr, workspace);
+        dispatch.merge().kernelForStream(stream).launch(stream, workspace, out.ptr);
+    }
+
+private:
+    const compilation::KpackKernelLoader& _kpackLoader;
+};
+```
+
+What the sketch relies on beyond the contract above and `LaunchKernelDefinition.hpp`:
+
+- The generator refuses a config whose launch names disagree, so alternatives with
+  another set (for example a single-launch variant) belong to a separate engine.
+- The hipDNN workspace is not zeroed. A launch that accumulates into the slice must
+  initialise it, or an earlier launch must write all of it.
+- `launchNames()` is provisional until the `launches[]` dispatch program exists
+  ([RFC 0017 §15.1](../../../../docs/rfcs/0017_UniversalKernelDescriptor.md)).
 
 ## Registration and inventory proof
 

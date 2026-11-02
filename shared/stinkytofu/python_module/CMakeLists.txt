@@ -176,6 +176,19 @@ install(FILES $<TARGET_FILE:stinkytofu>
     COMPONENT python_bindings
 )
 
+# On ELF platforms _stinkytofu.so is linked with RUNPATH=$ORIGIN and
+# NEEDED=libstinkytofu.so.0 (the SONAME). $<TARGET_FILE> is the *versioned* file
+# (libstinkytofu.so.0.1.0), so without the SONAME sitting next to the extension
+# the loader fails with "libstinkytofu.so.0: cannot open shared object file".
+# Windows DLLs and static builds have no SONAME, so guard the genex.
+get_target_property(_stinkytofu_lib_type stinkytofu TYPE)
+if(NOT WIN32 AND _stinkytofu_lib_type STREQUAL "SHARED_LIBRARY")
+    install(FILES $<TARGET_SONAME_FILE:stinkytofu>
+        DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu
+        COMPONENT python_bindings
+    )
+endif()
+
 # Install Python wrapper (__init__.py)
 install(FILES stinkytofu/__init__.py
     DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu
@@ -188,6 +201,12 @@ install(FILES stinkytofu/__init__.py
 if(DEFINED SKBUILD)
     install(TARGETS stinkytofu_python DESTINATION stinkytofu)
     install(FILES $<TARGET_FILE:stinkytofu> DESTINATION stinkytofu)
+    # Ship the SONAME (libstinkytofu.so.0) too; see the non-SKBUILD block above.
+    # Without it the wheel installs only libstinkytofu.so.0.1.0 and importing
+    # stinkytofu raises "libstinkytofu.so.0: cannot open shared object file".
+    if(NOT WIN32 AND _stinkytofu_lib_type STREQUAL "SHARED_LIBRARY")
+        install(FILES $<TARGET_SONAME_FILE:stinkytofu> DESTINATION stinkytofu)
+    endif()
     install(FILES stinkytofu/__init__.py DESTINATION stinkytofu)
     install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc" DESTINATION stinkytofu)
 endif()

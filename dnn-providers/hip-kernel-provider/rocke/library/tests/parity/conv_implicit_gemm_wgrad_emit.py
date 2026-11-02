@@ -49,6 +49,12 @@
 #         gfx942 and chiplet swizzle; 45-47 pair it with async_dma, unroll_k
 #         and WMMA, which both engines must reject; 48 is a scalar-load
 #         128x128 tile (more carried offsets than accumulators)
+#   49 -- gfx1250 WMMA split-K=4, bf16 dW (zero-fill packed bf16 atomic), M-outer
+#   50 -- gfx1250 WMMA split-K=4, fp32 dW (scalar atomic), K-outer
+#   51 -- gfx1250 WMMA split-K=2, fp16 dW, C=24 (partial N tiles)
+#   52-54 -- WMMA split-K both engines must reject: gfx1201 bf16 dW (arch not
+#         enabled), gfx1250 bf16 dW with the cshuffle epilogue (outside the
+#         WMMA wgrad subset), gfx1151 fp32 dW (arch not enabled, any dtype)
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no case loads bf16 operands. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -56,7 +62,7 @@
 #
 # Negative cases (configs 100+) verify that invalid specs are rejected:
 #   100 -- odd C with fp16 split-K (must raise ValueError)
-#   102 -- split_k > 1 on RDNA gfx1151 (must raise ValueError)
+#   102 -- 16-bit split_k > 1 on RDNA gfx1151 (must raise ValueError)
 #   103 -- two_stage=True with split_k=1 (must raise ValueError)
 #   104 -- streamk with split_k=4 (must raise ValueError)
 #   105 -- streamk on gfx1250 (must raise ValueError)
@@ -64,7 +70,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-48, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-54, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -611,6 +617,83 @@ def _spec(idx: int):
             arch,
         )
 
+    if 49 <= idx <= 51:
+        # gfx1250 wave32 WMMA split-K through the WMMA atomic epilogue: a packed
+        # 16-bit atomic per element (zero partner) or a scalar fp32 atomic.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        problem, dtype_d, split_k, lds_k_outer = {
+            49: (
+                ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+                "bf16",
+                4,
+                False,
+            ),
+            50: (
+                ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+                "fp32",
+                4,
+                True,
+            ),
+            51: (
+                ConvProblem(N=4, Hi=12, Wi=12, C=24, K=32, Y=3, X=3, pH=1, pW=1),
+                "fp16",
+                2,
+                False,
+            ),
+        }[idx]
+        return (
+            WgradConvSpec(
+                problem=problem,
+                data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+                split_k=split_k,
+                lds_k_outer=lds_k_outer,
+            ),
+            "gfx1250",
+        )
+
+    if 52 <= idx <= 54:
+        # WMMA split-K specs both engines must reject.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        arch, dtype_d, epilogue, warp_tile_k = {
+            52: ("gfx1201", "bf16", "default", 16),
+            53: ("gfx1250", "bf16", "cshuffle", 32),
+            54: ("gfx1151", "fp32", "default", 16),
+        }[idx]
+        return (
+            WgradConvSpec(
+                problem=ConvProblem(
+                    N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1
+                ),
+                data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=warp_tile_k,
+                wave_size=32,
+                pipeline="mem",
+                epilogue=epilogue,
+                split_k=4,
+            ),
+            arch,
+        )
+
     # ----------------------------------------------------------------
     # Negative cases: these specs must be REJECTED by the validator.
     # The harness (run_emit) expects a ValueError / SystemExit when
@@ -637,7 +720,8 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 102:
-        # split_k > 1 on RDNA gfx1151 -- must raise (CDNA-only).
+        # 16-bit split_k > 1 on RDNA gfx1151 -- must raise (WMMA split-K is
+        # not enabled on gfx1151).
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
         return (
             WgradConvSpec(

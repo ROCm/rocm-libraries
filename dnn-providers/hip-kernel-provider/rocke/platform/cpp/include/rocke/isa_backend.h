@@ -109,6 +109,7 @@ const char* rocke_isa_triple(const rocke_isa_backend_t* be);
 /* The LLVM datalayout string for `flavor` (Python backend.datalayout(flavor)).
  * Only the buffer-fat-pointer address space (p8) drifts between LLVM 20 (ROCm
  * 7.0/7.1) and LLVM 22 (ROCm >= 7.2). */
+/* Borrowed process-lifetime string, or NULL for AUTO/an unknown flavor. */
 const char* rocke_isa_datalayout_for_flavor(const rocke_isa_backend_t* be,
                                             rocke_llvm_flavor_t flavor);
 /* Flavor-agnostic accessor: the historical shared form (LLVM20). New callers
@@ -116,7 +117,8 @@ const char* rocke_isa_datalayout_for_flavor(const rocke_isa_backend_t* be,
 const char* rocke_isa_datalayout(const rocke_isa_backend_t* be);
 /* The two leading IR lines for `flavor` (Python backend.module_preamble):
  * `target datalayout = "..."` + newline + `target triple = "..."`. Written
- * into `out` (cleared first). Returns 0 on success, -1 on OOM. */
+ * into `out` (cleared first). Returns 0 on success, -1 on OOM or an unknown
+ * flavor; failure leaves `out` empty. */
 int rocke_isa_module_preamble_for_flavor(const rocke_isa_backend_t* be,
                                          rocke_llvm_flavor_t flavor,
                                          rocke_strbuf_t* out);

@@ -5,17 +5,27 @@
 # The descriptors under
 # dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/
 # and src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDensePacks.cpp
-# are generated from this file. Generation mints fresh UUIDs on every run, so never
-# copy a regenerated descriptor directory over the live one: that replaces every
-# retained id, which extend.md forbids. After editing this file, render into an empty
-# scratch directory from the IngestorGenerator root and splice only the additions
-# (tools/splice_additions.py refuses, writing nothing, if a retained entry changed):
+# are generated from this file. Ids are reused by default: the installed bundle (the
+# descriptors directory above) is the previous version, so every descriptor id that is
+# still produced is kept (a kernel is matched by its completed metadata plus arch, not by
+# name; a metadata change, or a retune that changes or drops a value its kernel_source
+# stated, gives that kernel a new id) and only added descriptors
+# get new ones. `--new-ids` starts every id over; `--ids-from <dir>` names a different
+# previous version. Even so, never copy a regenerated descriptor directory over the live
+# one, and never generate in place (that is refused: the KDP is a DVC output). After
+# editing this file, render into an empty scratch directory from the IngestorGenerator
+# root:
 #     PROVIDER=../../../../dnn-providers/hip-kernel-provider
 #     LIVE=$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense
 #     .venv/bin/python generate.py --config configs/gfx950_attention_dense.yaml \
 #         --output-dir <scratch>
+# The live KDP sits in $LIVE/artifacts/, where tools/splice_additions.py does not look, so
+# splice only the additions into it by hand, or with that tool on the KDP alone (it
+# refuses, writing nothing, if a retained entry changed): copy the scratch KDP into an
+# otherwise empty directory <kdp-only>, then
 #     .venv/bin/python tools/splice_additions.py \
-#         --scratch <scratch>/descriptors/rocKE/gfx950_attention_dense --live "$LIVE"
+#         --scratch <kdp-only> --live "$LIVE/artifacts"
+# and run `dvc add artifacts` there.
 # The generated tests/TestGfx950AttentionDensePacks.cpp carries no UUIDs and is
 # already in the provider's clang-format form; copy it over the live census test.
 # tests/test_registry_regeneration.py gates this file against
@@ -26,9 +36,13 @@
 # hand-maintained and must not be overwritten. See
 # projects/hipdnn/tools/ai/skills/hipdnn-ingestor-engine/extend.md.
 #
-# The generated gfx950_attention_dense.kdp.json is a DVC output: copy it to
-# descriptors/rocKE/gfx950_attention_dense/artifacts/ and run `dvc add artifacts`, not
-# `git add`. See the descriptors README ("Large rocKE files live in DVC").
+# The generated gfx950_attention_dense.kdp.json is a DVC output. The shipped one must be
+# present in descriptors/rocKE/gfx950_attention_dense/artifacts/ before running the
+# command above (`dvc pull -r ingestor artifacts.dvc` there); otherwise the run refuses
+# rather than remint every kernel id. Record the spliced KDP with
+# `dvc add artifacts`, not `git add`; an artifact that no longer hashes to the recorded
+# md5 draws a stale-artifact warning on the next run until `dvc add` records it. See the
+# descriptors README ("Large rocKE files live in DVC").
 #
 # The kernel is the dense flash-attention prefill from
 # rocke/library/kernels/gfx950/attention_dense.py, in the PACKAGED dialect: hkp_pack
@@ -193,7 +207,7 @@ packs:
     metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
-    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
     spec_defaults:
       head_size: 64
       batch: 1
@@ -211,6 +225,7 @@ packs:
       wide_lds_dma: false
       interleave: false
       persist_decode: auto
+      nonpersist_decode: qb_minor
       num_persistent: 256
       block_size: 0
       num_kv_blocks: 0
@@ -289,7 +304,7 @@ packs:
     metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
-    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
     spec_defaults:
       head_size: 128
       batch: 1
@@ -307,6 +322,7 @@ packs:
       wide_lds_dma: false
       interleave: false
       persist_decode: auto
+      nonpersist_decode: qb_minor
       num_persistent: 256
       block_size: 0
       num_kv_blocks: 0

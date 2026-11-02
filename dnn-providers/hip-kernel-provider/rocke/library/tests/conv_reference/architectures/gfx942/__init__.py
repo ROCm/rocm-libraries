@@ -19,6 +19,8 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from reference_common.cases import index_cases
+
 from ...contract import Case
 
 if TYPE_CHECKING:
@@ -36,10 +38,18 @@ CASES = tuple(
         ("asymmetric", {"Hi": 7, "Wi": 11, "N": 2}),
         ("multi-tile", {"K": 96}),
         ("odd-channels", {"K": 33}),
+        ("odd-input-channels", {"C": 33}),
+        ("stem", {"C": 3, "Hi": 16, "Wi": 16}),
+        ("large", {"N": 2, "Hi": 14, "Wi": 14, "C": 64, "K": 128}),
+        ("long-k", {"Y": 5, "X": 5, "pH": 2, "pW": 2, "sH": 2, "sW": 2}),
+        ("grouped-odd", {"C": 66, "K": 66, "groups": 2}),
+        ("depthwise", {"C": 64, "K": 64, "groups": 64}),
+        ("anisotropic", {"Y": 1, "X": 7, "pH": 0, "pW": 3, "sW": 2}),
+        ("out-1x1", {"Hi": 3, "Wi": 3, "pH": 0, "pW": 0}),
     )
     for dtype in ("fp16", "bf16")
 )
-CASE_BY_ID = {case.id: case for case in CASES}
+CASE_BY_ID = index_cases(CASES, label="convolution")
 
 
 # The gfx942 forward configuration the cohort was qualified on.

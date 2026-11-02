@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 import argparse
+import sys
 
+import geko.device as device
+from geko import logger
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_optimize
 from geko.utils import ensure_tensile_importable, parse_devices
@@ -125,8 +128,29 @@ def main() -> None:
             "to collect clock frequency telemetry. Off by default."
         ),
     )
+    parser.add_argument(
+        "--skip-gpu-check",
+        dest="skip_gpu_check",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the GPU device pre-flight check (verifies at least as many "
+            "GPU devices are visible as requested via --devices). The check "
+            "relies on a device-enumerator tool (amdgpu-arch / "
+            "rocm_agent_enumerator / rocminfo on Linux, hipinfo on Windows) "
+            "being on PATH (e.g. $ROCM_PATH/bin); if none is found the check "
+            "is skipped with a warning rather than blocking."
+        ),
+    )
     args = parser.parse_args()
     devices = parse_devices(args.devices)
+
+    if not args.skip_gpu_check:
+        gpu_check_rc = device.main(len(devices))
+        if gpu_check_rc != 0:
+            logger.error("GPU check failed; aborting.")
+            sys.exit(gpu_check_rc)
+
     hipblaslt_path = resolve_hipblaslt_path(
         explicit=args.hipblaslt, anchor=__file__, require_built=True
     )

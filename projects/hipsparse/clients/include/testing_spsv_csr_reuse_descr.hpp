@@ -29,6 +29,8 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnvec.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -119,10 +121,9 @@ static void call_spsv(hipsparseHandle_t&     handle,
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMatSetAttribute(matA, HIPSPARSE_SPMAT_DIAG_TYPE, &diag, sizeof(diag)));
 
-    hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, m, dx, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, typeT));
+    hipsparseLocalDnVec x(m, dx, typeT);
+    hipsparseLocalDnVec y1(m, dy_1, typeT);
+    hipsparseLocalDnVec y2(m, dy_2, typeT);
 
     hipsparseSpSVDescr_t descr;
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_createDescr(&descr));
@@ -180,9 +181,6 @@ static void call_spsv(hipsparseHandle_t&     handle,
     }
 
     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 }
 
 // Exercises the multi-configuration shared-buffer path: query bufferSize once
@@ -237,9 +235,8 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                 CHECK_HIPSPARSE_ERROR(hipsparseSpMatSetAttribute(
                     matA, HIPSPARSE_SPMAT_DIAG_TYPE, &diag, sizeof(diag)));
 
-                hipsparseDnVecDescr_t x, y;
-                CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, m, dx, typeT));
-                CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, m, dy, typeT));
+                hipsparseLocalDnVec x(m, dx, typeT);
+                hipsparseLocalDnVec y(m, dy, typeT);
 
                 for(hipsparseSpSVAlg_t alg : algs)
                 {
@@ -253,9 +250,6 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
 
                     CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
                 }
-
-                CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-                CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
             }
         }
     }
@@ -287,9 +281,8 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                         CHECK_HIP_ERROR(
                             hipMemcpy(dy, hy.data(), sizeof(T) * m, hipMemcpyHostToDevice));
 
-                        hipsparseDnVecDescr_t x, y;
-                        CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, m, dx, typeT));
-                        CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, m, dy, typeT));
+                        hipsparseLocalDnVec x(m, dx, typeT);
+                        hipsparseLocalDnVec y(m, dy, typeT);
 
                         hipsparseSpSVDescr_t descr;
                         CHECK_HIPSPARSE_ERROR(hipsparseSpSV_createDescr(&descr));
@@ -333,8 +326,6 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                         }
 
                         CHECK_HIPSPARSE_ERROR(hipsparseSpSV_destroyDescr(descr));
-                        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-                        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
                     }
                 }
             }
@@ -358,8 +349,7 @@ void testing_spsv_csr_reuse_descr(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures. The sparse matrix descriptor is created once as a
     // square (m x m) CSR matrix and reused across every configuration below.

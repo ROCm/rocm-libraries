@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -15,15 +16,15 @@ import pytest
 
 from sdpa_reference.architectures import ARCHITECTURES, baseline_lock, get_architecture
 from sdpa_reference.architectures.gfx942 import CASES
-from sdpa_reference.cli import load_bundle, verify_case
+from sdpa_reference.cli import OPERATION, load_bundle, verify_case
 from sdpa_reference.contract import (
     INPUT_GENERATOR,
     SCHEMA_VERSION,
-    checked_inputs,
     make_inputs,
     Case,
     independent_reference,
 )
+from reference_common import cli as common_cli
 from reference_common.numeric import (
     ErrorBudget,
     array_digest,
@@ -33,20 +34,56 @@ from reference_common.numeric import (
 )
 
 
-def test_cohort_preserves_existing_sdpa_parameterizations():
-    source = Path(__file__).with_name("test_attention_dense_gfx942_numeric.py")
-    module = ast.parse(source.read_text())
+# The Torch-gated gfx950 dense test has no mask column; it runs its rows causal.
+_LEGACY_MASK = {"gfx942": {}, "gfx950": {"causal": True}}
+
+
+def _legacy_source(architecture):
+    return Path(__file__).with_name(f"test_attention_dense_{architecture}_numeric.py")
+
+
+def _legacy_cases(architecture):
+    """Base ``_COHORT`` rows of a Torch-gated test; it runs them at B=1, S=512."""
+    module = ast.parse(_legacy_source(architecture).read_text())
     original = next(
         ast.literal_eval(node.value)
         for node in module.body
         if isinstance(node, ast.Assign)
         and any(isinstance(t, ast.Name) and t.id == "_COHORT" for t in node.targets)
     )
-    assert [
-        (c.dtype, c.head_dim, c.query_heads, c.kv_heads, c.persistent, c.causal)
-        for c in CASES
-    ] == original
-    assert len({case.id for case in CASES}) == 8
+    fixed = dict(_LEGACY_MASK[architecture], batch=1, sequence_length=512)
+    return tuple(Case(*row, **fixed) for row in original)
+
+
+def _assert_covers_legacy_cohort(architecture):
+    """Keep every legacy parameterization pinned; pinned-only cases need no edit."""
+    cases = get_architecture(architecture).CASES
+    missing = [case.id for case in _legacy_cases(architecture) if case not in cases]
+    assert not missing, (
+        f"{architecture} SDPA cohort no longer covers {missing} from "
+        f"{_legacy_source(architecture).name}::_COHORT. Restore them; cohort "
+        "changes require requalifying the complete cohort (see "
+        "reference_common/docs/gpu-reference-workflow.md)."
+    )
+
+
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+def test_cohort_preserves_existing_sdpa_parameterizations(architecture):
+    _assert_covers_legacy_cohort(architecture)
+
+
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+def test_legacy_coverage_allows_pinned_only_cases_and_names_dropped_ones(
+    monkeypatch, architecture
+):
+    target = get_architecture(architecture)
+    # Start from exactly the legacy rows so this checks the guard, not the cohort.
+    cases = _legacy_cases(architecture)
+    monkeypatch.setattr(target, "CASES", (*cases, replace(cases[0], batch=2)))
+    _assert_covers_legacy_cohort(architecture)
+    monkeypatch.setattr(target, "CASES", cases[1:])
+    with pytest.raises(AssertionError, match=re.escape(f"['{cases[0].id}']")):
+        _assert_covers_legacy_cohort(architecture)
 
 
 def test_gfx942_source_adapter_uses_the_current_tuning_dispatch_api():
@@ -61,21 +98,62 @@ def test_gfx942_source_adapter_uses_the_current_tuning_dispatch_api():
         assert spec.head_size == case.head_dim
 
 
-def test_gfx950_cohort_preserves_existing_sdpa_parameterizations():
-    source = Path(__file__).with_name("test_attention_dense_gfx950_numeric.py")
-    module = ast.parse(source.read_text())
-    original = next(
-        ast.literal_eval(node.value)
-        for node in module.body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(t, ast.Name) and t.id == "_COHORT" for t in node.targets)
+def test_gfx942_source_adapter_supports_published_dispatch_api(monkeypatch):
+    from dataclasses import dataclass
+
+    import dispatch.attention as attention
+    import kernels
+
+    # Published source snapshots predate the tuning API and select persistence
+    # through the request. Exercise both sides of that request contract.
+    @dataclass(frozen=True)
+    class LegacyRequest(attention.AttentionRequest):
+        dense_persistent: str = "auto"
+
+    tuning = attention.tuning_spec_with_knobs
+
+    def legacy_factory(request):
+        assert request.dense_persistent in ("on", "off")
+        return tuning(
+            request,
+            "gfx942_dense",
+            {"persistent": request.dense_persistent == "on"},
+        ).kernel_spec
+
+    monkeypatch.setattr(attention, "AttentionRequest", LegacyRequest)
+    monkeypatch.setattr(
+        attention, "dense_spec_for_request", legacy_factory, raising=False
     )
-    cases = get_architecture("gfx950").CASES
-    assert [
-        (c.dtype, c.head_dim, c.query_heads, c.kv_heads, c.persistent) for c in cases
-    ] == original
-    assert len({case.id for case in cases}) == 7
-    assert all(c.causal and c.batch == 1 and c.sequence_length == 512 for c in cases)
+    monkeypatch.delattr(attention, "tuning_spec_with_knobs")
+    root = str(Path(kernels.__file__).resolve().parent.parent)
+    for case in CASES:
+        spec = get_architecture("gfx942").prepare(case, root)
+        assert spec.persistent is case.persistent
+        assert spec.dtype == case.dtype
+        assert spec.head_size == case.head_dim
+        assert (spec.num_query_heads, spec.num_kv_heads) == (
+            case.query_heads,
+            case.kv_heads,
+        )
+        assert spec.causal is case.causal
+
+
+def test_gfx942_source_adapter_reports_a_renamed_current_api(monkeypatch):
+    """A renamed current API fails on its own name, not in the published path."""
+    import kernels
+    from dispatch import attention
+
+    # A symbol rename moves the function but leaves this adapter's call behind.
+    monkeypatch.setattr(
+        attention,
+        "attention_spec_with_knobs",
+        attention.tuning_spec_with_knobs,
+        raising=False,
+    )
+    monkeypatch.delattr(attention, "tuning_spec_with_knobs")
+    root = str(Path(kernels.__file__).resolve().parent.parent)
+    with pytest.raises(AttributeError, match="no attribute 'tuning_spec_with_knobs'"):
+        get_architecture("gfx942").prepare(CASES[0], root)
 
 
 @pytest.mark.parametrize("case", get_architecture("gfx950").CASES, ids=lambda c: c.id)
@@ -101,7 +179,12 @@ def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):
     )
     assert spec.causal is case.causal
     assert not spec.use_sinks and not spec.sliding_window
-    assert spec.runtime_shape is (not case.persistent)
+    assert spec.runtime_shape is (not case.persistent), (
+        f"{case.id} selected runtime_shape={spec.runtime_shape}. Dense replay "
+        "binds shape scalars only for runtime-shape grid kernels; persistent "
+        "kernels bake the shape. Use a sequence length the aligned (non-ragged) "
+        "grid kernel accepts, or extend the dense replay ABI first."
+    )
     # Replay supplies shape scalars only for the runtime-shape members of this cohort.
     signature = attention_dense_signature(spec)
     names = [arg["name"] for arg in signature]
@@ -133,6 +216,7 @@ def _bundle(tmp_path, architecture="gfx942"):
     (payload / "fixture").write_bytes(b"artifact fixture")
     manifest = {
         "schema": SCHEMA_VERSION,
+        "budget_policy": "max-reference-bound-v1",
         "baseline_revision": "a" * 40,
         "files": payload_digests(payload),
         "input_generation": INPUT_GENERATOR,
@@ -140,10 +224,8 @@ def _bundle(tmp_path, architecture="gfx942"):
             case.id: {
                 "case": asdict(case),
                 "device_target": f"{architecture}:sramecc+:xnack-",
-                "budget": asdict(ErrorBudget(case.tolerance, 0.001, case.margin)),
-                "comparison_limit": ErrorBudget(
-                    case.tolerance, 0.001, case.margin
-                ).comparison_limit,
+                "budget": asdict(ErrorBudget(case.tolerance, 0.001)),
+                "comparison_limit": ErrorBudget(case.tolerance, 0.001).comparison_limit,
                 "input_digests": {},
                 "output_digest": "not-a-qualified-output",
                 "kernel": {
@@ -191,7 +273,7 @@ def test_even_a_new_lock_cannot_silently_change_the_test_contract(tmp_path, chan
     elif change == "changed_shape":
         entry["case"]["sequence_length"] = 128
     else:
-        budget = ErrorBudget(0.2, 0.001, CASES[0].margin)
+        budget = ErrorBudget(0.2, 0.001)
         entry["budget"] = asdict(budget)
         entry["comparison_limit"] = budget.comparison_limit
     _lock(tmp_path, manifest)
@@ -199,9 +281,122 @@ def test_even_a_new_lock_cannot_silently_change_the_test_contract(tmp_path, chan
         load_bundle(tmp_path, tmp_path / "lock.json")
 
 
-def test_unknown_old_output_cannot_inherit_a_qualified_bound(tmp_path, monkeypatch):
+def test_case_ids_name_batch_and_sequence_length():
+    case = CASES[0]
+    assert case.id == "fp16-d128-h16-kv4-default-causal-b1-s512"
+    variants = (case, replace(case, batch=2), replace(case, sequence_length=1024))
+    assert len({variant.id for variant in variants}) == len(variants)
+
+
+@pytest.mark.parametrize("architecture", ARCHITECTURES)
+def test_every_enrolled_case_has_a_distinct_id(architecture):
+    from reference_common.cases import index_cases
+
+    # Adapters index ids on import, so a collision fails instead of dropping a case.
+    target = get_architecture(architecture)
+    assert list(target.CASE_BY_ID.values()) == list(target.CASES)
+    with pytest.raises(ValueError, match="duplicate SDPA case id"):
+        index_cases((*target.CASES, target.CASES[0]), label="SDPA")
+
+
+@pytest.mark.parametrize("change", ["missing", "extra", "duplicate"])
+def test_bundle_must_record_the_enrolled_cohort_one_to_one(tmp_path, change):
+    manifest = _bundle(tmp_path)
+    case = CASES[0]
+    entry = manifest["cases"][case.id]
+    if change == "missing":
+        del manifest["cases"][case.id]
+        expected = rf"missing: {case.id} \(.*sequence_length=512\); extra: none"
+    elif change == "extra":
+        variant = asdict(replace(case, sequence_length=1024))
+        manifest["cases"]["variant"] = dict(entry, case=variant)
+        expected = r"missing: none; extra: variant \(.*sequence_length=1024\)"
+    else:
+        manifest["cases"]["copy"] = entry
+        expected = rf"records case {case.id} more than once: copy, {case.id}$"
+    _lock(tmp_path, manifest)
+    with pytest.raises(ValueError, match=expected):
+        load_bundle(tmp_path, tmp_path / "lock.json")
+
+
+def _published_id(case):
+    """The id format of the published bundles, which omits batch and length."""
+    grid = "persistent" if case.persistent else "default"
+    mask = "causal" if case.causal else "full"
+    return (
+        f"{case.dtype}-d{case.head_dim}-h{case.query_heads}"
+        f"-kv{case.kv_heads}-{grid}-{mask}"
+    )
+
+
+@pytest.mark.parametrize("architecture", ARCHITECTURES)
+def test_bundle_keyed_by_published_ids_loads_and_replays(
+    tmp_path, monkeypatch, architecture
+):
     from sdpa_reference import cli
 
+    manifest = _bundle(tmp_path, architecture)
+    cases = get_architecture(architecture).CASES
+    # Published ids omit batch and length. Cases that would share one were never
+    # published under it, so they keep their full ids.
+    published = [_published_id(case) for case in cases]
+    keys = {
+        case.id: key if published.count(key) == 1 else case.id
+        for case, key in zip(cases, published)
+    }
+    manifest["cases"] = {keys[case.id]: manifest["cases"][case.id] for case in cases}
+    _lock(tmp_path, manifest)
+    assert (
+        load_bundle(tmp_path, tmp_path / "lock.json", architecture=architecture)
+        == manifest
+    )
+    case = next(c for c in reversed(cases) if keys[c.id] != c.id)
+    key = keys[case.id]
+    assert cli.manifest_key(manifest, case, architecture=architecture) == key
+    entry = manifest["cases"][key]
+    entry["input_digests"] = {
+        name: array_digest(a) for name, a in make_inputs(case).items()
+    }
+    out = np.zeros(case.shape, dtype="<f2" if case.dtype == "fp16" else "<u2")
+    entry["output_digest"] = array_digest(out)
+    requests = []
+
+    def worker(request, **kwargs):
+        requests.append(request)
+        return [out], {
+            "device_target": entry["device_target"],
+            "launches": 1,
+            "torch_imported": False,
+        }
+
+    monkeypatch.setattr(common_cli, "run_worker", worker)
+    verify_case(
+        case,
+        bundle=tmp_path,
+        manifest=manifest,
+        current_root=tmp_path,
+        repetitions=1,
+        architecture=architecture,
+    )
+    # Frozen runners receive the request protocol they were qualified with.
+    replay, source = requests
+    assert source == {
+        "architecture": architecture,
+        "case": asdict(case),
+        "input_digests": entry["input_digests"],
+        "repetitions": 1,
+        "inputs": source["inputs"],
+        "mode": "source",
+    }
+    assert replay == dict(
+        source,
+        mode="replay",
+        kernel=entry["kernel"],
+        hsaco=str(tmp_path / "payload/cases" / key / "kernel.hsaco"),
+    )
+
+
+def test_unknown_old_output_cannot_inherit_a_qualified_bound(tmp_path, monkeypatch):
     manifest = _bundle(tmp_path)
     manifest["cases"][CASES[0].id]["input_digests"] = {
         name: array_digest(a) for name, a in make_inputs(CASES[0]).items()
@@ -212,14 +407,14 @@ def test_unknown_old_output_cannot_inherit_a_qualified_bound(tmp_path, monkeypat
         calls.append(request["mode"])
         return [np.zeros(CASES[0].shape, np.float16)], {}
 
-    monkeypatch.setattr(cli, "_worker", worker)
+    monkeypatch.setattr(common_cli, "run_worker", worker)
     with pytest.raises(AssertionError, match="reference qualification failure"):
         verify_case(CASES[0], bundle=tmp_path, manifest=manifest)
     assert calls == ["replay"]
 
 
 def test_worker_prefers_selected_library_over_test_packages(tmp_path, monkeypatch):
-    from sdpa_reference.cli import _worker
+    from reference_common.runner import run_worker
 
     runner = tmp_path / "tests"
     library = tmp_path / "library"
@@ -243,12 +438,13 @@ def test_worker_prefers_selected_library_over_test_packages(tmp_path, monkeypatc
         "(output / 'report.json').write_text(json.dumps({'launches': 1}))\n"
     )
     monkeypatch.setenv("PYTHONPATH", str(runner))
-    outputs, report = _worker(
+    outputs, report = run_worker(
         {"mode": "source", "repetitions": 1},
         runner=runner,
         platform=platform,
         library=library,
         work=tmp_path / "work",
+        module=OPERATION.worker_module,
     )
     np.testing.assert_array_equal(outputs[0], np.ones(1))
     assert report["launches"] == 1
@@ -308,8 +504,6 @@ def test_generic_wmma_bundle_keeps_processor_qualification(
 def test_generic_wmma_replay_requires_qualified_processor(
     tmp_path, monkeypatch, architecture, mismatch
 ):
-    from sdpa_reference import cli
-
     manifest = _bundle(tmp_path, architecture)
     case = get_architecture(architecture).CASES[0]
     entry = manifest["cases"][case.id]
@@ -327,7 +521,7 @@ def test_generic_wmma_replay_requires_qualified_processor(
             device = architecture + ":xnack+"
         return [out], {"device_target": device, "launches": 1, "torch_imported": False}
 
-    monkeypatch.setattr(cli, "_worker", worker)
+    monkeypatch.setattr(common_cli, "run_worker", worker)
     with pytest.raises(ValueError, match="qualified target|different target features"):
         verify_case(
             case,
@@ -339,14 +533,28 @@ def test_generic_wmma_replay_requires_qualified_processor(
 
 
 def test_generated_input_mismatch_prevents_any_worker(tmp_path, monkeypatch):
-    from sdpa_reference import cli
-
     manifest = _bundle(tmp_path)
     calls = []
-    monkeypatch.setattr(cli, "_worker", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(
+        common_cli, "run_worker", lambda *args, **kwargs: calls.append(args)
+    )
     with pytest.raises(ValueError, match="generated SDPA input digest mismatch"):
         verify_case(CASES[0], bundle=tmp_path, manifest=manifest)
     assert not calls
+
+
+@pytest.mark.parametrize("declared", ["sdpa", "conv-fwd"])
+def test_declared_operation_must_be_sdpa(tmp_path, declared):
+    # Published SDPA manifests omit the field; one that declares it must agree.
+    manifest = _bundle(tmp_path)
+    assert "operation" not in manifest
+    manifest["operation"] = declared
+    _lock(tmp_path, manifest)
+    if declared == "sdpa":
+        assert load_bundle(tmp_path, tmp_path / "lock.json") == manifest
+    else:
+        with pytest.raises(ValueError, match="wrong reference operation"):
+            load_bundle(tmp_path, tmp_path / "lock.json")
 
 
 def test_changed_generator_contract_is_rejected(tmp_path):
@@ -361,8 +569,6 @@ def test_changed_generator_contract_is_rejected(tmp_path):
 def test_generated_inputs_are_temporary_and_shared_by_both_workers(
     tmp_path, monkeypatch, fail
 ):
-    from sdpa_reference import cli
-
     manifest = _bundle(tmp_path)
     case = CASES[0]
     entry = manifest["cases"][case.id]
@@ -388,7 +594,7 @@ def test_generated_inputs_are_temporary_and_shared_by_both_workers(
             "torch_imported": False,
         }
 
-    monkeypatch.setattr(cli, "_worker", worker)
+    monkeypatch.setattr(common_cli, "run_worker", worker)
     if fail:
         with pytest.raises(RuntimeError, match="deliberate worker failure"):
             verify_case(
@@ -435,43 +641,69 @@ def test_generated_inputs_are_temporary_and_shared_by_both_workers(
 )
 def test_versioned_generator_preserves_stream_order_and_quantized_bits(dtype, digests):
     case = Case(dtype, 2, 4, 2, False, True, sequence_length=2)
-    checked_inputs(case, digests)
+    OPERATION.checked_inputs(case, digests)
     # Other generator instances must not change the freshly seeded corpus.
     np.random.default_rng(123).standard_normal(99)
-    checked_inputs(case, digests)
+    OPERATION.checked_inputs(case, digests)
 
 
-@pytest.mark.parametrize("architecture", ["gfx1151", "gfx1200", "gfx1201"])
-@pytest.mark.parametrize("case_index", range(8))
-def test_wmma_reference_matches_production_kernel_abi(architecture, case_index):
+def _wmma_grid(prepared):
+    """One CTA per query tile, query head, and batch of the prepared case (flat 1-D grid)."""
+    case = prepared.case
+    tiles = -(-case.sequence_length // prepared.spec.bm)
+    return (case.batch * tiles * case.query_heads, 1, 1)
+
+
+@pytest.mark.parametrize(
+    "architecture,case",
+    [
+        (architecture, case)
+        for architecture in ("gfx1151", "gfx1200", "gfx1201")
+        for case in get_architecture(architecture).CASES
+    ],
+    ids=lambda value: value.id if isinstance(value, Case) else value,
+)
+def test_wmma_reference_matches_production_kernel_abi(architecture, case):
     import kernels
     from sdpa_reference.implementations import wmma
 
     target = get_architecture(architecture)
-    case = target.CASES[case_index]
     root = Path(kernels.__file__).resolve().parent.parent
     prepared = target.prepare(case, str(root))
-    assert prepared.abi == "wmma-strided-v2"
+    assert prepared.abi == "wmma-strided-v3"
     kernel = wmma.build(prepared)
     assert [(p.name, p.type.name) for p in kernel.params] == [
         (arg["name"], arg["type"].replace(" ", "")) for arg in wmma.signature(prepared)
     ]
-    assert wmma.grid(prepared) == (4, 4, 2)
-    assert prepared.spec.block_size == 32
-    assert prepared.spec.head_size == case.head_dim
-    assert prepared.spec.mask_mode == ("causal" if case.causal else "none")
+    assert wmma.grid(prepared) == _wmma_grid(prepared)
+    assert prepared.spec.threads == 2 * prepared.spec.bm
+    assert prepared.spec.head_dim == case.head_dim
+    assert prepared.spec.mask == ("causal" if case.causal else "none")
     assert prepared.spec.layout == "dense"
     values = wmma.scalars(case, case.scale)
-    assert values["seqlen_q"] == values["seqlen_k"] == 64
-    assert values["num_query_heads"] == 4
+    assert values["seqlen_q"] == values["seqlen_k"] == case.sequence_length
+    assert values["num_query_heads"] == case.query_heads
     assert values["num_kv_heads"] == case.kv_heads
     assert values["bottom_right"] == values["write_lse"] == 0
-    assert values["window_left"] == values["window_right"] == -1
+    # The "causal" class takes the diagonal from the runtime bounds; the unmasked one
+    # ignores them.
+    assert values["window_left"] == -1
+    assert values["window_right"] == (0 if case.causal else -1)
+    assert values["batch"] == case.batch
+    assert values["num_v_heads"] == case.kv_heads
+    assert values["head_dim_q"] == values["head_dim_v"] == case.head_dim
     assert values["stride_lse_batch"] == 0
     assert values["stride_lse_token"] == values["stride_lse_head"] == 0
     assert values["scale_log2"] == pytest.approx(case.scale * np.log2(np.e))
-    for name, heads in (("q", 4), ("k", case.kv_heads), ("v", case.kv_heads), ("o", 4)):
-        assert values[f"stride_{name}_batch"] == 64 * heads * case.head_dim
+    for name, heads in (
+        ("q", case.query_heads),
+        ("k", case.kv_heads),
+        ("v", case.kv_heads),
+        ("o", case.query_heads),
+    ):
+        assert values[f"stride_{name}_batch"] == (
+            case.sequence_length * heads * case.head_dim
+        )
         assert values[f"stride_{name}_token"] == heads * case.head_dim
         assert values[f"stride_{name}_head"] == case.head_dim
     buffers = {name: object() for name in ("q", "k", "v", "out")}
@@ -497,7 +729,16 @@ def test_wmma_launch_and_export_preserve_runtime_arguments(architecture, monkeyp
     from sdpa_reference.implementations import wmma
     from sdpa_reference.worker import replay_values
 
-    case = wmma.CASES[-1]  # Batched, causal GQA exercises the distinct K/V strides.
+    # Batched, causal GQA exercises the distinct K/V strides.
+    case = next(
+        (
+            c
+            for c in reversed(wmma.CASES)
+            if c.batch > 1 and c.causal and c.kv_heads < c.query_heads
+        ),
+        None,
+    )
+    assert case, "the WMMA cohort needs a batched, causal GQA case"
     root = Path(kernels.__file__).resolve().parent.parent
     target = get_architecture(architecture)
     compiler_target = "gfx1151" if architecture == "gfx1151" else "gfx12-generic"
@@ -526,14 +767,14 @@ def test_wmma_launch_and_export_preserve_runtime_arguments(architecture, monkeyp
         wmma.launch(prepared, buffers, case.scale)
     code, metadata = wmma.exported_kernel(prepared)
     assert code == b"code-object"
-    assert metadata["abi"] == "wmma-strided-v2"
+    assert metadata["abi"] == "wmma-strided-v3"
     assert metadata["compiler_target"] == compiler_target
     assert len(compiled) == 1 and len(launches) == 2
     expected = pack_args(metadata["signature"], replay_values(metadata, buffers, case))
     for arguments, config in launches:
         assert arguments == expected
-        assert config.grid == metadata["grid"] == (4, 4, 2)
-        assert config.block == metadata["block"] == (32, 1, 1)
+        assert config.grid == metadata["grid"] == _wmma_grid(prepared)
+        assert config.block == metadata["block"] == (prepared.spec.threads, 1, 1)
 
 
 def test_wmma_reference_cohort_and_rejections():
@@ -541,10 +782,17 @@ def test_wmma_reference_cohort_and_rejections():
     import kernels
     from sdpa_reference.implementations import wmma
 
-    assert len(wmma.CASES) == len({case.id for case in wmma.CASES}) == 8
-    assert {(c.head_dim, c.kv_heads, c.causal) for c in wmma.CASES} == {
+    assert len(wmma.CASES) == len({case.id for case in wmma.CASES})
+    required = {
         (d, kv, causal) for d in (64, 128) for kv in (1, 4) for causal in (False, True)
     }
+    missing = required - {(c.head_dim, c.kv_heads, c.causal) for c in wmma.CASES}
+    assert not missing, (
+        f"WMMA cohort no longer covers (head_dim, kv_heads, causal) {sorted(missing)}. "
+        "gfx1151, gfx1200, and gfx1201 share it; cohort changes require "
+        "requalifying each of them (see "
+        "reference_common/docs/gpu-reference-workflow.md)."
+    )
     root = str(Path(kernels.__file__).resolve().parent.parent)
     for architecture in ("gfx1151", "gfx1200", "gfx1201"):
         target = get_architecture(architecture)
@@ -587,7 +835,9 @@ def test_legacy_dense_replay_arguments(architecture, runtime_shape):
     )
 
 
-@pytest.mark.parametrize("abi", ["wmma-strided-v1", "wmma-strided-v2"])
+@pytest.mark.parametrize(
+    "abi", ["wmma-strided-v1", "wmma-strided-v2", "wmma-strided-v3"]
+)
 def test_worker_wmma_replay_uses_frozen_scalars_and_rejects_unknown_abi(abi):
     from sdpa_reference.worker import replay_values
     from sdpa_reference.implementations import wmma
@@ -611,7 +861,7 @@ def test_worker_wmma_replay_uses_frozen_scalars_and_rejects_unknown_abi(abi):
     expected = dict(
         frozen, Q=buffers["q"], K=buffers["k"], V=buffers["v"], O=buffers["out"]
     )
-    if abi == "wmma-strided-v2":
+    if abi in ("wmma-strided-v2", "wmma-strided-v3"):
         expected["LSE"] = 0
     assert result == expected
     assert metadata == {"abi": abi, "scalars": frozen}
@@ -670,25 +920,99 @@ def test_dense_export_uses_selected_production_launcher(architecture, monkeypatc
         )
         code, metadata = target.exported_kernel(spec)
         assert code is launcher._hsaco
+        if architecture == "gfx942":
+            scalars = module.attention_dense_runtime_args(spec)
+        else:
+            scalars = (
+                dict(
+                    batch=case.batch,
+                    seqlen_q=case.sequence_length,
+                    seqlen_kv=case.sequence_length,
+                )
+                if spec.runtime_shape
+                else {}
+            )
         assert metadata == {
+            "abi": "dense-v2",
             "name": launcher.kernel_name,
             "signature": launcher.signature,
             "grid": module.attention_dense_grid(spec),
             "block": module.attention_dense_block(spec),
             "runtime_shape": spec.runtime_shape,
+            "scalars": scalars,
         }
+
+
+@pytest.mark.parametrize(
+    "architecture,case",
+    [
+        (arch, case)
+        for arch in ("gfx942", "gfx950")
+        for case in get_architecture(arch).CASES
+    ],
+    ids=lambda value: value.id if isinstance(value, Case) else value,
+)
+def test_dense_export_replays_production_launch_arguments(
+    architecture, case, monkeypatch
+):
+    import importlib
+
+    import kernels
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from rocke.runtime.packing import pack_args
+    from sdpa_reference.worker import replay_values
+
+    target = get_architecture(architecture)
+    module = importlib.import_module(f"kernels.{architecture}.attention_dense")
+    spec = target.prepare(case, str(Path(kernels.__file__).resolve().parent.parent))
+    buffers = dict(q=0x1000, k=0x2000, v=0x3000, out=0x4000)
+    launched = []
+
+    class RecordingLauncher:
+        _hsaco = b"executed-code-object"
+        kernel_name = "executed_kernel"
+        signature = module.attention_dense_signature(spec)
+
+        def __call__(self, values, *, config):
+            launched.append(pack_args(self.signature, values))
+
+    launcher = RecordingLauncher()
+    monkeypatch.setattr(
+        module,
+        "_DENSE_LAUNCHER_CACHE",
+        {attention_dense_cache_key(spec, arch=architecture): launcher},
+    )
+    target.launch(spec, buffers, case.scale)
+    _, metadata = target.exported_kernel(spec)
+    metadata = json.loads(json.dumps(metadata))
+    replayed = replay_values(metadata, buffers, case)
+    assert launched == [pack_args(metadata["signature"], replayed)]
+    assert metadata["abi"] == "dense-v2"
+    assert set(replayed) == {arg["name"] for arg in metadata["signature"]}
+    # Runtime dimensions must come from the certificate, not the replay caller.
+    assert (
+        replay_values(metadata, buffers, replace(case, batch=case.batch + 1))
+        == replayed
+    )
+    # An ABI expansion must be frozen completely or fail qualification.
+    launcher.signature = [
+        *launcher.signature,
+        {"name": "unbound_scalar", "type": "i32"},
+    ]
+    with pytest.raises(ValueError, match="scalar.*signature"):
+        target.exported_kernel(spec)
 
 
 def test_frozen_runner_imports_all_adapters_without_source_checkout(tmp_path):
     import subprocess
     import sys
 
-    from sdpa_reference.cli import _freeze_runner
-
     runner = tmp_path / "runner"
-    _freeze_runner(runner)
+    OPERATION.freeze_runner(runner)
     assert not list(runner.rglob("baseline_lock.json"))
     assert not list(runner.rglob("__pycache__"))
+    for name in ("pinned_tests.py", "pytest_support.py"):
+        assert not (runner / "reference_common" / name).exists()
     # Isolated mode ignores inherited PYTHONPATH and the source working directory.
     # Only the frozen runner is added; production modules must remain lazy.
     script = """
@@ -713,9 +1037,11 @@ for name in ("dense", "wmma"):
 for name, module in tuple(sys.modules.items()):
     if name.split(".")[0] in ("sdpa_reference", "reference_common"):
         assert Path(module.__file__).resolve().is_relative_to(root), name
+assert "reference_common.worker" in sys.modules
 assert "kernels" not in sys.modules
 assert "dispatch" not in sys.modules
 assert "torch" not in sys.modules
+assert "pytest" not in sys.modules
 """
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-c", script, str(runner), *ARCHITECTURES],

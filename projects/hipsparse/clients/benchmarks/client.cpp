@@ -110,9 +110,10 @@ int main(int argc, char* argv[])
 
             return status;
         }
-        catch(const hipsparseStatus_t& status)
+        catch(const std::exception& e)
         {
-            return status;
+            std::cerr << e.what() << std::endl;
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
         }
         catch(const hipError_t& status)
         {
@@ -151,9 +152,10 @@ int main(int argc, char* argv[])
 
             return status;
         }
-        catch(const hipsparseStatus_t& status)
+        catch(const std::exception& e)
         {
-            return status;
+            std::cerr << e.what() << std::endl;
+            return HIPSPARSE_STATUS_INTERNAL_ERROR;
         }
         catch(const hipError_t& status)
         {

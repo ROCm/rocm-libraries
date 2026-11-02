@@ -126,6 +126,7 @@ namespace hiptensor
     void ContractionTest::reset()
     {
         handle    = nullptr;
+        plan      = nullptr;
         workspace = nullptr;
 
         worksize = 0u;
@@ -855,6 +856,12 @@ namespace hiptensor
                                                         sizeof(hiptensorCacheMode_t)));
             }
 
+            // RunKernel may be called more than once per test (e.g. plan cache tests)
+            if(plan)
+            {
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
+                plan = nullptr;
+            }
             CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
 
             auto resource = getResource();
@@ -1145,10 +1152,14 @@ namespace hiptensor
     {
         if(mRunFlag)
         {
-            CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
+            if(plan)
+            {
+                CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
+                plan = nullptr;
+            }
             CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlanPreference(planPref));
-            CHECK_HIPTENSOR_ERROR(hiptensorDestroyPlan(plan));
             CHECK_HIPTENSOR_ERROR(hiptensorDestroyOperationDescriptor(desc));
+            CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
 
             if(a_ms_ks)
             {

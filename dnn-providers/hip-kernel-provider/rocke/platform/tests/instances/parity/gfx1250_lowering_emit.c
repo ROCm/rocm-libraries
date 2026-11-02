@@ -187,9 +187,8 @@ static void build_wmma_scale16_fp4(rocke_ir_builder_t* b)
     wmma_scaled(b, true, "fp4e2m1", "fp4e2m1", "e8m0", "e8m0");
 }
 
-/* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
- * <8 x i16> that the handler reinterprets; gfx1250 has per-element-type
- * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret.
+/* ds_load_tr16_b128. gfx1250 has per-element-type opcodes (.v8f16 / .v8bf16)
+ * that land in the right type. gfx950 has no wide transpose read and raises.
  */
 static void tr16_b128(rocke_ir_builder_t* b, const rocke_type_t* elem)
 {
@@ -584,9 +583,7 @@ static const config_t BASE_CONFIGS[] = {
     {build_wmma_scale_fp4, "gfx1250"},
     {build_wmma_scale16_fp4, "gfx1250"},
     {build_tr16_f16, "gfx1250"},
-    {build_tr16_f16, "gfx950"},
     {build_tr16_bf16, "gfx1250"},
-    {build_tr16_bf16, "gfx950"},
     {build_barrier_drains, "gfx1250"},
     {build_barrier_drains, "gfx950"},
     {build_wait_counters, "gfx1250"},
@@ -647,12 +644,86 @@ static const config_t BASE_CONFIGS[] = {
     {NULL, "gfx1250", "fp4", true, "bf6"},
 };
 
+/* The f16/bf16 buffer stores with their optional cache-policy immediate:
+ * every store form with a non-zero value (it reaches the intrinsic's aux
+ * operand) and one default store (no attribute, aux 0). */
+static void build_buffer_store_cachepolicy(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t ro;
+    rocke_param_opts_t wo;
+    memset(&ro, 0, sizeof(ro));
+    ro.readonly = true;
+    ro.readonly_set = true;
+    ro.align = 16;
+    ro.align_set = true;
+    memset(&wo, 0, sizeof(wo));
+    wo.align = 16;
+    wo.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_f16(), "global"), &ro);
+    rocke_value_t* dst = rocke_b_param(b, "dst", rocke_ptr_type(b, rocke_f16(), "global"), &wo);
+    rocke_value_t* nbytes = rocke_b_param(b, "nbytes", rocke_i32(), NULL);
+    rocke_value_t* rs = rocke_b_buffer_rsrc(b, src, nbytes);
+    rocke_value_t* rd = rocke_b_buffer_rsrc(b, dst, nbytes);
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* off = rocke_b_mul(b, tid, rocke_b_const_i32(b, 16));
+    rocke_value_t* h8 = rocke_b_buffer_load_vN(b, rs, off, c0, rocke_f16(), 8);
+    rocke_b_buffer_store_vN_f16_ex(b, rd, off, c0, h8, 4, 1);
+    rocke_value_t* h2 = rocke_b_buffer_load_vN(b, rs, off, c0, rocke_f16(), 2);
+    rocke_b_buffer_store_vN_f16_ex(b, rd, off, c0, h2, 1, 24);
+    rocke_b_buffer_store_vN_f16(b, rd, off, c0, h8, 4);
+    rocke_value_t* h1 = rocke_b_buffer_load_f16(b, rs, off, c0);
+    rocke_b_buffer_store_f16_ex(b, rd, off, c0, h1, 3);
+    rocke_value_t* g8 = rocke_b_buffer_load_vN(b, rs, off, c0, rocke_bf16(), 8);
+    rocke_b_buffer_store_vN_bf16_ex(b, rd, off, c0, g8, 4, 1);
+    rocke_value_t* g4 = rocke_b_buffer_load_vN(b, rs, off, c0, rocke_bf16(), 4);
+    rocke_b_buffer_store_vN_bf16_ex(b, rd, off, c0, g4, 2, 17);
+    rocke_value_t* g1 = rocke_b_buffer_load_bf16(b, rs, off, c0);
+    rocke_b_buffer_store_bf16_ex(b, rd, off, c0, g1, 31);
+    rocke_b_ret(b);
+}
+
+/* The dtype-generic scalar buffer load for every element type (the 16-bit
+ * ones through the i16 intrinsic, the 32-bit ones through i32). */
+static void build_buffer_load_scalar(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t ro;
+    rocke_param_opts_t wo;
+    memset(&ro, 0, sizeof(ro));
+    ro.readonly = true;
+    ro.readonly_set = true;
+    ro.align = 16;
+    ro.align_set = true;
+    memset(&wo, 0, sizeof(wo));
+    wo.align = 16;
+    wo.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_i32(), "global"), &ro);
+    rocke_value_t* dst = rocke_b_param(b, "dst", rocke_ptr_type(b, rocke_i32(), "global"), &wo);
+    rocke_value_t* nbytes = rocke_b_param(b, "nbytes", rocke_i32(), NULL);
+    rocke_value_t* rs = rocke_b_buffer_rsrc(b, src, nbytes);
+    rocke_value_t* rd = rocke_b_buffer_rsrc(b, dst, nbytes);
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* off = rocke_b_mul(b, tid, rocke_b_const_i32(b, 4));
+    rocke_value_t* h = rocke_b_buffer_load(b, rs, off, c0, rocke_f16());
+    rocke_value_t* g = rocke_b_buffer_load(b, rs, off, c0, rocke_bf16());
+    rocke_value_t* f = rocke_b_buffer_load(b, rs, off, c0, rocke_f32());
+    rocke_value_t* i = rocke_b_buffer_load(b, rs, off, c0, rocke_i32());
+    rocke_b_buffer_store_f16(b, rd, off, c0, h);
+    rocke_b_buffer_store_bf16(b, rd, off, c0, g);
+    rocke_b_buffer_store_f32(b, rd, off, c0, f);
+    rocke_b_buffer_store_f32(b, rd, off, c0, rocke_b_bitcast(b, i, rocke_f32()));
+    rocke_b_ret(b);
+}
+
 static const config_t FEATURE_CONFIGS[] = {
     {build_data_prefetch, "gfx1250"},
     {build_cluster, "gfx1250"},
     {build_cluster_dims, "gfx1250"},
     {build_multicast, "gfx1250"},
     {build_tdm, "gfx1250"},
+    {build_buffer_store_cachepolicy, "gfx1250"},
+    {build_buffer_load_scalar, "gfx1250"},
 };
 static const int NUM_FEATURE_CONFIGS = (int)(sizeof(FEATURE_CONFIGS) / sizeof(FEATURE_CONFIGS[0]));
 
