@@ -59,6 +59,7 @@ _MX_SCALE_MODES = {
     (32, "E5M3"): 7,
     (16, "E5M3"): 8,
 }
+_BENCH_ACTIVATIONS = {"None": "none", "Relu": "relu"}
 
 
 class UnsupportedBenchProblem(Exception):
@@ -146,8 +147,11 @@ def bench_yaml(problems: Iterable[GemmProblem]) -> str:
             "beta": problem.beta,
             # Bounded MX inputs avoid overflowing FP16 outputs at large DepthU.
             "initialization": "hpl" if problem.mx_block_a or problem.mx_block_b else "rand_int",
-            "bias_vector": False,
-            "activation_type": "none",
+            "bias_vector": problem.bias is not None,
+            "activation_type": _BENCH_ACTIVATIONS[problem.activation],
+            "gradient": problem.gradient,
+            "use_e": problem.aux_type is not None,
+            "amaxD": problem.amax_d,
             "scaleA": _mx_scale_mode(problem, "a"),
             "scaleB": _mx_scale_mode(problem, "b"),
             "scaleC": False,
@@ -183,6 +187,11 @@ def bench_yaml(problems: Iterable[GemmProblem]) -> str:
                     row[f"compute_input_type{operand}"] = _datatype_name(problem, dtype)
         if problem.math_op == "XFloat32":
             row["compute_type"] = "c_xf32_r"
+        if problem.bias is not None:
+            row["bias_type"] = _datatype_name(problem, problem.bias.dtype)
+            row["bias_source"] = problem.bias.source.lower()
+        if problem.aux_type is not None:
+            row["aux_type"] = _datatype_name(problem, problem.aux_type)
         row.update(zip(("lda", "ldb", "ldc", "ldd"), problem.leading_dimensions))
         row.update(zip(("stride_a", "stride_b", "stride_c", "stride_d"), problem.batch_strides))
         rows.append(row)

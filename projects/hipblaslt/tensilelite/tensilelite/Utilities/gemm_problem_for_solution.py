@@ -36,6 +36,10 @@ _SYNCHRONIZER_ELEMENTS = 409600 * 16
 # this many splits of the requested reduction blocks.
 AUTOMATIC_SPLIT_GROUPS = 2
 
+# Serialized bias-source codes: the bias reduction of a gradient epilogue reads
+# A, B or D. Code 2 (C) does not occur in shipped solutions.
+_BIAS_SOURCES = {0: "A", 1: "B", 3: "D"}
+
 
 class UnsupportedSolution(Exception):
     """A known feature for which this workload generator has no implementation.
@@ -67,6 +71,20 @@ def _size_predicates(predicate):
         sizes = tuple(p for child in children for p in _size_predicates(child))
         return sizes if kind == "And" or not sizes else (predicate,)
     return (predicate,) if "Size" in kind or kind == "GlobalSplitUCheckMinK" else ()
+
+
+def _activation_whitelist(predicate):
+    """Activations a solution's predicate allows, or None when it does not restrict them."""
+    if not isinstance(predicate, dict):
+        return None
+    if predicate.get("type") == "ActivationEnumWhiteList":
+        return tuple(predicate["value"])
+    if predicate.get("type") == "And":
+        for child in predicate["value"]:
+            allowed = _activation_whitelist(child)
+            if allowed is not None:
+                return allowed
+    return None
 
 
 def _choose_sizes(index, preferred, reduction_multiple, predicates):
@@ -174,6 +192,54 @@ def _choose_sizes(index, preferred, reduction_multiple, predicates):
     return result[0], result[1], result[3]
 
 
+def _required_epilogue(index, problem_type, allowed_activations):
+    """GemmProblem epilogue fields for a solution's gradient, E and amaxD outputs.
+
+    A gradient solution produces the bias gradient, so it needs a bias. Solutions
+    with E are also given their bias, so that the same epilogue is exercised as
+    for gradient solutions. E is used with ReLU: forward solutions write E, and
+    gradient solutions read it and apply the ReLU derivative.
+    """
+    p = problem_type
+    gradient, aux = bool(p.get("useGradient")), bool(p.get("useE"))
+    epilogue = {"gradient": gradient, "amax_d": bool(p.get("outputAmaxD"))}
+    if not (gradient or aux):
+        return epilogue
+    if not p.get("useBias"):
+        raise UnsupportedSolution(index, ["gradient or E epilogue without bias support"])
+    sources = p.get("biasSrcWhiteList", ())
+    dtypes = p.get("biasDataTypeWhiteList", ())
+    source = next((_BIAS_SOURCES[s] for s in sources if s in _BIAS_SOURCES), None)
+    if source is None or not dtypes:
+        raise UnsupportedSolution(index, [f"bias sources {list(sources)}, types {list(dtypes)}"])
+    bias_type = "Float" if "Float" in dtypes else dtypes[0]
+    if bias_type not in TYPE_PROPERTIES:
+        raise ValueError(f"Solution {index}: unknown bias datatype {bias_type!r}")
+    epilogue["bias"] = GemmBias(bias_type, source)
+    if aux:
+        aux_type = p.get("eType", p["dType"])
+        if aux_type not in TYPE_PROPERTIES:
+            raise ValueError(f"Solution {index}: unknown E datatype {aux_type!r}")
+        required = "Drelu" if gradient else "Relu"
+        if allowed_activations is not None and required not in allowed_activations:
+            raise UnsupportedSolution(index, [f"activation {required} not allowed"])
+        epilogue["aux_type"] = aux_type
+        epilogue["activation"] = "Relu"
+    return epilogue
+
+
+@dataclass(frozen=True, slots=True)
+class GemmBias:
+    """A bias vector: its storage type and the matrix it belongs to (A, B or D).
+
+    Without a gradient the bias is added to each output row. With a gradient it
+    is an output: the bias gradient, reduced from the source matrix.
+    """
+
+    dtype: str
+    source: str
+
+
 @dataclass(frozen=True, slots=True)
 class GemmProblem:
     """A packed matrix multiplication and the information needed to select its kernel.
@@ -181,8 +247,13 @@ class GemmProblem:
     The index, solution/kernel names, library directory and GPU target identify
     the chosen solution within one library build.
 
-    Scalars default to alpha=1 and beta=0, batch count is one, and optional
-    epilogue features are disabled. Native execution still checks solution support.
+    Scalars default to alpha=1 and beta=0, and batch count is one. The epilogue
+    follows the solution's outputs: ``gradient`` computes a bias gradient;
+    ``aux_type`` is the E tensor's type when the solution has E (written
+    forward, read with a gradient), otherwise None; ``bias`` accompanies
+    gradient and E; ``activation`` is "Relu" with E, meaning its derivative when
+    ``gradient`` is set; ``amax_d`` also returns the absolute maximum of D.
+    Native execution still checks solution support.
     MX block sizes of zero mean unscaled operands. MX scale format is 0 for
     ordinary scales, 1 for host-preswizzled gfx950 scales, or 2 for gfx1250 TDM.
     """
@@ -214,6 +285,11 @@ class GemmProblem:
     mx_scale_format: int = 0
     alpha: int | float = 1
     beta: int | float = 0
+    gradient: bool = False
+    aux_type: str | None = None
+    bias: GemmBias | None = None
+    activation: str = "None"
+    amax_d: bool = False
 
     @property
     def leading_dimensions(self) -> tuple[int, int, int, int]:
@@ -325,16 +401,13 @@ class LibraryMetadata:
         reasons = []
         if mapping.get("adaptiveGemmGSUA", 0):
             reasons.append("adaptive split-K")
-        # TODO(newling): Add grouped and sparse GEMM, required output operations
-        # and the excluded matrix layouts (AIHPBLAS-3605).
+        # TODO(newling): Add grouped and sparse GEMM, gate residuals and the
+        # excluded matrix layouts (AIHPBLAS-3605).
         unsupported = (
             "groupedGemm",
             "fusedGemmA2A",
             "sparse",
-            "useGradient",
-            "useE",
             "useGateResidual",
-            "outputAmaxD",
             "useInitialStridesAB",
             "useInitialStridesCD",
             "swizzleTensorA",
@@ -379,6 +452,7 @@ class LibraryMetadata:
         a_op, b_op = "C" if conjugate_a else "", "C" if conjugate_b else ""
         if operation != f"Contraction_l_A{a_indices}{a_op}_B{b_indices}{b_op}_Cijk_Dijk":
             raise UnsupportedSolution(solution_index, [f"contraction {operation}"])
+        epilogue = _required_epilogue(solution_index, p, record.get("activationWhiteList"))
         if strategy != "None":
             k_splits, fixed_split = 1, 1
         elif split == -1:
@@ -420,6 +494,7 @@ class LibraryMetadata:
             mx_scale_format=mx_format,
             alpha=alpha,
             beta=beta,
+            **epilogue,
         )
 
 
@@ -469,9 +544,9 @@ def load_library_metadata(
                     for key in ("name", "kernelName", "problemType", "sizeMapping")
                     if key in record
                 }
-                records[index]["sizePredicates"] = _size_predicates(
-                    record.get("problemPredicate", {"type": "TruePred"})
-                )
+                predicate = record.get("problemPredicate", {"type": "TruePred"})
+                records[index]["sizePredicates"] = _size_predicates(predicate)
+                records[index]["activationWhiteList"] = _activation_whitelist(predicate)
     if wanted is not None and wanted - seen:
         raise KeyError(f"Solution indices not found: {sorted(wanted - seen)}")
     return LibraryMetadata(directory, target, tuple(sorted(records)), MappingProxyType(records))

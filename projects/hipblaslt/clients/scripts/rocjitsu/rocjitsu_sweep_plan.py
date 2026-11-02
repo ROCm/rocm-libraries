@@ -14,6 +14,7 @@ from tensilelite.Utilities.gemm_problem_bench import UnsupportedBenchProblem, be
 from tensilelite.Utilities.gemm_problem_for_solution import (
     LibraryMetadata,
     UnsupportedSolution,
+    _activation_whitelist,
     _size_predicates,
 )
 
@@ -69,6 +70,7 @@ def regular_problem(solution, directory, target, *, reduction_blocks=8, alpha=1,
     record = {
         **solution,
         "sizePredicates": _size_predicates(solution["problemPredicate"]),
+        "activationWhiteList": _activation_whitelist(solution["problemPredicate"]),
     }
     metadata = LibraryMetadata(directory, target, (solution["index"],), {solution["index"]: record})
     return metadata.choose_single_problem(

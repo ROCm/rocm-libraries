@@ -1126,7 +1126,7 @@ class SweepTests(unittest.TestCase):
                 mxTypeB="E8",
                 mxScaleFormat=1,
             )
-            records[6]["problemType"]["useE"] = True
+            records[6]["problemType"]["useGateResidual"] = True
             records[0]["sizeMapping"]["globalSplitU"] = 4
             path = root / "library_gfx950.dat"
             path.with_suffix(".co").write_bytes(b"kernel")
@@ -1137,7 +1137,7 @@ class SweepTests(unittest.TestCase):
                     small = plan.make_plan(root, "gfx950", {}, 0, 2, policy=plan.REGULAR_POLICY)
                     self.assertEqual(small["jobs"], full["jobs"][:2])
                     self.assertEqual(full["planned_cases"], 6)
-                    self.assertEqual(full["coverage_gaps"], {"useE": 1})
+                    self.assertEqual(full["coverage_gaps"], {"useGateResidual": 1})
                     selected = next(j for j in full["jobs"] if j["solutions"][0]["index"] == 0)
                     self.assertEqual(selected["cases"][0]["shape"], [64, 96, 1, 1024])
                     row = yaml.safe_load(selected["bench_yaml"])[0]

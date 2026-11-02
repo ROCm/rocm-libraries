@@ -95,12 +95,23 @@ that needs additional shapes and runtime settings.
 
 Storage and compute types, transposes and conjugation come from the solution.
 The chosen problem uses one batch, real alpha 1 and beta 0 by default, and no
-bias, activation or optional scales. A nonzero beta requires a solution with
+optional bias, activation or scales. A nonzero beta requires a solution with
 beta support; integer computation requires integral scalars. Complex scalars
 have zero imaginary part. Required MX operand scales are preserved. Storage is packed column-major: element `(row, col)` has offset
 `row + col * leading_dimension`. Each leading dimension is the stored row
 count; transposing A or B changes that count. C and D are M-by-N and have no
 transpose operation in the hipBLASLt matmul descriptor.
+
+### Gradient, E and amaxD outputs
+
+Some solutions compute extra outputs, and the problem enables them. A gradient
+solution (`gradient`) computes a bias gradient, reduced from the first allowed
+bias source (A, B or D). A solution with an E tensor (`aux_type` is its type)
+is given ReLU: forward solutions write E, and gradient solutions read it and
+apply the ReLU derivative. Both also get a `bias`, of type Float if the
+solution allows it, otherwise its first allowed type. An amaxD solution
+(`amax_d`) also returns the absolute maximum of D. A solution whose allowed
+bias sources or activations exclude these choices is unsupported.
 
 ### MX block-scaled operands
 
@@ -280,7 +291,7 @@ else:
 ```
 
 Current exclusions include adaptive split-K, grouped or sparse GEMM,
-required output operations, unusual
+gate residuals, unusual
 layouts and contractions, and different C/D storage types. Record the reason
 and continue a sweep if desired. Catch only `UnsupportedSolution`; malformed
 metadata and unexpected errors must remain visible.

@@ -58,7 +58,8 @@ report record these parameters and each chosen shape; resume rejects a changed
 workload. Nonzero beta exercises reading C. Integer computation requires integral
 scalars, and complex imaginary parts remain zero. The native runtime assigns persistent work;
 this small shape does not exercise every Stream-K scheduling/reduction path.
-Optional epilogues are disabled. This supports double, complex, FNUZ and MX
+Optional epilogues are disabled; gradient, E and amaxD outputs that a solution
+requires are enabled with their bias and ReLU. This supports double, complex, FNUZ and MX
 operands as well as the initial real types. MX block sizes, scale datatypes and
 scale layout come from metadata; the native client initializes the operands and
 scales and computes the numerical reference. MX uses bounded HPL input values.

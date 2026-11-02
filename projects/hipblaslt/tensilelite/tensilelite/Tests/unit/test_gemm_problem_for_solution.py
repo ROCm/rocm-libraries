@@ -74,6 +74,7 @@ def test_full_tile_and_eight_blocks_per_split(tmp_path, trans_a, trans_b, split)
     assert row["uniform_summation_order"] == 0
     assert row["norm_check"] and row["norm_check_assert"] and row["allclose_check"]
     assert row["activation_type"] == "none" and row["bias_vector"] is False
+    assert (row["gradient"], row["use_e"], row["amaxD"]) == (False, False, False)
     assert (row["scaleA"], row["scaleB"], row["initialization"]) == ("none", "none", "rand_int")
     # Generation reuses the loaded records, independent of the files afterward.
     for path in tmp_path.iterdir():
@@ -274,6 +275,87 @@ def test_rejects_unsupported_problem_features(tmp_path, key, value):
     assert caught.value.reasons
 
 
+def epilogue_solution(*, gradient=False, aux=False, amax=False, sources=(1,), activations=None):
+    record = solution()
+    record["problemType"].update(
+        dType="Half",
+        cType="Half",
+        eType="Half",
+        useBias=1,
+        biasSrcWhiteList=list(sources),
+        biasDataTypeWhiteList=["Float", "Half"],
+        useGradient=gradient,
+        useE=aux,
+        outputAmaxD=amax,
+        activationType="Hipblaslt_all" if aux else "None",
+    )
+    if activations is not None:
+        record["problemPredicate"] = {
+            "type": "And",
+            "value": [{"type": "ActivationEnumWhiteList", "value": list(activations)}],
+        }
+    return record
+
+
+@pytest.mark.parametrize(
+    "gradient,aux,source,activations,expected",
+    [
+        # Bias gradient reduced from B, without an activation.
+        (True, False, 1, None, {"bias_source": "b", "activation_type": "none"}),
+        (True, False, 0, None, {"bias_source": "a", "activation_type": "none"}),
+        # Forward ReLU that also writes E.
+        (False, True, 3, ["None", "Relu"], {"bias_source": "d", "activation_type": "relu"}),
+        # Gradient that reads E and applies the ReLU derivative.
+        (True, True, 3, ["Dgelu", "Drelu"], {"bias_source": "d", "activation_type": "relu"}),
+    ],
+)
+def test_gradient_and_aux_epilogues(tmp_path, gradient, aux, source, activations, expected):
+    write_shard(
+        tmp_path,
+        [epilogue_solution(gradient=gradient, aux=aux, sources=(source,), activations=activations)],
+    )
+    p = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    assert p.gradient == gradient
+    assert p.aux_type == ("Half" if aux else None)
+    assert p.bias is not None and p.bias.dtype == "Float"
+    (row,) = yaml.safe_load(bench_yaml([p]))
+    assert (row["gradient"], row["use_e"], row["bias_vector"]) == (gradient, aux, True)
+    assert row["bias_type"] == "f32_r"
+    assert {key: row[key] for key in expected} == expected
+    assert ("aux_type" in row) == aux and row.get("aux_type", "f16_r") == "f16_r"
+    assert row["norm_check_assert"] and row["allclose_check"]
+
+
+def test_amax_d_needs_no_bias_or_activation(tmp_path):
+    write_shard(tmp_path, [epilogue_solution(amax=True)])
+    p = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    assert (p.amax_d, p.gradient, p.aux_type, p.bias) == (True, False, None, None)
+    (row,) = yaml.safe_load(bench_yaml([p]))
+    assert (row["amaxD"], row["bias_vector"], row["activation_type"]) == (True, False, "none")
+
+
+@pytest.mark.parametrize(
+    "changes,reason",
+    [
+        ({"useBias": 0}, "without bias support"),
+        ({"biasSrcWhiteList": [2]}, "bias sources"),
+        ({"biasDataTypeWhiteList": []}, "bias sources"),
+    ],
+)
+def test_gradient_without_usable_bias_is_unsupported(tmp_path, changes, reason):
+    record = epilogue_solution(gradient=True)
+    record["problemType"].update(changes)
+    write_shard(tmp_path, [record])
+    with pytest.raises(UnsupportedSolution, match=reason):
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+
+
+def test_aux_requires_an_allowed_relu(tmp_path):
+    write_shard(tmp_path, [epilogue_solution(aux=True, sources=(3,), activations=["Gelu"])])
+    with pytest.raises(UnsupportedSolution, match="Relu not allowed"):
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+
+
 @pytest.mark.parametrize("dtype", ["Float4", "Float8"])
 @pytest.mark.parametrize("output", ["Half", "BFloat16", "Float"])
 @pytest.mark.parametrize("depth", [256, 512])
@@ -445,8 +527,10 @@ def test_catalog_retains_only_problem_construction_metadata(tmp_path):
         "problemType",
         "sizeMapping",
         "sizePredicates",
+        "activationWhiteList",
     }
     assert library._records[17]["sizePredicates"] == ()
+    assert library._records[17]["activationWhiteList"] is None
     assert library.choose_single_problem(17).k == 256
 
 
@@ -691,7 +775,7 @@ def test_complex_conjugate_transpose(tmp_path):
 
 def test_sweep_can_continue_only_for_explicit_unsupported_cases(tmp_path):
     unsupported = solution(9)
-    unsupported["problemType"].update(groupedGemm=True, useE=True)
+    unsupported["problemType"].update(groupedGemm=True, useGateResidual=True)
     write_shard(tmp_path, [unsupported, solution(17)])
     library = load_library_metadata(tmp_path, target="gfx942")
     executed, gaps = [], {}
@@ -701,7 +785,7 @@ def test_sweep_can_continue_only_for_explicit_unsupported_cases(tmp_path):
         except UnsupportedSolution as error:
             gaps[error.solution_index] = error.reasons
     assert [p.solution_index for p in executed] == [17]
-    assert set(gaps[9]) == {"groupedGemm", "useE"}
+    assert set(gaps[9]) == {"groupedGemm", "useGateResidual"}
     # A broken record must escape the sweep's UnsupportedSolution handler.
     broken = solution(0)
     del broken["sizeMapping"]["depthU"]
