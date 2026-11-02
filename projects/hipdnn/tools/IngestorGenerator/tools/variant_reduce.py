@@ -56,7 +56,12 @@ _V1_DEVICE_FIELDS = frozenset({"gcn_arch_name", "warp_size", "multi_processor_co
 _DEVICE_FIELDS_BY_VERSION = {
     1: _V1_DEVICE_FIELDS,
     2: _V1_DEVICE_FIELDS
-    | {"total_global_mem", "memory_bus_width", "memory_clock_rate", "shared_mem_per_block"},
+    | {
+        "total_global_mem",
+        "memory_bus_width",
+        "memory_clock_rate",
+        "shared_mem_per_block",
+    },
 }
 
 EPSILON_GRID = tuple(i / 100 for i in range(51)) + (math.inf,)
@@ -241,11 +246,15 @@ def _graph_key(graph, where: str):
         vtable_bytes = struct.unpack_from("<H", buffer, vtable)[0]
         field = 0
         if vtable_bytes > _GRAPH_ID_VTABLE_OFFSET:
-            field = struct.unpack_from("<H", buffer, vtable + _GRAPH_ID_VTABLE_OFFSET)[0]
+            field = struct.unpack_from("<H", buffer, vtable + _GRAPH_ID_VTABLE_OFFSET)[
+                0
+            ]
         if field and table + field + _GRAPH_ID_BYTES > len(buffer):
             raise ValueError("Graph.id runs past the buffer")
     except (binascii.Error, struct.error, ValueError) as exc:
-        raise ReduceError(f"{where}: graph content is not a Graph buffer ({exc})") from exc
+        raise ReduceError(
+            f"{where}: graph content is not a Graph buffer ({exc})"
+        ) from exc
     if field:
         buffer[table + field : table + field + _GRAPH_ID_BYTES] = bytes(_GRAPH_ID_BYTES)
     return {**graph, "content_base64": base64.b64encode(bytes(buffer)).decode("ascii")}
@@ -288,7 +297,9 @@ def read_shard(path) -> dict:
             t = entry["time_ms"]
             if type(t) not in (int, float) or not math.isfinite(t) or t < 0:
                 raise ReduceError(f"{where} entries[{index}]: bad time_ms {t!r}")
-        key = json.dumps([_graph_key(doc["graph"], where), doc["device"]], sort_keys=True)
+        key = json.dumps(
+            [_graph_key(doc["graph"], where), doc["device"]], sort_keys=True
+        )
         records[key] = doc["entries"]
     return records
 

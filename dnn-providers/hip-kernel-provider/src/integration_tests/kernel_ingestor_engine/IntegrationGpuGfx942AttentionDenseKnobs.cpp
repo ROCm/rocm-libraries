@@ -230,28 +230,32 @@ std::vector<KnobCase> knobCases()
             for(const auto& tile : tilesFor(headSize, dataType, true, 0))
             {
                 const auto& [hq, hkv] = heads[row++ % std::size(heads)];
-                cases.push_back({prefix + "Causal_" + tileName(tile),
-                                 makeShape(dataType, headSize, hq, hkv, Mask::BOUNDS_TOP_LEFT, 0, 1, 512, 512),
-                                 FORCED,
-                                 tile});
+                cases.push_back(
+                    {prefix + "Causal_" + tileName(tile),
+                     makeShape(dataType, headSize, hq, hkv, Mask::BOUNDS_TOP_LEFT, 0, 1, 512, 512),
+                     FORCED,
+                     tile});
             }
             for(const auto& tile : tilesFor(headSize, dataType, false, 0))
             {
                 const auto& [hq, hkv] = heads[row++ % std::size(heads)];
-                cases.push_back({prefix + "NoMask_" + tileName(tile),
-                                 makeShape(dataType, headSize, hkv, hkv, Mask::NO_MASK, 0, 1, 512, 512),
-                                 FORCED,
-                                 tile});
+                cases.push_back(
+                    {prefix + "NoMask_" + tileName(tile),
+                     makeShape(dataType, headSize, hkv, hkv, Mask::NO_MASK, 0, 1, 512, 512),
+                     FORCED,
+                     tile});
             }
             for(const int64_t window : catalogWindows())
             {
                 const int64_t seq = std::max<int64_t>(512, 2 * window);
                 for(const auto& tile : tilesFor(headSize, dataType, true, window))
                 {
-                    cases.push_back({prefix + "Window" + std::to_string(window) + "_" + tileName(tile),
-                                     makeShape(dataType, headSize, 1, 1, Mask::WINDOW_TOP_LEFT, window, 1, seq, seq),
-                                     FORCED,
-                                     tile});
+                    cases.push_back(
+                        {prefix + "Window" + std::to_string(window) + "_" + tileName(tile),
+                         makeShape(
+                             dataType, headSize, 1, 1, Mask::WINDOW_TOP_LEFT, window, 1, seq, seq),
+                         FORCED,
+                         tile});
                 }
             }
         }

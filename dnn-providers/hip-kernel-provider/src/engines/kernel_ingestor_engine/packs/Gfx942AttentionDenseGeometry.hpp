@@ -97,11 +97,8 @@ inline bool isSupportedGfx942AttentionDenseTile(int64_t headSize, int64_t blockM
  * A zero window (no window) always passes. Callers must have validated the tile with
  * isSupportedGfx942AttentionDenseTile and the extents as positive.
  */
-inline bool gfx942AttentionDenseWindowReachesKeys(int64_t blockM,
-                                                  int64_t blockN,
-                                                  int64_t seqLenQ,
-                                                  int64_t seqLenKv,
-                                                  int64_t slidingWindow)
+inline bool gfx942AttentionDenseWindowReachesKeys(
+    int64_t blockM, int64_t blockN, int64_t seqLenQ, int64_t seqLenKv, int64_t slidingWindow)
 {
     if(slidingWindow == 0)
     {

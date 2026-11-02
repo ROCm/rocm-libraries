@@ -429,8 +429,8 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
         int64_t window = 0;
         if(__builtin_add_overflow(band.leftBound, int64_t{1}, &window))
         {
-            HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
-                                   << "left_bound " << band.leftBound << " is out of range");
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"} << "left_bound " << band.leftBound
+                                                    << " is out of range");
             return std::nullopt;
         }
         return AttentionDenseMask{1, window};
@@ -966,10 +966,10 @@ double scoreKernel(const MatchContext& /*context*/,
     constexpr int64_t PAD_SPAN = 16;
     constexpr int64_t PRIORITY_SPAN = 8;
     const bool baselineTile = tile->blockM == BASELINE_BLOCK_M && tile->blockN == BASELINE_BLOCK_N;
-    const int64_t tileRank
-        = baselineTile ? 0
-                       : 1 + (tile->blockM / GFX942_ATTENTION_DENSE_TILE_QUANTUM) * 17
-                             + tile->blockN / GFX942_ATTENTION_DENSE_TILE_QUANTUM;
+    const int64_t tileRank = baselineTile
+                                 ? 0
+                                 : 1 + (tile->blockM / GFX942_ATTENTION_DENSE_TILE_QUANTUM) * 17
+                                       + tile->blockN / GFX942_ATTENTION_DENSE_TILE_QUANTUM;
     const int64_t padRank = armRank(*ldsRowPad, BASELINE_LDS_ROW_PAD, 4, PAD_SPAN);
     const int64_t priorityRank = armRank(*pvPriority, BASELINE_PV_PRIORITY, 1, PRIORITY_SPAN);
     const int64_t rank
