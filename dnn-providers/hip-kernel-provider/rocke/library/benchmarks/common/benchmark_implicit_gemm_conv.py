@@ -606,6 +606,57 @@ def _rank_results(results: list, what: str = "") -> "tuple[list, list]":
     driver.
     """
     return rank_verified(results, lambda r: r.tflops, lambda r: r.passed, what)
+# Byte the dX buffer is filled with before a dx_interior verify launch: bf16
+# 0x7F7F (3.39e38), so an untouched voxel is told from a written one.
+_DXI_SENTINEL_BYTE = 0x7F
+
+
+def _verify_interior(*, rt, run, ident, problem, out_dev, out_t, ref_out, label, u8) -> bool:
+    """Verify a ``dx_interior`` dgrad launch against the full reference.
+
+    dX is pre-filled with a sentinel. The voxels the interior launch computes
+    (the interior; plus, for the x-halo kernels, the w columns of interior
+    rows) are compared with the reference as ``_verify_kernel`` compares (peak
+    normalised, 5e-2); every other voxel must still hold the sentinel (skip,
+    ``dx_interior`` 1) or be exactly 0 (zero-fill, 2: the whole shell)."""
+    import numpy as np
+    import torch
+
+    from kernels.common.conv_dgrad_interior import (
+        DXI_ZERO,
+        dx_interior_keeps_w,
+        interior_mask_np,
+        written_mask_np,
+    )
+
+    rt.memset(out_dev, _DXI_SENTINEL_BYTE, out_t.nbytes)
+    rt.synchronize() if hasattr(rt, "synchronize") else None
+    run()
+    out_cpu = torch.empty_like(out_t)
+    rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
+    out = out_cpu.float()
+    ref = ref_out.float().cpu()
+    keep_w = dx_interior_keeps_w(ident)
+    zero = ident.dx_interior == DXI_ZERO
+    comp = torch.from_numpy(interior_mask_np(problem) if zero else written_mask_np(problem, keep_w))
+    halo = ~comp
+    ref_scale = ref.abs().max().clamp(min=1.0)
+    diff = (out - ref).abs()[comp]
+    rel_err = float(diff.max() / ref_scale)
+    sentinel = float(torch.tensor([0x7F7F], dtype=torch.int16).view(torch.bfloat16).float())
+    hv = out[halo]
+    want = 0.0 if zero else sentinel
+    n_bad = int((hv != want).sum())
+    ok = rel_err < 5e-2 and n_bad == 0
+    status = (
+        f"PASS (rel_err={rel_err:.2e}, max_abs={float(diff.max()):.2e}; "
+        f"{int(comp.sum())} computed voxels, {int(halo.sum())} shell voxels "
+        f"{'zero' if zero else 'untouched'})"
+        if ok
+        else f"FAIL(rel_err={rel_err:.2e}, shell voxels not {'zero' if zero else 'untouched'}: {n_bad})"
+    )
+    print(f"  verify {label}: {status}", flush=True)
+    return ok
 
 
 def _verify_kernel(
@@ -5851,6 +5902,16 @@ def _fast_rank_candidates(
     def on_finalist(i, run):
         if ref_out is None:
             return None
+        if direction == "dgrad" and getattr(items[i][0], "dx_interior", 0):
+            try:
+                return _verify_interior(
+                    rt=rt, run=run, ident=items[i][0], problem=problem, out_dev=ptrs[2],
+                    out_t=D_t, ref_out=ref_out, label=labels[i], u8=u8,
+                )
+            except (HipError, RuntimeError) as e:
+                print(f"  verify {labels[i]}: FAIL({e})", flush=True)
+                synchronize_and_release()
+                return False
         try:
             stopped, passed = _verify_kernel(
                 rt=rt,
@@ -6983,6 +7044,82 @@ def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
     return run, bound[1]
 
 
+def _cached_bind_interior(
+    problem, ident, meta, rt, launcher, case_dtype, split_k, ptrs, sizes, arch,
+    stage2_kernels, KernelLauncher, LaunchConfig, live_extras,
+):
+    """``(run, label)`` of a ``dx_interior`` dgrad launch: the base binary on
+    the interior view problem (dX pointer at the view origin, the full
+    tensor's dX strides), then the pp_box_det stage 2 (rows mapped to full
+    pixel indices, the full dX) and, in zero-fill mode, the shell zero-fill."""
+    from kernels.common.conv_dgrad_interior import (
+        DXI_ZERO,
+        DgradHaloZeroSpec,
+        build_dgrad_halo_zero,
+        dgrad_halo_zero_signature,
+        dx_interior_keeps_w,
+        halo_zero_launch,
+        interior_view_dx,
+        interior_view_problem,
+        view_pixel_map,
+    )
+
+    from benchmarks.common.kernel_sweep import _launch_values_for
+
+    keep_w = dx_interior_keeps_w(ident)
+    vp = interior_view_problem(problem, keep_w)
+    off_e, stride_vals = interior_view_dx(problem, keep_w)
+    n_elem = problem.N * (problem.Di if problem.is_3d else 1) * problem.Hi * problem.Wi * problem.C
+    eb = sizes[2] // n_elem
+    vptrs = (ptrs[0], ptrs[1], ptrs[2] + off_e * eb)
+    vsizes = (sizes[0], sizes[1], sizes[2] - off_e * eb)
+    try:
+        extras, grid = _extras_and_grid(
+            "dgrad", vp, ident, rt, case_dtype, split_k=split_k,
+            pbd_pix_map=view_pixel_map(problem, keep_w),
+        )
+    except ValueError as e:
+        print(f"  [skip] {ident.label()}: {e}", flush=True)
+        return None
+    live_extras.append(extras)
+    values = _launch_values_for("dgrad", vp, ident, vptrs, vsizes, extras)
+    values.update(stride_vals)
+    cfg = LaunchConfig(
+        grid=grid,
+        block=(meta.get("block_size") or (ident.warp_m * ident.warp_n * ident.wave_size), 1, 1),
+        stream=0,
+    )
+    run = launcher.bind(values, config=cfg)
+    if extras.get("pbd") is not None:
+        run = _pbd_stage2_run(
+            run, ident, problem, extras, ptrs, sizes, arch, stage2_kernels, KernelLauncher,
+            LaunchConfig,
+        )
+    if ident.dx_interior == DXI_ZERO:
+        from rocke import compile_kernel
+
+        zspec = DgradHaloZeroSpec()
+        key = ("dxi_zero", zspec)
+        if key not in stage2_kernels:
+            art = compile_kernel(build_dgrad_halo_zero(zspec), arch=arch)
+            stage2_kernels[key] = KernelLauncher(
+                hsaco=art.hsaco, kernel_name=art.kernel_name,
+                signature=dgrad_halo_zero_signature(zspec),
+            )
+        zv, zgrid, zblock = halo_zero_launch(problem, eb, ptrs[2], sizes[2], zspec)
+        run_z = stage2_kernels[key].bind(zv, config=LaunchConfig(grid=zgrid, block=zblock, stream=0))
+        _main = run
+
+        def run(_main=_main, run_z=run_z):
+            _main()
+            run_z()
+
+    label = ident.label()
+    if split_k is not None:
+        label += f" @split_k={split_k}"
+    return run, label
+
+
 def _cached_bind(
     direction,
     problem,
@@ -7017,6 +7154,15 @@ def _cached_bind(
 
     from benchmarks.common.kernel_sweep import _launch_values_for
 
+    dxi = getattr(ident, "dx_interior", 0) if direction == "dgrad" else 0
+    if dxi:
+        # Interior-only dX (kernels/common/conv_dgrad_interior.py): the
+        # binary runs the interior view problem, its dX the full tensor's
+        # interior (offset pointer, full strides).
+        return _cached_bind_interior(
+            problem, ident, meta, rt, launcher, case_dtype, split_k, ptrs, sizes, arch,
+            stage2_kernels, KernelLauncher, LaunchConfig, live_extras,
+        )
     try:
         extras, grid = _extras_and_grid(
             direction, problem, ident, rt, case_dtype, split_k=split_k
@@ -7295,7 +7441,7 @@ def _fwd_stage2(
     return compiled[key], values, cfg
 
 
-def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
+def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None, pbd_pix_map=None):
     """Trailing kernargs and the launch grid for one cached kernel.
 
     Both backward directions need host-side state that an AOT kernel takes as
@@ -7350,6 +7496,7 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
                 sub_gemms, problem, tile_m=ident.tile_m, tile_n=ident.tile_n,
                 pp_box_order=getattr(ident, "pp_box_order", 0),
                 slot_bytes=2 if ident.pp_box_det in (2, 4) else 4,
+                **({"pix_map": pbd_pix_map} if pbd_pix_map is not None else {}),
             )
             flat = np.array(_w, dtype=np.int32)
             _alloc_bytes = int(_lay["total_words"]) * 4

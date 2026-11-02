@@ -146,7 +146,7 @@ from __future__ import annotations
 
 import itertools
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as _dc_replace
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from kernels.common.conv_split_k import FWD_SPLIT_K_ARCHS
@@ -624,6 +624,29 @@ def _dgrad_pbx8_twins(sets):
 
 if _os.environ.get("ROCKE_AOT_DGRAD_PBX8", "0") not in ("", "0"):
     CACHE_DGRAD_PLAIN_KNOBS = _dgrad_pbx8_twins(CACHE_DGRAD_PLAIN_KNOBS)
+
+
+# Interior-only dX twins (KernelIdentity.dx_interior, a launch-time field:
+# the twin is the base binary): ROCKE_AOT_DGRAD_DXI lists the modes (1 skip,
+# 2 zero-fill; unset = none), added to every x-halo / pp_boxes dgrad job that
+# can take them whose label matches ROCKE_AOT_DGRAD_DXI_SCOPE (regex; unset =
+# all). ADD mode: the base jobs are unchanged.
+CACHE_DGRAD_DXI: Tuple[int, ...] = tuple(
+    int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_DXI", "").split(",") if v.strip()
+)
+CACHE_DGRAD_DXI_SCOPE = _os.environ.get("ROCKE_AOT_DGRAD_DXI_SCOPE", "")
+
+
+def _dxi_applies(ident) -> bool:
+    if not (ident.tapk_xhalo or ident.pp_boxes):
+        return False
+    if ident.split_k > 1 and not (ident.pp_boxes and ident.pp_box_det):
+        return False
+    if ident.pp_streamk or ident.tapk_pp_persist == 2:
+        return False
+    return not CACHE_DGRAD_DXI_SCOPE or bool(_re.search(CACHE_DGRAD_DXI_SCOPE, ident.label()))
+
+
 # Extra dgrad tile extents (e.g. "512") built ONLY as ROCKE_AOT_DGRAD_PPK
 # variants of the plain tpf1 tap-outer binary (no base binary, no other loop):
 # ROCKE_AOT_DGRAD_PP_TILE_MN. Unset = none.
@@ -3588,6 +3611,16 @@ def _dgrad_jobs(
                         spec_kwargs=jcfg,
                         caps={**job_caps, "xhalo": True} if _ppx else job_caps,
                     )
+                    # dx_interior twins (ROCKE_AOT_DGRAD_DXI): the same
+                    # binary under a launch-time identity field.
+                    if CACHE_DGRAD_DXI and _dxi_applies(ident):
+                        for _v in CACHE_DGRAD_DXI:
+                            yield BuildJob(
+                                identity=_dc_replace(ident, dx_interior=_v),
+                                direction="dgrad",
+                                spec_kwargs=jcfg,
+                                caps={**job_caps, "xhalo": True} if _ppx else job_caps,
+                            )
             for sk in _dgrad_split_ks(
                 arch,
                 wave_size,

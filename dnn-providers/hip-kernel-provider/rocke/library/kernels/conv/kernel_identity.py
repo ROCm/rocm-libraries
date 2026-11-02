@@ -450,6 +450,11 @@ class KernelIdentity:
     pp_box_order: int = 0
     # Dgrad only (DgradConvSpec.pp_box_det). Left out of the hash at 0.
     pp_box_det: int = 0
+    # Dgrad only, launch-time (kernels/common/conv_dgrad_interior.py): on a
+    # halo-form problem compute dX on the interior only (1 = the halo shell
+    # is not written, 2 = it is zero-filled). The binary is the base
+    # identity's. Left out of the hash at 0.
+    dx_interior: int = 0
     # async_dma only: elements per DRAM->LDS chunk of the A and B loaders. The
     # width is picked from the build-time cpg so a chunk never straddles a
     # filter position, and is baked into the ISA -- a binary is only correct
@@ -626,7 +631,7 @@ class KernelIdentity:
         ):
             if not fields[name]:
                 del fields[name]
-        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo", "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order", "pp_box_det"):
+        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo", "pp_streamk", "pp_sk_mode", "pp_zskip", "pp_boxes", "pp_box_cus", "pp_box_order", "pp_box_det", "dx_interior"):
             if not fields[name]:
                 del fields[name]
         if not fields["split_k_cluster"]:
@@ -1130,6 +1135,33 @@ def identity_supports_problem(
                     f"divide the problem's contiguous run of {run}"
                 )
 
+    # dx_interior: the launch runs the interior view problem (see
+    # kernels/common/conv_dgrad_interior.py); only the families and
+    # reductions that write dX without a zeroed buffer.
+    if identity.direction == "dgrad" and getattr(identity, "dx_interior", 0):
+        from kernels.common.conv_dgrad_interior import (
+            DXI_MODES,
+            dx_interior_keeps_w,
+            dx_interior_problem_ok,
+            interior_view_problem,
+        )
+
+        if identity.dx_interior not in DXI_MODES:
+            return False, f"dx_interior={identity.dx_interior} is not a mode"
+        if not (identity.tapk_xhalo or identity.pp_boxes):
+            return False, "dx_interior serves the x-halo and pp_boxes kernels only"
+        if identity.split_k > 1 and not (identity.pp_boxes and identity.pp_box_det):
+            return False, "dx_interior: split-K only as pp_box_det (no dX zeroing)"
+        if identity.pp_streamk or getattr(identity, "tapk_pp_persist", 0) == 2:
+            return False, "dx_interior: no stream-K (it zeroes dX)"
+        ok, why = dx_interior_problem_ok(problem)
+        if not ok:
+            return False, why
+        base = dataclasses.replace(identity, dx_interior=0)
+        return identity_supports_problem(
+            base, interior_view_problem(problem, dx_interior_keeps_w(identity)), llvm_flavor
+        )
+
     # Implicit-GEMM dgrad dispatches CTAs with a binary search whose trip
     # count is runtime, but the sub-GEMM record table the search walks is
     # sized at build time for ``max_sub_gemms``; a problem that decomposes
@@ -1330,6 +1362,8 @@ IDENTITY_CAPABILITY_FIELDS = (
     "pp_sk_mode",
     "pp_boxes",
     "pp_box_cus",
+    "pp_box_det",
+    "dx_interior",
     "split_addr_k_decode",
     "uk_nopad",
     "xwin",

@@ -68,7 +68,8 @@ def _record_pixels(sg, problem) -> List[int]:
 
 
 def pp_box_det_pack(
-    sub_gemms, problem, *, tile_m: int, tile_n: int, pp_box_order: int, slot_bytes: int = 4
+    sub_gemms, problem, *, tile_m: int, tile_n: int, pp_box_order: int, slot_bytes: int = 4,
+    pix_map=None,
 ) -> Tuple[List[int], dict]:
     """The i32 words of a ``pp_box_det`` launch's sub-GEMM buffer up to the
     workspace, and its layout: ``ws_word`` (slot 0), ``ws_words`` (all slots),
@@ -90,6 +91,10 @@ def pp_box_det_pack(
             continue
         nm = _ceil_div(sg.gemm_m, tile_m)
         pix = _record_pixels(sg, problem)
+        if pix_map is not None:
+            # (dx_interior: view pixel -> full-tensor pixel; stage 2 stores
+            # through the full dX)
+            pix = [pix_map(q) for q in pix]
         for m in range(nm):
             r = pix[m * tile_m:(m + 1) * tile_m]
             for n in range(nn):
