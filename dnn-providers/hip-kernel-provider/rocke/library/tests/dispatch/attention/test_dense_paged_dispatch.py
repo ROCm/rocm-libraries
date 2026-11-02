@@ -191,6 +191,17 @@ def test_binding_and_spec_refuse_non_bool_paged_flags(arch, spec_id):
         dataclasses.replace(result.spec.kernel_spec, paged="no")
 
 
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_launch_refuses_unknown_keywords(arch, spec_id):
+    """A bind-only option passed to launch() is refused, not dropped."""
+    result = dispatch_attention(_pinned(_request(arch), spec_id))
+    cache = CacheStandIn((_SQ // _BS, _BS, _HKV, _D))
+    launch = result.bind_torch({"q": None, "k": cache, "v": cache, "out": None}).launch
+    for kw in ({"unsafe_skip_paged_value_validation": True}, {"softmax_scale": 0.5}):
+        with pytest.raises(TypeError, match=next(iter(kw))):
+            launch(**kw)
+
+
 @pytest.mark.parametrize("arch", sorted(_PAGED_SPEC_IDS))
 def test_contiguous_dense_spec_ignores_the_block_count(arch):
     spec_id = _PAGED_SPEC_IDS[arch][0]

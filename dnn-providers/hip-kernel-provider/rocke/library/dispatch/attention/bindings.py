@@ -290,6 +290,11 @@ _DENSE_OPTIONAL_INPUTS = {
 }
 
 
+_DENSE_LAUNCH_OPTIONS = frozenset({"scale", "stream"}).union(
+    *_DENSE_OPTIONAL_INPUTS.values()
+)
+
+
 def _dense_runner(arch: str):
     if arch == "gfx942":
         from kernels.gfx942.attention_dense import run_attention_dense_torch
@@ -329,6 +334,15 @@ def bind_dense_attention_torch(
         )
 
     def launch(**_kw):
+        # Refused, not ignored: a bind-time option or a misspelled keyword would
+        # otherwise be dropped silently.
+        if unknown := _kw.keys() - _DENSE_LAUNCH_OPTIONS:
+            raise TypeError(
+                "dense attention launch() got unexpected keyword(s) "
+                + ", ".join(sorted(unknown))
+                + "; it takes "
+                + ", ".join(sorted(_DENSE_LAUNCH_OPTIONS))
+            )
         call = {
             "spec": spec,
             "q": tensors["q"],
