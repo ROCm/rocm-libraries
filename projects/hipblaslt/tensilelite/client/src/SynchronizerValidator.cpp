@@ -50,6 +50,8 @@ namespace TensileLite
         SynchronizerValidator::SynchronizerValidator(
             po::variables_map const& args, std::vector<std::shared_ptr<DeviceContext>> devices)
             : m_enabled(args["check-synchronizer"].as<bool>())
+            , m_validateAfterEnqueues(args.count("validate-after-enqueues")
+                                      && args["validate-after-enqueues"].as<bool>())
             , m_devices(std::move(devices))
         {
         }
@@ -141,11 +143,25 @@ namespace TensileLite
                                                     TimingEvents const&        startEvents,
                                                     TimingEvents const&        stopEvents)
         {
+            validateInputs(slots, "warmup");
+        }
+
+        void SynchronizerValidator::validateEnqueues(std::vector<size_t> const& slots,
+                                                     TimingEvents const&        startEvents,
+                                                     TimingEvents const&        stopEvents)
+        {
+            if(m_validateAfterEnqueues)
+                validateInputs(slots, "enqueues");
+        }
+
+        void SynchronizerValidator::validateInputs(std::vector<size_t> const& slots,
+                                                   char const*                stage)
+        {
             try
             {
                 for(auto const& device : m_devices)
                     for(size_t slot : slots)
-                        checkInputs(device->deviceId, device->inputArr[slot], "warmup");
+                        checkInputs(device->deviceId, device->inputArr[slot], stage);
             }
             catch(...)
             {
