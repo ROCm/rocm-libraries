@@ -92,14 +92,28 @@ long long fww_Wo(const rocke_direct_conv_problem_t* p)
            + 1;
 }
 
-/* spec.vp: the problem the tile loop sees, ``problem`` itself or its
- * strided-GEMM view (1x1, stride 1, over the Ho x Wo output grid). */
+/* spec.vp: the problem the tile loop sees, ``problem`` itself, its
+ * polyphase view (1 x m, stride 1) or its strided-GEMM view (1x1, stride 1,
+ * over the Ho x Wo output grid). */
 rocke_direct_conv_problem_t fww_vp(const rocke_direct_fwd_wmma_spec_t* s)
 {
     rocke_direct_conv_problem_t v = s->problem;
+    const rocke_direct_conv_problem_t* p = &s->problem;
+    if(s->poly_view)
+    {
+        const int m = p->stride ? (int)fww_floordiv(p->KW, p->stride) : 0;
+        v.H = 1;
+        v.W = (int)fww_Wo(p) + m - 1;
+        v.cpg = p->stride * p->cpg;
+        v.KH = 1;
+        v.KW = m;
+        v.PAD = 0;
+        v.pad_w = -1;
+        v.stride = 1;
+        return v;
+    }
     if(!s->strided_view)
         return v;
-    const rocke_direct_conv_problem_t* p = &s->problem;
     const int Ho = (int)fww_Ho(p), Wo = (int)fww_Wo(p);
     v.N = s->fold_n ? 1 : p->N;
     v.H = s->fold_n ? p->N * Ho : Ho;
@@ -232,6 +246,7 @@ rocke_direct_fwd_wmma_spec_t rocke_direct_fwd_wmma_spec_default(void)
     s.tap_shift = false;
     s.strided_view = false;
     s.fold_n = false;
+    s.poly_view = false;
     return s;
 }
 
@@ -357,7 +372,8 @@ rocke_status_t rocke_direct_fwd_wmma_kernel_name(const rocke_direct_fwd_wmma_spe
                            spec->tap_reuse ? "tu" : "",
                            spec->tap_shift ? "tsh" : "",
                            spec->strided_view ? "sv" : "",
-                           spec->fold_n ? "fn" : ""};
+                           spec->fold_n ? "fn" : "",
+                           spec->poly_view ? "pv" : ""};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {fww_is_bf16(spec) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "direct_fwd_wmma",
@@ -419,6 +435,27 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
     }
     else if(spec->fold_n)
         FWW_FAIL("fold_n builds on strided_view");
+    rocke_direct_conv_problem_t pv_view;
+    if(spec->poly_view)
+    {
+        const int S = p->stride;
+        const int pad_w = rocke_direct_conv_problem_pad_w(p);
+        if(spec->strided_view || p->H != 1 || p->KH != 1 || p->PAD || p->dil_h != 1
+           || p->dil_w != 1)
+            FWW_FAIL("poly_view serves 1-D (H = 1, 1 x R) undilated filters");
+        if(S < 2 || p->KW % S || !(0 <= pad_w && pad_w < S) || p->W % S)
+            FWW_FAIL("poly_view needs R = m * S, column padding below S and W %% S == 0");
+        if(p->groups != 1)
+            FWW_FAIL("poly_view serves ungrouped convs");
+        if(spec->phase_split || spec->pack_groups > 1)
+            FWW_FAIL("poly_view is a plain stride-1 1-D loop");
+        if(spec->ck == 0 || p->cpg % spec->ck || (pad_w * p->cpg) % spec->ck)
+            FWW_FAIL("a chunk must lie in one input pixel (cpg %d, ck %d)", p->cpg, spec->ck);
+        if(rocke_direct_fwd_wmma_tile_h(spec) != 1)
+            FWW_FAIL("poly_view tiles one row (tile_w * tile_n == block_p)");
+        pv_view = fww_vp(spec);
+        p = &pv_view;
+    }
     if(p->stride != 1 && p->stride != 2)
         FWW_FAIL("stride %d not in (1, 2)", p->stride);
     if(p->dil_h < 1 || p->dil_w < 1)
@@ -564,11 +601,13 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
         FWW_FAIL("unsupported scheduler_strategy '%s'", spec->sched);
     /* Global offsets are i32 bytes and the tile index is a flat block id. */
     {
-        long long total_k = (long long)p->groups * p->kpg;
-        long long total_c = (long long)p->groups * p->cpg;
-        long long bytes[3] = {2LL * p->N * p->H * p->W * total_c,
-                              2LL * total_k * p->KH * p->KW * p->cpg,
-                              2LL * p->N * Ho * Wo * total_k};
+        /* The real problem's tensors (p may be a view). */
+        const rocke_direct_conv_problem_t* r = &spec->problem;
+        long long total_k = (long long)r->groups * r->kpg;
+        long long total_c = (long long)r->groups * r->cpg;
+        long long bytes[3] = {2LL * r->N * r->H * r->W * total_c,
+                              2LL * total_k * r->KH * r->KW * r->cpg,
+                              2LL * r->N * fww_Ho(r) * fww_Wo(r) * total_k};
         long long mx = bytes[0];
         if(bytes[1] > mx)
             mx = bytes[1];
@@ -621,6 +660,8 @@ struct fww_ctx
     int NPW, HC, PSTR, NHS, WTAPS, NG, WEI0;
     bool RR, TU, TSH, SB, PP;
     bool SV; /* strided_view */
+    bool PV; /* poly_view */
+    int PV_PAD; /* poly_view: the real column padding */
     int RKH; /* the real problem's KH (strided_view patch runs) */
     int TWF;
     int64_t SEL_LO, SEL_HI;
@@ -628,6 +669,7 @@ struct fww_ctx
     V c0, c1, c2, c8, c16;
     V c_groups, c_cpg, c_kpg, c_cpg0, c_N, c_H, c_W, c_Ho, c_Wo;
     V c_run; /* channels of one contiguous patch run (strided_view) */
+    V c_pv_lead, pv_w_start; /* poly_view: leading-pad elements, sub-halo 0 start */
     V xs_n, xs_h, xs_w, ys_n, ys_h, ys_w, xs_h_real;
     V tid, wave_id, lane, l16, lhalf, wave_k, wave_p;
     V n_base, k_base, h_tile, w_tile, k_grp, c_grp, w_row, c_CK, n_chunks;
@@ -716,7 +758,23 @@ void tdm_descriptor_3d(fww_ctx& c,
                        int tile0,
                        int tile1,
                        V tile2,
-                       V out[5])
+                       V out[5],
+                       V tile1_v = NULL);
+
+/* tile1_v (when not NULL) is a runtime tile1, as Python's ``tile1: Value``. */
+void tdm_descriptor_3d(fww_ctx& c,
+                       V global_ptr,
+                       V lds_addr,
+                       V d0,
+                       V d1,
+                       V d2,
+                       V s1,
+                       V s2,
+                       int tile0,
+                       int tile1,
+                       V tile2,
+                       V out[5],
+                       V tile1_v)
 {
     rocke_ir_builder_t* b = c.b;
     V c16 = ci(c, 16);
@@ -749,7 +807,7 @@ void tdm_descriptor_3d(fww_ctx& c,
         g1[3] = rocke_b_lor(b, x, y);
     }
     {
-        V x = ci(c, tile1);
+        V x = tile1_v != NULL ? tile1_v : ci(c, tile1);
         V y = rocke_b_shl(b, tile2, c16);
         g1[4] = rocke_b_lor(b, x, y);
     }
@@ -807,6 +865,66 @@ void issue_halo(fww_ctx& c, V chunk, V stage)
             if_then(c, issue, [&]() {
                 V img_off = addk(c, stage_off, (int64_t)im * c.IMG + (int64_t)a * c.PSTR);
                 V x_k0 = k0;
+                V w_ext_c = sh.w_ext;
+                V tile1_c = NULL; /* NULL: the baked HC */
+                if(c.PV)
+                {
+                    /* View pixel j, chunk k0: input pixel S*j - pw + k0 // C. A
+                     * chunk of the leading pad skips the image's first view
+                     * pixel (zeroed here), the others its last one. */
+                    V lead_c = rocke_b_cmp_lt(b, k0, c.c_pv_lead);
+                    V first = rocke_b_cmp_eq(b, c.pv_w_start, c.c0);
+                    V skip;
+                    {
+                        V x = rocke_b_land(b, lead_c, first);
+                        skip = rocke_b_select(b, x, c.c1, c.c0);
+                    }
+                    V last_w = c.c_W;
+                    if(c.PV_PAD)
+                    {
+                        V x = sub(c, c.c_W, c.c1);
+                        last_w = rocke_b_select(b, lead_c, c.c_W, x);
+                    }
+                    {
+                        V x = ci(c, c.HC);
+                        tile1_c = sub(c, x, skip);
+                    }
+                    {
+                        V x = add(c, c.pv_w_start, sh.w_ext);
+                        V y = sminv(c, x, last_w);
+                        V z = add(c, c.pv_w_start, skip);
+                        V u = sub(c, y, z);
+                        w_ext_c = smaxv(c, u, c.c0);
+                    }
+                    V zero_lane;
+                    {
+                        V x = ci(c, c.XP / 8);
+                        zero_lane = rocke_b_cmp_lt(b, c.lane, x);
+                    }
+                    V cond;
+                    {
+                        V x = rocke_b_land(b, lead_c, first);
+                        cond = rocke_b_land(b, x, zero_lane);
+                    }
+                    if_then(c, cond, [&]() {
+                        V zero_v = rocke_b_zero_vec(b, c.io_type, 8);
+                        V x = add(c, img_off, sh.z_elems);
+                        V y = mul(c, c.lane, c.c8);
+                        V idx[2] = {c.c0, add(c, x, y)};
+                        rocke_b_smem_store_vN(b, c.lds, idx, 2, zero_v, 8);
+                        rocke_b_s_waitcnt(b, -1, 0, -1);
+                    });
+                    {
+                        V x = sub(c, k0, c.c_pv_lead);
+                        V y = mul(c, skip, c.xs_w);
+                        x_k0 = add(c, x, y);
+                    }
+                    {
+                        V x = ci(c, c.XP);
+                        V y = mul(c, skip, x);
+                        img_off = add(c, img_off, y);
+                    }
+                }
                 if(c.SV && c.RKH > 1)
                 {
                     /* Patch run r of the chunk: one input row further on. */
@@ -847,14 +965,15 @@ void issue_halo(fww_ctx& c, V chunk, V stage)
                                   src,
                                   dst,
                                   c_ext,
-                                  sh.w_ext,
+                                  w_ext_c,
                                   h_ext,
                                   c.xs_col,
                                   c.xs_h,
                                   c.XP,
                                   c.HC,
                                   c.x_tile2,
-                                  d);
+                                  d,
+                                  tile1_c);
                 rocke_b_tensor_load_to_lds(b, d[0], d[1], d[2], d[3], d[4], 0);
             });
         }
@@ -1516,6 +1635,9 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     c.spec = spec;
     c.SV = spec->strided_view;
     c.RKH = rp->KH;
+    c.PV = spec->poly_view;
+    c.PV_PAD = c.PV ? rocke_direct_conv_problem_pad_w(rp) : 0;
+    c.c_pv_lead = c.pv_w_start = NULL;
     c.KH = p->KH;
     c.KW = p->KW;
     c.S = p->stride;
@@ -1600,6 +1722,13 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
         c.c_cpg0 = c.c_cpg;
     }
     c.c_run = c.c_cpg;
+    if(c.PV)
+    {
+        /* elements of the leading pad: pw input pixels (C runtime) */
+        c.c_pv_lead = mulk(c, c.c_cpg, c.PV_PAD);
+        c.c_cpg = mulk(c, c.c_cpg, rp->stride);
+        c.c_cpg0 = c.c_cpg;
+    }
     if(c.SV)
     {
         c.c_run = mulk(c, c.c_cpg, rp->KW);
@@ -1615,6 +1744,12 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     c.xs_h = params->p_A_stride_hi;
     c.xs_w = params->p_A_stride_wi;
     c.xs_h_real = c.xs_h;
+    if(c.PV)
+    {
+        /* The view's columns: Wo + m - 1 view pixels of S input pixels each. */
+        c.c_W = addk(c, params->p_Wo, c.KW - 1);
+        c.xs_w = mulk(c, c.xs_w, rp->stride);
+    }
     if(c.SV)
     {
         /* The view's rows and columns are the output grid: input row S * i. */
@@ -1789,6 +1924,8 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
             base = add(c, z, w);
         }
         c.sub_halos.push_back(fww_sub_halo{base, z_elems, w_ext});
+        if(a == 0)
+            c.pv_w_start = w_start;
     }
     c.xs_col = c.PS ? mul(c, c.xs_w, c_S) : c.xs_w;
     {

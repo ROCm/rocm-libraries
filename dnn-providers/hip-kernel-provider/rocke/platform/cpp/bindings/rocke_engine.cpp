@@ -2517,6 +2517,7 @@ rocke_direct_fwd_wmma_spec_t dfww_build_spec(const py::dict& d, std::deque<std::
     s.tap_shift = dict_bool(d, "tap_shift", s.tap_shift);
     s.strided_view = dict_bool(d, "strided_view", s.strided_view);
     s.fold_n = dict_bool(d, "fold_n", s.fold_n);
+    s.poly_view = dict_bool(d, "poly_view", s.poly_view);
     if(d.contains("sched") && !d["sched"].is_none())
         s.sched = keep(d["sched"].cast<std::string>());
     return s;

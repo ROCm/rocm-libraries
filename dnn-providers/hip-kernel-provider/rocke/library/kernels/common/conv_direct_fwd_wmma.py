@@ -191,12 +191,35 @@ class DirectFwdWmmaSpec:
     # rows, y's Ho output rows), so the batch folds into the rows and a tile
     # can span images: N * Ho rows of one image.
     fold_n: bool = False
+    # A 1-D strided filter whose width is a multiple of the stride (1 x m*S,
+    # stride S, column padding below S, H = 1, W a multiple of S) as a 1 x m
+    # stride-1 conv over a polyphase view of X: view pixel j is input pixels
+    # S*j - pw .. S*j - pw + S - 1, S*cpg contiguous channels. The weights
+    # [k][t][c] are already [k][tap][S*cpg]. A chunk lies in one input pixel
+    # of its view pixel, so it reads S*j - pw + i at its own bounds: the view's
+    # first pixel is a leading zero for the chunks with i < pw (zeroed per
+    # chunk) and its last a trailing one for the others (the TDM extent).
+    poly_view: bool = False
 
     @property
     def vp(self) -> DirectConvProblem:
-        """The problem the tile loop sees: ``problem`` itself, or its
-        strided-GEMM view (1x1, stride 1, over the Ho x Wo output grid)."""
+        """The problem the tile loop sees: ``problem`` itself, its polyphase
+        view (1 x m, stride 1) or its strided-GEMM view (1x1, stride 1, over
+        the Ho x Wo output grid)."""
         p = self.problem
+        if self.poly_view:
+            m = p.KW // p.stride
+            return replace(
+                p,
+                H=1,
+                W=p.Wo + m - 1,
+                cpg=p.stride * p.cpg,
+                KH=1,
+                KW=m,
+                PAD=0,
+                pad_w=-1,
+                stride=1,
+            )
         if not self.strided_view:
             return p
         rows = p.N * p.Ho if self.fold_n else p.Ho
@@ -365,6 +388,7 @@ class DirectFwdWmmaSpec:
             "tsh" if self.tap_shift else "",
             "sv" if self.strided_view else "",
             "fn" if self.fold_n else "",
+            "pv" if self.poly_view else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
@@ -427,6 +451,21 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
             return "fold_n needs H == stride * Ho and one image per tile"
     elif spec.fold_n:
         return "fold_n builds on strided_view"
+    if spec.poly_view:
+        S = p.stride
+        if spec.strided_view or p.H != 1 or p.KH != 1 or p.PAD or p.is_dilated:
+            return "poly_view serves 1-D (H = 1, 1 x R) undilated filters"
+        if S < 2 or p.KW % S or not 0 <= p.PAD_W < S or p.W % S:
+            return "poly_view needs R = m * S, column padding below S and W % S == 0"
+        if p.groups != 1:
+            return "poly_view serves ungrouped convs"
+        if spec.phase_split or spec.pack_groups > 1:
+            return "poly_view is a plain stride-1 1-D loop"
+        if p.cpg % spec.ck or (p.PAD_W * p.cpg) % spec.ck:
+            return f"a chunk must lie in one input pixel (cpg {p.cpg}, ck {spec.ck})"
+        if spec.tile_h != 1:
+            return "poly_view tiles one row (tile_w * tile_n == block_p)"
+        p = spec.vp
     if p.stride not in (1, 2):
         return f"stride {p.stride} not in (1, 2)"
     if p.dil_h < 1 or p.dil_w < 1:
@@ -572,7 +611,7 @@ def _tdm_descriptor_3d(
     dims: Sequence[Value],
     strides: Sequence[Value],
     tile0: int,
-    tile1: int,
+    tile1: int | Value,
     tile2: Value,
 ) -> tuple[Value, Value, Value, Value, Value]:
     """The five D# groups of a rank-3 TDM tile transfer (2-byte elements).
@@ -600,7 +639,10 @@ def _tdm_descriptor_3d(
         b.shl(d0, c16),
         b.lor(b.lshr(d0, c16), b.shl(d1, c16)),
         b.lor(b.lshr(d1, c16), b.const_i32(tile0 << 16)),
-        b.lor(b.const_i32(tile1), b.shl(tile2, c16)),
+        b.lor(
+            b.const_i32(tile1) if isinstance(tile1, int) else tile1,
+            b.shl(tile2, c16),
+        ),
         s1,
         b.shl(s2, c16),
         b.lshr(s2, c16),
@@ -680,6 +722,13 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         c_kpg = b.div(params["p_total_k"], c_groups)
         c_cpg0 = c_cpg
     c_run = c_cpg  # channels of one contiguous patch run (strided_view)
+    PV = spec.poly_view
+    PV_PAD = rp.PAD_W if PV else 0
+    if PV:
+        # elements of the leading pad: pw input pixels (C runtime)
+        c_pv_lead = b.mul(c_cpg, b.const_i32(PV_PAD))
+        c_cpg = b.mul(c_cpg, b.const_i32(rp.stride))
+        c_cpg0 = c_cpg
     if SV:
         c_run = b.mul(c_cpg, b.const_i32(rp.KW))
         c_cpg = b.mul(c_cpg, b.const_i32(rp.KH * rp.KW))
@@ -693,6 +742,10 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         params["p_A_stride_wi"],
     )
     xs_h_real = xs_h
+    if PV:
+        # The view's columns: Wo + m - 1 view pixels of S input pixels each.
+        c_W = b.add(params["p_Wo"], b.const_i32(p.KW - 1))
+        xs_w = b.mul(xs_w, b.const_i32(rp.stride))
     if SV:
         # The view's rows and columns are the output grid: input row S * i.
         c_H, c_W = params["p_Ho"], params["p_Wo"]
@@ -765,6 +818,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
     # elements, column extent). Phase a holds the input columns w0 + a + S*j.
     c_S = b.const_i32(S)
     sub_halos = []
+    pv_w_start = None
     for a in range(NPW):
         wa = b.add(w0, b.const_i32(a)) if a else w0
         if PS:
@@ -783,6 +837,8 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
             b.add(b.mul(w_start, xs_w), c_grp),
         )
         sub_halos.append((base, z_elems, w_ext))
+        if a == 0:
+            pv_w_start = w_start
     xs_col = b.mul(xs_w, c_S) if PS else xs_w
     k_ext = b.smax(b.smin(b.sub(c_kpg, k_base), b.const_i32(BK)), c0)
     w_base = b.mul(b.add(k_grp, k_base), w_row)
@@ -831,6 +887,38 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
                 with b.scf_if(issue):
                     img_off = b.add(stage_off, b.const_i32(im * IMG + a * PSTR))
                     x_k0 = k0
+                    w_ext_c = x_w_ext
+                    tile1_c = HC
+                    if PV:
+                        # View pixel j, chunk k0: input pixel S*j - pw + k0 // C.
+                        # A chunk of the leading pad skips the image's first view
+                        # pixel (zeroed here), the others its last one.
+                        lead_c = b.cmp_lt(k0, c_pv_lead)
+                        first = b.cmp_eq(pv_w_start, c0)
+                        skip = b.select(b.land(lead_c, first), c1, c0)
+                        last_w = (
+                            b.select(lead_c, c_W, b.sub(c_W, c1)) if PV_PAD else c_W
+                        )
+                        tile1_c = b.sub(b.const_i32(HC), skip)
+                        w_ext_c = b.smax(
+                            b.sub(
+                                b.smin(b.add(pv_w_start, x_w_ext), last_w),
+                                b.add(pv_w_start, skip),
+                            ),
+                            c0,
+                        )
+                        zero_lane = b.cmp_lt(lane, b.const_i32(XP // 8))
+                        with b.scf_if(b.land(b.land(lead_c, first), zero_lane)):
+                            zero_v = b.zero_vec(io_type, 8)
+                            b.smem_store_vN(
+                                lds,
+                                [c0, b.add(b.add(img_off, z_elems), b.mul(lane, c8))],
+                                zero_v,
+                                n=8,
+                            )
+                            b.s_waitcnt(lgkmcnt=0)
+                        x_k0 = b.add(b.sub(k0, c_pv_lead), b.mul(skip, xs_w))
+                        img_off = b.add(img_off, b.mul(skip, b.const_i32(XP)))
                     if SV and rp.KH > 1:
                         # Patch run r of the chunk: one input row further on.
                         run = b.div(k0, c_run)
@@ -848,10 +936,10 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
                             b,
                             src,
                             dst,
-                            dims=(c_ext, x_w_ext, h_ext),
+                            dims=(c_ext, w_ext_c, h_ext),
                             strides=(xs_col, xs_h),
                             tile0=XP,
-                            tile1=HC,
+                            tile1=tile1_c,
                             tile2=x_tile2,
                         )
                     )

@@ -5388,6 +5388,20 @@ def cases():
             dict(waves_p=2, tile_w=8, ck=64, strided_view=True),
         ),
         (
+            "bf16_1x16_s8_pw4_pv",
+            dict(H=1, W=512, KH=1, KW=16, PAD=0, pad_w=4, stride=8),
+            dict(
+                waves_k=1,
+                tiles_k=4,
+                tiles_p=4,
+                tile_w=256,
+                ck=64,
+                poly_view=True,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+        (
             "fp16_s2_valid_tn2",
             dict(H=35, W=35, PAD=0, stride=2, dtype="fp16"),
             dict(

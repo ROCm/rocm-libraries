@@ -61,6 +61,12 @@
 #  41  bf16, 1x1 s2, cpg 256, 2x1 waves of 1x1 tiles, ck 128, 3 stages
 #  42  rejected by both engines: fold_n without strided_view
 #  43  rejected by both engines: strided_view on a padded 3x3
+#  1-D strided filters over a polyphase view (poly_view; H 1, PAD 0):
+#  44  bf16, 1x16 stride 8, column PAD 4, W 512, 1x4 waves, ck 64, prefetch
+#  45  fp16, 1x4 stride 2, column PAD 1, W 600, 2x2 waves, ck 32, 3 stages
+#  46  fp16, 1x16 stride 8, column PAD 4, 2x2 waves of 4x8 tiles, prefetch
+#  47  rejected by both engines: 1x3 stride 2 (R not a multiple of S)
+#  48  rejected by both engines: cpg 96 with ck 64 (a chunk spans two pixels)
 from _emit_common import run_emit
 from kernels.common.conv_direct_fwd_wmma import (
     DirectFwdWmmaSpec,
@@ -150,6 +156,7 @@ def _k(wk, wp, tk, tp, tw, tn, ck, st, **kw):
 
 PF = dict(prefetch=True, sched="iterative-ilp")
 SV = dict(strided_view=True)
+PV = dict(poly_view=True)
 
 
 def _spec(idx: int):
@@ -412,6 +419,35 @@ def _spec(idx: int):
         ),
         42: (S(problem=_p(KH=1, PAD=0, stride=2), fold_n=True), "gfx1250"),
         43: (S(problem=_p(stride=2), **SV), "gfx1250"),
+        44: (
+            S(
+                problem=_pr(1, 16, 0, 4, 1, 512, stride=8),
+                **_k(1, 4, 4, 4, 256, 1, 64, 2, **PV, **PF),
+            ),
+            "gfx1250",
+        ),
+        45: (
+            S(
+                problem=_pr(1, 4, 0, 1, 1, 600, dtype="fp16", stride=2),
+                **_k(2, 2, 2, 4, 128, 1, 32, 3, **PV),
+            ),
+            "gfx1250",
+        ),
+        46: (
+            S(
+                problem=_pr(1, 16, 0, 4, 1, 512, dtype="fp16", stride=8),
+                **_k(2, 2, 4, 8, 256, 1, 64, 2, **PV, **PF),
+            ),
+            "gfx1250",
+        ),
+        47: (S(problem=_pr(1, 3, 0, 1, 1, 600, stride=2), **PV), "gfx1250"),
+        48: (
+            S(
+                problem=_pr(1, 4, 0, 1, 1, 600, stride=2, cpg=96),
+                **_k(2, 2, 2, 4, 128, 1, 64, 2, **PV),
+            ),
+            "gfx1250",
+        ),
     }
     if idx not in cfgs:
         raise SystemExit(f"unknown config index {idx}")

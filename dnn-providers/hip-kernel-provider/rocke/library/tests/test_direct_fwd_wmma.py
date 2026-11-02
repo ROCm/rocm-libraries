@@ -121,6 +121,17 @@ class TestFwdWmmaSpec(unittest.TestCase):
             (dict(KH=7, KW=1, PAD=3, pad_w=0), dict(tap_reuse=True), "tap_reuse"),
             (dict(KH=1, KW=7, PAD=0, pad_w=3), dict(phase_split=True), "phase split"),
             (dict(KH=1, KW=7, PAD=0, pad_w=19, dil_w=3), {}, "PAD_W 19"),
+            (
+                dict(H=1, W=600, KH=1, KW=3, PAD=0, pad_w=1, stride=2),
+                dict(poly_view=True),
+                "R = m * S",
+            ),
+            (
+                dict(H=2, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2),
+                dict(poly_view=True),
+                "1-D",
+            ),
+            ({}, dict(poly_view=True), "1-D"),
         ):
             why = fwd_wmma_reason(DirectFwdWmmaSpec(problem=_problem(**pkw), **knobs))
             self.assertIsNotNone(why, (pkw, knobs))
@@ -231,6 +242,22 @@ class TestFwdWmmaSpec(unittest.TestCase):
             (dict(KH=2, PAD=0, stride=2, H=14), dict(strided_view=True, fold_n=True)),
             (dict(KH=2, PAD=0, stride=2, H=13), dict(strided_view=True, fold_n=True)),
             ({}, dict(fold_n=True)),
+            (
+                dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2),
+                dict(poly_view=True, tile_w=128, waves_k=2, waves_p=2),
+            ),
+            (
+                dict(H=1, W=600, KH=1, KW=3, PAD=0, pad_w=1, stride=2),
+                dict(poly_view=True),
+            ),
+            (
+                dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2),
+                dict(poly_view=True, strided_view=True),
+            ),
+            (
+                dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2, C=96),
+                dict(poly_view=True, ck=64),
+            ),
             ({}, dict(wave_epilogue=True, tiles_p=3)),
             ({}, dict(row_ring=True, tap_ring=True)),
             ({}, dict(row_ring=True, split_barrier=True)),
@@ -664,6 +691,46 @@ _CASES = (
             prefetch=True,
             sched="iterative-ilp",
             strided_view=True,
+        ),
+    ),
+    # 1-D strided filters over a polyphase view (one output row per block).
+    (
+        dict(H=1, W=512, C=64, K=64, KH=1, KW=16, PAD=0, pad_w=4, stride=8),
+        dict(
+            waves_k=1,
+            waves_p=4,
+            tiles_k=4,
+            tiles_p=4,
+            tile_w=256,
+            ck=64,
+            poly_view=True,
+            prefetch=True,
+            sched="iterative-ilp",
+        ),
+    ),
+    (
+        dict(N=3, H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2, dtype="fp16"),
+        dict(
+            waves_k=2,
+            waves_p=2,
+            tiles_k=2,
+            tiles_p=4,
+            tile_w=128,
+            stages=3,
+            poly_view=True,
+        ),
+    ),
+    (
+        dict(N=2, H=1, W=1000, C=128, K=32, KH=1, KW=16, PAD=0, pad_w=4, stride=8),
+        dict(
+            waves_k=2,
+            waves_p=2,
+            tiles_k=1,
+            tiles_p=4,
+            tile_w=128,
+            ck=64,
+            stages=3,
+            poly_view=True,
         ),
     ),
     # A column padding of its own on a square filter.

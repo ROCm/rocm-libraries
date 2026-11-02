@@ -260,19 +260,26 @@ def parse_miopen_cmd_direct(cmd: str):
     # The direct kernels take one stride and one padding for both axes;
     # substituting the H value for W would run, and report, another problem.
     sH = miopen_args.sH
-    if miopen_args.sH != miopen_args.sW:
+    # A 1-D conv (H = 1, a 1 x R filter, no row padding) has one output row
+    # whatever its row stride: its column stride is the problem's stride.
+    one_d = miopen_args.Hi == 1 and miopen_args.Y == 1 and miopen_args.pH == 0
+    if one_d and miopen_args.sH != miopen_args.sW and miopen_args.sH == 1:
+        sH = miopen_args.sW
+    elif miopen_args.sH != miopen_args.sW:
         raise ValueError(
             f"direct conv takes one stride for both axes "
             f"(got -u {miopen_args.sH} -v {miopen_args.sW})"
         )
     # A stride-1 depthwise dgrad (the rotated-filter tiled kernel), an
-    # ungrouped stride-1 forward (the small-K WMMA kernel) and an ungrouped
-    # stride-1 1 x R forward, dilated or not (direct_fwd_wmma), are the
-    # problems a direct kernel computes with per-axis padding; every other
-    # variant refuses it.
+    # ungrouped stride-1 forward (the small-K WMMA kernel), an ungrouped 1-D
+    # strided forward (poly_view) and an ungrouped stride-1 1 x R forward,
+    # dilated or not (direct_fwd_wmma), are the problems a direct kernel
+    # computes with per-axis padding; every other variant refuses it.
     pad_w_ok = (
         (miopen_args.forw == 2 and cpg == 1 and kpg == 1 and sH == 1)
-        or (miopen_args.forw == 1 and groups == 1 and sH == 1 and not dilated)
+        or (
+            miopen_args.forw == 1 and groups == 1 and (sH == 1 or one_d) and not dilated
+        )
         or (
             miopen_args.forw == 1
             and groups == 1

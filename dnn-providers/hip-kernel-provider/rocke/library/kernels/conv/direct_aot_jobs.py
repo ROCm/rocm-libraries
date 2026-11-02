@@ -731,6 +731,21 @@ FWD_WMMA_SV_KNOBS = (
     (2, 2, 8, 4, 8, 64, 3, True, True),
     (2, 4, 4, 4, 8, 64, 3, True, True),
 )
+# 1-D strided filters as a 1 x m stride-1 conv over a polyphase view
+# (poly_view): (R, stride, column padding) of the vocoder upsampling-style
+# layers, and (waves_k, waves_p, tiles_k, tiles_p, tile_w, ck, stages,
+# prefetch) rows (one output row: tile_w == block_p).
+FWD_WMMA_POLY_LAYERS = ((16, 8, 4), (4, 2, 1))
+FWD_WMMA_POLY_KNOBS = (
+    (1, 4, 4, 4, 256, 64, 2, True),
+    (2, 2, 2, 4, 128, 32, 3, False),
+    (2, 2, 2, 4, 128, 32, 3, True),
+    (2, 2, 4, 4, 128, 64, 2, True),
+    (2, 2, 4, 8, 256, 64, 2, False),
+    (2, 2, 4, 8, 256, 64, 2, True),
+    (2, 4, 4, 4, 256, 64, 2, False),
+    (2, 4, 4, 4, 256, 64, 2, True),
+)
 # END FWD_WMMA TABLES
 
 # Tiled direct wgrad (DirectWgradTiledSpec): (wave_k16, wave_c16, waves_k,
@@ -1365,6 +1380,11 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
                 and (kw, 1) in FWD_WMMA_1D_FILTERS
                 and pw == (kw - 1) // 2
             )
+        )
+        # 1-D strided filters 1 x m*S (poly_view): (R, stride, column padding).
+        + tuple(
+            DirectCaps(KH=1, kw=r, PAD=0, pad_w=pw, stride=st, cpg=0, kpg=0)
+            for r, st, pw in FWD_WMMA_POLY_LAYERS
         ),
     ),
     # Wgrad (grouped and non-grouped), channel counts runtime. The kernel is a
@@ -1469,6 +1489,23 @@ def _dgrad_wmma_knobs(rows, pack_groups: int = 1) -> Iterator[dict]:
             knobs.update(prefetch=True, sched="iterative-ilp")
         if pack_groups > 1:
             knobs.update(pack_groups=pack_groups)
+        yield knobs
+
+
+def _fwd_wmma_poly_knobs() -> Iterator[dict]:
+    for wk, wp, tk, tp, tw, ck, st, pf in FWD_WMMA_POLY_KNOBS:
+        knobs = dict(
+            waves_k=wk,
+            waves_p=wp,
+            tiles_k=tk,
+            tiles_p=tp,
+            tile_w=tw,
+            ck=ck,
+            stages=st,
+            poly_view=True,
+        )
+        if pf:
+            knobs.update(prefetch=True, sched="iterative-ilp")
         yield knobs
 
 
@@ -1838,16 +1875,19 @@ def _knob_grid(
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return  # a wave32 kernel: no tuning for this arch at all
         if caps is not None and caps.KH != caps.KW:
-            # 1 x R rows on 1-D signals and / or the Inception rectangular
-            # rows (a 1x7 "same" cap is both).
-            if caps.KH == 1:
-                yield from _fwd_wmma_1d_knobs(caps.KW)
-            if (caps.KH, caps.KW, caps.PAD, caps.pad_w) in FWD_WMMA_RECT_LAYERS:
-                yield from _fwd_wmma_knobs(
-                    FWD_WMMA_RECT3_KNOBS
-                    if caps.KH * caps.KW == 3
-                    else FWD_WMMA_RECT_KNOBS
-                )
+            if caps.stride > 1:
+                yield from _fwd_wmma_poly_knobs()
+            else:
+                # 1 x R rows on 1-D signals and / or the Inception rectangular
+                # rows (a 1x7 "same" cap is both).
+                if caps.KH == 1:
+                    yield from _fwd_wmma_1d_knobs(caps.KW)
+                if (caps.KH, caps.KW, caps.PAD, caps.pad_w) in FWD_WMMA_RECT_LAYERS:
+                    yield from _fwd_wmma_knobs(
+                        FWD_WMMA_RECT3_KNOBS
+                        if caps.KH * caps.KW == 3
+                        else FWD_WMMA_RECT_KNOBS
+                    )
         elif caps is not None and caps.cpg > 0:
             # Pack groups up to one 32-channel WMMA K step.
             yield from _fwd_wmma_knobs(
@@ -2301,6 +2341,23 @@ def probe_problem(
             KH=caps.KH,
             KW=caps.KW,
             PAD=caps.PAD,
+            pad_w=caps.pad_w,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == _FWD_WMMA and caps.KW != caps.KH and caps.stride > 1:
+        # A 1-D strided filter: one row, 256 runtime channels, W a multiple
+        # of the stride.
+        return DirectConvProblem(
+            N=1,
+            H=1,
+            W=64 * caps.stride,
+            groups=1,
+            cpg=256,
+            kpg=256,
+            KH=1,
+            KW=caps.KW,
+            PAD=0,
             pad_w=caps.pad_w,
             stride=caps.stride,
             dtype=dtype,

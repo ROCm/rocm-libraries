@@ -1287,6 +1287,12 @@ Knobs beyond the tile geometry (`prefetch`, `sched` as in the dgrad):
   channels one input row apart; a channel chunk lies within one run).
   `fold_n` (with `strided_view`, `H == stride * Ho`) folds the batch into the
   view rows, so a tile can span images of small maps.
+- `poly_view` runs a 1-D strided filter whose width is a multiple of the
+  stride (1 x m*S, stride S, column padding below S, H = 1) as a 1 x m
+  stride-1 conv over a polyphase view of X: view pixel j is input pixels
+  `S*j - pw .. S*j - pw + S - 1` (`S * cpg` contiguous channels). A channel
+  chunk lies in one input pixel and reads at its own bounds, so the chunks
+  of the leading pad skip (and zero) the view's first pixel.
 
 Besides square filters it serves rectangular filters with a column padding
 of their own (`pad_w`, in 0..(KW-1)*dil): the halo's column origin, the

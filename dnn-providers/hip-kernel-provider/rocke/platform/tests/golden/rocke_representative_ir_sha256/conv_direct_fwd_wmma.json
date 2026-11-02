@@ -4,6 +4,10 @@
     "llvm20": {
       "cases": {},
       "expected_failures": {
+        "conv_direct_fwd_wmma/gfx1250/bf16_1x16_s8_pw4_pv": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
         "conv_direct_fwd_wmma/gfx1250/bf16_1x1_s2_sv_fn": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
           "type": "ValueError"
@@ -49,6 +53,10 @@
     "llvm22": {
       "cases": {},
       "expected_failures": {
+        "conv_direct_fwd_wmma/gfx1250/bf16_1x16_s8_pw4_pv": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
         "conv_direct_fwd_wmma/gfx1250/bf16_1x1_s2_sv_fn": {
           "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
           "type": "ValueError"
@@ -93,6 +101,14 @@
     },
     "llvm23": {
       "cases": {
+        "conv_direct_fwd_wmma/gfx1250/bf16_1x16_s8_pw4_pv": {
+          "arch": "gfx1250",
+          "bytes": 148952,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f1x16_p0_pw4_wk1_wp4_tk4_tp4_tw256_ck64_st2_pf_siterative-ilp_str8_pv_bf16",
+          "sha256": "10c58909fa0cb64bb3c9320e85e28bf3b5b7f2bb9ac02af96e705fda9f7f58a7",
+          "status": "ok"
+        },
         "conv_direct_fwd_wmma/gfx1250/bf16_1x1_s2_sv_fn": {
           "arch": "gfx1250",
           "bytes": 100572,
@@ -178,6 +194,14 @@
     },
     "llvm24": {
       "cases": {
+        "conv_direct_fwd_wmma/gfx1250/bf16_1x16_s8_pw4_pv": {
+          "arch": "gfx1250",
+          "bytes": 148952,
+          "family": "conv_direct_fwd_wmma",
+          "kernel_name": "direct_fwd_wmma_f1x16_p0_pw4_wk1_wp4_tk4_tp4_tw256_ck64_st2_pf_siterative-ilp_str8_pv_bf16",
+          "sha256": "10c58909fa0cb64bb3c9320e85e28bf3b5b7f2bb9ac02af96e705fda9f7f58a7",
+          "status": "ok"
+        },
         "conv_direct_fwd_wmma/gfx1250/bf16_1x1_s2_sv_fn": {
           "arch": "gfx1250",
           "bytes": 100572,
