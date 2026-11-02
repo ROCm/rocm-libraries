@@ -48,6 +48,13 @@ SEV_INFO = 0
 SEV_OFF = 4
 LOG_CALLBACK_SYNC = 0
 STATUS_SUCCESS = 0
+# The hip-kernel-provider offloads ingestor applicability to pool threads once enough variants
+# are pending (``ApplicabilityManager.cpp``, read per call). Those threads log INFO lines into
+# the sync callback, which needs the GIL that the calling thread holds while it waits for them
+# (``get_engine_configs`` does not release it). A threshold no graph reaches keeps every check,
+# and so every line, on the calling thread.
+INLINE_APPLICABILITY_ENV = "HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS"
+INLINE_APPLICABILITY_VALUE = "1000000000"
 
 _SELECTED = re.compile(
     r"ingestor: engine '(?P<engine>[^']+)' (?:slot '(?P<slot>[^']+)' )?"
@@ -184,6 +191,9 @@ def _install(lib) -> bool:
     set_level = lib.hipdnnBackendSetGlobalLogLevel_ext
     set_level.argtypes = [ctypes.c_int]
     set_level.restype = ctypes.c_int
+    # Before the callback exists, so no pool thread can ever call into it (see
+    # INLINE_APPLICABILITY_ENV); a caller's own threshold would reopen the deadlock.
+    os.environ[INLINE_APPLICABILITY_ENV] = INLINE_APPLICABILITY_VALUE
     # The callback first: raising the level before it exists would let INFO lines reach the
     # sinks with nobody listening.
     if set_callback(callback, SEV_INFO, LOG_CALLBACK_SYNC, handle) != STATUS_SUCCESS:
