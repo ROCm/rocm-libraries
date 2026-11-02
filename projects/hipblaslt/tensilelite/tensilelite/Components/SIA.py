@@ -30,6 +30,7 @@ from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSSt
 
 from ..Common import roundUp, print2
 from ..Component import SIA
+from ..SolutionStructs.Problem import usesBlockDequantA
 
 from copy import deepcopy
 from typing import Tuple
@@ -1203,9 +1204,12 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
     # should never run out of items to schedule
     assert not itemsLWToSched # should have scheduled everthing already
 
-    #For the sparse case, GR and LW are not in paired.
-    #Hence, we must add all the remaining GRs into imod at the end.
-    if kernel["ProblemType"]["Sparse"]:
+    #For the sparse and block-dequant cases, GR and LW are not paired: the sparse
+    #metadata reads and the block-dequant scale reads have no local write of their
+    #own, so there are more GRs than LW slots. Hence, we must add all the remaining
+    #GRs into imod at the end; dropping them would leave a buffer that is never
+    #loaded again.
+    if kernel["ProblemType"]["Sparse"] or usesBlockDequantA(kernel["ProblemType"]):
         while itemsGRToSchedLater:
             itemGR = itemsGRToSchedLater[0]
             imod.add(itemGR)
