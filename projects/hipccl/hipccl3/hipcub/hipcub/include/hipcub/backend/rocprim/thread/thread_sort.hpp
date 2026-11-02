@@ -85,10 +85,10 @@ StableOddEvenSort(KeyT (&keys)[ITEMS_PER_THREAD],
 {
   constexpr bool KEYS_ONLY = ::rocprim::Equals<ValueT, NullType>::VALUE;
 
-  HIPCUB_SORT_MAYBE_UNROLL()
+  _CCCL_SORT_MAYBE_UNROLL()
   for(int i = 0; i < ITEMS_PER_THREAD; ++i)
   {
-      HIPCUB_SORT_MAYBE_UNROLL()
+      _CCCL_SORT_MAYBE_UNROLL()
       for(int j = 1 & i; j < ITEMS_PER_THREAD - 1; j += 2)
       {
           if(compare_op(keys[j + 1], keys[j]))
