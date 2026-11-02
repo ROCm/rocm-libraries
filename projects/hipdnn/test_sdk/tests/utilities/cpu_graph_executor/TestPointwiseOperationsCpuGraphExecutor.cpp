@@ -28,43 +28,53 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::half;
 
-struct ReluPointwiseTestParams
+struct PointwiseTestParams
 {
     hipdnn_frontend::PointwiseMode mode;
-    DataType inputDataType = DataType::FLOAT;
-    DataType accumulatorDataType = DataType::FLOAT;
-    float in0TensorValue = 0.0f; // RELU_FWD: x; RELU_BWD: dy.
-    float in1TensorValue = 0.0f; // RELU_BWD: x.
-    std::vector<int64_t> inputDims = {1, 3, 4, 4};
+    float in0TensorValue = 0.0f; // Unary: x; backward modes: dy.
+    float in1TensorValue = 0.0f; // Binary: second operand; backward modes: x.
+    std::vector<int64_t> in0Dims = {1, 3, 4, 4};
+    std::vector<int64_t> in1Dims = {1, 3, 4, 4};
     std::vector<int64_t> outputDims = {1, 3, 4, 4};
 
-    // Optional ReLU parameters
+    // Optional mode parameters
     std::optional<float> reluLowerClip;
     std::optional<float> reluUpperClip;
     std::optional<float> reluLowerClipSlope;
+    std::optional<float> swishBeta;
+    std::optional<float> eluAlpha;
+    std::optional<float> softplusBeta;
+    std::optional<int64_t> axis; // GEN_INDEX
+
+    // Expected value of every element of a BOOLEAN output (comparison and logical modes)
+    bool expectedBoolean = false;
 
     // Test metadata
     std::string testDescription;
 };
 
-class PointwiseReluTestHelper
+class PointwiseTestHelper
 {
 public:
-    template <typename T>
-    static void runReluFwdTest(const ReluPointwiseTestParams& params)
+    template <typename InputType, typename OutputType = InputType>
+    static void runUnaryTest(const PointwiseTestParams& params)
     {
         auto [graph, tensorBundle, variantPack]
-            = buildPointwiseUnaryGraph(params.inputDims,
+            = buildPointwiseUnaryGraph(params.in0Dims,
                                        params.outputDims,
-                                       params.inputDataType,
-                                       params.accumulatorDataType,
-                                       params.inputDataType,
+                                       nativeTypeToDataType<InputType>(),
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                       nativeTypeToDataType<OutputType>(),
                                        params.mode,
                                        1,
                                        TensorLayout::NCHW,
                                        params.reluLowerClip,
                                        params.reluUpperClip,
-                                       params.reluLowerClipSlope);
+                                       params.reluLowerClipSlope,
+                                       params.swishBeta,
+                                       params.eluAlpha,
+                                       params.softplusBeta,
+                                       params.axis);
 
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
@@ -72,8 +82,7 @@ public:
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
         auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
-        const auto& nodeWrap = graphWrap.getNodeWrapper(0);
-        const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
+        const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
 
         tensorBundle.tensors[attributes.in_0_tensor_uid()]->fillTensorWithValue(
             params.in0TensorValue);
@@ -82,28 +91,31 @@ public:
             serializedGraph.data(), serializedGraph.size(), variantPack);
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
-
-        EXPECT_EQ(params.mode, hipdnn_frontend::PointwiseMode::RELU_FWD);
-        EXPECT_TRUE(PointwiseReluTestHelper::verifyReluForwardOutput<T>(*outTensor, params));
+        EXPECT_TRUE((verifyOutput<InputType, InputType, OutputType>(*outTensor, params)));
     }
 
-    template <typename T>
-    static void runReluBwdTest(const ReluPointwiseTestParams& params)
+    template <typename Input0Type,
+              typename Input1Type = Input0Type,
+              typename OutputType = Input0Type>
+    static void runBinaryTest(const PointwiseTestParams& params)
     {
         auto [graph, tensorBundle, variantPack]
-            = buildPointwiseBinaryGraph(params.inputDims,
-                                        params.inputDims,
+            = buildPointwiseBinaryGraph(params.in0Dims,
+                                        params.in1Dims,
                                         params.outputDims,
-                                        params.inputDataType,
-                                        params.inputDataType,
-                                        params.accumulatorDataType,
-                                        params.inputDataType,
+                                        nativeTypeToDataType<Input0Type>(),
+                                        nativeTypeToDataType<Input1Type>(),
+                                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                        nativeTypeToDataType<OutputType>(),
                                         params.mode,
                                         1,
                                         TensorLayout::NCHW,
                                         params.reluLowerClip,
                                         params.reluUpperClip,
-                                        params.reluLowerClipSlope);
+                                        params.reluLowerClipSlope,
+                                        params.swishBeta,
+                                        params.eluAlpha,
+                                        params.softplusBeta);
 
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
@@ -111,8 +123,7 @@ public:
         auto [serializedGraph, serErr] = graph->to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
         auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
-        const auto& nodeWrap = graphWrap.getNodeWrapper(0);
-        const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
+        const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
 
         tensorBundle.tensors[attributes.in_0_tensor_uid()]->fillTensorWithValue(
             params.in0TensorValue);
@@ -123,334 +134,341 @@ public:
             serializedGraph.data(), serializedGraph.size(), variantPack);
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
-
-        EXPECT_EQ(params.mode, hipdnn_frontend::PointwiseMode::RELU_BWD);
-        EXPECT_TRUE(PointwiseReluTestHelper::verifyReluBackwardOutput<T>(*outTensor, params));
+        EXPECT_TRUE((verifyOutput<Input0Type, Input1Type, OutputType>(*outTensor, params)));
     }
 
-    template <typename InputType>
-    static bool verifyReluForwardOutput(ITensor& outTensor, const ReluPointwiseTestParams& params)
+private:
+    static bool hasModeParameters(const PointwiseTestParams& params)
     {
-        Tensor<InputType> input0(params.inputDims);
-        input0.fillTensorWithValue(params.in0TensorValue);
-        Tensor<InputType> output(params.outputDims);
+        return params.reluLowerClip.has_value() || params.reluUpperClip.has_value()
+               || params.reluLowerClipSlope.has_value() || params.swishBeta.has_value()
+               || params.eluAlpha.has_value() || params.softplusBeta.has_value();
+    }
 
-        if(params.reluLowerClip.has_value() || params.reluUpperClip.has_value()
-           || params.reluLowerClipSlope.has_value())
+    template <typename Input0Type, typename Input1Type, typename OutputType>
+    static bool verifyOutput(ITensor& outTensor, const PointwiseTestParams& params)
+    {
+        if constexpr(std::is_same_v<OutputType, bool>)
         {
-            CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
-                PointwiseMode::RELU_FWD,
-                output,
-                input0,
-                params.reluLowerClip.has_value() ? params.reluLowerClip.value() : 0.0f,
-                params.reluUpperClip.has_value() ? params.reluUpperClip.value()
-                                                 : std::numeric_limits<float>::max(),
-                params.reluLowerClipSlope.has_value() ? params.reluLowerClipSlope.value() : 0.0f);
+            const auto& output = static_cast<const Tensor<bool>&>(outTensor);
+            return allElementsEqual(
+                output, params.outputDims, [&](int64_t, int64_t, int64_t, int64_t) {
+                    return params.expectedBoolean;
+                });
+        }
+        else if constexpr(std::is_same_v<OutputType, int32_t>) // GEN_INDEX
+        {
+            const auto& output = static_cast<const Tensor<OutputType>&>(outTensor);
+            const auto axis = static_cast<size_t>(params.axis.value());
+            return allElementsEqual(
+                output, params.outputDims, [&](int64_t n, int64_t c, int64_t h, int64_t w) {
+                    return static_cast<OutputType>(std::array<int64_t, 4>{n, c, h, w}[axis]);
+                });
         }
         else
         {
-            CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
-                PointwiseMode::RELU_FWD, output, input0);
-        }
+            const auto mode = frontendToSdkPointwiseMode(params.mode);
+            Tensor<Input0Type> input0(params.in0Dims);
+            input0.fillTensorWithValue(params.in0TensorValue);
+            Tensor<OutputType> output(params.outputDims);
 
-        const CpuFpReferenceValidation<InputType> validator;
-        return validator.allClose(output, outTensor);
+            if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(mode))
+            {
+                Tensor<Input1Type> input1(params.in1Dims);
+                input1.fillTensorWithValue(params.in1TensorValue);
+                if(hasModeParameters(params))
+                {
+                    CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
+                        mode,
+                        output,
+                        input0,
+                        input1,
+                        params.reluLowerClip.value_or(0.0f),
+                        params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
+                        params.reluLowerClipSlope.value_or(0.0f),
+                        params.swishBeta.value_or(1.0f),
+                        params.eluAlpha.value_or(1.0f),
+                        params.softplusBeta.value_or(1.0f));
+                }
+                else
+                {
+                    CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
+                        mode, output, input0, input1);
+                }
+            }
+            else if(hasModeParameters(params))
+            {
+                CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
+                    mode,
+                    output,
+                    input0,
+                    params.reluLowerClip.value_or(0.0f),
+                    params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
+                    params.reluLowerClipSlope.value_or(0.0f),
+                    params.swishBeta.value_or(1.0f),
+                    params.eluAlpha.value_or(1.0f),
+                    params.softplusBeta.value_or(1.0f));
+            }
+            else
+            {
+                CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
+                    mode, output, input0);
+            }
+
+            const CpuFpReferenceValidation<OutputType> validator;
+            return validator.allClose(output, outTensor);
+        }
     }
 
-    template <typename InputType>
-    static bool verifyReluBackwardOutput(ITensor& outTensor, const ReluPointwiseTestParams& params)
+    template <typename T, typename ExpectedFn>
+    static bool allElementsEqual(const Tensor<T>& output,
+                                 const std::vector<int64_t>& dims,
+                                 ExpectedFn expected)
     {
-        Tensor<InputType> upstreamGrad(params.inputDims);
-        Tensor<InputType> input(params.inputDims);
-        upstreamGrad.fillTensorWithValue(params.in0TensorValue);
-        input.fillTensorWithValue(params.in1TensorValue);
-
-        Tensor<InputType> output(params.outputDims);
-
-        if(params.reluLowerClip.has_value() || params.reluUpperClip.has_value()
-           || params.reluLowerClipSlope.has_value())
+        for(int64_t n = 0; n < dims[0]; ++n)
         {
-            CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
-                PointwiseMode::RELU_BWD,
-                output,
-                upstreamGrad,
-                input,
-                params.reluLowerClip.has_value() ? params.reluLowerClip.value() : 0.0f,
-                params.reluUpperClip.has_value() ? params.reluUpperClip.value()
-                                                 : std::numeric_limits<float>::max(),
-                params.reluLowerClipSlope.has_value() ? params.reluLowerClipSlope.value() : 0.0f);
+            for(int64_t c = 0; c < dims[1]; ++c)
+            {
+                for(int64_t h = 0; h < dims[2]; ++h)
+                {
+                    for(int64_t w = 0; w < dims[3]; ++w)
+                    {
+                        if(output.getHostValue(n, c, h, w) != expected(n, c, h, w))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
         }
-        else
-        {
-            CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
-                PointwiseMode::RELU_BWD, output, upstreamGrad, input);
-        }
-
-        const CpuFpReferenceValidation<InputType> validator;
-        return validator.allClose(output, outTensor);
+        return true;
     }
 };
 
 template <typename T>
-class ReluPointwiseOperationsCpuGraphExecutor : public ::testing::Test
+class PointwiseOperationsCpuGraphExecutor : public ::testing::Test
 {
 protected:
     using DataTypeT = T;
 };
 
 using TestTypes = ::testing::Types<float, half, bfloat16>;
-TYPED_TEST_SUITE(ReluPointwiseOperationsCpuGraphExecutor, TestTypes, );
+TYPED_TEST_SUITE(PointwiseOperationsCpuGraphExecutor, TestTypes, );
 
 // =============================================================================
 // ReLU Forward Tests
 // =============================================================================
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardStandardNegativeInput)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluForwardStandardNegativeInput)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = -10.0f;
     params.testDescription = "Standard ReLU with negative input should clamp to zero";
 
-    PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardStandardPositiveInput)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluForwardStandardPositiveInput)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 10.0f;
     params.testDescription = "Standard ReLU with positive input should pass through";
 
-    PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedBelowLowerBound)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluForwardClampedBelowLowerBound)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 0.0f;
     params.reluLowerClip = 0.1f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Clamped ReLU with input below lower bound";
 
-    PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedAboveUpperBound)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluForwardClampedAboveUpperBound)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 2.0f;
     params.reluLowerClip = 0.1f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Clamped ReLU with input above upper bound";
 
-    PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardClampedWithinBounds)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluForwardClampedWithinBounds)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 0.2f;
     params.reluLowerClip = 0.1f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Clamped ReLU with input within bounds";
 
-    PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardLeakyNegativeInput)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluForwardLeakyNegativeInput)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = -0.5f;
     params.reluLowerClipSlope = 0.1f;
     params.testDescription = "Leaky ReLU with negative input";
 
-    PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardLeakyPositiveInput)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluForwardLeakyPositiveInput)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 0.5f;
     params.reluLowerClipSlope = 0.1f;
     params.testDescription = "Leaky ReLU with positive input";
 
-    PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardUpperBoundOnlyBelowBound)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluForwardUpperBoundOnlyBelowBound)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 0.1f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Upper-bounded ReLU with input below bound";
 
-    PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluForwardUpperBoundOnlyAboveBound)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluForwardUpperBoundOnlyAboveBound)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 0.9f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Upper-bounded ReLU with input above bound";
 
-    PointwiseReluTestHelper::runReluFwdTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
 // =============================================================================
 // ReLU Backward Tests
 // =============================================================================
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardStandardNegativeX)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluBackwardStandardNegativeX)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 5.0f; // Dy
     params.in1TensorValue = -10.0f; // X
     params.testDescription = "Standard ReLU backward with negative X";
 
-    PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardStandardPositiveX)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluBackwardStandardPositiveX)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 5.0f; // Dy
     params.in1TensorValue = 10.0f; // X
     params.testDescription = "Standard ReLU backward with positive X";
 
-    PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedBelowBounds)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluBackwardClampedBelowBounds)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 5.0f; // Dy
     params.in1TensorValue = -1.0f; // X
     params.reluLowerClip = 0.1f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Clamped ReLU backward with X below bounds";
 
-    PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedAboveBounds)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluBackwardClampedAboveBounds)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 2.0f; // Dy
     params.in1TensorValue = 1.0f; // X
     params.reluLowerClip = 0.1f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Clamped ReLU backward with X above bounds";
 
-    PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedWithinBounds)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluBackwardClampedWithinBounds)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 1.0f; // Dy
     params.in1TensorValue = 0.2f; // X
     params.reluLowerClip = 0.1f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Clamped ReLU backward with X within bounds";
 
-    PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyNegativeX)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyNegativeX)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 5.0f; // Dy
     params.in1TensorValue = -1.0f; // X
     params.reluLowerClipSlope = 0.1f;
     params.testDescription = "Leaky ReLU backward with negative X";
 
-    PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyPositiveX)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyPositiveX)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 2.0f; // Dy
     params.in1TensorValue = 1.0f; // X
     params.reluLowerClipSlope = 0.1f;
     params.testDescription = "Leaky ReLU backward with positive X";
 
-    PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyBelowBound)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyBelowBound)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 5.0f; // Dy
     params.in1TensorValue = 1.0f; // X
     params.reluUpperClip = 10.0f;
     params.testDescription = "Upper-bounded ReLU backward with X below bound";
 
-    PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyAboveBound)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyAboveBound)
 {
-    ReluPointwiseTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 2.0f; // Dy
     params.in1TensorValue = 20.0f; // X
     params.reluUpperClip = 10.0f;
     params.testDescription = "Upper-bounded ReLU backward with X above bound";
 
-    PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
 TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
@@ -613,1086 +631,344 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, PreluForwardBackwardComposedGraph)
 }
 
 // =============================================================================
-// Additional unary, binary, comparison and logical pointwise operations
+// Unary math operations
 // =============================================================================
-
-struct PointwiseOperationTestParams
-{
-    hipdnn_frontend::PointwiseMode mode;
-    DataType inputDataType = DataType::FLOAT;
-    DataType input1DataType = DataType::FLOAT;
-    DataType accumulatorDataType = DataType::FLOAT;
-    float in0TensorValue = 0.0f;
-    float in1TensorValue = 0.0f;
-    std::vector<int64_t> in0Dims = {1, 3, 4, 4};
-    std::vector<int64_t> in1Dims = {1, 3, 4, 4};
-    std::vector<int64_t> outputDims = {1, 3, 4, 4};
-
-    // Optional parameters
-    std::optional<float> eluAlpha;
-    std::optional<float> softplusBeta;
-    std::optional<float> swishBeta;
-    std::optional<int64_t> axis;
-
-    // Test metadata
-    std::string testDescription;
-};
-
-class PointwiseOperationsTestHelper
-{
-public:
-    template <typename T>
-    static void runUnaryTest(const PointwiseOperationTestParams& params)
-    {
-        auto [graph, tensorBundle, variantPack]
-            = buildPointwiseUnaryGraph(params.in0Dims,
-                                       params.outputDims,
-                                       params.inputDataType,
-                                       params.accumulatorDataType,
-                                       params.inputDataType,
-                                       params.mode,
-                                       1,
-                                       TensorLayout::NCHW,
-                                       std::nullopt,
-                                       std::nullopt,
-                                       std::nullopt,
-                                       std::nullopt,
-                                       params.eluAlpha,
-                                       params.softplusBeta);
-
-        auto result = graph->validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        auto [serializedGraph, serErr] = graph->to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
-        const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
-
-        tensorBundle.tensors[attributes.in_0_tensor_uid()]->fillTensorWithValue(
-            params.in0TensorValue);
-
-        CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), variantPack);
-
-        const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
-        EXPECT_TRUE(verifyUnaryOutput<T>(*outTensor, params));
-    }
-
-    template <typename T>
-    static void runBinaryTest(const PointwiseOperationTestParams& params)
-    {
-        auto [graph, tensorBundle, variantPack]
-            = buildPointwiseBinaryGraph(params.in0Dims,
-                                        params.in1Dims,
-                                        params.outputDims,
-                                        params.inputDataType,
-                                        params.inputDataType,
-                                        params.accumulatorDataType,
-                                        params.inputDataType,
-                                        params.mode,
-                                        1,
-                                        TensorLayout::NCHW,
-                                        std::nullopt,
-                                        std::nullopt,
-                                        std::nullopt,
-                                        params.swishBeta,
-                                        params.eluAlpha,
-                                        params.softplusBeta);
-
-        auto result = graph->validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        auto [serializedGraph, serErr] = graph->to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
-        const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
-
-        tensorBundle.tensors[attributes.in_0_tensor_uid()]->fillTensorWithValue(
-            params.in0TensorValue);
-        tensorBundle.tensors[attributes.in_1_tensor_uid().value()]->fillTensorWithValue(
-            params.in1TensorValue);
-
-        CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), variantPack);
-
-        const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
-        EXPECT_TRUE((verifyBinaryOutput<T, T, T>(*outTensor, params)));
-    }
-
-    // In0 and in1 may have different data types; the output uses the in0 data type.
-    template <typename T0, typename T1>
-    static void runMixedTypeBinaryTest(const PointwiseOperationTestParams& params)
-    {
-        auto [graph, tensorBundle, variantPack]
-            = buildPointwiseBinaryGraph(params.in0Dims,
-                                        params.in1Dims,
-                                        params.outputDims,
-                                        params.inputDataType,
-                                        params.input1DataType,
-                                        params.accumulatorDataType,
-                                        params.inputDataType,
-                                        params.mode);
-
-        auto result = graph->validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        auto [serializedGraph, serErr] = graph->to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
-        const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
-
-        tensorBundle.tensors[attributes.in_0_tensor_uid()]->fillTensorWithValue(
-            params.in0TensorValue);
-        tensorBundle.tensors[attributes.in_1_tensor_uid().value()]->fillTensorWithValue(
-            params.in1TensorValue);
-
-        CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), variantPack);
-
-        const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
-        EXPECT_TRUE((verifyBinaryOutput<T0, T1, T0>(*outTensor, params)));
-    }
-
-    // GEN_INDEX: the output holds the coordinate of each element along the axis.
-    template <typename OutputType>
-    static void runGenIndexTest(const std::vector<int64_t>& dims,
-                                int64_t axis,
-                                DataType inputDataType,
-                                DataType outputDataType)
-    {
-        auto [graph, tensorBundle, variantPack]
-            = buildPointwiseUnaryGraph(dims,
-                                       dims,
-                                       inputDataType,
-                                       DataType::FLOAT,
-                                       outputDataType,
-                                       hipdnn_frontend::PointwiseMode::GEN_INDEX,
-                                       1,
-                                       TensorLayout::NCHW,
-                                       std::nullopt,
-                                       std::nullopt,
-                                       std::nullopt,
-                                       std::nullopt,
-                                       std::nullopt,
-                                       std::nullopt,
-                                       axis);
-
-        auto result = graph->validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        auto [serializedGraph, serErr] = graph->to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
-        const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
-
-        CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), variantPack);
-
-        const auto* outTensor = static_cast<Tensor<OutputType>*>(
-            tensorBundle.tensors.at(attributes.out_0_tensor_uid()).get());
-        for(int64_t n = 0; n < dims[0]; ++n)
-        {
-            for(int64_t c = 0; c < dims[1]; ++c)
-            {
-                for(int64_t h = 0; h < dims[2]; ++h)
-                {
-                    for(int64_t w = 0; w < dims[3]; ++w)
-                    {
-                        const std::array<int64_t, 4> coordinates = {n, c, h, w};
-                        EXPECT_EQ(static_cast<int64_t>(
-                                      static_cast<float>(outTensor->getHostValue(n, c, h, w))),
-                                  coordinates[static_cast<size_t>(axis)]);
-                    }
-                }
-            }
-        }
-    }
-
-    // Comparison operations produce a BOOLEAN output tensor.
-    template <typename T0, typename T1>
-    static void runCompareTest(const PointwiseOperationTestParams& params, bool expectedResult)
-    {
-        auto [graph, tensorBundle, variantPack]
-            = buildPointwiseBinaryGraph(params.in0Dims,
-                                        params.in1Dims,
-                                        params.outputDims,
-                                        params.inputDataType,
-                                        params.input1DataType,
-                                        params.accumulatorDataType,
-                                        DataType::BOOLEAN,
-                                        params.mode);
-
-        auto result = graph->validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        auto [serializedGraph, serErr] = graph->to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
-        const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
-
-        tensorBundle.tensors[attributes.in_0_tensor_uid()]->fillTensorWithValue(
-            params.in0TensorValue);
-        tensorBundle.tensors[attributes.in_1_tensor_uid().value()]->fillTensorWithValue(
-            params.in1TensorValue);
-
-        CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), variantPack);
-
-        const auto* outTensor = static_cast<Tensor<bool>*>(
-            tensorBundle.tensors.at(attributes.out_0_tensor_uid()).get());
-        verifyBooleanOutput(*outTensor, params.outputDims, expectedResult);
-    }
-
-    static void runLogicalBinaryTest(hipdnn_frontend::PointwiseMode mode,
-                                     bool in0Value,
-                                     bool in1Value,
-                                     bool expectedResult)
-    {
-        const std::vector<int64_t> dims = {1, 2, 2, 2};
-        auto [graph, tensorBundle, variantPack] = buildPointwiseBinaryGraph(dims,
-                                                                            dims,
-                                                                            dims,
-                                                                            DataType::BOOLEAN,
-                                                                            DataType::BOOLEAN,
-                                                                            DataType::FLOAT,
-                                                                            DataType::BOOLEAN,
-                                                                            mode);
-
-        auto result = graph->validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        auto [serializedGraph, serErr] = graph->to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
-        const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
-
-        auto* input0 = static_cast<Tensor<bool>*>(
-            tensorBundle.tensors.at(attributes.in_0_tensor_uid()).get());
-        auto* input1 = static_cast<Tensor<bool>*>(
-            tensorBundle.tensors.at(attributes.in_1_tensor_uid().value()).get());
-        input0->fillWithValue(in0Value);
-        input1->fillWithValue(in1Value);
-
-        CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), variantPack);
-
-        const auto* outTensor = static_cast<Tensor<bool>*>(
-            tensorBundle.tensors.at(attributes.out_0_tensor_uid()).get());
-        verifyBooleanOutput(*outTensor, dims, expectedResult);
-    }
-
-    static void runLogicalNotTest(bool inValue, bool expectedResult)
-    {
-        const std::vector<int64_t> dims = {1, 2, 2, 2};
-        auto [graph, tensorBundle, variantPack]
-            = buildPointwiseUnaryGraph(dims,
-                                       dims,
-                                       DataType::BOOLEAN,
-                                       DataType::FLOAT,
-                                       DataType::BOOLEAN,
-                                       hipdnn_frontend::PointwiseMode::LOGICAL_NOT);
-
-        auto result = graph->validate();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        auto [serializedGraph, serErr] = graph->to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
-        const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
-
-        auto* input = static_cast<Tensor<bool>*>(
-            tensorBundle.tensors.at(attributes.in_0_tensor_uid()).get());
-        input->fillWithValue(inValue);
-
-        CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), variantPack);
-
-        const auto* outTensor = static_cast<Tensor<bool>*>(
-            tensorBundle.tensors.at(attributes.out_0_tensor_uid()).get());
-        verifyBooleanOutput(*outTensor, dims, expectedResult);
-    }
-
-    template <typename InputType>
-    static bool verifyUnaryOutput(ITensor& outTensor, const PointwiseOperationTestParams& params)
-    {
-        Tensor<InputType> input0(params.in0Dims);
-        input0.fillTensorWithValue(params.in0TensorValue);
-        Tensor<InputType> output(params.outputDims);
-
-        if(params.eluAlpha.has_value() || params.softplusBeta.has_value())
-        {
-            CpuReferencePointwiseImpl<InputType, InputType>::pointwiseCompute(
-                sdkPointwiseMode(params.mode),
-                output,
-                input0,
-                0.0f,
-                std::numeric_limits<float>::max(),
-                0.0f,
-                1.0f,
-                params.eluAlpha.has_value() ? params.eluAlpha.value() : 1.0f,
-                params.softplusBeta.has_value() ? params.softplusBeta.value() : 1.0f);
-        }
-        else
-        {
-            CpuReferencePointwiseImpl<InputType, InputType>::pointwiseCompute(
-                sdkPointwiseMode(params.mode), output, input0);
-        }
-
-        const CpuFpReferenceValidation<InputType> validator;
-        return validator.allClose(output, outTensor);
-    }
-
-    template <typename Input0Type, typename Input1Type, typename OutputType>
-    static bool verifyBinaryOutput(ITensor& outTensor, const PointwiseOperationTestParams& params)
-    {
-        Tensor<Input0Type> input0(params.in0Dims);
-        Tensor<Input1Type> input1(params.in1Dims);
-        input0.fillTensorWithValue(params.in0TensorValue);
-        input1.fillTensorWithValue(params.in1TensorValue);
-        Tensor<OutputType> output(params.outputDims);
-
-        if(params.swishBeta.has_value() || params.eluAlpha.has_value()
-           || params.softplusBeta.has_value())
-        {
-            CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
-                sdkPointwiseMode(params.mode),
-                output,
-                input0,
-                input1,
-                0.0f,
-                std::numeric_limits<float>::max(),
-                0.0f,
-                params.swishBeta.has_value() ? params.swishBeta.value() : 1.0f,
-                params.eluAlpha.has_value() ? params.eluAlpha.value() : 1.0f,
-                params.softplusBeta.has_value() ? params.softplusBeta.value() : 1.0f);
-        }
-        else
-        {
-            CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
-                sdkPointwiseMode(params.mode), output, input0, input1);
-        }
-
-        const CpuFpReferenceValidation<OutputType> validator;
-        return validator.allClose(output, outTensor);
-    }
-
-private:
-    static PointwiseMode sdkPointwiseMode(hipdnn_frontend::PointwiseMode mode)
-    {
-        return hipdnn_test_sdk::utilities::frontendToSdkPointwiseMode(mode);
-    }
-
-    static void verifyBooleanOutput(const Tensor<bool>& output,
-                                    const std::vector<int64_t>& dims,
-                                    bool expectedResult)
-    {
-        for(int64_t n = 0; n < dims[0]; ++n)
-        {
-            for(int64_t c = 0; c < dims[1]; ++c)
-            {
-                for(int64_t h = 0; h < dims[2]; ++h)
-                {
-                    for(int64_t w = 0; w < dims[3]; ++w)
-                    {
-                        EXPECT_EQ(output.getHostValue(n, c, h, w), expectedResult);
-                    }
-                }
-            }
-        }
-    }
-};
-
-template <typename T>
-class PointwiseOperationsCpuGraphExecutor : public ::testing::Test
-{
-protected:
-    using DataTypeT = T;
-};
-
-TYPED_TEST_SUITE(PointwiseOperationsCpuGraphExecutor, TestTypes, );
 
 TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryExp)
 {
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::EXP;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 1.5f;
     params.testDescription = "Exponential of a positive input";
 
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryLog)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::LOG;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f;
-    params.testDescription = "Natural logarithm of a positive input";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
 TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnarySqrt)
 {
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::SQRT;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 4.0f;
     params.testDescription = "Square root of a positive input";
 
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryRsqrt)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryFloorNegativeInput)
 {
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::RSQRT;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 4.0f;
-    params.testDescription = "Reciprocal square root of a positive input";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryReciprocal)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::RECIPROCAL;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f;
-    params.testDescription = "Reciprocal of a positive input";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnarySin)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SIN;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.testDescription = "Sine of a positive input";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryTan)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::TAN;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 0.5f;
-    params.testDescription = "Tangent of a positive input";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryErf)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ERF;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 0.5f;
-    params.testDescription = "Error function of a positive input";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryCeilPositive)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CEIL;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.5f;
-    params.testDescription = "Ceil of a positive fractional input";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryCeilNegative)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CEIL;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = -1.5f;
-    params.testDescription = "Ceil of a negative fractional input";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryFloorPositive)
-{
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::FLOOR;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.5f;
-    params.testDescription = "Floor of a positive fractional input";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryFloorNegative)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::FLOOR;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = -1.5f;
     params.testDescription = "Floor of a negative fractional input";
 
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
 TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryIdentity)
 {
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::IDENTITY;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 3.0f;
     params.testDescription = "Identity passes the input through";
 
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryEluPositiveInput)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f;
-    params.testDescription = "ELU with positive input passes through";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryEluNegativeInput)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = -1.0f;
-    params.testDescription = "ELU with negative input, default alpha";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnarySoftplusPositiveInput)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.testDescription = "Softplus with positive input, default beta";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnarySoftplusNegativeInput)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = -1.0f;
-    params.testDescription = "Softplus with negative input, default beta";
-
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
 TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnaryEluWithAlpha)
 {
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::ELU_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = -1.0f;
     params.eluAlpha = 0.5f;
     params.testDescription = "ELU with negative input and custom alpha";
 
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
 
 TYPED_TEST(PointwiseOperationsCpuGraphExecutor, UnarySoftplusWithBeta)
 {
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_FWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 1.0f;
     params.softplusBeta = 2.0f;
     params.testDescription = "Softplus with custom beta";
 
-    PointwiseOperationsTestHelper::runUnaryTest<TypeParam>(params);
+    PointwiseTestHelper::runUnaryTest<TypeParam>(params);
 }
+
+// =============================================================================
+// Binary arithmetic and backward operations
+// =============================================================================
 
 TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryDivide)
 {
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::DIV;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 6.0f;
     params.in1TensorValue = 3.0f;
-    params.testDescription = "Divide with same-shape inputs";
+    params.testDescription = "DIV with same-shape inputs";
 
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
 TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryDivideBroadcastChannel)
 {
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::DIV;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 6.0f;
     params.in1TensorValue = 3.0f;
     params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "Divide with in1 broadcast over H and W";
+    params.testDescription = "DIV with in1 broadcast over H and W";
 
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryDivideBroadcastScalarIn0)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::DIV;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 6.0f;
-    params.in1TensorValue = 3.0f;
-    params.in0Dims = {1, 1, 1, 1};
-    params.testDescription = "Divide with in0 broadcast to the output shape";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
 TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryAddSquare)
 {
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::ADD_SQUARE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 1.0f;
     params.in1TensorValue = 2.0f;
-    params.testDescription = "AddSquare with same-shape inputs";
+    params.testDescription = "ADD_SQUARE with same-shape inputs";
 
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryAddSquareBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ADD_SQUARE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "AddSquare with in1 broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
 TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryAddSquareBroadcastScalarIn0)
 {
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::ADD_SQUARE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
     params.in0TensorValue = 1.0f;
     params.in1TensorValue = 2.0f;
     params.in0Dims = {1, 1, 1, 1};
-    params.testDescription = "AddSquare with in0 broadcast to the output shape";
+    params.testDescription = "ADD_SQUARE with in0 broadcast to the output shape";
 
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareEqualEqualInputs)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardPositiveX)
 {
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_EQ;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
     params.in0TensorValue = 2.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareEqual with EqualInputs";
+    params.in1TensorValue = 1.0f;
+    params.testDescription = "GELU backward with positive X";
 
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareEqualFirstSmaller)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardNegativeXBroadcastChannel)
 {
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_EQ;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareEqual with FirstSmaller";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, false);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareEqualFirstLarger)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_EQ;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 3.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareEqual with FirstLarger";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, false);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareEqualBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_EQ;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "CompareEqual with in1 broadcast";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, false);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareNotEqualEqualInputs)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_NEQ;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
     params.in0TensorValue = 2.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareNotEqual with EqualInputs";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, false);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareNotEqualFirstSmaller)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_NEQ;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareNotEqual with FirstSmaller";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareNotEqualFirstLarger)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_NEQ;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 3.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareNotEqual with FirstLarger";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareNotEqualBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_NEQ;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
+    params.in1TensorValue = -1.0f;
     params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "CompareNotEqual with in1 broadcast";
+    params.testDescription = "GELU backward with X broadcast over H and W";
 
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareGreaterEqualEqualInputs)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluApproxTanhBackwardNegativeX)
 {
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_GE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
     params.in0TensorValue = 2.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareGreaterEqual with EqualInputs";
+    params.in1TensorValue = -1.0f;
+    params.testDescription = "GELU tanh backward with negative X";
 
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareGreaterEqualFirstSmaller)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardWithBeta)
 {
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_GE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareGreaterEqual with FirstSmaller";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, false);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareGreaterEqualFirstLarger)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_GE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 3.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareGreaterEqual with FirstLarger";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareGreaterEqualBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_GE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "CompareGreaterEqual with in1 broadcast";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, false);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessEqualInputs)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_LT;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
     params.in0TensorValue = 2.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareLess with EqualInputs";
+    params.in1TensorValue = 1.0f;
+    params.swishBeta = 0.5f;
+    params.testDescription = "Swish backward with custom beta";
 
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, false);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessFirstSmaller)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardWithAlpha)
 {
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_LT;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareLess with FirstSmaller";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessFirstLarger)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_LT;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 3.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareLess with FirstLarger";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, false);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_LT;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "CompareLess with in1 broadcast";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessEqualEqualInputs)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_LE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
     params.in0TensorValue = 2.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareLessEqual with EqualInputs";
+    params.in1TensorValue = -1.0f;
+    params.eluAlpha = 0.5f;
+    params.testDescription = "ELU backward with custom alpha";
 
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessEqualFirstSmaller)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardNegativeX)
 {
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_LE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareLessEqual with FirstSmaller";
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
+    params.in0TensorValue = 2.0f;
+    params.in1TensorValue = -1.0f;
+    params.testDescription = "Softplus backward with negative X";
 
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessEqualFirstLarger)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_LE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 3.0f;
-    params.in1TensorValue = 2.0f;
-    params.testDescription = "CompareLessEqual with FirstLarger";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, false);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessEqualBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::CMP_LE;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f;
-    params.in1TensorValue = 2.0f;
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "CompareLessEqual with in1 broadcast";
-
-    PointwiseOperationsTestHelper::runCompareTest<TypeParam, TypeParam>(params, true);
+    PointwiseTestHelper::runBinaryTest<TypeParam>(params);
 }
 
 TEST(TestPointwiseOperationsCpuGraphExecutor, DivideMixedTypeFloatInputHalfDivisor)
 {
-    PointwiseOperationTestParams params;
+    PointwiseTestParams params;
     params.mode = hipdnn_frontend::PointwiseMode::DIV;
-    params.inputDataType = DataType::FLOAT;
-    params.input1DataType = DataType::HALF;
-    params.accumulatorDataType = DataType::FLOAT;
     params.in0TensorValue = 6.0f;
     params.in1TensorValue = 4.0f;
     params.testDescription = "DIV with float dividend and half divisor";
 
-    PointwiseOperationsTestHelper::runMixedTypeBinaryTest<float, half>(params);
+    PointwiseTestHelper::runBinaryTest<float, half>(params);
 }
 
-TEST(TestPointwiseOperationsCpuGraphExecutor, AddSquareMixedTypeFloatInputBfloat16Squared)
+TEST(TestPointwiseOperationsCpuGraphExecutor, SoftplusBackwardMixedTypeFloatDyHalfX)
 {
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ADD_SQUARE;
-    params.inputDataType = DataType::FLOAT;
-    params.input1DataType = DataType::BFLOAT16;
-    params.accumulatorDataType = DataType::FLOAT;
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
+    params.in0TensorValue = 2.0f;
+    params.in1TensorValue = 1.0f;
+    params.testDescription = "Softplus backward with float dy and half x";
+
+    PointwiseTestHelper::runBinaryTest<float, half>(params);
+}
+
+// =============================================================================
+// Comparison operations
+// =============================================================================
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareEqualEqualInputs)
+{
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::CMP_EQ;
+    params.in0TensorValue = 2.0f;
+    params.in1TensorValue = 2.0f;
+    params.expectedBoolean = true;
+    params.testDescription = "CMP_EQ with equal inputs";
+
+    PointwiseTestHelper::runBinaryTest<TypeParam, TypeParam, bool>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareNotEqualBroadcastChannel)
+{
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::CMP_NEQ;
     params.in0TensorValue = 1.0f;
     params.in1TensorValue = 2.0f;
-    params.testDescription = "ADD_SQUARE with float first input and bfloat16 second input";
+    params.in1Dims = {1, 3, 1, 1};
+    params.expectedBoolean = true;
+    params.testDescription = "CMP_NEQ with in1 broadcast";
 
-    PointwiseOperationsTestHelper::runMixedTypeBinaryTest<float, bfloat16>(params);
+    PointwiseTestHelper::runBinaryTest<TypeParam, TypeParam, bool>(params);
 }
 
-TEST(TestPointwiseOperationsCpuGraphExecutor, LogicalAndTrueAndTrue)
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareGreaterEqualFirstLarger)
 {
-    PointwiseOperationsTestHelper::runLogicalBinaryTest(
-        hipdnn_frontend::PointwiseMode::LOGICAL_AND, true, true, true);
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::CMP_GE;
+    params.in0TensorValue = 3.0f;
+    params.in1TensorValue = 2.0f;
+    params.expectedBoolean = true;
+    params.testDescription = "CMP_GE with a larger first input";
+
+    PointwiseTestHelper::runBinaryTest<TypeParam, TypeParam, bool>(params);
 }
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessFirstSmaller)
+{
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::CMP_LT;
+    params.in0TensorValue = 1.0f;
+    params.in1TensorValue = 2.0f;
+    params.expectedBoolean = true;
+    params.testDescription = "CMP_LT with a smaller first input";
+
+    PointwiseTestHelper::runBinaryTest<TypeParam, TypeParam, bool>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryCompareLessFirstLarger)
+{
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::CMP_LT;
+    params.in0TensorValue = 3.0f;
+    params.in1TensorValue = 2.0f;
+    params.expectedBoolean = false;
+    params.testDescription = "CMP_LT with a larger first input";
+
+    PointwiseTestHelper::runBinaryTest<TypeParam, TypeParam, bool>(params);
+}
+
+// =============================================================================
+// Logical operations
+// =============================================================================
 
 TEST(TestPointwiseOperationsCpuGraphExecutor, LogicalAndTrueAndFalse)
 {
-    PointwiseOperationsTestHelper::runLogicalBinaryTest(
-        hipdnn_frontend::PointwiseMode::LOGICAL_AND, true, false, false);
-}
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::LOGICAL_AND;
+    params.in0TensorValue = 1.0f;
+    params.in1TensorValue = 0.0f;
+    params.expectedBoolean = false;
+    params.testDescription = "true AND false";
 
-TEST(TestPointwiseOperationsCpuGraphExecutor, LogicalOrFalseOrFalse)
-{
-    PointwiseOperationsTestHelper::runLogicalBinaryTest(
-        hipdnn_frontend::PointwiseMode::LOGICAL_OR, false, false, false);
+    PointwiseTestHelper::runBinaryTest<bool, bool, bool>(params);
 }
 
 TEST(TestPointwiseOperationsCpuGraphExecutor, LogicalOrFalseOrTrue)
 {
-    PointwiseOperationsTestHelper::runLogicalBinaryTest(
-        hipdnn_frontend::PointwiseMode::LOGICAL_OR, false, true, true);
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::LOGICAL_OR;
+    params.in0TensorValue = 0.0f;
+    params.in1TensorValue = 1.0f;
+    params.expectedBoolean = true;
+    params.testDescription = "false OR true";
+
+    PointwiseTestHelper::runBinaryTest<bool, bool, bool>(params);
 }
 
 TEST(TestPointwiseOperationsCpuGraphExecutor, LogicalNotTrue)
 {
-    PointwiseOperationsTestHelper::runLogicalNotTest(true, false);
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::LOGICAL_NOT;
+    params.in0TensorValue = 1.0f;
+    params.expectedBoolean = false;
+    params.testDescription = "NOT true";
+
+    PointwiseTestHelper::runUnaryTest<bool>(params);
 }
 
-TEST(TestPointwiseOperationsCpuGraphExecutor, LogicalNotFalse)
+// =============================================================================
+// GEN_INDEX (INT32 output)
+// =============================================================================
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, GenIndexChannelAxis)
 {
-    PointwiseOperationsTestHelper::runLogicalNotTest(false, true);
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GEN_INDEX;
+    params.in0TensorValue = 0.0f;
+    params.axis = 1;
+    params.in0Dims = {2, 3, 2, 2};
+    params.outputDims = {2, 3, 2, 2};
+    params.testDescription = "Each element holds its channel index";
+
+    PointwiseTestHelper::runUnaryTest<TypeParam, int32_t>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, GenIndexLastAxis)
+{
+    PointwiseTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GEN_INDEX;
+    params.in0TensorValue = 0.0f;
+    params.axis = 3;
+    params.in0Dims = {2, 3, 2, 4};
+    params.outputDims = {2, 3, 2, 4};
+    params.testDescription = "Each element holds its width index";
+
+    PointwiseTestHelper::runUnaryTest<TypeParam, int32_t>(params);
 }
 
 TEST(TestPointwiseOperationsCpuGraphExecutor, ExpReciprocalDivideComposedGraph)
@@ -1813,454 +1089,4 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, ExpReciprocalDivideComposedGraph)
             }
         }
     }
-}
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardPositiveX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.testDescription = "GELU backward with positive X";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardPositiveXBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "GELU backward with positive X with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardNegativeX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.testDescription = "GELU backward with negative X";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardNegativeXBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "GELU backward with negative X with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluApproxTanhBackwardPositiveX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.testDescription = "GELU tanh backward with positive X";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor,
-           BinaryGeluApproxTanhBackwardPositiveXBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "GELU tanh backward with positive X with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluApproxTanhBackwardNegativeX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.testDescription = "GELU tanh backward with negative X";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor,
-           BinaryGeluApproxTanhBackwardNegativeXBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "GELU tanh backward with negative X with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardPositiveX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.testDescription = "Swish backward with positive X";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardPositiveXBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "Swish backward with positive X with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardNegativeX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.testDescription = "Swish backward with negative X";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardNegativeXBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "Swish backward with negative X with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardWithBeta)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.swishBeta = 0.5f;
-    params.testDescription = "Swish backward with custom beta";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardWithBetaBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.swishBeta = 0.5f;
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "Swish backward with custom beta with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardPositiveX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 2.0f; // X
-    params.testDescription = "ELU backward with positive X passes dy through";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardPositiveXBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 2.0f; // X
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription
-        = "ELU backward with positive X passes dy through with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardNegativeX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.testDescription = "ELU backward with negative X, default alpha";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardNegativeXBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription
-        = "ELU backward with negative X, default alpha with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardWithAlpha)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.eluAlpha = 0.5f;
-    params.testDescription = "ELU backward with custom alpha";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardWithAlphaBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.eluAlpha = 0.5f;
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "ELU backward with custom alpha with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardPositiveX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.testDescription = "Softplus backward with positive X";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardPositiveXBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "Softplus backward with positive X with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardNegativeX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.testDescription = "Softplus backward with negative X";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardNegativeXBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = -1.0f; // X
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "Softplus backward with negative X with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardWithBeta)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.softplusBeta = 2.0f;
-    params.testDescription = "Softplus backward with custom beta";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardWithBetaBroadcastChannel)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
-    params.inputDataType = nativeTypeToDataType<TypeParam>();
-    params.input1DataType = nativeTypeToDataType<TypeParam>();
-    params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 2.0f; // Dy
-    params.in1TensorValue = 1.0f; // X
-    params.softplusBeta = 2.0f;
-    params.in1Dims = {1, 3, 1, 1};
-    params.testDescription = "Softplus backward with custom beta with X broadcast over H and W";
-
-    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
-}
-
-TEST(TestPointwiseOperationsCpuGraphExecutor, SoftplusBackwardMixedTypeFloatDyHalfX)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
-    params.inputDataType = DataType::FLOAT;
-    params.input1DataType = DataType::HALF;
-    params.accumulatorDataType = DataType::FLOAT;
-    params.in0TensorValue = 2.0f;
-    params.in1TensorValue = 1.0f;
-    params.testDescription = "Softplus backward with float dy and half x";
-
-    PointwiseOperationsTestHelper::runMixedTypeBinaryTest<float, half>(params);
-}
-
-TEST(TestPointwiseOperationsCpuGraphExecutor, GeluBackwardMixedTypeFloatDyBfloat16X)
-{
-    PointwiseOperationTestParams params;
-    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
-    params.inputDataType = DataType::FLOAT;
-    params.input1DataType = DataType::BFLOAT16;
-    params.accumulatorDataType = DataType::FLOAT;
-    params.in0TensorValue = 2.0f;
-    params.in1TensorValue = -1.0f;
-    params.testDescription = "GELU backward with float dy and bfloat16 x";
-
-    PointwiseOperationsTestHelper::runMixedTypeBinaryTest<float, bfloat16>(params);
-}
-
-TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexAxis0Float)
-{
-    PointwiseOperationsTestHelper::runGenIndexTest<float>(
-        {2, 3, 2, 2}, 0, DataType::FLOAT, DataType::FLOAT);
-}
-
-TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexAxis1Float)
-{
-    PointwiseOperationsTestHelper::runGenIndexTest<float>(
-        {2, 3, 2, 2}, 1, DataType::FLOAT, DataType::FLOAT);
-}
-
-TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexAxis2Half)
-{
-    PointwiseOperationsTestHelper::runGenIndexTest<half>(
-        {2, 3, 4, 2}, 2, DataType::HALF, DataType::HALF);
-}
-
-TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexAxis3Bfloat16)
-{
-    PointwiseOperationsTestHelper::runGenIndexTest<bfloat16>(
-        {2, 3, 2, 4}, 3, DataType::BFLOAT16, DataType::BFLOAT16);
-}
-
-TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexInt32Output)
-{
-    PointwiseOperationsTestHelper::runGenIndexTest<int32_t>(
-        {2, 3, 2, 4}, 1, DataType::FLOAT, DataType::INT32);
-}
-
-TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexFloatInputHalfOutput)
-{
-    PointwiseOperationsTestHelper::runGenIndexTest<half>(
-        {1, 3, 2, 2}, 1, DataType::FLOAT, DataType::HALF);
 }

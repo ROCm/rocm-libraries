@@ -295,7 +295,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinary)
     EXPECT_TRUE(keyFromNode == expectedKey);
 }
 
-TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinaryDivideMixedPrecision)
+TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinaryDivide)
 {
     const PointwiseSignatureKey expectedKey{
         PointwiseMode::DIV, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
@@ -323,7 +323,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinaryDivideMixedPreci
     EXPECT_TRUE(keyFromNode == expectedKey);
 }
 
-TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapComparisonBooleanOutput)
+TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapComparison)
 {
     const PointwiseSignatureKey expectedKey{PointwiseMode::CMP_LT,
                                             DataType::FLOAT,
@@ -354,7 +354,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapComparisonBooleanOutpu
     EXPECT_TRUE(keyFromNode == expectedKey);
 }
 
-TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapLogicalBoolean)
+TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBoolean)
 {
     const PointwiseSignatureKey expectedKey{PointwiseMode::LOGICAL_AND,
                                             DataType::BOOLEAN,
@@ -567,7 +567,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeThirdInputTensorNotInMapThrows)
     EXPECT_THROW(PointwiseSignatureKey(node, tensors.map()), std::runtime_error);
 }
 
-TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnaryMixedPrecisionExp)
+TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnaryExp)
 {
     const PointwiseSignatureKey expectedKey{
         PointwiseMode::EXP, DataType::HALF, DataType::FLOAT, DataType::HALF};
@@ -614,9 +614,9 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedUnaryModes)
         }
 
         const auto mode = static_cast<PointwiseMode>(i);
-        if(mode == PointwiseMode::LOGICAL_NOT)
+        if(mode == PointwiseMode::LOGICAL_NOT || mode == PointwiseMode::GEN_INDEX)
         {
-            // BOOLEAN-only; covered by the logical operations test below.
+            // BOOLEAN-only and INT32-output operations are covered in separate tests.
             continue;
         }
 
@@ -656,7 +656,7 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedBinaryModes)
         const auto mode = static_cast<PointwiseMode>(i);
         if(mode == PointwiseMode::LOGICAL_AND || mode == PointwiseMode::LOGICAL_OR)
         {
-            // BOOLEAN-only; covered by PlanBuildersRegisteredForLogicalOperations.
+            // BOOLEAN-only operations are covered in a separate test.
             continue;
         }
 
@@ -685,7 +685,7 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForGenIndexInt32Output)
 {
     const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
 
-    for(auto input : {DataType::FLOAT, DataType::INT32})
+    for(auto input : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
     {
         const PointwiseSignatureKey key{
             PointwiseMode::GEN_INDEX, input, DataType::FLOAT, DataType::INT32};
