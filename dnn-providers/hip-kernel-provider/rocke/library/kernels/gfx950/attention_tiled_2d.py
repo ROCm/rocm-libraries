@@ -39,13 +39,14 @@ Correctness contract (validated against `aiter.op_tests.triton_tests.attention`
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
 )
+from kernels.common._lse_store import lse_row_has_mass, lse_store
 
 from rocke.core.ir import (
     BF16,
@@ -500,8 +501,16 @@ class UnifiedAttention2DTiledSpec:
     # to the alignment chosen by ``causal_top_left``. Not combinable with ALiBi /
     # QQ-bias, whose offsets are defined on the causal diagonal.
     right_bound: int = 0
+    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
+    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
+    #   Off by default; off emits no new IR, so shipped kernels are unchanged.
+    emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         if type(self.use_additive_bias) is not bool:
             raise ValueError(
                 "use_additive_bias must be a bool, got "
@@ -962,6 +971,7 @@ class UnifiedAttention2DTiledSpec:
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
             "qrev" if self.use_qblock_reverse else "",
+            "lse" if self.emit_lse else "",
         )
 
 
@@ -1306,6 +1316,17 @@ def build_unified_attention_2d_tiled(
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
     additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
+    lse = (
+        b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
+        if spec.emit_lse
+        else None
+    )
 
     kv_head_idx = b.block_id_x()
     q_block_global_idx = b.block_id_y()
@@ -3670,6 +3691,7 @@ def build_unified_attention_2d_tiled(
                 # full ``l_new = alpha * l_old + l_sum`` updates are applied
                 # by that shared downstream block, not here.
                 m_new = [st_m_new for _ in range(SOFTMAX_STATE_SLOTS)]
+                m_carry = [st_m_raw for _ in range(SOFTMAX_STATE_SLOTS)]
                 l_local = [st_l_sum for _ in range(SOFTMAX_STATE_SLOTS)]
                 # In the transposed orientation we already have masked /
                 # scaled / softcapped scores in ``st_scores`` and softmax
@@ -3863,6 +3885,7 @@ def build_unified_attention_2d_tiled(
                     masked[(n, reg)] = score
 
             m_new = []
+            m_carry = []
             s_local = {}
             for reg in range(REGS_PER_LANE):
                 local_max = neg_inf
@@ -3874,6 +3897,7 @@ def build_unified_attention_2d_tiled(
                 full_max_raw = b.fmax(m_vals[reg], tile_max)
                 ok = b.fcmp("ogt", full_max_raw, neg_inf)
                 m_new.append(b.select(ok, full_max_raw, zero_f))
+                m_carry.append(full_max_raw)
 
             l_local = []
             for reg in range(REGS_PER_LANE):
@@ -3966,6 +3990,7 @@ def build_unified_attention_2d_tiled(
             # repeated for every N-tile. Local lane-max across N-tiles, then 4-stage
             # XOR butterfly across the 16 lanes in the row-group.
             m_new = []
+            m_carry = []
             s_local = {}  # (reg, n) -> the lane's masked score (still owned per-lane)
             for reg in range(REGS_PER_LANE):
                 local_max = neg_inf
@@ -3978,6 +4003,7 @@ def build_unified_attention_2d_tiled(
                 full_max_raw = b.fmax(m_vals[reg], tile_max)
                 ok = b.fcmp("ogt", full_max_raw, neg_inf)
                 m_new.append(b.select(ok, full_max_raw, zero_f))
+                m_carry.append(full_max_raw)
 
             # ---- compute P = exp2(S - m_new) and l_local = sum(P) per row ----
             # P_lds[row, col] = exp2(S[row, col] - m_new[row]). Each warp publishes
@@ -4437,9 +4463,14 @@ def build_unified_attention_2d_tiled(
             for atom in range(M_ATOMS_PER_WARP):
                 new_acc[n * M_ATOMS_PER_WARP + atom] = acc_per_atom[atom]
 
+        # Carry the unclamped running max: it stays -inf until the row has seen a
+        # key. ``m_new`` (-inf replaced by 0) is only the exponent reference for
+        # P and alpha. Carrying the clamped 0 instead pins m at 0 when a row's
+        # first tile is fully masked (sliding window), and exp2(s - 0) then
+        # underflows P for very negative scores so the row's O collapses.
         yields = []
         for r in range(SOFTMAX_STATE_SLOTS):
-            yields.append(m_new[r])
+            yields.append(m_carry[r])
             yields.append(new_l_vals[r])
         for n in range(ACC_N_TILES):
             for atom in range(ACC_M_ATOMS):
@@ -4525,6 +4556,9 @@ def build_unified_attention_2d_tiled(
 
     final = kvloop.results
     l_final = [final[2 * r + 1] for r in range(SOFTMAX_STATE_SLOTS)]
+    if spec.emit_lse:
+        # m is in log2 units (scores carry scale*log2e), reduced across lanes.
+        m_final = [final[2 * r] for r in range(SOFTMAX_STATE_SLOTS)]
     ml_count_final = 2 * SOFTMAX_STATE_SLOTS
     # acc_final indexed by (n * ACC_M_ATOMS + atom)
     acc_final = [
@@ -4536,9 +4570,10 @@ def build_unified_attention_2d_tiled(
     def _acc_final_get(n: int, atom: int) -> Value:
         return acc_final[n * ACC_M_ATOMS + atom]
 
-    # Per-row reciprocal of L (computed once, reused across stripes).
+    # Per-row reciprocal of L (computed once, reused across stripes). Only an
+    # exact-zero L marks a keyless row (stored as 0); a NaN L stays NaN in O.
     rcp_l = [b.rcp(l_final[r]) for r in range(SOFTMAX_STATE_SLOTS)]
-    l_nonzero = [b.fcmp("ogt", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
+    l_zero = [b.fcmp("oeq", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
 
     if USE_MFMA_32X32:
         if TRANSPOSED_QK_32X32:
@@ -4573,7 +4608,22 @@ def build_unified_attention_2d_tiled(
                 dim=b.const_i32(0),
             )
             inv_l_t = b.rcp(l_final[0])
-            l_nonzero_t = b.fcmp("ogt", l_final[0], zero_f)
+            l_zero_t = b.fcmp("oeq", l_final[0], zero_f)
+            if spec.emit_lse:
+                # One row per lane; lanes l and l^32 hold the same (m, l), so
+                # only the low half writes. Emitted once, outside the n-loop.
+                with b.scf_if(b.land(op_mask_t, b.cmp_eq(lane_half32, b.const_i32(0)))):
+                    lse_store(
+                        b,
+                        lse,
+                        b.add(
+                            b.mul(b.add(cu_q_start, op_pos_t), b.const_i32(NUM_QH)),
+                            op_qh_t,
+                        ),
+                        m_final[0],
+                        l_final[0],
+                        row_has_mass=lse_row_has_mass(b, l_final[0]),
+                    )
             for n in range(ACC_N_TILES):
                 acc32 = _acc_final_get(n, 0)
                 for reg in range(REGS_PER_LANE):
@@ -4583,7 +4633,7 @@ def build_unified_attention_2d_tiled(
                     v = b.vec_extract(acc32, reg)
                     normalized = b.fmul(v, inv_l_t)
                     final_h = b.cast_f32_to(
-                        b.select(l_nonzero_t, normalized, zero_f), dtype
+                        b.select(l_zero_t, zero_f, normalized), dtype
                     )
                     with b.scf_if(op_mask_t):
                         b.global_store(
@@ -4625,6 +4675,27 @@ def build_unified_attention_2d_tiled(
             head=op_qh32_base,
             dim=b.const_i32(0),
         )
+        if spec.emit_lse:
+            # State slot reg's row is wave_row_base + _mfma_32x32_c_row(lane, reg)
+            # (= hoist_row[reg]); all 32 lanes of a half agree, lane_col32 == 0
+            # (lanes 0 and 32) writes.
+            lse_writer32 = b.cmp_eq(lane_col32, b.const_i32(0))
+            for reg in range(REGS_PER_LANE):
+                with b.scf_if(b.land(lse_writer32, hoist_row_ok[reg])):
+                    lse_store(
+                        b,
+                        lse,
+                        b.add(
+                            b.mul(
+                                b.add(cu_q_start, hoist_qp_r[reg]),
+                                b.const_i32(NUM_QH),
+                            ),
+                            hoist_qh_r[reg],
+                        ),
+                        m_final[reg],
+                        l_final[reg],
+                        row_has_mass=lse_row_has_mass(b, l_final[reg]),
+                    )
         for n in range(ACC_N_TILES):
             acc32 = _acc_final_get(n, 0)
             for reg in range(REGS_PER_LANE):
@@ -4633,7 +4704,7 @@ def build_unified_attention_2d_tiled(
                 v = b.vec_extract(acc32, reg)
                 normalized = b.fmul(v, rcp_l[reg])
                 final_h = b.cast_f32_to(
-                    b.select(l_nonzero[reg], normalized, zero_f), dtype
+                    b.select(l_zero[reg], zero_f, normalized), dtype
                 )
                 b.smem_store_vN(Acc_lds, [row, col_in_stripe], final_h, 1)
             b.sync()
@@ -4724,7 +4795,6 @@ def build_unified_attention_2d_tiled(
         head=op_qh,
         dim=b.const_i32(0),
     )
-
     for stripe in range(OUT_STRIPES):
         n_start = stripe * N_TILES_PER_STRIPE
         # ---- stage 1: write this stripe's N-tiles into Acc_lds ----
@@ -4743,7 +4813,7 @@ def build_unified_attention_2d_tiled(
                 v = b.vec_extract(_acc_final_get(n, atom), in_atom)
                 normalized = b.fmul(v, rcp_l[reg])
                 final_h = b.cast_f32_to(
-                    b.select(l_nonzero[reg], normalized, zero_f), dtype
+                    b.select(l_zero[reg], zero_f, normalized), dtype
                 )
                 b.smem_store_vN(Acc_lds, [row, col_in_stripe], final_h, 1)
         b.sync()
@@ -4761,6 +4831,31 @@ def build_unified_attention_2d_tiled(
         # ---- stage 3: sync so the next stripe can overwrite Acc_lds ----
         if stripe + 1 < OUT_STRIPES:
             b.sync()
+
+    if spec.emit_lse:
+        # After the O stripes, not before: emitted ahead of them, the LSE store
+        # let LLVM fuse the O multiply and FP16 convert into v_fma_mixlo_f16
+        # (one rounding; LSE-off rounds twice), moving FP16 O by 1 ulp versus
+        # LSE-off on MI300X/MI355X (ROCm 10). Here the O ISA matches LSE-off.
+        # Slot r's row is wave_row_base + _in_warp_row(r) (= hoist_row[r]); the
+        # 16 lanes of a row group agree, lane_col == 0 (one per lane_rg) writes.
+        lse_writer16 = b.cmp_eq(lane_col, b.const_i32(0))
+        for reg in range(REGS_PER_LANE):
+            with b.scf_if(b.land(lse_writer16, hoist_row_ok[reg])):
+                lse_store(
+                    b,
+                    lse,
+                    b.add(
+                        b.mul(
+                            b.add(cu_q_start, hoist_qp_r[reg]),
+                            b.const_i32(NUM_QH),
+                        ),
+                        hoist_qh_r[reg],
+                    ),
+                    m_final[reg],
+                    l_final[reg],
+                    row_has_mass=lse_row_has_mass(b, l_final[reg]),
+                )
 
     return b.kernel
 

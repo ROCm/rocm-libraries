@@ -15,6 +15,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
+
 PLATFORM = Path(__file__).resolve().parents[1]
 
 
@@ -422,8 +427,9 @@ def run_probe(native, library, **overrides):
         PYTHONPATH=os.pathsep.join(str(path) for path in sys.path if path),
     )
     env.update(overrides)
+    env = rocke_subprocess_env(env)
     result = subprocess.run(
-        [sys.executable, "-c", PROBE, str(native)],
+        rocke_python_command("-c", PROBE, str(native)),
         env=env,
         capture_output=True,
         text=True,
@@ -571,8 +577,8 @@ def test_unloadable_override_does_not_fall_through_to_sdk(native_detector, tmp_p
     env = automatic_env(site)
     env["ROCKE_COMGR_LIB"] = str(broken)
     result = subprocess.run(
-        [sys.executable, "-c", UNAVAILABLE_PROBE, str(native)],
-        env=env,
+        rocke_python_command("-c", UNAVAILABLE_PROBE, str(native)),
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
     )
@@ -586,14 +592,22 @@ def test_empty_discovery_values_match_unset(native_detector, tmp_path, variable)
     native = site / native_detector.name
     shutil.copyfile(native_detector, native)
     env = automatic_env(site)
+    decoy = tmp_path / "unrelated"
+    package = decoy / "rocke"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(
+        "raise AssertionError('cwd package imported')\n"
+    )
     results = []
     for value in (None, ""):
         child_env = dict(env)
         if value is not None:
             child_env[variable] = value
+        child_env = rocke_subprocess_env(child_env)
         result = subprocess.run(
-            [sys.executable, "-c", PROBE, str(native)],
+            rocke_python_command("-c", PROBE, str(native)),
             env=child_env,
+            cwd=decoy,
             check=True,
             capture_output=True,
             text=True,
@@ -626,8 +640,8 @@ def test_sdk_selected_despite_competing_system_compiler(
     env["ROCM_HOME"] = str(system.parent.parent)
     env["LD_LIBRARY_PATH"] = str(system.parent)
     result = subprocess.run(
-        [sys.executable, "-c", PROBE, str(native)],
-        env=env,
+        rocke_python_command("-c", PROBE, str(native)),
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
         check=True,
@@ -679,8 +693,8 @@ def test_sdk_selection_checks_mapped_file_identity(native_detector, tmp_path, ki
             "assert native.fixture_load_calls()==0\n"
         )
     result = subprocess.run(
-        [sys.executable, "-c", script, str(native), str(mapped)],
-        env=automatic_env(site),
+        rocke_python_command("-c", script, str(native), str(mapped)),
+        env=rocke_subprocess_env(automatic_env(site)),
         capture_output=True,
         text=True,
     )
@@ -705,8 +719,8 @@ def test_missing_sdk_payload_does_not_use_system_compiler(native_detector, tmp_p
     env["ROCM_PATH"] = str(system.parent.parent)
     env["LD_LIBRARY_PATH"] = str(system.parent)
     result = subprocess.run(
-        [sys.executable, "-c", UNAVAILABLE_PROBE, str(native)],
-        env=env,
+        rocke_python_command("-c", UNAVAILABLE_PROBE, str(native)),
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
     )
@@ -727,8 +741,8 @@ def test_relocated_shared_engine_discovers_sdk_without_build_path(
     library = relocated / library.relative_to(original)
     native = relocated / native.relative_to(original)
     result = subprocess.run(
-        [sys.executable, "-c", PROBE, str(native)],
-        env=automatic_env(site),
+        rocke_python_command("-c", PROBE, str(native)),
+        env=rocke_subprocess_env(automatic_env(site)),
         capture_output=True,
         text=True,
         check=True,
@@ -774,8 +788,8 @@ def test_build_sidecar_tracks_selected_sdk_site_after_parent_relocation(
     native = relocated / native.relative_to(original)
     library = relocated / library.relative_to(original)
     result = subprocess.run(
-        [sys.executable, "-c", PROBE, str(native)],
-        env=automatic_env(site),
+        rocke_python_command("-c", PROBE, str(native)),
+        env=rocke_subprocess_env(automatic_env(site)),
         capture_output=True,
         text=True,
         check=True,
@@ -803,14 +817,14 @@ def test_cmake_build_sidecar_discovers_user_site_sdk(
     # so the SDK is visible to Python, but would disappear under isolated mode.
     interpreter_root = tmp_path / "interpreter"
     subprocess.run(
-        [
-            sys.executable,
+        rocke_python_command(
             "-m",
             "venv",
             "--without-pip",
             "--system-site-packages",
             str(interpreter_root),
-        ],
+        ),
+        env=rocke_subprocess_env(),
         check=True,
         capture_output=True,
         text=True,
@@ -824,6 +838,7 @@ def test_cmake_build_sidecar_discovers_user_site_sdk(
         "ROCKE_LLVM_FLAVOR",
     ):
         env.pop(name, None)
+    # This probe measures the selected interpreter's site policy, not rocKE imports.
     result = subprocess.run(
         [
             str(python),
@@ -884,10 +899,12 @@ def test_cmake_build_sidecar_discovers_user_site_sdk(
     )
     native.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(native_detector, native)
-    env["PYTHONPATH"] = str(PLATFORM / "python")
+    # Keep the configured interpreter while the launcher fixes package identity.
+    command = rocke_python_command("-c", PROBE, str(native))
+    command[0] = str(python)
     result = subprocess.run(
-        [str(python), "-c", PROBE, str(native)],
-        env=env,
+        command,
+        env=rocke_subprocess_env(env),
         check=True,
         capture_output=True,
         text=True,
@@ -1066,15 +1083,10 @@ assert ctypes.c_uint.in_dll(fixture, 'fixture_queries').value == (
 """
     env = dict(os.environ, ROCKE_COMGR_LIB=str(library))
     subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            script,
-            str(native_detector),
-            str(library),
-            str(queryable),
-        ],
-        env=env,
+        rocke_python_command(
+            "-c", script, str(native_detector), str(library), str(queryable)
+        ),
+        env=rocke_subprocess_env(env),
         check=True,
         capture_output=True,
         text=True,
@@ -1128,8 +1140,8 @@ def test_unqueryable_compiler_rejects_auto_but_allows_explicit_emission(tmp_path
     env.pop("ROCKE_LLVM_FLAVOR", None)
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
     result = subprocess.run(
-        [sys.executable, "-c", REJECTION_PROBE],
-        env=env,
+        rocke_python_command("-c", REJECTION_PROBE),
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
     )
@@ -1204,8 +1216,8 @@ def test_absolute_build_sidecar_discovers_sdk(
         )
         env["ROCKE_COMGR_LIB"] = str(library)
     result = subprocess.run(
-        [sys.executable, "-c", PROBE, str(native)],
-        env=env,
+        rocke_python_command("-c", PROBE, str(native)),
+        env=rocke_subprocess_env(env),
         check=True,
         capture_output=True,
         text=True,
@@ -1248,8 +1260,7 @@ def test_invalid_build_sidecar_does_not_load_compiler(
     shutil.copyfile(native_detector, native)
     (build / "rocke_sdk_site.txt").write_text(descriptor.format(site=site))
     result = subprocess.run(
-        [
-            sys.executable,
+        rocke_python_command(
             "-c",
             "import ctypes, sys; "
             "native = ctypes.CDLL(sys.argv[1]); "
@@ -1257,8 +1268,8 @@ def test_invalid_build_sidecar_does_not_load_compiler(
             "assert not native.rocke_loaded_compiler_info(); "
             "assert native.fixture_load_calls() == 0",
             str(native),
-        ],
-        env=automatic_env(site),
+        ),
+        env=rocke_subprocess_env(automatic_env(site)),
         capture_output=True,
         text=True,
     )
@@ -1544,8 +1555,8 @@ def test_build_descriptor_preserves_sdk_site_traversal(
     # Set sys.path after startup: Python itself normalizes PYTHONPATH spellings.
     script = "import sys; sys.path.insert(0, sys.argv[2])\n" + PROBE
     result = subprocess.run(
-        [sys.executable, "-c", script, str(native), spelling],
-        env=automatic_env(site),
+        rocke_python_command("-c", script, str(native), spelling),
+        env=rocke_subprocess_env(automatic_env(site)),
         capture_output=True,
         text=True,
     )
@@ -1587,16 +1598,16 @@ def test_build_descriptor_missing_sdk_site_recovers(
     assert (build / location).resolve() == site
     env = automatic_env(site)
     unavailable = subprocess.run(
-        [sys.executable, "-c", UNAVAILABLE_PROBE, str(native)],
-        env=env,
+        rocke_python_command("-c", UNAVAILABLE_PROBE, str(native)),
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
     )
     assert unavailable.returncode == 0, unavailable.stderr
     library = sdk_fixture(site)
     result = subprocess.run(
-        [sys.executable, "-c", PROBE, str(native)],
-        env=env,
+        rocke_python_command("-c", PROBE, str(native)),
+        env=rocke_subprocess_env(env),
         check=True,
         capture_output=True,
         text=True,
@@ -1621,9 +1632,9 @@ def test_relative_loaded_module_ignores_changed_cwd(native_detector, tmp_path):
         "os.chdir(sys.argv[2])\n" + PROBE
     )
     result = subprocess.run(
-        [sys.executable, "-c", script, str(native), str(decoy)],
+        rocke_python_command("-c", script, str(native), str(decoy)),
         cwd=prefix,
-        env=automatic_env(site),
+        env=rocke_subprocess_env(automatic_env(site)),
         check=True,
         capture_output=True,
         text=True,
@@ -1662,9 +1673,9 @@ def test_build_descriptor_uses_physical_symlink_base(
         os.path.join("..", "env", "site-packages"),
     ]
     result = subprocess.run(
-        [sys.executable, "-c", PROBE, str(alias / native.name)],
+        rocke_python_command("-c", PROBE, str(alias / native.name)),
         cwd=tmp_path,
-        env=automatic_env(site),
+        env=rocke_subprocess_env(automatic_env(site)),
         check=True,
         capture_output=True,
         text=True,

@@ -605,6 +605,25 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
 
+    # Compiler tool locations for Python entries that compile and disassemble
+    # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its
+    # lib/llvm/bin/ (neither is on the CI image's PATH), and the device-library
+    # bitcode. CTest resolves these lists at test time; they stay empty off Linux
+    # or without ROCM_PATH. Tool discovery is separate from enforcement policy:
+    # only entries whose compiler checks must run append the requirement list.
+    # Contract: tests/test_engine_linkage.py::
+    # test_installed_ctest_entries_get_scoped_environment_contracts.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set(_rocke_compiler_tool_environment)\n"
+           "set(_rocke_compiler_requirement_environment)\n"
+           "if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Linux\" AND NOT \"\$ENV{ROCM_PATH}\" STREQUAL \"\")\n"
+           "  list(APPEND _rocke_compiler_tool_environment\n"
+           "       \"PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH}\"\n"
+           "       \"HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode\")\n"
+           "  list(APPEND _rocke_compiler_requirement_environment\n"
+           "       \"ROCKE_REQUIRE_COMPILER_TOOLS=1\")\n"
+           "endif()\n")
+
     # Reproduce the committed host-flavor column from the relocated artifact.
     # This mirrors the build-tree CTest in tests/cmake/CoreTests.cmake, but deliberately
     # uses the installed package data that downstream/provider CI consumes.
@@ -667,15 +686,13 @@ if(ROCKE_INSTALL_TESTS)
         endif()
       endforeach()
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_platform_pytest_environment \"${_ROCKE_PYTEST_ENVIRONMENT}\")\n"
+             "list(APPEND _rocke_platform_pytest_environment \${_rocke_compiler_tool_environment})\n"
              "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"not integration\" -v -rs --timeout=60)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set(_rocke_compiler_env \"\")\n"
-             "if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Linux\" AND NOT \"\$ENV{ROCM_PATH}\" STREQUAL \"\")\n"
-             "  set(_rocke_compiler_env \";PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH};HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode\")\n"
-             "endif()\n"
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"${_ROCKE_PYTEST_ENVIRONMENT}\${_rocke_compiler_env}\"\n"
+             "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
@@ -732,8 +749,11 @@ if(ROCKE_INSTALL_TESTS)
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
     # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
-    # and K/V cache policy, and the scalar fallback's cache key and block-table
-    # stride kernarg.
+    # and K/V cache policy, the scalar fallback's cache key and block-table
+    # stride kernarg, the unified attention running-max carry and keyless
+    # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
+    # host-side SDPA sequence-length and padding-mask adapters/specs, and the
+    # fmha_mfma free-stride ABI and layout contracts.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -742,7 +762,13 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
-        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py")
+        "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
+        "tests/library/tests/test_attention_unified_masked_tile_ir.py"
+        "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+        "tests/library/tests/test_sdpa_seqlen.py"
+        "tests/library/tests/test_sdpa_padding_mask.py"
+        "tests/library/tests/test_fmha_mfma_free_stride.py"
+        "tests/library/tests/test_sdpa_free_stride_layouts.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -778,7 +804,10 @@ if(ROCKE_INSTALL_TESTS)
            "  TIMEOUT 180)\n")
 
     # Library MLA CPU tests (no GPU required): kernel lowering/admission, dispatch
-    # wiring, the IR golden, the fp32 oracle, and the benchmark shape loader. Same
+    # wiring, the IR golden, the fp32 oracle, the benchmark shape loader, and the
+    # shared read-ahead helper. The prefill occupancy / agpr_acc guards compile
+    # through comgr and read the code object with llvm-objdump, so the entry also
+    # takes the compiler environment; with it they fail rather than skip. Same
     # PYTHONPATH contract as the conv entry above; the staged library tree carries
     # kernels/mla, dispatch/mla, builders/mla, benchmarks/common/mla_shapes.py and
     # tests/golden/mla_prefill_gfx942_ir_sha256.json.
@@ -787,18 +816,23 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/dispatch/mla/test_mla_prefill_gfx942_wiring.py"
         "tests/library/tests/test_mla_prefill_gfx942_golden.py"
         "tests/library/tests/test_mla_reference.py"
-        "tests/library/tests/test_mla_benchmark_shapes.py")
+        "tests/library/tests/test_mla_benchmark_shapes.py"
+        "tests/library/tests/test_read_ahead.py")
     set(_ROCKE_LIBRARY_MLA_TESTS "")
     foreach(_rocke_mla_test ${_ROCKE_LIBRARY_MLA_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_MLA_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_rocke_mla_test}\"")
     endforeach()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set(_rocke_library_mla_pytest_environment \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\")\n"
+           "list(APPEND _rocke_library_mla_pytest_environment\n"
+           "     \${_rocke_compiler_tool_environment}\n"
+           "     \${_rocke_compiler_requirement_environment})\n"
            "add_test(rocke_library_mla_pytest python -m pytest${_ROCKE_LIBRARY_MLA_TESTS} -v -rs --timeout=120)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_mla_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;mla\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  ENVIRONMENT \"\${_rocke_library_mla_pytest_environment}\"\n"
            "  TIMEOUT 900)\n")
 
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -958,6 +992,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
         "tests/library/tests/test_attention_scalar_block_table_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
+        "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
@@ -969,6 +1004,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
         "tests/library/tests/test_attention_tiled_3d_running_max.py"
+        "tests/library/tests/test_attention_unified_2d_masked_tile_numeric.py"
+        "tests/library/tests/test_attention_unified_scalar_masked_tile_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_wave_page_id_load.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
