@@ -3,34 +3,22 @@
 
 #pragma once
 
-#include <string>
+#include <string_view>
 
-// Library ScalingFormat ordinals. These are not the public
-// HIPBLASLT_MATMUL_MATRIX_SCALE_* integers. tensile_host.cpp static_asserts
-// them against RocblasltContractionProblem::ScalingFormat.
-inline constexpr int kRocblasltScaleBlock32UE8M0    = 3; // Block_32_UE8M0
-inline constexpr int kRocblasltScaleBlock32UE8M0Ext = 9; // Block_32_UE8M0_32_8_EXT
-
-// Request codes written onto the Tensile problem. -1 matches every kernel
-// layout, -2 matches none, and 1 matches HostPreSwizzle only.
-inline constexpr int kMxScaleRequestUnspecified    = -1;
-inline constexpr int kMxScaleRequestUnsupported    = -2;
-inline constexpr int kMxScaleRequestHostPreSwizzle = 1;
-
-// gfx950 scale format 3 (Block_32_UE8M0) cannot use a shipped HostPreSwizzle
-// kernel or a canonical NoSwizzle kernel. Format 1001 still requests
-// HostPreSwizzle. Every other architecture, including gfx1250 scale 3, stays
-// unspecified so the existing kernels still match.
-inline int rocblaslt_mx_scale_format_request(const std::string& arch, int scaleA, int scaleB)
+// True only for gfx950 packed block-32 E8 scales (Scale::Block_32_UE8M0,
+// bench --scaleA/--scaleB 3). Pre-swizzled scales (Scale::Block_32_UE8M0_32_8_EXT,
+// bench 1001) return false, as does every other scale and every other arch.
+//
+// Scale is RocblasltContractionProblem::ScalingFormat. The scale compare is
+// first so a non-packed GEMM does not scan the arch name. The caller passes
+// the arch already stored on the handle. This function does not call
+// hipGetDevice or hipGetDeviceProperties.
+template <typename Scale>
+inline bool rocblaslt_reject_gfx950_packed_scale(const char* arch, Scale scaleA, Scale scaleB)
 {
-    if(arch.find("gfx950") == std::string::npos)
-        return kMxScaleRequestUnspecified;
-
-    if(scaleA == kRocblasltScaleBlock32UE8M0 || scaleB == kRocblasltScaleBlock32UE8M0)
-        return kMxScaleRequestUnsupported;
-
-    if(scaleA == kRocblasltScaleBlock32UE8M0Ext || scaleB == kRocblasltScaleBlock32UE8M0Ext)
-        return kMxScaleRequestHostPreSwizzle;
-
-    return kMxScaleRequestUnspecified;
+    if(scaleA != Scale::Block_32_UE8M0 && scaleB != Scale::Block_32_UE8M0)
+        return false;
+    if(arch == nullptr)
+        return false;
+    return std::string_view(arch).find("gfx950") != std::string_view::npos;
 }

@@ -135,7 +135,6 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::FusedA2ATileDivisible>(),
                      Base::template Pair<Predicates::Contraction::MXBlockA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
-                     Base::template Pair<Predicates::Contraction::MXScaleFormatEqual>(),
                      Base::template Pair<Predicates::Contraction::MXBlockFreeA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockFreeB>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSA>(),
@@ -618,11 +617,6 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::MXBlockB, IO>
             : public AutoMappingTraits<Predicates::Contraction::MXBlockB, IO>
-        {
-        };
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::MXScaleFormatEqual, IO>
-            : public AutoMappingTraits<Predicates::Contraction::MXScaleFormatEqual, IO>
         {
         };
         template <typename IO>

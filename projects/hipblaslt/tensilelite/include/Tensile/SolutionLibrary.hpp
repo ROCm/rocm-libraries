@@ -31,7 +31,6 @@
 #include <string>
 #include <vector>
 
-#include <Tensile/ContractionProblem.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/Task.hpp>
 
@@ -68,9 +67,7 @@ namespace TensileLite
            && solutions.problemType.mxBlockA == problem.mxBlockA()
            && solutions.problemType.mxBlockB == problem.mxBlockB()
            && solutions.problemType.mxBlockFreeA == problem.mxBlockFreeA()
-           && solutions.problemType.mxBlockFreeB == problem.mxBlockFreeB()
-           && mxScaleRequestMatchesKernel(problem.mxScaleFormat(),
-                                           solutions.problemType.mxScaleFormat))
+           && solutions.problemType.mxBlockFreeB == problem.mxBlockFreeB())
             return true;
         return false;
     }

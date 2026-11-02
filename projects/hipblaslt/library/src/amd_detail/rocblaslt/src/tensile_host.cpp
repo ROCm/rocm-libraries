@@ -69,23 +69,6 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
-static_assert(static_cast<int>(RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
-                  == kRocblasltScaleBlock32UE8M0,
-              "Block_32_UE8M0 ordinal drifted from mx_scale_format.hpp");
-static_assert(
-    static_cast<int>(RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-        == kRocblasltScaleBlock32UE8M0Ext,
-    "Block_32_UE8M0_32_8_EXT ordinal drifted from mx_scale_format.hpp");
-static_assert(TensileLite::ContractionProblemGemm::MXScaleRequestUnspecified
-                  == kMxScaleRequestUnspecified,
-              "unspecified MX scale request drifted from mx_scale_format.hpp");
-static_assert(TensileLite::ContractionProblemGemm::MXScaleRequestUnsupported
-                  == kMxScaleRequestUnsupported,
-              "unsupported MX scale request drifted from mx_scale_format.hpp");
-static_assert(TensileLite::ContractionProblemGemm::MXScaleFormatHostPreSwizzle
-                  == kMxScaleRequestHostPreSwizzle,
-              "HostPreSwizzle MX scale request drifted from mx_scale_format.hpp");
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -2424,11 +2407,6 @@ namespace
             prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
           tensileProblem.setMXScaleB(rocisa::DataType::E8, 32, {}, padMXScaleTensorFreeDim);
 
-        tensileProblem.setMXScaleFormat(rocblaslt_mx_scale_format_request(
-            rocblaslt_internal_get_arch_name(),
-            static_cast<int>(prob.scaleAType),
-            static_cast<int>(prob.scaleBType)));
-
         return tensileProblem;
     }
 
@@ -2744,11 +2722,6 @@ namespace
 	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
    	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
 	    tensileProblem.setMXScaleB(rocisa::DataType::E8, 32, {}, padMXScaleTensorFreeDim);
-
-        tensileProblem.setMXScaleFormat(rocblaslt_mx_scale_format_request(
-            rocblaslt_internal_get_arch_name(),
-            static_cast<int>(prob.scaleAType),
-            static_cast<int>(prob.scaleBType)));
     }
 
     rocisa::DataType computeTypeToRocisaDataType(rocblaslt_compute_type compute_type)
@@ -4817,6 +4790,9 @@ namespace
                                                      std::shared_ptr<void>              gemmData)
     {
         std::vector<int> indexes;
+        if(rocblaslt_reject_gfx950_packed_scale(
+               handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType))
+            return indexes;
         if(TuningPolicy::allKernels())
         {
             std::vector<rocblaslt_matmul_heuristic_result> all;
@@ -5712,6 +5688,17 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         if(useRocRoller(handle, prob))
             return runRocRollerContractionProblem(handle, algo, prob);
 #endif
+        // Packed block-32 E8 on gfx950 has no TensileLite kernel. Reject before
+        // library load and solution search. Scale type is compared first, inside
+        // the helper, so other GEMMs do not scan the arch name. The arch is the
+        // one cached on the handle at creation.
+        if(rocblaslt_reject_gfx950_packed_scale(
+               handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType))
+        {
+            log_info(__func__,
+                     "gfx950 Block_32_UE8M0 has no TensileLite kernel; pre-swizzled kernels are not used");
+            return rocblaslt_status_not_implemented;
+        }
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                                library;
         std::shared_ptr<hipDeviceProp_t>       deviceProp;
@@ -7488,6 +7475,13 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                    maxWorkSpaceBytes,
                                    returnAlgoCount);
 #endif
+    if(rocblaslt_reject_gfx950_packed_scale(
+           handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType))
+    {
+        log_info(__func__,
+                 "gfx950 Block_32_UE8M0 has no TensileLite kernel; pre-swizzled kernels are not used");
+        return rocblaslt_status_success;
+    }
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
@@ -7690,6 +7684,14 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
         return rocblaslt_status_success;
     }
 #endif
+    if(rocblaslt_reject_gfx950_packed_scale(
+           handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType))
+    {
+        heuristicResults.clear();
+        log_info(__func__,
+                 "gfx950 Block_32_UE8M0 has no TensileLite kernel; pre-swizzled kernels are not used");
+        return rocblaslt_status_success;
+    }
     auto tensile_prob = ConstructTensileProblem(prob);
     return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes);
 }
@@ -7699,6 +7701,15 @@ rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&      
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
                                  size_t                                          maxWorkSpaceBytes)
 {
+    for(const auto& prob : probs)
+    {
+        if(rocblaslt_reject_gfx950_packed_scale(
+               handle->properties.gcnArchName, prob.scaleAType, prob.scaleBType))
+        {
+            heuristicResults.clear();
+            return rocblaslt_status_success;
+        }
+    }
     TensileLite::ContractionProblemGroupedGemm tensile_probs;
     for(int i = 0; i < probs.size(); i++)
     {
