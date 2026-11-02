@@ -19,6 +19,7 @@ Emulation is a throughput optimization. It pays off for large GEMMs with high
 arithmetic intensity on GPUs where INT8 peak throughput greatly exceeds FP64 or
 FP32 peak throughput. By default, hipBLASLt predicts for each problem whether
 emulation is faster than the native GEMM, and runs the native GEMM when it isn't.
+How hipBLASLt predicts this depends on the GPU. See `Strategy`_.
 
 For background on the Ozaki scheme and how emulation compares across GPUs, see
 :doc:`Data types and precision support <rocm:reference/precision-support>`.
@@ -31,7 +32,10 @@ Prerequisites
 hipBLASLt emulates a ``hipblasLtMatmul`` call only when all of the following
 conditions are met:
 
-* The GPU is an AMD Instinct MI350X or MI355X.
+* The GPU is an AMD Instinct MI350X or MI355X, or an AMD Radeon GPU with a
+  gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1152, gfx1200, or gfx1201
+  target. To look up the target of your GPU, see
+  :doc:`GPU specifications <rocm:reference/gpu-specs>`.
 * A, B, C, and D are all ``HIP_R_64F`` (FP64) or all ``HIP_R_32F`` (FP32), and
   the scale type is the same type.
 * The GEMM is not batched (``batch_count = 1``).
@@ -131,6 +135,19 @@ The strategy decides whether an enabled emulation path is taken:
   emulates only when it is. Small GEMMs typically run natively.
 * ``eager``: hipBLASLt always emulates, regardless of problem size. Use this to
   test emulation on problems that the performance model would reject.
+
+How the ``performant`` strategy predicts depends on the GPU:
+
+* On GPUs with performance values measured on that GPU (the MI350X, MI355X,
+  Radeon PRO W7800, and Radeon RX 9070 XT), a performance model compares the
+  predicted emulated and native times.
+* On other supported Radeon GPUs, hipBLASLt emulates an FP64 GEMM when its
+  arithmetic intensity, ``2 * m * n * k / (8 * (m * k + k * n + m * n))``
+  flops per byte, is at least a threshold for the GPU's target, and runs
+  FP32 GEMMs natively. Small GEMMs, and GEMMs with a small ``k``, run
+  natively.
+
+``eager`` emulates every FP64 and FP32 GEMM on all supported GPUs.
 
 Precision target
 ----------------
@@ -283,12 +300,15 @@ emulation workspace size in the ``workspaceSize`` field of each result.
 The returned size is optimal: it lets emulation run all INT8 GEMM passes at
 once. Emulation also works with a smaller workspace, but it then splits the
 work into more passes, which reduces throughput. With the ``performant``
-strategy, if the smaller workspace makes emulation slower than the native
-GEMM, the call runs natively and prints a warning with the optimal size.
+strategy on a GPU with measured performance values, if the smaller workspace
+makes emulation slower than the native GEMM, the call runs natively and prints
+a warning with the optimal size.
 
 To avoid sizing the workspace for every problem, you can allocate one buffer
 and reuse it for all emulated GEMMs. On MI355X, a 16 to 32 GiB buffer gives
-close to optimal throughput for typical problem sizes.
+close to optimal throughput for typical problem sizes. On GPUs with less
+memory, such as Radeon GPUs, size the buffer to fit the available memory. A
+smaller buffer still works, with more passes.
 
 Example: FP64 GEMM with emulation
 =================================
@@ -380,7 +400,7 @@ natively. Set ``HIPBLAS_EMULATION_STRATEGY=eager`` to emulate them anyway.
 Pass a workspace size in bytes with ``--workspace``, or with the
 ``user_allocated_workspace`` key in a YAML problem file. The examples in this
 section use 32 GiB (34359738368 bytes), which is enough for large problems on
-MI355X.
+MI355X. On a GPU with less memory, pass a smaller size.
 
 Command-line examples
 ---------------------
@@ -467,8 +487,9 @@ An emulation request runs as a native GEMM in these cases:
 
 * The call doesn't meet the `Prerequisites`_.
 * The ``performant`` strategy predicts that the native GEMM is faster.
-* No workspace is passed, or the workspace is too small for emulation to beat
-  the native GEMM under the ``performant`` strategy.
+* No workspace is passed, or, on a GPU with measured performance values, the
+  workspace is too small for emulation to beat the native GEMM under the
+  ``performant`` strategy.
 * Inf or NaN detection is enabled and the input contains Inf or NaN.
 * The dynamic range of the input is too wide for any supported number of moduli
   to reach the precision target. hipBLASLt runs the native GEMM rather than

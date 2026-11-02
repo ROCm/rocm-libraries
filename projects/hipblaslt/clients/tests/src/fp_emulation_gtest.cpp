@@ -54,12 +54,12 @@ namespace
             return emulated ? rocblaslt_compute_f32_emulated_fixedpoint : rocblaslt_compute_f32;
         return emulated ? rocblaslt_compute_f64_emulated_fixedpoint : rocblaslt_compute_f64;
     }
-    // Returns true only when a HIP device exists AND it is in the emulation
-    // hardware support table.  Uses EAGER to bypass the cost model so the probe
-    // GEMM size (16³) never influences the result — only the device table check
-    // matters.  Note: fixedPointEmulationDecision checks get_perf_model_params()
-    // unconditionally before the eager short-circuit, so EAGER only skips the
-    // performance-model comparison, not the device support lookup.
+    // Returns true only when a HIP device exists AND the emulation device lookup
+    // finds it (chip row or architecture row).  Uses EAGER to bypass the
+    // cost model so the probe GEMM size (16³) never influences the result — only
+    // the device lookup matters.  Note: fixedPointEmulationDecision checks the
+    // device lookup unconditionally before the eager short-circuit, so EAGER only
+    // skips the performance-model comparison, not the device support lookup.
     bool has_supported_device()
     {
         int count = 0;
@@ -156,6 +156,101 @@ namespace
                   FIXED_POINT_EMULATION_ENV_INVALID);
         EXPECT_EQ(fixedPointEmulationParseSpecialValuesMaskEnv("3x").state,
                   FIXED_POINT_EMULATION_ENV_INVALID);
+    }
+
+    // Device lookup: a chip row matches by PCI device ID, an architecture row
+    // by gfx target (target features in the name are ignored).  Architecture
+    // rows carry the size thresholds; a device without one never emulates on
+    // a threshold.
+    TEST_F(FixedPointEmulationHostTest, DeviceLookupChipAndArch)
+    {
+        /* Radeon Pro W7800 and Radeon RX 9070 XT: chip rows. */
+        EXPECT_EQ(fixedPointEmulationLookupDevice(0x745eu, "gfx1100").match,
+                  FIXED_POINT_EMULATION_DEVICE_CHIP);
+        EXPECT_EQ(fixedPointEmulationLookupDevice(0x7550u, "gfx1201").match,
+                  FIXED_POINT_EMULATION_DEVICE_CHIP);
+        /* MI355X: chip row, no architecture row. */
+        const auto mi355x = fixedPointEmulationLookupDevice(0x75a3u, "gfx950:sramecc+:xnack-");
+        EXPECT_EQ(mi355x.match, FIXED_POINT_EMULATION_DEVICE_CHIP);
+        EXPECT_EQ(mi355x.fp64_min_ai, FIXED_POINT_EMULATION_NEVER);
+        EXPECT_EQ(mi355x.fp32_min_ai, FIXED_POINT_EMULATION_NEVER);
+        /* Radeon targets without a chip row: architecture rows with an FP64
+         * threshold, FP32 never. */
+        for(const char* arch : {"gfx1100:sramecc-:xnack-",
+                                "gfx1101",
+                                "gfx1102",
+                                "gfx1150",
+                                "gfx1151",
+                                "gfx1152",
+                                "gfx1200",
+                                "gfx1201"})
+        {
+            const auto sup = fixedPointEmulationLookupDevice(0xFFFFu, arch);
+            EXPECT_EQ(sup.match, FIXED_POINT_EMULATION_DEVICE_ARCH) << arch;
+            EXPECT_GT(sup.fp64_min_ai, 0.0) << arch;
+            EXPECT_LT(sup.fp64_min_ai, FIXED_POINT_EMULATION_NEVER) << arch;
+            EXPECT_EQ(sup.fp32_min_ai, FIXED_POINT_EMULATION_NEVER) << arch;
+        }
+        /* Unsupported: no chip row, no architecture row; prefixes of a gfx name
+         * do not match. */
+        EXPECT_EQ(fixedPointEmulationLookupDevice(0xFFFFu, "gfx942").match,
+                  FIXED_POINT_EMULATION_DEVICE_NONE);
+        EXPECT_EQ(fixedPointEmulationLookupDevice(0xFFFFu, "gfx110").match,
+                  FIXED_POINT_EMULATION_DEVICE_NONE);
+        EXPECT_EQ(fixedPointEmulationLookupDevice(0xFFFFu, nullptr).match,
+                  FIXED_POINT_EMULATION_DEVICE_NONE);
+    }
+
+    // Emulate-or-native policy: eager always emulates; otherwise a chip row
+    // asks the performance model and an architecture row compares the
+    // arithmetic intensity 2mnk / (bytes * (mk + kn + mn)) with its threshold
+    // for the type (0 = always, NEVER = never).
+    TEST_F(FixedPointEmulationHostTest, PolicyChipModelArchThreshold)
+    {
+        constexpr auto NATIVE  = FIXED_POINT_EMULATION_POLICY_NATIVE;
+        constexpr auto EMULATE = FIXED_POINT_EMULATION_POLICY_EMULATE;
+        constexpr auto MODEL   = FIXED_POINT_EMULATION_POLICY_MODEL;
+        constexpr auto NEVER   = FIXED_POINT_EMULATION_NEVER;
+
+        const FixedPointEmulationDeviceSupport chip{
+            FIXED_POINT_EMULATION_DEVICE_CHIP, NEVER, NEVER};
+        const FixedPointEmulationDeviceSupport arch{
+            FIXED_POINT_EMULATION_DEVICE_ARCH, 25.0, NEVER};
+        const FixedPointEmulationDeviceSupport arch_fp32_always{
+            FIXED_POINT_EMULATION_DEVICE_ARCH, NEVER, 0.0};
+        const FixedPointEmulationDeviceSupport none{FIXED_POINT_EMULATION_DEVICE_NONE, 0.0, 0.0};
+
+        for(hipDataType t : {HIP_R_64F, HIP_R_32F})
+        {
+            /* Chip row: eager emulates, otherwise the performance model. */
+            EXPECT_EQ(fixedPointEmulationPolicy(chip, true, t, 16, 16, 16), EMULATE);
+            EXPECT_EQ(fixedPointEmulationPolicy(chip, false, t, 16, 16, 16), MODEL);
+            EXPECT_EQ(fixedPointEmulationPolicy(chip, false, t, 4096, 4096, 4096), MODEL);
+            /* Architecture row: eager emulates regardless of the threshold. */
+            EXPECT_EQ(fixedPointEmulationPolicy(arch, true, t, 16, 16, 16), EMULATE);
+            /* Unsupported device: never. */
+            EXPECT_EQ(fixedPointEmulationPolicy(none, true, t, 4096, 4096, 4096), NATIVE);
+            EXPECT_EQ(fixedPointEmulationPolicy(none, false, t, 4096, 4096, 4096), NATIVE);
+        }
+        /* Architecture row, FP64 threshold 25 flop/byte: a square GEMM of size
+         * n has an intensity of n / 12, so 300^3 is exactly at the threshold
+         * (inclusive). */
+        EXPECT_EQ(fixedPointEmulationPolicy(arch, false, HIP_R_64F, 299, 299, 299), NATIVE);
+        EXPECT_EQ(fixedPointEmulationPolicy(arch, false, HIP_R_64F, 300, 300, 300), EMULATE);
+        EXPECT_EQ(fixedPointEmulationPolicy(arch, false, HIP_R_64F, 4096, 4096, 4096), EMULATE);
+        /* A small k keeps the intensity low however large m * n * k is. */
+        EXPECT_EQ(fixedPointEmulationPolicy(arch, false, HIP_R_64F, 65536, 65536, 64), NATIVE);
+        EXPECT_EQ(fixedPointEmulationPolicy(arch, false, HIP_R_64F, 65536, 65536, 128), EMULATE);
+        /* Architecture row, FP32 NEVER: native at any size unless eager. */
+        EXPECT_EQ(fixedPointEmulationPolicy(arch, false, HIP_R_32F, 16384, 16384, 16384), NATIVE);
+        EXPECT_EQ(fixedPointEmulationPolicy(arch, true, HIP_R_32F, 16384, 16384, 16384), EMULATE);
+        /* Threshold 0: always emulate; NEVER: never. */
+        EXPECT_EQ(fixedPointEmulationPolicy(arch_fp32_always, false, HIP_R_32F, 1, 1, 1), EMULATE);
+        EXPECT_EQ(
+            fixedPointEmulationPolicy(arch_fp32_always, false, HIP_R_64F, 16384, 16384, 16384),
+            NATIVE);
+        /* Other types are never emulated. */
+        EXPECT_EQ(fixedPointEmulationPolicy(chip, true, HIP_R_16F, 4096, 4096, 4096), NATIVE);
     }
 
     // -----------------------------------------------------------------------
@@ -345,6 +440,36 @@ namespace
         set_enabled(true);
         set_strategy(HIPBLAS_EMULATION_STRATEGY_PERFORMANT);
         EXPECT_TRUE(would_apply(HIP_R_64F, 4096, 4096, 4096, 1));
+    }
+
+    // On a device with only an architecture row, PERFORMANT emulates FP64
+    // exactly at or above the row's intensity threshold and runs FP32
+    // natively; EAGER
+    // emulates below the threshold.  Devices with a chip row use the
+    // performance model (covered by the tests above).
+    TEST_F(FixedPointEmulationTest, WouldApply_ArchitectureThreshold)
+    {
+        int dev = 0;
+        ASSERT_EQ(hipGetDevice(&dev), hipSuccess);
+        const FixedPointEmulationDeviceSupport sup = fixedPointEmulationDeviceSupport(dev);
+        if(sup.match != FIXED_POINT_EMULATION_DEVICE_ARCH)
+            GTEST_SKIP() << "Device has a chip row: the performance model decides";
+        set_enabled(true);
+        set_strategy(HIPBLAS_EMULATION_STRATEGY_PERFORMANT);
+        if(sup.fp64_min_ai > 1.0 && sup.fp64_min_ai < FIXED_POINT_EMULATION_NEVER)
+        {
+            /* A square FP64 GEMM of size n has an intensity of n / 12. */
+            const int64_t edge  = static_cast<int64_t>(std::ceil(12.0 * sup.fp64_min_ai));
+            const int64_t large = edge + 2;
+            const int64_t small = edge / 2;
+            EXPECT_TRUE(would_apply(HIP_R_64F, large, large, large, 1));
+            EXPECT_FALSE(would_apply(HIP_R_64F, small, small, small, 1));
+            set_strategy(HIPBLAS_EMULATION_STRATEGY_EAGER);
+            EXPECT_TRUE(would_apply(HIP_R_64F, small, small, small, 1));
+            set_strategy(HIPBLAS_EMULATION_STRATEGY_PERFORMANT);
+        }
+        if(sup.fp32_min_ai == FIXED_POINT_EMULATION_NEVER)
+            EXPECT_FALSE(would_apply(HIP_R_32F, 4096, 4096, 4096, 1));
     }
 
     TEST_F(FixedPointEmulationTest, EmulatedGemm_SmokeIdentity)
