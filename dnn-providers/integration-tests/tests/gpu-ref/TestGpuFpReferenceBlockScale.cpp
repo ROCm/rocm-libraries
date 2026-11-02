@@ -21,6 +21,7 @@ using hipdnn_test_sdk::utilities::CpuFpReferenceBlockScaleQuantize;
 
 TEST(TestGpuFpReferenceBlockScale, QuantizeMatchesCpu)
 {
+    SKIP_IF_NO_DEVICES();
     Tensor<float> cpuX({2, 5});
     Tensor<int8_t> cpuY({2, 5});
     Tensor<float> cpuScale({2, 3});
@@ -45,23 +46,38 @@ TEST(TestGpuFpReferenceBlockScale, QuantizeMatchesCpu)
         }
         for(int64_t block = 0; block < 3; ++block)
         {
-            EXPECT_FLOAT_EQ(gpuScale.getHostValue(row, block), cpuScale.getHostValue(row, block));
+            EXPECT_EQ(gpuScale.getHostValue(row, block), cpuScale.getHostValue(row, block));
         }
+    }
+
+    const std::vector<float> expectedScales{
+        0x1.83060ep-6f, 0x1.02040ap-4f, 0.0f, 0x1.c38710p-5f, 0x1.02040ap-5f, 0x1.02040ap-8f};
+    for(size_t i = 0; i < expectedScales.size(); ++i)
+    {
+        EXPECT_EQ(gpuScale.getHostValue(static_cast<int64_t>(i / 3), static_cast<int64_t>(i % 3)),
+                  expectedScales[i]);
     }
 }
 
 TEST(TestGpuFpReferenceBlockScale, DequantizeMatchesCpu)
 {
-    Tensor<float> cpuX({1, 4, 6});
-    Tensor<float> cpuScale({1, 2, 3});
-    Tensor<float> cpuY({1, 4, 6});
-    Tensor<float> gpuX({1, 4, 6});
-    Tensor<float> gpuScale({1, 2, 3});
-    Tensor<float> gpuY({1, 4, 6});
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> cpuX({1, 5, 7});
+    Tensor<float> cpuScale({1, 3, 4});
+    Tensor<float> cpuY({1, 5, 7});
+    Tensor<float> gpuX({1, 5, 7});
+    Tensor<float> gpuScale({1, 3, 4});
+    Tensor<float> gpuY({1, 5, 7});
 
-    cpuX.fillWithValue(1.5f);
-    gpuX.fillWithValue(1.5f);
-    const std::vector<float> scales{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+    std::vector<float> values(35);
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        values[i] = static_cast<float>(i) - 11.5f;
+    }
+    cpuX.fillWithData(values.data(), values.size() * sizeof(float));
+    gpuX.fillWithData(values.data(), values.size() * sizeof(float));
+    const std::vector<float> scales{
+        1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f};
     cpuScale.fillWithData(scales.data(), scales.size() * sizeof(float));
     gpuScale.fillWithData(scales.data(), scales.size() * sizeof(float));
     CpuFpReferenceBlockScaleDequantize::dequantize(cpuX, cpuScale, cpuY, {2, 2}, false);
@@ -70,13 +86,44 @@ TEST(TestGpuFpReferenceBlockScale, DequantizeMatchesCpu)
     GpuFpReferenceBlockScale::dequantize(gpuX, gpuScale, gpuY, {2, 2}, false);
     gpuY.memory().hostData();
 
-    for(int64_t row = 0; row < 4; ++row)
+    for(int64_t row = 0; row < 5; ++row)
     {
-        for(int64_t column = 0; column < 6; ++column)
+        for(int64_t column = 0; column < 7; ++column)
         {
             EXPECT_FLOAT_EQ(gpuY.getHostValue(0, row, column), cpuY.getHostValue(0, row, column));
         }
     }
+}
+
+TEST(TestGpuFpReferenceBlockScale, QuantizeBlockSizeOneHasExpectedValues)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> x({2});
+    Tensor<int8_t> y({2});
+    Tensor<float> scale({2});
+    const std::vector<float> values{127.0f, -254.0f};
+    x.fillWithData(values.data(), values.size() * sizeof(float));
+
+    GpuFpReferenceBlockScale::quantize(x, y, scale, 1, 0);
+    y.memory().hostData();
+    scale.memory().hostData();
+
+    EXPECT_EQ(y.getHostValue(0), 127);
+    EXPECT_EQ(y.getHostValue(1), -127);
+    EXPECT_EQ(scale.getHostValue(0), 1.0f);
+    EXPECT_EQ(scale.getHostValue(1), 2.0f);
+}
+
+TEST(TestGpuFpReferenceBlockScale, QuantizeRejectsNonFiniteInput)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> x({2});
+    Tensor<int8_t> y({2});
+    Tensor<float> scale({1});
+    const std::vector<float> values{1.0f, std::numeric_limits<float>::quiet_NaN()};
+    x.fillWithData(values.data(), values.size() * sizeof(float));
+
+    EXPECT_THROW(GpuFpReferenceBlockScale::quantize(x, y, scale, 2, 0), std::runtime_error);
 }
 
 template <typename QuantizedType>
@@ -124,11 +171,6 @@ static void runCompactE8M0RoundTrip()
 TEST(TestGpuFpReferenceBlockScale, CompactE8M0RoundTripsMatchCpu)
 {
     SKIP_IF_NO_DEVICES();
-    const auto arch = hipdnn_test_sdk::utilities::currentDeviceArch();
-    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx1250", 0) != 0)
-    {
-        GTEST_SKIP() << "Native HIP compact types are not supported on " << arch;
-    }
 
     runCompactE8M0RoundTrip<fp4_e2m1>();
     runCompactE8M0RoundTrip<fp6_e2m3>();

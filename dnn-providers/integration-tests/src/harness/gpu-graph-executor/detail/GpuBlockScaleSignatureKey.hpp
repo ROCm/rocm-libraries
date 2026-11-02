@@ -116,6 +116,7 @@ struct GpuBlockScaleSignatureKey
         {
             addCompactDequantizeBuilders<DataType::FLOAT>(map);
             addCompactDequantizeBuilders<DataType::HALF>(map);
+            addCompactDequantizeBuilders<DataType::BFLOAT16>(map);
         }
         return map;
     }
