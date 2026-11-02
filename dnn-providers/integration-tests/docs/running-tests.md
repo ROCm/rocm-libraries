@@ -690,12 +690,21 @@ only if both values are live in it.
 | `dead` | legal rows hold both, but in each of them at least one of the two is inert (the pair can never be met live) |
 | `unproven` | the exhaustive search for a covering row passed its cap before it decided; the pair is never counted as covered |
 
-with the reason in the report. `unproven` is empty for the four SDPA forward spaces
-(`SdpaFwd/Default`, `SdpaFwd/Flash2Region`, `SdpaFwd/Gfx950Dense`, `SdpaFwd/Flash2`), where the
-generator's tests prove every `illegal` and `dead` pair by an independent search and show that
-every other pair is covered. The generator runs on every space, but the other spaces are not
-tested for completeness: a space with many axes tied together by constraints (the two Gfx1151
-spaces, which are not run on a device either) may report `unproven` pairs.
+with the reason in the report. The search is exact. It reads what each constraint and each part of
+the rendered case *effectively* reads once the pair is fixed (`d3 if ndim == 5 else 1` reads
+nothing of `d3` for `ndim` 4, so no value of the 3-D window is live there), sets axes depth first
+with forward checking, and searches the axes left after the pair as separate components when no
+constraint ties them. A cap on the nodes it visits per pair (`DEFAULT_EXHAUSTIVE_CAP`) is the
+fallback: a space whose constraints and case tie too many axes together for it reports `unproven`
+pairs instead of guessing. No shipped space does: `unproven` is empty for all of them. The tests
+assert it for every space whose graph varies; the probe-only spaces, whose graph is fixed and
+which vary the alignment and placement alone (`Matmul/Align`, `SdpaFwd/Flash2`), are covered
+completely by their 27 rows. The tests also pin the `illegal` and `dead` sets of every shipped
+space (`gauntlet/pairwise_pins.json`,
+re-pinned in the commit that changes a space's axes, derived values or constraints), prove every
+`illegal` and `dead` pair of the four SDPA forward spaces (`SdpaFwd/Default`,
+`SdpaFwd/Flash2Region`, `SdpaFwd/Gfx950Dense`, `SdpaFwd/Flash2`) by an independent search, and show
+that every other pair of those spaces is covered.
 
 **Rows.** A row is an explicit row: id `pw<k>` (`k` counts from 0 over the main rows and the repair
 rows of the space), `metadata.generator` `gauntlet-pairwise`, the pairwise seed in `notes`
@@ -766,8 +775,12 @@ can be compared with it. The same is `run_gauntlet_fuzz.coverage_of(work_dir, le
 first=None, spaces_dir=None)`. Random runs have no `pair_coverage` of their own.
 
 **What is tested.** The generator, the driver's pairwise path and the coverage are tested
-(`test_gauntlet.py`, stub binary, no GPU). That every pair is covered or proven impossible is
-tested for the SDPA forward spaces only; the other spaces get a generator run and nothing more.
+(`test_gauntlet.py`, stub binary, no GPU). That no pair is `unproven` is tested for every shipped
+space with a varying graph; that every other pair is covered, and that every `illegal` and `dead`
+pair is so by a search coded apart from the generator, is tested for the SDPA forward spaces; the
+illegal and dead sets of every space are pinned. A brute force over the whole product of small toy
+spaces checks the proofs, including toys that only the effective-reads search and the component
+split settle within a small cap.
 
 ### Measuring the oracle's cost
 

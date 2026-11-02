@@ -4930,9 +4930,10 @@ def test_shrink_search_ends_on_a_value_the_oracle_accepted_even_when_it_is_not_m
 # Pairwise generation (pairwise.py)
 # --------------------------------------------------------------------------
 
-# The completeness tests cover SDPA forward: the spaces of its three engines (ASM_SDPA,
-# HIP_FLASH2, rocKE dense) and the probe space. The generator runs on any space; for the others
-# only that it returns (and what it does when its search is capped) is tested.
+# The independent checks (the coverage witness and the independent proof of every illegal and dead
+# tuple) cover SDPA forward: the spaces of its three engines (ASM_SDPA, HIP_FLASH2, rocKE dense)
+# and the probe space. That every pair of every space with a varying graph is settled (no
+# ``unproven``), and the pins of the illegal and dead sets, cover every shipped space.
 SDPA_FWD_SPACES = [
     "SdpaFwd/Default",
     "SdpaFwd/Flash2Region",
@@ -5035,6 +5036,33 @@ def _brute_force(sp, levels):
     return covered, universe - held, held - covered
 
 
+def _tuples_holding(order, levels, axis, value):
+    """Every tuple that holds ``axis`` at ``value``, as ``_tuple_key`` writes it (the two axes in
+    the space's order ``order``; ``levels`` are the levels of each axis)."""
+    found = set()
+    for other in order:
+        if other == axis:
+            continue
+        for level in levels[other]:
+            (_, a, va), (_, b, vb) = sorted(
+                [(order.index(axis), axis, value), (order.index(other), other, level)],
+                key=lambda t: t[0],
+            )
+            found.add(_tuple_key(a, va, b, vb))
+    return found
+
+
+SPLIT_AXES = {
+    "a": [1, 2],
+    "b": [1, 2],
+    "u1": [1, 2, 3],
+    "u2": [1, 2, 3],
+    "w1": [1, 2, 3],
+    "w2": [1, 2, 3],
+    "w3": [1, 2, 3],
+}
+
+
 # A toy space for each way a tuple can fail to be covered, small enough for the product.
 TOY_PAIRWISE = {
     # lv is used only while use is "on": with use "off" it is inert, so (off, lv) is dead.
@@ -5113,6 +5141,105 @@ TOY_PAIRWISE = {
         "dead": {_tuple_key("use", "off", "lv", lv) for lv in (1, 2, 3)}
         | {_tuple_key("lv", lv, "n", 1) for lv in (1, 2, 3)},
     },
+    # y is read only while sel is "a" (a conditional of the case), and a constraint ties it to
+    # x1..x3, so statically y depends on all of them. With sel at "b" nothing reads y: (b, y) is
+    # dead for every y, and a search that sees what is read finds that without enumerating
+    # x1..x3. ``cap`` is a node cap that search needs and a search over every axis the pair is
+    # tied to does not.
+    "branch": {
+        "decl": {
+            "axes": {
+                "sel": {"values": ["a", "b"]},
+                "y": {"values": [1, 2, 3]},
+                "x1": {"values": [1, 2, 3]},
+                "x2": {"values": [1, 2, 3]},
+                "x3": {"values": [1, 2, 3]},
+                "x4": {"values": [1, 2, 3]},
+            },
+            "derive": {},
+            "constraints": [
+                {"rule": "x1 + x2 + x3 + x4 + y <= 12", "reason": "the five must fit"}
+            ],
+            "case": {
+                "values": {
+                    "sel": "${sel}",
+                    "x1": "${x1}",
+                    "x2": "${x2}",
+                    "x3": "${x3}",
+                    "x4": "${x4}",
+                    "gain": "${y if sel == 'a' else 0}",
+                },
+                "metadata": {},
+            },
+        },
+        "illegal": set(),
+        "dead": {_tuple_key("sel", "b", "y", v) for v in (1, 2, 3)},
+        "cap": 20,
+    },
+    # The same through a ``when``: the entry that holds y and z is present only while sel is "a",
+    # so with sel at "b" neither is read and (b, y), (b, z) are dead, again without enumerating
+    # z and the three x that the entry and the constraint tie them to.
+    "guarded": {
+        "decl": {
+            "axes": {
+                "sel": {"values": ["a", "b"]},
+                "y": {"values": [1, 2, 3]},
+                "z": {"values": [1, 2, 3]},
+                "x1": {"values": [1, 2, 3]},
+                "x2": {"values": [1, 2, 3]},
+                "x3": {"values": [1, 2, 3]},
+            },
+            "derive": {},
+            "constraints": [
+                {"rule": "x1 + x2 + x3 + y <= 9", "reason": "the four must fit"}
+            ],
+            "case": {
+                "values": {
+                    "sel": "${sel}",
+                    "x1": "${x1}",
+                    "x2": "${x2}",
+                    "x3": "${x3}",
+                },
+                "metadata": {},
+                "add_tensors": [
+                    {"when": "${sel == 'a'}", "uid": 7, "gain": "${y + z}"}
+                ],
+            },
+        },
+        "illegal": set(),
+        "dead": {_tuple_key("sel", "b", "y", v) for v in (1, 2, 3)}
+        | {_tuple_key("sel", "b", "z", v) for v in (1, 2, 3)},
+        "cap": 20,
+    },
+    # b = 1 needs w1 * w2 * w3 = 7, which no level of w gives, so b = 1 is in no legal row (every
+    # tuple that holds it is illegal) and b = 2, the only level left, is inert (every tuple that
+    # holds it is dead). To refute (b = 1, u1 = 1) the search must see that w1 w2 w3 have no
+    # completion whatever a and u2 are: the two constraints share no axis, so with the pair set
+    # a u2 and w1 w2 w3 are two components, one with completions and one without. ``cap`` is a node
+    # cap that searching the components apart needs and one search over all of them does not.
+    "split": {
+        "decl": {
+            "axes": {k: {"values": v} for k, v in SPLIT_AXES.items()},
+            "derive": {},
+            "constraints": [
+                {
+                    "rule": "a != 1 or u1 + u2 >= 3",
+                    "reason": "a = 1 needs u1 + u2 >= 3",
+                },
+                {
+                    "rule": "b != 1 or w1 * w2 * w3 == 7",
+                    "reason": "b = 1 needs a product of seven, which no w gives",
+                },
+            ],
+            "case": {
+                "values": {k: "${%s}" % k for k in SPLIT_AXES},
+                "metadata": {},
+            },
+        },
+        "illegal": _tuples_holding(list(SPLIT_AXES), SPLIT_AXES, "b", 1),
+        "dead": _tuples_holding(list(SPLIT_AXES), SPLIT_AXES, "b", 2),
+        "cap": 40,
+    },
 }
 
 
@@ -5133,7 +5260,7 @@ def test_pairwise_matches_a_brute_force_over_the_whole_product_of_a_toy_space(
     # and the brute force sees the cases each toy is there for
     assert TOY_PAIRWISE[toy]["illegal"] <= illegal
     assert TOY_PAIRWISE[toy]["dead"] <= dead
-    if toy in ("gated", "constrained", "ranged"):
+    if toy in ("gated", "constrained", "ranged", "branch", "guarded", "split"):
         assert (illegal, dead) == (
             TOY_PAIRWISE[toy]["illegal"],
             TOY_PAIRWISE[toy]["dead"],
@@ -5731,7 +5858,8 @@ def test_pair_coverage_counts_drawn_passed_and_declined_tuples_of_hand_made_reco
 
 
 def test_pairwise_runs_on_a_space_outside_sdpa_forward(pairwise_builds):
-    # RMSNorm is outside the completeness tests: the build only has to return rows that render
+    # RMSNorm has no independent proof of its own (the completeness test only says every pair is
+    # settled): the build has to return rows that render
     result, seconds = pairwise_builds("RMSNorm/Default")
     sp = space_by_id("RMSNorm/Default")
     assert result.rows
@@ -5757,6 +5885,225 @@ def test_a_capped_search_reports_unproven_and_never_counts_the_tuple_covered(tmp
     assert not covered & (flagged | unproven)
     # every tuple is covered, proven impossible or reported unproven: none is dropped
     assert covered | flagged | unproven == _tuple_universe(capped.levels)
+
+
+def _fixed_graph(sp):
+    """Is the graph the same in every row of the space (a probe-only space, like Matmul/Align and
+    SdpaFwd/Flash2)? No ``${}`` of ``case.values`` reads an axis, directly or through a derived
+    value: only what is placed on the graph (alignment, placement) varies."""
+    reads = {a: {a} for a in sp.axes}
+    for name, expr in sp.derive.items():
+        reads[name] = set().union(
+            *(reads[n] for n in _expression_names(expr.source) if n in reads)
+        )
+    case = json.loads(sp.path.read_text(encoding="utf-8"))["case"]
+    return not any(
+        reads[n]
+        for source in _substitutions(case["values"])
+        for n in _expression_names(source)
+        if n in reads
+    )
+
+
+PROBE_ONLY_SPACES = [s.space_id for s in SPACES if _fixed_graph(s)]
+COMPLETE_SPACES = [s.space_id for s in SPACES if not _fixed_graph(s)]
+PAIRWISE_PINS = json.loads((HERE / "pairwise_pins.json").read_text(encoding="utf-8"))
+
+
+def test_the_probe_only_spaces_are_the_ones_whose_graph_never_varies():
+    # bug caught: a space with a varying graph left out of the completeness test below
+    assert {"Matmul/Align", "SdpaFwd/Flash2"} <= set(PROBE_ONLY_SPACES)
+    for space_id in COMPLETE_SPACES:
+        assert set(space_by_id(space_id).axes) - {"alignment", "placement"}, space_id
+    assert len(COMPLETE_SPACES) + len(PROBE_ONLY_SPACES) == len(SPACES)
+
+
+@pytest.mark.parametrize("space_id", COMPLETE_SPACES)
+def test_every_pair_of_every_space_with_a_varying_graph_is_settled(
+    pairwise_builds, space_id
+):
+    # bug caught: a search that stops at its cap and leaves a pair neither covered nor proven
+    # impossible, or a row of the covering set that is not a legal row of the space
+    result, seconds = pairwise_builds(space_id)
+    assert result.unproven == [], [(f.pair, f.detail) for f in result.unproven[:5]]
+    universe = _tuple_universe(result.levels)
+    flagged = _flagged(result, "illegal") | _flagged(result, "dead")
+    assert result.tuples_total == len(universe) and flagged <= universe
+    assert len(result.rows) >= result.lower_bound
+    sp = space_by_id(space_id)
+    for k, values in enumerate(result.rows):
+        assert sampler.sample_from_axes(sp, values, 7, f"pw{k}").axis_values == values
+    print(
+        f"\n{space_id}: {len(result.rows)} rows, {result.tuples_total} tuples,"
+        f" {len(result.illegal)} illegal, {len(result.dead)} dead,"
+        f" {len(result.unproven)} unproven, built in {seconds:.1f} s"
+    )
+
+
+def _pin_key(pair):
+    (a, va), (b, vb) = pair
+    return json.dumps([a, repr(va), b, repr(vb)])
+
+
+def test_every_shipped_space_has_a_pin_at_the_pairwise_seed():
+    # bug caught: a new space whose illegal and dead tuples nothing pins
+    assert PAIRWISE_PINS["seed"] == PAIRWISE_SEED
+    assert set(PAIRWISE_PINS["spaces"]) == set(SPACE_IDS)
+
+
+@pytest.mark.parametrize("space_id", sorted(PAIRWISE_PINS["spaces"]))
+def test_the_illegal_and_dead_sets_are_pinned(pairwise_builds, space_id):
+    # bug caught: a change to the proof search (or to a space) that moves a tuple between covered,
+    # illegal and dead. The sets of the spaces that were settled before forward checking and
+    # components were added are the ones that search printed; a change of a space's axes, derived
+    # values or constraints re-pins them (pairwise_pins.json) in its own commit, with the diff.
+    result, _ = pairwise_builds(space_id)
+    for kind in ("illegal", "dead"):
+        keys = sorted(_pin_key(f.pair) for f in getattr(result, kind))
+        pinned = PAIRWISE_PINS["pairs"].get(space_id, {}).get(kind)
+        if pinned is not None:
+            expected = sorted(json.dumps(k) for k in pinned)
+            assert keys == expected, (
+                kind,
+                "no longer flagged:",
+                sorted(set(expected) - set(keys))[:5],
+                "newly flagged:",
+                sorted(set(keys) - set(expected))[:5],
+            )
+        pin = PAIRWISE_PINS["spaces"][space_id][kind]
+        assert len(keys) == pin["count"], (kind, len(keys), pin["count"])
+        assert (
+            hashlib.sha256("\n".join(keys).encode()).hexdigest() == pin["sha256"]
+        ), kind
+
+
+@pytest.mark.parametrize("toy", ["branch", "guarded", "split"])
+def test_forward_checking_and_components_settle_pairs_a_small_cap_would_leave_unproven(
+    tmp_path, toy
+):
+    # bug caught: a search that enumerates every axis a pair is tied to: it passes the small cap
+    # of the toy on a pair that what the case effectively reads (a conditional in branch, a
+    # ``when`` in guarded) or the independent components (split) settle. The toys' caps are chosen
+    # so that a search over all the axes a pair is tied to ends ``unproven``
+    cap = TOY_PAIRWISE[toy]["cap"]
+    sp = space_lib.load_space(write_space(tmp_path, **TOY_PAIRWISE[toy]["decl"]))
+    small = pairwise.build(sp, 1, cap=cap)
+    assert small.unproven == []
+    assert _flagged(small, "illegal") == TOY_PAIRWISE[toy]["illegal"]
+    assert _flagged(small, "dead") == TOY_PAIRWISE[toy]["dead"]
+    # the cap is still the fallback: a search too short for the pair reports it unproven
+    starved = pairwise.build(sp, 1, cap=2)
+    assert starved.unproven
+    assert not _flagged(starved, "illegal") & _flagged(starved, "unproven")
+    assert not _flagged(starved, "dead") & _flagged(starved, "unproven")
+
+
+@pytest.mark.parametrize(
+    "space_id",
+    [
+        "ResampleFwd/Default",
+        "SdpaFwd/Gfx1151",
+        "SdpaFwd/Default",
+        "BatchnormBackward/Default",
+    ],
+)
+def test_the_axes_an_expression_effectively_reads_are_all_its_value_depends_on(
+    space_id,
+):
+    # bug caught: the analysis that drops a branch (a conditional, an and/or operand, a false
+    # ``when``) calls an axis unread that a value does depend on, so a pair is called dead or
+    # illegal wrongly. Checked on the spaces the search leans on it for: with some axes fixed,
+    # every other axis the analysis calls unread leaves the value of a constraint and of each
+    # group of the case where it is, whatever level it takes.
+    sp = space_by_id(space_id)
+    names = list(sp.axes)
+    levels = {a: pairwise.levels(sp, a, 1) for a in names}
+    partial = pairwise._Partial(sp, pairwise._Dependencies(sp).expanded)
+    deciders = sorted(partial.deciders)
+    rng = random.Random(f"effective-reads:{space_id}")
+
+    def value(kind, i, row):
+        env = pairwise._LazyEnv(sp.derive, row)
+        if kind == "rule":
+            return sp.constraints[i].expr.evaluate(env)
+        return pairwise._group_value(partial.groups[i], env)
+
+    compared = 0
+    for _ in range(25):
+        row = {a: copy.deepcopy(rng.choice(levels[a])) for a in names}
+        fixed = rng.sample(deciders, min(len(deciders), rng.randint(1, 3)))
+        under = pairwise._Under(partial, {a: row[a] for a in fixed})
+        claims = [
+            ("rule", i, under.reads(node))
+            for i, node in enumerate(partial.constraint_nodes)
+        ] + [
+            ("group", i, partial.group_reads(under, i))
+            for i in range(len(partial.groups))
+        ]
+        for kind, i, reads in claims:
+            try:
+                base = value(kind, i, row)
+            except space_lib.SpaceError:
+                continue
+            for axis in names:
+                if axis in reads or axis in fixed:
+                    continue
+                for level in rng.sample(levels[axis], min(2, len(levels[axis]))):
+                    alt = {**row, axis: copy.deepcopy(level)}
+                    assert value(kind, i, alt) == base, (kind, i, axis, level, fixed)
+                    compared += 1
+    assert compared > 100
+
+
+def _axis_is_live(sp, levels, values, axis):
+    base = _rendered(sp, values)
+    for level in levels[axis]:
+        if _same_value(level, values[axis]):
+            continue
+        alt = _rendered(sp, {**values, axis: level})
+        if alt is not None and alt != base:
+            return True
+    return False
+
+
+@pytest.mark.parametrize(
+    "space_id", ["ResampleFwd/Default", "SdpaFwd/Gfx1151", "SdpaFwd/Gfx1151Decode"]
+)
+def test_random_rows_that_hold_a_flagged_pair_never_have_both_values_live(
+    pairwise_builds, space_id
+):
+    # bug caught: an illegal or dead verdict that is wrong. These spaces' pairs are the ones that
+    # only the search over what a case effectively reads settles, and the independent proof of the
+    # SDPA forward spaces cannot decide them (it enumerates every axis they are tied to). Random
+    # rows holding a flagged pair stand in for it: a legal row holds no illegal pair, and in a
+    # legal row that holds a dead pair one of its two values is inert.
+    result, _ = pairwise_builds(space_id)
+    sp = space_by_id(space_id)
+    names = list(result.levels)
+    rng = random.Random(f"flagged-pairs:{space_id}")
+    legal_rows = 0
+    for kind in ("illegal", "dead"):
+        for finding in getattr(result, kind):
+            (a, va), (b, vb) = finding.pair
+            found = 0
+            for _ in range(400):
+                values = {n: copy.deepcopy(rng.choice(result.levels[n])) for n in names}
+                values[a], values[b] = copy.deepcopy(va), copy.deepcopy(vb)
+                if _rendered(sp, values) is None:
+                    continue
+                assert kind == "dead", (
+                    "a legal row holds an illegal pair",
+                    finding.pair,
+                )
+                assert not (
+                    _axis_is_live(sp, result.levels, values, a)
+                    and _axis_is_live(sp, result.levels, values, b)
+                ), (finding.pair, values)
+                found += 1
+                legal_rows += 1
+                if found == 6:
+                    break
+    assert legal_rows > 20
 
 
 # --------------------------------------------------------------------------

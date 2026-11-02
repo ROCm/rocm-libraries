@@ -30,20 +30,39 @@ search over the axes that can matter for it (the *relevant axes*) decides why:
 * ``unproven``: the search hit its cap first, and no later row covered the tuple. A space with
   many axes tied together by constraints can leave some; the tuple is never counted covered.
 
-The relevant axes of the pair (A, B) are found by closure, reading the names of expressions with
-``ast`` and expanding derived names to the axes they read. The *support* of an axis is itself plus
-every axis read by a constraint that reads it and by a case-template group that reads it (a ``${}``
-value, or one ``add_tensors`` / ``node_patches`` / ``tensor_patches`` entry with its ``when``):
-whether the axis is live in a legal row depends on those axes alone. The relevant axes of a pair
-are the support of A and of B, closed under constraints (a constraint that reads a relevant axis
-joins all its axes; so does a derived value that can fail to evaluate, such as a division by an
-axis). An axis outside them cannot change whether the pair is legal or live, so it is filled from
-a legal base row. The search is depth first over the relevant axes in a *static plan*: an order
-fixed per search shape, and for each depth the checks that become decidable there (a constraint;
-a derived value that can fail; and, for an axis that must be live, necessary conditions for it:
-some other level that keeps a constraint true, some derived value that reads it directly that
-changes, and both together). Each check reads a few axes only, so its answer is cached by their
-levels and shared by every search of the build; a prefix that fails one is refuted at once.
+The search that decides this is exact and has three parts (``_Under``, ``_Builder._problem``,
+``_Builder._solve``).
+
+*What the expressions read.* The pair fixes two axes, and ``_Under`` evaluates the space's
+expressions with them fixed to say which axes each one *effectively* reads: the branch of
+``d3 if ndim == 5 else 1`` that a fixed ``ndim`` rules out is not read, nor are the operands of an
+``and`` / ``or`` after the one that ends it, nor the body of an ``add_tensors`` / ``node_patches``
+entry whose ``when`` is false. With ``ndim`` at 4 nothing reads ``win_d``, so it is inert and every
+pair that holds it is dead at once. The *relevant axes* are the axes that the constraints (and
+derived values that can fail to evaluate, such as a division by an axis) which read a fixed axis
+effectively read, those that the liveness checks below read, and, by closure, those of every such
+expression that reads a relevant axis. Every other axis cannot change whether the pair is legal or
+live, so it is filled from a legal base row.
+
+*Checks.* A constraint, a fallible derived value, and the liveness of each axis that must be live
+are each one check, reading a few axes; its answer is cached by their levels, for every search of
+the build. An axis is live when another of its levels gives a legal row (the constraints and derived
+values that read it hold) in which one *group* of the case renders differently: a case differs
+exactly where one of its groups does (``_template_groups``: each ``${}`` of ``values``, of the graph
+keys of ``metadata`` and of ``tensor_patches``, and each ``add_tensors`` / ``node_patches`` entry as
+a whole, present only while its ``when`` holds). Two cheaper checks, both necessary for liveness,
+refute a prefix early: the case must still be able to read the axis once the axes that decide what
+is read (the tests of conditionals and guards) are set, and some other level must keep a constraint
+true and change a value the case reads.
+
+*Search.* Depth first with forward checking: whenever every axis of a check but one is set, only
+the levels of that one that pass it stay in its domain (one level is set at once and propagates; none
+cuts the branch), and the axis with the smallest domain is set next. After the pair is set and
+propagated, the axes left split into the connected components of the checks that read two of them.
+Components share no check, so a row exists iff every component has a completion, and each is
+searched alone. A liveness check reads every axis its groups read, so it joins them; where the
+case reads all axes through the axis that must be live, they stay one component. A cap on the nodes
+visited (``DEFAULT_EXHAUSTIVE_CAP``) stays as the fallback: past it the tuple is ``unproven``.
 
 Construction is AETG-style: take the first uncovered tuple, fix its two axes, draw ``candidates``
 completions (each fills the other axes in a random order with the level that covers the most
@@ -67,7 +86,7 @@ from bisect import bisect_right
 from collections import Counter
 from typing import NamedTuple
 
-from space import SpaceError
+from space import SpaceError, _Expr, _Subst
 
 DEFAULT_CANDIDATES = 50
 DEFAULT_EXHAUSTIVE_CAP = 200_000
@@ -81,6 +100,7 @@ INTERIOR_LIST_LIMIT = 4096
 # What rejects a prefix of a search besides a constraint.
 EVALUATION_FAILS = "an expression of the space fails to evaluate"
 INERT = "a value is inert"
+NO_LEVEL = "no level of an axis is left"
 
 # What of a rendered case shapes the graph. The rest of the metadata is the row's name.
 GRAPH_CASE_KEYS = ("values", "tensor_patches", "add_tensors", "node_patches")
@@ -283,19 +303,6 @@ class _Dependencies:
                 support |= part
         return frozenset(support)
 
-    def close(self, axes):
-        """``axes`` plus, until nothing changes, every axis of each constraint (or fallible
-        derived value) that touches them."""
-        closed = set(axes)
-        grew = True
-        while grew:
-            grew = False
-            for c in self.reach:
-                if c & closed and not c <= closed:
-                    closed |= c
-                    grew = True
-        return frozenset(closed)
-
 
 def _rendered(case):
     metadata = case["metadata"]
@@ -439,6 +446,292 @@ class _Capped(Exception):
     """A search visited more nodes than its cap."""
 
 
+class _Unread(Exception):
+    """An expression read a name its dependency analysis said it would not read."""
+
+
+class _LazyEnv(dict):
+    """Axis values, with each derived value computed the first time it is read. A name that is
+    neither is an ``_Unread``: the search evaluates an expression with only the axes it
+    depends on, so a read outside them is a bug of the analysis, never a value to guess.
+    """
+
+    def __init__(self, derive, values):
+        super().__init__(values)
+        self._derive = derive
+
+    def __missing__(self, name):
+        expr = self._derive.get(name)
+        if expr is None:
+            raise _Unread(name)
+        value = self[name] = expr.evaluate(self)
+        return value
+
+
+class _Group(NamedTuple):
+    """One part of a rendered case that stands or falls with its values: a ``${...}`` of
+    ``values``, of a graph key of ``metadata`` or of ``tensor_patches``, or one ``add_tensors`` /
+    ``node_patches`` entry (all the ``${...}`` of its body, present only while its ``when``
+    holds; ``guard`` is that ``when``, None for the others)."""
+
+    guard: object
+    parts: tuple
+
+
+def _compiled_substitutions(tree):
+    """The ``${...}`` of a compiled case block (``Space.case_values`` and the like)."""
+    if isinstance(tree, _Subst):
+        yield tree
+    elif isinstance(tree, list):
+        for v in tree:
+            yield from _compiled_substitutions(v)
+    elif isinstance(tree, dict):
+        for v in tree.values():
+            yield from _compiled_substitutions(v)
+
+
+def _template_groups(space):
+    """The parts of a space's case that decide whether two rendered cases differ: exactly what
+    ``_rendered`` compares (the ``values``, the added tensors, the node and tensor patches and the
+    ``GRAPH_METADATA_KEYS`` of the metadata)."""
+    groups = [_Group(None, (s,)) for s in _compiled_substitutions(space.case_values)]
+    for key, tree in space.case_metadata.items():
+        if key in GRAPH_METADATA_KEYS:
+            groups += [_Group(None, (s,)) for s in _compiled_substitutions(tree)]
+    for entries in (space.case_add_tensors, space.case_node_patches):
+        for entry in entries or ():
+            body = {k: v for k, v in entry.items() if k != "when"}
+            groups.append(
+                _Group(entry.get("when"), tuple(_compiled_substitutions(body)))
+            )
+    groups += [
+        _Group(None, (s,)) for s in _compiled_substitutions(space.case_tensor_patches)
+    ]
+    return groups
+
+
+def _group_value(group, env):
+    """What a group renders to in ``env`` as text, None while its entry is left out."""
+    guard = group.guard
+    if isinstance(guard, _Subst):
+        if not guard.expr.evaluate(env):
+            return None
+    elif guard is not None and not guard:
+        return None
+    return json.dumps(
+        [part.expr.evaluate(env) for part in group.parts], sort_keys=True, default=repr
+    )
+
+
+_UNKNOWN = object()
+_NO_AXES = frozenset()
+
+
+def _parse(source):
+    return ast.parse(source.strip(), mode="eval").body
+
+
+class _KnownEnv(dict):
+    """The environment ``_Under`` evaluates a fully known subexpression in."""
+
+    def __init__(self, under):
+        super().__init__()
+        self._under = under
+
+    def __missing__(self, name):
+        value = self._under.value_of(name)
+        if value is _UNKNOWN:
+            raise _Unread(name)
+        self[name] = value
+        return value
+
+
+class _Partial:
+    """The expressions of a space as syntax trees, for ``_Under``: derived values, constraints and
+    the groups of the case (see ``_template_groups``)."""
+
+    def __init__(self, space, expanded):
+        self.axes = frozenset(space.axes)
+        self.evaluator = _Expr("0", space.space_id, "dependency analysis", ())
+        self.derive_nodes = {n: _parse(e.source) for n, e in space.derive.items()}
+        self.constraint_nodes = [_parse(c.rule) for c in space.constraints]
+        self.groups = _template_groups(space)
+        self.guard_nodes = [
+            _parse(g.guard.expr.source) if isinstance(g.guard, _Subst) else None
+            for g in self.groups
+        ]
+        self.part_nodes = [
+            [_parse(p.expr.source) for p in g.parts] for g in self.groups
+        ]
+        # The axes some conditional, ``and`` / ``or`` operand or ``when`` that the groups of the
+        # case read tests: the only ones whose values can decide what the case reads.
+        deciders = set()
+
+        def tests(node):
+            for n in ast.walk(node):
+                if isinstance(n, ast.Name) and n.id in expanded:
+                    deciders.update(expanded[n.id])
+
+        roots = [n for nodes in self.part_nodes for n in nodes]
+        roots += [g for g in self.guard_nodes if g is not None]
+        stack = [n.id for r in roots for n in ast.walk(r) if isinstance(n, ast.Name)]
+        reached = set()
+        while stack:
+            name = stack.pop()
+            if name in self.derive_nodes and name not in reached:
+                reached.add(name)
+                stack.extend(
+                    n.id
+                    for n in ast.walk(self.derive_nodes[name])
+                    if isinstance(n, ast.Name)
+                )
+        roots += [self.derive_nodes[name] for name in reached]
+        for root in roots:
+            for n in ast.walk(root):
+                if isinstance(n, ast.IfExp):
+                    tests(n.test)
+                elif isinstance(n, ast.BoolOp):
+                    for operand in n.values[:-1]:
+                        tests(operand)
+        for guard in self.guard_nodes:
+            if guard is not None:
+                tests(guard)
+        self.deciders = frozenset(deciders)
+
+    def is_read(self, under, axis):
+        """Does some group of the case effectively read ``axis`` under ``under``?"""
+        return any(axis in self.group_reads(under, i) for i in range(len(self.groups)))
+
+    def group_reads(self, under, i):
+        """The axes the group ``i`` effectively reads under ``under``: none while its guard is
+        known to be false."""
+        axes = _NO_AXES
+        if self.guard_nodes[i] is not None:
+            axes, value = under.visit(self.guard_nodes[i])
+            if value is not _UNKNOWN and not value:
+                return _NO_AXES
+        elif self.groups[i].guard is not None and not self.groups[i].guard:
+            return _NO_AXES
+        for node in self.part_nodes[i]:
+            axes = axes | under.visit(node)[0]
+        return axes
+
+
+class _Under:
+    """What the expressions of a space read once some axes are fixed (``fixed``: axis name ->
+    value). ``visit(node)`` returns ``(axes, value)``: the axes the expression *effectively*
+    reads, and its value if the fixed axes decide it (else ``_UNKNOWN``). It follows the
+    evaluator's own short circuits: the branch of a conditional whose test is decided, the
+    operands of ``and`` / ``or`` after one that ends the evaluation, are not read; everything
+    else reads all it names. So ``d3 if ndim == 5 else 1`` reads nothing once ``ndim`` is 4, and
+    the expression's value cannot depend on any axis outside ``axes``, whatever the other axes
+    are, which is the whole claim the search relies on."""
+
+    def __init__(self, partial, fixed):
+        self.partial = partial
+        self.fixed = fixed
+        self._memo = {}
+        self._env = _KnownEnv(self)
+
+    def value_of(self, name):
+        if name in self.fixed:
+            return self.fixed[name]
+        if name in self.partial.axes:
+            return _UNKNOWN
+        return self.visit(self.partial.derive_nodes[name])[1]
+
+    def reads(self, node):
+        return self.visit(node)[0]
+
+    def visit(self, node):
+        found = self._memo.get(id(node))
+        if found is None:
+            found = self._memo[id(node)] = self._visit(node)
+        return found
+
+    def _visit(self, node):
+        kind = type(node)
+        if kind is ast.Constant:
+            return _NO_AXES, node.value
+        if kind is ast.Name:
+            name = node.id
+            if name in self.fixed:
+                return _NO_AXES, self.fixed[name]
+            if name in self.partial.axes:
+                return frozenset([name]), _UNKNOWN
+            return self.visit(self.partial.derive_nodes[name])
+        if kind is ast.IfExp:
+            tested, value = self.visit(node.test)
+            if value is not _UNKNOWN:
+                return self.visit(node.body if value else node.orelse)
+            axes = tested | self.visit(node.body)[0] | self.visit(node.orelse)[0]
+            return axes, _UNKNOWN
+        if kind is ast.BoolOp:
+            return self._bool_op(node)
+        if kind is ast.Call:
+            parts = node.args
+        else:
+            parts = [c for c in ast.iter_child_nodes(node) if isinstance(c, ast.expr)]
+        axes, known = _NO_AXES, True
+        for part in parts:
+            part_axes, value = self.visit(part)
+            axes = axes | part_axes
+            known = known and value is not _UNKNOWN
+        return axes, (self._known(node) if known else _UNKNOWN)
+
+    def _bool_op(self, node):
+        is_and = isinstance(node.op, ast.And)
+        axes, unknown, value = _NO_AXES, False, None
+        for operand in node.values:
+            operand_axes, operand_value = self.visit(operand)
+            if unknown or operand_value is _UNKNOWN:
+                # an operand whose value is open: the rest is read, and may be what is returned
+                unknown = True
+                axes = axes | operand_axes
+            elif bool(operand_value) != is_and:  # this operand ends the evaluation
+                return _NO_AXES, operand_value
+            else:
+                value = operand_value
+        return (axes, _UNKNOWN) if unknown else (_NO_AXES, value)
+
+    def _known(self, node):
+        try:
+            return self.partial.evaluator._eval(node, self._env)
+        except (
+            _Unread,
+            SpaceError,
+            TypeError,
+            ValueError,
+            ZeroDivisionError,
+            IndexError,
+            OverflowError,
+            KeyError,
+        ):
+            return _UNKNOWN
+
+
+class _LiveSpec(NamedTuple):
+    """What the liveness of one axis reads, given the fixed axes: ``members`` (positions of the
+    free axes), the groups, constraints and fallible derived values that read the axis.
+    """
+
+    members: tuple
+    groups: tuple
+    rules: tuple
+    derived: tuple
+
+
+class _Problem(NamedTuple):
+    """The checks of one search, and ``free`` / ``touch``: the axes (positions) it sets, and for
+    each the checks (indices) that read it. ``searched`` is every axis the search decides the
+    answer from: the fixed ones and ``free``."""
+
+    checks: list
+    free: tuple
+    touch: dict
+    searched: tuple
+
+
 class _Check:
     """A test a prefix of a search can fail once it has set the axes at ``positions``: ``fn``
     takes their level indices and returns None when they pass, else what refuted them. The
@@ -460,6 +753,7 @@ class _Search(NamedTuple):
     kind: str  # "found", "illegal", "dead" or "unproven"
     row: tuple
     detail: str
+    searched: tuple = ()  # the axes (positions) a "found" row was decided on
 
 
 class _Builder:
@@ -502,9 +796,12 @@ class _Builder:
                     if any(_same(level, v) for v in allowed.get(n, ()))
                 ]
         self.base_row = None
-        self._plans = {}
         self._single = {}
         self._checks = {}
+        self.partial = _Partial(space, self.liveness.deps.expanded)
+        self._unders = {}
+        self._specs = {}
+        self._problems = {}
         self.exhaustive_seconds = 0.0
         self.unproven_at = (
             {}
@@ -698,16 +995,20 @@ class _Builder:
                 )
         return self.base_row
 
-    def relevant(self, *axes):
-        """The positions of the axes that a search fixing the axes ``axes`` depends on."""
-        deps = self.liveness.deps
-        position = self.liveness.position
-        return sorted(
-            position[n]
-            for n in deps.close(
-                frozenset().union(*(deps.support[self.names[a]] for a in axes))
+    def _under(self, fixed):
+        """What the expressions of the space read with the axes of ``fixed`` (a sorted tuple of
+        ``(position, level)``) at those levels."""
+        found = self._unders.get(fixed)
+        if found is None:
+            values = self.liveness.level_values
+            found = self._unders[fixed] = _Under(
+                self.partial, {self.names[p]: values[p][i] for p, i in fixed}
             )
-        )
+        return found
+
+    def _scope(self, fixed, axes):
+        """The part of ``fixed`` that sits on the axes (names) ``axes``."""
+        return tuple(f for f in fixed if self.names[f[0]] in axes)
 
     def _environment(self, positions, key):
         values = self.liveness.level_values
@@ -729,39 +1030,167 @@ class _Builder:
                 stack.extend(reads[n])
         return [n for n in derive if n in needed]
 
-    def _constraint_check(self, index):
-        space = self.space
+    def _eff_check(self, kind, ident, static, members, fixed):
+        """The check that constraint number ``ident`` (``kind`` "constraint") holds, or that the
+        derived value ``ident`` (``kind`` "fallible") evaluates, from the levels of ``members``
+        (the axes it effectively reads with ``fixed`` set) and of the axes of ``fixed`` that sit
+        among the ``static`` ones. The answers are cached by those levels, shared by every search
+        that fixes the same of those axes at the same levels."""
+        scope = self._scope(fixed, static)
+        found = self._checks.get((kind, ident, scope))
+        if found is None:
+            space = self.space
+            names = self.names
+            values = self.liveness.level_values
+            base = {names[p]: values[p][i] for p, i in scope}
+            if kind == "constraint":
+                expr = space.constraints[ident].expr
+                rule = expr.source
+            else:
+                expr, rule = space.derive[ident], None
+
+            def fn(key):
+                env = _LazyEnv(space.derive, base)
+                for p, i in zip(members, key):
+                    env[names[p]] = values[p][i]
+                try:
+                    held = expr.evaluate(env)
+                except SpaceError:
+                    return EVALUATION_FAILS
+                return rule if rule is not None and not held else None
+
+            found = self._checks[kind, ident, scope] = _Check(members, fn)
+        return found
+
+    def _live_spec(self, pos, fixed):
+        """What the liveness of axis ``pos`` (one of the ``fixed`` axes) reads: the groups of the
+        case, constraints and fallible derived values that read it with every other fixed axis
+        set (the axis itself stays open: another level of it is what liveness tries), and, with
+        the axes they read, the ``members`` that are free."""
+        found = self._specs.get((pos, fixed))
+        if found is None:
+            partial = self.partial
+            axis = self.names[pos]
+            position = self.liveness.position
+            under = self._under(tuple(f for f in fixed if f[0] != pos))
+            support = {axis}
+            groups, rules, derived = [], [], []
+            for i in range(len(partial.groups)):
+                reads = partial.group_reads(under, i)
+                if axis in reads:
+                    support |= reads
+                    groups.append(i)
+            for i, node in enumerate(partial.constraint_nodes):
+                reads = under.reads(node)
+                if axis in reads:
+                    support |= reads
+                    rules.append(i)
+            for name in self.liveness.deps.fallible:
+                reads = under.reads(partial.derive_nodes[name])
+                if axis in reads:
+                    support |= reads
+                    derived.append(name)
+            if not groups:  # no group of the case reads the axis: it is never live
+                support, rules, derived = {axis}, [], []
+            members = tuple(sorted(position[a] for a in support if a != axis))
+            found = self._specs[pos, fixed] = _LiveSpec(
+                members, tuple(groups), tuple(rules), tuple(derived)
+            )
+        return found
+
+    def _live_check(self, pos, spec, fixed):
+        """The check that axis ``pos`` is live: some other level of it gives a legal row (the
+        constraints and derived values of ``spec`` hold) whose case differs (one of the groups of
+        ``spec`` renders differently), from the levels of the ``members`` of ``spec``. Liveness
+        is read from the groups alone: a case differs exactly where one of its groups does.
+        """
+        axis = self.names[pos]
+        scope = self._scope(fixed, self.liveness.deps.support[axis])
+        found = self._checks.get(("live", pos, scope))
+        if found is None:
+            space = self.space
+            names = self.names
+            values = self.liveness.level_values
+            base = {names[p]: values[p][i] for p, i in scope}
+            own = base[axis]
+            members = spec.members
+            groups = [self.partial.groups[i] for i in spec.groups]
+            rules = [space.constraints[i].expr for i in spec.rules]
+            derived = [space.derive[n] for n in spec.derived]
+            others = [v for v in values[pos] if not _same(v, own)]
+
+            def env_at(key, level):
+                env = _LazyEnv(space.derive, base)
+                for p, i in zip(members, key):
+                    env[names[p]] = values[p][i]
+                env[axis] = level
+                return env
+
+            def fn(key):
+                try:
+                    before = [_group_value(g, env_at(key, own)) for g in groups]
+                except SpaceError:
+                    return EVALUATION_FAILS
+                for level in others:
+                    alt = env_at(key, level)
+                    try:
+                        for expr in derived:
+                            expr.evaluate(alt)
+                        if not all(rule.evaluate(alt) for rule in rules):
+                            continue
+                        after = [_group_value(g, alt) for g in groups]
+                    except SpaceError:
+                        continue
+                    if after != before:
+                        return None
+                return INERT
+
+            found = self._checks["live", pos, scope] = _Check(members, fn)
+        return found
+
+    def _reach_check(self, pos, fixed, relevant):
+        """The check that the case can still read axis ``pos`` (it can only be live then): with
+        the other fixed axes and the free relevant axes that decide what is read (``deciders``:
+        the tests of conditionals and guards) at their levels, some group of the case reads it.
+        Fewer axes set only means more is read, so this refutes a prefix as soon as its deciders
+        are set, long before every axis the liveness reads is. None when there is no such axis to
+        set."""
         deps = self.liveness.deps
-        constraint = space.constraints[index]
-        steps = self._chain(_names_in(constraint.rule, deps.expanded))
-        positions = self._positions(deps.constraints[index])
-
-        def fn(key):
-            env = self._environment(positions, key)
-            try:
-                for n in steps:
-                    env[n] = space.derive[n].evaluate(env)
-                return None if constraint.expr.evaluate(env) else constraint.rule
-            except SpaceError:
-                return EVALUATION_FAILS
-
-        return _Check(positions, fn)
-
-    def _fallible_check(self, name):
-        space = self.space
-        steps = self._chain([name])
-        positions = self._positions(self.liveness.deps.fallible[name])
-
-        def fn(key):
-            env = self._environment(positions, key)
-            try:
-                for n in steps:
-                    env[n] = space.derive[n].evaluate(env)
-            except SpaceError:
-                return EVALUATION_FAILS
+        position = self.liveness.position
+        axis = self.names[pos]
+        fixed_positions = {p for p, _ in fixed}
+        support = deps.support[axis]
+        members = tuple(
+            sorted(
+                position[a]
+                for a in support & self.partial.deciders
+                if a != axis
+                and position[a] in relevant
+                and position[a] not in fixed_positions
+            )
+        )
+        if not members:
             return None
+        scope = self._scope(fixed, support)
+        found = self._checks.get(("reach", pos, scope, members))
+        if found is None:
+            names = self.names
+            values = self.liveness.level_values
+            base = {names[p]: values[p][i] for p, i in scope if p != pos}
+            partial = self.partial
 
-        return _Check(positions, fn)
+            def fn(key):
+                fixed_values = dict(base)
+                for p, i in zip(members, key):
+                    fixed_values[names[p]] = values[p][i]
+                return (
+                    None
+                    if partial.is_read(_Under(partial, fixed_values), axis)
+                    else INERT
+                )
+
+            found = self._checks["reach", pos, scope, members] = _Check(members, fn)
+        return found
 
     def _move_check(self, key):
         """What a prefix that sets the axes of a ``scope`` must still allow of axis ``pos``: some
@@ -831,113 +1260,252 @@ class _Builder:
         return _Check(positions, fn)
 
     def _check(self, kind, key):
+        """The checks that need no analysis of the fixed axes (``kind`` "move")."""
         found = self._checks.get((kind, key))
         if found is None:
-            make = {
-                "constraint": self._constraint_check,
-                "fallible": self._fallible_check,
-                "move": self._move_check,
-            }[kind]
-            found = self._checks[kind, key] = make(key)
+            found = self._checks[kind, key] = self._move_check(key)
         return found
 
-    def _plan(self, fixed, need):
-        """The static plan of a search with the axes ``fixed`` set in which the axes of ``need``
-        are live: ``(order, stages)``. ``order`` lists the relevant axes not fixed in the order
-        the search sets them; ``stages[d]`` holds the checks that become decidable once the
-        first ``d`` of them are set (each runs once, at the first node that can decide it).
+    def _problem(self, fixed, need):
+        """The search for a legal row with the axes of ``fixed`` (a sorted tuple of ``(position,
+        level)``) set in which the axes of ``need`` (a sorted tuple of those positions) are live.
+
+        It depends on the fixed axes alone, so what the expressions read *with them set* is what
+        counts (``_Under``): the constraints (and derived values that can fail) that read a fixed
+        axis in some branch, the axes they effectively read, and, for each ``need`` axis, the
+        members of its liveness (``_live_spec``) are the *relevant* axes, closed under the
+        constraints that read one of them. A constraint whose effective axes are all outside
+        keeps the value it has in the legal base row, which every other axis is taken from.
+        Each constraint, each fallible derived value and each liveness is one check; a check of a
+        constraint that reads no fixed axis in any branch and no relevant axis is not needed.
         """
-        plan = self._plans.get((fixed, need))
-        if plan is not None:
-            return plan
+        found = self._problems.get((fixed, need))
+        if found is not None:
+            return found
+        space = self.space
         deps = self.liveness.deps
-        relevant = self.relevant(*fixed)
-        inside = set(relevant)
-        pending = [
-            self._check("constraint", i) for i in range(len(self.space.constraints))
+        position = self.liveness.position
+        names = self.names
+        partial = self.partial
+        under = self._under(fixed)
+        fixed_axes = frozenset(names[p] for p, _ in fixed)
+        fixed_positions = {p for p, _ in fixed}
+
+        def where(axes):
+            return tuple(sorted(position[a] for a in axes))
+
+        legal = [
+            (
+                "constraint",
+                i,
+                deps.constraints[i],
+                under.reads(partial.constraint_nodes[i]),
+            )
+            for i in range(len(space.constraints))
         ]
-        pending += [self._check("fallible", name) for name in deps.fallible]
-        for p in need:
-            parts = ["full", "differs", *deps.touching[self.names[p]]]
-            pending += [self._check("move", (p, part)) for part in parts]
-        pending = [c for c in pending if c.members <= inside]
-        assigned = set(fixed)
-        stages = [[c for c in pending if c.members <= assigned]]
-        pending = [c for c in pending if not c.members <= assigned]
-        remaining = [p for p in relevant if p not in assigned]
-        order = []
-        while remaining:
+        legal += [
+            ("fallible", name, static, under.reads(partial.derive_nodes[name]))
+            for name, static in deps.fallible.items()
+        ]
+        lives = {p: self._live_spec(p, fixed) for p in need}
+        relevant = set(fixed_positions)
+        for _kind, _ident, static, reads in legal:
+            if static & fixed_axes:
+                relevant.update(where(reads))
+        for spec in lives.values():
+            relevant.update(spec.members)
+        grew = True
+        while grew:
+            grew = False
+            for _kind, _ident, _static, reads in legal:
+                touched = where(reads)
+                if relevant.intersection(touched) and not relevant.issuperset(touched):
+                    relevant.update(touched)
+                    grew = True
+        checks = []
+        for kind, ident, static, reads in legal:
+            members = where(reads)
+            if static & fixed_axes or relevant.intersection(members):
+                checks.append(self._eff_check(kind, ident, static, members, fixed))
+        for p, spec in lives.items():
+            checks.append(self._live_check(p, spec, fixed))
+            reach = self._reach_check(p, fixed, relevant)
+            if reach is not None:
+                checks.append(reach)
+            for part in ("full", "differs", *deps.touching[names[p]]):
+                check = self._check("move", (p, part))
+                if check.members <= relevant:
+                    checks.append(check)
+        touch = {}
+        for index, check in enumerate(checks):
+            for p in check.positions:
+                touch.setdefault(p, []).append(index)
+        free = tuple(p for p in sorted(relevant - fixed_positions) if p in touch)
+        found = self._problems[fixed, need] = _Problem(
+            checks, free, touch, tuple(sorted(relevant))
+        )
+        return found
 
-            def score(p):
-                grown = assigned | {p}
-                done = sum(1 for c in pending if c.members <= grown)
-                progress = sum(
-                    1.0 / len(c.members - assigned) for c in pending if p in c.members
-                )
-                return (-done, -progress, self.size[p], p)
+    def _solve(self, fixed, need):
+        """Search for a legal row with the axes of ``fixed`` (``(position, level)`` pairs) at
+        their levels in which every axis of ``need`` is live, over the relevant axes of
+        ``_problem`` (every other axis is taken from a legal base row). Returns ``(row, rejected,
+        nodes, searched)``: the row or None, what refuted the nodes, the nodes visited and the
+        relevant axes; raises ``_Capped`` past ``cap`` nodes.
 
-            p = min(remaining, key=score)
-            remaining.remove(p)
-            assigned.add(p)
-            order.append(p)
-            stages.append([c for c in pending if c.members <= assigned])
-            pending = [c for c in pending if not c.members <= assigned]
-        plan = self._plans[fixed, need] = (order, stages)
-        return plan
+        **Forward checking.** Whenever every axis but one of a check is set, the levels of that
+        one that pass the check are all that stay in its domain (the answer is cached by the
+        levels of the others); an empty domain cuts the branch, a single level is set at once
+        and propagates further (it costs no node). Each node sets the axis with the smallest
+        domain.
 
-    def _dfs(self, fixed, need):
-        """Depth-first search for a legal row with the axes of ``fixed`` (``(axis, level)``
-        pairs) at their levels in which every axis of ``need`` (a tuple) is live, over the
-        relevant axes (the others are taken from a legal base row), following the static plan: a
-        node that fails a check of its stage is refuted, whatever the axes still to be set.
-        Returns the row or None, what refuted the nodes, and the nodes visited; raises
-        ``_Capped`` past ``cap`` nodes."""
-        live = self.liveness
-        order, stages = self._plan(tuple(p for p, _ in fixed), need)
-        base_row = self.legal_base_row()
-        row = list(base_row)
+        **Components.** Once the fixed axes (and what propagates from them) are set, the axes
+        left are split into the connected components of the checks that read two of them (a
+        constraint, a derived value that can fail, a liveness: one link between all the axes it
+        reads). The components share no check, so a row exists iff every component has a
+        completion, and each is searched alone: a hopeless component is refuted without
+        enumerating the others' levels. A liveness reads several axes, so it links them all,
+        and a space whose cases read every axis through it stays one component.
+        """
+        fixed = tuple(sorted(fixed))
+        need = tuple(sorted(need))
+        problem = self._problem(fixed, need)
+        checks, touch = problem.checks, problem.touch
+        lv = [-1] * self.n
         for p, level in fixed:
-            row[p] = level
+            lv[p] = level
+        dom = {p: list(self.allowed[p]) for p in problem.free}
         rejected = Counter()
         nodes = 0
+        trail = []
+        searched = problem.searched
 
-        def passes(stage):
-            for check in stage:
-                key = tuple([row[p] for p in check.positions])
-                verdict = check.cache.get(key, _UNSET)
-                if verdict is _UNSET:
-                    verdict = check.cache[key] = check.fn(key)
-                if verdict is not None:
-                    rejected[verdict] += 1
+        def undo(mark):
+            while len(trail) > mark:
+                p, old = trail.pop()
+                if old is None:
+                    lv[p] = -1
+                else:
+                    dom[p] = old
+
+        def verdict(check, key):
+            found = check.cache.get(key, _UNSET)
+            if found is _UNSET:
+                found = check.cache[key] = check.fn(key)
+            return found
+
+        def process(index, queue):
+            check = checks[index]
+            positions = check.positions
+            open_ = [m for m in positions if lv[m] < 0]
+            if not open_:
+                found = verdict(check, tuple([lv[m] for m in positions]))
+                if found is not None:
+                    rejected[found] += 1
                     return False
+                return True
+            if len(open_) > 1:
+                return True
+            p = open_[0]
+            at = positions.index(p)
+            key = [lv[m] for m in positions]
+            keep, why = [], None
+            for level in dom[p]:
+                key[at] = level
+                found = verdict(check, tuple(key))
+                if found is None:
+                    keep.append(level)
+                else:
+                    why = found
+            if len(keep) == len(dom[p]):
+                return True
+            if not keep:
+                rejected[why or NO_LEVEL] += 1
+                return False
+            trail.append((p, dom[p]))
+            dom[p] = keep
+            if len(keep) == 1:
+                lv[p] = keep[0]
+                trail.append((p, None))
+                queue.append(p)
             return True
 
-        def descend(depth):
+        def propagate(queue):
+            while queue:
+                for index in touch[queue.pop()]:
+                    if not process(index, queue):
+                        return False
+            return True
+
+        def solve(component):
             nonlocal nodes
-            if depth == len(order):
-                full = tuple(row)
-                if live.violation(self.values(full)) is None and all(
-                    live.live_index(full, p) for p in need
-                ):
-                    return full
-                return None
-            p = order[depth]
-            stage = stages[depth + 1]
-            for level in self.allowed[p]:
+            open_ = [p for p in component if lv[p] < 0]
+            if not open_:
+                return True
+            p = min(open_, key=lambda q: (len(dom[q]), -len(touch[q]), q))
+            for level in list(dom[p]):
                 nodes += 1
                 if nodes > self.cap:
                     raise _Capped
-                row[p] = level
-                if passes(stage):
-                    found = descend(depth + 1)
-                    if found is not None:
-                        return found
-            row[p] = base_row[p]
-            return None
+                mark = len(trail)
+                lv[p] = level
+                trail.append((p, None))
+                if propagate([p]) and solve(component):
+                    return True
+                undo(mark)
+            return False
 
-        if not passes(stages[0]):
-            return None, rejected, nodes
-        return descend(0), rejected, nodes
+        queue = []
+        for p in problem.free:
+            if not dom[p]:
+                rejected[NO_LEVEL] += 1
+                return None, rejected, nodes, searched
+            if len(dom[p]) == 1:
+                lv[p] = dom[p][0]
+                queue.append(p)
+        for index in range(len(checks)):
+            if not process(index, queue):
+                return None, rejected, nodes, searched
+        if not propagate(queue):
+            return None, rejected, nodes, searched
+        parent = {p: p for p in problem.free if lv[p] < 0}
+
+        def find(p):
+            while parent[p] != p:
+                parent[p] = parent[parent[p]]
+                p = parent[p]
+            return p
+
+        for check in checks:
+            head = None
+            for m in check.positions:
+                if m in parent:
+                    if head is None:
+                        head = m
+                    else:
+                        parent[find(m)] = find(head)
+        components = {}
+        for p in parent:
+            components.setdefault(find(p), []).append(p)
+        for component in components.values():
+            if not solve(component):
+                return None, rejected, nodes, searched
+        row = list(self.legal_base_row())
+        for p, level in fixed:
+            row[p] = level
+        for p in problem.free:
+            if lv[p] >= 0:
+                row[p] = lv[p]
+        full = tuple(row)
+        live = self.liveness
+        if live.violation(self.values(full)) is not None or not all(
+            live.live_index(full, p) for p in need
+        ):
+            raise RuntimeError(
+                f"space '{self.space.space_id}': a row the search found is not legal and"
+                f" live: {self.values(full)} (fixed {fixed}, live {need})"
+            )
+        return full, rejected, nodes, searched
 
     def search(self, a, la, b, lb):
         """Exhaustive search for a legal row with axis ``a`` at level ``la`` and ``b`` at ``lb``
@@ -954,7 +1522,7 @@ class _Builder:
         found = self._single.get((pos, level), _UNSET)
         if found is _UNSET:
             try:
-                found = self._dfs(((pos, level),), (pos,))[0] is not None
+                found = self._solve(((pos, level),), (pos,))[0] is not None
             except _Capped:
                 found = None
             self._single[pos, level] = found
@@ -968,7 +1536,7 @@ class _Builder:
         )
         both = ((a, la), (b, lb))
         try:
-            row, rejected, nodes = self._dfs(both, ())
+            row, rejected, nodes, _ = self._solve(both, ())
             if row is None:
                 if not rejected:
                     return _Search("illegal", None, "no legal row")
@@ -983,9 +1551,9 @@ class _Builder:
             seen_a = self._possible(a, la)
             seen_b = self._possible(b, lb)
             if seen_a and seen_b:
-                row = self._dfs(both, (a, b))[0]
+                row, _, _, searched = self._solve(both, (a, b))
                 if row is not None:
-                    return _Search("found", row, "")
+                    return _Search("found", row, "", searched)
         except _Capped:
             return capped
         if not seen_a and not seen_b:
@@ -1016,7 +1584,7 @@ class _Builder:
         verdict = self.search(x, lx, y, ly)
         if verdict.kind != "found":
             return None, verdict
-        fixed = {p: verdict.row[p] for p in self.relevant(x, y)}
+        fixed = {p: verdict.row[p] for p in verdict.searched}
         rows = [verdict.row] + [
             self.fill(
                 fixed,
