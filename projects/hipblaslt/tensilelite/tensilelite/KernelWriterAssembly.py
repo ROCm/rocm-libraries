@@ -10075,7 +10075,9 @@ class KernelWriterAssembly(KernelWriter):
     numVgpr = int(ceil(instruction.blockWidth))
     lastAbs = self.mxSplatLastUsedInGroup(kernel, tP_MX, valuStart, groupBytes)
     destStart = self.mxSplatLoadDestStart(kernel, tP_MX, valuStart, groupBytes, numVgpr)
-    key = (tc, m, iui, valuStart)
+    # Keyed like _mxSplatNoteLoad, by the buffer the load wrote: under RAP that is
+    # the absolute resident index, not the wrapped m.
+    key = (tc, self.rapResidentBufferIdx(kernel, tc, u, m), iui, valuStart)
     gen = getattr(self, "_mxSplatGen", {}).get(key, 0)
     if not hasattr(self, "_mxSplatEmitted"):
       self._mxSplatEmitted = {}
@@ -10198,7 +10200,8 @@ class KernelWriterAssembly(KernelWriter):
     tc = tP_MX["tensorChar"]
     if not self._mx2dSplatInPlace(kernel, tc):
       return
-    key = (tc, m, iui, mappedIdx)
+    # Keyed like _mx2dSplatNoteLoad; see _emitMxSplatBeforeWmma.
+    key = (tc, self.rapResidentBufferIdx(kernel, tc, u, m), iui, mappedIdx)
     gen = getattr(self, "_mx2dSplatGen", {}).get(key, 0)
     if not hasattr(self, "_mx2dSplatEmitted"):
       self._mx2dSplatEmitted = {}

@@ -4194,17 +4194,24 @@ class Solution(collections.abc.Mapping):
       vgprsPerElement += vgprsPerAddr  # addrGSUSyncVgprs
 
     # One buffer set per resident k-tile: a ValuA block plus its MX scale block,
-    # numVgprBuffer blocks of each. Mirrors vgprAllocationImplClassic. The MX
-    # TileSpan halving is deliberately not modelled: leaving it out overstates R,
-    # which understates k, and only the understating direction is safe here.
+    # numVgprBuffer blocks of each. Mirrors vgprAllocationImplClassic, including
+    # its ceil: at MXBlock 128 a WaveTile's single e8 still takes a whole VGPR,
+    # which flooring the product would price at none. The MX TileSpan halving is
+    # deliberately not modelled: leaving it out overstates R, which understates
+    # k, and only the understating direction is safe here.
     numVgprBuffer = state["LoopIters"] if state["ClusterLocalRead"] \
                     else state["PrefetchLocalRead"] + 1
     macA = problemType.get("MacDataTypeA") or problemType["DataType"]
     bpeA = bpr * macA.numRegisters()
+    mxsaPerBlock = 0
+    if problemType["MXBlockA"]:
+      mxsaWaveTiles = state["MIWaveTileMXSA"]
+      if problemType.get("MXBlockFreeA", 1) > 1:
+        # A 2D tile gives VectorWidth WaveTiles one shared SSSS VGPR.
+        mxsaWaveTiles = max(1, mxsaWaveTiles // max(1, int(state["VectorWidthMXSA"])))
+      mxsaPerBlock = mxsaWaveTiles * int(math.ceil(state["MIInputPerThreadMXSA"] / bpr))
     residentPerKTile = numVgprBuffer * (
-        int(state["MIWaveTileA"] * state["MIInputPerThreadA"] * bpeA // bpr)
-        + (int(state["MIWaveTileMXSA"] * state["MIInputPerThreadMXSA"] // bpr)
-           if problemType["MXBlockA"] else 0))
+        int(state["MIWaveTileA"] * state["MIInputPerThreadA"] * bpeA // bpr) + mxsaPerBlock)
     if residentPerKTile <= 0:
       return None
 

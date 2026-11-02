@@ -702,6 +702,72 @@ def test_rap_is_rejected_with_space_filling_algo(
 
 
 # ---------------------------------------------------------------------------
+# MXBlock 128 scales. With MXBlock == MatrixInstK each thread loads one e8 per
+# WMMA and splats it in place to all four K blocks, right before the first WMMA
+# that reads it. Under RAP that register is resident: the fill copy has to
+# splat every k-tile's scales, and the reuse copy, which loads none, must not
+# splat again -- in a 1D tile the packed source bytes are gone by then.
+# ---------------------------------------------------------------------------
+_MXSA_REG = re.compile(r"vgprValuMXSA_X(\d+)_I0\+([0-9+]+)")
+
+
+def _mxsaRegs(line):
+    return [(int(buf), sum(int(term) for term in offset.split("+")))
+            for buf, offset in _MXSA_REG.findall(line)]
+
+
+@pytest.mark.parametrize("mxBlockFree", [1, 128], ids=["1d", "2d"])
+def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
+    _gp_gfx1250, gfx1250_iim, assembler, mxBlockFree
+):
+    import shutil
+    import rocisa
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+
+    # MXBlock [128] or [128, 128] in a config, as ProblemType parses it.
+    scales = dict(MXBlockA=128, MXBlockB=128, MXBlockFreeA=mxBlockFree, MXBlockFreeB=mxBlockFree)
+    # The rest of rap_gfx1250.yaml's audited configuration: without it the tile
+    # runs out of SGPRs whatever its scales.
+    audited = dict(UseSgprForGRO=0, InitCIterWmma=1, ForceDisableShadowInit=True)
+    sol = Solution(_make_params(gfx1250_iim, ProblemType=dict(_MX_PROBLEM_TYPE, **scales), **audited),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    with preserve_rocisa_kernel_state():
+        (kernel,) = generateKernelObjectsFromSolutions([sol])
+        ri = rocisa.rocIsa.getInstance()
+        ri.init(tuple(kernel["ISA"]), shutil.which("amdclang++") or "/usr/bin/amdclang++")
+        ri.setKernel(tuple(kernel["ISA"]), kernel["WavefrontSize"])
+        kernel.duplicate = False
+        kernel["BaseName"] = getKernelFileBase(False, kernel)
+        kwa = KernelWriterAssembly(assembler, DebugConfig())
+        kwa.setRocIsa(ri.getData(), ri.getOutputOptions())
+        # Raises if the resident block overflows the register pool.
+        source = kwa._getKernelSource(kernel)
+
+    fill, reuse = source.split("label_RAP_IterN:", 1)
+    reuse = reuse.split("label_RAP_StoreJoin:", 1)[0]
+    splatted = {}
+    for line in fill.splitlines():
+        line = line.strip()
+        regs = _mxsaRegs(line)
+        if line.startswith("ds_load") and regs:
+            splatted[regs[0][0]] = set()
+        elif line.startswith("v_perm_b32") and regs:
+            buf, offset = regs[0]
+            splatted[buf].add(offset)
+        elif line.startswith("v_wmma"):
+            for buf, offset in regs:
+                assert offset in splatted.get(buf, ()), f"WMMA reads an unsplatted scale: {line}"
+    assert set(splatted) == set(range(sol["_RAPNumResidentKTiles"] * sol["LoopIters"]))
+    reuseLines = [line.strip() for line in reuse.splitlines() if _mxsaRegs(line)]
+    assert reuseLines and all(line.startswith("v_wmma") for line in reuseLines), \
+        "the reuse copy reloads or re-splats a resident scale"
+
+
+# ---------------------------------------------------------------------------
 # k_max model. Pinned to the two audited gfx1250 configs, whose true bounds were
 # measured by sweeping the resident k-tile count until rapCheckStoreNeutrality
 # fired: MacroTile 64x256 clears k=8 and trips at 9, 64x512 clears k=3 at 4.
@@ -731,8 +797,9 @@ def _modelTerms(threadTile1):
     return state, problemType
 
 
-def _kMax(threadTile1, **problemTypeOverrides):
+def _kMax(threadTile1, stateOverrides=None, **problemTypeOverrides):
     state, problemType = _modelTerms(threadTile1)
+    state.update(stateOverrides or {})
     problemType.update(problemTypeOverrides)
     isaInfoMap = {_MODEL_ISA: SimpleNamespace(regCaps={"MaxVgpr": 1024})}
     return Solution.rapMaxResidentKTiles(
@@ -748,6 +815,18 @@ def test_rap_kmax_model_reproduces_the_measured_bound_on_mt64x256():
 def test_rap_kmax_model_reproduces_the_measured_bound_on_mt64x512():
     # Twice the accumulators halves the slack: (1024 - 256 - 512 - 40) / 68.
     assert _kMax(16) == 3
+
+
+def test_rap_kmax_model_gives_each_mx128_wavetile_a_vgpr():
+    # MXBlock 128 leaves one e8 per thread, which floors to no register, but each
+    # WaveTile still holds a VGPR: R 68 as at MXBlock 32, so k stays at 8.
+    assert _kMax(8, {"MIInputPerThreadMXSA": 1}, MXBlockA=128) == 8
+
+
+def test_rap_kmax_model_shares_a_2d_scale_vgpr_across_vector_width():
+    # VectorWidth 2 WaveTiles share one VGPR: R 66 -> (1024 - 128 - 256 - 40) / 66.
+    assert _kMax(8, {"MIInputPerThreadMXSA": 1, "VectorWidthMXSA": 2},
+                 MXBlockA=128, MXBlockFreeA=128) == 9
 
 
 def test_rap_kmax_model_declines_when_the_store_cannot_be_priced():
