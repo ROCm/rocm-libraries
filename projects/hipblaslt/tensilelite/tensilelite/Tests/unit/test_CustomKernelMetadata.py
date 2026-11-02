@@ -24,6 +24,7 @@
 
 import os
 import re
+from copy import deepcopy
 from textwrap import dedent, indent
 
 import pytest
@@ -59,6 +60,7 @@ from tensilelite.CustomKernels import (
     readCustomKernelConfig,
     validateCustomKernelMetadata,
 )
+from tensilelite.SolutionStructs.Problem import ProblemType
 from tensilelite.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
 from tensilelite.ValidateMetadata import validate_all
 
@@ -1551,8 +1553,16 @@ def test_skinny_tn_range_logic(rel, dataType, kernels):
         plain = yaml.safe_load(f)
     plainHeader = {k: plain[k] for k in ("ScheduleName", "ArchitectureName", "CUCount", "DeviceNames")}
     assert {k: doc[k] for k in plainHeader} == plainHeader
-    typeFields = ("DataType", "DataTypeA", "DataTypeB", "DataTypeE", "DestDataType")
-    assert pt == {**plain["ProblemType"], **{k: dataType for k in typeFields}}
+    typeFields = (
+        "DataType", "DataTypeA", "DataTypeB", "DataTypeE", "DestDataType",
+        "MacDataTypeA", "MacDataTypeB",
+    )
+    expected = {**plain["ProblemType"], **{k: dataType for k in typeFields}}
+    # Logic files may omit defaults that the reference writes explicitly.
+    # Compare the effective problem types, including the FP16/BF16 MAC types.
+    actualType = ProblemType(deepcopy(pt), False).state
+    expectedType = ProblemType(deepcopy(expected), False).state
+    assert actualType == expectedType
 
     names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
     rows = [(key, names[index]) for key, (index, _) in doc["ExactLogic"]]
