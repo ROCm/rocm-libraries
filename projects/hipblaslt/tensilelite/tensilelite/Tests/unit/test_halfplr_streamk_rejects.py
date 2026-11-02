@@ -403,7 +403,7 @@ def test_halfplr_rejects_explicit_wide_local_read(
 # with the local-read width capped.
 #
 # Regression test for the IndexError crash reproduced from
-# ``Tensile/Tests/common/ductile/gfx1250/f32_tt_batched.yaml`` (DataType=S /
+# ``tensilelite/Tests/common/ductile/gfx1250/f32_tt_batched.yaml`` (DataType=S /
 # F32, TT, HalfPLR=[0,1,2,3], LDSTrInst=True but enableLDSTr can never be True
 # for a 4-byte MacDataType -- isLDSTrEnabled has no arm for numBytes > 2).
 # getHalfPLRGroups() only exposes a 2-element sliding window of HalfPLR's 3

@@ -38,7 +38,7 @@ def _legacy_imports(paths):
 
 
 def test_production_modules_do_not_import_the_legacy_tensile_package():
-    """Production modules must not require the separately packaged compatibility alias."""
+    """Production modules must not import the removed legacy ``Tensile`` package."""
     production_modules = (
         path
         for path in _PACKAGE_ROOT.rglob("*.py")
