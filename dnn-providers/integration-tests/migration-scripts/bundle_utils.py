@@ -261,8 +261,13 @@ def inputs_by_name(meta: dict, graph: dict) -> dict:
 # --------------------------------------------------------------------------
 
 
-def skeleton_hash(graph: dict) -> str:
-    """Structural fingerprint: node types + wiring + tensor set."""
+def skeleton_hash(graph: dict, value_form: bool = False) -> str:
+    """Structural fingerprint: node types + wiring + tensor set.
+
+    With ``value_form``, the fingerprint also records the value form of each
+    tensor: whether it has a baked ``value``, its ``value_type`` and its
+    ``is_runtime_pass_by_value`` flag.
+    """
     canon: dict = {}
 
     def canon_uid(u):
@@ -293,8 +298,238 @@ def skeleton_hash(graph: dict) -> str:
     )
 
     skeleton = {"nodes": parts, "tensors": tensor_set}
+    if value_form:
+        skeleton["value_forms"] = sorted(
+            [
+                canon_uid(t["uid"]),
+                "value" in t,
+                t.get("value_type"),
+                bool(t.get("is_runtime_pass_by_value", False)),
+            ]
+            for t in graph.get("tensors", [])
+            if "uid" in t
+        )
     blob = json.dumps(skeleton, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+# --------------------------------------------------------------------------
+# Grouped import (opt-in templating used by import_graph.py)
+# --------------------------------------------------------------------------
+
+# Top-level sweep.json key that records the grouping options of a sweep.
+IMPORT_MODE_KEY = "import_mode"
+
+# import_mode key that records the file layout of a grouped sweep.
+SWEEP_FORMAT_KEY = "format"
+
+# "pretty" is json.dumps(indent=2). "compact" writes one line per member of
+# each case and of its values, and one line per tensor in values.tensors.
+SWEEP_FORMATS = ("pretty", "compact")
+
+
+# Top-level values key for templated tensor alignment, keyed by tensor uid.
+ALIGNMENT_VALUES_KEY = "alignment"
+
+# Top-level graph fields that every template of a grouped sweep takes from the
+# case values. hipDNN derives them from the tensors, so they can differ
+# between cases that share a skeleton.
+GROUPED_TOP_LEVEL = ("is_override_shape_enabled", "min_required_engine_api_version")
+
+
+def import_mode_marker(grouping: list, sweep_format: str = None) -> dict:
+    """The ``import_mode`` object for a sweep made with these grouping options.
+
+    A ``sweep_format`` other than None is recorded as the ``format`` key.
+    """
+    marker = {"grouping": sorted(grouping)}
+    if sweep_format is not None:
+        marker[SWEEP_FORMAT_KEY] = sweep_format
+    return marker
+
+
+def sweep_import_mode(sweep: dict):
+    """The ``import_mode`` object of a loaded sweep.json, or None if unmarked."""
+    marker = sweep.get(IMPORT_MODE_KEY) if isinstance(sweep, dict) else None
+    return marker if isinstance(marker, dict) else None
+
+
+def import_mode_grouping(marker):
+    """The part of an ``import_mode`` object that controls sweep matching.
+
+    This is the object without its ``format`` key, or None for no object.
+    The file layout of a sweep never decides which cases share it.
+    """
+    if marker is None:
+        return None
+    return {k: v for k, v in marker.items() if k != SWEEP_FORMAT_KEY}
+
+
+# --------------------------------------------------------------------------
+# sweep.json writer
+# --------------------------------------------------------------------------
+
+
+def sweep_format(sweep: dict) -> str:
+    """The file layout recorded in a loaded sweep.json.
+
+    An unmarked sweep, or a marker with no ``format`` key, is "pretty".
+    """
+    marker = sweep_import_mode(sweep)
+    if marker is None or SWEEP_FORMAT_KEY not in marker:
+        return "pretty"
+    return marker[SWEEP_FORMAT_KEY]
+
+
+def _compact(value) -> str:
+    return json.dumps(value, separators=(", ", ": "))
+
+
+def _key(k) -> str:
+    """An object key as json.dumps writes it, for example 1 as "1"."""
+    return json.dumps({k: 0})[1:-4]
+
+
+def _layout_members(obj: dict, indent: str, compact_one) -> list:
+    """One line per member of ``obj``; ``compact_one(key, value, comma)`` may expand one."""
+    lines = []
+    items = list(obj.items())
+    for i, (k, v) in enumerate(items):
+        comma = "," if i < len(items) - 1 else ""
+        expanded = compact_one(k, v, comma)
+        if expanded is None:
+            lines.append(f"{indent}{_key(k)}: {_compact(v)}{comma}")
+        else:
+            lines.extend(expanded)
+    return lines
+
+
+def _layout_values(k, v, comma):
+    if k != "tensors" or not isinstance(v, list) or not v:
+        return None
+    lines = ['        "tensors": [']
+    lines += [
+        " " * 10 + _compact(t) + ("," if j < len(v) - 1 else "")
+        for j, t in enumerate(v)
+    ]
+    lines.append("        ]" + comma)
+    return lines
+
+
+def _layout_case_member(k, v, comma):
+    if k != "values" or not isinstance(v, dict) or not v:
+        return None
+    lines = ['      "values": {']
+    lines += _layout_members(v, " " * 8, _layout_values)
+    lines.append("      }" + comma)
+    return lines
+
+
+def _layout_case(case, comma: str) -> list:
+    if not isinstance(case, dict) or not case:
+        return ["    " + _compact(case) + comma]
+    lines = ["    {"]
+    lines += _layout_members(case, " " * 6, _layout_case_member)
+    lines.append("    }" + comma)
+    return lines
+
+
+def _compact_sweep(sweep: dict) -> str:
+    lines = ["{"]
+    items = list(sweep.items())
+    for i, (k, v) in enumerate(items):
+        comma = "," if i < len(items) - 1 else ""
+        if k == "cases" and isinstance(v, list) and v:
+            lines.append(f"  {_key(k)}: [")
+            for j, case in enumerate(v):
+                lines += _layout_case(case, "," if j < len(v) - 1 else "")
+            lines.append("  ]" + comma)
+        else:
+            body = json.dumps(v, indent=2).replace("\n", "\n  ")
+            lines.append(f"  {_key(k)}: {body}{comma}")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def dump_sweep(sweep: dict, fmt: str) -> str:
+    """The text of a sweep.json in layout ``fmt``, with a final newline.
+
+    Both layouts keep every key, its order and its nesting, so the text loads
+    to an object equal to ``sweep``. Raises ValueError for an unknown layout.
+    """
+    if fmt not in SWEEP_FORMATS:
+        raise ValueError(
+            f"unknown sweep.json format {fmt!r}; expected one of {', '.join(SWEEP_FORMATS)}"
+        )
+    if fmt == "pretty" or not isinstance(sweep, dict) or not sweep:
+        return json.dumps(sweep, indent=2) + "\n"
+    return _compact_sweep(sweep)
+
+
+def _node_attribute_leaves(node: dict, path: tuple = ()):
+    """Yield (path, value) for every non-object attribute value of a node.
+
+    Skips the structural node keys and every ``*_tensor_uid`` key.
+    """
+    for k, v in node.items():
+        if (not path and k in NODE_STRUCTURAL) or k.endswith("_tensor_uid"):
+            continue
+        if isinstance(v, dict):
+            yield from _node_attribute_leaves(v, path + (k,))
+        else:
+            yield path + (k,), v
+
+
+def template_node_attributes(template: dict):
+    """Replace every non-object node attribute value with a placeholder.
+
+    The placeholder is ``${case.attributes.<key>}``. The key is the attribute
+    path joined with ``__``. A key that occurs on more than one node gets an
+    ``n<index>__`` prefix.
+    """
+    nodes = template.get("nodes", [])
+    counts = defaultdict(int)
+    for node in nodes:
+        for path, _ in _node_attribute_leaves(node):
+            counts["__".join(path)] += 1
+    for ni, node in enumerate(nodes):
+        for path, _ in list(_node_attribute_leaves(node)):
+            key = "__".join(path)
+            if counts[key] > 1:
+                key = f"n{ni}__{key}"
+            parent = node
+            for tok in path[:-1]:
+                parent = parent[tok]
+            parent[path[-1]] = f"${{case.attributes.{key}}}"
+
+
+def template_tensor_alignment(template: dict):
+    """Replace each tensor ``alignment`` with ``${case.alignment.<uid>}``.
+
+    The placeholder resolves from the top-level ``alignment`` object of the
+    case values, so :func:`expand` and the C++ loader both resolve it.
+    """
+    for t in template.get("tensors", []):
+        if "alignment" in t and isinstance(t.get("uid"), int):
+            t["alignment"] = f"${{case.{ALIGNMENT_VALUES_KEY}.{t['uid']}}}"
+
+
+def template_top_level_fields(template: dict):
+    """Replace each ``GROUPED_TOP_LEVEL`` field with ``${case.<field>}``.
+
+    The placeholder resolves to the whole value of the case, so an object
+    field resolves in one piece in :func:`expand` and in the C++ loader.
+    """
+    for fld in GROUPED_TOP_LEVEL:
+        if fld in template:
+            template[fld] = f"${{case.{fld}}}"
+
+
+def template_tensor_values(template: dict):
+    """Replace each baked tensor ``value`` with the ``${case.value}`` placeholder."""
+    for t in template.get("tensors", []):
+        if "value" in t:
+            t["value"] = "${case.value}"
 
 
 # --------------------------------------------------------------------------
