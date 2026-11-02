@@ -76,6 +76,7 @@ class TestTapOuterSpec(unittest.TestCase):
             (p, dict(tile_w=12), "must divide"),
             (p, dict(tdm_split=8), "tdm_split"),
             (p, dict(tdm_split=3), "tdm_split"),
+            (p, dict(tdm_split=2, stages=3), "2 stages"),
             (p, dict(sched="no-such-strategy"), "no-such-strategy"),
             (p, dict(tiles_k=8, tiles_p=8, waves_k=2, waves_p=4, ck=256), "LDS"),
             (_problem(pad_w=11), {}, "one padding"),
@@ -158,6 +159,7 @@ class TestTapOuterSpec(unittest.TestCase):
             (p, dict(tiles_k=16, tiles_p=16, ck=32, stages=2)),
             (_problem(N=4096, H=128, W=128, C=512, K=512), {}),
             (p, dict(prefetch=True, tdm_split=2, stages=4)),
+            (p, dict(prefetch=True, tdm_split=2, stages=2)),
         ):
             specs.append(DirectFwdTapOuterSpec(problem=problem, **knobs))
         strided = DirectConvProblem(
@@ -213,8 +215,11 @@ _CASES = (
     (dict(N=1, H=20, W=20, C=64, K=64), dict(tiles_p=1, tile_w=32)),
     # A channel tail (96 = 64 + 32) and K short of the block.
     (dict(C=96, K=40), dict(stages=3)),
-    (dict(groups=2, C=128, K=64, PAD=2, dil=2), dict(tdm_split=2)),
-    (dict(N=3, H=7, W=9, C=64, K=32, PAD=0, dil=1), dict(tdm_split=4, tile_w=8)),
+    (dict(groups=2, C=128, K=64, PAD=2, dil=2), dict(tdm_split=2, stages=2)),
+    (
+        dict(N=3, H=7, W=9, C=64, K=32, PAD=0, dil=1),
+        dict(tdm_split=4, tile_w=8, stages=2),
+    ),
     (dict(H=33, W=17, PAD=4, dil=4), dict(waves_k=1, waves_p=4, tiles_k=8, tiles_p=2)),
 )
 

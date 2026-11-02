@@ -413,7 +413,7 @@ bool rocke_fwd_gstream_wmma_is_valid_spec(const rocke_fwd_gstream_wmma_spec_t* s
                               2LL * total_k * p->KH * p->KW * p->cpg,
                               2LL * p->N * Ho * Wo * total_k};
         const long long mx = std::max(bytes[0], std::max(bytes[1], bytes[2]));
-        if(mx >= kI32Max)
+        if(mx > kI32Max)
             GS_FAIL("tensors of %lld B exceed the i32 byte offsets", mx);
     }
     {

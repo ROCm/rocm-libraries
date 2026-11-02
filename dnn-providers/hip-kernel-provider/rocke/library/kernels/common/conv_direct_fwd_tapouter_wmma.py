@@ -74,9 +74,9 @@ from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value
+from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_fwd_wmma import CH_PAD, WMMA_K, _tdm_descriptor_3d
 from kernels.common.conv_direct_grouped import (
@@ -84,14 +84,9 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     emit_direct_params,
 )
-from kernels.common.conv_fwd_wmma_gate import wmma_fwd_gate
+from kernels.common.conv_fwd_wmma_gate import wmma_fwd_gate, wmma_fwd_limits_reason
 
 TAPOUTER_VGPR_BUDGET = 512
-_I32_MAX = (1 << 31) - 1
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
 
 
 @dataclass(frozen=True)
@@ -185,9 +180,9 @@ class DirectFwdTapOuterSpec:
         return (
             p.N
             * p.groups
-            * _ceil_div(p.Ho, self.tile_h)
-            * _ceil_div(p.Wo, self.tile_w)
-            * _ceil_div(p.kpg, self.block_k),
+            * ceil_div(p.Ho, self.tile_h)
+            * ceil_div(p.Wo, self.tile_w)
+            * ceil_div(p.kpg, self.block_k),
             1,
             1,
         )
@@ -200,9 +195,9 @@ def tapouter_tile_efficiency(spec: DirectFwdTapOuterSpec) -> float:
     """Share of ``spec``'s padded tile grid that is real work on its problem."""
     p = spec.problem
     tiles = (
-        _ceil_div(p.Ho, spec.tile_h) * spec.tile_h,
-        _ceil_div(p.Wo, spec.tile_w) * spec.tile_w,
-        _ceil_div(p.kpg, spec.block_k) * spec.block_k,
+        ceil_div(p.Ho, spec.tile_h) * spec.tile_h,
+        ceil_div(p.Wo, spec.tile_w) * spec.tile_w,
+        ceil_div(p.kpg, spec.block_k) * spec.block_k,
     )
     return (p.Ho * p.Wo * p.kpg) / (tiles[0] * tiles[1] * tiles[2])
 
@@ -236,6 +231,10 @@ def tapouter_reason(spec: DirectFwdTapOuterSpec, arch: str = "gfx1250") -> str |
         return f"tdm_split {ts} needs 2 * {ts} waves"
     if spec.tile_h % ts or spec.block_k % ts:
         return f"tdm_split {ts} must divide tile_h {spec.tile_h} and block_k"
+    if ts > 1 and spec.stages > 2:
+        # A slab in the top padding issues no transfer, so a wave's tensor
+        # count no longer marks its steps: only a full wait is safe.
+        return f"tdm_split {ts} needs 2 stages (a skipped slab breaks the wait)"
     if spec.tile_w < 1 or spec.block_p % spec.tile_w:
         return f"tile_w {spec.tile_w} must divide {spec.block_p}"
     if spec.threads_per_block > target.limits.max_threads_per_block:
@@ -249,20 +248,7 @@ def tapouter_reason(spec: DirectFwdTapOuterSpec, arch: str = "gfx1250") -> str |
     )
     if vgprs > TAPOUTER_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
-    tensor_bytes = (
-        2 * p.N * p.H * p.W * p.total_c,
-        2 * p.total_k * p.KH * p.KW * p.cpg,
-        2 * p.N * p.Ho * p.Wo * p.total_k,
-    )
-    if max(tensor_bytes) > _I32_MAX:
-        return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
-    if spec.grid()[0] > _I32_MAX:
-        return f"{spec.grid()[0]} workgroups exceed the i32 block id"
-    return None
+    return wmma_fwd_limits_reason(p, spec.sched, spec.grid()[0])
 
 
 def is_valid_tapouter_spec(
@@ -417,7 +403,7 @@ def build_direct_fwd_tapouter_wmma(
         if max_z:
             z_vecs = b.div(z_elems, c8)
             with b.scf_if(b.cmp_lt(c0, z_vecs)):
-                for j in range(0, _ceil_div(max_z, 8), THREADS):
+                for j in range(0, ceil_div(max_z, 8), THREADS):
                     v = b.add(tid, b.const_i32(j))
                     with b.scf_if(b.cmp_lt(v, z_vecs)):
                         b.smem_store_vN(

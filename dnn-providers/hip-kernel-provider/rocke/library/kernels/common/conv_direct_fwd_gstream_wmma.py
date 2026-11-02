@@ -60,9 +60,9 @@ from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef
+from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_fwd_wmma import CH_PAD, WMMA_K, _tdm_descriptor_3d
 from kernels.common.conv_direct_grouped import (
@@ -70,14 +70,9 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     emit_direct_params,
 )
-from kernels.common.conv_fwd_wmma_gate import wmma_fwd_gate
+from kernels.common.conv_fwd_wmma_gate import wmma_fwd_gate, wmma_fwd_limits_reason
 
 GSTREAM_VGPR_BUDGET = 448
-_I32_MAX = (1 << 31) - 1
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
 
 
 @dataclass(frozen=True)
@@ -112,7 +107,7 @@ class FwdGstreamWmmaSpec:
         to whole 16-row M tiles (the padding rows have zero weights and are
         not stored)."""
         kpg = self.problem.kpg
-        return kpg if self.span16 else _ceil_div(kpg, 16) * 16
+        return kpg if self.span16 else ceil_div(kpg, 16) * 16
 
     @property
     def block_k(self) -> int:
@@ -162,7 +157,7 @@ class FwdGstreamWmmaSpec:
     @property
     def lead_cols(self) -> int:
         p = self.problem
-        return _ceil_div(p.PAD, p.stride) if self.phase_split else p.PAD
+        return ceil_div(p.PAD, p.stride) if self.phase_split else p.PAD
 
     @property
     def x_pitch(self) -> int:
@@ -200,7 +195,7 @@ class FwdGstreamWmmaSpec:
         return [
             (t, t, c)
             for t in range(T)
-            for c in range(_ceil_div(self.problem.cpg, WMMA_K))
+            for c in range(ceil_div(self.problem.cpg, WMMA_K))
         ]
 
     @property
@@ -208,13 +203,13 @@ class FwdGstreamWmmaSpec:
         return self.waves_k * self.waves_p * self.wave_size
 
     def n_bands(self) -> int:
-        return _ceil_div(self.problem.Ho, self.tile_h)
+        return ceil_div(self.problem.Ho, self.tile_h)
 
     def grid(self) -> tuple[int, int, int]:
         p = self.problem
         n_kb = p.groups * self.kpad // self.block_k
-        n_wt = _ceil_div(p.Wo, self.tile_w)
-        walkers = _ceil_div(p.N * self.n_bands(), self.walk)
+        n_wt = ceil_div(p.Wo, self.tile_w)
+        walkers = ceil_div(p.N * self.n_bands(), self.walk)
         return (n_kb * n_wt * walkers, 1, 1)
 
     def launch_geometry(self) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
@@ -249,7 +244,7 @@ def fwd_gstream_tile_efficiency(spec: FwdGstreamWmmaSpec) -> float:
     """Share of ``spec``'s padded pixel grid that is real work on its problem."""
     p = spec.problem
     hp = spec.n_bands() * spec.tile_h
-    wp = _ceil_div(p.Wo, spec.tile_w) * spec.tile_w
+    wp = ceil_div(p.Wo, spec.tile_w) * spec.tile_w
     return (p.Ho * p.Wo) / (hp * wp)
 
 
@@ -276,7 +271,7 @@ def fwd_gstream_reason(spec: FwdGstreamWmmaSpec, arch: str = "gfx1250") -> str |
     if (
         p.cpg > 16
         and p.cpg % WMMA_K
-        and _ceil_div(p.cpg, WMMA_K) * WMMA_K - p.cpg > CH_PAD
+        and ceil_div(p.cpg, WMMA_K) * WMMA_K - p.cpg > CH_PAD
     ):
         return f"cpg {p.cpg}: its last k-step reads past the LDS row skew"
     if min(spec.waves_k, spec.waves_p, spec.tiles_k, spec.tiles_p) < 1:
@@ -313,20 +308,7 @@ def fwd_gstream_reason(spec: FwdGstreamWmmaSpec, arch: str = "gfx1250") -> str |
     )
     if vgprs > GSTREAM_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of weights, accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
-    tensor_bytes = (
-        2 * p.N * p.H * p.W * p.total_c,
-        2 * p.total_k * p.KH * p.KW * p.cpg,
-        2 * p.N * p.Ho * p.Wo * p.total_k,
-    )
-    if max(tensor_bytes) >= _I32_MAX:
-        return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
-    if spec.grid()[0] > _I32_MAX:
-        return f"{spec.grid()[0]} workgroups exceed the i32 block id"
-    return None
+    return wmma_fwd_limits_reason(p, spec.sched, spec.grid()[0])
 
 
 def is_valid_fwd_gstream_spec(
@@ -473,7 +455,7 @@ def build_fwd_gstream_wmma(
                 if max_z:
                     # Cells above / left of the image: no transfer writes them.
                     z_vecs = b.div(z_elems, c8)
-                    for j in range(0, _ceil_div(max_z, 8), WAVE):
+                    for j in range(0, ceil_div(max_z, 8), WAVE):
                         v = b.add(lane, b.const_i32(j))
                         with b.scf_if(b.cmp_lt(v, z_vecs)):
                             b.smem_store_vN(

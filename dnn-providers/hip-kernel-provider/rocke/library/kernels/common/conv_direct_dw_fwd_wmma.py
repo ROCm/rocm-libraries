@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from rocke.core.ir import IRBuilder, KernelDef, Value
+from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
     DW_DGRAD_MFMA_CH,
@@ -121,9 +122,9 @@ class DwFwdWmmaSpec:
     def grid(self) -> Tuple[int, int, int]:
         p = self.problem
         return (
-            -(-p.Wo // self.tile_w),
-            -(-p.groups // self.block_ch),
-            -(-p.N // self.w_fold) * -(-p.Ho // self.block_h),
+            ceil_div(p.Wo, self.tile_w),
+            ceil_div(p.groups, self.block_ch),
+            ceil_div(p.N, self.w_fold) * ceil_div(p.Ho, self.block_h),
         )
 
     def launch_geometry(self):
@@ -133,7 +134,7 @@ class DwFwdWmmaSpec:
         """16-byte input loads per thread and window row."""
         win = self.tile_w + 4 * _dw_mfma_passes(self.problem.KW) - 2
         per_px = self.block_ch // DW_DGRAD_MFMA_CH
-        return -(-self.w_fold * win * per_px // self.threads_per_block)
+        return ceil_div(self.w_fold * win * per_px, self.threads_per_block)
 
     def frag_vgprs(self) -> int:
         """VGPRs of the register-resident fragments: the one-hot weights
@@ -145,7 +146,7 @@ class DwFwdWmmaSpec:
 
     def lds_bytes(self) -> int:
         per_px = self.block_ch // DW_DGRAD_MFMA_CH
-        in_px = -(-self.in_passes() * self.threads_per_block // per_px)
+        in_px = ceil_div(self.in_passes() * self.threads_per_block, per_px)
         out_px = self.w_fold * self.tile_w
         return 2 * (in_px + out_px) * (self.block_ch + DW_DGRAD_MFMA_CH) * 2
 
@@ -198,17 +199,18 @@ def dw_fwd_wmma_reason(spec: DwFwdWmmaSpec) -> Optional[str]:
     # A plan-time rule: the IR does not depend on the group count.
     if p.groups % DW_DGRAD_MFMA_CH:
         return f"groups % {DW_DGRAD_MFMA_CH} != 0 (got {p.groups})"
+    frag_vgprs = spec.frag_vgprs()
     if (
         spec.block_waves > DW_FWD_WMMA_WIDE_WAVES
-        and spec.frag_vgprs() > DW_FWD_WMMA_WIDE_FRAG_VGPRS
+        and frag_vgprs > DW_FWD_WMMA_WIDE_FRAG_VGPRS
     ):
         return (
             f"{spec.block_waves} waves need fragments <= "
-            f"{DW_FWD_WMMA_WIDE_FRAG_VGPRS} VGPRs (got {spec.frag_vgprs()})"
+            f"{DW_FWD_WMMA_WIDE_FRAG_VGPRS} VGPRs (got {frag_vgprs})"
         )
-    if spec.frag_vgprs() > DW_FWD_WMMA_MAX_FRAG_VGPRS:
+    if frag_vgprs > DW_FWD_WMMA_MAX_FRAG_VGPRS:
         return (
-            f"fragments need {spec.frag_vgprs()} VGPRs (> "
+            f"fragments need {frag_vgprs} VGPRs (> "
             f"{DW_FWD_WMMA_MAX_FRAG_VGPRS}); lower prefetch_rows or the filter"
         )
     if spec.unrolled_wmmas() > DW_FWD_WMMA_MAX_UNROLL:
@@ -364,7 +366,7 @@ def build_dw_fwd_wmma(spec: DwFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
     n_out = F * TW * PER_PX
     c_TW = b.const_i32(TW)
     drain: List[Tuple[Value, Value, Value]] = []
-    for i in range(-(-n_out // THREADS)):
+    for i in range(ceil_div(n_out, THREADS)):
         idx = b.add(tid, b.const_i32(i * THREADS))
         px = b.div(idx, c_per_px)
         ch8 = b.mul(b.mod(idx, c_per_px), c8)
@@ -383,8 +385,8 @@ def build_dw_fwd_wmma(spec: DwFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
     # images past p_N and channels past p_groups read zero through the lane
     # sentinel.
     n_in = F * U * PER_PX
-    in_passes = -(-n_in // THREADS)
-    in_px = -(-in_passes * THREADS // PER_PX)
+    in_passes = ceil_div(n_in, THREADS)
+    in_px = ceil_div(in_passes * THREADS, PER_PX)
     i_smem = b.smem_alloc(io_type, [2, in_px, CH_PAD], name_hint="x_stage")
     c_U = b.const_i32(U)
     in_plan: List[Tuple[Value, Value, Value]] = []

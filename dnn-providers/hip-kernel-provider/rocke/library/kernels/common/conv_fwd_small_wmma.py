@@ -46,7 +46,6 @@ stride, padding, the small channel count and the tile geometry are baked.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
 
 from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
@@ -56,6 +55,7 @@ from rocke.core.codegen_policy import (
 )
 from rocke.core.ir import F32, I32, IRBuilder, KernelDef, Value
 
+from kernels.common.conv_direct_fwd_wmma import _tdm_descriptor_3d
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _io_type,
@@ -82,54 +82,6 @@ def _ceil_div(a: int, b: int) -> int:
 
 def _round_up(a: int, b: int) -> int:
     return _ceil_div(a, b) * b
-
-
-def _tdm_descriptor_3d(
-    b: IRBuilder,
-    global_ptr: Value,
-    lds_addr: Value,
-    *,
-    dims: Sequence[Value],
-    strides: Sequence[Value],
-    tile0: int,
-    tile1: int,
-    tile2: Value,
-) -> tuple[Value, Value, Value, Value, Value]:
-    """The five D# groups of a rank-3 TDM tile transfer (2-byte elements).
-
-    Dimension 0 is contiguous; ``strides`` are the element strides of
-    dimensions 1 and 2, ``dims`` the extents left from ``global_ptr`` (the
-    hardware zero-fills the tile past them). The tile lands packed
-    ``[tile2][tile1][tile0]`` at the i32 LDS byte address ``lds_addr``.
-    ``tile2`` may be a runtime value.
-    """
-    c16 = b.const_i32(16)
-    d0, d1, d2 = dims
-    s1, s2 = strides
-    gaddr = b.global_ptr_to_i64(global_ptr)
-    g_hi = b.trunc(b.lshr(gaddr, b.const_i64(32)), I32)
-    group0 = (
-        b.const_i32(1),
-        lds_addr,
-        b.trunc(gaddr, I32),
-        b.lor(b.land(g_hi, b.const_i32(0x1FFFFFF)), b.const_i32(-(1 << 31))),
-    )
-    group1 = (
-        b.const_i32(1 << 16),  # data_size = 2 bytes
-        b.shl(d0, c16),
-        b.lor(b.lshr(d0, c16), b.shl(d1, c16)),
-        b.lor(b.lshr(d1, c16), b.const_i32(tile0 << 16)),
-        b.lor(b.const_i32(tile1), b.shl(tile2, c16)),
-        s1,
-        b.shl(s2, c16),
-        b.lshr(s2, c16),
-    )
-    group2 = (d2, b.const_i32(0), b.const_i32(0), b.const_i32(0))
-
-    def pk(words):
-        return b.vec_pack([b.readfirstlane(v) for v in words], I32)
-
-    return pk(group0), pk(group1), pk(group2), b.zero_vec(I32, 4), b.zero_vec(I32, 8)
 
 
 def _wmma_op(p: DirectConvProblem, arch: str):

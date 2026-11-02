@@ -18,6 +18,7 @@ in the same order and the same rejection messages.
 from __future__ import annotations
 
 from rocke.core.arch import ArchTarget
+from rocke.core.codegen_policy import normalize_scheduler_strategy
 
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
@@ -25,12 +26,20 @@ from kernels.common.conv_direct_grouped import (
     pad_w_reason,
 )
 
-__all__ = ["WMMA_K", "WMMA_M", "WMMA_N", "wmma_ab_dtype", "wmma_fwd_gate"]
+__all__ = [
+    "WMMA_K",
+    "WMMA_M",
+    "WMMA_N",
+    "wmma_ab_dtype",
+    "wmma_fwd_gate",
+    "wmma_fwd_limits_reason",
+]
 
 # The fp32-accumulating WMMA atom every forward family issues: M x N x K.
 WMMA_M = 16
 WMMA_N = 16
 WMMA_K = 32
+_I32_MAX = (1 << 31) - 1
 
 
 def wmma_ab_dtype(dtype: str) -> str:
@@ -74,3 +83,24 @@ def wmma_fwd_gate(
     ):
         return f"missing wmma_f32_{WMMA_M}x{WMMA_N}x{WMMA_K}_{ab} on {arch}", target
     return (pad_w_reason(p) if per_axis_pad else one_padding_reason(p)), target
+
+
+def wmma_fwd_limits_reason(
+    p: DirectConvProblem, sched: str | None, n_blocks: int
+) -> str | None:
+    """The checks a forward validator ends with: a known scheduler strategy,
+    i32 byte offsets into X, W and Y, and an i32 flat block id."""
+    try:
+        normalize_scheduler_strategy(sched)
+    except ValueError as e:
+        return str(e)
+    tensor_bytes = (
+        2 * p.N * p.H * p.W * p.total_c,
+        2 * p.total_k * p.KH * p.KW * p.cpg,
+        2 * p.N * p.Ho * p.Wo * p.total_k,
+    )
+    if max(tensor_bytes) > _I32_MAX:
+        return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
+    if n_blocks > _I32_MAX:
+        return f"{n_blocks} workgroups exceed the i32 block id"
+    return None

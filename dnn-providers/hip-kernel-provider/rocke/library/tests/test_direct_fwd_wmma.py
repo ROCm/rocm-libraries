@@ -132,6 +132,22 @@ class TestFwdWmmaSpec(unittest.TestCase):
                 "1-D",
             ),
             ({}, dict(poly_view=True), "1-D"),
+            (
+                dict(H=1, W=512, KH=1, KW=8, PAD=0, pad_w=1, stride=4),
+                dict(poly_view=True),
+                "S / 2",
+            ),
+            (
+                dict(C=128, K=128, groups=2, KH=2, PAD=0, stride=2),
+                dict(strided_view=True),
+                "ungrouped",
+            ),
+            (dict(KH=2, PAD=0, stride=2), dict(strided_view=True, ck=0), "ck 0"),
+            (
+                dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2),
+                dict(poly_view=True, ck=0),
+                "ck 0",
+            ),
         ):
             why = fwd_wmma_reason(DirectFwdWmmaSpec(problem=_problem(**pkw), **knobs))
             self.assertIsNotNone(why, (pkw, knobs))
@@ -242,6 +258,23 @@ class TestFwdWmmaSpec(unittest.TestCase):
             (dict(KH=2, PAD=0, stride=2, H=14), dict(strided_view=True, fold_n=True)),
             (dict(KH=2, PAD=0, stride=2, H=13), dict(strided_view=True, fold_n=True)),
             ({}, dict(fold_n=True)),
+            (dict(KH=2, PAD=0, stride=2), dict(strided_view=True, ck=0)),
+            (
+                dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2),
+                dict(poly_view=True, ck=0),
+            ),
+            (
+                dict(C=128, K=128, groups=2, KH=2, PAD=0, stride=2),
+                dict(strided_view=True),
+            ),
+            (
+                dict(C=128, K=128, groups=2, KH=1, PAD=0, stride=2),
+                dict(strided_view=True),
+            ),
+            (
+                dict(H=1, W=512, KH=1, KW=8, PAD=0, pad_w=1, stride=4),
+                dict(poly_view=True),
+            ),
             (
                 dict(H=1, W=600, KH=1, KW=4, PAD=0, pad_w=1, stride=2),
                 dict(poly_view=True, tile_w=128, waves_k=2, waves_p=2),
@@ -388,6 +421,36 @@ class TestFwdWmmaSpec(unittest.TestCase):
         )
         self.assertIsNotNone(spec, why)
         self.assertEqual(spec.problem.PAD_W, 9)
+
+    def test_shipped_strided_views_refuse_grouped_patches(self):
+        """A 2x2 stride-2 patch run is KW * cpg contiguous channels only when
+        one group holds a pixel's channels: every shipped 2x2 strided_view row
+        refuses a grouped problem, while a 1x1 stride-2 one still serves it."""
+        from kernels.conv.direct_aot_jobs import _fwd_wmma_sv_knobs
+        from kernels.conv.direct_variants import direct_spec_for_problem
+
+        rows = list(_fwd_wmma_sv_knobs())
+        self.assertTrue(rows)
+        for kh in (1, 2):
+            dense = _problem(N=4, H=64, W=64, C=256, K=256, KH=kh, PAD=0, stride=2)
+            grouped = _problem(
+                N=4, H=64, W=64, C=256, K=256, groups=2, KH=kh, PAD=0, stride=2
+            )
+            for knobs in rows:
+                if knobs.get("fold_n"):
+                    continue
+                spec, why = direct_spec_for_problem(
+                    "direct_fwd_wmma", dense, knobs, "gfx1250", 32
+                )
+                self.assertIsNotNone(spec, (kh, knobs, why))
+                spec, why = direct_spec_for_problem(
+                    "direct_fwd_wmma", grouped, knobs, "gfx1250", 32
+                )
+                if kh == 1:
+                    self.assertIsNotNone(spec, (knobs, why))
+                else:
+                    self.assertIsNone(spec, knobs)
+                    self.assertIn("ungrouped", why)
 
 
 def _gpu_skip() -> str:

@@ -428,6 +428,10 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
             FWW_FAIL("strided_view serves stride > 1");
         if(spec->phase_split || spec->pack_groups > 1 || spec->tap_reuse)
             FWW_FAIL("strided_view is a 1x1 stride-1 loop (no phases, packs or reuse)");
+        /* A patch run of KW * cpg contiguous channels exists only when one
+         * group holds all of a pixel's channels. */
+        if(p->KH > 1 && p->groups > 1)
+            FWW_FAIL("a KxK strided_view serves ungrouped convs");
         if(p->KH > 1 && spec->ck != 0 && (p->KW * p->cpg) % spec->ck)
             FWW_FAIL("a %d-channel patch run is not whole ck %d chunks", p->KW * p->cpg, spec->ck);
         if(spec->fold_n && (p->H != p->stride * fww_Ho(p) || spec->tile_n != 1))
@@ -445,6 +449,9 @@ bool rocke_direct_fwd_wmma_is_valid_spec(const rocke_direct_fwd_wmma_spec_t* spe
             FWW_FAIL("poly_view serves 1-D (H = 1, 1 x R) undilated filters");
         if(S < 2 || p->KW % S || !(0 <= pad_w && pad_w < S) || p->W % S)
             FWW_FAIL("poly_view needs R = m * S, column padding below S and W %% S == 0");
+        /* The view's last pixel is then all input, not a trailing zero. */
+        if(0 < 2 * pad_w && 2 * pad_w < S)
+            FWW_FAIL("poly_view needs column padding 0 or at least S / 2");
         if(p->groups != 1)
             FWW_FAIL("poly_view serves ungrouped convs");
         if(spec->phase_split || spec->pack_groups > 1)

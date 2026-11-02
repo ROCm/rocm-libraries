@@ -46,6 +46,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from benchmarks.common import conv_fill
+
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 # (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue).
@@ -596,8 +598,6 @@ def verify_error(out, ref) -> Tuple[float, float]:
     o = out.float().cpu()
     r = ref.float().cpu()
     d = (o - r).abs()
-    from benchmarks.common import conv_fill
-
     err = float(d.max() / r.abs().max().clamp(min=conv_fill.ref_floor()))
     if err != err:  # NaN
         err = float("inf")
@@ -610,8 +610,6 @@ def make_inputs(problem, io_dtype: str, seed: int = 42):
 
     tdt = {"fp16": torch.float16, "bf16": torch.bfloat16}[io_dtype]
     g = torch.Generator().manual_seed(seed)
-    from benchmarks.common import conv_fill
-
     x = conv_fill.fill_x(
         torch.empty(problem.N, problem.Hi, problem.Wi, problem.C), generator=g
     )
@@ -1041,8 +1039,6 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--arch", default=None)
-    from benchmarks.common import conv_fill
-
     conv_fill.add_argument(ap)
     args = ap.parse_args(argv)
     conv_fill.set_mode(args.fill)

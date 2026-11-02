@@ -282,6 +282,10 @@ bool rocke_fwd_tapouter_wmma_is_valid_spec(const rocke_fwd_tapouter_wmma_spec_t*
         TO_FAIL("tdm_split %d must divide tile_h %d and block_k",
                 ts,
                 rocke_fwd_tapouter_wmma_tile_h(spec));
+    /* A slab in the top padding issues no transfer, so a wave's tensor count
+     * no longer marks its steps: only a full wait is safe. */
+    if(ts > 1 && spec->stages > 2)
+        TO_FAIL("tdm_split %d needs 2 stages (a skipped slab breaks the wait)", ts);
     if(spec->tile_w < 1 || rocke_fwd_tapouter_wmma_block_p(spec) % spec->tile_w != 0)
         TO_FAIL("tile_w %d must divide %d", spec->tile_w, rocke_fwd_tapouter_wmma_block_p(spec));
     if(rocke_fwd_tapouter_wmma_threads_per_block(spec)

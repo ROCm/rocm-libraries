@@ -4764,19 +4764,20 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             # A kernel launches on one batch slice at a time, so it is offered
             # against the largest slice: the grid limits apply to that.
             fit_problem = dc_replace(run_problem, N=batch_chunks[0][1])
+            keep = (
+                None
+                if kernel_map is None
+                else conv_fill.kernels_for(
+                    kernel_map, case_key(problem, case_dtype, direction)
+                )
+            )
             candidates = [
                 (ident, path, meta)
                 for ident, path, meta in cache.compatible(
                     fit_problem, direction=direction
                 )
                 if ident.dtype_a == case_dtype
-                and (
-                    kernel_map is None
-                    or ident.label()
-                    in conv_fill.kernels_for(
-                        kernel_map, case_key(problem, case_dtype, direction)
-                    )
-                )
+                and (keep is None or ident.label() in keep)
             ]
             if not candidates:
                 _, why = next(

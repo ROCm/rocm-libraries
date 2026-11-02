@@ -95,7 +95,7 @@ static int make_cfg(int idx, rocke_fwd_tapouter_wmma_spec_t* s, const char** arc
         return 0;
     case 6:
         s->problem = same(18, "bf16");
-        knobs(s, 2, 2, 4, 2, 16, 64, 3);
+        knobs(s, 2, 2, 4, 2, 16, 64, 2);
         s->prefetch = true;
         s->sched = "iterative-ilp";
         s->tdm_split = 2;

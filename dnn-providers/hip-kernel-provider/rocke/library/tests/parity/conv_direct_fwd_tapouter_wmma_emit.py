@@ -19,7 +19,7 @@
 #   3  fp16, dilation 24, groups 2 (cpg 32 / kpg 48), 4/1/4/4/16/128/2
 #   4  bf16, dilation 36, 40x44, 4/2/4/4/16/64/2
 #   5  fp16, dilation 4, defaults (3 stages)
-#   6  bf16, dilation 18, 2/2/4/2/16/64/3, prefetch, iterative-ilp, tdm_split 2
+#   6  bf16, dilation 18, 2/2/4/2/16/64/2, prefetch, iterative-ilp, tdm_split 2
 #   7  fp16, dilation 2x3 (PAD 3), defaults
 #  rejected by both engines:
 #   8  gfx950 (wave64)
@@ -89,7 +89,7 @@ def _spec(idx: int):
                     2,
                     16,
                     64,
-                    3,
+                    2,
                     prefetch=True,
                     sched="iterative-ilp",
                     tdm_split=2,

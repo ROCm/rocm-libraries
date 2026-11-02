@@ -1650,67 +1650,56 @@ def _dgrad_wmma_knobs(rows, pack_groups: int = 1) -> Iterator[dict]:
         yield knobs
 
 
+def _wmma_fwd_knob_row(
+    wk: int, wp: int, tk: int, tp: int, tw: int, *, prefetch: bool = False, **rest
+) -> dict:
+    """One WMMA forward tuning row as knobs: the wave / tile shape, ``rest``
+    without the switches that are off (False or None), and ``prefetch`` with
+    the iterative-ilp scheduler it is tuned with."""
+    knobs = dict(waves_k=wk, waves_p=wp, tiles_k=tk, tiles_p=tp, tile_w=tw)
+    knobs.update((k, v) for k, v in rest.items() if v is not False and v is not None)
+    if prefetch:
+        knobs.update(prefetch=True, sched="iterative-ilp")
+    return knobs
+
+
 def _fwd_wmma_poly_knobs() -> Iterator[dict]:
-    for wk, wp, tk, tp, tw, ck, st, pf in FWD_WMMA_POLY_KNOBS:
-        knobs = dict(
-            waves_k=wk,
-            waves_p=wp,
-            tiles_k=tk,
-            tiles_p=tp,
-            tile_w=tw,
-            ck=ck,
-            stages=st,
-            poly_view=True,
+    for *shape, ck, st, pf in FWD_WMMA_POLY_KNOBS:
+        yield _wmma_fwd_knob_row(
+            *shape, ck=ck, stages=st, poly_view=True, prefetch=bool(pf)
         )
-        if pf:
-            knobs.update(prefetch=True, sched="iterative-ilp")
-        yield knobs
 
 
 def _fwd_wmma_sv_knobs() -> Iterator[dict]:
-    for wk, wp, tk, tp, tw, ck, st, pf, fn in FWD_WMMA_SV_KNOBS:
-        knobs = dict(
-            waves_k=wk,
-            waves_p=wp,
-            tiles_k=tk,
-            tiles_p=tp,
-            tile_w=tw,
+    for *shape, ck, st, pf, fn in FWD_WMMA_SV_KNOBS:
+        yield _wmma_fwd_knob_row(
+            *shape,
             ck=ck,
             stages=st,
             strided_view=True,
+            fold_n=bool(fn),
+            prefetch=bool(pf),
         )
-        if pf:
-            knobs.update(prefetch=True, sched="iterative-ilp")
-        if fn:
-            knobs.update(fold_n=True)
-        yield knobs
 
 
 def _fwd_wmma_knobs(rows, pack_groups: int = 1) -> Iterator[dict]:
     for wk, wp, tk, tp, tw, tn, ck, st, pf, sb, we, ps, rr in rows:
-        knobs = dict(
-            waves_k=wk,
-            waves_p=wp,
-            tiles_k=tk,
-            tiles_p=tp,
-            tile_w=tw,
+        yield _wmma_fwd_knob_row(
+            wk,
+            wp,
+            tk,
+            tp,
+            tw,
             tile_n=tn,
             ck=ck,
             stages=st,
+            split_barrier=bool(sb),
+            wave_epilogue=bool(we),
+            phase_split=bool(ps),
+            row_ring=bool(rr),
+            pack_groups=pack_groups if pack_groups > 1 else None,
+            prefetch=bool(pf),
         )
-        if pf:
-            knobs.update(prefetch=True, sched="iterative-ilp")
-        if sb:
-            knobs.update(split_barrier=True)
-        if we:
-            knobs.update(wave_epilogue=True)
-        if ps:
-            knobs.update(phase_split=True)
-        if rr:
-            knobs.update(row_ring=True)
-        if pack_groups > 1:
-            knobs.update(pack_groups=pack_groups)
-        yield knobs
 
 
 def _dw_fwd_cpl_arch(arch: str) -> bool:
@@ -2099,63 +2088,41 @@ def _knob_grid(
             for knobs in _fwd_wmma_knobs(FWD_WMMA_KNOBS):
                 if knobs["tile_n"] == 1 and not knobs.get("row_ring"):
                     yield dict(knobs, tap_reuse=True)
-            for wk, wp, tk, tp, tw, tn, ck, pg, sched in FWD_WMMA_PP_KNOBS:
-                knobs = dict(
-                    waves_k=wk,
-                    waves_p=wp,
-                    tiles_k=tk,
-                    tiles_p=tp,
-                    tile_w=tw,
+            for *shape, tn, ck, pg, sched in FWD_WMMA_PP_KNOBS:
+                yield _wmma_fwd_knob_row(
+                    *shape,
                     tile_n=tn,
                     ck=ck,
                     stages=2,
                     pingpong=True,
+                    pp_group=pg if pg > 1 else None,
+                    sched=sched or None,
                 )
-                if pg > 1:
-                    knobs["pp_group"] = pg
-                if sched:
-                    knobs["sched"] = sched
-                yield knobs
     elif variant == _FWD_TAPOUTER:
         from rocke.core.arch import ArchTarget
 
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return
-        for wk, wp, tk, tp, tw, ck, st in FWD_TAPOUTER_KNOBS:
-            yield dict(
-                waves_k=wk,
-                waves_p=wp,
-                tiles_k=tk,
-                tiles_p=tp,
-                tile_w=tw,
-                ck=ck,
-                stages=st,
-            )
+        for *shape, ck, st in FWD_TAPOUTER_KNOBS:
+            yield _wmma_fwd_knob_row(*shape, ck=ck, stages=st)
     elif variant == _FWD_GSTREAM:
         from rocke.core.arch import ArchTarget
 
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return
         padded = caps is not None and caps.cpg not in FWD_GSTREAM_CHANNELS
-        for wk, wp, tk, tp, tw, walk, st, ps, pd in (
+        for *shape, walk, st, ps, pd in (
             FWD_GSTREAM_PADG_KNOBS if padded else FWD_GSTREAM_KNOBS
         ):
             if ps and (caps is None or caps.stride != 2):
                 continue
-            knobs = dict(
-                waves_k=wk,
-                waves_p=wp,
-                tiles_k=tk,
-                tiles_p=tp,
-                tile_w=tw,
+            yield _wmma_fwd_knob_row(
+                *shape,
                 walk=walk,
                 stages=st,
+                phase_split=bool(ps),
+                pf_depth=pd if pd > 1 else None,
             )
-            if ps:
-                knobs["phase_split"] = True
-            if pd > 1:
-                knobs["pf_depth"] = pd
-            yield knobs
     elif variant == _DW_FWD_WMMA:
         from rocke.core.arch import ArchTarget
 

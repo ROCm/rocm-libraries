@@ -82,7 +82,6 @@ from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value, VectorType
 
@@ -97,11 +96,11 @@ from kernels.common.conv_fwd_wmma_gate import (
     WMMA_N,
     wmma_ab_dtype,
     wmma_fwd_gate,
+    wmma_fwd_limits_reason,
 )
 
 CH_PAD = 8  # channels of row skew past each LDS row (16 bytes)
 FWD_WMMA_VGPR_BUDGET = 512
-_I32_MAX = (1 << 31) - 1
 
 
 def _ceil_div(a: int, b: int) -> int:
@@ -443,7 +442,11 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
             return "strided_view serves stride > 1"
         if spec.phase_split or spec.pack_groups > 1 or spec.tap_reuse:
             return "strided_view is a 1x1 stride-1 loop (no phases, packs or reuse)"
-        if p.KH > 1 and (p.KW * p.cpg) % spec.ck:
+        if p.KH > 1 and p.groups > 1:
+            # A patch run of KW * cpg contiguous channels exists only when
+            # one group holds all of a pixel's channels.
+            return "a KxK strided_view serves ungrouped convs"
+        if p.KH > 1 and spec.ck and (p.KW * p.cpg) % spec.ck:
             return (
                 f"a {p.KW * p.cpg}-channel patch run is not whole ck {spec.ck} chunks"
             )
@@ -457,11 +460,14 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
             return "poly_view serves 1-D (H = 1, 1 x R) undilated filters"
         if S < 2 or p.KW % S or not 0 <= p.PAD_W < S or p.W % S:
             return "poly_view needs R = m * S, column padding below S and W % S == 0"
+        if 0 < 2 * p.PAD_W < S:
+            # The view's last pixel is then all input, not a trailing zero.
+            return "poly_view needs column padding 0 or at least S / 2"
         if p.groups != 1:
             return "poly_view serves ungrouped convs"
         if spec.phase_split or spec.pack_groups > 1:
             return "poly_view is a plain stride-1 1-D loop"
-        if p.cpg % spec.ck or (p.PAD_W * p.cpg) % spec.ck:
+        if not spec.ck or p.cpg % spec.ck or (p.PAD_W * p.cpg) % spec.ck:
             return f"a chunk must lie in one input pixel (cpg {p.cpg}, ck {spec.ck})"
         if spec.tile_h != 1:
             return "poly_view tiles one row (tile_w * tile_n == block_p)"
@@ -579,21 +585,7 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
         vgprs += 8 * ((p.KH - 1) * p.dil_h * (tw // 16))
     if vgprs > FWD_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
-    # Global offsets are i32 bytes and the tile index is a flat block id.
-    tensor_bytes = (
-        2 * real.N * real.H * real.W * real.total_c,
-        2 * real.total_k * real.KH * real.KW * real.cpg,
-        2 * real.N * real.Ho * real.Wo * real.total_k,
-    )
-    if max(tensor_bytes) > _I32_MAX:
-        return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
-    if spec.grid()[0] > _I32_MAX:
-        return f"{spec.grid()[0]} workgroups exceed the i32 block id"
-    return None
+    return wmma_fwd_limits_reason(real, spec.sched, spec.grid()[0])
 
 
 def is_valid_fwd_wmma_spec(
