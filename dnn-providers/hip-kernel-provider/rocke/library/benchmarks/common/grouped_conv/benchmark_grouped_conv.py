@@ -35,6 +35,11 @@ kernels' knob rules); --algorithm, --instance and --sample narrow that further.
 The instances run in the dispatcher's priority order, so the table also shows
 where its default pick (marked '*') ranks.
 
+Every reported time is measured the way hipDNN's ``dnn-benchmark`` times a
+call (``--timing staged``, the default: one stalled event pair per launch, the
+median; see :mod:`benchmarks.common.batched_timing`), so the numbers compare
+with hipDNN and MIOpen. ``--timing block`` restores the back-to-back average.
+
 The instances record the LLVM flavor they are lowered for (``llvm22``); run
 with ``ROCKE_LLVM_FLAVOR`` set to it.
 
@@ -69,6 +74,7 @@ from pathlib import Path
 # where the C++ engine extension is not built.
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
+from benchmarks.common.batched_timing import add_timing_arg  # noqa: E402
 from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg  # noqa: E402
 
 _DTYPES = ("fp16", "bf16")
@@ -671,6 +677,7 @@ def _verify(rt, run, out_dev, out_t, ref_out, name: str, dump_fail, u8):
 
 def _run_case(args, cache, problem, dtype: str, sel) -> int:
     import ctypes
+    import struct
 
     import numpy as np
     import torch
@@ -729,7 +736,7 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
 
     stop = EarlyStop.for_case(args, p, dtype, direction)
     measured: list[_Measured] = []
-    n_missing = n_failed = 0
+    n_missing = n_failed = n_skipped = 0
     n = len(sel.results)
     rc = 0
     try:
@@ -770,8 +777,18 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                     )
                     for step, (hsaco, meta) in zip(plan.steps, entries)
                 ]
+            except struct.error as e:
+                # A genuine over-2 GiB tensor is the only kernarg a struct.error
+                # should come from; anything else is a real packing bug and must
+                # not be swallowed as a silent skip.
+                if max(sizes.values()) <= 2**31 - 1:
+                    raise
+                print(f"  [skip] {spec.name}: tensor over 2 GiB ({e})", flush=True)
+                n_skipped += 1
+                continue
             except (HipError, KeyError) as e:
                 print(f"  [skip] {spec.name}: {e}", flush=True)
+                n_skipped += 1
                 continue
 
             def run(bound=bound):
@@ -801,6 +818,7 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                 )
             except (HipError, RuntimeError) as e:
                 print(f"  [skip] {spec.name}: {e}", flush=True)
+                n_skipped += 1
                 continue
             if ms is None:
                 stop.report(spec.name)
@@ -826,6 +844,12 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
             f"(build them with --compile-all, or run without --run-from-cache)",
             flush=True,
         )
+    if n_skipped:
+        print(f"  {n_skipped} instance(s) skipped (see [skip] lines above)", flush=True)
+        if args.verify:
+            # A skip is neither a pass nor a fail: --verify must not report rc=0
+            # for a run that never actually verified every admitted instance.
+            rc = 1
     if ref_out is not None:
         print(f"  verify: {n_failed} of the launched instances failed", flush=True)
     if not measured:
@@ -993,6 +1017,7 @@ def _parser() -> argparse.ArgumentParser:
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
     add_early_stop_arg(parser)
+    add_timing_arg(parser)
     parser.add_argument(
         "--top", type=int, default=10, help="print the top-N instances (default: 10)"
     )

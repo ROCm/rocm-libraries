@@ -29,6 +29,8 @@ from kernels.conv import kernel_label as kernel_label
 from kernels.conv.direct_variants import (
     DIRECT_DGRAD_REORGANIZE,
     DIRECT_DGRAD_TRANSPOSE,
+    DIRECT_DGRAD_PATCH_WMMA,
+    DIRECT_DGRAD_SMALLC_WMMA,
     DIRECT_DGRAD_WMMA,
     DIRECT_FWD_SMALLC_WMMA,
     DIRECT_FWD_SMALLK_WMMA,
@@ -66,6 +68,8 @@ def _implicit_jobs(direction: str, n_geometries: int):
 # Variants the grid builds only for wave32 (gfx1250): walked there.
 _WAVE32_ONLY = {
     DIRECT_DGRAD_WMMA: "gfx1250",
+    DIRECT_DGRAD_PATCH_WMMA: "gfx1250",
+    DIRECT_DGRAD_SMALLC_WMMA: "gfx1250",
     DIRECT_FWD_WMMA: "gfx1250",
     DIRECT_FWD_SMALLC_WMMA: "gfx1250",
     DIRECT_FWD_SMALLK_WMMA: "gfx1250",
