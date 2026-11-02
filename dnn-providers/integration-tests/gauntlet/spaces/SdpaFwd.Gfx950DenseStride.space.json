@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "operation": "SdpaFwd",
+  "description": "Probe-only evidence for hipkernel:Gfx950AttentionDense (rocKE) on a padded leading stride, crossed with the declared alignment. The SdpaFwd/Gfx950Dense region (BSHD, head size 64 or 128, bfloat16 or half, a (query heads, kv heads) pair the KDP ships for both head sizes, seqlen_q a multiple of 128 and seqlen_kv a multiple of 32, no mask, no stats) over a small shape set, where the row stride (the stride between two consecutive sequence positions, in elements) of the tensors `pad_on` names (q, k, v, o, or all four) is the packed one, heads * head size, plus `pad`; the head stride stays the head size and the batch stride grows with the row stride, so a head's vector stays contiguous and only the rows are spread apart. The `pad` elements after a row are gap elements that belong to no element. `pad` takes 0 (packed), 1, 2, 3, 4, 5 and 7 (below or off a 16-byte vector of 8 half or bfloat16 elements), 8, 16 and 24 (16-byte multiples), and 9, 15, 17 and 31 (break the vector width). It is crossed with the declared alignment of Q, K, V and O (tensor_patches on uids 1, 0, 3, 2) and with the placement of the device pointers, as in Matmul/Align and SdpaFwd/Flash2: exact puts every device pointer at exactly the declared alignment, under misaligns Q below it (a PASS then means the backend rejected the pointer), default leaves the pointers where they are; under drawn at alignment 1 is rendered as exact. It exists to show whether the engine declines a padded row stride instead of reading and writing across a row of a layout it does not know. Expected (probed on gfx950, 48 samples and every pair): DECLINED at every pad above 0, even a 16-byte multiple; at pad 0, PASS when the declared alignment is at least 16 and DECLINED below. WRONG or CRASH on a padded stride is the finding. Only strides, alignment and placement vary: the input fill stays at its default range. pad_on has no effect at pad 0, so every pad_on but 'all' is illegal there.",
+  "engine": "hipkernel:Gfx950AttentionDense",
+  "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
+  "axes": {
+    "dtype":     {"values": ["bfloat16", "half"]},
+    "b":         {"values": [1, 2]},
+    "heads":     {"values": [[8, 1], [16, 2], [16, 16], [32, 8]]},
+    "d":         {"values": [64, 128]},
+    "sq_m":      {"values": [1, 2]},
+    "skv_mode":  {"values": ["same", "independent"]},
+    "skv_n":     {"values": [1, 2, 4]},
+    "pad":       {"values": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31]},
+    "pad_on":    {"values": ["q", "k", "v", "o", "all"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
+  },
+  "derive": {
+    "hq":        "heads[0]",
+    "hkv":       "heads[1]",
+    "sq":        "sq_m * 128",
+    "skv":       "sq if skv_mode == 'same' else skv_n * 32",
+    "dims_q":    "[b, hq, sq, d]",
+    "dims_kv":   "[b, hkv, skv, d]",
+    "pad_q":     "pad if pad_on in ['q', 'all'] else 0",
+    "pad_k":     "pad if pad_on in ['k', 'all'] else 0",
+    "pad_v":     "pad if pad_on in ['v', 'all'] else 0",
+    "pad_o":     "pad if pad_on in ['o', 'all'] else 0",
+    "row_q":     "hq*d + pad_q",
+    "row_k":     "hkv*d + pad_k",
+    "row_v":     "hkv*d + pad_v",
+    "row_o":     "hq*d + pad_o",
+    "stride_q":  "[sq*row_q, d, row_q, 1]",
+    "stride_k":  "[skv*row_k, d, row_k, 1]",
+    "stride_v":  "[skv*row_v, d, row_v, 1]",
+    "stride_o":  "[sq*row_o, d, row_o, 1]",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "constraints": [
+    {"rule": "pad > 0 or pad_on == 'all'", "reason": "pad_on names no tensor when pad is 0: every pad_on would render the same packed graph"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_kv}", "strides": "${stride_k}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_q}",  "strides": "${stride_q}", "data_type": "${dtype}"},
+        {"uid": 2, "dims": "${dims_q}",  "strides": "${stride_o}", "data_type": "${dtype}"},
+        {"uid": 3, "dims": "${dims_kv}", "strides": "${stride_v}", "data_type": "${dtype}"}
+      ],
+      "attributes": {
+        "attributes__attn_scale_value": 0.0883883461356163,
+        "attributes__diagonal_alignment": "TOP_LEFT",
+        "attributes__right_bound": "${None}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "placement": "${eff_placement}",
+      "placement_uid": 1
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}}
+    ]
+  }
+}

@@ -517,16 +517,19 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "Layernorm/Default",
         "LayernormBackward/Default",
         "Matmul/Align",
+        "Matmul/Stride",
         "RMSNorm/Default",
         "RMSNormBackward/Default",
         "ResampleFwd/Default",
         "SdpaBackward/Default",
+        "SdpaFwd/AsmStride",
         "SdpaFwd/Default",
         "SdpaFwd/Flash2",
         "SdpaFwd/Flash2Region",
         "SdpaFwd/Gfx1151",
         "SdpaFwd/Gfx1151Decode",
         "SdpaFwd/Gfx950Dense",
+        "SdpaFwd/Gfx950DenseStride",
     ]
     for sp in SPACES:
         assert BUNDLES not in sp.path.parents
@@ -565,6 +568,22 @@ def _packed(dims, strides):
     return sum((d - 1) * s for d, s in zip(dims, strides)) + 1 == count
 
 
+def _nested(dims, strides):
+    """True when no two elements share an offset and ``strides`` nest: each stride, taken in
+    ascending order, is beyond the span the smaller strides reach. Rows may be spread apart
+    (a padded leading stride), which ``_packed`` refuses."""
+    if len(dims) != len(strides) or any(d < 1 for d in dims):
+        return False
+    span = 0  # the largest offset reached by the axes of a smaller stride
+    for stride, dim in sorted(zip(strides, dims)):
+        if dim == 1:
+            continue
+        if stride <= span:
+            return False
+        span += (dim - 1) * stride
+    return True
+
+
 def expanded_graph(template, row):
     """The graph the harness runs for a sweep row: the template expanded with the row's
     values, then its ``tensor_patches`` applied."""
@@ -600,7 +619,17 @@ def test_shipped_space_row_appended_to_the_template_sweep_expands(tmp_path, spac
         }
         for tensor in graph["tensors"]:
             if tensor.get("value") is None:
-                assert _packed(tensor["dims"], tensor["strides"]), (s.case_id, tensor)
+                if space_id in STRIDE_SPACES:
+                    # a padded leading stride: the rows are spread apart, never overlapping
+                    assert _nested(tensor["dims"], tensor["strides"]), (
+                        s.case_id,
+                        tensor,
+                    )
+                else:
+                    assert _packed(tensor["dims"], tensor["strides"]), (
+                        s.case_id,
+                        tensor,
+                    )
     expanded = {
         json.dumps(expanded_graph(template, s.row), sort_keys=True) for s in samples
     }
@@ -1379,9 +1408,14 @@ OLD_SHAPE_DIGESTS = {
 }
 # the spaces without a domain axis: one fixed shape, only alignment and placement are drawn
 FIXED_SHAPE_SPACES = ["Matmul/Align", "SdpaFwd/Flash2"]
+# the padded-leading-stride probe spaces (R5): they draw strides (a `pad` of the row stride) next
+# to alignment and placement and have no domain axis; Matmul/Stride also has no dtype axis
+STRIDE_SPACES = ["Matmul/Stride", "SdpaFwd/AsmStride", "SdpaFwd/Gfx950DenseStride"]
+NO_DOMAIN_SPACES = FIXED_SHAPE_SPACES + STRIDE_SPACES
+NO_DTYPE_SPACES = FIXED_SHAPE_SPACES + ["Matmul/Stride"]
 # the late axes a space gained after its domain axis, which sit before `domain` in the axis order
 EXTRA_LATE_AXES = {"SdpaFwd/Default": ["stats", "window", "wl", "wr"]}
-DOMAIN_SPACE_IDS = [s for s in SPACE_IDS if s not in FIXED_SHAPE_SPACES]
+DOMAIN_SPACE_IDS = [s for s in SPACE_IDS if s not in NO_DOMAIN_SPACES]
 ALIGNMENTS = [1, 2, 4, 8, 16, 32, 64, 128, 256]
 PLACEMENTS = ["default", "exact", "under"]
 # The tensor (by template name) whose pointer `under` misaligns: the op's primary data
@@ -1393,16 +1427,19 @@ PLACEMENT_OPERAND = {
     "Layernorm/Default": "x",
     "LayernormBackward/Default": "X",
     "Matmul/Align": "a",
+    "Matmul/Stride": "a",
     "RMSNorm/Default": "x",
     "RMSNormBackward/Default": "x",
     "ResampleFwd/Default": "X",
     "SdpaBackward/Default": "Q",
+    "SdpaFwd/AsmStride": "Q",
     "SdpaFwd/Default": "Q",
     "SdpaFwd/Flash2": "Q",
     "SdpaFwd/Flash2Region": "Q",
     "SdpaFwd/Gfx1151": "Q",
     "SdpaFwd/Gfx1151Decode": "Q",
     "SdpaFwd/Gfx950Dense": "Q",
+    "SdpaFwd/Gfx950DenseStride": "Q",
 }
 PATCHED_OPERANDS = (
     PLACEMENT_OPERAND  # every space declares alignments through tensor_patches
@@ -1423,6 +1460,119 @@ def domains_of(space_id):
     ]
 
 
+# --------------------------------------------------------------------------
+# R5: padded leading strides
+# --------------------------------------------------------------------------
+
+PADS = {
+    "Matmul/Stride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 12, 16, 17, 31],
+    "SdpaFwd/AsmStride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31],
+    "SdpaFwd/Gfx950DenseStride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31],
+}
+# pad_on value -> the uids of the tensors whose leading stride it pads
+PAD_ON_UIDS = {
+    "Matmul/Stride": {"a": {1}, "b": {2}, "c": {0}, "all": {0, 1, 2}},
+    "SdpaFwd/AsmStride": {"q": {1}, "k": {0}, "v": {3}, "o": {2}, "all": {0, 1, 2, 3}},
+    "SdpaFwd/Gfx950DenseStride": {"q": {1}, "k": {0}, "v": {3}, "o": {2}, "all": {0, 1, 2, 3}},
+}  # fmt: skip
+
+
+def _element_space(dims, strides):
+    return sum((d - 1) * s for d, s in zip(dims, strides)) + 1
+
+
+def _element_count(dims):
+    count = 1
+    for d in dims:
+        count *= d
+    return count
+
+
+def _padded_rows(space_id, uid, axes, dims):
+    """How many rows (the leading-stride steps) a padded tensor of the stride space has."""
+    if space_id == "Matmul/Stride":
+        return dims[0] * dims[1]  # batch * matrix rows
+    bshd = space_id == "SdpaFwd/Gfx950DenseStride" or axes["layout"] == "bshd"
+    # BSHD: the row is a whole sequence position (batch * seqlen of them); BHSD: a position of
+    # one head (batch * heads * seqlen)
+    return dims[0] * dims[2] if bshd else dims[0] * dims[1] * dims[2]
+
+
+@pytest.mark.parametrize("space_id", STRIDE_SPACES)
+def test_a_pad_widens_the_leading_stride_of_the_named_tensors_and_of_no_other(space_id):
+    # bug caught: a pad that reaches the wrong uid, pads a head or batch stride instead of the row
+    # stride (the allocation then has a different number of gap elements), leaves a tensor packed
+    # that pad_on names, or renders overlapping strides: the allocation of a tensor padded by p
+    # is exactly (rows - 1) * p elements beyond its element count, and a tensor not named is packed
+    sp = space_by_id(space_id)
+    assert sp.axes["pad"].values == PADS[space_id]
+    assert set(sp.axes["pad_on"].values) == set(PAD_ON_UIDS[space_id])
+    layouts = sp.axes["layout"].values if "layout" in sp.axes else [None]
+    base = sampler.sample(sp, 4).axis_values
+    checked = set()
+    for layout in layouts:
+        for pad in sp.axes["pad"].values:
+            for pad_on, padded_uids in PAD_ON_UIDS[space_id].items():
+                axes = dict(base, pad=pad, pad_on=pad_on)
+                if layout is not None:
+                    axes["layout"] = layout
+                if pad == 0 and pad_on != "all":
+                    with pytest.raises(sampler.InvalidRowError):
+                        sampler.sample_from_axes(sp, axes, 0)
+                    continue
+                tensors = sampler.sample_from_axes(sp, axes, 0).row["values"]["tensors"]
+                assert sorted(t["uid"] for t in tensors) == sorted(
+                    PAD_ON_UIDS[space_id]["all"]
+                )
+                for t in tensors:
+                    dims, strides = t["dims"], t["strides"]
+                    assert _nested(dims, strides), (axes, t)
+                    gap = _element_space(dims, strides) - _element_count(dims)
+                    if t["uid"] in padded_uids and pad:
+                        rows = _padded_rows(space_id, t["uid"], axes, dims)
+                        assert gap == (rows - 1) * pad, (axes, t)
+                        assert not _packed(dims, strides)
+                        checked.add((layout, pad_on, pad))
+                    else:
+                        assert gap == 0 and _packed(dims, strides), (axes, t)
+    # every pad value of every pad_on was rendered padded
+    assert {(p, v) for _, p, v in checked} == {
+        (on, pad)
+        for on in PAD_ON_UIDS[space_id]
+        for pad in sp.axes["pad"].values
+        if pad
+    }
+
+
+def _strides_of(dims, order):
+    """Packed strides of ``dims`` with the axes listed slowest first in ``order``."""
+    strides = [0] * len(dims)
+    step = 1
+    for axis in reversed(order):
+        strides[axis] = step
+        step *= dims[axis]
+    return strides
+
+
+@pytest.mark.parametrize("space_id", STRIDE_SPACES)
+def test_a_pad_of_zero_renders_the_packed_layout(space_id):
+    # bug caught: a derive that changes the packed layout (BSHD is [b, s, h, d] in memory, BHSD is
+    # [b, h, s, d], a matmul is row-major), so the padded rows would measure something other
+    # than the padding
+    sp = space_by_id(space_id)
+    for seed in range(60):
+        axes = dict(sampler.sample(sp, seed).axis_values, pad=0, pad_on="all")
+        tensors = sampler.sample_from_axes(sp, axes, 0).row["values"]["tensors"]
+        for t in tensors:
+            if space_id == "Matmul/Stride":
+                order = (0, 1, 2)
+            elif space_id == "SdpaFwd/Gfx950DenseStride" or axes["layout"] == "bshd":
+                order = (0, 2, 1, 3)
+            else:
+                order = (0, 1, 2, 3)
+            assert t["strides"] == _strides_of(t["dims"], order), (axes, t)
+
+
 def test_every_shipped_space_has_its_operands_listed():
     assert sorted(PRIMARY_OPERANDS) == DOMAIN_SPACE_IDS
     assert sorted(POISONED_OPERANDS) == DOMAIN_SPACE_IDS
@@ -1438,7 +1588,7 @@ def test_the_last_axes_are_domain_alignment_placement_in_that_order(space_id):
     # misspelled value is never rendered by the derive chain, and an old value that moves
     # changes what recorded seeds mean; `late` marks exactly the spaces that had seeds recorded
     sp = space_by_id(space_id)
-    tail = ["alignment", "placement"] if space_id in FIXED_SHAPE_SPACES else [
+    tail = ["alignment", "placement"] if space_id in NO_DOMAIN_SPACES else [
         "domain", "alignment", "placement",
     ]  # fmt: skip
     assert list(sp.axes)[-len(tail) :] == tail
@@ -2751,12 +2901,14 @@ def test_default_run_covers_every_space_and_filter_narrows(run):
     assert run.summary["spaces"] == ["RMSNorm/Default"]
     assert run.run("--samples", "2", space="SdpaFwd/.*") == 0
     assert run.summary["spaces"] == [
+        "SdpaFwd/AsmStride",
         "SdpaFwd/Default",
         "SdpaFwd/Flash2",
         "SdpaFwd/Flash2Region",
         "SdpaFwd/Gfx1151",
         "SdpaFwd/Gfx1151Decode",
         "SdpaFwd/Gfx950Dense",
+        "SdpaFwd/Gfx950DenseStride",
     ]
 
 
@@ -2956,7 +3108,7 @@ def test_suite_tag_is_the_dtype_of_the_graphs_input_tensor(run, space_id):
     template = json.loads(sp.template_path.read_text())
     for seed in range(60):
         s = sampler.sample(sp, seed)
-        if space_id in FIXED_SHAPE_SPACES:
+        if space_id in NO_DTYPE_SPACES:
             # no dtype axis, so no dtype directory: the suite is the plain space suite
             assert f._test_name(sp, s) == f"gauntlet_{sp.operation}_{sp.name}.s{seed}"
             continue

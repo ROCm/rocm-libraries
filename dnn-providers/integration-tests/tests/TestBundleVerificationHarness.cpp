@@ -598,6 +598,259 @@ TEST(TestBundleVerificationHarness, UnderPlacementMovesOnlyTheNamedUidBelowItsAl
     EXPECT_NE(address % 16u, 0u);
     EXPECT_EQ(address % 8u, 0u);
 }
+
+// ---- padded leading strides ---------------------------------------------------------------
+// A tensor whose rows are padded has gap elements between the end of a row and the start of the
+// next. The harness sizes, places and copies a tensor by its element space (the offset of the
+// last element, plus one), so a gap is carried along as bytes that belong to no element.
+
+/// The element space of dims and strides, computed independently of the tensor classes.
+int64_t elementSpaceOf(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    int64_t last = 0;
+    for(std::size_t axis = 0; axis < dims.size(); ++axis)
+    {
+        last += (dims[axis] - 1) * strides[axis];
+    }
+    return last + 1;
+}
+
+/// The layouts the padded probe spaces render (Matmul.Stride, SdpaFwd.AsmStride,
+/// SdpaFwd.Gfx950DenseStride), padded by an odd, a sub-vector and a vector-multiple pad.
+struct PaddedLayout
+{
+    const char* name;
+    std::vector<int64_t> dims;
+    std::vector<int64_t> strides;
+};
+
+std::vector<PaddedLayout> paddedLayouts()
+{
+    return {
+        // Matmul A [3, 16, 32] with a leading dimension of 32 + 3, 32 + 4 and 32 + 1
+        {"matmul_pad3", {3, 16, 32}, {16 * 35, 35, 1}},
+        {"matmul_pad4", {3, 16, 32}, {16 * 36, 36, 1}},
+        {"matmul_pad1", {3, 16, 32}, {16 * 33, 33, 1}},
+        // SDPA Q [b 2, hq 8, sq 64, d 128], BHSD: row stride d + 5
+        {"bhsd_pad5", {2, 8, 64, 128}, {8 * 64 * 133, 64 * 133, 133, 1}},
+        // the same, BSHD: row stride hq * d + 7, head stride d
+        {"bshd_pad7", {2, 8, 64, 128}, {64 * (8 * 128 + 7), 128, 8 * 128 + 7, 1}},
+        // V [2, 2, 96, 128] BSHD with a row of 2 * 128 + 8
+        {"bshd_pad8", {2, 2, 96, 128}, {96 * (2 * 128 + 8), 128, 2 * 128 + 8, 1}},
+    };
+}
+
+std::shared_ptr<IntegrationTestBundle>
+    makePaddedOutputBundle(const PaddedLayout& layout,
+                           hipdnn_flatbuffers_sdk::data_objects::DataType type)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 1, "output", type, &layout.strides, &layout.dims));
+    bundle->outputTensorUids.push_back(1);
+    const std::vector<flatbuffers::Offset<Node>> nodes;
+    builder.Finish(CreateGraphDirect(
+        builder, "padded", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
+    bundle->graphBuffer = builder.Release();
+    return bundle;
+}
+
+// Bug caught: an output buffer sized by the element count (too short for the last row once the
+// rows are padded, so the engine writes past it), or by a packed guess of the strides, for the
+// layouts the padded probe spaces render.
+TEST(TestBundleVerificationHarness, AllocatedOutputsOfPaddedStridesCoverEveryPaddedOffset)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    for(const auto& layout : paddedLayouts())
+    {
+        SCOPED_TRACE(layout.name);
+        auto bundle = makePaddedOutputBundle(layout, DataType::FLOAT);
+        const auto wrapper = bundle->graphWrapper();
+        auto outputs = detail::allocateSentinelOutputs(wrapper.getTensorMap(),
+                                                       bundle->outputTensorUids,
+                                                       TensorMap{},
+                                                       /*onDevice=*/false);
+
+        auto& tensor = *outputs.at(1);
+        const auto expectedSpace
+            = static_cast<std::size_t>(elementSpaceOf(layout.dims, layout.strides));
+        EXPECT_EQ(tensor.elementSpace(), expectedSpace);
+        EXPECT_GT(tensor.elementSpace(), tensor.elementCount()) << "the rows are padded";
+        EXPECT_FALSE(tensor.isPacked());
+
+        // The largest offset any element reaches is the last byte of the allocation, and the
+        // element there holds the sentinel like every other element.
+        std::vector<int64_t> last;
+        for(const int64_t dim : layout.dims)
+        {
+            last.push_back(dim - 1);
+        }
+        EXPECT_EQ(tensor.getIndex(last), static_cast<int64_t>(expectedSpace) - 1);
+        auto& typed = dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<float>&>(tensor);
+        EXPECT_TRUE(std::isnan(typed.getHostValue(last)));
+        EXPECT_TRUE(std::isnan(typed.getHostValue(std::vector<int64_t>(last.size(), 0))));
+    }
+}
+
+// Bug caught: the device sentinel fill (a memset of the allocation) and the host fill (the
+// logical elements) leaving different values in an element of a padded output, which would make
+// an element the engine never wrote look written on one side.
+TEST(TestBundleVerificationHarness, DeviceSentinelOfAPaddedOutputHoldsTheHostSentinelInEveryElement)
+{
+    SKIP_IF_NO_DEVICES();
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    for(const auto type : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        const PaddedLayout layout{"padded", {3, 5, 7}, {5 * 11, 11, 1}};
+        auto bundle = makePaddedOutputBundle(layout, type);
+        const auto wrapper = bundle->graphWrapper();
+        auto hostOutputs = detail::allocateSentinelOutputs(
+            wrapper.getTensorMap(), bundle->outputTensorUids, TensorMap{}, /*onDevice=*/false);
+        auto deviceOutputs = detail::allocateSentinelOutputs(
+            wrapper.getTensorMap(), bundle->outputTensorUids, TensorMap{}, /*onDevice=*/true);
+
+        auto& expected = *hostOutputs.at(1);
+        auto& actual = *deviceOutputs.at(1);
+        ASSERT_EQ(expected.elementSpace(), actual.elementSpace());
+        ASSERT_EQ(actual.elementSpace(),
+                  static_cast<std::size_t>(elementSpaceOf(layout.dims, layout.strides)));
+
+        // Non-const host access migrates the device-written bytes back. Only the elements are
+        // compared: what the gaps hold is not part of the contract.
+        const auto* expectedBytes = static_cast<const unsigned char*>(expected.rawHostData());
+        const auto* actualBytes = static_cast<const unsigned char*>(actual.rawHostData());
+        const auto size = expected.elementSize();
+        for(int64_t i = 0; i < layout.dims[0]; ++i)
+        {
+            for(int64_t j = 0; j < layout.dims[1]; ++j)
+            {
+                for(int64_t k = 0; k < layout.dims[2]; ++k)
+                {
+                    const auto offset = static_cast<std::size_t>(expected.getIndex(i, j, k)) * size;
+                    EXPECT_EQ(std::memcmp(expectedBytes + offset, actualBytes + offset, size), 0)
+                        << "element " << i << "," << j << "," << k;
+                }
+            }
+        }
+    }
+}
+
+// Bug caught: a shadow sized by the element count (the last row would be cut off), a copy that
+// takes only the logical elements (a gap byte the engine's kernel expects to find would be gone),
+// or a copy back that writes a gap byte the engine never wrote, for padded inputs and outputs at
+// every alignment the harness places at.
+TEST(TestBundleVerificationHarness, PlacementOfPaddedTensorsCarriesEveryByteAndTheLastElement)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // [3, 4, 8] floats with a leading stride of 11 (a pad of 3): 129 floats, 96 of them elements
+    const std::vector<int64_t> dims = {3, 4, 8};
+    const std::vector<int64_t> strides = {4 * 11, 11, 1};
+    const std::size_t space = static_cast<std::size_t>(elementSpaceOf(dims, strides));
+    ASSERT_EQ(space, 129u);
+
+    // the offsets that hold an element
+    std::vector<std::size_t> elementOffsets;
+    std::vector<bool> isElement(space, false);
+    for(int64_t i = 0; i < dims[0]; ++i)
+    {
+        for(int64_t j = 0; j < dims[1]; ++j)
+        {
+            for(int64_t k = 0; k < dims[2]; ++k)
+            {
+                const auto offset = static_cast<std::size_t>(i * strides[0] + j * strides[1] + k);
+                elementOffsets.push_back(offset);
+                isElement[offset] = true;
+            }
+        }
+    }
+    ASSERT_EQ(elementOffsets.size(), 96u);
+    ASSERT_TRUE(isElement.back()) << "the last offset holds the last element of the last row";
+
+    constexpr std::uint32_t inputGap = 0xA5A5A5A5U;
+    constexpr std::uint32_t outputGap = 0x5A5A5A5AU;
+    const auto bitsOf = [](float value) {
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    };
+
+    for(const int64_t n : K_ALIGNMENTS)
+    {
+        SCOPED_TRACE("N=" + std::to_string(n));
+        hipdnn_data_sdk::utilities::Tensor<float> input(dims, strides);
+        hipdnn_data_sdk::utilities::Tensor<float> output(dims, strides);
+        {
+            std::vector<std::uint32_t> inputBits(space, inputGap);
+            std::vector<std::uint32_t> outputBits(space, outputGap);
+            for(const auto offset : elementOffsets)
+            {
+                inputBits[offset] = bitsOf(static_cast<float>(offset));
+                outputBits[offset] = 0x7FC00000U; // the sentinel NaN
+            }
+            ASSERT_EQ(input.fillWithData(inputBits.data(), space * sizeof(float)),
+                      space * sizeof(float));
+            ASSERT_EQ(output.fillWithData(outputBits.data(), space * sizeof(float)),
+                      space * sizeof(float));
+        }
+
+        VariantPack pack;
+        pack[1] = input.rawDeviceData();
+        pack[2] = output.rawDeviceData();
+        const std::vector<detail::PlacementCandidate> candidates
+            = {{1, &input, false, n}, {2, &output, true, n}};
+        {
+            detail::PlacedVariantPack placed(pack, candidates, CasePlacement::EXACT, std::nullopt);
+            ASSERT_EQ(placed.placedUids(), (std::vector<int64_t>{1, 2}));
+
+            // the input shadow holds every element and every gap byte of the original
+            std::vector<std::uint32_t> seen(space, 0);
+            ASSERT_EQ(
+                hipMemcpy(seen.data(), pack.at(1), space * sizeof(float), hipMemcpyDeviceToHost),
+                hipSuccess);
+            for(std::size_t offset = 0; offset < space; ++offset)
+            {
+                const auto expected
+                    = isElement[offset] ? bitsOf(static_cast<float>(offset)) : inputGap;
+                ASSERT_EQ(seen[offset], expected) << "input offset " << offset;
+            }
+
+            // the "engine" writes every element of the output, and only those: the last row's
+            // last element sits at the end of the shadow
+            ASSERT_EQ(
+                hipMemcpy(seen.data(), pack.at(2), space * sizeof(float), hipMemcpyDeviceToHost),
+                hipSuccess);
+            for(std::size_t offset = 0; offset < space; ++offset)
+            {
+                ASSERT_EQ(seen[offset], isElement[offset] ? 0x7FC00000U : outputGap)
+                    << "output shadow offset " << offset;
+            }
+            for(const auto offset : elementOffsets)
+            {
+                seen[offset] = bitsOf(static_cast<float>(offset) + 0.5f);
+            }
+            ASSERT_EQ(
+                hipMemcpy(pack.at(2), seen.data(), space * sizeof(float), hipMemcpyHostToDevice),
+                hipSuccess);
+            placed.copyBackOutputs();
+        }
+
+        output.markDeviceModified();
+        const auto* host = static_cast<const std::uint32_t*>(output.rawHostData());
+        for(std::size_t offset = 0; offset < space; ++offset)
+        {
+            const auto expected
+                = isElement[offset] ? bitsOf(static_cast<float>(offset) + 0.5f) : outputGap;
+            ASSERT_EQ(host[offset], expected) << "output offset " << offset;
+        }
+    }
+}
+
 } // namespace
 
 TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreFilledEndToEnd)

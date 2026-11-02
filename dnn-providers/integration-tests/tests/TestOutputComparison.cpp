@@ -1323,3 +1323,106 @@ TEST(TestOutputComparison, RaggedOutputOnDeviceIsReportedNotThrown)
 }
 
 // NOLINTEND(readability-identifier-naming)
+
+// ---------------------------------------------------------------------------
+// Padded leading stride. A tensor whose rows are padded has gap elements between the end of a
+// row and the start of the next; they belong to no element, so whatever an engine or a reference
+// left there must never decide a verdict, at either site.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// The batchnorm graph of K_GRAPH with y_out (uid 5) given a padded leading stride: [2, 3, 4, 5]
+// elements whose rows are 8 apart instead of 5: 120 elements in an allocation of 189, with 3 gap
+// elements after every row but the last.
+const std::string K_PADDED_GRAPH
+    = R"({"nodes": [{"inputs": {"x_tensor_uid": 0, "mean_tensor_uid": 1, )"
+      R"("inv_variance_tensor_uid": 2, "scale_tensor_uid": 3, "bias_tensor_uid": 4}, )"
+      R"("outputs": {"y_tensor_uid": 5}, "type": "BatchnormInferenceAttributes", )"
+      R"("compute_data_type": "float", "name": ""}], "tensors": [)"
+      R"({"name": "", "uid": 0, "strides": [60, 20, 5, 1], "dims": [2, 3, 4, 5], )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "", "uid": 1, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "", "uid": 2, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "", "uid": 3, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "", "uid": 4, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
+      R"("data_type": "float", "virtual": false}, )"
+      R"({"name": "y_out", "uid": 5, "strides": [96, 32, 8, 1], "dims": [2, 3, 4, 5], )"
+      R"("data_type": "float", "virtual": false}], "io_data_type": "float", )"
+      R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
+
+flatbuffers::DetachedBuffer makePaddedGraphBuffer()
+{
+    flatbuffers::DetachedBuffer buffer;
+    EXPECT_TRUE(hipdnn_integration_tests::bundle::detail::buildGraphBuffer(
+        nlohmann::json::parse(K_PADDED_GRAPH), buffer));
+    return buffer;
+}
+
+// A y_out whose every element is `value` and whose every gap byte is `gapByte`, the gaps set
+// before the elements are written and left as they are.
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
+    paddedFloatTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                      float value,
+                      unsigned char gapByte)
+{
+    auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
+    std::memset(tensor->rawHostData(), gapByte, tensor->elementSpace() * tensor->elementSize());
+    tensor->fillTensorWithValue(value);
+    return tensor;
+}
+
+} // namespace
+
+// Bug caught: a comparison that walks the allocation (a linear fast path taken for a tensor
+// that is not packed, or a validator that reads elementSpace) instead of the logical elements:
+// two tensors that hold the same elements but different bytes in the gaps (NaN against zero) would
+// disagree. The layout is [96, 32, 8, 1] over [2, 3, 4, 5], so it is padded in every row.
+TEST_P(TestOutputComparisonSite, GapBytesOfAPaddedOutputAreNeverCompared)
+{
+    const auto buffer = makePaddedGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+
+    auto expected = paddedFloatTensor(attrs, 3.5f, 0xFF); // NaN bytes in the gaps
+    auto actual = paddedFloatTensor(attrs, 3.5f, 0x00); // zero bytes in the gaps
+    ASSERT_FALSE(expected->isPacked());
+    ASSERT_GT(expected->elementSpace(), expected->elementCount());
+
+    EXPECT_FALSE(
+        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), GetParam(), "b").has_value());
+    EXPECT_FALSE(
+        compareTensor(K_UID_A, attrs, *actual, *expected, exact(), GetParam(), "b").has_value());
+}
+
+// Bug caught: the comparison stopping short of the allocation's end: the element at the largest
+// offset (the last element of the last row) is the one a short walk drops, and a first-row
+// element is the one a walk that pairs elements by position in the allocation misreads.
+TEST_P(TestOutputComparisonSite, ADifferenceInTheLastAndTheFirstElementOfAPaddedOutputIsFound)
+{
+    const auto buffer = makePaddedGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+
+    const std::vector<std::vector<int64_t>> positions = {{1, 2, 3, 4}, {0, 0, 0, 0}, {0, 1, 3, 4}};
+    for(const auto& position : positions)
+    {
+        auto expected = paddedFloatTensor(attrs, 3.5f, 0xFF);
+        auto actual = paddedFloatTensor(attrs, 3.5f, 0x00);
+        hipdnn_data_sdk::utilities::TensorView<float> view(*actual);
+        view.getHostValue(position) = 9.25f;
+        actual->markHostModified();
+
+        const auto mismatch
+            = compareTensor(K_UID_A, attrs, *expected, *actual, exact(), GetParam(), "b");
+        ASSERT_TRUE(mismatch.has_value())
+            << "element at offset " << actual->getIndex(position) << " differs";
+        EXPECT_NE(mismatch->report.find("9.25"), std::string::npos);
+    }
+}

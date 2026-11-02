@@ -400,9 +400,25 @@ reports `DECLINED`, not a failure.
 | `SdpaFwd/Flash2` | `HIP_FLASH2_ENGINE` | `SdpaFwd/Default` | **not a shape space**: one fixed fp16 SDPA forward (BHSD, head size 128, seqlen 256), varying only `alignment` and `placement`; gfx942 builds with `-DENABLE_HIP_FLASH2_ENGINE=ON` only |
 | `SdpaFwd/Flash2Region` | `HIP_FLASH2_ENGINE` | `SdpaFwd/Default` | SDPA forward over the FLASH2 region on gfx942: fp16, head size 64 or 128 (V and O the same), no mask or top-left causal, BSHD or BHSD, grouped-query heads, `seqlen_q` a multiple of 64 above the `useFlash2ForShape` crossover; two decline-probe slices just outside it (below the crossover, `seqlen_q` not a multiple of 64); no stats or mask tensor (the engine declines them) |
 | `Matmul/Align` | none (probes MIOpen and hipBLASLt) | `Matmul/Default` | **not a shape space**: one fixed float batched matmul, varying only `alignment` and `placement` |
+| `Matmul/Stride` | none (probes MIOpen and hipBLASLt) | `Matmul/Default` | **padded-stride probe**: the fixed matmul of `Matmul/Align` with a `pad` (0 to 31 elements) added to the leading dimension of the tensors `pad_on` names, crossed with `alignment` and `placement`. On gfx950 hipBLASLt passes every pad at alignment 16 and declines the other alignments; MIOpen declines everything |
+| `SdpaFwd/AsmStride` | `ASM_SDPA_ENGINE` | `SdpaFwd/Default` | **padded-stride probe**: bfloat16 SDPA forward (head size 128 or 192, BSHD or BHSD, grouped-query heads, dense) over a small shape set, with a `pad` added to the row stride of the tensors `pad_on` names, crossed with `alignment` and `placement`. On gfx950 the engine passes every pad at alignment 16 or more and declines below |
+| `SdpaFwd/Gfx950DenseStride` | `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Default` | **padded-stride probe**: the `SdpaFwd/Gfx950Dense` region over a small shape set, with a `pad` added to the row stride of the tensors `pad_on` names, crossed with `alignment` and `placement`. On gfx950 the engine declines every pad above 0 |
 
 The engine column is informational (the space's `engine` key). A space's `description`
 says what it draws, why each constraint exists and which tensor each axis touches.
+
+**Padded leading strides (`*Stride` spaces).** The three padded-stride probes draw a `pad`, in
+elements, that widens the leading (row) stride of the tensors `pad_on` names; the batch and head
+strides follow, and the `pad` elements after each row are gap elements that belong to no
+element. Strides enter the case through `derive` (a space's `tensor_patches` may set only the
+alignment). The harness fills and compares the elements and never the gaps: a gap element is not
+written by a host fill (a device fill of a free range draws over the whole allocation, gaps
+included, with finite values), the output sentinel and the placement shadows cover the whole
+allocation (the offset of the last element plus one), and the comparison walks the logical
+elements. Each space's `description` states the outcome expected on the engine it probes: every
+padded probe is `PASS` or `DECLINED`, and a `WRONG` is an engine accepting a stride it computes
+wrongly. The spaces are probe-only (`purpose: probe`) and never frozen into a bundle. Because
+their graphs vary, the pairwise completeness test covers them.
 
 **Per-engine recipes.** Every SDPA engine runs through the same driver; only the engine name, the
 config, the build and the environment differ. `<build>` is the CMake build directory. All of them
@@ -438,7 +454,7 @@ python3 dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py \
     --filter '^SdpaFwd/Flash2(Region)?$' --samples 64 --work-dir gauntlet-runs/flash2
 ```
 
-**Input-value, alignment and placement axes.** Every space except `Matmul/Align` and `SdpaFwd/Flash2` has a
+**Input-value, alignment and placement axes.** Every space except `Matmul/Align`, `SdpaFwd/Flash2` and the three `*Stride` spaces has a
 `domain` axis, and every space has an `alignment` and a `placement` axis. They render
 case metadata and `tensor_patches` rather than shape values:
 

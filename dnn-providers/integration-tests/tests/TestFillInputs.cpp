@@ -2293,4 +2293,214 @@ TEST(TestFillInputs, OperandRecipeKindsFeedTheScaleNormalization)
         EXPECT_EQ(recipes.fill(2), c.scale);
     }
 }
+
+// ── Padded leading stride ───────────────────────────────────────────────────
+namespace
+{
+
+// A tensor whose rows are padded (the leading stride is wider than the row) has gap elements
+// between the end of a row and the start of the next. They belong to no element: an input fill
+// must write every element, in the order the packed tensor of the same dims gets them, and
+// leave every gap byte as it was.
+
+constexpr unsigned char kGapPoison = 0xA5;
+
+template <typename T>
+struct PaddedFill
+{
+    FillResult result;
+    std::vector<T> elements; // row-major, as fillSingle() reports them
+    std::vector<unsigned char> bytes; // the whole allocation, gaps included
+    std::size_t elementSpace = 0;
+};
+
+// Fills one rows x cols input of element type T whose leading stride is `ld`, after setting every
+// byte of its allocation to kGapPoison.
+template <typename T>
+PaddedFill<T>
+    fillPadded(const FillRecipe& recipe, unsigned int seed, int64_t rows, int64_t cols, int64_t ld)
+{
+    const std::vector<int64_t> dims = {rows, cols};
+    const std::vector<int64_t> strides = {ld, 1};
+    const auto gr = buildMatmulGraph(dataTypeOf<T>(), dims, strides);
+    const std::vector<int64_t> ownedUids = {1};
+    InputTensorMap inputs;
+    inputs[1] = std::make_shared<hipdnn_data_sdk::utilities::Tensor<T>>(dims, strides);
+
+    PaddedFill<T> out;
+    out.elementSpace = inputs.at(1)->elementSpace();
+    std::memset(inputs.at(1)->rawHostData(), kGapPoison, out.elementSpace * sizeof(T));
+    inputs.at(1)->markHostModified();
+
+    InputFillRecipes recipes;
+    recipes.set(1, recipe).setSeed(1, seed);
+    out.result = fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+    if(!out.result.filled)
+    {
+        return out;
+    }
+
+    const auto* host = static_cast<const unsigned char*>(inputs.at(1)->rawHostData());
+    out.bytes.assign(host, host + out.elementSpace * sizeof(T));
+    const auto* data = reinterpret_cast<const T*>(out.bytes.data());
+    for(int64_t r = 0; r < rows; ++r)
+    {
+        for(int64_t c = 0; c < cols; ++c)
+        {
+            out.elements.push_back(data[r * ld + c]);
+        }
+    }
+    return out;
+}
+
+// The bytes of `padded` that no element of a rows x cols tensor with leading stride `ld` covers.
+std::vector<std::size_t>
+    gapOffsets(std::size_t elementSpace, int64_t rows, int64_t cols, int64_t ld)
+{
+    std::vector<bool> covered(elementSpace, false);
+    for(int64_t r = 0; r < rows; ++r)
+    {
+        for(int64_t c = 0; c < cols; ++c)
+        {
+            covered.at(static_cast<std::size_t>(r * ld + c)) = true;
+        }
+    }
+    std::vector<std::size_t> gaps;
+    for(std::size_t i = 0; i < elementSpace; ++i)
+    {
+        if(!covered[i])
+        {
+            gaps.push_back(i);
+        }
+    }
+    return gaps;
+}
+
+template <typename T>
+void expectPaddedFillMatchesPackedFill(const FillRecipe& recipe, int64_t pad)
+{
+    constexpr int64_t rows = 7;
+    constexpr int64_t cols = 24;
+    const int64_t ld = cols + pad;
+    SCOPED_TRACE(InputFillRecipes::kindToString(recipe.kind));
+    SCOPED_TRACE("pad " + std::to_string(pad));
+
+    const auto packed = fillSingle<T>(recipe, 7, rows, cols);
+    const auto padded = fillPadded<T>(recipe, 7, rows, cols, ld);
+    ASSERT_TRUE(packed.result.filled) << packed.result.reason;
+    ASSERT_TRUE(padded.result.filled) << padded.result.reason;
+
+    // The allocation reaches the last element of the last row and not a gap element beyond it.
+    EXPECT_EQ(padded.elementSpace, static_cast<std::size_t>((rows - 1) * ld + cols));
+
+    // Every element holds what the packed tensor of the same dims gets from the same seed.
+    EXPECT_TRUE(sameBytes(padded.elements, packed.values));
+
+    // No gap element was written.
+    const auto gaps = gapOffsets(padded.elementSpace, rows, cols, ld);
+    EXPECT_EQ(gaps.size(), static_cast<std::size_t>((rows - 1) * pad));
+    for(const std::size_t gap : gaps)
+    {
+        for(std::size_t b = 0; b < sizeof(T); ++b)
+        {
+            ASSERT_EQ(padded.bytes[gap * sizeof(T) + b], kGapPoison)
+                << "gap element " << gap << " byte " << b;
+        }
+    }
+}
+
+template <typename T>
+void expectEveryKindLeavesTheGapsAlone()
+{
+    const std::vector<FillRecipe> recipes = {
+        FillRecipe::free(-1.0f, 1.0f),
+        FillRecipe::fixed(0.5f),
+        FillRecipe::zeros(),
+        FillRecipe::nonzero(-1.0f, 1.0f),
+        FillRecipe::large(8.0f),
+        FillRecipe::subnormal(),
+        FillRecipe::nonFinite(FillRecipe::SpecialValue::QUIET_NAN, 0.25f),
+        FillRecipe::nonFinite(FillRecipe::SpecialValue::POS_INF, 0.25f),
+    };
+    // 0 packed, odd and vector-width-breaking pads, and a 16-byte multiple of a 2-byte type
+    for(const int64_t pad : {0, 1, 3, 7, 8, 9})
+    {
+        for(const auto& recipe : recipes)
+        {
+            expectPaddedFillMatchesPackedFill<T>(recipe, pad);
+        }
+    }
+}
+
+} // namespace
+
+// Bug caught: a fill that walks the allocation linearly instead of the logical elements (the
+// packed tensor's order), which on a padded tensor would write the gap bytes and shift every
+// element after the first row, or one that stops at elementCount and leaves the last rows unfilled.
+TEST(TestFillInputs, HostFillOfAPaddedTensorWritesEveryElementAndNoGapByteForEveryKind)
+{
+    expectEveryKindLeavesTheGapsAlone<float>();
+    expectEveryKindLeavesTheGapsAlone<hipdnn_data_sdk::types::half>();
+    expectEveryKindLeavesTheGapsAlone<hipdnn_data_sdk::types::bfloat16>();
+}
+
+// Bug caught: the planted non-finite share being counted over elementSpace, which would plant
+// into (or reserve) gap elements and leave fewer non-finite elements than the recipe asks for.
+TEST(TestFillInputs, SpecialOnAPaddedTensorPlantsItsShareInElementsAndNotInGaps)
+{
+    constexpr int64_t rows = 8;
+    constexpr int64_t cols = 16;
+    constexpr int64_t ld = 23;
+    const auto filled = fillPadded<float>(
+        FillRecipe::nonFinite(FillRecipe::SpecialValue::QUIET_NAN, 0.25f), 3, rows, cols, ld);
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+    EXPECT_EQ(std::count_if(filled.elements.begin(),
+                            filled.elements.end(),
+                            [](float v) { return std::isnan(v); }),
+              rows * cols / 4);
+}
+
+// Bug caught: the device filler's size threshold deciding on the logical element count, so a
+// padded tensor whose allocation reaches the threshold stays on the host; and the device fill
+// leaving an element of a padded tensor unfilled or out of range. The device fill draws over the
+// whole allocation, gaps included, so a gap is in range too: an engine that wrongly reads a gap
+// gets a plausible finite value, never the sentinel of a missed fill.
+TEST(TestFillInputs, DeviceFillerCountsTheAllocationOfAPaddedTensorAndFillsItsElements)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!DeviceInputFiller::isSupported())
+    {
+        GTEST_SKIP() << "rocRAND not available. Skipping test.";
+    }
+
+    // elementCount 64 * 128 = 8192 is below minElements(); the padded allocation is above it
+    constexpr int64_t rows = 64;
+    constexpr int64_t cols = 128;
+    constexpr int64_t ld = 256;
+    ASSERT_LT(static_cast<std::size_t>(rows * cols), DeviceInputFiller::minElements());
+    const std::vector<int64_t> dims = {rows, cols};
+    const std::vector<int64_t> strides = {ld, 1};
+    hipdnn_data_sdk::utilities::Tensor<float> tensor(dims, strides);
+    ASSERT_GE(tensor.elementSpace(), DeviceInputFiller::minElements());
+
+    DeviceInputFiller device;
+    ASSERT_TRUE(device.tryFill(tensor, FillRecipe::free(-1.0f, 1.0f), 5));
+    device.waitForFills();
+
+    const float* data = tensor.memory().hostData();
+    for(int64_t r = 0; r < rows; ++r)
+    {
+        for(int64_t c = 0; c < cols; ++c)
+        {
+            const float v = data[r * ld + c];
+            ASSERT_GE(v, -1.0f) << "row " << r << " col " << c;
+            ASSERT_LE(v, 1.0f) << "row " << r << " col " << c;
+        }
+    }
+    for(std::size_t i = 0; i < tensor.elementSpace(); ++i)
+    {
+        ASSERT_FALSE(std::isnan(data[i])) << "allocation element " << i;
+    }
+}
+
 // NOLINTEND(readability-identifier-naming)
