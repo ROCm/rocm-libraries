@@ -2,6 +2,13 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-5.1.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* Fixed summary issue where `BUILD_CODE_COVERAGE` was reading from `CODE_COVERAGE` instead of `BUILD_CODE_COVERAGE`.
+
+
 ## hipCUB-5.0.0 for ROCm 10.2.0
 
 ### Added

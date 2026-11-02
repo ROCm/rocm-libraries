@@ -3,11 +3,18 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 5.1.0 for ROCm 10.3.0
+
+### Changed
+
+* updated cmake option `CODE_COVERAGE` to `BUILD_CODE_COVERAGE` to match `rocprim` and `hipcub`.
+
+
 ## rocThrust 5.0.0 for ROCm 10.2.0
- 
+
 ### Added
 * rocThrust is now largely in feature parity with CCCL/thrust v3.0.3. If there isn't a libhipcxx corresponding to CCCL/libcudacxx version 3.0.3 or later, `thrust::tuple`, `thrust::pair` and `thrust::zip_iterator` will fall back to rocThrust 4.4.0 implementations.
- 
+
 ### Resolved issues
 
 * Fixed build failures when libhipcxx is not on the include path. The OMP and TBB backends included `<cuda/std/...>` headers directly and `thrust/unique_ptr.h` included `<compare>` unconditionally. They now use the standard library fallback, and `<compare>` is only included for C++20 and later.
@@ -35,14 +42,14 @@ Documentation for rocThrust available at
 * With `--hipstdpar-interpose-alloc`, `aligned_alloc` rounds an alignment that is not a power of two up, as `memalign` does, instead of failing with `EINVAL`. The compiler routes both calls to the same interposed function.
 
 ## rocThrust 4.6.0 for ROCm 10.0.0
- 
+
 ### Added
- 
+
 * True global support in hipstdpar
 * Return value checks for assorted locations in the codebase that were previously missing.
- 
+
 ### Fixed
- 
+
 * Fixed over-read and NULL deref in __hipstdpar_realloc
 
 ### Upcoming changes
