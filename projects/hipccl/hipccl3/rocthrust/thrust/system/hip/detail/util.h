@@ -39,7 +39,6 @@
 
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/iterator/iterator_traits.h>
 
 #if !THRUST_COMPILER(NVRTC)
 #  include <thrust/system/hip/error.h>

@@ -71,9 +71,9 @@ struct make_counting_iterator_base
                                   _THRUST_STD::type_identity<any_system_tag>,
                                   _THRUST_STD::type_identity<System>>::type;
 
-  using traversal = replace_if_use_default<Traversal, ::internal::type_identity<random_access_traversal_tag>>;
+  using traversal = replace_if_use_default<Traversal, _THRUST_STD::type_identity<random_access_traversal_tag>>;
   using difference =
-    replace_if_use_default<Difference, ::internal::type_identity<counting_iterator_difference_type<Incrementable>>>;
+    replace_if_use_default<Difference, _THRUST_STD::type_identity<counting_iterator_difference_type<Incrementable>>>;
 
   // our implementation departs from Boost's in that counting_iterator::dereference
   // returns a copy of its counter, rather than a reference to it. returning a reference

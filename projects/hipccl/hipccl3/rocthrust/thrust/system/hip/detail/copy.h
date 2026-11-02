@@ -41,7 +41,6 @@
 
 #include <thrust/advance.h>
 #include <thrust/detail/raw_pointer_cast.h>
-#include <thrust/detail/temporary_array.h>
 #include <thrust/system/hip/detail/cross_system.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/util.h>
@@ -93,6 +92,7 @@ transform(execution_policy<Derived>& policy, InputIt first, InputIt last, Output
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 
+#include <thrust/detail/temporary_array.h>
 #include <thrust/system/hip/detail/transform.h>
 #include <thrust/system/hip/detail/uninitialized_copy.h>
 
