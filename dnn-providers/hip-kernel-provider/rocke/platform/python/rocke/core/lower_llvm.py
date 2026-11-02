@@ -63,10 +63,15 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _buffer_op_bytes,
+    _global_ptr_offset_op_error,
+    _global_ptr_to_i64_op_error,
+    _if_else_branch_yield,
     _is_unsigned,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
+    _trap_op_error,
     check_cluster_dims,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
@@ -605,6 +610,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     "s.setprio": ("declare void @llvm.amdgcn.s.setprio(i16 immarg)"),
+    "trap": "declare void @llvm.trap()",
     "s.waitcnt": ("declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"),
     "make.buffer.rsrc.p1": (
         "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
@@ -649,6 +655,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "raw.ptr.buffer.load.f16": (
         "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
+    # 1-byte buffer load and store: the narrowest access, range-checked whole,
+    # for 1-byte elements (i8, u8, fp8, bf8) one at a time.
+    "raw.ptr.buffer.load.i8": (
+        "declare i8 @llvm.amdgcn.raw.ptr.buffer.load.i8("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
+    "raw.ptr.buffer.store.i8": (
+        "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8("
+        "i8, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
     ),
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
@@ -976,10 +992,28 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     ),
 }
 
-# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides. No intrinsic needs a
-# further override today.
+# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides.
 _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
     **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
+}
+
+# LLVM 24 changes the named-barrier pointer ABI from LDS addrspace(3) to
+# addrspace(15). Lowering inserts the matching addrspacecast at each call.
+_INTRINSIC_DECLS_LLVM24_OVERRIDES: Dict[str, str] = {
+    **_INTRINSIC_DECLS_LLVM23_OVERRIDES,
+    "s.barrier.init": (
+        "declare void @llvm.amdgcn.s.barrier.init(ptr addrspace(15) nocapture, i32)"
+    ),
+    "s.barrier.signal.var": (
+        "declare void @llvm.amdgcn.s.barrier.signal.var("
+        "ptr addrspace(15) nocapture, i32)"
+    ),
+    "s.barrier.join": (
+        "declare void @llvm.amdgcn.s.barrier.join(ptr addrspace(15) nocapture)"
+    ),
+    "s.wakeup.barrier": (
+        "declare void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(15) nocapture)"
+    ),
 }
 
 
@@ -999,6 +1033,8 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
         decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
     elif abi is _LlvmDeclarationAbi.LLVM23:
         decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+    elif abi is _LlvmDeclarationAbi.LLVM24:
+        decls.update(_INTRINSIC_DECLS_LLVM24_OVERRIDES)
     return decls
 
 
@@ -1083,6 +1119,24 @@ def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> N
 # Declaration key of the K=128 f8f6f4 MFMA (A and B as ``<8 x i32>``). The key is
 # the intrinsic name without the ``llvm.amdgcn.`` prefix, as for the 32x32x64 key.
 _F8F6F4_16X16X128_KEY = "mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32"
+
+
+class _BufferAccessForm(NamedTuple):
+    """The raw buffer intrinsic form that moves one access of a given width."""
+
+    suffix: str  # the intrinsic's type suffix: raw.ptr.buffer.load.<suffix>
+    llvm_type: str  # the integer type the access is loaded or stored as
+    load_hint: str  # the name hint of the loaded integer
+
+
+# One form per buffer access width in bytes (core/ir.py _BUFFER_ACCESS_BYTES).
+_BUFFER_ACCESS_FORMS: dict[int, _BufferAccessForm] = {
+    1: _BufferAccessForm("i8", "i8", "bli8"),
+    2: _BufferAccessForm("i16", "i16", "bli16"),
+    4: _BufferAccessForm("i32", "i32", "bli32"),
+    8: _BufferAccessForm("v2i32", "<2 x i32>", "blv2"),
+    16: _BufferAccessForm("v4i32", "<4 x i32>", "blv4"),
+}
 
 
 def _llvm_type(t: Type) -> str:
@@ -1834,6 +1888,23 @@ class _Lowerer:
             if f"%{p.name}" == v.name:
                 return _param_llvm_type(p)
         return _llvm_type(v.type)
+
+    def _require_global_header_ptr(self, op_name: str, ptr: Value) -> None:
+        """Refuse ``op_name`` when the module types its ``ptr`` operand other
+        than ``ptr addrspace(1)``.
+
+        The global-pointer ops emit against ``ptr addrspace(1)``. The IR rules
+        check the IR type, but a parameter's ``addr_space`` override (such as
+        ``"constant"``) moves its header type away from it, and the emitted
+        instruction would then not match the header. The C++ engine
+        (``ll_require_global_header_ptr``) refuses with the same text.
+        """
+        header = self._ptr_llvm_type(ptr)
+        if header != "ptr addrspace(1)":
+            raise TypeError(
+                f"{op_name} ptr must be a global pointer, got {header} "
+                "(its parameter's addr_space)"
+            )
 
     def _need(self, key: str) -> None:
         """Register a demand for an intrinsic declaration, and vet it.
@@ -5289,6 +5360,7 @@ class _Lowerer:
         # ptr + byte_off as a new global pointer (getelementptr i8). The
         # offset must be i64 so block bases beyond 2 GiB do not overflow.
         ptr, off = op.operands
+        self._require_global_header_ptr("global_ptr_add", ptr)
         off_ty = _llvm_type(off.type)
         if off_ty == "i32":
             off64 = self._fresh("goff64")
@@ -5304,12 +5376,25 @@ class _Lowerer:
             f"{self._operand(ptr)}, i64 {off64}"
         )
 
+    def _op_tile_global_ptr_offset(self, op: Op) -> None:
+        # ptr + byte_off without ``inbounds``: the result may point outside
+        # the allocation, so the compiler must not assume it does not.
+        error = _global_ptr_offset_op_error(op)
+        if error:
+            raise ValueError(error)
+        ptr, off = op.operands
+        self._require_global_header_ptr("global_ptr_offset", ptr)
+        self._current().emit(
+            f"  {op.result.name} = getelementptr i8, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i64 {self._operand(off)}"
+        )
+
     def _op_tile_global_ptr_to_i64(self, op: Op) -> None:
-        if len(op.operands) != 1 or len(op.results) != 1:
-            raise ValueError("global_ptr_to_i64 expects one operand and one result")
+        error = _global_ptr_to_i64_op_error(op)
+        if error:
+            raise ValueError(error)
         (ptr,) = op.operands
-        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
-            raise TypeError("global_ptr_to_i64 ptr must be a global pointer")
+        self._require_global_header_ptr("global_ptr_to_i64", ptr)
         self._current().emit(
             f"  {op.result.name} = ptrtoint ptr addrspace(1) {self._operand(ptr)} to i64"
         )
@@ -5393,11 +5478,23 @@ class _Lowerer:
         if member_count.type != I32:
             raise TypeError(f"{short_name} member_count must be i32")
         local = self._lds_ptr_operand(short_name, barrier)
+        addrspace, local = self._named_barrier_pointer(local)
         self._need(intrinsic)
         self._current().emit(
             f"  call void @llvm.amdgcn.{intrinsic}("
-            f"ptr addrspace(3) {local}, i32 {self._operand(member_count)})"
+            f"ptr addrspace({addrspace}) {local}, i32 {self._operand(member_count)})"
         )
+
+    def _named_barrier_pointer(self, local: str) -> tuple[int, str]:
+        if not _emission_profile(self._flavor).has(
+            _LlvmEmissionCapability.NAMED_BARRIER_AS15
+        ):
+            return 3, local
+        cast = self._fresh("barrier.as15")
+        self._current().emit(
+            f"  {cast} = addrspacecast ptr addrspace(3) {local} " "to ptr addrspace(15)"
+        )
+        return 15, cast
 
     def _op_tile_s_barrier_join(self, op: Op) -> None:
         self._lower_named_barrier_one(op, "s.barrier.join")
@@ -5411,9 +5508,11 @@ class _Lowerer:
         if len(op.operands) != 1:
             raise ValueError(f"{short_name} expects one barrier pointer")
         local = self._lds_ptr_operand(short_name, op.operands[0])
+        addrspace, local = self._named_barrier_pointer(local)
         self._need(intrinsic)
         self._current().emit(
-            f"  call void @llvm.amdgcn.{intrinsic}(ptr addrspace(3) {local})"
+            f"  call void @llvm.amdgcn.{intrinsic}("
+            f"ptr addrspace({addrspace}) {local})"
         )
 
     def _op_tile_s_barrier_leave(self, op: Op) -> None:
@@ -5833,6 +5932,13 @@ class _Lowerer:
         level = int(op.attrs["level"])
         self._current().emit(f"  call void @llvm.amdgcn.s.setprio(i16 {level})")
 
+    def _op_tile_trap(self, op: Op) -> None:
+        error = _trap_op_error(op)
+        if error:
+            raise ValueError(error)
+        self._need("trap")
+        self._current().emit("  call void @llvm.trap()")
+
     # ----- buffer-rsrc + async DRAM->LDS -----
 
     def _op_tile_buffer_rsrc(self, op: Op) -> None:
@@ -5963,43 +6069,49 @@ class _Lowerer:
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 
-        Loads `<dwords x i32>` via the matching intrinsic and bitcasts
-        to `<n x elem_type>`.  Handles f16/bf16 (2-byte) and f32/i32
-        (4-byte) elements.
+        One raw buffer load of the result's width (``_BUFFER_ACCESS_FORMS``),
+        bitcast to the ``<n x elem>`` result.
         """
+        nbytes = _buffer_op_bytes(op)
         rsrc, voffset, soffset = op.operands
-        dwords = int(op.attrs["dwords"])
-        elem_type = op.attrs["elem_type"]
-        n = op.result.type.count  # elements in the result vector
-        _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
-        llvm_elem = _LLVM_ELEM[elem_type]
-        if dwords == 1:
-            self._need("raw.ptr.buffer.load.i32")
-            tmp = self._fresh("bli32")
-            self._current().emit(
-                f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
-                f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voffset)}, "
-                f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast i32 {tmp} to <{n} x {llvm_elem}>"
-            )
-        else:
-            intr = f"raw.ptr.buffer.load.v{dwords}i32"
-            self._need(intr)
-            tmp = self._fresh(f"blv{dwords}")
-            self._current().emit(
-                f"  {tmp} = call <{dwords} x i32> @llvm.amdgcn.raw.ptr.buffer.load.v{dwords}i32("
-                f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voffset)}, "
-                f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast <{dwords} x i32> {tmp} to <{n} x {llvm_elem}>"
-            )
+        result_type = op.result.type
+        form = _BUFFER_ACCESS_FORMS[nbytes]
+        self._need(f"raw.ptr.buffer.load.{form.suffix}")
+        tmp = self._fresh(form.load_hint)
+        self._current().emit(
+            f"  {tmp} = call {form.llvm_type} "
+            f"@llvm.amdgcn.raw.ptr.buffer.load.{form.suffix}("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = bitcast {form.llvm_type} {tmp} to "
+            f"{_llvm_type(result_type)}"
+        )
+
+    def _op_tile_buffer_store_vN(self, op: Op) -> None:
+        """Dtype-generic vectorised buffer store: the value bitcast to one
+        integer of its width (``_BUFFER_ACCESS_FORMS``) and stored with the
+        matching raw buffer store."""
+        nbytes = _buffer_op_bytes(op)
+        rsrc, voffset, soffset, val = op.operands
+        form = _BUFFER_ACCESS_FORMS[nbytes]
+        self._need(f"raw.ptr.buffer.store.{form.suffix}")
+        bc = self._fresh("bsbc")
+        self._current().emit(
+            f"  {bc} = bitcast {_llvm_type(val.type)} {self._operand(val)} to "
+            f"{form.llvm_type}"
+        )
+        self._current().emit(
+            f"  call void @llvm.amdgcn.raw.ptr.buffer.store.{form.suffix}("
+            f"{form.llvm_type} {bc}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
 
     def _op_tile_buffer_load(self, op: Op) -> None:
         """Dtype-generic scalar buffer load (single element, OOB-clamped).
@@ -7039,7 +7151,18 @@ class _Lowerer:
             br label %if.end
           if.end:
             [continuation]
+
+        An if/else with results takes each result from the ``scf.yield``
+        that ends each branch, through one ``phi`` per result at the head of
+        ``if.end``::
+
+          if.end:
+            %if7 = phi float [ %a, %if.then ], [ %b, %if.else ]
         """
+        # Refuse a malformed if/else, or a branch that does not yield the
+        # results, before reading the op or emitting.
+        for branch in range(2):
+            _if_else_branch_yield(op, branch)
         (cond,) = op.operands
         then_region = op.regions[0]
         else_region = op.regions[1]
@@ -7056,7 +7179,7 @@ class _Lowerer:
         cur.terminated = True
 
         # Lower then branch (then_blk is now _current).
-        self.lower_region(then_region)
+        then_values = self._lower_if_else_branch(op, then_region)
         then_last = self._current()
         # then falls through to join; use another placeholder.
         if not then_last.terminated:
@@ -7067,7 +7190,7 @@ class _Lowerer:
         else_blk = self._new_block("if.else")
 
         # Lower else branch.
-        self.lower_region(else_region)
+        else_values = self._lower_if_else_branch(op, else_region)
         else_last = self._current()
 
         # Create join block (becomes _current for subsequent ops).
@@ -7075,6 +7198,12 @@ class _Lowerer:
         if not else_last.terminated:
             else_last.emit(f"  br label %{end_blk.label}")
             else_last.terminated = True
+        for result, then_value, else_value in zip(op.results, then_values, else_values):
+            end_blk.emit(
+                f"  {result.name} = phi {_llvm_type(result.type)} "
+                f"[ {then_value}, %{then_last.label} ], "
+                f"[ {else_value}, %{else_last.label} ]"
+            )
 
         # Backpatch placeholders in the predecessor and then blocks.
         for blk in (cur, then_last):
@@ -7082,6 +7211,16 @@ class _Lowerer:
                 line = line.replace("%IF_ELSE", f"%{else_blk.label}")
                 line = line.replace("%IF_END", f"%{end_blk.label}")
                 blk.lines[i] = line
+
+    def _lower_if_else_branch(self, op: Op, region: Region) -> List[str]:
+        """Lower one branch of the scf.if_else ``op``; return the operands its
+        closing ``scf.yield`` gives the results (none when ``op`` has none)."""
+        if not op.results:
+            self.lower_region(region)
+            return []
+        self._yield_stack.append([])
+        self.lower_region(region)
+        return self._yield_stack.pop()
 
     def _op_scf_yield(self, op: Op) -> None:
         if not self._yield_stack:

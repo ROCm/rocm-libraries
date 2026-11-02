@@ -1001,6 +1001,9 @@ class _Writer:
     def hoist(self, kernel, tcA="A"):
         return str(KernelWriterAssembly._hoistTdmSharedScaleWrapUSel(self, kernel, tcA))
 
+    def declareStagger(self, kernel):
+        return str(KernelWriterAssembly.declareStaggerParms(self, kernel))
+
 
 def _kernel(tdmFuse=2, numWaves=NUM_WAVES):
     return {
@@ -1147,3 +1150,17 @@ def test_hoist_does_not_disturb_the_scale_wrapu_registers():
         if "s_cselect_b32" in line:
             assert line.split(",")[0].endswith("s[sgprWrapUA+0]") or \
                    line.split(",")[0].endswith("s[sgprWrapUA+1]")
+
+
+# ------------------------------------------------------ the packed argument ---
+@pytest.mark.parametrize("pgr", [1, 2, 3])
+def test_declare_stagger_leaves_the_packed_argument_intact(pgr):
+    """Persistent kernels rerun declareStaggerParms per tile from the same sgpr,
+    so the decode may read the packed StaggerU but never write it."""
+    kernel = {"PrefetchGlobalRead": pgr, "ProblemType": {"IndicesBatch": [2]}}
+    text = _Writer(kernel).declareStagger(kernel)
+    instructions = [line.split("//")[0].split() for line in text.splitlines()]
+    written = [i for i in instructions if len(i) > 1 and i[1].rstrip(",") == "s[sgprStaggerU]"]
+    assert not written
+    for mask in sorted(_PACKED_MASKS):
+        assert re.search(r"s_and_b32 s\d+, s\[sgprStaggerU\], %s\b" % mask, text), mask
