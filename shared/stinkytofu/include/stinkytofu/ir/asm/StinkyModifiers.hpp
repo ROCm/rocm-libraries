@@ -314,6 +314,7 @@ struct Modifier {
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
+        TENSOR,
     };
 
     Modifier(Type type) : type(type) {}
@@ -486,6 +487,22 @@ struct CacheScopeModifiers : public TypedModifier<CacheScopeModifiers> {
         : TypedModifier<CacheScopeModifiers>(), scope(scope) {}
 
     MUBUFScope scope;
+};
+
+// Cache-policy fields of the gfx1250 tensor ops (tensor_load_to_lds), mirroring rocisa's
+// TENSORModifiers. Default (TH_NONE / SCOPE_NONE / NV_NONE) fields are not emitted.
+struct TENSORModifiers : public TypedModifier<TENSORModifiers> {
+    static constexpr Modifier::Type Type = Modifier::Type::TENSOR;
+
+    TENSORModifiers(MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                    TemporalHint th = TemporalHint::TH_NONE, NonVolatile nv = NonVolatile::NV_NONE,
+                    bool isStore = false)
+        : TypedModifier<TENSORModifiers>(), scope(scope), th(th), nv(nv), isStore(isStore) {}
+
+    MUBUFScope scope;
+    TemporalHint th;
+    NonVolatile nv;
+    bool isStore;
 };
 
 struct SMEMModifiers : public TypedModifier<SMEMModifiers> {

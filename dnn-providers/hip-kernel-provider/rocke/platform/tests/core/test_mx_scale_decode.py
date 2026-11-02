@@ -10,14 +10,15 @@ The tests below check that contract four ways: every one of the 256 codes run
 through the decoder on the GPU against an independent reference; the decoder's
 lowered text (it zero-extends the byte, never sign-extends it, so the signed
 int-to-float conversion that follows sees 0..255) in LLVM IR and in HIP; the two engines lowering the
-decoder to the same LLVM IR; and the MX GEMM, the decoder's caller, building
-the same unsigned decoder in both engines. The MX GEMM targets a GPU this test
-host may not have, so it is compile-checked only.
+decoder to the same LLVM IR; and the MX GEMM reading its scale bytes the same
+unsigned way in both engines. The MX GEMM's numerics across the scale range
+are checked in tests/instances/test_mx_gemm_scale_range.py.
 """
 
 import ctypes
 import importlib.util
 import math
+import re
 import struct
 
 import numpy as np
@@ -29,7 +30,16 @@ from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.helpers import compile_kernel
-from rocke.helpers.mx_scale import decode_mx_scale_e8m0
+from rocke.helpers.mx_scale import (
+    BF8_E5M2_FNUZ,
+    BF8_E5M2_OCP,
+    FP8_E4M3_FNUZ,
+    FP8_E4M3_OCP,
+    MxElementFormat,
+    decode_mx_scale_e8m0,
+    exact_mx_scale_split,
+    fma_with_mx_scale_pair,
+)
 from rocke.instances.common.mx_gemm import MxGemmSpec, build_mx_gemm
 
 _CODES = 256
@@ -131,7 +141,7 @@ def test_non_byte_input_is_rejected():
         decode_mx_scale_e8m0(b, b.const_i32(0))
 
 
-def test_mx_gemm_builds_the_unsigned_decoder_in_both_engines():
+def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines():
     # The C++ MX GEMM builder must emit the same LLVM IR as the Python one;
     # backend="both" lowers through each and fails on any byte difference.
     if not _has_cpp_engine():
@@ -139,7 +149,110 @@ def test_mx_gemm_builds_the_unsigned_decoder_in_both_engines():
     ll = lower_mx_gemm(_mx_gemm_spec(), arch="gfx950", backend="both").llvm_text
     assert ll.count("zext i8") >= 2  # the A and the B scale bytes
     assert "sext i8" not in ll
-    assert ll.count("float 0x7FF8000000000000") == 2
+    assert ll.count("icmp eq i32") >= 2  # each byte checked for the NaN code
+    assert "float 0x7FF8000000000000" in ll
+
+
+@pytest.mark.parametrize(
+    "case, message",
+    [
+        ("scalar value", "fma_with_mx_scale_pair expects an f32 vector value, got f32"),
+        (
+            "mismatched addend",
+            "fma_with_mx_scale_pair expects the addend type to match the value type "
+            "vec<f32x4>, got vec<f32x2>",
+        ),
+        ("i32 scale code", "fma_with_mx_scale_pair expects i8 input, got i32"),
+        ("missing split", "fma_with_mx_scale_pair expects an MxScaleSplit, got None"),
+    ],
+)
+def test_scale_pair_fma_refuses_wrong_types(case, message):
+    b = IRBuilder("mx_scale_pair_refusal")
+    value = b.vector_splat(b.const_f32(1.0), 4)
+    addend = value
+    codes = b.param("Codes", PtrType(I8, "global"))
+    a_code = b_code = b.global_load_i8(codes, b.const_i32(0))
+    if case == "scalar value":
+        value = b.const_f32(1.0)
+    elif case == "mismatched addend":
+        addend = b.vector_splat(b.const_f32(1.0), 2)
+    elif case == "i32 scale code":
+        b_code = b.const_i32(0)
+    split = exact_mx_scale_split(BF8_E5M2_OCP, BF8_E5M2_OCP, 32)
+    if case == "missing split":
+        split = None
+    with pytest.raises(ValueError, match=re.escape(message)):
+        fma_with_mx_scale_pair(b, value, a_code, b_code, addend, split=split)
+
+
+# (format, the exponent cap its 32-element groups get). The fused factor
+# always takes every f32 power of two, 2^-149..2^127. The cap is 254 minus the
+# top bit of the largest group: 32 * 448^2 < 2^23 for OCP E4M3, 32 * 240^2 <
+# 2^21 for E4M3 FNUZ and 32 * 57344^2 < 2^37 for both E5M2 encodings, so the
+# narrower E4M3 range leaves room for a larger cap.
+_MFMA_FORMAT_CAPS = (
+    (FP8_E4M3_OCP, 232),
+    (BF8_E5M2_OCP, 218),
+    (FP8_E4M3_FNUZ, 234),
+    (BF8_E5M2_FNUZ, 218),
+)
+
+
+@pytest.mark.parametrize(
+    "element_format, cap", _MFMA_FORMAT_CAPS, ids=[f.name for f, _ in _MFMA_FORMAT_CAPS]
+)
+def test_exact_split_for_the_mfma_formats(element_format, cap):
+    """The split derived for each fp8 / bf8 encoding the matrix cores read,
+    and its largest ``pre``, the cap less the largest ``fused``. The C++
+    engine's test (test_mx_scale_decode.cpp) pins the same values."""
+    split = exact_mx_scale_split(element_format, element_format, 32)
+    assert (split.exponent_cap, split.fused_min, split.fused_max) == (cap, -149, 127)
+    assert split.pre_max == cap - 127
+
+
+@pytest.mark.parametrize(
+    "element_format, cap", _MFMA_FORMAT_CAPS, ids=[f.name for f, _ in _MFMA_FORMAT_CAPS]
+)
+def test_exact_split_cap_is_the_largest_that_keeps_the_pre_scale_exact(
+    element_format, cap
+):
+    """At the cap, the largest group times ``2^pre`` (``pre = cap - 127``) is
+    a finite f32; one step higher it overflows. So the derived cap is the
+    largest one the split can take."""
+    largest_group = np.float32(32 * element_format.largest_value**2)
+    with np.errstate(over="ignore"):
+        at_cap = largest_group * np.float32(2.0 ** (cap - 127))
+        above_cap = largest_group * np.float32(2.0 ** (cap - 126))
+    assert np.isfinite(at_cap) and np.isinf(above_cap)
+
+
+@pytest.mark.parametrize(
+    "element_format, message",
+    [
+        (
+            MxElementFormat("wide", -9, 1.0e30),
+            "exact_mx_scale_split: the dot product of 32 products of wide and wide "
+            "values can reach 2^204, beyond the f32 range",
+        ),
+        (
+            MxElementFormat("fine", -60, 1.0),
+            "exact_mx_scale_split: the dot product of 32 products of fine and fine "
+            "values can be as small as 2^-120; at the smallest scales (ea + eb = -254) "
+            "it needs a factor of 2^-105 before the fma, which would round it",
+        ),
+        (
+            MxElementFormat("spread", -22, 2.0**40),
+            "exact_mx_scale_split: the dot product of 32 products of spread and spread "
+            "values spans 2^-44 to 2^86, too wide to saturate ea + eb at 169 without "
+            "changing a result",
+        ),
+    ],
+    ids=["dot beyond f32", "products too small", "range too wide"],
+)
+def test_exact_split_refuses_formats_without_one(element_format, message):
+    """A format whose bounds admit no exact split is refused, with the reason."""
+    with pytest.raises(ValueError, match=re.escape(message)):
+        exact_mx_scale_split(element_format, element_format, 32)
 
 
 def _skip_unless_comgr_targets(isa: str) -> None:

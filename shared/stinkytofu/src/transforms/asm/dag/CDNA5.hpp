@@ -687,6 +687,17 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Per-barrier matching ds_load count collected in
     // computeBarrierBeforeThresholds.
     std::unordered_map<StinkyInstruction*, int> barrierDsLoadCounts_;
+    // Per-barrier drain B (WMMA windows) the after threshold was planned with: N = base + B. The
+    // last ds feeding the barrier goes at N - B, so the pacer ends its stage there.
+    std::unordered_map<const StinkyInstruction*, int> barrierDrainWmmas_;
+    // The drain the pacer keeps in front of `barrier`: its planned B, or the ds credit lifetime in
+    // WMMA windows for a barrier with no after threshold.
+    int barrierDrain(const StinkyInstruction& barrier) const {
+        auto it = barrierDrainWmmas_.find(&barrier);
+        if (it != barrierDrainWmmas_.end()) return it->second;
+        const int window = std::max(1, wmmaIssueConfig.latency);
+        return (dsReadCreditLifetime() + window - 1) / window;
+    }
     struct BarrierBeforeOutput {
         int beforeThreshold = 0;
         int baseBeforeThreshold = 0;
@@ -2990,6 +3001,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
+    barrierDrainWmmas_.clear();
     if (hasWMMAInRegion_) {
         // Layer 1/3 (base merge):
         // Build one threshold map from two independent estimators:
@@ -3001,6 +3013,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         auto beforeThresholds = computeBarrierBeforeThresholds(regionStart, regionEnd);
         for (auto& [barrier, afterOutput] : afterThresholds) {
             barrierWmmaThresholds_[barrier] = afterOutput.afterThreshold;
+            barrierDrainWmmas_[barrier] = afterOutput.latencyWmmaBudget;
         }
         for (auto& [barrier, beforeOutput] : beforeThresholds) {
             auto it = barrierWmmaThresholds_.find(barrier);
@@ -3605,6 +3618,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         for (unsigned id : dsOrder) {
             int start = 0;
             int end = INT_MAX;
+            int drain = 0;  // the drain of the barrier that sets `end`
             for (const auto* edges : {&deps.dag.graph, &predsRef}) {
                 const bool forward = edges == &deps.dag.graph;
                 std::vector<unsigned> frontier{id};
@@ -3614,10 +3628,12 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                         for (unsigned m : (*edges)[n]) {
                             const int w = cutWindow(m);
                             if (w >= 0) {
-                                if (forward)
-                                    end = std::min(end, w);
-                                else
+                                if (!forward) {
                                     start = std::max(start, w);
+                                } else if (w < end) {
+                                    end = w;
+                                    drain = barrierDrain(*deps.dag.nodes[m].inst);
+                                }
                             } else if (!isMatrixInstruction(*deps.dag.nodes[m].inst) &&
                                        !isDSRead(*deps.dag.nodes[m].inst)) {
                                 next.push_back(m);
@@ -3627,16 +3643,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     frontier = std::move(next);
                 }
             }
-            loads.push_back({id, start, end, earliestAt[id]});
+            loads.push_back({id, start, end, earliestAt[id], drain});
         }
-        // WMMAs kept free in front of a stage end for the last ds_load to return. Typical case:
-        // ceil(creditLifetime / window) (9 for 8-cycle WMMAs). The worst case (4 waves loading
-        // together, sched_test) needs about 17. kDrainSlackWmmas is an UNVERIFIED magic number
-        // chosen so the sum is the old scheduler's 17 on f8; a reserve of 9 measured no better
-        // on medium, MAF or MAB.
-        static constexpr int kDrainSlackWmmas = 8;
-        const int drainWindows =
-            (dsReadCreditLifetime() + windowCycles - 1) / windowCycles + kDrainSlackWmmas;
         const int batch = std::max(1, dagFeatures.dsBatchWmmas);
         // The most loads the LDS takes in one batch: its credits (readQueueDepth, each held
         // readCreditLifetime cycles) over the batch's cycles.
@@ -3644,8 +3652,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             (static_cast<long long>(batch) * windowCycles * std::max(1, dsReadQueueDepth()) +
              dsReadCreditLifetime() - 1) /
             std::max(1, dsReadCreditLifetime()));
-        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows,
-                       maxPerBatch, effectiveDsCyclesPerLoad(dsTotalThisRegion_), windowCycles);
+        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, maxPerBatch,
+                       effectiveDsCyclesPerLoad(dsTotalThisRegion_), windowCycles);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
@@ -3656,8 +3664,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                         r, effectiveDsCyclesPerLoad(dsTotalThisRegion_))
                                  << "\n");
         PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
-                             << " wmmas=" << wmmaTotalThisRegion_ << " batch=" << batch << " drain="
-                             << drainWindows << " catchUp=" << dagFeatures.dsCatchUpPace << "\n");
+                             << " wmmas=" << wmmaTotalThisRegion_ << " batch=" << batch
+                             << " catchUp=" << dagFeatures.dsCatchUpPace << "\n");
     }
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);

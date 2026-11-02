@@ -146,6 +146,9 @@ struct ActivationParams
     double gamma;
 };
 
+// An unset relu_lower_clip_slope and a slope of exactly 0 both mean "no leaky ramp".
+bool hasLeakyReluSlope(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs);
+
 ActivationParams mapPointwiseModeToMiopenActivation(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs);
 

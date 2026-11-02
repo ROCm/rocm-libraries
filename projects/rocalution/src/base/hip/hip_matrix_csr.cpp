@@ -1492,13 +1492,28 @@ namespace rocalution
                 buffer);
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
             niter[0] = max_iter;
-            if(history != NULL)
+
+            // The in-place algorithm only records its convergence history while computing the
+            // residual norms; otherwise rocsparse_csritilu0_history reads an uninitialized buffer
+            const bool history_recorded
+                = (itilu0_alg != rocsparse_itilu0_alg_default
+                   && itilu0_alg != rocsparse_itilu0_alg_async_inplace)
+                  || (itilu0_option & rocsparse_itilu0_option_compute_nrm_residual) > 0;
+
+            if(history != NULL && !history_recorded)
+            {
+                LOG_INFO("*** warning: HIPAcceleratorMatrixCSR::ItILU0Factorize() convergence "
+                         "history is not available for the in-place algorithm without "
+                         "ItILU0Option::ComputeNrmResidual");
+                niter[0] = 0;
+            }
+            else if(history != NULL)
             {
                 assert((option & ItILU0Option::StoppingCriteria) > 0);
                 if(std::is_same<ValueType, double>{}
                    || std::is_same<ValueType, std::complex<double>>{})
                 {
-                    rocsparseTcsritilu0_history<double>(
+                    status = rocsparseTcsritilu0_history<double>(
                         ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
                         itilu0_alg,
                         niter,
@@ -1508,20 +1523,32 @@ namespace rocalution
                 }
                 else
                 {
-                    int    num_iter      = max_iter;
-                    float* local_history = new float[num_iter * 2];
-                    rocsparseTcsritilu0_history<float>(
+                    int                num_iter = max_iter;
+                    std::vector<float> local_history(num_iter * 2);
+                    status = rocsparseTcsritilu0_history<float>(
                         ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
                         itilu0_alg,
                         niter,
-                        local_history,
+                        local_history.data(),
                         buffer_size,
                         buffer);
 
-                    for(int i = 0; i < num_iter * 2; ++i)
+                    if(status == rocsparse_status_success)
                     {
-                        history[i] = local_history[i];
+                        for(int i = 0; i < num_iter * 2; ++i)
+                        {
+                            history[i] = local_history[i];
+                        }
                     }
+                }
+
+                // The factorization is valid even if no history could be retrieved
+                if(status != rocsparse_status_success)
+                {
+                    LOG_INFO("*** warning: HIPAcceleratorMatrixCSR::ItILU0Factorize() convergence "
+                             "history is not available, rocsparse_csritilu0_history returned "
+                             << status);
+                    niter[0] = 0;
                 }
             }
 

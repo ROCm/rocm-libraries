@@ -2865,6 +2865,14 @@ class Solution(collections.abc.Mapping):
       state["DirectToLdsMetadata"] = 0
       state["MIWaveTileMetadata"] = 0
 
+    # An unsuffixed NonTemporal sets A, B, C, D, Gate and Metadata only; MXSA, MXSB, E and WS need
+    # their own NonTemporal<tensor> key. (An unsuffixed TemporalHint or NonVolatile, above, is
+    # expanded over every tensor.)
+    # Under TDMFuse=1/2/3 a data tensor (A or B) and its scale tensor(s) share one tensor_load_to_lds
+    # whose th/scope/nv bits are instruction-wide. The data tensor decides: its TemporalHint,
+    # NonTemporal and NonVolatile are emitted and the scale tensors' are ignored for that
+    # instruction (see tdmHintDeciders), so the generated asm follows A/B. Under TDMFuse=0 a field
+    # is emitted only when the members of each set ({A,B}, {MXSA,MXSB}) agree.
     if state["NonTemporal"] != -1:
       state["NonTemporalA"] = state["NonTemporal"]
       state["NonTemporalB"] = state["NonTemporal"]

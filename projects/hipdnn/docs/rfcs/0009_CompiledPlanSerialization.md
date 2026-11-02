@@ -205,11 +205,17 @@ are in `dnn-providers/hip-kernel-provider/src/core/PluginSerialization.cpp`.
 
 ### Supported Engines
 
-An ingestor engine supports serialization when each kernel in its descriptor set is a kpack code
-object. Each dispatch handler of the set must also report `supportsSaving()`. The provider
+An ingestor engine supports serialization when each kernel in its descriptor set is a single-launch
+kpack code object. Each dispatch handler of the set must also report `supportsSaving()`. The provider
 calculates this from the descriptor set and its dispatch handlers. A supported engine reports the
 behavior note `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. The other engines of the
 provider do not report this note.
+
+A multi-launch kernel (RFC 0017 §15.1) cannot be saved. The payload holds one kernel image: one
+symbol, one signature and one code object. A multi-launch kernel has a symbol and a signature for
+each launch, and its launches can use more than one code object. An engine with a multi-launch
+kernel does not report the note. Saving these plans needs a payload that holds an image for each
+launch, and a dispatch handler contract that saves and restores every launch.
 
 The save hook refuses a plan that no ingestor engine built. Such a plan has no single-kernel ingestor
 plan to save.
@@ -363,8 +369,9 @@ this order:
 2. A plan that the provider loaded from a payload.
 3. A benchmarking plan that has not selected a kernel.
 4. A plan that no ingestor engine built.
-5. A kernel with a source kind other than kpack.
-6. A plan whose dispatch handler does not support save.
+5. A kernel with more than one launch.
+6. A kernel with a source kind other than kpack.
+7. A plan whose dispatch handler does not support save.
 
 Rule 2 has a result for the frontend: `to_binary()` of a graph that `from_binary()` loaded fails.
 `to_compiled_plan_binary()` of a loaded plan also fails. Keep the original bytes of the payload.

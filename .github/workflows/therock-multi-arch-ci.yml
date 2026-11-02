@@ -279,8 +279,11 @@ jobs:
             amdgpu_targets: gfx942
           - amdgpu_families: gfx950-dcgpu
             amdgpu_targets: gfx950
+    # Temporarily disabled due to artifact setup flakes. Re-enable after
+    # https://github.com/ROCm/TheRock-Infra/issues/1160 is resolved.
     if: >-
       ${{
+        false &&
         !cancelled() &&
         github.event_name == 'pull_request' &&
         (

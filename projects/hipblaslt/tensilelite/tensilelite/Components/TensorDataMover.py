@@ -7,7 +7,7 @@ from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, SCSelectB32, TensorLoadToLds, \
     VReadfirstlaneB32
-from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData
+from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData, TENSORModifiers
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
 # from ..KernelWriterAssembly import KernelWriterAssembly
@@ -288,7 +288,8 @@ class TensorDataMoverLoad(TensorDataMover):
             #TODO: support stagger U
         return mod
 
-    def issueLoad(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:
+    def issueLoad(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str],
+                  tensor: Optional[TENSORModifiers] = None) -> Module:
         mod = Module("tensor load")
         if len(self.mem_token) > 1:
             comment = f"sync LDS {self.mem_token}"
@@ -298,10 +299,11 @@ class TensorDataMoverLoad(TensorDataMover):
             comment = "No MemToken for TDM load"
         if all(g is not None for g in [group2, group3]):
             tensorLoadToLds = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                              sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR), comment=comment)
+                                              sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR), comment=comment,
+                                              tensor=tensor)
         else:
             tensorLoadToLds = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                              None, None, comment=comment)
+                                              None, None, comment=comment, tensor=tensor)
 
         if self.mem_token is not None:
             tensorLoadToLds.setMemToken(MemTokenData(self.mem_token))

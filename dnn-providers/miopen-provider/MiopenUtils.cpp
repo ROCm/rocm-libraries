@@ -107,6 +107,12 @@ size_t getSpatialDimCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttr
     return attr.dims()->size() - 2;
 }
 
+bool hasLeakyReluSlope(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs)
+{
+    const auto slope = attrs.relu_lower_clip_slope();
+    return slope.has_value() && *slope != 0.f;
+}
+
 ActivationParams mapPointwiseModeToMiopenActivation(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs)
 {
@@ -119,7 +125,6 @@ ActivationParams mapPointwiseModeToMiopenActivation(
     {
         auto lowerClip = attrs.relu_lower_clip();
         auto upperClip = attrs.relu_upper_clip();
-        auto lowerClipSlope = attrs.relu_lower_clip_slope();
 
         if(lowerClip && upperClip)
         {
@@ -137,11 +142,13 @@ ActivationParams mapPointwiseModeToMiopenActivation(
             return ActivationParams{
                 miopenActivationCLIPPEDRELU, static_cast<double>(*upperClip), 0.0, 0.0};
         }
-        if(lowerClipSlope)
+        if(hasLeakyReluSlope(attrs))
         {
             // Leaky ReLU
-            return ActivationParams{
-                miopenActivationLEAKYRELU, static_cast<double>(*lowerClipSlope), 0.0, 0.0};
+            return ActivationParams{miopenActivationLEAKYRELU,
+                                    static_cast<double>(*attrs.relu_lower_clip_slope()),
+                                    0.0,
+                                    0.0};
         }
         if(lowerClip && *lowerClip != 0.f)
         {

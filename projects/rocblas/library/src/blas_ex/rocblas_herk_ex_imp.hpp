@@ -51,6 +51,8 @@ namespace
         if(!handle)
             return rocblas_status_invalid_handle;
 
+        rocblas_internal_api_scope api_scope(handle, ROCBLAS_API_STR(rocblas_herk_ex));
+
         constexpr bool HERM = true;
 
         //Check if the handle is in the device memory size query, as there are two algorithms one which requires extra workspace memory and one which doesn't

@@ -217,6 +217,39 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
             return status;
     }
 
+    if(handle->layer_mode & rocblas_layer_mode_log_kernel_select)
+    {
+        rocblas_internal_gemm_problem p;
+        p.trans_a        = trans_a;
+        p.trans_b        = trans_b;
+        p.m              = m_64;
+        p.n              = n_64;
+        p.k              = k_64;
+        p.alpha          = alpha;
+        p.beta           = beta;
+        p.input_type     = rocblas_datatype_from_type<Ti>;
+        p.output_type    = rocblas_datatype_from_type<To>;
+        p.compute_type   = rocblas_datatype_from_type<TScal>;
+        p.lda            = lda_64;
+        p.ldb            = ldb_64;
+        p.ldc            = ldc_64;
+        p.ldd            = ldd_64;
+        p.stride_a       = stride_a;
+        p.stride_b       = stride_b;
+        p.stride_c       = stride_c;
+        p.stride_d       = stride_d;
+        p.batch_count    = batch_count_64;
+        p.pointer_array  = BATCHED;
+        p.algo           = algo;
+        p.solution_index = solution_index;
+        p.flags          = uint32_t(flags);
+        rocblas_internal_log_kernel_select(handle,
+                                           p,
+                                           "source",
+                                           "rocblas_gemm_source_solution_64",
+                                           rocblas_internal_take_kernel_select_fallback(handle));
+    }
+
     if constexpr(check_numerics_supported)
     {
         if(check_numerics)

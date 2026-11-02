@@ -758,7 +758,9 @@ namespace
                 rocblas_layer_mode layer_mode
                     = static_cast<rocblas_layer_mode>(strtol(str_layer_mode, 0, 0));
 
-                if(layer_mode & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal))
+                if(layer_mode
+                   & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal
+                      | rocblas_layer_mode_log_kernel_select))
                 {
                     char buf[256];
                     rocblas_get_version_string(buf, 256);
@@ -1342,6 +1344,42 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 #endif
 }
 
+namespace
+{
+    template <typename Ti, typename To, typename Tc>
+    rocblas_internal_gemm_problem
+        make_gemm_problem(const RocblasContractionProblem<Ti, To, Tc>& prob,
+                          rocblas_gemm_algo                            algo,
+                          int32_t                                      solution_index)
+    {
+        rocblas_internal_gemm_problem p;
+        p.trans_a        = prob.trans_a;
+        p.trans_b        = prob.trans_b;
+        p.m              = prob.m;
+        p.n              = prob.n;
+        p.k              = prob.k;
+        p.alpha          = prob.alpha;
+        p.beta           = prob.beta;
+        p.input_type     = rocblas_datatype_from_type<Ti>;
+        p.output_type    = rocblas_datatype_from_type<To>;
+        p.compute_type   = rocblas_datatype_from_type<Tc>;
+        p.lda            = prob.col_stride_a;
+        p.ldb            = prob.col_stride_b;
+        p.ldc            = prob.col_stride_c;
+        p.ldd            = prob.col_stride_d;
+        p.stride_a       = prob.batch_stride_a;
+        p.stride_b       = prob.batch_stride_b;
+        p.stride_c       = prob.batch_stride_c;
+        p.stride_d       = prob.batch_stride_d;
+        p.batch_count    = prob.batch_count;
+        p.pointer_array  = !prob.strided_batch;
+        p.algo           = algo;
+        p.solution_index = solution_index;
+        p.flags          = uint32_t(prob.flags);
+        return p;
+    }
+} // namespace
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasContractionProblem                                               *
@@ -1353,6 +1391,13 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
 {
     rocblas_status status            = rocblas_status_internal_error;
     bool           hipblaslt_backend = false;
+
+    // Per-sub-problem kernel-selection state, consumed by rocblas_layer_mode_log_kernel_select (0x10).
+    // Capture is gated by the layer bit to avoid the std::string copy of solution->name() when off.
+    const bool kernel_select_logging
+        = prob.handle->layer_mode & rocblas_layer_mode_log_kernel_select;
+    bool        hipblaslt_attempted = false;
+    std::string selected_tensile_name;
 
     bool solutionBased = algo == rocblas_gemm_algo_solution_index;
     bool hipBLASLtOnly = false, TensileOnly = false;
@@ -1369,6 +1414,7 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
 #ifdef BUILD_WITH_HIPBLASLT
         if(useHipBLASLt(prob))
         {
+            hipblaslt_attempted = true;
             try
             {
                 rocblas_int hipblaslt_idx = map_index_rocblas_to_hipblaslt(solution_index);
@@ -1438,6 +1484,9 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
 
             if(!solution && fallbackTensileProblem(tensile_prob))
                 solution = library->findBestSolution(tensile_prob, *hardware, fitness_query);
+
+            if(solution && kernel_select_logging)
+                selected_tensile_name = solution->name();
 
             if(!solution)
             {
@@ -1552,6 +1601,38 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
                          prob.col_stride_c,
                          (void*)prob.D,
                          prob.col_stride_d);
+    }
+
+    if(kernel_select_logging)
+    {
+        // Queries and check_solution_index return success without launching anything. hipBLASLt
+        // honours check_solution_index only for algo == rocblas_gemm_algo_solution_index.
+        const bool check_only = (prob.flags & rocblas_gemm_flags_check_solution_index)
+                                && (!hipblaslt_backend || solutionBased);
+        const bool launched = !check_only && !prob.handle->get_solution_fitness_query()
+                              && !prob.handle->is_device_memory_size_query();
+
+        if(launched && status == rocblas_status_success)
+        {
+            rocblas_internal_log_kernel_select(
+                prob.handle,
+                make_gemm_problem(prob, algo, solution_index),
+                hipblaslt_backend ? "hipblaslt" : "tensile",
+                hipblaslt_backend ? nullptr : selected_tensile_name.c_str(),
+                hipblaslt_attempted && !hipblaslt_backend ? "hipblaslt" : "none");
+        }
+
+        // Tell the source-GEMM fallback which backends rejected this sub-problem.
+        const char* rejected = nullptr;
+        if(status == rocblas_status_not_implemented)
+        {
+#ifdef BUILD_WITH_TENSILE
+            rejected = hipblaslt_attempted ? "hipblaslt,tensile" : "tensile";
+#else
+            rejected = hipblaslt_attempted ? "hipblaslt" : nullptr;
+#endif
+        }
+        prob.handle->kernel_select_fallback_from = rejected;
     }
 
     return status;
