@@ -271,7 +271,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
 
         _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", options);
-        _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormBwdSpatial"));
+        _runnableKernels.push_back(_compiledProgram->getKernel("batchNormBwdSpatial"));
         _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(xlocalsize), 1, 1);
         _runnableKernels[0]->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize), 1, 1);
     }
@@ -323,16 +323,16 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
         _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", options);
         _runnableKernels.push_back(
-            _compiledProgram->getKernel(_usesSavedStats ? "BatchNormBwdSpatialDScaleDBias"
-                                                        : "BatchNormBwdSpatialMeanVariance"));
+            _compiledProgram->getKernel(_usesSavedStats ? "batchNormBwdSpatialDScaleDBias"
+                                                        : "batchNormBwdSpatialMeanVariance"));
         _runnableKernels.push_back(
-            _compiledProgram->getKernel(_usesSavedStats ? "BatchNormBwdSpatialFinalDScaleDBias"
-                                                        : "BatchNormBwdSpatialFinalMeanVariance"));
+            _compiledProgram->getKernel(_usesSavedStats ? "batchNormBwdSpatialFinalDScaleDBias"
+                                                        : "batchNormBwdSpatialFinalMeanVariance"));
         _runnableKernels.push_back(_compiledProgram->getKernel(
-            _usesSavedStats ? "BatchNormBwdSpatialDX" : "BatchNormBwdSpatialDScaleDBias"));
+            _usesSavedStats ? "batchNormBwdSpatialDX" : "batchNormBwdSpatialDScaleDBias"));
         _runnableKernels.push_back(_compiledProgram->getKernel(
-            _usesSavedStats ? "BatchNormBwdSpatialDX" : "BatchNormBwdSpatialFinalDScaleDBias"));
-        _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormBwdSpatialDX"));
+            _usesSavedStats ? "batchNormBwdSpatialDX" : "batchNormBwdSpatialFinalDScaleDBias"));
+        _runnableKernels.push_back(_compiledProgram->getKernel("batchNormBwdSpatialDX"));
 
         for(size_t i = 0; i < 5; ++i)
         {
