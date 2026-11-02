@@ -229,6 +229,7 @@ add_library(
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp
     MiopenPluginPublic.cpp
+    MiopenPoolingDescriptor.cpp
     MiopenTensor.cpp
     MiopenUtils.cpp
 )
