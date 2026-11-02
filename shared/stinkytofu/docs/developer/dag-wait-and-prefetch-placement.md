@@ -21,9 +21,9 @@ carried the prefetch forward to the segment end, the barrier right before the te
    barrier above it (`barrierWmmaThresholds_`).
    - Multi-stage loop body (tensilelite `HalfPLR`, 3 TDM stages): the k-th of n prefetches is
      held until window `load - lead + k * lead / n`.
-   - Single-stage loop body (lead < 8): the whole group is released at the load window and
-     the stage barrier waits until the ready group has issued, so the group lands just
-     before `s_barrier_wait -3`. A group that is not fully ready never holds the barrier.
+   - Single-stage loop body (lead < 8): the whole group is released at the load window.
+     The stage barrier does not wait for the group. When both are ready, the barrier issues
+     first.
    - With a lead set, prefetches have their own ready queue; they are not fillers and never
      count against the filler quota.
 2. **Wait-prone fillers** (`WaitAluHoldStrictCount`, only with ESM2, the only mode in which
