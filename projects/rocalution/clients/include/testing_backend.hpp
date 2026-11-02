@@ -121,8 +121,10 @@ void testing_backend(Arguments argus)
     stop_rocalution();
 }
 
-// On Windows, omp.h only declares the OpenMP 2.0 API
-#if defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+// On Windows, omp.h only declares the OpenMP 2.0 API.
+// ROCALUTION_WITH_OPENMP is set on the library target only when that library
+// was built with OpenMP. The test's own -fopenmp is not the same thing.
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
 // Set the pre-init OpenMP state, then initialize a host-only platform with 2 threads
 void backend_omp_init(int levels, int nthreads)
 {
@@ -162,7 +164,7 @@ int backend_omp_team_size(void)
 
 void testing_backend_omp_parallel_region(void)
 {
-#if defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
     // OMP_THREAD_LIMIT=1 legitimately caps every team at one thread
     if(omp_get_thread_limit() < 2)
     {
@@ -204,13 +206,13 @@ void testing_backend_omp_parallel_region(void)
     omp_set_max_active_levels(def_levels);
     omp_set_num_threads(def_threads);
 #else
-    GTEST_SKIP() << "rocalution-test is built without the OpenMP 3.0 API";
+    GTEST_SKIP() << "rocALUTION was built without OpenMP, or rocalution-test has no OpenMP 3.0 API";
 #endif
 }
 
 void testing_backend_omp_restore_state(void)
 {
-#if defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+#if defined(ROCALUTION_WITH_OPENMP) && defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
     int def_dynamic = omp_get_dynamic();
     int def_levels  = omp_get_max_active_levels();
     int def_threads = omp_get_max_threads();
@@ -242,7 +244,7 @@ void testing_backend_omp_restore_state(void)
     omp_set_max_active_levels(def_levels);
     omp_set_num_threads(def_threads);
 #else
-    GTEST_SKIP() << "rocalution-test is built without the OpenMP 3.0 API";
+    GTEST_SKIP() << "rocALUTION was built without OpenMP, or rocalution-test has no OpenMP 3.0 API";
 #endif
 }
 
