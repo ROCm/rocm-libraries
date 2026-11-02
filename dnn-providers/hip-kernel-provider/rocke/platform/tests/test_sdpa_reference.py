@@ -19,6 +19,7 @@ import numpy as np
 from rocke.numeric.references import sdpa_reference as exported_sdpa_reference
 from rocke.numeric.sdpa_reference import (
     _band_mask,
+    hipdnn_left_to_window,
     keep,
     resolve_diagonal_band,
     resolve_hipdnn_band,
@@ -222,6 +223,9 @@ def _hipdnn_extract_diagonal_band(left, right, top_left, causal, causal_br):
     right = -1 if right is None else right
     if left < -1 or right < -1:
         raise ValueError("bounds")
+    # hipDNN #14483: left_bound counts the diagonal key, so 0 is rejected.
+    if left == 0:
+        raise ValueError("left_bound 0")
     if causal and causal_br:
         raise ValueError("both flags")
     if causal or causal_br:
@@ -268,7 +272,9 @@ class TestResolveHipdnnBand(unittest.TestCase):
 
     def test_agrees_with_resolve_diagonal_band_without_flags(self):
         for left, right, alignment, top_left, flags in self._grid():
-            if any(flags):
+            # left_bound = 0 is valid only in resolve_diagonal_band's FlashAttention
+            # window, where it keeps the diagonal; hipDNN rejects it.
+            if any(flags) or left == 0:
                 continue
             try:
                 want = resolve_diagonal_band(
@@ -332,10 +338,45 @@ class TestResolveHipdnnBand(unittest.TestCase):
             ("top_left", 3, 0),
         )
 
+    def test_left_bound_zero_rejected(self):
+        for kw in ({"left_bound": 0}, {"causal_mask": True, "left_bound": 0}):
+            with self.subTest(**kw):
+                with self.assertRaisesRegex(ValueError, "left_bound must be -1"):
+                    resolve_hipdnn_band(**kw)
+
     def test_result_feeds_keep(self):
         diagonal, left, right = resolve_hipdnn_band(causal_mask_bottom_right=True)
         self.assertTrue(keep(1, 4, 2, 5, diagonal, left, right))
         self.assertFalse(keep(0, 4, 2, 5, diagonal, left, right))
+
+
+class TestHipdnnLeftToWindow(unittest.TestCase):
+    def test_converts_l_to_l_minus_one(self):
+        self.assertEqual(hipdnn_left_to_window(-1), -1)
+        self.assertEqual(hipdnn_left_to_window(None), -1)
+        self.assertEqual(hipdnn_left_to_window(1), 0)
+        self.assertEqual(hipdnn_left_to_window(7), 6)
+
+    def test_rejects_zero_and_below_minus_one(self):
+        for left in (0, -2):
+            with self.subTest(left=left):
+                with self.assertRaises(ValueError):
+                    hipdnn_left_to_window(left)
+
+    def test_window_keeps_l_keys_ending_at_the_diagonal(self):
+        """hipDNN's rule ``k > q + offset - L``, for every L, both alignments."""
+        for left in range(1, 7):
+            for sq, skv in ((6, 6), (3, 7), (7, 3)):
+                for diagonal in ("top_left", "bottom_right"):
+                    off = 0 if diagonal == "top_left" else skv - sq
+                    w = hipdnn_left_to_window(left)
+                    for q in range(sq):
+                        for k in range(skv):
+                            self.assertEqual(
+                                keep(q, k, sq, skv, diagonal, w, 0),
+                                q + off - left < k <= q + off,
+                                msg=str((left, sq, skv, diagonal, q, k)),
+                            )
 
 
 class TestPublicNames(unittest.TestCase):
@@ -344,7 +385,6 @@ class TestPublicNames(unittest.TestCase):
         for name in (
             "rocke.numeric.references",
             "rocke.numeric.sdpa_reference",
-            "rocke.numeric.sdpa_request_reference",
         ):
             with self.subTest(module=name):
                 mod = importlib.import_module(name)

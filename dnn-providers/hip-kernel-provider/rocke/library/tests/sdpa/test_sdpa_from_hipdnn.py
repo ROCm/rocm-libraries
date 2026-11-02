@@ -178,10 +178,16 @@ def test_mask_merges_deprecated_flags_like_hipdnn(attributes, band):
         # The flag's right bound of 0 must not mask an invalid stored bound.
         {"causal_mask": True, "right_bound": -5},
         {"causal_mask_bottom_right": True, "left_bound": -3},
+        # SdpaFwdNode rejects left_bound = 0 (hipDNN #14483): a provider's L - 1
+        # would turn it into the unbounded -1.
+        {"left_bound": 0},
+        {"causal_mask": True, "left_bound": 0},
     ],
 )
-def test_bounds_below_minus_one_are_rejected_like_hipdnn(attributes):
-    with pytest.raises(ValueError, match=r"must be >= -1"):
+def test_bounds_outside_hipdnn_domain_are_rejected(attributes):
+    with pytest.raises(
+        ValueError, match=r"left_bound must be -1 \(unbounded\) or >= 1"
+    ):
         _request(attributes=attributes)
 
 
@@ -362,7 +368,6 @@ def test_stats_needs_generate_stats_and_a_tensor():
         ({"attributes": {"dropout_probability": 0.1}}, "dropout"),
         ({"inputs": {"seed_tensor_uid": 10}}, "dropout"),
         ({"outputs": {"rng_dump_tensor_uid": 10}}, "dropout"),
-        ({"inputs": {"page_table_k_tensor_uid": 10}}, "paged"),
         ({"attributes": {"max_seq_len_kv": 64}}, "paged"),
         ({"inputs": {"descale_q_tensor_uid": 10}}, "fp8"),
         ({"inputs": {"scale_o_tensor_uid": 10}}, "fp8_s_o"),
@@ -502,6 +507,64 @@ def test_key_sets_match_the_ingestor_sdpa_graph_template():
 # --- the checked-in hipDNN golden bundles ------------------------------------------
 
 _BUNDLES = hipdnn_assets.golden_bundle_root()
+
+
+@pytest.mark.parametrize("paged_sides", [("k",), ("v",), ("k", "v")])
+@pytest.mark.parametrize("max_seq_len_kv", [None, 2 * S])
+def test_paged_containers_are_not_compared_with_the_batch(paged_sides, max_seq_len_kv):
+    """A paged K or V is [num_blocks, H, block_size, D]: its dims 0 and 2 are not
+    the batch and key length, so SdpaFwdNode skips those checks per paged side
+    (hipDNN #14358's paged graphs have num_blocks != B)."""
+    block, blocks_per_seq = S // 2, 4
+    container = (B * blocks_per_seq + 3, H, block, D)
+    tensors = [
+        _tensor(10, (B, 1, 1, 1), "int32"),
+        _tensor(11, (B, 1, 1, 1), "int32"),
+        _tensor(12, (B, 1, blocks_per_seq, 1), "int32"),
+        _tensor(13, (B, 1, blocks_per_seq, 1), "int32"),
+    ]
+    graph = _graph(
+        attributes={"max_seq_len_kv": max_seq_len_kv},
+        inputs={
+            "seq_len_q_tensor_uid": 10,
+            "seq_len_kv_tensor_uid": 11,
+            **{f"page_table_{side}_tensor_uid": 12 + i for i, side in enumerate("kv")},
+        },
+        tensors=tensors,
+    )
+    for side in "kv":
+        if side not in paged_sides:
+            graph["nodes"][0]["inputs"][f"page_table_{side}_tensor_uid"] = None
+    for uid, side in ((1, "k"), (2, "v")):
+        if side in paged_sides:
+            graph["tensors"][uid] = _tensor(uid, container)
+    req = from_hipdnn_graph(graph, "gfx950")
+    assert (req.paged_k, req.paged_v) == ("k" in paged_sides, "v" in paged_sides)
+    assert req.batch == B and req.s_kv == 2 * S
+    assert "paged" in req.features()
+    assert SdpaRequest.from_normalized(json.loads(json.dumps(req.normalized()))) == req
+
+
+@pytest.mark.parametrize(
+    "table_dims, max_seq_len_kv, match",
+    [
+        ((B + 1, 1, 4, 1), None, r"dims \[B, 1, max_blocks_per_seq, 1\]"),
+        ((B, 1, 4), None, r"dims \[B, 1, max_blocks_per_seq, 1\]"),
+        ((B, 1, 3, 1), 2 * S, r"ceil\(max_seq_len_kv / block_size\) = 4"),
+        ((B, 1, 4, 1), 0, "max_seq_len_kv must be positive"),
+    ],
+)
+def test_page_table_shape_is_validated_like_hipdnn(table_dims, max_seq_len_kv, match):
+    graph = _graph(
+        attributes={"max_seq_len_kv": max_seq_len_kv},
+        inputs={"page_table_k_tensor_uid": 12},
+        tensors=[_tensor(12, table_dims, "int32")],
+    )
+    graph["tensors"][1] = _tensor(1, (9, H, S // 2, D))
+    with pytest.raises(ValueError, match=match):
+        from_hipdnn_graph(graph, "gfx950")
+
+
 _GRAPHS = hipdnn_assets.sdpa_fwd_golden_graphs()
 
 

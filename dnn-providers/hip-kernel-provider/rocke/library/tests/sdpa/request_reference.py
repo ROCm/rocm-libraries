@@ -5,11 +5,10 @@
 
 An adapter over :func:`rocke.numeric.sdpa_reference.sdpa_reference`: it
 decodes what that array oracle does not model (flat strided buffers, packed
-ragged buffers, the scale source, FP8 descales) and delegates the attention
-math, so there is one SDPA forward definition.
-
-The request is read by attribute rather than imported, because ``platform``
-must not depend on ``library``.
+ragged buffers, the scale source, FP8 descales, hipDNN's left bound) and
+delegates the attention math, so there is one SDPA forward definition. It
+lives beside the SDPA tests rather than in ``platform``, so it reads the
+request's own facts (:meth:`SdpaRequest.features`) instead of re-deriving them.
 """
 
 from __future__ import annotations
@@ -20,7 +19,8 @@ from typing import Any
 
 import numpy as np
 
-from rocke.numeric.sdpa_reference import sdpa_reference
+from dispatch.sdpa import SdpaRequest
+from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 
 __all__ = ["sdpa_reference_from_request"]
 
@@ -138,24 +138,20 @@ def _descale(
     return values.reshape(batch, heads_kv)[:, np.arange(h_q) // (h_q // heads_kv)]
 
 
-def _unsupported_sdpa_features(req: Any) -> list[str]:
-    fp8 = getattr(req, "fp8", None)
-    s_o_fields = ("descale_s", "scale_s", "scale_o", "amax_s", "amax_o")
-    checks = {
-        "dropout": req.dropout is not None,
-        "paged": req.paged is not None,
-        "block_mask": req.block_mask is not None,
-        "sinks": req.sink_token is not None,
-        "alibi": bool(req.alibi),
-        "fp8_s_o": fp8 is not None
-        and any(getattr(fp8, f) is not None for f in s_o_fields),
-        "max_sum_exp": req.max is not None or req.sum_exp is not None,
-    }
-    return [name for name, active in checks.items() if active]
+# What hipDNN's CPU reference rejects too, by SdpaRequest.features() name.
+UNSUPPORTED_FEATURES = (
+    "dropout",
+    "paged",
+    "block_mask",
+    "sinks",
+    "alibi",
+    "fp8_s_o",
+    "max_sum_exp",
+)
 
 
 def sdpa_reference_from_request(
-    req: Any, tensors: Mapping[str, Any]
+    req: SdpaRequest, tensors: Mapping[str, Any]
 ) -> dict[str, np.ndarray]:
     """hipDNN SDPA forward for a ``dispatch.sdpa.SdpaRequest``.
 
@@ -168,7 +164,9 @@ def sdpa_reference_from_request(
         O     = (p . V) * descale_v
         stats = max + ln(sum_exp)                   # -inf on a fully masked row
 
-    The scale is always the request's (hipDNN's default is 1.0, not
+    ``keep`` is hipDNN's band: ``left_bound = L`` keeps the ``L`` keys ending at
+    the diagonal, converted once to the array oracle's window ``L - 1``. The
+    scale is always the request's (hipDNN's default is 1.0, not
     ``1/sqrt(d)``). The descales are folded into Q and O, and the rest is
     :func:`rocke.numeric.sdpa_reference.sdpa_reference` in float64.
 
@@ -193,7 +191,8 @@ def sdpa_reference_from_request(
     block masks, sinks, ALiBi, FP8 softmax/output scaling, and max/sum_exp
     outputs, which hipDNN's CPU reference rejects too.
     """
-    unsupported = _unsupported_sdpa_features(req)
+    features = req.features()
+    unsupported = [name for name in UNSUPPORTED_FEATURES if name in features]
     if unsupported:
         raise NotImplementedError(
             f"sdpa_reference_from_request does not implement {', '.join(unsupported)}"
@@ -245,7 +244,7 @@ def sdpa_reference_from_request(
         scale = float(np.asarray(tensors["scale"], dtype=np.float32).reshape(-1)[0])
     else:
         scale = float(req.scale)
-    fp8 = getattr(req, "fp8", None)
+    fp8 = req.fp8
 
     def descriptor(field: str) -> Any:
         return None if fp8 is None else getattr(fp8, field)
@@ -265,7 +264,7 @@ def sdpa_reference_from_request(
         v,
         scale=scale,
         bias=bias,
-        left_bound=req.left_bound,
+        left_bound=hipdnn_left_to_window(req.left_bound),
         right_bound=req.right_bound,
         top_left=req.diagonal == "top_left",
         seq_len_q=q_eff,

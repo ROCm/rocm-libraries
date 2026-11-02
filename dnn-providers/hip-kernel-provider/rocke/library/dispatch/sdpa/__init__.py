@@ -7,20 +7,30 @@
 :func:`from_hipdnn` builds one from the node's flatbuffer JSON. Candidates gate
 on :meth:`SdpaRequest.features` through the shared ``Capability`` contract.
 
-No SDPA kernel family is registered against this contract yet (kernel wiring
-is a follow-up -- see ``KERNEL_AUTHORING.md``), so :func:`registered_sdpa_combos`,
-:func:`sdpa_sweep_space`, and :func:`dispatch_sdpa_all` are the delegation
-points that follow-up plugs a real ``CandidateRegistry`` into. Each accepts
-only a validated :class:`SdpaRequest` (``__post_init__`` already rejects a
-malformed one) and, until that registry exists, always report nothing to run.
+No SDPA kernel is registered yet (kernel wiring is a follow-up -- see
+``KERNEL_AUTHORING.md``), so :data:`SDPA_REGISTRY` is an empty
+``CandidateRegistry``. :func:`registered_sdpa_combos`, :func:`sdpa_sweep_space`
+and :func:`dispatch_sdpa_all` are the same wrappers every family has (see
+``rocke.dispatch.families.norm``): each short-circuits on a request error, then
+delegates to the registry, so a candidate registered there is reachable through
+them without changing this module. The ABI version arrives with the first
+candidate, whose ``KernelCandidate.abi_version`` carries it.
 """
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Any, Sequence, Tuple
+
+from rocke.dispatch.core import (
+    CandidateRegistry,
+    DispatchResult,
+    KernelCandidate,
+    KernelId,
+    OperatorRequest,
+    make_kernel_id,
+)
 
 from .common import (
-    SDPA_ABI_VERSION,
     SDPA_DIM_VOCABULARY,
     SDPA_DTYPES,
     SDPA_FEATURES,
@@ -34,39 +44,54 @@ from .common import (
 )
 from .hipdnn import HIPDNN_DTYPES, from_hipdnn, from_hipdnn_graph
 
+SDPA_REGISTRY = CandidateRegistry("sdpa", dim_vocabulary=SDPA_DIM_VOCABULARY)
 
-def registered_sdpa_combos(req: SdpaRequest) -> Tuple[Tuple[object, object], ...]:
-    """Every executable ``(candidate, spec)`` pair registered for ``req``.
 
-    Request errors short-circuit before any registry delegation: an
-    ``SdpaRequest`` is already validated at construction
-    (:meth:`SdpaRequest._validate`), so the only error this raises is a wrong
-    argument type. No SDPA kernel family is registered against this contract
-    yet, so this always returns an empty tuple.
+def _request_errors(req: OperatorRequest) -> list[str]:
+    """Why ``req`` cannot reach the registry; empty when it can.
+
+    An ``SdpaRequest`` is validated at construction, so the remaining error is
+    a request of another family.
     """
     if not isinstance(req, SdpaRequest):
-        raise TypeError(f"expected SdpaRequest, got {type(req).__name__}")
-    return ()
+        return [f"expected SdpaRequest, got {type(req).__name__}"]
+    if req.op != "sdpa_fwd":
+        return [f"unsupported op {req.op!r}"]
+    return []
 
 
-def sdpa_sweep_space(req: SdpaRequest) -> Tuple[object, ...]:
-    """Every concrete engine/configuration :func:`registered_sdpa_combos`
-    makes available to a sweep for ``req``."""
-    return tuple(spec for _candidate, spec in registered_sdpa_combos(req))
+def _kernel_id(req: SdpaRequest, candidate: KernelCandidate, spec: Any) -> KernelId:
+    return make_kernel_id(req, candidate, spec, op="sdpa_fwd")
 
 
-def dispatch_sdpa_all(req: SdpaRequest) -> Tuple[object, ...]:
-    """Every eligible dispatch result from :func:`registered_sdpa_combos` for
-    ``req``."""
-    return tuple(registered_sdpa_combos(req))
+def registered_sdpa_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, Any], ...]:
+    """Every registered SDPA candidate that can launch ``req``, with its specs."""
+    if _request_errors(req):
+        return ()
+    return SDPA_REGISTRY.combos(req)
+
+
+def sdpa_sweep_space(req: OperatorRequest) -> Sequence[Any]:
+    if _request_errors(req):
+        return ()
+    return SDPA_REGISTRY.sweep_space(req)
+
+
+def dispatch_sdpa_all(req: OperatorRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible SDPA kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return SDPA_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 __all__ = [
     "HIPDNN_DTYPES",
-    "SDPA_ABI_VERSION",
     "SDPA_DIM_VOCABULARY",
     "SDPA_DTYPES",
     "SDPA_FEATURES",
+    "SDPA_REGISTRY",
     "Dtype",
     "SdpaBias",
     "SdpaDropout",

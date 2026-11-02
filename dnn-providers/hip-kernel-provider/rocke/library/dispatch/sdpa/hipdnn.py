@@ -13,7 +13,8 @@ Mask resolution follows hipDNN's resolvers: both deprecated causal flags set
 is an error; a flag sets ``right_bound = 0`` (and bottom-right alignment for
 ``causal_mask_bottom_right``) and the stored ``left_bound``, ``right_bound``
 and ``diagonal_alignment`` are applied on top; an unset bound reads as
-unbounded.
+unbounded. ``left_bound`` keeps its hipDNN (cuDNN) meaning, ``L`` keys ending at
+the diagonal; ``0`` is rejected as ``SdpaFwdNode`` does.
 """
 
 from __future__ import annotations
@@ -310,15 +311,13 @@ def from_hipdnn(
             probability=0.0 if probability is None else probability, **dropout
         )
 
-    paged = SdpaPaged(
+    # An empty paged or fp8 group is normalized to None by SdpaRequest.
+    kwargs["paged"] = SdpaPaged(
         page_table_k=tensor(inputs, "page_table_k_tensor_uid"),
         page_table_v=tensor(inputs, "page_table_v_tensor_uid"),
         max_seq_len_kv=attrs.get("max_seq_len_kv"),
     )
-    if paged != SdpaPaged():
-        kwargs["paged"] = paged
-
-    fp8 = SdpaFp8(
+    kwargs["fp8"] = SdpaFp8(
         descale_q=tensor(inputs, "descale_q_tensor_uid"),
         descale_k=tensor(inputs, "descale_k_tensor_uid"),
         descale_v=tensor(inputs, "descale_v_tensor_uid"),
@@ -328,8 +327,6 @@ def from_hipdnn(
         amax_s=tensor(outputs, "amax_s_tensor_uid"),
         amax_o=tensor(outputs, "amax_o_tensor_uid"),
     )
-    if fp8 != SdpaFp8():
-        kwargs["fp8"] = fp8
 
     # The hipDNN frontend creates the stats output exactly when generate_stats is
     # true, so either one without the other is contradictory input. Dropping it

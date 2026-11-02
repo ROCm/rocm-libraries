@@ -231,8 +231,8 @@ worked example is SDPA forward:
       matches hipDNN's CPU reference and golden generator, including edge cases
       (fully masked rows, padding), reusing the operator's existing array oracle
       rather than a second copy of the math. For SDPA,
-      [numeric/sdpa_request_reference.py](platform/python/rocke/numeric/sdpa_request_reference.py)
-      decodes the request and delegates to
+      [tests/sdpa/request_reference.py](library/tests/sdpa/request_reference.py)
+      decodes the request (gating on its `features()`) and delegates to
       [numeric/sdpa_reference.py](platform/python/rocke/numeric/sdpa_reference.py).
       Features it does not implement raise `NotImplementedError` by name.
 - [ ] **Case table.** One shared list of requests that together report every

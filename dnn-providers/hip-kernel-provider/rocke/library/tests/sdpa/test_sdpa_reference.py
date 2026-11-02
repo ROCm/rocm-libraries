@@ -6,7 +6,9 @@
 Two oracles, neither sharing the vectorised attention math it delegates to:
 
 - a scalar fp64 loop that transliterates hipDNN's ``CpuFpReferenceSdpa::forward``
-  (bias indexed the way its ``computeMaskIndex`` does, mask from ``keep``),
+  (bias indexed the way its ``computeMaskIndex`` does, band from its
+  ``isMasked``, transliterated below as :func:`hipdnn_keep` rather than shared
+  with the oracle's ``keep``),
   extended per batch the way hipDNN's golden generator runs GROUP mode;
 - PyTorch's math SDPA backend, which is what hipDNN's golden generator uses,
   run per batch with an additive mask (skipped without torch).
@@ -22,8 +24,7 @@ import numpy as np
 import pytest
 
 from dispatch.sdpa import SdpaBias, SdpaFp8, SdpaTensor
-from rocke.numeric.references import keep, sdpa_reference_from_request
-from rocke.numeric.sdpa_request_reference import _strided_view
+from tests.sdpa.request_reference import _strided_view, sdpa_reference_from_request
 from tests.sdpa.request_cases import (
     CASES,
     bhsd,
@@ -42,6 +43,21 @@ NOT_IMPLEMENTED = {
     "fp8_s_o": "fp8_s_o",
     "max_sum_exp": "max_sum_exp",
 }
+
+
+def hipdnn_keep(q, k, s_q, s_kv, diagonal, left_bound, right_bound):
+    """hipDNN's ``CpuFpReferenceSdpa`` band (``isMasked``), cuDNN's meaning.
+
+    Keeps ``k`` in ``(q + off - L, q + off + R]``: ``left_bound = L`` keeps the
+    ``L`` keys ending at the diagonal. Transliterated, not imported, so the
+    oracle's ``L - 1`` conversion is checked against hipDNN's own rule.
+    """
+    off = 0 if diagonal == "top_left" else s_kv - s_q
+    if right_bound >= 0 and k > q + off + right_bound:
+        return False
+    if left_bound >= 0 and k <= q + off - left_bound:
+        return False
+    return True
 
 
 def _lengths(req, tensors, name, ragged_key, extent):
@@ -109,7 +125,7 @@ def loop_reference(req, tensors):
                         dims = bias.shape
                         idx = (b, h, i, j)[4 - len(dims) :]
                         s += bias[tuple(0 if n == 1 else x for n, x in zip(dims, idx))]
-                    if not keep(
+                    if not hipdnn_keep(
                         i, j, sq, skv, req.diagonal, req.left_bound, req.right_bound
                     ):
                         s = -math.inf
@@ -156,12 +172,48 @@ def test_unsupported_features_raise_by_name(name):
 
 @pytest.mark.parametrize("diagonal", ["top_left", "bottom_right"])
 @pytest.mark.parametrize(
-    "left, right", [(-1, 0), (1, 0), (2, 1), (0, 3), (3, -1), (0, 0)]
+    "left, right", [(-1, 0), (1, 0), (2, 1), (1, 3), (3, -1), (1, -1), (4, 2)]
 )
 @pytest.mark.parametrize("s_q, s_kv", [(5, 5), (3, 7), (7, 3)])
-def test_mask_agrees_with_keep(diagonal, left, right, s_q, s_kv):
-    # Q = 0 makes every kept score equal, and V = I_{s_kv} makes O[q] the
-    # attention row itself, so O > 0 exactly where keep() is true.
+def test_mask_agrees_with_hipdnn(diagonal, left, right, s_q, s_kv):
+    o = _attention_rows(diagonal, left, right, s_q, s_kv)
+    want = np.array(
+        [
+            [hipdnn_keep(q, k, s_q, s_kv, diagonal, left, right) for k in range(s_kv)]
+            for q in range(s_q)
+        ]
+    )
+    np.testing.assert_array_equal(o > 0, want)
+    rows = want.any(axis=1)
+    np.testing.assert_allclose(o[rows].sum(axis=1), 1.0, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "left, kept",
+    [
+        # hipDNN #14483's hand-checked cases (LeftBoundKeepsLKeysIncludingDiagonal
+        # LikeCudnn): L = 2 at query 5 keeps {4, 5}; L = 1 keeps only the diagonal.
+        (2, {4, 5}),
+        (1, {5}),
+        (6, {0, 1, 2, 3, 4, 5}),
+    ],
+)
+def test_left_bound_keeps_l_keys_ending_at_the_diagonal(left, kept):
+    o = _attention_rows("top_left", left, 0, 8, 8)
+    assert set(np.flatnonzero(o[5] > 0).tolist()) == kept
+
+
+def test_left_bound_zero_is_rejected():
+    with pytest.raises(ValueError, match="left_bound"):
+        make_request(left_bound=0)
+
+
+def _attention_rows(diagonal, left, right, s_q, s_kv):
+    """The oracle's attention matrix for one head.
+
+    Q = 0 makes every kept score equal, and V = I_{s_kv} makes O[q] the
+    attention row itself, so O > 0 exactly where the band keeps the key.
+    """
     req = make_request(
         b=1,
         h_q=1,
@@ -176,16 +228,7 @@ def test_mask_agrees_with_keep(diagonal, left, right, s_q, s_kv):
     )
     v = np.eye(s_kv, dtype=np.float32)[None, None]
     tensors = {"q": np.zeros((1, 1, s_q, 4)), "k": np.ones((1, 1, s_kv, 4)), "v": v}
-    o = sdpa_reference_from_request(req, tensors)["o"][0, 0]
-    want = np.array(
-        [
-            [keep(q, k, s_q, s_kv, diagonal, left, right) for k in range(s_kv)]
-            for q in range(s_q)
-        ]
-    )
-    np.testing.assert_array_equal(o > 0, want)
-    rows = want.any(axis=1)
-    np.testing.assert_allclose(o[rows].sum(axis=1), 1.0, atol=1e-6)
+    return sdpa_reference_from_request(req, tensors)["o"][0, 0]
 
 
 def test_fully_masked_row_is_zero_and_minus_inf():
@@ -507,7 +550,9 @@ def test_matches_torch_math_sdpa_per_batch(overrides):
         keep_mask = torch.tensor(
             [
                 [
-                    keep(i, j, sq, skv, req.diagonal, req.left_bound, req.right_bound)
+                    hipdnn_keep(
+                        i, j, sq, skv, req.diagonal, req.left_bound, req.right_bound
+                    )
                     for j in range(skv)
                 ]
                 for i in range(sq)
