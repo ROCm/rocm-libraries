@@ -122,8 +122,8 @@ public:
                 = detail::v8::recordOf<detail::v8::PlanRecord>(pointer);
             if(plan == nullptr)
             {
-                throw detail::v8::ShimError(CUDNN_STATUS_NOT_INITIALIZED,
-                                            "ExecutionPlan: the plan was not built");
+                throw detail::v8::CompatibilityError(CUDNN_STATUS_NOT_INITIALIZED,
+                                                     "ExecutionPlan: the plan was not built");
             }
             const std::string& json = plan->json();
             json_string.reserve(json.size() + 1);
@@ -176,9 +176,9 @@ private:
         workSpaceSize = plan.workspaceSize();
         if(workSpaceSize < 0)
         {
-            throw detail::v8::ShimError(CUDNN_STATUS_INTERNAL_ERROR,
-                                        "hipDNN reported a negative workspace size "
-                                            + std::to_string(workSpaceSize));
+            throw detail::v8::CompatibilityError(CUDNN_STATUS_INTERNAL_ERROR,
+                                                 "hipDNN reported a negative workspace size "
+                                                     + std::to_string(workSpaceSize));
         }
     }
 
@@ -280,10 +280,11 @@ public:
 #if(CUDNN_VERSION >= 90400)
         if(m_execution_plan.kernel_cache)
         {
-            set_error_and_throw_exception(&m_execution_plan,
-                                          CUDNN_STATUS_NOT_SUPPORTED,
-                                          "ExecutionPlanBuilder: a kernel cache (setKernelCache) "
-                                          "is not supported by the hipDNN cuDNN shim");
+            set_error_and_throw_exception(
+                &m_execution_plan,
+                CUDNN_STATUS_NOT_SUPPORTED,
+                "ExecutionPlanBuilder: a kernel cache (setKernelCache) "
+                "is not supported by the hipDNN cuDNN compatibility layer");
             return std::move(m_execution_plan);
         }
 #endif

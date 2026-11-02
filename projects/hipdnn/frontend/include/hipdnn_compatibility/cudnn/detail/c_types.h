@@ -23,9 +23,9 @@
 
 /**
  * @file c_types.h
- * @brief cuDNN backend C-API types for the hipDNN cuDNN v8 compatibility shim.
+ * @brief cuDNN backend C-API types for the hipDNN cuDNN v8 compatibility layer.
  *
- * Enumerator values are shim-assigned, not NVIDIA's, and append-only within a
+ * Enumerator values are compatibility-layer-assigned, not NVIDIA's, and append-only within a
  * hipdnn_frontend major version.
  */
 

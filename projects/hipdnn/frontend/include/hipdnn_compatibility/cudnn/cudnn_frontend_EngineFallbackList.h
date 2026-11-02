@@ -10,7 +10,7 @@
 /**
  * @file cudnn_frontend_EngineFallbackList.h
  * @brief cuDNN v8 `EngineFallbackList_v8` / `EngineFallbackListBuilder_v8` and
- *        `get_fallback_engine_list` over the shim's v8 core.
+ *        `get_fallback_engine_list` over the compatibility layer's v8 core.
  */
 
 #pragma once
@@ -37,7 +37,7 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
 // NOLINTBEGIN(readability-identifier-naming,modernize-use-equals-delete,modernize-use-override,performance-move-constructor-init,readability-else-after-return):
 // ported verbatim; upstream's spelling and shapes are the source-compatible surface.
 
-// NVIDIA engine numbers; they do not name hipDNN cuDNN shim engines.
+// NVIDIA engine numbers; they do not name hipDNN cuDNN compatibility layer engines.
 inline auto get_fallback_engine_list(DescriptorType_t mode,
                                      const std::string& opGraphTag) -> std::vector<int>
 {

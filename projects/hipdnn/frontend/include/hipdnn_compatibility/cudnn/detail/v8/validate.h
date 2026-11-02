@@ -45,7 +45,7 @@ T requireValue(const std::optional<T>& value, std::string_view label)
 {
     if(!value)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " is required");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " is required");
     }
     return *value;
 }
@@ -55,7 +55,8 @@ std::vector<T> requireNonEmpty(std::vector<T> values, std::string_view label)
 {
     if(values.empty())
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " is required (non-empty)");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(label) + " is required (non-empty)");
     }
     return values;
 }
@@ -65,7 +66,7 @@ void requireRecord(const std::shared_ptr<const T>& record, std::string_view labe
 {
     if(!record)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " is required");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " is required");
     }
 }
 
@@ -81,9 +82,10 @@ void requireMaxCount(const std::vector<T>& values, std::size_t maxCount, std::st
 {
     if(values.size() > maxCount)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(label) + ": element count " + std::to_string(values.size())
-                            + " outside [0, " + std::to_string(maxCount) + "]");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(label) + ": element count "
+                                     + std::to_string(values.size()) + " outside [0, "
+                                     + std::to_string(maxCount) + "]");
     }
 }
 
@@ -96,9 +98,9 @@ CEnum requireEnumerator(CEnum value, std::string_view label)
     const auto raw = static_cast<std::int64_t>(value);
     if(raw < 0 || raw > LAST_ENUMERATOR<CEnum>)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(label) + " = " + std::to_string(raw)
-                            + " is not a valid enumerator");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(label) + " = " + std::to_string(raw)
+                                     + " is not a valid enumerator");
     }
     return value;
 }
@@ -106,12 +108,13 @@ CEnum requireEnumerator(CEnum value, std::string_view label)
 template <typename CEnum>
 [[noreturn]] void throwUnsupportedValue(CEnum value, std::string_view label)
 {
-    throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                    std::string(label) + " value " + std::to_string(static_cast<int>(value))
-                        + " is not supported by the hipDNN cuDNN shim");
+    throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                             std::string(label) + " value "
+                                 + std::to_string(static_cast<int>(value))
+                                 + " is not supported by the hipDNN cuDNN compatibility layer");
 }
 
-// cuDNN value -> shim FE enum, for enums with no hasHipdnnCounterpart gate.
+// cuDNN value -> compatibility layer FE enum, for enums with no hasHipdnnCounterpart gate.
 template <typename CEnum>
 auto requireFe(CEnum value, std::string_view label)
 {
@@ -123,7 +126,7 @@ auto requireFe(CEnum value, std::string_view label)
     return *mapped;
 }
 
-// cuDNN value -> shim FE enum that hipDNN can also represent: an out-of-range
+// cuDNN value -> compatibility layer FE enum that hipDNN can also represent: an out-of-range
 // value is BAD_PARAM; a declared value hipDNN cannot represent is NOT_SUPPORTED.
 template <typename CEnum>
 auto requireLowerable(CEnum value, std::string_view label)
@@ -141,7 +144,7 @@ inline std::int64_t requireSpatialDims(std::optional<std::int64_t> value, std::s
     const std::int64_t spatialDims = requireValue(value, label);
     if(spatialDims < 1)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " must be >= 1");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " must be >= 1");
     }
     return spatialDims;
 }
@@ -155,10 +158,10 @@ void requireSpatialCount(const std::vector<T>& values,
 {
     if(static_cast<std::int64_t>(values.size()) != spatialDims)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(label) + " has " + std::to_string(values.size())
-                            + " elements, expected the spatial dimension count "
-                            + std::to_string(spatialDims));
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(label) + " has " + std::to_string(values.size())
+                                     + " elements, expected the spatial dimension count "
+                                     + std::to_string(spatialDims));
     }
     requireMaxCount(values, std::size_t{CUDNN_DIM_MAX}, label);
 }
@@ -170,9 +173,10 @@ inline void requireScaling(std::optional<double> value, double expected, std::st
     {
         // Default stream formatting matches %g: "0.5", "1", "nan".
         std::ostringstream message;
-        message << label << " = " << *value << " is not supported by the hipDNN cuDNN shim; only "
-                << expected << " is";
-        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED, message.str());
+        message << label << " = " << *value
+                << " is not supported by the hipDNN cuDNN compatibility layer; only " << expected
+                << " is";
+        throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED, message.str());
     }
 }
 
@@ -180,9 +184,10 @@ inline void rejectUnlowerable(bool present, std::string_view label, std::string_
 {
     if(present)
     {
-        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                        std::string(label) + " is not supported by the hipDNN cuDNN shim"
-                            + std::string(context));
+        throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                                 std::string(label)
+                                     + " is not supported by the hipDNN cuDNN compatibility layer"
+                                     + std::string(context));
     }
 }
 
@@ -210,9 +215,9 @@ inline void requireAllOrNone(std::initializer_list<OptionalSlot> slots)
     }
     if(present != nullptr && missing != nullptr)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(missing->label) + " is required when "
-                            + std::string(present->label) + " is set");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(missing->label) + " is required when "
+                                     + std::string(present->label) + " is set");
     }
 }
 
@@ -330,52 +335,57 @@ inline std::shared_ptr<const TensorRecord> makeTensorRecord(TensorInputs inputs,
     requireMaxCount(strides, std::size_t{CUDNN_DIM_MAX} + 1, labels.strides);
     if(dimensions.size() != strides.size())
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.dimensions) + " has " + std::to_string(dimensions.size())
-                            + " elements but " + std::string(labels.strides) + " has "
-                            + std::to_string(strides.size()));
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(labels.dimensions) + " has "
+                                     + std::to_string(dimensions.size()) + " elements but "
+                                     + std::string(labels.strides) + " has "
+                                     + std::to_string(strides.size()));
     }
     for(std::size_t i = 0; i < dimensions.size(); ++i)
     {
         if(dimensions[i] <= 0 || strides[i] < 0)
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            "tensor dimension " + std::to_string(i) + " is "
-                                + std::to_string(dimensions[i]) + " with stride "
-                                + std::to_string(strides[i])
-                                + "; dimensions must be positive and strides non-negative");
+            throw CompatibilityError(
+                CUDNN_STATUS_BAD_PARAM,
+                "tensor dimension " + std::to_string(i) + " is " + std::to_string(dimensions[i])
+                    + " with stride " + std::to_string(strides[i])
+                    + "; dimensions must be positive and strides non-negative");
         }
     }
     const std::int64_t uniqueId = requireValue(inputs.uniqueId, labels.uniqueId);
     if(uniqueId < 0)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(labels.uniqueId) + " must be >= 0");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(labels.uniqueId) + " must be >= 0");
     }
     const std::int64_t alignment = requireValue(inputs.alignment, labels.alignment);
     if(alignment <= 0)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(labels.alignment) + " must be > 0");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(labels.alignment) + " must be > 0");
     }
     // As hipDNN's TensorAttributes rule: a virtual tensor has no caller-side
     // value to pass.
     if(inputs.isVirtual && (inputs.isByValue || inputs.constantValue))
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.isVirtual) + " (UID " + std::to_string(uniqueId)
-                            + ") cannot be passed by value or hold a constant");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(labels.isVirtual) + " (UID " + std::to_string(uniqueId)
+                                     + ") cannot be passed by value or hold a constant");
     }
 
     const DataType_t dataType = requireLowerable(rawType, labels.dataType);
     if(inputs.vectorCount != 1)
     {
-        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                        std::string(labels.vectorCount) + " other than 1 is not supported");
+        throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                                 std::string(labels.vectorCount)
+                                     + " other than 1 is not supported");
     }
     if(requireEnumerator(inputs.reorderingMode, labels.reorderingMode)
        != CUDNN_TENSOR_REORDERING_NONE)
     {
-        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                        std::string(labels.reorderingMode) + " other than NONE is not supported");
+        throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                                 std::string(labels.reorderingMode)
+                                     + " other than NONE is not supported");
     }
 
     if(inputs.constantValue)
@@ -397,14 +407,15 @@ inline std::shared_ptr<const TensorRecord> makeTensorRecord(TensorInputs inputs,
             }
             if(!narrowed)
             {
-                throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                                std::string(labels.constantValue) + " has "
-                                    + std::to_string(inputs.constantValue->size())
-                                    + " bytes; the tensor data type needs " + std::to_string(size)
-                                    + (widerInteger ? "; a wider integer is narrowed only to INT8, "
-                                                      "UINT8, INT32 or BOOLEAN, and only when its "
-                                                      "value fits"
-                                                    : ""));
+                throw CompatibilityError(
+                    CUDNN_STATUS_BAD_PARAM,
+                    std::string(labels.constantValue) + " has "
+                        + std::to_string(inputs.constantValue->size())
+                        + " bytes; the tensor data type needs " + std::to_string(size)
+                        + (widerInteger ? "; a wider integer is narrowed only to INT8, "
+                                          "UINT8, INT32 or BOOLEAN, and only when its "
+                                          "value fits"
+                                        : ""));
             }
             inputs.constantValue = std::move(narrowed);
         }
@@ -458,8 +469,8 @@ inline std::shared_ptr<const ConvolutionRecord> makeConvRecord(ConvolutionInputs
     requireSpatialCount(inputs.filterStrides, spatialDims, labels.filterStrides);
     if(inputs.filterStrides.front() <= 0)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.filterStrides) + "[0] must be > 0");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(labels.filterStrides) + "[0] must be > 0");
     }
 
     const DataType_t computeType = requireLowerable(rawComputeType, labels.computeType);
@@ -517,7 +528,8 @@ inline std::shared_ptr<const PointwiseRecord> makePointwiseRecord(const Pointwis
     {
         if(value && !std::isfinite(*value))
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " must be finite");
+            throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                     std::string(label) + " must be finite");
         }
     }
     // The clips may be infinite (an unbounded side, saturated when narrowed),
@@ -527,7 +539,8 @@ inline std::shared_ptr<const PointwiseRecord> makePointwiseRecord(const Pointwis
     {
         if(value && std::isnan(*value))
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " must not be NaN");
+            throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                     std::string(label) + " must not be NaN");
         }
     }
 
@@ -572,8 +585,8 @@ inline std::shared_ptr<const MatmulRecord> makeMatmulRecord(const MatmulInputs& 
     const cudnnDataType_t rawComputeType = requireValue(inputs.computeType, labels.computeType);
     if(inputs.hasPaddingValue)
     {
-        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                        std::string(labels.paddingValue) + " is not supported");
+        throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                                 std::string(labels.paddingValue) + " is not supported");
     }
     return std::make_shared<const MatmulRecord>(
         requireLowerable(rawComputeType, labels.computeType));
@@ -637,20 +650,21 @@ inline std::vector<std::int64_t> integralFractions(const std::vector<cudnnFracti
         const cudnnFraction_t& fraction = fractions[i];
         if(fraction.denominator == 0)
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            std::string(label) + "[" + std::to_string(i)
-                                + "] has a zero denominator");
+            throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                     std::string(label) + "[" + std::to_string(i)
+                                         + "] has a zero denominator");
         }
         // INT64_MIN / -1 overflows; its quotient is unrepresentable anyway.
         const bool overflows = fraction.denominator == -1
                                && fraction.numerator == std::numeric_limits<std::int64_t>::min();
         if(overflows || fraction.numerator % fraction.denominator != 0)
         {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            std::string(label) + "[" + std::to_string(i)
-                                + "] = " + std::to_string(fraction.numerator) + "/"
-                                + std::to_string(fraction.denominator)
-                                + " is not an integer; fractional values are not supported");
+            throw CompatibilityError(
+                CUDNN_STATUS_NOT_SUPPORTED,
+                std::string(label) + "[" + std::to_string(i)
+                    + "] = " + std::to_string(fraction.numerator) + "/"
+                    + std::to_string(fraction.denominator)
+                    + " is not an integer; fractional values are not supported");
         }
         values.push_back(fraction.numerator / fraction.denominator);
     }
@@ -722,9 +736,9 @@ inline NormFamily requireNormFamily(cudnnBackendNormMode_t mode, std::string_vie
     default:
         break;
     }
-    throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                    std::string(label) + " " + unsupported
-                        + " is not supported by the hipDNN cuDNN shim");
+    throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                             std::string(label) + " " + unsupported
+                                 + " is not supported by the hipDNN cuDNN compatibility layer");
 }
 
 // Backward operations pass no phase; only batchnorm forward depends on it.
@@ -808,10 +822,11 @@ std::shared_ptr<const OperationRecordT>
         const std::size_t actual = inputs.tensors[i]->dimensions().size();
         if(actual != rank)
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            std::string(labels.tensors[i]) + " has rank " + std::to_string(actual)
-                                + ", expected " + std::string(labels.spatialDims)
-                                + " + 2 = " + std::to_string(rank));
+            throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                     std::string(labels.tensors[i]) + " has rank "
+                                         + std::to_string(actual) + ", expected "
+                                         + std::string(labels.spatialDims)
+                                         + " + 2 = " + std::to_string(rank));
         }
     }
     requireScaling(inputs.alpha, 1.0, labels.alpha);
@@ -890,8 +905,8 @@ inline std::shared_ptr<const PointwiseOperationRecord>
     const std::optional<PointwiseModeTraits> traits = pointwiseModeTraits(inputs.pointwise->mode());
     if(!traits)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.pointwise) + " has no pointwise mode");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(labels.pointwise) + " has no pointwise mode");
     }
     const bool backward = traits->modeClass == PointwiseModeClass::ACTIVATION_BACKWARD;
 
@@ -922,10 +937,10 @@ inline std::shared_ptr<const PointwiseOperationRecord>
     const auto rejectUnusedSlot = [&traits](const TensorPtr& tensor, std::string_view label) {
         if(tensor)
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            std::string(label) + " is not used by a pointwise "
-                                + pointwiseModeClassName(traits->modeClass) + " mode with "
-                                + std::to_string(traits->portCount) + " ports");
+            throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                     std::string(label) + " is not used by a pointwise "
+                                         + pointwiseModeClassName(traits->modeClass) + " mode with "
+                                         + std::to_string(traits->portCount) + " ports");
         }
     };
     if(backward)
@@ -1091,8 +1106,9 @@ inline std::shared_ptr<const ResampleBackwardOperationRecord>
     // hipDNN's max-pool backward needs the forward pass's argmax indices.
     if(inputs.resample->mode() == ResampleMode_t::MAXPOOL && !inputs.index)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.index) + " is required for CUDNN_RESAMPLE_MAXPOOL");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(labels.index)
+                                     + " is required for CUDNN_RESAMPLE_MAXPOOL");
     }
     rejectUnlowerable(inputs.index && inputs.resample->mode() != ResampleMode_t::MAXPOOL,
                       labels.index,

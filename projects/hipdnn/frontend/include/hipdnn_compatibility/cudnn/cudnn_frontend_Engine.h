@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_Engine.h
- * @brief cuDNN v8 `Engine_v8` / `EngineBuilder_v8` over the shim's v8 core.
+ * @brief cuDNN v8 `Engine_v8` / `EngineBuilder_v8` over the compatibility layer's v8 core.
  */
 
 #pragma once
@@ -199,7 +199,7 @@ public:
                 = detail::v8::recordOf<detail::v8::GraphCore>(m_engine.opGraph);
             if(!graph)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     CUDNN_STATUS_BAD_PARAM,
                     "EngineBuilder: the operation graph is not a built OperationGraph");
             }

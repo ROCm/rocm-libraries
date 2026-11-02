@@ -54,9 +54,9 @@ if(NOT TARGET hipdnn_frontend)
 endif()
 # Superbuild: the hipDNN option; standalone: the installed frontend's cudnn_compatibility component.
 if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY OR hipdnn_frontend_cudnn_compatibility_FOUND)
-    set(HIPDNN_SAMPLES_CUDNN_SHIM ON)
+    set(HIPDNN_SAMPLES_CUDNN_COMPATIBILITY ON)
 else()
-    set(HIPDNN_SAMPLES_CUDNN_SHIM OFF)
+    set(HIPDNN_SAMPLES_CUDNN_COMPATIBILITY OFF)
 endif()
 if(NOT TARGET hipdnn_flatbuffers_sdk)
     find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
@@ -161,31 +161,31 @@ endif()
 
 add_hipdnn_sample(hipdnn_sample_serialization_roundtrip serialization/SerializationRoundTrip.cpp)
 
-if(HIPDNN_SAMPLES_CUDNN_SHIM AND HIPDNN_ENABLE_SDPA)
+if(HIPDNN_SAMPLES_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
     add_hipdnn_sample(
         hipdnn_sample_cudnn_shim_sdpa_round_trip
         cudnn_shim/SdpaRoundTrip.cpp
     )
 endif()
 
-# cuDNN-shim samples. The v9 graph samples validate on the host, except HipifyConvFprop; it and the
+# cuDNN compatibility samples. The v9 graph samples validate on the host, except HipifyConvFprop; it and the
 # v8 builder samples (*_v8) execute on a GPU.
-if(HIPDNN_SAMPLES_CUDNN_SHIM)
+if(HIPDNN_SAMPLES_CUDNN_COMPATIBILITY)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_fprop cudnn_shim/ConvFprop.cpp)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_matmul cudnn_shim/Matmul.cpp)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_layernorm cudnn_shim/Layernorm.cpp)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_pointwise cudnn_shim/Pointwise.cpp)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_hipify_conv_fprop cudnn_shim/HipifyConvFprop.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_fprop_v8 cudnn_shim/ConvFpropV8.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_dgrad_v8 cudnn_shim/ConvDgradV8.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_wgrad_v8 cudnn_shim/ConvWgradV8.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_bias_relu_v8 cudnn_shim/ConvBiasReluV8.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_matmul_bias_act_v8 cudnn_shim/MatmulBiasActV8.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_pointwise_relu_v8 cudnn_shim/PointwiseReluV8.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_batchnorm_v8 cudnn_shim/BatchnormV8.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_layernorm_v8 cudnn_shim/LayernormV8.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_reduction_v8 cudnn_shim/ReductionV8.cpp)
-    add_hipdnn_sample(hipdnn_sample_cudnn_shim_resample_v8 cudnn_shim/ResampleV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_compatibility_conv_fprop_v8 cudnn_shim/ConvFpropV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_compatibility_conv_dgrad_v8 cudnn_shim/ConvDgradV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_compatibility_conv_wgrad_v8 cudnn_shim/ConvWgradV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_compatibility_conv_bias_relu_v8 cudnn_shim/ConvBiasReluV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_compatibility_matmul_bias_act_v8 cudnn_shim/MatmulBiasActV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_compatibility_pointwise_relu_v8 cudnn_shim/PointwiseReluV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_compatibility_batchnorm_v8 cudnn_shim/BatchnormV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_compatibility_layernorm_v8 cudnn_shim/LayernormV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_compatibility_reduction_v8 cudnn_shim/ReductionV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_compatibility_resample_v8 cudnn_shim/ResampleV8.cpp)
 endif()
 
 add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
@@ -352,11 +352,11 @@ add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_variance_activ)
 # Register serialization samples as tests
 add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
 
-if(HIPDNN_SAMPLES_CUDNN_SHIM AND HIPDNN_ENABLE_SDPA)
+if(HIPDNN_SAMPLES_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_sdpa_round_trip)
 endif()
 
-if(HIPDNN_SAMPLES_CUDNN_SHIM)
+if(HIPDNN_SAMPLES_CUDNN_COMPATIBILITY)
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_conv_fprop)
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_matmul)
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_layernorm)
@@ -376,7 +376,7 @@ if(HIPDNN_SAMPLES_CUDNN_SHIM)
         foreach(_variant IN LISTS ARGN)
             list(APPEND _args --require-variant "${_variant}")
         endforeach()
-        add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_${SAMPLE}
+        add_hipdnn_sample_test(hipdnn_sample_cudnn_compatibility_${SAMPLE}
             SKIP_REGULAR_EXPRESSION "${HIPDNN_CUDNN_V8_SKIP_REGEX}"
             ARGS ${_args})
     endfunction()
@@ -401,8 +401,8 @@ if(HIPDNN_SAMPLES_CUDNN_SHIM)
     # The v8 samples run the heuristics' first engine config, so an engine preference must be
     # refused rather than ignored.
     add_hipdnn_sample_command_test(
-        hipdnn_sample_cudnn_shim_conv_fprop_v8_rejects_engine_id
-        hipdnn_sample_cudnn_shim_conv_fprop_v8
+        hipdnn_sample_cudnn_compatibility_conv_fprop_v8_rejects_engine_id
+        hipdnn_sample_cudnn_compatibility_conv_fprop_v8
         ARGS --dtype fp32 --layout nchw --engine-id 12345
         PASS_REGULAR_EXPRESSION "--engine-id and --engine-name are not supported"
         SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available"
@@ -412,15 +412,15 @@ if(HIPDNN_SAMPLES_CUDNN_SHIM)
     # PASS_REGULAR_EXPRESSION test ignores the exit status, so a second run requires it nonzero.
     set(_require_variant_args --dtype fp32 --layout nhwc --require-variant "fp32 [NCHW]")
     add_hipdnn_sample_command_test(
-        hipdnn_sample_cudnn_shim_conv_fprop_v8_require_variant
-        hipdnn_sample_cudnn_shim_conv_fprop_v8
+        hipdnn_sample_cudnn_compatibility_conv_fprop_v8_require_variant
+        hipdnn_sample_cudnn_compatibility_conv_fprop_v8
         ARGS ${_require_variant_args}
         PASS_REGULAR_EXPRESSION "--require-variant .* did not run"
         SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available"
     )
     add_hipdnn_sample_command_test(
-        hipdnn_sample_cudnn_shim_conv_fprop_v8_require_variant_exit_status
-        hipdnn_sample_cudnn_shim_conv_fprop_v8
+        hipdnn_sample_cudnn_compatibility_conv_fprop_v8_require_variant_exit_status
+        hipdnn_sample_cudnn_compatibility_conv_fprop_v8
         ARGS ${_require_variant_args}
         WILL_FAIL
         SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available"
@@ -430,9 +430,9 @@ if(HIPDNN_SAMPLES_CUDNN_SHIM)
     # wall-clock budgets are reported, not gated (--enforce-budget gates them); the perf label lets
     # a dedicated performance job select it.
     if(NOT BUILD_ADDRESS_SANITIZER AND NOT BUILD_THREAD_SANITIZER AND NOT THEROCK_SANITIZER)
-        set(HIPDNN_CUDNN_V8_OVERHEAD_TEST hipdnn_sample_cudnn_shim_conv_fprop_v8_overhead)
+        set(HIPDNN_CUDNN_V8_OVERHEAD_TEST hipdnn_sample_cudnn_compatibility_conv_fprop_v8_overhead)
         add_hipdnn_sample_command_test(
-            ${HIPDNN_CUDNN_V8_OVERHEAD_TEST} hipdnn_sample_cudnn_shim_conv_fprop_v8 BUILD_TREE_ONLY
+            ${HIPDNN_CUDNN_V8_OVERHEAD_TEST} hipdnn_sample_cudnn_compatibility_conv_fprop_v8 BUILD_TREE_ONLY
             ARGS --overhead --dtype fp32 --layout nchw
             SKIP_REGULAR_EXPRESSION "${HIPDNN_CUDNN_V8_SKIP_REGEX}"
         )

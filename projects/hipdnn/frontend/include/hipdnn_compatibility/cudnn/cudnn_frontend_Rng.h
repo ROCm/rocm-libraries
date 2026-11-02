@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_Rng.h
- * @brief cuDNN FE v0.x `RngDesc_v8` and its builder, built as a shim RNG record.
+ * @brief cuDNN FE v0.x `RngDesc_v8` and its builder, built as a compatibility layer RNG record.
  */
 #pragma once
 
@@ -180,7 +180,7 @@ public:
                 = detail::convert_to_cudnn_type(m_RngDesc.distribution, cudnn_rng_distribution);
             if(status != CUDNN_STATUS_SUCCESS)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     status,
                     "RngDescBuilder: distribution is not set or not a valid RngDistribution_t");
             }

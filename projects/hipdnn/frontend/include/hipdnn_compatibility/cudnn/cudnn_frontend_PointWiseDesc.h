@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_PointWiseDesc.h
- * @brief cuDNN v8 `PointWiseDesc_v8` / `PointWiseDescBuilder_v8`, built as a shim pointwise record.
+ * @brief cuDNN v8 `PointWiseDesc_v8` / `PointWiseDescBuilder_v8`, built as a compatibility layer pointwise record.
  */
 
 #pragma once
@@ -191,7 +191,7 @@ public:
                     = detail::convert_to_cudnn_type(m_pointWiseDesc.mode, cudnn_pointwise_mode);
                 if(status != CUDNN_STATUS_SUCCESS)
                 {
-                    throw detail::v8::ShimError(
+                    throw detail::v8::CompatibilityError(
                         status,
                         "PointWiseDescBuilder: mode is not set or not a valid PointwiseMode_t");
                 }
@@ -201,7 +201,7 @@ public:
                     = detail::convert_to_cudnn_type(m_pointWiseDesc.compute_type, cudnn_data_type);
                 if(status != CUDNN_STATUS_SUCCESS)
                 {
-                    throw detail::v8::ShimError(
+                    throw detail::v8::CompatibilityError(
                         status, "PointWiseDescBuilder: compute type is not a valid DataType_t");
                 }
 

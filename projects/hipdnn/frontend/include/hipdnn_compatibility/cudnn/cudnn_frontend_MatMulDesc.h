@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_MatMulDesc.h
- * @brief cuDNN v8 `MatMulDesc_v8` / `MatMulDescBuilder_v8`, built as a shim matmul record.
+ * @brief cuDNN v8 `MatMulDesc_v8` / `MatMulDescBuilder_v8`, built as a compatibility layer matmul record.
  */
 
 #pragma once
@@ -105,7 +105,7 @@ public:
             auto status = detail::convert_to_cudnn_type(m_matMulDesc.compute_type, cudnn_data_type);
             if(status != CUDNN_STATUS_SUCCESS)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     status, "MatMulDescBuilder: compute type is not set or not a valid DataType_t");
             }
             return detail::v8::makeMatmulRecord({cudnn_data_type, m_matMulDesc.isPadded}, s_labels);

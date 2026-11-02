@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # Compiles NVIDIA's unmodified cudnn-frontend samples/cpp and samples/legacy_samples corpora
-# against the *installed* hipDNN cuDNN-compatibility shim, and runs what compiles.
+# against the *installed* hipDNN cuDNN compatibility layer, and runs what compiles.
 #
 # This is a standalone project configured against an install tree, not a subdirectory of
 # the hipDNN build. It installs to share/hipdnn/cudnn_samples/ and is configured at test
@@ -282,7 +282,7 @@ if(NOT PIN_PROBE_OK)
         "${PIN_PROBE_OUTPUT}")
 endif()
 
-# Each public shim header must compile first in a TU against the install alone. The
+# Each public compatibility layer header must compile first in a TU against the install alone. The
 # overlay is deliberately absent: its forwarders would mask a broken include.
 set(_e27_headers
     cudnn.h
@@ -626,7 +626,7 @@ endforeach()
 
 file(MAKE_DIRECTORY "${REPORT_DIR}/legacy")
 add_executable(tu_legacy_samples ${_legacy_tu_paths})
-# legacy/overlay first: its cudnn.h stubs the raw descriptor C API the shim does not provide,
+# legacy/overlay first: its cudnn.h stubs the raw descriptor C API the compatibility layer does not provide,
 # which only test_list.cpp's "Tensor creation comparison" calls.
 target_include_directories(tu_legacy_samples PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/legacy/overlay" "${CMAKE_CURRENT_SOURCE_DIR}/overlay"
@@ -733,7 +733,7 @@ foreach(i RANGE 0 ${_last} 1)
                      --sidecar "${sidecar}"
                      -- $<TARGET_FILE:tu_legacy_samples> "${name}"
                         --warn UnmatchedTestSpec --allow-running-no-tests)
-    # A VACUOUS case that ran without crashing exits 77: it never reached the shim, so it
+    # A VACUOUS case that ran without crashing exits 77: it never reached the compatibility layer, so it
     # must not count as a pass.
     set_tests_properties(run_legacy_${id} PROPERTIES
         FIXTURES_REQUIRED fx_legacy_samples

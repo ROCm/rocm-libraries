@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Convolution fprop through the cuDNN v8 (v0.x builder) surface of the shim, run on a real
-// provider and checked against the CPU reference. `--overhead` instead measures the shim's
+// Convolution fprop through the cuDNN v8 (v0.x builder) surface of the compatibility layer, run on a real
+// provider and checked against the CPU reference. `--overhead` instead measures the compatibility layer's
 // per-call cost against direct hipDNN backend calls on the same objects.
 
 #include <algorithm>
@@ -109,7 +109,7 @@ struct OverheadResult
     double p10;
     double p50;
     double p90;
-    double shim;
+    double compatibility;
     double raw;
     double budget;
 
@@ -121,13 +121,14 @@ struct OverheadResult
 
 // Each arm returns false on a failed call. Every batch starts on an idle queue, and the arm
 // order alternates per round so drift and ordering effects cancel.
-template <typename ShimArm, typename RawArm>
-OverheadResult measure(const char* metric, ShimArm& shimArm, RawArm& rawArm, double budget)
+template <typename CompatibilityArm, typename RawArm>
+OverheadResult
+    measure(const char* metric, CompatibilityArm& compatibilityArm, RawArm& rawArm, double budget)
 {
     bool ok = true;
     for(int i = 0; i < WARMUP_CALLS; ++i)
     {
-        ok = shimArm() && ok;
+        ok = compatibilityArm() && ok;
     }
     for(int i = 0; i < WARMUP_CALLS; ++i)
     {
@@ -150,27 +151,27 @@ OverheadResult measure(const char* metric, ShimArm& shimArm, RawArm& rawArm, dou
     };
 
     std::vector<double> diffs;
-    std::vector<double> shimTimes;
+    std::vector<double> compatibilityTimes;
     std::vector<double> rawTimes;
     diffs.reserve(ROUNDS);
-    shimTimes.reserve(ROUNDS);
+    compatibilityTimes.reserve(ROUNDS);
     rawTimes.reserve(ROUNDS);
     for(int round = 0; round < ROUNDS; ++round)
     {
-        double shimNs = 0.0;
+        double compatibilityNs = 0.0;
         double rawNs = 0.0;
         if(round % 2 == 0)
         {
-            shimNs = timeBatch(shimArm);
+            compatibilityNs = timeBatch(compatibilityArm);
             rawNs = timeBatch(rawArm);
         }
         else
         {
             rawNs = timeBatch(rawArm);
-            shimNs = timeBatch(shimArm);
+            compatibilityNs = timeBatch(compatibilityArm);
         }
-        diffs.push_back(shimNs - rawNs);
-        shimTimes.push_back(shimNs);
+        diffs.push_back(compatibilityNs - rawNs);
+        compatibilityTimes.push_back(compatibilityNs);
         rawTimes.push_back(rawNs);
     }
     HIP_CHECK(hipDeviceSynchronize());
@@ -182,7 +183,7 @@ OverheadResult measure(const char* metric, ShimArm& shimArm, RawArm& rawArm, dou
     return OverheadResult{percentile(diffs, 0.1),
                           percentile(diffs, 0.5),
                           percentile(diffs, 0.9),
-                          percentile(shimTimes, 0.5),
+                          percentile(compatibilityTimes, 0.5),
                           percentile(rawTimes, 0.5),
                           budget};
 }
@@ -191,7 +192,7 @@ void printOverhead(const char* metric, const OverheadResult& result)
 {
     std::cout << std::fixed << std::setprecision(1) << "OVERHEAD " << metric
               << " p10=" << result.p10 << " p50=" << result.p50 << " p90=" << result.p90
-              << " shim=" << result.shim << " raw=" << result.raw << ' '
+              << " compatibility layer=" << result.compatibility << " raw=" << result.raw << ' '
               << (result.pass() ? "PASS" : "OVER_BUDGET") << '\n';
 }
 
@@ -310,19 +311,19 @@ int runOverhead(cudnnHandle_t handle, const v8_sample::Options& options)
                                      .setUids(3, uids.data())
                                      .build();
 
-    // The baseline runs the hipDNN plan and variant pack behind the shim's objects directly
+    // The baseline runs the hipDNN plan and variant pack behind the compatibility layer's objects directly
     // (get_raw_desc() is the hipDNN descriptor). It calls the C symbols so the frontend's
     // backend lookup is measured.
     hipdnnBackendDescriptor_t hipPlan = plan.get_raw_desc();
     hipdnnBackendDescriptor_t hipPack = pack.get_raw_desc();
 
-    auto m1Shim = [&]() {
+    auto m1Compatibility = [&]() {
         return cudnnBackendExecute(handle, plan.get_raw_desc(), pack.get_raw_desc())
                == CUDNN_STATUS_SUCCESS;
     };
     auto m1Raw
         = [&]() { return hipdnnBackendExecute(handle, hipPlan, hipPack) == HIPDNN_STATUS_SUCCESS; };
-    auto m2Shim = [&]() {
+    auto m2Compatibility = [&]() {
         const fe::VariantPack perCall = fe::VariantPackBuilder()
                                             .setWorkspacePointer(workspacePtr)
                                             .setDataPointers(3, pointers.data())
@@ -362,8 +363,8 @@ int runOverhead(cudnnHandle_t handle, const v8_sample::Options& options)
         return ok;
     };
 
-    const OverheadResult m1 = measure("M1", m1Shim, m1Raw, EXECUTE_BUDGET_NS);
-    const OverheadResult m2 = measure("M2", m2Shim, m2Raw, BUILD_AND_EXECUTE_BUDGET_NS);
+    const OverheadResult m1 = measure("M1", m1Compatibility, m1Raw, EXECUTE_BUDGET_NS);
+    const OverheadResult m2 = measure("M2", m2Compatibility, m2Raw, BUILD_AND_EXECUTE_BUDGET_NS);
 
     // PyTorch's two engine-config sources: instant heuristics, then the fallback list.
     const std::array<fe::GeneratorSource, 2> sources

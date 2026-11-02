@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_ConvDesc.h
- * @brief cuDNN v8 `ConvDesc_v8` / `ConvDescBuilder_v8`, built as a shim convolution record.
+ * @brief cuDNN v8 `ConvDesc_v8` / `ConvDescBuilder_v8`, built as a compatibility layer convolution record.
  */
 
 #pragma once
@@ -227,13 +227,13 @@ public:
         return detail::v8::buildDescriptor(m_convDesc, CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR, [&] {
             if(m_convDesc.nDims <= 0)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     CUDNN_STATUS_BAD_PARAM,
                     "ConvDescBuilder: spatial dimension count must be positive");
             }
             if(m_convDesc.stride[0] <= 0)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     CUDNN_STATUS_BAD_PARAM,
                     "ConvDescBuilder: spatial strides must be set and positive");
             }
@@ -242,7 +242,7 @@ public:
             auto status = detail::convert_to_cudnn_type(m_convDesc.compute_type, cudnn_data_type);
             if(status != CUDNN_STATUS_SUCCESS)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     status, "ConvDescBuilder: compute type is not set or not a valid DataType_t");
             }
 

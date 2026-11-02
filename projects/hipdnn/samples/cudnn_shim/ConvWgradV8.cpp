@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // Convolution backward filter built the way PyTorch builds it through the cuDNN v8 (v0.x builder)
-// surface of the shim (x, dw and dy set as x, w and y), run on a real provider and checked
+// surface of the compatibility layer (x, dw and dy set as x, w and y), run on a real provider and checked
 // against the CPU reference.
 
 #include <cstdint>

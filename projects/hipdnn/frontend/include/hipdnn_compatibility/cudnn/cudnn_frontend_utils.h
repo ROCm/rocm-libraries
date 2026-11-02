@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_utils.h
- * @brief cuDNN FE enums, exceptions, enum converters and string helpers for the hipDNN shim.
+ * @brief cuDNN FE enums, exceptions, enum converters and string helpers for the hipDNN compatibility layer.
  */
 
 #pragma once
@@ -48,7 +48,7 @@ static_assert(CUDNN_FRONTEND_VERSION == 12400,
               "include/cudnn_frontend_utils.h at the new tag, then update this assert.");
 
 #if !defined(CUDNN_FRONTEND_SKIP_JSON_LIB) && !defined(HIPDNN_FRONTEND_SKIP_JSON_LIB)
-// Upstream declares this alias at global scope; here it stays in the shim namespace so it does not
+// Upstream declares this alias at global scope; here it stays in the compatibility layer namespace so it does not
 // collide with a consumer's own global `json`, unless `using namespace cudnn_frontend;` brings it
 // into scope and the consumer's alias names a different type (the name is then ambiguous).
 using json = nlohmann::json;
@@ -431,7 +431,7 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 // NOLINTBEGIN(readability-identifier-naming): upstream's converter names are the
 // source-compatible surface.
 
-// Upstream's converters are hand-written switch tables; the shim routes them through
+// Upstream's converters are hand-written switch tables; the compatibility layer routes them through
 // toCudnn/toFe so there is one mapping, keeping upstream's fallback values.
 template <typename CudnnEnum, typename FeEnum>
 cudnnStatus_t convertToCudnnOrInvalid(const FeEnum mode, CudnnEnum& cudnn_mode)
@@ -601,7 +601,7 @@ inline RngDistribution_t convert_from_cudnn_type(const cudnnRngDistribution_t cu
 // NOLINTEND(readability-identifier-naming)
 
 // Upstream serializes these enums with NLOHMANN_JSON_SERIALIZE_ENUM. Most are aliases of
-// hipDNN's enums, which ADL never looks up in this namespace, so the shim renders the same
+// hipDNN's enums, which ADL never looks up in this namespace, so the compatibility layer renders the same
 // strings from its own table instead. nullptr stands for JSON null; a value missing from
 // upstream's table falls back to its first entry, as nlohmann does.
 inline const char* enumName(PointwiseMode_t value) noexcept

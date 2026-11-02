@@ -27,7 +27,7 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 {
 
-// The plan JSON format is the shim's own:
+// The plan JSON format is the compatibility layer's own:
 //   {"version":1,
 //    "engine":{"globalIndex":i,"id":"<decimal>","name":"...","behaviorNotes":[n,...]},
 //    "knobs":[{"type":t,"value":v},...],
@@ -242,9 +242,10 @@ public:
 
     [[noreturn]] void fail(const std::string& what) const
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(_label) + ": " + what + " at offset " + std::to_string(_pos)
-                            + " (expected the format written by the hipDNN cuDNN shim)");
+        throw CompatibilityError(
+            CUDNN_STATUS_BAD_PARAM,
+            std::string(_label) + ": " + what + " at offset " + std::to_string(_pos)
+                + " (expected the format written by the hipDNN cuDNN compatibility layer)");
     }
 
     void markSeen(bool& seen, std::string_view key) const
@@ -766,10 +767,11 @@ inline std::shared_ptr<const PlanRecord>
     std::optional<plan_json::Plan> parsed = plan_json::read(json, jsonLabel);
     if(!parsed)
     {
-        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                        std::string(jsonLabel)
-                            + " has no \"payload\": the engine could not serialize the plan, so "
-                              "it cannot be loaded");
+        throw CompatibilityError(
+            CUDNN_STATUS_NOT_SUPPORTED,
+            std::string(jsonLabel)
+                + " has no \"payload\": the engine could not serialize the plan, so "
+                  "it cannot be loaded");
     }
     hipdnnBackendDescriptor_t raw = nullptr;
     checkHipdnn(hipdnnBackend()->backendCreateAndDeserializeExecutionPlanExt(
@@ -788,10 +790,10 @@ inline std::shared_ptr<const PlanRecord>
         "reading the engine ID of the deserialized hipDNN execution plan");
     if(id != parsed->id)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(jsonLabel) + ": \"id\" " + std::to_string(parsed->id)
-                            + " does not match engine " + std::to_string(id)
-                            + " of the serialized plan");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(jsonLabel) + ": \"id\" " + std::to_string(parsed->id)
+                                     + " does not match engine " + std::to_string(id)
+                                     + " of the serialized plan");
     }
     KnobChoices requested
         = parsed->requestedKnobs ? std::move(*parsed->requestedKnobs) : parsed->knobs;

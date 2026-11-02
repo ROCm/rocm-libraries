@@ -19,12 +19,12 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 {
 
-// Shim-originated failure. Carries the cuDNN status directly so guarded() never has
+// Compatibility-layer-originated failure. Carries the cuDNN status directly so guarded() never has
 // to translate it.
-class ShimError : public std::runtime_error
+class CompatibilityError : public std::runtime_error
 {
 public:
-    ShimError(cudnnStatus_t status, const std::string& message)
+    CompatibilityError(cudnnStatus_t status, const std::string& message)
         : std::runtime_error(message)
         , _status(status)
     {
@@ -47,7 +47,7 @@ inline std::string takeHipdnnMessage()
     return message.data();
 }
 
-// Converts a failed hipDNN call into a ShimError. The backend message is drained
+// Converts a failed hipDNN call into a CompatibilityError. The backend message is drained
 // immediately because reading it clears it.
 // `context` is a view so that a literal costs nothing on the success path.
 inline void checkHipdnn(hipdnnStatus_t status, std::string_view context)
@@ -59,7 +59,7 @@ inline void checkHipdnn(hipdnnStatus_t status, std::string_view context)
     std::string message(context);
     message += ": ";
     message += takeHipdnnMessage();
-    throw ShimError(toCudnnStatus(status), message);
+    throw CompatibilityError(toCudnnStatus(status), message);
 }
 
 inline void checkFrontend(const hipdnn_frontend::Error& error, const std::string& context)
@@ -68,7 +68,7 @@ inline void checkFrontend(const hipdnn_frontend::Error& error, const std::string
     {
         return;
     }
-    throw ShimError(toCudnnStatus(error.get_code()), context + ": " + error.get_message());
+    throw CompatibilityError(toCudnnStatus(error.get_code()), context + ": " + error.get_message());
 }
 
 inline hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor

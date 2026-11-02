@@ -11,7 +11,7 @@
 
 /**
  * @file frontend_types.h
- * @brief cuDNN FE enums, knob types, and utility functions for the shim.
+ * @brief cuDNN FE enums, knob types, and utility functions for the compatibility layer.
  *
  * C-API-free leaf included by the `detail/v8` core and re-exported by
  * `cudnn_frontend_utils.h`.
@@ -111,7 +111,7 @@ struct DeviceProperties
 {
 };
 
-// Shim-owned: hipDNN publishes no counterpart for these enums.
+// Compatibility-layer-owned: hipDNN publishes no counterpart for these enums.
 // NOLINTBEGIN(readability-identifier-naming)
 /// @brief cuDNN FE tensor reordering mode.
 enum class TensorReordering_t

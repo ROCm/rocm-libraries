@@ -20,7 +20,7 @@ A case passes only when its outcome is the one the manifest predicts for its tie
 clean and free of the forbidden text for RUN_CLEAN, anything but crashed or run-failed
 for VACUOUS, and for XFAIL_RUN one `expect` entry's outcome with its anchor present and
 its forbid absent. Every other result, including an XFAIL_RUN case that runs clean
-without a ran-clean expectation, fails it. A VACUOUS case never reaches the shim, so
+without a ran-clean expectation, fails it. A VACUOUS case never reaches the compatibility layer, so
 when it meets its tier it exits 77 (SKIP_RETURN_CODE) instead of passing.
 """
 
@@ -336,7 +336,9 @@ def case_mode(args, command) -> int:
         print(f"::error title=cuDNN legacy case unexpected::{args.case}: {reason}")
         return 1
     if tier == "VACUOUS":
-        print(f"cuDNN legacy case skipped, never reaches the shim: {reason}")
+        print(
+            f"cuDNN legacy case skipped, never reaches the compatibility layer: {reason}"
+        )
         return _SKIP_EXIT
     if result.outcome == "crashed":
         print(

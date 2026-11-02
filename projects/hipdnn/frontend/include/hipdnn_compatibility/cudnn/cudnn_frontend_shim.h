@@ -28,7 +28,7 @@
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
-// The shim never loads cuDNN dynamically, so the runtime version checks are empty.
+// The compatibility layer never loads cuDNN dynamically, so the runtime version checks are empty.
 #define NV_CUDNN_FE_DYNAMIC_CHECK_BACKEND_DESCRIPTOR(MINIMUM_VERSION, DESCRIPTOR, MESSAGE)
 #define NV_CUDNN_FE_DYNAMIC_CHECK_CUDNN_BACKEND_VERSION(MINIMUM_VERSION, STATUS)
 
@@ -133,7 +133,7 @@ inline cudnnStatus_t get_stream(cudnnHandle_t handle, hipStream_t* stream)
 // NOLINTEND(readability-identifier-naming,modernize-redundant-void-arg,readability-redundant-inline-specifier,misc-misplaced-const,readability-avoid-return-with-void-value,misc-const-correctness,bugprone-unused-local-non-trivial-variable)
 
 // hipDNN keeps a failed call's message until it is read. The timer reports only a status,
-// so the message is drained here rather than left for the next shim error on this thread.
+// so the message is drained here rather than left for the next compatibility layer error on this thread.
 inline cudnnStatus_t profilingStatus(hipdnnStatus_t status)
 {
     if(status != HIPDNN_STATUS_SUCCESS)

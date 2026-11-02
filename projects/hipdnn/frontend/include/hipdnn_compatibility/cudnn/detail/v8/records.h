@@ -83,10 +83,10 @@ const T& recordAs(const Record& record)
     static_assert(std::is_base_of_v<Record, T>);
     if(!T::isKind(record.kind()))
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        "record of descriptor type "
-                            + std::to_string(static_cast<int>(record.kind()))
-                            + " does not have the expected type");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 "record of descriptor type "
+                                     + std::to_string(static_cast<int>(record.kind()))
+                                     + " does not have the expected type");
     }
     return static_cast<const T&>(record);
 }

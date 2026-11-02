@@ -69,11 +69,11 @@ This table provides a high-level overview of the differences between cuDNN and h
 
 See the :ref:`dimension-layouts` section of the Operation Support doccument for operation-specifc hipDNN tensor layout details.
 
-Compile cuDNN frontend source with the compatibility shim
+Compile cuDNN frontend source with the compatibility layer
 =========================================================
 
 Instead of porting to the ``hipdnn_frontend`` API, you can compile existing cuDNN frontend source
-against hipDNN's header-only cuDNN-compatibility shim. Its cuDNN-spelled headers live under
+against hipDNN's header-only cuDNN compatibility layer. Its cuDNN-spelled headers live under
 ``frontend/include/hipdnn_compatibility/cudnn/`` (for example,
 ``#include <hipdnn_compatibility/cudnn/cudnn_frontend.h>``) and are installed with the
 ``hipdnn_frontend`` headers only when hipDNN is built with ``-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON``.
@@ -88,7 +88,7 @@ them:
 The v0.x builders were introduced in ``hipdnn_frontend`` 0.5; code that uses only the v9 graph API
 can request an earlier version.
 
-The shim is source compatible only: rebuild your code against it. Its C entry points take HIP types
+The compatibility layer is source compatible only: rebuild your code against it. Its C entry points take HIP types
 (for example, ``cudnnSetStream`` takes a ``hipStream_t``), so CUDA runtime calls in your source still
 need porting to HIP.
 
@@ -100,13 +100,13 @@ Replace the cuDNN include and alias the namespace:
 
     namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
 
-Upstream declares a global ``json`` alias for ``nlohmann::json``; the shim declares it as
+Upstream declares a global ``json`` alias for ``nlohmann::json``; the compatibility layer declares it as
 ``cudnn_frontend::json``. Code that names a bare ``json`` adds ``using json = nlohmann::json;``,
-which compiles against both NVIDIA's header and the shim. ``cudnn_frontend::json`` exists only in
-the shim, so an alias to it belongs inside the ROCm branch of single-source code.
+which compiles against both NVIDIA's header and the compatibility layer. ``cudnn_frontend::json`` exists only in
+the compatibility layer, so an alias to it belongs inside the ROCm branch of single-source code.
 
 See the samples in `samples/cudnn_shim <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples/cudnn_shim>`_.
-The shim's behavior differs from cuDNN in places. See
+The compatibility layer's behavior differs from cuDNN in places. See
 `Known divergences <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md>`__
 for the full list.
 
@@ -256,7 +256,7 @@ has the full list.
 * **Engine numbers:** engine indices order hipDNN's engines by engine ID. NVIDIA engine numbers in
   errata files or hard-coded in your source select unrelated engines, or none
   (`Engines, plans and execution <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#engines-plans-and-execution>`__).
-* **Enum values:** the C enums have cuDNN's names but the shim's own values. Don't store or compare
+* **Enum values:** the C enums have cuDNN's names but the compatibility layer's own values. Don't store or compare
   raw values produced by cuDNN
   (`Enum values <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#enum-values>`__).
 

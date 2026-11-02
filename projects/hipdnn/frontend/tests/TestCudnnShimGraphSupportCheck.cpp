@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Coverage for the shim's is_supported_ext() probe, a hipDNN extension with no
+// Coverage for the compatibility layer's is_supported_ext() probe, a hipDNN extension with no
 // upstream cuDNN frontend equivalent, so the contract asserted here is hipDNN's;
 // and for the once-per-process warning on heuristic modes the graph API does not honor.
 #include "CudnnShimTestSupport.hpp"

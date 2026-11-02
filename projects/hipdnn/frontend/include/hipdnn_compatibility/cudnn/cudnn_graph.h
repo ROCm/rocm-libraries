@@ -11,9 +11,9 @@
 
 /**
  * @file cudnn_graph.h
- * @brief cuDNN backend C types and plan execution for the hipDNN cuDNN-compatibility shim.
+ * @brief cuDNN backend C types and plan execution for the hipDNN cuDNN compatibility layer.
  *
- * Header-only replacement for the parts of NVIDIA's `<cudnn_graph.h>` the shim keeps:
+ * Header-only replacement for the parts of NVIDIA's `<cudnn_graph.h>` the compatibility layer keeps:
  * the backend C types, `cudnnBackendExecute` and `cudnnGetLastErrorString`, both of
  * which pass straight through to hipDNN. Includable standalone.
  */
@@ -35,10 +35,10 @@ inline cudnnStatus_t cudnnBackendExecute(cudnnHandle_t handle,
                                          cudnnBackendDescriptor_t executionPlan,
                                          cudnnBackendDescriptor_t variantPack)
 {
-    namespace shim = hipdnn_frontend::compatibility::cudnn_frontend::detail;
+    namespace compat = hipdnn_frontend::compatibility::cudnn_frontend::detail;
     cudnnStatus_t status = CUDNN_STATUS_SUCCESS;
-    const shim::v8::Outcome outcome = shim::v8::guarded([&] {
-        status = shim::toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendExecute(
+    const compat::v8::Outcome outcome = compat::v8::guarded([&] {
+        status = compat::toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendExecute(
             handle, executionPlan, variantPack));
     });
     return outcome ? status : outcome.status;

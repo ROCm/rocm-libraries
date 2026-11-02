@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // A single RELU_FWD node built with the cuDNN v8 (v0.x) builders and run through
-// the shim.
+// the compatibility layer.
 
 #include <cstdint>
 #include <iostream>

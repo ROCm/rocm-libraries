@@ -86,11 +86,11 @@ class CaseModeTest(unittest.TestCase):
         self.assertEqual(sidecar["reason"], "case not registered")
 
     def test_vacuous_case_that_runs_is_skipped(self):
-        entry = {"tier": "VACUOUS", "reason": "never reaches the shim"}
+        entry = {"tier": "VACUOUS", "reason": "never reaches the compatibility layer"}
         code, sidecar = self.run_case(entry, child(CLEAN_SUMMARY, 0))
         self.assertEqual(code, 77)
         self.assertEqual(sidecar["verdict"], "expected")
-        self.assertEqual(sidecar["reason"], "never reaches the shim")
+        self.assertEqual(sidecar["reason"], "never reaches the compatibility layer")
 
     def test_vacuous_case_that_crashes_fails(self):
         code, sidecar = self.run_case(

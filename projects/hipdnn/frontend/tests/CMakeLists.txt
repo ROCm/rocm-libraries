@@ -54,34 +54,34 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimPlanSurface.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimLogging.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimUtils.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8CApiStandalone.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8TypeMapping.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Utils.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Tu.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8MixedTu.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Heuristics.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8EngineBuilders.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8ExecutionPlanBuilder.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Filters.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8PlanCache.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8GetPlan.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8FindPlan.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8CoreFactories.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8CoreLowering.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8CorePlans.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderTensor.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderParameters.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderOperations.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderLowering.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderGraph.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderEngines.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderPlans.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderInputs.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderContracts.cpp>
-    # The errata filter and the shim's json alias exist only when the frontend keeps its JSON
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8CApiStandalone.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8TypeMapping.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8Utils.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8Tu.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8MixedTu.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8Heuristics.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8EngineBuilders.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8ExecutionPlanBuilder.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8Filters.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8PlanCache.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8GetPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8FindPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8CoreFactories.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8CoreLowering.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8CorePlans.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8BuilderTensor.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8BuilderParameters.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8BuilderOperations.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8BuilderLowering.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8BuilderGraph.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8BuilderEngines.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8BuilderPlans.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8BuilderInputs.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnCompatibilityV8BuilderContracts.cpp>
+    # The errata filter and the compatibility layer's json alias exist only when the frontend keeps its JSON
     # library.
-    $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<NOT:$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>>>:TestCudnnShimV8Errata.cpp>
-    $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<NOT:$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>>>:TestCudnnShimGlobalJson.cpp>
+    $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<NOT:$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>>>:TestCudnnCompatibilityV8Errata.cpp>
+    $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<NOT:$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>>>:TestCudnnCompatibilityGlobalJson.cpp>
     # SDPA node coverage additionally needs the SDPA build.
     $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<BOOL:${HIPDNN_ENABLE_SDPA}>>:TestCudnnShimGraphSDPA.cpp>
     TestDescriptorHelpers.cpp
@@ -240,11 +240,11 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     add_executable(
         hipdnn_frontend_cudnn_v8_noexcept_tests
         main.cpp
-        TestCudnnShimV8NoExcept.cpp
-        TestCudnnShimV8NoexceptOperations.cpp
-        TestCudnnShimV8NoexceptPlans.cpp
-        TestCudnnShimV8NoexceptBoundary.cpp
-        TestCudnnShimV8NoexceptEngines.cpp
+        TestCudnnCompatibilityV8NoExcept.cpp
+        TestCudnnCompatibilityV8NoexceptOperations.cpp
+        TestCudnnCompatibilityV8NoexceptPlans.cpp
+        TestCudnnCompatibilityV8NoexceptBoundary.cpp
+        TestCudnnCompatibilityV8NoexceptEngines.cpp
     )
     target_compile_definitions(
         hipdnn_frontend_cudnn_v8_noexcept_tests PRIVATE NV_CUDNN_DISABLE_EXCEPTION
@@ -259,9 +259,9 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     clang_tidy_check(hipdnn_frontend_cudnn_v8_noexcept_tests)
     add_hipdnn_test(hipdnn_frontend_cudnn_v8_noexcept_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-    # Link-only gate, like hipdnn_frontend_dynamic_load_tests: the shim links against
+    # Link-only gate, like hipdnn_frontend_dynamic_load_tests: the compatibility layer links against
     # hipdnn_frontend_dynamic without libhipdnn_backend.
-    add_executable(hipdnn_frontend_cudnn_v8_dynamic_link_tests TestCudnnShimV8DynamicLink.cpp)
+    add_executable(hipdnn_frontend_cudnn_v8_dynamic_link_tests TestCudnnCompatibilityV8DynamicLink.cpp)
     target_compile_options(
         hipdnn_frontend_cudnn_v8_dynamic_link_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
     )
@@ -277,27 +277,27 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     # is a directory-wide and hipdnn_frontend interface definition, so it is undefined here;
     # compile options follow the definitions on the command line.
     add_library(
-        hipdnn_frontend_cudnn_shim_no_logging_no_sdpa OBJECT TestCudnnShimNoLoggingNoSdpa.cpp
+        hipdnn_frontend_cudnn_compatibility_no_logging_no_sdpa OBJECT TestCudnnCompatibilityNoLoggingNoSdpa.cpp
     )
     target_compile_definitions(
-        hipdnn_frontend_cudnn_shim_no_logging_no_sdpa PRIVATE NV_CUDNN_FRONTEND_DISABLE_LOGGING
+        hipdnn_frontend_cudnn_compatibility_no_logging_no_sdpa PRIVATE NV_CUDNN_FRONTEND_DISABLE_LOGGING
     )
     target_compile_options(
-        hipdnn_frontend_cudnn_shim_no_logging_no_sdpa
+        hipdnn_frontend_cudnn_compatibility_no_logging_no_sdpa
         PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} -UHIPDNN_ENABLE_SDPA
     )
     target_link_libraries(
-        hipdnn_frontend_cudnn_shim_no_logging_no_sdpa PRIVATE hipdnn_frontend hip::host
+        hipdnn_frontend_cudnn_compatibility_no_logging_no_sdpa PRIVATE hipdnn_frontend hip::host
     )
 
     # Compile-only: the umbrella under each JSON opt-out (CUDNN_ / HIPDNN_FRONTEND_SKIP_JSON_LIB;
     # the plain umbrella is in hipdnn_frontend_tests), and each autotune header outside the
     # umbrella, first and alone in its TU, plain and under each opt-out.
-    set(_hipdnn_cudnn_v8_header_umbrella TestCudnnShimV8SkipJson.cpp)
-    set(_hipdnn_cudnn_v8_header_find_plan TestCudnnShimV8HeaderFindPlan.cpp)
-    set(_hipdnn_cudnn_v8_header_get_plan TestCudnnShimV8HeaderGetPlan.cpp)
+    set(_hipdnn_cudnn_v8_header_umbrella TestCudnnCompatibilityV8SkipJson.cpp)
+    set(_hipdnn_cudnn_v8_header_find_plan TestCudnnCompatibilityV8HeaderFindPlan.cpp)
+    set(_hipdnn_cudnn_v8_header_get_plan TestCudnnCompatibilityV8HeaderGetPlan.cpp)
     set(_hipdnn_cudnn_v8_header_engine_config_generator
-        TestCudnnShimV8HeaderEngineConfigGenerator.cpp
+        TestCudnnCompatibilityV8HeaderEngineConfigGenerator.cpp
     )
     set(_hipdnn_cudnn_v8_header_targets)
     foreach(_header umbrella find_plan get_plan engine_config_generator)
@@ -323,24 +323,24 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     endforeach()
 
     # PyTorch consumes these headers as C++20; every other target here compiles them as C++17.
-    # The wrapper source keeps TestCudnnShimV8Tu.cpp at one compile_commands.json entry, which
+    # The wrapper source keeps TestCudnnCompatibilityV8Tu.cpp at one compile_commands.json entry, which
     # the -p lookup of the unit binary's tidy step would otherwise also lint as C++20.
     set(_hipdnn_cudnn_v8_cpp20_targets)
     if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
-        hipdnn_frontend_cpp20_object(hipdnn_frontend_cudnn_v8_tu_cpp20 TestCudnnShimV8TuCpp20.cpp)
+        hipdnn_frontend_cpp20_object(hipdnn_frontend_cudnn_v8_tu_cpp20 TestCudnnCompatibilityV8TuCpp20.cpp)
         target_link_libraries(
             hipdnn_frontend_cudnn_v8_tu_cpp20 PRIVATE hipdnn_frontend hip::host GTest::gtest
         )
         list(APPEND _hipdnn_cudnn_v8_cpp20_targets hipdnn_frontend_cudnn_v8_tu_cpp20)
     else()
         message(STATUS "hipDNN: this C++ compiler advertises no cxx_std_20; the C++20 cuDNN v8 "
-                       "shim compile target is not created")
+                       "compatibility layer compile target is not created")
     endif()
 
     # Attached to the unit binary so targeted builds cannot skip the gates.
     add_dependencies(
         hipdnn_frontend_tests
-        hipdnn_frontend_cudnn_shim_no_logging_no_sdpa
+        hipdnn_frontend_cudnn_compatibility_no_logging_no_sdpa
         ${_hipdnn_cudnn_v8_header_targets}
         ${_hipdnn_cudnn_v8_cpp20_targets}
     )

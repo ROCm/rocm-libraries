@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_find_plan.h
- * @brief cuDNN v8 `time_sorted_plan` and `EngineConfigGenerator::cudnnFindPlan*` over the shim.
+ * @brief cuDNN v8 `time_sorted_plan` and `EngineConfigGenerator::cudnnFindPlan*` over the compatibility layer.
  */
 
 #pragma once

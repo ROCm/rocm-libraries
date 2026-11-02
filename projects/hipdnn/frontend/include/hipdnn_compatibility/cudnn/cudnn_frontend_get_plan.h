@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_get_plan.h
- * @brief cuDNN v8 `EngineConfigGenerator::cudnnGetPlan` over the shim's v0.x builders.
+ * @brief cuDNN v8 `EngineConfigGenerator::cudnnGetPlan` over the compatibility layer's v0.x builders.
  */
 
 #pragma once

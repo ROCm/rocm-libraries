@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // matmul -> ADD(bias) -> activation built with the cuDNN v8 (v0.x) builders and run
-// through the shim.
+// through the compatibility layer.
 
 #include <array>
 #include <cstdint>

@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_Errata.h
- * @brief cuDNN v8 errata filters (`load_from_config`, `check_errata`) over the shim's records.
+ * @brief cuDNN v8 errata filters (`load_from_config`, `check_errata`) over the compatibility layer's records.
  */
 
 #pragma once

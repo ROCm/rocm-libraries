@@ -7,7 +7,7 @@
 // License text and pinned upstream version: THIRD_PARTY_LICENSES.md
 // (installed to share/doc/hipdnn_frontend).
 
-// Legacy-corpus harness only; never installed under include/. The shim has no raw
+// Legacy-corpus harness only; never installed under include/. The compatibility layer has no raw
 // descriptor C API, so the raw-backend half of "Tensor creation comparison"
 // (test_list.cpp:60-87) compiles against these stubs, including the only attribute
 // names and types it uses, and fails at its first REQUIRE instead of failing the

@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_Tensor.h
- * @brief cuDNN v8 `Tensor_v8` / `TensorBuilder_v8`, built as a shim tensor record.
+ * @brief cuDNN v8 `Tensor_v8` / `TensorBuilder_v8`, built as a compatibility layer tensor record.
  */
 
 #pragma once
@@ -334,7 +334,7 @@ public:
             auto status = detail::convert_to_cudnn_type(m_tensor.data_type, cudnn_data_type);
             if(status != CUDNN_STATUS_SUCCESS)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     status, "TensorBuilder: data type is not set or not a valid DataType_t");
             }
 
@@ -345,8 +345,8 @@ public:
                     m_tensor.raggedOffset->get_desc());
                 if(inputs.raggedOffset == nullptr)
                 {
-                    throw detail::v8::ShimError(CUDNN_STATUS_BAD_PARAM,
-                                                "TensorBuilder: ragged offset tensor is not built");
+                    throw detail::v8::CompatibilityError(
+                        CUDNN_STATUS_BAD_PARAM, "TensorBuilder: ragged offset tensor is not built");
                 }
             }
 
@@ -357,7 +357,7 @@ public:
                     = detail::convert_to_cudnn_type(m_tensor.reorder_type, cudnn_reordering_type);
                 if(status != CUDNN_STATUS_SUCCESS)
                 {
-                    throw detail::v8::ShimError(
+                    throw detail::v8::CompatibilityError(
                         status, "TensorBuilder: reordering mode is not a valid TensorReordering_t");
                 }
             }

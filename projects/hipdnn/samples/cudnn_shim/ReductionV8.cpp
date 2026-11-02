@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // Per-channel ADD and MAX reductions built with the cuDNN v8 (v0.x) builders, run through the
-// shim on a real provider and checked against the CPU reference. No provider implements
+// compatibility layer on a real provider and checked against the CPU reference. No provider implements
 // reduction yet, so every variant is skipped until one does.
 
 #include <array>

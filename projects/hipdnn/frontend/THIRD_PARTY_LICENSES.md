@@ -10,15 +10,15 @@ hipDNN contains source code derived from the following third-party project.
 - **License:** MIT
 - **Project:** https://github.com/NVIDIA/cudnn-frontend
 - **Use:** Paths are relative to `projects/hipdnn/`. Portions of the
-  cuDNN-compatibility shim (`frontend/include/hipdnn_compatibility/`) and of
+  cuDNN compatibility layer (`frontend/include/hipdnn_compatibility/`) and of
   `frontend/include/hipdnn_frontend/Types.hpp` and
   `frontend/include/hipdnn_frontend/Error.hpp` are derived from cuDNN frontend.
-  The shim's cuDNN C declarations,
+  The compatibility layer's cuDNN C declarations,
   `frontend/include/hipdnn_compatibility/cudnn/detail/c_types.h`, copy only the
   identifier names, from upstream's `include/` headers and
-  `samples/legacy_samples/` sources; the enumerator values are the shim's own. Its NVIDIA notice
+  `samples/legacy_samples/` sources; the enumerator values are the compatibility layer's own. Its NVIDIA notice
   names those files.
-  The cuDNN-shim samples `samples/cudnn_shim/ConvFprop.cpp`,
+  The cuDNN compatibility samples `samples/cudnn_shim/ConvFprop.cpp`,
   `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp` and `Pointwise.cpp` mirror upstream samples, and
   `tests/cudnn_samples/legacy/overlay/cudnn.h` (legacy-corpus harness only,
   installed with the harness under `share/hipdnn/cudnn_samples`, never under

@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_Operation.h
- * @brief cuDNN v8 `Operation_v8` / `OperationBuilder_v8` over the shim's v8 core.
+ * @brief cuDNN v8 `Operation_v8` / `OperationBuilder_v8` over the compatibility layer's v8 core.
  */
 
 #pragma once
@@ -229,8 +229,8 @@ private:
         std::shared_ptr<const RecordT> record = detail::v8::recordOf<RecordT>(desc);
         if(record == nullptr)
         {
-            throw detail::v8::ShimError(CUDNN_STATUS_BAD_PARAM,
-                                        std::string(label) + " is not built");
+            throw detail::v8::CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                                 std::string(label) + " is not built");
         }
         return record;
     }
@@ -248,8 +248,8 @@ private:
     {
         if(desc == nullptr)
         {
-            throw detail::v8::ShimError(CUDNN_STATUS_BAD_PARAM,
-                                        std::string(label) + " is required");
+            throw detail::v8::CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                                 std::string(label) + " is required");
         }
         return slot_record<RecordT>(desc, label);
     }
@@ -277,17 +277,18 @@ private:
         return true;
     }
 
-    // Kinds the shim cannot lower: the checks upstream's SetAttribute calls would
+    // Kinds the compatibility layer cannot lower: the checks upstream's SetAttribute calls would
     // hit (slots, enum ranges), then NOT_SUPPORTED.
     template <typename Checks>
     Operation_v8&& reject_unsupported(const char* kind, Checks&& checks)
     {
         const detail::v8::Outcome outcome = detail::v8::guarded([&] {
             checks();
-            throw detail::v8::ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                                        std::string("OperationBuilder: ") + kind
-                                            + " operations are not supported by the hipDNN "
-                                              "cuDNN shim");
+            throw detail::v8::CompatibilityError(
+                CUDNN_STATUS_NOT_SUPPORTED,
+                std::string("OperationBuilder: ") + kind
+                    + " operations are not supported by the hipDNN "
+                      "cuDNN compatibility layer");
         });
         set_error_and_throw_exception(&m_operation, outcome.status, outcome.message.c_str());
         return std::move(m_operation);

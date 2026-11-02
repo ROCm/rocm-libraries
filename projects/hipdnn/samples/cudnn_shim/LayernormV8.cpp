@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // Layer norm forward training and backward over C, H and W, built with the cuDNN v8 (v0.x) norm
-// builders, run through the shim on a real provider and checked against the CPU reference.
+// builders, run through the compatibility layer on a real provider and checked against the CPU reference.
 
 #include <cstdint>
 #include <iostream>

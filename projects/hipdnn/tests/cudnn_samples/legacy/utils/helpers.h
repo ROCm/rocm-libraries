@@ -20,7 +20,7 @@
  * DEALINGS IN THE SOFTWARE.
  *
  * Substituted for the hipDNN cuDNN-compatibility legacy harness. Differs from upstream only
- * in the device-property pin and the handle helpers the shim already defines.
+ * in the device-property pin and the handle helpers the compatibility layer already defines.
  */
 
 #pragma once
@@ -80,7 +80,7 @@ enum class MHA_Bias_Type { NO_BIAS = 0, PRE_SCALE_BIAS = 1, POST_SCALE_BIAS = 2 
         }                                                                                                       \
     }
 
-// CudnnHandleDeleter and create_cudnn_handle come from the shim's <cudnn.h>.
+// CudnnHandleDeleter and create_cudnn_handle come from the compatibility layer's <cudnn.h>.
 
 bool
 is_ampere_arch();

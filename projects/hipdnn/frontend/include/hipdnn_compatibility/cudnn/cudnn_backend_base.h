@@ -41,7 +41,7 @@ Descriptor&& buildDescriptor(Descriptor& descriptor,
                              MakeRecord&& makeRecord);
 } // namespace detail::v8
 
-// Upstream wraps one cuDNN descriptor. Here it pairs the shim record behind a builder object with a
+// Upstream wraps one cuDNN descriptor. Here it pairs the compatibility layer record behind a builder object with a
 // non-owning view of the hipDNN descriptor (if any) that the record owns; get_backend_descriptor()
 // is what get_raw_desc() and cudnnBackendExecute see. The public members are upstream's plus a
 // keyed record constructor; the record and type are reached only through detail::v8::RecordAccess.
@@ -49,7 +49,7 @@ class OpaqueBackendPointer
 {
     friend struct detail::v8::RecordAccess;
 
-    // Only RecordAccess can create a key, so only the shim can call the record constructor, which
+    // Only RecordAccess can create a key, so only the compatibility layer can call the record constructor, which
     // stays public for std::make_shared. The explicit default constructor also keeps the key from
     // being an aggregate that `{}` could build.
     class RecordKey

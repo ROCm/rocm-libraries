@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_EngineConfigGenerator.h
- * @brief cuDNN v8 `EngineConfigGenerator` and plan `filter` over the shim's v0.x builders.
+ * @brief cuDNN v8 `EngineConfigGenerator` and plan `filter` over the compatibility layer's v0.x builders.
  */
 
 #pragma once

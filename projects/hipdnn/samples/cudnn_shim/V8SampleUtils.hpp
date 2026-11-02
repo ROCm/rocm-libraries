@@ -466,7 +466,7 @@ int guardedMain(F&& body)
     catch(fe::cudnnException& e)
     {
         std::fprintf(stderr,
-                     "cuDNN shim error (%s): %s\n",
+                     "cuDNN compatibility layer error (%s): %s\n",
                      cudnnGetErrorString(e.getCudnnStatus()),
                      e.what());
         return 1;

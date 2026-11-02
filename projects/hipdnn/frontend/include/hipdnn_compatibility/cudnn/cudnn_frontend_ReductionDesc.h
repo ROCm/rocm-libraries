@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_ReductionDesc.h
- * @brief cuDNN FE v0.x `ReductionDesc_v8` and its builder, built as a shim reduction record.
+ * @brief cuDNN FE v0.x `ReductionDesc_v8` and its builder, built as a compatibility layer reduction record.
  */
 #pragma once
 
@@ -118,7 +118,7 @@ public:
                     = detail::convert_to_cudnn_type(m_reductionDesc.compute_type, cudnn_data_type);
                 if(status != CUDNN_STATUS_SUCCESS)
                 {
-                    throw detail::v8::ShimError(
+                    throw detail::v8::CompatibilityError(
                         status,
                         "ReductionDescBuilder: compute type is not set or not a valid DataType_t");
                 }
@@ -128,7 +128,7 @@ public:
                                                        cudnn_reduction_mode);
                 if(status != CUDNN_STATUS_SUCCESS)
                 {
-                    throw detail::v8::ShimError(
+                    throw detail::v8::CompatibilityError(
                         status,
                         "ReductionDescBuilder: reduction operator is not set or "
                         "not a valid ReductionMode_t");

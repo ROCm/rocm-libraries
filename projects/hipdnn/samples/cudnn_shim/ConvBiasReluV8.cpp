@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Convolution fprop + bias ADD + ReLU through the cuDNN v8 (v0.x builder) surface of the shim,
+// Convolution fprop + bias ADD + ReLU through the cuDNN v8 (v0.x builder) surface of the compatibility layer,
 // shaped for MIOpen's fused conv-bias-activation engine, and checked against the CPU reference.
 
 #include <cstdint>

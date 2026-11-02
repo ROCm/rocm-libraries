@@ -3,7 +3,7 @@
 
 /**
  * @file engine_filters.h
- * @brief Per-engine predicates and selection diagnostics shared by the cuDNN shim APIs.
+ * @brief Per-engine predicates and selection diagnostics shared by the cuDNN compatibility layer APIs.
  */
 
 #pragma once
@@ -39,7 +39,7 @@ inline bool isDeterminismClaimed(int64_t engineId)
     return engineId == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;
 }
 
-// cuDNN heuristic modes a shim API accepts but runs as fallback selection. The v0.x builders
+// cuDNN heuristic modes a compatibility layer API accepts but runs as fallback selection. The v0.x builders
 // run every mode as fallback; the v9 API honors A and B and falls back only for OPENSOURCE.
 enum class UnhonoredHeuristicMode : std::uint8_t
 {

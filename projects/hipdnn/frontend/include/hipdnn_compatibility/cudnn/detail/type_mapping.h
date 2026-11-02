@@ -17,7 +17,7 @@
 #include <hipdnn_compatibility/cudnn/detail/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 
-// cuDNN C enum <-> shim FE enum, matched by enumerator name as upstream's
+// cuDNN C enum <-> compatibility layer FE enum, matched by enumerator name as upstream's
 // convert_to_cudnn_type / convert_from_cudnn_type do. std::nullopt means the
 // value is valid on one side but has no counterpart on the other; callers
 // report NOT_SUPPORTED. The builder setters pass raw C values through upstream's

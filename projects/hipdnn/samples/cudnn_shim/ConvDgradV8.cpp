@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // Convolution backward data built the way PyTorch builds it through the cuDNN v8 (v0.x builder)
-// surface of the shim (dx, w and dy set as x, w and y), run on a real provider and checked
+// surface of the compatibility layer (dx, w and dy set as x, w and y), run on a real provider and checked
 // against the CPU reference.
 
 #include <cstdint>

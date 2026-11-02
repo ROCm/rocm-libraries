@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_OperationGraph.h
- * @brief cuDNN v8 `OperationGraph_v8` / `OperationGraphBuilder_v8` over the shim's v8 core.
+ * @brief cuDNN v8 `OperationGraph_v8` / `OperationGraphBuilder_v8` over the compatibility layer's v8 core.
  */
 
 #pragma once
@@ -71,8 +71,9 @@ public:
             const auto core = detail::v8::recordOf<detail::v8::GraphCore>(pointer);
             if(core == nullptr)
             {
-                throw detail::v8::ShimError(CUDNN_STATUS_NOT_INITIALIZED,
-                                            "OperationGraph: the operation graph was not built");
+                throw detail::v8::CompatibilityError(
+                    CUDNN_STATUS_NOT_INITIALIZED,
+                    "OperationGraph: the operation graph was not built");
             }
             global_count = core->engineCount();
         });
@@ -280,10 +281,10 @@ public:
                     detail::v8::recordOf<detail::v8::OperationRecord>(m_operationGraph.ops[i]));
                 if(records.back() == nullptr)
                 {
-                    throw detail::v8::ShimError(CUDNN_STATUS_BAD_PARAM,
-                                                "OperationGraphBuilder: operation "
-                                                    + std::to_string(i)
-                                                    + " is not a built operation");
+                    throw detail::v8::CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                                         "OperationGraphBuilder: operation "
+                                                             + std::to_string(i)
+                                                             + " is not a built operation");
                 }
             }
             std::shared_ptr<const detail::v8::GraphCore> core

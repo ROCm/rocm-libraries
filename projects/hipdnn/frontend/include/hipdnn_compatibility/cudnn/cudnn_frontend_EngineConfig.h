@@ -10,7 +10,7 @@
 /**
  * @file cudnn_frontend_EngineConfig.h
  * @brief cuDNN v8 `EngineConfig_v8` / `EngineConfigBuilder_v8` and `EngineConfigList` over the
- *        shim's v8 core.
+ *        compatibility layer's v8 core.
  */
 
 #pragma once
@@ -112,7 +112,7 @@ public:
                 = detail::v8::recordOf<detail::v8::EngineRecord>(m_engine_config.engine);
             if(!engine)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     CUDNN_STATUS_BAD_PARAM,
                     "EngineConfigBuilder: the engine is not a built Engine");
             }

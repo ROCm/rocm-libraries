@@ -129,9 +129,9 @@ add_test_plugin(${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET} TestPassByVa
 # test_autotune_plugin supports the autotune workflow with global.benchmarking and test knobs
 add_test_plugin(${TEST_AUTOTUNE_PLUGIN_NAME} TestAutotunePlugin.cpp)
 
-# test_cudnn_shim_v8_plugin backs the cuDNN v8 shim integration tests: one engine with a
+# test_cudnn_compatibility_v8_plugin backs the cuDNN v8 compatibility layer integration tests: one engine with a
 # cuDNN-projectable knob and plan serialization, one whose execution context always fails
-add_test_plugin(${TEST_CUDNN_SHIM_V8_PLUGIN_NAME} TestCudnnShimV8Plugin.cpp)
+add_test_plugin(${TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME} TestCudnnCompatibilityV8Plugin.cpp)
 
 # Create the default plugin in test_plugins/default
 set(test_good_default_plugin_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/default")

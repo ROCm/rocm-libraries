@@ -31,7 +31,7 @@ find_package(hipdnn_frontend 0.5 CONFIG REQUIRED COMPONENTS cudnn_compatibility)
 target_link_libraries(my_app PRIVATE hipdnn_frontend)
 ```
 
-`COMPONENTS cudnn_compatibility` fails configuration if hipDNN was built without the shim. The v0.x builders were introduced in `hipdnn_frontend` 0.5; code that uses only the v9 graph API can request an earlier version.
+`COMPONENTS cudnn_compatibility` fails configuration if hipDNN was built without the compatibility layer. The v0.x builders were introduced in `hipdnn_frontend` 0.5; code that uses only the v9 graph API can request an earlier version.
 
 `Graph::sdpa` and `Graph::sdpa_backward` exist only when hipDNN is also built with `-DHIPDNN_ENABLE_SDPA=ON`. The `hipdnn_frontend` target propagates that define.
 
@@ -66,9 +66,9 @@ namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
 #endif
 ```
 
-Do not include NVIDIA's `cudnn.h` or `cudnn_frontend.h` in the same translation unit, and drop your own declarations of cuDNN names (for example a cuDNN stub layer) from shim builds. Through `cudnn.h` the shim itself declares `cudnnHandle_t`, `cudnnStatus_t`, the `cudnn*` entry points, the cuDNN backend C enums and types (`cudnnDataType_t`, `cudnnBackendDescriptor_t`, `cudnnFraction_t`, ... with their `CUDNN_*` enumerators), the macro `CUDNN_DIM_MAX`, and `cudnnBackendExecute` and `cudnnGetLastErrorString`. This holds for v9-only code too.
+Do not include NVIDIA's `cudnn.h` or `cudnn_frontend.h` in the same translation unit, and drop your own declarations of cuDNN names (for example a cuDNN stub layer) from compatibility layer builds. Through `cudnn.h` the compatibility layer itself declares `cudnnHandle_t`, `cudnnStatus_t`, the `cudnn*` entry points, the cuDNN backend C enums and types (`cudnnDataType_t`, `cudnnBackendDescriptor_t`, `cudnnFraction_t`, ... with their `CUDNN_*` enumerators), the macro `CUDNN_DIM_MAX`, and `cudnnBackendExecute` and `cudnnGetLastErrorString`. This holds for v9-only code too.
 
-Upstream declares a global `json` alias for `nlohmann::json`; the shim declares it as `cudnn_frontend::json`. Code that names a bare `json` adds `using json = nlohmann::json;`, which compiles against both NVIDIA's header and the shim. `cudnn_frontend::json` exists only in the shim, so an alias to it belongs inside the `USE_ROCM` branch. With `using namespace cudnn_frontend;` in scope, a global `json` alias of another type (for example `nlohmann::ordered_json`) is ambiguous; name it as `::json`.
+Upstream declares a global `json` alias for `nlohmann::json`; the compatibility layer declares it as `cudnn_frontend::json`. Code that names a bare `json` adds `using json = nlohmann::json;`, which compiles against both NVIDIA's header and the compatibility layer. `cudnn_frontend::json` exists only in the compatibility layer, so an alias to it belongs inside the `USE_ROCM` branch. With `using namespace cudnn_frontend;` in scope, a global `json` alias of another type (for example `nlohmann::ordered_json`) is ambiguous; name it as `::json`.
 
 [`samples/cudnn_shim/HipifyConvFprop.cpp`](../samples/cudnn_shim/HipifyConvFprop.cpp) is a complete hipified convolution program. Each line changed from the cuDNN original is marked `// cuDNN: <original line>`. The other v9 samples in [`samples/cudnn_shim/`](../samples/cudnn_shim/) build and validate one node each on the host. The `*V8.cpp` samples use the v0.x builders and run on a GPU: most build one operation, and `ConvBiasReluV8.cpp` and `MatmulBiasActV8.cpp` a three-node fusion. See the [samples README](../samples/README.md#cudnn-compatibility-shim-samples).
 
@@ -121,8 +121,8 @@ Not provided (compile error):
 | Symptom | Cause and fix |
 |---|---|
 | `cudnn_frontend` is not declared | Missing namespace alias. Add it after the include. |
-| Redefinition of `cudnnHandle_t`, `cudnnCreate` or a `CUDNN_*` enumerator | NVIDIA cuDNN headers, or your own cuDNN declarations, are also included. Remove them from shim builds. |
-| `json` is not declared | The shim declares upstream's global `json` alias as `cudnn_frontend::json`. Add `using json = nlohmann::json;`, which works with both NVIDIA's header and the shim. |
+| Redefinition of `cudnnHandle_t`, `cudnnCreate` or a `CUDNN_*` enumerator | NVIDIA cuDNN headers, or your own cuDNN declarations, are also included. Remove them from compatibility layer builds. |
+| `json` is not declared | The compatibility layer declares upstream's global `json` alias as `cudnn_frontend::json`. Add `using json = nlohmann::json;`, which works with both NVIDIA's header and the compatibility layer. |
 | `cudnnBackendCreateDescriptor`, `cudnnBackendSetAttribute` or `CUDNN_ATTR_*` does not compile | The raw backend descriptor API is not provided. Build descriptors with the v0.x builders or the v9 graph API. |
 | `validate()` returns `cuDNN-shim node '<name>' has no hipDNN equivalent yet` | The graph uses an [unsupported node](#unsupported-nodes-and-apis). To request one, open an issue at https://github.com/ROCm/rocm-libraries/issues. |
 | `validate()` returns `Duplicate tensor UID in graph` | Two tensors share a UID. Give each tensor a unique UID. |

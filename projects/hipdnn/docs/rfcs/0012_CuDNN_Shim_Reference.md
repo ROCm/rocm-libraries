@@ -423,8 +423,8 @@ defaults match upstream (logging off) — no decision needed.
 
 ## 6. The `<cudnn.h>` / v0.x umbrella-header problem
 
-The shim provides **source-level** compatibility for the cuDNN frontend v9
-graph API (this RFC) and the v0.x builders ([RFC 0022](./0022_CuDNN_V8_Shim.md)).
+The compatibility layer provides **source-level** compatibility for the cuDNN frontend v9
+graph API (this RFC) and the v0.x builders ([RFC 0022](./0022_CuDNN_V8_Compatibility.md)).
 Explicitly out of scope:
 
 - **ABI compatibility**: a `.so`/`.dll` built against real cuDNN cannot be
@@ -468,9 +468,9 @@ Consequences:
 
 ### Decision in this RFC
 
-The shim's `cudnn_frontend.h` includes `cudnn.h` and, as upstream, the
+The compatibility layer's `cudnn_frontend.h` includes `cudnn.h` and, as upstream, the
 v0.x headers and the `_v8` aliases, which
-[RFC 0022](./0022_CuDNN_V8_Shim.md) designs. This RFC covers the part of
+[RFC 0022](./0022_CuDNN_V8_Compatibility.md) designs. This RFC covers the part of
 `cudnn.h` the v9 graph API needs.
 
 `cudnn.h` covers the C-API **types** the v9 method signatures reference:
@@ -498,9 +498,9 @@ including `cudnn_frontend::Tensor` (`Tensor_v8`, as upstream), is RFC 0022's.
 ### Options considered for v0.x source compatibility
 
 - **(A) Compile-only stubs for v0.x types**. Declare every v0.x
-  class/builder in the shim's umbrella with the same signatures, with
+  class/builder in the compatibility layer's umbrella with the same signatures, with
   method bodies that return `error_code_t::GRAPH_NOT_SUPPORTED` at runtime.
-  Lets `Conv_v8.cpp` *compile* against the shim; the convolution path is
+  Lets `Conv_v8.cpp` *compile* against the compatibility layer; the convolution path is
   disabled at runtime.
 - **(B) Require the consumer to gate v0.x usage**. Ship a v9-only umbrella
   and require consumers to keep v0.x TUs out of the build via their
@@ -510,5 +510,5 @@ including `cudnn_frontend::Tensor` (`Tensor_v8`, as upstream), is RFC 0022's.
   separate `<cudnn_frontend_v8.h>` (stubs). Functionally the same as (A)
   but with explicit consumer opt-in.
 
-[RFC 0022](./0022_CuDNN_V8_Shim.md) takes a functional variant of (A): the
+[RFC 0022](./0022_CuDNN_V8_Compatibility.md) takes a functional variant of (A): the
 v0.x builders run on hipDNN and are exposed through the existing umbrella.

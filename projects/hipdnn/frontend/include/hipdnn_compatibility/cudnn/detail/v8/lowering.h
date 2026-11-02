@@ -49,7 +49,7 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 {
 
-// The shim's own `graph` namespace (the v9 API) shadows hipDNN's.
+// The compatibility layer's own `graph` namespace (the v9 API) shadows hipDNN's.
 namespace fe_graph = ::hipdnn_frontend::graph;
 
 // cuDNN's name for an operation kind, from upstream's DescriptorType_t names.
@@ -81,7 +81,7 @@ inline std::string operationLabel(const LoweringLabels& labels, cudnnBackendDesc
     return labels.operationName != nullptr ? labels.operationName(kind) : operationKindName(kind);
 }
 
-// Graph features the shim cannot lower.
+// Graph features the compatibility layer cannot lower.
 struct GraphFlags
 {
     bool dynamicShape = false;
@@ -208,8 +208,8 @@ decltype(auto)
 {
     if(op.target() == OperationTarget::NOT_SET)
     {
-        throw ShimError(CUDNN_STATUS_INTERNAL_ERROR,
-                        operationLabel(labels, op.kind()) + " has no lowering target");
+        throw CompatibilityError(CUDNN_STATUS_INTERNAL_ERROR,
+                                 operationLabel(labels, op.kind()) + " has no lowering target");
     }
     return visitOperationAs(op, visitor, OperationRecords{});
 }
@@ -335,9 +335,10 @@ private:
             lowered.set_value(!bytes.empty() && bytes.front() != std::byte{0});
             return;
         default:
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            _labels.constantValue + " of UID " + std::to_string(tensor.uniqueId())
-                                + ": hipDNN cannot carry a constant of this data type");
+            throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                                     _labels.constantValue + " of UID "
+                                         + std::to_string(tensor.uniqueId())
+                                         + ": hipDNN cannot carry a constant of this data type");
         }
     }
 
@@ -371,9 +372,10 @@ private:
         }
         if(difference != nullptr)
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            _labels.operations + ": two tensors with UID "
-                                + std::to_string(first.uniqueId()) + " differ in " + difference);
+            throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                     _labels.operations + ": two tensors with UID "
+                                         + std::to_string(first.uniqueId()) + " differ in "
+                                         + difference);
         }
     }
 
@@ -403,10 +405,11 @@ inline std::vector<std::size_t> stableTopologicalOrder(const std::vector<Operati
             const auto [found, inserted] = producers.emplace(output->uniqueId(), i);
             if(!inserted && found->second != i)
             {
-                throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                                labels.operations + ": UID " + std::to_string(output->uniqueId())
-                                    + " is written by operations " + std::to_string(found->second)
-                                    + " and " + std::to_string(i));
+                throw CompatibilityError(
+                    CUDNN_STATUS_BAD_PARAM,
+                    labels.operations + ": UID " + std::to_string(output->uniqueId())
+                        + " is written by operations " + std::to_string(found->second) + " and "
+                        + std::to_string(i));
             }
         }
     }
@@ -451,8 +454,8 @@ inline std::vector<std::size_t> stableTopologicalOrder(const std::vector<Operati
     }
     if(order.size() != count)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        labels.operations + ": the operations form a cycle");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 labels.operations + ": the operations form a cycle");
     }
     return order;
 }
@@ -749,7 +752,8 @@ inline void lowerOperation(const NormForwardOperationRecord& op, LoweringContext
         lowerRmsnorm(op, context);
         return;
     default:
-        throw ShimError(CUDNN_STATUS_INTERNAL_ERROR, "norm forward operation has no target");
+        throw CompatibilityError(CUDNN_STATUS_INTERNAL_ERROR,
+                                 "norm forward operation has no target");
     }
 }
 
@@ -832,7 +836,8 @@ inline void lowerOperation(const NormBackwardOperationRecord& op, LoweringContex
         lowerRmsnormBackward(op, context);
         return;
     default:
-        throw ShimError(CUDNN_STATUS_INTERNAL_ERROR, "norm backward operation has no target");
+        throw CompatibilityError(CUDNN_STATUS_INTERNAL_ERROR,
+                                 "norm backward operation has no target");
     }
 }
 
@@ -844,27 +849,30 @@ inline void preflightGraph(const std::vector<std::shared_ptr<const OperationReco
 {
     if(handle == nullptr)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, labels.handle + " is required");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM, labels.handle + " is required");
     }
     if(operations.empty())
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, labels.operations + " is required (non-empty)");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 labels.operations + " is required (non-empty)");
     }
     for(const auto& [enabled, label] : {std::pair{flags.dynamicShape, &labels.dynamicShape},
                                         std::pair{flags.overrideShape, &labels.overrideShape}})
     {
         if(enabled)
         {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            *label + " = true is not supported by the hipDNN cuDNN shim");
+            throw CompatibilityError(
+                CUDNN_STATUS_NOT_SUPPORTED,
+                *label + " = true is not supported by the hipDNN cuDNN compatibility layer");
         }
     }
     for(std::size_t i = 0; i < operations.size(); ++i)
     {
         if(!operations[i])
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            labels.operations + ": operation " + std::to_string(i) + " is null");
+            throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                     labels.operations + ": operation " + std::to_string(i)
+                                         + " is null");
         }
     }
 }

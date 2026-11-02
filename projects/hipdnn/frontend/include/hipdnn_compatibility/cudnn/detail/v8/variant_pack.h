@@ -41,17 +41,18 @@ inline void requireVariantPackArray(const void* data, std::int64_t count, std::s
 {
     if(count < 0)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(label) + ": element count " + std::to_string(count)
-                            + " is negative");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(label) + ": element count " + std::to_string(count)
+                                     + " is negative");
     }
     if(count == 0)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + " is required (non-empty)");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(label) + " is required (non-empty)");
     }
     if(data == nullptr)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM, std::string(label) + ": array is null");
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM, std::string(label) + ": array is null");
     }
 }
 
@@ -79,10 +80,11 @@ inline std::shared_ptr<const VariantPackRecord> buildVariantPack(void* const* da
     requireVariantPackArray(uniqueIds, uidCount, labels.uniqueIds);
     if(pointerCount != uidCount)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.dataPointers) + " has " + std::to_string(pointerCount)
-                            + " elements but " + std::string(labels.uniqueIds) + " has "
-                            + std::to_string(uidCount));
+        throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                 std::string(labels.dataPointers) + " has "
+                                     + std::to_string(pointerCount) + " elements but "
+                                     + std::string(labels.uniqueIds) + " has "
+                                     + std::to_string(uidCount));
     }
 
     ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor variantPack = createHipdnnDescriptor(

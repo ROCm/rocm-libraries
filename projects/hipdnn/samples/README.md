@@ -457,7 +457,7 @@ Shows the runtime-load frontend target `hipdnn_frontend_dynamic`. The sample lin
 
 ## cuDNN Compatibility Shim Samples
 
-Built when hipDNN is built with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`, or, in a standalone samples build, when the installed `hipdnn_frontend` provides the `cudnn_compatibility` component. They use cuDNN frontend spellings through the shim; see the [cuDNN shim guide](../docs/cudnn-shim.md).
+Built when hipDNN is built with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`, or, in a standalone samples build, when the installed `hipdnn_frontend` provides the `cudnn_compatibility` component. They use cuDNN frontend spellings through the compatibility layer; see the [cuDNN compatibility layer guide](../docs/cudnn-shim.md).
 
 - [`cudnn_shim/ConvFprop.cpp`](./cudnn_shim/ConvFprop.cpp): builds and validates a convolution forward graph (host only).
 - [`cudnn_shim/Matmul.cpp`](./cudnn_shim/Matmul.cpp): builds and validates a batched matmul graph (host only).
@@ -465,7 +465,7 @@ Built when hipDNN is built with `-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`, or, in
 - [`cudnn_shim/Pointwise.cpp`](./cudnn_shim/Pointwise.cpp): builds and validates a binary pointwise graph (host only).
 - [`cudnn_shim/SdpaRoundTrip.cpp`](./cudnn_shim/SdpaRoundTrip.cpp): builds and validates an SDPA forward graph (host only; also needs `HIPDNN_ENABLE_SDPA`).
 - [`cudnn_shim/HipifyConvFprop.cpp`](./cudnn_shim/HipifyConvFprop.cpp): a cuDNN frontend convolution forward program after textual hipify, with each rewritten line marked `// cuDNN:`. Runs on a GPU and checks the output.
-- [`cudnn_shim/ConvFpropV8.cpp`](./cudnn_shim/ConvFpropV8.cpp): a convolution forward built with the v0.x builders (cuDNN v8 API). Runs on a GPU and checks the output; `--overhead` reports the shim's per-call cost, and `--enforce-budget` makes that report fail when over budget.
+- [`cudnn_shim/ConvFpropV8.cpp`](./cudnn_shim/ConvFpropV8.cpp): a convolution forward built with the v0.x builders (cuDNN v8 API). Runs on a GPU and checks the output; `--overhead` reports the compatibility layer's per-call cost, and `--enforce-budget` makes that report fail when over budget.
 - [`cudnn_shim/ConvDgradV8.cpp`](./cudnn_shim/ConvDgradV8.cpp), [`cudnn_shim/ConvWgradV8.cpp`](./cudnn_shim/ConvWgradV8.cpp): convolution backward data and backward filter built the way PyTorch builds them. Run on a GPU and check the output. Each also tries a true-convolution (`CUDNN_CONVOLUTION`) and an asymmetric-padding variant; MIOpen rejects both, so they are skipped and their output has not been checked on any provider.
 - [`cudnn_shim/ConvBiasReluV8.cpp`](./cudnn_shim/ConvBiasReluV8.cpp): a fused convolution, bias and ReLU built with the v0.x builders. Runs on a GPU and checks the output.
 - [`cudnn_shim/MatmulBiasActV8.cpp`](./cudnn_shim/MatmulBiasActV8.cpp): a matmul with bias and activation built with the v0.x builders. Runs on a GPU and checks the output when the hipBLASLt provider is loaded; skipped elsewhere, including gfx115x on Windows, where hipBLASLt declines matmul.

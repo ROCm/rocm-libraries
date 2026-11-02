@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_Reorder_Tensor.h
- * @brief cuDNN v8 `cudnnReorderFilterAndBiasInt8x32`; the shim validates the arguments and
+ * @brief cuDNN v8 `cudnnReorderFilterAndBiasInt8x32`; the compatibility layer validates the arguments and
  *        returns `CUDNN_STATUS_NOT_SUPPORTED`.
  */
 
@@ -63,7 +63,7 @@ inline cudnnStatus_t cudnnReorderFilterAndBiasInt8x32(cudnnHandle_t handle,
     }
 
     CUDNN_FE_LOG_LABEL_ENDL("cudnnReorderFilterAndBiasInt8x32: INT8x32 filter and bias "
-                            "reordering is not supported by the hipDNN cuDNN shim");
+                            "reordering is not supported by the hipDNN cuDNN compatibility layer");
     return CUDNN_STATUS_NOT_SUPPORTED;
 }
 

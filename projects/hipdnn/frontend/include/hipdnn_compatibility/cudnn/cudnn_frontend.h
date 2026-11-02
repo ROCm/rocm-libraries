@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend.h
- * @brief Umbrella header for the hipDNN cuDNN frontend compatibility shim (v9 graph API and
+ * @brief Umbrella header for the hipDNN cuDNN frontend compatibility layer (v9 graph API and
  * v0.x builders).
  *
  * The v0.x builders were introduced in hipdnn_frontend 0.5.0.

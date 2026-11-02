@@ -37,7 +37,7 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 
 using KnobChoices = std::vector<std::pair<cudnnBackendKnobType_t, std::int64_t>>;
 
-// A hipDNN knob the shim shows and accepts: it projects onto cuDNN
+// A hipDNN knob the compatibility layer shows and accepts: it projects onto cuDNN
 // min/max/stride, and no other knob of the same engine maps onto the same cuDNN
 // type.
 struct EngineKnob
@@ -211,9 +211,9 @@ private:
     {
         if(isLoaded())
         {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            "an engine restored from a serialized execution plan has no "
-                            "operation graph or knob information");
+            throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                                     "an engine restored from a serialized execution plan has no "
+                                     "operation graph or knob information");
         }
     }
 
@@ -278,9 +278,10 @@ inline std::shared_ptr<const EngineRecord> makeEngineRecord(std::shared_ptr<cons
     const std::optional<std::int64_t> id = graph->engineIdAt(index);
     if(!id)
     {
-        throw ShimError(index < 0 ? CUDNN_STATUS_BAD_PARAM : CUDNN_STATUS_NOT_SUPPORTED,
-                        std::string(indexLabel) + " = " + std::to_string(index) + " is outside [0, "
-                            + std::to_string(graph->engineCount()) + ")");
+        throw CompatibilityError(index < 0 ? CUDNN_STATUS_BAD_PARAM : CUDNN_STATUS_NOT_SUPPORTED,
+                                 std::string(indexLabel) + " = " + std::to_string(index)
+                                     + " is outside [0, " + std::to_string(graph->engineCount())
+                                     + ")");
     }
     return std::make_shared<const EngineRecord>(std::move(graph), index, *id);
 }
@@ -298,15 +299,15 @@ inline std::vector<std::shared_ptr<const EngineRecord>>
         const std::optional<std::int64_t> index = graph->engineIndexOf(id);
         if(!index)
         {
-            throw ShimError(CUDNN_STATUS_INTERNAL_ERROR,
-                            "ranked engine " + std::to_string(id) + " has no index");
+            throw CompatibilityError(CUDNN_STATUS_INTERNAL_ERROR,
+                                     "ranked engine " + std::to_string(id) + " has no index");
         }
         engines.push_back(std::make_shared<const EngineRecord>(graph, *index, id));
     }
     return engines;
 }
 
-// Heuristic inputs the shim cannot honor; set means the caller asked for it.
+// Heuristic inputs the compatibility layer cannot honor; set means the caller asked for it.
 struct HeuristicSettings
 {
     bool smCountTarget = false;
@@ -323,19 +324,19 @@ inline void checkHeuristicSettings(const HeuristicSettings& settings, const Heur
 {
     if(settings.smCountTarget)
     {
-        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                        std::string(labels.smCountTarget)
-                            + " is not supported by the hipDNN cuDNN shim");
+        throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                                 std::string(labels.smCountTarget)
+                                     + " is not supported by the hipDNN cuDNN compatibility layer");
     }
     if(settings.deviceProp)
     {
-        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                        std::string(labels.deviceProp)
-                            + " is not supported by the hipDNN cuDNN shim");
+        throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                                 std::string(labels.deviceProp)
+                                     + " is not supported by the hipDNN cuDNN compatibility layer");
     }
 }
 
-// The shim enumerates with fallback selection only, so every mode returns the graph's rank
+// The compatibility layer enumerates with fallback selection only, so every mode returns the graph's rank
 // snapshot; modes other than FALLBACK warn once per process.
 inline std::vector<std::shared_ptr<const EngineRecord>>
     heuristicResults(const std::shared_ptr<const GraphCore>& graph,
@@ -433,9 +434,10 @@ public:
     {
         if(isLoaded())
         {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            "the engine config of a deserialized execution plan has no hipDNN "
-                            "engine config");
+            throw CompatibilityError(
+                CUDNN_STATUS_NOT_SUPPORTED,
+                "the engine config of a deserialized execution plan has no hipDNN "
+                "engine config");
         }
         if(_settings.empty())
         {
@@ -470,9 +472,9 @@ inline std::shared_ptr<const ConfigRecord>
 {
     if(engine->isLoaded())
     {
-        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                        "an engine restored from a serialized execution plan cannot be "
-                        "configured");
+        throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                                 "an engine restored from a serialized execution plan cannot be "
+                                 "configured");
     }
 
     constexpr std::int64_t UNSET_KNOB_VALUE = -1;
@@ -494,29 +496,29 @@ inline std::shared_ptr<const ConfigRecord>
         const std::string label = knobTypeLabel(type);
         if(knob == nullptr)
         {
-            throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                            prefix + label + " is not exposed by engine "
-                                + std::to_string(engine->id()));
+            throw CompatibilityError(CUDNN_STATUS_NOT_SUPPORTED,
+                                     prefix + label + " is not exposed by engine "
+                                         + std::to_string(engine->id()));
         }
         for(const auto& previous : choices)
         {
             if(previous.first == type)
             {
-                throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                                prefix + label + " is chosen more than once");
+                throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                         prefix + label + " is chosen more than once");
             }
         }
         const auto converted = appendNativeKnobSetting(knob->native, value, settings);
         if(converted.is_bad())
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM, prefix + converted.get_message());
+            throw CompatibilityError(CUDNN_STATUS_BAD_PARAM, prefix + converted.get_message());
         }
         const auto valid = knob->native.validate(settings.back());
         if(valid.is_bad())
         {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                            prefix + label + " = " + std::to_string(value) + ": "
-                                + valid.get_message());
+            throw CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                     prefix + label + " = " + std::to_string(value) + ": "
+                                         + valid.get_message());
         }
         choices.emplace_back(type, value);
     }

@@ -9,7 +9,7 @@
 
 /**
  * @file cudnn_frontend_Resample.h
- * @brief cuDNN FE v0.x `ResampleDesc_v8` and its builder, built as a shim resample record.
+ * @brief cuDNN FE v0.x `ResampleDesc_v8` and its builder, built as a compatibility layer resample record.
  */
 #pragma once
 
@@ -284,7 +284,7 @@ public:
         return detail::v8::buildDescriptor(m_resampleDesc, CUDNN_BACKEND_RESAMPLE_DESCRIPTOR, [&] {
             if(m_resampleDesc.spatialDim < 0)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     CUDNN_STATUS_BAD_PARAM,
                     "ResampleDescBuilder: spatial dimension count must be non-negative");
             }
@@ -294,7 +294,7 @@ public:
                 = detail::convert_to_cudnn_type(m_resampleDesc.resample_mode, cudnn_resample_mode);
             if(status != CUDNN_STATUS_SUCCESS)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     status,
                     "ResampleDescBuilder: resample mode is not set or not a valid ResampleMode_t");
             }
@@ -303,7 +303,7 @@ public:
             status = detail::convert_to_cudnn_type(m_resampleDesc.computeType, cudnn_data_type);
             if(status != CUDNN_STATUS_SUCCESS)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     status, "ResampleDescBuilder: compute type is not a valid DataType_t");
             }
 
@@ -314,7 +314,7 @@ public:
             status = detail::convert_to_cudnn_type(m_resampleDesc.padding_mode, cudnn_padding_mode);
             if(status != CUDNN_STATUS_SUCCESS)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     status,
                     "ResampleDescBuilder: padding mode is not set or not a valid PaddingMode_t");
             }
@@ -328,9 +328,10 @@ public:
                 {
                     if(array[i].denominator == 0)
                     {
-                        throw detail::v8::ShimError(CUDNN_STATUS_BAD_PARAM,
-                                                    std::string(label) + "[" + std::to_string(i)
-                                                        + "] has a zero denominator");
+                        throw detail::v8::CompatibilityError(CUDNN_STATUS_BAD_PARAM,
+                                                             std::string(label) + "["
+                                                                 + std::to_string(i)
+                                                                 + "] has a zero denominator");
                     }
                 }
                 return std::vector<cudnnFraction_t>(array, array + count);

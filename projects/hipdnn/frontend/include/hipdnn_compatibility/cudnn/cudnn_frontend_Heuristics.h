@@ -10,7 +10,7 @@
 /**
  * @file cudnn_frontend_Heuristics.h
  * @brief cuDNN v8 `EngineHeuristics_v8` / `EngineHeuristicsBuilder_v8` and `get_heuristics_list`
- *        over the shim's v8 core.
+ *        over the compatibility layer's v8 core.
  */
 
 #pragma once
@@ -160,7 +160,7 @@ public:
                 = detail::v8::recordOf<detail::v8::GraphCore>(m_heuristics.opGraph);
             if(!graph)
             {
-                throw detail::v8::ShimError(
+                throw detail::v8::CompatibilityError(
                     CUDNN_STATUS_BAD_PARAM,
                     "EngineHeuristicsBuilder: the operation graph is not a built OperationGraph");
             }
