@@ -48,6 +48,7 @@ from ..core import (
 from .binding import gemm_rcr_binding
 from .common import (
     GEMM_DIM_VOCABULARY,
+    RDNA_WMMA_GEMM_ARCHES,
     GemmRequest,
     apply_split_k,
     rcr_request_errors,
@@ -278,7 +279,6 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 _CDNA_MFMA_BF16 = ("gfx90a", "gfx942", "gfx950")
 _CDNA_MEM_BF16 = ("gfx942", "gfx950")
 _CDNA_DECODE_BF16 = ("gfx950",)
-_RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
 
 GEMM_BF16_REGISTRY = CandidateRegistry(
     _FAMILY,
@@ -300,7 +300,7 @@ GEMM_BF16_REGISTRY.extend(
             spec_id="rdna_wmma_default",
             priority=10,
             spec_fn=_spec_rdna_wmma,
-            arches=_RDNA_WMMA,
+            arches=RDNA_WMMA_GEMM_ARCHES,
         ),
         _make_candidate(
             name="universal_gemm_bf16_cdna_mem",
@@ -314,7 +314,7 @@ GEMM_BF16_REGISTRY.extend(
             spec_id="rdna_wmma_32x32",
             priority=20,
             spec_fn=_spec_rdna_wmma_small,
-            arches=_RDNA_WMMA,
+            arches=RDNA_WMMA_GEMM_ARCHES,
         ),
         _make_candidate(
             name="universal_gemm_bf16_cdna_decode",

@@ -870,9 +870,9 @@ Hand the same candidate a shape that *does* tile evenly and the predicate alone
 answers:
 
 ```
-universal_gemm_fp16_rdna_wmma, M=N=K=512, arch=gfx950   # declared: gfx11-generic, gfx1151, gfx1201
+universal_gemm_fp16_rdna_wmma, M=N=K=512, arch=gfx950   # declared: gfx11-generic, gfx1201
   _supports(req)   -> (True, 'ok')
-  capability.check -> (False, "arch 'gfx950' not in ('gfx11-generic', 'gfx1151', 'gfx1201')")
+  capability.check -> (False, "arch 'gfx950' not in ('gfx11-generic', 'gfx1201')")
   admits(req)      -> (False, "capability: arch 'gfx950' not in (...)")
 ```
 
@@ -1204,7 +1204,7 @@ ABI version. A module per arch mirrors the kernel tree one for one.
 The platform families are the opposite case. Every dispatched conv candidate
 builds through one `build_implicit_gemm_conv`, every GEMM candidate through one
 `build_universal_gemm`, with arch passed as an argument. The only thing that
-varies per architecture is a cohort tuple (`_CDNA_MEM`, `_RDNA_WMMA`,
+varies per architecture is a cohort tuple (`_CDNA_MEM`, `RDNA_WMMA_GEMM_ARCHES`,
 `_GFX1250_WMMA`). Splitting those into per-arch modules would put a tuple in
 each file and separate no code, while scattering a cohort list that currently
 reads at a glance.

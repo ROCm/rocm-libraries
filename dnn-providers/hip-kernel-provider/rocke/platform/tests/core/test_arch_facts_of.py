@@ -16,7 +16,12 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
-from rocke.core.arch import ArchTarget, known_arches
+from rocke.core.arch import (
+    ArchTarget,
+    arches_with_own_facts,
+    known_arches,
+    listed_arch_for,
+)
 from rocke.core.arch import domain as arch_domain
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.core.arch.target import (
@@ -116,6 +121,22 @@ def test_every_generic_target_member_has_a_row():
         assert generic in known_arches()
         for member in members:
             assert member in known_arches(), (generic, member)
+
+
+def test_arches_with_own_facts_leaves_out_exactly_the_pointers():
+    """Each distinct set of facts appears once: every known arch that is not a
+    pointer, in known_arches() order, and no pointer."""
+    assert arches_with_own_facts() == tuple(
+        gfx for gfx in known_arches() if gfx not in POINTERS
+    )
+    assert set(_load_generic_targets()) <= set(arches_with_own_facts())
+
+
+def test_arches_with_own_facts_cover_every_known_arch():
+    """Declaring arches_with_own_facts() loses no target: listed_arch_for admits
+    every known arch through an entry, a pointer through its generic."""
+    for gfx in known_arches():
+        assert listed_arch_for(gfx, arches_with_own_facts()) == POINTERS.get(gfx, gfx)
 
 
 def _measured_cells(column, gfx):

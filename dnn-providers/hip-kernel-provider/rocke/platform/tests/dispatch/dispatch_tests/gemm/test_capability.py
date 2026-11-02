@@ -124,7 +124,7 @@ class TestDeclaredCoverage(unittest.TestCase):
         )
         self.assertEqual(
             by_name["universal_gemm_fp16_rdna_wmma"]["capability"]["arches"],
-            ["gfx11-generic", "gfx1151", "gfx1201"],
+            ["gfx11-generic", "gfx1201"],
         )
 
     def test_every_generic_member_gets_exactly_its_generics_candidates(self):
@@ -132,8 +132,8 @@ class TestDeclaredCoverage(unittest.TestCase):
 
         Members have rows of their own, so a request keeps the processor's name.
         A member no list names must reach exactly the candidates, and the specs,
-        a request for its generic reaches; a member a list names (gfx1151,
-        gfx1201) reaches those plus its own.
+        a request for its generic reaches; a member a list names (gfx1201)
+        reaches those plus its own.
         """
         shapes = ((1, 4096, 4096), (64, 64, 64), (512, 1024, 256), (4096, 4096, 4096))
         for dtype, registry in _REGISTRIES:

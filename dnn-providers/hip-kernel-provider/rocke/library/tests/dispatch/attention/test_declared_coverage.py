@@ -16,7 +16,12 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.core.arch import ArchTarget, known_arches, listed_arch_for
+from rocke.core.arch import (
+    ArchTarget,
+    arches_with_own_facts,
+    known_arches,
+    listed_arch_for,
+)
 
 from dispatch.attention import (
     ATTENTION_REGISTRY,
@@ -117,7 +122,7 @@ class TestDeclaredCoverage(unittest.TestCase):
         by_name = {c["name"]: c for c in ATTENTION_REGISTRY.coverage()["candidates"]}
         self.assertEqual(
             by_name["attention_unified_2d"]["capability"]["arches"],
-            list(known_arches()),
+            list(arches_with_own_facts()),
         )
         self.assertEqual(
             by_name["attention_gfx942_dense_pipe"]["capability"]["arches"], ["gfx942"]

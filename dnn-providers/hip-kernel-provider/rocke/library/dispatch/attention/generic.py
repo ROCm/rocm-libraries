@@ -20,7 +20,7 @@ from kernels.common.attention_unified import (
     supports_native_unified_attention_3d_tiled,
     supports_native_unified_attention_tiled,
 )
-from rocke.core.arch import known_arches
+from rocke.core.arch import arches_with_own_facts
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -52,8 +52,11 @@ from .common import (
 # are therefore the second documented exception to wave-size consistency,
 # alongside norm2d. Narrowing them to the wave64 MFMA targets would drop the
 # gfx1250 and RDNA coverage that the scalar and WMMA backends actually provide.
+# A processor whose row points at a generic target is served through that
+# generic's entry (listed_arch_for), so only targets with facts of their own are
+# listed.
 _UNIFIED_CAPABILITY = Capability(
-    arches=known_arches(),
+    arches=arches_with_own_facts(),
     dtypes=UNIFIED_DTYPES,
     shapes=(
         ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),

@@ -137,6 +137,8 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
 # Every RDNA target the WMMA kernels are registered for. A request admits a
 # target when this names the target or its generic (the row arch_specs.json
 # points the target at), and then runs that entry's objects and tuning space.
+# Members are named here (unlike the GEMM candidates' RDNA_WMMA_GEMM_ARCHES)
+# because each one carries its own tuning entry.
 RDNA_WMMA_ARCHES = ("gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201")
 PREFILL_ALGORITHM = "wmma_fmha_fwd_v2"
 DECODE_ALGORITHM = "wmma_fmha_decode"

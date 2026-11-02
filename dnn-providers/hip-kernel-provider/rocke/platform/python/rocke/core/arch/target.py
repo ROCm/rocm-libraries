@@ -2178,6 +2178,21 @@ def known_arches() -> Tuple[str, ...]:
     return tuple(sorted(_load_specs()))
 
 
+def arches_with_own_facts() -> tuple[str, ...]:
+    """Every known arch whose ``arch_specs.json`` row holds its own facts, sorted.
+
+    A row that takes its facts from a generic target (``facts_of``) is left out:
+    its target is the generic's under another name, and :func:`listed_arch_for`
+    admits it wherever the generic is listed. Every known arch is therefore
+    either in this tuple or covered by an entry of it, and each distinct set of
+    facts appears once. Declare these as a candidate's arches, or iterate them,
+    when the claim is "every target": iterating :func:`known_arches` instead
+    repeats each generic's work once per member that points at it.
+    """
+    pointers = _load_pointers()
+    return tuple(gfx for gfx in known_arches() if gfx not in pointers)
+
+
 def target_id_from_isa(isa: str) -> str:
     """Extract the target ID from a COMGR ISA name.
 
