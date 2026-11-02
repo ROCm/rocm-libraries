@@ -44,9 +44,10 @@ nlohmann::json
     knobsJson(const std::map<hipdnn_frontend::KnobType_t, hipdnn_frontend::KnobValueVariant>& knobs)
 {
     auto result = nlohmann::json::object();
-    for(const auto& [name, value] : knobs)
+    for(const auto& entry : knobs)
     {
-        std::visit([&result, &name](const auto& held) { result[name] = held; }, value);
+        const auto& name = entry.first;
+        std::visit([&result, &name](const auto& held) { result[name] = held; }, entry.second);
     }
     return result;
 }

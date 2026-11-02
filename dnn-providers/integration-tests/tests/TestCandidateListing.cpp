@@ -39,12 +39,12 @@ using hipdnn_integration_tests::EngineNotApplicableError;
 using namespace hipdnn_integration_tests::bundle;
 using namespace hipdnn_integration_tests::bundle::testing_support;
 
-using ::testing::_;
-
 // NOLINTBEGIN(readability-identifier-naming)
 
 namespace
 {
+
+using ::testing::_;
 
 const LoadedEngine ENGINE{7, "ENGINE_UNDER_TEST"};
 
@@ -364,7 +364,7 @@ TEST_F(TestCandidateListing, ABundleThatFailedToLoadIsListedAsAnError)
 {
     EXPECT_CALL(_runner, openGraph(_, _)).Times(0);
     EXPECT_CALL(_runner, candidatePage(_, _, _, _, _)).Times(0);
-    ListingCase failed{"Suite.broken", "dir/broken.json", nullptr, "Failed to load bundle"};
+    const ListingCase failed{"Suite.broken", "dir/broken.json", nullptr, "Failed to load bundle"};
 
     const auto listing = listCaseCandidates(_runner, failed, ENGINE);
 
@@ -530,12 +530,12 @@ TEST_F(TestCandidateListing, AMessageThatIsNotUtf8StillWritesTheRecord)
 // What the listing is given: the bundles registration loaded and the ones it could not.
 TEST(TestToListingCases, LoadedAndFailedBundlesBothBecomeCases)
 {
-    LoadedBundle loaded;
+    detail::LoadedBundle loaded;
     loaded.suiteName = "Suite";
     loaded.testName = "case_0";
     loaded.jsonPath = "dir/sweep.json#case_0";
     loaded.bundle = std::make_shared<IntegrationTestBundle>();
-    const FailedLoad failed{
+    const detail::FailedLoad failed{
         "Suite", "case_1", "Failed to load bundle: bad metadata", "dir/sweep.json#case_1"};
 
     const auto cases = toListingCases({loaded}, {failed});

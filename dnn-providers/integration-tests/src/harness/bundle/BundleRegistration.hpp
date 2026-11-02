@@ -634,8 +634,8 @@ inline BundleRegistrationStats
 /// The loaded bundles and the failed loads as the cases --list-candidates lists, in that order.
 /// A failed load is listed with its diagnostic: a case that was written and cannot load must
 /// read as an error, not as a case that was never there.
-inline std::vector<ListingCase> toListingCases(const std::vector<LoadedBundle>& bundles,
-                                               const std::vector<FailedLoad>& failures)
+inline std::vector<ListingCase> toListingCases(const std::vector<detail::LoadedBundle>& bundles,
+                                               const std::vector<detail::FailedLoad>& failures)
 {
     std::vector<ListingCase> cases;
     cases.reserve(bundles.size() + failures.size());
@@ -677,10 +677,10 @@ inline std::vector<ListingCase> collectListingCases()
         return {};
     }
 
-    std::vector<FailedLoad> failures;
+    std::vector<detail::FailedLoad> failures;
     const auto bundles = detail::loadDiscoveredBundles(
         *discovered, /*countFound=*/false, /*countClaims=*/false, &failures);
-    return toListingCases(bundles.value_or(std::vector<LoadedBundle>{}), failures);
+    return toListingCases(bundles.value_or(std::vector<detail::LoadedBundle>{}), failures);
 }
 
 } // namespace hipdnn_integration_tests::bundle
