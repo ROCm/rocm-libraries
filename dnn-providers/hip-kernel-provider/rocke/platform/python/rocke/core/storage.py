@@ -11,7 +11,9 @@ from math import gcd
 from .dtypes import DTypeCategory, dtype_info
 
 _MAX_BITS = (1 << 64) - 1
-_REGISTER_BITS = 32
+
+# Width of one hardware register: the carrier sub-byte elements are packed into by hand.
+REGISTER_BITS = 32
 
 
 def _checked(value: int) -> int:
@@ -134,30 +136,111 @@ def _require_int_at_least(name: str, value: int, minimum: int) -> int:
     return value
 
 
+def is_register_packed(dtype: str) -> bool:
+    """Whether ``dtype``'s elements are packed into registers by hand: True for a
+    sub-byte dtype (fp4, fp6, i4), which has no LLVM element type. A dtype of 8 or
+    more bits is False: LLVM packs its vectors into registers itself (a
+    ``<4 x half>`` occupies two registers). A predicate raises ``ValueError``.
+    """
+    info = dtype_info(dtype)
+    if info.category is DTypeCategory.PREDICATE:
+        raise ValueError(f"{info.name} is a predicate, not register data")
+    return info.encoded_bits < 8
+
+
+# MMA scale encodings: whole bytes, but no arithmetic and no value form in the IR (neither engine
+# maps them to an LLVM or HIP type), so they are held and moved as bytes.
+SCALE_ENCODINGS = ("e8m0", "e5m3")
+
+# Dtypes with no arithmetic of their own, held in the integer of their width.
+_HELD_AS_INTEGER = {"tf32": "i32", **{name: "i8" for name in SCALE_ENCODINGS}}
+
+
+def storage_dtype(dtype: str) -> str:
+    """The dtype whose elements hold ``dtype`` in registers and in LDS -- the one rule::
+
+        dtype                         storage
+        fp4e2m1, fp6e2m3, i4, ...     i32     register-packed: whole 32-bit words
+        tf32                          i32     no arithmetic of its own
+        e8m0, e5m3                    i8      scale encodings (SCALE_ENCODINGS)
+        every other dtype             itself
+
+    ``i1`` (a predicate) is not register data and raises ``ValueError``.
+    """
+    if is_register_packed(dtype):
+        return "i32"
+    name = dtype_info(dtype).name
+    return _HELD_AS_INTEGER.get(name, name)
+
+
+def storage_group(dtype: str) -> tuple[int, int]:
+    """``(elements, storage elements)``: the fewest elements of ``dtype`` that fill
+    whole elements of its :func:`storage_dtype`, and how many they fill. A dtype held
+    one to one is (1, 1); a register-packed one is a whole-word group, (8, 1) at 4
+    bits and (16, 3) at 6. Elements move between registers, and between registers
+    and memory, in these groups without repacking bits.
+    """
+    if not is_register_packed(dtype):
+        return (1, 1)
+    return BitPacking(dtype_info(dtype).encoded_bits).group(REGISTER_BITS)
+
+
+def elements_to_storage(dtype: str, count: int) -> int:
+    """How many :func:`storage_dtype` elements hold ``count`` elements of ``dtype``
+    laid out from element 0: ``count`` for a dtype held one to one, else the 32-bit
+    words they occupy low-bit-first, a partly filled last word included. Exact for a
+    whole number of :func:`storage_group` groups, as every packed offset and stride
+    is; rounded up otherwise, as an allocation needs."""
+    _require_int_at_least("element count", count, 0)
+    if not is_register_packed(dtype):
+        return count
+    return -(-count * dtype_info(dtype).encoded_bits // REGISTER_BITS)
+
+
+def storage_to_elements(dtype: str, storage_count: int) -> int:
+    """How many whole elements of ``dtype`` ``storage_count`` :func:`storage_dtype`
+    elements hold: the inverse of :func:`elements_to_storage` for a whole number of
+    :func:`storage_group` groups."""
+    _require_int_at_least("storage element count", storage_count, 0)
+    if not is_register_packed(dtype):
+        return storage_count
+    return storage_count * REGISTER_BITS // dtype_info(dtype).encoded_bits
+
+
+def element_bytes(dtype: str) -> int:
+    """Bytes of one element of ``dtype``. A sub-byte dtype has no byte width of its
+    own -- it is addressed in the 32-bit words of its :func:`storage_dtype` -- and
+    raises ``ValueError``."""
+    info = dtype_info(dtype)
+    if info.encoded_bits % 8:
+        raise ValueError(
+            f"element_bytes failed - dtype={info.name!r} is {info.encoded_bits} bits, "
+            "expected a whole number of bytes; a sub-byte dtype is addressed in the "
+            "32-bit words of its storage_dtype"
+        )
+    return info.encoded_bits // 8
+
+
 def register_packing(dtype: str, count: int) -> FragmentPacking | None:
     """How ``count`` elements of a sub-byte ``dtype`` sit densely in 32-bit registers.
 
     Elements pack low-bit-first with no padding between them, and must fill
-    whole registers. A dtype of 8 or more bits returns None: it has an LLVM
-    element type, and LLVM packs its vectors into registers itself (a
-    ``<4 x half>`` occupies two registers), so rocke never packs it by hand. A
-    predicate raises.
+    whole registers. A dtype that is not register-packed (:func:`is_register_packed`)
+    returns None, so rocke never packs it by hand. A predicate raises.
     """
     info = dtype_info(dtype)
     _require_int_at_least("element count", count, 1)
-    if info.category is DTypeCategory.PREDICATE:
-        raise ValueError(f"{info.name} is a predicate, not register data")
-    if info.encoded_bits >= 8:
+    if not is_register_packed(dtype):
         return None
     bits = count * info.encoded_bits
-    if bits % _REGISTER_BITS:
+    if bits % REGISTER_BITS:
         raise ValueError(
             f"{count} {info.name} elements occupy {bits} bits, not a whole number of "
-            f"{_REGISTER_BITS}-bit registers -- packed operands must fill whole "
+            f"{REGISTER_BITS}-bit registers -- packed operands must fill whole "
             "registers"
         )
     return FragmentPacking(
-        BitPacking(info.encoded_bits), count, _REGISTER_BITS, bits // _REGISTER_BITS
+        BitPacking(info.encoded_bits), count, REGISTER_BITS, bits // REGISTER_BITS
     )
 
 
