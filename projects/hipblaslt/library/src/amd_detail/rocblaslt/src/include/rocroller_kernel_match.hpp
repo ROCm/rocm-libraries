@@ -3,137 +3,106 @@
 
 #pragma once
 
-#include <string>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
 
 // One entry from chooseSolutionIndexParameters, in that function's order.
 // streamK and the non-temporal bits are kept so a checked-in kernel is not
 // substituted for a rocRoller kernel that was not captured.
-//
-// unroll is prefetchInFlight, the integer after _UR_. A scale-block extent of
-// 0 means that operand has no block-scale size in the name. The A token is
-// blockRow[x blockCol]; the B token is blockCol[x blockRow], matching
-// gemm.cpp. The second extent is omitted from the name when it is 1.
 struct RocRollerSelectedTile
 {
-    int  m = 0;
-    int  n = 0;
-    int  k = 0;
+    int  m                = 0;
+    int  n                = 0;
+    int  k                = 0;
     bool workgroupMapping = false;
     bool streamK          = false;
     bool nonTemporalA     = false;
     bool nonTemporalB     = false;
-    int  unroll           = 0;
-    int  scaleABlockRow   = 0;
-    int  scaleABlockCol   = 1;
-    int  scaleBBlockCol   = 0;
-    int  scaleBBlockRow   = 1;
 };
 
-// `token` occurs in `kernel` and the character after it is '_' or the end.
-// Stops "_UR_2" from matching "_UR_20", and "_WGT_16x16x128" from matching a
-// longer K extent.
-inline bool rocRollerDelimitedToken(const std::string& kernel, const std::string& token)
+// What a checked-in rocRoller kernel's solution declares about it: the macro
+// tile (customKernel.macrotile), StreamK (a RocRollerStreamK workspace) and
+// workgroup mapping (an RR_WorkgroupMapping kernarg). Operand types,
+// transposes, scale-block size and scale layout are the solution's predicates,
+// which the caller evaluates. The unroll follows from the types and the tile,
+// so it needs no match of its own.
+struct RocRollerKernelTraits
 {
-    const auto pos = kernel.find(token);
-    if(pos == std::string::npos)
+    int  m                = 0;
+    int  n                = 0;
+    int  k                = 0;
+    bool streamK          = false;
+    bool workgroupMapping = false;
+};
+
+// Does a checked-in kernel with these traits implement exactly this ranked tile?
+inline bool rocRollerKernelMatchesTile(const RocRollerKernelTraits& kernel,
+                                       const RocRollerSelectedTile& tile)
+{
+    // No non-temporal variant is checked in.
+    if(tile.nonTemporalA || tile.nonTemporalB)
         return false;
-    const auto end = pos + token.size();
-    return end == kernel.size() || kernel[end] == '_';
+    if(kernel.m != tile.m || kernel.n != tile.n || kernel.k != tile.k)
+        return false;
+    if(kernel.streamK != tile.streamK)
+        return false;
+    // StreamK disables workgroup mapping even when the ranked tile requests it.
+    return kernel.workgroupMapping == (tile.workgroupMapping && !tile.streamK);
 }
 
-// The integer gemm.cpp writes after SA_<mode><type>_ or SB_<mode><type>_.
-// primary is blockRowSize on A and blockColSize on B. secondary stays 1 when
-// the name omits the x-extent. present is false when that operand has no
-// block-scale size token. Returns false when the token is malformed.
-inline bool rocRollerScaleBlockToken(const std::string& kernel,
-                                    const char*        tag,
-                                    int&               primary,
-                                    int&               secondary,
-                                    bool&              present)
+// Where an accepting checked-in kernel stands when no ranked tile has one.
+// Compared in this order, the first difference deciding:
+//   1. the earliest position of the kernel's macro tile in the ranked list,
+//      which is origami's predicted order; tiles the ranker does not list last;
+//   2. the larger macro-tile area M x N;
+//   3. fewer differences from the WGM and StreamK the ranker gives that tile;
+//      for an unlisted tile, WGM exactly when K >= 4096 and no StreamK;
+//   4. the lower solution index.
+struct RocRollerFallbackRank
 {
-    present   = false;
-    primary   = 0;
-    secondary = 1;
-    const auto tagPos = kernel.find(tag);
-    if(tagPos == std::string::npos)
-        return true;
+    size_t  tilePosition  = 0;
+    int64_t area          = 0;
+    int     mismatches    = 0;
+    int     solutionIndex = 0;
 
-    const auto tagLen  = std::char_traits<char>::length(tag);
-    const auto typeEnd = kernel.find('_', tagPos + tagLen);
-    if(typeEnd == std::string::npos || typeEnd + 1 >= kernel.size() || kernel[typeEnd + 1] < '0'
-       || kernel[typeEnd + 1] > '9')
-        return true;
-
-    present = true;
-    auto i  = typeEnd + 1;
-    while(i < kernel.size() && kernel[i] >= '0' && kernel[i] <= '9')
+    bool operator<(const RocRollerFallbackRank& other) const
     {
-        primary = primary * 10 + (kernel[i] - '0');
-        ++i;
+        if(tilePosition != other.tilePosition)
+            return tilePosition < other.tilePosition;
+        if(area != other.area)
+            return area > other.area;
+        if(mismatches != other.mismatches)
+            return mismatches < other.mismatches;
+        return solutionIndex < other.solutionIndex;
     }
-    if(i < kernel.size() && kernel[i] == 'x')
+};
+
+inline RocRollerFallbackRank rocRollerFallbackRank(const RocRollerKernelTraits&              kernel,
+                                                   const std::vector<RocRollerSelectedTile>& ranked,
+                                                   int64_t problemK,
+                                                   int     solutionIndex)
+{
+    RocRollerFallbackRank rank;
+    rank.tilePosition = ranked.size();
+    for(size_t i = 0; i < ranked.size(); ++i)
     {
-        ++i;
-        secondary = 0;
-        if(i >= kernel.size() || kernel[i] < '0' || kernel[i] > '9')
-            return false;
-        while(i < kernel.size() && kernel[i] >= '0' && kernel[i] <= '9')
+        if(ranked[i].m == kernel.m && ranked[i].n == kernel.n && ranked[i].k == kernel.k)
         {
-            secondary = secondary * 10 + (kernel[i] - '0');
-            ++i;
+            rank.tilePosition = i;
+            break;
         }
     }
-    return i == kernel.size() || kernel[i] == '_';
-}
 
-inline bool rocRollerScaleBlockMatches(const std::string& kernel,
-                                       const char*        tag,
-                                       int                expectPrimary,
-                                       int                expectSecondary)
-{
-    int  primary   = 0;
-    int  secondary = 1;
-    bool present   = false;
-    if(!rocRollerScaleBlockToken(kernel, tag, primary, secondary, present))
-        return false;
-    if(expectPrimary == 0)
-        return !present;
-    return present && primary == expectPrimary && secondary == expectSecondary;
-}
-
-// Does a checked-in rocRoller kernel name describe exactly this ranked tile?
-// `prefix` runs through the trailing "_Float_". The caller builds it.
-inline bool rocRollerKernelNameMatchesTile(const std::string&           kernel,
-                                           const std::string&           prefix,
-                                           const RocRollerSelectedTile& tile)
-{
-    if(kernel.find(prefix) == std::string::npos)
-        return false;
-
-    // Captured kernels use natural scales. Preswizzled support would also need
-    // to match these tokens against the problem's scale format.
-    if(kernel.find("_PSTA_") != std::string::npos || kernel.find("_PTA_") != std::string::npos
-       || kernel.find("_PSTB_") != std::string::npos || kernel.find("_PTB_") != std::string::npos)
-        return false;
-
-    // Include delimiters so a tile extent or unroll depth cannot match part of
-    // a larger number.
-    const std::string wgt = "_WGT_" + std::to_string(tile.m) + "x" + std::to_string(tile.n) + "x"
-                            + std::to_string(tile.k) + "_UR_" + std::to_string(tile.unroll);
-    if(!rocRollerDelimitedToken(kernel, wgt))
-        return false;
-
-    // genKernelName places SK immediately before the workgroup tile token.
-    const bool hasSk = kernel.find("_SK" + wgt) != std::string::npos;
-    if(hasSk != tile.streamK)
-        return false;
-
-    // Two kernels of one tile can also differ in block-scale size.
-    if(!rocRollerScaleBlockMatches(kernel, "SA_", tile.scaleABlockRow, tile.scaleABlockCol)
-       || !rocRollerScaleBlockMatches(kernel, "SB_", tile.scaleBBlockCol, tile.scaleBBlockRow))
-        return false;
-
-    // StreamK disables workgroup mapping even when the ranked tile requests it.
-    const bool hasWgm = kernel.find("_WGM_") != std::string::npos;
-    return hasWgm == (tile.workgroupMapping && !tile.streamK);
+    bool wantStreamK = false;
+    bool wantWgm     = problemK >= 4096;
+    if(rank.tilePosition < ranked.size())
+    {
+        wantStreamK = ranked[rank.tilePosition].streamK;
+        wantWgm     = ranked[rank.tilePosition].workgroupMapping && !wantStreamK;
+    }
+    rank.area          = static_cast<int64_t>(kernel.m) * kernel.n;
+    rank.mismatches    = (kernel.workgroupMapping != wantWgm) + (kernel.streamK != wantStreamK);
+    rank.solutionIndex = solutionIndex;
+    return rank;
 }
