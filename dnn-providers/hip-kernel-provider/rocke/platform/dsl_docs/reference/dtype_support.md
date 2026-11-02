@@ -157,7 +157,8 @@ The ops that are signed by definition -- `smax`, `smin`, `sext` and their
 vector forms -- refuse a `u8` operand (`smax treats its operands as signed, but
 u8 is unsigned -- use umax`). Native `u16`/`u32` types remain absent.
 A single `u8` can be loaded from and stored to global memory and stored to
-LDS. The vector memory builders refuse `u8`: the global pair, and the LDS pair
+LDS, and `zero_vec` builds a `u8` zero vector. The vector memory builders
+refuse `u8`: the global pair, and the LDS pair
 `smem_load_vN` / `smem_store_vN`, which admit one shared element list (so an
 LDS load of `u8`, which `smem_load_vN` also serves for one element, is refused
 too). `u4`, like `i4`, is packed-only: the IR builder of both engines refuses

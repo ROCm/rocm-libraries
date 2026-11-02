@@ -96,7 +96,7 @@ const_f64(value)           # printed as the exact IEEE-754 bit pattern
 fp16_zero()
 zero_vec_f32(n)            # <n x f32>, all zeros
 zero_vec_f32_4()           # <4 x f32>, all zeros
-zero_vec(elem, n)          # f32 / f16 / bf16 / f64 / fp8e4m3 / bf8e5m2 / i8 / i16 / i32
+zero_vec(elem, n)          # f32 / f16 / bf16 / f64 / fp8e4m3 / bf8e5m2 / i8 / u8 / i16 / i32
 ```
 
 ### Arithmetic / compare / cast

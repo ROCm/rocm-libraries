@@ -2568,7 +2568,7 @@ class IRBuilder:
         _refuse_packed_only_value("zero_vec", elem)
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, I16, I32):
+        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, U8, I16, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
