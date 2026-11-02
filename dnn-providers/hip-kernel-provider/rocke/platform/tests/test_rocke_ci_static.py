@@ -117,6 +117,29 @@ class TestIrParityCoverage(unittest.TestCase):
         case_ids = [case["case_id"] for case in cases()]
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
+    def test_nvfp4_variants_are_registered_and_lowerable(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        registered = {case["case_id"]: case for case in cases()}
+        for dtype in ("bf16", "fp16"):
+            for k in (128, 256):
+                cid = f"gemm/gfx1250/nvfp4/{dtype}/k{k}"
+                with self.subTest(case=cid):
+                    self.assertIn(cid, registered)
+                    case = registered[cid]
+                    self.assertEqual(case["arch"], "gfx1250")
+                    self.assertEqual(case["family"], "gemm")
+                    kernel = case["build"]()
+                    self.assertEqual(len(kernel.params), 10)
+                    self.assertEqual(
+                        [param.name for param in kernel.params[-2:]],
+                        ["A_tensor_scale", "B_tensor_scale"],
+                    )
+                    llvm = lower_kernel_to_llvm(
+                        kernel, arch=case["arch"], llvm_flavor="llvm23"
+                    )
+                    self.assertIn("fmul float %A_tensor_scale, %B_tensor_scale", llvm)
+
     def test_ir_cases_match_golden_sha256(self):
         """Byte-stability gate: every case's lowered-IR sha256 (and the set of
         expected failures) must match the committed golden, for EVERY llvm

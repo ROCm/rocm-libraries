@@ -20,8 +20,9 @@ rounds only once. The same tool can keep FP32 multiplication separate from FP16
 conversion. **Use the returned value** in the next operation; calling the
 barrier and then using the original value does not protect that operation.
 
-This feature is covered through AMDGPU LLVM IR and COMGR compilation. Native
-HIP-source lowering of the barrier is unsupported.
+This feature is covered through AMDGPU LLVM IR and COMGR compilation. Python
+HIP-source lowering also supports the barrier, including the NVFP4 FP16
+tensor epilogue. Native HIP-source lowering of the barrier is unsupported.
 
 The C API is `rocke_b_optimization_barrier(builder, value)`. Both APIs use the
 existing inline-assembly operation. The assembly text is empty, and its output
