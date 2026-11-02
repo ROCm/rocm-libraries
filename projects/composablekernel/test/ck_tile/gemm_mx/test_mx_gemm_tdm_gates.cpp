@@ -16,6 +16,7 @@
 #include <initializer_list>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -91,8 +92,9 @@ std::pair<bool, std::string> logged(F&& f)
 }
 
 // The pipeline problem of TdmMxGemm: tile 64 x 64 x KTile, warps 2x2x1, a WarpTile x WarpTile x
-// 128 warp tile and ScaleBlockSize-element scales (32 by default), as in the TDM gtests. It names
-// pipeline, so a policy can be checked with it on its own.
+// 128 warp tile and ScaleBlockSize-element scales (32 by default), as in the TDM gtests; with
+// ClusterLaunch, clusters of 2 x 2 workgroups, as in the TDM gtests' cluster-launch rows. It names
+// no pipeline, so a policy can be checked with it on its own.
 template <typename A,
           typename B,
           typename ALayout       = Row,
@@ -101,12 +103,18 @@ template <typename A,
           typename BScale        = E8M0,
           index_t KTile          = 128,
           index_t WarpTile       = 16,
-          index_t ScaleBlockSize = 32>
+          index_t ScaleBlockSize = 32,
+          bool ClusterLaunch     = false>
 struct TdmMxProblem
 {
-    using Shape = ck_tile::TileGemmShape<ck_tile::sequence<64, 64, KTile>,
-                                         ck_tile::sequence<2, 2, 1>,
-                                         ck_tile::sequence<WarpTile, WarpTile, 128>>;
+    using BlockTile   = ck_tile::sequence<64, 64, KTile>;
+    using BlockWarps  = ck_tile::sequence<2, 2, 1>;
+    using WarpLengths = ck_tile::sequence<WarpTile, WarpTile, 128>;
+    using ClusterTile = ck_tile::sequence<2, 2, 1>;
+    using Shape       = std::conditional_t<
+              ClusterLaunch,
+              ck_tile::ClusterTileGemmShape<ClusterTile, BlockTile, BlockWarps, WarpLengths>,
+              ck_tile::TileGemmShape<BlockTile, BlockWarps, WarpLengths>>;
     using Traits =
         ck_tile::TileGemmUniversalTraits<false, false, false, true, ALayout, BLayout, Row, true>;
     using type = ck_tile::MxGemmPipelineProblem<A,
@@ -134,13 +142,24 @@ template <template <typename...> class Pipeline,
           typename BScale        = E8M0,
           index_t KTile          = 128,
           index_t WarpTile       = 16,
-          index_t ScaleBlockSize = 32>
+          index_t ScaleBlockSize = 32,
+          bool ClusterLaunch     = false>
 struct TdmMxGemm
 {
-    using ProblemDef =
-        TdmMxProblem<A, B, ALayout, BLayout, AScale, BScale, KTile, WarpTile, ScaleBlockSize>;
-    using Shape           = typename ProblemDef::Shape;
-    using Partitioner     = ck_tile::GemmSpatiallyLocalTilePartitioner<Shape, 8, 4>;
+    using ProblemDef         = TdmMxProblem<A,
+                                            B,
+                                            ALayout,
+                                            BLayout,
+                                            AScale,
+                                            BScale,
+                                            KTile,
+                                            WarpTile,
+                                            ScaleBlockSize,
+                                            ClusterLaunch>;
+    using Shape              = typename ProblemDef::Shape;
+    using LocalPartitioner   = ck_tile::GemmSpatiallyLocalTilePartitioner<Shape, 8, 4>;
+    using ClusterPartitioner = ck_tile::GemmClusterTilePartitioner<Shape>;
+    using Partitioner     = std::conditional_t<ClusterLaunch, ClusterPartitioner, LocalPartitioner>;
     using Problem         = typename ProblemDef::type;
     using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<A,
                                                              B,
@@ -170,7 +189,9 @@ struct TdmMxGemm
         MxGemmKernel<Partitioner, Pipeline<Problem>, ck_tile::TdmEpilogue<EpilogueProblem>>;
     using GroupedKernel = ck_tile::
         MxGroupedGemmKernel<Partitioner, Pipeline<Problem>, ck_tile::TdmEpilogue<EpilogueProblem>>;
+    // The kernel takes its scale packing and launch mode from TdmMxProblem, as the tests assume.
     static_assert(Kernel::KXdlPackEff == kTdmKXdlPack);
+    static_assert(Kernel::ClusterLaunch == ClusterLaunch);
 
     static typename Kernel::KernelArgs
     make_args(index_t M, index_t N, index_t K, index_t stride_A, index_t stride_B)
@@ -776,6 +797,98 @@ TEST(MxGemmTdmGates, KernelKeepsTheKGatesOfOtherConfigurations)
     expect_shape_accepted<Rrr>(64, 64, 256, 256, 64);
     expect_shape_rejection<Rrr>(
         64, 64, 160, 160, 64, "requires K to be a multiple of ScaleBlockSize * KXdlPack = 128");
+    skip_without_gfx125();
+}
+
+// UniversalGemmKernel::IsSupportedArgument checks the byte sizes of A, B and E but not of the
+// scales, and for the TDM V1 and V2 pipelines does not query the device. That it accepts a shape
+// the scale-view check rejects shows that the scale views alone reach 2^31 bytes.
+template <typename Gemm>
+void expect_operand_sizes_accepted(
+    index_t M, index_t N, index_t K, index_t stride_A, index_t stride_B)
+{
+    const auto kargs = Gemm::make_args(M, N, K, stride_A, stride_B);
+    const auto [supported, log] =
+        logged([&] { return Gemm::Kernel::BaseKernel::IsSupportedArgument(kargs); });
+    EXPECT_TRUE(supported) << M << " " << N << " " << K << "\n" << log;
+}
+
+// A scale view holds GetScalePacksK(K) int32 packs for each of its rows, M or N rounded up to the
+// warp tile. With FP8 and K = 1 that is one 4-byte pack for a 1-byte row of A or column of B, so
+// the view reaches 2^31 bytes at 2^29 rows while A, B and E stay below 2^31 bytes.
+TEST(MxGemmTdmGates, KernelChecksTheScaleViewSize)
+{
+    // Rows of 4 bytes that make 2^31 bytes.
+    constexpr index_t kRowsAtLimit = index_t{1} << 29;
+    // B scales: N rounded up to the 16-wide warp tile. 2^29 - 16 rows hold 2^31 - 64 bytes;
+    // 2^29 - 15 rows round up to 2^29, exactly 2^31 bytes.
+    using Gemm = TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F8>;
+    expect_shape_accepted<Gemm>(1, kRowsAtLimit - 16, 1, 1, 1);
+    expect_shape_rejection<Gemm>(1,
+                                 kRowsAtLimit - 15,
+                                 1,
+                                 1,
+                                 1,
+                                 "requires the packed B-scale view to be smaller than 2^31 bytes, "
+                                 "but it holds 2147483648 bytes");
+    expect_operand_sizes_accepted<Gemm>(1, kRowsAtLimit - 15, 1, 1, 1);
+    // The size does not wrap: N = INT_MAX rounds up to 2^31 rows, 2^33 bytes.
+    expect_shape_rejection<Gemm>(1,
+                                 std::numeric_limits<index_t>::max(),
+                                 1,
+                                 1,
+                                 1,
+                                 "requires the packed B-scale view to be smaller than 2^31 bytes, "
+                                 "but it holds 8589934592 bytes");
+    // K = 129 needs two packs per row, so the limit falls at half the N. B is then larger than
+    // 2^31 bytes, which IsSupportedArgument rejects, so the accepted N is checked with
+    // IsTdmShapeSupported alone.
+    EXPECT_TRUE(
+        Gemm::Kernel::IsTdmShapeSupported(Gemm::make_args(1, kRowsAtLimit / 2 - 16, 129, 129, 129)))
+        << kRowsAtLimit / 2 - 16;
+    expect_shape_rejection<Gemm>(1,
+                                 kRowsAtLimit / 2 - 15,
+                                 129,
+                                 129,
+                                 129,
+                                 "requires the packed B-scale view to be smaller than 2^31 bytes, "
+                                 "but it holds 2147483648 bytes");
+    // A scales with cluster launch: all of M, rounded up to the 32-wide warp tile of the TDM
+    // gtests' cluster-launch rows.
+    using Cluster = TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1,
+                              F8,
+                              F8,
+                              Row,
+                              Col,
+                              E8M0,
+                              E8M0,
+                              128,
+                              32,
+                              32,
+                              /*ClusterLaunch=*/true>;
+    ASSERT_FALSE(Cluster::Kernel::kOffsetPtrsByTileCoords);
+    expect_shape_accepted<Cluster>(kRowsAtLimit - 32, 1, 1, 1, 1);
+    expect_shape_rejection<Cluster>(kRowsAtLimit - 31,
+                                    1,
+                                    1,
+                                    1,
+                                    1,
+                                    "requires the packed A-scale view to be smaller than 2^31 "
+                                    "bytes, but it holds 2147483648 bytes");
+    expect_operand_sizes_accepted<Cluster>(kRowsAtLimit - 31, 1, 1, 1, 1);
+    expect_shape_rejection<Cluster>(std::numeric_limits<index_t>::max(),
+                                    1,
+                                    1,
+                                    1,
+                                    1,
+                                    "requires the packed A-scale view to be smaller than 2^31 "
+                                    "bytes, but it holds 8589934592 bytes");
+    // With a row-major A and C and no cluster launch the A-scale view spans one M tile, as RunGemm
+    // shifts the A-scale pointer to it.
+    using NoCluster =
+        TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F8, Row, Col, E8M0, E8M0, 128, 32>;
+    ASSERT_TRUE(NoCluster::Kernel::kOffsetPtrsByTileCoords);
+    expect_shape_accepted<NoCluster>(kRowsAtLimit - 31, 1, 1, 1, 1);
     skip_without_gfx125();
 }
 

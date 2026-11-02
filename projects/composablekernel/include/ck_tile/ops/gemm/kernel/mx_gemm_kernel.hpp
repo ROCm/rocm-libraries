@@ -142,6 +142,9 @@ inline constexpr bool is_mx_tdm_k_tail_config_v =
  *            contiguous extent is K for a row-major A and a column-major B, M for a column-major
  *            A and N for a row-major B.
  *          Apart from that, M and N are not checked: TDM clips partial tiles in hardware.
+ *          MxGemmKernel::IsTdmShapeSupported adds one check that depends on M and N: the B-scale
+ *          matrix (N' x S), and the A-scale matrix (M' x S, or one M tile of it when the kernel
+ *          shifts the A-scale pointer per M tile), must each be smaller than 2^31 bytes.
  *          The function takes the operand types and tile constants rather than a kernel, so it
  *          can also be checked for operand types that the TDM pipelines cannot instantiate yet.
  * @tparam ADataType      Type of A.
@@ -162,7 +165,7 @@ inline constexpr bool is_mx_tdm_k_tail_config_v =
  * @param K        Reduction length.
  * @param stride_A Stride of A in elements, as in MxGemmHostArgs.
  * @param stride_B Stride of B in elements, as in MxGemmHostArgs.
- * @return true if the TDM MX path supports the shape.
+ * @return true if the shape passes these checks.
  */
 template <typename ADataType,
           typename BDataType,
@@ -515,12 +518,15 @@ struct MxGemmKernel
     }
 
     /**
-     * @brief Runs only the IsMxTdmShapeSupported checks of IsSupportedArgument.
-     * @details Skips the split-K, pointer-alignment and device checks, so it runs on any host.
+     * @brief Runs the shape checks of IsSupportedArgument: IsMxTdmShapeSupported and
+     *        IsScaleViewSizeSupported.
+     * @details Skips the split-K, pointer-alignment and device checks and the A, B, D and E size
+     *          checks of UniversalGemmKernel::IsSupportedArgument.
      * @tparam AllowKTail Passed to IsMxTdmShapeSupported. The default, true, gives the checks of
      *                    IsSupportedArgument; false keeps the K checks for every configuration, as
      *                    MxGroupedGemmKernel::IsSupportedArgument requires.
-     * @return true if the TDM MX path supports the shape in kargs.
+     * @param kargs Kernel arguments; M, N, K and the A and B strides are read.
+     * @return true if the shape in kargs passes these checks.
      */
     template <bool AllowKTail = true>
     CK_TILE_HOST static bool IsTdmShapeSupported(const KernelArgs& kargs)
@@ -531,6 +537,7 @@ struct MxGemmKernel
                       "MX GEMM: the TDM pipelines take a single A and a single B tensor.");
         using ALayout = remove_cvref_t<std::tuple_element_t<0, AsLayout>>;
         using BLayout = remove_cvref_t<std::tuple_element_t<0, BsLayout>>;
+        // IsMxTdmShapeSupported goes first, so a shape it rejects is logged with its own reason.
         return IsMxTdmShapeSupported<ADataType,
                                      BDataType,
                                      ALayout,
@@ -539,9 +546,72 @@ struct MxGemmKernel
                                      BlockScaleSize,
                                      KXdlPackEff,
                                      AllowKTail>(
-            kargs.M, kargs.N, kargs.K, kargs.stride_As[0], kargs.stride_Bs[0]);
+                   kargs.M, kargs.N, kargs.K, kargs.stride_As[0], kargs.stride_Bs[0]) &&
+               IsScaleViewSizeSupported(kargs);
     }
 
+    private:
+    /**
+     * @brief Whether the packed scale views of MakeScaleABlockWindow and MakeScaleBBlockWindow
+     *        are smaller than 2^31 bytes.
+     * @details The scales are read with buffer loads, which compute byte offsets in index_t, so
+     *          the kernel keeps each scale view below 2^31 bytes, the limit
+     *          UniversalGemmKernel::IsSupportedArgument applies to A, B, D and E but not to the
+     *          scales. A scale view holds GetScalePacksK(K) int32 packs in each of its
+     *          ceil(M / (MThreadPerXdl * MXdlPackEff)) * MThreadPerXdl rows (for B: N,
+     *          NThreadPerXdl and NXdlPackEff); with MXdlPackEff and NXdlPackEff of 1 on the TDM
+     *          pipelines, these are the M' (N') rows of IsMxTdmShapeSupported. A scale view can be
+     *          larger than A (B): with a K tail, for an fp8_t B with K < 4, a column of B holds
+     *          fewer than 4 bytes and its row of scales holds 4; and as N is rounded up to the
+     *          warp tile, with 16-element scales, a 32-wide warp tile and N = 1, the B-scale view
+     *          holds 2K bytes for a K-byte B (likewise for A and M). The A-scale view spans one M
+     *          tile when RunGemm shifts the A-scale pointer to it (kOffsetPtrsByTileCoords), and
+     *          all of M otherwise, as with cluster launch or a column-major A or C.
+     * @param kargs Kernel arguments; M, N and K are read.
+     * @return true if both scale views are smaller than 2^31 bytes.
+     */
+    CK_TILE_HOST static bool IsScaleViewSizeSupported(const KernelArgs& kargs)
+    {
+        // The byte size of a scale view: the rows and packs of its descriptor (see
+        // MakeScaleABlockWindow), all in 64 bits, so that no rounding up or product overflows for
+        // any M, N and K.
+        constexpr long_index_t kScalePackK = BlockScaleSize * KXdlPackEff;
+        constexpr long_index_t kScaleBytes = sizeof(remove_pointer_t<ScalePtrType>);
+        const long_index_t packs_k =
+            integer_divide_ceil(static_cast<long_index_t>(kargs.K), kScalePackK);
+        const auto view_bytes = [&](index_t extent, index_t thread_per_xdl, index_t xdl_pack) {
+            const long_index_t row_groups =
+                integer_divide_ceil(static_cast<long_index_t>(extent),
+                                    static_cast<long_index_t>(thread_per_xdl) * xdl_pack);
+            return row_groups * thread_per_xdl * packs_k * kScaleBytes;
+        };
+        const auto reject = [](const char* operand, long_index_t bytes) {
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR("MX GEMM with a TDM pipeline requires the packed ",
+                              operand,
+                              "-scale view to be smaller than 2^31 bytes, but it holds ",
+                              bytes,
+                              " bytes!");
+            }
+            return false;
+        };
+        constexpr long_index_t kSizeLimit = long_index_t{1} << 31;
+        const long_index_t a_bytes =
+            view_bytes(BaseKernel::ClampMToOffsettedTile(kargs.M, 0), MThreadPerXdl, MXdlPackEff);
+        if(a_bytes >= kSizeLimit)
+        {
+            return reject("A", a_bytes);
+        }
+        const long_index_t b_bytes = view_bytes(kargs.N, NThreadPerXdl, NXdlPackEff);
+        if(b_bytes >= kSizeLimit)
+        {
+            return reject("B", b_bytes);
+        }
+        return true;
+    }
+
+    public:
     template <typename KernelArgs>
     CK_TILE_DEVICE static auto
     MakeScaleABlockWindow(const std::array<ScalePtrType, NumATensor>& as_scale_ptr,
@@ -549,6 +619,8 @@ struct MxGemmKernel
                           index_t block_idx_m,
                           const index_t k_elem_offset = 0)
     {
+        // IsScaleViewSizeSupported recomputes this view's lengths in 64 bits to bound its byte
+        // size; change both together.
         const auto&& scale_packs_m = integer_divide_ceil(kargs.M, MThreadPerXdl * MXdlPackEff);
         const auto&& scale_packs_k = GetScalePacksK(kargs.K);
 
@@ -607,6 +679,8 @@ struct MxGemmKernel
                           index_t block_idx_n,
                           const index_t k_elem_offset = 0)
     {
+        // IsScaleViewSizeSupported recomputes this view's lengths in 64 bits to bound its byte
+        // size; change both together.
         const auto&& scale_packs_n = integer_divide_ceil(kargs.N, NThreadPerXdl * NXdlPackEff);
         const auto&& scale_packs_k = GetScalePacksK(kargs.K);
 
