@@ -30,6 +30,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
   ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
   does the weight tensor in every case.
+* [Conv] Fixed HIP graph captures of convolutions failing with `hipErrorStreamCaptureInvalidated`
+  after a find had skipped a naive solver for exceeding `MIOPEN_NAIVE_TIMEOUT` (#12121). Scratch
+  held by a skipped evaluation is now released by a background thread as soon as its kernel
+  finishes, rather than from a later kernel launch, so it is also released in workloads that only
+  replay a captured graph.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for

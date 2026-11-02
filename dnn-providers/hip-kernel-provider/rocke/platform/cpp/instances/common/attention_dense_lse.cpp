@@ -9,30 +9,8 @@
  * order: C++ leaves argument evaluation order unspecified, and each call
  * consumes an SSA id.
  */
-#include <math.h>
-
-#include "rocke/helper_rocke.helpers.attention_fwd_ext.h"
 #include "rocke/instance_attention_dense_lse_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
-
-void rocke_attention_dense_lse_store(rocke_ir_builder_t* b,
-                                     rocke_value_t* dst,
-                                     rocke_value_t* element_offset,
-                                     rocke_value_t* m_log2,
-                                     rocke_value_t* l,
-                                     rocke_value_t* row_has_mass)
-{
-    if(b == NULL || !rocke_ir_builder_ok(b))
-        return;
-    rocke_value_t* one = rocke_b_const_f32(b, 1.0);
-    rocke_value_t* safe_l = rocke_b_select(b, row_has_mass, l, one);
-    rocke_value_t* zero = rocke_b_const_f32(b, 0.0);
-    rocke_value_t* safe_m = rocke_b_select(b, row_has_mass, m_log2, zero);
-    rocke_value_t* lse = rocke_natural_lse_from_log2_stats(b, safe_m, safe_l);
-    rocke_value_t* neg_inf = rocke_b_const_f32(b, -INFINITY);
-    rocke_value_t* value = rocke_b_select(b, row_has_mass, lse, neg_inf);
-    rocke_b_global_store(b, dst, element_offset, value, 4);
-}
 
 rocke_value_t* rocke_attention_dense_row_has_key(rocke_ir_builder_t* b,
                                                  rocke_value_t* query_row,

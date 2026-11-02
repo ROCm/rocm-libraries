@@ -7,10 +7,11 @@
  *
  *   Python (_lse_store.py)                      C (this header)
  *   -----------------------------------------   ------------------------------
- *   lse_store(b, dst, off, m, l, row_has_mass)  rocke_attention_dense_lse_store
  *   dense_row_has_key(b, q, kv_len, ...)        rocke_attention_dense_row_has_key
  *   zero_keyless_row(b, packed, has_key, ...)   rocke_attention_dense_zero_keyless_row
  *
+ * lse_store, lse_row_has_mass and natural_lse_from_log2_stats are shared with
+ * the unified attention builders: rocke/instance_lse_store_internal.h.
  * Not ported: validate_dense_lse (host-side torch tensor checks, no C caller)
  * and the make_*_lse_epilogue hooks (not used by the dense builders).
  *
@@ -28,16 +29,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* lse_store(b, dst, element_offset, m_log2, l, *, row_has_mass): one FP32
- * natural-log LSE store, -inf where row_has_mass is false. The caller guards
- * row existence and writer ownership. */
-void rocke_attention_dense_lse_store(rocke_ir_builder_t* b,
-                                     rocke_value_t* dst,
-                                     rocke_value_t* element_offset,
-                                     rocke_value_t* m_log2,
-                                     rocke_value_t* l,
-                                     rocke_value_t* row_has_mass);
 
 /* dense_row_has_key(b, query_row, kv_length, *, causal, diagonal, window,
  * right_bound=0): i1, true iff the row's visible key range [lower, upper] is
