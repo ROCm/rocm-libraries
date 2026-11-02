@@ -56,6 +56,7 @@
   - [Lazy-rescale threshold](#lazy-rescale-threshold)
   - [When dispatch picks it](#when-dispatch-picks-it)
   - [Measured and not kept in the seventh pass](#measured-and-not-kept-in-the-seventh-pass)
+- [Eighth pass — single-head layout retired](#eighth-pass--single-head-layout-retired)
 - [Method](#method)
 - [What remains unproven](#what-remains-unproven)
 
@@ -200,7 +201,7 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 30 | Block-table lookup one tile ahead | **Kept** | the page index is in a register before its tile's loads issue; small gain, none clearly slower |
 | 31 | Four heads per workgroup, one wave per head (`heads_per_wg = 4`, `block_q = 16`), selected by dispatch until lever 42 | **Kept, superseded by 42** | each staged key tile feeds four heads; no score split or partial combine; absorbed query never touches LDS; still two workgroups per CU; large gain on every shape |
 | 32 | Permuted-row PV gather on the four-heads path | **Kept** | one `ds_read_b64` of a key row feeds four PV tiles instead of sixteen scalar reads; large gain on every shape |
-| 33 | Occupancy guard tests | **Kept** | CPU tests fail if the shipped or the fallback layout leaves two workgroups per CU |
+| 33 | Occupancy guard tests | **Kept** | CPU tests fail if either shipped layout (two heads x two tiles, or one head x four tiles for an odd head count) leaves two workgroups per CU |
 | 34 | Score reads software-pipelined eight k-steps ahead, fenced every four (`HPW_SCORE_PREFETCH`, `HPW_SCORE_FENCE_EVERY`) | **Kept** | `lgkmcnt` waits, the loop's largest stall class, shrank on the trace; VGPR stays at the two-workgroup line, no spill; gain on every long shape |
 | 35 | Next tile's staging loads issued after the score GEMM | **Kept** | frees the staging registers for the score read-ahead; required by lever 34 |
 | 36 | Lazy softmax rescale (`HPW_LAZY_TAU`) | **Kept** | the 64 packed multiplies of the accumulator rescale run only on tiles where some row's max moved; gain on every long shape |
@@ -211,7 +212,7 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 41 | Eight heads per workgroup (`heads_per_wg = 8`) | Not selected | parity-verified and admissible (k_rope staging narrows to 2-wide chunks); faster on some shapes, slower on others, no clean dispatch rule |
 | 42 | Query tiles per head (`q_tiles_per_wg`), shipped as two heads x two tiles | **Kept** | each head's W_UK / W_UV fetch and epilogue staging serve two waves; half the epilogue rounds; registers and LDS unchanged; L2 misses fell sharply; large gain on short full-prompt shapes, neutral to small on chunked |
 | 43 | XCD-aware workgroup order (`num_xcds`, from the device CU count) | **Kept** | each XCD walks short runs of a head-major order, so its L2 holds a few heads' weights; gain on short shapes |
-| 44 | One head x four query tiles per workgroup | Not selected | lowest weight traffic, but a large regression on some chunked shapes that is not explained |
+| 44 | One head x four query tiles per workgroup | **Kept for odd head counts** | not selected for even counts: a large regression on some chunked shapes that is not explained; for odd counts it replaced the single-head layout (eighth pass) |
 | 45 | `agpr_acc`: 32 rows per wave, accumulator in AGPRs, one workgroup per CU | **Kept, by rule** | in-place asm MFMAs into fixed AGPRs; llvm22 / llvm23 only; three dwords spill outside the loop; gain at many query rows per sequence |
 | 46 | Double-buffered key tile with the loop unrolled by two (agpr_acc) | **Kept** | one barrier per tile; static slot offsets |
 | 47 | Direct-to-LDS key tiles (`buffer_load ... lds`), DMA spread over the score fences | **Kept** | needs lever 48; without it the backend waits on each DMA before the next LDS read and the spread is much slower than one burst |
@@ -701,9 +702,9 @@ The four-heads layout needs `block_q = 16` (at 32 the accumulators spill) and no
 AGPRs (with AGPRs it falls to one workgroup per CU and the rescale copies
 return). In the fourth pass dispatch selected it whenever the head count
 divided by four; dispatch now packs two heads x two query tiles whenever the
-head count is even, and otherwise falls back to the single-head spec defaults,
-which the `fwd_*` golden cases pin. The verifier's full mode runs whatever
-dispatch selects.
+head count is even, and one head x four query tiles otherwise (see the
+[eighth pass](#eighth-pass--single-head-layout-retired)); the `dispatch_*`
+golden cases pin both. The verifier's full mode runs whatever dispatch selects.
 
 ### Measured and not stacked
 
@@ -714,8 +715,8 @@ dispatch selects.
   timed end to end): faster, but it changes the kernel signature. Blocked on the
   provider API.
 - **`iglp_opt(1)` on the main loop** and a **grouped PV gather**: both measured
-  faster on the single-head path only, which dispatch now uses just as a fallback.
-  Neither has been timed on the four-heads path.
+  faster on the single-head path only, since retired. Neither has been timed on
+  the four-heads path.
 - **`amdgpu-waves-per-eu = 2`**: compiles to identical ISA; nothing to keep.
 - **Other knob re-sweeps** (`SCORE_SGB_GROUP`, `WT_PAD`, `r_kv_tile = 64`): neutral,
   slower or inadmissible.
@@ -802,9 +803,9 @@ composes it with `torch.bmm` absorb and `W_UV` against the same oracle, and the
 live benchmark times the composition and its per-stage split. Most of the
 removed prologue and epilogue already overlapped the other workgroup's loop, so
 the kernel-only gain is concentrated on long shapes. Dispatch serves it when
-the request sets `MLARequest(absorbed_query=True)` (odd head counts are
-refused: the single-head layout has no absorbed variant); the default stays
-the fused kernel, since the provider API does not carry the absorbed query yet.
+the request sets `MLARequest(absorbed_query=True)`, for any head count; the
+default stays the fused kernel, since the provider API does not carry the
+absorbed query yet.
 
 On a node where torch's hipBLASLt path stalls, set
 `TORCH_BLAS_PREFER_HIPBLASLT=0` before any run that goes through `torch.bmm`.
@@ -904,8 +905,8 @@ AGPRs. A compile-only probe showed that no LLVM register-class hint keeps it
 there once the conditional lazy rescale exists: carried as loop values, the
 accumulator's AGPR-to-VGPR copies are hoisted to the top of the loop and the
 absorbed query spills. So the accumulator never becomes an IR value
-(`_AgprAcc`): the PV MFMA is inline asm accumulating in place in fixed
-`a[4t:4t+3]`, the rescale scales in place under a wave-uniform `scf_if`, and
+([`AgprAcc`](../../../kernels/mla/_mla_body.py)): the PV MFMA is inline asm
+accumulating in place in fixed `a[4t:4t+3]`, the rescale scales in place under a wave-uniform `scf_if`, and
 the epilogue reads it out once. `agpr_alloc = (0, 0)` keeps the backend out of
 the AGPR file. llvm20 ignores that and lets its own MFMAs write the hidden
 tiles, so admission refuses llvm20; the guard test checks that only the
@@ -985,6 +986,24 @@ layout through its opt-in candidate, so each appears once.
 - **Deeper score read-ahead (12, 16 k-steps)**: slower.
 - **Padding only the first asm MFMA per operand**: no measurable change.
 
+## Eighth pass — single-head layout retired
+
+Odd head counts cannot pair heads, so until this pass they ran the original
+single-head kernel: one workgroup per (query tile, head), the score K split
+across waves, and the absorbed query and latent output staged through LDS.
+A gated sweep on a 304-CU gfx942 timed it against the one-wave-per-head layout
+at one head per workgroup -- two or four query tiles, at 16 rows per wave or
+with `agpr_acc` -- at H = 5, 7, 15 and 63 over the DeepSeek-V3 full-prompt and
+chunked shape list, every arm gated against the fp32 oracle first. One head x
+four tiles at 16 rows per wave was faster than the single-head kernel at every
+measured configuration; two tiles, and `agpr_acc` at low head counts, were
+slower on most shapes.
+
+Dispatch now runs odd head counts as one head x four tiles at 16 rows per wave,
+with the XCD-aware order, and the single-head kernel is gone. Odd head counts
+also gain `absorbed_query`. The score probe keeps its own admission
+(`supports_mla_score_probe`); its IR is unchanged.
+
 ## Method
 
 Per lever, in order, with no deviation:
@@ -1025,14 +1044,15 @@ They are not deliverables and their output does not belong in this repository.
 - **Untried next levers.** The `s512` shapes, where per-workgroup fixed cost
   dominates, are furthest from aiter (also in the gated re-run on a 304-CU
   gfx942); the unfused projections address that
-  directly but need an API change. `iglp_opt` and the grouped gather have only
-  been timed on the single-head path. aiter's remaining structural advantages —
+  directly but need an API change. `iglp_opt` and the grouped gather were only
+  timed on the single-head path, since retired. aiter's remaining structural advantages —
   32 rows per wave at 512 registers, asynchronous direct-to-LDS key tiles several
   tiles deep, and 64 KB of LDS at one workgroup per CU — need a one-workgroup-
   per-CU redesign rather than a lever on this layout.
 - **Fifth- and sixth-pass timing ran on a 228-CU gfx942 only.** The 8-XCD
   order for a 304-CU gfx942 is derived, not measured.
-- **The one-head x four-tile regression on chunked shapes is unexplained.**
+- **The one-head x four-tile regression on chunked shapes at even head counts
+  is unexplained.**
 - **The agpr_acc asm hazard padding is validated by parity, not by a hazard
   model.** The asm is opaque to the backend's hazard recognizer.
 - **llvm23's async DMA (`buffer_load_lds_async` + `asyncmark`) also removes

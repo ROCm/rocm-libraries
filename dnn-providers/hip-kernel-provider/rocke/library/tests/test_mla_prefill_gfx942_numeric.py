@@ -15,8 +15,8 @@ tile can stay under 4e-2 absolute; ``test_negative_control_*`` pins that. Fully
 masked rows are held to ``out == 0`` / ``lse == -inf`` exactly.
 
 Specs come from the MLA dispatcher, so each case compiles the layout that ships
-for it: two heads per workgroup for even head counts, the single-head layout for
-odd ones, and agpr_acc for batches averaging >= 320 query rows per sequence
+for it: two heads per workgroup for even head counts, one head x four query tiles
+for odd ones, and agpr_acc for batches averaging >= 320 query rows per sequence
 (``sk4096_h128``). Two extra lanes cover what dispatch only picks on some
 shapes: agpr_acc forced on for short / ragged batches, and the unfused
 ``absorbed_query`` composition.
@@ -61,7 +61,7 @@ _ALL_SCENARIOS = [
     "sk512_h64",
     "sk4096_h128",
     "ragged_long_h64",
-    "single_head_h5",
+    "odd_heads_h5",
     "six_heads_h6",
     "many_seqs_h64",
 ]
@@ -70,15 +70,15 @@ _ALL_SCENARIOS = [
 # ragged long batch -- shapes dispatch runs on the 16-row layout.
 _AGPR_FORCED = ["mixed_varlen_h64", "sk512_h64", "ragged_long_h64"]
 
-# absorbed_query: one short, one masked/ragged, the long cases, H=6, and the
-# 300-sequence batch. The single-head layout does not implement absorbed_query,
-# so H=5 is not listed.
+# absorbed_query: one short, one masked/ragged, the long cases, H=5, H=6, and
+# the 300-sequence batch.
 _ABSORBED = [
     "square_h64",
     "mixed_varlen_h128",
     "sk512_h64",
     "sk4096_h128",
     "ragged_long_h64",
+    "odd_heads_h5",
     "six_heads_h6",
     "many_seqs_h64",
 ]
@@ -155,27 +155,21 @@ def test_mla_prefill_numeric_absorbed_query(name):
 
 def test_absorbed_lane_runs_the_spec_dispatch_selects():
     """The absorbed lane asks dispatch for ``absorbed_query`` on the request,
-    so the spec it runs is the dispatched one, not a post-dispatch swap; the
-    single-head layout has no absorbed kernel, so dispatch refuses H=5."""
+    so the spec it runs is the dispatched one, not a post-dispatch swap."""
     probe = _probe()
     for name in _ABSORBED:
         sc = probe.SCENARIOS[name]
         spec = probe._dispatched_spec(
             sc.heads, sc.q_lens, sc.k_lens, "gfx942", absorbed_query=True
         )
-        assert spec.absorbed_query and spec.heads_per_wg == 2, name
+        assert spec.absorbed_query, name
+        assert spec.heads_per_wg == (2 if sc.heads % 2 == 0 else 1), name
         assert spec.fwd_kernel_name().endswith("_aq"), name
-    sc = probe.SCENARIOS["single_head_h5"]
-    spec = probe._dispatched_spec(
-        sc.heads, sc.q_lens, sc.k_lens, "gfx942", absorbed_query=True
-    )
-    ok, why = probe.supports_mla_prefill(spec, arch="gfx942")
-    assert not ok and "absorbed_query" in why
 
 
 def test_packed_absorbed_refusal_is_a_failure_not_a_skip():
-    """An even-head absorbed request dispatch refuses (here the 576-wide query
-    extent) must surface its reason, not fall back to the single-head SKIP."""
+    """An absorbed request dispatch refuses (here the 576-wide query extent)
+    must surface its reason as a failure."""
     probe = _probe()
     with pytest.raises(ValueError, match="query extent"):
         probe._dispatched_spec(128, [30000], [30000], "gfx942", absorbed_query=True)
@@ -230,14 +224,14 @@ def test_negative_control_one_zeroed_page_fails_the_bars():
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-def test_rows_per_sequence_dispatch_agpr_and_odd_heads_single_head():
+def test_rows_per_sequence_dispatch_agpr_and_odd_heads_four_tiles():
     """The numeric cases above exercise the layouts they claim to.
 
     sk4096_h128 is one 512-query sequence, at least 320 rows per sequence, which
     dispatch serves with agpr_acc on any CU count; every other two-heads
     scenario averages fewer rows and runs the 16-row layout (agpr_acc is covered
-    for those by the forced lane). single_head_h5 has an odd head count, which
-    dispatch cannot pack two to a workgroup.
+    for those by the forced lane). odd_heads_h5 has an odd head count, which
+    dispatch runs as one head x four query tiles.
     """
     probe = _probe()
     arch = _arch()
@@ -251,10 +245,6 @@ def test_rows_per_sequence_dispatch_agpr_and_odd_heads_single_head():
     for name in _ALL_SCENARIOS:
         if name != "sk4096_h128":
             assert not spec(name).agpr_acc, name
-    single = spec("single_head_h5")
-    assert (single.heads_per_wg, single.q_tiles_per_wg, single.agpr_acc) == (
-        1,
-        1,
-        False,
-    )
+    odd = spec("odd_heads_h5")
+    assert (odd.heads_per_wg, odd.q_tiles_per_wg, odd.agpr_acc) == (1, 4, False)
     assert spec("six_heads_h6").heads_per_wg == 2
