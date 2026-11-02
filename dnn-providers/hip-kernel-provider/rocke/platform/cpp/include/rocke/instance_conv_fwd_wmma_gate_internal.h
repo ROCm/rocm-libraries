@@ -31,7 +31,7 @@
 const char* rocke_wmma_ab_dtype(const char* dtype);
 
 /* wmma_fwd_gate: whether kernel `name` can run `p` on `arch` at the spec's
- * `wave_size`. On success stores the resolved target in `*target_out` and
+ * `wave_size`, with one padding for both axes. On success stores the resolved target in `*target_out` and
  * returns true, so callers need not resolve it again; otherwise writes the
  * reason and returns false. */
 bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
