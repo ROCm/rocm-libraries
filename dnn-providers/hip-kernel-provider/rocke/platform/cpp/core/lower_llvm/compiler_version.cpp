@@ -44,7 +44,7 @@ namespace fs = std::filesystem;
 fs::path file_path(const std::string& text)
 {
 #ifdef _WIN32
-    return fs::u8path(text);
+    return fs::path(std::u8string(text.begin(), text.end()));
 #else
     return fs::path(text);
 #endif
