@@ -34,7 +34,11 @@ from rocjitsu_sweep_plan import (
 from tensilelite.Utilities.ClientConfig import problemTypeOptions
 
 DEFAULT_BATCH_SIZES = {"bench": 32, "tensile": 1}
+# Progress checkpoints are at least this many seconds apart, and further apart
+# when writing one takes longer: at most 1/CHECKPOINT_COST_RATIO of the
+# coordinator's time goes to rewriting them as results accumulate.
 CHECKPOINT_SECONDS = 5
+CHECKPOINT_COST_RATIO = 20
 # Peak resident memory of one emulated native process, measured on gfx942 with
 # rocjitsu's race plugin: about 0.30 GiB plus 5.24 times the uncompressed size
 # of the Tensile code objects it loads. Decompression, loader staging and the
@@ -67,6 +71,11 @@ def batch_memory_gib(batch):
     return MEMORY_BASE_GIB + MEMORY_PER_CODE_OBJECT_GIB * sum(
         code_object_bytes(path) for path in paths
     ) / (1 << 30)
+
+
+def checkpoint_after(started, finished):
+    """When the next progress checkpoint is due, after one written in [started, finished]."""
+    return finished + max(CHECKPOINT_SECONDS, CHECKPOINT_COST_RATIO * (finished - started))
 
 
 def write_text(path, value):
@@ -1654,13 +1663,14 @@ def run(args):
                 result["batch_id"] = job["batch_id"]
                 write_json(args.reports / f"solution-{job['id']:03}.result.json", result)
             if time.monotonic() >= next_checkpoint or value["stop"]:
+                started = time.monotonic()
                 checkpoint = {
                     **value,
                     "results": sorted(carried + value["results"], key=lambda r: r["id"]),
                 }
                 write_json(args.reports / "progress.json", checkpoint)
                 write_text(args.reports / "summary.md", render_report(manifest, checkpoint))
-                next_checkpoint = time.monotonic() + CHECKPOINT_SECONDS
+                next_checkpoint = checkpoint_after(started, time.monotonic())
             for result in value["completed"]:
                 row = solution_report(manifest["jobs"][result["id"]], result, args.backend)
                 print(

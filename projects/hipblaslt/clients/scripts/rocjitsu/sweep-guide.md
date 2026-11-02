@@ -227,8 +227,10 @@ not a hard process-memory limit.
 Each backend writes into a fresh report directory:
 
 - `summary.md`: solution index, individual outcome, numerical passes, dispatch counts
-  and reasons. Updated atomically at most once every five seconds
-  during normal execution, on stopping, and at completion; published
+  and reasons. Updated atomically, with `progress.json`, at most once every five
+  seconds during normal execution, and less often once a checkpoint takes more
+  than a quarter second to write (at most 5% of the coordinator's time); also on
+  stopping and at completion. Published
   in the GitHub job summary. Partial reports distinguish pending/incomplete work.
 - `manifest.json`: inventory, selection, policy, shapes, predicates, input hashes,
   detector revision and known-failure matches.

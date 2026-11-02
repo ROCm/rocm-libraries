@@ -431,6 +431,10 @@ class SweepTests(unittest.TestCase):
                 plan.make_plan(root, "gfx942", {}, 100, 106, profiles=profiles, workers=3), full
             )
 
+    def test_checkpoint_interval_grows_with_its_write_time(self):
+        self.assertEqual(sweep.checkpoint_after(100, 100.1), 100.1 + sweep.CHECKPOINT_SECONDS)
+        self.assertEqual(sweep.checkpoint_after(100, 102), 102 + 2 * sweep.CHECKPOINT_COST_RATIO)
+
     def test_parallel_regular_inventory_matches_serial(self):
         from tensilelite.Utilities.BinaryLibraryIO import writeMessagePack
 
