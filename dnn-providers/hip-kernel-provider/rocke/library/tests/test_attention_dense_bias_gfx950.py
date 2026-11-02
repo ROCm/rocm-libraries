@@ -179,6 +179,16 @@ def test_bias_is_refused_with_paged_kv():
         replace(_BASE, **paged, use_additive_bias=True)
 
 
+def test_bias_is_refused_with_a_kv_segment_split():
+    # The split's segment store returns before the bias epilogue's keyless-row
+    # handling, so the two do not compose.
+    replace(_BASE, kv_segments=2)  # the split spec itself is valid
+    with pytest.raises(
+        ValueError, match=r"use_additive_bias is not supported with kv_segments > 1"
+    ):
+        replace(_BASE, kv_segments=2, use_additive_bias=True)
+
+
 # --------------------------------------------------------------------------- #
 # Runner validation (raised before any compile or launch). The bias checks run on
 # duck-typed tensors, so they need no torch; the varlen offset checks read int32
@@ -449,6 +459,28 @@ def test_the_grid_candidate_builds_a_bias_spec():
     assert spec.use_additive_bias and not spec.persistent
     plain = attention_tuning_spec(_request(use_attn_bias=False), "gfx950_dense_grid")
     assert not plain.kernel_spec.use_additive_bias
+
+
+@pytest.mark.parametrize("spec_id", ["gfx950_dense_grid", "gfx950_dense_qbminor"])
+def test_a_short_bottom_right_bias_chunk_keeps_one_kv_segment(spec_id):
+    # A short query chunk over a long KV prefix splits the KV range when bias is
+    # off; with bias on the factory keeps the unsplit grid the bias path supports.
+    from dispatch.attention import attention_tuning_spec
+
+    chunk = dict(
+        batch=1,
+        nhead_q=32,
+        nhead_k=8,
+        seqlen_q=512,
+        seqlen_k=8192,
+        mask_type=2,
+        kv_block_size=64,
+        num_cus=256,
+    )
+    plain = attention_tuning_spec(_request(**chunk, use_attn_bias=False), spec_id)
+    assert plain.kernel_spec.kv_segments > 1
+    spec = attention_tuning_spec(_request(**chunk), spec_id).kernel_spec
+    assert spec.use_additive_bias and spec.kv_segments == 1
 
 
 def test_a_bias_request_sweeps_bias_specs_only():
