@@ -31,9 +31,12 @@
 #include "hip_placement.hpp"
 #include "hipblaslt_ostream.hpp"
 
+#include <initializer_list>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 class HipDeviceBuffer : public d_vector_type
 {
@@ -141,9 +144,9 @@ class HipHostBuffer
 {
 public:
     HipHostBuffer(hipDataType dtype, std::size_t numElements)
-        : buffer(memory_pool<h_memory>::Get(realDataTypeSize(dtype) * numElements
-                                                ? realDataTypeSize(dtype) * numElements
-                                                : realDataTypeSize(dtype)))
+        : requested(realDataTypeSize(dtype) * numElements ? realDataTypeSize(dtype) * numElements
+                                                          : realDataTypeSize(dtype))
+        , buffer(memory_pool<h_memory>::Get(requested))
     {
     }
 
@@ -193,9 +196,39 @@ public:
         return reinterpret_cast<const T*>(buf());
     }
 
+    // A failed pinned allocation leaves a null buffer rather than an error.
+    hipError_t memcheck() const
+    {
+        return buffer.get() ? hipSuccess : hipErrorOutOfMemory;
+    }
+
+    std::size_t getRequestedBytes() const
+    {
+        return requested;
+    }
+
 private:
-    h_memory buffer;
+    std::size_t requested;
+    h_memory    buffer;
 };
+
+// Describes the first host buffer in `groups` whose allocation failed, or returns an empty
+// string when every allocation succeeded.
+inline std::string
+    host_allocation_failure(std::initializer_list<const std::vector<HipHostBuffer>*> groups)
+{
+    for(const auto* group : groups)
+        for(const auto& b : *group)
+            if(b.memcheck() != hipSuccess)
+            {
+                std::ostringstream s;
+                s.precision(3);
+                s << "could not allocate " << double(b.getRequestedBytes()) / double(1 << 30)
+                  << " GiB of pinned host memory";
+                return s.str();
+            }
+    return {};
+}
 
 inline hipError_t synchronize(HipDeviceBuffer&    dBuf,
                               const HipHostBuffer& hBuf,

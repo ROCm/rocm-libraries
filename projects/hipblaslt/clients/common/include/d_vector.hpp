@@ -31,8 +31,10 @@
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_test.hpp"
 #include "singletons.hpp"
+#include <algorithm>
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
+#include <type_traits>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -42,6 +44,12 @@
 
 #define MEM_MAX_GUARD_PAD 8192
 #define MAX_DTYPE_SIZE sizeof(double)
+
+// In hipblaslt-test, an idle pinned host buffer at least this large stays cached only while
+// consecutive tests keep reusing it. The kernel cannot reclaim pinned memory, so a cached
+// multi-GiB buffer starves the other test processes on the host; smaller buffers stay cached
+// because nearly all tests reuse them.
+inline constexpr size_t kHostPoolRetainLimit = size_t(1) << 30;
 
 /* ============================================================================================ */
 /*! \brief  (abstract class) wrapper around a pointer to hip device or pinned host memory, including allocation size in bytes */
@@ -72,6 +80,9 @@ public:
     {
         return capacity() < s;
     }
+
+    // The memory_pool test count when the buffer was last returned to the pool.
+    uint64_t restored_test = 0;
 
     size_t get_available_host_memory()
     {
@@ -243,9 +254,41 @@ public:
         Instance().m_pool_managed.clear();
     }
 
+    // Ends a test: releases the idle buffers of at least `bytes` that the test did not return,
+    // so a large buffer stays cached only while consecutive tests keep reusing it.
+    static void EndTest(size_t bytes)
+    {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
+        for(auto* pool : {&Instance().m_pool, &Instance().m_pool_managed})
+            Instance().release_from_earlier_tests(*pool, bytes);
+        ++Instance().m_test;
+    }
+
+    // Total capacity of the idle buffers held for reuse.
+    static size_t CachedBytes()
+    {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
+        size_t                      total = 0;
+        for(auto* pool : {&Instance().m_pool, &Instance().m_pool_managed})
+            for(const auto& m : *pool)
+                total += m.capacity();
+        return total;
+    }
+
 private:
     std::vector<M> m_pool, m_pool_managed;
     std::mutex m_mutex;
+    uint64_t       m_test = 0; // tests ended, counted by EndTest
+
+    void release_from_earlier_tests(std::vector<M>& pool, size_t bytes)
+    {
+        pool.erase(std::remove_if(pool.begin(),
+                                  pool.end(),
+                                  [&](const M& m) {
+                                      return m.capacity() >= bytes && m.restored_test < m_test;
+                                  }),
+                   pool.end());
+    }
 
     static memory_pool& Instance()
     {
@@ -273,8 +316,19 @@ private:
         #endif
 
         auto  it   = std::lower_bound(pool.begin(), pool.end(), bytes);
-        if(it != pool.end() && // found a buffer that is large enough ..
-           it->capacity() < 2 * bytes) // but not way too large
+        bool  hit  = it != pool.end() && // found a buffer that is large enough ..
+                   it->capacity() < 2 * bytes; // but not way too large
+        if constexpr(std::is_same_v<M, h_memory>)
+        {
+            // Before pinning more host memory for a large request, release the large buffers
+            // that earlier tests left and this one has not reused.
+            if(!hit && bytes >= kHostPoolRetainLimit)
+            {
+                release_from_earlier_tests(pool, kHostPoolRetainLimit);
+                it = std::lower_bound(pool.begin(), pool.end(), bytes);
+            }
+        }
+        if(hit)
         {
             auto p = std::move(*it);
             p.resize(bytes);
@@ -286,9 +340,13 @@ private:
             size_t free_device_mem, total_device_mem;
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
 
-            // Threshold for "huge" allocations — skip 20% extra allocation
+            // Threshold for "huge" allocations — skip 20% extra allocation. hipblaslt-test
+            // reuses a host buffer at the retain limit only for the same shape in the next
+            // test, so for those the extra would only add pinned memory.
             const size_t big_thresh = total_device_mem / 4;
             bool huge_request = (bytes >= big_thresh);
+            if constexpr(std::is_same_v<M, h_memory>)
+                huge_request = huge_request || bytes >= kHostPoolRetainLimit;
 
             // remove the (largest) buffer that was too small
             if(it != pool.begin())
@@ -317,11 +375,25 @@ private:
     {
         if(!dm.get() || !dm.capacity())
             return;
-        auto& pool = dm.is_managed() ? m_pool_managed : m_pool;
+        auto& pool       = dm.is_managed() ? m_pool_managed : m_pool;
+        dm.restored_test = m_test;
         // insert in (sorted) pool
         pool.insert(std::lower_bound(pool.begin(), pool.end(), dm.capacity()), std::move(dm));
     }
 };
+
+#ifdef GOOGLE_TEST
+// After each test, releases the idle pinned host buffers at or above kHostPoolRetainLimit
+// that the test did not reuse.
+class HostPoolReleaseListener : public ::testing::EmptyTestEventListener
+{
+public:
+    void OnTestEnd(const ::testing::TestInfo&) override
+    {
+        memory_pool<h_memory>::EndTest(kHostPoolRetainLimit);
+    }
+};
+#endif
 
 /* ============================================================================================ */
 /*! \brief  base-class to allocate/deallocate device memory */
