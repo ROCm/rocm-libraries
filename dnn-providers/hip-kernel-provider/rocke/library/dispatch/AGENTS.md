@@ -184,14 +184,46 @@ untunable (`lds_num_buffers`), or swept.
 gfx942 dense uses the same walk over `_GFX942_DENSE_AXES`
 (`("gfx942", "dense")`). It registers one candidate, so `persistent` is a
 knob there alongside `block_m` and `block_n`, and the persistent-only knobs
-are pruned per spec. Its knobs are the K row and
-V row pads, the D64 K group pad, the conflict-free-V store and its swizzle,
-the persistent and non-persistent block orders, exp2, `iglp` / `iglp_mode`,
-the PV fence mask, `pv_priority`, `pv_loop_order`, the bf16 O store width,
-and `causal_diag_split`. The
-LDS-saving knobs lead as enablers so an over-budget tile can still reach the
-setting that fits. Untunable here: `lds_num_buffers` (only 1 is implemented)
-and `lazy_rescale` (the body never reads it).
+are pruned per spec. Its knobs include the K and V row pads, the D64 K group
+pad, conflict-free V store (`use_cfvst`) and its swizzle, K LDS buffering
+(`lds_num_buffers`), V register prefetch (`v_reg_prefetch`), the persistent
+and non-persistent block orders, exp2, `iglp` / `iglp_mode`, the PV fence
+mask, `pv_priority`, `pv_loop_order`, the bf16 O store width, and
+`causal_diag_split`. LDS-saving and prerequisite axes lead as enablers so
+an otherwise invalid configuration can become valid before later knobs
+are considered. Only `lazy_rescale` is untunable on gfx942, because the
+kernel body does not read it.
+
+Two performance levers are **independent opt-ins** for supported BF16 D128
+causal attention (`sliding_window=0`, no sinks), with or without
+`causal_diag_split`: `lds_num_buffers=2` enables **K LDS double buffering
+only**, and `v_reg_prefetch=True` enables **V register prefetch only**. Both
+run on the CFVST body, which is already the D128 default
+(`use_cfvst=None` resolves on via `_use_cfvst`; `use_cfvst=False` opts out
+on either grid). KDB and VPF also require `persistent=True` and
+`block_n=64`, as enforced by the kernel's validator; turning on either one
+does not implicitly enable the other.
+
+The production tuning space remains **one knob at a time** on the default
+CFVST body. It offers CFVST off, CFVST + KDB, and CFVST + VPF without
+requiring the triple combination. The triple
+CFVST + KDB + VPF combination remains reachable through an explicit knob
+pin or the full tuning space. The BF16 D128 default remains
+`use_cfvst=None` (policy resolves to on at D128), `lds_num_buffers=1`, and
+`v_reg_prefetch=False`; these tuning choices do not alter the shipped
+default or make the opt-in dense candidate an automatic dispatch winner.
+Bare `tuning_id` replay searches production points only; replay a
+full-space-only combination with its recorded knob dictionary.
+
+**Tuning-id migration for `gfx942_dense`.** Adding the defaulted
+`v_reg_prefetch` field changes the defaults fingerprint in `config_key`, so
+every `gfx942_dense` `tuning_id` recorded before it is rekeyed: replaying one
+raises `PinRefused` instead of rebuilding a different kernel. No such id is
+stored in this tree. A downstream tuning store must drop its old
+`gfx942_dense` ids and re-sweep. `TUNING_ID_VERSION` is not bumped: the
+defaults fingerprint already separates the old and new ids, and
+`lds_num_buffers` was untunable on gfx942 before, so no stored id names it.
+
 `registered_attention_combos(req)` is the multi-engine bench
 entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each
 candidate's `sweep_space` (dense, WMMA, and unified tuning). Routing-only
@@ -201,7 +233,7 @@ unified path labels are omitted.
 tier, that opt-in check is the only thing keeping them off the default path — a
 tier-3 candidate whose `support()` forgets it would silently claim all traffic
 for its arch. `Capability` cannot express the check (it constrains the request's
-*selector*, not its shape), so it stays in the predicate and every tier-3
+**selector**, not its shape), so it stays in the predicate and every tier-3
 candidate has to carry it.
 
 ## Layout
@@ -238,7 +270,7 @@ the two unified paths and `d256_decode` -- which is not the same as portable:
 each still lists its arches explicitly, because there is no family wildcard.
 
 The two generic candidates declare every known arch on purpose: they select a
-*path*, and `attention_unified` picks the concrete backend downstream from the
+**path**, and `attention_unified` picks the concrete backend downstream from the
 running device (wave64 MFMA on gfx942/gfx950, wave32 WMMA on gfx1250, the
 arch-neutral scalar kernel elsewhere). They are an explicit, tested exception to
 the wave-size consistency invariant.
@@ -284,7 +316,7 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
    [Definition of Done](../../KERNEL_AUTHORING.md#a-new-kernel-family) item.
 
    Point `build` at the real builder if the candidate has one. The unified
-   paths do not: they return an `AttentionSpec` naming a *path*, and no builder
+   paths do not: they return an `AttentionSpec` naming a **path**, and no builder
    consumes that. A standalone kernel like `attention_gfx1250_wmma` returns its
    builder's own spec instead, which is why it can declare `build`, a real
    grid, and a real signature where the unified candidates declare none.
