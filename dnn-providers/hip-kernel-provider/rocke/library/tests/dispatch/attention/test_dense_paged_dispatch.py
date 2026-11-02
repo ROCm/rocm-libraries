@@ -107,6 +107,23 @@ def test_paged_ragged_query_tail_follows_the_contiguous_kernel(arch, spec_id):
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
+@pytest.mark.parametrize("window", [0, 256])
+def test_paged_keeps_the_default_tile(arch, spec_id, window):
+    """Paged K/V stays on the 256x64 tile where a small contiguous request takes a
+    smaller one (gfx942: half-height tile or narrow window; gfx950: window tile)."""
+    small = dict(seqlen_q=512, seqlen_k=512, nhead_q=8, nhead_k=2, num_cus=256)
+    req = _request(arch, sliding_window=window, **small)
+    spec = dispatch_attention(_pinned(req, spec_id)).spec.kernel_spec
+    assert (spec.block_m, spec.block_n) == (256, 64)
+    assert not getattr(spec, "window_wave_skip", False)
+    contiguous = dispatch_attention(
+        _pinned(dataclasses.replace(req, layout="auto"), spec_id)
+    )
+    if arch == "gfx942" or window:
+        assert contiguous.spec.kernel_spec.block_m < 256
+
+
+@pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_layout_is_matched_like_the_capability(arch, spec_id):
     """The request's layout spelling is normalized as in its feature set, so the
     candidate that matched ``layout_paged`` also builds the paged spec."""

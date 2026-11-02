@@ -279,6 +279,9 @@ class AttentionDenseSpec:
                 )
             if not self.causal:
                 raise ValueError("paged attention is causal-only")
+            if self.causal_bottom_right:
+                # The shifted diagonal is untested with paged K/V on both arches.
+                raise ValueError("causal_bottom_right is not supported with paged=True")
         if self.use_sinks and self.paged:
             raise ValueError("use_sinks is not yet supported with paged KV")
         if self.use_sinks and self.varlen:

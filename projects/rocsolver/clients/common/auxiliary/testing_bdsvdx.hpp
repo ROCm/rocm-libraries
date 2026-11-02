@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -251,7 +251,7 @@ void bdsvdx_getError(const rocblas_handle handle,
         // error is ||hS - hSRes|| / ||hS||
         // using frobenius norm
         err = norm_error('F', 1, nn, 1, hS[0] + ioffset, hSRes[0]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
 
         // Check the singular vectors if required
         // U is stored in hZRes, and V is stored in hZRes+n
@@ -270,12 +270,12 @@ void bdsvdx_getError(const rocblas_handle handle,
                 cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, nn, nn, n,
                          T(1), hZRes[0], ldz, hZRes[0], ldz, T(0), UUres.data(), nn);
                 err = norm_error('F', nn, nn, nn, I.data(), UUres.data());
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
 
                 cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, nn, nn, n,
                          T(1), hZRes[0] + n, ldz, hZRes[0] + n, ldz, T(0), VVres.data(), nn);
                 err = norm_error('F', nn, nn, nn, I.data(), VVres.data());
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
 
             err = 0;
@@ -303,7 +303,7 @@ void bdsvdx_getError(const rocblas_handle handle,
                          -hSRes[0][k], hZRes[0] + k * ldz, 1);
             }
             err = double(snorm('F', n, nn, hZRes[0], ldz)) / double(snorm('F', n, n, B.data(), n));
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
 
             // check ifail
             err = 0;
@@ -313,7 +313,7 @@ void bdsvdx_getError(const rocblas_handle handle,
                 if(hIfailRes[0][j] != 0)
                     err++;
             }
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
     }
     else
@@ -328,7 +328,7 @@ void bdsvdx_getError(const rocblas_handle handle,
                 if(hIfailRes[0][j] == 0)
                     err++;
             }
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
     }
 }
