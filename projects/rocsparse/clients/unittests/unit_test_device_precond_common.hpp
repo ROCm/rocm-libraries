@@ -90,7 +90,7 @@ namespace precond_ut
             member = saved;
         }
 
-        ScopedOverride(const ScopedOverride&) = delete;
+        ScopedOverride(const ScopedOverride&)            = delete;
         ScopedOverride& operator=(const ScopedOverride&) = delete;
     };
 
@@ -114,7 +114,7 @@ namespace precond_ut
                 (void)rocsparse_destroy_mat_descr(descr);
         }
 
-        descr_info(const descr_info&) = delete;
+        descr_info(const descr_info&)            = delete;
         descr_info& operator=(const descr_info&) = delete;
     };
 
@@ -138,10 +138,10 @@ namespace precond_ut
         rocsparse_s##NAME, rocsparse_d##NAME, rocsparse_c##NAME, rocsparse_z##NAME, __VA_ARGS__)
 
     template <typename T>
-    using real_of = std::conditional_t<
-        std::is_same_v<T, double> || std::is_same_v<T, rocsparse_double_complex>,
-        double,
-        float>;
+    using real_of = std::conditional_t<std::is_same_v<T, double>
+                                           || std::is_same_v<T, rocsparse_double_complex>,
+                                       double,
+                                       float>;
 
     template <typename T>
     constexpr bool is_cplx
@@ -262,10 +262,25 @@ namespace precond_ut
     }
 
     template <typename T>
-    void expect_finite(const std::vector<T>& v)
+    bool expect_finite(const std::vector<T>& v, const std::string& what = {})
     {
+        size_t count = 0;
+        size_t first = 0;
         for(size_t i = 0; i < v.size(); ++i)
-            EXPECT_TRUE(std::isfinite(re(v[i])) && std::isfinite(im(v[i]))) << "entry " << i;
+        {
+            if(!std::isfinite(re(v[i])) || !std::isfinite(im(v[i])))
+            {
+                if(count == 0)
+                    first = i;
+                ++count;
+            }
+        }
+        if(count == 0)
+            return true;
+        ADD_FAILURE() << (what.empty() ? std::string("result") : what) << " has " << count
+                      << " non-finite entries, first at index " << first << " (" << re(v[first])
+                      << ", " << im(v[first]) << ")";
+        return false;
     }
 
     // ------------------------------------------------------------------
@@ -304,7 +319,7 @@ namespace precond_ut
                     a.ind.push_back(j);
                     const double s = (skew && j < i) ? 1.15 : 1.0;
                     // Hermitian imaginary part: im(i, j) = -im(j, i).
-                    const double w    = (std::abs(j - i) == 1) ? 1.0 : 0.5;
+                    const double w = (std::abs(j - i) == 1) ? 1.0 : 0.5;
                     const double imag = (is_cplx<T> && j != i) ? (j > i ? 0.1 * w : -0.1 * w) : 0.0;
                     a.val.push_back(make_value<T>(r * s, imag));
                 };
@@ -1080,7 +1095,7 @@ namespace precond_ut
                 (void)api<K>::destroy(handle, descr);
         }
 
-        descr_guard(const descr_guard&) = delete;
+        descr_guard(const descr_guard&)            = delete;
         descr_guard& operator=(const descr_guard&) = delete;
     };
 
@@ -1214,8 +1229,8 @@ namespace precond_ut
         device_vector<T>           val;
         rocsparse_spmat_descr      A = nullptr;
 
-        dev_csr()               = default;
-        dev_csr(const dev_csr&) = delete;
+        dev_csr()                          = default;
+        dev_csr(const dev_csr&)            = delete;
         dev_csr& operator=(const dev_csr&) = delete;
 
         ~dev_csr()
@@ -1287,8 +1302,8 @@ namespace precond_ut
         device_vector<T>       val;
         rocsparse_spmat_descr  A = nullptr;
 
-        dev_bsr()               = default;
-        dev_bsr(const dev_bsr&) = delete;
+        dev_bsr()                          = default;
+        dev_bsr(const dev_bsr&)            = delete;
         dev_bsr& operator=(const dev_bsr&) = delete;
 
         ~dev_bsr()

@@ -170,6 +170,8 @@ namespace
                          const std::string&    what)
     {
         ASSERT_EQ(got.size(), want.size()) << what;
+        if(!expect_finite(got, what) || !expect_finite(want, what + " reference"))
+            return;
         const double tol = solve_tolerance<T>();
         double       err = 0.0;
         for(size_t i = 0; i < got.size(); ++i)
@@ -194,6 +196,9 @@ namespace
                                      int32_t               m,
                                      int32_t               n)
     {
+        // Same NaN hole as expect_solution: std::max(res, NaN) keeps res.
+        if(!expect_finite(sol, "solution"))
+            return;
         double res = 0.0, norm_b = 0.0;
         for(int32_t c = 0; c < n; ++c)
         {
@@ -320,8 +325,7 @@ namespace
     const int32_t k_medium_sizes[] = {1025, 2048, 3000, 5000, 9000, 20000, 40000, 70000, 135000};
 
     // Strictly diagonal: both off-diagonals are zero and every diagonal entry is
-    // nonzero, so the solution is x_i = b_i / d_i. A tolerance comparison does not
-    // reject NaN, so the entries are checked for finiteness first.
+    // nonzero, so the solution is x_i = b_i / d_i.
     template <typename T>
     system_t<T> make_diagonal_system(int32_t m, int32_t n, int seed)
     {
@@ -350,16 +354,6 @@ namespace
     }
 
     template <typename T>
-    void expect_finite_solution(const std::vector<T>& got, const std::string& what)
-    {
-        for(size_t i = 0; i < got.size(); ++i)
-        {
-            EXPECT_TRUE(std::isfinite(re(got[i])) && std::isfinite(im(got[i])))
-                << what << " index " << i;
-        }
-    }
-
-    template <typename T>
     void run_diagonal_multi_rhs(rocsparse_handle handle, int32_t m, int32_t n)
     {
         SCOPED_TRACE("diagonal no_pivot m=" + std::to_string(m) + " n=" + std::to_string(n));
@@ -376,7 +370,6 @@ namespace
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         const auto got = to_host(dB);
-        expect_finite_solution(got, "gtsv_no_pivot");
         expect_solution(got, s.x, "gtsv_no_pivot solution");
     }
 
@@ -409,7 +402,6 @@ namespace
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         const auto got = to_host(dx);
-        expect_finite_solution(got, "gtsv_no_pivot_strided_batch");
         for(int32_t k = 0; k < batch_count; ++k)
         {
             const std::vector<T> sol(got.begin() + static_cast<size_t>(k) * m,
