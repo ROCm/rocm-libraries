@@ -955,7 +955,9 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 ["t", "f"],
                 ["t", "f"],
             ):
-                if logits == "t":
+                # Soft cap rules bias out further down, so spelling it here
+                # keeps the entries emitted and the entries kept the same set.
+                if logits == "t" and bias == "no":
                     pipelines.append(Pipeline("qr", "row", "f", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                     pipelines.append(Pipeline("qr", "row", "t", "f", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
                     pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, pagedkv, sink, mask))  # fmt: skip
