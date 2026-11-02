@@ -115,17 +115,6 @@ int main(int argc, char* argv[])
             std::cerr << e.what() << std::endl;
             return HIPSPARSE_STATUS_INTERNAL_ERROR;
         }
-        catch(const hipError_t& status)
-        {
-            std::cerr << "hip error: " << hipGetErrorString(status) << " ("
-                      << static_cast<int>(status) << ")" << std::endl;
-            return HIPSPARSE_STATUS_INTERNAL_ERROR;
-        }
-        catch(const std::exception& e)
-        {
-            std::cerr << e.what() << std::endl;
-            return HIPSPARSE_STATUS_INTERNAL_ERROR;
-        }
     }
     else
     {
@@ -151,17 +140,6 @@ int main(int argc, char* argv[])
             }
 
             return status;
-        }
-        catch(const std::exception& e)
-        {
-            std::cerr << e.what() << std::endl;
-            return HIPSPARSE_STATUS_INTERNAL_ERROR;
-        }
-        catch(const hipError_t& status)
-        {
-            std::cerr << "hip error: " << hipGetErrorString(status) << " ("
-                      << static_cast<int>(status) << ")" << std::endl;
-            return HIPSPARSE_STATUS_INTERNAL_ERROR;
         }
         catch(const std::exception& e)
         {
