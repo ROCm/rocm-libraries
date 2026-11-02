@@ -60,8 +60,10 @@
 #include <memory>
 #include <shared_mutex>
 #include <sstream>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
@@ -599,9 +601,9 @@ namespace
      * A key's entries that still name the kernel their index resolves to, in
      * the order lookups try them. Neither resolving an index nor comparing
      * names depends on the call, so replay does both once per key, again only
-     * after the loaded entries change. Support is still checked on every call:
-     * it also depends on values the key leaves out, such as beta and C/D
-     * aliasing.
+     * after the loaded entries change. Which of them supports a call also
+     * depends on values the key leaves out, such as beta and the workspace,
+     * so replay keeps that answer per Tensile problem (ReplayResults).
      */
     struct ReplayCandidates
     {
@@ -669,6 +671,172 @@ namespace
         std::unordered_map<TensileLite::ProblemOverride, std::shared_ptr<ReplayCandidates>> m_byKey;
     };
 
+    /**
+     * What a call's tuning key reads that its Tensile problem leaves out or
+     * holds more coarsely, with the device. Two calls that make equal Tensile
+     * problems on one device and agree on these have the same tuning key, so a
+     * replay result never spans two keys.
+     */
+    struct ReplayCallFields
+    {
+        int device;
+
+        // The problem keeps the epilogue's parts, but not the bias enum it
+        // implies, nor the bias stride, the gradient flag, or the aux type of
+        // an epilogue without E. Every path derives the gradient flag from the
+        // epilogue, but the key reads it as given.
+        rocblaslt_epilogue epilogue;
+        bool               gradient;
+        int32_t            biasStride;
+        hipDataType        auxType;
+
+        // The problem has one scaling mode for A and B together, one flag for
+        // C and D together, and nothing for E.
+        RocblasltContractionProblem::ScalingFormat scaleAType;
+        RocblasltContractionProblem::ScalingFormat scaleBType;
+        unsigned                                   scales;
+
+        // The key reads an adaptive SM target as no target.
+        bool adaptiveSmCount;
+
+        ReplayCallFields(rocblaslt_handle handle, const RocblasltContractionProblem& p)
+            : device(handle->device)
+            , epilogue(p.epilogue)
+            , gradient(p.gradient)
+            , biasStride(p.bias_stride)
+            , auxType(p.aux_type)
+            , scaleAType(p.scaleAType)
+            , scaleBType(p.scaleBType)
+            , scales(unsigned(p.scaleA != nullptr) | unsigned(p.scaleB != nullptr) << 1
+                     | unsigned(p.scaleC != nullptr) << 2 | unsigned(p.scaleD != nullptr) << 3
+                     | unsigned(p.scaleE != nullptr) << 4)
+            , adaptiveSmCount(p.adaptive_sm_count)
+        {
+        }
+
+        auto tie() const
+        {
+            return std::tie(device,
+                            epilogue,
+                            gradient,
+                            biasStride,
+                            auxType,
+                            scaleAType,
+                            scaleBType,
+                            scales,
+                            adaptiveSmCount);
+        }
+
+        bool operator==(const ReplayCallFields& other) const
+        {
+            return tie() == other.tie();
+        }
+    };
+
+    /** What replay found for one call: the index it launches, or -1 for none. */
+    struct ReplayResult
+    {
+        ReplayCallFields                  fields;
+        int                               index = -1;
+        TensileLite::ProblemOverride      key;
+        std::shared_ptr<ReplayCandidates> candidates;
+    };
+
+    /**
+     * Replay's answer for each exact call, so that a call repeating one is
+     * served without building its tuning key or checking support again.
+     *
+     * Keyed like default selection's solution cache, on the Tensile problem
+     * through the same hash and Comparison, which cover everything a support
+     * check reads from the problem; the call fields beside it keep calls with
+     * different tuning keys apart. An answer, including that no entry
+     * supports the call, holds until the loaded entries change. Any change
+     * stales every answer, so the map is emptied then: it holds at most the
+     * problems replayed since the last load, added row or reset.
+     */
+    class ReplayResults
+    {
+    public:
+        static ReplayResults& instance()
+        {
+            static ReplayResults gInstance;
+            return gInstance;
+        }
+
+        std::shared_ptr<const ReplayResult> find(const TensileLite::ContractionProblemGemm& problem,
+                                                 const ReplayCallFields&                    fields,
+                                                 uint64_t generation)
+        {
+            std::shared_lock<std::shared_mutex> lock(m_mutex);
+            if(generation != m_generation)
+                return nullptr;
+            auto found = m_byProblem.find(problem);
+            if(found == m_byProblem.end())
+                return nullptr;
+            for(const auto& result : found->second)
+                if(result->fields == fields)
+                    return result;
+            return nullptr;
+        }
+
+        /** Stores a result for the problem it was found for, unless entries changed since. */
+        void add(const TensileLite::ContractionProblemGemm& problem,
+                 std::shared_ptr<const ReplayResult>        result)
+        {
+            const uint64_t generation = result->candidates->generation;
+
+            std::unique_lock<std::shared_mutex> lock(m_mutex);
+            if(generation < m_generation)
+                return;
+            if(generation > m_generation)
+            {
+                m_byProblem.clear();
+                m_generation = generation;
+            }
+            auto& results = m_byProblem[problem];
+            for(auto& stored : results)
+                if(stored->fields == result->fields)
+                {
+                    stored = std::move(result);
+                    return;
+                }
+            results.push_back(std::move(result));
+        }
+
+        void clear()
+        {
+            std::unique_lock<std::shared_mutex> lock(m_mutex);
+            m_byProblem.clear();
+        }
+
+    private:
+        struct SameProblem
+        {
+            bool operator()(const TensileLite::ContractionProblemGemm& a,
+                            const TensileLite::ContractionProblemGemm& b) const
+            {
+                return TensileLite::Comparison<TensileLite::ContractionProblemGemm>::compare(a, b)
+                       == 0;
+            }
+        };
+
+        std::shared_mutex m_mutex;
+        uint64_t          m_generation = 0;
+        std::unordered_map<TensileLite::ContractionProblemGemm,
+                           std::vector<std::shared_ptr<const ReplayResult>>,
+                           std::hash<TensileLite::ContractionProblemGemm>,
+                           SameProblem>
+            m_byProblem;
+    };
+
+    /** Fills *algo as getSolutionsFromIndex returns an index. */
+    void algo_for_index(int index, size_t max_workspace_bytes, rocblaslt_matmul_algo* algo)
+    {
+        *algo                               = rocblaslt_matmul_algo{};
+        *reinterpret_cast<int*>(algo->data) = index;
+        algo->max_workspace_bytes           = max_workspace_bytes;
+    }
+
     /** Whether an index supports this call within the workspace, filling *algo to launch it. */
     bool index_supports_call(rocblaslt_handle                   handle,
                              int                                index,
@@ -677,10 +845,7 @@ namespace
                              size_t                             max_workspace_bytes,
                              rocblaslt_matmul_algo*             algo)
     {
-        // What getSolutionsFromIndex returns for this index.
-        *algo                               = rocblaslt_matmul_algo{};
-        *reinterpret_cast<int*>(algo->data) = index;
-        algo->max_workspace_bytes           = max_workspace_bytes;
+        algo_for_index(index, max_workspace_bytes, algo);
 
         size_t required = 0;
         if(rocblaslt_status_success
@@ -754,16 +919,44 @@ int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
         handle, *candidates, problem, gemmData, max_workspace_bytes, &algo);
 }
 
-int tuning_cache_replay(rocblaslt_handle                    handle,
-                        const TensileLite::ProblemOverride& key,
-                        const RocblasltContractionProblem&  problem,
-                        std::shared_ptr<void>               gemmData,
-                        rocblaslt_matmul_algo*              algo,
-                        bool                                countMiss)
+int tuning_cache_replay(rocblaslt_handle                             handle,
+                        const RocblasltContractionProblem&           problem,
+                        const TensileLite::ContractionProblemGemm&   tensileProblem,
+                        std::shared_ptr<void>                        gemmData,
+                        rocblaslt_matmul_algo*                       algo,
+                        bool                                         countMiss,
+                        std::optional<TensileLite::ProblemOverride>* key)
 {
-    const auto candidates = ReplayCandidatesByKey::instance().find(handle, key);
-    const int  index      = first_supported_candidate(
-        handle, *candidates, problem, gemmData, problem.workspaceSize, algo);
+    // Read before the lookup, like ReplayCandidatesByKey::find.
+    const uint64_t         generation = TensileLite::OverrideMap::getMap().generation();
+    const ReplayCallFields fields(handle, problem);
+
+    auto result = ReplayResults::instance().find(tensileProblem, fields, generation);
+    if(result)
+    {
+        if(result->index >= 0)
+            algo_for_index(result->index, problem.workspaceSize, algo);
+    }
+    else
+    {
+        // Copied before the support check works on gemmData's problem.
+        const TensileLite::ContractionProblemGemm checkedProblem = tensileProblem;
+
+        auto fresh        = std::make_shared<ReplayResult>(ReplayResult{fields});
+        fresh->key        = RocblasltContractionProblem2ProblemOverride(problem);
+        fresh->candidates = ReplayCandidatesByKey::instance().find(handle, fresh->key);
+        fresh->index      = first_supported_candidate(
+            handle, *fresh->candidates, problem, gemmData, problem.workspaceSize, algo);
+        TensileLite::TuningCounters::instance().replayChecks++;
+
+        ReplayResults::instance().add(checkedProblem, fresh);
+        result = std::move(fresh);
+    }
+
+    if(key)
+        *key = result->key;
+
+    const int index = result->index;
     if(index < 0 && !countMiss)
         return index;
 
@@ -773,15 +966,16 @@ int tuning_cache_replay(rocblaslt_handle                    handle,
     else
         counters.misses++;
 
-    const int tally = index >= 0 ? 2 : 1;
-    int       told  = candidates->tallied.load(std::memory_order_relaxed);
-    while(told < tally && !candidates->tallied.compare_exchange_weak(told, tally))
+    auto&     candidates = *result->candidates;
+    const int tally      = index >= 0 ? 2 : 1;
+    int       told       = candidates.tallied.load(std::memory_order_relaxed);
+    while(told < tally && !candidates.tallied.compare_exchange_weak(told, tally))
     {
     }
     if(told < tally)
-        TensileLite::recordTuningLookup(key, index >= 0);
+        TensileLite::recordTuningLookup(result->key, index >= 0);
 
-    log_lookup(__func__, key, index >= 0, index);
+    log_lookup(__func__, result->key, index >= 0, index);
     return index;
 }
 
@@ -3729,6 +3923,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     TensileLite::resetTuningDiagnosticsForTest();
     TensileLite::resetReplayLoadForTest();
     ReplayCandidatesByKey::instance().clear();
+    ReplayResults::instance().clear();
 
     auto& counters         = TensileLite::TuningCounters::instance();
     counters.entriesLoaded = 0;
@@ -3738,6 +3933,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     counters.tuned         = 0;
     counters.skipped       = 0;
     counters.attempts      = 0;
+    counters.replayChecks  = 0;
 
     tuningInjectFailureForTest(0);
     static_cast<void>(tuningLastLaunchedIndexForTest());
@@ -3873,6 +4069,9 @@ extern "C" HIPBLASLT_EXPORT int hipblaslt_tuning_last_launch_for_test()
 //       lines are bounded per shape, so they cannot show a retry.
 //   10 tuned shapes
 //       Distinct shapes this process tuned, as the summary line counts them.
+//   11 replay checks
+//       Calls cache replay answered by checking the entries' support, rather
+//       than from what it found for an earlier call making the same problem.
 //
 // Fills up to count values in that order and returns how many there are, so a
 // test expecting a different list notices instead of misreading it. New values
@@ -3893,7 +4092,8 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* val
                             c.tuned.load(),
                             c.skipped.load(),
                             c.attempts.load(),
-                            tunedShapes};
+                            tunedShapes,
+                            c.replayChecks.load()};
 
     constexpr size_t known = sizeof(all) / sizeof(all[0]);
     for(size_t i = 0; values && i < count && i < known; i++)

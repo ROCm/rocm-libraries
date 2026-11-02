@@ -159,6 +159,10 @@ namespace TensileLite
         // Searches that got as far as tuning-start, whatever their outcome.
         std::atomic<uint64_t> attempts{0};
 
+        // Calls cache replay answered by checking the entries' support, rather
+        // than from what it found for an earlier call making the same problem.
+        std::atomic<uint64_t> replayChecks{0};
+
         std::string summary() const
         {
             return "loaded=" + std::to_string(entriesLoaded.load()) + " hits="

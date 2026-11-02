@@ -70,6 +70,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <complex>
 #include <cstdint>
@@ -84,6 +85,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -5666,6 +5668,49 @@ namespace
         *(int*)reselectedAlgo.data = choice->solution;
         return &reselectedAlgo;
     }
+
+#ifndef NDEBUG
+    /** Whether problem is already what updateTensileProblem makes of it from prob. */
+    bool isUpdatedFrom(const RocblasltContractionProblem&         prob,
+                       const TensileLite::ContractionProblemGemm& problem)
+    {
+        auto updated = problem;
+        updateTensileProblem(prob, updated);
+
+        auto fields = [](const TensileLite::ContractionProblemGemm& q) {
+            const auto& p = q.getParams();
+            return std::make_tuple(q.tensors(),
+                                   q.beta(),
+                                   q.alphaType(),
+                                   q.betaType(),
+                                   q.alphaRestriction(),
+                                   q.betaRestriction(),
+                                   q.cEqualsD(),
+                                   q.batchMode(),
+                                   q.getUseDeviceUserArguments(),
+                                   p.gsu(),
+                                   p.gsuc(),
+                                   p.gsuwgmrr(),
+                                   p.wgm(),
+                                   p.wgmxcc(),
+                                   p.wgmxccg(),
+                                   p.biasEnum(),
+                                   p.factorDim(),
+                                   p.activationEnum(),
+                                   p.fallbackStatus(),
+                                   p.streamKTileSchedulingMode(),
+                                   p.uniformSummationOrder(),
+                                   p.smCountTarget(),
+                                   p.occupancyProbeAddr(),
+                                   p.occupancyProbeEpoch(),
+                                   p.occupancyProbeMinGrid());
+        };
+        return TensileLite::Comparison<TensileLite::ContractionProblemGemm>::compare(updated,
+                                                                                     problem)
+                   == 0
+               && fields(updated) == fields(problem);
+    }
+#endif
 } // namespace
 
 /******************************************************************************
@@ -5734,12 +5779,20 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 // A matmul-only caller never reaches the heuristic entry
                 // point, which is the only other place that loads the file.
                 TensileLite::loadTuningFileForReplay(tuning.cachePath());
-                tuningKey = RocblasltContractionProblem2ProblemOverride(prob);
+
+                // Replay looks the call up by its Tensile problem, which the
+                // launch needs anyway.
+                updateTensileProblem(prob, data->problem);
 
                 // A miss that may go on to tune is counted by the tuner, by
                 // what the call finds once it can tune.
-                if(tuning_cache_replay(
-                       handle, *tuningKey, prob, gemmData, &heuristicResult.algo, !tunes)
+                if(tuning_cache_replay(handle,
+                                       prob,
+                                       data->problem,
+                                       gemmData,
+                                       &heuristicResult.algo,
+                                       !tunes,
+                                       tunes ? &tuningKey : nullptr)
                    >= 0)
                     algo = &heuristicResult.algo;
             }
@@ -5762,7 +5815,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 return rocblaslt_status_not_implemented;
             algo = &heuristicResult.algo;
         }
-        updateTensileProblem(prob, data->problem);
+        // Replay has already made data->problem what this would.
+        if(replayed)
+            assert(isUpdatedFrom(prob, data->problem));
+        else
+            updateTensileProblem(prob, data->problem);
 
         // A re-selected solution runs through a copy of the caller's algo with
         // its index replaced; the caller's algo stays as queried.

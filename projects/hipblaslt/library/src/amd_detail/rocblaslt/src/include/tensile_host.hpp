@@ -47,6 +47,7 @@
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <atomic>
+#include <optional>
 
 // Return the value category for a value, as a double precision value, such
 // such as whether it's 0, 1, -1 or some other value. Tensile uses a double
@@ -296,16 +297,23 @@ int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
 
 /**
  * Cache replay for a matmul that passed no algo: tuning_cache_find_valid_entry
- * within the problem's workspace, filling *algo to launch the entry it finds.
- * Counts the lookup, except a miss when countMiss is false: a call that can go
- * on to tune is counted by what it finds once it can.
+ * for the call's key within the problem's workspace, filling *algo to launch the
+ * entry it finds. Counts the lookup, except a miss when countMiss is false: a
+ * call that can go on to tune is counted by what it finds once it can.
+ *
+ * tensileProblem is gemmData's problem, which updateTensileProblem has already
+ * made from problem; it is left that way. The answer, found or not, is kept for
+ * that Tensile problem and the call's other key inputs until the loaded entries
+ * change, so a call repeating them neither builds its key nor checks support
+ * again. When key is given, it is set to the call's key.
  */
-int tuning_cache_replay(rocblaslt_handle                    handle,
-                        const TensileLite::ProblemOverride& key,
-                        const RocblasltContractionProblem&  problem,
-                        std::shared_ptr<void>               gemmData,
-                        rocblaslt_matmul_algo*              algo,
-                        bool                                countMiss);
+int tuning_cache_replay(rocblaslt_handle                             handle,
+                        const RocblasltContractionProblem&           problem,
+                        const TensileLite::ContractionProblemGemm&   tensileProblem,
+                        std::shared_ptr<void>                        gemmData,
+                        rocblaslt_matmul_algo*                       algo,
+                        bool                                         countMiss,
+                        std::optional<TensileLite::ProblemOverride>* key);
 
 /**
  * The solution index this thread last launched through runContractionProblem,
