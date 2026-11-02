@@ -10,6 +10,7 @@ pytest.importorskip("flatbuffers")
 pytest.importorskip("pandas")
 
 from uhd_gen.__main__ import main  # noqa: E402
+from uhd_gen.tests.model_bin import ENCODING_FLAGS, encoding_of  # noqa: E402
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
@@ -440,3 +441,24 @@ def test_the_model_is_fitted_for_the_round_early_stopping_chose():
         frame, ["x"], "tflops", num_boost_round=budget, early_stopping_rounds=5
     )
     assert 0 < model.num_trees() < budget
+
+
+@pytest.mark.parametrize(("flags", "written"), ENCODING_FLAGS)
+def test_the_encoding_flags_choose_how_model_bin_stores_its_trees(
+    tmp_path, evaluator, flags, written
+):
+    corpus = _l1_corpus(tmp_path / "corpus.json", metric="tflops")
+    output = tmp_path / "model"
+    assert (
+        _l1_train(
+            corpus,
+            output,
+            "--metric",
+            "tflops",
+            "--feature-evaluator",
+            evaluator,
+            *flags,
+        )
+        == 0
+    )
+    assert encoding_of(output / "model.bin") == written

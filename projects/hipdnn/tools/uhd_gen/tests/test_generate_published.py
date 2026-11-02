@@ -18,6 +18,8 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("lightgbm")
 pytest.importorskip("flatbuffers")
 
+from uhd_gen.tests.model_bin import ENCODING_FLAGS, encoding_of  # noqa: E402
+
 PROBLEMS = 40
 
 
@@ -247,3 +249,24 @@ def test_trained_on_every_row_it_is_the_model_train_makes_from_the_same_rows(
     ).read_bytes()
     rows = json.loads((output / "train.json").read_text())
     assert len(rows) == PROBLEMS * 4, "recall trains on every row"
+
+
+@pytest.mark.parametrize(("flags", "written"), ENCODING_FLAGS)
+def test_a_published_dataset_is_written_in_the_encoding_asked_for(
+    published, evaluator, flags, written
+):
+    code, output = _generate(
+        published,
+        evaluator,
+        "encoded",
+        *FEATURES,
+        "--target",
+        "tflops",
+        "--objective",
+        "max",
+        "--group-by-feature",
+        "kernel.solver_id",
+        *flags,
+    )
+    assert code == 0
+    assert encoding_of(output / "model" / "model.bin") == written
