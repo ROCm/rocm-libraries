@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+import itertools
+import math
 import os
 import re
 from textwrap import dedent, indent
@@ -1422,6 +1424,16 @@ _VLLM_WVSPLITK = [
 ]
 _VLLM_WVSPLITK_NAMES = [f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}" for dt, n, tile in _VLLM_WVSPLITK]
 
+# Their bias-epilogue variants that library logic picks.
+_VLLM_WVSPLITK_BIAS = [
+    *[("bf16", n, tile) for n in (1, 2, 3) for tile in ("y1u4", "y1u2")],
+    *[("bf16", 4, tile) for tile in ("y1u4", "y1u2", "y3u2")],
+    ("bf16", 5, "y1u2"),
+    *[("f16", n, tile) for n in (1, 2, 3) for tile in ("y1u4", "y1u2")],
+    *[("f16", n, tile) for n in (4, 5) for tile in ("y1u4", "y1u2", "y3u2")],
+]
+_VLLM_WVSPLITK_BIAS_NAMES = [f"wvSplitK_vllm_{dt}_tn_bias_n{n}_{tile}" for dt, n, tile in _VLLM_WVSPLITK_BIAS]
+
 _SKINNY_TN_ARGS = [
     "SizeSum",
     "SizeFree0",
@@ -1443,7 +1455,7 @@ _SKINNY_TN_ARGS = [
 _WVSPLTK_NAMES = ["wvSpltK_bf16_tn_m1", "wvSpltK_bf16_tn_m2", "wvSpltK_bf16_tn_m4"]
 
 
-@pytest.mark.parametrize("name", [*_WVSPLTK_NAMES, *_VLLM_WVSPLITK_NAMES])
+@pytest.mark.parametrize("name", [*_WVSPLTK_NAMES, *_VLLM_WVSPLITK_NAMES, *_VLLM_WVSPLITK_BIAS_NAMES])
 def test_wvspltk_code_object_version_matches_library_build(name):
     """Library logic references these kernels, so TensileCreateLibrary links each
     into one code object with Tensile's kernels, which hipBLASLt assembles at its
@@ -1461,7 +1473,7 @@ _UNIT_STRIDE_KEYS = (
 )
 
 
-def _check_skinny_tn_config(name, dataType, sizeEqual, sizeLessThan=None, sizeGreaterThan=None):
+def _check_skinny_tn_config(name, dataType, sizeEqual, sizeLessThan=None, sizeGreaterThan=None, bias=False):
     ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     valid, msg = validateCustomKernelMetadata(name, ck_root)
     assert valid, msg
@@ -1470,6 +1482,13 @@ def _check_skinny_tn_config(name, dataType, sizeEqual, sizeLessThan=None, sizeGr
     pt = config["ProblemType"]
     assert (pt["DataType"], pt["DestDataType"], pt["ComputeDataType"]) == (dataType, dataType, "s")
     assert (pt["TransposeA"], pt["TransposeB"]) == (True, False)
+    assert not pt.get("Activation") and not pt.get("UseScaleAlphaVec")
+    if bias:
+        # hipBLASLt's bias epilogue: a bias of D's type on each row of D.
+        assert (pt["UseBias"], pt["BiasSrc"], pt["BiasDataTypeList"]) == (1, "D", [dataType])
+    else:
+        assert not pt.get("UseBias")
+    assert readCustomKernelConfig(name, ck_root)["Features"]["SupportsBias"] is bias
     assert config["AssertSizeEqual"] == sizeEqual
     if sizeLessThan is None:
         assert "AssertSizeLessThan" not in config
@@ -1484,7 +1503,7 @@ def _check_skinny_tn_config(name, dataType, sizeEqual, sizeLessThan=None, sizeGr
     ck = config["CustomKernel"]
     assert ck["grid"] == ["ComputeUnits", "One", "One"]
     assert ck["threads"] == [64, 16, 1]
-    assert [a["semantic"] for a in ck["args"]] == _SKINNY_TN_ARGS
+    assert [a["semantic"] for a in ck["args"]] == _SKINNY_TN_ARGS + (["AddressBias"] if bias else [])
     # Each wave reduces whole rows, every row with the same lanes, loop and
     # reduction, so hipBLASLt can run these under uniform summation order.
     assert ck["uniformSummationOrder"] is True
@@ -1511,6 +1530,16 @@ def test_vllm_wvsplitk_shipped_config(dt, n, tile):
     """Same layout and arguments as wvSpltK, with n fixed per kernel. Tokens that
     fit LDS are staged once, otherwise K is staged in chunks, so K has no bound."""
     _check_skinny_tn_config(f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}", {"bf16": "b", "f16": "h"}[dt], {1: n, 2: 1})
+
+
+@pytest.mark.parametrize("dt,n,tile", _VLLM_WVSPLITK_BIAS)
+def test_vllm_wvsplitk_bias_shipped_config(dt, n, tile):
+    """The same kernels with the bias added to each row of D, its address
+    appended to the args. The bias kernels accept no activation or scale vector,
+    and hipBLASLt only gives them a bias of D's type."""
+    _check_skinny_tn_config(
+        f"wvSplitK_vllm_{dt}_tn_bias_n{n}_{tile}", {"bf16": "b", "f16": "h"}[dt], {1: n, 2: 1}, bias=True
+    )
 
 
 _LOGIC_ROOT = os.path.normpath(
@@ -1541,30 +1570,64 @@ def _boxes_overlap(a, b):
     return True
 
 
+def _box_covered(box, boxes):
+    """Whether every problem in Range key box lies in one of boxes. Checks one
+    problem per cell of the grid that all their bounds cut each dimension into."""
+    span = lambda b, dim: (b[2 * dim], math.inf if b[2 * dim + 1] == -1 else b[2 * dim + 1] + 1)
+    corners = []
+    for dim in range(4):
+        lo, hi = span(box, dim)
+        cuts = {x for b in (box, *boxes) for x in span(b, dim)}
+        corners.append(sorted(x for x in cuts if lo <= x < hi))
+    inside = lambda p, b: all(span(b, dim)[0] <= p[dim] < span(b, dim)[1] for dim in range(4))
+    return all(any(inside(p, b) for b in boxes) for p in itertools.product(*corners))
+
+
+_PLAIN_RANGE = {
+    7: "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
+    _HALF: "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml",
+}
+
+
 @pytest.mark.parametrize(
-    "rel,dataType,kernels",
+    "rel,dataType,kernels,bias",
     [
         (
-            "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
+            _PLAIN_RANGE[7],
             7,
             set(_WVSPLTK_NAMES) | {name for name in _VLLM_WVSPLITK_NAMES if "_bf16_" in name},
+            False,
         ),
         (
-            "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml",
+            _PLAIN_RANGE[_HALF],
             _HALF,
             {name for name in _VLLM_WVSPLITK_NAMES if "_f16_" in name},
+            False,
+        ),
+        (
+            "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_Bias_B_UserArgs.yaml",
+            7,
+            {name for name in _VLLM_WVSPLITK_BIAS_NAMES if "_bf16_" in name},
+            True,
+        ),
+        (
+            "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_Bias_H_UserArgs.yaml",
+            _HALF,
+            {name for name in _VLLM_WVSPLITK_BIAS_NAMES if "_f16_" in name},
+            True,
         ),
     ],
 )
-def test_skinny_tn_range_logic(rel, dataType, kernels):
+def test_skinny_tn_range_logic(rel, dataType, kernels, bias):
     """hipBLASLt reaches the skinny TN kernels through these Range files. A custom
-    kernel takes the logic file's problem type, and these kernels support no bias,
-    activation or scale vector, so the type must be plain GEMM. The BF16 file
-    must match the header and type of the shipped plain-GEMM logic to share its
-    placeholder; gfx950 ships no plain-GEMM FP16 TN logic, so the FP16 file
-    differs from it only in the data types. Keys are [m_min, m_max, n_min, n_max,
-    batch_min, batch_max, K_min, K_max], -1 unbounded. hipBLASLt takes the first
-    row containing the problem, so the rows must not overlap, and each must sit
+    kernel takes the logic file's problem type. The plain kernels support no
+    bias, activation or scale vector, so their type must be plain GEMM; the bias
+    kernels' type adds only a bias of D's type. Each file must match the header
+    and type of the shipped plain-GEMM BF16 logic to share its placeholder;
+    gfx950 ships no plain-GEMM FP16 TN logic, so the FP16 files differ from it
+    only in the data types. Keys are [m_min, m_max, n_min, n_max, batch_min,
+    batch_max, K_min, K_max], -1 unbounded. hipBLASLt takes the first row
+    containing the problem, so the rows must not overlap, and each must sit
     inside its kernel's predicates."""
     path = os.path.join(_LOGIC_ROOT, rel)
     if not os.path.exists(path):
@@ -1575,7 +1638,7 @@ def test_skinny_tn_range_logic(rel, dataType, kernels):
     pt = doc["ProblemType"]
     assert pt.get("ActivationType", "none") == "none"
     assert pt.get("UseScaleAB", "") == ""
-    for key in ("UseBias", "UseE", "UseScaleAlphaVec", "UseScaleCD", "GroupedGemm", "Gradient"):
+    for key in ("UseE", "UseScaleAlphaVec", "UseScaleCD", "GroupedGemm", "Gradient"):
         assert not pt.get(key), key
 
     with open(os.path.join(_LOGIC_ROOT, _PLAIN_BF16_LOGIC)) as f:
@@ -1583,7 +1646,10 @@ def test_skinny_tn_range_logic(rel, dataType, kernels):
     plainHeader = {k: plain[k] for k in ("ScheduleName", "ArchitectureName", "CUCount", "DeviceNames")}
     assert {k: doc[k] for k in plainHeader} == plainHeader
     typeFields = ("DataType", "DataTypeA", "DataTypeB", "DataTypeE", "DestDataType")
-    assert pt == {**plain["ProblemType"], **{k: dataType for k in typeFields}}
+    expected = {**plain["ProblemType"], **{k: dataType for k in typeFields}}
+    if bias:
+        expected.update(UseBias=1, BiasSrc="D", BiasDataTypeList=[dataType])
+    assert pt == expected
 
     names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
     rows = [(key, names[index]) for key, (index, _) in doc["ExactLogic"]]
@@ -1591,6 +1657,15 @@ def test_skinny_tn_range_logic(rel, dataType, kernels):
     for i, (a, nameA) in enumerate(rows):
         for b, nameB in rows[i + 1 :]:
             assert not _boxes_overlap(a, b), (a, nameA, b, nameB)
+
+    if bias:
+        # A problem without a bias also matches the bias type. hipBLASLt searches
+        # the plain-GEMM file first, so rows inside its rows keep those problems
+        # off the bias kernels.
+        with open(os.path.join(_LOGIC_ROOT, _PLAIN_RANGE[dataType])) as f:
+            plainRows = [key for key, _ in yaml.safe_load(f)["ExactLogic"]]
+        for key, name in rows:
+            assert _box_covered(key, plainRows), (key, name)
 
     ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
     for key, name in rows:
