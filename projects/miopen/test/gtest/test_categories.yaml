@@ -614,7 +614,29 @@ gfx11_common_patterns: &gfx11_common_patterns
 
 exclude_gpu:
   exclude_gpu_gfx120X:
-    test_patterns: *gfx11_common_patterns
+    test_patterns:
+      - *gfx11_common_patterns
+      # Fails on every arch without bundled AI models (ALMIOPEN-2966): "no fdeep .tn.model files found" in the system db.
+      # Linux and Windows gfx120X, 10 of 10 executions on 8 hosts: TheRock bump PR #9651 run 41113572856 (shard 3, attempts
+      # 1-4) and PR #9680 run 41405101044 (issue #14874). Remove when ALMIOPEN-2966 makes the test skip archs without models.
+      - "GPU_ConvAIModelLoad_FP32*"
+      # Fails on gfx1201 hosts whose CU count has no shipped system db (#13416): "Db file does not exist ...
+      # gfx120138.HIP.fdb.txt" on CS-RORDMZ-DT84 (TheRock PR #9651 run 41113572856 attempt 1); only gfx120140 ships, which
+      # passes on the other gfx1201 hosts. Same cause as StaticFDBSync/9 on gfx115X. Remove with the gfx115X entry (#13416).
+      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/11"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx120X"
+
+  exclude_gpu_gfx120X_linux:
+    test_patterns:
+      # Hangs until the 60-min ctest timeout after "Testing solution functions..." on the Linux gfx1201 hosts CS-RORDMZ-DT87
+      # and CS-RORDMZ-DT81 (issue #14874): TheRock PR #9651 run 41113572856 attempts 1-2 and PR #9680 run 41405101044, 3 of 3
+      # executions on Linux gfx1201. Passes in < 1.2 s on Linux gfx1200 and on Windows gfx1201 (5 of 5 runs).
+      - "GPU_SoftmaxFind20_FP16.softmaxBackward_log_channel_mode_fp16"
     labels:
       - "quick"
       - "standard"
@@ -690,6 +712,12 @@ exclude_gpu:
       # Forward Inference GRU verification failed at gru_test.cpp:1985/2224/2473 for 3 of these 8 bias-enabled cases in
       # PR #13107 run 39358709264 (attempt 2); the same cases passed on the other attempt and in run 39480689944.
       - "Full/GPU_GRU_Base_FP16.TestFloat16/batchSize_17_seqLength_23_inVecLen_13_hiddenSize_67_*biasMode_1_*"
+      # Hang in the multiprocess-write phase ("Waiting for test processes...") until the ctest/step timeout on Windows gfx1151
+      # (issue #14874): 6 hangs on 5 hosts since 10-31 - develop nightlies 41179300934 (RamDb) and 41283494663 (RamDb, and
+      # PlainTextDb on 3 attempts), TheRock PR #9680 run 41405101044 (PlainTextDb). MultiFileDb_AllTests has no multiprocess
+      # phase and keeps running. Linux gfx115X already excludes CPU_PerfDb_NONE.* (ALMIOPEN-2964).
+      - "CPU_PerfDb_NONE.RamDb_AllTests"
+      - "CPU_PerfDb_NONE.PlainTextDb_AllTests"
     labels:
       - "quick"
       - "standard"
