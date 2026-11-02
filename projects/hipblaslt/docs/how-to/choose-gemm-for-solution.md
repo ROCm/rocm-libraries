@@ -202,7 +202,9 @@ example chose 16-by-16-by-512 and reported `norm_error` of zero. Your dimensions
 and numerical error depend on the chosen solution.
 
 The generated YAML enables numerical validation, sets `cold_iters=0` and
-`iters=0`, and disables adaptive timing. Validation performs the one target
+`iters=0`, and disables adaptive timing. It also turns off uniform summation
+order, which is on by default and would otherwise reject a solution that does
+not guarantee it. Validation performs the one target
 execution; initialization and split-reduction helpers can launch separately.
 Use a benchmark containing this zero-timed-iteration behavior.
 

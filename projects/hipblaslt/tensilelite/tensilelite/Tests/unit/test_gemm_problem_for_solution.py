@@ -71,6 +71,7 @@ def test_full_tile_and_eight_blocks_per_split(tmp_path, trans_a, trans_b, split)
     assert (row["alpha"], row["beta"], row["batch_count"]) == (1, 0, 1)
     assert (row["algo_method"], row["solution_index"], row["requested_solution_num"]) == (2, 17, 1)
     assert (row["cold_iters"], row["iters"], row["adaptive"]) == (0, 0, False)
+    assert row["uniform_summation_order"] == 0
     assert row["norm_check"] and row["norm_check_assert"] and row["allclose_check"]
     assert row["activation_type"] == "none" and row["bias_vector"] is False
     assert (row["scaleA"], row["scaleB"], row["initialization"]) == ("none", "none", "rand_int")

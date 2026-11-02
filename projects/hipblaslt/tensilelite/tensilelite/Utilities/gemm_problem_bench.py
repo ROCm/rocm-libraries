@@ -163,6 +163,9 @@ def bench_yaml(problems: Iterable[GemmProblem]) -> str:
             "print_kernel_info": True,
             "skip_slow_solution_ratio": 0.0,
             "user_allocated_workspace": 128 * 1024 * 1024,
+            # Uniform summation order, on by default, rejects solutions that do
+            # not guarantee it; the requested solution must run regardless.
+            "uniform_summation_order": 0,
         }
         # Bench's explicit compute-input fields accept narrow/FP32 inputs only.
         # Its compute enum supplies the real component type for double, complex
