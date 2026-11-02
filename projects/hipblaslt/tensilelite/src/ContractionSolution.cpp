@@ -464,17 +464,18 @@ namespace TensileLite
         // Rounded down to a whole number of K units. A kernel whose K unit spans
         // several iterations cannot start a workgroup partway through one, and
         // the device hands the leftover out a whole unit at a time, so both the
-        // stride and the remainder have to be multiples of the unit. skKUnit
-        // drops the unit back to one iteration when the tile's K is not a whole
-        // number of units, where quantising would strand the fraction.
-        const size_t skIters = static_cast<size_t>(skTiles) * itersPerTile;
-        const size_t g       = skKUnit(itersPerTile, kGranularity);
-        split.skItersPerWG   = static_cast<uint32_t>(g * (skIters / g / skGrid));
+        // stride and the remainder have to be multiples of the unit. The flat
+        // space counts padded tiles (skPaddedItersPerTile), which is what puts
+        // the tile starts the cuts fall between on unit boundaries as well.
+        const size_t g           = std::max(kGranularity, size_t{1});
+        const size_t paddedIters = skPaddedItersPerTile(itersPerTile, g);
+        const size_t skIters     = static_cast<size_t>(skTiles) * paddedIters;
+        split.skItersPerWG       = static_cast<uint32_t>(g * (skIters / g / skGrid));
         // Global leftover under the historical first-E mapping. The device may
         // redistribute these extras within each tile when
         // InternalArgsSupport::perTileExtraIters is set and skGrid % skTiles == 0;
         // the packed value itself is unchanged.
-        split.extraIters   = static_cast<uint32_t>(static_cast<size_t>(skTiles) * itersPerTile
+        split.extraIters   = static_cast<uint32_t>(skIters
                                                  - static_cast<size_t>(split.skItersPerWG)
                                                        * skGrid);
         return split;
@@ -485,8 +486,12 @@ namespace TensileLite
                                       size_t                    itersPerTile,
                                       size_t                    skGrid,
                                       bool                      perTileCapable,
-                                      bool                      uniformSummationOrder)
+                                      bool                      uniformSummationOrder,
+                                      size_t                    kGranularity)
     {
+        // Chunk lengths are cut from the padded flat space, so the divisibility
+        // this checks is against the padded tile length, not the real one.
+        const size_t paddedIters = skPaddedItersPerTile(itersPerTile, kGranularity);
         // The kernel branches at runtime on the uniform-summation-order bit the
         // host packs into MagicShiftItersPerTile: with the bit clear it runs the
         // historical global first-E mapping even when it supports per-tile
@@ -525,7 +530,7 @@ namespace TensileLite
             return true;
 
         if(split.skItersPerWG != 0 && split.extraIters == 0 && split.skTiles == tiles
-           && itersPerTile % split.skItersPerWG == 0)
+           && paddedIters % split.skItersPerWG == 0)
             return true;
 
         if(perTileActive && split.skTiles == tiles && tiles != 0 && skGrid % tiles == 0
@@ -573,12 +578,13 @@ namespace TensileLite
         if(skGrid == 0 || tiles == 0 || kGranularity == 0)
             return range;
 
-        const size_t g          = skKUnit(itersPerTile, kGranularity);
-        const size_t totalIters = tiles * itersPerTile;
+        const size_t g           = kGranularity;
+        const size_t paddedIters = skPaddedItersPerTile(itersPerTile, g);
+        const size_t totalIters  = tiles * paddedIters;
         // Both the stride and the leftover are whole K units: the device adds
-        // g, not 1, to the long chunks, and E/g workgroups get one. g is 1 when
-        // the tile's K is not a whole number of units (skKUnit), which is also
-        // the only case the device cannot place on a unit boundary at all.
+        // g, not 1, to the long chunks, and E/g workgroups get one. The flat
+        // space counts padded tiles, so a multiple of g in it is a unit
+        // boundary inside whichever tile it lands in.
         const size_t W          = g * (totalIters / g / skGrid);
         const size_t E          = (totalIters - W * skGrid) / g;
 
@@ -593,9 +599,9 @@ namespace TensileLite
             const size_t F    = skGrid / tiles;
             const size_t q    = w / F;
             const size_t s    = w % F;
-            const size_t base = g * (itersPerTile / g / F);
-            const size_t remI = (itersPerTile - base * F) / g;
-            range.start       = q * itersPerTile + s * base + g * std::min(s, remI);
+            const size_t base = g * (paddedIters / g / F);
+            const size_t remI = (paddedIters - base * F) / g;
+            range.start       = q * paddedIters + s * base + g * std::min(s, remI);
             range.end         = range.start + base + (s < remI ? g : size_t{0});
             return range;
         }
@@ -1139,8 +1145,14 @@ namespace TensileLite
         {
             // Prebuilt DP layout v0: six u32 slots, no workspace/flag pointer.
             // DataParallel argument layout v1 never uses these scheduling fields.
+            // The flat space is in padded tiles here too, so that a solution with
+            // a K unit keeps one convention across every path it can take.
             uint32_t magicShift = 0;
-            const uint32_t magic = solution.magicNumber(2, itersPerTile, &magicShift);
+            const uint32_t magic = solution.magicNumber(
+                2,
+                static_cast<uint32_t>(
+                    skPaddedItersPerTile(itersPerTile, solution.skKGranularity())),
+                &magicShift);
             if(solution.internalArgsSupport.perTileExtraIters
                && problem.getParams().uniformSummationOrder() != 0)
                 magicShift |= 0x20000000u;
@@ -1487,15 +1499,17 @@ namespace TensileLite
                     skSplit = overrideSplit;
                 // Calculate number of stream-k iterations per workitem, rounded up
                 // to a whole number of K units so that every chunk boundary
-                // p*skItersPerWI lands on one (see skKGranularity(), skKUnit()).
-                const uint32_t kGran
-                    = static_cast<uint32_t>(skKUnit(itersPerTile, skKGranularity()));
+                // p*skItersPerWI lands on one (see skKGranularity()). The tile is
+                // measured padded to a whole unit, so the boundaries stay on units
+                // even when its real K is not; the device clamps the last chunk
+                // back to ItersPerTile.
+                const uint32_t kGran = static_cast<uint32_t>(skKGranularity());
+                const uint32_t paddedIters
+                    = static_cast<uint32_t>(skPaddedItersPerTile(itersPerTile, kGran));
                 uint32_t skItersPerWI
-                    = kGran
-                      * CeilDivide(CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit),
-                                   kGran);
+                    = kGran * CeilDivide(CeilDivide(paddedIters, skSplit), kGran);
                 // Calculate real splitting factor in case iterations don't divide evenly
-                skSplit = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
+                skSplit = CeilDivide(paddedIters, skItersPerWI);
                 uint32_t totalItems = (tiles - skTiles) + skTiles * skSplit;
 
                 args.template append<uint32_t>("ItersPerTile", itersPerTile);
@@ -1533,16 +1547,13 @@ namespace TensileLite
                         sk4_skTiles = overrideTiles;
                     if(overrideSplit > -1)
                         sk4_skSplit = overrideSplit;
-                    const uint32_t sk4_kGran
-                        = static_cast<uint32_t>(skKUnit(sk3_itersPerTile, skKGranularity()));
+                    const uint32_t sk4_kGran = static_cast<uint32_t>(skKGranularity());
+                    const uint32_t sk4_paddedIters = static_cast<uint32_t>(
+                        skPaddedItersPerTile(sk3_itersPerTile, sk4_kGran));
                     uint32_t       sk4_skItersPerWI
                         = sk4_kGran
-                          * CeilDivide(CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
-                                                  sk4_skSplit),
-                                       sk4_kGran);
-                    sk4_skSplit
-                        = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
-                                     sk4_skItersPerWI);
+                          * CeilDivide(CeilDivide(sk4_paddedIters, sk4_skSplit), sk4_kGran);
+                    sk4_skSplit = CeilDivide(sk4_paddedIters, sk4_skItersPerWI);
                     uint32_t sk4_totalItems
                         = (sk3_tiles - sk4_skTiles) + sk4_skTiles * sk4_skSplit;
 
@@ -1571,10 +1582,15 @@ namespace TensileLite
                 else
                 {
                     // SK5-off mirrors standalone SK3 arg packing.
+                    // The device divides the flat iteration space by the padded
+                    // tile length, so that is what the magic division encodes;
+                    // ItersPerTile itself stays the real count.
+                    const size_t sk3_paddedIters
+                        = skPaddedItersPerTile(sk3_itersPerTile, skKGranularity());
                     uint32_t magicNumberItersPerTile;
                     uint32_t magicShiftItersPerTile;
                     magicNumberItersPerTile = magicNumber(
-                        2, sk3_itersPerTile, &magicShiftItersPerTile);
+                        2, sk3_paddedIters, &magicShiftItersPerTile);
                     // Bit 30 = SK5 mode bit, bit 29 = uniform summation order.
                     // Both are stolen from the always-zero 5..30 window of
                     // magicNumberAlg2's shift field; bit 31 stays the "add"
@@ -1593,11 +1609,10 @@ namespace TensileLite
                     {
                         uint32_t skSplit
                             = static_cast<uint32_t>(launch.grid / sk3_tiles);
-                        const uint32_t kGranP
-                            = static_cast<uint32_t>(skKUnit(sk3_itersPerTile, skKGranularity()));
+                        const uint32_t kGranP = static_cast<uint32_t>(skKGranularity());
                         sk3_skItersPerWG
                             = kGranP
-                              * (static_cast<uint32_t>(sk3_itersPerTile) / kGranP / skSplit);
+                              * (static_cast<uint32_t>(sk3_paddedIters) / kGranP / skSplit);
                         sk3_skTiles = skSplit;
                     }
                     else
@@ -1635,11 +1650,20 @@ namespace TensileLite
                 // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
                 // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
                 auto     itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
-                auto     totalIters   = tiles * itersPerTile;
+                // The flat iteration space the device cuts counts tiles padded to
+                // a whole K unit, so both its extent and the magic division that
+                // maps a flat index back to a tile use the padded length. The
+                // ItersPerTile argument below stays the real count: the kernel
+                // compares StreamKLocalEnd against it to decide which workgroup
+                // owns the tile's tail loop.
+                const size_t paddedItersPerTile
+                    = skPaddedItersPerTile(itersPerTile, skKGranularity());
+                auto     totalIters   = tiles * paddedItersPerTile;
 
                 uint32_t magicNumberItersPerTile;
                 uint32_t magicShiftItersPerTile;
-                magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
+                magicNumberItersPerTile
+                    = magicNumber(2, paddedItersPerTile, &magicShiftItersPerTile);
 
                 // MagicShiftItersPerTile wire format:
                 //   31    = magicNumberAlg2's "add" indicator (abit)
@@ -1678,9 +1702,8 @@ namespace TensileLite
                     // Rounded down to a whole K unit, like the two-tile split:
                     // the device lays partials out at p*W and hands the
                     // remainder out a unit at a time (StreamK.py skAssignIters).
-                    const uint32_t kGranP
-                        = static_cast<uint32_t>(skKUnit(itersPerTile, skKGranularity()));
-                    uint32_t skItersPerWG = kGranP * (itersPerTile / kGranP / skSplit);
+                    const uint32_t kGranP = static_cast<uint32_t>(skKGranularity());
+                    uint32_t skItersPerWG = kGranP * (paddedItersPerTile / kGranP / skSplit);
 
                     args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
                     args.template append<uint32_t>("skGrid", launch.grid);
@@ -3063,8 +3086,13 @@ namespace TensileLite
         if(launch.grid > 0 && internalArgsSupport.persistentLoopArgsVersion == 0)
         {
             size_t numTiles = tiles.x * tiles.y * tiles.z;
-            skTotalIters    = static_cast<uint32_t>(numTiles * itersPerTile);
-            skMagicNumberItersPerTile = magicNumber(2, itersPerTile, &skMagicShiftItersPerTile);
+            // Flat space and its tile division are measured in padded tiles; see
+            // the SK3 packer.
+            const uint32_t paddedItersPerTile
+                = static_cast<uint32_t>(skPaddedItersPerTile(itersPerTile, skKGranularity()));
+            skTotalIters    = static_cast<uint32_t>(numTiles * paddedItersPerTile);
+            skMagicNumberItersPerTile
+                = magicNumber(2, paddedItersPerTile, &skMagicShiftItersPerTile);
 
             bool twoTileStreamK = sizeMapping.isStreamK()
                                   || customKernel.workspaceType == CustomWorkspaceType::StreamK
@@ -3076,9 +3104,9 @@ namespace TensileLite
                 {
                     uint32_t skSplit = static_cast<uint32_t>(launch.grid / numTiles);
                     // Same K-unit quantisation as the other parallel-reduction packer.
-                    const uint32_t kGranP
-                        = static_cast<uint32_t>(skKUnit(itersPerTile, skKGranularity()));
-                    skItersPerWG = kGranP * (itersPerTile / kGranP / max(skSplit, uint32_t(1)));
+                    const uint32_t kGranP = static_cast<uint32_t>(skKGranularity());
+                    skItersPerWG
+                        = kGranP * (paddedItersPerTile / kGranP / max(skSplit, uint32_t(1)));
                     skTotalTiles = skSplit;
                 }
                 else
@@ -3097,7 +3125,7 @@ namespace TensileLite
                         size_t skT = bigEnough ? launch.grid * fullTiles + numTiles % launch.grid : numTiles;
                         skTotalTiles = static_cast<uint32_t>(min(skT, numTiles));
                     }
-                    skItersPerWG = skTotalTiles * itersPerTile / max(uint32_t(1), static_cast<uint32_t>(launch.grid));
+                    skItersPerWG = skTotalTiles * paddedItersPerTile / max(uint32_t(1), static_cast<uint32_t>(launch.grid));
                 }
             }
         }
@@ -6739,10 +6767,11 @@ namespace TensileLite
             const int fullTiles = static_cast<int>(std::min(
                 static_cast<size_t>(std::max(gpu->skFullTiles, 0)), cluster.blocks / launch.grid));
             cluster.split = streamKStaticSplit(cluster.blocks, iters, launch.grid,
-                                                fullTiles, false);
+                                                fullTiles, false, skKGranularity());
             if(problem.getParams().uniformSummationOrder()
                && !streamKStaticSplitRowUniform(cluster.split, cluster.blocks, iters,
-                                                launch.grid, internalArgsSupport.perTileExtraIters, true))
+                                                launch.grid, internalArgsSupport.perTileExtraIters,
+                                                true, skKGranularity()))
             {
                 // Scheduling and fixup retain ABI2's global first-E mapping.
                 // Equal chunks of every spatial block have the same reduction
@@ -6753,7 +6782,8 @@ namespace TensileLite
                 if(factor >= 2)
                 {
                     launch.grid = checkedMultiply(cluster.blocks, factor);
-                    cluster.split = streamKStaticSplit(cluster.blocks, iters, launch.grid, 0, false);
+                    cluster.split = streamKStaticSplit(cluster.blocks, iters, launch.grid, 0,
+                                                       false, skKGranularity());
                 }
                 else
                     wholeBlocks("uniform-whole-blocks");
@@ -7083,19 +7113,13 @@ namespace TensileLite
                 // What a cut has to land on is the K span StreamK treats as
                 // indivisible, not DepthU. skKGranularity() is the number of
                 // iterations in one scale epoch, and every host packer and
-                // device mapping site rounds its K chunk to it, so the cut
-                // quantum is DepthU * the unit that actually applies here.
-                //
-                // That unit is skKUnit(), not skKGranularity() itself: a tile
-                // whose K is not a whole number of epochs has a leftover the
-                // device's whole-epoch distribution cannot place, so the split
-                // falls back to single iterations and a cut can land inside a
-                // granule again. Such a problem is still refused.
+                // device mapping site cuts the flat space in whole epochs of
+                // tiles padded to a whole epoch (skPaddedItersPerTile), so the
+                // cut quantum is DepthU * that unit whatever the tile's real K
+                // is. The tile's iteration count does not enter into it.
                 constexpr size_t mxScaleSwizzleGranuleK = 256; // lrSubtileShape[1](2) * instK(128)
-                const size_t     itersPerTile
-                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
-                const size_t skKCutQuantumK
-                    = sizeMapping.depthU * skKUnit(itersPerTile, solution.skKGranularity());
+                const size_t     skKCutQuantumK
+                    = sizeMapping.depthU * solution.skKGranularity();
                 if(skKCutQuantumK % mxScaleSwizzleGranuleK != 0)
                     return refuse("MXScaleSwizzleGranule",
                                   "StreamK K-cut quantum " + std::to_string(skKCutQuantumK)
@@ -7302,7 +7326,8 @@ namespace TensileLite
                                                      itersPerTile,
                                                      launch.grid,
                                                      internalArgsSupport.perTileExtraIters,
-                                                     problem.getParams().uniformSummationOrder() != 0))
+                                                     problem.getParams().uniformSummationOrder() != 0,
+                                                     skKGranularity()))
                         return refuse(
                             "StaticSplitNotRowUniform",
                             "the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
@@ -8109,11 +8134,12 @@ namespace TensileLite
                 skTiles = static_cast<uint32_t>(overrideT);
             if(overrideS > -1)
                 skSplit = static_cast<uint32_t>(overrideS);
-            const uint32_t kGran = static_cast<uint32_t>(skKUnit(itersPerTile, skKGranularity()));
+            const uint32_t kGran       = static_cast<uint32_t>(skKGranularity());
+            const uint32_t paddedIters
+                = static_cast<uint32_t>(skPaddedItersPerTile(itersPerTile, kGran));
             uint32_t       skItersPerWI
-                = kGran
-                  * CeilDivide(CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit), kGran);
-            skSplit = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
+                = kGran * CeilDivide(CeilDivide(paddedIters, skSplit), kGran);
+            skSplit = CeilDivide(paddedIters, skItersPerWI);
             d.skTiles             = skTiles;
             d.skSplit             = skSplit;
             d.totalItems          = (tiles - skTiles) + static_cast<size_t>(skTiles) * skSplit;

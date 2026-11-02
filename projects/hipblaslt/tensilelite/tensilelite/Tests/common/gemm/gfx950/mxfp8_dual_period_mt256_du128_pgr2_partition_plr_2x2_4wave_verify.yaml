@@ -13,14 +13,6 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  # These shapes exist to validate the dual-period scale contract, not the
-  # row-uniform reduction promise.  Stream-K only divides K in whole 256-K
-  # scale epochs when a tile holds a whole number of them, so under the
-  # default (auto) request the K=383/384-style shapes are refused before
-  # they ever reach the kernel.  Ask for the historical order instead; the
-  # USO envelope itself is pinned by RowUniformityStreamKMX in
-  # clients/tests/src/row_uniformity_gtest.cpp.
-  UniformSummationOrder: 0
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 2
   Device: 0
@@ -93,9 +85,19 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1024]
           - Exact: [4096, 4096, 1, 8192]
           # A tile count past the point where the runtime picks a Stream-K grid
-          # rather than one workgroup per tile (576 tiles, 24x24).  Note this
-          # client launches grid == tiles, so it does not itself produce a range
-          # that splits a tile's K; the K-unit quantisation that makes such a
-          # range safe is pinned by RowUniformityScaleEpoch in
-          # clients/tests/src/row_uniformity_gtest.cpp.
+          # rather than one workgroup per tile (576 tiles, 24x24).
           - Exact: [6144, 6144, 1, 512]
+          # One tile with an ODD number of data iterations.  These are the
+          # shapes that actually cut a tile's K: the Stream-K heuristic splits
+          # a single deep tile on its own, and an odd iteration count puts the
+          # cut half way through a 256-K scale epoch unless the flat iteration
+          # space is measured in tiles padded to a whole epoch.  Each is paired
+          # with its even neighbour, which was always safe, so a regression
+          # shows up as a parity pattern rather than a lone failure.
+          - Exact: [256, 256, 1, 2176]  # 17 iterations
+          - Exact: [256, 256, 1, 2048]  # 16
+          - Exact: [256, 256, 1, 2432]  # 19
+          - Exact: [256, 256, 1, 2304]  # 18
+          - Exact: [256, 256, 1, 3200]  # 25
+          - Exact: [256, 256, 1, 3072]  # 24
+          - Exact: [256, 256, 1, 4224]  # 33

@@ -1308,12 +1308,17 @@ namespace
         }
     }
 
-    // A tile whose K is not a whole number of units cannot be quantised: the
-    // leftover would be a fraction of a unit, and the device places leftovers a
-    // whole unit at a time, so the fraction would go to nobody. Such a problem
-    // keeps the historical mapping, which also keeps the unsplit case -- one
-    // workgroup covering a K shorter than one unit -- working as it always has.
-    TEST(RowUniformityScaleEpoch_pre_checkin, PartialUnitTileFallsBack)
+    // A tile whose K is not a whole number of units is the case the quantum
+    // exists for, and the one a quantised stride alone does not cover: tile t
+    // begins at t*itersPerTile, which is odd for odd t. Padding each tile to a
+    // whole unit in the flat space moves every tile start onto a unit boundary,
+    // so the leftover is a whole number of units in every tile at once.
+    //
+    // The padded iterations are not work. This replays the device's per-tile
+    // clamp (skTileIndex caps the local end at the real itersPerTile) and
+    // checks that each real iteration is claimed exactly once and the padding
+    // by nobody.
+    TEST(RowUniformityScaleEpoch_pre_checkin, PartialUnitTileStaysQuantised)
     {
         constexpr size_t g = 2;
 
@@ -1328,28 +1333,56 @@ namespace
                     SCOPED_TRACE("tiles=" + std::to_string(t) + " itersPerTile="
                                  + std::to_string(i) + " grid=" + std::to_string(grid));
 
-                    const auto quantised
-                        = TensileLite::streamKStaticSplit(t, i, grid, 1, false, g);
-                    const auto historical
-                        = TensileLite::streamKStaticSplit(t, i, grid, 1, false, 1);
-                    EXPECT_EQ(quantised.skItersPerWG, historical.skItersPerWG);
-                    EXPECT_EQ(quantised.extraIters, historical.extraIters);
+                    const size_t padded = TensileLite::skPaddedItersPerTile(i, g);
+                    EXPECT_EQ(padded % g, size_t{0});
+                    EXPECT_GE(padded, i);
+                    EXPECT_LT(padded - i, g);
 
-                    size_t covered = 0;
-                    for(size_t w = 0; w < grid; ++w)
-                        for(bool perTile : {false, true})
+                    const auto split = TensileLite::streamKStaticSplit(t, i, grid, 1, false, g);
+                    EXPECT_EQ(split.skItersPerWG % g, size_t{0}) << "packed SKItersPerWG";
+                    EXPECT_EQ(split.extraIters % g, size_t{0}) << "leftover";
+
+                    for(bool perTile : {false, true})
+                    {
+                        std::vector<int> claims(t * i, 0);
+                        for(size_t w = 0; w < grid; ++w)
                         {
-                            const auto a = TensileLite::streamKWorkgroupIterRange(
+                            const auto r = TensileLite::streamKWorkgroupIterRange(
                                 w, t, i, grid, perTile, true, g);
-                            const auto b = TensileLite::streamKWorkgroupIterRange(
-                                w, t, i, grid, perTile, true, 1);
-                            EXPECT_EQ(a.start, b.start) << "w=" << w;
-                            EXPECT_EQ(a.end, b.end) << "w=" << w;
-                            if(!perTile)
-                                covered += a.end - a.start;
+                            EXPECT_EQ(r.start % g, size_t{0})
+                                << "w=" << w << " perTile=" << perTile;
+                            EXPECT_LE(r.start, r.end) << "w=" << w;
+
+                            for(size_t f = r.start; f < r.end; ++f)
+                            {
+                                const size_t tile  = f / padded;
+                                const size_t local = f % padded;
+                                if(tile < t && local < i)
+                                    claims[tile * i + local]++;
+                            }
                         }
-                    EXPECT_EQ(covered, t * i) << "work dropped";
+                        for(size_t n = 0; n < claims.size(); ++n)
+                            EXPECT_EQ(claims[n], 1)
+                                << "perTile=" << perTile << " tile=" << (n / i)
+                                << " iter=" << (n % i);
+                    }
                 }
+    }
+
+    // Padding to one unit is no padding, so the flat space, the split and every
+    // range stay exactly what they were before the unit existed.
+    TEST(RowUniformityScaleEpoch_pre_checkin, UnitOnePadsNothing)
+    {
+        const size_t itersPerTile[] = {0, 1, 2, 7, 16, 33, 64, 257};
+        for(size_t i : itersPerTile)
+        {
+            EXPECT_EQ(TensileLite::skPaddedItersPerTile(i, 0), i);
+            EXPECT_EQ(TensileLite::skPaddedItersPerTile(i, 1), i);
+        }
+        EXPECT_EQ(TensileLite::skPaddedItersPerTile(0, 2), size_t{0});
+        EXPECT_EQ(TensileLite::skPaddedItersPerTile(17, 2), size_t{18});
+        EXPECT_EQ(TensileLite::skPaddedItersPerTile(18, 2), size_t{18});
+        EXPECT_EQ(TensileLite::skPaddedItersPerTile(17, 4), size_t{20});
     }
 
     // Granularity one has to leave every existing kernel exactly as it was.
@@ -1893,13 +1926,15 @@ namespace
         // duUnit is numSubIterK(1) * MatrixInstK(128) * LocalSplitU(1) = 128.
         // Stream-K divides K in whole 256-K scale epochs there
         // (ContractionSolution::skKGranularity), so a cut cannot land inside a
-        // granule while the tile's K is a whole number of epochs: K=1024 is
-        // eight DepthU, four epochs.
+        // granule: K=1024 is eight DepthU, four epochs.
         {"MXDepthU128EpochAligned", 32, 128, 1024, false},
-        // An odd number of DepthU per tile leaves a half-epoch the device's
-        // whole-epoch distribution cannot place, so skKUnit drops the quantum
-        // back to one iteration and a cut can straddle a granule again.
-        {"MXDepthU128EpochRagged", 32, 128, 896, true},
+        // An odd number of DepthU per tile used to be refused: the leftover
+        // half-epoch forced the split back to single iterations, which let a
+        // cut straddle a granule. The flat space is now measured in tiles
+        // padded to a whole epoch (skPaddedItersPerTile), so the quantum holds
+        // whatever the tile's K is and the tile's own iteration count no
+        // longer enters the audit.
+        {"MXDepthU128EpochRagged", 32, 128, 896, false},
         // The guard must scope to MX problems and nothing else.
         {"NonMXDepthU128", 0, 128, 1024, false},
         {"NonMXDepthU16", 0, 16, 1024, false},
@@ -1919,9 +1954,9 @@ namespace
         solution->problemType.mxBlockB   = c.mxBlock;
         solution->sizeMapping.depthU     = c.depthU;
 
-        // K decides how many DepthU a tile holds, and so whether the
-        // whole-epoch Stream-K split applies (skKUnit) or falls back to
-        // single iterations.
+        // K decides how many DepthU a tile holds. A ragged count is carried by
+        // the padding rather than by dropping the quantum, so it is admitted
+        // alongside the aligned one; the parameter stays to pin that.
         auto problem = TensileLite::ContractionProblemGemm::GEMM(
             false, false, 1024, 1024, c.k, 1024, 1024, 1024, 0.0, false, 1);
         problem.setComputeInputTypeA(rocisa::DataType::Float);

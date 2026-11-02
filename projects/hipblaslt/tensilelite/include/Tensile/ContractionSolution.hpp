@@ -607,22 +607,39 @@ namespace TensileLite
      * (StreamK.py skAssignIters).
      */
     /**
-     * Iterations per indivisible K unit, as it actually applies to one tile.
+     * The tile's iteration count rounded up to a whole number of K units.
      *
-     * A unit larger than one iteration only constrains the split when the
-     * tile's K is a whole number of units. If it is not, the leftover is a
-     * fraction of a unit, and the device hands leftovers out a whole unit at a
-     * time, so quantising the stride would leave that fraction unassigned and
-     * silently drop work. Such a problem gets the historical mapping instead:
-     * no split of a tile whose K is not unit-aligned can put every workgroup on
-     * a unit boundary anyway, so there is nothing to preserve, and falling back
-     * keeps the unsplit case (one workgroup, the whole tile) exactly as it was.
+     * Stream-K cuts K out of a flat space of tiles*itersPerTile iterations, so
+     * tile t begins at flat index t*itersPerTile. With a unit wider than one
+     * iteration that start is only on a unit boundary when itersPerTile is a
+     * multiple of the unit; otherwise a cut that is unit-aligned in flat space
+     * still lands mid-unit inside the odd tiles, which is what the unit
+     * forbids. Quantising the stride alone does not fix it, and dropping the
+     * unit back to one iteration -- what this used to do -- makes every cut
+     * free to land anywhere, which on the MX scale path silently applies the
+     * wrong scales.
+     *
+     * Measuring the flat space in padded tiles restores the property for every
+     * tile at once: tile starts and the cuts between them are all multiples of
+     * the unit, so every workgroup begins on a unit boundary whatever
+     * itersPerTile is. The padding is not work -- skTileIndex() clamps each
+     * workgroup's local range to the real itersPerTile, so the up-to-(unit-1)
+     * padded iterations at the end of a tile belong to no workgroup and are
+     * never run. The matching device-side rounding is skPaddedItersPerTile()
+     * in Components/StreamK.py.
+     *
+     * Row uniformity is preserved: every tile pads to the same length, so the
+     * ordered list of chunk lengths folded into one tile is the list folded
+     * into every other.
+     *
+     * A unit of one pads nothing, so every non-MX kernel keeps the exact flat
+     * space, split and argument values it had before the unit existed.
      */
-    inline size_t skKUnit(size_t itersPerTile, size_t kGranularity)
+    inline size_t skPaddedItersPerTile(size_t itersPerTile, size_t kGranularity)
     {
-        if(kGranularity <= 1 || itersPerTile == 0 || itersPerTile % kGranularity != 0)
-            return 1;
-        return kGranularity;
+        if(kGranularity <= 1 || itersPerTile == 0)
+            return itersPerTile;
+        return ((itersPerTile + kGranularity - 1) / kGranularity) * kGranularity;
     }
 
     /**
@@ -680,7 +697,8 @@ namespace TensileLite
                                      size_t                    itersPerTile,
                                      size_t                    skGrid                = 0,
                                      bool                      perTileCapable        = false,
-                                     bool                      uniformSummationOrder = false);
+                                     bool                      uniformSummationOrder = false,
+                                     size_t                    kGranularity          = 1);
 
     /**
      * Whether a resolved Stream-K launch may use parallel reduction under
