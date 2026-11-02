@@ -1813,9 +1813,8 @@ class TestAttentionHelpers(unittest.TestCase):
                         _assert_resources_fit(art, arch=arch, kernel_name=k.name)
 
     def test_dense_paged_smaller_tiles_compile_and_fit_budget(self):
-        """comgr build + resource-budget net for paged K/V on the smaller tiles
-        dispatch picks (gfx942 half-height, narrow window with the wave skip,
-        bf16 D64 narrow window; gfx950 window tile), with each tile's page limit."""
+        """comgr build + resource-budget net for paged K/V on the smaller dense
+        tiles, at each tile's page limit."""
         shape = dict(
             batch=1,
             seqlen_q=1024,

@@ -266,10 +266,10 @@ def dense_paged_fields(req) -> dict:
 def dense_paged_tile_fits(req, block_m: int, block_n: int) -> bool:
     """Whether the request's pages fit a ``block_m`` x ``block_n`` tile; True when the
     request is not paged. A smaller tile that fails this keeps the default tile."""
-    from kernels.common._attention_dense_paged import paged_tile_fits
+    from kernels.common._attention_dense_paged import paged_tile_check
 
     paged = dense_paged_fields(req)
-    return not paged or paged_tile_fits(paged["block_size"], block_m, block_n)
+    return not paged or paged_tile_check(paged["block_size"], block_m, block_n)[0]
 
 
 @lru_cache(maxsize=256)

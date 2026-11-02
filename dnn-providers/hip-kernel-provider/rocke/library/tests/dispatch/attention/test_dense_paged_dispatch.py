@@ -82,17 +82,17 @@ def test_persistent_variants_decline_paged(spec_id):
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 @pytest.mark.parametrize(
-    "overrides",
+    "overrides,error",
     [
-        dict(batch=2),
-        dict(mask_type=0, sliding_window=0),
-        dict(seqlen_q=1000, seqlen_k=1000),
-        dict(kv_block_size=8),
+        (dict(batch=2), "batch>1"),
+        (dict(mask_type=0, sliding_window=0), "causal-only"),
+        (dict(seqlen_q=1000, seqlen_k=1000, sliding_window=0), "whole KV tiles"),
+        (dict(kv_block_size=8), "must be >= 16"),
     ],
     ids=["multi_seq", "non_causal", "partial_kv_tile", "page_8"],
 )
-def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides):
-    with pytest.raises(ValueError):
+def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides, error):
+    with pytest.raises(ValueError, match=error):
         dispatch_attention(_pinned(_request(arch, **overrides), spec_id))
 
 
@@ -157,34 +157,6 @@ def test_paged_keeps_the_default_tile_when_its_pages_do_not_fit(
     paged, contiguous = _tiles(arch, spec_id, **overrides)
     assert paged == (256, 64, False)
     assert contiguous[:2] != (256, 64)
-
-
-@pytest.mark.parametrize("block_m,block_n", [(256, 64), (128, 64), (128, 32), (64, 64)])
-@pytest.mark.parametrize("block_size", [16, 32, 64, 128])
-def test_paged_tile_fits_agrees_with_the_spec(block_m, block_n, block_size):
-    from kernels.common._attention_dense_paged import paged_tile_fits
-    from kernels.common.attention_dense_spec import AttentionDenseSpec
-
-    try:
-        AttentionDenseSpec(
-            batch=1,
-            seqlen_q=1024,
-            seqlen_kv=1024,
-            num_query_heads=8,
-            num_kv_heads=2,
-            head_size=128,
-            causal=True,
-            dtype="fp16",
-            block_m=block_m,
-            block_n=block_n,
-            paged=True,
-            block_size=block_size,
-            num_kv_blocks=1024,
-        )
-        admitted = True
-    except ValueError:
-        admitted = False
-    assert paged_tile_fits(block_size, block_m, block_n) == admitted
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)

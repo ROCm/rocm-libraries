@@ -40,16 +40,21 @@ def paged_cache_bytes(spec) -> int:
     return spec.num_kv_blocks * spec.block_size * spec.num_kv_heads * spec.head_size * 2
 
 
-def paged_tile_fits(block_size: int, block_m: int, block_n: int) -> bool:
-    """Whether pages of ``block_size`` keys fit a ``block_m`` x ``block_n`` tile, as the
-    spec's paged validation requires: whole pages per KV tile, and each wave's rows
-    of a tile (one wave per 32 query rows) inside one page."""
+def paged_tile_check(block_size: int, block_m: int, block_n: int) -> tuple[bool, str]:
+    """Whether pages of ``block_size`` keys fit a ``block_m`` x ``block_n`` tile: whole
+    pages per KV tile, and each wave's rows of a tile (one wave per 32 query rows)
+    inside one page, so one lookup per wave serves its rows."""
+    if block_n % block_size:
+        return False, (
+            f"block_n ({block_n}) must be a multiple of page block_size ({block_size})"
+        )
     rows_per_wave = block_n // (block_m // 32)
-    return (
-        block_n % block_size == 0
-        and block_size >= rows_per_wave
-        and block_size % rows_per_wave == 0
-    )
+    if block_size < rows_per_wave or block_size % rows_per_wave:
+        return False, (
+            f"paged block_size ({block_size}) must be >= and a multiple of "
+            f"ROWS_PER_WAVE ({rows_per_wave})"
+        )
+    return True, ""
 
 
 def paged_seq_setup(b, bt, kv_lens, bt_stride, block_size: int):

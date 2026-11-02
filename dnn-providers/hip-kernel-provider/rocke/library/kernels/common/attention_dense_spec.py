@@ -16,7 +16,7 @@ from types import MappingProxyType
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
 
-from kernels.common._attention_dense_paged import paged_cache_bytes
+from kernels.common._attention_dense_paged import paged_cache_bytes, paged_tile_check
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
     PERSIST_DECODES,
@@ -243,17 +243,9 @@ class AttentionDenseSpec:
                 )
             if self.block_size < 16:
                 raise ValueError(f"paged block_size ({self.block_size}) must be >= 16")
-            if self.block_n % self.block_size:
-                raise ValueError(
-                    f"block_n ({self.block_n}) must be a multiple of page "
-                    f"block_size ({self.block_size})"
-                )
-            rows_per_wave = self.block_n // self.num_waves
-            if self.block_size < rows_per_wave or self.block_size % rows_per_wave:
-                raise ValueError(
-                    f"paged block_size ({self.block_size}) must be >= and a "
-                    f"multiple of ROWS_PER_WAVE ({rows_per_wave})"
-                )
+            ok, why = paged_tile_check(self.block_size, self.block_m, self.block_n)
+            if not ok:
+                raise ValueError(why)
             if self.num_kv_blocks <= 0:
                 raise ValueError("paged=True requires num_kv_blocks > 0")
             cache_bytes = paged_cache_bytes(self)
