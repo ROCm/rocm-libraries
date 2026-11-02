@@ -701,6 +701,21 @@ def test_rap_is_rejected_with_space_filling_algo(
     assert "SpaceFillingAlgo" in out
 
 
+@pytest.mark.parametrize("rap", [0, 1])
+def test_rap_is_rejected_with_2d_mx_scales(_gp_gfx1250, gfx1250_iim, assembler, capsys, rap):
+    # The same 2D solution is accepted without RAP, so the reject is RAP's alone.
+    # MXBlock [128, 128] in a config, as ProblemType parses it.
+    scale2d = dict(MXBlockA=128, MXBlockB=128, MXBlockFreeA=128, MXBlockFreeB=128)
+    sol, out = _derive(gfx1250_iim, assembler, capsys, ReuseAcrossPersistent=rap,
+                       AssertSummationElementMultiple=256,
+                       ProblemType=dict(_MX_PROBLEM_TYPE, **scale2d))
+    if rap:
+        assert sol.get("Valid") is not True, "expected reject"
+        assert "2D MX scales" in out
+    else:
+        assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+
+
 # ---------------------------------------------------------------------------
 # k_max model. Pinned to the two audited gfx1250 configs, whose true bounds were
 # measured by sweeping the resident k-tile count until rapCheckStoreNeutrality

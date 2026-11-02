@@ -7849,6 +7849,11 @@ class Solution(collections.abc.Mapping):
       if len(state["SpaceFillingAlgo"]):
         reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with SpaceFillingAlgo")
         return
+      # The resident path is implemented for 1D scaling tiles only. With a 2D
+      # tile (MXBlockFree > 1) the reuse copy computes from the wrong scales.
+      if state["ProblemType"]["MXBlockFreeA"] > 1 or state["ProblemType"]["MXBlockFreeB"] > 1:
+        reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with 2D MX scales (MXBlockFree > 1)")
+        return
       # The A-side local-read pack buffers are sized from numVgprBufferPackA,
       # which RAP does not grow, so the resident buffer sets would alias each
       # other's pack registers. UnrollMajorLDSA is what suppresses that path.
