@@ -36,14 +36,16 @@ version = 1
 # (`quick_SdpaBackward_Default.1_1_256_128_fp16_...`), the gauntlet fuzz driver in the suite,
 # because its case ids are `s<seed>` (`gauntlet_SdpaBackward_Default_fp16_cases.s7`). The
 # globs therefore do not anchor on the `.`. The leading "_" in "_fp16_" keeps it from also
-# matching "bfp16_".
+# matching "bfp16_". The golden cases spell bfloat16 `bf16` in their ids
+# (`quick_SdpaBackward_Default.golden_1_1_128_128_bf16_nomask`), so the bfloat16 entry
+# matches both tokens.
 [[tolerance_overrides]]
 filters = ["*_SdpaBackward_*_fp16_*"]
 atol = 2.5e-3
 rtol = 2.5e-3
 
 [[tolerance_overrides]]
-filters = ["*_SdpaBackward_*_bfp16_*"]
+filters = ["*_SdpaBackward_*_bfp16_*", "*_SdpaBackward_*_bf16_*"]
 atol = 1e-2
 rtol = 1e-2
 
