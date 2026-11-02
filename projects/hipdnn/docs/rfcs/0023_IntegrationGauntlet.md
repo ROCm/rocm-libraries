@@ -2,9 +2,12 @@
 
 - Contributors: Adam Dickin
 - **Status**: Planned
-- **Status notes**: Proposed. Nothing is merged. The first slice (outcome report §9, fuzz mode §7,
-  spaces for SDPA forward and RMSNorm forward) is being built separately.
-- **Last verified**: 2026-10-26 against `develop` (`3f9cd39c31c`)
+- **Status notes**: Proposed. Nothing is merged to `develop`. S1–S4, S11, S12 (hip-kernel-provider
+  only), S13 and the first part of S17 (the remaining hip-kernel-provider ops) are built on unmerged
+  branches; [§17.1](#171-stories) gives the state of each story, and each section says what is not
+  yet built.
+- **Last verified**: 2026-10-28 against the implementation branch head `4179d972df9` (based on
+  `develop` `3f9cd39c31c`)
 
 ## Table of Contents
 
@@ -134,16 +137,25 @@ Three rules hold everywhere:
 
 ### 5.1 Location: with the tool, pointing at a sweep template
 
-Spaces ship with the fuzz tool, one file per op (more when an op has distinct regions):
+Spaces ship with the fuzz tool, one file per op, plus one per distinct region of an op
+(`<Op>[.<Name>].space.json`):
 
 ```
 dnn-providers/integration-tests/gauntlet/
   run_gauntlet_fuzz.py
+  space.py, sampler.py
   spaces/
-    SdpaFwd.space.json
-    SdpaFwd.Gfx950Dense.space.json
+    SdpaFwd.space.json              ASM_SDPA region
+    SdpaFwd.Gfx950Dense.space.json  rocKE gfx950 dense attention region
     RMSNorm.space.json
+    Layernorm, LayernormBackward, Batchnorm, BatchnormInference, BatchnormBackward,
+    RMSNormBackward, ResampleFwd   (.space.json each)
+    Matmul.Align.space.json         probe-only: one fixed graph, alignment and placement only
+    SdpaFwd.Flash2.space.json       probe-only: one fixed fp16 graph for HIP_FLASH2
 ```
+
+A **probe-only space** has no shape axes. It holds one fixed graph and varies only the alignment and
+placement axes (§11), to show where an engine's alignment boundary is.
 
 A space does not carry a graph. It names an existing template-sweep topology by path:
 
@@ -217,10 +229,11 @@ values). The case `id` is `s<shape seed>`.
 
 | Field | Meaning |
 |---|---|
-| `axes` | Each axis is either a `values` list, or an integer `range` `[lo, hi]` with optional `boundaries`. A sampler draws a boundary value with probability ½ and a uniform value otherwise, so powers of two, ±1 and degenerate values appear often. |
+| `description`, `engine` | Free text. `engine` names the engine the space targets; it is informational and does not choose the engine of a run. The description says what the space draws and why each constraint exists. |
+| `axes` | Each axis is either a `values` list, or an integer `range` `[lo, hi]` with optional `boundaries`. A sampler draws a boundary value with probability ½ and a uniform value otherwise, so powers of two, ±1 and degenerate values appear often. An axis marked `"late": true` draws from a stream of its own (shape seed, attempt, axis name), so an axis added to an existing space does not change the shapes that earlier seeds produced. Late axes come last. |
 | `derive` | Values computed from axes, in declaration order. A derived value can use earlier derived values. |
-| `constraints` | Legality rules. A sample that breaks one is discarded and redrawn. Each rule has a reason. The rules copy the frontend validation of the op (RFC 0022 §6) and the cost ceilings of §14. |
-| `case` | The sweep case to write. A string `"${expr}"` is replaced by the value of `expr`, keeping its JSON type. Strings that do not start with `${` and end with `}` are copied. |
+| `constraints` | Rules a sample must meet. A sample that breaks one is discarded and redrawn, up to 5000 draws per seed; a space with no legal draw in that budget is a load error that names each rule and how often it rejected. Each rule has a reason. There are three kinds: legality rules copied from the frontend validation of the op (RFC 0022 §6), the cost ceilings of §14, and accuracy bounds that keep a value domain inside what the oracle can grade (§14). |
+| `case` | The sweep case to write: `values`, `metadata` and optional `tensor_patches` (RFC 0011). A string `"${expr}"` is replaced by the value of `expr`, keeping its JSON type. Strings that do not start with `${` and end with `}` are copied. The metadata can carry `inputs` (§12), `validator` (§12), `placement` and `placement_uid` (§11.3). |
 
 Expressions are a small, safe subset of Python: literals (numbers, strings, `True`, `False`,
 `None`), lists, arithmetic (`+ - * / // % **`), comparisons, `and`/`or`/`not`, `x if c else y`,
@@ -280,7 +293,14 @@ command-line flag that overrides it.
 | `HIPDNN_FUZZ_CASE_TIMEOUT` | `--case-timeout` | Longest one case may run before it counts as a hang | `10m` |
 
 The binary, test article, engine and test config are flags (`--binary`, `--test-article`,
-`--test-engine`, `--test-config`), the same values a CTest lane passes.
+`--test-engine`, `--test-config`), the same values a CTest lane passes. `--binary-arg` passes any
+other binary flag. `--spaces-dir` runs the spaces of another directory, so a space can be edited for
+triage without touching the tree. `--work-dir`, `--batch-size` and `--summary` set the output
+directory, the samples per binary invocation and the summary path.
+
+Before the first batch the driver lists the binary's tests on an empty bundle root with the run's
+flags. A bad engine name, a bad plugin, a missing config or no GPU stops the run with exit status 2
+before any sample runs, instead of reporting every sample as a load crash.
 
 ### 7.3 Seeds and replay
 
@@ -289,14 +309,15 @@ The binary, test article, engine and test config are flags (`--binary`, `--test-
 - The data seed is separate. By default it is derived from the shape seed; `--data-seed` fixes it.
   It becomes the case's `metadata.seed`, which the harness already uses for input fills. A failing
   geometry can run again with new data, and the reverse (as in cuDNN's `random_config.py`).
-- The case id is `s<shape seed>`. The driver prints the replay command for every `WRONG` and
-  `CRASH`:
+- The case id is `s<shape seed>`. For every `WRONG` and `CRASH` the driver writes `replay.sh`
+  (§7.5), one command of this form:
 
   ```
-  run_gauntlet_fuzz.py --filter '^SdpaFwd/Dense$' --seed 913377 --samples 1 --data-seed 4021 ...
+  run_gauntlet_fuzz.py --filter '^SdpaFwd/Gfx950Dense$' --seed 913377 --samples 1 --data-seed 4021 ...
   ```
 
-  That command writes the same graph with the same data and runs it alone.
+  That command writes the same graph with the same data and runs it alone. Device-filled inputs
+  differ from host-filled ones, so the replay uses the fill path of the original run.
 
 ### 7.4 Every sample gets an outcome
 
@@ -317,35 +338,49 @@ report.
 
 ### 7.5 Freezing a finding
 
-For each `WRONG` or `CRASH` sample the driver writes `<work>/failures/<case>/`, outside the bundle
-root so later batches never load it:
+For each `WRONG` or `CRASH` sample the driver writes `<work>/failures/<case>/` before the run
+continues, outside the bundle root so later batches never load it:
 
 - `<case>.json`, the expanded concrete graph, with UIDs already in canonical (by-name) order, so an
   import does not renumber tensors and change their per-tensor input seeds;
 - `<case>.meta.json`, its metadata (`format_version`, `seed`, `purpose: regression`,
   `reference_source` naming the space and shape seed);
-- `replay.txt`, the replay command and whether inputs were filled on the host or the device
-  (`HIPDNN_TEST_HOST_INPUT_FILL=1` forces the host fill).
+- `repro.json`: the space and the hashes of the space and template files, the shape seed, the axis
+  values, the data seed, the fill path, engine, arch, ROCm and git versions, flags and the
+  `HIPDNN_*` environment;
+- `outcome.json` (the outcome record) and `log_tail.txt` (the end of the binary's log);
+- `replay.sh` (§7.3), and `replay.txt`, which holds the same command, the fill path
+  (`HIPDNN_TEST_HOST_INPUT_FILL=1` forces the host fill) and the freeze command below.
 
 `migration-scripts/import_graph.py --graph failures/<case>/<case>.json --bundle-dir
-integration-test-bundles --tier <level>` adds it to a checked-in sweep, with duplicate detection.
-The path from finding to regression case is mechanical.
+integration-test-bundles --tier <level>` adds it to a checked-in sweep, with duplicate detection. A
+tensor alignment that differs from the template is kept as a `tensor_patches` entry, and
+`placement_uid` is remapped with the UIDs. The path from finding to regression case is mechanical.
 
 ### 7.6 Report
 
 At the end the driver prints, per engine and space, the count of each outcome and the decline
-reasons, and writes `summary.json`. The exit status is non-zero when any sample is `WRONG` or
-`CRASH`. `UNEXERCISED` samples are listed with their reasons; they never count as green.
+reasons, and writes `summary.json`. For the `alignment`, `placement` and `domain` axes the summary
+also counts outcomes per axis value (`axis_outcomes`), which is how an alignment boundary is read.
+The exit status is non-zero when any sample is `WRONG` or `CRASH`. `UNEXERCISED` samples are listed
+with their reasons; they never count as green.
+
+The driver writes one sweep per input data type, under
+`bundles/gauntlet/<Op>/<Space>/<tag>_cases/` (`<tag>` is `fp32`, `fp16` or `bfp16`). The tag is
+then part of the GTest suite name (`gauntlet_RMSNorm_Default_fp16_cases.s123`), so the dtype globs
+of an engine's TOML tolerances and skips apply to fuzz cases as they do to quick bundles.
 
 ### 7.7 Not yet built
 
-- A CTest lane label (`gauntlet`) per provider engine. It must stay out of every level that the
-  external YAML catch-alls select. Until then the driver is the entry point.
+- A CTest lane label (`gauntlet`) per provider engine (S16). It must stay out of every level that
+  the external YAML catch-alls select. Until then the driver is the entry point.
 - Shrinking a failing sample to a smaller reproducer.
+- A space for any op outside hip-kernel-provider's HIP_MLOPS and SDPA forward regions (S17b).
 
 ## 8. Rejection Probes
 
-Not yet built.
+Not yet built, apart from the alignment probes of §11: every space has `alignment` and `placement`
+axes, and two probe-only spaces (§5.1) fix a graph and vary only those axes.
 
 A **probe** is a legal graph whose expected outcome is "decline with a typed reason, or accept and be
 correct" (RFC 0022 §9). Probes test the integration contract: an engine that accepts a graph it
@@ -377,8 +412,8 @@ Each case on each engine gets exactly one outcome:
 
 | Outcome | Meaning | Gate |
 |---|---|---|
-| `PASS` | Accepted and verified against an oracle | pass |
-| `DECLINED` | The engine resolved the support query and is absent from the ranked list | pass for a probe; FAIL for a claim (the run already fails it as `CLAIM_BROKEN`, RFC 0015) |
+| `PASS` | Accepted and verified against an oracle. For a `placement: "under"` case (§11.3): the backend rejected the misaligned pointer with `BAD_PARAM`, and nothing was compared | pass |
+| `DECLINED` | The engine resolved the support query and is absent from the ranked list, or declined later with `EngineNotApplicableError` | pass for a probe; FAIL for a claim (the run already fails it as `CLAIM_BROKEN`, RFC 0015) |
 | `WRONG` | Accepted, ran, and the output did not match the oracle | FAIL |
 | `CRASH` | In the ranked list, then failed to build or execute (including a late `NOT_SUPPORTED`), hung, or killed the process | FAIL |
 | `UNCLAIMED_PASS` | `PASS` on a claim-bearing graph whose sidecar does not claim this cell | report (the claim is too narrow) |
@@ -417,16 +452,19 @@ Lines. Each bundle test writes a `started` record before it runs and a `finished
 ends. Records are flushed one at a time, so a crash keeps every earlier line.
 
 ```json
-{"event":"started","test":"gauntlet_SdpaFwd_Dense.s913377","bundle":".../sweep.json#s913377"}
-{"event":"finished","test":"gauntlet_SdpaFwd_Dense.s913377","bundle":".../sweep.json#s913377",
+{"event":"started","test":"gauntlet_SdpaFwd_Gfx950Dense_bfp16_cases.s913377","bundle":".../sweep.json#s913377"}
+{"event":"finished","test":"gauntlet_SdpaFwd_Gfx950Dense_bfp16_cases.s913377","bundle":".../sweep.json#s913377",
  "engine":"ASM_SDPA_ENGINE","arch":"gfx950","platform":"linux","purpose":"probe",
- "outcome":"DECLINED","depth":"not-reached","origin":"none","verifier":"none",
+ "outcome":"DECLINED","stage":"query","depth":"not-reached","origin":"none","verifier":"none",
  "reason":"Engine ASM_SDPA_ENGINE does not support this graph (1 output tensor(s), 0 ranked engine(s))"}
 ```
 
 `purpose` comes from the case metadata (`claim`, `probe`, `regression`; absent when not set). The
 loader rejects any other value. This is the tag half of RFC 0022's I2; excluding probes from the
-support-matrix render is the other half and is not built.
+support-matrix render is the other half and is not built. `stage` is where the test stopped
+(`graph`, `claim`, `query`, `build`, `execute`, `compare`, `oracle`, `setup`, or `none` for a pass).
+A case that sets `inputs`, `validator`, `placement` or `placement_uid` echoes them into its
+`finished` record, and a pass that verified a rejection adds `"expected_status":"BAD_PARAM"`.
 
 ### 9.4 Fractions, not green
 
@@ -483,50 +521,104 @@ built plan's knob tuple. Until the plan's knob choices can be read back, `kernel
 
 `TensorAttributes::set_alignment(n)` declares the byte alignment of a tensor's pointer (default 16).
 The graph carries it. The backend already enforces it at execute: a pointer less aligned than
-declared is `BAD_PARAM` (`EnginePluginResourceManager.cpp`, `executeOpGraph`). A non-default
-alignment also raises the minimum plugin API version, so older plugins are not offered the graph.
+declared is `BAD_PARAM` (`EnginePluginResourceManager.cpp`, `executeOpGraph`).
 
-The missing half: no engine reads the declared alignment when it decides to accept a graph. A
-kernel that assumes 16-byte vector loads accepts a graph that declares 2-byte alignment, and the
-harness cannot see it because every buffer it allocates is aligned to at least 256 bytes.
+A non-default alignment also raises the minimum engine plugin API version of the graph to 1.3.0
+(`K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION` in `PluginVersionConstants.hpp`). A plugin below 1.3.0
+is never offered such a graph; it is assumed to need 16. The same 1.3.0 floor also admits graphs
+with ragged tensors, and a raise from below 1.1.0 also admits override-shape graphs. An engine
+whose plugin raises its version to receive non-default alignments must therefore decline ragged
+and override-shape graphs explicitly if it does not support them.
+
+The missing half was: no engine read the declared alignment when it decided to accept a graph. A
+kernel that assumes 16-byte vector loads accepted a graph that declares 2-byte alignment, and the
+harness could not see it because every buffer it allocates is aligned to at least 256 bytes.
 
 ### 11.2 Engine fix
 
-Not yet built.
-
 Each engine reads each tensor's declared alignment in its applicability check. When the declared
-alignment is below what the kernel needs, it declines with reason `ALIGNMENT`, or selects a variant
-that handles it. For a descriptor engine this is a matcher criterion on `$tensor.alignment`
-([RFC 0018](0018_UniversalMatchDescriptor.md)); for a hand-written engine it is one check per input.
+alignment is below what the kernel needs, it declines, or selects a variant that handles it. Until
+typed decline reasons exist (S6), the decline carries no `ALIGNMENT` code; the outcome report shows
+it as an engine absent from the ranked list.
+
+Built for hip-kernel-provider, which now reports engine plugin API 1.3.0. Each rule below is
+confirmed by probes: below the threshold `DECLINED`, at and above it `PASS`, with exact placement.
+
+| Engine | Rule | Source of the need |
+|---|---|---|
+| HIP_MLOPS BatchNorm (inference, forward training, backward) | Folds the declared alignment into the vector-width or variant choice; declines when no variant fits. Per-channel fp32 tensors need 4 bytes. | Vector loads and fixed 4- and 2-wide accesses |
+| HIP_MLOPS LayerNorm, RMSNorm, Resample (forward and backward) | Declines when the declared alignment is below, or not a multiple of, the element size | Found by fuzzing: garbage output at 1 and 2 bytes with exact placement |
+| ASM_SDPA forward and backward | Declines below 16 bytes (8 for fp8 K and V) | Attention kernel documentation; the code objects have no source |
+| HIP_FLASH2 | Q and O need 8, K and V need 2 | Kernel source |
+| Ingestor packs (gfx950 dense attention, gfx1151 WMMA attention and decode) | Q, K, V and O need 16, LSE 4, bias its element size | Attention kernel documentation |
+
+For the ingestor packs the check lives in each pack's native matcher, not in a
+`$tensor.alignment` criterion of the match descriptor ([RFC 0018](0018_UniversalMatchDescriptor.md)).
+The native matcher already decides applicability for these packs, and one criterion per tensor
+would duplicate the rule in every descriptor. A descriptor criterion stays the route for packs
+without a native matcher.
+
+MIOpen (API 1.2.0) and hipBLASLt (1.0.0) are not changed. The version gate offers them only
+graphs at the default alignment, which they accept, and probes confirm they decline every other
+value. They need their own S12 story only if a user needs a non-default alignment on them.
 
 ### 11.3 Harness placement
 
-Not yet built.
+A case asks for placement in its metadata. Placement applies to the engine run only; the reference
+run is never placed.
 
-A case can ask for exact placement (`metadata.placement: "exact"`). The harness then offsets each
-device pointer so that it is aligned to the declared alignment *N* but not to *2N*. The tests:
+| `metadata.placement` | Engine run's device pointers |
+|---|---|
+| `default` | Where the allocator put them |
+| `exact` | Every device pointer is aligned to its tensor's declared *N* and not to *2N* |
+| `under` | The pointer of `metadata.placement_uid` is aligned to *N/2* and not to *N*. The case passes only if the engine accepts the graph and the backend then rejects that uid with `BAD_PARAM` |
 
-- probes for each declared value (element size, 4, 8, 16, 32 and above), each with its pointer at
-  exactly that alignment;
-- the same, crossed with a leading stride that is not a multiple of the vector width;
-- one case with a pointer less aligned than declared, which must return `BAD_PARAM`.
+The harness copies each input into a shadow buffer at the placed offset, fills each output shadow
+with the NaN sentinel and copies outputs back after execute. Runtime pass-by-value scalars,
+sub-byte packed inputs and host-only runs are left in place. A `placement_uid` that cannot be
+placed makes the case `UNEXERCISED` at stage `setup`.
+
+Every space has an `alignment` axis (1 to 256 bytes, rendered as a `tensor_patches` entry per
+device tensor) and a `placement` axis. The tests this gives:
+
+- probes for each declared value from 1 to 256, each with its pointer at exactly that alignment;
+- one case per space and sample with a pointer less aligned than declared, which must return
+  `BAD_PARAM`.
+
+Not yet built: the same probes crossed with a leading stride that is not a multiple of the vector
+width. Every shipped space draws packed strides only.
 
 ## 12. Input Value Domains
 
-Not yet built.
+`InputFillRecipes` set a range per op and dtype. They could not exclude zero, and they never
+injected non-finite or subnormal values. A case's `metadata.inputs` now selects a fill kind per
+tensor uid:
 
-`InputFillRecipes` sets a range per op and dtype. It cannot exclude zero, and it never injects
-non-finite or subnormal values. A space can declare value domains per tensor:
+| Kind | Every element is | Use |
+|---|---|---|
+| `free(lo, hi)` | Uniform over `[lo, hi]` (today's fill) | Default ranges |
+| `fixed(value)` | `value` | Constant inputs, degenerate reductions |
+| `nonzero(lo, hi)` | A `free` draw that is not zero in the data type | Divisions, normalization |
+| `zeros` | Zero | Degenerate reductions |
+| `large(scale)` | Magnitude in `[top/2, top]`, `top = min(scale, largest finite)`, random sign | Overflow and accumulation |
+| `subnormal` | A subnormal of the data type | Kernels that flush or take shortcuts |
+| `special(nan \| inf \| -inf, fraction)` | That fraction of elements non-finite, the rest `free` | Non-finite propagation |
 
-| Domain | Use |
-|---|---|
-| `uniform(lo, hi)` | Today's fill |
-| `nonzero(lo, hi)` | Divisions, normalization |
-| `zeros`, `constant(v)` | Degenerate reductions |
-| `large(scale)` | Overflow and accumulation |
-| `subnormal`, `special(nan, inf)` | Kernels that take numerical shortcuts |
+The new kinds fill on the host from a per-uid generator, so they are deterministic per seed. The
+parse is strict: an unknown kind, an entry with neither `kind` nor `seed`, or a malformed field is a
+metadata error. A kind the data type cannot hold (`subnormal` on an integer, `inf` on most fp8
+formats) makes the case `UNEXERCISED`.
 
-Non-finite cases need a validator that matches NaN and infinity positions; that is RFC 0022 I4.
+Every shape space has a `domain` axis (`default`, `narrow`, `wide`, `positive`, `constant`,
+`nonzero`, `zeros`, `large`, `subnormal`, `nan`, `inf`) that renders these recipes for the space's
+primary data tensors.
+
+**Non-finite grading.** `metadata.validator: "match_nonfinite"` grades NaN against NaN and Inf
+against Inf of the same sign by position, and grades finite elements with the resolved tolerance.
+A reference with no finite element fails. With the mask on, engine outputs are prefilled with a
+NaN of a distinctive payload, and an element still holding it fails, so an output the engine never
+wrote is caught. The mask applies to float, half, bfloat16 and double outputs; other outputs keep
+strict grading. It exists on the host only, so it forces host-side comparison.
 
 ## 13. Corpus Intake
 
@@ -565,6 +657,11 @@ Rules:
   buildable` (RFC 0015) or against golden data. They never pass without an oracle.
 - An op with no reference is `UNEXERCISED` at `full` until a reference or golden data exists; its
   gauntlet runs at `buildable`.
+- When the CPU reference's own rounding error exceeds the tolerance for a value domain (for
+  example sequential fp32 sums over large `n·hw` in BatchNorm backward, or bf16 rounding of P before
+  P·V in SDPA), the space bounds that domain with an accuracy constraint and cites the reason. Each
+  such constraint is a known blind spot. The fix is a per-output tolerance override in the engine's
+  TOML, after which the constraint is removed.
 
 ## 15. Tiers
 
@@ -594,27 +691,29 @@ A new engine (or a large change to one, including one an agent wrote) is gated a
 
 ### 17.1 Stories
 
-| # | Story | Depends on | Gap |
-|---|---|---|---|
-| S1 | Outcome report (`--outcome-report`, six outcomes, `purpose` metadata) | — | G3 |
-| S2 | Space declaration format and expression evaluator | — | G2 |
-| S3 | Fuzz driver: sampling, seeds, batches, crash recovery, freeze output, summary | S1, S2 | G6 |
-| S4 | First fuzz spaces: SDPA forward, RMSNorm forward | S3 | G6 |
-| S5 | Pairwise generator writing level sweeps | S2 | G2 |
-| S6 | Typed decline reasons in the plugin SDK | S1 | G3 |
-| S7 | Rejection-probe library per op | S2, S6 | G3 |
-| S8 | Catalog sweep mode | S1 | G1 |
-| S9 | Kernel identity in outcome records | S8 | G1 |
-| S10 | MIOpen "run solution by ID" provider API | S8 | G1 |
-| S11 | Exact-alignment placement in the harness | — | G7 |
-| S12 | Engines honor declared alignment (one story per engine) | S11 | G7 |
-| S13 | Input value-domain control | S2 | — |
-| S14 | Corpus batch intake | — | G4 |
-| S15 | Oracle cost measurement and per-op ceilings | — | G5 |
-| S16 | Gauntlet CTest lane label per provider, excluded from every CI level | S3 | G6 |
-| S17 | Spaces for convolution and the remaining ops | S2, RFC 0022 plans | G2 |
+| # | Story | Depends on | Gap | State |
+|---|---|---|---|---|
+| S1 | Outcome report (`--outcome-report`, six outcomes, `purpose` metadata) | — | G3 | Built |
+| S2 | Space declaration format and expression evaluator | — | G2 | Built |
+| S3 | Fuzz driver: sampling, seeds, batches, crash recovery, freeze output, summary | S1, S2 | G6 | Built |
+| S4 | First fuzz spaces: SDPA forward, RMSNorm forward | S3 | G6 | Built |
+| S5 | Pairwise generator writing level sweeps | S2 | G2 | Not started |
+| S6 | Typed decline reasons in the plugin SDK | S1 | G3 | Not started |
+| S7 | Rejection-probe library per op | S2, S6 | G3 | Alignment probes only (§8) |
+| S8 | Catalog sweep mode | S1 | G1 | Not started |
+| S9 | Kernel identity in outcome records | S8 | G1 | Not started |
+| S10 | MIOpen "run solution by ID" provider API | S8 | G1 | Not started |
+| S11 | Exact-alignment placement in the harness | — | G7 | Built, except the strided cross (§11.3) |
+| S12 | Engines honor declared alignment (one story per engine) | S11 | G7 | hip-kernel-provider built; MIOpen and hipBLASLt gated by version (§11.2) |
+| S13 | Input value-domain control | S2 | — | Built |
+| S14 | Corpus batch intake | — | G4 | Not started |
+| S15 | Oracle cost measurement and per-op ceilings | — | G5 | Not started |
+| S16 | Gauntlet CTest lane label per provider, excluded from every CI level | S3 | G6 | Not started |
+| S17a | Spaces for the remaining hip-kernel-provider ops (LayerNorm, BatchNorm, RMSNorm backward, Resample) | S2 | G2 | Built |
+| S17b | Spaces for convolution, matmul, pointwise, reduction and SDPA backward | S2, RFC 0022 plans | G2 | Not started |
 
-S1–S4 are the first implementation PR, which follows this RFC.
+"Built" means on an unmerged branch: S1–S4 form the first implementation PR, and S11, S12, S13 and
+S17a form a second one stacked on it.
 
 ### 17.2 ALMIOPEN-2470 (fuzz mode)
 
@@ -651,6 +750,8 @@ rules and its reconciliation line carry over.
 | A space drifts from frontend validation | Illegal samples fail in graph build; the driver counts them as `UNEXERCISED` with the frontend message, which flags the drift. |
 | Gauntlet runs leak into CI | Spaces live outside the bundle tree (§5.1); no CTest lane runs the driver until S16, which must prove exclusion. |
 | Long runs lose results | Outcome lines are flushed per case; crash recovery reruns the remainder. |
+| The plugin API raise for alignment (§11.1) changes which graphs a shipping provider receives: ragged and override-shape graphs reach it too | Every hip-kernel-provider engine declines ragged graphs, and the gfx950 dense pack declines override-shape graphs, explicitly. Graphs at the default alignment reach the provider exactly as before. |
+| Accuracy constraints narrow a space to what the oracle can grade, hiding defects in that region | Each one cites its reason (§14); per-output TOML tolerance overrides replace them. |
 
 ## 20. Open Questions
 
@@ -661,6 +762,10 @@ rules and its reconciliation line carry over.
 4. **Kernel identity for non-descriptor engines.** Should MIOpen report its solver ID through the
    same `kernel` field?
 5. **Where fuzz findings are triaged.** One Jira component per provider, or a shared gauntlet board?
+6. **MIOpen and hipBLASLt alignment.** Should they raise to plugin API 1.3.0 and check the declared
+   alignment, or keep receiving only default-alignment graphs?
+7. **Non-finite semantics per op.** The HIP Resample maxpool never selects NaN, while the CPU
+   reference keeps a leading NaN. Which one is the contract? The `nan` domain avoids the case today.
 
 ## 21. Glossary
 
