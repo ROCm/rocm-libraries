@@ -30,6 +30,9 @@ version = 1
 #                  name, or "uid=N" when the graph did not name it
 #   validator:     "allclose", "allclose_matching_infinities" or "rms"
 #   rms_threshold: required when validator = "rms", and must be absent otherwise
+# "allclose" and "allclose_matching_infinities" may also set atol, rtol or both (finite,
+# non-negative; forbidden for "rms"): that tolerance applies to the matched tensors only and
+# outranks a [[tolerance_overrides]] entry for the same test.
 # "allclose_matching_infinities" grades as "allclose" does, at the same resolved
 # atol/rtol, except that an element that is infinite with the same sign in both the
 # reference and the device output compares equal — for an output whose correct value
@@ -72,6 +75,67 @@ filters = ["*LayernormBackward*bfp16_*"]
 tensors = ["*::DSCALE", "*::DBIAS"]
 validator = "rms"
 rms_threshold = 1e-2
+
+# BatchnormBackward, gauntlet suites only. These entries replace two fuzz-space constraints
+# (BatchnormBackward.space.json) that kept the oracle inside the common suite's tolerances.
+# Both are scoped to `*gauntlet*` so the checked-in quick..comprehensive bundles keep the
+# common tolerance and per-element grading. The gauntlet suite carries the input dtype tag
+# before `_cases` (`gauntlet_BatchnormBackward_Default_fp16_cases.s7`); "_fp16_" does not match
+# "_bfp16_".
+#
+# dx of half and bfloat16 (replaces the space rule that dropped the wide, positive and large
+# domains for these dtypes). The common tolerance is atol = rtol = 4e-4 (half) and 3e-3
+# (bfloat16), TestTolerances.hpp batchnorm::getToleranceBackward, graded as
+# |impl - ref| <= atol + rtol * |ref|. In those domains |dx| runs from a few units to about 1e4
+# (saved mean and inv_variance are literal ranges, so xhat * mean(xhat * dy) is not cancelled),
+# where the engine and the fp32 reference round the channel reductions differently and a few
+# elements per thousand differ by exactly one ulp of the result (measured on gfx950, e.g.
+# ref 2.535156 impl 2.537109 in half). One ulp of v in [2^e, 2^(e+1)) is 2^(e-p), p = 10 for
+# half and 7 for bfloat16, so it is at most 2^-p * |v|: 9.8e-4 of |v| for half and 7.8e-3 for
+# bfloat16, at every magnitude up to the domain's range (1 ulp = 8 at |dx| near 1e4 in half).
+# rtol = 2 * 2^-p covers one ulp of any |dx| with a factor of two over the ulp at the bottom
+# of its binade, so a one-ulp disagreement cannot fail at any magnitude, while an error of
+# a few ulps still does. atol stays at the common tolerance: it only matters near zero, where
+# the disagreement is far below one ulp of the larger operand.
+[[validator_overrides]]
+filters = ["*gauntlet*BatchnormBackward*_fp16_*"]
+tensors = ["*::DX"]
+validator = "allclose"
+atol = 4e-4
+rtol = 2e-3
+
+[[validator_overrides]]
+filters = ["*gauntlet*BatchnormBackward*_bfp16_*"]
+tensors = ["*::DX"]
+validator = "allclose"
+atol = 3e-3
+rtol = 1.6e-2
+
+# dscale and dbias (replaces the space rule that bounded n*hw for the wide and large domains).
+# Both are fp32 sums of random-sign terms of magnitude 4.6 to 24 over n*hw elements per
+# channel. The CPU reference adds them as one sequential fp32 sum and the engine by a tree, so
+# they differ by about 1e-2 once partial sums reach 1e4 (measured on gfx950: 3 to 17 percent of
+# cases at n*hw = 4096..32768, always one channel whose true sum is near zero and so misses
+# atol + rtol * |ref|). Like LayernormBackward's dscale and dbias above, this is an error that
+# tracks the tensor's scale, not each element's, so it is graded as a relative RMS. That error
+# is about 1e-2 on channel sums whose rms is about sqrt(n*hw) * 10 (4e2 at n*hw = 2**11,
+# 1.8e3 at 2**15), so the relative RMS is of order 1e-5 or below. The threshold has to clear
+# the reference's own sequential-sum error that two constraints of the space still bound
+# instead (4.5e-4 relative for constant terms at n*hw = 2**15, 2.4e-4 for same-sign terms at
+# 2**21: BatchnormBackward.space.json), so it is 1e-3, the fp16 tier of the LayernormBackward
+# precedent above: more than twice that bound and two orders above the error of the
+# random-sign sums, while a wrong reduction (a missing channel, a doubled term) is a relative
+# RMS of order 1 (4e-2 for one missing channel of 512). dscale and dbias are fp32 for every
+# input dtype, so one threshold serves all of them.
+#
+# The suite grades dscale and dbias by this RMS in every domain, not only wide and large: a
+# gauntlet name carries no domain, and a per-element comparison of a sum whose reference is a
+# sequential fp32 sum is what the constraint removed here was working around.
+[[validator_overrides]]
+filters = ["*gauntlet*BatchnormBackward*"]
+tensors = ["*::DSCALE", "*::DBIAS"]
+validator = "rms"
+rms_threshold = 1e-3
 
 #
 # RMSNormBackward Pure-Bfp16 (dy/x/dx all bf16) fails CPU-reference tolerance

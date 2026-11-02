@@ -1306,10 +1306,11 @@ POISON_FRACTION = {
 # term, and a cancelling sum leaves an output below that error, so atol 0.01 only grades a V of
 # magnitude up to about 2. Probed on gfx950 with Q and K wide or large (ASM_SDPA_ENGINE, then
 # Gfx950AttentionDense): V in +-8 or large scale 8 fails 82 of 100 and 21 of 60 samples, V in
-# +-4 fails 41 of 150 and 14 of 60, V in +-2 fails none of 150 and 60.
+# +-4 fails 41 of 150 and 14 of 60, V in +-2 fails none of 150 and 60. SdpaFwd/Default and
+# SdpaFwd/Gfx950Dense no longer narrow V: their engine TOMLs grade O by a gauntlet-scoped relative
+# RMS instead (test_the_sdpa_forward_output_rms_reaches_fuzz_cases_only). The spaces of the
+# engines no device here can verify keep the narrowing.
 OPERAND_DOMAIN = {
-    ("SdpaFwd/Default", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
-    ("SdpaFwd/Gfx950Dense", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
     ("SdpaFwd/Flash2Region", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
     ("SdpaFwd/Gfx1151", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
     ("SdpaFwd/Gfx1151Decode", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
@@ -3066,6 +3067,139 @@ def test_the_asm_sdpa_backward_tolerances_reach_fuzz_and_quick_cases(run):
         "quick_SdpaFwd_Default.1_1_256_128_fp16_nchw",
     ):
         assert _toml_tolerance(config, other) is None, other
+
+
+GFX950_DENSE_TOML = (
+    TESTS_ROOT.parent
+    / "hip-kernel-provider"
+    / "config"
+    / "hipkernel_Gfx950AttentionDense.toml"
+)
+
+
+def _toml_validator(config, test_name, tensor):
+    """What the harness resolves for one output tensor: the last ``[[validator_overrides]]``
+    entry whose filters match the test name and whose tensors match the label, as
+    ``(validator, rms_threshold, atol, rtol)``; None when none matches, which leaves allclose
+    at the tolerance the common suite and ``[[tolerance_overrides]]`` give
+    (``TestSettings::findValidatorOverride``, the GTest glob of ``globMatch`` for both).
+    """
+    result = None
+    for entry in config.get("validator_overrides", []):
+        if any(_gtest_glob_matches(g, test_name) for g in entry["filters"]) and any(
+            _gtest_glob_matches(g, tensor) for g in entry["tensors"]
+        ):
+            result = (
+                entry["validator"],
+                entry.get("rms_threshold"),
+                entry.get("atol"),
+                entry.get("rtol"),
+            )
+    return result
+
+
+def _quick_names(operation):
+    """The GTest names of every checked-in bundle case of one operation, all tiers."""
+    names = []
+    for sweep in sorted(BUNDLES.glob(f"*/{operation}/*/sweep.json")):
+        suite = "_".join(sweep.parent.relative_to(BUNDLES).parts)
+        for case in json.loads(sweep.read_text())["cases"]:
+            names.append(f"{suite}.{re.sub(r'[^A-Za-z0-9_]', '_', case['id'])}")
+    return names
+
+
+def test_the_batchnorm_backward_gauntlet_entries_reach_fuzz_cases_only(run):
+    # bug caught: an entry whose filter misses the `s<seed>` names grades nothing (the space
+    # constraints it replaces are gone, so the oracle then fails on one-ulp dx and dscale
+    # noise), one that matches the quick bundles relaxes checked-in CI, and "_fp16_" taking
+    # the bfloat16 suites would grade them at the half tolerance
+    tomllib = pytest.importorskip("tomllib")
+    if not HIP_MLOPS_TOML.is_file():
+        pytest.skip("the hip-kernel-provider config is not in this checkout")
+    config = tomllib.loads(HIP_MLOPS_TOML.read_text(encoding="utf-8"))
+    space_id = "BatchnormBackward/Default"
+    sp = space_by_id(space_id)
+    f = _fuzz(run, space=space_id)
+    dx = {"float": None, "half": ("allclose", None, 4e-4, 2e-3)}
+    dx["bfloat16"] = ("allclose", None, 3e-3, 1.6e-2)
+    seen = set()
+    for seed in range(200):
+        s = sampler.sample(sp, seed)
+        name = f._test_name(sp, s)
+        dtype = s.axis_values["dtype"]
+        seen.add(dtype)
+        assert (
+            _toml_validator(config, name, "BatchnormBackward_0::DX") == dx[dtype]
+        ), name
+        for tensor in ("BatchnormBackward_0::DSCALE", "BatchnormBackward_0::DBIAS"):
+            assert _toml_validator(config, name, tensor) == (
+                "rms",
+                1e-3,
+                None,
+                None,
+            ), name
+        for tensor in ("x", "dy", "scale", "BatchnormBackward_0"):
+            assert _toml_validator(config, name, tensor) is None, (name, tensor)
+    assert seen == {"float", "half", "bfloat16"}
+
+    # a checked-in bundle of the same operation, in any tier, is graded as before
+    names = _quick_names("BatchnormBackward")
+    assert any(n.startswith("quick_BatchnormBackward_") for n in names)
+    for name in names:
+        for tensor in (
+            "BatchnormBackward_0::DX",
+            "BatchnormBackward_0::DSCALE",
+            "BatchnormBackward_0::DBIAS",
+        ):
+            assert _toml_validator(config, name, tensor) is None, name
+
+
+def test_the_sdpa_forward_output_rms_reaches_fuzz_cases_only(run):
+    # bug caught: as above for O, where the V narrowing the entries replace is gone: an
+    # unmatched fuzz name grades a wide or large V at atol 0.01 and fails most samples, and a
+    # match on a quick bundle or on the log-sum-exp would loosen what CI and the stats check
+    tomllib = pytest.importorskip("tomllib")
+    for toml_path, space_id, expected in (
+        (ASM_SDPA_TOML, "SdpaFwd/Default", {"bfloat16": ("rms", 8e-3, None, None)}),
+        (
+            GFX950_DENSE_TOML,
+            "SdpaFwd/Gfx950Dense",
+            {
+                "bfloat16": ("rms", 8e-3, None, None),
+                "half": ("rms", 2e-3, None, None),
+            },
+        ),
+    ):
+        if not toml_path.is_file():
+            pytest.skip("the hip-kernel-provider config is not in this checkout")
+        config = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+        sp = space_by_id(space_id)
+        f = _fuzz(run, space=space_id)
+        seen = set()
+        for seed in range(200):
+            s = sampler.sample(sp, seed)
+            name = f._test_name(sp, s)
+            dtype = s.axis_values["dtype"]
+            seen.add(dtype)
+            assert (
+                _toml_validator(config, name, "SdpaFwd_0::O") == expected[dtype]
+            ), name
+            for tensor in ("stats", "Q", "K", "V"):
+                assert _toml_validator(config, name, tensor) is None, (name, tensor)
+        assert seen == set(expected)
+
+        # the checked-in bundles of the operation, in any tier, keep the common tolerance
+        names = _quick_names("SdpaFwd")
+        assert any(n.startswith("quick_SdpaFwd_") for n in names)
+        for name in names:
+            assert _toml_validator(config, name, "SdpaFwd_0::O") is None, name
+        # and the other operation's gauntlet suites are not matched
+        assert (
+            _toml_validator(
+                config, "gauntlet_SdpaBackward_Default_bfp16_cases.s7", "SdpaFwd_0::O"
+            )
+            is None
+        )
 
 
 def test_samples_are_split_into_batches_with_consecutive_seeds(run):

@@ -46,3 +46,29 @@ rtol = 2.5e-3
 filters = ["*_SdpaBackward_*_bfp16_*"]
 atol = 1e-2
 rtol = 1e-2
+
+# -- Validator Overrides --
+# Change which comparison an output tensor is graded by (see TestSettings.hpp for the schema).
+# allclose is the default everywhere. Each entry names the output tensors it applies to.
+#
+# SdpaFwd output O, gauntlet suites only (`*gauntlet*`; the quick bundles keep the common
+# allclose tolerance, tol::sdpa::getToleranceFwd<T>() = 1e-2). This replaces the narrowing of
+# V in the SdpaFwd/Default space (V free(-2, 2) under wide, scale 2 under large instead of the
+# Q and K ranges). The kernel rounds P to bfloat16 for the P.V product, which gives each P_j
+# a relative error up to 2^-8 (rms about 1.5e-3). The error of one output element is then the
+# P-weighted sum of |V_j| times those errors, so it grows with |V| (a V of magnitude 4 or
+# more failed 41 of 150 samples, V in +-8 82 of 100, at atol 0.01: probed on gfx950), while a
+# cancelling sum leaves O itself small. The error tracks the scale of V, not each element of
+# O, so it is graded as a relative RMS, as LayernormBackward does for dscale and dbias:
+# the P rounding gives about 1.5e-3 relative to the rms of O, and rounding O to bfloat16
+# (one ulp, 2^-8 of |O| at most) adds a similar amount, so 8e-3, the bfloat16 relative-RMS
+# tolerance of rmsnorm::getTolerance (TestTolerances.hpp), is about three times the
+# expected error while a wrong softmax or a missing kv block is of order 1. The pattern
+# `_bfp16_` is the dtype tag the fuzz driver puts in the suite
+# (`gauntlet_SdpaFwd_Default_bfp16_cases.s7`); the space draws bfloat16 only.
+# The log-sum-exp (stats) keeps allclose: a different tensor label.
+[[validator_overrides]]
+filters = ["*gauntlet*SdpaFwd*_bfp16_*"]
+tensors = ["*::O"]
+validator = "rms"
+rms_threshold = 8e-3
