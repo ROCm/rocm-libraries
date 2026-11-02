@@ -219,7 +219,7 @@ rocke_kernel_def_t* rocke_build_mxfp4_tdm_gemm(rocke_ir_builder_t* b,
        || spec->vector_epilogue || spec->local_read_prefetch || spec->wave_parity_tdm
        || spec->scale_tdm || spec->lds_pad || spec->lds_segment_interleave || spec->init_c_wmma
        || spec->cluster_dim_set || spec->tdm_multicast || spec->prefetch_gl2
-       || spec->tile_refill_mid)
+       || spec->tile_refill_mid || spec->expert_scheduling)
     {
         return (rocke_kernel_def_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "C++ mxfp4_tdm_gemm currently supports only parity config 0");

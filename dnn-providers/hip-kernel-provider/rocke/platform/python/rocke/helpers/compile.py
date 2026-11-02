@@ -96,6 +96,9 @@ from ..runtime.comgr import build_hsaco_from_llvm_ir, build_hsaco_from_llvm_modu
 # compiles it in a fresh process. Compile policy only: no lowerer reads it, so
 # the LLVM IR is the same with or without it.
 COMGR_FRESH_PROCESS_ATTR = "comgr_fresh_process"
+# Kernel attribute for ``-amdgpu-expert-scheduling-mode`` (compile policy only,
+# like the attribute above).
+EXPERT_SCHEDULING_ATTR = "amdgpu_expert_scheduling_mode"
 
 
 @dataclass
@@ -503,6 +506,8 @@ def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:
     agpr_alloc = kernel.attrs.get("agpr_alloc")
     if kernel.attrs.get("mfma_vgpr_form") or _is_zero_agpr_alloc(agpr_alloc):
         options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
+    if kernel.attrs.get(EXPERT_SCHEDULING_ATTR):
+        options.extend(["-mllvm", "-amdgpu-expert-scheduling-mode"])
     return options
 
 

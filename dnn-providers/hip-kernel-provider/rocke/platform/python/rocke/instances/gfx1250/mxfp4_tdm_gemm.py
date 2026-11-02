@@ -17,6 +17,7 @@ from ...core.ir import (
     PtrType,
     Value,
 )
+from ...helpers.compile import EXPERT_SCHEDULING_ATTR
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
 _ATOM_M = 32
@@ -99,6 +100,8 @@ class MxFp4TdmGemmSpec:
     tdm_multicast: bool = False
     prefetch_gl2: bool = False
     tile_refill_mid: bool = False
+    # ESM2, as the winner's EnableESM2: LLVM's -amdgpu-expert-scheduling-mode.
+    expert_scheduling: bool = False
 
     @property
     def wave_repeat_m(self) -> int:
@@ -173,6 +176,7 @@ class MxFp4TdmGemmSpec:
                 "mcast": self.tdm_multicast,
                 "pgl2": self.prefetch_gl2,
                 "rmid": self.tile_refill_mid,
+                "esm": self.expert_scheduling,
             },
         )
 
@@ -189,6 +193,7 @@ _STEP6_BOOL_FLAGS = (
     "tdm_multicast",
     "prefetch_gl2",
     "tile_refill_mid",
+    "expert_scheduling",
 )
 
 
@@ -843,6 +848,8 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
+    if spec.expert_scheduling:
+        b.kernel.attrs[EXPERT_SCHEDULING_ATTR] = True
     if spec.cluster_dim is not None:
         b.set_cluster_dims(*spec.cluster_dim)
     ops = _IrOps(b)

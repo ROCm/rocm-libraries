@@ -119,12 +119,13 @@ repo.
 | 6.6 | `step6_6_mxfp4_gemm` | `lds_pad` | `LdsPad*`, `LdsBlockSizePerPad*` |
 | 6.7 | `step6_7_mxfp4_gemm` | `lds_segment_interleave` | `LDSSegmentInterleave=1` |
 | 6.8 | `step6_8_mxfp4_gemm` | `cluster_dim=(4,4,1)`, `tdm_multicast` | `ClusterDim=4x4`, `TDMMulticast` |
+| 6.9 | `step6_9_mxfp4_gemm` | `expert_scheduling` | `EnableESM2` |
 
 The chain keeps only steps that are faster than the step before them, or
 that a later faster step needs: 6.4 is slower on its own, but `scale_tdm`,
 `lds_segment_interleave` and `tdm_multicast` all build on it. Three YAML
 features were slower than the step before them on the YAML shape, so they
-are trials (`--trials`), not chain steps:
+are trials (`--trials`), not chain steps. They build on 6.8, not 6.9:
 
 | Trial | Variant | Adds to 6.8 | YAML parameter |
 | --- | --- | --- | --- |
@@ -183,6 +184,12 @@ Design of each step:
   intrinsic into a real branch (only the first wave signals the cluster
   barrier). That branch splits the main loop into several blocks, and LLVM
   then keeps about 35 LDS reads in flight instead of 62.
+- **6.9 expert scheduling.** The kernel is compiled with
+  `-mllvm -amdgpu-expert-scheduling-mode`, LLVM's counterpart of the
+  winner's `EnableESM2`. The wave sets `SCHED_MODE` to 2 at entry, the
+  hardware stops tracking ALU dependencies, and LLVM inserts the
+  `s_wait_alu` waits itself (346 in the YAML-shape kernel, none in 6.8).
+  The LLVM IR is 6.8's; only the compile option differs.
 - **T1 GL2 prefetch.** The cluster's 16 workgroups split the GL2 prefetch
   of tile `k + 2`'s A, B and swizzled-scale lines, one 256 B line per thread,
   with `th:TH_LOAD_NT scope:SCOPE_SE` as in the winner. The A and B lines
@@ -246,6 +253,7 @@ for any step):
 | 6.6 | 815 | 282624 |
 | 6.7 | 815 | 282624 |
 | 6.8 | 819 | 282624 |
+| 6.9 | 819 | 282624 |
 | T1 | 826 | 282624 |
 | T2 | 1008 | 282624 |
 | T3 | 942 | 282624 |

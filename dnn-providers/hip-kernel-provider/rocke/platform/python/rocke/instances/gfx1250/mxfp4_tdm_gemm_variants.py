@@ -44,9 +44,10 @@ MXFP4_GEMM_VARIANTS, VARIANT_STEPS = _chain(
         "step6_8_mxfp4_gemm",
         {"cluster_dim": (4, 4, 1), "tdm_multicast": True},
     ),
+    ("6.9", "step6_9_mxfp4_gemm", {"expert_scheduling": True}),
 )
 
-# Trials build on the last chain entry and stay off the chain. The YAML's
+# Trials build on 6.8 and stay off the chain. The YAML's
 # VectorWidthB=4 (each lane owns 4 adjacent rocKE A rows) is not a trial: it
 # is the M mapping ``scale_tdm`` already uses from 6.5 on, just as
 # VectorWidthA=8 is the N mapping of ``vector_epilogue``.
@@ -55,7 +56,7 @@ MXFP4_GEMM_VARIANTS, VARIANT_STEPS = _chain(
 # trial_ck_lds_pad replaces 6.6 instead: it is 6.5 with CK Tile's comp_tdm
 # padding (16 B after every 256 B LDS row on A and B, no B iterate mode,
 # unpadded scales), so it compares against 6.6 directly.
-_CHAIN_END = MXFP4_GEMM_VARIANTS[-1][1]
+_CHAIN_END = dict(MXFP4_GEMM_VARIANTS)["step6_8_mxfp4_gemm"]
 _STEP6_5 = dict(MXFP4_GEMM_VARIANTS)["step6_5_mxfp4_gemm"]
 MXFP4_GEMM_TRIAL_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     ("trial_prefetch_gl2_mxfp4_gemm", {**_CHAIN_END, "prefetch_gl2": True}),

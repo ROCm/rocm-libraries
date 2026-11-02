@@ -18,6 +18,7 @@ from rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm import (
     run_case,
     swizzle_mx_scales_gfx1250,
 )
+from rocke.helpers.compile import _comgr_options_for_kernel
 from rocke.instances.gfx1250.mxfp4_tdm_gemm import (
     IntOps,
     MxFp4TdmGemmSpec,
@@ -323,11 +324,11 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         self.assertEqual(names[0], BASE_VARIANT)
         self.assertEqual(
             [variant_step(name) for name in names],
-            [f"6.{i}" for i in range(1, 9)],
+            [f"6.{i}" for i in range(1, 10)],
         )
         self.assertEqual(
             [name for name in names[1:]],
-            [f"step6_{i}_mxfp4_gemm" for i in range(2, 9)],
+            [f"step6_{i}_mxfp4_gemm" for i in range(2, 10)],
         )
         self.assertEqual(MXFP4_GEMM_VARIANTS[0][1], {})
         for name in names:
@@ -354,6 +355,18 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
             base_llvm.replace(BASE_VARIANT, "mxfp4_tdm_gemm"),
             default_llvm,
         )
+
+    def test_expert_scheduling_is_a_comgr_option(self):
+        expected = {
+            "step6_8_mxfp4_gemm": ["-O3"],
+            "step6_9_mxfp4_gemm": ["-O3", "-mllvm", "-amdgpu-expert-scheduling-mode"],
+        }
+        for name, options in expected.items():
+            with self.subTest(variant=name):
+                kernel = build_mxfp4_tdm_gemm(
+                    variant_spec(name, *_SMOKE, **YAML_TILE), arch="gfx1250"
+                )
+                self.assertEqual(_comgr_options_for_kernel(kernel), options)
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)
@@ -455,6 +468,15 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         self.assertEqual(_count(cluster_asm, by_step["6.7"]), 0)
         self.assertEqual(_count(cluster_asm, by_step["6.8"]), 3)
         self.assertNotRegex(by_step["6.8"], r"\bfence\b")
+        # 6.9: a compile option only, so the LLVM IR is 6.8's.
+        names = {variant_step(name): name for name in llvm}
+        kernels = {
+            step: variant_spec(names[step], *_SMOKE, **YAML_TILE).kernel_name()
+            for step in ("6.8", "6.9")
+        }
+        self.assertEqual(
+            by_step["6.9"].replace(kernels["6.9"], kernels["6.8"]), by_step["6.8"]
+        )
         # Trial prefetch_gl2: two NT, SE-scope GL2 prefetches in the loop
         # body, with no guard branch.
         prefetch_gl2, init_c, refill_mid = (by_step[t] for t in ("T1", "T2", "T3"))

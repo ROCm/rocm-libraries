@@ -53,6 +53,7 @@ typedef struct rocke_mxfp4_tdm_gemm_spec
     bool tdm_multicast;
     bool prefetch_gl2;
     bool tile_refill_mid;
+    bool expert_scheduling;
 } rocke_mxfp4_tdm_gemm_spec_t;
 
 rocke_mxfp4_tdm_gemm_spec_t rocke_mxfp4_tdm_gemm_spec_default(void);
