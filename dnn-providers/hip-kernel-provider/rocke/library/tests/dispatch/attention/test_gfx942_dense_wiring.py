@@ -328,6 +328,32 @@ class TestGfx942DensePersistent(unittest.TestCase):
             self.assertEqual(persistent.kernel_spec.nonpersist_decode, "auto")
 
 
+class TestGfx942DenseQbMinor(unittest.TestCase):
+    """``gfx942_dense_qbminor`` fixes the grid the hipDNN kernel ingestor launches:
+    one CTA per (query block, query head, batch) at the qb_minor order, unsplit."""
+
+    def test_default_spec_is_the_unsplit_qb_minor_grid(self):
+        with _Gfx942Arch():
+            # Causal MHA at D128 is where the tuned default goes persistent and
+            # auto resolves another block order.
+            for kw in (
+                dict(nhead_q=8, nhead_k=8, seqlen_q=512, seqlen_k=512),
+                dict(hdim_q=64, hdim_v=64),
+                dict(mask_type=0),
+                dict(sliding_window=128),
+            ):
+                with self.subTest(**kw):
+                    req = _req(spec_id="gfx942_dense_qbminor", **kw)
+                    spec = attention_tuning_spec(
+                        req, "gfx942_dense_qbminor"
+                    ).kernel_spec
+                    self.assertFalse(spec.persistent)
+                    self.assertEqual(spec.nonpersist_decode, "qb_minor")
+                    self.assertEqual(spec.kv_segments, 1)
+                    self.assertFalse(spec.window_wave_skip)
+                    self.assertEqual(spec.block_m, 256)
+
+
 class TestGfx942DenseWavesPerEu(unittest.TestCase):
     def test_shipped_policy_and_knob_override(self):
         self.assertEqual(_spec(_req()).waves_per_eu, 2)

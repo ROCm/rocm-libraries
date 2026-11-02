@@ -1014,8 +1014,19 @@ def _gfx942_request(**kw):
 
 
 def _gfx942_specs(req, level="production", limit=0, **kw):
-    combos = _dense_combos(req, level=level, limit=limit, **kw)
-    return [spec for _candidate, spec in combos]
+    """The tuned ``gfx942_dense`` candidate's specs; the qbminor variant fixes
+    the grid and is covered in test_gfx942_dense_wiring.py."""
+    specs = (
+        spec
+        for candidate, spec in iter_registered_attention_combos(
+            req,
+            candidate_prefix="attention_gfx942_dense",
+            sweep_level=level,
+            **kw,
+        )
+        if candidate.name == "attention_gfx942_dense"
+    )
+    return list(islice(specs, limit) if limit else specs)
 
 
 def gfx942_dense_spec(req):
@@ -1023,8 +1034,8 @@ def gfx942_dense_spec(req):
 
 
 class TestGfx942DenseTuningSpace(unittest.TestCase):
-    """The gfx942 dense kernel's knobs on the same machinery. gfx942 registers
-    one dense candidate, so persistence is a knob there alongside the tile."""
+    """The gfx942 dense kernel's knobs on the same machinery. On the tuned
+    candidate persistence is a knob alongside the tile."""
 
     def test_every_dense_spec_field_is_classified(self):
         _assert_dense_fields_classified(self, "gfx942", Gfx942AttentionDenseSpec)

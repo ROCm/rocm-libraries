@@ -136,11 +136,11 @@ kernel_name_template: attention_dense.{dtype}_d{head_size}_c{causal}_swa{sliding
 enumerate:
   candidates: dispatch.attention:attention_candidates
   request: dispatch.attention.common:AttentionRequest
-  # gfx942 registers one dense candidate; persistent is a knob of it, not a
-  # separate algorithm. At the fixed cell shape below the default spec is the
-  # non-persistent grid (work = 2 * nhead_q < 304), and `persistent` is in
-  # reduction.fields.ignored, so every variant stays on the grid body.
-  pin: {algorithm: attention_dense, spec_id: gfx942_dense}
+  # gfx942_dense_qbminor is the dense candidate whose default spec is the grid the
+  # native dispatch launches: one CTA per (query block, query head, batch) at the
+  # qb_minor block order, one KV segment. persistent, nonpersist_decode and
+  # kv_segments are knobs of it, held at that default by reduction.fields.ignored.
+  pin: {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
   # Request fields every cell shares. Batch, sequence lengths and head counts are
   # runtime kernel params on gfx942, so they only seed the build-time spec.
   fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
@@ -153,7 +153,7 @@ enumerate:
     - fields: [dtype]
       values: [bf16, fp16]
     # A causal sliding window is TOP_LEFT_CAUSAL plus sliding_window = W, the number
-    # of keys attended including the diagonal (graph left_bound + 1). The window is
+    # of keys attended including the diagonal (the graph's left_bound). The window is
     # baked into the kernel and must be a multiple of block_n.
     - fields: [mask_type, sliding_window]
       values:
@@ -169,7 +169,7 @@ enumerate:
   space: full
   # Fields of the registry spec every generated kernel carries: the whole
   # Gfx942AttentionDenseSpec, so hkp_pack hydrates nothing from a changed default.
-  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse]
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
   # Frozen build cost: a registry that grows past this fails here, not at pack time.
   max_kernels: 1000
 
@@ -185,7 +185,7 @@ reduction:
       - {name: pv_priority}
     # Held at the registry default. The grid catalog never varies the persistent
     # fields; the rest are gfx942 levers left to the kernel's own policy.
-    ignored: [waves_per_eu, lds_k_group_pad, persistent, num_persistent, interleave, persist_decode, use_exp2_fast, iglp, iglp_mode, pv_loop_order, o_store_width, pv_sched_fence_mask, causal_diag_split, v_row_pad, use_cfvst, use_v_swizzle]
+    ignored: [waves_per_eu, lds_k_group_pad, persistent, num_persistent, interleave, persist_decode, use_exp2_fast, iglp, iglp_mode, pv_loop_order, o_store_width, pv_sched_fence_mask, causal_diag_split, v_row_pad, use_cfvst, use_v_swizzle, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
   aot_budget_per_arch: 1000
 
 # How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
@@ -232,7 +232,7 @@ launch_surface:
       Sq % block_m or Skv % block_n is non-zero, or the window leaves the last
       query block no key tile. Head counts, batch and sequence lengths are runtime
       kernel arguments and are never compared. graph_match maps a causal band of
-      left_bound L to sliding_window L + 1 and declines every non-causal band.
+      left_bound L to sliding_window L and declines every non-causal band.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
   - name: kernargs
