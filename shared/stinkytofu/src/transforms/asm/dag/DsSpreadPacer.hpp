@@ -144,6 +144,17 @@ class DsSpreadPacer {
         return (open ? st.inBatch : 0) < (open ? st.allow : allowFor(st, idx));
     }
 
+    // Loads the even line has placed by the current batch minus the loads the stage has issued
+    // (> 0: the load's stage is behind its line).
+    int behind(unsigned nodeId, int wmmaIssued) const {
+        auto it = stageOf_.find(nodeId);
+        if (!active_ || it == stageOf_.end() || wmmaIssued >= wmmaTotal_) return 0;
+        const Stage& st = stages_[it->second];
+        const int idx = batchOf(st, wmmaIssued);
+        if (idx >= st.batches) return 0;
+        return std::max(0, evenLine(st, idx) - st.issued);
+    }
+
     // A ds_load issued with `wmmaIssued` WMMAs of the region issued so far.
     void noteIssue(unsigned nodeId, int wmmaIssued) {
         auto it = stageOf_.find(nodeId);

@@ -119,6 +119,24 @@ rocke_value_t* lincomb(rocke_ir_builder_t* b,
 rocke_value_t* lincomb_f(rocke_ir_builder_t* b,
                          const std::vector<std::pair<double, rocke_value_t*>>& terms);
 
+/* The 1-D Winograd transforms with shared subexpressions (Python bt_1d /
+ * at_1d over _IROps): B^T d and A^T d for one length-n column, fp32. */
+std::vector<rocke_value_t*>
+    bt_1d(rocke_ir_builder_t* b, int m, const std::vector<rocke_value_t*>& d);
+std::vector<rocke_value_t*>
+    at_1d(rocke_ir_builder_t* b, int m, const std::vector<rocke_value_t*>& d);
+/* filter_matrix_int(m): integer numerators of G (row-major n x 3) and their
+ * common denominator. */
+int64_t filter_matrix_int(int m, std::vector<int64_t>& gi);
+/* conv_winograd_fwd's prescale bit helpers: 2**e from an i32 exponent; |raw|
+ * of 16-bit floats as integers; their (vector) max; the horizontal max as an
+ * i32; a 16-bit float pattern as fp32. */
+rocke_value_t* pow2_f32(rocke_ir_builder_t* b, rocke_value_t* x);
+rocke_value_t* abs_bits_vec(rocke_ir_builder_t* b, rocke_value_t* raw, int n);
+rocke_value_t* max_bits(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y, int n);
+rocke_value_t* hmax_bits(rocke_ir_builder_t* b, rocke_value_t* v, int n);
+rocke_value_t* bits_to_f32(rocke_ir_builder_t* b, rocke_value_t* bits, const char* dt);
+
 } // namespace rocke_wino
 
 #endif /* ROCKE_INSTANCE_CONV_WINOGRAD_INTERNAL_H */

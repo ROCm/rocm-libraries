@@ -43,6 +43,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Fixed wrong workspace sizes in the system find-dbs for gfx908, gfx90a (104 CU), gfx942,
   gfx950 and gfx1201, mostly for `GemmWrwUniversal`, the CK grouped solvers and
   `TransposedConvBinWinoRxS`. DBSync now checks the workspace stored in each find-db record.
+* [Conv] Fixed HIP graph captures of convolutions failing with `hipErrorStreamCaptureInvalidated`
+  after a find had skipped a naive solver for exceeding `MIOPEN_NAIVE_TIMEOUT` (#12121). Scratch
+  held by a skipped evaluation is now released by a background thread as soon as its kernel
+  finishes, rather than from a later kernel launch, so it is also released in workloads that only
+  replay a captured graph.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
