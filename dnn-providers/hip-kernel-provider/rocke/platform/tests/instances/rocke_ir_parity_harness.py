@@ -5224,6 +5224,54 @@ def cases():
             build_fwd_small_wmma_case(_kind, _prob, **_over),
         )
 
+    # --- conv_direct_fwd_gstream_wmma: small-group forward walking row bands
+    # (gfx1250). TDM halo ring + wave32 WMMA; every case needs llvm23 (TDM), so
+    # the other flavors record them as expected failures. The C++ twin is gated
+    # by library/tests/parity/conv_direct_fwd_gstream_wmma_emit.*.
+    def build_fwd_gstream_case(prob_kw, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_fwd_gstream_wmma import (
+                FwdGstreamWmmaSpec,
+                build_fwd_gstream_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            shape = dict(N=2, H=28, W=28, KH=3, KW=3, PAD=1, stride=1, dtype="bf16")
+            shape.update(prob_kw)
+            return build_fwd_gstream_wmma(
+                FwdGstreamWmmaSpec(problem=DirectConvProblem(**shape), **spec_kw),
+                arch="gfx1250",
+            )
+
+        return _build
+
+    for _case_id, _prob, _over in (
+        (
+            "bf16_c16_s1",
+            dict(groups=8, cpg=16, kpg=16),
+            dict(waves_k=2, waves_p=2, tiles_k=2, tiles_p=2, tile_w=16, walk=4),
+        ),
+        (
+            "fp16_c56_s2_ps",
+            dict(groups=4, cpg=56, kpg=56, stride=2, dtype="fp16"),
+            dict(
+                waves_k=4,
+                waves_p=1,
+                tiles_k=2,
+                tiles_p=4,
+                tile_w=16,
+                walk=4,
+                phase_split=True,
+            ),
+        ),
+    ):
+        add(
+            "conv_direct_fwd_gstream_wmma",
+            f"conv_direct_fwd_gstream_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_fwd_gstream_case(_prob, **_over),
+        )
+
     # --- conv_direct_dw_fwd_wmma: Toeplitz WMMA depthwise forward (gfx1250) ---
     # Buffer loads + LDS staging + wave32 16x16x32 WMMA. The C++ twin is gated
     # by library/tests/parity/conv_direct_dw_fwd_wmma_emit.*.

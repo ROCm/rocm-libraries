@@ -1347,6 +1347,34 @@ the per-layer rows of `FWD_SMALLK_KNOBS_BY_LAYER`) over `FWD_SMALLK_LAYERS`:
 3x3 K=4, 3x3 K=3 and 1x7 K=1 with column padding 3 (variants `direct_fwd_smallc_wmma` /
 `direct_fwd_smallk_wmma`).
 
+### Small groups (`FwdGstreamWmmaSpec`)
+
+`library/kernels/common/conv_direct_fwd_gstream_wmma.py` (C++ twin
+`instance_conv_direct_fwd_gstream_wmma.h`) serves grouped 3x3 layers with 8 to
+64 channels per group (`cpg == kpg`, stride 1 or 2), where
+`direct_fwd_wmma` has a single input-channel chunk per block and nothing to
+prefetch. A block keeps one output-channel slice and one column strip and
+walks `walk` row bands (flattened (image, band) order) through a ring of
+`stages` TDM halo slots, so the next band's transfer is in flight while the
+current one is multiplied. The weights stay in VGPRs for the whole walk.
+
+- 8 or 16 channels per group: an M tile reads 16 input channels (one group of
+  16 or two of 8) and each half of the WMMA K takes a different filter tap
+  (lanes 0-15 tap `2j`, lanes 16-31 tap `2j + 1`).
+- 32 or more: plain 32-channel k-steps per tap; a block covers whole groups
+  or part of one. A group that is not whole 16-row M tiles / 32-channel
+  k-steps (56) is padded with zero weights, and its padding rows are not
+  stored.
+
+Knobs: the tile (`waves_k`, `waves_p`, `tiles_k`, `tiles_p`, `tile_w`), `walk`,
+`stages`, `phase_split` (stride 2), `prefetch` / `pf_depth` (B fragments read
+k-steps ahead) and `sched`. The output is stored straight from the
+accumulators through a bounds-checked buffer descriptor. Runtime: batch,
+extents and the group count; baked: filter, stride, padding and the channels
+per group. The AOT grid is `FWD_GSTREAM_KNOBS` over cpg 8 / 16 / 32 / 64 and
+`FWD_GSTREAM_PADG_KNOBS` over cpg 56, stride 1 and 2 (variant
+`direct_fwd_gstream_wmma`), filtered per problem by tile efficiency.
+
 ### Depthwise (`DwFwdWmmaSpec`)
 
 `library/kernels/common/conv_direct_dw_fwd_wmma.py` (C++ twin

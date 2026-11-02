@@ -26,6 +26,7 @@ from kernels.conv.direct_variants import (
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
     DIRECT_DEPTHWISE_TILED_DGRAD as _DW_TILED_DGRAD,
     DIRECT_DW_FWD_WMMA as _DW_FWD_WMMA,
+    DIRECT_FWD_GSTREAM_WMMA as _FWD_GSTREAM,
     DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
@@ -597,6 +598,59 @@ FWD_WMMA_PACKED_STRIDED_KNOBS = (
     (1, 8, 2, 2, 16, 1, 32, 2, True, False, False, True, False),
     (2, 4, 1, 2, 32, 2, 32, 2, True, False, False, True, False),
     (2, 4, 1, 4, 16, 1, 32, 2, True, False, False, True, False),
+)
+# direct_fwd_gstream_wmma (small groups, row-band walk): channels per group
+# baked (cpg == kpg) and its knob rows (waves_k, waves_p, tiles_k, tiles_p,
+# tile_w, walk, stages, phase_split, pf_depth). phase_split rows build at
+# stride 2 only; tile_w 8 with short walks serves the 7x7 / 8x8 maps. Blocks
+# of 128 output channels read 256-byte runs of each NHWC pixel (wide layers).
+FWD_GSTREAM_CHANNELS = (8, 16, 32, 64)
+FWD_GSTREAM_KNOBS = (
+    (1, 2, 2, 2, 8, 2, 2, False, 1),
+    (1, 2, 2, 2, 16, 4, 2, True, 1),
+    (2, 1, 2, 4, 16, 4, 2, False, 1),
+    (2, 1, 2, 4, 16, 4, 2, True, 1),
+    (2, 2, 2, 1, 16, 8, 2, False, 2),
+    (2, 2, 2, 1, 16, 8, 2, True, 2),
+    (2, 2, 2, 2, 8, 1, 2, False, 1),
+    (2, 2, 2, 2, 8, 2, 2, False, 1),
+    (2, 2, 2, 2, 8, 4, 2, False, 1),
+    (2, 2, 2, 2, 8, 4, 2, True, 1),
+    (2, 2, 2, 2, 16, 4, 2, False, 1),
+    (2, 2, 2, 2, 16, 4, 2, True, 1),
+    (2, 2, 2, 2, 16, 4, 2, True, 2),
+    (2, 2, 2, 2, 16, 8, 2, False, 2),
+    (2, 2, 2, 2, 16, 12, 2, True, 1),
+    (2, 2, 2, 2, 32, 4, 2, False, 1),
+    (2, 2, 4, 1, 8, 1, 2, False, 1),
+    (2, 2, 4, 1, 8, 2, 2, False, 1),
+    (2, 2, 4, 1, 8, 4, 2, False, 1),
+    (2, 2, 4, 1, 16, 4, 2, False, 1),
+    (2, 2, 4, 1, 16, 12, 2, False, 1),
+    (2, 2, 4, 1, 16, 12, 2, True, 1),
+    (2, 2, 4, 1, 16, 24, 2, True, 1),
+    (2, 2, 4, 1, 32, 12, 2, False, 1),
+    (4, 1, 2, 2, 16, 12, 2, True, 1),
+    (4, 1, 2, 4, 16, 4, 2, False, 1),
+    (4, 2, 2, 1, 8, 2, 2, False, 1),
+    (4, 2, 2, 1, 16, 12, 2, False, 1),
+    (4, 2, 2, 2, 16, 4, 2, False, 1),
+    (4, 2, 2, 2, 16, 12, 2, True, 1),
+)
+# Groups whose channels are not whole 32-channel k-steps / 16-row M tiles
+# (RegNet's 56): the last k-step and M tile are padded with zero weights, and
+# the padding output rows are not stored. Their own rows (all-K-wave blocks of
+# two groups hold the weights of one tile column in VGPRs).
+FWD_GSTREAM_PADG_CHANNELS = (56,)
+FWD_GSTREAM_PADG_KNOBS = (
+    (4, 1, 2, 4, 16, 4, 2, False, 1),
+    (4, 1, 2, 4, 16, 4, 2, True, 1),
+    (4, 1, 2, 4, 32, 4, 2, True, 1),
+    (8, 1, 2, 4, 16, 4, 2, False, 1),
+    (8, 1, 2, 4, 16, 4, 2, True, 1),
+    (8, 1, 2, 4, 32, 4, 2, False, 1),
+    (8, 1, 2, 4, 32, 4, 2, True, 1),
+    (8, 1, 2, 4, 32, 8, 2, True, 1),
 )
 FWD_WMMA_STRIDED_KNOBS = (
     (1, 4, 2, 2, 16, 1, 64, 2, True, False, False, True, False),
@@ -1451,6 +1505,15 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
         ),
     ),
+    # Small-group forward walking row bands (cpg == kpg baked), 3x3 "same".
+    _FWD_GSTREAM: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=3, PAD=1, stride=s, cpg=c, kpg=c)
+            for c in FWD_GSTREAM_CHANNELS + FWD_GSTREAM_PADG_CHANNELS
+            for s in _STRIDES
+        ),
+    ),
     _DW_FWD_WMMA: (
         "fwd",
         tuple(
@@ -1974,6 +2037,31 @@ def _knob_grid(
                 if sched:
                     knobs["sched"] = sched
                 yield knobs
+    elif variant == _FWD_GSTREAM:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        padded = caps is not None and caps.cpg not in FWD_GSTREAM_CHANNELS
+        for wk, wp, tk, tp, tw, walk, st, ps, pd in (
+            FWD_GSTREAM_PADG_KNOBS if padded else FWD_GSTREAM_KNOBS
+        ):
+            if ps and (caps is None or caps.stride != 2):
+                continue
+            knobs = dict(
+                waves_k=wk,
+                waves_p=wp,
+                tiles_k=tk,
+                tiles_p=tp,
+                tile_w=tw,
+                walk=walk,
+                stages=st,
+            )
+            if ps:
+                knobs["phase_split"] = True
+            if pd > 1:
+                knobs["pf_depth"] = pd
+            yield knobs
     elif variant == _DW_FWD_WMMA:
         from rocke.core.arch import ArchTarget
 

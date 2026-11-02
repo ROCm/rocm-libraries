@@ -1,0 +1,39 @@
+/* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ * rocke/instance_conv_fwd_wmma_tdm_internal.h -- PRIVATE TDM descriptor helper
+ * shared by the C++ ports of the wave32 WMMA forward families that stage
+ * tiles with rank-3 TDM transfers (conv_direct_fwd_gstream_wmma.cpp,
+ * conv_direct_fwd_tapouter_wmma.cpp). Declares no public API.
+ *
+ *   Python (conv_direct_fwd_wmma.py)               C++ (this header)
+ *   ---------------------------------------------   ------------------------------
+ *   _tdm_descriptor_3d(b, global_ptr, lds_addr,     rocke_fwd_tdm_descriptor_3d
+ *       dims, strides, tile0, tile1, tile2)
+ *
+ * The ops are emitted in the Python order (byte identity).
+ */
+#ifndef ROCKE_INSTANCE_CONV_FWD_WMMA_TDM_INTERNAL_H
+#define ROCKE_INSTANCE_CONV_FWD_WMMA_TDM_INTERNAL_H
+
+#include "rocke/ir.h"
+
+/* The five D# groups of a rank-3 TDM tile transfer of 2-byte elements:
+ * dimension 0 is contiguous, (s1, s2) are the element strides of dimensions
+ * 1 and 2, (d0, d1, d2) the extents left from global_ptr (the hardware
+ * zero-fills past them); the tile lands packed [tile2][tile1][tile0] at the
+ * i32 LDS byte address lds_addr. Writes out[0..4]. */
+void rocke_fwd_tdm_descriptor_3d(rocke_ir_builder_t* b,
+                                 rocke_value_t* global_ptr,
+                                 rocke_value_t* lds_addr,
+                                 rocke_value_t* d0,
+                                 rocke_value_t* d1,
+                                 rocke_value_t* d2,
+                                 rocke_value_t* s1,
+                                 rocke_value_t* s2,
+                                 int tile0,
+                                 int tile1,
+                                 rocke_value_t* tile2,
+                                 rocke_value_t* out[5]);
+
+#endif /* ROCKE_INSTANCE_CONV_FWD_WMMA_TDM_INTERNAL_H */
