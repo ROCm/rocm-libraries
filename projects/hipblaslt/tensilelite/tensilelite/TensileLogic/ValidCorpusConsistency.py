@@ -29,7 +29,6 @@ needs a documented, temporary exception, extend the known-bugs schema (see
 checks.
 """
 
-import re
 import sys
 
 from collections import defaultdict
@@ -216,7 +215,7 @@ def find_sibling_device_names_violations(
 
 
 _RR_KERNEL_PREFIX = "RR_GEMM_"
-_WGT_TOKEN = re.compile(r"_WGT_(\d+)x(\d+)x(\d+)_")
+_TILE_FIELDS = ("MacroTile0", "MacroTile1", "DepthU")
 
 
 def find_rocroller_macrotile_violations(
@@ -224,7 +223,7 @@ def find_rocroller_macrotile_violations(
     logic_root: Path,
 ) -> List[str]:
     """Check that each rocRoller custom kernel declares a usable ``macrotile``
-    that agrees with its own name.
+    that agrees with the solution's own tile.
 
     These kernels are pre-assembled objects captured at one tile. The size
     predicates that stop a kernel being handed a shape it was never captured
@@ -234,11 +233,12 @@ def find_rocroller_macrotile_violations(
     logic file at tuning time and is not reconciled against the assembly
     afterwards, which is what makes an independent check worth having.
 
-    The kernel's own name carries the same tile as a ``_WGT_<m>x<n>x<k>_``
-    token, so the two can be checked against each other without reading any
-    assembly. That catches a disagreement between them; it cannot catch both
-    copies being wrong in the same way, which is what the corpus predicate test
-    in ``Tests/unit/test_rocroller_predicate_corpus.py`` covers from the other
+    The same solution records its tile a second time as ``MacroTile0``,
+    ``MacroTile1`` and ``DepthU``, so the two can be checked against each
+    other without reading any assembly. That catches a disagreement between
+    them; it cannot catch both copies being wrong in the same way, which is
+    what the corpus predicate test in
+    ``Tests/unit/test_rocroller_predicate_corpus.py`` covers from the other
     end.
 
     Unlike the other checks here this one reads the ``Solutions`` list rather
@@ -293,20 +293,12 @@ def find_rocroller_macrotile_violations(
                 )
                 continue
 
-            token = _WGT_TOKEN.search(name)
-            if token is None:
-                violations.append(
-                    f"rocRoller macrotile violation: {where}: name carries no "
-                    "_WGT_<m>x<n>x<k>_ token to check the macrotile against"
-                )
-                continue
-
-            from_name = [int(group) for group in token.groups()]
-            if from_name != list(macrotile):
+            tile = [solution.get(field) for field in _TILE_FIELDS]
+            if tile != list(macrotile):
                 violations.append(
                     f"rocRoller macrotile violation: {where}: macrotile "
-                    f"{list(macrotile)} disagrees with the {from_name} in its "
-                    "own name"
+                    f"{list(macrotile)} disagrees with the solution's "
+                    f"{'/'.join(_TILE_FIELDS)} {tile}"
                 )
     return violations
 

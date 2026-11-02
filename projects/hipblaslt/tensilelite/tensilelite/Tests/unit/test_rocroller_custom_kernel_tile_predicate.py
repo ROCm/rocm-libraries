@@ -13,11 +13,24 @@ answers.
 N is deliberately unconstrained -- measured clean at N = 160, 192 and 320
 against a 128-wide tile -- because a predicate that rejects working sizes
 makes the kernels unreachable, which is the opposite failure.
+
+The family is the kernels whose custom.config declares Source.Origin
+rocroller, so these tests name kernels that are checked in.
 """
 
 import pytest
 
 from tensilelite.Contractions import ProblemPredicate
+from tensilelite.CustomKernels import customKernelOrigin, getAllCustomKernelNames
+
+_RR_KERNEL = "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x128x128_UR_2_WGM_"
+# A rocRoller capture that predates the RR_GEMM_ naming.
+_LEGACY_RR_KERNEL = (
+    "RRGEMM_TN_half_half_half_half_float_WGTS64x64x64_WGS128x2_WGMXCC0_LABufferToLDS_"
+    "LBBufferToLDS_SD1_LSABufferToVGPR_LSBBufferToVGPR_UNROLL0x0_SwizzleScale00_"
+    "SwizzleTileSize0x0X0x0_PF4x1m1_M_98fd6c3c16c08d0e"
+)
+_AITER_KERNEL = "_ZN5aiter24bf16gemm_bf16_tn_256x256E"
 
 
 M_TAG = "Free0SizeMultiple"
@@ -37,8 +50,8 @@ class _ProblemTypeStub:
         self.aType = _DataTypeStub()
 
 
-def _state(name="RR_GEMM_TN_FP8_FP8_Float_Float_Float_WGT_256x128x128_UR_2",
-           macrotile=(256, 128, 128), customKernel=True, **overrides):
+def _state(name=_RR_KERNEL, macrotile=(256, 128, 128), customKernel=True,
+           generated=False, **overrides):
     state = {
         "ProblemType": {
             "SwizzleTensorA": False,
@@ -60,6 +73,8 @@ def _state(name="RR_GEMM_TN_FP8_FP8_Float_Float_Float_WGT_256x128x128_UR_2",
     }
     if customKernel:
         state["CustomKernel"] = {"name": name, "macrotile": list(macrotile)}
+        if generated:
+            state["CustomKernel"]["generated"] = True
     state.update(overrides)
     return state
 
@@ -115,12 +130,45 @@ def test_non_custom_solutions_are_untouched():
     "Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgs_MT64x64x256",
     "wvSpltK_bf16_tn_m1",
     "Custom_Cijk_Alik_Bljk_BBS_BH_UserArgs",
+    _AITER_KERNEL,
 ])
 def test_other_custom_kernel_families_are_untouched(name):
-    """Scoped to RR_GEMM_ because that is the family that was measured. The
-    AITER and generated custom kernels keep their existing behaviour."""
+    """Scoped to the rocRoller captures because that is the family that was
+    measured. The AITER and generated custom kernels keep their existing
+    behaviour."""
     tags = _by_tag(_state(name=name))
     assert M_TAG not in tags and K_TAG not in tags
+
+
+def test_the_scope_is_the_origin_not_the_name():
+    # Named like the family but not a checked-in capture: no origin to read.
+    tags = _by_tag(_state(name="RR_GEMM_TN_FP8_FP8_Float_Float_Float_not_checked_in"))
+    assert M_TAG not in tags and BATCH_TAG not in tags
+    # A capture that does not follow the RR_GEMM_ naming is still one.
+    tags = _by_tag(_state(name=_LEGACY_RR_KERNEL, macrotile=(64, 64, 64)))
+    assert tags[M_TAG][0].value == 64 and tags[K_TAG][0].value == 64
+    assert BATCH_TAG in tags and BUFFER_TAG in tags
+
+
+def test_a_generated_kernel_is_untouched_whatever_it_is_called():
+    tags = _by_tag(_state(generated=True))
+    assert M_TAG not in tags and BATCH_TAG not in tags
+
+
+def test_origin_is_read_from_custom_config():
+    assert customKernelOrigin(_RR_KERNEL) == "rocroller"
+    assert customKernelOrigin(_LEGACY_RR_KERNEL) == "rocroller"
+    assert customKernelOrigin(_AITER_KERNEL) == "aiter"
+    assert customKernelOrigin("") is None
+    assert customKernelOrigin("no-such-kernel-anywhere") is None
+
+
+def test_every_checked_in_rr_gemm_kernel_is_a_rocroller_capture():
+    """The name and the origin describe the same family on the shipped corpus,
+    so keying on the origin dropped no RR_GEMM_ kernel from the predicates."""
+    names = [n for n in getAllCustomKernelNames() if n.startswith("RR_GEMM_")]
+    assert names
+    assert [n for n in names if customKernelOrigin(n) != "rocroller"] == []
 
 
 def test_a_unit_tile_emits_nothing():

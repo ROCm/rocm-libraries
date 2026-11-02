@@ -168,6 +168,25 @@ def isExternalCustomKernel(name, directory=None):
     return "Source" in config
 
 
+def customKernelOrigin(name, directory=None):
+    """The ``Source.Origin`` a captured kernel's ``custom.config`` declares.
+
+    ``None`` for a Tensile-generated kernel, which has no ``Source`` block, and
+    for a kernel whose metadata cannot be read, the same conservative reading
+    ``isExternalCustomKernel`` makes. ``getCustomKernelConfig`` drops
+    ``Source`` from the solution state, so a caller holding only the state asks
+    here.
+    """
+    if not name:
+        return None
+    try:
+        config = readCustomKernelConfig(name, directory)
+    except (RuntimeError, OSError):
+        return None
+    source = config.get("Source")
+    return source.get("Origin") if isinstance(source, dict) else None
+
+
 def mxScalesArePackedForSolutions(solutions, directory=None):
     """Whether the benchmark client should allocate MX scales with no padding.
 
@@ -671,18 +690,15 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     depthU = kernelConfig.get("DepthU", 0)
     macrotile = [mi[0] * wt[0] * wg[0], mi[1] * wt[1] * wg[1], depthU]
 
-    # Fallback: parse macrotile from kernel name if computed values are zero.
-    # rocRoller spells its workgroup tile WGT_<m>x<n>x<k> rather than
-    # MT<m>x<n>x<k>, and a captured rocRoller kernel carries no
-    # MatrixInstruction/DepthU for the computation above to use. The tile is
-    # load-bearing for Stream-K -- it is the divisor in every hoisted kernarg
-    # and it sizes the partial-tile workspace -- so a zero here must not
-    # survive.
+    # Fallback: parse macrotile from kernel name if computed values are zero
     if macrotile[0] == 0 or macrotile[1] == 0:
-        m = re.search(r'(?:MT|WGT_)(\d+)x(\d+)x(\d+)', kernelName)
+        m = re.search(r'MT(\d+)x(\d+)x(\d+)', kernelName)
         if m:
             macrotile = [int(m.group(1)), int(m.group(2)), int(m.group(3))]
 
+    # The tile is load-bearing for Stream-K -- it is the divisor in every
+    # hoisted kernarg and it sizes the partial-tile workspace -- so a zero here
+    # must not survive.
     if isRocRollerSK and (
         macrotile[0] <= 0 or macrotile[1] <= 0 or macrotile[2] <= 0
     ):
@@ -690,8 +706,8 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
             f"Custom kernel '{kernelName}' is a rocRoller Stream-K kernel but "
             f"its macrotile resolved to {macrotile}. Stream-K divides by the "
             f"macrotile to derive every hoisted kernarg, so it cannot be "
-            f"inferred later; give the kernel a WGT_<m>x<n>x<k> name or "
-            f"declare MatrixInstruction/MIWaveTile/DepthU in custom.config."
+            f"inferred later; declare a CustomKernel block with its macrotile, "
+            f"or MatrixInstruction/MIWaveTile/DepthU, in custom.config."
         )
 
     threads = [kernelMeta.get(".max_flat_workgroup_size", 256), 1, 1]
