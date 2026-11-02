@@ -1889,7 +1889,8 @@ _BAND_CASES = [
 
 # batch > 1 matters: a q-block that sits entirely past the keys must not read the next
 # batch's tokens, and with batch == 1 such an over-read lands in zero-filled
-# (out-of-range) memory, which hides it (the gfx950 start-tile bug found on #13125).
+# (out-of-range) memory, which hides it. gfx950 shipped exactly that bug: its
+# start-tile computation let a q-block past the keys read the next batch's tokens.
 # _check_band asserts the empty rows are exactly zero in every batch.
 _BAND_BATCH = 2
 
