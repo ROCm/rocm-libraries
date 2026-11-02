@@ -84,7 +84,7 @@ rocm_install(
 if(HIP_COMPILER STREQUAL "clang")
   rocm_export_targets(
     TARGETS hip::hipcub
-    DEPENDS PACKAGE rocprim
+    DEPENDS PACKAGE rocprim PACKAGE libhipcxx
     NAMESPACE hip::
   )
 else()
