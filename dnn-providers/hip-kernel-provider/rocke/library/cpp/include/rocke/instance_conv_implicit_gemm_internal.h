@@ -600,6 +600,8 @@ typedef struct rocke_conv_build_ctx
      * depth origin's -pD and one filter-depth step dD * A_stride_di. NULL on 2-D. */
     rocke_value_t* split_neg_pD;
     rocke_value_t* split_zstep;
+    /* _emit_fwd_kloops' c1 = b.const_i32(1) (the uniform-tap advance reads it). */
+    rocke_value_t* uk_c1;
 } rocke_conv_build_ctx_t;
 
 /* Python mul_u24: x * y with both operands masked to 24 bits so the backend

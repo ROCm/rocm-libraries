@@ -902,6 +902,41 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->m_band = idx == 70 ? 32 : 0;
         spec->split_k = idx == 71 ? 2 : 1;
         return 0;
+    case 75:
+    case 76:
+    case 77:
+    case 78:
+    case 79:
+    case 82:
+        if(make_cfg_3d(idx == 75 ? 70 : (idx == 78 || idx == 82) ? 71 : 55, spec, arch) != 0)
+            return -1;
+        spec->uniform_k_decode = true;
+        if(idx == 77)
+            spec->reg_prefetch = 2;
+        if(idx == 79)
+        {
+            spec->reg_prefetch = 1;
+            spec->lds_xor = true;
+        }
+        spec->uk_tap_fast = idx >= 77;
+        spec->uk_nopad = idx >= 77 && idx <= 79;
+        spec->fb_skip_empty = idx == 77 || idx == 78;
+        spec->uk_chunk_group = (idx == 79 || idx == 82) ? 2 : 0;
+        if(idx == 78)
+            spec->xcd_remap = 6;
+        return 0;
+    case 80:
+        if(make_cfg_3d_base(56, spec, arch) != 0)
+            return -1;
+        spec->uniform_k_decode = true;
+        spec->reg_prefetch = 1;
+        spec->lds_kpack_read = true;
+        return 0;
+    case 81:
+        if(make_cfg_3d_base(57, spec, arch) != 0)
+            return -1;
+        spec->uniform_k_decode = true;
+        return 0;
     case 72:
         if(make_cfg_3d_base(54, spec, arch) != 0)
             return -1;

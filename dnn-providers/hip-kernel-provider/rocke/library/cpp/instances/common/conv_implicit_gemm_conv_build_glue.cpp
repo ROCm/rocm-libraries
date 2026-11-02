@@ -1116,7 +1116,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
      *                                  affects schedule hints inside mfma)
      *   else (async)  -> kloop_async  (SoftwarePipeline.run_ping_pong over
      *                                  AsyncTileLoader; no scf.for_iter) */
-    if(spec->reg_prefetch)
+    if(spec->uniform_k_decode || spec->reg_prefetch)
     {
         /* The reg_prefetch K loops (Python _emit_fwd_kloops). */
         rocke_conv_emit_fwd_kloops(&ctx);

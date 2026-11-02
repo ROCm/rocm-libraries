@@ -251,6 +251,23 @@ typedef struct rocke_implicit_gemm_conv_spec
     /* lds_xor_rowkey: key the k-packed lds_xor swizzle of tile_k 32 on the
      * row itself (not the 128-byte span). */
     bool lds_xor_rowkey; /* default false */
+
+    /* Uniform-tap K loop (uniform_k_decode): when cpg % tile_k == 0 the tile's
+     * channel base and filter tap are carried as uniform counters, so the
+     * per-element k decode disappears; otherwise the plain fallback loop. */
+    bool uniform_k_decode; /* default false */
+    /* uk_tap_fast: the 3-D uniform-tap loop walks the filter taps fastest and
+     * the channel chunk outermost. */
+    bool uk_tap_fast; /* default false */
+    /* uk_nopad: the uniform-tap loop without the per-element bounds checks
+     * (unpadded / halo-form input; only the tap-range check stays). */
+    bool uk_nopad; /* default false */
+    /* uk_chunk_group (power of two >= 2, uk_tap_fast only): chunks fastest
+     * inside a group of that many, then the tap, then the next group. */
+    int uk_chunk_group; /* default 0 */
+    /* fb_skip_empty: the uniform_k_decode kernels' fallback loop skips its
+     * prologue load when its range is empty. */
+    bool fb_skip_empty; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

@@ -455,18 +455,25 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     ROCKE_FLAG(s->cshuffle_no_alias, "noalc");
     /* unroll_k: a different K-loop body under the same name otherwise. */
     ROCKE_FLAG(s->unroll_k, "unroll");
-    ROCKE_FLAG(0, "ukd");
+    ROCKE_FLAG(s->uniform_k_decode, "ukd");
     ROCKE_FLAG(s->reg_prefetch > 0, "rpf%d", s->reg_prefetch);
     ROCKE_FLAG(s->xcd_remap > 0, "xcd%d", s->xcd_remap);
     ROCKE_FLAG(s->lds_xor, "lxor");
-    /* (pfr, spt, sakd, adir, tapf, cg, lah, dfr, vmi: Python-only, off.) */
+    /* (pfr, spt, sakd, adir: Python-only, off.) */
+    ROCKE_FLAG(s->uk_tap_fast, "tapf");
+    ROCKE_FLAG(s->uk_chunk_group > 0, "cg%d", s->uk_chunk_group);
+    /* (lah, dfr, vmi: Python-only, off.) */
     ROCKE_FLAG(s->lds_kpack_read, "kprd");
     /* (lbar, flate, uxh, xdpp, prio, pp, ppm, ppbd: Python-only, off.) */
     ROCKE_FLAG(s->lds_xor_rowkey, "lxrk");
-    /* (mch, xws, saa, sapl, sapf, esf, skx, fsk, sfs, szf, xsub, ppfd, fbse,
-     *  ppeg, elb, shy, mss, stc, sdet, psf, nag: Python-only knobs, off.) */
+    /* (mch, xws, saa, sapl, sapf, esf, skx, fsk, sfs, szf, xsub, ppfd:
+     *  Python-only knobs, off.) */
+    ROCKE_FLAG(s->fb_skip_empty, "fbse");
+    /* (ppeg, elb, shy, mss, stc, sdet, psf, nag: Python-only knobs, off.) */
     ROCKE_FLAG(s->m_band > 0, "mb%d", s->m_band);
-    /* (xsm, fxd, xyr, eqx, nopad, dpw: Python-only knobs, off here.) */
+    /* (xsm, fxd, xyr, eqx: Python-only knobs, off here.) */
+    ROCKE_FLAG(s->uk_nopad, "nopad");
+    /* (dpw: Python-only, off.) */
     /* The occupancy target changes the register allocation. */
     ROCKE_FLAG(s->has_waves_per_eu, "wpe%d", s->waves_per_eu);
     /* Gm changes the emitted body, so it must reach the symbol: without it two
@@ -1109,12 +1116,17 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
 {
     if(s->xcd_remap < 0)
         ROCKE_SPEC_FAIL(reason, reason_cap, "xcd_remap must be >= 0");
+    /* _fwd_kloop_sched_conflict */
+    if(s->uk_nopad && !s->uniform_k_decode)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "uk_nopad drops the bounds checks of the uniform_k_decode loop only");
     if(s->xcd_remap && s->chiplet_swizzle)
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "xcd_remap and chiplet_swizzle both remap the grid; set one");
     if(s->m_band < 0 || (s->m_band && !s->xcd_remap))
         ROCKE_SPEC_FAIL(reason, reason_cap, "m_band needs xcd_remap");
-    const bool kloops = s->reg_prefetch != 0; /* uniform_k_decode: not ported */
+    const bool kloops = s->uniform_k_decode || s->reg_prefetch != 0;
     if(s->lds_xor)
     {
         if(!kloops)
@@ -1126,6 +1138,23 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
             ROCKE_SPEC_FAIL(reason,
                             reason_cap,
                             "lds_xor needs tile_k >= 32 and the default (unpadded) LDS layout");
+    }
+    if(s->uk_tap_fast && !(s->uniform_k_decode && s->problem.is_3d))
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "uk_tap_fast reorders the 3-D uniform_k_decode loop only");
+    if(s->uk_chunk_group)
+    {
+        const int g = s->uk_chunk_group;
+        if(!s->uk_tap_fast)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "uk_chunk_group groups the chunks of the uk_tap_fast order only");
+        if(g < 2 || (g & (g - 1)))
+            ROCKE_SPEC_FAIL(reason, reason_cap, "uk_chunk_group must be a power of two >= 2");
+        if(s->split_k > 1) /* the uk_nopad rpf_pingpong loops only (not ported) */
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "uk_chunk_group with split_k: the uk_nopad rpf_pingpong loops only");
     }
     if(s->lds_xor_rowkey && !(s->lds_xor && s->lds_kpack_read && s->tile_k == 32))
         ROCKE_SPEC_FAIL(reason,
@@ -1142,6 +1171,9 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
             ROCKE_SPEC_FAIL(
                 reason, reason_cap, "lds_kpack_read needs an even number of kk steps per tile");
     }
+    if(s->fb_skip_empty && !s->uniform_k_decode)
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "fb_skip_empty guards the uniform_k_decode kernels' fallback loop");
     if(s->reg_prefetch < 0 || s->reg_prefetch > 2)
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "reg_prefetch must be 0, 1 or 2, got %d", s->reg_prefetch);
@@ -1163,6 +1195,10 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
                         "uniform_k_decode/reg_prefetch are not implemented with group_merge");
+    if(s->uniform_k_decode && rocke_conv_problem_is_pointwise(&s->problem))
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "uniform_k_decode: the pointwise fast path has no filter tap to decode");
     return true;
 }
 

@@ -23,6 +23,7 @@
 #include "rocke/arena.h"
 
 #include <stdio.h>
+#include <string.h>
 
 /* ----- shared small helper: copy a working acc array into ctx->final_accs ----
  * Python sets `final_accs = current_accs` (or `for_op.results`); in C the
@@ -609,10 +610,10 @@ void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx)
 }
 
 /* ===================================================================== *
- * rocke_conv_emit_fwd_kloops -- Python _emit_fwd_kloops, the plain "k" loop
- * (uniform_k_decode off): run_loop(k_lo, k_hi, accs, [], plain_fetch,
- * plain_adv, "k") for reg_prefetch 1 and 2. A prefetch past the end of the
- * reduction addresses k >= K_gemm and loads zeros without touching memory.
+ * rocke_conv_emit_fwd_kloops -- Python _emit_fwd_kloops: the reg_prefetch /
+ * uniform_k_decode K loops (run_loop), the uniform-tap loop and its plain
+ * fallback. A prefetch past the end of the reduction addresses an
+ * out-of-range tap / k and loads zeros without touching memory.
  * ===================================================================== */
 typedef struct
 {
@@ -620,15 +621,259 @@ typedef struct
     rocke_ctl_staged_t b;
 } conv_rpf_staged_t;
 
-/* plain_fetch(k): k_off_capture = k; fetch(a_descriptor, b_descriptor). */
-static void conv_rpf_fetch(rocke_conv_build_ctx_t* ctx, rocke_value_t* k, conv_rpf_staged_t* st)
+#define CONV_UK_MAX_STATE 4
+
+/* The uniform-tap loop's build-time state (Python closures of the uk section). */
+typedef struct
+{
+    rocke_conv_build_ctx_t* ctx;
+    bool is3;
+    rocke_value_t* a_ystep;
+    rocke_value_t* a_xstep;
+    rocke_value_t* a_zstep;
+    rocke_value_t* a_gbase;
+    /* uk_cap[0] = tile_uniforms(st) */
+    rocke_value_t* hsh;
+    rocke_value_t* wsh;
+    rocke_value_t* dsh;
+    rocke_value_t* a_off;
+    rocke_value_t* b_off;
+    rocke_value_t* t_ok;
+} conv_uk_t;
+
+/* Python a_uk(b_, row, col). */
+static rocke_value_t* conv_uk_a_desc(rocke_ir_builder_t* b,
+                                     rocke_value_t* row,
+                                     rocke_value_t* col,
+                                     rocke_value_t** out_valid,
+                                     void* user)
+{
+    conv_uk_t* u = (conv_uk_t*)user;
+    rocke_conv_build_ctx_t* ctx = u->ctx;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
+    rocke_value_t *q_wo, *wo, *q_ho, *ho, *n, *do_ = NULL;
+    rocke_conv_magic_divmod(
+        b, m_val, ctx->p_magic_m_Wo_mult, ctx->p_magic_m_Wo_shift, ctx->p_Wo, false, &q_wo, &wo);
+    rocke_conv_magic_divmod(
+        b, q_wo, ctx->p_magic_m_Ho_mult, ctx->p_magic_m_Ho_shift, ctx->p_Ho, false, &q_ho, &ho);
+    if(u->is3)
+        rocke_conv_magic_divmod(
+            b, q_ho, ctx->p_magic_m_Do_mult, ctx->p_magic_m_Do_shift, ctx->p_Do, false, &n, &do_);
+    else
+        n = q_ho;
+    rocke_value_t* hi0 = rocke_b_sub(b, rocke_b_mul(b, ho, ctx->p_sH), ctx->p_pH);
+    rocke_value_t* wi0 = rocke_b_sub(b, rocke_b_mul(b, wo, ctx->p_sW), ctx->p_pW);
+    rocke_value_t* n_off = rocke_b_mul(b, n, ctx->p_A_stride_n);
+    rocke_value_t* h_off = rocke_b_mul(b, hi0, ctx->p_A_stride_hi);
+    rocke_value_t* base = rocke_b_add(b, n_off, h_off);
+    base = rocke_b_add(b, base, rocke_b_mul(b, wi0, ctx->p_A_stride_wi));
+    if(spec->uk_nopad)
+    {
+        /* Unpadded: every tap of an output pixel is in range; only the
+         * tap-range check of the prefetch past the end stays. */
+        if(u->is3)
+        {
+            rocke_value_t* di0 = rocke_b_sub(b, rocke_b_mul(b, do_, ctx->p_sD), ctx->p_pD);
+            base = rocke_b_add(b, base, rocke_b_mul(b, di0, ctx->p_A_stride_di));
+        }
+        if(u->a_gbase != NULL)
+            base = rocke_b_add(b, base, u->a_gbase);
+        *out_valid = u->t_ok;
+        return rocke_b_add(b, rocke_b_add(b, base, col), u->a_off);
+    }
+    /* (u32)(origin + shift) < extent  <=>  0 <= origin + shift < extent */
+    rocke_value_t* h_ok = rocke_b_cmp_ult(b, rocke_b_add(b, hi0, u->hsh), ctx->p_Hi);
+    rocke_value_t* w_ok = rocke_b_cmp_ult(b, rocke_b_add(b, wi0, u->wsh), ctx->p_Wi);
+    rocke_value_t* ok = rocke_b_land(b, h_ok, w_ok);
+    if(u->is3)
+    {
+        rocke_value_t* di0 = rocke_b_sub(b, rocke_b_mul(b, do_, ctx->p_sD), ctx->p_pD);
+        base = rocke_b_add(b, base, rocke_b_mul(b, di0, ctx->p_A_stride_di));
+        rocke_value_t* d_ok = rocke_b_cmp_ult(b, rocke_b_add(b, di0, u->dsh), ctx->p_Di);
+        ok = rocke_b_land(b, ok, d_ok);
+    }
+    if(u->a_gbase != NULL)
+        base = rocke_b_add(b, base, u->a_gbase);
+    ok = rocke_b_land(b, ok, u->t_ok);
+    *out_valid = ok;
+    return rocke_b_add(b, rocke_b_add(b, base, col), u->a_off);
+}
+
+/* Python b_uk(b_, row, col) (epi_quad_xpose's channel permutation: identity). */
+static rocke_value_t* conv_uk_b_desc(rocke_ir_builder_t* b,
+                                     rocke_value_t* row,
+                                     rocke_value_t* col,
+                                     rocke_value_t** out_valid,
+                                     void* user)
+{
+    conv_uk_t* u = (conv_uk_t*)user;
+    rocke_conv_build_ctx_t* ctx = u->ctx;
+    rocke_value_t* k_out = rocke_b_add(b, ctx->block_n_off_v, row);
+    if(ctx->k_out_group_base != NULL)
+        k_out = rocke_b_add(b, ctx->k_out_group_base, k_out);
+    rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, k_out, ctx->p_B_stride_k), col);
+    off = rocke_b_add(b, off, u->b_off);
+    *out_valid = u->t_ok;
+    return off;
+}
+
+/* Python tile_uniforms(st), st = (c, x, y[, z]). */
+static void conv_uk_tile_uniforms(conv_uk_t* u, rocke_value_t* const* st)
+{
+    rocke_conv_build_ctx_t* ctx = u->ctx;
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* c_t = st[0];
+    rocke_value_t* x_t = st[1];
+    rocke_value_t* y_t = st[2];
+    u->hsh = rocke_b_mul(b, y_t, ctx->p_dH);
+    u->wsh = rocke_b_mul(b, x_t, ctx->p_dW);
+    rocke_value_t* ay = rocke_b_mul(b, y_t, u->a_ystep);
+    rocke_value_t* ax = rocke_b_mul(b, x_t, u->a_xstep);
+    u->a_off = rocke_b_add(b, rocke_b_add(b, ay, ax), c_t);
+    rocke_value_t* by = rocke_b_mul(b, y_t, ctx->p_B_stride_y);
+    rocke_value_t* bx = rocke_b_mul(b, x_t, ctx->p_B_stride_x);
+    u->b_off = rocke_b_add(b, rocke_b_add(b, by, bx), c_t);
+    if(u->is3)
+    {
+        rocke_value_t* z_t = st[3];
+        u->dsh = rocke_b_mul(b, z_t, ctx->p_dD);
+        u->a_off = rocke_b_add(b, u->a_off, rocke_b_mul(b, z_t, u->a_zstep));
+        u->b_off = rocke_b_add(b, u->b_off, rocke_b_mul(b, z_t, ctx->p_B_stride_z));
+        u->t_ok = rocke_b_cmp_lt(b, z_t, ctx->p_Z);
+    }
+    else
+    {
+        u->dsh = NULL;
+        u->t_ok = rocke_b_cmp_lt(b, y_t, ctx->p_Y);
+    }
+}
+
+/* Python uk_adv(st): the next tile's (c, x, y[, z]). */
+static void conv_uk_adv(conv_uk_t* u, rocke_value_t* const* st, rocke_value_t** out)
+{
+    rocke_conv_build_ctx_t* ctx = u->ctx;
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    rocke_value_t* c0 = ctx->c0;
+    rocke_value_t* c_t = st[0];
+    rocke_value_t* x_t = st[1];
+    rocke_value_t* y_t = st[2];
+    rocke_value_t* z_t = u->is3 ? st[3] : NULL;
+    if(spec->uk_tap_fast && spec->uk_chunk_group)
+    {
+        /* Chunks fastest inside a group of uk_chunk_group chunks, then the
+         * tap (x, y, z), then the next group. */
+        rocke_value_t* c_gspan = rocke_b_const_i32(b, spec->uk_chunk_group * ctx->block_k);
+        rocke_value_t* c_gmask = rocke_b_const_i32(b, spec->uk_chunk_group * ctx->block_k - 1);
+        rocke_value_t* nc = rocke_b_add(b, c_t, ctx->c_block_k);
+        rocke_value_t* e1 = rocke_b_cmp_eq(b, rocke_b_land(b, nc, c_gmask), c0);
+        rocke_value_t* w_c = rocke_b_lor(b, e1, rocke_b_cmp_ge(b, nc, ctx->p_cpg));
+        nc = rocke_b_select(b, w_c, rocke_b_sub(b, c_t, rocke_b_land(b, c_t, c_gmask)), nc);
+        rocke_value_t* nx = rocke_b_add(b, x_t, rocke_b_select(b, w_c, ctx->uk_c1, c0));
+        rocke_value_t* w_x = rocke_b_cmp_ge(b, nx, ctx->p_X);
+        nx = rocke_b_select(b, w_x, c0, nx);
+        rocke_value_t* ny = rocke_b_add(b, y_t, rocke_b_select(b, w_x, ctx->uk_c1, c0));
+        rocke_value_t* w_y = rocke_b_cmp_ge(b, ny, ctx->p_Y);
+        ny = rocke_b_select(b, w_y, c0, ny);
+        rocke_value_t* nz = rocke_b_add(b, z_t, rocke_b_select(b, w_y, ctx->uk_c1, c0));
+        rocke_value_t* w_z = rocke_b_cmp_ge(b, nz, ctx->p_Z);
+        nz = rocke_b_select(b, w_z, c0, nz);
+        nc = rocke_b_add(b, nc, rocke_b_select(b, w_z, c_gspan, c0));
+        nz = rocke_b_select(b, rocke_b_cmp_ge(b, nc, ctx->p_cpg), ctx->p_Z, nz);
+        out[0] = nc;
+        out[1] = nx;
+        out[2] = ny;
+        out[3] = nz;
+        return;
+    }
+    if(spec->uk_tap_fast)
+    {
+        /* Filter taps fastest, channel chunk outermost. */
+        rocke_value_t* nx = rocke_b_add(b, x_t, ctx->uk_c1);
+        rocke_value_t* w_x = rocke_b_cmp_ge(b, nx, ctx->p_X);
+        nx = rocke_b_select(b, w_x, c0, nx);
+        rocke_value_t* ny = rocke_b_add(b, y_t, rocke_b_select(b, w_x, ctx->uk_c1, c0));
+        rocke_value_t* w_y = rocke_b_cmp_ge(b, ny, ctx->p_Y);
+        ny = rocke_b_select(b, w_y, c0, ny);
+        rocke_value_t* nz = rocke_b_add(b, z_t, rocke_b_select(b, w_y, ctx->uk_c1, c0));
+        rocke_value_t* w_z = rocke_b_cmp_ge(b, nz, ctx->p_Z);
+        nz = rocke_b_select(b, w_z, c0, nz);
+        rocke_value_t* nc = rocke_b_add(b, c_t, rocke_b_select(b, w_z, ctx->c_block_k, c0));
+        /* Past the end: park on an out-of-range tap (z = Z). */
+        nz = rocke_b_select(b, rocke_b_cmp_ge(b, nc, ctx->p_cpg), ctx->p_Z, nz);
+        out[0] = nc;
+        out[1] = nx;
+        out[2] = ny;
+        out[3] = nz;
+        return;
+    }
+    rocke_value_t* nc = rocke_b_add(b, c_t, ctx->c_block_k);
+    rocke_value_t* w_c = rocke_b_cmp_ge(b, nc, ctx->p_cpg);
+    nc = rocke_b_select(b, w_c, c0, nc);
+    rocke_value_t* nx = rocke_b_add(b, x_t, rocke_b_select(b, w_c, ctx->uk_c1, c0));
+    rocke_value_t* w_x = rocke_b_cmp_ge(b, nx, ctx->p_X);
+    nx = rocke_b_select(b, w_x, c0, nx);
+    rocke_value_t* ny = rocke_b_add(b, y_t, rocke_b_select(b, w_x, ctx->uk_c1, c0));
+    out[0] = nc;
+    out[1] = nx;
+    out[2] = ny;
+    if(!u->is3)
+        return;
+    rocke_value_t* w_y = rocke_b_cmp_ge(b, ny, ctx->p_Y);
+    ny = rocke_b_select(b, w_y, c0, ny);
+    rocke_value_t* nz = rocke_b_add(b, z_t, rocke_b_select(b, w_y, ctx->uk_c1, c0));
+    out[2] = ny;
+    out[3] = nz;
+}
+
+/* The run_loop "fetch_tile" / "advance" pair: plain (u == NULL) or uniform-tap. */
+static void conv_kl_fetch(rocke_conv_build_ctx_t* ctx,
+                          conv_uk_t* u,
+                          rocke_value_t* k,
+                          rocke_value_t* const* state,
+                          conv_rpf_staged_t* st)
 {
     rocke_ir_builder_t* b = ctx->b;
-    ctx->k_off_capture = k;
+    if(u == NULL)
+    {
+        /* plain_fetch: k_off_capture = k; fetch(a_descriptor, b_descriptor) */
+        ctx->k_off_capture = k;
+        rocke_coalesced_tile_loader_load_global(b,
+                                                &ctx->a_sync_loader,
+                                                ctx->tid,
+                                                rocke_conv_a_descriptor,
+                                                ctx,
+                                                ctx->a_rsrc,
+                                                NULL,
+                                                &st->a);
+        rocke_coalesced_tile_loader_load_global(b,
+                                                &ctx->b_sync_loader,
+                                                ctx->tid,
+                                                rocke_conv_b_descriptor,
+                                                ctx,
+                                                ctx->b_rsrc,
+                                                NULL,
+                                                &st->b);
+        return;
+    }
+    /* uk_fetch: uk_cap[0] = tile_uniforms(st); fetch(a_uk, b_uk) */
+    conv_uk_tile_uniforms(u, state);
     rocke_coalesced_tile_loader_load_global(
-        b, &ctx->a_sync_loader, ctx->tid, rocke_conv_a_descriptor, ctx, ctx->a_rsrc, NULL, &st->a);
+        b, &ctx->a_sync_loader, ctx->tid, conv_uk_a_desc, u, ctx->a_rsrc, NULL, &st->a);
     rocke_coalesced_tile_loader_load_global(
-        b, &ctx->b_sync_loader, ctx->tid, rocke_conv_b_descriptor, ctx, ctx->b_rsrc, NULL, &st->b);
+        b, &ctx->b_sync_loader, ctx->tid, conv_uk_b_desc, u, ctx->b_rsrc, NULL, &st->b);
+}
+
+static void conv_kl_adv(conv_uk_t* u, rocke_value_t* const* st, int n_state, rocke_value_t** out)
+{
+    if(u == NULL)
+    {
+        for(int i = 0; i < n_state; ++i)
+            out[i] = st[i];
+        return;
+    }
+    conv_uk_adv(u, st, out);
 }
 
 /* store(staged, A_dst, B_dst): the loaders' LDS stores, or the lds_xor
@@ -660,51 +905,104 @@ static void conv_rpf_store(rocke_conv_build_ctx_t* ctx,
     }
 }
 
-void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
+/* Python run_loop(lo, hi, accs_in, state_in, fetch_tile, advance, tag). */
+static void conv_run_loop(rocke_conv_build_ctx_t* ctx,
+                          rocke_value_t* lo,
+                          rocke_value_t* hi,
+                          rocke_value_t* const* accs_in,
+                          const char* const* state_names,
+                          rocke_value_t* const* state_in,
+                          int n_state,
+                          conv_uk_t* u,
+                          const char* tag,
+                          rocke_value_t** out_accs)
 {
     rocke_ir_builder_t* b = ctx->b;
     const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
     const int n_acc = ctx->num_accs;
     const int block_k = ctx->block_k;
-    rocke_value_t* lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
-    rocke_value_t* hi = (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm;
     conv_rpf_staged_t* st
         = (conv_rpf_staged_t*)rocke_arena_alloc(&b->arena, sizeof(conv_rpf_staged_t));
     if(st == NULL)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv rpf: arena alloc failed");
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv run_loop: arena alloc failed");
         return;
     }
-    (void)rocke_b_const_i32(b, 1); /* c1 = b.const_i32(1) */
-
-    rocke_iter_arg_t it[ROCKE_CONV_MAX_ACCS];
-    rocke_value_t* iv[ROCKE_CONV_MAX_ACCS];
-    rocke_value_t* acc_a[ROCKE_CONV_MAX_ACCS];
-    rocke_value_t* acc_b[ROCKE_CONV_MAX_ACCS];
-    char nbuf[64];
-
-    /* Prologue: tile `lo` into buffer 0, published. */
-    conv_rpf_fetch(ctx, lo, st);
-    conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
-    rocke_b_sync(b);
+    rocke_iter_arg_t it[ROCKE_CONV_MAX_ACCS + CONV_UK_MAX_STATE];
+    rocke_value_t* iv[ROCKE_CONV_MAX_ACCS + CONV_UK_MAX_STATE];
+    rocke_value_t* acc_a[ROCKE_CONV_MAX_ACCS + CONV_UK_MAX_STATE];
+    rocke_value_t* acc_b[ROCKE_CONV_MAX_ACCS + CONV_UK_MAX_STATE];
+    rocke_value_t* st1[CONV_UK_MAX_STATE];
+    rocke_value_t* st2[CONV_UK_MAX_STATE];
+    char nbuf[96];
+    char ivn[32];
 
     for(int i = 0; i < n_acc; ++i)
     {
-        snprintf(nbuf, sizeof(nbuf), "k_%s", ctx->acc_names[i]);
+        snprintf(nbuf, sizeof(nbuf), "%s_%s", tag, ctx->acc_names[i]);
         it[i].name = rocke_arena_strdup(&b->arena, nbuf);
-        it[i].init = ctx->acc_inits[i];
+        it[i].init = accs_in[i];
+    }
+    for(int i = 0; i < n_state; ++i)
+    {
+        snprintf(nbuf, sizeof(nbuf), "%s_%s", tag, state_names[i]);
+        it[n_acc + i].name = rocke_arena_strdup(&b->arena, nbuf);
+        it[n_acc + i].init = state_in[i];
+    }
+    snprintf(ivn, sizeof(ivn), "%s_k", tag);
+
+    if(!spec->reg_prefetch)
+    {
+        rocke_for_t f = rocke_b_scf_for_iter(
+            b, lo, hi, ctx->c_block_k, it, n_acc + n_state, rocke_arena_strdup(&b->arena, ivn), false, true);
+        for(int i = 0; i < f.num_iter_vars; ++i)
+            iv[i] = f.iter_vars[i];
+        rocke_b_region_enter(b, f.body);
+        {
+            conv_kl_fetch(ctx, u, f.iv, iv + n_acc, st);
+            conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
+            rocke_b_sync(b);
+            rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iv, n_acc, acc_a);
+            rocke_b_sync(b);
+            conv_kl_adv(u, iv + n_acc, n_state, acc_a + n_acc);
+            rocke_b_scf_yield(b, acc_a, n_acc + n_state);
+        }
+        rocke_b_region_leave(b);
+        for(int i = 0; i < n_acc; ++i)
+            out_accs[i] = f.op->results[i];
+        return;
+    }
+
+    /* Prologue: tile `lo` into buffer 0, published. The fallback loop of a
+     * fb_skip_empty kernel only runs it when its range is not empty. */
+    if(spec->fb_skip_empty && strcmp(tag, "fb") == 0)
+    {
+        rocke_if_t if_op = rocke_b_scf_if(b, rocke_b_cmp_lt(b, lo, hi));
+        rocke_b_region_enter(b, if_op.then_region);
+        conv_kl_fetch(ctx, u, lo, state_in, st);
+        conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
+        rocke_b_sync(b);
+        rocke_b_region_leave(b);
+    }
+    else
+    {
+        conv_kl_fetch(ctx, u, lo, state_in, st);
+        conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
+        rocke_b_sync(b);
     }
 
     if(spec->reg_prefetch == 1)
     {
         /* One buffer: read tile t+1 into registers, MFMA tile t, retire every
          * wave's ds_reads, then overwrite the buffer and publish. */
-        rocke_for_t f = rocke_b_scf_for_iter(b, lo, hi, ctx->c_block_k, it, n_acc, "k_k", false, true);
+        rocke_for_t f = rocke_b_scf_for_iter(
+            b, lo, hi, ctx->c_block_k, it, n_acc + n_state, rocke_arena_strdup(&b->arena, ivn), false, true);
         for(int i = 0; i < f.num_iter_vars; ++i)
             iv[i] = f.iter_vars[i];
         rocke_b_region_enter(b, f.body);
         {
-            conv_rpf_fetch(ctx, rocke_b_add(b, f.iv, ctx->c_block_k), st);
+            conv_kl_adv(u, iv + n_acc, n_state, st1);
+            conv_kl_fetch(ctx, u, rocke_b_add(b, f.iv, ctx->c_block_k), st1, st);
             rocke_b_sched_barrier(b, 0);
             ctx->k_off_capture = f.iv;
             rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iv, n_acc, acc_a);
@@ -712,10 +1010,13 @@ void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
             rocke_b_sync(b);
             conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
             rocke_b_sync(b);
-            rocke_b_scf_yield(b, acc_a, n_acc);
+            for(int i = 0; i < n_state; ++i)
+                acc_a[n_acc + i] = st1[i];
+            rocke_b_scf_yield(b, acc_a, n_acc + n_state);
         }
         rocke_b_region_leave(b);
-        rocke_conv_set_final_accs(ctx, f.op->results, n_acc);
+        for(int i = 0; i < n_acc; ++i)
+            out_accs[i] = f.op->results[i];
         return;
     }
 
@@ -730,13 +1031,15 @@ void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
     rocke_value_t* pair_hi = rocke_b_add(b, lo, rocke_b_mul(b, n_pairs, c_2bk));
     rocke_value_t* tail_hi = rocke_b_add(b, lo, rocke_b_mul(b, n_tiles, ctx->c_block_k));
 
-    rocke_for_t f = rocke_b_scf_for_iter(b, lo, pair_hi, c_2bk, it, n_acc, "k_k", false, true);
+    rocke_for_t f = rocke_b_scf_for_iter(
+        b, lo, pair_hi, c_2bk, it, n_acc + n_state, rocke_arena_strdup(&b->arena, ivn), false, true);
     for(int i = 0; i < f.num_iter_vars; ++i)
         iv[i] = f.iter_vars[i];
     rocke_b_region_enter(b, f.body);
     {
         rocke_value_t* k1 = rocke_b_add(b, f.iv, ctx->c_block_k);
-        conv_rpf_fetch(ctx, k1, st);
+        conv_kl_adv(u, iv + n_acc, n_state, st1);
+        conv_kl_fetch(ctx, u, k1, st1, st);
         rocke_b_sched_barrier(b, 0);
         ctx->k_off_capture = f.iv;
         rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, iv, n_acc, acc_a);
@@ -744,25 +1047,30 @@ void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
         conv_rpf_store(ctx, st, ctx->A_smem2, ctx->B_smem2);
         rocke_b_sync(b);
         rocke_value_t* k2 = rocke_b_add(b, f.iv, c_2bk);
-        conv_rpf_fetch(ctx, k2, st);
+        conv_kl_adv(u, st1, n_state, st2);
+        conv_kl_fetch(ctx, u, k2, st2, st);
         rocke_b_sched_barrier(b, 0);
         ctx->k_off_capture = k1;
         rocke_conv_emit_mfma_phase(ctx, ctx->A_smem2, ctx->B_smem2, acc_a, n_acc, acc_b);
         rocke_b_sched_barrier(b, 0);
         conv_rpf_store(ctx, st, ctx->A_smem, ctx->B_smem);
         rocke_b_sync(b);
-        rocke_b_scf_yield(b, acc_b, n_acc);
+        for(int i = 0; i < n_state; ++i)
+            acc_b[n_acc + i] = st2[i];
+        rocke_b_scf_yield(b, acc_b, n_acc + n_state);
     }
     rocke_b_region_leave(b);
 
     rocke_iter_arg_t tit[ROCKE_CONV_MAX_ACCS];
     for(int i = 0; i < n_acc; ++i)
     {
-        snprintf(nbuf, sizeof(nbuf), "k_t_%s", ctx->acc_names[i]);
+        snprintf(nbuf, sizeof(nbuf), "%s_t_%s", tag, ctx->acc_names[i]);
         tit[i].name = rocke_arena_strdup(&b->arena, nbuf);
         tit[i].init = f.op->results[i];
     }
-    rocke_for_t t = rocke_b_scf_for_iter(b, pair_hi, tail_hi, ctx->c_block_k, tit, n_acc, "k_kt", false, true);
+    snprintf(ivn, sizeof(ivn), "%s_kt", tag);
+    rocke_for_t t = rocke_b_scf_for_iter(
+        b, pair_hi, tail_hi, ctx->c_block_k, tit, n_acc, rocke_arena_strdup(&b->arena, ivn), false, true);
     for(int i = 0; i < t.num_iter_vars; ++i)
         iv[i] = t.iter_vars[i];
     rocke_b_region_enter(b, t.body);
@@ -773,5 +1081,99 @@ void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
         rocke_b_scf_yield(b, acc_a, n_acc);
     }
     rocke_b_region_leave(b);
-    rocke_conv_set_final_accs(ctx, t.op->results, n_acc);
+    for(int i = 0; i < n_acc; ++i)
+        out_accs[i] = t.op->results[i];
+}
+
+void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    const int n_acc = ctx->num_accs;
+    rocke_value_t* c0 = ctx->c0;
+    rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+    rocke_value_t* k_hi = (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm;
+    rocke_value_t* accs0[ROCKE_CONV_MAX_ACCS] = {};
+    rocke_value_t* res[ROCKE_CONV_MAX_ACCS] = {};
+    for(int i = 0; i < n_acc; ++i)
+        accs0[i] = ctx->acc_inits[i];
+
+    ctx->uk_c1 = rocke_b_const_i32(b, 1); /* c1 = b.const_i32(1) */
+    const bool is3 = ctx->spec->problem.is_3d;
+
+    if(!spec->uniform_k_decode)
+    {
+        conv_run_loop(ctx, k_lo, k_hi, accs0, NULL, NULL, 0, NULL, "k", res);
+        rocke_conv_set_final_accs(ctx, res, n_acc);
+        return;
+    }
+
+    /* ---- uniform-tap loop ---- */
+    conv_uk_t* u = (conv_uk_t*)rocke_arena_alloc(&b->arena, sizeof(conv_uk_t));
+    if(u == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv uk: arena alloc failed");
+        return;
+    }
+    memset(u, 0, sizeof(*u));
+    u->ctx = ctx;
+    u->is3 = is3;
+    rocke_value_t* c_bk_mask = rocke_b_const_i32(b, ctx->block_k - 1);
+    rocke_value_t* uk_ok = rocke_b_cmp_eq(b, rocke_b_land(b, ctx->p_cpg, c_bk_mask), c0);
+    rocke_value_t* uk_hi = rocke_b_select(b, uk_ok, ctx->c_K_gemm, c0);
+    u->a_ystep = rocke_b_mul(b, ctx->p_dH, ctx->p_A_stride_hi);
+    u->a_xstep = rocke_b_mul(b, ctx->p_dW, ctx->p_A_stride_wi);
+    if(is3)
+        u->a_zstep = rocke_b_mul(b, ctx->p_dD, ctx->p_A_stride_di);
+    u->a_gbase = (ctx->group_idx != NULL) ? rocke_b_mul(b, ctx->group_idx, ctx->p_cpg) : NULL;
+
+    static const char* const uk_names[4] = {"uc", "ux", "uy", "uz"};
+    const int n_state = is3 ? 4 : 3;
+    rocke_value_t* state[4];
+    rocke_value_t* uk_accs[ROCKE_CONV_MAX_ACCS] = {};
+
+    if(!ctx->fwd_asplit)
+    {
+        for(int i = 0; i < n_state; ++i)
+            state[i] = c0;
+        conv_run_loop(ctx, c0, uk_hi, accs0, uk_names, state, n_state, u, "uk", uk_accs);
+        rocke_value_t* fb_lo = rocke_b_select(b, uk_ok, ctx->c_K_gemm, c0);
+        conv_run_loop(ctx, fb_lo, ctx->c_K_gemm, uk_accs, NULL, NULL, 0, NULL, "fb", res);
+        rocke_conv_set_final_accs(ctx, res, n_acc);
+        return;
+    }
+    /* split_k: this slice runs K tiles [k_lo, k_hi) / block_k, so the uniform
+     * tap state starts at tile k_lo / block_k in the loop's own tile order. A
+     * slice past the end starts on an out-of-range tap and loads zeros. */
+    rocke_value_t* t_lo = rocke_b_div(b, k_lo, ctx->c_block_k);
+    rocke_value_t* n_taps_xy = rocke_b_mul(b, ctx->p_X, ctx->p_Y);
+    rocke_value_t *c_s, *x_s, *y_s, *z_s = NULL;
+    if(spec->uk_tap_fast)
+    {
+        rocke_value_t* n_taps = rocke_b_mul(b, n_taps_xy, ctx->p_Z);
+        rocke_value_t* tap = rocke_b_mod(b, t_lo, n_taps);
+        c_s = rocke_b_mul(b, rocke_b_div(b, t_lo, n_taps), ctx->c_block_k);
+        x_s = rocke_b_mod(b, tap, ctx->p_X);
+        y_s = rocke_b_mod(b, rocke_b_div(b, tap, ctx->p_X), ctx->p_Y);
+        z_s = rocke_b_div(b, tap, n_taps_xy);
+        z_s = rocke_b_select(b, rocke_b_cmp_ge(b, c_s, ctx->p_cpg), ctx->p_Z, z_s);
+    }
+    else
+    {
+        rocke_value_t* tap = rocke_b_div(b, k_lo, ctx->p_cpg);
+        c_s = rocke_b_sub(b, k_lo, rocke_b_mul(b, tap, ctx->p_cpg));
+        x_s = rocke_b_mod(b, tap, ctx->p_X);
+        y_s = is3 ? rocke_b_mod(b, rocke_b_div(b, tap, ctx->p_X), ctx->p_Y)
+                  : rocke_b_div(b, tap, ctx->p_X);
+        if(is3)
+            z_s = rocke_b_div(b, tap, n_taps_xy);
+    }
+    state[0] = c_s;
+    state[1] = x_s;
+    state[2] = y_s;
+    state[3] = z_s;
+    rocke_value_t* uk_hi_s = rocke_b_select(b, uk_ok, k_hi, k_lo);
+    conv_run_loop(ctx, k_lo, uk_hi_s, accs0, uk_names, state, n_state, u, "uk", uk_accs);
+    conv_run_loop(ctx, uk_hi_s, k_hi, uk_accs, NULL, NULL, 0, NULL, "fb", res);
+    rocke_conv_set_final_accs(ctx, res, n_acc);
 }

@@ -962,6 +962,14 @@ _GFX942_3D_OFFSET = 32
 #   72: 54 + compv3, reg_prefetch=2, lds_kpack_read (schedule hints, k-packed counts)
 #   73: 55 + lds_xor without a reg_prefetch loop: rejected by both engines
 #   74: 55 + reg_prefetch=1, lds_xor, lds_xor_rowkey without lds_kpack_read: rejected
+#   75: 70 + uniform_k_decode (the uniform-tap loop + plain fallback)
+#   76: 55 + uniform_k_decode (no register prefetch)
+#   77: 55 + uniform_k_decode, reg_prefetch=2, uk_tap_fast, uk_nopad, fb_skip_empty
+#   78: 71 + uniform_k_decode, uk_tap_fast, uk_nopad, fb_skip_empty, xcd_remap=6 (split slices)
+#   79: 55 + uniform_k_decode, reg_prefetch=1, lds_xor, uk_tap_fast, uk_chunk_group=2, uk_nopad
+#   80: 56 + uniform_k_decode, reg_prefetch=1, lds_kpack_read (stride 2, 32x32x8, default epilogue)
+#   81: 57 + uniform_k_decode (pointwise): rejected by both engines
+#   82: 71 + uniform_k_decode, uk_tap_fast, uk_chunk_group=2: rejected by both engines
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1024,6 +1032,20 @@ def _gfx942_3d_spec(idx: int):
         72: (54, dict(pipeline="compv3", reg_prefetch=2, lds_kpack_read=True)),
         73: (55, dict(lds_xor=True)),
         74: (55, dict(reg_prefetch=1, lds_xor=True, lds_xor_rowkey=True)),
+        75: (55, dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True,
+                      lds_kpack_read=True, lds_xor_rowkey=True, xcd_remap=6, m_band=32)),
+        76: (55, dict(uniform_k_decode=True)),
+        77: (55, dict(uniform_k_decode=True, reg_prefetch=2, uk_tap_fast=True,
+                      uk_nopad=True, fb_skip_empty=True)),
+        78: (55, dict(split_k=2, reg_prefetch=1, lds_xor=True, lds_kpack_read=True,
+                      uniform_k_decode=True, uk_tap_fast=True, uk_nopad=True,
+                      fb_skip_empty=True, xcd_remap=6)),
+        79: (55, dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True,
+                      uk_tap_fast=True, uk_chunk_group=2, uk_nopad=True)),
+        80: (56, dict(uniform_k_decode=True, reg_prefetch=1, lds_kpack_read=True)),
+        81: (57, dict(uniform_k_decode=True)),
+        82: (55, dict(split_k=2, reg_prefetch=1, lds_xor=True, lds_kpack_read=True,
+                      uniform_k_decode=True, uk_tap_fast=True, uk_chunk_group=2)),
     }
     extra = {}
     if idx in knobs:
