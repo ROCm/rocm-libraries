@@ -116,9 +116,9 @@ distinct physical cores are available.
 `--memory-budget GIB` additionally limits the estimated memory of concurrently
 running native processes. A process's peak memory is dominated by the Tensile
 code objects it loads, which are decompressed, staged and copied into emulated
-device memory: it was measured as about 0.3 GiB plus 5.24 times their
-uncompressed size. The runner estimates each batch this way, with a 0.45 GiB
-margin. A batch starts only when its estimate fits beside those already
+device memory: over whole gfx942 and gfx950 catalogues it was about 0.35 GiB
+plus 6.0 times their uncompressed size. The runner estimates each batch as
+0.6 GiB plus 6.0 times that size, which exceeded every measured peak. A batch starts only when its estimate fits beside those already
 running; a later batch that fits may start first. A batch larger than the whole
 budget runs alone. The budget and model are recorded in `settings.json`.
 Workers claim batches in shard order, but operating-system scheduling and

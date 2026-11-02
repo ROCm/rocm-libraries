@@ -39,13 +39,14 @@ DEFAULT_BATCH_SIZES = {"bench": 32, "tensile": 1}
 # coordinator's time goes to rewriting them as results accumulate.
 CHECKPOINT_SECONDS = 5
 CHECKPOINT_COST_RATIO = 20
-# Peak resident memory of one emulated native process, measured on gfx942 with
-# rocjitsu's race plugin: about 0.30 GiB plus 5.24 times the uncompressed size
-# of the Tensile code objects it loads. Decompression, loader staging and the
-# emulated device copy each hold the code. The base includes a 0.45 GiB margin
-# for the largest observed underestimate.
-MEMORY_BASE_GIB = 0.75
-MEMORY_PER_CODE_OBJECT_GIB = 5.24
+# Peak resident memory of one emulated native process with rocjitsu's race
+# plugin, fitted to whole-catalogue gfx942 and gfx950 sweeps (12,196 processes):
+# about 0.35 GiB plus 6.0 times the uncompressed size of the Tensile code
+# objects it loads. Decompression, loader staging and the emulated device copy
+# each hold the code. With this factor, the base covers every measured process
+# with at least 0.1 GiB to spare.
+MEMORY_BASE_GIB = 0.6
+MEMORY_PER_CODE_OBJECT_GIB = 6.0
 
 
 @functools.cache
