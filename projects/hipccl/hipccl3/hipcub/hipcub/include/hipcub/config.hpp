@@ -267,15 +267,6 @@ END_HIPCUB_NAMESPACE
     #endif
 #endif // HIPCUB_TRAIT
 
-// This API needs to be deprecated once libhipcxx is available.
-#ifndef HIPCUB_PRAGMA_UNROLL_FULL
-    #define HIPCUB_PRAGMA_UNROLL_FULL() _Pragma("unroll")
-#endif // HIPCUB_PRAGMA_UNROLL_FULL
-
-#ifndef HIPCUB_PRAGMA_NOUNROLL
-    #define HIPCUB_PRAGMA_NOUNROLL() _Pragma("nounroll")
-#endif // HIPCUB_PRAGMA_NOUNROLL
-
 #ifndef HIPCUB_RETURN_ON_ERROR
     #define HIPCUB_RETURN_ON_ERROR(...)       \
         do                                    \
