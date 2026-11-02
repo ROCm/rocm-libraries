@@ -310,23 +310,25 @@ def test_d128_swa_4warp_top_left_reads_only_its_blocks(rt):
 
 _DENSE_HQ, _DENSE_HKV, _DENSE_BATCH = 4, 1, 2
 
-# (id, sq, skv, window, right, persistent)
+# (id, sq, skv, window, right, persistent, ragged)
 _DENSE_CASES = [
-    ("tl_causal_256x512", 256, 512, 0, 0, False),
-    ("tl_causal_512x256", 512, 256, 0, 0, False),
-    ("full_512x1024", 512, 1024, 0, -1, False),
+    ("tl_causal_256x512", 256, 512, 0, 0, False, False),
+    ("tl_causal_512x256", 512, 256, 0, 0, False, False),
+    ("full_512x1024", 512, 1024, 0, -1, False, False),
+    # Sq != Sk and neither a tile multiple: the ragged q- and k-tile tails.
+    ("full_ragged_197x400", 197, 400, 0, -1, False, True),
     # q > skv + window: the last rows see no key, in both batches.
-    ("left_only_w128_1024x512_empty", 1024, 512, 128, -1, False),
-    ("persist_left_only_w128_1024x512_empty", 1024, 512, 128, -1, True),
-    ("lookahead_r7_512x1024", 512, 1024, 0, 7, False),
+    ("left_only_w128_1024x512_empty", 1024, 512, 128, -1, False, False),
+    ("persist_left_only_w128_1024x512_empty", 1024, 512, 128, -1, True, False),
+    ("lookahead_r7_512x1024", 512, 1024, 0, 7, False, False),
 ]
 
 
 @pytest.mark.parametrize(
-    "sq,skv,window,right,persistent",
+    "sq,skv,window,right,persistent,ragged",
     [pytest.param(*c[1:], id=c[0]) for c in _DENSE_CASES],
 )
-def test_dense_band_matches_numpy(rt, sq, skv, window, right, persistent):
+def test_dense_band_matches_numpy(rt, sq, skv, window, right, persistent, ragged):
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
         run_attention_dense_torch,
@@ -346,6 +348,7 @@ def test_dense_band_matches_numpy(rt, sq, skv, window, right, persistent):
         sliding_window=window,
         persistent=persistent,
         num_persistent=304,
+        ragged=ragged,
     )
     rng = np.random.default_rng(1)
     b = _DENSE_BATCH

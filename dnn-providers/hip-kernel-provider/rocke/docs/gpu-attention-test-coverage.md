@@ -24,6 +24,8 @@ added from `pytest --co -m gpu` collection on 2026-10-20. The Torch-free gfx942
 band suite (`test_attention_band_gfx942_numpy_numeric.py`) was added on
 2026-10-27: 29 cases passed with 0 skips on gfx942 (MI300A) with `import torch`
 blocked.
+One ragged cross-length dense row (197x400, full attention) was added to it
+afterwards, making 30.
 A source-declared shape is not necessarily selected, executed, or passed in CI.
 Two edits postdate that inventory, both to the KDA decode dispatch rows. The
 `expected_spec_id` values use the tile-named KDA spec ids
@@ -62,7 +64,7 @@ listed separately in the inventory, not added to the workload rows.
 | gfx942 binary reuse across shapes | 3 shapes in 1 test | No reuse assertion or larger shape | Skipped |
 | gfx942 dense cross-length and band (top-left; windows, lookahead, ragged, B2 empty rows, sinks/LSE, index truth table) | 138 | No: references are Sq=Sk=512 causal/full | Skipped (Torch-gated) |
 | gfx942 unified mask/band (paged varlen; top-left, no-mask, bands, per-body rows, dispatch, block-table over-read) | 325 | No: different path and masks | Skipped (Torch-gated) |
-| gfx942 band without Torch (unified tiled 2D/3D: top-left Sq<Sk and Sq>Sk, no mask, left-only and two-sided windows, empty rows, Sq=1 decode, varlen; 4-warp D128 SWA top-left; dense: top-left cross-length, full, B2 empty-row window, lookahead) | 29 | No: different paths and masks | Yes: runs in CI without Torch (NumPy reference) |
+| gfx942 band without Torch (unified tiled 2D/3D: top-left Sq<Sk and Sq>Sk, no mask, left-only and two-sided windows, empty rows, Sq=1 decode, varlen; 4-warp D128 SWA top-left; dense: top-left cross-length, full, ragged cross-length full, B2 empty-row window, lookahead) | 30 | No: different paths and masks | Yes: runs in CI without Torch (NumPy reference) |
 | gfx942 non-default tile | 1 | No | Skipped |
 | gfx942 forced exp2 A/B | 2 | No A/B assertion | Skipped |
 | gfx942 paged D128 ring regression | 12 | No: different path | Skipped |
@@ -152,7 +154,7 @@ The historical source inventory below is unchanged by this new cohort.
 | Paged i64 K/V addressing | BF16 D128 decode, page size 16: B8 Sk1024 Hq/Hkv=(32,8),(64,4) and B8 ragged Sk≤1000 with a block-table tail (`num_kv_blocks` overstated to force i64); B4 Sk1024 Hq/Hkv=(32,8) on a cache just over 2 GiB with pages straddling 2^31 bytes | No reference case pages the cache or uses i64 K/V addressing |
 | Seeds/distributions | One fixed normally distributed recipe per configuration in required suite | Multiple runs test repeatability, not additional input coverage |
 | Additional dense combinations | No BF16 full-mask case; no D64 full-mask case; not every dtype × grid × head-ratio combination | The selected rows are not a Cartesian-product sweep |
-| Unequal query/KV lengths, bottom-right masks | gfx942 dense: 138 top-left cross-length/band rows (aligned and ragged, B1/B2); gfx942 unified: 325 paged varlen rows incl. bottom-right bands; gfx950: 11 dense rows plus 327 unified rows; see shape table | All required Sq=Sk=512; no cross-length, band, or ragged reference. gfx942 dense has no bottom-right body, and apart from 29 Torch-free band rows (`test_attention_band_gfx942_numpy_numeric.py`) every gfx942 row here is Torch-gated, so it skips in CI without Torch |
+| Unequal query/KV lengths, bottom-right masks | gfx942 dense: 138 top-left cross-length/band rows (aligned and ragged, B1/B2); gfx942 unified: 325 paged varlen rows incl. bottom-right bands; gfx950: 11 dense rows plus 327 unified rows; see shape table | All required Sq=Sk=512; no cross-length, band, or ragged reference. gfx942 dense has no bottom-right body, and apart from 30 Torch-free band rows (`test_attention_band_gfx942_numpy_numeric.py`) every gfx942 row here is Torch-gated, so it skips in CI without Torch |
 | Decode / varlen / append / sparse / quantized / backward | Exact 15 extended-harness rows in shape table | Different operations, ABI layouts, and sometimes architectures |
 
 The paged ring test also checks for an external parity harness and can skip if
@@ -742,6 +744,7 @@ not executed GPU-kernel counts. All filenames below are relative to
 | [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 256 | 512 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; top-left; causal; grid | Missing |
 | [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 512 | 256 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; top-left; causal; grid | Missing |
 | [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 512 | 1024 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; top-left; no mask; grid | Missing |
+| [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 197 | 400 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; top-left; no mask; ragged q and k tails; grid | Missing |
 | [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 1024 | 512 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; empty rows exactly 0; top-left; no right bound; window=128; grid | Missing |
 | [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 1024 | 512 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; empty rows exactly 0; top-left; no right bound; window=128; persistent | Missing |
 | [test_attention_band_gfx942_numpy_numeric.py](../library/tests/test_attention_band_gfx942_numpy_numeric.py) :: test_dense_band_matches_numpy | gfx942 | bf16 | 2 | 512 | 1024 | 4 | 1 | 128 | direct spec; NumPy reference, no Torch; top-left; right=7; grid | Missing |
