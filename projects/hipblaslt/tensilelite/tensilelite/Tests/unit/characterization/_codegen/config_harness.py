@@ -12,7 +12,7 @@ the **config-driven** solution-generation surface that the logic-driven
                          ->  constructForkPermutations
                          ->  _generateForkedSolutions  ->  Solution(s)
                          ->  generateKernelObjectsFromSolutions  ->  kernel dict(s)
-                         ->  processKernelSource  ->  assembly text
+                         ->  codegen_harness.emit_prepared_kernels  ->  assembly text
 
 A TensileLite ``BenchmarkProblems`` entry is a ``[ProblemType, ProblemSizeGroup]``
 pair. The ``ForkParameters`` block is a cartesian product of single-element
@@ -279,7 +279,7 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
     _generateForkedSolutions -> Solution(s)`` then emits each via the *same*
     path :mod:`codegen_harness` uses (``generateKernelObjectsFromSolutions`` +
-    ``processKernelSource``), returning ``[(basename, source, err), ...]`` sorted
+    ``emit_prepared_kernels``), returning ``[(basename, source, err), ...]`` sorted
     by basename.
 
     ``err`` is the emitter return code (0 == ok). ``limit`` bounds both the
@@ -296,7 +296,6 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     ``problem_fingerprint`` selects a stable problem-group identity and takes
     precedence over the positional ``problem_index``.
     """
-    import rocisa  # noqa: F401  (ensures the singleton module is importable here)
     from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig
@@ -304,7 +303,6 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
 
     assembler, iim = _toolchain_for(arch)
 
-    results = []
     with _isolated_globals_with_isa(iim):
         sols = _solutions_from_config_unguarded(
             config_path,
@@ -323,34 +321,17 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
         if limit is not None:
             kernels = sorted(kernels, key=lambda k: getKernelFileBase(splitGSU, k))[:limit]
         kwa = KernelWriterAssembly(assembler, DebugConfig())
-
-        for kernel in kernels:
-            results.append(_emit_one(kwa, kernel, splitGSU, canonical))
+        results = _ch.emit_prepared_kernels(
+            kwa, kernels, splitGSU=splitGSU, canonical=canonical
+        )
 
     results.sort(key=lambda t: t[0])
     return results
 
 
 def _emit_one(kwa, kernel, splitGSU, canonical):
-    """Emit a single kernel via the codegen_harness machinery.
-
-    Reuses ``codegen_harness._init_rocisa_for`` (per-kernel rocisa init),
-    ``_prepare_kernel`` (sets BaseName), and ``canonicalize_asm`` so the emitted
-    text matches the logic-driven harness exactly.
-    """
-    from tensilelite.TensileCreateLibrary.Run import processKernelSource
-
-    ri = _ch._init_rocisa_for(kernel)
-    data = ri.getData()
-    outOptions = ri.getOutputOptions()
-    base = _ch._prepare_kernel(kernel, splitGSU)
-    res = processKernelSource(kwa, data, outOptions, splitGSU, kernel)
-    src = res.src
-    if canonical:
-        src = _ch.canonicalize_asm(src)
-    elif isinstance(src, (bytes, bytearray)):
-        src = src.decode(errors="replace")
-    return base, src, res.err
+    """Emit one kernel via :func:`codegen_harness.emit_one_kernel`."""
+    return _ch.emit_one_kernel(kwa, kernel, splitGSU=splitGSU, canonical=canonical)
 
 
 _CLONE_TARGET_RE = re.compile(r"^label_([A-Za-z0-9]+)_target_\d+:", re.M)

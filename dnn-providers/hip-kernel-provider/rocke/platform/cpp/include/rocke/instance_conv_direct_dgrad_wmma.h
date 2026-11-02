@@ -4,12 +4,19 @@
  * rocke/instance_conv_direct_dgrad_wmma.h -- C++ engine port of the wave32 WMMA
  * direct dgrad builder in library/kernels/common/conv_direct_dgrad_wmma.py.
  *
- * Stride-1 dgrad, dense and grouped, on the gfx1250 WMMA 16x16x32 atom: per
+ * Direct dgrad, dense and grouped, on the gfx1250 WMMA 16x16x32 atom: per
  * dY channel chunk, one 3-D TDM transfer stages the dY halo of the block's dX
  * tile and one stages the chunk's weights for every tap, in an LDS ring of
  * `stages` slots; the weights are transposed on the LDS read
  * (ds_load_tr16_b128) and every tap reads a shifted window of the halo. The dX
  * tile is staged back through LDS and stored with one TDM transfer per image.
+ *
+ * Stride 2 runs as a phase decomposition (one accumulator set per output
+ * phase, one shared dY halo), dilation only moves each tap's halo shift,
+ * `pack_groups` stages a block-diagonal super-group of small groups once
+ * before the loop, `split_barrier` splits the per-chunk barrier into
+ * s_barrier_signal / s_barrier_wait and `wave_epilogue` stores each wave's
+ * tiles with its own TDM transfer.
  *
  *   Python (conv_direct_dgrad_wmma.py)       C (this header)
  *   ------------------------------------     ---------------------------------------
@@ -24,9 +31,10 @@
  *
  * AOT: the kernel declares the direct-conv kernarg block of
  * rocke_conv_direct_arg_names("dgrad"). Batch, extents, the group count and
- * both channel counts are runtime; the filter, PAD, dtype and tile geometry
- * are baked, so the emitted IR does not depend on the problem's extents,
- * groups or channel counts.
+ * both channel counts are runtime; the filter, PAD, stride, dilation, dtype
+ * and tile geometry are baked (and cpg / kpg when pack_groups > 1), so the
+ * emitted IR does not depend on the problem's extents, groups or channel
+ * counts.
  *
  * `sched` is the optional Python scheduler_strategy (NULL = backend default).
  */
@@ -62,6 +70,9 @@ extern "C" {
  *      prefetch: bool = False
  *      sched: str | None = None
  *      wave_size: int = 32
+ *      pack_groups: int = 1          # groups per block-diagonal super-group
+ *      split_barrier: bool = False   # s_barrier_signal / _wait per chunk
+ *      wave_epilogue: bool = False   # per-wave LDS staging + TDM store
  * ===================================================================== */
 typedef struct rocke_direct_dgrad_wmma_spec
 {
@@ -78,6 +89,9 @@ typedef struct rocke_direct_dgrad_wmma_spec
     bool prefetch; /* default false */
     const char* sched; /* default NULL */
     int wave_size; /* default 32 */
+    int pack_groups; /* default 1 */
+    bool split_barrier; /* default false */
+    bool wave_epilogue; /* default false */
 } rocke_direct_dgrad_wmma_spec_t;
 
 /* Spec with the Python dataclass defaults; problem == problem_default(). */
@@ -89,11 +103,13 @@ int rocke_direct_dgrad_wmma_block_p(const rocke_direct_dgrad_wmma_spec_t* spec);
 int rocke_direct_dgrad_wmma_tile_h(const rocke_direct_dgrad_wmma_spec_t* spec);
 int rocke_direct_dgrad_wmma_threads_per_block(const rocke_direct_dgrad_wmma_spec_t* spec);
 long rocke_direct_dgrad_wmma_lds_bytes(const rocke_direct_dgrad_wmma_spec_t* spec);
-/* spec.grid() -> (ceil(N / tile_n) * groups * n_h_tiles * n_w_tiles * n_c_tiles, 1, 1). */
+/* spec.grid() -> (ceil(N / tile_n) * (groups / pack_groups) * n_h_tiles * n_w_tiles
+ * * n_c_tiles, 1, 1); the h / w tiles cover ceil(H / stride) x ceil(W / stride). */
 void rocke_direct_dgrad_wmma_grid(const rocke_direct_dgrad_wmma_spec_t* spec, int grid[3]);
 
 /* kernel_name(): kernel_name_join(name, f{KH}x{KW}, p{PAD}, wc{}, wp{}, tc{}, tp{},
- * tw{}, [tn{}], ck{}, st{}, [pf], [s{sched}], [bf16]). */
+ * tw{}, [tn{}], ck{}, st{}, [pf], [s{sched}], [str{stride}], [dil{dh}x{dw}],
+ * [pg{G}c{cpg}k{kpg}], [sb], [we], [bf16]). */
 rocke_status_t rocke_direct_dgrad_wmma_kernel_name(const rocke_direct_dgrad_wmma_spec_t* spec,
                                                    char* out,
                                                    size_t out_cap);

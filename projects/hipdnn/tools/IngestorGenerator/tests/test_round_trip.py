@@ -127,7 +127,37 @@ def test_multi_launch_fixture_loads_and_keeps_its_kernels(validator):
     assert payload["success"] is True
     assert payload["engines"] == [engine]
     assert payload["expected_engines_missing"] == []
-    assert "0 dropped" in " ".join(d["message"] for d in payload["diagnostics"])
+    diagnostics = " ".join(d["message"] for d in payload["diagnostics"])
+    assert "0 dropped" in diagnostics, diagnostics
+    # "0 dropped" counts engines; a kernel dropped for its launch set says so itself.
+    assert "carries the launches" not in diagnostics, diagnostics
+
+
+def test_mismatched_launch_sets_drop_the_odd_kernel_and_fail(validator):
+    """Two kernels of one pack naming different launch sets cannot both be launched by
+    the pack's one handler. The stub declares the first kernel's set, so the second is
+    dropped with the launch-name diagnostic and the run fails; the engine itself still
+    loads on the kernel that matches."""
+    engine = "hipkernel:ValidateFixtureLaunchMismatch"
+    result = subprocess.run(
+        [
+            str(validator),
+            str(FIXTURE_ROOT / "multi_launch_mismatch"),
+            "--expect-engine",
+            engine,
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert payload["success"] is False
+    assert payload["expected_engines_missing"] == []
+    diagnostics = " ".join(d["message"] for d in payload["diagnostics"])
+    assert "carries the launches {decode, reduce}" in diagnostics, diagnostics
+    assert "launches {decode, merge}" in diagnostics, diagnostics
 
 
 @pytest.mark.parametrize(
