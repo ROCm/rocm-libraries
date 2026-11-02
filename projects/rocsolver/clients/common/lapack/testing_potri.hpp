@@ -218,7 +218,7 @@ void potri_getError(const rocblas_handle handle,
         if(hInfoRes[b][0] == 0)
         {
             err = norm_error('F', n, n, lda, hA[b], hARes[b]);
-            *max_err = rocblas_max_nan(err, (*max_err));
+            *max_err = rocblas_max_nan(err, *max_err);
         }
     }
 }

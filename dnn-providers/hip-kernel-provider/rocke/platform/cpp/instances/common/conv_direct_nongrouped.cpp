@@ -113,7 +113,8 @@ static int nongrouped_ho(const rocke_direct_conv_problem_t* p)
 
 static int nongrouped_wo(const rocke_direct_conv_problem_t* p)
 {
-    return (p->W + 2 * p->PAD - (p->KW - 1) * p->dil_w - 1) / p->stride + 1;
+    return (p->W + 2 * rocke_direct_conv_problem_pad_w(p) - (p->KW - 1) * p->dil_w - 1) / p->stride
+           + 1;
 }
 
 static void nongrouped_set_reason(char* reason, size_t reason_cap, const char* msg)
