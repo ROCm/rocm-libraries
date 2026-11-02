@@ -368,6 +368,7 @@ class Sim(FakePytest):
             "bwd_cand": env.get(contract.CANDIDATE_ENV["bwd"]),
             "exhaustive": env.get(contract.EXHAUSTIVE_ENV),
             "prefix": env.get(contract.PREFIX_ENV),
+            "kernel_log": env.get(contract.KERNEL_LOG_ENV),
         }
         self.runs.append((results, pins, ids))
         results.mkdir(parents=True, exist_ok=True)
@@ -418,7 +419,7 @@ def test_pair_passes_run_every_other_forward_with_every_backward_under_pair_dirs
     ids = [f"{BWD}::b1", f"{BWD}::b2"]
     pass1 = dict(fwd="hipdnn:A", bwd="hipdnn:X", fwd_engines="A;B", bwd_engines="X;Y")
     status, sim = run_all_engines(
-        monkeypatch, tmp_path, ids, ok_behave({(None, None): pass1})
+        monkeypatch, tmp_path, ids, ok_behave({(None, None): pass1}), "--pairs"
     )
     pairs = tmp_path / "all-engines" / "pair"
     assert sorted(p.name for p in pairs.iterdir()) == ["B__X", "B__Y"]
@@ -432,6 +433,66 @@ def test_pair_passes_run_every_other_forward_with_every_backward_under_pair_dirs
     # the backward-only sweep still pins just the other backward on the heuristic forward
     assert listing(sim, tmp_path / "all-engines" / "bwd" / "Y") == [["b1", "b2"]]
     assert status == 0
+
+
+PAIRS_IDS = [f"{BWD}::b1", f"{BWD}::b2"]
+PAIRS_PASS1 = dict(fwd="hipdnn:A", bwd="hipdnn:X", fwd_engines="A;B", bwd_engines="X;Y")
+
+
+def test_pair_passes_are_opt_in(monkeypatch, tmp_path):
+    _, sim = run_all_engines(
+        monkeypatch, tmp_path, PAIRS_IDS, ok_behave({(None, None): PAIRS_PASS1})
+    )
+    root = tmp_path / "all-engines"
+    assert not (root / "pair").exists()
+    assert listing(sim, root / "bwd" / "Y") == [["b1", "b2"]]  # sweeps are unaffected
+
+
+def test_reference_forward_passes_run_without_pairs(monkeypatch, tmp_path):
+    def behave(nodeid, pins, results):
+        name = nodeid.split("::")[-1]
+        if (pins["fwd"], pins["bwd"]) == (None, None):
+            fields = dict(PAIRS_PASS1)
+            if name == "b1":
+                fields = dict(
+                    outcome="crash", fwd="hipdnn:A", fail_side="fwd", stage="execute",
+                    fwd_engines="A;B", reason="worker died (pid 5)",
+                )  # fmt: skip
+            return rows_of([nodeid], **fields)[0]
+        if pins["fwd"] == "reference":
+            return rows_of(
+                [nodeid], fwd="ref:pinned reference", bwd=f"hipdnn:{pins['bwd'] or 'X'}",
+                bwd_engines="" if pins["bwd"] else "X;Y",
+            )[0]  # fmt: skip
+        return rows_of(
+            [nodeid], fwd=f"hipdnn:{pins['fwd']}", bwd=f"hipdnn:{pins['bwd']}"
+        )[0]
+
+    _, sim = run_all_engines(monkeypatch, tmp_path, PAIRS_IDS, behave)
+    root = tmp_path / "all-engines"
+    assert listing(sim, root / "refwd" / "discovery") == [["b1"]]
+    assert listing(sim, root / "refwd" / "Y") == [["b1"]]
+    assert not (root / "pair").exists()
+
+
+def test_kernel_log_is_exported_to_every_pass_only_with_kernel_ids_or_exhaustive(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(
+        contract.KERNEL_LOG_ENV, "1"
+    )  # an inherited value must not leak in
+    _, sim = run_all_engines(
+        monkeypatch, tmp_path / "plain", PAIRS_IDS,
+        ok_behave({(None, None): PAIRS_PASS1}), "--pairs",
+    )  # fmt: skip
+    assert len(sim.runs) > 2
+    assert {p["kernel_log"] for _, p, _ in sim.runs} == {None}
+    _, sim = run_all_engines(
+        monkeypatch, tmp_path / "ids", PAIRS_IDS,
+        ok_behave({(None, None): PAIRS_PASS1}), "--pairs", "--kernel-ids",
+    )  # fmt: skip
+    assert len(sim.runs) > 2
+    assert {p["kernel_log"] for _, p, _ in sim.runs} == {"1"}
 
 
 def test_a_case_whose_forward_crashed_gets_refwd_discovery_refwd_and_pair_passes(
@@ -461,7 +522,7 @@ def test_a_case_whose_forward_crashed_gets_refwd_discovery_refwd_and_pair_passes
             [nodeid], fwd=f"hipdnn:{pins['fwd']}", bwd=f"hipdnn:{pins['bwd']}"
         )[0]
 
-    status, sim = run_all_engines(monkeypatch, tmp_path, ids, behave)
+    status, sim = run_all_engines(monkeypatch, tmp_path, ids, behave, "--pairs")
     root = tmp_path / "all-engines"
     discovery = [r for r in sim.runs if r[0] == root / "refwd" / "discovery"]
     assert [(p["fwd"], p["bwd"]) for _, p, _ in discovery] == [("reference", None)]
@@ -811,7 +872,7 @@ def test_a_forward_that_dies_is_attributed_scheduled_around_and_captured_end_to_
     real_run, monkeypatch
 ):
     monkeypatch.setenv(contract.TEST_CRASH_ENV, "fwd:A")
-    status, out = real_run("--all-engines")
+    status, out = real_run("--all-engines", "--pairs", "--kernel-ids")
     rows = by_name(out / "results.csv")
     assert {n: r["outcome"] for n, r in rows.items()} == {
         "test_f1": "crash", "test_b1": "crash", "test_b2": "crash",
@@ -932,6 +993,9 @@ def test_exhaustive_runs_one_pass_per_candidate_index_over_the_cases_that_have_i
         assert len(reconcile.read_rows(d / "results.csv")) == len(expected)
     main = [r for r in sim.runs if r[0] == tmp_path][0]
     assert (main[1]["exhaustive"], main[1]["prefix"]) == ("1", "/opt/fake-rocm")
+    assert {p["kernel_log"] for _, p, _ in sim.runs} == {
+        "1"
+    }  # candidate honoring needs ids
 
 
 def test_an_engine_that_cannot_enumerate_gets_not_enumerable_rows_and_no_pytest_pass(
@@ -1021,8 +1085,8 @@ def test_extreme_runs_candidate_passes_over_every_enumerable_pair(
         tmp_path / "cand" / "pair" / "F__X" / "not-enumerable" / "results.csv"
     )
     assert {r["reason"] for r in blocked} == {"fwd F: no enumeration"}
-    # the all-engines passes still run first: the plain pair of the non-winning forward
-    assert (tmp_path / "all-engines" / "pair" / "F__X").exists()
+    # the plain pair passes of --all-engines are opt-in (--pairs); EXTREME's candidate pairs are not
+    assert not (tmp_path / "all-engines" / "pair").exists()
 
 
 def test_exhaustive_is_refused_with_fake_or_a_preset_candidate(

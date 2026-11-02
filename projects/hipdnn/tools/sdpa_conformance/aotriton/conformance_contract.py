@@ -19,7 +19,12 @@ Kernel records
     ``hipdnn_sdpa.last_call(direction)`` returns the :class:`CallRecord` of the calling thread's
     most recent ``sdpa_fwd``/``sdpa_bwd``. The plugin records its kernel with
     ``record(direction, "kernel", kernel)``; the plugin's fold and ``reconcile.served_engines``
-    ignore entries of kind ``kernel`` as they ignore ``engines``.
+    ignore entries of kind ``kernel`` as they ignore ``engines``. Kernel ids come from the backend's
+    INFO log, and installing the callback that reads it raises the backend log level and forces
+    ingestor applicability inline, which changes how the product runs; so the plugin installs it
+    only when ``HIPDNN_SDPA_KERNEL_LOG`` (``KERNEL_LOG_ENV``) is ``1``, which the runner sets in
+    every pass for ``--kernel-ids`` and ``--exhaustive`` (candidate honoring compares kernel ids).
+    Without it the kernel columns stay empty.
 
 Candidates
     ``--exhaustive`` pins kernels inside an engine. ``HIPDNN_FWD_CANDIDATE`` / ``HIPDNN_BWD_CANDIDATE``
@@ -54,6 +59,8 @@ REFERENCE_PIN = "reference"
 # Candidate pins (see "Candidates" above).
 CANDIDATE_ENV = {"fwd": "HIPDNN_FWD_CANDIDATE", "bwd": "HIPDNN_BWD_CANDIDATE"}
 EXHAUSTIVE_ENV = "HIPDNN_SDPA_EXHAUSTIVE"
+# "1" makes the plugin install ``hipdnn_sdpa``'s kernel-id log callback (see "Kernel records").
+KERNEL_LOG_ENV = "HIPDNN_SDPA_KERNEL_LOG"
 PREFIX_ENV = "HIPDNN_SDPA_PREFIX"
 BENCH_RELATIVE = "bin/hipdnn_bench"
 BENCH_PLUGIN_DIR = "lib/hipdnn_plugins/engines"

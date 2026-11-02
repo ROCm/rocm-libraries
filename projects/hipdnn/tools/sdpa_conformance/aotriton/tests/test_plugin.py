@@ -756,12 +756,20 @@ def test_next_case_sees_no_marker():
     assert not (inflight / "main" / "main.json").exists()
 
 
-def test_the_kernel_log_is_installed_in_each_pytest_process_except_under_fake(
-    run, fake_sdpa
+def test_the_kernel_log_is_installed_only_when_asked_and_never_under_fake(
+    run, fake_sdpa, monkeypatch
 ):
-    run(PRELUDE + "def test_x():\n    pass\n")
+    source = PRELUDE + "def test_x():\n    pass\n"
+    monkeypatch.delenv(contract.KERNEL_LOG_ENV, raising=False)
+    run(source)
+    assert fake_sdpa.log_installs == 0
+    monkeypatch.setenv(contract.KERNEL_LOG_ENV, "0")
+    run(source)
+    assert fake_sdpa.log_installs == 0
+    monkeypatch.setenv(contract.KERNEL_LOG_ENV, "1")
+    run(source)
     assert fake_sdpa.log_installs == 1
-    run(PRELUDE + "def test_x():\n    pass\n", "--fake=always-decline")
+    run(source, "--fake=always-decline")
     assert fake_sdpa.log_installs == 1
 
 

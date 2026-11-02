@@ -5,7 +5,8 @@
 """Run AOTriton's SDPA suite against hipDNN and record one CSV row per case.
 
     run_aotriton.py [--suite default|forward] [--release N] [--shard I/N] [--fake always-decline]
-                    [--layout-mode MODE] [--fwd-no-stats] [--all-engines] [--exhaustive] [--packed-gpu]
+                    [--layout-mode MODE] [--fwd-no-stats] [--all-engines] [--pairs] [--kernel-ids]
+                    [--exhaustive] [--packed-gpu]
                     [--out DIR | --arch ARCH --run NAME]
                     [--workers N] [--resume] [--nodeids-file PATH] [--hang-timeout S] [--lock-dir DIR]
                     [--hipdnn-prefix DIR] [-- PYTEST...]
@@ -43,12 +44,19 @@ cases it must run) and ``pass.json`` (kind, direction, pins):
 * ``fwd/<engine>/`` and ``bwd/<engine>/``: one pytest run per applicable engine that did not
   serve a case, pinning ``HIPDNN_FWD_ENGINE`` (``test_forward.py`` cases) or ``HIPDNN_BWD_ENGINE``
   (every other case, forward left to the heuristic);
-* ``pair/<fwd>__<bwd>/``: backward cases with both pins, every stats-capable forward that did not
-  serve the case against every applicable backward;
+* ``pair/<fwd>__<bwd>/`` (only with ``--pairs``): backward cases with both pins, every
+  stats-capable forward that did not serve the case against every applicable backward;
 * ``refwd/discovery/`` and ``refwd/<bwd>/``: for backward cases whose forward failed or crashed in
   any pass, the backward unpinned and then pinned on the reference forward
-  (``HIPDNN_FWD_ENGINE=reference``); the pair passes then cover those cases with the backward
-  engines the discovery pass recorded.
+  (``HIPDNN_FWD_ENGINE=reference``); with ``--pairs`` the pair passes then cover those cases with
+  the backward engines the discovery pass recorded.
+
+``--pairs`` is off by default: each pass pins one direction, so a failure names the engine of that
+direction. ``--kernel-ids`` fills the ``fwd_kernel`` / ``bwd_kernel`` columns by exporting
+``HIPDNN_SDPA_KERNEL_LOG=1`` to every pass, which makes the plugin install ``hipdnn_sdpa``'s backend
+log callback. That callback raises the backend log level to INFO and forces ingestor applicability
+inline, so it changes how the product runs; it is off by default and the kernel columns stay empty.
+``--exhaustive`` implies it, because candidate honoring compares kernel ids.
 
 ``--exhaustive`` pins kernels inside an engine (``--all-engines`` pins engines; the flags compose, and
 both together are the EXTREME run). Pass 1 records, per case and engine, the candidate count
@@ -143,6 +151,18 @@ def parse_args(argv):
         "--all-engines",
         action="store_true",
         help="after the normal run, re-run every case with each other applicable engine pinned",
+    )
+    parser.add_argument(
+        "--pairs",
+        action="store_true",
+        help="with --all-engines, also run the forward x backward pair passes (off: one direction "
+        "per pass)",
+    )
+    parser.add_argument(
+        "--kernel-ids",
+        action="store_true",
+        help="record the kernel id of each case (installs a backend INFO-log callback, which "
+        "changes how the product runs); --exhaustive implies it",
     )
     parser.add_argument(
         "--exhaustive",
@@ -620,10 +640,11 @@ class Runner:
             self.candidate_pairs(rows)
 
     def all_engines(self):
-        """Pinned sweeps, pair passes, then the reference-forward passes for failed forwards."""
+        """Pinned sweeps, pair passes (``--pairs``), then the reference-forward passes for failed forwards."""
         rows = reconcile.read_rows(self.out / reconcile.CSV_NAME)
         self.sweeps(engine_work(rows))
-        self.pairs(pair_work(rows))
+        if self.args.pairs:
+            self.pairs(pair_work(rows))
         failed = forward_failed(self.out)
         if not failed:
             return
@@ -647,7 +668,10 @@ class Runner:
                 nodeids,
                 f"refwd bwd {engine}",
             )
-        self.pairs(pair_work(rows, {r["nodeid"]: r["bwd_engines"] for r in discovery}))
+        if self.args.pairs:
+            self.pairs(
+                pair_work(rows, {r["nodeid"]: r["bwd_engines"] for r in discovery})
+            )
 
 
 def _not_enumerable_rows(pass_dir, messages):
@@ -717,6 +741,11 @@ def main(argv=None):
     if args.exhaustive:
         env[contract.EXHAUSTIVE_ENV] = (
             "1"  # pass 1 counts candidates; later passes drop it
+        )
+    env.pop(contract.KERNEL_LOG_ENV, None)
+    if args.kernel_ids or args.exhaustive:
+        env[contract.KERNEL_LOG_ENV] = (
+            "1"  # every pass: candidate honoring compares ids
         )
     env.setdefault(contract.INFLIGHT_DIR_ENV, tempfile.mkdtemp(prefix="sdpa-inflight-"))
     env.setdefault(contract.DECLINES_DIR_ENV, str(out / reconcile.DECLINES_DIR))
