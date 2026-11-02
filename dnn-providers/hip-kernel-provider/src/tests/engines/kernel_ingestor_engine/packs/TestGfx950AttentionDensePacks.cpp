@@ -1058,9 +1058,10 @@ TEST_F(TestGfx950AttentionDensePacks, RanksThroughItsRegisteredScoreSymbol)
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("hipkernel.gfx950_attention_dense.score"));
 }
 
-/// UMD policy, this engine's shape: a SINGLE-pack engine carries no graph-scoped
-/// criterion -- its own graph_match admits the node type and validates shape. Mirrors
-/// TestConvFwdPack.cpp's HasAGraphMatchAndOneKernelMatcher.
+/// UMD policy, this engine's shape: a SINGLE-pack engine, or one catalog sharded across
+/// packs that declare no discriminator, carries no graph-scoped criterion -- its own
+/// graph_match admits the node type and validates shape. Mirrors TestConvFwdPack.cpp's
+/// HasAGraphMatchAndOneKernelMatcher.
 TEST_F(TestGfx950AttentionDensePacks, CarriesNoGraphScopedMatcher)
 {
     EXPECT_FALSE(_set->engine.graphMatchNativeSymbol.empty());

@@ -2833,7 +2833,7 @@ class TestStableIds:
                 for name, block in (("p", 512), ("q", 1024))
             ],
         )
-        with pytest.raises(ValueError, match="(?i)multi-pack|single-pack"):
+        with pytest.raises(ValueError, match="(?i)without operation matchers"):
             resolve_ids(multi, tmp_path / "m", engine_ids_from=[bundles.home_dir])
 
     def test_a_satellite_must_sit_in_the_homes_family_folder(self, generator, tmp_path):
