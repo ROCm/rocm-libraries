@@ -250,6 +250,13 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         ok_a = rocke_b_cmp_lt(b, ctx->row_qp, ctx->cur_batch_q_len);
         ok_b = rocke_b_cmp_lt(b, ctx->row_qh, rocke_b_const_i32(b, cfg->NUM_QH));
         ctx->row_ok = rocke_b_land(b, ok_a, ok_b);
+        /* Padding rows past BLOCK_Q*NQK alias the next q-block: no store. */
+        if(cfg->BLOCK_Q * cfg->NQK < cfg->BLOCK_M)
+        {
+            rocke_value_t* vr = rocke_b_const_i32(b, cfg->BLOCK_Q * cfg->NQK);
+            rocke_value_t* row_vr = rocke_b_cmp_lt(b, ctx->lane_col, vr);
+            ctx->row_ok = rocke_b_land(b, ctx->row_ok, row_vr);
+        }
         ctx->row_causal_lim = rocke_b_add(b, ctx->context_len, ctx->row_qp);
         ctx->row_alibi = NULL;
         if(cfg->USE_ALIBI)

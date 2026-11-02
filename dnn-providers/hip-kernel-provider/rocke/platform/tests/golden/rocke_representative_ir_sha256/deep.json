@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -174,6 +172,91 @@
       "expected_failures": {}
     },
     "llvm23": {
+      "cases": {
+        "deep/common_gfx950_wt16/h16w16_k32": {
+          "arch": "gfx950",
+          "bytes": 54952,
+          "family": "deep_fused_conv",
+          "kernel_name": "irhash_deep_gfx950_wt16_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "895ba0a243f02524fa875213adc2a35159244334280959dca77c6bced25fd2ad",
+          "status": "ok"
+        },
+        "deep/common_gfx950_wt16/h24w24_k32": {
+          "arch": "gfx950",
+          "bytes": 55001,
+          "family": "deep_fused_conv",
+          "kernel_name": "irhash_deep_gfx950_wt16b_N1H24W24C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "00f8a6a84dc8a74b77cf011c8bcecb93231db6a43c6b4a9838d6f450c18f9ac2",
+          "status": "ok"
+        },
+        "deep/gfx1151/native_h16w16": {
+          "arch": "gfx1151",
+          "bytes": 112212,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1151_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_K132_pool2x2_s2x2_t64x32_pt4x4_w4x2_wmma16x16x16_directa_nativeiu8_i8i4_realquant",
+          "sha256": "46b1d5187844b2a9ccdb74ab3c825249d0d125a6165bb3a5e3c9ba67eb4e43cd",
+          "status": "ok"
+        },
+        "deep/gfx1151/native_h24w24": {
+          "arch": "gfx1151",
+          "bytes": 112213,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1151_deep_fused_conv_pool_N1H24W24C16_K32Y3X3_K132_pool2x2_s2x2_t64x32_pt4x4_w4x2_wmma16x16x16_directa_nativeiu8_i8i4_realquant",
+          "sha256": "2f1ab20b0d93490a6cf27e12f8ca937e4478c7d164ec67b05072bbb0142e76fd",
+          "status": "ok"
+        },
+        "deep/gfx11_generic/native_h16w16": {
+          "arch": "gfx11-generic",
+          "bytes": 112212,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1151_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_K132_pool2x2_s2x2_t64x32_pt4x4_w4x2_wmma16x16x16_directa_nativeiu8_i8i4_realquant",
+          "sha256": "46b1d5187844b2a9ccdb74ab3c825249d0d125a6165bb3a5e3c9ba67eb4e43cd",
+          "status": "ok"
+        },
+        "deep/gfx1201/h16w16_k32": {
+          "arch": "gfx1201",
+          "bytes": 74147,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "beee81ce04ce9a7d4e89295b0c103f54037bd1f3e0ff4615cff61f9f3ab1d040",
+          "status": "ok"
+        },
+        "deep/gfx1201/h24w24_k32": {
+          "arch": "gfx1201",
+          "bytes": 74148,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H24W24C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "4b5fc75c0809c625695608579e550f51e39f9c2457e17cb5a80815c8b2ead9d7",
+          "status": "ok"
+        },
+        "deep/gfx12_generic/h16w16_k32": {
+          "arch": "gfx12-generic",
+          "bytes": 74147,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "beee81ce04ce9a7d4e89295b0c103f54037bd1f3e0ff4615cff61f9f3ab1d040",
+          "status": "ok"
+        },
+        "deep/gfx950/h16w16_k32": {
+          "arch": "gfx950",
+          "bytes": 33797,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx950_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a32x32x16_mem_cshuffle_epi_relu",
+          "sha256": "a8de6ef9f43590910d02f49c327e9be8f4ede6995d13dd652d8667f18d0ec4b0",
+          "status": "ok"
+        },
+        "deep/gfx950/h24w24_k32": {
+          "arch": "gfx950",
+          "bytes": 33801,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx950_deep_fused_conv_pool_N1H24W24C16_K32Y3X3_t64x32x16_w2x1_a32x32x16_mem_cshuffle_epi_relu",
+          "sha256": "dfeba2fa3baac6599a12352cc46fab56e691a190dc313f3778846d4580c89880",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "deep/common_gfx950_wt16/h16w16_k32": {
           "arch": "gfx950",
