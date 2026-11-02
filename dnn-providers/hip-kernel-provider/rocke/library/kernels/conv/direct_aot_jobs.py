@@ -605,6 +605,25 @@ FWD_WMMA_STRIDED_KNOBS = (
     (2, 2, 2, 4, 16, 1, 32, 2, True, False, False, True, False),
     (2, 4, 1, 2, 16, 1, 64, 2, True, False, False, True, False),
     (2, 4, 2, 2, 8, 1, 32, 2, True, False, False, False, False),
+    # Phase-split halo with weights streamed per filter row (row_ring): the
+    # smaller weight slots leave room for 128-channel blocks and three
+    # stages. 256-pixel blocks fill whole waves of 256 on 32x32 outputs; the
+    # 40-wide tiles fit the 40x40 outputs of 80x80 layers exactly.
+    (1, 8, 8, 2, 32, 1, 32, 3, False, False, False, True, True),
+    (1, 8, 8, 2, 32, 1, 32, 3, True, False, False, True, True),
+    (2, 4, 4, 2, 16, 1, 32, 3, False, False, False, True, True),
+    (2, 4, 4, 4, 16, 1, 32, 3, False, False, False, True, True),
+    (2, 4, 4, 4, 32, 1, 32, 3, False, False, False, True, True),
+    (2, 5, 4, 2, 40, 1, 32, 3, False, False, False, True, True),
+    (2, 5, 4, 4, 40, 1, 32, 3, False, False, False, True, True),
+    (2, 4, 4, 4, 16, 1, 32, 3, True, False, False, True, True),
+    (2, 4, 4, 4, 32, 1, 32, 3, True, False, False, True, True),
+    (2, 5, 4, 4, 40, 1, 32, 3, True, False, False, True, True),
+    # Four images of 8x8 outputs per block (no phase split): the 16x16 and
+    # 14x14 stride-2 inputs of the deep ResNet stages fill 256-pixel blocks.
+    (2, 4, 4, 4, 8, 4, 32, 3, False, False, False, False, True),
+    (2, 4, 4, 4, 8, 4, 32, 3, True, False, False, False, True),
+    (1, 8, 8, 2, 8, 4, 32, 3, False, False, False, False, True),
 )
 FWD_WMMA_PATCH2_KNOBS = (
     (1, 2, 1, 4, 16, 1, 32, 3, True, True, True, False, False),

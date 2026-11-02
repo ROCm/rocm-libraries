@@ -67,6 +67,10 @@
 #  46  fp16, 1x16 stride 8, column PAD 4, 2x2 waves of 4x8 tiles, prefetch
 #  47  rejected by both engines: 1x3 stride 2 (R not a multiple of S)
 #  48  rejected by both engines: cpg 96 with ck 64 (a chunk spans two pixels)
+#  row-ring stride-2 rows (kpg 128):
+#  49  fp16, 3x3 s2, phase_split + row_ring, 2x5 waves, tile_w 40, 3 stages,
+#      prefetch + iterative-ilp
+#  50  bf16, 3x3 s2, row_ring, four images of 8-wide tiles, 3 stages
 from _emit_common import run_emit
 from kernels.common.conv_direct_fwd_wmma import (
     DirectFwdWmmaSpec,
@@ -441,6 +445,20 @@ def _spec(idx: int):
             "gfx1250",
         ),
         47: (S(problem=_pr(1, 3, 0, 1, 1, 600, stride=2), **PV), "gfx1250"),
+        49: (
+            S(
+                problem=_p(stride=2, dtype="fp16", kpg=128),
+                **_k(2, 5, 4, 4, 40, 1, 32, 3, phase_split=True, row_ring=True, **PF),
+            ),
+            "gfx1250",
+        ),
+        50: (
+            S(
+                problem=_p(stride=2, kpg=128),
+                **_k(2, 4, 4, 4, 8, 4, 32, 3, row_ring=True),
+            ),
+            "gfx1250",
+        ),
         48: (
             S(
                 problem=_pr(1, 4, 0, 1, 1, 600, stride=2, cpg=96),

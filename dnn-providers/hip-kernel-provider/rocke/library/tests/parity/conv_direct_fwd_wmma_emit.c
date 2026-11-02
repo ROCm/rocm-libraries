@@ -353,6 +353,18 @@ static int make_cfg(int idx, rocke_direct_fwd_wmma_spec_t* s, const char** arch)
         s->problem = make_problem_rect(1, 3, 0, 1, 1, 600, 2, "bf16");
         s->poly_view = true;
         return 0;
+    case 49:
+        s->problem = make_problem(3, 1, 2, 1, 64, 128, 1, 1, "fp16");
+        knobs(s, 2, 5, 4, 4, 40, 1, 32, 3);
+        s->phase_split = true;
+        s->row_ring = true;
+        pf(s);
+        return 0;
+    case 50:
+        s->problem = make_problem(3, 1, 2, 1, 64, 128, 1, 1, "bf16");
+        knobs(s, 2, 4, 4, 4, 8, 4, 32, 3);
+        s->row_ring = true;
+        return 0;
     case 48:
         s->problem = make_problem_rect(1, 4, 0, 1, 1, 600, 2, "bf16");
         s->problem.cpg = 96;

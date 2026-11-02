@@ -693,6 +693,36 @@ _CASES = (
             strided_view=True,
         ),
     ),
+    # Row-ring stride-2 rows: phase-split 40-wide tiles of a 40x40 output,
+    # and four images of 8x8 outputs per block.
+    (
+        dict(H=80, W=80, C=64, K=128, stride=2, dtype="fp16"),
+        dict(
+            waves_k=2,
+            waves_p=5,
+            tiles_k=4,
+            tiles_p=4,
+            tile_w=40,
+            stages=3,
+            phase_split=True,
+            row_ring=True,
+            prefetch=True,
+            sched="iterative-ilp",
+        ),
+    ),
+    (
+        dict(N=6, H=16, W=16, C=64, K=128, stride=2),
+        dict(
+            waves_k=2,
+            waves_p=4,
+            tiles_k=4,
+            tiles_p=4,
+            tile_w=8,
+            tile_n=4,
+            stages=3,
+            row_ring=True,
+        ),
+    ),
     # 1-D strided filters over a polyphase view (one output row per block).
     (
         dict(H=1, W=512, C=64, K=64, KH=1, KW=16, PAD=0, pad_w=4, stride=8),

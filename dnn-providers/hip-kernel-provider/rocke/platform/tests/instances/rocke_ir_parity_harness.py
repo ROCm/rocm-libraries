@@ -5402,6 +5402,11 @@ def cases():
             ),
         ),
         (
+            "bf16_s2_rr_tn4",
+            dict(H=16, W=16, kpg=128, stride=2),
+            dict(tiles_p=4, tile_w=8, tile_n=4, stages=3, row_ring=True),
+        ),
+        (
             "fp16_s2_valid_tn2",
             dict(H=35, W=35, PAD=0, stride=2, dtype="fp16"),
             dict(
