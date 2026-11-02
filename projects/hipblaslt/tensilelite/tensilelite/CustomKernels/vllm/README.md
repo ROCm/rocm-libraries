@@ -43,7 +43,8 @@ memory, is slower than `big` on MI355X and is not used. Changes from vLLM:
   closed form;
 - the `sml` path handles `m` that is not a multiple of `YTILE`, like the other
   two variants;
-- no bias.
+- the bias is hipBLASLt's bias vector, one value per row of D, added by a
+  separate set of kernels (below).
 
 | Type | n | Tiles (YTILE, UNRL) |
 | ---- | - | ------------------- |
@@ -62,18 +63,46 @@ the same loop and the same reduction, whichever wave and tile it falls in, and
 StaggerU is 0. The kernels therefore declare `uniformSummationOrder: true` in
 `custom.config`, so hipBLASLt can select them under uniform summation order.
 
+## `wvSplitK_vllm_{bf16,f16}_tn_bias_n<N>_y<YTILE>u<UNRL>`
+
+The same kernels with hipBLASLt's bias epilogue: a bias vector of D's type
+with one value per row of D (bias source D), added in FP32 before the
+conversion to D's type:
+
+```
+D[m + n*ldd] = alpha * sum_k A[m*lda + k] * B[n*ldb + k] + beta * C[m + n*ldc] + bias[m]
+```
+
+Each wave loads its rows' bias when it starts a row tile, so the load overlaps
+the K loop. A null bias address adds nothing. The kernels support no
+activation or scale-alpha vector; hipBLASLt gives problems with either, or with
+an FP32 bias, to other kernels. Predicates, reduction order and
+`uniformSummationOrder` are those of the kernels above. The tiles are the ones
+the bias library logic picks:
+
+| Type | n | Tiles (YTILE, UNRL) |
+| ---- | - | ------------------- |
+| BF16 | 1 to 3 | (1, 4), (1, 2) |
+| BF16 | 4 | (1, 4), (1, 2), (3, 2) |
+| BF16 | 5 | (1, 2) |
+| FP16 | 1 to 3 | (1, 4), (1, 2) |
+| FP16 | 4, 5 | (1, 4), (1, 2), (3, 2) |
+
 ## Kernarg preload
 
 The kernels take the arguments of the rocBLAS wvSpltK kernels, in the same
 order: 72 bytes, of which the first 14 dwords (everything the staging and the
-K loop read) are preloaded into SGPRs. `n` is passed but unused.
+K loop read) are preloaded into SGPRs. `n` is passed but unused. The bias
+kernels append the bias address (80 bytes), with the same preload.
 
 ## Library logic
 
-hipBLASLt picks these kernels through two `Range` logic files in
+hipBLASLt picks the plain kernels through two `Range` logic files in
 `gfx950/gfx950/Range/`: `gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml` (BF16,
 shared with the rocBLAS wvSpltK kernels) and
-`gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml` (FP16). Every row has `batch == 1`,
+`gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml` (FP16), and the bias kernels
+through `gfx950_Cijk_Alik_Bljk_BBS_BH_Bias_B_UserArgs.yaml` and
+`gfx950_Cijk_Alik_Bljk_HHS_BH_Bias_H_UserArgs.yaml`. Every row has `batch == 1`,
 one `n` from 1 to 5 and `m >= 9`. The rows were measured on MI355X, over decode
 shapes of current models, a power-of-two sweep, and random shapes, each with
 the weights in cache and streamed from HBM. For each `n` and each cell of
@@ -94,12 +123,20 @@ hipBLASLt's own on the largest shapes, which standalone timing misses. Cells
 where hipBLASLt's own kernel wins have no row. Rows never overlap, since
 hipBLASLt takes the first row that contains the problem.
 
-The files carry the plain-GEMM problem type (no bias, activation or scale
-vector), because a custom kernel takes the logic file's problem type and these
-kernels support none of those.
+The bias rows were chosen the same way, against hipBLASLt's previous picks for
+the same shapes with a bias of D's type, and lie inside the plain files' rows:
+the bias problem type also accepts a problem without a bias, and hipBLASLt
+searches the plain-GEMM files first, so a GEMM without a bias never reaches a
+bias kernel.
+
+A custom kernel takes the logic file's problem type, so the plain files carry
+the plain-GEMM one (no bias, activation or scale vector), and the bias files
+the same type with a bias of D's type.
 
 Within one device's logic, hipBLASLt searches the plain-GEMM placeholder library
 before the Bias/SAV ones, and `Equality` before `Range` inside a placeholder.
+Each bias file forms a placeholder of its own, searched after the plain-GEMM
+one and before the Bias/activation/scale-vector ones.
 The BF16 file reuses the header of the shipped plain-GEMM logic
 (`gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml`), so both
 share a placeholder and its tuned sizes keep their kernels; tuning a size there
@@ -117,8 +154,9 @@ ranges come before skinny sizes tuned in the same device's Bias libraries.
 ## Tensile metadata
 
 Each `.s` embeds its Tensile `custom.config`, generated from the Tensile YAML
-for its type and `n`, `custom_vllm_wvsplitk_{bf16,f16}_tn_n<N>.yaml`, which
-lists that `n`'s tiles. To refresh one, delete the existing block first:
+for its type and `n`, `custom_vllm_wvsplitk_{bf16,f16}_tn_n<N>.yaml` (or
+`custom_vllm_wvsplitk_{bf16,f16}_tn_bias_n<N>.yaml` for the bias kernels),
+which lists that `n`'s tiles. To refresh one, delete the existing block first:
 `AddCustomConfig` will not overwrite it. Replacement assembly must stay at code
 object version 4 (see `../README.md`) and keep its `.amdgcn_target` /
 `.amdhsa_code_object_version` directives.
