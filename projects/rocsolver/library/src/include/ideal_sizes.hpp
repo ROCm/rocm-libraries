@@ -35,7 +35,7 @@
  *********************************************************************************/
 
 #define BS1 256 // generic 1 dimensional thread-block size used to call common kernels
-#define BS2                                                                      \
+#define BS2 \
     ROCSOLVER_ASAN_VALUE(16, 32) // generic 2 dimensional thread-block size used \
     // to call common kernels
 
