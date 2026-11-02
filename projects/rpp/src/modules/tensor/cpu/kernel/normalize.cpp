@@ -640,8 +640,8 @@ RppStatus normalize_f32_f32_host_tensor(Rpp32f* srcPtr, RpptGenericDescPtr srcGe
                     continue;
             }
 
-            for (Rpp32u i = 1; i < tensorDims; i++)
-                srcPtrChannel += begin[i - 1] * srcGenericDescPtr->strides[i];
+            for (Rpp32u i = 0; i < tensorDims; i++)
+                srcPtrChannel += begin[i] * srcGenericDescPtr->strides[i + 1];
 
             if (computeMeanStddev & 1)  // Check if mean is to be computed internally
                 compute_3D_mean(srcPtrChannel, meanTensor, srcReductionDims, srcStride,
