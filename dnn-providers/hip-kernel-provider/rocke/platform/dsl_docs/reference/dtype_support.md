@@ -411,7 +411,8 @@ mode. The missing selector and precision contract are described in §2.5.
   The f64 MFMA atom `mfma_f64_16x16x4_f64` is declared on gfx90a/gfx942/gfx950,
   and gfx942 also declares `mfma_f64_4x4x4_f64` (section 4B). Universal GEMM
   and its batched/grouped wrappers select `mfma_f64_16x16x4_f64` with fp64
-  accumulation on gfx942 only (§5).
+  accumulation on gfx90a, gfx942 and gfx950, every target that declares it;
+  gfx90a, which has no DRAM->LDS DMA, refuses `direct_to_lds` (§5).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
   `gfx1251-gemm-insts` (§4A).
 
@@ -567,8 +568,9 @@ The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
   `2 * (l // 16) + slot`) and are not validated on hardware.
 - The CDNA i8 and f64 atoms, the bf16 atoms without the `_1k` suffix (gfx908
   and gfx90a; on gfx90a the `_1k` atoms keep the larger K) and the mixed
-  `fp8_bf8` / `bf8_fp8` atoms are declared. Of these, only gfx942's
-  `mfma_f64_16x16x4_f64` is selected by a family (universal GEMM, §5).
+  `fp8_bf8` / `bf8_fp8` atoms are declared. Of these, only
+  `mfma_f64_16x16x4_f64` is selected by a family (universal GEMM on gfx90a,
+  gfx942 and gfx950, §5).
 - The gfx12 fp8 / bf8 -> f32, `iu8`, `iu4` and 16-bit-output (f16 -> f16,
   bf16 -> bf16) WMMA atoms are declared on `gfx12-generic` (and so on
   `gfx1201`); no family uses them yet.
@@ -690,7 +692,7 @@ scheduled to gain.
 
 | Family | Supported | Not supported |
 |---|---|---|
-| Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum); fp64 on gfx942 when the spec's dtype is `fp64` (A/B/C homogeneous, fp64 accum; 16x16x4 warp tile; mem, compv3 and compv4 pipelines) | **fp8/bf8** — rejected (only f16, bf16 and fp64 are accepted); **fp64** with split-K, fused epilogues or `direct_to_lds` with `pad_k`, or on other targets |
+| Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum); fp64 on gfx90a, gfx942 and gfx950 when the spec's dtype is `fp64` (A/B/C homogeneous, fp64 accum; 16x16x4 warp tile; mem, compv3 and compv4 pipelines) | **fp8/bf8** — rejected (only f16, bf16 and fp64 are accepted); **fp64** with split-K, fused epilogues, `direct_to_lds` with `pad_k`, `direct_to_lds` on gfx90a, or on other targets |
 | MFMA GEMM (`mfma_gemm.py`) | f16, bf16 (`_SUPPORTED_DTYPES`, `:178`) | **fp8/bf8** — rejected at `:192-195`; `:62-65` records the missing lane-decode and byte-wise A/B loads, but that docstring is itself stale (it still calls `f16` "the only shipped option" after bf16 landed) |
 | Integer WMMA GEMM ([wmma_gemm_iu8.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8.py)) | Signed int8 A/B packed four values per i32 → i32 accumulation/output; gfx1151 and gfx11-generic (`iu8` WMMA atom) | Raw byte-pointer inputs; targets without this atom; requires complete 16×16 tiles and K a multiple of 16 |
 | Integer WMMA GEMM with dequantization ([wmma_gemm_iu8_dequant.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py)) | Same packed int8 input and i32 accumulation, runtime per-tensor scales → f16 output | Same target and packing constraints; no arbitrary output dtype selector |

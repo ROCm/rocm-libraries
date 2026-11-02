@@ -4,9 +4,13 @@
 """Multi-arch attention candidates: the two unified paths and D256 decode.
 
 This module holds the candidates whose ``Capability`` names more than one arch.
-That is a different claim from "portable": each one still lists its arches
-explicitly, because there is no family wildcard (section 8.1, step 7). A new
-target inherits nothing here until someone opts it in.
+That is a different claim from "portable": D256 decode lists its arches
+explicitly, because there is no family wildcard (section 8.1, step 7), and a new
+target inherits nothing from it until someone opts it in. Naming a generic target
+is not a wildcard either: ``listed_arch_for`` admits the processors whose rows
+point at it, which are the generic's target under their own names. The two
+unified paths are the documented exception and declare every target that holds
+facts of its own (see ``_UNIFIED_CAPABILITY``).
 """
 
 from __future__ import annotations

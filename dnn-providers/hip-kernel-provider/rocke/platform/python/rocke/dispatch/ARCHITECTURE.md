@@ -1323,7 +1323,9 @@ dependence.
 Steps 1–6 touch no existing file except the one-line `__init__` addition. That is
 the open/closed property, and section 10 makes it an executable invariant. Step 7
 is the deliberate exception: because there is no family wildcard, a new target
-inherits a generic kernel only when someone opts it in.
+inherits a generic kernel only when someone opts it in. A processor whose
+`arch_specs.json` row points at a generic target is not a new target in this
+sense: a list that names the generic already covers it (`listed_arch_for`).
 
 ---
 
@@ -1558,14 +1560,14 @@ the unified paths.
 
 Seven invariants, one test module per family.
 
-**Arch gate.** Every candidate rejects every architecture it does not declare.
-Parametrize over `known_arches()` and the registry — this catches a missing gate
-on a kernel added years later.
+**Arch gate.** Every candidate rejects every architecture it does not declare,
+directly or through a declared generic target. Parametrize over `known_arches()`
+and the registry — this catches a missing gate on a kernel added years later.
 
 ```python
 for cand in registry.candidates():
     for arch in known_arches():
-        if arch in cand.capability.arches:
+        if listed_arch_for(arch, cand.capability.arches) is not None:
             continue
         ok, why = cand.admits(request_for(arch))
         assert not ok, f"{cand.name} wrongly admits {arch}"

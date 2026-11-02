@@ -250,6 +250,13 @@ def test_f64_gemm_rejects_unsupported(spec, reason):
     _assert_both_engines_refuse(spec, "gfx942", reason)
 
 
+def test_f64_gemm_targets_are_the_documented_ones():
+    """dtype_support.md and SUPPORT_MATRIX.md name the targets the validator
+    admits fp64 GEMM on, and the one of them that refuses direct_to_lds."""
+    assert _F64_GEMM_ARCHS == ("gfx90a", "gfx942", "gfx950")
+    assert _F64_GEMM_ARCHS_WITHOUT_DMA == ("gfx90a",)
+
+
 @pytest.mark.parametrize("arch", _F64_GEMM_ARCHS_WITHOUT_DMA)
 def test_f64_gemm_direct_to_lds_refused_without_dma(arch):
     spec = _spec((64, 64, 16, 2, 2), "compv3", "cshuffle", direct_to_lds=True)

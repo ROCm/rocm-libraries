@@ -271,8 +271,13 @@ invisible to `for_arch()` and `coverage()` and would make both answer by omissio
 Two decisions stay deliberate rather than automatic:
 
 - **Generic multi-arch candidates do not inherit the target.** There is no family
-  wildcard; extend a `unified_*` candidate's `arches` only once that generic kernel
-  has actually been run there. Silence is the correct default.
+  wildcard; extend a candidate's `arches` only once its kernel has actually been
+  run there. Silence is the correct default. A processor whose row points at a
+  generic target is the exception by construction, not a wildcard: a list that
+  names the generic covers it (`listed_arch_for`), because it is the generic's
+  target under its own name. The `unified_*` candidates declare every target with
+  facts of its own (`arches_with_own_facts()`) on purpose; a new such target
+  reaches them on landing.
 - **Registration is not promotion.** Making the new arch's specialized kernel win
   under `algorithm="auto"` is a separate decision that wants benchmark evidence.
   Land it opt-in.
