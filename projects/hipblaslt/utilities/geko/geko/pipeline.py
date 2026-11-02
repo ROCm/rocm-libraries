@@ -226,6 +226,7 @@ def run_search(
     logger.info(f"Full output directory: '{full_output_dir}'")
     logger.info(f"Keep threshold: {keep_thr}")
     logger.info(f"Performance threshold: {up_thr}")
+    logger.info(f"Search profile: {profile}")
 
     match_table_path = hipblaslt_path / "build/release/device-library/MatchTable.yaml"
     if custom_lib_src is not None:
