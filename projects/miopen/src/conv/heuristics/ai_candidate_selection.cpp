@@ -953,8 +953,9 @@ std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& ra
         if(it == derived_registry.end())
             MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: unknown kernel-config "
                          "derived feature '" +
-                         name + "' in metadata; add its computer to the registry to match this "
-                                "model.");
+                         name +
+                         "' in metadata; add its computer to the registry to match this "
+                         "model.");
         it->second();
     }
 
@@ -1715,11 +1716,10 @@ ModelSelectBestCandidate(const std::string& arch,
 }
 
 MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>>
-SelectBestVocabCandidate(
-    const std::string& arch,
-    const std::string& solver,
-    const std::map<std::string, float>& features,
-    const std::function<bool(const std::string&, int)>& is_args_supported)
+SelectBestVocabCandidate(const std::string& arch,
+                         const std::string& solver,
+                         const std::map<std::string, float>& features,
+                         const std::function<bool(const std::string&, int)>& is_args_supported)
 {
     // Parse the "+<split_k>" a split-k solver appends after the closing '>' of the GetTypeString.
     // The base kernel string itself can contain '+' (e.g. "<256l+256m, ...>"), so search only after
@@ -1753,8 +1753,8 @@ SelectBestVocabCandidate(
         // encoder, no FillValidKernels).
         std::vector<std::pair<int, float>> scored;
         {
-            const miopen::ScopedTimeLogger rank_timer(
-                solver + " lazy_applicability.rank (" + std::to_string(vocab.size()) + " vocab)");
+            const miopen::ScopedTimeLogger rank_timer(solver + " lazy_applicability.rank (" +
+                                                      std::to_string(vocab.size()) + " vocab)");
             const auto& model           = GetCandidateSelectionModel(arch, solver);
             const auto encoded_features = model.EncodeInputFeatures(features);
             std::vector<std::vector<float>> vocab_embeddings;
