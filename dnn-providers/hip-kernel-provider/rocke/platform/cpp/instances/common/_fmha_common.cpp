@@ -746,8 +746,9 @@ void rocke_fmha_kernel_builder_appendkv_grid(rocke_fmha_kernel_builder_t* kb,
     }
     b = &kb->b;
     /* self.q_tile_base = b.to_sgpr_u32(b.mul(b.block_id_x(), b.const_i32(block_q))) */
-    kb->q_tile_base = rocke_b_to_sgpr_u32(
-        b, rocke_b_mul(b, rocke_b_block_id_x(b), rocke_b_const_i32(b, block_q)));
+    kb->q_tile_base = rocke_b_block_id_x(b);
+    kb->q_tile_base = rocke_b_mul(b, kb->q_tile_base, rocke_b_const_i32(b, block_q));
+    kb->q_tile_base = rocke_b_to_sgpr_u32(b, kb->q_tile_base);
     /* self.kv_head_idx = b.to_sgpr_u32(b.block_id_y()) */
     kb->kv_head_idx = rocke_b_to_sgpr_u32(b, rocke_b_block_id_y(b));
     /* if has_batch_axis: self.batch_idx = b.to_sgpr_u32(b.block_id_z()) */

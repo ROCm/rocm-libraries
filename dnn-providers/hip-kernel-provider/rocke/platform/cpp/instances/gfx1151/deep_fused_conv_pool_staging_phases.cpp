@@ -242,10 +242,10 @@ void rocke_gfx1151_dfcp_stage_conv0_w0(rocke_gfx1151_dfcp_build_ctx_t* ctx,
             rocke_value_t* sidx = rocke_b_select(b, in_range, idx, c0);
             rocke_value_t* n = rocke_b_div(b, sidx, c_kpad);
             rocke_value_t* kg = rocke_b_mod(b, sidx, c_kpad);
-            rocke_value_t* valid = rocke_b_land(
-                b,
-                in_range,
-                rocke_b_land(b, rocke_b_cmp_lt(b, n, c_k0), rocke_b_cmp_lt(b, kg, c_kg)));
+            /* Bound in Python's left-to-right order. */
+            rocke_value_t* n_ok = rocke_b_cmp_lt(b, n, c_k0);
+            rocke_value_t* kg_ok = rocke_b_cmp_lt(b, kg, c_kg);
+            rocke_value_t* valid = rocke_b_land(b, in_range, rocke_b_land(b, n_ok, kg_ok));
             rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, n, c_kg), kg);
             rocke_value_t* safe_off = rocke_b_select(b, valid, off, c0);
             rocke_value_t* raw_i8 = rocke_b_global_load_i8(b, w0_ptr, safe_off, 0);

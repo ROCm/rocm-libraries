@@ -419,15 +419,21 @@ void rocke_gfx942_attn2d_emit_q_gather(rocke_gfx942_attn2d_build_ctx_t* ctx)
                                   ctx->qb_start_pos,
                                   rocke_b_div(b, q32_row, rocke_b_const_i32(b, (int64_t)ctx->NQK)));
                 /* q32_h = kv_head_idx*NQK + q32_row % NQK */
-                q32_h = rocke_b_add(
-                    b,
-                    rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, (int64_t)ctx->NQK)),
-                    rocke_b_mod(b, q32_row, rocke_b_const_i32(b, (int64_t)ctx->NQK)));
+                /* Bound in Python's left-to-right order. */
+                {
+                    rocke_value_t* head_base
+                        = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, (int64_t)ctx->NQK));
+                    rocke_value_t* head_in_kv
+                        = rocke_b_mod(b, q32_row, rocke_b_const_i32(b, (int64_t)ctx->NQK));
+                    q32_h = rocke_b_add(b, head_base, head_in_kv);
+                }
                 /* q32_mask = (q32_pos<cur_batch_q_len) && (q32_h<NUM_QH) */
-                q32_mask = rocke_b_land(
-                    b,
-                    rocke_b_cmp_lt(b, q32_pos, ctx->cur_batch_q_len),
-                    rocke_b_cmp_lt(b, q32_h, rocke_b_const_i32(b, (int64_t)ctx->NUM_QH)));
+                {
+                    rocke_value_t* pos_ok = rocke_b_cmp_lt(b, q32_pos, ctx->cur_batch_q_len);
+                    rocke_value_t* head_ok
+                        = rocke_b_cmp_lt(b, q32_h, rocke_b_const_i32(b, (int64_t)ctx->NUM_QH));
+                    q32_mask = rocke_b_land(b, pos_ok, head_ok);
+                }
                 q32_pos_safe = rocke_b_select(b, q32_mask, q32_pos, rocke_b_const_i32(b, 0));
                 q32_h_safe = rocke_b_select(b, q32_mask, q32_h, rocke_b_const_i32(b, 0));
 
@@ -448,10 +454,12 @@ void rocke_gfx942_attn2d_emit_q_gather(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 q32_raw = rocke_b_global_load_vN(b, ctx->query, q32_off, dtype, Q32_FRAG, 8);
                 /* q32 = vector_select(splat(q32_mask, Q32_FRAG), q32_raw,
                  *                     zero_vec(dtype, Q32_FRAG)) */
-                q32 = rocke_b_vector_select(b,
-                                            rocke_b_vector_splat(b, q32_mask, Q32_FRAG),
-                                            q32_raw,
-                                            rocke_b_zero_vec(b, dtype, Q32_FRAG));
+                {
+                    /* Bound in Python's left-to-right order. */
+                    rocke_value_t* mask_vec = rocke_b_vector_splat(b, q32_mask, Q32_FRAG);
+                    rocke_value_t* zero = rocke_b_zero_vec(b, dtype, Q32_FRAG);
+                    q32 = rocke_b_vector_select(b, mask_vec, q32_raw, zero);
+                }
             }
             else
             {

@@ -249,9 +249,12 @@ void rocke_moe_sort_persistent_histogram(rocke_moe_sort_ctx_t* ctx)
 
             /* valid_e = b.land(b.cmp_ge(eid, c_zero),
              *                  b.cmp_lt(eid, num_experts)) */
-            ctx->valid_e = rocke_b_land(b,
-                                        rocke_b_cmp_ge(b, ctx->eid, ctx->c_zero),
-                                        rocke_b_cmp_lt(b, ctx->eid, ctx->num_experts));
+            {
+                /* Bound in Python's left-to-right order. */
+                rocke_value_t* eid_ge0 = rocke_b_cmp_ge(b, ctx->eid, ctx->c_zero);
+                rocke_value_t* eid_lt_n = rocke_b_cmp_lt(b, ctx->eid, ctx->num_experts);
+                ctx->valid_e = rocke_b_land(b, eid_ge0, eid_lt_n);
+            }
 
             /* with b.scf_if(valid_e): */
             {
@@ -390,9 +393,12 @@ rocke_kernel_def_t* rocke_moe_sort_persistent_scatter(rocke_moe_sort_ctx_t* ctx)
 
             /* valid_e = b.land(b.cmp_ge(eid, c_zero),
              *                  b.cmp_lt(eid, num_experts)) */
-            ctx->valid_e = rocke_b_land(b,
-                                        rocke_b_cmp_ge(b, ctx->eid, ctx->c_zero),
-                                        rocke_b_cmp_lt(b, ctx->eid, ctx->num_experts));
+            {
+                /* Bound in Python's left-to-right order. */
+                rocke_value_t* eid_ge0 = rocke_b_cmp_ge(b, ctx->eid, ctx->c_zero);
+                rocke_value_t* eid_lt_n = rocke_b_cmp_lt(b, ctx->eid, ctx->num_experts);
+                ctx->valid_e = rocke_b_land(b, eid_ge0, eid_lt_n);
+            }
 
             /* with b.scf_if(valid_e): */
             {

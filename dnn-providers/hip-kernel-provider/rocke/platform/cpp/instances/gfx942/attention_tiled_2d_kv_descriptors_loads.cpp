@@ -221,10 +221,11 @@ rocke_value_t* rocke_gfx942_attn2d_v_t_slot(rocke_gfx942_attn2d_build_ctx_t* ctx
     rocke_value_t* k_inner = rocke_b_mod(b, tok, rocke_b_const_i32(b, ctx->V_T_KPACK));
     rocke_value_t* n_group = rocke_b_div(b, dim, rocke_b_const_i32(b, ctx->V_T_NPER_ROW));
     rocke_value_t* n_inner = rocke_b_mod(b, dim, rocke_b_const_i32(b, ctx->V_T_NPER_ROW));
-    rocke_value_t* hi = rocke_b_add(
-        b,
-        rocke_b_mul(b, k_group, rocke_b_const_i32(b, ctx->V_T_NGROUPS * ctx->V_T_GROUP_STRIDE)),
-        rocke_b_mul(b, n_group, rocke_b_const_i32(b, ctx->V_T_GROUP_STRIDE)));
+    /* Bound in Python's left-to-right order. */
+    rocke_value_t* k_part
+        = rocke_b_mul(b, k_group, rocke_b_const_i32(b, ctx->V_T_NGROUPS * ctx->V_T_GROUP_STRIDE));
+    rocke_value_t* n_part = rocke_b_mul(b, n_group, rocke_b_const_i32(b, ctx->V_T_GROUP_STRIDE));
+    rocke_value_t* hi = rocke_b_add(b, k_part, n_part);
     rocke_value_t* lo
         = rocke_b_add(b, rocke_b_mul(b, n_inner, rocke_b_const_i32(b, ctx->V_T_KPACK)), k_inner);
     return rocke_b_add(b, hi, lo);
@@ -535,8 +536,8 @@ static void rocke__fast_paged_kv_voff_split(rocke_gfx942_attn2d_build_ctx_t* ctx
     (void)base_ptr_src;
     if(ctx->I64_KV_ADDR)
     {
-        rocke_value_t* base_i64
-            = rocke_b_shl(b, rocke_b_zext(b, physical, rocke_i64()), rocke_b_const_i64(b, 15));
+        rocke_value_t* base_i64 = rocke_b_zext(b, physical, rocke_i64());
+        base_i64 = rocke_b_shl(b, base_i64, rocke_b_const_i64(b, 15));
         if(out_base_i64)
             *out_base_i64 = base_i64;
         if(out_voff)

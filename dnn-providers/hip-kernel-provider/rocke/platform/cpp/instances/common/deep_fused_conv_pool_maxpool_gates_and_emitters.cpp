@@ -489,12 +489,14 @@ void rocke_dfcp_emit_inline_maxpool_from_registers(rocke_ir_builder_t* b,
             int s1 = slots[1];
             int s2 = slots[2];
             int s3 = slots[3];
-            rocke_value_t* acc = rocke_b_fmax(
-                b,
-                rocke_b_fmax(
-                    b, rocke_b_vec_extract(b, acc_vec, s0), rocke_b_vec_extract(b, acc_vec, s1)),
-                rocke_b_fmax(
-                    b, rocke_b_vec_extract(b, acc_vec, s2), rocke_b_vec_extract(b, acc_vec, s3)));
+            /* Bound in Python's left-to-right order. */
+            rocke_value_t* e0 = rocke_b_vec_extract(b, acc_vec, s0);
+            rocke_value_t* e1 = rocke_b_vec_extract(b, acc_vec, s1);
+            rocke_value_t* m01 = rocke_b_fmax(b, e0, e1);
+            rocke_value_t* e2 = rocke_b_vec_extract(b, acc_vec, s2);
+            rocke_value_t* e3 = rocke_b_vec_extract(b, acc_vec, s3);
+            rocke_value_t* m23 = rocke_b_fmax(b, e2, e3);
+            rocke_value_t* acc = rocke_b_fmax(b, m01, m23);
             rocke_value_t* y_h;
             rocke_value_t* y_off_elems;
             rocke_value_t* y_off_bytes;

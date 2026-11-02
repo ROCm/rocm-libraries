@@ -295,6 +295,16 @@ repos:
           )$
         pass_filenames: false
 
+      # A call with two op-emitting arguments emits them in a compiler-dependent
+      # order, which breaks the C++/Python byte identity. Checks the changed files;
+      # the whole tree is held to it by tests/tools/test_check_emission_order.py.
+      - id: rocke-emission-order
+        name: rocKE C++ builder calls emit in a fixed order
+        entry: python dnn-providers/hip-kernel-provider/rocke/platform/tools/check_emission_order.py
+        language: python
+        files: ^dnn-providers/hip-kernel-provider/rocke/platform/cpp/.*\.(c|cpp|h|hpp)$
+        pass_filenames: true
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:
