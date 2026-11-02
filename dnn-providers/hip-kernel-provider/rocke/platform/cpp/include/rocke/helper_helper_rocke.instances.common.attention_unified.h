@@ -85,13 +85,16 @@ typedef struct rocke_unified_attention_problem
     bool use_sinks; /* default false                                      */
     bool use_alibi; /* default false                                      */
     bool use_qq_bias; /* default false                                      */
-    bool use_additive_bias; /* default false                                */
     bool use_fp8; /* default false                                      */
     int num_cus; /* default 120 (selector only; unused by scalar)      */
     int waves_per_eu; /* Optional[int]; <0 == None                          */
     bool waves_per_eu_set;
     const char* compile_backend; /* Optional[str]; NULL == None               */
     int num_kv_blocks; /* default 0                                  */
+    /* gfx950 tiled kernels only; the scalar path never reads it. Appended last
+     * (not grouped with the other bools above) because ABI_VERSION 7 only
+     * covers appended fields -- see abi.h. */
+    bool use_additive_bias; /* default false                                */
 } rocke_unified_attention_problem_t;
 
 /* Default-constructed problem (Python field defaults). The required positional

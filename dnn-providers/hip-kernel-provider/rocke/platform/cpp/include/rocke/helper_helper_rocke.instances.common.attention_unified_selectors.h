@@ -78,11 +78,14 @@ typedef struct rocke_unified_attn_problem
     bool use_sinks; /* default false */
     bool use_alibi; /* default false */
     bool use_qq_bias; /* default false */
-    bool use_additive_bias; /* default false */
     bool use_fp8; /* default false */
     int num_cus; /* default 120 */
     /* waves_per_eu / compile_backend are not read by the ported selectors. */
     int num_kv_blocks; /* default 0 ("unknown") */
+    /* gfx950 tiled kernels only. Appended last (not grouped with the other
+     * bools above) because ABI_VERSION 7 only covers appended fields -- see
+     * abi.h. */
+    bool use_additive_bias; /* default false */
 } rocke_unified_attn_problem_t;
 
 /* Python: UnifiedAttentionProblem.num_queries_per_kv property.

@@ -94,8 +94,6 @@ typedef struct rocke_attention_tiled_2d_spec
     /* ---- defaulted ---- */
     bool use_alibi; /* False */
     bool use_qq_bias; /* False */
-    /* gfx950 only; the gfx942 validator rejects it. Appends four kernel params. */
-    bool use_additive_bias; /* False */
     int num_seqs; /* 0 */
     int num_warps; /* 1 */
 
@@ -181,6 +179,10 @@ typedef struct rocke_attention_tiled_2d_spec
     bool use_global_load_lds_k; /* False */
     bool use_q_major_grid; /* False */
     bool use_qblock_reverse; /* False (gfx950: longest-first query blocks) */
+    /* gfx950 only; the gfx942 validator rejects it. Appends four kernel params.
+     * Appended last (not grouped with the other defaulted bools above) because
+     * ABI_VERSION 7 only covers appended fields -- see abi.h. */
+    bool use_additive_bias; /* False */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

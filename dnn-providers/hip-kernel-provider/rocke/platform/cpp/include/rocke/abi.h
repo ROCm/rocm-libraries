@@ -86,8 +86,15 @@ extern "C" {
  * 4: rocke_memory_caps_t gained has_global_float_atomic_add at its end, which
  *    changes its size and with it the offset of rocke_arch_target_t.limits.
  * 5: rocke_tensor_view_t gained buffer (rocke_tv_buffer_resource_t) at its end,
- *    which changes its size and that of every struct embedding a view. */
-#define ROCKE_ABI_VERSION 5
+ *    which changes its size and that of every struct embedding a view.
+ * 6: rocke_attention_tiled_2d_spec_t (gfx942) and
+ *    rocke_unified_attention_reduce_tiled_spec_t (gfx942, gfx950) gained
+ *    emit_lse at their end, which changes their size.
+ * 7: rocke_attention_tiled_2d_spec_t (gfx942, gfx950),
+ *    rocke_unified_attention_3d_tiled_spec_t (gfx942, gfx950),
+ *    rocke_unified_attention_problem_t and rocke_unified_attn_problem_t gained
+ *    use_additive_bias at their end, which changes their size. */
+#define ROCKE_ABI_VERSION 7
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

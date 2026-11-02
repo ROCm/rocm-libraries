@@ -143,8 +143,6 @@ typedef struct rocke_unified_attention_3d_tiled_spec
     /* ---- defaulted ---- */
     bool use_alibi; /* False */
     bool use_qq_bias; /* False */
-    /* gfx950 only; the gfx942 builder rejects it. Appends four kernel params. */
-    bool use_additive_bias; /* False */
     int num_seqs; /* 0 */
 
     bool has_waves_per_eu; /* Optional[int] None */
@@ -176,6 +174,10 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
      * can be extended. */
     bool use_wave_page_id_load; /* False */
+    /* gfx950 only; the gfx942 builder rejects it. Appends four kernel params.
+     * Appended last (not grouped with the other defaulted bools above) because
+     * ABI_VERSION 7 only covers appended fields -- see abi.h. */
+    bool use_additive_bias; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 /* Materialise every defaulted field. Required fields are zero/NULL-init; the

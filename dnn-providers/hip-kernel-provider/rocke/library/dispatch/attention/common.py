@@ -824,26 +824,28 @@ def _unified_path_coverage(
 
     The single owner of which gate judges a unified problem. The scalar gate
     knows nothing about the tiled-only features (additive bias, the LSE
-    output), so a problem with either is judged by the path's own tiled gate:
-    instead of the scalar gate for bias (which the scalar gate refuses), after
-    it for LSE. The tiled gate limits each feature to the arches that
-    implement it; the split-KV gate owns LSE and the 2D gate refuses it. The
-    unified kernels take an fp32 bias only.
+    output), so neither is shown to it: both are stripped before the scalar
+    call, which still runs every other scalar-only check (e.g. a q_dtype
+    override) regardless of whether bias or LSE is requested. If the
+    stripped problem clears the scalar gate and either feature is actually
+    present, the path's own tiled gate judges the real problem instead. The
+    tiled gate limits each feature to the arches that implement it; the
+    split-KV gate owns LSE and the 2D gate refuses it. The unified kernels
+    take an fp32 bias only.
     """
     path_gate = (
         supports_native_unified_attention_3d_tiled
         if path == "3d"
         else supports_native_unified_attention_tiled
     )
-    if problem.use_additive_bias:
-        if str(req.attn_bias_dtype).strip().lower() != "f32":
-            return False, (
-                "unified attention takes an f32 additive bias only, got "
-                f"attn_bias_dtype={req.attn_bias_dtype!r}"
-            )
-        return path_gate(problem, arch=arch)
-    ok, why = supports_native_unified_attention(problem, arch=arch)
-    if ok and problem.emit_lse:
+    if problem.use_additive_bias and str(req.attn_bias_dtype).strip().lower() != "f32":
+        return False, (
+            "unified attention takes an f32 additive bias only, got "
+            f"attn_bias_dtype={req.attn_bias_dtype!r}"
+        )
+    base = replace(problem, emit_lse=False, use_additive_bias=False)
+    ok, why = supports_native_unified_attention(base, arch=arch)
+    if ok and (problem.use_additive_bias or problem.emit_lse):
         return path_gate(problem, arch=arch)
     return ok, why
 
