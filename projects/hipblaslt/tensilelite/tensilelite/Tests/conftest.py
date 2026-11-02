@@ -198,7 +198,7 @@ def _restore_valid_parameters_isa():
     entry is gfx803. A gfx942 assignment that does not restore leaves the next
     test on this worker comparing against ``(9, 4, *)``.
     """
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved = validParameters.get("ISA")
     saved_isa = None if saved is None else list(saved)
