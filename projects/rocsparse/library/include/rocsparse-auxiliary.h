@@ -1264,11 +1264,13 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
  *  @param[in]
  *  ell_block_dim block dimension of the sparse blocked ELL matrix.
  *  @param[in]
- *  ell_cols      column indices of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_cols      number of columns of the blocked ELL storage, that is, \p ell_block_dim times the
+ *                number of blocks stored per block row. Must not exceed \p cols.
  *  @param[in]
- *  ell_col_ind   column indices of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_col_ind   column indices of the blocked ELL matrix. Must be an array of length
+ *                \p ceil(rows/ell_block_dim)*ell_cols/ell_block_dim.
  *  @param[in]
- *  ell_val       values of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_val       values of the blocked ELL matrix. Must be an array of length \p rows*ell_cols.
  *  @param[in]
  *  idx_type      \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
  *  @param[in]
@@ -1278,9 +1280,9 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
  *                \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr, \p ell_cols, \p ell_col_ind, or \p ell_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows or \p cols is invalid.
- *  \retval rocsparse_status_invalid_value if \p idx_type, \p idx_base, or \p data_type is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr, \p ell_col_ind, or \p ell_val is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows, \p cols, \p ell_block_dim, or \p ell_cols is invalid.
+ *  \retval rocsparse_status_invalid_value if \p ell_block_dir, \p idx_type, \p idx_base, or \p data_type is invalid.
  */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -2580,11 +2582,13 @@ rocsparse_status rocsparse_const_ell_get(rocsparse_const_spmat_descr descr,
  *  @param[out]
  *  ell_block_dim block dimension of the sparse blocked ELL matrix.
  *  @param[out]
- *  ell_cols      column indices of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_cols      number of columns of the blocked ELL storage, that is, \p ell_block_dim times the
+ *                number of blocks stored per block row.
  *  @param[out]
- *  ell_col_ind   column indices of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_col_ind   column indices of the blocked ELL matrix, an array of length
+ *                \p ceil(rows/ell_block_dim)*ell_cols/ell_block_dim.
  *  @param[out]
- *  ell_val       values of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_val       values of the blocked ELL matrix, an array of length \p rows*ell_cols.
  *  @param[out]
  *  idx_type      \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
  *  @param[out]
@@ -2594,9 +2598,8 @@ rocsparse_status rocsparse_const_ell_get(rocsparse_const_spmat_descr descr,
  *                \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr, \p ell_cols, \p ell_col_ind, or \p ell_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows, \p cols, or \p ell_block_dim is invalid.
- *  \retval rocsparse_status_invalid_value if \p ell_block_dir, \p idx_type, \p idx_base, or \p data_type is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or any output pointer is invalid.
+ *  \retval rocsparse_status_not_initialized if \p descr is not initialized.
  */
 /**@{*/
 ROCSPARSE_EXPORT
