@@ -386,39 +386,19 @@ void runConvBwdExecutorVsCpu(const std::vector<int64_t>& dyDims,
     auto wStrides = generateStrides(wDims);
     auto dxStrides = generateStrides(dxDims);
 
-    auto graphBuilder
-        = createConvBwdGraph(DY_UID,
-                             W_UID,
-                             DX_UID,
-                             dyDims,
-                             wDims,
-                             dxDims,
-                             dyStrides,
-                             wStrides,
-                             dxStrides,
-                             padding,
-                             convStride,
-                             dilation,
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<ComputeT>());
-
-    // The CPU reference has no pure-HALF/BFLOAT16 compute signatures, so it runs a FLOAT-compute graph.
-    auto cpuGraphBuilder
-        = createConvBwdGraph(DY_UID,
-                             W_UID,
-                             DX_UID,
-                             dyDims,
-                             wDims,
-                             dxDims,
-                             dyStrides,
-                             wStrides,
-                             dxStrides,
-                             padding,
-                             convStride,
-                             dilation,
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
+    auto graphBuilder = createConvBwdGraph(DY_UID,
+                                           W_UID,
+                                           DX_UID,
+                                           dyDims,
+                                           wDims,
+                                           dxDims,
+                                           dyStrides,
+                                           wStrides,
+                                           dxStrides,
+                                           padding,
+                                           convStride,
+                                           dilation,
+                                           hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
 
     auto dyCount = elementCount(dyDims);
     auto wCount = elementCount(wDims);
@@ -472,8 +452,7 @@ void runConvBwdExecutorVsCpu(const std::vector<int64_t>& dyDims,
     cpuVariantPack[DX_UID] = cpuDx.rawHostData();
 
     CpuReferenceGraphExecutor cpuExecutor;
-    cpuExecutor.execute(
-        cpuGraphBuilder.GetBufferPointer(), cpuGraphBuilder.GetSize(), cpuVariantPack);
+    cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
 
     // Compare GPU executor output against CPU executor output
     const auto* cpuResult = static_cast<const T*>(cpuDx.rawHostData());
@@ -502,22 +481,19 @@ void runConvWrwExecutorVsCpu(const std::vector<int64_t>& xDims,
     auto dyStrides = generateStrides(dyDims);
     auto dwStrides = generateStrides(dwDims);
 
-    auto graphBuilder
-        = createConvWrwGraph(X_UID,
-                             DY_UID,
-                             DW_UID,
-                             xDims,
-                             dyDims,
-                             dwDims,
-                             xStrides,
-                             dyStrides,
-                             dwStrides,
-                             padding,
-                             convStride,
-                             dilation,
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<T>(),
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<ComputeT>());
+    auto graphBuilder = createConvWrwGraph(X_UID,
+                                           DY_UID,
+                                           DW_UID,
+                                           xDims,
+                                           dyDims,
+                                           dwDims,
+                                           xStrides,
+                                           dyStrides,
+                                           dwStrides,
+                                           padding,
+                                           convStride,
+                                           dilation,
+                                           hipdnn_test_sdk::utilities::nativeTypeToDataType<T>());
 
     auto xCount = elementCount(xDims);
     auto dyCount = elementCount(dyDims);
@@ -992,22 +968,6 @@ TEST(TestGpuReferenceGraphExecutorBfp16, ConvBwdExecutes)
         {1, 1, 2, 2}, {1, 1, 3, 3}, {1, 1, 4, 4}, {0, 0}, {1, 1}, {1, 1});
 }
 
-TEST(TestGpuReferenceGraphExecutorFp16, ConvBwdHalfComputeExecutes)
-{
-    SKIP_IF_NO_DEVICES();
-
-    runConvBwdExecutorVsCpu<hipdnn_data_sdk::types::half, hipdnn_data_sdk::types::half>(
-        {1, 1, 2, 2}, {1, 1, 3, 3}, {1, 1, 4, 4}, {0, 0}, {1, 1}, {1, 1});
-}
-
-TEST(TestGpuReferenceGraphExecutorBfp16, ConvBwdBfloat16ComputeExecutes)
-{
-    SKIP_IF_NO_DEVICES();
-
-    runConvBwdExecutorVsCpu<hipdnn_data_sdk::types::bfloat16, hipdnn_data_sdk::types::bfloat16>(
-        {1, 1, 2, 2}, {1, 1, 3, 3}, {1, 1, 4, 4}, {0, 0}, {1, 1}, {1, 1});
-}
-
 TEST(TestGpuReferenceGraphExecutorFp32, ConvWrwBasicExecutes)
 {
     SKIP_IF_NO_DEVICES();
@@ -1045,22 +1005,6 @@ TEST(TestGpuReferenceGraphExecutorBfp16, ConvWrwExecutes)
     SKIP_IF_NO_DEVICES();
 
     runConvWrwExecutorVsCpu<hipdnn_data_sdk::types::bfloat16>(
-        {1, 1, 4, 4}, {1, 1, 2, 2}, {1, 1, 3, 3}, {0, 0}, {1, 1}, {1, 1});
-}
-
-TEST(TestGpuReferenceGraphExecutorFp16, ConvWrwHalfComputeExecutes)
-{
-    SKIP_IF_NO_DEVICES();
-
-    runConvWrwExecutorVsCpu<hipdnn_data_sdk::types::half, hipdnn_data_sdk::types::half>(
-        {1, 1, 4, 4}, {1, 1, 2, 2}, {1, 1, 3, 3}, {0, 0}, {1, 1}, {1, 1});
-}
-
-TEST(TestGpuReferenceGraphExecutorBfp16, ConvWrwBfloat16ComputeExecutes)
-{
-    SKIP_IF_NO_DEVICES();
-
-    runConvWrwExecutorVsCpu<hipdnn_data_sdk::types::bfloat16, hipdnn_data_sdk::types::bfloat16>(
         {1, 1, 4, 4}, {1, 1, 2, 2}, {1, 1, 3, 3}, {0, 0}, {1, 1}, {1, 1});
 }
 

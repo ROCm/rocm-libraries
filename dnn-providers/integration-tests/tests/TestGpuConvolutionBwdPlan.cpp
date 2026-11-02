@@ -41,9 +41,7 @@ inline flatbuffers::FlatBufferBuilder
                              = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                              int64_t dyUid = 10,
                              int64_t wUid = 11,
-                             int64_t dxUid = 12,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType computeType
-                             = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                             int64_t dxUid = 12)
 {
     const std::vector<int64_t> dxDims = {4, 4, 4, 4};
     const std::vector<int64_t> dxStrides = {64, 16, 4, 1};
@@ -65,8 +63,7 @@ inline flatbuffers::FlatBufferBuilder
                               {1, 1},
                               {1, 1},
                               inputDataType,
-                              outputDataType,
-                              computeType);
+                              outputDataType);
 }
 
 template <typename DyType, typename WType, typename DxType, typename ComputeType>
@@ -86,24 +83,6 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& dyDims,
     auto dxStrides = generateStrides(dxDims);
 
     auto graphBuilder
-        = createConvBwdGraph(DY_UID,
-                             W_UID,
-                             DX_UID,
-                             dyDims,
-                             wDims,
-                             dxDims,
-                             dyStrides,
-                             wStrides,
-                             dxStrides,
-                             padding,
-                             stride,
-                             dilation,
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<DyType>(),
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<DxType>(),
-                             hipdnn_test_sdk::utilities::nativeTypeToDataType<ComputeType>());
-
-    // The CPU reference has no pure-HALF/BFLOAT16 compute signatures, so it runs a FLOAT-compute graph.
-    auto cpuGraphBuilder
         = createConvBwdGraph(DY_UID,
                              W_UID,
                              DX_UID,
@@ -186,8 +165,7 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& dyDims,
     cpuVariantPack[DX_UID] = cpuDx.rawHostData();
 
     hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
-    cpuExecutor.execute(
-        cpuGraphBuilder.GetBufferPointer(), cpuGraphBuilder.GetSize(), cpuVariantPack);
+    cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
 
     // Compare GPU output against CPU reference
     const auto* cpuResult = static_cast<const DxType*>(cpuDx.rawHostData());
@@ -399,53 +377,6 @@ TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableFalseWhenComputeTypeMismatche
     EXPECT_FALSE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 }
 
-TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableForHalfCompute)
-{
-    auto graphBuilder
-        = createCustomConvBwdGraph(DataType::HALF, DataType::HALF, 10, 11, 12, DataType::HALF);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
-        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
-
-    const GpuConvolutionBwdPlanBuilder<DataType::HALF,
-                                       DataType::HALF,
-                                       DataType::HALF,
-                                       DataType::HALF>
-        halfComputeBuilder;
-    EXPECT_TRUE(halfComputeBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-
-    // The float-compute builder must not accept a graph whose node compute type is HALF.
-    const GpuConvolutionBwdPlanBuilder<DataType::HALF,
-                                       DataType::HALF,
-                                       DataType::HALF,
-                                       DataType::FLOAT>
-        floatComputeBuilder;
-    EXPECT_FALSE(floatComputeBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-}
-
-TEST(TestGpuConvolutionBwdPlanBuilder, IsApplicableForBfloat16Compute)
-{
-    auto graphBuilder = createCustomConvBwdGraph(
-        DataType::BFLOAT16, DataType::BFLOAT16, 10, 11, 12, DataType::BFLOAT16);
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
-        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
-
-    const GpuConvolutionBwdPlanBuilder<DataType::BFLOAT16,
-                                       DataType::BFLOAT16,
-                                       DataType::BFLOAT16,
-                                       DataType::BFLOAT16>
-        bfloat16ComputeBuilder;
-    EXPECT_TRUE(
-        bfloat16ComputeBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-
-    // The float-compute builder must not accept a graph whose node compute type is BFLOAT16.
-    const GpuConvolutionBwdPlanBuilder<DataType::BFLOAT16,
-                                       DataType::BFLOAT16,
-                                       DataType::BFLOAT16,
-                                       DataType::FLOAT>
-        floatComputeBuilder;
-    EXPECT_FALSE(floatComputeBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-}
-
 TEST(TestGpuConvolutionBwdPlanBuilder, BuildNodePlanThrowsForWrongAttributesType)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
@@ -584,14 +515,6 @@ TEST(TestGpuConvolutionBwdPlanFp16, ExecutePlan)
         {1, 1, 2, 2}, {1, 1, 3, 3}, {1, 1, 4, 4}, {0, 0}, {1, 1}, {1, 1});
 }
 
-TEST(TestGpuConvolutionBwdPlanFp16, ExecutePlanPure)
-{
-    SKIP_IF_NO_DEVICES();
-
-    runBwdPlanExecuteVsCpuRef<half, half, half, half>(
-        {1, 1, 2, 2}, {1, 1, 3, 3}, {1, 1, 4, 4}, {0, 0}, {1, 1}, {1, 1});
-}
-
 // ============================================================================
 // BF16 plan execution tests
 // ============================================================================
@@ -604,10 +527,39 @@ TEST(TestGpuConvolutionBwdPlanBfp16, ExecutePlan)
         {1, 1, 2, 2}, {1, 1, 3, 3}, {1, 1, 4, 4}, {0, 0}, {1, 1}, {1, 1});
 }
 
-TEST(TestGpuConvolutionBwdPlanBfp16, ExecutePlanPure)
+TEST(TestGpuConvolutionBwdPlanBuilder, IsNotApplicableForConvolutionMode)
 {
-    SKIP_IF_NO_DEVICES();
+    auto graphBuilder = createCustomConvBwdGraph();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
-    runBwdPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, bfloat16>(
-        {1, 1, 2, 2}, {1, 1, 3, 3}, {1, 1, 4, 4}, {0, 0}, {1, 1}, {1, 1});
+    const GpuConvolutionBwdPlanBuilder<DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT>
+        patient;
+
+    EXPECT_TRUE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+
+    // The kernels are cross-correlation only, so true convolution must be rejected.
+    auto* attributes = const_cast<ConvolutionBwdAttributes*>(
+        graphWrap.getNode(0).attributes_as_ConvolutionBwdAttributes());
+    ASSERT_NE(attributes, nullptr);
+    ASSERT_TRUE(attributes->mutate_conv_mode(ConvMode::CONVOLUTION));
+
+    EXPECT_FALSE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+}
+
+TEST(TestGpuConvolutionBwdPlanBuilder, PureReducedPrecisionComputeSignatureThrows)
+{
+    GpuPlanBuilderRegistry registry;
+
+    // Reduced-precision compute would accumulate in 16 bits, so it is not registered.
+    const GpuConvolutionBwdSignatureKey halfKey{
+        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF};
+    const GpuConvolutionBwdSignatureKey bfloat16Key{
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16};
+
+    EXPECT_THROW(registry.getPlanBuilder(halfKey), std::runtime_error);
+    EXPECT_THROW(registry.getPlanBuilder(bfloat16Key), std::runtime_error);
 }

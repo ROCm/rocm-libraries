@@ -14,7 +14,6 @@ namespace hipdnn_integration_tests::test_utils
 
 // Creates a minimal graph with a ConvolutionWrw node and separate input/output data types.
 // Uses symmetric padding (prePadding == postPadding == padding).
-// computeType is the node compute data type.
 // inputDataType applies to x and dy tensors; outputDataType applies to dw tensor.
 inline flatbuffers::FlatBufferBuilder
     createConvWrwGraph(int64_t xUid,
@@ -30,9 +29,7 @@ inline flatbuffers::FlatBufferBuilder
                        const std::vector<int64_t>& convStride,
                        const std::vector<int64_t>& dilation,
                        hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType computeType
-                       = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                       hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -59,7 +56,7 @@ inline flatbuffers::FlatBufferBuilder
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "conv_wrw_node",
-                                     computeType,
+                                     DataType::FLOAT,
                                      NodeAttributes::ConvolutionWrwAttributes,
                                      convWrwAttrs.Union()));
 
