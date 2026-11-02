@@ -2,10 +2,11 @@
 
 - Contributors: Adam Dickin
 - **Status**: Planned
-- **Status notes**: Proposed. Nothing is merged to `develop`. S1–S5, S9, S11, S12 (hip-kernel-provider
-  only), S13 and the hip-kernel-provider spaces of S17 are built on an unmerged branch;
-  [§17.1](#171-stories) gives the state of each story, and each section says what is not yet built.
-  S6 (typed decline reasons) is deferred.
+- **Status notes**: Proposed. Nothing is merged to `develop`. S1–S5, S7–S9, S11–S13 (S12 for
+  hip-kernel-provider only), S15 (measured on gfx950) and the hip-kernel-provider spaces of S17 are
+  built on an unmerged branch; [§17.1](#171-stories) gives the state of each story, and each section
+  says what is not yet built. S6 (typed decline reasons) is deferred. S10, S14, S16 and S17b (except
+  its SDPA backward space) are not started.
 - **Last verified**: 2026-11-02 against the implementation branch `users/addickin/gauntlet_domains_align`
   (merged with `develop` `79b4ae8503b`)
 
@@ -147,15 +148,22 @@ dnn-providers/integration-tests/gauntlet/
   spaces/
     SdpaFwd.space.json              ASM_SDPA region
     SdpaFwd.Gfx950Dense.space.json  rocKE gfx950 dense attention region
+    SdpaFwd.Flash2Region, SdpaFwd.Gfx1151, SdpaFwd.Gfx1151Decode, SdpaBackward   (.space.json each)
     RMSNorm.space.json
     Layernorm, LayernormBackward, Batchnorm, BatchnormInference, BatchnormBackward,
     RMSNormBackward, ResampleFwd   (.space.json each)
     Matmul.Align.space.json         probe-only: one fixed graph, alignment and placement only
     SdpaFwd.Flash2.space.json       probe-only: one fixed fp16 graph for HIP_FLASH2
+    Matmul.Stride, SdpaFwd.AsmStride, SdpaFwd.Gfx950DenseStride   padded-stride probes (§11.3)
+    SdpaFwd.AsmProbe, SdpaBackward.AsmProbe, SdpaFwd.Gfx950DenseProbe, SdpaFwd.Flash2Probe,
+    Layernorm.MlopsProbe, LayernormBackward.MlopsProbe, RMSNorm.MlopsProbe,
+    Batchnorm.MlopsProbe, BatchnormBackward.MlopsProbe, Matmul.Probe   rejection probes (§8)
 ```
 
 A **probe-only space** has no shape axes. It holds one fixed graph and varies only the alignment and
-placement axes (§11), to show where an engine's alignment boundary is.
+placement axes (§11), to show where an engine's alignment boundary is. A **rejection probe** (§8)
+draws one `family` per case, each a graph an engine should decline, and a **padded-stride probe**
+(§11.3) adds a `pad` axis to a small fixed shape set.
 
 A space does not carry a graph. It names an existing template-sweep topology by path:
 
@@ -234,6 +242,7 @@ values). The case `id` is `s<shape seed>`.
 | `derive` | Values computed from axes, in declaration order. A derived value can use earlier derived values. |
 | `constraints` | Rules a sample must meet. A sample that breaks one is discarded and redrawn, up to 5000 draws per seed; a space with no legal draw in that budget is a load error that names each rule and how often it rejected. Each rule has a reason. There are three kinds: legality rules copied from the frontend validation of the op (RFC 0022 §6), the cost ceilings of §14, and accuracy bounds that keep a value domain inside what the oracle can grade (§14). |
 | `case` | The sweep case to write: `values`, `metadata` and optional `tensor_patches` (RFC 0011). A string `"${expr}"` is replaced by the value of `expr`, keeping its JSON type. Strings that do not start with `${` and end with `}` are copied. The metadata can carry `inputs` (§12), `validator` (§12), `placement` and `placement_uid` (§11.3). |
+| `expect` | Optional. What a probe case must do: `declined` or `declined_or_pass`, or an expression over the sample's axes that renders to one of them (§8). A probe space without `expect` expects `declined_or_pass`; a case whose `purpose` is not `probe` has no expectation. |
 
 Expressions are a small, safe subset of Python: literals (numbers, strings, `True`, `False`,
 `None`), lists, arithmetic (`+ - * / // % **`), comparisons, `and`/`or`/`not`, `x if c else y`,
@@ -249,9 +258,14 @@ that section. A plan review checks that the space and the plan agree.
 
 ## 6. Pairwise Generator
 
-Built for the fuzz driver (`gauntlet/pairwise.py`, `run_gauntlet_fuzz.py --pairwise`). Coverage is
-proven complete for the SDPA forward spaces only; other spaces run with a capped search and report
-the pairs it could not settle as `unproven`. Rows are not yet written into CI level directories.
+Built for the fuzz driver (`gauntlet/pairwise.py`, `run_gauntlet_fuzz.py --pairwise`). Completeness
+is proven for every space with a varying graph: `unproven` is empty for each of the 14 shape spaces
+(the SDPA forward, backward, Flash2 region and gfx1151 spaces and the normalization, batch
+normalization and Resample spaces). The cap on the search stays as a fallback. The settled
+`illegal` and `dead` sets of every shipped space are pinned (`gauntlet/pairwise_pins.json`, pairwise
+seed 1): the exact tuples for the three SDPA forward spaces whose engines run on a device, a count and
+a digest for every other space. A change to a space's axes, derived values or constraints shows up as
+a re-pin in the same commit. Rows are not yet written into CI level directories.
 
 The pairwise generator reads a space and builds a set of rows in which every value of every axis
 meets every value of every other axis at least once (all-pairs), in a row where **both values
@@ -264,10 +278,18 @@ gives a legal row that renders differently). Pairs where one value is inert do n
 - **Construction.** Seeded greedy (AETG-style): start each row from the first uncovered pair, draw
   several completions that fill the remaining axes by uncovered-pair gain, keep the legal one with
   the best gain, and credit only its live pairs. Each row is checked whole against the constraints.
-- **Impossible pairs.** A pair no completion covers is settled by exhaustive search over the axes it
-  depends on (the closure of the constraint, derive and render expressions that name it). It is
-  reported `illegal` (no legal row holds both values) or `dead` (legal rows exist, but one value is
-  inert in each), never dropped. Past the search cap it is `unproven`.
+- **Impossible pairs.** A pair no completion covers is settled by an exact search. With the pair
+  fixed, the search finds which axes each expression of the space *effectively* reads (the branch of
+  `d3 if ndim == 5 else 1` that a fixed `ndim` rules out reads no `d3`; an entry whose `when` is false
+  reads none of its body), and takes the closure of those over the constraints, the derived values that
+  can fail and the liveness checks. Every other axis cannot change whether the pair is legal or live
+  and is filled from a legal base row. Over the relevant axes it runs a depth-first search with
+  forward checking: once every axis of a check but one is set, the check cuts that axis's levels at
+  once, and the axis with the fewest levels left is set next. The axes left split into the connected
+  components of the checks that read two of them. Components share no check, so a row exists exactly
+  when every component has a completion, and each is searched alone. The pair is reported `illegal`
+  (no legal row holds both values) or `dead` (legal rows exist, but one value is inert in each), never
+  dropped. Past the node cap it is `unproven`, and is never counted covered.
 - **Repair round.** After the run, pairs that were only ever declined get new rows built from levels
   that did pass (`--pairwise-repair`), so a pair is not counted as reached only through declines.
 - **Report.** `summary.json` gains `pair_coverage` per space: `tuples`, `illegal`, `dead`, `drawn`,
@@ -276,6 +298,11 @@ gives a legal row that renders differently). Pairs where one value is inert do n
   `metadata.generator = "gauntlet-pairwise"` and the seed, and replay by name like fuzz samples.
 - **Output.** `--generate-only` writes the rows as sweeps without running them. Placing them in a
   level directory, with claims, is the remaining step toward the I1 bundle generator of RFC 0022 §15.
+- **Device runs.** On gfx950 (2026-11-02) `--pairwise` on `SdpaFwd/Gfx950Dense` ran 542 rows (376
+  `PASS`, 166 `DECLINED`, no `WRONG`) over 3389 tuples with 0 `illegal`, 307 `dead` and 0 `unproven`;
+  the 3082 tuples drawn equal tuples − illegal − dead. `SdpaBackward/Default` was all `DECLINED` on
+  gfx950 (ASM_SDPA ranks no backward engine there), so that run shows coverage only: 339 rows over 4025
+  tuples, 54 `dead`, 3971 drawn.
 
 ## 7. Gauntlet Fuzz Mode
 
@@ -397,13 +424,14 @@ alike. The failure folder then carries the shrunk sample next to the original, w
 
 ## 8. Rejection Probes
 
-Not yet built, apart from the alignment probes of §11: every space has `alignment` and `placement`
-axes, and two probe-only spaces (§5.1) fix a graph and vary only those axes.
+Built, as the probe library below and the alignment probes of §11: every space has `alignment` and
+`placement` axes, and probe-only spaces (§5.1) fix a graph and vary only those axes.
 
-Probes live only in gauntlet spaces and run only through the driver; they are never checked into a
-CI level. A rejection that CI must enforce is an RFC 0022 `expected_rejection` bundle (I10), which
-is never executed and fails the lane when an engine accepts it. Keeping probes out of the bundle
-tree also keeps them out of the support-matrix render, which counts every checked-in case.
+Probes live only in gauntlet spaces and run only through the driver; their cases are never frozen into a
+checked-in bundle and never checked into a CI level. A rejection that CI must enforce is an RFC 0022
+`expected_rejection` bundle (I10), which is never executed and fails the lane when an engine accepts
+it. Keeping probes out of the bundle tree also keeps them out of the support-matrix render, which
+counts every checked-in case.
 
 A **probe** is a legal graph whose expected outcome is "decline, or accept and be
 correct" (RFC 0022 §9). Probes test the integration contract: an engine that accepts a graph it
@@ -419,13 +447,43 @@ cannot run is the failure the gauntlet exists to catch.
 
 Illegal graphs, which the frontend rejects, are frontend unit tests (RFC 0022 §6), not probes.
 
+**The probe library.** One probe-only space per engine family, in four classes: unsupported
+attributes, mixed dtypes, int32 index overflow and dimensions not divisible by 4. A space draws a
+`family` per case, each family one hazard on a small fixed graph. Non-dense strides are the
+padded-stride probes of §11.3.
+
+| Space | Engine | Families |
+|---|---|---|
+| `SdpaFwd/AsmProbe` | ASM_SDPA forward | Dropout, ALiBi, padding, sequence-length mode, additive mask, paging, sink, block mask, fp8 scales on a bf16 graph, statistics, a device scale tensor, mixed Q/K/V/O dtypes, fp16/fp32, odd dimensions, overflow |
+| `SdpaBackward/AsmProbe` | ASM_SDPA backward | The backward attribute set, statistics dtype and rank, mixed dtypes, grouped-query heads, head sizes the registry lacks, odd dimensions, overflow. gfx942 only: every case is `DECLINED` at the device gate on gfx950 |
+| `SdpaFwd/Gfx950DenseProbe` | gfx950 dense attention pack | Attributes the kernel cannot apply, mixed dtypes, head sizes and head counts the catalog does not ship, odd dimensions, scale limits, overflow |
+| `SdpaFwd/Flash2Probe` | HIP_FLASH2 | Attribute declines, mixed dtypes, odd dimensions, 32-bit dimension limits. gfx942 only; not run on a device in this work |
+| `Layernorm/MlopsProbe`, `LayernormBackward/MlopsProbe`, `RMSNorm/MlopsProbe` | HIP_MLOPS | Mixed dtypes of scale, bias, statistics and output, an io dtype outside float/half/bfloat16, an inconsistent `normalized_dim_count`, ranks 2, 3 and 6, declared alignment 1 and 2, odd sizes, overflow |
+| `Batchnorm/MlopsProbe`, `BatchnormBackward/MlopsProbe` | HIP_MLOPS | Non-float scale, bias and statistics, io dtypes outside float/half/bfloat16, `y`, `dy` or `dx` in another dtype than `x`, half running statistics, declared alignment 1 and 2, odd sizes, overflow |
+| `Matmul/Probe` | hipBLASLt (MIOpen declines every matmul) | Mixed A/B/C dtypes, transposed operands and result, odd M/N/K, rank 2, batch broadcast and permuted-batch strides, declared alignment below 16, overflow of a dimension, a leading dimension or a batch stride past 32 bits |
+
+**Expectation.** Each case has an `expect`, which the space renders per case from its axes:
+`declined` (the engine must not take it) or `declined_or_pass` (it may take it and then must be
+correct). A probe space without `expect` expects `declined_or_pass`. `declined` is met by
+`DECLINED` only; `declined_or_pass` by `DECLINED`, `PASS` and `UNCLAIMED_PASS`. `WRONG`, `CRASH` and
+`UNEXERCISED` always violate it: an accept that nothing verified is no evidence. The driver records
+`expect`, `expectation` (`met` or `violated`) and `violation` on each outcome record, and the summary
+gives each space `expectations: {met, violated, violations}`. A violation is a finding to triage; it
+does not change the exit status, which stays driven by `WRONG` and `CRASH`.
+
+**Accepted above the ceiling.** An overflow probe is larger than the oracle can afford (§14), so it
+runs at `enforcement_level: buildable` (RFC 0015). `DECLINED` meets its `declined` expectation. If the
+engine accepts and builds it, the binary stops before any comparison and the driver records it
+`UNEXERCISED` with the reason `accepted above the oracle ceiling`, a violation: an accepted overflow
+probe is never `PASS`.
+
 **Typed reason (deferred).** Today a decline is "not in the ranked list" or a late `EngineNotApplicableError`
 message. The outcome report records the message. A deferred story (S6) would add a reason code to the
 plugin's decline (an enum in the plugin SDK: `UNSUPPORTED_DTYPE`, `UNSUPPORTED_LAYOUT`,
 `UNSUPPORTED_ATTRIBUTE`, `ALIGNMENT`, `SHAPE_LIMIT`, `NO_KERNEL`, `OTHER`), so reports can group
 declines without parsing text.
 
-Probes are never trimmed from a level (RFC 0022 P6). They are cheap: a decline costs one query.
+Probes are cheap: a decline costs one query.
 
 ## 9. Outcome Model and Report
 
@@ -487,7 +545,9 @@ loader rejects any other value. This is the tag half of RFC 0022's I2. Probes ar
 (§8), so the support-matrix render never sees one. `stage` is where the test stopped
 (`graph`, `claim`, `query`, `build`, `execute`, `compare`, `oracle`, `setup`, or `none` for a pass).
 A case that sets `inputs`, `validator`, `placement` or `placement_uid` echoes them into its
-`finished` record, and a pass that verified a rejection adds `"expected_status":"BAD_PARAM"`.
+`finished` record, and a pass that verified a rejection adds `"expected_status":"BAD_PARAM"`. The
+record also carries `candidate` when the case forces one (§10.3), and `reference_ms` and
+`reference_lane` when a reference graded the case (§14).
 
 ### 9.4 Fractions, not green
 
@@ -500,7 +560,9 @@ cases are all `DECLINED` or `UNEXERCISED` says so; it is not a pass of the engin
 
 ## 10. Catalog Sweep
 
-Not yet built.
+Built for the engines that enumerate their catalog (the kernel-ingestor engines of
+hip-kernel-provider); every other engine is a one-entry catalog. Running every MIOpen solver is not
+built (S10).
 
 ### 10.1 What exists
 
@@ -508,29 +570,53 @@ The catalog enumeration API already exists for descriptor engines (RFC 0019 §13
 `HIPDNN_ATTR_ENGINE_CANDIDATES_EXT` pages the matched catalog of one engine for one graph, and
 `hipdnn_frontend::detail::getEngineCandidates()` decodes it into `EngineCandidatePage`. Each
 `EngineCandidate` has a stable `id` (the kernel identity), its `kernelFeatures`, and an
-`EngineVariant` whose complete knob tuple selects exactly that kernel through
-`Graph::add_engine_variants()`. Engines that cannot enumerate return an error, not an empty page.
+`EngineVariant` whose complete knob tuple selects exactly that kernel. Engines that cannot enumerate
+answer `NOT_APPLICABLE`, not an empty page. Only the kernel-ingestor engines enumerate. A knob
+tuple builds through `create_execution_plan_ext(engineId, knobs)` on the normal compiled-plan
+path. `Graph::add_engine_variants()` is not used: it only feeds `autotune()`, and
+`create_execution_plans()` refuses after it.
 
 ### 10.2 Sweep mode
 
-A sweep mode of the integration binary, for one graph:
+The sweep lives in the driver, not in a looping binary mode: the driver writes each candidate as a
+concrete case, so the harness still runs concrete graphs only and every candidate gets the normal
+per-case isolation, crash recovery and failure folder. It costs one listing call per graph.
 
-1. Build the graph once, fill inputs once with the case seed, run the oracle once.
-2. For the engine under test, page through the whole catalog.
-3. For each candidate: enroll its variant, build the plan, fill outputs with NaN, execute, compare
-   with the graph's tolerances, and write one outcome record with the candidate `id` and knobs.
-4. Write a reconciliation line: `entries = passed + failed + declined`. A candidate is never
-   skipped.
+1. **Listing.** `hipdnn_integration_tests --test-engine E --list-candidates <file>` loads each
+   registered case, writes the candidate page of the engine under test (every page of
+   `getEngineCandidates`) as JSON Lines, and builds and executes nothing. A record's `status` is
+   `ok` (the engine enumerated), `not_enumerable` (the engine cannot enumerate, or does not take the
+   graph) or `error` (the graph did not load or the enumeration broke).
+2. **Forcing.** A case may carry `metadata.engine_variant = {id, knobs}`. The harness then builds
+   exactly that candidate with `create_execution_plan_ext(engineId, knobs)` instead of
+   `create_execution_plans()`, and the `finished` record gets `candidate` (§10.3).
+3. **Driver.** `run_gauntlet_fuzz.py --catalog` (it needs `--test-engine`; it works with fuzz,
+   `--pairwise` and `--row` runs) lists the candidates of each drawn graph and writes one case per
+   candidate, `<graph case id>c<k>`, `k` being the candidate's index in the listing. The catalog is
+   sorted by kernel id, so `k` is stable. A candidate case has the graph's axes and data seed plus the
+   `engine_variant`, so each candidate gets its own graph object, its own NaN-sentinel outputs and its
+   own oracle run. A candidate failure's `replay.sh` calls `--row` on a row file that carries the
+   `engine_variant`, so a replay forces the same candidate.
+4. **Shards.** `--catalog-shard i/n` keeps the candidates whose index satisfies `k % n == i`. Running
+   the shards `0/n` .. `(n-1)/n` runs every candidate of every graph exactly once, none lost and none
+   repeated, which is what a runtime-compilation engine needs, since every candidate compiles.
+5. **Reconciliation.** `summary.json` has a `catalog` block: per graph the catalog size and an outcome
+   per candidate id, and per engine the totals. `catalog.reconciled` is true when every selected
+   candidate of every graph has exactly one outcome. A graph whose listing ended in `error`, listed no
+   candidates, or killed or hung the binary is `UNEXERCISED` with the reason, never dropped; a
+   candidate is never skipped.
 
 Statuses map onto §9: a candidate that fails to build or execute is `CRASH`; a numeric mismatch is
-`WRONG`. Runtime-compilation engines compile every candidate, so the sweep shards by candidate
-offset (`--catalog-shard i/n`). Isolation rules from ALMIOPEN-2827 hold: one graph object, NaN-filled
-outputs before every candidate, no shared reference device buffer, the graph's registered outputs
-only.
+`WRONG`. Isolation holds by construction: a case is one graph, its outputs are NaN-filled before the
+engine runs, and a reference buffer is never shared between cases.
 
-Engines without enumeration (MIOpen, hipBLASLt) get a one-entry catalog: their default
-configuration. Running every MIOpen solver needs a provider API for "run solution by ID"; that is a
-separate story.
+Engines without enumeration (MIOpen, hipBLASLt) are a one-entry catalog: a `not_enumerable` graph
+becomes the case `<graph>c0` with `engine_variant {"id": "default"}`, the engine's own pick. Running
+every MIOpen solver needs a provider API for "run solution by ID"; that is a separate story (S10).
+
+On gfx950 (2026-11-02) a smoke sweep of six `SdpaFwd/Gfx950Dense` graphs with the dense pack listed
+two graphs with 2 and 3 candidates, each of which passed, and four graphs the pack does not take
+(`not_enumerable`, `DECLINED`); `candidate_mismatch` was empty and the run reconciled.
 
 ### 10.3 Kernel identity in every run
 
@@ -541,8 +627,13 @@ gains `kernels`, the distinct kernels the case ran. The driver's summary counts 
 each engine, and `kernel_unreported` counts cases that executed without a kernel line. Engines that
 log no kernel (HIP_MLOPS) leave `kernels` absent.
 
-For descriptor engines the catalog sweep (§10.2) names the candidate `id` it forced, so a sweep case
-records exactly which catalog entry ran.
+For descriptor engines the catalog sweep (§10.2) forces a candidate, and the `finished` record's
+`candidate` field names it: the `id` of the case's `engine_variant`, or `"default"` for the engine's
+own pick; the field is absent when the case forces nothing. The driver checks that it equals the id
+it forced (a mismatch is `candidate_mismatch`, which fails the run, because the force did not reach
+the engine), and, where the record has `kernels`, that the part of each after its last `/` equals
+the id too (`kernel_mismatch`, listed and printed, not a failure: a log-format difference is not an
+engine bug). A sweep case therefore records exactly which catalog entry ran.
 
 ## 11. Declared Alignment
 
@@ -614,8 +705,28 @@ device tensor) and a `placement` axis. The tests this gives:
 - one case per space and sample with a pointer less aligned than declared, which must return
   `BAD_PARAM`.
 
-Not yet built: the same probes crossed with a leading stride that is not a multiple of the vector
-width. Every shipped space draws packed strides only.
+**The strided cross.** Three padded-stride probe spaces cross the declared alignment and the
+placement with a leading stride that is not a multiple of the vector width: `Matmul/Stride`
+(hipBLASLt and MIOpen), `SdpaFwd/AsmStride` (ASM_SDPA) and `SdpaFwd/Gfx950DenseStride` (the gfx950
+dense pack). Each adds a late `pad` axis (elements added to the leading stride) and a `pad_on` axis
+that names the tensors it applies to; strides enter the case only through `derive`, so the shipped
+spaces draw what they always did. The harness allocates, fills, places and compares non-packed
+tensors: the allocation, the output sentinel and the placement shadows cover the element space (the
+offset of the last element plus one), a host fill and the comparison touch the elements and not the
+gaps, and unit tests cover gap bytes and the element space of padded layouts.
+
+On gfx950 (2026-11-02) every padded probe was `DECLINED` or `PASS`, none `WRONG`:
+
+| Space | Result |
+|---|---|
+| `SdpaFwd/AsmStride` | `PASS` for every pad at declared alignment 16 or more; `DECLINED` below |
+| `SdpaFwd/Gfx950DenseStride` | `DECLINED` for every pad above 0 |
+| `Matmul/Stride` | hipBLASLt `PASS` for every pad at alignment 16, `DECLINED` at the other alignments; MIOpen `DECLINED` everywhere |
+
+The row-stride divisibility gap that was expected in ASM_SDPA did not reproduce, so no engine check
+was added. A host fill leaves the gap bytes of a padded tensor as uninitialised memory, while a
+device fill writes finite values there, so an engine that wrongly read a gap would give a
+non-reproducible `WRONG` on the host path. Poisoning the gaps deterministically is open.
 
 ## 12. Input Value Domains
 
@@ -633,10 +744,17 @@ tensor uid:
 | `subnormal` | A subnormal of the data type | Kernels that flush or take shortcuts |
 | `special(nan \| inf \| -inf, fraction)` | That fraction of elements non-finite, the rest `free` | Non-finite propagation |
 
-The new kinds fill on the host from a per-uid generator, so they are deterministic per seed. The
-parse is strict: an unknown kind, an entry with neither `kind` nor `seed`, or a malformed field is a
-metadata error. A kind the data type cannot hold (`subnormal` on an integer, `inf` on most fp8
-formats) makes the case `UNEXERCISED`.
+A host fill draws from a per-uid generator, so it is deterministic per seed. The `nonzero`, `zeros`,
+`large`, `subnormal` and `special` kinds of float, half, bfloat16 and the fp8 formats are also filled
+on the device for inputs of at least 2^14 elements, by hipRTC kernels (`gpu-ref/kernels/common`) that
+shape the draws of the filler's rocRAND generator; smaller tensors, other types, sub-byte types and
+`fixed` fills use the host. Each kind keeps its value contract on the device, including the planted
+non-finite element that space rules rely on. Host and device fills are not bit-identical: a failure
+reproduces bit for bit only on the fill path of the run that found it, which the report and
+`replay.sh` name, and `HIPDNN_TEST_HOST_INPUT_FILL=1` forces the host fill. The parse is strict: an
+unknown kind, an entry with neither `kind` nor `seed`, or a malformed field is a metadata error. A
+kind the data type cannot hold (`subnormal` on an integer, `inf` on most fp8 formats) makes the case
+`UNEXERCISED`.
 
 Every shape space has a `domain` axis (`default`, `narrow`, `wide`, `positive`, `constant`,
 `nonzero`, `zeros`, `large`, `subnormal`, `nan`, `inf`) that renders these recipes for the space's
@@ -668,15 +786,59 @@ A corpus graph that exceeds the oracle ceiling (§14) is recorded `UNEXERCISED`,
 ## 14. Oracle Cost and Coverage
 
 The GPU reference runs one thread per output element and walks the full reduction in that thread. Its
-cost grows as outputs × reduction length. Rough ceilings, per case, at which the reference stays
-under one minute on an MI300-class GPU (to be measured; [§20](#20-open-questions)):
+cost grows as outputs × reduction length. A case may spend 60 s on its oracle. Each space states its
+ceiling as a cost constraint, and `gauntlet/measure_oracle_cost.py` measures what that ceiling costs:
+per space it runs a ladder of explicit rows that sweep the cost expression from small to the ceiling
+through the driver's `--row` path (by default 8 rungs, each a quarter of the next), fits
+`reference_ms = a + b · cost` by least squares over the rungs whose reference ran, and extrapolates the
+cost at which the reference takes 60 s. The numbers come from two fields of the `finished` record
+(§9.3): `reference_ms`, the wall time of the reference run that graded the case, and
+`reference_lane`, `gpu` or `cpu`, which counts a GPU to CPU fallback as `cpu`. The driver copies both
+to `outcomes.jsonl`.
 
-| Op | Cost driver | Starting ceiling |
-|---|---|---|
-| SDPA forward | `b·hq·sq·skv·d` | 2^31 |
-| Convolution | `n·k·p·q·c·r·s / g` | 2^33 |
-| Matmul | `m·n·k` | 2^33 |
-| Normalization | `elements` | 2^30 |
+Measured on gfx950 on 2026-11-02, every current ceiling stays:
+
+| Space | Cost driver | Ceiling | Lane | At the ceiling | Cost at 60 s | Fit |
+|---|---|---|---|---|---|---|
+| `SdpaFwd/Default` (ASM_SDPA) | `b·hq·sq·skv·dqk` | 2^31 | GPU | 13.6 s, extrapolated | 9.6e9 | 2 rungs only (274 ms at 2^17, 276 ms at 2^19); the engine declined the larger rungs |
+| `SdpaFwd/Gfx950Dense` | `b·hq·sq·skv·d` | 2^31 | GPU | 458 ms, measured | 7.1e11 | 6 rungs, r² 0.9995 |
+| `Batchnorm/Default` | `n·c·hw` | 2^30 | GPU | 184 ms, measured | 3.7e12 | 8 rungs |
+| `BatchnormInference/Default` | `n·c·hw` | 2^30 | GPU | 159 ms, measured | 1.7e13 | 8 rungs |
+| `BatchnormBackward/Default` | `n·c·hw` | 2^24 | CPU | 446 ms, measured | 2.3e9 | 8 rungs, r² 0.9992 |
+| `Layernorm/Default` | `n·c·d·h·w` | 2^30 | GPU | 171 ms, measured | 5.1e12 | 8 rungs |
+| `LayernormBackward/Default` | `n·c·d·h·w` | 2^30 | GPU | 359 ms, measured | 3.5e12 | 8 rungs |
+| `RMSNorm/Default` | `n·c·d·h·w` | 2^30 | GPU | 163 ms, measured | 8.5e12 | 8 rungs |
+| `RMSNormBackward/Default` | `n·c·d·h·w` | 2^30 | GPU | 1.17 s, measured | 7.5e10 | 8 rungs, r² 0.99998 |
+| `ResampleFwd/Default`, input | `n·c·d·h·w` | 2^30 | CPU | 2.4 s, extrapolated from 92 ms at 2^25 | 2.7e10 | 6 rungs, r² 0.9998 |
+| `ResampleFwd/Default`, pooled work | `n·c·od·oh·ow·wvol` | 2^30 | GPU | 196 ms, extrapolated from 169 ms at 1.1e8 | 2.1e12 | 6 rungs, flat series (r² 0.49) |
+| `SdpaBackward/Default` | `b·hq·sq·skv·(d+d)` | 2^29 | CPU | about 24 s (an earlier gfx942 measurement) | about 1.3e9 | linear above 2^26 at about 45 ns per cost unit |
+
+Every ceiling measured on gfx950 predicts at most 13.6 s at the ceiling (the ASM_SDPA figure; every
+other row is 2.4 s or less), far under the 60 s budget, so none is raised: a higher one would only
+make fuzz cases slower, and the engine limits the spaces cite (the `int` template parameters of the
+kernels, work-group limits) are reached first. A GPU-lane case carries a fixed cost of 0.15 to 0.35 s
+per case (the constant of the fit). ASM_SDPA, with two measured points, and the two ResampleFwd rows,
+extrapolated from rungs below the ceiling, are the least anchored. The `SdpaBackward` row is the
+earlier gfx942 measurement (its CPU reference is serial); it cannot be re-measured on gfx950, where
+ASM_SDPA backward ranks no engine, and its 2^29 ceiling stays.
+
+**Lane.** The gauntlet's oracle chain takes the GPU reference wherever the GPU graph executor has an
+applicable plan for the op and falls back to the CPU reference. That is why the norm spaces ran on the
+GPU lane although `ReferenceOpCoverage` lists only convolution and SDPA for the GPU: those lists decide
+which checked-in bundles are registered for reference validation, not which lane the gauntlet chain
+tries. BatchNorm backward has no GPU plan, so its oracle is the scalar CPU reference, which is why its
+ceiling is lower. The lane of Resample depends on the row: the two ladders of `ResampleFwd` ran the
+CPU and the GPU lane respectively.
+
+**Not measured.**
+
+| Space | Reason |
+|---|---|
+| `SdpaFwd/Flash2Region` | HIP_FLASH2 runs on gfx942 only; no such device in the measurement |
+| `SdpaFwd/Gfx1151`, `SdpaFwd/Gfx1151Decode` | The engines run on gfx1151 only; no such device in the measurement |
+| `SdpaBackward/Default` on gfx950 | ASM_SDPA backward ranks no engine on gfx950, so no reference runs |
+| Probe spaces (`*Probe`, `*Stride`, `Matmul/Align`, `SdpaFwd/Flash2`) | They state no cost ceiling: they draw fixed or small graphs, and an overflow probe runs at `buildable` (§8) |
+| Convolution, Matmul | No shape space yet (S17b). The starting estimates, 2^33 for `n·k·p·q·c·r·s/g` and for `m·n·k`, stand unmeasured |
 
 Rules:
 
@@ -689,8 +851,16 @@ Rules:
 - When the CPU reference's own rounding error exceeds the tolerance for a value domain (for
   example sequential fp32 sums over large `n·hw` in BatchNorm backward, or bf16 rounding of P before
   P·V in SDPA), the space bounds that domain with an accuracy constraint and cites the reason. Each
-  such constraint is a known blind spot. The fix is a per-output tolerance override in the engine's
-  TOML, after which the constraint is removed.
+  such constraint is a known blind spot. The fix is a per-output tolerance in the engine's TOML:
+  `[[validator_overrides]]` accepts `atol` and `rtol` for the `allclose` and
+  `allclose_matching_infinities` validators, resolved per tensor label, and those values win over
+  `[[tolerance_overrides]]` for the tensor (later entries win among validator entries). The entries
+  are scoped to gauntlet suites (`*gauntlet*<Op>*`), so checked-in CI bundles keep the common
+  tolerance. They replaced the BatchNorm backward DX bound for half and bfloat16 and the DSCALE and
+  DBIAS bound, and the SDPA bound on wide and large V for ASM_SDPA and the gfx950 dense pack (the
+  output is graded by `allclose`). Removing the DSCALE and DBIAS bound exposed wrong DSCALE and
+  DBIAS from the engine at large `n·hw`, which the bound had hidden; the finding stays open. Two
+  bounds that name the CPU reference's own sequential sums stay, because no tolerance can lift them.
 
 ## 15. Tiers
 
@@ -726,23 +896,24 @@ A new engine (or a large change to one, including one an agent wrote) is gated a
 | S2 | Space declaration format and expression evaluator | — | G2 | Built |
 | S3 | Fuzz driver: sampling, seeds, batches, crash recovery, freeze output, summary | S1, S2 | G6 | Built |
 | S4 | First fuzz spaces: SDPA forward, RMSNorm forward | S3 | G6 | Built |
-| S5 | Pairwise generator | S2 | G2 | Built; completeness proven for SDPA forward only (§6) |
+| S5 | Pairwise generator | S2 | G2 | Built; completeness proven for every space with a varying graph, illegal and dead sets pinned (§6) |
 | S6 | Typed decline reasons in the plugin SDK | S1 | G3 | Deferred: changes every engine; last in the backlog |
-| S7 | Rejection-probe library per op | S2 | G3 | Alignment probes only (§8) |
-| S8 | Catalog sweep mode | S1 | G1 | Not started |
-| S9 | Kernel identity in outcome records | — | G1 | Built for engines that log their kernel (§10.3) |
+| S7 | Rejection-probe library per op | S2 | G3 | Built: ten probe spaces with per-case `expect`, gauntlet-only; the gfx942-only spaces not run on a device (§8) |
+| S8 | Catalog sweep mode | S1 | G1 | Built: `--list-candidates`, `engine_variant` forcing, `--catalog`, `--catalog-shard`, reconciliation (§10) |
+| S9 | Kernel identity in outcome records | — | G1 | Built: `kernels` for engines that log their kernel, `candidate` for forced candidates (§10.3) |
 | S10 | MIOpen "run solution by ID" provider API | S8 | G1 | Not started |
-| S11 | Exact-alignment placement in the harness | — | G7 | Built, except the strided cross (§11.3) |
+| S11 | Exact-alignment placement in the harness | — | G7 | Built, including the strided cross (§11.3) |
 | S12 | Engines honor declared alignment (one story per engine) | S11 | G7 | hip-kernel-provider built; MIOpen and hipBLASLt gated by version (§11.2) |
-| S13 | Input value-domain control | S2 | — | Built |
+| S13 | Input value-domain control | S2 | — | Built, with per-output tolerances (§14) and device fills (§12) |
 | S14 | Corpus batch intake | — | G4 | Not started |
-| S15 | Oracle cost measurement and per-op ceilings | — | G5 | SDPA backward measured (ceiling 2^29); others not started |
+| S15 | Oracle cost measurement and per-op ceilings | — | G5 | Built for gfx950: measured, every ceiling kept (§14); Flash2, gfx1151 and SdpaBackward on gfx950 unmeasured |
 | S16 | Gauntlet CTest lane label per provider, excluded from every CI level | S3 | G6 | Not started |
 | S17a | Spaces for the remaining hip-kernel-provider ops (LayerNorm, BatchNorm, RMSNorm backward, Resample) | S2 | G2 | Built |
 | S17b | Spaces for convolution, matmul, pointwise, reduction and SDPA backward | S2, RFC 0022 plans | G2 | SDPA backward space built; others not started |
 
-"Built" means on an unmerged branch. Besides S1–S4 and S11, S12, S13 and S17a, the branch carries
-S5 (pairwise), S9 (kernel identity), shrinking (§7.7) and the SDPA backward space.
+"Built" means on an unmerged branch. Besides S1–S4, S7–S9, S11–S13, S15 and S17a, the branch carries
+shrinking (§7.7) and the SDPA backward space. S6 is deferred; S10, S14, S16 and S17b (except its SDPA
+backward space) are not started.
 
 ### 17.2 ALMIOPEN-2470 (fuzz mode)
 
@@ -784,7 +955,8 @@ rules and its reconciliation line carry over.
 
 ## 20. Open Questions
 
-1. **Oracle ceilings.** The §14 numbers are estimates; S15 measures them per arch.
+1. **Oracle ceilings.** Measured on gfx950 (§14); the gfx942 and gfx1151 spaces and any further arch
+   remain unmeasured.
 2. **Default sample count** for the engine-integration gate (§16).
 3. **Decline reason codes.** Is the §8 enum enough, and does it belong in the plugin ABI or in the
    decline message format?
