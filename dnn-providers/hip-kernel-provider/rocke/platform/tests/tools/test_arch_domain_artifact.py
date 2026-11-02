@@ -40,6 +40,7 @@ registrations and the packaged helper list in step if either path is renamed.
 from __future__ import annotations
 
 import ast
+import contextlib
 import io
 import json
 import os
@@ -1410,6 +1411,36 @@ while True:
         except (OSError, IndexError):
             return True
 
+    @contextlib.contextmanager
+    def _short_timeout_after_ready(self, pids: Path):
+        """Start each timeout only after its stub recorded both processes.
+
+        The production timeout remains part of the call under test. This patch
+        shortens only ``Popen.communicate`` after a deterministic readiness
+        handshake, avoiding a race between interpreter startup and a tiny test
+        timeout while retaining a real process group and descendant.
+        """
+        original = subprocess.Popen.communicate
+        expected_pids = 0
+
+        def communicate(proc, *args, **kwargs):
+            nonlocal expected_pids
+            if kwargs.get("timeout") is not None:
+                expected_pids += 2
+                deadline = time.monotonic() + 5
+                while True:
+                    started = len(self._started(pids)) if pids.exists() else 0
+                    if started >= expected_pids:
+                        break
+                    if time.monotonic() >= deadline:
+                        raise AssertionError("stub process tree did not become ready")
+                    time.sleep(0.01)
+                kwargs["timeout"] = 0.05
+            return original(proc, *args, **kwargs)
+
+        with mock.patch.object(subprocess.Popen, "communicate", communicate):
+            yield
+
     def _survivors(self, pids: Path) -> list[int]:
         # Killing is asynchronous: give the kernel a moment to deliver it.
         deadline = time.monotonic() + 5
@@ -1434,9 +1465,14 @@ while True:
         clang, pids = self._stub("clang")
         scratch = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, scratch, True)
-        status, _ = G._probe(
-            clang, scratch / "probe.ll", "gfx942", scratch / "probe.hsaco", timeout=2
-        )
+        with self._short_timeout_after_ready(pids):
+            status, _ = G._probe(
+                clang,
+                scratch / "probe.ll",
+                "gfx942",
+                scratch / "probe.hsaco",
+                timeout=60,
+            )
         self.assertEqual(status, G.STATUS_TOOLCHAIN_TIMEOUT)
         self.assertEqual(len(self._started(pids)), 2, "stub did not start its child")
         self.assertEqual(self._survivors(pids), [], "outlived the probe's timeout")
@@ -1445,7 +1481,7 @@ while True:
         opt, pids = self._stub("opt")
         scratch = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, scratch, True)
-        with mock.patch.object(G, "PROBE_TIMEOUT_S", 2):
+        with self._short_timeout_after_ready(pids):
             verdict = G._name_exists(opt, "declare void @llvm.nope()", scratch)
         self.assertIsNone(verdict.exists)
         self.assertEqual(verdict.status, G.STATUS_TOOLCHAIN_TIMEOUT)
@@ -1461,8 +1497,9 @@ while True:
         tool, pids = self._stub(
             "clang", prelude='sys.stdout.buffer.write(b"\\xff"); sys.stdout.flush()'
         )
-        with self.assertRaises(subprocess.TimeoutExpired):
-            B.run_bounded([tool], timeout=2)
+        with self._short_timeout_after_ready(pids):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                B.run_bounded([tool], timeout=60)
         self.assertEqual(self._survivors(pids), [], "outlived the timeout")
 
     def test_a_batched_name_check_timeout_ends_the_whole_opt_run(self):
@@ -1473,7 +1510,7 @@ while True:
             ("a", "declare void @llvm.nope.a()"),
             ("b", "declare void @llvm.nope.b()"),
         ]
-        with mock.patch.object(G, "PROBE_TIMEOUT_S", 2):
+        with self._short_timeout_after_ready(pids):
             verdicts = G._name_exists_many(opt, items, scratch)
         self.assertEqual(
             {key: v.status for key, v in verdicts.items()},
@@ -1487,9 +1524,14 @@ while True:
         clang, pids = self._stub("clang")
         scratch = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, scratch, True)
-        status, _ = G._assemble(
-            clang, scratch / "probe.ll", "gfx942", scratch / "probe.hsaco", timeout=2
-        )
+        with self._short_timeout_after_ready(pids):
+            status, _ = G._assemble(
+                clang,
+                scratch / "probe.ll",
+                "gfx942",
+                scratch / "probe.hsaco",
+                timeout=60,
+            )
         self.assertEqual(status, G.STATUS_TOOLCHAIN_TIMEOUT)
         self.assertEqual(len(self._started(pids)), 2, "stub did not start its child")
         self.assertEqual(self._survivors(pids), [], "outlived the assembly's timeout")
