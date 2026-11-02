@@ -303,6 +303,35 @@ TEST(LocalKernelLibrary, smoke_SetExactMatchSelectsOnlyThatShape)
         << "a different K should not match";
 }
 
+// A batch applies its mappings in order, as the same calls one at a time
+// would, and skips an unregistered index.
+TEST(LocalKernelLibrary, smoke_SetExactMatchesAppliesInOrder)
+{
+    auto         problem = makeProblem();
+    auto         other   = makeProblem(kM, kN, kK * 2);
+    auto         gpu     = makeGpu();
+    LocalLibrary library;
+
+    auto first  = makeSolution(problem);
+    auto second = makeSolution(problem);
+    auto added  = library.addSolutions({first, second});
+    ASSERT_EQ(added.size(), 2u);
+
+    const auto shape = localExactShapeFor(problem);
+    EXPECT_EQ(library.setExactMatches({{shape, added[0]},
+                                       {shape, added[1]},
+                                       {shape, added[1] + 1},
+                                       {localExactShapeFor(other), added[0]},
+                                       {shape, added[0]}}),
+              4u);
+    EXPECT_EQ(library.selectableCount(), 2u);
+    EXPECT_EQ(library.findExact(problem, gpu), first) << "the last mapping of a key wins";
+    EXPECT_EQ(library.findExact(other, gpu), first);
+
+    EXPECT_EQ(library.setExactMatches({{shape, added[1] + 1}}), 0u);
+    EXPECT_EQ(library.findExact(problem, gpu), first);
+}
+
 // Concurrent lookups share the selected solution, so selection must not write
 // to it.
 TEST(LocalKernelLibrary, smoke_SelectionDoesNotWriteToSolution)

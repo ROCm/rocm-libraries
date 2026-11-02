@@ -14,17 +14,22 @@
  *  absolute directory, it is a local kernel library shared by every process
  *  that names it:
  *
- *  - Kernels and mappings saved there for a device's architecture are loaded
- *    when hipBLASLt first initializes that device, before any heuristic query.
+ *  - Kernels and mappings are saved for the architecture and compute unit
+ *    count of the device they were made on, and for the build of hipBLASLt
+ *    that made them. Those saved for a device are loaded when this build of
+ *    hipBLASLt first initializes it, before any heuristic query. A saved
+ *    kernel is loaded only if its files still match what was saved and it
+ *    can run on the device; otherwise it is skipped with a warning. Its code
+ *    object is loaded when one of its kernels first runs.
  *  - \ref hipblasLtLocalKernelRegister and \ref hipblasLtLocalKernelSetExactMatch
  *    save to it before they return, and fail if they cannot.
  *  - \ref hipblasLtLocalKernelRefresh loads what other processes have saved
  *    since.
  *
  *  The directory is created if absent. It is not used, and a warning is
- *  printed, if it or a directory in it is group- or world-writable, or if the
- *  process is running with elevated privileges (set-user-ID, set-group-ID or
- *  file capabilities).
+ *  printed, if it or a directory in it is owned by another user or is group-
+ *  or world-writable, or if the process is running with elevated privileges
+ *  (set-user-ID, set-group-ID or file capabilities).
  */
 
 #pragma once
@@ -133,6 +138,12 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *  HIPBLASLT_TUNING_OVERRIDE_FILE, takes priority over this mapping. An
  *  algorithm passed explicitly to hipblasLtMatmul also keeps its selection.
  *
+ *  With a local kernel library, "mapped last" is across all processes: the
+ *  mapping is saved, then applied together with what other processes saved
+ *  before it, as \ref hipblasLtLocalKernelRefresh would. If another process
+ *  mapped the same shape and types in between, its kernel is the one
+ *  selected, here and in every later process.
+ *
  *  @param[in]
  *  handle       Pointer to the allocated hipBLASLt handle.
  *  @param[in]
@@ -160,9 +171,9 @@ hipblasStatus_t hipblasLtLocalKernelSetExactMatch(
  *
  *  \details
  *  Reads what has been added to the local kernel library for the handle's
- *  architecture since this process last read it. Mappings are applied in the
- *  order they were made, across all processes. Does nothing without a local
- *  kernel library.
+ *  device since this process last read it. Mappings are applied in the order
+ *  they were made, across all processes. Does nothing without a local kernel
+ *  library.
  *
  *  @param[in]
  *  handle      Pointer to the allocated hipBLASLt handle.
@@ -174,7 +185,9 @@ hipblasStatus_t hipblasLtLocalKernelSetExactMatch(
  *                                          warning.
  *  \retval HIPBLAS_STATUS_NOT_INITIALIZED  \p handle is NULL.
  *  \retval HIPBLAS_STATUS_INTERNAL_ERROR   The handle's device could not be made
- *                                          current or initialized.
+ *                                          current or initialized, or the
+ *                                          local kernel library could not be
+ *                                          read; nothing was loaded.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtLocalKernelRefresh(hipblasLtHandle_t handle, size_t* registered);

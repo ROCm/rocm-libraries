@@ -4,12 +4,15 @@
 #include "include/local_kernel_store.hpp"
 #include "include/rocblaslt_secure_env.hpp"
 
+#include <hipblaslt/hipblaslt-version.h>
+
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -17,6 +20,15 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+
+#ifndef TO_STR2
+#define TO_STR2(x) #x
+#define TO_STR(x) TO_STR2(x)
+#endif
+
+#ifndef HIPBLASLT_VERSION_TWEAK
+#error "HIPBLASLT_VERSION_TWEAK (hipblaslt-version.h) decides which local kernel journal is read"
+#endif
 
 namespace fs = std::filesystem;
 
@@ -26,10 +38,11 @@ namespace rocblaslt
     {
         namespace
         {
-            constexpr const char* kEnvName     = "HIPBLASLT_LOCAL_KERNEL_LIBRARY";
-            constexpr const char* kObjectsDir  = "objects";
-            constexpr const char* kJournalName = "journal";
-            constexpr const char* kZlibSuffix  = ".zlib";
+            constexpr const char* kEnvName       = "HIPBLASLT_LOCAL_KERNEL_LIBRARY";
+            constexpr const char* kObjectsDir    = "objects";
+            constexpr const char* kJournalPrefix = "journal-";
+            constexpr const char* kZlibSuffix    = ".zlib";
+            constexpr int         kFormat        = 1;
 
             void setError(std::string* error, std::string const& message)
             {
@@ -46,6 +59,30 @@ namespace rocblaslt
             {
                 return text.size() >= suffix.size()
                        && text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+            }
+
+            bool isNameChar(char c)
+            {
+                return std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_'
+                       || c == '-';
+            }
+
+            /** The build stamp, with any character not safe in a file name replaced. */
+            std::string const& buildStamp()
+            {
+                static const std::string stamp = [] {
+                    std::string text = TO_STR(HIPBLASLT_VERSION_TWEAK);
+                    for(char& c : text)
+                        if(!isNameChar(c))
+                            c = '_';
+                    return text.empty() ? std::string("unknown") : text;
+                }();
+                return stamp;
+            }
+
+            std::string versionLine()
+            {
+                return "V " + std::to_string(kFormat) + " " + buildStamp();
             }
 
             class Fd
@@ -125,9 +162,38 @@ namespace rocblaslt
 
             /**
              * 128-bit FNV-1a over two independently seeded lanes. It names
-             * objects; it is not a defence against a writer who can already
-             * modify the library, which the directory checks exclude.
+             * objects and detects damaged ones. It does not detect tampering;
+             * the ownership and permission checks keep other users from
+             * writing the library.
              */
+            class ObjectHash
+            {
+            public:
+                void update(unsigned char const* data, size_t size)
+                {
+                    for(size_t i = 0; i < size; ++i)
+                    {
+                        m_a = (m_a ^ data[i]) * 0x100000001b3ull;
+                        m_b = (m_b ^ data[i]) * 0xff51afd7ed558ccdull;
+                    }
+                }
+
+                std::string hex() const
+                {
+                    char text[33];
+                    std::snprintf(text,
+                                  sizeof(text),
+                                  "%016llx%016llx",
+                                  static_cast<unsigned long long>(m_a),
+                                  static_cast<unsigned long long>(m_b));
+                    return text;
+                }
+
+            private:
+                uint64_t m_a = 0xcbf29ce484222325ull;
+                uint64_t m_b = 0x9e3779b97f4a7c15ull;
+            };
+
             bool hashFile(std::string const& path, std::string* out, std::string* error)
             {
                 Fd fd(::open(path.c_str(), O_RDONLY | O_CLOEXEC));
@@ -137,7 +203,7 @@ namespace rocblaslt
                     return false;
                 }
 
-                uint64_t                   a = 0xcbf29ce484222325ull, b = 0x9e3779b97f4a7c15ull;
+                ObjectHash                 hash;
                 std::vector<unsigned char> buffer(1 << 20);
                 for(;;)
                 {
@@ -151,21 +217,21 @@ namespace rocblaslt
                     }
                     if(got == 0)
                         break;
-                    for(ssize_t i = 0; i < got; ++i)
-                    {
-                        a = (a ^ buffer[i]) * 0x100000001b3ull;
-                        b = (b ^ buffer[i]) * 0xff51afd7ed558ccdull;
-                    }
+                    hash.update(buffer.data(), static_cast<size_t>(got));
                 }
-
-                char text[33];
-                std::snprintf(text,
-                              sizeof(text),
-                              "%016llx%016llx",
-                              static_cast<unsigned long long>(a),
-                              static_cast<unsigned long long>(b));
-                *out = text;
+                *out = hash.hex();
                 return true;
+            }
+
+            /** 32-bit FNV-1a of a record's other fields, its last field. */
+            std::string lineChecksum(std::string const& body)
+            {
+                uint32_t sum = 0x811c9dc5u;
+                for(unsigned char c : body)
+                    sum = (sum ^ c) * 0x01000193u;
+                char text[9];
+                std::snprintf(text, sizeof(text), "%08x", sum);
+                return text;
             }
 
             bool isHash(std::string const& text)
@@ -178,10 +244,21 @@ namespace rocblaslt
                 return true;
             }
 
-            /**
-             * Whoever can write the library chooses which code objects are
-             * loaded, so a directory others can write is refused.
-             */
+            bool checkStat(std::string const& path, struct stat const& st, std::string* error)
+            {
+                if(st.st_uid != ::geteuid())
+                {
+                    setError(error, path + " is owned by another user");
+                    return false;
+                }
+                if(st.st_mode & (S_IWGRP | S_IWOTH))
+                {
+                    setError(error, path + " is group- or world-writable");
+                    return false;
+                }
+                return true;
+            }
+
             bool checkPrivate(fs::path const& path, std::string* error)
             {
                 struct stat st
@@ -192,12 +269,7 @@ namespace rocblaslt
                     setError(error, errnoText("cannot stat", path.string()));
                     return false;
                 }
-                if(st.st_mode & (S_IWGRP | S_IWOTH))
-                {
-                    setError(error, path.string() + " is group- or world-writable");
-                    return false;
-                }
-                return true;
+                return checkStat(path.string(), st, error);
             }
 
             /**
@@ -226,19 +298,22 @@ namespace rocblaslt
             }
 
             /**
-             * Copies to a temporary name unique to this process and renames it
-             * into place, so concurrent writers of the same object never see a
-             * partial file. Content addressed: an existing object is kept.
+             * Copies `from` into `dir` under a temporary name unique to this
+             * process, hashing the bytes as they are written, and renames the
+             * copy to <hash><suffix>. Concurrent writers of one object never
+             * see a partial file, and the name always matches the contents: an
+             * object already there is replaced by one with the same contents.
              */
-            bool copyDurable(std::string const& from, fs::path const& to, std::string* error)
+            bool copyHashed(std::string const& from,
+                            fs::path const&    dir,
+                            std::string const& suffix,
+                            std::string*       hash,
+                            std::string*       error)
             {
-                std::error_code ec;
-                if(fs::exists(to, ec))
-                    return true;
-
                 static std::atomic<unsigned> counter{0};
-                const fs::path temp = to.string() + ".tmp." + std::to_string(::getpid()) + "."
-                                      + std::to_string(counter++);
+                const std::string            unique
+                    = std::to_string(::getpid()) + "." + std::to_string(counter++);
+                const fs::path temp = dir / (".tmp." + unique);
 
                 Fd in(::open(from.c_str(), O_RDONLY | O_CLOEXEC));
                 if(in.get() < 0)
@@ -247,6 +322,8 @@ namespace rocblaslt
                     return false;
                 }
 
+                std::error_code ec;
+                ObjectHash      written;
                 {
                     Fd out(::open(temp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644));
                     if(out.get() < 0)
@@ -255,13 +332,17 @@ namespace rocblaslt
                         return false;
                     }
 
-                    std::vector<char> buffer(1 << 20);
+                    std::vector<unsigned char> buffer(1 << 20);
                     for(;;)
                     {
                         const ssize_t got = ::read(in.get(), buffer.data(), buffer.size());
                         if(got < 0 && errno == EINTR)
                             continue;
-                        if(got < 0 || (got > 0 && !writeAll(out.get(), buffer.data(), got)))
+                        if(got < 0
+                           || (got > 0
+                               && !writeAll(out.get(),
+                                            reinterpret_cast<char const*>(buffer.data()),
+                                            static_cast<size_t>(got))))
                         {
                             setError(error, errnoText("cannot copy to", temp.string()));
                             fs::remove(temp, ec);
@@ -269,6 +350,7 @@ namespace rocblaslt
                         }
                         if(got == 0)
                             break;
+                        written.update(buffer.data(), static_cast<size_t>(got));
                     }
 
                     if(::fsync(out.get()) != 0)
@@ -279,27 +361,37 @@ namespace rocblaslt
                     }
                 }
 
+                const fs::path to = dir / (written.hex() + suffix);
                 if(::rename(temp.c_str(), to.c_str()) != 0)
                 {
                     setError(error, errnoText("cannot publish", to.string()));
                     fs::remove(temp, ec);
                     return false;
                 }
-                syncDirectory(to.parent_path());
+                syncDirectory(dir);
+                *hash = written.hex();
                 return true;
             }
 
             bool parseLine(std::string const& line, JournalEntry* entry)
             {
-                std::istringstream fields(line);
-                std::string        kind;
+                const size_t split = line.rfind(' ');
+                if(split == std::string::npos
+                   || line.compare(
+                          split + 1, std::string::npos, lineChecksum(line.substr(0, split)))
+                          != 0)
+                    return false;
+
+                std::istringstream fields(line.substr(0, split));
+                std::string        kind, extra;
                 if(!(fields >> kind))
                     return false;
 
                 if(kind == "R")
                 {
                     std::string format;
-                    if(!(fields >> entry->payload.id.datHash >> entry->payload.id.coHash >> format))
+                    if(!(fields >> entry->payload.id.datHash >> entry->payload.id.coHash >> format)
+                       || (fields >> extra))
                         return false;
                     if(format != "dat" && format != "dat.zlib")
                         return false;
@@ -312,7 +404,8 @@ namespace rocblaslt
                 {
                     auto& e = entry->exact;
                     if(!(fields >> e.id.datHash >> e.id.coHash >> e.payloadIndex >> e.m >> e.n
-                         >> e.batch >> e.k))
+                         >> e.batch >> e.k)
+                       || (fields >> extra))
                         return false;
                     entry->kind = JournalEntry::Kind::Exact;
                     return isHash(e.id.datHash) && isHash(e.id.coHash) && e.payloadIndex >= 0;
@@ -321,13 +414,38 @@ namespace rocblaslt
                 return false;
             }
 
-            /** Parses complete lines; a trailing partial line is left unread. */
-            void parseJournal(std::string const&         text,
+            /**
+             * Parses the complete lines of `text`, which starts at byte
+             * `offset` of the journal at `path`; a trailing partial line is
+             * left unread. The journal's first line must be this build's V
+             * line. A journal without a complete first line holds no records.
+             */
+            bool parseJournal(std::string const&         text,
                               uint64_t                   offset,
+                              std::string const&         path,
                               std::vector<JournalEntry>* entries,
-                              uint64_t*                  end)
+                              uint64_t*                  end,
+                              std::string*               error)
             {
                 size_t start = 0;
+                if(offset == 0)
+                {
+                    const size_t newline = text.find('\n');
+                    if(newline == std::string::npos)
+                    {
+                        *end = 0;
+                        return true;
+                    }
+                    if(text.compare(0, newline, versionLine()) != 0)
+                    {
+                        setError(error,
+                                 path + " does not start with \"" + versionLine()
+                                     + "\"; it was not written by this build of hipBLASLt");
+                        return false;
+                    }
+                    start = newline + 1;
+                }
+
                 for(;;)
                 {
                     const size_t newline = text.find('\n', start);
@@ -340,12 +458,15 @@ namespace rocblaslt
                     start = newline + 1;
                 }
                 *end = offset + start;
+                return true;
             }
 
             /**
-             * Appends one line to a journal opened with O_APPEND and locked
-             * exclusively. A partial last line, left by a writer that crashed,
-             * is terminated first so the new record starts on its own line.
+             * Appends text ending in one record to a journal opened with
+             * O_APPEND and locked exclusively. A partial last line, left by a
+             * writer that crashed, is terminated first so the new record starts
+             * on its own line; its checksum keeps the partial line from being
+             * read as a record.
              */
             bool appendLine(int fd, std::string const& path, std::string line, std::string* error)
             {
@@ -395,11 +516,13 @@ namespace rocblaslt
                 struct stat st
                 {
                 };
-                if(::fstat(fd, &st) != 0 || (st.st_mode & (S_IWGRP | S_IWOTH)))
+                if(::fstat(fd, &st) != 0)
                 {
-                    setError(error, path + " is group- or world-writable");
+                    setError(error, errnoText("cannot stat", path));
                     return false;
                 }
+                if(!checkStat(path, st, error))
+                    return false;
 
                 while(::flock(fd, exclusive ? LOCK_EX : LOCK_SH) != 0)
                 {
@@ -412,10 +535,15 @@ namespace rocblaslt
                 return true;
             }
 
+            std::string withChecksum(std::string const& body)
+            {
+                return body + " " + lineChecksum(body);
+            }
+
             std::string payloadLine(PayloadRecord const& record)
             {
-                return "R " + record.id.datHash + " " + record.id.coHash + " "
-                       + (record.compressed ? "dat.zlib" : "dat");
+                return withChecksum("R " + record.id.datHash + " " + record.id.coHash + " "
+                                    + (record.compressed ? "dat.zlib" : "dat"));
             }
 
             std::string exactLine(ExactRecord const& record)
@@ -424,7 +552,12 @@ namespace rocblaslt
                 line << "E " << record.id.datHash << ' ' << record.id.coHash << ' '
                      << record.payloadIndex << ' ' << record.m << ' ' << record.n << ' '
                      << record.batch << ' ' << record.k;
-                return line.str();
+                return withChecksum(line.str());
+            }
+
+            std::array<uint64_t, 4> shapeOf(ExactRecord const& record)
+            {
+                return {record.m, record.n, record.batch, record.k};
             }
         } // namespace
 
@@ -492,6 +625,12 @@ namespace rocblaslt
             return new Store(rootPath.string());
         }
 
+        bool Store::checkLayout(std::string* error) const
+        {
+            return checkPrivate(m_root, error)
+                   && checkPrivate(fs::path(m_root) / kObjectsDir, error);
+        }
+
         std::string Store::shardPath(PayloadRecord const& record) const
         {
             return (fs::path(m_root) / kObjectsDir
@@ -504,71 +643,166 @@ namespace rocblaslt
             return (fs::path(m_root) / kObjectsDir / (id.coHash + ".co")).string();
         }
 
-        std::string Store::journalPath(std::string const& arch, std::string* error) const
+        std::string Store::journalPath(std::string const& scope, std::string* error) const
         {
-            const bool safe = !arch.empty() && arch.find('/') == std::string::npos && arch != "."
-                              && arch != ".." && arch != kObjectsDir;
+            bool safe = !scope.empty() && scope != "." && scope != ".." && scope != kObjectsDir;
+            for(char c : scope)
+                safe = safe && isNameChar(c);
             if(!safe)
             {
-                setError(error, "invalid architecture name " + arch);
+                setError(error, "invalid journal name " + scope);
                 return {};
             }
-            return (fs::path(m_root) / arch / kJournalName).string();
+            return (fs::path(m_root) / scope / (kJournalPrefix + buildStamp())).string();
         }
 
-        bool Store::storeObjects(std::string const&   shardFile,
-                                 std::string const&   coPath,
-                                 PayloadRecord const& record,
-                                 std::string*         error) const
+        bool Store::storeObjects(std::string const& shardFile,
+                                 std::string const& coPath,
+                                 PayloadRecord*     record,
+                                 std::string*       error) const
         {
-            // Both objects are durable before any record names them.
-            return copyDurable(shardFile, shardPath(record), error)
-                   && copyDurable(coPath, codeObjectPath(record.id), error);
-        }
-
-        bool Store::appendPayload(std::string const&   arch,
-                                  PayloadRecord const& record,
-                                  std::string*         error) const
-        {
-            const std::string path = journalPath(arch, error);
-            if(path.empty() || !makePrivateDirectory(fs::path(path).parent_path(), error))
+            if(!checkLayout(error))
                 return false;
+
+            // Both objects are durable before any record names them.
+            const fs::path objects = fs::path(m_root) / kObjectsDir;
+            PayloadId      id;
+            if(!copyHashed(shardFile,
+                           objects,
+                           std::string(".dat") + (record->compressed ? kZlibSuffix : ""),
+                           &id.datHash,
+                           error)
+               || !copyHashed(coPath, objects, ".co", &id.coHash, error))
+                return false;
+            record->id = id;
+            return true;
+        }
+
+        bool Store::verifyObjects(PayloadRecord const& record, std::string* error) const
+        {
+            if(!checkLayout(error))
+                return false;
+
+            for(auto const& [path, expected] :
+                {std::make_pair(shardPath(record), record.id.datHash),
+                 std::make_pair(codeObjectPath(record.id), record.id.coHash)})
+            {
+                std::string actual;
+                if(!checkPrivate(path, error) || !hashFile(path, &actual, error))
+                    return false;
+                if(actual != expected)
+                {
+                    setError(error, path + " is damaged: its contents do not match its name");
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        bool Store::appendUnlessKnown(
+            std::string const&                                     scope,
+            std::function<std::string(JournalState const&)> const& makeLine,
+            std::string*                                           error) const
+        {
+            const std::string path = journalPath(scope, error);
+            if(path.empty() || !checkLayout(error)
+               || !makePrivateDirectory(fs::path(path).parent_path(), error))
+                return false;
+
+            std::lock_guard<std::mutex> lock(m_mutex);
 
             Fd fd;
             if(!openJournal(path, true, &fd, error))
                 return false;
 
-            // Re-read under the lock: another process may have just added it.
+            struct stat st
+            {
+            };
+            if(::fstat(fd.get(), &st) != 0)
+            {
+                setError(error, errnoText("cannot stat", path));
+                return false;
+            }
+
+            // Re-read under the lock: another process may have appended.
+            JournalState& state = m_journals[scope];
+            if(state.device != uint64_t(st.st_dev) || state.inode != uint64_t(st.st_ino)
+               || uint64_t(st.st_size) < state.offset)
+            {
+                state        = JournalState{};
+                state.device = st.st_dev;
+                state.inode  = st.st_ino;
+            }
+
             std::string text;
-            if(!readFrom(fd.get(), 0, &text))
+            if(!readFrom(fd.get(), state.offset, &text))
             {
                 setError(error, errnoText("cannot read", path));
                 return false;
             }
-            std::vector<JournalEntry> entries;
-            uint64_t                  end = 0;
-            parseJournal(text, 0, &entries, &end);
-            for(auto const& entry : entries)
-                if(entry.kind == JournalEntry::Kind::Payload && entry.payload.id == record.id)
-                    return true;
 
-            return appendLine(fd.get(), path, payloadLine(record), error);
+            std::string prefix;
+            if(state.offset == 0 && text.find('\n') == std::string::npos)
+            {
+                // New, or left without a complete V line by a writer that
+                // crashed creating it. Either way it holds no records.
+                if(!text.empty() && ::ftruncate(fd.get(), 0) != 0)
+                {
+                    setError(error, errnoText("cannot truncate", path));
+                    return false;
+                }
+                text.clear();
+                prefix = versionLine() + "\n";
+            }
+
+            std::vector<JournalEntry> entries;
+            uint64_t                  end = state.offset;
+            if(!parseJournal(text, state.offset, path, &entries, &end, error))
+                return false;
+            for(auto const& entry : entries)
+            {
+                if(entry.kind == JournalEntry::Kind::Payload)
+                    state.payloads.insert(entry.payload.id);
+                else
+                    state.lastExact[shapeOf(entry.exact)] = entry.exact;
+            }
+            state.offset = end;
+
+            const std::string line = makeLine(state);
+            if(line.empty())
+                return true;
+            return appendLine(fd.get(), path, prefix + line, error);
         }
 
-        bool Store::appendExact(std::string const& arch,
+        bool Store::appendPayload(std::string const&   scope,
+                                  PayloadRecord const& record,
+                                  std::string*         error) const
+        {
+            return appendUnlessKnown(
+                scope,
+                [&](JournalState const& state) {
+                    return state.payloads.count(record.id) ? std::string() : payloadLine(record);
+                },
+                error);
+        }
+
+        bool Store::appendExact(std::string const& scope,
                                 ExactRecord const& record,
                                 std::string*       error) const
         {
-            const std::string path = journalPath(arch, error);
-            if(path.empty() || !makePrivateDirectory(fs::path(path).parent_path(), error))
-                return false;
-
-            Fd fd;
-            return openJournal(path, true, &fd, error)
-                   && appendLine(fd.get(), path, exactLine(record), error);
+            return appendUnlessKnown(
+                scope,
+                [&](JournalState const& state) {
+                    auto last = state.lastExact.find(shapeOf(record));
+                    if(last != state.lastExact.end() && last->second.id == record.id
+                       && last->second.payloadIndex == record.payloadIndex)
+                        return std::string();
+                    return exactLine(record);
+                },
+                error);
         }
 
-        bool Store::read(std::string const&         arch,
+        bool Store::read(std::string const&         scope,
                          uint64_t                   offset,
                          std::vector<JournalEntry>* entries,
                          uint64_t*                  end,
@@ -577,8 +811,8 @@ namespace rocblaslt
             entries->clear();
             *end = offset;
 
-            const std::string path = journalPath(arch, error);
-            if(path.empty())
+            const std::string path = journalPath(scope, error);
+            if(path.empty() || !checkLayout(error))
                 return false;
 
             std::error_code ec;
@@ -600,8 +834,7 @@ namespace rocblaslt
                 setError(error, errnoText("cannot read", path));
                 return false;
             }
-            parseJournal(text, offset, entries, end);
-            return true;
+            return parseJournal(text, offset, path, entries, end, error);
         }
     } // namespace local_kernel_store
 } // namespace rocblaslt

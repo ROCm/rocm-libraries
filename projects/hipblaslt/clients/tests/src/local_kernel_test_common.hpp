@@ -17,6 +17,7 @@
 #include <hipblaslt/hipblaslt-local-kernel.h>
 #include <hipblaslt/hipblaslt.h>
 
+#include <fcntl.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -560,8 +561,10 @@ namespace local_kernel_test
     // Starts this executable with only the named DISABLED_ case enabled and
     // returns its pid, or -1. Uses posix_spawn because forking after HIP
     // initialization is unsafe. The child does not inherit LIBRARY_ENV; `env`
-    // adds "NAME=value" entries.
-    inline pid_t spawnWorker(std::string const& filter, std::vector<std::string> const& env = {})
+    // adds "NAME=value" entries. A non-empty `errorLog` receives its stderr.
+    inline pid_t spawnWorker(std::string const&              filter,
+                             std::vector<std::string> const& env      = {},
+                             std::string const&              errorLog = {})
     {
         std::string exe = selfExe();
         if(exe.empty())
@@ -581,10 +584,23 @@ namespace local_kernel_test
             envp.push_back(entry.data());
         envp.push_back(nullptr);
 
-        pid_t pid = 0;
-        if(posix_spawn(&pid, exe.c_str(), nullptr, nullptr, argv, envp.data()) != 0)
+        posix_spawn_file_actions_t actions;
+        if(posix_spawn_file_actions_init(&actions) != 0)
             return -1;
-        return pid;
+        if(!errorLog.empty()
+           && posix_spawn_file_actions_addopen(
+                  &actions, STDERR_FILENO, errorLog.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644)
+                  != 0)
+        {
+            posix_spawn_file_actions_destroy(&actions);
+            return -1;
+        }
+
+        pid_t      pid = 0;
+        const bool spawned
+            = posix_spawn(&pid, exe.c_str(), &actions, nullptr, argv, envp.data()) == 0;
+        posix_spawn_file_actions_destroy(&actions);
+        return spawned ? pid : -1;
     }
 
     // Exit status of a spawned worker, or -1.
@@ -598,8 +614,10 @@ namespace local_kernel_test
         return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     }
 
-    inline int runWorker(std::string const& filter, std::vector<std::string> const& env = {})
+    inline int runWorker(std::string const&              filter,
+                         std::vector<std::string> const& env      = {},
+                         std::string const&              errorLog = {})
     {
-        return waitWorker(spawnWorker(filter, env));
+        return waitWorker(spawnWorker(filter, env, errorLog));
     }
 } // namespace local_kernel_test

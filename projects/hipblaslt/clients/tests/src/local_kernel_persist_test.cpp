@@ -71,9 +71,20 @@ namespace
         return name.substr(0, name.find(':'));
     }
 
+    // The directory of the current device's journals, e.g. gfx942_CU304.
+    fs::path scopePath(fs::path const& library)
+    {
+        return library / (deviceArch() + "_CU" + std::to_string(deviceCuCount()));
+    }
+
+    // This build's journal: the only one a test's library holds.
     fs::path journalPath(fs::path const& library)
     {
-        return library / deviceArch() / "journal";
+        std::error_code ec;
+        for(auto const& entry : fs::directory_iterator(scopePath(library), ec))
+            if(entry.path().filename().string().rfind("journal-", 0) == 0)
+                return entry.path();
+        return scopePath(library) / "journal-not-found";
     }
 
     // The journal's lines, including a final one without a newline.
@@ -100,6 +111,12 @@ namespace
         for(std::string field; in >> field;)
             ++count;
         return count;
+    }
+
+    std::string readFile(fs::path const& path)
+    {
+        std::ifstream in(path, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     }
 
     size_t countObjects(fs::path const& library, std::string const& extension)
@@ -284,6 +301,8 @@ TEST(LocalKernelPersist, SavedKernelsLoadInNewProcess)
 
     EXPECT_GE(countObjects(library, ".co"), 1u);
     auto lines = journalLines(library);
+    ASSERT_FALSE(lines.empty());
+    EXPECT_EQ(lines[0].rfind("V 1 ", 0), 0u) << "the journal starts with its version";
     EXPECT_GE(countRecords(lines, 'R'), 1u);
     EXPECT_EQ(countRecords(lines, 'E'), 1u);
     for(auto const& entry : fs::directory_iterator(library / "objects"))
@@ -293,6 +312,23 @@ TEST(LocalKernelPersist, SavedKernelsLoadInNewProcess)
     EXPECT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}), 0)
         << "a new process loads the saved kernel; the payload it was registered from is gone";
     EXPECT_EQ(runWorker(NOTHING_LOADED_WORKER), 0) << "without the variable, nothing is loaded";
+}
+
+// Mapping a shape again to the kernel it already selects, as a tuner run again
+// does, records nothing.
+TEST(LocalKernelPersist, RepeatedMappingIsRecordedOnce)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+    const auto first = journalLines(library);
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+    EXPECT_EQ(journalLines(library), first);
+    EXPECT_EQ(countRecords(first, 'E'), 1u);
+
+    EXPECT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}), 0);
 }
 
 // Registering a payload already registered, or already saved, returns the
@@ -390,6 +426,92 @@ TEST(LocalKernelPersist, RefreshLoadsWhatOthersSaved)
         runWorker("LocalKernelPersist.DISABLED_RefreshWorker", {libraryEnv(tmp.path / "lib")}), 0);
 }
 
+// A mapping is applied together with what other processes saved before it,
+// so this process selects what a new one would.
+TEST(LocalKernelPersist, DISABLED_ReadBackWorker)
+{
+    char const* library = std::getenv(LIBRARY_ENV);
+    ASSERT_NE(library, nullptr);
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    Problem small, large;
+    ASSERT_EQ(buildProblem(small, 16), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(buildProblem(large, 64), HIPBLAS_STATUS_SUCCESS);
+
+    Registered r = registerUsable(handle, small, candidates);
+    ASSERT_GE(r.index, 0);
+
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library), env(TEST_M_ENV, "64")}), 0);
+    EXPECT_LT(topIndex(handle, large), LOCAL_INDEX_BASE) << "not read yet";
+
+    ASSERT_EQ(hipblasLtLocalKernelSetExactMatch(handle, r.index, 16, N, 1, K),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(topIndex(handle, small), r.index);
+    EXPECT_GE(topIndex(handle, large), LOCAL_INDEX_BASE)
+        << "the other process's mapping, saved first, is applied too";
+
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelPersist, MappingAppliesWhatOthersSavedFirst)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    EXPECT_EQ(
+        runWorker("LocalKernelPersist.DISABLED_ReadBackWorker", {libraryEnv(tmp.path / "lib")}), 0);
+}
+
+// Refresh fails, loading nothing, when the journal cannot be read.
+TEST(LocalKernelPersist, DISABLED_UnreadableRefreshWorker)
+{
+    char const* library = std::getenv(LIBRARY_ENV);
+    ASSERT_NE(library, nullptr);
+    const std::vector<std::string> candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_FALSE(registerPayload(handle, candidates[0] + ".dat", candidates[0] + ".co").empty());
+
+    const fs::path journal = journalPath(library);
+    const auto     lines   = journalLines(library);
+    ASSERT_GE(lines.size(), 2u);
+
+    {
+        std::ofstream out(journal, std::ios::trunc);
+        out << "V 1 another-build\n";
+        for(size_t i = 1; i < lines.size(); ++i)
+            out << lines[i] << '\n';
+    }
+    size_t added = 123;
+    EXPECT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_INTERNAL_ERROR)
+        << "written by another build";
+    EXPECT_EQ(added, 0u);
+
+    ASSERT_TRUE(fs::remove(journal));
+    ASSERT_TRUE(fs::create_directory(journal));
+    EXPECT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_INTERNAL_ERROR)
+        << "not a readable file";
+
+    ASSERT_TRUE(fs::remove(journal));
+    EXPECT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_SUCCESS)
+        << "a missing journal reads as empty";
+
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelPersist, RefreshReportsUnreadableJournal)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    EXPECT_EQ(runWorker("LocalKernelPersist.DISABLED_UnreadableRefreshWorker",
+                        {libraryEnv(tmp.path / "lib")}),
+              0);
+}
+
 // Two processes saving at once both land, and the journal stays well formed.
 TEST(LocalKernelPersist, ConcurrentWriters)
 {
@@ -402,19 +524,22 @@ TEST(LocalKernelPersist, ConcurrentWriters)
     ASSERT_EQ(waitWorker(small), 0);
     ASSERT_EQ(waitWorker(large), 0);
 
-    auto                  lines = journalLines(library);
+    auto lines = journalLines(library);
+    ASSERT_FALSE(lines.empty());
+    EXPECT_EQ(lines[0].rfind("V 1 ", 0), 0u) << lines[0];
     std::set<std::string> payloads;
-    for(auto const& line : lines)
+    for(size_t i = 1; i < lines.size(); ++i)
     {
+        auto const& line = lines[i];
         if(line.rfind("R ", 0) == 0)
         {
-            EXPECT_EQ(countFields(line), 4u) << line;
+            EXPECT_EQ(countFields(line), 5u) << line;
             EXPECT_TRUE(payloads.insert(line).second) << "payload recorded twice: " << line;
         }
         else
         {
             EXPECT_EQ(line.rfind("E ", 0), 0u) << line;
-            EXPECT_EQ(countFields(line), 8u) << line;
+            EXPECT_EQ(countFields(line), 9u) << line;
         }
     }
     EXPECT_EQ(countRecords(lines, 'E'), 2u);
@@ -461,8 +586,42 @@ TEST(LocalKernelPersist, IgnoresWritableDirectory)
     EXPECT_EQ(runWorker(NOTHING_LOADED_WORKER, {libraryEnv(library)}), 0);
 }
 
-// Lines that do not parse are skipped, and a partial last line left by a
-// crashed writer does not swallow the next record.
+// A directory owned by another user is not used, though its permissions would
+// pass. As root, the test makes one; otherwise it uses "/", which root owns.
+TEST(LocalKernelPersist, IgnoresDirectoryOwnedByAnotherUser)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+
+    fs::path library = "/";
+    if(::geteuid() == 0)
+    {
+        constexpr uid_t nobody = 65534;
+        library                = tmp.path / "lib";
+        ASSERT_TRUE(fs::create_directories(library / "objects"));
+        for(auto const& dir : {library, library / "objects"})
+        {
+            ASSERT_EQ(::chown(dir.c_str(), nobody, nobody), 0) << dir;
+            ASSERT_EQ(::chmod(dir.c_str(), 0755), 0) << dir;
+        }
+    }
+
+    const fs::path errors = tmp.path / "stderr";
+    ASSERT_EQ(runWorker("LocalKernelPersist.DISABLED_InMemoryWorker",
+                        {libraryEnv(library)},
+                        errors.string()),
+              0);
+    EXPECT_NE(readFile(errors).find(library.string() + " is owned by another user"),
+              std::string::npos)
+        << readFile(errors);
+    if(::geteuid() == 0)
+        EXPECT_TRUE(fs::is_empty(library / "objects") && !fs::exists(scopePath(library)))
+            << "nothing is written to a directory owned by another user";
+}
+
+// Lines that do not parse or whose checksum does not match are skipped, and a
+// partial last line left by a crashed writer is not read as a record, even
+// where what remains would parse, and does not swallow the next record.
 TEST(LocalKernelPersist, ToleratesDamagedJournal)
 {
     TempDir tmp;
@@ -470,25 +629,37 @@ TEST(LocalKernelPersist, ToleratesDamagedJournal)
     const fs::path library = tmp.path / "lib";
 
     ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+    auto lines = journalLines(library);
+    ASSERT_FALSE(lines.empty());
+    const std::string mapping = lines.back();
+    ASSERT_EQ(mapping.rfind("E ", 0), 0u) << mapping;
+
+    // The mapping with K cut short and no checksum, as a crash could leave
+    // it, and with K changed under its checksum.
+    const std::string body    = mapping.substr(0, mapping.rfind(' '));
+    const std::string torn    = body.substr(0, body.size() - 2);
+    const std::string changed = torn + "99" + mapping.substr(mapping.rfind(' '));
     {
         std::ofstream out(journalPath(library), std::ios::app);
-        out << "Z unknown record\nR nothex nothex dat\nE 12";
+        out << "Z unknown record\nR nothex nothex dat 00000000\n" << changed << "\n" << torn;
     }
 
-    ASSERT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}), 0);
+    ASSERT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}), 0)
+        << "only the original mapping is selectable";
     ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library), env(TEST_M_ENV, "64")}), 0);
 
-    auto lines = journalLines(library);
-    EXPECT_NE(std::find(lines.begin(), lines.end(), "E 12"), lines.end())
+    lines = journalLines(library);
+    EXPECT_NE(std::find(lines.begin(), lines.end(), torn), lines.end())
         << "the partial line was terminated, not extended";
     ASSERT_FALSE(lines.empty());
     EXPECT_EQ(lines.back().rfind("E ", 0), 0u);
-    EXPECT_EQ(countFields(lines.back()), 8u);
+    EXPECT_EQ(countFields(lines.back()), 9u);
 
     EXPECT_EQ(
         runWorker(LOAD_WORKER,
                   {libraryEnv(library), env(TEST_M_ENV, "64"), env(TEST_SELECTABLE_ENV, "2")}),
-        0);
+        0)
+        << "the terminated partial line is still not a record";
 }
 
 // A record whose objects are gone is skipped with a warning.
@@ -504,6 +675,40 @@ TEST(LocalKernelPersist, SkipsMissingObjects)
             fs::remove(entry.path());
 
     EXPECT_EQ(runWorker(NOTHING_LOADED_WORKER, {libraryEnv(library)}), 0);
+}
+
+// A saved code object that no longer matches its name, cut short or changed
+// in place, is skipped with a warning, and so are its mappings.
+TEST(LocalKernelPersist, SkipsDamagedObjects)
+{
+    for(const bool truncate : {true, false})
+    {
+        TempDir tmp;
+        ASSERT_FALSE(tmp.path.empty());
+        const fs::path library = tmp.path / "lib";
+
+        ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+        for(auto const& entry : fs::directory_iterator(library / "objects"))
+        {
+            if(entry.path().extension() != ".co")
+                continue;
+            if(truncate)
+            {
+                fs::resize_file(entry.path(), fs::file_size(entry.path()) / 2);
+                continue;
+            }
+            std::fstream file(entry.path(), std::ios::in | std::ios::out | std::ios::binary);
+            char         last = 0;
+            file.seekg(-1, std::ios::end);
+            file.get(last);
+            file.seekp(-1, std::ios::end);
+            file.put(static_cast<char>(~last));
+            ASSERT_TRUE(file.good()) << entry.path();
+        }
+
+        EXPECT_EQ(runWorker(NOTHING_LOADED_WORKER, {libraryEnv(library)}), 0)
+            << (truncate ? "cut short" : "changed in place");
+    }
 }
 
 // Registers one shard with two code objects that differ only in trailing
@@ -611,7 +816,10 @@ TEST(LocalKernelPersist, OneShardWithTwoCodeObjects)
         std::vector<std::string> fields;
         for(std::string field; in >> field;)
             fields.push_back(field);
-        (line.rfind("R ", 0) == 0 ? payloads : exacts).push_back(fields);
+        if(line.rfind("R ", 0) == 0)
+            payloads.push_back(fields);
+        else if(line.rfind("E ", 0) == 0)
+            exacts.push_back(fields);
     }
     ASSERT_EQ(exacts.size(), 1u);
     std::vector<std::vector<std::string>> sameShard;
