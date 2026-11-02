@@ -118,6 +118,23 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
+    # 9-17: the vector / looped folds (vec, rezero, ws_bf16, fold_loop,
+    # slab_par) on the bf16 64x576 problem. Keep in lockstep with the C emitter.
+    _v = {
+        9: dict(vec=4),
+        10: dict(vec=4, rezero=1),
+        11: dict(vec=4, ws_bf16=True),
+        12: dict(vec=4, ws_replicas=48, fold_loop=4, slab_par=4, tile_m=1),
+        13: dict(vec=4, ws_replicas=50, fold_loop=4, slab_par=4, tile_m=1),
+        14: dict(vec=4, ws_replicas=10, fold_loop=4, ws_bf16=True),
+        15: dict(vec=4, ws_replicas=2, dtype_d="fp32"),
+        16: dict(rezero=1),
+        17: dict(vec=4, fold_loop=4, groups=2),
+    }
+    if idx in _v:
+        kw = dict(dtype_d="bf16")
+        kw.update(_v[idx])
+        return WgradReduceSpec(problem=_make_problem(64, 576), **kw), "gfx942"
     raise SystemExit(f"unknown config index {idx}")
 
 

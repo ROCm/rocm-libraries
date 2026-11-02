@@ -103,6 +103,32 @@ static int make_cfg(int idx, rocke_wgrad_reduce_spec_t* spec, const char** arch)
         spec->ws_replicas = 4;
         spec->problem_short = "N1H4W4C8_K32Y3X3";
         return 0;
+    case 9:
+    case 10:
+    case 11:
+    case 12:
+    case 13:
+    case 14:
+    case 15:
+    case 16:
+    case 17:
+        /* The vector / looped folds; mirrors _v in the Python emitter. */
+        spec->wg_M = 64;
+        spec->wg_N = 576;
+        spec->dtype_d = idx == 15 ? "fp32" : "bf16";
+        spec->problem_short = "N1H4W4C64_K64Y3X3";
+        *arch = "gfx942";
+        spec->vec = idx == 16 ? 1 : 4;
+        spec->rezero = (idx == 10 || idx == 16) ? 1 : 0;
+        spec->ws_bf16 = idx == 11 || idx == 14;
+        spec->ws_replicas = idx == 12 ? 48 : idx == 13 ? 50 : idx == 14 ? 10 : idx == 15 ? 2 : 8;
+        spec->fold_loop = (idx == 12 || idx == 13 || idx == 14 || idx == 17) ? 4 : 0;
+        spec->slab_par = (idx == 12 || idx == 13) ? 4 : 1;
+        if(idx == 12 || idx == 13)
+            spec->tile_m = 1;
+        if(idx == 17)
+            spec->groups = 2;
+        return 0;
     default:
         return -1;
     }
