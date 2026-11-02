@@ -17,7 +17,12 @@ from dispatch.attention import (
     attention_execution_candidates,
     dispatch_attention,
 )
-from dispatch.attention.common import AttentionSpec, _problem, _tuning_problem
+from dispatch.attention.common import (
+    AttentionSpec,
+    _problem,
+    _tuning_problem,
+    _unified_path_coverage,
+)
 from dispatch.attention.tuning_specs import (
     ExplicitAttention2DConfig,
     ExplicitAttention3DConfig,
@@ -169,6 +174,20 @@ class TestRouting(unittest.TestCase):
         for label, (request, reason) in cases.items():
             with self.subTest(case=label), self.assertRaisesRegex(ValueError, reason):
                 dispatch_attention(request)
+
+    def test_scalar_gate_refusals_apply_to_bias_problems(self):
+        # A q_dtype override without fp8 is refused only by the scalar gate.
+        # AttentionRequest has no q_dtype, so set it on the problem directly.
+        for path, kw in (("2d", {}), ("3d", {"seqlen_q": 1, "seqlen_k": 8192})):
+            for bias in (False, True):
+                with self.subTest(path=path, bias=bias):
+                    req = _req(use_attn_bias=bias, **kw)
+                    ok, why = _unified_path_coverage(req, _problem(req), path, "gfx950")
+                    self.assertTrue(ok, why)
+                    problem = replace(_problem(req), q_dtype="fp16")
+                    ok, why = _unified_path_coverage(req, problem, path, "gfx950")
+                    self.assertFalse(ok)
+                    self.assertIn("q_dtype override requires use_fp8", why)
 
     def test_strided_decode_refuses_bias(self):
         # mask_type=1 (the _req default, top-left causal) is refused by the

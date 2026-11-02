@@ -205,9 +205,8 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
      * can be extended. */
     bool use_wave_page_id_load; /* False */
-    /* gfx950 only; the gfx942 builder rejects it. Appends four kernel params.
-     * Appended last (not grouped with the other defaulted bools above) because
-     * ABI_VERSION 7 only covers appended fields -- see abi.h. */
+    /* gfx950 only (the gfx942 spec validator rejects it). Appends four kernel
+     * params. Kept last: inserting a field moves every later one (abi.h). */
     bool use_additive_bias; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 

@@ -91,9 +91,8 @@ typedef struct rocke_unified_attention_problem
     bool waves_per_eu_set;
     const char* compile_backend; /* Optional[str]; NULL == None               */
     int num_kv_blocks; /* default 0                                  */
-    /* gfx950 tiled kernels only; the scalar path never reads it. Appended last
-     * (not grouped with the other bools above) because ABI_VERSION 7 only
-     * covers appended fields -- see abi.h. */
+    /* gfx950 tiled kernels only; the scalar path refuses it. Kept last:
+     * inserting a field moves every later one (abi.h). */
     bool use_additive_bias; /* default false                                */
 } rocke_unified_attention_problem_t;
 

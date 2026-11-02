@@ -179,9 +179,9 @@ typedef struct rocke_attention_tiled_2d_spec
     bool use_global_load_lds_k; /* False */
     bool use_q_major_grid; /* False */
     bool use_qblock_reverse; /* False (gfx950: longest-first query blocks) */
-    /* gfx950 only; the gfx942 validator rejects it. Appends four kernel params.
-     * Appended last (not grouped with the other defaulted bools above) because
-     * ABI_VERSION 7 only covers appended fields -- see abi.h. */
+    /* gfx950 only (on gfx942, rocke_gfx942_attn2d_build_ctx_init rejects it).
+     * Appends four kernel params. Kept last: inserting a field moves every
+     * later one (abi.h). */
     bool use_additive_bias; /* False */
 } rocke_attention_tiled_2d_spec_t;
 

@@ -17,9 +17,10 @@ decision is a PURE function of the problem
 ``UnifiedAttentionProblem.select_path``), so it can be mirrored byte-faithfully
 on the C++ side. Backend coverage is gated by
 :func:`attention_unified.supports_native_unified_attention` (head_size /
-block_size / dtype / feature gate -- also pure); for a bias problem,
-:func:`_unified_path_coverage` skips that scalar gate and judges the problem
-by the path's own tiled gate instead (the scalar backend never serves bias).
+block_size / dtype / feature gate -- also pure); for a problem with a
+tiled-only feature (additive bias, the LSE output),
+:func:`_unified_path_coverage` runs that scalar gate with the feature stripped
+and then lets the path's own tiled gate judge the feature.
 
 The structural identity used for selection parity is therefore::
 
@@ -58,11 +59,10 @@ from typing import Any, Tuple
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    _explicit_path_supported,
     gfx942_3d_kv_needs_i64_addr,
     kv_addr_width_for_builder,
     supports_native_unified_attention,
-    supports_native_unified_attention_3d_tiled,
-    supports_native_unified_attention_tiled,
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
     # job is to state that coverage as a Capability so it can be filtered and
     # queried without probing. Copying the numbers would drift in the one
@@ -819,25 +819,18 @@ def _problem_with_num_cus(
 
 def _unified_path_coverage(
     req: AttentionRequest, problem: UnifiedAttentionProblem, path: str, arch: str
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Whether the unified ``path`` ("2d" / "3d") can run ``problem``.
 
-    The single owner of which gate judges a unified problem. The scalar gate
-    knows nothing about the tiled-only features (additive bias, the LSE
-    output), so neither is shown to it: both are stripped before the scalar
-    call, which still runs every other scalar-only check (e.g. a q_dtype
-    override) regardless of whether bias or LSE is requested. If the
-    stripped problem clears the scalar gate and either feature is actually
-    present, the path's own tiled gate judges the real problem instead. The
-    tiled gate limits each feature to the arches that implement it; the
-    split-KV gate owns LSE and the 2D gate refuses it. The unified kernels
-    take an fp32 bias only.
+    The scalar gate knows nothing about the tiled-only features (additive
+    bias, the LSE output), so it judges the problem with both stripped: its
+    other checks (e.g. a q_dtype override) apply whether or not either feature
+    is requested. When the stripped problem passes and either feature is on,
+    the path's tiled gate (``_explicit_path_supported``, shared with the
+    strided-decode candidate) judges the real problem; it limits each feature
+    to the arches and paths that implement it. The unified kernels take an
+    fp32 bias only, which only the request can tell.
     """
-    path_gate = (
-        supports_native_unified_attention_3d_tiled
-        if path == "3d"
-        else supports_native_unified_attention_tiled
-    )
     if problem.use_additive_bias and str(req.attn_bias_dtype).strip().lower() != "f32":
         return False, (
             "unified attention takes an f32 additive bias only, got "
@@ -846,7 +839,7 @@ def _unified_path_coverage(
     base = replace(problem, emit_lse=False, use_additive_bias=False)
     ok, why = supports_native_unified_attention(base, arch=arch)
     if ok and (problem.use_additive_bias or problem.emit_lse):
-        return path_gate(problem, arch=arch)
+        return _explicit_path_supported(problem, None, path, arch)
     return ok, why
 
 
