@@ -1371,6 +1371,11 @@ def extract_placeholder(value: object) -> str | None:
     return None
 
 
+def first_path_token(path: str) -> str:
+    """The first dotted component of a placeholder path: ``a.b`` -> ``a``."""
+    return path.split(".", 1)[0]
+
+
 def collect_placeholders(
     value: object, scalar_fields: set[str], attribute_fields: set[str]
 ) -> None:
@@ -1617,6 +1622,7 @@ def validate_sweep_case(
     stats_tensor_uids: set[int] | None = None,
     length_uids: dict[int, int] | None = None,
     absent_uids: set[int] = frozenset(),
+    tensor_scoped_fields: set[tuple[int, str]] | None = None,
 ) -> None:
     if not isinstance(case, dict):
         result.error(sweep_path, f"case {index} is not an object")
@@ -1646,15 +1652,33 @@ def validate_sweep_case(
         values = {}
 
     for field_name in sorted(scalar_fields):
-        if field_name not in values:
+        if first_path_token(field_name) not in values:
             result.error(
                 sweep_path,
                 f"case '{case_label}' is missing placeholder value for '{field_name}'",
             )
+    # A placeholder in a tensor field resolves from that tensor's values entry
+    # first, then from the top-level values.
+    raw_case_tensors = {}
+    if isinstance(values.get("tensors"), list):
+        for tensor in values["tensors"]:
+            if isinstance(tensor, dict) and is_integer(tensor.get("uid")):
+                raw_case_tensors.setdefault(tensor["uid"], tensor)
+    for uid, field_name in sorted(tensor_scoped_fields or ()):
+        token = first_path_token(field_name)
+        if token not in values and token not in raw_case_tensors.get(uid, {}):
+            result.error(
+                sweep_path,
+                f"case '{case_label}' is missing placeholder value for '{field_name}'",
+                uid,
+            )
+    used_keys = {first_path_token(f) for f in scalar_fields} | {
+        first_path_token(f) for _, f in tensor_scoped_fields or ()
+    }
     for key in values:
         if key in ("tensors", "attributes"):
             continue
-        if key not in scalar_fields:
+        if key not in used_keys:
             result.warning(
                 sweep_path, f"case '{case_label}' has unused values entry '{key}'"
             )
@@ -1837,6 +1861,15 @@ def validate_sweep_bundle(
         if key in ("tensors", "nodes"):
             continue
         collect_placeholders(value, scalar_fields, attribute_fields)
+    tensor_scoped_fields: set[tuple[int, str]] = set()
+    for tensor in tensors:
+        if not isinstance(tensor, dict) or not is_integer(tensor.get("uid")):
+            continue
+        fields: set[str] = set()
+        for key, value in tensor.items():
+            if key not in TEMPLATE_TENSOR_FIELDS:
+                collect_placeholders(value, fields, attribute_fields)
+        tensor_scoped_fields.update((tensor["uid"], f) for f in fields)
 
     version = sweep.get("version")
     if not is_integer(version) or version not in (1, 2):
@@ -1882,6 +1915,7 @@ def validate_sweep_bundle(
             stats_tensor_uids,
             length_uids,
             absent_uids,
+            tensor_scoped_fields,
         )
 
 
