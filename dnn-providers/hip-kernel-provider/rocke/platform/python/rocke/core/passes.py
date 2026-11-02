@@ -171,16 +171,25 @@ def _constant_ity(t: Type) -> str:
     return "i32"
 
 
-def _const_int(v: Value) -> Optional[int]:
-    op = v.op
+def constant_int(value: Value | int) -> int | None:
+    """The compile-time integer ``value`` is, or None.
+
+    An int (not a bool) is itself. A Value is read from its defining integer
+    ``arith.constant`` (i1, i32 or i64), at the constant's width as the folder
+    holds it: an i32 literal 0x80000000 and a folded i32 sum of the same bits are
+    one value, -2**31. A float constant, a bool, or a runtime value is None.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    op = value.op
     if op is None or op.name != "arith.constant":
         return None
     ity = op.attrs.get("ity", "i32")
     if ity not in ("i1", "i32", "i64"):
         return None
-    # Read at the constant's width, as folded results are written: an i32
-    # literal 0x80000000 and a folded i32 sum of the same bits are one value.
-    return _wrap_to_width(int(op.attrs["value"]), v.type)
+    return _wrap_to_width(int(op.attrs["value"]), value.type)
 
 
 def _int_width(t: Type) -> int:
@@ -229,8 +238,8 @@ def _try_fold(op: Op) -> Optional[int]:
     if op.name == "arith.assume_range":
         # The marker is its first operand; a runtime end (operand 1) does not
         # stop a constant marked value from folding.
-        return _const_int(op.operands[0])
-    ints = [_const_int(v) for v in op.operands]
+        return constant_int(op.operands[0])
+    ints = [constant_int(v) for v in op.operands]
     if any(v is None for v in ints):
         return None
 
