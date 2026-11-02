@@ -11253,4 +11253,6 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
             p.groups * p.KH * p.KW * ceil_div(p.kpg, k_atom) * ceil_div(p.cpg, 16)
         )
         return (n_blocks, 1, 1), (64, 1, 1)
+    if hasattr(spec, "launch_geometry"):
+        return spec.launch_geometry()
     raise TypeError(f"no launch geometry for {type(spec).__name__}")

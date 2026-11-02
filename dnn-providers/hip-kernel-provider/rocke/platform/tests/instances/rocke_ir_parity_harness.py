@@ -5224,6 +5224,53 @@ def cases():
             build_fwd_small_wmma_case(_kind, _prob, **_over),
         )
 
+    # --- conv_direct_dw_fwd_wmma: Toeplitz WMMA depthwise forward (gfx1250) ---
+    # Buffer loads + LDS staging + wave32 16x16x32 WMMA. The C++ twin is gated
+    # by library/tests/parity/conv_direct_dw_fwd_wmma_emit.*.
+    def build_dw_fwd_wmma_case(dtype, K, PAD, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_dw_fwd_wmma import (
+                DwFwdWmmaSpec,
+                build_dw_fwd_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=37,
+                groups=64,
+                cpg=1,
+                kpg=1,
+                KH=K,
+                KW=K,
+                PAD=PAD,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_dw_fwd_wmma(
+                DwFwdWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _K, _PAD, _over in (
+        ("bf16_k3_default", "bf16", 3, 1, {}),
+        (
+            "fp16_k7_wv8_f4_pf4",
+            "fp16",
+            7,
+            3,
+            dict(block_waves=8, block_h=4, w_fold=4, prefetch_rows=4),
+        ),
+    ):
+        add(
+            "conv_direct_dw_fwd_wmma",
+            f"conv_direct_dw_fwd_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_dw_fwd_wmma_case(_dtype, _K, _PAD, **_over),
+        )
+
     # --- conv_direct_dgrad_wmma: wave32 WMMA direct dgrad (gfx1250) ---
     # 3-D TDM halo and weight staging, transpose-on-read weights, TDM epilogue.
     # Every case needs llvm23 (TDM), so the other flavors record them as

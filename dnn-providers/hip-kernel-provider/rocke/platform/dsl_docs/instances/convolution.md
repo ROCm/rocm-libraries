@@ -1347,6 +1347,28 @@ the per-layer rows of `FWD_SMALLK_KNOBS_BY_LAYER`) over `FWD_SMALLK_LAYERS`:
 3x3 K=4, 3x3 K=3 and 1x7 K=1 with column padding 3 (variants `direct_fwd_smallc_wmma` /
 `direct_fwd_smallk_wmma`).
 
+### Depthwise (`DwFwdWmmaSpec`)
+
+`library/kernels/common/conv_direct_dw_fwd_wmma.py` (C++ twin
+`instance_conv_direct_dw_fwd_wmma.h`) is the Toeplitz WMMA depthwise forward,
+the forward twin of the windowed depthwise dgrad's matrix form (stride 1,
+`cpg = kpg = 1`, `groups` a multiple of 8). Each wave owns 8 channels; one
+16x16x32 WMMA multiplies one-hot weights (A) by 4 window columns x 8 channels
+of an input row (B) into 32 output columns x 8 channels (D), so a filter row
+of `KW` taps takes `ceil((KW + 1) / 4)` passes. Input rows stream through the
+block (staged in LDS, double buffered, `prefetch_rows` loads ahead) into `KH`
+circular accumulator tiles; each finished output row drains through LDS as
+16-byte stores. Rows and columns outside the tensors read zero or drop their
+store through sentinel buffer offsets.
+
+Knobs: `block_waves` (8 channels each, up to 16), `block_h` output rows per
+block, `w_fold` images folded into the 32 tile columns (1, 2 or 4) and
+`prefetch_rows` (1..4). The validator bounds the register-resident fragments
+(tighter for 16-wave blocks), the unrolled WMMA count and the LDS staging.
+Runtime: N, H, W, Ho, Wo, groups and the strides; baked: KH, KW, PAD and the
+knobs. The AOT grid is `DW_FWD_WMMA_*` over "same" 3x3 / 5x5 / 7x7 and "valid"
+7x7 (variant `direct_dw_fwd_wmma`).
+
 ## Winograd Forward (gfx1250)
 
 `library/kernels/common/conv_winograd_*.py` (C++ twins

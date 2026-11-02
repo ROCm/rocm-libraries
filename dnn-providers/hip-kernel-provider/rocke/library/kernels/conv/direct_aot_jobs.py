@@ -25,6 +25,7 @@ from kernels.conv.direct_variants import (
     DIRECT_DGRAD_SMALLC_WMMA as _DGRAD_SMALLC,
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
     DIRECT_DEPTHWISE_TILED_DGRAD as _DW_TILED_DGRAD,
+    DIRECT_DW_FWD_WMMA as _DW_FWD_WMMA,
     DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
@@ -177,6 +178,15 @@ DW_WIN_MFMA_FOLDS = (1, 2, 4)
 DW_WIN_MFMA_WAVES = (4, 8)
 DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
 DW_WIN_MFMA_PREFETCH = 2
+# Toeplitz WMMA depthwise forward (direct_dw_fwd_wmma, stride 1, wave32):
+# "same"-padded 3x3..7x7 plus "valid" 7x7 (a 9x9's register-resident
+# fragments overflow the budget). Tiles from 1 row (small maps, many blocks)
+# to a whole 56/64-row map.
+DW_FWD_WMMA_CAPS = ((3, 1), (5, 2), (7, 3), (7, 0))
+DW_FWD_WMMA_FOLDS = (1, 2, 4)
+DW_FWD_WMMA_WAVES = (2, 4, 8, 16)
+DW_FWD_WMMA_BLOCK_H = (1, 2, 4, 7, 8, 12, 14, 16, 28, 32, 56, 64)
+DW_FWD_WMMA_PREFETCH = (2, 3, 4)
 # 4c dgrad (direct_grouped_dgrad_4c, cpg = kpg = 4): the 4x4x4 MFMA kernel on
 # the transposed problem with fused weights. The cache carries the image of
 # the 4c dispatch policy -- the (4, 16) tile with gathered weights, LDS-staged
@@ -1441,6 +1451,13 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
         ),
     ),
+    _DW_FWD_WMMA: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
+            for k, pad in DW_FWD_WMMA_CAPS
+        ),
+    ),
 }
 
 
@@ -1957,6 +1974,18 @@ def _knob_grid(
                 if sched:
                     knobs["sched"] = sched
                 yield knobs
+    elif variant == _DW_FWD_WMMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        for fold, waves, bh, pf in itertools.product(
+            DW_FWD_WMMA_FOLDS,
+            DW_FWD_WMMA_WAVES,
+            DW_FWD_WMMA_BLOCK_H,
+            DW_FWD_WMMA_PREFETCH,
+        ):
+            yield dict(block_waves=waves, block_h=bh, w_fold=fold, prefetch_rows=pf)
     elif variant in (_FWD_SMALLC, _FWD_SMALLK):
         from rocke.core.arch import ArchTarget
 

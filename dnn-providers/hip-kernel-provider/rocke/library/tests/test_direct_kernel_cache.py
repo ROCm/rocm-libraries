@@ -25,6 +25,7 @@ from kernels.conv.direct_variants import (
     DIRECT_DGRAD_PATCH_WMMA,
     DIRECT_DGRAD_SMALLC_WMMA,
     DIRECT_DGRAD_WMMA,
+    DIRECT_DW_FWD_WMMA,
     DIRECT_FWD_SMALLC_WMMA,
     DIRECT_FWD_SMALLK_WMMA,
     DIRECT_FWD_WMMA,
@@ -37,7 +38,12 @@ from rocke.runtime.packing import compile_packer
 
 _ARCH = "gfx950"
 # Variants the grid builds only for wave32 targets.
-_WAVE32_ONLY_FWD = {DIRECT_FWD_WMMA, DIRECT_FWD_SMALLC_WMMA, DIRECT_FWD_SMALLK_WMMA}
+_WAVE32_ONLY_FWD = {
+    DIRECT_FWD_WMMA,
+    DIRECT_FWD_SMALLC_WMMA,
+    DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_DW_FWD_WMMA,
+}
 _WAVE32_ONLY = {
     DIRECT_DGRAD_WMMA,
     DIRECT_DGRAD_PATCH_WMMA,
