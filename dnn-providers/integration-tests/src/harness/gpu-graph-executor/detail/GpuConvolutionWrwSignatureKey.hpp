@@ -57,8 +57,8 @@ struct GpuConvolutionWrwSignatureKey
         auto dwTensorAttr = tensorMap.at(nodeAttributes->dw_tensor_uid());
         if(xTensorAttr == nullptr || dyTensorAttr == nullptr || dwTensorAttr == nullptr)
         {
-            throw std::runtime_error(
-                "One or more tensor attributes could be found in the map, failed to construct key");
+            throw std::runtime_error("One or more tensor attributes could not be found in the map, "
+                                     "failed to construct key");
         }
 
         xDataType = xTensorAttr->data_type();
