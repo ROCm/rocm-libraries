@@ -7,7 +7,8 @@ so their K/V has to come from the sequence's own blocks. ``poison`` surrounds ea
 hostile data: NaN in the cache slots after its last key, and block-table entries past its own
 blocks (in every row, also of shorter sequences) that point to a NaN block or to a block id far
 outside the cache. A fault poisons the HIP context and an out-of-bounds read can also hang, so
-``spawn_results`` runs every case in its own fresh process under one deadline.
+``spawn_results`` runs every case in its own fresh process with its own deadline, a few at a time
+(each process holds its own torch and HIP context).
 """
 
 from __future__ import annotations
@@ -15,12 +16,19 @@ from __future__ import annotations
 import concurrent.futures as cf
 import multiprocessing as mp
 import os
+import threading
 import time
+import traceback
 
 import pytest
 
 FAR_BLOCK = 100_000  # outside any cache here, but within i32 element addressing
-RESULTS_TIMEOUT_S = 300  # the cases take seconds
+CASE_TIMEOUT_S = 300  # a case takes seconds
+MAX_WORKERS = 8
+
+
+class CaseTimeout(Exception):
+    """A case gave no result in time: its kernel likely hangs on an out-of-bounds read."""
 
 
 def own_blocks(kv_lens, bs, num_blocks):
@@ -28,6 +36,7 @@ def own_blocks(kv_lens, bs, num_blocks):
     import torch
 
     need = [(kl + bs - 1) // bs for kl in kv_lens]
+    assert sum(need) < num_blocks, "the cache has too few blocks for the sequences"
     perm = torch.randperm(num_blocks - 1, device="cuda").int()
     table = torch.zeros(len(kv_lens), max(need), dtype=torch.int32, device="cuda")
     start = 0
@@ -60,43 +69,85 @@ def poison(k, v, table, kv_lens, bs, mode):
     return torch.cat([table, extra], 1).contiguous()
 
 
-def spawn_results(jobs, env=None):
-    """Submit ``{key: (fn, case)}`` each to its own spawned process; yield ``(futures, deadline)``
-    (read them with ``result``), then stop the workers. ``env``: variables the workers start
-    with. Use from a module-scoped fixture."""
-    saved = {name: os.environ.get(name) for name in env or {}}
-    os.environ.update(
-        env or {}
-    )  # submit() starts each worker, which copies the environment
-    ctx = mp.get_context("spawn")  # fork after the parent touched the GPU is unsafe
-    pools, futures = [], {}
+def _run_case(conn, fn, case, env):
+    # Set before anything imports torch: the allocator reads its configuration at init.
+    os.environ.update(env or {})
     try:
-        for key, (fn, case) in jobs.items():
-            pool = cf.ProcessPoolExecutor(max_workers=1, mp_context=ctx)
-            pools.append(pool)
-            futures[key] = pool.submit(fn, case)
+        conn.send(("ok", fn(case)))
+    except BaseException:  # noqa: BLE001 - reported to the parent
+        conn.send(("error", traceback.format_exc()))
     finally:
-        for name, value in saved.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
-    yield futures, time.monotonic() + RESULTS_TIMEOUT_S
-    for pool in pools:
-        # A hung worker would block a waiting shutdown forever.
-        for proc in getattr(pool, "_processes", {}).values():
-            if proc.is_alive():
-                proc.kill()
-        pool.shutdown(wait=False, cancel_futures=True)
+        conn.close()
+
+
+def spawn_results(jobs, env=None):
+    """Run ``{key: (fn, case)}`` each in its own fresh spawned process, at most ``MAX_WORKERS``
+    at a time, and yield ``{key: future}`` (read them with ``result``). A case gets
+    ``CASE_TIMEOUT_S`` from its start; then its process is killed. ``env``: variables each
+    process sets for itself. Use from a module-scoped fixture."""
+    ctx = mp.get_context("spawn")  # fork after the parent touched the GPU is unsafe
+    futures = {key: cf.Future() for key in jobs}
+    pending = list(jobs.items())
+    running = {}  # key -> (process, connection, deadline)
+    stop = threading.Event()
+
+    def finish(key, error=None, value=None):
+        proc, conn, _ = running.pop(key)
+        if proc.is_alive():
+            proc.join(timeout=10)
+        if proc.is_alive():  # hung while exiting
+            proc.kill()
+        conn.close()
+        if error is None:
+            futures[key].set_result(value)
+        else:
+            futures[key].set_exception(error)
+
+    def schedule():
+        while (pending or running) and not stop.is_set():
+            while pending and len(running) < MAX_WORKERS:
+                key, (fn, case) = pending.pop(0)
+                parent_end, child_end = ctx.Pipe(duplex=False)
+                proc = ctx.Process(target=_run_case, args=(child_end, fn, case, env))
+                proc.start()
+                child_end.close()
+                running[key] = (proc, parent_end, time.monotonic() + CASE_TIMEOUT_S)
+            for key, (proc, conn, deadline) in list(running.items()):
+                if conn.poll():
+                    try:
+                        status, value = conn.recv()
+                    except EOFError:  # died without a result: a fault or an abort
+                        finish(key, RuntimeError(f"worker exited ({proc.exitcode})"))
+                        continue
+                    if status == "ok":
+                        finish(key, value=value)
+                    else:
+                        finish(key, RuntimeError(f"worker raised:\n{value}"))
+                elif not proc.is_alive():
+                    finish(key, RuntimeError(f"worker exited ({proc.exitcode})"))
+                elif time.monotonic() > deadline:
+                    proc.kill()
+                    finish(key, CaseTimeout(f"no result within {CASE_TIMEOUT_S} s"))
+            time.sleep(0.05)
+
+    thread = threading.Thread(target=schedule, daemon=True)
+    thread.start()
+    try:
+        yield futures
+    finally:
+        stop.set()
+        thread.join()
+        for proc, conn, _ in running.values():
+            proc.kill()
+            conn.close()
+        for future in futures.values():
+            future.cancel()
 
 
 def result(results, key):
-    """The worker's return value; a fault in the worker re-raises here (a hard abort raises
-    ``BrokenProcessPool``), and a worker past the deadline fails the test."""
-    futures, deadline = results
+    """The case's return value; a fault in its process re-raises here, and a case past its
+    deadline fails the test."""
     try:
-        return futures[key].result(timeout=max(0.0, deadline - time.monotonic()))
-    except cf.TimeoutError:
-        pytest.fail(
-            f"no result within {RESULTS_TIMEOUT_S} s: the kernel likely read out of bounds"
-        )
+        return results[key].result()
+    except CaseTimeout as e:
+        pytest.fail(f"{e}: the kernel likely read out of bounds")

@@ -33,6 +33,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
+from kernels.common._attention_kv_seq_tail import (
+    buffer_offset_in_rows_left,
+    buffer_offset_in_sequence,
+    last_row_in_sequence,
+    rows_in_sequence,
+)
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
@@ -799,6 +805,25 @@ def build_unified_attention_3d_tiled(
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
         buf_off_i64 = b.zext(buf_off_i32, I64)
         V_buf_base = b.smem_ptr_add(V_lds_addr, buf_off_i64)
+        # Paged V rows past the sequence load zero: see _attention_kv_seq_tail (strided
+        # offsets are bounded already). The swizzle permutes columns within a row only.
+        v_tail = spec.kv_layout != "strided"
+        whole_rows = KV_HALVES_PER_CALL % HD == 0
+        # A copy inside one row (head_size a multiple of the copy): its row is the call's.
+        in_row = HD % KV_HALVES_PER_CALL == 0
+        if v_tail:
+            v_rows = rows_in_sequence(b, seq_len, kv_tile_idx, T)
+            if whole_rows:
+                # A copy covers whole rows: one subtraction per tile, then one compare
+                # with an immediate per copy; with one row per copy the bound is
+                # wave-uniform.
+                uniform_rows = KV_HALVES_PER_CALL == HD
+                lane_row = (
+                    b.const_i32(0)
+                    if uniform_rows
+                    else b.div(lane_half_base, b.const_i32(HD))
+                )
+                rows_left = b.sub(v_rows, lane_row)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             if spec.kv_layout == "strided":
@@ -830,6 +855,25 @@ def build_unified_attention_3d_tiled(
                     linear_half=_kv_src_linear(linear_half),
                     kv_head=kv_head_idx,
                 )
+            if v_tail and whole_rows:
+                voff = buffer_offset_in_rows_left(
+                    b,
+                    voff,
+                    rows_left,
+                    call * (KV_HALVES_PER_CALL // HD),
+                    uniform=uniform_rows,
+                )
+            elif v_tail and in_row:
+                voff = buffer_offset_in_rows_left(
+                    b,
+                    voff,
+                    v_rows,
+                    call // (HD // KV_HALVES_PER_CALL),
+                    uniform=True,
+                )
+            elif v_tail:
+                row = b.div(linear_half, b.const_i32(HD))
+                voff = buffer_offset_in_sequence(b, voff, row, v_rows)
             v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
                 value_rsrc,
@@ -896,13 +940,22 @@ def build_unified_attention_3d_tiled(
         return b.add(base, b.mul(in_page, b.const_i32(T * token_stride)))
 
     def _issue_wide_load(
-        src, lds, kv_tile_idx: Value, buf_idx: Value, page_id: Value | None
+        src,
+        lds,
+        kv_tile_idx: Value,
+        buf_idx: Value,
+        page_id: Value | None,
+        v_tail: bool = False,
     ) -> None:
+        if v_tail:  # V rows past the sequence read its last row instead
+            last_row = last_row_in_sequence(b, seq_len, kv_tile_idx, T)
         for call in range(wide_chunks_per_thread):
             chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
             linear_half = b.mul(chunk_id, b.const_i32(WIDE_ELEMS))
             row = b.div(linear_half, b.const_i32(HD))
             col = b.mod(linear_half, b.const_i32(HD))
+            # The global row it is read from; the LDS row stays ``row``.
+            src_row = b.smin(row, last_row) if v_tail else row
             if page_id is not None:
                 # The tile base plus the chunk's offset within the page, which
                 # is loop-invariant: no page-table lookup per copy.
@@ -910,17 +963,22 @@ def build_unified_attention_3d_tiled(
                     _tile_base(page_id, kv_tile_idx, BS * NUM_KV * HD, NUM_KV * HD),
                     b.add(
                         b.add(
-                            b.mul(row, b.const_i32(NUM_KV * HD)),
+                            b.mul(src_row, b.const_i32(NUM_KV * HD)),
                             b.mul(kv_head_idx, b.const_i32(HD)),
                         ),
                         col,
                     ),
                 )
             else:
+                src_half = (
+                    b.add(b.mul(src_row, b.const_i32(HD)), col)
+                    if v_tail
+                    else linear_half
+                )
                 voff, _ = paged_kv_desc.offset(
                     b,
                     tile_idx=kv_tile_idx,
-                    linear_half=linear_half,
+                    linear_half=src_half,
                     kv_head=kv_head_idx,
                 )
                 # paged_kv_desc uses BYTE strides; global_load_vN is
@@ -960,6 +1018,8 @@ def build_unified_attention_3d_tiled(
         lds = K_lds if lds_token == "K" else V_lds
         src = key if lds_token == "K" else value
         assert fp8_elems_per_chunk == 8
+        if lds_token == "V":  # V rows past the sequence read its last row instead
+            v_last_row = last_row_in_sequence(b, seq_len, kv_tile_idx, T)
         for call in range(fp8_chunks_per_thread):
             chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
             row = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
@@ -967,7 +1027,9 @@ def build_unified_attention_3d_tiled(
                 b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
                 b.const_i32(fp8_elems_per_chunk),
             )
-            linear_half_first = b.add(b.mul(row, b.const_i32(HD)), col)
+            # V: the global row it is read from; the LDS row stays ``row``.
+            src_row = b.smin(row, v_last_row) if lds_token == "V" else row
+            linear_half_first = b.add(b.mul(src_row, b.const_i32(HD)), col)
             voff, _ = paged_kv_desc.offset(
                 b,
                 tile_idx=kv_tile_idx,
@@ -994,7 +1056,7 @@ def build_unified_attention_3d_tiled(
         if KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, buf_idx, "V")
         elif WIDE_KV:
-            _issue_wide_load(value, V_lds, tile_idx, buf_idx, page_id)
+            _issue_wide_load(value, V_lds, tile_idx, buf_idx, page_id, v_tail=True)
         else:
             _issue_v_load(tile_idx, buf_idx, page_id)
 

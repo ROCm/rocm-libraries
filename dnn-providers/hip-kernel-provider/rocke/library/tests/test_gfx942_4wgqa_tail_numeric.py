@@ -206,7 +206,7 @@ def results(request):
 
 def _max_abs(results, fn, case):
     key = (fn.__name__, case["id"])
-    if key not in results[0]:
+    if key not in results:
         pytest.skip("windowed parity harness not present in this checkout")
     return result(results, key)
 

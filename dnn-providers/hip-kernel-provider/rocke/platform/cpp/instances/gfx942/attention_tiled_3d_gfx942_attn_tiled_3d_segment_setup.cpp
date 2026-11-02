@@ -38,6 +38,7 @@
 #include <stdio.h> /* snprintf */
 #include <string.h>
 
+#include "rocke/instance_attention_kv_seq_tail_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_3d_internal.h"
 
 /* ============================================================ *
@@ -835,6 +836,34 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
     rocke_value_t* buf_off_i64 = rocke_b_zext(B, buf_off_i32, rocke_i64());
     rocke_value_t* V_buf_base = rocke_b_smem_ptr_add(B, ctx->V_lds_addr, buf_off_i64);
 
+    /* Paged V rows past the sequence load zero (_attention_kv_seq_tail); strided
+     * offsets are bounded already. When a copy covers whole rows, its row is the
+     * lane's first row plus an immediate; with one row per copy the bound is
+     * wave-uniform. */
+    const bool v_tail = !ctx->strided_kv;
+    const bool whole_rows = KV_HALVES_PER_CALL % CFG.HD == 0;
+    const bool uniform_rows = KV_HALVES_PER_CALL == CFG.HD;
+    /* A copy inside one row (head_size a multiple of the copy): its row is the call's. */
+    const bool in_row = CFG.HD % KV_HALVES_PER_CALL == 0;
+    rocke_value_t* v_rows = NULL;
+    rocke_value_t* rows_left = NULL;
+    if(v_tail)
+    {
+        v_rows = rocke_kv_rows_in_sequence(B, ctx->seq_len, kv_tile_idx, CFG.T);
+        if(whole_rows)
+        {
+            rocke_value_t* lane_row;
+            if(uniform_rows)
+                lane_row = rocke_b_const_i32(B, 0);
+            else
+            {
+                rocke_value_t* hd = rocke_b_const_i32(B, CFG.HD);
+                lane_row = rocke_b_div(B, ctx->lane_half_base, hd);
+            }
+            rows_left = rocke_b_sub(B, v_rows, lane_row);
+        }
+    }
+
     for(call = 0; call < kv_calls_per_tile; ++call)
     {
         rocke_value_t* linear_half
@@ -871,6 +900,22 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
                 kv_tile_idx,
                 rocke_gfx942_attention_tiled_3d_kv_src_linear(ctx, linear_half),
                 ctx->kv_head_idx);
+        }
+        if(v_tail && whole_rows)
+        {
+            voff = rocke_kv_buffer_offset_in_rows_left(
+                B, voff, rows_left, call * (KV_HALVES_PER_CALL / CFG.HD), uniform_rows);
+        }
+        else if(v_tail && in_row)
+        {
+            voff = rocke_kv_buffer_offset_in_rows_left(
+                B, voff, v_rows, call / (CFG.HD / KV_HALVES_PER_CALL), true);
+        }
+        else if(v_tail)
+        {
+            rocke_value_t* hd = rocke_b_const_i32(B, CFG.HD);
+            rocke_value_t* row = rocke_b_div(B, linear_half, hd);
+            voff = rocke_kv_buffer_offset_in_sequence(B, voff, row, v_rows);
         }
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(
             B, V_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
@@ -1045,6 +1090,9 @@ void rocke_gfx942_attention_tiled_3d_issue_wide_load(
     rocke_value_t* lds = is_value ? ctx->V_lds : ctx->K_lds;
     int call;
 
+    /* V rows past the sequence read its last row instead. */
+    rocke_value_t* last_row
+        = is_value ? rocke_kv_last_row_in_sequence(B, ctx->seq_len, kv_tile_idx, CFG.T) : NULL;
     for(call = 0; call < wide_chunks_per_thread; ++call)
     {
         rocke_value_t* chunk_call = rocke_b_const_i32(B, call);
@@ -1053,21 +1101,29 @@ void rocke_gfx942_attention_tiled_3d_issue_wide_load(
         rocke_value_t* linear_half = rocke_b_mul(B, chunk_id, rocke_b_const_i32(B, WIDE_ELEMS));
         rocke_value_t* row = rocke_b_div(B, linear_half, rocke_b_const_i32(B, HD));
         rocke_value_t* col = rocke_b_mod(B, linear_half, rocke_b_const_i32(B, HD));
+        /* The global row it is read from; the LDS row stays `row`. */
+        rocke_value_t* src_row = is_value ? rocke_b_smin(B, row, last_row) : row;
         rocke_value_t* elem_off;
         rocke_mem_opts_t opts = ROCKE_MEM_OPTS_INIT;
         if(page_id != NULL)
         {
             rocke_value_t* page_base = rocke_gfx942_attention_tiled_3d_tile_base(
                 ctx, page_id, kv_tile_idx, CFG.BS * CFG.NUM_KV * HD, CFG.NUM_KV * HD);
-            rocke_value_t* row_off = rocke_b_mul(B, row, rocke_b_const_i32(B, CFG.NUM_KV * HD));
+            rocke_value_t* row_off = rocke_b_mul(B, src_row, rocke_b_const_i32(B, CFG.NUM_KV * HD));
             rocke_value_t* head_off = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, HD));
             rocke_value_t* in_page = rocke_b_add(B, rocke_b_add(B, row_off, head_off), col);
             elem_off = rocke_b_add(B, page_base, in_page);
         }
         else
         {
+            rocke_value_t* src_half = linear_half;
+            if(is_value)
+            {
+                rocke_value_t* hd = rocke_b_const_i32(B, HD);
+                src_half = rocke_b_add(B, rocke_b_mul(B, src_row, hd), col);
+            }
             rocke_value_t* voff
-                = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
+                = rocke__paged_kv_offset(ctx, kv_tile_idx, src_half, ctx->kv_head_idx);
             elem_off = rocke_b_div(B, voff, rocke_b_const_i32(B, KV_BYTES));
         }
         rocke_value_t* vec;
@@ -1104,6 +1160,9 @@ void rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
     rocke_value_t* src = is_value ? ctx->value : ctx->key;
     int call, i;
 
+    /* V rows past the sequence read its last row instead. */
+    rocke_value_t* v_last_row
+        = is_value ? rocke_kv_last_row_in_sequence(B, ctx->seq_len, kv_tile_idx, CFG.T) : NULL;
     for(call = 0; call < fp8_chunks_per_thread; ++call)
     {
         rocke_value_t* chunk_call = rocke_b_const_i32(B, call);
@@ -1115,7 +1174,9 @@ void rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
         rocke_value_t* col_mod
             = rocke_b_mod(B, chunk_id, rocke_b_const_i32(B, HD / fp8_elems_per_chunk));
         rocke_value_t* col = rocke_b_mul(B, col_mod, rocke_b_const_i32(B, fp8_elems_per_chunk));
-        rocke_value_t* lhf_mul = rocke_b_mul(B, row, rocke_b_const_i32(B, HD));
+        /* V: the global row it is read from; the LDS row stays `row`. */
+        rocke_value_t* src_row = is_value ? rocke_b_smin(B, row, v_last_row) : row;
+        rocke_value_t* lhf_mul = rocke_b_mul(B, src_row, rocke_b_const_i32(B, HD));
         rocke_value_t* linear_half_first = rocke_b_add(B, lhf_mul, col);
         rocke_value_t* voff
             = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half_first, ctx->kv_head_idx);
