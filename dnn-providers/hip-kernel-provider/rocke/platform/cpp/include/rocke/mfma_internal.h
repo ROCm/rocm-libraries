@@ -77,12 +77,16 @@ static inline int rocke_mfma_type_matches(const rocke_type_t* type, const char* 
 {
     if(!type)
         return 0;
-    if(strcmp(expected, "vec<i8x8>") == 0)
+    if(strcmp(expected, "vec<fp8e4m3x8>") == 0 || strcmp(expected, "vec<bf8e5m2x8>") == 0)
+    {
+        /* Byte carriers are untyped; logical floating values must match the instruction. */
+        const rocke_scalar_kind_t format
+            = strcmp(expected, "vec<fp8e4m3x8>") == 0 ? ROCKE_SCALAR_FP8E4M3 : ROCKE_SCALAR_BF8E5M2;
         return type->kind == ROCKE_TYPE_VECTOR && type->count == 8 && type->elem
                && type->elem->kind == ROCKE_TYPE_SCALAR
                && (type->elem->scalar == ROCKE_SCALAR_I8 || type->elem->scalar == ROCKE_SCALAR_U8
-                   || type->elem->scalar == ROCKE_SCALAR_FP8E4M3
-                   || type->elem->scalar == ROCKE_SCALAR_BF8E5M2);
+                   || type->elem->scalar == format);
+    }
     int count;
     char element[32];
     if(sscanf(expected, "vec<%31[^x]x%d>", element, &count) == 2)
@@ -111,6 +115,9 @@ static inline const char* rocke_mfma_operand_error(const rocke_op_t* op,
         snprintf(message, capacity, "MFMA expects %d operands and 1 result", arity);
         return message;
     }
+    const int byte_source = !packed_bits
+                            && (strcmp(source_type, "vec<fp8e4m3x8>") == 0
+                                || strcmp(source_type, "vec<bf8e5m2x8>") == 0);
     for(int role = 0; role < 2; ++role)
     {
         const rocke_value_t* value = op->operands[role];
@@ -118,11 +125,25 @@ static inline const char* rocke_mfma_operand_error(const rocke_op_t* op,
         if(packed_bits ? rocke_mfma_carrier_bits(type) != packed_bits
                        : !rocke_mfma_type_matches(type, source_type))
         {
-            if(packed_bits)
+            if(byte_source && type && type->kind == ROCKE_TYPE_VECTOR && type->count == 8
+               && type->elem && type->elem->kind == ROCKE_TYPE_SCALAR
+               && (type->elem->scalar == ROCKE_SCALAR_FP8E4M3
+                   || type->elem->scalar == ROCKE_SCALAR_BF8E5M2))
+                snprintf(
+                    message,
+                    capacity,
+                    "MFMA source format mismatch - src%d=%s, expected %s or vec<i8x8> or vec<u8x8>",
+                    role,
+                    type->name,
+                    source_type);
+            else if(packed_bits)
                 snprintf(
                     message, capacity, "MFMA requires src0 and src1 to have %d bits", packed_bits);
             else
-                snprintf(message, capacity, "MFMA requires src0 and src1 to be %s", source_type);
+                snprintf(message,
+                         capacity,
+                         "MFMA requires src0 and src1 to be %s",
+                         byte_source ? "vec<i8x8>" : source_type);
             return message;
         }
     }

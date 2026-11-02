@@ -336,6 +336,49 @@ def test_mfma_preserves_equal_width_packed_carriers(case, carrier, flavor, engin
         )
 
 
+@pytest.mark.parametrize("case", BYTE_CASES, ids=[c[1] for c in BYTE_CASES])
+@pytest.mark.parametrize("flavor", [*FLAVORS, "llvm24"])
+@pytest.mark.parametrize("role", ["src0", "src1"])
+@pytest.mark.parametrize(
+    "engine,concrete",
+    [
+        ("python", False),
+        ("python", True),
+        ("native", False),
+        ("hip", False),
+        ("hip", True),
+    ],
+)
+def test_mfma_rejects_opposite_logical_byte_format(
+    case, flavor, role, engine, concrete
+):
+    # Equal byte widths do not make E4M3 and E5M2 numerically interchangeable.
+    kernel, op = _kernel(case, concrete=concrete)
+    wrong = BF8E5M2 if case[2].elem == FP8E4M3 else FP8E4M3
+    actual = VectorType(wrong, 8)
+    _corrupt_type(kernel, op, role, actual)
+    error = (
+        f"MFMA source format mismatch - {role}={actual.name}, "
+        f"expected {case[2].name} or vec<i8x8> or vec<u8x8>"
+    )
+    _assert_rejects(kernel, case, flavor, error, engine)
+    if engine == "python":
+        lowerer = _Lowerer(kernel, arch=case[0], llvm_flavor=flavor)
+        with pytest.raises(ValueError) as caught:
+            lowerer.lower_op(op)
+        assert str(caught.value) == error
+        assert lowerer._needs_intrin == {}
+        assert all(block.lines == [] for block in lowerer._blocks)
+    elif engine == "hip":
+        from rocke.core.lower_hip import _Lowerer as HipLowerer
+
+        lowerer = HipLowerer(kernel, arch=case[0])
+        with pytest.raises(ValueError) as caught:
+            lowerer.lower_op(op)
+        assert str(caught.value) == error
+        assert lowerer.lines == []
+
+
 @pytest.mark.parametrize("case", [*BYTE_CASES, *PACKED_CASES])
 @pytest.mark.parametrize("flavor", FLAVORS)
 @pytest.mark.parametrize(

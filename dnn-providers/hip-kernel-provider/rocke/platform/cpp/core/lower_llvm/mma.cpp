@@ -1381,7 +1381,8 @@ void rocke_ll_lower_mfma_fp8_bf8(
     }
     char accumulator_type[48];
     snprintf(accumulator_type, sizeof(accumulator_type), "vec<f32x%d>", out_vec);
-    validate_mfma(L, op, "vec<i8x8>", accumulator_type, accumulator_type);
+    const char* source_type = strcmp(dtype, "fp8") == 0 ? "vec<fp8e4m3x8>" : "vec<bf8e5m2x8>";
+    validate_mfma(L, op, source_type, accumulator_type, accumulator_type);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];

@@ -25,10 +25,10 @@ _SOURCES = {
     "mfma_f32_16x16x32_bf16": VectorType(BF16, 8),
     "mfma_f32_32x32x8_bf16": VectorType(BF16, 4),
     "mfma_f32_32x32x16_bf16": VectorType(BF16, 8),
-    "mfma_f32_16x16x32_fp8": VectorType(I8, 8),
-    "mfma_f32_16x16x32_bf8": VectorType(I8, 8),
-    "mfma_f32_32x32x16_fp8": VectorType(I8, 8),
-    "mfma_f32_32x32x16_bf8": VectorType(I8, 8),
+    "mfma_f32_16x16x32_fp8": VectorType(FP8E4M3, 8),
+    "mfma_f32_16x16x32_bf8": VectorType(BF8E5M2, 8),
+    "mfma_f32_32x32x16_fp8": VectorType(FP8E4M3, 8),
+    "mfma_f32_32x32x16_bf8": VectorType(BF8E5M2, 8),
 }
 _PACKED_BITS = {
     "mfma_f32_16x16x128_fp4fp6fp8": 256,
@@ -95,14 +95,35 @@ def validate_mfma(op: Op) -> None:
             raise ValueError(f"MFMA requires src0 and src1 to have {bits} bits")
     else:
         source = _SOURCES[op_id]
-        if source == VectorType(I8, 8):
-            valid = all(
-                isinstance(v.type, VectorType)
-                and type(v.type.count) is int
-                and v.type.count == 8
-                and v.type.elem in (I8, U8, FP8E4M3, BF8E5M2)
-                for v in op.operands[:2]
-            )
+        byte_source = isinstance(source, VectorType) and source.elem in (
+            FP8E4M3,
+            BF8E5M2,
+        )
+        if byte_source:
+            # A byte bitcast preserves storage, not the logical number format.
+            valid = True
+            for role, value in enumerate(op.operands[:2]):
+                actual = value.type
+                valid = (
+                    isinstance(actual, VectorType)
+                    and type(actual.count) is int
+                    and actual.count == 8
+                    and actual.elem in (I8, U8, source.elem)
+                )
+                if valid:
+                    continue
+                if (
+                    isinstance(actual, VectorType)
+                    and type(actual.count) is int
+                    and actual.count == 8
+                    and actual.elem in (FP8E4M3, BF8E5M2)
+                    and actual.elem != source.elem
+                ):
+                    raise ValueError(
+                        f"MFMA source format mismatch - src{role}={actual.name}, "
+                        f"expected {source.name} or vec<i8x8> or vec<u8x8>"
+                    )
+                break
         else:
             valid = all(
                 _fixed_type_matches(v.type, source)
@@ -113,7 +134,8 @@ def validate_mfma(op: Op) -> None:
                 for v in op.operands[:2]
             )
         if not valid:
-            raise ValueError(f"MFMA requires src0 and src1 to be {source.name}")
+            required = VectorType(I8, 8) if byte_source else source
+            raise ValueError(f"MFMA requires src0 and src1 to be {required.name}")
     count = 16 if op_id.startswith("mfma_f32_32x32") else 4
     if op_id == "mfma_f64_4x4x4_f64":
         count = 1

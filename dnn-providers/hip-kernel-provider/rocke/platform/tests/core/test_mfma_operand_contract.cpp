@@ -127,6 +127,18 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
         rocke_ir_builder_free(&builder);
         return 0;
     }
+    else if(variant == 13 || variant == 14)
+    {
+        const char* opposite = strcmp(spec->source, "fp8e4m3") == 0 ? "bf8e5m2" : "fp8e4m3";
+        const auto* actual = rocke_vector_type(&builder, rocke_scalar_by_name(opposite), 8);
+        op->operands[variant - 13]->type = actual;
+        snprintf(expected,
+                 sizeof(expected),
+                 "MFMA source format mismatch - src%d=%s, expected %s or vec<i8x8> or vec<u8x8>",
+                 variant - 13,
+                 actual->name,
+                 source_type->name);
+    }
     else if(variant == 1 || variant == 2)
     {
         op->operands[variant - 1]->type = rocke_i32();
@@ -276,6 +288,10 @@ int main()
             for(int variant = 0; variant <= (spec.scaled ? 10 : 8); ++variant)
                 CHECK(check_case(&spec, variant, generic) == 0);
     CHECK(check_packed_carriers() == 0);
+    for(int index = 13; index <= 16; ++index)
+        for(int generic = 0; generic < 2; ++generic)
+            for(int variant = 13; variant <= 14; ++variant)
+                CHECK(check_case(&cases[index], variant, generic) == 0);
     CHECK(check_case(&cases[0], 11, 0) == 0);
     CHECK(check_case(&cases[0], 12, 0) == 0);
     return 0;
