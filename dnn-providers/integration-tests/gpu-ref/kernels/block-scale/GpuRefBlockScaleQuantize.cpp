@@ -44,11 +44,16 @@ extern "C" __global__ void BlockScaleQuantizeRef(BlockScaleQuantizeArgs args)
     for(long long element = blockStart; element < blockEnd; ++element)
     {
         const auto value = toAccum(x[xOffset + element * args.xStrides[args.axis]]);
+        if(isnan(value) || isinf(value))
+        {
+            atomicExch(args.invalidInput, 1);
+            return;
+        }
         maxAbs = max(maxAbs, static_cast<COMPUTE_TYPE>(fabs(value)));
     }
 
-    auto scaleValue = static_cast<COMPUTE_TYPE>(maxAbs / args.outputMax);
-    SCALE_TYPE storedScale = roundScaleUp<SCALE_TYPE>(static_cast<float>(scaleValue));
+    const double scaleValue = static_cast<double>(maxAbs) / args.outputMax;
+    SCALE_TYPE storedScale = roundScaleUp<SCALE_TYPE>(scaleValue);
     scale[scaleOffset] = storedScale;
 
     const auto computeScale = static_cast<COMPUTE_TYPE>(storedScale);
@@ -60,8 +65,25 @@ extern "C" __global__ void BlockScaleQuantizeRef(BlockScaleQuantizeArgs args)
                      min(output, static_cast<COMPUTE_TYPE>(args.outputMax)));
         if constexpr(__is_integral(Y_TYPE))
         {
-            output = nearbyint(output);
+            if(output <= static_cast<COMPUTE_TYPE>(args.outputLowest))
+            {
+                y[yOffset + element * args.yStrides[args.axis]]
+                    = static_cast<Y_TYPE>(args.outputLowest);
+            }
+            else if(output >= static_cast<COMPUTE_TYPE>(args.outputMax))
+            {
+                y[yOffset + element * args.yStrides[args.axis]]
+                    = static_cast<Y_TYPE>(args.outputMax);
+            }
+            else
+            {
+                y[yOffset + element * args.yStrides[args.axis]]
+                    = static_cast<Y_TYPE>(nearbyint(output));
+            }
         }
-        y[yOffset + element * args.yStrides[args.axis]] = static_cast<Y_TYPE>(output);
+        else
+        {
+            y[yOffset + element * args.yStrides[args.axis]] = static_cast<Y_TYPE>(output);
+        }
     }
 }

@@ -223,16 +223,15 @@ __device__ inline float roundToFp8(float x, int format)
     }
 }
 
-__device__ inline float compactFloatToFloat(
-    unsigned char bits, int exponentBits, int mantissaBits, int exponentBias)
+__device__ inline float
+    compactFloatToFloat(unsigned char bits, int exponentBits, int mantissaBits, int exponentBias)
 {
     const unsigned char signMask = 1u << (exponentBits + mantissaBits);
     const unsigned char magnitude = bits & (signMask - 1u);
     const unsigned char exponent = magnitude >> mantissaBits;
     const unsigned char mantissa = magnitude & ((1u << mantissaBits) - 1u);
-    const float significand
-        = exponent == 0 ? static_cast<float>(mantissa)
-                        : static_cast<float>((1u << mantissaBits) + mantissa);
+    const float significand = exponent == 0 ? static_cast<float>(mantissa)
+                                            : static_cast<float>((1u << mantissaBits) + mantissa);
     const int power = (exponent == 0 ? 1 : exponent) - exponentBias - mantissaBits;
     const float value = __builtin_ldexpf(significand, power);
     return (bits & signMask) != 0 ? -value : value;

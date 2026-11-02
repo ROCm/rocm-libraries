@@ -23,7 +23,17 @@ namespace hipdnn_gpu_ref
 class GpuFpReferenceBlockScale
 {
 public:
-    static constexpr unsigned int BLOCK_SIZE = 256;
+    static constexpr size_t MAX_TENSOR_RANK = 5;
+
+    static std::optional<std::string> checkQuantize(const std::vector<int64_t>& xDims,
+                                                    const std::vector<int64_t>& yDims,
+                                                    const std::vector<int64_t>& scaleDims,
+                                                    int32_t blockSize,
+                                                    std::optional<int64_t> axis);
+    static std::optional<std::string> checkDequantize(const std::vector<int64_t>& xDims,
+                                                      const std::vector<int64_t>& yDims,
+                                                      const std::vector<int64_t>& scaleDims,
+                                                      const std::vector<int32_t>& blockSize);
 
     template <class XDataType, class YDataType, class ScaleDataType, class ComputeDataType = float>
     static void quantize(hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
@@ -36,6 +46,9 @@ public:
         static_assert(IS_SUPPORTED_SCALE_TYPE<ScaleDataType>);
         static_assert(std::is_same_v<ComputeDataType, float>);
 
+        validateStrides(x.dims(), x.strides(), "x");
+        validateStrides(y.dims(), y.strides(), "y");
+        validateStrides(scale.dims(), scale.strides(), "scale");
         validateQuantize(x.dims(), y.dims(), scale.dims(), blockSize, axis);
         const auto targetAxis = axis.value_or(static_cast<int64_t>(x.dims().size()) - 1);
         auto defines = buildDefines<XDataType, YDataType, ScaleDataType, ComputeDataType>();
@@ -67,6 +80,9 @@ public:
         static_assert(IS_SUPPORTED_SCALE_TYPE<ScaleDataType>);
         static_assert(std::is_same_v<ComputeDataType, float>);
 
+        validateStrides(x.dims(), x.strides(), "x");
+        validateStrides(y.dims(), y.strides(), "y");
+        validateStrides(scale.dims(), scale.strides(), "scale");
         const auto effectiveBlockSize
             = validateDequantize(x.dims(), y.dims(), scale.dims(), blockSize);
         auto defines = buildDefines<XDataType, YDataType, ScaleDataType, ComputeDataType>();
@@ -84,6 +100,9 @@ public:
     }
 
 private:
+    static void validateStrides(const std::vector<int64_t>& dims,
+                                const std::vector<int64_t>& strides,
+                                const char* tensorName);
     template <typename T>
     static constexpr bool IS_SUPPORTED_IO_TYPE
         = std::is_same_v<T, float> || std::is_same_v<T, hipdnn_data_sdk::types::half>

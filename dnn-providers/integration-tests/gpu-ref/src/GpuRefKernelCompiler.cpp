@@ -64,7 +64,6 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
 
     // Build compile options from defines vector
     auto compileOptions = compileDefines;
-    compileOptions.emplace_back("-I" GPU_REF_HIP_INCLUDE_DIR);
     std::vector<const char*> optPtrs;
     optPtrs.reserve(compileOptions.size());
     for(const auto& option : compileOptions)
