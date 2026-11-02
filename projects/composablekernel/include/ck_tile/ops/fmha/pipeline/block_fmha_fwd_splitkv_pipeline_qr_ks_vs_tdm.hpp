@@ -103,15 +103,15 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
     // Tell FmhaFwdSplitKVKernel which K/V DRAM views this pipeline wants.
     //
-    // The prefill kernel and the split-kv kernel do NOT default to the same
-    // thing, which is why BlockFmhaPipelineQRKSVSTdm declares neither flag and
-    // still works there: fmha_fwd_kernel.hpp's !kUsesUntransposedVKernelPath
-    // branch already hands out a native row-major (seqlen, hdim_v) V view,
-    // while fmha_fwd_splitkv_kernel.hpp's corresponding branch transposes to
-    // (hdim_v, seqlen) and pads. This pipeline steps V by {kN0, 0} -- a seqlen
-    // stride on dim 0 -- so it needs the untransposed view, or the stride lands
-    // on the head-dim axis instead (symptom: O comes out low, worsening with
-    // every KV tile). The same choice sets the V navigator's VirtualDim to 0.
+    // Both flags must be declared here. BlockFmhaPipelineQRKSVSTdm gets away
+    // with declaring neither because fmha_fwd_kernel.hpp falls back to matching
+    // the pipeline name against "qr_tdm"; fmha_fwd_splitkv_kernel.hpp's
+    // detectors have no such fallback and default to false, which selects the
+    // transposed (hdim_v, seqlen) V view. This pipeline steps V by {kN0, 0} --
+    // a seqlen stride on dim 0 -- so it needs the untransposed view, or the
+    // stride lands on the head-dim axis instead (symptom: O comes out low,
+    // worsening with every KV tile). The same choice sets the V navigator's
+    // VirtualDim to 0.
     //
     // The affine flag is the same requirement make_k_dram documents: this path
     // loads K and V with bare load_tile_tdm (not the prefill's
@@ -122,13 +122,11 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr bool kUsesTdmAffineDramPath       = true;
 
     // Progressive K reload, overridden locally instead of read from the problem.
-    // BlockFmhaFwdSplitKVPipelineProblem hardwires kProgressiveDsLoadK to false
-    // -- that value exists so the shared qr_tdm policy compiles for the
-    // qr_tdm_sched split copy, which does not use the feature. This pipeline
-    // does: every prefill qr_tdm D128 instance is generated with it on (the
-    // "_plk" suffix in the kernel name), and turning it off here would hand back
-    // the very advantage this copy exists to keep. The policy's only read of the
-    // flag (block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp:273) is already
+    // BlockFmhaFwdSplitKVPipelineProblem hardwires kProgressiveDsLoadK to false,
+    // which is what lets the shared qr_tdm policy compile against that problem;
+    // this pipeline wants the feature on, as every prefill qr_tdm instance has
+    // it. The policy's only read of the flag
+    // (block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp:273) is already
     // short-circuited by kUseDoubleKVLdsBuffer == false, so this stays local.
     //
     // Gated on kN0 == 64: the reload's static_asserts below require
@@ -136,14 +134,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     // prefill qr_tdm tile is bn0 64 so this is always on there; a narrower KV
     // tile has to fall back to the plain traversal.
     static constexpr bool kProgressiveDsLoadK = (kN0 == 64);
-
-    // Also overridden locally rather than read from the problem: split-kv has no
-    // min-seqlen_q skip, and BlockFmhaFwdSplitKVPipelineProblem does not carry
-    // the member. Defining it here instead of adding it to the shared problem
-    // header keeps every iteration on this file off the critical path -- that
-    // header is included by essentially every fmha instance, so touching it
-    // rebuilds the whole instance library.
-    static constexpr bool kSkipMinSeqlenQ = false;
 
     static constexpr bool kHwGemm1Scale = is_any_of<VDataType, fp8_t, bf8_t>::value &&
                                           BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
@@ -262,9 +252,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     }();
 
     static constexpr index_t kAlignmentO = Policy::template GetAlignmentO<Problem>();
-    // Required by fmha_fwd_kernel.hpp's qr_async_trload-style branch (the one we
-    // dispatch into via `kPipelineName != "qr_async_trload" && != "qr_tdm"`).
-    // Mirrors block_fmha_pipeline_qr_ks_vs_async_trload.hpp:90.
+    // Read by fmha_fwd_splitkv_kernel.hpp when it builds the o_acc dram window.
+    // Unlike the generic pipeline this keeps the full vector length under
+    // kPadHeadDimV, which holds because dcheck/dvcheck admit only hdim_v % 8 == 0.
     static constexpr index_t kAlignmentOacc = Policy::template GetAlignmentO<Problem>();
 
     static constexpr index_t kAlignmentBias =
@@ -482,8 +472,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>>,
             "wrong!");
 
-        // Hybrid loaders: Q/K via TDM (box-major LDS write), V via async_load
-        // + ds_load_tr (transposed). V dram window keeps (kN1, kK1) shape.
+        // Q/K/V all reach LDS through load_tile_tdm; V is then read back with
+        // ds_load_tr. V dram window keeps (kN1, kK1) shape.
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowLengths{}[I0] &&
@@ -629,8 +619,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                     store_tile(lse_acc_dram_window_tmp, lse_acc);
                 }
 
-                // Note: here occ are all cleard, return it
-                // Note: q loaded but no fence, ignore it.
+                // o_acc is still cleared, and Q has not been loaded yet, so
+                // there is nothing to fence before returning.
                 return o_acc;
             }
         }
@@ -888,11 +878,11 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         auto kv_iteration = [&](auto i_parity) {
             constexpr index_t kCurBuf  = decltype(i_parity)::value;
             constexpr index_t kNextBuf = 1 - kCurBuf;
-            // Sink-aware: in the sink phase tiles start at 0, in the normal phase at
-            // physical_seqlen_k_start. k_origin below and the blockscale descale index
+            // Sink-aware: in the sink phase tiles start at kv_load_start, in the normal
+            // phase at aligned_physical_seqlen_k_start. k_origin below and the descale index
             // (k_descale in the kBlockScale sweep, v_descale in pack_v_scale) address the
             // same tile, so they share this one expression -- a sink-blind index here
-            // trails the loaded column by physical_seqlen_k_start - sink_seq_end.
+            // trails the loaded column after the sink phase.
             [[maybe_unused]] const index_t kv_tile_start =
                 (num_sink_loop > i_total_loops)
                     ? kv_load_start + i_total_loops * kN0
@@ -1388,8 +1378,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     // can call this pipeline through its existing call site, with no TDM-specific
     // branch on the kernel side.
     //
-    // Unlike the qr_tdm_sched split copy, this one needs no LDS carving here: the
-    // single-V path already takes one arena pointer and slices it itself through
+    // No LDS carving here: the single-V path takes one arena pointer and slices
+    // it itself through
     // Policy::LdsArenaLayout. The variant hooks are not part of this pipeline and
     // block_indices has no consumer; everything else is forwarded and used.
     template <typename QDramBlockWindowTmp,

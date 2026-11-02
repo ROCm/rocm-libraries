@@ -207,8 +207,8 @@ int override_num_splits_if_necessary(int batch,
             constexpr int kMinTilesPerSplit = 8;
             const int num_kv_tiles          = ck_tile::integer_divide_ceil(max_seqlen_k, kN0);
             max_splits = std::max(1, std::min(128, num_kv_tiles / kMinTilesPerSplit));
-            // num_SMs counts 4 blocks per CU, so this stops splitting at 2
-            // workgroups per CU instead of 3.2.
+            // num_blocks_per_SM is 4 per WGP, i.e. 2 per CU, so this stops
+            // splitting at 1 workgroup per CU instead of 1.6.
             fill_threshold = 0.5f;
         }
 

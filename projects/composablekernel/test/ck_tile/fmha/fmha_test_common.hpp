@@ -63,11 +63,10 @@ struct Model
     using Geometry = ck_tile::FmhaTdmSchedGeometryFor<Problem>;
 };
 
-// Split-kv counterpart of Model, shared by both split-kv TDM copies. The shape
-// matches the prefill pipeline each copy was derived from -- they share its
-// policy -- only the problem type and traits differ. Flag values mirror what
-// codegen/ops/fmha_fwd_splitkv.py emits for them: no bias, no soft cap, no
-// quant, no paged-kv, LSE always stored.
+// Split-kv counterpart of Model. The shape matches the prefill pipeline the
+// split-kv qr_tdm copy was derived from -- they share its policy -- only the
+// problem type and traits differ. The flags below pin one point of the trait
+// space, the one these static checks describe; codegen emits more.
 //
 // BlockM selects which tile is being described; the split-kv qr_tdm copy runs
 // the 64-wide one.

@@ -460,7 +460,9 @@ struct fmha_fwd_splitkv_args
     ck_tile::index_t batch_stride_block_table; // only used if 'block_table_ptr' is not nullptr
     // only used if 'block_table_ptr' is not nullptr. Must be a multiple of the
     // kernel's kN0, otherwise a key tile straddles two pages and the page turn
-    // reads the wrong rows. Nothing checks it: results are silently wrong.
+    // reads the wrong rows. The kernel does not check it, so a caller that
+    // violates it gets wrong results rather than an error; the example runner
+    // rejects anything not a multiple of 128 before it gets here.
     ck_tile::index_t page_block_size;
     bool is_gappy; // differentiate seqstart_k_ptr usage. only used if 'block_table_ptr' is not
                    // nullptr.
