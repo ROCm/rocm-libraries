@@ -25,7 +25,7 @@
 //
 // Default CSR SpMV selects nnz-split only for a poor adaptive partition, and
 // only when the caller asked for the default algorithm. These tests run the
-// public analysis and read which analysis buffers were stored.
+// public analysis and read which analysis buffers and algorithm were stored.
 //
 #include "unit_test_utils.hpp"
 
@@ -148,11 +148,12 @@ namespace
 
     struct Selection
     {
-        bool               has_info        = false;
-        bool               adaptive_blocks = false;
-        bool               nnzsplit_tuned  = false;
-        bool               copy_ok         = false;
-        std::vector<float> y;
+        bool                 has_info        = false;
+        bool                 adaptive_blocks = false;
+        bool                 nnzsplit_tuned  = false;
+        bool                 copy_ok         = false;
+        rocsparse::csrmv_alg selected        = rocsparse::csrmv_alg_default;
+        std::vector<float>   y;
     };
 
     Selection run_spmv(rocsparse_handle    handle,
@@ -258,6 +259,7 @@ namespace
         {
             out.has_info        = true;
             out.adaptive_blocks = info->adaptive.row_blocks != nullptr;
+            out.selected        = info->selected_alg;
             out.nnzsplit_tuned
                 = info->nnzsplit.starting_ids != nullptr && info->nnzsplit.block_size != 0;
             if(out.nnzsplit_tuned)
@@ -270,6 +272,9 @@ namespace
                       && copied->nnzsplit.size == info->nnzsplit.size
                       && copied->nnzsplit.block_size == info->nnzsplit.block_size
                       && copied->nnzsplit.nnz_per_thread == info->nnzsplit.nnz_per_thread
+                      && copied->nnzsplit.starting_ids_size_in_bytes
+                             == info->nnzsplit.starting_ids_size_in_bytes
+                      && copied->selected_alg == info->selected_alg
                       && copied->adaptive.row_blocks == nullptr;
                 const bool offsets_ok
                     = copied_ok
@@ -326,6 +331,7 @@ TEST_F(CsrmvDefaultDispatch, default_selects_nnzsplit_for_internal_empty_gap)
     const auto    got
         = run_spmv(handle, a, rocsparse_spmv_alg_default, rocsparse_operation_none, false, true);
     EXPECT_TRUE(got.has_info);
+    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_nnzsplit);
     EXPECT_TRUE(got.nnzsplit_tuned);
     EXPECT_TRUE(got.copy_ok);
     EXPECT_FALSE(got.adaptive_blocks);
@@ -338,6 +344,7 @@ TEST_F(CsrmvDefaultDispatch, explicit_adaptive_is_not_replaced)
     const auto    got = run_spmv(
         handle, a, rocsparse_spmv_alg_csr_adaptive, rocsparse_operation_none, false, true);
     EXPECT_TRUE(got.has_info);
+    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_default);
     EXPECT_TRUE(got.adaptive_blocks);
     EXPECT_FALSE(got.nnzsplit_tuned);
     expect_y(got.y, host_spmv(a));
@@ -349,6 +356,7 @@ TEST_F(CsrmvDefaultDispatch, default_keeps_adaptive_for_populated_rows)
     const auto    got
         = run_spmv(handle, a, rocsparse_spmv_alg_default, rocsparse_operation_none, false, true);
     EXPECT_TRUE(got.has_info);
+    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_adaptive);
     EXPECT_TRUE(got.adaptive_blocks);
     EXPECT_FALSE(got.nnzsplit_tuned);
     expect_y(got.y, host_spmv(a));
@@ -360,6 +368,7 @@ TEST_F(CsrmvDefaultDispatch, default_selects_nnzsplit_for_alternating_row_length
     const auto    got
         = run_spmv(handle, a, rocsparse_spmv_alg_default, rocsparse_operation_none, false, true);
     EXPECT_TRUE(got.has_info);
+    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_nnzsplit);
     EXPECT_TRUE(got.nnzsplit_tuned);
     EXPECT_TRUE(got.copy_ok);
     EXPECT_FALSE(got.adaptive_blocks);
@@ -372,6 +381,7 @@ TEST_F(CsrmvDefaultDispatch, default_keeps_adaptive_when_empty_suffix_is_skipped
     const auto    got
         = run_spmv(handle, a, rocsparse_spmv_alg_default, rocsparse_operation_none, false, true);
     EXPECT_TRUE(got.has_info);
+    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_adaptive);
     EXPECT_TRUE(got.adaptive_blocks);
     EXPECT_FALSE(got.nnzsplit_tuned);
     expect_y(got.y, host_spmv(a));
@@ -391,6 +401,7 @@ TEST_F(CsrmvDefaultDispatch, transposed_csc_default_uses_the_csr_rule)
     const auto    got = run_spmv(
         handle, a, rocsparse_spmv_alg_default, rocsparse_operation_transpose, true, false);
     EXPECT_TRUE(got.has_info);
+    EXPECT_EQ(got.selected, rocsparse::csrmv_alg_nnzsplit);
     EXPECT_TRUE(got.nnzsplit_tuned);
     EXPECT_TRUE(got.copy_ok);
     EXPECT_FALSE(got.adaptive_blocks);

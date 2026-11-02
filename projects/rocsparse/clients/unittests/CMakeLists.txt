@@ -56,6 +56,7 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
 set(ROCSPARSE_UNIT_TEST_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_indextype_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_datatype_utils.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_adaptive_analysis.cpp
 )
 
 add_executable(rocsparse-unit-test

@@ -110,33 +110,33 @@ TEST(csrmv_adaptive_analysis, numThreadsForReduction_custom_wg_size)
     EXPECT_EQ(rocsparse::numThreadsForReduction(5, 64), 8u); // 64 >> bit_width(4)=3
 }
 
-// adaptive_partition_should_retarget decides when default SpMV leaves adaptive.
+// csrmv_adaptive_partition_is_poor_fit decides when default SpMV selects nnz-split.
 // gen_wg 256 is the short-row workgroup, so the wide-block limit is 32*256.
-TEST(csrmv_adaptive_analysis, retarget_wide_blocks_covering_the_matrix)
+TEST(csrmv_adaptive_analysis, poor_fit_wide_blocks_covering_the_matrix)
 {
     const int        n = 10000;
     std::vector<int> blocks{0, n};
     std::vector<int> ptr(static_cast<size_t>(n) + 1, 0);
     ptr.back() = 2;
-    EXPECT_TRUE(rocsparse::adaptive_partition_should_retarget(
+    EXPECT_TRUE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
         blocks.data(), blocks.size(), ptr.data(), n, 256u));
 }
 
 // The wide-block limit is 32 workgroups, so it scales with the workgroup size.
-TEST(csrmv_adaptive_analysis, retarget_span_limit_follows_workgroup)
+TEST(csrmv_adaptive_analysis, poor_fit_span_limit_follows_workgroup)
 {
     const int        n = 2000;
     std::vector<int> blocks{0, n};
     std::vector<int> ptr(static_cast<size_t>(n) + 1, 0);
-    EXPECT_FALSE(rocsparse::adaptive_partition_should_retarget(
+    EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
         blocks.data(), blocks.size(), ptr.data(), n, 256u));
-    EXPECT_TRUE(rocsparse::adaptive_partition_should_retarget(
+    EXPECT_TRUE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
         blocks.data(), blocks.size(), ptr.data(), n, 32u));
 }
 
 // A wide block that is only a small share of the matrix, and no transition
-// fragments, stays on adaptive.
-TEST(csrmv_adaptive_analysis, no_retarget_when_wide_blocks_are_a_small_share)
+// fragments, is a good fit.
+TEST(csrmv_adaptive_analysis, good_fit_when_wide_blocks_are_a_small_share)
 {
     const int        wide = 8193;
     const int        rest = 9;
@@ -160,11 +160,11 @@ TEST(csrmv_adaptive_analysis, no_retarget_when_wide_blocks_are_a_small_share)
     {
         push(span, 200);
     }
-    EXPECT_FALSE(rocsparse::adaptive_partition_should_retarget(
+    EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
         blocks.data(), blocks.size(), ptr.data(), n, 256u));
 }
 
-TEST(csrmv_adaptive_analysis, retarget_when_a_quarter_of_blocks_are_underfilled)
+TEST(csrmv_adaptive_analysis, poor_fit_when_a_quarter_of_blocks_are_underfilled)
 {
     std::vector<int> blocks{0};
     std::vector<int> ptr{0};
@@ -175,11 +175,11 @@ TEST(csrmv_adaptive_analysis, retarget_when_a_quarter_of_blocks_are_underfilled)
         ptr.push_back(nnz);
         blocks.push_back(row + 1);
     }
-    EXPECT_TRUE(rocsparse::adaptive_partition_should_retarget(
+    EXPECT_TRUE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
         blocks.data(), blocks.size(), ptr.data(), 8, 256u));
 }
 
-TEST(csrmv_adaptive_analysis, no_retarget_below_a_quarter_underfilled)
+TEST(csrmv_adaptive_analysis, good_fit_below_a_quarter_underfilled)
 {
     std::vector<int> blocks{0};
     std::vector<int> ptr{0};
@@ -190,12 +190,12 @@ TEST(csrmv_adaptive_analysis, no_retarget_below_a_quarter_underfilled)
         ptr.push_back(nnz);
         blocks.push_back(row + 1);
     }
-    EXPECT_FALSE(rocsparse::adaptive_partition_should_retarget(
+    EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
         blocks.data(), blocks.size(), ptr.data(), 8, 256u));
 }
 
 // Seven underfilled blocks are not enough to call the pattern systematic.
-TEST(csrmv_adaptive_analysis, no_retarget_without_enough_blocks)
+TEST(csrmv_adaptive_analysis, good_fit_without_enough_blocks)
 {
     std::vector<int> blocks{0};
     std::vector<int> ptr{0};
@@ -206,7 +206,7 @@ TEST(csrmv_adaptive_analysis, no_retarget_without_enough_blocks)
         ptr.push_back(nnz);
         blocks.push_back(row + 1);
     }
-    EXPECT_FALSE(rocsparse::adaptive_partition_should_retarget(
+    EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
         blocks.data(), blocks.size(), ptr.data(), 7, 256u));
 }
 
@@ -216,14 +216,14 @@ TEST(csrmv_adaptive_analysis, zero_span_chunks_are_ignored)
     const std::vector<int> blocks{5, 5, 5, 8};
     std::vector<int>       ptr(9, 0);
     ptr[8] = 200;
-    EXPECT_FALSE(rocsparse::adaptive_partition_should_retarget(
+    EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
         blocks.data(), blocks.size(), ptr.data(), 8, 256u));
 }
 
-TEST(csrmv_adaptive_analysis, retarget_rejects_empty_partition)
+TEST(csrmv_adaptive_analysis, good_fit_for_empty_partition)
 {
     const std::vector<int> blocks{0};
     const std::vector<int> ptr{0};
-    EXPECT_FALSE(rocsparse::adaptive_partition_should_retarget(
+    EXPECT_FALSE(rocsparse::csrmv_adaptive_partition_is_poor_fit(
         blocks.data(), blocks.size(), ptr.data(), 0, 256u));
 }

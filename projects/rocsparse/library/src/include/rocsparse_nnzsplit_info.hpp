@@ -33,8 +33,9 @@ typedef struct _rocsparse_nnzsplit_info
 
     size_t size{};
 
-    void* starting_ids{};
-    void* starting_block_ids{};
+    void*  starting_ids{};
+    void*  starting_block_ids{};
+    size_t starting_ids_size_in_bytes{};
 
     // Launch tuning chosen at analysis time and replayed verbatim at compute
     // time so the two phases always agree (the block layout of starting_ids /

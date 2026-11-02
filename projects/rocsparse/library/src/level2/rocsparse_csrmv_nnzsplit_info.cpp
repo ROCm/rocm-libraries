@@ -33,13 +33,14 @@ _rocsparse_nnzsplit_info::~_rocsparse_nnzsplit_info()
     // starting_block_ids points into the starting_ids allocation, so only one free is needed.
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->starting_ids));
 
-    this->starting_ids           = nullptr;
-    this->starting_block_ids     = nullptr;
-    this->size                   = 0;
-    this->use_starting_block_ids = false;
-    this->block_size             = 0;
-    this->nnz_per_thread         = 0;
-    this->max_row_nnz            = 0;
+    this->starting_ids               = nullptr;
+    this->starting_block_ids         = nullptr;
+    this->starting_ids_size_in_bytes = 0;
+    this->size                       = 0;
+    this->use_starting_block_ids     = false;
+    this->block_size                 = 0;
+    this->nnz_per_thread             = 0;
+    this->max_row_nnz                = 0;
 }
 
 void _rocsparse_nnzsplit_info::clear()
@@ -49,11 +50,12 @@ void _rocsparse_nnzsplit_info::clear()
     // starting_block_ids points into the starting_ids allocation, so only one free is needed.
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->starting_ids));
 
-    this->starting_ids           = nullptr;
-    this->starting_block_ids     = nullptr;
-    this->size                   = 0;
-    this->use_starting_block_ids = false;
-    this->block_size             = 0;
-    this->nnz_per_thread         = 0;
-    this->max_row_nnz            = 0;
+    this->starting_ids               = nullptr;
+    this->starting_block_ids         = nullptr;
+    this->starting_ids_size_in_bytes = 0;
+    this->size                       = 0;
+    this->use_starting_block_ids     = false;
+    this->block_size                 = 0;
+    this->nnz_per_thread             = 0;
+    this->max_row_nnz                = 0;
 }

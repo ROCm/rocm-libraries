@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_adaptive_info.hpp"
+#include "rocsparse_csrmv_alg.hpp"
 #include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_lrb_info.hpp"
 #include "rocsparse_mat_descr.hpp"
@@ -53,6 +54,10 @@ typedef struct _rocsparse_csrmv_info
     rocsparse_indextype index_type_I = deprecated_rocsparse_indextype_u16;
     rocsparse_indextype index_type_J = deprecated_rocsparse_indextype_u16;
 
+    // Algorithm chosen when the analysis was asked for csrmv_alg_default, and
+    // csrmv_alg_default when an explicit algorithm was analysed.
+    rocsparse::csrmv_alg selected_alg = rocsparse::csrmv_alg_default;
+
     _rocsparse_csrmv_info() {}
 
     ~_rocsparse_csrmv_info()
@@ -75,6 +80,7 @@ typedef struct _rocsparse_csrmv_info
         this->csr_col_ind  = nullptr;
         this->index_type_I = deprecated_rocsparse_indextype_u16;
         this->index_type_J = deprecated_rocsparse_indextype_u16;
+        this->selected_alg = rocsparse::csrmv_alg_default;
     }
 
 } * rocsparse_csrmv_info, *rocsparse_cscmv_info;

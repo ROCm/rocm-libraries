@@ -24,21 +24,51 @@
 
 #pragma once
 
+#include "rocsparse_csrmv_alg.hpp"
 #include "rocsparse_handle.hpp"
+
+#include <vector>
 
 namespace rocsparse
 {
-    typedef enum csrmv_alg_
-    {
-        csrmv_alg_default = 0,
-        csrmv_alg_rowsplit,
-        csrmv_alg_adaptive,
-        csrmv_alg_lrb,
-        csrmv_alg_nnzsplit
-    } csrmv_alg;
+    // Replaces csrmv_alg_default with a specific algorithm. When csrmv_info holds
+    // the algorithm analysis selected for the same operation, that one is used.
+    rocsparse_status csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg&        alg,
+                                                 rocsparse_operation          operation,
+                                                 const _rocsparse_csrmv_info* csrmv_info);
 
-    rocsparse_status csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& alg,
-                                                 rocsparse_operation   operation);
+    // Host row blocks of CSR-Adaptive, built by the first phase of the adaptive
+    // analysis. The second phase uploads them to the csrmv info.
+    template <typename I, typename J>
+    struct csrmv_adaptive_partition
+    {
+        std::vector<I> row_ptr;
+        std::vector<I> row_blocks;
+        std::vector<J> wg_ids;
+        int64_t        first_row{};
+        int64_t        last_row{};
+        uint32_t       gen_wg{};
+    };
+
+    template <typename I, typename J>
+    rocsparse_status csrmv_adaptive_compute_partition(rocsparse_handle                handle,
+                                                      J                               m,
+                                                      I                               nnz,
+                                                      const I*                        csr_row_ptr,
+                                                      csrmv_adaptive_partition<I, J>& partition);
+
+    // Replaces csrmv_alg_default with the algorithm to analyse. For a
+    // non-transposed matrix this builds the adaptive partition, chooses nnz-split
+    // when the partition is a poor fit and adaptive otherwise. Explicit
+    // algorithms are left unchanged and the partition is left empty.
+    template <typename I, typename J>
+    rocsparse_status csrmv_select_algorithm(rocsparse_handle                handle,
+                                            rocsparse_operation             trans,
+                                            J                               m,
+                                            I                               nnz,
+                                            const I*                        csr_row_ptr,
+                                            rocsparse::csrmv_alg&           alg,
+                                            csrmv_adaptive_partition<I, J>& partition);
 
     // Helper function to extract gamma arrays and z vectors for batched operations
     // gamma_device_array and z_array must be preallocated device buffers
@@ -50,18 +80,21 @@ namespace rocsparse
                                                       T*        gamma_device_array,
                                                       const Y** z_array);
 
+    // partition is the result of csrmv_adaptive_compute_partition for this
+    // matrix, or nullptr to compute it here.
     template <typename I, typename J, typename A>
-    rocsparse_status csrmv_analysis_adaptive_template_dispatch(rocsparse_handle          handle,
-                                                               rocsparse_operation       trans,
-                                                               J                         m,
-                                                               J                         n,
-                                                               I                         nnz,
-                                                               const rocsparse_mat_descr descr,
-                                                               const A*                  csr_val,
-                                                               const I*              csr_row_ptr,
-                                                               const J*              csr_col_ind,
-                                                               rocsparse_csrmv_info* p_csrmv_info,
-                                                               bool allow_retarget);
+    rocsparse_status
+        csrmv_analysis_adaptive_template_dispatch(rocsparse_handle          handle,
+                                                  rocsparse_operation       trans,
+                                                  J                         m,
+                                                  J                         n,
+                                                  I                         nnz,
+                                                  const rocsparse_mat_descr descr,
+                                                  const A*                  csr_val,
+                                                  const I*                  csr_row_ptr,
+                                                  const J*                  csr_col_ind,
+                                                  rocsparse_csrmv_info*     p_csrmv_info,
+                                                  const csrmv_adaptive_partition<I, J>* partition);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_lrb_template_dispatch(rocsparse_handle          handle,

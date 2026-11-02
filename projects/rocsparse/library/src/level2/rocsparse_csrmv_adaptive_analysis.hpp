@@ -82,10 +82,10 @@ namespace rocsparse
 
     // Nonzeros that close one adaptive row block. This is BLOCK_SIZE in
     // rocsparse_csrmv_template_adaptive.cpp.
-    inline constexpr uint32_t adaptive_block_nnz = 1024;
+    inline constexpr uint32_t csrmv_adaptive_block_nnz = 1024;
 
-    // True when the adaptive partition is a poor fit and default SpMV should
-    // use nnz-split instead. An explicit adaptive request does not call this.
+    // True when the adaptive row blocks are a poor fit for this matrix, so that
+    // csrmv_select_algorithm chooses nnz-split for csrmv_alg_default.
     //
     // A zero row span is an intermediate chunk of one long row and is ignored.
     // The two poor partitions are:
@@ -93,55 +93,9 @@ namespace rocsparse
     // - many blocks closed by a long/short transition before they hold a full
     //   block of nonzeros, so most of the grid does almost no numeric work
     template <typename I>
-    inline bool adaptive_partition_should_retarget(const I*    row_blocks,
-                                                   std::size_t row_block_size,
-                                                   const I*    row_ptr,
-                                                   I           n_rows,
-                                                   uint32_t    gen_wg)
-    {
-        if(row_block_size < 2 || n_rows <= 0)
-        {
-            return false;
-        }
-
-        const std::size_t nblocks         = row_block_size - 1;
-        const I           span_limit      = static_cast<I>(32) * static_cast<I>(gen_wg);
-        const I           underfilled_nnz = static_cast<I>(adaptive_block_nnz / 8);
-
-        int64_t     wide_rows   = 0;
-        std::size_t comparable  = 0;
-        std::size_t underfilled = 0;
-
-        for(std::size_t block = 0; block < nblocks; ++block)
-        {
-            const I begin = row_blocks[block];
-            const I end   = row_blocks[block + 1];
-            const I span  = end - begin;
-            if(span <= 0)
-            {
-                continue;
-            }
-
-            if(span > span_limit)
-            {
-                wide_rows += static_cast<int64_t>(span);
-            }
-
-            const I block_nnz = row_ptr[end] - row_ptr[begin];
-            ++comparable;
-            if(block_nnz > 0 && block_nnz < underfilled_nnz)
-            {
-                ++underfilled;
-            }
-        }
-
-        // Wide blocks cover a substantial share of the matrix.
-        if(wide_rows * 8 >= static_cast<int64_t>(n_rows))
-        {
-            return true;
-        }
-
-        // At least a quarter of the row blocks are transition fragments.
-        return comparable >= 8 && underfilled * 4 >= comparable;
-    }
+    bool csrmv_adaptive_partition_is_poor_fit(const I*    row_blocks,
+                                              std::size_t row_block_size,
+                                              const I*    row_ptr,
+                                              I           n_rows,
+                                              uint32_t    gen_wg);
 }

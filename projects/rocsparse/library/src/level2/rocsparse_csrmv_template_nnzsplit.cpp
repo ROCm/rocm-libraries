@@ -380,20 +380,16 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
     dim3 csrmv_threads(BLOCKSIZE);
     dim3 csrmv_phase_1((rocsparse::max(m + 1, n) + BLOCKSIZE - 1) / BLOCKSIZE);
 
-    if(!csrmv_info->nnzsplit.use_starting_block_ids)
-    {
-        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            &csrmv_info->nnzsplit.starting_ids, sizeof(J) * (requiredBlocks + 1), stream));
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
-            csrmv_info->nnzsplit.starting_ids, 0, sizeof(J) * (requiredBlocks + 1), stream));
-    }
-    else
-    {
-        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            &csrmv_info->nnzsplit.starting_ids, sizeof(J) * (2 * requiredBlocks + 2), stream));
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
-            csrmv_info->nnzsplit.starting_ids, 0, sizeof(J) * (2 * requiredBlocks + 2), stream));
-    }
+    csrmv_info->nnzsplit.starting_ids_size_in_bytes = csrmv_info->nnzsplit.use_starting_block_ids
+                                                          ? sizeof(J) * (2 * requiredBlocks + 2)
+                                                          : sizeof(J) * (requiredBlocks + 1);
+    RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csrmv_info->nnzsplit.starting_ids,
+                                                 csrmv_info->nnzsplit.starting_ids_size_in_bytes,
+                                                 stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(csrmv_info->nnzsplit.starting_ids,
+                                                 0,
+                                                 csrmv_info->nnzsplit.starting_ids_size_in_bytes,
+                                                 stream));
     J* temp_buffer_j = reinterpret_cast<J*>(csrmv_info->nnzsplit.starting_ids);
     csrmv_info->nnzsplit.starting_block_ids = &temp_buffer_j[requiredBlocks + 1];
 
