@@ -18,7 +18,6 @@ Integrates with hipBLASLt for benchmarking.
 
 import pandas as pd
 import logging
-import numpy as np
 import time
 
 from collections import defaultdict
@@ -362,9 +361,35 @@ def run(
         idx = df.groupby(list(GEMM_FIELDS))["us"].idxmin()
         return df.loc[idx].reset_index(drop=True)
 
+    def _config_flops(cfg: dict) -> float:
+        return float(cfg["M"]) * float(cfg["N"]) * float(cfg["K"]) * float(cfg.get("batch_count", 1))
+
     chunk_size = max(min(max_chunk_size, len(configs) // len(devices)), 1)
-    chunks = np.array_split(configs, len(configs) // chunk_size)
-    items = [ {"configs": chunk.tolist(), "keep_failed_logs": False} for chunk in chunks ]
+    n_chunks = max(len(configs) // chunk_size, 1)
+    # Cap chunk size so all chunks stay equally "full" (not just equally
+    # flops-weighted), avoiding idle GPUs from undersized chunks.
+    capacity = -(-len(configs) // n_chunks)  # ceil(len(configs) / n_chunks)
+
+    # Greedy LPT bin balancing: assign heaviest (FLOPs = M*N*K*batch_count)
+    # configs first, each to the lowest-total non-full chunk.
+    ordered = sorted(configs, key=lambda cfg: _config_flops(cfg[0]), reverse=True)
+    chunk_bins: List[List[tuple]] = [[] for _ in range(n_chunks)]
+    chunk_flops = [0.0] * n_chunks
+    for cfg in ordered:
+        idx = min(
+            (i for i in range(n_chunks) if len(chunk_bins[i]) < capacity),
+            key=lambda i: chunk_flops[i],
+        )
+        chunk_bins[idx].append(cfg)
+        chunk_flops[idx] += _config_flops(cfg[0])
+
+    # Chunk membership isn't an id range anymore, so tag each chunk with a
+    # stable index for naming (see setup() below).
+    items = [
+        {"configs": chunk, "chunk_index": i, "keep_failed_logs": False}
+        for i, chunk in enumerate(chunk_bins)
+        if chunk
+    ]
 
     io_lock = Lock()
     failed_lock = Lock()
@@ -374,9 +399,15 @@ def run(
         def setup(self) -> None:
             self.configs = self.item["configs"]
             self.ids = [cfg[1] for cfg in self.configs]
-            self.chunk_id = self.ids[0] if len(self.ids) == 1 else f"{self.ids[0]}-{self.ids[-1]}"
-            self.bench_file = output_dir / f"gemms_{self.chunk_id}.yaml"
-            self.log_file = output_dir / f"gemms_{self.chunk_id}.out"
+            # Multi-config chunks: "chunk_<i>". Single-config items (a
+            # 1-item chunk, or a retry) keep "gemms_<id>" so retries never
+            # clash with an existing chunk's files.
+            if len(self.configs) > 1:
+                self.chunk_id = f"chunk_{self.item['chunk_index']}"
+            else:
+                self.chunk_id = f"gemms_{self.ids[0]}"
+            self.bench_file = output_dir / f"{self.chunk_id}.yaml"
+            self.log_file = output_dir / f"{self.chunk_id}.out"
             self.passed = False
             self.keep_failed_logs = self.item.get("keep_failed_logs", False)
             
@@ -492,9 +523,9 @@ def run(
                         processed_df.to_csv(processed_file, index=False)
 
                 except Exception as e:
-                    logger.warning(f"Failed to persist gemms_{self.chunk_id} results: {e}")
+                    logger.warning(f"Failed to persist {self.chunk_id} results: {e}")
             else:
-                logger.warning(f"GEMMs {self.chunk_id} failed or missing log; skipping result persistence")
+                logger.warning(f"{self.chunk_id} failed or missing log; skipping result persistence")
                 if not self.keep_failed_logs:
                     self.log_file.unlink(missing_ok=True)
                     self.bench_file.unlink(missing_ok=True)

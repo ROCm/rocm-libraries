@@ -756,6 +756,103 @@ def test_run_emits_failed_gemms_after_retry_failure(monkeypatch: pytest.MonkeyPa
     assert (outdir / "failed_gemms.yaml").is_file()
 
 
+def test_run_balances_chunks_by_flops_and_count(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Chunks should be capacity-capped (equal-ish item counts) and
+    flops-balanced (heaviest GEMMs spread across different chunks)."""
+    hip = tmp_path / "hip"
+    hip.mkdir()
+
+    # flops == K here since M=N=batch_count=1; 3 heavy + 3 light GEMMs.
+    flop_values = [100_000, 90_000, 80_000, 10, 9, 8]
+    configs = [_gemm_config(M=1, N=1, K=k, batch_count=1) for k in flop_values]
+
+    captured: dict = {}
+
+    class _CaptureRunner:
+        def __init__(self, items, worker_impl, devices, n_slots=1):
+            captured["items"] = items
+
+        def __call__(self, _workdir):
+            return []
+
+    monkeypatch.setattr(search, "Runner", _CaptureRunner)
+
+    search.run(hip, configs, tmp_path / "out", devices=[0, 1], max_chunk_size=10)
+
+    items = captured["items"]
+    assert len(items) == 2
+
+    # Capacity cap: chunks stay equally "full" (differ by at most one item).
+    sizes = sorted(len(item["configs"]) for item in items)
+    assert sizes == [3, 3]
+
+    def _chunk_of(original_id: int) -> int:
+        for i, item in enumerate(items):
+            if any(cfg[1] == original_id for cfg in item["configs"]):
+                return i
+        raise AssertionError(f"original id {original_id} missing from chunks")
+
+    # The two heaviest GEMMs (ids 0 and 1, flops 100_000/90_000) are the
+    # first two placed by the greedy algorithm and must land in different
+    # chunks -- that's the flops-balancing guarantee.
+    assert _chunk_of(0) != _chunk_of(1)
+
+
+def test_run_names_multi_and_single_config_items_differently(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Multi-config chunks are named "chunk_<i>"; single-config items (a
+    lone chunk, or a retry) keep "gemms_<id>" so retries never clash with
+    an existing chunk's output files."""
+    hip = tmp_path / "hip"
+    hip.mkdir()
+
+    captured: dict = {}
+
+    class _CaptureRunner:
+        def __init__(self, items, worker_impl, devices, n_slots=1):
+            captured["items"] = items
+            captured["worker_impl"] = worker_impl
+            captured["devices"] = devices
+
+        def __call__(self, _workdir):
+            return []
+
+    monkeypatch.setattr(search, "Runner", _CaptureRunner)
+
+    # 4 configs on 1 device => a single chunk holding all 4 (multi-config).
+    configs = [_gemm_config(M=1, N=1, K=k, batch_count=1) for k in [4, 3, 2, 1]]
+    search.run(hip, configs, tmp_path / "out", devices=[0], max_chunk_size=10)
+
+    items = captured["items"]
+    worker_impl = captured["worker_impl"]
+    devices = captured["devices"]
+    assert len(items) == 1
+    assert len(items[0]["configs"]) == 4
+
+    worker = worker_impl(items[0], devices[0], 0, None, None)
+    worker.setup()
+    assert worker.chunk_id == "chunk_0"
+    assert worker.bench_file.name == "chunk_0.yaml"
+    assert worker.log_file.name == "chunk_0.out"
+
+    # A single config on its own device => a lone (single-config) chunk.
+    captured.clear()
+    search.run(hip, [configs[0]], tmp_path / "out2", devices=[0], max_chunk_size=10)
+    worker = captured["worker_impl"](captured["items"][0], captured["devices"][0], 0, None, None)
+    worker.setup()
+    assert worker.chunk_id == "gemms_0"
+    assert worker.bench_file.name == "gemms_0.yaml"
+
+    # A single-config retry item (built directly, as search.run() does
+    # internally) must use the same "gemms_<id>" naming.
+    retry_item = {"configs": [(configs[0], 7)], "keep_failed_logs": True}
+    retry_worker = worker_impl(retry_item, devices[0], 0, None, None)
+    retry_worker.setup()
+    assert retry_worker.chunk_id == "gemms_7"
+    assert retry_worker.bench_file.name == "gemms_7.yaml"
+
+
 def _gemm_config(**overrides: object) -> dict:
     """Return one dense-search GEMM configuration.
 
