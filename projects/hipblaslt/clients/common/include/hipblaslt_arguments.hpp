@@ -213,6 +213,7 @@ struct Arguments
     bool                     scaleD;
     bool                     scaleE;
     bool                     scaleAlpha_vector;
+    bool                     device_scalar_alpha;
     bool                     amaxScaleA;
     bool                     amaxScaleB;
     bool                     amaxD;
@@ -352,6 +353,7 @@ struct Arguments
     OPER(scaleD) SEP                 \
     OPER(scaleE) SEP                 \
     OPER(scaleAlpha_vector) SEP      \
+    OPER(device_scalar_alpha) SEP    \
     OPER(amaxScaleA) SEP             \
     OPER(amaxScaleB) SEP             \
     OPER(amaxD) SEP                  \

@@ -32,6 +32,7 @@ from ..Activation import ActivationType
 from ..Common import fastdeepcopy as deepcopy
 from ..Common.Constants import INDEX_CHARS
 from ..Common.DataType import DataType
+from ..Common.ScaleAlphaVec import VALID_SCALE_ALPHA_VEC_MODES, scaleAlphaVectorMode
 from ..Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
 
 
@@ -439,7 +440,9 @@ _defaultProblemType = {
     # Int4 weight encoding; UnsignedBias8 uses implicit zero-point 8 when symmetric.
     "Int4EncodingA": "Signed",
     "UseScaleCD": False,  # =True use scaleC, scaleD
-    "UseScaleAlphaVec": 0,  # =1 support alpha vector on M direction, =2 support bias vector on N direction, =3 support alpha vector on both M,N direction
+    # 1/2/3 support M/N/MN vectors; gfx1250 may add 0x4 (5/6/7) for device scalar support.
+    # Scalar-only mode 4 is reserved; capable kernels retain the vector epilogue.
+    "UseScaleAlphaVec": 0,
     "HighPrecisionAccumulate": False,  # f32 += f16*f16
     "SilentHighPrecisionAccumulate": False,  # Keep kernel names the same for HPA mode.  Useful for testing.
     "Sparse": 0,  # 4:2 Structured Sparse A Matrix, 0=Non Sparse, 1=Sparse Matrix A, 2=Sparse Matrix B
@@ -892,6 +895,8 @@ class ProblemType(Mapping):
         srcFile=srcFile,
         raiseOnMismatch=raiseOnTypeMismatch,
     )
+    if self["UseScaleAlphaVec"] not in VALID_SCALE_ALPHA_VEC_MODES:
+      printExit("UseScaleAlphaVec must be 0, 1, 2, 3, 5, 6, or 7; scalar-only mode 4 is not supported.")
 
     # adjusting all data types
     if "DataType" in config:
@@ -1389,7 +1394,7 @@ class ProblemType(Mapping):
       if self["BiasSrc"] and self["Gradient"]: # Show bias src if gradient = True
         name.append(f"{self['BiasSrc']}")
 
-    factorDim = max(self["UseScaleAlphaVec"], self["UseBias"])
+    factorDim = max(scaleAlphaVectorMode(self["UseScaleAlphaVec"]), self["UseBias"])
     if factorDim > 1 :
         s = ("N" if factorDim == 2 else "MN")
         name.append(f"FD{s}")

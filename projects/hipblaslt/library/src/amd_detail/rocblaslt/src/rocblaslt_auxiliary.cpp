@@ -958,6 +958,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
 
     // Encoding is a solution predicate; set it on every search path.
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+    problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
 
     if(adaptive_sm_count_applies(handle, matmul_descr))
     {
@@ -3001,6 +3002,10 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
         return rocblaslt_status_invalid_pointer;
     }
 
+    auto alphaTypeStatus = validateDeviceScalarAlphaType(matmul_descr);
+    if(alphaTypeStatus != rocblaslt_status_continue)
+        return alphaTypeStatus;
+
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
@@ -3058,6 +3063,10 @@ rocblaslt_status
         log_error(__func__, "invalid requested count", requestedAlgoCount);
         return rocblaslt_status_invalid_value;
     }
+    auto alphaTypeStatus = validateDeviceScalarAlphaType(matmul_desc);
+    if(alphaTypeStatus != rocblaslt_status_continue)
+        return alphaTypeStatus;
+
     if(matA->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED
        || matB->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED
        || matC->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED
@@ -3683,6 +3692,9 @@ extern "C" int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
         log_error(__func__, "invalid handle pointer");
         return -1;
     }
+
+    if(validateDeviceScalarAlphaType(matmul_descr) != rocblaslt_status_continue)
+        return -1;
 
     hipDataType            a_type              = matA->type;
     hipDataType            b_type              = matB->type;

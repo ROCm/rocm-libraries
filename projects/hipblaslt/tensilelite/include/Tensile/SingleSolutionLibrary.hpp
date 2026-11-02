@@ -157,6 +157,8 @@ namespace TensileLite
             bool debug = Debug::Instance().printPredicateEvaluation();
 
             auto solution = resolved();
+            if(solution && !solution->deviceScalarAlphaSupported(problems))
+                return {};
             if(solution)
             {
                 if(debug)
@@ -284,6 +286,9 @@ namespace TensileLite
             bool debug = Debug::Instance().printPredicateEvaluation();
 
             auto solution    = resolved();
+            if(solution && searchType == SolutionLibrarySearchType::DEFAULT
+               && !solution->deviceScalarAlphaSupported(problems))
+                return {};
             bool useSolution = false;
             if(solution)
             {

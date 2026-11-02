@@ -11,6 +11,7 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/PerformanceMetricTypes.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipUtils.hpp>
@@ -100,7 +101,6 @@ namespace
         return problem;
     }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
     TensileLite::Client::po::variables_map makeMinimalClientArgs(int mxScaleFormat)
     {
         using namespace TensileLite::Client;
@@ -185,9 +185,40 @@ namespace
         return args;
     }
 
-#endif
-
 } // namespace
+
+TEST(ClientAlphaMode, ScalarSupportDefaultsToScalarAndAllowsRuntimeOverride)
+{
+    for(int modes : {1, 2, 3, 5, 6, 7})
+        for(int runtimeOverride : {-1, 0, 1})
+        {
+            SCOPED_TRACE(::testing::Message() << "modes=" << modes
+                                             << " override=" << runtimeOverride);
+            auto args = makeMinimalClientArgs(0);
+            setOption(args, "use-scaleAlphaVec", modes);
+            if(runtimeOverride >= 0)
+                setOption(args, "device-scalar-alpha", runtimeOverride != 0);
+            TensileLite::Client::ClientProblemFactory factory(args);
+            ASSERT_EQ(factory.problems().size(), 1u);
+            auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+            ASSERT_NE(problem, nullptr);
+            const bool scalar = runtimeOverride < 0 ? modes >= 5 : runtimeOverride != 0;
+            EXPECT_EQ(problem->getParams().deviceScalarAlpha(), scalar);
+            EXPECT_EQ(problem->useScaleAlphaVec(),
+                      scalar ? TensileLite::ScaleAlphaVecDeviceScalarBit : modes & 3);
+            EXPECT_EQ(problem->scaleAlphaVec().totalLogicalElements(), scalar ? 1u : 128u);
+        }
+}
+
+TEST(ClientAlphaMode, RejectsReservedScalarOnlyAndUnknownSupportModes)
+{
+    for(int modes : {-1, 4, 8})
+    {
+        auto args = makeMinimalClientArgs(0);
+        setOption(args, "use-scaleAlphaVec", modes);
+        EXPECT_THROW(TensileLite::Client::ClientProblemFactory factory(args), std::invalid_argument);
+    }
+}
 
 // =============================================================================
 //   Section 1 - TensileLite::Client::isMXTensor
