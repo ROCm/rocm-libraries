@@ -1,126 +1,181 @@
 # hipDNN Testing
 
-- **Status:** Draft
-- **Owner:** @ROCm/hipdnn-core
-- **Technical Lead:** Brian Harrison
-- **Last Updated:** 2026-08-17
+Owner: @ROCm/hipdnn-reviewers | Last Updated: 2026-10-22
 
-This guide tells contributors which tests to run before pushing a change.
-For general project information, see the [README](../README.md), [design overview](./Design.md), and [contribution guide](../CONTRIBUTING.md).
-For detailed test design and ownership, see [Testing Strategy](./testing/TESTING_STRATEGY.md). For current limits, see [Known Testing Gaps](./testing/KNOWN_TESTING_GAPS.md).
+## Component overview
 
-## Component Overview
+This page shows how to build and run hipDNN tests, what each CI tier runs, and what to run before you push.
 
-hipDNN is a graph-based DNN execution library with Windows and Linux support. The frontend, backend, and plugin separation allows each layer to be unit tested independently, while integration tests validate cross-layer behavior.
-
-hipDNN core includes the backend, frontend, Data SDK, FlatBuffers SDK, Plugin SDK, and Test SDK.
-Core unit and API tests use test plugins from this repository. You can test core-only changes without building a production provider.
-
-Production provider plugins live under `dnn-providers/`.
-Changes to plugin loading, graph execution, operation support, or provider-facing behavior must be tested with the affected provider. Prefer the superbuild; you can also test an installed standalone provider.
-See [Plugin Development](./PluginDevelopment.md) for the plugin boundary and the [integration test documentation](../../../dnn-providers/integration-tests/docs/README.md) for provider test setup ([running the tests](../../../dnn-providers/integration-tests/docs/running-tests.md)) and categories ([test tiers](../../../dnn-providers/integration-tests/docs/running-tests.md#test-tiers)).
-
-## Development Workflow
-
-Choose the path that matches your change. Before pushing, run the affected component's `standard` tests.
-See [Building hipDNN](./Building.md) for setup, presets, targets, and platform requirements.
-
-### Core-only standalone path
-
-Use this path when changes stay within hipDNN core and do not alter provider or cross-project behavior.
-From `projects/hipdnn/`:
+Core-only change, from `projects/hipdnn/`:
 
 ```bash
 cmake --preset release
 cmake --build build/release
-ctest --test-dir build/release -L standard --output-on-failure
+ctest --test-dir build/release -L '^standard$' --output-on-failure
 ```
 
-While working, use `ctest -R <regex>` or a GoogleTest filter to run only the tests you need.
-Before pushing, run the full core `standard` category.
-
-### Provider or integration superbuild path
-
-Use this path for provider changes, provider-facing core changes, real graph execution, or changes that span projects.
-From the repository root, use the smallest preset that includes the affected provider. Use `hipdnn-providers` for MIOpen and hipBLASLt, or `hipdnn-providers-all` when HIP-kernel is also affected:
+Provider or cross-project change, from the repository root:
 
 ```bash
 cmake --preset hipdnn-providers -DROCM_LIBS_ENABLE_ROOT_CTEST=ON
 cmake --build build
-ctest --test-dir build -L standard --output-on-failure
+ctest --test-dir build -L '^standard$' --output-on-failure
 ```
 
-Root-level CTest only sees these tests when CMake was configured with `ROCM_LIBS_ENABLE_ROOT_CTEST=ON`.
-See [Building hipDNN](./Building.md#superbuild) for other provider presets.
+`ctest` does not build. Build first. Anchor tier labels (`'^standard$'`): `-L standard` is a regex and also matches any label that contains the word. Replace `standard` with `quick`, `comprehensive` or `full` to run another tier.
 
-`ctest` does not build changed code. Always build before running tests.
+### Testing documentation
 
-Follow [Coding Style and Naming Guidelines](./CodingStyleAndNamingGuidelines.md) and complete the non-test contribution checks in [CONTRIBUTING](../CONTRIBUTING.md) before pushing.
+- [Testing Strategy](./testing/TESTING_STRATEGY.md): methodology, layers, integration test strategy, and tier, flaky-test, sanitizer, coverage and performance policy.
+- [Known Testing Gaps](./testing/KNOWN_TESTING_GAPS.md): what a green run does not prove.
+- [Release Testing](./testing/RELEASE_TESTING.md): the release verification procedure. [Release Run Template](./testing/RELEASE_RUN_TEMPLATE.md): the record to fill in while following it.
+- [Integration test documentation](../../../dnn-providers/integration-tests/docs/README.md): the shared provider test project (flags, formats, authoring).
+- [Building hipDNN](./Building.md): prerequisites, presets, targets. [Coding Style and Naming Guidelines](./CodingStyleAndNamingGuidelines.md) covers test names.
 
-## Unit Testing Strategy
+## Development workflow
 
-Unit tests should test one component and its visible behavior, edge cases, and failures.
-Keep them fast and repeatable. Replace outside dependencies with existing fakes or mocks.
-For a bug fix, add a test that fails before the fix and passes after it.
+### Building and running tests
 
-Put new tests beside the existing tests for that component.
-Follow the GoogleTest patterns already used there.
-If a unit test needs a GPU, call `SKIP_IF_NO_DEVICES()` so it skips cleanly on CPU-only machines.
+Build options and presets: [Building hipDNN](./Building.md). Superbuild presets include `hipdnn`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-providers`, `hipdnn-providers-all`, `hipdnn-samples`, and `hipdnn-dev-all`.
 
-Use [Coding Style and Naming Guidelines](./CodingStyleAndNamingGuidelines.md) for test names. Use [Testing Strategy](./testing/TESTING_STRATEGY.md) to choose the right test layer.
+**Standalone core** (above). Use `debug` instead of `release` for a debugger build. To run one test, use `ctest -R <regex>` or the test binary with `--gtest_filter`.
 
-## Integration Testing Strategy
+**Superbuild.** Root `ctest` sees tests only when configured with `-DROCM_LIBS_ENABLE_ROOT_CTEST=ON`. Superbuild means one CMake build of hipDNN, the providers and the samples from the repository root. Pick the smallest preset that includes the affected provider (`hipdnn-providers` covers MIOpen and hipBLASLt; `hipdnn-providers-all` adds HIP-kernel). Tier targets for hipDNN core do not need that flag:
 
-Core integration tests check the public backend and frontend with controlled test plugins.
-Use them when a change crosses component boundaries but does not need a production provider.
+```bash
+cmake --build build --target hipdnn-standard-check
+```
 
-Provider integration tests run graphs through a real provider and compare results with a reference.
-Use them to test operation results, provider and engine selection, and GPU behavior.
-Put shared graph tests in the provider-agnostic suite. Put behavior that belongs to one provider in that provider's own tests.
-Each provider runs the shared `hipdnn_integration_tests` graph set separately with its own plugin and engine.
+`hipdnn-<category>-check` and `hipdnn-<category>-check-verbose` exist for each category in [`test_categories.yaml`](../test_categories.yaml): the tiers `quick`, `standard`, `comprehensive` and `full`, plus `ffm-quick`, `unit` and `integration`. They build and run the hipDNN core tests only; `hipdnn-check` runs all core tests. Provider and integration-tests targets are listed in [Building hipDNN: Superbuild Targets](./Building.md#superbuild-targets).
 
-hipDNN owns API, graph, routing, serialization, and plugin-lifecycle tests.
-Each provider owns its operation results and supported GPU coverage. Passing core tests does not prove that a provider works correctly.
-See [Testing Strategy](./testing/TESTING_STRATEGY.md) for ownership details and [Running the Tests](../../../dnn-providers/integration-tests/docs/running-tests.md) for provider test setup.
+**One provider.** Build the provider's preset (for example `miopen-provider`), then run the shared integration suite against it:
 
-## Performance & Benchmarking
+```bash
+cmake --build build --target miopen-provider-external-integration-check
+```
 
-hipDNN sends graphs to provider engines; providers run most kernels. Every performance result must name the provider and engine so a slowdown can be traced to hipDNN, the provider adapter, or the underlying library.
+**Installed tree, as TheRock runs it.** CI installs the build, then runs ctest inside each component's directory in the install:
 
-Use [ROCm dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking#readme) for manual graph benchmarks. Record the workload revision, graph inputs, GPU, provider, engine, plugin version or artifact, and software build. Compare only with a baseline from the same GPU architecture.
+```bash
+ctest --test-dir <install>/bin/<dir> -L '^standard$' -LE ex_gpu --output-on-failure --parallel 1 --timeout 7200
+```
 
-Keep GPU execution time separate from host submission time. See [Testing Strategy](./testing/TESTING_STRATEGY.md#4-performance-testing) for details. There is no automated performance gate today; see [Known Testing Gaps](./testing/KNOWN_TESTING_GAPS.md#automated-performance-checks).
+`<dir>` is `hipdnn`, `hipdnn_integration_tests_ctest`, `hipdnn_samples`, `miopen_plugin`, `hipblaslt_plugin`, or `hip_kernel_provider`. When the component has suites labelled for the runner's GPU architecture (for example `miopen_plugin` on gfx110X), CI uses `-L '^ex_gpu_<arch>$'` in place of `-LE ex_gpu`.
+
+**Integration binary.** Run it directly to slice a run. In a superbuild it finds the plugin itself; standalone, name the plugin:
+
+```bash
+./bin/hipdnn_integration_tests --test-article /path/to/libmiopen_plugin.so --test-engine <ENGINE> --gtest_filter='quick_*'
+```
+
+- `--test-engine` pins the run to one engine. `--test-article` is the plugin `.so`.
+- Bundle tests (data-driven graph cases) run by default; `--no-bundles` runs only the C++ tests compiled into the binary.
+- `--verification-mode auto|golden|gpu|cpu` selects the oracle (see [Verification modes](../../../dnn-providers/integration-tests/docs/running-tests.md#verification-modes)). `gpu` and `cpu` need no golden-data pull.
+- Bundle suites are named `{tier}_{Op}_{Topology}`, so `--gtest_filter='*_Batchnorm_*'` selects one op. More flags: [command-line reference](../../../dnn-providers/integration-tests/docs/running-tests.md#command-line-reference--hipdnn_integration_tests).
+
+**Samples.** Configure the `hipdnn-samples` preset with `-DROCM_LIBS_ENABLE_ROOT_CTEST=ON`; it builds hipDNN, the providers, and the samples together. Then run `ctest --test-dir build -L '^standard$'`. Standalone sample builds: [Building hipDNN: Building the Samples](./Building.md#building-the-samples).
+
+**Without a GPU.** Tests that need a device call `SKIP_IF_NO_DEVICES()` and skip. `hipdnn_integration_tests` prints "No HIP devices available" and exits 0. A GPU-less run proves the CPU tests only.
+
+**Windows.** The same `ctest` commands apply from a Windows build environment; see [Building hipDNN: Windows](./Building.md#windows) for setup.
+
+### Reading results
+
+- **ctest:** add `--output-on-failure` to print the log of each failing test. Add `--output-junit results.xml` for a JUnit file.
+- **Integration binary:** prints `REFERENCE EXECUTOR ERRORS` and `UNVERIFIABLE BUNDLES` lists when non-empty, then a `TEST COVERAGE SUMMARY` that ends with a `Verified by: golden N, gpu_ref N, cpu_ref N, none N` line (what each bundle was checked against). `none` means nothing was compared.
+- **CI logs:** each component is its own step in the `therock-multi-arch-ci.yml` run, named by component (`hipdnn`, `hipdnn-integration-tests`, `miopenprovider`, and so on).
+
+### Before you push
+
+- Build, then run `ctest -L '^standard$'` for each component you changed.
+- Run the affected provider's tests for any change to plugin loading, graph execution, operation support, or provider-facing behavior.
+- Test on the hardware your change affects. A provider change must be validated on the GPUs it targets; PR CI covers only a few ([Known Testing Gaps](./testing/KNOWN_TESTING_GAPS.md#hardware-coverage)).
+- Add a test that fails before the fix and passes after it for every bug fix.
+- Run the sanitizer that matches the risk: ASAN for memory ownership and lifetime; TSAN for threads and shared state.
+- Format and static analysis: `hipdnn-check-format`, and `hipdnn-tidy` on Linux.
+- Do not disable a test to get a check green. Track every skip or tolerance override in an issue ([policy](./testing/TESTING_STRATEGY.md#flaky-tests-and-skips)).
+- List the commands you ran in the PR description. Do not mark unrun checks as passed.
 
 ## Pre-submit / CI gates
 
-Run the affected component's `standard` tests before pushing. Local tests do not replace CI.
-Record the commands you ran and their results in the pull request. Do not mark skipped or unrun checks as passed.
+### Test tiers
 
-Workflow files are the source of truth for CI platforms, runners, build options, and test commands. Runner assignments and required GitHub checks may be configured outside this repository, so confirm them in the current workflow run and repository settings.
-See [`hipdnn-superbuild-ci.yml`](../../../.github/workflows/hipdnn-superbuild-ci.yml) for the superbuild workflow and [`CODEOWNERS`](../../../.github/CODEOWNERS) for review routing.
-Complete the non-test checks in [CONTRIBUTING](../CONTRIBUTING.md).
+Every test belongs to a tier, expressed as a ctest label: `quick`, `standard`, `comprehensive`, `full`. Tiers are cumulative in intent; in practice, how much each tier selects differs by project, and core and samples run all their tests at every tier because they are fast. Budgets and tier policy follow TheRock (ROCm's multi-repository build and CI system): [test_filtering.md](https://github.com/ROCm/TheRock/blob/main/docs/development/test_filtering.md). Principles: [Testing Strategy: Tier policy](./testing/TESTING_STRATEGY.md#tier-policy). Standalone and superbuild builds need third-party libraries from the environment or `-DALLOW_FETCH_DEPS=ON` ([Building hipDNN](./Building.md#third-party-libraries)). CI facts below are from this repo's workflows, checked 2026-10-22.
 
-If a required check fails, fix it or document an exception approved by a maintainer.
-Do not disable or skip a test only to make a check pass.
-See [Known Testing Gaps](./testing/KNOWN_TESTING_GAPS.md) for limits in current automation and policy.
+| Tier | Role (intended) | Runs today in CI | Budget |
+|------|-----------------|------------------|--------|
+| `quick` | Pre-submit minimum: CPU-only unit tests plus a minimal enablement set that flags obvious breaks across providers | Workflow dispatch; fallback when a PR or push cannot be mapped to projects (shared-CI script or config changes, unclassified paths) | < 5 min |
+| `standard` | `quick` plus slower enablement and high-priority regression cases | Every PR and push to `develop` that touches hipDNN: Linux gfx94X, Windows gfx110X | < 30 min |
+| `comprehensive` | Nightly breadth | Nightly: Linux gfx94X, Windows gfx1151 | < 2 h |
+| `full` | Release: much broader cases and regression testing | TheRock prerelease builds (outside this repo) | 2 h or more |
 
-## Static Analysis
+- Each CI test step is limited to 30 minutes per shard (10 for `hipdnn-cudnn-samples`). A tier that runs longer reaches its budget by sharding: the component splits its tests across jobs, each within the 30-minute limit. Only `hipkernelprovider` shards today (2 shards, except `quick`).
+- `hipdnn_install` and `hipdnn-cudnn-samples` ignore the tier and run unfiltered `ctest`. They run on run-all triggers only.
+- The superbuild CI applies no tier filter, so it runs the suites of every tier ([gates](#what-gates-a-pull-request)).
+- GPUs that PR and nightly CI do not cover: [Known Testing Gaps](./testing/KNOWN_TESTING_GAPS.md#hardware-coverage).
 
-hipDNN uses `clang-tidy` to find common C++ and HIP problems. Linux builds enable it by default; Windows builds disable it by default because it adds significant build time.
+### Pull request labels
 
-The Linux hipDNN superbuild CI enables `clang-tidy`; the Windows job disables it. For local checks, build with `-DENABLE_CLANG_TIDY=ON` or run the `hipdnn-tidy` target when it is available. See [Building hipDNN: Clang Tools](./Building.md#clang-tools) and [Clang-Tidy Rules](./CodingStyleAndNamingGuidelines.md#151-clang-tidy-rules).
+Labels on a PR change what CI runs. Required GitHub checks are configured outside this repo.
 
-Static analysis does not replace unit or integration tests.
+| Label | Effect |
+|-------|--------|
+| `test:<component>` (for example `test:hipdnn`) | Restricts the test components to the listed ones |
+| `ci:skip` | Skips CI |
+| `ci:asan`, `ci:host-asan` | Enables the PR ASAN workflow, which builds ASAN (`ci:asan`) or host-ASAN (`ci:host-asan`) binaries and does not run tests |
+| `ci:gfx*`, `ci:build:gfx*`, `ci:test:gfx*`, `ci:run-all-archs`, `ci:platform:linux`, `ci:platform:windows` | Selects GPU families and platforms |
+| `ci:cpu-test-only` | Disables the GPU test runner for all families |
+| `test_filter:<tier>` | No effect on the PR workflow: its tier is `standard` (or `quick` on a fallback) |
 
-## ASAN/TSAN/sanitizer coverage
+### What gates a pull request
 
-Sanitizers are extra checks for risky changes; they do not replace normal `standard` tests.
-Run ASAN for changes involving memory ownership, allocation, object lifetime, serialization, plugin loading, or cleanup after failures.
-Run TSAN for changes involving threads, shared state, callbacks, logging, or synchronization.
+| Check | What it runs |
+|-------|--------------|
+| `hipdnn-superbuild-ci.yml` | Superbuild on Linux (gfx942 target) and Windows (gfx1151 target), then `ctest --test-dir build --output-on-failure --no-tests=error`, which produces no JUnit file. Triggers on PRs that touch `projects/hipdnn/**` or `dnn-providers/**`, and nightly. Skips the builds when every changed file is documentation (`*.md`, `*.rst`, `docs/**`); the skipped job counts as passing |
+| `therock-multi-arch-ci.yml` | `standard` tier on Linux gfx94X and Windows gfx110X for the affected components |
+| `therock-multi-arch-ci-asan.yml` | ASAN build (host-ASAN with `ci:host-asan`), only with `ci:asan` or `ci:host-asan`; no tests |
 
-ASAN and TSAN use separate build configurations and cannot be enabled together.
-TSAN supports Linux host code only. ASAN support depends on the platform and GPU, so some GPU tests skip under ASAN.
-For ASAN commands, see [Building hipDNN: Address Sanitizer Build](./Building.md#address-sanitizer-build). For TSAN, configure a standalone Linux build with `-DBUILD_THREAD_SANITIZER=ON`. Build first, then run the affected `standard` tests.
+Workflow files are the source of truth; which checks are required is set in repository settings.
 
-A clean sanitizer run checks memory or thread safety only. It does not prove numerical correctness or replace provider integration tests.
-See [Known Testing Gaps](./testing/KNOWN_TESTING_GAPS.md) for current sanitizer limits.
+### Emulating CI
+
+Climb only as far as you need.
+
+1. **Run the label locally.** Build the preset for the affected component and run `ctest -L '^standard$'` as in [Building and running tests](#building-and-running-tests). This matches what a PR runs, minus the GPU architecture.
+2. **Run the installed tree.** Install the build and run the `ctest --test-dir <install>/bin/<dir> ...` command above. This catches missing install rules and files that only exist in the build tree.
+3. **Dispatch the workflow.** Run `therock-multi-arch-ci.yml` through `workflow_dispatch` with `linux_amdgpu_families` or `windows_amdgpu_families` (for example `gfx950`) and `pr_labels: test:hipdnn`. Dispatch runs `quick`.
+
+Local and CI runs differ in:
+
+- GPU architecture and driver. CI PR runs use gfx94X on Linux and gfx110X on Windows; your GPU may differ.
+- Tier selection. CI selects the tier from the trigger, not from the preset.
+- Parallelism. CI runs `--parallel 1`.
+
+When a CI result differs from your local run, compare the GPU architecture, tier and parallelism first. Keep the CI job log.
+
+## Sanitizers and static analysis
+
+Policy and CI coverage: [Testing Strategy: Sanitizers](./testing/TESTING_STRATEGY.md#sanitizers), [Static analysis](./testing/TESTING_STRATEGY.md#static-analysis) and [Coverage](./testing/TESTING_STRATEGY.md#coverage). Platform notes: [Building hipDNN: Address Sanitizer Build](./Building.md#address-sanitizer-build) and [Clang Tools](./Building.md#clang-tools).
+
+```bash
+# ASAN (standalone)
+cmake --preset release -DBUILD_ADDRESS_SANITIZER=ON
+cmake --build build/release
+ctest --test-dir build/release -L '^standard$'
+
+# TSAN (Linux host code; cannot be combined with ASAN)
+cmake --preset release -DBUILD_THREAD_SANITIZER=ON
+
+# clang-tidy
+cmake --preset release -DENABLE_CLANG_TIDY=ON
+cmake --build build/release --target hipdnn-tidy
+
+# Coverage (reports in build/release/coverage-report/; other targets: unit-coverage, integration-coverage, current-coverage)
+cmake --preset release -DHIPDNN_ENABLE_COVERAGE=ON
+cmake --build build/release --target coverage
+```
+
+## Release testing
+
+The hipDNN team runs the `full` tier and the benchmark corpus by hand before release.
+Procedure and run record: [Release Testing](./testing/RELEASE_TESTING.md).

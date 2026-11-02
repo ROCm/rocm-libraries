@@ -7,10 +7,13 @@ from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, SCSelectB32, TensorLoadToLds, \
     VReadfirstlaneB32
-from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData
+from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData, TENSORModifiers
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
+from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows, mxTdmMSplitStride, mxTdmTileM
 # from ..KernelWriterAssembly import KernelWriterAssembly
+
+
 
 class TensorDataMoverLoad(TensorDataMover):
     kernel = {"TDMInst": 3}
@@ -26,6 +29,16 @@ class TensorDataMoverLoad(TensorDataMover):
 
     def __call__(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping):
         pass
+
+    def mulScaleKRowPitch(self, writer: "KernelWriterAssembly", kernel: Mapping, tc: str, tIdx: int,
+                          dstSgpr: int | str, comment: str) -> Module:
+        """dst *= K-row pitch of an MX scale tensor (see mulScaleRows)."""
+        mxTile = mxFreeTile(kernel, tc)
+        size = sgpr(f"Size{INDEX_CHARS[tIdx]}")
+        if mxTile == 1:
+            return mulScaleRows(sgpr(dstSgpr), sgpr(dstSgpr), size, mxTile, comment=comment)
+        with writer.allocTmpSgpr(1, tag="TDM_mxsKRowPitch") as rows:
+            return mulScaleRows(sgpr(dstSgpr), sgpr(dstSgpr), size, mxTile, sgpr(rows.idx), comment)
 
     def gsuIterOffset(self, writer: "KernelWriterAssembly", kernel: Mapping, tc: str, dstSgpr: int | str) -> Module:
         """Index of the first unroll iteration owned by this GSU group.
@@ -139,7 +152,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(self.gsuIterOffset(writer, kernel, tc, gsuOffsetSgprIdx))
                 mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
                 if "MXS" in tc:
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
+                    mod.add(self.mulScaleKRowPitch(writer, kernel, tc, tIdx, gsuOffsetSgprIdx,
+                                                   "MXS: scale GSU offset by the K-row pitch"))
                 elif tlu:
                     unrollStride = writer.strideRef(tc, unrollSummation[-1])
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
@@ -213,7 +227,15 @@ class TensorDataMoverLoad(TensorDataMover):
             waveOffsetSgprIdx = tmpSgprRes.idx + 2
             mod.add(SMovB64(sgpr(tmpSgprIdx, 2), 0))
             if ("MXS" in tc):
-                mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), round(mxUnit * mt * bpe), f"wgId * mxUnit({mxUnit}) * MT({mt}) * bpe({bpe})"))
+                mxTile = mxFreeTile(kernel, tc)
+                if mxTile > 1:
+                    # (wg*MT)/MXBlockFree, not wg*ceil(MT/free): a 224-row tile
+                    # starts at N=224 → scale row 1, not row 2.
+                    mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), round(mt * mxUnit * bpe), f"wgId * MT({mt}) * mxUnit({mxUnit}) * bpe({bpe})"))
+                    mod.add(SLShiftRightB32(sgpr(tmpSgprIdx), hex(int(log2(mxTile))), sgpr(tmpSgprIdx), f"MXS 2D: (wg*MT)/MXBlockFree({mxTile})"))
+                else:
+                    mtScale = mxTdmTileM(mt, mxTile)
+                    mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), round(mxUnit * mtScale * bpe), f"wgId * mxUnit({mxUnit}) * (MT({mt})/MXBlockFree({mxTile})) * bpe({bpe})"))
             else:
                 mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"tileStride * MT({mt}) * bpe({bpe})"))
                 mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), comment="*= wgId"))
@@ -227,14 +249,19 @@ class TensorDataMoverLoad(TensorDataMover):
             if ("MXS" in tc):
                 mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
                 numMxKGroups = mxDU // mxUnit
+                mxTile = mxFreeTile(kernel, tc)
                 if numMxKGroups >= numComp:
                     # K-splitting: offset by stride to next k_group
                     scale = numMxKGroups // numComp
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), (mxUnit * numMxKGroups // numComp), f"woffset = wCompId * mxUnit({mxUnit}) * numMxKGroups({numMxKGroups}) // numComp({numComp})"))
-                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"woffset *= Size{INDEX_CHARS[tIdx]}"))
+                    mod.add(self.mulScaleKRowPitch(writer, kernel, tc, tIdx, waveOffsetSgprIdx,
+                                                   "woffset *= K-row pitch"))
                 else:
-                    # M/N-splitting: offset within same k_group along tile dimension
-                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * mxUnit * bpe), f"woffset = wCompId * mt//numComp({mt // numComp}) * mxUnit({mxUnit}) * bpe({bpe})"))
+                    # M/N-splitting: offset within same k_group along tile dimension.
+                    # 0 when scale-rows < numComp: all comps share the WG start
+                    # (extra comps are 0-wide via dim0).
+                    mSplit = mxTdmMSplitStride(mt, mxTile, numComp)
+                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mSplit * mxUnit * bpe), f"woffset = wCompId * mSplit({mSplit}) * mxUnit({mxUnit}) * bpe({bpe})"))
             else:
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))
@@ -246,7 +273,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(self.gsuIterOffset(writer, kernel, tc, gsuOffsetSgprIdx))
                 mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
                 if "MXS" in tc:
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
+                    mod.add(self.mulScaleKRowPitch(writer, kernel, tc, tIdx, gsuOffsetSgprIdx,
+                                                   "MXS: scale GSU offset by the K-row pitch"))
                 elif tlu:
                     unrollStride = writer.strideRef(tc, unrollSummation[-1])
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
@@ -288,7 +316,8 @@ class TensorDataMoverLoad(TensorDataMover):
             #TODO: support stagger U
         return mod
 
-    def issueLoad(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:
+    def issueLoad(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str],
+                  tensor: Optional[TENSORModifiers] = None) -> Module:
         mod = Module("tensor load")
         if len(self.mem_token) > 1:
             comment = f"sync LDS {self.mem_token}"
@@ -298,10 +327,11 @@ class TensorDataMoverLoad(TensorDataMover):
             comment = "No MemToken for TDM load"
         if all(g is not None for g in [group2, group3]):
             tensorLoadToLds = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                              sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR), comment=comment)
+                                              sgpr(group2, self.GROUP2_NUM_SGPR), sgpr(group3, self.GROUP3_NUM_SGPR), comment=comment,
+                                              tensor=tensor)
         else:
             tensorLoadToLds = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),\
-                                              None, None, comment=comment)
+                                              None, None, comment=comment, tensor=tensor)
 
         if self.mem_token is not None:
             tensorLoadToLds.setMemToken(MemTokenData(self.mem_token))
@@ -376,7 +406,15 @@ class TensorDataMoverLoad(TensorDataMover):
     def incrementGlobalAddr(self, writer: "KernelWriterAssembly", group0: int | str, sgprIncrement: int | str) -> Module:
         mod = Module()
         mod.addComment("TDM increment global addr")
-        mod.add(SAddU32(sgpr(f"{group0}+2"), sgpr(f"{group0}+2"), sgpr(sgprIncrement), "TDM increment lo"))
+        # Persistent, unstaggered non-transposed tensors can fold their
+        # increment into an assembler constant instead of reserving an SGPR.
+        # Paired-wave TDM increments still live in their own descriptor SGPR.
+        if isinstance(sgprIncrement, str) and sgprIncrement.startswith("GlobalReadIncs"):
+            tc = sgprIncrement[len("GlobalReadIncs"):]
+            increment = writer.globalReadIncsOperand(tc, 0)
+        else:
+            increment = sgpr(sgprIncrement)
+        mod.add(SAddU32(sgpr(f"{group0}+2"), sgpr(f"{group0}+2"), increment, "TDM increment lo"))
         mod.add(SAddCU32(sgpr(f"{group0}+3"), sgpr(f"{group0}+3"), 0, "TDM increment hi (carry)"))
         return mod
 

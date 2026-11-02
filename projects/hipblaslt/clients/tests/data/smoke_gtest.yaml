@@ -105,7 +105,42 @@ Tests:
   use_ext_setproblem: true
   algo_method: 1
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
+  gpu_arch: '9(0a|42|50)|1250'
+
+# Grouped GEMM through grouped matrix layouts and hipblasLtMatmul (api_method grouped_gemm_c).
+# Shapes that differ per group come from device arrays; TN kernels need no minimum M or N.
+- name: grouped_gemm_c_api_per_group_shapes_smoke
+  category: smoke
+  function:
+    matmul: *hpa_half_precisions_fp_16_32_dst
+  M: [64, 127]
+  N: [48, 17]
+  K: [32, 40]
+  transA: T
+  transB: N
+  grouped_gemm: 8
+  alpha: 2
+  beta: [ 0.0, 1.0 ]
+  unit_check: 1
+  api_method: 3
+  gpu_arch_exclude: '11\d{2}|120\d{1}'
+
+# Shapes shared by every group use the scalar layout attributes, in every layout.
+- name: grouped_gemm_c_api_shared_shapes_smoke
+  category: smoke
+  function:
+    matmul: *hpa_half_precisions_fp_16_32_dst
+  matrix_size:
+    - { M: 64, N: 48, K: 32 }
+    - { M: 64, N: 48, K: 32 }
+    - { M: 64, N: 48, K: 32 }
+  transA_transB: *transA_transB_range
+  grouped_gemm: 3
+  alpha: 2
+  beta: [ 0.0, 1.0 ]
+  unit_check: 1
+  api_method: 3
+  gpu_arch_exclude: '11\d{2}|120\d{1}'
 
 # Preserve conjugation independently for A and B during extension setup.
 - name: matmul_ext_complex_support_smoke
@@ -474,7 +509,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch: '9(0a|4[0-2])'
+  gpu_arch: '9(0a|4[0-2])|1250'
 
 - name: matmul_gemm_i8_dst_i32_smoke
   category: smoke

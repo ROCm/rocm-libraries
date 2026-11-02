@@ -107,7 +107,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
+                 'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A', 'stochasticRounding']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -349,6 +349,9 @@ class ProblemType:
 
         rv.mxBlockA = d.get('MXBlockA', 0)
         rv.mxBlockB = d.get('MXBlockB', 0)
+        # Free-dimension extent of the scaling tile; 1 == the original 1xMXBlock.
+        rv.mxBlockFreeA = d.get('MXBlockFreeA', 1)
+        rv.mxBlockFreeB = d.get('MXBlockFreeB', 1)
         rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
         rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
         # mxScaleFormat is a Solution-level parameter and is populated by
@@ -357,6 +360,8 @@ class ProblemType:
         rv.metadataLayout = 0
         if 'MetadataLayout' in d:
             rv.metadataLayout = d['MetadataLayout']
+
+        rv.stochasticRounding = bool(d.get('StochasticRounding', False))
         return rv
 
     def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):
@@ -494,9 +499,11 @@ class ProblemType:
             predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
             if self.mxBlockA:
                 predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))
+                predicates.append(ProblemPredicate("MXBlockFreeA", value=self.mxBlockFreeA))
             predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
             if self.mxBlockB:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
+                predicates.append(ProblemPredicate("MXBlockFreeB", value=self.mxBlockFreeB))
         return predicates
 
 # Dict-valued Assert* keys and the runtime predicate each one emits per index.
@@ -772,6 +779,7 @@ class CustomKernel:
 
 class SizeMapping:
     StateKeys = ['waveNum',
+                 'WavefrontSize',
                  'workGroup',
                  'macroTile',
                  'threadTile',
@@ -829,8 +837,16 @@ class SizeMapping:
                  'LocalSplitU',
                  'DirectToLdsA',
                  'DirectToLdsB',
+                 'OneLDSBuffer',
+                 'SourceSwap',
+                 'UnrollMajorLDSA',
+                 'UnrollMajorLDSB',
+                 'enableLDSTrA',
+                 'enableLDSTrB',
                  'ExpertSchedulingMode',
-                 'clusterDim'
+                 'clusterDim',
+                 'BufferLoad',
+                 'BufferStore'
                  ]
 
     @classmethod
@@ -872,6 +888,7 @@ class SizeMapping:
         dtlB = bool(d['DirectToLdsB'])
 
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
+                   WavefrontSize            = d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
                    macroTile                = cls.ReadOriginalMacroTile(d),
                    threadTile               = d['ThreadTile'],
@@ -929,8 +946,22 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
+                   OneLDSBuffer             = d.get('1LDSBuffer', 0) == 1,
+                   SourceSwap               = bool(d.get('SourceSwap', False)),
+                   UnrollMajorLDSA          = int(bool(d['UnrollMajorLDSA'])) if 'UnrollMajorLDSA' in d else -1,
+                   UnrollMajorLDSB          = int(bool(d['UnrollMajorLDSB'])) if 'UnrollMajorLDSB' in d else -1,
+                   enableLDSTrA             = bool(d.get('enableLDSTrA', False)),
+                   enableLDSTrB             = bool(d.get('enableLDSTrB', False)),
                    ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
-                   clusterDim               = d['ClusterDim']
+                   clusterDim               = d['ClusterDim'],
+                   # BufferLoad/BufferStore were only added to SizeMapping's
+                   # serialized state by this change, so libraries built before
+                   # it won't have these keys; default to True (the prior,
+                   # implicit behavior) for backward compatibility, matching
+                   # the other newly-added-but-optional fields above (e.g.
+                   # PrefetchAcrossPersistent, TemporalHintA/B).
+                   BufferLoad               = bool(d.get('BufferLoad', True)),
+                   BufferStore              = bool(d.get('BufferStore', True))
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
@@ -966,8 +997,16 @@ class InternalArgsSupport:
                    wgm = isp['SupportCustomWGM'],
                    staggerU = isp['SupportCustomStaggerU'],
                    perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
+                   occupancyProbe = isp.get('SupportOccupancyProbe', False),
                    useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
+
+    def state(self):
+        rv = {key: getattr(self, key) for key in self.StateKeys}
+        # Emitted only when set so libraries built without the probe are unchanged.
+        if getattr(self, 'occupancyProbe', False):
+            rv['occupancyProbe'] = True
+        return rv
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):

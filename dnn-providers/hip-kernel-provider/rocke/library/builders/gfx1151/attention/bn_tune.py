@@ -13,9 +13,8 @@ from rocke.helpers import compile_kernel
 from rocke.runtime.hip_module import Runtime
 from rocke.runtime.launcher import time_launches
 
-from .bench_v_staging import _find_objdump, _ref_attention
 from .fmha_blockn import BlockNCfg, build_wmma_fmha_blockn, blockn_grid
-from .tune import Shape, _mem_counts, _resource_counts
+from .tune import Shape, _find_objdump, _mem_counts, _ref_attention, _resource_counts
 
 
 def verify_and_time(

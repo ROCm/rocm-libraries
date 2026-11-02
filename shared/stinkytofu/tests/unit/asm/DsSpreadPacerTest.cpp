@@ -17,6 +17,11 @@ void add(Loads& v, int n, unsigned first, int start = 0, int end = INT_MAX) {
     for (int i = 0; i < n; ++i) v.push_back({first + static_cast<unsigned>(i), start, end});
 }
 
+// The drain every load's barrier keeps free (the scheduler gives each load its barrier's).
+void setDrain(Loads& v, int drain) {
+    for (auto& l : v) l.drain = drain;
+}
+
 // Issues the pending loads while their stage has room in the batch at `wmmaIssued`; returns how
 // many went.
 int issueBatch(DsSpreadPacer& p, int wmmaIssued, std::deque<unsigned>& pending, int cap = 1000) {
@@ -41,7 +46,7 @@ TEST(DsSpreadPacer, SparseStageTakesItsEvenShare) {
     Loads v;
     add(v, 8, 0);
     DsSpreadPacer p;
-    p.plan(v, /*wmmaTotal=*/32, /*batch=*/4, /*catchUp=*/2, /*drain=*/0);
+    p.plan(v, /*wmmaTotal=*/32, /*batch=*/4, /*catchUp=*/2);
     auto pending = ids(v);
     for (int w = 0; w < 32; w += 4) EXPECT_EQ(issueBatch(p, w, pending), 1) << "w=" << w;
 }
@@ -51,7 +56,7 @@ TEST(DsSpreadPacer, ADenseStageGetsAShareAboveWhatTheLdsRateFits) {
     Loads v;
     add(v, 60, 0);
     DsSpreadPacer p;
-    p.plan(v, 32, 4, 2, 0);
+    p.plan(v, 32, 4, 2);
     auto pending = ids(v);
     EXPECT_EQ(issueBatch(p, 0, pending), 8);
 }
@@ -62,7 +67,8 @@ TEST(DsSpreadPacer, TheQuotaFollowsTheEvenLine) {
     Loads v;
     add(v, 128, 0, 0, 109);
     DsSpreadPacer p;
-    p.plan(v, 109, 4, 2, 17);
+    setDrain(v, 17);
+    p.plan(v, 109, 4, 2);
     auto pending = ids(v);
     int placed = 0;
     for (int w = 0; w < 40; w += 4) {
@@ -79,7 +85,7 @@ TEST(DsSpreadPacer, ABatchThatBeganBehindTakesExactlyTheShareAndTheCatchUpStep) 
     Loads v;
     add(v, 16, 0);
     DsSpreadPacer p;
-    p.plan(v, 32, 4, 2, 0);
+    p.plan(v, 32, 4, 2);
     auto pending = ids(v);
     EXPECT_EQ(issueBatch(p, 16, pending), 4);
     EXPECT_EQ(issueBatch(p, 20, pending), 4);
@@ -94,7 +100,7 @@ TEST(DsSpreadPacer, CatchingUpStopsOnceTheStageIsOnItsLine) {
     Loads v;
     add(v, 8, 0);
     DsSpreadPacer p;
-    p.plan(v, 16, 4, 2, 0);
+    p.plan(v, 16, 4, 2);
     auto pending = ids(v);
     EXPECT_EQ(issueBatch(p, 4, pending), 4);
     EXPECT_EQ(issueBatch(p, 8, pending), 2);
@@ -107,7 +113,7 @@ TEST(DsSpreadPacer, EachStageHasItsOwnWindowAndShare) {
     add(v, 8, 0, 0, 40);
     add(v, 12, 100, 40, INT_MAX);
     DsSpreadPacer p;
-    p.plan(v, 64, 4, 2, 0);
+    p.plan(v, 64, 4, 2);
     std::deque<unsigned> a, b;
     for (const auto& l : v) (l.nodeId < 100 ? a : b).push_back(l.nodeId);
     EXPECT_EQ(issueBatch(p, 0, a), 1);
@@ -122,7 +128,7 @@ TEST(DsSpreadPacer, StagesOpenAtTheSameTimeEachTakeTheirOwnShare) {
     add(v, 8, 0, 0, 40);
     add(v, 8, 100, 0, 40 + 1);
     DsSpreadPacer p;
-    p.plan(v, 64, 4, 0, 0);
+    p.plan(v, 64, 4, 0);
     std::deque<unsigned> a, b;
     for (const auto& l : v) (l.nodeId < 100 ? a : b).push_back(l.nodeId);
     EXPECT_EQ(issueBatch(p, 0, a), 1);
@@ -135,7 +141,8 @@ TEST(DsSpreadPacer, TheDrainEndsAStageEarlier) {
     Loads v;
     add(v, 12, 0, 0, 32);
     DsSpreadPacer p;
-    p.plan(v, 32, 4, 0, /*drain=*/8);
+    setDrain(v, 8);
+    p.plan(v, 32, 4, 0);
     auto pending = ids(v);
     for (int w = 0; w < 24; w += 4) EXPECT_EQ(issueBatch(p, w, pending), 2) << "w=" << w;
     EXPECT_TRUE(pending.empty());
@@ -146,7 +153,8 @@ TEST(DsSpreadPacer, AStageEndsWithItsLastBatch) {
     Loads v;
     add(v, 63, 0, 0, 48 + 17);
     DsSpreadPacer p;
-    p.plan(v, 128, 4, 0, 17);
+    setDrain(v, 17);
+    p.plan(v, 128, 4, 0);
     auto pending = ids(v);
     int total = 0;
     for (int w = 0; w < 48; w += 4) {
@@ -158,6 +166,21 @@ TEST(DsSpreadPacer, AStageEndsWithItsLastBatch) {
     EXPECT_TRUE(pending.empty());
 }
 
+TEST(DsSpreadPacer, ALoadUsesTheDrainItsBarrierWasPlannedWith) {
+    // 12 loads feeding a barrier at WMMA 20. A barrier planned with a drain of 4 (N = last ds + 4)
+    // ends the stage at 16: 4 batches of 3. A drain of 8 ends it at 12: 3 batches of 4.
+    for (int drain : {8, 4}) {
+        Loads v;
+        add(v, 12, 0, 0, 20);
+        setDrain(v, drain);
+        DsSpreadPacer p;
+        p.plan(v, 64, 4, 0);
+        auto pending = ids(v);
+        const int perBatch = drain == 4 ? 3 : 4;
+        for (int w = 0; w < 12; w += 4) EXPECT_EQ(issueBatch(p, w, pending), perBatch) << "w=" << w;
+    }
+}
+
 TEST(DsSpreadPacer, TheRegionEndNeedsNoDrain) {
     // 16 loads to the region end (the loop returns to its start), 32 WMMAs, 8 of them the drain.
     // Without a drain at the region end the stage has all 8 batches: 2 loads in each, the last
@@ -166,7 +189,8 @@ TEST(DsSpreadPacer, TheRegionEndNeedsNoDrain) {
     Loads v;
     add(v, 16, 0);
     DsSpreadPacer p;
-    p.plan(v, 32, 4, 0, /*drain=*/8);
+    setDrain(v, 8);
+    p.plan(v, 32, 4, 0);
     auto pending = ids(v);
     for (int w = 0; w < 32; w += 4) EXPECT_EQ(issueBatch(p, w, pending), 2) << "w=" << w;
     EXPECT_TRUE(pending.empty());
@@ -179,7 +203,8 @@ TEST(DsSpreadPacer, AStageEndsWhereItsLastLoadCanFirstIssue) {
     add(v, 12, 0, 0, 20);
     v.back().earliest = 24;
     DsSpreadPacer p;
-    p.plan(v, 64, 4, 0, 8);
+    setDrain(v, 8);
+    p.plan(v, 64, 4, 0);
     auto pending = ids(v);
     for (int w = 0; w < 24; w += 4) EXPECT_EQ(issueBatch(p, w, pending), 2) << "w=" << w;
     EXPECT_TRUE(pending.empty());
@@ -191,10 +216,41 @@ TEST(DsSpreadPacer, AStageNotLaterThanItsPlanKeepsItsPlannedEnd) {
     add(v, 12, 0, 0, 20);
     v.back().earliest = 8;
     DsSpreadPacer p;
-    p.plan(v, 64, 4, 0, 8);
+    setDrain(v, 8);
+    p.plan(v, 64, 4, 0);
     auto pending = ids(v);
     for (int w = 0; w < 12; w += 4) EXPECT_EQ(issueBatch(p, w, pending), 4) << "w=" << w;
     EXPECT_TRUE(pending.empty());
+}
+
+TEST(DsSpreadPacer, AStageEndsWhereTheLdsRateFitsItsLoadsWhenThatIsBeforeItsPlannedEnd) {
+    // 64 loads from WMMA 0 to a barrier at 71 with 17 kept free: planned end 54. At 6 cycles per
+    // load and 8 cycles per WMMA the loads fit by 48, so the stage ends there: 12 batches, 6 loads
+    // in the first. Without the rate the stage ends at 54: 14 batches, 5 in the first.
+    for (bool rate : {false, true}) {
+        Loads v;
+        add(v, 64, 0, 0, 71);
+        v.back().earliest = 40;
+        DsSpreadPacer p;
+        setDrain(v, 17);
+        p.plan(v, 128, 4, 0, 0, rate ? 6 : 0, rate ? 8 : 0);
+        auto pending = ids(v);
+        EXPECT_EQ(issueBatch(p, 0, pending), rate ? 6 : 5) << "rate=" << rate;
+    }
+}
+
+TEST(DsSpreadPacer, ARateFloorAtOrAfterThePlannedEndChangesNothing) {
+    // 64 loads from WMMA 80 to the region end (128): the loads fit by 80 + 48 = 128, the planned
+    // end, so the stage keeps its 12 batches.
+    for (bool rate : {false, true}) {
+        Loads v;
+        add(v, 64, 0, 80);
+        DsSpreadPacer p;
+        setDrain(v, 17);
+        p.plan(v, 128, 4, 0, 0, rate ? 6 : 0, rate ? 8 : 0);
+        auto pending = ids(v);
+        EXPECT_EQ(issueBatch(p, 80, pending), 6) << "rate=" << rate;
+    }
 }
 
 TEST(DsSpreadPacer, ABatchBehindItsLineTakesWhatTheStageNeedsUpToTheHardware) {
@@ -205,7 +261,7 @@ TEST(DsSpreadPacer, ABatchBehindItsLineTakesWhatTheStageNeedsUpToTheHardware) {
         Loads v;
         add(v, 24, 0, 0, INT_MAX);
         DsSpreadPacer p;
-        p.plan(v, 16, 4, 0, 0, cap);
+        p.plan(v, 16, 4, 0, cap);
         auto pending = ids(v);
         EXPECT_EQ(issueBatch(p, 8, pending), cap == 0 ? 6 : 8) << "cap=" << cap;
     }
@@ -217,7 +273,8 @@ TEST(DsSpreadPacer, AStageTheDrainLeavesNoRoomForIsReleasedInOneBatch) {
     Loads v;
     add(v, 35, 0, 115, 128);
     DsSpreadPacer p;
-    p.plan(v, 128, 4, 2, 17);
+    setDrain(v, 17);
+    p.plan(v, 128, 4, 2);
     auto pending = ids(v);
     EXPECT_EQ(issueBatch(p, 116, pending), 35);
 }
@@ -226,7 +283,7 @@ TEST(DsSpreadPacer, NothingIsHeldOnceTheRegionsWmmasHaveIssued) {
     Loads v;
     add(v, 8, 0);
     DsSpreadPacer p;
-    p.plan(v, 32, 4, 0, 0);
+    p.plan(v, 32, 4, 0);
     auto pending = ids(v);
     EXPECT_EQ(issueBatch(p, 0, pending), 1);
     EXPECT_TRUE(p.released(pending.front(), 32));
@@ -236,7 +293,7 @@ TEST(DsSpreadPacer, ALoadOutsideThePlanIsAlwaysReleased) {
     Loads v;
     add(v, 4, 0);
     DsSpreadPacer p;
-    p.plan(v, 16, 4, 2, 0);
+    p.plan(v, 16, 4, 2);
     EXPECT_TRUE(p.released(999, 0));
     p.noteIssue(999, 0);  // harmless
     EXPECT_TRUE(p.released(999, 0));
@@ -246,7 +303,7 @@ TEST(DsSpreadPacer, NonPositiveBatchAndNegativeCatchUpAreClamped) {
     Loads v;
     add(v, 4, 0);
     DsSpreadPacer p;
-    p.plan(v, 4, /*batch=*/0, /*catchUp=*/-3, 0);  // batch 1, catch-up 0: 1 load per WMMA
+    p.plan(v, 4, /*batch=*/0, /*catchUp=*/-3);  // batch 1, catch-up 0: 1 load per WMMA
     auto pending = ids(v);
     for (int w = 0; w < 4; ++w) EXPECT_EQ(issueBatch(p, w, pending), 1) << "w=" << w;
 }
@@ -255,7 +312,7 @@ TEST(DsSpreadPacer, ARegionWithoutWmmasIsInactive) {
     Loads v;
     add(v, 4, 0);
     DsSpreadPacer p;
-    p.plan(v, 0, 4, 2, 0);
+    p.plan(v, 0, 4, 2);
     EXPECT_FALSE(p.active());
     EXPECT_TRUE(p.released(0, 0));
 }
@@ -264,17 +321,17 @@ TEST(DsSpreadPacer, PlanningAgainStartsFresh) {
     Loads v;
     add(v, 8, 0);
     DsSpreadPacer p;
-    p.plan(v, 32, 4, 2, 0);
+    p.plan(v, 32, 4, 2);
     auto pending = ids(v);
     EXPECT_EQ(issueBatch(p, 0, pending), 1);
-    p.plan(v, 32, 4, 2, 0);
+    p.plan(v, 32, 4, 2);
     pending = ids(v);
     EXPECT_EQ(issueBatch(p, 0, pending), 1);  // the previous region's counts are gone
 }
 
 TEST(DsSpreadPacer, InactiveWithoutLoads) {
     DsSpreadPacer p;
-    p.plan({}, 32, 4, 2, 0);
+    p.plan({}, 32, 4, 2);
     EXPECT_FALSE(p.active());
     EXPECT_TRUE(p.released(0, 0));
 }
@@ -290,9 +347,38 @@ TEST(DsSpreadPacer, AStageOpeningOffABatchBoundaryCountsBatchesFromItsStart) {
     Loads v;
     add(v, 6, 0, /*start=*/3, /*end=*/11);
     DsSpreadPacer p;
-    p.plan(v, /*wmmaTotal=*/16, /*batch=*/4, /*catchUp=*/0, /*drain=*/0);
+    p.plan(v, /*wmmaTotal=*/16, /*batch=*/4, /*catchUp=*/0);
     auto pending = ids(v);
     std::vector<int> per;
     for (int w = 3; w < 11; ++w) per.push_back(issueBatch(p, w, pending));
     EXPECT_EQ(per, (std::vector<int>{3, 0, 0, 0, 3, 0, 0, 0}));
+}
+
+TEST(DsSpreadPacer, AStageTheLdsRateCanNotFinishByItsEndIsReported) {
+    // 60 loads from WMMA 0 to a barrier at 60 with 17 kept free: end 43. At 6 cycles per load and 8
+    // cycles per WMMA they need 45; at 5 they need 38; with no rate nothing is checked.
+    for (int cycles : {0, 5, 6}) {
+        Loads v;
+        add(v, 60, 0, 0, 60);
+        DsSpreadPacer p;
+        setDrain(v, 17);
+        p.plan(v, 128, 4, 0, 0, cycles, cycles > 0 ? 8 : 0);
+        if (cycles == 6) {
+            ASSERT_EQ(p.rateLimited().size(), 1u);
+            EXPECT_EQ(p.rateLimited()[0].start, 0);
+            EXPECT_EQ(p.rateLimited()[0].end, 43);
+            EXPECT_EQ(p.rateLimited()[0].total, 60);
+            EXPECT_EQ(p.rateLimited()[0].needed, 45);
+        } else {
+            EXPECT_TRUE(p.rateLimited().empty()) << "cycles=" << cycles;
+        }
+    }
+}
+
+TEST(DsSpreadPacer, TheRateLimitedWarningNamesTheStageTheRateAndTheShortfall) {
+    DsSpreadPacer::RateLimited r{0, 43, 60, 45};
+    EXPECT_EQ(DsSpreadPacer::rateLimitedMessage(r, 6),
+              "stage [0, 43) has 60 ds_loads that need 45 WMMAs at 6 cycles per load but has 43: "
+              "the pace is too sparse for the stage, its last ds_load will land late (lower "
+              "DsReadCyclesPerLoad)");
 }

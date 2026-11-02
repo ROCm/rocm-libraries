@@ -76,8 +76,9 @@ an XOR butterfly (``quad_perm`` at offsets 1-2, ``ds_swizzle`` wider; with
 unfused kernel allocates no LDS (``fuse_out_norm`` adds a ``num_warps``-float
 LDS reduction when ``num_warps > 1``, ALGORITHM.md section 4.9; the
 ``conv_once`` and ``out_lds`` knobs add LDS blocks of their own, section
-4.10). Dispatch selects this tile from the gfx950 GDN registry: `auto`
-uses a deterministic static priority, while an explicit `spec_id` pins a tile.
+4.10). Dispatch selects this tile from the gfx950 GDN registry: `auto` runs one
+static tile and knob stack per case (``dispatch.gdn.axes.AUTO_DEFAULTS``: gate
+kind x fused x state width), while an explicit `spec_id` pins a tile.
 
 ``simple=True`` is the v1 reference: one workgroup per ``(sequence, value_head)``,
 ``head_v_dim`` threads, thread ``t`` owning state row ``t`` (the full
@@ -134,6 +135,7 @@ __all__ = [
     "gdn_decode_signature",
     "GDN_DTYPES",
     "STATE_DTYPES",
+    "fuse_conv_heads_error",
     "CONV_WIDTH",
     "OUT_GATE_ACTIVATION",
     "gdn_decode_pointer_alignment",
@@ -157,6 +159,22 @@ GDN_DTYPES = get_args(DType)
 # stores.
 StateDType = Literal["f16", "bf16", "f32"]
 STATE_DTYPES = get_args(StateDType)
+
+
+def fuse_conv_heads_error(num_k_heads: int, num_v_heads: int) -> str | None:
+    """Why ``fuse_conv`` cannot run with these head counts, or ``None``.
+
+    One rule for ``is_valid_spec`` and dispatch's ``request_errors``, which
+    re-exports it so the two cannot drift when the emitter learns grouped heads.
+    """
+    if num_k_heads == num_v_heads:
+        return None
+    return (
+        "NOT_YET_IMPLEMENTED: fuse_conv requires num_k_heads == num_v_heads "
+        "(the in-place shift of shared q/k conv channels would race), got "
+        f"{num_k_heads}/{num_v_heads}"
+    )
+
 
 # Eps of the q/k L2 normalisation (compile-time). The fused output norm's eps
 # is the separate runtime ``norm_eps`` argument.
@@ -255,12 +273,31 @@ def _store_state(
     store_vec(b, ptr, idx, vec, n=n, temporal_hint=_TEMPORAL[hint])
 
 
-# Where a tile-dependent knob changes emitted code. A knob that is on where its
-# predicate is False emits the knob-off kernel, so kernel_name() adds its token
-# only where the predicate holds: one name per distinct kernel. The fused-only
-# knobs (conv_once, norm_gate_once, out_lds) need no predicate: is_valid_spec
-# rejects them wherever they would be inert. The state hints and waves_per_eu
-# change code on both emitters and every tile.
+# Where a knob can change emitted code. A tile-dependent knob that is on where
+# its predicate is False emits the knob-off kernel, so kernel_name() adds its
+# token only where the predicate holds: one name per distinct kernel. A
+# fused-only knob (conv_once, norm_gate_once, out_lds) reads a tensor or result
+# only its fusion has, so is_valid_spec rejects it where its predicate is False.
+# Dispatch reads these same predicates to decide which knobs a request can set
+# (dispatch/gdn/rules.py), so the two cannot drift. The state hints and
+# waves_per_eu change code on both emitters and every tile.
+def conv_once_applies(spec: "GdnDecodeSpec") -> bool:
+    """``conv_once``: the request fuses the conv1d (``fuse_conv``)."""
+    return bool(spec.fuse_conv)
+
+
+def norm_gate_once_applies(spec: "GdnDecodeSpec") -> bool:
+    """``norm_gate_once``: the request fuses the gated RMSNorm
+    (``fuse_out_norm``). Its emitter coupling to ``conv_once`` is a separate,
+    NOT_YET_IMPLEMENTED rule of the validator, not part of where it applies."""
+    return bool(spec.fuse_out_norm)
+
+
+def out_lds_applies(spec: "GdnDecodeSpec") -> bool:
+    """``out_lds``: the request fuses the gated RMSNorm (``fuse_out_norm``)."""
+    return bool(spec.fuse_out_norm)
+
+
 def dpp_reduce_applies(spec: "GdnDecodeSpec") -> bool:
     """``dpp_reduce``: the warp-tiled in-group sum has an xor-4 stage
     (``warp_threads_k >= 8``)."""
@@ -585,7 +622,7 @@ class GdnDecodeSpec:
     # recurrence-only kernel at an identical work boundary.
     fuse_gate: bool = True
     wave_size: int = 64
-    # GDN's dispatcher default uses these values whenever they are legal.
+    # The tile of GDN's plain 16-bit ``auto`` row (dispatch/gdn/axes.py).
     # Direct callers still get a valid general-purpose configuration.
     num_warps: int = 2
     warp_threads_k: int = 16
@@ -821,11 +858,11 @@ def _knob_error(spec: GdnDecodeSpec) -> Optional[str]:
             f"waves_per_eu must be in [0, {_MAX_WAVES_PER_EU}], "
             f"got {spec.waves_per_eu!r}"
         )
-    if spec.conv_once and not spec.fuse_conv:
+    if spec.conv_once and not conv_once_applies(spec):
         return "conv_once requires fuse_conv"
-    if spec.norm_gate_once and not spec.fuse_out_norm:
+    if spec.norm_gate_once and not norm_gate_once_applies(spec):
         return "norm_gate_once requires fuse_out_norm"
-    if spec.out_lds and not spec.fuse_out_norm:
+    if spec.out_lds and not out_lds_applies(spec):
         return "out_lds requires fuse_out_norm"
     # An emitter coupling, not a functional limit (ALGORITHM.md §8, follow-up
     # 8): the products live in conv_once's LDS block, behind its barrier.
@@ -886,12 +923,10 @@ def is_valid_spec(spec: GdnDecodeSpec, arch: str = "gfx950") -> Tuple[bool, str]
                 "blocks_per_v_dim == 1 (one workgroup per head), got "
                 f"{spec.blocks_per_v_dim}"
             )
-    if spec.fuse_conv and spec.num_k_heads != spec.num_v_heads:
-        return False, (
-            "NOT_YET_IMPLEMENTED: fuse_conv requires num_k_heads == num_v_heads "
-            "(the in-place shift of shared q/k conv channels would race), got "
-            f"{spec.num_k_heads}/{spec.num_v_heads}"
-        )
+    if spec.fuse_conv:
+        why = fuse_conv_heads_error(spec.num_k_heads, spec.num_v_heads)
+        if why is not None:
+            return False, why
     if (
         spec.gate_kind == "kda"
         and spec.fuse_gate

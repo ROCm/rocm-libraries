@@ -14,9 +14,9 @@ from rocisa.enum import RegisterType
 from rocisa.instruction import SCmpEQU32
 from rocisa.register import RegisterPool
 
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.Components.TileProcessingStrategy import TileProcessingStrategy
-from Tensile.Components.WorkAssignment import XCCMappingOn, _extract_hybrid_mode
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Components.TileProcessingStrategy import TileProcessingStrategy
+from tensilelite.Components.WorkAssignment import XCCMappingOn, _extract_hybrid_mode
 from gpu_test_helpers import (
     GPU_MARKS, assemble_kernel, generate_kernel_asm, generate_load_params,
     init_rocisa, run_on_gpu, run_scalar_kernel,

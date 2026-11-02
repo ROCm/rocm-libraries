@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -898,27 +898,50 @@ namespace rocalution
         }
         else
         {
+            size_t sizeof_ptr_type = 0;
+            size_t sizeof_ind_type = 0;
+            size_t sizeof_val_type = 0;
+
+            if(!same_ptr_type)
+            {
+                status = rocsparseio_type_get_size(file_ptr_type, &sizeof_ptr_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_ind_type)
+            {
+                status = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_val_type)
+            {
+                status = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
+            }
+
+            if(status != rocsparseio_status_success)
+            {
+                LOG_INFO("ReadFileRSIO: rocsparseio_type_get_size failed");
+                free_host(ptr);
+                free_host(col);
+                free_host(val);
+                rocsparseio_close(handle);
+                return false;
+            }
+
             void* tmp_ptr = (void*)ptr[0];
             void* tmp_ind = (void*)col[0];
             void* tmp_val = (void*)val[0];
             if(!same_ptr_type)
             {
-                size_t sizeof_ptr_type;
-                status  = rocsparseio_type_get_size(file_ptr_type, &sizeof_ptr_type);
                 tmp_ptr = malloc((nrow + 1) * sizeof_ptr_type);
             }
 
             if(!same_ind_type)
             {
-                size_t sizeof_ind_type;
-                status  = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
                 tmp_ind = malloc(nnz * sizeof_ind_type);
             }
 
             if(!same_val_type)
             {
-                size_t sizeof_val_type;
-                status  = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
                 tmp_val = malloc(nnz * sizeof_val_type);
             }
 
@@ -926,6 +949,18 @@ namespace rocalution
             if(status != rocsparseio_status_success)
             {
                 LOG_INFO("ReadFileRSIO: rocsparseiox_read_sparse_csx failed");
+                if(!same_ptr_type)
+                {
+                    free(tmp_ptr);
+                }
+                if(!same_ind_type)
+                {
+                    free(tmp_ind);
+                }
+                if(!same_val_type)
+                {
+                    free(tmp_val);
+                }
                 free_host(ptr);
                 free_host(col);
                 free_host(val);
@@ -1050,6 +1085,14 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(ptr);
+            free_host(col);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -1207,27 +1250,50 @@ namespace rocalution
         }
         else
         {
+            size_t sizeof_ptr_type = 0;
+            size_t sizeof_ind_type = 0;
+            size_t sizeof_val_type = 0;
+
+            if(!same_ptr_type)
+            {
+                status = rocsparseio_type_get_size(file_ptr_type, &sizeof_ptr_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_ind_type)
+            {
+                status = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_val_type)
+            {
+                status = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
+            }
+
+            if(status != rocsparseio_status_success)
+            {
+                LOG_INFO("ReadFileRSIO: rocsparseio_type_get_size failed");
+                free_host(ptr);
+                free_host(col);
+                free_host(val);
+                rocsparseio_close(handle);
+                return false;
+            }
+
             void* tmp_ptr = (void*)ptr[0];
             void* tmp_ind = (void*)col[0];
             void* tmp_val = (void*)val[0];
             if(!same_ptr_type)
             {
-                size_t sizeof_ptr_type;
-                status  = rocsparseio_type_get_size(file_ptr_type, &sizeof_ptr_type);
                 tmp_ptr = malloc((nrow + 1) * sizeof_ptr_type);
             }
 
             if(!same_ind_type)
             {
-                size_t sizeof_ind_type;
-                status  = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
                 tmp_ind = malloc(nnz * sizeof_ind_type);
             }
 
             if(!same_val_type)
             {
-                size_t sizeof_val_type;
-                status  = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
                 tmp_val = malloc(nnz * sizeof_val_type);
             }
 
@@ -1235,6 +1301,18 @@ namespace rocalution
             if(status != rocsparseio_status_success)
             {
                 LOG_INFO("ReadFileRSIO: rocsparseiox_read_sparse_mcsx failed");
+                if(!same_ptr_type)
+                {
+                    free(tmp_ptr);
+                }
+                if(!same_ind_type)
+                {
+                    free(tmp_ind);
+                }
+                if(!same_val_type)
+                {
+                    free(tmp_val);
+                }
                 free_host(ptr);
                 free_host(col);
                 free_host(val);
@@ -1359,6 +1437,14 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(ptr);
+            free_host(col);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -1559,27 +1645,50 @@ namespace rocalution
         }
         else
         {
+            size_t sizeof_ptr_type = 0;
+            size_t sizeof_ind_type = 0;
+            size_t sizeof_val_type = 0;
+
+            if(!same_ptr_type)
+            {
+                status = rocsparseio_type_get_size(file_ptr_type, &sizeof_ptr_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_ind_type)
+            {
+                status = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_val_type)
+            {
+                status = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
+            }
+
+            if(status != rocsparseio_status_success)
+            {
+                LOG_INFO("ReadFileRSIO: rocsparseio_type_get_size failed");
+                free_host(ptr);
+                free_host(col);
+                free_host(val);
+                rocsparseio_close(handle);
+                return false;
+            }
+
             void* tmp_ptr = (void*)ptr[0];
             void* tmp_ind = (void*)col[0];
             void* tmp_val = (void*)val[0];
             if(!same_ptr_type)
             {
-                size_t sizeof_ptr_type;
-                status  = rocsparseio_type_get_size(file_ptr_type, &sizeof_ptr_type);
                 tmp_ptr = malloc((nrowb + 1) * sizeof_ptr_type);
             }
 
             if(!same_ind_type)
             {
-                size_t sizeof_ind_type;
-                status  = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
                 tmp_ind = malloc(nnzb * sizeof_ind_type);
             }
 
             if(!same_val_type)
             {
-                size_t sizeof_val_type;
-                status  = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
                 tmp_val = malloc(nnz * sizeof_val_type);
             }
 
@@ -1587,6 +1696,18 @@ namespace rocalution
             if(status != rocsparseio_status_success)
             {
                 LOG_INFO("ReadFileRSIO: rocsparseiox_read_sparse_gebsx failed");
+                if(!same_ptr_type)
+                {
+                    free(tmp_ptr);
+                }
+                if(!same_ind_type)
+                {
+                    free(tmp_ind);
+                }
+                if(!same_val_type)
+                {
+                    free(tmp_val);
+                }
                 free_host(ptr);
                 free_host(col);
                 free_host(val);
@@ -1711,6 +1832,14 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(ptr);
+            free_host(col);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -1846,27 +1975,50 @@ namespace rocalution
         }
         else
         {
+            size_t sizeof_row_type = 0;
+            size_t sizeof_ind_type = 0;
+            size_t sizeof_val_type = 0;
+
+            if(!same_row_type)
+            {
+                status = rocsparseio_type_get_size(file_row_type, &sizeof_row_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_ind_type)
+            {
+                status = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_val_type)
+            {
+                status = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
+            }
+
+            if(status != rocsparseio_status_success)
+            {
+                LOG_INFO("ReadFileRSIO: rocsparseio_type_get_size failed");
+                free_host(row);
+                free_host(col);
+                free_host(val);
+                rocsparseio_close(handle);
+                return false;
+            }
+
             void* tmp_row = (void*)row[0];
             void* tmp_ind = (void*)col[0];
             void* tmp_val = (void*)val[0];
             if(!same_row_type)
             {
-                size_t sizeof_row_type;
-                status  = rocsparseio_type_get_size(file_row_type, &sizeof_row_type);
                 tmp_row = malloc(nnz * sizeof_row_type);
             }
 
             if(!same_ind_type)
             {
-                size_t sizeof_ind_type;
-                status  = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
                 tmp_ind = malloc(nnz * sizeof_ind_type);
             }
 
             if(!same_val_type)
             {
-                size_t sizeof_val_type;
-                status  = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
                 tmp_val = malloc(nnz * sizeof_val_type);
             }
 
@@ -1874,6 +2026,18 @@ namespace rocalution
             if(status != rocsparseio_status_success)
             {
                 LOG_INFO("ReadFileRSIO: rocsparseiox_read_sparse_coo failed");
+                if(!same_row_type)
+                {
+                    free(tmp_row);
+                }
+                if(!same_ind_type)
+                {
+                    free(tmp_ind);
+                }
+                if(!same_val_type)
+                {
+                    free(tmp_val);
+                }
                 free_host(row);
                 free_host(col);
                 free_host(val);
@@ -1998,6 +2162,14 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(row);
+            free_host(col);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -2150,19 +2322,37 @@ namespace rocalution
         }
         else
         {
+            size_t sizeof_ind_type = 0;
+            size_t sizeof_val_type = 0;
+
+            if(!same_ind_type)
+            {
+                status = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_val_type)
+            {
+                status = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
+            }
+
+            if(status != rocsparseio_status_success)
+            {
+                LOG_INFO("ReadFileRSIO: rocsparseio_type_get_size failed");
+                free_host(offset);
+                free_host(val);
+                rocsparseio_close(handle);
+                return false;
+            }
+
             void* tmp_ind = (void*)offset[0];
             void* tmp_val = (void*)val[0];
             if(!same_ind_type)
             {
-                size_t sizeof_ind_type;
-                status  = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
                 tmp_ind = malloc(ndiag * sizeof_ind_type);
             }
 
             if(!same_val_type)
             {
-                size_t sizeof_val_type;
-                status  = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
                 tmp_val = malloc(nnz * sizeof_val_type);
             }
 
@@ -2170,6 +2360,14 @@ namespace rocalution
             if(status != rocsparseio_status_success)
             {
                 LOG_INFO("ReadFileRSIO: rocsparseiox_read_sparse_dia failed");
+                if(!same_ind_type)
+                {
+                    free(tmp_ind);
+                }
+                if(!same_val_type)
+                {
+                    free(tmp_val);
+                }
                 free_host(offset);
                 free_host(val);
                 rocsparseio_close(handle);
@@ -2258,6 +2456,13 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(offset);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -2408,19 +2613,37 @@ namespace rocalution
         }
         else
         {
+            size_t sizeof_ind_type = 0;
+            size_t sizeof_val_type = 0;
+
+            if(!same_ind_type)
+            {
+                status = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_val_type)
+            {
+                status = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
+            }
+
+            if(status != rocsparseio_status_success)
+            {
+                LOG_INFO("ReadFileRSIO: rocsparseio_type_get_size failed");
+                free_host(col);
+                free_host(val);
+                rocsparseio_close(handle);
+                return false;
+            }
+
             void* tmp_ind = (void*)col[0];
             void* tmp_val = (void*)val[0];
             if(!same_ind_type)
             {
-                size_t sizeof_ind_type;
-                status  = rocsparseio_type_get_size(file_ind_type, &sizeof_ind_type);
                 tmp_ind = malloc(nnz * sizeof_ind_type);
             }
 
             if(!same_val_type)
             {
-                size_t sizeof_val_type;
-                status  = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
                 tmp_val = malloc(nnz * sizeof_val_type);
             }
 
@@ -2428,6 +2651,14 @@ namespace rocalution
             if(status != rocsparseio_status_success)
             {
                 LOG_INFO("ReadFileRSIO: rocsparseiox_read_sparse_ell failed");
+                if(!same_ind_type)
+                {
+                    free(tmp_ind);
+                }
+                if(!same_val_type)
+                {
+                    free(tmp_val);
+                }
                 free_host(col);
                 free_host(val);
                 rocsparseio_close(handle);
@@ -2516,6 +2747,13 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(col);
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -2719,6 +2957,49 @@ namespace rocalution
         }
         else
         {
+            size_t sizeof_coo_row_type = 0;
+            size_t sizeof_coo_col_type = 0;
+            size_t sizeof_coo_val_type = 0;
+            size_t sizeof_ell_col_type = 0;
+            size_t sizeof_ell_val_type = 0;
+
+            if(!same_coo_row_type)
+            {
+                status = rocsparseio_type_get_size(file_coo_row_type, &sizeof_coo_row_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_coo_col_type)
+            {
+                status = rocsparseio_type_get_size(file_coo_col_type, &sizeof_coo_col_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_coo_val_type)
+            {
+                status = rocsparseio_type_get_size(file_coo_val_type, &sizeof_coo_val_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_ell_col_type)
+            {
+                status = rocsparseio_type_get_size(file_ell_col_type, &sizeof_ell_col_type);
+            }
+
+            if(status == rocsparseio_status_success && !same_ell_val_type)
+            {
+                status = rocsparseio_type_get_size(file_ell_val_type, &sizeof_ell_val_type);
+            }
+
+            if(status != rocsparseio_status_success)
+            {
+                LOG_INFO("ReadFileRSIO: rocsparseio_type_get_size failed");
+                free_host(coo_row);
+                free_host(coo_col);
+                free_host(coo_val);
+                free_host(ell_col);
+                free_host(ell_val);
+                rocsparseio_close(handle);
+                return false;
+            }
+
             void* tmp_coo_row = (void*)coo_row[0];
             void* tmp_coo_col = (void*)coo_col[0];
             void* tmp_coo_val = (void*)coo_val[0];
@@ -2727,36 +3008,26 @@ namespace rocalution
 
             if(!same_coo_row_type)
             {
-                size_t sizeof_coo_row_type;
-                status      = rocsparseio_type_get_size(file_coo_row_type, &sizeof_coo_row_type);
                 tmp_coo_row = malloc(coo_nnz * sizeof_coo_row_type);
             }
 
             if(!same_coo_col_type)
             {
-                size_t sizeof_coo_col_type;
-                status      = rocsparseio_type_get_size(file_coo_col_type, &sizeof_coo_col_type);
                 tmp_coo_col = malloc(coo_nnz * sizeof_coo_col_type);
             }
 
             if(!same_coo_val_type)
             {
-                size_t sizeof_coo_val_type;
-                status      = rocsparseio_type_get_size(file_coo_val_type, &sizeof_coo_val_type);
                 tmp_coo_val = malloc(coo_nnz * sizeof_coo_val_type);
             }
 
             if(!same_ell_col_type)
             {
-                size_t sizeof_ell_col_type;
-                status      = rocsparseio_type_get_size(file_ell_col_type, &sizeof_ell_col_type);
                 tmp_ell_col = malloc(ell_nnz * sizeof_ell_col_type);
             }
 
             if(!same_ell_val_type)
             {
-                size_t sizeof_ell_val_type;
-                status      = rocsparseio_type_get_size(file_ell_val_type, &sizeof_ell_val_type);
                 tmp_ell_val = malloc(ell_nnz * sizeof_ell_val_type);
             }
 
@@ -2765,6 +3036,26 @@ namespace rocalution
             if(status != rocsparseio_status_success)
             {
                 LOG_INFO("ReadFileRSIO: rocsparseiox_read_sparse_hyb failed");
+                if(!same_coo_row_type)
+                {
+                    free(tmp_coo_row);
+                }
+                if(!same_coo_col_type)
+                {
+                    free(tmp_coo_col);
+                }
+                if(!same_coo_val_type)
+                {
+                    free(tmp_coo_val);
+                }
+                if(!same_ell_col_type)
+                {
+                    free(tmp_ell_col);
+                }
+                if(!same_ell_val_type)
+                {
+                    free(tmp_ell_val);
+                }
                 free_host(coo_row);
                 free_host(coo_col);
                 free_host(coo_val);
@@ -2977,6 +3268,16 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(coo_row);
+            free_host(coo_col);
+            free_host(coo_val);
+            free_host(ell_col);
+            free_host(ell_val);
+            return false;
+        }
         return true;
     }
 
@@ -2999,13 +3300,10 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_index_base file_base;
-        uint64_t               file_nrow;
-        uint64_t               file_ncol;
-        rocsparseio_type       file_row_type;
-        rocsparseio_type       file_ind_type;
-        rocsparseio_type       file_val_type;
-        rocsparseio_order      file_order;
+        uint64_t          file_nrow;
+        uint64_t          file_ncol;
+        rocsparseio_type  file_val_type;
+        rocsparseio_order file_order;
 
         //
         // Read meta-data from file.
@@ -3083,11 +3381,24 @@ namespace rocalution
         }
         else
         {
+            size_t sizeof_val_type = 0;
+
+            if(!same_val_type)
+            {
+                status = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
+            }
+
+            if(status != rocsparseio_status_success)
+            {
+                LOG_INFO("ReadFileRSIO: rocsparseio_type_get_size failed");
+                free_host(val);
+                rocsparseio_close(handle);
+                return false;
+            }
+
             void* tmp_val = (void*)val[0];
             if(!same_val_type)
             {
-                size_t sizeof_val_type;
-                status  = rocsparseio_type_get_size(file_val_type, &sizeof_val_type);
                 tmp_val = malloc(nrow * ncol * sizeof_val_type);
             }
 
@@ -3095,6 +3406,10 @@ namespace rocalution
             if(status != rocsparseio_status_success)
             {
                 LOG_INFO("ReadFileRSIO: rocsparseiox_read_dense_matrix failed");
+                if(!same_val_type)
+                {
+                    free(tmp_val);
+                }
                 free_host(val);
                 rocsparseio_close(handle);
                 return false;
@@ -3149,6 +3464,12 @@ namespace rocalution
         }
 
         status = rocsparseio_close(handle);
+        if(status != rocsparseio_status_success)
+        {
+            LOG_INFO("ReadFileRSIO: rocsparseio_close failed");
+            free_host(val);
+            return false;
+        }
         return true;
     }
 
@@ -3346,7 +3667,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_csr_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3399,7 +3725,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_mcsr_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3452,7 +3783,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_bcsr_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3489,7 +3825,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_coo_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3524,7 +3865,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_dia_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3559,7 +3905,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_ell_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3617,7 +3968,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_hyb_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 
@@ -3647,7 +4003,12 @@ namespace rocalution
             return false;
         }
 
-        rocsparseio_close(handle);
+        io_status = rocsparseio_close(handle);
+        if(io_status != rocsparseio_status_success)
+        {
+            LOG_INFO("write_matrix_dense_rocsparseio: cannot close file " << filename);
+            return false;
+        }
         return true;
     }
 

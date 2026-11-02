@@ -139,11 +139,13 @@
             "dims": [
               1,
               1,
-              256
+              256,
+              1
             ],
             "strides": [
               256,
               256,
+              1,
               1
             ],
             "data_type": "float"
@@ -162,19 +164,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaBwdBfp16.Correctness/5",
         "operation": "Smoke/IntegrationGpuSdpaBwdBfp16",
         "seed": 0,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdBfp16.Correctness_5",
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          },
-          "8": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          }
-        }
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdBfp16.Correctness_5"
       }
     },
     {
@@ -315,11 +305,13 @@
             "dims": [
               1,
               1,
-              256
+              256,
+              1
             ],
             "strides": [
               256,
               256,
+              1,
               1
             ],
             "data_type": "float"
@@ -338,19 +330,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaBwdFp16.Correctness/2",
         "operation": "Smoke/IntegrationGpuSdpaBwdFp16",
         "seed": 0,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdFp16.Correctness_2",
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          },
-          "8": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          }
-        }
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdFp16.Correctness_2"
       }
     },
     {
@@ -491,11 +471,13 @@
             "dims": [
               1,
               1,
-              256
+              256,
+              1
             ],
             "strides": [
               256,
               256,
+              1,
               1
             ],
             "data_type": "float"
@@ -514,19 +496,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuSdpaBwdFp16.Correctness/6",
         "operation": "Smoke/IntegrationGpuSdpaBwdFp16",
         "seed": 0,
-        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdFp16.Correctness_6",
-        "inputs": {
-          "1": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          },
-          "8": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0
-          }
-        }
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuSdpaBwdFp16.Correctness_6"
       }
     }
   ]

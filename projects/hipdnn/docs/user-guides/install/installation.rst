@@ -125,7 +125,7 @@ Verify hipDNN installation
 ==========================
 
 The hipDNN library ships with executables that can be used to test the hipDNN library and plugins when the GPU hardware is available.
-These executables can be run individually or as a suite using the ``ctest`` driver program. (``ctest`` is isntalled as part of the CMake package.)
+These executables can be run individually or as a suite using the ``ctest`` driver program. (``ctest`` is installed as part of the CMake package.)
 
 Run hipDNN unit tests
 ---------------------
@@ -161,6 +161,7 @@ Here's an example that demonstrates running these tests using ``ctest``:
    100% tests passed, 0 tests failed out of 9
 
 Replace ``/opt/rocm`` with your ROCm install folder when running this ``ctest`` command.
+The exact set of tests depends on the hipDNN version and build options.
 
 Run hipDNN samples
 ------------------
@@ -209,5 +210,7 @@ This example demonstrates running the entire set of samples using ``ctest``:
    100% tests passed, 0 tests failed out of 15
 
 Replace ``/opt/rocm`` with your ROCm install folder when running this ``ctest`` command.
+The exact set of samples depends on the hipDNN version and build options. For example,
+builds with ``HIPDNN_ENABLE_CUDNN_COMPATIBILITY`` also install the ``hipdnn_sample_cudnn_shim_*`` samples.
 
 See `hipDNN Samples <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/README.md>`_ for further details on running these sample programs and their operation.
