@@ -14,9 +14,13 @@ then times that spec and selected variants derived from it:
 
 Every variant is checked against the independent fp32 oracle before timing.
 The default run reports both eager host-observed latency and HIP-graph device
-time. ``--sweep-tiles`` additionally reuses the tuner to measure every legal
-KDA tile and reports the dispatcher-selected tile against the fastest correct
-one for that exact shape.
+time, both in cold memory through the driver's shared helpers
+(``gdn_decode.device_us`` / ``eager_us``): launches cycle through independent
+copies of the inputs and state (``--rotate-mb``; ``0`` = warm, debugging only,
+and the output says so), and each time is a median. ``--sweep-tiles``
+additionally runs ``decode_table_sweep.py``'s stage 1 on every legal KDA tile
+(base configuration) and the ``auto`` configuration, and reports ``auto``
+against the fastest correct one for that exact shape.
 
 Run::
 
@@ -32,20 +36,20 @@ from __future__ import annotations
 
 import argparse
 import dataclasses as dc
-import statistics
 import sys
-import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
-from builders.gfx950.gdn.tune import (
-    device_is_visible as tuning_device_is_visible,
-    legal_configs,
-    sweep_batch,
-)
+from benchmarks.gfx950.gdn import decode_table_sweep as table_sweep
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+from dispatch.gdn.cli_args import (
+    check_rotate_mb,
+    fastest_first,
+    nan_safe_max,
+    parse_batches,
+)
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, gdn_decode_grid
-from rocke.runtime.hip_module import get_device_arch
+from rocke.runtime.hip_module import get_device_arch, get_device_count
 
 ARCH = "gfx950"
 DEFAULT_BATCHES = (1, 8, 32, 128)
@@ -54,33 +58,33 @@ KNOWN_VARIANTS = ("fused", "precomputed", "simple")
 
 def _load_device_backend() -> bool:
     """Load Torch launch helpers when the benchmark is actually executed."""
-    global TOL, drain, launch, launcher_for, make_inputs
-    global precompute_kda_log_decay, prepare, ref_fp32, torch
+    global ROTATE_MB, cold_device_us, eager_us, gate_launch, launcher_for
+    global make_inputs, precompute_kda_log_decay, timing_label, torch
     try:
         import torch as torch_module
         from builders.gfx950.gdn.gdn_decode import (
-            TOL,
-            drain,
-            launch,
+            ROTATE_MB,
+            eager_us,
+            gate_launch,
             launcher_for,
             make_inputs,
             precompute_kda_log_decay,
-            prepare,
-            ref_fp32,
+            timing_label,
         )
+        from builders.gfx950.gdn.gdn_decode import device_us as cold_device_us
     except ModuleNotFoundError as exc:
         if exc.name == "torch":
             return False
         raise
     torch = torch_module
-    # sweep_batch has its own lazy device backend; initialize it for --sweep-tiles.
-    return tuning_device_is_visible()
+    return get_device_count() > 0
 
 
 @dataclass(frozen=True)
 class SweepComparison:
-    selected_tile: tuple[int, int, int]
+    selected_id: str
     selected_us: float
+    best_id: str
     best_tile: tuple[int, int, int]
     best_us: float
     selected_over_best: float
@@ -154,23 +158,25 @@ def production_variants(
     return variants, result
 
 
-def compare_selected_to_sweep(
-    selected_tile: tuple[int, int, int], rows
-) -> SweepComparison:
-    """Compare one dispatched tile with a correctness-gated sweep result."""
-    if not rows:
-        raise ValueError("no correct, timeable tile in exhaustive sweep")
-    selected = next((row for row in rows if row[1] == selected_tile), None)
+def compare_selected_to_sweep(selected_id: str, rows) -> SweepComparison:
+    """Compare the dispatched configuration with the timed rows of a
+    ``decode_table_sweep`` stage-1 run of the same shape."""
+    timed = fastest_first(rows)
+    if not timed:
+        raise ValueError("no correct, timeable configuration in the sweep")
+    selected = next((r for r in timed if r["tuning_id"] == selected_id), None)
     if selected is None:
-        raise ValueError(f"selected tile {selected_tile} is absent from sweep results")
-    best_us, best_tile, _ = rows[0]
-    selected_us = selected[0]
+        raise ValueError(
+            f"selected configuration {selected_id} is absent from the timed sweep rows"
+        )
+    best = timed[0]
     return SweepComparison(
-        selected_tile=selected_tile,
-        selected_us=selected_us,
-        best_tile=best_tile,
-        best_us=best_us,
-        selected_over_best=selected_us / best_us,
+        selected_id=selected_id,
+        selected_us=selected["us"],
+        best_id=best["tuning_id"],
+        best_tile=tuple(best["tile"]),
+        best_us=best["us"],
+        selected_over_best=selected["us"] / best["us"],
     )
 
 
@@ -193,74 +199,13 @@ def inputs_for_variant(name: str, fused_spec: GdnDecodeSpec, raw_inputs):
     return inp
 
 
-def _prepared_call(spec: GdnDecodeSpec, inp, batch: int):
-    launcher = launcher_for(spec, arch=ARCH)
-    values, cfg = prepare(spec, inp, batch)
-    return lambda: launch(launcher, values, cfg)
-
-
-def correctness_error(spec: GdnDecodeSpec, inp, batch: int) -> float:
-    """Run once and compare both output and written state pages with fp32."""
-    ref_out, ref_state = ref_fp32(spec, inp)
-    launcher = launcher_for(spec, arch=ARCH)
-    values, cfg = prepare(spec, inp, batch)
-    launch(launcher, values, cfg)
-    drain()
-    written = inp["write_indices"].long()
-    return max(
-        (values["out"].float() - ref_out).abs().max().item(),
-        (values["state"].float()[written] - ref_state).abs().max().item(),
+def device_us(spec: GdnDecodeSpec, inp, batch: int, rotate_mb: int) -> float | None:
+    """Cold-memory per-launch device time (``gdn_decode.device_us``), or None
+    when graph capture is unavailable (``device_us`` prints why)."""
+    timed = cold_device_us(
+        spec, inp, batch, launcher_for(spec, arch=ARCH), rotate_mb=rotate_mb
     )
-
-
-def eager_us(spec: GdnDecodeSpec, inp, batch: int, reps: int = 200) -> float:
-    """Median host-observed latency, including one launch and synchronisation."""
-    call = _prepared_call(spec, _clone_inputs(inp), batch)
-    for _ in range(50):
-        call()
-    torch.cuda.synchronize()
-    samples = []
-    for _ in range(reps):
-        start = time.perf_counter_ns()
-        call()
-        torch.cuda.synchronize()
-        samples.append((time.perf_counter_ns() - start) / 1e3)
-    drain()
-    return statistics.median(samples)
-
-
-def device_us(spec: GdnDecodeSpec, inp, batch: int, reps: int = 64) -> float | None:
-    """Per-launch device time from a replayed graph, or None on capture failure."""
-    call = _prepared_call(spec, _clone_inputs(inp), batch)
-    for _ in range(10):
-        call()
-    torch.cuda.synchronize()
-    try:
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            for _ in range(reps):
-                call()
-    except Exception as exc:  # pragma: no cover - environment-sensitive
-        print(
-            f"    graph capture unavailable: {type(exc).__name__}: {exc}",
-            file=sys.stderr,
-        )
-        drain()
-        return None
-    for _ in range(5):
-        graph.replay()
-    torch.cuda.synchronize()
-    best = float("inf")
-    for _ in range(40):
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
-        graph.replay()
-        end.record()
-        torch.cuda.synchronize()
-        best = min(best, start.elapsed_time(end) * 1e3 / reps)
-    drain()
-    return best
+    return None if timed is None else timed[0]
 
 
 def _print_variant_header() -> None:
@@ -283,7 +228,14 @@ def _print_variant_row(
 
 
 def run_default(
-    *, batches, names, num_k_heads, num_v_heads, head_dim, no_device
+    *,
+    batches,
+    names,
+    num_k_heads,
+    num_v_heads,
+    head_dim,
+    no_device,
+    rotate_mb,
 ) -> Failures:
     failures = Failures()
     _print_variant_header()
@@ -300,18 +252,22 @@ def run_default(
             raw_inputs = make_inputs(fused, batch)
             for name, spec in variants.items():
                 inp = inputs_for_variant(name, fused, raw_inputs)
-                error = correctness_error(spec, inp, batch)
-                if error > TOL:
+                verdict = gate_launch(spec, inp, batch, launcher_for(spec, arch=ARCH))
+                error = verdict.worst
+                if not verdict.passed:
                     message = (
-                        f"batch {batch} variant {name}: correctness {error:.3e} > {TOL}"
+                        f"batch {batch} variant {name}: fp32 gate failed "
+                        f"(worst {error:.3e}, spill {verdict.spill})"
                     )
                     failures.add(message)
                     print(
                         f"{batch:6d} {batch*num_v_heads:7d} {name:>11} FAILED {message}"
                     )
                     continue
-                eager = eager_us(spec, inp, batch)
-                device = None if no_device else device_us(spec, inp, batch)
+                eager = eager_us(
+                    spec, inp, batch, launcher_for(spec, arch=ARCH), rotate_mb=rotate_mb
+                )
+                device = None if no_device else device_us(spec, inp, batch, rotate_mb)
                 if not no_device and device is None:
                     failures.add(
                         f"batch {batch} variant {name}: device timing unavailable"
@@ -336,29 +292,59 @@ def run_default(
     return failures
 
 
-def run_sweep(*, batches, num_k_heads, num_v_heads, head_dim, top) -> Failures:
+def run_sweep(
+    *,
+    batches,
+    num_k_heads,
+    num_v_heads,
+    head_dim,
+    top,
+    device,
+    rotate_mb,
+) -> Failures:
+    """``decode_table_sweep`` stage 1 over every legal tile's base
+    configuration plus ``auto``, per batch; ``auto`` against the fastest."""
     failures = Failures()
-    print("\n=== exhaustive legal-tile proof ===")
+    print("\n=== every legal tile (base configuration) and auto, stage 1 ===")
+    opts = table_sweep.options(bases_only=True, rotate_mb=rotate_mb)
+    meta = table_sweep.run_meta(opts, device, ROTATE_MB)
     for batch in batches:
         try:
-            variants, result = production_variants(
-                batch=batch,
+            shape = table_sweep.Shape(
+                gate_kind="kda",
+                mode="plain",
+                state_dtype="bf16",
                 num_k_heads=num_k_heads,
                 num_v_heads=num_v_heads,
                 head_dim=head_dim,
-                names=("fused",),
+                batch=batch,
             )
-            selected = variants["fused"]
-            rows = sweep_batch(selected, batch, legal_configs(selected))
-            comparison = compare_selected_to_sweep(tile_of(selected), rows)
+            auto, configs = table_sweep.shape_configs(shape, opts)
+            rows = table_sweep.stage1_shape(
+                shape, auto, configs, range(len(configs)), opts, meta
+            )
+            for row in rows:
+                if row["status"] != table_sweep.OK:
+                    failures.add(
+                        f"batch {batch} {row['tuning_id']}: {row['status']} "
+                        f"{row['reason']}"
+                    )
+            comparison = compare_selected_to_sweep(auto.spec.tuning_id, rows)
             print(
-                f"batch {batch} work {batch*num_v_heads} spec_id={result.candidate.spec_id} "
-                f"selected={comparison.selected_tile} {comparison.selected_us:.3f}us "
-                f"fastest={comparison.best_tile} {comparison.best_us:.3f}us "
-                f"selected/fastest={comparison.selected_over_best:.3f}"
+                f"batch {batch} work {batch*num_v_heads} "
+                f"auto={comparison.selected_id} {comparison.selected_us:.3f}us "
+                f"fastest={comparison.best_id} tile={comparison.best_tile} "
+                f"{comparison.best_us:.3f}us "
+                f"auto/fastest={comparison.selected_over_best:.3f}"
             )
-            for micros, tile, error in rows[:top]:
-                print(f"  {micros:9.3f}us tile={tile} max_err={error:.3e}")
+            for row in fastest_first(rows)[:top]:
+                errors = nan_safe_max(
+                    (row["out_err"], row["state_err"], row["conv_err"])
+                )
+                print(
+                    f"  {row['us']:9.3f}us {row['tuning_id']} "
+                    f"tile={tuple(row['tile'])} max_err={errors:.3e}"
+                )
         except Exception as exc:
             failures.add(f"batch {batch} sweep: {type(exc).__name__}: {exc}")
             print(f"batch {batch} sweep FAILED: {type(exc).__name__}: {exc}")
@@ -367,7 +353,12 @@ def run_sweep(*, batches, num_k_heads, num_v_heads, head_dim, top) -> Failures:
 
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--batches", default=",".join(str(x) for x in DEFAULT_BATCHES))
+    parser.add_argument(
+        "--batches",
+        type=parse_batches,
+        default=",".join(str(x) for x in DEFAULT_BATCHES),
+        help="comma-separated positive decode batch sizes",
+    )
     parser.add_argument("--num-k-heads", type=int, default=32)
     parser.add_argument("--num-v-heads", type=int, default=32)
     parser.add_argument("--head-dim", type=int, default=128)
@@ -375,13 +366,21 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--no-device", action="store_true")
     parser.add_argument("--sweep-tiles", action="store_true")
     parser.add_argument("--top", type=int, default=5)
+    parser.add_argument(
+        "--rotate-mb",
+        type=int,
+        default=None,
+        help="MiB one cold-memory rotation cycle touches at least (default: the "
+        "driver's ROTATE_MB; see gdn_decode.cold_copies); 0 = warm, debugging only",
+    )
     args = parser.parse_args(argv)
+    check_rotate_mb(args.rotate_mb, parser)
 
     try:
         names = parse_variants(args.variants)
-        batches = tuple(int(x) for x in args.batches.split(","))
     except ValueError as exc:
         parser.error(str(exc))
+    batches = args.batches
 
     if not _load_device_backend():
         print("requires ROCm torch and a visible HIP device", file=sys.stderr)
@@ -393,7 +392,10 @@ def main(argv: Iterable[str] | None = None) -> int:
             f"requires {ARCH}; visible HIP device is {device_arch!r}", file=sys.stderr
         )
         return 2
+    if args.rotate_mb is None:
+        args.rotate_mb = ROTATE_MB
     print(f"device={device_arch} arch={ARCH}")
+    print(timing_label(args.rotate_mb))
     print(
         "precomputed excludes log-decay production cost; it reports "
         "recurrence-only cost, not an unfused production pipeline."
@@ -406,6 +408,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         num_v_heads=args.num_v_heads,
         head_dim=args.head_dim,
         no_device=args.no_device,
+        rotate_mb=args.rotate_mb,
     )
     if args.sweep_tiles:
         sweep_failures = run_sweep(
@@ -414,6 +417,8 @@ def main(argv: Iterable[str] | None = None) -> int:
             num_v_heads=args.num_v_heads,
             head_dim=args.head_dim,
             top=args.top,
+            device=device_arch,
+            rotate_mb=args.rotate_mb,
         )
         failures.messages.extend(sweep_failures.messages)
 

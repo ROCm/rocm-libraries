@@ -2199,6 +2199,7 @@ needs:
 | `known_knobs(base)` | the in-scope axes | axes are scoped per problem; out-of-scope knobs are then dropped instead of refused |
 | `recorded(base)` | none | `base` resolves a field per problem (work size, dtype) |
 | `outer_knob`, `outer_values(base, level)`, `outer_default(base)` | none | one field is cheap to sweep on top of every knob set (`waves_per_eu`: subclass `tuning.waves.WavesPerEuSpace`) |
+| `outer_dependent_knobs` | none | whether a knob is dropped depends on the outer knob's value (GDN decode: `row_loads` restates auto's order at some `waves_per_eu` values only) |
 | `stem(kernel)`, `stem_prefix()` | `variant_id` / `"{variant_id}@"` | the id should show more than the variant (attention: `_wpe{N}`) |
 | `production(base, axes, is_valid)` | every knob on its own | curated stacks |
 | `is_valid(base, knobs)` | canonical and valid | the walk should prune differently |
@@ -2207,8 +2208,14 @@ needs:
 **Rules the hooks encode.** A knob that compiles to the default is *dropped*;
 one that is illegal is *refused* with a reason. Never refuse an inert knob --
 a pin that travels across shapes would then fail where the knob happens to be
-inert. `inert` and `base_value` must not read the `outer_knob`: streams check
-a knob set once and only rebuild it per outer value. Knob values are coerced
+inert. `inert` and `base_value` must not read the `outer_knob` except for the
+knobs named in `outer_dependent_knobs`: a stream checks a knob set at the
+base's outer value and only rebuilds it per outer value, unless the set holds
+one of those knobs; then it canonicalizes the set again at every outer value,
+drop rules included, and the default `is_valid` keeps a prefix that drops
+only those knobs at the base's value but is canonical at another. Where a
+value drops the knob, the set lists as its twin without it (deduped by id). A
+knob set refused at the base's outer value is not listed at any other. Knob values are coerced
 to the type their axis declares (the outer knob to the type of its values),
 so `True` and `1` name one configuration. A field the base resolves per
 problem must be `recorded`, or its `config_key` stops being portable.

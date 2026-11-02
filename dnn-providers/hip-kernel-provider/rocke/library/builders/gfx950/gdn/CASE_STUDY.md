@@ -10,7 +10,8 @@ device-time comparison with the merge base; it publishes no speed numbers.
 [ALGORITHM.md](ALGORITHM.md) states the rule and the exception; this file keeps
 the measurements, which change with the compiler. The register, wave and
 scratch numbers are static counts read from the gfx950 code object, not
-hardware counters.
+hardware counters. Section 8 holds a second record, the spill snapshot of the forced `row_loads`
+order for the single-wave `fuse_conv` tiles, with the script that regenerates it.
 
 ## Contents
 
@@ -24,6 +25,7 @@ hardware counters.
 - [5. Decisions](#5-decisions)
 - [6. Measured speed](#6-measured-speed)
 - [7. Reproducing](#7-reproducing)
+- [8. Forced `row_loads` order spills](#8-forced-row_loads-order-spills)
 
 ## 1. Mechanism
 
@@ -36,8 +38,11 @@ consumed one row at a time, and falls on tiles where the earlier order kept
 intermediate values live longer.
 
 The exception ([ALGORITHM.md §4.3](ALGORITHM.md#43-dataflow-and-pipeline)) is keyed on the wave count: with `fuse_conv`
-and one wave, a lane owns many V rows, so that tile keeps the interleaved order
-for each row's `v` conv inputs, each state chunk and the norm inputs. Multi-wave
+and one wave, a lane owns many V rows, so that tile loads each row's `v` conv
+inputs, each state chunk and the norm inputs where the parent order did (the
+rule is `auto_late_row_inputs`, [ALGORITHM.md §4.3](ALGORITHM.md#43-dataflow-and-pipeline), which
+decides where it loads first). The `row_loads` knob can force
+either order. Multi-wave
 `fuse_conv` tiles hoist everything. Their per-lane cap is `512 / ceil(NW / 4)`
 VGPRs, so tiles with a small `WTK` (wide `q`/`k` slices with their taps and
 weights) or many waves can cross it.
@@ -170,8 +175,10 @@ measured. The tile choices were made on the old load order ([§5](#5-decisions))
 
 **Method.** Both trees run in one process, with their arms interleaved, and each
 result is the median of 3 independent runs. State, conv-state and output
-buffers rotate through at least 1 GiB per cycle, so every launch reads from
-HBM; every copy has its own cloned inputs. Timing replays a HIP graph. The
+buffers rotate through at least 1 GiB per cycle, in a cold-memory harness that
+is not in this tree (the in-tree helper, `gdn_decode.cold_copies`, gives the
+same guarantee for the in-tree tools); that 1 GiB exceeds the caches was not
+measured. Every copy has its own cloned inputs. Timing replays a HIP graph. The
 Python lowerer and `llvm23` build both trees. The runs used the ROCm 7.13
 container.
 
@@ -264,3 +271,153 @@ and put that ROCm's `llvm/bin` first on `PATH` so
 [`analyze_hsaco`](../../../../platform/python/rocke/analysis/isa.py) uses a
 `llvm-objdump` that knows the AMDGPU target. The pool uses every CPU the process
 may run on; on a shared node, run one instance at a time.
+
+## 8. Forced `row_loads` order spills
+
+The `row_loads` knob ([ALGORITHM.md §4.10](ALGORITHM.md#410-performance-knobs))
+forces the load order of a single-wave `fuse_conv` kernel. The validator refuses
+no forced order, so this section records, for one compiler, where the forced
+order spills and where `auto`'s does. It is a snapshot: the counts move with the
+compiler, and it decides nothing. Whether a spill costs more than the order's
+other effects is for the sweep to rank.
+
+**Snapshot.** Target gfx950. Toolchain as installed on the host that produced
+it: ROCm 7.1.0 comgr (`llvm20`, SHA-256 `b3e6941ac89a1ba6…`, the one in §4.1),
+its `llvm-objdump`, Python lowerer (`ROCKE_BACKEND=python`). Taken on this change's emitter;
+re-running the script below reproduces the table.
+No build or compile failure in any of the 6,560 compiles.
+
+The sweep covers every single-wave `fuse_conv` spec family at `Hk = Hv = 16`,
+`BPV = 1`: gate kind (GDN, KDA) × state (`bf16`; `f32`; `f32` with
+`interleave_cols`) × `DK = DV` 64 / 128 / 256 × `WTK` 1–32 × no norm / per-lane
+norm / `out_lds` with `norm_gate_once` × `conv_once` × `stream_rows` ×
+`waves_per_eu` 0 / 1 / 2 / 4. 3,600 legal specs; some name the same kernel (an
+inert knob adds no name token), so rows are keyed by `kernel_name()`: 3,280
+distinct kernels, each compiled in both orders. A kernel spills when its scratch
+is above 0 B.
+
+| Auto's order | Distinct kernels | Forcing the other order starts a spill | removes one | Spill in both orders |
+| --- | ---: | ---: | ---: | ---: |
+| late | 3,208 | 358 | 17 | 2,072 |
+| first | 72 | 3 | 0 | 0 |
+
+Of the 2,072 late-order kernels that spill in both orders: 1,219 at
+`DK = DV = 256`; 333 of the rest at `DK = DV = 128` with `WTK` 1 or 2; 478 of
+the rest under a `waves_per_eu` floor of 2 or more; 42 others.
+
+**Reproduce.** Save as `spill_sweep.py` outside the tree and run it from
+[`rocke/library`](../../..). It uses every worker named by `SWEEP_JOBS` (default
+32); on a shared node run one instance at a time. The run time depends on the host load and on
+the worker count (`SWEEP_JOBS`).
+
+```bash
+export ROCKE_BACKEND=python SWEEP_JOBS=48
+export ROCKE_COMGR_LIB=/opt/rocm-7.1.0/lib/libamd_comgr.so.3 ROCKE_LLVM_FLAVOR=llvm20
+export PATH=/opt/rocm-7.1.0/llvm/bin:$PATH   # llvm-objdump that knows the AMDGPU target
+PYTHONPATH=.:../platform/python python3 /path/to/spill_sweep.py
+```
+
+```python
+import dataclasses as dc
+import os
+import tempfile
+from itertools import product
+from multiprocessing import Pool
+from pathlib import Path
+
+from kernels.gfx950.gdn_decode import (
+    GdnDecodeSpec,
+    auto_late_row_inputs,
+    build_gdn_decode,
+    is_valid_spec,
+)
+from rocke.analysis.isa import analyze_hsaco
+from rocke.helpers.compile import compile_kernel
+
+ARCH = "gfx950"
+STATES = (("bf16", False), ("f32", False), ("f32", True))  # (state, interleave_cols)
+NORMS = (  # (fuse_out_norm, out_lds and norm_gate_once)
+    (False, False),  # no norm
+    (True, False),  # per-lane norm
+    (True, True),  # out_lds + norm_gate_once
+)
+
+
+def families():
+    """Every single-wave fuse_conv spec family (Hk = Hv = 16, BPV = 1)."""
+    for gate, (st, ic), dk, wtk, (rn, lds), co, sr, wpe in product(
+        ("gdn", "kda"), STATES, (64, 128, 256), (1, 2, 4, 8, 16, 32), NORMS,
+        (False, True), (False, True), (0, 1, 2, 4),
+    ):
+        spec = GdnDecodeSpec(
+            gate_kind=gate, num_k_heads=16, num_v_heads=16, state_dtype=st,
+            interleave_cols=ic, head_k_dim=dk, head_v_dim=dk, num_warps=1,
+            warp_threads_k=wtk, blocks_per_v_dim=1, fuse_conv=True,
+            fuse_out_norm=rn, out_lds=lds, norm_gate_once=lds, conv_once=co,
+            stream_rows=sr, waves_per_eu=wpe,
+        )
+        if is_valid_spec(spec, arch=ARCH)[0]:
+            yield spec
+
+
+def scratch(spec):
+    art = compile_kernel(build_gdn_decode(spec, arch=ARCH), arch=ARCH,
+                         capture_ir_text=False)
+    with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
+        f.write(bytes(art.hsaco))
+        f.flush()
+        return analyze_hsaco(Path(f.name)).resources.scratch_bytes
+
+
+if __name__ == "__main__":
+    rows = {}  # auto kernel name -> (auto order, spec, other-order spec)
+    for spec in families():
+        order = "late" if auto_late_row_inputs(spec) else "first"
+        other = dc.replace(spec, row_loads="first" if order == "late" else "late")
+        rows.setdefault(spec.kernel_name(), (order, spec, other))
+    kernels = {}  # kernel name -> spec, each distinct kernel compiled once
+    for _order, spec, other in rows.values():
+        kernels[spec.kernel_name()] = spec
+        kernels[other.kernel_name()] = other
+    with Pool(int(os.environ.get("SWEEP_JOBS", "32"))) as pool:
+        out = dict(zip(kernels, pool.map(scratch, kernels.values(), chunksize=8)))
+
+    def spills(spec):
+        return out[spec.kernel_name()] > 0
+
+    print("distinct kernels compiled:", len(kernels))
+    print("distinct (auto kernel, other order) rows:", len(rows))
+    for auto_order in ("late", "first"):
+        group = [(s, o) for ao, s, o in rows.values() if ao == auto_order]
+        starts = [s for s, o in group if not spills(s) and spills(o)]
+        stops = [s for s, o in group if spills(s) and not spills(o)]
+        both = [s for s, o in group if spills(s) and spills(o)]
+        print(f"auto {auto_order}: {len(group)} rows; forcing the other order "
+              f"starts a spill in {len(starts)}, removes one in {len(stops)}; "
+              f"{len(both)} spill in both")
+        if auto_order == "late":
+            groups = {
+                "DK = DV = 256": lambda s: s.head_k_dim == 256,
+                "DK = DV = 128, WTK 1 or 2": lambda s: s.head_k_dim == 128
+                and s.warp_threads_k in (1, 2),
+                "waves_per_eu >= 2 (rest)": lambda s: s.waves_per_eu >= 2,
+            }
+            left = both
+            for label, test in groups.items():
+                print(f"  both spill, {label}: {sum(map(test, left))}")
+                left = [s for s in left if not test(s)]
+            print(f"  both spill, all other: {len(left)}")
+```
+
+Output of the run behind the table:
+
+```text
+distinct kernels compiled: 6560
+distinct (auto kernel, other order) rows: 3280
+auto late: 3208 rows; forcing the other order starts a spill in 358, removes one in 17; 2072 spill in both
+  both spill, DK = DV = 256: 1219
+  both spill, DK = DV = 128, WTK 1 or 2: 333
+  both spill, waves_per_eu >= 2 (rest): 478
+  both spill, all other: 42
+auto first: 72 rows; forcing the other order starts a spill in 3, removes one in 0; 0 spill in both
+```
