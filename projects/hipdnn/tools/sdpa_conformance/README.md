@@ -63,8 +63,17 @@ backward or varlen cases, whose backward consumes the forward's Stats.
 | Pass directory | Pins | Cases |
 |---|---|---|
 | `fwd/<engine>/`, `bwd/<engine>/` | one engine | each applicable engine that did not serve the case (`test_forward.py` pins `HIPDNN_FWD_ENGINE`, every other case `HIPDNN_BWD_ENGINE`) |
-| `pair/<fwd>__<bwd>/` | both | backward cases: every stats-capable forward that did not serve the case against every backward engine |
-| `refwd/discovery/`, `refwd/<bwd>/` | `HIPDNN_FWD_ENGINE=reference` | backward cases whose forward failed or crashed in any pass: the backward unpinned, then each backward engine; the pair passes then cover them too |
+| `pair/<fwd>__<bwd>/` (only with `--pairs`) | both | backward cases: every stats-capable forward that did not serve the case against every backward engine |
+| `refwd/discovery/`, `refwd/<bwd>/` | `HIPDNN_FWD_ENGINE=reference` | backward cases whose forward failed or crashed in any pass: the backward unpinned, then each backward engine; with `--pairs` the pair passes then cover them too |
+
+The forward x backward pair passes are opt-in (`--pairs`): by default every pass pins one direction, so a
+failure names the engine of that direction. The reference-forward passes always run.
+
+Kernel ids are opt-in too. `--kernel-ids` exports `HIPDNN_SDPA_KERNEL_LOG=1` to every pass; the plugin then
+installs `hipdnn_sdpa`'s backend log callback and fills `fwd_kernel` / `bwd_kernel`. The callback raises the
+backend log level to INFO and forces ingestor applicability inline (`HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS`),
+which changes how the product runs, so by default it is not installed and the kernel columns stay empty (nothing
+downstream needs them; the engine that faulted is recorded regardless). `--exhaustive` implies `--kernel-ids`.
 
 `--exhaustive` tests every kernel (candidate) of an engine, not only the one it picks. Candidates come from
 `hipdnn_bench enumerate --graph <json> --engine-name <engine> --plugin-dir <prefix>/lib/hipdnn_plugins/engines`
