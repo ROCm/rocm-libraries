@@ -10,7 +10,9 @@ buffer hands the MFMA pairs of fp8 bytes reinterpreted as bf16, with no
 k_scale, and the scores come out wrong. The IR verifier does not catch such a
 read, so this test walks the built kernel and checks every LDS load against
 the element type of the buffer it reads, and that every fp8 K read reaches the
-QK MFMA only through a multiply by the ``k_scale`` kernel argument.
+QK MFMA only through a multiply by the ``k_scale`` kernel argument. It also
+pins the K slab pad: a laid-out pad is refused when Q would be staged in the
+single K slot, and otherwise every K read goes through the padded slab layout.
 
 Pure Python: it builds the kernel IR and needs no GPU. The C++ engine tests
 need the ``rocke_engine`` binding (``ROCKE_BUILD_PYBIND=ON``), which CI does
@@ -173,6 +175,80 @@ def test_fp8_k_is_scaled_by_k_scale_before_the_mfma(path):
         ), f"{path}: scaled K does not reach an MFMA"
 
 
+_LAID_OUT_K_PAD = dict(
+    use_k_single_buffer=True, use_kq_lds_pad=True, kq_lds_pad_halves=8
+)
+
+
+@pytest.mark.parametrize("path", sorted(_QK_PATHS))
+def test_laid_out_k_pad_refuses_q_staged_in_the_k_slot(path):
+    # Q staged in the single K slot is written and read unpadded, which does
+    # not match a laid-out K slab pad.
+    with pytest.raises(ValueError, match="cannot hold aliased Q - use_q_reread=False"):
+        UnifiedAttention2DTiledSpec(**_BASE, **_QK_PATHS[path], **_LAID_OUT_K_PAD)
+
+
+def _defining(value, name):
+    """The op that defines ``value``, asserted to be a ``name`` op."""
+    assert value.op is not None and value.op.name == name, (
+        f"expected {value.name} to come from {name}, "
+        f"got {value.op.name if value.op else 'a kernel parameter'}"
+    )
+    return value.op
+
+
+def _constant(value):
+    return _defining(value, "arith.constant").attrs["value"]
+
+
+@pytest.mark.parametrize("q_source", ["use_q_reread", "use_q_direct_reg"])
+def test_laid_out_k_pad_reads_k_through_the_padded_slabs(q_source):
+    head, tile, pad = _BASE["head_size"], _BASE["tile_size"], 8
+    slab_rows = 64 * 16 // 2 // head  # one wave's 1024-B async-DMA slab of bf16
+    spec = UnifiedAttention2DTiledSpec(
+        **_BASE, **_QK_PATHS["32x32 transposed"], **_LAID_OUT_K_PAD, **{q_source: True}
+    )
+    assert spec.kq_lds_pad_slab_rows == slab_rows
+    kernel = build_unified_attention_2d_tiled(spec, arch="gfx950")
+
+    k_lds = [
+        op.results[0]
+        for op in _walk(kernel.body.ops)
+        if op.name == "tile.smem_alloc" and "Klds" in op.results[0].name
+    ]
+    assert [buffer.type.shape for buffer in k_lds] == [
+        (1, tile // slab_rows, slab_rows * head + pad)
+    ]
+    k_reads = [
+        op
+        for op in _walk(kernel.body.ops)
+        if op.name == "tile.smem_load_vN" and op.operands[0] is k_lds[0]
+    ]
+    assert k_reads, "no QK read of the padded K buffer"
+    for read in k_reads:
+        # (buf, row, col) -> (buf, row // SLAB_ROWS, (row % SLAB_ROWS) * HD + col)
+        slab = _defining(read.operands[2], "arith.div")
+        k_row = slab.operands[0]
+        assert _constant(slab.operands[1]) == slab_rows
+        col_in_slab = _defining(read.operands[3], "arith.add")
+        row_offset = _defining(col_in_slab.operands[0], "arith.mul")
+        row_in_slab = _defining(row_offset.operands[0], "arith.mod")
+        assert row_in_slab.operands[0] is k_row
+        assert _constant(row_in_slab.operands[1]) == slab_rows
+        assert _constant(row_offset.operands[1]) == head
+
+
+def test_k_pad_the_kernel_cannot_lay_out_is_inert():
+    # Without a single K slot the pad is not laid out, so Q may alias K.
+    spec = UnifiedAttention2DTiledSpec(
+        **_BASE, use_kq_lds_pad=True, kq_lds_pad_halves=8
+    )
+    assert spec.kq_lds_pad_slab_rows == 0
+    assert spec.kq_lds_pad_off_reason == (
+        "the KQ LDS pad is only laid out for a single-K schedule"
+    )
+
+
 @pytest.mark.parametrize("path", sorted(_QK_PATHS))
 def test_cpp_engine_emits_the_same_llvm_ir(path):
     # The C++ builder serves these kernels without Python; it must read and
@@ -186,3 +262,16 @@ def test_cpp_engine_emits_the_same_llvm_ir(path):
     assert (
         engine.gfx950_attention_tiled_2d_lower_llvm(asdict(spec), "gfx950") == expected
     )
+
+
+def test_cpp_engine_refuses_the_python_only_k_pad():
+    # The C++ builder has no KQ slab pad; it refuses the knob rather than
+    # lower an unpadded K read. Developer builds only (see the module note).
+    engine = pytest.importorskip("rocke_engine")
+    spec = UnifiedAttention2DTiledSpec(
+        **_BASE, **_QK_PATHS["32x32 transposed"], **_LAID_OUT_K_PAD, use_q_reread=True
+    )
+    with pytest.raises(
+        ValueError, match="use_kq_lds_pad=True is not implemented in the C\\+\\+ engine"
+    ):
+        engine.gfx950_attention_tiled_2d_lower_llvm(asdict(spec), "gfx950")

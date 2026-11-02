@@ -784,6 +784,14 @@ std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
 
 rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
 {
+    /* The KQ slab pad and the KQ XOR swizzle exist only in the Python builder;
+     * the C spec has no field for either, so lowering them here would silently
+     * emit an unpadded, unswizzled K read. */
+    for(const char* python_only : {"use_kq_lds_pad", "use_kq_xor_swizzle"})
+        if(a_bool(d, python_only, false))
+            throw py::value_error(std::string("rocke_engine tiled-2d: ") + python_only
+                                  + "=True is not implemented in the C++ engine; build this"
+                                    " spec with the Python engine or set it to False");
     rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
     s.head_size = a_int(d, "head_size", s.head_size);
     s.block_size = a_int(d, "block_size", s.block_size);
