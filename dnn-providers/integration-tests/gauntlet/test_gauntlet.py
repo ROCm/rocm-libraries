@@ -45,6 +45,10 @@ STUB = HERE / "stub_binary.py"
 BUNDLES = TESTS_ROOT / "integration-test-bundles"
 SPACES = space_lib.load_spaces()
 SPACE_IDS = [s.space_id for s in SPACES]
+# The rejection-probe library (R2): one `family` axis per engine, an `expect` per case; no domain,
+# alignment or placement axes and no recorded seeds, so the tests of the shape spaces skip them.
+PROBE_LIBRARY_IDS = [i for i in SPACE_IDS if i.endswith("Probe")]
+LEGACY_SPACE_IDS = [i for i in SPACE_IDS if i not in PROBE_LIBRARY_IDS]
 bu = fuzz.load_bundle_utils()
 
 
@@ -380,6 +384,9 @@ def test_sample_is_determined_by_its_shape_seed(space_id):
             )
             > 1
         )
+    elif space_id in PROBE_LIBRARY_IDS:
+        # a family may differ only in its add_tensors and node_patches
+        assert len({json.dumps(s.row) for s in first}) == 3
     else:
         assert len({json.dumps(s.row["values"]) for s in first}) == 3
 
@@ -387,7 +394,7 @@ def test_sample_is_determined_by_its_shape_seed(space_id):
 @pytest.mark.parametrize("space_id", SPACE_IDS)
 def test_constraints_hold_over_1000_samples(space_id):
     sp = space_by_id(space_id)
-    assert sp.constraints or space_id in FIXED_SHAPE_SPACES
+    assert sp.constraints or space_id in FIXED_SHAPE_SPACES + PROBE_LIBRARY_IDS
     for seed in range(1000):
         s = sampler.sample(sp, seed)
         env = sp.derive_env(s.axis_values)
@@ -476,7 +483,7 @@ FEATURE_KEYS = {
 }
 
 
-@pytest.mark.parametrize("space_id", SPACE_IDS)
+@pytest.mark.parametrize("space_id", LEGACY_SPACE_IDS)
 def test_row_has_sweep_json_format(space_id):
     s = sampler.sample(space_by_id(space_id), 913377)
     row = s.row
@@ -510,7 +517,7 @@ def test_row_has_sweep_json_format(space_id):
 
 def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
     assert space_lib.DEFAULT_SPACES_DIR == HERE / "spaces"
-    assert SPACE_IDS == [
+    assert LEGACY_SPACE_IDS == [
         "Batchnorm/Default",
         "BatchnormBackward/Default",
         "BatchnormInference/Default",
@@ -530,6 +537,18 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "SdpaFwd/Gfx1151Decode",
         "SdpaFwd/Gfx950Dense",
         "SdpaFwd/Gfx950DenseStride",
+    ]
+    assert PROBE_LIBRARY_IDS == [
+        "Batchnorm/MlopsProbe",
+        "BatchnormBackward/MlopsProbe",
+        "Layernorm/MlopsProbe",
+        "LayernormBackward/MlopsProbe",
+        "Matmul/Probe",
+        "RMSNorm/MlopsProbe",
+        "SdpaBackward/AsmProbe",
+        "SdpaFwd/AsmProbe",
+        "SdpaFwd/Flash2Probe",
+        "SdpaFwd/Gfx950DenseProbe",
     ]
     for sp in SPACES:
         assert BUNDLES not in sp.path.parents
@@ -592,7 +611,8 @@ def expanded_graph(template, row):
     return graph
 
 
-@pytest.mark.parametrize("space_id", SPACE_IDS)
+# probe-library cases are never frozen into a bundle, so only the shape spaces need to expand back
+@pytest.mark.parametrize("space_id", LEGACY_SPACE_IDS)
 def test_shipped_space_row_appended_to_the_template_sweep_expands(tmp_path, space_id):
     sp = space_by_id(space_id)
     topology = tmp_path / "quick" / sp.operation / sp.template_path.parent.name
@@ -1415,7 +1435,7 @@ NO_DOMAIN_SPACES = FIXED_SHAPE_SPACES + STRIDE_SPACES
 NO_DTYPE_SPACES = FIXED_SHAPE_SPACES + ["Matmul/Stride"]
 # the late axes a space gained after its domain axis, which sit before `domain` in the axis order
 EXTRA_LATE_AXES = {"SdpaFwd/Default": ["stats", "window", "wl", "wr"]}
-DOMAIN_SPACE_IDS = [s for s in SPACE_IDS if s not in NO_DOMAIN_SPACES]
+DOMAIN_SPACE_IDS = [s for s in LEGACY_SPACE_IDS if s not in NO_DOMAIN_SPACES]
 ALIGNMENTS = [1, 2, 4, 8, 16, 32, 64, 128, 256]
 PLACEMENTS = ["default", "exact", "under"]
 # The tensor (by template name) whose pointer `under` misaligns: the op's primary data
@@ -1576,13 +1596,13 @@ def test_a_pad_of_zero_renders_the_packed_layout(space_id):
 def test_every_shipped_space_has_its_operands_listed():
     assert sorted(PRIMARY_OPERANDS) == DOMAIN_SPACE_IDS
     assert sorted(POISONED_OPERANDS) == DOMAIN_SPACE_IDS
-    assert sorted(PLACEMENT_OPERAND) == SPACE_IDS
+    assert sorted(PLACEMENT_OPERAND) == LEGACY_SPACE_IDS
     assert sorted(OLD_SHAPE_DIGESTS) == [
         "RMSNorm/Default", "SdpaFwd/Default", "SdpaFwd/Gfx950Dense",
     ]  # fmt: skip
 
 
-@pytest.mark.parametrize("space_id", SPACE_IDS)
+@pytest.mark.parametrize("space_id", LEGACY_SPACE_IDS)
 def test_the_last_axes_are_domain_alignment_placement_in_that_order(space_id):
     # bug caught: an axis in the middle shifts the draws of the axes after it, a reordered or
     # misspelled value is never rendered by the derive chain, and an old value that moves
@@ -1952,7 +1972,7 @@ def _device_tensor_uids(template):
     )
 
 
-@pytest.mark.parametrize("space_id", SPACE_IDS)
+@pytest.mark.parametrize("space_id", LEGACY_SPACE_IDS)
 def test_every_alignment_and_placement_renders_the_placement_and_the_patches(space_id):
     # bug caught: a patch on a scalar or virtual tensor (the harness would reject or ignore
     # it), a missing operand, a placement_uid on another tensor, or an `under` at alignment 1
@@ -1982,7 +2002,7 @@ def test_every_alignment_and_placement_renders_the_placement_and_the_patches(spa
 
 def test_under_is_drawn_at_every_alignment_but_one_and_only_exact_replaces_it():
     # bug caught: an `under` row at alignment 1, or an exact that is lost at alignment >= 2
-    for space_id in SPACE_IDS:
+    for space_id in LEGACY_SPACE_IDS:
         sp = space_by_id(space_id)
         seen = set()
         for seed in range(400):
@@ -2900,16 +2920,7 @@ def test_default_run_covers_every_space_and_filter_narrows(run):
     assert run.run("--samples", "2", space="RMSNorm/Default") == 0
     assert run.summary["spaces"] == ["RMSNorm/Default"]
     assert run.run("--samples", "2", space="SdpaFwd/.*") == 0
-    assert run.summary["spaces"] == [
-        "SdpaFwd/AsmStride",
-        "SdpaFwd/Default",
-        "SdpaFwd/Flash2",
-        "SdpaFwd/Flash2Region",
-        "SdpaFwd/Gfx1151",
-        "SdpaFwd/Gfx1151Decode",
-        "SdpaFwd/Gfx950Dense",
-        "SdpaFwd/Gfx950DenseStride",
-    ]
+    assert run.summary["spaces"] == [i for i in SPACE_IDS if i.startswith("SdpaFwd/")]
 
 
 def test_filter_matching_nothing_and_broken_spaces_are_usage_errors(
@@ -3099,7 +3110,7 @@ def test_a_crash_in_one_dtype_group_costs_one_case_and_the_other_groups_run(run)
     )
 
 
-@pytest.mark.parametrize("space_id", SPACE_IDS)
+@pytest.mark.parametrize("space_id", LEGACY_SPACE_IDS)
 def test_suite_tag_is_the_dtype_of_the_graphs_input_tensor(run, space_id):
     # bug caught: a space whose dtype axes are not the ones the driver reads gets a tag
     # that disagrees with its graph, and the TOML then grades a bfloat16 case as fp32
@@ -3471,9 +3482,12 @@ def test_summary_counts_every_sample_per_engine_and_space_with_reasons(run):
         },
         engine="STUB_ENGINE",
     )
-    assert run.run("--samples", "12", "--batch-size", "5", space=None) == 1
+    # the rejection probes change a PASS at a lower enforcement level; they have their own tests
+    assert (
+        run.run("--samples", "12", "--batch-size", "5", space=r"^(?!.*Probe).*$") == 1
+    )
     summary = run.summary
-    spaces = len(SPACE_IDS)
+    spaces = len(LEGACY_SPACE_IDS)
     total = 12 * spaces  # twelve samples in each space; every residue of seed % 6 twice
     assert summary["samples"] == total and summary["reconciled"] is True
     assert sum(summary["outcomes"].values()) == total
@@ -3486,8 +3500,8 @@ def test_summary_counts_every_sample_per_engine_and_space_with_reasons(run):
         "UNEXERCISED": 4 * spaces,
     }
     engine = summary["engines"]["STUB_ENGINE"]
-    assert engine["samples"] == total and set(engine["spaces"]) == set(SPACE_IDS)
-    for space_id in SPACE_IDS:
+    assert engine["samples"] == total and set(engine["spaces"]) == set(LEGACY_SPACE_IDS)
+    for space_id in LEGACY_SPACE_IDS:
         sp = engine["spaces"][space_id]
         assert sp["samples"] == 12 and sum(sp["outcomes"].values()) == 12
         assert sp["outcomes"]["PASS"] == 2 and sp["outcomes"]["WRONG"] == 2
@@ -4030,7 +4044,7 @@ def test_replay_script_runs(findings):
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("space_id", SPACE_IDS)
+@pytest.mark.parametrize("space_id", LEGACY_SPACE_IDS)
 def test_fault_folder_imports_for_real_and_expands_back_identically(
     run, tmp_path, space_id
 ):

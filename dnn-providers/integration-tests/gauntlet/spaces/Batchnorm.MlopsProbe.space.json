@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "operation": "Batchnorm",
+  "description": "Probe-only rejection library for HIP_MLOPS_ENGINE (BatchNorm forward training, spatial mode) on gfx950 (the engine has no device-arch check, so it is not gfx-specific and any available GPU runs it): a legal training graph (rank 4, NCHW or NHWC packed strides, float/half/bfloat16 x and y, float scale, bias, saved mean and inv-variance, a double epsilon, declared alignment 16; quick Batchnorm/Variant2) with ONE feature per case, named by the `family` axis; every family is a graph the frontend accepts (BatchnormNode.hpp pre_validate checks no dtype, allows any one of mean / inv_variance, requires the four running statistics together but not a momentum). The `expect` of a case is `declined` where the engine must not take the graph or where it does not check a feature its kernel ignores (a gap: an accept then shows as WRONG or an UNEXERCISED violation, which is the point) and `declined_or_pass` where a correct engine may take it. Source: BatchnormPlanBuilder.cpp isApplicable and BatchnormFwdTrainingPlanBuilder.cpp isApplicable (the engine takes the graph if either builder does), BatchnormApplicabilityChecks.cpp (BatchnormValidator), BatchnormFwdTrainingPlan.cpp, BatchnormCommon.hpp. none: the control (plain training graph, saved stats, no running statistics), the engine takes it. running_full: adds prev/next running mean and variance and a double momentum tensor (all five, so the plan reads and updates them, BatchnormFwdTrainingPlan.cpp:49-66): `declined_or_pass`. odd_dims: N, C, H and W each drawn from values not divisible by 4 (1, 2, 3, 5, 6, 7, 9, 10, 15, 17): the kernels fall back to a scalar vector size when C or H*W is not a multiple of 4 (BatchnormCommon.hpp trySpatialMultipleConfig / defaultConfigSpatialSingle), no divisibility gate exists: `declined_or_pass`. dt_scale_half, dt_bias_bf16: scale (bias) not float; dt_stat_half, dt_invvar_bf16: saved mean / inv-variance not float; the validator demands FLOAT for scale and bias and for the saved stats (BatchnormApplicabilityChecks.cpp:78-94 and 96-112, called from checkFwdTrainingTensorConfigSupported at 356-379): `declined`. dt_io_double, dt_io_int8: x and y outside {float, half, bfloat16} (BatchnormApplicabilityChecks.cpp:65-76): `declined`. dt_y_mixed, dt_y_mixed2 [gap]: y dtype different from x among float / half / bfloat16 (the next / the next-but-one type in the order float, half, bfloat16 after x's): the validator checks x and y only against the allowed set one by one (:65-76), but the training kernels use one fp type derived from x and scale (BatchnormFwdTrainingPlan.cpp:221-237, no separate output type), so y would be written as x's type: `declined`, an accept is a bug candidate (WRONG). Running statistics without a momentum tensor are not a probe: the backend's BatchnormOperationDescriptor::finalize() rejects them (BAD_PARAM, running statistics must all be set or all null), so the graph never loads. running_dt_half [gap]: running mean and variance (prev and next) in half with a momentum tensor: the validator's stat list holds mean and inv-variance only (:371-377), the running tensors are never checked for dtype and the kernel reads and writes them as float: `declined`, an accept is WRONG. align_low: every tensor declares alignment 1 or 2 bytes: the per-channel float tensors need 4-byte alignment in every kernel configuration (BatchnormCommon.hpp:519-557 spatialSingleAlignmentNeed / spatialMultipleAlignmentNeed, channel need FP32_BYTES) and selectSpatialConfig (:658-686) finds none, checkDeclaredAlignmentSupported throws (BatchnormFwdTrainingPlan.cpp:282-301): `declined`. overflow: `ovf` names the dimension pushed past the int32 / uint32 limit at enforcement_level buildable (no tensor is allocated, filled or executed): n = 2**31 (batch), c = 2**31 (channels, batch stride 2**31), h = 2**31, w = 2**32, total31 / total32 = four moderate dims whose product is 2**31 / 2**32 so only the element count and the N*H*W / N*C*H*W kernel parameters overflow; isApplicable has no overflow gate and the kernel parameters HIP_PLUGIN_BN_NHW / NCHW / CHW are compiled as int (BatchnormFwdTrainingPlan.cpp:444-449, Configuration.hpp proto_config static_asserts): `declined`; an accepted and built overflow case is reported UNEXERCISED with the reason `accepted above the oracle ceiling`, never PASS. Known gaps (expected WRONG or a violation when the engine accepts): dt_y_mixed, dt_y_mixed2, running_dt_half. Axes: `family`; `dtype` (the io dtype); `shape` = [layout, n, c, h, w] (8 combos); `odd` = [n, c, h, w] with no dimension divisible by 4, used by odd_dims only; `align` (1 or 2, used by align_low only); `ovf` (the overflow variant). Never frozen into a bundle.",
+  "engine": "HIP_MLOPS_ENGINE",
+  "template": "../../integration-test-bundles/quick/Batchnorm/Variant2/graph.template.json",
+  "axes": {
+    "family": {
+      "values": [
+        "none",
+        "dt_scale_half",
+        "dt_bias_bf16",
+        "dt_stat_half",
+        "dt_invvar_bf16",
+        "dt_io_double",
+        "dt_io_int8",
+        "dt_y_mixed",
+        "dt_y_mixed2",
+        "running_full",
+        "running_dt_half",
+        "odd_dims",
+        "align_low",
+        "overflow"
+      ]
+    },
+    "dtype": {"values": ["float", "half", "bfloat16"]},
+    "shape": {
+      "values": [
+        ["nchw", 2, 1, 4, 4],
+        ["nchw", 4, 8, 2, 8],
+        ["nchw", 8, 16, 1, 4],
+        ["nchw", 3, 32, 4, 1],
+        ["nhwc", 2, 4, 4, 4],
+        ["nhwc", 4, 8, 2, 8],
+        ["nhwc", 8, 16, 1, 4],
+        ["nhwc", 16, 2, 8, 16]
+      ]
+    },
+    "odd": {
+      "values": [
+        [3, 3, 3, 3],
+        [1, 5, 1, 7],
+        [5, 7, 3, 1],
+        [9, 1, 2, 5],
+        [7, 9, 6, 3],
+        [2, 15, 5, 10],
+        [1, 17, 1, 2],
+        [9, 2, 7, 6]
+      ]
+    },
+    "align": {"values": [1, 2]},
+    "ovf": {"values": ["n", "c", "h", "w", "total31", "total32"]}
+  },
+  "derive": {
+    "layout": "shape[0]",
+    "n": "shape[1]",
+    "c": "shape[2]",
+    "h": "shape[3]",
+    "w": "shape[4]",
+    "odd_n": "odd[0]",
+    "odd_c": "odd[1]",
+    "odd_h": "odd[2]",
+    "odd_w": "odd[3]",
+    "is_odd": "family == 'odd_dims'",
+    "ov": "family == 'overflow'",
+    "n_e": "2**31 if ov and ovf == 'n' else (2**15 if ov and ovf == 'total31' else (2**8 if ov and ovf == 'total32' else (2 if ov and ovf == 'c' else (1 if ov else (odd_n if is_odd else n)))))",
+    "c_e": "2**31 if ov and ovf == 'c' else (2**8 if ov and ovf in ['total31', 'total32'] else (1 if ov else (odd_c if is_odd else c)))",
+    "h_e": "2**31 if ov and ovf == 'h' else (16 if ov and ovf == 'total31' else (2**8 if ov and ovf == 'total32' else (1 if ov else (odd_h if is_odd else h))))",
+    "w_e": "2**32 if ov and ovf == 'w' else (16 if ov and ovf == 'total31' else (2**8 if ov and ovf == 'total32' else (1 if ov else (odd_w if is_odd else w))))",
+    "dims_x": "[n_e, c_e, h_e, w_e]",
+    "dims_p": "[1, c_e, 1, 1]",
+    "xs_w": "1 if layout == 'nchw' else c_e",
+    "xs_h": "w_e if layout == 'nchw' else w_e * c_e",
+    "xs_c": "h_e * w_e if layout == 'nchw' else 1",
+    "xs_n": "c_e * h_e * w_e",
+    "stride_x": "[xs_n, xs_c, xs_h, xs_w]",
+    "stride_s": "[c_e, 1, xs_w if layout == 'nchw' else c_e, xs_w if layout == 'nchw' else c_e]",
+    "stride_p": "[c_e, 1, 1, 1]",
+    "ydt_i": "0 if dtype == 'float' else (1 if dtype == 'half' else 2)",
+    "ydt_mixed": "['float', 'half', 'bfloat16'][(ydt_i + (1 if family == 'dt_y_mixed' else 2)) % 3]",
+    "dtx": "'double' if family == 'dt_io_double' else ('int8' if family == 'dt_io_int8' else dtype)",
+    "dty": "'double' if family == 'dt_io_double' else ('int8' if family == 'dt_io_int8' else (ydt_mixed if family in ['dt_y_mixed', 'dt_y_mixed2'] else dtype))",
+    "dts": "'half' if family == 'dt_scale_half' else 'float'",
+    "dtb": "'bfloat16' if family == 'dt_bias_bf16' else 'float'",
+    "dtm": "'half' if family == 'dt_stat_half' else 'float'",
+    "dti": "'half' if family == 'dt_stat_half' else ('bfloat16' if family == 'dt_invvar_bf16' else 'float')",
+    "dtr": "'half' if family == 'running_dt_half' else 'float'",
+    "running": "family in ['running_full', 'running_dt_half']",
+    "with_mom": "running",
+    "al": "align if family == 'align_low' else 16"
+  },
+  "constraints": [
+    {
+      "rule": "ov or n_e * c_e * h_e * w_e <= 2**20",
+      "reason": "oracle cost ceiling for the non-overflow families; the overflow family is built, never run"
+    },
+    {
+      "rule": "n_e * h_e * w_e > 1",
+      "reason": "training computes batch statistics, so N * spatial must be > 1 (frontend validateBatchNormTrainingSpatialDimensions; engine BatchnormValidator::validateSpatialDimensions, BatchnormApplicabilityChecks.cpp:29)"
+    }
+  ],
+  "expect": "${'declined_or_pass' if family in ['none', 'running_full', 'odd_dims'] else 'declined'}",
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_p}", "strides": "${stride_s}", "data_type": "${dti}"},
+        {"uid": 1, "dims": "${dims_p}", "strides": "${stride_s}", "data_type": "${dtm}"},
+        {"uid": 2, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dty}"},
+        {"uid": 3, "dims": "${dims_x}", "strides": "${stride_x}", "data_type": "${dtx}"},
+        {"uid": 4, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "${dtb}"},
+        {"uid": 5, "dims": [1], "strides": [1], "data_type": "double"},
+        {"uid": 6, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "${dts}"}
+      ]
+    },
+    "metadata": {
+      "purpose": "probe",
+      "enforcement_level": "${'buildable' if ov else 'full'}",
+      "inputs": {"3": {"kind": "free", "lo": -1.0, "hi": 1.0}, "4": {"kind": "free", "lo": -2.0, "hi": 2.0}, "6": {"kind": "free", "lo": -2.0, "hi": 2.0}}
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${al}"}},
+      {"uid": 1, "set": {"alignment": "${al}"}},
+      {"uid": 2, "set": {"alignment": "${al}"}},
+      {"uid": 3, "set": {"alignment": "${al}"}},
+      {"uid": 4, "set": {"alignment": "${al}"}},
+      {"uid": 6, "set": {"alignment": "${al}"}}
+    ],
+    "add_tensors": [
+      {"when": "${running}", "uid": 7, "name": "prev_running_mean", "data_type": "${dtr}", "dims": "${dims_p}", "strides": "${stride_p}", "alignment": "${al}", "is_runtime_pass_by_value": false, "ragged_offset_multiplier": 1, "virtual": false},
+      {"when": "${running}", "uid": 8, "name": "prev_running_variance", "data_type": "${dtr}", "dims": "${dims_p}", "strides": "${stride_p}", "alignment": "${al}", "is_runtime_pass_by_value": false, "ragged_offset_multiplier": 1, "virtual": false},
+      {"when": "${running}", "uid": 9, "name": "Batchnorm_0::NEXT_RUNNING_MEAN", "data_type": "${dtr}", "dims": "${dims_p}", "strides": "${stride_s}", "alignment": "${al}", "is_runtime_pass_by_value": false, "ragged_offset_multiplier": 1, "virtual": false},
+      {"when": "${running}", "uid": 10, "name": "Batchnorm_0::NEXT_RUNNING_VARIANCE", "data_type": "${dtr}", "dims": "${dims_p}", "strides": "${stride_s}", "alignment": "${al}", "is_runtime_pass_by_value": false, "ragged_offset_multiplier": 1, "virtual": false},
+      {"when": "${with_mom}", "uid": 11, "name": "momentum", "data_type": "double", "dims": [1], "strides": [1], "value": 0.14325573613681652, "value_type": "Float64Value", "virtual": false}
+    ],
+    "node_patches": [
+      {"when": "${running}", "node": "Batchnorm_0", "section": "inputs", "set": {"prev_running_mean_tensor_uid": 7, "prev_running_variance_tensor_uid": 8}},
+      {"when": "${with_mom}", "node": "Batchnorm_0", "section": "inputs", "set": {"momentum_tensor_uid": 11}},
+      {"when": "${running}", "node": "Batchnorm_0", "section": "outputs", "set": {"next_running_mean_tensor_uid": 9, "next_running_variance_tensor_uid": 10}},
+      {"when": "${family == 'stat_mean_only'}", "node": "Batchnorm_0", "section": "outputs", "set": {"inv_variance_tensor_uid": null}},
+      {"when": "${family == 'stat_invvar_only'}", "node": "Batchnorm_0", "section": "outputs", "set": {"mean_tensor_uid": null}}
+    ]
+  }
+}
