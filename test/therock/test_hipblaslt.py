@@ -94,8 +94,8 @@ if AMDGPU_FAMILIES == "gfx1151" and platform == "windows":
 test_filter = []
 if test_type == "quick":
     test_filter.append("--gtest_filter=*smoke*")
-elif test_type == "quick":
-    test_filter.append("--gtest_filter=*quick*")
+elif test_type == "standard":
+    test_filter.append("--gtest_filter=*smoke*:*quick*:*pre_checkin*-*known_bug*")
 
 # The tuning store's tests are a separate binary. They need no GPU and take well
 # under a second, so the first shard runs all of them, without gtest sharding.
