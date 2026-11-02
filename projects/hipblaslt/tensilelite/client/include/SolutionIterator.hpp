@@ -215,11 +215,15 @@ namespace TensileLite
         class TopSolutionIterator : public SolutionIterator
         {
         public:
+            /// requireSelectedSolution: a problem for which the library selects no
+            /// solution is counted as an error (error() != 0, so the client exits
+            /// non-zero) and skipped, instead of falling back to library solution 0.
             TopSolutionIterator(
                 std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                 std::shared_ptr<Hardware>                                      hardware,
                 double                                                         predictionThreshold,
                 int                                                            numSolutions,
+                bool                                                           requireSelectedSolution,
                 bool                                                           printWinnerOnly,
                 bool                                                           printRejectedPredicates);
 
@@ -228,6 +232,8 @@ namespace TensileLite
 
             virtual void preSolution(ContractionSolution* const solution) override;
             virtual void postSolution() override;
+
+            virtual int error() const override;
 
             virtual bool                                 moreSolutionsInProblem() const override;
             virtual std::shared_ptr<ContractionSolution> getSolution() override;
@@ -242,6 +248,8 @@ namespace TensileLite
             int                                               m_currentSolutionIdx = 0;
             double                                            m_predictionThreshold;
             double                                            m_currentPrediction;
+            bool                                              m_requireSelectedSolution  = false;
+            int                                               m_problemsWithoutSelection = 0;
         };
     } // namespace Client
 } // namespace TensileLite

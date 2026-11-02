@@ -370,6 +370,10 @@ namespace TensileLite
                 ("solution-start-idx",       po::value<int>()->default_value(-1), "First solution to run")
                 ("num-solutions",            po::value<int>()->default_value(-1), "Number of solutions to run")
                 ("best-solution",            po::value<bool>()->default_value(false), "Best solution benchmark mode")
+                ("require-selected-solution", po::value<bool>()->default_value(false), "With --best-solution: a problem for which "
+                                                                                       "the library selects no solution is an error "
+                                                                                       "(non-zero exit) and is skipped, instead of "
+                                                                                       "running library solution 0.")
 
                 ("results-file",             po::value<std::string>()->default_value("results.csv"), "File name to write results.")
                 ("no-results-file",          po::value<bool>()->default_value(false),                "Write no results file (results-file is ignored).")

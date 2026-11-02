@@ -8,12 +8,13 @@
 # small size, nothing timed or validated. Shipped hipBLASLt Prediction logic is non-MX, so
 # this config is too.
 #
-# Not detected: an empty selection. With --best-solution the client falls back to library
-# solution 0 when the library selects nothing, and passes. So this covers logic write ->
-# library build -> load -> the Origami ranking call, not "the selection is non-empty".
-# Solution 0 is the MT128x128 tile; for the library client's size (128x128x1x512, the dummy
-# size used when the logic has no exact sizes) Origami ranks MT64x64 first, so a run that
-# reports MT64x64 shows the selection went through Origami.
+# An empty selection fails the test: the LibraryClient step runs the client with
+# --require-selected-solution, so a problem the library selects nothing for is reported
+# ("No solution selected for problem ...") and the client and Tensile exit non-zero, instead
+# of the client falling back to library solution 0. Solution 0 is the MT128x128 tile; for the
+# library client's size (128x128x1x512, the dummy size used when the logic has no exact sizes)
+# Origami ranks MT64x64 first, so a run that reports MT64x64 shows the selection went through
+# Origami.
 #
 # gfx950 only: the logic names one architecture, and the selection needs an Origami hardware
 # model (gfx950 has one).
