@@ -36,7 +36,8 @@ TESTING (`/bank-conflict` + a wall-time sweep) -- neither falls out on these num
 edges (relabel / reorder / identity) that beat both are trustworthy winners and DO decide outright.
 
 Validity is rocKE's own gates: :func:`mma_operand_layout_sound` (per-operand sound MMA operand), optionally
-the pairwise :func:`mma_pair_k_aligned` (``A.K-dist == B.K-dist`` -- pass ``k_partner``), and the tier from
+the pairwise :func:`mma_pair_k_aligned` (A and B hold the same K at the positions the instruction couples --
+pass ``k_partner`` with both canonical layouts), and the tier from
 :func:`classify_transform`. No reference tables, no hand formulas -- read off the actual layouts, so it is
 correct for any context (atom / wave / #atoms / tile shape / dtype).
 """
@@ -199,6 +200,7 @@ def evaluate_transform(
     *,
     canon=None,
     k_partner=None,
+    k_partner_canon=None,
     dtype_bits: int = 16,
     through_lds: bool = False,
     lds_conflict_cost=None,
@@ -209,18 +211,30 @@ def evaluate_transform(
     ``source``/``target`` are ``WarpDistributionEncoding`` or forward maps. Validity gates (all optional, all
     rocKE's own solvers):
     - ``canon`` -- the atom's canonical operand ref -> **per-operand** soundness (:func:`mma_operand_layout_sound`).
-    - ``k_partner`` -- the OTHER operand's target layout -> the **pairwise** ``A.K-dist == B.K-dist`` half of
-      the sound MAC (:func:`mma_pair_k_aligned`). Without it, that half is the caller's responsibility.
+    - ``k_partner`` -- the OTHER operand's target layout -> the **pairwise** half of the sound MAC
+      (:func:`mma_pair_k_aligned`): the target and ``k_partner`` hold the same K at every pair of positions
+      the instruction couples. The coupling comes from the two canonical layouts, so ``k_partner`` needs
+      ``canon`` (the target's) and ``k_partner_canon`` (the partner's); without either it raises
+      ``ValueError``. Without ``k_partner``, that half is the caller's responsibility.
     Cost knobs: ``through_lds`` allows an LDS reposition (pass ``lds_conflict_cost=(store_bc, read_bc)`` for its
     true cost; unset = flagged lower bound). With NO ``canon`` and NO ``k_partner`` the result is
     transform-cost-ONLY and does not imply a valid MMA.
     """
+    if k_partner is not None and (canon is None or k_partner_canon is None):
+        raise ValueError(
+            "k_partner needs canon= and k_partner_canon= -- A and B K positions pair through the "
+            "instruction's canonical layouts, which define the coupling"
+        )
     src, tgt = as_forward_map(source), as_forward_map(target)
     sound = (
         mma_operand_layout_sound(tgt, canon).severity if canon is not None else "n/a"
     )
     k_match = (
-        mma_pair_k_aligned(tgt, k_partner).severity if k_partner is not None else "n/a"
+        mma_pair_k_aligned(
+            tgt, k_partner, a_canon=canon, b_canon=k_partner_canon
+        ).severity
+        if k_partner is not None
+        else "n/a"
     )
     works = (canon is None or sound == "ok") and (k_partner is None or k_match == "ok")
     valid_note = f"sound={sound}, K-match={k_match}"
@@ -301,6 +315,7 @@ def optimize_layout(
     *,
     canon=None,
     k_partner=None,
+    k_partner_canon=None,
     dtype_bits: int = 16,
     through_lds: bool = False,
     lds_conflict_cost=None,
@@ -322,6 +337,7 @@ def optimize_layout(
                 tgt,
                 canon=canon,
                 k_partner=k_partner,
+                k_partner_canon=k_partner_canon,
                 dtype_bits=dtype_bits,
                 through_lds=through_lds,
                 lds_conflict_cost=lds_conflict_cost,

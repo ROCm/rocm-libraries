@@ -19,11 +19,21 @@ about *where each element lives* comes from our encodings; the pure value object
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any, Callable
 
+from ...core.dtypes import dtype_info
+from ...core.ir import I8, I32, U8, VectorType
+from ...core.storage import BitPacking
 from .descriptors import TensorDesc, TensorWindow
 from .encoding import WarpDistributionEncoding
-from .fragments import Fragment, TileDesc
+from .fragments import (
+    Fragment,
+    TileDesc,
+    _fragment_storage_type,
+    _is_packed,
+    _storage_element,
+)
 
 __all__ = [
     "emit_tensor_coordinates",
@@ -33,31 +43,47 @@ __all__ = [
     "store_fragment",
 ]
 
-# Element byte-widths, keyed by the rocke ``ir.Type`` name. Drives the load/store
-# alignment so NO dtype is baked into the verb -- the width follows the fragment's type.
-_BYTE_WIDTH = {
-    "i8": 1,
-    "fp8e4m3": 1,
-    "bf8e5m2": 1,
-    "i16": 2,
-    "f16": 2,
-    "bf16": 2,
-    "i32": 4,
-    "f32": 4,
-    "i64": 8,
-    "f64": 8,
-}
+# Sub-byte elements are packed into 32-bit words; one word is the smallest unit a lane accesses.
+_WORD_BITS = 32
 
 
-def _align_of(dtype: Any) -> int:
-    """Natural alignment (bytes) for an ``ir.Type`` -- the element's own width."""
-    try:
-        return _BYTE_WIDTH[dtype.name]
-    except KeyError as exc:
-        raise NotImplementedError(
-            f"no alignment known for dtype -- dtype={dtype.name!r}, "
-            f"expected one of {sorted(_BYTE_WIDTH)}"
-        ) from exc
+def _element_bits(dtype: Any) -> int:
+    """Bits of one logical element of `dtype` (``core.dtypes.dtype_info``)."""
+    return dtype_info(dtype.name).encoded_bits
+
+
+def _unit_bits(dtype: Any) -> int:
+    """Bits of one storage unit of `dtype` -- what one memory access moves per element of its
+    vector: the fragment storage element (``i32`` for tf32 and for packed sub-byte dtypes, the dtype
+    itself otherwise). Also the access's natural alignment, in bits."""
+    return dtype_info(_storage_element(dtype).name).encoded_bits
+
+
+def _unit_count(dtype: Any, elements: int) -> int:
+    """How many storage units hold `elements` logical elements of `dtype` (whole units)."""
+    return elements * _element_bits(dtype) // _unit_bits(dtype)
+
+
+def _unit_index(b: Any, element_index: Any, dtype: Any) -> Any:
+    """Convert a flat element index into the storage-unit index an access is addressed by,
+    ``element_index * bits / unit_bits``. Emits nothing when one element is one unit (every
+    byte-or-wider dtype), so their IR is unchanged. A packed index is divided by the elements of one
+    whole-word group before it is multiplied by that group's words, ``(element_index / 16) * 3`` for
+    a 6-bit dtype: exact, because every packed access starts on a whole word and so on a whole group
+    (:func:`_check_packed_runs`), and it never overflows i32 where the element index does not, as
+    multiplying first would past a third of the i32 range for a 6-bit dtype."""
+    bits, unit = _element_bits(dtype), _unit_bits(dtype)
+    if bits == unit:
+        return element_index
+    common = math.gcd(bits, unit)
+    groups = b.div(element_index, b.const_i32(unit // common))
+    return groups if bits == common else b.mul(groups, b.const_i32(bits // common))
+
+
+def _packed_group(dtype: Any) -> tuple[int, int]:
+    """The smallest whole-word group of a packed `dtype`: ``(elements, words)`` -- (8, 1) for a
+    4-bit dtype, (16, 3) for a 6-bit one."""
+    return BitPacking(_element_bits(dtype)).group(_WORD_BITS)
 
 
 def _cast_element(b: Any, value: Any, src: Any, dst: Any) -> Any:
@@ -161,19 +187,56 @@ def emit_tensor_coordinates(
     )
 
 
+def _refuse_u8_fragment(verb: str, dtype: Any) -> None:
+    """Refuse a u8 fragment in a verb that builds the register vector from a zero vector of the
+    storage type: core's ``zero_vec`` has no u8 form. The i8 zero vector reinterpreted is the same
+    bits, so the message names that route.
+    """
+    if dtype == U8:
+        raise NotImplementedError(
+            f"{verb} cannot build a u8 fragment: core's zero_vec has no u8 form -- TODO: not "
+            f"implemented yet; build an I8 fragment with {verb} and b.bitcast its value to "
+            f"vec<u8 x n>"
+        )
+
+
+def _move_registers(
+    b: Any, vector: Any, moves: Sequence[tuple[int, int]], count: int
+) -> Any:
+    """A new ``count``-element register vector of ``vector``'s element type holding, for each
+    ``(src, dst)`` of `moves` in order, element ``src`` of `vector` at element ``dst``: a
+    compile-time register shuffle (``vec_extract`` / ``vec_insert`` into a zero vector). Elements no
+    move writes stay zero.
+
+    A u8 vector is moved as the i8 vector of the same bits, since core's ``zero_vec`` has no u8
+    form, and the result reinterpreted back to u8.
+    """
+    elem = vector.type.elem
+    if elem == U8:
+        as_i8 = b.bitcast(vector, VectorType(I8, vector.type.count))
+        return b.bitcast(_move_registers(b, as_i8, moves, count), VectorType(U8, count))
+    out = b.zero_vec(elem, count)
+    for src, dst in moves:
+        out = b.vec_insert(out, b.vec_extract(vector, src), dst)
+    return out
+
+
 def fill_fragment(b: Any, fragment: Fragment, scalar: Any) -> None:
-    """Set every register of `fragment` to `scalar`, element-wise (no layout, no addressing).
+    """Set every register of `fragment` to `scalar`, element-wise (no layout, no addressing). A zero
+    fill is the zero of the fragment's storage type, so a tf32 or packed fragment is all-zero words.
 
     Only a compile-time zero fill is implemented today. A nonzero or runtime `scalar` is REJECTED
     rather than silently zero-filled, so a caller asking for ones gets a loud failure instead of a
-    wrong fragment.
+    wrong fragment. A u8 fragment is refused (:func:`_refuse_u8_fragment`).
     """
+    _refuse_u8_fragment("fill_fragment", fragment.dtype)
     if not (isinstance(scalar, int) and scalar == 0):
         raise NotImplementedError(
             f"fill_fragment supports only a compile-time zero fill -- got scalar={scalar!r}; "
             "nonzero/runtime scalar splat is not implemented"
         )
-    fragment.value = b.zero_vec(fragment.dtype, fragment.tile_desc.register_count)
+    storage = fragment.storage_type
+    fragment.value = b.zero_vec(storage.elem, storage.count)
 
 
 def _as_value(b: Any, x: Any) -> Any:
@@ -254,6 +317,12 @@ def _address(
     return address
 
 
+def _lds_storage_element(dtype: Any) -> Any:
+    """The element type of an LDS buffer holding a `dtype` tensor: ``i32`` words for a packed
+    sub-byte dtype, the tensor dtype itself otherwise."""
+    return I32 if _is_packed(dtype) else dtype
+
+
 def _check_lds_buffer(
     verb: str,
     buffer: Any,
@@ -261,24 +330,45 @@ def _check_lds_buffer(
     lds_swizzle: bool | Callable[[Any, list], list],
 ) -> None:
     """Fail fast unless ``buffer`` can hold ``tensor``: an LDS buffer is flat (rank 1), holds the
-    tensor's dtype, and holds at least :func:`lds_element_span` elements (the descriptor's span, or
-    the built-in swizzle's reach). The descriptor is the one home of the buffer's layout; the
-    allocation only gives it room, so a buffer that disagrees with it is refused here rather than
-    read or written out of range (LDS accesses are unclipped). Window origins are trusted, as for
-    every LDS access."""
+    tensor's LDS storage element (:func:`_lds_storage_element`), and holds the storage units of at
+    least :func:`lds_element_span` elements (the descriptor's span, or the built-in swizzle's reach).
+    The descriptor is the one home of the buffer's layout; the allocation only gives it room, so a
+    buffer that disagrees with it is refused here rather than read or written out of range (LDS
+    accesses are unclipped). Window origins are trusted, as for every LDS access. A packed tensor is
+    addressed in whole words, which no swizzle keeps together, so a swizzle is refused for it.
+    """
     buffer_type = buffer.type
+    dtype = tensor.dtype
+    element = _lds_storage_element(dtype)
     span = lds_element_span(tensor, lds_swizzle)
+    units = -(-span * _element_bits(dtype) // _element_bits(element))
+    if _is_packed(dtype) and lds_swizzle:
+        raise NotImplementedError(
+            f"{verb}: an LDS swizzle of packed {dtype.name} data -- a swizzle moves elements, and "
+            f"{dtype.name} elements are addressed in whole 32-bit words -- TODO: not implemented yet"
+        )
     if len(buffer_type.shape) != 1:
         raise ValueError(
             f"{verb}: the LDS buffer {buffer_type.name} has rank {len(buffer_type.shape)} -- an LDS "
             f"buffer is flat; its layout lives in the tensor descriptor. Allocate "
-            f"smem_alloc({tensor.dtype.name}, [{span}])"
+            f"smem_alloc({element.name}, [{units}])"
         )
-    if buffer_type.elem.name != tensor.dtype.name:
+    if buffer_type.elem.name != element.name:
+        if _is_packed(dtype):
+            raise ValueError(
+                f"LDS buffer for {dtype.name} fragments must hold its storage words -- allocate "
+                f"smem_alloc(I32, [words]) sized from the descriptor; got {buffer_type.name}"
+            )
         raise ValueError(
-            f"{verb}: LDS buffer element {buffer_type.elem.name} != tensor dtype {tensor.dtype.name}"
+            f"{verb}: LDS buffer element {buffer_type.elem.name} != tensor dtype {dtype.name}"
         )
-    if span > buffer_type.shape[0]:
+    if units > buffer_type.shape[0]:
+        if _is_packed(dtype):
+            raise ValueError(
+                f"{verb}: the LDS tensor spans {span} {dtype.name} elements, {units} i32 words, "
+                f"but the buffer holds {buffer_type.shape[0]} -- size the allocation as "
+                f"ceil(lds_element_span * {_element_bits(dtype)} / 32) words"
+            )
         raise ValueError(
             f"{verb}: the LDS tensor spans {span} elements but the buffer holds "
             f"{buffer_type.shape[0]} -- size the allocation with lds_element_span"
@@ -343,16 +433,26 @@ def _register_positions(
 
 
 def _register_index(
-    b: Any, window: TensorWindow, tile_desc: TileDesc, base_index: Any, register: int
+    b: Any,
+    window: TensorWindow,
+    tile_desc: TileDesc,
+    base_index: Any,
+    register: int,
+    dtype: Any,
 ) -> Any:
-    """The register's element index: the lane base index plus the register's compile-time coordinate
-    offset linearized by the tensor strides. Consecutive registers' indices then differ by a constant,
-    which the backend vectorizer can merge; it is bit-exact with :func:`_address` of the register's
-    positions by linearity."""
+    """The register's storage-unit index: the lane base index (already in storage units, see
+    :func:`_unit_index`) plus the register's compile-time coordinate offset linearized by the tensor
+    strides and converted to units. Consecutive registers' indices then differ by a constant, which
+    the backend vectorizer can merge; it is bit-exact with :func:`_address` of the register's
+    positions by linearity. For every byte-or-wider dtype a unit is an element."""
     deltas = _register_coord_offsets(tile_desc.layout, register)
     lead = _leading_rank(window, len(deltas))
-    offset = sum(
-        delta * window.tensor.strides[lead + axis] for axis, delta in enumerate(deltas)
+    offset = _unit_count(
+        dtype,
+        sum(
+            delta * window.tensor.strides[lead + axis]
+            for axis, delta in enumerate(deltas)
+        ),
     )
     return base_index if offset == 0 else b.add(base_index, b.const_i32(offset))
 
@@ -398,87 +498,177 @@ def _clip_mask(
 
 
 def _zero_scalar(b: Any, dtype: Any) -> Any:
-    """A scalar 0 of `dtype` -- the zero-pad value handed to ``masked_global_load``."""
-    return b.vec_extract(b.zero_vec(dtype, 1), 0)
+    """A scalar 0 of `dtype`'s storage unit -- the zero-pad value handed to ``masked_global_load``."""
+    return b.vec_extract(b.zero_vec(_storage_element(dtype), 1), 0)
 
 
+# Storage elements moved with vector accesses: global loads, LDS loads and LDS stores
+# (global_load_vN, smem_load_vN, smem_store_vN). tf32 is held and moved as i32.
 _WIDE_OK = {
     "f16",
     "bf16",
     "f32",
     "i32",
-}  # dtypes global_load_vN / smem_load_vN vectorize
+    "fp8e4m3",
+    "bf8e5m2",
+    "i8",
+}
 
 
-def _contiguous_run(
-    tile_desc: TileDesc, window: TensorWindow, dtype: Any, is_lds: bool
-) -> int:
-    """Width of the innermost stride-1 register run -> a single WIDE load; else 1 (scalar).
+def _register_run(tile_desc: TileDesc, window: TensorWindow) -> tuple[int, int] | None:
+    """``(tensor axis, length)`` of the innermost register bucket when its registers are consecutive
+    elements in memory, else ``None``.
 
     The innermost register bucket varies fastest in the register index. Its registers are
     consecutive positions on their axis only when the bucket is that axis's INNERMOST hierarchical
     level (levels of length 1 inside it do not count). A bucket on an outer level steps the position
     by the product of the levels inside it -- an interleaved layout holds positions 0, 4, 8, 12 in
     four consecutive registers -- so it gives no run. When the bucket is the innermost level of the
-    tensor's stride-1 axis, its registers are memory-contiguous and can be one `global_load_vN` /
-    `smem_load_vN`. Width is the largest supported vector size for the dtype (8/4/2) dividing the run.
+    tensor's stride-1 axis, its registers are memory-contiguous. Because both spaces address an
+    element by ``sum(position * stride)``, that holds in LDS exactly as in global memory.
+    """
+    layout = tile_desc.layout
+    majors, minors = layout.register_to_rh_major, layout.register_to_rh_minor
+    if not majors:
+        return None
+    lead = _leading_rank(window, len(tile_desc.shape))
+    tile_axis = majors[-1] - 1  # innermost register bucket's X-dim -> tile axis
+    run_axis = lead + tile_axis
+    if tile_axis < 0 or window.tensor.strides[run_axis] != 1:
+        return None
+    inner_levels = layout.hierarchical_lengths[tile_axis][minors[-1] + 1 :]
+    if math.prod(inner_levels) != 1:
+        return None  # an outer level of its axis: consecutive registers are not consecutive positions
+    return run_axis, layout.bucket_length(majors[-1], minors[-1])
 
-    A wide GLOBAL load is UNMASKED, so it is emitted only for a tile that is FULLY IN BOUNDS on the
-    stride-1 run axis: the effective clip there (`window.bounds[axis]` or the tensor length) must be a
-    COMPILE-TIME multiple of the tile extent, so no tile overhangs the tensor. A ragged/odd tensor, or
-    a runtime clip that can't be proven aligned, falls to the SCALAR path (which masks against the
-    length) -- never an out-of-bounds wide read (the page-fault risk Principle 4 kills). LDS is EXEMPT:
-    the verbs check that the flat buffer holds the descriptor's whole span (:func:`_check_lds_buffer`)
-    and LDS accesses are unclipped, so the gate applies to global only. Because both spaces address
-    an element by ``sum(position * stride)``, consecutive registers of a run on a stride-1 axis are
-    consecutive elements in LDS exactly as in global memory.
+
+def _tile_in_bounds(tile_desc: TileDesc, window: TensorWindow) -> bool:
+    """True when no tile of this window can overhang an axis it spans, so a GLOBAL access needs no
+    mask: every tile axis's effective clip (``window.bounds[axis]`` or the tensor length) is a
+    COMPILE-TIME multiple of the tile extent, and the tile origin is on the tile grid.
+
+    Not just the stride-1 run axis: a wide K-run at a fixed but OOB M row (odd M, aligned K) is just as
+    out of bounds as an overhanging run. A COMPILE-TIME mid-tile origin is caught (it could straddle
+    the boundary and overhang); a runtime (SSA) origin is TRUSTED grid-aligned (every caller:
+    block_id*tile). This is a PARTIAL guard -- an SSA mid-tile origin (attention) is not caught; that
+    is DEFERRED with attention support (see _origin_misaligned). Only the tile axes are checked: a
+    leading axis is positioned by its origin and not clipped, exactly as in _clip_mask.
+    """
+    lead = _leading_rank(window, len(tile_desc.shape))
+    for tile_axis, extent in enumerate(tile_desc.shape):
+        ax = lead + tile_axis
+        clip = (
+            window.bounds[ax]
+            if window.bounds is not None and window.bounds[ax] is not None
+            else window.tensor.lengths[ax]
+        )
+        if not (isinstance(clip, int) and clip % extent == 0):
+            return False
+        if _origin_misaligned(window.origin[ax], extent):
+            return False
+    return True
+
+
+def _check_packed_runs(
+    verb: str, tile_desc: TileDesc, window: TensorWindow, dtype: Any, is_lds: bool
+) -> int:
+    """Fail fast unless every access of a packed `dtype` moves whole 32-bit words, and return the
+    run length in elements.
+
+    A lane cannot write part of a word another lane owns, so each lane's registers must form runs of
+    whole words along the tensor's stride-1 axis (:func:`_register_run`; a multiple of the dtype's
+    whole-word group, 8 elements for 4 bits, 16 for 6 bits), and each run must start on a group
+    boundary: every other stride and a compile-time origin on the run axis are multiples of the
+    group. A clipped GLOBAL window masks whole groups, so its compile-time bound along the stride-1
+    axis must be a multiple of the group too (a runtime bound is trusted aligned, as runtime origins
+    are). LDS accesses are unclipped."""
+    group, _ = _packed_group(dtype)
+    run = _register_run(tile_desc, window)
+    length = 1 if run is None else run[1]
+    # "an 8-element boundary", "a 16-element boundary"
+    article = "an" if str(group).startswith("8") else "a"
+    need = (
+        f"{verb} of {dtype.name} needs each lane's registers to form runs of whole 32-bit words "
+        f"along the tensor's stride-1 axis (multiples of {group} elements, starting on {article} "
+        f"{group}-element boundary)"
+    )
+    if run is None or length % group:
+        raise ValueError(
+            f"{need}; this layout gives runs of {length} "
+            f"{'element' if length == 1 else 'elements'} -- choose a layout whose innermost "
+            "register run lies along the stride-1 axis"
+        )
+    run_axis = run[0]
+    for axis, stride in enumerate(window.tensor.strides):
+        if axis != run_axis and stride % group:
+            raise ValueError(
+                f"{need}; tensor axis {axis} steps by {stride} elements, so its runs start off "
+                f"that boundary -- pad that stride to a multiple of {group}"
+            )
+    origin = window.origin[run_axis]
+    if isinstance(origin, int) and origin % group:
+        raise ValueError(
+            f"{need}; the window origin on the stride-1 axis is {origin} -- place the window on a "
+            f"multiple of {group}"
+        )
+    if not is_lds:
+        bound = (
+            window.bounds[run_axis]
+            if window.bounds is not None and window.bounds[run_axis] is not None
+            else window.tensor.lengths[run_axis]
+        )
+        if isinstance(bound, int) and bound % group:
+            raise ValueError(
+                f"{verb} of a clipped {dtype.name} window needs its bound along the stride-1 axis "
+                f"to be a multiple of {group} elements (whole 32-bit words) -- got {bound}"
+            )
+    return length
+
+
+def _contiguous_run(
+    tile_desc: TileDesc,
+    window: TensorWindow,
+    dtype: Any,
+    is_lds: bool,
+    *,
+    verb: str = "load_fragment / store_fragment",
+) -> int:
+    """Storage units one access moves: the widest vector over the innermost stride-1 register run
+    (:func:`_register_run`) -> a single WIDE load; else 1 (one element). `dtype` is the logical
+    dtype; the width is counted in its storage units (:func:`_unit_bits`), which are its elements for
+    every byte-or-wider dtype. Width is the largest supported vector size (16/8/4/2) of at most 16
+    bytes dividing the run.
+
+    A wide GLOBAL load is UNMASKED, so it is emitted only for a tile that is FULLY IN BOUNDS
+    (:func:`_tile_in_bounds`). A ragged/odd tensor, or a runtime clip that can't be proven aligned,
+    falls to the SCALAR path (which masks against the length) -- never an out-of-bounds wide read (the
+    page-fault risk Principle 4 kills). LDS is EXEMPT: the verbs check that the flat buffer holds the
+    descriptor's whole span (:func:`_check_lds_buffer`) and LDS accesses are unclipped, so the gate
+    applies to global only.
 
     The width must also divide every OTHER stride, leading axes included: a run then starts at a
     multiple of the width whatever the positions on the other axes, so the ``align`` the access claims
-    holds (an odd batch stride would otherwise start a wide run mid-vector)."""
-    layout = tile_desc.layout
-    if dtype.name not in _WIDE_OK:
+    holds (an odd batch stride would otherwise start a wide run mid-vector).
+
+    A packed sub-byte dtype has no one-element access: its runs must be whole words
+    (:func:`_check_packed_runs`, which raises with `verb` otherwise). A global tile that may overhang
+    moves one whole-word group per access, masked as a unit; any other packed access is the widest
+    whole-group vector of words dividing the run."""
+    if _is_packed(dtype):
+        return _packed_access_units(verb, tile_desc, window, dtype, is_lds)
+    if _storage_element(dtype).name not in _WIDE_OK:
         return 1
-    majors, minors = layout.register_to_rh_major, layout.register_to_rh_minor
-    if not majors:
+    run = _register_run(tile_desc, window)
+    if run is None:
         return 1
-    lead = _leading_rank(window, len(tile_desc.shape))
-    tile_axis = majors[-1] - 1  # innermost register bucket's X-dim -> tile axis
-    strides = window.tensor.strides
-    run_axis = lead + tile_axis
-    if tile_axis < 0 or strides[run_axis] != 1:
+    run_axis, length = run
+    if not is_lds and not _tile_in_bounds(tile_desc, window):
         return 1
-    inner_levels = layout.hierarchical_lengths[tile_axis][minors[-1] + 1 :]
-    if math.prod(inner_levels) != 1:
-        return 1  # an outer level of its axis: consecutive registers are not consecutive positions
-    other_strides = [stride for axis, stride in enumerate(strides) if axis != run_axis]
-    if not is_lds:
-        # Fully-in-bounds gate (global only): a wide load is UNMASKED, so it is safe only if the tile
-        # overhangs NO axis it spans -- not just the stride-1 run axis. A wide K-run at a fixed but
-        # OOB M row (odd M, aligned K) is just as out of bounds as an overhanging run. So EVERY axis's
-        # effective clip must be a compile-time multiple of the tile extent on that axis; otherwise
-        # some tile overhangs and the unmasked read faults -> scalarize (the masked path is safe).
-        # Every axis's effective clip must be a compile-time tile multiple AND the tile origin must be on
-        # the tile grid: a COMPILE-TIME mid-tile origin is caught (it could straddle the boundary and
-        # overhang); a runtime (SSA) origin is TRUSTED grid-aligned (every caller: block_id*tile). This
-        # is a PARTIAL guard -- an SSA mid-tile origin (attention) is not caught; that is DEFERRED with
-        # attention support (see _origin_misaligned). Only the tile axes are checked: a leading axis
-        # is positioned by its origin and not clipped, exactly as in _clip_mask.
-        for tile_axis, extent in enumerate(tile_desc.shape):
-            ax = lead + tile_axis
-            clip = (
-                window.bounds[ax]
-                if window.bounds is not None and window.bounds[ax] is not None
-                else window.tensor.lengths[ax]
-            )
-            if not (isinstance(clip, int) and clip % extent == 0):
-                return 1
-            if _origin_misaligned(window.origin[ax], extent):
-                return 1
-    length = layout.bucket_length(majors[-1], minors[-1])
-    max_vw = (
-        16 // _BYTE_WIDTH[dtype.name]
-    )  # one load = dwordx4 = 16 bytes; longer runs -> N loads
+    other_strides = [
+        stride for axis, stride in enumerate(window.tensor.strides) if axis != run_axis
+    ]
+    # One load = dwordx4 = 16 bytes; longer runs -> N loads.
+    max_vw = 128 // _unit_bits(dtype)
     for vw in (16, 8, 4, 2):
         if (
             vw <= max_vw
@@ -487,6 +677,42 @@ def _contiguous_run(
         ):
             return vw
     return 1
+
+
+def _packed_access_units(
+    verb: str, tile_desc: TileDesc, window: TensorWindow, dtype: Any, is_lds: bool
+) -> int:
+    """The words one access of a packed `dtype` moves (see :func:`_contiguous_run`): one whole-word
+    group for a global tile that may overhang (masked as a unit), else the widest whole-group count
+    of at most 4 words (16 bytes) that divides the run and keeps every run start on a multiple of
+    itself."""
+    length = _check_packed_runs(verb, tile_desc, window, dtype, is_lds)
+    _, group_words = _packed_group(dtype)
+    if not is_lds and not _tile_in_bounds(tile_desc, window):
+        return group_words
+    run_axis, _ = _register_run(tile_desc, window)
+    bits = _element_bits(dtype)
+    run_words = _unit_count(dtype, length)
+    other_strides = [
+        stride for axis, stride in enumerate(window.tensor.strides) if axis != run_axis
+    ]
+    for words in (4, 3, 2, 1):
+        if (
+            words % group_words == 0
+            and run_words % words == 0
+            and all(
+                stride * bits % (words * _WORD_BITS) == 0 for stride in other_strides
+            )
+        ):
+            return words
+    raise AssertionError("a whole-word group always divides a checked packed run")
+
+
+def _access_align(units: int, dtype: Any) -> int:
+    """The alignment (bytes) an access of `units` storage units claims: the access size when it is a
+    power of two, else the largest power of two dividing it (a 3-word access claims one word).
+    """
+    return (_unit_bits(dtype) // 8) * (units & -units)
 
 
 def _is_lds(source: Any) -> bool:
@@ -590,27 +816,29 @@ def _lds_index(
     register: int,
     lds_swizzle: bool | Callable[[Any, list], list],
     base_index: Any,
+    dtype: Any,
 ) -> Any:
-    """The flat LDS element index of `register`'s run start, ``sum(position * stride)`` over the
-    window's descriptor -- the same address rule as global memory.
+    """The flat LDS storage-unit index of `register`'s run start: ``sum(position * stride)`` over
+    the window's descriptor -- the same address rule as global memory -- in units of `dtype`'s LDS
+    storage element (:func:`_unit_index`; the element index for every byte-or-wider dtype).
 
-    Without a swizzle it is the lane base index (``base_index``, from :func:`_lane_base_index`,
-    emitted once per access) plus the register's compile-time offset: consecutive runs differ by a
-    constant, which the backend folds into the instruction offset and pairs into ``ds_read2`` /
-    ``ds_write2``. A swizzle is not linear, so a swizzled run rebuilds its positions, swizzles them
-    and linearises the result (``base_index`` is unused then).
+    Without a swizzle it is the lane base index (``base_index``, from :func:`_lane_base_index` in
+    storage units, emitted once per access) plus the register's compile-time offset: consecutive runs
+    differ by a constant, which the backend folds into the instruction offset and pairs into
+    ``ds_read2`` / ``ds_write2``. A swizzle is not linear, so a swizzled run rebuilds its positions,
+    swizzles them and linearises the result (``base_index`` is unused then).
 
     The swizzle sees the position on EVERY tensor axis, leading axes (their origins) first, so an
     element's swizzled address does not depend on the rank of the tile that reaches it.
     """
     if not lds_swizzle:
-        return _register_index(b, window, tile_desc, base_index, register)
+        return _register_index(b, window, tile_desc, base_index, register, dtype)
     coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
     lead = _leading_rank(window, len(coords))
     leading = [_as_value(b, window.origin[axis]) for axis in range(lead)]
     swizzle = _swizzle_lds_positions if lds_swizzle is True else lds_swizzle
     swizzled = swizzle(b, leading + _positions(b, window, coords))
-    return _address(b, window, swizzled[lead:], swizzled[:lead])
+    return _unit_index(b, _address(b, window, swizzled[lead:], swizzled[:lead]), dtype)
 
 
 def _checked_lds_base_index(
@@ -623,14 +851,16 @@ def _checked_lds_base_index(
     lds_swizzle: bool | Callable[[Any, list], list],
 ) -> Any:
     """Check the LDS buffer (and the built-in swizzle's layout rule), then return the lane base
-    index the unswizzled runs add their offsets to (``None`` when a swizzle is active).
+    index, in storage units, the unswizzled runs add their offsets to (``None`` when a swizzle is
+    active).
     """
     if lds_swizzle is True:
         _check_builtin_swizzle(window.tensor)
     _check_lds_buffer(verb, buffer, window.tensor, lds_swizzle)
     if lds_swizzle:
         return None
-    return _lane_base_index(b, window, tile_desc, thread)[1]
+    base_index = _lane_base_index(b, window, tile_desc, thread)[1]
+    return _unit_index(b, base_index, window.tensor.dtype)
 
 
 def _swizzle_vw(lds_swizzle: Any, dist_vw: int, align: int) -> int:
@@ -669,57 +899,68 @@ def load_fragment(
     TensorDesc (strides) + the tile_desc. `ptr` is the SOURCE the fragment is loaded from: a global
     ``ptr<...>`` (VMEM) OR an LDS ``smem<...>`` buffer from ``smem_alloc`` -- the load op is chosen
     from the source (:func:`_is_lds`), so the same verb stages global<->register and LDS<->register.
-    The fragment's dtype IS ``window.tensor.dtype`` (nothing is baked in). Where the window clips (an
+    The fragment's dtype IS ``window.tensor.dtype`` (nothing is baked in); its registers are read as
+    that dtype's storage units (:attr:`Fragment.storage_type`: i32 for tf32, whole i32 words for a
+    packed sub-byte dtype, whose runs must be whole words). Where the window clips (an
     element past its bound), OOB elements are filled with `pad` (`masked_global_load`); otherwise the
     plain `global_load` fast path (byte-identical to no-clip). In both spaces an element's index is
     ``sum(position * stride)`` over the window's descriptor. An LDS buffer is flat
     (``b.smem_alloc(td.dtype, [lds_element_span(td, lds_swizzle)])``) and the descriptor is its
-    layout: the buffer must be rank 1, hold the tensor's dtype and hold that span (refused
-    otherwise); LDS loads are unclipped.
+    layout: the buffer must be rank 1, hold the tensor's dtype (i32 words for a packed dtype) and
+    hold that span (refused otherwise); LDS loads are unclipped.
     `pad` default `0`; a non-zero `constant(value)` fill is reserved. `coherency` reserved.
 
     A rank-t tile covers the window's last t axes (t <= the window's rank, refused otherwise); each
-    leading axis is read at its origin.
+    leading axis is read at its origin. A u8 tensor is refused (:func:`_refuse_u8_fragment`).
     """
+    _refuse_u8_fragment("load_fragment", window.tensor.dtype)
     _check_tile_rank("load_fragment", window, tile_desc)
     _check_leading_bounds("load_fragment", window, tile_desc)
     dtype = window.tensor.dtype
-    align = _align_of(dtype)
     lds = _is_lds(ptr)
-    vw = _contiguous_run(tile_desc, window, dtype, lds)  # >1 -> one wide load per run
+    # Storage units per access (>1 -> one wide load per run) and the registers they hold.
+    vw = _contiguous_run(tile_desc, window, dtype, lds, verb="load_fragment")
     # A custom swizzle relocates whole units of its granularity (vw_elems), capped + range-checked to
     # [1, natural run]. The built-in bool swizzle preserves its run.
     if lds:
-        vw = _swizzle_vw(lds_swizzle, vw, align)
-    value = b.zero_vec(dtype, tile_desc.register_count)
+        vw = _swizzle_vw(lds_swizzle, vw, _unit_bits(dtype) // 8)
+    step = vw * _unit_bits(dtype) // _element_bits(dtype)
+    storage = _fragment_storage_type(dtype, tile_desc.register_count)
+    unit = storage.elem
+    value = b.zero_vec(unit, storage.count)
     if lds:
-        # LDS source: one flat element index per run (wide when contiguous), lane base once.
+        # LDS source: one flat storage-unit index per run (wide when contiguous), lane base once.
         base_index = _checked_lds_base_index(
             "load_fragment", b, ptr, window, tile_desc, thread, lds_swizzle
         )
-        for register in range(0, tile_desc.register_count, vw):
+        for register in range(0, tile_desc.register_count, step):
             index = _lds_index(
-                b, window, tile_desc, thread, register, lds_swizzle, base_index
+                b, window, tile_desc, thread, register, lds_swizzle, base_index, dtype
             )
-            loaded = b.smem_load_vN(ptr, index, dtype=dtype, n=vw)
+            loaded = b.smem_load_vN(ptr, index, dtype=unit, n=vw)
+            slot = _unit_count(dtype, register)
             for i in range(vw):
-                value = b.vec_insert(value, b.vec_extract(loaded, i), register + i)
+                value = b.vec_insert(value, b.vec_extract(loaded, i), slot + i)
         return Fragment(tile_desc, dtype, value)
-    zero: Any = None  # the pad scalar, emitted lazily on the first clipped element
-    for register in range(0, tile_desc.register_count, vw):
+    align = _unit_bits(dtype) // 8
+    zero: Any = None  # the pad scalar, emitted lazily on the first clipped access
+    for register in range(0, tile_desc.register_count, step):
         coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
         positions = _positions(b, window, coords)
-        address = _address(b, window, positions)
-        if vw > 1:
-            # Contiguous stride-1 run -> single vectorised global load (global_load_dwordxN).
-            loaded = b.global_load_vN(ptr, address, dtype, vw, align=vw * align)
-            for i in range(vw):
-                value = b.vec_insert(value, b.vec_extract(loaded, i), register + i)
-            continue
+        address = _unit_index(b, _address(b, window, positions), dtype)
+        slot = _unit_count(dtype, register)
+        # A wide access is only chosen for a tile that cannot overhang, so it never needs a mask; a
+        # packed whole-word group may, and is masked as a unit (its bound is whole groups).
         mask = _clip_mask(b, window, positions, tile_desc.shape)
-        if mask is None:
-            loaded = b.global_load(ptr, address, dtype, align=align)
-        else:
+        if mask is None and vw > 1:
+            # Contiguous stride-1 run -> single vectorised global load (global_load_dwordxN).
+            loaded = b.global_load_vN(
+                ptr, address, unit, vw, align=_access_align(vw, dtype)
+            )
+            for i in range(vw):
+                value = b.vec_insert(value, b.vec_extract(loaded, i), slot + i)
+            continue
+        if mask is not None:
             if pad != 0:
                 # Only a zero clip pad is implemented; a per-stage pad (e.g. -inf for a max) is
                 # reserved for the reduction stages.
@@ -729,9 +970,32 @@ def load_fragment(
                 )
             if zero is None:
                 zero = _zero_scalar(b, dtype)
-            loaded = b.masked_global_load(ptr, address, mask, zero, dtype, align=align)
-        value = b.vec_insert(value, loaded, register)
+        for i in range(vw):
+            unit_address = address if i == 0 else b.add(address, b.const_i32(i))
+            if mask is None:
+                loaded = b.global_load(ptr, unit_address, unit, align=align)
+            else:
+                loaded = b.masked_global_load(
+                    ptr, unit_address, mask, zero, unit, align=align
+                )
+            value = b.vec_insert(value, loaded, slot + i)
     return Fragment(tile_desc, dtype, value)
+
+
+def _stored_unit(b: Any, fragment: Fragment, slot: int, out_dtype: Any) -> Any:
+    """Storage register `slot` of `fragment`, cast to `out_dtype` (:func:`_cast_element`)."""
+    return _cast_element(
+        b, b.vec_extract(fragment.value, slot), fragment.dtype, out_dtype
+    )
+
+
+def _global_store_units(
+    b: Any, ptr: Any, address: Any, units: list[Any], align: int
+) -> None:
+    """Store `units` at consecutive storage-unit addresses from `address`, one scalar store each."""
+    for i, value in enumerate(units):
+        unit_address = address if i == 0 else b.add(address, b.const_i32(i))
+        b.global_store(ptr, unit_address, value, align=align)
 
 
 def store_fragment(
@@ -758,20 +1022,26 @@ def store_fragment(
     """
     _check_tile_rank("store_fragment", window, fragment.tile_desc)
     _check_leading_bounds("store_fragment", window, fragment.tile_desc)
+    tile_desc = fragment.tile_desc
     out_dtype = window.tensor.dtype
-    align = _align_of(out_dtype)
+    align = _unit_bits(out_dtype) // 8
     lds = _is_lds(ptr)
     # Wide LDS stores when the innermost register run is contiguous (ds_write_b{32,64,128}); the
-    # global store stays scalar (the C epilogue is one-shot + may clip/cast).
-    vw = (
-        _contiguous_run(fragment.tile_desc, window, out_dtype, is_lds=True)
-        if lds
-        else 1
-    )
-    # A custom swizzle relocates whole units of its granularity (vw_elems) -> the access is capped and
-    # range-checked to [1, natural run]. The built-in bool swizzle preserves its run.
+    # global store stays scalar (the C epilogue is one-shot + may clip/cast): one element, or one
+    # whole-word group of a packed dtype, per access.
     if lds:
+        vw = _contiguous_run(tile_desc, window, out_dtype, True, verb="store_fragment")
+        # A custom swizzle relocates whole units of its granularity (vw_elems) -> the access is
+        # capped and range-checked to [1, natural run]. The built-in bool swizzle preserves its run.
         vw = _swizzle_vw(lds_swizzle, vw, align)
+    elif _is_packed(out_dtype):
+        _check_packed_runs("store_fragment", tile_desc, window, out_dtype, False)
+        vw = _packed_group(out_dtype)[1]
+    else:
+        vw = 1
+    step = vw * _unit_bits(out_dtype) // _element_bits(out_dtype)
+    unit = _storage_element(out_dtype)
+
     # Global path: compute the LANE base-address ONCE (register 0 = the thread-only address, no register
     # offset), then emit each store as base + <compile-time constant> -- the fixed per-register coordinate
     # offset linearized by the strides. Consecutive registers' addresses then differ by a constant, which
@@ -782,47 +1052,46 @@ def store_fragment(
     # LDS path uses the same base-plus-constant form per wide run (see _lds_index).
     if lds:
         lds_base_index = _checked_lds_base_index(
-            "store_fragment", b, ptr, window, fragment.tile_desc, thread, lds_swizzle
+            "store_fragment", b, ptr, window, tile_desc, thread, lds_swizzle
         )
-        for register in range(0, fragment.tile_desc.register_count, vw):
+        for register in range(0, tile_desc.register_count, step):
             index = _lds_index(
                 b,
                 window,
-                fragment.tile_desc,
+                tile_desc,
                 thread,
                 register,
                 lds_swizzle,
                 lds_base_index,
+                out_dtype,
             )
+            slot = _unit_count(fragment.dtype, register)
             if vw == 1:
-                el = _cast_element(
-                    b,
-                    b.vec_extract(fragment.value, register),
-                    fragment.dtype,
-                    out_dtype,
+                b.smem_store_vN(
+                    ptr, [index], _stored_unit(b, fragment, slot, out_dtype), 1
                 )
-                b.smem_store_vN(ptr, [index], el, 1)
-            else:
-                vec = b.zero_vec(out_dtype, vw)
+            elif vw & (vw - 1):
+                # No LDS vector store of this width (a 3-word packed group): one store per word.
                 for i in range(vw):
-                    el = _cast_element(
-                        b,
-                        b.vec_extract(fragment.value, register + i),
-                        fragment.dtype,
-                        out_dtype,
-                    )
+                    el = _stored_unit(b, fragment, slot + i, out_dtype)
+                    b.smem_store_vN(ptr, [b.add(index, b.const_i32(i))], el, 1)
+            else:
+                vec = b.zero_vec(unit, vw)
+                for i in range(vw):
+                    el = _stored_unit(b, fragment, slot + i, out_dtype)
                     vec = b.vec_insert(vec, el, i)
                 b.smem_store_vN(ptr, [index], vec, vw)
         return
-    base_positions, base_index = _lane_base_index(b, window, fragment.tile_desc, thread)
-    for register in range(0, fragment.tile_desc.register_count, vw):
-        positions = _register_positions(b, fragment.tile_desc, base_positions, register)
-        address = _register_index(b, window, fragment.tile_desc, base_index, register)
-        element = b.vec_extract(fragment.value, register)
-        value = _cast_element(b, element, fragment.dtype, out_dtype)
-        mask = _clip_mask(b, window, positions, fragment.tile_desc.shape)
+    base_positions, base_index = _lane_base_index(b, window, tile_desc, thread)
+    base_index = _unit_index(b, base_index, out_dtype)
+    for register in range(0, tile_desc.register_count, step):
+        positions = _register_positions(b, tile_desc, base_positions, register)
+        address = _register_index(b, window, tile_desc, base_index, register, out_dtype)
+        slot = _unit_count(fragment.dtype, register)
+        units = [_stored_unit(b, fragment, slot + i, out_dtype) for i in range(vw)]
+        mask = _clip_mask(b, window, positions, tile_desc.shape)
         if mask is None:
-            b.global_store(ptr, address, value, align=align)
+            _global_store_units(b, ptr, address, units, align)
         else:
             with b.scf_if(mask):
-                b.global_store(ptr, address, value, align=align)
+                _global_store_units(b, ptr, address, units, align)

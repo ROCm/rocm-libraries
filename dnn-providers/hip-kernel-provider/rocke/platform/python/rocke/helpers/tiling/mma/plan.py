@@ -18,11 +18,17 @@ such -- ``a_layout`` / ``b_layout`` / ``c_layout`` return :class:`WarpDistributi
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
+from ....core.dtypes import normalize_dtype
+from ....core.ir import Type, dtype_to_ir_type
 from ..encoding import WarpDistributionEncoding
-from ..fragments import TileDesc
-from ..traits import MmaTraits, MmaTraitsCatalog, load_mma_traits
+from ..fragments import TileDesc, _fragment_dtype_ok
+from ..traits import (
+    MmaTraits,
+    MmaTraitsCatalog,
+    load_mma_traits,
+)
+from ..traits.backend_coverage import committed_backend_coverage
 from .styles import CanonicalStyle, LayoutStyle
 from .warp_encoding import canonical_layouts
 
@@ -36,17 +42,48 @@ __all__ = ["Tiling", "TileMmaPlan"]
 _SUBTILE_ORDERS = ("MNK", "MKN", "NMK", "NKM", "KMN", "KNM")
 
 
+def _ir_constant_name(dtype: Type) -> str:
+    """The ``rocke.core.ir`` constant an author writes for ``dtype`` (``F16`` for ``f16``): every
+    scalar IR type is exported under its name in upper case."""
+    return f"rocke.core.ir.{dtype.name.upper()}"
+
+
+def _require_scalar_ir_type(role: str, value: object) -> Type:
+    """Return ``value`` when it is a scalar IR type; otherwise raise naming the constant to pass.
+
+    ``role`` is the keyword the value came in (``"a"``, ``"b"``, ``"c"`` or ``"d"``). A dtype string
+    is refused rather than converted, so every MMA dtype the plan holds is the IR type the author
+    wrote.
+    """
+    ok, _ = _fragment_dtype_ok(value)
+    if ok:
+        return value  # type: ignore[return-value]
+    head = f"{role}= must be a scalar IR type such as rocke.core.ir.F16"
+    if isinstance(value, str):
+        try:
+            dtype = dtype_to_ir_type(value)
+        except ValueError:
+            raise ValueError(
+                f"{head}, not the string {value!r} -- rocke.core.ir has no type for "
+                f"{value!r}"
+            ) from None
+        raise ValueError(  # noqa: TRY004 -- every refused dtype argument is a ValueError
+            f"{head}, not the string {value!r} -- pass {_ir_constant_name(dtype)}"
+        )
+    # A composite IR type (vector, pointer, LDS) is shown by its IR spelling, anything else by repr.
+    shown = value.name if isinstance(value, Type) else repr(value)
+    raise ValueError(f"{head} -- got {shown} ({type(value).__name__})")
+
+
 @dataclass(frozen=True)
 class Tiling:
     """The wave-tile iteration policy -- the MMA object's knobs.
 
-    * ``atom_shape`` -- how to pick the hardware MMA atom. Two flavours (plus a default):
-        - a shape ``(M, N, K)`` tuple -> TARGET-AGNOSTIC: resolved to the atom for the bound
-          target + dtypes (MFMA on CDNA, WMMA on RDNA -- authorship carries no gfx branch);
-        - an explicit intrinsic name ``str`` (e.g. ``"mfma_f32_16x16x16f16"``) -> the escape
-          hatch: that exact backend op is used (target-specific by construction);
-        - ``None`` -> the wave shape itself (a single MMA).
-      The inner-K count the object runs is ``wave_K / atom_K``.
+    * ``atom_shape`` -- the hardware MMA atom's ``(M, N, K)``, a shape hint only: it is resolved
+      to the instruction for the bound target + dtypes (MFMA on CDNA, WMMA on RDNA -- authorship
+      carries no gfx branch). ``None`` (the default) means the wave shape itself (a single MMA).
+      The inner-K count the object runs is ``wave_K / atom_K``. To pin one exact instruction, name
+      it with ``TileMma(atom_override=...)`` instead.
     * ``order`` -- the M/N/K subtile loop-nest order (a permutation of ``"MNK"``). Stride
       convention: the RIGHT-MOST axis varies fastest (innermost); ``"MNK"`` runs K innermost.
       Iterated inside one ``TileMmaDriver`` call.
@@ -59,18 +96,23 @@ class Tiling:
       regardless -- there is no dense body to protect.
     """
 
-    atom_shape: Optional[tuple[int, int, int] | str] = None
+    atom_shape: tuple[int, int, int] | None = None
     order: str = "MNK"
     mac_prio: int = 0
 
     def __post_init__(self) -> None:
         atom = self.atom_shape
-        if atom is not None and not isinstance(atom, str):
-            if len(atom) != 3 or any(not isinstance(d, int) or d <= 0 for d in atom):
-                raise ValueError(
-                    f"atom_shape must be 3 positive ints or an intrinsic name -- "
-                    f"atom_shape={atom!r}"
-                )
+        if isinstance(atom, str):
+            raise ValueError(  # noqa: TRY004 -- an atom_shape the author mistyped is a ValueError
+                f"atom_shape is the instruction's (M, N, K) -- got the string {atom!r}; pin an "
+                f"instruction with TileMma(atom_override={atom!r})"
+            )
+        if atom is not None and (
+            len(atom) != 3 or any(not isinstance(d, int) or d <= 0 for d in atom)
+        ):
+            raise ValueError(
+                f"atom_shape must be 3 positive ints -- atom_shape={atom!r}"
+            )
         if self.order not in _SUBTILE_ORDERS:
             raise ValueError(
                 f"unknown subtile order -- order={self.order!r}, "
@@ -89,41 +131,55 @@ class Tiling:
 class TileMmaPlan:
     """A target-resolved wave-tile MMA design (dense; the M1 surface). IR-free.
 
-    ``TileMmaPlan((16, 16, 64), a="f16", b="f16", c="f32", target="gfx90a",
+    ``TileMmaPlan((16, 16, 64), a=F16, b=F16, c=F32, target="gfx90a",
     tiling=Tiling(atom_shape=(16, 16, 16)))`` -- resolution + validation happen here, fail-fast, with
     no IR. Feed the resolved layouts / ``emit_op`` to a :class:`TileMmaDriver` to walk the atom grid.
+
+    ``a``, ``b``, ``c`` and ``d`` are scalar IR types from ``rocke.core.ir`` (``F16``, ``F32``,
+    ``FP8E4M3``, ...): A and B are the operand dtypes, ``c`` the accumulator taken in and ``d`` the
+    result returned. ``d`` omitted means the result has the accumulator's dtype (``d = c``), which
+    is what every accumulate-in-place instruction does. A dtype string is refused with the constant
+    to pass instead. A and B may differ (``a=FP8E4M3, b=BF8E5M2``) wherever the target has such an
+    instruction.
+
+    ``atom_override="<op_id>"`` pins one exact instruction by name; ``a``/``b``/``c``/``d`` are then
+    optional: each one given must be one the instruction takes, and the rest are taken from it.
     """
 
     def __init__(
         self,
         shape: tuple[int, int, int] | None = None,
         *,
-        a: str | None = None,
-        b: str | None = None,
-        c: str | None = None,
+        a: Type | None = None,
+        b: Type | None = None,
+        c: Type | None = None,
+        d: Type | None = None,
         target: str,
         tiling: Tiling | None = None,
         style: LayoutStyle | None = None,
         catalog: MmaTraitsCatalog | None = None,
         atom_override: str | None = None,
     ) -> None:
+        for role, value in (("a", a), ("b", b), ("c", c), ("d", d)):
+            if value is not None:
+                _require_scalar_ir_type(role, value)
         tiling = tiling if tiling is not None else Tiling()
         style = style if style is not None else CanonicalStyle()
         catalog = catalog if catalog is not None else load_mma_traits()
 
         self._traits: MmaTraits
         if atom_override is not None:
-            # Name a specific intrinsic and DERIVE its M/N/K + dtypes from the traits (target still
-            # required, to validate/resolve). `shape`, if given, is the wave tile (a multiple of the
-            # atom); otherwise it IS the atom -- a single MMA. Any a/b/c passed are overridden.
+            # Pin one instruction by name. Its M/N/K come from the row; so do any of a/b/c/d the
+            # author leaves out, and each one given must be one the row takes. `shape`, if given, is
+            # the wave tile (a multiple of the atom); otherwise it IS the atom -- a single MMA.
             if tiling.atom_shape is not None:
                 raise ValueError(
                     "specify the atom via atom_override OR tiling.atom_shape, not both"
                 )
-            self._traits = self._resolve_atom(catalog, atom_override, target)
+            self._traits, (a, b, c, d) = self._resolve_named(
+                catalog, atom_override, target, a, b, c, d
+            )
             atom_shape = (self._traits.m, self._traits.n, self._traits.k)
-            a = b = self._traits.input_dtype
-            c = self._traits.output_dtype
             shape = tuple(shape) if shape is not None else atom_shape
         else:
             if shape is None:
@@ -132,31 +188,25 @@ class TileMmaPlan:
                 )
             if a is None or b is None or c is None:
                 raise ValueError(
-                    "a/b/c dtypes are required unless atom_override is given"
+                    "a/b/c dtypes are required unless the instruction is pinned with "
+                    "atom_override=..."
                 )
             shape = tuple(shape)
-            if a != b:
-                raise ValueError(
-                    f"MFMA requires matching A/B dtypes -- a={a!r}, b={b!r}"
-                )
-            # Resolve the atom + its traits from the knob: explicit intrinsic NAME, atom SHAPE,
-            # or (None) the wave shape itself. Both paths end with a resolved traits row.
-            atom_knob = tiling.atom_shape
-            if isinstance(atom_knob, str):
-                self._traits = self._resolve_by_name(catalog, atom_knob, target, a, c)
-                atom_shape = (self._traits.m, self._traits.n, self._traits.k)
-            else:
-                atom_shape = atom_knob if atom_knob is not None else shape
-                m, n, k = atom_shape
-                self._traits = catalog.select(
-                    target=target,
-                    input_dtype=a,
-                    output_dtype=c,
-                    m=m,
-                    n=n,
-                    k=k,
-                    family="dense",
-                )
+            # The atom is the tiling knob's (M, N, K), or (None) the wave shape itself.
+            atom_shape = tiling.atom_shape if tiling.atom_shape is not None else shape
+            m, n, k = atom_shape
+            self._traits = catalog.select(
+                target=target,
+                a=a,
+                b=b,
+                c=c,
+                d=d,
+                m=m,
+                n=n,
+                k=k,
+                family="dense",
+            )
+            d = d if d is not None else c
 
         if len(shape) != 3:
             raise ValueError(f"shape must be (M, N, K) -- got {shape!r}")
@@ -182,6 +232,7 @@ class TileMmaPlan:
         self._a_dtype = a
         self._b_dtype = b
         self._c_dtype = c
+        self._d_dtype = d
         self._target = target
 
         # C-oracle (rev-7 Principle 8): the DERIVED native C the style produces must equal the machine's
@@ -197,37 +248,59 @@ class TileMmaPlan:
         self._assert_accumulator_matches_oracle()
 
     @staticmethod
-    def _resolve_by_name(
-        catalog: MmaTraitsCatalog, op_id: str, target: str, a: str, c: str
-    ) -> MmaTraits:
-        """Resolve an EXPLICIT intrinsic name (escape hatch) to its traits, validating that it
-        exists, runs on ``target``, and matches the requested dtypes. ``catalog.get`` already
-        fails fast for unknown/reserved op_ids."""
-        traits = catalog.get(op_id)
-        if not traits.supports(target):
-            raise ValueError(
-                f"MMA intrinsic not available on target -- op_id={op_id!r}, "
-                f"target={target!r}, supported={list(traits.supported_targets)}"
-            )
-        if traits.input_dtype != a or traits.output_dtype != c:
-            raise ValueError(
-                f"MMA intrinsic dtype mismatch -- op_id={op_id!r}, intrinsic "
-                f"in/out=({traits.input_dtype},{traits.output_dtype}), requested ({a},{c})"
-            )
-        return traits
+    def _resolve_named(
+        catalog: MmaTraitsCatalog,
+        op_id: str,
+        target: str,
+        a: Type | None,
+        b: Type | None,
+        c: Type | None,
+        d: Type | None,
+    ) -> tuple[MmaTraits, tuple[Type, Type, Type, Type]]:
+        """Resolve an ``atom_override`` instruction name to its row and the plan's (A, B, C, D).
 
-    @staticmethod
-    def _resolve_atom(catalog: MmaTraitsCatalog, op_id: str, target: str) -> MmaTraits:
-        """Resolve an ``atom_override`` intrinsic NAME to its traits: validate it exists and runs
-        on ``target``. M/N/K + dtypes are DERIVED from it, so there is no dtype-match check (unlike
-        ``_resolve_by_name``, which validates against author-supplied dtypes)."""
+        The row must exist (``catalog.get`` fails fast listing the valid names) and run on
+        ``target``. Each dtype the author gives must be one the row takes -- for an integer row
+        whose signedness is selectable, that includes the unsigned twin, which is kept as given --
+        and every dtype left out is taken from the row. An omitted ``d`` is the row's result
+        dtype, never defaulted to ``c``.
+        """
         traits = catalog.get(op_id)
         if not traits.supports(target):
             raise ValueError(
-                f"MMA intrinsic not available on target -- op_id={op_id!r}, "
+                f"MMA instruction not available on target -- op_id={op_id!r}, "
                 f"target={target!r}, supported={list(traits.supported_targets)}"
             )
-        return traits
+        row = dict(zip("abcd", traits.ir_dtypes()))
+        row_names = {
+            "a": traits.a_dtype,
+            "b": traits.b_dtype,
+            "c": traits.c_dtype,
+            "d": traits.d_dtype,
+        }
+        given = {"a": a, "b": b, "c": c, "d": d}
+        clauses, fixes = [], []
+        for role, dtype in given.items():
+            if dtype is None:
+                continue
+            # The catalog spells dtypes by their canonical core.dtypes names: that is the match key.
+            asked = {**row_names, role: normalize_dtype(dtype.name)}
+            if not traits.accepts(**asked):
+                verb = "returns" if role == "d" else "takes"
+                clauses.append(
+                    f"{role}={dtype.name} but it {verb} {role.upper()}={row[role].name}"
+                )
+                fixes.append(f"{role}={_ir_constant_name(row[role])}")
+        if clauses:
+            omit = "a/b/c/d" if given["d"] is not None else "a/b/c"
+            raise ValueError(
+                f"MMA instruction dtype mismatch for {op_id!r} -- {'; '.join(clauses)} -- "
+                f"pass {', '.join(fixes)}, or omit {omit} to take them from the instruction"
+            )
+        resolved = tuple(
+            given[role] if given[role] is not None else row[role] for role in "abcd"
+        )
+        return traits, resolved  # type: ignore[return-value]
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -260,16 +333,25 @@ class TileMmaPlan:
         return self._target
 
     @property
-    def a_dtype(self) -> str:
+    def a_dtype(self) -> Type:
+        """The A operand dtype (an IR type)."""
         return self._a_dtype
 
     @property
-    def b_dtype(self) -> str:
+    def b_dtype(self) -> Type:
+        """The B operand dtype (an IR type)."""
         return self._b_dtype
 
     @property
-    def c_dtype(self) -> str:
+    def c_dtype(self) -> Type:
+        """The accumulator dtype the instruction takes in (an IR type)."""
         return self._c_dtype
+
+    @property
+    def d_dtype(self) -> Type:
+        """The result dtype the instruction returns (an IR type); equal to :attr:`c_dtype` for
+        every accumulate-in-place instruction."""
+        return self._d_dtype
 
     @property
     def op_id(self) -> str:
@@ -376,59 +458,59 @@ class TileMmaPlan:
                 f"atom-derived descriptor cannot express is not supported."
             )
 
-    # SOT dtype token -> arch-catalog token (naming-convention alias only).
-    _ARCH_DTYPE_ALIAS = {"f16": "fp16", "bf16": "bf16", "f32": "fp32", "f64": "fp64"}
+    def emit_op(self, *, scale_format: tuple[str, str] | None = None):
+        """Return the backend ``MmaOp`` that issues this plan's instruction on its target.
 
-    def emit_op(self):
-        """Resolve the backend ``MmaOp`` for ``b.mma`` from the arch op-registry -- keyed by
-        the ATOM shape (one ``b.mma`` consumes one atom).
+        Whether rocke issues an instruction, and with which backend op, is what the measured
+        backend coverage record says (``traits/data/backend_coverage.json``, loaded once per process
+        by :func:`~rocke.helpers.tiling.traits.backend_coverage.committed_backend_coverage`;
+        ``traits/README.md`` "Backend coverage" describes its classes). The op is fetched by the op
+        id the record holds for this (instruction, target) pair, never searched for by operand
+        dtypes and shape: several backend ops can share those. A pair whose class is not ``issuable`` raises
+        ``NotImplementedError`` naming the class. One ``b.mma`` with the op consumes one atom.
 
-        Lazy import: uses ``core.arch`` -- the op registry, NOT the mfma emission helpers --
-        so this layer stays independent of ``mfma_gemm_inner``.
+        The record holds one op per variant for two kinds of instruction. An integer instruction
+        whose operand signedness is selectable has one op per (A, B) dtype pair; the plan's own A
+        and B pick it, so a ``u8`` operand issues the unsigned instruction. A scaled instruction has
+        one op per scale format, the (A, B) scale dtypes it decodes: ``scale_format=("e8m0",
+        "e8m0")`` names it, and is required when the record holds more than one. The record refuses
+        ``scale_format`` for an instruction it does not record per scale format.
+
+        Emits no IR. Lazy import: uses ``core.arch`` -- the op registry, NOT the mfma emission
+        helpers -- so this layer stays independent of ``mfma_gemm_inner``.
         """
         from rocke.core.arch import ArchTarget
 
-        target = ArchTarget.from_gfx(self._target)
-        m, n, k = self._atom_shape
-        op = target.mma.op_for_shape(
-            family="mma",
-            a_dtype=self._ARCH_DTYPE_ALIAS.get(self._a_dtype, self._a_dtype),
-            b_dtype=self._ARCH_DTYPE_ALIAS.get(self._b_dtype, self._b_dtype),
-            c_dtype=self._ARCH_DTYPE_ALIAS.get(self._c_dtype, self._c_dtype),
-            m=m,
-            n=n,
-            k=k,
-        )
+        variant: dict[str, tuple[str, str]] = {}
+        if scale_format is not None:
+            variant["scale_format"] = scale_format
+        if self._traits.operand_signedness == "selectable":
+            variant["operand_dtypes"] = (
+                normalize_dtype(self._a_dtype.name),
+                normalize_dtype(self._b_dtype.name),
+            )
+        coverage = committed_backend_coverage()
+        status = coverage.status(self.op_id, self._target, **variant)
+        if status != "issuable":
+            raise NotImplementedError(
+                f"{self.op_id!r} on {self._target!r} is not issued by rocke yet (backend "
+                f"coverage: {status}) -- the plan can be visualised but not issued; the classes "
+                f"are described in helpers/tiling/traits/README.md -- TODO: not implemented yet"
+            )
+        backend_op = coverage.backend_op(self.op_id, self._target, **variant)
+        op = ArchTarget.from_gfx(self._target).mma.by_op_id(backend_op)
         if op is None:
             raise ValueError(
-                f"no backend MMA op for atom={self._atom_shape} "
-                f"{self._a_dtype}->{self._c_dtype} on target={self._target!r}"
+                f"backend coverage names backend op {backend_op!r} for {self.op_id!r} on "
+                f"{self._target!r}, but {self._target!r} has no such op -- the record no longer "
+                f"matches the ops core registers; regenerate it as traits/README.md describes "
+                f"under Backend coverage"
             )
         return op
-
-    def _ir_type(self, token: str):
-        """SOT dtype token (``f16``/``f32``/...) -> rocke ``ir.Type`` (lazy import seam)."""
-        from rocke.core import ir
-
-        try:
-            return getattr(
-                ir,
-                {
-                    "f16": "F16",
-                    "bf16": "BF16",
-                    "f32": "F32",
-                    "f8": "FP8E4M3",
-                    "bf8": "BF8E5M2",
-                }[token],
-            )
-        except KeyError as exc:
-            raise NotImplementedError(
-                f"no ir.Type for dtype token -- token={token!r}"
-            ) from exc
 
     def __repr__(self) -> str:
         return (
             f"TileMmaPlan(shape={self._shape}, atom={self._atom_shape}, "
             f"a={self._a_dtype!r}, b={self._b_dtype!r}, c={self._c_dtype!r}, "
-            f"target={self._target!r}, op_id={self.op_id!r})"
+            f"d={self._d_dtype!r}, target={self._target!r}, op_id={self.op_id!r})"
         )

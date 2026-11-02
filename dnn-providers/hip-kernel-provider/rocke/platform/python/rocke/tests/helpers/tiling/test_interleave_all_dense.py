@@ -5,15 +5,17 @@ traits row and PROVE, for the rows the construction can drive, that
 
   * the operand K-contiguous <-> free-dim-contiguous transpose is cross-lane-free (``reorder`` tier),
   * the C-shuffle (native accumulator -> store order) is cross-lane-free, and
-  * the MMA soundness (positional per-atom K-match) holds,
+  * the MMA soundness (per-atom K-match at the positions the instruction couples) holds -- except on the
+    mixed-width ``f8f6f4`` rows, where it is PROVEN to fail (see ``_operand_k_maps_differ``),
 
 for a single atom AND a 2x2-atom tile (``free_sub>1`` / multi-patch, e.g. the 32x32 atom's ``P=4``).
 
 Rows that CANNOT interleave are PROVEN to fail the SOT §9 interleavability gate (never skipped
-silently) -- only the non-square ``wmma_f32_32x16x128_f4`` does. gfx11 WMMA holds the whole K per lane and
-DUPLICATES the operand across the two 16-lane halves; that duplicate is modelled as a replication axis and
-proven cross-lane-free (per-lane element-set preservation + a within-one-copy ``reorder``). The exact
-population counts are asserted so a catalogue change (a new atom, a changed trait) trips the sweep.
+silently) -- only the non-square ``wmma_f32_32x16x128_f4`` does, and the interleaved construction refuses
+it by name. gfx11 WMMA holds the whole K per lane and DUPLICATES the operand across the two 16-lane halves;
+that duplicate is modelled as a replication axis and proven cross-lane-free (per-lane element-set
+preservation + a within-one-copy ``reorder``). The exact population counts are asserted so a catalogue
+change (a new atom, a changed trait) trips the sweep.
 
 Interleavability depends only on (shape, wave, element size), so bf8/fp8, bf16/f16 and f32/xf32 are
 equivalent — but every distinct dense row is still exercised.
@@ -26,6 +28,10 @@ import pytest
 from rocke.helpers.tiling.traits import load_mma_traits
 from rocke.helpers.tiling.layouts import make_tile_desc
 from rocke.helpers.tiling.mma.styles import AtomNumbers, InterleavedStyle
+from rocke.helpers.tiling.mma.warp_encoding import (
+    canonical_layouts,
+    encoder_supports_layout,
+)
 from rocke.helpers.tiling.transforms import (
     as_forward_map,
     classify_transform,
@@ -59,10 +65,9 @@ def _operand_gate(t) -> bool:
     B's is N (free_lanes=n); both share ``k_lanes = K/ABK``. For EACH operand ``free_lanes * k_lanes``
     must DIVIDE the wave; the quotient is the broadcast/replication factor (1 for CDNA/gfx12; 2 for
     gfx11 WMMA, which holds the whole K per lane and DUPLICATES the operand across the two 16-lane
-    halves -- identical data, no cross-lane). Fails when EITHER operand OVER-subscribes the wave -- the
-    non-square f4 row does so on A (32*2 = 64 > 32) while B is fine (16*2 = 32), so the row is out.
+    halves -- identical data, no cross-lane). Fails when EITHER operand OVER-subscribes the wave.
     """
-    k_lanes = t.k // t.k_ab_per_lane
+    k_lanes = t.k // t.layout_params.k_ab_per_lane
     return all(
         free_lanes * k_lanes <= t.wave_size
         and t.wave_size % (free_lanes * k_lanes) == 0
@@ -70,9 +75,18 @@ def _operand_gate(t) -> bool:
     )
 
 
+def _operand_k_maps_differ(t) -> bool:
+    """A mixed-width ``f8f6f4`` row: its 8-bit operand holds K in two runs of 16 per lane, its 6/4-bit
+    operand in one run of 32 (per-operand ``k_num_access`` differ). The interleaved construction lays A and
+    B out with ONE K map, so on such a row A and B hold different K at the positions the instruction
+    couples -- the pair would multiply the wrong K, and the K check rejects it."""
+    lp = t.layout_params
+    return lp.a_k_num_access != lp.b_k_num_access
+
+
 def _accum_gate(t) -> bool:
     """§9 accumulator precondition: ``c_lane_rows * atom.n == wave``."""
-    return (t.m // t.c_m_per_lane) * t.n == t.wave_size
+    return (t.m // t.layout_params.c_m_per_lane) * t.n == t.wave_size
 
 
 def _operand_reorder_ok(t, a, free_atoms: int, k_sub: int) -> tuple[bool, str]:
@@ -105,15 +119,21 @@ def _operand_reorder_ok(t, a, free_atoms: int, k_sub: int) -> tuple[bool, str]:
     return tier == "reorder", tier
 
 
+# Every dense row the encoder can lay out (multi-block rows are a documented encoder boundary).
 _DENSE = sorted(
-    (t for t in load_mma_traits().by_op_id.values() if t.family == "dense"),
+    (
+        t
+        for t in load_mma_traits().by_op_id.values()
+        if t.family == "dense" and encoder_supports_layout(t)[0]
+    ),
     key=lambda t: t.op_id,
 )
 _IDS = [t.op_id for t in _DENSE]
 
 # PROVEN-below boundary (asserted, not assumed): the ONLY dense row that cannot interleave.
-#   wmma_f32_32x16x128_f4 -- non-square (m=32 != n=16) AND free x K over-subscribes the wave
-#   (32*2 = 64 > 32, so no integer replication factor exists). Both failures are real.
+#   wmma_f32_32x16x128_f4 -- non-square (m=32 != n=16), and each lane holds 2 M blocks of A in its
+#   registers, which the interleaved construction does not model: AtomNumbers.from_traits refuses it
+#   with a named NotImplementedError.
 # (The 8 gfx11-era wmma_*_w32 rows hold the whole K per lane and DUPLICATE the operand across the two
 #  16-lane halves; modelling that duplicate as a replication axis makes them interleave cross-lane-free --
 #  proven via per-lane element-set preservation + a within-one-copy `reorder`.)
@@ -124,6 +144,15 @@ _CANNOT_INTERLEAVE = {
 
 @pytest.mark.parametrize("t", _DENSE, ids=_IDS)
 def test_dense_mma_interleavable(t):
+    # --- Boundary: A holds several M blocks per lane -> the construction refuses it by name ---
+    if t.layout_params.a_m_register_blocks > 1:
+        assert t.op_id in _CANNOT_INTERLEAVE
+        with pytest.raises(
+            NotImplementedError, match="InterleavedStyle cannot lay out"
+        ):
+            AtomNumbers.from_traits(t)
+        return
+
     a = AtomNumbers.from_traits(t)
     op_ok, acc_ok, square = _operand_gate(t), _accum_gate(t), (t.m == t.n)
 
@@ -143,12 +172,16 @@ def test_dense_mma_interleavable(t):
             ok
         ), f"{t.op_id}: operand K<->free is {tier} at (free_atoms={free_atoms}, k_sub={k_sub})"
 
-    # MMA soundness (positional per-atom K-match) for the base single-atom operands. Per-operand free
-    # lanes: A's free axis is M (free_lanes=a.m), B's is N (free_lanes=a.n) -- equal for a square atom.
+    # MMA soundness (per-atom K-match at coupled positions) for the base single-atom operands. Per-operand
+    # free lanes: A's free axis is M (free_lanes=a.m), B's is N (free_lanes=a.n) -- equal for a square atom.
     _, a_mma = _STYLE.operand_descs(t, free_sub=1, k_sub=1, free_lanes=a.m)
     _, b_mma = _STYLE.operand_descs(t, free_sub=1, k_sub=1, free_lanes=a.n)
-    d = mma_pair_k_aligned(a_mma.layout, b_mma.layout)
-    assert d.severity == "ok", f"{t.op_id}: MMA soundness failed -- {d.message}"
+    a_canon, b_canon, _ = canonical_layouts(t, (1, 1, 1))
+    d = mma_pair_k_aligned(a_mma.layout, b_mma.layout, a_canon=a_canon, b_canon=b_canon)
+    if _operand_k_maps_differ(t):
+        assert d.severity == "error", f"{t.op_id}: one K map passed a mixed-width pair"
+    else:
+        assert d.severity == "ok", f"{t.op_id}: MMA soundness failed -- {d.message}"
 
     # C-shuffle (native accumulator -> store), single atom AND 2x2-atom tile (free_sub>1 / multi-patch).
     for m_sub, n_sub in [(1, 1), (2, 2)]:
@@ -170,8 +203,8 @@ def test_proof_population():
         else:
             cannot += 1
     assert (len(_DENSE), driven, cannot) == (
-        73,
-        72,
+        147,
+        146,
         1,
     ), f"population shifted: total={len(_DENSE)} driven={driven} cannot={cannot}"
     # Every cannot-interleave row is one we documented (and vice-versa).
@@ -181,3 +214,6 @@ def test_proof_population():
         if not (_operand_gate(t) and _accum_gate(t) and t.m == t.n)
     }
     assert measured_cannot == _CANNOT_INTERLEAVE, measured_cannot ^ _CANNOT_INTERLEAVE
+    # The mixed-width f8f6f4 rows whose interleaved pair is K-misaligned: gfx950 16x16x128 and 32x32x64
+    # (12 each) and gfx1250 16x16x128 (12).
+    assert sum(map(_operand_k_maps_differ, _DENSE)) == 36

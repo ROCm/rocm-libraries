@@ -118,9 +118,9 @@ def _gemm_operand_loads():
     """
     mma = TileMma(
         (32, 64, 8),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(32, 32, 8)),
     )

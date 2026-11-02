@@ -222,7 +222,7 @@ cooperative map; `classify_epilogue(...)` → the branch. Worked example:
 
 ## Tool catalog (load-bearing knobs; full list in `visualization_api_surface.md`)
 
-- **`MmaTee`** — `from_mma(mma, **overrides)` (canonical refs + dtypes from the atom) OR explicit args. ✗
+- **`MmaTee`** — `from_mma(mma, **overrides)` (canonical refs from the atom + per-operand dtypes from the TileMma: its A, B and result dtypes) OR explicit args. ✗
   `from_mma` with no `a_enc`/`b_enc` renders CANONICAL (it sources canonical from the `canonical_layouts` helper,
   NOT `mma.a_layout`) — for interleaved you MUST pass explicit `a_enc`/`b_enc` and VERIFY the encoding is
   `!= canonical_layouts(mma.traits, mma.subtiles)` + sound (`mma.a_layout` is the CONFIGURED style now, NOT a
@@ -280,7 +280,8 @@ cooperative map; `classify_epilogue(...)` → the branch. Worked example:
 - `mma_operand_layout_sound(layout, canon, role=)` → `ok` / `error`. `mma_operand_repair_hint(layout, canon)`
   → `ok` / `warning` (an in-register reorder makes-it-so — name the permutation) / `error` (cross-lane or
   none). `mma_pair_compatible(a, b, a_canon=, b_canon=)` → both sound AND K-dists match; drives the tee
-  banner. `mma_pair_k_aligned(a, b)` → `ok`/`warning`/`error` (pairwise K-match, per atom).
+  banner. `mma_pair_k_aligned(a, b, a_canon=, b_canon=)` → `ok`/`warning`/`error` (pairwise K-match, per
+  atom, at the positions the canonicals couple).
   `classify_transform(src, tgt)` → `reorder` (cheap, dtype-graded) vs `cross_lane` (expensive/deferred).
 - Tee banner red ERROR / orange WARNING = the pair diagnostic — say what's wrong, which rule, cheapest remedy
   (free symmetry [reposition/source-swap] → dword reorder → sub-dword → cross-lane last).
