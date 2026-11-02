@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Native barrier admission, serialization, LLVM support, and HIP rejection. */
+/* Native barrier admission, serialization, and LLVM/HIP lowering contracts. */
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -136,60 +136,121 @@ static int test_predicate()
     return 0;
 }
 
-static int test_tensor_epilogue_rejects_native_hip()
+static int test_tensor_epilogue_hip()
 {
     const char* arches[] = {"gfx950", "gfx1250"};
     const bool clobbers[] = {false, true};
+    const rocke_type_t* types[] = {rocke_bf16(), rocke_f16()};
     for(const char* arch : arches)
-        for(bool explicit_clobber : clobbers)
+        for(const auto* type : types)
+            for(bool explicit_clobber : clobbers)
+            {
+                rocke_ir_builder_t b;
+                CHECK(rocke_ir_builder_init(&b, "tensor_epilogue") == ROCKE_OK);
+                auto* output
+                    = rocke_b_param(&b, "output", rocke_ptr_type(&b, type, "global"), nullptr);
+                auto* acc = rocke_b_param(&b, "acc", rocke_f32(), nullptr);
+                auto* factor_a = rocke_b_param(&b, "factor_a", rocke_f32(), nullptr);
+                auto* factor_b = rocke_b_param(&b, "factor_b", rocke_f32(), nullptr);
+                auto* factors = rocke_b_fmul(&b, factor_a, factor_b);
+                auto* scaled = rocke_b_fmul(&b, acc, factors);
+                auto* opaque = rocke_b_optimization_barrier(&b, scaled);
+                CHECK(opaque);
+                if(explicit_clobber)
+                    rocke_attr_set_str(&b, &opaque->op->attrs, "clobber", "");
+                rocke_b_global_store(
+                    &b, output, rocke_b_thread_id_x(&b), rocke_b_cast_f32_to(&b, opaque, type), 2);
+                rocke_b_ret(&b);
+                // The tensor epilogue has the same barrier contract in both routes.
+                CHECK(test_llvm_roundtrip(&b, arch) == 0);
+
+                char* serialized = nullptr;
+                CHECK(rocke_ir_serialize(b.kernel, &serialized) == ROCKE_OK);
+                rocke_ir_builder_t copy;
+                CHECK(rocke_ir_builder_init(&copy, "imported_epilogue") == ROCKE_OK);
+                rocke_kernel_def_t* kernel = nullptr;
+                CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
+                CHECK(kernel);
+                free(serialized);
+
+                rocke_lower_hip_opts_t opts = {};
+                opts.arch = arch;
+                rocke_strbuf_t original = {}, imported = {};
+                CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &original) == ROCKE_OK);
+                CHECK(rocke_lower_kernel_to_hip(&copy, kernel, &opts, &imported) == ROCKE_OK);
+                CHECK(original.cstr() && imported.cstr());
+                CHECK(strcmp(original.cstr(), imported.cstr()) == 0);
+                CHECK(strstr(original.cstr(), "factor_a * factor_b"));
+                CHECK(strstr(original.cstr(), "asm (\"\" : \"=v\""));
+                CHECK(!strstr(original.cstr(), "asm volatile"));
+                CHECK(!strstr(original.cstr(), " : \"memory\""));
+                original.free_buffer();
+                imported.free_buffer();
+                rocke_ir_builder_free(&copy);
+                rocke_ir_builder_free(&b);
+            }
+    return 0;
+}
+
+static int test_hip_rejects_malformed_attributes()
+{
+    for(int index = 0; index < 13; ++index)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "invalid_hip_asm") == ROCKE_OK);
+        auto* value = rocke_b_param(&b, "value", rocke_f32(), nullptr);
+        auto* result = rocke_b_optimization_barrier(&b, value);
+        const char* key = index < 7 ? "clobber" : "sideeffect";
+        int kind = index < 7 ? index : index - 7 + 2;
+        switch(kind)
         {
-            rocke_ir_builder_t b;
-            CHECK(rocke_ir_builder_init(&b, "tensor_epilogue") == ROCKE_OK);
-            auto* output
-                = rocke_b_param(&b, "output", rocke_ptr_type(&b, rocke_f16(), "global"), nullptr);
-            auto* acc = rocke_b_param(&b, "acc", rocke_f32(), nullptr);
-            auto* factor_a = rocke_b_param(&b, "factor_a", rocke_f32(), nullptr);
-            auto* factor_b = rocke_b_param(&b, "factor_b", rocke_f32(), nullptr);
-            auto* factors = rocke_b_fmul(&b, factor_a, factor_b);
-            auto* scaled = rocke_b_fmul(&b, acc, factors);
-            auto* opaque = rocke_b_optimization_barrier(&b, scaled);
-            CHECK(opaque);
-            if(explicit_clobber)
-                rocke_attr_set_str(&b, &opaque->op->attrs, "clobber", "");
-            rocke_b_global_store(&b,
-                                 output,
-                                 rocke_b_thread_id_x(&b),
-                                 rocke_b_cast_f32_to(&b, opaque, rocke_f16()),
-                                 2);
-            rocke_b_ret(&b);
-            // The same valid FP16 tensor epilogue remains supported through LLVM.
-            CHECK(test_llvm_roundtrip(&b, arch) == 0);
-
-            char* serialized = nullptr;
-            CHECK(rocke_ir_serialize(b.kernel, &serialized) == ROCKE_OK);
-            rocke_ir_builder_t copy;
-            CHECK(rocke_ir_builder_init(&copy, "imported_epilogue") == ROCKE_OK);
-            rocke_kernel_def_t* kernel = nullptr;
-            CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
-            CHECK(kernel);
-            free(serialized);
-
-            rocke_lower_hip_opts_t opts = {};
-            opts.arch = arch;
-            rocke_strbuf_t original = {}, imported = {};
-            CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &original) == ROCKE_ERR_NOTIMPL);
-            CHECK(rocke_lower_kernel_to_hip(&copy, kernel, &opts, &imported) == ROCKE_ERR_NOTIMPL);
-            CHECK(strcmp(rocke_ir_builder_error(&b), "no HIP lowering for op 'tile.inline_asm'")
-                  == 0);
-            CHECK(strcmp(rocke_ir_builder_error(&copy), "no HIP lowering for op 'tile.inline_asm'")
-                  == 0);
-            CHECK(!original.cstr() || !strstr(original.cstr(), "asm (\"\""));
-            CHECK(!imported.cstr() || !strstr(imported.cstr(), "asm (\"\""));
-            original.free_buffer();
-            imported.free_buffer();
-            rocke_ir_builder_free(&copy);
-            rocke_ir_builder_free(&b);
+        case 0:
+            rocke_attr_set_bool(&b, &result->op->attrs, key, false);
+            break;
+        case 1:
+            rocke_attr_set_bool(&b, &result->op->attrs, key, true);
+            break;
+        case 2:
+            rocke_attr_set_int(&b, &result->op->attrs, key, 0);
+            break;
+        case 3:
+            rocke_attr_set_int(&b, &result->op->attrs, key, 1);
+            break;
+        case 4:
+            rocke_attr_set_float(&b, &result->op->attrs, key, 0.0);
+            break;
+        case 5:
+            rocke_attr_set_float(&b, &result->op->attrs, key, 1.0);
+            break;
+        case 6:
+            rocke_attr_set_str(&b, &result->op->attrs, key, "memory");
+            break;
+        case 7:
+            rocke_attr_set_str(&b, &result->op->attrs, key, "");
+            break;
         }
+        const char* diagnostic = index < 7
+                                     ? "HIP optimization barrier clobber must be an empty string"
+                                     : "HIP inline asm sideeffect must be a boolean";
+        char* serialized = nullptr;
+        CHECK(rocke_ir_serialize(b.kernel, &serialized) == ROCKE_OK);
+        rocke_ir_builder_t copy;
+        CHECK(rocke_ir_builder_init(&copy, "imported_invalid_asm") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = nullptr;
+        CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
+        free(serialized);
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = "gfx1250";
+        rocke_strbuf_t original = {}, imported = {};
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &original) == ROCKE_ERR_VALUE);
+        CHECK(rocke_lower_kernel_to_hip(&copy, kernel, &opts, &imported) == ROCKE_ERR_VALUE);
+        CHECK(strcmp(rocke_ir_builder_error(&b), diagnostic) == 0);
+        CHECK(strcmp(rocke_ir_builder_error(&copy), diagnostic) == 0);
+        original.free_buffer();
+        imported.free_buffer();
+        rocke_ir_builder_free(&copy);
+        rocke_ir_builder_free(&b);
+    }
     return 0;
 }
 
@@ -198,6 +259,7 @@ int main()
     int admission = test_admission();
     int scalars = test_scalars();
     int predicate = test_predicate();
-    int hip = test_tensor_epilogue_rejects_native_hip();
-    return admission || scalars || predicate || hip;
+    int hip = test_tensor_epilogue_hip();
+    int attributes = test_hip_rejects_malformed_attributes();
+    return admission || scalars || predicate || hip || attributes;
 }

@@ -69,8 +69,9 @@ Scale selection is mirrored by Python `IRBuilder.mma` and C
 `rocke_b_mma_scaled`; the complete spec-to-kernel builder remains Python-only.
 C++ lowers its serialized IR through LLVM, including the tensor-scale epilogue.
 HIP compilation uses Python-generated source only; native HIP support is outside
-this NVFP4 API's scope. Native inline-assembly lowering remains unsupported, so
-the FP16 tensor-epilogue barrier rejects through native HIP.
+this NVFP4 API's supported scope. Both HIP lowerers support the isolated
+single-output barrier and its FP16/BF16 tensor epilogue, with matching
+attribute validation; that does not prove complete native NVFP4 compilation.
 
 ## Validation and scope
 
@@ -85,8 +86,8 @@ layout directly.
 
 CPU tests cover the scale encodings, parameter/signature contract, scale direction,
 epilogue placement, invalid specs, and preserved defaults. The native barrier
-CTest also pins direct/serialized HIP rejection of the FP16 tensor epilogue
-while preserving its LLVM support. The GPU verifier covers
+CTest also pins direct/serialized HIP acceptance of the isolated FP16/BF16
+tensor epilogue and malformed-attribute rejection while preserving LLVM support. The GPU verifier covers
 K=128/256, BF16/FP16 outputs, independent block scales, non-power-of-two tensor
 factors, zero scales, isolated K groups, and all FP4 code products at lane/K
 boundaries. Exact fixtures use bounded products and explicitly rounded FP32
@@ -112,9 +113,15 @@ python tests/instances/rocke_ir_parity_harness.py \
 The representative registry includes BF16/FP16 outputs at M32/N48 and
 K128/K256. The strict `both` registry test builds each case in Python and compares
 Python/native LLVM lowering through serialized IR. The golden checks emitted-byte
-stability and expected LLVM20/22 rejections; NVFP4 emits at the `llvm23` flavor.
+stability and expected LLVM20/22 rejections; NVFP4 emits at `llvm23` and `llvm24`.
+Symbols use a codegen specialization suffix rather than an M/N/K tag: M changes
+only the grid, while baked addressing and K unrolling still distinguish kernels.
 `tools/check_byte_identity.py` uses a separate inventory of paired Python/C
 emitters, so its family totals do not establish NVFP4 builder coverage.
+`optimization_barrier_emit.{py,c}` also provides eight `hip` configurations:
+gfx950/gfx1250 × BF16/FP16 × absent/empty clobbers. The focused host test checks
+Python/native HIP text through the binding, independently of `ROCKE_BACKEND`;
+strict `both` is an LLVM comparison, not a HIP comparison.
 
 The host example test calls `nvfp4_gemm.main`; the GPU test below launches
 `nvfp4_gemm_verify` as a subprocess for COMGR/HIP, BF16/FP16, and both shapes:

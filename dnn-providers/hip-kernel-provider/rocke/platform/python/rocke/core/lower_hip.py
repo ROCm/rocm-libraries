@@ -1527,8 +1527,12 @@ class _Lowerer:
         side = "volatile " if sideeffect else ""
         in_names = [_name(o) for o in op.operands]
         clob = op.attrs.get("clobber", "memory" if sideeffect else "")
+        if not isinstance(clob, str):
+            raise ValueError("HIP inline asm clobber must be a string")
         clob_str = f' : "{clob}"' if clob else ""
         if op.results:
+            if not parts:
+                raise ValueError("HIP inline asm requires an output constraint")
             out_c = parts[0]
             in_cs = parts[1:]
             res = op.results[0]

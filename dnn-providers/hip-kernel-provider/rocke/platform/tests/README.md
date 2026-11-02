@@ -337,12 +337,16 @@ output. The dedicated Python/C parity emitters cover LLVM, canonical IR, and
 verification; committed golden entries anchor the existing configurations.
 `instances/test_optimization_barrier_numeric.py` compiles through COMGR and
 checks scalar payloads, lane predicates, and intermediate rounding on a GPU.
-NVFP4 HIP compilation uses Python-generated source. Native HIP inline-assembly
-lowering, including the FP16 tensor-epilogue barrier, remains unsupported.
-`core/test_optimization_barrier.cpp` checks that the valid FP16 epilogue lowers
-through LLVM but rejects through native HIP, both directly and after
-serialization, on gfx950/gfx1250 with absent/empty clobbers. The existing
+NVFP4 HIP compilation uses Python-generated source; complete native NVFP4 HIP
+compilation is not claimed. Both HIP handlers lower single-output inline assembly.
+`core/test_optimization_barrier.cpp` checks LLVM/HIP support for the isolated
+BF16/FP16 tensor epilogue, directly and after serialization, on gfx950/gfx1250
+with absent/empty clobbers, plus malformed-attribute rejection. The existing
 `rocke_optimization_barrier` CTest runs those checks in build and installed trees.
+`optimization_barrier_emit.{py,c}` provides eight `hip` configurations for this
+matrix alongside its unchanged LLVM/IR modes. The focused Python tests compare
+HIP text and rejection diagnostics through `lower_serialized_ir_hip`; the
+`ROCKE_BACKEND=both` LLVM gate alone does not perform that HIP comparison.
 
 ## Installed pinned-reference suites
 

@@ -21,9 +21,9 @@
  *   - the IR side-table machinery is wired: the ds_read transpose loads
  *     (ds_read_tr16_b64/b128) resolve their LDS storage via rocke_h_smem_storage,
  *     and scf.yield walks the enclosing scf.for via h_find_enclosing_for.
- * ROCKE_ERR_NOTIMPL marks unsupported native inline-asm forms and
- * tile.ds_read_tr_b8. Unlike Python, this backend does not lower raw inline-asm
- * payloads, including the empty tied-VGPR optimization barrier.
+ * Inline assembly follows Python's single-output HIP contract, including
+ * empty tied-VGPR value barriers. Multi-output assembly and tile.ds_read_tr_b8
+ * remain unsupported.
  * Every opcode is registered in the dispatch table; none is dropped.
  */
 #include <ctype.h>
@@ -343,17 +343,142 @@ static rocke_status_t rocke_h_op_tile_register_p_from_qk_c(rocke_h_lowerer_t* lw
     return lw->status;
 }
 
-/* Native HIP inline-asm lowering remains unsupported, including value barriers. */
+/* Python's constraint/operand zip, stopping at the shorter list. */
+static const char* h_asm_operands(rocke_h_lowerer_t* lw,
+                                  const char* const* constraints,
+                                  size_t num_constraints,
+                                  const rocke_op_t* op)
+{
+    const char* text = "";
+    for(size_t i = 0; i < num_constraints && i < (size_t)op->num_operands; ++i)
+    {
+        text = rocke_arena_printf(&lw->b->arena,
+                                  "%s%s\"%s\"(%s)",
+                                  text,
+                                  i ? ", " : "",
+                                  constraints[i],
+                                  rocke_h_name(lw, op->operands[i]));
+        if(!text)
+        {
+            rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
+            return "";
+        }
+    }
+    return text;
+}
+
+/* Python: _op_tile_inline_asm. Translate LLVM $N placeholders to GCC %N,
+ * keeping pure tied-VGPR barriers nonvolatile and free of memory clobbers. */
 static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     if(!rocke_h_live(lw))
-    {
         return lw->status;
+    if(op->num_results > 1)
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_NOTIMPL,
+                            "HIP backend inline asm supports at most one output; got %d "
+                            "(inline_asm_multi not yet lowered)",
+                            op->num_results);
+
+    const auto* side_attr = rocke_attr_get(&op->attrs, "sideeffect");
+    if(side_attr && side_attr->kind != ROCKE_ATTR_BOOL)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "HIP inline asm sideeffect must be a boolean");
+    const bool sideeffect = side_attr ? side_attr->u.b : true;
+    const char* raw_template = rocke_attr_get_str(&op->attrs, "template");
+    const char* raw_constraints = rocke_attr_get_str(&op->attrs, "constraints");
+    if(!raw_template || !raw_constraints)
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_KEY,
+                            "tile.inline_asm: missing '%s' attr",
+                            raw_template ? "constraints" : "template");
+
+    const auto* clob_attr = rocke_attr_get(&op->attrs, "clobber");
+    const bool barrier = op->num_results == 1 && op->num_operands == 1
+                         && strcmp(raw_template, "") == 0 && strcmp(raw_constraints, "=v,0") == 0
+                         && !sideeffect;
+    if(barrier && clob_attr
+       && (clob_attr->kind != ROCKE_ATTR_STR || !clob_attr->u.s || clob_attr->u.s[0]))
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "HIP optimization barrier clobber must be an empty string");
+    if(clob_attr && (clob_attr->kind != ROCKE_ATTR_STR || !clob_attr->u.s))
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "HIP inline asm clobber must be a string");
+    const char* clobber = clob_attr ? clob_attr->u.s : (sideeffect ? "memory" : "");
+
+    char* tmpl = rocke_arena_strdup(&lw->b->arena, raw_template);
+    size_t max_entries = 1;
+    for(const char* c = raw_constraints; *c; ++c)
+        max_entries += *c == ',';
+    const char** entries
+        = (const char**)rocke_arena_alloc(&lw->b->arena, max_entries * sizeof(const char*));
+    if(!tmpl || !entries)
+        return rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
+    for(char* t = tmpl; *t; ++t)
+        if(t[0] == '$' && isdigit((unsigned char)t[1]))
+            t[0] = '%';
+
+    size_t num_entries = 0;
+    for(const char* c = raw_constraints;;)
+    {
+        const char* end = strchr(c, ',');
+        const char* first = c;
+        const char* last = end ? end : c + strlen(c);
+        while(first < last && isspace((unsigned char)*first))
+            ++first;
+        while(last > first && isspace((unsigned char)last[-1]))
+            --last;
+        if(last > first)
+        {
+            entries[num_entries]
+                = rocke_arena_printf(&lw->b->arena, "%.*s", (int)(last - first), first);
+            if(!entries[num_entries++])
+                return rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
+        }
+        if(!end)
+            break;
+        c = end + 1;
     }
-    return rocke_h_fail(lw,
-                        ROCKE_ERR_NOTIMPL,
-                        "no HIP lowering for op '%s'",
-                        op->name ? op->name : rocke_opcode_name(op->opcode));
+
+    const char* side = sideeffect ? "volatile " : "";
+    const char* clobber_open = clobber[0] ? " : \"" : "";
+    const char* clobber_close = clobber[0] ? "\"" : "";
+    if(op->num_results == 1)
+    {
+        if(num_entries == 0)
+            return rocke_h_fail(
+                lw, ROCKE_ERR_VALUE, "HIP inline asm requires an output constraint");
+        const auto* res = op->results[0];
+        const char* name = rocke_h_name(lw, res);
+        const char* ins = h_asm_operands(lw, entries + 1, num_entries - 1, op);
+        if(!rocke_h_live(lw))
+            return lw->status;
+        rocke_h_emitf(lw, "%s %s;", rocke_h_type_to_hip(lw, res->type), name);
+        rocke_h_emitf(lw,
+                      "asm %s(\"%s\" : \"%s\"(%s) : %s%s%s%s);",
+                      side,
+                      tmpl,
+                      entries[0],
+                      name,
+                      ins,
+                      clobber_open,
+                      clobber,
+                      clobber_close);
+    }
+    else
+    {
+        const char* ins = h_asm_operands(lw, entries, num_entries, op);
+        if(!rocke_h_live(lw))
+            return lw->status;
+        rocke_h_emitf(lw,
+                      "asm %s(\"%s\" : :%s%s%s%s%s);",
+                      side,
+                      tmpl,
+                      ins[0] ? " " : "",
+                      ins,
+                      clobber_open,
+                      clobber,
+                      clobber_close);
+    }
+    return lw->status;
 }
 
 /* ============================== cross-lane =============================== */

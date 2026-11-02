@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Native Python/C value-barrier parity, independent of matrix kernels."""
 
+import sys
+
+from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.ir import (
     BF16,
     BF8E5M2,
@@ -16,8 +19,6 @@ from rocke.core.ir import (
     IRBuilder,
     PtrType,
 )
-
-from _emit_common import run_emit
 
 ARCHES = (
     "gfx1250",
@@ -53,7 +54,42 @@ def _build(spec, *, arch):
     return b.kernel
 
 
+HIP_CONFIGS = tuple(
+    (arch, dtype, clobber)
+    for arch in ("gfx950", "gfx1250")
+    for dtype in (BF16, F16)
+    for clobber in (False, True)
+)
+
+
+def build_hip_epilogue(dtype, explicit_clobber):
+    b = IRBuilder("tensor_epilogue")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    output = b.param("output", PtrType(dtype, "global"))
+    acc = b.param("acc", F32)
+    factor_a = b.param("factor_a", F32)
+    factor_b = b.param("factor_b", F32)
+    value = b.fmul(acc, b.fmul(factor_a, factor_b))
+    opaque = b.optimization_barrier(value)
+    if explicit_clobber:
+        opaque.op.attrs["clobber"] = ""
+    b.global_store(output, b.thread_id_x(), b.cast_f32_to(opaque, dtype), align=2)
+    b.ret()
+    return b.kernel
+
+
 def main() -> int:
+    if len(sys.argv) > 2 and sys.argv[2] == "hip":
+        idx = int(sys.argv[1])
+        if not 0 <= idx < len(HIP_CONFIGS):
+            raise SystemExit(f"unknown config index {idx}")
+        arch, dtype, clobber = HIP_CONFIGS[idx]
+        print(
+            lower_kernel_to_hip(build_hip_epilogue(dtype, clobber), arch=arch), end=""
+        )
+        return 0
+    from _emit_common import run_emit
+
     return run_emit(_spec, _build)
 
 

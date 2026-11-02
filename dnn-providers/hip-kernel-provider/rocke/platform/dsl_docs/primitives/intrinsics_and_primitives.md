@@ -21,8 +21,10 @@ conversion. **Use the returned value** in the next operation; calling the
 barrier and then using the original value does not protect that operation.
 
 This feature is covered through AMDGPU LLVM IR and COMGR compilation. Python
-HIP-source lowering also supports the barrier, including the NVFP4 FP16
-tensor epilogue. Native HIP-source lowering of the barrier is unsupported.
+and native HIP-source lowering support the isolated barrier, including FP16
+and BF16 tensor-scale epilogues. This lowering support does not establish
+native HIP compilation of a complete NVFP4 kernel. Both HIP handlers require
+a boolean `sideeffect` attribute and an absent or empty barrier clobber.
 
 The C API is `rocke_b_optimization_barrier(builder, value)`. Both APIs use the
 existing inline-assembly operation. The assembly text is empty, and its output

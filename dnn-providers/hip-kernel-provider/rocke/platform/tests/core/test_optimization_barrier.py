@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Value barriers preserve types and survive serialization through both engines."""
 
+from pathlib import Path
+import runpy
+
 import pytest
 
 from rocke.core.ir import (
@@ -156,3 +159,96 @@ def test_hip_general_pure_asm_preserves_explicit_memory_clobber():
     hip = lower_kernel_to_hip(parse(serialize(b.kernel)), arch="gfx1250")
     assert 'asm ("v_mov_b32 %0, %1"' in hip
     assert '"memory"' in hip
+
+
+@pytest.fixture
+def hip_engine():
+    return pytest.importorskip("rocke_engine")
+
+
+@pytest.mark.parametrize("index", range(8))
+def test_hip_barrier_paired_emitters(index, hip_engine):
+    emitter = runpy.run_path(
+        str(
+            Path(__file__).resolve().parents[1]
+            / "instances"
+            / "parity"
+            / "optimization_barrier_emit.py"
+        )
+    )
+    arch, dtype, clobber = emitter["HIP_CONFIGS"][index]
+    kernel = emitter["build_hip_epilogue"](dtype, clobber)
+    python = lower_kernel_to_hip(kernel, arch=arch)
+    native = hip_engine.lower_serialized_ir_hip(serialize(kernel), arch=arch)
+    assert native == python
+    assert "factor_a * factor_b" in native
+    assert 'asm ("" : "=v"' in native
+    assert "asm volatile" not in native
+    assert ' : "memory"' not in native
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("clobber", v) for v in (False, True, 0, 1, 0.0, 1.0, "memory")]
+    + [("sideeffect", v) for v in (0, 1, 0.0, 1.0, "", "false")],
+)
+def test_hip_native_rejects_malformed_barrier_attributes(field, value, hip_engine):
+    b = IRBuilder("invalid_native_asm")
+    result = b.optimization_barrier(b.param("value", F32))
+    result.op.attrs[field] = value
+    diagnostic = (
+        "HIP optimization barrier clobber must be an empty string"
+        if field == "clobber"
+        else "HIP inline asm sideeffect must be a boolean"
+    )
+    with pytest.raises(ValueError, match=diagnostic):
+        lower_kernel_to_hip(b.kernel, arch="gfx1250")
+    with pytest.raises(RuntimeError, match=diagnostic):
+        hip_engine.lower_serialized_ir_hip(serialize(b.kernel), arch="gfx1250")
+
+
+@pytest.mark.parametrize("sideeffect", [None, False, True])
+@pytest.mark.parametrize("output", [None, F32])
+def test_hip_general_assembly_matches_native(sideeffect, output, hip_engine):
+    b = IRBuilder("general_asm")
+    value = b.param("value", F32)
+    b.inline_asm(
+        "v_mov_b32 $0, $1" if output else "s_nop 0",
+        "=v,0" if output else "",
+        [value] if output else [],
+        output,
+    )
+    op = b.kernel.body.ops[-1]
+    if sideeffect is None:
+        del op.attrs["sideeffect"]
+    else:
+        op.attrs["sideeffect"] = sideeffect
+    op.attrs["clobber"] = "memory"
+    assert lower_kernel_to_hip(b.kernel, arch="gfx1250") == (
+        hip_engine.lower_serialized_ir_hip(serialize(b.kernel), arch="gfx1250")
+    )
+
+
+@pytest.mark.parametrize("clobber", [False, True, 0, 1, 0.0, 1.0])
+def test_hip_general_assembly_rejects_non_string_clobber(clobber, hip_engine):
+    b = IRBuilder("invalid_general_clobber")
+    result = b.inline_asm("v_mov_b32 $0, $1", "=v,0", [b.param("value", F32)], F32)
+    result.op.attrs["clobber"] = clobber
+    with pytest.raises(ValueError, match="HIP inline asm clobber must be a string"):
+        lower_kernel_to_hip(b.kernel, arch="gfx1250")
+    with pytest.raises(RuntimeError, match="HIP inline asm clobber must be a string"):
+        hip_engine.lower_serialized_ir_hip(serialize(b.kernel), arch="gfx1250")
+
+
+def test_hip_assembly_requires_output_constraint(hip_engine):
+    b = IRBuilder("missing_output_constraint")
+    result = b.inline_asm("", "=v,0", [b.param("value", F32)], F32)
+    result.op.attrs["constraints"] = " , "
+    with pytest.raises(
+        ValueError, match="HIP inline asm requires an output constraint"
+    ):
+        lower_kernel_to_hip(b.kernel, arch="gfx1250")
+    with pytest.raises(
+        RuntimeError, match="HIP inline asm requires an output constraint"
+    ):
+        hip_engine.lower_serialized_ir_hip(serialize(b.kernel), arch="gfx1250")

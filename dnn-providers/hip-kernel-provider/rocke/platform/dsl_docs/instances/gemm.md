@@ -397,7 +397,11 @@ kernel = build_nvfp4_gemm(spec, arch="gfx1250")
 M and N must be positive multiples of 16; K must be a positive multiple of
 128. A and B use contiguous uint8 storage `[M, K/2]` and `[N, K/2]`.
 A-scale storage is uint8 `[M, K/16]`; B-scale storage is uint8 `[K/16, N]`.
-C is row-major BF16 or FP16 `[M, N]`. The ordered kernel ABI is:
+C is row-major BF16 or FP16 `[M, N]`. Kernel symbols carry operation/codegen
+knobs and a specialization suffix for baked addressing and unroll constants;
+M is launch-grid metadata and does not distinguish the generated body.
+Changing this symbol spelling requires regenerating cached named artifacts.
+The ordered kernel ABI is:
 
 ```text
 A, B, A_scale, B_scale, C, M, N, K, A_tensor_scale, B_tensor_scale
@@ -412,9 +416,10 @@ The builder selects the shared FP4/E4M3/SCALE16 tensor-scale path.
 It is an untuned standalone builder/example; dispatcher registration and
 production routing are deferred. The complete spec-to-kernel builder is
 Python-only; C++ lowers its serialized IR through LLVM. HIP compilation uses
-Python-generated source only; native HIP is outside this NVFP4 API's scope, and
-its FP16 inline-assembly barrier remains unsupported by that backend.
-NVFP4 LLVM emission uses `llvm23`;
+Python-generated source only; complete native HIP NVFP4 compilation remains
+outside this API's supported scope. Both HIP lowerers support the isolated
+single-output inline-assembly barrier and reject malformed barrier attributes.
+NVFP4 LLVM emission supports `llvm23` and `llvm24`;
 older emission flavors reject this path. Numerical verification uses bounded
 exact fixtures and establishes neither arbitrary-input accumulation behavior
 nor performance. Quantization, foreign scale-layout conversion, partial tiles,

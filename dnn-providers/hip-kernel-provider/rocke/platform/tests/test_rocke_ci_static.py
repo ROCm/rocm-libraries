@@ -146,6 +146,7 @@ class TestIrParityCoverage(unittest.TestCase):
                                 "fmul float %A_tensor_scale, %B_tensor_scale", llvm
                             )
 
+
 # The representative-IR byte-stability gate, split so each LLVM flavor is its own
 # test: lowering every case at every flavor in one test came close to the
 # per-test timeout. Together these check exactly what one all-flavor
