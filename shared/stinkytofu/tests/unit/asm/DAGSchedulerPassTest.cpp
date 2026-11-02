@@ -2467,6 +2467,32 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_LongRunKeepsEveryInstruction) {
     EXPECT_EQ(std::count(shape.begin(), shape.end(), 'd'), 12) << shape;
 }
 
+// An automatic refill line (cover < 0) is one WMMA short of a full queue: the same schedule as
+// asking for (depth - 1) x the next WMMA's latency by hand.
+TEST_F(DAGSchedulerPassTest, WmmaQueue_AutomaticCoverIsOneWmmaShortOfFull) {
+    constexpr int kDepth = 4;
+    std::string shapes[2];
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+        int latency = 0;
+        for (int i = 0; i < 8; i++)
+            latency = createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i)->latencyCycles;
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsSpread = false;
+        pfc.dagFeatures.dsReadQueueDepth = 2;
+        pfc.dagFeatures.wmmaQueueDepth = kDepth;
+        pfc.dagFeatures.wmmaQueueCoverCycles = v == 0 ? -1 : (kDepth - 1) * latency;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    EXPECT_EQ(shapes[0], shapes[1]);
+}
+
 // Depth 4, cover 16: ds_loads go while at least 16 cycles of WMMA work are queued, and the
 // next WMMA goes first once less is, so the queue never runs dry.
 TEST_F(DAGSchedulerPassTest, WmmaQueue_KeepsTheQueueFed) {

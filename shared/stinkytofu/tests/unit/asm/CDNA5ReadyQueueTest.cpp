@@ -148,6 +148,9 @@ struct CDNA5ReadyQueueTestPeer {
     static void carry(CDNA5ReadyQueue& q) {
         q.carryQueuedWar();
     }
+    static int cover(const CDNA5ReadyQueue& q, int wmmaLatency) {
+        return q.wmmaQueueCover(wmmaLatency);
+    }
     static void resetWindow(CDNA5ReadyQueue& q) {
         q.resetActiveWindow();
     }
@@ -361,6 +364,29 @@ TEST_F(CDNA5ReadyQueueTest, AdvanceTimeReadsItsArgumentByKind) {
 
 // A queued WMMA keeps reading its sources after a region cut. The WAR gate must still hold a
 // ds_load into those registers until the pipe has read them, then release it.
+// The automatic refill line is one WMMA short of a full queue, sized by the latency of the WMMA
+// the refill is for, not by the region's first WMMA: depth 8 gives 28 for a 4-cycle WMMA and 56
+// for an 8-cycle one. An explicit cover is the same for both and 0 turns the queue model off.
+TEST_F(CDNA5ReadyQueueTest, AutomaticRefillLineFollowsTheNextWmmaLatency) {
+    using Peer = CDNA5ReadyQueueTestPeer;
+    PassContext autoCtx = makeQueueCtx(8, -1);
+    CDNA5ReadyQueue autoQueue(autoCtx);
+    EXPECT_EQ(Peer::cover(autoQueue, 4), 28);
+    EXPECT_EQ(Peer::cover(autoQueue, 8), 56);
+
+    PassContext explicitCtx = makeQueueCtx(8, 40);
+    CDNA5ReadyQueue explicitQueue(explicitCtx);
+    EXPECT_EQ(Peer::cover(explicitQueue, 4), 40);
+    EXPECT_EQ(Peer::cover(explicitQueue, 8), 40);
+
+    PassContext offCtx = makeQueueCtx(8, 0);
+    CDNA5ReadyQueue offQueue(offCtx);
+    EXPECT_EQ(Peer::cover(offQueue, 8), 0);
+    PassContext depthOneCtx = makeQueueCtx(1, -1);
+    CDNA5ReadyQueue depthOneQueue(depthOneCtx);
+    EXPECT_EQ(Peer::cover(depthOneQueue, 8), 0);
+}
+
 TEST_F(CDNA5ReadyQueueTest, QueuedWmmaWarStateSurvivesARegionCut) {
     PassContext ctx = makeQueueCtx(8, 16);
     CDNA5ReadyQueue queue(ctx);
