@@ -75,6 +75,15 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     assert "_tensilelite_client_binding.py" in archived_names
     assert "tensilelite_configure_client.py" in archived_names
 
+def test_cmake_device_generation_owns_raw_rocisa():
+    """Device generation builds raw rocisa; rocisa-only builds opt in explicitly."""
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert (
+        'option(ROCISA_BUILD_PYTHON '
+        '"Build the in-tree rocisa Python extension without device libraries." OFF)'
+    ) in cmake
+    assert "if(HIPBLASLT_ENABLE_DEVICE OR ROCISA_BUILD_PYTHON" in cmake
 def test_direct_wheel_build_requires_explicit_rocm_identity(tmp_path, monkeypatch):
     source_root = _isolated_source(tmp_path)
     rocm_root = tmp_path / "ambient-rocm"
@@ -180,16 +189,32 @@ def test_client_version_metadata_is_scoped_and_checked_exactly():
     )
 
     version_condition = (
-        "if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT\n"
-        "        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)"
+        "if(_tensilelite_needs_canonical_wheel\n"
+        "        OR _tensilelite_needs_compatibility_wheel\n"
+        "        OR TENSILELITE_ENABLE_CLIENT)"
     )
     version_block = top_cmake.split(
         f"{version_condition}\n    set(_tensilelite_source_root", 1
     )[1].split("\nendif()", 1)[0]
+    client_version_block = top_cmake.split(
+        "if(TENSILELITE_ENABLE_CLIENT)\n    configure_file(", 1
+    )[1].split("\nendif()", 1)[0]
     assert "TENSILELITE_DISTRIBUTION_VERSION" in version_block
     assert version_condition in top_cmake
+    assert "TensileLiteClientVersion.hpp.in" in client_version_block
+    assert "TensileLiteClientVersion.hpp" in client_version_block
     assert '"-DEXPECTED_VERSION=${TENSILELITE_DISTRIBUTION_VERSION}"' in tests_cmake
     assert "actual_version STREQUAL EXPECTED_VERSION" in version_check
+
+
+def test_rocisa_python_package_outputs_are_configuration_invariant():
+    cmake = (_PROJECT_ROOT / "rocisa/CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert "function(_rocisa_set_python_package_output_directory" in cmake
+    assert "LIBRARY_OUTPUT_DIRECTORY_${_config_upper}" in cmake
+    assert "RUNTIME_OUTPUT_DIRECTORY_${_config_upper}" in cmake
+    assert "_rocisa_set_python_package_output_directory(\n        _rocisa" in cmake
+    assert "_rocisa_set_python_package_output_directory(\n            stinkytofu_python" in cmake
 
 
 def test_wheel_rebuild_depends_on_top_level_runtime_modules():
