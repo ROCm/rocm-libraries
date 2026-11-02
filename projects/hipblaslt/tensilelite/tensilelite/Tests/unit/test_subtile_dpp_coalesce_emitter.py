@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.Components.GlobalWriteBatch import GlobalWriteBatchWriter
+from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter
 
 pytestmark = pytest.mark.unit
 

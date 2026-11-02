@@ -13,7 +13,7 @@ when both pairs exist on adjacent tt0 rows in the SAME N-group.
 
 import pytest
 
-from Tensile.Components.GlobalWriteBatch import GlobalWriteBatchWriter
+from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter
 
 pytestmark = pytest.mark.unit
 
