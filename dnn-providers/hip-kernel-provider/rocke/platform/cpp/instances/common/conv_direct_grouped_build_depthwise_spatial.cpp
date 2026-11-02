@@ -58,7 +58,7 @@
 static int sp_wo(const rocke_direct_conv_problem_t* p)
 {
     int s = p->stride > 0 ? p->stride : 1;
-    return (p->W + 2 * p->PAD - p->KW) / s + 1;
+    return (p->W + 2 * rocke_direct_conv_problem_pad_w(p) - p->KW) / s + 1;
 }
 
 /* Raw input values of row y, one per filter column (Python: load_row).

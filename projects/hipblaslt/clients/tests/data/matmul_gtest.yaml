@@ -104,20 +104,39 @@ Tests:
   matrix_size:
     - { M:  128,  N:  128,  K:  0  }
 
-# Skinny GEMMs that library logic routes to the rocBLAS wvSpltK custom kernels on
-# gfx950: padded leading dimensions they must honor, and general-batched
-# (pointer-array) problems they cannot run, which must fall back to other kernels.
+# Skinny TN GEMMs that library logic routes to the vLLM wvSplitK and rocBLAS
+# wvSpltK custom kernels on gfx950: padded leading dimensions they must honor
+# (ldb 1028 also keeps the tokens off 16-byte boundaries), m not a multiple of
+# the wave tile (12290 with YTILE = 3), n * K past the LDS stage (3 x 28672), and
+# general-batched (pointer-array) problems they cannot run, which must fall back
+# to other kernels.
 - name: matmul_skinny_bf16_tn
   category: pre_checkin
   function:
     matmul: *hpa_bf16_precision
   transA: T
   transB: N
-  matrix_size:
+  matrix_size: &skinny_tn_sizes
     - { M: 1024, N: 1, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
     - { M: 1024, N: 2, K: 1024, lda: 1032, ldb: 1040, ldc: 1048, ldd: 1056 }
     - { M: 1024, N: 3, K: 1024, lda: 1024, ldb: 1032, ldc: 1024, ldd: 1024 }
     - { M: 1024, N: 4, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 5, K: 1024, lda: 1024, ldb: 1028, ldc: 1024, ldd: 1032 }
+    - { M: 8192, N: 1, K: 1024, lda: 1024, ldb: 1024, ldc: 8192, ldd: 8192 }
+    - { M: 12290, N: 4, K: 10248, lda: 10248, ldb: 10248, ldc: 12290, ldd: 12290 }
+    - { M: 1024, N: 3, K: 28672, lda: 28672, ldb: 28680, ldc: 1024, ldd: 1024 }
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+
+- name: matmul_skinny_f16_tn
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  transA: T
+  transB: N
+  matrix_size: *skinny_tn_sizes
   alpha: 1
   beta: [0, 2]
   batch_mode: [0, 1]
@@ -3434,6 +3453,39 @@ Tests:
   # Not on gfx1250: the all-solutions find returns "NO solution found!" for this fp32 NN
   # shape on gfx1250-strict (hardware run on PR #13504).
   gpu_arch: '1201'
+
+###############################################################################
+# Checks of D across solutions (ROCM-32357).
+#
+# A case that checks several solutions launches them all into the same D, in
+# the hipblaslt-test loop and in the hipblaslt-bench candidate search (timing
+# 1). D is filled with the fast_check NaN sentinel before each solution (all-ones
+# bytes for D types the sentinel does not cover), so a solution that never
+# stores D fails instead of passing on the previous solution's result.
+###############################################################################
+
+# Self-test: solution 1 is never launched. The case passes only if the allclose
+# check reports solution 1 and no other solution.
+# Runtime on gfx942: 4 cases, under 1 s.
+- name: matmul_check_reports_unlaunched_solution
+  category: pre_checkin
+  function:
+    matmul:
+      - *single_precision
+      - *hpa_bf16_precision
+  matrix_size:
+    - { M: 131, N: 67, K: 200 }
+  transA: N
+  transB: T
+  alpha: 2.0
+  beta: -2.0
+  requested_solution_num: 4
+  skip_launch_solution: 1
+  unit_check: 0
+  allclose_check: 1
+  timing: [0, 1]
+  iters: 0
+  cold_iters: 0
 
 ###############################################################################
 # fast_check: verification without a host reference GEMM.

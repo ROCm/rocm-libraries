@@ -257,6 +257,53 @@ namespace
         EXPECT_EQ(d.run(HIP_R_32F, static_cast<hipDataType>(-1), false), 1);
     }
 
+    // Runs a 64 x 64 x 64 f32 GEMM through the hipblaslt-bench timing path with
+    // --post_bench_verify_iters 3 and C stored in D, and counts the checks that failed.
+    int64_t bench_relaunch_failures(double beta)
+    {
+        Arguments arg{};
+        arg.init();
+        snprintf(arg.function, sizeof(arg.function), "%s", "matmul");
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = arg.aux_type = HIP_R_32F;
+        arg.compute_type                                                 = HIPBLAS_COMPUTE_32F;
+        arg.transA = arg.transB = 'N';
+        arg.M[0] = arg.N[0] = arg.K[0] = 64;
+        arg.lda[0] = arg.ldb[0] = arg.ldc[0] = arg.ldd[0] = arg.lde[0] = 64;
+        arg.stride_a[0] = arg.stride_b[0] = arg.stride_c[0] = arg.stride_d[0] = arg.stride_e[0]
+            = 64 * 64;
+        arg.alpha             = 1;
+        arg.beta              = beta;
+        arg.c_equal_d         = true;
+        arg.timing            = 1;
+        arg.iters             = 3;
+        arg.cold_iters        = 1;
+        arg.unit_check        = 0;
+        arg.norm_check        = 1;
+        arg.allclose_check    = 1;
+        arg.norm_check_assert = false;
+        arg.fast_check        = 0;
+
+        const int32_t saved = hipblaslt_bench_options::post_bench_verify_iters();
+        hipblaslt_bench_options::post_bench_verify_iters() = 3;
+        const int64_t before = hipblaslt_bench_options::verification_failures();
+        testing_matmul(arg);
+        hipblaslt_bench_options::post_bench_verify_iters() = saved;
+        return hipblaslt_bench_options::verification_failures() - before;
+    }
+
+    // With beta 1, every launch adds A * B to the D the previous launch left, so each relaunch
+    // gives a different D from the first launch. The bench refuses this setup from the command
+    // line; here it stands in for a solution that writes a wrong result on some launches.
+    TEST(BenchVerify, smoke_RelaunchThatChangesDIsCaught)
+    {
+        EXPECT_EQ(bench_relaunch_failures(1), 1);
+    }
+
+    TEST(BenchVerify, smoke_RepeatableRelaunchesPass)
+    {
+        EXPECT_EQ(bench_relaunch_failures(0), 0);
+    }
+
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
     {
         Arguments arg{};
@@ -465,6 +512,8 @@ namespace
 
                 if(arg.c_equal_d)
                     name << "_C_EQUAL_D";
+                if(arg.timing)
+                    name << "_TIMING";
                 if(arg.placement[0])
                     name << "_PLACE_" << arg.placement;
                 if(arg.integer_exact_pattern[0])

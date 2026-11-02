@@ -51,13 +51,14 @@ def test_differential_gate_streams_unbuffered_progress(
     assert len(gate_calls) == expected_gate_calls
     if not supports_target_ops:
         primary, supplemental = gate_calls
-        assert "--exclude" in primary[0]
-        assert module.TARGET_OP_PROFILE_FAMILIES[0] in primary[0]
+        exclude_index = primary[0].index("--exclude")
+        excluded_families = primary[0][exclude_index + 1].split(",")
+        assert set(module.TARGET_OP_PROFILE_FAMILIES) <= set(excluded_families)
         assert supplemental[1]["env"]["ROCKE_LLVM_FLAVOR"] == "llvm23"
         only_index = supplemental[0].index("--only")
         supplemental_families = supplemental[0][only_index + 1].split(",")
         assert module.GFX1250_FAMILY in supplemental_families
-        assert module.TARGET_OP_PROFILE_FAMILIES[0] in supplemental_families
+        assert set(module.TARGET_OP_PROFILE_FAMILIES) <= set(supplemental_families)
     for command, kwargs in gate_calls:
         assert command[:3] == [module.sys.executable, "-u", str(module.RUN_DIFF)]
         if supports_target_ops:
