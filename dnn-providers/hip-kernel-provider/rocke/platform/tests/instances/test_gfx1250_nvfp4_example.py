@@ -2,7 +2,14 @@
 # SPDX-License-Identifier: MIT
 """NVFP4 entry point retains the existing verifier's spec and case contract."""
 
+from pathlib import Path
+import runpy
+import subprocess
+import sys
+
 import pytest
+
+from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
 from rocke.examples.gfx1250.gemm import (
     block_scaled_gemm_verify,
@@ -74,3 +81,63 @@ def test_nvfp4_package_exports():
         assert getattr(gfx1250, name) is getattr(instance, name)
     assert "is_valid_nvfp4_gemm_spec" in gfx1250.__all__
     assert gfx1250.is_valid_nvfp4_gemm_spec is instance.is_valid_spec
+
+
+def test_numeric_verifier_subprocess_uses_selected_package(monkeypatch, tmp_path):
+    numeric_test = runpy.run_path(
+        str(Path(__file__).with_name("test_gfx1250_nvfp4_numeric.py"))
+    )["test_nvfp4_numeric"]
+    decoy = tmp_path / "rocke"
+    decoy.mkdir()
+    (decoy / "__init__.py").write_text("raise RuntimeError('imported cwd decoy')\n")
+    monkeypatch.chdir(tmp_path)
+    env = rocke_subprocess_env()
+    real_run = subprocess.run
+    module = "rocke.examples.gfx1250.gemm.nvfp4_gemm_verify"
+    # Disable site hooks in the negative control so a pre-import cannot mask cwd shadowing.
+    raw = real_run(
+        [sys.executable, "-S", "-m", module, "--help"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert raw.returncode != 0 and "imported cwd decoy" in raw.stderr
+    calls = []
+
+    def probe_launch(command, *, env, capture_output, text, timeout):
+        assert capture_output and text and timeout == 300
+        module_index = command.index("-m") + 1
+        assert command[module_index] == module
+        assert command[module_index + 1 :] == [
+            "--m",
+            "16",
+            "--n",
+            "16",
+            "--k",
+            "128",
+            "--dtype-c",
+            "bf16",
+            "--compile-route",
+            "comgr",
+            "--case",
+            "all",
+        ]
+        # Run the actual launch prefix, but --help requires neither GPU nor ml_dtypes.
+        help_result = real_run(
+            command[: module_index + 1] + ["--help"],
+            env=env,
+            capture_output=capture_output,
+            text=text,
+            timeout=timeout,
+        )
+        assert help_result.returncode == 0, help_result.stdout + help_result.stderr
+        assert "Verify packed NVFP4 GEMM" in help_result.stdout
+        calls.append(env)
+        # Only the numerical result is stubbed: this host test checks launch identity.
+        return subprocess.CompletedProcess(
+            command, 0, "PASS: verified 24 cases\n" + "bad=0\n" * 24, ""
+        )
+
+    monkeypatch.setattr(subprocess, "run", probe_launch)
+    numeric_test(env, "comgr", "bf16", 16, 16, 128)
+    assert calls == [env]

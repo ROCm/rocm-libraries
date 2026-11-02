@@ -78,15 +78,42 @@ def build_hip_epilogue(dtype, explicit_clobber):
     return b.kernel
 
 
+HIP_STRING_CONFIGS = tuple(
+    (arch, output) for arch in ("gfx950", "gfx1250") for output in (False, True)
+)
+
+
+def build_hip_assembly(output):
+    b = IRBuilder("asm_string")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    prefix = "v_mov_b32 $0, $1" if output else "s_nop 0"
+    template = prefix + '\n\ts_nop 0 ; "quoted" \\path'
+    pointer = b.param("output", PtrType(F32, "global")) if output else None
+    value = b.param("value", F32) if output else None
+    result = b.inline_asm(
+        template,
+        "=v,0" if output else "",
+        [value] if output else [],
+        F32 if output else None,
+    )
+    if output:
+        b.global_store(pointer, b.thread_id_x(), result, align=4)
+    b.ret()
+    return b.kernel
+
+
 def main() -> int:
     if len(sys.argv) > 2 and sys.argv[2] == "hip":
         idx = int(sys.argv[1])
-        if not 0 <= idx < len(HIP_CONFIGS):
+        if not 0 <= idx < len(HIP_CONFIGS) + len(HIP_STRING_CONFIGS):
             raise SystemExit(f"unknown config index {idx}")
-        arch, dtype, clobber = HIP_CONFIGS[idx]
-        print(
-            lower_kernel_to_hip(build_hip_epilogue(dtype, clobber), arch=arch), end=""
-        )
+        if idx < len(HIP_CONFIGS):
+            arch, dtype, clobber = HIP_CONFIGS[idx]
+            kernel = build_hip_epilogue(dtype, clobber)
+        else:
+            arch, output = HIP_STRING_CONFIGS[idx - len(HIP_CONFIGS)]
+            kernel = build_hip_assembly(output)
+        print(lower_kernel_to_hip(kernel, arch=arch), end="")
         return 0
     from _emit_common import run_emit
 

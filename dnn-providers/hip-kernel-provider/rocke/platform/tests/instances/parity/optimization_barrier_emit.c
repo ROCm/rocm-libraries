@@ -52,6 +52,25 @@ static void build_hip_epilogue(rocke_ir_builder_t* b, int idx)
     rocke_b_ret(b);
 }
 
+/* Appended HIP configs: gfx950/gfx1250 x void/single-output multiline asm. */
+static void build_hip_assembly(rocke_ir_builder_t* b, int idx)
+{
+    const bool output = idx % 2 != 0;
+    const char* tmpl = output ? "v_mov_b32 $0, $1\n\ts_nop 0 ; \"quoted\" \\path"
+                              : "s_nop 0\n\ts_nop 0 ; \"quoted\" \\path";
+    rocke_value_t* pointer
+        = output ? rocke_b_param(b, "output", rocke_ptr_type(b, rocke_f32(), "global"), NULL)
+                 : NULL;
+    rocke_value_t* value = output ? rocke_b_param(b, "value", rocke_f32(), NULL) : NULL;
+    rocke_value_t* operands[] = {value};
+    const rocke_type_t* types[] = {rocke_f32()};
+    auto* op = rocke_b_inline_asm(
+        b, tmpl, output ? "=v,0" : "", operands, output ? 1 : 0, types, output ? 1 : 0, NULL);
+    if(output && op)
+        rocke_b_global_store(b, pointer, rocke_b_thread_id_x(b), op->results[0], 4);
+    rocke_b_ret(b);
+}
+
 static const char* ARCHES[]
     = {"gfx1250", "gfx950", "gfx90a", "gfx942", "gfx1151", "gfx1201", "gfx11-generic"};
 static const int NUM_CONFIGS = sizeof(ARCHES) / sizeof(ARCHES[0]);
@@ -75,22 +94,26 @@ int main(int argc, char** argv)
         fprintf(stderr, "unknown mode %s\n", mode);
         return 2;
     }
-    if(idx < 0 || idx >= (hip ? 8 : NUM_CONFIGS))
+    if(idx < 0 || idx >= (hip ? 12 : NUM_CONFIGS))
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
     rocke_ir_builder_t b;
-    if(rocke_ir_builder_init(&b, hip ? "tensor_epilogue" : "optimization_barrier") != ROCKE_OK)
+    if(rocke_ir_builder_init(
+           &b, hip ? (idx < 8 ? "tensor_epilogue" : "asm_string") : "optimization_barrier")
+       != ROCKE_OK)
     {
         fprintf(stderr, "builder init failed\n");
         return 1;
     }
     /* Python: b.kernel.attrs["max_workgroup_size"] = 64 */
     rocke_attr_set_int(&b, &b.kernel->attrs, "max_workgroup_size", 64);
-    if(hip)
+    if(hip && idx < 8)
         build_hip_epilogue(&b, idx);
+    else if(hip)
+        build_hip_assembly(&b, idx - 8);
     else
         build_optimization_barriers(&b);
 
@@ -105,7 +128,7 @@ int main(int argc, char** argv)
     if(hip)
     {
         rocke_lower_hip_opts_t opts = {};
-        opts.arch = idx < 4 ? "gfx950" : "gfx1250";
+        opts.arch = (idx < 8 ? idx < 4 : idx < 10) ? "gfx950" : "gfx1250";
         rocke_strbuf_t text = {};
         auto status = rocke_lower_kernel_to_hip(&b, kernel, &opts, &text);
         if(status != ROCKE_OK)

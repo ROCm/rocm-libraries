@@ -343,10 +343,12 @@ compilation is not claimed. Both HIP handlers lower single-output inline assembl
 BF16/FP16 tensor epilogue, directly and after serialization, on gfx950/gfx1250
 with absent/empty clobbers, plus malformed-attribute rejection. The existing
 `rocke_optimization_barrier` CTest runs those checks in build and installed trees.
-`optimization_barrier_emit.{py,c}` provides eight `hip` configurations for this
-matrix alongside its unchanged LLVM/IR modes. The focused Python tests compare
-HIP text and rejection diagnostics through `lower_serialized_ir_hip`; the
-`ROCKE_BACKEND=both` LLVM gate alone does not perform that HIP comparison.
+`optimization_barrier_emit.{py,c}` provides twelve `hip` configurations: eight
+for this epilogue matrix and four for multiline void/single-output assembly on
+gfx950/gfx1250, including quotes and backslashes in the template. Its LLVM/IR
+modes are unchanged. The focused Python tests compare HIP text and rejection
+diagnostics through `lower_serialized_ir_hip`; the `ROCKE_BACKEND=both` LLVM gate
+alone does not perform that HIP comparison.
 
 ## Installed pinned-reference suites
 

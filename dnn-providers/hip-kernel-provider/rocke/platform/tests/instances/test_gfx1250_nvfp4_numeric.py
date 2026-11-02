@@ -3,8 +3,9 @@
 """NVFP4 tensor-scaled numerical fixtures."""
 
 import subprocess
-import sys
 import pytest
+
+from rocke.tests.subprocess_launcher import rocke_python_command
 
 
 @pytest.mark.parametrize("route", ["comgr", "hip"])
@@ -12,8 +13,7 @@ import pytest
 @pytest.mark.parametrize("m,n,k", [(16, 16, 128), (32, 48, 256)])
 def test_nvfp4_numeric(gpu_env, route, dtype_c, m, n, k):
     result = subprocess.run(
-        [
-            sys.executable,
+        rocke_python_command(
             "-m",
             "rocke.examples.gfx1250.gemm.nvfp4_gemm_verify",
             "--m",
@@ -28,7 +28,7 @@ def test_nvfp4_numeric(gpu_env, route, dtype_c, m, n, k):
             route,
             "--case",
             "all",
-        ],
+        ),
         env=gpu_env,
         capture_output=True,
         text=True,

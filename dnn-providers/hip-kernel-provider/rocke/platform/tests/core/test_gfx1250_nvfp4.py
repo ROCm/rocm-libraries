@@ -293,8 +293,13 @@ def test_tensor_scale_has_distinct_signature_and_name(dtype):
     )
 
 
-def test_e4m3_scale_decoding_against_numeric_dtype():
-    ml = pytest.importorskip("ml_dtypes")
+@pytest.fixture
+def ml_reference_types():
+    return pytest.importorskip("ml_dtypes")
+
+
+def test_e4m3_scale_decoding_against_numeric_dtype(ml_reference_types):
+    ml = ml_reference_types
     codes = np.arange(127, dtype=np.uint8)
     np.testing.assert_array_equal(
         decode_e4m3_scales(codes), codes.view(ml.float8_e4m3fn).astype(np.float64)
@@ -304,6 +309,7 @@ def test_e4m3_scale_decoding_against_numeric_dtype():
             decode_e4m3_scales(np.array([code], dtype=np.uint8))
 
 
+@pytest.mark.usefixtures("ml_reference_types")
 def test_tensor_scale_direction_and_conversion_order():
     # One nonzero FP4 product: 1 * 1. E4M3 scales are 1.25 * 1.75.
     a = np.zeros((16, 64), dtype=np.uint8)
@@ -316,6 +322,7 @@ def test_tensor_scale_direction_and_conversion_order():
     np.testing.assert_array_equal(result, np.full((16, 16), 0.546875))
 
 
+@pytest.mark.usefixtures("ml_reference_types")
 def test_tensor_rounding_fixture_requires_fp32_intermediate():
     # This real GEMM cell lies on an FP16 tie after FP32 multiplication.
     # Fusing the multiply and FP16 conversion instead returns -375.25.
@@ -342,6 +349,7 @@ def test_tensor_rounding_fixture_requires_fp32_intermediate():
         "codes-127",
     ],
 )
+@pytest.mark.usefixtures("ml_reference_types")
 def test_bounded_reference_fixtures(case):
     spec = NvFp4GemmSpec("nv", 32, 48, 256)
     inputs, factors = make_case_inputs(spec, case)
@@ -378,6 +386,7 @@ def test_default_fp4_api_keeps_kernel_identity():
     "tensor_scales",
     [None, (1.3, 0.7), (1, 2), np.array([1.3, 0.7], dtype=np.float32)],
 )
+@pytest.mark.usefixtures("ml_reference_types")
 def test_launcher_tensor_factor_argument_bytes(tensor_scales):
     import ctypes
     import struct
@@ -489,6 +498,7 @@ def test_rejects_malformed_tensor_factors_without_casting(entrypoint, factors):
 
 
 @pytest.mark.parametrize("factors", [(1, 2), np.array([1.3, 0.7], dtype=np.float32)])
+@pytest.mark.usefixtures("ml_reference_types")
 def test_reference_accepts_real_numeric_tensor_factors(factors):
     spec = NvFp4GemmSpec("real_factors", 16, 16, 128)
     inputs, _ = make_case_inputs(spec, "mixed")

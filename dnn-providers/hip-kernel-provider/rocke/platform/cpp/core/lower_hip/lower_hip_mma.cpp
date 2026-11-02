@@ -343,6 +343,63 @@ static rocke_status_t rocke_h_op_tile_register_p_from_qk_c(rocke_h_lowerer_t* lw
     return lw->status;
 }
 
+/* Python: _escape_hip_asm_string. Fixed-width octal escapes cannot absorb a
+ * following digit. The returned buffer belongs to the lowerer's arena. */
+static const char* h_escape_asm_string(rocke_h_lowerer_t* lw, const char* text)
+{
+    const size_t length = strlen(text);
+    if(length > (SIZE_MAX - 1) / 4)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
+        return "";
+    }
+    char* escaped = (char*)rocke_arena_alloc(&lw->b->arena, length * 4 + 1);
+    if(!escaped)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "tile.inline_asm: out of memory");
+        return "";
+    }
+    char* out = escaped;
+    for(const unsigned char* c = (const unsigned char*)text; *c; ++c)
+    {
+        switch(*c)
+        {
+        case '\\':
+            *out++ = '\\';
+            *out++ = '\\';
+            break;
+        case '"':
+            *out++ = '\\';
+            *out++ = '"';
+            break;
+        case '\n':
+            *out++ = '\\';
+            *out++ = 'n';
+            break;
+        case '\r':
+            *out++ = '\\';
+            *out++ = 'r';
+            break;
+        case '\t':
+            *out++ = '\\';
+            *out++ = 't';
+            break;
+        default:
+            if(*c < 32 || *c == 127)
+            {
+                *out++ = '\\';
+                *out++ = '0' + ((*c >> 6) & 7);
+                *out++ = '0' + ((*c >> 3) & 7);
+                *out++ = '0' + (*c & 7);
+            }
+            else
+                *out++ = *c;
+        }
+    }
+    *out = '\0';
+    return escaped;
+}
+
 /* Python's constraint/operand zip, stopping at the shorter list. */
 static const char* h_asm_operands(rocke_h_lowerer_t* lw,
                                   const char* const* constraints,
@@ -438,6 +495,9 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
         c = end + 1;
     }
 
+    const char* escaped_template = h_escape_asm_string(lw, tmpl);
+    if(!rocke_h_live(lw))
+        return lw->status;
     const char* side = sideeffect ? "volatile " : "";
     const char* clobber_open = clobber[0] ? " : \"" : "";
     const char* clobber_close = clobber[0] ? "\"" : "";
@@ -455,7 +515,7 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
         rocke_h_emitf(lw,
                       "asm %s(\"%s\" : \"%s\"(%s) : %s%s%s%s);",
                       side,
-                      tmpl,
+                      escaped_template,
                       entries[0],
                       name,
                       ins,
@@ -471,7 +531,7 @@ static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const ro
         rocke_h_emitf(lw,
                       "asm %s(\"%s\" : :%s%s%s%s%s);",
                       side,
-                      tmpl,
+                      escaped_template,
                       ins[0] ? " " : "",
                       ins,
                       clobber_open,

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
@@ -254,6 +255,50 @@ static int test_hip_rejects_malformed_attributes()
     return 0;
 }
 
+static int test_hip_asm_string_roundtrip()
+{
+    for(bool output : {false, true})
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "asm_string") == ROCKE_OK);
+        auto* value = output ? rocke_b_param(&b, "value", rocke_f32(), nullptr) : nullptr;
+        rocke_value_t* operands[] = {value};
+        const rocke_type_t* types[] = {rocke_f32()};
+        const char* prefix = output ? "v_mov_b32 $0, $1" : "s_nop 0";
+        char tmpl[128];
+        snprintf(tmpl, sizeof tmpl, "%s\n\ts_nop 0 ; \"quoted\" \\path\r\0017\177", prefix);
+        CHECK(rocke_b_inline_asm(&b,
+                                 tmpl,
+                                 output ? "=v,0" : "",
+                                 operands,
+                                 output ? 1 : 0,
+                                 types,
+                                 output ? 1 : 0,
+                                 nullptr));
+        rocke_b_ret(&b);
+        char* serialized = nullptr;
+        CHECK(rocke_ir_serialize(b.kernel, &serialized) == ROCKE_OK);
+        rocke_ir_builder_t copy;
+        CHECK(rocke_ir_builder_init(&copy, "imported_asm") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = nullptr;
+        CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
+        free(serialized);
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = "gfx950";
+        rocke_strbuf_t original = {}, imported = {};
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &original) == ROCKE_OK);
+        CHECK(rocke_lower_kernel_to_hip(&copy, kernel, &opts, &imported) == ROCKE_OK);
+        CHECK(strcmp(original.cstr(), imported.cstr()) == 0);
+        CHECK(strstr(original.cstr(), "\\n\\ts_nop 0 ; \\\"quoted\\\" \\\\path\\r\\0017\\177"));
+        CHECK(!strstr(original.cstr(), "s_nop 0 ; \"quoted\""));
+        original.free_buffer();
+        imported.free_buffer();
+        rocke_ir_builder_free(&copy);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
 int main()
 {
     int admission = test_admission();
@@ -261,5 +306,6 @@ int main()
     int predicate = test_predicate();
     int hip = test_tensor_epilogue_hip();
     int attributes = test_hip_rejects_malformed_attributes();
-    return admission || scalars || predicate || hip || attributes;
+    int strings = test_hip_asm_string_roundtrip();
+    return admission || scalars || predicate || hip || attributes || strings;
 }

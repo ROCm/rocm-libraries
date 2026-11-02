@@ -166,9 +166,9 @@ def hip_engine():
     return pytest.importorskip("rocke_engine")
 
 
-@pytest.mark.parametrize("index", range(8))
-def test_hip_barrier_paired_emitters(index, hip_engine):
-    emitter = runpy.run_path(
+@pytest.fixture
+def barrier_emitter():
+    return runpy.run_path(
         str(
             Path(__file__).resolve().parents[1]
             / "instances"
@@ -176,8 +176,12 @@ def test_hip_barrier_paired_emitters(index, hip_engine):
             / "optimization_barrier_emit.py"
         )
     )
-    arch, dtype, clobber = emitter["HIP_CONFIGS"][index]
-    kernel = emitter["build_hip_epilogue"](dtype, clobber)
+
+
+@pytest.mark.parametrize("index", range(8))
+def test_hip_barrier_paired_emitters(index, hip_engine, barrier_emitter):
+    arch, dtype, clobber = barrier_emitter["HIP_CONFIGS"][index]
+    kernel = barrier_emitter["build_hip_epilogue"](dtype, clobber)
     python = lower_kernel_to_hip(kernel, arch=arch)
     native = hip_engine.lower_serialized_ir_hip(serialize(kernel), arch=arch)
     assert native == python
@@ -238,6 +242,56 @@ def test_hip_general_assembly_rejects_non_string_clobber(clobber, hip_engine):
         lower_kernel_to_hip(b.kernel, arch="gfx1250")
     with pytest.raises(RuntimeError, match="HIP inline asm clobber must be a string"):
         hip_engine.lower_serialized_ir_hip(serialize(b.kernel), arch="gfx1250")
+
+
+@pytest.mark.parametrize("index", range(4))
+def test_hip_assembly_paired_emitters(index, hip_engine, barrier_emitter):
+    arch, output = barrier_emitter["HIP_STRING_CONFIGS"][index]
+    kernel = barrier_emitter["build_hip_assembly"](output)
+    source = lower_kernel_to_hip(kernel, arch=arch)
+    assert source == hip_engine.lower_serialized_ir_hip(serialize(kernel), arch=arch)
+    assert r"\n\ts_nop 0 ; \"quoted\" \\path" in source
+
+
+_HIP_ASM_STRING_CASES = [
+    ("\n\ts_nop 0", r"\n\ts_nop 0"),
+    (' ; "quoted" \\path', r" ; \"quoted\" \\path"),
+    ("\r\x017\x7f", r"\r\0017\177"),
+]
+
+
+def _asm_string_kernel(suffix, output):
+    b = IRBuilder("asm_string")
+    prefix = "v_mov_b32 $0, $1" if output else "s_nop 0"
+    value = b.param("value", F32) if output else None
+    b.inline_asm(
+        prefix + suffix, "=v,0" if output else "", [value] if output else [], output
+    )
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("suffix,escaped", _HIP_ASM_STRING_CASES)
+@pytest.mark.parametrize("output", [None, F32])
+@pytest.mark.parametrize("roundtrip", [False, True])
+def test_hip_assembly_string_literal(suffix, escaped, output, roundtrip):
+    kernel = _asm_string_kernel(suffix, output)
+    if roundtrip:
+        kernel = parse(serialize(kernel))
+    source = lower_kernel_to_hip(kernel, arch="gfx950")
+    prefix = "v_mov_b32 %0, %1" if output else "s_nop 0"
+    assert f'asm volatile ("{prefix}{escaped}"' in source
+
+
+@pytest.mark.parametrize("suffix,escaped", _HIP_ASM_STRING_CASES)
+@pytest.mark.parametrize("output", [None, F32])
+def test_hip_assembly_string_matches_native(suffix, escaped, output, hip_engine):
+    kernel = _asm_string_kernel(suffix, output)
+    python = lower_kernel_to_hip(kernel, arch="gfx950")
+    native = hip_engine.lower_serialized_ir_hip(serialize(kernel), arch="gfx950")
+    assert native == python
+    prefix = "v_mov_b32 %0, %1" if output else "s_nop 0"
+    assert f'asm volatile ("{prefix}{escaped}"' in native
 
 
 def test_hip_assembly_requires_output_constraint(hip_engine):

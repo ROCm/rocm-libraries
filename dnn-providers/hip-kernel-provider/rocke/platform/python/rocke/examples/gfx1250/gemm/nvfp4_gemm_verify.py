@@ -49,20 +49,20 @@ def reference_result(a, b, sa, sb, tensor_scales, *, dtype_c="bf16") -> np.ndarr
     Float64 accumulation here is an oracle for the exact fixtures, not a promise
     of bitwise agreement for arbitrary NVFP4 inputs.
     """
-    import ml_dtypes
-
+    factors = _tensor_factors_fp32(tensor_scales)
+    if dtype_c not in ("bf16", "fp16", "f16"):
+        raise ValueError("output dtype must be bf16 or fp16")
     da, db = decode_fp4(a), decode_fp4(b)
     m, k = da.shape
     n, kb = db.shape
     if k != kb or k % 16 or sa.shape != (m, k // 16) or sb.shape != (k // 16, n):
         raise ValueError("incompatible packed matrix or K=16 block-scale shapes")
-    factors = _tensor_factors_fp32(tensor_scales)
     a_real = da * np.repeat(decode_e4m3_scales(sa), 16, axis=1)
     b_real = db * np.repeat(decode_e4m3_scales(sb).T, 16, axis=1)
     acc = (a_real @ b_real.T).astype(np.float32)
     result = acc * np.float32(factors[0] * factors[1])
-    if dtype_c not in ("bf16", "fp16", "f16"):
-        raise ValueError("output dtype must be bf16 or fp16")
+    import ml_dtypes
+
     out_type = ml_dtypes.bfloat16 if dtype_c == "bf16" else np.float16
     return result.astype(out_type).astype(np.float32)
 

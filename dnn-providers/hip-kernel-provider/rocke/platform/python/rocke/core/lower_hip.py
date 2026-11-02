@@ -56,7 +56,6 @@ from .mma_operand import (
 )
 from .tf32 import TF32_MMA, tf32_mma_target_error, tf32_op_error
 
-
 # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
 # keeps its values out of the IR.
 _HIP_TYPE = {
@@ -74,6 +73,17 @@ _HIP_TYPE = {
     "fp8e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
 }
+
+
+def _escape_hip_asm_string(text: str) -> str:
+    """Preserve assembly bytes inside a C++ string literal, not an LLVM literal."""
+    escapes = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+    return "".join(
+        escapes.get(
+            char, f"\\{ord(char):03o}" if ord(char) < 32 or ord(char) == 127 else char
+        )
+        for char in text
+    )
 
 
 def _hip_scalar_type(type_name: str) -> str:
@@ -1522,7 +1532,9 @@ class _Lowerer:
                     "HIP optimization barrier clobber must be an empty string"
                 )
 
-        template = _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
+        template = _escape_hip_asm_string(
+            _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
+        )
         parts = [c.strip() for c in op.attrs["constraints"].split(",") if c.strip()]
         side = "volatile " if sideeffect else ""
         in_names = [_name(o) for o in op.operands]
