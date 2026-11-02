@@ -2113,51 +2113,12 @@ namespace TensileLite
             m_mxPreswizzledA = false;
             m_mxPreswizzledB = false;
 
-            MXScaleLayout layoutA = MXScaleLayout::None;
-            MXScaleLayout layoutB = MXScaleLayout::None;
-
-            if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::GFX950
-               && m_currentSolution != nullptr)
-            {
-                auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;
-                size_t           MiK           = static_cast<size_t>(mi[2]);
-                constexpr size_t swizzleTileMN = 32; // 2 SIMDs * 16 lanes per wave for MN access
-                constexpr size_t tileK         = 256 / swizzleTileMN; // scale blocks per wave in K
-
-                // The scale tensor is [K blocks, MN] for a K-contiguous operand and
-                // the transpose of that for a free-dim contiguous one.
-                auto scaleDimsFor = [](TensorDescriptor const& scaleDesc, size_t boundIdx) {
-                    auto const& s = scaleDesc.sizes();
-                    // returns {K blocks, MN}
-                    return std::make_pair(s[boundIdx], s[boundIdx == 0 ? 1 : 0]);
-                };
-
-                if(MiK > 0)
-                {
-                    if(problem.mxBlockA() > 0 && MiK % problem.mxBlockA() == 0)
-                    {
-                        auto const [kBlocksA, mnA]
-                            = scaleDimsFor(problem.mxsa(), problem.boundIndices()[0].a);
-                        if(kBlocksA % tileK == 0 && mnA % swizzleTileMN == 0)
-                            layoutA = MXScaleLayout::GFX950;
-                    }
-
-                    if(problem.mxBlockB() > 0 && MiK % problem.mxBlockB() == 0)
-                    {
-                        auto const [kBlocksB, mnB]
-                            = scaleDimsFor(problem.mxsb(), problem.boundIndices()[0].b);
-                        if(kBlocksB % tileK == 0 && mnB % swizzleTileMN == 0)
-                            layoutB = MXScaleLayout::GFX950;
-                    }
-                }
-            }
-            else if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::GFX1250)
-            {
-                if(problem.mxBlockA() > 0)
-                    layoutA = MXScaleLayout::GFX1250;
-                if(problem.mxBlockB() > 0)
-                    layoutB = MXScaleLayout::GFX1250;
-            }
+            int32_t const solutionScaleFormat
+                = m_currentSolution != nullptr ? m_currentSolution->problemType.mxScaleFormat : -1;
+            MXScaleLayout const layoutA = detail::mxScaleLayoutForSolution(
+                m_mxScaleLayout, m_mxScaleFormat, solutionScaleFormat, problem.mxBlockA());
+            MXScaleLayout const layoutB = detail::mxScaleLayoutForSolution(
+                m_mxScaleLayout, m_mxScaleFormat, solutionScaleFormat, problem.mxBlockB());
 
             // We pass cpuInput.valid (host) pointers because the CPU reference
             // path needs those bytes host-side anyway.
@@ -2202,7 +2163,8 @@ namespace TensileLite
                   // gfx1250 swizzles depend only on the tensor descriptors, so an
                   // unchanged descriptor means both the canonical scale and the cached
                   // swizzled bytes are still valid. gfx950 is excluded because its
-                  // preswizzle choice also depends on the current solution's MI shape.
+                  // preswizzle choice also depends on the current solution's
+                  // MXScaleFormat.
                   if(m_mxScaleLayout == MXScaleLayout::GFX1250 && descriptorsUnchanged)
                   {
                       return;
@@ -3214,7 +3176,8 @@ namespace TensileLite
                 else if(needMXSwizzle)
                 {
                     // initializeMXData populates gpuInput.valid with the swizzled
-                    // scale when arch + geometry allow; the picked solution can
+                    // scale when the arch and the solution's MXScaleFormat
+                    // call for it; the picked solution can
                     // additionally request the canonical layout via
                     // problemType.mxScaleFormat == 0 (NoSwizzle), in which case
                     // we upload cpuInput.valid as-is even if a swizzled copy is
@@ -3707,7 +3670,7 @@ namespace TensileLite
             if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))
             {
                 auto    castInputs   = static_pointer_cast<ContractionInputs>(inputs);
-                size_t  rotatingSize = getRotatingSize(*gemmProblem, *castInputs);
+                size_t rotatingSize = getRotatingSize(*gemmProblem, *castInputs);
                 int32_t rotatingNum
                     = std::min(maxRotatingBufferNum, static_cast<int32_t>(ceil((float)m_rotatingBuffer / rotatingSize)))
                       - 1; // Minus the original buffer.
@@ -3715,14 +3678,21 @@ namespace TensileLite
                 // <= 0 means don't rotating
                 rotatingNum = std::max(0, rotatingNum);
 
-                int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
+                const size_t rotatingAllocatedSize
+                    = m_rotatingMode == 0 ? m_rm->getDataSize() - m_rm->getDataLargestUnitSize() : 0;
+                if(rotatingSize > 0 && rotatingAllocatedSize > 0)
+                {
+                    const size_t maxCopiesBySlack = rotatingAllocatedSize / rotatingSize;
+                    rotatingNum = static_cast<int32_t>(
+                        std::min(static_cast<size_t>(rotatingNum), maxCopiesBySlack));
+                }
+
+                const size_t totalRotatingSizeNeeded = static_cast<size_t>(rotatingNum) * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
                           << ". Rotating num: " << rotatingNum
                           << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
-                    auto rotatingAllocatedSize
-                        = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
                     if(totalRotatingSizeNeeded > rotatingAllocatedSize)
                     {
                         std::cout << "Rotating buffer size: " << rotatingAllocatedSize
@@ -3733,7 +3703,7 @@ namespace TensileLite
                     }
                     uint8_t* ptr = (uint8_t*)m_rm->getData().get() + m_rm->getDataLargestUnitSize();
                     int64_t  offset = 0;
-                    for(size_t i = 0; i < rotatingNum; i++)
+                    for(size_t i = 0; i < static_cast<size_t>(rotatingNum); i++)
                     {
                         auto newInputs = createRotatingInput(
                             *gemmProblem, *castInputs, (void*)ptr, offset, stream);
@@ -3778,14 +3748,21 @@ namespace TensileLite
                 // <= 0 means don't rotating
                 rotatingNum = std::max(0, rotatingNum);
 
-                int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
+                const size_t rotatingAllocatedSize
+                    = m_rotatingMode == 0 ? m_rm->getDataSize() - m_rm->getDataLargestUnitSize() : 0;
+                if(rotatingSize > 0 && rotatingAllocatedSize > 0)
+                {
+                    const size_t maxCopiesBySlack = rotatingAllocatedSize / rotatingSize;
+                    rotatingNum = static_cast<int32_t>(
+                        std::min(static_cast<size_t>(rotatingNum), maxCopiesBySlack));
+                }
+
+                const size_t totalRotatingSizeNeeded = static_cast<size_t>(rotatingNum) * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
                           << ". Rotating num: " << rotatingNum
                           << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
-                    auto rotatingAllocatedSize
-                        = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
                     if(totalRotatingSizeNeeded > rotatingAllocatedSize)
                     {
                         std::cout << "Rotating buffer size: " << rotatingAllocatedSize
@@ -3796,7 +3773,7 @@ namespace TensileLite
                     }
                     uint8_t* ptr = (uint8_t*)m_rm->getData().get() + m_rm->getDataLargestUnitSize();
                     int64_t  offset = 0;
-                    for(size_t j = 0; j < rotatingNum; j++)
+                    for(size_t j = 0; j < static_cast<size_t>(rotatingNum); j++)
                     {
                         ContractionGroupedInputs newInputs;
                         newInputs.ws = castInputs->ws;

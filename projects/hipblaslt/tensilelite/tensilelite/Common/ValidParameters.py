@@ -703,6 +703,11 @@ validParameters = { # we need to make sure this matches develop
     "AssertStrideBEqual": -1,
     "AssertStrideCEqual": -1,
     "AssertStrideDEqual": -1,
+    # Divisibility of an A/B stride, same {index: value} form: the predicate is
+    # stride(index) % value == 0, in elements. A kernel that issues wide loads
+    # along the leading dimension declares it. Fork YAML: AssertStrideAMultiple: [{1: 4}]
+    "AssertStrideAMultiple": -1,
+    "AssertStrideBMultiple": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1448,6 +1453,14 @@ ASSERT_DIM_MAP_PARAMETERS = (
     "AssertStrideBEqual",
     "AssertStrideCEqual",
     "AssertStrideDEqual",
+    "AssertStrideAMultiple",
+    "AssertStrideBMultiple",
+)
+
+# Subset of the above where the value is a divisor, so 0 would divide by zero.
+ASSERT_DIM_MULTIPLE_PARAMETERS = (
+    "AssertStrideAMultiple",
+    "AssertStrideBMultiple",
 )
 
 
@@ -1466,6 +1479,15 @@ def checkAssertSizeMapIsValid(name, value):
         if type(val) is not int:
             msgBase = "Invalid parameter value: {} = {}\nSize must be int, got {}"
             raise Exception(msgBase.format(name, value, type(val).__name__))
+
+
+def checkAssertMultipleMapIsValid(name, value):
+    """Divisors must be positive; -1 is the skip sentinel."""
+    for val in value.values():
+        if val == -1 or val > 0:
+            continue
+        msgBase = "Invalid parameter value: {} = {}\nMultiple must be > 0 (or -1 to skip), got {}"
+        raise Exception(msgBase.format(name, value, val))
 
 
 def checkSpaceFillAlgoIsValid(name, value):
@@ -1585,6 +1607,8 @@ def checkParametersAreValid(
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
         elif name in ASSERT_DIM_MAP_PARAMETERS:
             checkAssertSizeMapIsValid(name, value)
+            if name in ASSERT_DIM_MULTIPLE_PARAMETERS:
+                checkAssertMultipleMapIsValid(name, value)
         elif name == "SpaceFillingAlgo":
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":

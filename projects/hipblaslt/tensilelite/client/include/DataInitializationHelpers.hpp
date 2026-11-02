@@ -282,6 +282,27 @@ namespace TensileLite
                     }
                 }
             }
+            // ----------------------------------------------------------------
+            //  Host-side scale layout for one MX operand. gfx950 pre-swizzles
+            //  only for solutions that declare HostPreSwizzle (mxScaleFormat 1);
+            //  a solution scale format of -1 means no solution has been picked yet.
+            //  The descriptors and allocations are already padded on gfx950, so
+            //  the choice does not depend on the problem shape or the solution's
+            //  nominal matrix instruction.
+            // ----------------------------------------------------------------
+            inline MXScaleLayout mxScaleLayoutForSolution(MXScaleLayout archLayout,
+                                                          int32_t       cliScaleFormat,
+                                                          int32_t       solutionScaleFormat,
+                                                          size_t        mxBlock)
+            {
+                if(cliScaleFormat <= 0 || mxBlock == 0)
+                    return MXScaleLayout::None;
+                if(archLayout == MXScaleLayout::GFX1250)
+                    return MXScaleLayout::GFX1250;
+                if(archLayout == MXScaleLayout::GFX950 && solutionScaleFormat == 1)
+                    return MXScaleLayout::GFX950;
+                return MXScaleLayout::None;
+            }
         } // namespace detail
     } // namespace Client
 } // namespace TensileLite

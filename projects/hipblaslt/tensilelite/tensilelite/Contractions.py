@@ -101,6 +101,13 @@ class BoundIndex:
         self.bMirror = bMirror
 
 
+def mxScaleFormatCode(solutionState):
+    """Host-visible code of the solution's MXScaleFormat: NoSwizzle 0, HostPreSwizzle 1, InMemorySwizzle 2."""
+    return {"NoSwizzle": 0,
+            "HostPreSwizzle": 1,
+            "InMemorySwizzle": 2}.get(solutionState.get("MXScaleFormat", "NoSwizzle"), 0)
+
+
 class ProblemType:
     StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputTypeA', 'computeInputTypeB', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
                  'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useGateResidual', 'gateResidualDataTypeWhiteList', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
@@ -513,6 +520,8 @@ ASSERT_DIM_MAP_PREDICATES = {
     "AssertSizeLessThan": "SizeLessThan",
     "AssertStrideAEqual": "StrideAEqual",
     "AssertStrideBEqual": "StrideBEqual",
+    "AssertStrideAMultiple": "StrideAMultiple",
+    "AssertStrideBMultiple": "StrideBMultiple",
     "AssertStrideCEqual": "StrideCEqual",
     "AssertStrideDEqual": "StrideDEqual",
 }
@@ -1079,9 +1088,7 @@ class Solution:
         # but it describes the in-device MX scale layout the kernel expects, which
         # the host (DataInitialization) needs to know to pick an upload layout.
         # Plumb it onto problemType so the host can read it post-solution-pick.
-        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
-                                        "HostPreSwizzle": 1,
-                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
+        rv.problemType.mxScaleFormat = mxScaleFormatCode(d)
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)

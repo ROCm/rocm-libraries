@@ -42,7 +42,7 @@ from tensilelite.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from tensilelite.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
+from tensilelite.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate, mxScaleFormatCode
 from tensilelite.Common.ValidParameters import (
     ASSERT_DIM_MAP_PARAMETERS,
     checkParametersAreValid,
@@ -367,6 +367,31 @@ def test_valid_parameters_reject_assert_size_equal_bad_map():
         checkParametersAreValid(("AssertSizeEqual", [{0: 1.5}]), validParameters)
 
 
+@pytest.mark.parametrize(
+    "key, tag", [("AssertStrideAMultiple", "StrideAMultiple"), ("AssertStrideBMultiple", "StrideBMultiple")]
+)
+def test_problem_predicate_emits_stride_multiple(key, tag):
+    pred = ProblemPredicate.FromOriginalKeyPair((key, {1: 4}))
+
+    assert pred is not None
+    assert pred.tag == tag
+    assert pred.index == 1
+    assert pred.value == 4
+    assert ProblemPredicate.FromOriginalKeyPair((key, {})) is None
+    assert ProblemPredicate.FromOriginalKeyPair((key, {1: -1})) is None
+    with pytest.raises(RuntimeError, match="must be a dict"):
+        ProblemPredicate.FromOriginalKeyPair((key, 4))
+
+
+def test_valid_parameters_stride_multiple():
+    checkParametersAreValid(("AssertStrideAMultiple", [{}, {1: 4}]), validParameters)
+    checkParametersAreValid(("AssertStrideBMultiple", [{1: 4}]), validParameters)
+    with pytest.raises(Exception, match="Multiple must be > 0"):
+        checkParametersAreValid(("AssertStrideAMultiple", [{1: 0}]), validParameters)
+    with pytest.raises(Exception, match="Multiple must be > 0"):
+        checkParametersAreValid(("AssertStrideBMultiple", [{1: -2}]), validParameters)
+
+
 def _write_minimal_yaml_with_predicate(yaml_path, predicate_value):
     yaml_path.write_text(dedent(f"""\
         BenchmarkProblems:
@@ -411,6 +436,120 @@ def test_parse_tensile_yaml_copies_assert_size_equal(tmp_path):
     config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
 
     assert config["AssertSizeEqual"] == {0: 1}
+
+
+def test_stride_multiple_round_trips_from_yaml_to_loader(tmp_path):
+    yaml_path = tmp_path / "stride_multiple.yaml"
+    yaml_path.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - CustomKernel:
+                - name: predicated_kernel
+                  args: []
+                  macrotile: [256, 256, 64]
+                  threads: [256, 1, 1]
+                  grid: [TilesX, TilesY, One]
+              - AssertStrideAMultiple: [{1: 4}]
+              - AssertStrideBMultiple: [{1: 4}]
+        """))
+
+    config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
+    rendered = build_custom_config_yaml(origin="test", config=config)
+
+    assert "AssertStrideAMultiple: { 1: 4 }" in rendered
+    assert "AssertStrideBMultiple: { 1: 4 }" in rendered
+
+    write_kernel(tmp_path / "stride_multiple.s", f"""\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 16, 1]
+          AssertStrideAMultiple: {config["AssertStrideAMultiple"]}
+          AssertStrideBMultiple: {config["AssertStrideBMultiple"]}
+        """)
+    loaded = getCustomKernelConfig("stride_multiple", {}, str(tmp_path))
+
+    assert loaded["AssertStrideAMultiple"] == {1: 4}
+    assert loaded["AssertStrideBMultiple"] == {1: 4}
+
+
+@pytest.mark.parametrize(
+    "state, code",
+    [
+        ({}, 0),
+        ({"MXScaleFormat": "Auto"}, 0),
+        ({"MXScaleFormat": "NoSwizzle"}, 0),
+        ({"MXScaleFormat": "HostPreSwizzle"}, 1),
+        ({"MXScaleFormat": "InMemorySwizzle"}, 2),
+    ],
+)
+def test_mx_scale_format_code(state, code):
+    assert mxScaleFormatCode(state) == code
+
+
+def test_mx_scale_format_round_trips_from_yaml_to_loader(tmp_path):
+    yaml_path = tmp_path / "mx_scale_format.yaml"
+    yaml_path.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - CustomKernel:
+                - name: swizzled_kernel
+                  args: []
+                  macrotile: [256, 256, 64]
+                  threads: [256, 1, 1]
+                  grid: [TilesX, TilesY, One]
+              - MXScaleFormat: [HostPreSwizzle]
+        """))
+
+    config = _parse_tensile_yaml(str(yaml_path), "swizzled_kernel")
+    rendered = build_custom_config_yaml(origin="test", config=config)
+
+    assert "MXScaleFormat: HostPreSwizzle" in rendered
+
+    write_kernel(tmp_path / "swizzled_kernel.s", f"""\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 16, 1]
+          MXScaleFormat: {config["MXScaleFormat"]}
+        """)
+    write_kernel(tmp_path / "plain_kernel.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+        """)
+
+    swizzled = getCustomKernelConfig("swizzled_kernel", {}, str(tmp_path))
+    plain = getCustomKernelConfig("plain_kernel", {}, str(tmp_path))
+
+    assert mxScaleFormatCode(swizzled) == 1
+    assert mxScaleFormatCode(plain) == 0
+
+
+def test_skinny_mxfp8_kernels_declare_host_pre_swizzle():
+    kernelDir = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels", "skinny_mxfp8")
+    kernelNames = sorted(f[:-2] for f in os.listdir(kernelDir) if f.endswith(".s"))
+
+    assert len(kernelNames) == 6
+    for name in kernelNames:
+        assert mxScaleFormatCode(readCustomKernelConfig(name)) == 1, name
+
+
+def test_skinny_mxfp8_kernels_serve_both_orientations():
+    kernelDir = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels", "skinny_mxfp8")
+    kernelNames = sorted(f[:-2] for f in os.listdir(kernelDir) if f.endswith(".s"))
+
+    for name in kernelNames:
+        config = readCustomKernelConfig(name)
+        assert config["CustomKernel"]["grid"] == ["TilesWide", "TilesSkinny", "Batch"], name
+        # No skinny-extent guard: only the wide-extent cap, on both M and N.
+        assert config["AssertSizeLessThan"] == {0: 131072, 1: 131072}, name
+        assert config["AssertSizeGreaterThan"] == {0: 0, 1: 0, 3: 0}, name
 
 
 def test_parse_tensile_yaml_rejects_multi_valued_predicate(tmp_path):
@@ -1295,6 +1434,23 @@ def test_get_custom_kernel_config_respects_explicit_custom_kernel(tmp_path):
     config = getCustomKernelConfig("k", {}, str(tmp_path))
     assert config["CustomKernel"]["macrotile"] == [128, 128, 64]
     assert config["CustomKernel"]["grid"] == ["TilesX", "TilesY", "One"]
+
+
+def test_get_custom_kernel_config_keeps_wide_skinny_grid(tmp_path):
+    # The orientation-independent skinny grid is passed through to the C++ block.
+    write_kernel(tmp_path / "k.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          CustomKernel:
+            args: []
+            macrotile: [256, 4, 64]
+            threads: [256, 1, 1]
+            grid: [TilesWide, TilesSkinny, Batch]
+        """)
+    config = getCustomKernelConfig("k", {}, str(tmp_path))
+    assert config["CustomKernel"]["grid"] == ["TilesWide", "TilesSkinny", "Batch"]
 
 
 def test_validate_metadata_tensile_missing_internal_support_params(tmp_path):
