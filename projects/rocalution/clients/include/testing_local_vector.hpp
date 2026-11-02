@@ -28,6 +28,7 @@
 #include "utility.hpp"
 
 #include <gtest/gtest.h>
+#include <memory>
 #include <rocalution/rocalution.hpp>
 
 using namespace rocalution;
@@ -1441,6 +1442,115 @@ void testing_move_to_host_async(const Arguments& argus)
     for(int i = 0; i < argus.size; ++i)
     {
         EXPECT_EQ(vec[i], static_cast<T>(i + 1));
+    }
+}
+
+// LocalVector that reports the backend it currently lives on. If both is_host_() and is_accel_()
+// are true, the vector has lost both backend objects and any further access (including its
+// destructor) dereferences NULL.
+template <typename T>
+class local_vector_location : public LocalVector<T>
+{
+public:
+    bool on_host() const
+    {
+        return this->is_host_() && !this->is_accel_();
+    }
+
+    bool on_accel() const
+    {
+        return this->is_accel_() && !this->is_host_();
+    }
+};
+
+template <typename T>
+bool local_vector_reaches_accelerator()
+{
+    local_vector_location<T> vec;
+    vec.Allocate("probe", 1);
+    vec.MoveToAccelerator();
+    return vec.on_accel();
+}
+
+template <typename T>
+void testing_move_to_host_async_sync(const Arguments& argus)
+{
+    if(!local_vector_reaches_accelerator<T>())
+    {
+        GTEST_SKIP() << "No accelerator available";
+    }
+
+    // Heap allocated so that a vector without backend objects can be leaked instead of crashing
+    // the test binary in its destructor
+    std::unique_ptr<local_vector_location<T>> vec(new local_vector_location<T>);
+    vec->Allocate("TestVector", argus.size);
+    for(int i = 0; i < argus.size; ++i)
+    {
+        (*vec)[i] = static_cast<T>(i + 1);
+    }
+
+    vec->MoveToAccelerator();
+    ASSERT_TRUE(vec->on_accel());
+
+    vec->MoveToHostAsync();
+
+    // The vector switches to the host only once Sync() is called
+    EXPECT_TRUE(vec->on_accel());
+
+    vec->Sync();
+
+    if(!vec->on_host())
+    {
+        vec.release();
+        FAIL() << "LocalVector is not on the host after MoveToHostAsync() and Sync()";
+    }
+
+    EXPECT_EQ(vec->GetSize(), argus.size);
+    EXPECT_TRUE(vec->Check());
+    for(int i = 0; i < argus.size; ++i)
+    {
+        EXPECT_EQ((*vec)[i], static_cast<T>(i + 1));
+    }
+}
+
+template <typename T>
+void testing_move_to_accelerator_async_sync(const Arguments& argus)
+{
+    if(!local_vector_reaches_accelerator<T>())
+    {
+        GTEST_SKIP() << "No accelerator available";
+    }
+
+    // Heap allocated so that a vector without backend objects can be leaked instead of crashing
+    // the test binary in its destructor
+    std::unique_ptr<local_vector_location<T>> vec(new local_vector_location<T>);
+    vec->Allocate("TestVector", argus.size);
+    for(int i = 0; i < argus.size; ++i)
+    {
+        (*vec)[i] = static_cast<T>(i + 1);
+    }
+
+    vec->MoveToAcceleratorAsync();
+
+    // The vector switches to the accelerator only once Sync() is called
+    EXPECT_TRUE(vec->on_host());
+
+    vec->Sync();
+
+    if(!vec->on_accel())
+    {
+        vec.release();
+        FAIL() << "LocalVector is not on the accelerator after MoveToAcceleratorAsync() and Sync()";
+    }
+
+    EXPECT_EQ(vec->GetSize(), argus.size);
+    EXPECT_TRUE(vec->Check());
+
+    vec->MoveToHost();
+    ASSERT_TRUE(vec->on_host());
+    for(int i = 0; i < argus.size; ++i)
+    {
+        EXPECT_EQ((*vec)[i], static_cast<T>(i + 1));
     }
 }
 

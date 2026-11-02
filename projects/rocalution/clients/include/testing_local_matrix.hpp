@@ -28,6 +28,7 @@
 #include "utility.hpp"
 
 #include <gtest/gtest.h>
+#include <memory>
 #include <rocalution/rocalution.hpp>
 
 using namespace rocalution;
@@ -1108,6 +1109,140 @@ void testing_local_move_to_host_async()
     EXPECT_NO_THROW(matrix.Sync());
     EXPECT_EQ(matrix.GetM(), 2);
     EXPECT_EQ(matrix.GetN(), 2);
+}
+
+// LocalMatrix that reports the backend it currently lives on. If both is_host_() and is_accel_()
+// are true, the matrix has lost both backend objects and any further access (including its
+// destructor) dereferences NULL.
+template <typename T>
+class local_matrix_location : public LocalMatrix<T>
+{
+public:
+    bool on_host() const
+    {
+        return this->is_host_() && !this->is_accel_();
+    }
+
+    bool on_accel() const
+    {
+        return this->is_accel_() && !this->is_host_();
+    }
+};
+
+template <typename T>
+bool local_matrix_reaches_accelerator()
+{
+    local_matrix_location<T> mat;
+    mat.MoveToAccelerator();
+    return mat.on_accel();
+}
+
+template <typename T>
+void testing_local_move_to_host_async_sync()
+{
+    if(!local_matrix_reaches_accelerator<T>())
+    {
+        GTEST_SKIP() << "No accelerator available";
+    }
+
+    PtrType                           row_offsets[3] = {0, 2, 4};
+    int                               col_indices[4] = {0, 1, 0, 1};
+    T                                 values[4]      = {1.0, 2.0, 3.0, 4.0};
+    const std::vector<std::vector<T>> dense_ref      = {{1.0, 2.0}, {3.0, 4.0}};
+
+    for(unsigned int format = DENSE; format <= HYB; ++format)
+    {
+        SCOPED_TRACE(_matrix_format_names[format]);
+
+        // Heap allocated so that a matrix without backend objects can be leaked instead of
+        // crashing the test binary in its destructor
+        std::unique_ptr<local_matrix_location<T>> mat(new local_matrix_location<T>);
+        mat->AllocateCSR("TestMatrix", 4, 2, 2);
+        mat->CopyFromCSR(row_offsets, col_indices, values);
+        mat->ConvertTo(format, (format == BCSR) ? 2 : 1);
+        ASSERT_EQ(mat->GetFormat(), format);
+        int64_t nnz = mat->GetNnz();
+
+        mat->MoveToAccelerator();
+        ASSERT_TRUE(mat->on_accel());
+
+        mat->MoveToHostAsync();
+
+        // The matrix switches to the host only once Sync() is called
+        EXPECT_TRUE(mat->on_accel());
+
+        mat->Sync();
+
+        if(!mat->on_host())
+        {
+            mat.release();
+            ADD_FAILURE() << "LocalMatrix is not on the host after MoveToHostAsync() and Sync()";
+            continue;
+        }
+
+        EXPECT_EQ(mat->GetFormat(), format);
+        EXPECT_EQ(mat->GetM(), 2);
+        EXPECT_EQ(mat->GetN(), 2);
+        EXPECT_EQ(mat->GetNnz(), nnz);
+        EXPECT_TRUE(mat->Check());
+
+        mat->ConvertToCSR();
+        EXPECT_EQ(extract_dense_matrix(*mat), dense_ref);
+    }
+}
+
+template <typename T>
+void testing_local_move_to_accelerator_async_sync()
+{
+    if(!local_matrix_reaches_accelerator<T>())
+    {
+        GTEST_SKIP() << "No accelerator available";
+    }
+
+    PtrType                           row_offsets[3] = {0, 2, 4};
+    int                               col_indices[4] = {0, 1, 0, 1};
+    T                                 values[4]      = {1.0, 2.0, 3.0, 4.0};
+    const std::vector<std::vector<T>> dense_ref      = {{1.0, 2.0}, {3.0, 4.0}};
+
+    for(unsigned int format = DENSE; format <= HYB; ++format)
+    {
+        SCOPED_TRACE(_matrix_format_names[format]);
+
+        // Heap allocated so that a matrix without backend objects can be leaked instead of
+        // crashing the test binary in its destructor
+        std::unique_ptr<local_matrix_location<T>> mat(new local_matrix_location<T>);
+        mat->AllocateCSR("TestMatrix", 4, 2, 2);
+        mat->CopyFromCSR(row_offsets, col_indices, values);
+        mat->ConvertTo(format, (format == BCSR) ? 2 : 1);
+        ASSERT_EQ(mat->GetFormat(), format);
+        int64_t nnz = mat->GetNnz();
+
+        mat->MoveToAcceleratorAsync();
+
+        // The matrix switches to the accelerator only once Sync() is called
+        EXPECT_TRUE(mat->on_host());
+
+        mat->Sync();
+
+        if(!mat->on_accel())
+        {
+            mat.release();
+            ADD_FAILURE() << "LocalMatrix is not on the accelerator after MoveToAcceleratorAsync() "
+                             "and Sync()";
+            continue;
+        }
+
+        EXPECT_EQ(mat->GetFormat(), format);
+        EXPECT_EQ(mat->GetM(), 2);
+        EXPECT_EQ(mat->GetN(), 2);
+        EXPECT_EQ(mat->GetNnz(), nnz);
+        EXPECT_TRUE(mat->Check());
+
+        mat->MoveToHost();
+        ASSERT_TRUE(mat->on_host());
+        mat->ConvertToCSR();
+        EXPECT_EQ(extract_dense_matrix(*mat), dense_ref);
+    }
 }
 
 template <typename T>
