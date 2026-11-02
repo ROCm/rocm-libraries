@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: MIT
 """Plan a race sweep over original solution indices in a tested artifact."""
 
+import concurrent.futures
+import functools
 import hashlib
 import json
 import math
+import multiprocessing
 import re
 from collections import Counter
 from pathlib import Path
@@ -245,6 +248,74 @@ def derive_cases(solution):
     return cases
 
 
+class _UnsupportedInInventory(Exception):
+    """A selected solution that the inventory found outside the adapter scope."""
+
+
+def _profile_for(solution, target, profiles):
+    return next(
+        (
+            name
+            for name, resources in profiles.items()
+            if matches_hardware(solution["hardwarePredicate"], target, resources)
+        ),
+        None,
+    )
+
+
+def _inventory_shard(
+    path, *, target, library_dir, policy, case_parameters, profiles, range_begin, range_end
+):
+    """Count one metadata shard's solutions and keep those in the selected range.
+
+    Each selected entry is (index, solution, profile, planned). For regular-v1,
+    planned is the problem and its bench input, or the reason it is unsupported.
+    """
+    counts, coverage_gaps = Counter(), Counter()
+    names, eligible_names, indices, selected = set(), set(), [], []
+    for _, solution in iterSolutionRecords(path):
+        index = solution["index"]
+        indices.append(index)
+        counts["solutions"] += 1
+        name = hashlib.sha256(solution["kernelName"].encode()).digest()
+        names.add(name)
+        profile = _profile_for(solution, target, profiles)
+        planned = None
+        if profile is None:
+            counts["other_or_unknown_hardware"] += 1
+        elif policy == REGULAR_POLICY:
+            # Only explicitly unimplemented features are coverage gaps.
+            # Missing fields and malformed metadata must fail preparation.
+            try:
+                problem = regular_problem(solution, library_dir, target, **case_parameters)
+                planned = (problem, bench_yaml([problem]))
+            except (UnsupportedSolution, UnsupportedBenchProblem) as error:
+                counts["outside_adapter_scope"] += 1
+                coverage_gaps.update(
+                    error.reasons if isinstance(error, UnsupportedSolution) else (error.reason,)
+                )
+                planned = str(error)
+            else:
+                counts["eligible_solutions"] += 1
+                eligible_names.add(name)
+        elif not ordinary_problem(solution["problemType"]):
+            counts["outside_adapter_scope"] += 1
+        else:
+            counts["eligible_solutions"] += 1
+            eligible_names.add(name)
+        if range_begin <= index and (range_end is None or index < range_end):
+            selected.append((index, solution, profile, planned))
+    return {
+        "sha256": sha256(path),
+        "indices": indices,
+        "counts": counts,
+        "coverage_gaps": coverage_gaps,
+        "names": names,
+        "eligible_names": eligible_names,
+        "selected": selected,
+    }
+
+
 def make_plan(
     library_dir,
     target,
@@ -256,7 +327,12 @@ def make_plan(
     reduction_blocks=8,
     alpha=1,
     beta=0,
+    workers=1,
 ):
+    """Plan the selected indices and inventory the whole catalogue.
+
+    ``workers`` processes inventory the metadata shards in parallel.
+    """
     if type(range_begin) is not int or not 0 <= range_begin < (1 << 31):
         raise ValueError("Solution index range begin must be a nonnegative native index")
     if range_end is not None and (
@@ -292,70 +368,47 @@ def make_plan(
     }
     if not libraries:
         raise ValueError(f"No {target} packaged metadata under {library_dir}")
-    counts, inputs, coverage_gaps = Counter(), {}, Counter()
-    names, eligible_names = set(), set()
-    indices, requested = set(), {}
     profiles = profiles or {"default": device}
-
-    def profile_for(solution):
-        return next(
-            (
-                name
-                for name, resources in profiles.items()
-                if matches_hardware(solution["hardwarePredicate"], target, resources)
-            ),
-            None,
-        )
-
-    def inventory():
-        for path in sorted(libraries.values()):
-            inputs[path.name] = sha256(path)
-            for _, solution in iterSolutionRecords(path):
-                if solution["index"] in indices:
-                    raise ValueError(f"Duplicate solution index {solution['index']} in {path}")
-                indices.add(solution["index"])
-                counts["solutions"] += 1
-                if range_begin <= solution["index"] and (
-                    range_end is None or solution["index"] < range_end
-                ):
-                    requested[solution["index"]] = (path, solution)
-                name = hashlib.sha256(solution["kernelName"].encode()).digest()
-                names.add(name)
-                if profile_for(solution) is None:
-                    counts["other_or_unknown_hardware"] += 1
-                elif policy == REGULAR_POLICY:
-                    # Only explicitly unimplemented features are coverage gaps.
-                    # Missing fields and malformed metadata must fail preparation.
-                    try:
-                        problem = regular_problem(solution, library_dir, target, **case_parameters)
-                        bench_yaml([problem])
-                    except (UnsupportedSolution, UnsupportedBenchProblem) as error:
-                        counts["outside_adapter_scope"] += 1
-                        reasons = (
-                            error.reasons
-                            if isinstance(error, UnsupportedSolution)
-                            else (error.reason,)
-                        )
-                        coverage_gaps.update(reasons)
-                    else:
-                        counts["eligible_solutions"] += 1
-                        eligible_names.add(name)
-                elif not ordinary_problem(solution["problemType"]):
-                    counts["outside_adapter_scope"] += 1
-                else:
-                    counts["eligible_solutions"] += 1
-                    eligible_names.add(name)
-
-    inventory()
+    inventory = functools.partial(
+        _inventory_shard,
+        target=target,
+        library_dir=library_dir,
+        policy=policy,
+        case_parameters=case_parameters,
+        profiles=profiles,
+        range_begin=range_begin,
+        range_end=range_end,
+    )
+    paths = sorted(libraries.values())
+    if workers > 1 and len(paths) > 1:
+        context = multiprocessing.get_context("fork")
+        with concurrent.futures.ProcessPoolExecutor(min(workers, len(paths)), context) as pool:
+            shards = list(pool.map(inventory, paths))
+    else:
+        shards = list(map(inventory, paths))
+    counts, inputs, coverage_gaps = Counter(), {}, Counter()
+    names, eligible_names, indices, requested = set(), set(), set(), {}
+    for path, shard in zip(paths, shards):
+        inputs[path.name] = shard["sha256"]
+        duplicates = indices.intersection(shard["indices"])
+        if duplicates or len(set(shard["indices"])) != len(shard["indices"]):
+            index = min(duplicates) if duplicates else shard["indices"][0]
+            raise ValueError(f"Duplicate solution index {index} in {path}")
+        indices.update(shard["indices"])
+        counts.update(shard["counts"])
+        coverage_gaps.update(shard["coverage_gaps"])
+        names |= shard["names"]
+        eligible_names |= shard["eligible_names"]
+        requested.update((entry[1]["index"], (path, *entry[1:])) for entry in shard["selected"])
     selected = [requested[i] for i in sorted(requested)]
     if not selected:
         raise ValueError("No solution indices in the requested range")
     counts.update(unique_kernel_names=len(names), eligible_kernel_names=len(eligible_names))
     jobs = []
-    for job_id, (metadata, s) in enumerate(selected):
+    for job_id, (metadata, s, profile, planned) in enumerate(selected):
         job = {
             "id": job_id,
-            "profile": profile_for(s),
+            "profile": profile,
             "library": str(metadata),
             "problem_type": s["problemType"],
             "hardware_predicate": s["hardwarePredicate"],
@@ -368,8 +421,9 @@ def make_plan(
                 job["planning_outcome"] = "EXCLUDED_HARDWARE"
                 raise ValueError("Requested solution does not match the emulated hardware")
             if policy == REGULAR_POLICY:
-                problem = regular_problem(s, library_dir, target, **case_parameters)
-                job["bench_yaml"] = bench_yaml([problem])
+                if isinstance(planned, str):
+                    raise _UnsupportedInInventory(planned)
+                problem, job["bench_yaml"] = planned
                 job["target_dispatches_per_case"] = 1
                 job["cases"] = [{"id": "regular", "shape": [problem.m, problem.n, 1, problem.k]}]
                 if (
@@ -386,14 +440,13 @@ def make_plan(
             KeyError,
             IndexError,
             TypeError,
-            UnsupportedSolution,
-            UnsupportedBenchProblem,
+            _UnsupportedInInventory,
         ) as error:
             job.setdefault(
                 "planning_outcome",
                 (
                     "UNSUPPORTED_FEATURE"
-                    if isinstance(error, (UnsupportedSolution, UnsupportedBenchProblem))
+                    if isinstance(error, _UnsupportedInInventory)
                     else "INVALID_INPUT"
                 ),
             )
@@ -430,7 +483,7 @@ def make_plan(
         "selection": "solution-index-range",
         "solution_index_range": {"begin": range_begin, "end": range_end},
         "solutions": len(selected),
-        "kernels": len({s["kernelName"] for _, s in selected}),
+        "kernels": len({s["kernelName"] for _, s, _, _ in selected}),
         "planned_cases": sum(len(job["cases"]) for job in jobs),
         "inventory": dict(counts),
         "input_sha256": inputs,

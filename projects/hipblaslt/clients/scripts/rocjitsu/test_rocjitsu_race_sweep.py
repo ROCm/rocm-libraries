@@ -427,6 +427,34 @@ class SweepTests(unittest.TestCase):
             )
             self.assertTrue(all(len({j["profile"] for j in batch}) == 1 for batch in batches))
             self.assertEqual(full["solution_index_range"], {"begin": 100, "end": 106})
+            self.assertEqual(
+                plan.make_plan(root, "gfx942", {}, 100, 106, profiles=profiles, workers=3), full
+            )
+
+    def test_parallel_regular_inventory_matches_serial(self):
+        from tensilelite.Utilities.BinaryLibraryIO import writeMessagePack
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for filename, indices in (("first", [0, 1, 2]), ("second", [3, 4, 5])):
+                records = [solution(i) for i in indices]
+                if filename == "second":
+                    records[1]["problemType"]["sparse"] = True
+                path = root / f"{filename}_gfx942.dat"
+                writeMessagePack(path, {"solutions": records, "library": {}})
+                path.with_suffix(".co").write_bytes(b"kernel")
+            serial = plan.make_plan(root, "gfx942", {}, 1, 5, policy=plan.REGULAR_POLICY)
+            parallel = plan.make_plan(
+                root, "gfx942", {}, 1, 5, policy=plan.REGULAR_POLICY, workers=2
+            )
+            self.assertEqual(parallel, serial)
+            self.assertEqual(serial["coverage_gaps"], {"sparse": 1})
+            outcomes = [j.get("planning_outcome") for j in serial["jobs"]]
+            self.assertEqual(outcomes, [None, None, None, "UNSUPPORTED_FEATURE"])
+            records[0]["sizeMapping"]["globalSplitU"] = 0
+            writeMessagePack(root / "second_gfx942.dat", {"solutions": records, "library": {}})
+            with self.assertRaisesRegex(ValueError, "invalid globalSplitU"):
+                plan.make_plan(root, "gfx942", {}, 0, None, policy=plan.REGULAR_POLICY, workers=2)
 
     def test_ranges_preserve_sparse_ids_and_hardware_exclusions(self):
         with tempfile.TemporaryDirectory() as tmp:

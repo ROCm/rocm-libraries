@@ -290,6 +290,7 @@ def prepare(args):
         reduction_blocks=getattr(args, "reduction_blocks", 8),
         alpha=getattr(args, "alpha", 1),
         beta=getattr(args, "beta", 0),
+        workers=args.workers,
     )
     manifest.update(
         backend=args.backend,

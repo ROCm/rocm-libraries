@@ -209,7 +209,8 @@ The human-readable client output is an interface dependency; format changes must
 update the parsers, and missing evidence fails the run.
 
 Workers use separate physical cores, with emulator/OpenMP/BLAS thread budgets of
-one. One coordinator owns batch assignment, recovery, index results and report
+one. Before execution, the same number of processes inventory the catalogue's
+metadata shards in parallel. One coordinator owns batch assignment, recovery, index results and report
 writes; each worker owns only its current private batch. On failure, workers stop
 claiming batches and finish their in-flight batches. With `--continue-on-failure`,
 bench finishes cleanup after a numerical failure and runs later inputs in the
