@@ -388,6 +388,27 @@ TEST(CustomKernelTest, ScaleStrideFollowsDescriptorWhenCallerDoesNotPack)
     EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, nn), 8);
 }
 
+// hipBLASLt takes the A and B scale formats independently, so a pre-swizzled
+// operand keeps the padded strides while the other operand gets compact ones.
+TEST(CustomKernelTest, ScaleStrideFollowsEachOperandsBuffer)
+{
+    for(bool packedA : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "packedA=" << packedA);
+        auto problem = mxScaleProblem(60, 60, 128, /*transA*/ true, /*transB*/ false);
+        problem.setCustomKernelMXScaleAIsPacked(packedA);
+        problem.setCustomKernelMXScaleBIsPacked(!packedA);
+
+        // ceil(128/32) = 4 K-blocks pad to 8, and M = N = 60 pad to 64.
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem), packedA ? 4 : 8);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), packedA ? 8 : 4);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA1, problem, 1),
+                  packedA ? 4 * 60 : 8 * 64);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB1, problem, 1),
+                  packedA ? 8 * 64 : 4 * 60);
+    }
+}
+
 // NN places K on different stored axes in A and B. Unaligned M and K make
 // compact and padded pitches differ for both operands.
 TEST(CustomKernelTest, ScaleStrideIsCompactForEitherBoundDimension)

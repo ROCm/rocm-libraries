@@ -49,17 +49,40 @@ namespace
 TEST(HostUnitMXScaleSetup, smoke_PackedDeclarationArrivesWithTheScaleDescriptor)
 {
     auto problem = mxProblem(64, 64, 128);
-    ASSERT_FALSE(problem.customKernelMXScalesArePacked());
+    ASSERT_FALSE(problem.customKernelMXScaleAIsPacked());
+    ASSERT_FALSE(problem.customKernelMXScaleBIsPacked());
 
     rocblaslt::setHostMXScaleA(problem, rocisa::DataType::E8, 32, /*padFreeDim*/ true);
     EXPECT_EQ(problem.mxBlockA(), 32u);
-    EXPECT_TRUE(problem.customKernelMXScalesArePacked());
+    EXPECT_TRUE(problem.customKernelMXScaleAIsPacked());
+    EXPECT_FALSE(problem.customKernelMXScaleBIsPacked());
 
     auto viaB = mxProblem(64, 64, 128);
-    ASSERT_FALSE(viaB.customKernelMXScalesArePacked());
     rocblaslt::setHostMXScaleB(viaB, rocisa::DataType::E8, 32, /*padFreeDim*/ true);
     EXPECT_EQ(viaB.mxBlockB(), 32u);
-    EXPECT_TRUE(viaB.customKernelMXScalesArePacked());
+    EXPECT_TRUE(viaB.customKernelMXScaleBIsPacked());
+    EXPECT_FALSE(viaB.customKernelMXScaleAIsPacked());
+}
+
+// A pre-swizzled operand keeps the padded descriptor layout, and declaring one
+// operand never changes what was declared for the other.
+TEST(HostUnitMXScaleSetup, smoke_PreSwizzledDeclarationIsPerOperand)
+{
+    auto swizzledA = mxProblem(64, 64, 128);
+    rocblaslt::setHostMXScaleA(
+        swizzledA, rocisa::DataType::E8, 32, /*padFreeDim*/ true, /*packed*/ false);
+    rocblaslt::setHostMXScaleB(
+        swizzledA, rocisa::DataType::E8, 32, /*padFreeDim*/ true, /*packed*/ true);
+    EXPECT_FALSE(swizzledA.customKernelMXScaleAIsPacked());
+    EXPECT_TRUE(swizzledA.customKernelMXScaleBIsPacked());
+
+    auto swizzledB = mxProblem(64, 64, 128);
+    rocblaslt::setHostMXScaleA(
+        swizzledB, rocisa::DataType::E8, 32, /*padFreeDim*/ true, /*packed*/ true);
+    rocblaslt::setHostMXScaleB(
+        swizzledB, rocisa::DataType::E8, 32, /*padFreeDim*/ true, /*packed*/ false);
+    EXPECT_TRUE(swizzledB.customKernelMXScaleAIsPacked());
+    EXPECT_FALSE(swizzledB.customKernelMXScaleBIsPacked());
 }
 
 // The TensileLite client uses the descriptor's padded layout by default.
@@ -71,7 +94,8 @@ TEST(HostUnitMXScaleSetup, smoke_RawSetMXScaleLeavesTheDeclarationUnset)
 
     EXPECT_EQ(problem.mxBlockA(), 32u);
     EXPECT_EQ(problem.mxBlockB(), 32u);
-    EXPECT_FALSE(problem.customKernelMXScalesArePacked());
+    EXPECT_FALSE(problem.customKernelMXScaleAIsPacked());
+    EXPECT_FALSE(problem.customKernelMXScaleBIsPacked());
 }
 
 // gfx950 pads ceil(128/32) = 4 K-blocks to 8; gfx1250 leaves this size at 4.
@@ -88,5 +112,6 @@ TEST(HostUnitMXScaleSetup, smoke_PaddingArgumentReachesTheDescriptor)
     rocblaslt::setHostMXScaleB(unpadded, rocisa::DataType::E8, 32, /*padFreeDim*/ false);
     EXPECT_EQ(unpadded.mxsa().strides()[1], 4u);
     EXPECT_EQ(unpadded.mxsb().strides()[1], 4u);
-    EXPECT_TRUE(unpadded.customKernelMXScalesArePacked());
+    EXPECT_TRUE(unpadded.customKernelMXScaleAIsPacked());
+    EXPECT_TRUE(unpadded.customKernelMXScaleBIsPacked());
 }

@@ -1383,23 +1383,43 @@ namespace TensileLite
             return m_mxBlockB;
         }
 
-        /// True when the MX scale buffers this caller hands to an *external* custom
-        /// kernel are packed with the compact ceil(K/mxBlock) leading dimension,
-        /// even though mxsa()/mxsb() carry the gfx950 padding setMXScaleA/B applies
-        /// for the Tensile-generated HostPreSwizzle kernels.
+        /// True when the MX scale buffer for A that this caller hands to an
+        /// *external* custom kernel is packed with the compact ceil(K/mxBlock)
+        /// leading dimension, even though mxsa() carries the gfx950 padding
+        /// setMXScaleA applies for the Tensile-generated HostPreSwizzle kernels.
         ///
-        /// hipBLASLt sets it: the user's plain Block_32_UE8M0 scale pointer is
-        /// packed. The TensileLite benchmark client leaves it false: it allocates
-        /// the scale buffer from the padded descriptor and hands that same buffer
-        /// to the custom kernel.
-        void setCustomKernelMXScalesArePacked(bool packed)
+        /// Each operand is declared on its own because hipBLASLt takes the A and
+        /// B scale formats independently. hipBLASLt sets it for every MX format
+        /// except Block_32_UE8M0_32_8_EXT, whose buffer the caller pre-swizzled
+        /// into the padded gfx950 layout. The TensileLite benchmark client leaves
+        /// it false: it allocates the scale buffer from the padded descriptor and
+        /// hands that same buffer to the custom kernel.
+        void setCustomKernelMXScaleAIsPacked(bool packed)
         {
-            m_customKernelMXScalesArePacked = packed;
+            m_customKernelMXScaleAIsPacked = packed;
         }
 
-        bool customKernelMXScalesArePacked() const
+        /// As setCustomKernelMXScaleAIsPacked, for B and mxsb().
+        void setCustomKernelMXScaleBIsPacked(bool packed)
         {
-            return m_customKernelMXScalesArePacked;
+            m_customKernelMXScaleBIsPacked = packed;
+        }
+
+        /// Declares both operands, for a caller that lays out A and B alike.
+        void setCustomKernelMXScalesArePacked(bool packed)
+        {
+            m_customKernelMXScaleAIsPacked = packed;
+            m_customKernelMXScaleBIsPacked = packed;
+        }
+
+        bool customKernelMXScaleAIsPacked() const
+        {
+            return m_customKernelMXScaleAIsPacked;
+        }
+
+        bool customKernelMXScaleBIsPacked() const
+        {
+            return m_customKernelMXScaleBIsPacked;
         }
 
         /// Extent of one scaling tile along the free dimension: M for A, N for
@@ -1695,7 +1715,8 @@ namespace TensileLite
         int              m_mxBlockFreeB            = 1;
         rocisa::DataType m_mxTypeA                 = rocisa::DataType::None;
         rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
-        bool             m_customKernelMXScalesArePacked = false;
+        bool             m_customKernelMXScaleAIsPacked = false;
+        bool             m_customKernelMXScaleBIsPacked = false;
 
         KernelLanguage    m_kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric m_performanceMetric = PerformanceMetric::DeviceEfficiency;

@@ -3254,18 +3254,21 @@ namespace TensileLite
         // shape. With K=96 and a block of 32, a packed row holds 3 scales and
         // the stride is 3, while the padded descriptor says 8.
         //
-        // customKernelMXScalesArePacked() names that caller. hipBLASLt sets it
-        // for a plain Block_32_UE8M0 pointer. The TensileLite benchmark client
-        // leaves it false when it allocated the padded buffer, and then the
-        // descriptor stride is already the one the kernel must use.
+        // customKernelMXScaleAIsPacked()/BIsPacked() name that caller, one
+        // operand at a time. hipBLASLt sets it for every MX format except the
+        // pre-swizzled Block_32_UE8M0_32_8_EXT, whose buffer is the padded
+        // gfx950 layout. The TensileLite benchmark client leaves it false when
+        // it allocated the padded buffer. In both cases the descriptor stride
+        // is already the one the kernel must use.
         // StrideScaleA1/B1, the batch stride, follows the same rule. No shipped
         // rocRoller kernel reads it, and those kernels run a single batch.
         auto scaleStrideFor = [&](TensorDescriptor const& scaleDesc,
                                   TensorDescriptor const& dataDesc,
+                                  bool                    packed,
                                   size_t                  boundIdx,
                                   size_t                  mxBlock,
                                   size_t                  idx) -> size_t {
-            if(!problem.customKernelMXScalesArePacked())
+            if(!packed)
                 return scaleDesc.strides()[idx];
             std::vector<size_t> sizes = dataDesc.sizes();
             if(mxBlock && boundIdx < sizes.size())
@@ -3419,6 +3422,7 @@ namespace TensileLite
                 {
                     size_t scaleStride = scaleStrideFor(problem.mxsa(),
                                                         problem.a(),
+                                                        problem.customKernelMXScaleAIsPacked(),
                                                         problem.boundIndices()[0].a,
                                                         problem.mxBlockA(),
                                                         descriptorStrideAB);
@@ -3427,9 +3431,10 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleA1:
                 {
-                    size_t batchStride = problem.customKernelMXScalesArePacked()
+                    size_t batchStride = problem.customKernelMXScaleAIsPacked()
                         ? scaleStrideFor(problem.mxsa(),
                                          problem.a(),
+                                         true,
                                          problem.boundIndices()[0].a,
                                          problem.mxBlockA(),
                                          descriptorStrideAB + 1)
@@ -3443,6 +3448,7 @@ namespace TensileLite
                 {
                     size_t scaleStride = scaleStrideFor(problem.mxsb(),
                                                         problem.b(),
+                                                        problem.customKernelMXScaleBIsPacked(),
                                                         problem.boundIndices()[0].b,
                                                         problem.mxBlockB(),
                                                         descriptorStrideAB);
@@ -3451,9 +3457,10 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleB1:
                 {
-                    size_t batchStride = problem.customKernelMXScalesArePacked()
+                    size_t batchStride = problem.customKernelMXScaleBIsPacked()
                         ? scaleStrideFor(problem.mxsb(),
                                          problem.b(),
+                                         true,
                                          problem.boundIndices()[0].b,
                                          problem.mxBlockB(),
                                          descriptorStrideAB + 1)
