@@ -231,15 +231,20 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             getGfxArchID(static_cast<uint32_t>(archArr[0]), static_cast<uint32_t>(archArr[1]),
                          static_cast<uint32_t>(archArr[2]));
 
+        // XNACK replay is what the drain before the burst guards against; where the driver has
+        // it off there is nothing to replay and nothing to pay for.
+        const bool emitXnackWait = passCtx.getAsmCapsConfig().enableXnackReplay;
+
         // Count N (fixed point). The burst we insert at entry-begin grows the kernel by
-        //   I = kBurstFixedBytes (s_getpc_b64=4 + s_add_i32(+label literal)=8 + s_add_u32=4
-        //                         + s_addc_u32=4 = 20, plus the optional XNACK s_wait_xcnt 0 = 4)
+        //   I = burstFixedBytes (s_getpc_b64=4 + s_add_i32(+label literal)=8 + s_add_u32=4
+        //                        + s_addc_u32=4 = 20, plus the XNACK s_wait_xcnt 0 = 4 when one
+        //                        is emitted)
         //     + N * kPrefetchInstBytes (each s_prefetch_inst)
         // bytes, shifting the whole body down by I. That can push one extra 4 KiB grid step past
         // the (now larger) tail, so N must be solved against the POST-insertion total. Because
         // I (<= ~hundreds of bytes) is far smaller than the 4 KiB grid step, two iterations
-        // converge. When the XNACK wait is off, this reverts to 20 (byte-identical to before).
-        constexpr int64_t kBurstFixedBytes = 20 + kSwPrefetchXnackWaitBytes;
+        // converge. Without the wait this is 20, the same arithmetic as before it existed.
+        const int64_t burstFixedBytes = 20 + (emitXnackWait ? kSwPrefetchXnackWaitBytes : 0);
         constexpr int64_t kPrefetchInstBytes = 8;
         const int64_t P0 = kSwPrefetchFirstGlobalByte;
         auto countN = [](int64_t total) {
@@ -250,12 +255,12 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
         };
         int N = countN(phase1.totalLayoutBytes);
         for (int iter = 0; iter < 2; ++iter) {
-            const int64_t burstBytes = kBurstFixedBytes + int64_t(N) * kPrefetchInstBytes;
+            const int64_t burstBytes = burstFixedBytes + int64_t(N) * kPrefetchInstBytes;
             N = countN(phase1.totalLayoutBytes + burstBytes);
         }
         // No ++N: the fixed-point already solves N against (preTotal + I) which is the
         // post-insertion total. The anchor is placed at the last instruction <= P0 (overlap
-        // bias, ≤ one instruction below P0, typically < 12 B). Since I >= kBurstFixedBytes =
+        // bias, ≤ one instruction below P0, typically < 12 B). Since I >= burstFixedBytes =
         // 20 >> 12 B, the fixed-point N absorbs that slack. An unconditional ++N would
         // over-provision on minimal-tail kernels (preTotal just above P0) where N=1 already
         // covers everything.
@@ -350,10 +355,10 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             burstBB->insertIR(insertAt, addHi);
 
             // XNACK safety: one s_wait_xcnt 0 before the contiguous prefetch burst (Method 2 — a
-            // single drain covers the whole back-to-back group). No-op when the toggle is off or
-            // the opcode is unavailable. Its 4 bytes are modeled in kBurstFixedBytes above and
+            // single drain covers the whole back-to-back group). No-op where XNACK replay is off
+            // or the opcode is unavailable. Its 4 bytes are modeled in burstFixedBytes above and
             // absorbed for real by the post-insertion re-accumulate (phase2 below).
-            if (kSwPrefetchEmitXnackWait) {
+            if (emitXnackWait) {
                 if (const HwInstDesc* xcntDesc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
                     StinkyInstruction* xcnt = builder.create(xcntDesc);
                     xcnt->addSrcReg(StinkyRegister(0));  // xcnt = 0

@@ -630,7 +630,7 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
                       op_name,
                       gfx ? gfx : "(unknown)");
     }
-    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    if(!rocke_ll_profile_has(L->flavor, ROCKE_LL_CAP_LLVM23_TARGET_OPS))
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,

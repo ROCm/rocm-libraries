@@ -667,6 +667,22 @@ public:
         attn_scale_value = value;
         return *this;
     }
+    /**
+     * @brief Set the left bound of the diagonal attention band (sliding window).
+     *
+     * Follows cuDNN: a left bound of L keeps the L keys ending at the diagonal, diagonal
+     * included, so query i attends to keys j with j > i + offset - L (offset is 0 for
+     * TOP_LEFT and seq_kv - seq_q for BOTTOM_RIGHT). Must be >= 1, or -1 for unbounded.
+     * A FlashAttention-style window_size_left = W is the same window as a left bound of W + 1.
+     *
+     * Two values differ from cuDNN. -1 means unbounded here, where cuDNN leaves the bound
+     * unset. 0 is rejected in both directions, where cuDNN 9.10 and later accepts it in the
+     * forward pass: a provider whose kernels take FlashAttention's window would pass L - 1,
+     * turning 0 into -1, which those kernels read as unbounded.
+     *
+     * @param value The left bound L.
+     * @return Reference to this for chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_band_left_bound(int64_t value)
     {
@@ -746,7 +762,14 @@ public:
     {
         return set_generate_stats(!value);
     }
-    // cuDNN set_sliding_window_length(n) forwards to the left diagonal-band bound.
+    /**
+     * @brief cuDNN-compatible alias of set_diagonal_band_left_bound().
+     *
+     * A window length of n keeps the n keys ending at the diagonal, as in cuDNN.
+     *
+     * @param value The window length n (>= 1).
+     * @return Reference to this for chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_sliding_window_length(int value)
     {

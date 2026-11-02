@@ -229,7 +229,26 @@ def _source_key(source: dict, with_role: bool) -> str:
     """Identity of the compiled artifact one `kernel_source` names: a packed
     entry's symbol sha256, or, pre-build, the builder plus the spec as written,
     where an omitted key stays omitted. A launch of a multi-launch descriptor also
-    names its role, the kernel of the builder's module it takes."""
+    names its role, the kernel of the builder's module it takes. An authored hip
+    source is its source, entry and build, and an authored hsaco source its file
+    and symbol, so two launches of one translation unit or code object that name
+    different kernels stay distinct."""
+    kind = source.get("kind")
+    if kind == "hip":
+        return json.dumps(
+            {
+                "kind": kind,
+                "source": source.get("source"),
+                "entry": source.get("entry"),
+                "build": source.get("build") or {},
+            },
+            sort_keys=True,
+        )
+    if kind == "hsaco":
+        return json.dumps(
+            {"kind": kind, "file": source.get("file"), "symbol": source.get("symbol")},
+            sort_keys=True,
+        )
     if source.get("sha256") or source.get("symbol"):
         return json.dumps(
             {"sha256": source.get("sha256"), "symbol": source.get("symbol")},

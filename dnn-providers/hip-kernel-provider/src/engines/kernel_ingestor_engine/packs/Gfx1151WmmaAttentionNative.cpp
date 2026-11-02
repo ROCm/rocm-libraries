@@ -396,10 +396,15 @@ std::optional<MaskParameters> maskFor(const data_objects::SdpaAttributes& attrib
         = attributes.left_bound().has_value() ? attributes.left_bound().value() : UNBOUNDED;
     const int64_t right
         = attributes.right_bound().has_value() ? attributes.right_bound().value() : UNBOUNDED;
-    if(left < UNBOUNDED || right < UNBOUNDED || !fitsI32(left) || !fitsI32(right))
+    // left_bound = 0 keeps no key at or before the diagonal; hipDNN rejects it.
+    if(left < UNBOUNDED || left == 0 || right < UNBOUNDED || !fitsI32(left) || !fitsI32(right))
     {
         return std::nullopt;
     }
+    // The graph's left_bound follows cuDNN (L keys ending at the diagonal, diagonal
+    // included); the kernel's window_left follows FlashAttention (keys before the
+    // diagonal), so the same window is L - 1.
+    const int64_t windowLeft = left > 0 ? left - 1 : UNBOUNDED;
 
     MaskParameters result;
     // The deprecated causal flags override any bounds and alignment, exactly as
@@ -413,11 +418,11 @@ std::optional<MaskParameters> maskFor(const data_objects::SdpaAttributes& attrib
     }
     result.bottomRight = static_cast<int32_t>(attributes.diagonal_alignment()
                                               == data_objects::DiagonalAlignment::BOTTOM_RIGHT);
-    result.left = static_cast<int32_t>(left);
+    result.left = static_cast<int32_t>(windowLeft);
     result.right = static_cast<int32_t>(right);
-    if(left != UNBOUNDED || right != UNBOUNDED)
+    if(windowLeft != UNBOUNDED || right != UNBOUNDED)
     {
-        result.kind = left == UNBOUNDED && right == 0 ? MaskKind::CAUSAL : MaskKind::WINDOW;
+        result.kind = windowLeft == UNBOUNDED && right == 0 ? MaskKind::CAUSAL : MaskKind::WINDOW;
     }
     return result;
 }
