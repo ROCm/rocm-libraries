@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <fstream>
 #include <map>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -401,6 +402,54 @@ namespace
                 EXPECT_EQ(found->second, value) << name << " " << key;
         }
     }
+
+    std::vector<std::string> fileLines(std::string const& path)
+    {
+        std::vector<std::string> lines;
+        std::ifstream            in(path);
+        std::string              line;
+        while(std::getline(in, line))
+        {
+            if(!line.empty())
+                lines.push_back(line);
+        }
+        return lines;
+    }
+
+    std::string arrayBody(std::string const& source, std::string const& name)
+    {
+        auto at = source.find(name);
+        if(at == std::string::npos)
+            return {};
+        auto open  = source.find('{', at);
+        auto close = source.find("};", open);
+        if(open == std::string::npos || close == std::string::npos)
+            return {};
+        return source.substr(open, close - open);
+    }
+
+    std::vector<std::string> quoted(std::string const& text, std::regex const& pattern)
+    {
+        std::vector<std::string> values;
+        for(auto it = std::sregex_iterator(text.begin(), text.end(), pattern);
+            it != std::sregex_iterator();
+            ++it)
+            values.push_back((*it)[1].str());
+        return values;
+    }
+}
+
+TEST(SolutionRecord, CatalogMatchesSolutionState)
+{
+    auto source = readText(TENSILELITE_SOLUTION_STATE_CPP);
+    ASSERT_FALSE(source.empty());
+    auto chips
+        = quoted(arrayBody(source, "SupportedBuildChipIds"), std::regex("\"([0-9a-fA-F]+)\""));
+    auto names = quoted(arrayBody(source, "DataTypes"), std::regex("\\{\"([^\"]+)\""));
+    EXPECT_EQ(chips,
+              fileLines(std::string(TENSILELITE_SOLUTION_CATALOG_DIR) + "/catalog_chip_ids.txt"));
+    EXPECT_EQ(names,
+              fileLines(std::string(TENSILELITE_SOLUTION_CATALOG_DIR) + "/catalog_data_types.txt"));
 }
 
 TEST(SolutionRecord, MatchesThePythonBuilder)

@@ -80,7 +80,9 @@ if(NOT TENSILELITE_ENABLE_YAML)
             "${CMAKE_CURRENT_SOURCE_DIR}/SolutionRecord_test.cpp"
     )
     target_compile_definitions(tensilelite-tests PRIVATE
-        "TENSILELITE_SOLUTION_RECORD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tests/unit/data/solution_records\"")
+        "TENSILELITE_SOLUTION_RECORD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tests/unit/test_data/solution_records\""
+        "TENSILELITE_SOLUTION_STATE_CPP=\"${CMAKE_CURRENT_SOURCE_DIR}/../src/msgpack/SolutionState.cpp\""
+        "TENSILELITE_SOLUTION_CATALOG_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tests/unit/test_data\"")
 endif()
 
 if(TENSILELITE_ENABLE_YAML)

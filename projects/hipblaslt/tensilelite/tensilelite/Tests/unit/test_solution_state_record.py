@@ -42,7 +42,7 @@ _MX_SCALE_FORMAT = {"NoSwizzle": 0, "HostPreSwizzle": 1, "InMemorySwizzle": 2}
 
 
 def records_dir():
-    return Path(__file__).resolve().parent / "data" / "solution_records"
+    return Path(__file__).resolve().parent / "test_data" / "solution_records"
 
 
 def _tags(predicate):
