@@ -241,6 +241,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue      = matmul_descr->fused_epilogue;
+    problem.fused_prologue      = matmul_descr->fused_prologue;
     problem.fused_a2a_world     = handle->device_comm_world;
     problem.fused_a2a_rank      = handle->device_comm_rank;
     problem.fused_a2a_peer_flag = handle->device_comm_peer_flags;
@@ -473,10 +474,11 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue = matmul_descr->fused_epilogue;
+    problem.fused_prologue = matmul_descr->fused_prologue;
 
     // The all-to-all stage is available through hipblasLtMatmul only.
     RocblasltFusedEpilogueInfo fused_info;
-    if(rocblaslt_resolve_fused_a2a(problem, fused_info))
+    if(rocblaslt_resolve_fused_a2a(problem, fused_info) || fused_info.misattached)
     {
         log_error(__func__, "fused all-to-all is not available through the extension GEMM API");
         return rocblaslt_status_invalid_value;
@@ -1627,7 +1629,7 @@ rocblaslt_status
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         RocblasltFusedEpilogueInfo fused_info;
-        if(rocblaslt_resolve_fused_a2a(*matmul_descr[i], fused_info))
+        if(rocblaslt_resolve_fused_a2a(*matmul_descr[i], fused_info) || fused_info.misattached)
         {
             log_error(__func__, "fused all-to-all is not available through the extension GEMM API");
             return rocblaslt_status_invalid_value;
