@@ -20,7 +20,7 @@ GlobalParameters:
   PrintSolutionRejectionReason: True
   ForceGenerateKernel: True
   UniformSummationOrder: 0
-  
+
 BenchmarkProblems:
   #######################################
   # TN - TDM + PrefetchAcrossPersistent
