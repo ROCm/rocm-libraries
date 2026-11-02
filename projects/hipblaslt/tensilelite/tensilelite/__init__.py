@@ -26,7 +26,7 @@
 from __future__ import print_function
 from os import path
 
-# Hardcoded tensilelite version, also in tensilelite/Source/TensileConfigVersion.cmake
+# Hardcoded TensileLite component version. setup.py adds the ROCm local version.
 __version__ = "5.0.0"
 
 # Compatibility-only filesystem-style root. Production code that reads bundled

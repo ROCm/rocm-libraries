@@ -27,7 +27,6 @@ import os
 import pandas as pd
 import numpy as np
 import yaml
-import subprocess
 import glob
 
 from shutil import copyfile
@@ -36,7 +35,7 @@ from copy import deepcopy
 from . import LibraryIO
 
 from . import ClientWriter
-from .create_library import tensileLibraryFile
+from .create_library import tensileLibraryFile, run as createLibrary
 from .Common import ensurePath, printExit
 from .Common.Architectures import gfxToSwCodename, detectGlobalCurrentArch, gfxToIsa
 from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
@@ -45,7 +44,7 @@ from .SolutionStructs import ProblemSizes
 from .Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 
-def createLibraryForBenchmark(logicPath, libraryPath, currentPath, gfxName):
+def createLibraryForBenchmark(logicPath, libraryPath, gfxName):
     """
     takes the path of existing logic files as input and adds the summation
     model for each of the solutions. This is used in the Tile Aware Metirc
@@ -57,15 +56,14 @@ def createLibraryForBenchmark(logicPath, libraryPath, currentPath, gfxName):
     where this then reads the result back from.
     """
 
-    pythonExePath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "bin", "TensileCreateLibrary")
-    args = [pythonExePath, \
+    args = [
         "--new-client-only", "--no-short-file-names", \
         f"--architecture={gfxName}", "--code-object-version=default", "--library-format=yaml", \
-        logicPath, libraryPath, "HIP"]
+        os.path.abspath(logicPath), os.path.abspath(libraryPath), "HIP"]
 
     try:
-        subprocess.run(args, check=True, cwd=currentPath)
-    except (subprocess.CalledProcessError, OSError) as e:
+        createLibrary(args)
+    except (RuntimeError, OSError, SystemExit) as e:
         printExit("ClientWriter Benchmark Process exited with error: {}".format(e))
 
 def GenerateSummations(userArgs):
@@ -127,7 +125,7 @@ def GenerateSummations(userArgs):
             rawLogic
 
         copyfile(logicFileName, localLogicFilePath)
-        createLibraryForBenchmark(localLogicPath, libPath, currentPath, gfxName)
+        createLibraryForBenchmark(localLogicPath, libPath, gfxName)
 
         exactList = []
 
