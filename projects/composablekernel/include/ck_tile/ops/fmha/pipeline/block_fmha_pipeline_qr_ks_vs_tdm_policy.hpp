@@ -785,7 +785,63 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         return p_block_dstr;
     }
 
-    template <typename Problem>
+    // gemm1 (P * V) for one 16-column V fragment: o_acc(m, n) += p(m) * v_frag for every M
+    // iteration, the PV block gemm's KMN step at a single nIter = NIter. scales is (P scale, V
+    // scale), each a scale functor or the block gemm's no_scale.
+    template <typename Problem,
+              typename OAcc,
+              typename PTile,
+              typename VFrag,
+              index_t NIter,
+              typename Scales>
+    CK_TILE_DEVICE static void RunPVFragment(
+        OAcc& o_acc, const PTile& p_tile, const VFrag& v_frag, number<NIter>, const Scales& scales)
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetPVBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+        static_assert(BlockGemm::KIterPerWarp == 1 && BlockGemm::NWarp == 1,
+                      "V fragments assume one K step and one N warp");
+        const auto& a_scale = scales.at(number<0>{});
+        const auto& b_scale = scales.at(number<1>{});
+        constexpr bool kScaled =
+            !std::is_same_v<remove_cvref_t<decltype(a_scale)>, typename BlockGemm::no_scale>;
+
+        using AWarpDstr       = typename WarpGemm::AWarpDstr;
+        using BWarpDstr       = typename WarpGemm::BWarpDstr;
+        using CWarpDstr       = typename WarpGemm::CWarpDstr;
+        constexpr auto a_len  = to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_len  = to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_len  = to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_zero = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+        constexpr auto b_zero = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr auto c_zero = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        typename WarpGemm::BWarpTensor b;
+        b.get_thread_buffer() = v_frag.get_y_sliced_thread_data(
+            merge_sequences(sequence<0, 0>{}, b_zero), merge_sequences(sequence<1, 1>{}, b_len));
+        static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto i_m) {
+            constexpr index_t m = decltype(i_m)::value;
+            typename WarpGemm::AWarpTensor a;
+            a.get_thread_buffer() =
+                p_tile.get_y_sliced_thread_data(merge_sequences(sequence<0, m>{}, a_zero),
+                                                merge_sequences(sequence<1, 1>{}, a_len));
+            typename WarpGemm::CWarpTensor c;
+            c.get_thread_buffer() =
+                o_acc.get_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                               merge_sequences(sequence<1, 1>{}, c_len));
+            if constexpr(kScaled)
+                WarpGemm{}(
+                    c, a, b, a_scale(i_m, number<0>{}), b_scale(number<NIter>{}, number<0>{}));
+            else
+                WarpGemm{}(c, a, b);
+            o_acc.set_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                           merge_sequences(sequence<1, 1>{}, c_len),
+                                           c.get_thread_buffer());
+        });
+    }
+
+    // kNPerBlock below kN1 describes one column slice of V (the fp8 V fragments).
+    template <typename Problem, index_t kNPerBlock = Problem::BlockFmhaShape::kN1>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVRegTileDistribution()
     {
         using BlockGemm       = remove_cvref_t<decltype(GetPVBlockGemm<Problem>())>;
@@ -795,7 +851,6 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<0>{});
         constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<1>{});
 
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
 
         constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);

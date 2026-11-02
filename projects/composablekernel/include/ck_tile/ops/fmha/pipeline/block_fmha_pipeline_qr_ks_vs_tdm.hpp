@@ -360,6 +360,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         array<float, kKVScaleGroups> v;
     };
 
+    template <bool kClampK = true>
     CK_TILE_DEVICE static KVDescale load_kv_descale(const float* k_descale_ptr,
                                                     const float* v_descale_ptr,
                                                     const KVScaleIndex& index)
@@ -369,9 +370,18 @@ struct BlockFmhaPipelineQRKSVSTdm
             const float k = cast_pointer_to_constant_address_space(k_descale_ptr)[index[g]];
             // The folded softmax multiplies masked -inf scores by k_descale; an all-zero
             // block's 0 would turn them into NaN. The smallest normal keeps them at -inf.
-            descale.k(g) = kFoldKDescale ? max(k, numeric<float>::min()) : k;
+            descale.k(g) = kFoldKDescale && kClampK ? max(k, numeric<float>::min()) : k;
             descale.v(g) = cast_pointer_to_constant_address_space(v_descale_ptr)[index[g]];
         });
+        return descale;
+    }
+
+    // load_kv_descale<false>'s missing clamp, applied where the descale is used.
+    CK_TILE_DEVICE static KVDescale clamp_k_descale(KVDescale descale)
+    {
+        if constexpr(kFoldKDescale)
+            static_for<0, kKVScaleGroups, 1>{}(
+                [&](auto g) { descale.k(g) = max(descale.k[g], numeric<float>::min()); });
         return descale;
     }
 
@@ -546,6 +556,15 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr bool kStagedKPairs =
         Problem::kProgressiveDsLoadK && kM0 == 128 && kQKHeaddim == 128 && kK0 == 32;
     static constexpr bool kUseIglpBulkScheduling = CK_TILE_FMHA_TDM_IGLP_BULK && !kStagedKPairs;
+    // fp8 runs gemm1 one 16-column V fragment at a time (Gemm1ByVFragment): kVReadAhead + 1
+    // fragments of V are live instead of the whole tile. Needs one gemm1 K step and one N warp.
+    static constexpr bool kVFragments = is_any_of<KDataType, fp8_t, bf8_t>::value && kN0 == kK1 &&
+                                        kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) &&
+                                        BlockFmhaShape::Gemm1BlockWarps::at(number<1>{}) == 1;
+    static constexpr index_t kVReadAhead = 2; // fragments in flight ahead of the current one
+    // The prefetched K descale is clamped where the next tile reads it (clamp_k_descale), so the
+    // clamp's scalar wait does not have to precede this tile's fenced gemm1.
+    static constexpr bool kDeferKDescaleClamp = kVFragments;
 
     // Unchecked TDM bounds need a stronger, independent range proof. Keep this
     // separate from K staging so padded/group/sink/custom-mask configurations
@@ -714,6 +733,51 @@ struct BlockFmhaPipelineQRKSVSTdm
         });
         p_scale = e8m0_one();
         return make_tuple(p_tile, rowsum);
+    }
+
+    // gemm1 one 16-column V fragment at a time (the policy's RunPVFragment): fragment n +
+    // kVReadAhead is read before fragment n's WMMAs, so kVReadAhead + 1 fragments of V are live.
+    // v_frag holds fragment 0 on entry; rescale_o(n) scales O's fragment-n columns first.
+    template <typename OAcc,
+              typename PTile,
+              typename VFrag,
+              typename VFragWindow,
+              typename Scales,
+              typename RescaleO>
+    CK_TILE_DEVICE static void Gemm1ByVFragment(OAcc& o_acc,
+                                                const PTile& p_tile,
+                                                VFrag v_frag,
+                                                VFragWindow& v_frag_window,
+                                                const Scales& scales,
+                                                const RescaleO& rescale_o)
+    {
+        using Gemm1 = remove_cvref_t<decltype(Policy::template GetPVBlockGemm<Problem>())>;
+        constexpr index_t kNIter = Gemm1::NIterPerWarp;
+        constexpr index_t kFragN = Gemm1::WarpGemm::kN;
+        static_assert(kNIter >= kVReadAhead, "fewer V fragments than the read-ahead");
+
+        VFrag v_bufs[kVReadAhead + 1];
+        v_bufs[0] = v_frag;
+        static_for<1, kVReadAhead, 1>{}([&](auto i_f) {
+            move_tile_window(v_frag_window, {0, kFragN});
+            v_bufs[decltype(i_f)::value] = load_tile_transpose(v_frag_window);
+        });
+
+        static_for<0, kNIter, 1>{}([&](auto i_n) {
+            constexpr index_t n = decltype(i_n)::value;
+            if constexpr(n + kVReadAhead < kNIter)
+            {
+                move_tile_window(v_frag_window, {0, kFragN});
+                v_bufs[(n + kVReadAhead) % (kVReadAhead + 1)] = load_tile_transpose(v_frag_window);
+            }
+            rescale_o(i_n);
+            Policy::template RunPVFragment<Problem>(
+                o_acc, p_tile, v_bufs[n % (kVReadAhead + 1)], i_n, scales);
+            // A full fence keeps the fragment order; a masked one lets later fragments' reads
+            // move ahead and V stops being bounded.
+            __builtin_amdgcn_sched_barrier(0);
+        });
+        move_tile_window(v_frag_window, {0, -kFragN * (kNIter - 1)});
     }
 
     // Single V, double K LDS buffer path.
@@ -1808,6 +1872,13 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {0, 0},
                              Policy::template MakeVRegTileDistribution<Problem>());
 
+        constexpr index_t kVFragN = remove_cvref_t<decltype(gemm_1)>::WarpGemm::kN;
+        auto v_frag_window =
+            make_tile_window(v_lds_read_view,
+                             make_tuple(number<kK1>{}, number<kVFragN>{}),
+                             {0, 0},
+                             Policy::template MakeVRegTileDistribution<Problem, kVFragN>());
+
         const index_t num_total_loop =
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
             num_sink_loop;
@@ -1887,7 +1958,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         // this also keeps the last iteration's prefetch of a tile past the end in bounds
         [[maybe_unused]] const index_t kv_last  = mask.GetXTotal() - 1;
         [[maybe_unused]] auto load_tile_descale = [&](index_t i_loop) {
-            return load_kv_descale(
+            return load_kv_descale<!kDeferKDescaleClamp>(
                 k_descale_ptr,
                 v_descale_ptr,
                 make_kv_scale_index(kv_tile_start_of(i_loop), kv_last, block_scale_size_kv));
@@ -1904,8 +1975,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                             KDataType* __restrict__ k_lds_read_ptr,
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
-            const index_t kv_tile_start            = kv_tile_start_of(i_total_loops);
-            [[maybe_unused]] const auto kv_descale = next_kv_descale;
+            const index_t kv_tile_start = kv_tile_start_of(i_total_loops);
+            [[maybe_unused]] const auto kv_descale =
+                kDeferKDescaleClamp ? clamp_k_descale(next_kv_descale) : next_kv_descale;
 
             // Prefetch K into the buffer gemm0 of this call reads; callers free it first.
             auto prefetch_k = [&]() {
@@ -2162,7 +2234,13 @@ struct BlockFmhaPipelineQRKSVSTdm
                 s_wait_tensorcnt_barrier<2>();
             }
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
-            auto v_tile = load_tile_transpose(v_lds_read_window);
+            v_frag_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
+            auto v_tile = [&]() {
+                if constexpr(kVFragments)
+                    return load_tile_transpose(v_frag_window); // fragment 0 only
+                else
+                    return load_tile_transpose(v_lds_read_window);
+            }();
 
             const auto k_origin = make_tuple(kv_tile_start, 0);
 
@@ -2241,7 +2319,12 @@ struct BlockFmhaPipelineQRKSVSTdm
             }();
             ReduceRowSync(m_local, f_max);
 
-            if constexpr(kUseIglpBulkScheduling)
+            if constexpr(kVFragments)
+            {
+                // Gemm1ByVFragment fences its own fragment order; the bulk hints would pull
+                // all of V ahead of softmax.
+            }
+            else if constexpr(kUseIglpBulkScheduling)
             {
                 __builtin_amdgcn_sched_group_barrier(0x100, 20, 0); // DS_READ bulk
                 __builtin_amdgcn_sched_group_barrier(0x008, 12, 0); // MFMA bulk
@@ -2400,12 +2483,32 @@ struct BlockFmhaPipelineQRKSVSTdm
                 {
                     l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
                 }
-                sweep_tile_span(o_spans[I1], [&](auto idx1) {
-                    constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                if constexpr(kVFragments)
+                {
+                    l_correction(i_idx) = tmp; // o_acc is scaled per fragment in gemm1
+                }
+                else
+                {
+                    sweep_tile_span(o_spans[I1], [&](auto idx1) {
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
 
-                    o_acc(i_j_idx) *= tmp;
-                });
+                        o_acc(i_j_idx) *= tmp;
+                    });
+                }
             });
+
+            // O columns of V fragment n: the span's first H index along N is the gemm1 NIter.
+            [[maybe_unused]] auto rescale_o_fragment = [&](auto i_n) {
+                if constexpr(kVFragments)
+                {
+                    sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                        sweep_tile_span(o_spans[I1], [&](auto idx1) {
+                            if constexpr(decltype(idx1)::Impl::at(0) == decltype(i_n)::value)
+                                o_acc(make_tuple(idx0, idx1)) *= l_correction[make_tuple(idx0)];
+                        });
+                    });
+                }
+            };
 
             if constexpr(!kMergedWarBarriers)
             {
@@ -2427,7 +2530,16 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             };
 
-            if constexpr(1 < k1_loops)
+            if constexpr(kVFragments)
+            {
+                Gemm1ByVFragment(o_acc,
+                                 p_tile,
+                                 v_tile,
+                                 v_frag_window,
+                                 make_tuple(p_scale_arg, v_scale(number<0>{})),
+                                 rescale_o_fragment);
+            }
+            else if constexpr(1 < k1_loops)
             {
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                     // loop over along the [V]alue Sequence length
@@ -2448,13 +2560,16 @@ struct BlockFmhaPipelineQRKSVSTdm
                 move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
             }
 
-            gemm_1(o_acc,
-                   get_slice_tile(p_tile,
-                                  sequence<0, (k1_loops - 1) * kK1>{},
-                                  sequence<kM0, k1_loops * kK1>{}),
-                   v_tile,
-                   p_scale_arg,
-                   v_scale(number<k1_loops - 1>{}));
+            if constexpr(!kVFragments)
+            {
+                gemm_1(o_acc,
+                       get_slice_tile(p_tile,
+                                      sequence<0, (k1_loops - 1) * kK1>{},
+                                      sequence<kM0, k1_loops * kK1>{}),
+                       v_tile,
+                       p_scale_arg,
+                       v_scale(number<k1_loops - 1>{}));
+            }
 
             if constexpr(kDeferDenominator)
             {
@@ -2476,7 +2591,11 @@ struct BlockFmhaPipelineQRKSVSTdm
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
             k_tile = load_tile(k_lds_read_window);
 
-            if constexpr(kUseIglpBulkScheduling)
+            if constexpr(kVFragments)
+            {
+                // no hint: the last fragment's fence already orders gemm1 before the next K
+            }
+            else if constexpr(kUseIglpBulkScheduling)
             {
                 __builtin_amdgcn_sched_group_barrier(0x100, 20, 0); // DS_READ bulk
                 __builtin_amdgcn_sched_group_barrier(0x008, 12, 0); // MFMA bulk
