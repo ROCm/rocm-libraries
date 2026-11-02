@@ -1456,6 +1456,24 @@ namespace
             << "A handwritten custom kernel must be refused under uniform summation order";
     }
 
+    // A handwritten kernel that declares uniformSummationOrder in its
+    // custom.config (one that reduces every row of D in the same order, like the
+    // wave-split-K skinny GEMMs) is admitted when nothing else in its launch
+    // would break row uniformity.
+    TEST(RowUniformityStreamKRejection_pre_checkin, HandwrittenCustomKernelDeclaringUniformOrder)
+    {
+        const auto hardware                           = probeHardware();
+        auto       solution                           = probeSolution();
+        solution->sizeMapping.tileProcessingStrategy  = TensileLite::TileProcessingStrategy::None;
+        solution->customKernel.name                   = "DummyCustomKernel";
+        solution->customKernel.generated              = false;
+        solution->customKernel.macrotile              = TensileLite::dim3(128, 128, 32);
+        solution->customKernel.uniformSummationOrder  = true;
+
+        EXPECT_TRUE(admitsUniformSummationOrder(*solution, hardware))
+            << "a handwritten custom kernel that declares uniform summation order must be admitted";
+    }
+
     // SupportCustomStaggerU: False does not mean the kernel found its stagger
     // somewhere the clamp cannot reach. It means only that the host declines to
     // write the packed StaggerU field, which leaves it 0, and a generated
@@ -1571,14 +1589,11 @@ namespace
     // literal rotation into its main loop where no host-side clamp reaches, so
     // a compiled-in StaggerU there must still be refused.
     //
-    // The refusal this pins is the outcome, not one particular clause. The
-    // CustomKernel clause at the top of the predicate already refuses every
-    // hand-written custom kernel outright, so it is what fires here; the
-    // narrower CompiledInStaggerU clause sits behind it as defense in depth,
-    // for the day that first clause is relaxed to admit individually vetted
-    // custom kernels. Both are private, so the public predicate cannot say
-    // which one objected -- what matters is that this configuration never
-    // becomes admissible.
+    // The kernel declares uniform summation order, so the CustomKernel clause
+    // at the top of the predicate lets it through and the narrower
+    // CompiledInStaggerU clause is the one that refuses it. Both are private,
+    // so the public predicate cannot say which one objected -- what matters is
+    // that this configuration never becomes admissible.
     TEST(RowUniformityStreamKRejection_pre_checkin, HandwrittenCustomKernelWithCompiledInStaggerU)
     {
         const auto hardware                    = probeHardware();
@@ -1588,6 +1603,7 @@ namespace
         solution->sizeMapping.staggerU         = 16;
         solution->customKernel.name            = "DummyCustomKernel";
         solution->customKernel.generated       = false;
+        solution->customKernel.uniformSummationOrder = true;
         auto problem                           = probeProblem();
 
         EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))

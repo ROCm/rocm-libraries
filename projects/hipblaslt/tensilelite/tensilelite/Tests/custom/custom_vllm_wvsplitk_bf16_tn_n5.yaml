@@ -59,6 +59,7 @@ BenchmarkProblems:
             macrotile: [64, 16, 8]
             threads: [64, 16, 1]
             grid: [ComputeUnits, One, One]
+            uniformSummationOrder: true
         - MatrixInstruction:
           # 9-tuple so fork conversion sets EnableMatrixInstruction and
           # WorkGroup [64, 16, 1] from waves=mi[7]*mi[8]=16 (matches threads).
