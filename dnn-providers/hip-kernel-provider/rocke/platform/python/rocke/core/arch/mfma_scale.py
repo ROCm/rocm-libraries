@@ -42,3 +42,58 @@ def scaled_mfma_error(op_id, operands, results=None):
     if results is not None and [v.type.name for v in results] != ["vec<f32x16>"]:
         return "scaled MFMA result must be vec<f32x16>"
     return None
+
+
+# --- K=128 f8f6f4 MFMA (16x16x128): format selectors and operand width -------
+
+DEFAULT_MATRIX_FORMAT = "fp8e4m3"
+# Every operand of the 16x16x128 call is 256 bits per lane (<8 x i32>). fp8 and
+# bf8 data fill all 8 dwords. fp6 data fills the low 6 and fp4 data the low 4;
+# the instruction ignores the remaining dwords. This matches the 32x32x64 family.
+F8F6F4_16X16X128_OPERAND_BITS = 256
+
+
+def _type_bits(t):
+    """Encoded bit width of an IR type, or ``None`` when it is not known."""
+    count = getattr(t, "count", None)
+    elem = getattr(t, "elem", None)
+    if count is not None and elem is not None:
+        bits = _type_bits(elem)
+        return None if bits is None else count * bits
+    try:
+        return dtype_info(t.name).encoded_bits
+    except (ValueError, AttributeError):
+        return None
+
+
+def f8f6f4_16x16x128_selectors(a_format, b_format):
+    """Return ``(cbsz, blgp)`` for the K=128 f8f6f4 MFMA.
+
+    ``a_format`` and ``b_format`` must be known format names, and they must be
+    equal in this version. Raises ``ValueError`` otherwise.
+    """
+    for role, fmt in (("a_format", a_format), ("b_format", b_format)):
+        if fmt not in MATRIX_FORMATS:
+            raise ValueError(
+                f"unknown {role} {fmt!r}; use one of {', '.join(MATRIX_FORMATS)}"
+            )
+    if a_format != b_format:
+        raise ValueError(
+            "a_format and b_format must name the same format in this version; "
+            f"got {a_format!r} and {b_format!r}"
+        )
+    return MATRIX_FORMATS[a_format], MATRIX_FORMATS[b_format]
+
+
+def f8f6f4_16x16x128_operand_error(a, b):
+    """Return an error text when A or B is not 256 bits per lane, else ``None``."""
+    for role, v in (("A", a), ("B", b)):
+        bits = _type_bits(v.type)
+        if bits != F8F6F4_16X16X128_OPERAND_BITS:
+            got = "an unknown width" if bits is None else f"{bits} bits"
+            return (
+                f"the {role} operand of the 16x16x128 f8f6f4 MFMA must have "
+                f"{F8F6F4_16X16X128_OPERAND_BITS} bits per lane (pad fp6 and fp4 "
+                f"data to 8 dwords); got {got}"
+            )
+    return None

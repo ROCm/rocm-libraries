@@ -11,6 +11,11 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
+
 
 def build_library(root, text, name="libamd_comgr.so", extra=()):
     root.mkdir(parents=True, exist_ok=True)
@@ -101,8 +106,10 @@ def test_python_bindings_use_the_compiling_library(tmp_path):
     env.update(ROCM_PATH=str(tmp_path / "native"), ROCKE_BACKEND="python")
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
     result = subprocess.run(
-        [sys.executable, "-c", BINDING_PROBE, str(tmp_path / "torch" / "__init__.py")],
-        env=env,
+        rocke_python_command(
+            "-c", BINDING_PROBE, str(tmp_path / "torch" / "__init__.py")
+        ),
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
         check=False,
@@ -215,12 +222,16 @@ for text, message in (("", "empty IR input"), ("not serialized IR", "parse faile
     else:
         raise AssertionError("invalid serialized input was accepted")
 
-try:
-    rocke_engine.lower_serialized_ir("not serialized IR", arch="gfx950", flavor="invalid")
-except RuntimeError as exc:
-    assert "unknown LLVM flavor" in str(exc)
-else:
-    raise AssertionError("invalid explicit flavor was accepted")
+for invalid_flavor in ("llvm25", "LLVM24", " llvm24 "):
+    try:
+        rocke_engine.lower_serialized_ir(
+            "not serialized IR", arch="gfx950", flavor=invalid_flavor
+        )
+    except ValueError as exc:
+        assert invalid_flavor in str(exc)
+        assert "unknown LLVM flavor" in str(exc)
+    else:
+        raise AssertionError("invalid explicit flavor was accepted")
 
 ir = serialize(IRBuilder("cleanup_explicit_probe").kernel)
 for _ in range(2):
@@ -232,14 +243,17 @@ for _ in range(2):
         raise AssertionError("serialized-IR resolver failure did not propagate")
 
 assert rocke_engine.lower_serialized_ir(ir, arch="gfx950", flavor="llvm20")
+assert rocke_engine.lower_serialized_ir(ir, arch="gfx950", flavor="llvm24")
 """
 
 
 def test_binding_resolver_failure_preserves_error_contract():
     pytest.importorskip("rocke_engine")
     result = subprocess.run(
-        [sys.executable, "-B", "-c", CLEANUP_PROBE],
-        env=dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path)),
+        rocke_python_command("-c", CLEANUP_PROBE, interpreter_flags=("-B",)),
+        env=rocke_subprocess_env(
+            dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
+        ),
         capture_output=True,
         text=True,
         check=False,
@@ -263,12 +277,9 @@ def test_resolver_failure_releases_binding_builders(tmp_path):
             "--show-leak-kinds=definite",
             "--xml=yes",
             "--xml-file=" + str(report),
-            sys.executable,
-            "-B",
-            "-c",
-            CLEANUP_PROBE,
+            *rocke_python_command("-c", CLEANUP_PROBE, interpreter_flags=("-B",)),
         ],
-        env=env,
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
         check=False,

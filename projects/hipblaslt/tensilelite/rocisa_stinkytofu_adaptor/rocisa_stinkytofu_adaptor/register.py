@@ -232,7 +232,7 @@ class RegisterPool:
         alignment = int(alignment)
 
         # Mirror the C++ behavior: ``preventOverflow`` is an int with -1 meaning
-        # "use defaultPreventOverflow". Tensile passes ``False`` explicitly
+        # "use defaultPreventOverflow". TensileLite passes ``False`` explicitly
         # (becomes 0) to permit growth.
         if int(preventOverflow) == -1:
             preventOverflow = int(self._defaultPreventOverflow)
