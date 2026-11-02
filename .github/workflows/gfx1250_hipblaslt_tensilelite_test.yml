@@ -495,7 +495,8 @@ jobs:
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
           mkdir -p "$GITHUB_WORKSPACE/tensilelite_test_results"
           # tox builds its own env from tox.ini (deps + rocisa); nothing else is needed here.
-          pip install tox
+          # Pinned to the version this step was last verified with on gfx1250.
+          pip install "tox==4.67.5"
           export CC="$ROCM_PATH/lib/llvm/bin/amdclang" CXX="$ROCM_PATH/lib/llvm/bin/amdclang++"
           # As the nightly: tox builds the client for the reported target
           # (gfx1250-strict here) and runs the common tests against it.
