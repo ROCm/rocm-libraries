@@ -167,6 +167,9 @@ class FakeBackend:
         def set_callback(callback, level, mode, handle):
             self.calls.append(("callback", level, mode, handle))
             self.callback = callback
+            self.offload_at_register = os.environ.get(
+                _kernel_log.INLINE_APPLICABILITY_ENV
+            )
             return status
 
         def set_level(level):
@@ -182,6 +185,10 @@ class FakeBackend:
 @pytest.fixture
 def fresh_install(monkeypatch):
     monkeypatch.setattr(_kernel_log, "_INSTALLED", None)
+    # _install sets it on os.environ: setenv records the original for teardown, delenv starts
+    # each test without it.
+    monkeypatch.setenv(_kernel_log.INLINE_APPLICABILITY_ENV, "")
+    monkeypatch.delenv(_kernel_log.INLINE_APPLICABILITY_ENV)
 
 
 def test_install_registers_the_sync_callback_before_raising_the_level(fresh_install):
@@ -193,6 +200,18 @@ def test_install_registers_the_sync_callback_before_raising_the_level(fresh_inst
     assert (level, mode) == (0, 0)  # HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_SYNC
     assert handle  # userHandle must be non-null
     assert backend.calls[1] == ("level", 0)
+
+
+def test_applicability_is_forced_inline_before_the_callback_can_fire(
+    fresh_install, monkeypatch
+):
+    # Pool threads that log into the sync callback wait for the GIL the calling thread holds
+    # while it waits for them: a deadlock. Inline applicability keeps every line on that thread.
+    monkeypatch.setenv(_kernel_log.INLINE_APPLICABILITY_ENV, "50")
+    backend = FakeBackend()
+    assert _kernel_log._install(backend.lib) is True
+    assert backend.offload_at_register == _kernel_log.INLINE_APPLICABILITY_VALUE
+    assert int(_kernel_log.INLINE_APPLICABILITY_VALUE) >= 10**9
 
 
 def test_the_registered_callback_decodes_a_c_string_into_the_build(fresh_install):
