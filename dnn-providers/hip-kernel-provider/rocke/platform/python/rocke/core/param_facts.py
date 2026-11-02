@@ -4,7 +4,8 @@
 """The facts a kernel parameter states on its declaration, and their rules.
 
 A kernel parameter states its facts on its declaration (``IRBuilder.param``)
-and they live in ``Param.attrs``: the host checks them before every launch.
+and they live in ``Param.attrs``: ``KernelLauncher.from_artifact`` checks them
+on the host before each launch, and the GPU trusts them.
 The six :data:`FACT_WORDS` are the only spelling of a comparison fact. A bound
 is an int, or a *relation*: an intexpr tree over earlier parameters
 (``rocke.core.intexpr``), stored as canonical JSON in one string attr.

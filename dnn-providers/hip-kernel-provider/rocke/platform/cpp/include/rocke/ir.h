@@ -554,7 +554,8 @@ typedef struct rocke_int_bound
 /* The integer facts a declaration states (Python IRBuilder.param's ge / gt / le /
  * lt / eq / multiple_of): value >= / > / <= / < / == a bound, and value % n ==
  * 0. At most one of ge/gt and one of le/lt; eq excludes every other word. The
- * host checks them before every launch and the GPU trusts them. */
+ * GPU trusts them; Python's KernelLauncher.from_artifact checks them on the
+ * host before each launch, and no other launch path does. */
 typedef struct rocke_int_facts
 {
     rocke_int_bound_t ge;

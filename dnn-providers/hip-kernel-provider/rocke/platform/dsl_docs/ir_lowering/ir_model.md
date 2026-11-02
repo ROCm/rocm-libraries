@@ -317,8 +317,9 @@ addr_space     -> "constant" lowers the pointer as ptr addrspace(4)
 
 Verified by `test_param_metadata_lowers_to_llvm_arg_attrs` in `tests/test_rocke.py`.
 
-Facts on an integer parameter, which the host checks before every launch and the GPU trusts.
-They emit nothing:
+Facts on an integer parameter, which the GPU trusts and a launcher built by
+`KernelLauncher.from_artifact` checks on the host before each launch (no other launch path checks them;
+see `runtime/compile_launch_and_manifest.md`). They emit nothing:
 
 ```text
 ge / gt  -> value >= / > bound      (at most one of the two)
@@ -351,6 +352,9 @@ text.
 
 A C++ caller may also pass a parameter's Value as a bound (`rocke_int_bound_t.value_bound`); it is
 stored as that parameter's relation.
+
+The host checks the facts through `KernelLauncher.from_artifact`, which reads them as the kernel's
+parameter contract (`rocke.runtime.parameter_contract`; see `runtime/compile_launch_and_manifest.md`).
 
 ### Values only the GPU can see: `gpu_checked_value`
 

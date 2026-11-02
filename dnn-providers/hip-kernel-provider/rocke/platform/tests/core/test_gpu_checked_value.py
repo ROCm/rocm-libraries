@@ -451,8 +451,9 @@ def test_verifier_and_every_lowering_refuse_a_failure_path_that_is_not_bare():
 def test_a_parameter_is_checked_by_the_host():
     assert _refused_text("refuse_parameter") == (
         "gpu_checked_value: M is a kernel parameter. The host checks every fact of a "
-        "kernel parameter before every launch and refuses the launch if one fails, so "
-        "a GPU check here would only repeat that check.\n"
+        "kernel parameter before each launch through KernelLauncher.from_artifact and "
+        "refuses the launch if one fails, so a GPU check here would only repeat that "
+        "check.\n"
         "Fix: state the fact where M is declared:\n"
         '    b.param("M", I32, le=4096)\n'
         'M is declared today as: b.param("M", I32, ge=1, le=1048576, multiple_of=64)'
@@ -470,12 +471,14 @@ def test_a_parameter_with_no_facts_gets_every_stated_word():
 def test_a_value_computed_from_parameters_is_checked_by_the_host():
     assert _refused_text("refuse_computed_from_one_parameter") == (
         "gpu_checked_value: T - 1 is computed only from kernel parameters (T), which "
-        "the host checks before every launch. Fix: state the bound on the parameter: "
+        "the host checks before each launch through KernelLauncher.from_artifact. "
+        "Fix: state the bound on the parameter: "
         'b.param("T", I32, ...). The IR range walk derives the facts of T - 1 from it.'
     )
     assert _refused_text("refuse_computed_from_parameters") == (
         "gpu_checked_value: T + M is computed only from kernel parameters (T, M), which "
-        "the host checks before every launch. Fix: state the bounds on the parameters: "
+        "the host checks before each launch through KernelLauncher.from_artifact. "
+        "Fix: state the bounds on the parameters: "
         'b.param("T", I32, ...), b.param("M", I32, ...). The IR range walk derives the '
         "facts of T + M from them."
     )
@@ -484,12 +487,13 @@ def test_a_value_computed_from_parameters_is_checked_by_the_host():
 def test_a_thread_id_is_bounded_by_the_workgroup_size():
     assert _refused_text("refuse_thread_id") == (
         "gpu_checked_value: thread_id_x is bounded by the kernel's workgroup size, "
-        "which the host checks.\n"
+        "which the host checks before each launch through KernelLauncher.from_artifact.\n"
         'Fix: b.kernel.attrs["workgroup_size"] = 64'
     )
     assert _refused_text("refuse_thread_id_and_parameter") == (
         "gpu_checked_value: thread_id_x + T is computed only from thread ids and kernel "
-        "parameters (T), which the host bounds before every launch.\n"
+        "parameters (T), which the host bounds before each launch through "
+        "KernelLauncher.from_artifact.\n"
         'Fix: state the workgroup size, b.kernel.attrs["workgroup_size"] = '
         "<threads per workgroup>, and the parameters' facts on their declarations; the "
         "IR range walk derives the facts of thread_id_x + T from them."

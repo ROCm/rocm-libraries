@@ -9,7 +9,8 @@ load reaches it.
 - **Who can see a value.** A value *depends on* a leaf when the leaf reaches it
   through any operand, a select or branch condition and a loop-carried value
   included. :func:`sources_of` lists the leaves: kernel parameters, constants
-  and thread ids, which the host checks or bounds before every launch, and
+  and thread ids, which the host can check or bound before a launch (a
+  ``KernelLauncher.from_artifact`` launch does), and
   ``gpu_only`` when any other leaf is reached -- a memory load, a block id, any
   value the host cannot compute. The host never checks the grid, so a value
   computed from block ids is GPU-only.

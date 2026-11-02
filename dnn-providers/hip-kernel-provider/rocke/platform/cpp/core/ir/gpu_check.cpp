@@ -597,8 +597,8 @@ std::string host_visible_text(const kernel_view_t& view,
         std::string out
             = "gpu_checked_value: " + name
               + " is a kernel parameter. The host checks every fact of a kernel parameter "
-                "before every launch and refuses the launch if one fails, so a GPU check here "
-                "would only repeat that check.\nFix: state the "
+                "before each launch through KernelLauncher.from_artifact and refuses the launch "
+                "if one fails, so a GPU check here would only repeat that check.\nFix: state the "
               + (count > 1 ? "facts" : "fact") + " where " + name + " is declared:\n    b.param(\""
               + name + "\", " + rocke_i_upper_type_name(value->type) + ", "
               + stated_call_text(view, words, facts) + ")\n" + name
@@ -612,7 +612,8 @@ std::string host_visible_text(const kernel_view_t& view,
         const char* axis = op ? rocke_attr_get_str(&op->attrs, "axis") : NULL;
         if(is(op, ROCKE_OP_GPU_THREAD_ID) && axis && strcmp(axis, "x") == 0 && has_upper)
             return "gpu_checked_value: " + text
-                   + " is bounded by the kernel's workgroup size, which the host checks.\n"
+                   + " is bounded by the kernel's workgroup size, which the host checks before "
+                     "each launch through KernelLauncher.from_artifact.\n"
                      "Fix: b.kernel.attrs[\"workgroup_size\"] = "
                    + std::to_string(upper + 1);
         std::string names;
@@ -622,7 +623,8 @@ std::string host_visible_text(const kernel_view_t& view,
         const std::string declarations
             = names.empty() ? "" : ", and the parameters' facts on their declarations";
         return "gpu_checked_value: " + text + " is computed only from thread ids" + params
-               + ", which the host bounds before every launch.\n"
+               + ", which the host bounds before each launch through "
+                 "KernelLauncher.from_artifact.\n"
                  "Fix: state the workgroup size, b.kernel.attrs[\"workgroup_size\"] = "
                  "<threads per workgroup>"
                + declarations + "; the IR range walk derives the facts of " + text + " from them.";
@@ -644,9 +646,10 @@ std::string host_visible_text(const kernel_view_t& view,
     const std::string fix = one ? "state the bound on the parameter: " + declarations
                                 : "state the bounds on the parameters: " + declarations;
     return "gpu_checked_value: " + text + " is computed only from kernel parameters (" + names
-           + "), which the host checks before every launch. Fix: " + fix
-           + ". The IR range walk derives the facts of " + text + " from " + (one ? "it" : "them")
-           + ".";
+           + "), which the host checks before each launch through KernelLauncher.from_artifact. "
+             "Fix: "
+           + fix + ". The IR range walk derives the facts of " + text + " from "
+           + (one ? "it" : "them") + ".";
 }
 
 /* ir._gpu_check_unchecked_text */

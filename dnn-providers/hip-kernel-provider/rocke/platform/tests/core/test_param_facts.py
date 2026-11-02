@@ -4,8 +4,8 @@
 """Facts on a kernel parameter's declaration (``IRBuilder.param``).
 
 An integer parameter states ``ge`` / ``gt`` / ``le`` / ``lt`` / ``eq`` /
-``multiple_of``; the host will check them before every launch, and the GPU
-trusts them. A bound is an int, an earlier parameter, or a ``sum_of`` /
+``multiple_of``; ``KernelLauncher.from_artifact`` checks them on the host
+before each launch, and the GPU trusts them. A bound is an int, an earlier parameter, or a ``sum_of`` /
 ``product_of`` / ``quotient_of`` / ``difference_of`` over those, stored as an
 int or as the canonical JSON of its intexpr tree. These tests pin:
 

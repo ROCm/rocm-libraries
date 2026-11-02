@@ -1169,6 +1169,22 @@ def gpu_check_word_symbol(kernel_name: str) -> str:
     return f"rocke_gpu_check_failed_{kernel_name}"
 
 
+# Why a kernel whose parameters state facts must not be launched from its code
+# object alone or from a recipe launch plan: neither reads the facts, and only
+# KernelLauncher.from_artifact checks them. Every such door refuses the kernel
+# with this text (ParameterContract's code_object_refusal and the recipe launch
+# plans); the C++ engine's recipe plan uses the same words
+# (ROCKE_PARAM_FACTS_UNCHECKED_REASON).
+PARAM_FACTS_UNCHECKED_REASON = (
+    "parameters carry facts, which a launch from a code object or from a launch "
+    "plan does not check"
+)
+
+# What every door that refuses a kernel tells its caller to do instead
+# (ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT in the C++ engine).
+LAUNCH_THROUGH_FROM_ARTIFACT = "launch it through KernelLauncher.from_artifact"
+
+
 def _gpu_check_failed_op_error(op: Op) -> str | None:
     """The error for a built ``tile.gpu_check_failed`` op that is not bare, or
     None (``rocke_i_gpu_check_failed_op_error`` in the C++ engine, same text).
@@ -1689,8 +1705,9 @@ def _gpu_check_host_visible_text(
         fact = "facts" if count > 1 else "fact"
         return (
             f"gpu_checked_value: {name} is a kernel parameter. The host checks every "
-            "fact of a kernel parameter before every launch and refuses the launch if "
-            "one fails, so a GPU check here would only repeat that check.\n"
+            "fact of a kernel parameter before each launch through "
+            "KernelLauncher.from_artifact and refuses the launch if one fails, so a GPU "
+            "check here would only repeat that check.\n"
             f"Fix: state the {fact} where {name} is declared:\n"
             f'    b.param("{name}", {value.type.name.upper()}, '
             f"{_stated_call_text(stated, multiple_of)})\n"
@@ -1705,7 +1722,8 @@ def _gpu_check_host_visible_text(
         ):
             return (
                 f"gpu_checked_value: {text} is bounded by the kernel's workgroup size, "
-                "which the host checks.\n"
+                "which the host checks before each launch through "
+                "KernelLauncher.from_artifact.\n"
                 f'Fix: b.kernel.attrs["workgroup_size"] = {upper + 1}'
             )
         names = ", ".join(p.param.name for p in sources.params)
@@ -1715,7 +1733,7 @@ def _gpu_check_host_visible_text(
         )
         return (
             f"gpu_checked_value: {text} is computed only from thread ids{params}, which "
-            "the host bounds before every launch.\n"
+            "the host bounds before each launch through KernelLauncher.from_artifact.\n"
             'Fix: state the workgroup size, b.kernel.attrs["workgroup_size"] = '
             f"<threads per workgroup>{declarations}; the IR range walk derives the "
             f"facts of {text} from them."
@@ -1737,7 +1755,8 @@ def _gpu_check_host_visible_text(
         source = "them"
     return (
         f"gpu_checked_value: {text} is computed only from kernel parameters ({names}), "
-        f"which the host checks before every launch. Fix: {fix}. The IR range walk "
+        "which the host checks before each launch through KernelLauncher.from_artifact. "
+        f"Fix: {fix}. The IR range walk "
         f"derives the facts of {text} from {source}."
     )
 
@@ -1837,11 +1856,14 @@ class IRBuilder:
         dereferenceable: int | None = None,
         addr_space: str | None = None,
     ) -> Value:
-        """Declare a kernel parameter, with the facts the host checks before
-        every launch.
+        """Declare a kernel parameter, with the facts the GPU trusts.
 
-        Facts on an integer parameter (each optional; the host checks them,
-        and the GPU trusts them):
+        Facts on an integer parameter (each optional). The GPU trusts them; a
+        launcher built by ``KernelLauncher.from_artifact`` checks them on the
+        host before each launch. No other launch path checks them: a
+        ``KernelLauncher`` built from code-object bytes and
+        ``launch_torch_kernel`` launch unchecked, and ``write_artifact``,
+        hkp_pack and the recipe launch plans refuse such a kernel.
 
         * ``ge`` / ``gt`` -- value >= / > bound (at most one of the two).
         * ``le`` / ``lt`` -- value <= / < bound (at most one of the two).

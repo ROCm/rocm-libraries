@@ -53,6 +53,7 @@ __all__ = [
     "product_of",
     "quotient_of",
     "relation_error",
+    "relation_infix_text",
     "relation_json",
     "relation_names",
     "relation_text",
@@ -246,14 +247,25 @@ class IntExpr:
                 return str(term)
             return leaf_text(term)
 
-        return f"{_FUNCTION_OF[self.op]}({', '.join(node(t) for t in self.terms)})"
+        return (
+            f"{_SPELLINGS[self.op].function}({', '.join(node(t) for t in self.terms)})"
+        )
 
 
-_FUNCTION_OF = {
-    "add": "sum_of",
-    "mul": "product_of",
-    "div": "quotient_of",
-    "sub": "difference_of",
+@dataclass(frozen=True)
+class _Spelling:
+    """How one relation op is written: the host function that builds it, and
+    the infix symbol a refusal shows it with once the arguments are put in."""
+
+    function: str
+    symbol: str
+
+
+_SPELLINGS = {
+    "add": _Spelling("sum_of", "+"),
+    "mul": _Spelling("product_of", "*"),
+    "div": _Spelling("quotient_of", "//"),
+    "sub": _Spelling("difference_of", "-"),
 }
 
 
@@ -318,7 +330,7 @@ def difference_of(minuend: Any, subtrahend: Any) -> IntExpr:
 # through every serializer with no new attr kind. ``cpp/core/ir/param_facts.cpp``
 # mirrors these readers, with the same texts.
 
-_RELATION_OPS = ("add", "sub", "mul", "div")
+_RELATION_OPS = tuple(_SPELLINGS)
 
 
 def relation_json(tree: Any) -> str:
@@ -392,5 +404,22 @@ def relation_text(tree: Any, leaf_text: Callable[[str], str] = str) -> str:
             head = head[key][0]
         terms.append(head)
         inner = ", ".join(relation_text(t, leaf_text) for t in reversed(terms))
-        return f"{_FUNCTION_OF[key]}({inner})"
+        return f"{_SPELLINGS[key].function}({inner})"
     return str(int(tree))
+
+
+def relation_infix_text(tree: Any, leaf_text: Callable[[str], str] = str) -> str:
+    """A relation in infix form, ``M * ldc`` (``//`` for ``quotient_of``),
+    nested terms in parentheses. ``leaf_text`` renders a parameter name: a
+    launch refusal passes one that puts in the argument's value."""
+
+    def node(term: Any, nested: bool) -> str:
+        if not isinstance(term, dict):
+            return str(int(term))
+        ((key, value),) = term.items()
+        if key == "param":
+            return leaf_text(value)
+        text = f"{node(value[0], True)} {_SPELLINGS[key].symbol} {node(value[1], True)}"
+        return f"({text})" if nested else text
+
+    return node(tree, False)
