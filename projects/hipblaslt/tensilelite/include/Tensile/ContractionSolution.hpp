@@ -625,6 +625,78 @@ namespace TensileLite
         size_t tiles, size_t itersPerTile, size_t skGrid, int skFullTiles, bool forceDPOnly);
 
     /**
+     * Dynamic work-queue StreamK decomposition (DynamicWorkQueue, and Hybrid's
+     * dynamic sub-mode): tiles - skTiles whole tiles plus skTiles tiles cut into
+     * skSplit parts of skItersPerWI iterations; grid is the launched workgroups.
+     */
+    struct StreamKDynamicSplit
+    {
+        uint32_t skTiles      = 0;
+        uint32_t skSplit      = 0;
+        uint32_t skItersPerWI = 0;
+        uint32_t totalItems   = 0;
+        size_t   grid         = 0;
+
+        // Workspace partial-tile slots (and, on the flag-protocol kernels, ready
+        // flags) the kernel indexes: one per part of every split tile.
+        size_t partialSlots() const
+        {
+            return static_cast<size_t>(skTiles) * skSplit;
+        }
+    };
+
+    struct StreamKDynamicSplitInputs
+    {
+        // Batch-inclusive tile count, getNumTiles(sizeMapping, 1).
+        size_t tiles = 0;
+        // getItersPerTile(sizeMapping), clamped to at least 1.
+        size_t itersPerTile = 1;
+        // Workgroups the dynamic grid policy may launch (CUs x occupancy).
+        size_t maxGrid = 0;
+        // CUs the split is sized for: origami's cu_count for the static grid.
+        size_t splitCUs = 0;
+        // False keeps every tile whole unless the debug overrides ask otherwise.
+        bool allowSplit = true;
+        // Flag-region entries left after the per-XCD queue counters.
+        size_t flagSlots = 0;
+        // Workspace the launch is given, and the bytes of one partial tile.
+        size_t workspaceBytes   = 0;
+        size_t partialTileBytes = 0;
+        // TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
+        int overrideTiles = -1;
+        int overrideSplit = -1;
+        // Uniform summation order: overrides that split only some tiles are
+        // ignored (see streamKDynamicSplitRowUniform).
+        bool uniformSummationOrder = false;
+    };
+
+    // Fewest iterations per split part (origami MinItersPerCU, grid_k_split_aware).
+    constexpr size_t StreamKDynamicMinItersPerWI = 8;
+
+    // Split factors origami grid_k_split_aware tries for tree reduction, largest first.
+    inline constexpr size_t StreamKDynamicSplitFactors[] = {16, 12, 8, 6, 4, 3, 2};
+
+    /**
+     * Choose the dynamic StreamK work decomposition.
+     *
+     * Fewer tiles than splitCUs are each cut into the largest of
+     * StreamKDynamicSplitFactors parts with tiles*skSplit <= splitCUs, at least
+     * StreamKDynamicMinItersPerWI iterations per part and partials that fit
+     * flagSlots and the workspace; otherwise every tile is whole. The debug
+     * overrides replace this rule, within the same workspace and flag limits.
+     */
+    TENSILELITEHOST_EXPORT StreamKDynamicSplit
+        streamKDynamicSplit(StreamKDynamicSplitInputs const& in);
+
+    /**
+     * Whether every tile of a dynamic StreamK decomposition is folded from the
+     * same ordered list of chunk lengths: all whole, or all split alike (one
+     * SKSplit and SKItersPerWI for every tile, summed in part order).
+     */
+    TENSILELITEHOST_EXPORT bool streamKDynamicSplitRowUniform(StreamKDynamicSplit const& d,
+                                                              size_t tiles);
+
+    /**
      * Whether every output tile of a static two-tile StreamK split is folded
      * from the same ordered list of chunk lengths, and so is bitwise equal to
      * every other tile fed identical inputs.
@@ -776,7 +848,7 @@ namespace TensileLite
         // makeArgs() must be reflected in computeStreamKDecisions() or the report
         // silently drifts from the launch.
         //
-        // recomputed: dynamic path  -> the SKTiles arg (debug override, else 0);
+        // recomputed: dynamic path  -> the SKTiles arg (streamKDynamicDecomposition());
         //             parallel path -> the split factor, which is what makeArgs packs
         //                              into the skTiles slot on that path;
         //             static SK3    -> streamKStaticSplit().skTiles, the stream-k
@@ -839,8 +911,8 @@ namespace TensileLite
         size_t idealWorkspaceBytes    = 0;
         // available: problem.workspaceSize().
         size_t givenWorkspaceBytes    = 0;
-        // recomputed: skTiles*skSplit slot count for the dynamic path (informational; does
-        // NOT feed the allocation guard, which is sized by grid).
+        // recomputed: skTiles*skSplit slot count for the dynamic path. When tiles are
+        // split this, not the grid, sizes the partials workspace.
         size_t dynamicPartialsSlots   = 0;
         // available: streamKBakedQueueCount() -- baked per-XCD work-queue count (NUM_XCD),
         // 0 if unknown.
@@ -1084,6 +1156,11 @@ namespace TensileLite
         bool                 uniformSummationOrderSupported(Problem const&  problem,
                                                             Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
+        // streamKDynamicSplit() for this solution, problem and hardware. Every
+        // consumer of the dynamic decomposition calls it, so they agree.
+        StreamKDynamicSplit  streamKDynamicDecomposition(Problem const&  problem,
+                                                         Hardware const& hardware,
+                                                         size_t          tiles) const;
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the
         // given problem/hardware. solve() does NOT consume this on the hot path:
@@ -1372,6 +1449,9 @@ namespace TensileLite
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
+            // SupportStreamKArrivalFixup (GlobalParameters.py): dynamic tiles
+            // are split only for these. Older/custom kernels leave this false.
+            bool arrivalFixup       = false;
             // Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args (CU-occupancy probe).
             bool occupancyProbe     = false;
             bool useUniversalArgs   = true;
