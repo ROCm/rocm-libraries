@@ -62,5 +62,10 @@ from rocke.numeric.sdpa_reference import (  # noqa: E402,F401
     sdpa_reference_bwd,
 )
 
+from rocke.numeric.sdpa_request_reference import (  # noqa: E402,F401
+    sdpa_reference_from_request,
+)
+
 __all__ += ["keep", "resolve_diagonal_band", "sdpa_reference"]
 __all__ += ["SdpaBwdResult", "sdpa_reference_bwd"]
+__all__ += ["sdpa_reference_from_request"]
