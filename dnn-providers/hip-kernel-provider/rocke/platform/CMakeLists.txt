@@ -646,7 +646,9 @@ if(ROCKE_INSTALL_TESTS)
     # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
     # and K/V cache policy, the scalar fallback's cache key and block-table
     # stride kernarg, the unified attention running-max carry and keyless
-    # guards on the emitted IR, and the tiled 2D LSE store on the emitted IR.
+    # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
+    # host-side SDPA sequence-length and padding-mask adapters/specs, and the
+    # fmha_mfma free-stride ABI and layout contracts.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -657,7 +659,11 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
-        "tests/library/tests/test_attention_unified_2d_lse_ir.py")
+        "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+        "tests/library/tests/test_sdpa_seqlen.py"
+        "tests/library/tests/test_sdpa_padding_mask.py"
+        "tests/library/tests/test_fmha_mfma_free_stride.py"
+        "tests/library/tests/test_sdpa_free_stride_layouts.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -873,6 +879,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
         "tests/library/tests/test_attention_scalar_block_table_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
+        "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
