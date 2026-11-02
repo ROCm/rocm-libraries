@@ -223,6 +223,7 @@ add_library(
     engines/plans/MiopenPointwiseTensorChecks.cpp
     engines/plans/MiopenResampleFwdChecks.cpp
     engines/plans/MiopenResampleFwdPlan.cpp
+    engines/plans/MiopenResampleFwdPlanBuilder.cpp
     engines/plans/MiopenUnaryActivationChecks.cpp
     engines/plans/MiopenUnaryActivationPlan.cpp
     engines/plans/MiopenUnaryActivationPlanBuilder.cpp
