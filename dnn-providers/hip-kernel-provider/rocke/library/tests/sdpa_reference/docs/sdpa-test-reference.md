@@ -11,8 +11,13 @@ on the GPU. It covers the base parameterizations in
 fp16/bf16, D64/D128, GQA/MHA, causal/full attention, and default/persistent grids.
 The gfx950 lane adds causal base configurations, described below.
 The gfx1151 and gfx1201 lanes add standalone FP16 WMMA cases.
+gfx942 and gfx950 enroll the `dense` [variant](../../reference_common/docs/README.md#glossary),
+and gfx1151, gfx1200, and gfx1201 the `wmma` variant, named for the kernel
+families in [`implementations/`](../implementations/).
 From the rocKE root, `python library/tests/run_sdpa_reference.py cases --arch <arch>`
-lists an architecture's enrolled cases.
+lists an architecture's enrolled cases by variant, and
+`PYTHONPATH=platform/python python library/tests/run_sdpa_reference.py status`
+lists each variant's publication and bundle state.
 A gfx1200 adapter is available for qualification; its archive and installation
 enrollment remain pending on-device qualification.
 For gfx942/gfx950, current execution uses the same dispatch factory and `run_attention_dense_torch`
@@ -107,7 +112,7 @@ and SDPA host suites passed 82 and 26 tests respectively. This validates Python
 reference installation and execution, not native provider execution or final
 artifact splitting.
 
-The archive is `library/tests/reference_bundles/sdpa/gfx950.tar.gz`, with MD5
+The archive is `library/tests/reference_bundles/sdpa/gfx950/dense.tar.gz`, with MD5
 `45ecc9f281ba2e1f29998f73929a41cf` and size 2,540,019 bytes. The archive was uploaded to DVC, downloaded into a new empty cache, and
 authenticated against the committed lock. Follow the
 [reference workflow](../../reference_common/docs/gpu-reference-workflow.md) for future updates.
@@ -156,12 +161,13 @@ qualification identity remains the physical processor: the manifest records
 exact old-output digests and old/current device-feature equality. A generic
 code object does not authorize copying a certificate between processors.
 
-Each qualified processor has its own archive, lock, and CTest entry. Payloads
-stay under concrete `gfx1200` or `gfx1201` installation directories so TheRock's
-artifact splitter and downloader select them correctly. A `gfx120X-all` job
-requests artifacts for both processors. A pinned suite executes only when that
-processor's archive is enrolled and its hardware is present.
-See the [reference workflow](../../reference_common/docs/gpu-reference-workflow.md#generic-code-objects-and-processor-qualification)
+Each qualified processor has its own `wmma` variant archive and lock, and its
+own CTest entry. Payloads stay under concrete `gfx1200/wmma` or `gfx1201/wmma`
+installation directories so TheRock's artifact splitter and downloader select
+them by processor. A `gfx120X-all` job requests artifacts for both processors. A
+pinned suite executes only when that processor's archive is enrolled and its
+hardware is present. See the
+[reference workflow](../../reference_common/docs/gpu-reference-workflow.md#generic-code-objects-and-processor-qualification)
 for qualification and publication.
 
 | Processor | Compiler target | Status |
@@ -321,11 +327,13 @@ arbitrary future Torch outputs. Use `cuda` on the corresponding ROCm processor
 for GPU reference evidence. This comparison also does not prove exact-real
 arithmetic accuracy or accuracy no-regression. Existing Torch tests remain useful.
 
-A reference-only audit can run without compiling or executing rocKE:
+A reference-only audit can run without compiling or executing rocKE. It checks
+one variant's cases and records the variant in its report; `--variant` may be
+omitted while the architecture has only one:
 
 ```bash
 PYTHONPATH=library/tests:platform/python python -m sdpa_reference.torch_reference \
-  --arch gfx942 --device cpu --output oracle-agreement.json
+  --arch gfx942 --variant dense --device cpu --output oracle-agreement.json
 python -m pytest library/tests/sdpa_reference/check_torch_reference.py -q
 ```
 
@@ -347,37 +355,41 @@ launcher blocks Torch imports in both baseline and current interpreters.
 From the rocm-libraries root, fetch the existing archive with DVC installed:
 
 ```bash
-dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc
+dvc pull dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles/sdpa/gfx942/dense.tar.gz.dvc
 ```
 
 Then, from the rocKE root, extract and validate it for source testing:
 
 ```bash
-python library/tests/reference_common/artifact.py unpack --operation sdpa \
-  --archive library/tests/reference_bundles/sdpa/gfx942.tar.gz \
-  --bundle library/tests/reference_bundles/sdpa/gfx942 \
-  --lock library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json
+python library/tests/reference_common/artifact.py unpack --operation sdpa --variant dense \
+  --archive library/tests/reference_bundles/sdpa/gfx942/dense.tar.gz \
+  --bundle library/tests/reference_bundles/sdpa/gfx942/dense \
+  --lock library/tests/sdpa_reference/architectures/gfx942/dense/baseline_lock.json
 ```
 
 The source default lookup uses that extracted directory. For an explicit bundle,
 run from the rocKE root:
 
 ```bash
-python library/tests/run_sdpa_reference.py verify --arch gfx942 \
+python library/tests/run_sdpa_reference.py verify --arch gfx942 --variant dense \
   --bundle <qualified-bundle-directory> \
   --current-root .
 ```
 
-This command requires gfx942 and runs every case that `cases --arch gfx942`
-lists, with two old and two current executions per case. It exits unsuccessfully
-on a missing case, missing GPU, qualification failure, or comparison failure. It
-never generates independent answers or fetches a reference during verification.
+This command requires gfx942 and runs every case that
+`cases --arch gfx942 --variant dense` lists, with two old and two current
+executions per case. `--variant` may be omitted while gfx942 enrolls only
+`dense`. It exits
+unsuccessfully on a missing case, missing GPU, qualification failure, or
+comparison failure. It never generates independent answers or fetches a
+reference during verification.
 
 The same cases can be run through pytest:
 
 ```bash
 python -m pytest library/tests/test_sdpa_pinned_reference.py \
   --rocke-reference-operation sdpa --rocke-reference-arch gfx942 \
+  --rocke-reference-variant dense \
   --rocke-reference-bundle <qualified-bundle-directory> -v -rs
 ```
 
@@ -414,10 +426,10 @@ cohort. The workflow also covers replacement baselines and publication enrollmen
 The existing TheRock CI flow builds and tests the installed provider artifact:
 
 1. Source preparation fetches the DVC-tracked archive at
-   `library/tests/reference_bundles/sdpa/<arch>.tar.gz` for each published SDPA
-   architecture before provider configuration.
-2. Provider CMake validates and extracts the archive against the committed
-   architecture-specific baseline lock, then installs the test harness and bundle.
+   `library/tests/reference_bundles/sdpa/<arch>/<variant>.tar.gz` for each
+   published SDPA variant before provider configuration.
+2. Provider CMake validates and extracts each archive against its variant's
+   committed baseline lock, then installs the test harness and bundles.
    `ROCKE_INSTALL_TEST_GPU_REFERENCES` defaults on for provider artifact builds
    and off in the rocm-libraries superbuild (`ROCM_LIBS_SUPERBUILD`). Setting it
    to OFF disables reference installation and GPU-test registration; host checks
@@ -425,18 +437,20 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
 3. TheRock's `ml-libs/artifact-hipkernelprovider.toml` collects the harness into the
    generic test artifact. Its `**/engines/test_arch_content/**` rule collects the
    bundle installed at
-   `bin/hip_kernel_provider/engines/test_arch_content/rocke/sdpa/<arch>/`;
+   `bin/hip_kernel_provider/engines/test_arch_content/rocke/sdpa/<arch>/<variant>/`;
    architecture splitting places it in the matching target test artifact, outside the
    release library payload.
 4. The test job assembles the generic and matching architecture artifacts and
-   prepares the Python/runtime dependencies. The existing provider runner selects
-   CTest entries using the provider's category YAML. The
+   prepares the Python/runtime dependencies. The existing provider runner
+   selects CTest entries using the provider's category YAML. The
    `rocke_sdpa_gpu_<arch>_pytest` entries run the same pytest file used locally:
-   one numerical comparison for each case the architecture enrolls, plus three
-   negative checks. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
-   `rocke_reference_common_pytest` runs shared archive and worker-isolation checks
-   and compares each installed bundle's cases with the enrolled cohort. Neither
-   host entry requires a GPU bundle.
+   for each published variant of the architecture, one numerical comparison for
+   each case it enrolls, plus three negative checks.
+   `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
+   `rocke_reference_common_pytest` runs shared archive and worker-isolation
+   checks, compares each installed bundle's cases with the enrolled cohort, and
+   replays its frozen runner with the current request on a host stand-in
+   runtime. Neither host entry requires a GPU bundle.
 
 This uses the existing workflows; no additional workflow is required. CI verifies
 an already qualified baseline and cannot generate or approve its own replacement.
@@ -472,27 +486,29 @@ Normal provider CI uses the defaults. The settings are:
 |---|---|---|
 | `ROCKE_INSTALL_TEST_GPU_REFERENCES` | CMake Boolean | Install all published GPU reference bundles and enroll their GPU tests |
 | `--rocke-reference-operation`, `--rocke-reference-arch` | Pytest options | Select the operation and GPU architecture |
-| `--rocke-reference-bundle` | Pytest option | Select a bundle for the selected operation/architecture |
+| `--rocke-reference-variant` | Pytest option | Run only this enrolled variant of the selected architecture |
+| `--rocke-reference-bundle` | Pytest option | Select a bundle for the selected operation, architecture, and variant |
 | `--rocke-reference-lock` | Pytest option | Select an explicit candidate lock instead of the committed lock |
 
 Explicit operation/architecture selection makes the suite required, including
 failure on a missing bundle. CTest supplies these options. Architecture-lane
 selection still uses the detected GPU and CI's concrete `AMDGPU_TARGETS`.
-Bundle and lock overrides require explicit operation and architecture options.
+Bundle and lock overrides require explicit operation and architecture options,
+and `--rocke-reference-variant` when the architecture enrolls several variants.
 A lock override also requires a bundle path. For candidate qualification and
 verification, follow the [reference workflow](../../reference_common/docs/gpu-reference-workflow.md).
 These options select what pytest reads; they do not change what CMake installs.
-CMake packages the standard archives for all operation/architecture pairs in
-`platform/cmake/PublishedGpuReferences.cmake`, and pytest finds the installed target
-bundle by default.
+CMake packages the standard archives of every variant with a committed lock
+under the architectures in `platform/cmake/PublishedGpuReferences.cmake`, and
+pytest finds each installed variant's bundle by default.
 CMake has no per-architecture reference-install option; its publication lists
 determine which pairs are installed. The pytest options select execution from
 those suites or verify an explicit candidate bundle and lock.
 
 ## Bundle contents and provenance
 
-The gfx942 DVC pointer is
-[`reference_bundles/sdpa/gfx942.tar.gz.dvc`](../../reference_bundles/sdpa/gfx942.tar.gz.dvc).
+The gfx942 `dense` DVC pointer is
+[`reference_bundles/sdpa/gfx942/dense.tar.gz.dvc`](../../reference_bundles/sdpa/gfx942/dense.tar.gz.dvc).
 Its schema-2 bundle contains:
 
 ```text
