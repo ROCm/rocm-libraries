@@ -14,6 +14,7 @@ from .LogicalScheduler import (
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, ceilDivide, plsinBlockSchedTile, isMxf4SubtilePath
+from ...Common.MxScaleLayout import splatFirst
 
 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, Label
@@ -1257,11 +1258,11 @@ def preLoop(writer, kernel):
   # Just sample impl, we can also interleave A/B loads
   for i in range(pgr):
     module.addComment0("Emitting %u-th set of GRs"%i)
-    module.add(globalReadDoSubtile('A', writer, kernel))
-    module.add(globalReadDoSubtile('B', writer, kernel))
-    # Scale GR in preloop
-    module.add(globalReadDoScaleSubtile('A', writer, kernel))
-    module.add(globalReadDoScaleSubtile('B', writer, kernel))
+    for tc in splatFirst(kernel, ("A", "B", "MXSA", "MXSB")):
+      if tc.startswith("MXS"):
+        module.add(globalReadDoScaleSubtile(tc[3], writer, kernel))
+      else:
+        module.add(globalReadDoSubtile(tc, writer, kernel))
     module.addComment("Add appropriate GR offset swap logic")
   module.addComment("")
 

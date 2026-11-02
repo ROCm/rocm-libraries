@@ -308,7 +308,7 @@ class TestRollNdShapeAxes(unittest.TestCase):
 class TestBinarySearchTripCount(unittest.TestCase):
     """`ceil(log2(n+1))` -- the trip count of a binary search over `n` items.
 
-    Found by sweeping kernels/gfx950: all three tiled attention kernels size their
+    Found by sweeping the production kernels: all three tiled attention kernels size their
     sequence-lookup loop this way, and `num_seqs` refused for want of the model
     even though the recipe schema could already express it. `magic_shift` computes
     `ceil(log2 x)` and both evaluators recurse into its operand, so the fix was to

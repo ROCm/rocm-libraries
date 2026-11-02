@@ -359,6 +359,8 @@ Limitations
   single-rank warm-up and then run in ``cache`` mode; see above.
 * ``alpha``, ``beta`` and whether ``C`` and ``D`` alias are not part of the lookup key, so an entry
   tuned at one value of ``beta`` can serve a caller using another.
-* An explicit ``algo`` passed to ``hipblasLtMatmul`` always launches as given. A caller that reuses an
+* An explicit ``algo`` passed to ``hipblasLtMatmul`` always launches as given, except that in
+  adaptive ``sm_count_target`` mode the top heuristic result can be swapped for the solution picked
+  at the current hint (see :doc:`how-to-use-streamk`). A caller that reuses an
   algorithm it queried before its shape was tuned does not pick up the winner until it queries the
   heuristic again.
