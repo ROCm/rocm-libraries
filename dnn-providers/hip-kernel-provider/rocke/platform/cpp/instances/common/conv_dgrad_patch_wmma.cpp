@@ -261,6 +261,8 @@ bool rocke_dgrad_patch_wmma_is_valid_spec(const rocke_dgrad_patch_wmma_spec_t* s
                    "not a patch embedding (stride == square filter, pad 0, ungrouped)");
         return false;
     }
+    if(rocke_direct_conv_one_padding_reason(p, "", reason, reason_cap))
+        return false;
     if(p->kpg % 8 != 0)
     {
         snprintf(msg, sizeof msg, "K %d must be a multiple of 8 (16-byte dY rows)", p->kpg);

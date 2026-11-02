@@ -117,6 +117,9 @@ jobs:
       test_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       test_type: ${{ steps.configure.outputs.test_type }}
+      # TEMPORARY: hipBLASLt gfx950 presubmit trial. Remove once TheRock#8985
+      # lands the formal mechanism for per-family presubmit test selection.
+      family_overrides: ${{ steps.family-override.outputs.family_overrides }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -145,6 +148,29 @@ jobs:
             --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
             --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
+
+      # TEMPORARY: hipBLASLt gfx950 presubmit trial. Remove once TheRock#8985
+      # lands the formal mechanism for per-family presubmit test selection.
+      # Keyed on the changed paths rather than changed_projects: the latter is
+      # a derived classification that can widen to every configured project or
+      # collapse to empty, neither of which means "this PR touched hipBLASLt".
+      - name: Resolve gfx950 family override
+        id: family-override
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          overrides='{}'
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            if gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
+                 --jq '.[].filename' | grep -q '^projects/hipblaslt/'; then
+              overrides='{"gfx950":{"linux":{"tests_on_trigger":["presubmit"],"test_labels_for_family":["test:hipblaslt"],"test_type_for_family":"quick"}}}'
+            fi
+          fi
+          echo "Resolved family_overrides: ${overrides}"
+          echo "family_overrides=${overrides}" >> "$GITHUB_OUTPUT"
 
   setup:
     needs: [ci-env, configure]
@@ -210,6 +236,7 @@ jobs:
           "pr_number": ${{ github.event.pull_request.number || 'null' }},
           "event_name": "${{ github.event_name }}",
           "skip_ci_config": ".github/skip-ci-config.toml",
+          "family_overrides": ${{ needs.configure.outputs.family_overrides }},
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
@@ -307,20 +334,29 @@ jobs:
     # notify_teams.py reports each failed Linux::/Windows:: job of this run
     # from here, routing to the MIOpen / hipDNN channels by PR title tag
     # ([miopen], [hipdnn], [miopenprovider]) or component name.
-    # Webhook secrets are unavailable to fork PRs.
+    # The Teams flow looks up each message by PR number, so runs without a PR
+    # (push, dispatch) are not reported.
     needs: [configure, linux_build_and_test, windows_build_and_test]
     # A notification problem must never fail the PR.
     continue-on-error: true
     if: >-
       ${{
         always() &&
-        !github.event.pull_request.head.repo.fork &&
+        github.event_name == 'pull_request' &&
         (
           needs.linux_build_and_test.result == 'failure' ||
           needs.windows_build_and_test.result == 'failure'
         )
       }}
     runs-on: ubuntu-24.04
+    # Secrets are not available to every PR (forks, Dependabot), and a fork
+    # flag does not tell whether they are (e.g. ROCm/llvm-project is a fork
+    # with secrets). An unset secret is an empty string, and the secrets
+    # context is not allowed in jobs.<id>.if, so expose the webhooks as job
+    # env and gate the step on them.
+    env:
+      MIOPEN_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
     steps:
       - name: Checkout notify script
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -329,12 +365,11 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Notify Teams for failed build and test jobs
+        if: env.MIOPEN_WEBHOOK_URL != '' || env.HIPDNN_WEBHOOK_URL != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          MIOPEN_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
-          HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
           CHANGED_PROJECTS: ${{ needs.configure.outputs.changed_projects }}
         run: |
           python3 .github/scripts/notify_teams.py \

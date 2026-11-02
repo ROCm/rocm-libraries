@@ -250,12 +250,13 @@ bool rocke_gfx950_attention_tiled_2d_supports(
         rocke_g950_reason(reason, reason_cap, buf);
         return false;
     }
-    /* head_size in {64,128,256} (Py627). */
-    if(!(args->head_size == 64 || args->head_size == 128 || args->head_size == 256))
+    /* head_size in {64,128,192,256} (Py627). */
+    if(!(args->head_size == 64 || args->head_size == 128 || args->head_size == 192
+         || args->head_size == 256))
     {
         snprintf(buf,
                  sizeof(buf),
-                 "tiled 2D kernel only supports head_size in {64,128,256} (got %d)",
+                 "tiled 2D kernel only supports head_size in {64,128,192,256} (got %d)",
                  args->head_size);
         rocke_g950_reason(reason, reason_cap, buf);
         return false;
@@ -742,11 +743,35 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        /* Trailing LSE output (Python: after the optional additive-bias params,
+         * which this twin does not declare). Off -> no param, ABI unchanged. */
+        if(spec->emit_lse)
+        {
+            memset(&o, 0, sizeof(o));
+            o.noalias = true;
+            o.noalias_set = true;
+            o.writeonly = true;
+            o.writeonly_set = true;
+            o.align = 4;
+            o.align_set = true;
+            ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
+        }
     }
 
     /* ---- grid ids + wave decomposition (Py891-904) ---- */
     ctx->kv_head_idx = rocke_b_block_id_x(b);
     ctx->q_block_global_idx = rocke_b_block_id_y(b);
+    if(spec->use_qblock_reverse)
+    {
+        /* Longest-first query blocks: y -> num_q_blocks - 1 - y, with the grid y
+         * extent total_q // BLOCK_Q + num_seqs (sequenced to match Python). */
+        rocke_value_t* total_q = rocke_b_global_load_i32(b, ctx->cu_q, ctx->num_seqs_p, 0);
+        rocke_value_t* c_block_q = rocke_b_const_i32(b, BLOCK_Q);
+        rocke_value_t* nqb = rocke_b_add(b, rocke_b_div(b, total_q, c_block_q), ctx->num_seqs_p);
+        rocke_value_t* c_one = rocke_b_const_i32(b, 1);
+        ctx->q_block_global_idx
+            = rocke_b_sub(b, rocke_b_sub(b, nqb, c_one), ctx->q_block_global_idx);
+    }
     ctx->tid = rocke_b_thread_id_x(b);
 
     if(NUM_WARPS == 1)
@@ -1114,6 +1139,8 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->use_fp8_mfma_qk ? "fp8mfma" : "",
             s->use_fp8_mfma_pv ? "fp8pv" : "",
             s->use_register_pv ? "regpv" : "",
+            s->use_qblock_reverse ? "qrev" : "",
+            s->emit_lse ? "lse" : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(

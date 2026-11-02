@@ -3,7 +3,7 @@
 - Contributors: hipDNN maintainers
 - **Status**: Implemented
 - **Status notes**: Plan-only serialization shipped in #6970. The envelope later gained `is_override_shape_enabled` (#7279) and `tensor_alignments` (#8728), and #7975 added a graph-and-plan container. The hip-kernel-provider exports the plugin hooks for its kernel ingestor engines (#13315), and the hipDNN test plugins also implement them.
-- **Last verified**: 2026-10-22 against `develop` (0bb1c36e8f7) with #13315 applied
+- **Last verified**: 2026-10-29 against `develop` (49a6d20f102)
 - Scope: frontend, backend, engine plugin API, test plugin implementation, hip-kernel-provider
   ingestor implementation
 
@@ -48,6 +48,12 @@ restored.execute(handle, variantPack, workspace);
 The restored `Graph` contains only an execution plan descriptor. APIs that depend on source graph
 nodes, engine configs, or graph mutation should not be assumed to work after compiled-plan
 deserialization.
+
+A deserialized plan is bound to the device of the handle passed to
+`deserialize_compiled_plan()` and executes only on handles whose stream is on that device
+(`hipdnnBackendExecute()` returns `HIPDNN_STATUS_BAD_PARAM` otherwise). Serialization is the
+supported way to move a plan to another device: deserialize the same bytes once per target
+device, each with a handle on that device.
 
 ## Frontend API
 
@@ -182,6 +188,9 @@ The descriptor stores enough state to execute without `EngineConfig -> Engine ->
 - Plugin resource manager.
 - Plugin execution context wrapper.
 
+A descriptor that was created from saved bytes keeps the plan bytes and returns them on save. A
+built plan serializes through its plugin once, on its first save, and keeps the result.
+
 Execution reads the engine ID and execution context directly from the execution plan descriptor.
 This is what makes a graph-less restored plan executable.
 
@@ -254,6 +263,10 @@ does not hold calculated grid sizes or kernel argument values.
 A loaded plan runs the code it was saved with. Upgrading the provider does not change the kernel
 inside a saved plan, even when the upgrade fixes that kernel. To use the new kernel, build the plan
 again from its graph and save it.
+
+A re-save describes the kernel of the loaded plan, with its original provider version and format
+versions. A newer kernel in an upgraded provider never enters a re-save. `from_binary(bytes)`
+without a handle loads only the graph. Build the plan from that graph, then save it.
 
 ### Versioning
 
@@ -341,8 +354,11 @@ The load hook then does these checks in this order. The first check that fails s
 16. The driver loads the code object on the device of the handle and finds the kernel symbol
     (`NOT_APPLICABLE`).
 
-The load hook loads the code object. As a result, a code object that the driver refuses fails the
-load, not the first execute. Another device loads its own module from the stored bytes at its first use.
+The load hook loads the code object on the device of the handle, so a code object that the driver
+refuses fails the load, not the first execute. The restored plan keeps the code object bytes and can
+load a separate module for another compatible device at its first use there. hipDNN does not use
+this today: the backend binds the plan to the load handle's device and rejects execution on any
+other device.
 
 ### Statuses and Messages
 
@@ -366,17 +382,27 @@ The save hook refuses these plans with `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`. It
 this order:
 
 1. A context without a plan.
-2. A plan that the provider loaded from a payload.
-3. A benchmarking plan that has not selected a kernel.
-4. A plan that no ingestor engine built.
-5. A kernel with more than one launch.
-6. A kernel with a source kind other than kpack.
-7. A plan whose dispatch handler does not support save.
+2. A benchmarking plan that has not selected a kernel.
+3. A plan that no ingestor engine built.
+4. A kernel with more than one launch.
+5. A kernel with a source kind other than kpack.
+6. A plan whose dispatch handler does not support save.
 
-Rule 2 has a result for the frontend: `to_binary()` of a graph that `from_binary()` loaded fails.
-`to_compiled_plan_binary()` of a loaded plan also fails. Keep the original bytes of the payload.
+hipDNN saves a loaded plan from the plan bytes it was loaded from. `to_binary()` of a graph that
+`from_binary()` loaded with its plan returns the plan bytes unchanged, inside a graph-and-plan
+container with the bytes of the graph. `to_compiled_plan_binary()` of a loaded plan returns the
+plan bytes unchanged. When the input to `from_compiled_plan_binary()` is a graph-and-plan
+container, only its plan part is kept, so the save returns the plan and not the container.
+hipDNN does not call the plugin to save a loaded plan. A loaded plan keeps its plan bytes for
+its lifetime, whether or not it is saved again. For the kernel ingestor engines the plan bytes
+include the kernel code object.
 
-For rule 3: a benchmarking plan usually selects its kernel at the first execute. A stored benchmark
+The provider also refuses a direct call of the save hook on a restored context. That refusal has
+the status `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` and the message
+`this plan was loaded from a saved payload; hipDNN saves a loaded plan from its original bytes and does not call the provider`.
+hipDNN does not make that call.
+
+For rule 2: a benchmarking plan usually selects its kernel at the first execute. A stored benchmark
 result can cover all candidates. In that case, the build makes a plain plan, and the plan saves before
 the first execute. To save a benchmarking plan, execute the plan one time, then save it. Or, build the
 plan with benchmarking off.
@@ -387,6 +413,21 @@ the code object. If the archive changes after the plan build, the save can fail.
 fails because the archive is not readable, the status is `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`.
 When the save fails because the bytes do not match the SHA-256, the status is
 `HIPDNN_PLUGIN_STATUS_INVALID_VALUE`. Do not change the archive between the plan build and the save.
+
+### Decision: Re-Save From the Loaded Bytes
+
+A re-save of a loaded plan returns the bytes that the plan was loaded from. The alternative was to
+re-encode the plan inside the provider. The saved bytes were chosen for these reasons:
+
+- It works for every plugin and every payload shape.
+- It adds no contract for plugin authors.
+- A re-save of the execution plan is byte-identical and deterministic. A re-save of the graph is
+  not guaranteed to be byte-identical.
+- It avoids a defect of re-encoding: a re-save of a version 1 envelope wrote version 2 with empty
+  `tensor_alignments`, which the version 2 reader rejects.
+
+The cost is one copy of the bytes for each loaded plan, for the life of the plan. A save of a built
+plan already keeps the same copy.
 
 ### Security
 
