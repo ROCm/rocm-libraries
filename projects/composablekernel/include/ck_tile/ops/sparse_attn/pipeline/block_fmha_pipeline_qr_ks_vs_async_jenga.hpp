@@ -280,7 +280,6 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                                                                     // load
         k_dram_window.init_raw();
         constexpr auto k_oob_ck = bool_constant<true>{};
-        constexpr auto k_pre_np = bool_constant<false>{};
 
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp.get_bottom_tensor_view(),
@@ -301,11 +300,8 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
         if(block_relation_onehot[0])
         {
             // prefetch K tile
-            async_load_tile_raw(k_lds_store(LdsSeq.at(number<0>{})),
-                                k_dram_window,
-                                number<-1>{},
-                                k_oob_ck,
-                                k_pre_np);
+            async_load_tile_raw(
+                k_lds_store(LdsSeq.at(number<0>{})), k_dram_window, number<-1>{}, k_oob_ck);
             move_tile_window(k_dram_window, {0, kK0});
             __builtin_amdgcn_sched_barrier(0);
         }
@@ -336,8 +332,7 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                         async_load_tile_raw(k_lds_store(LdsSeq.at(number<0>{})),
                                             k_dram_window,
                                             number<-1>{},
-                                            k_oob_ck,
-                                            k_pre_np);
+                                            k_oob_ck);
                     }
                     move_tile_window(k_dram_window, {0, kK0});
                     move_tile_window(v_dram_window, {0, kN0});
@@ -354,8 +349,7 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                     async_load_tile_raw(k_lds_store(number<LdsSeq.at(number<i_k0 + 1>{})>{}),
                                         k_dram_window,
                                         number<-1>{},
-                                        k_oob_ck,
-                                        k_pre_np);
+                                        k_oob_ck);
                     if constexpr(i_k0 < k0_loops - 1)
                         move_tile_window(k_dram_window, {0, kK0});
 
@@ -555,11 +549,8 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                 if constexpr(k1_loops >= 2 &&
                              LdsSeq.at(number<0>{}) == LdsSeq.at(number<k0_loops + k1_loops - 2>{}))
                     __builtin_amdgcn_s_barrier();
-                async_load_tile_raw(k_lds_store(LdsSeq.at(number<0>{})),
-                                    k_dram_window,
-                                    number<-1>{},
-                                    k_oob_ck,
-                                    k_pre_np);
+                async_load_tile_raw(
+                    k_lds_store(LdsSeq.at(number<0>{})), k_dram_window, number<-1>{}, k_oob_ck);
                 move_tile_window(k_dram_window, {0, kK0});
             }
             // tail

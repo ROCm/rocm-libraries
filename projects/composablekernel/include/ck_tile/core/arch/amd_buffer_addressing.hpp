@@ -1367,48 +1367,6 @@ llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc,
                                 index_t offset,
                                 index_t aux) __asm("llvm.amdgcn.raw.buffer.load.lds");
 
-template <unsigned num_dwords, bool pre_nop = false>
-CK_TILE_DEVICE void async_buffer_load_dwordxn_v(void* smem,
-                                                int32x4_t rsrc,
-                                                index_t voffset,
-                                                index_t /*soffset*/,
-                                                index_t ioffset /*max 0xFFF*/,
-                                                index_t /*flag*/       = 0,
-                                                bool_constant<pre_nop> = {})
-{
-#define CK_TILE_ASYNC_LOAD_WITH_INSTR(instr)                            \
-    if constexpr(pre_nop)                                               \
-        asm volatile("s_nop 4\n" instr " %1, %2, 0 offen offset:%3 lds" \
-                     : "=r"(smem) /*dummy dependency for smem*/         \
-                     : "v"(voffset), "s"(rsrc), "n"(ioffset)            \
-                     : "memory");                                       \
-    else                                                                \
-        asm volatile(instr " %1, %2, 0 offen offset:%3 lds"             \
-                     : "=r"(smem) /*dummy dependency for smem*/         \
-                     : "v"(voffset), "s"(rsrc), "n"(ioffset)            \
-                     : "memory");
-
-    if constexpr(num_dwords == 1)
-    {
-        CK_TILE_ASYNC_LOAD_WITH_INSTR("buffer_load_dword");
-    }
-#if defined(__gfx950__)
-    else if constexpr(num_dwords == 3)
-    {
-        CK_TILE_ASYNC_LOAD_WITH_INSTR("buffer_load_dwordx3");
-    }
-    else if constexpr(num_dwords == 4)
-    {
-        CK_TILE_ASYNC_LOAD_WITH_INSTR("buffer_load_dwordx4");
-    }
-#endif
-    else
-    {
-        static_assert(false, "wrong! not implemented data width");
-    }
-#undef CK_TILE_ASYNC_LOAD_WITH_INSTR
-}
-
 // Same-wave wait for async buffer-load completion. Not a cross-wave fence (see
 // buffer_load_fence). Only works on gfx9, should be avoided.
 CK_TILE_DEVICE void async_buffer_load_fence(index_t cnt = 0)
@@ -1897,31 +1855,6 @@ CK_TILE_DEVICE void amd_buffer_load_raw_impl(thread_buffer<T, N>& dst,
                                              flag,
                                              bool_constant<pre_nop>{});
     }
-}
-
-template <typename T,
-          index_t N,
-          amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
-          bool pre_nop                        = false>
-CK_TILE_DEVICE void amd_async_buffer_load_impl(CK_TILE_LDS_ADDR T* smem,
-                                               int32x4_t src_wave_buffer_resource,
-                                               index_t src_thread_addr_offset,
-                                               index_t src_wave_addr_offset,
-                                               index_t src_immediate_addr_offset = 0,
-                                               bool_constant<pre_nop>            = {})
-{
-    constexpr index_t num_bytes = sizeof(T) * N;
-    constexpr index_t num_words = num_bytes / 4;
-    static_assert(num_bytes % 4 == 0 && (num_words == 1 || num_words == 3 || num_words == 4),
-                  "wrong! only support in dword, dwordx3, dwordx4");
-
-    async_buffer_load_dwordxn_v<num_words>(smem,
-                                           src_wave_buffer_resource,
-                                           src_thread_addr_offset,
-                                           src_wave_addr_offset,
-                                           src_immediate_addr_offset,
-                                           0,
-                                           bool_constant<pre_nop>{});
 }
 
 template <typename T,
@@ -2800,57 +2733,6 @@ CK_TILE_DEVICE void amd_buffer_load_raw(thread_buffer<T, N>& dst,
         src_linear_addr_offset,
         is_valid_element,
         bool_constant<pre_nop>{});
-}
-
-// unfortunately async copy can not make sure invalid data is zero inside LDS
-// ... unless people manually write zero to LDS at the proper address.
-// so not support invalid_element check for now.
-// buffer_load OOB still working.
-template <typename T,
-          index_t N,
-          amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
-          bool pre_nop                        = false>
-CK_TILE_DEVICE void amd_async_buffer_load_with_oob_raw(T* smem,
-                                                       const T* p_src_wave,
-                                                       index_t src_thread_element_offset,
-                                                       index_t src_linear_element_offset,
-                                                       index_t src_element_space_size,
-                                                       bool_constant<pre_nop> = {})
-{
-    const int32x4_t src_wave_buffer_resource =
-        make_wave_buffer_resource(p_src_wave, src_element_space_size * sizeof(T));
-
-    index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
-    index_t src_linear_addr_offset = src_linear_element_offset * sizeof(T);
-
-    amd_async_buffer_load_impl<T, N, coherence>(smem,
-                                                src_wave_buffer_resource,
-                                                src_thread_addr_offset,
-                                                0,
-                                                src_linear_addr_offset,
-                                                bool_constant<pre_nop>{});
-}
-
-// This version support buffer resource as input arg
-template <typename T,
-          index_t N,
-          amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
-          bool pre_nop                        = false>
-CK_TILE_DEVICE void amd_async_buffer_load_with_oob_raw(T* smem,
-                                                       const int32x4_t src_wave_buffer_resource,
-                                                       index_t src_thread_element_offset,
-                                                       index_t src_linear_element_offset,
-                                                       bool_constant<pre_nop> = {})
-{
-    index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
-    index_t src_linear_addr_offset = src_linear_element_offset * sizeof(T);
-
-    amd_async_buffer_load_impl<T, N, coherence>(smem,
-                                                src_wave_buffer_resource,
-                                                src_thread_addr_offset,
-                                                0,
-                                                src_linear_addr_offset,
-                                                bool_constant<pre_nop>{});
 }
 
 // This version support buffer resource as input arg
