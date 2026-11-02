@@ -346,8 +346,9 @@ static int test_scale_contracts()
             fingerprint *= UINT64_C(1099511628211);
         } while(*text++);
     }
-    CHECK(arch->mma.num_ops == 93);
-    CHECK(fingerprint == UINT64_C(8996553530891217874));
+    // 93 rows of the filtered catalog plus the dense 16x16x128 f8f6f4 atom.
+    CHECK(arch->mma.num_ops == 94);
+    CHECK(fingerprint == UINT64_C(2118804672703646445));
     CHECK(packed_rows == 4 && scaled_rows == 86);
     return 0;
 }

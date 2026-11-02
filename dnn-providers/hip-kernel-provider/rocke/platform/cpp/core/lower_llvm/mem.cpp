@@ -695,17 +695,18 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     const char* base = rocke_ll_fresh(L, "smem.base");
     const char* idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
     const char* elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
-    /* Python _op_tile_smem_load_vN uses a LOCAL dict that, unlike the other
-     * handlers, does NOT list fp8e4m3 / bf8e5m2 -- so they fall to the default
-     * 2 (not 1). Replicate that exact dict here rather than the shared
-     * ll_elem_bytes (which maps fp8/bf8 -> 1), or the fp8 down-GEMM LDS reads
-     * emit `align 16` instead of the Python `align 32`.
-     *   {"i8":1,"u8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
+    /* Python _op_tile_smem_load_vN reads lower_llvm._SMEM_ELEM_BYTES, which
+     * lists the 8-bit floats at 1 byte. (Its earlier local map omitted
+     * fp8e4m3 / bf8e5m2, so they fell to the default of 2 and a 16-element fp8
+     * read claimed `align 32` for a 16-byte access.) This mirrors that map:
+     *   {"i8":1,"u8":1,"fp8e4m3":1,"bf8e5m2":1,"f16":2,"bf16":2,"i32":4,
+     *    "tf32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
     const char* en = op->results[0]->type->elem->name;
     int elem_bytes = 2;
     if(en)
     {
-        if(strcmp(en, "i8") == 0 || strcmp(en, "u8") == 0)
+        if(strcmp(en, "i8") == 0 || strcmp(en, "u8") == 0 || strcmp(en, "fp8e4m3") == 0
+           || strcmp(en, "bf8e5m2") == 0)
         {
             elem_bytes = 1;
         }
@@ -722,8 +723,14 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
             elem_bytes = 8;
         }
     }
-    /* New 96-bit widths guarantee only element alignment, including FP8. */
-    int64_t align = (vec == 3 || vec == 6 || vec == 12) ? 12 / vec : vec * elem_bytes;
+    /* New 96-bit widths guarantee only element alignment, including FP8.
+     * Otherwise bound the claim by what every row start actually guarantees:
+     * an LDS tile advances by its innermost dimension per row, so a pad that
+     * makes it a non-multiple of vec leaves alternate rows off the natural
+     * boundary. Mirrors lower_llvm._smem_vec_align. */
+    int64_t align = (vec == 3 || vec == 6 || vec == 12)
+                        ? 12 / vec
+                        : (int64_t)rocke_i_smem_vec_align_elems(stype, vec) * elem_bytes;
     /* gfx1250: vec==8 loads are marked volatile to block the WMMA-aware backend
      * pass from substituting ds_load_tr16_b128 (transposed) for the plain
      * sequential ds_read_b128. Mirrors Python _op_tile_smem_load_vN lines
@@ -903,6 +910,26 @@ static void op_tile_smem_addr_of(rocke_lower_t* L, const rocke_op_t* op)
     const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     rocke_ll_lds_prov_set(L, op->results[0], gname);
     rocke_ll_emitf(L, "  %s = ptrtoint ptr addrspace(3) %s to i64", ll_res(op), base_ptr);
+}
+
+/* Mirrors lower_llvm._op_tile_global_addr_of: a GEP materialised as an i64.
+ * Not `inbounds`: a clipped TDM fill can point past the allocation (early
+ * refill's second prologue fill with K < tile_k), and an inbounds GEP past the
+ * object is poison that the mover's clipping cannot undo. */
+static void op_tile_global_addr_of(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* ptr = op->operands[0];
+    const rocke_value_t* index = op->operands[1];
+    const char* elem_ty = rocke_ll_llvm_type(L, ptr->type->pointee);
+    const char* gep = rocke_ll_fresh(L, "gaddr_gep");
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr %s, ptr addrspace(1) %s, %s %s",
+                   gep,
+                   elem_ty,
+                   rocke_ll_operand(L, ptr),
+                   rocke_ll_llvm_type(L, index->type),
+                   rocke_ll_operand(L, index));
+    rocke_ll_emitf(L, "  %s = ptrtoint ptr addrspace(1) %s to i64", ll_res(op), gep);
 }
 
 static void op_tile_smem_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
@@ -2090,6 +2117,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_LOAD_VN_F32, op_tile_smem_load_vN_f32);
     rocke_ll_set_handler(ROCKE_OP_TILE_LDS_ATOMIC_ADD, op_tile_lds_atomic_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_ADDR_OF, op_tile_smem_addr_of);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_ADDR_OF, op_tile_global_addr_of);
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_PTR_ADD, op_tile_smem_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_ADD, op_tile_global_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, op_tile_global_ptr_to_i64);

@@ -23,6 +23,15 @@
 
 #include "rocke/instance_gemm_internal.h"
 
+/* Forward declaration. is_tdm is passed explicitly rather than re-read from
+ * ctx->spec->trait.tdm: after the function-entry branch on tdm, the compiler
+ * can propagate its cached value and fold the drain's re-check to false even
+ * when tdm is true. Passing it as a parameter breaks that folding. */
+static void rocke_gemm_drain_sync(rocke_ir_builder_t* b, bool is_tdm);
+/* Wrapper that reads trait.tdm from ctx; safe to call from functions that do
+ * not have an entry-branch optimization hazard (e.g. emit_kloop_simple). */
+static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx);
+
 /* ===================================================================== *
  *  emit_mfma_phase
  *
@@ -71,7 +80,8 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
 
     if(ctx->is_wmma)
     {
-        rocke_gemm_emit_wmma_phase(ctx, A_src, B_src, iter_vars, num_iter_vars, out_accs);
+        rocke_gemm_emit_wmma_phase(
+            ctx, A_src, B_src, iter_vars, num_iter_vars, parity_imm, parity_v, out_accs);
         return;
     }
 
@@ -260,8 +270,7 @@ void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
         rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
 
-        /* Start-of-iter barrier (RAW-safe read of half(parity), WAR-safe
-         * overwrite of half(next)). */
+        /* Start-of-iter barrier (compv4 non-TDM path; TDM never reaches kloop_db). */
         rocke_b_sync(b);
         /* Issue next-tile global->VGPR->LDS copy into the other half. */
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
@@ -325,7 +334,8 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
         /* Single-buffer load-then-compute pipeline. parity is compile-time 0
          * (Python passes no lds_parity -> default 0). */
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, for_op.iv, 0, NULL);
-        rocke_b_sync(b);
+        rocke_gemm_drain_prefetch_and_sync(
+            ctx); /* re-reads trait.tdm each iter: no CSE risk here */
 
         rocke_gemm_emit_mfma_phase(ctx,
                                    ctx->A_smem,
@@ -346,6 +356,169 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
     ctx->num_for_results = for_op.op->num_results;
 }
 
+/* Mirrors Python _sync_after_load / _drain_prefetch_and_sync.
+ * is_tdm is passed explicitly rather than read from ctx->spec->trait.tdm
+ * so the compiler cannot constant-fold the branch away (see forward decl). */
+static void rocke_gemm_drain_sync(rocke_ir_builder_t* b, bool is_tdm)
+{
+    if(is_tdm)
+    {
+        rocke_b_s_wait_tensorcnt(b, 0);
+        rocke_b_sync_lds_only(b);
+    }
+    else
+    {
+        rocke_b_sync(b);
+    }
+}
+
+static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx)
+{
+    rocke_gemm_drain_sync(ctx->b, ctx->spec->trait.tdm);
+}
+
+/* Workgroup barrier ids of the split barrier: signal / wait the whole WG. */
+#define ROCKE_GEMM_WG_SIGNAL 0xFFFFFFFFu
+#define ROCKE_GEMM_WG_WAIT 0xFFFF
+
+/* The split-barrier signal: drain this wave's fragment reads and wait until at
+ * most `*(int*)user` fills are outstanding (the tile about to be read has
+ * landed), then arrive. Mirrors Python _signal_next_tile_ready /
+ * _signal_tile_done / the early refill's _signal. */
+static void rocke_gemm_split_signal(rocke_gemm_build_ctx_t* ctx, void* user)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_b_s_waitcnt(b, -1, 0, -1);
+    rocke_b_s_wait_tensorcnt(b, *(const int*)user);
+    rocke_b_s_barrier_signal(b, ROCKE_GEMM_WG_SIGNAL);
+}
+
+/* ===================================================================== *
+ *  _emit_kloop_tdm_ring: TDM K-loop over D = tdm_depth >= 3 buffer LDS ring.
+ *  Mirrors Python _emit_kloop_tdm_ring in gemm_universal.py.
+ * ===================================================================== */
+void rocke_gemm_emit_kloop_tdm_ring(rocke_gemm_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int D = ctx->spec->trait.tdm_depth;
+    const int per_tile = (ctx->tdm_waves > 1) ? 1 : 2;
+    const int allowed = (D - 2) * per_tile;
+    const int ahead_k = (D - 1) * ctx->block_k;
+    const bool split = ctx->spec->trait.split_barrier;
+    rocke_gemm_emit_hook_t signal_next_tile_ready = {rocke_gemm_split_signal, (void*)&allowed};
+    rocke_gemm_emit_hook_t none = {NULL, NULL};
+    rocke_value_t* k_span = rocke_b_sub(b, ctx->k_upper, ctx->k_lo);
+    rocke_value_t* c_one_k = rocke_b_const_i32(b, 1);
+    rocke_value_t* last_tile = rocke_b_div(b, rocke_b_sub(b, k_span, c_one_k), ctx->c_block_k);
+    rocke_value_t* last_origin
+        = rocke_b_add(b, ctx->k_lo, rocke_b_mul(b, last_tile, ctx->c_block_k));
+    rocke_value_t* c_ring;
+    rocke_value_t* c_ahead;
+    rocke_value_t* c_one;
+    rocke_iter_arg_t loop_args[1 + ROCKE_GEMM_MAX_ACCS];
+    rocke_for_t for_op;
+    int i;
+
+    /* Prologue: fill ring slots 0 .. D-2. Emitted BEFORE the three ring
+     * constants below, matching Python's statement order: every builder call
+     * allocates an SSA name, so hoisting the constants would shift every
+     * later number and break byte-identity. */
+    for(int j = 0; j < D - 1; ++j)
+    {
+        rocke_value_t* k_off = rocke_b_smin(
+            b, rocke_b_add(b, ctx->k_lo, rocke_b_const_i32(b, j * ctx->block_k)), last_origin);
+        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_off, j, NULL);
+    }
+
+    /* Split barrier: the joint barrier at each iteration's top becomes a wait
+     * there, paired with a signal raised once the previous iteration's last
+     * fragment reads have drained and its tile + 1 has landed -- the same
+     * `allowed` count, since the outstanding fills are the same set at both
+     * points. The prologue raises the first signal and a wait after the loop
+     * consumes the last one. */
+    if(split)
+    {
+        rocke_b_s_wait_tensorcnt(b, allowed);
+        rocke_b_s_barrier_signal(b, ROCKE_GEMM_WG_SIGNAL);
+    }
+
+    c_ring = rocke_b_const_i32(b, D);
+    c_ahead = rocke_b_const_i32(b, D - 1);
+    c_one = rocke_b_const_i32(b, 1);
+    loop_args[0].name = "ring";
+    loop_args[0].init = ctx->c0;
+    for(i = 0; i < ctx->num_accs; ++i)
+    {
+        loop_args[1 + i].name = ctx->acc_names[i];
+        loop_args[1 + i].init = ctx->acc_inits[i];
+    }
+
+    for_op = rocke_b_scf_for_iter(b,
+                                  ctx->k_lo,
+                                  ctx->k_upper,
+                                  ctx->c_block_k,
+                                  loop_args,
+                                  1 + ctx->num_accs,
+                                  "k0",
+                                  /*unroll=*/false,
+                                  /*elide_trailing_barrier=*/true);
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        rocke_value_t* ring = for_op.iter_vars[0];
+        rocke_value_t* const* acc_iter = &for_op.iter_vars[1];
+        int num_acc_iter = for_op.num_iter_vars - 1;
+        rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
+        rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
+        rocke_value_t* k_ahead;
+        rocke_value_t* slot_ahead;
+
+        if(split)
+        {
+            rocke_b_s_barrier_wait(b, ROCKE_GEMM_WG_WAIT);
+        }
+        else
+        {
+            rocke_b_s_wait_tensorcnt(b, allowed);
+            rocke_b_sync_lds_only(b);
+        }
+        k_ahead = rocke_b_smin(
+            b, rocke_b_add(b, for_op.iv, rocke_b_const_i32(b, ahead_k)), last_origin);
+        slot_ahead = rocke_b_mod(b, rocke_b_add(b, ring, c_ahead), c_ring);
+        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_ahead, 0, slot_ahead);
+        if(split)
+            rocke_gemm_emit_wmma_phase_ex(ctx,
+                                          ctx->A_smem,
+                                          ctx->B_smem,
+                                          acc_iter,
+                                          num_acc_iter,
+                                          0,
+                                          ring,
+                                          new_accs,
+                                          signal_next_tile_ready,
+                                          none);
+        else
+            rocke_gemm_emit_mfma_phase(
+                ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, ring, new_accs);
+
+        yield_vals[0] = rocke_b_mod(b, rocke_b_add(b, ring, c_one), c_ring);
+        for(i = 0; i < num_acc_iter; ++i)
+            yield_vals[1 + i] = new_accs[i];
+        rocke_b_scf_yield(b, yield_vals, 1 + num_acc_iter);
+    }
+    rocke_b_region_leave(b);
+
+    if(split)
+        rocke_b_s_barrier_wait(b, ROCKE_GEMM_WG_WAIT);
+    /* Drain the in-flight fills so downstream code (cshuffle epilogue, persistent
+     * prologue) can safely reuse LDS. */
+    rocke_b_s_wait_tensorcnt(b, 0);
+
+    for(i = 0; i < for_op.op->num_results - 1; ++i)
+        ctx->for_results[i] = for_op.op->results[1 + i];
+    ctx->num_for_results = for_op.op->num_results - 1;
+}
+
 /* ===================================================================== *
  *  _emit_kloop_prefetch: DTLA ping-pong software-pipelined K-loop. Falls
  *  back to _simple when loads_per_tile > 63 (vmcnt is 6 bits on gfx950).
@@ -354,6 +527,14 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     int loads_per_tile;
+    /* Capture is_tdm once at function entry into a local bool so the compiler
+     * cannot constant-fold it away inside the loop based on the entry branch
+     * (see the comment on rocke_gemm_drain_sync). */
+    const bool is_tdm = ctx->spec->trait.tdm;
+    const bool split = ctx->spec->trait.split_barrier;
+    static const int tile_done_allowed = 0;
+    rocke_gemm_emit_hook_t signal_tile_done = {rocke_gemm_split_signal, (void*)&tile_done_allowed};
+    rocke_gemm_emit_hook_t none = {NULL, NULL};
     rocke_value_t* K_minus_one_tile;
     rocke_value_t* c1_i32;
     rocke_iter_arg_t loop_args[1 + ROCKE_GEMM_MAX_ACCS];
@@ -361,15 +542,40 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
     rocke_for_t for_op;
     int i;
 
-    loads_per_tile = ctx->dtl_a_passes + ctx->dtl_b_passes;
-    if(loads_per_tile > 63)
+    loads_per_tile = is_tdm ? 2 : (ctx->dtl_a_passes + ctx->dtl_b_passes);
+    /* vmcnt is 6 bits on gfx950 (max 63); saturates at 63 and loses the prefetch. */
+    if(strcmp(ctx->arch, "gfx1250") != 0 && loads_per_tile > 63)
     {
         rocke_gemm_emit_kloop_simple(ctx);
         return;
     }
 
+    /* A deep TDM ring (depth >= 3) is its own loop shape. It is a separate
+     * branch so that depths 1 and 2 keep emitting exactly what they did
+     * before this knob existed. */
+    if(ctx->tdm_ring)
+    {
+        rocke_gemm_emit_kloop_tdm_ring(ctx);
+        return;
+    }
+
+    if(ctx->spec->trait.tdm_early_refill)
+    {
+        rocke_gemm_emit_kloop_tdm_early_refill(ctx);
+        return;
+    }
+
     /* Prologue: load tile 0 into half 0 (slice base k_lo in split-K). */
     rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->k_lo, 0, NULL);
+
+    /* Split barrier: every wait (each iteration's top, and the epilogue's)
+     * pairs with the signal raised one phase earlier -- the prologue's for the
+     * first iteration, then the one inside each iteration's WMMA phase. */
+    if(split)
+    {
+        rocke_b_s_wait_tensorcnt(b, 0);
+        rocke_b_s_barrier_signal(b, ROCKE_GEMM_WG_SIGNAL);
+    }
 
     K_minus_one_tile = rocke_b_sub(b, ctx->k_upper, ctx->c_block_k);
     c1_i32 = rocke_b_const_i32(b, 1);
@@ -403,12 +609,27 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
         rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
 
-        /* Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier. */
-        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
-        rocke_b_s_barrier_bare(b);
+        /* Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier (non-TDM);
+         * or s_wait_tensorcnt(0) + sync_lds_only (TDM depth=2 ping-pong). */
+        if(split)
+            rocke_b_s_barrier_wait(b, ROCKE_GEMM_WG_WAIT);
+        else
+            rocke_gemm_drain_sync(b, is_tdm);
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
-        rocke_gemm_emit_mfma_phase(
-            ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, parity, new_accs);
+        if(split)
+            rocke_gemm_emit_wmma_phase_ex(ctx,
+                                          ctx->A_smem,
+                                          ctx->B_smem,
+                                          acc_iter,
+                                          num_acc_iter,
+                                          0,
+                                          parity,
+                                          new_accs,
+                                          signal_tile_done,
+                                          none);
+        else
+            rocke_gemm_emit_mfma_phase(
+                ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, parity, new_accs);
 
         yield_vals[0] = next_parity;
         for(i = 0; i < num_acc_iter; ++i)
@@ -424,8 +645,10 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
         int num_tail = for_op.op->num_results - 1;
         rocke_value_t* epi_accs[ROCKE_GEMM_MAX_ACCS];
 
-        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
-        rocke_b_s_barrier_bare(b);
+        if(split)
+            rocke_b_s_barrier_wait(b, ROCKE_GEMM_WG_WAIT);
+        else
+            rocke_gemm_drain_sync(b, is_tdm);
         rocke_gemm_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, tail_accs, num_tail, 0, final_parity, epi_accs);
 
@@ -433,4 +656,167 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
             ctx->for_results[i] = epi_accs[i];
         ctx->num_for_results = num_tail;
     }
+}
+
+/* ===================================================================== *
+ *  _emit_kloop_tdm_early_refill: depth-2 TDM ping-pong with the early refill.
+ *  Mirrors Python _emit_kloop_tdm_early_refill in gemm_universal.py.
+ *
+ *  Waves 2p / 2p+1 own half p (alternating issuers). For K-tile i in half p,
+ *  after the wave's split-barrier signal and the first row of the last
+ *  k-atom's WMMAs, the pair owning half p waits on that barrier (every wave
+ *  has finished reading half p) and refills it with tile i + 2; the wait is
+ *  issued right before the TDM load so the descriptor arithmetic overlaps it.
+ *  Every other wave consumes the same barrier phase at the top of tile i + 1.
+ *  The loop runs two tiles per iteration with static parity over an even tile
+ *  count; with an odd count the last tile lies past K and is zero-filled.
+ * ===================================================================== */
+typedef struct rocke_gemm_early_refill
+{
+    rocke_value_t* pair; /* tdm_wave_id / 2 */
+    rocke_value_t* bk2; /* const_i32(2 * block_k) */
+    int p; /* LDS half of the tile */
+    rocke_value_t* k_cur; /* K origin of the tile */
+    bool refill; /* refill the half with tile + 2 */
+} rocke_gemm_early_refill_t;
+
+static void rocke_gemm_er_wait(rocke_gemm_build_ctx_t* ctx, void* user)
+{
+    (void)user;
+    rocke_b_s_barrier_wait(ctx->b, ROCKE_GEMM_WG_WAIT);
+}
+
+/* The pair owning the other half already consumed this phase when it
+ * refilled that half. */
+static void rocke_gemm_er_top_wait(rocke_gemm_build_ctx_t* ctx, rocke_value_t* pair, int p)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* other = rocke_b_const_i32(b, 1 - p);
+    rocke_if_t gate = rocke_b_scf_if(b, rocke_b_cmp_ne(b, pair, other));
+    rocke_b_region_enter(b, gate.then_region);
+    rocke_gemm_er_wait(ctx, NULL);
+    rocke_b_region_leave(b);
+}
+
+static void rocke_gemm_er_refill(rocke_gemm_build_ctx_t* ctx, void* user)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_gemm_early_refill_t* r = (const rocke_gemm_early_refill_t*)user;
+    rocke_value_t* half = rocke_b_const_i32(b, r->p);
+    rocke_if_t gate = rocke_b_scf_if(b, rocke_b_cmp_eq(b, r->pair, half));
+    rocke_b_region_enter(b, gate.then_region);
+    if(r->refill)
+    {
+        rocke_gemm_emit_hook_t wait = {rocke_gemm_er_wait, NULL};
+        rocke_value_t* k_next = rocke_b_add(b, r->k_cur, r->bk2);
+        rocke_gemm_emit_load_phase_ex(ctx, ctx->A_smem, ctx->B_smem, k_next, r->p, NULL, wait);
+    }
+    else
+    {
+        rocke_gemm_er_wait(ctx, NULL);
+    }
+    rocke_b_region_leave(b);
+}
+
+static void rocke_gemm_er_tile(rocke_gemm_build_ctx_t* ctx,
+                               rocke_value_t* pair,
+                               rocke_value_t* bk2,
+                               int p,
+                               rocke_value_t* k_cur,
+                               rocke_value_t* const* acc,
+                               int num_acc,
+                               bool refill,
+                               rocke_value_t** out_accs)
+{
+    static const int all_landed = 0;
+    rocke_gemm_early_refill_t r;
+    rocke_gemm_emit_hook_t signal = {rocke_gemm_split_signal, (void*)&all_landed};
+    rocke_gemm_emit_hook_t refill_hook = {rocke_gemm_er_refill, &r};
+    r.pair = pair;
+    r.bk2 = bk2;
+    r.p = p;
+    r.k_cur = k_cur;
+    r.refill = refill;
+    rocke_gemm_er_top_wait(ctx, pair, p);
+    rocke_gemm_emit_wmma_phase_ex(
+        ctx, ctx->A_smem, ctx->B_smem, acc, num_acc, p, NULL, out_accs, signal, refill_hook);
+}
+
+void rocke_gemm_emit_kloop_tdm_early_refill(rocke_gemm_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* c1 = rocke_b_const_i32(b, 1);
+    rocke_value_t* c2 = rocke_b_const_i32(b, 2);
+    rocke_value_t* bk2 = rocke_b_const_i32(b, 2 * ctx->block_k);
+    rocke_value_t* pair = rocke_b_div(b, ctx->tdm_wave_id, c2);
+    rocke_iter_arg_t loop_args[ROCKE_GEMM_MAX_ACCS];
+    rocke_value_t* acc0[ROCKE_GEMM_MAX_ACCS];
+    rocke_value_t* acc1[ROCKE_GEMM_MAX_ACCS];
+    rocke_for_t for_op;
+    int i;
+
+    /* Prologue: tiles 0 and 1 into halves 0 and 1. Pair 1 consumes the
+     * prologue phase here, as if it had refilled half 1 after tile -1. */
+    rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->k_lo, 0, NULL);
+    {
+        rocke_value_t* k1 = rocke_b_add(b, ctx->k_lo, ctx->c_block_k);
+        rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k1, 1, NULL);
+    }
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_s_barrier_signal(b, ROCKE_GEMM_WG_SIGNAL);
+    {
+        rocke_if_t gate = rocke_b_scf_if(b, rocke_b_cmp_eq(b, pair, c1));
+        rocke_b_region_enter(b, gate.then_region);
+        rocke_gemm_er_wait(ctx, NULL);
+        rocke_b_region_leave(b);
+    }
+
+    /* The loop runs an even number of tiles so every parity is static (a
+     * runtime-parity tail spills the steady state at the 256-VGPR budget).
+     * With an odd tile count the last tile lies past K: its descriptor's
+     * remaining-K extent is zero, the mover fills it with zeros, and its
+     * WMMAs add nothing. */
+    rocke_value_t* n_tiles
+        = rocke_b_div(b, rocke_b_sub(b, ctx->k_upper, ctx->k_lo), ctx->c_block_k);
+    rocke_value_t* n_even = rocke_b_add(b, n_tiles, rocke_b_mod(b, n_tiles, c2));
+    rocke_value_t* n_pairs = rocke_b_div(b, rocke_b_sub(b, n_even, c2), c2);
+    rocke_value_t* k_pairs_end = rocke_b_add(b, ctx->k_lo, rocke_b_mul(b, n_pairs, bk2));
+
+    for(i = 0; i < ctx->num_accs; ++i)
+    {
+        loop_args[i].name = ctx->acc_names[i];
+        loop_args[i].init = ctx->acc_inits[i];
+    }
+    for_op = rocke_b_scf_for_iter(b,
+                                  ctx->k_lo,
+                                  k_pairs_end,
+                                  bk2,
+                                  loop_args,
+                                  ctx->num_accs,
+                                  "k0",
+                                  /*unroll=*/false,
+                                  /*elide_trailing_barrier=*/true);
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        rocke_value_t* k1;
+        rocke_gemm_er_tile(
+            ctx, pair, bk2, 0, for_op.iv, for_op.iter_vars, for_op.num_iter_vars, true, acc0);
+        k1 = rocke_b_add(b, for_op.iv, ctx->c_block_k);
+        rocke_gemm_er_tile(ctx, pair, bk2, 1, k1, acc0, for_op.num_iter_vars, true, acc1);
+        rocke_b_scf_yield(b, acc1, for_op.num_iter_vars);
+    }
+    rocke_b_region_leave(b);
+
+    /* Tail: tile T-2 (half 0) has nothing left to refill; tile T-1 (half 1)
+     * raises no signal. */
+    rocke_gemm_er_tile(
+        ctx, pair, bk2, 0, k_pairs_end, for_op.op->results, for_op.op->num_results, false, acc0);
+    rocke_gemm_er_top_wait(ctx, pair, 1);
+    rocke_gemm_emit_wmma_phase(
+        ctx, ctx->A_smem, ctx->B_smem, acc0, for_op.op->num_results, 1, NULL, acc1);
+
+    for(i = 0; i < for_op.op->num_results; ++i)
+        ctx->for_results[i] = acc1[i];
+    ctx->num_for_results = for_op.op->num_results;
 }

@@ -58,6 +58,34 @@ class TestArchTarget(unittest.TestCase):
             family="wmma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"
         )
         self.assertEqual([o.shape for o in wmma], [(16, 16, 32)])
+        # The 8-bit atoms double K to 64, and all four operand pairings exist --
+        # a mixed fp8/bf8 GEMM is a catalog lookup, not a special case. Pinning
+        # all four keeps a dtype-pair typo in the catalog from resolving to the
+        # homogeneous atom and reinterpreting one operand's exponent width.
+        # fp8 x fp8 also has the dense K=128 f8f6f4 atom (both matrix formats
+        # pinned to FP8), so that pairing alone carries two shapes.
+        for a_dtype, b_dtype, shapes in (
+            ("fp8", "fp8", [(16, 16, 64), (16, 16, 128)]),
+            ("bf8", "bf8", [(16, 16, 64)]),
+            ("fp8", "bf8", [(16, 16, 64)]),
+            ("bf8", "fp8", [(16, 16, 64)]),
+        ):
+            with self.subTest(a=a_dtype, b=b_dtype):
+                ops = t.mma.enumerate(
+                    family="wmma", a_dtype=a_dtype, b_dtype=b_dtype, c_dtype="fp32"
+                )
+                self.assertEqual([o.shape for o in ops], shapes)
+        # supports_dtype_combo defaults to family="mma", which gfx1250 has none
+        # of -- so the fp8 combo reads False here and True one line down. A
+        # caller that omits the family on a WMMA-only arch gets "unsupported"
+        # for an atom the catalog carries.
+        self.assertFalse(t.supports_dtype_combo("fp8", "fp8", "fp32"))
+        self.assertTrue(t.supports_dtype_combo("fp8", "fp8", "fp32", family="wmma"))
+        # The capacity is the one knob a tile-size search consults without ever
+        # naming it: understate it and legal tiles are silently rejected,
+        # overstate it and the rejection moves to the compiler. Neither shows up
+        # as a wrong answer, so pin the number.
+        self.assertEqual(t.lds_capacity_bytes, 327680)
         from rocke.core.isa import backend_for
         from rocke.core.isa.backend import Gfx1250Backend
 

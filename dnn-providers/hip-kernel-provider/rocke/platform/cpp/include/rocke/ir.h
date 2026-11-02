@@ -490,6 +490,9 @@ typedef enum rocke_opcode
      * shifts. */
     ROCKE_OP_TILE_TRAP,
 
+    /* tile.global_addr_of: a global pointer's address as an i64 (appended). */
+    ROCKE_OP_TILE_GLOBAL_ADDR_OF,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -1484,6 +1487,12 @@ rocke_value_t*
 rocke_value_t* rocke_b_smem_addr_of(rocke_ir_builder_t* b, rocke_value_t* smem);
 rocke_value_t*
     rocke_b_smem_ptr_add(rocke_ir_builder_t* b, rocke_value_t* lds_addr, rocke_value_t* byte_off);
+
+/* The i64 address of ptr[index] in global memory. The TDM descriptor carries a
+ * raw 57-bit global address rather than a pointer, so the element GEP has to be
+ * materialised as an integer. Mirrors ir.py global_addr_of. */
+rocke_value_t*
+    rocke_b_global_addr_of(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* index);
 void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
                                         rocke_value_t* rsrc,
                                         rocke_value_t* lds_addr,

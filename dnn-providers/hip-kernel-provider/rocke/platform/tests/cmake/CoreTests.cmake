@@ -81,6 +81,22 @@ if(BUILD_TESTING)
   install(TARGETS rocke_storage RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_storage)
 
+  # Field-level packing of the gfx1250 TDM descriptor (C++ twin of test_tdm.py).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tdm.cpp")
+    add_executable(rocke_test_tdm core/test_tdm.cpp)
+    target_link_libraries(rocke_test_tdm PRIVATE rocke_core)
+    add_test(NAME rocke_test_tdm
+             COMMAND rocke_test_tdm)
+    set_tests_properties(rocke_test_tdm
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_test_tdm)
+    set_target_properties(rocke_test_tdm
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_test_tdm
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_test_tdm)
+  endif()
   add_executable(rocke_ir_types core/test_ir_types.cpp)
   target_link_libraries(rocke_ir_types PRIVATE rocke_core)
   add_test(NAME rocke_ir_types COMMAND rocke_ir_types)
@@ -364,6 +380,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_opcode_values)
+  endif()
+
+  # The dense gfx1250 16x16x128 f8f6f4 WMMA atom lowers to HIP in the C++ engine.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_dense_f8f6f4_hip.cpp")
+    add_executable(rocke_dense_f8f6f4_hip core/test_dense_f8f6f4_hip.cpp)
+    target_link_libraries(rocke_dense_f8f6f4_hip PRIVATE rocke_core)
+    add_test(NAME rocke_dense_f8f6f4_hip COMMAND rocke_dense_f8f6f4_hip)
+    set_tests_properties(rocke_dense_f8f6f4_hip
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_dense_f8f6f4_hip)
+    set_target_properties(rocke_dense_f8f6f4_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_dense_f8f6f4_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_dense_f8f6f4_hip)
   endif()
 
   # The E8M0 scale decoder reads its byte unsigned in both C++ lowerers.
