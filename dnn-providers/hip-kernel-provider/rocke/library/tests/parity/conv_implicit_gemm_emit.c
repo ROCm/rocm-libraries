@@ -867,6 +867,24 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         spec->has_waves_per_eu = true;
         spec->waves_per_eu = 2;
         return 0;
+    case 63:
+    case 65:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->xcd_remap = idx == 65 ? 6 : 0;
+        spec->m_band = idx == 65 ? 32 : 0;
+        return 0;
+    case 64:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->split_k = 4;
+        return 0;
+    case 66:
+        if(make_cfg_3d_base(56, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        return 0;
     default:
         return make_cfg_3d_base(idx, spec, arch);
     }

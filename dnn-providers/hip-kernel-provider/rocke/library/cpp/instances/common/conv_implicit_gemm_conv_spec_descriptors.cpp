@@ -473,6 +473,9 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     /* The split-K binary has its own ABI and epilogue; the degree is a kernarg,
      * so only the variant reaches the name. The cluster form bakes its degree. */
     ROCKE_FLAG(s->split_k > 1, "splitk");
+    /* The atomic split of a 2-D problem (a 3-D split is always atomic, so its
+     * name is unchanged). */
+    ROCKE_FLAG(s->split_atomic, "satom");
     ROCKE_FLAG(s->split_k_cluster > 0, "skc%d", s->split_k_cluster);
     /* TF32 compute keeps fp32 storage, so nothing else in the name tells it
      * from an fp32 kernel with the same atom shape. Last, and only when set,
@@ -1043,6 +1046,45 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
     return true;
 }
 
+/* fwd_split_k_atomic(spec). */
+bool rocke_conv_fwd_split_k_atomic(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    return s->split_k > 1 && s->wave_size == 64 && (s->problem.is_3d || s->split_atomic);
+}
+
+/* fwd_split_k_conflict(spec), wave64 MFMA atomic split (split_k > 1). */
+bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                       char* reason,
+                                       size_t reason_cap)
+{
+    if(s->split_atomic
+       && (s->split_k < 2 || s->wave_size != 64 || s->problem.is_3d || s->split_k_cluster))
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "split_atomic selects the wave64 MFMA atomic split-K for a 2-D "
+                        "problem: it needs split_k > 1, wave_size 64 and no split_k_cluster "
+                        "(a 3-D split is always atomic)");
+    if(s->split_k == 1 || s->split_k == -1 || !rocke_conv_fwd_split_k_atomic(s)
+       || (s->pipeline != NULL && strcmp(s->pipeline, "wavelet") == 0))
+        return true; /* not the atomic split: fwd_split_k_reason's */
+    if(s->split_k < 1)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "split_k must be >= 1 (got %d)", s->split_k);
+    if(s->epilogue == NULL || strcmp(s->epilogue, "cshuffle") != 0)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 needs the cshuffle epilogue (atomic store)");
+    if(s->unroll_k || s->async_dma)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 needs the single-tile K loop (no unroll_k / async_dma)");
+    if(s->group_merge > 1)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 does not support group_merge");
+    const char* dd = s->dtype_d ? s->dtype_d : "fp16";
+    if(strcmp(dd, "fp32") != 0 && strcmp(dd, "bf16") != 0 && strcmp(dd, "fp16") != 0)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 needs dtype_d fp32/bf16/fp16 (got %s)", dd);
+    if(strcmp(dd, "fp32") != 0 && rocke_conv_problem_kpg(&s->problem) % 2)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 with a 16-bit D needs even kpg");
+    if(!rocke_conv_acc_epilogue_is_identity(&s->acc_epilogue))
+        ROCKE_SPEC_FAIL(reason, reason_cap, "fwd split_k > 1 does not support an accumulator epilogue");
+    return true;
+}
+
 /* _fwd_kloop_conflict(spec) for the knobs the C port carries: false (with the
  * reason) when Python's would return a non-empty string. Shared by validate
  * and is_valid_spec, as in Python. */
@@ -1176,6 +1218,10 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
         return false;
     }
     if(!rocke_conv_fwd_kloop_conflict_ok(s, reason, reason_cap))
+    {
+        return false;
+    }
+    if(!rocke_conv_fwd_asplit_conflict_ok(s, reason, reason_cap))
     {
         return false;
     }
@@ -1356,8 +1402,12 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
         {
             /* The split-K binary stages its fp32 partial tile, whatever dtype_d is. */
-            int c_dtype_bytes
-                = ((s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) || s->split_k > 1) ? 4 : 2;
+            /* The two-stage split-K binary stages its fp32 partial tile,
+             * whatever dtype_d is; the atomic split stages at dtype_d. */
+            int c_dtype_bytes = ((s->dtype_d && strcmp(s->dtype_d, "fp32") == 0)
+                                 || (s->split_k > 1 && !rocke_conv_fwd_split_k_atomic(s)))
+                                    ? 4
+                                    : 2;
             c_lds = is_cshuffle ? (s->tile_m * s->tile_n * c_dtype_bytes) : 0;
         }
         {
@@ -1447,9 +1497,18 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
     }
 
+    if(s->split_atomic && !rocke_conv_fwd_asplit_conflict_ok(s, reason, reason_cap))
+        return false;
     if(s->split_k != 1 || s->split_k_cluster)
     {
-        if(!rocke_conv_fwd_split_k_available(s, family, arch, reason, reason_cap))
+        if(rocke_conv_fwd_split_k_atomic(s) && !s->split_k_cluster)
+        {
+            /* The atomic split-K forward: the slices add into D (no
+             * workspace); fwd_split_k_conflict judges it. */
+            if(!rocke_conv_fwd_asplit_conflict_ok(s, reason, reason_cap))
+                return false;
+        }
+        else if(!rocke_conv_fwd_split_k_available(s, family, arch, reason, reason_cap))
         {
             return false;
         }

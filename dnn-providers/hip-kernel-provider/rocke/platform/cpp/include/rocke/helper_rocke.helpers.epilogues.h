@@ -237,6 +237,18 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                                           rocke_value_t* wg_N,
                                           rocke_value_t* bounds_m, /* NULL => no bounds */
                                           rocke_value_t* bounds_n);
+/* atomic_store(..., col_offset=): col_offset (NULL => none) is added to every
+ * destination offset after the bounds check (e.g. a conv group's
+ * output-channel slab base when wg_N is the full row stride). */
+void rocke_cshuffle_epilogue_atomic_store_ex(rocke_ir_builder_t* b,
+                                             const rocke_cshuffle_epilogue_t* epi,
+                                             rocke_value_t* const* accs,
+                                             int num_accs,
+                                             rocke_value_t* dw_ptr,
+                                             rocke_value_t* wg_N,
+                                             rocke_value_t* bounds_m,
+                                             rocke_value_t* bounds_n,
+                                             rocke_value_t* col_offset);
 
 /* CShuffleEpilogue.atomic_store(b, accs, dw_ptr, wg_N=None, bounds=None, addr_fn=...).
  * As rocke_cshuffle_epilogue_atomic_store, with an optional addr_fn for an

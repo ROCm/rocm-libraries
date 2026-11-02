@@ -252,7 +252,8 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         memset(&d_opts, 0, sizeof(d_opts));
         d_opts.noalias = true;
         d_opts.noalias_set = true;
-        d_opts.writeonly = true;
+        /* The atomic split binary atomic-adds into D (read-modify-write). */
+        d_opts.writeonly = !rocke_conv_fwd_split_k_atomic(spec);
         d_opts.writeonly_set = true;
         d_opts.align = 16;
         d_opts.align_set = true;
@@ -351,7 +352,14 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      * Python: the fp32 workspace, then the slice width and degree -- the same
      * trailing pair wgrad takes -- emitted right after the problem block. The
      * cluster form also declares its (1, 1, S) launch shape. */
-    ctx->fwd_split = spec->split_k > 1;
+    ctx->fwd_asplit = rocke_conv_fwd_split_k_atomic(spec);
+    if(ctx->fwd_asplit)
+    {
+        /* Split-K launch block, appended after the problem block (conv_abi). */
+        ctx->fwd_p_ks = rocke_b_param(b, "ks", rocke_i32(), NULL);
+        ctx->fwd_p_ks_count = rocke_b_param(b, "ks_count", rocke_i32(), NULL);
+    }
+    ctx->fwd_split = spec->split_k > 1 && !ctx->fwd_asplit;
     if(ctx->fwd_split)
     {
         rocke_param_opts_t ws_opts;
@@ -620,12 +628,28 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         rocke_value_t* hi_add = rocke_b_add(b, ctx->kloop_k_lo, ctx->fwd_p_ks);
         ctx->kloop_k_hi = rocke_b_to_sgpr_u32(b, hi_add);
     }
+    if(ctx->fwd_asplit)
+    {
+        /* gridDim.z = groups * ks_count: group = z / ks_count, slice = z % ks_count. */
+        rocke_value_t* z = rocke_b_block_id_z(b);
+        rocke_value_t* slice = rocke_b_mod(b, z, ctx->fwd_p_ks_count);
+        ctx->fwd_slice_id = slice;
+        ctx->kloop_k_lo = rocke_b_mul(b, slice, ctx->fwd_p_ks);
+        ctx->kloop_k_hi = rocke_b_add(b, ctx->kloop_k_lo, ctx->fwd_p_ks);
+    }
     if(ctx->grouped)
     {
         /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
          * Bind subexpressions in Python's left-to-right order to pin SSA ids.
-         * Split-K: the group is the z quotient decoded above. */
-        ctx->group_idx = ctx->fwd_split ? split_group_z : rocke_b_block_id_z(b);
+         * Split-K: the group is the z quotient decoded above; the atomic split
+         * divides z by ks_count. */
+        if(ctx->fwd_asplit)
+        {
+            rocke_value_t* z = rocke_b_block_id_z(b);
+            ctx->group_idx = rocke_b_div(b, z, ctx->fwd_p_ks_count);
+        }
+        else
+            ctx->group_idx = ctx->fwd_split ? split_group_z : rocke_b_block_id_z(b);
         /* AOT: the runtime p_kpg param (was const_i32(p.kpg)). Merged: the
          * merged kpg, which is Gm exactly (depthwise only), so c_gm. */
         ctx->k_out_group_base
@@ -1041,8 +1065,16 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
             /* Merged: g is the merged group and the merged kpg is Gm, so the
              * same expression yields k_out = merged_group*Gm + g_n. Split-K
              * reuses the decoded group (z also carries the slice). */
-            rocke_value_t* bid_z = ctx.fwd_split ? ctx.group_idx : rocke_b_block_id_z(b);
-            ctx.d_k_out_group_base = rocke_b_mul(b, bid_z, ctx.merged ? ctx.c_gm : ctx.p_kpg);
+            if(ctx.fwd_asplit)
+            {
+                ctx.d_k_out_group_base = rocke_b_mul(b, ctx.group_idx, ctx.p_kpg);
+            }
+            else
+            {
+                rocke_value_t* bid_z = ctx.fwd_split ? ctx.group_idx : rocke_b_block_id_z(b);
+                ctx.d_k_out_group_base
+                    = rocke_b_mul(b, bid_z, ctx.merged ? ctx.c_gm : ctx.p_kpg);
+            }
         }
         else
         {

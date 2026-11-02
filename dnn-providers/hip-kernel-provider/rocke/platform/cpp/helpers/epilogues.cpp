@@ -681,13 +681,30 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
         b, epi, accs, num_accs, dw_ptr, wg_N, NULL, NULL, bounds_m, bounds_n);
 }
 
-/* Python _and(x, y) in CShuffleEpilogue.atomic_store: a NULL operand is
- * "no condition"; two conditions are and-ed. */
-static rocke_value_t* cshuffle_atomic_and(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y)
+static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
+                                                const rocke_cshuffle_epilogue_t* epi,
+                                                rocke_value_t* const* accs,
+                                                int num_accs,
+                                                rocke_value_t* dw_ptr,
+                                                rocke_value_t* wg_N,
+                                                rocke_epilogue_addr_fn addr_fn,
+                                                void* addr_user,
+                                                rocke_value_t* bounds_m,
+                                                rocke_value_t* bounds_n,
+                                                rocke_value_t* col_offset);
+
+void rocke_cshuffle_epilogue_atomic_store_ex(rocke_ir_builder_t* b,
+                                             const rocke_cshuffle_epilogue_t* epi,
+                                             rocke_value_t* const* accs,
+                                             int num_accs,
+                                             rocke_value_t* dw_ptr,
+                                             rocke_value_t* wg_N,
+                                             rocke_value_t* bounds_m,
+                                             rocke_value_t* bounds_n,
+                                             rocke_value_t* col_offset)
 {
-    if(x == NULL)
-        return y;
-    return (y == NULL) ? x : rocke_b_land(b, x, y);
+    cshuffle_epilogue_atomic_store_impl(
+        b, epi, accs, num_accs, dw_ptr, wg_N, NULL, NULL, bounds_m, bounds_n, col_offset);
 }
 
 void rocke_cshuffle_epilogue_atomic_store_addr(rocke_ir_builder_t* b,
@@ -700,6 +717,33 @@ void rocke_cshuffle_epilogue_atomic_store_addr(rocke_ir_builder_t* b,
                                                void* addr_user,
                                                rocke_value_t* bounds_m,
                                                rocke_value_t* bounds_n)
+{
+    cshuffle_epilogue_atomic_store_impl(
+        b, epi, accs, num_accs, dw_ptr, wg_N, addr_fn, addr_user, bounds_m, bounds_n, NULL);
+}
+
+/* Python _and(x, y) in CShuffleEpilogue.atomic_store: a NULL operand is
+ * "no condition"; two conditions are and-ed. */
+static rocke_value_t* cshuffle_atomic_and(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y)
+{
+    if(x == NULL)
+        return y;
+    return (y == NULL) ? x : rocke_b_land(b, x, y);
+}
+
+/* CShuffleEpilogue.atomic_store(addr_fn=, col_offset=): col_offset (NULL =>
+ * none) is added to the destination offset of either address form. */
+static void cshuffle_epilogue_atomic_store_impl(rocke_ir_builder_t* b,
+                                                const rocke_cshuffle_epilogue_t* epi,
+                                                rocke_value_t* const* accs,
+                                                int num_accs,
+                                                rocke_value_t* dw_ptr,
+                                                rocke_value_t* wg_N,
+                                                rocke_epilogue_addr_fn addr_fn,
+                                                void* addr_user,
+                                                rocke_value_t* bounds_m,
+                                                rocke_value_t* bounds_n,
+                                                rocke_value_t* col_offset)
 {
     /* Steps 1+2 are identical to rocke_cshuffle_epilogue_store (scatter accs
      * to LDS then barrier).  Step 3 replaces wide buffer_store with atomic-adds:
@@ -950,6 +994,8 @@ void rocke_cshuffle_epilogue_atomic_store_addr(rocke_ir_builder_t* b,
                     rocke_value_t* v = rocke_b_vec_extract(b, vf32, 0);
                     if(addr_fn == NULL)
                         c_off = rocke_b_add(b, rocke_b_mul(b, m_val, wg_N), n_val);
+                    if(col_offset != NULL)
+                        c_off = rocke_b_add(b, c_off, col_offset);
                     rocke_b_global_atomic_add(b, dw_ptr, c_off, v, NULL);
                 }
                 if(ok != NULL)
@@ -1001,6 +1047,8 @@ void rocke_cshuffle_epilogue_atomic_store_addr(rocke_ir_builder_t* b,
                         c_off_even = addr_fn(b, m_val, n_even, &a_ok, addr_user);
                         ok = cshuffle_atomic_and(b, ok, a_ok);
                     }
+                    if(col_offset != NULL)
+                        c_off_even = rocke_b_add(b, c_off_even, col_offset);
 
                     if(ok != NULL)
                     {

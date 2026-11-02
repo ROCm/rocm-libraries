@@ -929,6 +929,11 @@ def _tf32_split_k_spec(idx: int):
         )
     spec, arch = _tf32_spec({82: 54, 83: 56}[idx])
     return replace(spec, split_k=2), arch
+
+
+_GFX942_3D_OFFSET = 32
+
+
 # gfx942 (wave64 MFMA) 3-D NDHWC configs on the 3x3x3 / pad-1 problem the
 # AOT cache builds its 3-D binaries against: the 3-D split A/B addressing
 # (every non-pointwise 3-D spec), bf16 operands through the MFMA path, and the
@@ -945,9 +950,10 @@ def _tf32_split_k_spec(idx: int):
 #   60: 54 + xcd_remap=8, waves_per_eu=2
 #   61: 55 + xcd_remap=6 + chiplet_swizzle: rejected by both engines
 #   62: 55 + m_band=32 without xcd_remap: rejected by both engines
-_GFX942_3D_OFFSET = 32
-
-
+#   63: 55 + split_k=2 (wave64 MFMA atomic split-K: ks/ks_count, atomics into D)
+#   64: 54 + split_k=4
+#   65: 55 + split_k=2, xcd_remap=6, m_band=32
+#   66: 56 + split_k=2 (default epilogue): rejected by both engines
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -997,6 +1003,10 @@ def _gfx942_3d_spec(idx: int):
         60: (54, dict(xcd_remap=8, waves_per_eu=2)),
         61: (55, dict(xcd_remap=6, chiplet_swizzle=True)),
         62: (55, dict(m_band=32)),
+        63: (55, dict(split_k=2)),
+        64: (54, dict(split_k=4)),
+        65: (55, dict(split_k=2, xcd_remap=6, m_band=32)),
+        66: (56, dict(split_k=2)),
     }
     extra = {}
     if idx in knobs:

@@ -176,6 +176,14 @@ typedef struct rocke_implicit_gemm_conv_spec
      * Stage 2 (instance_conv_fwd_split_k_reduce.h) folds the slabs into D.
      * Default 1 emits none of this. Mirrors Python ImplicitGemmConvSpec.split_k. */
     int split_k; /* default 1     */
+    /* The atomic form of the wave64 MFMA split binary
+     * (rocke_conv_fwd_split_k_atomic): ks / ks_count follow the problem block
+     * and every slice atomic-adds its partial tile into the zeroed D -- no
+     * workspace, no Stage 2. A 3-D problem always takes it (the two-stage
+     * split above serves 2-D problems only); split_atomic selects it for a
+     * 2-D problem too. Default false. Mirrors
+     * ImplicitGemmConvSpec.split_atomic. */
+    bool split_atomic; /* default false */
     /* Single-launch split-K through a gfx1250 workgroup cluster (0 = off). The
      * split_k_cluster slices of one output tile form one (1, 1, S) cluster;
      * after a cluster barrier each slice folds 1/S of the tile's rows across

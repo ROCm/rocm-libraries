@@ -447,7 +447,9 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        rocke_value_t* slab_base,
                                        const char* out_dtype,
                                        rocke_value_t* bound_m,
-                                       rocke_value_t* bound_n)
+                                       rocke_value_t* bound_n,
+                                       rocke_value_t* atomic_d,
+                                       rocke_value_t* atomic_row_pitch)
 {
     const rocke_conv_problem_t* p = &spec->problem;
     /* This is the epilogue group_merge actually ships on (the validator rejects
@@ -515,6 +517,22 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
      * come from the build context. Python builds them before the K-loop (so
      * the wavelet driver can reuse the same store code) and bounds with the
      * p_M / p_kpg kernargs, so nothing is emitted here. */
+    if(atomic_d != NULL)
+    {
+        /* The atomic split-K forward: each K slice adds its partial tile into
+         * the zeroed D. D's row (output position) stride is the total K; the
+         * group's output-channel slab starts at group * kpg. */
+        rocke_cshuffle_epilogue_atomic_store_ex(b,
+                                                &epi,
+                                                accs,
+                                                num_accs,
+                                                atomic_d,
+                                                atomic_row_pitch,
+                                                bound_m,
+                                                bound_n,
+                                                k_out_group_base);
+        return;
+    }
     if(rocke_conv_problem_is_pointwise(p))
     {
         rocke_conv_d_addr_pw_ctx_t pw;
@@ -688,7 +706,9 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                           ctx->fwd_split ? ctx->fwd_slab_base : NULL,
                                           ctx->fwd_split ? "fp32" : NULL,
                                           ctx->p_M,
-                                          ctx->merged ? ctx->c_gm : ctx->p_kpg);
+                                          ctx->merged ? ctx->c_gm : ctx->p_kpg,
+                                          ctx->fwd_asplit ? ctx->D : NULL,
+                                          ctx->fwd_asplit ? ctx->p_K : NULL);
     }
     /* elif op.family == "wmma": */
     else if(ctx->op != NULL && ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0)

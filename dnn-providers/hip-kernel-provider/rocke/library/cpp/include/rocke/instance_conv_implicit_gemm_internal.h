@@ -364,6 +364,11 @@ typedef struct rocke_conv_build_ctx
      * slice (z = group * ks_count + slice), and the slab base the epilogue adds
      * to every D offset. Mirrors the Python builder's `split` locals. */
     bool fwd_split;
+    /* The atomic split-K forward (Python `_split`, fwd_split_k_atomic): the
+     * slices atomic-add their partial tiles into the zeroed D; ks / ks_count
+     * follow the problem block and there is no workspace. Exclusive with
+     * fwd_split (the two-stage workspace split). */
+    bool fwd_asplit;
     rocke_value_t* fwd_p_ws;
     rocke_value_t* fwd_p_ws_bytes;
     rocke_value_t* fwd_p_ks;
@@ -653,6 +658,16 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
                                     rocke_value_t* bv,
                                     rocke_value_t* c);
 
+/* fwd_split_k_atomic(spec): split_k > 1 on wave64 MFMA, on a 3-D problem or
+ * with split_atomic -- the atomic split-K forward rather than the two-stage
+ * workspace split. */
+bool rocke_conv_fwd_split_k_atomic(const rocke_implicit_gemm_conv_spec_t* s);
+/* fwd_split_k_conflict(spec) for the wave64 MFMA atomic split-K forward (the
+ * knobs the C port carries): false with the reason when Python's returns a
+ * non-empty string. */
+bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                       char* reason,
+                                       size_t reason_cap);
 /* _fwd_kloop_conflict(spec) for the knobs the C port carries (xcd_remap,
  * m_band): false with the reason when Python's returns a non-empty string. */
 bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
@@ -907,7 +922,10 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        rocke_value_t* slab_base,
                                        const char* out_dtype,
                                        rocke_value_t* bound_m,
-                                       rocke_value_t* bound_n);
+                                       rocke_value_t* bound_n,
+                                       /* atomic split: D and its row pitch (NULL => store) */
+                                       rocke_value_t* atomic_d,
+                                       rocke_value_t* atomic_row_pitch);
 
 /* ----- driver-internal ctx population (the build prologue, lines 787-1032) ----
  * Splitting the long prologue out of the public entry keeps the glue TU small;
