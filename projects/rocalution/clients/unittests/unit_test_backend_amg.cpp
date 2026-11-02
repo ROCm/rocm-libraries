@@ -666,8 +666,30 @@ TYPED_TEST(backend_amg, rs_strong_influences_of_a_grid_and_its_negation)
         v = -v;
     }
     const auto S_negated = this->strong_influences(negated, 0.25f, 0, nullptr);
-    KNOWN_BUG("for a negative diagonal, a_ij < eps max_k a_ik is taken as strong");
     EXPECT_EQ(S_negated, S);
+}
+
+// A row without diagonal counts as one with a positive diagonal. The negated grid runs
+// first, so that a sign left over from its rows would show.
+TYPED_TEST(backend_amg, rs_strong_influences_of_rows_without_diagonal)
+{
+    using T           = typename TypeParam::value_type;
+    const Csr<T> full = grid<T>(8, 6, 1.0, 0.1, true);
+    Csr<T>       ref(full.n);
+    for(int i = 0; i < full.n; ++i)
+    {
+        for(PtrType j = full.row_offset[i]; j < full.row_offset[i + 1]; ++j)
+        {
+            if(full.col[j] != i)
+            {
+                ref.add(full.col[j], full.val[j]);
+            }
+        }
+        ref.end_row();
+    }
+
+    this->strong_influences(transformed(full, [](int, int, T v) { return -v; }), 0.25f, 0, nullptr);
+    EXPECT_EQ(this->strong_influences(ref, 0.25f, 0, nullptr), rs_strength(ref, 0.25));
 }
 
 // Undecided points (0) become C points (1) and are marked if they influence another

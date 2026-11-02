@@ -6958,7 +6958,7 @@ namespace rocalution
                 int       col = this->mat_.col[j];
                 ValueType val = this->mat_.val[j];
 
-                cast_S->vec_[j] = (col != i) && (val < cond);
+                cast_S->vec_[j] = (col != i) && (sign ? val > cond : val < cond);
             }
 
             // If cond is zero -> i is independent of other grid points
@@ -7253,7 +7253,7 @@ namespace rocalution
                 int       col = this->mat_.col[j];
                 ValueType val = this->mat_.val[j];
 
-                if(col != i && val < cond)
+                if(col != i && (sign ? val > cond : val < cond))
                 {
                     // col is strongly connected to i
                     cast_S->vec_[j] = true;
@@ -7281,7 +7281,7 @@ namespace rocalution
                     int       col = cast_gst->mat_.col[j];
                     ValueType val = cast_gst->mat_.val[j];
 
-                    if(val < cond)
+                    if(sign ? val > cond : val < cond)
                     {
                         // col is strongly connected to i
                         cast_S->vec_[j + this->nnz_] = true;
@@ -10201,9 +10201,10 @@ namespace rocalution
             cast_G->vec_[i] = -2;
         }
 
-        int      Usize    = 0;
-        PtrType* ind_diag = NULL;
-        allocate_host(this->nrow_, &ind_diag);
+        int Usize = 0;
+
+        // A row without diagonal counts as a zero diagonal
+        std::vector<ValueType> diag(this->nrow_, static_cast<ValueType>(0));
 
         // Build U
         for(int i = 0; i < this->nrow_; ++i)
@@ -10218,13 +10219,13 @@ namespace rocalution
                 }
                 else
                 {
-                    ind_diag[i] = j;
+                    diag[i] = this->mat_.val[j];
                 }
             }
 
             sum *= static_cast<ValueType>(5);
 
-            if(this->mat_.val[ind_diag[i]] > sum)
+            if(diag[i] > sum)
             {
                 cast_G->vec_[i] = -1;
                 ++Usize;
@@ -10308,7 +10309,7 @@ namespace rocalution
             ValueType max_a_ij = static_cast<ValueType>(0);
             PtrType   min_j    = -1;
             bool      neg      = false;
-            if(this->mat_.val[ind_diag[i]] < static_cast<ValueType>(0))
+            if(diag[i] < static_cast<ValueType>(0))
             {
                 neg = true;
             }
@@ -10374,8 +10375,6 @@ namespace rocalution
             ++nc;
         }
 
-        free_host(&ind_diag);
-
         return true;
     }
 
@@ -10404,9 +10403,10 @@ namespace rocalution
             cast_G->vec_[i] = -2;
         }
 
-        int      Usize    = 0;
-        PtrType* ind_diag = NULL;
-        allocate_host(this->nrow_, &ind_diag);
+        int Usize = 0;
+
+        // A row without diagonal counts as a zero diagonal
+        std::vector<ValueType> diag(this->nrow_, static_cast<ValueType>(0));
 
         // Build U
         for(int i = 0; i < this->nrow_; ++i)
@@ -10421,7 +10421,7 @@ namespace rocalution
                 }
                 else
                 {
-                    ind_diag[i] = j;
+                    diag[i] = this->mat_.val[j];
                 }
             }
 
@@ -10436,7 +10436,7 @@ namespace rocalution
 
             sum *= static_cast<ValueType>(5);
 
-            if(this->mat_.val[ind_diag[i]] > sum)
+            if(diag[i] > sum)
             {
                 cast_G->vec_[i] = -1;
                 ++Usize;
@@ -10520,7 +10520,7 @@ namespace rocalution
             ValueType max_a_ij = static_cast<ValueType>(0);
             int       min_j    = -1;
             bool      neg      = false;
-            if(this->mat_.val[ind_diag[i]] < static_cast<ValueType>(0))
+            if(diag[i] < static_cast<ValueType>(0))
             {
                 neg = true;
             }
@@ -10623,8 +10623,6 @@ namespace rocalution
 
             ++nc;
         }
-
-        free_host(&ind_diag);
 
         return true;
     }

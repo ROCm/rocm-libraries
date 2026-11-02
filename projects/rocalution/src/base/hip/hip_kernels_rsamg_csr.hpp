@@ -96,6 +96,14 @@ namespace rocalution
         // where true means, the diagonal element is negative
         __shared__ bool sign[BLOCKSIZE / WFSIZE];
 
+        // A row without diagonal counts as having a positive one
+        if(lid == 0)
+        {
+            sign[wid] = false;
+        }
+
+        __threadfence_block();
+
         J int_row_begin = csr_row_ptr[row];
         J int_row_end   = csr_row_ptr[row + 1];
 
@@ -157,7 +165,7 @@ namespace rocalution
             I col = csr_col_ind[j];
             T val = csr_val[j];
 
-            if(col != row && val < cond)
+            if(col != row && (sign[wid] ? val > cond : val < cond))
             {
                 // col is strongly connected to row
                 S[j] = true;
@@ -181,7 +189,7 @@ namespace rocalution
                 I col = bnd_col_ind[j];
                 T val = bnd_val[j];
 
-                if(val < cond)
+                if(sign[wid] ? val > cond : val < cond)
                 {
                     // col is strongly connected to row
                     S[j + nnz] = true;

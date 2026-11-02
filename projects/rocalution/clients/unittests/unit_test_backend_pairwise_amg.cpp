@@ -924,18 +924,14 @@ TYPED_TEST(backend_pairwise_amg, initial_pass_of_a_row_without_diagonal)
     }
     const Csr<T> ghost = without_entries<T>(A.n, 3);
 
-    KNOWN_BUG("the initial pass reads a_ii at a diagonal index that a row without diagonal "
-              "never sets, which crashes");
-    expect_in_child([&] {
-        for(bool with_ghost : {false, true})
-        {
-            SCOPED_TRACE(with_ghost ? "with ghost part" : "local");
-            Aggregation agg;
-            ASSERT_TRUE(this->initial(A, 0.25, 0, &agg, with_ghost ? &ghost : nullptr));
-            expect_valid_pairwise(A, agg, 2);
-            EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 1, 1, 2, 2}));
-        }
-    });
+    for(bool with_ghost : {false, true})
+    {
+        SCOPED_TRACE(with_ghost ? "with ghost part" : "local");
+        Aggregation agg;
+        ASSERT_TRUE(this->initial(A, 0.25, 0, &agg, with_ghost ? &ghost : nullptr));
+        expect_valid_pairwise(A, agg, 2);
+        EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 1, 1, 2, 2}));
+    }
 }
 
 namespace

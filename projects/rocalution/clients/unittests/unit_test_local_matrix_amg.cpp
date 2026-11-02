@@ -373,6 +373,21 @@ TYPED_TEST(local_matrix_amg, rs_coarsening_of_a_complete_graph)
     EXPECT_EQ(std::count(result.first.begin(), result.first.end(), 1), 1);
 }
 
+// Rows 1 and 2 have a negative diagonal and only negative couplings, so they depend on
+// nothing and are F points from the start. lambda counts a dependent F point twice: if their
+// couplings to 0 were strong, lambda_0 would be 4, beyond the bound n - 1 of the buckets.
+TYPED_TEST(local_matrix_amg,
+           rs_coarsening_of_rows_with_a_negative_diagonal_and_no_positive_coupling)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = from_rows<T>(
+        3, {{{0, 2.0}, {1, -1.0}, {2, -1.0}}, {{0, -1.0}, {1, -1.0}}, {{0, -1.0}, {2, -1.0}}});
+
+    const auto result = rs_coarsening_on(TypeParam::backend, ref);
+    EXPECT_EQ(result.second, (std::vector<bool>{false, true, true, false, false, false, false}));
+    EXPECT_EQ(result.first, (std::vector<int>{1, 2, 2}));
+}
+
 // Strength does not change when a row is scaled by -1
 TYPED_TEST(local_matrix_amg, rs_coarsening_of_a_negated_grid)
 {
@@ -384,7 +399,6 @@ TYPED_TEST(local_matrix_amg, rs_coarsening_of_a_negated_grid)
 
     const auto negated
         = rs_coarsening_on(TypeParam::backend, transformed(ref, [](int, int, T v) { return -v; }));
-    KNOWN_BUG("for a negative diagonal, a_ij < eps max_k a_ik is taken as strong");
     EXPECT_EQ(negated.second, original.second);
     EXPECT_EQ(negated.first, original.first);
 }

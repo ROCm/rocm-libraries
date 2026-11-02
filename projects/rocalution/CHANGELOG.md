@@ -41,6 +41,9 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed the strength of connection of `RugeStuebenAMG`, with the classical and the PMIS coarsening, for rows with a negative diagonal. Those rows took the couplings with the sign of the diagonal as strong instead of those with the opposite sign; strength now does not change when a row is scaled by -1. This also fixes `LocalMatrix::RSCoarsening()` writing past the end of an internal array for a row with a negative diagonal and no positive coupling.
+* Fixed the PMIS strength of connection on the accelerator using an undefined diagonal sign for a row without diagonal. Such a row now counts as one with a positive diagonal, as on the host.
+* Fixed `PairwiseAMG` and `LocalMatrix::InitialPairwiseAggregation()` reading the diagonal of a row without diagonal at an undefined index, which could crash. A missing diagonal now counts as zero.
 
 ## (Unreleased) rocALUTION 4.1.1
 
