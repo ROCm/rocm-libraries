@@ -818,4 +818,9 @@ void rocke_spec_set_reason(char* reason, size_t cap, const char* msg)
     }
     memcpy(reason, msg, n);
     reason[n] = '\0';
+    /* A cut reason ends in "..." so it is never mistaken for a complete one. */
+    if(n < strlen(msg) && cap >= 4)
+    {
+        memcpy(reason + cap - 4, "...", 4);
+    }
 }

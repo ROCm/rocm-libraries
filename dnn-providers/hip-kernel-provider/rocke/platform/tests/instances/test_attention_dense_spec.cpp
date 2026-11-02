@@ -29,7 +29,9 @@
 #include <string>
 
 #include "rocke/arena.h"
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder */
 #include "rocke/instance_attention_dense_spec.h"
+#include "rocke/instance_lse_store_internal.h" /* rocke_zero_keyless_row */
 #include "rocke/json_dom.h"
 
 namespace
@@ -126,69 +128,91 @@ bool json_opt_str(const jd_val_t* v, const char** out)
     return *out != nullptr;
 }
 
+/* The C struct's fields by Python name, by type. */
+struct IntField
+{
+    const char* name;
+    int rocke_attention_dense_spec_t::*member;
+};
+struct BoolField
+{
+    const char* name;
+    bool rocke_attention_dense_spec_t::*member;
+};
+struct StrField
+{
+    const char* name;
+    const char* rocke_attention_dense_spec_t::*member;
+};
+const IntField k_int_fields[] = {
+    {"batch", &rocke_attention_dense_spec_t::batch},
+    {"seqlen_q", &rocke_attention_dense_spec_t::seqlen_q},
+    {"seqlen_kv", &rocke_attention_dense_spec_t::seqlen_kv},
+    {"num_query_heads", &rocke_attention_dense_spec_t::num_query_heads},
+    {"num_kv_heads", &rocke_attention_dense_spec_t::num_kv_heads},
+    {"head_size", &rocke_attention_dense_spec_t::head_size},
+    {"sliding_window", &rocke_attention_dense_spec_t::sliding_window},
+    {"block_m", &rocke_attention_dense_spec_t::block_m},
+    {"block_n", &rocke_attention_dense_spec_t::block_n},
+    {"waves_per_eu", &rocke_attention_dense_spec_t::waves_per_eu},
+    {"lds_k_group_pad", &rocke_attention_dense_spec_t::lds_k_group_pad},
+    {"num_persistent", &rocke_attention_dense_spec_t::num_persistent},
+    {"block_size", &rocke_attention_dense_spec_t::block_size},
+    {"num_kv_blocks", &rocke_attention_dense_spec_t::num_kv_blocks},
+    {"chiplet_num_xcds", &rocke_attention_dense_spec_t::chiplet_num_xcds},
+};
+const BoolField k_bool_fields[] = {
+    {"causal", &rocke_attention_dense_spec_t::causal},
+    {"ragged", &rocke_attention_dense_spec_t::ragged},
+    {"varlen", &rocke_attention_dense_spec_t::varlen},
+    {"persistent", &rocke_attention_dense_spec_t::persistent},
+    {"interleave", &rocke_attention_dense_spec_t::interleave},
+    {"lazy_rescale", &rocke_attention_dense_spec_t::lazy_rescale},
+    {"paged", &rocke_attention_dense_spec_t::paged},
+    {"use_sinks", &rocke_attention_dense_spec_t::use_sinks},
+    {"causal_bottom_right", &rocke_attention_dense_spec_t::causal_bottom_right},
+};
+const StrField k_str_fields[] = {
+    {"dtype", &rocke_attention_dense_spec_t::dtype},
+    {"persist_decode", &rocke_attention_dense_spec_t::persist_decode},
+    {"nonpersist_decode", &rocke_attention_dense_spec_t::nonpersist_decode},
+};
+
 /* Fill one spec field from its JSON value. Returns false for a field this C++
  * port does not know: the Python dataclass gained or renamed a field, and the C
  * struct has to follow. */
 bool set_field(rocke_attention_dense_spec_t* s, const char* name, const jd_val_t* v)
 {
-    struct IntField
-    {
-        const char* name;
-        int rocke_attention_dense_spec_t::*member;
-    };
-    struct BoolField
-    {
-        const char* name;
-        bool rocke_attention_dense_spec_t::*member;
-    };
-    struct StrField
-    {
-        const char* name;
-        const char* rocke_attention_dense_spec_t::*member;
-    };
-    static const IntField ints[] = {
-        {"batch", &rocke_attention_dense_spec_t::batch},
-        {"seqlen_q", &rocke_attention_dense_spec_t::seqlen_q},
-        {"seqlen_kv", &rocke_attention_dense_spec_t::seqlen_kv},
-        {"num_query_heads", &rocke_attention_dense_spec_t::num_query_heads},
-        {"num_kv_heads", &rocke_attention_dense_spec_t::num_kv_heads},
-        {"head_size", &rocke_attention_dense_spec_t::head_size},
-        {"sliding_window", &rocke_attention_dense_spec_t::sliding_window},
-        {"block_m", &rocke_attention_dense_spec_t::block_m},
-        {"block_n", &rocke_attention_dense_spec_t::block_n},
-        {"waves_per_eu", &rocke_attention_dense_spec_t::waves_per_eu},
-        {"lds_k_group_pad", &rocke_attention_dense_spec_t::lds_k_group_pad},
-        {"num_persistent", &rocke_attention_dense_spec_t::num_persistent},
-        {"block_size", &rocke_attention_dense_spec_t::block_size},
-        {"num_kv_blocks", &rocke_attention_dense_spec_t::num_kv_blocks},
-        {"chiplet_num_xcds", &rocke_attention_dense_spec_t::chiplet_num_xcds},
-    };
-    static const BoolField bools[] = {
-        {"causal", &rocke_attention_dense_spec_t::causal},
-        {"ragged", &rocke_attention_dense_spec_t::ragged},
-        {"varlen", &rocke_attention_dense_spec_t::varlen},
-        {"persistent", &rocke_attention_dense_spec_t::persistent},
-        {"interleave", &rocke_attention_dense_spec_t::interleave},
-        {"lazy_rescale", &rocke_attention_dense_spec_t::lazy_rescale},
-        {"paged", &rocke_attention_dense_spec_t::paged},
-        {"use_sinks", &rocke_attention_dense_spec_t::use_sinks},
-        {"causal_bottom_right", &rocke_attention_dense_spec_t::causal_bottom_right},
-    };
-    static const StrField strs[] = {
-        {"dtype", &rocke_attention_dense_spec_t::dtype},
-        {"persist_decode", &rocke_attention_dense_spec_t::persist_decode},
-        {"nonpersist_decode", &rocke_attention_dense_spec_t::nonpersist_decode},
-    };
-    for(const auto& f : ints)
+    for(const auto& f : k_int_fields)
         if(std::strcmp(f.name, name) == 0)
             return json_int(v, &(s->*f.member));
-    for(const auto& f : bools)
+    for(const auto& f : k_bool_fields)
         if(std::strcmp(f.name, name) == 0)
             return json_bool(v, &(s->*f.member));
-    for(const auto& f : strs)
+    for(const auto& f : k_str_fields)
         if(std::strcmp(f.name, name) == 0)
             return json_opt_str(v, &(s->*f.member));
     return false;
+}
+
+/* The name of the first field where a and b differ, or nullptr. */
+const char* first_difference(const rocke_attention_dense_spec_t& a,
+                             const rocke_attention_dense_spec_t& b)
+{
+    for(const auto& f : k_int_fields)
+        if(a.*f.member != b.*f.member)
+            return f.name;
+    for(const auto& f : k_bool_fields)
+        if(a.*f.member != b.*f.member)
+            return f.name;
+    for(const auto& f : k_str_fields)
+    {
+        const char* x = a.*f.member;
+        const char* y = b.*f.member;
+        if((x == nullptr) != (y == nullptr) || (x != nullptr && std::strcmp(x, y) != 0))
+            return f.name;
+    }
+    return nullptr;
 }
 
 /* The expected text at expect[key]: false (and nothing compared) for JSON null. */
@@ -368,6 +392,39 @@ void check_vectors()
         rocke_arena_destroy(&arena);
         return;
     }
+    /* Every Python default, and the tile table, as the generator recorded them. */
+    const rocke_attention_dense_spec_t got_defaults = rocke_attention_dense_spec_default();
+    rocke_attention_dense_spec_t want_defaults = got_defaults;
+    const jd_val_t* defaults = rocke_jget(root, "defaults");
+    CHECK(defaults != nullptr && defaults->kind == JD_OBJ && defaults->obj_len > 0);
+    for(int i = 0; defaults != nullptr && defaults->kind == JD_OBJ && i < defaults->obj_len; ++i)
+        CHECK(set_field(&want_defaults, defaults->obj[i].key, defaults->obj[i].val));
+    const char* differs = first_difference(want_defaults, got_defaults);
+    if(differs != nullptr)
+    {
+        std::fprintf(stderr, "FAIL defaults: %s differs from the Python default\n", differs);
+        ++g_failures;
+    }
+    const jd_val_t* tiles = rocke_jget(root, "tile_geometries");
+    CHECK(tiles != nullptr && tiles->kind == JD_ARR
+          && tiles->arr_len == ROCKE_DENSE_TILE_GEOMETRY_COUNT);
+    for(int i = 0; tiles != nullptr && tiles->kind == JD_ARR && i < tiles->arr_len
+                   && i < ROCKE_DENSE_TILE_GEOMETRY_COUNT;
+        ++i)
+    {
+        const jd_val_t* t = tiles->arr[i];
+        int bm = -1;
+        int bn = -1;
+        CHECK(t != nullptr && t->kind == JD_ARR && t->arr_len == 3);
+        if(t == nullptr || t->kind != JD_ARR || t->arr_len != 3)
+            continue;
+        CHECK_STR(ROCKE_DENSE_TILE_GEOMETRIES[i].name, rocke_jstr(t->arr[0]));
+        CHECK(json_int(t->arr[1], &bm) && ROCKE_DENSE_TILE_GEOMETRIES[i].block_m == bm);
+        CHECK(json_int(t->arr[2], &bn) && ROCKE_DENSE_TILE_GEOMETRIES[i].block_n == bn);
+    }
+    CHECK(ROCKE_DENSE_DEFAULT_BLOCK_M == ROCKE_DENSE_TILE_GEOMETRIES[0].block_m
+          && ROCKE_DENSE_DEFAULT_BLOCK_N == ROCKE_DENSE_TILE_GEOMETRIES[0].block_n);
+
     const rocke_attention_dense_traits_t base = rocke_attention_dense_traits_base();
     const jd_val_t* cases = rocke_jget(root, "cases");
     CHECK(cases != nullptr && cases->kind == JD_ARR && cases->arr_len > 0);
@@ -595,23 +652,36 @@ void check_reason_truncation()
     CHECK(std::strcmp(shortbuf + sizeof(shortbuf) - 4, "...") == 0);
 }
 
-void check_defaults_and_tables()
+/* zero_keyless_row's Python ValueError for an O store width other than 1, 2 or
+ * 4: the helper throws, and an extern "C" builder entry's guard turns that into
+ * a NULL result and the sticky builder error with the Python text. */
+void check_zero_keyless_width()
 {
-    const char* where = "defaults";
-    const rocke_attention_dense_spec_t s = rocke_attention_dense_spec_default();
-    CHECK(s.causal && !s.ragged && !s.varlen && s.lazy_rescale && !s.persistent);
-    CHECK(s.block_m == 256 && s.block_n == 64 && s.waves_per_eu == 2);
-    CHECK(s.lds_k_group_pad == 8 && s.num_persistent == 256);
-    CHECK_STR(s.dtype, "bf16");
-    CHECK_STR(s.persist_decode, "auto");
-    CHECK_STR(s.nonpersist_decode, "auto");
-    CHECK(s.chiplet_num_xcds == 8);
-    CHECK_STR(ROCKE_DENSE_TILE_GEOMETRIES[0].name, "default");
-    CHECK(ROCKE_DENSE_TILE_GEOMETRIES[0].block_m == 256
-          && ROCKE_DENSE_TILE_GEOMETRIES[0].block_n == 64);
-    CHECK_STR(ROCKE_DENSE_TILE_GEOMETRIES[1].name, "bm128");
-    CHECK(ROCKE_DENSE_TILE_GEOMETRIES[1].block_m == 128
-          && ROCKE_DENSE_TILE_GEOMETRIES[1].block_n == 64);
+    const char* where = "zero_keyless_row width";
+    for(int width : {2, 3})
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "zero_keyless_width") == ROCKE_OK);
+        rocke_value_t* m = rocke_b_param(&b, "m", rocke_f32(), NULL);
+        rocke_value_t* row = rocke_b_param(&b, "row", rocke_i32(), NULL);
+        rocke_value_t* val = rocke_b_cast_f32_to(&b, m, rocke_bf16());
+        rocke_value_t* vals[2] = {val, val};
+        rocke_value_t* packed = rocke_b_vec_pack(&b, vals, 2, rocke_bf16());
+        rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+        rocke_value_t* has_key = rocke_b_cmp_le(&b, zero, row);
+        rocke_value_t* out = ckc::guard_builder(
+            &b, [&] { return rocke_zero_keyless_row(&b, packed, has_key, rocke_bf16(), width); });
+        if(width == 2)
+        {
+            CHECK(out != nullptr && rocke_ir_builder_status(&b) == ROCKE_OK);
+        }
+        else
+        {
+            CHECK(out == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
+            CHECK_STR(rocke_ir_builder_error(&b), "unsupported O store width 3");
+        }
+        rocke_ir_builder_free(&b);
+    }
 }
 
 } // namespace
@@ -619,7 +689,7 @@ void check_defaults_and_tables()
 int main()
 {
     check_vectors();
-    check_defaults_and_tables();
+    check_zero_keyless_width();
     check_unknown_decode();
     check_preflight_contract();
     check_unvalidated_spec();

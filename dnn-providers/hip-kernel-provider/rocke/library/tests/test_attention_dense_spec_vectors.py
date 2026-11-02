@@ -59,11 +59,12 @@ import inspect
 import json
 import random
 import sys
-from dataclasses import fields
+from dataclasses import MISSING, fields
 from pathlib import Path
 
 from kernels.common.attention_dense_decode import NONPERSIST_DECODES, PERSIST_DECODES
 from kernels.common.attention_dense_spec import (
+    DENSE_TILE_GEOMETRIES,
     AttentionDenseSpec,
     check_dense_spec_preflight,
 )
@@ -163,6 +164,25 @@ _CASES: tuple[dict, ...] = (
         num_kv_heads=1,
     ),
     dict(persistent=True, persist_decode="gqa_pair_2phase", num_persistent=4),
+    # gqa_pair_2phase's own preconditions (_aligned_causal_error, even NQB).
+    dict(
+        persistent=True,
+        persist_decode="gqa_pair_2phase",
+        num_persistent=8,
+        causal=False,
+    ),
+    dict(
+        persistent=True,
+        persist_decode="gqa_pair_2phase",
+        num_persistent=8,
+        ragged=True,
+    ),
+    dict(
+        persistent=True,
+        persist_decode="gqa_pair_2phase",
+        num_persistent=8,
+        seqlen_q=768,
+    ),
     dict(sliding_window=-64),
     dict(causal=False, sliding_window=64),
     dict(sliding_window=100),
@@ -462,6 +482,16 @@ def _field_names() -> list[str]:
     return [f.name for f in fields(AttentionDenseSpec)]
 
 
+def _defaults() -> dict:
+    """Every field that has a default, as rocke_attention_dense_spec_default()
+    must produce it (the shape fields have none)."""
+    return {
+        f.name: f.default
+        for f in fields(AttentionDenseSpec)
+        if f.default is not MISSING
+    }
+
+
 def _spec_fields(overrides: dict) -> dict:
     spec = AttentionDenseSpec(**_BASE)
     values = {name: getattr(spec, name) for name in _field_names()}
@@ -624,6 +654,11 @@ def _build() -> dict:
             "rocke_attention_dense_spec. Do not edit by hand."
         ),
         "fields": _field_names(),
+        "defaults": _defaults(),
+        "tile_geometries": [
+            [name, g["block_m"], g["block_n"]]
+            for name, g in DENSE_TILE_GEOMETRIES.items()
+        ],
         "generated": {"seed": _GENERATED_SEED, "count": _GENERATED_COUNT},
         "cases": [
             {"spec": _spec_fields(c), "expect": _evaluate(_spec_fields(c))}
@@ -687,6 +722,19 @@ def test_fields_match_the_dataclass():
     )
 
 
+def test_defaults_and_tile_table_match_the_dataclass():
+    """rocke_attention_dense_spec_default() and ROCKE_DENSE_TILE_GEOMETRIES are
+    checked against these, so a changed Python default fails the C++ test."""
+    recorded = _load()
+    assert recorded["defaults"] == _defaults(), _stale(
+        f"recorded defaults: {recorded['defaults']}\ncurrent: {_defaults()}"
+    )
+    tiles = [[n, g["block_m"], g["block_n"]] for n, g in DENSE_TILE_GEOMETRIES.items()]
+    assert recorded["tile_geometries"] == tiles, _stale(
+        f"recorded tiles: {recorded['tile_geometries']}\ncurrent: {tiles}"
+    )
+
+
 def test_every_case_matches_the_current_python():
     recorded = _load()
     assert recorded["generated"] == {
@@ -728,6 +776,83 @@ def test_hook_tables_match_the_current_python():
             )
 
 
+def _reject_sites() -> set[tuple[str, int]]:
+    """(file, line) of every reject the C++ port mirrors: each ``raise`` in
+    ``AttentionDenseSpec.__post_init__``, each ``return False, ...`` in
+    ``check_dense_spec_preflight``, and each non-None return of a decode check."""
+    import ast
+
+    import kernels.common.attention_dense_decode as decode_mod
+    import kernels.common.attention_dense_spec as spec_mod
+
+    sites = set()
+    for mod in (spec_mod, decode_mod):
+        path = inspect.getsourcefile(mod)
+        tree = ast.parse(Path(path).read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if mod is spec_mod and node.name == "__post_init__":
+                sites |= {
+                    (path, n.lineno) for n in ast.walk(node) if isinstance(n, ast.Raise)
+                }
+            elif mod is spec_mod and node.name == "check_dense_spec_preflight":
+                sites |= {
+                    (path, n.lineno)
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.Return)
+                    and isinstance(n.value, ast.Tuple)
+                    and isinstance(n.value.elts[0], ast.Constant)
+                    and n.value.elts[0].value is False
+                }
+            elif mod is decode_mod and node.name in ("check", "_aligned_causal_error"):
+                sites |= {
+                    (path, n.lineno)
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.Return)
+                    and n.value is not None
+                    and not (
+                        isinstance(n.value, ast.Constant) and n.value.value is None
+                    )
+                    and not isinstance(n.value, ast.Name)
+                }
+    return sites
+
+
+def test_cases_reach_every_reject_site():
+    """Every reject the C++ port mirrors is hit by some base case, so dropping
+    one of its conditions in C changes a recorded answer. A count would not
+    notice a site that no case reaches."""
+    # Unreachable in both engines: __post_init__ already rejects any dtype other
+    # than bf16 / fp16 before the paged block, so no spec reaches this re-check.
+    unreachable = ("paged not yet implemented for dtype",)
+    sites = {
+        (path, line)
+        for path, line in _reject_sites()
+        if not any(
+            text in Path(path).read_text().splitlines()[line - 1]
+            for text in unreachable
+        )
+    }
+    hit = set()
+
+    def tracer(frame, event, arg):
+        if event == "line":
+            key = (frame.f_code.co_filename, frame.f_lineno)
+            if key in sites:
+                hit.add(key)
+        return tracer
+
+    sys.settrace(tracer)
+    try:
+        for c in _load()["cases"]:
+            _evaluate(c["spec"])
+    finally:
+        sys.settrace(None)
+    missed = sorted(sites - hit)
+    assert not missed, f"reject sites no case reaches: {missed}"
+
+
 def test_cases_cover_every_reject_reason_and_valid_specs():
     """The C++ port is only checked where a case reaches; keep the table wide."""
     cases = _load()["cases"]
@@ -738,7 +863,6 @@ def test_cases_cover_every_reject_reason_and_valid_specs():
         if c["expect"]["valid"] and not c["expect"]["preflight_ok"]
     }
     valid = [c for c in cases if c["expect"]["preflight_ok"]]
-    assert len(rejects - {None}) >= 40
     assert None in rejects  # the division-by-zero paths, verdict only
     assert len(preflight) >= 4
     assert len(valid) >= 12

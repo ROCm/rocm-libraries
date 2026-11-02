@@ -2,8 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/attention_dense_lse_emit.c -- C-side emitter for the dense-
- * attention LSE helpers (rocke/instance_attention_dense_lse_internal.h, plus the
- * shared rocke/instance_lse_store_internal.h store). Builds
+ * attention LSE helpers (rocke/instance_lse_store_internal.h). Builds
  * each kernel identically to attention_dense_lse_emit.py so run_diff.py can
  * byte-compare the two engines' .ll; see that file for the per-config rationale.
  *
@@ -17,7 +16,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "rocke/instance_attention_dense_lse_internal.h"
 #include "rocke/instance_lse_store_internal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
@@ -59,13 +57,13 @@ static void build(rocke_ir_builder_t* b, const lse_cfg_t* c)
     rocke_value_t* l = rocke_b_param(b, "l", rocke_f32(), NULL);
     rocke_value_t* tid = rocke_b_thread_id_x(b);
     rocke_value_t* query_row = rocke_b_add(b, q_base, tid);
-    rocke_value_t* has_key = rocke_attention_dense_row_has_key(
+    rocke_value_t* has_key = rocke_dense_row_has_key(
         b, query_row, kv_len, c->causal, c->diagonal, c->window, c->right_bound);
     rocke_lse_store(b, lse, tid, m, l, has_key);
     rocke_value_t* val = rocke_b_cast_f32_to(b, m, dtype);
     rocke_value_t* vals[4] = {val, val, val, val};
     rocke_value_t* packed = rocke_b_vec_pack(b, vals, c->width, dtype);
-    packed = rocke_attention_dense_zero_keyless_row(b, packed, has_key, dtype, c->width);
+    packed = rocke_zero_keyless_row(b, packed, has_key, dtype, c->width);
     rocke_value_t* stride = rocke_b_const_i32(b, c->width);
     rocke_value_t* off = rocke_b_mul(b, tid, stride);
     rocke_b_global_store_vN(b, o, off, packed, c->width, 2 * c->width);

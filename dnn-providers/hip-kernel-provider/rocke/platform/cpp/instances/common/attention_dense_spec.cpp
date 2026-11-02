@@ -23,7 +23,8 @@
 #include <string>
 #include <vector>
 
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_spec_set_reason */
+#include "rocke/strbuf.h" /* rocke_strbuf_append_py_repr */
 
 const rocke_dense_tile_geometry_t ROCKE_DENSE_TILE_GEOMETRIES[ROCKE_DENSE_TILE_GEOMETRY_COUNT] = {
     {"default", ROCKE_DENSE_DEFAULT_BLOCK_M, ROCKE_DENSE_DEFAULT_BLOCK_N},
@@ -33,19 +34,23 @@ const rocke_dense_tile_geometry_t ROCKE_DENSE_TILE_GEOMETRIES[ROCKE_DENSE_TILE_G
 namespace
 {
 
-/* Write the formatted reason (if a buffer was given) and return false. A reason
- * longer than the buffer ends in "..." so a truncated text is never mistaken
- * for a complete one. */
+/* Write the formatted reason (if a buffer was given) and return false. The
+ * shared rocke_spec_set_reason marks a cut reason with "...". */
 bool reject(char* reason, size_t cap, const char* fmt, ...)
 {
     if(reason != NULL && cap > 0)
     {
         va_list ap;
         va_start(ap, fmt);
-        const int len = vsnprintf(reason, cap, fmt, ap);
+        va_list again;
+        va_copy(again, ap);
+        const int len = vsnprintf(NULL, 0, fmt, ap);
         va_end(ap);
-        if(len >= 0 && (size_t)len >= cap && cap >= 4)
-            memcpy(reason + cap - 4, "...", 4);
+        std::string text(len > 0 ? (size_t)len : 0, '\0');
+        if(len > 0)
+            vsnprintf(&text[0], text.size() + 1, fmt, again);
+        va_end(again);
+        rocke_spec_set_reason(reason, cap, text.c_str());
     }
     return false;
 }
@@ -55,39 +60,14 @@ bool streq(const char* a, const char* b)
     return a != NULL && b != NULL && strcmp(a, b) == 0;
 }
 
-/* Python repr() of an Optional[str]: None, or the quoted string with the
- * escapes repr() emits for the characters a spec value can carry. */
+/* Python repr() of an Optional[str] (rocke_strbuf_append_py_repr). */
 std::string py_repr(const char* s)
 {
-    if(s == NULL)
-        return "None";
-    const char quote = (strchr(s, '\'') != NULL && strchr(s, '"') == NULL) ? '"' : '\'';
-    std::string out(1, quote);
-    for(const unsigned char* p = (const unsigned char*)s; *p; ++p)
-    {
-        if(*p == '\\')
-            out += "\\\\";
-        else if(*p == (unsigned char)quote)
-        {
-            out += '\\';
-            out += quote;
-        }
-        else if(*p == '\n')
-            out += "\\n";
-        else if(*p == '\r')
-            out += "\\r";
-        else if(*p == '\t')
-            out += "\\t";
-        else if(*p < 0x20 || *p == 0x7f)
-        {
-            char buf[8];
-            snprintf(buf, sizeof(buf), "\\x%02x", *p);
-            out += buf;
-        }
-        else
-            out += (char)*p;
-    }
-    out += quote;
+    rocke_strbuf_t sb;
+    rocke_strbuf_init(&sb, 0);
+    rocke_strbuf_append_py_repr(&sb, s);
+    std::string out = rocke_strbuf_cstr(&sb);
+    rocke_strbuf_free(&sb);
     return out;
 }
 

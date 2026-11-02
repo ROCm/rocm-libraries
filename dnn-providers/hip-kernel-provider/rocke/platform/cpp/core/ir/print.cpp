@@ -448,72 +448,10 @@ static void emit_pad(rocke_strbuf_t* out, int indent)
     }
 }
 
-/* Python repr(label) for a str: single-quoted. Handles the common identifier
- * labels ("body","then","entry"). CPython switches to double-quotes when the
- * string contains a single quote but no double quote, and escapes backslashes /
- * non-printables; those cases never occur for region labels in the engine. */
+/* Python repr(label) for a str (rocke_strbuf_append_py_repr). */
 static void emit_repr_str(rocke_strbuf_t* out, const char* s)
 {
-    if(!s)
-    {
-        /* Python repr(None) -> "None"; labels are always strings, but be safe. */
-        rocke_strbuf_append(out, "None");
-        return;
-    }
-    int has_single = 0, has_double = 0;
-    for(const char* p = s; *p; ++p)
-    {
-        if(*p == '\'')
-            has_single = 1;
-        else if(*p == '"')
-            has_double = 1;
-    }
-    char quote = (has_single && !has_double) ? '"' : '\'';
-    rocke_strbuf_append_char(out, quote);
-    for(const char* p = s; *p; ++p)
-    {
-        char c = *p;
-        if(c == '\\' || c == quote)
-        {
-            rocke_strbuf_append_char(out, '\\');
-            rocke_strbuf_append_char(out, c);
-        }
-        else if(c == '\n')
-        {
-            rocke_strbuf_append(out, "\\n");
-        }
-        else if(c == '\t')
-        {
-            rocke_strbuf_append(out, "\\t");
-        }
-        else if(c == '\r')
-        {
-            rocke_strbuf_append(out, "\\r");
-        }
-        else
-        {
-            unsigned char uc = (unsigned char)c;
-            /* CPython repr(str) escapes C0 control characters (other than the
-             * \t \n \r handled above) and DEL (0x7f) as lowercase 2-digit
-             * "\xNN". Printable ASCII (0x20..0x7e) is emitted verbatim. Bytes
-             * >= 0x80 would require UTF-8 decoding to reproduce CPython's
-             * per-codepoint repr (\xNN / \uNNNN / printable) and are passed
-             * through verbatim; region labels and attr strings in the frozen IR
-             * contract are ASCII identifiers, so this case never arises. */
-            if(uc < 0x20 || uc == 0x7f)
-            {
-                static const char hexdig[] = "0123456789abcdef";
-                rocke_strbuf_append(out, "\\x");
-                rocke_strbuf_append_char(out, hexdig[(uc >> 4) & 0xf]);
-                rocke_strbuf_append_char(out, hexdig[uc & 0xf]);
-            }
-            else
-            {
-                rocke_strbuf_append_char(out, c);
-            }
-        }
-    }
-    rocke_strbuf_append_char(out, quote);
+    rocke_strbuf_append_py_repr(out, s);
 }
 
 /* ---------------------------------------------------------------- ops */
