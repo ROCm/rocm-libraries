@@ -6,15 +6,15 @@ from __future__ import annotations
 """GEMM Kernel Optimization module.
 
 Implements the main optimization workflow.
-Generates Tensile tensilelite for specific GEMM types and executes multi-GPU
+Generates TensileLite configurations for specific GEMM types and executes multi-GPU
 optimization with automatic load balancing and progress monitoring.
 
 Key functions:
-    configure: Generate tensilelite configs for GEMM types.
+    configure: Generate TensileLite configs for GEMM types.
     run: Execute optimization across multiple GPUs.
     analyze: Benchmark and filter optimized kernels.
 
-Integrates with hipBLASLt for benchmarking and Tensile for kernel compilation.
+Integrates with hipBLASLt for benchmarking and TensileLite for kernel compilation.
 """
 
 import os
@@ -135,7 +135,7 @@ def configure(
     Builds a config dict from gemm_configs (each a GemmConfig with its
     GemmType and size list), applies ARCH-specific defaults via
     apply_input_config_defaults, and runs config_generator.run to write
-    tensilelite tuning YAML (and side artifacts) under output_dir.
+    TensileLite tuning YAML (and side artifacts) under output_dir.
 
     Each GemmConfig carries its own ``mx`` flag. MX-only data types (F4)
     auto-enable MX in GemmConfig.__post_init__; for F8, MX is set by the
@@ -217,30 +217,30 @@ def run(
     abort_after_consecutive_failures: int = 8,
     max_shape_failures: int = 0,
 ) -> None:
-    """Run tensilelite optimization across every tuning YAML under tuning_dir.
+    """Run TensileLite optimization across every tuning YAML under tuning_dir.
 
-    Builds the tensilelite client once and dispatches one job per discovered
+    Builds the TensileLite client once and dispatches one job per discovered
     config to the shared Runner abstraction. Scheduling matches the previous
     run() implementation (workload-based assignment with LPT ordering);
     progress reporting follows search.run() (queue-driven completion updates).
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation. Used both
-            for the Tensile binary and to add tensilelite to PYTHONPATH.
+            for the TensileLite binary and to add tensilelite to PYTHONPATH.
         tuning_dir (str | Path): Directory containing per-GEMM optimization
             YAML configs (see configure).
         devices (Sequence[int], optional): GPU device IDs used by the load
             balancer. 
             Defaults to None, which is interpreted as all 8 devices if not specified.
         client_build_dir (str | Path, optional): Build directory for the
-            tensilelite client (see build_tensilelite_client).
+            TensileLite client (see build_tensilelite_client).
             Defaults to Path("build_tmp").
         n_slots (int, optional): Maximum concurrent jobs per device. Defaults
             to 4.
         retry (bool, optional): Worker-level retry behavior for existing
             failed / resumable build dirs. Defaults to True.
         stall_timeout (float, optional): Seconds a worker may go without writing
-            to its tensilelite log before it is killed and its slot released.
+            to its TensileLite log before it is killed and its slot released.
             0 disables. Defaults to 900.0.
         abort_after_consecutive_failures (int, optional): Stop scheduling new
             jobs after this many consecutive job failures across all devices;
