@@ -381,10 +381,13 @@ def _uses_reorganize(spec: Gfx950ConvDgradAotSpec) -> bool:
 
 
 class _HelperCache:
-    """The two cache calls ``plan_for`` makes for the MFMA helpers."""
+    """The cache calls ``plan_for`` makes for the MFMA helpers."""
 
     def get(self, identity):
         return Path("x.hsaco"), {"kernel_name": identity.algorithm}
+
+    def entry_meta(self, identity):
+        return {"kernel_name": identity.algorithm}
 
     def hsaco_path(self, identity):
         return Path("x.hsaco")
