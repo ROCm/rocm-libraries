@@ -27,6 +27,8 @@ set(SUPPORTED_ARCHITECTURES
     "gfx90a:xnack-"
     "gfx942:xnack+"
     "gfx950:xnack+"
+    "gfx1250:xnack-"
+    "gfx1250-strict:xnack-"
 )
 
 # Base architectures - used when "all" is specified for GPU_TARGETS
@@ -91,10 +93,25 @@ function(tensilelite_validate_gpu_targets targets)
     string(REGEX REPLACE ";" " " target_flat "${target_list}")
     string(REGEX REPLACE " +" ";" target_list "${target_flat}")
 
+    tensilelite_sanitizer_requires_xnack(_requires_xnack)
     foreach(target IN LISTS target_list)
         list(FIND supported_list "${target}" idx)
         if(idx EQUAL -1)
             message(FATAL_ERROR "Unsupported GPU target: ${target}\nSupported targets are: ${supported_list}")
+        endif()
+        # Device ASAN instruments memory accesses that only resolve under XNACK
+        # replay, so an xnack- target asks for the two things at once: the
+        # sanitizer, and the hardware behaviour it depends on turned off. The
+        # list above cannot express this -- it is one list, the same under every
+        # sanitizer setting -- so the pairing is refused here instead. Host-only
+        # ASAN does not instrument device code and is unaffected; this is gated
+        # on the same predicate that decides whether to promote a bare target to
+        # xnack+, so the two cannot disagree about what "full ASAN" means.
+        if(_requires_xnack AND "${target}" MATCHES ":xnack-")
+            message(FATAL_ERROR
+                "GPU target ${target} disables XNACK replay, which device "
+                "AddressSanitizer requires. Drop the ':xnack-' qualifier, or "
+                "build without HIPBLASLT_ENABLE_ASAN/THEROCK_SANITIZER=ASAN.")
         endif()
     endforeach()
 endfunction()
@@ -130,6 +147,115 @@ function(tensilelite_normalize_targets output_var)
     foreach(_arch IN LISTS ARGN)
         tensilelite_offload_target(_target "${_arch}")
         list(APPEND _normalized "${_target}")
+    endforeach()
+    set(${output_var} "${_normalized}" PARENT_SCOPE)
+endfunction()
+
+# Whether the compiler driver accepts a target ID. Asked with -###, a driver dry
+# run: the target ID is validated but nothing is compiled, so a probe costs ~10ms.
+# Answers are remembered for the rest of the configure, so each distinct ID is
+# asked once per configure rather than once per call.
+#
+# A compiler that is not an AMDGPU-aware clang rejects every ID, including bare
+# ones. Callers must treat a lone "no" as "cannot judge" rather than as a verdict
+# about the qualifier; see tensilelite_normalize_xnack_archs.
+function(tensilelite_target_id_supported output_var arch)
+    # Remembered in a global property, not a cache entry: the answer is a
+    # property of the compiler that happens to be installed, and a cache entry
+    # would outlive it. An in-place toolchain upgrade keeps the same
+    # CMAKE_CXX_COMPILER path, so nothing would invalidate a cached answer, and
+    # the configure would go on stripping a suffix the new compiler accepts --
+    # while TensileLite, which probes afresh in every process, would not. A
+    # global property is dropped at the end of each configure, so the two cannot
+    # drift apart; the cost is one ~10ms probe per distinct target ID.
+    string(MAKE_C_IDENTIFIER "_TENSILELITE_TARGET_ID_OK_${arch}" _cache_key)
+    get_property(_cached GLOBAL PROPERTY ${_cache_key})
+    if(NOT "${_cached}" STREQUAL "")
+        set(${output_var} "${_cached}" PARENT_SCOPE)
+        return()
+    endif()
+
+    # clang needs an input file, but never opens it under -###. Kept empty and
+    # reused so the probe does not depend on anything in the source tree.
+    set(_probe_src "${CMAKE_BINARY_DIR}/tensilelite_target_id_probe.cpp")
+    if(NOT EXISTS "${_probe_src}")
+        file(WRITE "${_probe_src}" "")
+    endif()
+
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}"
+                --target=amdgcn-amd-amdhsa "-mcpu=${arch}"
+                # Quoted: unquoted, CMake reads the # as a comment and eats the
+                # rest of the line, leaving clang to read from stdin and fail.
+                "-###" -c -x c++ "${_probe_src}"
+        RESULT_VARIABLE _rc
+        OUTPUT_QUIET ERROR_QUIET)
+
+    if(_rc EQUAL 0)
+        set(_ok ON)
+    else()
+        set(_ok OFF)
+    endif()
+    set_property(GLOBAL PROPERTY ${_cache_key} "${_ok}")
+    set(${output_var} "${_ok}" PARENT_SCOPE)
+endfunction()
+
+# An arch with the xnack qualifier removed, other qualifiers kept in order.
+#
+# Matched exactly, not by prefix, and for the same reason as _withoutXnack in
+# tensilelite/Common/Architectures.py: the xnack token is dropped only to reach
+# a target the compiler will take, and anything else is left for the compiler to
+# refuse. A prefix match would also eat "xnack-typo", so a misspelling would come
+# back as a bare arch the compiler accepts, and the build would go on with the
+# replay mode nobody asked for. The two must agree, or hip::device and the
+# Tensile code objects part ways.
+function(tensilelite_strip_xnack output_var arch)
+    string(REPLACE ":" ";" _parts "${arch}")
+    list(POP_FRONT _parts _base)
+    set(_kept "")
+    foreach(_qualifier IN LISTS _parts)
+        if(NOT _qualifier STREQUAL "xnack+" AND NOT _qualifier STREQUAL "xnack-")
+            list(APPEND _kept "${_qualifier}")
+        endif()
+    endforeach()
+    list(JOIN _kept ":" _quals)
+    if(_quals)
+        set(${output_var} "${_base}:${_quals}" PARENT_SCOPE)
+    else()
+        set(${output_var} "${_base}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Drops the xnack qualifier from the targets the compiler will not take it on.
+# Each arch is put to the compiler, and if the target ID is refused the bare
+# form is tried instead.
+#
+# Detected rather than tabulated, so no list here tracks which target IDs the
+# compiler takes and a change on that side needs no edit. Kept in step with
+# compilerTargetOf() in tensilelite/Common/Architectures.py, which asks the same
+# question for the TensileLite side -- the two must agree, or hip::device and
+# the Tensile code objects end up built for different targets.
+#
+# Only the xnack token goes, so other qualifiers survive, and an arch refused
+# for some other reason -- a typo in the processor name -- has to stay an error
+# rather than quietly degrade to its base name. So the stripped form is asked
+# about too, and an arch is left exactly as given unless dropping xnack is what
+# makes it acceptable.
+function(tensilelite_normalize_xnack_archs output_var)
+    set(_normalized "")
+    foreach(_arch IN LISTS ARGN)
+        set(_result "${_arch}")
+        tensilelite_target_id_supported(_accepted "${_arch}")
+        if(NOT _accepted)
+            tensilelite_strip_xnack(_stripped "${_arch}")
+            if(NOT _stripped STREQUAL _arch)
+                tensilelite_target_id_supported(_stripped_accepted "${_stripped}")
+                if(_stripped_accepted)
+                    set(_result "${_stripped}")
+                endif()
+            endif()
+        endif()
+        list(APPEND _normalized "${_result}")
     endforeach()
     set(${output_var} "${_normalized}" PARENT_SCOPE)
 endfunction()

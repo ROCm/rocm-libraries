@@ -7417,7 +7417,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       enableWaitCntInsertion = (stinky_opt_level != 0
                                 or dcpThickGateFromTokenPasses(kernel)
                                 or not globalParameters.get("DisableSTWaitCnt", True))
-
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
                                # gfx1250 v0/v1 share ISA (12,5,0); this build-wide name (empty unless a
@@ -7706,6 +7705,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.states.asmCaps  = ti.getAsmCaps()
     self.states.archCaps = ti.getArchCaps()
     self.states.regCaps  = ti.getRegCaps()
+
+    isa = kernel["ISA"]
+    isaInfo = getattr(kernel, 'isaInfoMap', {}).get(isa) if hasattr(kernel, 'isaInfoMap') else None
+    if isaInfo:
+      # Rebuilt for the same reason as the deltas below: written in place, this
+      # key would reach the cache the caps came from, so an xnack- kernel would
+      # leave EnableXnackReplay=False behind for every later kernel in the
+      # process -- including unqualified ones, which then lose their drains
+      # without anything reporting it.
+      self.states.archCaps = {**self.states.archCaps,
+                              "EnableXnackReplay": isaInfo.archCaps["EnableXnackReplay"]}
 
     # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
     # the build's arch name is the only signal here (empty for v1). Rebuild the
