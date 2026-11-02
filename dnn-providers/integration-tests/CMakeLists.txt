@@ -256,6 +256,7 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/ReferenceExecutorPool.cpp
+    src/harness/bundle/CandidateListing.cpp
     src/harness/bundle/CaseOutcome.cpp
     src/harness/bundle/FrontendGraphEngineRunner.cpp
     src/harness/bundle/FrontendKernelLogControl.cpp

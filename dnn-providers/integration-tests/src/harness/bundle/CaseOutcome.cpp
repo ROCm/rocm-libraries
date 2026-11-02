@@ -195,6 +195,10 @@ std::string finishedRecordJson(const CaseOutcomeRecord& record)
     {
         json["placement_uid"] = *record.identity.placementUid;
     }
+    if(record.identity.candidate.has_value())
+    {
+        json["candidate"] = *record.identity.candidate;
+    }
     if(record.identity.inputs.is_object() && !record.identity.inputs.empty())
     {
         json["inputs"] = record.identity.inputs;

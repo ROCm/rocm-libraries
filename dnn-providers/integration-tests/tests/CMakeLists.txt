@@ -11,6 +11,7 @@
 # which are linked and tested here.
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    ../src/harness/bundle/CandidateListing.cpp
     ../src/harness/bundle/CaseOutcome.cpp
     ../src/harness/bundle/GraphSession.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
@@ -96,6 +97,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestProductionPolicy.cpp
     TestGraphSession.cpp
     TestCaseOutcome.cpp
+    TestCandidateListing.cpp
+    TestEngineVariant.cpp
     TestOutcomeReport.cpp
     TestKernelLogTap.cpp
     TestOutputComparison.cpp

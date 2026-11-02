@@ -15,8 +15,9 @@ namespace hipdnn_integration_tests::bundle
 /// them:
 ///   - openGraph()  — one from_binary, then the single get_ranked_engine_ids()
 ///                    query whose answer becomes GraphSession::engines.
-///   - buildPlans() — create_execution_plans / check_support / build_plans, with a
-///                    late decline returned as an answer rather than thrown.
+///   - buildPlans() — create_execution_plans (or, for a case that names one catalog
+///                    candidate, create_execution_plan_ext) / check_support / build_plans,
+///                    with a late decline returned as an answer rather than thrown.
 ///   - execute()    — builds plans if needed, then runs the graph on a variant pack.
 ///   - benchmark()  — times the plan execute() built (--benchmark only).
 ///
@@ -40,6 +41,12 @@ public:
     hipdnn_frontend::AutotuneResult benchmark(GraphSession& session,
                                               VariantPack& variantPack,
                                               const BenchmarkSettings& settings) override;
+
+    hipdnn_frontend::Error candidatePage(GraphSession& session,
+                                         const LoadedEngine& engine,
+                                         int64_t offset,
+                                         int64_t limit,
+                                         hipdnn_frontend::EngineCandidatePage& page) override;
 };
 
 } // namespace hipdnn_integration_tests::bundle

@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include <hipdnn_frontend/EngineQueryTypes.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 
 #include "harness/Benchmark.hpp"
@@ -175,6 +176,17 @@ public:
     virtual hipdnn_frontend::AutotuneResult benchmark(GraphSession& session,
                                                       VariantPack& variantPack,
                                                       const BenchmarkSettings& settings)
+        = 0;
+
+    /// One page of the catalog candidates `engine` can build for the graph of `session`
+    /// (hipdnn_frontend::detail::getEngineCandidates), `limit` entries from `offset`. An engine
+    /// that cannot enumerate answers with an error saying so, not an empty page. Builds and
+    /// executes nothing.
+    virtual hipdnn_frontend::Error candidatePage(GraphSession& session,
+                                                 const LoadedEngine& engine,
+                                                 int64_t offset,
+                                                 int64_t limit,
+                                                 hipdnn_frontend::EngineCandidatePage& page)
         = 0;
 };
 

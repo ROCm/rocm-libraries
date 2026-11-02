@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -28,6 +29,7 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/FrontendGraphEngineRunner.hpp"
 #include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/OutcomeReportLog.hpp"
@@ -212,6 +214,16 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--benchmark-warmup")
             .scan<'i', int>()
             .help("Untimed executions before timing (default 30). Requires --benchmark.");
+        parser.add_argument("--list-candidates")
+            .help("Write the candidate catalog of the engine named by --test-engine to this file "
+                  "and exit, without building or executing anything: one JSON object per line "
+                  "for each bundle case this run would execute (--gtest_filter applies): "
+                  "{\"test\", \"bundle\", \"engine\", \"status\", \"total\", \"candidates\": "
+                  "[{\"id\", \"knobs\"}], \"reason\"}. Every page of the catalog is read. "
+                  "status is ok, not_enumerable (the engine cannot enumerate, or does not take "
+                  "the graph: the catalog is its one heuristic pick) or error; a per-case error "
+                  "does not change the exit status. A candidate is built by a case whose "
+                  "metadata carries engine_variant {\"id\", \"knobs\"}.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -401,6 +413,14 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        const auto listCandidatesPath = parser.present<std::string>("--list-candidates");
+        if(listCandidatesPath.has_value() && (!engineName.has_value() || writeSupportClaims))
+        {
+            std::cerr << "--list-candidates lists the candidates of the engine named by "
+                         "--test-engine, and cannot be combined with --write-support-claims.\n";
+            return 1;
+        }
+
         // Only that a directory was named -- "is this the source tree" is not
         // decidable, a build directory is just a directory. The env var is the
         // documented alternative to the flag, so it satisfies this too.
@@ -528,6 +548,37 @@ int main(int argc, char** argv) noexcept
                       << hipdnn_integration_tests::TestConfig::get().getEngineName()
                       << "' is not loaded. Check the plugin path.\n";
             return 1;
+        }
+
+        // Listing mode: the catalog of every case this run would execute, and nothing else.
+        // After the engine table is built and the engine is known to be loaded, before any test
+        // is registered: it builds no plan, executes nothing and runs no test.
+        if(listCandidatesPath.has_value())
+        {
+            const auto engine = hipdnn_integration_tests::bundle::resolveEngineUnderTest();
+            std::ofstream listing(*listCandidatesPath, std::ios::trunc);
+            if(!engine.has_value() || !listing)
+            {
+                std::cerr << "Error: cannot open the candidate listing for writing: "
+                          << *listCandidatesPath << "\n";
+                return 1;
+            }
+
+            const auto cases = hipdnn_integration_tests::bundle::collectListingCases();
+            hipdnn_integration_tests::bundle::FrontendGraphEngineRunner runner;
+            const auto errors = hipdnn_integration_tests::bundle::writeCandidateListing(
+                listing, runner, cases, *engine);
+            listing.close();
+            if(!listing)
+            {
+                std::cerr << "Error: cannot write the candidate listing: " << *listCandidatesPath
+                          << "\n";
+                return 1;
+            }
+            std::cerr << "Listed the candidates of " << cases.size() << " case(s) of engine "
+                      << engine->name << " (" << errors << " with status error) into "
+                      << *listCandidatesPath << "\n";
+            return 0;
         }
 
         // Enumerated before any test records support data (see setEngineNames); the

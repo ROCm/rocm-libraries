@@ -23,6 +23,7 @@
 #include "harness/BundleMetadata.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/CandidateListing.hpp"
 #include "harness/bundle/GTestFilter.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
@@ -396,8 +397,15 @@ inline std::optional<DiscoveredBundleSet> discoverDataDirBundles()
 // `countFound` seeds graphsFound and `countClaims` seeds graphsWithClaims as bundles
 // load. Only the engine binary enforces or authors claims, so the golden-data binary
 // passes false for both rather than seeding counters no one will ever satisfy.
+//
+// A bundle that fails to load registers a synthetic failing test, unless `failures` is given:
+// then it is appended there and no test is registered, for a caller (--list-candidates) that
+// reports the failure itself and never runs a test.
 inline std::optional<std::vector<LoadedBundle>>
-    loadDiscoveredBundles(const DiscoveredBundleSet& discovered, bool countFound, bool countClaims)
+    loadDiscoveredBundles(const DiscoveredBundleSet& discovered,
+                          bool countFound,
+                          bool countClaims,
+                          std::vector<FailedLoad>* failures = nullptr)
 {
     // Load all bundles eagerly, once, at registration time; classifyBundle()
     // decides each outcome. Three failures get a synthetic failing test
@@ -436,6 +444,11 @@ inline std::optional<std::vector<LoadedBundle>>
         if(auto* failed = std::get_if<FailedLoad>(&outcome))
         {
             HIPDNN_PLUGIN_LOG_ERROR(failed->message);
+            if(failures != nullptr)
+            {
+                failures->push_back(std::move(*failed));
+                continue;
+            }
             registerSyntheticBundleTest(failed->suiteName,
                                         failed->testName,
                                         SyntheticOutcome::FAIL,
@@ -616,6 +629,58 @@ inline BundleRegistrationStats
 
     HIPDNN_PLUGIN_LOG_INFO("Registered " << bundles->size() << " bundle test(s)");
     return stats;
+}
+
+/// The loaded bundles and the failed loads as the cases --list-candidates lists, in that order.
+/// A failed load is listed with its diagnostic: a case that was written and cannot load must
+/// read as an error, not as a case that was never there.
+inline std::vector<ListingCase> toListingCases(const std::vector<LoadedBundle>& bundles,
+                                               const std::vector<FailedLoad>& failures)
+{
+    std::vector<ListingCase> cases;
+    cases.reserve(bundles.size() + failures.size());
+    for(const auto& bundle : bundles)
+    {
+        cases.push_back(
+            {bundle.fullName(), bundle.jsonPath.string(), bundle.bundle, std::string()});
+    }
+    for(const auto& failure : failures)
+    {
+        cases.push_back(
+            {failure.suiteName + "." + failure.testName, failure.bundle, nullptr, failure.message});
+    }
+    return cases;
+}
+
+/// The cases this run would execute, for --list-candidates: the same discovery and the same
+/// --gtest_filter selection as registerBundleTests(), loaded the same way, but registering no
+/// test. Read after InitGoogleTest, which parses the filter.
+inline std::vector<ListingCase> collectListingCases()
+{
+    BundleRegistrationStats stats;
+
+    auto discovered = detail::discoverDataDirBundles();
+    if(!discovered.has_value())
+    {
+        return {};
+    }
+
+    // Not authoring and not observing: a listing neither writes claims nor counts coverage.
+    discovered->bundles = detail::selectBundlesToLoad(std::move(discovered->bundles),
+                                                      GTEST_FLAG_GET(filter),
+                                                      /*writing=*/false,
+                                                      /*observing=*/false,
+                                                      stats,
+                                                      supportClaimCoverage());
+    if(discovered->bundles.empty())
+    {
+        return {};
+    }
+
+    std::vector<FailedLoad> failures;
+    const auto bundles = detail::loadDiscoveredBundles(
+        *discovered, /*countFound=*/false, /*countClaims=*/false, &failures);
+    return toListingCases(bundles.value_or(std::vector<LoadedBundle>{}), failures);
 }
 
 } // namespace hipdnn_integration_tests::bundle

@@ -665,6 +665,37 @@ TEST_F(TestOutcomeReport, FinishedRecordNamesTheDefaultsWhenTheCaseSetNothing)
     EXPECT_FALSE(identity.inputs.is_object()) << identity.inputs.dump();
 }
 
+// Bug caught: a catalog sweep whose records do not say which candidate each case built, so a
+// failure cannot be tied to a candidate; or a record that names a candidate for a case that
+// forced none.
+TEST_F(TestOutcomeReport, FinishedRecordNamesTheCandidateTheCaseForced)
+{
+    const auto tagged = bundle();
+    tagged->metadata.engineVariant = EngineVariantSpec{"tile_128x64", {}};
+    engineWrites(_mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, tagged, &results);
+
+    EXPECT_EQ(onlyFinished().identity.candidate, std::optional<std::string>("tile_128x64"));
+    EXPECT_EQ(nlohmann::json::parse(finishedRecordJson(onlyFinished())).at("candidate"),
+              "tile_128x64");
+}
+
+TEST_F(TestOutcomeReport, FinishedRecordHasNoCandidateWhenTheCaseForcedNone)
+{
+    engineWrites(_mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, bundle(), &results);
+
+    EXPECT_FALSE(onlyFinished().identity.candidate.has_value());
+    EXPECT_FALSE(nlohmann::json::parse(finishedRecordJson(onlyFinished())).contains("candidate"));
+}
+
 // ---------------------------------------------------------------------------
 // placement "under": the backend must say BAD_PARAM for the named tensor, and only that is a pass
 // ---------------------------------------------------------------------------

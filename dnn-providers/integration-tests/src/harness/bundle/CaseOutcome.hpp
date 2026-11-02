@@ -64,6 +64,10 @@ struct CaseIdentity
     std::string validator;
     std::string placement;
     std::optional<int64_t> placementUid;
+    /// The catalog candidate the case asked the engine to build (`metadata.engine_variant`):
+    /// its id, or "default" for the engine's own pick. Unset when the case names none, and then
+    /// left out of the record.
+    std::optional<std::string> candidate;
     /// The fill recipes the harness parsed from `metadata.inputs`, keyed by tensor uid; null
     /// when the case sets none. Lets a passing run show that its recipe reached the harness.
     nlohmann::json inputs;

@@ -339,6 +339,10 @@ private:
             identity.validator = toString(meta.validator);
             identity.placement = toString(meta.placement);
             identity.placementUid = meta.placementUid;
+            if(meta.engineVariant.has_value())
+            {
+                identity.candidate = meta.engineVariant->id;
+            }
             if(meta.inputs.has_value())
             {
                 identity.inputs = _inputFillRecipes.toJson();
