@@ -122,8 +122,8 @@ LLVM_FLAVOR_LLVM24 = "llvm24"
 
 # Compiler lanes, ordered by the first LLVM major they qualify. A lane names
 # the compiler contract; its emission profile below names the LLVM-IR structure.
-# Keeping those concepts separate lets llvm23 and llvm24 share IR deliberately
-# without silently treating every future compiler as compatible.
+# Keeping those concepts separate lets compiler lanes share only the structural
+# facts qualification proves, without treating every future compiler as compatible.
 _LLVM_FLAVOR_LADDER: tuple[tuple[int, str], ...] = (
     (0, LLVM_FLAVOR_LLVM20),
     (21, LLVM_FLAVOR_LLVM22),
@@ -180,12 +180,14 @@ class _LlvmDeclarationAbi(enum.Enum):
     LLVM20 = "llvm20"
     LLVM22 = "llvm22"
     LLVM23 = "llvm23"
+    LLVM24 = "llvm24"
 
 
 class _LlvmEmissionCapability(enum.Enum):
     """Structural operations admitted by an emission profile."""
 
     LLVM23_TARGET_OPS = "llvm23_target_ops"
+    NAMED_BARRIER_AS15 = "named_barrier_as15"
 
 
 @dataclass(frozen=True)
@@ -217,23 +219,30 @@ _PROFILE_LLVM23 = _LlvmEmissionProfile(
     _LlvmDeclarationAbi.LLVM23,
     frozenset({_LlvmEmissionCapability.LLVM23_TARGET_OPS}),
 )
+_PROFILE_LLVM24 = _LlvmEmissionProfile(
+    _DATALAYOUT_LLVM23,
+    LlvmDatalayoutKind.P8_INDEXED,
+    _LlvmDeclarationAbi.LLVM24,
+    frozenset(
+        {
+            _LlvmEmissionCapability.LLVM23_TARGET_OPS,
+            _LlvmEmissionCapability.NAMED_BARRIER_AS15,
+        }
+    ),
+)
 
-# LLVM 24 is a distinct qualified compiler lane with no structural IR delta
-# from LLVM 23 in the qualified toolchain. Sharing the object makes that an
-# executable decision rather than a copied set of coincidentally equal fields.
+# LLVM 24 retains LLVM 23's datalayout and target-op surface, but its named
+# barrier intrinsics changed their pointer ABI from addrspace(3) to addrspace(15).
 _LLVM_EMISSION_PROFILES: dict[str, _LlvmEmissionProfile] = {
     LLVM_FLAVOR_LLVM20: _PROFILE_LLVM20,
     LLVM_FLAVOR_LLVM22: _PROFILE_LLVM22,
     LLVM_FLAVOR_LLVM23: _PROFILE_LLVM23,
-    LLVM_FLAVOR_LLVM24: _PROFILE_LLVM23,
+    LLVM_FLAVOR_LLVM24: _PROFILE_LLVM24,
 }
 
 # One canonical lane per distinct structural profile, plus explicit aliases.
-# Golden writers use these to avoid storing identical hash documents. Keep the
-# mapping reviewable: aliasing is a qualification decision, not object identity.
-LLVM_EMISSION_ALIASES: dict[str, str] = {
-    LLVM_FLAVOR_LLVM24: LLVM_FLAVOR_LLVM23,
-}
+# LLVM 24 now has a declaration/call-shape delta and therefore cannot alias 23.
+LLVM_EMISSION_ALIASES: dict[str, str] = {}
 LLVM_EMISSION_FLAVORS: tuple[str, ...] = tuple(
     flavor for flavor in LLVM_FLAVORS if flavor not in LLVM_EMISSION_ALIASES
 )

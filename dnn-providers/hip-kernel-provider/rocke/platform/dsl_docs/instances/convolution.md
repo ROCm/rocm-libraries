@@ -843,6 +843,7 @@ class DirectDepthwiseTiledSpec:
     block_waves: int = 1    # waves per block (64 channels each)
     unroll_rows: bool = False
     wave_size: int = 64
+    dgrad: bool = False     # stride-1 depthwise dgrad, rotated filter (below)
     cpl: int = 1            # channels per lane: 1, 2 or 4 (see DirectDepthwiseSpec)
 ```
 
@@ -876,6 +877,29 @@ The sweeps skip a row-streaming config that would spill
 Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`;
 the wave32 configs 166-178 cover both depthwise forward kernels at wave size
 32, including their channel-packed (`cpl` 2 and 4) forms.
+
+**Rotated-filter dgrad mode (`dgrad=True`).** A stride-1 depthwise dgrad is the
+forward correlation of dY with the filter rotated by 180 degrees, at padding
+`KH-1-PAD` rows and `KW-1-PAD_W` columns. In this mode the kernel takes the
+dgrad kernarg block, reads dY (`Ho x Wo`) and writes dX (`H x W`): the extents
+and the A-side strides swap roles, the weight-row loads read row `KH-1-r`
+reversed, and the epilogue addresses dX through its kernarg strides. The grid
+tiles `H x W` (`out_hw`), and the kernel name gains the `dg` flag (and a
+`p{PAD}x{PAD_W}` part when the two paddings differ). Only one
+filter row is register-resident, so the mode takes filters up to
+`_DW_TILED_DGRAD_MAX_K = 64` on a side, including non-square ones such as
+51x5 / 5x51, and it is the one direct kernel that accepts a per-axis padding
+(`DirectConvProblem.pad_w`, -1 meaning `PAD`; `PAD_W` is the effective column
+padding and `Wo` uses it; a `pad_w` below -1 is refused). It requires stride 1,
+one channel per lane (`cpl = 1`), `PAD <= KH-1` and `PAD_W <= KW-1`; the forward mode refuses a problem whose `PAD_W != PAD`, and
+`direct_spec_for_problem` refuses such a problem for every other variant. AOT
+variant `direct_depthwise_tiled_dgrad` (`DIRECT_WAVE_PARAMETRIC`): 13x13 to
+31x31 and 51x5 / 5x51 at "same" padding, `DW_TILED_DGRAD_BLOCK_W` x
+`DW_TILED_DGRAD_BLOCK_H`. Like `conv_direct_dgrad_wmma` it is served by the
+direct-conv AOT cache; there is no dispatcher route. Both engines build it
+(C++ `rocke_build_direct_depthwise_tiled` with `dgrad = true`); parity configs
+186-190 and 197, and 191-193 and 198 are specs both engines reject (per-axis
+padding on the forward mode, stride 2, a 65-row filter, `pad_w = -2`).
 
 ### Windowed Depthwise Dgrad Kernel (`DirectDepthwiseDgradWindowedSpec`)
 
@@ -1017,6 +1041,53 @@ Parity gate: configs 0-19 of
 `dot2` forms, 11-19 the MFMA form, including the gfx942, `groups % 8 != 0` and
 `block_h = 0` configs both engines reject). Case study:
 [`depthwise_windowed_dgrad_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/depthwise_windowed_dgrad_case_study.md).
+
+### Row-Streaming Depthwise Dgrad Kernel (`DirectDepthwiseDgradStreamSpec`)
+
+`DirectDepthwiseDgradStreamSpec` / `build_direct_depthwise_dgrad_streaming`
+(C++ `rocke_build_direct_depthwise_dgrad_streaming`, header
+`rocke/instance_conv_direct_grouped_dw_dgrad.h`). Backward-data for depthwise
+convolution (`cpg == kpg == 1`) at any stride; AOT cache variant
+`direct_depthwise_dgrad`.
+
+```python
+@dataclass(frozen=True)
+class DirectDepthwiseDgradStreamSpec:
+    problem: DirectConvProblem
+    name: str = "direct_depthwise_dgrad_stream"
+    block_w: int = 8        # dX columns per block
+    block_waves: int = 1
+    wave_size: int = 64
+    cpl: int = 1            # channels per lane: 1, 2, 4 or 8
+```
+
+dY rows stream through a runtime loop, `KH` rows per iteration with a few rows
+prefetched, into `stride * KH` circular accumulator slots per dX column; a dX
+row is stored once its last tap has landed, and a second loop flushes the rows
+past the last dY row. The `KH x KW` weights are preloaded.
+
+`cpl > 1` (channel packing) gives every lane `cpl` adjacent channels: dY rows
+load and dX rows store as one `cpl`-wide vector per lane and every tap is
+`cpl / 2` packed `<2 x f32>` FMAs over channel pairs; `cpl == 1` emits the
+scalar kernel unchanged. `groups` must be a multiple of `cpl`, `block_ch`
+grows by `cpl`, and the validator bounds the packed weights
+(`cpl * KH * KW <= 200`) and accumulator slots
+(`cpl * block_w * KH <= _DW_DGRAD_CPL_MAX_ACC = 192`). Those are ceilings,
+not a spill model: the AOT grid adds the `DW_DGRAD_CPL_GRID` knobs and drops
+the entries whose per-lane estimate `cpl * KH * (2 * KW + block_w / stride)`
+exceeds `DW_DGRAD_PACKED_LIVE_BUDGET` (288; 448 for four-wave blocks on
+gfx1250, which spills in no smaller block), calibrated by compiling the grid.
+The kernel name gains `cpl{N}`.
+
+Grid: `(ceil(W / block_w), ceil(groups / block_ch), N)` with
+`block_ch = block_waves * wave_size * cpl`.
+
+Parity gate: configs 179-185 in
+`library/tests/parity/conv_direct_grouped_emit.{c,py}` (scalar and `cpl` 2 / 4
+/ 8, fp16 and bf16, stride 1 and 2, wave32 and wave64), and 194-196 and
+199-200 are specs both engines reject (`groups % cpl != 0`, `cpl = 3`, the
+accumulator bound, a per-axis padding, `pad_w = -3`). The kernel offsets
+columns by `PAD`, so it refuses a problem whose `PAD_W != PAD`.
 
 ## Direct Non-grouped Convolution
 

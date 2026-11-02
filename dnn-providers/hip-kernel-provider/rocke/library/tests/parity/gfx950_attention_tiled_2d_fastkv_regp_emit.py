@@ -47,6 +47,9 @@ _CONFIGS = {
     3: dict(_BASE, use_transposed_half_local_pv=True, use_mfma32_skip_legacy_qreg=True),
     4: dict(_BASE, use_agpr_alloc_zero=True, use_transposed_half_local_pv=True),
     5: dict(_BASE, use_grouped_kv2_softmax=True),
+    # LSE output through the wrapper: trailing lse_ptr and the wrapper's own
+    # kernel name ("..._lse_fastkv_regp").
+    6: dict(_BASE, emit_lse=True),
 }
 
 

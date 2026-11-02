@@ -228,7 +228,7 @@ static bool
                     p->dil_h,
                     p->dil_w);
     const int Ho = p->H + 2 * p->PAD - p->KH + 1;
-    const int Wo = p->W + 2 * p->PAD - p->KW + 1;
+    const int Wo = p->W + 2 * rocke_direct_conv_problem_pad_w(p) - p->KW + 1;
     if(p->PAD < 0 || Ho <= 0 || Wo <= 0)
         DW_WIN_FAIL("degenerate geometry (PAD=%d, Ho=%d, Wo=%d)", p->PAD, Ho, Wo);
     if(spec->block_w < 1)
