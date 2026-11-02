@@ -72,7 +72,7 @@ struct KernelDefinition
     /// built anywhere else (a test, say). Shared and immutable, so copying a definition
     /// copies a pointer. A reader checks `preparedBy` against its own function before
     /// trusting the payload's type, and decodes the metadata itself otherwise.
-    std::shared_ptr<const void> prepared;
+    std::shared_ptr<const void> prepared{};
     KernelPrepareFn preparedBy = nullptr;
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const

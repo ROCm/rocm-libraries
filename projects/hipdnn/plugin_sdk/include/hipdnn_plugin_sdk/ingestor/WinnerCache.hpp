@@ -112,6 +112,9 @@ struct RecordedKernelKeyHash
     }
 };
 
+// NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter) - identity adapter so
+// kernelOf(Entry) works uniformly for both Entry=KernelDefinition and Entry=KernelDefinition*;
+// callers only ever pass in lvalues drawn from a CatalogView/vector, never a temporary.
 inline const KernelDefinition& kernelOf(const KernelDefinition& kernel)
 {
     return kernel;
@@ -222,8 +225,7 @@ inline bool recordCoversView(const WinnerRecord& record,
 /// would; the kernels are indexed once so the whole call is linear rather than quadratic.
 /// orderByRecord() over a catalog view: the same order, as pointers.
 inline std::vector<const KernelDefinition*>
-    orderByRecord(const WinnerRecord& record,
-                  const std::vector<const KernelDefinition*>& kernels)
+    orderByRecord(const WinnerRecord& record, const std::vector<const KernelDefinition*>& kernels)
 {
     return detail::orderByRecordImpl(record, kernels);
 }

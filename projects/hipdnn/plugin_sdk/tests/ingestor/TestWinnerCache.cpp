@@ -63,18 +63,18 @@ TEST(TestIngestorWinnerCache, AViewOfTheCandidatesIsCoveredAndOrderedAsTheCandid
     const auto stale = definitionFor(0x03, 0xF1);
     const WinnerRecord record{entryFor(second, 1.0), entryFor(first, 2.0)};
     const std::vector<KernelDefinition> kernels{first, second};
-    const std::vector<const KernelDefinition*> view{&kernels[0], &kernels[1]};
+    const std::vector<const KernelDefinition*> view{kernels.data(), &kernels[1]};
 
     EXPECT_EQ(recordCoversView(record, view), recordCovers(record, view));
     const auto ordered = orderByRecordView(record, view);
     ASSERT_EQ(ordered.size(), 2U);
     EXPECT_EQ(ordered[0], &kernels[1]);
-    EXPECT_EQ(ordered[1], &kernels[0]);
+    EXPECT_EQ(ordered[1], kernels.data());
     ASSERT_TRUE(orderIfFullyCoveredView(record, view).has_value());
     EXPECT_EQ(*orderIfFullyCoveredView(record, view), ordered);
 
     // A candidate the record does not cover declines it, as for copies.
-    const std::vector<const KernelDefinition*> wider{&kernels[0], &kernels[1], &stale};
+    const std::vector<const KernelDefinition*> wider{kernels.data(), &kernels[1], &stale};
     EXPECT_FALSE(recordCoversView(record, wider));
     EXPECT_FALSE(orderIfFullyCoveredView(record, wider).has_value());
 }

@@ -911,7 +911,7 @@ TEST(TestGfx950ConvFwdGeometry, NongroupedTileWidthsAreTheOnesASweepOfWoTries)
 {
     // tile_w_candidates in conv_direct_nongrouped.py: the exact divisors of Wo among one
     // to six atoms, else the first width with the least waste.
-    for(const auto [tileW, wo, atom, fits] : std::vector<std::tuple<int, int, int, bool>>{
+    for(const auto& [tileW, wo, atom, fits] : std::vector<std::tuple<int, int, int, bool>>{
             {32, 96, 32, true},
             {96, 96, 32, true},
             {64, 96, 32, false},
