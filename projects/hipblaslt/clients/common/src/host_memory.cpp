@@ -165,7 +165,7 @@ std::optional<size_t> host_memory_limit_override()
     return limit;
 }
 
-size_t available_host_memory_bytes(const HostMemorySources& sources)
+std::optional<size_t> available_host_memory_bytes(const HostMemorySources& sources)
 {
     std::optional<size_t> available;
 #ifdef _WIN32
@@ -186,5 +186,5 @@ size_t available_host_memory_bytes(const HostMemorySources& sources)
     // When the system cannot be read, the limit is the only budget there is.
     if(auto limit = host_memory_limit_override())
         return std::min(available.value_or(*limit), *limit);
-    return available.value_or(0);
+    return available;
 }

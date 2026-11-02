@@ -18,9 +18,10 @@ struct HostMemorySources
 // Host memory this process can still allocate, in bytes: the smaller of MemAvailable and the
 // headroom under each cgroup memory limit from the process's cgroup up to the root. Inside a
 // container /proc/meminfo describes the whole host, so the cgroup limit is often the smaller.
-// Returns 0 when /proc/meminfo cannot be read. On Windows, returns the available physical
-// memory. Either way, HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT caps the result.
-size_t available_host_memory_bytes(const HostMemorySources& sources = {});
+// On Windows, the available physical memory. Either way, HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT caps
+// the result. Returns nothing when the system cannot be read and no limit is set; 0 means that
+// no memory is left, for example in a full container.
+std::optional<size_t> available_host_memory_bytes(const HostMemorySources& sources = {});
 
 // HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT, when set, caps the host memory the test and bench clients
 // assume they can allocate: on a machine with no cgroup limit, or to make a test skip. It can only

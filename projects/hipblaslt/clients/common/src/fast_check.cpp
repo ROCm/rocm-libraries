@@ -2013,9 +2013,10 @@ std::string fast_check_memory_shortfall(size_t                                  
             return "this case needs " + gib(device_bytes) + " of device memory and "
                    + gib(free_bytes) + " is free";
 
-        const size_t available = available_host_memory_bytes();
-        if(available > 0 && host_bytes > available)
-            return "this case needs " + gib(host_bytes) + " of host memory and " + gib(available)
+        // When the system cannot report its memory, let the case run.
+        const std::optional<size_t> available = available_host_memory_bytes();
+        if(available && host_bytes > *available)
+            return "this case needs " + gib(host_bytes) + " of host memory and " + gib(*available)
                    + " is available";
         return {};
     };

@@ -101,10 +101,13 @@ public:
     size_t get_available_host_memory()
     {
 #ifdef __linux__
-        size_t available = available_host_memory_bytes();
-        if(available == 0)
+        std::optional<size_t> available = available_host_memory_bytes();
+        if(!available)
+        {
             hipblaslt_cerr << "Error getting available host memory" << std::endl;
-        return available;
+            return 0;
+        }
+        return *available;
 #elif defined(_WIN32)
         MEMORYSTATUSEX memStatus = {};
         memStatus.dwLength = sizeof(memStatus);

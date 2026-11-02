@@ -305,7 +305,7 @@ namespace
     TEST(HostMemory_pre_checkin, query_handles_missing_and_unexpected_files)
     {
         FakeHost host;
-        EXPECT_EQ(available_host_memory_bytes(host.sources), 0u) << "no meminfo";
+        EXPECT_EQ(available_host_memory_bytes(host.sources), std::nullopt) << "no meminfo";
 
         host.mem_available(8 * kGiB);
         host.write(host.sources.self_cgroup, "0::/job\n");
@@ -323,10 +323,11 @@ namespace
         std::stringstream text;
         text << std::ifstream(HostMemorySources().meminfo).rdbuf();
         meminfo_only.write(meminfo_only.sources.meminfo, text.str());
-        const size_t available = available_host_memory_bytes();
-        EXPECT_GT(available, 0u);
+        const std::optional<size_t> available = available_host_memory_bytes();
+        ASSERT_TRUE(available.has_value());
+        EXPECT_GT(*available, 0u);
         // MemAvailable moves between the two reads, so allow 1 GiB of drift.
-        EXPECT_LE(available, available_host_memory_bytes(meminfo_only.sources) + kGiB);
+        EXPECT_LE(*available, available_host_memory_bytes(meminfo_only.sources).value_or(0) + kGiB);
     }
 
     // Sets HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT for one scope.
@@ -396,6 +397,16 @@ namespace
         ScopedLimit limit("1G");
         std::string why = fast_check_memory_shortfall(0, 2 * kGiB);
         EXPECT_NE(why.find("needs 2 GiB of host memory and 1 GiB is available"), std::string::npos)
+            << why;
+    }
+
+    TEST(HostMemory_pre_checkin, no_host_memory_left_makes_the_preflight_skip)
+    {
+        // A budget of 0, from a full container or this limit, means nothing is left. It differs
+        // from a budget the system could not report, under which the preflight lets the case run.
+        ScopedLimit limit("0");
+        std::string why = fast_check_memory_shortfall(0, kGiB);
+        EXPECT_NE(why.find("needs 1 GiB of host memory and 0 GiB is available"), std::string::npos)
             << why;
     }
 #endif
