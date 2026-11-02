@@ -204,8 +204,9 @@ valid answer.
   owner's performance or accuracy data? If not, record "no ground truth supplied".
 - **Knobs:** after enumerating the variant space below, ask whether to exclude or
   prioritise knobs or narrow cells, using `--plan-space`'s exact instance counts; above
-  `reduction.aot_budget_per_arch` the user narrows them before any pack. Estimate compile
-  time as instances × seconds per kernel compile, measured on the build machine.
+  `reduction.aot_budget_per_arch` the user narrows them, or approves the count in
+  `$EVIDENCE`, before any pack. Estimate compile time as instances × seconds per kernel
+  compile, measured on the build machine.
 
 **Owner data.** Set `OWNER_DATA` to the owner's file (CSV with a header, or a JSON list
 of rows) and convert each row into a graph of a separate `ground_truth` corpus. Pass one
@@ -383,7 +384,7 @@ appears:
 | Census call gated on the predicate, `PACK_NAME product ARCHES <arch>` | `$PROVIDER/src/tests/CMakeLists.txt` | The census row above, for a shipped bundle |
 | Device test source in `hip_kernel_provider_integration_tests` | `$PROVIDER/src/integration_tests/CMakeLists.txt` (`IntegrationGpuGfx950AttentionDenseKnobs.cpp`) | Explicit-selection cases: forced knobs, exact kernel ID, CPU reference; see stage 5 |
 | `add_external_integration_test_target(TARGET_NAME hip_kernel_provider_<engine>_gpu_ref_integration_tests … ENGINE_NAME … REFERENCE_EXECUTOR gpu GTEST_FILTER …)` in the arch's census shard (`hkp_reserve_census_shard`) | `$PROVIDER/src/integration_tests/CMakeLists.txt` | The engine-pinned bundle run stage 5 executes |
-| `<provider>-<engine>-external-integration-check` with `TEST_CONFIG` and `TEST_CATEGORIES_YAML`, in the same shard | `$PROVIDER/src/CMakeLists.txt` | The engine-pinned tiered suites |
+| `<provider>-<engine>-external-integration-check` with `TEST_CONFIG` and `TEST_CATEGORIES_YAML`, in the same shard; the same TOML also goes to `hkp_reserve_census_shard(... FILES <toml>)` | `$PROVIDER/src/CMakeLists.txt` | The engine-pinned tiered suites. Without `FILES`, configuration fails; the `hkp_reserve_census_shard` header in `HkpPackaging.cmake` says why |
 | Categories YAML variable, its `EXISTS` check and list entry | `$PROVIDER/CMakeLists.txt` | Feeds the YAML categorization; any listed file missing drops the whole provider to legacy CTest labels |
 | New files `hipkernel_<Engine>_test_categories_integration.yaml` and `config/hipkernel_<Engine>.toml` | `$PROVIDER/` | Tier patterns and the per-engine test config |
 | Bundles plus `.support.json` claims naming the engine and arch | `dnn-providers/integration-tests/integration-test-bundles/{quick,standard}/<Op>/…` | Without matching bundles the engine-pinned target selects zero cases |
@@ -830,6 +831,26 @@ provider's default installed CTest root is **`$INSTALL/bin/hip_kernel_provider`*
 `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests`, which is the ASM SDPA engine
 reached by a different path and never ingestor evidence.
 
+A build tree registers the same engine-pinned suites a second time, with absolute paths,
+under `$BUILD/dnn-providers/hip-kernel-provider/src`. The engine label is the engine ID
+with every character outside `[A-Za-z0-9_.-]` mapped to `_`:
+
+```bash
+ctest --test-dir "$BUILD/dnn-providers/hip-kernel-provider/src" -N -L hipkernel_Gfx950AttentionDense
+```
+
+The census shard runs in either tree. In the build tree it is
+`$BUILD/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider/census/<arch>`
+(`$BUILD/bin/...` on Windows), the same relative path as under `$INSTALL`:
+
+```bash
+ctest --test-dir "$BUILD/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider/census/gfx950" \
+  -N -L hipkernel_Gfx950AttentionDense
+```
+
+The provider's `install_CTestTestfile.cmake` (or `CTestTestfile.cmake.install`) in the build
+tree is a staging file for the installed root; CTest does not read it there.
+
 Other bundles in the production root may register their own targets; they are not
 evidence for yours. Replace `<your-bundle-ctest-target>` with the name your own
 registration creates. A gfx942 dense bundle would be shaped like
@@ -989,6 +1010,19 @@ among variants sharing its other knobs, which divide every shape a larger tile d
    selection being shipped. A `space: full` selection ships with the manifest's flip, per
    the README's *Updating the captured catalog*.
 
+**Catalog size.** In the kernel ingestor, a cold benchmarked plan build prepares every
+candidate left after knob and workspace filtering, so its cost grows with the candidate
+count. Keep the catalog small enough to stay buildable and searchable; when it grows too
+large, reduce it with this stage. A winner cache cannot ship with the engine: it serves
+only the hipDNN build that wrote it and needs a writable `HIPDNN_CACHE_DIR`
+(`HIPDNN_FORCE_BENCHMARKING` in `projects/hipdnn/docs/Environment.md`),
+so users of every new build pay the cold build. Nothing in CI or the build checks
+`reduction.aot_budget_per_arch`. This stage's `variant_reduce.py` and the stage 7
+`generate.py --strict` dry run gate on it, as does `registry_enumerator.py --strict`, and
+`generate.py` warns on every run. The budget counts kernels per pack per arch, but
+build cost follows the per-graph candidate count N, so a catalog under budget can still
+have a large N.
+
 **Explicitly untuned engine.** To show what the shipped selection leaves on the table,
 measure the cold heuristic against `dnn-benchmark --autotune` (fresh `--cache-dir` per
 phase, the cohort rules in [workloads.md](workloads.md)) and report the gap and the
@@ -1052,13 +1086,26 @@ status means — `SWEEP_DONE`, `SWEEP_TIMING_ONLY`, `SWEEP_INCOMPLETE` — and w
 does and does not make a single cohort. With ground truth, rerun stage 6's `compare` on
 this output with `--strict`: exit 1 means a row is outside the margin, missing, declined
 in any timing round, failing correctness or without a passing correctness verdict, so fix
-it or record the user's acceptance of that row in `$EVIDENCE`. Check the budget the same way; a dry run writes
-nothing, and exit 1 means a pack arch is over `reduction.aot_budget_per_arch`, so reduce
-further or justify the count in `$EVIDENCE`:
+it or record the user's acceptance of that row in `$EVIDENCE`. Check the budget the same
+way; a dry run writes nothing. Exit 1 is a refusal or an internal failure, so read stderr:
+`exceed the AOT budget and --strict is set` means a pack arch is over
+`reduction.aot_budget_per_arch`. Reduce further, or record the user's approval of the
+count in `$EVIDENCE`; once an approval is recorded, that exit 1 is expected:
 
 ```bash
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED" --dry-run --strict
 ```
+
+**Large catalogs: plan-build measurement.** Before shipping a large catalog (stage 6's
+*Catalog size*), measure the cold plan-build time on the final installed selection with
+`HIPDNN_FORCE_BENCHMARKING=1`, `HIPDNN_LOG_LEVEL=info` and a fresh `HIPDNN_CACHE_DIR`.
+Judge "large" by the per-graph candidate count N in the engine log line
+`ingestor: engine '<name>' will benchmark N candidate(s) (M before knob filtering), ranked front <id>`
+and by the measured time, not by the per-arch kernel total. That build loads about N
+kpack modules (fewer where candidates share a code object, more where a multi-launch
+kernel names one per launch), and they stay resident for the life of the process. Keep
+the numbers in `$EVIDENCE` and summarise them on the Jira ticket. If the build is too slow
+or N is too large, reduce the selection (stage 6) and repeat.
 
 Harvest final phase results and available engine logs into the per-input outcome ledger,
 then join within each corpus/phase.

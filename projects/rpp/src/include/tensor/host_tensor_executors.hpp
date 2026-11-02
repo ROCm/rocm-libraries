@@ -1144,6 +1144,15 @@ RppStatus gaussian_filter_generic_host_single_image(T* srcPtr, RpptDescPtr srcDe
                                                     RppLayoutParams layoutParams,
                                                     rpp::Handle& handle);
 
+// -------------------- bilateral_filter --------------------
+
+template <typename T>
+RppStatus bilateral_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
+                                       RpptDescPtr dstDescPtr, Rpp32f* stdDevSpaceTensor,
+                                       Rpp32f* stdDevRangeTensor, Rpp32u kernelSize,
+                                       RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                       RppLayoutParams layoutParams, rpp::Handle& handle);
+
 // -------------------- box_filter --------------------
 
 template <typename T>

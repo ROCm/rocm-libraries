@@ -21,6 +21,7 @@ repository.
   .. grid-item-card:: Install
 
     * :doc:`Install rocALUTION <install/rocALUTION-install>`
+    * :doc:`Build rocALUTION from source <install/rocALUTION-build-from-source>`
 
 .. grid:: 2
   :gutter: 3

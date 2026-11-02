@@ -1057,6 +1057,18 @@ def _run_families(
 
 
 def main():
+    """Run the CLI without leaking its pinned flavor to in-process callers."""
+    previous_flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
+    try:
+        return _main()
+    finally:
+        if previous_flavor is None:
+            os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+        else:
+            os.environ["ROCKE_LLVM_FLAVOR"] = previous_flavor
+
+
+def _main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="ll", choices=["ll", "ir", "verify"])
     ap.add_argument(
