@@ -1323,6 +1323,7 @@ def run_config(cfg, tmp_dir, debug=False):
 # ---------------------------------------------------------------------------
 # Pytest
 # ---------------------------------------------------------------------------
+@pytest.mark.gpu
 @pytest.mark.gfx1250
 @pytest.mark.skipif(not HAS_GFX1250, reason=f"GL2 prefetch tests require gfx1250, found {GFX_TARGET}")
 class TestGL2PrefetchOffset:
