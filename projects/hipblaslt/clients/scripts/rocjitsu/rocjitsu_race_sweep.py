@@ -1072,6 +1072,21 @@ def convert_bench_input(client, stem, timeout, env):
     return execute_command(command, stem.with_suffix(".conversion.log"), timeout, env)
 
 
+# Native process groups run in their own sessions, so a signal to the runner
+# does not reach them. The runner's stop handler kills the groups listed here.
+_native_groups = set()
+
+
+def stop_native_processes(signum, frame):
+    """Kill running native process groups and exit; retained results allow resuming."""
+    for group in list(_native_groups):
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    os._exit(128 + signum)
+
+
 def execute_command(command, log, timeout, env):
     deadline = time.monotonic() + timeout
     with log.open("x", encoding="utf-8") as output:
@@ -1084,6 +1099,7 @@ def execute_command(command, log, timeout, env):
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+        _native_groups.add(process.pid)
         try:
             return process.wait(timeout=max(0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
@@ -1094,6 +1110,8 @@ def execute_command(command, log, timeout, env):
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
             raise
+        finally:
+            _native_groups.discard(process.pid)
 
 
 def run_queue(
@@ -2217,7 +2235,13 @@ def main():
     ):
         if getattr(args, key) is not None:
             setattr(args, key, getattr(args, key).resolve())
-    return run(args) if args.chunk_size is None else run_campaign(args)
+    stops = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+    previous = {signum: signal.signal(signum, stop_native_processes) for signum in stops}
+    try:
+        return run(args) if args.chunk_size is None else run_campaign(args)
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@ import csv
 import io
 import json
 import os
+import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -456,6 +458,38 @@ class SweepTests(unittest.TestCase):
             self.assertEqual(plan.catalogue_end(root, "gfx942"), 10)
             with self.assertRaisesRegex(ValueError, r"not in the catalogue: \[4\]"):
                 plan.make_plan(root, "gfx942", {}, 0, None, indices=[3, 4])
+
+    def test_stopping_the_runner_kills_native_process_groups(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "native.pid"
+            script = f"""
+import signal, sys, threading, time
+from pathlib import Path
+sys.path.insert(0, {str(Path(__file__).parent)!r})
+import rocjitsu_race_sweep as sweep
+signal.signal(signal.SIGTERM, sweep.stop_native_processes)
+command = ["sh", "-c", "echo $$ > {marker}; exec sleep 60"]
+threading.Thread(
+    target=sweep.execute_command, args=(command, Path({tmp!r}) / "log", 120, None), daemon=True
+).start()
+time.sleep(120)
+"""
+            runner = subprocess.Popen([sys.executable, "-c", script], env=os.environ)
+            for _ in range(200):
+                if marker.is_file() and marker.read_text().strip():
+                    break
+                time.sleep(0.05)
+            native = int(marker.read_text())
+            runner.send_signal(signal.SIGTERM)
+            self.assertEqual(runner.wait(timeout=30), 128 + signal.SIGTERM)
+            for _ in range(200):
+                try:
+                    os.kill(native, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail("Native process outlived the stopped runner")
 
     def test_campaign_runs_chunks_reuses_finished_ones_and_resumes_the_rest(self):
         with tempfile.TemporaryDirectory() as tmp:
