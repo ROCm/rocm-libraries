@@ -4165,17 +4165,19 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
     if(isFp8A && isFp8B && isShuffledScale)
         return false;
 
+    if(!(handle->useRocRoller == 1
+         || (handle->useRocRoller == -1
+             && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)))))
+        return false;
+
     // Properties rocRoller declines outright. Vetoing them here, rather than
     // letting the rocRoller entry points report an error, is what makes the
     // problem fall through to TensileLite. Every rocRoller call site shares
     // this predicate, so selection, support checks and the launch all agree on
-    // which backend owns the problem.
-    if(!rocRollerSupportsProblem(prob))
-        return false;
-
-    return handle->useRocRoller == 1
-           || (handle->useRocRoller == -1
-               && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)));
+    // which backend owns the problem. Asked last because it reports each
+    // refusal on stderr, which only a problem otherwise bound for rocRoller
+    // should produce.
+    return rocRollerSupportsProblem(prob);
 }
 
 namespace

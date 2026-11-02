@@ -9,10 +9,21 @@
 #include "solution_selection.hpp"
 #include "utility.hpp"
 
+#include <iostream>
+
 bool rocRollerSupportsProblem(const RocblasltContractionProblem& prob)
 {
-    if(prob.bias != nullptr || prob.batch_count != 1)
+    if(prob.bias != nullptr)
+    {
+        std::cerr << "rocRoller does not support bias" << std::endl;
         return false;
+    }
+
+    if(prob.batch_count != 1)
+    {
+        std::cerr << "rocRoller only supports 1 batch_count not " << prob.batch_count << std::endl;
+        return false;
+    }
 
     // Asked in the types hipBLASLt already uses, not a generator's: this target
     // builds without rocRoller's headers so that a checkout without
@@ -22,9 +33,21 @@ bool rocRollerSupportsProblem(const RocblasltContractionProblem& prob)
     // hip2RocRollerType, which throws on a format it cannot name.
     const auto scaleType = normalizeOperandType(prob.scale_type);
     if(scaleType != HIPBLASLT_DATATYPE_INVALID && scaleType != HIP_R_32F)
+    {
+        std::cerr << "rocRoller only supports F32 as scale type not "
+                  << hipDataType_to_string(scaleType) << std::endl;
         return false;
+    }
 
-    return genKernelType(prob).typeAcc == HIP_R_32F;
+    const auto typeAcc = genKernelType(prob).typeAcc;
+    if(typeAcc != HIP_R_32F)
+    {
+        std::cerr << "rocRoller only supports F32 accumulation, not "
+                  << hipDataType_to_string(typeAcc) << std::endl;
+        return false;
+    }
+
+    return true;
 }
 
 rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& prob,
