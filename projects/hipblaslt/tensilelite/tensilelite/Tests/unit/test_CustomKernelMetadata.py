@@ -367,6 +367,31 @@ def test_valid_parameters_reject_assert_size_equal_bad_map():
         checkParametersAreValid(("AssertSizeEqual", [{0: 1.5}]), validParameters)
 
 
+@pytest.mark.parametrize(
+    "key, tag", [("AssertStrideAMultiple", "StrideAMultiple"), ("AssertStrideBMultiple", "StrideBMultiple")]
+)
+def test_problem_predicate_emits_stride_multiple(key, tag):
+    pred = ProblemPredicate.FromOriginalKeyPair((key, {1: 4}))
+
+    assert pred is not None
+    assert pred.tag == tag
+    assert pred.index == 1
+    assert pred.value == 4
+    assert ProblemPredicate.FromOriginalKeyPair((key, {})) is None
+    assert ProblemPredicate.FromOriginalKeyPair((key, {1: -1})) is None
+    with pytest.raises(RuntimeError, match="must be a dict"):
+        ProblemPredicate.FromOriginalKeyPair((key, 4))
+
+
+def test_valid_parameters_stride_multiple():
+    checkParametersAreValid(("AssertStrideAMultiple", [{}, {1: 4}]), validParameters)
+    checkParametersAreValid(("AssertStrideBMultiple", [{1: 4}]), validParameters)
+    with pytest.raises(Exception, match="Multiple must be > 0"):
+        checkParametersAreValid(("AssertStrideAMultiple", [{1: 0}]), validParameters)
+    with pytest.raises(Exception, match="Multiple must be > 0"):
+        checkParametersAreValid(("AssertStrideBMultiple", [{1: -2}]), validParameters)
+
+
 def _write_minimal_yaml_with_predicate(yaml_path, predicate_value):
     yaml_path.write_text(dedent(f"""\
         BenchmarkProblems:
@@ -411,6 +436,85 @@ def test_parse_tensile_yaml_copies_assert_size_equal(tmp_path):
     config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
 
     assert config["AssertSizeEqual"] == {0: 1}
+
+
+def test_stride_multiple_round_trips_from_yaml_to_loader(tmp_path):
+    yaml_path = tmp_path / "stride_multiple.yaml"
+    yaml_path.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - CustomKernel:
+                - name: predicated_kernel
+                  args: []
+                  macrotile: [256, 256, 64]
+                  threads: [256, 1, 1]
+                  grid: [TilesX, TilesY, One]
+              - AssertStrideAMultiple: [{1: 4}]
+              - AssertStrideBMultiple: [{1: 4}]
+        """))
+
+    config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
+    rendered = build_custom_config_yaml(origin="test", config=config)
+
+    assert "AssertStrideAMultiple: { 1: 4 }" in rendered
+    assert "AssertStrideBMultiple: { 1: 4 }" in rendered
+
+    write_kernel(tmp_path / "stride_multiple.s", f"""\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 16, 1]
+          AssertStrideAMultiple: {config["AssertStrideAMultiple"]}
+          AssertStrideBMultiple: {config["AssertStrideBMultiple"]}
+        """)
+    loaded = getCustomKernelConfig("stride_multiple", {}, str(tmp_path))
+
+    assert loaded["AssertStrideAMultiple"] == {1: 4}
+    assert loaded["AssertStrideBMultiple"] == {1: 4}
+
+
+def test_mx_scale_format_round_trips_from_yaml_to_loader(tmp_path):
+    yaml_path = tmp_path / "mx_scale_format.yaml"
+    yaml_path.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - CustomKernel:
+                - name: swizzled_kernel
+                  args: []
+                  macrotile: [256, 256, 64]
+                  threads: [256, 1, 1]
+                  grid: [TilesX, TilesY, One]
+              - MXScaleFormat: [HostPreSwizzle]
+        """))
+
+    config = _parse_tensile_yaml(str(yaml_path), "swizzled_kernel")
+    rendered = build_custom_config_yaml(origin="test", config=config)
+
+    assert "MXScaleFormat: HostPreSwizzle" in rendered
+
+    write_kernel(tmp_path / "swizzled_kernel.s", f"""\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 16, 1]
+          MXScaleFormat: {config["MXScaleFormat"]}
+        """)
+    write_kernel(tmp_path / "plain_kernel.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+        """)
+
+    swizzled = getCustomKernelConfig("swizzled_kernel", {}, str(tmp_path))
+    plain = getCustomKernelConfig("plain_kernel", {}, str(tmp_path))
+
+    assert swizzled["MXScaleFormat"] == "HostPreSwizzle"
+    assert plain.get("MXScaleFormat", "NoSwizzle") == "NoSwizzle"
 
 
 def test_parse_tensile_yaml_rejects_multi_valued_predicate(tmp_path):
@@ -1297,6 +1401,23 @@ def test_get_custom_kernel_config_respects_explicit_custom_kernel(tmp_path):
     assert config["CustomKernel"]["grid"] == ["TilesX", "TilesY", "One"]
 
 
+def test_get_custom_kernel_config_keeps_wide_skinny_grid(tmp_path):
+    # The orientation-independent skinny grid is passed through to the C++ block.
+    write_kernel(tmp_path / "k.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          CustomKernel:
+            args: []
+            macrotile: [256, 4, 64]
+            threads: [256, 1, 1]
+            grid: [TilesWide, TilesSkinny, Batch]
+        """)
+    config = getCustomKernelConfig("k", {}, str(tmp_path))
+    assert config["CustomKernel"]["grid"] == ["TilesWide", "TilesSkinny", "Batch"]
+
+
 def test_validate_metadata_tensile_missing_internal_support_params(tmp_path):
     write_kernel(tmp_path / "k.s", """\
           ProblemType: {}
@@ -1634,3 +1755,215 @@ def test_metadata_loader_matches_pure_python_safe_loader():
     expected = yaml.load("\n".join(lines[start:end]), Loader=yaml.SafeLoader)
 
     assert ck_mod._readEmbeddedYaml(_LARGE_METADATA_KERNEL) == expected
+
+
+# ---------------------------------------------------------------------------
+# AssertTensorBytesLessThan, divisor validation at emission, grids, kStep
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("value", [1, 4294967296, -1])
+def test_tensor_bytes_limit_accepts_positive_int_and_skip(value):
+    checkParametersAreValid(("AssertTensorBytesLessThan", [value]), validParameters)
+
+
+@pytest.mark.parametrize("value", [0, -2, 1.5, "4294967296", True, {3: 4}])
+def test_tensor_bytes_limit_rejects_everything_else(value):
+    with pytest.raises(Exception, match="positive int"):
+        checkParametersAreValid(("AssertTensorBytesLessThan", [value]), validParameters)
+
+
+def test_tensor_bytes_limit_emits_a_predicate_with_the_value():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertTensorBytesLessThan", 4294967296))
+
+    assert pred.tag == "TensorBytesLessThan"
+    assert pred.value == 4294967296
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertTensorBytesLessThan", -1)) is None
+    for bad in (0, -2, 1.5, "1"):
+        with pytest.raises(RuntimeError, match="positive int or -1"):
+            ProblemPredicate.FromOriginalKeyPair(("AssertTensorBytesLessThan", bad))
+
+
+@pytest.mark.parametrize("key", ["AssertSizeMultiple", "AssertStrideAMultiple", "AssertStrideBMultiple"])
+@pytest.mark.parametrize("value", [{3: 0}, {1: 0}, {1: -2}])
+def test_multiple_divisor_is_validated_when_the_predicate_is_emitted(key, value):
+    with pytest.raises(Exception, match="Multiple must be > 0"):
+        ProblemPredicate.FromOriginalKeyPair((key, value))
+    assert ProblemPredicate.FromOriginalKeyPair((key, {3: -1})) is None
+
+
+@pytest.mark.parametrize(
+    "grid",
+    [
+        ["TilesWide", "TilesSkinny", "Batch"],
+        ["TilesWideSkinnyBatch", "One", "One"],
+        ["TilesX", "TilesY", "One"],
+        ["TilesXY", "Batch", "One"],
+    ],
+)
+def test_grid_validation_accepts_compatible_grids(grid):
+    ck_mod.validateCustomKernelGrid(grid)
+
+
+@pytest.mark.parametrize(
+    "grid",
+    [
+        ["TilesWide", "TilesXY", "One"],
+        ["TilesX", "TilesWide", "One"],
+        ["TilesSkinny", "TilesY", "Batch"],
+        # The offender in the third slot.
+        ["TilesWide", "One", "TilesXY"],
+        ["TilesSkinny", "Batch", "TilesX"],
+        ["TilesWideSkinnyBatch", "One", "TilesY"],
+    ],
+)
+def test_grid_validation_rejects_mixing_wide_skinny_with_mn_tile_counts(grid):
+    with pytest.raises(RuntimeError, match="mixes wide/skinny"):
+        ck_mod.validateCustomKernelGrid(grid, "mixed")
+
+
+def _step_config(kStep, problemType=None, **asserts):
+    config = {"CustomKernel": {"kStep": kStep}, **asserts}
+    if problemType is not None:
+        config["ProblemType"] = problemType
+    return config
+
+
+def test_k_step_must_be_a_multiple_of_the_mx_block():
+    ck_mod.validateCustomKernelStepAndSplitK(
+        _step_config(256, {"MXBlockA": 32, "MXBlockB": [1, 32]}, AssertSummationElementMultiple=256))
+    with pytest.raises(ValueError, match="multiple of MXBlockB 32"):
+        ck_mod.validateCustomKernelStepAndSplitK(
+            _step_config(16, {"MXBlockB": 32}, AssertSummationElementMultiple=16))
+
+
+@pytest.mark.parametrize(
+    "asserts, batched, ok",
+    [
+        ({"AssertSummationElementMultiple": 256}, True, False),
+        ({"AssertSummationElementMultiple": 256, "AssertSizeMultiple": {3: 1024}}, True, True),
+        ({"AssertSummationElementMultiple": 256, "AssertSizeMultiple": {3: 1024}}, False, False),
+        ({"AssertSummationElementMultiple": 256, "AssertSizeMultiple": {2: 1024}}, False, True),
+        ({"AssertSummationElementMultiple": 256, "AssertSizeMultiple": {3: -1}}, True, False),
+        ({"AssertSummationElementMultiple": 64, "AssertSizeMultiple": {3: 256}}, True, False),
+    ],
+)
+def test_k_step_must_divide_the_admitted_k_multiple(asserts, batched, ok):
+    config = _step_config(1024, {"Batched": batched}, **asserts)
+    if ok:
+        ck_mod.validateCustomKernelStepAndSplitK(config)
+        return
+    with pytest.raises(ValueError, match="does not divide the K multiple"):
+        ck_mod.validateCustomKernelStepAndSplitK(config)
+
+
+@pytest.mark.parametrize(
+    "problemType, kStep",
+    [
+        ({"MXBlockA": 32}, 16),
+        ({"MXBlockA": 32, "MXBlockB": 32}, 48),
+        ({"MXBlockB": [1, 32]}, 16),
+        ({"MXBlockA": [32]}, 16),
+    ],
+)
+def test_k_step_rejects_an_mx_block_mismatch_on_either_operand(problemType, kStep):
+    with pytest.raises(ValueError, match=r"multiple of MXBlock[AB] 32"):
+        ck_mod.validateCustomKernelStepAndSplitK(
+            _step_config(kStep, problemType, AssertSummationElementMultiple=kStep))
+
+
+def test_k_step_admitted_multiple_is_the_lcm_not_the_max():
+    # lcm(96, 64) = 192 is whole steps of 192; the larger of the two (96) is not.
+    asserts = {"AssertSummationElementMultiple": 96, "AssertSizeMultiple": {3: 64}}
+    ck_mod.validateCustomKernelStepAndSplitK(_step_config(192, {"Batched": True}, **asserts))
+    with pytest.raises(ValueError, match="does not divide the K multiple 192"):
+        ck_mod.validateCustomKernelStepAndSplitK(_step_config(384, {"Batched": True}, **asserts))
+
+
+_KSTEP_KERNEL = """\
+    InternalSupportParams:
+      KernArgsVersion: 0
+    ProblemType: {{{problem_type}}}
+    MatrixInstruction: [16, 16, 16, 1]
+    CustomKernel:
+      args: []
+      macrotile: [16, 16, 16]
+      threads: [64, 1, 1]
+      grid: [TilesX, TilesY, One]
+      kStep: 1024
+    AssertSummationElementMultiple: 256
+    """
+
+
+@pytest.mark.parametrize("problem_type", ["", "MXBlockA: 2048"])
+def test_loader_rejects_a_k_step_that_the_asserts_do_not_admit(tmp_path, problem_type):
+    write_kernel(tmp_path / "bad_step.s", _KSTEP_KERNEL.format(problem_type=problem_type))
+
+    with pytest.raises(ValueError, match="kStep 1024"):
+        getCustomKernelConfig("bad_step", {}, str(tmp_path))
+
+
+def test_loader_rejects_a_k_step_that_is_not_a_multiple_of_the_mx_block(tmp_path):
+    kernel = _KSTEP_KERNEL.replace("kStep: 1024", "kStep: 16").format(problem_type="MXBlockA: 32")
+    write_kernel(tmp_path / "bad_mx.s", kernel)
+
+    with pytest.raises(ValueError, match="multiple of MXBlockA 32"):
+        getCustomKernelConfig("bad_mx", {}, str(tmp_path))
+
+
+def test_loader_accepts_a_k_step_that_the_asserts_admit(tmp_path):
+    kernel = _KSTEP_KERNEL + "AssertSizeMultiple: {{3: 1024}}\n"
+    write_kernel(tmp_path / "good_step.s", kernel.format(problem_type=""))
+
+    assert getCustomKernelConfig("good_step", {}, str(tmp_path))["CustomKernel"]["kStep"] == 1024
+
+
+@pytest.mark.parametrize("grid", [["TilesWide", "TilesSkinny", "Batch"], ["TilesWideSkinnyBatch", "One", "One"]])
+def test_solution_rejects_split_k_on_a_wide_skinny_grid(grid):
+    from tensilelite.SolutionStructs.Solution import Solution
+
+    state = {
+        "GlobalSplitU": 2,
+        "CustomKernel": {
+            "name": "wide_skinny",
+            "macrotile": [16, 16, 4096],
+            "threads": [64, 1, 1],
+            "grid": grid,
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="GlobalSplitU 2"):
+        Solution._assignCustomKernelParameters(state)
+
+
+def test_custom_config_yaml_carries_the_tensor_bytes_limit_from_a_fork(tmp_path):
+    yaml_path = tmp_path / "tensor_bytes.yaml"
+    _write_minimal_yaml_with_predicate(yaml_path, "[]")
+    text = yaml_path.read_text().replace(
+        "AssertFree0ElementMultiple: []", "AssertTensorBytesLessThan: [4294967296]")
+    yaml_path.write_text(text)
+
+    config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
+    rendered = build_custom_config_yaml(origin="test", config=config)
+
+    assert config["AssertTensorBytesLessThan"] == 4294967296
+    assert "AssertTensorBytesLessThan: 4294967296" in rendered
+
+
+def test_k_step_zero_skips_the_k_multiple_check():
+    ck_mod.validateCustomKernelStepAndSplitK(_step_config(0, {"MXBlockA": 32}))
+
+
+def test_solution_rejects_a_custom_kernel_with_a_mixed_grid():
+    from tensilelite.SolutionStructs.Solution import Solution
+
+    state = {
+        "CustomKernel": {
+            "name": "mixed",
+            "macrotile": [16, 16, 4096],
+            "threads": [64, 1, 1],
+            "grid": ["TilesWide", "TilesXY", "One"],
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="mixes wide/skinny"):
+        Solution._assignCustomKernelParameters(state)

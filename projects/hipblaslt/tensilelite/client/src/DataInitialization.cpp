@@ -2120,7 +2120,13 @@ namespace TensileLite
                && m_currentSolution != nullptr)
             {
                 auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;
-                size_t           MiK           = static_cast<size_t>(mi[2]);
+                // Handwritten kernels declare a nominal MatrixInstruction (the skinny MXFP8 kernels
+                // state K 16 for a 16x16x128 MFMA, and the K16 kernel has no MFMA), which the MX-block
+                // gate below would reject; kStep is the K really consumed per iteration and is
+                // validated to be a multiple of the MX block.
+                size_t           MiK           = m_currentSolution->customKernel.kStep != 0
+                                                     ? m_currentSolution->customKernel.kStep
+                                                     : static_cast<size_t>(mi[2]);
                 constexpr size_t swizzleTileMN = 32; // 2 SIMDs * 16 lanes per wave for MN access
                 constexpr size_t tileK         = 256 / swizzleTileMN; // scale blocks per wave in K
 

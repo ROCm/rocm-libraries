@@ -70,6 +70,10 @@ namespace TensileLite
 
                 virtual bool operator()(Task const& task) const override
                 {
+                    // Selection must reject an invalid wide/skinny grid, not abort on it.
+                    if(!task.solution.wideSkinnyGridObstacle().empty())
+                        return false;
+
                     if (!task.solution.sizeMapping.isPersistent())
                     {
                         // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items
@@ -90,6 +94,13 @@ namespace TensileLite
 
                 virtual bool debugEval(Task const& task, std::ostream& stream) const override
                 {
+                    std::string obstacle = task.solution.wideSkinnyGridObstacle();
+                    if(!obstacle.empty())
+                    {
+                        PredicateDebugger::printRow(stream, false, this->type(), obstacle);
+                        return false;
+                    }
+
                     if (!task.solution.sizeMapping.isPersistent())
                     {
                         // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items

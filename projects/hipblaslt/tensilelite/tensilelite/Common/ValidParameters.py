@@ -693,6 +693,10 @@ validParameters = { # we need to make sure this matches develop
     # A kernel that stages an operand in LDS declares the first size that no
     # longer fits. Fork YAML: AssertSizeLessThan: [{3: 16385}]  # K <= 16384
     "AssertSizeLessThan": -1,
+    # Divisibility per dimension, same {index: size} form; the predicate is
+    # size(index) % value == 0. AssertSummationElementMultiple caps at 256, so a
+    # kernel whose K step is larger declares it here. Fork YAML: AssertSizeMultiple: [{3: 1024}]
+    "AssertSizeMultiple": -1,
     # Exact stride per tensor, same {index: value} form. Index 0 is the unit
     # stride and index 1 the leading dimension, so for a column-major NN GEMM
     # {0: 1, 1: 2} reads "elements contiguous, lda == 2". A kernel that indexes
@@ -702,6 +706,16 @@ validParameters = { # we need to make sure this matches develop
     "AssertStrideBEqual": -1,
     "AssertStrideCEqual": -1,
     "AssertStrideDEqual": -1,
+    # Divisibility of an A/B stride, same {index: value} form: the predicate is
+    # stride(index) % value == 0, in elements. A kernel that issues wide loads
+    # along the leading dimension declares it. Fork YAML: AssertStrideAMultiple: [{1: 4}]
+    "AssertStrideAMultiple": -1,
+    "AssertStrideBMultiple": -1,
+    # First byte extent of any one tensor (A, B, C or D) that a kernel cannot
+    # address. Handwritten kernels that reach a whole tensor through a single 32-bit
+    # buffer resource declare 2^32 here; a problem with a tensor of at least this
+    # many bytes does not match. -1 skips. Fork YAML: AssertTensorBytesLessThan: [4294967296]
+    "AssertTensorBytesLessThan": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1443,10 +1457,20 @@ ASSERT_DIM_MAP_PARAMETERS = (
     "AssertSizeEqual",
     "AssertSizeGreaterThan",
     "AssertSizeLessThan",
+    "AssertSizeMultiple",
     "AssertStrideAEqual",
     "AssertStrideBEqual",
     "AssertStrideCEqual",
     "AssertStrideDEqual",
+    "AssertStrideAMultiple",
+    "AssertStrideBMultiple",
+)
+
+# Subset of the above where the value is a divisor, so 0 would divide by zero.
+ASSERT_DIM_MULTIPLE_PARAMETERS = (
+    "AssertSizeMultiple",
+    "AssertStrideAMultiple",
+    "AssertStrideBMultiple",
 )
 
 
@@ -1465,6 +1489,23 @@ def checkAssertSizeMapIsValid(name, value):
         if type(val) is not int:
             msgBase = "Invalid parameter value: {} = {}\nSize must be int, got {}"
             raise Exception(msgBase.format(name, value, type(val).__name__))
+
+
+def checkAssertMultipleMapIsValid(name, value):
+    """Divisors must be positive; -1 is the skip sentinel."""
+    for val in value.values():
+        if val == -1 or val > 0:
+            continue
+        msgBase = "Invalid parameter value: {} = {}\nMultiple must be > 0 (or -1 to skip), got {}"
+        raise Exception(msgBase.format(name, value, val))
+
+
+def checkAssertTensorBytesLessThanIsValid(name, value):
+    """The byte limit must be a positive int; -1 is the skip sentinel."""
+    if type(value) is int and (value == -1 or value > 0):
+        return
+    msgBase = "Invalid parameter value: {} = {}\nMust be a positive int or -1 to skip"
+    raise Exception(msgBase.format(name, value))
 
 
 def checkSpaceFillAlgoIsValid(name, value):
@@ -1584,6 +1625,10 @@ def checkParametersAreValid(
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
         elif name in ASSERT_DIM_MAP_PARAMETERS:
             checkAssertSizeMapIsValid(name, value)
+            if name in ASSERT_DIM_MULTIPLE_PARAMETERS:
+                checkAssertMultipleMapIsValid(name, value)
+        elif name == "AssertTensorBytesLessThan":
+            checkAssertTensorBytesLessThanIsValid(name, value)
         elif name == "SpaceFillingAlgo":
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":
