@@ -251,13 +251,16 @@ class GemmProblem:
     follows the solution's outputs: ``gradient`` computes a bias gradient;
     ``aux_type`` is the E tensor's type when the solution has E (written
     forward, read with a gradient), otherwise None; ``bias`` accompanies
-    gradient and E, and grouped solutions that use one; ``activation`` is "Relu" with E, meaning its derivative when
-    ``gradient`` is set; ``amax_d`` also returns the absolute maximum of D.
+    gradient and E, and grouped solutions that use one; ``activation`` is "Relu"
+    with E, meaning its derivative when ``gradient`` is set; ``amax_d`` also
+    returns the absolute maximum of D.
     Native execution still checks solution support.
     MX block sizes of zero mean unscaled operands. MX scale format is 0 for
     ordinary scales, 1 for host-preswizzled gfx950 scales, or 2 for gfx1250 TDM.
     ``grouped_members`` is None for a single GEMM, or the ordered (M, N, K)
     shapes in a grouped dispatch. The scalar dimensions describe its first member.
+    Swizzle flags request packed device layouts; adapters rearrange the logical
+    column-major inputs into those layouts before execution.
     """
 
     solution_index: int
@@ -294,6 +297,8 @@ class GemmProblem:
     amax_d: bool = False
     grouped_members: tuple[tuple[int, int, int], ...] | None = None
     scale_ab: str | None = None
+    swizzle_a: bool = False
+    swizzle_b: bool = False
 
     @property
     def leading_dimensions(self) -> tuple[int, int, int, int]:
@@ -415,8 +420,6 @@ class LibraryMetadata:
             "useGateResidual",
             "useInitialStridesAB",
             "useInitialStridesCD",
-            "swizzleTensorA",
-            "swizzleTensorB",
             "mirrorDimsA",
             "mirrorDimsB",
         )
@@ -520,6 +523,8 @@ class LibraryMetadata:
             **epilogue,
             grouped_members=grouped_members,
             scale_ab=scale_ab,
+            swizzle_a=bool(p.get("swizzleTensorA", False)),
+            swizzle_b=bool(p.get("swizzleTensorB", False)),
         )
 
 

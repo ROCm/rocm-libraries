@@ -119,6 +119,16 @@ apply the ReLU derivative. Both also get a `bias`, of type Float if the
 solution allows it, otherwise its first allowed type. An amaxD solution
 (`amax_d`) also returns the absolute maximum of D. A solution whose allowed
 bias sources or activations exclude these choices is unsupported.
+### Swizzled operands
+
+Solutions can require A or B to use a swizzled layout, which rearranges small
+blocks of input elements in device memory. The descriptor preserves this
+requirement as `swizzle_a` and `swizzle_b`. Its dimensions and strides still
+describe the logical column-major inputs; the bench packs them into the required
+device layout and validates the resulting multiplication against those inputs.
+The bench adapter supports swizzling Half, BFloat16, Float8_fnuz and Float4
+storage. Other swizzled storage types raise `UnsupportedBenchProblem` because
+the bench would ignore their swizzle flags.
 
 ### MX block-scaled operands
 

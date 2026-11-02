@@ -72,6 +72,7 @@ def test_full_tile_and_eight_blocks_per_split(tmp_path, trans_a, trans_b, split)
     assert (row["algo_method"], row["solution_index"], row["requested_solution_num"]) == (2, 17, 1)
     assert (row["cold_iters"], row["iters"], row["adaptive"]) == (0, 0, False)
     assert row["uniform_summation_order"] == 0
+    assert not row["swizzle_a"] and not row["swizzle_b"]
     assert row["norm_check"] and row["norm_check_assert"] and row["allclose_check"]
     assert row["activation_type"] == "none" and row["bias_vector"] is False
     assert (row["gradient"], row["use_e"], row["amaxD"]) == (False, False, False)
@@ -421,6 +422,49 @@ def test_mixed_grouped_fp8_fp16_uses_cpp_api_with_half_compute_inputs(tmp_path, 
     assert row["scaleA"] == row["scaleB"] == "Scalar"
     with pytest.raises(UnsupportedBenchProblem, match="mixed grouped compute inputs"):
         bench_yaml([replace(problem, compute_input_a="Float8_fnuz")])
+
+
+@pytest.mark.parametrize("swizzle_a,swizzle_b", [(True, False), (False, True), (True, True)])
+@pytest.mark.parametrize("dtype", ["Half", "BFloat16", "Float8_fnuz", "Float4"])
+def test_swizzled_operands_keep_logical_shape_and_request_device_layout(
+    tmp_path, swizzle_a, swizzle_b, dtype
+):
+    record = solution(trans_a=True, trans_b=False, split=4)
+    record["problemType"].update(
+        aType=dtype,
+        bType=dtype,
+        cType="Half",
+        dType="Half",
+        swizzleTensorA=swizzle_a,
+        swizzleTensorB=swizzle_b,
+    )
+    write_shard(tmp_path, [record])
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(
+        17, reduction_blocks=3, alpha=2, beta=1
+    )
+    assert (problem.swizzle_a, problem.swizzle_b) == (swizzle_a, swizzle_b)
+    assert (problem.m, problem.n, problem.k) == (128, 96, 384)
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert (row["swizzle_a"], row["swizzle_b"]) == (swizzle_a, swizzle_b)
+    assert (row["lda"], row["ldb"], row["stride_a"], row["stride_b"]) == (
+        384,
+        384,
+        128 * 384,
+        96 * 384,
+    )
+    assert (row["transA"], row["transB"], row["solution_index"]) == ("T", "N", 17)
+    assert row["norm_check"] and row["norm_check_assert"] and row["allclose_check"]
+    assert (row["alpha"], row["beta"], row["iters"], row["cold_iters"]) == (2, 1, 0, 0)
+
+
+@pytest.mark.parametrize("operand", ["A", "B"])
+def test_bench_rejects_a_swizzle_flag_it_would_silently_ignore(tmp_path, operand):
+    record = solution()
+    record["problemType"][f"swizzleTensor{operand}"] = True
+    write_shard(tmp_path, [record])
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    with pytest.raises(UnsupportedBenchProblem, match=f"swizzled {operand} datatype Float"):
+        bench_yaml([problem])
 
 
 @pytest.mark.parametrize("dtype", ["Float4", "Float8"])

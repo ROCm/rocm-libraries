@@ -122,6 +122,18 @@ def bench_yaml(problems: Iterable[GemmProblem]) -> str:
             problem.conjugate_b and not problem.trans_b
         ):
             raise UnsupportedBenchProblem(problem.solution_index, "conjugation without transpose")
+        for operand in ("a", "b"):
+            dtype = getattr(problem, f"{operand}_type")
+            if getattr(problem, f"swizzle_{operand}") and dtype not in {
+                "Half",
+                "BFloat16",
+                "Float8_fnuz",
+                "Float4",
+            }:
+                # Bench silently ignores swizzle flags for other storage types.
+                raise UnsupportedBenchProblem(
+                    problem.solution_index, f"swizzled {operand.upper()} datatype {dtype}"
+                )
         identity = (problem.library_directory, problem.target)
         if source is not None and source != identity:
             raise ValueError("Problems must come from the same library directory and target")
@@ -137,6 +149,8 @@ def bench_yaml(problems: Iterable[GemmProblem]) -> str:
             "batch_count": 1,
             "transA": "C" if problem.conjugate_a else "T" if problem.trans_a else "N",
             "transB": "C" if problem.conjugate_b else "T" if problem.trans_b else "N",
+            "swizzle_a": problem.swizzle_a,
+            "swizzle_b": problem.swizzle_b,
             "a_type": _datatype_name(problem, problem.a_type),
             "b_type": _datatype_name(problem, problem.b_type),
             "c_type": _datatype_name(problem, problem.c_type),
