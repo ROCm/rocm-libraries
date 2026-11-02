@@ -1809,8 +1809,11 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                               int pad_amount,
                               rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
-/* Abort the kernel (Python IRBuilder.trap): llvm.trap, s_trap 2. After a trap
- * every later HIP call in the process fails, so it is a last resort. */
+/* Abort the kernel (Python IRBuilder.trap): llvm.trap, which the backend emits
+ * as s_trap 2 (gfx11: its simulated trap, s_trap 2 then s_sendmsg then an
+ * s_sethalt loop). A taken trap aborts the process on Linux (ROCr), never
+ * returns from the launch on Windows, and stops the wave under a debugger, so
+ * it is a last resort. */
 void rocke_b_trap(rocke_ir_builder_t* b);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
