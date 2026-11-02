@@ -760,6 +760,21 @@ namespace
         return dynamic_cast<Holder*>(caching->library().get());
     }
 
+    // Pauses inside afterLibraryPublished(), which runs after the shard is
+    // registered and the library member is stored.
+    struct GatedPlaceholder : Holder
+    {
+        mutable std::atomic<bool> published{false};
+        mutable std::atomic<bool> release{false};
+
+        void afterLibraryPublished() const override
+        {
+            published.store(true, std::memory_order_release);
+            while(!release.load(std::memory_order_acquire))
+                std::this_thread::yield();
+        }
+    };
+
     struct PlaceholderIndexedShardTest : public TempDirTest
     {
         std::vector<int> shardIndices;
@@ -876,105 +891,141 @@ TEST_F(PlaceholderIndexedShardTest, PlaceholderFirstPublishesItsCacheToTheParent
     EXPECT_EQ(solution, viaCache) << "index lookup and the shard's own cache disagree";
 }
 
-// The publish gate makes the raw pointer visible before the owning pointer is
-// stored. Threads that call loadPlaceholderLibrary wait for that store. A use
-// of the member in the gap is counted in placeholderEarlyUse and must stay zero,
-// and every thread must receive the solution.
-TEST_F(PlaceholderIndexedShardTest, ConcurrentColdLookupsAllSeeTheLoadedShard)
+// Readers sample the master while the loader is paused in
+// afterLibraryPublished(). Indexed solutions stay in the shard cache until a
+// lookup parses them, so a visible library member has to come with the
+// loaded-file entry, the published cache, and the code-object name on a
+// solution parsed from that cache.
+TEST_F(PlaceholderIndexedShardTest, PublishIsVisibleOnlyAfterShardIsRegistered)
 {
     singleTree = true;
     if(!layOutLibrary())
         GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
 
-    const int    index   = *std::min_element(shardIndices.begin(), shardIndices.end());
-    const AMDGPU device  = TensileLite::testing::makeDevice(
+    const int    index  = *std::min_element(shardIndices.begin(), shardIndices.end());
+    const AMDGPU device = TensileLite::testing::makeDevice(
         TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
     const auto problem = TensileLite::testing::dummyProblem();
+    const std::string codeObject = std::string(kShardPrefix) + ".co";
 
-    struct Gate
-    {
-        std::atomic<int> value{0};
-        Gate()
-        {
-            placeholderEarlyUse.store(0);
-            placeholderPublishGate.store(&value);
-        }
-        ~Gate()
-        {
-            value.store(2);
-            placeholderPublishGate.store(nullptr);
-        }
-    } gate;
-
-    // A placeholder that has not been loaded yet. The one inside a master read
-    // from disk may already have run its load, which would close the gap.
-    Master fresh;
-    Holder cold;
-    cold.filePrefix          = kShardPrefix;
-    cold.libraryDirectory    = tmpDir.string();
+    Master           fresh;
+    GatedPlaceholder cold;
+    cold.filePrefix       = kShardPrefix;
+    cold.libraryDirectory = tmpDir.string();
     if(cold.libraryDirectory.back() != '/')
         cold.libraryDirectory.push_back('/');
-    cold.suffix              = ".dat";
-    cold.solutionsGuard      = &fresh.solutionsGuard;
-    cold.loadedFiles         = &fresh.loadedFiles;
-    cold.masterSolutions     = &fresh.solutions;
-    cold.solutionSources     = &fresh.solutionSources;
+    cold.suffix               = ".dat";
+    cold.solutionsGuard       = &fresh.solutionsGuard;
+    cold.loadedFiles          = &fresh.loadedFiles;
+    cold.masterSolutions      = &fresh.solutions;
+    cold.solutionSources      = &fresh.solutionSources;
     cold.indexLoadedLibraries = &fresh.indexLoadedLibraries;
 
-    std::atomic<int> bad{0};
-    std::mutex       errorMu;
-    std::string      error;
-    std::thread      loader([&] {
+    struct Sample
+    {
+        bool libraryVisible = false;
+        bool fileRecorded   = false;
+        bool cachePublished = false;
+        bool indexInCache   = false;
+        bool codeObjectNamed = false;
+    };
+
+    constexpr int            kReaders = 4;
+    std::vector<Sample>      seen(kReaders);
+    std::vector<std::thread> readers;
+    std::atomic<int>         sampled{0};
+    std::string              error;
+    std::shared_ptr<ContractionSolution> loaded;
+
+    std::thread loader([&] {
         try
         {
-            if(!cold.getSolutionByIndex(problem, device, index))
-                bad.fetch_add(1);
+            loaded = cold.getSolutionByIndex(problem, device, index);
         }
         catch(std::exception const& ex)
         {
-            bad.fetch_add(1);
-            std::lock_guard<std::mutex> lock(errorMu);
             error = ex.what();
         }
         catch(...)
         {
-            bad.fetch_add(1);
-            std::lock_guard<std::mutex> lock(errorMu);
             error = "unknown exception";
         }
     });
 
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while(gate.value.load() == 0 && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::yield();
-    ASSERT_EQ(gate.value.load(), 1) << "load did not reach the publish gap; error=" << error
-                                    << " bad=" << bad.load();
+    struct Join
+    {
+        GatedPlaceholder*         cold;
+        std::thread*              loader;
+        std::vector<std::thread>* readers;
+        ~Join()
+        {
+            cold->release.store(true, std::memory_order_release);
+            if(loader->joinable())
+                loader->join();
+            for(auto& th : *readers)
+                if(th.joinable())
+                    th.join();
+        }
+    } join{&cold, &loader, &readers};
 
-    constexpr int            kReaders = 7;
-    std::vector<std::thread> readers;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while(!cold.published.load(std::memory_order_acquire)
+          && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    ASSERT_TRUE(cold.published.load(std::memory_order_acquire))
+        << "load did not publish the library; error=" << error;
+
     for(int t = 0; t < kReaders; ++t)
     {
-        readers.emplace_back([&] {
-            try
+        readers.emplace_back([&, t] {
+            Sample sample;
+            sample.libraryVisible = static_cast<bool>(cold.library);
+            sample.fileRecorded   = fresh.loadedFiles.count(kShardPrefix) == 1;
+            auto source           = fresh.solutionSources.find(kShardPrefix);
+            sample.cachePublished = source != fresh.solutionSources.end() && source->second;
+            if(sample.cachePublished)
             {
-                if(!cold.getSolutionByIndex(problem, device, index))
-                    bad.fetch_add(1);
+                sample.indexInCache = source->second->contains(index);
+                if(auto solution = source->second->get(index))
+                    sample.codeObjectNamed = solution->codeObjectFilename.load() == codeObject;
             }
-            catch(...)
-            {
-                bad.fetch_add(1);
-            }
+            seen[t] = sample;
+            sampled.fetch_add(1, std::memory_order_release);
         });
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    gate.value.store(2);
+    while(sampled.load(std::memory_order_acquire) < kReaders
+          && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    ASSERT_EQ(sampled.load(), kReaders);
+
+    for(int t = 0; t < kReaders; ++t)
+    {
+        EXPECT_TRUE(seen[t].libraryVisible);
+        EXPECT_TRUE(seen[t].fileRecorded) << "library was visible before loadedFiles was updated";
+        EXPECT_TRUE(seen[t].cachePublished)
+            << "library was visible before the shard cache was published";
+        EXPECT_TRUE(seen[t].indexInCache);
+        EXPECT_TRUE(seen[t].codeObjectNamed)
+            << "library was visible before the code-object name was set";
+    }
+
+    cold.release.store(true, std::memory_order_release);
     loader.join();
     for(auto& th : readers)
         th.join();
 
-    EXPECT_EQ(placeholderEarlyUse.load(), 0);
-    EXPECT_EQ(bad.load(), 0);
+    ASSERT_TRUE(error.empty()) << error;
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->index, index);
+    EXPECT_EQ(loaded->codeObjectFilename.load(), codeObject);
+    EXPECT_EQ(fresh.loadedFiles.count(kShardPrefix), 1u);
+    auto source = fresh.solutionSources.find(kShardPrefix);
+    ASSERT_NE(source, fresh.solutionSources.end());
+    ASSERT_NE(source->second, nullptr);
+    auto parsed = source->second->get(index);
+    ASSERT_NE(parsed, nullptr);
+    EXPECT_EQ(parsed->codeObjectFilename.load(), codeObject);
 }
 
 TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)

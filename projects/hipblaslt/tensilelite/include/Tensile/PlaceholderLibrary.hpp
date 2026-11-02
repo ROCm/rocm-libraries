@@ -32,23 +32,14 @@
 #include <Tensile/Tensile.hpp>
 
 #include <algorithm>
-#include <atomic>
 #include <iterator>
 #include <map>
 #include <mutex>
-#include <thread>
 
 #include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
-    // When non-null, publishing a placeholder library stores the raw pointer,
-    // sets *gate to 1, and waits until *gate is no longer 1 before storing the
-    // owning pointer. placeholderEarlyUse counts a member access that saw the
-    // raw pointer without the owning pointer. Both stay unused in production.
-    inline std::atomic<std::atomic<int>*> placeholderPublishGate{nullptr};
-    inline std::atomic<int>               placeholderEarlyUse{0};
-
     // Which placeholder libraries should be initialized at start
     // To be extended in the future
     enum class LazyLoadingInit
@@ -169,57 +160,7 @@ namespace TensileLite
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     struct PlaceholderLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
-        struct Published
-        {
-            using Lib = SolutionLibrary<MyProblem, MySolution>;
-
-            std::shared_ptr<Lib> owned;
-            std::atomic<Lib*>    raw{nullptr};
-
-            Published()                            = default;
-            Published(Published const&)            = delete;
-            Published& operator=(Published const&) = delete;
-
-            Published& operator=(std::shared_ptr<Lib> next)
-            {
-                raw.store(next.get(), std::memory_order_release);
-                if(auto* gate = placeholderPublishGate.load(std::memory_order_acquire))
-                {
-                    if(gate->load(std::memory_order_acquire) == 0)
-                    {
-                        gate->store(1, std::memory_order_release);
-                        while(gate->load(std::memory_order_acquire) == 1)
-                            std::this_thread::yield();
-                    }
-                }
-                owned = std::move(next);
-                return *this;
-            }
-
-            explicit operator bool() const
-            {
-                return raw.load(std::memory_order_acquire) != nullptr;
-            }
-
-            // A caller that uses the member without waiting for the load can
-            // observe the raw pointer while owned is still empty.
-            Lib* operator->() const
-            {
-                if(raw.load(std::memory_order_acquire) != nullptr && !owned)
-                {
-                    placeholderEarlyUse.fetch_add(1, std::memory_order_relaxed);
-                    return nullptr;
-                }
-                return owned.get();
-            }
-
-            operator std::shared_ptr<Lib>() const
-            {
-                return owned;
-            }
-        };
-
-        mutable Published library;
+        mutable std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> library;
         mutable std::set<std::string>*                                  loadedFiles;
         mutable SolutionMap<MySolution>*                                masterSolutions;
         mutable std::mutex*                                             solutionsGuard;
@@ -247,70 +188,83 @@ namespace TensileLite
         std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> loadPlaceholderLibrary() const
         {
             std::call_once(lazyLoadOnce, [this] {
-            if(library)
-                return;
+                if(library)
+                    return;
 
-            std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
+                std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
                 auto        newLibrary = LoadLibraryFile<MyProblem, MySolution>(path);
                 auto        mLibrary
                     = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
-                library = mLibrary->library;
+                auto loaded = mLibrary->library;
 
                 // Indexed shards publish solutions later; stamp the name on
                 // the cache so it is applied as each one is parsed.
                 if(mLibrary->blobCache)
                     mLibrary->blobCache->setCodeObjectFilename(getCodeObjectFileName());
 
-                std::lock_guard<std::mutex> lock(*solutionsGuard);
-
-                // Publishes this shard's cache so the owning master can resolve
-                // indices the shard has not parsed yet. Keyed by prefix, so a
-                // shard the master already published is not registered twice --
-                // two caches for one shard would retain two copies of its blob
-                // and hand out two objects for the same solution index.
-                auto publishShardCache = [&]() {
-                    if(mLibrary->blobCache && solutionSources != nullptr)
-                        solutionSources->emplace(filePrefix, mLibrary->blobCache);
-                };
-
-                if(loadedFiles->find(filePrefix) != loadedFiles->end())
+                std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> published;
                 {
-                    if(indexLoadedLibraries->find(filePrefix) == indexLoadedLibraries->end())
-                    {
-                        // Keeping this shard's own tree, so its cache is the one
-                        // the leaves reference.
-                        publishShardCache();
-                        return;
-                    }
-                    // Adopting the tree the master loaded means adopting the
-                    // cache the master already published; ours is dropped.
-                    library = (*indexLoadedLibraries)[filePrefix];
-                    indexLoadedLibraries->erase(filePrefix);
+                    std::lock_guard<std::mutex> lock(*solutionsGuard);
 
-                    // If the library is already loaded, just return it
-                    if(Debug::Instance().printCodeObjectInfo())
-                        std::cout << "load placeholder library " << filePrefix
-                                  << " from MasterLibrary cache" << std::endl;
-                    return;
+                    // Publishes this shard's cache so the owning master can resolve
+                    // indices the shard has not parsed yet. Keyed by prefix, so a
+                    // shard the master already published is not registered twice --
+                    // two caches for one shard would retain two copies of its blob
+                    // and hand out two objects for the same solution index.
+                    auto publishShardCache = [&]() {
+                        if(mLibrary->blobCache && solutionSources != nullptr)
+                            solutionSources->emplace(filePrefix, mLibrary->blobCache);
+                    };
+
+                    if(loadedFiles->find(filePrefix) != loadedFiles->end())
+                    {
+                        if(indexLoadedLibraries->find(filePrefix) == indexLoadedLibraries->end())
+                        {
+                            // Keeping this shard's own tree, so its cache is the one
+                            // the leaves reference.
+                            publishShardCache();
+                            published = loaded;
+                        }
+                        else
+                        {
+                            // Adopting the tree the master loaded means adopting the
+                            // cache the master already published; ours is dropped.
+                            published = (*indexLoadedLibraries)[filePrefix];
+                            indexLoadedLibraries->erase(filePrefix);
+
+                            if(Debug::Instance().printCodeObjectInfo())
+                                std::cout << "load placeholder library " << filePrefix
+                                          << " from MasterLibrary cache" << std::endl;
+                        }
+                    }
+                    else
+                    {
+                        publishShardCache();
+
+                        using std::begin;
+                        using std::end;
+
+                        std::transform(begin(mLibrary->solutions),
+                                       end(mLibrary->solutions),
+                                       std::inserter(*masterSolutions, end(*masterSolutions)),
+                                       [this](auto& i) {
+                                           i.second->codeObjectFilename = getCodeObjectFileName();
+                                           return i;
+                                       });
+                        loadedFiles->insert(filePrefix);
+                        published = loaded;
+
+                        if(Debug::Instance().printCodeObjectInfo())
+                            std::cout << "load placeholder library " << path << std::endl
+                                      << mLibrary->solutions.size() << " solutions loaded"
+                                      << std::endl;
+                    }
                 }
 
-                publishShardCache();
-
-                using std::begin;
-                using std::end;
-
-                std::transform(begin(mLibrary->solutions),
-                               end(mLibrary->solutions),
-                               std::inserter(*masterSolutions, end(*masterSolutions)),
-                               [this](auto& i) {
-                                   i.second->codeObjectFilename = getCodeObjectFileName();
-                                   return i;
-                               });
-                loadedFiles->insert(filePrefix);
-
-                if(Debug::Instance().printCodeObjectInfo())
-                    std::cout << "load placeholder library " << path << std::endl
-                              << mLibrary->solutions.size() << " solutions loaded" << std::endl;
+                // Stored after this load has registered the shard. The hook runs
+                // immediately after that store.
+                library = std::move(published);
+                afterLibraryPublished();
             });
 
             return library;
@@ -444,6 +398,12 @@ namespace TensileLite
         {
             return filePrefix + suffix;
         }
+
+    protected:
+        // Runs after `library` is stored. This load has already published the
+        // shard cache and recorded the file. Indexed solutions stay in that
+        // cache until a lookup parses them.
+        virtual void afterLibraryPublished() const {}
     };
 
 } // namespace TensileLite

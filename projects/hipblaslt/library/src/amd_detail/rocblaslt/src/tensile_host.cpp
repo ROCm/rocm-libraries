@@ -7521,7 +7521,12 @@ namespace
     std::atomic<int> g_lastGetAllSearchType{-1};
 }
 
-extern "C" __attribute__((visibility("default"))) int rocblaslt_testing_last_get_all_search_type()
+extern "C" HIPBLASLT_EXPORT void rocblaslt_testing_reset_last_get_all_search_type_for_test()
+{
+    g_lastGetAllSearchType.store(-1, std::memory_order_relaxed);
+}
+
+extern "C" HIPBLASLT_EXPORT int rocblaslt_testing_last_get_all_search_type_for_test()
 {
     return g_lastGetAllSearchType.load(std::memory_order_relaxed);
 }
