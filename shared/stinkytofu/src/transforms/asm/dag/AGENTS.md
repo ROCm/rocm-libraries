@@ -37,20 +37,21 @@ When two rules want different things, the higher level wins. `PlacementLevel` in
 | L1 | `Barrier` | The barrier lands where it is planned. |
 | L2 | `LastDs` | The last ds before a barrier issues in time for that barrier. |
 | L3 | `WmmaQueue` | The WMMA queue stays busy: no window is wasted (the refill). |
-| L4 | `WmmaTail` | Back-to-back WMMAs before a barrier cover its stall (`kBarrierTailWmmas`, `wmmaBarrierCover`). |
-| L5 | `Prefetch` | Prefetches and global loads issue at their planned window. |
-| L6 | `DsPacer` | ds loads are spread over the region (`DsSpreadPacer`). |
-| L7 | `Filler` | SALU and VALU fill whatever slots are left. |
+| L4 | `Prefetch` | Prefetches and global loads issue at their planned window. |
+| L5 | `DsPacer` | ds loads are spread over the region (`DsSpreadPacer`). |
+| L6 | `Filler` | SALU and VALU fill whatever slots are left. |
 
 Consequences:
 
-- A lower level never vetoes a higher one. The ds pacer (L6) must not delay the last ds
-  before a barrier (L2). A filler (L7) must not take a prefetch's window (L5).
-- Cover is measured, not counted. `wmma ds×8` does not cover a barrier; `wmma wmma ds×8`
-  does. A rule that asks "is the barrier covered" uses `queuedCoverCycles()`, not the number
-  of instructions picked.
-- The WMMA tail (L4) exists to provide cover. VALU and SALU may co-issue inside it. Do not
-  block them there.
+- A lower level never vetoes a higher one. The ds pacer (L5) must not delay the last ds
+  before a barrier (L2). A filler (L6) must not take a prefetch's window (L4).
+- A barrier issues when its WMMA threshold is met. Do not hold it for an extra tail of
+  WMMAs after the threshold. The threshold includes the last WMMA a feeding ds_load depends
+  on and that load's drain (`depThreshold`). Two exclusive groups whose claim windows
+  overlap are the exception: that drain does not fit, so the after group stops at
+  `maxParentWmmaIdx + 1` and the separation that does not fit is added to the before
+  group's threshold. A barrier that is in both the after and before maps is still averaged
+  no earlier than `depThreshold`.
 
 ## Rules
 
