@@ -46,12 +46,32 @@ struct SdpaBwdTestCase
         kStrides = generateStrides(kDims);
     }
 
+    // Non-packed layouts the kernels address: Q, K, V and dO stored [B, S, H, D],
+    // and O and dQ rows padded to D+1 elements. O, dO and dQ have Q's dims.
+    SdpaBwdTestCase& withNonPackedLayouts()
+    {
+        // Stride order (lower = tighter) for [B, H, S, D] dims stored as [B, S, H, D].
+        const std::vector<int64_t> bshdOrder = {3, 1, 2, 0};
+        qStrides = generateStrides(qDims, bshdOrder);
+        kStrides = generateStrides(kDims, bshdOrder);
+        vStrides = generateStrides(vDims, bshdOrder);
+        doStrides = generateStrides(qDims, bshdOrder);
+        const int64_t paddedRow = qDims[3] + 1;
+        oStrides = {qDims[1] * qDims[2] * paddedRow, qDims[2] * paddedRow, paddedRow, 1};
+        dqStrides = oStrides;
+        return *this;
+    }
+
     std::vector<int64_t> qDims;
     std::vector<int64_t> kDims;
     std::vector<int64_t> vDims;
     std::vector<int64_t> qStrides;
     std::vector<int64_t> kStrides;
     std::vector<int64_t> vStrides;
+    // Empty: packed strides for Q's dims (dO takes O's strides).
+    std::vector<int64_t> oStrides;
+    std::vector<int64_t> doStrides;
+    std::vector<int64_t> dqStrides;
 
     std::optional<float> attnScaleValue;
     int64_t leftBound;
@@ -79,6 +99,14 @@ std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, -1, 0, true),
         // Asymmetric Sq != Skv — bottom-right causal
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, -1, 0, false),
+        // B=2 and H=2, so every batch and head stride, and the packed LSE/D
+        // layout that buildPlan derives from Q's dims, reach the kernels.
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}),
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}, std::nullopt, -1, 0, true),
+        // The same with non-packed layouts that isApplicable accepts.
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}).withNonPackedLayouts(),
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}, std::nullopt, -1, 0, true)
+            .withNonPackedLayouts(),
         // ALMIOPEN-2079: Re-enable when GQA support is implemented
         // // GQA: 4 Q heads, 1 KV head — no mask
         // SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}),
@@ -154,13 +182,13 @@ protected:
 
         const SdpaBwdTestCase& testCase = this->GetParam();
 
-        // O has same dims/strides as Q (with V's head dim for the last dimension)
+        // O has same dims as Q (with V's head dim for the last dimension)
         auto oDims = testCase.qDims;
-        auto oStrides = generateStrides(oDims);
+        auto oStrides = testCase.oStrides.empty() ? generateStrides(oDims) : testCase.oStrides;
 
-        // dO has same dims/strides as O
+        // dO has same dims as O, and O's strides unless the test case sets its own
         const auto& doDims = oDims;
-        const auto& doStrides = oStrides;
+        const auto doStrides = testCase.doStrides.empty() ? oStrides : testCase.doStrides;
 
         // Stats (LSE) dims: [B, H_q, S_q] with contiguous strides
         const std::vector<int64_t> statsDims
@@ -223,6 +251,10 @@ protected:
         auto [dq, dk, dv] = graph.sdpa_backward(q, k, v, o, dO, stats, std::move(bwdAttributes));
 
         dq->set_output(true).set_data_type(getDataTypeEnumFromType<DataType>());
+        if(!testCase.dqStrides.empty())
+        {
+            dq->set_dim(testCase.qDims).set_stride(testCase.dqStrides);
+        }
         dk->set_output(true).set_data_type(getDataTypeEnumFromType<DataType>());
         dv->set_output(true).set_data_type(getDataTypeEnumFromType<DataType>());
 

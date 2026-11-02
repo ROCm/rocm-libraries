@@ -8,6 +8,7 @@
 #include "plans/SdpaBwdPlan.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -16,6 +17,7 @@
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -234,21 +236,19 @@ bool wouldBwdDimsFitKernargFields(const hipdnn_flatbuffers_sdk::data_objects::Te
 // it cannot represent, instead of failing at execute time.  Returns false (and
 // logs the offending field) on any overflow; returns true when every stride is
 // safe.
-bool wouldBwdByteStridesFitUint32(
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dO,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dq,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dk,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dv,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats,
-    int64_t headsQ,
-    int64_t seqLenQ,
-    int64_t headDimQk,
-    int64_t tsKv,
-    bool useA32)
+bool wouldBwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dO,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dq,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dk,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dv,
+                                  int64_t headsQ,
+                                  int64_t seqLenQ,
+                                  int64_t headDimQk,
+                                  int64_t tsKv,
+                                  bool useA32)
 {
     auto check = [](const char* name, int64_t elements, int64_t elementBytes) {
         return plan_utils::byteStrideFitsU32(name, elements, elementBytes);
@@ -275,10 +275,10 @@ bool wouldBwdByteStridesFitUint32(
     ok &= checkBwdTensor("dk", dk);
     ok &= checkBwdTensor("dv", dv);
 
-    // LSE/D buffer: rank 3 [B, H_q, S_q] in FP32; only batch+head strides used.
-    const auto* statsStrides = stats.strides();
-    ok &= check("batch_stride_lsed", statsStrides->Get(0), K_FP32_BYTES);
-    ok &= check("nhead_stride_lsed", statsStrides->Get(1), K_FP32_BYTES);
+    // LSE/D buffer: packed [B, H_q, S_q] in FP32 (isApplicable declines any other
+    // stats layout); only the batch and head strides are kernel arguments.
+    ok &= check("batch_stride_lsed", headsQ * seqLenQ, K_FP32_BYTES);
+    ok &= check("nhead_stride_lsed", seqLenQ, K_FP32_BYTES);
 
     // dq_acc: contiguous [B, H_q, S_q, D_qk] FP32, derived from dims (A32 only).
     if(useA32)
@@ -588,6 +588,95 @@ bool SdpaBwdPlanBuilder::isApplicable(
         !wouldBwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
         "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
 
+    auto toString = [](const flatbuffers::Vector<int64_t>* values) {
+        return hipdnn_data_sdk::utilities::vecToString(
+            hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(values));
+    };
+
+    // Strides the kernels cannot address. The ODO, DQDKDV and DQ_CONVERT argument
+    // blocks carry only batch, head and sequence byte strides, and each row is
+    // read or written as D contiguous elements. On gfx942 every layout declined
+    // below gave silent wrong gradients:
+    // - Head-dim (innermost) stride other than 1: it is treated as 1 (a stride-2
+    //   Q gave Inf dK/dV; a stride-2 dQ left dQ elements unwritten).
+    // - Sequence stride below D, even on a length-1 sequence axis: each buffer
+    //   ends S * seq stride elements (S * Seqs bytes) after the start of its
+    //   (batch, head) slice, so the end of the last row reads as 0 and writes
+    //   there are dropped. At D=192, DQDKDV reaches bytes 128-383 of a Q, K or V
+    //   row through the instruction offset, which the record-index bound does not
+    //   check, so 64 elements would be enough there; the rule stays at D for all
+    //   tensors.
+    // - Odd stride on an axis whose offset DQDKDV puts in its 4-byte record index
+    //   (byte offset >> 2): the sequence axis of Q, K, V, dO, dK and dV, and the
+    //   head axis of dK and dV (no-mask and sliding-window kernels; the causal
+    //   kernels add the dK/dV head offset to the buffer base, but this check does
+    //   not depend on the mask). A row that starts 2 bytes into a dword is read or
+    //   written one element early. DQDKDV adds the other offsets to the buffer
+    //   base, and ODO and DQ_CONVERT (A32 path) address O and dQ by byte offset,
+    //   so odd strides there are addressed correctly.
+    struct IoTensor
+    {
+        const char* name;
+        const TensorAttributes* tensor;
+        // Outermost axis whose offset is in the record index (3: none).
+        flatbuffers::uoffset_t firstIndexedAxis;
+        // Written by the kernels (dQ, dK, dV).
+        bool isOutput;
+    };
+    const std::array<IoTensor, 8> ioTensors{{{"q", qTensor, 2, false},
+                                             {"k", kTensor, 2, false},
+                                             {"v", vTensor, 2, false},
+                                             {"o", oTensor, 3, false},
+                                             {"do", doTensor, 2, false},
+                                             {"dq", dqTensor, 3, true},
+                                             {"dk", dkTensor, 1, true},
+                                             {"dv", dvTensor, 1, true}}};
+    for(const auto& io : ioTensors)
+    {
+        const auto* dims = io.tensor->dims();
+        const auto* strides = io.tensor->strides();
+        const auto describe = [&]() {
+            return std::string(io.name) + " tensor (Actual dims: " + toString(dims)
+                   + ", strides: " + toString(strides) + ")";
+        };
+        HIP_KERNEL_RETURN_FALSE_IF(dims->size() != 4 || strides->size() != 4,
+                                   "rank-4 dims and strides required for " + describe());
+        HIP_KERNEL_RETURN_FALSE_IF(strides->Get(3) != 1,
+                                   "head-dim (innermost) stride must be 1 for " + describe());
+        HIP_KERNEL_RETURN_FALSE_IF(strides->Get(2) < dims->Get(3),
+                                   "sequence stride must be at least the head dim for "
+                                       + describe());
+        bool oddIndexedStride = false;
+        for(auto axis = io.firstIndexedAxis; axis < 3; ++axis)
+        {
+            if(dims->Get(axis) > 1 && strides->Get(axis) % 2 != 0)
+            {
+                oddIndexedStride = true;
+            }
+        }
+        HIP_KERNEL_RETURN_FALSE_IF(oddIndexedStride,
+                                   "4-byte-indexed stride must be even for " + describe());
+
+        // A zero batch or head stride on an output axis longer than 1 makes the
+        // (batch, head) slices of dQ, dK or dV share memory. Each slice is written
+        // by its own workgroups (grid y and z are head and batch), so the slices
+        // overwrite each other: on gfx942 such dQ, dK and dV were wrong and changed
+        // between runs with identical inputs. A zero stride on an input (a
+        // broadcast) just re-reads one slice and stays accepted.
+        // Only this overlap is checked, deliberately: a zero stride is how a
+        // broadcast is written, so an output gets one when it is given the strides
+        // of a broadcast input. Nonzero strides that make an output overlap itself,
+        // such as equal batch and head strides, have to be built by hand; they are
+        // not checked here, although on gfx942 they also gave wrong dK and dV.
+        const bool zeroOutputStride = io.isOutput
+                                      && ((dims->Get(0) > 1 && strides->Get(0) == 0)
+                                          || (dims->Get(1) > 1 && strides->Get(1) == 0));
+        HIP_KERNEL_RETURN_FALSE_IF(
+            zeroOutputStride,
+            "batch and head strides must be nonzero on axes longer than 1 for output "
+                + describe());
+    }
+
     // The AITER dqdkdv kernel indexes dK/dV by q-head: workgroup.y spans nhead_q and
     // the kernel divides by ratio only for the K/V *reads*, never for the dK/dV
     // *writes*.  Supporting GQA therefore requires caller-side head expansion -
@@ -617,6 +706,31 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
                                "stats tensor datatype must be FP32 (Actual type: "
                                    + EnumNameDataType(statsTensor->data_type()) + ")");
+
+    // LSE and the D workspace must be packed [B, H_q, S_q] FP32. Every gfx942
+    // batch-mode DQDKDV kernel computes the offset of both as
+    // ((b * H_q + h) * S_q + s) * 4 from nhead_q and seqlen_q, and never loads its
+    // Hs_lsed argument (from the .co disassembly). ODO writes D into a
+    // B * H_q * S_q workspace with the same packed strides (buildPlan). On gfx942
+    // a stats head stride padded to S_q + 64 gave wrong, run-to-run varying
+    // gradients, so decline any other layout. No kernel reads the stats strides,
+    // so the stride of a size-1 axis is not checked.
+    const int64_t batchSize = qTensor->dims()->Get(0);
+    const int64_t seqLenQ = qTensor->dims()->Get(2);
+    const auto* statsDims = statsTensor->dims();
+    const auto* statsStrides = statsTensor->strides();
+    HIP_KERNEL_RETURN_FALSE_IF(
+        (statsDims->size() != 3 && (statsDims->size() != 4 || statsDims->Get(3) != 1))
+            || statsStrides->size() != statsDims->size() || statsDims->Get(0) != batchSize
+            || statsDims->Get(1) != numHeadsQ || statsDims->Get(2) != seqLenQ,
+        "stats tensor must be [B, H_q, S_q] or [B, H_q, S_q, 1] matching Q (Actual dims: "
+            + toString(statsDims) + ", strides: " + toString(statsStrides) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        (batchSize != 1 && statsStrides->Get(0) != numHeadsQ * seqLenQ)
+            || (numHeadsQ != 1 && statsStrides->Get(1) != seqLenQ)
+            || (seqLenQ != 1 && statsStrides->Get(2) != 1),
+        "stats tensor strides must be packed [H_q * S_q, S_q, 1] (Actual strides: "
+            + toString(statsStrides) + ")");
 
     auto dataTypeIdOpt = tryGetDataTypeIdentifier(qTensor->data_type(),
                                                   kTensor->data_type(),
@@ -659,9 +773,41 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                "Head dimension must be one of {64, 128, 192} (Actual value: "
                                    + std::to_string(headDimQk) + ")");
 
+    // Each kernel takes B, H, S_q, S_kv and D once, from Q, K and V, and addresses
+    // every tensor with them, so O, dO and dQ must have Q's dims and V, dK and dV
+    // must have K's. The frontend lets V have fewer heads than K (it checks only
+    // that both divide H_q); DQDKDV then reads V and writes dV past their last
+    // head. On gfx942, H_q = H_k = 4 with H_v = 2 or 1 gave wrong dQ, dK and dV.
+    HIP_KERNEL_RETURN_FALSE_IF(kTensor->dims()->Get(0) != batchSize,
+                               "k tensor batch must equal q batch (Actual dims: k "
+                                   + toString(kTensor->dims()) + ", q " + toString(qTensor->dims())
+                                   + ")");
+    struct SameDims
+    {
+        const char* name;
+        const TensorAttributes* tensor;
+        const char* refName;
+        const TensorAttributes* ref;
+    };
+    const std::array<SameDims, 6> sameDims{{{"o", oTensor, "q", qTensor},
+                                            {"do", doTensor, "q", qTensor},
+                                            {"dq", dqTensor, "q", qTensor},
+                                            {"v", vTensor, "k", kTensor},
+                                            {"dk", dkTensor, "k", kTensor},
+                                            {"dv", dvTensor, "k", kTensor}}};
+    for(const auto& match : sameDims)
+    {
+        const auto* dims = match.tensor->dims();
+        const auto* refDims = match.ref->dims();
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !std::equal(dims->begin(), dims->end(), refDims->begin(), refDims->end()),
+            std::string(match.name) + " tensor dims must equal " + match.refName
+                + " dims (Actual: " + match.name + " " + toString(dims) + ", " + match.refName + " "
+                + toString(refDims) + ")");
+    }
+
     // Classify the mask; contradictory mask attributes are an invalid-input
     // condition the engine declines rather than dispatches.
-    const int64_t seqLenQ = qTensor->dims()->Get(2);
     const int64_t seqLenKv = kTensor->dims()->Get(2);
     MaskType maskType = MaskType::NO_MASK;
     try
@@ -755,7 +901,6 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                                              *dqTensor,
                                                              *dkTensor,
                                                              *dvTensor,
-                                                             *statsTensor,
                                                              numHeadsQ,
                                                              seqLenQ,
                                                              headDimQk,
@@ -878,7 +1023,6 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
     auto* doTensor = tensorMap.at(doUid);
-    auto* statsTensor = tensorMap.at(statsUid);
     auto* dqTensor = tensorMap.at(dqUid);
     auto* dkTensor = tensorMap.at(dkUid);
     auto* dvTensor = tensorMap.at(dvUid);
@@ -948,10 +1092,12 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto dvStrideHead = static_cast<unsigned int>(dvStrides->Get(1));
     auto dvStrideSeq = static_cast<unsigned int>(dvStrides->Get(2));
 
-    // Stats (LSE): [B, H_q, S_q] — rank 3, FP32
-    auto* statsStrides = statsTensor->strides();
-    auto statsStrideBatch = static_cast<unsigned int>(statsStrides->Get(0));
-    auto statsStrideHead = static_cast<unsigned int>(statsStrides->Get(1));
+    // Stats (LSE) and the D workspace: packed [B, H_q, S_q] FP32. isApplicable
+    // declines any stats tensor that is not packed on every axis of size > 1, so
+    // the strides follow from Q's dims. (The user's stride on a size-1 axis is
+    // arbitrary and must not reach the kernels.)
+    const unsigned int statsStrideBatch = numHeadsQ * seqLenQ;
+    const unsigned int statsStrideHead = seqLenQ;
 
     // -------------------------------------------------------------------------
     // 3. Attention scale — resolve as ScalarOperand (RFC 0016)
