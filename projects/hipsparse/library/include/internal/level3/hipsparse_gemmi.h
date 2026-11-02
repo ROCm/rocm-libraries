@@ -60,7 +60,7 @@ extern "C" {
 *  @param[in]
 *  nnz         number of non-zero entries of the sparse CSC matrix \f$B\f$. Must be non-negative.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  A           array of dimension \f$lda \times k\f$ (\f$op(A) == A\f$) or
 *              \f$lda \times m\f$ (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
@@ -77,7 +77,7 @@ extern "C" {
 *  cscRowIndB  array of \p nnz elements containing the column indices of the sparse CSC
 *              matrix \f$B\f$.
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta        scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C           array of dimension \f$ldc \times n\f$ that holds the values of \f$C\f$.
 *  @param[in]

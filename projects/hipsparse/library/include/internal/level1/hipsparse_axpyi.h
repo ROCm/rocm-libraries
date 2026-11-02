@@ -65,7 +65,7 @@ extern "C" {
 *  @param[in]
 *  nnz         number of non-zero entries of vector \f$x\f$. Must be non-negative.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  xVal        array of \p nnz elements containing the values of \f$x\f$.
 *  @param[in]

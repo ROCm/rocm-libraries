@@ -53,6 +53,7 @@ extern "C" {
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseSgtsv2_nopivot "hipsparseXgtsv2_nopivot()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
