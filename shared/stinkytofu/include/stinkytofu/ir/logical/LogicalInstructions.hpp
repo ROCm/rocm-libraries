@@ -92,6 +92,7 @@ class LogicalInstruction : public IRBase {
     std::optional<GLOBALModifiers> global;          ///< Global memory modifier
     std::optional<CacheScopeModifiers> cacheScope;  ///< SOPP fence scope (global_wb / global_inv)
     std::optional<MUBUFModifiers> mubuf;            ///< MUBUF (buffer load/store) modifier
+    std::optional<TENSORModifiers> tensor;          ///< Tensor op (tensor_load_to_lds) cache policy
     std::optional<SMEMModifiers> smem;              ///< SMEM (scalar load/store/atomic) modifier
     std::optional<VOP3PModifiers> vop3;             ///< VOP3P (op_sel) modifier
     std::optional<True16Modifiers> true16;          ///< True16 (.l/.h half-select) modifier

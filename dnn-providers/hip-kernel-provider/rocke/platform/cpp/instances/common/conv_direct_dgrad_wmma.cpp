@@ -404,6 +404,8 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         dgw_set_reason(reason, reason_cap, msg);
         return false;
     }
+    if(rocke_direct_conv_one_padding_reason(p, "", reason, reason_cap))
+        return false;
     G = spec->pack_groups;
     if(G < 1)
     {

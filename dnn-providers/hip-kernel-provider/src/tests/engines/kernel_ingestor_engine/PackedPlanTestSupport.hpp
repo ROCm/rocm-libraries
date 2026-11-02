@@ -232,20 +232,28 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition
     return kernel;
 }
 
-// A GenericPlan over `handler` for the stub kernel of `seed` and `kind`, on the Pointwise
-// test graph. Builds no code object and needs no device.
+// A GenericPlan over `handler` for `kernel`, on the Pointwise test graph. Builds no code
+// object and needs no device.
+inline std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>
+    makeStubPlan(const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& handler,
+                 hipdnn_plugin_sdk::ingestor::KernelDefinition kernel)
+{
+    const GraphFixture fixture(buildPointwiseGraph());
+    const hipdnn_plugin_sdk::ingestor::BoundTokens bound;
+    return std::make_unique<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>(
+        hipdnn_plugin_sdk::ingestor::KernelDispatcher<Handle>{std::move(kernel), &handler},
+        fixture.context(),
+        bound);
+}
+
+// makeStubPlan() for the stub kernel of `seed` and `kind`.
 inline std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>
     makeStubPlan(const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& handler,
                  uint8_t seed,
                  hipdnn_plugin_sdk::ingestor::KernelSourceKind kind
                  = hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK)
 {
-    const GraphFixture fixture(buildPointwiseGraph());
-    const hipdnn_plugin_sdk::ingestor::BoundTokens bound;
-    return std::make_unique<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>(
-        hipdnn_plugin_sdk::ingestor::KernelDispatcher<Handle>{stubKernel(seed, kind), &handler},
-        fixture.context(),
-        bound);
+    return makeStubPlan(handler, stubKernel(seed, kind));
 }
 
 // A plan of an engine other than an ingestor engine. It has no saveable plan, and it does not

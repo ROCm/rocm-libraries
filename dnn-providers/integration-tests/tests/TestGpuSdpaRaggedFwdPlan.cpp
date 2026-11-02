@@ -19,6 +19,8 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpaRagged.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedSdpaGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -421,7 +423,7 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, PlanConstruction)
 }
 
 // The plan must run the same kernel as a direct fpropRagged call, including the LSE. Equal
-// lengths leave no padding, so whole tensors are compared. ExecuteUsesBfloat16ProbabilityMode
+// lengths leave no padding, so whole tensors are compared. ExecuteUsesFloatProbabilityNotProviderRounding
 // checks the probability mode, which this tolerance cannot tell apart.
 TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
 {
@@ -501,7 +503,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
         /*topLeftAlignment=*/true,
         &lseDirect,
         /*raggedOffsetLse=*/nullptr,
-        sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>());
+        REFERENCE_SDPA_PROBABILITY_MODE);
 
     const float tolerance = 1e-2f;
     const CpuFpReferenceValidation<bfloat16> oValidation(tolerance, tolerance);
@@ -512,10 +514,10 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
         << "Plan LSE differs from direct fpropRagged LSE";
 }
 
-// All-bf16 graphs round P to bf16 (RTNE) before P@V, as AITER does. Large V values make that
-// rounding visible: the FLOAT and BFLOAT16_RTNE outputs differ, and the plan must match RTNE
-// exactly. One query token against four keys, H = D = 1, and the default scale of 1.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesBfloat16ProbabilityMode)
+// The plan computes P in fp32 (an independent oracle, SEM-012), not with AITER's bf16 P rounding.
+// Large V values make the rounding visible: the FLOAT and BFLOAT16_RTNE outputs differ, and the
+// plan must match FLOAT.
+TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesFloatProbabilityNotProviderRounding)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -590,7 +592,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesBfloat16ProbabilityMode)
     const float oFloat = direct(SdpaSoftmaxProbabilityMode::FLOAT);
 
     ASSERT_NE(oRtne, oFloat);
-    EXPECT_EQ(static_cast<float>(oPlan.memory().hostData()[0]), oRtne);
+    EXPECT_EQ(static_cast<float>(oPlan.memory().hostData()[0]), oFloat);
 }
 
 // fp8: the plan must pass the Q/K/V descales from the variant pack through to fpropRagged.
@@ -709,7 +711,7 @@ using Fp8Builder = GpuSdpaRaggedFwdPlanBuilder<DataType::FP8_E4M3,
                                                DataType::BFLOAT16>;
 
 // One fp8 descale. One value is a scalar [1]. B * H_kv values are a per-KV-head [B, H_kv, 1, 1]
-// descale, DEVICE storage only.
+// descale, TENSOR storage only.
 struct DescaleCase
 {
     OperandStorage storage;
@@ -781,7 +783,7 @@ void checkFp8DescaleStorage(const DescaleCase& qCase,
     auto offQ = makeRaggedOffset({seqLen, seqLen}, seqStride);
     auto offKv = makeRaggedOffset({seqLen, seqLen}, seqStride);
 
-    // Device copies feed the direct reference and any DEVICE plan operands.
+    // Device copies feed the direct reference and any TENSOR plan operands.
     const auto makeDeviceDescale = [&](const DescaleCase& c) {
         Tensor<float> t(descaleDims(c));
         std::copy(c.values.begin(), c.values.end(), t.memory().hostData());
@@ -805,7 +807,7 @@ void checkFp8DescaleStorage(const DescaleCase& qCase,
         {RAGGED_OFFSET_KV_UID, offKv.memory().deviceData()},
     };
     const auto bind = [&](int64_t uid, const DescaleCase& c, Tensor<float>& device, float& host) {
-        if(c.storage == OperandStorage::DEVICE)
+        if(c.storage == OperandStorage::TENSOR)
         {
             variantPack.emplace(uid, device.memory().deviceData());
         }
@@ -854,8 +856,8 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8BakedDescaleNotInVariantPack)
 {
     SKIP_IF_NO_DEVICES();
     checkFp8DescaleStorage({OperandStorage::BAKED, {0.5f}},
-                           {OperandStorage::DEVICE, {0.25f}},
-                           {OperandStorage::DEVICE, {2.0f}});
+                           {OperandStorage::TENSOR, {0.25f}},
+                           {OperandStorage::TENSOR, {2.0f}});
 }
 
 TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8RuntimePassByValueDescales)
@@ -872,7 +874,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8MixedDescaleStorage)
     SKIP_IF_NO_DEVICES();
     checkFp8DescaleStorage({OperandStorage::BAKED, {0.5f}},
                            {OperandStorage::RUNTIME_PASS_BY_VALUE, {0.25f}},
-                           {OperandStorage::DEVICE, {1.5f, 2.0f, 2.5f, 3.0f}});
+                           {OperandStorage::TENSOR, {1.5f, 2.0f, 2.5f, 3.0f}});
 }
 
 // Host-stored descales (baked or pass-by-value) must be scalars.
@@ -1082,7 +1084,7 @@ TEST_P(TestGpuSdpaRaggedFwdPlanScale, ExecuteHonorsNonDefaultScale)
         scale.storage = OperandStorage::RUNTIME_PASS_BY_VALUE;
         if(source == ScaleSource::DEVICE_TENSOR)
         {
-            scale.storage = OperandStorage::DEVICE;
+            scale.storage = OperandStorage::TENSOR;
         }
         else if(source == ScaleSource::BAKED_TENSOR)
         {
@@ -1284,6 +1286,93 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteBottomRightBandMatchesCpu)
     attrs.right_bound = 0;
     checkPlanMaskAgainstCpu(attrs, 1, 0, /*expectedTopLeft=*/false);
 }
+
+// A deprecated causal flag composes with explicit bounds and alignment the way cuDNN's setters do
+// (PlanUtils.hpp extractDiagonalBandParams), matching the dense GPU and CPU references: the flag
+// sets right_bound = 0, then any left_bound, any right_bound >= 0 and (for causal_mask) the
+// alignment apply on top. Register SEM-002.
+struct RaggedDeprecatedCausalCase
+{
+    const char* name;
+    bool causalMask;
+    bool causalMaskBottomRight;
+    std::optional<int64_t> leftBound;
+    std::optional<int64_t> rightBound;
+    DiagonalAlignment alignment;
+    int64_t expectedLeftBound;
+    int64_t expectedRightBound;
+    bool expectedTopLeft;
+};
+
+class TestGpuSdpaRaggedFwdPlanDeprecatedCausal
+    : public ::testing::TestWithParam<RaggedDeprecatedCausalCase>
+{
+};
+
+TEST_P(TestGpuSdpaRaggedFwdPlanDeprecatedCausal, ComposesWithExplicitBounds)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& p = GetParam();
+    SdpaAttributesT attrs;
+    attrs.causal_mask = p.causalMask;
+    attrs.causal_mask_bottom_right = p.causalMaskBottomRight;
+    attrs.left_bound = p.leftBound;
+    attrs.right_bound = p.rightBound;
+    attrs.diagonal_alignment = p.alignment;
+    checkPlanMaskAgainstCpu(attrs, p.expectedLeftBound, p.expectedRightBound, p.expectedTopLeft);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuSdpaRaggedFwdPlanDeprecatedCausal,
+                         ::testing::Values(RaggedDeprecatedCausalCase{"CausalWithLeftBound",
+                                                                      true,
+                                                                      false,
+                                                                      1,
+                                                                      std::nullopt,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      1,
+                                                                      0,
+                                                                      true},
+                                           RaggedDeprecatedCausalCase{"CausalWithRightBound",
+                                                                      true,
+                                                                      false,
+                                                                      std::nullopt,
+                                                                      1,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      -1,
+                                                                      1,
+                                                                      true},
+                                           RaggedDeprecatedCausalCase{"CausalWithUnboundedRight",
+                                                                      true,
+                                                                      false,
+                                                                      std::nullopt,
+                                                                      -1,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      -1,
+                                                                      0,
+                                                                      true},
+                                           RaggedDeprecatedCausalCase{
+                                               "CausalWithBottomRightAlignment",
+                                               true,
+                                               false,
+                                               std::nullopt,
+                                               std::nullopt,
+                                               DiagonalAlignment::BOTTOM_RIGHT,
+                                               -1,
+                                               0,
+                                               false},
+                                           RaggedDeprecatedCausalCase{"BottomRightWithLeftBound",
+                                                                      false,
+                                                                      true,
+                                                                      1,
+                                                                      std::nullopt,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      1,
+                                                                      0,
+                                                                      false}),
+                         [](const ::testing::TestParamInfo<RaggedDeprecatedCausalCase>& info) {
+                             return std::string(info.param.name);
+                         });
 
 // Both deprecated causal flags, or a bound below -1, are rejected when the plan is built.
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, BuildRejectsInvalidMaskAttributes)

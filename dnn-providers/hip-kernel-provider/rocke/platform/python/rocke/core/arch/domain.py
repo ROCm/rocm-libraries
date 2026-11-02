@@ -202,7 +202,7 @@ def committed_flavors() -> tuple[str, ...]:
 # it preserves the gate that applied before the compiler lane was split out and
 # is safer than silently running with no gate. A lane's own column always wins.
 # tools/gen_arch_domain_cpp.py copies this map into the C++ engine.
-COLUMN_ALIASES: dict[str, str] = {"llvm24": "llvm23"}
+COLUMN_ALIASES: dict[str, str] = {}
 
 
 def _column_path(flavor: str) -> Path:

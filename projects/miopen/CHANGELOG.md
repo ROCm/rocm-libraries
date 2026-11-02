@@ -30,6 +30,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
   ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
   does the weight tensor in every case.
+* [Conv] Fixed HIP graph captures of convolutions failing with `hipErrorStreamCaptureInvalidated`
+  after a find had skipped a naive solver for exceeding `MIOPEN_NAIVE_TIMEOUT` (#12121). Scratch
+  held by a skipped evaluation is now released by a background thread as soon as its kernel
+  finishes, rather than from a later kernel launch, so it is also released in workloads that only
+  replay a captured graph.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
@@ -40,6 +45,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
+* [DB] Windows installs now place the system find-db, perf-db, kernel-db and AI heuristic model
+  files in `share\miopen\db`, the same location as Linux, instead of `bin`. MIOpen looks for them
+  in `share\miopen\db` under the parent of the directory that holds `MIOpen.dll`.
+  `MIOPEN_SYSTEM_DB_PATH` still overrides the location. A Windows build tree stages the same
+  files under `build\share\miopen\db` instead of `build\bin`, so a `BUILD_DEV=OFF` build runs
+  from the build tree without an install.
 
 ### Removed
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).

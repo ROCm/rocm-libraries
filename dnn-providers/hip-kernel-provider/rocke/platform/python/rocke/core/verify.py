@@ -39,6 +39,10 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _assume_range_errors,
+    _buffer_op_bytes,
+    _if_else_branch_yield,
+    _global_ptr_offset_op_error,
+    _global_ptr_to_i64_op_error,
     _int_add_wrap_error,
     _int_cmp_pred_error,
     _is_flag_ptr,
@@ -51,6 +55,7 @@ from .ir import (
     VectorType,
     PtrType,
     SmemType,
+    _trap_op_error,
 )
 
 ERROR = "error"
@@ -428,6 +433,17 @@ class _Verifier:
                     f"{len(op.operands)}",
                     op,
                 )
+        elif name == "scf.if_else":
+            try:
+                for branch in range(2):
+                    _if_else_branch_yield(op, branch)
+            except ValueError as error:
+                self.err(str(error), op)
+        elif name in ("tile.buffer_load_vN", "tile.buffer_store_vN"):
+            try:
+                _buffer_op_bytes(op)
+            except (TypeError, ValueError) as error:
+                self.err(str(error), op)
         elif name == "cf.return":
             if op.operands or op.results:
                 self.err(f"{name}: must have no operands and no results", op)
@@ -455,6 +471,18 @@ class _Verifier:
                 _FLAG_STORE_ORDERINGS if name == "memref.global_flag_store" else None
             )
             self._check_sync_attrs(op, orderings)
+        elif name == "tile.global_ptr_offset":
+            error = _global_ptr_offset_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == "tile.global_ptr_to_i64":
+            error = _global_ptr_to_i64_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == "tile.trap":
+            error = _trap_op_error(op)
+            if error:
+                self.err(error, op)
 
     def _check_sync_attrs(self, op: Op, orderings) -> None:
         """Scope / ordering values of a fence or flag op (presence is checked

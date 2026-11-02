@@ -86,7 +86,7 @@ flowchart TD
 
     subgraph G["5 · Gates — 'done' means all green"]
         direction TB
-        G1["tools/check_byte_identity.py at EVERY flavor<br/>llvm20 · llvm22 · llvm23"]
+        G1["tools/check_byte_identity.py at EVERY flavor<br/>llvm20 · llvm22 · llvm23 · llvm24"]
         G2["test_cpp_engine_lowers_every_arch_python_wires<br/>a Python row without the two C++ rows FAILS here"]
         G3["arch-gate dispatch test: new candidates reject every other arch<br/>+ additive-registration + declared-coverage invariants"]
         G4["tools/run_checks.py · platform/tests/run_all.py"]

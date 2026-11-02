@@ -191,6 +191,83 @@ const rocke_type_t* rocke_require_ir_type(const char* dtype);
  * scalar with no format. */
 int rocke_i_type_bits(const rocke_type_t* t);
 
+/* The bytes one buffer access of `count` `elem` elements moves (Python
+ * core/ir.py::_buffer_access_bytes): `elem` is a scalar whose width is whole
+ * bytes and the access is 1, 2, 4, 8 or 16 bytes. Otherwise returns 0 and
+ * writes the Python engine's refusal, prefixed with `op_name`, into `err`. */
+int rocke_i_buffer_access_bytes(
+    const char* op_name, const rocke_type_t* elem, int count, char* err, size_t err_cap);
+
+/* The bytes a buffer access whose `role` ("result" of a load, "value" of a
+ * store) has type `t` moves (Python core/ir.py::_buffer_vector_bytes): `t` is a
+ * vector, checked as rocke_i_buffer_access_bytes. Otherwise returns 0 and
+ * writes the Python engine's refusal into `err`. */
+int rocke_i_buffer_vector_bytes(
+    const char* op_name, const char* role, const rocke_type_t* t, char* err, size_t err_cap);
+
+/* rocke_i_buffer_vector_bytes for a built tile.buffer_load_vN (three operands,
+ * one result: the loaded vector) or tile.buffer_store_vN (four operands, the
+ * last the stored vector, no result), after its operand and result counts:
+ * serialized IR reaches the verifier and the lowerings without passing the
+ * builder (Python core/ir.py::_buffer_op_bytes). Otherwise returns 0 and writes
+ * the Python engine's refusal into `err`. */
+int rocke_i_buffer_op_bytes(const rocke_op_t* op, char* err, size_t err_cap);
+
+/* The error for a global_ptr_offset whose pointer, offset and (once built,
+ * else NULL) result have these types, or NULL when they are valid (Python
+ * core/ir.py::_global_ptr_offset_error, same texts): a global pointer, an i64
+ * offset, a result of the pointer's type. A returned error is written to `buf`. */
+const char* rocke_i_global_ptr_offset_error(const rocke_type_t* ptr_type,
+                                            const rocke_type_t* byte_off_type,
+                                            const rocke_type_t* result_type,
+                                            char* buf,
+                                            size_t cap);
+
+/* rocke_i_global_ptr_offset_error for a built tile.global_ptr_offset op, after
+ * its operand and result counts (Python core/ir.py::_global_ptr_offset_op_error).
+ * The verifier and both lowerings use it. */
+const char* rocke_i_global_ptr_offset_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* The error for a global_ptr_to_i64 whose pointer and (once built, else NULL)
+ * result have these types, or NULL when they are valid (Python
+ * core/ir.py::_global_ptr_to_i64_error, same texts): a global pointer and an
+ * i64 result. A returned error is written to `buf`. */
+const char* rocke_i_global_ptr_to_i64_error(const rocke_type_t* ptr_type,
+                                            const rocke_type_t* result_type,
+                                            char* buf,
+                                            size_t cap);
+
+/* rocke_i_global_ptr_to_i64_error for a built tile.global_ptr_to_i64 op, after
+ * its operand and result counts (Python core/ir.py::_global_ptr_to_i64_op_error).
+ * The verifier and both lowerings use it. */
+const char* rocke_i_global_ptr_to_i64_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* The error for a built tile.trap op that has operands, results or regions,
+ * or NULL when it is bare (Python core/ir.py::_trap_op_error, same text): the
+ * lowerings emit only the trap call, so a result would reach its uses
+ * undefined. A returned error is written to `buf`. The verifier and both
+ * lowerings use it. */
+const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* Whether an scf.if_else can carry a result `index` of type `result_type`
+ * (Python core/ir.py::_if_else_result_type_error): not an LDS allocation.
+ * Otherwise returns false and writes the Python engine's refusal into `err`.
+ * The builder and rocke_i_if_else_branch_yield use it. */
+bool rocke_i_if_else_result_type_ok(int index,
+                                    const rocke_type_t* result_type,
+                                    char* err,
+                                    size_t err_cap);
+
+/* The scf.yield that gives the scf.if_else `op`'s results their values on
+ * branch `branch` (0 then, 1 else), in `*out_yield`; NULL when `op` has no
+ * results (Python core/ir.py::_if_else_branch_yield). Every if/else has one
+ * condition and two branches, checked first; no result is an LDS allocation;
+ * a branch of an if/else with results ends in an scf.yield of one value per
+ * result, of the result's type, and never a buffer descriptor. Otherwise
+ * returns false and writes the Python engine's refusal into `err`. */
+bool rocke_i_if_else_branch_yield(
+    const rocke_op_t* op, int branch, const rocke_op_t** out_yield, char* err, size_t err_cap);
+
 /* Refuse a bitcast of a `source` value to `target` unless both are values of
  * the same bit width (Python core/ir.py::_check_bitcast_width). `verb` names
  * the builder ("bitcast", "vec_bitcast") and `hint` says what to do instead of

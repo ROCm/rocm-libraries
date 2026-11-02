@@ -777,6 +777,47 @@ inline bool operator!=(const KernelDescriptor& lhs, const KernelDescriptor& rhs)
     return !(lhs == rhs);
 }
 
+/// The launch names of a kernel's @c sources map: the set a native dispatch handler must
+/// declare to launch the kernel. Empty for a single-launch kernel, which keeps `source`.
+inline std::set<std::string> launchNamesOf(const std::map<std::string, KernelSource>& sources)
+{
+    std::set<std::string> names;
+    for(const auto& launch : sources)
+    {
+        names.insert(launch.first);
+    }
+    return names;
+}
+
+// A multi-launch kernel leaves `source` default, and a default KernelSource reads as an
+// EMBEDDED_SOURCE kernel with no file. Read a kernel's sources through the two helpers
+// below, which look at `sources` first, rather than through `source` directly. Each takes
+// a KernelDescriptor or a KernelDefinition; both carry `source` and `sources`.
+
+/// The one source of a single-launch @p kernel, or nullptr for a multi-launch kernel. For a
+/// reader that needs exactly one code object, which must refuse a multi-launch kernel. The
+/// pointer refers into @p kernel and is valid only while @p kernel is, so never pass a
+/// temporary.
+template <typename Kernel>
+const KernelSource* singleLaunchSource(const Kernel& kernel)
+{
+    return kernel.sources.empty() ? &kernel.source : nullptr;
+}
+
+/// True iff @p predicate holds for every launch of @p kernel: each `sources` entry of a
+/// multi-launch kernel, or the one `source` of a single-launch kernel.
+template <typename Kernel, typename Predicate>
+bool allLaunchSources(const Kernel& kernel, Predicate predicate)
+{
+    if(kernel.sources.empty())
+    {
+        return predicate(kernel.source);
+    }
+    return std::all_of(kernel.sources.begin(), kernel.sources.end(), [&](const auto& launch) {
+        return predicate(launch.second);
+    });
+}
+
 /// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over
 /// a vector of child kernels.
 struct KernelDescriptorPack

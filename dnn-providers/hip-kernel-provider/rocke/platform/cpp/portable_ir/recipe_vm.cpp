@@ -1203,6 +1203,17 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             rv_fail(vm, "scf_if_else needs cond");
             return;
         }
+        /* The recipe carries no result types for an if/else, so results would
+         * replay unbound; the Python recorder refuses with the same text
+         * (recording_builder.py IF_ELSE_RESULTS_UNSUPPORTED). */
+        const jd_val_t* results = rocke_jget(instr, "results");
+        if(results && results->kind == JD_ARR && results->arr_len > 0)
+        {
+            rv_fail(vm,
+                    "portable IR does not support an scf.if_else with results; lower the "
+                    "kernel directly");
+            return;
+        }
         rocke_if_else_t s = rocke_b_scf_if_else(vm->b, cond);
         if(!rocke_ir_builder_ok(vm->b))
         {
