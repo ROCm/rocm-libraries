@@ -142,3 +142,13 @@ def test_a_pinned_instance_builds_its_kernel_ir(case):
     assert kernel is not None
     with pytest.raises(ValueError, match="not gfx950"):
         res.candidate.built(res.spec, "gfx950")
+
+
+def test_step_replay_resolves_a_table_through_dispatch():
+    from benchmarks.common.conv_step_replay import load_pins_cases
+
+    path = TABLES["gfx942_unet3d_bf16"]
+    doc = json.loads(path.read_text())
+    for mode, body in doc["modes"].items():
+        cases = load_pins_cases(f"{path}#{mode}", doc["arch"])
+        assert {k: v["kernel"] for k, v in cases.items()} == {k: v["kernel"] for k, v in body["cases"].items()}
