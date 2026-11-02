@@ -352,8 +352,10 @@ namespace
         const Stored      sB = packed(tB ? n : k, tB ? k : n, orderB);
         const Stored      sD = packed(m, n, HIPBLASLT_ORDER_COL);
 
-        // Distinct scales, so a scale applied to the wrong operand or dropped changes D.
-        const float        scaleA = 2.0f, scaleB = 3.0f, alpha = 1.0f, beta = 0.0f;
+        // Distinct scales, so a scale applied to the wrong operand or dropped changes D. Their
+        // product, 8, keeps every result a multiple of 8, which FP16 represents exactly up to
+        // 16384; the largest possible |D| here is 128 * 3 * 2 * 8 = 6144.
+        const float        scaleA = 2.0f, scaleB = 4.0f, alpha = 1.0f, beta = 0.0f;
         const DeviceBuffer dScaleA = upload(std::vector<float>{scaleA});
         const DeviceBuffer dScaleB = upload(std::vector<float>{scaleB});
         const DeviceBuffer dA      = upload(fill<F8>(sA, valueA));
@@ -425,6 +427,7 @@ namespace
         constexpr auto COL = HIPBLASLT_ORDER_COL, ROW = HIPBLASLT_ORDER_ROW;
         auto           runAll = [&](auto f8, hipDataType typeAB) {
             using F8 = decltype(f8);
+            bool ran = false;
             for(hipDataType typeD : {HIP_R_32F, HIP_R_16F})
             {
                 auto run = [&](hipblasOperation_t opA,
@@ -445,9 +448,9 @@ namespace
                 EXPECT_TRUE(run(N, N, ROW, COL)) << "A row-major: no algorithm";
                 EXPECT_TRUE(run(T, T, COL, ROW)) << "B row-major: no algorithm";
                 EXPECT_TRUE(run(N, T, ROW, ROW)) << "A and B row-major: no algorithm";
-                return true;
+                ran = true;
             }
-            return false;
+            return ran;
         };
         const bool ranFnuz = runAll(hipblaslt_f8_fnuz(0.0f), HIP_R_8F_E4M3_FNUZ);
         const bool ranOcp  = runAll(hipblaslt_f8(0.0f), HIP_R_8F_E4M3);
