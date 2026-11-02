@@ -922,6 +922,13 @@ that tensor
 ([details](file-formats.md#per-engine-test-config--configengine_nametoml)). The
 `hipdnn_golden_data_tests` binary replaces the retired `golden-check` mode.
 
+A `[[validator_overrides]]` entry with `validator = "allclose"` or
+`"allclose_matching_infinities"` may also set `atol`, `rtol` or both. They set that tolerance
+for the matched output tensors only, and outrank a `[[tolerance_overrides]]` entry for the same
+test. The engine configs use this for numerics the fuzz driver found, scoped to the gauntlet
+suites (`*gauntlet*<Op>*`) so that a checked-in bundle is graded as before
+([precedence](file-formats.md#per-engine-test-config--configengine_nametoml)).
+
 **SDPA Philox dropout.** No reference can reproduce an engine's random stream, so a
 forward graph with `dropout_probability` is verified through its `rng_dump` output
 ([SEM-015](../../../projects/hipdnn/docs/SdpaSemanticsRegister.md)). An engine that

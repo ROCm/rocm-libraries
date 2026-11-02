@@ -67,10 +67,16 @@ inline std::optional<ValidatorOverride> findTomlValidatorOverride(const std::str
 // The validator override is consulted first because it outranks atol/rtol: announcing a
 // tolerance before knowing whether it survives is how a reader is told the wrong check
 // ran. `atol`/`rtol` are the fallback the caller resolved. On the default allclose path
-// they are logged only when a tolerance override changed them, so a quiet run means the
+// they are logged only when an override changed them, so a quiet run means the
 // defaults graded the tensor; a selected validator instead announces itself and its
-// tolerances unconditionally, so a logged `atol=` there says nothing about whether a
-// tolerance override matched.
+// tolerances unconditionally, so a logged `atol=` there says nothing about whether an
+// override matched.
+//
+// For the two allclose kinds the tolerance is resolved in three layers, each replacing the
+// one before it: the caller's `atol`/`rtol`, then the test's [[tolerance_overrides]] entry
+// (both values, every tensor of the test), then the validator entry's own `atol` and `rtol`
+// (each only if the entry spells it, this tensor only). A validator entry without either
+// leaves the tolerance path exactly as it was.
 inline bundle::ComparisonTolerance
     gradingForTensor(const std::string& testName,
                      const std::string& tensorLabel,
@@ -79,6 +85,7 @@ inline bundle::ComparisonTolerance
                      float atol,
                      float rtol)
 {
+    bool matchingInfinities = false;
     if(validatorOverride)
     {
         switch(validatorOverride->kind)
@@ -90,18 +97,10 @@ inline bundle::ComparisonTolerance
             return bundle::ComparisonTolerance::rms(validatorOverride->rmsThreshold);
 
         case ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES:
-            // This kind grades finite elements by atol/rtol, so a [[tolerance_overrides]]
-            // entry still applies to it exactly as it does to allclose.
-            if(toleranceOverride)
-            {
-                atol = toleranceOverride->atol;
-                rtol = toleranceOverride->rtol;
-            }
-            HIPDNN_PLUGIN_LOG_INFO("Validator override applied for "
-                                   << testName << " tensor " << tensorLabel
-                                   << ": allclose_matching_infinities, atol=" << atol
-                                   << " rtol=" << rtol);
-            return bundle::ComparisonTolerance::allCloseMatchingInfinities(atol, rtol);
+            // This kind grades finite elements by atol/rtol, so the tolerance layers
+            // below apply to it exactly as they do to allclose.
+            matchingInfinities = true;
+            break;
 
         case ValidatorOverrideKind::ALLCLOSE:
             break; // an explicit allclose entry takes the default path below
@@ -117,6 +116,26 @@ inline bundle::ComparisonTolerance
     {
         atol = toleranceOverride->atol;
         rtol = toleranceOverride->rtol;
+    }
+    const bool validatorTolerance
+        = validatorOverride && (validatorOverride->atol || validatorOverride->rtol);
+    if(validatorTolerance)
+    {
+        atol = validatorOverride->atol.value_or(atol);
+        rtol = validatorOverride->rtol.value_or(rtol);
+    }
+
+    if(matchingInfinities)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Validator override applied for "
+                               << testName << " tensor " << tensorLabel
+                               << ": allclose_matching_infinities, atol=" << atol
+                               << " rtol=" << rtol);
+        return bundle::ComparisonTolerance::allCloseMatchingInfinities(atol, rtol);
+    }
+
+    if(toleranceOverride || validatorTolerance)
+    {
         HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for "
                                << testName << " tensor " << tensorLabel
                                << ": allclose, atol=" << atol << " rtol=" << rtol);

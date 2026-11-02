@@ -4,7 +4,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -53,6 +55,12 @@ struct ValidatorOverride
     ValidatorOverrideKind kind;
     // Relative-RMS threshold. Meaningful only when kind == RMS.
     float rmsThreshold;
+    // Per-tensor tolerance of an allclose or allclose_matching_infinities entry. Each is
+    // present only when the entry spells it; a present value outranks the matching
+    // [[tolerance_overrides]] entry and the policy default for that tensor. Always empty for
+    // RMS, which the parser enforces.
+    std::optional<float> atol = std::nullopt;
+    std::optional<float> rtol = std::nullopt;
 };
 
 // Loads a per-engine TOML settings file for integration tests.
@@ -79,6 +87,13 @@ struct ValidatorOverride
 //   filters   = ["*SdpaFwd*Masked*"]
 //   tensors   = ["*::LSE"]
 //   validator = "allclose_matching_infinities"
+//
+//   [[validator_overrides]]
+//   filters   = ["*gauntlet*BatchnormBackward*"]
+//   tensors   = ["*::DX"]
+//   validator = "allclose"
+//   atol      = 4e-4      # optional, with or without rtol
+//   rtol      = 2e-3
 //
 //   [[test_skips]]
 //   archs     = ["gfx1100", "gfx1101"]
@@ -112,6 +127,15 @@ struct ValidatorOverride
 // and neither "allclose" nor "allclose_matching_infinities" may carry one, because
 // an entry that does not say exactly what it means is a load error rather than a
 // silent fall-back to allclose.
+// "allclose" and "allclose_matching_infinities" entries may also set 'atol', 'rtol' or
+// both: a finite, non-negative number that replaces that tolerance for the tensors the
+// entry matches. It outranks a [[tolerance_overrides]] entry for the same test, which
+// is the one way to relax one output of a graph and leave its siblings on the default
+// (a tolerance override applies to every tensor of the test). A key an entry omits
+// leaves that tolerance to the tolerance override or the default. 'rms' with 'atol' or
+// 'rtol' is a load error, since an RMS comparison reads neither. When several entries
+// match one tensor the last one wins as a whole: its omitted keys do not inherit an
+// earlier entry's.
 // For test_skips, an entry matches when ALL of:
 //   - 'archs' is omitted/empty (any arch), OR any 'archs' value is a
 //     substring of the device's raw gcnArchName.
@@ -207,7 +231,7 @@ public:
                   });
             if(tensorMatches)
             {
-                result = ValidatorOverride{entry.kind, entry.rmsThreshold};
+                result = ValidatorOverride{entry.kind, entry.rmsThreshold, entry.atol, entry.rtol};
             }
         }
 
@@ -299,6 +323,8 @@ private:
         std::vector<std::string> tensors;
         ValidatorOverrideKind kind;
         float rmsThreshold;
+        std::optional<float> atol;
+        std::optional<float> rtol;
     };
 
     struct SkipEntry
@@ -349,6 +375,33 @@ private:
             result.push_back(*str);
         }
         return result;
+    }
+
+    // The finite, non-negative float at `key`, or nullopt when the key is absent. Throws when
+    // it is present and not a number, NaN, infinite or outside the float range, or negative:
+    // a tolerance that cannot be applied is a load error, never a fall-back to the default.
+    static std::optional<float>
+        parseTolerance(const toml::table& entry, std::string_view key, const char* sectionName)
+    {
+        const auto node = entry[key];
+        if(!node)
+        {
+            return std::nullopt;
+        }
+        const auto value = node.value<double>();
+        if(!value.has_value())
+        {
+            throw std::runtime_error(std::string(sectionName) + " entry '" + std::string(key)
+                                     + "' must be a number");
+        }
+        // Checked on the double: narrowing one beyond the float range is undefined behavior.
+        if(!std::isfinite(*value) || *value < 0.0
+           || *value > static_cast<double>(std::numeric_limits<float>::max()))
+        {
+            throw std::runtime_error(std::string(sectionName) + " entry '" + std::string(key)
+                                     + "' must be finite and non-negative");
+        }
+        return static_cast<float>(*value);
     }
 
     static OverrideEntry parseToleranceOverride(const toml::node& node)
@@ -444,7 +497,21 @@ private:
             parsed.kind = isAllClose ? ValidatorOverrideKind::ALLCLOSE
                                      : ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES;
             parsed.rmsThreshold = 0.0f;
+            parsed.atol = parseTolerance(*table, "atol", K_SECTION);
+            parsed.rtol = parseTolerance(*table, "rtol", K_SECTION);
             return parsed;
+        }
+
+        // The mirror of the guard above: an RMS comparison reads neither tolerance, so one
+        // here is an entry that does not do what it says.
+        for(const char* key : {"atol", "rtol"})
+        {
+            if((*table)[key])
+            {
+                throw std::runtime_error(std::string(K_SECTION)
+                                         + R"~( entry with validator = "rms" also sets ')~" + key
+                                         + "'");
+            }
         }
 
         parsed.kind = ValidatorOverrideKind::RMS;

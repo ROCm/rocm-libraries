@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "harness/TestSettings.hpp"
+#include "harness/TomlGuards.hpp"
 
 using hipdnn_integration_tests::TestSettings;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
@@ -578,6 +579,354 @@ rms_threshold = 1e-4
 )");
 
     EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// ---------------------------------------------------------------------------
+// [[validator_overrides]] atol / rtol — one tensor's tolerance
+//
+// A [[tolerance_overrides]] entry relaxes every output of a test. These keys are the way to
+// relax one output of a graph, so what they must not touch matters as much as what they set.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// The scoping the gauntlet entries of an engine TOML use: its suites carry "gauntlet" in the
+// name (run_gauntlet_fuzz.py, `gauntlet_<Op>_<Space>_<tag>_cases.s<seed>`); quick-bundle
+// tests are `quick_<Op>_<Variant>.<case id>` (BundleDiscovery.hpp deriveSuiteName).
+const char* const K_GAUNTLET_DX_CONFIG = R"(
+[meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["*BatchnormBackward*"]
+atol = 1e-1
+rtol = 2e-1
+
+[[validator_overrides]]
+filters = ["*gauntlet*BatchnormBackward*"]
+tensors = ["*::DX"]
+validator = "allclose"
+atol = 4e-4
+rtol = 2e-3
+)";
+
+const char* const K_GAUNTLET_TEST = "gauntlet_BatchnormBackward_Default_fp16_cases.s1234";
+const char* const K_QUICK_TEST = "quick_BatchnormBackward_Variant2.2_32_8_8_fp16_nchw_train";
+
+// What the parser said about a validator entry, or "" when it loaded.
+std::string validatorEntryLoadError(const std::string& entryBody)
+{
+    const TempTomlFile file("[meta]\nversion = 1\n\n[[validator_overrides]]\n"
+                            "filters = [\"*gauntlet*BatchnormBackward*\"]\n"
+                            "tensors = [\"*::DX\"]\n"
+                            + entryBody);
+    try
+    {
+        const TestSettings settings(file.path());
+    }
+    catch(const std::runtime_error& e)
+    {
+        return e.what();
+    }
+    return "";
+}
+
+} // namespace
+
+TEST(TestSettingsValidatorOverrides, AtolAndRtolApplyOnlyToTheMatchedTensor)
+{
+    const TempTomlFile file(K_GAUNTLET_DX_CONFIG);
+    const TestSettings settings(file.path());
+
+    const auto dx = settings.findValidatorOverride(K_GAUNTLET_TEST, "BatchnormBackward_0::DX");
+    ASSERT_TRUE(dx.has_value());
+    EXPECT_EQ(dx->kind, hipdnn_integration_tests::ValidatorOverrideKind::ALLCLOSE);
+    ASSERT_TRUE(dx->atol.has_value());
+    ASSERT_TRUE(dx->rtol.has_value());
+    EXPECT_FLOAT_EQ(*dx->atol, 4e-4F);
+    EXPECT_FLOAT_EQ(*dx->rtol, 2e-3F);
+
+    EXPECT_FALSE(
+        settings.findValidatorOverride(K_GAUNTLET_TEST, "BatchnormBackward_0::DSCALE").has_value())
+        << "a sibling output of the same graph keeps the default tolerance";
+    EXPECT_FALSE(
+        settings.findValidatorOverride(K_GAUNTLET_TEST, "BatchnormBackward_0::DBIAS").has_value());
+}
+
+// The entries are scoped to the gauntlet so a checked-in bundle is graded as before.
+TEST(TestSettingsValidatorOverrides, GauntletScopedEntryDoesNotMatchQuickBundleNames)
+{
+    const TempTomlFile file(K_GAUNTLET_DX_CONFIG);
+    const TestSettings settings(file.path());
+
+    EXPECT_TRUE(
+        settings.findValidatorOverride(K_GAUNTLET_TEST, "BatchnormBackward_0::DX").has_value());
+    EXPECT_FALSE(
+        settings.findValidatorOverride(K_QUICK_TEST, "BatchnormBackward_0::DX").has_value());
+    EXPECT_FALSE(settings
+                     .findValidatorOverride("full_BatchnormBackward_Default.4096_8_8_8_fp32_nchw",
+                                            "BatchnormBackward_0::DX")
+                     .has_value());
+    EXPECT_FALSE(settings
+                     .findValidatorOverride("gauntlet_SdpaFwd_Default_bfp16_cases.s1",
+                                            "BatchnormBackward_0::DX")
+                     .has_value())
+        << "another operation's gauntlet suite is not matched either";
+}
+
+TEST(TestSettingsValidatorOverrides, AtolWithoutRtolLeavesRtolEmpty)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*SdpaFwd*"]
+tensors = ["*::O"]
+validator = "allclose_matching_infinities"
+atol = 0.5
+)");
+    const TestSettings settings(file.path());
+
+    const auto hit = settings.findValidatorOverride("gauntlet_SdpaFwd_x.s1", "SdpaFwd_0::O");
+    ASSERT_TRUE(hit.has_value());
+    ASSERT_TRUE(hit->atol.has_value());
+    EXPECT_FLOAT_EQ(*hit->atol, 0.5F);
+    EXPECT_FALSE(hit->rtol.has_value());
+}
+
+// Zero is a legitimate tolerance (an exact-match output), so non-negative, not positive.
+TEST(TestSettingsValidatorOverrides, ZeroToleranceIsAccepted)
+{
+    EXPECT_EQ(validatorEntryLoadError("validator = \"allclose\"\natol = 0.0\nrtol = 0.0\n"), "");
+}
+
+TEST(TestSettingsValidatorOverrides, AnEntryWithoutAtolOrRtolCarriesNeither)
+{
+    const TempTomlFile file(K_RMS_CONFIG);
+    const TestSettings settings(file.path());
+
+    const auto hit = settings.findValidatorOverride(
+        "Smoke/IntegrationGpuLayernormBackwardPure5DFp32.Correctness/9",
+        "LayernormBackward_0::DSCALE");
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_FALSE(hit->atol.has_value());
+    EXPECT_FALSE(hit->rtol.has_value());
+}
+
+// A later matching entry replaces the earlier one as a whole: a later "allclose" with no
+// tolerance must put the tensor back on the default rather than inherit the earlier atol.
+TEST(TestSettingsValidatorOverrides, LaterEntryWinsAsAWholeForAtolAndRtol)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = ["*gauntlet*BatchnormBackward*"]
+tensors = ["*::DX"]
+validator = "allclose"
+atol = 4e-4
+rtol = 2e-3
+
+[[validator_overrides]]
+filters = ["*gauntlet*BatchnormBackward*bfp16_*"]
+tensors = ["*::DX"]
+validator = "allclose"
+rtol = 2e-2
+
+[[validator_overrides]]
+filters = ["*gauntlet*BatchnormBackward*fp32_*"]
+tensors = ["*::DX"]
+validator = "allclose"
+)");
+    const TestSettings settings(file.path());
+
+    const auto half = settings.findValidatorOverride(
+        "gauntlet_BatchnormBackward_Default_fp16_cases.s1", "BatchnormBackward_0::DX");
+    ASSERT_TRUE(half.has_value());
+    EXPECT_FLOAT_EQ(*half->atol, 4e-4F);
+    EXPECT_FLOAT_EQ(*half->rtol, 2e-3F);
+
+    const auto bf16 = settings.findValidatorOverride(
+        "gauntlet_BatchnormBackward_Default_bfp16_cases.s1", "BatchnormBackward_0::DX");
+    ASSERT_TRUE(bf16.has_value());
+    EXPECT_FALSE(bf16->atol.has_value()) << "the later entry does not inherit the earlier atol";
+    EXPECT_FLOAT_EQ(*bf16->rtol, 2e-2F);
+
+    const auto fp32 = settings.findValidatorOverride(
+        "gauntlet_BatchnormBackward_Default_fp32_cases.s1", "BatchnormBackward_0::DX");
+    ASSERT_TRUE(fp32.has_value());
+    EXPECT_FALSE(fp32->atol.has_value());
+    EXPECT_FALSE(fp32->rtol.has_value());
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnNegativeAtol)
+{
+    EXPECT_NE(validatorEntryLoadError("validator = \"allclose\"\natol = -1e-3\n")
+                  .find("'atol' must be finite and non-negative"),
+              std::string::npos);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnNegativeRtol)
+{
+    EXPECT_NE(
+        validatorEntryLoadError("validator = \"allclose_matching_infinities\"\nrtol = -1e-3\n")
+            .find("'rtol' must be finite and non-negative"),
+        std::string::npos);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnNanAtol)
+{
+    EXPECT_NE(validatorEntryLoadError("validator = \"allclose\"\natol = nan\n")
+                  .find("'atol' must be finite and non-negative"),
+              std::string::npos);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnInfiniteRtol)
+{
+    EXPECT_NE(validatorEntryLoadError("validator = \"allclose\"\nrtol = inf\n")
+                  .find("'rtol' must be finite and non-negative"),
+              std::string::npos);
+}
+
+// 1e300 is a finite double but not a float: narrowing it would silently grade with infinity.
+TEST(TestSettingsValidatorOverrides, ThrowsOnAtolBeyondFloatRange)
+{
+    EXPECT_NE(validatorEntryLoadError("validator = \"allclose\"\natol = 1e300\n")
+                  .find("'atol' must be finite and non-negative"),
+              std::string::npos);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnNonNumericAtol)
+{
+    EXPECT_NE(validatorEntryLoadError("validator = \"allclose\"\natol = \"4e-4\"\n")
+                  .find("'atol' must be a number"),
+              std::string::npos);
+}
+
+// An RMS comparison reads neither tolerance, so an entry that sets one does not do what it
+// says; it is a load error rather than a tolerance that is silently ignored.
+TEST(TestSettingsValidatorOverrides, ThrowsOnRmsWithAtol)
+{
+    EXPECT_NE(validatorEntryLoadError("validator = \"rms\"\nrms_threshold = 1e-3\natol = 1e-3\n")
+                  .find("also sets 'atol'"),
+              std::string::npos);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnRmsWithRtol)
+{
+    EXPECT_NE(validatorEntryLoadError("validator = \"rms\"\nrms_threshold = 1e-3\nrtol = 1e-3\n")
+                  .find("also sets 'rtol'"),
+              std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// What the harness grades a tensor with: the parsed entries through gradingForTensor
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+hipdnn_integration_tests::bundle::ComparisonTolerance
+    gradedAs(const TestSettings& settings, const std::string& testName, const std::string& tensor)
+{
+    // The default the caller resolved: a stand-in for the policy value of the op and dtype.
+    return hipdnn_integration_tests::gradingForTensor(
+        testName,
+        tensor,
+        settings.findValidatorOverride(testName, tensor),
+        settings.findToleranceOverride(testName),
+        1e-5F,
+        2e-5F);
+}
+
+} // namespace
+
+// The point of the feature: DX takes its own atol/rtol even though a [[tolerance_overrides]]
+// entry matches the test and sets different values, and DSCALE keeps that tolerance entry.
+TEST(TestSettingsValidatorOverrides, ValidatorToleranceBeatsToleranceOverrideForItsTensorOnly)
+{
+    const TempTomlFile file(K_GAUNTLET_DX_CONFIG);
+    const TestSettings settings(file.path());
+
+    const auto dx = gradedAs(settings, K_GAUNTLET_TEST, "BatchnormBackward_0::DX");
+    EXPECT_EQ(dx.kind, hipdnn_integration_tests::bundle::ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(dx.atol, 4e-4F);
+    EXPECT_FLOAT_EQ(dx.rtol, 2e-3F);
+
+    const auto dscale = gradedAs(settings, K_GAUNTLET_TEST, "BatchnormBackward_0::DSCALE");
+    EXPECT_EQ(dscale.kind, hipdnn_integration_tests::bundle::ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(dscale.atol, 1e-1F);
+    EXPECT_FLOAT_EQ(dscale.rtol, 2e-1F);
+}
+
+// The quick bundle of the same op still takes the tolerance entry, never the gauntlet's.
+TEST(TestSettingsValidatorOverrides, QuickBundleIsGradedByTheToleranceOverrideNotTheGauntletEntry)
+{
+    const TempTomlFile file(K_GAUNTLET_DX_CONFIG);
+    const TestSettings settings(file.path());
+
+    const auto dx = gradedAs(settings, K_QUICK_TEST, "BatchnormBackward_0::DX");
+    EXPECT_FLOAT_EQ(dx.atol, 1e-1F);
+    EXPECT_FLOAT_EQ(dx.rtol, 2e-1F);
+}
+
+// Either key alone: the other one falls back to the tolerance entry, then to the default.
+TEST(TestSettingsValidatorOverrides, OneKeyAloneLeavesTheOtherToTheLowerLayers)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["*gauntlet_A_*"]
+atol = 1e-1
+rtol = 2e-1
+
+[[validator_overrides]]
+filters = ["*gauntlet_*"]
+tensors = ["*::O"]
+validator = "allclose_matching_infinities"
+atol = 3e-3
+)");
+    const TestSettings settings(file.path());
+
+    const auto withToleranceEntry = gradedAs(settings, "gauntlet_A_x.s1", "Op_0::O");
+    EXPECT_EQ(withToleranceEntry.kind,
+              hipdnn_integration_tests::bundle::ValidatorKind::ALLCLOSE_MATCHING_INFINITIES);
+    EXPECT_FLOAT_EQ(withToleranceEntry.atol, 3e-3F);
+    EXPECT_FLOAT_EQ(withToleranceEntry.rtol, 2e-1F);
+
+    const auto withDefault = gradedAs(settings, "gauntlet_B_x.s1", "Op_0::O");
+    EXPECT_FLOAT_EQ(withDefault.atol, 3e-3F);
+    EXPECT_FLOAT_EQ(withDefault.rtol, 2e-5F);
+}
+
+// An entry that sets no tolerance leaves the existing tolerance path untouched.
+TEST(TestSettingsValidatorOverrides, EntryWithoutToleranceLeavesTheTolerancePathUnchanged)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["*gauntlet_*"]
+atol = 1e-1
+rtol = 2e-1
+
+[[validator_overrides]]
+filters = ["*gauntlet_*"]
+tensors = ["*::O"]
+validator = "allclose"
+)");
+    const TestSettings settings(file.path());
+
+    const auto graded = gradedAs(settings, "gauntlet_A_x.s1", "Op_0::O");
+    EXPECT_EQ(graded.kind, hipdnn_integration_tests::bundle::ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(graded.atol, 1e-1F);
+    EXPECT_FLOAT_EQ(graded.rtol, 2e-1F);
 }
 
 // An entry with 'tensors' but no 'filters' reads as "apply to every test" to a human,

@@ -644,6 +644,13 @@ tensors       = ["*::DSCALE", "*::DBIAS"]
 validator     = "rms"
 rms_threshold = 1e-4
 
+[[validator_overrides]]                              # one output's tolerance, gauntlet suites only
+filters   = ["*gauntlet*BatchnormBackward*fp16_*"]
+tensors   = ["*::DX"]
+validator = "allclose"
+atol      = 4e-4
+rtol      = 2e-3
+
 [[test_skips]]
 archs     = ["gfx90a"]   # optional; omit to match every arch
 platforms = ["windows"]                             # optional; omit to match both
@@ -655,7 +662,7 @@ reason    = "no applicable kernel for this shape on this arch"
 |---|---|
 | `[meta]` | `version = 1` is required. A missing or unsupported version is a load error. The harness never ignores it silently. |
 | `[[tolerance_overrides]]` | `filters`, `atol` and `rtol` are all required. **Later entries win** when several match. |
-| `[[validator_overrides]]` | Applies when a `filters` glob matches the test **and** a `tensors` glob matches the output tensor's label (its name, or `uid=N` when unnamed). `validator` is `allclose`, `allclose_matching_infinities` or `rms`. `rms_threshold` is required and positive for `rms`, and forbidden for the other two. **Later entries win.** Allclose is the default everywhere. Only this table changes it. Use it for outputs where per-element comparison is the wrong question, not to get more tolerance. See the validators below. |
+| `[[validator_overrides]]` | Applies when a `filters` glob matches the test **and** a `tensors` glob matches the output tensor's label (its name, or `uid=N` when unnamed). `validator` is `allclose`, `allclose_matching_infinities` or `rms`. `rms_threshold` is required and positive for `rms`, and forbidden for the other two. `atol` and `rtol` are optional (either or both) for the two allclose validators, and forbidden for `rms`; each must be a finite, non-negative number. They set that tolerance for the matched tensors only, and they outrank a `[[tolerance_overrides]]` entry (see below). **Later entries win** as a whole: an entry's omitted keys do not inherit an earlier entry's. Allclose is the default everywhere. Only this table changes it. Use it for outputs where per-element comparison is the wrong question, or where one output of a graph needs its own tolerance and the others do not. See the validators below. |
 | `[[test_skips]]` | `filters` and `reason` are required. **The first matching entry wins** — this is the opposite order from the two tables above. `archs` is a substring match against the raw `gcnArchName` (so `gfx11` covers `gfx1100` and `gfx1151`). `platforms` is `linux` / `windows`. The skip message is `[arch <current gcnArchName>] <reason>`. |
 
 `filters` are globs that match the full GTest name. This is the same string that
@@ -685,6 +692,24 @@ The two non-default validators:
 Neither validator is defined for integer outputs. If a glob selects an integer
 output, that tensor fails with a message that names the glob. Narrow the glob to
 float outputs.
+
+**Tolerance precedence for one output.** A `[[tolerance_overrides]]` entry sets `atol` and
+`rtol` for every output of the tests it matches. For a tensor graded by `allclose` or
+`allclose_matching_infinities`, the tolerance is resolved in three layers, and each replaces
+the one before it:
+
+1. the default of the operation and data type;
+2. the matching `[[tolerance_overrides]]` entry, if any (both values);
+3. the matching `[[validator_overrides]]` entry's `atol` and `rtol`, each only if the entry
+   spells it.
+
+Only the matched tensor is affected, so a graph's other outputs keep layer 1 or 2. An entry
+that sets neither key leaves the resolution exactly as it was. An `rms` tensor reads neither.
+
+A checked-in bundle must not be relaxed to make a fuzz-found disagreement pass, so entries for
+gauntlet-found numerics are scoped to the gauntlet suites. Their GTest names carry `gauntlet`
+(`gauntlet_<Op>_<Space>_<tag>_cases.s<seed>`), while quick-bundle tests are
+`quick_<Op>_<Variant>.<case id>`; the filter `*gauntlet*<Op>*` matches the former only.
 
 The TOML applies to bundle and C++ graph tests alike. It never applies to
 `hipdnn_golden_data_tests`. The config of an engine describes how far that engine

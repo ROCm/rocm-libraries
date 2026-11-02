@@ -132,4 +132,80 @@ TEST(TestTomlGuards, GradingForTensorMatchingInfinitiesAppliesTheToleranceOverri
     EXPECT_FLOAT_EQ(grading.rtol, 6e-2f);
 }
 
+// Each layer replaces the one before it: the caller's default, the test's tolerance entry, then
+// the validator entry's own atol/rtol. A validator entry names a tensor, so it wins.
+TEST(TestTomlGuards, GradingForTensorValidatorToleranceBeatsToleranceOverride)
+{
+    const ValidatorOverride allclose{ValidatorOverrideKind::ALLCLOSE, 0.0f, 4e-4f, 2e-3f};
+    const ToleranceOverride tomlTolerance{5e-2f, 6e-2f};
+
+    const auto grading
+        = gradingForTensor("gauntlet.s1", "Op_0::DX", allclose, tomlTolerance, 1e-5f, 2e-5f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 4e-4f);
+    EXPECT_FLOAT_EQ(grading.rtol, 2e-3f);
+}
+
+TEST(TestTomlGuards, GradingForTensorValidatorAtolAloneKeepsTheOtherTolerancesRtol)
+{
+    const ValidatorOverride allclose{ValidatorOverrideKind::ALLCLOSE, 0.0f, 4e-4f, std::nullopt};
+    const ToleranceOverride tomlTolerance{5e-2f, 6e-2f};
+
+    const auto withTomlTolerance
+        = gradingForTensor("gauntlet.s1", "Op_0::DX", allclose, tomlTolerance, 1e-5f, 2e-5f);
+    EXPECT_FLOAT_EQ(withTomlTolerance.atol, 4e-4f);
+    EXPECT_FLOAT_EQ(withTomlTolerance.rtol, 6e-2f);
+
+    const auto withDefault
+        = gradingForTensor("gauntlet.s1", "Op_0::DX", allclose, std::nullopt, 1e-5f, 2e-5f);
+    EXPECT_FLOAT_EQ(withDefault.atol, 4e-4f);
+    EXPECT_FLOAT_EQ(withDefault.rtol, 2e-5f);
+}
+
+TEST(TestTomlGuards, GradingForTensorMatchingInfinitiesTakesTheValidatorTolerance)
+{
+    const ValidatorOverride matchingInfinities{
+        ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES, 0.0f, std::nullopt, 7e-3f};
+    const ToleranceOverride tomlTolerance{5e-2f, 6e-2f};
+
+    const auto grading = gradingForTensor(
+        "gauntlet.s1", "SdpaFwd_0::LSE", matchingInfinities, tomlTolerance, 1e-3f, 2e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE_MATCHING_INFINITIES);
+    EXPECT_FLOAT_EQ(grading.atol, 5e-2f);
+    EXPECT_FLOAT_EQ(grading.rtol, 7e-3f);
+}
+
+// An allclose entry with no atol/rtol is the pre-existing path: the tolerance entry still wins
+// over the caller's default and the entry changes nothing else.
+TEST(TestTomlGuards, GradingForTensorEntryWithoutToleranceLeavesTheTolerancePathUnchanged)
+{
+    const ValidatorOverride allclose{ValidatorOverrideKind::ALLCLOSE, 0.0f};
+    const ToleranceOverride tomlTolerance{5e-2f, 6e-2f};
+
+    const auto withTomlTolerance
+        = gradingForTensor("gauntlet.s1", "Op_0::DX", allclose, tomlTolerance, 1e-5f, 2e-5f);
+    EXPECT_FLOAT_EQ(withTomlTolerance.atol, 5e-2f);
+    EXPECT_FLOAT_EQ(withTomlTolerance.rtol, 6e-2f);
+
+    const auto withDefault
+        = gradingForTensor("gauntlet.s1", "Op_0::DX", allclose, std::nullopt, 1e-5f, 2e-5f);
+    EXPECT_FLOAT_EQ(withDefault.atol, 1e-5f);
+    EXPECT_FLOAT_EQ(withDefault.rtol, 2e-5f);
+}
+
+// RMS reads no atol/rtol, so the threshold decides whatever else the layers hold.
+TEST(TestTomlGuards, GradingForTensorRmsIgnoresTheToleranceLayers)
+{
+    const ValidatorOverride rms{ValidatorOverrideKind::RMS, 1e-3f};
+    const ToleranceOverride tomlTolerance{5e-2f, 6e-2f};
+
+    const auto grading
+        = gradingForTensor("gauntlet.s1", "Op_0::DSCALE", rms, tomlTolerance, 1e-5f, 2e-5f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::RMS);
+    EXPECT_FLOAT_EQ(grading.rmsThreshold, 1e-3f);
+}
+
 // NOLINTEND(readability-identifier-naming)
