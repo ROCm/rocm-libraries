@@ -1367,8 +1367,10 @@ def retime(args, meta: dict) -> list:
     Stage 2 takes its walk fields (``seed`` included: it seeds the gate and
     timing inputs) from the stage-1 rows it re-times, not from this command
     line, whose walk flags are refused: the rows record the walk their inputs
-    were made with."""
+    were made with. Stage-1 rows ranked by another build than ``meta``'s are
+    refused (:func:`check_stage1_build`): this load is the one it checks."""
     by_shape, shapes = stage1_shapes(args)
+    check_stage1_build(by_shape, meta, args)
     walk = stage1_walk(r for rows in by_shape.values() for r in rows)
     meta = dict(meta, **walk)
     args = argparse.Namespace(**{**vars(args), **walk})
@@ -1610,7 +1612,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         return summarize(rows)
     if args.stage1_json:
         try:
-            stage1_by_shape, recorded_shapes = stage1_shapes(args)
+            _, recorded_shapes = stage1_shapes(args)
         except (OSError, ValueError) as exc:
             ap.error(usage_error_text(exc))
         shapes = []
@@ -1648,10 +1650,11 @@ def main(argv: Iterable[str] | None = None) -> int:
     meta = run_meta(args, device, ROTATE_MB)
     if args.stage1_json:
         try:
-            check_stage1_build(stage1_by_shape, meta, args)
-        except ValueError as exc:
+            rows = retime(args, meta)
+        except ValueError as exc:  # stage-1 rows this build cannot re-time
             ap.error(usage_error_text(exc))
-    rows = retime(args, meta) if args.stage1_json else sweep(args, shapes, meta)
+    else:
+        rows = sweep(args, shapes, meta)
     return finish(args, rows, shapes, len(recorded_shapes) if args.stage1_json else 0)
 
 

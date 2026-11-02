@@ -622,7 +622,7 @@ def test_stage2_from_files_splits_shapes_across_shards(monkeypatch, tmp_path):
         args = sweep.options(
             stage1_json=[str(tmp_path / "s1.json")], shard=(i, 2), top_k=1
         )
-        sweep.retime(args, {})
+        sweep.retime(args, dict(_META))
         covered.extend(seen)
         for shape, ids in seen.items():
             auto = dispatch_gdn_decode(shape.request()).spec.tuning_id
@@ -779,7 +779,7 @@ def test_stage2_from_files_fails_on_a_shape_with_no_timed_row(
         raise AssertionError("a shape with no timed row was re-timed")
 
     monkeypatch.setattr(sweep, "stage2_shape", no_stage2)
-    out = sweep.retime(sweep.options(stage1_json=[path]), {"rotate_mb": 1024})
+    out = sweep.retime(sweep.options(stage1_json=[path]), dict(_META))
     assert [(r["stage"], r["status"]) for r in out] == [(2, "error")]
     assert "no timed stage-1 row" in out[0]["reason"]
     assert sweep.summarize(out) == 1
@@ -1178,6 +1178,27 @@ def test_stage2_refuses_stage1_rows_ranked_by_another_build_than_this_run(tmp_pa
     sweep.check_stage1_build(by_shape, dict(here, sha="def"), pinned)
     with pytest.raises(ValueError, match="backend"):
         sweep.check_stage1_build(by_shape, dict(here, backend="cpp"), pinned)
+
+
+def test_retime_refuses_stage1_rows_of_another_build_and_times_nothing(
+    monkeypatch, tmp_path
+):
+    """``retime`` checks the snapshot it loads against this run's build: a
+    uniformly old sha or compiler is refused before any stage-2 timing, so a
+    direct call is as safe as ``main`` (which exits 2 on the error)."""
+    timed = []
+    monkeypatch.setattr(sweep, "stage2_shape", lambda *a, **k: timed.append(a) or [])
+    args = _stage1_args(tmp_path, _rows()[:2])
+    here = dict(_META, llvm_version="unknown", llvm_flavor="unknown", backend="unknown")
+    for meta, match in (
+        (dict(here, sha="def"), "sha: stage 1 abc, here def"),
+        (dict(here, backend="cpp"), "backend: stage 1 unknown, here cpp"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            sweep.retime(args, meta)
+    assert timed == []
+    sweep.retime(args, here)  # the same build re-times
+    assert timed
 
 
 def test_run_meta_records_the_resolved_backend_and_llvm_flavor(monkeypatch):
@@ -1673,7 +1694,7 @@ def test_a_stage2_shard_past_the_recorded_shapes_owns_nothing_and_succeeds(
     path = str(tmp_path / "s1.json")
     sweep.write_rows(path, rows)
     args = sweep.options(stage1_json=[path], shard=(5, 8))
-    assert sweep.retime(args, {}) == []
+    assert sweep.retime(args, dict(_META)) == []
     assert sweep.finish(args, [], [], recorded=len(shapes)) == 0
     assert "shard 5/8 owns no shape (3 shapes recorded)" in capsys.readouterr().out
 
