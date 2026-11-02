@@ -50,9 +50,15 @@ __global__ void log1p_1d_hip_tensor(Rpp16s* srcPtr, uint srcStrides, Rpp32f* dst
     uint dstIdx = (id_z * dstStrides) + id_x;
 
     d_float8 src_f8, dst_f8;
-    rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
-    log1p_hip_compute(srcPtr, &src_f8, &dst_f8);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    if (width - id_x >= 8) {
+        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+        log1p_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    } else {
+        rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, width - id_x);
+        log1p_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store_n(dstPtr + dstIdx, &dst_f8, width - id_x);
+    }
 }
 
 __global__ void log1p_2d_hip_tensor(Rpp16s* srcPtr, uint2 srcStridesNH, Rpp32f* dstPtr,
@@ -73,9 +79,15 @@ __global__ void log1p_2d_hip_tensor(Rpp16s* srcPtr, uint2 srcStridesNH, Rpp32f* 
     uint dstIdx = (id_z * dstStridesNH.x) + (id_y * dstStridesNH.y) + id_x;
 
     d_float8 src_f8, dst_f8;
-    rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
-    log1p_hip_compute(srcPtr, &src_f8, &dst_f8);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    if (width - id_x >= 8) {
+        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+        log1p_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    } else {
+        rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, width - id_x);
+        log1p_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store_n(dstPtr + dstIdx, &dst_f8, width - id_x);
+    }
 }
 
 __global__ void log1p_nd_hip_tensor(Rpp16s* srcPtr, uint* srcStrides, uint* srcDims, uint numDims,
@@ -84,6 +96,7 @@ __global__ void log1p_nd_hip_tensor(Rpp16s* srcPtr, uint* srcStrides, uint* srcD
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;  // batchsize
 
     if (id_x >= srcStrides[0]) return;
+    int numValid = min(8, (int)srcStrides[0] - id_x);  // elements left in this sample
 
     uint* roi = roiTensor + id_z * numDims * 2;
     uint* begin = roi;
@@ -103,9 +116,15 @@ __global__ void log1p_nd_hip_tensor(Rpp16s* srcPtr, uint* srcStrides, uint* srcD
     }
 
     d_float8 src_f8, dst_f8;
-    rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
-    log1p_hip_compute(srcPtr, &src_f8, &dst_f8);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    if (numValid == 8) {
+        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+        log1p_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    } else {
+        rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, numValid);
+        log1p_hip_compute(srcPtr, &src_f8, &dst_f8);
+        rpp_hip_pack_float8_and_store_n(dstPtr + dstIdx, &dst_f8, numValid);
+    }
 }
 
 // -------------------- Set 3 - kernel executor --------------------
