@@ -459,6 +459,46 @@ class SweepTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, r"not in the catalogue: \[4\]"):
                 plan.make_plan(root, "gfx942", {}, 0, None, indices=[3, 4])
 
+    def test_one_index_per_kernel_keeps_the_smallest_eligible_index_per_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shards = {"first": [solution(i) for i in (4, 6, 9)], "second": [solution(2)]}
+            shards["second"].append(solution(7))
+            for record in shards["first"] + shards["second"]:
+                record["kernelName"] = "shared"
+            # Index 2 is unsupported, so the smallest eligible index for "shared" is 4.
+            shards["second"][0]["problemType"]["sparse"] = True
+            # Index 9 runs under another profile, so it is its own representative.
+            shards["first"][2]["hardwarePredicate"] = {"type": "CUCount", "value": 128}
+            shards["second"][1]["kernelName"] = "other"
+            for name, records in shards.items():
+                path = root / f"{name}_gfx942.dat"
+                path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+                path.with_suffix(".co").write_bytes(b"object")
+            profiles = {
+                "full": {"simd_count": 1024, "simd_per_cu": 4},
+                "half": {"simd_count": 512, "simd_per_cu": 4},
+            }
+            for policy in (plan.POLICY, plan.REGULAR_POLICY):
+                with self.subTest(policy=policy):
+                    manifest = plan.make_plan(
+                        root, "gfx942", {}, 0, None, policy, profiles, one_index_per_kernel=True
+                    )
+                    kept = [j["solutions"][0]["index"] for j in manifest["jobs"]]
+                    self.assertEqual(kept, [2, 4, 7, 9])
+                    self.assertEqual(manifest["omitted_kernel_duplicates"], 1)
+                    later = plan.make_plan(
+                        root, "gfx942", {}, 5, None, policy, profiles, one_index_per_kernel=True
+                    )
+                    self.assertEqual([j["solutions"][0]["index"] for j in later["jobs"]], [7, 9])
+                    with self.assertRaises(plan.EmptySelection):
+                        plan.make_plan(
+                            root, "gfx942", {}, 5, 7, policy, profiles, one_index_per_kernel=True
+                        )
+                    every = plan.make_plan(root, "gfx942", {}, 0, None, policy, profiles)
+                    self.assertEqual(len(every["jobs"]), 5)
+                    self.assertFalse(every["one_index_per_kernel"])
+
     def test_stopping_the_runner_kills_native_process_groups(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "native.pid"
@@ -570,6 +610,17 @@ time.sleep(120)
             ):
                 self.assertEqual(sweep.run_campaign(args), 0)
             self.assertEqual(calls, [(0, 10, None), (20, 30, None)])
+
+            def empty_run(args):
+                args.reports.mkdir()
+                raise plan.EmptySelection("No solution indices in the requested range")
+
+            args.reports = root / "empty"
+            args.solution_indices = None
+            args.solution_index_range_end = 10
+            with patch.object(sweep, "run", side_effect=empty_run):
+                self.assertEqual(sweep.run_campaign(args), 0)
+            self.assertTrue(json.loads((args.reports / "campaign.json").read_text())["complete"])
 
     def test_parallel_regular_inventory_matches_serial(self):
         from tensilelite.Utilities.BinaryLibraryIO import writeMessagePack

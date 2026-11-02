@@ -26,6 +26,7 @@ from rocjitsu_known_failures import apply_known_failures
 from rocjitsu_sweep_plan import (
     POLICY,
     REGULAR_POLICY,
+    EmptySelection,
     catalogue_end,
     derive_devices,
     make_batches,
@@ -209,6 +210,15 @@ def render_report(manifest, summary):
         ),
         *(
             [
+                "One index per kernel and profile: omitted "
+                f"{manifest['omitted_kernel_duplicates']} selected indices whose kernel runs at "
+                "a smaller eligible index."
+            ]
+            if manifest.get("one_index_per_kernel")
+            else []
+        ),
+        *(
+            [
                 "Case parameters: "
                 f"reduction blocks `{cell(manifest['case_parameters']['reduction_blocks'])}`, "
                 f"alpha `{cell(manifest['case_parameters']['alpha'])}`, "
@@ -327,6 +337,7 @@ def prepare(args):
         beta=getattr(args, "beta", 0),
         workers=args.workers,
         indices=getattr(args, "solution_indices", None),
+        one_index_per_kernel=getattr(args, "one_index_per_kernel", False),
     )
     manifest.update(
         backend=args.backend,
@@ -1329,7 +1340,7 @@ def resume_results(directory, manifest):
     ):
         if previous[key] != manifest[key]:
             raise ValueError(f"Cannot resume: {key} changed")
-    for key in ("selection", "solution_index_list_sha256"):
+    for key in ("selection", "solution_index_list_sha256", "one_index_per_kernel"):
         if previous.get(key) != manifest.get(key):
             raise ValueError(f"Cannot resume: {key} changed")
     prior_parameters = previous.get("case_parameters")
@@ -1953,7 +1964,12 @@ def run_campaign(args):
                 if (previous / "manifest.json").is_file():
                     chunk.resume_from = previous
             print(f"campaign: running {directory.name}", flush=True)
-            run(chunk)
+            try:
+                run(chunk)
+            except EmptySelection:
+                # The chunk has no catalogue index, or only omitted kernel duplicates.
+                empty = {"stop": None, "passed": True, "outcome_counts": {}, "index_outcomes": []}
+                write_json(directory / "summary.json", empty)
         summary = json.loads((directory / "summary.json").read_text(encoding="utf-8"))
         outcomes = summary["index_outcomes"]
         chunks.append(
@@ -2103,6 +2119,14 @@ def main():
         help=(
             "Run the selection as consecutive chunks of this many original indices, each "
             "in its own directory under --reports; rerunning continues an interrupted campaign"
+        ),
+    )
+    parser.add_argument(
+        "--one-index-per-kernel",
+        action="store_true",
+        help=(
+            "Omit an eligible index when a smaller eligible index in the catalogue has the same "
+            "kernel name and hardware profile"
         ),
     )
     parser.add_argument("--backend", choices=("tensile", "bench"), required=True)

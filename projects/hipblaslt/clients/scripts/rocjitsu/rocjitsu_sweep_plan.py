@@ -340,6 +340,10 @@ def catalogue_end(library_dir, target, workers=1):
     return max(_map_shards(_shard_last_index, paths, workers)) + 1
 
 
+class EmptySelection(ValueError):
+    """No catalogue index meets the selection."""
+
+
 class _UnsupportedInInventory(Exception):
     """A selected solution that the inventory found outside the adapter scope."""
 
@@ -369,11 +373,14 @@ def _inventory_shard(
 ):
     """Count one metadata shard's solutions and keep those selected.
 
-    Each selected entry is (index, solution, profile, planned). For regular-v1,
-    planned is the problem and its bench input, or the reason it is unsupported.
+    Each selected entry is (index, solution, profile, planned, eligible). For
+    regular-v1, planned is the problem and its bench input, or the reason it is
+    unsupported. ``first_eligible`` maps each eligible (kernel name digest,
+    profile) to its smallest index.
     """
     counts, coverage_gaps = Counter(), Counter()
     names, eligible_names, shard_indices, selected = set(), set(), [], []
+    first_eligible = {}
     for _, solution in iterSolutionRecords(path):
         index = solution["index"]
         shard_indices.append(index)
@@ -381,7 +388,7 @@ def _inventory_shard(
         name = hashlib.sha256(solution["kernelName"].encode()).digest()
         names.add(name)
         profile = _profile_for(solution, target, profiles)
-        planned = None
+        planned, eligible = None, False
         if profile is None:
             counts["other_or_unknown_hardware"] += 1
         elif policy == REGULAR_POLICY:
@@ -397,16 +404,19 @@ def _inventory_shard(
                 )
                 planned = str(error)
             else:
-                counts["eligible_solutions"] += 1
-                eligible_names.add(name)
+                eligible = True
         elif not ordinary_problem(solution["problemType"]):
             counts["outside_adapter_scope"] += 1
         else:
+            eligible = True
+        if eligible:
             counts["eligible_solutions"] += 1
             eligible_names.add(name)
+            key = (name, profile)
+            first_eligible[key] = min(index, first_eligible.get(key, index))
         in_range = range_begin <= index and (range_end is None or index < range_end)
         if in_range and (indices is None or index in indices):
-            selected.append((index, solution, profile, planned))
+            selected.append((index, solution, profile, planned, eligible))
     return {
         "sha256": sha256(path),
         "indices": shard_indices,
@@ -414,6 +424,7 @@ def _inventory_shard(
         "coverage_gaps": coverage_gaps,
         "names": names,
         "eligible_names": eligible_names,
+        "first_eligible": first_eligible,
         "selected": selected,
     }
 
@@ -431,12 +442,15 @@ def make_plan(
     beta=0,
     workers=1,
     indices=None,
+    one_index_per_kernel=False,
 ):
     """Plan the selected indices and inventory the whole catalogue.
 
     ``indices``, if given, selects only those indices within the range; each
-    must be in the catalogue. ``workers`` processes inventory the metadata
-    shards in parallel.
+    must be in the catalogue. With ``one_index_per_kernel``, an eligible index
+    is omitted when a smaller eligible index in the catalogue has the same
+    kernel name and hardware profile. ``workers`` processes inventory the
+    metadata shards in parallel.
     """
     if type(range_begin) is not int or not 0 <= range_begin < (1 << 31):
         raise ValueError("Solution index range begin must be a nonnegative native index")
@@ -479,6 +493,7 @@ def make_plan(
     shards = _map_shards(inventory, paths, workers)
     counts, inputs, coverage_gaps = Counter(), {}, Counter()
     names, eligible_names, seen, requested = set(), set(), set(), {}
+    first_eligible = {}
     for path, shard in zip(paths, shards):
         inputs[path.name] = shard["sha256"]
         repeated = Counter(shard["indices"])
@@ -490,6 +505,8 @@ def make_plan(
         coverage_gaps.update(shard["coverage_gaps"])
         names |= shard["names"]
         eligible_names |= shard["eligible_names"]
+        for key, index in shard["first_eligible"].items():
+            first_eligible[key] = min(index, first_eligible.get(key, index))
         requested.update((entry[1]["index"], (path, *entry[1:])) for entry in shard["selected"])
     if indices is not None:
         missing = {
@@ -498,11 +515,18 @@ def make_plan(
         if missing:
             raise ValueError(f"Solution indices not in the catalogue: {sorted(missing)[:10]}")
     selected = [requested[i] for i in sorted(requested)]
+    duplicates = 0
+    if one_index_per_kernel:
+        representative = lambda s, profile: first_eligible[
+            hashlib.sha256(s["kernelName"].encode()).digest(), profile
+        ]
+        kept = [e for e in selected if not e[4] or representative(e[1], e[2]) == e[1]["index"]]
+        duplicates, selected = len(selected) - len(kept), kept
     if not selected:
-        raise ValueError("No solution indices in the requested range")
+        raise EmptySelection("No solution indices in the requested range")
     counts.update(unique_kernel_names=len(names), eligible_kernel_names=len(eligible_names))
     jobs = []
-    for job_id, (metadata, s, profile, planned) in enumerate(selected):
+    for job_id, (metadata, s, profile, planned, _) in enumerate(selected):
         job = {
             "id": job_id,
             "profile": profile,
@@ -589,7 +613,9 @@ def make_plan(
             }
         ),
         "solutions": len(selected),
-        "kernels": len({s["kernelName"] for _, s, _, _ in selected}),
+        "kernels": len({s["kernelName"] for _, s, *_ in selected}),
+        "one_index_per_kernel": one_index_per_kernel,
+        "omitted_kernel_duplicates": duplicates,
         "planned_cases": sum(len(job["cases"]) for job in jobs),
         "inventory": dict(counts),
         "input_sha256": inputs,

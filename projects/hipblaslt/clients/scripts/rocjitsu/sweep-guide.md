@@ -46,6 +46,15 @@ the range must exist in the catalogue. The manifest records
 `selection: solution-index-list` and the SHA-256 of the sorted, distinct list, and
 a resumed run must use the same list.
 
+`--one-index-per-kernel` omits an eligible index when a smaller eligible index
+in the catalogue, possibly outside the selection, has the same kernel name and
+hardware profile. The kept index runs that kernel's code; omitted indices can
+differ in solution parameters and so in the problem constructed for them, which
+this mode does not test. Unsupported and unmatched indices are kept. On the
+gfx942 catalogue it omits about a third of the eligible indices (101,662 of
+303,101), on gfx950 about 5%. The manifest records the mode and the number
+omitted from the selection.
+
 The `tile-depth-v1` adapters support ordinary GEMM with matching C/D types, optional
 bias/scaling and no activation. Grouped, fused, sparse, MX, gradient, auxiliary
 output and swizzled problems are outside their scope. Inventory counts include
