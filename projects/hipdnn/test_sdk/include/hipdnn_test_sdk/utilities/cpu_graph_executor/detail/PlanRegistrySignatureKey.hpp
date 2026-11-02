@@ -29,6 +29,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaRaggedFwdSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::detail
 {
@@ -65,6 +66,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               ResampleBwdSignatureKey,
                                               SdpaBwdSignatureKey,
                                               SdpaFwdSignatureKey,
+                                              SdpaRaggedFwdSignatureKey,
                                               ReductionSignatureKey>;
 
 struct PlanRegistrySignatureKeyHash

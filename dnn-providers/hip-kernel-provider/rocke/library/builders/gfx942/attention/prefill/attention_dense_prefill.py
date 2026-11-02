@@ -106,6 +106,7 @@ _OVERRIDE_FIELDS = (
     "lds_k_group_pad",
     "num_persistent",
     "persist_decode",
+    "nonpersist_decode",
 )
 
 
@@ -156,9 +157,16 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument(
         "--persist-decode",
         dest="persist_decode",
-        choices=["auto", "qb_major", "hkv_major"],
+        choices=sorted(Gfx942AttentionDenseSpec.supported_persist_decodes()),
         default=None,
         help="persistent work-item decode; default = dispatch's 'auto'",
+    )
+    ap.add_argument(
+        "--nonpersist-decode",
+        dest="nonpersist_decode",
+        choices=sorted(Gfx942AttentionDenseSpec.supported_nonpersist_decodes()),
+        default=None,
+        help="non-persistent block order; default = dispatch's 'auto'",
     )
     ap.add_argument(
         "--interleave",
@@ -515,10 +523,15 @@ def main():
         )
         spec = resolve_dense_spec(req, overrides)
         if args.dry_run:
+            decode = (
+                spec.resolved_persist_decode
+                if spec.persistent
+                else spec.resolved_nonpersist_decode
+            )
             print(
                 f"Sq={sq:<6d} {describe_dense_spec(spec, overrides)}  "
                 f"(persistent={spec.persistent} np={spec.num_persistent} "
-                f"decode={spec.persist_decode} wpe={spec.waves_per_eu} "
+                f"decode={decode} wpe={spec.waves_per_eu} "
                 f"bn={spec.block_n} kpad={spec.lds_k_group_pad})"
             )
             continue

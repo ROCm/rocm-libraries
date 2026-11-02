@@ -643,12 +643,13 @@ TEST(TestIngestorGenericEngine, ACoveringRecordDecidesTheConfigurationPrediction
     // A stub record covering the whole catalog, in which K64 takes half K128's time.
     const auto measure = [&](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
         WinnerRecord record;
-        for(const auto& kernel : manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
+        for(const KernelDefinition* kernel :
+            manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
         {
-            record.push_back({kernel.kernelId,
-                              kernel.packId,
-                              kernel.dispatchId,
-                              kernel.getIntMetadata(BLOCK_SIZE) == 64 ? 1.0 : 2.0});
+            record.push_back({kernel->kernelId,
+                              kernel->packId,
+                              kernel->dispatchId,
+                              kernel->getIntMetadata(BLOCK_SIZE) == 64 ? 1.0 : 2.0});
         }
         std::sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
             return lhs.timeMs < rhs.timeMs;
@@ -765,12 +766,13 @@ TEST(TestIngestorGenericEngine, AnEvictedRecordStillDecidesBothPlanAndPrediction
 
     // A stub record covering the whole catalog, in which K64 takes half K128's time.
     WinnerRecord record;
-    for(const auto& kernel : manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
+    for(const KernelDefinition* kernel :
+        manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
     {
-        record.push_back({kernel.kernelId,
-                          kernel.packId,
-                          kernel.dispatchId,
-                          kernel.getIntMetadata(BLOCK_SIZE) == 64 ? 1.0 : 2.0});
+        record.push_back({kernel->kernelId,
+                          kernel->packId,
+                          kernel->dispatchId,
+                          kernel->getIntMetadata(BLOCK_SIZE) == 64 ? 1.0 : 2.0});
     }
     std::sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;

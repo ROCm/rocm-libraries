@@ -2234,8 +2234,10 @@ the engine's UED revision, and the ranking metric. The ranked order is stored wi
   provider-wide static cache only becomes interesting if UHDs are ever shared across engines, which the
   ownership model does not currently allow.
 - **Result cache on the descriptor cache key.** Selection is a pure function of (feature vector,
-  candidate set). Reuse RFC 0017's applicability cache key — **`(engine id, graph id, device id)` plus
-  the engine's descriptor-set version** — rather than a bespoke fingerprint. "Engine id" here is the
+  candidate set). Reuse RFC 0017's applicability cache key — **`(engine id, graph content,
+  graph-level fields, tensor uids, device id)` plus the engine's descriptor-set version** — rather
+  than a bespoke fingerprint ([RFC 0017 §8.1](0017_UniversalKernelDescriptor.md) says why each part
+  is in it). "Engine id" here is the
   **64-bit id** hipDNN keys on (the FNV-1a hash of the UED `name`), not the descriptor GUID;
   [RFC 0020 §3](0020_UniversalEngineDescriptor.md) keeps those two id spaces distinct. The device id
   because it is what `$device.*` resolved against, and the version so a pack that changed cannot be
@@ -2278,7 +2280,7 @@ the engine's UED revision, and the ranking metric. The ranked order is stored wi
   inside it:
 
   ```
-  <cache root>/<uhd id>/<uhd content hash>/<graph id>-<device>.rank
+  <cache root>/<uhd id>/<uhd content hash>/<graph content key>-<device>.rank
   ```
 
   Three details decide whether this actually works:
@@ -2308,10 +2310,10 @@ the engine's UED revision, and the ranking metric. The ranked order is stored wi
   - **The cache is capacity-bounded** (an LRU in the current foundation), so a working set larger than
     the bound re-ranks on eviction. The bound is a tuning parameter, not a correctness issue, but the
     latency budget should be justified against the *uncached* path.
-  - **Some graphs cannot be cached at all.** The key needs a stable graph identity; a graph that is
-    unfinalized, legacy, or carries a non-v4 id has none, so **every call re-ranks**. That is the real
-    worst case for selection overhead, and it is the one [Section 9.4](#94-latency-target) should be
-    measured against.
+  - **Some graphs cannot be cached at all.** The key is built from the graph's serialized bytes; a
+    graph that supplies none, or whose bytes do not verify, has no key, so **every call re-ranks**.
+    That is the real worst case for selection overhead, and it is the one
+    [Section 9.4](#94-latency-target) should be measured against.
 
   **OPEN:** in-process only vs. a persistent cross-run cache — see [Open Question 9](#operational).
 
@@ -2392,8 +2394,8 @@ Graph
 So there is no flow in which ranking happens before applicability is confirmed, and none in which it
 happens without a request. Whether a UHD is loaded at all depends on the policy in play: one that ranks
 by explicit user selection or fixed criteria never asks, and never triggers a load. The load-timing
-rules, the per-engine model cache, and the shared `(engine id, graph id, device id)` +
-generation-counter result key are specified once in [Section 9.2](#92-loading-and-caching) and are not
+rules, the per-engine model cache, and the shared result key (RFC 0017's applicability cache key,
+plus the generation counter) are specified once in [Section 9.2](#92-loading-and-caching) and are not
 restated here.
 
 **Where estimates fit.** Once the policy has its applicable set, it *may* ask each engine for a
@@ -3416,8 +3418,9 @@ dependency-gated and land only when a concrete need appears.
 
 ### Operational
 
-9. **Caching scope.** The in-process catalog cache, held per engine and keyed on graph id, device id,
-   UED revision, and ranking metric, is sufficient for repeated graphs within a session, and needs nothing
+9. **Caching scope.** The in-process catalog cache, held per engine and keyed on RFC 0017's
+   applicability cache key (graph content, not graph id), device id, UED revision, and ranking
+   metric, is sufficient for repeated graphs within a session, and needs nothing
    UHD-specific ([Section 9.2](#92-loading-and-caching)). Persistent cross-run caching is a different
    design — it needs the heuristic's content hash in the storage path, a device identity that is not the
    HIP ordinal, and a garbage-collection story — and it interacts with a future

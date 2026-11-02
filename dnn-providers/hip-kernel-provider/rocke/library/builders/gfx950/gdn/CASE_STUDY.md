@@ -49,17 +49,21 @@ Tiles are `(num_warps, warp_threads_k, blocks_per_v_dim)`. bf16 I/O, bf16 and
 
 - **Dispatcher tiles (114 tile and state-dtype pairs):** GDN at `Hk/Hv = 16/32`,
   every tile in [`CONFIGURED_TILES`](../../../dispatch/gdn/gfx950.py); KDA at
-  `32/32`, the three tiles in
-  [`_TUNED_TILES_KDA`](../../../dispatch/gdn/gfx950.py); each with bf16 and
-  `f32` state. Dispatch accepts only a 16-bit state today, so the `f32` half is
-  not reachable from a request yet.
+  `32/32`, the three tiles of the work-keyed table KDA `auto` used then,
+  `(4,16,4)`, `(1,16,4)` and `(2,16,1)`; each with bf16 and `f32` state. This
+  table was collected before dispatch accepted `f32` state, so the `f32` half
+  was built as specs directly. `auto` now runs one tile and knob stack per case
+  ([ALGORITHM.md §4.6](ALGORITHM.md#46-registry-and-tile-selection)).
 - **Auto-route fallback (4):** GDN `(1,1,1)` at `DK = DV = 64` and `192`, where
-  [`DEFAULT_TILE`](../../../dispatch/gdn/gfx950.py) `(2,16,8)` is illegal
+  the plain 16-bit `auto` tile `(2,16,8)` is illegal
   ([ALGORITHM.md §4.6](ALGORITHM.md#46-registry-and-tile-selection)).
 - **Fused tiles (228):** GDN and KDA at `16/16`, `BPV = 1`, every legal
   `(NW, WTK)` with `NW` in 1–16 and `WTK` in 1–32, with `fuse_conv`,
-  `fuse_out_norm` (`rn` below) or both (`cv+rn`). The registry never builds a
-  fused spec; callers pick these tiles themselves.
+  `fuse_out_norm` (`rn` below) or both (`cv+rn`). This table was collected
+  before dispatch had fusion request fields, so the measurements used
+  hand-built specs. `auto` then routed one interim `(4,16,1)` fused tile; it
+  now runs each fused case's row (§4.6), and every other registered legal
+  `BPV = 1` tile stays selectable by explicit `spec_id`.
 
 The merge base is `153bf493555`, the interleaved order; the head is the
 load-first emitter.
@@ -136,9 +140,9 @@ Fused tiles (228 cases; modeled waves per SIMD, merge base → head):
   `(4,16,1)` bf16 gains a wave on ROCm 7.1, loses one on ROCm 7.13 and does not
   change on ROCm 10).
 - **The exemption stays keyed on `NW == 1`.** The tiles that start to spill are
-  multi-wave `fuse_conv` tiles, which dispatch never builds. Which ones spill
-  differs per compiler, so a footprint-keyed exemption would encode one
-  compiler's register allocator.
+  multi-wave `fuse_conv` tiles outside the fused tiles `auto` runs (`(4,16,1)`,
+  `(8,16,1)` and `(4,8,1)`, §4.6). Which ones spill differs per compiler, so a
+  footprint-keyed exemption would encode one compiler's register allocator.
 - **The scratch test holds the stable subset.**
   [`test_lowers_and_compiles_without_scratch`](../../../tests/test_gdn_decode_fused.py)
   lowers all 228 fused cases and
@@ -146,8 +150,8 @@ Fused tiles (228 cases; modeled waves per SIMD, merge base → head):
   every mode on `(1,16,1)`, `(2,8,1)`, `(2,16,1)`, `(4,8,1)`, `(4,16,1)` and
   `(8,16,1)`, plus norm-only on every other legal tile except `(1,1,1)` and
   `(1,2,1)`.
-- **Tile defaults were picked on the interleaved order.** Re-run
-  [`tune.py`](tune.py) before relying on their ranking
+- **The tiles timed in §6 were picked on the interleaved order.** The `auto`
+  defaults that replaced them were measured on the load-first order
   ([ALGORITHM.md §4.6](ALGORITHM.md#46-registry-and-tile-selection)).
 
 ## 6. Measured speed
@@ -158,11 +162,11 @@ timings is not in this tree, so this section states the scope, method,
 correctness gate and result in words and publishes no speed numbers.
 
 **Scope.** Single-token `DK = DV = 128` decode, bf16 I/O, batches 1, 16 and 128.
-GDN uses the default `(2,16,8)` tile. KDA uses the dispatcher's `(4,16,4)`,
-`(1,16,4)` and `(2,16,1)` tiles; the fused f32 case uses `(4,16,1)`. The f32-state
-and fused arms were built as specs directly: a dispatch request cannot ask for an
-`f32` state or for fusion today. GDN fused performance was not measured. The tile
-choices were made on the old load order ([§5](#5-decisions)).
+GDN uses the `(2,16,8)` tile, its default at the time. KDA uses the `(4,16,4)`,
+`(1,16,4)` and `(2,16,1)` tiles of the work-keyed table it used then; the fused
+f32 case uses `(4,16,1)`. The f32-state and fused arms were built as specs
+directly. No f32 or fused tile was tuned. GDN fused performance was not
+measured. The tile choices were made on the old load order ([§5](#5-decisions)).
 
 **Method.** Both trees run in one process, with their arms interleaved, and each
 result is the median of 3 independent runs. State, conv-state and output
@@ -196,12 +200,14 @@ from itertools import product
 from multiprocessing import Pool
 from pathlib import Path
 
-from dispatch.gdn.gfx950 import _TUNED_TILES_KDA, CONFIGURED_TILES
+from dispatch.gdn.gfx950 import CONFIGURED_TILES
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode, is_valid_spec
 from rocke.analysis.isa import analyze_hsaco
 from rocke.helpers.compile import compile_kernel
 
 FUSED = ((True, False), (False, True), (True, True))  # (fuse_conv, fuse_out_norm)
+# The KDA work-keyed tiles `auto` used when this table was collected.
+KDA_TILES = ((4, 16, 4), (1, 16, 4), (2, 16, 1))
 
 
 def specs():
@@ -209,7 +215,7 @@ def specs():
         for nw, wtk, bpv in CONFIGURED_TILES:
             yield dict(gate_kind="gdn", num_k_heads=16, num_v_heads=32, state_dtype=st,
                        num_warps=nw, warp_threads_k=wtk, blocks_per_v_dim=bpv)
-        for _, (nw, wtk, bpv), _ in _TUNED_TILES_KDA:
+        for nw, wtk, bpv in KDA_TILES:
             yield dict(gate_kind="kda", num_k_heads=32, num_v_heads=32, state_dtype=st,
                        num_warps=nw, warp_threads_k=wtk, blocks_per_v_dim=bpv)
         for d in (64, 192):  # (2,16,8) is illegal here, so auto takes (1,1,1)

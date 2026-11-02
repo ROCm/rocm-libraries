@@ -648,10 +648,10 @@ def test_versioned_generator_preserves_stream_order_and_quantized_bits(dtype, di
 
 
 def _wmma_grid(prepared):
-    """One CTA per query block, query head, and batch of the prepared case."""
+    """One CTA per query tile, query head, and batch of the prepared case (flat 1-D grid)."""
     case = prepared.case
-    rows = prepared.spec.q_rows_per_cta
-    return (case.sequence_length // rows, case.query_heads, case.batch)
+    tiles = -(-case.sequence_length // prepared.spec.bm)
+    return (case.batch * tiles * case.query_heads, 1, 1)
 
 
 @pytest.mark.parametrize(
@@ -670,22 +670,28 @@ def test_wmma_reference_matches_production_kernel_abi(architecture, case):
     target = get_architecture(architecture)
     root = Path(kernels.__file__).resolve().parent.parent
     prepared = target.prepare(case, str(root))
-    assert prepared.abi == "wmma-strided-v2"
+    assert prepared.abi == "wmma-strided-v3"
     kernel = wmma.build(prepared)
     assert [(p.name, p.type.name) for p in kernel.params] == [
         (arg["name"], arg["type"].replace(" ", "")) for arg in wmma.signature(prepared)
     ]
     assert wmma.grid(prepared) == _wmma_grid(prepared)
-    assert prepared.spec.block_size == 32
-    assert prepared.spec.head_size == case.head_dim
-    assert prepared.spec.mask_mode == ("causal" if case.causal else "none")
+    assert prepared.spec.threads == 2 * prepared.spec.bm
+    assert prepared.spec.head_dim == case.head_dim
+    assert prepared.spec.mask == ("causal" if case.causal else "none")
     assert prepared.spec.layout == "dense"
     values = wmma.scalars(case, case.scale)
     assert values["seqlen_q"] == values["seqlen_k"] == case.sequence_length
     assert values["num_query_heads"] == case.query_heads
     assert values["num_kv_heads"] == case.kv_heads
     assert values["bottom_right"] == values["write_lse"] == 0
-    assert values["window_left"] == values["window_right"] == -1
+    # The "causal" class takes the diagonal from the runtime bounds; the unmasked one
+    # ignores them.
+    assert values["window_left"] == -1
+    assert values["window_right"] == (0 if case.causal else -1)
+    assert values["batch"] == case.batch
+    assert values["num_v_heads"] == case.kv_heads
+    assert values["head_dim_q"] == values["head_dim_v"] == case.head_dim
     assert values["stride_lse_batch"] == 0
     assert values["stride_lse_token"] == values["stride_lse_head"] == 0
     assert values["scale_log2"] == pytest.approx(case.scale * np.log2(np.e))
@@ -761,14 +767,14 @@ def test_wmma_launch_and_export_preserve_runtime_arguments(architecture, monkeyp
         wmma.launch(prepared, buffers, case.scale)
     code, metadata = wmma.exported_kernel(prepared)
     assert code == b"code-object"
-    assert metadata["abi"] == "wmma-strided-v2"
+    assert metadata["abi"] == "wmma-strided-v3"
     assert metadata["compiler_target"] == compiler_target
     assert len(compiled) == 1 and len(launches) == 2
     expected = pack_args(metadata["signature"], replay_values(metadata, buffers, case))
     for arguments, config in launches:
         assert arguments == expected
         assert config.grid == metadata["grid"] == _wmma_grid(prepared)
-        assert config.block == metadata["block"] == (32, 1, 1)
+        assert config.block == metadata["block"] == (prepared.spec.threads, 1, 1)
 
 
 def test_wmma_reference_cohort_and_rejections():
@@ -829,7 +835,9 @@ def test_legacy_dense_replay_arguments(architecture, runtime_shape):
     )
 
 
-@pytest.mark.parametrize("abi", ["wmma-strided-v1", "wmma-strided-v2"])
+@pytest.mark.parametrize(
+    "abi", ["wmma-strided-v1", "wmma-strided-v2", "wmma-strided-v3"]
+)
 def test_worker_wmma_replay_uses_frozen_scalars_and_rejects_unknown_abi(abi):
     from sdpa_reference.worker import replay_values
     from sdpa_reference.implementations import wmma
@@ -853,7 +861,7 @@ def test_worker_wmma_replay_uses_frozen_scalars_and_rejects_unknown_abi(abi):
     expected = dict(
         frozen, Q=buffers["q"], K=buffers["k"], V=buffers["v"], O=buffers["out"]
     )
-    if abi == "wmma-strided-v2":
+    if abi in ("wmma-strided-v2", "wmma-strided-v3"):
         expected["LSE"] = 0
     assert result == expected
     assert metadata == {"abi": abi, "scalars": frozen}

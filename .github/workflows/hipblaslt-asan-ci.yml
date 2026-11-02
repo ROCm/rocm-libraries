@@ -11,6 +11,7 @@ on:
       - "test/therock/test_hipblaslt.py"
       - "test/therock/lsan.supp"
       - ".github/workflows/hipblaslt-asan-ci.yml"
+      - ".github/actions/ci-env/**"
   workflow_dispatch:
 
 permissions:
@@ -27,7 +28,7 @@ jobs:
     outputs:
       # Use the same TheRock revision as rocm-libraries' Multi-Arch CI so
       # this focused gfx90a lane exercises its actual math-libs build system.
-      therock_ref: ${{ steps.therock-ref.outputs.ref }}
+      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
@@ -43,10 +44,6 @@ jobs:
       - name: Load CI environment
         id: ci-env
         uses: ./.github/actions/ci-env
-
-      - name: Select locked TheRock revision
-        id: therock-ref
-        run: echo "ref=3c4ec014374d4d32243334ef229093fe7b38c5b2" >> "$GITHUB_OUTPUT"
 
       - name: Compute arch matrix
         id: matrix
