@@ -970,6 +970,16 @@ _GFX942_3D_OFFSET = 32
 #   80: 56 + uniform_k_decode, reg_prefetch=1, lds_kpack_read (stride 2, 32x32x8, default epilogue)
 #   81: 57 + uniform_k_decode (pointwise): rejected by both engines
 #   82: 71 + uniform_k_decode, uk_tap_fast, uk_chunk_group=2: rejected by both engines
+#   83: 55 at t256x128x64 w4x2 + split_k=2, uniform_k_decode, reg_prefetch=1, lds_xor,
+#       lds_kpack_read, uk_tap_fast, uk_nopad, fb_skip_empty, xcd_remap=6 (8 waves)
+#   84: 83 + rpf_pingpong=5, vmem_interleave=5, pp_b_double, pp_split_fetch=3
+#   85: 83 + rpf_pingpong=5, vmem_interleave=6, pp_b_double, pp_split_fetch=4
+#   86: 83 + rpf_pingpong=4, rpf_setprio=1, pp_pre_mfma=2
+#   87: 83 + rpf_pingpong=1
+#   88: 83 + rpf_pingpong=3, pp_b_double
+#   89: 83 + rpf_pingpong=5, vmem_interleave=5, pp_split_fetch=10
+#   90: 54 + compv3, reg_prefetch=1, vmem_interleave=2, rpf_setprio=1
+#   91: 83 + rpf_pingpong=5 without vmem_interleave: rejected by both engines
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
@@ -1046,7 +1056,23 @@ def _gfx942_3d_spec(idx: int):
         81: (57, dict(uniform_k_decode=True)),
         82: (55, dict(split_k=2, reg_prefetch=1, lds_xor=True, lds_kpack_read=True,
                       uniform_k_decode=True, uk_tap_fast=True, uk_chunk_group=2)),
+        90: (54, dict(pipeline="compv3", reg_prefetch=1, vmem_interleave=2, rpf_setprio=1)),
     }
+    _s3 = dict(tile_n=128, tile_k=64, warp_n=2, split_k=2, uniform_k_decode=True,
+               reg_prefetch=1, lds_xor=True, lds_kpack_read=True, uk_tap_fast=True,
+               uk_nopad=True, fb_skip_empty=True, xcd_remap=6)
+    _pp = {
+        83: {},
+        84: dict(rpf_pingpong=5, vmem_interleave=5, pp_b_double=True, pp_split_fetch=3),
+        85: dict(rpf_pingpong=5, vmem_interleave=6, pp_b_double=True, pp_split_fetch=4),
+        86: dict(rpf_pingpong=4, rpf_setprio=1, pp_pre_mfma=2),
+        87: dict(rpf_pingpong=1),
+        88: dict(rpf_pingpong=3, pp_b_double=True),
+        89: dict(rpf_pingpong=5, vmem_interleave=5, pp_split_fetch=10),
+        91: dict(rpf_pingpong=5),
+    }
+    if idx in _pp:
+        knobs[idx] = (55, dict(_s3, **_pp[idx]))
     extra = {}
     if idx in knobs:
         idx, extra = knobs[idx]

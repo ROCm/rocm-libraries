@@ -706,7 +706,13 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
          * second A/B tile for it was dead and charged LDS the kernel never used.
          * Mirrors the Python double_buffer condition. */
         ctx->double_buffer = spec->async_dma || spec->unroll_k || spec->reg_prefetch == 2;
-        if(ctx->double_buffer)
+        if(spec->pp_b_double)
+        {
+            /* rpf_pingpong: B alone in two buffers (A stays single). */
+            ctx->A_smem2 = ctx->A_smem;
+            ctx->B_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_b, b_shape, 2, "B_smem2");
+        }
+        else if(ctx->double_buffer)
         {
             ctx->A_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_a, a_shape, 2, "A_smem2");
             ctx->B_smem2 = rocke_b_smem_alloc(b, ctx->ir_dtype_b, b_shape, 2, "B_smem2");

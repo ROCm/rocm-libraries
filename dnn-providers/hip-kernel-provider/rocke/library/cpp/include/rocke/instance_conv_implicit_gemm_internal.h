@@ -602,7 +602,33 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* split_zstep;
     /* _emit_fwd_kloops' c1 = b.const_i32(1) (the uniform-tap advance reads it). */
     rocke_value_t* uk_c1;
+    /* emit_mfma_phase modes of the rpf_pingpong loop (all off by default):
+     * pp_read collects the tile's fragments (no MFMA), pp_use runs MFMAs
+     * [pp_i0, pp_i1) of collected fragments; _pp_part's b_only / b_from /
+     * kk_from narrow the reads. vmi_pending: buffer_loads the next MFMA phase
+     * spreads over its MFMAs (vmem_interleave). */
+    struct rocke_conv_frag* pp_read;
+    int pp_read_n;
+    const struct rocke_conv_frag* pp_use;
+    int pp_i0;
+    int pp_i1;
+    bool pp_b_only;
+    int pp_b_from_p1; /* _pp_part["b_from"] + 1; 0 => None */
+    int pp_kk_from;
+    int vmi_pending;
+    /* _fetch_part (pp_split_fetch): skip an operand's global reads. */
+    bool fetch_skip_a;
+    bool fetch_skip_b;
 } rocke_conv_build_ctx_t;
+
+/* One kk step's MFMA operands (Python load_frags' (a_rows, b_cols)). */
+typedef struct rocke_conv_frag
+{
+    rocke_value_t* a[ROCKE_CONV_MAX_ACCS];
+    int na;
+    rocke_value_t* b[ROCKE_CONV_MAX_ACCS];
+    int nb;
+} rocke_conv_frag_t;
 
 /* Python mul_u24: x * y with both operands masked to 24 bits so the backend
  * selects v_mul_u32_u24. Only for terms the host bounds (conv_args.MUL24_REDUCTION_LIMIT). */

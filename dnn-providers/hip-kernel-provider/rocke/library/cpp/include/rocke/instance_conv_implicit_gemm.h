@@ -268,6 +268,24 @@ typedef struct rocke_implicit_gemm_conv_spec
     /* fb_skip_empty: the uniform_k_decode kernels' fallback loop skips its
      * prologue load when its range is empty. */
     bool fb_skip_empty; /* default false */
+
+    /* vmem_interleave: the next tile's buffer_loads go one per that many
+     * MFMAs of the reg_prefetch / rpf_pingpong phase (hint pipelines). */
+    int vmem_interleave; /* default 0 */
+    /* rpf_setprio (1..3): raise the wave priority over the load issue + MFMAs
+     * of the reg_prefetch loops. */
+    int rpf_setprio; /* default 0 */
+    /* rpf_pingpong (1..5): the 8-wave block ping-pong of the uniform_k_decode
+     * + reg_prefetch=1 loop (two waves per SIMD alternate memory and compute
+     * phases). 4/5: tile t+2's global reads in [mem B] / [compute B]. */
+    int rpf_pingpong; /* default 0 */
+    /* pp_pre_mfma: MFMAs of each compute phase placed ahead of its barrier. */
+    int pp_pre_mfma; /* default 0 */
+    /* pp_b_double: rpf_pingpong with B in two LDS buffers (pairs + tail). */
+    bool pp_b_double; /* default false */
+    /* pp_split_fetch (rpf_pingpong 5): where each operand's global reads go.
+     * The C port carries 1-4 and 10; 5-9 are Python-only (rejected here). */
+    int pp_split_fetch; /* default 0 */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

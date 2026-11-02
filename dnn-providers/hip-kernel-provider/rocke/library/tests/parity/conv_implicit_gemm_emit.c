@@ -925,6 +925,69 @@ static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const cha
         if(idx == 78)
             spec->xcd_remap = 6;
         return 0;
+    case 83:
+    case 84:
+    case 85:
+    case 86:
+    case 87:
+    case 88:
+    case 89:
+    case 91:
+        if(make_cfg_3d_base(55, spec, arch) != 0)
+            return -1;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
+        spec->warp_n = 2;
+        spec->split_k = 2;
+        spec->uniform_k_decode = true;
+        spec->reg_prefetch = 1;
+        spec->lds_xor = true;
+        spec->lds_kpack_read = true;
+        spec->uk_tap_fast = true;
+        spec->uk_nopad = true;
+        spec->fb_skip_empty = true;
+        spec->xcd_remap = 6;
+        switch(idx)
+        {
+        case 84:
+        case 85:
+            spec->rpf_pingpong = 5;
+            spec->vmem_interleave = idx == 84 ? 5 : 6;
+            spec->pp_b_double = true;
+            spec->pp_split_fetch = idx == 84 ? 3 : 4;
+            break;
+        case 86:
+            spec->rpf_pingpong = 4;
+            spec->rpf_setprio = 1;
+            spec->pp_pre_mfma = 2;
+            break;
+        case 87:
+            spec->rpf_pingpong = 1;
+            break;
+        case 88:
+            spec->rpf_pingpong = 3;
+            spec->pp_b_double = true;
+            break;
+        case 89:
+            spec->rpf_pingpong = 5;
+            spec->vmem_interleave = 5;
+            spec->pp_split_fetch = 10;
+            break;
+        case 91:
+            spec->rpf_pingpong = 5;
+            break;
+        default:
+            break;
+        }
+        return 0;
+    case 90:
+        if(make_cfg_3d_base(54, spec, arch) != 0)
+            return -1;
+        spec->pipeline = "compv3";
+        spec->reg_prefetch = 1;
+        spec->vmem_interleave = 2;
+        spec->rpf_setprio = 1;
+        return 0;
     case 80:
         if(make_cfg_3d_base(56, spec, arch) != 0)
             return -1;

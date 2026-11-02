@@ -462,14 +462,21 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     /* (pfr, spt, sakd, adir: Python-only, off.) */
     ROCKE_FLAG(s->uk_tap_fast, "tapf");
     ROCKE_FLAG(s->uk_chunk_group > 0, "cg%d", s->uk_chunk_group);
-    /* (lah, dfr, vmi: Python-only, off.) */
+    /* (lah, dfr: Python-only, off.) */
+    ROCKE_FLAG(s->vmem_interleave > 0, "vmi%d", s->vmem_interleave);
     ROCKE_FLAG(s->lds_kpack_read, "kprd");
-    /* (lbar, flate, uxh, xdpp, prio, pp, ppm, ppbd: Python-only, off.) */
+    /* (lbar, flate, uxh, xdpp: Python-only, off.) */
+    ROCKE_FLAG(s->rpf_setprio > 0, "prio%d", s->rpf_setprio);
+    ROCKE_FLAG(s->rpf_pingpong > 0, "pp%d", s->rpf_pingpong);
+    ROCKE_FLAG(s->pp_pre_mfma > 0, "ppm%d", s->pp_pre_mfma);
+    ROCKE_FLAG(s->pp_b_double, "ppbd");
     ROCKE_FLAG(s->lds_xor_rowkey, "lxrk");
     /* (mch, xws, saa, sapl, sapf, esf, skx, fsk, sfs, szf, xsub, ppfd:
      *  Python-only knobs, off.) */
     ROCKE_FLAG(s->fb_skip_empty, "fbse");
-    /* (ppeg, elb, shy, mss, stc, sdet, psf, nag: Python-only knobs, off.) */
+    /* (ppeg, elb, shy, mss, stc, sdet: Python-only knobs, off.) */
+    ROCKE_FLAG(s->pp_split_fetch > 0, "psf%d", s->pp_split_fetch);
+    /* (nag: Python-only, off.) */
     ROCKE_FLAG(s->m_band > 0, "mb%d", s->m_band);
     /* (xsm, fxd, xyr, eqx: Python-only knobs, off here.) */
     ROCKE_FLAG(s->uk_nopad, "nopad");
@@ -1121,6 +1128,29 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
                         "uk_nopad drops the bounds checks of the uniform_k_decode loop only");
+    if(s->vmem_interleave)
+    {
+        if(s->wave_size != 64 || (s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
+           || s->async_dma)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "lds_ahead/defer_mfma/vmem_interleave schedule the sync wave64 "
+                            "MFMA K loop");
+        if(s->vmem_interleave < 0)
+            ROCKE_SPEC_FAIL(reason, reason_cap, "defer_mfma and vmem_interleave must be >= 0");
+        if(!(s->reg_prefetch == 1 || s->reg_prefetch == 2))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "vmem_interleave is implemented in the reg_prefetch and "
+                            "single-buffer prefetch_regs loops only");
+        const bool hints
+            = s->pipeline != NULL
+              && (strcmp(s->pipeline, "compv3") == 0 || strcmp(s->pipeline, "compv4") == 0);
+        if(!(hints || s->rpf_pingpong))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "vmem_interleave needs a hint-emitting pipeline (compv3/compv4)");
+    }
     if(s->xcd_remap && s->chiplet_swizzle)
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "xcd_remap and chiplet_swizzle both remap the grid; set one");
@@ -1156,6 +1186,62 @@ bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
                             reason_cap,
                             "uk_chunk_group with split_k: the uk_nopad rpf_pingpong loops only");
     }
+    if(s->rpf_setprio && (!(s->reg_prefetch == 1 || s->reg_prefetch == 2) || s->rpf_setprio > 3))
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "rpf_setprio (1..3) is implemented in the reg_prefetch and "
+                        "single-buffer prefetch_regs loops");
+    if(s->rpf_pingpong)
+    {
+        const int nw = s->warp_m * s->warp_n;
+        if(s->rpf_pingpong < 1 || s->rpf_pingpong > 5)
+            ROCKE_SPEC_FAIL(reason, reason_cap, "rpf_pingpong must be 0..5");
+        if((s->rpf_pingpong == 5) != (s->vmem_interleave != 0))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "rpf_pingpong=5 places its loads one per vmem_interleave MFMAs "
+                            "(and only it)");
+        const int half_mf = (s->tile_k / s->warp_tile_k) * (s->tile_m / s->warp_m / s->warp_tile_m)
+                            * (s->tile_n / s->warp_n / s->warp_tile_n) / 2;
+        if(s->pp_pre_mfma > half_mf)
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "pp_pre_mfma must not exceed a compute phase's MFMAs");
+        if(s->rpf_pingpong >= 4 && !s->lds_xor)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "rpf_pingpong>=4 carries the staged tile in the lds_xor store form");
+        if(!(s->uniform_k_decode && s->reg_prefetch == 1))
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "rpf_pingpong is implemented in the uniform_k_decode + "
+                            "reg_prefetch=1 loop only");
+        if(nw != 8)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "rpf_pingpong pairs the two waves of each SIMD: it needs 8 waves");
+    }
+    if(s->pp_b_double)
+    {
+        const int kk = s->warp_tile_k ? s->tile_k / s->warp_tile_k : 1;
+        const bool ok
+            = s->rpf_pingpong
+              && ((s->lds_kpack_read && (kk / 2) % 2 == 0) || (!s->lds_kpack_read && kk % 2 == 0));
+        if(!ok)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "pp_b_double: the plain rpf_pingpong loop with k-packed reads and an "
+                            "even number of kk pairs per half");
+    }
+    if(s->pp_pre_mfma && !s->rpf_pingpong)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pp_pre_mfma shapes the rpf_pingpong loop");
+    if(s->pp_split_fetch
+       && !(s->pp_split_fetch >= 1 && s->pp_split_fetch <= 10 && s->rpf_pingpong == 5))
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "pp_split_fetch (1-10) shapes the plain rpf_pingpong 5 loop");
+    if(s->pp_split_fetch >= 5 && s->pp_split_fetch <= 9)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pp_split_fetch 5-9 are not ported to the C engine");
+    if(s->pp_pre_mfma < 0)
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pp_pre_mfma must be >= 0");
     if(s->lds_xor_rowkey && !(s->lds_xor && s->lds_kpack_read && s->tile_k == 32))
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
@@ -1499,6 +1585,8 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
 
         double_buf = (s->async_dma || s->unroll_k || s->reg_prefetch == 2) ? 1 : 0;
         ab_lds = ab_bytes * (double_buf ? 2 : 1);
+        if(s->pp_b_double)
+            ab_lds += s->tile_n * lds_layout.row_stride * ab_dtype_bytes;
 
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
         {
