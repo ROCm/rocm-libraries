@@ -28,12 +28,19 @@ TEST(TestPointwiseValidation, UnaryModesClassifiedCorrectly)
     EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::FLOOR));
     EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::ELU_FWD));
     EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::SOFTPLUS_FWD));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::IDENTITY));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::LOGICAL_NOT));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::GEN_INDEX));
 
     // Test that binary operations are NOT unary
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::ADD));
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::SUB));
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::MUL));
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::RELU_BWD));
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::DIV));
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::CMP_EQ));
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::LOGICAL_AND));
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::GELU_BWD));
 }
 
 TEST(TestPointwiseValidation, BinaryModesClassifiedCorrectly)
@@ -48,11 +55,28 @@ TEST(TestPointwiseValidation, BinaryModesClassifiedCorrectly)
     EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::RELU_BWD));
     EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::SIGMOID_BWD));
     EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::TANH_BWD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::ADD_SQUARE));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_EQ));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_NEQ));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_GT));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_GE));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_LT));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_LE));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::LOGICAL_AND));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::LOGICAL_OR));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::GELU_BWD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::GELU_APPROX_TANH_BWD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::SWISH_BWD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::ELU_BWD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::SOFTPLUS_BWD));
 
     // Test that unary operations are NOT binary
     EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::RELU_FWD));
     EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::SIGMOID_FWD));
     EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::TANH_FWD));
+    EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::IDENTITY));
+    EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::LOGICAL_NOT));
+    EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::GEN_INDEX));
 }
 
 TEST(TestPointwiseValidation, TernaryModesClassifiedCorrectly)
@@ -63,6 +87,9 @@ TEST(TestPointwiseValidation, TernaryModesClassifiedCorrectly)
     // Test that unary and binary operations are NOT ternary
     EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::RELU_FWD));
     EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::ADD));
+    EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::CMP_EQ));
+    EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::LOGICAL_NOT));
+    EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::GEN_INDEX));
 }
 
 TEST(TestPointwiseValidation, MutualExclusivityOfCategories)
