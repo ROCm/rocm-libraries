@@ -74,12 +74,12 @@ __device__ void sytf2_device_upper(const rocblas_int tid,
         int kstep = 1;
 
         // find max off-diagonal entry in column k
-        iamax<MAX_THDS>(tid, k, A + k * lda, 1, sval, sidx);
+        iamax<MAX_THDS>(tid, k, A + idx2D(0, k, lda), 1, sval, sidx);
         if(tid == 0)
         {
             imax = sidx[0] - 1;
             colmax = sval[0];
-            absakk = aabs<S>(A[k + k * lda]);
+            absakk = aabs<S>(A[idx2D(k, k, lda)]);
         }
         __syncthreads();
 
@@ -98,7 +98,7 @@ __device__ void sytf2_device_upper(const rocblas_int tid,
             else
             {
                 // find max off-diagonal entry in row i
-                iamax<MAX_THDS>(tid, k - imax, A + imax + (imax + 1) * lda, lda, sval, sidx);
+                iamax<MAX_THDS>(tid, k - imax, A + idx2D(imax, imax + 1, lda), lda, sval, sidx);
                 if(tid == 0)
                     rowmax = sval[0];
 
@@ -106,7 +106,7 @@ __device__ void sytf2_device_upper(const rocblas_int tid,
 
                 if(imax > 0)
                 {
-                    iamax<MAX_THDS>(tid, imax, A + imax * lda, 1, sval, sidx);
+                    iamax<MAX_THDS>(tid, imax, A + idx2D(0, imax, lda), 1, sval, sidx);
                     if(tid == 0)
                         rowmax = std::max(rowmax, sval[0]);
                 }
@@ -115,7 +115,7 @@ __device__ void sytf2_device_upper(const rocblas_int tid,
                 if(absakk >= alpha * colmax * (colmax / rowmax))
                     // no interchange (1-by-1 block)
                     kp = k;
-                else if(aabs<S>(A[imax + imax * lda]) >= alpha * rowmax)
+                else if(aabs<S>(A[idx2D(imax, imax, lda)]) >= alpha * rowmax)
                     // interchange rows and columns kk = k and kp = imax (1-by-1 block)
                     kp = imax;
                 else
@@ -132,15 +132,15 @@ __device__ void sytf2_device_upper(const rocblas_int tid,
                 // interchange rows and columns kp and kk
                 if(tid == 0)
                 {
-                    swap(A[kk + kk * lda], A[kp + kp * lda]);
+                    swap(A[idx2D(kk, kk, lda)], A[idx2D(kp, kp, lda)]);
                     if(kstep == 2)
-                        swap(A[kk + k * lda], A[kp + k * lda]);
+                        swap(A[idx2D(kk, k, lda)], A[idx2D(kp, k, lda)]);
                 }
 
                 for(i = tid; i < kp; i += MAX_THDS)
-                    swap(A[i + kk * lda], A[i + kp * lda]);
+                    swap(A[idx2D(i, kk, lda)], A[idx2D(i, kp, lda)]);
                 for(i = tid; i < kk - kp - 1; i += MAX_THDS)
-                    swap(A[(kp + i + 1) + kk * lda], A[kp + (kp + i + 1) * lda]);
+                    swap(A[idx2D((kp + i + 1), kk, lda)], A[idx2D(kp, kp + i + 1, lda)]);
                 __syncthreads();
             }
 
@@ -149,18 +149,18 @@ __device__ void sytf2_device_upper(const rocblas_int tid,
                 // 1-by-1 pivot block
 
                 // perform rank 1 update of A from [0,0] to [k-1,k-1] (syr)
-                T r1 = T(1) / A[k + k * lda];
+                T r1 = T(1) / A[idx2D(k, k, lda)];
                 for(j = tid; j < k; j += MAX_THDS)
                 {
-                    T r2 = -r1 * A[j + k * lda];
+                    T r2 = -r1 * A[idx2D(j, k, lda)];
                     for(i = 0; i <= j; i++)
-                        A[i + j * lda] = A[i + j * lda] + A[i + k * lda] * r2;
+                        A[idx2D(i, j, lda)] = A[idx2D(i, j, lda)] + A[idx2D(i, k, lda)] * r2;
                 }
                 __syncthreads();
 
                 // update column k (scal)
                 for(j = tid; j < k; j += MAX_THDS)
-                    A[j + k * lda] *= r1;
+                    A[idx2D(j, k, lda)] *= r1;
             }
             else
             {
@@ -170,27 +170,27 @@ __device__ void sytf2_device_upper(const rocblas_int tid,
                 {
                     // perform rank 2 update of A from [0,0] to [k-2,k-2]
                     T wk, wkm1;
-                    T d12 = A[(k - 1) + k * lda];
-                    T d22 = A[(k - 1) + (k - 1) * lda] / d12;
-                    T d11 = A[k + k * lda] / d12;
+                    T d12 = A[idx2D((k - 1), k, lda)];
+                    T d22 = A[idx2D((k - 1), k - 1, lda)] / d12;
+                    T d11 = A[idx2D(k, k, lda)] / d12;
                     d12 = T(1) / ((d11 * d22 - T(1)) * d12);
                     for(j = k - 2 - tid; j >= 0; j -= MAX_THDS)
                     {
-                        wkm1 = d12 * (d11 * A[j + (k - 1) * lda] - A[j + k * lda]);
-                        wk = d12 * (d22 * A[j + k * lda] - A[j + (k - 1) * lda]);
+                        wkm1 = d12 * (d11 * A[idx2D(j, k - 1, lda)] - A[idx2D(j, k, lda)]);
+                        wk = d12 * (d22 * A[idx2D(j, k, lda)] - A[idx2D(j, k - 1, lda)]);
                         for(i = j; i >= 0; i--)
-                            A[i + j * lda]
-                                = A[i + j * lda] - A[i + k * lda] * wk - A[i + (k - 1) * lda] * wkm1;
+                            A[idx2D(i, j, lda)] = A[idx2D(i, j, lda)] - A[idx2D(i, k, lda)] * wk
+                                - A[idx2D(i, k - 1, lda)] * wkm1;
                     }
                     __syncthreads();
 
                     // update columns k and k-1
                     for(j = k - 2 - tid; j >= 0; j -= MAX_THDS)
                     {
-                        wkm1 = d12 * (d11 * A[j + (k - 1) * lda] - A[j + k * lda]);
-                        wk = d12 * (d22 * A[j + k * lda] - A[j + (k - 1) * lda]);
-                        A[j + k * lda] = wk;
-                        A[j + (k - 1) * lda] = wkm1;
+                        wkm1 = d12 * (d11 * A[idx2D(j, k - 1, lda)] - A[idx2D(j, k, lda)]);
+                        wk = d12 * (d22 * A[idx2D(j, k, lda)] - A[idx2D(j, k - 1, lda)]);
+                        A[idx2D(j, k, lda)] = wk;
+                        A[idx2D(j, k - 1, lda)] = wkm1;
                     }
                 }
             }
@@ -247,12 +247,12 @@ __device__ void sytf2_device_lower(const rocblas_int tid,
         int kstep = 1;
 
         // find max off-diagonal entry in column k
-        iamax<MAX_THDS>(tid, n - k - 1, A + (k + 1) + k * lda, 1, sval, sidx);
+        iamax<MAX_THDS>(tid, n - k - 1, A + idx2D(k + 1, k, lda), 1, sval, sidx);
         if(tid == 0)
         {
             imax = k + sidx[0];
             colmax = sval[0];
-            absakk = aabs<S>(A[k + k * lda]);
+            absakk = aabs<S>(A[idx2D(k, k, lda)]);
         }
         __syncthreads();
 
@@ -271,7 +271,7 @@ __device__ void sytf2_device_lower(const rocblas_int tid,
             else
             {
                 // find max off-diagonal entry in row i
-                iamax<MAX_THDS>(tid, imax - k, A + imax + k * lda, lda, sval, sidx);
+                iamax<MAX_THDS>(tid, imax - k, A + idx2D(imax, k, lda), lda, sval, sidx);
                 if(tid == 0)
                     rowmax = sval[0];
 
@@ -279,7 +279,7 @@ __device__ void sytf2_device_lower(const rocblas_int tid,
 
                 if(imax < n - 1)
                 {
-                    iamax<MAX_THDS>(tid, n - imax - 1, A + (imax + 1) + imax * lda, 1, sval, sidx);
+                    iamax<MAX_THDS>(tid, n - imax - 1, A + idx2D(imax + 1, imax, lda), 1, sval, sidx);
                     if(tid == 0)
                         rowmax = std::max(rowmax, sval[0]);
                 }
@@ -288,7 +288,7 @@ __device__ void sytf2_device_lower(const rocblas_int tid,
                 if(absakk >= alpha * colmax * (colmax / rowmax))
                     // no interchange (1-by-1 block)
                     kp = k;
-                else if(aabs<S>(A[imax + imax * lda]) >= alpha * rowmax)
+                else if(aabs<S>(A[idx2D(imax, imax, lda)]) >= alpha * rowmax)
                     // interchange rows and columns kk = k and kp = imax (1-by-1 block)
                     kp = imax;
                 else
@@ -305,15 +305,15 @@ __device__ void sytf2_device_lower(const rocblas_int tid,
                 // interchange rows and columns kp and kk
                 if(tid == 0)
                 {
-                    swap(A[kk + kk * lda], A[kp + kp * lda]);
+                    swap(A[idx2D(kk, kk, lda)], A[idx2D(kp, kp, lda)]);
                     if(kstep == 2)
-                        swap(A[kk + k * lda], A[kp + k * lda]);
+                        swap(A[idx2D(kk, k, lda)], A[idx2D(kp, k, lda)]);
                 }
 
                 for(i = tid; i < n - kp - 1; i += MAX_THDS)
-                    swap(A[(kp + i + 1) + kk * lda], A[(kp + i + 1) + kp * lda]);
+                    swap(A[idx2D((kp + i + 1), kk, lda)], A[idx2D((kp + i + 1), kp, lda)]);
                 for(i = tid; i < kp - kk - 1; i += MAX_THDS)
-                    swap(A[(kk + i + 1) + kk * lda], A[kp + (kk + i + 1) * lda]);
+                    swap(A[idx2D((kk + i + 1), kk, lda)], A[idx2D(kp, kk + i + 1, lda)]);
                 __syncthreads();
             }
 
@@ -324,19 +324,20 @@ __device__ void sytf2_device_lower(const rocblas_int tid,
                 if(k < n - 1)
                 {
                     // perform rank 1 update of A from [k+1,k+1] to [n-1,n-1] (syr)
-                    T r1 = T(1) / A[k + k * lda];
+                    T r1 = T(1) / A[idx2D(k, k, lda)];
                     for(j = tid; j < n - k - 1; j += MAX_THDS)
                     {
-                        T r2 = -r1 * A[(k + j + 1) + k * lda];
+                        T r2 = -r1 * A[idx2D((k + j + 1), k, lda)];
                         for(i = j; i < n - k - 1; i++)
-                            A[(k + i + 1) + (k + j + 1) * lda]
-                                = A[(k + i + 1) + (k + j + 1) * lda] + A[(k + i + 1) + k * lda] * r2;
+                            A[idx2D((k + i + 1), k + j + 1, lda)]
+                                = A[idx2D((k + i + 1), k + j + 1, lda)]
+                                + A[idx2D((k + i + 1), k, lda)] * r2;
                     }
                     __syncthreads();
 
                     // update column k (scal)
                     for(j = tid; j < n - k - 1; j += MAX_THDS)
-                        A[(k + j + 1) + k * lda] *= r1;
+                        A[idx2D((k + j + 1), k, lda)] *= r1;
                 }
             }
             else
@@ -347,27 +348,27 @@ __device__ void sytf2_device_lower(const rocblas_int tid,
                 {
                     // perform rank 2 update of A from [k+2,k+2] to [n-1,n-1]
                     T wk, wkp1;
-                    T d21 = A[(k + 1) + k * lda];
-                    T d11 = A[(k + 1) + (k + 1) * lda] / d21;
-                    T d22 = A[k + k * lda] / d21;
+                    T d21 = A[idx2D((k + 1), k, lda)];
+                    T d11 = A[idx2D((k + 1), k + 1, lda)] / d21;
+                    T d22 = A[idx2D(k, k, lda)] / d21;
                     d21 = T(1) / ((d11 * d22 - T(1)) * d21);
                     for(j = k + 2 + tid; j < n; j += MAX_THDS)
                     {
-                        wk = d21 * (d11 * A[j + k * lda] - A[j + (k + 1) * lda]);
-                        wkp1 = d21 * (d22 * A[j + (k + 1) * lda] - A[j + k * lda]);
+                        wk = d21 * (d11 * A[idx2D(j, k, lda)] - A[idx2D(j, k + 1, lda)]);
+                        wkp1 = d21 * (d22 * A[idx2D(j, k + 1, lda)] - A[idx2D(j, k, lda)]);
                         for(i = j; i < n; i++)
-                            A[i + j * lda]
-                                = A[i + j * lda] - A[i + k * lda] * wk - A[i + (k + 1) * lda] * wkp1;
+                            A[idx2D(i, j, lda)] = A[idx2D(i, j, lda)] - A[idx2D(i, k, lda)] * wk
+                                - A[idx2D(i, k + 1, lda)] * wkp1;
                     }
                     __syncthreads();
 
                     // update columns k and k+1
                     for(j = k + 2 + tid; j < n; j += MAX_THDS)
                     {
-                        wk = d21 * (d11 * A[j + k * lda] - A[j + (k + 1) * lda]);
-                        wkp1 = d21 * (d22 * A[j + (k + 1) * lda] - A[j + k * lda]);
-                        A[j + k * lda] = wk;
-                        A[j + (k + 1) * lda] = wkp1;
+                        wk = d21 * (d11 * A[idx2D(j, k, lda)] - A[idx2D(j, k + 1, lda)]);
+                        wkp1 = d21 * (d22 * A[idx2D(j, k + 1, lda)] - A[idx2D(j, k, lda)]);
+                        A[idx2D(j, k, lda)] = wk;
+                        A[idx2D(j, k + 1, lda)] = wkp1;
                     }
                 }
             }
@@ -396,7 +397,7 @@ template <typename T, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(SYTF2_MAX_THDS)
     sytf2_kernel_upper(const rocblas_int n,
                        U AA,
-                       const rocblas_int shiftA,
+                       const rocblas_stride shiftA,
                        const rocblas_int lda,
                        const rocblas_stride strideA,
                        rocblas_int* ipivA,
@@ -424,7 +425,7 @@ template <typename T, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(SYTF2_MAX_THDS)
     sytf2_kernel_lower(const rocblas_int n,
                        U AA,
-                       const rocblas_int shiftA,
+                       const rocblas_stride shiftA,
                        const rocblas_int lda,
                        const rocblas_stride strideA,
                        rocblas_int* ipivA,
@@ -484,7 +485,7 @@ rocblas_status rocsolver_sytf2_template(rocblas_handle handle,
                                         const rocblas_fill uplo,
                                         const rocblas_int n,
                                         U A,
-                                        const rocblas_int shiftA,
+                                        const rocblas_stride shiftA,
                                         const rocblas_int lda,
                                         const rocblas_stride strideA,
                                         rocblas_int* ipiv,

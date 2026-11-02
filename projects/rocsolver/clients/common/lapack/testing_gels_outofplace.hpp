@@ -214,16 +214,16 @@ void gels_outofplace_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
 
             // populate hX with values from hB
             for(rocblas_int i = 0; i < rowsB; i++)
                 for(rocblas_int j = 0; j < nrhs; j++)
-                    hX[b][i + j * ldx] = hB[b][i + j * ldb];
+                    hX[b][i + rocblas_stride(j) * ldx] = hB[b][i + rocblas_stride(j) * ldb];
 
             // add some singularities
             // always the same elements for debugging purposes
@@ -236,14 +236,14 @@ void gels_outofplace_initData(const rocblas_handle handle,
                         // zero random col
                         rocblas_int j = sample_index(rocblas_rng);
                         for(rocblas_int i = 0; i < m; i++)
-                            hA[b][i + j * lda] = 0;
+                            hA[b][i + rocblas_stride(j) * lda] = 0;
                     }
                     else
                     {
                         // zero random row
                         rocblas_int i = sample_index(rocblas_rng);
                         for(rocblas_int j = 0; j < n; j++)
-                            hA[b][i + j * lda] = 0;
+                            hA[b][i + rocblas_stride(j) * lda] = 0;
                     }
                 } while(coinflip(rocblas_rng));
             }
@@ -439,9 +439,9 @@ void testing_gels_outofplace(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
     rocblas_int ldb = argus.get<rocblas_int>("ldb", transC == 'N' ? m : n);
     rocblas_int ldx = argus.get<rocblas_int>("ldx", transC == 'N' ? n : m);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nrhs);
-    rocblas_stride stX = argus.get<rocblas_stride>("strideX", ldx * nrhs);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * nrhs);
+    rocblas_stride stX = argus.get<rocblas_stride>("strideX", rocblas_stride(ldx) * nrhs);
 
     rocblas_operation trans = char2rocblas_operation(transC);
     rocblas_int bc = argus.batch_count;

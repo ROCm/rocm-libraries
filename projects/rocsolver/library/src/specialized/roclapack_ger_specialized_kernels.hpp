@@ -41,18 +41,24 @@ ROCSOLVER_KERNEL void ger_kernel(I m,
                                  rocblas_stride stridea,
                                  U1 xx,
                                  rocblas_stride shiftX,
-                                 I incx,
+                                 I incx_arg,
                                  rocblas_stride strideX,
                                  U2 yy,
                                  rocblas_stride shiftY,
-                                 I incy,
+                                 I incy_arg,
                                  rocblas_stride strideY,
                                  U3 AA,
                                  rocblas_stride shiftA,
-                                 I inca,
-                                 I lda,
+                                 I inca_arg,
+                                 I lda_arg,
                                  rocblas_stride strideA)
 {
+    // (64-bit increments and leading dimension, so that the offsets below are computed in 64 bits)
+    const int64_t incx = incx_arg;
+    const int64_t incy = incy_arg;
+    const int64_t inca = inca_arg;
+    const int64_t lda = lda_arg;
+
     // indices
     I bid = hipBlockIdx_z;
     I i = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
