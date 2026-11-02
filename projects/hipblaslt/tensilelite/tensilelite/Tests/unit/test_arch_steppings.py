@@ -3608,7 +3608,7 @@ def test_a_name_cannot_smuggle_a_path_separator():
 
 
 def _fromConfig(configArchitecture, isaList, archNames):
-    from tensilelite.Tensile import archNamesFromConfig
+    from tensilelite.run import archNamesFromConfig
 
     return archNamesFromConfig(configArchitecture, isaList, list(archNames))
 
@@ -3992,7 +3992,7 @@ def test_target_id_qualifiers_rejects_a_misspelling_or_a_repeat(spec, match):
 def test_config_architecture_rejects_a_misspelled_qualifier():
     """The config is where this matters: nothing downstream can catch it."""
     from tensilelite.Common.Architectures import ARCH_CAP_OVERRIDES
-    from tensilelite.Tensile import archNamesFromConfig
+    from tensilelite.run import archNamesFromConfig
 
     isaList = [ISA_GFX1250]
     assert archNamesFromConfig(GFX1250 + ":xnack-", isaList, []) == [GFX1250 + ":xnack-"]
@@ -4091,7 +4091,7 @@ def test_cap_overrides_reach_a_spec_with_a_second_qualifier():
 
 
 def test_config_rejects_two_entries_settling_the_detected_arch_differently():
-    from tensilelite.Tensile import archNamesFromConfig
+    from tensilelite.run import archNamesFromConfig
 
     isaList = [ISA_GFX1250]
     # Order decided the mode before: one spelling tuned with replay on, the
@@ -4136,7 +4136,7 @@ def test_config_allows_two_entries_with_the_same_effective_capabilities():
     them as distinct target IDs and the helper kernels differ, so picking one by
     position is the thing being refused.
     """
-    from tensilelite.Tensile import archNamesFromConfig
+    from tensilelite.run import archNamesFromConfig
 
     isa942 = [gfxToIsa("gfx942")]
     with pytest.raises(ValueError, match="different xnack modes"):
