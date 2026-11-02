@@ -204,7 +204,9 @@ def mint_ids(
         "kernel_match": take(engine.kernel_match_umd["id"] if engine else None),
     }
     if config.engine.has_heuristic:
-        ids["uhd"] = take(engine.uhd["id"] if engine and engine.uhd else None)
+        # engine.uhd's first entry is always the native fallback this config
+        # regenerates; a trailing promoted-model id is untouched here.
+        ids["uhd"] = take(engine.uhd[0]["id"] if engine and engine.uhd else None)
     ids["udd"] = take(engine.udd["id"] if engine else None)
 
     prior_packs = {kdp.name: kdp for kdp in prior.kdps} if prior else {}
@@ -1205,7 +1207,10 @@ def resolve_ids(
                 build_kernel_match_umd(config, ids),
                 engine.kernel_match_umd,
             ),
-            "uhd": (build_uhd(config, ids), engine.uhd),
+            # The home's "default" may be a list (native fallback + a promoted
+            # model); only the native fallback, always first, is what this
+            # engine's own config regenerates.
+            "uhd": (build_uhd(config, ids), engine.uhd[0] if engine.uhd else None),
         }
         for name, (generated, home_doc) in built.items():
             if generated != home_doc:
@@ -1257,7 +1262,7 @@ def _report(
                 engine.kmd,
                 engine.udd,
                 engine.kernel_match_umd,
-                engine.uhd,
+                *(engine.uhd or ()),
             )
             if doc
         )

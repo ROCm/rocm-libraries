@@ -56,7 +56,7 @@ class EngineDocs:
 
     ued: dict
     kmd: dict
-    uhd: dict | None
+    uhd: tuple[dict, ...] | None
     udd: dict
     kernel_match_umd: dict
 
@@ -194,8 +194,18 @@ def _engine_docs(tree: _Root, engine_name: str) -> EngineDocs | None:
                 f"{ued_path}: 'sort_kernel_catalog' must be an object with a "
                 f"'default' UHD reference"
             )
-        uhd = tree.resolve(
-            "uhd", catalog["default"], "sort_kernel_catalog.default", ued_path
+        default = catalog["default"]
+        # The native fallback scorer comes first; a promoted model packet appends
+        # its own after it, so "default" is one UHD id or a list of them.
+        default_ids = default if isinstance(default, list) else [default]
+        if not default_ids or not all(isinstance(i, str) for i in default_ids):
+            raise ValueError(
+                f"{ued_path}: 'sort_kernel_catalog.default' must be a UHD id or "
+                f"a non-empty list of UHD ids"
+            )
+        uhd = tuple(
+            tree.resolve("uhd", i, "sort_kernel_catalog.default", ued_path)
+            for i in default_ids
         )
     kdps = tree.kdps_of(ued["id"])
     if not kdps:
