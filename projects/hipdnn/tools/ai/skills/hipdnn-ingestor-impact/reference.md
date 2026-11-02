@@ -103,6 +103,130 @@ rows.
   that runs after lowering (`rocke/helpers/compile.py`, `rocke/runtime/`): the IR digest does not
   cover it. A static kernarg `mismatch` is never downgraded.
 
+## Predicate tables
+
+The emitter also puts each builder's support predicate to the test, on both sides, after the
+builds. It works on the family's shipped builder, and on every other `build_*` function of its
+module that the builds called (a `KernelModule`'s kernel builders, such as a `reduce` companion's).
+It takes the shipped specs (an inner builder's are the specs the builds passed it) and varies one
+int or bool field at a time from up to four seeds. The values are the shipped ones, 0, -1, and the
+negation, double, half and 1.5 times of each shipped positive value. It asks the predicate the
+packer would resolve (`_resolve_support_predicate`).
+
+| Check | Finding |
+|---|---|
+| `builder` | The predicate accepts the spec and the builder raises on it: the packer would pass a spec its builder rejects. The detail names the exception and the `file:line` that raised it. |
+| `sign` | Between two builders of one family, on a field both specs have: a value outside the sign range of every shipped value (<= 0 where all are >= 1, < 0 where all are >= 0) that this predicate accepts and the other refuses. |
+
+The `sign` check compares only predicates built into the same module. A lone predicate that
+accepts 0 is not a finding: many fields mean "off" or "default" at 0 or -1.
+
+`at_base` marks two things:
+
+- **On a table**: the base ran the same builder's table.
+- **On a finding**: the base's table had the same check on the same field, so the finding
+  predates the change.
+
+`report` gives each finding a state and lists the findings in their own section, in this order:
+
+| State | When |
+|---|---|
+| `new` | The base's table of the same builder lacked it; or the base did not table the builder and the change edits its predicate or that builder (a function the diff's hunks fall in, in the family's source module) |
+| `first shipped` | The base did not table the builder and the change touches neither: an older predicate defect that the change ships for the first time |
+| `at base` | The base's table had it: it predates the change |
+
+These are pack-time facts. `report` never turns them into rows, so they never change the rollup.
+Instead it prints a `Pack-time:` line just above the `Runtime impact:` line:
+
+| Line | Meaning |
+|---|---|
+| `NEW <n>` | The `new` findings |
+| `FIRST-SHIPPED <n>` | The `first shipped` findings |
+| `CLEAN (<n> tables)` | Every table ran in full; any finding is `at base` |
+| `NOT RUN (<why>)` | No emit file, or no shipped rocKE builder to table |
+| `NOT RUN for <k> of <n> tables (<why>); no finding in the rest` | No finding, but a table was skipped or truncated, so the line cannot read clean |
+
+`NEW` and `FIRST-SHIPPED` can appear together, followed by `; not run for ...` when some table
+did not run.
+
+A table that cannot run says why (`skipped`): the packer has no resolver at that revision, no
+predicate takes the spec, or the specs are not dataclasses. A family's tables stop after
+`IMPACT_EMIT_TABLE_SECONDS` (default 60) and say `truncated`.
+
+Judge each finding whose state is `new` or `first shipped`. Read the predicate and the
+builder at `HEAD`.
+
+- A `builder` finding is a defect unless something refuses that spec before the packer.
+- A `sign` finding is a defect when the builder or a launch uses the field as a count, size or
+  index.
+
+A finding that holds is `IMPORTANT` (*Severities*). A finding that is `at base` predates the
+change and gets no severity of its own; mention it only when the change makes it reachable.
+
+## C++ differential tables (judge-written)
+
+The scripts compare the names, order and types of a C++ copy, never its values or what it refuses.
+For a `changed` `launch_surface` row whose C++ side is header-only and includes no HIP header
+(geometry, split rule, workspace, arguments), settle the values with a throwaway table. A
+`kernargs` or `workspace` row qualifies like any other, whether its C++ list is built from
+`KernelArgument` literals or helper calls. One table compares one C++ function with its Python
+counterpart; a header that restates several functions gives several tables, and the
+`C++ tables:` count is per function:
+
+1. Extract the side with `git archive <HEAD> <paths>` into a scratch directory, as the emitter
+   does. Never use the worktree.
+2. Write a small `main()` that includes the header, reads one input row per line from stdin and
+   prints the C++ result or `throw <message>`. Compile it with a host compiler, adding `-I` for the
+   header's directory and `projects/hipdnn/plugin_sdk/include`. On Windows use the ROCm wheel's
+   `clang++` with the MSVC `INCLUDE` and `LIB` set. No hipDNN build is needed.
+3. Write a Python driver that imports the `python_source` module (or the class the `guard:` text
+   names) from the extract. It builds the rows, runs both sides and prints each row where they
+   disagree. The rows are each value the shipped catalog uses for the fields the C++ side reads
+   (each value in at least one row, not the cross product), plus each Python refusal's boundary
+   just inside and just outside it: every `raise` and `return False, ...` in the function and in
+   the `__post_init__` of the classes it builds. When the Python function compiles or launches
+   kernels, stub that layer (no GPU, comgr or kernel cache) and say in *C++ table detail* what
+   was stubbed. Keep a table to a few thousand rows: sample each field's values, do not
+   enumerate their combinations.
+4. Run it at `HEAD`, and on the merged tree when the row is `merged-only` or the target moved
+   rocKE.
+
+Judge every disagreement, naming the function on each side:
+
+| Disagreement | Severity |
+|---|---|
+| A valid row whose values differ | `BLOCKING` |
+| Python refuses, C++ accepts, and no C++ refusal on the engine's call path refuses it first | `BLOCKING` |
+| Python refuses, C++ accepts; a C++ refusal on the engine's call path refuses it first (name it), but the function itself does not enforce the precondition, and some call site outside that guarded path reaches the function (a test included, whatever inputs that call site passes) | `IMPORTANT` |
+| The same, with no call site outside the guarded path | No finding; list it in *C++ table detail* |
+| C++ refuses, Python accepts, on an input the matcher lets through | `IMPORTANT`: the engine declines what rocKE serves |
+| C++ refuses, Python accepts, on an input the matcher refuses first | No finding; list it in *C++ table detail* |
+
+The `IMPORTANT` row applies on purpose to any function a unit test calls directly: a test is a
+caller outside the guarded path, and the finding marks a precondition the function relies on but
+does not check, as `gfx942StridedKvArguments` on #14259 did.
+
+Matchers in `*Native.cpp` need the graph data types, so they get no table: read them by hand and
+say so in *C++ table detail*. Delete the scratch directory when done.
+
+Summarise the outcome on the `C++ tables:` line at the top of the report, beside the two verdict
+lines. `<k>` counts every table with at least one disagreeing row, whatever the judgment, so a
+disagreement judged harmless still shows in the count. For each disagreeing table, the line gives
+the function, what disagrees and the severity. When a row qualified but no table was written, the
+line says `none written` and why.
+
+## Severities
+
+Every judged finding in the report carries one:
+
+| Severity | Use for |
+|---|---|
+| `BLOCKING` | A break on the engine's path: a holding `mismatch` row, a dispatch divergence, values that differ on a valid row, a refusal no C++ check on the engine path restates |
+| `IMPORTANT` | Real risk off the engine's path or not yet reachable: a predicate-table finding that holds, a precondition the function does not enforce while another caller reaches it, the engine declining what rocKE serves |
+| `SUGGESTION` | Anything else worth fixing in code the change touches |
+
+A `changed` row that is consistent is not a finding; it names the device run that settles it.
+
 ## Judging the rows
 
 Read both sides at the head revision, and at the merged tree when the row says `merged-only`, before
@@ -154,3 +278,13 @@ a flags-ON build when one exists), the architecture, and the flags.
   std::vector<KernelArgument> function (its list is built another way): cannot compare`". With
   only the builder edited, a dynamic list gives no pair row. Compare such a list with the builder
   by hand.
+- A predicate table varies one field at a time, so a defect that needs two fields to move
+  together is out of reach, unless one seed already has the other value. It builds the accepted
+  specs but does not lower them, so a builder that only fails in lowering reads clean. It finds
+  inner builders only through the module's own `build_*` globals: a builder imported under
+  another name, or called through a dict, is not tabled.
+- `new` versus `first shipped` reads only the family's source module. A predicate the module
+  imports from elsewhere, edited there by the change, reads `first shipped`. Check where the
+  predicate is defined before calling a `first shipped` finding older.
+- No table, scripted or judge-written, sees a change made in step on both sides: Python and C++
+  still agree. That is a test-quality question.

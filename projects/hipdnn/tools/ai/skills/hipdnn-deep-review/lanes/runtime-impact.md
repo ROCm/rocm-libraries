@@ -42,11 +42,17 @@ searched as copies and readers, so a stale pin or a stale import is yours.
    with its message, and never fold an `emit.json` from an earlier run. Record the flavor it used.
 3. Judge every row whose status is not `inert` or `outside` with the reference's *Judging the
    rows*. Read both sides at `$HEAD` (and the merged tree when the row says `merged-only`) before
-   filing.
-4. End **Checked, no finding** with the rollup line the script printed, corrected by your
-   judgment and saying why when it differs:
+   filing. Judge each predicate-table finding not marked `at_base` with the reference's *Predicate tables*.
+   For each `changed` `launch_surface` row whose C++ side is a header-only, HIP-free function, write
+   the throwaway C++ table of the reference's *C++ differential tables* in `$SCRATCH/IMPACT/`
+   when `Build host: yes`. Keep its driver and output under `lanes/IMPACT-evidence/`.
+4. End **Checked, no finding** with the two lines the script printed last, each corrected by your
+   judgment and saying why when it differs: the `Pack-time:` line (`NEW <n>`, `FIRST-SHIPPED <n>`,
+   `CLEAN` or `NOT RUN`; see the reference's *Predicate tables*), then
    `Runtime impact: BREAKS | NEEDS-DEVICE <arch: suite, ...> | NONE (<n> files inspected) | N/A (no surface file)`,
-   keeping any `not judged here:` note the script added.
+   keeping any `not judged here:` note the script added. Follow them with your own
+   `C++ tables: <k> of <n> disagree (...) | <n> written, all agree | none written (<why>)` line, so a
+   qualifying row with no table is visible.
 
 ## From row to finding
 
@@ -56,6 +62,8 @@ searched as copies and readers, so a stale pin or a stale import is yours.
 | A dispatch divergence | A `source-claim` at `IMPORTANT` or higher, quoting both sides |
 | A descriptor or generic-target value the loader rejects or ignores | A finding, citing the loader rule |
 | No break (`changed` but consistent), `inert`, `outside` | No finding. Count them under **Checked, no finding**; list each `inert` reason once |
+| A predicate-table finding in state `new` or `first shipped` that holds | A `defect` at `IMPORTANT`: the packer accepts a spec its builder rejects, or a value the kernel cannot use. For `first shipped`, say the predicate is older and ships for the first time. **Proof**: the table's row (predicate, field, values, seed, the builder's error). A finding `at base` predates the change: `FUTURE WORK` at most |
+| A C++ table disagreement that holds | A `source-claim`: `BLOCKING` when a valid row's values differ, or when no C++ refusal on the engine's call path refuses a row Python refuses. `IMPORTANT` when the engine path refuses it but the header's own function does not, and another caller reaches the function directly. **Proof**: the harness, the driver command and the disagreeing rows |
 
 For every `changed` row without a finding, put the device run the reference says to name under
 **Approval requests**, and add `AUTH: requires <arch> <suite> with the ingestor flags ON` under

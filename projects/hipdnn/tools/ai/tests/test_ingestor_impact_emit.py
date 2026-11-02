@@ -115,6 +115,62 @@ def module_files(**kw):
     return files
 
 
+# The packer's predicate lookup in miniature: `supports_<builder minus build_>`.
+RESOLVER = """
+def _resolve_support_predicate(module, builder):
+    name = "supports_" + builder[len("build_"):]
+    fn = getattr(module, name, None)
+    return (name, fn) if callable(fn) else (None, None)
+"""
+
+
+def table_builder_src(reduce_check="spec.n % 8 == 0"):
+    """A KernelModule builder for the predicate tables. Its predicate accepts any positive
+    tile, but the builder asserts the tile divides the block. Its `reduce` companion's spec
+    shares the field `n` (8 times the primary's), its predicate is REDUCE_CHECK, and the
+    primary's predicate refuses n <= 0."""
+    return textwrap.dedent(
+        f"""
+        import dataclasses
+        from rocke.helpers import KernelModule
+
+        @dataclasses.dataclass(frozen=True)
+        class Spec:
+            n: int = 1
+            block: int = 32
+            tile: int = 16
+
+        @dataclasses.dataclass(frozen=True)
+        class RSpec:
+            n: int = 8
+
+        def supports_fake(spec, arch="x"):
+            return spec.n >= 1 and spec.block >= 1 and spec.tile >= 1, "ok"
+
+        def supports_reduce(spec, arch="x"):
+            return {reduce_check}, "ok"
+
+        def build_reduce(spec, arch):
+            return {{"params": [("out", "ptr addrspace(1)")], "body": "r"}}
+
+        def build_fake(spec, arch):
+            assert spec.block % spec.tile == 0, "tile must divide block"
+            p = [("q", "ptr addrspace(1)"), ("n", "i32")]
+            return KernelModule({{"params": p, "body": "v1"}},
+                                {{"reduce": build_reduce(RSpec(n=8 * spec.n), arch=arch)}})
+        """
+    )
+
+
+def table_files(**kw):
+    files = module_files()
+    files[f"{PROVIDER}/descriptor-packaging/python/hkp_pack/rocke_compile.py"] = (
+        HELPERS + RESOLVER
+    )
+    files[BUILDER] = table_builder_src(**kw)
+    return files
+
+
 KDP_VARIANTS = ({"name": "v_a", "spec": {"n": 1}}, {"name": "v_b", "spec": {"n": 2}})
 
 
@@ -246,6 +302,8 @@ def scenarios():
     s["module"] = module_files()
     s["module_wide"] = module_files(reduce_params=[("lse", "ptr addrspace(1)")])
     s["module_body"] = module_files(reduce_body="r2")
+    s["tables"] = table_files()
+    s["tables_fixed"] = table_files(reduce_check="spec.n >= 1 and spec.n % 8 == 0")
     return s
 
 
@@ -359,7 +417,7 @@ def test_extra_param_lists_every_variant_and_shows_head_list(emit, repo, tmp_pat
 def test_body_only_change_is_ir_changed_not_params(emit, repo, tmp_path):
     rc, doc = run(emit, repo, "base", "body", tmp_path)
     assert rc == 0
-    assert doc["schema"] == 4
+    assert doc["schema"] == 5
     # the recorded ids are the real tree ids, and differ when the sides differ
     assert doc["base_tree"] == git_out(repo, "rev-parse", "base^{tree}")
     assert doc["head_tree"] == git_out(repo, "rev-parse", "body^{tree}")
@@ -389,6 +447,67 @@ def test_kernel_module_builder_records_and_compares_every_launch(
     assert f["companions"]["head"] == {"reduce": reduce}
     assert f["params_changed"] == params_changed
     assert f["ir_changed"] == ir_changed
+
+
+def findings_of(doc):
+    """{(inner builder or "", check, field): finding} over every predicate table."""
+    return {
+        (t["inner"], f["check"], f["field"]): f
+        for t in doc["predicate_tables"]
+        for f in t["findings"]
+    }
+
+
+def test_predicate_tables_flag_what_the_builder_rejects_and_a_companion_sign_gap(
+    emit, repo, tmp_path
+):
+    # catches: a predicate that accepts a tile the builder asserts on (#14259 S-1), and a
+    # companion predicate that accepts n <= 0 where the module's own predicate refuses it
+    # (#14242 r4385341723), reported as nothing; or a field every predicate guards flagged
+    _, doc = run(emit, repo, "module", "tables", tmp_path)
+    found = findings_of(doc)
+    assert set(found) == {("", "builder", "tile"), ("build_reduce", "sign", "n")}
+    tile = found["", "builder", "tile"]
+    assert 24 in tile["values"] and "AssertionError" in tile["detail"]
+    assert set(found["build_reduce", "sign", "n"]["values"]) == {-16, -8, 0}
+    # the base's tables could not run (no resolver there): nothing predates the change, and
+    # no table counts as tabled at base
+    assert not any(f["at_base"] for f in found.values())
+    assert not any(t["at_base"] for t in doc["predicate_tables"])
+    (main,) = [t for t in doc["predicate_tables"] if not t["inner"]]
+    assert (main["predicate"], main["skipped"], main["truncated"]) == (
+        "supports_fake",
+        "",
+        False,
+    )
+
+
+def test_predicate_table_findings_also_at_base_are_pre_existing_and_a_fix_clears_one(
+    emit, repo, tmp_path
+):
+    # catches: a finding the base already had reported as new, or one the head fixed kept
+    _, doc = run(emit, repo, "tables", "tables", tmp_path)
+    assert all(t["at_base"] for t in doc["predicate_tables"])
+    assert all(f["at_base"] for f in findings_of(doc).values())
+    _, doc = run(emit, repo, "tables", "tables_fixed", tmp_path)
+    found = findings_of(doc)
+    assert (
+        set(found) == {("", "builder", "tile")}
+        and found["", "builder", "tile"]["at_base"]
+    )
+
+
+def test_predicate_tables_say_why_they_did_not_run_and_stop_at_their_budget(
+    emit, repo, tmp_path, monkeypatch
+):
+    # catches: a revision without the packer's resolver read as "no findings", or a table
+    # that runs past its budget instead of stopping and saying so
+    _, doc = run(emit, repo, "base", "base", tmp_path)
+    (t,) = doc["predicate_tables"]
+    assert t["skipped"].startswith("hkp_pack has no _resolve_support_predicate")
+    monkeypatch.setenv("IMPACT_EMIT_TABLE_SECONDS", "0")
+    _, doc = run(emit, repo, "tables", "tables", tmp_path)
+    assert all(t["truncated"] and t["rows"] == 0 for t in doc["predicate_tables"])
 
 
 def test_removed_variant_is_only_in_base_and_unchanged_one_is_not_flagged(

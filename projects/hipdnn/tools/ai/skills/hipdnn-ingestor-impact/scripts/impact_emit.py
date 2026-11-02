@@ -27,6 +27,18 @@ target (`gfx11-generic`), so the shard arches that share it collapse into one fa
 differs, so it includes `params_changed`. A variant that fails to build is recorded under
 `failures` and takes no part in the comparison.
 
+Predicate tables (`predicate_tables`, head side). For each family's builder, and for each other
+`build_*` function of its module that the builds called (a KernelModule's kernel builders), the
+child takes the shipped specs (for an inner builder: the specs the builds passed it), varies one
+int or bool field at a time from up to four seeds (the shipped values, 0, -1, and the negation,
+double, half and 1.5 times of each shipped positive value), and asks the predicate the packer
+resolves (`_resolve_support_predicate`). An accepted spec that the builder raises on is a
+`builder` finding. Between two builders of one family, a value outside the sign range of every
+shipped value (<= 0 where all are >= 1, < 0 where all are >= 0) of a field they share that one
+predicate accepts and the other refuses is a `sign` finding on the one that accepts. A finding
+the base's table also has (same check, same field) is marked `at_base`. A family's tables stop
+after `IMPACT_EMIT_TABLE_SECONDS` (default 60) and say `truncated`.
+
 The flavor defaults to the newest flavor the head and the base both know (the top rung
 of `_LLVM_FLAVOR_LADDER` in `rocke/platform/python/rocke/core/lower_llvm.py`, else the last
 of `LLVM_FLAVORS`); with none shared it is the head's newest and the base fails loudly.
@@ -39,7 +51,9 @@ it found; 1 with one line `impact_emit: <reason>` on stderr when it could not ru
 
 import argparse
 import ast
+import dataclasses
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -51,6 +65,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -458,6 +473,9 @@ class _Helpers:
         self.kernel_module = KernelModule
         self.require_arch_sig = getattr(rc, "_require_spec_arch_signature", None)
         self.check_predicate = getattr(rc, "_check_support_predicate", None)
+        # The packer's own predicate lookup (alias, derived name, then is_valid*), which the
+        # predicate tables reuse so they test the predicate the packer would consult.
+        self.resolve_predicate = getattr(rc, "_resolve_support_predicate", None)
         # The packer's lowering backend; a tree without the pin is taken as Python.
         backend = getattr(rc, "_BACKEND", "python")
         if backend != "python":
@@ -499,7 +517,33 @@ def _compile_arch(h, shard, target):
     return shard
 
 
-def _build_one(h, v, arch):
+def _record_inner_builders(module, shipped):
+    """Wrap MODULE's other `build_*` functions so each call records (name, spec) while the
+    shipped builder runs; returns (calls, restore). A KernelModule builder reaches its kernels'
+    builders through the module's globals, so this sees the spec of every companion launch.
+    """
+    calls, saved = [], {}
+    for name, obj in list(vars(module).items()):
+        if name.startswith("build_") and name != shipped and inspect.isfunction(obj):
+
+            def recorder(*args, _name=name, _fn=obj, **kwargs):
+                if args:
+                    calls.append((_name, args[0]))
+                return _fn(*args, **kwargs)
+
+            saved[name] = obj
+            setattr(module, name, recorder)
+
+    def restore():
+        for name, obj in saved.items():
+            setattr(module, name, obj)
+
+    return calls, restore
+
+
+def _build_one(h, v, arch, capture=None):
+    """Build and lower one variant. CAPTURE, a dict, receives the module, the spec object
+    and the (inner builder, spec) calls the build made, for the predicate tables."""
     from importlib import import_module
 
     module = import_module(h.module_from_source(v["source"]))
@@ -510,7 +554,13 @@ def _build_one(h, v, arch):
     obj = h.build_spec(cls, v["spec"])
     if callable(h.check_predicate):
         h.check_predicate(module, v["builder"], obj, arch)
-    kd = fn(obj, arch=arch)
+    calls, restore = _record_inner_builders(module, v["builder"])
+    try:
+        kd = fn(obj, arch=arch)
+    finally:
+        restore()
+    if capture is not None:
+        capture.update(module=module, spec=obj, inner=calls)
     # A KernelModule is lowered kernel by kernel, as the packer's `compile_module` does; each
     # companion is its own launch with its own kernarg list.
     is_module = h.kernel_module is not None and isinstance(kd, h.kernel_module)
@@ -536,6 +586,247 @@ def _build_one(h, v, arch):
     return built
 
 
+# ------------------------------------------------------------ predicate tables (child)
+
+#: Seeds per table, and how many distinct shipped values of one int field seed its domain.
+_TABLE_SEEDS = 4
+_TABLE_BASE_INTS = 6
+
+
+def _spec_key(spec):
+    return repr(dataclasses.asdict(spec))
+
+
+def _domains(specs):
+    """{field: (kind, shipped ints)} for the int and bool fields of the shipped specs. An int
+    field may also be None in some specs (an Optional override)."""
+    out = {}
+    for f in dataclasses.fields(specs[0]):
+        vals = [getattr(s, f.name, None) for s in specs]
+        ints = sorted({x for x in vals if type(x) is int})
+        if ints and all(x is None or type(x) is int for x in vals):
+            out[f.name] = ("int", ints)
+        elif all(type(x) is bool for x in vals):
+            out[f.name] = ("bool", [])
+    return out
+
+
+def _candidates(kind, ints):
+    """Values to try for one field: the shipped ones, 0, -1, and around each shipped positive
+    value its negation, double, half and one and a half times."""
+    if kind == "bool":
+        return [False, True]
+    pos = [x for x in ints if x > 0]
+    if len(pos) > _TABLE_BASE_INTS:
+        pos = sorted(set(pos[:4] + pos[-2:]))
+    out = set(ints if len(ints) <= _TABLE_BASE_INTS else pos) | {0, -1}
+    for x in pos:
+        out |= {-x, 2 * x, x // 2, x + x // 2}
+    return sorted(out)
+
+
+def _seeds(specs, domains):
+    """Up to _TABLE_SEEDS shipped specs, picked greedily to cover the most (field, value) pairs."""
+    chosen, seen, pool = [], set(), list(specs)
+    while pool and len(chosen) < _TABLE_SEEDS:
+        best = max(
+            pool, key=lambda s: len({(f, repr(getattr(s, f))) for f in domains} - seen)
+        )
+        gain = {(f, repr(getattr(best, f))) for f in domains} - seen
+        if chosen and not gain:
+            break
+        chosen.append(best)
+        seen |= gain
+        pool.remove(best)
+    return chosen
+
+
+def _verdict(pred, spec, kw):
+    res = pred(spec, **kw)
+    return bool(res[0]) if isinstance(res, tuple) else bool(res)
+
+
+def _where(exc):
+    """`file:line` of the frame that raised EXC."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    return f"{Path(frames[-1].filename).name}:{frames[-1].lineno}" if frames else "?"
+
+
+class _Table:
+    """One builder's table: the record that goes into the emit file, and what the
+    same-module sign check needs (the predicate, its first seed, the field domains)."""
+
+    def __init__(self, name):
+        self.name = name
+        self.record = {
+            "predicate": "",
+            "rows": 0,
+            "skipped": "",
+            "truncated": False,
+            "findings": [],
+        }
+        self.found = {}
+        self.pred = self.kw = self.seeds = self.domains = None
+
+    def note(self, check, field, value, seed, detail):
+        f = self.found.setdefault(
+            (check, field),
+            {
+                "check": check,
+                "field": field,
+                "values": [],
+                "seed": ", ".join(f"{k}={getattr(seed, k)!r}" for k in self.domains)[
+                    :300
+                ],
+                "detail": detail,
+            },
+        )
+        if value not in f["values"] and len(f["values"]) < 8:
+            f["values"].append(value)
+
+    def accepts(self, seed, field, value):
+        """The predicate's verdict on SEED with FIELD set to VALUE; a spec that cannot be
+        constructed, or a predicate that raises, is no acceptance."""
+        try:
+            return _verdict(
+                self.pred, dataclasses.replace(seed, **{field: value}), self.kw
+            )
+        except Exception:
+            return False
+
+    def finish(self):
+        self.record["findings"] = sorted(
+            self.found.values(), key=lambda f: (f["check"], f["field"])
+        )
+        for f in self.record["findings"]:
+            f["values"].sort(key=lambda v: (type(v) is bool, v))
+        return self.record
+
+
+def _predicate_table(h, module, name, catalog, arch, deadline):
+    """The table of one builder: its shipped specs varied one field at a time, each variation
+    put to the predicate the packer would consult. A spec the predicate accepts is built; a
+    builder that raises on it is a `builder` finding."""
+    t = _Table(name)
+    rec = t.record
+    if not callable(h.resolve_predicate):
+        rec["skipped"] = "hkp_pack has no _resolve_support_predicate at this revision"
+        return t
+    try:
+        pname, pred = h.resolve_predicate(module, name)
+    except Exception as e:
+        rec["skipped"] = f"predicate lookup raised {type(e).__name__}: {str(e)[:200]}"
+        return t
+    if pred is None:
+        rec["skipped"] = "no support predicate takes its spec"
+        return t
+    rec["predicate"] = pname
+    specs = list({_spec_key(s): s for s in catalog}.values()) if catalog else []
+    if not specs or not all(
+        dataclasses.is_dataclass(s) and not isinstance(s, type) for s in specs
+    ):
+        rec["skipped"] = "no shipped spec, or a spec that is not a dataclass instance"
+        return t
+    t.domains = _domains(specs)
+    t.seeds = _seeds(specs, t.domains)
+    t.pred = pred
+    t.kw = {"arch": arch} if "arch" in inspect.signature(pred).parameters else {}
+    fn = getattr(module, name)
+    bkw = {"arch": arch} if "arch" in inspect.signature(fn).parameters else {}
+    for seed in t.seeds:
+        for field, (kind, ints) in t.domains.items():
+            for value in _candidates(kind, ints):
+                current = getattr(seed, field)
+                if value == current and type(value) is type(current):
+                    continue
+                if time.time() >= deadline:
+                    rec["truncated"] = True
+                    break
+                try:
+                    spec = dataclasses.replace(seed, **{field: value})
+                    accepted = _verdict(pred, spec, t.kw)
+                except Exception:
+                    continue  # refused at construction, or the predicate has no verdict
+                rec["rows"] += 1
+                if not accepted:
+                    continue
+                try:
+                    fn(spec, **bkw)
+                except Exception as e:
+                    t.note("builder", field, value, seed,
+                           f"{pname} accepts it; {name} raises {type(e).__name__}: {str(e)[:200]} at {_where(e)}")  # fmt: skip
+    return t
+
+
+def _same_module_signs(tables, deadline):
+    """`sign` findings between the tables of one family (a KernelModule's builders): for a
+    field two of them share, a value outside the sign range of every shipped value (<= 0 where
+    all are >= 1, < 0 where all are >= 0) that one predicate accepts and the other refuses.
+    """
+    live = [t for t in tables if t.pred is not None and t.seeds]
+    for a in live:
+        for b in live:
+            if a is b:
+                continue
+            for field, (kind, ints_a) in a.domains.items():
+                kind_b, ints_b = b.domains.get(field, (None, []))
+                if kind != "int" or kind_b != "int":
+                    continue
+                low = min(ints_a[0], ints_b[0])
+                if low < 0:
+                    continue
+                values = sorted(
+                    v
+                    for v in set(_candidates("int", ints_a))
+                    | set(_candidates("int", ints_b))
+                    if v < 0 or (low >= 1 and v == 0)
+                )
+                for v in values:
+                    if time.time() >= deadline:
+                        a.record["truncated"] = True
+                        return
+                    if a.accepts(a.seeds[0], field, v) and not b.accepts(
+                        b.seeds[0], field, v
+                    ):
+                        a.note("sign", field, v, a.seeds[0],
+                               f"{a.record['predicate']} accepts {field}={v}; {b.record['predicate']}, the predicate of "
+                               f"{b.name} in the same module, refuses it; every shipped value is >= {low}")  # fmt: skip
+
+
+def _tables(h, fams, captures):
+    """One table per family's shipped builder and per inner builder its builds called."""
+    seconds = float(os.environ.get("IMPACT_EMIT_TABLE_SECONDS", "60"))
+    out = []
+    for key, fam in fams.items():
+        got = captures.get(key)
+        if not got:
+            continue
+        module = got["module"]
+        inner = {}
+        for name, spec in got["inner"]:
+            inner.setdefault(name, []).append(spec)
+        deadline = time.time() + seconds
+        tables = [
+            _predicate_table(h, module, name, catalog, fam["arch"], deadline)
+            for name, catalog in [
+                (fam["builder"], got["specs"]),
+                *sorted(inner.items()),
+            ]
+        ]
+        _same_module_signs(tables, deadline)
+        for t in tables:
+            out.append(
+                {
+                    "arch": fam["arch"],
+                    "source": fam["source"],
+                    "builder": fam["builder"],
+                    "inner": "" if t.name == fam["builder"] else t.name,
+                    **t.finish(),
+                }
+            )
+    return out
+
+
 def child_main(root, out):
     # The script's own directory must not shadow rocKE modules.
     here = str(Path(__file__).resolve().parent)
@@ -543,7 +834,7 @@ def child_main(root, out):
     t0 = time.time()
     variants, skipped = _discover(root)
     h = _Helpers()
-    fams, specs = {}, {}
+    fams, specs, captures = {}, {}, {}
     # One family per (compile arch, source, builder): the packer compiles once per
     # compile arch, so shard arches that share a generic target collapse into one family.
     for v in variants:
@@ -586,11 +877,19 @@ def child_main(root, out):
                 fam["failures"][v["name"]] = err
                 continue
             try:
-                fam["built"][v["name"]] = _build_one(h, v, carch)
+                capture = {}
+                fam["built"][v["name"]] = _build_one(h, v, carch, capture)
             except Exception as e:
                 fam["failures"][v["name"]] = f"{type(e).__name__}: {str(e)[:300]}"
+                continue
+            got = captures.setdefault(
+                key, {"module": capture["module"], "specs": [], "inner": []}
+            )
+            got["specs"].append(capture["spec"])
+            got["inner"] += capture["inner"]
     doc = {
         "families": list(fams.values()),
+        "tables": _tables(h, fams, captures),
         "not_inspected": skipped,
         "seconds": round(time.time() - t0, 1),
     }
@@ -784,6 +1083,33 @@ def compare(base_side, head_side):
     return out
 
 
+def compare_tables(base_side, head_side):
+    """The head's predicate tables. `at_base` on a table says the base ran the same builder's
+    table (it was shipped and tabled there); on a finding, that the base's table has a finding of
+    the same check on the same field, so it predates the change. A builder the base did not
+    table can carry an old predicate defect that ships for the first time."""
+
+    def key(t):
+        return (t["arch"], t["source"], t["builder"], t["inner"])
+
+    seen = {
+        key(t): {(f["check"], f["field"]) for f in t["findings"]}
+        for t in base_side.get("tables", [])
+        if not t["skipped"]
+    }
+    return [
+        {
+            **t,
+            "at_base": key(t) in seen,
+            "findings": [
+                {**f, "at_base": (f["check"], f["field"]) in seen.get(key(t), set())}
+                for f in t["findings"]
+            ],
+        }
+        for t in head_side.get("tables", [])
+    ]
+
+
 def cmd_run(a):
     repo = Path(a.repo)
     if not repo.is_dir():
@@ -798,6 +1124,7 @@ def cmd_run(a):
         fh = pool.submit(run_side, repo, a.head, head_tree, flavor, a.timeout, "head")
         base_side, head_side = fb.result(), fh.result()
     families = compare(base_side, head_side)
+    tables = compare_tables(base_side, head_side)
     not_inspected = [
         {"kdp": n["kdp"], "side": side, "reason": n["reason"]}
         for side, doc in (("base", base_side), ("head", head_side))
@@ -805,7 +1132,7 @@ def cmd_run(a):
     ]
     seconds = round(time.time() - t0, 1)
     doc = {
-        "schema": 4,
+        "schema": 5,
         "tool": "impact_emit",
         "flavor": flavor,
         "base": a.base,
@@ -813,6 +1140,7 @@ def cmd_run(a):
         "base_tree": base_tree,
         "head_tree": head_tree,
         "families": families,
+        "predicate_tables": tables,
         "not_inspected": not_inspected,
         "seconds": seconds,
     }
@@ -833,6 +1161,13 @@ def cmd_run(a):
         )
     for n in not_inspected:
         print(f"not inspected [{n['side']}] {n['kdp']}: {n['reason']}")
+    for t in tables:
+        who = t["builder"] + (f"[{t['inner']}]" if t["inner"] else "")
+        state = t["skipped"] or (
+            f"{t['rows']} rows, {len(t['findings'])} findings"
+            + (", truncated" if t["truncated"] else "")
+        )
+        print(f"table {t['arch']} {t['source']}:{who}: {state}")
     print(f"flavor {flavor}, {len(families)} families, {seconds}s")
     return 0
 

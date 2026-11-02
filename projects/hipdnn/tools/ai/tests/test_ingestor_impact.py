@@ -514,15 +514,102 @@ def family(**fields) -> dict:
     return fam
 
 
-def write_emit(path, repo, base, head, families=None, **fields):
+def write_emit(path, repo, base, head, families=None, tables=(), **fields):
     """An impact_emit document made for base..head, holding `families` (default: one family
-    built from `fields`)."""
-    doc = {"schema": 4, "tool": "impact_emit", "flavor": "llvm23", "base": base, "head": head,
+    built from `fields`) and the predicate `tables`."""
+    doc = {"schema": 5, "tool": "impact_emit", "flavor": "llvm23", "base": base, "head": head,
            "base_tree": tree_of(repo, base), "head_tree": tree_of(repo, head),
            "families": [family(**fields)] if families is None else families,
-           "not_inspected": [], "seconds": 1.0}  # fmt: skip
+           "predicate_tables": list(tables), "not_inspected": [], "seconds": 1.0}  # fmt: skip
     Path(path).write_text(json.dumps(doc), encoding="utf-8")
     return str(path)
+
+
+def table(findings=(), **fields) -> dict:
+    """One predicate table of the builder, tabled at base too, holding `findings`."""
+    t = dict(arch="gfx950", source="kernels/gfx950/attn.py", builder="build_attn", inner="",
+             predicate="supports_attn", rows=12, skipped="", truncated=False, at_base=True,
+             findings=list(findings))  # fmt: skip
+    t.update(fields)
+    return t
+
+
+def finding(check="builder", field="tile", at_base=False, **fields) -> dict:
+    f = dict(check=check, field=field, values=[24], seed="tile=16", at_base=at_base,
+             detail="supports_attn accepts it; build_attn raises AssertionError: tile")  # fmt: skip
+    f.update(fields)
+    return f
+
+
+def test_predicate_tables_are_listed_new_first_and_never_move_a_row_or_the_rollup(
+    mod, capsys, tmp_path
+):
+    # catches: a pack-time table finding turned into a row (changing the rollup), a
+    # pre-existing finding, or an older one on a builder that first ships now, counted as new,
+    # a finding on a builder the change edits counted as an older one, or the tables dropped
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON})
+    head = commit(repo, {BUILDER: BODY_EDIT})  # edits build_attn
+    plain = write_emit(tmp_path / "plain.json", repo, base, head)
+    tables = [table([finding(at_base=True, field="n", check="sign", values=[0, -1])]),
+              table([finding(field="block")], inner="build_new", at_base=False),
+              table([finding(field="k")], at_base=False),
+              table([finding()], inner="build_reduce", predicate="supports_reduce")]  # fmt: skip
+    with_tables = write_emit(tmp_path / "t.json", repo, base, head, tables=tables)
+    a = report(mod, capsys, repo, base, head, "--emit", plain)
+    b = report(mod, capsys, repo, base, head, "--emit", with_tables)
+    assert (a["rows"], a["rollup"]) == (b["rows"], b["rollup"])
+    assert b["predicate_tables"] == tables and a["predicate_tables"] == []
+    argv = [
+        "report",
+        "--repo",
+        str(repo),
+        "--base",
+        base,
+        "--head",
+        head,
+        "--emit",
+        with_tables,
+    ]
+    assert mod.main(argv) == 0
+    text = capsys.readouterr().out
+    assert "2 new, 1 first shipped, 1 at base" in text
+    new_tabled = text.index("| tile | 24 | new |")
+    new_edited = text.index("| k | 24 | new |")
+    first_ship = text.index("| block | 24 | first shipped |")
+    old = text.index("| sign | n | 0, -1 | at base |")
+    assert (
+        max(new_tabled, new_edited) < first_ship < old < text.index("Runtime impact:")
+    )
+    # the pack-time line sits right above the runtime verdict, which stays the last line
+    assert text.rstrip().splitlines()[-2:] == [
+        "Pack-time: NEW 2, FIRST-SHIPPED 1",
+        b["rollup"],
+    ]
+    assert b["pack_time"] == "Pack-time: NEW 2, FIRST-SHIPPED 1"
+    assert a["pack_time"] == "Pack-time: NOT RUN (no shipped rocKE builder to table)"
+    static = report(mod, capsys, repo, base, head)
+    assert static["pack_time"] == "Pack-time: NOT RUN (emitter not run)"
+
+
+@pytest.mark.parametrize(
+    "tables, line",
+    [
+        ([table([finding(at_base=True)])], "Pack-time: CLEAN (1 tables)"),
+        ([table([finding(at_base=False)], at_base=False)], "Pack-time: FIRST-SHIPPED 1"),
+        ([table([finding()]), table(skipped="no support predicate takes its spec")],
+         "Pack-time: NEW 1; not run for 1 of 2 tables (no support predicate takes its spec)"),
+        ([table(), table(truncated=True)],
+         "Pack-time: NOT RUN for 1 of 2 tables (truncated); no finding in the rest"),
+    ],
+    ids=["pre-existing-only-is-clean", "first-shipped", "new-with-a-skipped-table",
+         "truncated-is-never-clean"],
+)  # fmt: skip
+def test_pack_time_line_counts_only_what_the_change_ships_and_never_reads_clean_unrun(
+    mod, tables, line
+):
+    # catches: a pre-existing finding counted as new, a newly shipped older defect hidden,
+    # or a skipped or truncated table reported as CLEAN
+    assert mod.pack_time(tables) == line
 
 
 def test_emit_fold_equal_variants_make_shipped_module_edits_inert(
@@ -659,7 +746,7 @@ def test_emit_made_for_another_base_or_head_is_refused(mod, capsys, tmp_path):
 @pytest.mark.parametrize(
     "spoil",
     [
-        lambda d: d.update(schema=3),
+        lambda d: d.update(schema=4),
         lambda d: d.update(not_inspected={}),
         lambda d: d["families"][0].update(failures=[]),
         lambda d: d["families"][0].pop("variants"),
@@ -668,15 +755,27 @@ def test_emit_made_for_another_base_or_head_is_refused(mod, capsys, tmp_path):
         lambda d: d["families"][0].update(
             companions={"base": None, "head": {"reduce": None}}
         ),
+        lambda d: d.pop("predicate_tables"),
+        lambda d: d.update(predicate_tables=[table([finding(check="maybe")])]),
+        lambda d: d.update(predicate_tables=[table([finding(values=["24"])])]),
+        lambda d: d.update(predicate_tables=[table(rows=None)]),
+        lambda d: d.update(
+            predicate_tables=[{k: v for k, v in table().items() if k != "at_base"}]
+        ),
     ],
     ids=[
-        "schema-3-without-companions",
+        "schema-4-without-tables",
         "not-inspected-dict",
         "failures-list",
         "no-variants",
         "params-str",
         "no-companions",
         "companion-without-params",
+        "no-predicate-tables",
+        "table-finding-unknown-check",
+        "table-finding-str-value",
+        "table-without-rows",
+        "table-without-at-base",
     ],
 )
 def test_malformed_emit_exits_one_instead_of_folding_or_crashing(

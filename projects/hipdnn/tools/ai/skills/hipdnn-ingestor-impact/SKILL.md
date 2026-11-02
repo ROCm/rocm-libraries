@@ -1,6 +1,6 @@
 ---
 name: hipdnn-ingestor-impact
-description: "Check whether a rocm-libraries change (PR, branch, commit range or uncommitted work) breaks the hipDNN kernel ingestor at run time while the default build stays green: kernel argument lists (ABI) out of step with their C++ and test copies, also against the target branch's tip, dispatch and launch-surface edits, descriptor and generic-target changes, removed Python symbols still read, and which shipped rocKE variants' emitted code changed. Reads git objects; the optional emitter runs rocKE on the CPU. Ends in a Runtime impact: BREAKS | NEEDS-DEVICE | NONE | N/A line. For a full multi-agent review, use hipdnn-deep-review, whose IMPACT lane runs the same scripts."
+description: "Check whether a rocm-libraries change (PR, branch, commit range or uncommitted work) breaks the hipDNN kernel ingestor at run time while the default build stays green: kernel argument lists (ABI) out of step with their C++ and test copies, also against the target branch's tip, dispatch and launch-surface edits, descriptor and generic-target changes, removed Python symbols still read, which shipped rocKE variants' emitted code changed, support predicates that accept specs their builders reject, and C++ restatements whose values or refusals differ from Python's. Reads git objects; the optional emitter runs rocKE on the CPU. Ends in a Runtime impact: BREAKS | NEEDS-DEVICE | NONE | N/A line. For a full multi-agent review, use hipdnn-deep-review, whose IMPACT lane runs the same scripts."
 argument-hint: "[<PR number> | branch:<name> | <base>..<head> | commit:<sha> | worktree] [emit]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
@@ -13,13 +13,15 @@ suggest it for any change under `dnn-providers/hip-kernel-provider/`, the SDK in
 [reference.md](reference.md) holds the contracts, row statuses, emitter rules and known gaps; read
 it before judging rows.
 
-The answer is advisory. It never builds, runs tests, dispatches CI or posts anything.
+The answer is advisory. It never builds the product, runs its tests, dispatches CI or posts
+anything; the only thing it compiles is the throwaway C++ table of step 6.
 
 ## Prerequisites
 
 `git` 2.38 or later (`merge-tree --write-tree`), Python 3.10 or newer and PyYAML; the emitter also
 needs Jinja2. Run from a rocm-libraries clone or worktree. On Windows, `python3` is often the
-Microsoft Store stub: use `python` or `py -3`.
+Microsoft Store stub: use `python` or `py -3`. The optional C++ tables (step 6) need a host C++
+compiler; on Windows, the ROCm wheel's `clang++` with the MSVC `INCLUDE` and `LIB` set.
 
 ## Workflow
 
@@ -49,11 +51,13 @@ Microsoft Store stub: use `python` or `py -3`.
    python3 <skill-directory>/scripts/impact.py report --repo . --base <BASE> --head <HEAD> --target-tip <TIP>
    ```
 
-   Exit 1 means it could not run: report its message, never a verdict.
+   Exit 1 means it could not run: report its message, never a verdict. The commands here write
+   `python3`; on Windows use `python` or `py -3` (see *Prerequisites*).
 
 4. **Run the emitter** when any rocKE or `hkp_pack` Python file changed in code, including rows the
    report calls `inert`, or when the user asks for `emit`. It builds every shipped variant at both
-   sides on two CPU workers for a few minutes; on a shared host, run one at a time. Put its output
+   sides on two CPU workers for a few minutes, then puts each builder's support predicate to a
+   table ([reference.md](reference.md) *Predicate tables*); on a host that other people or agents use at the same time, run one emitter at a time. Put its output
    outside the repository and delete any earlier file first:
 
    ```bash
@@ -67,14 +71,24 @@ Microsoft Store stub: use `python` or `py -3`.
 
 5. **Judge every row** whose status is not `inert` or `outside`, with
    [reference.md](reference.md) *Judging the rows*. Read both sides at `<HEAD>` (`git show
-   <HEAD>:<path>`), and at the merged tree when the row says `merged-only`.
+   <HEAD>:<path>`), and at the merged tree when the row says `merged-only`. Judge each predicate
+   table finding not marked `at_base` with *Predicate tables*.
 
-6. **Report** in the format below.
+6. **Write a C++ table** for each `changed` `launch_surface` row whose C++ side is a header-only,
+   HIP-free function, when a host compiler is available: [reference.md](reference.md) *C++
+   differential tables*. Work in a scratch directory outside the repository and delete it after.
+   A row whose C++ side is a matcher in `*Native.cpp` gets no table: read it by hand and say so in
+   *C++ table detail*. When a row qualifies but no table can be written (no compiler, the Python
+   side cannot be imported), say so on the report's `C++ tables:` line rather than leaving it out.
+
+7. **Report** in the format below.
 
 ## Report
 
 ```markdown
 Runtime impact: <rollup as printed>  (judged: <rollup after judgment, with why when it differs>)
+Pack-time: <line as printed>  (judged: <how many findings hold, and why any do not>)
+C++ tables: <k> of <n> tables disagree (<function>: <what disagrees>, <severity>; ...) | <n> written, all agree | none written (<why>)
 Analysed: <BASE>..<HEAD>  target tip: <TIP or none>  emitter: <flavor, or not run and why>
 
 | Row | Status | Judgment | Evidence (path:line at HEAD or merged tree) |
@@ -82,9 +96,19 @@ Analysed: <BASE>..<HEAD>  target tip: <TIP or none>  emitter: <flavor, or not ru
 Device runs that would settle the changed rows
 - <ctest entry> on <arch> with the ingestor, rocKE and SDPA flags ON
 
-Not judged here: <the note the script printed, or none>
+Predicate tables: <the section's count line, or "emitter not run">
+| Builder | Check | Field | Values | State (new, first shipped, at base) | Judgment |
+
+C++ table detail: <per table: the pair, rows, each disagreement and its judgment; or none>
+
+Not judged here: <the note the script printed (it prints one only with NONE or N/A), or none>
 Known gaps that apply: <from reference.md, or none>
 ```
+
+`<k>` on the `C++ tables:` line counts every table with at least one disagreeing row, whatever the
+judgment; the judgment and severity follow in the parenthesis. Every judged finding (a row, a
+predicate-table finding, a C++ table disagreement) carries a severity from
+[reference.md](reference.md) *Severities*: `BLOCKING`, `IMPORTANT` or `SUGGESTION`.
 
 Group `inert` and `outside` rows into one count each, with each `inert` reason listed once. Write
 `none` for an empty section; do not drop it.

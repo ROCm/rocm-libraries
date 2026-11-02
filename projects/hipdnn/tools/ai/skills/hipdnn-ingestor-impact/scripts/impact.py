@@ -31,18 +31,23 @@ many it left to each. A rocKE C++ engine source is `inert` while no provider bui
 rocKE links the engine and the packer pins the Python lowering backend; any other non-Python rocKE
 file is not understood.
 
-Rollup (last line of `report`):
+Rollup (last two lines of `report`):
+  Pack-time: NEW <n>[, FIRST-SHIPPED <n>][; not run for ...] | FIRST-SHIPPED <n> | CLEAN (<n> tables)
+             | NOT RUN (<why>) | NOT RUN for <k> of <n> tables (<why>); no finding in the rest
   Runtime impact: BREAKS | NEEDS-DEVICE <archs> | NONE (<n> files inspected[; not judged here: ...])
                   | N/A (no surface file[; not judged here: ...])
 
-`report --emit FILE.json` folds in impact_emit.py output (schema 4), which must have been made for
+`report --emit FILE.json` folds in impact_emit.py output (schema 5), which must have been made for
 the same base and head trees: changed params of any launch (a KernelModule builder's companions
 included) vs the static C++ list that mirrors that launch is a mismatch; changed IR or
 COMGR inputs are `changed` for that arch; when every family is equal (nothing changed, nothing
 failed, nothing not inspected) the rows that were `changed` only because a shipped module changed
 become `inert`, but only on modules a family with built variants imports, and never on code that
 runs after lowering (COMPILE_STEP) or on a DVC pointer. Static kernarg mismatch rows are never
-downgraded. A module that the packer reaches ships on every architecture.
+downgraded. A module that the packer reaches ships on every architecture. The emit file's
+predicate tables (a predicate that accepts a spec its builder raises on, or a value outside the
+sign range of every shipped spec) are pack-time facts: `report` lists them in their own section,
+new at head before pre-existing, and they never change a row or the rollup.
 """
 
 import argparse
@@ -2986,8 +2991,10 @@ def merge_views(per_view: list) -> list:
 
 EMIT_SIZES = {"i8": 1, "i16": 2, "i32": 4, "float": 4, "half": 2, "i64": 8, "double": 8}
 #: The impact_emit.py output this script reads; 3 added `comgr_changed`, 4 `companions` (the
-#: kernarg list of each companion launch of a KernelModule builder).
-EMIT_SCHEMA = 4
+#: kernarg list of each companion launch of a KernelModule builder), 5 `predicate_tables`.
+EMIT_SCHEMA = 5
+#: The text fields of one predicate table.
+TABLE_TEXT = ("arch", "source", "builder", "inner", "predicate", "skipped")
 
 
 def load_emit(path) -> dict:
@@ -3036,6 +3043,29 @@ def emit_shape_problem(data: dict):
     skipped = data.get("not_inspected")
     if not isinstance(skipped, list) or not all(isinstance(i, dict) for i in skipped):
         return "`not_inspected` is not a list of objects"
+    tables = data.get("predicate_tables")
+    if not isinstance(tables, list):
+        return "`predicate_tables` is not a list"
+    for n, t in enumerate(tables):
+        if not (
+            isinstance(t, dict)
+            and all(isinstance(t.get(k), str) for k in TABLE_TEXT)
+            and count(t.get("rows"))
+            and isinstance(t.get("truncated"), bool)
+            and isinstance(t.get("at_base"), bool)
+            and isinstance(t.get("findings"), list)
+        ):
+            return f"predicate table {n} lacks {', '.join(TABLE_TEXT)}, rows, truncated, at_base or findings"
+        for f in t["findings"]:
+            if not (
+                isinstance(f, dict)
+                and f.get("check") in ("builder", "sign")
+                and all(isinstance(f.get(k), str) for k in ("field", "seed", "detail"))
+                and isinstance(f.get("values"), list)
+                and all(type(v) in (int, bool) for v in f["values"])
+                and isinstance(f.get("at_base"), bool)
+            ):
+                return f"predicate table {n}: a finding lacks check, field, values, seed, detail or at_base"
     for n, fam in enumerate(data["families"]):
         if not isinstance(fam, dict):
             return f"family {n} is not an object"
@@ -3305,6 +3335,102 @@ def render_rows(rows: list) -> str:
     return "\n".join(lines)
 
 
+def table_edited(ctx, table) -> bool:
+    """True when the change edits the table's predicate or the builder it tabled, in the
+    family's source module (the functions the diff's hunks fall in)."""
+    ch = ctx.changes.get(emit_source(ctx, table["source"]))
+    names = [n for n in (table["predicate"], table["inner"] or table["builder"]) if n]
+    return bool(ch) and any(
+        f == n or f.startswith(n + ".") for f in ch.funcs for n in names
+    )
+
+
+def finding_state(table, finding, edited) -> str:
+    """`new` (the base's table lacked it, or the base did not table the builder and the
+    change edits its predicate or builder), `first shipped` (the base did not table the
+    builder and the change does not touch either: an older defect that now ships), or
+    `at base` (the base's table had it)."""
+    if finding["at_base"]:
+        return "at base"
+    if table["at_base"] or (edited is not None and edited(table)):
+        return "new"
+    return "first shipped"
+
+
+def pack_time(tables, edited=None) -> str:
+    """The pack-time line: what the predicate tables found that the change ships, kept apart
+    from the runtime rollup. NEW and FIRST-SHIPPED count findings by `finding_state`; EDITED
+    (a table -> bool, see `table_edited`) tells a predicate the change wrote from an older one.
+    CLEAN needs every table to have run in full: a skipped or truncated table is not run for
+    its builder, so it never reads clean."""
+    if tables is None:
+        return "Pack-time: NOT RUN (emitter not run)"
+    if not tables:
+        return "Pack-time: NOT RUN (no shipped rocKE builder to table)"
+    states = [finding_state(t, f, edited) for t in tables for f in t["findings"]]
+    new, first = states.count("new"), states.count("first shipped")
+    missed = [t for t in tables if t["skipped"] or t["truncated"]]
+    why = sorted({t["skipped"] or "truncated" for t in missed})
+    gap = f"not run for {len(missed)} of {len(tables)} tables ({'; '.join(why)})"
+    if new or first:
+        parts = ([f"NEW {new}"] if new else []) + (
+            [f"FIRST-SHIPPED {first}"] if first else []
+        )
+        return "Pack-time: " + ", ".join(parts) + (f"; {gap}" if missed else "")
+    if missed:
+        return f"Pack-time: NOT RUN {gap[len('not run '):]}; no finding in the rest"
+    return f"Pack-time: CLEAN ({len(tables)} tables)"
+
+
+def render_tables(tables: list, edited=None) -> str:
+    """The emit file's predicate tables: findings the change introduces, then older defects
+    that ship for the first time, then pre-existing ones (`finding_state`), then the tables
+    that could not run. Pack-time facts; no row or rollup reads them."""
+
+    def esc(text):
+        return str(text).replace("|", "\\|").replace("\n", " ")
+
+    def state(t, f):
+        return finding_state(t, f, edited)
+
+    found = [(t, f) for t in tables for f in t["findings"]]
+    order = {"new": 0, "first shipped": 1, "at base": 2}
+    found.sort(key=lambda x: order[state(*x)])
+    counts = {s: sum(1 for x in found if state(*x) == s) for s in order}
+    skipped = [t for t in tables if t["skipped"]]
+    truncated = [t for t in tables if t["truncated"]]
+    lines = [
+        f"Predicate tables (pack time, not in the rollup): {len(tables)} tables; findings: "
+        f"{counts['new']} new, {counts['first shipped']} first shipped, "
+        f"{counts['at base']} at base; {len(skipped)} skipped, {len(truncated)} truncated"
+    ]
+    if found:
+        lines += [
+            "",
+            "| Builder | Arch | Predicate | Check | Field | Values | State | Detail |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        for t, f in found:
+            who = f"{t['source']}:{t['builder']}" + (
+                f" [{t['inner']}]" if t["inner"] else ""
+            )
+            values = ", ".join(repr(v) for v in f["values"])
+            lines.append(
+                f"| {esc(who)} | {t['arch']} | {esc(t['predicate'])} | {f['check']} | {esc(f['field'])} "
+                f"| {esc(values)} | {state(t, f)} | {esc(f['detail'])}; seed {esc(f['seed'])} |"
+            )
+    reasons = {}
+    for t in skipped:
+        reasons.setdefault(t["skipped"], []).append(
+            t["builder"] + (f"[{t['inner']}]" if t["inner"] else "")
+        )
+    for why, who in sorted(reasons.items()):
+        lines.append(
+            f"skipped ({len(who)}): {why}: {', '.join(sorted(set(who)))[:300]}"
+        )
+    return "\n".join(lines)
+
+
 def render_files(ctx_changes: list, rows: list) -> str:
     worst = {}
     for r in rows:
@@ -3410,7 +3536,8 @@ def run(args):
             per_view.append(mrows)
     if emit is not None:
         per_view[0] = fold_emit(ctx, per_view[0], emit)
-    return ctx, views, merge_views(per_view)
+    tables = emit["predicate_tables"] if emit is not None else None
+    return ctx, views, merge_views(per_view), tables
 
 
 def public(row) -> dict:
@@ -3418,7 +3545,7 @@ def public(row) -> dict:
 
 
 def cmd(args) -> None:
-    ctx, views, rows = run(args)
+    ctx, views, rows, tables = run(args)
     selected = (
         rows
         if args.cmd == "report"
@@ -3443,7 +3570,10 @@ def cmd(args) -> None:
                  "status": worst.get(c.path, "outside")} for c in files
             ]  # fmt: skip
         if args.cmd == "report":
+            payload["pack_time"] = pack_time(tables, lambda t: table_edited(ctx, t))
             payload["rollup"] = rollup(rows)
+            if tables is not None:
+                payload["predicate_tables"] = tables
         sys.stdout.write(json.dumps(payload, indent=2) + "\n")
         return
     out = []
@@ -3459,7 +3589,9 @@ def cmd(args) -> None:
     else:
         out += ["", f"no {args.cmd} rows"]
     if args.cmd == "report":
-        out += ["", rollup(rows)]
+        if tables is not None:
+            out += ["", render_tables(tables, lambda t: table_edited(ctx, t))]
+        out += ["", pack_time(tables, lambda t: table_edited(ctx, t)), rollup(rows)]
     sys.stdout.write("\n".join(out) + "\n")
 
 
