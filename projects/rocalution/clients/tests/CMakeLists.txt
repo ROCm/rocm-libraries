@@ -171,6 +171,18 @@ target_include_directories(rocalution-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CUR
 # Link rocALUTION library
 target_link_libraries(rocalution-test PRIVATE roc::rocalution)
 
+# The OpenMP state checks in test_backend.cpp need the OpenMP runtime of the library.
+# Only that source is compiled with OpenMP: the pragma in gen_3d_laplacian() (utility.hpp)
+# is not thread-safe.
+if(TARGET OpenMP::OpenMP_CXX AND (SUPPORT_OMP OR NOT DEFINED SUPPORT_OMP))
+  separate_arguments(ROCALUTION_TEST_OMP_FLAGS NATIVE_COMMAND "${OpenMP_CXX_FLAGS}")
+  get_target_property(ROCALUTION_TEST_OMP_LIBS OpenMP::OpenMP_CXX INTERFACE_LINK_LIBRARIES)
+  set_source_files_properties(test_backend.cpp PROPERTIES COMPILE_OPTIONS "${ROCALUTION_TEST_OMP_FLAGS}")
+  if(ROCALUTION_TEST_OMP_LIBS)
+    target_link_libraries(rocalution-test PRIVATE ${ROCALUTION_TEST_OMP_LIBS})
+  endif()
+endif()
+
 if(NOT TARGET rocalution)
   set_target_properties(rocalution-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
 else()
