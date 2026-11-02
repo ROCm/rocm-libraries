@@ -31,6 +31,7 @@ from geko.constants import SUPPORTED_ARCH, canonical_arch
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_bench, run_configure, run_optimize, run_search
 from geko.schemas import GemmConfig, GemmType
+from geko.search import SEARCH_PROFILES
 from geko.utils import parse_devices
 
 # Sample tuning YAML path shown when --list input is missing or invalid.
@@ -183,23 +184,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Performance uplift threshold for kernel filtering",
     )
     parser.add_argument(
-        "--duration",
-        type=float,
-        default=5.0,
+        "--search-profile",
+        dest="search_profile",
+        type=str,
+        default="thorough",
+        choices=sorted(SEARCH_PROFILES),
         help=(
-            "Adaptive measurement floor in MILLISECONDS (measure_time) used with "
-            "--search. Derives warmup_time (2x), max_measure_time (4x) and "
-            "sample_time (1/10). Defaults to 5.0 (the am5 sweet spot)."
-        ),
-    )
-    parser.add_argument(
-        "--no-adaptive-search",
-        dest="adaptive_search",
-        action="store_false",
-        default=True,
-        help=(
-            "Disable hipblaslt-bench --adaptive timing during --search (falls "
-            "back to fixed iters/cold_iters sizing). Adaptive is on by default."
+            "Search profile used with --search: bundles the hipblaslt-bench "
+            "--adaptive timing knobs. 'fast' (single dense pass, cheapest), "
+            "'balanced' (two-stage: cheap screen + strict re-verify of its "
+            "top-K candidates), or 'thorough' (tightest convergence/ceiling "
+            "knobs, most expensive). Defaults to 'thorough'."
         ),
     )
     parser.add_argument(
@@ -282,14 +277,13 @@ class CliArgs:
     search_space: str | None
     workdir: str | None
     up_thr: float
-    duration: float
     benchmark_duration: float
     custom_lib_src: str | None
     custom_lib_dir: str | None
     retry: bool
     bench_freq: bool
     skip_gpu_check: bool = False
-    adaptive_search: bool = True
+    search_profile: str = "thorough"
 
 
 def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
@@ -363,8 +357,7 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         search_space=ns.search_space,
         workdir=ns.workdir,
         up_thr=ns.up_thr,
-        duration=ns.duration,
-        adaptive_search=ns.adaptive_search,
+        search_profile=ns.search_profile,
         benchmark_duration=ns.benchmark_duration,
         custom_lib_src=ns.custom_lib_src,
         custom_lib_dir=ns.custom_lib_dir,
@@ -455,8 +448,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             up_thr=args.up_thr,
             workdir=run_root_str,
             verbose=args.verbose,
-            duration=args.duration,
-            adaptive=args.adaptive_search,
+            profile=args.search_profile,
             bench_freq=args.bench_freq,
             custom_lib_src=args.custom_lib_src,
         )

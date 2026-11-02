@@ -21,9 +21,10 @@ import logging
 import numpy as np
 import time
 
+from collections import defaultdict
 from threading import Lock
 from pathlib import Path
-from typing import Sequence, List
+from typing import Sequence, List, Dict
 from geko import bench
 from geko.bench.utils import is_built_custom_library
 from geko.constants import GEMM_LOG_FIELDS, GEMM_FIELDS
@@ -32,18 +33,76 @@ from geko.concurrency.runner import Runner, Worker
 
 logger = logging.getLogger("GEKO")
 
-# --- adaptive-timing defaults (hipblaslt-bench --adaptive) --------------------
-# The measurement floor is `duration` (milliseconds); every other timing knob is
-# derived from it so the whole family scales with a single number
-_ADAPTIVE_WARMUP_MULT = 2.0           # warmup_time      = 2 x measure_time
-_ADAPTIVE_CEIL_MULT = 4.0             # max_measure_time = 4 x measure_time
-_ADAPTIVE_MIN_SAMPLES = 10            # sample_time = measure_time / 10 (>=10 samples at the floor)
+# --------------------------------------------------------------------------- #
+# Search profiles: CLI-selectable presets bundling the hipblaslt-bench
+# --adaptive timing knobs, replacing the old --duration/--no-adaptive-search
+# flags. Values come from the adaptive-timing regret-sweep experiment
+# (workspace/offtune/test_cpp/experiments/search_adaptive/run_experiment.py):
+#
+#   fast     - Convergence-driven single dense pass. Cheapest, used as-is
+#              for a quick dense search.
+#   balanced - Two-stage search: a cheap "stage_a" screen over the full
+#              population, then a strict "stage_b" re-verify restricted to
+#              each GEMM's own top-"k" screen candidates. Unlike "fast"/
+#              "thorough" (flat adaptive-knob dicts), "balanced" nests two
+#              such dicts under "stage_a"/"stage_b" plus a "k" int.
+#              configure() detects this nesting and builds off "stage_a"
+#              only -- search.run() doesn't implement the stage_b re-verify
+#              pass yet, so stage_b/k aren't consumed until that lands.
+#   thorough - Tightest convergence/ceiling knobs from the regret sweep.
+#              Most expensive; full/accurate search. Default profile.
+#
+# Each flat (non-two-stage) entry fully resolves the adaptive block:
+# measure_time is the measurement floor (ms); warmup_time/max_measure_time/
+# sample_time are derived from it via warmup_mult/ceil_mult/min_samples
+# (warmup_time = warmup_mult x measure_time, max_measure_time = ceil_mult x
+# measure_time, sample_time = measure_time / min_samples).
+# --------------------------------------------------------------------------- #
+SEARCH_PROFILES: dict[str, dict] = {
+    "fast": dict(
+        measure_time=5.0, warmup_mult=0.4, ceil_mult=3.0, min_samples=10,
+        noise_threshold=0.01, min_iters=3, max_iters=10000,
+        stability_threshold=0.0, stability_window=32, stability_interval=16,
+    ),
+    "thorough": dict(
+        measure_time=20.0, warmup_mult=2.0, ceil_mult=16.0, min_samples=10,
+        noise_threshold=0.005, min_iters=10, max_iters=10000,
+        stability_threshold=0.03, stability_window=6, stability_interval=3,
+    ),
+}
+SEARCH_PROFILES["balanced"] = dict(
+    stage_a=SEARCH_PROFILES["fast"],
+    stage_b=SEARCH_PROFILES["thorough"],
+    k=50,
+)
 
 
 def _normalize_compute_type(v: str) -> str:
     # Normalize legacy values so downstream joins always use c_* compute_type keys.
     v = str(v)
     return v if v.startswith("c_") else f"c_{v}"
+
+
+def _resolve_adaptive_fields(adaptive_cfg: dict) -> dict:
+    """Expand one flat SEARCH_PROFILES adaptive-knob dict (measure_time,
+    warmup_mult, ceil_mult, min_samples, noise_threshold, min_iters,
+    max_iters, stability_threshold, stability_window, stability_interval)
+    into the full hipblaslt-bench ``--adaptive`` per-row field block.
+    """
+    measure_time = float(adaptive_cfg["measure_time"])
+    return {
+        "adaptive": True,
+        "sample_time": measure_time / adaptive_cfg["min_samples"],
+        "min_iters": adaptive_cfg["min_iters"],
+        "max_iters": adaptive_cfg["max_iters"],
+        "stability_threshold": adaptive_cfg["stability_threshold"],
+        "stability_window": adaptive_cfg["stability_window"],
+        "stability_interval": adaptive_cfg["stability_interval"],
+        "warmup_time": adaptive_cfg["warmup_mult"] * measure_time,
+        "measure_time": measure_time,
+        "max_measure_time": adaptive_cfg["ceil_mult"] * measure_time,
+        "noise_threshold": adaptive_cfg["noise_threshold"],
+    }
 
 
 def _load_processed_df(processed_file: Path) -> pd.DataFrame:
@@ -71,40 +130,34 @@ def _load_processed_df(processed_file: Path) -> pd.DataFrame:
 
 def configure(
     df: pd.DataFrame,
-    duration: float = 5.0,
+    profile: str = "thorough",
     iters: int = 100,
     cold_iters: int = 20,
     rotating: int = 512,
     beta: bool = False,
     flush: bool = False,
-    adaptive: bool = True,
-    noise_threshold: float = 0.05,
-    min_iters: int = 10,
-    max_iters: int = 0,
-    stability_threshold: float = 0.05,
-    stability_window: int = 32,
-    stability_interval: int = 16,
 ) -> List[dict]:
     """Generate benchmarking configurations for each input GEMM.
 
     Creates YAML and shell script configuration files for tuning a specific
     GEMM operation type using the config generator framework.
 
-    By default every config is emitted in hipblaslt-bench ``--adaptive`` mode:
-    the bench warms up, then accumulates samples until the measured mean's
-    relative standard error drops below ``noise_threshold`` (converged), the
-    robust spread plateaus (stable), or a ceiling is hit. The measurement floor
-    is ``duration`` (in milliseconds); ``warmup_time``, ``max_measure_time`` and
-    ``sample_time`` are derived from it (2x, 4x and 1/10 respectively). 
-    Under adaptive mode the per-row ``iters``/``cold_iters`` are
-    ignored by the bench (the adaptive loop gates timing), so they only size the
-    problem set.
-
+    Every config is emitted in hipblaslt-bench ``--adaptive`` mode: the bench
+    warms up, then accumulates samples until the measured mean's relative
+    standard error drops below ``noise_threshold`` (converged), the robust
+    spread plateaus (stable), or a ceiling is hit. The adaptive timing knobs
+    (``measure_time``, ``warmup_time``, ``max_measure_time``, ``sample_time``,
+    ``noise_threshold``, ``min_iters``/``max_iters``, and the
+    ``stability_*`` knobs) are bundled per ``profile`` -- see
+        ``SEARCH_PROFILES`` for the "fast"/"balanced"/"thorough" presets. For
+    the two-stage "balanced" profile (a ``{"stage_a", "stage_b", "k"}``
+    dict rather than a flat adaptive-knob dict), only the "stage_a" screen
+    config is used here.
     Args:
         df (DataFrame): DataFrame containing the GEMMs to benchmark.
-        duration (float, optional): Adaptive measurement floor in MILLISECONDS
-            (``measure_time``). Also used to size the per-row iteration count.
-            Defaults to 5.0.
+        profile (str, optional): Search profile name, a key of
+            ``SEARCH_PROFILES`` ("fast", "balanced", or "thorough").
+            Defaults to "thorough".
         iters (int, optional): Number of benchmark iterations.
             Defaults to 100.
         cold_iters (int, optional): Number of warm-up iterations.
@@ -115,30 +168,24 @@ def configure(
             Defaults to False.
         flush (bool, optional): Whether to flush GPU caches.
             Defaults to False.
-        adaptive (bool, optional): Emit hipblaslt-bench ``--adaptive`` rows with
-            the timing knobs below. When False, falls back to fixed
-            iters/cold_iters sizing only. Defaults to True.
-        noise_threshold (float, optional): Relative std-error convergence target.
-            Defaults to 0.05.
-        min_iters (int, optional): Iteration floor for the adaptive loop.
-            Defaults to 10.
-        max_iters (int, optional): Iteration ceiling (0 => bound by time).
-            Defaults to 0.
-        stability_threshold (float, optional): Robust-spread plateau for the
-            "stable" early stop. Defaults to 0.05.
-        stability_window (int, optional): Samples in the stability window.
-            Defaults to 32.
-        stability_interval (int, optional): Stability re-check interval.
-            Defaults to 16.
 
     Returns:
         dict: List of dictionaries containing the benchmark configurations.
 
     Raises:
-        ValueError: If input DataFrame is empty.
+        ValueError: If input DataFrame is empty or profile is unknown.
     """
     if df.empty:
         raise ValueError("No GEMM operations found in input DataFrame")
+
+    if profile not in SEARCH_PROFILES:
+        raise ValueError(
+            f"Unknown search profile '{profile}'; expected one of {sorted(SEARCH_PROFILES)}"
+        )
+    adaptive_cfg = SEARCH_PROFILES[profile]
+    if "stage_a" in adaptive_cfg:
+        adaptive_cfg = adaptive_cfg["stage_a"]
+    measure_time = float(adaptive_cfg["measure_time"])
 
     df = df.rename({"m": "M", "n": "N", "k": "K"}, axis=1)
     uniq_df = df[list(GEMM_LOG_FIELDS)].drop_duplicates()
@@ -150,7 +197,7 @@ def configure(
     configs = bench.log.update(
         uniq_df.to_dict(orient="records"),
         latency=latency,
-        duration=duration / 1000.0,  # bench.log.update expects seconds; duration is ms
+        duration=measure_time / 1000.0,  # bench.log.update expects seconds; measure_time is ms
         iters=iters,
         cold_iters=cold_iters,
         rotating=rotating,
@@ -160,6 +207,7 @@ def configure(
         print_kernel_info=True,
     )[0]
 
+    adaptive_fields = _resolve_adaptive_fields(adaptive_cfg)
     for i, config in enumerate(configs):
         config["algo_method"] = 1
         config["requested_solution_num"] = -1
@@ -174,23 +222,7 @@ def configure(
             else:
                 config["skip_slow_solution_ratio"] = 0.3
 
-    if adaptive:
-        measure_time = float(duration)
-        warmup_time = _ADAPTIVE_WARMUP_MULT * measure_time
-        max_measure_time = _ADAPTIVE_CEIL_MULT * measure_time
-        sample_time = measure_time / _ADAPTIVE_MIN_SAMPLES
-        for config in configs:
-            config["adaptive"] = True
-            config["sample_time"] = sample_time
-            config["min_iters"] = min_iters
-            config["max_iters"] = max_iters
-            config["stability_threshold"] = stability_threshold
-            config["stability_window"] = stability_window
-            config["stability_interval"] = stability_interval
-            config["warmup_time"] = warmup_time
-            config["measure_time"] = measure_time
-            config["max_measure_time"] = max_measure_time
-            config["noise_threshold"] = noise_threshold
+        config.update(adaptive_fields)
 
     return configs
 
@@ -203,6 +235,7 @@ def run(
     devices: Sequence[int] | None = None,
     bench_freq: bool = False,
     max_chunk_size: int = 25,
+    profile: str | None = None,
 ) -> pd.DataFrame:
     """Run GEMM dense benchmarks across multiple GPU devices.
 
@@ -223,10 +256,22 @@ def run(
             Defaults to False.
         max_chunk_size (int, optional): Maximum number of configs per chunk. 
             Defaults to 25.
+        profile (str | None, optional): Search profile name, a key of
+            ``SEARCH_PROFILES`` (should match the profile passed to
+            ``configure()`` for these same ``configs``). When the resolved
+            profile has a ``"stage_b"`` entry (currently only "balanced"),
+            each chunk is re-verified after its own stage_a (screen) pass:
+            every GEMM's top-``k`` stage_a candidates (ranked by measured
+            latency) are re-benchmarked individually with stage_b's own
+            (stricter) adaptive config, and that stage_b result becomes the
+            GEMM's final winner. Defaults to None (single-stage behavior,
+            unchanged from before two-stage support was added).
 
     Raises:
         FileNotFoundError: If hipBLASLt path does not exist.
-        ValueError: If max_chunk_size is invalid or custom_lib_dir is not built.
+        ValueError: If max_chunk_size is invalid, custom_lib_dir is not
+            built, profile is unknown, or profile has a "stage_b" entry
+            without a positive "k".
 
     Note:
         - Uses multiprocessing and threading for parallel optimization.
@@ -240,6 +285,22 @@ def run(
         f"Starting dense search with output_dir={output_dir} devices={devices} "
         f"n_configs={len(configs)}"
     )
+
+    stage_b_cfg = None
+    top_k = None
+    if profile is not None:
+        if profile not in SEARCH_PROFILES:
+            raise ValueError(
+                f"Unknown search profile '{profile}'; expected one of {sorted(SEARCH_PROFILES)}"
+            )
+        profile_cfg = SEARCH_PROFILES[profile]
+        stage_b_cfg = profile_cfg.get("stage_b")
+        top_k = profile_cfg.get("k")
+        if stage_b_cfg is not None and not top_k:
+            raise ValueError(
+                f"Search profile '{profile}' has a 'stage_b' entry but no positive 'k'"
+            )
+    stage_b_adaptive = _resolve_adaptive_fields(stage_b_cfg) if stage_b_cfg is not None else None
 
     hipblaslt_path = Path(hipblaslt_path)
     if not hipblaslt_path.is_dir():
@@ -267,6 +328,15 @@ def run(
     def _config_to_gemm_key(cfg: dict) -> tuple:
         key = [cfg[k] for k in GEMM_LOG_FIELDS]
         index = GEMM_LOG_FIELDS.index("compute_type")
+        key[index] = _normalize_compute_type(key[index])
+        return tuple(key)
+
+    def _res_row_to_gemm_key(row) -> tuple:
+        # GEMM_FIELDS and GEMM_LOG_FIELDS share the same field order (only
+        # m/n/k vs M/N/K differ in name case), so this is comparable to
+        # _config_to_gemm_key()'s output for the same GEMM.
+        key = [row[c] for c in GEMM_FIELDS]
+        index = GEMM_FIELDS.index("compute_type")
         key[index] = _normalize_compute_type(key[index])
         return tuple(key)
 
@@ -315,6 +385,33 @@ def run(
                 return 0
             return self.log_file.read_text().count("Winner")
 
+        def _stage_b_configs(self, stage_a_log: Path) -> List[dict]:
+            # Rank each GEMM's own stage_a candidates by measured latency
+            # (ascending; ties keep stage_a's first-seen order) and shortlist
+            # the first top_k distinct solution indices per GEMM.
+            res = bench.utils.parse_benchmark_output(stage_a_log).sort_values("us")
+            shortlist: Dict[tuple, List[int]] = defaultdict(list)
+            for _, row in res.iterrows():
+                key = _res_row_to_gemm_key(row)
+                sols = shortlist[key]
+                sol = int(row["solutionIdx"])
+                if sol in sols:
+                    continue
+                if len(sols) < top_k:
+                    sols.append(sol)
+
+            rows: List[dict] = []
+            for cfg, _ in self.configs:
+                key = _config_to_gemm_key(cfg)
+                for sol in shortlist.get(key, []):
+                    row = dict(cfg)
+                    row["algo_method"] = 2
+                    row["solution_index"] = sol
+                    row.pop("requested_solution_num", None)
+                    row.update(stage_b_adaptive)
+                    rows.append(row)
+            return rows
+
         def run(self) -> bool:
             bench.log.dump([cfg[0] for cfg in self.configs], self.bench_file)
             try:
@@ -331,8 +428,48 @@ def run(
             except Exception:
                 self.passed = False
                 return False
-            
-            self.passed = self._winner_count() == len(self.configs)
+
+            stage_a_passed = self._winner_count() == len(self.configs)
+            if stage_b_cfg is None or not stage_a_passed:
+                self.passed = stage_a_passed
+                return self.passed
+
+            # Two-stage: keep stage_a's own output under its own name, then
+            # re-verify each GEMM's own top-k stage_a candidates with
+            # stage_b's stricter adaptive config, writing the FINAL result
+            # back to self.log_file. teardown() stays unchanged and simply
+            # operates on stage_b data instead of stage_a data.
+            stage_a_log = self.log_file.with_name(f"{self.log_file.stem}_stage_a.out")
+            self.log_file.rename(stage_a_log)
+
+            stage_b_rows = self._stage_b_configs(stage_a_log)
+            if not stage_b_rows:
+                self.passed = False
+                return False
+
+            bench.log.dump(stage_b_rows, self.bench_file)
+            try:
+                bench.run(
+                    hipblaslt_path,
+                    self.bench_file,
+                    self.log_file,
+                    custom_lib_dir=custom_lib_dir,
+                    devices=[self.device],
+                    cache=False,
+                    bench_freq=bench_freq,
+                    silent=True,
+                )
+            except Exception:
+                self.passed = False
+                return False
+
+            try:
+                stage_b_res = bench.utils.parse_benchmark_output(self.log_file)
+            except ValueError:
+                self.passed = False
+                return False
+
+            self.passed = len(stage_b_res) == len(stage_b_rows)
             return self.passed
 
         def teardown(self) -> None:
