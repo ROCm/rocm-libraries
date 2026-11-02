@@ -44,6 +44,9 @@ namespace origami {
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param configs Vector of all possible valid configurations.
  * @return prediction_result_t Configurations with best latency.
+ * For an empty problem (M, N or batch is 0) this is the first valid config in
+ * @p configs (@see rank_configs).
+ * @throws std::runtime_error if @p configs is empty.
  */
 ORIGAMI_EXPORT prediction_result_t select_config(const problem_t& problem,
                                   const hardware_t& hardware,
@@ -89,7 +92,13 @@ ORIGAMI_EXPORT staggerU_t select_staggerU(const problem_t& problem,
  * @param model Model type to use for ranking (gemm or attention)
  * @return std::vector<prediction_result_t> Configurations with latencies ranked by performance
  * (best first). If every candidate is rejected, returns a ranking of the rejected configs
- * (max latency) instead of throwing.
+ * (max latency) instead of throwing. For an empty problem (M, N or batch is 0) there is
+ * nothing to model: returns every config, the valid ones first, each with latency
+ * heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD (the model's work-independent floor), then
+ * the rejected ones with max latency, each group in input order.
+ * K = 0 is not empty and the analytical model ranks it normally. A config with
+ * prediction_mode == simulation throws std::runtime_error("Problem size is invalid")
+ * for K = 0 instead.
  *
  * Non-temporal availability is read from each config
  * (config_t::non_temporal_a_available / non_temporal_b_available). Call
@@ -119,6 +128,7 @@ ORIGAMI_EXPORT void memoize_non_temporal_availability(std::vector<config_t>& con
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param configs List of candidate configurations
  * @return prediction_result_t Configurations with best latency.
+ * @throws std::runtime_error under the same conditions as select_config().
  */
 ORIGAMI_EXPORT prediction_result_t select_config_mnk(std::size_t M,
                                       std::size_t N,
@@ -133,7 +143,8 @@ ORIGAMI_EXPORT prediction_result_t select_config_mnk(std::size_t M,
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param configs List of candidate configurations to rank
  * @param topk Number of top configurations to return
- * @return std::vector<prediction_result_t> Top K configurations ranked by performance (best first)
+ * @return std::vector<prediction_result_t> Top K configurations ranked by performance (best first).
+ * For an empty problem, the first @p topk configs of that ranking (@see rank_configs).
  */
 ORIGAMI_EXPORT std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
                                                      const hardware_t& hardware,

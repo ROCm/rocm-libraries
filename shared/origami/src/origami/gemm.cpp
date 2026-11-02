@@ -2367,6 +2367,12 @@ double compute_total_latency(const problem_t& problem,
     }
   }
 
+  // An empty problem (M, N or batch is 0) has no output tiles to model, and
+  // the model below divides by M, N and the tile count. Only the launch
+  // overhead, the model's work-independent floor, remains.
+  if (problem.size.m == 0 || problem.size.n == 0 || problem.batch == 0) {
+    return heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD;
+  }
 
   // Use Formocast simulation model if prediction_mode is set to simulation
   if (config.prediction_mode == prediction_modes_t::simulation) {
