@@ -415,7 +415,7 @@ class TestTapOuterKIdentity(unittest.TestCase):
                      "split_atomic_agent", "split_atomic_pairs", "split_atomic_fast",
                      "epi_store_fast", "split_xcd_remap", "split_streamk", "split_flag_store",
                      "split_zero_first", "xh_subtile",
-                     "pp_fetch_deep", "pp_split_fetch", "fb_skip_empty", "pp_end_guard", "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact",
+                     "pp_fetch_deep", "pp_split_fetch", "fb_skip_empty", "pp_end_guard", "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact", "split_det",
                      "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring",
                      "xh_dlds", "xh_epi_lin", "xh_tap_rsrc"):  # fwd K-loop / x-halo / split-store knobs, off
             del fields[name]

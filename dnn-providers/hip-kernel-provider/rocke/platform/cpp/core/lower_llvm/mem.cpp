@@ -1162,13 +1162,14 @@ static void op_tile_buffer_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     tmp = rocke_ll_fresh(L, form->load_hint);
     rocke_ll_emitf(L,
                    "  %s = call %s @llvm.amdgcn.raw.ptr.buffer.load.%s("
-                   "ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                   "ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                    tmp,
                    form->llvm_type,
                    form->suffix,
                    rocke_ll_operand(L, rsrc),
                    rocke_ll_operand(L, voffset),
-                   rocke_ll_operand(L, soffset));
+                   rocke_ll_operand(L, soffset),
+                   (long long)ll_attr_int(op, "aux", 0));
     rocke_ll_emitf(L,
                    "  %s = bitcast %s %s to %s",
                    ll_res(op),
@@ -1542,13 +1543,14 @@ static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
                        (long long)dwords);
         rocke_ll_emitf(L,
                        "  call void @llvm.amdgcn.raw.ptr.buffer.store.v%lldi32("
-                       "<%lld x i32> %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       "<%lld x i32> %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                        (long long)dwords,
                        (long long)dwords,
                        bc,
                        rocke_ll_operand(L, rsrc),
                        rocke_ll_operand(L, voffset),
-                       rocke_ll_operand(L, soffset));
+                       rocke_ll_operand(L, soffset),
+                       (long long)ll_attr_int(op, "aux", 0));
     }
 }
 

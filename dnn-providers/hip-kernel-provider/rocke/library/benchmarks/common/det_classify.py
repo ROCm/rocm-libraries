@@ -28,7 +28,8 @@ from typing import Optional, Tuple
 # (split_tail: the tail tiles; split_flag_store / split_zero_first: slice 0
 # stores, the rest atomic-add; split_streamk / split_hybrid: atomics on the
 # shared tiles). Identity fields of deterministic fwd split reductions:
-FWD_DET_SPLIT_FIELDS: Tuple[str, ...] = ()
+# split_det (det-fwd): owner-ordered f32 fold (1, 2) / two-stage slabs (3).
+FWD_DET_SPLIT_FIELDS: Tuple[str, ...] = ("split_det",)
 
 # ---- dgrad ---------------------------------------------------------------
 # split_k > 1 (incl. pp_boxes box split degrees, which need split_k > 1)
@@ -36,7 +37,9 @@ FWD_DET_SPLIT_FIELDS: Tuple[str, ...] = ()
 # pp_sk_mode bit 1 (fix-up by the last-arriving contributor) adds the last
 # arriver's own partial at a scheduling-dependent place -- rejected;
 # tapk_pp_persist 2 (stream-K tail) atomic-adds. Deterministic split fields:
-DGRAD_DET_SPLIT_FIELDS: Tuple[str, ...] = ()
+# pp_box_det (det-dgrad): split box slices store per-block slots, a second
+# kernel folds them in slice order.
+DGRAD_DET_SPLIT_FIELDS: Tuple[str, ...] = ("pp_box_det",)
 
 # ---- wgrad ---------------------------------------------------------------
 # Two-stage fields that atomically accumulate (into the scratch or dW).
@@ -49,7 +52,12 @@ WGRAD_DET_SPLIT_FIELDS: Tuple[str, ...] = ("ws_store",)
 # (field, value) pairs of deterministic reductions that round every partial
 # sum below f32 before the fold (less accurate than an f32 reduction):
 # ``--deterministic f32`` rejects them as well. ws_store 2 = bf16 slabs.
-LOWP_PARTIAL_FIELDS: Tuple[Tuple[str, int], ...] = (("ws_store", 2),)
+LOWP_PARTIAL_FIELDS: Tuple[Tuple[str, int], ...] = (("ws_store", 2), ("pp_box_det", 2))
+
+
+# (det-fwd) Reason of the two-way bf16-atomic fwd rule below: deterministic,
+# but each partial is rounded to bf16 -> rejected by ``--deterministic f32``.
+TWO_WAY_BF16_REASON = "two-way split: commutative bf16 add"
 
 
 def _any(ident, fields) -> bool:
@@ -87,6 +95,17 @@ def classify(direction: str, ident, split_k: Optional[int] = None) -> Tuple[bool
             return True, "unsplit: direct store"
         if _any(ident, FWD_DET_SPLIT_FIELDS):
             return True, "deterministic split field"
+        if (
+            split_k is not None
+            and int(split_k) == 2
+            and not getattr(ident, "split_streamk", False)
+            and not getattr(ident, "split_hybrid", 0)
+        ):
+            # (det-fwd) Two contributions into a zeroed (or slice-0-stored)
+            # tile: bf16(a) then round(bf16(a) + bf16(b)) -- IEEE addition
+            # commutes, so either order gives the same bits (fwd s3 record,
+            # 2/full1824, checked bitwise). Three or more do not.
+            return True, TWO_WAY_BF16_REASON
         return False, "split-K atomics into D"
     if direction == "dgrad":
         if getattr(ident, "pp_streamk", 0):
@@ -108,7 +127,8 @@ def is_deterministic(
 ) -> bool:
     """``mode`` "any": any bitwise-deterministic reduction; "f32": also no
     partial sums rounded below f32 (LOWP_PARTIAL_FIELDS)."""
-    ok = classify(direction, ident, split_k)[0]
+    ok, reason = classify(direction, ident, split_k)
     if ok and mode == "f32":
         ok = not any(getattr(ident, f, None) == v for f, v in LOWP_PARTIAL_FIELDS)
+        ok = ok and reason != TWO_WAY_BF16_REASON
     return ok

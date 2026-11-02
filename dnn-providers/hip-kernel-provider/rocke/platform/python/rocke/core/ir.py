@@ -5648,7 +5648,8 @@ class IRBuilder:
         ).result
 
     def buffer_load_vN(
-        self, rsrc: Value, voffset: Value, soffset: Value, dtype: "Type", n: int
+        self, rsrc: Value, voffset: Value, soffset: Value, dtype: "Type", n: int,
+        aux: int = 0,
     ) -> Value:
         """Dtype-generic vectorised `raw_ptr_buffer_load` of N elements.
 
@@ -5673,6 +5674,13 @@ class IRBuilder:
         if nbytes >= 4:
             attrs["dwords"] = nbytes // 4
         attrs["elem_type"] = dtype.name
+        if aux:
+            # Cache-policy (AUX) bits of a load of 8 bytes or more, e.g. 16 =
+            # SC1 on gfx942 (an agent-coherent read, as LLVM's agent-scope
+            # atomic loads). 0 (default) adds no attribute.
+            if nbytes < 8:
+                raise ValueError("buffer_load_vN: aux needs dwords >= 2")
+            attrs["aux"] = int(aux)
         return self._op(
             "tile.buffer_load_vN",
             [rsrc, voffset, soffset],
@@ -5873,16 +5881,24 @@ class IRBuilder:
         )
 
     def buffer_store_vN_f32(
-        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, n: int
+        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, n: int,
+        aux: int = 0,
     ) -> None:
         """Vectorised f32 buffer store. n in {1, 2, 4}; each f32 = 1 dword.
         OOB voffsets are silently dropped (buffer rsrc bounds-check)."""
         if n not in (1, 2, 4):
             raise ValueError(f"buffer_store_vN_f32 n must be 1, 2, or 4 (got {n})")
+        attrs = {"dwords": int(n)}
+        if aux:
+            # Cache-policy (AUX) bits of the n >= 2 store, e.g. 16 = SC1 on
+            # gfx942 (agent-coherent, as LLVM's agent-scope atomic stores).
+            if n == 1:
+                raise ValueError("buffer_store_vN_f32: aux needs n >= 2")
+            attrs["aux"] = int(aux)
         self._op(
             "tile.buffer_store_vN_f32",
             [rsrc, voffset, soffset, value],
-            attrs={"dwords": int(n)},
+            attrs=attrs,
         )
 
     def buffer_store_vN(

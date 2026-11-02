@@ -690,6 +690,27 @@ class ImplicitGemmConvSpec:
     # For grids that leave CUs idle at a whole slice count (s7: 64 tiles x 3 =
     # 192 of 228 CUs). Tags ``shy<n>``.
     split_hybrid: int = 0
+    # split_k > 1: deterministic split-K. No atomics into D: every split
+    # tile has one owner contribution -- the last slice (plain / split_tail
+    # grids: slice ks_count - 1, dispatched last) or, under split_hybrid, the
+    # remainder segment (the last aligned slice when there is none). The
+    # other contributions store their f32 partial tile plainly into their own
+    # slot of the ``sk_partials`` scratch (thread-private layout, coalesced
+    # 16-byte stores), release it and count themselves in the tile's i32
+    # ``sk_flags`` counter; the owner waits for the count, acquires, adds the
+    # partials to its accumulators in slot order (bitwise-reproducible f32
+    # sum) and stores D once in bf16, then resets the counter (zeroed once at
+    # allocation). D needs no clearing. A waiting owner only waits on
+    # earlier-dispatched workgroups (with split_xcd_remap the launch must be
+    # co-resident: tiles * ks_count <= resident workgroups). Scratch: one
+    # block_m x block_n f32 slot per non-owner contribution of every split
+    # tile (split_tail: of the tail tiles only, see fwd_split_det_slots).
+    # Appends ``sk_flags`` and ``sk_partials`` to the split-K ABI. 1: the
+    # partials ordered by agent-scope release/acquire fences (an L2
+    # writeback / invalidate per workgroup); 2: moved by agent-coherent
+    # (SC1) buffer stores / loads, the flag ordered by the barrier's
+    # vmcnt(0) -- no L2 maintenance. Tags ``sdet<n>``.
+    split_det: int = 0
     # AMDGPU machine-scheduler strategy (the kernel's "amdgpu-sched-strategy"
     # attribute): 0 = LLVM's default, 1 max-ilp, 2 max-memory-clause,
     # 3 iterative-ilp, 4 iterative-minreg, 5 iterative-maxocc. Tags ``mss<n>``.
@@ -899,6 +920,7 @@ class ImplicitGemmConvSpec:
                 f"shy{self.split_hybrid}": self.split_hybrid > 0,
                 f"mss{self.sched_strategy}": self.sched_strategy > 0,
                 "stc": self.split_tail_compact,
+                f"sdet{self.split_det}": self.split_det > 0,
                 f"psf{self.pp_split_fetch}": self.pp_split_fetch > 0,
                 "nag": self.no_agpr,
                 f"mb{self.m_band}": self.m_band > 0,
@@ -1590,6 +1612,37 @@ def _fwd_atomic_split_knobs(spec: "ImplicitGemmConvSpec") -> List[str]:
     return [k for k in _FWD_ATOMIC_SPLIT_KNOBS if getattr(spec, k, 0)]
 
 
+def fwd_split_det_slabs(tiles: int, split_k: int, *, split_hybrid: int = 0) -> int:
+    """``split_det`` 3: the [M, K] f32 slabs a launch at degree ``split_k``
+    writes (one per contribution of a tile): ``split_k`` on the plain grid;
+    under ``split_hybrid`` the ``split_k // tiles`` aligned slices plus one
+    for the remainder segments when there are any."""
+    if split_hybrid:
+        s_ = split_k // max(1, tiles)
+        return s_ + (1 if split_k - s_ * tiles > 0 else 0)
+    return split_k
+
+
+def fwd_split_det_slots(
+    tiles: int,
+    groups: int,
+    split_k: int,
+    *,
+    split_tail: bool = False,
+    full_tiles: int = 0,
+    split_hybrid: int = 0,
+) -> int:
+    """Partial-tile slots (``tile_m x tile_n`` f32 each) a ``split_det``
+    launch at degree ``split_k`` addresses in ``sk_partials``: per split tile,
+    one per non-owner contribution -- ``split_k - 1`` on the plain grid (of
+    the tail tiles only under ``split_tail``), ``split_k // tiles`` aligned
+    slices under ``split_hybrid`` (one group)."""
+    if split_hybrid:
+        return tiles * (split_k // max(1, tiles))
+    split_tiles = max(0, tiles - full_tiles) if split_tail else tiles
+    return groups * split_tiles * max(0, split_k - 1)
+
+
 def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
     """Why ``spec.split_k`` cannot be honoured, or ``""`` if it can.
 
@@ -1602,7 +1655,7 @@ def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
     """
     if spec.split_k == 1:
         if (spec.split_xcd_remap or spec.split_streamk or spec.split_hybrid or spec.split_flag_store
-                or spec.split_zero_first):
+                or spec.split_zero_first or spec.split_det):
             return "split_xcd_remap / split_streamk / split_flag_store need the split-K binary"
         if spec.split_atomic_agent or spec.split_atomic_pairs:
             return "split_atomic_agent/split_atomic_pairs need the split-K binary (split_k > 1)"
@@ -1614,6 +1667,12 @@ def fwd_split_k_conflict(spec: "ImplicitGemmConvSpec") -> str:
         if _knobs:
             return f"{', '.join(_knobs)}: knobs of the wave64 MFMA atomic split-K forward"
         return ""
+    if spec.split_det and (
+        spec.split_streamk or spec.split_flag_store or spec.split_zero_first
+        or spec.data.dtype_d != "bf16" or spec.split_det not in (1, 2, 3)
+        or (spec.split_det == 3 and spec.split_tail)
+    ):
+        return "split_det: plain / split_tail / split_hybrid grids, bf16 D, no other split store"
     if spec.split_hybrid and (spec.split_streamk or spec.split_hybrid < 0):
         return "split_hybrid: one segment scheme (not with split_streamk), E >= 0"
     if (spec.split_streamk or spec.split_hybrid) and (
@@ -2257,6 +2316,9 @@ def _build_implicit_gemm_conv_impl(
             p_full_tiles = b.param("full_tiles", I32)
         if spec.split_flag_store or spec.split_zero_first:
             p_sk_flags = b.param("sk_flags", PtrType(I32, "global"), noalias=True)
+        if spec.split_det:
+            p_sk_flags = b.param("sk_flags", PtrType(I32, "global"), noalias=True)
+            p_sk_partials = b.param("sk_partials", PtrType(F32, "global"), noalias=True)
     p_N = params["p_N"]
     p_Hi = params["p_Hi"]
     p_Wi = params["p_Wi"]
@@ -3965,7 +4027,189 @@ def _build_implicit_gemm_conv_impl(
                         col_offset=_k_out_grp_base,
                     )
 
+                def _det_store_slab():
+                    """split_det 3 (two-stage): every contribution stores its
+                    f32 partial tile, row-major through the cshuffle LDS
+                    staging, into its own [M, K] slab of ``sk_partials``
+                    (slot = slice; split_hybrid: aligned slice s, remainder
+                    S). A separate fold kernel sums the slabs in slot order
+                    into D (conv_wgrad_workspace_reduce over M x K)."""
+                    if spec.split_hybrid:
+                        slot = b.select(_shy_prim, _shy_s, _shy_S)
+                    else:
+                        slot = _slice
+                    slab = b.to_sgpr_u32(b.mul(slot, b.mul(p_M, p_K)))
+                    ws_rsrc = b.buffer_rsrc(p_sk_partials, b.const_i32(0x7FFFFFF0))
+                    # Row slabs of <= 32 KB of f32 where the warp's M atoms allow.
+                    _mfm = spec.mfmas_per_warp_m
+                    _mch = max(spec.cshuffle_m_chunks, 1)
+                    while (block_m * block_n * 4) // _mch > 32 * 1024 and _mfm % (_mch * 2) == 0:
+                        _mch *= 2
+                    epi32 = CShuffleEpilogue.from_grid(
+                        atom=spec.atom, grid=grid, out_dtype="fp32", max_store_vec=4,
+                        no_alias=spec.cshuffle_no_alias,
+                    )
+                    epi32 = dc_replace(epi32, war_barriers=1)
+                    if _mch > 1:
+                        epi32 = dc_replace(epi32, m_chunks=_mch)
+                    if spec.epi_lds_barriers:
+                        epi32 = dc_replace(epi32, lds_barriers=True)
+
+                    def ws_addr(b_, m_val, n_val):
+                        # D's packed [M, K] layout (a group's channel slab at
+                        # group * kpg), one slab per slot.
+                        if _k_out_grp_base is not None:
+                            n_val = b_.add(_k_out_grp_base, n_val)
+                        return b_.add(slab, b_.add(b_.mul(m_val, p_K), n_val)), None
+
+                    epi32.store(
+                        b, accs=final_accs_in, addr_fn=ws_addr, d_rsrc=ws_rsrc,
+                        bounds=(p_M, c_N_bound),
+                    )
+
+                def _det_store():
+                    """split_det: owner folds the other contributions' f32
+                    partials in slot order and stores D once; the others
+                    store their partial into their slot and count in."""
+                    if spec.split_det == 3:
+                        _det_store_slab()
+                        return
+                    # Mode 2: the partials move through agent-coherent (SC1)
+                    # buffer stores / loads, so neither side writes back or
+                    # invalidates its XCD's L2 (the agent-scope fences of
+                    # mode 1 cost the other workgroups their cached A/B).
+                    _coh = spec.split_det == 2
+                    _aux = 16  # SC1
+                    if _coh:
+                        _ws_rsrc = b.buffer_rsrc(p_sk_partials, b.const_i32(0x7FFFFFF0))
+                    c_1 = b.const_i32(1)
+                    c_tile = b.const_i32(block_m * block_n)
+                    if spec.split_hybrid:
+                        _has_rem = b.cmp_lt(c0, _shy_H)
+                        is_owner = b.select(
+                            _has_rem,
+                            b.lnot(_shy_prim),
+                            b.land(_shy_prim, b.cmp_eq(_shy_s, b.sub(_shy_S, c_1))),
+                        )
+                        n_wait = b.to_sgpr_u32(b.select(_has_rem, _shy_S, b.sub(_shy_S, c_1)))
+                        n_slots = _shy_S
+                        slot = _shy_s
+                        f_idx = _fsk_tile
+                        t_slot = _fsk_tile
+                    else:
+                        t_lin = b.add(
+                            b.mul(b.div(block_m_off_v, b.const_i32(block_m)), p_num_pid_n),
+                            b.div(block_n_off_v, b.const_i32(block_n)),
+                        )
+                        _tiles = b.mul(p_num_pid_m, p_num_pid_n)
+                        f_idx = t_lin
+                        t_slot = t_lin
+                        per_group = _tiles
+                        if spec.split_tail:
+                            # Slots for the tail tiles only (launch order).
+                            t_slot = b.sub(t_lin, p_full_tiles)
+                            per_group = b.sub(_tiles, p_full_tiles)
+                        if grouped:
+                            f_idx = b.add(f_idx, b.mul(group_idx, _tiles))
+                            t_slot = b.add(t_slot, b.mul(group_idx, per_group))
+                        n_wait = b.to_sgpr_u32(b.sub(p_ks_count, c_1))
+                        is_owner = b.cmp_eq(_slice, n_wait)
+                        n_slots = n_wait
+                        slot = _slice
+                    f_idx = b.to_sgpr_u32(f_idx)
+                    t_base = b.to_sgpr_u32(b.mul(b.mul(t_slot, n_slots), c_tile))
+                    c_bs = b.const_i32(spec.block_size)
+                    # Each accumulator vector as 4-wide f32 pieces, one
+                    # 16-byte store per piece and thread (coalesced).
+                    pieces = []
+                    for ai, acc in enumerate(final_accs_in):
+                        n = acc.type.count
+                        assert n % 4 == 0, n
+                        for q in range(n // 4):
+                            pieces.append((ai, q))
+
+                    def _piece_off(base, j):
+                        return b.add(base, b.mul(b.add(b.const_i32(j * spec.block_size), tid),
+                                                 b.const_i32(4)))
+
+                    with b.scf_if(b.lnot(is_owner)):
+                        s_base = b.add(t_base, b.mul(slot, c_tile))
+                        for j, (ai, q) in enumerate(pieces):
+                            acc = final_accs_in[ai]
+                            if acc.type.count == 4:
+                                v = acc
+                            else:
+                                v = b.vec_pack(
+                                    [b.vec_extract(acc, 4 * q + e) for e in range(4)], F32
+                                )
+                            if _coh:
+                                b.buffer_store_vN_f32(
+                                    _ws_rsrc, b.mul(_piece_off(s_base, j), b.const_i32(4)), c0,
+                                    v, 4, aux=_aux)
+                            else:
+                                b.global_store_vN(p_sk_partials, _piece_off(s_base, j), v, 4)
+                        if not _coh:
+                            b.fence(scope="agent", ordering="release")
+                        b.sync()
+                        with b.scf_if(b.cmp_eq(tid, c0)):
+                            b.global_atomic_add(p_sk_flags, f_idx, c_1)
+                    with b.scf_if(is_owner):
+                        with b.scf_if(b.cmp_eq(tid, c0)):
+                            b.global_flag_wait_eq(p_sk_flags, f_idx, n_wait, ordering="monotonic")
+                            if not _coh:
+                                b.fence(scope="agent", ordering="acquire")
+                            # Every contribution has counted in: reset for
+                            # the next launch.
+                            b.global_flag_store(p_sk_flags, f_idx, c0, ordering="monotonic")
+                        b.sync()
+                        if not _coh:
+                            b.fence(scope="agent", ordering="acquire")
+                        elif _coh:
+                            # Compiler barrier: no partial load above the wait.
+                            b.fence(scope="workgroup", ordering="acquire")
+                        it = [(f"sdet_a{i}", a) for i, a in enumerate(final_accs_in)]
+                        fold = b.scf_for_iter(c0, n_wait, c_1, it, iv_name="sdet_s")
+                        with fold as (sv, iv):
+                            accs_f = list(iv)
+                            s_base = b.add(t_base, b.mul(sv, c_tile))
+                            if _coh:
+                                loaded = [
+                                    b.buffer_load_vN(
+                                        _ws_rsrc, b.mul(_piece_off(s_base, j), b.const_i32(4)),
+                                        c0, F32, 4, aux=_aux)
+                                    for j in range(len(pieces))
+                                ]
+                            else:
+                                loaded = [
+                                    b.global_load_vN(p_sk_partials, _piece_off(s_base, j), F32, 4)
+                                    for j in range(len(pieces))
+                                ]
+                            new = []
+                            j = 0
+                            for ai, acc in enumerate(accs_f):
+                                n = acc.type.count
+                                if n == 4:
+                                    new.append(b.fadd(acc, loaded[j]))
+                                    j += 1
+                                    continue
+                                parts = []
+                                for q in range(n // 4):
+                                    parts += [b.vec_extract(loaded[j + q], e) for e in range(4)]
+                                j += n // 4
+                                new.append(b.fadd(acc, b.vec_pack(parts, F32)))
+                            b.scf_yield(*new)
+                        epi.store(
+                            b,
+                            accs=list(fold.results),
+                            addr_fn=d_addr,
+                            d_rsrc=d_rsrc,
+                            bounds=(p_M, c_N_bound),
+                        )
+
                 def _atomic():
+                    if spec.split_det:
+                        _det_store()
+                        return
                     if spec.split_zero_first:
                         # The tile was zeroed by its slice 0 at kernel start:
                         # wait for that (normally long done), add, and the

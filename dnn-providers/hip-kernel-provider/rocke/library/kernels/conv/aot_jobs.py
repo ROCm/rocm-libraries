@@ -1670,6 +1670,15 @@ def _fwd_split_atomic_variants(kloop: dict, variant: tuple) -> Tuple[dict, ...]:
         if shy and skx and flat and _os.environ.get("ROCKE_AOT_FWD_SHY_SKX", "0") not in ("", "0"):
             out = out + [dict(v, split_hybrid=e, split_xcd_remap=n)
                          for e in shy for n in skx for v in base]
+        # ROCKE_AOT_FWD_SDET=2[,1]: each (but the flag-store / zero-first /
+        # stream-K ones) also as the deterministic split-K binary of that mode
+        # (split_det: owner-ordered f32 partial fold, no atomics into D). ADD.
+        for m in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_SDET", "").split(",") if t.strip()):
+            out = out + [
+                dict(v, split_det=m) for v in out
+                if not v.get("split_flag_store") and not v.get("split_zero_first")
+                and not v.get("split_streamk")
+            ]
     return tuple(out)
 
 

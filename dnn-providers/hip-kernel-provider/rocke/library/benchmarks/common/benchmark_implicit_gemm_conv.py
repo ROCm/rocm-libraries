@@ -5864,6 +5864,7 @@ def _signature_for_identity(ident, dtype):
         split_tail=bool(getattr(ident, "split_tail", False)),
         split_flags=bool(getattr(ident, "split_flag_store", False)
                          or getattr(ident, "split_zero_first", False)),
+        **({"split_det": True} if getattr(ident, "split_det", False) else {}),
     )
 
 
@@ -6724,8 +6725,37 @@ def _cached_bind(
             rt.memset_async(dw_ptr, 0, dw_bytes, stream)
             _launch()
 
+    elif (
+        direction == "fwd"
+        and ident.split_k > 1
+        and not ident.two_stage
+        and int(getattr(ident, "split_det", 0)) == 3
+    ):
+        # split_det 3: the kernel stores every contribution's f32 partial into
+        # its own [M, K] slab; Stage 2 (the wgrad workspace fold over an
+        # M x K "dW") sums them in slab order and casts into D.
+        from kernels.common._conv_implicit_gemm_common import ConvProblem as _CP
+        from kernels.common.conv_args import ConvArgs as _CA
+
+        _gm = _CA.from_problem(problem, tile_m=ident.tile_m, tile_n=ident.tile_n).gemm_m
+        _fold_p = _CP(N=1, Hi=1, Wi=1, C=problem.K, K=_gm, Y=1, X=1)
+        s2_launcher, s2_spec = _stage2_reduce(
+            _fold_p, ident.dtype_d, arch, stage2_kernels, KernelLauncher,
+            extras["det_slabs"], rezero_ok=False,
+        )
+        s2_values, s2_cfg = _stage2_launch(
+            s2_spec, ws_ptr=extras["sk_partials"], ws_bytes=extras["det_slab_bytes"],
+            dw_ptr=ptrs[2], dw_bytes=sizes[2],
+        )
+        _launch = run
+
+        def run(_launch=_launch, s2_launcher=s2_launcher, s2_values=s2_values, s2_cfg=s2_cfg):
+            _launch()
+            s2_launcher(s2_values, config=s2_cfg)
+
     elif direction == "fwd" and ident.split_k > 1 and not ident.two_stage and (
         getattr(ident, "split_flag_store", False) or getattr(ident, "split_zero_first", False)
+        or getattr(ident, "split_det", False)
     ):
         # Slice 0 of every split tile stores plainly (split_flag_store): D
         # needs no clear.
@@ -7097,6 +7127,48 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         if getattr(ident, "split_tail", False):
             # The tiles that run unsplit (TailSplit); 0 = split every tile.
             extras["full_tiles"] = getattr(split_k, "full_tiles", 0)
+        if getattr(ident, "split_det", False):
+            # split_det: one i32 counter per output tile (zeroed once, the
+            # owner resets it) and the f32 partial-tile slots, in one buffer.
+            from kernels.common.conv_implicit_gemm import fwd_split_det_slots
+
+            _a = ConvArgs.from_problem(
+                problem, tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
+            )
+            _tiles = _a.num_pid_m * _a.num_pid_n
+            fb = 8 * _tiles * max(1, problem.groups)
+            fb = -(-fb // 256) * 256
+            slots = fwd_split_det_slots(
+                _tiles, max(1, problem.groups), int(split_k),
+                split_tail=bool(getattr(ident, "split_tail", False)),
+                full_tiles=int(extras.get("full_tiles", 0) or 0),
+                split_hybrid=int(getattr(ident, "split_hybrid", 0) or 0),
+            )
+            nb = fb + 4 * ident.tile_m * ident.tile_n * max(1, slots)
+            if nb > (1 << 31) - 4:
+                # The partial slots are addressed by i32 byte offsets.
+                raise ValueError(f"split_det: {slots} partial-tile slots exceed 2 GiB")
+            if int(getattr(ident, "split_det", 0)) == 3:
+                # Two-stage: one [M, K] f32 slab per contribution.
+                from kernels.common.conv_implicit_gemm import fwd_split_det_slabs
+
+                extras["det_slabs"] = fwd_split_det_slabs(
+                    _tiles, int(split_k), split_hybrid=int(getattr(ident, "split_hybrid", 0) or 0)
+                )
+                extras["det_slab_bytes"] = 4 * _a.gemm_m * problem.K * extras["det_slabs"]
+                # The fold's i32 ws_bytes kernarg and its gridDim.y (M / 4
+                # rows per workgroup) bound the launch.
+                if extras["det_slab_bytes"] > (1 << 31) - 4 or -(-_a.gemm_m // 4) > 65535:
+                    raise ValueError(
+                        f"split_det 3: {extras['det_slabs']} [M={_a.gemm_m}, K={problem.K}] f32 "
+                        f"slabs exceed the fold's limits (2 GiB scratch, 65535 x 4 rows)"
+                    )
+                nb = fb + extras["det_slab_bytes"]
+            fl = rt.alloc(nb)
+            rt.memset(fl, 0, nb)
+            extras["sk_flags"] = fl
+            extras["sk_partials"] = int(fl) + fb
+            extras["sk_flags_bytes"] = nb
         if getattr(ident, "split_streamk", False) or getattr(ident, "split_hybrid", 0):
             # Stream-K / split_hybrid: a flat grid of ``split_k`` workgroups.
             return extras, (int(split_k), 1, 1)

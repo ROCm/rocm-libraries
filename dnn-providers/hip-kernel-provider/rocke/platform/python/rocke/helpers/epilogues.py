@@ -796,8 +796,11 @@ class CShuffleEpilogue:
         bf16 atomic-adds in place of the buffer stores."""
         atom = self.atom
         grid = self.grid
-        if atom is None or fp32_out or not bf16_out:
-            raise ValueError("m_chunks > 1: MFMA bf16 output only (prototype)")
+        if atom is None or (fp32_out and atomic is not None) or not (bf16_out or fp32_out):
+            raise ValueError("m_chunks > 1: MFMA bf16 (or fp32 buffer-store) output only (prototype)")
+        # fp32 output (the f32 partial slabs of a deterministic split-K):
+        # the slab is staged in f32 and stored with 16-byte f32 stores.
+        _st_dt = F32 if fp32_out else BF16
         mc = self.m_chunks
         mfmas_m = grid.mfmas_per_warp_m
         mfmas_n = grid.mfmas_per_warp_n
@@ -824,7 +827,7 @@ class CShuffleEpilogue:
         warp_m_off_c = b.mul(grid.warp_m_idx, b.const_i32(cm * am))
         c_threads = b.const_i32(threads)
         c_tile_n_div_vec = b.const_i32(grid.tile_n // sv)
-        c_elem_bytes = b.const_i32(2)
+        c_elem_bytes = b.const_i32(4 if fp32_out else 2)
         oob_sentinel = b.const_i32((1 << 31) - 1)
         c_slab = b.const_i32(cm * am)
         c_wrows = b.const_i32(mfmas_m * am)
@@ -837,8 +840,8 @@ class CShuffleEpilogue:
                 mi = c * cm + mi_l
                 for ni in range(mfmas_n):
                     acc = accs[mi * mfmas_n + ni]
-                    acc_staged = b.vec_trunc_f32_to_bf16(acc)
-                    dt = make_static_distributed_tensor(dist, dtype=BF16)
+                    acc_staged = acc if fp32_out else b.vec_trunc_f32_to_bf16(acc)
+                    dt = make_static_distributed_tensor(dist, dtype=_st_dt)
                     for i in range(atom.c_per_lane):
                         dt.set([i, 0], b.vec_extract(acc_staged, i))
                     tile_m_base = b.add(warp_m_off_c, b.const_i32(mi_l * am))
@@ -968,6 +971,10 @@ class CShuffleEpilogue:
                 )
                 off_bytes = b.mul(off_elems, c_elem_bytes)
                 safe = b.select(ok, off_bytes, oob_sentinel) if ok is not None else off_bytes
+                if fp32_out:
+                    vf = b.smem_load_vN(c_smem, row, col, dtype=F32, n=sv)
+                    b.buffer_store_vN_f32(d_rsrc, safe, b.const_i32(0), vf, sv)
+                    continue
                 vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=sv)
                 b.buffer_store_vN_bf16(d_rsrc, safe, b.const_i32(0), vbf, sv // 2)
 

@@ -320,6 +320,7 @@ def conv_arg_names(
     split_k: bool = False,
     split_tail: bool = False,
     split_flags: bool = False,
+    split_det: bool = False,
 ) -> List[ArgSpec]:
     """The implicit-GEMM conv kernarg ABI for one direction.
 
@@ -387,7 +388,15 @@ def conv_arg_names(
             if not split_k:
                 raise ValueError("split_flags extends the fwd split-K ABI only")
             out += [("sk_flags", "i32*")]
+        if split_det:
+            # ImplicitGemmConvSpec.split_det: the per-tile counters and the
+            # f32 partial-tile slots.
+            if not split_k or split_flags:
+                raise ValueError("split_det extends the fwd split-K ABI only (no split_flags)")
+            out += [("sk_flags", "i32*"), ("sk_partials", "f32*")]
         return out
+    if split_det:
+        raise ValueError("split_det is a fwd-only variant")
     if direction == "wgrad":
         return _wgrad_arg_names(
             is_3d=is_3d, two_stage=two_stage, streamk=streamk,
@@ -535,6 +544,7 @@ def conv_args_signature(
     split_k: bool = False,
     split_tail: bool = False,
     split_flags: bool = False,
+    split_det: bool = False,
 ) -> List[Dict[str, Any]]:
     """Implicit-GEMM conv launch signature for one direction.
 
@@ -557,6 +567,7 @@ def conv_args_signature(
             split_k=split_k,
             split_tail=split_tail,
             split_flags=split_flags,
+            **({"split_det": True} if split_det else {}),
         ),
         dtype,
         dtype_b or dtype,

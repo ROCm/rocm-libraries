@@ -363,6 +363,8 @@ class KernelIdentity:
     sched_strategy: int = 0
     # fwd only (ImplicitGemmConvSpec.split_tail_compact). Left out of the hash at False.
     split_tail_compact: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_det). Left out of the hash at 0.
+    split_det: int = 0
     # fwd only (ImplicitGemmConvSpec.epi_quad_xpose). Left out of the hash at 0.
     epi_quad_xpose: int = 0
     # fwd and dgrad (ImplicitGemmConvSpec.no_agpr, DgradConvSpec.no_agpr). Left out of the hash while False.
@@ -608,7 +610,7 @@ class KernelIdentity:
             "split_streamk", "split_flag_store", "xh_subtile", "split_atomic_fast",
             "epi_store_fast", "split_zero_first", "pp_fetch_deep",
             "pp_split_fetch", "fb_skip_empty", "pp_end_guard",
-            "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact",
+            "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact", "split_det",
             "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring", "xh_dlds", "xh_epi_lin", "xh_tap_rsrc",
         ):
             if not fields[name]:

@@ -6122,7 +6122,7 @@ class _Lowerer:
             f"ptr addrspace(8) {self._operand(rsrc)}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
-            f"i32 0)"
+            f"i32 {int(op.attrs.get('aux', 0))})"
         )
         self._current().emit(
             f"  {op.result.name} = bitcast {form.llvm_type} {tmp} to "
@@ -6389,7 +6389,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('aux', 0))})"
             )
 
     def _op_tile_async_buffer_load_lds(self, op: Op) -> None:
