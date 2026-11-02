@@ -111,8 +111,14 @@ if(NOT HIPSPARSELT_ENABLE_CUDA)
         hipsparselt_validate_gpu_targets("${GPU_TARGETS}")
     endif()
 
-    # Save original targets (with :xnack- suffix) for TensileCreateLibrary
-    set(TENSILELITE_GPU_TARGETS "${GPU_TARGETS}" CACHE STRING "AMD GFX targets for Tensilelite" FORCE)
+    # Save original targets (with :xnack- suffix) for TensileCreateLibrary, which
+    # needs the suffix the next line strips for hip::device. A normal variable,
+    # as hipBLASLt keeps it: both readers are inside this configure -- the
+    # create_device_library() call below, and the embedded hipBLASLt, which
+    # inherits it through block(). A cache entry would additionally be offered
+    # as something to set, and then overwritten from GPU_TARGETS on the next
+    # configure, since it is derived rather than chosen.
+    set(TENSILELITE_GPU_TARGETS "${GPU_TARGETS}")
 
     # Strip xnack suffix from xnack_any platforms (e.g. gfx1250) for hip::device
     # offload targets. find_package(hip) bakes GPU_TARGETS into --offload-arch on
