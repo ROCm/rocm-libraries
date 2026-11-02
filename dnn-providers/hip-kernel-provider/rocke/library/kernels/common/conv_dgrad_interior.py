@@ -70,6 +70,41 @@ def dx_interior_keeps_w(identity) -> bool:
     )
 
 
+def dx_interior_writes_w(identity) -> bool:
+    """Does the interior launch still store the w shell columns of interior
+    rows? (The full-W view without the x-halo store mask, xh_dx_wmask.)"""
+    return dx_interior_keeps_w(identity) and not getattr(identity, "xh_dx_wmask", False)
+
+
+def wmask_view(p):
+    """``xh_dx_wmask`` on a ``pW = (X-1)/2`` problem: the x-halo loop runs the
+    W-extended view (``Wi + 2 hw``, ``pW = 0``; same dY), its dX origin ``hw``
+    pixels before dX's (those columns are masked out of the stores).
+    Returns ``(view problem, element offset (negative), dX stride kernargs)``."""
+    hd, hh, hw = halo_widths(p)
+    v = dc_replace(p, Wi=int(p.Wi) + 2 * hw, pW=0)
+    s = _full_strides(p)
+    vals = {"p_dX_stride_n": s["n"], "p_dX_stride_hi": s["hi"], "p_dX_stride_wi": s["wi"]}
+    if p.is_3d:
+        vals["p_dX_stride_di"] = s["di"]
+    return v, -hw * s["wi"], vals
+
+
+def launch_view(identity, p):
+    """``(problem, dX element offset, dX stride kernargs or {}, pixel map or None)``
+    an interior / W-masked launch of ``identity`` on ``p`` binds."""
+    if getattr(identity, "dx_interior", 0):
+        if not dx_interior_uses_view(identity):
+            return p, 0, {}, None
+        keep_w = dx_interior_keeps_w(identity)
+        off, vals = interior_view_dx(p, keep_w)
+        return interior_view_problem(p, keep_w), off, vals, view_pixel_map(p, keep_w)
+    if getattr(identity, "xh_dx_wmask", False):
+        v, off, vals = wmask_view(p)
+        return v, off, vals, None
+    return p, 0, {}, None
+
+
 def halo_widths(p) -> Tuple[int, int, int]:
     """``(hd, hh, hw)``: the halo shell's width per axis ((F - 1) / 2; hd = 0 in 2-D)."""
     hd = (int(p.Z) - 1) // 2 if p.is_3d else 0
@@ -126,6 +161,11 @@ def interior_view_dx(p, keep_w: bool) -> Tuple[int, Dict[str, int]]:
     }
     if p.is_3d:
         vals["p_dX_stride_di"] = s["di"]
+        if int(p.N) == 1:
+            # One image: its stride is never used; the view's own (Do planes)
+            # keeps the n-stride check of the plane-gapped linear store
+            # (xh_dx_wmask with xh_epi_lin) true.
+            vals["p_dX_stride_n"] = s["di"] * int(p.Do)
     return off, vals
 
 

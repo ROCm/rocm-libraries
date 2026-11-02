@@ -390,6 +390,8 @@ class KernelIdentity:
     xh_epi_lin: bool = False
     # dgrad only (DgradConvSpec.xh_tap_rsrc). Left out of the hash while False.
     xh_tap_rsrc: bool = False
+    # dgrad only (DgradConvSpec.xh_dx_wmask). Left out of the hash while False.
+    xh_dx_wmask: bool = False
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
     # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
@@ -627,7 +629,7 @@ class KernelIdentity:
             "epi_store_fast", "split_zero_first", "pp_fetch_deep",
             "pp_split_fetch", "fb_skip_empty", "pp_end_guard",
             "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact", "split_det",
-            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring", "xh_dlds", "xh_epi_lin", "xh_tap_rsrc",
+            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m", "fxh_dma", "xh_yring", "xh_dlds", "xh_epi_lin", "xh_tap_rsrc", "xh_dx_wmask",
         ):
             if not fields[name]:
                 del fields[name]
@@ -1136,6 +1138,24 @@ def identity_supports_problem(
                     f"divide the problem's contiguous run of {run}"
                 )
 
+    # xh_dx_wmask (the x-halo W-column store mask) without dx_interior: the
+    # binary serves pW = (X-1)/2 problems through their W-extended view.
+    if (
+        identity.direction == "dgrad"
+        and getattr(identity, "xh_dx_wmask", False)
+        and not getattr(identity, "dx_interior", 0)
+    ):
+        from kernels.common.conv_dgrad_interior import wmask_view
+
+        hw = (int(getattr(problem, "X", 1)) - 1) // 2
+        if not identity.tapk_xhalo or hw < 1 or int(getattr(problem, "pW", 0)) != hw:
+            return False, "xh_dx_wmask serves pW == (X-1)/2 problems (or a dx_interior launch)"
+        if int(getattr(problem, "sW", 1)) != 1 or int(getattr(problem, "dW", 1)) != 1:
+            return False, "xh_dx_wmask serves stride 1 / dilation 1 W"
+        return identity_supports_problem(
+            dataclasses.replace(identity, xh_dx_wmask=False), wmask_view(problem)[0], llvm_flavor
+        )
+
     # dx_interior: the launch runs the interior view problem (see
     # kernels/common/conv_dgrad_interior.py); only the families and
     # reductions that write dX without a zeroed buffer.
@@ -1164,7 +1184,7 @@ def identity_supports_problem(
             return identity_supports_problem(
                 dataclasses.replace(identity, dx_interior=0), problem, llvm_flavor
             )
-        base = dataclasses.replace(identity, dx_interior=0)
+        base = dataclasses.replace(identity, dx_interior=0, xh_dx_wmask=False)
         return identity_supports_problem(
             base, interior_view_problem(problem, dx_interior_keeps_w(identity)), llvm_flavor
         )
@@ -1379,6 +1399,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "m_band",
     "xwin_kband",
     "xh_tap_rsrc",
+    "xh_dx_wmask",
     "xh_yring",
 )
 

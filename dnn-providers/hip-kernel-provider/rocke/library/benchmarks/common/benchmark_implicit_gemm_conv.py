@@ -624,7 +624,7 @@ def _verify_interior(*, rt, run, ident, problem, out_dev, out_t, ref_out, label,
 
     from kernels.common.conv_dgrad_interior import (
         DXI_ZERO,
-        dx_interior_keeps_w,
+        dx_interior_writes_w,
         interior_mask_np,
         written_mask_np,
     )
@@ -636,7 +636,7 @@ def _verify_interior(*, rt, run, ident, problem, out_dev, out_t, ref_out, label,
     rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
     out = out_cpu.float()
     ref = ref_out.float().cpu()
-    keep_w = dx_interior_keeps_w(ident)
+    keep_w = dx_interior_writes_w(ident)
     zero = ident.dx_interior == DXI_ZERO
     comp = torch.from_numpy(interior_mask_np(problem) if zero else written_mask_np(problem, keep_w))
     halo = ~comp
@@ -7057,26 +7057,17 @@ def _cached_bind_interior(
         DgradHaloZeroSpec,
         build_dgrad_halo_zero,
         dgrad_halo_zero_signature,
-        dx_interior_keeps_w,
-        dx_interior_uses_view,
         halo_zero_launch,
-        interior_view_dx,
-        interior_view_problem,
-        view_pixel_map,
+        launch_view,
     )
 
     from benchmarks.common.kernel_sweep import _launch_values_for
 
     n_elem = problem.N * (problem.Di if problem.is_3d else 1) * problem.Hi * problem.Wi * problem.C
     eb = sizes[2] // n_elem
-    if dx_interior_uses_view(ident):
-        keep_w = dx_interior_keeps_w(ident)
-        vp = interior_view_problem(problem, keep_w)
-        off_e, stride_vals = interior_view_dx(problem, keep_w)
-        pix_map = view_pixel_map(problem, keep_w)
-    else:
-        # pp_boxes: interior records of the halo problem (dgrad_sub_gemms).
-        vp, off_e, stride_vals, pix_map = problem, 0, {}, None
+    # (pp_boxes + dx_interior: the halo problem with interior records;
+    # xh_dx_wmask without dx_interior: the W-extended view of a pW=1 problem)
+    vp, off_e, stride_vals, pix_map = launch_view(ident, problem)
     vptrs = (ptrs[0], ptrs[1], ptrs[2] + off_e * eb)
     vsizes = (sizes[0], sizes[1], sizes[2] - off_e * eb)
     try:
@@ -7160,7 +7151,7 @@ def _cached_bind(
     from benchmarks.common.kernel_sweep import _launch_values_for
 
     dxi = getattr(ident, "dx_interior", 0) if direction == "dgrad" else 0
-    if dxi:
+    if dxi or (direction == "dgrad" and getattr(ident, "xh_dx_wmask", False)):
         # Interior-only dX (kernels/common/conv_dgrad_interior.py): the
         # binary runs the interior view problem, its dX the full tensor's
         # interior (offset pointer, full strides).

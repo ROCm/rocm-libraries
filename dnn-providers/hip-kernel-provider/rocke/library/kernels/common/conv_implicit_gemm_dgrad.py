@@ -1797,6 +1797,16 @@ class DgradConvSpec:
     # straight to dX (one 8-byte buffer store each, no LDS staging).
     # Default 0; tags ``xep<n>``.
     xh_epi: int = 0
+    # With tapk_xhalo and the x-halo cshuffle epilogue (xh_epi >= 1, 3-D):
+    # store only the dX pixels with (X-1)/2 <= wi < Wi - (X-1)/2 -- the x-halo
+    # loop needs pW == 0 (full W rows), so this is how it computes an
+    # interior-only dX (KernelIdentity.dx_interior: the halo shell columns
+    # untouched) or a pW = (X-1)/2 problem launched on its W-extended view.
+    # With xh_epi_lin the linear store offset also accepts a gap between
+    # (n, d) planes (m * stride_w + plane * (stride_d - Hi * stride_h)), so
+    # a D/H interior view of a larger dX keeps the linear stores. Default
+    # False; tags ``xwm``.
+    xh_dx_wmask: bool = False
     # With tapk_xhalo (split_k 1, stride 1; launched for groups == 1): a
     # persistent grid of n workgroups per CU (dgrad_persistent_grid); each
     # walks the output tiles bid, bid + gridDim, ... (the XCD order applied
@@ -2243,6 +2253,7 @@ class DgradConvSpec:
                 "elb": self.epi_lds_barriers and not self.pp_boxes,
                 "xtr": self.xh_tap_rsrc,
                 f"xyr{self.xh_yring}": self.xh_yring > 0,
+                "xwm": self.xh_dx_wmask,
                 "nag": self.no_agpr,
                 # The launch-order tile walk (A/B knob, see xcd_tile_order).
                 "noxcd": not self.xcd_tile_order,
@@ -3345,6 +3356,10 @@ def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
                     "xh_a_k4, xh_b_wide, tapk_ztrim 1 (zt0 failed verify on s2), no split-K / "
                     "xh_persist, and a ring "
                     "of P = k * Wi >= tile_m + X - 1 rows within the A slab")
+    if spec.xh_dx_wmask and not (
+            spec.tapk_xhalo and spec.xh_epi >= 1 and spec.problem.is_3d
+            and spec.epilogue == "cshuffle"):
+        return "xh_dx_wmask needs the 3-D x-halo loop with its cshuffle epilogue (xh_epi >= 1)"
     if spec.xh_epi_lin and not (
             (spec.tapk_xhalo and spec.xh_epi == 1 and spec.split_k == 1
              and spec.epilogue == "cshuffle") or _pp_dense_epi(spec)):
@@ -10640,6 +10655,21 @@ def _xh_f32x4_to_bf16_perm(b: IRBuilder, vals: Sequence[Value]) -> Value:
     return b.vec_bitcast(b.vec_pack(words, _I32), _VT(BF16, 4))
 
 
+def _xh_wmask_wrap(b: IRBuilder, spec: "DgradConvSpec", params: Dict[str, Value], fn):
+    """``xh_dx_wmask``: ``fn``'s store valid only for (X-1)/2 <= wi < Wi - (X-1)/2."""
+    md_w = _MagicDiv(params["p_Wi"], params["p_magic_m_Wi_mult"], params["p_magic_m_Wi_shift"])
+    hw_c = b.const_i32((spec.problem.X - 1) // 2)
+    w_hi = b.sub(params["p_Wi"], hw_c)
+
+    def f(b_: IRBuilder, m_val: Value, n_val: Value):
+        off, valid = fn(b_, m_val, n_val)
+        _q, wi = _magic_divmod(b_, m_val, md_w)
+        ok = b_.land(b_.cmp_ge(wi, hw_c), b_.cmp_lt(wi, w_hi))
+        return off, ok if valid is None else b_.land(valid, ok)
+
+    return f
+
+
 def _emit_xh_cshuffle_epilogue(
     b: IRBuilder,
     spec: DgradConvSpec,
@@ -10659,6 +10689,8 @@ def _emit_xh_cshuffle_epilogue(
     from rocke.helpers.tensor_view import make_lds_view
 
     dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, params, c_group_base)
+    if spec.xh_dx_wmask:
+        dx_addr = _xh_wmask_wrap(b, spec, params, dx_addr)
     atom = spec.atom
     if spec.xh_epi == 3:
         # Direct, 16-byte stores: lanes l and l ^ 16 hold 4-channel groups g
@@ -10789,6 +10821,29 @@ def _emit_xh_cshuffle_epilogue(
         def dx_lin(b_: IRBuilder, m_val: Value, n_val: Value):
             c_ = b_.add(n_val, c_group_base) if c_group_base is not None else n_val
             return b_.add(b_.mul(m_val, sw), c_), None
+
+        if spec.xh_dx_wmask:
+            # Rows and planes may sit apart (an interior view of a larger
+            # dX, or a W-extended view of a narrower one): offset = m * sw
+            # + row * (sh - Wi * sw) + plane * (sd - Hi * sh); only the
+            # image stride must be consistent.
+            sd = params["p_dX_stride_di"]
+            lin_ok = b.cmp_eq(params["p_dX_stride_n"], b.mul(sd, params["p_Di"]))
+            rgap = b.sub(sh, b.mul(sw, params["p_Wi"]))
+            gap = b.sub(sd, b.mul(sh, params["p_Hi"]))
+            md_w = _MagicDiv(params["p_Wi"], params["p_magic_m_Wi_mult"], params["p_magic_m_Wi_shift"])
+            md_h = _MagicDiv(params["p_Hi"], params["p_magic_m_Hi_mult"], params["p_magic_m_Hi_shift"])
+            hw_c = b.const_i32((spec.problem.X - 1) // 2)
+            w_hi = b.sub(params["p_Wi"], hw_c)
+
+            def dx_lin(b_: IRBuilder, m_val: Value, n_val: Value):
+                c_ = b_.add(n_val, c_group_base) if c_group_base is not None else n_val
+                q, wi = _magic_divmod(b_, m_val, md_w)
+                plane, _h = _magic_divmod(b_, q, md_h)
+                off = b_.add(
+                    b_.add(b_.add(b_.mul(m_val, sw), b_.mul(q, rgap)), b_.mul(plane, gap)), c_
+                )
+                return off, b_.land(b_.cmp_ge(wi, hw_c), b_.cmp_lt(wi, w_hi))
 
     for c in range(mc):
         b.sync()
