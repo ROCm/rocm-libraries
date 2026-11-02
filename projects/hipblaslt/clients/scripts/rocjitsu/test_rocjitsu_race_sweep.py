@@ -640,6 +640,26 @@ class SweepTests(unittest.TestCase):
             self.assertEqual(
                 run.call_args.args[0].hardware_profiles, [Path("first.json"), Path("second.json")]
             )
+        with (
+            patch.object(sys, "argv", required + ["--hardware-profile-template", "t.json"]),
+            patch.object(sweep, "run", return_value=0) as run,
+        ):
+            self.assertEqual(sweep.main(), 0)
+            self.assertEqual(
+                run.call_args.args[0].hardware_profile_template, Path("t.json").resolve()
+            )
+        for flags in (
+            ["--hardware-profile-template", "t.json", "--config", "c.json"],
+            ["--hardware-profile-template", "t.json", "--hardware-profile", "first.json"],
+        ):
+            with (
+                self.subTest(flags=flags),
+                patch.object(sys, "argv", required + flags),
+                patch.object(sys, "stderr", io.StringIO()),
+                patch.object(sweep, "run") as run,
+                self.assertRaises(SystemExit),
+            ):
+                sweep.main()
 
     def test_native_chip_fallback_is_directed_and_profile_batches_do_not_mix(self):
         devices = {
@@ -694,6 +714,115 @@ class SweepTests(unittest.TestCase):
                 root, "gfx950", {}, 0, 4, plan.REGULAR_POLICY, profiles={"mi355": devices["mi355"]}
             )
             self.assertEqual(len(plan.make_batches(single["jobs"], 64, group_by_shard=True)), 1)
+
+    def test_devices_derived_from_a_template_cover_the_catalogue_predicates(self):
+        processor = {"type": "Processor", "value": "gfx950"}
+        chip = lambda value: {"type": "PciChipId", "value": value}
+        cus = lambda value: {"type": "CUCount", "value": value}
+        predicates = [
+            processor,
+            {"type": "And", "value": [processor, chip(0x75A0)]},
+            {"type": "And", "value": [processor, cus(128), chip(0x75A0)]},
+            {"type": "And", "value": [processor, {"type": "Or", "value": [chip(0x75A3)]}]},
+            {"type": "And", "value": [processor, cus(256), chip(0x75A8)]},
+            {"type": "Processor", "value": "gfx942"},
+        ]
+        template = {"device_id": 0x75A0, "simd_count": 1024, "simd_per_cu": 4, "other": 1}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for number, shard in enumerate((predicates[:3], predicates[3:])):
+                records = [solution(i + 10 * number) for i in range(len(shard))]
+                for record, predicate in zip(records, shard):
+                    record["hardwarePredicate"] = {"type": "AMDGPU", "value": predicate}
+                path = root / f"shard{number}_gfx950.dat"
+                path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            devices = plan.derive_devices(root, "gfx950", template)
+            self.assertEqual(plan.derive_devices(root, "gfx950", template, workers=2), devices)
+        self.assertEqual(devices[0], template)
+        self.assertEqual(
+            sorted((d["device_id"], d["simd_count"] // 4) for d in devices[1:]),
+            [(0x75A0, 128), (0x75A3, 256), (0x75A8, 256)],
+        )
+        self.assertTrue(all(d["other"] == 1 for d in devices))
+        self.assertEqual(
+            next(d for d in devices if d["device_id"] == 0x75A8)["marketing_name"],
+            "gfx950 emulated PCI 0x75a8, 256 CUs",
+        )
+        for predicate in predicates[:-1]:
+            self.assertTrue(any(plan.matches_hardware(predicate, "gfx950", d) for d in devices))
+
+    def test_template_profiles_are_written_and_identified_by_their_configuration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = [solution(i) for i in range(2)]
+            records[1]["hardwarePredicate"] = {
+                "type": "And",
+                "value": [
+                    {"type": "Processor", "value": "gfx942"},
+                    {"type": "CUCount", "value": 1},
+                ],
+            }
+            path = root / "library_gfx942.dat"
+            path.write_bytes(msgpack.packb({"solutions": records}, use_bin_type=True))
+            path.with_suffix(".co").write_bytes(b"kernel")
+            template = root / "template.json"
+            template.write_text(
+                json.dumps(
+                    {
+                        "vm": {
+                            "gpu": {
+                                "device": {
+                                    "gfx_target_version": 90402,
+                                    "simd_count": 8,
+                                    "simd_per_cu": 4,
+                                    "num_shader_engines": 1,
+                                    "num_shader_arrays_per_engine": 1,
+                                    "num_cu_per_sh": 2,
+                                }
+                            }
+                        },
+                        "topology": {
+                            "root": {
+                                "name": "soc",
+                                "type": "soc",
+                                "children": [{"name": "cu[0:2]", "type": "compute_unit"}],
+                            }
+                        },
+                    }
+                )
+            )
+            failures = root / "failures.yaml"
+            failures.write_text(yaml.safe_dump({**failure_list(), "failures": []}))
+            manifests = []
+            for reports in ("first", "second"):
+                args = SimpleNamespace(
+                    reports=root / reports,
+                    backend="tensile",
+                    workers=1,
+                    policy=plan.POLICY,
+                    target="gfx942",
+                    library_dir=root,
+                    solution_index_range_begin=0,
+                    solution_index_range_end=None,
+                    config=None,
+                    hardware_profiles=None,
+                    hardware_profile_template=template,
+                    rocjitsu=path.with_suffix(".co"),
+                    client=path.with_suffix(".co"),
+                    known_failures=failures,
+                    rocjitsu_revision="a" * 40,
+                    run_known_failures=True,
+                )
+                args.reports.mkdir()
+                manifest, configs = sweep.prepare(args)
+                manifests.append(manifest)
+            self.assertEqual(sorted(configs), ["profile-000", "profile-001"])
+            written = json.loads(configs["profile-001"].read_text())
+            self.assertEqual(written["vm"]["gpu"]["device"]["simd_count"], 4)
+            self.assertEqual(written["topology"], json.loads(template.read_text())["topology"])
+            self.assertEqual([j["profile"] for j in manifest["jobs"]], list(configs))
+            hashes = [{k: p["sha256"] for k, p in m["profiles"].items()} for m in manifests]
+            self.assertEqual(hashes[0], hashes[1])
 
     def test_explicit_profile_rejects_conflicting_device_and_topology_resources(self):
         config = {

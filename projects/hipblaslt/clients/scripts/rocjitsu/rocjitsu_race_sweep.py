@@ -25,6 +25,7 @@ from rocjitsu_known_failures import apply_known_failures
 from rocjitsu_sweep_plan import (
     POLICY,
     REGULAR_POLICY,
+    derive_devices,
     make_batches,
     make_plan,
     sha256,
@@ -255,11 +256,24 @@ def render_report(manifest, summary):
 def prepare(args):
     begin = time.monotonic()
     explicit_profiles = getattr(args, "hardware_profiles", None)
+    template = getattr(args, "hardware_profile_template", None)
+    if template is not None:
+        template_config = json.loads(template.read_text(encoding="utf-8"))
+        validate_profile(template_config, args.target)
+        devices = derive_devices(
+            args.library_dir, args.target, template_config["vm"]["gpu"]["device"], args.workers
+        )
+        sources = [(template, device) for device in devices]
+    else:
+        sources = [(path, None) for path in explicit_profiles or [args.config]]
     configs, profiles = {}, {}
-    for number, path in enumerate(explicit_profiles or [args.config]):
-        name = f"profile-{number:03}" if explicit_profiles else "default"
+    for number, (path, device) in enumerate(sources):
+        named = explicit_profiles or template is not None
+        name = f"profile-{number:03}" if named else "default"
         base = json.loads(path.read_text(encoding="utf-8"))
-        if explicit_profiles:
+        if device is not None:
+            base["vm"]["gpu"]["device"] = device
+        if named:
             validate_profile(base, args.target)
         base.update(
             max_ticks=0,
@@ -270,12 +284,13 @@ def prepare(args):
         )
         base["plugins"] = {"race": {}}
         base["sinks"] = {"types": ["stderr"]}
-        config = args.reports / (f"{name}.json" if explicit_profiles else "rocjitsu.json")
+        config = args.reports / (f"{name}.json" if named else "rocjitsu.json")
         write_json(config, base)
         configs[name] = config
         profiles[name] = {
             "source": str(path),
-            "sha256": sha256(path),
+            # A derived profile is identified by the configuration written from the template.
+            "sha256": sha256(config if device is not None else path),
             "config": str(config),
             "device": base["vm"]["gpu"]["device"],
         }
@@ -1850,6 +1865,14 @@ def main():
         action="append",
         help="Complete emulator profile; repeat to select among profiles instead of --config",
     )
+    configuration.add_argument(
+        "--hardware-profile-template",
+        type=Path,
+        help=(
+            "Complete emulator profile from which to derive one profile per PCI chip ID and "
+            "CU count that the catalogue's hardware predicates need"
+        ),
+    )
     parser.add_argument(
         "--resume-from",
         type=Path,
@@ -1997,7 +2020,15 @@ def main():
             "finite positive timeouts and memory budget, positive reduction blocks, "
             "and finite scalars"
         )
-    for key in ("rocjitsu", "client", "config", "library_dir", "reports", "resume_from"):
+    for key in (
+        "rocjitsu",
+        "client",
+        "config",
+        "hardware_profile_template",
+        "library_dir",
+        "reports",
+        "resume_from",
+    ):
         if getattr(args, key) is not None:
             setattr(args, key, getattr(args, key).resolve())
     return run(args)

@@ -248,6 +248,88 @@ def derive_cases(solution):
     return cases
 
 
+def metadata_shards(library_dir, target):
+    """The target's library directory and its metadata shards, in sorted order."""
+    library_dir = library_dir / target if (library_dir / target).is_dir() else library_dir
+    # Prefer compressed metadata just as the native loader does; do not inventory
+    # both representations of a shard if an artifact happens to contain both.
+    libraries = {
+        p.name.removesuffix(".zlib"): p
+        for p in sorted(library_dir.glob(f"*{target}.dat*"))
+        if p.name.endswith((".dat", ".dat.zlib"))
+    }
+    if not libraries:
+        raise ValueError(f"No {target} packaged metadata under {library_dir}")
+    return library_dir, sorted(libraries.values())
+
+
+def _map_shards(function, paths, workers):
+    if workers > 1 and len(paths) > 1:
+        context = multiprocessing.get_context("fork")
+        with concurrent.futures.ProcessPoolExecutor(min(workers, len(paths)), context) as pool:
+            return list(pool.map(function, paths))
+    return list(map(function, paths))
+
+
+def _hardware_leaves(predicate, kind):
+    if predicate["type"] == kind:
+        yield predicate["value"]
+    elif predicate["type"] in {"AMDGPU", "And", "Or"}:
+        children = predicate["value"]
+        for child in children if isinstance(children, list) else [children]:
+            yield from _hardware_leaves(child, kind)
+
+
+def _shard_hardware_predicates(path):
+    return {
+        json.dumps(solution["hardwarePredicate"], sort_keys=True)
+        for _, solution in iterSolutionRecords(path)
+    }
+
+
+def derive_devices(library_dir, target, template, workers=1):
+    """Emulated devices that together match every hardware predicate in a catalogue.
+
+    The first device is the template. Each other device is the template with a
+    PCI chip ID and active CU count taken from the predicates, added for a
+    predicate that no earlier device matches. A predicate that no such device
+    matches is left for the inventory to count as other hardware.
+    """
+    _, paths = metadata_shards(library_dir, target)
+    predicates = sorted(set().union(*_map_shards(_shard_hardware_predicates, paths, workers)))
+    predicates = [json.loads(p) for p in predicates]
+    per_cu = template["simd_per_cu"]
+    leaves = lambda kind: {v for p in predicates for v in _hardware_leaves(p, kind)}
+    chips = [template.get("device_id")]
+    if target == "gfx950":
+        chips += sorted(leaves("PciChipId") - set(chips))
+    cus = [template["simd_count"] // per_cu]
+    cus += sorted(leaves("CUCount") - set(cus), reverse=True)
+    devices = [template]
+    for predicate in predicates:
+        if any(matches_hardware(predicate, target, device) for device in devices):
+            continue
+        for chip in chips:
+            for cu in cus:
+                device = {
+                    **template,
+                    "device_id": chip,
+                    "simd_count": cu * per_cu,
+                    "marketing_name": (
+                        f"{target} emulated"
+                        + ("" if chip is None else f" PCI {chip:#x}")
+                        + f", {cu} CUs"
+                    ),
+                }
+                if matches_hardware(predicate, target, device):
+                    devices.append(device)
+                    break
+            else:
+                continue
+            break
+    return devices
+
+
 class _UnsupportedInInventory(Exception):
     """A selected solution that the inventory found outside the adapter scope."""
 
@@ -358,16 +440,7 @@ def make_plan(
         if policy == REGULAR_POLICY
         else None
     )
-    library_dir = library_dir / target if (library_dir / target).is_dir() else library_dir
-    # Prefer compressed metadata just as the native loader does; do not inventory
-    # both representations of a shard if an artifact happens to contain both.
-    libraries = {
-        p.name.removesuffix(".zlib"): p
-        for p in sorted(library_dir.glob(f"*{target}.dat*"))
-        if p.name.endswith((".dat", ".dat.zlib"))
-    }
-    if not libraries:
-        raise ValueError(f"No {target} packaged metadata under {library_dir}")
+    library_dir, paths = metadata_shards(library_dir, target)
     profiles = profiles or {"default": device}
     inventory = functools.partial(
         _inventory_shard,
@@ -379,21 +452,15 @@ def make_plan(
         range_begin=range_begin,
         range_end=range_end,
     )
-    paths = sorted(libraries.values())
-    if workers > 1 and len(paths) > 1:
-        context = multiprocessing.get_context("fork")
-        with concurrent.futures.ProcessPoolExecutor(min(workers, len(paths)), context) as pool:
-            shards = list(pool.map(inventory, paths))
-    else:
-        shards = list(map(inventory, paths))
+    shards = _map_shards(inventory, paths, workers)
     counts, inputs, coverage_gaps = Counter(), {}, Counter()
     names, eligible_names, indices, requested = set(), set(), set(), {}
     for path, shard in zip(paths, shards):
         inputs[path.name] = shard["sha256"]
-        duplicates = indices.intersection(shard["indices"])
-        if duplicates or len(set(shard["indices"])) != len(shard["indices"]):
-            index = min(duplicates) if duplicates else shard["indices"][0]
-            raise ValueError(f"Duplicate solution index {index} in {path}")
+        repeated = Counter(shard["indices"])
+        duplicates = indices.intersection(repeated) | {i for i, n in repeated.items() if n > 1}
+        if duplicates:
+            raise ValueError(f"Duplicate solution index {min(duplicates)} in {path}")
         indices.update(shard["indices"])
         counts.update(shard["counts"])
         coverage_gaps.update(shard["coverage_gaps"])

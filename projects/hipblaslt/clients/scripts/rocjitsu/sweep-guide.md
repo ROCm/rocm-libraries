@@ -335,9 +335,9 @@ is enabled by this tool.
 
 ## Hardware profiles
 
-`--config` retains the existing single-profile invocation. For profile selection, supply one or more complete emulator JSON configurations using repeated `--hardware-profile PATH` options. These replace `--config` as the candidate device profiles. The planner chooses the first compatible profile per solution, then orders metadata shards within each profile before batching. Profiles remain fixed within a native process, including recovery processes. A batch may cross shard boundaries within that profile.
+`--config` retains the existing single-profile invocation. For profile selection, supply one or more complete emulator JSON configurations using repeated `--hardware-profile PATH` options. These replace `--config` as the candidate device profiles. Alternatively, `--hardware-profile-template PATH` derives the candidates from one stock configuration: the template itself, then for each catalogue hardware predicate that no earlier candidate matches, the template with a PCI chip ID and active CU count (SIMD count) from the predicates. The topology and other resources are the template's, so a derived device can enable fewer CUs than the topology has slots. Derivation reads the whole catalogue, and for the same template and catalogue it produces the same profiles. The planner chooses the first compatible profile per solution, then orders metadata shards within each profile before batching. Profiles remain fixed within a native process, including recovery processes. A batch may cross shard boundaries within that profile.
 
-Profile selection checks the architecture, positive integral CU resources, shader resources and the topology's total CU count. Supply configurations describing the intended device; the runner does not derive a PCI ID or change device resources from a solution predicate. Existing single-profile configurations retain their current behavior. The matcher uses the native directed chip fallback table: for example, gfx950 PCI 0x75a3 can use 0x75a0 solutions, while 0x75a0 cannot use 0x75a3 solutions. A single compatible profile can therefore cover several chip predicates. All supplied profiles and their hashes, normalized execution configurations and per-index assignments are recorded in the manifest.
+Profile selection checks the architecture, positive integral CU resources, shader resources and the topology's total CU count. Explicit configurations must describe the intended device; only the template option derives a PCI ID or CU count from a predicate. Existing single-profile configurations retain their current behavior. The matcher uses the native directed chip fallback table: for example, gfx950 PCI 0x75a3 can use 0x75a0 solutions, while 0x75a0 cannot use 0x75a3 solutions. A single compatible profile can therefore cover several chip predicates. All supplied or derived profiles and their hashes (for a derived profile, of its written configuration), normalized execution configurations and per-index assignments are recorded in the manifest.
 
 ## Running locally
 
@@ -349,12 +349,13 @@ under `share/hipblaslt/tensilelite/rocjitsu`.
 Choose a complete emulator configuration for the intended hardware. Stock
 configurations live in rocJITsu's `configs/` directory. `--config PATH` supplies
 one profile; repeated `--hardware-profile PATH` supplies candidate profiles
-without also requiring `--config`. These forms are mutually exclusive. The runner
-only considers supplied profiles and does not discover or create missing variants.
+without also requiring `--config`; `--hardware-profile-template PATH` derives the
+candidates from one configuration, such as `gfx942_cdna3.json` or `gfx950_mi355x.json`.
+These forms are mutually exclusive.
 
 Set `PYTHONPATH` to the installed TensileLite package root and ensure the client
-loads the runtime matching the tested library. Set `HARDWARE_PROFILE` to a
-configuration covering the requested indices; the example does not create it.
+loads the runtime matching the tested library. The example derives its profiles
+from rocJITsu's stock gfx950 configuration.
 
 ```bash
 export PYTHONPATH="$ROCM_PATH/share/hipblaslt/tensilelite${PYTHONPATH:+:$PYTHONPATH}"
@@ -365,7 +366,7 @@ python3 -B "$sweep/rocjitsu_race_sweep.py" \
   --rocjitsu "$ROCJITSU_BUILD_DIR/tools/rocjitsu/rocjitsu" \
   --rocjitsu-revision "$(git -C "$ROCJITSU_SOURCE_DIR" rev-parse HEAD)" \
   --client "$ROCM_PATH/bin/hipblaslt-bench" \
-  --config "$HARDWARE_PROFILE" \
+  --hardware-profile-template "$ROCJITSU_SOURCE_DIR/configs/gfx950_mi355x.json" \
   --library-dir "$ROCM_PATH/lib/hipblaslt/library" \
   --target gfx950 --reports "$RACE_REPORT_DIR/sweep-bench" \
   --solution-index-range-begin 4000 --solution-index-range-end 8000 \
