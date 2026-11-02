@@ -1176,13 +1176,22 @@ static rocke_status_t rocke_h_op_vector_shl(rocke_h_lowerer_t* lw, const rocke_o
     return h_vec_binop(lw, op, "<<");
 }
 
-/* def _op_vector_lshr(self, op): res[i] = ((uint32_t)a[i]) >> b[i]. */
+/* def _op_vector_lshr(self, op): res[i] = ((<unsigned elem>)a[i]) >> b[i]. A
+ * logical shift in the element's own width, as LLVM's lshr: each lane is read
+ * through the unsigned type of that width, so no sign bit is shifted in and no
+ * bit above the element is dropped. */
 static rocke_status_t rocke_h_op_vector_lshr(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
     const char* res_t = rocke_h_type_to_hip(lw, r->type);
+    const rocke_type_t* elem = r->type->kind == ROCKE_TYPE_VECTOR ? r->type->elem : r->type;
+    const char* unsigned_t = rocke_h_unsigned_int_type(elem);
+    if(!unsigned_t)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", elem->name);
+    }
     const char* nice = rocke_h_name(lw, r);
     const char* an = rocke_h_name(lw, a);
     const char* bn = rocke_h_name(lw, b);
@@ -1190,7 +1199,7 @@ static rocke_status_t rocke_h_op_vector_lshr(rocke_h_lowerer_t* lw, const rocke_
     rocke_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n; i++)
     {
-        rocke_h_emitf(lw, "%s[%d] = ((uint32_t)%s[%d]) >> %s[%d];", nice, i, an, i, bn, i);
+        rocke_h_emitf(lw, "%s[%d] = ((%s)%s[%d]) >> %s[%d];", nice, i, unsigned_t, an, i, bn, i);
     }
     return lw->status;
 }
@@ -1226,12 +1235,15 @@ static rocke_status_t h_vec_minmax(rocke_h_lowerer_t* lw, const rocke_op_t* op, 
     return lw->status;
 }
 
+/* smax / smin are signed, so they refuse a u8 operand. */
 static rocke_status_t rocke_h_op_vector_smax(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    rocke_i_refuse_unsigned_operands(op, NULL);
     return h_vec_minmax(lw, op, ">");
 }
 static rocke_status_t rocke_h_op_vector_smin(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    rocke_i_refuse_unsigned_operands(op, NULL);
     return h_vec_minmax(lw, op, "<");
 }
 /* vector.max shares the smax ">" form in the Python lowerer. */
@@ -1302,6 +1314,7 @@ static rocke_status_t rocke_h_op_vector_trunc(rocke_h_lowerer_t* lw, const rocke
 }
 static rocke_status_t rocke_h_op_vector_sext(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    rocke_i_refuse_unsigned_operands(op, NULL);
     return h_vec_elem_cast(lw, op);
 }
 

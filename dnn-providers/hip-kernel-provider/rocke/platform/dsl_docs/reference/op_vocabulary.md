@@ -151,8 +151,9 @@ that range-checks every access. Its offset is i64 and is never widened implicitl
 `buffer_load_vN` / `buffer_store_vN` take any scalar whose width is whole bytes (i8, u8, fp8, bf8,
 i16, f16, bf16, i32, f32, i64, f64); one access moves 1, 2, 4, 8 or 16 bytes. The hardware checks an
 access of 4 bytes or more per 4-byte component and a 1- or 2-byte access whole: a load past
-`num_records` reads 0, a store past it writes nothing. The HIP lowering has no vector type for u8 or
-i64 elements, so those two lower through LLVM only.
+`num_records` reads 0, a store past it writes nothing. Both lowerings take every element type; the
+HIP source declares a u8 or i64 vector type (`u8xN`, `i64xN`) after its prologue when the kernel
+uses one.
 
 ## MFMA
 

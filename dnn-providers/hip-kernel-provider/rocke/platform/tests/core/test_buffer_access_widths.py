@@ -15,6 +15,7 @@ in the ``rocke_future_intrinsic_lowering`` ctest, the same texts as here.
 from __future__ import annotations
 
 import ctypes
+import re
 import shutil
 import struct
 
@@ -33,11 +34,13 @@ from rocke.core.ir import (
     I8,
     I16,
     I32,
+    I64,
+    U8,
     IRBuilder,
     PtrType,
     VectorType,
 )
-from rocke.core.lower_hip import lower_kernel_to_hip
+from rocke.core.lower_hip import HIP_PROLOGUE, lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.core.verify import verify
 from rocke.tests.engines import (
@@ -56,6 +59,9 @@ WIDTHS = (
     (I8, 4),
     (I8, 8),
     (I8, 16),
+    (U8, 1),
+    (U8, 4),
+    (U8, 16),
     (FP8E4M3, 1),
     (FP8E4M3, 4),
     (BF8E5M2, 16),
@@ -70,6 +76,8 @@ WIDTHS = (
     (I32, 2),
     (F64, 1),
     (F64, 2),
+    (I64, 1),
+    (I64, 2),
 )
 
 # Access bytes -> (LLVM integer type, intrinsic suffix, HIP builtin suffix).
@@ -83,6 +91,7 @@ FORMS = {
 
 _LLVM_ELEM = {
     "i8": "i8",
+    "u8": "i8",
     "fp8e4m3": "i8",
     "bf8e5m2": "i8",
     "i16": "i16",
@@ -91,12 +100,13 @@ _LLVM_ELEM = {
     "f32": "float",
     "i32": "i32",
     "f64": "double",
+    "i64": "i64",
 }
 
 
 def _nbytes(dtype, n):
-    return n * {"i8": 1, "fp8e4m3": 1, "bf8e5m2": 1, "i16": 2, "f16": 2,
-                "bf16": 2, "f32": 4, "i32": 4, "f64": 8}[dtype.name]  # fmt: skip
+    return n * {"i8": 1, "u8": 1, "fp8e4m3": 1, "bf8e5m2": 1, "i16": 2, "f16": 2,
+                "bf16": 2, "f32": 4, "i32": 4, "f64": 8, "i64": 8}[dtype.name]  # fmt: skip
 
 
 def _id(width):
@@ -188,6 +198,29 @@ def test_hip_uses_the_builtin_of_its_width(width):
     assert f"= __builtin_amdgcn_raw_buffer_load{builtin}(" in hip
     assert f"__builtin_memcpy(&_bs, &bl{n}" in hip
     assert f", {nbytes}); __builtin_amdgcn_raw_buffer_store{builtin}(_bs, " in hip
+
+
+@pytest.mark.parametrize(
+    "dtype,n,declaration",
+    [
+        (U8, 4, "using u8x4 = uint8_t __attribute__((ext_vector_type(4)));"),
+        (U8, 16, "using u8x16 = uint8_t __attribute__((ext_vector_type(16)));"),
+        (I64, 1, "using i64x1 = int64_t __attribute__((ext_vector_type(1)));"),
+        (I64, 2, "using i64x2 = int64_t __attribute__((ext_vector_type(2)));"),
+    ],
+    ids=["4xu8", "16xu8", "1xi64", "2xi64"],
+)
+def test_hip_declares_a_u8_or_i64_vector_after_the_prologue(dtype, n, declaration):
+    # The prologue is shared by every HIP source and has no u8 or i64 vector; a
+    # kernel that uses one gets its declaration right after the prologue, once.
+    assert f"{dtype.name}x" not in HIP_PROLOGUE
+    kernel, _ = _copy_kernel("buffer_hip_vector_type", [(dtype, n)])
+    hip = lower_hip_with_both_engines(kernel, "gfx942")
+    assert hip.startswith(HIP_PROLOGUE)
+    assert hip[len(HIP_PROLOGUE) :].lstrip("\n").startswith(declaration + "\n")
+    assert hip.count(declaration) == 1
+    # The result is declared with the new type and filled from the raw load.
+    assert re.search(rf"\b{dtype.name}x{n} (bl\w*); __builtin_memcpy\(&\1, ", hip)
 
 
 def test_hip_scopes_the_store_temporary():
@@ -428,6 +461,7 @@ GPU_WIDTHS = (
     (I32, 1), (I32, 2), (I32, 4),
     (I8, 1), (I8, 2), (BF8E5M2, 1), (F16, 1), (BF16, 1), (I16, 1),
     (F64, 1), (F64, 2),
+    (U8, 1), (U8, 4), (U8, 16), (I64, 1), (I64, 2),
 )  # fmt: skip
 
 
@@ -455,7 +489,8 @@ def test_gpu_copy_is_bit_exact(route):
     assert (out[total:] == 0xA5).all()
 
 
-def test_hip_source_of_every_width_compiles(tmp_path):
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_hip_source_of_every_width_compiles(tmp_path, arch):
     """The HIP lowering of every width is accepted by hipcc (no GPU needed)."""
     import subprocess
 
@@ -464,9 +499,9 @@ def test_hip_source_of_every_width_compiles(tmp_path):
         pytest.skip("hipcc not found")
     kernel, _ = _copy_kernel("buffer_every_width_hip", WIDTHS)
     source = tmp_path / "buffer_every_width.hip"
-    source.write_text(lower_kernel_to_hip(kernel, arch="gfx942"))
+    source.write_text(lower_kernel_to_hip(kernel, arch=arch))
     subprocess.run(
-        [hipcc, "--offload-arch=gfx942", "--genco", "-O3", str(source), "-o",
+        [hipcc, f"--offload-arch={arch}", "--genco", "-O3", str(source), "-o",
          str(tmp_path / "out.hsaco")],
         check=True,
         capture_output=True,
