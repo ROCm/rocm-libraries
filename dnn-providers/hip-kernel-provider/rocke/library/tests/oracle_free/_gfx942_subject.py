@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Narrow P3 subject adapter for the shipped gfx942 dense kernel.
+"""Narrow uniform-probability subject adapter for the shipped gfx942 dense kernel.
 
 Torch, dispatch, and the runner are imported only inside ``run_dense_case`` so
 CPU collection and the analytical contracts remain independent of ROCm Torch.
@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from ._analytical import P3Case, P3SpecFingerprint
+from ._analytical import UniformCase, UniformSpecFingerprint
 
 _POINTER_ALIGNMENT = 16
 
@@ -24,7 +24,7 @@ class ResolvedDenseSubject:
     case_id: str
     tuning_spec: object
     candidate_name: str
-    fingerprint: P3SpecFingerprint
+    fingerprint: UniformSpecFingerprint
 
 
 def _tensor_span(tensor) -> tuple[int, int]:
@@ -34,7 +34,7 @@ def _tensor_span(tensor) -> tuple[int, int]:
 
 
 def _validate_tensors(
-    case: P3Case,
+    case: UniformCase,
     q,
     k,
     v,
@@ -84,23 +84,23 @@ def _validate_tensors(
                 raise ValueError(f"{left_name} overlaps {right_name}")
 
 
-def _validate_supported_case(case: P3Case) -> None:
-    """Reject shapes outside the first shipped gfx942 P3 matrix."""
+def _validate_supported_case(case: UniformCase) -> None:
+    """Reject shapes outside the first shipped gfx942 uniform-probability matrix."""
     if case.batch != 1:
-        raise ValueError("P3 gfx942 tranche requires batch 1")
+        raise ValueError("gfx942 uniform-probability cases require batch 1")
     if case.nhead_q != 4 or case.nhead_k != 4:
-        raise ValueError("P3 gfx942 tranche requires Hq=Hkv=4")
+        raise ValueError("gfx942 uniform-probability cases require Hq=Hkv=4")
     if case.head_dim != 64:
-        raise ValueError("P3 gfx942 tranche requires D64")
+        raise ValueError("gfx942 uniform-probability cases require D64")
     if case.seqlen_q != 256:
-        raise ValueError("P3 gfx942 tranche requires query length 256")
+        raise ValueError("gfx942 uniform-probability cases require query length 256")
     if case.seqlen_k != 256:
-        raise ValueError("P3 gfx942 tranche requires key length 256")
+        raise ValueError("gfx942 uniform-probability cases require key length 256")
     if case.mask == "window" and case.window != 64:
-        raise ValueError("P3 gfx942 tranche requires window 64")
+        raise ValueError("gfx942 uniform-probability cases require window 64")
 
 
-def _verify_resolved_spec(case: P3Case, tuning_spec) -> P3SpecFingerprint:
+def _verify_resolved_spec(case: UniformCase, tuning_spec) -> UniformSpecFingerprint:
     """Assert the requested dense path and return its proof fingerprint."""
     if tuning_spec.path != "dense":
         raise AssertionError(f"dispatch returned path={tuning_spec.path!r}")
@@ -119,7 +119,7 @@ def _verify_resolved_spec(case: P3Case, tuning_spec) -> P3SpecFingerprint:
         "num_kv_heads": case.nhead_k,
         "head_size": case.head_dim,
         "dtype": case.dtype,
-        "causal": case.mask != "none",
+        "causal": True,
         "sliding_window": case.window if case.mask == "window" else 0,
         "persistent": False,
     }
@@ -136,10 +136,30 @@ def _verify_resolved_spec(case: P3Case, tuning_spec) -> P3SpecFingerprint:
     if not spec.resolved_use_exp2_fast():
         raise AssertionError("oracle-free quick cases require the fast exp2 path")
     if spec.use_sinks:
-        raise AssertionError("oracle-free P3 requires attention sinks to be disabled")
+        raise AssertionError(
+            "the uniform-probability check requires attention sinks to be disabled"
+        )
     if spec.emit_lse:
-        raise AssertionError("oracle-free P3 requires the direct non-LSE epilogue")
-    return P3SpecFingerprint(
+        raise AssertionError(
+            "the uniform-probability check requires the direct non-LSE epilogue"
+        )
+    # A KV-segment split combines partial softmax states, ragged padding adds
+    # masked tail tiles, and bottom-right shifts the band; the single-pass
+    # top-left argument behind the calibration covers none of them.
+    if spec.kv_segments != 1:
+        raise AssertionError(
+            "the uniform-probability check requires single-pass KV, "
+            f"kv_segments={spec.kv_segments}"
+        )
+    if spec.ragged:
+        raise AssertionError(
+            "the uniform-probability check requires a non-ragged shape"
+        )
+    if spec.causal_bottom_right:
+        raise AssertionError(
+            "the uniform-probability check requires the top-left causal band"
+        )
+    return UniformSpecFingerprint(
         path=tuning_spec.path,
         persistent=bool(spec.persistent),
         runtime_shape=bool(spec.runtime_shape),
@@ -152,7 +172,7 @@ def _verify_resolved_spec(case: P3Case, tuning_spec) -> P3SpecFingerprint:
     )
 
 
-def _resolve_tuning_spec(case: P3Case):
+def _resolve_tuning_spec(case: UniformCase):
     """Resolve ``gfx942_dense`` through the public attention tuning factory."""
     from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
@@ -165,7 +185,7 @@ def _resolve_tuning_spec(case: P3Case):
         hdim_q=case.head_dim,
         hdim_v=case.head_dim,
         arch="gfx942",
-        mask_type=0 if case.mask == "none" else 1,
+        mask_type=1,
         sliding_window=case.window if case.mask == "window" else 0,
         dtype=case.dtype,
     )
@@ -174,7 +194,7 @@ def _resolve_tuning_spec(case: P3Case):
     return tuning_spec
 
 
-def resolve_dense_subject(case: P3Case) -> ResolvedDenseSubject:
+def resolve_dense_subject(case: UniformCase) -> ResolvedDenseSubject:
     """Resolve one supported quick case and expose its calibration identity."""
     _validate_supported_case(case)
     tuning_spec = _resolve_tuning_spec(case)
@@ -187,7 +207,7 @@ def resolve_dense_subject(case: P3Case) -> ResolvedDenseSubject:
 
 
 def run_dense_case(
-    case: P3Case,
+    case: UniformCase,
     q,
     k,
     v,

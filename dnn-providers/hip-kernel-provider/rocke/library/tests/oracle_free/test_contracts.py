@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only contracts for the P3 checker and dense subject adapter."""
+"""CPU-only contracts for the uniform-probability checker and subject adapter."""
 
 from __future__ import annotations
 
@@ -14,25 +14,25 @@ import numpy as np
 import pytest
 
 from ._analytical import (
-    P3_BASIS_OFFSETS,
-    P3_CALIBRATION,
-    P3_CAUSAL_FP16,
-    P3_WINDOW_BF16,
+    UNIFORM_BASIS_OFFSETS,
+    UNIFORM_CALIBRATION,
+    UNIFORM_CAUSAL_FP16,
+    UNIFORM_WINDOW_BF16,
     CalibrationEntry,
-    P3Case,
-    P3Mutation,
-    P3Observation,
-    P3SpecFingerprint,
-    analyze_p3_policy,
-    correct_p3_observation,
+    UniformCase,
+    UniformMutation,
+    UniformObservation,
+    UniformSpecFingerprint,
+    analyze_uniform_policy,
+    correct_uniform_observation,
     decode_bits,
     legal_keys,
-    p3_expected_bits,
-    p3_inputs,
-    p3_inputs_folded,
     residue_count,
     target_bits,
     ulp_distance,
+    uniform_expected_bits,
+    uniform_inputs,
+    uniform_inputs_folded,
 )
 from ._gfx942_subject import (
     _resolve_tuning_spec,
@@ -43,23 +43,23 @@ from ._gfx942_subject import (
 )
 
 
-def _small_case(mask: str, *, window: int = 0, seqlen_k: int = 8) -> P3Case:
-    return P3Case(1, 8, seqlen_k, 2, 2, 4, "fp16", mask, window)
+def _small_case(mask: str, *, window: int = 0, seqlen_k: int = 8) -> UniformCase:
+    return UniformCase(1, 8, seqlen_k, 2, 2, 4, "fp16", mask, window)
 
 
 def _replace_bits(
-    observation: P3Observation,
+    observation: UniformObservation,
     exposure: str,
     coordinate: tuple[int, int, int, int],
     bits: int,
-) -> P3Observation:
+) -> UniformObservation:
     outputs: list[tuple[str, np.ndarray]] = []
     for name, values in observation.exposures:
         copy = values.copy()
         if name == exposure:
             copy[coordinate] = np.uint16(bits)
         outputs.append((name, copy))
-    return P3Observation(tuple(outputs))
+    return UniformObservation(tuple(outputs))
 
 
 def _fraction_from_bits(bits: int, dtype: str) -> Fraction:
@@ -89,11 +89,17 @@ def test_legal_key_sets_pin_causal_window_and_mutation_semantics() -> None:
 
     assert legal_keys(causal, 0) == (0,)
     assert legal_keys(causal, 7) == tuple(range(8))
-    assert legal_keys(causal, 3, P3Mutation.INCLUDE_FUTURE_KEY) == (0, 1, 2, 3, 4)
-    assert legal_keys(causal, 3, P3Mutation.EXCLUDE_LAST_KEY) == (0, 1, 2)
+    assert legal_keys(causal, 3, UniformMutation.INCLUDE_FUTURE_KEY) == (0, 1, 2, 3, 4)
+    assert legal_keys(causal, 3, UniformMutation.EXCLUDE_LAST_KEY) == (0, 1, 2)
     assert legal_keys(window, 4) == (1, 2, 3, 4)
-    assert legal_keys(window, 4, P3Mutation.INCLUDE_OLD_WINDOW_KEY) == (0, 1, 2, 3, 4)
-    assert legal_keys(window, 4, P3Mutation.EXCLUDE_OLDEST_WINDOW_KEY) == (2, 3, 4)
+    assert legal_keys(window, 4, UniformMutation.INCLUDE_OLD_WINDOW_KEY) == (
+        0,
+        1,
+        2,
+        3,
+        4,
+    )
+    assert legal_keys(window, 4, UniformMutation.EXCLUDE_OLDEST_WINDOW_KEY) == (2, 3, 4)
 
 
 @pytest.mark.parametrize(
@@ -136,10 +142,10 @@ def test_ulp_distance_coalesces_signed_zero() -> None:
     assert ulp_distance(0xBC00, 0xBC01) == 1
 
 
-def test_p3_generators_cover_basis_and_folded_profiles() -> None:
+def test_uniform_generators_cover_basis_and_folded_profiles() -> None:
     exposed: list[int] = []
-    for offset in P3_BASIS_OFFSETS:
-        q, k, v = p3_inputs(P3_CAUSAL_FP16, offset)
+    for offset in UNIFORM_BASIS_OFFSETS:
+        q, k, v = uniform_inputs(UNIFORM_CAUSAL_FP16, offset)
         assert not np.any(q)
         assert np.isfinite(k).all()
         assert np.unique(k).size > 1
@@ -148,29 +154,29 @@ def test_p3_generators_cover_basis_and_folded_profiles() -> None:
         assert all(key == offset + dim for key, dim in locations)
     assert exposed == list(range(256))
 
-    q, k, folded = p3_inputs_folded(P3_CAUSAL_FP16)
+    q, k, folded = uniform_inputs_folded(UNIFORM_CAUSAL_FP16)
     assert not np.any(q)
     assert np.isfinite(k).all()
     locations = np.argwhere(folded[0, :, 0, :] == 1.0)
-    assert len(locations) == P3_CAUSAL_FP16.seqlen_k
-    assert all(dim == key % P3_CAUSAL_FP16.head_dim for key, dim in locations)
+    assert len(locations) == UNIFORM_CAUSAL_FP16.seqlen_k
+    assert all(dim == key % UNIFORM_CAUSAL_FP16.head_dim for key, dim in locations)
 
 
 @pytest.mark.parametrize(
     "case",
     [
-        P3_CAUSAL_FP16,
-        P3_WINDOW_BF16,
+        UNIFORM_CAUSAL_FP16,
+        UNIFORM_WINDOW_BF16,
         _small_case("causal"),
         _small_case("window", window=1),
         _small_case("window", window=3),
         _small_case("window", window=4),
     ],
 )
-def test_correctly_rounded_synthetic_observations_pass(case: P3Case) -> None:
-    result = analyze_p3_policy(
+def test_correctly_rounded_synthetic_observations_pass(case: UniformCase) -> None:
+    result = analyze_uniform_policy(
         case,
-        correct_p3_observation(case),
+        correct_uniform_observation(case),
         budget=0,
         focused_rows=range(case.seqlen_q),
     )
@@ -183,40 +189,40 @@ def test_correctly_rounded_synthetic_observations_pass(case: P3Case) -> None:
 @pytest.mark.parametrize(
     "case,mutation,required",
     [
-        (P3_CAUSAL_FP16, P3Mutation.INCLUDE_FUTURE_KEY, ("target_ulp=",)),
+        (UNIFORM_CAUSAL_FP16, UniformMutation.INCLUDE_FUTURE_KEY, ("target_ulp=",)),
         (
-            P3_CAUSAL_FP16,
-            P3Mutation.EXCLUDE_LAST_KEY,
+            UNIFORM_CAUSAL_FP16,
+            UniformMutation.EXCLUDE_LAST_KEY,
             ("masked_max=", "masked_mass="),
         ),
         (
-            P3_CAUSAL_FP16,
-            P3Mutation.DENOMINATOR_PLUS_ONE,
+            UNIFORM_CAUSAL_FP16,
+            UniformMutation.DENOMINATOR_PLUS_ONE,
             ("target_ulp=",),
         ),
         (
-            P3_WINDOW_BF16,
-            P3Mutation.INCLUDE_OLD_WINDOW_KEY,
+            UNIFORM_WINDOW_BF16,
+            UniformMutation.INCLUDE_OLD_WINDOW_KEY,
             ("target_ulp=",),
         ),
         (
-            P3_WINDOW_BF16,
-            P3Mutation.EXCLUDE_OLDEST_WINDOW_KEY,
+            UNIFORM_WINDOW_BF16,
+            UniformMutation.EXCLUDE_OLDEST_WINDOW_KEY,
             ("masked_max=", "masked_mass="),
         ),
         (
-            P3_WINDOW_BF16,
-            P3Mutation.DENOMINATOR_PLUS_ONE,
+            UNIFORM_WINDOW_BF16,
+            UniformMutation.DENOMINATOR_PLUS_ONE,
             ("target_ulp=",),
         ),
     ],
 )
 def test_mutations_are_detected_on_the_shipped_matrix(
-    case: P3Case, mutation: P3Mutation, required: tuple[str, ...]
+    case: UniformCase, mutation: UniformMutation, required: tuple[str, ...]
 ) -> None:
-    result = analyze_p3_policy(
+    result = analyze_uniform_policy(
         case,
-        correct_p3_observation(case),
+        correct_uniform_observation(case),
         budget=0,
         mutation=mutation,
     )
@@ -225,8 +231,9 @@ def test_mutations_are_detected_on_the_shipped_matrix(
 
 
 def test_one_bf16_ulp_passes_old_ceiling_but_fails_exact_policy() -> None:
-    case = P3_WINDOW_BF16
-    observation = correct_p3_observation(case)
+    # 4e-3 is the superseded BF16 elementwise absolute ceiling.
+    case = UNIFORM_WINDOW_BF16
+    observation = correct_uniform_observation(case)
     name = "basis@192"
     coordinate = (0, 255, 0, 0)
     original = int(observation.by_name[name][coordinate])
@@ -235,7 +242,7 @@ def test_one_bf16_ulp_passes_old_ceiling_but_fails_exact_policy() -> None:
         float(decode_bits(original + 1, "bf16")) - float(decode_bits(original, "bf16"))
     )
     assert delta < 4e-3
-    result = analyze_p3_policy(case, mutated, budget=0)
+    result = analyze_uniform_policy(case, mutated, budget=0)
     assert any(item.startswith("target_ulp=") for item in result.violations)
 
 
@@ -248,19 +255,19 @@ def test_basis_and_folded_blind_spots_are_explicit() -> None:
 
 def test_nonzero_budget_is_rejected_until_calibrated() -> None:
     with pytest.raises(ValueError, match="only budget=0"):
-        analyze_p3_policy(
+        analyze_uniform_policy(
             _small_case("causal"),
-            correct_p3_observation(_small_case("causal")),
+            correct_uniform_observation(_small_case("causal")),
             budget=1,
         )
 
 
 def test_vacuous_partial_observation_is_a_policy_violation() -> None:
     case = _small_case("causal")
-    observation = P3Observation(
+    observation = UniformObservation(
         (("basis@8", np.zeros(case.output_shape, dtype=np.uint16)),)
     )
-    result = analyze_p3_policy(
+    result = analyze_uniform_policy(
         case, observation, budget=0, require_complete=False, focused_rows=()
     )
     assert "no_legal_coordinate_observed" in result.violations
@@ -268,52 +275,54 @@ def test_vacuous_partial_observation_is_a_policy_violation() -> None:
 
 def test_observation_validation_rejects_missing_duplicate_and_bad_shape() -> None:
     case = _small_case("causal")
-    basis = p3_expected_bits(case, "basis@0")
+    basis = uniform_expected_bits(case, "basis@0")
     with pytest.raises(ValueError, match="duplicate"):
-        P3Observation((("basis@0", basis), ("basis@0", basis)))
+        UniformObservation((("basis@0", basis), ("basis@0", basis)))
     with pytest.raises(ValueError, match="shape"):
-        analyze_p3_policy(
+        analyze_uniform_policy(
             case,
-            P3Observation((("basis@0", basis[:, :-1]), ("folded", basis))),
+            UniformObservation((("basis@0", basis[:, :-1]), ("folded", basis))),
             budget=0,
         )
     with pytest.raises(ValueError, match="folded"):
-        analyze_p3_policy(case, P3Observation((("basis@0", basis),)), budget=0)
+        analyze_uniform_policy(
+            case, UniformObservation((("basis@0", basis),)), budget=0
+        )
 
 
 def test_exact_zero_invalid_negative_and_masked_contracts() -> None:
     case = _small_case("causal")
-    correct = correct_p3_observation(case)
+    correct = correct_uniform_observation(case)
     masked = (0, 0, 0, 0)
     leak = _replace_bits(correct, "basis@4", masked, 0x0001)
-    leak_result = analyze_p3_policy(case, leak, budget=0)
+    leak_result = analyze_uniform_policy(case, leak, budget=0)
     assert any(item.startswith("masked_max=") for item in leak_result.violations)
     assert any(item.startswith("masked_mass=") for item in leak_result.violations)
 
     negative_zero = _replace_bits(correct, "basis@4", masked, 0x8000)
-    assert analyze_p3_policy(case, negative_zero, budget=0).violations == ()
+    assert analyze_uniform_policy(case, negative_zero, budget=0).violations == ()
 
     legal = (0, 0, 0, 0)
     negative = _replace_bits(correct, "basis@0", legal, 0xBC00)
-    negative_result = analyze_p3_policy(case, negative, budget=0)
+    negative_result = analyze_uniform_policy(case, negative, budget=0)
     assert any(item.startswith("negative_max=") for item in negative_result.violations)
 
     nan = _replace_bits(correct, "basis@0", legal, 0x7E00)
-    nan_result = analyze_p3_policy(case, nan, budget=0)
+    nan_result = analyze_uniform_policy(case, nan, budget=0)
     assert any(item.startswith("invalid=") for item in nan_result.violations)
     assert nan_result.invalid_count == 1
 
 
 def test_nonzero_trailing_coordinate_is_rejected() -> None:
     case = _small_case("causal", seqlen_k=6)
-    correct = correct_p3_observation(case)
+    correct = correct_uniform_observation(case)
     trailing = _replace_bits(correct, "basis@4", (0, 0, 0, 2), 0x0001)
-    result = analyze_p3_policy(case, trailing, budget=0)
+    result = analyze_uniform_policy(case, trailing, budget=0)
     assert any(item.startswith("trailing_max=") for item in result.violations)
 
 
-def _fingerprint(block_m: int = 128) -> P3SpecFingerprint:
-    return P3SpecFingerprint(
+def _fingerprint(block_m: int = 128) -> UniformSpecFingerprint:
+    return UniformSpecFingerprint(
         path="dense",
         persistent=False,
         runtime_shape=True,
@@ -332,32 +341,30 @@ def test_calibration_entries_are_zero_budget_ratified_and_scoped() -> None:
     entry = CalibrationEntry(
         ulp_budget=0,
         source_revision="0123456789abcdef",
-        case_ids=(P3_CAUSAL_FP16.case_id,),
+        case_ids=(UNIFORM_CAUSAL_FP16.case_id,),
         spec=fp16_fp,
         ratified=True,
     )
-    assert entry.covers(P3_CAUSAL_FP16, fp16_fp)
-    assert not entry.covers(P3_WINDOW_BF16, fp16_fp)
+    assert entry.covers(UNIFORM_CAUSAL_FP16, fp16_fp)
+    assert not entry.covers(UNIFORM_WINDOW_BF16, fp16_fp)
     with pytest.raises(ValueError, match="ulp_budget=0"):
-        CalibrationEntry(1, "revision", (P3_CAUSAL_FP16.case_id,), fp16_fp, True)
+        CalibrationEntry(1, "revision", (UNIFORM_CAUSAL_FP16.case_id,), fp16_fp, True)
     with pytest.raises(ValueError, match="ratified"):
-        CalibrationEntry(
-            0, "revision", (P3_CAUSAL_FP16.case_id,), fp16_fp, False
-        )
-    assert set(P3_CALIBRATION) == {
+        CalibrationEntry(0, "revision", (UNIFORM_CAUSAL_FP16.case_id,), fp16_fp, False)
+    assert set(UNIFORM_CALIBRATION) == {
         ("gfx942", "attention_gfx942_dense", "fp16"),
         ("gfx942", "attention_gfx942_dense", "bf16"),
     }
-    for key, installed in P3_CALIBRATION.items():
+    for key, installed in UNIFORM_CALIBRATION.items():
         assert len(key) == 3
         assert installed.ulp_budget == 0
         assert installed.ratified
         assert installed.source_revision == "79b4ae8503bed9950b475759b31277f281afdda0"
-    assert P3_CALIBRATION[("gfx942", "attention_gfx942_dense", "fp16")].covers(
-        P3_CAUSAL_FP16, fp16_fp
+    assert UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "fp16")].covers(
+        UNIFORM_CAUSAL_FP16, fp16_fp
     )
-    assert P3_CALIBRATION[("gfx942", "attention_gfx942_dense", "bf16")].covers(
-        P3_WINDOW_BF16, bf16_fp
+    assert UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", "bf16")].covers(
+        UNIFORM_WINDOW_BF16, bf16_fp
     )
 
 
@@ -392,7 +399,7 @@ class _FakeTensor:
         return 2
 
 
-def _fake_tensors(case: P3Case) -> dict[str, _FakeTensor]:
+def _fake_tensors(case: UniformCase) -> dict[str, _FakeTensor]:
     stride = 1 << 24
     return {
         "q": _FakeTensor(case.output_shape, stride),
@@ -402,9 +409,9 @@ def _fake_tensors(case: P3Case) -> dict[str, _FakeTensor]:
     }
 
 
-def test_subject_tensor_validation_accepts_p3_contract() -> None:
-    tensors = _fake_tensors(P3_CAUSAL_FP16)
-    _validate_tensors(P3_CAUSAL_FP16, **tensors, expected_dtype="fp16")
+def test_subject_tensor_validation_accepts_dense_contract() -> None:
+    tensors = _fake_tensors(UNIFORM_CAUSAL_FP16)
+    _validate_tensors(UNIFORM_CAUSAL_FP16, **tensors, expected_dtype="fp16")
 
 
 @pytest.mark.parametrize(
@@ -427,17 +434,17 @@ def test_subject_tensor_validation_accepts_p3_contract() -> None:
     ],
 )
 def test_subject_tensor_validation_rejects_bad_abi(mutation, match: str) -> None:
-    tensors = _fake_tensors(P3_CAUSAL_FP16)
+    tensors = _fake_tensors(UNIFORM_CAUSAL_FP16)
     mutation(tensors)
     with pytest.raises(ValueError, match=match):
-        _validate_tensors(P3_CAUSAL_FP16, **tensors, expected_dtype="fp16")
+        _validate_tensors(UNIFORM_CAUSAL_FP16, **tensors, expected_dtype="fp16")
 
 
-def test_subject_accepts_only_the_shipped_p3_cases() -> None:
-    _validate_supported_case(P3_CAUSAL_FP16)
-    _validate_supported_case(P3_WINDOW_BF16)
+def test_subject_accepts_only_the_shipped_uniform_cases() -> None:
+    _validate_supported_case(UNIFORM_CAUSAL_FP16)
+    _validate_supported_case(UNIFORM_WINDOW_BF16)
     with pytest.raises(ValueError, match="D64"):
-        _validate_supported_case(P3Case(1, 256, 256, 4, 4, 128, "fp16", "causal"))
+        _validate_supported_case(UniformCase(1, 256, 256, 4, 4, 128, "fp16", "causal"))
 
 
 def test_subject_requires_the_proof_pinned_resolved_spec() -> None:
@@ -457,6 +464,9 @@ def test_subject_requires_the_proof_pinned_resolved_spec() -> None:
         block_n=64,
         use_sinks=False,
         emit_lse=False,
+        kv_segments=1,
+        ragged=False,
+        causal_bottom_right=False,
         resolved_use_exp2_fast=lambda: True,
     )
     tuning_spec = SimpleNamespace(
@@ -465,14 +475,26 @@ def test_subject_requires_the_proof_pinned_resolved_spec() -> None:
         candidate_name="attention_gfx942_dense",
         kernel_spec=kernel_spec,
     )
-    assert _verify_resolved_spec(P3_CAUSAL_FP16, tuning_spec) == _fingerprint(block_m=128)
+    expected = _fingerprint(block_m=128)
+    assert _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec) == expected
+    for name, value, match in (
+        ("kv_segments", 2, "single-pass"),
+        ("ragged", True, "ragged"),
+        ("causal_bottom_right", True, "top-left"),
+    ):
+        original = getattr(kernel_spec, name)
+        setattr(kernel_spec, name, value)
+        with pytest.raises(AssertionError, match=match):
+            _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec)
+        setattr(kernel_spec, name, original)
+    assert _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec) == expected
     kernel_spec.resolved_use_exp2_fast = lambda: False
     with pytest.raises(AssertionError, match="fast exp2"):
-        _verify_resolved_spec(P3_CAUSAL_FP16, tuning_spec)
+        _verify_resolved_spec(UNIFORM_CAUSAL_FP16, tuning_spec)
 
 
-@pytest.mark.parametrize("case", [P3_CAUSAL_FP16, P3_WINDOW_BF16])
-def test_subject_resolves_real_shipped_spec_without_torch(case: P3Case) -> None:
+@pytest.mark.parametrize("case", [UNIFORM_CAUSAL_FP16, UNIFORM_WINDOW_BF16])
+def test_subject_resolves_real_shipped_spec_without_torch(case: UniformCase) -> None:
     tuning_spec = _resolve_tuning_spec(case)
     assert tuning_spec.path == "dense"
     assert tuning_spec.arch == "gfx942"

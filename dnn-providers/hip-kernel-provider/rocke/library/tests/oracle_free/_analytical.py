@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Torch-free closed forms and raw-bit policy checks for the P3 probe.
+"""Torch-free closed forms and raw-bit policy checks for the uniform-probability probe.
 
 There is intentionally no general attention implementation in this module.
 Zero Q forces uniform legal logits, so every expectation follows directly from
@@ -11,7 +11,7 @@ legal-key membership and exact rational rounding into the subject dtype.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from functools import cache
 from types import MappingProxyType
@@ -24,11 +24,11 @@ _FORMAT = {
     "fp16": (10, 5, 15),
     "bf16": (7, 8, 127),
 }
-P3_BASIS_OFFSETS = (0, 64, 128, 192)
-P3_FOCUSED_ROWS = (0, 62, 63, 64, 127, 128, 255)
+UNIFORM_BASIS_OFFSETS = (0, 64, 128, 192)
+UNIFORM_FOCUSED_ROWS = (0, 62, 63, 64, 127, 128, 255)
 
 
-class P3Mutation(str, Enum):
+class UniformMutation(str, Enum):
     """Analyzer-side legal-set and denominator mutations."""
 
     INCLUDE_FUTURE_KEY = "include_future_key"
@@ -39,8 +39,8 @@ class P3Mutation(str, Enum):
 
 
 @dataclass(frozen=True)
-class P3Case:
-    """Logical dense-attention shape and semantics for one P3 case."""
+class UniformCase:
+    """Logical dense-attention shape and semantics for one uniform-probability case."""
 
     batch: int
     seqlen_q: int
@@ -95,12 +95,12 @@ class P3Case:
         )
 
 
-P3_CAUSAL_FP16 = P3Case(1, 256, 256, 4, 4, 64, "fp16", "causal")
-P3_WINDOW_BF16 = P3Case(1, 256, 256, 4, 4, 64, "bf16", "window", 64)
+UNIFORM_CAUSAL_FP16 = UniformCase(1, 256, 256, 4, 4, 64, "fp16", "causal")
+UNIFORM_WINDOW_BF16 = UniformCase(1, 256, 256, 4, 4, 64, "bf16", "window", 64)
 
 
 @dataclass(frozen=True)
-class P3SpecFingerprint:
+class UniformSpecFingerprint:
     """Proof-relevant fields of the dispatch-resolved dense subject."""
 
     path: str
@@ -121,12 +121,14 @@ class CalibrationEntry:
     ulp_budget: int
     source_revision: str
     case_ids: tuple[str, ...]
-    spec: P3SpecFingerprint
+    spec: UniformSpecFingerprint
     ratified: bool
 
     def __post_init__(self) -> None:
         if self.ulp_budget != 0:
-            raise ValueError("rocKE P3 currently supports only ulp_budget=0")
+            raise ValueError(
+                "the uniform-probability check currently supports only ulp_budget=0"
+            )
         if not self.source_revision:
             raise ValueError("source_revision must be nonempty")
         if not self.case_ids or len(set(self.case_ids)) != len(self.case_ids):
@@ -134,12 +136,12 @@ class CalibrationEntry:
         if not self.ratified:
             raise ValueError("only ratified calibration entries may be installed")
 
-    def covers(self, case: P3Case, spec: P3SpecFingerprint) -> bool:
+    def covers(self, case: UniformCase, spec: UniformSpecFingerprint) -> bool:
         """Return whether this entry authorizes ``case`` and resolved ``spec``."""
         return case.case_id in self.case_ids and spec == self.spec
 
 
-_DENSE_QUICK_SPEC_FP16 = P3SpecFingerprint(
+_DENSE_QUICK_SPEC_FP16 = UniformSpecFingerprint(
     path="dense",
     persistent=False,
     runtime_shape=True,
@@ -151,7 +153,7 @@ _DENSE_QUICK_SPEC_FP16 = P3SpecFingerprint(
     emit_lse=False,
 )
 
-_DENSE_QUICK_SPEC_BF16 = P3SpecFingerprint(
+_DENSE_QUICK_SPEC_BF16 = UniformSpecFingerprint(
     path="dense",
     persistent=False,
     runtime_shape=True,
@@ -166,7 +168,7 @@ _DENSE_QUICK_SPEC_BF16 = P3SpecFingerprint(
 
 # Ratified on gfx942 against the exact quick cases below. A future shape or
 # resolved-spec change is uncalibrated even when candidate name and dtype match.
-P3_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingProxyType(
+UNIFORM_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingProxyType(
     {
         (
             "gfx942",
@@ -175,7 +177,7 @@ P3_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingProxyTy
         ): CalibrationEntry(
             ulp_budget=0,
             source_revision="79b4ae8503bed9950b475759b31277f281afdda0",
-            case_ids=(P3_CAUSAL_FP16.case_id,),
+            case_ids=(UNIFORM_CAUSAL_FP16.case_id,),
             spec=_DENSE_QUICK_SPEC_FP16,
             ratified=True,
         ),
@@ -186,7 +188,7 @@ P3_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingProxyTy
         ): CalibrationEntry(
             ulp_budget=0,
             source_revision="79b4ae8503bed9950b475759b31277f281afdda0",
-            case_ids=(P3_WINDOW_BF16.case_id,),
+            case_ids=(UNIFORM_WINDOW_BF16.case_id,),
             spec=_DENSE_QUICK_SPEC_BF16,
             ratified=True,
         ),
@@ -194,21 +196,25 @@ P3_CALIBRATION: Mapping[tuple[str, str, str], CalibrationEntry] = MappingProxyTy
 )
 
 
-def _coerce_mutation(mutation: P3Mutation | str | None) -> P3Mutation | None:
+def _coerce_mutation(mutation: UniformMutation | str | None) -> UniformMutation | None:
     if mutation is None:
         return None
     try:
-        return mutation if isinstance(mutation, P3Mutation) else P3Mutation(mutation)
+        return (
+            mutation
+            if isinstance(mutation, UniformMutation)
+            else UniformMutation(mutation)
+        )
     except ValueError as error:
-        raise ValueError(f"unknown P3 mutation {mutation!r}") from error
+        raise ValueError(f"unknown mutation {mutation!r}") from error
 
 
-def _validate_mutation(case: P3Case, mutation: P3Mutation | None) -> None:
+def _validate_mutation(case: UniformCase, mutation: UniformMutation | None) -> None:
     if (
         mutation
         in {
-            P3Mutation.INCLUDE_FUTURE_KEY,
-            P3Mutation.EXCLUDE_LAST_KEY,
+            UniformMutation.INCLUDE_FUTURE_KEY,
+            UniformMutation.EXCLUDE_LAST_KEY,
         }
         and case.mask != "causal"
     ):
@@ -216,8 +222,8 @@ def _validate_mutation(case: P3Case, mutation: P3Mutation | None) -> None:
     if (
         mutation
         in {
-            P3Mutation.INCLUDE_OLD_WINDOW_KEY,
-            P3Mutation.EXCLUDE_OLDEST_WINDOW_KEY,
+            UniformMutation.INCLUDE_OLD_WINDOW_KEY,
+            UniformMutation.EXCLUDE_OLDEST_WINDOW_KEY,
         }
         and case.mask != "window"
     ):
@@ -225,9 +231,9 @@ def _validate_mutation(case: P3Case, mutation: P3Mutation | None) -> None:
 
 
 def legal_interval(
-    case: P3Case,
+    case: UniformCase,
     query: int,
-    mutation: P3Mutation | str | None = None,
+    mutation: UniformMutation | str | None = None,
 ) -> tuple[int, int]:
     """Return inclusive analyzer legal bounds, or ``(0, -1)`` when empty."""
     if not 0 <= query < case.seqlen_q:
@@ -236,27 +242,27 @@ def legal_interval(
     _validate_mutation(case, selected)
 
     upper_shift = 0
-    if selected == P3Mutation.INCLUDE_FUTURE_KEY:
+    if selected == UniformMutation.INCLUDE_FUTURE_KEY:
         upper_shift = 1
-    elif selected == P3Mutation.EXCLUDE_LAST_KEY:
+    elif selected == UniformMutation.EXCLUDE_LAST_KEY:
         upper_shift = -1
     upper = min(query + upper_shift, case.seqlen_k - 1)
 
     lower = 0
     if case.mask == "window":
         window = case.window
-        if selected == P3Mutation.INCLUDE_OLD_WINDOW_KEY:
+        if selected == UniformMutation.INCLUDE_OLD_WINDOW_KEY:
             window += 1
-        elif selected == P3Mutation.EXCLUDE_OLDEST_WINDOW_KEY:
+        elif selected == UniformMutation.EXCLUDE_OLDEST_WINDOW_KEY:
             window -= 1
         lower = max(0, query - window + 1)
     return (lower, upper) if lower <= upper else (0, -1)
 
 
 def legal_keys(
-    case: P3Case,
+    case: UniformCase,
     query: int,
-    mutation: P3Mutation | str | None = None,
+    mutation: UniformMutation | str | None = None,
 ) -> tuple[int, ...]:
     """Enumerate the independently derived legal keys for one query."""
     lower, upper = legal_interval(case, query, mutation)
@@ -363,7 +369,7 @@ def decode_bits(bits: np.ndarray | int, dtype: str) -> np.ndarray:
     return widened.view(np.float32).astype(np.float64)
 
 
-def _deterministic_k(case: P3Case) -> np.ndarray:
+def _deterministic_k(case: UniformCase) -> np.ndarray:
     """Construct finite, nonconstant, exactly representable K values."""
     batch = np.arange(case.batch, dtype=np.int64)[:, None, None, None]
     key = np.arange(case.seqlen_k, dtype=np.int64)[None, :, None, None]
@@ -373,8 +379,8 @@ def _deterministic_k(case: P3Case) -> np.ndarray:
     return (values.astype(np.float32) / 8.0).copy()
 
 
-def p3_inputs(
-    case: P3Case, basis_offset: int
+def uniform_inputs(
+    case: UniformCase, basis_offset: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build zero-Q, nonconstant-K, shifted-identity-V inputs."""
     if basis_offset < 0:
@@ -389,7 +395,9 @@ def p3_inputs(
     return q, k, v
 
 
-def p3_inputs_folded(case: P3Case) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def uniform_inputs_folded(
+    case: UniformCase,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build folded-basis V, where key ``k`` maps to dimension ``k mod D``."""
     q = np.zeros(case.output_shape, dtype=np.float32)
     k = _deterministic_k(case)
@@ -399,25 +407,25 @@ def p3_inputs_folded(case: P3Case) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return q, k, v
 
 
-@dataclass(frozen=True)
-class P3Observation:
+@dataclass(frozen=True, eq=False)
+class UniformObservation:
     """Named raw-bit subject outputs from basis and folded exposures."""
 
-    exposures: tuple[tuple[str, np.ndarray], ...] = field(compare=False)
+    exposures: tuple[tuple[str, np.ndarray], ...]
 
     def __post_init__(self) -> None:
         if not self.exposures:
-            raise ValueError("P3 observation requires at least one exposure")
+            raise ValueError("an observation requires at least one exposure")
         normalized: list[tuple[str, np.ndarray]] = []
         names: set[str] = set()
         for name, values in self.exposures:
             if name in names:
-                raise ValueError(f"duplicate P3 exposure {name!r}")
+                raise ValueError(f"duplicate exposure {name!r}")
             if name != "folded":
                 _basis_offset(name)
             raw = np.asarray(values)
             if raw.dtype != np.uint16:
-                raise ValueError(f"P3 exposure {name!r} must contain raw uint16 bits")
+                raise ValueError(f"exposure {name!r} must contain raw uint16 bits")
             copy = np.ascontiguousarray(raw).copy()
             copy.setflags(write=False)
             normalized.append((name, copy))
@@ -425,7 +433,7 @@ class P3Observation:
         object.__setattr__(self, "exposures", tuple(normalized))
 
     @classmethod
-    def from_mapping(cls, exposures: Mapping[str, np.ndarray]) -> P3Observation:
+    def from_mapping(cls, exposures: Mapping[str, np.ndarray]) -> UniformObservation:
         """Copy a mapping into one immutable observation."""
         return cls(tuple(exposures.items()))
 
@@ -438,7 +446,7 @@ class P3Observation:
 def _basis_offset(name: str) -> int:
     prefix = "basis@"
     if not name.startswith(prefix):
-        raise ValueError(f"unknown P3 exposure {name!r}")
+        raise ValueError(f"unknown exposure {name!r}")
     text = name[len(prefix) :]
     try:
         offset = int(text)
@@ -449,7 +457,7 @@ def _basis_offset(name: str) -> int:
     return offset
 
 
-def _basis_offsets(observation: P3Observation) -> tuple[int, ...]:
+def _basis_offsets(observation: UniformObservation) -> tuple[int, ...]:
     return tuple(
         sorted(
             _basis_offset(name) for name, _ in observation.exposures if name != "folded"
@@ -458,18 +466,18 @@ def _basis_offsets(observation: P3Observation) -> tuple[int, ...]:
 
 
 def _validate_observation(
-    case: P3Case, observation: P3Observation, *, require_complete: bool
+    case: UniformCase, observation: UniformObservation, *, require_complete: bool
 ) -> None:
     for name, values in observation.exposures:
         if values.shape != case.output_shape:
             raise ValueError(
-                f"P3 exposure {name!r} shape {values.shape} != {case.output_shape}"
+                f"exposure {name!r} shape {values.shape} != {case.output_shape}"
             )
     if not require_complete:
         return
     names = observation.by_name
     if "folded" not in names:
-        raise ValueError("gated P3 observation requires a folded exposure")
+        raise ValueError("a gated observation requires a folded exposure")
     offsets = _basis_offsets(observation)
     exposed = [
         offset + dim
@@ -478,11 +486,11 @@ def _validate_observation(
         if offset + dim < case.seqlen_k
     ]
     if exposed != list(range(case.seqlen_k)):
-        raise ValueError("P3 basis exposures must expose every key exactly once")
+        raise ValueError("basis exposures must expose every key exactly once")
 
 
 def _coordinate_representation(
-    case: P3Case,
+    case: UniformCase,
     exposure: str,
     dim: int,
     first: int,
@@ -497,10 +505,10 @@ def _coordinate_representation(
     return has_key, int(has_key and first <= key <= last)
 
 
-def p3_expected_bits(
-    case: P3Case,
+def uniform_expected_bits(
+    case: UniformCase,
     exposure: str,
-    mutation: P3Mutation | str | None = None,
+    mutation: UniformMutation | str | None = None,
 ) -> np.ndarray:
     """Construct correctly rounded synthetic output bits for one expectation."""
     selected = _coerce_mutation(mutation)
@@ -511,9 +519,13 @@ def p3_expected_bits(
         legal_count = max(0, last - first + 1)
         if legal_count == 0:
             if selected is None:
-                raise ValueError(f"correct P3 rule has an empty row at q={query}")
+                raise ValueError(
+                    f"correct legal-key rule has an empty row at q={query}"
+                )
             continue
-        denominator = legal_count + int(selected == P3Mutation.DENOMINATOR_PLUS_ONE)
+        denominator = legal_count + int(
+            selected == UniformMutation.DENOMINATOR_PLUS_ONE
+        )
         for dim in range(case.head_dim):
             _, represented = _coordinate_representation(
                 case, exposure, dim, first, last
@@ -525,27 +537,27 @@ def p3_expected_bits(
     return output
 
 
-def correct_p3_observation(
-    case: P3Case,
+def correct_uniform_observation(
+    case: UniformCase,
     *,
     basis_offsets: Sequence[int] | None = None,
-) -> P3Observation:
-    """Build a complete correctly rounded synthetic P3 observation."""
+) -> UniformObservation:
+    """Build a complete correctly rounded synthetic observation."""
     offsets = (
         tuple(range(0, case.seqlen_k, case.head_dim))
         if basis_offsets is None
         else tuple(basis_offsets)
     )
     exposures = [
-        (f"basis@{offset}", p3_expected_bits(case, f"basis@{offset}"))
+        (f"basis@{offset}", uniform_expected_bits(case, f"basis@{offset}"))
         for offset in offsets
     ]
-    exposures.append(("folded", p3_expected_bits(case, "folded")))
-    return P3Observation(tuple(exposures))
+    exposures.append(("folded", uniform_expected_bits(case, "folded")))
+    return UniformObservation(tuple(exposures))
 
 
 @dataclass(frozen=True)
-class P3NqStats:
+class UniformNqStats:
     """One exposure's reduced evidence for a legal count."""
 
     rows: int
@@ -565,8 +577,8 @@ class _MutableNqStats:
 
 
 @dataclass(frozen=True)
-class P3Result:
-    """Decomposed P3 verdict plus calibration diagnostics."""
+class UniformResult:
+    """Decomposed uniform-probability verdict plus calibration diagnostics."""
 
     violations: tuple[str, ...]
     invalid_count: int
@@ -587,7 +599,7 @@ class P3Result:
     focused_row_errors: Mapping[int, float]
     max_ulp_within_proven: int
     max_ulp_beyond_proven: int
-    per_nq: Mapping[str, Mapping[int, P3NqStats]]
+    per_nq: Mapping[str, Mapping[int, UniformNqStats]]
 
     @property
     def exact_rate(self) -> float:
@@ -603,12 +615,12 @@ def _proven_limit(dtype: str, exposure: str) -> int:
 
 def _freeze_groups(
     groups: Mapping[str, Mapping[int, _MutableNqStats]],
-) -> Mapping[str, Mapping[int, P3NqStats]]:
-    frozen: dict[str, Mapping[int, P3NqStats]] = {}
+) -> Mapping[str, Mapping[int, UniformNqStats]]:
+    frozen: dict[str, Mapping[int, UniformNqStats]] = {}
     for exposure, by_nq in groups.items():
         frozen[exposure] = MappingProxyType(
             {
-                nq: P3NqStats(
+                nq: UniformNqStats(
                     rows=item.rows,
                     compared=item.compared,
                     exact=item.exact,
@@ -621,18 +633,20 @@ def _freeze_groups(
     return MappingProxyType(frozen)
 
 
-def analyze_p3_policy(
-    case: P3Case,
-    observation: P3Observation,
+def analyze_uniform_policy(
+    case: UniformCase,
+    observation: UniformObservation,
     *,
     budget: int,
-    mutation: P3Mutation | str | None = None,
-    focused_rows: Sequence[int] = P3_FOCUSED_ROWS,
+    mutation: UniformMutation | str | None = None,
+    focused_rows: Sequence[int] = UNIFORM_FOCUSED_ROWS,
     require_complete: bool = True,
-) -> P3Result:
-    """Apply the decomposed zero-ULP P3 policy to raw output bits."""
+) -> UniformResult:
+    """Apply the decomposed zero-ULP uniform-probability policy to raw output bits."""
     if budget != 0:
-        raise ValueError("rocKE P3 currently supports only budget=0")
+        raise ValueError(
+            "the uniform-probability check currently supports only budget=0"
+        )
     selected = _coerce_mutation(mutation)
     _validate_mutation(case, selected)
     _validate_observation(case, observation, require_complete=require_complete)
@@ -687,9 +701,13 @@ def analyze_p3_policy(
             legal_count = max(0, last - first + 1)
             if legal_count == 0:
                 if selected is None:
-                    raise ValueError(f"correct P3 rule has an empty row at q={query}")
+                    raise ValueError(
+                        f"correct legal-key rule has an empty row at q={query}"
+                    )
                 invalid_count += case.batch * case.nhead_q
-            denominator = legal_count + int(selected == P3Mutation.DENOMINATOR_PLUS_ONE)
+            denominator = legal_count + int(
+                selected == UniformMutation.DENOMINATOR_PLUS_ONE
+            )
             group = exposure_groups.setdefault(legal_count, _MutableNqStats())
             group.rows += case.batch * case.nhead_q
 
@@ -819,7 +837,7 @@ def analyze_p3_policy(
     if compared_count == 0:
         violations.append("no_legal_coordinate_observed")
 
-    return P3Result(
+    return UniformResult(
         violations=tuple(violations),
         invalid_count=invalid_count,
         max_negative=max_negative,
@@ -843,7 +861,7 @@ def analyze_p3_policy(
     )
 
 
-def format_p3_result(result: P3Result) -> str:
+def format_uniform_result(result: UniformResult) -> str:
     """Render the policy verdict and worst target-bit diagnostics."""
     coordinate = (
         "n/a"
@@ -859,15 +877,3 @@ def format_p3_result(result: P3Result) -> str:
         f"stored_sum={result.max_stored_sum_residual:.9g}; "
         f"legacy_abs={result.legacy_abs_residual:.9g}"
     )
-
-
-def round_to_storage(values: np.ndarray, dtype: str) -> np.ndarray:
-    """Decode values after the historical float32-mediated storage rounding."""
-    values = np.asarray(values, dtype=np.float32)
-    if dtype == "fp16":
-        return values.astype(np.float16).astype(np.float32)
-    if dtype != "bf16":
-        raise ValueError(dtype)
-    bits = values.view(np.uint32)
-    rounded = bits + np.uint32(0x7FFF) + ((bits >> 16) & np.uint32(1))
-    return (rounded & np.uint32(0xFFFF0000)).view(np.float32)

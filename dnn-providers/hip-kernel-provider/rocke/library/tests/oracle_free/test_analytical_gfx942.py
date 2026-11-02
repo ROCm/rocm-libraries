@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""On-GPU raw-bit P3 policy checks for the shipped gfx942 dense kernel."""
+"""On-GPU raw-bit uniform-probability checks for the shipped gfx942 dense kernel."""
 
 from __future__ import annotations
 
@@ -14,18 +14,18 @@ import pytest
 from rocke.runtime.hip_module import get_device_arch
 
 from ._analytical import (
-    P3_BASIS_OFFSETS,
-    P3_CALIBRATION,
-    P3_CAUSAL_FP16,
-    P3_WINDOW_BF16,
-    P3Case,
-    P3Mutation,
-    P3Observation,
-    P3Result,
-    analyze_p3_policy,
-    format_p3_result,
-    p3_inputs,
-    p3_inputs_folded,
+    UNIFORM_BASIS_OFFSETS,
+    UNIFORM_CALIBRATION,
+    UNIFORM_CAUSAL_FP16,
+    UNIFORM_WINDOW_BF16,
+    UniformCase,
+    UniformMutation,
+    UniformObservation,
+    UniformResult,
+    analyze_uniform_policy,
+    format_uniform_result,
+    uniform_inputs,
+    uniform_inputs_folded,
 )
 from ._gfx942_subject import (
     ResolvedDenseSubject,
@@ -33,7 +33,9 @@ from ._gfx942_subject import (
     run_dense_case,
 )
 
-torch = pytest.importorskip("torch", reason="ROCm torch is required for gfx942 P3")
+torch = pytest.importorskip(
+    "torch", reason="ROCm torch is required for the gfx942 uniform-probability check"
+)
 
 pytestmark = [
     pytest.mark.gpu,
@@ -43,7 +45,7 @@ pytestmark = [
 ]
 
 
-def _torch_dtype(case: P3Case):
+def _torch_dtype(case: UniformCase):
     return {"fp16": torch.float16, "bf16": torch.bfloat16}[case.dtype]
 
 
@@ -52,14 +54,17 @@ def _raw_output_bits(out) -> np.ndarray:
     return out.view(torch.int16).cpu().numpy().view(np.uint16).copy()
 
 
-def _run_exposures(case: P3Case, subject: ResolvedDenseSubject) -> P3Observation:
+def _run_exposures(
+    case: UniformCase, subject: ResolvedDenseSubject
+) -> UniformObservation:
     device = torch.device("cuda", torch.cuda.current_device())
     dtype = _torch_dtype(case)
     outputs: list[tuple[str, np.ndarray]] = []
     profiles = [
-        (f"basis@{offset}", p3_inputs(case, offset)) for offset in P3_BASIS_OFFSETS
+        (f"basis@{offset}", uniform_inputs(case, offset))
+        for offset in UNIFORM_BASIS_OFFSETS
     ]
-    profiles.append(("folded", p3_inputs_folded(case)))
+    profiles.append(("folded", uniform_inputs_folded(case)))
     for name, (q_numpy, k_numpy, v_numpy) in profiles:
         q = torch.from_numpy(q_numpy).to(device=device, dtype=dtype)
         k = torch.from_numpy(k_numpy).to(device=device, dtype=dtype)
@@ -67,38 +72,38 @@ def _run_exposures(case: P3Case, subject: ResolvedDenseSubject) -> P3Observation
         out = torch.full(case.output_shape, float("nan"), device=device, dtype=dtype)
         run_dense_case(case, q, k, v, out, subject=subject)
         outputs.append((name, _raw_output_bits(out)))
-    return P3Observation(tuple(outputs))
+    return UniformObservation(tuple(outputs))
 
 
-def _case_label(case: P3Case) -> str:
+def _case_label(case: UniformCase) -> str:
     mask = f"window-{case.window}" if case.mask == "window" else case.mask
     return (
-        f"P3 {case.dtype} {mask} B{case.batch} "
+        f"uniform {case.dtype} {mask} B{case.batch} "
         f"Sq{case.seqlen_q} Sk{case.seqlen_k} "
         f"H{case.nhead_q}/{case.nhead_k} D{case.head_dim}"
     )
 
 
-def _applicable_mutations(case: P3Case) -> tuple[P3Mutation, ...]:
+def _applicable_mutations(case: UniformCase) -> tuple[UniformMutation, ...]:
     if case.mask == "causal":
         return (
-            P3Mutation.INCLUDE_FUTURE_KEY,
-            P3Mutation.EXCLUDE_LAST_KEY,
-            P3Mutation.DENOMINATOR_PLUS_ONE,
+            UniformMutation.INCLUDE_FUTURE_KEY,
+            UniformMutation.EXCLUDE_LAST_KEY,
+            UniformMutation.DENOMINATOR_PLUS_ONE,
         )
     return (
-        P3Mutation.INCLUDE_OLD_WINDOW_KEY,
-        P3Mutation.EXCLUDE_OLDEST_WINDOW_KEY,
-        P3Mutation.DENOMINATOR_PLUS_ONE,
+        UniformMutation.INCLUDE_OLD_WINDOW_KEY,
+        UniformMutation.EXCLUDE_OLDEST_WINDOW_KEY,
+        UniformMutation.DENOMINATOR_PLUS_ONE,
     )
 
 
 def _capture_calibration(
-    case: P3Case,
+    case: UniformCase,
     subject: ResolvedDenseSubject,
-    results: dict[str, P3Result],
+    results: dict[str, UniformResult],
 ) -> None:
-    output_text = os.environ.get("ROCKE_P3_CALIBRATION_OUT")
+    output_text = os.environ.get("ROCKE_ORACLE_FREE_CALIBRATION_OUT")
     if not output_text:
         return
     output_dir = Path(output_text).expanduser()
@@ -109,7 +114,7 @@ def _capture_calibration(
             for exposure, groups in result.per_nq.items():
                 for legal_count, stats in groups.items():
                     record = {
-                        "record_type": "rocke_p3_legal_count",
+                        "record_type": "rocke_uniform_legal_count",
                         "arch": "gfx942",
                         "candidate_name": subject.candidate_name,
                         "case_id": case.case_id,
@@ -130,21 +135,21 @@ def _capture_calibration(
 @pytest.mark.parametrize(
     "case",
     [
-        pytest.param(P3_CAUSAL_FP16, id="fp16-causal"),
-        pytest.param(P3_WINDOW_BF16, id="bf16-window64"),
+        pytest.param(UNIFORM_CAUSAL_FP16, id="fp16-causal"),
+        pytest.param(UNIFORM_WINDOW_BF16, id="bf16-window64"),
     ],
 )
-def test_p3_uniform_masked_probabilities(case: P3Case) -> None:
+def test_uniform_masked_probabilities(case: UniformCase) -> None:
     """Gate a ratified dense case and always self-test mutation sensitivity."""
     subject = resolve_dense_subject(case)
     observation = _run_exposures(case, subject)
-    control = analyze_p3_policy(case, observation, budget=0)
+    control = analyze_uniform_policy(case, observation, budget=0)
     results = {"none": control}
     for mutation in _applicable_mutations(case):
-        mutated = analyze_p3_policy(case, observation, budget=0, mutation=mutation)
+        mutated = analyze_uniform_policy(case, observation, budget=0, mutation=mutation)
         assert mutated.violations, (
             f"{_case_label(case)}: checker failed to reject {mutation.value}; "
-            f"{format_p3_result(mutated)}"
+            f"{format_uniform_result(mutated)}"
         )
         results[mutation.value] = mutated
 
@@ -152,13 +157,18 @@ def test_p3_uniform_masked_probabilities(case: P3Case) -> None:
 
     arch = get_device_arch()
     key = (arch, subject.candidate_name, case.dtype)
-    entry = P3_CALIBRATION.get(key)
+    entry = UNIFORM_CALIBRATION.get(key)
     if entry is None:
-        pytest.skip(f"P3 policy uncalibrated for {key}; {format_p3_result(control)}")
+        pytest.skip(
+            f"uniform-probability policy uncalibrated for {key}; "
+            f"{format_uniform_result(control)}"
+        )
     if not entry.covers(case, subject.fingerprint):
         pytest.skip(
-            f"P3 policy scope mismatch for {key}, case={case.case_id}; "
-            f"{format_p3_result(control)}"
+            f"uniform-probability policy scope mismatch for {key}, "
+            f"case={case.case_id}; {format_uniform_result(control)}"
         )
 
-    assert not control.violations, f"{_case_label(case)}: {format_p3_result(control)}"
+    assert (
+        not control.violations
+    ), f"{_case_label(case)}: {format_uniform_result(control)}"
