@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pytest
 
+import measure_oracle_cost as moc
 import pairwise
 import run_gauntlet_fuzz as fuzz
 import sampler
@@ -6424,3 +6425,224 @@ def test_repair_with_no_allowed_level_for_an_axis_retries_nothing_and_says_why(
     )  # fmt: skip
     assert again.rows == [] and again.never_passed == [with_mode]
     assert [f.pair for f in again.unreachable] == [without_mode]
+
+
+# --------------------------------------------------------------------------
+# measure_oracle_cost.py: the oracle's cost per space
+# --------------------------------------------------------------------------
+
+# A toy space whose cost ceiling is ``n * m <= 4000`` (``n * m * a <= 12000`` in the second form):
+# the expression the ladder sweeps must be the one the space declares.
+COST_TOYS = {
+    "n * m": ("n * m <= 4000", 4000, ["values.n", "values.m"]),
+    "n * m * a": ("n * m * a <= 12000", 12000, ["values.n", "values.m", "values.a"]),
+}
+
+
+def write_cost_space(spaces, rule="n * m <= 4000", reason="oracle cost ceiling"):
+    write_space(
+        spaces,
+        axes={
+            "a": {"values": [1, 2, 3]},
+            "n": {"range": [1, 1000], "boundaries": [1, 1000]},
+            "m": {"values": [1, 2, 4, 8, 8]},
+        },
+        derive={},
+        constraints=[{"rule": rule, "reason": reason}],
+        case={
+            "values": {"a": "${a}", "n": "${n}", "m": "${m}"},
+            "metadata": {"purpose": "probe"},
+        },
+    )
+
+
+def measure(tmp_path, spaces, *extra):
+    """The report of ``measure_oracle_cost.py`` against the stub, and its exit status."""
+    report = tmp_path / "oracle_cost.json"
+    status = moc.main(
+        [
+            "--binary", str(STUB),
+            "--spaces-dir", str(spaces),
+            "--work-dir", str(tmp_path / "ladder"),
+            "--json", str(report),
+            "--rungs", "5",
+            *extra,
+        ]
+    )  # fmt: skip
+    return status, json.loads(report.read_text())["measurements"]
+
+
+@pytest.mark.parametrize("driver", sorted(COST_TOYS))
+def test_the_ladder_fits_a_linear_reference_time_back_within_one_percent(
+    run, tmp_path, driver
+):
+    # bug caught: a fit that is off by the units (ms per cost against cost per ms), reads the
+    # wrong rows' times, or sweeps a cost expression the space does not declare
+    rule, ceiling, paths = COST_TOYS[driver]
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_cost_space(spaces, rule)
+    run.control(
+        default="pass",
+        reference_ms={"a": 3.0, "k": 0.25, "product_of": paths},
+        reference_lane="cpu",
+    )
+    status, [m] = measure(tmp_path, spaces)
+    assert status == 0
+    assert m["status"] == "measured" and m["lane"] == "cpu"
+    assert m["cost_driver"] == driver and m["ceiling"] == ceiling
+    assert m["fit_points"] == len(m["points"]) >= 4
+    assert m["b_ms_per_cost"] == pytest.approx(0.25, rel=0.01)
+    assert m["a_ms"] == pytest.approx(3.0, rel=0.01)
+    assert m["r2"] == pytest.approx(1.0, abs=1e-6)
+    assert m["cost_at_60s"] == pytest.approx((60000 - 3.0) / 0.25, rel=0.01)
+    assert m["predicted_ms_at_ceiling"] == pytest.approx(3.0 + 0.25 * ceiling, rel=0.01)
+    costs = [p["cost"] for p in m["points"]]
+    assert costs == sorted(set(costs)) and costs[-1] <= ceiling
+    assert (
+        costs[-1] >= ceiling / 2 and costs[0] <= ceiling / 100
+    )  # small to the ceiling
+    # the cost of a point is the one of the row that ran: the stub priced it from the row
+    for point in m["points"]:
+        assert point["reference_ms"] == pytest.approx(3.0 + 0.25 * point["cost"])
+
+
+def test_only_rungs_that_ran_the_reference_are_fitted(run, tmp_path):
+    # bug caught: a CRASH or DECLINED rung entering the fit as a 0 ms point (it drags the slope
+    # down), or a WRONG rung, which did run the reference, being dropped
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_cost_space(spaces)
+    run.control(
+        default="pass",
+        cases={"r1": "crash_execute", "r2": "wrong", "r3": "declined"},
+        reference_ms={"a": 3.0, "k": 0.25, "product_of": ["values.n", "values.m"]},
+    )
+    status, [m] = measure(tmp_path, spaces)
+    assert status == 0  # a WRONG or CRASH rung is a rung, not an error of this tool
+    outcomes = {p["case"]: p["outcome"] for p in m["points"]}
+    assert (outcomes["r1"], outcomes["r2"], outcomes["r3"]) == (
+        "CRASH", "WRONG", "DECLINED",
+    )  # fmt: skip
+    assert m["fit_points"] == len(m["points"]) - 2
+    assert m["b_ms_per_cost"] == pytest.approx(0.25, rel=0.01)
+    assert m["a_ms"] == pytest.approx(3.0, rel=0.01)
+
+
+def test_a_space_whose_engine_declines_every_rung_is_unmeasured_with_the_reason(
+    run, tmp_path
+):
+    # bug caught: an engine that declines every rung reported as a fit of nothing (or a crash
+    # of the tool), without saying why the space has no measurement
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_cost_space(spaces)
+    run.control(default="declined")
+    status, [m] = measure(tmp_path, spaces)
+    assert status == 0
+    assert m["status"] == "unmeasured"
+    assert "DECLINED" in m["reason"] and "does not support this graph" in m["reason"]
+    assert all(p["outcome"] == "DECLINED" for p in m["points"]) and m["points"]
+    assert "a_ms" not in m and "cost_at_60s" not in m
+
+
+def test_a_space_without_a_cost_ceiling_is_unmeasured(run, tmp_path):
+    # bug caught: an unrelated "<=" constraint taken for the cost driver
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_cost_space(spaces, rule="n >= a", reason="n must reach a")
+    run.control(default="pass", reference_ms=1.0)
+    status, [m] = measure(tmp_path, spaces)
+    assert status == 0
+    assert m["status"] == "unmeasured" and "no cost-ceiling constraint" in m["reason"]
+    assert m["points"] == []
+
+
+def test_a_pin_is_held_in_every_rung(run, tmp_path):
+    # bug caught: a pinned axis (the one an engine needs to accept the row) moved by the ladder
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_cost_space(spaces)
+    run.control(
+        default="pass",
+        reference_ms={"a": 0.0, "k": 1.0, "product_of": ["values.n", "values.m"]},
+    )
+    status, [m] = measure(tmp_path, spaces, "--pin", "m=2")
+    assert status == 0
+    for point in m["points"]:
+        row = json.loads(
+            (
+                tmp_path / "ladder" / "Toy_Default_0" / point["case"] / "row.json"
+            ).read_text()
+        )
+        assert row["axes"]["m"] == 2
+        assert point["cost"] == row["axes"]["n"] * 2
+
+
+def test_an_unknown_pin_is_a_usage_error(run, tmp_path, capsys):
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_cost_space(spaces)
+    assert (
+        moc.main(["--binary", str(STUB), "--spaces-dir", str(spaces),
+                  "--work-dir", str(tmp_path / "w"), "--pin", "nope=1"])
+        == 2
+    )  # fmt: skip
+    assert "nope" in capsys.readouterr().err
+
+
+def test_the_fit_uses_the_lane_with_more_rungs_and_a_flat_time_has_no_60s_cost():
+    # bug caught: a CPU and a GPU time fitted as one line, or a division by a zero slope
+    sp = space_by_id("SdpaFwd/Default")
+    [driver] = moc.cost_drivers(sp)
+
+    def point(i, cost, ms, lane):
+        return {"case": f"r{i}", "cost": cost, "outcome": "PASS",
+                "reference_ms": ms, "reference_lane": lane}  # fmt: skip
+
+    mixed = moc.summarize(
+        driver,
+        [point(0, 10, 15.0, "cpu"), point(1, 20, 25.0, "cpu"), point(2, 30, 35.0, "cpu"),
+         point(3, 40, 1.0, "gpu"), point(4, 50, 1.0, "gpu")],
+    )  # fmt: skip
+    assert (mixed["lane"], mixed["fit_points"]) == ("cpu", 3)
+    assert mixed["a_ms"] == pytest.approx(5.0) and mixed[
+        "b_ms_per_cost"
+    ] == pytest.approx(1.0)
+    flat = moc.summarize(driver, [point(0, 10, 7.0, "gpu"), point(1, 20, 7.0, "gpu")])
+    assert flat["status"] == "measured" and flat["cost_at_60s"] is None
+    same_cost = moc.summarize(
+        driver, [point(0, 10, 7.0, "gpu"), point(1, 10, 8.0, "gpu")]
+    )
+    assert (
+        same_cost["status"] == "unmeasured"
+        and "two distinct costs" in same_cost["reason"]
+    )
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_every_shipped_cost_space_gets_a_legal_ladder_to_its_ceiling(space_id):
+    # bug caught: a ladder of rows the space forbids (the driver would refuse them), one that
+    # stops far below the ceiling, or a cost driver other than the space's own constraint
+    sp = space_by_id(space_id)
+    drivers = moc.cost_drivers(sp)
+    for driver in drivers:
+        ladder = moc.build_ladder(driver, 8, 4, 1, 1, {})
+        costs = [cost for cost, _ in ladder]
+        assert (
+            len(costs) >= 5
+            and costs == sorted(set(costs))
+            and costs[-1] <= driver.ceiling
+        )
+        for cost, axes in ladder:
+            sample = sampler.sample_from_axes(
+                sp, axes, 1
+            )  # legal, every axis in its domain
+            assert driver.expr.evaluate(sp.derive_env(sample.axis_values)) == cost
+        if len(drivers) == 1:
+            assert costs[-1] >= driver.ceiling / 2
+    if space_id == "SdpaBackward/Default":
+        [driver] = drivers
+        assert (driver.source, driver.ceiling) == ("b*hq*sq*skv*(d+d)", 2**29)
+    if space_id == "Matmul/Align":
+        assert drivers == []

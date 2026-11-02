@@ -334,7 +334,7 @@ A case graded by a reference executor (not golden data) also carries `"reference
 `"reference_lane"` (`"cpu"` or `"gpu"`): the wall time of the reference run that produced the
 outputs the engine was compared with, and the lane it ran on. After a GPU-to-CPU fallback they
 are the CPU run's. They are absent when no reference ran. The gauntlet driver copies both into
-`outcomes.jsonl`.
+`outcomes.jsonl`; [measuring the oracle's cost](#measuring-the-oracles-cost) fits them.
 
 | Outcome | Meaning |
 |---|---|
@@ -768,6 +768,46 @@ first=None, spaces_dir=None)`. Random runs have no `pair_coverage` of their own.
 **What is tested.** The generator, the driver's pairwise path and the coverage are tested
 (`test_gauntlet.py`, stub binary, no GPU). That every pair is covered or proven impossible is
 tested for the SDPA forward spaces only; the other spaces get a generator run and nothing more.
+
+### Measuring the oracle's cost
+
+A space bounds its samples by a cost ceiling (`n * c * hw <= 2**30`, `b*hq*sq*skv*dqk <= 2**31`)
+because the reference an engine is graded against takes time in proportion to that cost. The
+ceiling is a measured number, and `gauntlet/measure_oracle_cost.py` (Python 3, standard library
+only) measures it. It reads each space's cost-ceiling constraint (the `<=` constraint whose
+`reason` says "cost"; a space with two, such as `ResampleFwd/Default`, is measured once per
+constraint), builds a ladder of explicit rows that sweep that expression from small to the
+ceiling with every other axis at a legal value, and runs each rung with the driver's
+[`--row`](#gauntlet-fuzz-runs) on the same binary and engine. It reads the `reference_ms` the
+binary reported for each rung from `outcomes.jsonl` (see [the outcome report](#outcome-report)),
+fits `reference_ms = a + b * cost` by least squares over the `PASS` and `WRONG` rungs that ran a
+reference, and extrapolates the cost at which the reference takes 60 s.
+
+```bash
+python3 dnn-providers/integration-tests/gauntlet/measure_oracle_cost.py \
+    --binary build/bin/hipdnn_integration_tests --test-article <plugin> \
+    --test-engine ASM_SDPA_ENGINE --test-config <its TOML> \
+    --filter '^SdpaBackward/' --pin dtype=half --work-dir gauntlet-runs/oracle_cost
+```
+
+`--binary`, `--test-article`, `--test-engine`, `--test-config`, `--binary-arg`, `--spaces-dir` and
+`--case-timeout` go to the driver as given. `--rungs N` (default 8) and `--ratio R` (default 4)
+set the ladder: the target costs fall by `R` from the ceiling, so the last rung is the largest row
+the space allows. Each rung starts from a legal base row (the sample `--base-seed` draws, default
+1) and lowers, then raises, the axes the cost depends on. `--pin AXIS=VALUE` (a JSON value, else a
+string; repeatable) keeps an axis at a value in every rung, which is how to give an engine a
+dtype or layout it accepts.
+
+The report, on stdout and in `--json` (default `<work-dir>/oracle_cost.json`), has one entry per
+space and cost driver: `cost_driver`, `ceiling`, `points` (each rung's `cost`, `outcome`,
+`reference_ms` and `reference_lane`), `lane`, `fit_points`, `a_ms`, `b_ms_per_cost`, `r2`,
+`cost_at_60s` and `predicted_ms_at_ceiling`. The oracle only runs when the engine does, so an
+engine that declines every rung leaves the space `unmeasured`, and the entry's `reason` is the
+engine's decline. A space is also `unmeasured` when fewer than two distinct costs ran a
+reference, and when it has no cost-ceiling constraint. If the rungs used both lanes the fit uses
+the lane with more rungs. Each rung's driver run is kept under `<work-dir>/<Op>_<Space>_<n>/r<i>/`.
+The tool is tested with the stub binary (`test_gauntlet.py`): a synthetic linear reference time is
+fitted back within 1%.
 
 ### Reading an alignment or placement probe
 
