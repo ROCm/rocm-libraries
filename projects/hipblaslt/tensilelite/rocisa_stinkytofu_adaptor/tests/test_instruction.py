@@ -3833,6 +3833,90 @@ class TestWaitCntCaps(unittest.TestCase):
         self.assertEqual(kwargs["max_vmcnt"], -1)
 
 
+class TestGlobalStoreText(AdaptorTestCase):
+    """Global-store text matches rocisa ``GLOBALStoreInstruction``.
+
+    Operands are vaddr, data, saddr. The size token stays in the gfx11+ form
+    when the ISA major is 11 or higher, and takes the legacy ``dword`` /
+    ``short`` spelling when the ISA is older or unset. Longer tokens such as
+    ``d16_hi_b16`` must win over ``b16``, which is a suffix of them.
+    """
+
+    def _text(self, cls, saddr=None):
+        if saddr is None:
+            saddr = sgpr(0, 4)
+        return str(cls(vaddr=vgpr(8), src=vgpr(1), saddr=saddr))
+
+    def _kernel_isa(self, isa):
+        """Point the kernel ISA at ``isa`` without changing the caps ISA.
+
+        The size token reads ``getKernel().isa``. Register text still asks
+        ``getAsmCaps()`` for the process ISA, and this build only has gfx1250.
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _swap():
+            kernel = _base.getKernel()
+            saved = kernel.isa
+            kernel.isa = isa
+            try:
+                yield
+            finally:
+                kernel.isa = saved
+
+        return _swap()
+
+    def test_gfx1250_prints_vaddr_then_data_then_saddr(self):
+        from rocisa_stinkytofu_adaptor.instruction import GlobalStoreB32
+
+        self.assertEqual(
+            self._text(GlobalStoreB32),
+            "global_store_b32 v8, v1, s[0:3]\n",
+        )
+
+    def test_off_saddr_prints_off(self):
+        from rocisa_stinkytofu_adaptor.instruction import GlobalStoreB32
+
+        # isOff is applied to the named-register form, matching rocisa sgpr(name).
+        self.assertEqual(
+            self._text(GlobalStoreB32, saddr=sgpr("Srd", isOff=True)),
+            "global_store_b32 v8, v1, off\n",
+        )
+
+    def test_size_token_follows_isa_major(self):
+        from rocisa_stinkytofu_adaptor.instruction import GlobalStoreB32, GlobalStoreB128
+
+        for value in ((9, 0, 0), (10, 1, 0)):
+            with self._kernel_isa(value):
+                self.assertEqual(self._text(GlobalStoreB32), "global_store_dword v8, v1, s[0:3]\n")
+                self.assertEqual(
+                    self._text(GlobalStoreB128), "global_store_dwordx4 v8, v1, s[0:3]\n",
+                )
+
+        with self._kernel_isa((11, 0, 0)):
+            self.assertEqual(self._text(GlobalStoreB32), "global_store_b32 v8, v1, s[0:3]\n")
+            self.assertEqual(self._text(GlobalStoreB128), "global_store_b128 v8, v1, s[0:3]\n")
+
+        # An unset kernel ISA matches native IsaVersion{} and takes the legacy suffix.
+        with self._kernel_isa(None):
+            self.assertEqual(self._text(GlobalStoreB32), "global_store_dword v8, v1, s[0:3]\n")
+
+    def test_d16_hi_is_not_rewritten_as_plain_short(self):
+        from rocisa_stinkytofu_adaptor.instruction import GlobalStoreD16HIB16
+
+        with self._kernel_isa((9, 4, 2)):
+            self.assertEqual(
+                self._text(GlobalStoreD16HIB16),
+                "global_store_short_d16_hi v8, v1, s[0:3]\n",
+            )
+        with self._kernel_isa((12, 5, 0)):
+            self.assertEqual(
+                self._text(GlobalStoreD16HIB16),
+                "global_store_d16_hi_b16 v8, v1, s[0:3]\n",
+            )
+
+
 class TestMfmaNegSrcs(unittest.TestCase):
     """MFMA neg follows HasWMMA_V1: three sources, otherwise two. Clear neg stays 0."""
 
