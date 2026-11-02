@@ -517,20 +517,21 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
 
-    # Compiler environment for Python entries that compile and disassemble
+    # Compiler tool locations for Python entries that compile and disassemble
     # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its
     # lib/llvm/bin/ (neither is on the CI image's PATH), and the device-library
-    # bitcode. Emitted once, before every entry that appends
-    # `${_rocke_compiler_env}` to its ENVIRONMENT. ctest resolves it at test
-    # time: empty off Linux or without ROCM_PATH, else ";PATH=...;..." so it
-    # appends straight after the entry's last variable. Where the tools are
-    # supplied, ROCKE_REQUIRE_COMPILER_TOOLS=1 makes the tests that honour it
-    # fail rather than skip: a gate that skips in every shard looks green and
-    # checks nothing.
+    # bitcode. CTest resolves these lists at test time; they stay empty off Linux
+    # or without ROCM_PATH. Tool discovery is separate from enforcement policy:
+    # only entries whose compiler checks must run append the requirement list.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set(_rocke_compiler_env \"\")\n"
+           "set(_rocke_compiler_tool_environment)\n"
+           "set(_rocke_compiler_requirement_environment)\n"
            "if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Linux\" AND NOT \"\$ENV{ROCM_PATH}\" STREQUAL \"\")\n"
-           "  set(_rocke_compiler_env \";PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH};HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode;ROCKE_REQUIRE_COMPILER_TOOLS=1\")\n"
+           "  list(APPEND _rocke_compiler_tool_environment\n"
+           "       \"PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH}\"\n"
+           "       \"HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode\")\n"
+           "  list(APPEND _rocke_compiler_requirement_environment\n"
+           "       \"ROCKE_REQUIRE_COMPILER_TOOLS=1\")\n"
            "endif()\n")
 
     # Reproduce the committed host-flavor column from the relocated artifact.
@@ -595,11 +596,13 @@ if(ROCKE_INSTALL_TESTS)
         endif()
       endforeach()
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set(_rocke_platform_pytest_environment \"${_ROCKE_PYTEST_ENVIRONMENT}\")\n"
+             "list(APPEND _rocke_platform_pytest_environment \${_rocke_compiler_tool_environment})\n"
              "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"not integration\" -v -rs --timeout=60)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"${_ROCKE_PYTEST_ENVIRONMENT}\${_rocke_compiler_env}\"\n"
+             "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
              "  TIMEOUT 300)\n")
     endif()
 
@@ -725,11 +728,15 @@ if(ROCKE_INSTALL_TESTS)
              " \"${ROCKE_TEST_CTEST_REL}${_rocke_mla_test}\"")
     endforeach()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set(_rocke_library_mla_pytest_environment \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\")\n"
+           "list(APPEND _rocke_library_mla_pytest_environment\n"
+           "     \${_rocke_compiler_tool_environment}\n"
+           "     \${_rocke_compiler_requirement_environment})\n"
            "add_test(rocke_library_mla_pytest python -m pytest${_ROCKE_LIBRARY_MLA_TESTS} -v -rs --timeout=120)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_mla_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;mla\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\${_rocke_compiler_env}\"\n"
+           "  ENVIRONMENT \"\${_rocke_library_mla_pytest_environment}\"\n"
            "  TIMEOUT 900)\n")
 
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
