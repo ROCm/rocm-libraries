@@ -26,6 +26,8 @@
  *   known_arches()                    rocke_known_arches()
  *   arch_from_isa(isa)                rocke_arch_from_isa()
  *   target_id_from_isa(isa)           rocke_target_id_from_isa()
+ *   parse_target_id(value)            rocke_parse_target_id()
+ *   processor_from_target_id(id)      rocke_processor_from_target_id()
  *   base_arch_from_target_id(id)      rocke_base_arch_from_target_id()
  *   compiler_target_from_target_id(id) rocke_compiler_target_from_target_id()
  *   generic_arch_from_target_id(id)   rocke_generic_arch_from_target_id()
@@ -440,8 +442,29 @@ void rocke_set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx);
  * NULL input/output or zero capacity returns NULL without writing. */
 
 /* Extract from the last "gfx", preserving profile and feature suffixes.
- * If there is no "gfx", copy the input unchanged. */
+ * If there is no "gfx", copy the input unchanged. Does not validate; see
+ * rocke_parse_target_id. */
 const char* rocke_target_id_from_isa(const char* isa, char* out, size_t out_cap);
+
+/* parse_target_id(value): the target ID of an AMDHSA ISA name or a bare target
+ * ID, refusing any other form. All of value must be an optional
+ * "amdgcn-amd-amdhsa--" or "amdgcn-amd-amdhsa-unknown-" prefix, a processor
+ * (gfx942, gfx11-generic, gfx9-4-generic), then zero or more ":feature+" or
+ * ":feature-" suffixes. On success writes the target ID without the prefix
+ * (amdgcn-amd-amdhsa-unknown-gfx942:xnack- gives gfx942:xnack-) and returns out.
+ * On refusal returns NULL, leaves out untouched and writes the text of Python's
+ * ValueError into err (truncated to err_cap; NULL err or zero err_cap writes
+ * nothing). NULL value/out or zero out_cap returns NULL without writing. */
+const char*
+    rocke_parse_target_id(const char* value, char* out, size_t out_cap, char* err, size_t err_cap);
+
+/* Processor of a target ID, without profile or feature suffixes:
+ * gfx942:sramecc+:xnack- gives gfx942, gfx1250-strict gives gfx1250, catalog
+ * names such as gfx11-generic stay whole and gfx1100 stays gfx1100 (its catalog
+ * row is rocke_base_arch_from_target_id's answer). Any other name is cut to its
+ * leading gfx token of lower-case letters and digits; a name that does not start
+ * with gfx is copied up to its first ':'. Does not validate. */
+const char* rocke_processor_from_target_id(const char* target_id, char* out, size_t out_cap);
 
 /* Remove features and profiles for catalog lookup, preserving catalog names
  * such as gfx11-generic. gfx1250-strict and gfx942:xnack- become gfx1250/gfx942.

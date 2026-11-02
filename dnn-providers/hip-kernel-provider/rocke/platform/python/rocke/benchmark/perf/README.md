@@ -80,7 +80,8 @@ which is which:
 
 ## 1. The primitives - what ships in rocKE (this package)
 
-Stdlib-only and do not persist records - they produce a record and return it.
+Stdlib-only (`occupancy` also reads target IDs through `rocke.core.arch`) and do
+not persist records - they produce a record and return it.
 Import and compose them; every consumer uses these same pieces.
 
 - `schema` - the measurement-record contract + `validate`. Identity is
