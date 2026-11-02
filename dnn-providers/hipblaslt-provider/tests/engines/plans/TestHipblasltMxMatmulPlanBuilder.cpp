@@ -868,6 +868,30 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8AWithFp6B)
     }
 }
 
+// #10811 only hits hipBLASLt transB = T, i.e. a column-major graph A. A K-contiguous
+// (row-major) FP8 A with an FP6 B is correct on gfx950 and is accepted.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsKContiguousFp8AWithFp6B)
+{
+    if(!onArch("gfx950"))
+    {
+        GTEST_SKIP() << "gfx950-only check (no FP6 MX kernels on gfx1250)";
+    }
+    for(const auto layout : {MxOperandLayout::K_K, MxOperandLayout::K_MN})
+    {
+        for(const auto aType : {DT::FP8_E4M3, DT::FP8_E5M2})
+        {
+            for(const auto bType : {DT::FP6_E2M3, DT::FP6_E3M2})
+            {
+                auto fb = createMxGraphWithLayout(layout, aType, DT::HALF, bType);
+                GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+                EXPECT_TRUE(_builder.isApplicable(_handle, graph))
+                    << toString(layout) << " A=" << EnumNameDataType(aType)
+                    << " B=" << EnumNameDataType(bType);
+            }
+        }
+    }
+}
+
 // See WORKAROUND_ISSUE_13715 in TestWorkarounds.hpp. hipBLASLt has gfx1250 MX
 // kernels for these element types only for transA=T, transB=N, while the canonical
 // (M/N-contiguous) layout here reaches hipBLASLt as transA=N, transB=T. The

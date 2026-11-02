@@ -28,7 +28,12 @@
 // ----------------------------------------------------------------------------
 // ROCm/rocm-libraries#10811 — on gfx950 a block-scaled MX GEMM with FP8 OCP
 // (E4M3 or E5M2) on graph operand A and FP6 (E2M3 or E3M2) on graph operand B
-// returns incorrect results.
+// returns incorrect results. Narrowed down with hipblaslt-bench (VEC32 scales,
+// every heuristic solution run): hipBLASLt A = FP6 x B = FP8 with transB = T is
+// wrong on the rocRoller kernels rr_32x32x64 and rr_16x16x128 (one of them is the
+// heuristic's first choice); transB = N is correct. Graph A reaches hipBLASLt as
+// B (row-major swap), with transB = T exactly when graph A is column-major, so
+// only that layout is declined; a K-contiguous (row-major) A is unaffected.
 //
 // REJECT_IF_WORKAROUND_ISSUE_10811 must only be invoked from a function with
 // return type `bool` (it contains a `return`).
@@ -97,12 +102,14 @@
             (tensorMap), (deqAttrA).x_tensor_uid());                                \
         const auto tXB = ::hipblaslt_plugin::hipblaslt_utils::findTensorAttributes( \
             (tensorMap), (deqAttrB).x_tensor_uid());                                \
+        const auto& stridesXA = tXA.strides();                                      \
         if(::hipblaslt_plugin::hipblaslt_utils::isTypeFp8Ocp(tXA.dataType())        \
-           && ::hipblaslt_plugin::hipblaslt_utils::isTypeFp6Ocp(tXB.dataType()))    \
+           && ::hipblaslt_plugin::hipblaslt_utils::isTypeFp6Ocp(tXB.dataType())     \
+           && (stridesXA.empty() || stridesXA.back() != 1))                         \
         {                                                                           \
             HIPDNN_PLUGIN_LOG_INFO(                                                 \
-                "[#10811] MX matmul not applicable: FP8 OCP A with FP6 B returns "  \
-                "incorrect results");                                               \
+                "[#10811] MX matmul not applicable: FP8 OCP A (column-major) with " \
+                "FP6 B returns incorrect results");                                 \
             return false;                                                           \
         }                                                                           \
     } while(0)
