@@ -141,7 +141,8 @@ def _acc_stats(Yv, ref):
 
 
 def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=False, pipe=None,
-            dgrad=False, acc_out=None, data="u1", timing=True, wtv=1, scale_exp=0):
+            dgrad=False, acc_out=None, data="u1", timing=True, wtv=1, scale_exp=0,
+            det_runs=0, adapter=False, adapter_pd=1):
     import torch
 
     from kernels.common import conv_winograd3d as cw
@@ -161,11 +162,21 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         if variant != "yx":
             raise ValueError("--dgrad: variant yx only")
         fDi, fHi, fWi, fC, fK = shape
-        Di, Hi, Wi, C, K = fDi + 2, fHi + 2, fWi + 2, fK, fC
+        if adapter:  # dX of the pad-(pd,1,1) conv: conv(pad(dY, (2 - pd, 1, 1)), Wd)
+            Di, Hi, Wi, C, K = fDi + 2 - 2 * adapter_pd, fHi, fWi, fK, fC
+        else:
+            Di, Hi, Wi, C, K = fDi + 2, fHi + 2, fWi + 2, fK, fC
         X, W = _make_data(data, (fDi - 2, fHi - 2, fWi - 2, fK), (fK, 3, 3, 3, fC), dev)
     else:
         Di, Hi, Wi, C, K = shape
-        X, W = _make_data(data, (Di, Hi, Wi, C), (K, 3, 3, 3, C), dev)
+        hs_ = 2 if adapter else 0  # adapter form: X is the unpadded (pad (pd,1,1)) input
+        X, W = _make_data(data, (Di - hs_ * adapter_pd, Hi - hs_, Wi - hs_, C), (K, 3, 3, 3, C),
+                          dev)
+    # zero halo the relayout adds around X: halo-form dgrad 2, adapter (pad 1,1,1) form 1;
+    # z may differ (adapter pad (0,1,1): FWD 0, BWD-data 2)
+    hx = 1 if adapter else (2 if dgrad else 0)
+    hz = (2 - adapter_pd if dgrad else adapter_pd) if adapter else hx
+    hxs = hx if hz == hx else (hz, hx, hx)
     Wd = W.flip(1, 2, 3).permute(4, 1, 2, 3, 0).contiguous() if dgrad else W
     if variant == "x":
         spec = cw.WinogradXSpec(Di=Di, Hi=Hi, Wi=Wi, C=C, K=K, **spec_kw)
@@ -184,7 +195,8 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
 
         def wt():
             return cw.winograd_yx_weight_transform(
-                Wd, dtype=udt, fold=spec.stage in ("reg", "wlds"), u16=spec.b16, uc=spec.bc
+                Wd, dtype=udt, fold=spec.stage in ("reg", "wlds"), u16=spec.b16, uc=spec.bc,
+                my=getattr(spec, "my", 2),
             )
 
         lay = getattr(spec, "xin", "c8")
@@ -221,7 +233,7 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         sigb = sigb.scalar("OS", "f32")
     bps = variant == "yx" and getattr(spec, "bps", 0)
     bpo = variant == "yx" and getattr(spec, "bps_out", False)
-    if bps:
+    if bps in (1, 2):  # bps=3 computes its scale in the kernel (no map)
         sigb = sigb.ptr("E", "i32")
     if bpo:
         sigb = sigb.ptr("EO", "i32")
@@ -242,8 +254,13 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         Xh[hb:Di - hb, hb:Hi - hb, hb:Wi - hb] = X[hb:Di - hb, hb:Hi - hb, hb:Wi - hb]
         X = Xh
         del Xh
-    if dgrad:
-        Xk = cw.winograd3d_x_to_c8(torch.nn.functional.pad(X * SX, (0, 0, 2, 2, 2, 2, 2, 2)))
+    if lay == "ndhwc" and variant == "yx":
+        # the main kernel reads X / dY in place; a padded form's zero halo by predication
+        if cw._xpad(spec) != (hz, hx):
+            raise ValueError(f"xin ndhwc: spec xpad (z, yx) must be {(hz, hx)}")
+        Xk = X * SX if SX != 1.0 else X
+    elif hx:
+        Xk = cw.winograd3d_x_to_c8(torch.nn.functional.pad(X * SX, (0, 0) + (hx,) * 4 + (hz,) * 2))
     else:
         Xk = {"c8": cw.winograd3d_x_to_c8, "r8": cw.winograd_x_to_r8}.get(lay, lambda t: t)(X * SX)
     grid = grid_fn(spec)
@@ -259,12 +276,14 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
 
     if bps and osc:
         raise ValueError("bps replaces oscale: use one of them")
+    if adapter and (bps == 2 or yc8h or variant != "yx"):
+        raise ValueError("--adapter: drop-in yx only (no bps=2 / yc8h chained input)")
     if bps == 1:
         hb = spec.bps_halo
-        if hb != (2 if dgrad else 0):
-            raise ValueError("bps=1: bps_halo must be 2 with --dgrad, else 0")
+        if hb != hx or cw._bps_hz(spec) != hz:
+            raise ValueError(f"bps=1: bps_halo must be {hx} and the z halo {hz} (the relayout's)")
         src = (X * SX) if osc else X
-        n_ent = cw.x_to_c8_lds_grid(Di - 2 * hb, Hi - 2 * hb, Wi - 2 * hb, C)[0]
+        n_ent = cw.x_to_c8_lds_grid(Di - 2 * hz, Hi - 2 * hb, Wi - 2 * hb, C)[0]
         vb = cw._x8_vb(C)
         Em = torch.zeros(n_ent * vb, device=dev, dtype=torch.int32)
         am = _absbits(src).amax(-1).reshape(-1)
@@ -281,19 +300,20 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         Dp, Hp, Wp = P.shape[:3]
         ZTp = spec.bps_pz or spec.z_tile
         NBp = spec.bps_pn or C // spec.n_tile
-        a_ = _absbits(P).reshape(Dp, Hp // 2, 2, Wp // 2, 2, C).amax(4).amax(2)
+        pmy = spec.bps_pmy or spec.my
+        a_ = _absbits(P).reshape(Dp, Hp // pmy, pmy, Wp // 2, 2, C).amax(4).amax(2)
         a_ = a_.reshape(Dp, -1, C)
         ntbp = -(-a_.shape[1] // 32)
         a_ = torch.nn.functional.pad(a_, (0, 0, 0, ntbp * 32 - a_.shape[1], 0,
                                           -(-Dp // ZTp) * ZTp - Dp))
         E = a_.reshape(-1, ZTp, ntbp, 32, NBp, C // NBp).amax(5).amax(3).amax(1).reshape(-1)
-        E = E.contiguous()
+        E = E.repeat_interleave(spec.bps_pw or spec.waves).contiguous()  # one per wave
         assert E.numel() == cw.bps_map_entries(spec), (E.numel(), cw.bps_map_entries(spec))
         args["E"] = E
         del Xin, P, a_
     if bpo:
-        EO = torch.zeros(grid[0] * (grid[1] if len(grid) > 1 else 1), device=dev,
-                         dtype=torch.int32)
+        EO = torch.zeros(grid[0] * (grid[1] if len(grid) > 1 else 1) * spec.waves,
+                         device=dev, dtype=torch.int32)
         args["EO"] = EO
     if frel:
         Fl = torch.zeros(grid[0], device=dev, dtype=torch.int32)
@@ -338,9 +358,11 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
     if variant == "yx":
         # rocKE auxiliary kernels for the whole call: X relayout + weight transform
         am1 = bps == 1
-        if dgrad:
-            kx = cw.build_x_to_c8_lds(Di - 4, Hi - 4, Wi - 4, C, halo=2, scale=osc, amax=am1)
-            xgrid = cw.x_to_c8_lds_grid(Di - 4, Hi - 4, Wi - 4, C)
+        if hx:
+            h2 = 2 * hx
+            kx = cw.build_x_to_c8_lds(Di - 2 * hz, Hi - h2, Wi - h2, C, halo=hxs, scale=osc,
+                                      amax=am1)
+            xgrid = cw.x_to_c8_lds_grid(Di - 2 * hz, Hi - h2, Wi - h2, C)
         elif lay == "r8":
             kx = cw.build_x_to_c8(Di, Hi, Wi, C, rows=True)
             xgrid = cw.x_to_c8_grid(Di, Hi, Wi, C)
@@ -359,8 +381,11 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         odt = "f16" if spec.op_dtype == "f16" else "bf16"
         wt3 = wtv in (3, 4) and odt == "f16" and spec.stage == "lds16" and not spec.b16 \
             and not spec.bc
+        my_ = getattr(spec, "my", 2)
+        if my_ != 2 and not wt3:
+            raise ValueError("my=4: --wtv 3 or 4")
         if wt3:
-            kw_ = cw.build_yx_weight_transform_v3(K, C, flip=dgrad, swz=wtv == 4)
+            kw_ = cw.build_yx_weight_transform_v3(K, C, flip=dgrad, swz=wtv == 4, my=my_)
         else:
             kw_ = cw.build_yx_weight_transform(
                 K, C, out_dtype=odt, fold=spec.stage in ("reg", "wlds"), u16=spec.b16,
@@ -385,12 +410,12 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
             aux = ("frel", la, ca)
         elif lay == "c8" and not spec.b16 and not spec.bc:
             # one launch for both passes (relayout and weight transform side by side)
-            hd = 4 if dgrad else 0
-            ka = cw.build_yx_aux(Di - hd, Hi - hd, Wi - hd, C, K, out_dtype=odt,
+            hd = 2 * hx
+            ka = cw.build_yx_aux(Di - 2 * hz, Hi - hd, Wi - hd, C, K, out_dtype=odt,
                                  fold=spec.stage in ("reg", "wlds"),
                                  rev=getattr(spec, "xrev", False),
-                                 halo=2 if dgrad else 0, flip=dgrad, wtv=(wtv if wt3 else 1),
-                                 scale=osc, amax=am1)
+                                 halo=hxs, flip=dgrad, wtv=(wtv if wt3 else 1),
+                                 scale=osc, amax=am1, my=my_)
             sga = (SignatureBuilder().ptr("X", "bf16").ptr("X8", "bf16")
                    .ptr("W", "bf16").ptr("U", odt))
             if osc:
@@ -401,7 +426,7 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
                 hsaco=compile_kernel(ka, arch=arch).hsaco, kernel_name=ka.name,
                 signature=sga.build(),
             )
-            ca = LaunchConfig(grid=cw.yx_aux_grid(Di - hd, Hi - hd, Wi - hd, C, K,
+            ca = LaunchConfig(grid=cw.yx_aux_grid(Di - 2 * hz, Hi - hd, Wi - hd, C, K,
                                                   wtv=(wtv if wt3 else 1)),
                               block=(256, 1, 1))
             aux = ("one", la, ca)
@@ -547,10 +572,11 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         torch.cuda.synchronize()
         xr = X.float().permute(3, 0, 1, 2)[None]
         wr = W.float().permute(0, 4, 1, 2, 3)
+        pd_ = (adapter_pd, 1, 1) if adapter else 0
         if dgrad:
-            ref = torch.nn.functional.conv_transpose3d(xr, wr)[0].permute(1, 2, 3, 0)
+            ref = torch.nn.functional.conv_transpose3d(xr, wr, padding=pd_)[0].permute(1, 2, 3, 0)
         else:
-            ref = torch.nn.functional.conv3d(xr, wr)[0].permute(1, 2, 3, 0)
+            ref = torch.nn.functional.conv3d(xr, wr, padding=pd_)[0].permute(1, 2, 3, 0)
         if yc8h:
             Yc = Y.float()
             hal = Yc.clone()
@@ -565,15 +591,22 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
             Yb = Yv.to(torch.bfloat16)
             ZT_ = spec.z_tile
             Dq = -(-spec.Do // ZT_) * ZT_
-            a_ = _absbits(Yb).reshape(spec.Do, spec.Ho // 2, 2, spec.Wo // 2, 2, K).amax(4).amax(2)
+            a_ = _absbits(Yb).reshape(spec.Do, spec.Ho // spec.my, spec.my, spec.Wo // 2, 2,
+                                      K).amax(4).amax(2)
             a_ = a_.reshape(spec.Do, -1, K)
             ntb_ = -(-a_.shape[1] // 32)
             a_ = torch.nn.functional.pad(a_, (0, 0, 0, ntb_ * 32 - a_.shape[1], 0, Dq - spec.Do))
             ref_eo = a_.reshape(-1, ZT_, ntb_, 32, K // spec.n_tile, spec.n_tile).amax(5).amax(3)
             ref_eo = ref_eo.amax(1).reshape(-1)
-            d_ = EO.to(torch.int64) - ref_eo.to(torch.int64)
-            res["map_out_ok"] = bool((d_ >= 0).all().item() and (d_ <= 1).all().item())
+            d_ = EO.reshape(-1, spec.waves).amax(1).to(torch.int64) - ref_eo.to(torch.int64)
+            # (yc8h_crop: the unstored ring still counts in the kernel's max -> upper bound only)
+            res["map_out_ok"] = bool((d_ >= 0).all().item() and (
+                getattr(spec, "yc8h_crop", False) or (d_ <= 1).all().item()))
             del Yb, a_, ref_eo, d_
+        if yc8h and getattr(spec, "yc8h_crop", False):
+            # the outer ring is not stored (chained BWD-data layout): compare the rest
+            Yv = Yv[1:-1, 1:-1, 1:-1].contiguous()
+            ref = ref[1:-1, 1:-1, 1:-1].contiguous()
         err = (Yv - ref).abs()
         scale = max(ref.abs().max().item(), 1.0)
         rel = err.max().item() / scale
@@ -587,8 +620,29 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
     from statistics import median
 
     res["dir"] = "dgrad" if dgrad else "fwd"
+    res["form"] = (f"adapter{'' if adapter_pd == 1 else '011'}" if adapter else "halo")
     res["scale_exp"] = scale_exp
     res["data"] = data
+    if det_runs and aux is not None and aux[0] != "frel" and pipe_fn is None:
+        # determinism: the whole drop-in call (aux + main [+ split-K reduce]) det_runs times
+        # into a poisoned output, bitwise against the first run; sha256 of the output for
+        # cross-GPU / cross-session comparison
+        import hashlib
+
+        outs = []
+        for _ in range(det_runs):
+            Y.view(torch.int16).fill_(-1)
+            if KS > 1:
+                Yp.fill_(float("nan"))
+            full()
+            torch.cuda.synchronize()
+            outs.append(Y.clone())
+        res["det_runs"] = det_runs
+        res["det_identical"] = all(torch.equal(outs[0].view(torch.int16), o.view(torch.int16))
+                                   for o in outs[1:])
+        res["out_sha256"] = hashlib.sha256(outs[0].cpu().view(torch.int16).numpy().tobytes()
+                                           ).hexdigest()[:16]
+        del outs
     if not timing:
         print(json.dumps(res), flush=True)
         return res
@@ -618,6 +672,30 @@ def run_one(shape, *, arch, warmup, iters, verify, spec_kw, label="", power=Fals
         res["eff_tf_chain"] = spec.flops / res["ms_chain"] / 1e9
     if aux is not None:
         res["ms_aux"] = median(time_launches_staged(aux_only, warmup=warmup, iters=iters))
+    if adapter and not dgrad:
+        # the direct alternative's extra pass: zero-pad copy of X into the halo-form input
+        # (torch strided copy into the interior of a preallocated, zero-haloed buffer), after
+        # which a halo-form (pad 0) direct kernel computes the adapter conv
+        Xpad = torch.zeros(Di, Hi, Wi, C, device=dev, dtype=torch.bfloat16)
+        Xin_ = Xpad[hz:Di - hz, hx:Hi - hx, hx:Wi - hx]
+
+        def padcopy():
+            Xin_.copy_(X)
+
+        res["ms_padcopy"] = median(time_launches_staged(padcopy, warmup=warmup, iters=iters))
+        # the same pad copy as one rocKE kernel at copy bandwidth (cw.build_pad_copy)
+        kpc = cw.build_pad_copy(Di - 2 * hz, Hi - 2 * hx, Wi - 2 * hx, C, halo=(hz, hx, hx))
+        lpc = KernelLauncher(hsaco=compile_kernel(kpc, arch=arch).hsaco, kernel_name=kpc.name,
+                             signature=SignatureBuilder().ptr("X", "bf16").ptr("Xp", "bf16").build())
+        cpc = LaunchConfig(grid=cw.pad_copy_grid(Di - 2 * hz, Hi - 2 * hx, Wi - 2 * hx, C),
+                           block=(256, 1, 1))
+        Xpad.zero_()
+        lpc({"X": X, "Xp": Xpad}, config=cpc)
+        torch.cuda.synchronize()
+        res["padcopy_rocke_exact"] = bool(torch.equal(Xin_, X))
+        res["ms_padcopy_rocke"] = median(time_launches_staged(
+            lambda: lpc({"X": X, "Xp": Xpad}, config=cpc), warmup=warmup, iters=iters))
+        del Xpad, Xin_
     if pipe_fn is not None:
         res["ms_pipe"] = median(time_launches_staged(pipe_fn, warmup=warmup, iters=iters))
         res["eff_tf_pipe"] = spec.flops / res["ms_pipe"] / 1e9
@@ -642,12 +720,19 @@ def main(argv=None):
     p.add_argument("--spec", default="{}", help="JSON dict of extra Winograd3dSpec fields")
     p.add_argument("--dgrad", action="store_true",
                    help="BWD-data of the shape (yx: conv of dY padded by 2, flipped weights)")
+    p.add_argument("--adapter", action="store_true",
+                   help="production pad-(1,1,1) form: X / dY one voxel smaller per side, the "
+                   "relayout adds the zero halo (drop-in only; FWD and --dgrad)")
+    p.add_argument("--adapter-pd", type=int, default=None, choices=(0, 1),
+                   help="adapter form with pad (pd, 1, 1): 0 = a D-split run's D+2 input")
     p.add_argument("--data", default="u1", help="operands: u1 | tr [@exp2 scale of X], see _make_data")
     p.add_argument("--acc-out", default=None, help="save the output (bf16) here (torch.save)")
     p.add_argument("--timing", type=int, default=1, help="0: verify / accuracy only")
     p.add_argument("--wtv", type=int, default=1, help="weight transform: 1 (scalar) | 3 (16-B) | 4 (16-B, 8x8 lane swizzle)")
     p.add_argument("--scale-exp", type=int, default=0,
                    help="spec oscale: relayout scales X by 2**e, the epilogue by 2**-e")
+    p.add_argument("--det-runs", type=int, default=0,
+                   help="determinism: run the drop-in call N times, compare bitwise (+ sha256)")
     p.add_argument("--pipe", default="", help="yx boff: pipelined whole call, z cut points as "
                    "fractions of the slabs, e.g. 0.1,0.4")
     a = p.parse_args(argv)
@@ -674,6 +759,9 @@ def main(argv=None):
             timing=bool(a.timing),
             wtv=a.wtv,
             scale_exp=a.scale_exp,
+            det_runs=a.det_runs,
+            adapter=a.adapter or a.adapter_pd is not None,
+            adapter_pd=1 if a.adapter_pd is None else a.adapter_pd,
         )
         if r is not None:
             r["spec"] = spec_kw

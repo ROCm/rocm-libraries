@@ -50,6 +50,17 @@ from rocke.helpers.spec import SignatureBuilder, kernel_name_join
 BT = ((1, 0, -1, 0), (0, 1, 1, 0), (0, -1, 1, 0), (0, 1, 0, -1))
 G = ((1.0, 0.0, 0.0), (0.5, 0.5, 0.5), (0.5, -0.5, 0.5), (0.0, 0.0, 1.0))
 AT = ((1, 1, 1, 0), (0, 1, -1, -1))
+# Winograd F(4,3) (points 0, +-1, +-2, inf) -- the y axis of the "my=4" yx variant, F(4x2,3x3)
+BT4 = ((4, 0, -5, 0, 1, 0), (0, -4, -4, 1, 1, 0), (0, 4, -4, -1, 1, 0), (0, -2, -1, 2, 1, 0),
+       (0, 2, -1, -2, 1, 0), (0, 4, 0, -5, 0, 1))
+G4 = ((0.25, 0.0, 0.0), (-1 / 6, -1 / 6, -1 / 6), (-1 / 6, 1 / 6, -1 / 6),
+      (1 / 24, 1 / 12, 1 / 6), (1 / 24, -1 / 12, 1 / 6), (0.0, 0.0, 1.0))
+AT4 = ((1, 1, 1, 1, 1, 0), (0, 1, -1, 2, -2, 0), (0, 1, 1, 4, 4, 0), (0, 1, -1, 8, -8, 1))
+
+
+def _ymats(my):
+    """(B^T, G, A^T) of the y axis: F(2,3) or F(4,3)."""
+    return (BT, G, AT) if my == 2 else (BT4, G4, AT4)
 # z-axis combination per wave a: V'_a = d[P0] + R * d[P1]; true V_a = S0 * V'_a.
 _ZP0 = (0, 1, 1, 1)
 _ZP1 = (2, 2, 2, 3)
@@ -240,6 +251,53 @@ def _bt_axis(b, vals, coef_row):
             s = term if co > 0 else b.fneg(term)
         else:
             s = b.fadd(s, term) if co > 0 else b.fsub(s, term)
+    return s
+
+
+def _f16x4_const(b, v):
+    """<4 x f16> splat of an f16-exact constant."""
+    import struct
+
+    from rocke.core.ir import F16
+
+    h = struct.unpack("<H", struct.pack("<e", float(v)))[0]
+    w = b.const_i32(h | (h << 16) if h < 0x8000 else (h | (h << 16)) - (1 << 32))
+    return b.vec_bitcast(b.vec_pack([w, w], I32), VectorType(F16, 4))
+
+
+def _f16x4_comb(b, vals, coef_row):
+    """sum_i coef_row[i] * vals[i] over <4 x f16> vectors (packed f16 adds / fmas)."""
+    acc = None
+    for co, v in zip(coef_row, vals):
+        if co == 0:
+            continue
+        if acc is None:
+            acc = v if co == 1 else b.vector_mul(_f16x4_const(b, co), v)
+        elif co == 1:
+            acc = b.vector_add(acc, v)
+        elif co == -1:
+            acc = b.vector_sub(acc, v)
+        else:
+            acc = b.vector_fma(_f16x4_const(b, co), v, acc)
+    return acc
+
+
+def _bt_axis_gen(b, vals, coef_row):
+    """sum_i coef_row[i] * vals[i], any integer coefficients (fma for |c| != 1)."""
+    if all(c in (0, 1, -1) for c in coef_row):
+        return _bt_axis(b, vals, coef_row)
+    s = None
+    for co, term in zip(coef_row, vals):
+        if co == 0:
+            continue
+        if s is None:
+            s = term if co == 1 else (b.fneg(term) if co == -1 else b.fmul(b.const_f32(float(co)), term))
+        elif co == 1:
+            s = b.fadd(s, term)
+        elif co == -1:
+            s = b.fsub(s, term)
+        else:
+            s = b.fma(b.const_f32(float(co)), term, s)
     return s
 
 
@@ -695,11 +753,54 @@ class WinogradYxSpec:
     # Exact (power-of-two) and deterministic (max is order-free); entries are plain stores.
     bps: int = 0
     bps_halo: int = 0
+    # bps=1: the source's zero halo along z when it differs from y / x (-1: bps_halo) -- the
+    # production pad (0,1,1) form of a D-split run (relayout halo (0, 1, 1); dgrad (2, 1, 1))
+    bps_halo_z: int = -1
     bps_l: int = 14
     bps_pz: int = 0
     bps_pn: int = 0
+    bps_pmy: int = 0  # the producer's my (0: own)
+    bps_pw: int = 0  # the producer's waves per workgroup = map entries per workgroup (0: own)
+    # 1: blocks whose amax already lies in the safe window (2^-10 <= amax, max|V| <= 2^L)
+    # use e = 0 and run an unscaled copy of the main loop (uniform branch, no in-loop cost);
+    # only out-of-range blocks take the scaled loop. 0: always scale.
+    bps_win: int = 1
     # epilogue: write this workgroup's output amax entry (map layout bps=2) to EO
     bps_out: bool = False
+    # output tile height along y: 2 = F(2x2,3x3) (default), 4 = F(4x2,3x3) -- F(4,3) along y
+    # (6 y-points, 6 waves per group: wave b owns y-point b), F(2,3) along x. The y-transform
+    # (B^T of F(4,3): coefficients 4, -5, 2) is done in f32 in the fill and staged as f16;
+    # 24 points per 8 outputs instead of 16 per 4 (fewer MFMAs, fewer input rows,
+    # staged values and weight fragments per output). lds16 only.
+    my: int = 2
+    # xin "ndhwc": the zero halo of a padded convolution by predication -- X is the
+    # unpadded NDHWC tensor (Di - 2 xpad_z, Hi - 2 xpad, Wi - 2 xpad, C) and fill loads of
+    # voxels outside it return zero (out-of-range buffer offset); no relayout pass. Pad
+    # (1,1,1) FWD: xpad 1; pad (0,1,1): xpad_z 0; BWD-data dX = conv(pad(dY), flipped W):
+    # xpad 1, xpad_z 2 - pd. xpad_z -1: same as xpad.
+    xpad: int = 0
+    xpad_z: int = -1
+    # xin "ndhwc": chunks per fill group. The fill loads ``xs`` consecutive 8-channel
+    # chunks of a voxel row at once (16 xs contiguous bytes per lane and row) and stages
+    # them every xs chunk iterations into a ring of xs + 1 LDS buffers, so every input
+    # line is fetched once per xs chunks instead of once per chunk. 1 = off.
+    xs: int = 1
+    # xs > 1: 0 = ring of xs + 1 staged LDS buffers (the group is staged at once); 1 = the
+    # usual two LDS buffers, one chunk staged per iteration from the group's registers (xs
+    # chunks x 16 B per item and row live in VGPRs; fits z_tile 4)
+    xsreg: int = 0
+    # main loop unrolled by two chunks with two raw register sets: the input loads of chunk
+    # cc + 3 are issued right after chunk cc + 1 is staged (into its registers) and the
+    # weight loads first, so no loop-carried register copy (which forces a wait for the
+    # newest input loads every iteration) and ~1.5 iterations of input-load latency hiding.
+    # Needs an even chunk count. 0 = off.
+    xpf: int = 0
+    # bps=3 (in-kernel prescale, no amax map): the workgroup estimates the scale from the
+    # max |x| of its first chunk (headroom 2^(13 - bps_el + 2)), tracks the max |x| of
+    # everything its fill stages, and recomputes the block with the exact scale (from the
+    # tracked max) when it falls outside the f16 window of the estimate (rare). Plain
+    # max reductions: deterministic.
+    bps_el: int = 8
     # debugging / attribution only (wrong results): "nofill" skips the LDS fill,
     # "nomfma" skips the MFMAs, "nowait" uses no barriers in the main loop
     dbg: str = ""
@@ -719,7 +820,12 @@ class WinogradYxSpec:
 
     @property
     def tiles2d(self) -> int:
-        return (self.Ho // 2) * (self.Wo // 2)
+        return (self.Ho // self.my) * (self.Wo // 2)
+
+    @property
+    def nbp(self) -> int:
+        """y transform points (waves per group)."""
+        return self.my + 2
 
     @property
     def block_size(self) -> int:
@@ -777,17 +883,42 @@ class WinogradYxSpec:
             *(["crop"] if self.yc8h_crop else []),
             *([f"ks{self.ksplit}"] if self.ksplit != 1 else []),
             *(["os"] if self.oscale else []),
-            *([f"bps{self.bps}h{self.bps_halo}" + (f"l{self.bps_l}" if self.bps_l != 14 else "")
-               + (f"p{self.bps_pz}n{self.bps_pn}" if self.bps == 2 else "")]
+            *([f"bps{self.bps}h{self.bps_halo}"
+               + (f"z{self.bps_halo_z}" if self.bps_halo_z >= 0 else "")
+               + (f"l{self.bps_l}" if self.bps_l != 14 else "")
+               + (f"p{self.bps_pz}n{self.bps_pn}" if self.bps == 2 else "")
+               + (f"y{self.bps_pmy}" if self.bps == 2 and self.bps_pmy else "")
+               + (f"w{self.bps_pw}" if self.bps == 2 and self.bps_pw else "")
+               + ("w0" if self.bps_win == 0 else "")]
               if self.bps else []),
             *(["bpo"] if self.bps_out else []),
+            *([f"my{self.my}"] if self.my != 2 else []),
+            *([f"xp{_xpad(self)[0]}{_xpad(self)[1]}"] if any(_xpad(self)) else []),
+            *([f"xs{self.xs}" + ("", "r", "l")[self.xsreg]] if self.xs != 1 else []),
+            *(["xpf"] if self.xpf else []),
+            *([f"el{self.bps_el}"] if self.bps == 3 and self.bps_el != 8 else []),
             *([f"dbg{self.dbg}"] if self.dbg else []),
         )
 
 
+def _xpad(spec):
+    """(z, y/x) zero halo added by predication (xin ndhwc)."""
+    xp = getattr(spec, "xpad", 0)
+    xz = getattr(spec, "xpad_z", -1)
+    return (xp if xz < 0 else xz), xp
+
+
 def is_valid_yx_spec(spec: WinogradYxSpec) -> Tuple[bool, str]:
-    if spec.Ho % 2 or spec.Wo % 2 or spec.Ho <= 0 or spec.Wo <= 0:
-        return False, "F(2,3) needs even output extents in y and x"
+    if spec.my not in (2, 4):
+        return False, "my: 2 | 4"
+    if spec.Ho % spec.my or spec.Wo % 2 or spec.Ho <= 0 or spec.Wo <= 0:
+        return False, "output extents: y a multiple of my, x even"
+    if spec.my == 4 and (
+            spec.stage != "lds16" or spec.lin or spec.bc or spec.b16
+            or spec.single_buf or spec.bshare or spec.frel or spec.persist or spec.fhalf
+            or spec.bf_fill or spec.ksplit != 1 or spec.yc8h_crop or spec.phase
+            or spec.waves not in (6, 12) or spec.xin != "c8"):
+        return False, "my=4: plain double-buffered lds16 (no lin / ksplit), 6 or 12 waves"
     if spec.tiles_per_wg != 32 or spec.c_chunk != 8:
         return False, "supports tiles_per_wg=32, c_chunk=8 only"
     nn = 2 if spec.nsplit else spec.nn
@@ -796,15 +927,15 @@ def is_valid_yx_spec(spec: WinogradYxSpec) -> Tuple[bool, str]:
     if (nn != 1 or spec.waves > 8) and spec.stage not in ("lds16", "wlds"):
         return False, "nn > 1 / more than 8 waves need stage lds16"
     if spec.stage in ("lds16", "wlds"):
-        g = spec.waves // 4
-        if spec.waves % 4 or g % nn or spec.z_tile % (g // nn):
-            return False, "lds16: waves/4 groups must split as nn x (divisor of z_tile)"
+        g = spec.waves // spec.nbp
+        if spec.waves % spec.nbp or g % nn or spec.z_tile % (g // nn):
+            return False, "lds16: waves/nbp groups must split as nn x (divisor of z_tile)"
     if spec.lin and (spec.stage != "lds16" or spec.fhalf or spec.bf_fill or spec.frel
                      or spec.persist or spec.ppad or spec.b16 or spec.bshare):
         return False, "lin: plain lds16 (no fhalf / bf_fill / frel / persist / ppad / b16)"
     if spec.tiles2d % spec.tiles_per_wg and not spec.lin:
         return False, f"2-D tiles {spec.tiles2d} not a multiple of {spec.tiles_per_wg}"
-    _nz = (spec.waves // 4) // (2 if spec.nsplit else spec.nn) if spec.stage in (
+    _nz = (spec.waves // spec.nbp) // (2 if spec.nsplit else spec.nn) if spec.stage in (
         "lds16", "wlds") else (
         spec.waves // 4)
     if spec.z_tile * 64 // max(1, _nz) > 256:
@@ -815,7 +946,8 @@ def is_valid_yx_spec(spec: WinogradYxSpec) -> Tuple[bool, str]:
         spec.op_dtype == "bf16t" and spec.stage != "lds"
     ):
         return False, f"unknown op_dtype {spec.op_dtype!r}"
-    if spec.waves not in (4, 8, 12, 16) or (spec.waves > 4 and spec.stage == "reg") or (
+    if spec.waves not in ((4, 8, 12, 16) if spec.my == 2 else (6, 12)) or (
+            spec.waves > 4 and spec.stage == "reg") or (
         spec.stage == "lds" and spec.waves == 8 and spec.z_tile % 2
     ):
         return False, "waves: 4 | 8 (lds, even z_tile) | 4..16 (lds16)"
@@ -844,8 +976,28 @@ def is_valid_yx_spec(spec: WinogradYxSpec) -> Tuple[bool, str]:
     if (spec.bps or spec.bps_out) and (
             spec.stage != "lds16" or spec.single_buf or spec.b16 or spec.frel or spec.persist
             or spec.fhalf or spec.bf_fill or spec.bshare or not spec.epi_vec
-            or spec.bps not in (0, 1, 2) or spec.bps_halo < 0 or spec.waves > 8):
+            or spec.bps not in (0, 1, 2, 3) or spec.bps_halo < 0
+            or spec.bps_halo_z < -1 or (spec.bps_halo_z >= 0 and spec.bps != 1)
+            or (spec.bps_out and spec.waves > (8 if spec.my == 2 else 6))):
         return False, "bps: plain double-buffered lds16 epi_vec (no fhalf / bf_fill / frel)"
+    if (any(_xpad(spec)) or spec.xs != 1) and (
+            spec.xin != "ndhwc" or spec.lin or spec.my != 2 or spec.xpad < 0
+            or spec.xpad_z < -1 or spec.xs < 1 or spec.single_buf or spec.b16 or spec.bshare
+            or spec.frel or spec.persist or spec.fhalf or spec.bf_fill or spec.phase
+            or spec.fill_first or spec.bpf2):
+        return False, "xpad / xs: xin ndhwc, plain double-buffered lds16 (no lin)"
+    if spec.xpf and (spec.xs != 1 or spec.stage != "lds16" or spec.single_buf or spec.b16
+                     or spec.frel or spec.persist or spec.fhalf or spec.bf_fill or spec.phase
+                     or spec.bpf2 or spec.lin
+                     or (spec.C // 8 // max(1, spec.ksplit)) % 2):
+        return False, "xpf: plain double-buffered lds16, xs 1, even chunk count"
+    if spec.xsreg not in (0, 1, 2) or (spec.xsreg == 2 and spec.ksplit != 1):
+        return False, "xsreg: 0 (LDS ring) | 1 (register groups) | 2 (lane-contiguous ring)"
+    if spec.xs != 1 and (spec.C // 8) % (spec.xs * max(1, spec.ksplit)):
+        return False, "xs must divide the chunks (per split)"
+    if spec.bps == 3 and (spec.xin != "ndhwc" or spec.oscale or spec.bps_out
+                          or not 2 <= spec.bps_el <= 13):
+        return False, "bps=3: xin ndhwc, no oscale / bps_out, 2 <= bps_el <= 13"
     if spec.bps_out and not spec.yc8h:
         return False, "bps_out writes the next layer's map: yc8h output only"
     if spec.yc8h_crop and not spec.yc8h:
@@ -882,6 +1034,8 @@ def is_valid_yx_spec(spec: WinogradYxSpec) -> Tuple[bool, str]:
         if spec.bf_fill:
             fl = max(fl, 2 * _yx_lds16_buf(spec) + 8 * 2 * (spec.Wo // 2 + 1) * 2 + 2)
         epi = min(spec.waves, 8) if spec.stage in ("lds16", "wlds") else spec.waves
+        if spec.my == 4:
+            epi = spec.nbp  # one group at a time in the epilogue
         if max(fl, epi * 32 * 64) * 4 > 65536:
             return False, "lds stage: staged planes exceed 64 KiB"
     if not 0 <= spec.pf_planes <= spec.z_tile + 1:
@@ -990,7 +1144,10 @@ def _yx_epilogue(
         ZT = zt_w
     if wb is None:
         wb = wave
-    wbase = ci(0) if zh is None else b.mul(zh, ci(4))
+    MY = getattr(spec, "my", 2)
+    NBP = MY + 2
+    ATY = _ymats(MY)[2]
+    wbase = ci(0) if zh is None else b.mul(zh, ci(NBP))
     TX = Wo // 2
     if getattr(spec, "yc8h", False):
         h2 = 2 * getattr(spec, "yc8h_halo", 1)
@@ -1032,17 +1189,30 @@ def _yx_epilogue(
         ld.ks_i = ks_i
         if amax_out is not None:
             ld.amax = [ci(0)]
+    def _coefs(oy):
+        # ATY[oy][bb] as wave-uniform f32 coefficients
+        out = []
+        if MY == 2:
+            for bb in range(4):
+                out.append(b.select(b.cmp_eq(oy, ci(0)), b.const_f32(float(AT[0][bb])),
+                                    b.const_f32(float(AT[1][bb]))))
+        else:
+            for bb in range(NBP):
+                cf = b.const_f32(float(ATY[0][bb]))
+                for r_ in range(1, MY):
+                    cf = b.select(b.cmp_eq(oy, ci(r_)), b.const_f32(float(ATY[r_][bb])), cf)
+                out.append(cf)
+        if oscale is not None:
+            out = [b.fmul(cf, oscale) for cf in out]
+        return out
+
+    # store roles (output row oy, slot half ih) per wave: F(2,3): wave b -> (b // 2, b % 2);
+    # F(4,3): 8 roles over 6 waves -- waves 0, 1 also take (3, b % 2)
     oy = b.div(wb, ci(2))
     ih = b.mod(wb, ci(2))
-    # AT[oy][bb] as wave-uniform f32 coefficients
-    coef = []
-    for bb in range(4):
-        coef.append(
-            b.select(b.cmp_eq(oy, ci(0)), b.const_f32(float(AT[0][bb])),
-                     b.const_f32(float(AT[1][bb])))
-        )
-    if oscale is not None:
-        coef = [b.fmul(cf, oscale) for cf in coef]
+    roles = [(ih, oy, _coefs(oy), None)]
+    if MY == 4:
+        roles.append((ih, ci(3), _coefs(ci(3)), b.cmp_lt(wb, ci(2))))
     # A^T along x for every slot right away (256 accumulators -> 128 VGPR values), so
     # no accumulator is live across the epilogue's barriers.
     pxs = {}
@@ -1051,28 +1221,28 @@ def _yx_epilogue(
             mv = [b.vec_extract(acc[zo * 4 + c], i) for c in range(4)]
             for ox in range(2):
                 pxs[(zo, i, ox)] = _bt_axis(b, mv, AT[ox])
-    groups = spec.waves // 4
+    groups = spec.waves // NBP
     if gpr is None or gpr >= groups:
-        _yx_epi_rounds(b, spec, ZT, pxs, st, ld, wave, wbase, ih, oy, coef, kq, tb, z0,
+        _yx_epi_rounds(b, spec, ZT, pxs, st, ld, wave, wbase, roles, kq, tb, z0,
                        n_glob, ry, None)
         if amax_out is not None:
             _yx_amax_store(b, spec, ld.amax[0], amax_out)
         return
-    assert amax_out is None, "bps_out: waves <= 8"
-    # Groups (4 waves each) take turns in LDS, gpr groups per round.
-    grp = b.div(wave, ci(4))
+    assert amax_out is None, "bps_out: one wave group in the epilogue"
+    # Groups (NBP waves each) take turns in LDS, gpr groups per round.
+    grp = b.div(wave, ci(NBP))
     for r in range(-(-groups // gpr)):
         lo, hi = r * gpr, min(groups, (r + 1) * gpr)
         active = b.land(b.cmp_ge(grp, ci(lo)), b.cmp_lt(grp, ci(hi)))
-        w_loc = b.sub(wave, ci(lo * 4))
-        wb_loc = b.mul(b.sub(grp, ci(lo)), ci(4))
+        w_loc = b.sub(wave, ci(lo * NBP))
+        wb_loc = b.mul(b.sub(grp, ci(lo)), ci(NBP))
         if r:
             b.sync()
-        _yx_epi_rounds(b, spec, ZT, pxs, st, ld, w_loc, wb_loc, ih, oy, coef, kq, tb, z0,
+        _yx_epi_rounds(b, spec, ZT, pxs, st, ld, w_loc, wb_loc, roles, kq, tb, z0,
                        n_glob, ry, active)
 
 
-def _yx_epi_rounds(b, spec, ZT, pxs, st, ld, wave, wbase, ih, oy, coef, kq, tb, z0, n_glob,
+def _yx_epi_rounds(b, spec, ZT, pxs, st, ld, wave, wbase, roles, kq, tb, z0, n_glob,
                    ry, active):
     ci = b.const_i32
     K, Ho, Wo = spec.K, spec.Ho, spec.Wo
@@ -1096,16 +1266,30 @@ def _yx_epi_rounds(b, spec, ZT, pxs, st, ld, wave, wbase, ih, oy, coef, kq, tb, 
 
         guarded(wr)
         b.sync()
-        guarded(lambda zo=zo: _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0,
-                                            n_glob, ry))
+        for ih, oy, coef, cond in roles:
+            # a conditional role is branch-free: the other waves' stores go out of range
+            guarded(lambda zo=zo, ih=ih, oy=oy, coef=coef, cond=cond: _yx_epi_store(
+                b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry, mask=cond))
 
 
-def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry):
+def _yx_store_mask(b, spec, mask, off, unit):
+    """Out-of-range offset (store dropped) where ``mask`` is false."""
+    if mask is None:
+        return off
+    if getattr(spec, "yc8h", False):
+        h2 = 2 * getattr(spec, "yc8h_halo", 1)
+        nel = (spec.Do + h2) * (spec.Ho + h2) * (spec.Wo + h2) * spec.K
+    else:
+        nel = getattr(spec, "ksplit", 1) * spec.Do * spec.Ho * spec.Wo * spec.K
+    return b.select(mask, off, b.const_i32(-(-nel // unit)))
+
+
+def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry, mask=None):
     ci = b.const_i32
     K, Ho, Wo = spec.K, spec.Ho, spec.Wo
     TX = Wo // 2
     if getattr(spec, "epi16", False) and hasattr(ld, "ld4"):
-        _yx_epi_store16(b, spec, zo, ld, wbase, ih, oy, coef, tb, z0, ry)
+        _yx_epi_store16(b, spec, zo, ld, wbase, ih, oy, coef, tb, z0, ry, mask=mask)
         return
     if getattr(spec, "epi_vec", False) and hasattr(ld, "ld4"):
         lane = ld.lane
@@ -1119,18 +1303,20 @@ def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry):
             tt = b.add(b.mul(tb, ci(spec.tiles_per_wg)), row)
             ttx = b.mod(tt, ci(TX))
             tty = b.div(tt, ci(TX))
-            yo = b.add(b.mul(tty, ci(2)), oy)
+            yo = b.add(b.mul(tty, ci(getattr(spec, "my", 2))), oy)
             for ox in range(2):
                 jj = b.add(b.mul(i_dyn, ci(2)), ci(ox))
                 src = b.add(ci(kq2 * 32), b.mul(nq, ci(4)))
                 out = None
-                for bb in range(4):
+                for bb in range(len(coef)):
                     pv = ld.ld4(b.add(wbase, ci(bb)), jj, src)
                     out = (b.vector_mul(cvec[bb], pv) if out is None
                            else b.vector_fma(cvec[bb], pv, out))
                 xo = b.add(b.mul(ttx, ci(2)), ci(ox))
+                obf = None
                 if hasattr(ld, "amax"):
-                    _yx_amax_acc(b, ld, out, tt, spec)
+                    obf = b.vec_trunc_f32_to_bf16(out)
+                    _yx_amax_acc(b, ld, obf, tt, spec, mask)
                 if getattr(spec, "yc8h", False):
                     # [K/8][Do+2][Ho+2][Wo+2][8], interior: channel kk = n_base + 4 nq
                     kb = b.add(b.div(ld.n_base, ci(8)), b.div(nq, ci(2)))
@@ -1140,11 +1326,14 @@ def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry):
                         b.add(yo, ci(hh))), ci(Wo + 2 * hh)), b.add(xo, ci(hh)))
                     yoff = b.add(b.mul(vox, ci(8)), b.mul(b.mod(nq, ci(2)), ci(4)))
                     yoff = _yx_crop_mask(b, spec, zz, yo, xo, yoff, 1)
+                    yoff = _yx_store_mask(b, spec, mask, yoff, 1)
                 else:
                     yoff = b.add(
                         b.mul(b.add(b.mul(b.add(b.mul(zz, ci(Ho)), yo), ci(Wo)), xo), ci(K)),
                         b.add(ld.n_base, b.mul(nq, ci(4))),
                     )
+                if not getattr(spec, "yc8h", False):
+                    yoff = _yx_store_mask(b, spec, mask, yoff, 1)
                 if getattr(spec, "ksplit", 1) > 1:
                     nel = spec.Do * Ho * Wo * K
                     yoff = b.add(yoff, b.mul(ld.ks_i, ci(nel)))
@@ -1153,7 +1342,8 @@ def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry):
                     continue
                 yoff = _yx_lin_mask(b, spec, tt, yoff, 1)
                 b.buffer_store_vN_bf16(
-                    ry, b.mul(yoff, ci(2)), ci(0), b.vec_trunc_f32_to_bf16(out), 2
+                    ry, b.mul(yoff, ci(2)), ci(0),
+                    obf if obf is not None else b.vec_trunc_f32_to_bf16(out), 2
                 )
         return
     if True:
@@ -1168,11 +1358,11 @@ def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry):
             tt = b.add(b.mul(tb, ci(spec.tiles_per_wg)), row)
             ttx = b.mod(tt, ci(TX))
             tty = b.div(tt, ci(TX))
-            yo = b.add(b.mul(tty, ci(2)), oy)
+            yo = b.add(b.mul(tty, ci(getattr(spec, "my", 2))), oy)
             for ox in range(2):
                 jj = b.add(b.mul(i_dyn, ci(2)), ci(ox))
                 out = None
-                for bb in range(4):
+                for bb in range(len(coef)):
                     pv = ld(b.add(wbase, ci(bb)), jj)
                     out = b.fmul(coef[bb], pv) if out is None else b.fma(coef[bb], pv, out)
                 xo = b.add(b.mul(ttx, ci(2)), ci(ox))
@@ -1182,41 +1372,37 @@ def _yx_epi_store(b, spec, zo, ld, wbase, ih, oy, coef, kq, tb, z0, n_glob, ry):
                 )
                 # out-of-range z (last block when z_tile does not divide Do) is dropped
                 yoff = _yx_lin_mask(b, spec, tt, yoff, 1)
+                yoff = _yx_store_mask(b, spec, mask, yoff, 1)
                 b.buffer_store_bf16(ry, b.mul(yoff, ci(2)), ci(0), b.trunc_f32_to_bf16(out))
 
 
-def _yx_amax_acc(b, ld, vec4, tt, spec):
-    """bps_out: running max of the |f32| bit patterns of this lane's stored outputs (tiles
-    past the plane's end under lin are excluded)."""
+def _yx_amax_acc(b, ld, vbf, tt, spec, mask=None):
+    """bps_out: running max of the |x| bf16 bit patterns this lane stores (``vbf``: the bf16
+    vector of the store), two 16-bit halves per dword with v_pk_max_u16 (tiles past the
+    plane's end under lin and masked-off roles are excluded)."""
     ci = b.const_i32
-    vi = b.vec_bitcast(vec4, VectorType(I32, 4))
+    n = vbf.type.count // 2
+    vi = b.vec_bitcast(vbf, VectorType(I32, n))
     m = ld.amax[0]
-    for q in range(4):
-        a = b.land(b.vec_extract(vi, q), ci(0x7FFFFFFF))
+    for q in range(n):
+        a = b.land(b.vec_extract(vi, q), ci(0x7FFF7FFF))
         if getattr(spec, "lin", False) and spec.tiles2d % spec.tiles_per_wg:
             a = b.select(b.cmp_lt(tt, ci(spec.tiles2d)), a, ci(0))
-        m = b.smax(m, a)
+        if mask is not None:
+            a = b.select(mask, a, ci(0))
+        m = b.inline_asm("v_pk_max_u16 $0, $1, $2", "=v,v,v", [m, a], I32, sideeffect=False)
     ld.amax[0] = m
 
 
 def _yx_amax_store(b, spec, m, amax_out):
-    """bps_out: the workgroup's output amax as a bf16 |x| pattern rounded up (an upper bound
-    of every stored bf16 value), stored to EO[entry] by thread 0 (plain store, no atomics)."""
+    """bps_out: each wave's output amax (the max |x| bf16 pattern of every value it stored),
+    stored by its lane 0 to EO[entry * waves + wave] (plain stores, no atomics, no barrier)."""
     ci = b.const_i32
     EO, entry, lds, slot0, wave, tid = amax_out
-    wm = b.readfirstlane(b.wave_reduce(m, "max"))
-    b.sync()  # the slots reuse the epilogue's staging area: every wave is done reading it
+    m = b.smax(b.land(m, ci(0xFFFF)), b.lshr(m, ci(16)))
+    wm = _wave_max_i32(b, m)
     with b.scf_if(b.cmp_eq(b.mod(tid, ci(64)), ci(0))):
-        b.smem_store_vN_f32(lds, [b.add(ci(slot0), wave)], b.bitcast(wm, F32), 1)
-    b.sync()
-    with b.scf_if(b.cmp_eq(tid, ci(0))):
-        mx = ci(0)
-        for w in range(spec.waves):
-            v = b.bitcast(b.vec_extract(b.smem_load_vN_f32(lds, ci(slot0 + w), n=1), 0), I32)
-            mx = b.smax(mx, v)
-        hi = b.lshr(mx, ci(16))
-        up = b.select(b.cmp_ne(b.land(mx, ci(0xFFFF)), ci(0)), ci(1), ci(0))
-        b.global_store(EO, entry, b.smin(b.add(hi, up), ci(0x7F80)), align=4)
+        b.global_store(EO, b.add(b.mul(entry, ci(spec.waves)), wave), wm, align=4)
 
 
 def _yx_crop_mask(b, spec, zz, yo, xo, off, unit):
@@ -1247,7 +1433,7 @@ def _yx_lin_mask(b, spec, tt, off, unit, total=None):
                     b.const_i32(-(-nel // unit)))
 
 
-def _yx_epi_store16(b, spec, zo, ld, wbase, ih, oy, coef, tb, z0, ry):
+def _yx_epi_store16(b, spec, zo, ld, wbase, ih, oy, coef, tb, z0, ry, mask=None):
     """yc8h epilogue, one 16-byte store per (lane, kq2): lane = (r, ox, g) with g = lane % 4
     the 8-channel group, ox = (lane // 4) % 2 and r = lane // 8 the tile row slot."""
     ci = b.const_i32
@@ -1271,28 +1457,31 @@ def _yx_epi_store16(b, spec, zo, ld, wbase, ih, oy, coef, tb, z0, ry):
         tt = b.add(b.mul(tb, ci(spec.tiles_per_wg)), row)
         ttx = b.mod(tt, ci(TX))
         tty = b.div(tt, ci(TX))
-        yo = b.add(b.mul(tty, ci(2)), oy)
+        yo = b.add(b.mul(tty, ci(getattr(spec, "my", 2))), oy)
         xo = b.add(b.mul(ttx, ci(2)), oxl)
         src = b.add(ci(kq2 * 32), b.mul(g, ci(8)))
         oa = ob = None
-        for bb in range(4):
+        for bb in range(len(coef)):
             pa = ld.ld4(b.add(wbase, ci(bb)), jj, b.add(src, h0))
             pb = ld.ld4(b.add(wbase, ci(bb)), jj, b.add(src, h1))
             oa = b.vector_mul(cvec[bb], pa) if oa is None else b.vector_fma(cvec[bb], pa, oa)
             ob = b.vector_mul(cvec[bb], pb) if ob is None else b.vector_fma(cvec[bb], pb, ob)
         lo = b.select(is1, ob, oa)
         hi = b.select(is1, oa, ob)
+        obf = None
         if hasattr(ld, "amax"):
-            _yx_amax_acc(b, ld, lo, tt, spec)
-            _yx_amax_acc(b, ld, hi, tt, spec)
+            obf = b.vec_trunc_f32_to_bf16(b.vec_concat(lo, hi))
+            _yx_amax_acc(b, ld, obf, tt, spec, mask)
         hh = getattr(spec, "yc8h_halo", 1)
         vox = b.add(b.mul(b.add(b.mul(b.add(b.mul(
             kb, ci(spec.Do + 2 * hh)), b.add(zz, ci(hh))), ci(Ho + 2 * hh)),
             b.add(yo, ci(hh))), ci(Wo + 2 * hh)), b.add(xo, ci(hh)))
         vox = _yx_lin_mask(b, spec, tt, vox, 8)
         vox = _yx_crop_mask(b, spec, zz, yo, xo, vox, 8)
+        vox = _yx_store_mask(b, spec, mask, vox, 8)
         b.buffer_store_vN_bf16(
-            ry, b.mul(vox, ci(16)), ci(0), b.vec_trunc_f32_to_bf16(b.vec_concat(lo, hi)), 4
+            ry, b.mul(vox, ci(16)), ci(0),
+            obf if obf is not None else b.vec_trunc_f32_to_bf16(b.vec_concat(lo, hi)), 4
         )
 
 
@@ -2050,25 +2239,53 @@ def _yx_lds16_ps(spec) -> int:
 def _yx_lds16_buf(spec) -> int:
     """f32 words of one staged-chunk buffer of the lds16 stage."""
     _, TCx, TR = _yx_lds_geom(spec)
-    return (spec.z_tile + 2) * TR * 4 * 2 * 2 * _yx_lds16_ps(spec) * 2
+    return (spec.z_tile + 2) * TR * spec.nbp * 2 * 2 * _yx_lds16_ps(spec) * 2
 
 
 def _yx_lds16_floats(spec) -> int:
-    f = (1 if spec.single_buf else 2) * _yx_lds16_buf(spec)
+    xs = getattr(spec, "xs", 1)
+    if getattr(spec, "xsreg", 0) == 1:  # register groups: two LDS buffers
+        xs = 1
+    f = (1 if spec.single_buf else (xs + 1 if xs > 1 else 2)) * _yx_lds16_buf(spec)
+    if getattr(spec, "bps", 0) == 3:
+        f += 16  # cross-wave max slots
     if spec.bshare:
         nn = 2 if spec.nsplit else spec.nn
         f += 48 * 32 * nn * 8 // 2  # f16 weight fragments of one chunk, f32 words
     return f
 
 
+import os as _os
+
+# wave_reduce lowering of the prescale's max reductions (0 LLVM default, 1 iterative, 2 DPP)
+_WRED = int(_os.environ.get("ROCKE_WINO_WRED", "-1"))  # -1: swizzle butterfly
+
+
+def _wave_max_i32(b, v):
+    """Wave-uniform max of a non-negative i32: 5 ds_swizzle xor steps inside each 32-lane
+    half, then the two halves' lane 0 via readlane (llvm.amdgcn.wave.reduce lowers to a
+    64-iteration readlane loop here)."""
+    if _WRED >= 0:
+        return b.readfirstlane(b.wave_reduce(v, "max", strategy=_WRED))
+    for x in (1, 2, 4, 8, 16):
+        v = b.smax(v, b.warp_shuffle_xor(v, x))
+    return b.smax(b.readlane(v, b.const_i32(0)), b.readlane(v, b.const_i32(32)))
+
+
+def _bps_hz(spec) -> int:
+    """bps=1 source halo along z (bps_halo_z, else bps_halo)."""
+    return spec.bps_halo if spec.bps_halo_z < 0 else spec.bps_halo_z
+
+
 def _bps_block_rows(spec, tb):
     """Input rows [r_lo, r_hi] (this kernel's coordinates) of tile block ``tb``."""
     TX, TCx, TR = _yx_lds_geom(spec)
+    my = spec.my
     t0 = tb * spec.tiles_per_wg
     if spec.lin:
         tl = min(t0 + spec.tiles_per_wg - 1, spec.tiles2d - 1)
-        return 2 * (t0 // TX), 2 * (tl // TX) + 3
-    return 2 * (t0 // TX), 2 * (t0 // TX) + 2 * TR + 1
+        return my * (t0 // TX), my * (tl // TX) + my + 1
+    return my * (t0 // TX), my * (t0 // TX) + my * TR + 1
 
 
 def _bps_plane_range(spec, zi, r_lo, r_hi):
@@ -2076,23 +2293,26 @@ def _bps_plane_range(spec, zi, r_lo, r_hi):
     None when the plane is all halo). Mirrors _bps_scales' device arithmetic."""
     h = spec.bps_halo
     if spec.bps == 1:
-        Ds, Hs, Ws = spec.Di - 2 * h, spec.Hi - 2 * h, spec.Wi - 2 * h
-        zs, ylo, yhi = zi - h, max(r_lo - h, 0), min(r_hi - h, Hs - 1)
+        hz = _bps_hz(spec)
+        Ds, Hs, Ws = spec.Di - 2 * hz, spec.Hi - 2 * h, spec.Wi - 2 * h
+        zs, ylo, yhi = zi - hz, max(r_lo - h, 0), min(r_hi - h, Hs - 1)
         if not (0 <= zs < Ds) or ylo > yhi:
             return None
         vb = _x8_vb(spec.C)
         return ((zs * Hs + ylo) * Ws) // vb, ((zs * Hs + yhi + 1) * Ws - 1) // vb
     Do, Ho, Wo = spec.Di - 2 * h, spec.Hi - 2 * h, spec.Wi - 2 * h
     TXp = Wo // 2
-    ntbp = -(-(Ho // 2) * TXp // 32)
+    pmy = spec.bps_pmy or spec.my
+    ntbp = -(-(Ho // pmy) * TXp // 32)
     ZTp = spec.bps_pz or spec.z_tile
     NBp = spec.bps_pn or spec.C // spec.n_tile
     zo, ylo, yhi = zi - h, max(r_lo - h, 0), min(r_hi - h, Ho - 1)
     if not (0 <= zo < Do) or ylo > yhi:
         return None
-    tba, tbb = ((ylo // 2) * TXp) // 32, ((yhi // 2 + 1) * TXp - 1) // 32
+    tba, tbb = ((ylo // pmy) * TXp) // 32, ((yhi // pmy + 1) * TXp - 1) // 32
     zb = zo // ZTp
-    return (zb * ntbp + tba) * NBp, (zb * ntbp + tbb) * NBp + NBp - 1
+    PW = spec.bps_pw or spec.waves
+    return (zb * ntbp + tba) * NBp * PW, ((zb * ntbp + tbb) * NBp + NBp) * PW - 1
 
 
 def _bps_maxe(spec) -> int:
@@ -2111,9 +2331,10 @@ def bps_map_entries(spec) -> int:
     """Entries of the map a bps=2 consumer reads = workgroups of the producer (bps_out)."""
     h = spec.bps_halo
     Do, Ho, Wo = spec.Di - 2 * h, spec.Hi - 2 * h, spec.Wi - 2 * h
-    ntbp = -(-(Ho // 2) * (Wo // 2) // 32)
+    ntbp = -(-(Ho // (spec.bps_pmy or spec.my)) * (Wo // 2) // 32)
     ZTp = spec.bps_pz or spec.z_tile
-    return (-(-Do // ZTp)) * ntbp * (spec.bps_pn or spec.C // spec.n_tile)
+    return ((-(-Do // ZTp)) * ntbp * (spec.bps_pn or spec.C // spec.n_tile)
+            * (spec.bps_pw or spec.waves))
 
 
 def _bps_scales(b, spec, E, z0, tb, lane, n_entries):
@@ -2124,25 +2345,27 @@ def _bps_scales(b, spec, E, z0, tb, lane, n_entries):
     NPL = spec.z_tile + 2
     TX, TCx, TR = _yx_lds_geom(spec)
     t0 = b.mul(tb, ci(spec.tiles_per_wg))
+    my = spec.my
     if spec.lin:
         tl = b.smin(b.add(t0, ci(spec.tiles_per_wg - 1)), ci(spec.tiles2d - 1))
-        r_lo = b.mul(b.div(t0, ci(TX)), ci(2))
-        r_hi = b.add(b.mul(b.div(tl, ci(TX)), ci(2)), ci(3))
+        r_lo = b.mul(b.div(t0, ci(TX)), ci(my))
+        r_hi = b.add(b.mul(b.div(tl, ci(TX)), ci(my)), ci(my + 1))
     else:
-        r_lo = b.mul(b.div(t0, ci(TX)), ci(2))
-        r_hi = b.add(r_lo, ci(2 * TR + 1))
+        r_lo = b.mul(b.div(t0, ci(TX)), ci(my))
+        r_hi = b.add(r_lo, ci(my * TR + 1))
     MAXE = _bps_maxe(spec)
     re = b.buffer_rsrc(E, ci(n_entries * 4))
     mx = ci(0)
-    for r in range(-(-NPL * MAXE // 64)):
+    for r in range(0 if "nomap" in spec.dbg else -(-NPL * MAXE // 64)):
         idx = b.add(lane, ci(r * 64))
         p_ = b.div(idx, ci(MAXE))
         k_ = b.mod(idx, ci(MAXE))
         zi = b.add(z0, p_)
         if spec.bps == 1:
-            Ds, Hs, Ws = spec.Di - 2 * h, spec.Hi - 2 * h, spec.Wi - 2 * h
+            hz = _bps_hz(spec)
+            Ds, Hs, Ws = spec.Di - 2 * hz, spec.Hi - 2 * h, spec.Wi - 2 * h
             vb = _x8_vb(spec.C)
-            zs = b.sub(zi, ci(h))
+            zs = b.sub(zi, ci(hz))
             ylo = b.smax(b.sub(r_lo, ci(h)), ci(0))
             yhi = b.smin(b.sub(r_hi, ci(h)), ci(Hs - 1))
             ok = b.land(b.land(b.cmp_ge(zs, ci(0)), b.cmp_lt(zs, ci(Ds))), b.cmp_le(ylo, yhi))
@@ -2153,7 +2376,8 @@ def _bps_scales(b, spec, E, z0, tb, lane, n_entries):
         else:
             Do, Ho, Wo = spec.Di - 2 * h, spec.Hi - 2 * h, spec.Wi - 2 * h
             TXp = Wo // 2
-            ntbp = -(-(Ho // 2) * TXp // 32)
+            pmy = spec.bps_pmy or spec.my
+            ntbp = -(-(Ho // pmy) * TXp // 32)
             ZTp = spec.bps_pz or spec.z_tile
             NBp = spec.bps_pn or spec.C // spec.n_tile
             zo = b.sub(zi, ci(h))
@@ -2161,24 +2385,34 @@ def _bps_scales(b, spec, E, z0, tb, lane, n_entries):
             yhi = b.smin(b.sub(r_hi, ci(h)), ci(Ho - 1))
             ok = b.land(b.land(b.cmp_ge(zo, ci(0)), b.cmp_lt(zo, ci(Do))), b.cmp_le(ylo, yhi))
             zb = b.div(b.smax(zo, ci(0)), ci(ZTp))
-            tba = b.div(b.mul(b.div(ylo, ci(2)), ci(TXp)), ci(32))
-            tbb = b.div(b.sub(b.mul(b.add(b.div(yhi, ci(2)), ci(1)), ci(TXp)), ci(1)), ci(32))
+            tba = b.div(b.mul(b.div(ylo, ci(pmy)), ci(TXp)), ci(32))
+            tbb = b.div(b.sub(b.mul(b.add(b.div(yhi, ci(pmy)), ci(1)), ci(TXp)), ci(1)), ci(32))
             base = b.mul(zb, ci(ntbp))
-            e_lo = b.mul(b.add(base, tba), ci(NBp))
-            e_hi = b.add(b.mul(b.add(base, tbb), ci(NBp)), ci(NBp - 1))
+            PW = spec.bps_pw or spec.waves
+            e_lo = b.mul(b.add(base, tba), ci(NBp * PW))
+            e_hi = b.add(b.mul(b.add(base, tbb), ci(NBp * PW)), ci(NBp * PW - 1))
         ent = b.add(e_lo, k_)
         ok = b.land(b.land(ok, b.cmp_lt(p_, ci(NPL))), b.cmp_le(ent, e_hi))
         off = b.select(ok, b.mul(ent, ci(4)), ci(n_entries * 4))
         v = b.vec_extract(b.buffer_load_vN(re, off, ci(0), I32, 1), 0)
         mx = b.smax(mx, v)
-    mx = b.readfirstlane(b.wave_reduce(mx, "max"))
+    if "nored" in spec.dbg:  # attribution only (wrong scale): lane 0's entries
+        mx = b.readfirstlane(mx)
+    else:
+        mx = _wave_max_i32(b, mx)
     bexp = b.land(b.lshr(mx, ci(7)), ci(0xFF))
-    e = b.sub(bexp, ci(126 - 2 + spec.bps_l))  # ceil(log2 amax) + log2(beta=4) - L
+    # ceil(log2 amax) + ceil(log2 beta) - L; beta = max|V| / amax = product of the B^T row
+    # 1-norms (F(2x2): 2 * 2; F(4x2): 10 * 2)
+    lb = 2 if spec.my == 2 else 5
+    e = b.sub(bexp, ci(126 - lb + spec.bps_l))
     e = b.select(b.cmp_eq(mx, ci(0)), ci(0), e)
-    e = b.smin(b.smax(e, ci(-120)), ci(120))
+    if spec.bps_win:
+        # inside the window (amax >= 2^-10 and no overflow) no scaling is needed
+        e = b.select(b.land(b.cmp_le(e, ci(0)), b.cmp_ge(e, ci(lb - spec.bps_l - 10))), ci(0), e)
+    e = b.readfirstlane(b.smin(b.smax(e, ci(-120)), ci(120)))
     s_in = b.bitcast(b.shl(b.sub(ci(127), e), ci(23)), F32)
     s_out = b.bitcast(b.shl(b.add(ci(127), e), ci(23)), F32)
-    return s_in, s_out
+    return s_in, s_out, e
 
 
 def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
@@ -2234,17 +2468,17 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
         BOFF = b.param("BOFF", I32)
     OS = b.param("OS", F32) if spec.oscale else None
     E = b.param("E", PtrType(I32, "global"), noalias=True, readonly=True, align=4) \
-        if spec.bps else None
+        if spec.bps in (1, 2) else None
     EO = b.param("EO", PtrType(I32, "global"), noalias=True, writeonly=True, align=4) \
         if spec.bps_out else None
 
     ci = b.const_i32
     tid = b.thread_id_x()
     wave = b.readfirstlane(b.div(tid, ci(64)))
-    wb = b.mod(wave, ci(4))
+    wb = b.mod(wave, ci(spec.nbp))
     NN = 2 if spec.nsplit else spec.nn
-    NZ = (spec.waves // 4) // NN
-    grp = b.div(wave, ci(4))
+    NZ = (spec.waves // spec.nbp) // NN
+    grp = b.div(wave, ci(spec.nbp))
     nh = b.div(grp, ci(NZ))  # output-channel group
     zh = b.mod(grp, ci(NZ))  # z group
     ZTW = ZT // NZ
@@ -2286,22 +2520,21 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     ty0 = b.div(t0, ci(TX))
     tx0 = b.mod(t0, ci(TX))
 
-    lds_words = max(_yx_lds16_floats(spec), min(spec.waves, 8) * 32 * 64)
+    lds_words = max(_yx_lds16_floats(spec),
+                    (min(spec.waves, 8) if spec.my == 2 else spec.nbp) * 32 * 64)
     if spec.bf_fill:
         lds_words = max(lds_words, 2 * BUF + 8 * 2 * HC * 2)
     lds = b.smem_alloc(F32, [lds_words], name_hint="winoyx16_planes")
     S_IN = S_OUT = None
-    if spec.bps:
+    if spec.bps in (1, 2):
         if spec.bps == 1:
             hh_ = spec.bps_halo
-            n_ent = x_to_c8_lds_grid(Di - 2 * hh_, Hi - 2 * hh_, Wi - 2 * hh_, C)[0]
+            n_ent = x_to_c8_lds_grid(Di - 2 * _bps_hz(spec), Hi - 2 * hh_, Wi - 2 * hh_, C)[0]
         else:
             n_ent = bps_map_entries(spec)
-        S_IN, S_OUT = _bps_scales(b, spec, E, z0, tb, lane, n_ent)
-    if OS is not None and S_OUT is not None:
-        OS = b.fmul(OS, S_OUT)
-    elif S_OUT is not None:
-        OS = S_OUT
+    OS0 = OS
+    BPS = {}  # s_in2 / s_out / e of the per-block prescale (computed after the first loads)
+    SC = [None]  # the fill's current prescale (None: unscaled code path)
 
     xn = spec.xin == "ndhwc"
     r8 = spec.xin == "r8"
@@ -2309,8 +2542,16 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     row_b = Wi * C * 2 if (xn or r8) else Wi * 16  # bytes between neighbouring rows
     plane_b = Hi * row_b
     chunk_b = 16 if xn else (Wi * 16 if r8 else Di * plane_b)
-    rx = b.buffer_rsrc(X, ci(Di * Hi * Wi * C * 2))
-    ru = b.buffer_rsrc(U, ci(3 * 16 * C * K * 2))
+    XPZ, XPY = _xpad(spec)
+    PRED = xn and (XPZ > 0 or XPY > 0)
+    Dr, Hr, Wr = Di - 2 * XPZ, Hi - 2 * XPY, Wi - 2 * XPY  # the real (unpadded) X
+    XOOB = Dr * Hr * Wr * C * 2
+    XS = spec.xs
+    rx = b.buffer_rsrc(X, ci(Dr * Hr * Wr * C * 2))
+    MY = spec.my
+    NBP = spec.nbp
+    BTY = _ymats(MY)[0]
+    ru = b.buffer_rsrc(U, ci(3 * NBP * 4 * C * K * 2))
     n_glob = b.add(b.mul(bid_n, ci(spec.n_tile)), m)
     if NN > 1:
         n_glob = b.add(n_glob, b.mul(nh, ci(32)))
@@ -2380,15 +2621,29 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
         voff = b.add(
             b.add(
                 b.mul(b.add(z0, zi), ci(plane_b)),
-                b.mul(b.add(b.mul(ty0, ci(2)), b.mul(tr, ci(2))), ci(row_b)),
+                b.mul(b.add(b.mul(ty0, ci(MY)), b.mul(tr, ci(MY))), ci(row_b)),
             ),
             b.mul(b.add(b.mul(tx0, ci(2)), col), ci(vox_b)),
         )
+        if PRED:
+            # one offset per row: voxels in the zero halo load from past the end (-> 0)
+            zr = b.sub(b.add(z0, zi), ci(XPZ))
+            xr = b.sub(b.add(b.mul(tx0, ci(2)), col), ci(XPY))
+            okzx = b.land(b.land(b.cmp_ge(zr, ci(0)), b.cmp_lt(zr, ci(Dr))),
+                          b.land(b.cmp_ge(xr, ci(0)), b.cmp_lt(xr, ci(Wr))))
+            yr0 = b.sub(b.add(b.mul(ty0, ci(MY)), b.mul(tr, ci(MY))), ci(XPY))
+            vl = []
+            for j in range(NBP):
+                yr = b.add(yr0, ci(j))
+                ok = b.land(okzx, b.land(b.cmp_ge(yr, ci(0)), b.cmp_lt(yr, ci(Hr))))
+                off = b.mul(b.add(b.mul(b.add(b.mul(zr, ci(Hr)), yr), ci(Wr)), xr), ci(C * 2))
+                vl.append(b.select(ok, off, ci(XOOB)))
+            voff = vl
         par = b.mod(col, ci(2))
         half = b.div(col, ci(2))
         # f32-word offset of (zi, tr, b=0, kq=0, par, half)
         lbase = b.add(
-            b.mul(b.add(b.mul(b.mul(b.mul(b.add(b.mul(zi, ci(TR)), tr), ci(4)), ci(2)), ci(2)),
+            b.mul(b.add(b.mul(b.mul(b.mul(b.add(b.mul(zi, ci(TR)), tr), ci(NBP)), ci(2)), ci(2)),
                         par), ci(HC * 2)),
             b.mul(half, ci(2)),
         )
@@ -2399,6 +2654,65 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
             valid = None  # every lane of this round has an item
         fill.append((valid, voff, lbase))
 
+    gfill = []
+    if XS > 1 and spec.xsreg == 2:
+        # lane-contiguous group fill: slot = (item, chunk i of the group), chunk fastest, so
+        # one load instruction covers 16 XS contiguous bytes of each voxel row it touches
+        nslot = items * XS
+        pw = -(-nslot // spec.waves)
+        for rr in range(-(-pw // 64)):
+            loc = b.add(lane, ci(rr * 64))
+            st_ = b.add(b.mul(wave, ci(pw)), loc)
+            valid = b.land(b.cmp_lt(loc, ci(pw)), b.cmp_lt(st_, ci(nslot)))
+            it = b.div(st_, ci(XS))
+            gi = b.mod(st_, ci(XS))
+            col = b.mod(it, ci(NC))
+            tmp = b.div(it, ci(NC))
+            tr = b.mod(tmp, ci(TR))
+            zi = b.div(tmp, ci(TR))
+            zr = b.sub(b.add(z0, zi), ci(XPZ))
+            xr = b.sub(b.add(b.mul(tx0, ci(2)), col), ci(XPY))
+            okzx = b.land(b.land(b.cmp_ge(zr, ci(0)), b.cmp_lt(zr, ci(Dr))),
+                          b.land(b.cmp_ge(xr, ci(0)), b.cmp_lt(xr, ci(Wr))))
+            yr0 = b.sub(b.add(b.mul(ty0, ci(MY)), b.mul(tr, ci(MY))), ci(XPY))
+            vl = []
+            for j in range(NBP):
+                yr = b.add(yr0, ci(j))
+                ok = b.land(okzx, b.land(b.cmp_ge(yr, ci(0)), b.cmp_lt(yr, ci(Hr))))
+                off = b.add(b.mul(b.add(b.mul(b.add(b.mul(zr, ci(Hr)), yr), ci(Wr)), xr),
+                                  ci(C * 2)), b.mul(gi, ci(16)))
+                vl.append(b.select(ok, off, ci(XOOB)))
+            par = b.mod(col, ci(2))
+            half = b.div(col, ci(2))
+            lbase = b.add(
+                b.mul(b.add(b.mul(b.mul(b.mul(b.add(b.mul(zi, ci(TR)), tr), ci(NBP)), ci(2)),
+                                  ci(2)), par), ci(HC * 2)),
+                b.mul(half, ci(2)),
+            )
+            gfill.append((valid, vl, lbase, gi))
+
+    def load_gfill(g):
+        sx = b.mul(b.mul(g, ci(XS)), ci(16))
+        return [b.buffer_load_vN(rx, vl[j], sx, I32, 4)
+                for _, vl, _, _ in gfill for j in range(NBP)]
+
+    def store_gfill(raw, g):
+        # slot (item, i) -> the buffer of chunk g * XS + i
+        for rr, (valid, _, lbase, gi) in enumerate(gfill):
+            if TRK["on"]:
+                TRK["mi"] = TRK["m"]
+            rows = []
+            for j in range(NBP):
+                v = raw[rr * NBP + j]
+                f = []
+                for q in range(4):
+                    f += bf16x2_to_f32(b.vec_extract(v, q))
+                rows.append(f)
+            _trk_item(valid)
+            boff = b.mul(b.mod(b.add(b.mul(g, ci(XS)), gi), ci(XS + 1)), ci(BUF))
+            with b.scf_if(valid):
+                _fill_writes(rows, b.add(lbase, boff))
+
     def load_fill(cc):
         sx = b.mul(cc, ci(chunk_b))
         out = []
@@ -2408,28 +2722,48 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
                     out.append(b.vector_splat(b.add(cc, ci(j)), 4))
             return out
         for valid, voff, _ in fill:
-            for j in range(4):
+            for j in range(NBP):
+                if isinstance(voff, list):  # predicated zero halo: per-row offsets
+                    out.append(b.buffer_load_vN(rx, voff[j], sx, I32, 4))
+                    continue
                 out.append(b.buffer_load_vN(rx, voff, b.add(sx, ci(j * row_b)), I32,
                                             2 if FH else 4))
         return out
 
+    TRK = {"on": False}  # bps=3: running max |x| (f32) of the staged values, per lane
+
     def bf16x2_to_f32(d):
         lo = b.bitcast(b.shl(d, ci(16)), F32)
         hi = b.bitcast(b.land(d, ci(-65536)), F32)
-        if S_IN is not None:  # per-block prescale (exact: a power of two)
-            return [b.fmul(lo, S_IN), b.fmul(hi, S_IN)]
+        if TRK["on"]:
+            TRK["mi"] = b.inline_asm("v_max3_f32 $0, $1, |$2|, |$3|", "=v,v,v,v",
+                                     [TRK["mi"], lo, hi], F32, sideeffect=False)
+        if SC[0] is not None:  # per-block prescale (exact: a power of two), v_pk_mul_f32
+            pv = b.vector_mul(b.vec_pack([lo, hi], F32), SC[0])
+            return [b.vec_extract(pv, 0), b.vec_extract(pv, 1)]
         return [lo, hi]
 
     def store_fill(raw, bufoff, pred=None):
+        _store_fill(raw, bufoff, pred)
+
+    def _trk_item(valid):
+        # fold this item's max into the lane's running max (items past the end excluded)
+        if TRK["on"]:
+            TRK["m"] = TRK["mi"] if valid is None else b.select(valid, TRK["mi"], TRK["m"])
+
+    def _store_fill(raw, bufoff, pred=None):
         for rr, (valid, _, lbase) in enumerate(fill):
+            if TRK["on"]:
+                TRK["mi"] = TRK["m"]
             if valid is None and pred is None:
                 rows = []
-                for j in range(4):
-                    v = raw[rr * 4 + j]
+                for j in range(NBP):
+                    v = raw[rr * NBP + j]
                     fr = []
                     for q in range(2 if FH else 4):
                         fr += bf16x2_to_f32(b.vec_extract(v, q))
                     rows.append(fr)
+                _trk_item(None)
                 _fill_writes(rows, b.add(lbase, bufoff))
                 continue
             if valid is None:
@@ -2437,12 +2771,13 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
             elif pred is not None:
                 valid = b.land(valid, pred)
             rows = []
-            for j in range(4):
-                v = raw[rr * 4 + j]
+            for j in range(NBP):
+                v = raw[rr * NBP + j]
                 f = []
                 for q in range(2 if FH else 4):
                     f += bf16x2_to_f32(b.vec_extract(v, q))
                 rows.append(f)
+            _trk_item(valid)
             if spec.bf_fill:
                 # invalid lanes write the dummy area past the ring (inside the epilogue's
                 # 64 KiB allocation)
@@ -2462,6 +2797,16 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
         return b.vec_bitcast(b.vec_pack(pk, I32), VectorType(F16, 4))
 
     def _fill_writes(rows, base):
+        if spec.yf16 and MY == 4:
+            # rows -> f16 (pkrtz), B^T of F(4,3) along y as packed f16 fma chains
+            nq = len(rows[0]) // 4
+            rq = [[_pk_quad(rows[j][4 * q:4 * q + 4]) for q in range(nq)] for j in range(NBP)]
+            for bb in range(NBP):
+                for q in range(nq):
+                    y = _f16x4_comb(b, [rq[j][q] for j in range(NBP)], BTY[bb])
+                    off = b.add(base, ci((bb * 2 + q) * 2 * HC * 2))
+                    b.smem_store_vN_f32(lds, [off], b.vec_bitcast(y, VectorType(F32, 2)), 2)
+            return
         if spec.yf16:
             nq = len(rows[0]) // 4
             rq = [[_pk_quad(rows[j][4 * q:4 * q + 4]) for q in range(nq)] for j in range(4)]
@@ -2475,8 +2820,8 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
             return
         if True:
             if True:
-                for bb in range(4):
-                    vals = [_bt_axis(b, [rows[j][ch] for j in range(4)], BT[bb])
+                for bb in range(NBP):
+                    vals = [_bt_axis_gen(b, [rows[j][ch] for j in range(NBP)], BTY[bb])
                             for ch in range(4 if FH else 8)]
                     for q in range(1 if FH else 2):
                         if spec.pkrtz:
@@ -2516,7 +2861,7 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
         su = b.add(s_ub, b.mul(cc, ci(K * 8 * 2)))
         return {
             (dz, c): b.buffer_load_vN(
-                ru, vu, b.add(su, ci(((dz * 4) * 4 + c) * u_pt * 2)), I32, 2
+                ru, vu, b.add(su, ci(((dz * NBP) * 4 + c) * u_pt * 2)), I32, 2
             )
             for dz in range(3)
             for c in range(4)
@@ -2537,7 +2882,7 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
     def read_plane(zl, bufoff):
         zi = b.add(b.mul(zh, ci(ZTW)), ci(zl))
         rowbase = b.mul(
-            b.add(b.mul(b.add(b.mul(b.add(b.mul(zi, ci(TR)), l_tr), ci(4)), wb), ci(2)), kq),
+            b.add(b.mul(b.add(b.mul(b.add(b.mul(zi, ci(TR)), l_tr), ci(NBP)), wb), ci(2)), kq),
             ci(2),
         )
         vs = []
@@ -2753,49 +3098,172 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
                 attrs={"dwords": 4},
             )
 
-    # prologue: chunk 0 staged in buffer 0, chunk 1 in registers
-    store_fill(load_fill(ci(0)), ci(0))
-    raw1 = load_fill(ci(min(1, n_chunks - 1)))
-    b0 = load_b(ci(0))
-    if spec.bpf2:
-        b1 = load_b(ci(min(1, n_chunks - 1)))
-    b.sync_lds_only()
-    nfill = len(raw1)
-    iters = [(f"acc{i}", atom.zero_acc(b)) for i in range(4 * ZTW)]
-    iters += [(f"raw{i}", v) for i, v in enumerate(raw1)]
-    iters += [(f"bfr{i}", b0[k]) for i, k in enumerate(bkeys)]
-    if spec.bpf2:
-        iters += [(f"bfs{i}", b1[k]) for i, k in enumerate(bkeys)]
-    loop = b.scf_for_iter(ci(0), ci(n_chunks), ci(1), iters, iv_name="cc")
-    with loop as (cc, its):
-        accs = list(its[: 4 * ZTW])
-        raw = its[4 * ZTW: 4 * ZTW + nfill]
-        bf = dict(zip(bkeys, its[4 * ZTW + nfill: 4 * ZTW + nfill + len(bkeys)]))
-        if spec.bpf2:
-            bf_next = [its[4 * ZTW + nfill + len(bkeys) + i] for i in range(len(bkeys))]
-        if spec.iglp >= 0:
-            b.iglp_opt(spec.iglp)
-        par_c = b.mod(cc, ci(2))
-        cur = b.mul(par_c, ci(BUF))
-        nxt_off = b.mul(b.sub(ci(1), par_c), ci(BUF))
-        # prefetch indices clamped to the last chunk: the buffer range check ignores
-        # soffset, so a chunk past the end would read outside the tensor
-        if spec.frel:
-            fr_val, fr_dst = fr_load(cc)
-        nraw = load_fill(b.smin(b.add(cc, ci(2)), ci(n_chunks - 1)))
-        nb = load_b(b.smin(b.add(cc, ci(2 if spec.bpf2 else 1)), ci(n_chunks - 1)))
-        if spec.phase_sel == "odd":
-            hi_wave = b.cmp_eq(b.mod(wave, ci(2)), ci(1))
-            lo_wave = b.cmp_eq(b.mod(wave, ci(2)), ci(0))
+    NRING = (XS + 1) if XS > 1 and not spec.xsreg else 2
+    SLOT = NRING * BUF  # bps=3: cross-wave max slots (past the staging ring)
+
+    def _wg_max_f32bits(m):
+        """Workgroup-uniform max of a non-negative per-lane f32 (as i32 bits)."""
+        wm = _wave_max_i32(b, b.bitcast(m, I32))
+        with b.scf_if(b.cmp_eq(lane, ci(0))):
+            b.smem_store_vN_f32(lds, [b.add(ci(SLOT), wave)],
+                                b.vec_pack([b.bitcast(wm, F32)], F32), 1)
+        b.sync_lds_only()
+        mx = ci(0)
+        for w_ in range(spec.waves):
+            v = b.vec_extract(b.smem_load_vN_f32(lds, ci(SLOT + w_), n=1), 0)
+            mx = b.smax(mx, b.bitcast(v, I32))
+        return b.readfirstlane(mx)
+
+    def _pow2_scales(e):
+        s_in = b.bitcast(b.shl(b.sub(ci(127), e), ci(23)), F32)
+        s_out = b.bitcast(b.shl(b.add(ci(127), e), ci(23)), F32)
+        return b.vector_splat(s_in, 2), s_out
+
+    def _lds16_main(scaled, pre=None, track=False, scales=None, tag="", e_cur=None):
+        # the main loop and epilogue; ``scaled``: the bps fill multiplies by 2^-e and the
+        # epilogue by 2^e (a second copy of the loop under a uniform branch, bps_win)
+        SC[0] = (BPS["s_in2"] if scales is None else scales[0]) if scaled else None
+        PFX = tag + ("s_" if scaled else "")  # unique SSA names in each copy of the loop
+        OS_ = OS0
+        if scaled:
+            so_ = BPS["s_out"] if scales is None else scales[1]
+            OS_ = so_ if OS0 is None else b.fmul(OS0, so_)
+        TRK["on"] = track
+        if track:
+            TRK["m"] = b.const_f32(0.0)
+        if spec.xpf:
+            acc, m_fin = _xpf_loop(PFX, scaled, pre, track)
+        elif XS > 1 and spec.xsreg == 1:
+            acc, m_fin = _xsr_loop(PFX, scaled, pre, track)
+        elif XS > 1 and spec.xsreg == 2:
+            acc, m_fin = _xsl_loop(PFX, scaled, pre, track)
+        elif XS > 1:
+            acc, m_fin = _xs_loop(PFX, scaled, pre, track)
         else:
-            hi_wave = b.cmp_ge(wave, ci(4))
-            lo_wave = b.cmp_lt(wave, ci(4))
-        if spec.fill_first:
-            store_fill(raw, nxt_off)
-        elif spec.phase:
-            store_fill(raw, nxt_off, hi_wave)
-        if spec.prio:
-            b.s_setprio(spec.prio)
+            acc, m_fin = _plain_loop(PFX, scaled, pre, track, tag)
+        TRK["on"] = False
+
+        def epi():
+            amax_out = None
+            if spec.bps_out:
+                amax_out = (EO, b.add(b.mul(bid, ci(spec.K // spec.n_tile)), bid_n), lds, 0,
+                            wave, tid)
+            _yx_epilogue(
+                b, spec, acc, wave, lane, kq, tb, b.add(z0, b.mul(zh, ci(ZTW))), n_glob, Y,
+                lds_flat=lds, zt_w=ZTW, wb=wb, zh=grp, gpr=2 if MY == 2 else 1,
+                ks_i=ks_i if KS > 1 else None, oscale=OS_, amax_out=amax_out,
+            )
+
+        if not track:
+            epi()
+            return
+        # bps=3: is the tracked max inside this run's f16 window? (uniform branch)
+        M = _wg_max_f32bits(m_fin)
+        b.sync_lds_only()  # the epilogue reuses the slots
+        EM = b.land(b.lshr(M, ci(23)), ci(0xFF))
+        bad = b.lor(b.cmp_gt(EM, b.add(e_cur, ci(139))),
+                    b.land(b.cmp_ne(M, ci(0)), b.cmp_lt(EM, b.add(e_cur, ci(115)))))
+        # store first (the accumulators die here), then recompute the block with the exact
+        # scale (max * 2^-e in [2^11, 2^12)) and store again when out of the window
+        epi()
+        if "nore" in spec.dbg:
+            return
+        with b.scf_if(bad):
+            b.sync_lds_only()  # the epilogue's LDS use is over
+            ex = b.readfirstlane(b.smin(b.smax(b.sub(EM, ci(138)), ci(-120)), ci(120)))
+            _lds16_main(True, None, track=False, scales=_pow2_scales(ex), tag=PFX + "r")
+
+    def _plain_loop(PFX, scaled, pre, track, tag=""):
+        # prologue: chunk 0 staged in buffer 0, chunk 1 in registers
+        if pre is not None:  # (bps) loaded before the scale is known
+            raw0, raw1, b0 = pre
+            store_fill(raw0, ci(0))
+            if raw1 is None:
+                raw1 = load_fill(ci(min(1, n_chunks - 1)))
+            if b0 is None:
+                b0 = load_b(ci(0))
+            if spec.bpf2:
+                b1 = load_b(ci(min(1, n_chunks - 1)))
+        else:
+            store_fill(load_fill(ci(0)), ci(0))
+            raw1 = load_fill(ci(min(1, n_chunks - 1)))
+            b0 = load_b(ci(0))
+            if spec.bpf2:
+                b1 = load_b(ci(min(1, n_chunks - 1)))
+        b.sync_lds_only()
+        nfill = len(raw1)
+        iters = [(f"{PFX}acc{i}", atom.zero_acc(b)) for i in range(4 * ZTW)]
+        iters += [(f"{PFX}raw{i}", v) for i, v in enumerate(raw1)]
+        iters += [(f"{PFX}bfr{i}", b0[k]) for i, k in enumerate(bkeys)]
+        if spec.bpf2:
+            iters += [(f"{PFX}bfs{i}", b1[k]) for i, k in enumerate(bkeys)]
+        if track:
+            iters += [(f"{PFX}trk", TRK["m"])]
+        loop = b.scf_for_iter(ci(0), ci(n_chunks), ci(1), iters,
+                              iv_name=(tag + "ccs") if scaled else (tag + "cc"))
+        with loop as (cc, its):
+            accs = list(its[: 4 * ZTW])
+            raw = its[4 * ZTW: 4 * ZTW + nfill]
+            bf = dict(zip(bkeys, its[4 * ZTW + nfill: 4 * ZTW + nfill + len(bkeys)]))
+            if spec.bpf2:
+                bf_next = [its[4 * ZTW + nfill + len(bkeys) + i] for i in range(len(bkeys))]
+            if track:
+                TRK["m"] = its[-1]
+            if spec.iglp >= 0:
+                b.iglp_opt(spec.iglp)
+            par_c = b.mod(cc, ci(2))
+            cur = b.mul(par_c, ci(BUF))
+            nxt_off = b.mul(b.sub(ci(1), par_c), ci(BUF))
+            # prefetch indices clamped to the last chunk: the buffer range check ignores
+            # soffset, so a chunk past the end would read outside the tensor
+            if spec.frel:
+                fr_val, fr_dst = fr_load(cc)
+            nraw = load_fill(b.smin(b.add(cc, ci(2)), ci(n_chunks - 1)))
+            nb = load_b(b.smin(b.add(cc, ci(2 if spec.bpf2 else 1)), ci(n_chunks - 1)))
+            if spec.phase_sel == "odd":
+                hi_wave = b.cmp_eq(b.mod(wave, ci(2)), ci(1))
+                lo_wave = b.cmp_eq(b.mod(wave, ci(2)), ci(0))
+            else:
+                hi_wave = b.cmp_ge(wave, ci(4))
+                lo_wave = b.cmp_lt(wave, ci(4))
+            if spec.fill_first:
+                store_fill(raw, nxt_off)
+            elif spec.phase:
+                store_fill(raw, nxt_off, hi_wave)
+            if spec.prio:
+                b.s_setprio(spec.prio)
+            _mfma_planes(accs, bf, cur)
+            if spec.prio:
+                b.s_setprio(0)
+            if spec.phase:
+                store_fill(raw, nxt_off, lo_wave)
+            elif not spec.fill_first:
+                store_fill(raw, nxt_off)
+            if spec.frel and "nocopy" not in spec.dbg:
+                fr_store(fr_val, fr_dst)
+            if spec.sgb:
+                nm = 4 * 3 * ZTW
+                for _ in range(nm):
+                    b.sched_group_barrier(0x008, 1, 0)  # 1 MFMA
+                    b.sched_group_barrier(0x002, spec.sgb, 0)  # VALU
+            b.sync_lds_only()
+            tr_ = [TRK["m"]] if track else []
+            if spec.bpf2:
+                b.scf_yield(*accs, *nraw, *bf_next, *[nb[k] for k in bkeys], *tr_)
+            else:
+                b.scf_yield(*accs, *nraw, *[nb[k] for k in bkeys], *tr_)
+        acc = loop.results[: 4 * ZTW]
+        m_fin = loop.results[-1] if track else None
+        if spec.frel:
+            # publish this workgroup's relayout share
+            if "norel" not in spec.dbg:
+                b.fence(scope="agent", ordering="release")
+            b.sync()
+            with b.scf_if(b.cmp_eq(wave, ci(0))):
+                b.global_flag_store(Fl, pidr, ci(1))
+        return acc, m_fin
+
+    def _mfma_planes(accs, bf, cur):
         for zi in range(ZTW + 2):
             frags = x_transform(read_plane(zi, cur))
             for dz in range(3):
@@ -2809,41 +3277,256 @@ def build_winograd_yx_lds16_fwd(spec: WinogradYxSpec) -> KernelDef:
                         )
             if spec.sbar:
                 b.sched_barrier(0)
-        if spec.prio:
-            b.s_setprio(0)
-        if spec.phase:
-            store_fill(raw, nxt_off, lo_wave)
-        elif not spec.fill_first:
-            store_fill(raw, nxt_off)
-        if spec.frel and "nocopy" not in spec.dbg:
-            fr_store(fr_val, fr_dst)
-        if spec.sgb:
-            nm = 4 * 3 * ZTW
-            for _ in range(nm):
-                b.sched_group_barrier(0x008, 1, 0)  # 1 MFMA
-                b.sched_group_barrier(0x002, spec.sgb, 0)  # VALU
-        b.sync_lds_only()
-        if spec.bpf2:
-            b.scf_yield(*accs, *nraw, *bf_next, *[nb[k] for k in bkeys])
+
+    def _load_group(g):
+        # xs consecutive chunks of every fill item (16 xs contiguous bytes per row)
+        return [load_fill(b.add(b.mul(g, ci(XS)), ci(i))) for i in range(XS)]
+
+    def _xpf_loop(PFX, scaled, pre, track):
+        # unrolled by two: carried raw sets A (chunk 2p + 1) and B (chunk 2p + 2); each half
+        # loads weights first, computes, stages its raw set, then refills that set with the
+        # chunk two ahead of it (no register rotation at the latch)
+        if pre is not None:
+            raw0 = pre[0][0] if isinstance(pre[0], list) and isinstance(pre[0][0], list) \
+                else pre[0]
         else:
-            b.scf_yield(*accs, *nraw, *[nb[k] for k in bkeys])
-    acc = loop.results[: 4 * ZTW]
-    if spec.frel:
-        # publish this workgroup's relayout share
-        if "norel" not in spec.dbg:
-            b.fence(scope="agent", ordering="release")
-        b.sync()
-        with b.scf_if(b.cmp_eq(wave, ci(0))):
-            b.global_flag_store(Fl, pidr, ci(1))
-    amax_out = None
-    if spec.bps_out:
-        amax_out = (EO, b.add(b.mul(bid, ci(spec.K // spec.n_tile)), bid_n), lds, 0,
-                    wave, tid)
-    _yx_epilogue(
-        b, spec, acc, wave, lane, kq, tb, b.add(z0, b.mul(zh, ci(ZTW))), n_glob, Y,
-        lds_flat=lds, zt_w=ZTW, wb=wb, zh=grp, gpr=2, ks_i=ks_i if KS > 1 else None,
-        oscale=OS, amax_out=amax_out,
-    )
+            raw0 = load_fill(ci(0))
+        store_fill(raw0, ci(0))
+        rA = load_fill(ci(min(1, n_chunks - 1)))
+        rB = load_fill(ci(min(2, n_chunks - 1)))
+        b0 = load_b(ci(0))
+        b.sync_lds_only()
+        nfill = len(rA)
+        iters = [(f"{PFX}acc{i}", atom.zero_acc(b)) for i in range(4 * ZTW)]
+        iters += [(f"{PFX}rawa{i}", v) for i, v in enumerate(rA)]
+        iters += [(f"{PFX}rawb{i}", v) for i, v in enumerate(rB)]
+        iters += [(f"{PFX}bfr{i}", b0[k]) for i, k in enumerate(bkeys)]
+        if track:
+            iters += [(f"{PFX}trk", TRK["m"])]
+        loop = b.scf_for_iter(ci(0), ci(n_chunks // 2), ci(1), iters,
+                              iv_name=PFX + "ps" if scaled else PFX + "p")
+        with loop as (p_, its):
+            accs = list(its[: 4 * ZTW])
+            o = 4 * ZTW
+            sets = [its[o: o + nfill], its[o + nfill: o + 2 * nfill]]
+            o += 2 * nfill
+            bf = dict(zip(bkeys, its[o: o + len(bkeys)]))
+            if track:
+                TRK["m"] = its[-1]
+            for h in range(2):
+                cc = b.add(b.mul(p_, ci(2)), ci(h))
+                if spec.iglp >= 0:
+                    b.iglp_opt(spec.iglp)
+                nb = load_b(b.smin(b.add(cc, ci(1)), ci(n_chunks - 1)))
+                if spec.fill_first:  # stage the next chunk before this chunk's MFMAs
+                    store_fill(sets[h], ci((1 - h) * BUF))
+                    sets[h] = load_fill(b.smin(b.add(cc, ci(3)), ci(n_chunks - 1)))
+                if spec.prio:
+                    b.s_setprio(spec.prio)
+                _mfma_planes(accs, bf, ci(h * BUF))
+                if spec.prio:
+                    b.s_setprio(0)
+                if not spec.fill_first:
+                    store_fill(sets[h], ci((1 - h) * BUF))
+                    sets[h] = load_fill(b.smin(b.add(cc, ci(3)), ci(n_chunks - 1)))
+                if spec.sgb:
+                    for _ in range(4 * 3 * ZTW):
+                        b.sched_group_barrier(0x008, 1, 0)  # 1 MFMA
+                        b.sched_group_barrier(0x002, spec.sgb, 0)  # VALU
+                b.sync_lds_only()
+                bf = nb
+            tr_ = [TRK["m"]] if track else []
+            b.scf_yield(*accs, *sets[0], *sets[1], *[bf[k] for k in bkeys], *tr_)
+        acc = loop.results[: 4 * ZTW]
+        m_fin = loop.results[-1] if track else None
+        return acc, m_fin
+
+    def _xsr_loop(PFX, scaled, pre, track):
+        # two LDS buffers; chunk cc + 1 is staged at the end of iteration cc from the
+        # registers of its group (xs chunks loaded together); the next group's loads are
+        # issued right after the current group's last chunk is staged
+        NG = n_chunks // XS
+        g0 = pre[0] if pre is not None else _load_group(ci(0))
+        store_fill(g0[0], ci(0))
+        b0 = load_b(ci(0))
+        b.sync_lds_only()
+        nfill = len(g0[0])
+        iters = [(f"{PFX}acc{i}", atom.zero_acc(b)) for i in range(4 * ZTW)]
+        iters += [(f"{PFX}raw{i}_{j}", v) for i in range(XS) for j, v in enumerate(g0[i])]
+        iters += [(f"{PFX}bfr{i}", b0[k]) for i, k in enumerate(bkeys)]
+        if track:
+            iters += [(f"{PFX}trk", TRK["m"])]
+        loop = b.scf_for_iter(ci(0), ci(NG), ci(1), iters,
+                              iv_name=PFX + "gs" if scaled else PFX + "g")
+        with loop as (g, its):
+            accs = list(its[: 4 * ZTW])
+            o = 4 * ZTW
+            regs = [its[o + i * nfill: o + (i + 1) * nfill] for i in range(XS)]
+            o += XS * nfill
+            bf = dict(zip(bkeys, its[o: o + len(bkeys)]))
+            if track:
+                TRK["m"] = its[-1]
+            ng = None
+            for i in range(XS):
+                cc = b.add(b.mul(g, ci(XS)), ci(i))
+                par_c = b.mod(cc, ci(2))
+                cur = b.mul(par_c, ci(BUF))
+                nxt_off = b.mul(b.sub(ci(1), par_c), ci(BUF))
+                nb = load_b(b.smin(b.add(cc, ci(1)), ci(n_chunks - 1)))
+                _mfma_planes(accs, bf, cur)
+                store_fill(regs[i + 1] if i < XS - 1 else ng[0], nxt_off)
+                if i == XS - 2:
+                    ng = _load_group(b.smin(b.add(g, ci(1)), ci(NG - 1)))
+                b.sync_lds_only()
+                bf = nb
+            tr_ = [TRK["m"]] if track else []
+            b.scf_yield(*accs, *[v for gi in ng for v in gi], *[bf[k] for k in bkeys], *tr_)
+        acc = loop.results[: 4 * ZTW]
+        m_fin = loop.results[-1] if track else None
+        return acc, m_fin
+
+    def _xsl_loop(PFX, scaled, pre, track):
+        # ring of XS + 1 buffers, lane-contiguous group loads (gfill); the whole next group is
+        # staged in the last iteration of the current one, then the group after it is loaded
+        R = XS + 1
+        NG = n_chunks // XS
+        store_gfill(load_gfill(ci(0)), ci(0))
+        g1 = load_gfill(ci(min(1, NG - 1)))
+        b0 = load_b(ci(0))
+        b.sync_lds_only()
+        nfill = len(g1)
+        iters = [(f"{PFX}acc{i}", atom.zero_acc(b)) for i in range(4 * ZTW)]
+        iters += [(f"{PFX}graw{j}", v) for j, v in enumerate(g1)]
+        iters += [(f"{PFX}bfr{i}", b0[k]) for i, k in enumerate(bkeys)]
+        if track:
+            iters += [(f"{PFX}trk", TRK["m"])]
+        loop = b.scf_for_iter(ci(0), ci(NG), ci(1), iters,
+                              iv_name=PFX + "gs" if scaled else PFX + "g")
+        with loop as (g, its):
+            accs = list(its[: 4 * ZTW])
+            o = 4 * ZTW
+            regs = its[o: o + nfill]
+            o += nfill
+            bf = dict(zip(bkeys, its[o: o + len(bkeys)]))
+            if track:
+                TRK["m"] = its[-1]
+            for i in range(XS):
+                cc = b.add(b.mul(g, ci(XS)), ci(i))
+                cur = b.mul(b.mod(cc, ci(R)), ci(BUF))
+                nb = load_b(b.smin(b.add(cc, ci(1)), ci(n_chunks - 1)))
+                _mfma_planes(accs, bf, cur)
+                if i == XS - 1:
+                    store_gfill(regs, b.add(g, ci(1)))
+                    regs = load_gfill(b.smin(b.add(g, ci(2)), ci(NG - 1)))
+                b.sync_lds_only()
+                bf = nb
+            tr_ = [TRK["m"]] if track else []
+            b.scf_yield(*accs, *regs, *[bf[k] for k in bkeys], *tr_)
+        acc = loop.results[: 4 * ZTW]
+        m_fin = loop.results[-1] if track else None
+        return acc, m_fin
+
+    def _xs_loop(PFX, scaled, pre, track):
+        # ring of XS + 1 staged chunks: chunk cc is computed from buffer cc % R while the
+        # fill stages chunk cc + XS (from the registers of the next group) into buffer
+        # (cc + XS) % R = (cc - 1) % R, consumed one iteration earlier; the next group's
+        # loads are issued after the last chunk of the current group is staged
+        R = XS + 1
+        NG = n_chunks // XS
+        if pre is not None:
+            g0 = pre[0]
+        else:
+            g0 = _load_group(ci(0))
+        for i in range(XS):
+            store_fill(g0[i], ci(i * BUF))
+        g1 = _load_group(ci(min(1, NG - 1)))
+        b0 = load_b(ci(0))
+        b.sync_lds_only()
+        nfill = len(g1[0])
+        iters = [(f"{PFX}acc{i}", atom.zero_acc(b)) for i in range(4 * ZTW)]
+        iters += [(f"{PFX}raw{i}_{j}", v) for i in range(XS) for j, v in enumerate(g1[i])]
+        iters += [(f"{PFX}bfr{i}", b0[k]) for i, k in enumerate(bkeys)]
+        if track:
+            iters += [(f"{PFX}trk", TRK["m"])]
+        loop = b.scf_for_iter(ci(0), ci(NG), ci(1), iters,
+                              iv_name=PFX + "gs" if scaled else PFX + "g")
+        with loop as (g, its):
+            accs = list(its[: 4 * ZTW])
+            o = 4 * ZTW
+            regs = [its[o + i * nfill: o + (i + 1) * nfill] for i in range(XS)]
+            o += XS * nfill
+            bf = dict(zip(bkeys, its[o: o + len(bkeys)]))
+            if track:
+                TRK["m"] = its[-1]
+            for i in range(XS):
+                cc = b.add(b.mul(g, ci(XS)), ci(i))
+                cur = b.mul(b.mod(cc, ci(R)), ci(BUF))
+                nxt_off = b.mul(b.mod(b.add(cc, ci(XS)), ci(R)), ci(BUF))
+                nb = load_b(b.smin(b.add(cc, ci(1)), ci(n_chunks - 1)))
+                _mfma_planes(accs, bf, cur)
+                store_fill(regs[i], nxt_off)
+                if i == XS - 1:
+                    ng = _load_group(b.smin(b.add(g, ci(2)), ci(NG - 1)))
+                b.sync_lds_only()
+                bf = nb
+            tr_ = [TRK["m"]] if track else []
+            b.scf_yield(*accs, *[v for gi in ng for v in gi], *[bf[k] for k in bkeys], *tr_)
+        acc = loop.results[: 4 * ZTW]
+        m_fin = loop.results[-1] if track else None
+        return acc, m_fin
+
+    if spec.bps == 3:
+        # in-kernel prescale: estimate from the first chunk(s), track, redo if needed
+        g0 = _load_group(ci(0)) if XS > 1 else [load_fill(ci(0))]
+        TRK["on"] = True
+        TRK["m"] = b.const_f32(0.0)
+        for raw_ in g0:  # max over the first chunks (no LDS writes: SC unset, rows unused)
+            for rr, (valid, _, _) in enumerate(fill):
+                TRK["mi"] = TRK["m"]
+                for j in range(NBP):
+                    v = raw_[rr * NBP + j]
+                    for q in range(4):
+                        d = b.vec_extract(v, q)
+                        lo = b.bitcast(b.shl(d, ci(16)), F32)
+                        hi = b.bitcast(b.land(d, ci(-65536)), F32)
+                        TRK["mi"] = b.inline_asm("v_max3_f32 $0, $1, |$2|, |$3|", "=v,v,v,v",
+                                                 [TRK["mi"], lo, hi], F32, sideeffect=False)
+                _trk_item(valid)
+        TRK["on"] = False
+        M0 = _wg_max_f32bits(TRK["m"])
+        E0 = b.land(b.lshr(M0, ci(23)), ci(0xFF))
+        # e = 0 inside the window 2^-10 <= amax0 < 2^(bps_el - 2) (unscaled loop copy), else
+        # amax0 * 2^-e in [2^(bps_el - 3), 2^(bps_el - 2)); headroom to the redo bound 2^13
+        EL = spec.bps_el
+        e_est = b.sub(E0, ci(124 + EL))
+        inwin = b.lor(b.cmp_eq(M0, ci(0)),
+                      b.land(b.cmp_ge(E0, ci(117)), b.cmp_le(E0, ci(124 + EL))))
+        e_est = b.readfirstlane(b.select(inwin, ci(0), b.smin(b.smax(e_est, ci(-120)),
+                                                               ci(120))))
+        pre = (g0 if XS > 1 else g0[0], None, None)
+        # one (always scaled) copy of the loop: an unscaled copy under a uniform branch,
+        # as bps_win does for the map-based prescale, keeps both copies' state live and
+        # spills next to the 128 accumulators
+        _lds16_main(True, pre, track=True, scales=_pow2_scales(e_est), tag="e", e_cur=e_est)
+    elif spec.bps:
+        # the first chunks' loads do not depend on the scale: issue them before the map
+        # reduction resolves (its load latency is otherwise exposed per workgroup)
+        PRE = _os.environ.get("ROCKE_WINO_PRE", "")
+        pre = (load_fill(ci(0)),
+               load_fill(ci(min(1, n_chunks - 1))) if "r" in PRE else None,
+               load_b(ci(0)) if "b" in PRE else None)
+        s_in_, s_out_, e_sc = _bps_scales(b, spec, E, z0, tb, lane, n_ent)
+        BPS.update(s_in2=b.vector_splat(s_in_, 2), s_out=s_out_)
+        if spec.bps_win:
+            with b.scf_if_else(b.cmp_ne(e_sc, ci(0))) as (t_ctx, e_ctx):
+                with t_ctx:
+                    _lds16_main(True, pre)
+                with e_ctx:
+                    _lds16_main(False, pre)
+        else:
+            _lds16_main(True, pre)
+    else:
+        _lds16_main(False)
     b.ret()
     return b.kernel
 
@@ -3073,8 +3756,9 @@ def build_winograd_yx_wlds_fwd(spec: WinogradYxSpec) -> KernelDef:
     return b.kernel
 
 
-def winograd_yx_weight_transform(w, *, dtype=None, fold=True, u16=False, uc=False):
-    """``w``: [K, 3, 3, 3, C] (KZYXC) -> U [3 dz][4 b][4 c][C/8][K][8] (y-sign folded)."""
+def winograd_yx_weight_transform(w, *, dtype=None, fold=True, u16=False, uc=False, my=2):
+    """``w``: [K, 3, 3, 3, C] (KZYXC) -> U [3 dz][4 b][4 c][C/8][K][8] (y-sign folded).
+    ``my=4``: F(4,3) along y -> U [3 dz][6 b][4 c][C/8][K][8] (lds16, no fold)."""
     import torch
 
     key = "yx" + str(w.device)
@@ -3086,6 +3770,12 @@ def winograd_yx_weight_transform(w, *, dtype=None, fold=True, u16=False, uc=Fals
     g, s = _WT_CONST[key]
     K, C = w.shape[0], w.shape[-1]
     wf = w.float()  # [K, z, y, x, C]
+    if my == 4:
+        g4 = torch.tensor(G4, dtype=torch.float32, device=w.device)
+        u = torch.einsum("bj,nzjkc->nzbkc", g4, wf)
+        u = torch.einsum("dk,nzbkc->nzbdc", g, u)  # [K, dz, 6 b, 4 c, C]
+        u = u.permute(1, 2, 3, 0, 4).reshape(3, 6, 4, K, C // 8, 8).permute(0, 1, 2, 4, 3, 5)
+        return u.to(dtype or torch.bfloat16).contiguous()
     u = torch.einsum("bj,nzjkc->nzbkc", g, wf)
     u = torch.einsum("dk,nzbkc->nzbdc", g, u)  # [K, dz, b, c, C]
     if fold:
@@ -3194,7 +3884,7 @@ def build_x_to_c8_lds(D: int, H: int, W: int, C: int, block_bytes=None,
     E[block] = max of the |x| bf16 bit patterns of the block's voxels (the bps=1 map)."""
     V = D * H * W
     b = IRBuilder(f"wino_x_to_c8l_V{V}C{C}" + (f"_bb{block_bytes}" if block_bytes else "")
-                  + (f"_h{halo}" if halo else "") + ("_s" if scale else "")
+                  + (f"_h{_halo_tag(halo)}" if halo else "") + ("_s" if scale else "")
                   + ("_am" if amax else ""))
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
@@ -3208,6 +3898,12 @@ def build_x_to_c8_lds(D: int, H: int, W: int, C: int, block_bytes=None,
                       scale=S, amax=E)
     b.ret()
     return b.kernel
+
+
+def _halo_tag(halo) -> str:
+    """Kernel-name tag of a relayout halo: an int as is, a per-axis (hz, hy, hx) tuple as
+    its three digits."""
+    return "".join(str(v) for v in halo) if isinstance(halo, tuple) else str(halo)
 
 
 X8_BLOCK_BYTES = 16384  # input bytes per relayout block (LDS-transposed relayout)
@@ -3224,10 +3920,12 @@ def _x_to_c8_lds_words(C, block_bytes=None):
 def _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, blk, block_bytes=None, vlim=None,
                       nthr=256, halo=0, scale=None, amax=None):
     """``halo``: X8 is [C/8][D+2h][H+2h][W+2h][8] and only its interior is written (the
-    caller zeroes the halo once) -- dgrad's dY padded by 2 for the flipped-weight conv."""
+    caller zeroes the halo once) -- dgrad's dY padded by 2 for the flipped-weight conv.
+    A tuple (hz, hy, hx) pads each axis by its own amount."""
     V = D * H * W
-    hp = halo
-    Vp = (D + 2 * hp) * (H + 2 * hp) * (W + 2 * hp)
+    hz_, hy_, hx_ = halo if isinstance(halo, tuple) else (halo,) * 3
+    hp = halo if not isinstance(halo, tuple) else (1 if any(halo) else 0)
+    Vp = (D + 2 * hz_) * (H + 2 * hy_) * (W + 2 * hx_)
     VL = V if vlim is None else vlim  # voxels [0, VL) are relayouted (strides use V)
     NCB = C // 8
     VB = _x8_vb(C, block_bytes)  # voxels per block
@@ -3244,18 +3942,21 @@ def _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, blk, block_bytes=None, vlim=Non
         vl = b.div(e, ci(NCB))
         cb = b.mod(e, ci(NCB))
         goff = b.add(b.mul(b.add(v0, vl), ci(C * 2)), b.mul(cb, ci(16)))
+        if amax is not None:  # elements past the block read 0 (out of range)
+            goff = b.select(ok, goff, ci(V * C * 2))
         val = b.buffer_load_vN(rx, goff, ci(0), I32, 4)
-        if amax is not None:  # max |x| bit pattern (16-bit halves, sign cleared)
+        if amax is not None:  # max |x| bit patterns, two 16-bit halves at a time
             for q in range(4):
                 a_ = b.land(b.vec_extract(val, q), ci(0x7FFF7FFF))
-                a_ = b.smax(b.land(a_, ci(0xFFFF)), b.lshr(a_, ci(16)))
-                am_ = b.select(ok, b.smax(am_, a_), am_) if (r or q) else b.select(ok, a_, ci(0))
+                am_ = a_ if (r == 0 and q == 0) else b.inline_asm(
+                    "v_pk_max_u16 $0, $1, $2", "=v,v,v", [am_, a_], I32, sideeffect=False)
         with b.scf_if(ok):
             b.smem_store_vN_f32(lds, [b.mul(b.add(b.mul(cb, ci(VB)), vl), ci(4))],
                                 b.vec_bitcast(val, VectorType(F32, 4)), 4)
     if amax is not None:
         slot0 = _x_to_c8_lds_words(C, block_bytes)
-        wm = b.readfirstlane(b.wave_reduce(am_, "max"))
+        am_ = b.smax(b.land(am_, ci(0xFFFF)), b.lshr(am_, ci(16)))
+        wm = _wave_max_i32(b, am_)
         with b.scf_if(b.cmp_eq(b.mod(tid, ci(64)), ci(0))):
             b.smem_store_vN_f32(lds, [b.add(ci(slot0), b.div(tid, ci(64)))],
                                 b.bitcast(wm, F32), 1)
@@ -3288,8 +3989,8 @@ def _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, blk, block_bytes=None, vlim=Non
                 xx_ = b.mod(v, ci(W))
                 yy_ = b.mod(b.div(v, ci(W)), ci(H))
                 zz_ = b.div(v, ci(H * W))
-                vp = b.add(b.mul(b.add(b.mul(b.add(zz_, ci(hp)), ci(H + 2 * hp)),
-                                       b.add(yy_, ci(hp))), ci(W + 2 * hp)), b.add(xx_, ci(hp)))
+                vp = b.add(b.mul(b.add(b.mul(b.add(zz_, ci(hz_)), ci(H + 2 * hy_)),
+                                       b.add(yy_, ci(hy_))), ci(W + 2 * hx_)), b.add(xx_, ci(hx_)))
             else:
                 vp = v
             ooff = b.select(b.cmp_lt(v, ci(VL)), b.add(b.mul(cb, ci(Vp * 16)), b.mul(vp, ci(16))),
@@ -3306,6 +4007,54 @@ def _emit_x_to_c8_lds(b, X, X8, lds, D, H, W, C, blk, block_bytes=None, vlim=Non
 def x_to_c8_lds_grid(D, H, W, C, block_bytes=None):
     VB = _x8_vb(C, block_bytes)
     return (-(-(D * H * W) // VB), 1, 1)
+
+
+PAD_COPY_UNROLL = 4  # 16-byte units per thread (all loads issued before the stores)
+
+
+def build_pad_copy(D: int, H: int, W: int, C: int, halo=1, unroll: int = PAD_COPY_UNROLL
+                   ) -> KernelDef:
+    """Zero-pad copy for the DIRECT path (not used by any Winograd kernel): X [D][H][W][C]
+    bf16 -> the interior of Xp [D+2hz][H+2hy][W+2hx][C] (the caller zeroes Xp's halo once), so a
+    halo-form (pad 0) kernel can serve a padded problem. Flat over 16-byte units, ``unroll``
+    per thread, all loads before the stores; out-of-range units are dropped by the buffer
+    bounds. ``halo``: an int or a per-axis (hz, hy, hx) tuple. Grid :func:`pad_copy_grid`."""
+    hz_, hy_, hx_ = halo if isinstance(halo, tuple) else (halo,) * 3
+    V = D * H * W
+    RW = W * C // 8  # 16-byte units per (d, h) row
+    n16 = V * C // 8
+    b = IRBuilder(f"pad_copy_D{D}H{H}W{W}C{C}_h{_halo_tag(halo)}_u{unroll}")
+    b.kernel.attrs["max_workgroup_size"] = 256
+    X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
+    Xp = b.param("Xp", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
+    ci = b.const_i32
+    nb_in = n16 * 16
+    nb_out = (D + 2 * hz_) * (H + 2 * hy_) * (W + 2 * hx_) * C * 2
+    rx = b.buffer_rsrc(X, ci(nb_in))
+    ry = b.buffer_rsrc(Xp, ci(nb_out))
+    base = b.add(b.mul(b.block_id_x(), ci(256 * unroll)), b.thread_id_x())
+    vals, offs = [], []
+    for u in range(unroll):
+        e = b.add(base, ci(u * 256))
+        ok = b.cmp_lt(e, ci(n16))
+        vals.append(b.buffer_load_vN(rx, b.select(ok, b.mul(e, ci(16)), ci(nb_in)), ci(0), I32, 4))
+        row = b.div(e, ci(RW))
+        off = b.mod(e, ci(RW))
+        dd = b.div(row, ci(H))
+        hh = b.mod(row, ci(H))
+        prow = b.add(b.mul(b.add(dd, ci(hz_)), ci(H + 2 * hy_)), b.add(hh, ci(hy_)))
+        o16 = b.add(b.mul(prow, ci((W + 2 * hx_) * C // 8)), b.add(off, ci(hx_ * C // 8)))
+        offs.append(b.select(ok, b.mul(o16, ci(16)), ci(nb_out)))
+    for u in range(unroll):
+        b._op("tile.buffer_store_vN_bf16",
+              [ry, offs[u], ci(0), b.vec_bitcast(vals[u], VectorType(BF16, 8))],
+              attrs={"dwords": 4})
+    b.ret()
+    return b.kernel
+
+
+def pad_copy_grid(D, H, W, C, unroll: int = PAD_COPY_UNROLL):
+    return (-(-(D * H * W * C // 8) // (256 * unroll)), 1, 1)
 
 
 def build_yx_weight_transform(K: int, C: int, *, out_dtype: str = "f16",
@@ -3399,7 +4148,7 @@ def _emit_yx_wt(b, W, Uo, K, C, out_dtype, fold, u16, uc, blk, flip=False):
 
 
 def build_yx_weight_transform_v3(K: int, C: int, *, flip: bool = False,
-                                 swz: bool = False) -> KernelDef:
+                                 swz: bool = False, my: int = 2) -> KernelDef:
     """W -> U [3][4][4][C/8][K][8] f16 (lds16 layout, no fold), one thread per (k, 8-channel
     group), consecutive threads = consecutive k, so every U store is a 16-byte lane store and
     a wave writes 1 KiB contiguous. Loads: 16 bytes per tap (forward filter, ``flip=False``)
@@ -3407,11 +4156,12 @@ def build_yx_weight_transform_v3(K: int, C: int, *, flip: bool = False,
     loads per tap. Same arithmetic order as _emit_yx_wt. Grid (ceil(K*C/8/256))."""
     from rocke.core.ir import F16
 
-    b = IRBuilder(f"wino_yx_wt3_K{K}C{C}{'_flip' if flip else ''}{'_swz' if swz else ''}")
+    b = IRBuilder(f"wino_yx_wt3_K{K}C{C}{'_flip' if flip else ''}{'_swz' if swz else ''}"
+                  f"{'_my4' if my == 4 else ''}")
     b.kernel.attrs["max_workgroup_size"] = 256
     W = b.param("W", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     Uo = b.param("U", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
-    _emit_yx_wt3(b, W, Uo, K, C, flip, b.block_id_x(), swz=swz)
+    _emit_yx_wt3(b, W, Uo, K, C, flip, b.block_id_x(), swz=swz, my=my)
     b.ret()
     return b.kernel
 
@@ -3425,8 +4175,11 @@ def yx_wt3_swz_ok(K, C, flip=False):
     return not flip and K % 8 == 0 and (C // 8) % 8 == 0
 
 
-def _emit_yx_wt3(b, W, Uo, K, C, flip, blk, swz=False):
+def _emit_yx_wt3(b, W, Uo, K, C, flip, blk, swz=False, my=2):
     from rocke.core.ir import F16
+
+    GY = _ymats(my)[1]
+    NBP = my + 2
 
     ci = b.const_i32
     NCB = C // 8
@@ -3448,7 +4201,7 @@ def _emit_yx_wt3(b, W, Uo, K, C, flip, blk, swz=False):
         cb = b.mod(b.div(tt, ci(K)), ci(NCB))
         dzv = b.div(tt, ci(K * NCB))  # this thread's z tap (3x the threads: latency-bound otherwise)
     rw = b.buffer_rsrc(W, ci(K * 27 * C * 2))
-    ru = b.buffer_rsrc(Uo, ci(48 * C * K * 2))
+    ru = b.buffer_rsrc(Uo, ci(3 * NBP * 4 * C * K * 2))
     w = {}
     for z in range(1):
         for y in range(3):
@@ -3474,7 +4227,7 @@ def _emit_yx_wt3(b, W, Uo, K, C, flip, blk, swz=False):
                         vals.append(b.bitcast(b.land(dq, ci(-65536)), F32))
                     w[(z, y, x)] = vals
     so = b.select(ok, b.add(b.mul(b.add(b.mul(cb, ci(K)), k), ci(16)),
-                            b.mul(dzv, ci(16 * C * K * 2))), ci(48 * C * K * 2))
+                            b.mul(dzv, ci(NBP * 4 * C * K * 2))), ci(3 * NBP * 4 * C * K * 2))
     for dz in range(1):
         gx = {}
         for y in range(3):
@@ -3488,19 +4241,19 @@ def _emit_yx_wt3(b, W, Uo, K, C, flip, blk, swz=False):
                         term = b.fmul(b.const_f32(g), w[(dz, y, x)][j])
                         acc = term if acc is None else b.fadd(acc, term)
                     gx[(y, cc, j)] = acc
-        for bb in range(4):
+        for bb in range(NBP):
             for cc in range(4):
                 outs = []
                 for j in range(8):
                     acc = None
                     for y in range(3):
-                        g = G[bb][y]
+                        g = GY[bb][y]
                         if g == 0.0:
                             continue
                         term = b.fmul(b.const_f32(g), gx[(y, cc, j)])
                         acc = term if acc is None else b.fadd(acc, term)
                     outs.append(acc)
-                pt = (dz * 4 + bb) * 4 + cc
+                pt = (dz * NBP + bb) * 4 + cc
                 for hh in range(2):
                     h = b.vec_cast_f32_to(b.vec_pack(outs[4 * hh:4 * hh + 4], F32), F16)
                     b.buffer_store_vN_f16(ru, so, ci(pt * C * K * 2 + 8 * hh), h, 2)
@@ -3582,7 +4335,7 @@ def yx_weight_transform_v2_grid(K, C):
 def build_yx_aux(D: int, H: int, W: int, C: int, K: int, *, out_dtype: str = "f16",
                  fold: bool = False, rev: bool = False, halo: int = 0,
                  flip: bool = False, wtv: int = 1, scale: bool = False,
-                 amax: bool = False) -> KernelDef:
+                 amax: bool = False, my: int = 2) -> KernelDef:
     """One launch for both auxiliary passes of the yx kernel: blocks [0, NX) relayout X to c8
     (LDS-transposed), blocks [NX, NX + NW) transform the weights -- the two run side by side
     instead of back to back. Signature (X, X8, W, U); grid yx_aux_grid()."""
@@ -3591,9 +4344,9 @@ def build_yx_aux(D: int, H: int, W: int, C: int, K: int, *, out_dtype: str = "f1
     odt = F16 if out_dtype == "f16" else BF16
     nx = x_to_c8_lds_grid(D, H, W, C)[0]
     b = IRBuilder(f"wino_yx_aux_V{D * H * W}C{C}K{K}_{out_dtype}{'_fold' if fold else ''}"
-                  f"{'_rev' if rev else ''}{f'_h{halo}' if halo else ''}{'_flip' if flip else ''}"
+                  f"{'_rev' if rev else ''}{f'_h{_halo_tag(halo)}' if halo else ''}{'_flip' if flip else ''}"
                   f"{'_wt3' if wtv == 3 else ''}{'_wt4' if wtv == 4 else ''}{'_s' if scale else ''}"
-                  f"{'_am' if amax else ''}")
+                  f"{'_am' if amax else ''}{'_my4' if my == 4 else ''}")
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
     X8 = b.param("X8", PtrType(BF16, "global"), noalias=True, writeonly=True, align=16)
@@ -3612,7 +4365,7 @@ def build_yx_aux(D: int, H: int, W: int, C: int, K: int, *, out_dtype: str = "f1
                               amax=E)
         with else_ctx:
             if wtv in (3, 4):
-                _emit_yx_wt3(b, Wp, Uo, K, C, flip, b.sub(bid, ci(nx)), swz=wtv == 4)
+                _emit_yx_wt3(b, Wp, Uo, K, C, flip, b.sub(bid, ci(nx)), swz=wtv == 4, my=my)
             else:
                 _emit_yx_wt(b, Wp, Uo, K, C, out_dtype, fold, False, False, b.sub(bid, ci(nx)),
                             flip=flip)

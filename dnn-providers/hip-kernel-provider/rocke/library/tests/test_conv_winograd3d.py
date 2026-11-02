@@ -227,3 +227,346 @@ def test_yx_wt3_swizzle_is_a_bijection(K, C):
     kd = cw.build_yx_weight_transform_v3(K, C, swz=True)
     assert kd.name.endswith("_swz")
     assert not cw.yx_wt3_swz_ok(K, C, flip=True)
+
+
+# ---- per-block prescale (bps), F(4x2,3x3) (my=4), plan selector ----
+ZSPEC = dict(BEST, yf16=True, nsplit=False, z_tile=4, n_tile=32, xcd=6)
+
+
+@pytest.mark.parametrize("extra", [
+    {"bps": 1}, {"bps": 1, "bps_win": 0},
+    {"bps": 2, "bps_halo": 1, "yc8h": True, "bps_out": True},
+    {"yc8h": True, "bps_out": True},
+])
+def test_bps_knobs_build(extra):
+    D, H, W, C, K = UNET3D_SHAPES[3]
+    s = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, **ZSPEC, **extra)
+    ok, why = cw.is_valid_yx_spec(s)
+    assert ok, why
+    k = cw.build_winograd_yx(s)
+    assert k.name == s.kernel_name()
+    assert "bps" in k.name or "bpo" in k.name
+
+
+def test_bps_invalid_combinations():
+    D, H, W, C, K = UNET3D_SHAPES[3]
+    bad = [dict(ZSPEC, bps_out=True),  # bps_out writes the next layer's map: yc8h only
+           dict(ZSPEC, bps=1, epi_vec=False),
+           dict(ZSPEC, bps=3)]
+    for kw in bad:
+        ok, _ = cw.is_valid_yx_spec(cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, **kw))
+        assert not ok, kw
+
+
+@pytest.mark.parametrize("sid,dgrad,form", [
+    (3, False, "halo"), (5, False, "halo"), (1, False, "halo"), (6, True, "halo"),
+    (9, True, "halo"), (4, False, "a111"), (9, True, "a111"), (5, False, "a011"),
+    (6, True, "a011")])
+def test_bps_map_ranges_cover_the_input_region(sid, dgrad, form):
+    """bps=1: the relayout-block entries a block reads cover every (unpadded) voxel of its
+    input region (planes z0..z0+ZT+1, its input rows, all x). Adapter forms: pad (1,1,1)
+    (relayout halo 1) and (0,1,1) (z halo 0 FWD / 2 BWD-data, y / x halo 1)."""
+    D, H, W, C, K = UNET3D_SHAPES[sid]
+    if form != "halo":
+        hz = {"a111": 1, "a011": 2 if dgrad else 0}[form]
+        kw = dict(ZSPEC, bps=1, bps_halo=1, **({"bps_halo_z": hz} if hz != 1 else {}))
+        dz = 2 if hz == 2 else 0  # BWD-data of pad (0,1,1): dY padded by 2 along z
+        shp = (D + dz, H, W) + ((K, C) if dgrad else (C, K))
+        s = cw.WinogradYxSpec(Di=shp[0], Hi=shp[1], Wi=shp[2], C=shp[3], K=shp[4], **kw)
+    elif dgrad:
+        kw = dict(DGRAD_LIN, xcd=6, bps=1, bps_halo=2)
+        s = cw.WinogradYxSpec(Di=D + 2, Hi=H + 2, Wi=W + 2, C=K, K=C, **kw)
+    else:
+        s = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, **ZSPEC, bps=1)
+    assert cw.is_valid_yx_spec(s)[0]
+    h = s.bps_halo
+    hz = cw._bps_hz(s)
+    Ds, Hs, Ws = s.Di - 2 * hz, s.Hi - 2 * h, s.Wi - 2 * h
+    vb = cw._x8_vb(s.C)
+    maxe = cw._bps_maxe(s)
+    for tb in range(cw._yx_ntb(s)):
+        r_lo, r_hi = cw._bps_block_rows(s, tb)
+        for z0 in (0, s.z_tile * (s.Do // s.z_tile // 2)):
+            for zi in range(z0, z0 + s.z_tile + 2):
+                rg = cw._bps_plane_range(s, zi, r_lo, r_hi)
+                zs = zi - hz
+                rows = [y - h for y in range(r_lo, r_hi + 1) if 0 <= y - h < Hs]
+                if not (0 <= zs < Ds) or not rows:
+                    assert rg is None
+                    continue
+                assert rg[1] - rg[0] + 1 <= maxe
+                for y in (rows[0], rows[-1]):
+                    for x in (0, Ws - 1):
+                        e = ((zs * Hs + y) * Ws + x) // vb
+                        assert rg[0] <= e <= rg[1]
+
+
+def test_bps_chained_map_entries():
+    D, H, W, C, K = UNET3D_SHAPES[4]
+    s = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, **ZSPEC, bps=2, bps_halo=1, yc8h=True)
+    # producer = s3 with the same tiling (z_tile 4, n_tile 32, 8 waves): its grid x waves
+    p = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=256, K=128, **ZSPEC, yc8h=True, bps_out=True)
+    assert cw.bps_map_entries(s) == cw.winograd_yx_grid(p)[0] * p.waves
+
+
+@pytest.mark.parametrize("sid", sorted(UNET3D_SHAPES))
+def test_f42_support(sid):
+    D, H, W, C, K = UNET3D_SHAPES[sid]
+    kw = dict(BEST, yf16=True, my=4, waves=12, nsplit=False, z_tile=2, n_tile=32)
+    ok, why = cw.is_valid_yx_spec(cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, **kw))
+    # 4x2 tiles: s10 (2 x 4 tiles per plane) has fewer than 32 per plane
+    assert ok == (sid != 10), why
+
+
+def test_f42_builds_and_dgrad_shapes_refused():
+    D, H, W, C, K = UNET3D_SHAPES[3]
+    kw = dict(BEST, yf16=True, my=4, waves=6, nsplit=False, z_tile=2, n_tile=32)
+    s = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, **kw)
+    assert cw.build_winograd_yx(s).name.endswith("my4")
+    # dgrad of s3 runs a 66-row output: not a multiple of 4
+    sd = cw.WinogradYxSpec(Di=D + 2, Hi=H + 2, Wi=W + 2, C=K, K=C, **kw)
+    assert not cw.is_valid_yx_spec(sd)[0]
+
+
+def test_f42_identity_cpu():
+    """F(4,3) along y x F(2,3) along x + direct z equals the direct conv (float64)."""
+    torch = pytest.importorskip("torch")
+    D, H, W, C, K = 6, 10, 8, 8, 3
+    x = torch.randn(D, H, W, C, dtype=torch.float64)
+    w = torch.randn(K, 3, 3, 3, C, dtype=torch.float64)
+    ref = torch.nn.functional.conv3d(x.permute(3, 0, 1, 2)[None], w.permute(0, 4, 1, 2, 3))[0]
+    bty = torch.tensor(cw.BT4, dtype=torch.float64)
+    btx = torch.tensor(cw.BT, dtype=torch.float64)
+    aty = torch.tensor(cw.AT4, dtype=torch.float64)
+    atx = torch.tensor(cw.AT, dtype=torch.float64)
+    u = cw.winograd_yx_weight_transform(w, dtype=torch.float64, my=4)  # [3][6][4][C/8][K][8]
+    u = u.permute(0, 1, 2, 3, 5, 4).reshape(3, 6, 4, C, K)
+    t = x.unfold(1, 6, 4).unfold(2, 4, 2)  # D, TY, TX, C, 6, 4
+    v = torch.einsum("bi,cj,zyxkij->bczyxk", bty, btx, t)
+    m = sum(torch.einsum("bczyxk,bckn->bczyxn", v[:, :, dz:dz + D - 2], u[dz]) for dz in range(3))
+    y = torch.einsum("pb,qc,bczyxn->nzypxq", aty, atx, m).reshape(K, D - 2, H - 2, W - 2)
+    assert (y - ref).abs().max().item() <= 1e-4 * ref.abs().max().item()
+
+
+def _cp(sid, **kw):
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    D, H, W, C, K = UNET3D_SHAPES[sid]
+    return ConvProblem(N=1, Hi=H, Wi=W, C=C, K=K, Y=3, X=3, Di=D, Z=3, sD=1, pD=0, dD=1, **kw)
+
+
+def test_selector_eligibility():
+    from kernels.common import conv_winograd3d_select as sel
+
+    assert sel.select_winograd3d(_cp(10), "fwd").kind == "direct"  # 16 tiles per plane
+    assert "wgrad" in sel.select_winograd3d(_cp(3), "wgrad").reason
+    assert "range_safe" in sel.select_winograd3d(_cp(3), "fwd", prescale="none").reason
+    p = _cp(3, pH=1)  # padding (0, 1, 0): no plan
+    assert "padding" in sel.select_winograd3d(p, "fwd").reason
+
+
+def _cp_adapter(sid):
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    D, H, W, C, K = UNET3D_SHAPES[sid]
+    return ConvProblem(N=1, Hi=H - 2, Wi=W - 2, C=C, K=K, Y=3, X=3, Di=D - 2, Z=3, sD=1, pD=1,
+                       dD=1, pH=1, pW=1)
+
+
+@pytest.mark.parametrize("sid", [1, 3, 4, 9])
+def test_selector_adapter_form(sid):
+    """pad (1,1,1): the drop-in relayout adds halo 1 (FWD) / 1 (BWD-data, 2 - pad), so the
+    yx problem is the halo form's (FWD) / the forward-shaped C <-> K problem (BWD-data)."""
+    from kernels.common import conv_winograd3d_select as sel
+
+    p = _cp_adapter(sid)
+    D, H, W, C, K = UNET3D_SHAPES[sid]
+    assert sel._winograd_problem(p, "fwd") == (D, H, W, C, K)
+    assert sel._winograd_problem(p, "dgrad") == (D, H, W, K, C)
+    assert sel._relayout_halo(p, "fwd") == 1 and sel._relayout_halo(p, "dgrad") == 1
+    for d in ("fwd", "dgrad"):
+        cands = sel.winograd3d_candidates(p, d, "dropin", "bps")
+        assert cands and all(s.bps == 1 and s.bps_halo == 1 and not s.lin for _, s, _ in cands)
+        assert "drop-in only" in sel.select_winograd3d(p, d, mode="chained").reason
+        plan = sel.select_winograd3d(p, d, mode="dropin")
+        if plan.kind == "yx":
+            assert plan.spec_dict["bps_halo"] == 1
+    # the halo form keeps its own table and halos
+    assert sel._relayout_halo(_cp(sid), "dgrad") == 2
+
+
+def test_selector_adapter_pad_copy_baseline():
+    """direct_pad_copy: the padded FWD direct baseline may be pad copy + halo-form kernel."""
+    from kernels.common import conv_winograd3d_select as sel
+
+    p = _cp_adapter(1)
+    a = sel.select_winograd3d(p, "fwd")
+    b = sel.select_winograd3d(p, "fwd", direct_pad_copy=True)
+    assert a.source == b.source == "tuned"
+    # Winograd is selected over the padded direct kernel, not over pad copy + halo-form kernel
+    assert a.kind == "yx" and b.kind == "direct" and "pad_copy" in b.reason
+    # BWD-data entries carry no pad-copy alternative: unchanged
+    assert (sel.select_winograd3d(p, "dgrad", direct_pad_copy=True).kind
+            == sel.select_winograd3d(p, "dgrad").kind)
+
+
+@pytest.mark.parametrize("sid", [3, 4, 9])
+def test_selector_adapter_011(sid):
+    """pad (0,1,1) with a D+2 input (a D-split run): relayout halos (0, 1) FWD, (2, 1) BWD-data."""
+    from kernels.common import conv_winograd3d_select as sel
+
+    D, H, W, C, K = UNET3D_SHAPES[sid]
+    p = _cp(sid, pH=1, pW=1)
+    p = type(p)(N=1, Hi=H - 2, Wi=W - 2, C=C, K=K, Y=3, X=3, Di=D, Z=3, sD=1, pD=0, dD=1,
+                pH=1, pW=1)
+    assert sel._relayout_halos(p, "fwd") == (0, 1) and sel._relayout_halos(p, "dgrad") == (2, 1)
+    assert sel._winograd_problem(p, "fwd") == (D, H, W, C, K)
+    assert sel._winograd_problem(p, "dgrad") == (D + 2, H, W, K, C)
+    for d in ("fwd", "dgrad"):
+        for _, s, _ in sel.winograd3d_candidates(p, d, "dropin", "bps"):
+            assert s.bps_halo == 1 and cw._bps_hz(s) == (0 if d == "fwd" else 2)
+        pl = sel.select_winograd3d(p, d)
+        if pl.kind == "yx":
+            assert pl.spec_dict["bps_halo"] == 1
+            assert pl.spec_dict.get("bps_halo_z", 1) == (0 if d == "fwd" else 2)
+
+
+@pytest.mark.parametrize("mode", ["dropin", "chained"])
+@pytest.mark.parametrize("sid", [1, 2, 3, 4, 5, 6, 7, 8, 9])
+def test_selector_plans_are_valid_specs(sid, mode):
+    from kernels.common import conv_winograd3d_select as sel
+
+    for d in ("fwd", "dgrad"):
+        plan = sel.select_winograd3d(_cp(sid), d, mode=mode)
+        if plan.kind == "yx":
+            D, H, W, C, K = UNET3D_SHAPES[sid]
+            shp = (D, H, W, C, K) if d == "fwd" else (D + 2, H + 2, W + 2, K, C)
+            s = cw.WinogradYxSpec(Di=shp[0], Hi=shp[1], Wi=shp[2], C=shp[3], K=shp[4],
+                                  **plan.spec_dict)
+            assert cw.is_valid_yx_spec(s)[0]
+            assert plan.prescale == "bps" and s.bps in (1, 2)
+            assert plan.source == "tuned" or plan.est_ms < plan.est_ms_direct
+        else:
+            assert plan.reason
+
+
+def test_selector_tuned_table(monkeypatch):
+    from kernels.common import conv_winograd3d_select as sel
+
+    key = ("fwd",) + UNET3D_SHAPES[3]
+    monkeypatch.setitem(sel.TUNED, key, {
+        "baselines": ("direct",),
+        "dropin": ("Z", ("direct",)), "chained": ("Z", ()),
+        "dropin_nops": ("Z", ("direct",))})
+    p = sel.select_winograd3d(_cp(3), "fwd", mode="dropin")
+    assert p.kind == "yx" and p.source == "tuned" and p.spec_dict["bps"] == 1
+    assert p.spec_dict.get("z_tile", 4) == 4 and p.spec_dict.get("xcd") == 6 and p.wtv == 4
+    # chained: does not beat the direct kernel by the margin -> direct
+    p = sel.select_winograd3d(_cp(3), "fwd", mode="chained")
+    assert p.kind == "direct" and p.source == "tuned"
+    # range-safe data reads the no-prescale entry; chained has none -> the model decides
+    p = sel.select_winograd3d(_cp(3), "fwd", mode="dropin", range_safe=True)
+    assert p.kind == "yx" and "bps" not in p.spec_dict
+    p = sel.select_winograd3d(_cp(3), "fwd", mode="chained", range_safe=True)
+    assert p.source == "model"
+
+
+def test_dropin_wrapper_rejects_direct_plans():
+    """Winograd3dDropin takes yx drop-in plans only (CPU: refused before any allocation)."""
+    from kernels.common import conv_winograd3d_select as sel
+    from kernels.common.conv_winograd3d_dropin import Winograd3dDropin
+
+    p = _cp_adapter(1)
+    plan = sel.select_winograd3d(p, "dgrad")  # BWD-data s1 adapter: direct (tuned)
+    assert plan.kind == "direct"
+    with pytest.raises(ValueError):
+        Winograd3dDropin(p, "dgrad", plan)
+    plan = sel.select_winograd3d(p, "fwd")
+    with pytest.raises(ValueError):
+        Winograd3dDropin(p, "dgrad", plan)  # direction mismatch
+
+
+@pytest.mark.parametrize("halo", [1, (0, 1, 1)])
+def test_pad_copy_kernel_builds(halo):
+    k = cw.build_pad_copy(16, 8, 8, 1024, halo=halo)
+    assert k.name.startswith("pad_copy_D16H8W8C1024_h")
+    # 16-byte units: 16*8*8*1024/8 = 131072 -> 128 blocks of 256 threads x 4 units
+    assert cw.pad_copy_grid(16, 8, 8, 1024) == (128, 1, 1)
+    assert cw.pad_copy_grid(256, 128, 128, 64, unroll=8) == (-(-(256 * 128 * 128 * 8) // 2048), 1, 1)
+
+
+def test_selector_pad_copy_rocke_baseline():
+    """With the rocKE pad copy as the direct alternative, adapter FWD s1 / s2 / s7-s9 go direct,
+    s3-s6 stay Winograd (gfx942 decision tables)."""
+    from kernels.common import conv_winograd3d_select as sel
+
+    for form in ("adapter", "adapter011"):
+        plans = sel.unet3d_plans("dropin", form=form, direct_pad_copy=True)
+        kinds = {sid: plans[("fwd", sid)].kind for sid in range(1, 11)}
+        assert [s for s, k in kinds.items() if k == "yx"] == [3, 4, 5, 6]
+
+
+# --- NDHWC-direct main kernel: predicated zero halo (xpad), chunk groups (xs), in-kernel
+# prescale (bps=3) -- no relayout pass ---------------------------------------------------
+XN = dict(ZSPEC, xin="ndhwc")
+
+
+@pytest.mark.parametrize("sid,extra", [
+    (3, {"xpad": 1}), (3, {"xpad": 1, "bps": 3}), (1, {"xpad": 1, "xpad_z": 0, "bps": 3}),
+    (4, {"xpad": 1, "xpad_z": 2, "bps": 3}),  # BWD-data of pad (0,1,1): dY padded (2,1,1)
+    (3, {"xpad": 1, "z_tile": 2, "nsplit": True, "n_tile": 64, "xcd": 0, "xs": 2}),
+    (5, {"xpad": 1, "z_tile": 2, "nsplit": True, "n_tile": 64, "xcd": 0, "xs": 2, "bps": 3}),
+    (7, {"xpad": 1, "ksplit": 4, "bps": 3}), (3, {"bps": 3}),
+])
+def test_ndhwc_direct_builds(sid, extra):
+    D, H, W, C, K = UNET3D_SHAPES[sid]
+    s = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, **dict(XN, **extra))
+    ok, why = cw.is_valid_yx_spec(s)
+    assert ok, why
+    k = cw.build_winograd_yx(s)
+    assert k.name == s.kernel_name()
+    names = [p.name for p in k.params] if hasattr(k, "params") else []
+    if extra.get("bps") == 3 and names:
+        assert "E" not in names  # no amax map argument
+    xz, xy = cw._xpad(s)
+    assert ("xp" in k.name) == bool(xz or xy)
+
+
+def test_ndhwc_direct_invalid_combinations():
+    D, H, W, C, K = UNET3D_SHAPES[3]
+    bad = [dict(ZSPEC, xpad=1),  # predicated halo needs xin ndhwc
+           dict(ZSPEC, xs=2),
+           dict(XN, xs=3, z_tile=2, nsplit=True, n_tile=64, xcd=0),  # 3 does not divide 32
+           dict(XN, xpad=1, lin=True),
+           dict(XN, bps=3, bps_el=1),
+           dict(XN, bps=3, oscale=True)]
+    for kw in bad:
+        ok, _ = cw.is_valid_yx_spec(cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K, **kw))
+        assert not ok, kw
+
+
+def test_ndhwc_direct_xs_ring_fits_lds():
+    # xs + 1 staged chunks must fit next to nothing else in 64 KiB (z_tile 2 -> xs 2 fits;
+    # z_tile 4 does not)
+    D, H, W, C, K = UNET3D_SHAPES[3]
+    ok, _ = cw.is_valid_yx_spec(cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K,
+                                                  **dict(XN, xs=2)))
+    assert not ok
+    s = cw.WinogradYxSpec(Di=D, Hi=H, Wi=W, C=C, K=K,
+                          **dict(XN, xs=2, z_tile=2, nsplit=True, n_tile=64, xcd=0))
+    assert cw.is_valid_yx_spec(s)[0]
+    assert cw._yx_lds16_floats(s) * 4 <= 65536
+
+
+def test_xpf_option_plans():
+    # opt-in: yx plans carry the unrolled-prefetch loop where valid; defaults never do
+    from kernels.common import conv_winograd3d_select as sel
+
+    for form in ("halo", "adapter", "adapter011"):
+        base = sel.unet3d_plans("dropin", form=form)
+        withx = sel.unet3d_plans("dropin", form=form, xpf=True)
+        for k, pl in base.items():
+            assert "xpf" not in pl.spec_dict
+            px = withx[k]
+            if px.kind == "yx" and not px.spec_dict.get("lin"):  # lin: no xpf variant
+                assert px.spec_dict.get("xpf") == 1, (form, k)
