@@ -305,7 +305,7 @@ namespace TensileLite
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
-                ("sync-after-warmups",       po::value<bool>()->default_value(true), "Synchronize GPU after warmup kernel runs")
+                ("sync-after-warmups",       po::value<bool>()->default_value(true), "Synchronize GPU after warmup kernel runs (ignored when nothing is timed)")
                 ("num-benchmarks",           po::value<int>()->default_value(1), "Number of benchmarks to run")
                 ("num-enqueues-per-sync",    po::value<int>()->default_value(1), "Enqueues per sync, will affect by min-flops-per-sync")
                 ("max-enqueues-per-sync",    po::value<int>()->default_value(-1), "Max Enqueues per sync, will affect by min-flops-per-sync")

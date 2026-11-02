@@ -212,13 +212,22 @@ TEST(BenchmarkTimerNothingIsTimed, CapsAndNegativeValues)
     EXPECT_FALSE(BenchmarkTimer::nothingIsTimed(timingArgs(1, -1, -1, 0)));
 }
 
-// Warmup events are dropped only when nothing is timed, the skip-slow ratio is 0 and
-// sync-after-warmups is off; any one reader keeps them.
+// Warmup events are dropped when nothing is timed and the skip-slow ratio is 0;
+// sync-after-warmups is ignored when nothing is timed, so it no longer keeps them.
 TEST(BenchmarkTimerReadsWarmupEvents, NothingTimedSkipSlowSyncAfterWarmups)
 {
     EXPECT_FALSE(BenchmarkTimer::readsWarmupEvents(warmupArgs(0, 0.0f, false)));
     EXPECT_TRUE(BenchmarkTimer::readsWarmupEvents(warmupArgs(0, 0.5f, false)));
-    EXPECT_TRUE(BenchmarkTimer::readsWarmupEvents(warmupArgs(0, 0.0f, true)));
+    EXPECT_FALSE(BenchmarkTimer::readsWarmupEvents(warmupArgs(0, 0.0f, true)));
     EXPECT_TRUE(BenchmarkTimer::readsWarmupEvents(warmupArgs(1, 0.0f, false)));
     EXPECT_TRUE(BenchmarkTimer::readsWarmupEvents(warmupArgs(1, 0.5f, true)));
+}
+
+// sync-after-warmups only takes effect when something is timed.
+TEST(BenchmarkTimerSyncsAfterWarmups, IgnoredWhenNothingIsTimed)
+{
+    EXPECT_FALSE(BenchmarkTimer::syncsAfterWarmups(warmupArgs(0, 0.0f, true)));
+    EXPECT_FALSE(BenchmarkTimer::syncsAfterWarmups(warmupArgs(0, 0.5f, true)));
+    EXPECT_TRUE(BenchmarkTimer::syncsAfterWarmups(warmupArgs(1, 0.0f, true)));
+    EXPECT_FALSE(BenchmarkTimer::syncsAfterWarmups(warmupArgs(1, 0.0f, false)));
 }

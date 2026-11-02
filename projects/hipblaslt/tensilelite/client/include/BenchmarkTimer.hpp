@@ -58,8 +58,12 @@ namespace TensileLite
             // or no enqueues requested either by count or by flops.
             static bool nothingIsTimed(po::variables_map const& args);
 
+            // True when validateWarmups waits for the last warmup: sync-after-warmups is set
+            // and something is timed. With nothing timed the sync protects nothing.
+            static bool syncsAfterWarmups(po::variables_map const& args);
+
             // True when the warmup timing events may be read: postWarmup reads them when the
-            // skip-slow ratio is set, validateWarmups under sync-after-warmups. Kept whenever
+            // skip-slow ratio is set, validateWarmups when syncsAfterWarmups(). Kept whenever
             // something is timed.
             static bool readsWarmupEvents(po::variables_map const& args);
 

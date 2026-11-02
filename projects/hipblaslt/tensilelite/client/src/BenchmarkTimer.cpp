@@ -127,7 +127,7 @@ namespace TensileLite
                                        float                                       flushTimeUs,
                                        std::vector<std::shared_ptr<DeviceContext>> devices)
             : m_numWarmups(args["num-warmups"].as<int>())
-            , m_syncAfterWarmups(args["sync-after-warmups"].as<bool>())
+            , m_syncAfterWarmups(syncsAfterWarmups(args))
             , m_numBenchmarks(args["num-benchmarks"].as<int>())
             , m_numEnqueuesPerSync(args["num-enqueues-per-sync"].as<int>())
             , m_maxEnqueuesPerSync(args["max-enqueues-per-sync"].as<int>())
@@ -162,10 +162,17 @@ namespace TensileLite
                        && args["min-flops-per-sync"].as<size_t>() == 0);
         }
 
+        bool BenchmarkTimer::syncsAfterWarmups(po::variables_map const& args)
+        {
+            // The sync only makes sure the warmups have finished before the timed runs start.
+            // With nothing timed it protects nothing, so sync-after-warmups is ignored.
+            return args["sync-after-warmups"].as<bool>() && !nothingIsTimed(args);
+        }
+
         bool BenchmarkTimer::readsWarmupEvents(po::variables_map const& args)
         {
             return !nothingIsTimed(args) || args["skip-slow-solution-ratio"].as<float>() != 0
-                   || args["sync-after-warmups"].as<bool>();
+                   || syncsAfterWarmups(args);
         }
 
         bool BenchmarkTimer::needMoreBenchmarkRuns() const
