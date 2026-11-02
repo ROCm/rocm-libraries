@@ -164,8 +164,12 @@ labels tests after registration and must execute in the same CMake directory
 scope. Use `include()`, not `add_subdirectory()`: with the project's pre-3.28
 CMake minimum, test properties can only be changed from the directory that
 called `add_test()`. Installed Python and library CTest entries still belong in
-`platform/CMakeLists.txt`. The ownership map and inventory-comparison recipe are
-in [`tests/README.md`](tests/README.md#cmake-registration-ownership).
+`platform/CMakeLists.txt`. Their `ENVIRONMENT` properties are external contracts:
+keep tool discovery separate from skip/fail policy, scope policy variables to the
+tests that consume them, and run the focused contract test after changing them.
+See [installed CTest environment contracts](../TESTING.md#514-installed-ctest-environment-contracts).
+The ownership map and inventory-comparison recipe are in
+[`tests/README.md`](tests/README.md#cmake-registration-ownership).
 
 Before updating a PR, run the top-level pre-commit hooks over the PR range from
 the repository root:

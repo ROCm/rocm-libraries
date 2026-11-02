@@ -40,9 +40,11 @@ const char* toString(LaneVerdict verdict);
 
 /// `bundleId` is "<suiteName>.<testName>": the cost gate reads its tier prefix, and
 /// knownReferenceGaps() is keyed on it.
+/// `gaps` defaults to knownReferenceGaps(); tests pass their own table.
 LaneVerdict judgeLane(const IntegrationTestBundle& bundle,
                       const std::string& bundleId,
-                      ReferenceExecutorType reference);
+                      ReferenceExecutorType reference,
+                      const std::vector<KnownReferenceGap>& gaps = knownReferenceGaps());
 
 /// The session facts a plan depends on: which lanes --reference selected, and
 /// whether the GPU one will actually execute.
@@ -53,6 +55,8 @@ struct GoldenDataSession
     /// A GPU lane with no device SKIP_IF_NO_DEVICES()s every test in SetUp(), so a
     /// selected but device-less GPU lane covers nothing.
     bool gpuHasDevice = false;
+    /// The gap table to plan against; null means knownReferenceGaps().
+    const std::vector<KnownReferenceGap>* gaps = nullptr;
 
     bool gpuLaneRuns() const
     {
