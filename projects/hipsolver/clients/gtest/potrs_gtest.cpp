@@ -275,3 +275,77 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          POTRS_COMPAT,
                          Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));
+
+// hipsolverDnXpotrs must set info, which rocsolver_Xpotrs_64 does not take.
+class checkin_misc_POTRS_64 : public ::testing::Test
+{
+protected:
+    void TearDown() override
+    {
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
+    }
+};
+
+TEST_F(checkin_misc_POTRS_64, info_is_set)
+{
+    const int64_t n = 2, nrhs = 1;
+    double        hA[4] = {4, 1, 1, 3}; // SPD, column-major
+    double        hB[2] = {1, 2};
+    double *      dA, *dB;
+    int*          dInfo;
+    int           info = -99;
+
+    ASSERT_EQ(hipMalloc(&dA, sizeof(hA)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dB, sizeof(hB)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dInfo, sizeof(int)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dA, hA, sizeof(hA), hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dB, hB, sizeof(hB), hipMemcpyHostToDevice), hipSuccess);
+
+    hipsolverDnHandle_t handle;
+    hipsolverDnParams_t params;
+    EXPECT_ROCBLAS_STATUS(hipsolverDnCreate(&handle), HIPSOLVER_STATUS_SUCCESS);
+    EXPECT_ROCBLAS_STATUS(hipsolverDnCreateParams(&params), HIPSOLVER_STATUS_SUCCESS);
+
+    EXPECT_ROCBLAS_STATUS(hipsolverDnXpotrf(handle,
+                                            params,
+                                            HIPSOLVER_FILL_MODE_LOWER,
+                                            n,
+                                            HIP_R_64F,
+                                            dA,
+                                            n,
+                                            HIP_R_64F,
+                                            nullptr,
+                                            0,
+                                            nullptr,
+                                            0,
+                                            dInfo),
+                          HIPSOLVER_STATUS_SUCCESS);
+
+    // a value potrs must overwrite
+    ASSERT_EQ(hipMemcpy(dInfo, &info, sizeof(int), hipMemcpyHostToDevice), hipSuccess);
+    EXPECT_ROCBLAS_STATUS(hipsolverDnXpotrs(handle,
+                                            params,
+                                            HIPSOLVER_FILL_MODE_LOWER,
+                                            n,
+                                            nrhs,
+                                            HIP_R_64F,
+                                            dA,
+                                            n,
+                                            HIP_R_64F,
+                                            dB,
+                                            n,
+                                            dInfo),
+                          HIPSOLVER_STATUS_SUCCESS);
+    ASSERT_EQ(hipMemcpy(&info, dInfo, sizeof(int), hipMemcpyDeviceToHost), hipSuccess);
+    ASSERT_EQ(hipMemcpy(hB, dB, sizeof(hB), hipMemcpyDeviceToHost), hipSuccess);
+
+    EXPECT_EQ(info, 0);
+    EXPECT_NEAR(hB[0], 1.0 / 11, 1e-12);
+    EXPECT_NEAR(hB[1], 7.0 / 11, 1e-12);
+
+    EXPECT_ROCBLAS_STATUS(hipsolverDnDestroyParams(params), HIPSOLVER_STATUS_SUCCESS);
+    EXPECT_ROCBLAS_STATUS(hipsolverDnDestroy(handle), HIPSOLVER_STATUS_SUCCESS);
+    ASSERT_EQ(hipFree(dA), hipSuccess);
+    ASSERT_EQ(hipFree(dB), hipSuccess);
+    ASSERT_EQ(hipFree(dInfo), hipSuccess);
+}
