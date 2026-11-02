@@ -3403,7 +3403,7 @@ static rocke_kernel_def_t*
         }
     }
 
-    rocke_coalesced_tile_loader_t a_sync_loader;
+    rocke_coalesced_tile_loader_t a_sync_loader{};
     a_sync_loader.tile_rows = block_m;
     a_sync_loader.tile_cols = block_k;
     a_sync_loader.block_size = threads;
@@ -3417,7 +3417,7 @@ static rocke_kernel_def_t*
     a_sync_loader.has_col_xor = false;
     a_sync_loader.elem_dtype = ab_ir; /* elem_dtype=ir_dtype_a */
 
-    rocke_coalesced_tile_loader_t b_sync_loader;
+    rocke_coalesced_tile_loader_t b_sync_loader{};
     b_sync_loader.tile_rows = spec->lds_k_outer ? block_k : block_n;
     b_sync_loader.tile_cols = spec->lds_k_outer ? block_n : block_k;
     b_sync_loader.block_size = threads;
@@ -3432,8 +3432,8 @@ static rocke_kernel_def_t*
     b_sync_loader.elem_dtype = b_ir; /* elem_dtype=ir_dtype_b */
 
     // ---- wavelet loaders (pipeline="wavelet" only) ----
-    rocke_coalesced_tile_loader_t a_wavelet_loader;
-    rocke_coalesced_tile_loader_t b_wavelet_loader;
+    rocke_coalesced_tile_loader_t a_wavelet_loader{};
+    rocke_coalesced_tile_loader_t b_wavelet_loader{};
     rocke_value_t* wavelet_is_math = NULL;
     rocke_value_t* wavelet_load_tid = NULL;
     int wavelet_epi_barriers = 0;

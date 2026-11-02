@@ -307,7 +307,7 @@ rocke_value_t* rocke_dfcp_load_conv1_weights_to_lds(rocke_ir_builder_t* b,
 {
     int shape[2];
     rocke_value_t* w1_smem;
-    rocke_coalesced_tile_loader_t loader;
+    rocke_coalesced_tile_loader_t loader{};
     dfcp_w1_desc_env_t env;
     int K0;
     int K1;

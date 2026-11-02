@@ -610,6 +610,8 @@ def _spec_raw(idx: int):
         return _mfma_gate_spec(idx)
     if 82 <= idx <= 85:
         return _tf32_split_k_spec(idx)
+    if idx >= 54 + _GFX942_3D_OFFSET:
+        return _gfx942_3d_spec(idx - _GFX942_3D_OFFSET)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -927,6 +929,67 @@ def _tf32_split_k_spec(idx: int):
         )
     spec, arch = _tf32_spec({82: 54, 83: 56}[idx])
     return replace(spec, split_k=2), arch
+# gfx942 (wave64 MFMA) 3-D NDHWC configs on the 3x3x3 / pad-1 problem the
+# AOT cache builds its 3-D binaries against: the 3-D split A/B addressing
+# (every non-pointwise 3-D spec), bf16 operands through the MFMA path, and the
+# opt-in K-loop knobs layered on top. Keep in lockstep with make_cfg_3d() in
+# conv_implicit_gemm_emit.c. The numbers below are _gfx942_3d_spec's own; it
+# serves parity config N as its config N - _GFX942_3D_OFFSET (they follow the
+# TF32 and MFMA split-K configs 54-85).
+#   54: fp16, groups=1, t256x64x32 w4x1 a16x16x16, mem/cshuffle
+#   55: bf16, groups=2, t256x64x32 w4x1 a16x16x16, mem/cshuffle
+#   56: bf16, groups=1, stride 2, t128x128x32 w2x2 a32x32x8, mem/default
+#   57: bf16, groups=2, 1x1x1 pointwise (no split addressing), t128x64x32 w2x2
+_GFX942_3D_OFFSET = 32
+
+
+def _gfx942_3d_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    def prob(groups=1, f=3, s=1):
+        pad = (f - 1) // 2
+        return ConvProblem(
+            N=1, Di=16, Hi=16, Wi=16, C=128, K=128, Z=f, Y=f, X=f,
+            sD=s, sH=s, sW=s, pD=pad, pH=pad, pW=pad, dD=1, dH=1, dW=1,
+            groups=groups,
+        )
+
+    def data(dt):
+        return ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
+
+    t256 = dict(
+        tile_m=256, tile_n=64, tile_k=32, warp_m=4, warp_n=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        vector_size_a=8, vector_size_b=8, vector_size_c=8,
+        pipeline="mem", epilogue="cshuffle",
+    )
+    cfgs = {
+        54: (prob(), "fp16", t256),
+        55: (prob(groups=2), "bf16", t256),
+        56: (
+            prob(s=2),
+            "bf16",
+            dict(
+                tile_m=128, tile_n=128, tile_k=32, warp_m=2, warp_n=2,
+                warp_tile_m=32, warp_tile_n=32, warp_tile_k=8,
+                pipeline="mem", epilogue="default",
+            ),
+        ),
+        57: (
+            prob(groups=2, f=1),
+            "bf16",
+            dict(
+                tile_m=128, tile_n=64, tile_k=32, warp_m=2, warp_n=2,
+                warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+                vector_size_a=8, vector_size_b=8, vector_size_c=8,
+                pipeline="mem", epilogue="cshuffle",
+            ),
+        ),
+    }
+    if idx not in cfgs:
+        raise SystemExit(f"unknown config index {idx}")
+    p, dt, kw = cfgs[idx]
+    return ImplicitGemmConvSpec(problem=p, data=data(dt), **kw), "gfx942"
 
 
 def main() -> int:

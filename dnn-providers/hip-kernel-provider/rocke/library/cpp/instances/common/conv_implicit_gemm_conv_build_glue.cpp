@@ -896,9 +896,27 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* ---- A/B addressing split (Python: the `if split_ab:` block) ----
      * Loop-invariant constants the split descriptors read; every operand is
      * bound to a temporary in Python's left-to-right order. */
-    ctx->split_ab = !ctx->is_pointwise && !spec->problem.is_3d
-                    && !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
-    if(ctx->split_ab)
+    ctx->split_ab = !ctx->is_pointwise
+                    && !(overrides != NULL && overrides->a_mhw_index_fn != NULL)
+                    && !(spec->problem.is_3d && ctx->merged);
+    ctx->split_neg_pD = NULL;
+    ctx->split_zstep = NULL;
+    if(ctx->split_ab && spec->problem.is_3d)
+    {
+        /* 3-D: the same row/k split with the depth axis added. A K tile moves
+         * only the k part (one 24-bit decode of k into (z, y, x, c) per load
+         * plus three stride steps); the (n, do, ho, wo) magic divisions and the
+         * (di, hi, wi) origin are per loader row and hoisted. */
+        ctx->split_neg_pD = rocke_b_sub(b, ctx->c0, ctx->p_pD);
+        ctx->split_neg_pH = rocke_b_sub(b, ctx->c0, ctx->p_pH);
+        ctx->split_neg_pW = rocke_b_sub(b, ctx->c0, ctx->p_pW);
+        ctx->split_zstep = rocke_b_mul(b, ctx->p_dD, ctx->p_A_stride_di);
+        ctx->split_ystep = rocke_b_mul(b, ctx->p_dH, ctx->p_A_stride_hi);
+        ctx->split_xstep = rocke_b_mul(b, ctx->p_dW, ctx->p_A_stride_wi);
+        ctx->split_group_base
+            = ctx->group_idx != NULL ? rocke_b_mul(b, ctx->group_idx, ctx->p_cpg) : NULL;
+    }
+    else if(ctx->split_ab)
     {
         ctx->split_neg_pH = rocke_b_sub(b, ctx->c0, ctx->p_pH);
         ctx->split_neg_pW = rocke_b_sub(b, ctx->c0, ctx->p_pW);

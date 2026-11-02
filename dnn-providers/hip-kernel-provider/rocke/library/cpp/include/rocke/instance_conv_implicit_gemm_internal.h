@@ -591,6 +591,10 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* split_ystep; /* dH * A_stride_hi */
     rocke_value_t* split_xstep; /* dW * A_stride_wi */
     rocke_value_t* split_group_base; /* group_idx * cpg (c_gm merged), NULL when ungrouped */
+    /* 3-D split addressing (Python: the `if split_ab and p.is_3d:` block): the
+     * depth origin's -pD and one filter-depth step dD * A_stride_di. NULL on 2-D. */
+    rocke_value_t* split_neg_pD;
+    rocke_value_t* split_zstep;
 } rocke_conv_build_ctx_t;
 
 /* Python mul_u24: x * y with both operands masked to 24 bits so the backend

@@ -44,6 +44,26 @@ static rocke_value_t* conv_a_offset_split(rocke_conv_build_ctx_t* ctx,
                                           rocke_value_t* m_val,
                                           rocke_value_t* k_val,
                                           rocke_value_t** out_valid);
+static void conv_k_decode3_at(rocke_conv_build_ctx_t* ctx,
+                              rocke_value_t* col,
+                              rocke_value_t** z,
+                              rocke_value_t** y,
+                              rocke_value_t** x,
+                              rocke_value_t** c);
+static rocke_value_t* conv_a_offset_split3(rocke_conv_build_ctx_t* ctx,
+                                           rocke_value_t* m_val,
+                                           rocke_value_t* z,
+                                           rocke_value_t* y,
+                                           rocke_value_t* x,
+                                           rocke_value_t* c,
+                                           rocke_value_t** out_valid);
+static rocke_value_t* conv_b_offset_split3(rocke_conv_build_ctx_t* ctx,
+                                           rocke_value_t* k_out,
+                                           rocke_value_t* z,
+                                           rocke_value_t* y,
+                                           rocke_value_t* x,
+                                           rocke_value_t* c,
+                                           rocke_value_t** out_valid);
 static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
                                           rocke_value_t* k_out,
                                           rocke_value_t* kg,
@@ -344,7 +364,16 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
         m_val = rocke_b_add(b, ctx->block_m_off_v, row);
 
     if(ctx->split_ab)
+    {
+        if(ctx->split_zstep != NULL)
+        {
+            /* a_offset_split3(b_, m_val, k_decode3_at(b_, col)) */
+            rocke_value_t *z, *y, *x, *c;
+            conv_k_decode3_at(ctx, col, &z, &y, &x, &c);
+            return conv_a_offset_split3(ctx, m_val, z, y, x, c, out_valid);
+        }
         return conv_a_offset_split(ctx, m_val, k_val, out_valid);
+    }
 
     if(ctx->group_idx != NULL)
     {
@@ -481,6 +510,125 @@ static rocke_value_t* conv_a_offset_split(rocke_conv_build_ctx_t* ctx,
     return off;
 }
 
+/* Python k_decode3 (fwd, 3-D): k -> (z, y, x, c) through the runtime magic
+ * pairs for cpg, X and Y, with 24-bit remainder products. */
+static void conv_k_decode3(rocke_conv_build_ctx_t* ctx,
+                           rocke_value_t* k_val,
+                           rocke_value_t** z,
+                           rocke_value_t** y,
+                           rocke_value_t** x,
+                           rocke_value_t** c)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t *q_c, *q_x;
+    rocke_conv_magic_divmod(
+        b, k_val, ctx->p_magic_k_cpg_mult, ctx->p_magic_k_cpg_shift, ctx->p_cpg, true, &q_c, c);
+    rocke_conv_magic_divmod(
+        b, q_c, ctx->p_magic_k_X_mult, ctx->p_magic_k_X_shift, ctx->p_X, true, &q_x, x);
+    rocke_conv_magic_divmod(
+        b, q_x, ctx->p_magic_k_Y_mult, ctx->p_magic_k_Y_shift, ctx->p_Y, true, z, y);
+}
+
+/* Python k_decode3_at: (z, y, x, c) of reduction index k_off + col of the
+ * current tile. Every element decodes its own index. */
+static void conv_k_decode3_at(rocke_conv_build_ctx_t* ctx,
+                              rocke_value_t* col,
+                              rocke_value_t** z,
+                              rocke_value_t** y,
+                              rocke_value_t** x,
+                              rocke_value_t** c)
+{
+    rocke_value_t* k = rocke_b_add(ctx->b, ctx->k_off_capture, col);
+    conv_k_decode3(ctx, k, z, y, x, c);
+}
+
+/* Python a_offset_split3: the row part (m -> (n, do, ho, wo), the (di, hi, wi)
+ * origin, the base offset) and the k part (z, y, x, c) decoded by the caller. */
+static rocke_value_t* conv_a_offset_split3(rocke_conv_build_ctx_t* ctx,
+                                           rocke_value_t* m_val,
+                                           rocke_value_t* z,
+                                           rocke_value_t* y,
+                                           rocke_value_t* x,
+                                           rocke_value_t* c,
+                                           rocke_value_t** out_valid)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t *q_wo, *wo, *q_ho, *ho, *n, *do_;
+    rocke_conv_magic_divmod(
+        b, m_val, ctx->p_magic_m_Wo_mult, ctx->p_magic_m_Wo_shift, ctx->p_Wo, false, &q_wo, &wo);
+    rocke_conv_magic_divmod(
+        b, q_wo, ctx->p_magic_m_Ho_mult, ctx->p_magic_m_Ho_shift, ctx->p_Ho, false, &q_ho, &ho);
+    rocke_conv_magic_divmod(
+        b, q_ho, ctx->p_magic_m_Do_mult, ctx->p_magic_m_Do_shift, ctx->p_Do, false, &n, &do_);
+    rocke_value_t* do_s = rocke_b_mul(b, do_, ctx->p_sD);
+    rocke_value_t* di0 = rocke_b_add(b, do_s, ctx->split_neg_pD);
+    rocke_value_t* ho_s = rocke_b_mul(b, ho, ctx->p_sH);
+    rocke_value_t* hi0 = rocke_b_add(b, ho_s, ctx->split_neg_pH);
+    rocke_value_t* wo_s = rocke_b_mul(b, wo, ctx->p_sW);
+    rocke_value_t* wi0 = rocke_b_add(b, wo_s, ctx->split_neg_pW);
+    rocke_value_t* n_off = rocke_b_mul(b, n, ctx->p_A_stride_n);
+    rocke_value_t* di_off = rocke_b_mul(b, di0, ctx->p_A_stride_di);
+    rocke_value_t* base = rocke_b_add(b, n_off, di_off);
+    rocke_value_t* hi_off = rocke_b_mul(b, hi0, ctx->p_A_stride_hi);
+    base = rocke_b_add(b, base, hi_off);
+    rocke_value_t* wi_off = rocke_b_mul(b, wi0, ctx->p_A_stride_wi);
+    base = rocke_b_add(b, base, wi_off);
+    if(ctx->split_group_base != NULL)
+        base = rocke_b_add(b, base, ctx->split_group_base);
+
+    rocke_value_t* z_dd = rocke_b_mul(b, z, ctx->p_dD);
+    rocke_value_t* di = rocke_b_add(b, di0, z_dd);
+    rocke_value_t* y_dh = rocke_b_mul(b, y, ctx->p_dH);
+    rocke_value_t* hi = rocke_b_add(b, hi0, y_dh);
+    rocke_value_t* x_dw = rocke_b_mul(b, x, ctx->p_dW);
+    rocke_value_t* wi = rocke_b_add(b, wi0, x_dw);
+    rocke_value_t* di_ge = rocke_b_cmp_ge(b, di, ctx->c0);
+    rocke_value_t* di_lt = rocke_b_cmp_lt(b, di, ctx->p_Di);
+    rocke_value_t* di_ok = rocke_b_land(b, di_ge, di_lt);
+    rocke_value_t* hi_ge = rocke_b_cmp_ge(b, hi, ctx->c0);
+    rocke_value_t* hi_lt = rocke_b_cmp_lt(b, hi, ctx->p_Hi);
+    rocke_value_t* hi_ok = rocke_b_land(b, hi_ge, hi_lt);
+    rocke_value_t* dh_ok = rocke_b_land(b, di_ok, hi_ok);
+    rocke_value_t* wi_ge = rocke_b_cmp_ge(b, wi, ctx->c0);
+    rocke_value_t* wi_lt = rocke_b_cmp_lt(b, wi, ctx->p_Wi);
+    rocke_value_t* wi_ok = rocke_b_land(b, wi_ge, wi_lt);
+    rocke_value_t* ok = rocke_b_land(b, dh_ok, wi_ok);
+    rocke_value_t* z_ok = rocke_b_cmp_lt(b, z, ctx->p_Z);
+    ok = rocke_b_land(b, ok, z_ok);
+    rocke_value_t* z_off = rocke_b_mul(b, z, ctx->split_zstep);
+    rocke_value_t* off = rocke_b_add(b, base, z_off);
+    rocke_value_t* y_off = rocke_b_mul(b, y, ctx->split_ystep);
+    off = rocke_b_add(b, off, y_off);
+    rocke_value_t* x_off = rocke_b_mul(b, x, ctx->split_xstep);
+    off = rocke_b_add(b, off, x_off);
+    off = rocke_b_add(b, off, c);
+    *out_valid = ok;
+    return off;
+}
+
+/* Python b_offset_split3: k_out*stride_k + z*stride_z + y*stride_y + x*stride_x
+ * + c, the filter strides through 24-bit multiplies. */
+static rocke_value_t* conv_b_offset_split3(rocke_conv_build_ctx_t* ctx,
+                                           rocke_value_t* k_out,
+                                           rocke_value_t* z,
+                                           rocke_value_t* y,
+                                           rocke_value_t* x,
+                                           rocke_value_t* c,
+                                           rocke_value_t** out_valid)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* base = rocke_b_mul(b, k_out, ctx->p_B_stride_k);
+    rocke_value_t* z_off = rocke_conv_mul_u24(b, z, ctx->p_B_stride_z);
+    rocke_value_t* off = rocke_b_add(b, base, z_off);
+    rocke_value_t* y_off = rocke_conv_mul_u24(b, y, ctx->p_B_stride_y);
+    off = rocke_b_add(b, off, y_off);
+    rocke_value_t* x_off = rocke_conv_mul_u24(b, x, ctx->p_B_stride_x);
+    off = rocke_b_add(b, off, x_off);
+    off = rocke_b_add(b, off, c);
+    *out_valid = rocke_b_cmp_lt(b, z, ctx->p_Z);
+    return off;
+}
+
 /* Python b_offset_split: k_out*stride_k + y*stride_y + x*stride_x + c, the
  * filter strides through 24-bit multiplies. */
 static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
@@ -538,7 +686,16 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
     }
 
     if(ctx->split_ab)
+    {
+        if(ctx->split_zstep != NULL)
+        {
+            /* b_offset_split3(b_, k_out, k_decode3_at(b_, col)) */
+            rocke_value_t *z, *y, *x, *c;
+            conv_k_decode3_at(ctx, col, &z, &y, &x, &c);
+            return conv_b_offset_split3(ctx, k_out, z, y, x, c, out_valid);
+        }
         return conv_b_offset_split(ctx, k_out, kg, out_valid);
+    }
 
     const char* names[2] = {"k_out", "k_gemm"};
     rocke_value_t* vals[2] = {k_out, kg};

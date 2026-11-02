@@ -800,6 +800,92 @@ static int make_cfg_tf32_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec,
     return 0;
 }
 
+/* gfx942 (wave64 MFMA) 3-D NDHWC configs: the 3x3x3 / pad-1 problem the
+ * AOT cache builds its 3-D binaries against. Keep in lockstep with
+ * _gfx942_3d_spec() in conv_implicit_gemm_emit.py (the index table is there).
+ * make_cfg_3d numbers them from 54; parity config N is its config
+ * N - GFX942_3D_OFFSET (they follow the TF32 and MFMA split-K configs 54-85). */
+#define GFX942_3D_OFFSET 32
+
+static rocke_conv_problem_t problem_3d(int groups, int f, int s)
+{
+    int pad = (f - 1) / 2;
+    rocke_conv_problem_t p = rocke_conv_problem_make_3d(
+        1, 16, 16, 16, 128, 128, f, f, f, s, s, s, pad, pad, pad, 1, 1, 1);
+    p.groups = groups;
+    return p;
+}
+
+static void set_dtype(rocke_implicit_gemm_conv_spec_t* spec, const char* dt)
+{
+    spec->dtype_a = dt;
+    spec->dtype_b = dt;
+    spec->dtype_d = dt;
+}
+
+static void set_t256(rocke_implicit_gemm_conv_spec_t* spec)
+{
+    spec->tile_m = 256;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 4;
+    spec->warp_n = 1;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 16;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 8;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+}
+
+static int make_cfg_3d(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    *arch = "gfx942";
+    switch(idx)
+    {
+    case 54:
+        spec->problem = problem_3d(1, 3, 1);
+        set_dtype(spec, "fp16");
+        set_t256(spec);
+        return 0;
+    case 55:
+        spec->problem = problem_3d(2, 3, 1);
+        set_dtype(spec, "bf16");
+        set_t256(spec);
+        return 0;
+    case 56:
+        spec->problem = problem_3d(1, 3, 2);
+        set_dtype(spec, "bf16");
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 8;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        return 0;
+    case 57:
+        spec->problem = problem_3d(2, 1, 1);
+        set_dtype(spec, "bf16");
+        set_t256(spec);
+        spec->tile_m = 128;
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -830,6 +916,11 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
     else if(idx >= 82 && idx <= 85)
     {
         if(make_cfg_tf32_split_k(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 54 + GFX942_3D_OFFSET)
+    {
+        if(make_cfg_3d(idx - GFX942_3D_OFFSET, spec, arch) != 0)
             return -1;
     }
     else if(make_cfg_raw(idx, spec, arch) != 0)
