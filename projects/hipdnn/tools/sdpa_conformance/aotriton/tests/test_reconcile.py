@@ -553,3 +553,157 @@ def test_candidate_passes_have_their_own_slug_and_accounting_lines(tmp_path):
         "main: expected 2, recorded 2",
         f"{rel}: expected 2, recorded 1 (1 not-run)",
     ]
+
+
+# ------------------------------------------------------------------ run directories and the report
+
+
+def real_shard(root, name, rows, collected):
+    """A shard directory as `run_aotriton.py --out` leaves it under ``results/<run>/<suite>-<k>of<N>``."""
+    return write_pass(root / name, "", {}, rows, collected)
+
+
+@pytest.mark.parametrize("names", [["default-1of2", "forward-2of2"], ["shard-1of2"]])
+def test_reconcile_reads_every_shard_directory_naming(tmp_path, names):
+    for i, name in enumerate(names):
+        real_shard(tmp_path, name, [row(f"a::t{i}")], [f"a::t{i}", f"a::x{i}"])
+    (tmp_path / "logs").mkdir()  # not a shard
+    got = by_id(reconcile.reconcile(tmp_path))
+    assert {v["outcome"] for v in got.values()} == {"pass", "not-run"}
+    assert len(got) == 2 * len(names)
+
+
+def test_shards_sort_by_number_not_by_text(tmp_path):
+    for k in (10, 2, 1):
+        (tmp_path / f"default-{k}of16").mkdir()
+    assert [d.name for d in reconcile.shard_dirs(tmp_path)] == [
+        "default-1of16",
+        "default-2of16",
+        "default-10of16",
+    ]
+
+
+def test_a_run_directory_without_shards_is_an_error_not_an_empty_result(
+    tmp_path, capsys
+):
+    (tmp_path / "logs").mkdir()
+    with pytest.raises(FileNotFoundError, match="no shard directories"):
+        reconcile.reconcile(tmp_path)
+    assert reconcile.main([str(tmp_path)]) == 2
+    assert "no shard directories" in capsys.readouterr().err
+
+
+def test_a_shards_file_names_the_expected_shards(tmp_path):
+    f = tmp_path / "shards.txt"
+    f.write_text("# bwd\ndefault 1 2\n\nforward 2 2 \n")
+    assert reconcile.read_shards_file(f) == ["default-1of2", "forward-2of2"]
+
+
+BWD = [f"v/test_backward.py::b{i}" for i in range(1, 6)]
+
+
+@pytest.fixture
+def two_shard_run(tmp_path):
+    """default-1of3: b1 pass, b2 fail (repro), b3 never ran, plus a bwd sweep of X that lost b2;
+    default-2of3: b4 crash, b5 pass; default-3of3 has no directory."""
+    run = tmp_path / "bwd2"
+    one = real_shard(
+        run, "default-1of3",
+        [row(BWD[0], bwd="hipdnn:X", bwd_engines="X;Y"),
+         row(BWD[1], "fail", bwd="hipdnn:Y", bwd_engines="X;Y", fail_side="bwd",
+             stage="execute", repro="repro/abc-main", reason="Backward dq is_allclose=False")],
+        BWD[:3],
+    )  # fmt: skip
+    write_pass(
+        one, "all-engines/bwd/X", {"kind": "sweep", "direction": "bwd", "pin_bwd": "X"},
+        [row(BWD[1], bwd="hipdnn:X")], [BWD[1]],
+    )  # fmt: skip
+    (one / "engine-inventory.txt").write_text("X\nY\nZ\n")
+    real_shard(
+        run, "default-2of3",
+        [row(BWD[3], "crash", bwd="hipdnn:X", fail_side="bwd", stage="execute",
+             reason="worker crashed (pid 9)"),
+         row(BWD[4], bwd="hipdnn:Y")],
+        BWD[3:],
+    )  # fmt: skip
+    (run / "default-2of3" / "declines").mkdir()
+    (run / "default-2of3" / "declines" / "gw0.jsonl").write_text(
+        json.dumps({"engine": "Z", "line": "Z: head_dim 192", "nodeid": BWD[3]}) + "\n"
+    )
+    (tmp_path / "shards.txt").write_text("default 1 3\ndefault 2 3\ndefault 3 3\n")
+    (tmp_path / "baseline.txt").write_text(
+        f"# Brian\n{BWD[1]}\nv/test_backward.py::gone\n"
+    )
+    return run
+
+
+def test_report_totals_per_shard_accounting_and_missing_shards(two_shard_run):
+    text = reconcile.run_report(
+        two_shard_run,
+        expected=reconcile.read_shards_file(two_shard_run.parent / "shards.txt"),
+    )
+    lines = [" ".join(l.split()) for l in text.splitlines()]
+    assert "default-1of3: collected 3, recorded 2, not-run 1" in lines
+    assert "default-2of3: collected 2, recorded 2, not-run 0" in lines
+    assert "default-3of3: MISSING (no shard directory)" in lines
+    assert "5 cases" in lines and "pass 2" in lines and "not-run 1" in lines
+    assert "main: expected 5, recorded 4 (1 not-run)" in lines  # summed over shards
+    assert "bwd/X: expected 1, recorded 1" in lines
+
+
+def test_report_counts_per_engine_across_shards_and_flags_zero_coverage_with_reasons(
+    two_shard_run,
+):
+    text = reconcile.run_report(two_shard_run)
+    lines = [" ".join(l.split()) for l in text.splitlines()]
+    assert (
+        "bwd X: pass=2 fail=0 declined=0 crash=1" in lines
+    )  # b1 + sweep b2 pass, b4 crash
+    assert "bwd Y: pass=1 fail=1 declined=0" in lines
+    assert "bwd -: pass=0 fail=0 declined=0 not-run=1" in lines
+    zero = text[text.index("engines with no pass:") :].splitlines()[0]
+    assert "Z" in zero and "X" not in zero
+    assert (
+        "decline: Z: head_dim 192" in text
+    )  # logged by another shard than the inventory's
+
+
+def test_report_lists_every_failure_with_engine_side_stage_and_repro(two_shard_run):
+    text = reconcile.run_report(two_shard_run)
+    failures = text[text.index("== failures") :]
+    fail = next(l for l in failures.splitlines() if BWD[1] in l)
+    for part in ("fail", "default-1of3", "main", "bwd Y", "side=bwd", "stage=execute",
+                 "repro=default-1of3/repro/abc-main", "is_allclose=False"):  # fmt: skip
+        assert part in fail
+    crash = next(l for l in failures.splitlines() if BWD[3] in l)
+    assert (
+        "crash" in crash
+        and "default-2of3" in crash
+        and "bwd X" in crash
+        and "repro=-" in crash
+    )
+
+
+def test_report_diffs_failing_node_ids_against_a_baseline(two_shard_run):
+    baseline = two_shard_run.parent / "baseline.txt"
+    text = reconcile.run_report(two_shard_run, baseline=baseline)
+    diff = text[text.index("== baseline") :]
+    assert "baseline 2 ids, failing here 2, still failing 1" in " ".join(diff.split())
+    new = diff[diff.index("new failures") :].split("\n\n")[0]
+    assert BWD[3] in new and BWD[1] not in new
+    gone = diff[diff.index("no longer failing") :]
+    assert "v/test_backward.py::gone: not in this run" in gone
+
+
+def test_report_cli_prints_the_report_and_writes_the_reconciled_csv(
+    two_shard_run, tmp_path, capsys
+):
+    out = tmp_path / "all.csv"
+    rc = reconcile.main(
+        [str(two_shard_run), "--report", "--shards-file", str(tmp_path / "shards.txt"),
+         "--baseline", str(tmp_path / "baseline.txt"), "--out", str(out)]
+    )  # fmt: skip
+    assert rc == 0
+    text = capsys.readouterr().out
+    assert "== shards" in text and "== failures" in text and "== baseline" in text
+    assert len(read_rows(out)) == 5
