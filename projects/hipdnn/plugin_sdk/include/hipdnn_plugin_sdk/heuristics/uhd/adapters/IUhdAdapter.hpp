@@ -8,12 +8,48 @@
 #include <stdexcept>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace hipdnn_plugin_sdk::uhd
 {
+
+/// A catalog's feature rows, stored row-major in one buffer the caller owns.
+struct FeatureRows
+{
+    const double* data = nullptr;
+    size_t count = 0; // Rows.
+    size_t width = 0; // Values per row; every row has the same width.
+
+    const double* row(size_t index) const
+    {
+        return data + (index * width);
+    }
+};
+
+/// What scoreBatch returns: one raw score per row and, for a model with an early-exit
+/// schedule, how far each row got.
+///
+/// `stage` is empty when every row was scored by the whole model. Otherwise it holds one
+/// entry per row: the number of early-exit stages the row survived. A row whose entry equals
+/// `stages` was scored by the whole model and its `raw` is a full score. Any smaller entry
+/// marks a row pruned at that stage: its `raw` is a partial sum over the trees it saw, in no
+/// unit, comparable only with rows pruned at the same stage, in the objective's direction.
+/// A ranker places every fully scored row ahead of every pruned row, and later stages ahead
+/// of earlier ones.
+struct BatchScores
+{
+    std::vector<double> raw;
+    std::vector<uint8_t> stage;
+    uint8_t stages = 0;
+
+    bool fullyScored(size_t index) const
+    {
+        return stage.empty() || stage[index] == stages;
+    }
+};
 
 /// @brief Abstract interface for UHD model adapters: scores candidates from feature vectors.
 class IUhdAdapter
@@ -26,15 +62,18 @@ public:
     /// @returns Predicted score; meaning depends on the UHD objective.
     virtual double score(const std::vector<double>& features) const = 0;
 
-    /// Score multiple candidates; the default calls score() per row.
+    /// Score a catalog's rows. The default calls score() per row; adapters whose model
+    /// compares rows (a grouped model's group choice, an early-exit schedule) override it.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-    virtual std::vector<double> scoreBatch(const std::vector<std::vector<double>>& batch) const
+    virtual BatchScores scoreBatch(const FeatureRows& rows) const
     {
-        std::vector<double> results;
-        results.reserve(batch.size());
-        for(const auto& features : batch)
+        BatchScores results;
+        results.raw.reserve(rows.count);
+        std::vector<double> features(rows.width);
+        for(size_t i = 0; i < rows.count; ++i)
         {
-            results.push_back(score(features));
+            features.assign(rows.row(i), rows.row(i) + rows.width);
+            results.raw.push_back(score(features));
         }
         return results;
     }

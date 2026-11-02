@@ -2339,6 +2339,117 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ADegradedRankingReportsNoGroup)
     }
 }
 
+namespace
+{
+
+/// A tree over slot 0 (`$kernel.tile_m`): at or below @p threshold it adds @p low, above it
+/// @p high.
+hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec
+    stepOnTileM(double threshold, double low, double high)
+{
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec spec;
+    spec.featureIndices = {0, 0, 0};
+    spec.thresholds = {threshold, 0.0, 0.0};
+    spec.leftChildren = {1, -1, -1};
+    spec.rightChildren = {2, -1, -1};
+    spec.leafValues = {0.0, low, high};
+    spec.defaultLeft = {1, 1, 1};
+    return spec;
+}
+
+/// A three-tree model whose schedule keeps the best two candidates after its first tree.
+Fixture writeEarlyExitFixture(
+    const std::filesystem::path& dir,
+    const std::vector<hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec>& trees,
+    const std::string& objective)
+{
+    const std::string signatureHash = uhd::FeatureExtractor::computeHash(SIGNATURE);
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder model;
+    model.setFeaturesHash(signatureHash)
+        .setNumFeatures(static_cast<int32_t>(SIGNATURE.size()))
+        .setTrainingArches({"gfx942"})
+        .setEarlyExit({{1, 2}});
+    for(const auto& tree : trees)
+    {
+        model.addTree(tree);
+    }
+    model.buildToFile((dir / "model.bin").string());
+    return {"model.bin", signatureHash, objective, true, "identity", SIGNATURE};
+}
+
+/// tile_m 32, 64, 128, 256. The pruned pair (32, 64) tie on their partial sum, so declared
+/// priority decides between them, which a full score would not: the whole model prefers 64.
+std::vector<KernelDefinition> earlyExitKernels()
+{
+    return {kernelWith(0x01, 32, 10),
+            kernelWith(0x02, 64, 1),
+            kernelWith(0x03, 128, 1),
+            kernelWith(0x04, 256, 1)};
+}
+} // namespace
+
+TEST(TestIngestorUhdKernelHeuristic, PrunedCandidatesRankAfterTheFullyScoredAndReportNoEstimate)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_early_exit_max"));
+    // Whole-model scores: 32 -> 3, 64 -> 4, 128 -> 5, 256 -> 7. After the first tree 128 and 256
+    // lead, so 32 and 64 are pruned with the same partial sum.
+    const auto fixture = writeEarlyExitFixture(
+        dir.path(), {stepOnTileM(96, 1, 2), stepOnTileM(200, 1, 3), stepOnTileM(48, 1, 2)}, "max");
+    const auto heuristic = UhdKernelHeuristic::tryCreate(
+        modelDescriptor(dir.path(), fixture), "test", KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto definitions = earlyExitKernels();
+    const auto catalog = catalogOver(definitions, 2048);
+
+    const auto scored = heuristic->rankScored(catalog, context);
+    ASSERT_EQ(scored.size(), 4U);
+    EXPECT_EQ(scored[0].kernelId, testId(0x04));
+    EXPECT_DOUBLE_EQ(scored[0].score, 7.0);
+    EXPECT_EQ(scored[1].kernelId, testId(0x03));
+    EXPECT_DOUBLE_EQ(scored[1].score, 5.0);
+    // Pruned: ordered by the tied partial sum, then declared priority; no estimate reported.
+    EXPECT_EQ(scored[2].kernelId, testId(0x01));
+    EXPECT_EQ(scored[2].score, 0.0);
+    EXPECT_EQ(scored[3].kernelId, testId(0x02));
+    EXPECT_EQ(scored[3].score, 0.0);
+
+    // The engine's estimate is its best fully scored candidate, never a pruned one's.
+    EXPECT_DOUBLE_EQ(engineEstimate(*heuristic, catalog, context), 7.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, PrunedCandidatesOrderInTheObjectivesDirectionWhenMinimizing)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_early_exit_min"));
+    // Whole-model times: 32 -> 7, 64 -> 6, 128 -> 5, 256 -> 3; lower wins. After the first
+    // tree 128 and 256 lead, so 32 and 64 are pruned.
+    const auto fixture = writeEarlyExitFixture(
+        dir.path(), {stepOnTileM(96, 2, 1), stepOnTileM(200, 3, 1), stepOnTileM(48, 2, 1)}, "min");
+    const auto heuristic = UhdKernelHeuristic::tryCreate(
+        modelDescriptor(dir.path(), fixture), "test", KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties, "time"};
+    const auto definitions = earlyExitKernels();
+    const auto catalog = catalogOver(definitions, 2048);
+
+    const auto scored = heuristic->rankScored(catalog, context);
+    ASSERT_EQ(scored.size(), 4U);
+    EXPECT_EQ(scored[0].kernelId, testId(0x04));
+    EXPECT_EQ(scored[1].kernelId, testId(0x03));
+    EXPECT_EQ(scored[2].kernelId, testId(0x01));
+    EXPECT_EQ(scored[3].kernelId, testId(0x02));
+    EXPECT_EQ(scored[2].score, 0.0);
+    EXPECT_EQ(scored[3].score, 0.0);
+
+    EXPECT_DOUBLE_EQ(engineEstimate(*heuristic, catalog, context), 3.0);
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

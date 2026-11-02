@@ -9,6 +9,9 @@ This tool takes benchmark timing data and produces:
 2. A FlatBuffer model artifact (`model.bin`) for `TreeDataAdapter`
 3. A UHD descriptor (`<stem>.uhd.json`) for the shared plugin-SDK runtime (RFC 0019 §4)
 
+`train --adapter linear_data` produces a RelLin per-configuration linear model and the
+`LinearDataAdapter` artifact instead ([below](#the-linear_data-adapter-rellin)).
+
 Promotion installs that pair into a descriptor tree. Every model -- L1 included -- is
 reached through a reference in its owning UED's role map (RFC 0019 §3.1); a UHD never
 names the engine it serves.
@@ -176,6 +179,11 @@ with its constant value), so the provenance says what was asked for and what nev
 | `--keep-lgbm` | No | Keep intermediate .lgbm file |
 | `--model-encoding` | No | `model.bin` tree encoding: `split_leaf` (default) or `node_arrays`, for a runtime that predates `split_leaf` (see [The `model.bin` encoding](#the-modelbin-encoding)) |
 | `--leaf-precision` | No | `split_leaf` leaf storage: `float32` (default) or `float64` (exact) |
+| `--early-exit` | No | `auto` (default), `none`, or `TREES:KEEP[,TREES:KEEP...]`: the catalog-ranking early-exit schedule written into `model.bin` (see [Early exit](#early-exit)) |
+| `--adapter` | No | Model family: `tree_data` (default) or `linear_data` (see [The `linear_data` adapter](#the-linear_data-adapter-rellin)). `generate` takes the same flag |
+| `--key-features` | No | `linear_data`: the features whose values together identify a kernel configuration (default: every `$kernel.*` reference in the signature) |
+| `--family-features` | No | `linear_data`: a coarser key whose family fit scores a configuration never seen in training (default: none) |
+| `--ridge` / `--min-rows` | No | `linear_data`: ridge strength (default `1e-2`) and the row count below which a configuration is shrunk harder (default `10`) |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 
@@ -1145,6 +1153,58 @@ KMD fields and knobs, or reads a shared-workspace token (`$ws.*`); it also refus
 `test_slotted_sweep.py`) import pandas, pyarrow and lightgbm, which CI does not install: they
 skip there and run only locally.
 
+## The `linear_data` adapter (RelLin)
+
+`python -m uhd_gen train --adapter linear_data ...` fits one ridge regression per kernel
+configuration instead of a tree ensemble. It is a cheap alternative for a small catalog:
+about 50 ns per candidate at run time (one hash lookup and one dot product), and on the
+catalogs it was evaluated on it matched or beat a tuned tree model.
+
+What it predicts. A candidate's score is its **log slowdown against the best candidate of
+the same problem**, `log t - log min t` (or `log max v - log v` for a rate such as TFLOPS),
+so **lower is better** whatever the corpus holds. The descriptor therefore always declares
+`objective: min`, no `score` block and no metric, and the runtime refuses a `linear_data`
+UHD that declares otherwise (RFC 0019 §7.5). Consequences for `train`:
+
+- `--target` and `--objective` name the corpus's own label and its direction (defaults:
+  `tflops`, `max`); the manifest records them and `evaluate` ranks measured values in that
+  direction.
+- `--metric`, `--calibrated`, `--group-by-feature` and `--role predict_engine` are refused:
+  the score is in no physical unit and is not comparable across engines.
+- The target is relative to the best candidate of a problem, so the corpus needs problem
+  identity: `--group-by`, or a `benchmark` column.
+
+How it fits (`rellin.py`, a port of the RelLinX prototype).
+
+- The **key** is the feature slots identifying a configuration: by default every
+  `$kernel.*` reference of the (pruned) signature, or `--key-features`. Every other varying
+  feature is a **basis term**, standardized, `log1p`-transformed when it is non-negative and
+  spans more than 64.
+- Each configuration's coefficients are a ridge fit (`--ridge`, default `1e-2`) shrunk toward
+  its family's (`--family-features`) and, through the family, toward a fit on every row. A
+  configuration with fewer than `--min-rows` (10) rows is shrunk much harder.
+- The **guard**: each basis term is clamped to the range it took in training, and a
+  configuration's prediction is floored at the smallest slowdown it showed in training, so a
+  configuration that was never the best cannot be extrapolated into the winner. A family or
+  the global fit, which describes configurations the corpus never measured, floors at 0.
+
+`model.bin` is a `LinearModel` (`linear_model.fbs`, identifier `HLIN`). Loading it checks, in
+order: the digest, the identifier, the FlatBuffers verifier, `features_hash`, then the model's
+own bounds (every index in range, coefficient and key lengths, finiteness, `scale > 0`,
+`lo <= hi`, unique keys, a global entry). `artifact.load_linear_artifact` repeats those checks
+offline with the runtime's reasons, `promote` runs it before installing, and `evaluate`
+scores the shipped bytes through `evaluate._linear_scorer`, which `TestLinearDataAdapter`
+pins against the C++ adapter on a shared fixture. A linear model can be installed for
+`sort_kernel_catalog` only, and an installed one is never replaced in place by another id's
+promotion (only a `predict_engine` model has that path, and a linear model cannot be one).
+
+```bash
+python -m uhd_gen train --adapter linear_data \
+    --input bench.csv --provenance prov.json \
+    --features kernel.tile kernel.stages q.size \
+    --group-by benchmark device --target avgTimeMs --objective min \
+    --output-dir ./uhd_output
+```
 ## Output
 
 `train` generates:
@@ -1152,7 +1212,7 @@ skip there and run only locally.
 ```
 output_dir/
 ├── <stem>.uhd.json     # the UHD: features, objective, score metric, artifact
-├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter
+├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter (LinearModel for LinearDataAdapter)
 └── train_manifest.json # training provenance
 ```
 
@@ -1228,10 +1288,10 @@ sha256sum model.bin   # equals tree_data.hash, and equals it again on the next c
   `double` and `bool`. A runtime built before `split_leaf` reads only this one: `train` and
   `generate` write it with `--model-encoding node_arrays`.
 
-The runtime reads both. It decodes either one, at load, into the same in-memory nodes the
-tree walk reads, so scoring speed does not depend on the encoding. A tag it does not know (a
-type a later schema adds) is refused by name ("stored as integer array type N, which this
-runtime cannot read") rather than read as another type.
+The runtime reads both. It decodes either one, at load, into the same compiled form, so
+scoring speed does not depend on the encoding. A tag it does not know (a type a later
+schema adds) is refused by name ("stored as integer array type N, which this runtime
+cannot read") rather than read as another type.
 
 Measured on a 500-tree, 127-leaf model with 54 features:
 
@@ -1248,6 +1308,44 @@ below 1.2e-38) is refused when the model is written, with the advice to use
 `--leaf-precision float64`, rather than stored as `inf` or `0`. Thresholds are never
 rounded: a split compares against the value LightGBM chose.
 
+### How the runtime walks a tree
+
+`TreeDataAdapter` compares ranks, not values. At load it sorts each feature's distinct split
+thresholds into a table and stores, per split, its threshold's position `r` there. A row is
+mapped once to positions, one binary search per feature the model reads (a catalog's rows
+share their problem features, so `scoreBatch` reuses the previous row's position when a value
+repeats), and every split then compares two integers: `x <= t[r]` exactly when fewer than
+`r + 1` thresholds lie below `x`, and `x < t[r]` exactly when fewer than `r + 1` lie at or
+below it. NaN and features past a short row's end take the split's default direction.
+Decisions, leaf values and summation order are a direct walk's, so scores are bit for bit
+the same. A compiled split is 16 bytes. On the shipped gfx942 conv fwd model (500 trees ×
+127 leaves), ranking catalogs of 17-400 candidates took 1.8-2.0× less time than the walk
+it replaced, with identical scores.
+
+### Early exit
+
+`GbdtModel.early_exit` is an optional schedule of `(trees, keep)` stages for ranking a
+whole catalog: `scoreBatch` sums the first `trees` trees for every candidate still in,
+keeps the `keep` best in the UHD objective's direction (ties keep the earlier row), and
+goes on; the last stage's survivors are scored by the whole model. A pruned candidate
+carries its partial sum, ranks after every usable fully scored candidate (later stages
+first, then by that sum) and reports no estimate. Stages must increase in `trees` and
+decrease in `keep`; a malformed schedule is refused, and a grouped model's is ignored.
+Single-row scoring (`score()`, `predict_engine`) always uses every tree. A runtime that
+predates the field ignores it and scores every candidate fully, which is still correct.
+
+`train --early-exit auto` chooses a schedule for a `sort_kernel_catalog` model from
+out-of-fold predictions of its cross-validation folds, so it never ranks rows a model was
+trained on. It tries one- and two-stage schedules over prefixes of 5-100 trees and
+shortlists of 8-32, and keeps the one doing the fewest tree walks whose mean top-1 regret
+is within 0.02 points, and p95 within 0.2 points, of scoring every candidate fully; none
+if no schedule saves at least 20% of the walks. The candidates' figures are recorded in
+`train_manifest.json` `early_exit`.
+`--early-exit 30:16` or `10:32,40:8` writes a schedule as given;
+`--early-exit none` (the default for calibrated and grouped models) writes none.
+`evaluate` applies the stored schedule exactly as the runtime does, so its regret is
+the shipped model's.
+
 ## Generated FlatBuffers bindings
 
 `model.bin` is written through flatc-generated Python bindings that
@@ -1257,7 +1355,8 @@ live in `_generated/`, committed alongside the tool the same way the C++
 ```
 _generated/hipdnn_flatbuffers_sdk/data_objects/
 ├── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
-└── IntegerArray.py, RealArray.py, *Array.py                         # its typed arrays
+├── IntegerArray.py, RealArray.py, *Array.py                         # its typed arrays
+└── LinearModel.py, LinearConfig.py, LinearBasisTerm.py              # linear_model.fbs
 ```
 
 `uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import
@@ -1270,7 +1369,8 @@ does it automatically, and so does the `flatc-hipdnn` pre-commit hook:
 
 ```bash
 python projects/hipdnn/scripts/run_flatc.py \
-    projects/hipdnn/flatbuffers_sdk/schemas/gbdt_model.fbs
+    projects/hipdnn/flatbuffers_sdk/schemas/gbdt_model.fbs \
+    projects/hipdnn/flatbuffers_sdk/schemas/linear_model.fbs
 ```
 
 That command emits both the C++ header and these bindings from one invocation, so
