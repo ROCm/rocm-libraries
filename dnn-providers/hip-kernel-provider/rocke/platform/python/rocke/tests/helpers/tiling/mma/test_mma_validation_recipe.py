@@ -233,7 +233,9 @@ def test_driver_is_sole_fragment_slicer():
     root = pathlib.Path(tiling_pkg.__file__).parent
     slicers = ("_read_subvector", "_write_subvector", "_subtile_triples")
     hits = {
-        p.name for p in root.rglob("*.py") if any(s in p.read_text() for s in slicers)
+        p.name
+        for p in root.rglob("*.py")
+        if any(s in p.read_text(encoding="utf-8") for s in slicers)
     }
     assert hits == {
         "driver.py"

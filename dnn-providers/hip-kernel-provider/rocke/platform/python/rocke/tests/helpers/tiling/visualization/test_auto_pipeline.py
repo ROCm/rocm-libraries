@@ -137,6 +137,7 @@ def test_roundtrip_replays_a_read_with_its_own_descriptor():
         an.verify_lds_roundtrip(pipe, sid, tile_k=32)
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_view_prefetch_flow_and_lds_store_block(tmp_path):
     """view() takes only SELECTION (block XOR flow + scope/operand/buffer/wave); it DERIVES every physical
     fact from the recording. The PREFETCH flow (global load -> LDS store) renders at macro + wave scope; the
@@ -184,6 +185,7 @@ def test_view_prefetch_flow_and_lds_store_block(tmp_path):
         )
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_view_compute_flow_builds_tee_from_the_recording(tmp_path):
     """flow='compute' builds the MMA tee from the RECORDED op alone (a_enc/b_enc/c_enc + canonical refs +
     derived dtypes -- no TileMma object) and renders A x B -> derived C; filename == the given out_path.
@@ -213,6 +215,7 @@ def test_view_compute_flow_builds_tee_from_the_recording(tmp_path):
     )
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_view_epilogue_flow_classifies_and_renders(tmp_path):
     """flow='epilogue' (small, once at the end): C native -> {reorder} -> global store C, built recording-
     only (c_native from the tee, C-store dist from the recorded reorder op), f32 in the name.
@@ -229,6 +232,7 @@ def test_view_epilogue_flow_classifies_and_renders(tmp_path):
 
 
 @pytest.mark.parametrize("operand,free", [("A", "M"), ("B", "N")])
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_lds_store_is_a_reposition_with_invariant_labels(tmp_path, operand, free):
     """The store is a REPOSITION into LDS (register slot -> LDS address), the datum's logical (free,K) LABEL
     invariant across the register file and the LDS view. On CRC there is NO transpose -- the free-contiguous
@@ -313,6 +317,7 @@ def test_pipeline_label_gate_blocks_position_derived_labels():
     ).check_label_invariance()
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_ab_swap_C_is_derived_not_hand_relabeled(tmp_path):
     """AB-swap is the EXPLICIT input-relabel exemplar (A<->B, M<->N). C is NOT relabeled by hand -- it falls
     out of the fixed machine via derive_c_distribution. Recording the crossed build and building the tee from
