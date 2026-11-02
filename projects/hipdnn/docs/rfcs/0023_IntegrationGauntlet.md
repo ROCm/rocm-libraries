@@ -2,12 +2,12 @@
 
 - Contributors: Adam Dickin
 - **Status**: Planned
-- **Status notes**: Proposed. Nothing is merged to `develop`. S1–S4, S11, S12 (hip-kernel-provider
-  only), S13 and the first part of S17 (the remaining hip-kernel-provider ops) are built on unmerged
-  branches; [§17.1](#171-stories) gives the state of each story, and each section says what is not
-  yet built.
-- **Last verified**: 2026-10-28 against the implementation branch head `4179d972df9` (based on
-  `develop` `3f9cd39c31c`)
+- **Status notes**: Proposed. Nothing is merged to `develop`. S1–S5, S9, S11, S12 (hip-kernel-provider
+  only), S13 and the hip-kernel-provider spaces of S17 are built on an unmerged branch;
+  [§17.1](#171-stories) gives the state of each story, and each section says what is not yet built.
+  S6 (typed decline reasons) is deferred.
+- **Last verified**: 2026-11-02 against the implementation branch `users/addickin/gauntlet_domains_align`
+  (merged with `develop` `79b4ae8503b`)
 
 ## Table of Contents
 
@@ -40,7 +40,7 @@ RFC adds the **Integration Gauntlet**: a large, generated, slow gate that runs o
 engine integration must survive it, including integrations that an agent wrote.
 
 The gauntlet passes only when every engine, on every graph it is given, does one of two things: it
-**declines the graph with a typed reason**, or it **accepts the graph and produces a correct
+**declines the graph**, or it **accepts the graph and produces a correct
 result**. It must never accept a graph it cannot handle.
 
 The design has five parts:
@@ -249,22 +249,33 @@ that section. A plan review checks that the space and the plan agree.
 
 ## 6. Pairwise Generator
 
-Not yet built.
+Built for the fuzz driver (`gauntlet/pairwise.py`, `run_gauntlet_fuzz.py --pairwise`). Coverage is
+proven complete for the SDPA forward spaces only; other spaces run with a capped search and report
+the pairs it could not settle as `unproven`. Rows are not yet written into CI level directories.
 
-The pairwise generator reads a space and writes a sweep in which every value of every axis meets
-every value of every other axis at least once (all-pairs). It uses a seeded greedy construction
-(IPOG): add axes one at a time, extend existing rows, then add rows for uncovered pairs. Each row is
-checked against the constraints; a pair that no legal row can cover is reported as infeasible, not
-dropped silently.
+The pairwise generator reads a space and builds a set of rows in which every value of every axis
+meets every value of every other axis at least once (all-pairs), in a row where **both values
+change the rendered case** (a value is *live* in a row when moving it to another level of its axis
+gives a legal row that renders differently). Pairs where one value is inert do not count.
 
-- **Output.** A `sweep.json` per RFC 0022 level directory, with `metadata.generator =
-  "gauntlet-pairwise"`, the seed, and `purpose` per case.
-- **Determinism.** Same space, same seed, same rows. The seed is stored in the sweep, so CI never
-  sees a random graph.
-- **Seeded rotation.** Nightly may use a new seed each week. The rows of each seed are checked in.
-- **Range axes.** Pairwise covers the boundary values of a range axis plus one interior value.
-
-The generator is the I1 bundle generator of RFC 0022 §15, built on this declaration.
+- **Levels.** A `values` axis contributes its values; a `range` axis contributes its declared
+  boundaries inside the range plus one interior value drawn from the seed. Range ends count only
+  when declared as boundaries.
+- **Construction.** Seeded greedy (AETG-style): start each row from the first uncovered pair, draw
+  several completions that fill the remaining axes by uncovered-pair gain, keep the legal one with
+  the best gain, and credit only its live pairs. Each row is checked whole against the constraints.
+- **Impossible pairs.** A pair no completion covers is settled by exhaustive search over the axes it
+  depends on (the closure of the constraint, derive and render expressions that name it). It is
+  reported `illegal` (no legal row holds both values) or `dead` (legal rows exist, but one value is
+  inert in each), never dropped. Past the search cap it is `unproven`.
+- **Repair round.** After the run, pairs that were only ever declined get new rows built from levels
+  that did pass (`--pairwise-repair`), so a pair is not counted as reached only through declines.
+- **Report.** `summary.json` gains `pair_coverage` per space: `tuples`, `illegal`, `dead`, `drawn`,
+  `passed`, `declined_only`, `never_passed`, `repair_rows` and the first uncovered pairs.
+- **Determinism.** Same space, same seed, same rows. Row ids are `pw<k>`; rows carry
+  `metadata.generator = "gauntlet-pairwise"` and the seed, and replay by name like fuzz samples.
+- **Output.** `--generate-only` writes the rows as sweeps without running them. Placing them in a
+  level directory, with claims, is the remaining step toward the I1 bundle generator of RFC 0022 §15.
 
 ## 7. Gauntlet Fuzz Mode
 
@@ -370,19 +381,31 @@ The driver writes one sweep per input data type, under
 then part of the GTest suite name (`gauntlet_RMSNorm_Default_fp16_cases.s123`), so the dtype globs
 of an engine's TOML tolerances and skips apply to fuzz cases as they do to quick bundles.
 
-### 7.7 Not yet built
+### 7.7 Shrinking
+
+`--shrink N` reduces each `WRONG` or `CRASH` sample's axis values (earlier levels of a `values`
+axis, smaller values of a `range` axis), up to `N` candidate runs, keeping a candidate only while its
+outcome stays the same. The data seed and case id stay, so the engine TOML grades every candidate
+alike. The failure folder then carries the shrunk sample next to the original, with its own
+`replay.sh`.
+
+### 7.8 Not yet built
 
 - A CTest lane label (`gauntlet`) per provider engine (S16). It must stay out of every level that
   the external YAML catch-alls select. Until then the driver is the entry point.
-- Shrinking a failing sample to a smaller reproducer.
-- A space for any op outside hip-kernel-provider's HIP_MLOPS and SDPA forward regions (S17b).
+- A space for any op outside hip-kernel-provider's HIP_MLOPS and SDPA regions (S17b).
 
 ## 8. Rejection Probes
 
 Not yet built, apart from the alignment probes of §11: every space has `alignment` and `placement`
 axes, and two probe-only spaces (§5.1) fix a graph and vary only those axes.
 
-A **probe** is a legal graph whose expected outcome is "decline with a typed reason, or accept and be
+Probes live only in gauntlet spaces and run only through the driver; they are never checked into a
+CI level. A rejection that CI must enforce is an RFC 0022 `expected_rejection` bundle (I10), which
+is never executed and fails the lane when an engine accepts it. Keeping probes out of the bundle
+tree also keeps them out of the support-matrix render, which counts every checked-in case.
+
+A **probe** is a legal graph whose expected outcome is "decline, or accept and be
 correct" (RFC 0022 §9). Probes test the integration contract: an engine that accepts a graph it
 cannot run is the failure the gauntlet exists to catch.
 
@@ -396,8 +419,8 @@ cannot run is the failure the gauntlet exists to catch.
 
 Illegal graphs, which the frontend rejects, are frontend unit tests (RFC 0022 §6), not probes.
 
-**Typed reason.** Today a decline is "not in the ranked list" or a late `EngineNotApplicableError`
-message. The outcome report records the message. A follow-on story adds a reason code to the
+**Typed reason (deferred).** Today a decline is "not in the ranked list" or a late `EngineNotApplicableError`
+message. The outcome report records the message. A deferred story (S6) would add a reason code to the
 plugin's decline (an enum in the plugin SDK: `UNSUPPORTED_DTYPE`, `UNSUPPORTED_LAYOUT`,
 `UNSUPPORTED_ATTRIBUTE`, `ALIGNMENT`, `SHAPE_LIMIT`, `NO_KERNEL`, `OTHER`), so reports can group
 declines without parsing text.
@@ -460,8 +483,8 @@ ends. Records are flushed one at a time, so a crash keeps every earlier line.
 ```
 
 `purpose` comes from the case metadata (`claim`, `probe`, `regression`; absent when not set). The
-loader rejects any other value. This is the tag half of RFC 0022's I2; excluding probes from the
-support-matrix render is the other half and is not built. `stage` is where the test stopped
+loader rejects any other value. This is the tag half of RFC 0022's I2. Probes are never checked in
+(§8), so the support-matrix render never sees one. `stage` is where the test stopped
 (`graph`, `claim`, `query`, `build`, `execute`, `compare`, `oracle`, `setup`, or `none` for a pass).
 A case that sets `inputs`, `validator`, `placement` or `placement_uid` echoes them into its
 `finished` record, and a pass that verified a rejection adds `"expected_status":"BAD_PARAM"`.
@@ -472,7 +495,7 @@ A report states, per engine and per space or bundle:
 
 > *N of M cases passed; D declined (by reason); W wrong; C crashed; U unexercised (by reason).*
 
-When kernel identity is recorded (§10.3) the report adds *K distinct kernels dispatched*. A run whose
+When kernels are recorded (§10.3) the report adds the kernels dispatched per engine. A run whose
 cases are all `DECLINED` or `UNEXERCISED` says so; it is not a pass of the engine.
 
 ## 10. Catalog Sweep
@@ -511,9 +534,15 @@ separate story.
 
 ### 10.3 Kernel identity in every run
 
-The outcome record gains `kernel` (candidate `id`) and `knobs` when the engine can say which
-candidate a plan built. For a descriptor engine the harness enumerates the catalog and matches the
-built plan's knob tuple. Until the plan's knob choices can be read back, `kernel` is absent.
+Built for the engines that log the kernel they select. The SDPA engines of hip-kernel-provider
+(ASM_SDPA forward and backward, HIP_FLASH2, the attention packs) emit one `kernel: <engine>
+<kernel>` log line per plan. The harness captures these lines per case and the `finished` record
+gains `kernels`, the distinct kernels the case ran. The driver's summary counts cases per kernel for
+each engine, and `kernel_unreported` counts cases that executed without a kernel line. Engines that
+log no kernel (HIP_MLOPS) leave `kernels` absent.
+
+For descriptor engines the catalog sweep (§10.2) names the candidate `id` it forced, so a sweep case
+records exactly which catalog entry ran.
 
 ## 11. Declared Alignment
 
@@ -667,9 +696,9 @@ Rules:
 
 | Gauntlet tier | When | Content | RFC 0022 level |
 |---|---|---|---|
-| **Enablement** | Pre-commit and PR | Pairwise layers 1–4 at small shapes; one executed case per feature × engine; all rejection probes | quick, PR |
-| **Hazard** | Nightly and release | Adds hazard shapes (except extremes), more pairwise seeds, deeper probes | nightly, full |
-| **Gauntlet** | A new integration, or on demand | Every kernel of the catalog × the levels above × huge and int32-overflow shapes × the corpus × fuzz samples | not a level; days |
+| **Enablement** | Pre-commit and PR | Pairwise layers 1–4 at small shapes; one executed case per feature × engine; `expected_rejection` bundles for rejections CI must enforce (RFC 0022 I10) | quick, PR |
+| **Hazard** | Nightly and release | Adds hazard shapes (except extremes) and more pairwise seeds | nightly, full |
+| **Gauntlet** | A new integration, or on demand | Every kernel of the catalog × the levels above × rejection probes × huge and int32-overflow shapes × the corpus × fuzz samples | not a level; days |
 
 Enablement and Hazard are concrete, checked-in bundles produced by the generators. The Gauntlet tier
 runs outside CI.
@@ -697,23 +726,23 @@ A new engine (or a large change to one, including one an agent wrote) is gated a
 | S2 | Space declaration format and expression evaluator | — | G2 | Built |
 | S3 | Fuzz driver: sampling, seeds, batches, crash recovery, freeze output, summary | S1, S2 | G6 | Built |
 | S4 | First fuzz spaces: SDPA forward, RMSNorm forward | S3 | G6 | Built |
-| S5 | Pairwise generator writing level sweeps | S2 | G2 | Not started |
-| S6 | Typed decline reasons in the plugin SDK | S1 | G3 | Not started |
-| S7 | Rejection-probe library per op | S2, S6 | G3 | Alignment probes only (§8) |
+| S5 | Pairwise generator | S2 | G2 | Built; completeness proven for SDPA forward only (§6) |
+| S6 | Typed decline reasons in the plugin SDK | S1 | G3 | Deferred: changes every engine; last in the backlog |
+| S7 | Rejection-probe library per op | S2 | G3 | Alignment probes only (§8) |
 | S8 | Catalog sweep mode | S1 | G1 | Not started |
-| S9 | Kernel identity in outcome records | S8 | G1 | Not started |
+| S9 | Kernel identity in outcome records | — | G1 | Built for engines that log their kernel (§10.3) |
 | S10 | MIOpen "run solution by ID" provider API | S8 | G1 | Not started |
 | S11 | Exact-alignment placement in the harness | — | G7 | Built, except the strided cross (§11.3) |
 | S12 | Engines honor declared alignment (one story per engine) | S11 | G7 | hip-kernel-provider built; MIOpen and hipBLASLt gated by version (§11.2) |
 | S13 | Input value-domain control | S2 | — | Built |
 | S14 | Corpus batch intake | — | G4 | Not started |
-| S15 | Oracle cost measurement and per-op ceilings | — | G5 | Not started |
+| S15 | Oracle cost measurement and per-op ceilings | — | G5 | SDPA backward measured (ceiling 2^29); others not started |
 | S16 | Gauntlet CTest lane label per provider, excluded from every CI level | S3 | G6 | Not started |
 | S17a | Spaces for the remaining hip-kernel-provider ops (LayerNorm, BatchNorm, RMSNorm backward, Resample) | S2 | G2 | Built |
-| S17b | Spaces for convolution, matmul, pointwise, reduction and SDPA backward | S2, RFC 0022 plans | G2 | Not started |
+| S17b | Spaces for convolution, matmul, pointwise, reduction and SDPA backward | S2, RFC 0022 plans | G2 | SDPA backward space built; others not started |
 
-"Built" means on an unmerged branch: S1–S4 form the first implementation PR, and S11, S12, S13 and
-S17a form a second one stacked on it.
+"Built" means on an unmerged branch. Besides S1–S4 and S11, S12, S13 and S17a, the branch carries
+S5 (pairwise), S9 (kernel identity), shrinking (§7.7) and the SDPA backward space.
 
 ### 17.2 ALMIOPEN-2470 (fuzz mode)
 
