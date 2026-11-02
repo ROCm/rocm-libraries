@@ -33,6 +33,7 @@ from pathlib import Path
 
 from rocke.core.arch import ArchTarget
 from rocke.helpers import compile_kernel, make_conv_manifest, write_artifact
+from kernels.common.conv_abi import conv_manifest_args_signature
 from kernels.common.conv_implicit_gemm import (
     ConvDataSpec,
     ConvProblem,
@@ -365,6 +366,7 @@ def main() -> int:
         cpg=p.C,
         kpg=p.K,
         conv_layout=conv_layout,
+        args_signature=conv_manifest_args_signature(dtype, conv_layout=conv_layout),
         dtype=dtype,
         # The kernel reads block_id.x as the N-tile index and
         # block_id.y as the M-tile index (mirrors gemm_universal).

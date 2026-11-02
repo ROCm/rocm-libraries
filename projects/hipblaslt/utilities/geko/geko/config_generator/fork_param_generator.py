@@ -23,8 +23,22 @@ def generate_fork_params(
     assembles groups.
     Returns (fork_params, num_mis, nkernels).
     """
-    mi_groups = mi_designer.generate_for_size(size)
     fork_params, opt_groups = opt_params.generate_for_size(size)
+
+    # Extract actual DepthU values and wavefront size for per-size MI expansion
+    depthu_values = None
+    if "DepthU" in fork_params:
+        depthu_values = fork_params["DepthU"].values
+
+    wavefront_size = 64  # Default
+    if "WavefrontSize" in fork_params:
+        wavefront_size = fork_params["WavefrontSize"].values[0]
+
+    mi_groups = mi_designer.generate_for_size(
+        size,
+        depthu_values=depthu_values,
+        wavefront_size=wavefront_size,
+    )
 
     if post_processor is not None:
         fork_params, mi_groups = post_processor.apply(fork_params, mi_groups, size)

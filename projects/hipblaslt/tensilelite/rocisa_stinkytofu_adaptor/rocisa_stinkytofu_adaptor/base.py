@@ -45,7 +45,7 @@ class OutputOptions:
     def __repr__(self) -> str:
         return f"OutputOptions(outputNoComment={self.outputNoComment})"
 
-    # Pickle support — needed because Tensile passes this object across the
+    # Pickle support — needed because TensileLite passes this object across the
     # ParallelMap2 fork/spawn boundary.
     def __getstate__(self) -> tuple:
         return (self.outputNoComment,)
@@ -91,7 +91,7 @@ class KernelInfo:
     """Mirror of ``rocisa::KernelInfo`` (base.hpp:47-57) — per-thread current
     kernel state.
 
-    Only the attributes Tensile actually reads back are typed: ``isa``
+    Only the attributes TensileLite actually reads back are typed: ``isa``
     (a 3-tuple) and ``wavefrontSize``.
     """
 
@@ -117,7 +117,7 @@ class KernelInfo:
 #
 # Module globals ARE the per-process singleton in Python — no Singleton
 # class needed. The ``rocIsa`` class in ``__init__.py`` is a forwarding
-# shell that preserves the rocisa API surface (KernelWriter / Tensile
+# shell that preserves the rocisa API surface (KernelWriter / TensileLite
 # callers can keep doing ``rocIsa.getInstance().getXxx()``); the actual
 # data lives down here.
 #
@@ -138,7 +138,7 @@ Mirror of ``rocisa::rocIsa::m_outputOptions`` (base.hpp:215)."""
 _current_isa: Optional[IsaKey] = None
 """Currently-selected ISA, or ``None`` before ``init()`` / ``setKernel()``.
 No direct C++ analogue (C++ derives the current ISA from the per-thread
-``m_threads[id].isaVersion``); we keep a separate flag because Tensile
+``m_threads[id].isaVersion``); we keep a separate flag because TensileLite
 calls ``init()`` before any ``setKernel()`` to populate caps."""
 
 _is_init: bool = False
@@ -171,6 +171,12 @@ matches the C++ ``int()`` default-construct of a missing map entry.
 ``setVgprMsb`` is wired in for Commit Y (``Label.toString`` side
 effect, code.hpp:122-125) — no consumer reads it today."""
 
+_force_scaled_wmma: bool = False
+"""gfx1250 low-precision scaled-WMMA workaround toggle. Mirror of
+``rocisa::rocIsa::m_forceScaledWMMA[id]``. Default ``False`` (base
+gfx1250 → plain ``v_wmma_*``); set ``True`` only for
+gfx1250-strict / gfx1250v0. Not reset by ``setKernel``."""
+
 
 # ---------------------------------------------------------------------------
 # OutputOptions accessors (unchanged from the prior commit).
@@ -192,7 +198,7 @@ def setOutputOptions(options: OutputOptions) -> None:
     """Replace the process-wide ``OutputOptions`` instance.
 
     Used by ``rocIsa.getInstance().setOutputOptions(...)`` -- which is
-    what Tensile / ParallelMap2 workers call to ship a pickled
+    what TensileLite / ParallelMap2 workers call to ship a pickled
     ``OutputOptions`` from the parent into the worker process.
     """
     global _current_output_options
@@ -244,7 +250,7 @@ def init(arch: Any, assemblerPath: str = "", debug: bool = False) -> None:
         try:
             asm, arch_c, reg, bugs = _caps.getCaps(key)
         except KeyError:
-            _init_native_fallback(arch, assemblerPath, debug, key)
+            _init_native_fallback([key], assemblerPath, debug)
             _is_init = True
             return
         _data[key] = IsaInfo(asm, arch_c, reg, bugs)
@@ -252,9 +258,31 @@ def init(arch: Any, assemblerPath: str = "", debug: bool = False) -> None:
     del debug
 
 
-def _init_native_fallback(arch: Any, assemblerPath: str, debug: bool,
-                          key: "tuple") -> None:
-    """Query ISA caps from native rocisa via a subprocess.
+def initMany(archs: Any, assemblerPath: str = "", debug: bool = False) -> None:
+    """Mirror of ``rocisa::rocIsa::initMany`` (base.hpp).
+
+    Same result as calling ``init`` for each arch. ISAs that stinkytofu has
+    no caps for are probed together, by one native ``initMany`` call in a
+    single subprocess.
+    """
+    archs = list(archs)
+    native = []
+    for arch in archs:
+        key = _caps.normalize_isa_key(arch)
+        if key in _data or key in native:
+            continue
+        try:
+            _data[key] = IsaInfo(*_caps.getCaps(key))
+        except KeyError:
+            native.append(key)
+    if native:
+        _init_native_fallback(native, assemblerPath, debug)
+    for arch in archs:
+        init(arch, assemblerPath, debug)
+
+
+def _init_native_fallback(keys: "list", assemblerPath: str, debug: bool) -> None:
+    """Query the caps of ISA keys from native rocisa via one subprocess.
 
     Loading ``_rocisa.so`` in-process would conflict with the already-loaded
     ``_stinkytofu.so`` (nanobind duplicate type registration).  A subprocess
@@ -266,21 +294,24 @@ def _init_native_fallback(arch: Any, assemblerPath: str, debug: bool,
     import sys
     import textwrap
 
-    isa_tuple = tuple(int(x) for x in key)
+    isas = [tuple(int(x) for x in key) for key in keys]
     script = textwrap.dedent(f"""\
         import os, json
         os.environ["ROCISA_BACKEND"] = "rocisa"
         import rocisa
         ti = rocisa.rocIsa.getInstance()
-        arch = {isa_tuple!r}
-        ti.init(arch, {assemblerPath!r}, {debug!r})
-        info = ti.getIsaInfo(arch)
-        print(json.dumps({{
-            "asmCaps":  {{str(k): int(v) for k, v in dict(info.asmCaps).items()}},
-            "archCaps": {{str(k): int(v) for k, v in dict(info.archCaps).items()}},
-            "regCaps":  {{str(k): int(v) for k, v in dict(info.regCaps).items()}},
-            "asmBugs":  {{str(k): int(v) for k, v in dict(info.asmBugs).items()}},
-        }}))
+        isas = {isas!r}
+        ti.initMany(isas, {assemblerPath!r}, {debug!r})
+        result = []
+        for arch in isas:
+            info = ti.getIsaInfo(arch)
+            result.append({{
+                "asmCaps":  {{str(k): int(v) for k, v in dict(info.asmCaps).items()}},
+                "archCaps": {{str(k): int(v) for k, v in dict(info.archCaps).items()}},
+                "regCaps":  {{str(k): int(v) for k, v in dict(info.regCaps).items()}},
+                "asmBugs":  {{str(k): int(v) for k, v in dict(info.asmBugs).items()}},
+            }})
+        print(json.dumps(result))
     """)
 
     env = {**os.environ, "ROCISA_BACKEND": "rocisa"}
@@ -290,13 +321,13 @@ def _init_native_fallback(arch: Any, assemblerPath: str, debug: bool,
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"Native rocisa fallback subprocess failed for ISA {key}:\n"
+            f"Native rocisa fallback subprocess failed for ISAs {isas}:\n"
             f"{result.stderr}"
         )
-    data = json.loads(result.stdout)
-    _data[key] = IsaInfo(
-        data["asmCaps"], data["archCaps"], data["regCaps"], data["asmBugs"],
-    )
+    for isa, data in zip(isas, json.loads(result.stdout)):
+        _data[isa] = IsaInfo(
+            data["asmCaps"], data["archCaps"], data["regCaps"], data["asmBugs"],
+        )
 
 
 def isInit() -> bool:
@@ -313,8 +344,8 @@ def getIsaInfo(arch: Any) -> "IsaInfo":
     """Mirror of ``rocisa::rocIsa::getIsaInfo`` (base.hpp:125-135).
 
     Lazy-populates the cache so callers can ask for any supported ISA
-    without a prior ``init()`` call (Tensile's
-    ``Tensile.Common.Capabilities.makeIsaInfoMap`` relies on this).
+    without a prior ``init()`` call (TensileLite's
+    ``tensilelite.Common.Capabilities.makeIsaInfoMap`` relies on this).
 
     Falls back to native ``_rocisa`` for ISAs not supported by stinkytofu.
     """
@@ -324,7 +355,7 @@ def getIsaInfo(arch: Any) -> "IsaInfo":
         try:
             asm, arch_c, reg, bugs = _caps.getCaps(key)
         except KeyError:
-            _init_native_fallback(arch, "", False, key)
+            _init_native_fallback([key], "", False)
             return _data[key]
         info = IsaInfo(asm, arch_c, reg, bugs)
         _data[key] = info
@@ -335,16 +366,12 @@ def _activeCaps() -> Tuple[Dict, Dict, Dict, Dict]:
     """Internal: return ``(asmCaps, archCaps, regCaps, asmBugs)`` for the
     currently-selected ISA. Used by the four public ``get*Caps`` helpers.
 
-    Raises ``RuntimeError`` if no ISA has been selected yet so a missing
-    ``init()`` / ``setKernel()`` produces a loud error rather than a
-    confusing ``KeyError`` deep inside instruction emission.
+    When no ISA has been selected yet, returns empty cap maps to mirror native
+    rocisa (which indexes a default-constructed, empty ``IsaInfo``).
     """
     if _current_isa is None:
-        raise RuntimeError(
-            "rocisa.base: init(arch, ...) or setKernel(arch, ...) must "
-            "be called before getAsmCaps()/getArchCaps()/getRegCaps()/"
-            "getAsmBugs()."
-        )
+        # Mirror native rocisa: an unpinned thread reads empty caps, not an error.
+        return ({}, {}, {}, {})
     info = _data.get(_current_isa)
     if info is None:
         asm, arch_c, reg, bugs = _caps.getCaps(_current_isa)
@@ -441,7 +468,7 @@ def isaToGfx(arch: Any) -> str:
 def getData() -> Dict[IsaKey, "IsaInfo"]:
     """Mirror of ``rocisa::rocIsa::getData`` (base.hpp:157-160).
 
-    Returns the live dict (NOT a copy). Tensile pickles the result and
+    Returns the live dict (NOT a copy). TensileLite pickles the result and
     ships it to ``ParallelMap2`` workers, which call ``setData`` to
     rehydrate. Mutating the returned dict mutates the process-wide
     state -- usually what you want.
@@ -506,6 +533,26 @@ def setVgprMsb(msb: int) -> None:
     """
     global _vgpr_msb
     _vgpr_msb = int(msb)
+
+
+def getForceScaledWMMA() -> bool:
+    """Mirror of ``rocisa::rocIsa::getForceScaledWMMA`` (base.hpp).
+
+    The gfx1250 low-precision scaled-WMMA workaround toggle; default
+    ``False`` matches the C++ absent-entry default. Deliberately not
+    reset by ``setKernel``.
+    """
+    return _force_scaled_wmma
+
+
+def setForceScaledWMMA(v: bool) -> None:
+    """Mirror of ``rocisa::rocIsa::setForceScaledWMMA`` (base.hpp).
+
+    Set true only for gfx1250-strict / gfx1250v0 so low-precision WMMA
+    emits ``v_wmma_scale_*`` with scale=0; base gfx1250 stays plain.
+    """
+    global _force_scaled_wmma
+    _force_scaled_wmma = bool(v)
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tests for the source-only half of check_public_abi.py.
+"""Tests for check_public_abi.py.
 
 The declaration parser is the only thing standing between the range entry
 points and a divergence that links cleanly and corrupts arguments at run time,
@@ -9,13 +9,19 @@ so it is worth testing against inputs it is expected to reject as well as ones
 it is expected to accept. Running the check against a tree that is already
 correct only ever exercises the passing path.
 
-Everything here works on string fixtures, so no build, toolchain or GPU is
-needed and the module runs in a lint lane:
+The binary checks are covered the same way, against a stand-in that answers the
+three questions those checks ask of a shared object. That stand-in deliberately
+does not exercise the ELF parser itself: the parser reads a real libMIOpen.so on
+every packaging build, so it is continuously covered by construction, whereas
+the conditions the checks are meant to catch -- a stale half of a build, an
+entry point renamed with no stub -- appear in no tree that is working.
+
+Everything here works on string fixtures and stand-ins, so no build, toolchain
+or GPU is needed and the module runs in a lint lane:
 
     python -m pytest projects/miopen/script/test_check_public_abi.py
 """
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -314,9 +320,12 @@ def test_provider_mirror_divergent_target_is_reported(capsys):
 # --------------------------------------------------------------------------
 # The dispatch seam
 #
-# A stub that never reaches MIOPEN_WRAPPER_DISPATCH silently loses the ability
-# to route to hipDNN, and no build catches it: the macro's assert needs the
-# macro to be present, and is compiled out under NDEBUG regardless.
+# A stub that never reaches a dispatch macro silently loses the ability to route
+# to hipDNN, and no build catches it: the macro's assert needs the macro to be
+# present, and is compiled out under NDEBUG regardless.
+#
+# MIOPEN_WRAPPER_DISPATCH and MIOPEN_WRAPPER_FORWARD open the same seam, so both
+# satisfy the check and a stub is expected to carry exactly one of them.
 # --------------------------------------------------------------------------
 
 # miopenGetErrorString is the one exempt stub, so it belongs in every fixture:
@@ -365,7 +374,10 @@ def test_stub_without_the_macro_is_reported(capsys):
         stub("miopenDestroy", ""),
     )
     assert not abi.check_wrapper_dispatch(dispatches_of(source))
-    assert "miopenDestroy has no MIOPEN_WRAPPER_DISPATCH" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert (
+        "miopenDestroy has no MIOPEN_WRAPPER_DISPATCH or MIOPEN_WRAPPER_FORWARD" in out
+    )
 
 
 def test_stub_dispatching_under_a_neighbours_name_is_reported(capsys):
@@ -387,7 +399,7 @@ def test_repeated_macro_is_reported(capsys):
         )
     )
     assert not abi.check_wrapper_dispatch(dispatches_of(source))
-    assert "miopenCreate has 2 MIOPEN_WRAPPER_DISPATCH calls" in capsys.readouterr().out
+    assert "miopenCreate has 2 dispatch macros" in capsys.readouterr().out
 
 
 def test_a_commented_out_macro_does_not_count_as_present(capsys):
@@ -395,7 +407,74 @@ def test_a_commented_out_macro_does_not_count_as_present(capsys):
         stub("miopenCreate", "    // MIOPEN_WRAPPER_DISPATCH(miopenCreate);")
     )
     assert not abi.check_wrapper_dispatch(dispatches_of(source))
-    assert "miopenCreate has no MIOPEN_WRAPPER_DISPATCH" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert (
+        "miopenCreate has no MIOPEN_WRAPPER_DISPATCH or MIOPEN_WRAPPER_FORWARD" in out
+    )
+
+
+def test_forward_macro_satisfies_the_seam(capsys):
+    source = wrapper_source(
+        stub(
+            "miopenCreate",
+            "    MIOPEN_WRAPPER_FORWARD(miopenCreate,\n"
+            "                           ::miopen::wrapper::hipdnn::Create(handle));",
+        )
+    )
+    assert abi.check_wrapper_dispatch(dispatches_of(source))
+    assert "1 routable wrapper stubs" in capsys.readouterr().out
+
+
+def test_forward_macro_under_a_neighbours_name_is_reported(capsys):
+    source = wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);"),
+        stub(
+            "miopenDestroy",
+            "    MIOPEN_WRAPPER_FORWARD(miopenCreate,\n"
+            "                           ::miopen::wrapper::hipdnn::Destroy(handle));",
+        ),
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    assert "miopenDestroy dispatches as miopenCreate" in capsys.readouterr().out
+
+
+def test_stub_carrying_both_macros_is_reported(capsys):
+    source = wrapper_source(
+        stub(
+            "miopenCreate",
+            "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);\n"
+            "    MIOPEN_WRAPPER_FORWARD(miopenCreate,\n"
+            "                           ::miopen::wrapper::hipdnn::Create(handle));",
+        )
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    assert "miopenCreate has 2 dispatch macros" in capsys.readouterr().out
+
+
+def test_dispatch_macro_given_a_forward_call_is_reported(capsys):
+    source = wrapper_source(
+        stub(
+            "miopenCreate",
+            "    MIOPEN_WRAPPER_DISPATCH(miopenCreate,\n"
+            "                            ::miopen::wrapper::hipdnn::Create(handle));",
+        )
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    out = capsys.readouterr().out
+    assert (
+        "miopenCreate has no MIOPEN_WRAPPER_DISPATCH or MIOPEN_WRAPPER_FORWARD" in out
+    )
+
+
+def test_forward_macro_without_a_call_is_reported(capsys):
+    source = wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_FORWARD(miopenCreate);")
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    out = capsys.readouterr().out
+    assert (
+        "miopenCreate has no MIOPEN_WRAPPER_DISPATCH or MIOPEN_WRAPPER_FORWARD" in out
+    )
 
 
 def test_exempt_stub_growing_the_macro_is_reported(capsys):
@@ -408,7 +487,7 @@ extern "C" const char* miopenGetErrorString(miopenStatus_t error)
 """
     assert not abi.check_wrapper_dispatch(dispatches_of(source))
     out = capsys.readouterr().out
-    assert "miopenGetErrorString carries MIOPEN_WRAPPER_DISPATCH but is exempt" in out
+    assert "miopenGetErrorString carries a dispatch macro but is exempt" in out
     assert "returns const char*" in out
 
 
@@ -447,80 +526,846 @@ def test_read_tracked_source_rejects_paths_outside_the_root(tmp_path):
     assert "outside the repository root" in "".join(reasons.values())
 
 
-needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
+# run_git() is the script's single shell-out, so the cases below are built by
+# replacing it rather than by standing up a real repository. An earlier version did
+# the latter, and `git init` in a temporary directory turned out to be unsafe here:
+# git exports GIT_DIR into the hooks it runs and GIT_DIR outranks -C, so under the
+# pre-commit hook these tests run from, the init reached the surrounding repository
+# and left it marked bare, which refuses every later commit.
 
 
-def _git(root: Path, *args: str) -> str:
-    done = subprocess.run(
-        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
-    )
-    return done.stdout.strip()
+def _completed(returncode=0, stdout=b"", stderr=b""):
+    return subprocess.CompletedProcess(["git"], returncode, stdout, stderr)
 
 
-def _repo_with_unreadable_blob(tmp_path: Path) -> tuple[Path, Path]:
-    """Build the exact shape a failed promisor fetch leaves behind.
+def _unreadable_blob_git(tracked: bool, cat_file_stderr: bytes = b"fatal: bad object"):
+    """Stand in for the shape a failed promisor fetch leaves behind.
 
-    The commit's tree still names the file -- so ls-tree answers -- while the
-    blob it points at is gone, so cat-file cannot produce the content. Deleting
-    the loose object reproduces that locally without needing a partial clone or
-    a network.
+    The commit's tree still names the file, so ls-tree answers, while the blob it
+    points at is gone, so cat-file cannot produce the content.
     """
-    root = tmp_path / "repo"
-    root.mkdir()
-    target = root / "tracked.hpp"
-    target.write_text("#pragma once\n", encoding="utf-8")
-    _git(root, "init", "-q")
-    _git(root, "config", "user.email", "nobody@example.invalid")
-    _git(root, "config", "user.name", "Test")
-    _git(root, "add", "tracked.hpp")
-    _git(root, "commit", "-qm", "add tracked.hpp")
-    blob = _git(root, "rev-parse", "HEAD:tracked.hpp")
-    target.unlink()
-    (root / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
-    return root, target
+
+    def run_git(repo_root, *args):
+        if args[0] == "cat-file":
+            return _completed(1, stderr=cat_file_stderr)
+        if args[0] == "ls-tree":
+            return _completed(0, stdout=b"tracked.hpp\n" if tracked else b"")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    return run_git
 
 
-@needs_git
-def test_tracked_but_unreadable_file_is_a_hard_failure(tmp_path):
+def test_tracked_but_unreadable_file_is_a_hard_failure(tmp_path, monkeypatch):
     """A checkout that carries the file but cannot produce it must not go green.
 
     Skipping here would drop a file that is under test out of the comparison
     while still reporting success, which is the one outcome this gate cannot
     afford: the drift it catches links cleanly and only misbehaves at run time.
     """
-    root, target = _repo_with_unreadable_blob(tmp_path)
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=True))
     with pytest.raises(abi.AbiError) as caught:
-        abi.read_tracked_source(target, root, {})
+        abi.read_tracked_source(tmp_path / "tracked.hpp", tmp_path, {})
     assert "tracked.hpp" in str(caught.value)
 
 
-@needs_git
-def test_the_hard_failure_carries_git_stderr(tmp_path):
+def test_the_hard_failure_carries_git_stderr(tmp_path, monkeypatch):
     """Whatever git said is the only evidence of why the checkout is broken."""
-    root, target = _repo_with_unreadable_blob(tmp_path)
+    monkeypatch.setattr(
+        abi,
+        "run_git",
+        _unreadable_blob_git(tracked=True, cat_file_stderr=b"fatal: missing blob abc"),
+    )
     with pytest.raises(abi.AbiError) as caught:
-        abi.read_tracked_source(target, root, {})
+        abi.read_tracked_source(tmp_path / "tracked.hpp", tmp_path, {})
     message = str(caught.value)
     assert "git cat-file said:" in message
+    assert "fatal: missing blob abc" in message
     assert "(git printed nothing)" not in message
 
 
-@needs_git
-def test_a_file_absent_from_the_commit_is_still_only_a_skip(tmp_path):
+def test_a_file_absent_from_the_commit_is_still_only_a_skip(tmp_path, monkeypatch):
     """The escalation must stay narrow.
 
     A sparse checkout legitimately lacks whole subtrees the commit never
     carried, and failing on those would break every partial-checkout lane
     instead of catching drift.
     """
-    root, _ = _repo_with_unreadable_blob(tmp_path)
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
     reasons: dict[str, str] = {}
-    assert abi.read_tracked_source(root / "never_added.hpp", root, reasons) is None
+    assert (
+        abi.read_tracked_source(tmp_path / "never_added.hpp", tmp_path, reasons) is None
+    )
     assert "not tracked at HEAD" in "".join(reasons.values())
 
 
-def test_a_non_checkout_is_a_skip_not_a_failure(tmp_path):
+def test_a_non_checkout_is_a_skip_not_a_failure(tmp_path, monkeypatch):
     """Source tarballs have no git at all; that is not a broken checkout."""
+    monkeypatch.setattr(
+        abi,
+        "run_git",
+        lambda root, *args: _completed(
+            128,
+            stderr=b"fatal: not a git repository (or any of the parent directories)",
+        ),
+    )
     reasons: dict[str, str] = {}
     assert abi.read_tracked_source(tmp_path / "absent.hpp", tmp_path, reasons) is None
     assert "not a git checkout" in "".join(reasons.values())
+
+
+def test_run_git_strips_an_ambient_git_environment(tmp_path, monkeypatch):
+    """Stands in for the pre-commit hook this runs as, which exports GIT_DIR.
+
+    Left in place, GIT_DIR outranks -C and every read answers from the repository
+    that invoked the hook, so a file absent from the tree under test is reported on
+    some other tree's contents -- and the answer looks ordinary either way.
+    """
+    monkeypatch.setenv("GIT_DIR", "/nowhere/.git")
+    monkeypatch.setenv("GIT_WORK_TREE", "/nowhere")
+    monkeypatch.setenv("GIT_INDEX_FILE", "/nowhere/index")
+
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        seen["env"] = kwargs["env"]
+        return _completed()
+
+    monkeypatch.setattr(abi.subprocess, "run", fake_run)
+    abi.run_git(tmp_path, "cat-file", "-p", "HEAD:x")
+
+    assert [key for key in seen["env"] if key.startswith("GIT_")] == []
+    assert seen["cmd"][:3] == ["git", "-C", str(tmp_path)]
+
+
+# --------------------------------------------------------------------------
+# Installed headers
+#
+# The staged include tree is what a consumer compiles against. A private
+# spelling that reaches it names a symbol only libMIOpen_private.so carries.
+# --------------------------------------------------------------------------
+
+
+def staged(tmp_path, files: dict[str, str]) -> Path:
+    """Build an include tree from {relative path: text} and return its root."""
+    root = tmp_path / "include"
+    for rel, text in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return root
+
+
+def test_a_clean_include_tree_passes(tmp_path):
+    root = staged(tmp_path, {"miopen/miopen.h": "miopenStatus_t miopenFoo(int);\n"})
+    assert abi.check_installed_headers(str(root), []) is True
+
+
+def test_an_include_tree_with_no_headers_is_an_error(tmp_path):
+    """A tree that stages nothing this recognises never got checked, so passing it
+    would report a clean include tree having read no files at all."""
+    root = staged(tmp_path, {"miopen/miopen-config.cmake": "# miopenFoo_impl\n"})
+    with pytest.raises(abi.AbiError, match="nothing was checked"):
+        abi.check_installed_headers(str(root), [])
+
+
+def test_an_include_tree_with_no_miopen_headers_is_an_error(tmp_path):
+    """Headers from other packages sharing the prefix do not count: passing on them
+    would report MIOpen's headers clean having read none of them."""
+    root = staged(tmp_path, {"hip/hip_runtime.h": "void hipFoo(void);\n"})
+    with pytest.raises(abi.AbiError, match="nothing was checked"):
+        abi.check_installed_headers(str(root), [])
+
+
+def test_other_packages_headers_are_still_scanned_for_leaks(tmp_path, capsys):
+    root = staged(
+        tmp_path,
+        {
+            "miopen/miopen.h": "miopenStatus_t miopenFoo(int);\n",
+            "other/leak.h": "miopenStatus_t miopenFoo_impl(int);\n",
+        },
+    )
+    assert abi.check_installed_headers(str(root), []) is False
+    assert "other/leak.h:1: miopenFoo_impl" in capsys.readouterr().out
+
+
+def test_an_include_tree_exempt_all_the_way_down_is_an_error(tmp_path):
+    """Exempting every staged header leaves the same nothing-was-read result."""
+    root = staged(tmp_path, {"miopen/private/rename.hpp": "void miopenFoo_impl();\n"})
+    with pytest.raises(abi.AbiError, match="nothing was checked"):
+        abi.check_installed_headers(str(root), ["miopen/private"])
+
+
+def test_a_leaked_rename_is_reported_with_file_and_line(tmp_path, capsys):
+    root = staged(
+        tmp_path,
+        {"miopen/miopen.h": "// header\nmiopenStatus_t miopenFoo_impl(int);\n"},
+    )
+    assert abi.check_installed_headers(str(root), []) is False
+    out = capsys.readouterr().out
+    assert "miopen/miopen.h:2: miopenFoo_impl" in out
+
+
+def test_the_private_directory_is_exempt(tmp_path):
+    """The private declarations spell the private names by definition.
+
+    A public header is staged alongside so the exemption is what carries the pass;
+    without one the tree scans nothing, which is its own failure.
+    """
+    root = staged(
+        tmp_path,
+        {
+            "miopen/miopen.h": "miopenStatus_t miopenFoo(int);\n",
+            "miopen/private/miopen_impl.h": "miopenStatus_t miopenFoo_impl(int);\n",
+        },
+    )
+    assert abi.check_installed_headers(str(root), ["miopen/private"]) is True
+
+
+def test_the_exemption_is_by_path_not_by_file_name(tmp_path, capsys):
+    """A file named like the private header, staged elsewhere, still trips.
+
+    Matching on the name alone would let any header called miopen_impl.h
+    smuggle the rename into the public tree.
+    """
+    root = staged(
+        tmp_path,
+        {"miopen/miopen_impl.h": "miopenStatus_t miopenFoo_impl(int);\n"},
+    )
+    assert abi.check_installed_headers(str(root), ["miopen/private"]) is False
+    assert "miopenFoo_impl" in capsys.readouterr().out
+
+
+def test_a_name_merely_containing_impl_is_not_a_leak(tmp_path):
+    """ck_impl_interface and friends are ordinary identifiers.
+
+    The check matches whole identifiers against the same pattern the symbol
+    checks use, so a substring search's false positives do not appear here.
+    """
+    root = staged(
+        tmp_path,
+        {
+            "miopen/miopen.h": (
+                "void ck_impl_interface(void);\n"
+                "int miopen_impl_helper;\n"
+                "void miopenFoo_implementation(void);\n"
+            )
+        },
+    )
+    assert abi.check_installed_headers(str(root), []) is True
+
+
+def test_only_headers_are_scanned(tmp_path, capsys):
+    """A CMake package file staged alongside the headers is not a header.
+
+    Nothing compiles against it, and counting it would inflate the number the
+    check reports as scanned.
+    """
+    root = staged(
+        tmp_path,
+        {
+            "miopen/miopen.h": "miopenStatus_t miopenFoo(int);\n",
+            "miopen/miopen-config.cmake": "# miopenFoo_impl\n",
+        },
+    )
+    assert abi.check_installed_headers(str(root), []) is True
+    assert "1 installed headers" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# The binary stand-in
+#
+# The co-version and superset checks ask a shared object for three things:
+# what it exports, what SONAME it declares, and what it is linked against.
+# --------------------------------------------------------------------------
+
+
+class FakeElf:
+    """A shared object as the binary checks see it."""
+
+    def __init__(self, path, symbols=(), soname="", needed=()):
+        self.path = Path(path)
+        self._symbols = set(symbols)
+        self._soname = soname
+        self._needed = tuple(needed)
+
+    def defined_dynamic_functions(self):
+        return set(self._symbols)
+
+    def soname(self):
+        return self._soname
+
+    def needed(self):
+        return sorted(self._needed)
+
+
+def wrapper_elf(
+    symbols=(), soname="libMIOpen.so.1", needed=("libMIOpen_private.so.1",)
+):
+    return FakeElf("libMIOpen.so", symbols, soname, needed)
+
+
+def private_elf(symbols=(), soname="libMIOpen_private.so.1"):
+    return FakeElf("libMIOpen_private.so", symbols, soname, ())
+
+
+# --------------------------------------------------------------------------
+# Co-versioning
+#
+# The two libraries are halves of one build. When they are not, the usual
+# cause is a stale build directory holding one half of an earlier one.
+# --------------------------------------------------------------------------
+
+
+def test_matched_versions_pass():
+    assert abi.check_coversioned(wrapper_elf(), private_elf()) is True
+
+
+def test_a_soname_major_mismatch_fails():
+    private = private_elf(soname="libMIOpen_private.so.2")
+    assert abi.check_coversioned(wrapper_elf(), private) is False
+
+
+def test_a_needed_version_mismatch_fails():
+    """The declared SONAMEs can agree while the link edge points elsewhere.
+
+    This is the case a SONAME-only comparison misses, and the one that
+    actually decides what the loader binds.
+    """
+    wrapper = wrapper_elf(needed=("libMIOpen_private.so.0",))
+    assert abi.check_coversioned(wrapper, private_elf()) is False
+
+
+def test_the_failure_names_all_three_observed_strings(capsys):
+    """Which of the three is the odd one out is the whole diagnosis."""
+    wrapper = wrapper_elf(soname="libMIOpen.so.1", needed=("libMIOpen_private.so.0",))
+    abi.check_coversioned(wrapper, private_elf(soname="libMIOpen_private.so.2"))
+    out = capsys.readouterr().out
+    assert "libMIOpen.so.1" in out
+    assert "libMIOpen_private.so.2" in out
+    assert "libMIOpen_private.so.0" in out
+
+
+def test_an_unversioned_wrapper_soname_fails():
+    """A wrapper with no soversion at all cannot be shown to match anything."""
+    wrapper = wrapper_elf(soname="libMIOpen.so", needed=("libMIOpen_private.so",))
+    assert (
+        abi.check_coversioned(wrapper, private_elf(soname="libMIOpen_private.so"))
+        is False
+    )
+
+
+# --------------------------------------------------------------------------
+# Private -> wrapper superset
+#
+# The baseline check compares the wrapper against a recorded list, so an entry
+# point the wrapper never re-exported is absent from both sides and passes.
+# Only the private library knows the full set of renamed entry points.
+# --------------------------------------------------------------------------
+
+
+def test_every_renamed_entry_point_having_a_stub_passes():
+    wrapper = wrapper_elf(symbols=("miopenFoo", "miopenBar"))
+    private = private_elf(symbols=("miopenFoo_impl", "miopenBar_impl"))
+    assert abi.check_impl_superset(wrapper, private) is True
+
+
+def test_a_renamed_entry_point_with_no_stub_fails():
+    wrapper = wrapper_elf(symbols=("miopenFoo",))
+    private = private_elf(symbols=("miopenFoo_impl", "miopenBar_impl"))
+    assert abi.check_impl_superset(wrapper, private) is False
+
+
+def test_the_missing_stub_is_reported_under_its_public_name(capsys):
+    """That is the name the stub would carry, and the one to grep for."""
+    wrapper = wrapper_elf(symbols=("miopenFoo",))
+    private = private_elf(symbols=("miopenFoo_impl", "miopenBar_impl"))
+    abi.check_impl_superset(wrapper, private)
+    out = capsys.readouterr().out
+    assert "  miopenBar\n" in out
+    assert "miopenBar_impl" not in out
+
+
+def test_private_symbols_that_were_never_renamed_are_not_required():
+    """Only the renamed set is forwarded; the rest stay private by design."""
+    wrapper = wrapper_elf(symbols=("miopenFoo",))
+    private = private_elf(symbols=("miopenFoo_impl", "miopenInternalThing"))
+    assert abi.check_impl_superset(wrapper, private) is True
+
+
+def test_a_private_library_with_no_renamed_symbols_is_an_error():
+    """Zero renamed entry points means the wrong file -- --private-lib aimed at the
+    wrapper, or a build where the rename was never applied -- not a satisfied
+    superset."""
+    wrapper = wrapper_elf(symbols=("miopenFoo",))
+    private = private_elf(symbols=("miopenInternalThing",))
+    with pytest.raises(abi.AbiError, match="not a flag-on private library"):
+        abi.check_impl_superset(wrapper, private)
+
+
+# --------------------------------------------------------------------------
+# Exit codes
+#
+# Each check above returning False is only half the contract; the other half is
+# that the subcommand folds it into its exit status. Dropping one `ok &=` would
+# leave every test above passing while the gate ignored that check entirely.
+# 0 is pass, 1 is a check that failed, 2 is a check that could not run.
+# --------------------------------------------------------------------------
+
+
+def run_check_wrapper(
+    tmp_path, monkeypatch, wrapper, private, extra=(), wrapper_only=()
+):
+    """Run `check-wrapper` through main() against stand-ins for the two libraries."""
+    baseline = tmp_path / "public_symbols.baseline"
+    baseline.write_text("miopenFoo\nmiopenBar\nmiopenExcluded\n")
+    excluded = tmp_path / "excluded_symbols.txt"
+    excluded.write_text("miopenExcluded\n")
+    listed = tmp_path / "wrapper_only_symbols.txt"
+    listed.write_text("".join(sym + "\n" for sym in wrapper_only))
+    libs = {"libMIOpen.so": wrapper, "libMIOpen_private.so": private}
+    monkeypatch.setattr(abi, "open_elf", lambda path, what: libs[path])
+    return abi.main(
+        [
+            "check-wrapper",
+            "libMIOpen.so",
+            "--baseline",
+            str(baseline),
+            "--excluded",
+            str(excluded),
+            "--wrapper-only",
+            str(listed),
+            "--private-lib",
+            "libMIOpen_private.so",
+            *extra,
+        ]
+    )
+
+
+def good_wrapper(**overrides):
+    return wrapper_elf(**{"symbols": ("miopenFoo", "miopenBar"), **overrides})
+
+
+def good_private(**overrides):
+    symbols = ("miopenFoo_impl", "miopenBar_impl", "miopenExcluded")
+    return private_elf(**{"symbols": symbols, **overrides})
+
+
+def test_check_wrapper_passes_a_consistent_pair(tmp_path, monkeypatch, capsys):
+    assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), good_private()) == 0
+    assert "wrapper public-abi symbol check: PASS" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_on_a_coversion_mismatch(tmp_path, monkeypatch, capsys):
+    private = good_private(soname="libMIOpen_private.so.2")
+    assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private) == 1
+    assert "wrapper public-abi symbol check: FAIL" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_on_a_missing_stub(tmp_path, monkeypatch, capsys):
+    private = good_private(
+        symbols=("miopenFoo_impl", "miopenBar_impl", "miopenBaz_impl", "miopenExcluded")
+    )
+    assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private) == 1
+    assert "wrapper public-abi symbol check: FAIL" in capsys.readouterr().out
+
+
+def run_with_needed_baseline(tmp_path, monkeypatch, listed):
+    needed = tmp_path / "wrapper_needed.baseline"
+    needed.write_text("".join(entry + "\n" for entry in listed))
+    return run_check_wrapper(
+        tmp_path,
+        monkeypatch,
+        good_wrapper(needed=("libMIOpen_private.so.1", "libc.so.6")),
+        good_private(),
+        extra=("--needed-baseline", str(needed)),
+    )
+
+
+def test_check_wrapper_passes_a_matching_needed_baseline(tmp_path, monkeypatch, capsys):
+    listed = ("libMIOpen_private.so.1", "libc.so.6")
+    assert run_with_needed_baseline(tmp_path, monkeypatch, listed) == 0
+    assert "DT_NEEDED list matches baseline (2 entries)" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_a_differing_needed_baseline(tmp_path, monkeypatch, capsys):
+    listed = ("libMIOpen_private.so.1", "libhipdnn_backend.so")
+    assert run_with_needed_baseline(tmp_path, monkeypatch, listed) == 1
+    out = capsys.readouterr().out
+    assert "DT_NEEDED list differs from baseline" in out
+    assert "missing from build: libhipdnn_backend.so" in out
+    assert "unexpected in build: libc.so.6" in out
+    assert "wrapper public-abi symbol check: FAIL" in out
+
+
+def test_check_wrapper_fails_without_the_private_lib_dependency(
+    tmp_path, monkeypatch, capsys
+):
+    wrapper = good_wrapper(needed=("libc.so.6",))
+    assert run_check_wrapper(tmp_path, monkeypatch, wrapper, good_private()) == 1
+    out = capsys.readouterr().out
+    assert "flag-on wrapper has no DT_NEEDED on libMIOpen_private" in out
+    assert "wrapper public-abi symbol check: FAIL" in out
+
+
+def test_check_wrapper_fails_on_a_hipdnn_backend_dependency(
+    tmp_path, monkeypatch, capsys
+):
+    wrapper = good_wrapper(needed=("libMIOpen_private.so.1", "libhipdnn_backend.so"))
+    assert run_check_wrapper(tmp_path, monkeypatch, wrapper, good_private()) == 1
+    out = capsys.readouterr().out
+    assert "wrapper has DT_NEEDED on libhipdnn_backend.so" in out
+    assert "wrapper public-abi symbol check: FAIL" in out
+
+
+def test_check_wrapper_that_cannot_run_exits_2(tmp_path, monkeypatch, capsys):
+    # A private library with no renamed symbols makes the superset check raise.
+    private = good_private(symbols=("miopenExcluded",))
+    assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private) == 2
+    assert "not a flag-on private library" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# Wrapper-only functions
+#
+# The flag-on wrapper exports a few functions of its own, declared in a header
+# installed only with the flag on and absent from the flag-off baseline. They
+# have no _impl, so none of the files that mirror miopen.h lists them.
+# --------------------------------------------------------------------------
+
+ACCESSOR = "miopenGetLastForwardedError"
+
+
+def test_check_wrapper_passes_an_exported_wrapper_only_symbol(
+    tmp_path, monkeypatch, capsys
+):
+    wrapper = good_wrapper(symbols=("miopenFoo", "miopenBar", ACCESSOR))
+    result = run_check_wrapper(
+        tmp_path, monkeypatch, wrapper, good_private(), wrapper_only=(ACCESSOR,)
+    )
+    assert result == 0
+    assert "wrapper public-abi symbol check: PASS" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_a_missing_wrapper_only_symbol(
+    tmp_path, monkeypatch, capsys
+):
+    result = run_check_wrapper(
+        tmp_path, monkeypatch, good_wrapper(), good_private(), wrapper_only=(ACCESSOR,)
+    )
+    assert result == 1
+    assert f"missing from build: {ACCESSOR}" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_a_wrapper_only_symbol_in_the_baseline(
+    tmp_path, monkeypatch, capsys
+):
+    """A symbol the flag-off build exports too is not wrapper-only.
+
+    Listing it leaves the expected set unchanged, so only this finding fails.
+    """
+    result = run_check_wrapper(
+        tmp_path,
+        monkeypatch,
+        good_wrapper(),
+        good_private(),
+        wrapper_only=("miopenFoo",),
+    )
+    assert result == 1
+    out = capsys.readouterr().out
+    assert "wrapper-only symbols file lists symbols that are in the baseline" in out
+    assert "  miopenFoo\n" in out
+
+
+def run_with_public_header(tmp_path, monkeypatch, header_text):
+    header = tmp_path / "miopen.h"
+    header.write_text(header_text)
+    wrapper = good_wrapper(symbols=("miopenFoo", "miopenBar", ACCESSOR))
+    return run_check_wrapper(
+        tmp_path,
+        monkeypatch,
+        wrapper,
+        good_private(),
+        extra=("--public-header", str(header)),
+        wrapper_only=(ACCESSOR,),
+    )
+
+
+def test_check_wrapper_fails_a_wrapper_only_symbol_declared_in_miopen_h(
+    tmp_path, monkeypatch, capsys
+):
+    header = f"MIOPEN_EXPORT miopenStatus_t {ACCESSOR}(miopenStatus_t* status);\n"
+    assert run_with_public_header(tmp_path, monkeypatch, header) == 1
+    out = capsys.readouterr().out
+    assert "wrapper-only symbols file lists entry points that ARE declared" in out
+    assert f"  {ACCESSOR}\n" in out
+
+
+def test_check_wrapper_ignores_a_wrapper_only_symbol_named_in_a_comment(
+    tmp_path, monkeypatch, capsys
+):
+    """miopen.h may point readers at the function without declaring it."""
+    header = f"/* Flag-on builds also offer {ACCESSOR}. */\n// See {ACCESSOR}.\n"
+    assert run_with_public_header(tmp_path, monkeypatch, header) == 0
+    assert "no wrapper-only symbol appears in miopen.h" in capsys.readouterr().out
+
+
+def test_check_installed_headers_exempts_the_private_directory_by_default(tmp_path):
+    root = staged(
+        tmp_path,
+        {
+            "miopen/miopen.h": "miopenStatus_t miopenFoo(void);\n",
+            "miopen/private/miopen_impl.h": "miopenStatus_t miopenFoo_impl(void);\n",
+        },
+    )
+    assert abi.main(["check-installed-headers", str(root)]) == 0
+
+
+def test_check_installed_headers_fails_on_a_leak(tmp_path):
+    root = staged(
+        tmp_path, {"miopen/miopen.h": "miopenStatus_t miopenFoo_impl(void);\n"}
+    )
+    assert abi.main(["check-installed-headers", str(root)]) == 1
+
+
+def test_check_installed_headers_that_cannot_run_exits_2(tmp_path):
+    assert abi.main(["check-installed-headers", str(tmp_path / "missing")]) == 2
+
+
+# --------------------------------------------------------------------------
+# check-headers end to end
+#
+# A minimal split: two miopen.h entry points, one of them the exempt stub, and
+# every file that has to agree with them. Each override flag is passed, so the
+# run reads only these files and never asks git.
+# --------------------------------------------------------------------------
+
+SPLIT_PUBLIC = """
+MIOPEN_EXPORT const char* miopenGetErrorString(miopenStatus_t error);
+MIOPEN_EXPORT miopenStatus_t miopenCreate(miopenHandle_t* handle);
+"""
+SPLIT_IMPL = """
+extern "C" const char* miopenGetErrorString_impl(miopenStatus_t error);
+extern "C" miopenStatus_t miopenCreate_impl(miopenHandle_t* handle);
+"""
+SPLIT_RENAMES = """
+#define miopenGetErrorString miopenGetErrorString_impl
+#define miopenCreate miopenCreate_impl
+"""
+EMPTY_WRAPPER_HEADER = "#pragma once\n#include <miopen/miopen.h>\n"
+ACCESSOR_HEADER = f"""#pragma once
+#include <miopen/miopen.h>
+#ifdef MIOPEN_BETA_API
+MIOPEN_EXPORT miopenStatus_t {ACCESSOR}(miopenStatus_t* forwardedStatus);
+#endif
+"""
+
+
+def split_wrapper(*stubs: str) -> str:
+    return wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);"), *stubs
+    )
+
+
+def accessor_stub(
+    body: str = "    *forwardedStatus = miopenStatusSuccess;",
+    param: str = "miopenStatus_t* forwardedStatus",
+) -> str:
+    return f"""
+extern "C" miopenStatus_t {ACCESSOR}({param})
+{{
+{body}
+    return miopenStatusSuccess;
+}}
+"""
+
+
+def run_check_headers(tmp_path, **overrides):
+    """Run `check-headers` through main(); a None override leaves that flag off."""
+    files = {
+        "public_header": SPLIT_PUBLIC,
+        "impl_header": SPLIT_IMPL,
+        "rename_header": SPLIT_RENAMES,
+        "wrapper": split_wrapper(),
+        "wrapper_header": EMPTY_WRAPPER_HEADER,
+        "wrapper_only": "# nothing yet\n",
+        "provider_rename": SPLIT_RENAMES,
+        "provider_api": CONSUMER_SOURCE,
+        "range_definitions": DEFINITIONS_SOURCE,
+        "range_test": CONSUMER_SOURCE,
+        **overrides,
+    }
+    argv = ["check-headers", "--source-root", str(tmp_path / "projects" / "miopen")]
+    for key, text in files.items():
+        if text is None:
+            continue
+        path = tmp_path / key
+        path.write_text(text, encoding="utf-8")
+        argv += [f"--{key.replace('_', '-')}", str(path)]
+    return abi.main(argv)
+
+
+def with_accessor(**overrides):
+    """One consistent wrapper-only function, with `overrides` applied on top."""
+    return {
+        "wrapper_header": ACCESSOR_HEADER,
+        "wrapper_only": f"{ACCESSOR}\n",
+        "wrapper": split_wrapper(accessor_stub()),
+        **overrides,
+    }
+
+
+def test_check_headers_passes_the_split_fixture(tmp_path, capsys):
+    assert run_check_headers(tmp_path) == 0
+    assert "header consistency check: PASS" in capsys.readouterr().out
+
+
+def test_check_headers_passes_a_consistent_wrapper_only_function(tmp_path, capsys):
+    """Its stub must be held to its own rules, not to the forwarding stubs'."""
+    assert run_check_headers(tmp_path, **with_accessor()) == 0
+    out = capsys.readouterr().out
+    assert "wrapper.cpp covers exactly the 3 miopen.h + hipdnn_forwarding.h" in out
+    assert "all 1 wrapper-only stubs call no _impl" in out
+    assert "all 2 wrapper stubs forward to their own _impl symbol" in out
+    assert "header consistency check: PASS" in out
+
+
+def test_check_headers_fails_when_the_header_and_list_disagree(tmp_path, capsys):
+    assert run_check_headers(tmp_path, **with_accessor(wrapper_only="")) == 1
+    out = capsys.readouterr().out
+    assert f"- declared in hipdnn_forwarding.h, not listed: {ACCESSOR}" in out
+
+
+def test_check_headers_fails_a_name_declared_in_both_headers(tmp_path, capsys):
+    both = EMPTY_WRAPPER_HEADER + (
+        "MIOPEN_EXPORT miopenStatus_t miopenCreate(miopenHandle_t* handle);\n"
+    )
+    result = run_check_headers(
+        tmp_path, wrapper_header=both, wrapper_only="miopenCreate\n"
+    )
+    assert result == 1
+    out = capsys.readouterr().out
+    assert "declared in both miopen.h and hipdnn_forwarding.h" in out
+    assert "  miopenCreate\n" in out
+
+
+def test_check_headers_fails_a_missing_wrapper_only_stub(tmp_path, capsys):
+    assert run_check_headers(tmp_path, **with_accessor(wrapper=split_wrapper())) == 1
+    out = capsys.readouterr().out
+    assert (
+        f"- declared in miopen.h + hipdnn_forwarding.h, absent from wrapper.cpp:"
+        f" {ACCESSOR}" in out
+    )
+
+
+def test_check_headers_fails_a_drifted_wrapper_only_prototype(tmp_path, capsys):
+    drifted = split_wrapper(accessor_stub(param="int* forwardedStatus"))
+    assert run_check_headers(tmp_path, **with_accessor(wrapper=drifted)) == 1
+    out = capsys.readouterr().out
+    assert "wrapper.cpp prototypes have drifted from hipdnn_forwarding.h" in out
+    assert "int*" in out
+
+
+def test_check_headers_fails_a_wrapper_only_stub_with_a_dispatch_macro(
+    tmp_path, capsys
+):
+    body = (
+        f"    MIOPEN_WRAPPER_DISPATCH({ACCESSOR});\n"
+        "    *forwardedStatus = miopenStatusSuccess;"
+    )
+    wrapper = split_wrapper(accessor_stub(body=body))
+    assert run_check_headers(tmp_path, **with_accessor(wrapper=wrapper)) == 1
+    assert f"{ACCESSOR} carries a dispatch macro" in capsys.readouterr().out
+
+
+def test_check_headers_fails_a_wrapper_only_stub_calling_an_impl(tmp_path, capsys):
+    body = f"    return {ACCESSOR}_impl(forwardedStatus);"
+    wrapper = split_wrapper(accessor_stub(body=body))
+    assert run_check_headers(tmp_path, **with_accessor(wrapper=wrapper)) == 1
+    assert f"{ACCESSOR} calls {ACCESSOR}_impl" in capsys.readouterr().out
+
+
+def test_check_headers_skips_a_checkout_without_a_core_source(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    assert run_check_headers(tmp_path, public_header=None) == 0
+    out = capsys.readouterr().out
+    assert "SKIP" in out
+    assert "include/miopen/miopen.h: not tracked at HEAD" in out
+
+
+def test_check_headers_treats_an_untracked_wrapper_header_and_list_as_empty(
+    tmp_path, monkeypatch, capsys
+):
+    """Removing the optional files must not turn the gate off."""
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    result = run_check_headers(tmp_path, wrapper_header=None, wrapper_only=None)
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "SKIP" not in out
+    assert "include_wrapper/miopen/hipdnn_forwarding.h is not part of this tree" in out
+    assert "test/public_abi/wrapper_only_symbols.txt is not part of this tree" in out
+    assert "wrapper_only_symbols.txt lists exactly the 0 hipdnn_forwarding.h" in out
+    assert "wrapper.cpp covers exactly the 2 miopen.h + hipdnn_forwarding.h" in out
+    assert "header consistency check: PASS" in out
+
+
+def test_check_headers_keeps_checking_without_the_wrapper_header_and_list(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    drifted = wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);").replace(
+            "miopenHandle_t* handle", "int* handle"
+        )
+    )
+    result = run_check_headers(
+        tmp_path, wrapper_header=None, wrapper_only=None, wrapper=drifted
+    )
+    assert result == 1
+    out = capsys.readouterr().out
+    assert "SKIP" not in out
+    assert "wrapper.cpp prototypes have drifted from miopen.h" in out
+
+
+def test_check_headers_fails_a_wrapper_only_stub_when_the_header_is_untracked(
+    tmp_path, monkeypatch, capsys
+):
+    """With no header there is nothing declaring the stub, so it is an extra."""
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    overrides = with_accessor(wrapper_header=None, wrapper_only=None)
+    assert run_check_headers(tmp_path, **overrides) == 1
+    out = capsys.readouterr().out
+    assert "SKIP" not in out
+    assert (
+        f"+ present in wrapper.cpp, not declared in miopen.h + hipdnn_forwarding.h:"
+        f" {ACCESSOR}" in out
+    )
+
+
+def test_check_headers_fails_a_listed_symbol_when_the_header_is_untracked(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    assert run_check_headers(tmp_path, **with_accessor(wrapper_header=None)) == 1
+    out = capsys.readouterr().out
+    assert f"+ listed, not declared in hipdnn_forwarding.h: {ACCESSOR}" in out
+
+
+def test_check_headers_fails_a_declared_symbol_when_the_list_is_untracked(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    assert run_check_headers(tmp_path, **with_accessor(wrapper_only=None)) == 1
+    out = capsys.readouterr().out
+    assert f"- declared in hipdnn_forwarding.h, not listed: {ACCESSOR}" in out
+
+
+def test_check_headers_still_fails_a_tracked_but_unreadable_wrapper_header(
+    tmp_path, monkeypatch, capsys
+):
+    """Only an untracked file counts as empty; a broken checkout stays an error."""
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=True))
+    assert run_check_headers(tmp_path, wrapper_header=None) == 2
+    assert "hipdnn_forwarding.h" in capsys.readouterr().err

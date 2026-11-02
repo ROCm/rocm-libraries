@@ -20,9 +20,14 @@ from rocke.core.arch import ArchTarget, known_arches
 
 from dispatch.attention import (
     ATTENTION_REGISTRY,
+    DENSE_ALGORITHM,
+    DENSE_GRID_ALGORITHM,
+    DENSE_PERSIST_ALGORITHM,
     AttentionRequest,
     attention_candidates,
 )
+
+_ALGORITHMS = ("auto", DENSE_ALGORITHM, DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM)
 
 # Candidates that serve a *path* rather than one kernel: the concrete backend is
 # chosen downstream by attention_unified on the running device (wave64 MFMA on
@@ -34,10 +39,10 @@ _PATH_CANDIDATES = frozenset({"attention_unified_2d", "attention_unified_3d"})
 
 def _requests(arch: str):
     for dtype in ("fp16", "bf16"):
-        for hdim in (64, 128, 256):
+        for hdim in (64, 128, 192, 256):
             for block in (16, 32, 64):
                 for sq, sk in ((1, 4096), (512, 512), (2048, 2048)):
-                    for algorithm in ("auto", "attention_dense"):
+                    for algorithm in _ALGORITHMS:
                         yield AttentionRequest(
                             batch=2,
                             nhead_q=16,
@@ -113,7 +118,8 @@ class TestDeclaredCoverage(unittest.TestCase):
             by_name["attention_gfx942_dense_pipe"]["capability"]["arches"], ["gfx942"]
         )
         self.assertEqual(
-            by_name["attention_gfx950_dense"]["capability"]["arches"], ["gfx950"]
+            by_name["attention_gfx950_dense_persist_widedma"]["capability"]["arches"],
+            ["gfx950"],
         )
         self.assertEqual(
             by_name["attention_gfx950_d256"]["capability"]["arches"], ["gfx950"]
@@ -147,7 +153,7 @@ class TestDeclaredHeadSizes(unittest.TestCase):
     def test_the_unified_paths_declare_the_backend_head_sizes(self):
         shapes = ATTENTION_REGISTRY.get("attention_unified_2d").capability.shapes
         self.assertIn(
-            {"dims": ["hdim_q"], "allowed": [64, 128, 256]},
+            {"dims": ["hdim_q"], "allowed": [64, 128, 192, 256]},
             [s.as_dict() for s in shapes],
         )
 

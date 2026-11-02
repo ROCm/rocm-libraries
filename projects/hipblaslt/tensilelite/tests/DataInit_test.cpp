@@ -3,11 +3,17 @@
 
 #include <gtest/gtest.h>
 #include "DataInitialization.hpp"             // isMXTensor / Problem
+#include "ClientProblemFactory.hpp"
 #include "DataInitializationHelpers.hpp"    // detail::* (MX-only, internally guarded)
+#include "ProgramOptions.hpp"
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ContractionSolution.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/KernelLanguageTypes.hpp>
+#include <Tensile/PerformanceMetricTypes.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
+#include <Tensile/hip/HipUtils.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -15,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -30,7 +37,10 @@
 #endif
 
 using TensileLite::ContractionProblemGemm;
+using TensileLite::ContractionSolution;
 using TensileLite::DataTypeInfo;
+using TensileLite::KernelLanguage;
+using TensileLite::PerformanceMetric;
 using TensileLite::TensorDescriptor;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
@@ -41,6 +51,12 @@ namespace dt = TensileLite::Client::detail;
 #endif
 namespace
 {
+    template <typename T>
+    void setOption(TensileLite::Client::po::variables_map& args, std::string const& name, T value)
+    {
+        args[name].value() = std::move(value);
+    }
+
     // -----------------------------------------------------------------------
     // Helper: build a ContractionProblemGemm with the requested A/B dtypes.
     // Mirrors tests/MXScalePadding_test.cpp::makeMXProblem so the geometry
@@ -59,7 +75,9 @@ namespace
                                        size_t           K = 256,
                                        size_t           batch  = 1,
                                        bool             transA = true,
-                                       bool             transB = false)
+                                       bool             transB = false,
+                                       int              mxBlockFreeA = 1,
+                                       int              mxBlockFreeB = 1)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(
             transA, transB,
@@ -73,10 +91,102 @@ namespace
             M, M * N,                       // ldc, strideC
             M, M * N,                       // ldd, strideD
             0.0);                           // beta
-        if(mxBlockA > 0) problem.setMXScaleA(rocisa::DataType::E8, mxBlockA);
-        if(mxBlockB > 0) problem.setMXScaleB(rocisa::DataType::E8, mxBlockB);
+        if(mxBlockA > 0)
+            problem.setMXScaleA(rocisa::DataType::E8, mxBlockA, {},
+                                /*padScaleTensorFreeDim=*/true, mxBlockFreeA);
+        if(mxBlockB > 0)
+            problem.setMXScaleB(rocisa::DataType::E8, mxBlockB, {},
+                                /*padScaleTensorFreeDim=*/true, mxBlockFreeB);
         return problem;
     }
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+    TensileLite::Client::po::variables_map makeMinimalClientArgs(int mxScaleFormat)
+    {
+        using namespace TensileLite::Client;
+
+        po::variables_map args;
+        setOption(args, "problem-identifier", std::string("Contraction_l_Ailk_Bljk_Cijk_Dijk"));
+        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{128, 128, 1, 512}});
+        setOption(args, "strided-batched", true);
+        setOption(args, "batch-mode", 0);
+        setOption(args, "grouped-gemm", false);
+        setOption(args, "sparse", 0);
+        setOption(args, "high-precision-accumulate", false);
+        setOption(args, "kernel-language", KernelLanguage::Any);
+        setOption(args, "performance-metric", PerformanceMetric::DeviceEfficiency);
+        setOption(args, "deterministic-mode", false);
+        setOption(args, "c-equal-d", false);
+        setOption(args, "type", rocisa::DataType::Float8);
+        setOption(args, "a-type", rocisa::DataType::Float8);
+        setOption(args, "b-type", rocisa::DataType::Float8);
+        setOption(args, "c-type", rocisa::DataType::Float);
+        setOption(args, "d-type", rocisa::DataType::Float);
+        setOption(args, "alpha-type", rocisa::DataType::Float);
+        setOption(args, "beta-type", rocisa::DataType::Float);
+        setOption(args, "compute-input-type-A", rocisa::DataType::Float8);
+        setOption(args, "compute-input-type-B", rocisa::DataType::Float8);
+        setOption(args, "f32-xdl-math-op", rocisa::DataType::Float);
+        setOption(args, "activation-compute-type", rocisa::DataType::Float);
+        // Deliberately 0 here (not 32): these only control whether
+        // ClientProblemFactory calls setMXScaleA/B on the *internal dummy*
+        // problem it builds for sizing purposes (see ClientProblemFactory.cpp),
+        // which is unrelated to the `problem` object this test passes directly
+        // into referenceNeedsPerSolutionRecompute(). When non-zero here, the
+        // DataInitialization ctor's storage-geometry computation for the
+        // swizzled MX-scale tensor indexes problem.freeIndicesA()[0] /
+        // freeIndicesB()[0] on that dummy problem without a bounds check; for
+        // the minimal synthetic problem-size/identifier used here those
+        // indices can be empty, which segfaults (only reachable on real
+        // hardware, so it stays hidden behind GTEST_SKIP() on any other arch).
+        // m_mxScaleFormat (checked by referenceNeedsPerSolutionRecompute) is
+        // read directly from "mx-scale-format" below, independent of these.
+        setOption(args, "mx-a-block", 0);
+        setOption(args, "mx-b-block", 0);
+        setOption(args, "mx-a-type", rocisa::DataType::E8);
+        setOption(args, "mx-b-type", rocisa::DataType::E8);
+        setOption(args, "mx-scale-format", mxScaleFormat);
+        setOption(args, "fused-gemm-a2a", false);
+        setOption(args, "metadata-layout", 0);
+        setOption(args, "a-ops", TensileLite::TensorOps{});
+        setOption(args, "b-ops", TensileLite::TensorOps{});
+        setOption(args, "c-ops", TensileLite::TensorOps{});
+        setOption(args, "d-ops", TensileLite::TensorOps{});
+        setOption(args, "use-gradient", false);
+        setOption(args, "output-amaxD", false);
+        setOption(args, "use-scaleAB", std::string());
+        setOption(args, "use-scaleCD", false);
+        // ClientProblemFactory::m_useBias / m_biasSrc are plain `int` members
+        // with NO default member initializer (see ClientProblemFactory.hpp);
+        // they're only assigned when args.count("use-bias") /
+        // args.count("bias-source") is true. Without these two options,
+        // m_useBias holds whatever garbage was left on the stack/heap when
+        // ClientProblemFactory was constructed. If that garbage is non-zero,
+        // ContractionProblemGemm::setBias() takes a branch that indexes
+        // m_tensors[m_biasSrc].sizes()[batchIdx] with batchIdx left at its
+        // default of 2 for this non-batched dummy problem (m_batchIndices is
+        // empty) -- an out-of-bounds read that segfaults. This is why the
+        // crash only showed up when the test ran in isolation (a fresh
+        // process, as CI's per-test ctest invocation does): the leftover
+        // stack/heap contents differ from running the whole 733-test binary
+        // in one process, where prior tests happened to leave zeroed memory
+        // behind and masked the bug. Setting these explicitly makes the
+        // behavior deterministic regardless of process/memory history.
+        setOption(args, "use-bias", 0);
+        setOption(args, "bias-source", static_cast<int>(ContractionProblemGemm::TENSOR::D));
+        setOption(args, "use-scaleAlphaVec", 0);
+        setOption(args, "device-idx", 0);
+        setOption(args, "num-elements-to-validate", 0);
+        setOption(args, "pristine-on-gpu", true);
+        setOption(args, "prune-mode", TensileLite::Client::PruneSparseMode::PruneRandom);
+        setOption(args, "rotating-buffer-size", 0);
+        setOption(args, "rotating-buffer-mode", 0);
+        setOption(args, "bounds-check", TensileLite::Client::BoundsCheckMode::Disable);
+        return args;
+    }
+
+#endif
+
 } // namespace
 
 // =============================================================================
@@ -202,6 +312,40 @@ TEST(IsMXProblem, OnlyB_isMX_AIsBF16)
                          /*mxBlockA=*/0, /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
+TEST(IsMXProblem, BothFP8Block128)
+{
+    // 1x128 block scaling: mxBlock only has to be positive, so widening the
+    // block must not change MX-problem detection or the scale dtypes.
+    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
+                         /*mxBlockA=*/128, /*mxBlockB=*/128);
+    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_EQ(p.mxBlockA(), 128);
+    EXPECT_EQ(p.mxBlockB(), 128);
+}
+TEST(IsMXProblem, BothFP8FreeTile128)
+{
+    // 128x128 block scaling. isMXProblem keys off mxBlock{A,B} only, so adding a
+    // free-dimension extent must not change detection either way.
+    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
+                         /*mxBlockA=*/128, /*mxBlockB=*/128,
+                         /*M=*/128, /*N=*/128, /*K=*/256, /*batch=*/1,
+                         /*transA=*/true, /*transB=*/false,
+                         /*mxBlockFreeA=*/128, /*mxBlockFreeB=*/128);
+    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_EQ(p.mxBlockA(), 128);
+    EXPECT_EQ(p.mxBlockB(), 128);
+    EXPECT_EQ(p.mxBlockFreeA(), 128);
+    EXPECT_EQ(p.mxBlockFreeB(), 128);
+}
+TEST(IsMXProblem, FreeTileDefaultsToOne)
+{
+    // Every problem built before MXBlockFree* existed must keep reporting 1,
+    // which is the divide-by-nothing 1xmxBlock layout.
+    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
+                         /*mxBlockA=*/128, /*mxBlockB=*/128);
+    EXPECT_EQ(p.mxBlockFreeA(), 1);
+    EXPECT_EQ(p.mxBlockFreeB(), 1);
+}
 TEST(IsMXProblem, NeitherIsMX)
 {
     auto p = makeProblem(rocisa::DataType::BFloat16, rocisa::DataType::BFloat16,
@@ -245,6 +389,53 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, BFloat8_OneBytePerElement)
         kStrideElems, static_cast<float>(info.elementSize));
     EXPECT_EQ(bytes, kStrideElems);
 }
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+TEST(DataInitializationReferenceRecompute, Gfx950RequiresPerSolutionRecomputeForSwizzledMX)
+{
+    hipDeviceProp_t prop{};
+    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+    if(std::string(prop.gcnArchName).find("gfx950") == std::string::npos)
+        GTEST_SKIP() << "gfx950-specific recompute behavior is only observable on gfx950";
+
+    auto problem = makeProblem(rocisa::DataType::Float8,
+                               rocisa::DataType::Float8,
+                               /*mxBlockA=*/32,
+                               /*mxBlockB=*/32);
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    TensileLite::Client::DataInitialization   dataInit(args, factory);
+
+    ContractionSolution noSwizzleSolution;
+    noSwizzleSolution.problemType.mxScaleFormat = 0;
+    ContractionSolution swizzleSolution;
+    swizzleSolution.problemType.mxScaleFormat = 1;
+
+    EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &noSwizzleSolution));
+    EXPECT_TRUE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
+}
+
+TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolutions)
+{
+    hipDeviceProp_t prop{};
+    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+    if(std::string(prop.gcnArchName).find("gfx1250") == std::string::npos)
+        GTEST_SKIP() << "gfx1250-specific reuse behavior is only observable on gfx1250";
+
+    auto problem = makeProblem(rocisa::DataType::Float8,
+                               rocisa::DataType::Float8,
+                               /*mxBlockA=*/32,
+                               /*mxBlockB=*/32);
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    TensileLite::Client::DataInitialization   dataInit(args, factory);
+
+    ContractionSolution swizzleSolution;
+    swizzleSolution.problemType.mxScaleFormat = 1;
+
+    EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
+}
+#endif
 
 // =============================================================================
 //   Section 4 — direct calls into TensileLite::Client::detail (MX builds only)
@@ -413,4 +604,201 @@ TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
                                                scale, data, 0, 0)));
 }
 
+
+// =============================================================================
+//   Section 5 - downsampleMXScaleFreeDim
+//
+//   mxDataGenerator only tiles scales along one axis, so a 2D MX scaling tile
+//   (MXBlockFree{A,B} > 1) is produced by generating the 1xmxBlock layout and
+//   collapsing every group of mxBlockFree free-dimension entries here. The
+//   representative is the group MAXIMUM for UE8M0 scales (byte order == numeric
+//   order, so a byte-wise max is exact) and the group's first entry otherwise.
+//
+//   Two buffer layouts have to work:
+//     kFast  (bound dim at index 0, TN A / NT B) -> [free][kBlock]
+//     !kFast                                     -> [kBlock][free]
+// =============================================================================
+
+// kFast: src is [free][kBlock] with 4 free rows x 2 K-blocks; a 2-row tile
+// collapses it to [2][2], taking the max down each column of the pair.
+TEST(DownsampleMXScaleFreeDim, KFastTakesGroupMaxPerKBlock)
+{
+    //            kb0   kb1
+    // free 0:     10     1
+    // free 1:      3    20
+    // free 2:      7     7
+    // free 3:      7     8
+    std::vector<uint8_t> src = {10, 1, 3, 20, 7, 7, 7, 8};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/2, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
+
+    EXPECT_EQ(dst[0], 10); // tile 0, kb0: max(10, 3)
+    EXPECT_EQ(dst[1], 20); // tile 0, kb1: max(1, 20)
+    EXPECT_EQ(dst[2],  7); // tile 1, kb0: max(7, 7)
+    EXPECT_EQ(dst[3],  8); // tile 1, kb1: max(7, 8)
+}
+
+// !kFast: src is [kBlock][free], so the free axis is the fast one.
+TEST(DownsampleMXScaleFreeDim, KSlowTakesGroupMaxPerKBlock)
+{
+    // kb0: free 0..3 = 10, 3, 7, 7
+    // kb1: free 0..3 =  1, 20, 7, 8
+    std::vector<uint8_t> src = {10, 3, 7, 7, 1, 20, 7, 8};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/2, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/false, /*unsignedExponentScale=*/true);
+
+    // dst is [kBlock][tiledFree] with tiledFree == 2.
+    EXPECT_EQ(dst[0], 10); // kb0, tile 0
+    EXPECT_EQ(dst[1],  7); // kb0, tile 1
+    EXPECT_EQ(dst[2], 20); // kb1, tile 0
+    EXPECT_EQ(dst[3],  8); // kb1, tile 1
+}
+
+// A free dimension that is not a multiple of the tile leaves a short last
+// group; the max must be taken over only the entries that exist.
+TEST(DownsampleMXScaleFreeDim, PartialLastTileStopsAtTheFreeDimension)
+{
+    // 3 free rows x 1 K-block, tile of 2 -> tiles {0,1} and {2}.
+    std::vector<uint8_t> src = {5, 9, 4};
+    std::vector<uint8_t> dst(2, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/3,
+                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
+
+    EXPECT_EQ(dst[0], 9); // max(5, 9)
+    EXPECT_EQ(dst[1], 4); // the lone survivor, not a read past the buffer
+}
+
+// Without an unsigned-exponent encoding a byte-wise max is meaningless, so the
+// group's first entry is copied verbatim.
+TEST(DownsampleMXScaleFreeDim, NonExponentScaleKeepsFirstOfEachGroup)
+{
+    std::vector<uint8_t> src = {5, 9, 4, 1};
+    std::vector<uint8_t> dst(2, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/false);
+
+    EXPECT_EQ(dst[0], 5);
+    EXPECT_EQ(dst[1], 4);
+}
+
+// mxBlockFree == 1 is the layout every pre-MXBlockFree config uses: the helper
+// must not touch the destination at all, since the caller writes straight into
+// the scale buffer in that case.
+TEST(DownsampleMXScaleFreeDim, TileExtentOneIsANoOp)
+{
+    std::vector<uint8_t> src = {5, 9, 4, 1};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), 4, 1, /*mxBlockFree=*/1, 1,
+                                 true, true);
+    for(auto b : dst)
+        EXPECT_EQ(b, 0xEE);
+
+    // Empty buffers are equally inert.
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/0, 1, 2, 1,
+                                 true, true);
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), 4, /*kBlocks=*/0, 2, 1,
+                                 true, true);
+    for(auto b : dst)
+        EXPECT_EQ(b, 0xEE);
+}
+
+// Multi-byte scale elements are copied whole. elemBytes != 1 also disables the
+// max, since the comparison only inspects the first byte.
+TEST(DownsampleMXScaleFreeDim, MultiByteElementsAreCopiedWhole)
+{
+    // 4 free rows x 1 K-block, 2 bytes per scale, tile of 2.
+    std::vector<uint8_t> src = {0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/2,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
+
+    EXPECT_EQ(dst[0], 0xAA);
+    EXPECT_EQ(dst[1], 0xBB);
+    EXPECT_EQ(dst[2], 0x11);
+    EXPECT_EQ(dst[3], 0x22);
+}
+
+// =============================================================================
+//   Section 6 - varyMXScaleFreeTiles
+//
+//   Random data quantizes every block against 0x7F, so the downsampled 2D
+//   scales are all equal and a wrong scale row would still validate. The helper
+//   offsets each tile by -2..2 so neighbouring free tiles always differ.
+// =============================================================================
+
+// kFast: [tiledFree][kBlock]. delta = (g + 2*kb) % 5 - 2.
+TEST(VaryMXScaleFreeTiles, KFastNeighbouringTilesDiffer)
+{
+    std::vector<uint8_t> s(4 * 2, 0x7F); // 4 tiles x 2 K-blocks
+
+    dt::varyMXScaleFreeTiles(s.data(), /*tiledFreeDim=*/4, /*kBlocks=*/2, /*kFast=*/true);
+
+    EXPECT_EQ(s[0], 0x7F - 2); // g0 kb0
+    EXPECT_EQ(s[1], 0x7F + 0); // g0 kb1
+    EXPECT_EQ(s[2], 0x7F - 1); // g1 kb0
+    EXPECT_EQ(s[3], 0x7F + 1); // g1 kb1
+    EXPECT_EQ(s[4], 0x7F + 0); // g2 kb0
+    EXPECT_EQ(s[6], 0x7F + 1); // g3 kb0
+    for(size_t kb = 0; kb < 2; kb++)
+        for(size_t g = 0; g + 1 < 4; g++)
+            EXPECT_NE(s[g * 2 + kb], s[(g + 1) * 2 + kb]) << "g=" << g << " kb=" << kb;
+}
+
+// !kFast: [kBlock][tiledFree] gets the same per-(tile, K-block) offset.
+TEST(VaryMXScaleFreeTiles, KSlowMatchesKFastPerTile)
+{
+    std::vector<uint8_t> fast(3 * 2, 0x7F);
+    std::vector<uint8_t> slow(3 * 2, 0x7F);
+
+    dt::varyMXScaleFreeTiles(fast.data(), 3, 2, /*kFast=*/true);
+    dt::varyMXScaleFreeTiles(slow.data(), 3, 2, /*kFast=*/false);
+
+    for(size_t g = 0; g < 3; g++)
+        for(size_t kb = 0; kb < 2; kb++)
+            EXPECT_EQ(fast[g * 2 + kb], slow[kb * 3 + g]) << "g=" << g << " kb=" << kb;
+}
+
+// Zero and NaN encodings are left alone; the result never reaches either.
+TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
+{
+    std::vector<uint8_t> s = {0x00, 0xFF, 0x01, 0xFE};
+
+    // kFast, 4 tiles x 1 K-block: deltas -2, -1, 0, +1.
+    dt::varyMXScaleFreeTiles(s.data(), 4, 1, /*kFast=*/true);
+
+    EXPECT_EQ(s[0], 0x00);
+    EXPECT_EQ(s[1], 0xFF);
+    EXPECT_EQ(s[2], 0x01); // 0x01 + 0
+    EXPECT_EQ(s[3], 0xFE); // 0xFE + 1 clamps to 0xFE
+}
+
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
+
+// =============================================================================
+//   Section 5 — TensileLite::hip::CopyTensorVoid
+// =============================================================================
+TEST(CopyTensorVoid, CopiesSource)
+{
+    TensorDescriptor   desc("t", rocisa::DataType::Float, {3, 2});
+    std::vector<float> src(desc.totalAllocatedElements());
+    std::iota(src.begin(), src.end(), 1.0f);
+    std::vector<float> dst(src.size(), 0.0f);
+
+    TensileLite::hip::CopyTensorVoid(dst.data(), src.data(), desc, hipMemcpyHostToHost);
+    ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
+    EXPECT_EQ(dst, src);
+}

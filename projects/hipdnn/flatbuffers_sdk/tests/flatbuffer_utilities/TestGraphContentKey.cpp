@@ -328,6 +328,28 @@ TEST(TestGraphContentKey, SharedAndSeparateRaggedOffsetsCompareUnequal)
     EXPECT_NE(keyFor(ContentCarryingTestGraph{separate}), keyFor(ContentCarryingTestGraph{shared}));
 }
 
+TEST(TestGraphContentKey, DifferentTensorAlignmentComparesUnequal)
+{
+    const Spec defaultAlignment;
+
+    Spec alignment8;
+    alignment8.tensors.front().alignment = 8;
+
+    EXPECT_NE(keyFor(ContentCarryingTestGraph{defaultAlignment}),
+              keyFor(ContentCarryingTestGraph{alignment8}));
+}
+
+TEST(TestGraphContentKey, DifferentTensorRaggedOffsetMultiplierComparesUnequal)
+{
+    const Spec defaultRaggedOffsetMultiplier;
+
+    Spec raggedOffsetMultiplier4;
+    raggedOffsetMultiplier4.tensors.front().raggedOffsetMultiplier = 8;
+
+    EXPECT_NE(keyFor(ContentCarryingTestGraph{defaultRaggedOffsetMultiplier}),
+              keyFor(ContentCarryingTestGraph{raggedOffsetMultiplier4}));
+}
+
 TEST(TestGraphContentKey, ADifferentNodeCountComparesUnequal)
 {
     const Spec single;

@@ -85,6 +85,21 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 // Forward declarations
 class ITensor;
 
+namespace detail
+{
+
+inline int64_t raggedSeqExtent(const std::vector<int64_t>& rowOffsets, int64_t seqStride, int64_t b)
+{
+    if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
+    {
+        return 0;
+    }
+    const auto bIdx = static_cast<size_t>(b);
+    return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+}
+
+} // namespace detail
+
 /**
  * @brief Snapshot of the state a ragged tensor iterator needs to traverse its buffer.
  *
@@ -97,6 +112,43 @@ struct RaggedIterationInfo
     std::vector<int64_t> rowOffsets;
     int seqAxis;
     int64_t seqStride;
+
+    /**
+     * @brief Number of sequence rows stored for batch `b`.
+     *
+     * @param b Batch index.
+     * @return `(rowOffsets[b+1] - rowOffsets[b]) / seqStride`, or 0 when `b` is outside
+     *         `[0, B)`.
+     */
+    int64_t seqExtent(int64_t b) const
+    {
+        return detail::raggedSeqExtent(rowOffsets, seqStride, b);
+    }
+
+    /**
+     * @brief Whether a logical index lies past its batch's stored sequence rows.
+     *
+     * Out-of-block positions have no storage of their own: they alias another batch's
+     * rows or run past the end of the buffer, so they must not be dereferenced.
+     *
+     * @param indices Full logical index; `indices[0]` is the batch.
+     * @return True if `indices[seqAxis] >= seqExtent(indices[0])`.
+     */
+    bool isOutOfBlock(const std::vector<int64_t>& indices) const
+    {
+        return indices[static_cast<size_t>(seqAxis)] >= seqExtent(indices[0]);
+    }
+
+    bool operator==(const RaggedIterationInfo& other) const
+    {
+        return rowOffsets == other.rowOffsets && seqAxis == other.seqAxis
+               && seqStride == other.seqStride;
+    }
+
+    bool operator!=(const RaggedIterationInfo& other) const
+    {
+        return !(*this == other);
+    }
 };
 
 template <bool IsConst = false>
@@ -418,15 +470,9 @@ public:
             return static_cast<int64_t>(rowOffsets.size()) - 1;
         }
 
-        // Per-batch sequence extent: number of sequence rows in batch b.
         int64_t seqExtent(int64_t b) const
         {
-            if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
-            {
-                return 0;
-            }
-            const auto bIdx = static_cast<size_t>(b);
-            return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+            return detail::raggedSeqExtent(rowOffsets, seqStride, b);
         }
     };
 
@@ -540,10 +586,10 @@ public:
     virtual ITensorIterator<true> cbegin() const = 0;
     virtual ITensorIterator<true> cend() const = 0;
 
-    /// True iff the elements occupy the memory span with no gaps, i.e.
-    /// elementCount == elementSpace. This says nothing about the ORDER in which a
-    /// linear walk of that span visits them; a permutation of the strides is packed
-    /// too, and iterating one linearly visits the right addresses in the wrong order.
+    /// True iff elementCount == elementSpace and no dimension of size greater than 1
+    /// has a zero stride. This says nothing about the ORDER in which a linear walk of
+    /// that span visits the elements; a permutation of the strides is packed too, and
+    /// iterating one linearly visits the right addresses in the wrong order.
     virtual bool isPacked() const = 0;
 
     virtual void markHostModified() = 0;
@@ -791,6 +837,10 @@ protected:
     bool computeIsPacked(const std::vector<int64_t>& dims,
                          const std::vector<int64_t>& strides) const
     {
+        if(hasBroadcastAxis(dims, strides))
+        {
+            return false;
+        }
         // Item count = largest stride * item count in that dimension
         return (calculateItemCount(dims) == calculateElementSpace(dims, strides));
     }
@@ -831,8 +881,8 @@ public:
         , _elementCount(TensorBase<T>::calculateItemCount(dims))
     {
         validateDimsAndStridesSameSize();
-        validateAllPositive(_dims, "dimension");
-        validateAllPositive(_strides, "stride");
+        validateAllAtLeast(_dims, 1, "positive", "dimension");
+        validateAllAtLeast(_strides, 0, "non-negative", "stride");
 
         // Set packed flag after validations since it can be incorrect if dims/strides are invalid.
         _packed = TensorBase<T>::computeIsPacked(dims, strides);
@@ -933,15 +983,18 @@ private:
         }
     }
 
-    void validateAllPositive(const std::vector<int64_t>& values, const std::string& valueName) const
+    void validateAllAtLeast(const std::vector<int64_t>& values,
+                            int64_t minimum,
+                            const char* requirement,
+                            const std::string& valueName) const
     {
         for(size_t i = 0; i < values.size(); ++i)
         {
-            if(values[i] <= 0)
+            if(values[i] < minimum)
             {
                 std::ostringstream oss;
-                oss << "All " << valueName << "s must be positive. " << valueName << " " << i
-                    << " is " << values[i];
+                oss << "All " << valueName << "s must be " << requirement << ". " << valueName
+                    << " " << i << " is " << values[i];
                 throw std::invalid_argument(oss.str());
             }
         }

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #include "test_seed.hpp"
 #include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_types.hpp"
 
 // required common headers
 #include "../../common/utils_device_ptr.hpp"
@@ -99,7 +100,21 @@ using HipcubBlockRunLengthDecodeTestParams
                        Params<rocprim::half, int, 256, 9, 7>,
                        Params<rocprim::bfloat16, int, 256, 9, 7>>;
 
-TYPED_TEST_SUITE(HipcubBlockRunLengthDecodeTest, HipcubBlockRunLengthDecodeTestParams);
+struct HipcubBlockRunLengthDecodeTestNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        return type_tag<typename Params::item_type>() + "_"
+               + type_tag<typename Params::length_type>() + "_"
+               + std::to_string(Params::block_size) + "_" + std::to_string(Params::runs_per_thread)
+               + "_" + std::to_string(Params::decoded_items_per_thread);
+    }
+};
+
+TYPED_TEST_SUITE(HipcubBlockRunLengthDecodeTest,
+                 HipcubBlockRunLengthDecodeTestParams,
+                 HipcubBlockRunLengthDecodeTestNameGenerator);
 
 template<class ItemT,
          class LengthT,

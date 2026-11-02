@@ -66,8 +66,8 @@ struct RankedEngines
 /// heuristic query, one applicability answer, all visible in the call chain.
 ///
 /// `buildFailed` is true when from_binary failed; `graph` may still be non-null in that
-/// case (it was allocated before the call). In the deviceless
-/// unit harnesses, which supply a canned `engines` and never execute anything.
+/// case (it was allocated before the call). It is null in the deviceless unit
+/// harnesses, which supply a canned `engines` and never execute anything.
 struct GraphSession
 {
     GraphSession();

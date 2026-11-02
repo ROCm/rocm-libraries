@@ -34,6 +34,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/config.hpp>
@@ -156,7 +157,32 @@ constexpr hipError_t invoke_reduce_by_key(Args&&... args)
     }
 }
 
-TYPED_TEST_SUITE(RocprimDeviceReduceByKey, Params);
+struct RocprimDeviceReduceByKeyNameGenerator
+{
+    template<class T>
+    static std::string type_tag_or_array()
+    {
+        if constexpr(std::is_same_v<T, test_utils::custom_test_array_type<double, 8>>)
+            return "ArrayDoublex8";
+        else
+            return type_tag<T>();
+    }
+
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag_or_array<typename Params::key_type>() + "_"
+                        + type_tag_or_array<typename Params::value_type>() + "_"
+                        + std::to_string(Params::min_segment_length) + "_"
+                        + std::to_string(Params::max_segment_length);
+        if constexpr(Params::use_identity_iterator) n += "_Ident";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        if constexpr(Params::deterministic) n += "_Det";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceReduceByKey, Params, RocprimDeviceReduceByKeyNameGenerator);
 
 TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 {

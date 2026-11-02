@@ -1,0 +1,278 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict] # not supported by arch
+
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 50
+  EnqueuesPerSync: 10
+  NumWarmups: 10
+  KernelTime: true
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  DataInitTypeD: 12
+  DataInitTypeScaleAlphaVec: 12
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  PreciseKernelTime: false
+  Device: 0
+  SkipSlowSolutionRatio: 0.0
+  #PrintSolutionRejectionReason: true
+  KeepBuildTmp: false
+  RotatingBufferSize: 1024
+  UseEffLike: false
+  SyncsPerBenchmark: 0
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: B
+    DestDataType: B
+    ComputeDataType: S
+    HighPrecisionAccumulate: true
+    UseScaleAlphaVec: 1
+    TransposeA: True
+    TransposeB: False
+    UseBeta: True
+    UseBias: 1
+    Activation: True
+    ActivationHPA: True
+    ActivationType: hipblaslt_all
+    Batched: True
+  - InitialSolutionParameters: 
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - WavefrontSize: [32] # Default Value: [-1] # Range: [-1, 32, 64]
+    - TDMInst: [3] # Default Value: [0] # Range: [0, 1, 2, 3]
+    - PrefetchLocalRead: [1] # Default Value: [1] # Range: [0, 1, ..., 127, 128]
+    - PrefetchGlobalRead: [2] # Default Value: [1] # Range: [0, 1, ..., 15, 16]
+    - PrefetchGlobalReadA: [-1]
+    - PrefetchGlobalReadB: [-1]
+    - ExpandPointerSwap: [False] # Default Value: [True] # Range: [False, True]
+    - 1LDSBuffer: [0] # Default Value: [0] # Range: [-1, 0, 1]
+    - TDMIterateMode: [0] # Default Value: [0] # Range: [-1, 0, ..., 2, 3]
+    - TDMSplit: [False] # Default Value: [False] # Range: [False, True]
+    - CompactLoopStore: [False] # Default Value: [False] # Range: [False, True]
+    - PreloadKernArgs: [True] # Default Value: [True] # Range: [False, True]
+    - LDSTrInst: [True] # Default Value: [False] # Range: [False, True]
+    - ScheduleIterAlg: [4] # Default Value: [3] # Range: [0, 1, ..., 3, 4]
+    - PrefetchGL2: [0, 1, 2] # Default Value: [0] # Range: [0, 1, 2]
+    - LdsPadA: [-1] # Default Value: [-1] # Range: [-1, 0, ..., 48, 64]
+    - LdsPadB: [-1] # Default Value: [-1] # Range: [-1, 0, ..., 48, 64]
+    - LdsBlockSizePerPadA: [-1] # Default Value: [-1] # Range: [-1, 0, ..., 7680, 8192]
+    - LdsBlockSizePerPadB: [-1] # Default Value: [-1] # Range: [-1, 0, ..., 7680, 8192]
+    - GlobalSplitU: [-1] # Default Value: [1] # Range: [-1, 0, ..., 1023, 1024]
+    - WorkAssignment: ["StaticGrid"] # Default Value: ['StaticGrid'] # Range: ['StaticGrid', 'DynamicWorkQueue', 'Hybrid']
+    - GlobalSplitUAlgorithm: ["MultipleBuffer"] # Default Value: ['MultipleBuffer'] # Range: ['SingleBuffer', 'MultipleBuffer', 'MultipleBufferSingleKernel', 'AtomicDest']
+    - WorkGroupMappingXCC: [-1] # Default Value: [1] # Range: [-1, 1, ..., 16, 32]
+    - DepthU: [64, 128, 256, 512] # Default Value: [-1] # Range: [-1, 2, ..., 1023, 1024]
+    - WaveSeparateGlobalReadA: [0] # Default Value: [0] # Range: [0, 1, 2]
+    - WaveSeparateGlobalReadB: [0] # Default Value: [0] # Range: [0, 1, 2]
+    - NumElementsPerBatchStore: [0] # Default Value: [0] # Range: [-1, 0, ..., 254, 255]
+    - SourceSwap: [False, True] # Default Value: [False] # Range: [False, True]
+    - StaggerU: [0] # Default Value: [32] # Range: [0, 2, ..., 32, 64]
+    - StaggerUStride: [-1] # Default Value: [256] # Range: [-1, 0, ..., 1024, 2048]
+    - StorePriorityOpt: [False] # Default Value: [False] # Range: [False, True]
+    - StoreSyncOpt: [0] # Default Value: [0] # Range: [0, 1, ..., 254, 255]
+    - WorkGroupMapping: [0] # Default Value: [8] # Range: [-1024, -1023, ..., 1023, 1024]
+    - GlobalReadVectorWidthA: [-1] # Default Value: [-1] # Range: [-2, -1, ..., 16, 32]
+    - GlobalReadVectorWidthB: [-1] # Default Value: [-1] # Range: [-2, -1, ..., 16, 32]
+    - ClusterLocalRead: [0, 1] # Default Value: [1] # Range: [0, 1]
+    - UseSgprForGRO: [-1] # Default Value: [-1] # Range: [-1, 0, 1]
+    - NonTemporalA: [0] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
+    - NonTemporalB: [0] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
+    - NonTemporalC: [0] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
+    - NonTemporalD: [0] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
+    - TransposeLDS: [-1] # Default Value: [-1] # Range: [-1, 1, 0, 2]
+    - AdaptiveGemm: [0, 1] # Default Value: [0] # Range: [0, 1]
+    - TailloopInNll: [False, True] # Default Value: [False] # Range: [False, True]
+    - ExtraMiLatencyLeft: [-1] # Default Value: [-1] # Range: [-1, 0, ..., 6, 8]
+    - ScheduleGROverBarrier: [-1] # Default Value: [-1] # Range: [-1, 0, 1]
+    - UnrollLoopSwapGlobalReadOrder: [0] # Default Value: [0] # Range: [0, 1]
+    - HalfPLR: [0, 1, 2, 3] # Default Value: [0] # Range: [0, 1, 2, 3]
+    - LDSSegmentInterleave: [0, 1] # Default Value: [0] # Range: [-1, 0, 1]
+    - TDMPlusLdsBuf: [-1] # Default Value: [0] # Range: [-1, 0, 1]
+    - InitCIterWmma: [-1] # Default Value: [-1] # Range: [-1, 0, 1]
+    - SwInstructionPrefetch: [-1] # Default Value: [1] # Range: [-1, 0, ..., False, True]
+    - NonVolatile: [-1] # Default Value: [-1] # Range: [-1, 0, 1]
+    - TemporalHintA: [0, 1] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
+    - TemporalHintB: [0, 1] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
+    - TemporalHintD: [0, 1] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
+    - MbskPrefetchMethod: [-1] # Default Value: [-1] # Range: [-1, 0, 1]
+    - Groups:
+      - - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  4 - totalGranularity  0.12500 - TilesPerCU:  0.12500 - TotalTiles:       32 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  4 - totalGranularity  0.12500 - TilesPerCU:  0.12500 - TotalTiles:       32 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 1] #MT 16x32   - TT 1x32   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  4 - totalGranularity  0.06250 - TilesPerCU:  0.12500 - TotalTiles:       32 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 1, 1] #MT 16x32   - TT 1x32   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  4 - totalGranularity  0.06250 - TilesPerCU:  0.12500 - TotalTiles:       32 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 1, 1] #MT 32x16   - TT 2x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  4 - totalGranularity  0.06250 - TilesPerCU:  0.06250 - TotalTiles:       16 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 1, 1] #MT 48x16   - TT 3x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  4 - totalGranularity  0.04167 - TilesPerCU:  0.06250 - TotalTiles:       16 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 2] #MT 16x32   - TT 1x16   - WG 16x4   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.03125 - TilesPerCU:  0.06250 - TotalTiles:       16 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 4, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 2] #MT 16x32   - TT 1x16   - WG 16x4   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.03125 - TilesPerCU:  0.06250 - TotalTiles:       16 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 4, 2]
+          ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.03125 - TilesPerCU:  0.06250 - TotalTiles:       16 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.03125 - TilesPerCU:  0.06250 - TotalTiles:       16 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 2]
+          ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 2, 1, 1] #MT 32x32   - TT 2x32   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  4 - totalGranularity  0.03125 - TilesPerCU:  0.06250 - TotalTiles:       16 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 4, 1, 1, 1] #MT 64x16   - TT 4x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  4 - totalGranularity  0.03125 - TilesPerCU:  0.06250 - TotalTiles:       16 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 3, 2, 1, 1] #MT 48x32   - TT 3x32   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  4 - totalGranularity  0.02083 - TilesPerCU:  0.06250 - TotalTiles:       16 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 4, 2, 1, 1] #MT 64x32   - TT 4x32   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  4 - totalGranularity  0.01562 - TilesPerCU:  0.06250 - TotalTiles:       16 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1] #MT 32x16   - TT 1x16   - WG 32x2   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.03125 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [32, 2, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 1, 2] #MT 32x32   - TT 2x16   - WG 16x4   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.01562 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 4, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 2, 1] #MT 32x32   - TT 1x32   - WG 32x2   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.01562 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [32, 2, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 2, 1] #MT 64x16   - TT 2x16   - WG 32x2   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.01562 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [32, 2, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 1, 2] #MT 48x32   - TT 3x16   - WG 16x4   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.01042 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 4, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 2] #MT 16x32   - TT 1x16   - WG 16x4   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00781 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 2] #MT 16x32   - TT 1x16   - WG 16x4   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00781 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 4, 1, 1, 2] #MT 64x32   - TT 4x16   - WG 16x4   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.00781 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [16, 4, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 2, 2, 1] #MT 64x32   - TT 2x32   - WG 32x2   - MIBlockM  1 - GSU   4 - LSU  2 - totalGranularity  0.00781 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          WorkGroup: [32, 2, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00781 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00781 - TilesPerCU:  0.03125 - TotalTiles:        8 -- sizes [(32, 16, 1, 1024)]
+          ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1] #MT 64x16   - TT 1x16   - WG 64x2   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00781 - TilesPerCU:  0.01562 - TotalTiles:        4 -- sizes [(32, 16, 1, 1024)]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 2] #MT 32x32   - TT 1x16   - WG 32x4   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00781 - TilesPerCU:  0.01562 - TotalTiles:        4 -- sizes [(32, 16, 1, 1024)]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1] #MT 32x16   - TT 1x16   - WG 32x2   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00781 - TilesPerCU:  0.01562 - TotalTiles:        4 -- sizes [(32, 16, 1, 1024)]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 4, 1] #MT 64x32   - TT 1x32   - WG 64x2   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00391 - TilesPerCU:  0.01562 - TotalTiles:        4 -- sizes [(32, 16, 1, 1024)]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 2, 2] #MT 64x32   - TT 2x16   - WG 32x4   - MIBlockM  1 - GSU   4 - LSU  1 - totalGranularity  0.00391 - TilesPerCU:  0.01562 - TotalTiles:        4 -- sizes [(32, 16, 1, 1024)]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  4 - totalGranularity  0.14062 - TilesPerCU:  0.18750 - TotalTiles:       48 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  4 - totalGranularity  0.14062 - TilesPerCU:  0.18750 - TotalTiles:       48 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [2, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 1, 1] #MT 32x16   - TT 2x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  4 - totalGranularity  0.07031 - TilesPerCU:  0.09375 - TotalTiles:       24 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 1, 1] #MT 16x48   - TT 1x48   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  4 - totalGranularity  0.04688 - TilesPerCU:  0.09375 - TotalTiles:       24 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 1, 1] #MT 16x48   - TT 1x48   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  4 - totalGranularity  0.04688 - TilesPerCU:  0.09375 - TotalTiles:       24 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [2, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 1, 1] #MT 48x16   - TT 3x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  4 - totalGranularity  0.04688 - TilesPerCU:  0.09375 - TotalTiles:       24 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  2 - totalGranularity  0.03516 - TilesPerCU:  0.09375 - TotalTiles:       24 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 2]
+          ClusterDim: [1, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  2 - totalGranularity  0.03516 - TilesPerCU:  0.09375 - TotalTiles:       24 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 2]
+          ClusterDim: [2, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 4, 1, 1, 1] #MT 64x16   - TT 4x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  4 - totalGranularity  0.03516 - TilesPerCU:  0.09375 - TotalTiles:       24 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1] #MT 32x16   - TT 1x16   - WG 32x2   - MIBlockM  1 - GSU   3 - LSU  2 - totalGranularity  0.03516 - TilesPerCU:  0.04688 - TotalTiles:       12 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [32, 2, 2]
+          ClusterDim: [1, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 3, 1, 1] #MT 32x48   - TT 2x48   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  4 - totalGranularity  0.02344 - TilesPerCU:  0.04688 - TotalTiles:       12 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 2, 1] #MT 64x16   - TT 2x16   - WG 32x2   - MIBlockM  1 - GSU   3 - LSU  2 - totalGranularity  0.01758 - TilesPerCU:  0.04688 - TotalTiles:       12 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [32, 2, 2]
+          ClusterDim: [1, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 3, 3, 1, 1] #MT 48x48   - TT 3x48   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  4 - totalGranularity  0.01562 - TilesPerCU:  0.04688 - TotalTiles:       12 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 4, 3, 1, 1] #MT 64x48   - TT 4x48   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  4 - totalGranularity  0.01172 - TilesPerCU:  0.04688 - TotalTiles:       12 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [16, 2, 4]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  1 - totalGranularity  0.00879 - TilesPerCU:  0.04688 - TotalTiles:       12 -- sizes [(32, 24, 1, 960)]
+          ClusterDim: [1, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] #MT 16x16   - TT 1x16   - WG 16x2   - MIBlockM  1 - GSU   3 - LSU  1 - totalGranularity  0.00879 - TilesPerCU:  0.04688 - TotalTiles:       12 -- sizes [(32, 24, 1, 960)]
+          ClusterDim: [2, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 2, 1] #MT 32x48   - TT 1x48   - WG 32x2   - MIBlockM  1 - GSU   3 - LSU  2 - totalGranularity  0.01172 - TilesPerCU:  0.02344 - TotalTiles:        6 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [32, 2, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1] #MT 64x16   - TT 1x16   - WG 64x2   - MIBlockM  1 - GSU   3 - LSU  1 - totalGranularity  0.00879 - TilesPerCU:  0.02344 - TotalTiles:        6 -- sizes [(32, 24, 1, 960)]
+          ClusterDim: [1, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 2, 1] #MT 32x16   - TT 1x16   - WG 32x2   - MIBlockM  1 - GSU   3 - LSU  1 - totalGranularity  0.00879 - TilesPerCU:  0.02344 - TotalTiles:        6 -- sizes [(32, 24, 1, 960)]
+          ClusterDim: [1, 2] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 3, 2, 1] #MT 64x48   - TT 2x48   - WG 32x2   - MIBlockM  1 - GSU   3 - LSU  2 - totalGranularity  0.00586 - TilesPerCU:  0.02344 - TotalTiles:        6 -- sizes [(32, 24, 1, 960)]
+          WorkGroup: [32, 2, 2]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+        - MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 4, 1] #MT 64x48   - TT 1x48   - WG 64x2   - MIBlockM  1 - GSU   3 - LSU  1 - totalGranularity  0.00293 - TilesPerCU:  0.01172 - TotalTiles:        3 -- sizes [(32, 24, 1, 960)]
+          ClusterDim: [1, 1] # Default Value: [[1, 1]] # Range: [[1, 1], [1, 2], ..., [15, 1], [16, 1]]
+      - - TileProcessingStrategy: StreamK # Default Value: ['None'] # Range: ['None', 'DataParallel', 'StreamK']
+          PrefetchAcrossPersistent: 0 # Default Value: [0] # Range: [0, 1]
+          PersistentXCCMapping: 0 # Default Value: [0] # Range: [0, 2, ..., 7, 8]
+        - TileProcessingStrategy: StreamK # Default Value: ['None'] # Range: ['None', 'DataParallel', 'StreamK']
+          PrefetchAcrossPersistent: 1 # Default Value: [0] # Range: [0, 1]
+          PersistentXCCMapping: 0 # Default Value: [0] # Range: [0, 2, ..., 7, 8]
+        - TileProcessingStrategy: DataParallel # Default Value: ['None'] # Range: ['None', 'DataParallel', 'StreamK']
+          PrefetchAcrossPersistent: 0 # Default Value: [0] # Range: [0, 1]
+          PersistentXCCMapping: 0 # Default Value: [0] # Range: [0, 2, ..., 7, 8]
+        - TileProcessingStrategy: DataParallel # Default Value: ['None'] # Range: ['None', 'DataParallel', 'StreamK']
+          PrefetchAcrossPersistent: 1 # Default Value: [0] # Range: [0, 1]
+          PersistentXCCMapping: 0 # Default Value: [0] # Range: [0, 2, ..., 7, 8]
+    BenchmarkJoinParameters: 
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [ 32, 16, 1, 1024 ]
+      - Exact: [ 32, 24, 1, 960 ]
+    - BiasTypeArgs: [B]
+LibraryLogic:
+  ScheduleName: "gfx1250"
+  ArchitectureName: "gfx1250"
+  DeviceNames: ["Device 73f0"]
+#LibraryClient: 
+Backend:
+  Name: Ductile
+  Config:
+    soo: false
+    n_elements_to_validate: 128
+    pop_size: 10
+    auto_pop_size: false
+    n_gen: 3
+    weights:
+      - group_0: [6.545177459716797, 6.545177459716797, 3.8083298206329346, 3.8083298206329346, 3.824988842010498, 3.825003147125244, 3.8428592681884766, 3.8428592681884766, 6.597599029541016, 6.597599029541016, 1.0702705383300781, 3.8250105381011963, 1.0702779293060303, 1.0702815055847168, 3.8511886596679688, 1.0875353813171387, 1.0875353813171387, 3.8511996269226074, 1.0875389575958252, 3.8601293563842773, 3.8601293563842773, 1.0875407457351685, 1.0875407457351685, 6.623793601989746, 6.623793601989746, 3.8642940521240234, 1.0961676836013794, 3.8642940521240234, 1.096170425415039, 1.096170425415039, 6.571377754211426, 6.571377754211426, 3.8380887508392334, 3.8256053924560547, 3.8256053924560547, 3.838099479675293, 6.61069393157959, 6.61069393157959, 3.8381049633026123, 3.857738733291626, 1.0789084434509277, 3.8577468395233154, 1.0789120197296143, 1.0789138078689575, 6.630339622497559, 6.630339622497559, 1.091854214668274, 3.867567777633667, 3.867567777633667, 1.0918569564819336, 1.0983284711837769]
+# End of BBS_TN_0.yaml 

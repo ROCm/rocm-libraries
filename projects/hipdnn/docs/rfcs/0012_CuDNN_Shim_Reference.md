@@ -1,5 +1,8 @@
 # RFC 0012 — Supporting Reference: Verified cuDNN FE v1.24 Surface
 
+- **Status**: see [RFC 0012](./0012_CuDNN_Shim.md)
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+
 This document is the long-form companion to
 [RFC 0012: cuDNN shim for hipDNN](./0012_CuDNN_Shim.md). It collects the
 verbose, source-verified material that the main RFC summarises: the full
@@ -336,25 +339,28 @@ the engine/knob plumbing — which the shim builds on as it lands. The shim
 will:
 
 - Accept all `HeurMode_t` values without error in
-  `create_execution_plans()`. **Interim**: map `A`, `B`, `FALLBACK`,
-  `OPENSOURCE` all to hipDNN's fallback/default selection, and **WARN on
-  first use per process** that the requested mode was not honored. Remap as
-  real hipDNN heuristics arrive.
+  `create_execution_plans()`. Map `A` and `B` to hipDNN's
+  `SelectionHeuristic::ModeA` / `ModeB` prediction policies (RFC 0019 §11.2),
+  and `FALLBACK` and `OPENSOURCE` to hipDNN's fallback/default selection,
+  **WARN**ing that `OPENSOURCE` was not honored.
 
-**Per-note triage.** `select_*` / `deselect_*` notes are not blanket
-no-ops; each note is classified by how it can be honored. The full table
-must be filled in note-by-note before Phase 4, but the handling buckets are:
+**Per-note triage.** Upstream `select_*` keeps only plans carrying the note;
+`deselect_*` drops plans carrying it. Each note is classified by what happens if
+the shim ignores the request: perf-only or unreachable exclusion → **warn**;
+correctness constraint hipDNN can honor → **map**; one it cannot → **error**
+(recorded-error mechanism, RFC §4.4.2); `NOT_SET` → **no-op**. A correctness
+mapping needs a positive engine claim — absence of a negative note proves
+nothing, since hipDNN engines declare no notes by default. Behavior notes
+follow one rule: a note hipDNN engines report (`isKnownBehaviorNote`) maps;
+any other value errors on select and warns on deselect.
 
-| Handling | When | Examples |
-|----------|------|----------|
-| Map to engine capability | hipDNN can express the constraint via engine/knob metadata | deterministic (non-deterministic filter) — wire through now that the note system exists |
-| Warn and ignore | advisory note, safe to drop | informational numerical notes with no correctness impact |
-| **Error** | correctness-critical and hipDNN cannot honor it | requesting deterministic when it cannot be guaranteed — running anyway is wrong |
+**Deterministic.** `deselect_numeric_notes({NONDETERMINISTIC})` maps to a shim
+allowlist of engines that positively claim determinism
+(`detail::isDeterminismClaimed`), to be replaced by engine metadata; if no
+engine survives, the shim fails with `GRAPH_NOT_SUPPORTED`.
 
-The principle: a note that exists to *exclude unsafe plans* must never be
-silently dropped — if the shim can't apply the filter, it errors
-(recorded-error mechanism, RFC §4.4.2) rather than returning a plan the user
-asked to avoid.
+The per-note select/deselect dispositions and their rationale are maintained in
+[KNOWN_DIVERGENCES.md — Note filters](../KNOWN_DIVERGENCES.md#note-filters).
 
 **Resource caps.** For `deselect_workspace_greater_than` and
 `deselect_shared_mem_greater_than` (both confirmed present in v1.24
@@ -384,9 +390,9 @@ typedef for `error_object` in the same header. hipDNN's `Error` (in
   `hipdnn_frontend::Error`, preserving the full public surface name-for-name
   (both fields and methods). `error_t` is exposed as a typedef.
 - The shim's `error_code_t` is an `enum class` mirroring cuDNN FE's set of
-  16 codes (full list in main RFC §4.3). `detail/status_translation.hpp`
-  provides `to_hipdnn(error_code_t) -> hipdnn_frontend::ErrorCode` and the
-  reverse.
+  16 codes (full list in main RFC §4.3). `detail/status_translation.h`
+  provides `toCudnnStatus(hipdnnStatus_t)` and `toHipdnnStatus(cudnnStatus_t)`
+  for the C-style status codes. The `to_hipdnn(error_code_t)` form proposed for `error_code_t` is not built.
 - Codes with no exact hipDNN counterpart (e.g., `NVRTC_COMPILATION_FAILED`,
   `INVALID_CUDA_DEVICE`) collapse to the nearest hipDNN value on the way
   down, and synthesize the cuDNN code on the way up if we can distinguish

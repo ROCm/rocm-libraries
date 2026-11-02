@@ -79,3 +79,5 @@ rocsparse_sctr()
 .. doxygenfunction:: rocsparse_csctr
   :outline:
 .. doxygenfunction:: rocsparse_zsctr
+  :outline:
+.. doxygenfunction:: rocsparse_isctr

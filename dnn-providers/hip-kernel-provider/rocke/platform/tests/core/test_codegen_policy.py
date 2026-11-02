@@ -112,6 +112,28 @@ class TestCodegenPolicy(unittest.TestCase):
             attrs,
         )
 
+    def test_launch_bounds_minimum_is_the_target_wave_size(self):
+        # LLVM discards an inverted min>max range and falls back to its default
+        # 1024 maximum, losing the register budget implied by the kernel limit.
+        for arch, max_wg, expected in (
+            ("gfx950", 64, "64,64"),
+            ("gfx950", 256, "64,256"),
+            ("gfx1151", 32, "32,32"),
+            ("gfx1151", 64, "32,64"),
+        ):
+            with self.subTest(arch=arch, max_wg=max_wg):
+                kernel = _kernel()
+                kernel.attrs["max_workgroup_size"] = max_wg
+                llvm = _lower_kernel_to_llvm_python(kernel, arch=arch)
+                self.assertIn(
+                    f'"amdgpu-flat-work-group-size"="{expected}"',
+                    next(
+                        line
+                        for line in llvm.splitlines()
+                        if line.startswith("attributes #0")
+                    ),
+                )
+
     def test_scheduler_policy_is_not_forwarded_as_a_raw_comgr_flag(self):
         kernel = _kernel()
         apply_codegen_policy(kernel, CodegenPolicy(scheduler_strategy="max-ilp"))

@@ -19,6 +19,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/AsmSetSymbolMap.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
@@ -52,6 +53,141 @@ bool terminatorBranchesTo(BasicBlock* bb, const std::string& label) {
     return false;
 }
 
+/// InsertClusterBarrierPass names wave 0's head `<start>_CBWave0` and points
+/// the latch there. The dispatch label itself is no longer the back-edge target.
+bool terminatorClosesLoop(BasicBlock* bb, const std::string& startLabel) {
+    return terminatorBranchesTo(bb, startLabel) ||
+           terminatorBranchesTo(bb, startLabel + "_CBWave0");
+}
+
+constexpr int kClusterBarrierId = -3;
+constexpr const char* kWaveIdxSymbol = "sgprWaveIdx";
+constexpr const char* kSkipLabelPrefix = "label_skipCBPreSignal_";
+constexpr const char* kWave0HeadSuffix = "_CBWave0";
+
+StinkyRegister makeSymbolicSgpr(const std::string& symbolicName) {
+    StinkyRegister reg(RegType::S, /*regIdx=*/0u, /*regNum=*/1u);
+    reg.setSymbolicName(symbolicName);
+    return reg;
+}
+
+bool isClusterSignalInst(const StinkyInstruction& inst) {
+    if (!isBarrierSignal(inst)) return false;
+    const auto& srcs = inst.getSrcRegs();
+    return !srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt &&
+           srcs[0].getLiteralInt() == kClusterBarrierId;
+}
+
+/// The entrance block of a wave-split loop: compare, branch to the other copy,
+/// and the next block is the wave-0 head. It must not be part of the init clone,
+/// or a non-zero wave would leave the zero-acc prefix immediately.
+bool isWaveDispatchBlock(BasicBlock* bb, BasicBlock* next) {
+    if (bb == nullptr || next == nullptr) return false;
+    if (next->getLabel() != bb->getLabel() + kWave0HeadSuffix) return false;
+    auto* term = dyn_cast<StinkyInstruction>(bb->getTerminator());
+    if (term == nullptr || !isBranch(*term)) return false;
+    return getBranchTarget(*term).rfind(kSkipLabelPrefix, 0) == 0;
+}
+
+BasicBlock* findBlockByLabel(Function& func, const std::string& label) {
+    for (BasicBlock& block : func) {
+        if (block.getLabel() == label) return &block;
+    }
+    return nullptr;
+}
+
+/// Real instructions, skipping the bare cluster signal that only wave 0 has,
+/// so a wave-0 prefix and its copy stay in step.
+bool countsForWaveAlign(const StinkyInstruction& inst) {
+    if (isPseudoInst(&inst)) return false;
+    return !isClusterSignalInst(inst);
+}
+
+/// Index of \p marker in the counted stream, or of the next counted instruction
+/// when \p marker itself is a wave-0-only signal.
+int continuationAlignIndex(BasicBlock* start, const StinkyInstruction* marker) {
+    bool seen = false;
+    int index = 0;
+    for (BasicBlock* bb = start; bb != nullptr; bb = bb->getNext()) {
+        for (IRBase& node : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&node);
+            if (inst == nullptr) continue;
+            if (inst == marker) seen = true;
+            if (!countsForWaveAlign(*inst)) continue;
+            if (seen) return index;
+            ++index;
+        }
+    }
+    return -1;
+}
+
+StinkyInstruction* alignInstAt(BasicBlock* start, int index) {
+    int seen = 0;
+    for (BasicBlock* bb = start; bb != nullptr; bb = bb->getNext()) {
+        for (IRBase& node : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&node);
+            if (inst == nullptr || !countsForWaveAlign(*inst)) continue;
+            if (seen == index) return inst;
+            ++seen;
+        }
+    }
+    return nullptr;
+}
+
+/// Wrap each bare `s_barrier_signal -3` so the shared init clone, which every
+/// wave executes, still lets only wave 0 post the signal.
+bool gateBareClusterSignals(const std::vector<BasicBlock*>& blocks, GfxArchID archId,
+                            int& gateSerial) {
+    std::vector<StinkyInstruction*> bare;
+    for (BasicBlock* bb : blocks) {
+        StinkyInstruction* prevReal = nullptr;
+        for (IRBase& node : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&node);
+            if (inst == nullptr || isPseudoInst(inst)) continue;
+            if (isClusterSignalInst(*inst)) {
+                const bool gated = prevReal != nullptr &&
+                                   prevReal->getUnifiedOpcode() == GFX::s_cbranch_scc0 &&
+                                   getBranchTarget(*prevReal).rfind(kSkipLabelPrefix, 0) == 0;
+                if (!gated) bare.push_back(inst);
+            }
+            prevReal = inst;
+        }
+    }
+    if (bare.empty()) return false;
+
+    static const HwInstDesc labelMCID{
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+    const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
+    const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc0, archId);
+    if (cmpDesc == nullptr || brDesc == nullptr) return false;
+
+    for (StinkyInstruction* signal : bare) {
+        BasicBlock* parent = signal->getParent();
+        if (parent == nullptr) continue;
+        const std::string skip =
+            std::string(kSkipLabelPrefix) + "init" + std::to_string(gateSerial++);
+        AsmIRBuilder builder(*parent, archId);
+        auto nextIt = std::next(BasicBlock::iterator(signal));
+        IRBase* after = (nextIt == parent->end()) ? nullptr : nextIt.getNodePtr();
+        StinkyInstruction* skipLbl =
+            (after != nullptr) ? builder.create(&labelMCID, after) : builder.create(&labelMCID);
+        skipLbl->addModifier<LabelData>(LabelData{skip, /*alignment=*/1});
+
+        StinkyInstruction* brInst = builder.create(brDesc, signal);
+        brInst->addSrcReg(StinkyRegister(skip));
+        brInst->addModifier<LabelData>(LabelData{skip});
+        brInst->addModifier<CommentData>(
+            CommentData{"Execute cluster barrier signal for waveID 0"});
+
+        StinkyInstruction* cmpInst = builder.create(cmpDesc, brInst);
+        cmpInst->addDestReg(StinkyRegister::getSCCRegister());
+        cmpInst->addSrcReg(makeSymbolicSgpr(kWaveIdxSymbol));
+        cmpInst->addSrcReg(StinkyRegister(0));
+        cmpInst->addModifier<CommentData>(CommentData{"Check for waveID 0"});
+    }
+    return true;
+}
+
 //----------------------------------------------------------------------
 // Region discovery: collect startBBs, then compute the region end in-pass.
 //----------------------------------------------------------------------
@@ -79,6 +215,11 @@ std::vector<RegionRange> findRegions(Function& func, const std::string& startLab
         BasicBlock* boundaryBB = nullptr;
         StinkyInstruction* boundaryInst = nullptr;
         for (BasicBlock* bb = startBB; bb; bb = bb->getNext()) {
+            // The entrance compare is not part of the cloned body.
+            if (isWaveDispatchBlock(bb, bb->getNext())) {
+                if (terminatorClosesLoop(bb, startLabel)) break;
+                continue;
+            }
             for (IRBase& node : *bb) {
                 auto* inst = dyn_cast<StinkyInstruction>(&node);
                 if (!isMfmaWithAcc(inst)) continue;
@@ -86,7 +227,7 @@ std::vector<RegionRange> findRegions(Function& func, const std::string& startLab
                 boundaryBB = bb;
                 boundaryInst = inst;
             }
-            if (terminatorBranchesTo(bb, startLabel)) break;
+            if (terminatorClosesLoop(bb, startLabel)) break;
         }
         if (boundaryInst) out.push_back({startBB, boundaryBB, boundaryInst});
     }
@@ -305,7 +446,7 @@ PostCloneFn postCloneFor(const std::string& specName) {
 /// Clone one region into a stage placed before it, then reroute pre-region
 /// entries through the clone. Returns false if skipped (logged inline).
 bool cloneOneRegion(Function& func, const CloneSpec& spec, size_t jobIdx, const RegionRange& region,
-                    GfxArchID archId) {
+                    GfxArchID archId, bool& insertedSymbolic, int& gateSerial) {
     // 1. Re-derive boundaryBB (an earlier job's split may have moved this inst).
     BasicBlock* boundaryBB = region.endInst->getParent();
     if (!boundaryBB) return false;
@@ -320,8 +461,19 @@ bool cloneOneRegion(Function& func, const CloneSpec& spec, size_t jobIdx, const 
     (void)_unused;  // == boundaryBB
     insertLabelAtStart(*bb2, targetLabel, archId);
 
-    // 3. Collect region BBs (startBB..boundaryBB).
-    const auto origRegion = collectRegionBBs(region.startBB, boundaryBB);
+    // 3. Collect region BBs (startBB..boundaryBB). A wave-split entrance is only
+    // the compare/branch, so the clone starts at the wave-0 body. Leaving the
+    // branch in the clone would send every non-zero wave out of the zero-acc
+    // prefix.
+    auto origRegion = collectRegionBBs(region.startBB, boundaryBB);
+    BasicBlock* wave0BB = nullptr;
+    BasicBlock* loop1BB = nullptr;
+    if (origRegion.size() >= 2 && isWaveDispatchBlock(origRegion[0], origRegion[1])) {
+        wave0BB = origRegion[1];
+        if (auto* term = dyn_cast<StinkyInstruction>(origRegion[0]->getTerminator()))
+            loop1BB = findBlockByLabel(func, getBranchTarget(*term));
+        origRegion.erase(origRegion.begin());
+    }
     if (origRegion.empty()) {
         PASS_DEBUG(std::cerr << "  job " << jobIdx << " (" << spec.name
                              << "): empty region; skip\n");
@@ -345,8 +497,80 @@ bool cloneOneRegion(Function& func, const CloneSpec& spec, size_t jobIdx, const 
         fn(cr.clonedBBs);
     }
 
+    // The shared init clone runs for every wave. A bare signal copied from the
+    // wave-0 body has to grow its check back, and the tail has to send non-zero
+    // waves into the other copy instead of back into wave 0.
+    if (gateBareClusterSignals(cr.clonedBBs, archId, gateSerial)) insertedSymbolic = true;
+
+    std::string waveNzTail;
+    if (wave0BB != nullptr && loop1BB != nullptr) {
+        StinkyInstruction* continuation = nullptr;
+        for (IRBase& node : *bb2) {
+            auto* inst = dyn_cast<StinkyInstruction>(&node);
+            if (inst != nullptr && !isPseudoInst(inst)) {
+                continuation = inst;
+                break;
+            }
+        }
+        if (continuation == nullptr && bb2->getNext() != nullptr) {
+            for (IRBase& node : *bb2->getNext()) {
+                auto* inst = dyn_cast<StinkyInstruction>(&node);
+                if (inst != nullptr && !isPseudoInst(inst)) {
+                    continuation = inst;
+                    break;
+                }
+            }
+        }
+        const int index =
+            (continuation != nullptr) ? continuationAlignIndex(wave0BB, continuation) : -1;
+        StinkyInstruction* parallel = (index >= 0) ? alignInstAt(loop1BB, index) : nullptr;
+        if (parallel != nullptr && parallel->getParent() != nullptr) {
+            waveNzTail = targetLabel + "_waveNz";
+            AsmIRBuilder nzBuilder(*parallel->getParent(), archId);
+            static const HwInstDesc labelMCID{
+                GFX::LABEL, GFX::LABEL, 0,       0,
+                0,          0,          "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            StinkyInstruction* nzLbl = nzBuilder.create(&labelMCID, parallel);
+            nzLbl->addModifier<LabelData>(LabelData{waveNzTail, /*alignment=*/1});
+            // The label sits mid-block until the next CFG build. Point the edge at
+            // the block that contains it so the branch is not a dangling target.
+            func.addEdge(cr.clonedBBs.back(), parallel->getParent());
+        }
+    }
+
     // 8. Branch the clone tail to targetLabel (skip origin on first entry).
-    appendBranchTo(func, *cr.clonedBBs.back(), bb2, targetLabel, archId);
+    //    A wave-split loop sends wave 0 there and every other wave to the
+    //    matching point in the copied body.
+    BasicBlock& cloneTail = *cr.clonedBBs.back();
+    if (!waveNzTail.empty()) {
+        AsmIRBuilder tailBuilder(cloneTail, archId);
+        const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
+        const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc0, archId);
+        const HwInstDesc* jumpDesc = getMCIDByUOp(GFX::s_branch, archId);
+        if (cmpDesc != nullptr && brDesc != nullptr && jumpDesc != nullptr) {
+            StinkyInstruction* cmpInst = tailBuilder.create(cmpDesc);
+            cmpInst->addDestReg(StinkyRegister::getSCCRegister());
+            cmpInst->addSrcReg(makeSymbolicSgpr(kWaveIdxSymbol));
+            cmpInst->addSrcReg(StinkyRegister(0));
+            cmpInst->addModifier<CommentData>(CommentData{"Check for waveID 0"});
+
+            StinkyInstruction* brInst = tailBuilder.create(brDesc);
+            brInst->addSrcReg(StinkyRegister(waveNzTail));
+            brInst->addModifier<LabelData>(LabelData{waveNzTail});
+            brInst->addModifier<CommentData>(
+                CommentData{"Execute cluster barrier signal for waveID 0"});
+
+            StinkyInstruction* jump = tailBuilder.create(jumpDesc);
+            jump->addSrcReg(StinkyRegister(targetLabel));
+            jump->addModifier<LabelData>(LabelData{targetLabel});
+            func.addEdge(&cloneTail, bb2);
+            insertedSymbolic = true;
+        } else {
+            appendBranchTo(func, cloneTail, bb2, targetLabel, archId);
+        }
+    } else {
+        appendBranchTo(func, cloneTail, bb2, targetLabel, archId);
+    }
 
     // 9. Reroute pre-region forward entries to land in the clone.
     const std::string& firstClonedLabel = cr.labelMap.count(origStartLabel)
@@ -386,6 +610,10 @@ class RegionClonePass : public StinkyInstPass {
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
         bool mutated = false;
+        bool insertedSymbolic = false;
+        // Per-run, not process-lifetime: a static serial survives into the next
+        // kernel compiled in this process and makes otherwise identical emits differ.
+        int gateSerial = 0;
         size_t jobIdx = 0;
         for (const CloneSpec& spec : cloneList_) {
             const auto regions = findRegions(func, spec.startLabel);
@@ -395,10 +623,16 @@ class RegionClonePass : public StinkyInstPass {
                                  << spec.startLabel << "): " << regions.size() << " region(s)\n");
 
             for (const auto& region : regions) {
-                if (cloneOneRegion(func, spec, jobIdx++, region, archId)) {
+                if (cloneOneRegion(func, spec, jobIdx++, region, archId, insertedSymbolic,
+                                   gateSerial)) {
                     mutated = true;
                 }
             }
+        }
+
+        if (insertedSymbolic) {
+            std::vector<SymbolicOperandFix> fixes;
+            resolveSymbolicOperands(func, fixes);
         }
 
         return mutated ? PreservedAnalyses::none() : preserveCFGAnalyses();

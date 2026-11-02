@@ -9,17 +9,17 @@ Limitations
 ******************************************
 
 hipThreads presents a standard-library-like interface, but GPU hardware imposes constraints that have no counterpart on the CPU.
-The rules below are not compile-time errors; ignoring them causes deadlocks, crashes, or undefined behavior at run time.
-For background on *why* these apply, see the :ref:`execution model <execution-model>`.
+The rules are not compile-time errors. Ignoring them causes deadlocks, crashes, or undefined behavior at run time.
+For background on why these apply, see the :ref:`execution model <execution-model>`.
 
 No synchronous HIP calls while threads are alive
-================================================
+=================================================
 
 Creating a ``hip::wthread`` launches a persistent scheduler kernel that stays resident until the last wthread is destroyed.
-Synchronous HIP calls such as ``hipDeviceSynchronize``, synchronous ``hipMemcpy``, or ``thrust::copy`` wait for *all* GPU work, including the scheduler, and therefore deadlock.
+Synchronous HIP calls such as ``hipDeviceSynchronize()``, synchronous ``hipMemcpy()``, or ``thrust::copy()`` wait for all GPU work, including the scheduler, and therefore deadlock.
 
-* Use asynchronous APIs (``hipMemcpyAsync``, ``hipMemsetAsync``) instead.
-* Or wrap your ``hip::wthread`` objects in a scoped block ``{ ... }`` so they are joined and the scheduler is torn down before any synchronous call.
+- Use asynchronous APIs such as ``hipMemcpyAsync()`` and ``hipMemsetAsync()`` instead.
+- Or wrap your ``hip::wthread`` objects in a scoped block so they are joined and the scheduler is torn down before any synchronous call.
 
 Callables must be ``__device__`` extended lambdas
 =================================================
@@ -55,6 +55,7 @@ In addition:
 
 * GPU threads have private stacks.
   Never capture by reference (``[&]``) a variable that lives on the launching thread's stack; shared data must live in heap or global memory.
+  Those stacks are also small by default, which affects what a callable can keep in local variables; see :ref:`the execution model <execution-model>`.
 * Do not capture a pointer or reference to shared memory (LDS, ``__shared__``).
   Shared memory is private to a single block/workgroup, but ``hip::wthread``s may run in different blocks, so such an address is meaningless to another thread.
   Shared data must live in global device memory (for example, memory from ``hipMalloc``).

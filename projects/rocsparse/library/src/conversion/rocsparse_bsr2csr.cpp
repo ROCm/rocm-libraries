@@ -26,6 +26,7 @@
 #include "rocsparse_bsr2csr.hpp"
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "bsr2csr_device.h"
@@ -33,7 +34,7 @@
 #define launch_bsr2csr_block_per_row_2_7_kernel(block_size, bsr_block_dim)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
         (rocsparse::bsr2csr_block_per_row_2_7_kernel<block_size, bsr_block_dim>), \
-        dim3(mb),                                                                 \
+        dim3(rocsparse::get_grid_size_x(handle, mb, block_size)),                 \
         dim3(block_size),                                                         \
         0,                                                                        \
         stream,                                                                   \
@@ -48,12 +49,12 @@
         csr_descr->base,                                                          \
         csr_val,                                                                  \
         csr_row_ptr,                                                              \
-        csr_col_ind);
+        csr_col_ind)
 
 #define launch_bsr2csr_block_per_row_8_32_kernel(block_size, bsr_block_dim)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \
         (rocsparse::bsr2csr_block_per_row_8_32_kernel<block_size, bsr_block_dim>), \
-        dim3(mb),                                                                  \
+        dim3(rocsparse::get_grid_size_x(handle, mb, block_size)),                  \
         dim3(block_size),                                                          \
         0,                                                                         \
         stream,                                                                    \
@@ -68,13 +69,13 @@
         csr_descr->base,                                                           \
         csr_val,                                                                   \
         csr_row_ptr,                                                               \
-        csr_col_ind);
+        csr_col_ind)
 
 #define launch_bsr2csr_block_per_row_33_256_kernel(block_size, bsr_block_dim, sub_block_dim) \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                      \
         (rocsparse::                                                                         \
              bsr2csr_block_per_row_33_256_kernel<block_size, bsr_block_dim, sub_block_dim>), \
-        dim3(mb),                                                                            \
+        dim3(rocsparse::get_grid_size_x(handle, mb, block_size)),                            \
         dim3(block_size),                                                                    \
         0,                                                                                   \
         stream,                                                                              \
@@ -89,7 +90,7 @@
         csr_descr->base,                                                                     \
         csr_val,                                                                             \
         csr_row_ptr,                                                                         \
-        csr_col_ind);
+        csr_col_ind)
 
 template <typename T, typename I, typename J>
 rocsparse_status rocsparse::bsr2csr_core(rocsparse_handle          handle,

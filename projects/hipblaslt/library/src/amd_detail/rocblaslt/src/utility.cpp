@@ -93,6 +93,14 @@ const char* hipDataType_to_string(hipDataType type)
         return "R_8F_E5M2";
     case HIP_R_8I:
         return "R_8I";
+    case HIP_R_4I:
+        return "R_4I";
+    case HIP_R_32I:
+        return "R_32I";
+    case HIP_C_32F:
+        return "C_32F";
+    case HIP_C_64F:
+        return "C_64F";
     case static_cast<hipDataType>(HIP_R_6F_E2M3):
         return "R_6F_E2M3";
     case static_cast<hipDataType>(HIP_R_6F_E3M2):
@@ -130,6 +138,8 @@ const char* hipDataType_to_bench_string(hipDataType type)
         return "bf16_r";
     case HIP_R_8I:
         return "i8_r";
+    case HIP_R_4I:
+        return "i4_r";
     case HIP_R_32I:
         return "i32_r";
     case HIP_R_8F_E4M3_FNUZ:
@@ -220,6 +230,16 @@ const char* rocblaslt_matrix_layout_attributes_to_string(rocblaslt_matrix_layout
         return "ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE";        
     case ROCBLASLT_MATRIX_LAYOUT_OFFSET:
         return "ROCBLASLT_MATRIX_LAYOUT_OFFSET";
+    case ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY:
+        return "ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY";
+    case ROCBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY:
+        return "ROCBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY";
+    case ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY:
+        return "ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY";
+    case ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH:
+        return "ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH";
+    case ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH:
+        return "ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH";
     case ROCBLASLT_MATRIX_LAYOUT_MAX:
         return "ROCBLASLT_MATRIX_LAYOUT_MAX";
     default:
@@ -289,6 +309,10 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_MAX";
     case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:
         return "MATMUL_DESC_BIAS_BATCH_STRIDE";
+    case ROCBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE:
+        return "MATMUL_DESC_ALPHA_BATCH_STRIDE";
+    case ROCBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE:
+        return "MATMUL_DESC_BETA_BATCH_STRIDE";
     default:
         return "Invalid";
     }
@@ -333,6 +357,30 @@ const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::Scal
         return "Block_32_UE5M3";
     case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
         return "Block_16_UE5M3";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        return "Block_32_BF16";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
+        return "Block_64_BF16";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        return "Block_128_BF16";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        return "Block_32_BF16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        return "Block_64_BF16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        return "Block_128_BF16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        return "Block_32_F16";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
+        return "Block_64_F16";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        return "Block_128_F16";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        return "Block_32_F16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
+        return "Block_64_F16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+        return "Block_128_F16_ZP";
     default:
         return "Invalid";
     }

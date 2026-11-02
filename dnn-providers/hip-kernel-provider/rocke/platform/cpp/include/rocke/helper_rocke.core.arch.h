@@ -95,6 +95,9 @@ const rocke_arch_mma_catalog_t* rocke_archtarget_mma(const rocke_archtarget_t* t
 
 /* target.mma.op_for_shape(...): the resolved MmaOp for an exact (m, n, k) atom
  * shape and (normalised) dtype combo, or NULL if absent. `family` NULL => "mma".
+ * The trailing scales argument is required: NULL leaves scales unconstrained;
+ * {NULL, NULL, ROCKE_MMA_SCALE_NONE} selects unscaled atoms. Invalid filters or
+ * ambiguous matches raise ckc::Error; callers handle errors at a C++ boundary.
  * This is the entry point build_universal_gemm uses to resolve the atom from the
  * target catalog. Forwards to rocke_mma_catalog_op_for_shape on t->mma. */
 const rocke_mmaop_t* rocke_archtarget_op_for_shape(const rocke_archtarget_t* t,
@@ -104,7 +107,8 @@ const rocke_mmaop_t* rocke_archtarget_op_for_shape(const rocke_archtarget_t* t,
                                                    const char* c_dtype,
                                                    int m,
                                                    int n,
-                                                   int k);
+                                                   int k,
+                                                   const rocke_mma_scale_filter_t* scales);
 
 /* target.mma.by_op_id(op_id): the catalog atom whose op_id handle matches
  * `op_id` (the backend's MMA key, e.g. "mfma_f32_16x16x16_f16"), or NULL if the
@@ -124,6 +128,11 @@ bool rocke_archtarget_supports_dtype_combo(
 /* ArchTarget.max_vector_load_dwords(dtype) (dtype accepted for parity, ignored
  * as in Python: width gated by the buffer-load path). */
 int rocke_archtarget_max_vector_load_dwords(const rocke_archtarget_t* t, const char* dtype);
+
+/* ArchTarget.async_lds_max_dwords property: the widest per-lane DRAM->LDS DMA
+ * this arch can do, in dwords (0 = no buffer_load_lds at all). NOT the same as
+ * max_vector_load_dwords, which is the register vector buffer-load width. */
+int rocke_archtarget_async_lds_max_dwords(const rocke_archtarget_t* t);
 
 /* ArchTarget.max_threads_per_block property. */
 int rocke_archtarget_max_threads_per_block(const rocke_archtarget_t* t);

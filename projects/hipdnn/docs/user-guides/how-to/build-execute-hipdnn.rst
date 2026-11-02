@@ -64,12 +64,12 @@ This simplified sample code creates a graph, creates tensors, and adds operation
   // class is provided for assistance. This class ensures sufficient memory is
   // allocated on the host and GPU for each tensor and uses the MigratableMemory
   // class to facilitate synchronizing data between host and device.
-  utilities::Tensor<DataType_t::FLOAT> xTensor(x->get_dim(), TensorLayout::NCHW);
-  utilities::Tensor<DataType_t::FLOAT> scaleTensor(scale->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> biasTensor(bias->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> meanTensor(mean->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> invVarianceTensor(inv_var->get_dim());
-  utilities::Tensor<DataType_t::FLOAT> yTensor(y->get_dim(), TensorLayout::NCHW);
+  utilities::Tensor<float> xTensor(x->get_dim(), TensorLayout::NCHW);
+  utilities::Tensor<float> scaleTensor(scale->get_dim());
+  utilities::Tensor<float> biasTensor(bias->get_dim());
+  utilities::Tensor<float> meanTensor(mean->get_dim());
+  utilities::Tensor<float> invVarianceTensor(inv_var->get_dim());
+  utilities::Tensor<float> yTensor(y->get_dim(), TensorLayout::NCHW);
 
   // [... populate Tensor input data on host ...]
 
@@ -87,7 +87,7 @@ This simplified sample code creates a graph, creates tensors, and adds operation
   variantPack[y->get_uid()] = yTensor.memory().deviceData();
 
   // Execute the graph
-  graph.execute(handle, variant_pack, workspace);
+  graph.execute(handle, variantPack, workspace);
 
   // Make graph output avaialble on host.
   yTensor.memory().markDeviceModified();
@@ -114,3 +114,48 @@ The variant pack specifies which GPU memory address correspond to which tensors.
 The tensors are added to the variant pack using the tensor UID as the key and the GPU memory address as the value.
 It's the responsibility of the application to ensure sufficient GPU memory is allocated for each tensor, and to ensure data is synchronized between the GPU and host memory.
 The Data SDK ``utilities::Tensor`` class assists with tensor host and GPU memory management, though it may not be suitable for all applications.
+
+Measure execution time
+======================
+
+Use ``Graph::execute_timed_ext()`` to execute the active plan once and obtain an
+``ExecutionTiming`` result. Allocate buffers and workspace before the call. The call
+waits for timing to complete, but it does not perform hidden warmups or retries.
+
+Check the returned ``Error`` before using the timing:
+
+* ``DEVICE_ONLY`` means that a stall gate excluded host submission gaps.
+* ``UNSTALLED`` means that the measurement did not use the gate. Depending on the
+  runtime and engine, the event interval may include host submission time.
+* ``INVALID`` means that no usable elapsed value is available.
+
+Do not rank ``DEVICE_ONLY`` and ``UNSTALLED`` samples together. Valid elapsed values
+are finite and non-negative; zero is valid for work below the event timer's resolution.
+
+A watchdog timeout sets ``timedOut`` to true, ``quality`` to ``INVALID``, and leaves
+``elapsedMs`` empty, even if execution succeeds. It does not disable later timed
+executions. A bad ``Error`` also invalidates the timing; it does not imply that no
+device work ran.
+
+A finite negative elapsed time is a bad reading, not a failure: the call still returns
+an OK ``Error``, ``quality`` is ``INVALID``, ``elapsedMs`` is empty, and execution ran
+exactly once with no retry or replay. Only a non-finite (NaN or Inf) elapsed time is a
+backend error and returns a bad ``Error``.
+
+Python returns ``(Error, ExecutionTiming)`` from ``graph.execute_timed_ext()``. The
+corresponding result fields are ``quality``, ``timed_out``, and ``elapsed_ms``.
+
+Autotune and ingestor benchmarking discard a stalled pass on timeout or a valid
+unstalled sample, then rerun every candidate unstalled once. Each new comparison
+attempts device-only timing again. A finite negative elapsed reading during a timed
+run is re-measured without disturbing the requested sample count or the convergence
+window, within a per-candidate budget that counts every negative reading in the pass.
+A stalled pass allows two re-measurements; one more negative reading reruns every
+candidate unstalled, so that bad stalled readings do not remove the fastest
+candidates. An unstalled pass allows two in ingestor benchmarking, and one per
+requested sample (at least two) in autotune, because the Windows HIP runtime reads
+negative at a steady rate (ROCm/rocm-systems#12925). An unstalled candidate that
+exhausts its budget fails.
+
+See :ref:`backend-api-attribute` for the low-level profiling attributes and
+backend context reuse.

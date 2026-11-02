@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,9 @@
 
 #include "rocblas.h"
 #include "rocblas_math.hpp"
-#if __GLIBC__ < 3 && __GLIBC__MINOR__ < 39
+// Older than glibc 2.39. Spelled out rather than "major < 3 && minor < 39", which only
+// happens to mean the same thing while glibc stays on major 2.
+#if defined(__GLIBC__) && (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 39))
 #undef _GLIBCXX_USE_C99_INTTYPES_TR1
 #endif
 #include <cinttypes>

@@ -5,6 +5,8 @@
 #include <array>
 #include <cstddef>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -20,9 +22,16 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <atomic>
+#include <set>
+#include <thread>
+
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+#ifdef HIPDNN_ENGINE_FLYDSL
+#include "tests/engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
+#endif
 #endif
 
 using namespace hip_kernel_provider;
@@ -66,8 +75,8 @@ static std::vector<std::string> expectedEngineNames()
 }
 
 /// Upper bound for the fixed-size buffers below. Raise it when a configuration exposes
-/// more engines than this.
-constexpr uint32_t MAX_EXPECTED_ENGINES = 8;
+/// more engines than this. FlyDSL alone adds one engine per kernel family.
+constexpr uint32_t MAX_EXPECTED_ENGINES = 32;
 
 TEST(TestContainer, ConstructsSuccessfully)
 {
@@ -173,6 +182,126 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
     }
 }
 
+TEST(TestContainer, AContainerRebuiltFromTheRetainedSetsExposesEveryIngestorEngine)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    const auto expectEveryIngestorEngine = [&sets](Container& container, const char* which) {
+        const auto engineIds = container.getEngineManager().getAllEngineIds();
+        for(const auto& set : sets)
+        {
+            const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+            EXPECT_NE(std::find(engineIds.begin(), engineIds.end(), engineId), engineIds.end())
+                << which << " Container has no engine for descriptor set '" << set.engine.name
+                << "'";
+        }
+    };
+
+    // `earlier` takes whatever state managers are still in their slots, discovery's or a
+    // rediscovery's, so these two are on the rebuild path whatever ran before.
+    {
+        const Container earlier;
+    }
+    Container afterDestroyed;
+    expectEveryIngestorEngine(afterDestroyed, "the after-destroyed");
+    Container whileAlive;
+    expectEveryIngestorEngine(whileAlive, "the while-alive");
+}
+
+// The slot tests below refill the slots first: whichever test constructs the process's
+// first Container takes what discovery built, and shuffling moves that test around.
+
+TEST(TestContainer, EachDiscoveredSetsStateManagerIsHandedOutOnceAndToItsOwnSet)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    // The schema id is what a manager exposes of the set it was built from, so a slot
+    // serving another set's manager shows up only between sets whose schemas differ.
+    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> schemaIds;
+    for(const auto& set : sets)
+    {
+        schemaIds.insert(set.schema.id);
+    }
+    ASSERT_GE(schemaIds.size(), 2U)
+        << "every discovered set shares one metadata schema, so a mispaired slot is invisible";
+
+    rediscoverStateManagersForTesting();
+
+    for(const auto& set : sets)
+    {
+        const auto stateManager = takeDiscoveredStateManager(set.engine.id);
+        ASSERT_NE(stateManager.get(), nullptr)
+            << "no state manager handed off for descriptor set '" << set.engine.name << "'";
+        EXPECT_EQ(stateManager->metadataSchema().id, set.schema.id)
+            << "the id of '" << set.engine.name << "' took the state manager of another set";
+        EXPECT_EQ(takeDiscoveredStateManager(set.engine.id).get(), nullptr)
+            << "'" << set.engine.name << "' handed out a second state manager";
+    }
+}
+
+TEST(TestContainer, ConcurrentTakesOfOneDiscoveredStateManagerHandItOutOnce)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+    const auto& engineId = sets.front().engine.id;
+    rediscoverStateManagersForTesting();
+
+    constexpr size_t THREAD_COUNT = 8;
+    std::atomic<bool> start{false};
+    std::atomic<size_t> handedOut{0};
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    for(size_t threadIndex = 0; threadIndex < THREAD_COUNT; ++threadIndex)
+    {
+        threads.emplace_back([&start, &handedOut, &engineId] {
+            while(!start.load())
+            {
+                std::this_thread::yield();
+            }
+            if(takeDiscoveredStateManager(engineId) != nullptr)
+            {
+                ++handedOut;
+            }
+        });
+    }
+    start.store(true);
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    EXPECT_EQ(handedOut.load(), 1U);
+}
+
+TEST(TestContainer, TheFirstContainerAfterRediscoveryTakesEveryDiscoveredStateManager)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+    rediscoverStateManagersForTesting();
+
+    {
+        const Container container;
+    }
+
+    // A slot still full means that Container built the set's state manager a second time.
+    for(const auto& set : sets)
+    {
+        EXPECT_EQ(takeDiscoveredStateManager(set.engine.id).get(), nullptr)
+            << "the Container did not take the state manager discovered for '" << set.engine.name
+            << "'";
+    }
+}
+
 TEST(TestContainer, GetEngineNameReturnsTheDeclaredNameForEveryIngestorEngine)
 {
     using namespace hip_kernel_provider::kernel_ingestor_engine;
@@ -250,7 +379,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
 
     Handle handle;
     auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-    if(deviceString != "gfx942" && deviceString != "gfx950")
+    if(deviceString != "gfx90a" && deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }
@@ -275,13 +404,42 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
         graphBuffer.data(), graphBuffer.size());
 
     auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
+    // Unused when neither the ASM nor the FlyDSL engines are built.
+    [[maybe_unused]] const auto applies = [&applicableEngines](auto engineId) {
+        return std::find(applicableEngines.begin(), applicableEngines.end(), engineId)
+               != applicableEngines.end();
+    };
 
+    // The engines that serve this graph on gfx90a, gfx942 and gfx950, and no others.
+    size_t expected = 0;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-    ASSERT_EQ(applicableEngines.size(), 1);
-    EXPECT_EQ(applicableEngines.front(), asm_sdpa_engine::AsmSdpaEngine::staticId());
-#else
-    EXPECT_TRUE(applicableEngines.empty());
+    // The assembly kernels are built for gfx942 and gfx950 only.
+    if(deviceString != "gfx90a")
+    {
+        EXPECT_TRUE(applies(asm_sdpa_engine::AsmSdpaEngine::staticId()));
+        ++expected;
+    }
 #endif
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
+    // FlyDSL's CDNA SDPA engines, one per kernel family: each family that ships objects for
+    // this device has a bf16 head-dim-128 non-causal one, so it must serve this graph, and a
+    // family that ships none must not (the dual-wave kernel ships for gfx950 only).
+    for(const auto& [op, engine] : std::array<std::pair<std::string_view, std::string_view>, 3>{{
+            {"sdpa_cdna", "hipkernel:flydsl_sdpa_cdna"},
+            {"sdpa_cdna_dualwave", "hipkernel:flydsl_sdpa_cdna_dualwave"},
+            {"sdpa_cdna_decode", "hipkernel:flydsl_sdpa_cdna_decode"},
+        }})
+    {
+        const bool ships = kernel_ingestor_engine::testing::flydslShipsForThisDevice(op);
+        EXPECT_EQ(applies(hipdnn_data_sdk::utilities::engineNameToId(std::string(engine))), ships)
+            << engine;
+        if(ships)
+        {
+            ++expected;
+        }
+    }
+#endif
+    EXPECT_EQ(applicableEngines.size(), expected);
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR

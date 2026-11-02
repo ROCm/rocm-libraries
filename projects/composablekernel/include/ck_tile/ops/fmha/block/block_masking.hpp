@@ -253,20 +253,30 @@ struct GenericAttentionMask
         //                      (otherwise sink un-mask is meaningless).
         //   i_y < x_total    : the query row is in-range vs. the key sequence
         //                      (handles seqlen_q > seqlen_k padding).
+#if defined(__gfx1250__)
+        // Branch-free: short-circuiting these divergent clauses emits an exec-mask
+        // save/branch/restore each. gfx1250 only -- on wave64 the extra live masks
+        // are SGPR pairs and overflow the file. bool locals keep the deduced return
+        // type bool, since bool & bool yields int.
+        const bool in_sink = (i_x < sink) & (i_x < i_y + x) & (y < y_total) & (i_y < x_total);
         if constexpr(IsLocal)
         {
-            if((i_x < sink) && (i_x < i_y + x) && (y < y_total) && i_y < x_total)
-                return false;
-            else
-                return i_x < x_start || i_x >= x_end;
+            const bool out = (!in_sink) & ((i_x < x_start) | (i_x >= x_end));
+            return out;
         }
         else
         {
-            if((i_x < sink) && (i_x < i_y + x) && (y < y_total) && i_y < x_total)
-                return false;
-            else
-                return i_x >= x_end || i_y >= y_total;
+            const bool out = (!in_sink) & ((i_x >= x_end) | (i_y >= y_total));
+            return out;
         }
+#else
+        if((i_x < sink) && (i_x < i_y + x) && (y < y_total) && i_y < x_total)
+            return false;
+        else if constexpr(IsLocal)
+            return i_x < x_start || i_x >= x_end;
+        else
+            return i_x >= x_end || i_y >= y_total;
+#endif
     }
 
     // if current tile is at the edge, means need per-pixel mask check.
@@ -506,18 +516,40 @@ struct SimplifiedGenericAttentionMask
         }
     }
 
+    // A nonempty signed interval has the same membership under unsigned offsets.
+    CK_TILE_HOST_DEVICE constexpr bool IsOutOfBoundUnsigned(index_t i_y, index_t i_x) const
+    {
+        if constexpr(!IsMasking)
+        {
+            return IsOutOfBound(i_y, i_x);
+        }
+        else
+        {
+            const index_t x_start = -y + i_y + 1;
+            const index_t x_end   = min(i_y + x, x_total);
+            const uint32_t width =
+                i_y < y_total && x_start < x_end ? uint32_t(x_end) - uint32_t(x_start) : 0u;
+            return uint32_t(i_x) - uint32_t(x_start) >= width;
+        }
+    }
+
     CK_TILE_HOST_DEVICE constexpr auto IsOutOfSinkBound(index_t i_y, index_t i_x) const
     {
         if constexpr(!IsMasking)
             return i_x >= x_total;
         index_t x_start = -y + i_y + 1;          // this could be negative, but it's fine
         index_t x_end   = min(i_y + x, x_total); // need min in case x is padded
-        // See note in the local-mask IsOutOfSinkBound: the sink column i_x is
-        // only valid up to the right-window boundary i_y + x.
+        // See the local-mask IsOutOfSinkBound for the clauses and the gate.
+#if defined(__gfx1250__)
+        const bool in_sink = (i_x < sink) & (i_x < i_y + x) & (y < y_total) & (i_y < x_total);
+        const bool out     = (!in_sink) & ((i_x < x_start) | (i_x >= x_end) | (i_y >= y_total));
+        return out;
+#else
         if((i_x < sink) && (i_x < i_y + x) && (y < y_total) && i_y < x_total)
             return false;
         else
             return i_x < x_start || i_x >= x_end || i_y >= y_total;
+#endif
     }
 
     // if current tile is at the edge, means need per-pixel mask check.

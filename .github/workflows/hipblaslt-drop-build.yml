@@ -1,0 +1,366 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Reproduces the hipBLASLt drop build formerly run by Jenkins. The build creates
+# RPMs for gfx942 and gfx950, then tests the installed packages on each GPU and
+# runs the hipBLASLt multi-GPU tests on a two-gfx950 runner.
+# Jenkins' "rocJenkins branch" is replaced by the branch selector in GitHub's
+# Run workflow dialog; the remaining Jenkins build parameters appear below.
+
+name: hipBLASLt drop build
+run-name: hipBLASLt drop build (${{ inputs.rocm_libraries_ref || 'develop' }} from ${{ github.ref_name }})
+
+on:
+  schedule:
+    - cron: "5 6 * * *"
+  workflow_dispatch:
+    inputs:
+      rocm_libraries_ref:
+        description: rocm-libraries branch, tag, or commit to build (ROCM_LIBS_REF)
+        type: string
+        default: develop
+      gpu_targets:
+        description: Semicolon-separated GPU architectures (GPU_TARGETS)
+        type: string
+        default: gfx942;gfx950
+      package_type:
+        description: Package format (PACKAGE_TYPE)
+        type: choice
+        options:
+          - rpm
+        default: rpm
+      build_runner:
+        description: Runner label for the package build
+        type: string
+        default: aws-linux-scale-rocm-prod
+      gfx942_runner:
+        description: Runner label for a single gfx942 GPU
+        type: string
+        default: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      gfx950_runner:
+        description: Runner label for a single gfx950 GPU
+        type: string
+        default: linux-gfx950-1gpu-ccs-ossci-rocm
+      gfx950_2gpu_runner:
+        description: Multi-GPU runner label; tests expose two gfx950 devices
+        type: string
+        default: linux-gfx950-8gpu-ccs-ossci-rocm
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.rocm_libraries_ref || 'develop' }}
+  cancel-in-progress: false
+
+env:
+  GPU_TARGETS: ${{ inputs.gpu_targets || 'gfx942;gfx950' }}
+  PACKAGE_TYPE: ${{ inputs.package_type || 'rpm' }}
+  ROCM_VERSION: 7.0.2
+
+jobs:
+  build-rpms:
+    name: Build hipBLASLt and hipSPARSELt RPMs
+    if: github.repository == 'ROCm/rocm-libraries'
+    runs-on: ${{ inputs.build_runner || 'aws-linux-scale-rocm-prod' }}
+    timeout-minutes: 600
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      source_short_sha: ${{ steps.source.outputs.short_sha }}
+      artifact_name: ${{ steps.artifact.outputs.artifact_name }}
+      archive_file: ${{ steps.artifact.outputs.archive_file }}
+    container:
+      image: quay.io/almalinuxorg/almalinux@sha256:02d6626076a835e964e0ace5bedfe81e74269d8c11492c86e72612b8be81bdd9
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Prepare EL9 build environment
+        run: |
+          set -euo pipefail
+          # Keep the digest-pinned AlmaLinux 9.6 image on its 9.6 package set.
+          for repo in baseos appstream crb extras; do
+            file="/etc/yum.repos.d/almalinux-${repo}.repo"
+            sed -i \
+              -e 's|^mirrorlist=|# mirrorlist=|' \
+              -e 's|^# baseurl=https://repo.almalinux.org/almalinux/$releasever|baseurl=https://repo.almalinux.org/vault/9.6|' \
+              "$file"
+          done
+          dnf -y install ca-certificates dnf-plugins-core epel-release
+          dnf config-manager --set-enabled crb
+          curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key \
+            -o /etc/pki/rpm-gpg/ROCm.gpg.key
+          cat >/etc/yum.repos.d/rocm.repo <<EOF
+          [ROCm-${ROCM_VERSION}]
+          name=ROCm ${ROCM_VERSION}
+          baseurl=https://repo.radeon.com/rocm/el9/${ROCM_VERSION}/main
+          enabled=1
+          priority=50
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/ROCm.gpg.key
+          EOF
+          dnf -y install cmake git git-lfs gzip tar unzip wget which \
+            python3.11 python3.11-pip python3.11-devel
+          # These are base SDK prerequisites that invoke --install-deps
+          # expects the build image to provide.
+          dnf -y install \
+            amd-smi-lib \
+            hip-devel \
+            numactl-devel \
+            rocm-llvm-devel \
+            rocm-openmp \
+            roctracer-devel \
+            zlib-devel
+          dnf -y clean all
+          mkdir -p /usr/local/bin
+          ln -sf /usr/bin/python3.11 /usr/local/bin/python3
+          ln -sf /usr/bin/python3.11 /usr/local/bin/python
+
+          # Jenkins provides GTest 1.14 under /usr/local. AlmaLinux's GTest 1.11
+          # does not provide the API used by the current hipBLASLt tests.
+          git clone --no-checkout --filter=blob:none \
+            https://github.com/google/googletest.git /tmp/googletest
+          git -C /tmp/googletest checkout f8d7d77c06936315286eb55f8de22cd23c188571
+          cmake -S /tmp/googletest -B /tmp/googletest-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_INSTALL_LIBDIR=lib64 \
+            -DBUILD_GMOCK=ON
+          cmake --build /tmp/googletest-build --parallel
+          cmake --install /tmp/googletest-build
+          rm -rf /tmp/googletest /tmp/googletest-build
+
+      - name: Check out the requested revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.rocm_libraries_ref || 'develop' }}
+          fetch-depth: 0
+          sparse-checkout: |
+            .github
+            cmake
+            projects/hipblaslt
+            projects/hipsparse
+            projects/hipsparselt
+            shared/mxdatagenerator
+            shared/origami
+            shared/rocroller
+            shared/stinkytofu
+          sparse-checkout-cone-mode: true
+
+      - name: Resolve source commit
+        id: source
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          sha="$(git rev-parse HEAD)"
+          short_sha="$(git rev-parse --short=10 HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Drop build source"
+            echo
+            echo "- Requested ref: \`$ROCM_LIBS_REF\`"
+            echo "- Resolved commit: \`$sha\`"
+            echo "- GPU targets: \`$GPU_TARGETS\`"
+            echo "- ROCm version: \`$ROCM_VERSION\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          ROCM_LIBS_REF: ${{ inputs.rocm_libraries_ref || 'develop' }}
+
+      - name: Report build configuration
+        env:
+          ROCM_LIBS_REF: ${{ inputs.rocm_libraries_ref || 'develop' }}
+        run: |
+          echo "ROCM_LIBS_REF=$ROCM_LIBS_REF"
+          echo "BASE_IMAGE=quay.io/almalinuxorg/almalinux:9.6 with ROCm ${ROCM_VERSION} EL9 repository"
+          echo "GPU_TARGETS=$GPU_TARGETS"
+          echo "PACKAGE_TYPE=$PACKAGE_TYPE"
+
+      - name: Build hipBLASLt packages
+        working-directory: projects/hipblaslt
+        run: |
+          set -euo pipefail
+          python3 -m venv build/venv
+          source build/venv/bin/activate
+          python -m pip install --upgrade pip wheel invoke
+          python -m pip install -r tensilelite/requirements.txt
+          invoke build \
+            --install-deps \
+            --clients \
+            --install-pkg \
+            --gemm-a2a-fusion \
+            --architecture="$GPU_TARGETS"
+
+      - name: Build hipSPARSELt packages
+        working-directory: projects/hipsparselt
+        run: |
+          set -euo pipefail
+          python3 -m venv build/venv
+          source build/venv/bin/activate
+          python -m pip install --upgrade pip wheel
+          python -m pip install -r requirements-build.txt
+          invoke build \
+            --install-deps \
+            --clients \
+            --install-pkg \
+            --architecture="$GPU_TARGETS"
+
+      - name: Collect RPMs
+        id: artifact
+        env:
+          SOURCE_SHORT_SHA: ${{ steps.source.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          hipblaslt_rpms=(projects/hipblaslt/build/release/*.rpm)
+          hipsparselt_rpms=(projects/hipsparselt/build/release/*.rpm)
+          if (( ${#hipblaslt_rpms[@]} == 0 )); then
+            echo "::error::The hipBLASLt build produced no RPMs"
+            exit 1
+          fi
+          if (( ${#hipsparselt_rpms[@]} == 0 )); then
+            echo "::error::The hipSPARSELt build produced no RPMs"
+            exit 1
+          fi
+          mkdir -p drop-artifact
+          cp "${hipblaslt_rpms[@]}" "${hipsparselt_rpms[@]}" drop-artifact/
+          date_stamp="$(date -u +%m%d%y)"
+          archive_file="hipblaslt-hipsparselt-rpms-${date_stamp}-rocm-${ROCM_VERSION}-${SOURCE_SHORT_SHA}.tar.gz"
+          artifact_name="hipblaslt-hipsparselt-rpms-${SOURCE_SHORT_SHA}"
+          (cd drop-artifact && tar -czf "../${archive_file}" .)
+          echo "archive_file=$archive_file" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+          ls -lh drop-artifact/*.rpm "$archive_file"
+
+      - name: Upload RPM archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.artifact.outputs.artifact_name }}
+          path: ${{ steps.artifact.outputs.archive_file }}
+          compression-level: 0
+          retention-days: 30
+
+  test-rpms:
+    name: ${{ matrix.name }}
+    needs: build-rpms
+    if: github.repository == 'ROCm/rocm-libraries'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: hipBLASLt tests (gfx942)
+            runner: ${{ inputs.gfx942_runner || 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }}
+            binary: hipblaslt-test
+            artifact_suffix: gfx942
+            filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
+          - name: hipSPARSELt tests (gfx942)
+            runner: ${{ inputs.gfx942_runner || 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }}
+            binary: hipsparselt-test
+            artifact_suffix: gfx942
+            filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
+          - name: hipBLASLt tests (gfx950)
+            runner: ${{ inputs.gfx950_runner || 'linux-gfx950-1gpu-ccs-ossci-rocm' }}
+            binary: hipblaslt-test
+            artifact_suffix: gfx950
+            filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
+          - name: hipSPARSELt tests (gfx950)
+            runner: ${{ inputs.gfx950_runner || 'linux-gfx950-1gpu-ccs-ossci-rocm' }}
+            binary: hipsparselt-test
+            artifact_suffix: gfx950
+            filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
+          - name: hipBLASLt multi-GPU tests (2 x gfx950)
+            runner: ${{ inputs.gfx950_2gpu_runner || 'linux-gfx950-8gpu-ccs-ossci-rocm' }}
+            binary: hipblaslt-test
+            artifact_suffix: 2xgfx950
+            hip_visible_devices: "0,1"
+            filter: "*multi_gpu*"
+    container:
+      image: quay.io/almalinuxorg/almalinux@sha256:02d6626076a835e964e0ace5bedfe81e74269d8c11492c86e72612b8be81bdd9
+      options: >-
+        --ipc host
+        --ulimit memlock=-1:-1
+        --ulimit nofile=1048576:1048576
+        --security-opt seccomp=unconfined
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        -e ROCR_VISIBLE_DEVICES
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Prepare EL9 test environment
+        run: |
+          set -euo pipefail
+          for repo in baseos appstream crb extras; do
+            file="/etc/yum.repos.d/almalinux-${repo}.repo"
+            sed -i \
+              -e 's|^mirrorlist=|# mirrorlist=|' \
+              -e 's|^# baseurl=https://repo.almalinux.org/almalinux/$releasever|baseurl=https://repo.almalinux.org/vault/9.6|' \
+              "$file"
+          done
+          dnf -y install ca-certificates dnf-plugins-core epel-release
+          dnf config-manager --set-enabled crb
+          curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key \
+            -o /etc/pki/rpm-gpg/ROCm.gpg.key
+          cat >/etc/yum.repos.d/rocm.repo <<EOF
+          [ROCm-${ROCM_VERSION}]
+          name=ROCm ${ROCM_VERSION}
+          baseurl=https://repo.radeon.com/rocm/el9/${ROCM_VERSION}/main
+          enabled=1
+          priority=50
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/ROCm.gpg.key
+          EOF
+          dnf -y install rocm-hip-runtime tar gzip findutils
+          dnf -y clean all
+
+      - name: Download RPM archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.build-rpms.outputs.artifact_name }}
+          path: drop-work
+
+      - name: Install RPMs
+        env:
+          ARCHIVE_FILE: ${{ needs.build-rpms.outputs.archive_file }}
+        run: |
+          set -euo pipefail
+          tar -C drop-work -xzf "drop-work/${ARCHIVE_FILE}"
+          mapfile -d '' rpms < <(find drop-work -name '*.rpm' -print0)
+          if (( ${#rpms[@]} == 0 )); then
+            echo "::error::The downloaded artifact contains no RPMs"
+            exit 1
+          fi
+          dnf -y install "${rpms[@]}"
+
+      - name: Run ${{ matrix.binary }}
+        env:
+          TEST_BINARY: ${{ matrix.binary }}
+          TEST_FILTER: ${{ matrix.filter }}
+          REQUESTED_HIP_VISIBLE_DEVICES: ${{ matrix.hip_visible_devices }}
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          if [[ -n "$REQUESTED_HIP_VISIBLE_DEVICES" ]]; then
+            export HIP_VISIBLE_DEVICES="$REQUESTED_HIP_VISIBLE_DEVICES"
+          fi
+          "/opt/rocm/bin/$TEST_BINARY" \
+            --gtest_filter="$TEST_FILTER" \
+            --gtest_output="xml:test-results/${TEST_BINARY}.xml" 2>&1 \
+            | tee "test-results/${TEST_BINARY}.log"
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.binary }}-${{ matrix.artifact_suffix }}-log
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 30

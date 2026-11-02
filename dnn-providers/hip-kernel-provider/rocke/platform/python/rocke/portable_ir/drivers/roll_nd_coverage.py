@@ -148,18 +148,13 @@ REFUSED_ND: List[
         str,
     ]
 ] = [
-    (
-        "conv_implicit_gemm",
-        _conv,
-        # The same axes, but with C sampled only on powers of two. The magic
-        # multiplier is 1 at both, so it looks invariant and gets frozen -- caught
-        # at the held-out non-power-of-two. Kept as a probe because the failure is
-        # a SAMPLING mistake that looks like success until verification.
-        {"N": [8, 16], "K": [64, 128], "C": [64, 128]},
-        None,
-        [{"N": 32, "K": 256, "C": 192}],
-        "C sampled only on powers of two hides the magic multiplier",
-    ),
+    # The conv_implicit_gemm power-of-two sampling trap used to live here: C
+    # drove a strength-reduced `n // C` whose multiplier is 1 at every power of
+    # two, so sampling 64/128 alone froze it. The conv kernels are AOT now --
+    # the extents and the magic (multiplier, shift) pairs are kernargs, not
+    # folded constants -- so there is no longer a constant for a bad sample to
+    # hide. The family's entry in FAMILIES_ND still samples C off the powers of
+    # two, which keeps the lesson enforced if that ever regresses.
     (
         "gemm_universal",
         _gemm,

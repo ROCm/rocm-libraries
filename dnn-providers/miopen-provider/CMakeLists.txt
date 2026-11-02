@@ -136,6 +136,7 @@ include(CheckToolVersion)
 include(ClangCheck)
 include(ClangTidy)
 include(Sanitizers)
+include(WindowsDllStaging)
 
 include(Dependencies)
 if(NOT MIOPENPROVIDER_SKIP_TESTS)
@@ -203,29 +204,33 @@ set_target_properties(${MIOPEN_PROVIDER_MIOPEN_LIB} PROPERTIES SYSTEM TRUE)
 add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
-    engines/plans/MiopenUnaryActivationPlan.cpp
-    engines/plans/MiopenUnaryActivationChecks.cpp
-    engines/plans/MiopenUnaryActivationPlanBuilder.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
-    engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
     engines/plans/MiopenBatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.cpp
+    engines/plans/MiopenBatchnormPlanBuilder.cpp
+    engines/plans/MiopenBinaryPointwiseChecks.cpp
+    engines/plans/MiopenBinaryPointwisePlan.cpp
+    engines/plans/MiopenBinaryPointwisePlanBuilder.cpp
     engines/plans/MiopenConvBwdPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlanBuilder.cpp
     engines/plans/MiopenConvFwdPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
+    engines/plans/MiopenPointwiseTensorChecks.cpp
+    engines/plans/MiopenUnaryActivationChecks.cpp
+    engines/plans/MiopenUnaryActivationPlan.cpp
+    engines/plans/MiopenUnaryActivationPlanBuilder.cpp
     HipdnnMiopenHandle.cpp
     MiopenActivationDescriptor.cpp
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp
-    MiopenUtils.cpp
-    MiopenTensor.cpp
     MiopenPluginPublic.cpp
+    MiopenTensor.cpp
+    MiopenUtils.cpp
 )
 
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -342,8 +347,6 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     if(TARGET hipdnn_integration_tests)
         list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS miopen_plugin hipdnn_integration_tests)
     endif()
-    set(DNN_PROVIDER_CHECK_EXCLUDE_LABELS ex_gpu_gfx110X)
-
 
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
@@ -470,6 +473,7 @@ install(TARGETS miopen_plugin EXPORT miopen-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
 
 add_clang_tidy_custom_target()
 

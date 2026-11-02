@@ -4,7 +4,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-09-16T15:00:49.738739
+Generated at: 2026-10-30T14:59:00.519447
 
 To update this file:
 1. Edit arch_specs.json
@@ -107,15 +107,23 @@ WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
         "int8_int8_int32": [[16, 16, 16]],
     },
     "gfx1250": {
+        "fp32_fp32_fp32": [[16, 16, 4]],
         "fp16_fp16_fp32": [[16, 16, 32]],
         "bf16_bf16_fp32": [[16, 16, 32]],
-        "fp8_fp8_fp32": [[16, 16, 64], [16, 16, 128]],
-        "bf8_bf8_fp32": [[16, 16, 64], [16, 16, 128]],
+        "fp8_fp8_fp32": [[16, 16, 64], [16, 16, 128], [32, 32, 128]],
+        "bf8_bf8_fp32": [[16, 16, 64], [16, 16, 128], [32, 32, 128]],
+        "int8_int8_int32": [[16, 16, 64]],
     },
 }
 
 # Preshuffle-specific warp tile combinations (subset of standard GEMM)
 PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
+    "gfx1250": {
+        "fp16_fp16_fp32": [[16, 16, 32]],
+        "bf16_bf16_fp32": [[16, 16, 32]],
+        "fp8_fp8_fp32": [[16, 16, 64]],
+        "bf8_bf8_fp32": [[16, 16, 64]],
+    },
     "gfx90a": {
         "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],
         "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],
@@ -138,7 +146,7 @@ PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]
 }
 
 # Preshuffle-supported pipelines
-PRESHUFFLE_PIPELINES: List[str] = ['preshufflev2']
+PRESHUFFLE_PIPELINES: List[str] = ['preshufflev2', 'preshuffle_tdm', 'comp_tdm', 'comp_tdm_v2', 'comp_async']
 
 # LDS staging budget in bytes: arch -> pipeline -> bytes.
 # Resolved from each architecture's lds_capacity_kb in arch_specs.json.
@@ -152,7 +160,9 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
+        "comp_tdm_pc": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -167,7 +177,9 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
+        "comp_tdm_pc": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -182,7 +194,9 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
+        "comp_tdm_pc": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -197,7 +211,9 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 163840,
         "compv4": 81920,
         "preshufflev2": 81920,
+        "preshuffle_tdm": 81920,
         "comp_async": 81920,
+        "comp_tdm_pc": 40960,
         "wavelet": 163840,
         "compv6": 81920,
         "preshufflev1": 81920,
@@ -212,7 +228,9 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
+        "comp_tdm_pc": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -227,7 +245,9 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
+        "comp_tdm_pc": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -242,7 +262,9 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         "comp_async": 32768,
+        "comp_tdm_pc": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -257,7 +279,9 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 327680,
         "compv4": 163840,
         "preshufflev2": 163840,
+        "preshuffle_tdm": 163840,
         "comp_async": 163840,
+        "comp_tdm_pc": 81920,
         "wavelet": 327680,
         "compv6": 163840,
         "preshufflev1": 163840,
@@ -297,6 +321,15 @@ TRAIT_UNSUPPORTED_COMBINATIONS: Set[Tuple[str, str, str]] = {
     ("compv6", "default", "interwave"),
     ("comp_async", "cshuffle", "interwave"),
     ("comp_async", "default", "interwave"),
+    ("comp_tdm", "cshuffle", "interwave"),
+    ("comp_tdm", "default", "interwave"),
+    ("comp_tdm", "tdm", "interwave"),
+    ("comp_tdm_v2", "cshuffle", "interwave"),
+    ("comp_tdm_v2", "default", "interwave"),
+    ("comp_tdm_v2", "tdm", "interwave"),
+    ("comp_tdm_pc", "cshuffle", "interwave"),
+    ("comp_tdm_pc", "default", "interwave"),
+    ("comp_tdm_pc", "tdm", "interwave"),
 }
 
 # Valid dtype combinations: (A_dtype, B_dtype) -> acc_dtype and notes
@@ -342,6 +375,16 @@ def get_warp_tile_combos(gpu_arch: str, dtype_key: str) -> List[List[int]]:
     return gpu_combos.get(dtype_key.lower(), [])
 
 
+# Pipelines that stage LDS exactly like another pipeline and therefore share its
+# budget. The TDM pipelines always allocate two LDS buffers, as comp_async does.
+# Kept as an alias rather than as extra per-architecture keys so the budget
+# tables above stay uniform across architectures.
+LDS_PIPELINE_BUDGET_ALIASES: Dict[str, str] = {
+    "comp_tdm": "comp_async",
+    "comp_tdm_v2": "comp_async",
+}
+
+
 def get_lds_limit(gpu_arch: str, pipeline: str, double_smem_buffer: bool = False) -> int:
     """Get the LDS staging budget in bytes for an architecture and pipeline.
 
@@ -359,7 +402,8 @@ def get_lds_limit(gpu_arch: str, pipeline: str, double_smem_buffer: bool = False
         # that cannot launch.
         per_pipeline = _SMALLEST_LDS_BUDGET
 
-    budget = per_pipeline.get(pipeline.lower(), per_pipeline["default"])
+    pipeline_key = LDS_PIPELINE_BUDGET_ALIASES.get(pipeline.lower(), pipeline.lower())
+    budget = per_pipeline.get(pipeline_key, per_pipeline["default"])
 
     if double_smem_buffer:
         capacity = LDS_TOTAL_CAPACITY_BY_ARCH.get(arch, _SMALLEST_LDS_CAPACITY)

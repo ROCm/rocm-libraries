@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,16 +36,18 @@ namespace rocsparse
                       const rocsparse_int* x_ind,
                       rocsparse_index_base idx_base)
     {
-        rocsparse_int idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        // Widen to int64_t before the multiply so the index arithmetic cannot
+        // signed-overflow (which is undefined behaviour) in an ILP64 build, and
+        // use a grid-stride loop so a clamped grid still covers all of nnz.
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
-        if(idx >= nnz)
+        for(int64_t idx = gid; idx < nnz; idx += stride)
         {
-            return;
+            const rocsparse_int i = x_ind[idx] - idx_base;
+
+            x_val[idx] = y[i];
+            y[i]       = static_cast<T>(0);
         }
-
-        rocsparse_int i = x_ind[idx] - idx_base;
-
-        x_val[idx] = y[i];
-        y[i]       = static_cast<T>(0);
     }
 }

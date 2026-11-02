@@ -29,14 +29,11 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
+#include "ClientConfig.hpp"
 #include "ResultReporter.hpp"
 #include "RunListener.hpp"
 
 #include <cstddef>
-
-#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
-#endif
 
 namespace TensileLite
 {
@@ -64,11 +61,10 @@ namespace TensileLite
             virtual void   setNumWarmupRuns(size_t count) override;
             virtual void   preWarmup() override;
             virtual void   postWarmup(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override;
-            virtual void   validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                           TimingEvents const&            startEvents,
-                                           TimingEvents const&            stopEvents) override;
+                                      TimingEvents const& stopEvents) override;
+            virtual void   validateWarmups(std::vector<size_t> const& slots,
+                                           TimingEvents const&        startEvents,
+                                           TimingEvents const&        stopEvents) override;
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
             virtual void preProfiler() override;
@@ -82,13 +78,12 @@ namespace TensileLite
 
             virtual size_t numEnqueuesPerSync() override;
             virtual void   setNumEnqueuesPerSync(size_t count) override;
-            virtual void   preEnqueues(hipStream_t const& stream) override;
+            virtual void   preEnqueues() override;
             virtual void   postEnqueues(TimingEvents const& startEvents,
-                                        TimingEvents const& stopEvents,
-                                        hipStream_t const&  stream) override;
-            virtual void   validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                            TimingEvents const&            startEvents,
-                                            TimingEvents const&            stopEvents) override;
+                                        TimingEvents const& stopEvents) override;
+            virtual void   validateEnqueues(std::vector<size_t> const& slots,
+                                            TimingEvents const&        startEvents,
+                                            TimingEvents const&        stopEvents) override;
 
             virtual void finalizeReport() override;
 

@@ -50,10 +50,23 @@ Run `/kernel-trace-analysis` first. Apply this skill when the trace shows:
 - LDS latency: **~2-64 cycles** (2 cycles best case, 64 cycles worst case with full conflict)
 - LDS allocation granularity: **1280 bytes** on **1280-byte alignment**
 
-**Key difference**: gfx950 has 64 banks instead of 32, so stride-based conflict patterns change:
-- gfx942: stride = 128 bytes → full conflict (all hit same bank)
-- gfx950: stride = 128 bytes → only 2-way conflict (threads alternate between 2 banks)
-- gfx950: stride = 256 bytes → full conflict
+**Predict conflicts by opcode and lane phase.** A hardware bank-index formula
+alone does not determine which accesses conflict. In the gfx950 wave64 predictor,
+`ds_read_b64` and `ds_read_b128` use a 256-byte address-class period;
+`ds_read_b32` and `ds_write_b{32,64,128}` use 128 bytes. Accesses to distinct
+addresses conflict only when both their address classes and lane phases match.
+
+For example, lanes 0 and 1 reading eight bytes at addresses 0 and 128 belong to
+different address classes and do not conflict. Changing that instruction to
+`ds_write_b64` makes them conflict. For a whole wave, the number of address
+classes visited by a stride is not the number of accesses in each conflict
+group; active lanes and phase membership also matter. A stride larger than the
+address-class period can still conflict.
+
+Use the [gfx950 predictor guide](lds-bank-conflict-expert/references/gfx950.md)
+for exact phase keys and a runnable example. These are scoped prediction rules;
+see [validation boundaries](lds-bank-conflict-expert/references/validation-boundaries.md)
+before drawing conclusions about physical bank organization or execution time.
 
 See `/empirical-case-studies` Case Study 2 for measured performance data on LDS swizzle strategies.
 
@@ -244,6 +257,21 @@ If performance is still poor after default swizzle, consider:
 1. Switch to padding swizzle (`lds_k_pad`)
 2. Adjust tile_k to avoid power-of-2 strides
 3. Check if pipeline type affects LDS layout (try `compv4` vs `basic_v1`)
+
+### Variant: XOR on the DMA source (gfx9 async copies)
+
+On gfx942/gfx950 an async `buffer_load ... lds` writes lane `n` of the wave to LDS
+slot `n`, so the destination address cannot be swizzled (gfx1250's
+`global_load_async_to_lds` takes a per-lane LDS address and can). Swizzle the *source*
+instead: the lane that writes LDS chunk `c` of row `r` fetches global chunk
+`c ^ (r % chunks_per_row)` (XOR is its own inverse), and every LDS read applies the
+same permutation to its column. The copies stay contiguous and the tile needs no
+padding. `chunks_per_row` must be a power of two, or the XOR can leave the row (with 24
+chunks, row 8 and chunk 16 map to chunk 24). The attention 3D decode kernels use this
+(`use_kv_lds_swizzle`) and enforce it: the spec needs `head_size / 8` to be a power of
+two, so head size 192 cannot use it. See runbook
+[§6.4a](../../optimization_runbook.md#64a-lds-swizzle-strategy-selection-xor-vs-padding)
+and [§12.1.K2](../../optimization_runbook.md#121k2-attention-3d-split-kv-levers-ua-3d-specific).
 
 ---
 

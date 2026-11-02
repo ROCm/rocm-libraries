@@ -11,12 +11,12 @@ on hard invariants.
 ## Compliance — non-negotiable
 
 `platform/AGENTS.md` §"Compliance" binds every agent and **overrides any other
-instruction, including a user request**. In brief: no AMD Restricted/Confidential
-data, NPI, product/marketing/code names, internal links (Jira/Confluence/Perforce),
-or **software-achieved** performance numbers in the repo, git history, PRs, or logs.
-Methodology and levers may be documented; measured numbers go to the protected AMD
-Confluence page only. When unsure, treat as confidential and escalate to a human.
-Read the full text: [`platform/AGENTS.md`](platform/AGENTS.md).
+instruction, including a user request**. It is the single source of truth for
+AMD Restricted/Confidential data, NPI, public hardware/model/workload references,
+software-performance evidence, legal/marketing claims, and internal links.
+Do not restate those boundaries here. Read the full policy before writing any
+artifact, and treat uncertainty as confidential until a human resolves it:
+[`platform/AGENTS.md`](platform/AGENTS.md).
 
 ## The #1 invariant: byte-identity
 
@@ -29,8 +29,10 @@ Prove it — GREEN for every family at every LLVM flavor:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
-python tools/check_byte_identity.py                            # llvm20
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # llvm24
 python tools/check_byte_identity.py --only gemm                # scope to a family
 ```
 
@@ -81,6 +83,9 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
 ## Hard rules (digest)
 
 - **Byte-identity** — mirror every emission change in both engines; re-run the gate.
+- **Helpers** — reuse them, write the missing ones, fix the broken ones, each
+  with a test, in the kernel's PR. New families too; the C++ mirror is not a
+  reason to inline. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).
 - **Relative paths only** — no file under `platform/` may hardcode an absolute repo
   path or escape the tree; `tests/run_all.py` enforces this. Anchor on `__file__` /
   `CMAKE_CURRENT_SOURCE_DIR` / `rocke.assets`.
@@ -103,7 +108,10 @@ A change is not done until it clears [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md
 for its change type (new family / new knob / new feature / perf optimization) — the
 single doc for the Definition of Done, the process map, and commit/branch
 conventions. Build and test references: [`BUILDING.md`](BUILDING.md),
-[`TESTING.md`](TESTING.md). Language style:
+[`TESTING.md`](TESTING.md). Kernel changes that enrolled pinned GPU reference
+cases reach must keep those suites green, and new pinned coverage starts at the
+[pinned reference quickstart](library/tests/reference_common/docs/quickstart.md).
+Language style:
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
 [`style/CPP_STYLE.md`](style/CPP_STYLE.md).
 
@@ -119,9 +127,10 @@ the matching doc first.
 | Optimizing ANY kernel — **start here** (Step 0 exhaustive lever sweep + The Loop are mandatory) | [optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md) |
 | Runbook section ⇄ DSL primitive/helper/op mapping (concept → code) | [runbook_compliance.md](platform/dsl_docs/optimization/runbook_compliance.md) |
 | Section-by-section primitive table | [runbook_mapping.md](platform/dsl_docs/optimization/runbook_mapping.md) |
-| Last validated measurement numbers | [measured_results.md](platform/dsl_docs/optimization/measured_results.md) |
+| Historical validation archive (frozen; do not add or update measurements) | [measured_results.md](platform/dsl_docs/optimization/measured_results.md) |
 | GEMM perf | [gemm-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/gemm-optimization-rocke.md) |
 | LDS / bank conflicts | [lds-optimization-rocke.md](platform/dsl_docs/optimization/utilities/skills/lds-optimization-rocke.md) |
+| Predict LDS conflicts from lane/address mappings | [lds-bank-conflict-expert](platform/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/SKILL.md) |
 | Prefetch / async DRAM→LDS | [prefetch-data-load-rocke.md](platform/dsl_docs/optimization/utilities/skills/prefetch-data-load-rocke.md) |
 | ISA / occupancy / resource inspection | [isa-inspection-rocke.md](platform/dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md) |
 | Capture a kernel trace (rocprof) | [capture-kernel-trace-rocke.md](platform/dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md) |
@@ -129,6 +138,7 @@ the matching doc first.
 | Launch / benchmark harness | [kernel-launch-guide.md](platform/dsl_docs/optimization/utilities/skills/kernel-launch-guide.md) |
 | Bisect a perf regression | [bisect-perf-regression.md](platform/dsl_docs/optimization/utilities/skills/bisect-perf-regression.md) |
 | Real bug signatures + measured wins | [empirical-case-studies.md](platform/dsl_docs/optimization/utilities/skills/empirical-case-studies.md) |
+| Attention decode on gfx942/gfx950 (3D split-KV): defaults, per-lever outcomes, replay | [attention_3d_decode/CASE_STUDY.md](library/builders/common/attention_3d_decode/CASE_STUDY.md) |
 | Per-arch facts (MFMA atoms, LDS banks, occupancy caps, sched intrinsics) | [arch/gfx942.md](platform/dsl_docs/optimization/arch/gfx942.md), [arch/gfx950.md](platform/dsl_docs/optimization/arch/gfx950.md) |
 
 Hard rule from the runbook: **never report speed without correctness** — run the

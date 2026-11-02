@@ -127,6 +127,9 @@ include(ClangTidy)
 # Sanitizer support (Address Sanitizer, etc.)
 include(Sanitizers)
 
+# Stage System32-shadowed ROCm DLLs into the build bin dir (Windows)
+include(WindowsDllStaging)
+
 # Setup testing dependencies, tests & clang format
 include(Dependencies)
 if (NOT HIPDNN_SKIP_TESTS)
@@ -376,3 +379,4 @@ install(TARGETS hipblaslt_plugin EXPORT hipblaslt-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")

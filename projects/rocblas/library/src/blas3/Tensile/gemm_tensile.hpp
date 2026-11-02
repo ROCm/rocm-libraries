@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -172,7 +172,7 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
         // Note: k==0 is a valid BLAS operation (D = beta*C), must not skip it.
         // Tensile kernels use 32-bit offset = column * stride, which overflows
         // when stride (=lda or ldb) is large and k is large.
-        // Safe k_chunk: k_chunk * max(lda,ldb) * sizeof(element) < 2^31
+        // Safe k_chunk: k_chunk * max(k_stride_a,k_stride_b) * sizeof(element) < 2^31
         const auto A_base = A_ptr + offset_a;
         const auto B_base = B_ptr + offset_b;
         const auto C_base = C_ptr + offset_c;
@@ -180,9 +180,14 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
 
         // Calculate safe k_chunk_size to keep offsets within signed 32-bit
         constexpr int64_t overflow_limit_2_to_31 = 2147483647; // 2^31 - 1
-        int64_t           max_stride             = std::max(int64_t(ld_a), int64_t(ld_b));
-        int64_t           bytes_per_element      = sizeof(Ti);
-        int64_t           safe_k
+        // The summation index only multiplies the leading dimension when it is the
+        // column index: A is k-major for trans_a == none, B is k-major otherwise.
+        // In the other orientations k walks unit stride.
+        int64_t k_stride_a        = (trans_a == rocblas_operation_none) ? int64_t(ld_a) : 1;
+        int64_t k_stride_b        = (trans_b == rocblas_operation_none) ? 1 : int64_t(ld_b);
+        int64_t max_stride        = std::max(k_stride_a, k_stride_b);
+        int64_t bytes_per_element = sizeof(Ti);
+        int64_t safe_k
             = (max_stride > 0 && max_stride * bytes_per_element > 0)
                   ? std::max(int64_t(1), overflow_limit_2_to_31 / (max_stride * bytes_per_element))
                   : int64_t(k);
@@ -190,8 +195,14 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
         // Ensure k_chunk >= 1 to avoid infinite loop when k=0
         int64_t k_chunk = (safe_k >= k) ? std::max(int64_t(k), int64_t(1)) : safe_k;
 
-        Tc beta_val = *beta;
-        Tc one_val  = static_cast<Tc>(1);
+        Tc one_val = static_cast<Tc>(1);
+
+        // First chunk computes D = alpha*A*B + beta*C; subsequent chunks accumulate
+        // into D, so after the first chunk the C input switches to D with beta=1
+        const Tc*      beta_C_D   = beta;
+        const To*      C_D_base   = C_base;
+        rocblas_int    ld_c_d     = ld_c;
+        rocblas_stride stride_c_d = stride_c;
 
         for(int64_t k_base = 0; k_base < std::max(int64_t(k), int64_t(1)); k_base += k_chunk)
         {
@@ -205,9 +216,6 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
             auto b_k_offset = (trans_b == rocblas_operation_none)
                                   ? k_base // column-major: row offset
                                   : int64_t(k_base) * ld_b; // transposed: col offset
-
-            // First chunk uses original beta; subsequent use beta=1 to accumulate
-            const Tc* chunk_beta = (k_base == 0) ? beta : &one_val;
 
             RocblasContractionProblem<Ti, To, Tc> problem{handle,
                                                           trans_a,
@@ -226,11 +234,11 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
                                                           ld_b,
                                                           stride_b,
                                                           0 /* offset_b */,
-                                                          chunk_beta,
-                                                          C_base,
+                                                          beta_C_D,
+                                                          C_D_base,
                                                           nullptr,
-                                                          ld_c,
-                                                          stride_c,
+                                                          ld_c_d,
+                                                          stride_c_d,
                                                           0 /* offset_c */,
                                                           D_base,
                                                           nullptr,
@@ -242,6 +250,11 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
                                                           flags};
 
             RETURN_IF_ROCBLAS_ERROR(runContractionProblem(problem, algo, solution_index));
+
+            beta_C_D   = &one_val;
+            C_D_base   = D_base;
+            ld_c_d     = ld_d;
+            stride_c_d = stride_d;
         }
     }
     return rocblas_status_success;

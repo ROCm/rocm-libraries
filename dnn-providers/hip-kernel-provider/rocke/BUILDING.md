@@ -77,8 +77,9 @@ from the local editable install rather than an index.
 After this, from any directory:
 
 ```sh
-python -c "import rocke, kernels, builders, dispatch"   # all resolve
-python -m builders.gfx942.attention.parity_unified_attention --help
+python -c "import rocke, kernels, builders, dispatch, benchmarks"   # all resolve
+python -m benchmarks.common.attention_combo_sweep --help
+rocke-attention-combo-sweep --list-only --arch gfx950
 pytest rocke/library/tests
 ```
 
@@ -118,16 +119,7 @@ guard is designed to catch (regenerate `_DATALAYOUT_*` in
 `core/lower_llvm.py` for the local toolchain) — it is independent of the
 platform/library layout and reproduces identically on `develop`.
 
-One more layout-independent residual appears **only when the C++ engine is not
-built** (a pure-`pip`/Python-fallback checkout, as above):
-`test_rocke_ci_static.py::TestIrParityCoverage::test_ir_cases_match_golden_sha256`
-reports IR drift for 6 `conv/*` cases. The golden hashes track the C++ engine's
-output; #8841 (cshuffle) changed the Python lowerer's conv epilogue IR, so the
-Python-fallback hashes differ until the goldens are regenerated. Like the
-datalayout guard it reproduces identically on `develop` and is unrelated to the
-platform/library split — build the C++ engine (`platform/cpp/`) to run this test
-against its intended baseline. Everything else is green; GPU-only tests skip
-without a device.
+Everything else is green; GPU-only tests skip without a device.
 
 ## Data / asset paths
 

@@ -633,10 +633,10 @@ std::string inferModKeyFromFields(const FieldMap& fields) {
 ///
 /// Returns true if every modifier-shaped token sequence the parser consumed
 /// could be represented in inst.modifiers. Returns false if the parser saw a
-/// trailing token shape it cannot model (currently: a `key:value` where the
-/// value is an Identifier such as `th:TH_LOAD_NT`, or any modifier-bearing
-/// instruction whose microcode format has no modifier namespace mapped here
-/// — e.g. TENSOR-format `tensor_load_to_lds`). The caller (parseInstLine)
+/// trailing token shape it cannot model (currently: an offset expression that
+/// does not evaluate, a token the format's namespace does not model such as
+/// `offset:0` on `tensor_load_to_lds`, or any modifier-bearing instruction
+/// whose microcode format has no modifier namespace mapped here). The caller (parseInstLine)
 /// uses this signal to bail out to TEXTBLOCK pass-through so the entire
 /// line round-trips verbatim instead of silently dropping the unmodelled
 /// modifier.
@@ -666,6 +666,9 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         case MicrocodeFormat::MC_SMEM:
             modKey = "mod.smem";
             break;
+        case MicrocodeFormat::MC_VIMAGE:
+            modKey = "mod.tensor";
+            break;
         default:
             break;
     }
@@ -683,12 +686,12 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
 
     // Collect key→value / key(value) / boolean-flag tokens
     FieldMap fields;
-    // Set when we see syntax we can parse but cannot represent: e.g.
-    // `key:Identifier_value` (`th:TH_LOAD_NT`, `scope:SCOPE_DEV`) or any
-    // modifier whose microcode format isn't mapped above. Tracked
-    // separately from `fields` so that we can still observe "had
-    // modifiers" even when they are all unrepresentable and the field map
-    // ends up empty.
+    // Set when we see syntax we can parse but cannot represent: e.g. a token the
+    // format's modifier namespace does not model (`offset:0` on
+    // `tensor_load_to_lds`), an offset expression that does not evaluate, or any
+    // modifier whose microcode format isn't mapped above. Tracked separately from
+    // `fields` so that we can still observe "had modifiers" even when they are all
+    // unrepresentable and the field map ends up empty.
     bool sawUnrepresentable = false;
     bool sawAnyModifier = false;
 
@@ -790,8 +793,7 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
     // within those encodings carry the modifier.
     if (modKey.empty()) modKey = inferModKeyFromFields(fields);
 
-    // Modifier-bearing instruction with no modKey to put them into (e.g.
-    // TENSOR-format `tensor_load_to_lds offset:0`). Anything in `fields`
+    // Modifier-bearing instruction with no modKey to put them into. Anything in `fields`
     // would be silently discarded below at the `modKey.empty()` early-return,
     // so flag the line as unrepresentable instead and let the caller fall
     // back to TEXTBLOCK pass-through.
@@ -839,6 +841,19 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         if (fields.contains("offset")) modFields["offset"] = fields["offset"];
         if (fields.contains("glc")) modFields["glc"] = "true";
         if (fields.contains("nv")) modFields["nv"] = "true";
+
+    } else if (modKey == "mod.tensor") {
+        // TENSORModifiers models th / scope / nv only; any other token keeps the
+        // line as TEXTBLOCK rather than dropping it on emission.
+        for (const auto& [key, value] : fields) {
+            if (key == "th" || key == "scope") {
+                modFields[key] = value;
+            } else if (key == "nv") {
+                modFields["nv"] = "nv";
+            } else {
+                sawUnrepresentable = true;
+            }
+        }
 
     } else if (modKey == "mod.dpp") {
         // Reconstruct the asm-form dpp_ctrl token from the parsed fields and
@@ -1005,7 +1020,7 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
 
     // Parse any trailing modifier tokens (offset:N, glc, vmcnt(N), etc.).
     // If parseModifiers signals that it saw a token shape it cannot
-    // represent (e.g. `th:TH_LOAD_NT` on tensor_load_to_lds, or any
+    // represent (e.g. `offset:0` on tensor_load_to_lds, or any
     // modifier on a microcode format that has no namespace mapped above),
     // bail to TEXTBLOCK pass-through so the line round-trips verbatim
     // instead of dropping the unmodelled modifier on emission.
@@ -1063,12 +1078,14 @@ static std::array<int, 3> archToIsaVersion(GfxArchID /*arch*/) {
 /// Parse the .amdhsa_kernel and .amdgpu_metadata sections from raw assembly text
 /// and build a SignatureBase. Returns nullptr if no recognisable metadata is found.
 std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, GfxArchID arch) {
+    const auto isaVersion = archToIsaVersion(arch);
     // Fields we need to extract
     std::string kernelName;
     int totalVgprs = 0;
     int totalSgprs = 0;
     int groupSegSize = 0;
-    int wavefrontSize = 64;
+    // gfx12.5 is wave32-only and omits the descriptor wave-size selector.
+    int wavefrontSize = (isaVersion[0] == 12 && isaVersion[1] == 5) ? 32 : 64;
     int flatWgSize = 64;
     std::array<int, 3> sgprWorkGroup = {1, 1, 1};
     int vgprWorkItem = 0;
@@ -1355,8 +1372,6 @@ std::shared_ptr<SignatureBase> parseKernelMetadata(const std::string& asmText, G
     }
 
     if (kernelName.empty()) return nullptr;
-
-    auto isaVersion = archToIsaVersion(arch);
 
     auto sig = std::make_shared<SignatureBase>(
         kernelName, isaVersion, kernArgsVersion, codeObjectVersion, groupSegSize, sgprWorkGroup,

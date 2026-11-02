@@ -258,7 +258,7 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::sellmvn_large_slice_kernel<256>),
-                    dim3(nslices),
+                    dim3(blocks_x, blocks_y, 1),
                     dim3(256),
                     0,
                     stream,
@@ -310,7 +310,7 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::sellmvt_large_slice_kernel<256>),
-                    dim3(nslices),
+                    dim3(blocks_x, blocks_y, 1),
                     dim3(256),
                     0,
                     stream,

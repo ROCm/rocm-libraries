@@ -114,6 +114,21 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | solvers are still used as a fallback when no non-naive solver
         | succeeds.
         |
+        | At most ``GPU_MAX_HW_QUEUES`` minus 2 skipped streams (at least
+        | 1; 2 at the HIP default of 4 queues) may be outstanding. Beyond
+        | that, the next naive evaluation waits for one to finish rather
+        | than timing a kernel that shares a hardware queue with it.
+        |
+        | A skipped kernel's scratch buffer is released as soon as the
+        | kernel finishes, by a background thread MIOpen starts for the
+        | handle on the first skip; no further MIOpen call is needed, so
+        | a workload that only replays a captured HIP graph releases it
+        | too. A deallocator installed with ``miopenSetAllocator`` is
+        | therefore called from that thread, possibly while another
+        | thread is capturing. It must not make calls HIP refuses during
+        | any capture, such as a synchronous ``hipMemcpy`` or
+        | ``hipMemset``: those invalidate every capture in the process.
+        |
         | Limitation: a skipped kernel keeps reading the caller's input
         | tensors until it finishes. Its results are discarded, so stale
         | or reused data is harmless, but unmapping those pages while it
@@ -206,6 +221,13 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
     * - | ``MIOPEN_DEBUG_ENABLE_AI_IMMED_MODE_FALLBACK``
         | Controls AI immediate mode fallback behavior.
       - | 0: Disable
+        | 1: Enable
+
+    * - | ``MIOPEN_DEBUG_LGBM_ONLY``
+        | Uses only the LightGBM heuristics: bypasses TunaNet solver selection and the
+        | KTN / two-tower kernel-tuning models, keeping the LightGBM solver selector and
+        | perf-config picker.
+      - | 0: Disable (default)
         | 1: Enable
 
     * - | ``MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK``
@@ -320,6 +342,11 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_DEPTHWISE_FWD_2D``
+        | Controls ConvDirectDepthwiseFwd2D direct solution.
+      - | 0: Disable
+        | 1: Enable
+
     * - | ``MIOPEN_DEBUG_CONV_DIRECT_ASM_1X1U_PERF_VALS``
         | Controls performance values for ConvAsm1x1U direct solution.
       - | 0: Disable
@@ -385,11 +412,6 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
 
     * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1``
         | Controls ConvBinWinogradRxSf2x3g1 FP32/FP16 Fwd/Bwd F(2,3) Winograd (non-group convolutions).
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_AMD_FUSED_WINOGRAD``
-        | Controls Fused FP32 F(3,3) Winograd with variable filter size.
       - | 0: Disable
         | 1: Enable
 

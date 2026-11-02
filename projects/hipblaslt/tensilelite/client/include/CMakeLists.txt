@@ -3,6 +3,7 @@
 
 target_sources(tensilelite-client-common
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/ClientConfig.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TypedId.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaResultReporter.hpp"
@@ -10,6 +11,7 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactory.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DeviceContext.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationHelpers.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDataManipulation.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter_fwd.hpp"
@@ -31,4 +33,5 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/Reference.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CSVStackFile.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2ARunner.hpp"
 )

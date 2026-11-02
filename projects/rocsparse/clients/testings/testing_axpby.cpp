@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -163,4 +163,93 @@ INSTANTIATE(int64_t, float, float, float);
 INSTANTIATE(int64_t, double, double, double);
 INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex, rocsparse_double_complex);
-void testing_axpby_extra(const Arguments& arg) {}
+void testing_axpby_extra(const Arguments& arg)
+{
+    // Regression test for AISPARSE-650.
+    //
+    // Before the fix, axpyi_device computed the element index as
+    //   hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x
+    // entirely in 32-bit unsigned arithmetic. Once nnz reaches 2^32 the
+    // block-index multiply wraps around, so threads in the high blocks operate
+    // on wrapped (low) elements while the tail of the sparse vector is never
+    // touched. The fix casts the block index to the (64-bit) index type before
+    // the multiply and iterates with a grid-stride loop.
+    //
+    // This drives the 64-bit-index path of rocsparse_axpby with nnz and size
+    // just past the 2^32 boundary. beta is neither 0 nor 1, so axpby first
+    // launches the scale kernel over all of y and then axpyi_template over x.
+    // The test checks that an element beyond the boundary is accumulated into
+    // y and that the last element of y is scaled. Everything is initialized on
+    // the device and only a few elements are probed, so no host buffer of this
+    // size is needed.
+    using I = int64_t;
+    using T = float;
+
+    static constexpr int64_t two_pow_32 = static_cast<int64_t>(1) << 32;
+
+    // nnz just beyond 2^32 so at least one block has a block index whose
+    // (blockIdx * BLOCKSIZE) product overflows 32-bit arithmetic.
+    const I nnz = two_pow_32 + 512;
+
+    // A sparse-vector descriptor requires nnz <= size.
+    const I size = nnz;
+
+    const rocsparse_index_base base = rocsparse_index_base_zero;
+
+    rocsparse_local_handle handle(arg);
+
+    device_vector<I> dx_ind(nnz);
+    device_vector<T> dx_val(nnz);
+    device_vector<T> dy(size);
+
+    // Filler elements all reference dense entry 0 and start at value 0.
+    CHECK_HIP_ERROR(hipMemset(dx_ind, 0, sizeof(I) * nnz));
+    CHECK_HIP_ERROR(hipMemset(dx_val, 0, sizeof(T) * nnz));
+    CHECK_HIP_ERROR(hipMemset(dy, 0, sizeof(T) * size));
+
+    // The probe lives past the 2^32 boundary. It carries the only non-zero value
+    // and references its own dense entry (index 1) so its result cannot be
+    // perturbed by the accumulations the filler elements make to dense entry 0.
+    const I probe_idx = two_pow_32 + 5;
+    const I probe_ind = 1;
+    const T x_in      = static_cast<T>(1);
+    CHECK_HIP_ERROR(hipMemcpy(
+        static_cast<I*>(dx_ind) + probe_idx, &probe_ind, sizeof(I), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(static_cast<T*>(dx_val) + probe_idx, &x_in, sizeof(T), hipMemcpyHostToDevice));
+
+    // y[1] is the probe's output; y[size - 1] is past the 2^32 boundary and is
+    // only touched by the beta scaling.
+    const I tail_idx = size - 1;
+    const T y_in     = static_cast<T>(1);
+    const T tail_in  = static_cast<T>(5);
+    CHECK_HIP_ERROR(
+        hipMemcpy(static_cast<T*>(dy) + probe_ind, &y_in, sizeof(T), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpy(static_cast<T*>(dy) + tail_idx, &tail_in, sizeof(T), hipMemcpyHostToDevice));
+
+    const T halpha = static_cast<T>(2);
+    const T hbeta  = static_cast<T>(3);
+
+    rocsparse_local_spvec x(size, nnz, dx_ind, dx_val, get_indextype<I>(), base, get_datatype<T>());
+    rocsparse_local_dnvec y(size, dy, get_datatype<T>());
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+    CHECK_ROCSPARSE_ERROR(testing::rocsparse_axpby(handle, &halpha, x, &hbeta, y));
+
+    // y[1] = beta * y_in + alpha * x_in = 5. Before the fix the wrapped block
+    // index leaves the probe element unprocessed.
+    T y_out = static_cast<T>(0);
+    CHECK_HIP_ERROR(
+        hipMemcpy(&y_out, static_cast<T*>(dy) + probe_ind, sizeof(T), hipMemcpyDeviceToHost));
+
+    unit_check_scalar<T>(hbeta * y_in + halpha * x_in, y_out);
+
+    // y[size - 1] = beta * tail_in = 15. An unclamped scale grid is rejected at
+    // launch, and a clamped grid without a grid-stride loop leaves it unscaled.
+    T tail_out = static_cast<T>(0);
+    CHECK_HIP_ERROR(
+        hipMemcpy(&tail_out, static_cast<T*>(dy) + tail_idx, sizeof(T), hipMemcpyDeviceToHost));
+
+    unit_check_scalar<T>(hbeta * tail_in, tail_out);
+}

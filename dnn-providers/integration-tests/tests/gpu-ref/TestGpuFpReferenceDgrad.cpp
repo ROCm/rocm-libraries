@@ -13,6 +13,9 @@
 using namespace gpu_conv_bwd_ref_test;
 using namespace gpu_conv_ref_test;
 
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
+
 // One-liner subclasses — each creates a distinct GTest-visible type so that
 // INSTANTIATE_TEST_SUITE_P can use clean tier-only prefixes (Smoke, Standard, Comprehensive, Full)
 // while the suite name itself carries dimensionality and layout information.
@@ -27,22 +30,22 @@ class TestGpuConvBwdRef2dFp32 : public ConvBwdShapeSuite<float>
 class TestGpuConvBwdRef3dFp32 : public ConvBwdShapeSuite<float>
 {
 };
-class TestGpuConvBwdRef1dFp16 : public ConvBwdShapeSuite<half>
+class TestGpuConvBwdRef1dFp16 : public ConvBwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvBwdRef2dFp16 : public ConvBwdShapeSuite<half>
+class TestGpuConvBwdRef2dFp16 : public ConvBwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvBwdRef3dFp16 : public ConvBwdShapeSuite<half>
+class TestGpuConvBwdRef3dFp16 : public ConvBwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvBwdRef1dBfp16 : public ConvBwdShapeSuite<bfloat16>
+class TestGpuConvBwdRef1dBfp16 : public ConvBwdShapeSuite<BFloat16Type>
 {
 };
-class TestGpuConvBwdRef2dBfp16 : public ConvBwdShapeSuite<bfloat16>
+class TestGpuConvBwdRef2dBfp16 : public ConvBwdShapeSuite<BFloat16Type>
 {
 };
-class TestGpuConvBwdRef3dBfp16 : public ConvBwdShapeSuite<bfloat16>
+class TestGpuConvBwdRef3dBfp16 : public ConvBwdShapeSuite<BFloat16Type>
 {
 };
 
@@ -56,22 +59,22 @@ class TestGpuConvBwdRefNhwc2dFp32 : public ConvBwdShapeSuite<float>
 class TestGpuConvBwdRefNdhwc3dFp32 : public ConvBwdShapeSuite<float>
 {
 };
-class TestGpuConvBwdRefNlc1dFp16 : public ConvBwdShapeSuite<half>
+class TestGpuConvBwdRefNlc1dFp16 : public ConvBwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvBwdRefNhwc2dFp16 : public ConvBwdShapeSuite<half>
+class TestGpuConvBwdRefNhwc2dFp16 : public ConvBwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvBwdRefNdhwc3dFp16 : public ConvBwdShapeSuite<half>
+class TestGpuConvBwdRefNdhwc3dFp16 : public ConvBwdShapeSuite<HalfType>
 {
 };
-class TestGpuConvBwdRefNlc1dBfp16 : public ConvBwdShapeSuite<bfloat16>
+class TestGpuConvBwdRefNlc1dBfp16 : public ConvBwdShapeSuite<BFloat16Type>
 {
 };
-class TestGpuConvBwdRefNhwc2dBfp16 : public ConvBwdShapeSuite<bfloat16>
+class TestGpuConvBwdRefNhwc2dBfp16 : public ConvBwdShapeSuite<BFloat16Type>
 {
 };
-class TestGpuConvBwdRefNdhwc3dBfp16 : public ConvBwdShapeSuite<bfloat16>
+class TestGpuConvBwdRefNdhwc3dBfp16 : public ConvBwdShapeSuite<BFloat16Type>
 {
 };
 
@@ -136,14 +139,14 @@ TEST(TestGpuConvBwdRefAsymPadFp32, MatchesCpuRef)
 TEST(TestGpuConvBwdRefAsymPadFp16, MatchesCpuRef)
 {
     SKIP_IF_NO_DEVICES();
-    runGpuVsCpuConvBwd<half>(
+    runGpuVsCpuConvBwd<HalfType>(
         {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1, 2, 2}, {1, 1}, {1, 1}, {1, 0}, {0, 1}, 5e-2f);
 }
 
 TEST(TestGpuConvBwdRefAsymPadBfp16, MatchesCpuRef)
 {
     SKIP_IF_NO_DEVICES();
-    runGpuVsCpuConvBwd<bfloat16>(
+    runGpuVsCpuConvBwd<BFloat16Type>(
         {1, 1, 3, 3}, {1, 1, 3, 3}, {1, 1, 2, 2}, {1, 1}, {1, 1}, {1, 0}, {0, 1}, 0.1f);
 }
 
@@ -161,8 +164,8 @@ TEST(TestGpuConvBwdRefAlphaBeta, AlphaOnly)
     Tensor<float> dxScaled({1, 1, 4, 4});
 
     const unsigned int seed = 42;
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
     // Compute with alpha=1.0
     GpuFpReferenceConvolution::dgrad<float>(dxRef, wTensor, dyTensor, {1, 1}, {1, 1}, {0, 0});
@@ -190,8 +193,8 @@ TEST(TestGpuConvBwdRefAlphaBeta, BetaAccumulate)
     Tensor<float> dxTensor({1, 1, 4, 4});
 
     const unsigned int seed = 42;
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
     dxTensor.fillWithValue(1.0f);
 
     // Pre-fill dx with 1.0, then compute with alpha=1.0, beta=1.0
@@ -222,8 +225,8 @@ TEST(TestGpuConvBwdRefAlphaBeta, BetaZeroSkipsRead)
     Tensor<float> dxDefault({1, 1, 4, 4});
 
     const unsigned int seed = 42;
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
 
     // Pre-fill with garbage — should be ignored when beta=0
     dxBetaZero.fillWithValue(999.0f);
@@ -261,8 +264,12 @@ TEST(TestGpuConvBwdRefStridedFp32, NonPackedOutput)
     Tensor<float> dyTensor({1, 1, 2, 2});
 
     const unsigned int seed = 42;
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    wTensor.memory().hostData();
 
     CpuFpReferenceConvolution::dgrad<float, float, float, double>(
         dxCpu, wTensor, dyTensor, {1, 1}, {1, 1}, {0, 0});
@@ -287,8 +294,12 @@ TEST(TestGpuConvBwdRefStridedFp32, NonPackedInput)
     Tensor<float> dyTensor(dyDims, dyStrides);
 
     const unsigned int seed = 42;
-    dyTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    wTensor.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    fillWithRandomValues(dyTensor, -1.0f, 1.0f, seed);
+    fillWithRandomValues(wTensor, -1.0f, 1.0f, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    dyTensor.memory().hostData();
+    wTensor.memory().hostData();
 
     CpuFpReferenceConvolution::dgrad<float, float, float, double>(
         dxCpu, wTensor, dyTensor, {1, 1}, {1, 1}, {0, 0});
@@ -309,10 +320,10 @@ TEST(TestGpuConvBwdRefMixedType, FloatDxHalfWeight)
 
     Tensor<float> dxCpu({1, 1, 4, 4});
     Tensor<float> dxGpu({1, 1, 4, 4});
-    Tensor<half> wTensor({1, 1, 3, 3});
+    Tensor<HalfType> wTensor({1, 1, 3, 3});
     Tensor<float> dyTensor({1, 1, 2, 2});
 
-    compareGpuVsCpuConvBwd<float, half, float, double>(
+    compareGpuVsCpuConvBwd<float, HalfType, float, double>(
         dxCpu, dxGpu, wTensor, dyTensor, {1, 1}, {1, 1}, {0, 0}, {0, 0}, 5e-2f, 1.0f);
 }
 
@@ -320,12 +331,12 @@ TEST(TestGpuConvBwdRefMixedType, HalfDxFloatWeight)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> dxCpu({1, 1, 4, 4});
-    Tensor<half> dxGpu({1, 1, 4, 4});
+    Tensor<HalfType> dxCpu({1, 1, 4, 4});
+    Tensor<HalfType> dxGpu({1, 1, 4, 4});
     Tensor<float> wTensor({1, 1, 3, 3});
-    Tensor<half> dyTensor({1, 1, 2, 2});
+    Tensor<HalfType> dyTensor({1, 1, 2, 2});
 
-    compareGpuVsCpuConvBwd<half, float, half, double>(
+    compareGpuVsCpuConvBwd<HalfType, float, HalfType, double>(
         dxCpu, dxGpu, wTensor, dyTensor, {1, 1}, {1, 1}, {0, 0}, {0, 0}, 5e-2f, 1.0f);
 }
 

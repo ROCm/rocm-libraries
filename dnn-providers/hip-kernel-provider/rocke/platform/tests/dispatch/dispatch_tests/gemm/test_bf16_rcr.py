@@ -15,6 +15,13 @@ def _bf16(M, N, K, arch):
     return GemmRequest(M=M, N=N, K=K, arch=arch, dtype="bf16")
 
 
+_EXPECTED_BF16_PTRS = {
+    "A": "ptr<bf16, global>",
+    "B": "ptr<bf16, global>",
+    "C": "ptr<bf16, global>",
+}
+
+
 class TestBf16RcrDispatch(unittest.TestCase):
     def test_dtype_gate_rejects_non_bf16(self):
         with self.assertRaises(ValueError):
@@ -54,6 +61,35 @@ class TestBf16RcrDispatch(unittest.TestCase):
         r = dispatch_gemm_bf16(_bf16(256, 256, 256, "gfx950"))
         mod = build_kernel(r)
         self.assertIsNotNone(mod)
+
+
+class TestBf16RcrSignature(unittest.TestCase):
+    """Every candidate must advertise bf16 ptr types, not the helper's fp16 default.
+
+    ``helpers.manifest.gemm_args_signature`` defaults to ``dtype="fp16"`` and
+    ``bf16_rcr._make_candidate`` overrides it explicitly. No bf16 sweep feeds
+    these signatures into a manifest yet -- ``benchmark/gemm/fp16_rcr_sweep.py``
+    is the only ``result.signature -> make_gemm_manifest`` wiring today -- so
+    this guards dispatch metadata rather than a live verify path. It matters
+    because the bf16 sweep will be written by copying the fp16 one, and at that
+    point a dropped override silently advertises ``ptr<f16, global>``, which the
+    manifest runner reads back to pick its reference dtype.
+
+    Assert against literal strings rather than a second call to the helper, so
+    the assertion cannot agree with the code by construction.
+    """
+
+    @staticmethod
+    def _ptr_types(signature):
+        return {a["name"]: a["type"] for a in signature if a["name"] in ("A", "B", "C")}
+
+    def test_every_candidate_signature_is_bf16(self):
+        candidates = gemm_bf16_candidates()
+        self.assertTrue(candidates, "no bf16 RCR candidates registered")
+        for c in candidates:
+            with self.subTest(candidate=c.name):
+                ptrs = self._ptr_types(c.signature(None))
+                self.assertEqual(ptrs, _EXPECTED_BF16_PTRS)
 
 
 if __name__ == "__main__":

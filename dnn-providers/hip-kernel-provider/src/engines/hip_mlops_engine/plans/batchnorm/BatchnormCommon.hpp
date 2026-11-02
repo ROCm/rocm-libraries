@@ -18,6 +18,100 @@ enum class Direction : int
     BACKWARD = 2
 };
 
+class ProblemDescription
+{
+public:
+    ProblemDescription(size_t n,
+                       size_t c,
+                       size_t h,
+                       size_t w,
+                       bool isLayoutNHWC,
+                       bool useFp16Mix,
+                       bool useBfp16Mix,
+                       Direction direction,
+                       size_t minWorkgroups)
+        : _n(n)
+        , _c(c)
+        , _h(h)
+        , _w(w)
+        , _isLayoutNHWC(isLayoutNHWC)
+        , _useFp16Mix(useFp16Mix)
+        , _useBfp16Mix(useBfp16Mix)
+        , _direction(direction)
+        , _minWorkgroups(minWorkgroups)
+    {
+    }
+
+    size_t n() const
+    {
+        return _n;
+    }
+    size_t c() const
+    {
+        return _c;
+    }
+    size_t h() const
+    {
+        return _h;
+    }
+    size_t w() const
+    {
+        return _w;
+    }
+    bool isLayoutNHWC() const
+    {
+        return _isLayoutNHWC;
+    }
+    bool useFp16Mix() const
+    {
+        return _useFp16Mix;
+    }
+    bool useBfp16Mix() const
+    {
+        return _useBfp16Mix;
+    }
+    bool useFp32() const
+    {
+        return !_useFp16Mix && !_useBfp16Mix;
+    }
+    Direction direction() const
+    {
+        return _direction;
+    }
+    size_t minWorkgroups() const
+    {
+        return _minWorkgroups;
+    }
+
+    unsigned int inCstride() const
+    {
+        return static_cast<unsigned int>(_h * _w);
+    }
+    unsigned int inNhw() const
+    {
+        return static_cast<unsigned int>(_n * _h * _w);
+    }
+    unsigned int inChw() const
+    {
+        return static_cast<unsigned int>(_c * _h * _w);
+    }
+    unsigned int inNchw() const
+    {
+        return static_cast<unsigned int>(_n * _c * _h * _w);
+    }
+
+private:
+    size_t _n;
+    size_t _c;
+    size_t _h;
+    size_t _w;
+    bool _isLayoutNHWC;
+    bool _useFp16Mix;
+    bool _useBfp16Mix;
+    Direction _direction;
+    size_t _minWorkgroups;
+};
+
 struct KernelConfig
 {
     int variant = -1;
@@ -30,11 +124,7 @@ struct KernelConfig
 
 // Compute workgroup size configuration given a problem (NHWC) and a vectorsize
 // It supports only 2D workgroups
-inline void getLocalConfigNHWC(size_t c,
-                               size_t h,
-                               size_t w,
-                               bool isFp32,
-                               size_t minWorkgroups,
+inline void getLocalConfigNHWC(const ProblemDescription& problem,
                                size_t vectorsize,
                                size_t& xlocalsize,
                                size_t& ylocalsize)
@@ -43,31 +133,32 @@ inline void getLocalConfigNHWC(size_t c,
     unsigned int xlocalsizeLimit = 64;
     if(vectorsize > 1)
     {
-        xlocalsizeLimit = isFp32 ? 16 : 32;
+        xlocalsizeLimit = problem.useFp32() ? 16 : 32;
     }
 
     // shared memory size per workgroup is fixed
     unsigned int maxLocalsize = 1024 / vectorsize;
 
     // default local config in case the while loop is not entered
-    xlocalsize = std::min(
-        size_t{1} << static_cast<size_t>(std::ceil(std::log2(std::max(c / vectorsize, size_t{1})))),
-        static_cast<size_t>(xlocalsizeLimit));
+    xlocalsize = std::min(size_t{1} << static_cast<size_t>(
+                              std::ceil(std::log2(std::max(problem.c() / vectorsize, size_t{1})))),
+                          static_cast<size_t>(xlocalsizeLimit));
     ylocalsize = maxLocalsize / xlocalsize;
 
     size_t nworkgroups = 0;
     // decrease maxLocalsize until the number of workgroups is greater than 80%
     // of the available CUs
-    while(nworkgroups < minWorkgroups && maxLocalsize >= xlocalsizeLimit && maxLocalsize > 64)
+    while(nworkgroups < problem.minWorkgroups() && maxLocalsize >= xlocalsizeLimit
+          && maxLocalsize > 64)
     {
         // xlocalsize must be power of 2 as reductions in the kernels rely on it, here c is rounded
         // up to next power of 2.
-        xlocalsize = std::min(size_t{1} << static_cast<size_t>(
-                                  std::ceil(std::log2(std::max(c / vectorsize, size_t{1})))),
+        xlocalsize = std::min(size_t{1} << static_cast<size_t>(std::ceil(
+                                  std::log2(std::max(problem.c() / vectorsize, size_t{1})))),
                               static_cast<size_t>(xlocalsizeLimit));
         ylocalsize = maxLocalsize / xlocalsize;
-        nworkgroups = ((c / vectorsize + xlocalsize - 1) / xlocalsize)
-                      * ((h * w + ylocalsize - 1) / ylocalsize);
+        nworkgroups = ((problem.c() / vectorsize + xlocalsize - 1) / xlocalsize)
+                      * ((problem.inCstride() + ylocalsize - 1) / ylocalsize);
         maxLocalsize >>= 1;
     }
 }
@@ -75,12 +166,7 @@ inline void getLocalConfigNHWC(size_t c,
 // Provide workgroup sizes for spatial multiple configuration.
 // It returns the preferred spatial multiple configuration, which is used without tuning.
 // If tuning is enabled, this configuration is also added to the group of instances.
-inline void getSpatialMultipleConfig(size_t c,
-                                     size_t h,
-                                     size_t w,
-                                     bool isLayoutNHWC,
-                                     bool isFp32,
-                                     size_t minWorkgroups,
+inline void getSpatialMultipleConfig(const ProblemDescription& problem,
                                      size_t vectorsize,
                                      size_t& xlocalsize,
                                      size_t& ylocalsize)
@@ -89,16 +175,16 @@ inline void getSpatialMultipleConfig(size_t c,
     xlocalsize = 1;
     ylocalsize = 1;
 
-    const size_t inCstride = h * w;
+    const size_t inCstride = problem.inCstride();
 
-    if(isLayoutNHWC)
+    if(problem.isLayoutNHWC())
     {
-        if(c % vectorsize != 0)
+        if(problem.c() % vectorsize != 0)
         {
             // xlocalsize and ylocalsize already initialized to 1
             return;
         }
-        getLocalConfigNHWC(c, h, w, isFp32, minWorkgroups, vectorsize, xlocalsize, ylocalsize);
+        getLocalConfigNHWC(problem, vectorsize, xlocalsize, ylocalsize);
     }
     else
     {
@@ -121,37 +207,32 @@ inline void getSpatialMultipleConfig(size_t c,
 
 // Check if spatial multiple implementation can be used for a given problem
 // and workgroup configuration.
-inline bool isSpatialMultipleApplicable(size_t n,
-                                        size_t c,
-                                        size_t h,
-                                        size_t w,
-                                        bool isLayoutNHWC,
-                                        bool isFp32,
+inline bool isSpatialMultipleApplicable(const ProblemDescription& problem,
                                         size_t vectorsize,
                                         unsigned int stashValues,
                                         size_t ylocalsize,
                                         size_t zlocalsize,
                                         size_t nelements)
 {
-    const auto inCstride = static_cast<unsigned int>(h * w);
+    const auto inCstride = problem.inCstride();
 
-    if(isLayoutNHWC)
+    if(problem.isLayoutNHWC())
     {
         // check if the provided vectorsize can be used
-        if(c % vectorsize != 0)
+        if(problem.c() % vectorsize != 0)
         {
             return false;
         }
 
-        stashValues *= (isFp32 ? 1 : 2);
+        stashValues *= (problem.useFp32() ? 1 : 2);
         const unsigned int lastYlocalsize = inCstride % ylocalsize == 0
                                                 ? static_cast<unsigned int>(ylocalsize)
                                                 : inCstride % ylocalsize;
 
         const unsigned int lastZocalsize
-            = n % (zlocalsize * nelements) == 0
+            = problem.n() % (zlocalsize * nelements) == 0
                   ? static_cast<unsigned int>(zlocalsize * nelements)
-                  : n % static_cast<unsigned int>(zlocalsize * nelements);
+                  : problem.n() % static_cast<unsigned int>(zlocalsize * nelements);
 
         // FP32:
         //  - last block must have enough space to stash intermediate results in HW dimension
@@ -163,7 +244,7 @@ inline bool isSpatialMultipleApplicable(size_t n,
         //    be large enough
         //  - if C is not multiple of 2, intermediate results are stored in N dimension splitting
         //    float values in group of 2 bytes. N must be large enough
-        if((!isFp32 && (c % 2 != 0 && lastZocalsize < stashValues))
+        if((!problem.useFp32() && (problem.c() % 2 != 0 && lastZocalsize < stashValues))
            || ((lastYlocalsize < stashValues) && (lastZocalsize < stashValues)))
         {
             return false;
@@ -182,14 +263,14 @@ inline bool isSpatialMultipleApplicable(size_t n,
                                                 : inCstride % ylocalsize;
 
         const unsigned int lastZocalsize
-            = n % (zlocalsize * nelements) == 0
+            = problem.n() % (zlocalsize * nelements) == 0
                   ? static_cast<unsigned int>(zlocalsize * nelements)
-                  : n % static_cast<unsigned int>(zlocalsize * nelements);
+                  : problem.n() % static_cast<unsigned int>(zlocalsize * nelements);
         // Restrictions:
         //  - last block must have enough space to stash intermediate results in HW dimension
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
         //    be large enough
-        stashValues *= (isFp32 ? 1 : 2);
+        stashValues *= (problem.useFp32() ? 1 : 2);
         if(lastYlocalsize < stashValues && lastZocalsize < stashValues)
         {
             return false;
@@ -198,14 +279,13 @@ inline bool isSpatialMultipleApplicable(size_t n,
     return true;
 }
 
-inline bool useMultiple(
-    size_t n, size_t h, size_t w, bool isFp16OrBfp16Mix, bool isLayoutNHWC, Direction direction)
+inline bool useMultiple(const ProblemDescription& problem)
 {
-    const auto inCstride = static_cast<unsigned int>(h * w);
-    const auto inNhw = static_cast<unsigned int>(n) * inCstride;
+    const auto inCstride = problem.inCstride();
+    const auto inNhw = problem.inNhw();
     const auto thrInNhw = static_cast<unsigned int>(32 * 1024 * 1024);
 
-    if(!isLayoutNHWC && direction == Direction::BACKWARD)
+    if(!problem.isLayoutNHWC() && problem.direction() == Direction::BACKWARD)
     {
         if((inNhw < thrInNhw && inCstride > 1024) || (inNhw < thrInNhw && inCstride > 512)
            || inCstride <= 512)
@@ -214,14 +294,15 @@ inline bool useMultiple(
         }
     }
 
-    if(!isLayoutNHWC && direction == Direction::FORWARD_TRAINING)
+    if(!problem.isLayoutNHWC() && problem.direction() == Direction::FORWARD_TRAINING)
     {
-        const bool condition1 = (n < 3) || (inCstride <= 512)
-                                || (inNhw < 33554432 && inCstride > 1024)
-                                || (n >= 256 && inCstride > 60 && isFp16OrBfp16Mix)
-                                || (isFp16OrBfp16Mix && inCstride > 512);
+        const bool condition1
+            = (problem.n() < 3) || (inCstride <= 512) || (inNhw < 33554432 && inCstride > 1024)
+              || (problem.n() >= 256 && inCstride > 60
+                  && (problem.useFp16Mix() || problem.useBfp16Mix()))
+              || ((problem.useFp16Mix() || problem.useBfp16Mix()) && inCstride > 512);
 
-        const bool condition2 = (n <= 768) || (inCstride <= 150);
+        const bool condition2 = (problem.n() <= 768) || (inCstride <= 150);
 
         if(condition1 && condition2)
         {
@@ -233,47 +314,39 @@ inline bool useMultiple(
 }
 
 // Provide the stash method to use for spatial multiple implementation
-inline int getStashMethod(bool isLayoutNHWC,
-                          bool isFp32,
+inline int getStashMethod(const ProblemDescription& problem,
                           unsigned int stashValues,
-                          size_t c,
-                          size_t n,
-                          size_t inCstride,
                           size_t ylocalsize,
                           size_t zlocalsize,
                           size_t nelements)
 {
     // See `batchnorm_functions.hpp` for stash implementation of different methods
     int stashMethod = 0;
-    stashValues *= (isFp32 ? 1 : 2);
-    const unsigned int lastYlocalsize = (inCstride) % ylocalsize == 0
+    stashValues *= (problem.useFp32() ? 1 : 2);
+    const unsigned int lastYlocalsize = problem.inCstride() % ylocalsize == 0
                                             ? static_cast<unsigned int>(ylocalsize)
-                                            : static_cast<unsigned int>((inCstride) % ylocalsize);
-    const unsigned int lastZocalsize = n % (zlocalsize * nelements) == 0
-                                           ? static_cast<unsigned int>(zlocalsize * nelements)
-                                           : n % static_cast<unsigned int>(zlocalsize * nelements);
+                                            : problem.inCstride() % ylocalsize;
+    const unsigned int lastZocalsize
+        = problem.n() % (zlocalsize * nelements) == 0
+              ? static_cast<unsigned int>(zlocalsize * nelements)
+              : problem.n() % static_cast<unsigned int>(zlocalsize * nelements);
     if(lastYlocalsize < stashValues && lastZocalsize >= stashValues)
     {
         stashMethod = 1;
     }
-    if(isLayoutNHWC && !isFp32 && (c % 2 != 0) && (lastZocalsize >= stashValues))
+    if(problem.isLayoutNHWC() && !problem.useFp32() && (problem.c() % 2 != 0)
+       && (lastZocalsize >= stashValues))
     {
         stashMethod = 2;
     }
     return stashMethod;
 }
 
-inline void defaultConfigSpatialSingle(size_t n,
-                                       size_t h,
-                                       size_t w,
-                                       bool isFp16Mix,
-                                       bool isBfp16Mix,
-                                       bool isLayoutNHWC,
-                                       Direction direction,
-                                       KernelConfig& config)
+inline void defaultConfigSpatialSingle(const ProblemDescription& problem, KernelConfig& config)
 {
-    const auto inCstride = static_cast<unsigned int>(h * w);
-    const auto inNhw = static_cast<unsigned int>(n * inCstride);
+    const auto n = problem.n();
+    const auto inCstride = problem.inCstride();
+    const auto inNhw = problem.inNhw();
 
     // NCHW supports also variants 0 and 3 which can be much faster than
     // variant 1 but have more restrictions. Here we decide if we use variant
@@ -283,11 +356,11 @@ inline void defaultConfigSpatialSingle(size_t n,
     // we add the latter for tuning to be sure and because it is cheap to run.
     // NOTE: Currently we don't have the tuning infrastructure in place, so we
     // are only selecting one variant to run based on heuristics.
-    if(!isLayoutNHWC)
+    if(!problem.isLayoutNHWC())
     {
-        if(direction == Direction::BACKWARD)
+        if(problem.direction() == Direction::BACKWARD)
         {
-            if((inCstride < 200) && (inCstride > 60) && isFp16Mix)
+            if((inCstride < 200) && (inCstride > 60) && problem.useFp16Mix())
             {
                 config.variant = 1;
                 config.vectorsize = 1;
@@ -348,8 +421,9 @@ inline void defaultConfigSpatialSingle(size_t n,
             }
 
             if((inNhw < 33554432 && inCstride > 1024)
-               || ((n >= 256) && (inCstride > 60) && (isFp16Mix || isBfp16Mix))
-               || ((inCstride > 512) && (isFp16Mix || isBfp16Mix)))
+               || ((n >= 256) && (inCstride > 60)
+                   && (problem.useFp16Mix() || problem.useBfp16Mix()))
+               || ((inCstride > 512) && (problem.useFp16Mix() || problem.useBfp16Mix())))
             {
                 config.variant = 1;
                 config.vectorsize = 1;
@@ -379,13 +453,7 @@ inline void defaultConfigSpatialSingle(size_t n,
 //  - for NHWC an hybrid approach is used, xlocalsize and vectorsize are set using heuristics,
 //    while ylocalsize, zlocalsize and nelements are added to the tuning with some
 //    additional restrictions based on heuristics to keep the number of instances low
-inline void defaultConfigSpatialMultiple(size_t n,
-                                         size_t c,
-                                         size_t h,
-                                         size_t w,
-                                         bool isLayoutNHWC,
-                                         bool isFp32,
-                                         size_t minWorkgroups,
+inline void defaultConfigSpatialMultiple(const ProblemDescription& problem,
                                          unsigned int stashValues,
                                          KernelConfig& config)
 {
@@ -393,28 +461,16 @@ inline void defaultConfigSpatialMultiple(size_t n,
     size_t ylocalsizeDefault = 1;
     const size_t zlocalsizeDefault = 1;
     size_t vectorsizeDefault = 4;
-    const size_t nelementsDefault = n;
+    const size_t nelementsDefault = problem.n();
 
-    if(isLayoutNHWC)
+    if(problem.isLayoutNHWC())
     {
         // First add the default instance, which should work well for a large range of problems
         {
-            getSpatialMultipleConfig(c,
-                                     h,
-                                     w,
-                                     isLayoutNHWC,
-                                     isFp32,
-                                     minWorkgroups,
-                                     vectorsizeDefault,
-                                     xlocalsizeDefault,
-                                     ylocalsizeDefault);
+            getSpatialMultipleConfig(
+                problem, vectorsizeDefault, xlocalsizeDefault, ylocalsizeDefault);
 
-            if(isSpatialMultipleApplicable(n,
-                                           c,
-                                           h,
-                                           w,
-                                           isLayoutNHWC,
-                                           isFp32,
+            if(isSpatialMultipleApplicable(problem,
                                            vectorsizeDefault,
                                            stashValues,
                                            ylocalsizeDefault,
@@ -433,22 +489,10 @@ inline void defaultConfigSpatialMultiple(size_t n,
                 if(vectorsizeDefault > 1)
                 {
                     vectorsizeDefault = 1;
-                    getSpatialMultipleConfig(c,
-                                             h,
-                                             w,
-                                             isLayoutNHWC,
-                                             isFp32,
-                                             minWorkgroups,
-                                             vectorsizeDefault,
-                                             xlocalsizeDefault,
-                                             ylocalsizeDefault);
+                    getSpatialMultipleConfig(
+                        problem, vectorsizeDefault, xlocalsizeDefault, ylocalsizeDefault);
 
-                    if(isSpatialMultipleApplicable(n,
-                                                   c,
-                                                   h,
-                                                   w,
-                                                   isLayoutNHWC,
-                                                   isFp32,
+                    if(isSpatialMultipleApplicable(problem,
                                                    vectorsizeDefault,
                                                    stashValues,
                                                    ylocalsizeDefault,
@@ -476,22 +520,9 @@ inline void defaultConfigSpatialMultiple(size_t n,
     // applicable)
     while(vectorsizeDefault > 0)
     {
-        getSpatialMultipleConfig(c,
-                                 h,
-                                 w,
-                                 isLayoutNHWC,
-                                 isFp32,
-                                 minWorkgroups,
-                                 vectorsizeDefault,
-                                 xlocalsizeDefault,
-                                 ylocalsizeDefault);
+        getSpatialMultipleConfig(problem, vectorsizeDefault, xlocalsizeDefault, ylocalsizeDefault);
 
-        if(isSpatialMultipleApplicable(n,
-                                       c,
-                                       h,
-                                       w,
-                                       isLayoutNHWC,
-                                       isFp32,
+        if(isSpatialMultipleApplicable(problem,
                                        vectorsizeDefault,
                                        stashValues,
                                        ylocalsizeDefault,

@@ -7,6 +7,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "MiopenUtils.hpp"
+#include "engines/plans/MiopenPointwiseTensorChecks.hpp"
 #include "engines/plans/MiopenUnaryActivationChecks.hpp"
 
 namespace miopen_plugin::unary_activation_applicability
@@ -36,15 +37,14 @@ void checkReluParamsSupported(const PointwiseAttributes& attrs)
 {
     const auto lowerClip = attrs.relu_lower_clip();
     const auto upperClip = attrs.relu_upper_clip();
-    const auto lowerClipSlope = attrs.relu_lower_clip_slope();
+    const bool leaky = miopen_utils::hasLeakyReluSlope(attrs);
 
     if(lowerClip && upperClip)
     {
         // Clamp. MIOpen's CLAMP floors at lower_clip and has no slope parameter, and this
         // branch wins over the leaky one below, so a non-zero slope would be silently dropped
-        // and the op would compute a flat floor instead of a ramp. A zero slope is a no-op
-        // that CLAMP already represents exactly, so it stays allowed.
-        if(lowerClipSlope && *lowerClipSlope != 0.f)
+        // and the op would compute a flat floor instead of a ramp.
+        if(leaky)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -56,7 +56,7 @@ void checkReluParamsSupported(const PointwiseAttributes& attrs)
     if(upperClip)
     {
         // Clipped ReLU is likewise flat below the knee, so the same reasoning applies.
-        if(lowerClipSlope && *lowerClipSlope != 0.f)
+        if(leaky)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -65,7 +65,7 @@ void checkReluParamsSupported(const PointwiseAttributes& attrs)
         }
         return; // Clipped ReLU
     }
-    if(lowerClipSlope)
+    if(leaky)
     {
         // Leaky ReLU. MIOpen's LEAKYRELU is parameterized by slope alone, with the knee fixed
         // at 0; it cannot represent a non-zero lower_clip (a shifted knee). Accepting such a
@@ -106,50 +106,11 @@ void checkTensorsSupported(
     const auto& outputTensor
         = miopen_utils::findTensorAttributes(tensorMap, attrs.out_0_tensor_uid());
 
-    if(inputTensor.virtual_() || outputTensor.virtual_())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            opName + " plan builder: input and output tensors must be non-virtual");
-    }
-
-    const auto inputDtype = inputTensor.data_type();
-    const auto outputDtype = outputTensor.data_type();
-
-    if((inputDtype != DataType::FLOAT && inputDtype != DataType::HALF)
-       || (outputDtype != DataType::FLOAT && outputDtype != DataType::HALF))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            opName + " plan builder: only FLOAT and HALF IO dtypes are supported");
-    }
-
-    if(inputDtype != outputDtype)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            opName + " plan builder: input and output tensors must have the same data type");
-    }
+    pointwise_applicability::validatePointwiseIoTensors({&inputTensor, &outputTensor},
+                                                        opName + " plan builder");
 
     const auto* inputDims = inputTensor.dims();
     const auto* outputDims = outputTensor.dims();
-    const auto* inputStrides = inputTensor.strides();
-    const auto* outputStrides = outputTensor.strides();
-
-    if(inputDims == nullptr || outputDims == nullptr || inputStrides == nullptr
-       || outputStrides == nullptr)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            opName + " plan builder: tensor dims or strides are null");
-    }
-
-    if(inputDims->size() != inputStrides->size() || outputDims->size() != outputStrides->size())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            opName + " plan builder: tensor dims and strides size mismatch");
-    }
 
     const auto rank = inputDims->size();
 
@@ -208,6 +169,15 @@ bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opG
     }
 
     const auto& attrs = opGraph.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+
+    if(attrs.in_1_tensor_uid().has_value() || attrs.in_2_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO(
+            GENERIC_OP_NAME
+            << " plan builder only supports unary nodes; in_1_tensor_uid/in_2_tensor_uid must "
+               "not be present");
+        return false;
+    }
 
     try
     {

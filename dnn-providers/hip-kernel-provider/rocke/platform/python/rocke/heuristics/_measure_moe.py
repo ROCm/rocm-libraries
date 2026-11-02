@@ -133,7 +133,9 @@ def _measure_spec(
     fns = {}
     mods = []
     for phase, (kdef, sig, grid) in defs.items():
-        ll = lower_kernel_to_llvm(kdef)
+        # Lower for the target we are about to compile for, not a fixed one:
+        # `isa` above is built from this same `arch`.
+        ll = lower_kernel_to_llvm(kdef, arch=arch)
         hsaco, _ = build_hsaco_from_llvm_ir(ll, isa=isa)
         mod = rt.load_module(hsaco)
         mods.append(mod)

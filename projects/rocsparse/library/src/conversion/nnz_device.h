@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -63,23 +63,20 @@ namespace rocsparse
     //! @param nnz_per_column   The array storing the results of the nnz per column.
     //!
     template <rocsparse_int NB_X, typename I, typename J, typename T>
-    ROCSPARSE_KERNEL(NB_X)
-    void nnz_kernel_col(rocsparse_order order,
-                        J               m,
-                        J               n,
-                        const T* __restrict__ A,
-                        int64_t lda,
-                        I* __restrict__ nnz_per_column)
+    ROCSPARSE_DEVICE_ILF void nnz_col_device(J               col,
+                                             rocsparse_order order,
+                                             J               m,
+                                             const T* __restrict__ A,
+                                             int64_t lda,
+                                             I* __restrict__ nnz_per_column,
+                                             I* __restrict__ sdata)
     {
         static constexpr T s_zero = {};
 
-        J tx  = hipThreadIdx_x;
-        J col = hipBlockIdx_x;
+        J tx = hipThreadIdx_x;
 
         J m_full = (m / NB_X) * NB_X;
         I res    = 0;
-
-        __shared__ I sdata[NB_X];
 
         if(order == rocsparse_order_column)
         {
@@ -132,6 +129,36 @@ namespace rocsparse
         }
     }
 
+    // GRID_STRIDE must be true when the grid was clamped below n blocks.
+    template <rocsparse_int NB_X, bool GRID_STRIDE, typename I, typename J, typename T>
+    ROCSPARSE_KERNEL(NB_X)
+    void nnz_kernel_col(rocsparse_order order,
+                        J               m,
+                        J               n,
+                        const T* __restrict__ A,
+                        int64_t lda,
+                        I* __restrict__ nnz_per_column)
+    {
+        __shared__ I sdata[NB_X];
+
+        if constexpr(GRID_STRIDE)
+        {
+            for(int64_t col = hipBlockIdx_x; col < n; col += hipGridDim_x)
+            {
+                rocsparse::nnz_col_device<NB_X>(
+                    static_cast<J>(col), order, m, A, lda, nnz_per_column, sdata);
+
+                // Thread 0 reads sdata before the next column overwrites it.
+                __syncthreads();
+            }
+        }
+        else
+        {
+            rocsparse::nnz_col_device<NB_X>(
+                static_cast<J>(hipBlockIdx_x), order, m, A, lda, nnz_per_column, sdata);
+        }
+    }
+
     //!
     //! @brief Kernel for counting the number of non-zeros per row.
     //! @param m         		The number of rows.
@@ -140,26 +167,30 @@ namespace rocsparse
     //! @param lda       		The leading dimension.
     //! @param nnz_per_row      The array storing the results of the nnz per row.
     //!
-    template <rocsparse_int DIM_X, rocsparse_int DIM_Y, typename I, typename J, typename T>
-    ROCSPARSE_KERNEL(DIM_X* DIM_Y)
-    void nnz_kernel_row(rocsparse_order order,
-                        J               m,
-                        J               n,
-                        const T* __restrict__ A,
-                        int64_t lda,
-                        I* __restrict__ nnz_per_row)
+    template <rocsparse_int DIM_X,
+              rocsparse_int DIM_Y,
+              typename K,
+              typename I,
+              typename J,
+              typename T>
+    ROCSPARSE_DEVICE_ILF void nnz_row_device(K               bid,
+                                             rocsparse_order order,
+                                             J               m,
+                                             J               n,
+                                             const T* __restrict__ A,
+                                             int64_t lda,
+                                             I* __restrict__ nnz_per_row,
+                                             I* __restrict__ sdata)
     {
         static constexpr T s_zero = {};
 
         J thread_id = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x;
         J tx        = thread_id % DIM_X;
         J ty        = thread_id / DIM_X;
-        J ind       = hipBlockIdx_x * DIM_X * 4 + tx;
+        K ind       = bid * DIM_X * 4 + tx;
         J n_tail    = n % (4 * DIM_Y);
         J col       = ty * 4;
         I res_A[4];
-
-        __shared__ I sdata[DIM_X * 4 * DIM_Y];
 
         for(int k = 0; k < 4; ++k)
         {
@@ -225,7 +256,7 @@ namespace rocsparse
 
         __syncthreads();
 
-        ind = hipBlockIdx_x * DIM_X * 4 + thread_id;
+        ind = bid * DIM_X * 4 + thread_id;
         if(thread_id < DIM_X * 4)
         {
             for(int j = 1; j < DIM_Y; j++)
@@ -237,6 +268,42 @@ namespace rocsparse
             {
                 nnz_per_row[ind] = sdata[thread_id];
             }
+        }
+    }
+
+    // GRID_STRIDE must be true when the grid was clamped below the number of
+    // DIM_X * 4 row tiles.
+    template <rocsparse_int DIM_X,
+              rocsparse_int DIM_Y,
+              bool          GRID_STRIDE,
+              typename I,
+              typename J,
+              typename T>
+    ROCSPARSE_KERNEL(DIM_X* DIM_Y)
+    void nnz_kernel_row(rocsparse_order order,
+                        J               m,
+                        J               n,
+                        const T* __restrict__ A,
+                        int64_t lda,
+                        I* __restrict__ nnz_per_row)
+    {
+        __shared__ I sdata[DIM_X * 4 * DIM_Y];
+
+        if constexpr(GRID_STRIDE)
+        {
+            for(int64_t bid = hipBlockIdx_x; bid * (DIM_X * 4) < m; bid += hipGridDim_x)
+            {
+                rocsparse::nnz_row_device<DIM_X, DIM_Y>(
+                    bid, order, m, n, A, lda, nnz_per_row, sdata);
+
+                // The reduction reads sdata before the next tile overwrites it.
+                __syncthreads();
+            }
+        }
+        else
+        {
+            rocsparse::nnz_row_device<DIM_X, DIM_Y>(
+                static_cast<int64_t>(hipBlockIdx_x), order, m, n, A, lda, nnz_per_row, sdata);
         }
     }
 }

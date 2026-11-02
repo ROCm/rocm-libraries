@@ -1,0 +1,137 @@
+# serializer version: 1
+# name: test_gfx950_emit_digests
+  list([
+    dict({
+      'file': 'BBS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bjlk_BBS_BH_Bias_AuxB_HA_S_SAV_UserArgsuIzuM2ZfDj6tMq662lEsDtNF_zdW3-VcMXI1UrnFjw=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'DTL.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Custom_Cijk_Alik_Bljk_HHS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname0_gfx950',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'F8B8BS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname1_gfx950',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_UserArgs_shortname0_gfx950',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'HHS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_HHS_BH_Bias_GG_HA_S_SAV_UserArgs_M2et6MHShVVvTeZ5fat-kgd7VIvCqnRc9AZvFeECeyQ=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'HSS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bjlk_HSS_BH_Bias_HA_S_SAV_UserArgs_MT3xJF6LHtaOZxSZxFUURb62ozZQFQNKz_pA9THCQsxHjk=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'I8_GSU.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_I8I8S_BH_Bias_HA_S_SAV_UserArgs_MMq4RE2j5SamXw3Fl3OWbs6wgpt6BfK_NSI8pHynBG60=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'MX.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT4UTAP-KiaMwFvGnLi6aCWs_H4MpjL90fLDMECXYFz3aI=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'MX_StreamK.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT4UTAP-KiaMwFvGnLi6aCWs_H4MpjL90fLDMECXYFz3aI=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'SB.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_S_B_Bias_AuxS_HA_S_SAV_UserArgs_MpSBmljTdZGwVkAzL3jLt76yERmKSW1T7gb1OGIRUeTY=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'StreamK_B8F8.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_B8F8_BH_Bias_HA_S_SAB_SAV_UserArg5Y17FXD4SQe1mViEJAbcMfrKQuAIrH8AUTN1BLBi0A0=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bljk_B8F8_BH_Bias_HA_S_SAB_SAV_UserArgIayw088m-UMa1b4vkn3R-lKSPKOF7SqAR9rcqEN2ERc=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bljk_B8F8_BH_Bias_HA_S_SAB_SAV_UserArgWOO2P_cnb_2NO2TgLedySLeUN6NZ-LsdvLayFEeFezQ=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bljk_B8F8_BH_Bias_HA_S_SAB_SAV_UserArgYuQvtd_F97rkGSL9pjWCnwk5PtXKa5rBwsq67yC_WUc=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bljk_B8F8_BH_Bias_HA_S_SAB_SAV_UserArgpZpdSszsAZla-tSbOeIUWysOemUX-AaLaXSRTfLO_-8=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'StreamK_F8F8S.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_F8F8S_BH_Bias_HA_S_SAV_UserArgs_MlUS8nxc3jg1l9vxRPgB6FVPdxNMC39nUJ3xgB5LLfTw=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'WaveSplitK.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bjlk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT3vCjR3CU_zrOfyApV9jDL9YzA_rYBamO7Qtl1jtMCJvk=',
+          'err': 0,
+        }),
+      ]),
+    }),
+  ])
+# ---

@@ -58,6 +58,8 @@ class ORIGAMI_EXPORT hardware_t {
     gfx950,
     gfx1200,
     gfx1201,
+    gfx1170,
+    gfx1171,
     gfx1100,
     gfx1101,
     gfx1150,
@@ -80,6 +82,8 @@ class ORIGAMI_EXPORT hardware_t {
     if (str == "gfx950") return architecture_t::gfx950;
     if (str == "gfx1200") return architecture_t::gfx1200;
     if (str == "gfx1201") return architecture_t::gfx1201;
+    if (str == "gfx1170") return architecture_t::gfx1170;
+    if (str == "gfx1171") return architecture_t::gfx1171;
     if (str == "gfx1100") return architecture_t::gfx1100;
     if (str == "gfx1101") return architecture_t::gfx1101;
     if (str == "gfx1150") return architecture_t::gfx1150;
@@ -103,6 +107,8 @@ class ORIGAMI_EXPORT hardware_t {
       case architecture_t::gfx950: return "gfx950";
       case architecture_t::gfx1200: return "gfx1200";
       case architecture_t::gfx1201: return "gfx1201";
+      case architecture_t::gfx1170: return "gfx1170";
+      case architecture_t::gfx1171: return "gfx1171";
       case architecture_t::gfx1100: return "gfx1100";
       case architecture_t::gfx1101: return "gfx1101";
       case architecture_t::gfx1150: return "gfx1150";
@@ -126,26 +132,117 @@ class ORIGAMI_EXPORT hardware_t {
     std::tuple<double, double, double>
         mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
     double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
+    size_t simds_per_cu;   ///< SIMD units per Compute Unit (CDNA: 4 SIMD16, RDNA3/4: 2 SIMD32)
+    size_t l1_capacity;    ///< L1 data cache capacity per CU in bytes (shared across all SIMDs)
 
     constexpr architecture_constants(double mem1_perf_ratio,
                                      double mem2_perf_ratio,
                                      double mem3_perf_ratio,
                                      size_t parallel_mi_cu,
                                      std::tuple<double, double, double> mem_bw_per_wg_coefficients,
-                                     double mem_clock_ratio)  // Obtained through microbenchmarking
+                                     double mem_clock_ratio,  // Obtained through microbenchmarking
+                                     size_t simds_per_cu,
+                                     size_t l1_capacity)
         : mem1_perf_ratio(mem1_perf_ratio)
         , mem2_perf_ratio(mem2_perf_ratio)
         , mem3_perf_ratio(mem3_perf_ratio)
         , parallel_mi_cu(parallel_mi_cu)
         , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
-        , mem_clock_ratio(mem_clock_ratio) {}
+        , mem_clock_ratio(mem_clock_ratio)
+        , simds_per_cu(simds_per_cu)
+        , l1_capacity(l1_capacity) {}
   };
 
   /**
    * MALL value for those architectures that do not support it.
-   * The value '1000' is just a big number.
    */
   static constexpr double NO_MALL_AVAILABLE = 1.21875121875121875122 * 1000;
+
+  /**
+   * @brief Return the number of SIMD units per Compute Unit for a given architecture.
+   *
+   * CDNA (gfx90a/942/950): 4 SIMD16 per CU.
+   * RDNA3/4 (gfx11xx/gfx12xx): 2 SIMD32 per CU.
+   * gfx1250: 4 SIMD32 per CU.
+   */
+  static constexpr size_t get_simds_per_cu(architecture_t arch) noexcept {
+    return get_arch_constants(arch).simds_per_cu;
+  }
+
+  /**
+   * @brief SIMD units per Compute Unit for this hardware instance's architecture.
+   */
+  constexpr size_t simds_per_cu() const noexcept { return get_simds_per_cu(arch); }
+
+  /**
+   * @brief Threads per wavefront TensileLite builds for an architecture by default: wave32
+   *        wherever the ISA supports it (gfx10/11/12), wave64 on CDNA (gfx90a/942/950).
+   *
+   * A kernel built with another WavefrontSize carries it in tensile_params_t::wavefront_size.
+   */
+  static constexpr size_t get_wavefront_size(architecture_t arch) noexcept {
+    switch (arch) {
+      case architecture_t::gfx90a:
+      case architecture_t::gfx942:
+      case architecture_t::gfx950: return 64;
+      default: return 32;
+    }
+  }
+
+  /**
+   * @brief Default threads per wavefront for this hardware instance's architecture.
+   */
+  constexpr size_t wavefront_size() const noexcept { return get_wavefront_size(arch); }
+
+  /**
+   * @brief Lanes per SIMD: 16 on CDNA (gfx90a/942/950), 32 on RDNA and gfx1250.
+   */
+  static constexpr size_t get_simd_lanes(architecture_t arch) noexcept {
+    switch (arch) {
+      case architecture_t::gfx90a:
+      case architecture_t::gfx942:
+      case architecture_t::gfx950: return 16;
+      default: return 32;
+    }
+  }
+
+  /**
+   * @brief Lanes per SIMD for this hardware instance's architecture.
+   */
+  constexpr size_t simd_lanes() const noexcept { return get_simd_lanes(arch); }
+
+  /**
+   * @brief Clocks one vector-ALU instruction of a wavefront occupies its SIMD.
+   *
+   * wave64 on SIMD16 (gfx950) takes 4; wave32 on SIMD32 (gfx1250) takes 1.
+   */
+  static constexpr size_t get_valu_cycles_per_instruction(architecture_t arch) noexcept {
+    return get_wavefront_size(arch) / get_simd_lanes(arch);
+  }
+
+  /**
+   * @brief Vector-ALU clocks per wavefront instruction for this hardware instance.
+   */
+  constexpr size_t valu_cycles_per_instruction() const noexcept {
+    return get_valu_cycles_per_instruction(arch);
+  }
+
+  /**
+   * @brief Whether matrix results land in separate accumulation registers that the
+   *        epilogue has to copy out (CDNA's AccVGPRs).
+   *
+   * gfx1250 keeps them in its unified VGPR file, so it has no such copy.
+   */
+  static constexpr bool get_has_accumulation_registers(architecture_t arch) noexcept {
+    return arch != architecture_t::gfx1250;
+  }
+
+  /**
+   * @brief Whether this hardware instance copies matrix results out of accumulation registers.
+   */
+  constexpr bool has_accumulation_registers() const noexcept {
+    return get_has_accumulation_registers(arch);
+  }
 
   /**
    * @brief gfx950-only architecture constants from optional PCI chip id.
@@ -163,14 +260,18 @@ class ORIGAMI_EXPORT hardware_t {
               2.55,
               4,
               std::make_tuple(-0.000098, 0.02011, 0),
-              1.5};
+              1.5,
+              4,
+              32 * 1024};
     }
     return {17,
             1.21875121875121875122 * 7,
             6,
             4,
-            std::make_tuple(-0.000013, 0.007070, 0.027355),
-            1.5};
+            std::make_tuple(-0.0000194, 0.008772, 0.007898),
+            1.5,
+            4,
+            32 * 1024};
   }
 
   /**
@@ -191,40 +292,49 @@ class ORIGAMI_EXPORT hardware_t {
       std::optional<int> pci_chip_id = std::nullopt) noexcept {
     switch (arch) {
       case architecture_t::gfx90a:
-        return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5};
+        return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5, 4, 16 * 1024};
       case architecture_t::gfx942:
-        return {17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5};
+        return {17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5, 4, 32 * 1024};
       case architecture_t::gfx950:
         return get_gfx950_arch_constants(pci_chip_id);
       case architecture_t::gfx1200:
-        return {3.28, 1.21875121875121875122 * 1.45, 0.280, 2, std::make_tuple(0, 0.31, 0), 1.5};
+        return {3.28, 1.21875121875121875122 * 1.45, 0.280, 2, std::make_tuple(0, 0.31, 0), 1.5, 2, 64 * 1024};
       case architecture_t::gfx1201:
-        return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};
+        return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5, 2, 64 * 1024};
+      case architecture_t::gfx1170:
+      case architecture_t::gfx1171: {
+        // TODO: Double-check gfx117x constants when measured values are available.
+        auto c            = get_arch_constants(architecture_t::gfx1201);
+        c.mem2_perf_ratio = NO_MALL_AVAILABLE;
+        return c;
+      }
       case architecture_t::gfx1100:
-        return {7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5};
+        return {7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1101:
         // AMD Navi 32
-        return {4.86133, 1.21875121875121875122 * 1.28305, 0.420583, 2, std::make_tuple(0, 0.13169, 0), 1.5};
+        return {4.86133, 1.21875121875121875122 * 1.28305, 0.420583, 2, std::make_tuple(0, 0.13169, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1150:
         // AMD Strix Point iGPU
-        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5};
+        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1151:
         // AMD Strix Halo iGPU
-        return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5};
+        return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1152:
         // AMD Radeon 840M iGPU
-        return {0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 1.5};
+        return {0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
-        return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
+        return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1250: {
         // TODO: Update with real gfx1250 constants when available
         auto c                       = get_gfx950_arch_constants(std::nullopt);
         c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
         c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
+        c.simds_per_cu               = 4;
+        c.l1_capacity                = 0;  // RDNA4 has no L1D between vcache and L2
         return c;
       }
-      default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
+      default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0, 4, 32 * 1024};
     }
   }
 
@@ -475,6 +585,60 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(16, 16, 16, data_type_t::Int4), 8}, // v_wmma_i32_16x16x16_iu4
              {matrix_instruction(16, 16, 32, data_type_t::Int4), 8}, // v_wmma_i32_16x16x32_iu4
          }},
+        {architecture_t::gfx1170,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 16}, // v_wmma_f16_16x16x16_f16/v_wmma_f32_16x16x16_f16
+
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_wmma_bf16_16x16x16_bf16/v_wmma_f32_16x16x16_bf16
+
+             // F8
+             {matrix_instruction(16, 16, 16, data_type_t::Float8), 8}, // v_wmma_f32_16x16x16_fp8_fp8
+
+             // F8B8
+             {matrix_instruction(16, 16, 16, data_type_t::Float8BFloat8), 8}, // v_wmma_f32_16x16x16_fp8_bf8
+
+             // B8F8
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat8Float8), 8}, // v_wmma_f32_16x16x16_bf8_fp8
+
+             // B8
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat8), 8}, // v_wmma_f32_16x16x16_bf8_bf8
+
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 8}, // v_wmma_i32_16x16x16_iu8
+
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 8}, // v_wmma_i32_16x16x16_iu4
+             {matrix_instruction(16, 16, 32, data_type_t::Int4), 8}, // v_wmma_i32_16x16x32_iu4
+         }},
+        {architecture_t::gfx1171,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 16}, // v_wmma_f16_16x16x16_f16/v_wmma_f32_16x16x16_f16
+
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_wmma_bf16_16x16x16_bf16/v_wmma_f32_16x16x16_bf16
+
+             // F8
+             {matrix_instruction(16, 16, 16, data_type_t::Float8), 8}, // v_wmma_f32_16x16x16_fp8_fp8
+
+             // F8B8
+             {matrix_instruction(16, 16, 16, data_type_t::Float8BFloat8), 8}, // v_wmma_f32_16x16x16_fp8_bf8
+
+             // B8F8
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat8Float8), 8}, // v_wmma_f32_16x16x16_bf8_fp8
+
+             // B8
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat8), 8}, // v_wmma_f32_16x16x16_bf8_bf8
+
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 8}, // v_wmma_i32_16x16x16_iu8
+
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 8}, // v_wmma_i32_16x16x16_iu4
+             {matrix_instruction(16, 16, 32, data_type_t::Int4), 8}, // v_wmma_i32_16x16x32_iu4
+         }},
         {architecture_t::gfx1100,
          {
              // F16
@@ -628,21 +792,33 @@ class ORIGAMI_EXPORT hardware_t {
          }}};
   // clang-format on
 
+  // ---------------------------------------------------------------------------
+  // Data members
+  // ---------------------------------------------------------------------------
+
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
   size_t rf_capacity;   ///< Capacity of Register File (RF) in bytes
-  double mem1_perf_ratio;
-  double mem2_perf_ratio;
-  double mem3_perf_ratio;
-  size_t L2_capacity;        ///< Capacity of L2 cache in bytes
-  size_t CU_per_L2;          ///< Number of compute units per L2 cache domain
+
+  double mem1_perf_ratio;  ///< L1/shared memory performance ratio (microbenchmarked)
+  double mem2_perf_ratio;  ///< L2 cache performance ratio (microbenchmarked)
+  double mem3_perf_ratio;  ///< MALL/HBM performance ratio (microbenchmarked)
+
+  size_t L2_capacity;   ///< Capacity of L2 cache in bytes
+  size_t l1_capacity;   ///< Capacity of L1 data cache per CU in bytes (shared across all SIMDs in a CU)
+  size_t CU_per_L2;     ///< Compute units per L2 cache domain (derived: N_CU / NUM_XCD)
+
   double compute_clock_ghz;  ///< Compute clock frequency in GHz
-  size_t parallel_mi_cu;     ///< Number of parallel matrix instructions per compute unit
+  size_t parallel_mi_cu;     ///< Calibrated parallel matrix-instruction throughput per CU
   std::tuple<double, double, double>
-      mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
+      mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup (microbenchmarked)
   size_t NUM_XCD;                  ///< Number of XCDs (XGMI Complex Die)
   std::optional<int> pci_chip_id{};  ///< PCI chip ID for gfx950 memory model row (if set)
+
+  // ---------------------------------------------------------------------------
+  // Constructors
+  // ---------------------------------------------------------------------------
 
   /**
    * @brief Construct hardware_t with explicit parameters.
@@ -747,6 +923,10 @@ class ORIGAMI_EXPORT hardware_t {
       size_t num_xcds_override           = 0,
       std::optional<int> pci_chip_id = std::nullopt);
 
+  // ---------------------------------------------------------------------------
+  // Static factory methods (construct hardware_t from device / arch / props)
+  // ---------------------------------------------------------------------------
+
   /**
    * @brief Create hardware_t instance for a specific HIP device.
    *
@@ -811,6 +991,10 @@ class ORIGAMI_EXPORT hardware_t {
       int compute_clock_khz,
       std::optional<int> pci_chip_id = std::nullopt);
 
+  // ---------------------------------------------------------------------------
+  // Static query methods (arch-keyed lookups, no hardware_t instance needed)
+  // ---------------------------------------------------------------------------
+
   /**
    * @brief Get the default (hardcoded) XCD count for a known architecture.
    *
@@ -838,6 +1022,27 @@ class ORIGAMI_EXPORT hardware_t {
   static size_t get_default_cache_line_bytes(architecture_t arch);
 
   /**
+   * @brief Return the L1 data cache capacity per CU for a given architecture.
+   */
+  static constexpr size_t get_l1_capacity(architecture_t arch) noexcept {
+    return get_arch_constants(arch).l1_capacity;
+  }
+
+  /**
+   * @brief Return the LDS read bandwidth per CU in bytes per clock.
+   *
+   * 32 four-byte banks (128 B/clk) through CDNA3 and on RDNA; CDNA4 doubles the
+   * bank count and read bandwidth to 256 B/clk, and gfx1250 keeps 64 banks.
+   */
+  static constexpr size_t get_lds_read_bytes_per_clk(architecture_t arch) noexcept {
+    switch (arch) {
+      case architecture_t::gfx950:
+      case architecture_t::gfx1250: return 256;
+      default: return 128;
+    }
+  }
+
+  /**
    * @brief Check if the hardware described by properties is supported.
    *
    * Determines whether the GPU architecture represented by the device
@@ -847,6 +1052,10 @@ class ORIGAMI_EXPORT hardware_t {
    * @return true if the architecture is supported, false otherwise
    */
   static bool is_hardware_supported(hipDeviceProp_t properties);
+
+  // ---------------------------------------------------------------------------
+  // Instance query methods (require a constructed hardware_t)
+  // ---------------------------------------------------------------------------
 
   /**
    * @brief Print hardware details to stdout.
@@ -907,6 +1116,10 @@ class ORIGAMI_EXPORT hardware_t {
   bool has_native_TF32() const;
 
  private:
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
   /**
    * @brief Extract substring before the first colon character.
    *

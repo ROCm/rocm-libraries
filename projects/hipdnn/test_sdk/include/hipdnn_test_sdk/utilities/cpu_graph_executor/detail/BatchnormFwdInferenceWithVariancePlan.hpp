@@ -92,13 +92,18 @@ public:
             = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
                 _params.epsilonTensor, variantPack, "Epsilon");
 
-        utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
-                                                                     *shallowScaleTensor,
-                                                                     *shallowBiasTensor,
-                                                                     *shallowMeanTensor,
-                                                                     *shallowVarianceTensor,
-                                                                     *shallowYTensor,
-                                                                     epsilonVal);
+        utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance<XDataType,
+                                                                     ScaleBiasDataType,
+                                                                     MeanVarianceDataType,
+                                                                     OutputDataType,
+                                                                     ComputeDataType>(
+            *shallowXTensor,
+            *shallowScaleTensor,
+            *shallowBiasTensor,
+            *shallowMeanTensor,
+            *shallowVarianceTensor,
+            *shallowYTensor,
+            epsilonVal);
     }
 
 private:

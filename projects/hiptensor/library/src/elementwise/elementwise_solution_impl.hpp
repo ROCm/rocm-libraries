@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include <map>
 #include <numeric>
 
 #include "elementwise_solution.hpp"
@@ -48,7 +47,7 @@ namespace hiptensor
         {
         }
 
-        bool initArgs(std::vector<float> const&                    scalarValues,
+        bool initArgs(std::vector<double> const&                   scalarValues,
                       std::vector<std::vector<std::size_t>> const& inLengthsArray,
                       std::vector<std::vector<std::size_t>> const& inStridesArray,
                       std::vector<std::vector<int32_t>> const&     inModesArray,
@@ -90,42 +89,61 @@ namespace hiptensor
 
             auto isColMajorStrides = HiptensorOptions::instance()->isColMajorStrides();
 
+            // The output tensor defines the iteration space: its mode order fixes what each
+            // dimension index means, and every other tensor's strides are permuted into that
+            // order. Indexing a tensor with strides left in its own mode order would read the
+            // wrong element whenever that order differs from the output's.
+            auto const& refModes = outModesArray[0];
+
+            // convertVectorToCkArray copies a fixed NDim elements, so a rank that disagrees
+            // with the instance would read past the end of the source vector.
+            constexpr auto nDim = static_cast<std::size_t>(Traits::NDim);
+            if(refModes.size() != nDim || outLengthsArray[0].size() != nDim)
+            {
+                return false;
+            }
+
             std::array<index_t, Traits::NDim> deviceInputLengths;
-            convertVectorToCkArray(inLengthsArray[0], deviceInputLengths);
+            convertVectorToCkArray(outLengthsArray[0], deviceInputLengths);
+
+            auto alignedStrides = [&](std::vector<std::size_t> const& lengths,
+                                      std::vector<std::size_t> const& strides,
+                                      std::vector<int32_t> const&     modes) {
+                return hiptensor::alignStridesToModes(
+                    refModes,
+                    modes,
+                    strides.empty() ? hiptensor::stridesFromLengths(lengths, isColMajorStrides)
+                                    : strides);
+            };
 
             std::array<std::array<index_t, Traits::NDim>, Traits::InDataT::Size()>
                 deviceInputStrides;
             for(int i = 0; i < deviceInputStrides.size(); i++)
             {
-                if(inStridesArray.empty() || inStridesArray[i].empty())
+                auto strides = alignedStrides(inLengthsArray[i],
+                                              inStridesArray.empty() ? std::vector<std::size_t>{}
+                                                                     : inStridesArray[i],
+                                              inModesArray[i]);
+                if(strides.size() != nDim)
                 {
-                    convertVectorToCkArray(
-                        hiptensor::stridesFromLengths(inLengthsArray[i], isColMajorStrides),
-                        deviceInputStrides[i]);
+                    return false;
                 }
-                else
-                {
-                    convertVectorToCkArray(inStridesArray[i], deviceInputStrides[i]);
-                }
+                convertVectorToCkArray(strides, deviceInputStrides[i]);
             }
 
             std::array<std::array<index_t, Traits::NDim>, Traits::OutDataT::Size()>
                 deviceOutputStrides;
             for(int i = 0; i < deviceOutputStrides.size(); i++)
             {
-                auto strides
-                    = (outStridesArray.empty() || outStridesArray[i].empty())
-                          ? hiptensor::stridesFromLengths(outLengthsArray[i], isColMajorStrides)
-                          : outStridesArray[i];
-                std::map<int32_t, int> modeToIndex;
-                for(int j = 0; j < Traits::NDim; j++)
+                auto strides = alignedStrides(outLengthsArray[i],
+                                              outStridesArray.empty() ? std::vector<std::size_t>{}
+                                                                      : outStridesArray[i],
+                                              outModesArray[i]);
+                if(strides.size() != nDim)
                 {
-                    modeToIndex[outModesArray[i][j]] = j;
+                    return false;
                 }
-                for(int j = 0; j < Traits::NDim; j++)
-                {
-                    deviceOutputStrides[i][j] = strides[modeToIndex[inModesArray[i][j]]];
-                }
+                convertVectorToCkArray(strides, deviceOutputStrides[i]);
             }
 
             std::array<const void*, Traits::InDataT::Size()> deviceInBuffers;
@@ -161,8 +179,10 @@ namespace hiptensor
                         deviceInBuffers,
                         deviceOutBuffers,
                         // ck::tensor_operation::element_wise::PassThrough{}));
-                        typename Traits::CombinedOp{typename Traits::AOp{operators[0]},
-                                                    typename Traits::ScaleOp{scalarValues[0]}}));
+                        typename Traits::CombinedOp{
+                            typename Traits::AOp{operators[0]},
+                            typename Traits::ScaleOp{
+                                static_cast<decltype(Traits::ScaleOp::scale_)>(scalarValues[0])}}));
                 }
             }
             else if constexpr(Traits::InstanceType
@@ -177,9 +197,9 @@ namespace hiptensor
                     typename Traits::CombinedOp{
                         typename Traits::ACOp{operators[0]},
                         typename Traits::AOp{CkHiptensorUnaryOp{operators[1]},
-                                             CkScale{scalarValues[0]}},
+                                             CkScale{static_cast<float>(scalarValues[0])}},
                         typename Traits::COp{CkHiptensorUnaryOp{operators[2]},
-                                             CkScale{scalarValues[1]}},
+                                             CkScale{static_cast<float>(scalarValues[1])}},
                     })); // ignore opB since none operation should be applied on output
             }
             else if constexpr(Traits::InstanceType
@@ -195,11 +215,11 @@ namespace hiptensor
                         typename Traits::ABCOp{operators[0]},
                         typename Traits::ABOp{operators[1]},
                         typename Traits::AOp{CkHiptensorUnaryOp{operators[2]},
-                                             CkScale{scalarValues[0]}},
+                                             CkScale{static_cast<float>(scalarValues[0])}},
                         typename Traits::AOp{CkHiptensorUnaryOp{operators[3]},
-                                             CkScale{scalarValues[1]}},
+                                             CkScale{static_cast<float>(scalarValues[1])}},
                         typename Traits::COp{CkHiptensorUnaryOp{operators[4]},
-                                             CkScale{scalarValues[2]}},
+                                             CkScale{static_cast<float>(scalarValues[2])}},
                     })); // ignore opB since none operation should be applied on output
             }
             else
@@ -215,7 +235,7 @@ namespace hiptensor
 
             // Size count
             Base::mSize = std::accumulate(
-                inLengthsArray[0].cbegin(), inLengthsArray[0].cend(), 1, std::multiplies{});
+                outLengthsArray[0].cbegin(), outLengthsArray[0].cend(), 1, std::multiplies{});
 
             // Arg test
             Base::mValid = deviceOp->IsSupportedArgument(Base::mInvokerArgPtr.get());

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "conv_kernel.h"
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 #include <span>
 #include <vector>
@@ -20,7 +20,7 @@ namespace hipconv
 class ConvAlgorithm
 {
 public:
-    using IsApplicableFn = bool (*)(const hipconv::Conv2dParams&);
+    using IsApplicableFn = bool (*)(const hipconv::ConvParams&);
 
     constexpr ConvAlgorithm(IsApplicableFn is_applicable_fn,
                             std::span<const ConvKernelSpan* const> kernel_groups)
@@ -30,7 +30,7 @@ public:
     }
 
     // This algorithm's configs for `par`, best first, at most `max_ranked` of them.
-    std::vector<ScoredKernel> get_valid_configs(const hipconv::Conv2dParams& par,
+    std::vector<ScoredKernel> get_valid_configs(const hipconv::ConvParams& par,
                                                 std::size_t max_ranked) const
     {
         std::vector<ScoredKernel> result;
@@ -41,7 +41,10 @@ public:
             const auto& group = *group_ptr;
             if(group.empty())
                 continue;
-            // All kernels in a family share the same is_applicable result.
+            // All kernels in a family share the same is_applicable and
+            // supports_dims results.
+            if(!group.front()->supports_dims(par.dims))
+                continue;
             if(!group.front()->is_applicable(par))
                 continue;
             for(ConvKernel* kernel : group)

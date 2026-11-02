@@ -3,7 +3,28 @@
 
 """Unit tests for Tensor attribute accessors (no GPU required)."""
 
+import json
+
+import numpy as np
+import pytest
+
 import hipdnn_frontend as hipdnn
+
+
+def _serialized_scalar(scalar):
+    """Serialize a MUL graph that uses scalar; return (scalar JSON, API floor)."""
+    graph = hipdnn.Graph()
+    graph.set_io_data_type(hipdnn.DataType.FLOAT)
+    graph.set_intermediate_data_type(hipdnn.DataType.FLOAT)
+    graph.set_compute_data_type(hipdnn.DataType.FLOAT)
+    x = hipdnn.Tensor.create([2, 3], hipdnn.DataType.FLOAT)
+    attrs = hipdnn.PointwiseAttributes()
+    attrs.set_mode(hipdnn.PointwiseMode.MUL)
+    graph.pointwise(x, scalar, attrs).set_output(True)
+    data = json.loads(graph.to_json())
+    (entry,) = [t for t in data["tensors"] if t["uid"] == scalar.get_uid()]
+    version = data["min_required_engine_api_version"]
+    return entry, (version["major"], version["minor"])
 
 
 class TestTensorAttributes:
@@ -100,3 +121,74 @@ class TestTensorAttributes:
 
         result = tensor.validate()
         assert result.is_good(), f"Validation failed: {result.get_message()}"
+
+
+class TestSetValue:
+    """set_value() bakes a compile-time constant of any supported type."""
+
+    @pytest.mark.parametrize(
+        "data_type, value, type_name",
+        [
+            (hipdnn.DataType.FLOAT, 2.5, "float"),
+            (hipdnn.DataType.DOUBLE, 0.1, "double"),
+            (hipdnn.DataType.HALF, 2.5, "half"),
+            (hipdnn.DataType.BFLOAT16, 2.5, "bfloat16"),
+            (hipdnn.DataType.UINT8, 200, "uint8"),
+            (hipdnn.DataType.INT32, -7, "int32"),
+            (hipdnn.DataType.INT64, 1 << 40, "int64"),
+            (hipdnn.DataType.BOOLEAN, True, "boolean"),
+        ],
+    )
+    def test_value_is_baked_with_the_requested_type(self, data_type, value, type_name):
+        scalar = hipdnn.Tensor().set_value(value, data_type)
+
+        entry, api = _serialized_scalar(scalar)
+
+        assert entry["data_type"] == type_name
+        assert entry["value"] == value
+        assert entry["is_runtime_pass_by_value"] is False
+        assert api == (1, 0)
+
+    @pytest.mark.parametrize(
+        "value, data_type",
+        [
+            (2.5, hipdnn.DataType.FLOAT),
+            (3, hipdnn.DataType.INT64),
+            (True, hipdnn.DataType.BOOLEAN),
+        ],
+    )
+    def test_type_inferred_from_python_value(self, value, data_type):
+        assert hipdnn.Tensor().set_value(value).get_data_type() == data_type
+
+    def test_existing_data_type_is_kept(self):
+        tensor = hipdnn.Tensor.create([1], hipdnn.DataType.HALF)
+        assert tensor.set_value(2.5).get_data_type() == hipdnn.DataType.HALF
+
+    def test_turns_host_tensor_like_into_a_constant(self):
+        scalar = hipdnn.Graph.tensor_like(np.array([2.5], np.float16))
+        assert scalar.get_is_runtime_pass_by_value() is True
+        assert _serialized_scalar(scalar)[1] == (1, 2)
+
+        scalar.set_value(2.5)
+
+        entry, api = _serialized_scalar(scalar)
+        assert scalar.get_is_runtime_pass_by_value() is False
+        assert (entry["data_type"], entry["value"], api) == ("half", 2.5, (1, 0))
+
+    def test_rejects_multi_element_tensor(self):
+        with pytest.raises(ValueError, match="one element"):
+            hipdnn.Tensor.create([2], hipdnn.DataType.FLOAT).set_value(1.0)
+
+    def test_rejects_out_of_range_integer(self):
+        with pytest.raises(ValueError, match="out of range"):
+            hipdnn.Tensor().set_value(300, hipdnn.DataType.UINT8)
+
+    def test_rejects_unsupported_data_type(self):
+        with pytest.raises(ValueError, match="data type must be"):
+            hipdnn.Tensor().set_value(1, hipdnn.DataType.INT8)
+
+    def test_rejects_unconvertible_value(self):
+        with pytest.raises(TypeError, match="cannot convert float"):
+            hipdnn.Tensor().set_value(1.5, hipdnn.DataType.INT32)
+        with pytest.raises(TypeError, match="cannot infer"):
+            hipdnn.Tensor().set_value("2.5")

@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -65,9 +65,6 @@ class Single2DNode : public LeafNode
 {
     friend class NodeFactory;
 
-private:
-    bool twd_attach_halfN2 = false;
-
 protected:
     Single2DNode(TreeNode* p, ComputeScheme s)
         : LeafNode(p, s)
@@ -80,7 +77,7 @@ protected:
 
 public:
     bool CreateDeviceResources() override;
-    bool UseOutputLengthForPadding() override
+    bool OutputLengthMatchesOutStride() const override
     {
         return ebtype != EmbeddedType::NONE;
     }

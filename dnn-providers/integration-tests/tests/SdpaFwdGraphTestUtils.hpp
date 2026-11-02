@@ -10,6 +10,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
 
 namespace hipdnn_integration_tests::test_utils
 {
@@ -25,18 +26,30 @@ using hipdnn_data_sdk::utilities::generateStrides;
 // When `statsUid` is provided, a FLOAT log-sum-exp (LSE) output tensor is added with dims
 // [B, H, Sq, 1] (derived from `qDims`) and its uid is written into attrs.stats_tensor_uid,
 // exercising the LSE/stats output path. Defaults to no stats output for existing callers.
-inline flatbuffers::FlatBufferBuilder
-    createSdpaFwdGraph(int64_t qUid,
-                       int64_t kUid,
-                       int64_t vUid,
-                       int64_t oUid,
-                       const std::vector<int64_t>& qDims,
-                       const std::vector<int64_t>& kDims,
-                       const std::vector<int64_t>& vDims,
-                       const std::vector<int64_t>& oDims,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                       hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs = {},
-                       std::optional<int64_t> statsUid = std::nullopt)
+//
+// When `scale` is provided, a FLOAT scale operand tensor is added in the storage mode the spec
+// asks for and its uid is written into attrs.scale_tensor_uid. Defaults to no scale tensor.
+//
+// When `maskUid` is provided it is written into attrs.attn_mask_tensor_uid. When `maskDataType`
+// is also provided, a mask tensor with that dtype (including DataType::UNSET) and `maskDims` is
+// added under `maskUid`. A `maskUid` (or an attrs.attn_mask_tensor_uid) without a `maskDataType`
+// leaves the uid dangling, with no tensor behind it. Defaults to no mask.
+inline flatbuffers::FlatBufferBuilder createSdpaFwdGraph(
+    int64_t qUid,
+    int64_t kUid,
+    int64_t vUid,
+    int64_t oUid,
+    const std::vector<int64_t>& qDims,
+    const std::vector<int64_t>& kDims,
+    const std::vector<int64_t>& vDims,
+    const std::vector<int64_t>& oDims,
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+    hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs = {},
+    std::optional<int64_t> statsUid = std::nullopt,
+    std::optional<hipdnn_test_sdk::utilities::FloatOperandSpec> scale = std::nullopt,
+    std::optional<int64_t> maskUid = std::nullopt,
+    const std::vector<int64_t>& maskDims = {},
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> maskDataType = std::nullopt)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -47,6 +60,14 @@ inline flatbuffers::FlatBufferBuilder
     if(statsUid.has_value())
     {
         attrs.stats_tensor_uid = statsUid;
+    }
+    if(scale.has_value())
+    {
+        attrs.scale_tensor_uid = scale->uid;
+    }
+    if(maskUid.has_value())
+    {
+        attrs.attn_mask_tensor_uid = maskUid;
     }
 
     flatbuffers::FlatBufferBuilder builder;
@@ -75,6 +96,19 @@ inline flatbuffers::FlatBufferBuilder
         statsStrides = generateStrides(statsDims);
         tensors.push_back(CreateTensorAttributesDirect(
             builder, statsUid.value(), "Stats", DataType::FLOAT, &statsStrides, &statsDims));
+    }
+
+    if(scale.has_value())
+    {
+        hipdnn_test_sdk::utilities::addFloatOperandTensor(builder, tensors, scale.value(), "Scale");
+    }
+
+    std::vector<int64_t> maskStrides;
+    if(maskUid.has_value() && maskDataType.has_value())
+    {
+        maskStrides = generateStrides(maskDims);
+        tensors.push_back(CreateTensorAttributesDirect(
+            builder, maskUid.value(), "Mask", maskDataType.value(), &maskStrides, &maskDims));
     }
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);

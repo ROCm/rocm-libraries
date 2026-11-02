@@ -1387,8 +1387,8 @@ measuring nothing:
   still works — a refusal costs coverage, never correctness.
 - **Brand-new IRBuilder op:** captured generically, but the C side must know how to
   lower it (work owed to any C-JIT backend; the byte-identical oracle catches a
-  missing/wrong lowering). Region-bearing ops beyond `scf.for`/`scf.if` make the
-  recorder raise a loud "extend me".
+  missing/wrong lowering). Region-bearing ops beyond `scf.for`/`scf.if`/
+  `scf.if_else` make the recorder raise a loud "extend me".
 
 See [`portable_ir_scaling_plan.md`](portable_ir_scaling_plan.md) for the full
 status, caveats, and rollout plan.

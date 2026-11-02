@@ -33,7 +33,9 @@
 #include <Tensile/Predicates.hpp>
 #include <Tensile/Task.hpp>
 
+#include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <vector>
 
 #include <tensilelitehost/export.h>
@@ -68,7 +70,7 @@ namespace TensileLite
 
                 virtual bool operator()(Task const& task) const override
                 {
-                    if (task.solution.sizeMapping.streamK == 0)
+                    if (!task.solution.sizeMapping.isPersistent())
                     {
                         // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items
                         dim3 workGroupSize;
@@ -88,7 +90,7 @@ namespace TensileLite
 
                 virtual bool debugEval(Task const& task, std::ostream& stream) const override
                 {
-                    if (task.solution.sizeMapping.streamK == 0)
+                    if (!task.solution.sizeMapping.isPersistent())
                     {
                         // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items
                         dim3 workGroupSize;
@@ -129,7 +131,7 @@ namespace TensileLite
                     return "WorkspaceCheck";
                 }
 
-                virtual bool operator()(Task const& task) const override
+                virtual bool operator()(Task const& task) const override try
                 {
                     size_t gsu = task.problem.getParams().gsu() != 0
                                      ? task.problem.getParams().gsu()
@@ -150,7 +152,15 @@ namespace TensileLite
                                <= task.problem.workspaceSize();
                 }
 
-                virtual bool debugEval(Task const& task, std::ostream& stream) const override
+                catch(std::invalid_argument const& error)
+                {
+                    // Grid selection can reject a budget smaller than one cluster.
+                    // Mark the solution ineligible instead of aborting selection.
+                    std::cerr << "hipBLASLt Error: " << error.what() << "\n";
+                    return false;
+                }
+
+                virtual bool debugEval(Task const& task, std::ostream& stream) const override try
                 {
                     size_t gsu = task.problem.getParams().gsu() != 0
                                      ? task.problem.getParams().gsu()
@@ -185,6 +195,11 @@ namespace TensileLite
                         "<=",
                         "max",
                         task.problem.workspaceSize());
+                }
+                catch(std::invalid_argument const& error)
+                {
+                    PredicateDebugger::printRow(stream, false, this->type(), error.what());
+                    return false;
                 }
             };
         } // namespace Contraction

@@ -324,10 +324,6 @@ void log_normal_floating_point_test()
 
     T normal_mean   = static_cast<T>(3.0);
     T normal_stddev = static_cast<T>(1.5);
-    T normal_var    = normal_stddev * normal_stddev;
-
-    T log_normal_mean   = std::exp(normal_mean + normal_var / 2.0);
-    T log_normal_stddev = std::sqrt(std::exp(normal_var) - 1.0) * log_normal_mean;
 
     Generator g;
     ROCRAND_CHECK(g.generate_log_normal(data, size, normal_mean, normal_stddev));
@@ -340,6 +336,7 @@ void log_normal_floating_point_test()
     double mean = 0.0;
     for(size_t i = 0; i < size; i++)
     {
+        host_data[i] = std::log(host_data[i]);
         mean += host_data[i];
     }
     mean = mean / size;
@@ -351,8 +348,8 @@ void log_normal_floating_point_test()
     }
     stddev = std::sqrt(stddev / size);
 
-    EXPECT_NEAR(log_normal_mean, mean, log_normal_mean * 0.2); // 20%
-    EXPECT_NEAR(log_normal_stddev, stddev, log_normal_stddev * 0.2); // 20%
+    EXPECT_NEAR(normal_mean, mean, normal_mean * 0.05); // 5%
+    EXPECT_NEAR(normal_stddev, stddev, normal_stddev * 0.05); // 5%
 
     HIP_CHECK(hipFree(data));
 }

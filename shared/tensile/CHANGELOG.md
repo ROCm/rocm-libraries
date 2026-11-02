@@ -1,6 +1,10 @@
 # Changelog for Tensile
 
-## Tensile 4.48.0 (Unreleased)
+## Tensile 4.50.0
+
+## Tensile 4.49.0
+
+## Tensile 4.48.0
 
 ### Resolved issues
 

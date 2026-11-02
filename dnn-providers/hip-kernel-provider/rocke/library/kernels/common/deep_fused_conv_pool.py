@@ -27,7 +27,6 @@ so it stays a pure perf optimization that naturally disables itself for WMMA.
 
 from __future__ import annotations
 
-import struct
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
@@ -42,6 +41,7 @@ from rocke.helpers.epilogues import _cshuffle_acc_distribution
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import LdsLayout
 from rocke.helpers.loads import CoalescedTileLoader
+from kernels.common.conv_abi import conv_fwd_problem_block
 from rocke.helpers.spec import SignatureBuilder, kernel_name_join
 from rocke.helpers.tensor_view import make_buffer_resource, make_lds_view
 from rocke.helpers.mfma_gemm_inner import load_smem_frag_contiguous_f16
@@ -55,6 +55,8 @@ from kernels.common.conv_implicit_gemm import (
     _resolve_conv_op,
 )
 from rocke.runtime.host_buffers import as_u8_buffer, nbytes, require_numpy
+from rocke.runtime.packing import pack_args
+from kernels.common.conv_args import ConvArgs, ConvGeometry
 
 __all__ = [
     "FusedConvPoolProblem",
@@ -62,6 +64,7 @@ __all__ = [
     "make_deep_fused_conv_pool_spec",
     "is_valid_spec",
     "deep_fused_conv_pool_signature",
+    "deep_fused_conv_pool_problem_values",
     "deep_fused_conv_pool_grid",
     "run_deep_fused_conv_pool_fp16_manifest_problem",
     "build_deep_fused_conv_pool",
@@ -364,9 +367,13 @@ def deep_fused_conv_pool_signature(spec: DeepFusedConvPoolSpec):
     The first three params match conv's pointer convention, but the third
     pointer is the final pooled output. ``W1`` is declared before the byte-size
     scalars so the HIP packed-args ABI keeps all 64-bit pointer args aligned.
-    """
 
-    return (
+    conv0 is built by the AOT implicit-GEMM builder, which emits the runtime
+    problem block right after the byte sizes. Kernargs pack positionally, so
+    the block has to be declared here too -- leaving it out launches the kernel
+    with every problem dimension uninitialized.
+    """
+    sb = (
         SignatureBuilder()
         .ptr("A", "f16")
         .ptr("B", "f16")
@@ -376,8 +383,29 @@ def deep_fused_conv_pool_signature(spec: DeepFusedConvPoolSpec):
         .scalar("A_bytes", "i32")
         .scalar("B_bytes", "i32")
         .scalar("Y_bytes", "i32")
-        .build()
     )
+    for name, kind in conv_fwd_problem_block(is_3d=spec.problem.conv.is_3d):
+        sb.scalar(name, kind)
+    return sb.build()
+
+
+def deep_fused_conv_pool_problem_values(
+    conv_problem: object, *, tile_m: int, tile_n: int
+) -> dict:
+    """Values of conv0's runtime problem block, keyed by kernarg name.
+
+    ``conv_problem`` is anything :meth:`ConvArgs.from_problem` accepts (a
+    ``ConvProblem`` or a :class:`ConvGeometry`); the tile is the one the
+    kernel was built with, which the chiplet-swizzle tile counts derive from.
+    """
+    if isinstance(conv_problem, ConvGeometry):
+        args = ConvArgs(conv_problem, tile_m=tile_m, tile_n=tile_n)
+    else:
+        args = ConvArgs.from_problem(conv_problem, tile_m=tile_m, tile_n=tile_n)
+    values = args.to_launch_values(0, 0, 0, 0, 0, 0)
+    return {
+        name: values[name] for name, _ in conv_fwd_problem_block(is_3d=args.geom.is_3d)
+    }
 
 
 def deep_fused_conv_pool_grid(
@@ -1438,6 +1466,32 @@ def run_deep_fused_conv_pool_fp16_manifest_problem(
     gx, gy, gz = [int(x) for x in manifest["grid_explicit"]]
     grid = (gx, gy, gz)
     block = (int(manifest["threads_per_block"]), 1, 1)
+    problem_values = deep_fused_conv_pool_problem_values(
+        ConvGeometry(
+            N=N,
+            Di=1,
+            Hi=Hi,
+            Wi=Wi,
+            C=C,
+            K=K,
+            Z=1,
+            Y=R,
+            X=S,
+            sD=1,
+            sH=sH,
+            sW=sW,
+            pD=0,
+            pH=pH,
+            pW=pW,
+            dD=1,
+            dH=dH,
+            dW=dW,
+            groups=1,
+            is_3d=False,
+        ),
+        tile_m=int(manifest["block_m"]),
+        tile_n=int(manifest["block_n"]),
+    )
     conv0_flop = N * Ho * Wo * K * R * S * C
     conv1_flop = N * Ho * Wo * K1 * K
     flop = 2.0 * (conv0_flop + conv1_flop)
@@ -1452,18 +1506,23 @@ def run_deep_fused_conv_pool_fp16_manifest_problem(
         rt.memcpy_h2d(B_dev, as_u8_buffer(B0), nbytes(B0))
         rt.memcpy_h2d(W1_dev, as_u8_buffer(W1), nbytes(W1))
         rt.memset(Y_dev, 0, nbytes(Y))
-        args = struct.pack(
-            "<QQQQiiii",
+        values = dict(
+            A=A_dev,
+            B=B_dev,
+            Y=Y_dev,
+            W1=W1_dev,
+            W1_bytes=nbytes(W1),
+            A_bytes=nbytes(A),
+            B_bytes=nbytes(B0),
+            Y_bytes=nbytes(Y),
+            **problem_values,
+        )
+        return pack_args(manifest["args_signature"], values), (
             A_dev,
             B_dev,
             Y_dev,
             W1_dev,
-            nbytes(W1),
-            nbytes(A),
-            nbytes(B0),
-            nbytes(Y),
         )
-        return args, (A_dev, B_dev, Y_dev, W1_dev)
 
     def check(rt: Runtime, ptrs):
         if not verify:

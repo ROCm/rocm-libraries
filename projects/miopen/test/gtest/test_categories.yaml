@@ -29,7 +29,6 @@ positive_patterns: &positive_patterns
   - "*/GPU_GLU_*"
   - "*/GPU_GroupConv*"
   - "*/GPU_GroupNorm_*"
-  - "*/GPU_GRUExtra_*"
   - "*/GPU_TestActivation*"
   - "*/GPU_HipBLASLtGEMMTest*"
   - "*/GPU_KernelTuningNetTestConv*"
@@ -37,7 +36,6 @@ positive_patterns: &positive_patterns
   - "*/GPU_LayerNormTest*"
   - "*/GPU_LayoutTransposeTest_*"
   - "*/GPU_Lrn*"
-  - "*/GPU_lstm_extra*"
   - "*/GPU_MultiMarginLoss_*"
   - "*/GPU_ConvNonpack*"
   - "*/GPU_PerfConfig_HipImplicitGemm*"
@@ -64,10 +62,64 @@ positive_patterns: &positive_patterns
   - "*/GPU_Dropout*"
   - "*/GPU_MIOpenDriver*"
   - "*/GPU_HipGraphExist*"
+  # Optimizers
+  - "*/GPU_Adam_*"
+  - "*/GPU_AmpAdam_*"
+  # Normalization
+  - "*/GPU_AddLayerNorm_*"
+  - "*/GPU_LayerNormBwdTest_*"
+  - "*/GPU_T5LayerNormBwdTest_*"
+  # Batch norm (incl. fusion / find2 variants)
+  - "*/GPU_BNInputValidation*"
+  - "*/GPU_BN_Fwd_Spatial_Welford_*"
+  - "*/GPU_BN_Spatial_*"
+  - "*/GPU_Bn3DPeract_*"
+  - "*/GPU_Bn3DSpatial_*"
+  - "*/GPU_BnDerive_*"
+  - "*/GPU_BnPeract_*"
+  - "*/GPU_CbnaInference_*"
+  - "*/GPU_na_*"
+  # Find / tuning / allocator
+  - "*/GPU_Allocator_*"
+  - "*/GPU_CandidateSelection_*"
+  - "*/GPU_Find2Conv_*"
+  - "*/GPU_FindDb_*"
+  - "*/GPU_FindModeTrustVerify_*"
+  # RNN family (replaces the *GRUExtra* / *lstm_extra* patterns, which matched nothing)
+  - "*/GPU_GRU_*"
+  - "*/GPU_LSTM_*"
+  - "*/GPU_LstmMSRnn_*"
+  - "*/GPU_RNNSeqApi_*"
+  - "*/GPU_RNNVanilla*"
+  # Pooling, tensor ops, reference kernels
+  - "*/GPU_Pooling2d_*"
+  - "*/GPU_Pooling3d_*"
+  - "*/GPU_TensorReorder_*"
+  - "*/GPU_TensorTransform_*"
+  - "*/GPU_binaryTensorOps_*"
+  - "*/GPU_reference_kernel_*"
   # Unprefixed: these are plain TEST/TEST_F with no INSTANTIATE_TEST_SUITE_P,
   # so they carry no "Prefix/" and the leading "*/" above would not match them.
   - "GPU_StreamTracker_FP32*"
   - "GPU_NaiveTimeout_FP32*"
+  # Added for Jenkins parity. Single-instantiation TEST/TEST_F suites, each <= ~10 s.
+  # Only the dtypes Jenkins validates for HipBLASLt GEMM (FP8/BFP8/FP64/I* are left out).
+  - "GPU_BN_Spatial_FP32*"
+  - "GPU_CKValidatorIntegration_FP32*"
+  - "GPU_CkImplLoader_FP16*"
+  - "GPU_Conv2DKernelTuningAI_FP32*"
+  - "GPU_Conv2DKernelTuningSolver_FP32*"
+  - "GPU_Conv3DKernelTuningAI_FP32*"
+  - "GPU_Conv3DKernelTuningSolver_FP32*"
+  - "GPU_ConvAIModelLoad_FP32*"
+  - "GPU_ConvNDKernelTuningUtils_FP32*"
+  - "GPU_ConvStridedTensors_FP32*"
+  - "GPU_HipBLASLtGEMMTest_FP32*"
+  - "GPU_HipBLASLtGEMMTest_FP16*"
+  - "GPU_HipBLASLtGEMMTest_BFP16*"
+  - "GPU_PerfConfig_HipImplicitGemm3DGroup*"
+  - "GPU_RunAIHeuristics_Integration_FP32*"
+  - "GPU_SoftmaxFind20_*"
   - "Standard/*" # include all standard tests by default
 
 
@@ -150,6 +202,7 @@ test_categories:
       - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_ElementCountOverflow_*"
+      - "Full/GPU_UnitTestConvSolverGemmFwdRestIntMaxOverflowFwd_I8*"
       # Large BN tests - full suite only
       - "Full/GPU_BNCKFWDTrainLarge2D_*"
       - "Full/GPU_BNOCLFWDTrainLarge2D_*"
@@ -168,6 +221,27 @@ test_categories:
       - "Full/GPU_BNFWDTrainLargeFusedActivation2D_*"
       - "Full/GPU_BNOCLBWDLargeFusedActivation2D_*"
       - "Full/GPU_BNOCLInferLargeFusedActivation2D_*"
+      - "Full/GPU_Adam_*"
+      - "Full/GPU_AmpAdam_*"
+      - "Full/GPU_AddLayerNorm_*"
+      - "Full/GPU_LayerNormBwdTest_*"
+      - "Full/GPU_T5LayerNormBwdTest_*"
+      - "Full/GPU_BN_Fwd_Spatial_Welford_*"
+      - "Full/GPU_BN_Spatial_*"
+      - "Full/GPU_Bn3DPeract_*"
+      - "Full/GPU_Bn3DSpatial_*"
+      - "Full/GPU_BnPeract_*"
+      - "Full/GPU_CandidateSelection_*"
+      - "Full/GPU_GRU_*"
+      - "Full/GPU_LSTM_*"
+      - "Full/GPU_LstmMSRnn_*"
+      - "Full/GPU_RNNSeqApi_*"
+      - "Full/GPU_RNNVanilla*"
+      - "Full/GPU_Pooling2d_*"
+      - "Full/GPU_Pooling3d_*"
+      - "Full/GPU_TensorTransform_*"
+      - "Full/GPU_binaryTensorOps_*"
+      - "Full/GPU_na_*"
 
     test_files:
       # Quick tests
@@ -250,6 +324,23 @@ test_categories:
       # Heavyweight (~60s) large-tensor wrw test; full-only like _LargeStride.
       # FP16-only (no BFP16 variant to keep in nightly), so exclude the family.
       - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_ElementCountOverflow_*"
+      # Full-only: slow cases (BN find2/fusion tuning, 2-34 s per test, >200 s serial
+      # per suite) or no CI timing yet (I8/I32 variants and new suites never ran in
+      # GitHub CI). Promote to comprehensive once measured and <= 200 s serial.
+      - "Full/GPU_na_train_find2_spatial_FP32*"
+      - "Full/GPU_na_train_find2_spatial_FP16*"
+      - "Full/GPU_na_train_find2_peract_FP32*"
+      - "Full/GPU_na_fusion_test_bn_spatial_FP32*"
+      - "Full/GPU_na_fusion_test_bn_spatial_FP16*"
+      - "Full/GPU_na_fusion_test_bn_peract_FP32*"
+      - "Full/GPU_BN_Spatial_FP32*"
+      - "Full/GPU_BN_Fwd_Spatial_Welford_*"
+      - "Full/GPU_LSTM_fused_infer_*"
+      - "Full/GPU_TensorTransform_I8*"
+      - "Full/GPU_binaryTensorOps_cast_*_I8*"
+      - "Full/GPU_binaryTensorOps_cast_*_I32*"
+      # Flaky on gfx942 (ALMIOPEN-1926); Jenkins filters the same index on gfx94X.
+      - "Full/GPU_LstmMSRnn_FP32.TestFloat/1095"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
 
@@ -331,6 +422,8 @@ test_categories:
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       - "Full/GPU_MIOpenDriverConv2dTransTest*"
       - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
+      # Flaky on gfx942 (ALMIOPEN-1926); Jenkins filters the same index on gfx94X.
+      - "Full/GPU_LstmMSRnn_FP32.TestFloat/1095"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
 
@@ -535,6 +628,15 @@ exclude_gpu:
       - "*/GPU_MIOpenDriver*"
       - "Smoke/CPU_Handle_NONE*"
       - "Full/GPU_reduce_custom_fp32*"
+      # Flaky on Windows gfx110X (ALMIOPEN-1926): intermittent CPU/GPU mismatch at rnn_seq_api.hpp:272,
+      # bias-enabled cases only, a different index set on every attempt (88 of 4,316 executions failed in
+      # PR #13107 runs 38815363944 and 38983909810). FP16 and Linux gfx94X passed every execution.
+      - "Full/GPU_LstmMSRnn_FP32*"
+      # Fails on every arch without bundled AI models (ALMIOPEN-2966): "no fdeep .tn.model files found" in the system db.
+      # Models ship only for gfx908/gfx90a/gfx942/gfx950, and since #13680 Windows installs per-target db files like Linux
+      # (PR #13107 run 40983714656, Windows gfx110X, 2 of 2 attempts). Remove when ALMIOPEN-2966 makes the test skip archs
+      # without models.
+      - "GPU_ConvAIModelLoad_FP32*"
     labels:
       - "quick"
       - "standard"
@@ -545,13 +647,69 @@ exclude_gpu:
   exclude_gpu_gfx115X:
   #Negative patterns for gfx1150 and gfx1151 will be covered here.
   #Add exclude_gpu_gfx1150/gfx1151 separately only if they have unique patterns.
-    test_patterns: *gfx11_common_patterns
+    test_patterns:
+      - *gfx11_common_patterns
+      # Flaky on Windows gfx1151 (ALMIOPEN-1926), same signature as gfx110X: intermittent CPU/GPU mismatch at
+      # rnn_seq_api.hpp:272, bias-enabled cases only (18 of 2,316 executions failed in PR #13107 run 39358709264).
+      - "Full/GPU_LstmMSRnn_FP32*"
+      # Fails on every gfx1151 host whose CU count has no shipped system db (#13416): "Db file does not exist ...
+      # gfx115128.HIP.fdb.txt" / "gfx115120.HIP.fdb.txt". Windows: 5 of 5 executions on 5 hosts (PR #13107 runs 39358709264,
+      # 39480689944, develop nightly 38527180317). Linux: 12 of 12 on the 20-CU strixhalo hosts in run 39740910967 (passes on
+      # CS-RORDMZ hosts). Only gfx115128 dbs ship; #13680 fixed the Windows install of those, but 20-CU hosts still have no
+      # gfx115120 db. Remove once the test skips missing dbs or a gfx115120 db ships (#13416).
+      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/9"
+      # Fails on every arch without bundled AI models (ALMIOPEN-2966): "no fdeep .tn.model files found" in the system db.
+      # Models ship only for gfx908/gfx90a/gfx942/gfx950, and since #13680 Windows installs per-target db files like Linux.
+      # Linux gfx1151: PR #13107 run 39358709264. Remove when ALMIOPEN-2966 makes the test skip archs without models.
+      - "GPU_ConvAIModelLoad_FP32*"
     labels:
       - "quick"
       - "standard"
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx115X"
+
+  exclude_gpu_gfx115X_linux:
+    test_patterns:
+      # OOM-killed on the 7.5 GB Linux gfx1151 runners strixhalo-12 and strixhalo-10 (ALMIOPEN-2964): SIGKILL / exit 137 in
+      # PR #13107 runs 39358709264 and 39529845480; both pass on the 31-125 GB gfx1151 hosts. Only standard-tier cases are
+      # excluded (the tier TheRock release tests run on these hosts); comprehensive/full OOM kills are not chased per case.
+      # Remove when ALMIOPEN-2964 closes.
+      - "CPU_PerfDb_NONE.*"
+      - "GPU_BN_Spatial_FP32.MIOpen3900Regression" # 1x2048x512x512 FP32, ~2.1 GB per tensor
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx115X"
+
+  exclude_gpu_gfx115X_windows:
+    test_patterns:
+      # Flaky on Windows gfx1151 (same bias-only RNN CPU/GPU mismatch as ALMIOPEN-1926): Backward Data / Forward Train /
+      # Forward Inference GRU verification failed at gru_test.cpp:1985/2224/2473 for 3 of these 8 bias-enabled cases in
+      # PR #13107 run 39358709264 (attempt 2); the same cases passed on the other attempt and in run 39480689944.
+      - "Full/GPU_GRU_Base_FP16.TestFloat16/batchSize_17_seqLength_23_inVecLen_13_hiddenSize_67_*biasMode_1_*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx115X"
+
+  exclude_gpu_gfx94X:
+    test_patterns:
+      # Flaky on gfx942 (ALMIOPEN-1926): same bias-only CPU/GPU mismatch at rnn_seq_api.hpp:272 as gfx110X/gfx115X. Jenkins
+      # gfx942, 2026-08-24..10-23: 39 failures at 36 different indices in ~304k executions (1 in 5 builds with >= 1 failure),
+      # including 11 of 37 develop builds after the per-index filters /1026 and /1095 landed; gfx90a: 0 in ~284k.
+      # Mirrors the Jenkins family filter under MIOPEN_TEST_GFX94X.
+      - "Full/GPU_LstmMSRnn_FP32*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx94X"
 
   exclude_gpu_gfx950:
     test_patterns:
