@@ -76,6 +76,8 @@ def _positive_seconds(text: str) -> float:
 
 
 def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
+    from .__main__ import add_model_encoding_arguments
+
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument(
         "--graphs",
@@ -216,6 +218,7 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-boost-round", type=int, default=500)
     parser.add_argument("--early-stopping", type=int, default=50)
+    add_model_encoding_arguments(parser)
     parser.add_argument("--name", default="Generated UHD")
     parser.add_argument(
         "--arch", help="Promotion arch; otherwise infer one observed architecture"
@@ -1440,6 +1443,8 @@ def _generate_published(
     are stated rather than inferred, and the model cannot be promoted. The holdout is
     generate's own: `--eval-benchmarks`, `--eval-fraction`, or `--recall`.
     """
+    from .__main__ import model_encoding_args
+
     if args.role == ROLE:
         raise ValueError(
             "a published dataset is a measured catalog; train it as a catalog ranker, "
@@ -1526,6 +1531,7 @@ def _generate_published(
         str(args.num_boost_round),
         "--early-stopping",
         str(args.early_stopping),
+        *model_encoding_args(args),
     ]
     if arches:
         train_args += ["--training-arches", *arches]
@@ -1842,7 +1848,7 @@ def _promote_all(
 
 
 def run_generate(args: argparse.Namespace) -> int:
-    from .__main__ import install_hint
+    from .__main__ import install_hint, model_encoding_args
     from .promote import PromoteError, build_plan
 
     stage = None
@@ -2121,6 +2127,7 @@ def run_generate(args: argparse.Namespace) -> int:
                 str(args.num_boost_round),
                 "--early-stopping",
                 str(args.early_stopping),
+                *model_encoding_args(args),
                 "--training-arches",
                 *arches,
             ]

@@ -430,12 +430,16 @@ This gate and §4.4 overlap on purpose and neither subsumes the other:
 ### 4.6 Does the measured arch-domain artifact reproduce?
 
 The warning gate consumes committed measurements; it does not prove that this
-host's toolchain reproduces them. The `rocke_arch_domain_reproducibility` CTest
-runs `tools/gen_arch_domain.py --check` over the full intrinsic/architecture
-matrix for the host flavor and compares the result with the committed column.
-This is an artifact-reproduction gate backed by the host toolchain, not a Python
-unit test: it owns external compiler processes, a dedicated timeout and resource
-policy, and an explicit CTest skip result.
+host's toolchain reproduces them. When the host compiler identity matches the
+provenance recorded in the committed column, the
+`rocke_arch_domain_reproducibility` CTest runs
+`tools/gen_arch_domain.py --check` over the full intrinsic/architecture matrix
+and compares the result with that column. LLVM development builds with the same
+major can disagree about intrinsic availability and ABI, so a different compiler
+identity is explicitly unvalidated rather than compared as though it asked the
+same question. This is an artifact-reproduction gate backed by the host
+toolchain, not a Python unit test: it owns external compiler processes, a
+dedicated timeout and resource policy, and an explicit CTest skip result.
 
 The gate is registered in both execution environments. A developer build runs
 the source tool against the source package data. Provider CI runs a packaged,
@@ -444,9 +448,10 @@ installed `rocke` package. This follows the library-side test contract: CMake
 stages every input, CTest supplies artifact-relative paths, and the test never
 configures or reaches back into a source checkout.
 
-The result mapping deliberately preserves the former pytest item's behavior:
-no clang, no committed host-flavor column, and a clang/resolved-flavor mismatch
-skip; a partial or internally inconsistent LLVM installation fails. Flavor
+The result mapping distinguishes applicability from failure: no clang, no
+committed host-flavor column, a clang/resolved-flavor mismatch, or a compiler
+identity different from the column's provenance skips with a named reason. A
+partial or internally inconsistent LLVM installation fails. Flavor
 auto-detection errors, including unavailable COMGR evidence, also remain
 failures during this migration.
 
@@ -469,9 +474,10 @@ CTest is categorized as standard in both build-tree and installed manifests, so
 installed-artifact CI can schedule the reproduction result without adding the
 external process sweep to the quick or FFM pytest pools. A named skip is not
 reproduction coverage: check the CTest result and reason, especially when the
-compiler's exact major differs from rocKE's resolved flavor or no committed
-column exists. Keeping one generator implementation behind two thin
-registrations preserves local coverage while avoiding duplicated test logic.
+compiler identity differs from the committed provenance, its major differs from
+rocKE's resolved flavor, or no committed column exists. Keeping one generator
+implementation behind two thin registrations preserves local coverage while
+avoiding duplicated test logic.
 
 **Kernel-author routing.** Ordinary kernel work does not need a separate focused
 run beyond the full pre-merge `tests/run_all.py`; once that runner has configured
@@ -490,7 +496,7 @@ performing comparisons**:
 
 | Execution class | Environment and oracle | Verdict |
 |---|---|---|
-| **Developer pre-merge gate** | `run_all.py`: relative-path guard → byte identity → emitted-IR validity → arch-domain warning gate → platform pytest → conditional differential pytest → all configured build-tree CTests | Blocking. This is a complete gate, not a fast smoke; differential pytest runs only when `rocke_engine` is importable, and the CTest phase includes the standard-tier arch-domain reproduction sweep once native tests are built. |
+| **Developer pre-merge gate** | Unfiltered `run_all.py`: relative-path guard → byte identity → emitted-IR validity → arch-domain warning gate → platform pytest → conditional differential pytest → all configured build-tree CTests | Blocking. This is a complete gate, not a fast smoke; differential pytest runs only when `rocke_engine` is importable, and the CTest phase includes the standard-tier arch-domain reproduction sweep once native tests are built. `--only`, `--only-ir`, and `--pytest-target` are focused iteration selectors and do not produce this complete verdict. |
 | **Installed host CI** | Selected CTests from the relocated provider artifact, including platform and explicitly enrolled library pytest cohorts | Blocking when selected. Registration alone is not enrollment. |
 | **Installed pinned-reference GPU CI** | One independently qualified reference CTest per published operation/architecture pair | Blocking on its matching required lane; missing hardware, qualification, bundle, or comparisons fails. Other processors' entries skip. |
 | **Legacy/manual GPU numeric** | Live NumPy/Torch reference tests and diagnostic harnesses not covered by a required pinned lane | Opt-in or capability-skipped; a skip proves no kernel correctness. |
@@ -503,12 +509,15 @@ importable → CTest). **CI does not run
 `run_all.py`** — it runs
 **ctest** against the installed artifact, after the component script installs
 the packaged wheels. Its registered pytest entries include the platform suite
-and selected library host/GPU suites. Test registration is authoritative in
-[`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and
-[`platform/CMakeLists.txt`](platform/CMakeLists.txt); the provider's external
-test-category YAML and TheRock's tier selection determine which registered
-tests actually execute. Check the selected list in the job log or with CTest's
-verbose listing. Registration alone does not establish CI coverage.
+and selected library host/GPU suites. Build-tree C++ test registration is
+orchestrated by
+[`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and owned by its
+[concern-specific fragments](platform/tests/README.md#cmake-registration-ownership)
+under `platform/tests/cmake/`. Installed Python and library CTest registration
+remains in [`platform/CMakeLists.txt`](platform/CMakeLists.txt). The provider's
+external test-category YAML and TheRock's tier selection determine which
+registered tests actually execute. Check the selected list in the job log or
+with CTest's verbose listing. Registration alone does not establish CI coverage.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
@@ -705,6 +714,83 @@ Repeat the native lane in a clean
 relocated install without source directories or native caches available; a
 source-only pass cannot establish installed-artifact support.
 
+#### 5.1.4 Installed CTest environment contracts
+
+An installed CTest entry's `ENVIRONMENT` property is part of its external
+contract. It is generated during configuration, evaluated from a relocated test
+tree, and can change whether a test runs, skips, or fails. Keep these concerns
+separate:
+
+- **Tool discovery** says where an executable or resource can be found, such as
+  compiler directories in `PATH` or `HIP_DEVICE_LIB_PATH`.
+- **Enforcement policy** says that a normally optional check is mandatory, such
+  as `ROCKE_REQUIRE_COMPILER_TOOLS=1` turning an unavailable-tool skip into a
+  failure.
+
+A shared discovery environment does not imply shared policy. Add an enforcement
+variable only to CTest entries whose tests consume it, and validate every
+consumer when changing a shared environment list. Exact environment assertions
+are intentional: an unexpected variable is observable behavior, especially when
+it changes skip/fail semantics.
+
+The current installed compiler-tool contract is:
+
+| Runtime environment | Compiler paths injected | MLA compiler checks required |
+|---|---:|---:|
+| Linux with `ROCM_PATH` | yes | yes |
+| Linux without `ROCM_PATH` | no | no |
+| Windows | no Unix-derived paths | no inferred requirement |
+
+The table describes values added by the generated manifest. CTest still passes
+through its parent process environment, so a caller that explicitly exports
+`ROCKE_REQUIRE_COMPILER_TOOLS=1` opts into strict checks independently of this
+automatic policy.
+
+These are native-host contracts. Linux tests must not pretend to cover Windows
+by patching Python platform values. If a Windows TheRock lane must require the
+MLA compiler checks, give that lane an explicit capability contract and its own
+tool-discovery rules; do not copy Unix `ROCM_PATH` layout assumptions or infer
+capability from the operating system alone.
+
+The source breadcrumb beside the environment construction in
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt) names the focused regression
+test. Run it after changing an installed Python test environment:
+
+```bash
+python -m pytest \
+  platform/tests/test_engine_linkage.py::test_installed_ctest_entries_get_scoped_environment_contracts \
+  -q
+```
+
+The test reads the standalone and provider-layout generated manifests through
+CTest, rejects duplicate variable names, and compares the complete environments
+of `rocke_pytest` and `rocke_library_mla_pytest` with and without a synthetic
+`ROCM_PATH`. Keep the expectations independently constructed rather than reusing
+the production CMake lists; otherwise production and test can repeat the same
+mistake.
+
+### 5.2 Single-arch tests: `arch_specific`
+
+A test that names one gfx target can hide a gap. The code under test may support more targets.
+Run such a test for each supported target. Use `subTest` or `pytest.mark.parametrize`.
+
+If the feature exists on a subset of targets only, mark the test with `arch_specific`.
+The decorator records the target list and the reason. It does not skip the test.
+
+```python
+from rocke.tests.arch_marks import arch_specific
+
+@arch_specific(("gfx950",), reason="mxfp6 A-scale layout exists on gfx950 only")
+def test_mxfp6_scale_thread_broadcast_across_k_blocks() -> None: ...
+```
+
+- **`archs`**: a non-empty list of names that `ArchTarget.from_gfx` accepts. A string raises `TypeError`.
+- **`reason`**: a non-empty sentence. A blank reason raises `ValueError`.
+- **Scope**: the decorator works on a function, a method, and a class. It works with `unittest` and `pytest`.
+- **Dependencies**: the helper imports no `torch`.
+
+The helper lives in `platform/python/rocke/tests/arch_marks.py`. Both `platform/tests` and `library/tests` import it as `rocke.tests.arch_marks`.
+
 ## 6. Invariants & contracts
 
 Cross-cutting properties every change must preserve:
@@ -750,7 +836,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
+| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | Platform unit tests outside `platform/tests` never run in gate or CI | Collect or relocate them |
 
 ### 7.3 What "green" does and does not mean today

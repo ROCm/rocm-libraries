@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 #include "rocblas_data.hpp"
 #include "rocblas_datatype2string.hpp"
 #include "rocblas_test.hpp"
+#include "testing_kernel_select.hpp"
 #include "testing_logging.hpp"
 #include "type_dispatch.hpp"
 #include <cctype>
@@ -53,10 +54,31 @@ namespace
         {
             if(!strcmp(arg.function, "logging"))
                 testing_logging<T>(arg);
+            else if constexpr(std::is_same_v<T, float>)
+            {
+                if(!strcmp(arg.function, "kernel_select_trsm"))
+                    testing_kernel_select_trsm(arg);
+                else if(!strcmp(arg.function, "kernel_select_layout"))
+                    testing_kernel_select_layout(arg);
+                else if(!strcmp(arg.function, "kernel_select_combined"))
+                    testing_kernel_select_combined(arg);
+                else if(!strcmp(arg.function, "kernel_select_source"))
+                    testing_kernel_select_source(arg);
+                else if(!strcmp(arg.function, "kernel_select_gemv"))
+                    testing_kernel_select_gemv(arg);
+                else if(!strcmp(arg.function, "kernel_select_tensile"))
+                    testing_kernel_select_tensile(arg);
+                else if(!strcmp(arg.function, "kernel_select_check_only"))
+                    testing_kernel_select_check_only(arg);
+                else
+                    FAIL() << "Internal error: Test called with unknown function: " << arg.function;
+            }
             else
                 FAIL() << "Internal error: Test called with unknown function: " << arg.function;
         }
     };
+
+    constexpr char c_kernel_select_prefix[] = "kernel_select_";
 
     struct logging : RocBLAS_Test<logging, logging_testing>
     {
@@ -69,13 +91,23 @@ namespace
         // Filter for which functions apply to this suite
         static bool function_filter(const Arguments& arg)
         {
-            return !strcmp(arg.function, "logging");
+            return !strcmp(arg.function, "logging")
+                   || !strncmp(
+                       arg.function, c_kernel_select_prefix, sizeof(c_kernel_select_prefix) - 1);
         }
 
         // Google Test name suffix based on parameters
         static std::string name_suffix(const Arguments& arg)
         {
             RocBLAS_TestName<logging> name(arg.name);
+
+            if(strcmp(arg.function, "logging"))
+            {
+                name << '_' << arg.function + sizeof(c_kernel_select_prefix) - 1 << '_'
+                     << rocblas_datatype2string(arg.a_type);
+                return std::move(name);
+            }
+
             name << rocblas_datatype2string(arg.a_type);
 
             name << (arg.pointer_mode_host ? "_hostptr" : "_devptr");
