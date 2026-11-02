@@ -16,6 +16,15 @@ using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 // Test GpuResampleFwdSignatureKey
 // =============================================================
 
+TEST(TestGpuResampleFwdSignatureKey, DefaultInitializesDataTypesToUnset)
+{
+    const GpuResampleFwdSignatureKey key{};
+    EXPECT_EQ(key.xDataType, DataType::UNSET);
+    EXPECT_EQ(key.yDataType, DataType::UNSET);
+    EXPECT_EQ(key.computeDataType, DataType::UNSET);
+    EXPECT_EQ(key.indexDataType, DataType::UNSET);
+}
+
 TEST(TestGpuResampleFwdSignatureKey, EqualityOperator)
 {
     const GpuResampleFwdSignatureKey key1{
@@ -87,6 +96,44 @@ TEST(TestGpuResampleFwdSignatureKey, HashFunction)
     }
 }
 
+TEST(TestGpuResampleFwdSignatureKey, RegistersPlanBuildersForSupportedTypes)
+{
+    const auto builders = GpuResampleFwdSignatureKey::getPlanBuilders();
+    EXPECT_EQ(builders.size(), 6U);
+
+    for(const auto index : {DataType::UNSET, DataType::INT32})
+    {
+        EXPECT_NE(builders.find({DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, index}),
+                  builders.end());
+        EXPECT_NE(builders.find({DataType::HALF, DataType::HALF, DataType::FLOAT, index}),
+                  builders.end());
+        EXPECT_NE(builders.find({DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT, index}),
+                  builders.end());
+    }
+    EXPECT_EQ(
+        builders.find({DataType::DOUBLE, DataType::DOUBLE, DataType::DOUBLE, DataType::UNSET}),
+        builders.end());
+}
+
+TEST(TestGpuResampleBwdSignatureKey, RegistersPlanBuildersForSupportedTypes)
+{
+    const auto builders = GpuResampleBwdSignatureKey::getPlanBuilders();
+    EXPECT_EQ(builders.size(), 6U);
+
+    for(const auto index : {DataType::UNSET, DataType::INT32})
+    {
+        EXPECT_NE(builders.find({DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, index}),
+                  builders.end());
+        EXPECT_NE(builders.find({DataType::HALF, DataType::HALF, DataType::FLOAT, index}),
+                  builders.end());
+        EXPECT_NE(builders.find({DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT, index}),
+                  builders.end());
+    }
+    EXPECT_EQ(
+        builders.find({DataType::DOUBLE, DataType::DOUBLE, DataType::DOUBLE, DataType::UNSET}),
+        builders.end());
+}
+
 TEST(TestGpuResampleFwdSignatureKey, Copy)
 {
     const GpuResampleFwdSignatureKey original{
@@ -110,6 +157,20 @@ TEST(TestGpuResampleFwdSignatureKey, CreateFromNodeAndTensorMap)
         graph.getNode(0), graph.getTensorMap(), graph.getNode(0).compute_data_type());
     const GpuResampleFwdSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::INT32};
+
+    EXPECT_TRUE(keyFromNode == expectedKey);
+}
+
+TEST(TestGpuResampleFwdSignatureKey, CreateFromNodeAndTensorMapWithoutIndex)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(false);
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const GpuResampleFwdSignatureKey keyFromNode(
+        graph.getNode(0), graph.getTensorMap(), graph.getNode(0).compute_data_type());
+    const GpuResampleFwdSignatureKey expectedKey{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET};
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }
@@ -141,9 +202,51 @@ TEST(TestGpuResampleFwdSignatureKey, ThrowsForMissingTensor)
                  std::runtime_error);
 }
 
+TEST(TestGpuResampleFwdSignatureKey, ThrowsForNullOutputTensor)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    auto tensorMapCopy = graph.getTensorMap();
+    const auto* nodeAttributes = graph.getNode(0).attributes_as_ResampleFwdAttributes();
+    ASSERT_NE(nodeAttributes, nullptr);
+    tensorMapCopy[nodeAttributes->y_tensor_uid()] = nullptr;
+
+    EXPECT_THROW(GpuResampleFwdSignatureKey(
+                     graph.getNode(0), tensorMapCopy, graph.getNode(0).compute_data_type()),
+                 std::runtime_error);
+}
+
+TEST(TestGpuResampleFwdSignatureKey, ThrowsForNullIndexTensor)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    auto tensorMapCopy = graph.getTensorMap();
+    const auto* nodeAttributes = graph.getNode(0).attributes_as_ResampleFwdAttributes();
+    ASSERT_NE(nodeAttributes, nullptr);
+    ASSERT_TRUE(nodeAttributes->index_tensor_uid().has_value());
+    tensorMapCopy[nodeAttributes->index_tensor_uid().value()] = nullptr;
+
+    EXPECT_THROW(GpuResampleFwdSignatureKey(
+                     graph.getNode(0), tensorMapCopy, graph.getNode(0).compute_data_type()),
+                 std::runtime_error);
+}
+
 // =============================================================
 // Test GpuResampleBwdSignatureKey
 // =============================================================
+
+TEST(TestGpuResampleBwdSignatureKey, DefaultInitializesDataTypesToUnset)
+{
+    const GpuResampleBwdSignatureKey key{};
+    EXPECT_EQ(key.dyDataType, DataType::UNSET);
+    EXPECT_EQ(key.dxDataType, DataType::UNSET);
+    EXPECT_EQ(key.computeDataType, DataType::UNSET);
+    EXPECT_EQ(key.indexDataType, DataType::UNSET);
+}
 
 TEST(TestGpuResampleBwdSignatureKey, EqualityOperator)
 {
@@ -243,6 +346,21 @@ TEST(TestGpuResampleBwdSignatureKey, CreateFromNodeAndTensorMap)
     EXPECT_TRUE(keyFromNode == expectedKey);
 }
 
+TEST(TestGpuResampleBwdSignatureKey, CreateFromNodeAndTensorMapWithoutIndex)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
+        false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const GpuResampleBwdSignatureKey keyFromNode(
+        graph.getNode(0), graph.getTensorMap(), graph.getNode(0).compute_data_type());
+    const GpuResampleBwdSignatureKey expectedKey{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET};
+
+    EXPECT_TRUE(keyFromNode == expectedKey);
+}
+
 TEST(TestGpuResampleBwdSignatureKey, ThrowsForWrongAttributesType)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
@@ -264,6 +382,39 @@ TEST(TestGpuResampleBwdSignatureKey, ThrowsForMissingTensor)
     const auto* nodeAttributes = graph.getNode(0).attributes_as_ResampleBwdAttributes();
     EXPECT_NE(nodeAttributes, nullptr);
     tensorMapCopy[nodeAttributes->dx_tensor_uid()] = nullptr;
+
+    EXPECT_THROW(GpuResampleBwdSignatureKey(
+                     graph.getNode(0), tensorMapCopy, graph.getNode(0).compute_data_type()),
+                 std::runtime_error);
+}
+
+TEST(TestGpuResampleBwdSignatureKey, ThrowsForNullOutputTensor)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    auto tensorMapCopy = graph.getTensorMap();
+    const auto* nodeAttributes = graph.getNode(0).attributes_as_ResampleBwdAttributes();
+    ASSERT_NE(nodeAttributes, nullptr);
+    tensorMapCopy[nodeAttributes->dy_tensor_uid()] = nullptr;
+
+    EXPECT_THROW(GpuResampleBwdSignatureKey(
+                     graph.getNode(0), tensorMapCopy, graph.getNode(0).compute_data_type()),
+                 std::runtime_error);
+}
+
+TEST(TestGpuResampleBwdSignatureKey, ThrowsForNullIndexTensor)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    auto tensorMapCopy = graph.getTensorMap();
+    const auto* nodeAttributes = graph.getNode(0).attributes_as_ResampleBwdAttributes();
+    ASSERT_NE(nodeAttributes, nullptr);
+    ASSERT_TRUE(nodeAttributes->index_tensor_uid().has_value());
+    tensorMapCopy[nodeAttributes->index_tensor_uid().value()] = nullptr;
 
     EXPECT_THROW(GpuResampleBwdSignatureKey(
                      graph.getNode(0), tensorMapCopy, graph.getNode(0).compute_data_type()),

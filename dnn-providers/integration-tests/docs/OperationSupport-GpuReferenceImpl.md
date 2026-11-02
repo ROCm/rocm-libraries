@@ -61,6 +61,8 @@ The following table lists the operations currently executable through the GPU gr
 | RMSNorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | RMSNorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; see [Reduction Modes](#reduction-modes) |
+| Resample Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 compute; MAXPOOL may produce INT32 indices |
+| Resample Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 compute; MAXPOOL requires INT32 indices |
 | SDPA Forward (dense) | FP16, BFP16, FP32 | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
 | Pointwise Unary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
@@ -75,8 +77,6 @@ The following table lists the operations currently executable through the GPU gr
 | BatchNorm Backward | `ReferenceCapabilityError` | `GpuFpReferenceBatchnorm::backward` exists |
 | SDPA Backward | `ReferenceCapabilityError` | None |
 | BlockScale Quantize / Dequantize | `ReferenceCapabilityError` | None |
-| Resample Forward | "Unsupported node type" error | `GpuFpReferenceResample::forward` exists |
-| Resample Backward | "Unsupported node type" error | None |
 | MoE Grouped Matmul (forward and backward) | "Unsupported node type" error | None |
 | Pointwise ternary (`BINARY_SELECT`), `MAX`, `MIN`, `CMP_GT` | Not applicable (plan builders reject the mode) | Not implemented |
 | Custom operations | `ReferenceCapabilityError` | None |
@@ -117,6 +117,16 @@ but are not reachable through graph-level verification.
 | Reduction | `GpuReductionPlanBuilder` | `GpuReductionSignatureKey` | Reduction over the requested dimensions |
 | SDPA Forward (dense) | `GpuSdpaFwdPlanBuilder` | `GpuSdpaFwdSignatureKey` | Scaled dot-product attention forward pass |
 | SDPA Forward (ragged) | `GpuSdpaRaggedFwdPlanBuilder` | `GpuSdpaRaggedFwdSignatureKey` | Packed (ragged) attention forward pass |
+
+### Resample Operations
+
+| Operation | Plan Builder | Signature Key | Description |
+|-----------|-------------|---------------|-------------|
+| Resample Forward | `GpuResampleFwdPlanBuilder` | `GpuResampleFwdSignatureKey` | Forward resampling with MAXPOOL or AVGPOOL modes |
+| Resample Backward | `GpuResampleBwdPlanBuilder` | `GpuResampleBwdSignatureKey` | Backward resampling with MAXPOOL or AVGPOOL modes |
+
+Both plans support ZERO_PAD and NEG_INF_PAD. Index tensors are supported only for MAXPOOL:
+forward indices are optional, while backward MAXPOOL requires indices. AVGPOOL uses no index tensor.
 
 ### Pointwise Operations
 
@@ -192,8 +202,8 @@ host validator.
 | Layernorm Forward / Backward | Yes | Yes |
 | RMSNorm Forward / Backward | Yes | Yes |
 | Reduction | Yes | Yes |
-| Resample Forward | Yes | No (library only) |
-| Resample Backward | Yes | No |
+| Resample Forward | Yes | Yes |
+| Resample Backward | Yes | Yes |
 | SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; no variable seq. len., no ragged) | Yes (dense; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | No |
 | BlockScale Quantize / Dequantize | Yes | No |
