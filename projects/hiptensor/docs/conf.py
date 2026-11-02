@@ -63,7 +63,7 @@ exclude_patterns = globals().get("exclude_patterns", []) + [".venv"]
 extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]
 
 html_theme_options = {
-    "flavor": "rocm",
+    "flavor": "hpc-sdk",
     "repository_url": "https://github.com/ROCm/rocm-libraries",
     "path_to_docs": "projects/hiptensor/docs",
     "use_repository_button": True,
