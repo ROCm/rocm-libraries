@@ -11,7 +11,7 @@ Every case ends as `pass`, `fail`, `crash`, `not-run`, `declined` (hipDNN has no
 | `aotriton/vendor/` | AOTriton's tests, byte-identical at a pinned commit |
 | `aotriton/shim/` | `aotriton_flash.py` and `pyaotriton` replacements |
 | `aotriton/hipdnn_aotriton_plugin.py` | outcome table, mode record, CSV, `--shard`, `--fake` |
-| `aotriton/run_aotriton.py`, `reconcile.py` | GPU runner and its passes; offline `not-run` reconciliation and engine tables |
+| `aotriton/run_aotriton.py`, `reconcile.py`, `completion.py` | GPU runner and its passes; offline `not-run` reconciliation, engine tables and run report; the shards a resumed link must finish |
 | `aotriton/conformance_contract.py` | names and formats shared by the runner, plugin, shim and `hipdnn_sdpa` |
 
 ## CPU tests
@@ -136,6 +136,14 @@ With `--all-engines`, each pass writes the same files under `all-engines/`. Afte
 ```
 python aotriton/reconcile.py <arch>/<run> --out <arch>/<run>/reconciled.csv
 ```
+
+`<arch>/<run>` holds one `<suite>-<k>of<N>/` directory per shard (`default-3of16`; `shard-<k>of<N>` too).
+`reconcile.py <results>/<run> --report [--shards-file FILE] [--baseline FILE]` prints the whole run: per-shard
+accounting (`FILE`: `<suite> <k> <N>` per line, so a shard without a directory shows as missing), outcome totals,
+passes and per-(direction, engine) counts over every shard, the engines no case passed with their first decline
+reasons, every `fail` / `crash` with engine, side, stage and repro path, and the failing node ids new to the run or
+fixed against `--baseline` (one node id per line). `completion.py <results>/<run> [--shards-file FILE]` lists the
+shards whose `--resume` still has work (`<suite> <k> <N>` lines on stdout, reasons on stderr).
 
 `mode` is `hipdnn` or `ref-fwd` (hipDNN forward declined; a reference forward fed the hipDNN
 backward). A `ref-fwd` pass proves the backward only.

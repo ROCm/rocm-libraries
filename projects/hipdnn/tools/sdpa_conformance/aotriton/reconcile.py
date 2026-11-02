@@ -7,12 +7,19 @@
     reconcile.py <run-dir> [--out reconciled.csv]
     reconcile.py <run-dir> --engines <out>
 
-``<run-dir>`` holds one ``shard-<i>of<N>/`` directory per shard, each with ``collected.txt`` (every
+``<run-dir>`` holds one ``<suite>-<k>of<N>/`` directory per shard (``default-3of16``, ``forward-1of4``;
+``shard-<k>of<N>`` too), each with ``collected.txt`` (every
 node id the shard collected) and ``results.csv`` (one row per finished case). The union over all
 shards gets one row per node id: rows as recorded, and ``not-run`` for every collected id without
 a row (killed job, exhausted walltime). A truncated trailing row (no newline, or the wrong number
 of fields) is dropped, so its case becomes ``not-run`` too. CSVs written before the
 ``fwd_engines`` / ``bwd_engines`` columns existed read with those fields empty.
+
+``--report`` reads the whole run: shard accounting (``--shards-file`` lists the expected shards,
+``<suite> <k> <N>`` per line, so a shard that left no directory shows as missing), outcome totals, per-
+pass and per-(direction, engine) counts over every shard, the engines no case passed with their first decline
+reasons, every ``fail`` / ``crash`` with engine, side, stage and repro path, and with ``--baseline FILE``
+(one failing node id per line) the failing node ids new to this run and the ones that no longer fail.
 
 ``--engines <out>`` also reads the candidate passes of ``run_aotriton.py --exhaustive`` under
 ``<out>/cand/`` (``candidate`` and ``candidate-pair`` passes; ``engines.csv`` gains
@@ -89,6 +96,7 @@ NODEIDS_NAME = "nodeids.txt"
 DECLINES_DIR = "declines"  # the job stages the workers' decline files here
 MAIN_PASS = "main"
 HEURISTIC = "heuristic"
+SHARD_DIR = re.compile(r"^([a-z]+)-(\d+)of(\d+)$")
 FORWARD_TESTS = "test_forward.py"
 
 
@@ -143,10 +151,37 @@ def read_rows(path):
     return rows
 
 
+def shard_dirs(run_dir):
+    """The shard directories of a run (``<suite>-<k>of<N>``), ordered by suite, then ``k`` numerically."""
+    found = []
+    for d in Path(run_dir).iterdir():
+        match = SHARD_DIR.match(d.name)
+        if match and d.is_dir():
+            found.append(((match[1], int(match[2]), int(match[3])), d))
+    return [d for _, d in sorted(found)]
+
+
+def read_shards_file(path):
+    """Shard directory names of a ``<suite> <k> <N>`` file (the ``submit_chains.sh`` format;
+    ``#`` comments and blank lines are skipped)."""
+    names = []
+    for line in Path(path).read_text().splitlines():
+        fields = line.split()
+        if fields and not fields[0].startswith("#"):
+            suite, k, n = fields[:3]
+            names.append(f"{suite}-{k}of{n}")
+    return names
+
+
 def reconcile(run_dir):
     """Union of every shard's rows plus ``not-run`` rows; returns a list of row dicts."""
     seen, rows, collected = set(), [], []
-    for shard in sorted(Path(run_dir).glob("shard-*")):
+    shards = shard_dirs(run_dir)
+    if not shards:
+        raise FileNotFoundError(
+            f"no shard directories (<suite>-<k>of<N>) under {run_dir}"
+        )
+    for shard in shards:
         for row in read_rows(shard / CSV_NAME):
             if row["nodeid"] not in seen:
                 seen.add(row["nodeid"])
@@ -168,8 +203,9 @@ def reconcile(run_dir):
     return rows
 
 
-def summarize(rows):
-    """Text summary: outcome totals, outcomes by reason, failing node ids with their reason."""
+def summarize(rows, failing=True):
+    """Text summary: outcome totals, outcomes by reason, failing node ids with their reason
+    (unless ``failing`` is false)."""
     by_outcome = collections.Counter(r["outcome"] for r in rows)
     lines = [f"{len(rows)} cases"]
     lines += [f"  {o:12} {by_outcome[o]}" for o in OUTCOMES if by_outcome[o]]
@@ -187,10 +223,10 @@ def summarize(rows):
             "passes by mode: "
             + ", ".join(f"{m or 'unrecorded'}={n}" for m, n in modes.items())
         )
-    failing = [r for r in rows if r["outcome"] in ("fail", "crash")]
-    if failing:
+    failed = [r for r in rows if r["outcome"] in ("fail", "crash")] if failing else []
+    if failed:
         lines.append("failing:")
-        lines += [f"  {r['outcome']} {r['nodeid']}  {r['reason']}" for r in failing]
+        lines += [f"  {r['outcome']} {r['nodeid']}  {r['reason']}" for r in failed]
     return "\n".join(lines)
 
 
@@ -235,7 +271,7 @@ def pass_dirs(out):
     return sorted(found.items())
 
 
-def _listing(path):
+def listing(path):
     path = Path(path)
     if not path.exists():
         return []
@@ -245,9 +281,9 @@ def _listing(path):
 def _passes(out):
     """``(directory, meta, expected node ids)`` of pass 1 and every pass under ``all-engines``."""
     out = Path(out)
-    yield out, {"kind": HEURISTIC}, _listing(out / COLLECTED_NAME)
+    yield out, {"kind": HEURISTIC}, listing(out / COLLECTED_NAME)
     for d, meta in pass_dirs(out):
-        yield d, meta, _listing(d / NODEIDS_NAME)
+        yield d, meta, listing(d / NODEIDS_NAME)
 
 
 _SOURCE = {"sweep": "pinned"}  # every other kind is its own source
@@ -354,9 +390,10 @@ def engine_rows(out):
 
 
 def _count_label(r):
+    engine = r["engine"] or "-"
     if r["source"] in ("heuristic", "pinned"):
-        return f"{r['direction']} {r['engine']}"
-    label = f"{r['source']} {r['direction']} {r['engine']}"
+        return f"{r['direction']} {engine}"
+    label = f"{r['source']} {r['direction']} {engine}"
     if r["source"] == "candidate":
         return f"{label} #{r[r['direction'] + '_candidate'] or '-'}"
     if r["source"] == "candidate-pair":
@@ -367,14 +404,21 @@ def _count_label(r):
     return label + (f" (fwd {r['pin_fwd']})" if r["source"] == "pair" else "")
 
 
-def engine_counts(rows):
-    """Text: per (direction, engine) the pass / fail / declined counts (other outcomes appended;
-    ``not_honored`` counts the declines whose candidate the backend did not build)."""
-    counts = collections.defaultdict(collections.Counter)
+def _tally(rows, counts):
+    """Add the engine ``rows`` to ``counts``, ``{label: Counter of outcomes}``."""
     for r in rows:
         counts[_count_label(r)][r["outcome"]] += 1
         if contract.CANDIDATE_NOT_HONORED in r["reason"]:
             counts[_count_label(r)]["not_honored"] += 1
+    return counts
+
+
+def engine_counts(rows, counts=None):
+    """Text: per (direction, engine) the pass / fail / declined counts (other outcomes appended;
+    ``not_honored`` counts the declines whose candidate the backend did not build). ``counts``
+    is a ``_tally`` already filled, for a run whose rows come shard by shard."""
+    if counts is None:
+        counts = _tally(rows, collections.defaultdict(collections.Counter))
     lines = []
     for label, c in sorted(counts.items()):
         extra = [
@@ -403,39 +447,48 @@ def write_engines(out):
     return engine_counts(rows)
 
 
-def pass_accounting(out):
-    """Text, one line per pass: node ids expected against rows recorded."""
-    lines = []
+def pass_name(out, d):
+    out = Path(out)
+    if d == out:
+        return MAIN_PASS
+    base = out if d.is_relative_to(out / CANDIDATES_DIR) else out / ENGINES_DIR
+    return d.relative_to(base).as_posix()
+
+
+def pass_totals(out):
+    """``[(pass name, node ids expected, of those recorded)]``, pass 1 first (named ``main``)."""
+    totals = []
     for d, _, expected in _passes(out):
         recorded = {r["nodeid"] for r in read_rows(d / CSV_NAME)}
-        missing = len([n for n in expected if n not in recorded])
-        name = (
-            MAIN_PASS
-            if d == Path(out)
-            else (
-                d.relative_to(Path(out))
-                if d.is_relative_to(Path(out) / CANDIDATES_DIR)
-                else d.relative_to(Path(out) / ENGINES_DIR)
-            ).as_posix()
-        )
-        lines.append(
-            f"{name}: expected {len(expected)}, recorded {len(recorded & set(expected))}"
-            + (f" ({missing} not-run)" if missing else "")
-        )
-    return "\n".join(lines)
+        totals.append((pass_name(out, d), len(expected), len(recorded & set(expected))))
+    return totals
 
 
-def _decline_lines(out):
-    """``{engine as the backend logged it: [distinct decline lines, in file order]}``."""
+def _accounting_line(name, expected, recorded):
+    missing = expected - recorded
+    return f"{name}: expected {expected}, recorded {recorded}" + (
+        f" ({missing} not-run)" if missing else ""
+    )
+
+
+def pass_accounting(out):
+    """Text, one line per pass: node ids expected against rows recorded."""
+    return "\n".join(_accounting_line(*t) for t in pass_totals(out))
+
+
+def _decline_lines(*outs):
+    """``{engine as the backend logged it: [distinct decline lines, in file order]}`` over the
+    ``declines/`` of every ``outs`` directory."""
     found = {}
-    for path in sorted((Path(out) / DECLINES_DIR).glob("*.jsonl")):
-        for line in path.read_text().splitlines():
-            if not line.strip():
-                continue
-            entry = json.loads(line)
-            lines = found.setdefault(entry["engine"], [])
-            if entry["line"] not in lines:
-                lines.append(entry["line"])
+    for out in outs:
+        for path in sorted((Path(out) / DECLINES_DIR).glob("*.jsonl")):
+            for line in path.read_text().splitlines():
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                lines = found.setdefault(entry["engine"], [])
+                if entry["line"] not in lines:
+                    lines.append(entry["line"])
     return found
 
 
@@ -452,17 +505,28 @@ def _same_engine(inventory_name, logged):
     return b.endswith("planbuilder") and ":" not in a and "sdpa" in a and "sdpa" in b
 
 
-def inventory_summary(out, rows, reasons=3):
+def _engine_outcomes(rows, by_engine):
+    """Add the engine ``rows`` to ``by_engine``, ``{engine: Counter of outcomes}``."""
+    for r in rows:
+        by_engine.setdefault(r["engine"], collections.Counter())[r["outcome"]] += 1
+    return by_engine
+
+
+def inventory_summary(out, rows, reasons=3, declines_from=None, by_engine=None):
     """Text: every engine of ``<out>/engine-inventory.txt`` with its outcome counts, zeros included,
-    and for an engine no case reached the first decline reasons logged under ``<out>/declines/``.
+    and for an engine no case reached the first decline reasons logged under ``<out>/declines/``
+    (or under every directory of ``declines_from``). ``by_engine`` is an ``_engine_outcomes``
+    already filled, for a run whose rows come shard by shard.
     """
     path = Path(out) / contract.INVENTORY_NAME
     if not path.exists():
         return ""
-    declines = _decline_lines(out)
+    declines = _decline_lines(*(declines_from or [out]))
+    if by_engine is None:
+        by_engine = _engine_outcomes(rows, {})
     lines = []
-    for name in _listing(path):
-        counts = collections.Counter(r["outcome"] for r in rows if r["engine"] == name)
+    for name in listing(path):
+        counts = by_engine.get(name, collections.Counter())
         lines.append(
             f"{name}: "
             + " ".join(
@@ -482,6 +546,143 @@ def inventory_summary(out, rows, reasons=3):
             lines += [f"    decline: {t}" for t in logged[:reasons]] or [
                 "    no applicable case and no decline reason logged"
             ]
+    return "\n".join(lines)
+
+
+def failure_rows(out):
+    """Every ``fail`` / ``crash`` of every pass of the shard ``out``, as dicts: ``pass``, ``nodeid``,
+    ``outcome``, ``direction`` and ``engine`` (the side that failed), ``fail_side``, ``stage``,
+    ``repro`` (relative to the shard directory, empty when none was saved), ``reason``.
+    """
+    found = []
+    for d, meta, expected in _passes(out):
+        bad = [
+            r
+            for r in _pass_engine_rows(d, meta, expected)
+            if r["outcome"] in ("fail", "crash")
+        ]
+        if not bad:
+            continue
+        raw = {r["nodeid"]: r for r in read_rows(d / CSV_NAME)}
+        found += [
+            {
+                "pass": pass_name(out, d),
+                "fail_side": raw[r["nodeid"]]["fail_side"],
+                "repro": raw[r["nodeid"]]["repro"],
+                **{
+                    k: r[k]
+                    for k in (
+                        "nodeid",
+                        "outcome",
+                        "direction",
+                        "engine",
+                        "stage",
+                        "reason",
+                    )
+                },
+            }
+            for r in bad
+        ]
+    return found
+
+
+def _shard_accounting(name, shard):
+    if shard is None:
+        return f"{name}: MISSING (no shard directory)"
+    (_, collected, recorded), *others = pass_totals(shard)
+    if not collected:
+        return f"{name}: collected.txt missing or empty, case count unknown"
+    line = f"{name}: collected {collected}, recorded {recorded}, not-run {collected - recorded}"
+    behind = sum(e - r for _, e, r in others)
+    return line + (f", other passes not-run {behind}" if behind else "")
+
+
+def run_report(run_dir, expected=(), baseline=None):
+    """Text report of the whole run in ``run_dir``: shard accounting (``expected`` names the shards
+    that must exist), outcome totals, passes and engines summed over every shard, the engines
+    no case passed, every failure, and with ``baseline`` (a file of failing node ids) the diff.
+    """
+    shards = {d.name: d for d in shard_dirs(run_dir)}
+    rows = reconcile(run_dir)
+    names = list(dict.fromkeys([*expected, *shards]))
+    passes, counts, by_engine, failures = (
+        {},
+        collections.defaultdict(collections.Counter),
+        {},
+        [],
+    )
+    for name, shard in shards.items():
+        for pass_name, want, got in pass_totals(shard):
+            total = passes.setdefault(pass_name, [0, 0])
+            total[0] += want
+            total[1] += got
+        engines = engine_rows(shard)
+        _tally(engines, counts)
+        _engine_outcomes(engines, by_engine)
+        failures += [{"shard": name, **f} for f in failure_rows(shard)]
+    lines = ["== shards"] + [_shard_accounting(n, shards.get(n)) for n in names]
+    lines += ["", "== outcomes", summarize(rows, failing=False)]
+    lines += ["", "== passes (all shards)"] + [
+        _accounting_line(n, *t) for n, t in passes.items()
+    ]
+    lines += ["", "== engines (all shards)", engine_counts((), counts)]
+    inventories = [d for d in shards.values() if (d / contract.INVENTORY_NAME).exists()]
+    lines += ["", "== inventory"]
+    if inventories:
+        first = inventories[0]
+        listed = listing(first / contract.INVENTORY_NAME)
+        lines += [
+            f"inventory of {d.name} differs from {first.name}"
+            for d in inventories[1:]
+            if listing(d / contract.INVENTORY_NAME) != listed
+        ]
+        zero = [n for n in listed if not by_engine.get(n, {}).get("pass")]
+        lines.append("engines with no pass: " + (", ".join(zero) or "none"))
+        lines.append(
+            inventory_summary(
+                first, (), declines_from=list(shards.values()), by_engine=by_engine
+            )
+        )
+    else:
+        lines.append("no engine-inventory.txt in any shard")
+    lines += ["", f"== failures ({len(failures)})"]
+    for f in failures:
+        repro = f"{f['shard']}/{f['repro']}" if f["repro"] else "-"
+        lines.append(
+            f"{f['outcome']} {f['shard']} {f['pass']} {f['direction']} {f['engine'] or '-'} "
+            f"side={f['fail_side'] or '-'} stage={f['stage'] or '-'} repro={repro} "
+            f"{f['nodeid']} :: {f['reason'][:160]}"
+        )
+    if baseline:
+        lines += [
+            "",
+            f"== baseline {Path(baseline).name}",
+            _baseline_diff(baseline, rows, failures),
+        ]
+    return "\n".join(lines)
+
+
+def _baseline_diff(baseline, rows, failures):
+    known = {
+        ln.strip()
+        for ln in Path(baseline).read_text().splitlines()
+        if ln.strip() and not ln.lstrip().startswith("#")
+    }
+    here = {f["nodeid"]: f for f in failures}
+    outcome = {r["nodeid"]: r["outcome"] for r in rows}
+    new = sorted(here.keys() - known)
+    fixed = sorted(known - here.keys())
+    lines = [
+        f"baseline {len(known)} ids, failing here {len(here)}, still failing {len(known & here.keys())}",
+        f"new failures (not in baseline): {len(new)}",
+        *[
+            f"  {n}  [{here[n]['outcome']} {here[n]['direction']} {here[n]['engine'] or '-'}]"
+            for n in new
+        ],
+        "",
+        f"no longer failing (in baseline, not failing here): {len(fixed)}",
+        *[f"  {n}: {outcome.get(n, 'not in this run')}" for n in fixed],
+    ]
     return "\n".join(lines)
 
 
@@ -563,13 +764,36 @@ def main(argv=None):
         metavar="OUT",
         help="write OUT/engines.csv for the --all-engines run in OUT (a shard directory)",
     )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="print the report of the whole run (every shard of <run-dir>) instead of the summary",
+    )
+    parser.add_argument(
+        "--shards-file",
+        type=Path,
+        help="with --report: the expected shards, one '<suite> <k> <N>' per line",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        help="with --report: failing node ids to diff against, one per line",
+    )
     args = parser.parse_args(argv)
-    rows = reconcile(args.run_dir)
+    try:
+        rows = reconcile(args.run_dir)
+    except FileNotFoundError as e:
+        print(e, file=sys.stderr)
+        return 2
     if args.out:
         args.out.write_text(
             ",".join(FIELDS) + "\n" + "".join(format_row(r) for r in rows)
         )
-    print(summarize(rows))
+    if args.report:
+        expected = read_shards_file(args.shards_file) if args.shards_file else ()
+        print(run_report(args.run_dir, expected, args.baseline))
+    else:
+        print(summarize(rows))
     if args.engines:
         print(write_engines(args.engines))
         print(pass_accounting(args.engines))
