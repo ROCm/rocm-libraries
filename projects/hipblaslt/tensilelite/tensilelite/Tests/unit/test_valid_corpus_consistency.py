@@ -661,6 +661,30 @@ def test_range_sibling_flags_a_different_header(tmp_path, problem_type_vcc, head
     assert f"{field}:" in violations[0]
 
 
+def test_range_sibling_flags_the_same_devices_in_another_order(tmp_path, problem_type_vcc):
+    # MasterSolutionLibrary.hardware joins DeviceNames in file order into the
+    # _ID placeholder suffix, so reordering them names a different placeholder.
+    tree = tmp_path / "gfx950" / "gfx950"
+    name = "gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml"
+    files = [
+        _write_logic_yaml(
+            tree / "Range" / name,
+            problemType=_PLAIN_BF16_TN,
+            libraryType="Range",
+            devices=("Device 75a0", "Device 75a3"),
+        ),
+        _write_logic_yaml(
+            tree / "Equality" / name,
+            problemType=_PLAIN_BF16_TN,
+            libraryType="Equality",
+            devices=("Device 75a3", "Device 75a0"),
+        ),
+    ]
+    violations = problem_type_vcc.find_range_sibling_violations(files, tmp_path)
+    assert len(violations) == 1
+    assert "DeviceNames:" in violations[0]
+
+
 def test_range_file_without_an_equality_sibling_is_not_compared(tmp_path, problem_type_vcc):
     rangeFile, _ = _range_pair(tmp_path, rangeType={**_PLAIN_BF16_TN, "UseBias": 1})
     assert problem_type_vcc.find_range_sibling_violations([rangeFile], tmp_path) == []

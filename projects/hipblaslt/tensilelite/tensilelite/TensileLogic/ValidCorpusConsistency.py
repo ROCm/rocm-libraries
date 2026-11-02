@@ -221,14 +221,16 @@ def _placeholder_identity(yaml_path: Path) -> Dict[str, object]:
     """The header fields and effective ``ProblemType`` that name a logic file's
     placeholder library. ``ProblemType`` is compared after TensileLite fills in
     its defaults, so a file that writes a default out explicitly and one that
-    omits it compare equal."""
+    omits it compare equal. ``DeviceNames`` keeps the file's order, unlike
+    ``read_device_names``: ``MasterSolutionLibrary.hardware`` joins them in
+    that order into the ``_ID`` placeholder suffix."""
     from ..SolutionStructs.Problem import ProblemType
 
     identity: Dict[str, object] = {
         "ScheduleName": load_logic_schedule_name(yaml_path),
         "ArchitectureName": load_logic_gfx_arch(yaml_path),
         "CUCount": load_logic_cu_count(yaml_path),
-        "DeviceNames": read_device_names(yaml_path),
+        "DeviceNames": [str(name) for name in load_logic_device_names(yaml_path) or []],
     }
     raw = load_logic_problem_type(yaml_path) or {}
     for key, value in ProblemType(copy.deepcopy(raw), False).state.items():
