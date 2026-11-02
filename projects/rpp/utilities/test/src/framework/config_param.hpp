@@ -98,13 +98,11 @@ struct LayoutConv {
 };
 
 // A single point in the test grid. dtype is both the input and output type.
-struct TestConfig {
-    RppBackend backend;
+struct TestConfig : BackendVariant {
     DType dtype;
     Layout layoutIn, layoutOut;
     Roi roi;
     Size size;
-    Rpp32u numThreads;  // passed to rppCreate; kDefaultThreads = rppCreate's default
 };
 
 // Produces the value-parameter label, e.g. "HIP_U8toU8_PKD3_FullRoi_2x36x48" (or
@@ -114,8 +112,8 @@ inline std::string config_name(const TestConfig& c) {
     const std::string layout = c.layoutIn == c.layoutOut
                                    ? layout_name(c.layoutIn)
                                    : layout_name(c.layoutIn) + "to" + layout_name(c.layoutOut);
-    return backend_name(c.backend, c.numThreads) + "_" + dtype_name(c.dtype) + "to" +
-           dtype_name(c.dtype) + "_" + layout + "_" + roi_name(c.roi) + "_" + size_name(c.size);
+    return c.name() + "_" + dtype_name(c.dtype) + "to" + dtype_name(c.dtype) + "_" + layout + "_" +
+           roi_name(c.roi) + "_" + size_name(c.size);
 }
 
 namespace presets {
@@ -166,8 +164,7 @@ inline std::vector<TestConfig> make_configs(
             for (LayoutConv layout : layouts)
                 for (Roi roi : rois)
                     for (Size size : sizes)
-                        configs.push_back(
-                            {b.backend, dtype, layout.in, layout.out, roi, size, b.numThreads});
+                        configs.push_back({b, dtype, layout.in, layout.out, roi, size});
     return configs;
 }
 

@@ -80,7 +80,7 @@ void run_fog(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n, cfg.numThreads);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_fog(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, intensity.data(), grey.data(),
                        roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -139,7 +139,7 @@ void run_fog_negative(const TestConfig& cfg, const FogNegativeParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n, cfg.numThreads);
+    RppHandle handle(cfg, cfg.size.n);
     const RppStatus status = rppt_fog(src.ptr(), &desc, dst.ptr(), &desc, intensity.data(),
                                       grey.data(), roi.data(), XYWH, handle.get(), cfg.backend);
     handle.sync();

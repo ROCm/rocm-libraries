@@ -48,12 +48,13 @@ SOFTWARE.
 
 namespace rpptest {
 
-// RAII wrapper around an rpp handle for the given backend.
+// RAII wrapper around an rpp handle for the given backend and thread count. Takes any test
+// config, since each derives from BackendVariant.
 class RppHandle {
    public:
-    RppHandle(RppBackend backend, std::size_t batchSize, Rpp32u numThreads = kDefaultThreads)
-        : backend_(backend) {
-        if (rppCreate(&handle_, batchSize, numThreads, nullptr, backend_) != rppStatusSuccess)
+    RppHandle(const BackendVariant& target, std::size_t batchSize) : backend_(target.backend) {
+        if (rppCreate(&handle_, batchSize, target.numThreads, nullptr, backend_) !=
+            rppStatusSuccess)
             throw std::runtime_error("rppCreate failed");
     }
     ~RppHandle() {

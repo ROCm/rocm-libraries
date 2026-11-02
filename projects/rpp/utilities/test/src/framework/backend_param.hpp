@@ -47,7 +47,7 @@ inline std::string backend_name(RppBackend backend) {
     return backend == RPP_HIP_BACKEND ? "HIP" : "HOST";
 }
 
-// numThreads value that keeps rppCreate's default: one thread per image on HOST.
+// numThreads value that keeps rppCreate's default.
 inline constexpr Rpp32u kDefaultThreads = 0;
 
 // HOST thread counts every op is tested with: the default, a single thread, and more threads than
@@ -55,10 +55,18 @@ inline constexpr Rpp32u kDefaultThreads = 0;
 // small machine may run the larger count with fewer.
 inline const std::vector<Rpp32u> kHostThreadCounts{kDefaultThreads, 1, 4};
 
-// A backend plus the numThreads its handle is created with.
+// A backend plus the numThreads its handle is created with. Each config type derives from this,
+// so RppHandle can be built straight from a config.
 struct BackendVariant {
     RppBackend backend;
-    Rpp32u numThreads;
+    Rpp32u numThreads = kDefaultThreads;
+
+    // Label token: "HOST" for the default thread count, "HOST_T1" for an explicit one.
+    std::string name() const {
+        return numThreads == kDefaultThreads
+                   ? backend_name(backend)
+                   : backend_name(backend) + "_T" + std::to_string(numThreads);
+    }
 };
 
 inline std::vector<BackendVariant> backend_variants() {
@@ -70,13 +78,6 @@ inline std::vector<BackendVariant> backend_variants() {
             variants.push_back({backend, kDefaultThreads});  // HIP ignores numThreads
     }
     return variants;
-}
-
-// Backend label token: "HOST" for the default thread count, "HOST_T1" for an explicit one.
-inline std::string backend_name(RppBackend backend, Rpp32u numThreads) {
-    return numThreads == kDefaultThreads
-               ? backend_name(backend)
-               : backend_name(backend) + "_T" + std::to_string(numThreads);
 }
 
 }  // namespace rpptest
