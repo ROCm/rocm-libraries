@@ -281,7 +281,7 @@ RppStatus rppt_bilateral_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
  * \param [in] srcPtr source tensor in HOST memory (for HOST backend)
  * \param [in] srcDescPtr source tensor descriptor (Restrictions - numDims = 4, offsetInBytes >= 0,
  * dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = 1/3)
- * \param [out] dstPtr destination tensor in sssHOST memory (for HOST backend)
+ * \param [out] dstPtr destination tensor in HOST memory (for HOST backend)
  * \param [in] dstDescPtr destination tensor descriptor (Restrictions - numDims = 4,
  * offsetInBytes >= 0, dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = same as that of srcDescPtr)
  * \param [in] prewittType gradient written to the destination (a single Rpp32u number with
