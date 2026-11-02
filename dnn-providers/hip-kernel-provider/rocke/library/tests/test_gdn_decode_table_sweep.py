@@ -378,7 +378,10 @@ class _FakeDriver:
         if tid in self.no_graph:
             raise _CaptureUnavailable("RuntimeError: operation not permitted")
         cold = _FakeCold(
-            self.samples[tid], len(sets), tid in self.replay_fails, tid in self.close_fails
+            self.samples[tid],
+            len(sets),
+            tid in self.replay_fails,
+            tid in self.close_fails,
         )
         self.colds.append(cold)
         return cold
