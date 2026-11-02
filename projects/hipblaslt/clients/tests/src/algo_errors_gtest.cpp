@@ -7,6 +7,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -526,6 +527,77 @@ namespace
                                            nullptr));
             };
         };
+        // The layout under test goes in A, or in B when A is the one left null.
+        auto layoutsWithNull = [col](hipblasLtMatrixLayout_t l, int nullSlot) {
+            std::array<hipblasLtMatrixLayout_t, 4> mats{l, col, col, col};
+            if(nullSlot == 0)
+                mats[1] = l;
+            if(nullSlot >= 0)
+                mats[nullSlot] = nullptr;
+            return mats;
+        };
+        auto heuristicNullLayout = [&](int nullSlot) {
+            return [=, this](hipblasLtMatrixLayout_t l) {
+                const auto                       mats = layoutsWithNull(l, nullSlot);
+                hipblasLtMatmulHeuristicResult_t result{};
+                int                              returned = 0;
+                return int(hipblasLtMatmulAlgoGetHeuristic(
+                    handle, desc, mats[0], mats[1], mats[2], mats[3], pref, 1, &result, &returned));
+            };
+        };
+        auto matmulWith = [&](const void* betaPtr, const void* cPtr, int nullSlot) {
+            return [=, this, alphaPtr = &alpha, aPtr = a, bPtr = b, dPtr = d, algo = control.algo](
+                       hipblasLtMatrixLayout_t l) {
+                const auto mats = layoutsWithNull(l, nullSlot);
+                return int(hipblasLtMatmul(handle,
+                                           desc,
+                                           alphaPtr,
+                                           aPtr,
+                                           mats[0],
+                                           bPtr,
+                                           mats[1],
+                                           betaPtr,
+                                           cPtr,
+                                           mats[2],
+                                           dPtr,
+                                           mats[3],
+                                           &algo,
+                                           nullptr,
+                                           0,
+                                           nullptr));
+            };
+        };
+        auto gemmNullLayout = [&](int nullSlot) {
+            return [=, this](hipblasLtMatrixLayout_t l) {
+                const auto          mats = layoutsWithNull(l, nullSlot);
+                hipblaslt_ext::Gemm gemm(handle,
+                                         HIPBLAS_OP_N,
+                                         HIPBLAS_OP_N,
+                                         kType,
+                                         kType,
+                                         kType,
+                                         kType,
+                                         HIPBLAS_COMPUTE_32F);
+                return int(gemm.setProblem(
+                    desc, &alpha, a, mats[0], b, mats[1], &beta, c, mats[2], d, mats[3]));
+            };
+        };
+        auto algoSupported
+            = [&](hipblasLtMatmulDesc_t matmulDesc, const void* alphaPtr, const void* betaPtr) {
+                  return [=, this, algo = control.algo](hipblasLtMatrixLayout_t l) mutable {
+                      size_t workspace = 0;
+                      return int(hipblaslt_ext::matmulIsAlgoSupported(
+                          handle, matmulDesc, alphaPtr, l, col, betaPtr, col, col, algo, workspace));
+                  };
+              };
+        auto solutionSupported
+            = [&](hipblasLtMatmulDesc_t matmulDesc, const void* alphaPtr, const void* betaPtr) {
+                  return [=, this, result = control](hipblasLtMatrixLayout_t l) mutable {
+                      int count = 0;
+                      return int(hipblaslt_ext::isSolutionSupported(
+                          &result, handle, matmulDesc, alphaPtr, l, col, betaPtr, col, col, nullptr, &count));
+                  };
+              };
         // The extension cases vary one scalar or data pointer; the layout under test is A, or
         // for GemmProblemType the order it gives A.
         auto gemmDesc = [&](const void* alphaPtr,
@@ -533,7 +605,7 @@ namespace
                             const void* aPtr,
                             const void* cPtr,
                             void*       dPtr) {
-            return [=](hipblasLtMatrixLayout_t l) {
+            return [=, this](hipblasLtMatrixLayout_t l) {
                 hipblaslt_ext::Gemm gemm(handle,
                                          HIPBLAS_OP_N,
                                          HIPBLAS_OP_N,
@@ -547,7 +619,7 @@ namespace
             };
         };
         auto groupedDesc = [&](void* alphaPtr, void* betaPtr, void* aPtr, void* dPtr) {
-            return [=](hipblasLtMatrixLayout_t l) {
+            return [=, this](hipblasLtMatrixLayout_t l) {
                 hipblaslt_ext::GroupedGemm         grouped(handle,
                                                    HIPBLAS_OP_N,
                                                    HIPBLAS_OP_N,
@@ -584,7 +656,7 @@ namespace
                                    void*       aPtr,
                                    void*       dPtr,
                                    int64_t     k = kSize) {
-            return [=](hipblasLtMatrixLayout_t l) {
+            return [=, this](hipblasLtMatrixLayout_t l) {
                 hipblaslt_ext::Gemm            gemm(handle,
                                          HIPBLAS_OP_N,
                                          HIPBLAS_OP_N,
@@ -619,7 +691,7 @@ namespace
                                       void*       aPtr,
                                       void*       dPtr,
                                       int64_t     k = kSize) {
-            return [=](hipblasLtMatrixLayout_t l) {
+            return [=, this](hipblasLtMatrixLayout_t l) {
                 hipblaslt_ext::GroupedGemm     grouped(handle,
                                                    HIPBLAS_OP_N,
                                                    HIPBLAS_OP_N,
@@ -658,6 +730,10 @@ namespace
             {"heuristic, null preference", heuristic(handle, desc, nullptr, 1, true)},
             {"heuristic, zero algos requested", heuristic(handle, desc, pref, 0, true)},
             {"heuristic, null algo count", heuristic(handle, desc, pref, 1, false)},
+            {"heuristic, null A layout", heuristicNullLayout(0)},
+            {"heuristic, null B layout", heuristicNullLayout(1)},
+            {"heuristic, null C layout", heuristicNullLayout(2)},
+            {"heuristic, null D layout", heuristicNullLayout(3)},
             {"matmul, null handle", matmul(nullptr, desc, &alpha, a, col, d, 0)},
             {"matmul, null descriptor", matmul(handle, nullptr, &alpha, a, col, d, 0)},
             {"matmul, null B layout", matmul(handle, desc, &alpha, a, nullptr, d, 0)},
@@ -665,6 +741,15 @@ namespace
             {"matmul, null A with nonzero alpha", matmul(handle, desc, &alpha, nullptr, col, d, 0)},
             {"matmul, null D", matmul(handle, desc, &alpha, a, col, nullptr, 0)},
             {"matmul, null workspace with a size", matmul(handle, desc, &alpha, a, col, d, 1024)},
+            {"matmul, null A layout", matmulWith(&beta, c, 0)},
+            {"matmul, null C layout", matmulWith(&beta, c, 2)},
+            {"matmul, null D layout", matmulWith(&beta, c, 3)},
+            {"matmul, null beta", matmulWith(nullptr, c, -1)},
+            {"matmul, null C", matmulWith(&beta, nullptr, -1)},
+            {"Gemm::setProblem, null A layout", gemmNullLayout(0)},
+            {"Gemm::setProblem, null B layout", gemmNullLayout(1)},
+            {"Gemm::setProblem, null C layout", gemmNullLayout(2)},
+            {"Gemm::setProblem, null D layout", gemmNullLayout(3)},
             {"Gemm::setProblem, null descriptor",
              [&](hipblasLtMatrixLayout_t l) {
                  hipblaslt_ext::Gemm gemm(handle,
@@ -737,6 +822,11 @@ namespace
                  return int(hipblaslt_ext::matmulIsAlgoSupported(
                      handle, desc, nullptr, l, col, &beta, col, col, control.algo, workspace));
              }},
+            {"matmulIsAlgoSupported, null descriptor", algoSupported(nullptr, &alpha, &beta)},
+            {"matmulIsAlgoSupported, null beta", algoSupported(desc, &alpha, nullptr)},
+            {"isSolutionSupported, null descriptor", solutionSupported(nullptr, &alpha, &beta)},
+            {"isSolutionSupported, null alpha", solutionSupported(desc, nullptr, &beta)},
+            {"isSolutionSupported, null beta", solutionSupported(desc, &alpha, nullptr)},
             {"isSolutionSupported, null handle",
              [&](hipblasLtMatrixLayout_t l) {
                  hipblasLtMatmulHeuristicResult_t supported = control;
@@ -753,7 +843,48 @@ namespace
         {
             const int columnMajor = call(col);
             EXPECT_NE(columnMajor, int(HIPBLAS_STATUS_SUCCESS)) << name;
+            EXPECT_NE(columnMajor, int(HIPBLAS_STATUS_NOT_SUPPORTED)) << name;
             EXPECT_EQ(call(row), columnMajor) << name;
+        }
+    }
+
+    // An empty problem returns before its pointers are checked, so a null alpha is accepted with
+    // column-major layouts, and a row-major one is still refused.
+    TEST_F(AlgoErrors, smoke_EmptyRowMajorProblemIsRefused)
+    {
+        for(const bool rowMajor : {false, true})
+        {
+            hipblaslt_ext::Gemm gemm(handle,
+                                     HIPBLAS_OP_N,
+                                     HIPBLAS_OP_N,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     HIPBLAS_COMPUTE_32F);
+            hipblaslt_ext::GemmProblemType type = gemm.getProblemTypes();
+            type.setOrderA(rowMajor ? HIPBLASLT_ORDER_ROW : HIPBLASLT_ORDER_COL);
+            hipblaslt_ext::GemmEpilogue epilogue;
+            hipblaslt_ext::GemmInputs   in = inputs();
+            in.setAlpha(nullptr);
+            const int64_t stride = kSize * kSize;
+            EXPECT_EQ(gemm.setProblem(0,
+                                      kSize,
+                                      kSize,
+                                      1,
+                                      kSize,
+                                      kSize,
+                                      kSize,
+                                      kSize,
+                                      stride,
+                                      stride,
+                                      stride,
+                                      stride,
+                                      epilogue,
+                                      in,
+                                      type),
+                      rowMajor ? HIPBLAS_STATUS_NOT_SUPPORTED : HIPBLAS_STATUS_SUCCESS)
+                << (rowMajor ? "row-major A" : "column-major A");
         }
     }
 

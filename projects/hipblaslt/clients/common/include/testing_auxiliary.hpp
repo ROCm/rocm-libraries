@@ -282,6 +282,8 @@ void testing_aux_mat_get_attr_bad_arg(const Arguments& arg)
             hipblasLtMatrixLayoutGetAttribute(mat, attr, &data64, size - 1, &sizeWritten),
             HIPBLAS_STATUS_INVALID_VALUE);
         EXPECT_EQ(sizeWritten, size) << "attribute " << attr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutGetAttribute(mat, attr, &data64, size, nullptr),
+                              HIPBLAS_STATUS_SUCCESS);
     }
 
     // test sizeWritten is nullptr, and the return state should be success
