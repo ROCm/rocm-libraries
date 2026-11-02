@@ -38,7 +38,6 @@
 #endif // no system header
 
 #if THRUST_HAS_HIP_COMPILER()
-#  include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #  include <thrust/iterator/permutation_iterator.h>
 #  include <thrust/system/hip/detail/transform.h>
 
@@ -55,7 +54,7 @@ gather(execution_policy<Derived>& policy, MapIt map_first, MapIt map_last, Items
     thrust::make_permutation_iterator(items, map_first),
     thrust::make_permutation_iterator(items, map_last),
     result,
-    ::internal::identity{});
+    _THRUST_STD::identity{});
 }
 
 template <class Derived, class MapIt, class StencilIt, class ItemsIt, class ResultIt, class Predicate>
@@ -74,7 +73,7 @@ ResultIt THRUST_HOST_DEVICE gather_if(
     thrust::make_permutation_iterator(items, map_last),
     stencil,
     result,
-    ::internal::identity{},
+    _THRUST_STD::identity{},
     predicate);
 }
 
@@ -82,7 +81,7 @@ template <class Derived, class MapIt, class StencilIt, class ItemsIt, class Resu
 ResultIt THRUST_HOST_DEVICE gather_if(
   execution_policy<Derived>& policy, MapIt map_first, MapIt map_last, StencilIt stencil, ItemsIt items, ResultIt result)
 {
-  return hip_rocprim::gather_if(policy, map_first, map_last, stencil, items, result, ::internal::identity{});
+  return hip_rocprim::gather_if(policy, map_first, map_last, stencil, items, result, _THRUST_STD::identity{});
 }
 
 } // namespace hip_rocprim

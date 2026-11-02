@@ -19,7 +19,6 @@
 // SOFTWARE.
 
 #include <thrust/copy.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -52,7 +51,7 @@ int main()
   // compute indices of nonzero elements
   using IndexIterator = thrust::device_vector<int>::iterator;
 
-  IndexIterator indices_end = thrust::copy_if(first, last, stencil.begin(), indices.begin(), ::internal::identity{});
+  IndexIterator indices_end = thrust::copy_if(first, last, stencil.begin(), indices.begin(), _THRUST_STD::identity{});
   // indices now contains [1,2,5,7]
 
   // print result
