@@ -273,12 +273,32 @@ def test_rows_from_different_source_shas_withhold_the_proposal(capsys):
     mixed[0]["sha"] = "def"
     assert report.report(mixed, args) == 1
     out = capsys.readouterr().out
-    assert "WITHHELD" in out and "2 source shas ['abc', 'def']" in out
+    assert "WITHHELD" in out and "2 builds" in out and "'abc'" in out and "'def'" in out
     assert "proposal " not in out and "AutoDefault(" not in out
     # Another stage's sha does not block the scored stage.
     other = _robust_case() + [_row(SHAPES[0], "q", 1.0, stage=2)]
     other[-1]["sha"] = "def"
     assert report.report(other, args) == 0
+
+
+@pytest.mark.parametrize("field", ["llvm_version", "llvm_flavor", "backend"])
+def test_rows_from_different_compilers_withhold_the_proposal(capsys, field):
+    """At one sha, another LLVM or lowering backend builds another binary
+    under the same tuning_id: the same problem as two shas."""
+    args = argparse.Namespace(stage=1, tie=0.01, top=3)
+    mixed = _robust_case()
+    mixed[0][field] = "other"
+    assert report.report(mixed, args) == 1
+    out = capsys.readouterr().out
+    assert "WITHHELD" in out and "2 builds" in out and "proposal " not in out
+
+
+def test_rocm_and_torch_versions_alone_withhold_nothing(capsys):
+    args = argparse.Namespace(stage=1, tie=0.01, top=3)
+    rows = _robust_case()
+    rows[0]["rocm_version"], rows[1]["torch_version"] = "7.13", "2.10"
+    assert report.report(rows, args) == 0
+    assert "WITHHELD" not in capsys.readouterr().out
 
 
 def test_a_shape_without_a_timed_row_or_with_auto_failing_is_never_dropped(capsys):
@@ -425,11 +445,14 @@ def test_report_prints_the_toolchain_of_the_rows_and_every_distinct_set(capsys):
         "toolchain: rocm 7.1.0 llvm 21.0.0 torch 2.9 backend cpp flavor llvm22"
     ]
     assert out.index("rows from sha") < out.index(lines[0])
-    # Rows that disagree: every set is printed and nothing is withheld.
-    rows[0] = dict(rows[0], backend="python", llvm_flavor="llvm20")
+    # Rows that disagree in the ROCm or torch version: every set is printed and
+    # nothing is withheld (the build fields are withheld on: see above).
+    rows[0] = dict(rows[0], rocm_version="7.13", torch_version="2.10")
     assert report.report(rows, args) == 0
     lines = [ln for ln in capsys.readouterr().out.splitlines() if "toolchain:" in ln]
-    assert len(lines) == 2 and any("backend python flavor llvm20" in ln for ln in lines)
+    assert len(lines) == 2 and any(
+        "rocm 7.13 llvm 21.0.0 torch 2.10" in ln for ln in lines
+    )
     # Rows of an older file record none of them: unknown, still reported.
     assert report.report(_robust_case(), args) == 0
     assert "toolchain: rocm unknown llvm unknown torch unknown backend unknown" in (

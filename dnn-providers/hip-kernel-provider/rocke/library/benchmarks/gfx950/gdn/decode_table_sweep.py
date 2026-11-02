@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import dataclasses as dc
 import glob
+import hashlib
 import json
 import math
 import os
@@ -801,6 +802,21 @@ def is_cold(row: dict) -> bool:
     return row["rotate_mb"] >= row.get("cold_target_mb", float("inf"))
 
 
+# The row fields that name the code and the compiler that built a kernel. A
+# ``tuning_id`` names a configuration, not these: rows that differ in any of
+# them are not repeated measurements of one configuration, so neither the
+# report nor stage 2 pools or ranks them together. ``rocm_version`` and
+# ``torch_version`` are recorded and printed, not compared: the LLVM that
+# compiles the kernel is what changes the binary.
+BUILD_FIELDS = ("sha", "llvm_version", "llvm_flavor", "backend")
+
+
+def build_of(row: dict) -> tuple:
+    """The :data:`BUILD_FIELDS` values of ``row`` (``unknown`` for a field an
+    older file did not record)."""
+    return tuple(str(row.get(name, "unknown")) for name in BUILD_FIELDS)
+
+
 def summarize(rows: list, out=None, require_auto: bool = True) -> int:
     """Print the best configuration per shape against ``auto``. Returns 1 if
     there are no rows, any row failed the gate, raised or could not be timed,
@@ -1115,6 +1131,7 @@ def _git(*args: str) -> str | None:
             ["git", "-C", os.path.dirname(os.path.abspath(__file__)), *args],
             capture_output=True,
             text=True,
+            errors="replace",
             check=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
@@ -1122,13 +1139,33 @@ def _git(*args: str) -> str | None:
 
 
 def _source_sha() -> str:
-    """``git HEAD`` of the source tree, ``-dirty`` appended when tracked files
-    differ from it (untracked files, such as output files, do not count);
-    ``unknown`` without git."""
+    """``git HEAD`` of the source tree. When the tree differs from it, ``-dirty.``
+    and 12 hex digits of a hash of the difference are appended, so two different
+    edits on one commit are two shas: the tracked changes (``git diff HEAD``,
+    staged or not) and the contents of every untracked ``.py`` file (a new
+    module not yet added changes the code too). Other untracked files, such as
+    output files, do not count. ``unknown`` without git."""
     sha = _git("rev-parse", "HEAD")
     if not sha:
         return "unknown"
-    return sha + ("-dirty" if _git("status", "--porcelain", "-uno") else "")
+    diff = _git("diff", "HEAD") or ""
+    top = _git("rev-parse", "--show-toplevel") or ""
+    listing = _git(
+        "ls-files", "--others", "--exclude-standard", "--full-name", "-z",
+        "--", ":(top,glob)**/*.py",
+    )  # fmt: skip
+    new = sorted(path for path in (listing or "").split("\0") if path)
+    if not diff and not new:
+        return sha
+    digest = hashlib.sha256(diff.encode())
+    for path in new:
+        digest.update(path.encode())
+        try:
+            with open(os.path.join(top, path), "rb") as fh:
+                digest.update(fh.read())
+        except OSError:  # gone since the listing: the name alone marks the tree
+            pass
+    return f"{sha}-dirty.{digest.hexdigest()[:12]}"
 
 
 def _toolchain() -> dict:
@@ -1260,16 +1297,66 @@ def stage1_walk(rows: Iterable[dict]) -> dict:
     return dict(zip(WALK_FIELDS, walks.pop()))
 
 
+def stage1_provenance(rows: list) -> None:
+    """Refuse stage-1 rows whose provenance stage 2 cannot vouch for. Stage 2
+    stamps its own sha, toolchain and rotation on every row it writes, and the
+    report scores stage-2 rows only, so it would never see what ranked the
+    shortlist. Refused, by the rules the report withholds on: rows of more than
+    one build (:data:`BUILD_FIELDS`), rows not timed in cold memory, and rows of
+    mixed ``rotate_mb``."""
+    builds = {build_of(r) for r in rows}
+    if len(builds) > 1:
+        raise ValueError(
+            f"the stage-1 rows come from {len(builds)} builds "
+            f"({', '.join(BUILD_FIELDS)}): {sorted(builds)}; re-time them at one build"
+        )
+    warm = [r for r in rows if not is_cold(r)]
+    if warm:
+        raise ValueError(
+            f"{len(warm)} of {len(rows)} stage-1 rows were not timed in cold "
+            "memory (rotate_mb below the cold target): re-time them with the "
+            "default --rotate-mb"
+        )
+    rotates = sorted({r["rotate_mb"] for r in rows})
+    if len(rotates) > 1:
+        raise ValueError(
+            f"the stage-1 rows mix rotate_mb values {rotates}: their times are "
+            "not comparable"
+        )
+
+
+def check_stage1_build(by_shape: dict, meta: dict, args) -> None:
+    """Refuse to re-time stage-1 rows that another build ranked than this run
+    would time them with: a kernel changed since, or another compiler. Those
+    rows are one build (:func:`stage1_provenance`); ``meta`` is this run's.
+    ``--source-sha`` says the code is the same where git cannot tell (a copied
+    tree), so the sha is then not compared."""
+    build = next(iter({build_of(r) for rows in by_shape.values() for r in rows}))
+    differ = [
+        f"{name}: stage 1 {old}, here {new}"
+        for name, old, new in zip(BUILD_FIELDS, build, build_of(meta))
+        if old != new and not (name == "sha" and args.source_sha)
+    ]
+    if differ:
+        raise ValueError(
+            "the stage-1 rows were ranked by another build than this run "
+            f"({'; '.join(differ)}): re-run stage 1 here, or stage 2 where it ran"
+        )
+
+
 def stage1_shapes(args):
     """``(by_shape, shapes)``: the ``--stage1-json`` stage-1 rows by shape, and
     the recorded shapes the shape filters keep. No shape left is an error:
     stage 2 would time nothing and report success. So are stage-1 rows of
-    different walks (:func:`stage1_walk`)."""
+    different walks (:func:`stage1_walk`) or with a provenance stage 2 cannot
+    vouch for (:func:`stage1_provenance`)."""
     by_shape = rows_by_shape(r for r in load_rows(args.stage1_json) if r["stage"] == 1)
     shapes = [s for s in sorted(by_shape) if matches(s, args)]
     if not shapes:
         raise ValueError("no recorded stage-1 shape matches the given filters")
-    stage1_walk(r for rows in by_shape.values() for r in rows)
+    every = [r for rows in by_shape.values() for r in rows]
+    stage1_walk(every)
+    stage1_provenance(every)
     return by_shape, shapes
 
 
@@ -1523,7 +1610,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         return summarize(rows)
     if args.stage1_json:
         try:
-            _, recorded_shapes = stage1_shapes(args)
+            stage1_by_shape, recorded_shapes = stage1_shapes(args)
         except (OSError, ValueError) as exc:
             ap.error(usage_error_text(exc))
         shapes = []
@@ -1559,6 +1646,11 @@ def main(argv: Iterable[str] | None = None) -> int:
         flush=True,
     )
     meta = run_meta(args, device, ROTATE_MB)
+    if args.stage1_json:
+        try:
+            check_stage1_build(stage1_by_shape, meta, args)
+        except ValueError as exc:
+            ap.error(usage_error_text(exc))
     rows = retime(args, meta) if args.stage1_json else sweep(args, shapes, meta)
     return finish(args, rows, shapes, len(recorded_shapes) if args.stage1_json else 0)
 

@@ -13,6 +13,8 @@ import itertools
 import json
 import math
 import os
+import shutil
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -1053,25 +1055,129 @@ def test_stage2_from_files_records_the_stage_one_walk(monkeypatch, tmp_path, cap
         sweep.retime(sweep.options(stage1_json=[path]), dict(_META))
 
 
+def _fake_git(answers):
+    """A ``_git`` that answers by command: ``rev-parse HEAD``, ``diff HEAD``,
+    ``ls-files``; anything else (the repo root) is empty."""
+
+    def git(*a):
+        key = a[0] if a[0] == "ls-files" else " ".join(a[:2])
+        return answers.get(key, "")
+
+    return git
+
+
 def test_run_meta_records_walk_toolchain_and_a_dirty_tree(monkeypatch):
     toolchain = dict(rocm_version="7.1", llvm_version="21.0.0", torch_version="2.9")
     monkeypatch.setattr(sweep, "_toolchain", lambda: toolchain)
     args = sweep.options(bases_only=True, rotate_mb=8, seed=3)
-    answers = {("rev-parse", "HEAD"): "abc", ("status", "--porcelain", "-uno"): ""}
-    monkeypatch.setattr(sweep, "_git", lambda *a: answers[a])
+    answers = {"rev-parse HEAD": "abc"}
+    monkeypatch.setattr(sweep, "_git", _fake_git(answers))
     meta = sweep.run_meta(args, "gfx950", 1024)
     assert meta["sha"] == "abc"
     assert (meta["bases_only"], meta["seed"], meta["rotate_mb"]) == (True, 3, 8)
     assert meta["cold_target_mb"] == 1024
     assert {k: meta[k] for k in toolchain} == toolchain
-    answers[("status", "--porcelain", "-uno")] = " M gdn_decode.py"
-    assert sweep.run_meta(args, "gfx950", 1024)["sha"] == "abc-dirty"
+    answers["diff HEAD"] = "diff --git a/gdn_decode.py b/gdn_decode.py"
+    assert sweep.run_meta(args, "gfx950", 1024)["sha"].startswith("abc-dirty.")
     # No git, no repo: unknown, never an error.
     monkeypatch.setattr(sweep, "_git", lambda *a: None)
     assert sweep.run_meta(args, "gfx950", 1024)["sha"] == "unknown"
     assert (
         sweep.run_meta(sweep.options(source_sha="pin"), "gfx950", 1024)["sha"] == "pin"
     )
+
+
+def test_a_dirty_tree_is_named_by_its_edits(monkeypatch):
+    """Two different uncommitted edits on one commit are two shas, and the same
+    edit is one: the marker is a hash of the difference, not a flag."""
+    answers = {"rev-parse HEAD": "abc"}
+    monkeypatch.setattr(sweep, "_git", _fake_git(answers))
+    assert sweep._source_sha() == "abc"
+    answers["diff HEAD"] = "edit one"
+    one = sweep._source_sha()
+    answers["diff HEAD"] = "edit two"
+    two = sweep._source_sha()
+    assert one.startswith("abc-dirty.") and two.startswith("abc-dirty.")
+    assert len(one) == len("abc-dirty.") + 12 and one != two
+    answers["diff HEAD"] = "edit one"
+    assert sweep._source_sha() == one
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_an_untracked_module_marks_the_tree_dirty_but_an_output_file_does_not(
+    monkeypatch, tmp_path
+):
+    def git(*args):
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+            + list(args),
+            check=True,
+            capture_output=True,
+        )
+
+    git("init", "-q")
+    (tmp_path / "kernel.py").write_text("x = 1\n")
+    git("add", "kernel.py")
+    git("commit", "-q", "-m", "init")
+    monkeypatch.setattr(sweep, "__file__", str(tmp_path / "sweep.py"))
+    clean = sweep._source_sha()
+    assert "-dirty" not in clean and clean != "unknown"
+    (tmp_path / "out.json").write_text("{}")  # an output file: not source
+    assert sweep._source_sha() == clean
+    (tmp_path / "new_module.py").write_text("y = 1\n")  # not yet `git add`ed
+    first = sweep._source_sha()
+    assert first.startswith(clean + "-dirty.")
+    (tmp_path / "new_module.py").write_text("y = 2\n")
+    assert sweep._source_sha() != first
+
+
+def _stage1_args(tmp_path, rows):
+    path = str(tmp_path / "s1.json")
+    sweep.write_rows(path, rows)
+    return sweep.options(stage1_json=[path])
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        (dict(sha="def"), "2 builds"),
+        (dict(llvm_version="21.1.0"), "2 builds"),
+        (dict(llvm_flavor="llvm24"), "2 builds"),
+        (dict(backend="python"), "2 builds"),
+        (dict(rotate_mb=0), "not timed in cold memory"),
+        (dict(rotate_mb=2048), "mix rotate_mb values"),
+    ],
+    ids=["sha", "llvm_version", "llvm_flavor", "backend", "warm", "mixed_rotation"],
+)
+def test_stage2_refuses_stage1_rows_it_cannot_vouch_for(tmp_path, change, message):
+    """Stage 2 stamps its own settings on its rows, so a stage-1 file that mixes
+    builds or rotations (an array job across commits, nodes or a debug run)
+    would reach the report as clean stage-2 rows: refused up front."""
+    rows = _rows()[:2]
+    rows[1].update(change)
+    args = _stage1_args(tmp_path, rows)
+    with pytest.raises(ValueError, match=message):
+        sweep.stage1_shapes(args)
+    with pytest.raises(ValueError, match=message):
+        sweep.retime(args, dict(_META))
+
+
+def test_stage2_refuses_stage1_rows_ranked_by_another_build_than_this_run(tmp_path):
+    rows = _rows()[:2]
+    by_shape, _ = sweep.stage1_shapes(_stage1_args(tmp_path, rows))
+    here = dict(_META, llvm_version="unknown", llvm_flavor="unknown", backend="unknown")
+    args = sweep.options()
+    sweep.check_stage1_build(by_shape, dict(here), args)  # the same build
+    with pytest.raises(ValueError, match="sha: stage 1 abc, here def"):
+        sweep.check_stage1_build(by_shape, dict(here, sha="def"), args)
+    with pytest.raises(ValueError, match="llvm_version"):
+        sweep.check_stage1_build(by_shape, dict(here, llvm_version="22.0.0"), args)
+    # --source-sha says the code is the same where git cannot tell: the sha is
+    # not compared, the compiler still is.
+    pinned = sweep.options(source_sha="def")
+    sweep.check_stage1_build(by_shape, dict(here, sha="def"), pinned)
+    with pytest.raises(ValueError, match="backend"):
+        sweep.check_stage1_build(by_shape, dict(here, backend="cpp"), pinned)
 
 
 def test_run_meta_records_the_resolved_backend_and_llvm_flavor(monkeypatch):

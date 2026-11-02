@@ -39,15 +39,17 @@ shapes than the rows cover without saying so.
 The report exits 1 with a ``WITHHELD`` line and no case at all (so no proposal
 of any case) when any row of the scored stage was not timed in cold memory
 (``rotate_mb`` below the cold target the sweep recorded), the scored rows mix
-``rotate_mb`` values, or the scored rows mix source ``sha`` values: a
-``tuning_id`` names a configuration, not the code that ran it, so the same id
-from two commits is not one measurement. A case whose rows come from different
-walks withholds that case's proposal only: it exits 1 and the other cases still
-print. Exit 0 means every case was scored.
+``rotate_mb`` values, or the scored rows mix builds: a ``tuning_id`` names a
+configuration, not the code or compiler that built it, so the same id from two
+builds is not one measurement. A build is the source ``sha`` (``-dirty.<hash>``
+names an uncommitted tree by its edits) with ``llvm_version``, ``llvm_flavor``
+and ``backend`` (``BUILD_FIELDS`` in ``decode_table_sweep.py``). A case whose
+rows come from different walks withholds that case's proposal only: it exits 1
+and the other cases still print. Exit 0 means every case was scored.
 
 It prints the rows' toolchain (ROCm, LLVM, torch, lowering backend, LLVM
-flavor) beside the sha and device: one line per distinct set, so rows timed
-with different toolchains show it. A mismatch withholds nothing.
+flavor) beside the sha and device: one line per distinct set. ROCm and torch
+versions may differ without withholding anything; the build fields may not.
 
 ``--stage 1`` (default) scores the stage-1 screen: every configuration, timed
 once each. ``--stage 2`` scores stage-2 rows, where only configurations re-timed
@@ -69,9 +71,11 @@ import sys
 from typing import Iterable
 
 from benchmarks.gfx950.gdn.decode_table_sweep import (
+    BUILD_FIELDS,
     OK,
     WALK_FIELDS,
     Shape,
+    build_of,
     case_name,
     is_cold,
     load_rows,
@@ -413,16 +417,18 @@ def report(rows: list, args, out=None) -> int:
             "their times are not comparable; re-time them with one",
             file=out,
         )
-    shas = sorted({r["sha"] for r in staged})
-    if len(shas) > 1:
+    builds = sorted({build_of(r) for r in staged})
+    if len(builds) > 1:
         print(
-            f"WITHHELD: the stage-{args.stage} rows come from {len(shas)} source "
-            f"shas {shas}: a tuning_id does not identify the code, so their times "
-            "are not one measurement; re-time them at one commit",
+            f"WITHHELD: the stage-{args.stage} rows come from {len(builds)} builds "
+            f"({', '.join(BUILD_FIELDS)}): {builds}: a tuning_id does not identify "
+            "the code or compiler, so their times are not one measurement; "
+            "re-time them at one build",
             file=out,
         )
-    if warm or len(rotates) > 1 or len(shas) > 1:
+    if warm or len(rotates) > 1 or len(builds) > 1:
         return 1
+    shas = sorted({r["sha"] for r in staged})
     devices = sorted({r["device"] for r in rows})
     print(f"rows from sha {', '.join(shas)} on {', '.join(devices)}", file=out)
     for line in toolchain_lines(rows):

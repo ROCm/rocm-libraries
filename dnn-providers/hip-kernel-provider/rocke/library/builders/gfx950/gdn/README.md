@@ -294,8 +294,10 @@ times the ones that pass, on in-place slots as a serving engine updates them:
 
 `auto` is always timed. A JSON row carries, in this order of origin:
 
-- the run settings (`run_meta`): `arch`, `device`, `sha` (the source sha;
-  `-dirty` when tracked files differ), the toolchain (`rocm_version`,
+- the run settings (`run_meta`): `arch`, `device`, `sha` (the source sha; when
+  the tree differs from it, `-dirty.` and 12 hex digits of a hash of the
+  tracked changes and the untracked `.py` files, so two different edits on one
+  commit are two shas), the toolchain (`rocm_version`,
   `llvm_version`, `torch_version`, `backend`, `llvm_flavor`; `unknown` where one
   could not be read), the walk (`sweep_level`, `tuning_sample`, `seed`,
   `bases_only`), `rotate_mb`, `cold_target_mb`, `rounds`, `s2_rounds`, `top_k`;
@@ -349,8 +351,12 @@ is not a finite number > 0), or a
 `batches` not a list, a head that is not an `Hk/Hv` string, a value the shape
 refuses), naming the row or entry.
 Stage 2 from saved rows takes the sweep level, sample, seed and `--bases-only`
-from stage 1, and
-refuses stage-1 rows that disagree. The header says: the sweep gates disjoint
+from stage 1, and refuses (exit 2) stage-1 rows that disagree on the walk, come
+from more than one build (`sha`, `llvm_version`, `llvm_flavor`, `backend`), are
+warm or mix `--rotate-mb`, or were ranked by another build than the run that
+re-times them (`--source-sha` skips only the sha comparison): stage 2 stamps
+its own settings on its rows, so the report could not see it otherwise. The
+header says: the sweep gates disjoint
 slots, one launch, and times in-place slots (the timed in-place launch is not
 itself gated).
 
@@ -402,11 +408,13 @@ of the rule that decided, its score, worst shape, non-default knob count, its
 score over `auto`'s, a ready-to-paste `AUTO_DEFAULTS` entry and a shortlist.
 Beside the `rows from sha ... on device` line it prints the rows' toolchain
 (ROCm, LLVM, torch, lowering backend and LLVM flavor), one line per distinct
-set, so rows timed with different toolchains show it; a mismatch withholds
-nothing.
+set. ROCm and torch versions may differ without withholding anything; rows of
+more than one build (`sha`, `llvm_version`, `llvm_flavor`, `backend`) are
+withheld, as a `tuning_id` names a configuration, not the code or compiler
+that built it.
 A shape with no timed row, or where `auto` failed, is listed as `UNSCORED`
 and the report exits 1. It also exits 1 when rows are warm or below the cold
-target, or mix `--rotate-mb` values: it then withholds everything (a
+target, or mix `--rotate-mb` values or builds: it then withholds everything (a
 `WITHHELD` line and no case). Rows from mixed walks (different `--sweep-level`,
 `--tuning-sample`, `--seed` or `--bases-only`) withhold only the proposal of
 the case they mix in; the other cases still print. Each proposal prints the
@@ -561,8 +569,8 @@ Exit codes differ slightly by command:
 | `gdn_decode.py` | all requested checks passed, or checks were disabled | at least one checked batch exceeded tolerance | no GPU visible, the fixed spec was rejected, or a refused flag (a negative `--rotate-mb`, a `--variant` that is not `tiled` or `simple`, a malformed or non-positive `--batches`) |
 | `benchmark_gdn_decode.py` | every batch passed correctness (timing may print `n/a` when graph capture is unavailable, and always with `--no-device`) | at least one batch exceeded tolerance, or the registry yielded other than 54 candidates | no GPU visible, or a refused flag (a negative `--rotate-mb`, a malformed or non-positive `--batches`) |
 | `benchmark_kda_decode.py` | every requested variant/sweep passed correctness and timing | any requested variant/sweep failed or was incomplete | no ROCm torch or no visible HIP device, the visible device is not gfx950, or a refused flag (a negative `--rotate-mb`, a malformed or non-positive `--batches`, an unknown `--variants` name) |
-| `decode_table_sweep.py` | every row passed the gate and was timed, and every shape timed `auto` (also `--list-only`; `--stage1-json F --shard I/N` with `I` past the last recorded shape) | some configuration failed the gate, raised or could not be timed, a shape has no timed `auto` (not checked in a `--shard` / `--offset` / `--limit` stage-1 run, which times `auto` in one window), the run timed nothing (`--offset` / `--limit` leave no configuration of any shape), `--summarize` found no rows, or (`--list-only`) a shape was refused | a refused flag or flag combination (`--bases-only` with `--sweep-level full` included), an unreadable, non-sweep or malformed input file (a `--shapes` entry or a saved row with a missing key or a bad value), stage-1 rows from different walks, no gfx950 device visible, or no torch |
-| `decode_defaults_report.py` | a proposal and an `auto` score for every case | some case has no configuration timed at every shape, or `auto` untimed at a shape; rows from mixed walks or mixed `--rotate-mb`; or warm rows (below the cold target), where the proposal is withheld | a refused flag value, a missing file argument, or an unreadable, non-sweep or malformed (a row lacks a key or holds a bad value) input file (argparse) |
+| `decode_table_sweep.py` | every row passed the gate and was timed, and every shape timed `auto` (also `--list-only`; `--stage1-json F --shard I/N` with `I` past the last recorded shape) | some configuration failed the gate, raised or could not be timed, a shape has no timed `auto` (not checked in a `--shard` / `--offset` / `--limit` stage-1 run, which times `auto` in one window), the run timed nothing (`--offset` / `--limit` leave no configuration of any shape), `--summarize` found no rows, or (`--list-only`) a shape was refused | a refused flag or flag combination (`--bases-only` with `--sweep-level full` included), an unreadable, non-sweep or malformed input file (a `--shapes` entry or a saved row with a missing key or a bad value), stage-1 rows from different walks, of more than one build, warm or of mixed `--rotate-mb`, or ranked by another build than this run (`--stage1-json`), no gfx950 device visible, or no torch |
+| `decode_defaults_report.py` | a proposal and an `auto` score for every case | some case has no configuration timed at every shape, or `auto` untimed at a shape; rows from mixed walks, mixed `--rotate-mb` or mixed builds; or warm rows (below the cold target), where the proposal is withheld | a refused flag value, a missing file argument, or an unreadable, non-sweep or malformed (a row lacks a key or holds a bad value) input file (argparse) |
 
 Scripts and CI should check the exit code instead of relying on printed text.
 
