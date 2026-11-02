@@ -1369,7 +1369,12 @@ class KernelComponentFactoryGfx950(
                 ["no", "causal"],
                 ["t", "f"],
             ):
-                pipelines.append(FmhaFwdPipeline("qr_async_trload_v3", "row", "t", "t", "f", "f", F_logits=logits, F_bias="no", F_lse=lse, F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f"))  # fmt: skip
+                mask_constraint = (
+                    CppConstraint("a.window_size_left < 0 && a.window_size_right == 0")
+                    if mask == "causal"
+                    else CppConstraint()
+                )
+                pipelines.append(FmhaFwdPipeline("qr_async_trload_v3", "row", "t", "t", "f", "f", F_logits=logits, F_bias="no", F_lse=lse, F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f", F_constraint=mask_constraint))  # fmt: skip
 
         elif dtype in cls._DT_MXFP8 or dtype in cls._DT_MXFP4:
             # no need dropout kernels
@@ -1779,7 +1784,10 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 ( 96,  96) : [FmhaFwdTileSize( 64,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint(( 96,  96))),
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(GFX125_QR_TDM_PINGPONG_RANGE), "qr_tdm_pingpong"),
+                # qr_tdm_pingpong's tiles. Up to 16 rows the 64-row tile would idle 3/4 of
+                # its M rows, so this one spends its four warps on N instead.
+                (128, 128) : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {GFX125_QR_TDM_PINGPONG_RANGE}"), "qr_tdm_pingpong"),
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(GFX125_QR_TDM_PINGPONG_RANGE), "qr_tdm_pingpong"),
                               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((160, 160))),
@@ -2286,6 +2294,42 @@ def get_product(receipt: int) -> Product:
             return cond
 
         return Product(name="PyTorch integration", rule=fit)
+    # CK Tile Python API
+    elif receipt == 5:
+
+        def fit(problem_ctx: ProblemContext, kernel_ctx: KernelContext) -> bool:
+            pipeline = kernel_ctx.pipeline
+            if problem_ctx.dtype == "fp8bf16":
+                return (
+                    problem_ctx.hdim == problem_ctx.hdim_v <= 256
+                    and pipeline.F_vlayout == "row"
+                    and (
+                        pipeline.F_qscale in ["no", "pertensor", "perhead"]
+                        or (
+                            problem_ctx.mode == "batch"
+                            and pipeline.F_qscale == "blockscale"
+                        )
+                    )
+                    and pipeline.F_bias == "no"
+                    and pipeline.F_dropout == "f"
+                    and pipeline.F_logits == "f"
+                    and pipeline.F_skip == "f"
+                    and pipeline.F_sink == "f"
+                )
+            cond = problem_ctx.dtype in ["fp16", "bf16"]
+            cond &= problem_ctx.hdim == problem_ctx.hdim_v <= 256
+            cond &= pipeline.F_vlayout == "row"
+            cond &= pipeline.F_bias in ["no", "alibi"] or (
+                problem_ctx.mode == "batch" and pipeline.F_bias == "bias"
+            )
+            cond &= pipeline.F_lse == "t"
+            cond &= pipeline.F_logits == "f"
+            cond &= pipeline.F_qscale == "no"
+            cond &= pipeline.F_skip == "f"
+            cond &= pipeline.F_sink == "f"
+            return cond
+
+        return Product(name="CK Tile Python API", rule=fit)
     # Aiter(mha_fwd) integration
     elif receipt == 100:
 

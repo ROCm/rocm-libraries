@@ -25,7 +25,15 @@ ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
 
 `conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
-across layers without `__init__.py`.
+across layers without `__init__.py`. That `sys.path` change belongs only to the
+pytest process. Tests that launch a Python child which imports `rocke` use
+`rocke.tests.subprocess_launcher.rocke_python_command()` together with
+`rocke_subprocess_env()`. The launcher puts the package under test ahead of the
+child's script and working directories, while the environment makes the same
+package available to grandchildren in both source and installed layouts. A
+Python grandchild that also requires package identity reuses the launcher; bare
+`PYTHONPATH` does not outrank its working directory. Never let an editable
+install or ambient `PYTHONPATH` choose the child's package accidentally.
 
 On Linux, `test_compiler_detection_native.py` compiles its wrapper and fake COMGR
 libraries from stdin and links the production `librocke_core.a`. Installed tests
@@ -60,6 +68,54 @@ for what is actually exercised vs. manual/diagnostic/demo.
 > owned by the byte-identity gate (which builds `rocke_core` and byte-compares the
 > 81 matched `*_emit.c`/`*_emit.py` pairs), and the binding itself by the
 > consistency proof documented in `cpp/bindings/README.md`.
+
+### CMake registration ownership
+
+Build-tree C++ registration is intentionally split by concern so unrelated PRs
+do not all edit one central file:
+
+| File | Ownership |
+|---|---|
+| `tests/CMakeLists.txt` | Stable orchestration only; includes the files below in dependency order |
+| `tests/cmake/CoreTests.cmake` | Core native targets and the build-tree arch-domain reproduction CTest |
+| `tests/cmake/PortableIrTests.cmake` | Portable-IR native tests and the replay CLI |
+| `tests/cmake/InstanceTests.cmake` | Instance-layer native tests |
+| `tests/cmake/TestCategoryLabels.cmake` | Provider YAML category application after every test is registered |
+| `platform/CMakeLists.txt` | Installed Python and library CTest entries; not build-tree C++ ownership |
+
+Add a native target to its concern-owned fragment. Do not put registration back
+in the orchestrator, and do not create a generic catch-all fragment. Keep unusual
+link libraries, include paths, installation rules, and artifact contracts explicit.
+The source contract test
+[`tools/test_cmake_test_registration.py`](tools/test_cmake_test_registration.py)
+pins the include order and keeps registration out of the orchestrator.
+
+The fragments use `include()`, not `add_subdirectory()`, deliberately. An include
+executes in the caller's CMake directory scope. That preserves the directory that
+called `add_test()`, which is required because the project's CMake minimum predates
+3.28 and `set_property(TEST ...)` / `set_tests_properties()` cannot modify those
+tests from a parent directory. `TestCategoryLabels.cmake` therefore remains the
+last include.
+
+For a registration-only refactor, prove that behavior did not change:
+
+1. Configure clean before and after build trees with identical options.
+2. Capture each inventory with
+   `ctest --test-dir <build> --show-only=json-v1`.
+3. Compare test names, commands, labels, timeouts, environments, skip properties,
+   and working directories after normalizing build-root paths. Ignore
+   `backtraceGraph` and each test's `backtrace`: extraction into includes changes
+   source locations by design.
+4. Compare target names from `cmake --build <build> --target help`.
+5. Compare generated install statements or clean install manifests after
+   normalizing build roots.
+6. Build and run the complete configured CTest suite. Exercise a provider-style
+   category-label configuration as well as standalone configuration whenever the
+   full provider checkout is available.
+
+A matching count alone is insufficient: a test can keep its name while silently
+losing a label, timeout, environment, skip code, command argument, or installed
+artifact path.
 
 ## Execution categories
 
@@ -118,11 +174,16 @@ expected crash or timeout whose normalized evidence still matches is not rerun
 serially; changed evidence, changed verdicts, unclassified results, and otherwise
 transient-looking results are.
 
-The migration preserves the former pytest item's result mapping:
+The artifact records the exact compiler build that measured it. LLVM development
+builds with the same major can disagree about intrinsic availability and ABI, so
+exact reproduction is applicable only when the host identity matches that
+provenance. A mismatch is reported with both identities and is an explicit
+unvalidated result, not a pass.
 
 | Condition | CTest result |
 |---|---|
-| Committed measurements reproduce cell-for-cell (compiler-build provenance may differ) | Pass |
+| Recorded compiler identity matches and measurements reproduce cell-for-cell | Pass |
+| Host compiler identity differs from the recorded identity | Skip |
 | No clang | Skip |
 | Clang flavor differs from rocKE's resolved flavor | Skip |
 | No committed column for the host flavor | Skip |

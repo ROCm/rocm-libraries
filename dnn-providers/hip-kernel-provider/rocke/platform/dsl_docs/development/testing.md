@@ -14,7 +14,15 @@ python/rocke/examples/               # Python-owned example generators
 ../library/builders/gfx942/attention/prefill/parity_unified_attention.py   # attention parity harness (torch reference)
 python/rocke/examples/common/ck_tile_parity.py               # small-op parity harness
 tests/instances/differential/run_diff.py    # C++ vs Python engine byte-identity (cross-engine parity)
+tests/CMakeLists.txt                         # stable native-test orchestrator
+tests/cmake/*.cmake                          # concern-owned native-test registrations
 ```
+
+When adding or moving a native C++ test, edit its concern-owned fragment rather
+than `tests/CMakeLists.txt`. The ownership rules, same-directory-scope rationale,
+and before/after inventory comparison recipe are in
+[`tests/README.md`](../../tests/README.md#cmake-registration-ownership).
+Installed Python and library CTest entries remain in `platform/CMakeLists.txt`.
 
 > The upstream `python/test/test_rocke_examples.py` end-to-end harness and the
 > `example/ck_tile/dsl/<N>_*/gen.py` generators are **not** part of rocKE (they

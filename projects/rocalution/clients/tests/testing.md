@@ -49,7 +49,7 @@ What a developer does between making a change and getting it merged.
 
 ```bash
 cd projects/rocalution
-# -c → BUILD_CLIENTS_SAMPLES + TESTS + BENCHMARKS; -d fetches dependencies (incl. googletest)
+# -c → BUILD_CLIENTS_SAMPLES + TESTS + BENCHMARKS; -d installs distro packages (GoogleTest must already be installed)
 ./install.sh -dc
 # host-only (no GPU), OpenMP on:            ./install.sh -c --host
 # MPI multi-node build:                     ./install.sh -c --host --mpi=on --no-openmp
@@ -102,7 +102,8 @@ binary (there is no `clients/unittests/` split like rocSPARSE) and use a mix of 
 
 There are no `TYPED_TEST` suites.
 
-**Framework:** GoogleTest (`find_package(GTest REQUIRED)`). `main` at
+**Framework:** GoogleTest (`find_package(GTest)`; if it isn't installed, it is built from
+`FETCHCONTENT_SOURCE_DIR_GOOGLETEST` or, with `-DALLOW_FETCH_DEPS=ON`, downloaded). `main` at
 `clients/tests/rocalution_host_gtest_main.cpp`, which calls `init_rocalution()` before
 `RUN_ALL_TESTS()` and accepts `--device <id>` / `--version`.
 

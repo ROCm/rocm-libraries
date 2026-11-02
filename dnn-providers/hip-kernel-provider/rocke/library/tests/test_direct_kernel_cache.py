@@ -1746,8 +1746,11 @@ def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_job
     """The MFMA variants are wave64 and drop out; the depthwise ones are built
     at wave_size 32, which the identity records and the spec carries. The
     wave32-only WMMA forward kernels are built too."""
+    fwd_parametric = {
+        v for v in DIRECT_WAVE_PARAMETRIC if dks.DIRECT_CAPABILITIES[v][0] == "fwd"
+    }
     assert {j.identity.algorithm for j in wave32_jobs} == (
-        DIRECT_WAVE_PARAMETRIC | _WAVE32_ONLY_FWD
+        fwd_parametric | _WAVE32_ONLY_FWD
     )
     for job in wave32_jobs:
         assert job.identity.wave_size == 32

@@ -6,7 +6,9 @@
 ``conv_direct_fwd_wmma`` and ``conv_fwd_small_wmma`` (small C / small K) run
 on the same hardware: a wave32 target with TDM and the 16x16x32 fp16 / bf16
 WMMA atom. :func:`wmma_fwd_gate` checks exactly that, once, for all three
-families; the shape rules of each family stay in its own ``*_reason``.
+families, together with the one padding for both axes they all take (each
+offsets columns by ``PAD``); the other shape rules of each family stay in
+its own ``*_reason``.
 
 The C++ engine mirrors this module in
 ``platform/cpp/instances/common/conv_fwd_wmma_gate.cpp`` with the same checks
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 from rocke.core.arch import ArchTarget
 
-from kernels.common.conv_direct_grouped import DirectConvProblem
+from kernels.common.conv_direct_grouped import DirectConvProblem, one_padding_reason
 
 __all__ = ["WMMA_K", "WMMA_M", "WMMA_N", "wmma_ab_dtype", "wmma_fwd_gate"]
 
@@ -36,9 +38,9 @@ def wmma_fwd_gate(
     p: DirectConvProblem, arch: str, name: str, wave_size: int
 ) -> tuple[str | None, ArchTarget | None]:
     """``(why, target)``: why kernel ``name`` cannot run ``p`` on ``arch`` at
-    the spec's ``wave_size`` (``None`` when the target qualifies), and the
-    resolved :class:`ArchTarget` so callers need not resolve it again. The
-    target is ``None`` only when ``arch`` is unknown."""
+    the spec's ``wave_size`` (``None`` when the target and the padding
+    qualify), and the resolved :class:`ArchTarget` so callers need not resolve
+    it again. The target is ``None`` only when ``arch`` is unknown."""
     try:
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
@@ -60,4 +62,4 @@ def wmma_fwd_gate(
         k=WMMA_K,
     ):
         return f"missing wmma_f32_{WMMA_M}x{WMMA_N}x{WMMA_K}_{ab} on {arch}", target
-    return None, target
+    return one_padding_reason(p), target

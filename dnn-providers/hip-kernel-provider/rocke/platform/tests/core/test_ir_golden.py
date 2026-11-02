@@ -22,6 +22,8 @@ from rocke.core.ir_golden import (
     GOLDEN_PROFILE_FLAVORS,
     check_golden,
     compare,
+    golden_shard,
+    load_golden,
 )
 from rocke.core.lower_llvm import LLVM_FLAVORS
 
@@ -95,14 +97,24 @@ class TestIrGolden(unittest.TestCase):
         self.assertEqual(errors, [f"[{bad}] k: a -> b"])
 
     def test_wrong_profile_alias_is_rejected(self):
-        self._write(GOLDEN_PROFILE_FLAVORS, {"llvm24": "llvm22"})
-        errors = check_golden(self.path, lambda fl: _sub())
+        aliases = {"llvm24": "llvm23"}
+        profiles = tuple(fl for fl in GOLDEN_FLAVORS if fl not in aliases)
+        self._write(profiles, {"llvm24": "llvm22"})
+        with patch.object(ir_golden, "GOLDEN_ALIASES", aliases), patch.object(
+            ir_golden, "GOLDEN_PROFILE_FLAVORS", profiles
+        ):
+            errors = check_golden(self.path, lambda fl: _sub())
         self.assertEqual(len(errors), 1)
         self.assertIn("do not match emission-profile aliases", errors[0])
 
     def test_direct_and_aliased_lane_is_rejected(self):
-        self._write(GOLDEN_PROFILE_FLAVORS + ("llvm24",), GOLDEN_ALIASES)
-        errors = check_golden(self.path, lambda fl: _sub())
+        aliases = {"llvm24": "llvm23"}
+        profiles = tuple(fl for fl in GOLDEN_FLAVORS if fl not in aliases)
+        self._write(profiles + ("llvm24",), aliases)
+        with patch.object(ir_golden, "GOLDEN_ALIASES", aliases), patch.object(
+            ir_golden, "GOLDEN_PROFILE_FLAVORS", profiles
+        ):
+            errors = check_golden(self.path, lambda fl: _sub())
         self.assertTrue(any("both direct and aliased" in error for error in errors))
 
     def test_compare_case_sets_and_failures(self):
@@ -119,6 +131,70 @@ class TestIrGolden(unittest.TestCase):
         self.assertIn("cases: new current added", errors)
         self.assertTrue(any(e.startswith("f: failure changed") for e in errors))
         self.assertEqual(compare(base, base), [])
+
+
+class TestGoldenShards(unittest.TestCase):
+    """A golden directory of per-family shards checks like the merged file."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    def _shard(self, name, cases, **top):
+        doc = {"schema": "s", "aliases": dict(GOLDEN_ALIASES), **top}
+        doc["flavors"] = {
+            fl: {"cases": {c: {"sha256": "a"} for c in cases}}
+            for fl in GOLDEN_PROFILE_FLAVORS
+        }
+        (self.dir / f"{name}.json").write_text(json.dumps(doc))
+
+    def _run(self, fl):
+        return {"cases": {c: {"sha256": "a"} for c in ("x/1", "x/2", "y/1")}}
+
+    def test_shards_merge(self):
+        self._shard("x", ["x/1", "x/2"])
+        self._shard("y", ["y/1"])
+        doc = load_golden(self.dir)
+        self.assertEqual(doc["schema"], "s")
+        self.assertEqual(doc["aliases"], GOLDEN_ALIASES)
+        for sub in doc["flavors"].values():
+            self.assertEqual(set(sub["cases"]), {"x/1", "x/2", "y/1"})
+        self.assertEqual(check_golden(self.dir, self._run), [])
+
+    def test_missing_shard_reported_as_new_cases(self):
+        self._shard("x", ["x/1", "x/2"])
+        errors = check_golden(self.dir, self._run)
+        self.assertTrue(errors)
+        self.assertTrue(all("new current y/1" in e for e in errors))
+
+    def test_misfiled_case_rejected(self):
+        self._shard("x", ["x/1", "x/2", "y/1"])
+        errors = check_golden(self.dir, self._run)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("belongs in y.json", errors[0])
+
+    def test_inconsistent_aliases_rejected(self):
+        self._shard("x", ["x/1", "x/2"])
+        self._shard("y", ["y/1"], aliases={"llvm24": "llvm23"})
+        errors = check_golden(self.dir, self._run)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("re-bless every shard", errors[0])
+
+    def test_unparsable_shard_named(self):
+        self._shard("x", ["x/1", "x/2"])
+        (self.dir / "y.json").write_text("{\n<<<<<<< HEAD\n}")
+        errors = check_golden(self.dir, self._run)
+        self.assertEqual(len(errors), 1)
+        self.assertTrue(errors[0].startswith("golden shard y.json:"), errors[0])
+
+    def test_empty_directory_rejected(self):
+        errors = check_golden(self.dir, self._run)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("no *.json shards", errors[0])
+
+    def test_golden_shard_is_first_segment(self):
+        self.assertEqual(golden_shard("attention/gfx942/2d_bf16"), "attention")
 
 
 if __name__ == "__main__":
