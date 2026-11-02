@@ -45,7 +45,7 @@ extern "C" {
 *  \f]
 *
 *  Allocation size for \p csrValC and \p csrColIndC is computed by the number of blocks in the GEBSR
-*  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rocBlockDim*colBlockDim.
+*  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rowBlockDim*colBlockDim.
 *
 *  For example, given the GEBSR matrix:
 *  \f[
@@ -160,7 +160,7 @@ hipsparseStatus_t hipsparseSgebsr2csr(hipsparseHandle_t         handle,
 *  \f]
 *
 *  Allocation size for \p csrValC and \p csrColIndC is computed by the number of blocks in the GEBSR
-*  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rocBlockDim*colBlockDim.
+*  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rowBlockDim*colBlockDim.
 *
 *  For example, given the GEBSR matrix:
 *  \f[
@@ -274,7 +274,7 @@ hipsparseStatus_t hipsparseDgebsr2csr(hipsparseHandle_t         handle,
 *  \f]
 *
 *  Allocation size for \p csrValC and \p csrColIndC is computed by the number of blocks in the GEBSR
-*  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rocBlockDim*colBlockDim.
+*  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rowBlockDim*colBlockDim.
 *
 *  For example, given the GEBSR matrix:
 *  \f[
@@ -388,7 +388,7 @@ hipsparseStatus_t hipsparseCgebsr2csr(hipsparseHandle_t         handle,
 *  \f]
 *
 *  Allocation size for \p csrValC and \p csrColIndC is computed by the number of blocks in the GEBSR
-*  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rocBlockDim*colBlockDim.
+*  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rowBlockDim*colBlockDim.
 *
 *  For example, given the GEBSR matrix:
 *  \f[
