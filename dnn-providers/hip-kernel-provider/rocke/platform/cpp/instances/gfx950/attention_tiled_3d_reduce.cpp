@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "rocke/instance_gfx950_attention_tiled_3d_internal.h"
+#include "rocke/instance_lse_store_internal.h"
 
 /* ============================================================ *
  * Per-slot caches shared between reduce_max_pass and reduce_combine_pass.
@@ -189,6 +190,20 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
     ctx->red_seq_lens
         = rocke_b_param(b, "seq_lens_ptr", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
 
+    /* lse_ptr : ptr<f32, global>, noalias, writeonly, align=4 (emit_lse only) */
+    ctx->red_lse = NULL;
+    if(spec != NULL && spec->emit_lse)
+    {
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->red_lse = rocke_b_param(b, "lse_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
+    }
+
     /* ---- grid ids + thread (lines 1029-1031) ---- */
     ctx->q_token = rocke_b_block_id_x(b);
     ctx->q_head = rocke_b_block_id_y(b);
@@ -245,6 +260,7 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
  *       if in_rng is not None:
  *           ms = select(in_rng, ms, neg_inf)
  *           ls = select(in_rng, ls, zero_f)
+ *       ms = select(fcmp("ogt", ls, zero_f), ms, neg_inf)   # empty segment -> -inf
  *       cache (sv, in_rng, sv_safe), ms, ls
  *       local_max = fmax(local_max, ms)
  *   overall_max = _wave64_reduce_max(local_max)
@@ -282,6 +298,7 @@ void rocke_gfx950_attention_tiled_3d_reduce_max_pass(
         rocke_value_t* idx;
         rocke_value_t* ms;
         rocke_value_t* ls;
+        rocke_value_t* has_mass;
 
         sv = rocke_b_add(b, rocke_b_const_i32(b, (int64_t)j * THREADS), ctx->tid);
 
@@ -312,6 +329,13 @@ void rocke_gfx950_attention_tiled_3d_reduce_max_pass(
             ms = rocke_b_select(b, in_rng, ms, ctx->neg_inf);
             ls = rocke_b_select(b, in_rng, ls, ctx->zero_f);
         }
+
+        /* A segment whose tiles were all masked for this row stores max=0 with
+         * sum=0. Its max carries no mass, so it must not set overall_max (it
+         * would underflow every real segment's factor) nor get a factor in
+         * pass 2: treat it as -inf. fcmp is emitted before select, as in Python. */
+        has_mass = rocke_b_fcmp(b, "ogt", ls, ctx->zero_f);
+        ms = rocke_b_select(b, has_mass, ms, ctx->neg_inf);
 
         if(s_seg_sv != NULL)
         {
@@ -377,7 +401,7 @@ void rocke_gfx950_attention_tiled_3d_reduce_combine_pass(
         ls = s_seg_l ? s_seg_l[j] : NULL;
 
         ms_finite = rocke_b_fcmp(b, "ogt", ms, ctx->neg_inf);
-        factor_raw = rocke_b_exp2(b, rocke_b_fsub(b, ms, ctx->overall_max));
+        factor_raw = rocke_b_exp2_fast(b, rocke_b_fsub(b, ms, ctx->overall_max));
         factor = rocke_b_select(b, ms_finite, factor_raw, ctx->zero_f);
 
         local_den = rocke_b_fadd(b, local_den, rocke_b_fmul(b, ls, factor));
@@ -497,5 +521,27 @@ void rocke_gfx950_attention_tiled_3d_reduce_normalize_pass(
 
         out_idx = rocke__red_out_offset(ctx, ctx->q_token, ctx->q_head, d);
         rocke_b_global_store(b, ctx->out, out_idx, scalar_out, 2);
+    }
+
+    /* emit_lse: every lane holds the same butterfly-reduced overall_max/expsum,
+     * so lane 0 writes. overall_max is in log2 units; lse_store converts to
+     * natural log and writes -inf for a row with no mass (sum 0); a NaN sum
+     * keeps NaN, as O does (!(l == 0), never l > 0). One builder call per
+     * statement, in Python order. */
+    if(ctx->reduce_spec != NULL && ctx->reduce_spec->emit_lse)
+    {
+        rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+        rocke_value_t* is_writer = rocke_b_cmp_eq(b, ctx->tid, c0);
+        rocke_if_t guard = rocke_b_scf_if(b, is_writer);
+        rocke_b_region_enter(b, guard.then_region);
+        {
+            rocke_value_t* nqh = rocke_b_const_i32(b, cfg->NUM_QH);
+            rocke_value_t* row = rocke_b_mul(b, ctx->q_token, nqh);
+            rocke_value_t* lse_index = rocke_b_add(b, row, ctx->q_head);
+            rocke_value_t* has_mass = rocke_lse_row_has_mass(b, ctx->overall_expsum);
+            rocke_lse_store(
+                b, ctx->red_lse, lse_index, ctx->overall_max, ctx->overall_expsum, has_mass);
+        }
+        rocke_b_region_leave(b);
     }
 }

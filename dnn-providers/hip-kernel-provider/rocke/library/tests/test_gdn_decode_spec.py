@@ -4,8 +4,9 @@
 """GDN decode spec rules and emission, without a GPU.
 
 Covers the ``spec -> IR`` direction: which specs the validator admits, and that
-the specs this family actually ships lower to LLVM IR -- the four tuned tiles
-plus the default, the ``simple`` reference body and the ``no_l2norm`` variant.
+the specs this family actually ships lower to LLVM IR -- every registered tile's
+base configuration, every case's ``auto`` configuration plus the default, the
+``simple`` reference body and the ``no_l2norm`` variant.
 That is a CURATED list, not the admitted space: the validator admits 54 legal
 tile combinations at the reference shape, times the dtype axis, and this file
 does not walk either. Lowering needs no device and no comgr, so the whole file
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 import unittest
+from itertools import product
 
 from kernels.gfx950.gdn_decode import (
     GdnDecodeSpec,
@@ -39,6 +41,41 @@ def _lower(spec: GdnDecodeSpec, arch: str = ARCH, flavor: str = "llvm20") -> str
     return _lower_kernel_to_llvm_python(
         build_gdn_decode(spec, arch=arch), arch=arch, llvm_flavor=flavor
     )
+
+
+def _compiled_scratch_bytes(test: unittest.TestCase, spec: GdnDecodeSpec) -> int:
+    """Compile ``spec`` through comgr and return the scratch bytes it spills to.
+
+    Checking the lowered text for ``define amdgpu_kernel`` proves only that the
+    lowerer printed something. comgr runs the real pipeline (IR -> bitcode ->
+    code object), so invalid IR, an intrinsic the target lacks or a resource
+    overflow fails here. It needs no GPU. A compile error is a defect and
+    propagates; only a missing toolchain skips.
+    """
+    import tempfile
+    from pathlib import Path
+
+    try:
+        from rocke.analysis.isa import analyze_hsaco
+        from rocke.helpers.compile import compile_kernel
+    except Exception as e:  # pragma: no cover - env-dependent
+        test.skipTest(f"comgr toolchain unavailable: {e}")
+    try:
+        art = compile_kernel(
+            build_gdn_decode(spec, arch=ARCH), arch=ARCH, capture_ir_text=False
+        )
+    except ImportError as e:  # pragma: no cover - env-dependent
+        test.skipTest(f"comgr toolchain unavailable: {e}")
+    with tempfile.NamedTemporaryFile(suffix=".hsaco") as fh:
+        fh.write(bytes(art.hsaco))
+        fh.flush()
+        try:
+            scratch = analyze_hsaco(Path(fh.name)).resources.scratch_bytes
+        except (FileNotFoundError, RuntimeError) as e:  # pragma: no cover
+            test.skipTest(f"HSACO introspection tool unavailable: {e}")
+    if scratch is None:  # pragma: no cover - metadata shape drift
+        test.skipTest("could not parse the scratch size from the HSACO")
+    return scratch
 
 
 class TestSpecAdmission(unittest.TestCase):
@@ -98,6 +135,16 @@ class TestSpecAdmission(unittest.TestCase):
         ok, why = is_valid_spec(dc.replace(GdnDecodeSpec(), dtype="f32"), arch=ARCH)
         self.assertFalse(ok)
 
+    def test_f32_is_a_state_dtype_only(self):
+        # f32 widens the recurrent state alone; q/k/v and the output stay
+        # 16-bit, so f32 is legal as state_dtype and rejected as dtype above.
+        for simple in (False, True):
+            spec = dc.replace(GdnDecodeSpec(), state_dtype="f32", simple=simple)
+            ok, why = is_valid_spec(spec, arch=ARCH)
+            self.assertTrue(ok, why)
+        ok, _ = is_valid_spec(dc.replace(GdnDecodeSpec(), state_dtype="fp8"), arch=ARCH)
+        self.assertFalse(ok)
+
     def test_nonpositive_geometry_is_rejected_cleanly(self):
         # A zero geometry field must come back as a reason, never a
         # ZeroDivisionError from a downstream ``%`` divisibility check -- the
@@ -139,6 +186,20 @@ class TestKernelNameIdentity(unittest.TestCase):
         variants = {
             "base": base,
             "state_dtype": dc.replace(base, state_dtype="f16"),
+            "state_dtype_f32": dc.replace(base, state_dtype="f32"),
+            "fuse_conv": dc.replace(
+                base, num_k_heads=32, blocks_per_v_dim=1, fuse_conv=True
+            ),
+            "fuse_out_norm": dc.replace(base, blocks_per_v_dim=1, fuse_out_norm=True),
+            "fuse_both": dc.replace(
+                base,
+                num_k_heads=32,
+                blocks_per_v_dim=1,
+                fuse_conv=True,
+                fuse_out_norm=True,
+            ),
+            "bpv1": dc.replace(base, blocks_per_v_dim=1),
+            "kh32_bpv1": dc.replace(base, num_k_heads=32, blocks_per_v_dim=1),
             "dtype": dc.replace(base, dtype="f16"),
             "wave_size": dc.replace(base, wave_size=32),
             "num_warps": dc.replace(base, num_warps=4),
@@ -291,38 +352,128 @@ class TestLaunchShape(unittest.TestCase):
 
 
 class TestEmission(unittest.TestCase):
-    """Every admitted spec must actually lower. No GPU, no comgr."""
+    """Every admitted spec must lower AND compile to a code object without
+    spilling to scratch, except the exemptions named in each test. No GPU
+    needed."""
 
-    def test_default_spec_emits_a_kernel(self):
-        llvm = _lower(GdnDecodeSpec())
-        self.assertIn("define amdgpu_kernel", llvm)
-        self.assertIn(GdnDecodeSpec().kernel_name(), llvm)
+    def test_default_spec_compiles(self):
+        spec = GdnDecodeSpec()
+        self.assertIn(spec.kernel_name(), _lower(spec))
+        self.assertEqual(_compiled_scratch_bytes(self, spec), 0)
 
-    def test_both_builder_paths_emit(self):
-        for simple in (False, True):
-            with self.subTest(simple=simple):
-                llvm = _lower(GdnDecodeSpec(simple=simple))
-                self.assertIn("define amdgpu_kernel", llvm)
+    def test_both_builder_paths_compile(self):
+        self.assertEqual(_compiled_scratch_bytes(self, GdnDecodeSpec()), 0)
+        # The simple path is the one-thread-per-state-row reference. Dispatch
+        # never selects it, and it holds a whole state row in registers, so
+        # whether it spills depends on the compiler version (0 B with ROCm 7.1,
+        # 1188 B with ROCm 7.13 on gfx950). Require only that it compiles.
+        _compiled_scratch_bytes(self, GdnDecodeSpec(simple=True))
 
-    def test_every_tuned_tile_emits(self):
-        # Both tables, each with its own gate kind: a tile is only ever selected
-        # together with the gate it was tuned for, so that is how it is checked.
-        from dispatch.gdn.gfx950 import _TUNED_TILES_GDN, _TUNED_TILES_KDA
+    def test_registered_tiles_compile(self):
+        from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
+        from dispatch.gdn.gfx950 import spec_id_for
 
-        for gate_kind, table in (
-            ("gdn", _TUNED_TILES_GDN),
-            ("kda", _TUNED_TILES_KDA),
-        ):
-            for _, tile, spec_id in table:
-                with self.subTest(spec_id=spec_id, gate_kind=gate_kind):
-                    spec = dc.replace(
-                        GdnDecodeSpec(),
-                        gate_kind=gate_kind,
-                        num_warps=tile[0],
-                        warp_threads_k=tile[1],
-                        blocks_per_v_dim=tile[2],
-                    )
-                    self.assertIn("define amdgpu_kernel", _lower(spec))
+        # Register-bound tiles: warp_threads_k=1 gives each lane the whole K
+        # reduction, so these sit at the 512-VGPR limit and whether (and how
+        # much) they spill depends on the compiler. Measured on gfx950, bf16
+        # state:
+        #                     ROCm 7.1   ROCm 7.13
+        #   nw1_wtk1_bpv1      448 B      364-372 B
+        #   nw1_wtk1_bpv2        0 B      372-388 B
+        #   nw2_wtk1_bpv1        0 B      376-404 B
+        #   kda_nw1_wtk1_bpv1  980 B      496 B
+        #   kda_nw1_wtk1_bpv2    0 B      388 B
+        #   kda_nw2_wtk1_bpv1    0 B      364 B
+        # (the KDA gate holds a decay per K channel, hence more registers).
+        # ``auto`` never selects them on a legal case tile; they stay
+        # registered for both gate kinds because they can be pinned and
+        # (1,1,1) is the fallback when a case's tile is illegal. They may
+        # spill up to their gate kind's budget, which absorbs compiler drift
+        # but still catches a register-pressure blowup. Every other registered
+        # tile of either gate kind must not spill.
+        spill_budget_bytes = {"gdn": 512, "kda": 1024}
+        register_bound = ((1, 1, 1), (1, 1, 2), (2, 1, 1))
+        for gate_kind in ("gdn", "kda"):
+            may_spill = {spec_id_for(tile, gate_kind) for tile in register_bound}
+            # Each registered tile's base configuration (the knob-free kernel).
+            results = dispatch_gdn_decode_bases(
+                GdnDecodeRequest(batch=16, arch="gfx950", gate_kind=gate_kind)
+            )
+            registered = {result.candidate.spec_id for result in results}
+            self.assertLessEqual(may_spill, registered, "stale may_spill entry")
+            for result in results:
+                with self.subTest(spec_id=result.candidate.spec_id):
+                    scratch = _compiled_scratch_bytes(self, result.spec.kernel_spec)
+                    if result.candidate.spec_id in may_spill:
+                        self.assertLessEqual(scratch, spill_budget_bytes[gate_kind])
+                    else:
+                        self.assertEqual(scratch, 0)
+
+    def test_every_auto_configuration_compiles_without_spilling(self):
+        from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+
+        # Every case's tile and knob stack, on each state width (f32 doubles
+        # the state registers each lane loads), in every fused mode: the
+        # one-flag modes run the row less the knobs they cannot read, and
+        # norm only is the one fused mode open to GQA heads.
+        modes = (
+            (False, False, 16),
+            (True, True, 16),
+            (True, False, 16),
+            (False, True, 16),
+            (False, True, 32),
+        )
+        for gate_kind in ("gdn", "kda"):
+            for (conv, norm, heads_v), state_dtype in product(
+                modes, ("bf16", "f16", "f32")
+            ):
+                req = GdnDecodeRequest(
+                    batch=16,
+                    arch="gfx950",
+                    gate_kind=gate_kind,
+                    num_k_heads=16,
+                    num_v_heads=heads_v,
+                    state_dtype=state_dtype,
+                    fuse_conv=conv,
+                    fuse_out_norm=norm,
+                )
+                spec = dispatch_gdn_decode(req).spec
+                with self.subTest(tuning_id=spec.tuning_id, state=state_dtype):
+                    self.assertEqual(_compiled_scratch_bytes(self, spec.kernel_spec), 0)
+
+    def test_auto_does_not_spill_off_the_measured_head_dims(self):
+        # The sweep ran at DK = DV = 128. The fused f32 GDN row's
+        # waves_per_eu caps the registers; with a wider key dim the state no
+        # longer fits and the kernel spills, so auto must not run it there.
+        from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+
+        for dk, dv in ((256, 128), (256, 256), (128, 256)):
+            req = GdnDecodeRequest(
+                batch=16,
+                arch="gfx950",
+                num_k_heads=16,
+                num_v_heads=16,
+                head_k_dim=dk,
+                head_v_dim=dv,
+                state_dtype="f32",
+                fuse_conv=True,
+                fuse_out_norm=True,
+            )
+            spec = dispatch_gdn_decode(req).spec
+            with self.subTest(dk=dk, dv=dv, tuning_id=spec.tuning_id):
+                self.assertEqual(_compiled_scratch_bytes(self, spec.kernel_spec), 0)
+
+    def test_default_gdn_tile_compiles_with_an_f32_state(self):
+        spec = dc.replace(GdnDecodeSpec(), state_dtype="f32")
+        self.assertEqual(_compiled_scratch_bytes(self, spec), 0)
+        # The simple reference path holds a whole f32 state row per thread, so
+        # it is register-heavy by construction (never dispatched; its f32
+        # numerics are covered on device). Measured on gfx950: 44 B (ROCm 7.1),
+        # 1236 B (ROCm 7.13). The budget absorbs compiler drift but still
+        # catches a register-pressure blowup.
+        SPILL_BUDGET_BYTES = 2048
+        simple = dc.replace(spec, simple=True)
+        self.assertLessEqual(_compiled_scratch_bytes(self, simple), SPILL_BUDGET_BYTES)
 
     def test_distinct_tiles_emit_distinct_code(self):
         # If two tiles produced identical IR the tuning table would be choosing

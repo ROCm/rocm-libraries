@@ -69,6 +69,27 @@ add code that maintains compatibility with pre-3.10 idioms.
 
 ---
 
+## API design (the cross-language standard)
+
+How functions are layered, named, exported, and tested follows the shared
+[API design standard](API_DESIGN_STANDARD.md). That document owns the rules; this guide owns
+how they are expressed in Python:
+
+- **Exports and the author door** — a module's `__all__` is the surface shared with sibling
+  modules; the package `__init__.py` `__all__` is the author door (§8). Also export the result
+  type a function is named with (standard Part 2).
+- **Naming, `_`-private state, read-only `@property` accessors** — §4, §7.
+- **Validation return types** — `(ok, reason)` for a simple gate; a three-tier diagnostic when
+  the caller must tell a reorder-fixable warning from a hard error (§7).
+- **Test coverage** — §11.
+
+Repo protocols the standard depends on (Part 4 — no paths in signatures, numpy-only public
+signatures, `platform/` not importing `library/`) are owned by
+[AGENTS.md](../platform/AGENTS.md). Enforcement of these rules is pending; the standard's
+[What is enforced](API_DESIGN_STANDARD.md#what-is-enforced) is the single home for that status.
+
+---
+
 ## 1. Formatting (owned by black — do not hand-fight it)
 
 - **Line length 88**, **double quotes**, black defaults. No `[tool.black]` overrides
@@ -224,9 +245,12 @@ This is a deliberate house style for a codebase full of hardware subtleties.
   if not ok:
       raise ValueError(f"invalid mfma_gemm spec for {arch}: {why}")
   ```
-  Raise `ValueError` for bad user/spec input and `NotImplementedError` for an
-  unsupported-but-valid path (e.g. an atom with no dispatch). Error messages name
-  the offending values and the fix, matching the existing structured style.
+  Which exception to raise, how to word the message, and where `__post_init__` checks
+  go versus `is_valid_spec` are owned by section 13.
+- **Layered checks that distinguish a reorder-fixable warning from a hard error** return a
+  three-tier diagnostic (a severity-carrying result) instead of `(ok, reason)`. That form is
+  owned by the [API design standard](API_DESIGN_STANDARD.md#part-1--layering--naming), not
+  restated here.
 
 ## 8. Public API surface (`__all__`)
 
@@ -270,9 +294,19 @@ emitter code:
 
 ## 11. Tests
 
-Test-file naming and the PR-bot test requirement are owned by AGENTS.md. Style note:
-most tests are CPU-only (lowering/serialization/byte-identity); gate GPU-only numeric
-tests on real hardware being present rather than faking it.
+Test-file naming and the PR-bot test requirement are owned by AGENTS.md. The test-coverage
+principles — prove the behaviour, choose cases by consequence, a self-validating setup — are in
+the [API design standard](API_DESIGN_STANDARD.md#part-5--testing-what-you-build). The Python
+mechanics:
+
+- **`pytest`** with `@pytest.mark.parametrize` to sweep the axes that change behaviour (shape,
+  dtype, atom count), not one case.
+- **Prefer a real input over a replacement.** Push the actual object through the real path; a
+  replaced dependency tests the replacement, not the code.
+- **Most tests are CPU-only** (lowering/serialization/byte-identity); gate GPU-only numeric
+  tests on real hardware being present rather than faking it.
+- **Assert the rejections too.** Every guard gets an error-condition test, not just the
+  passing case; what that test must check is in section 13.6.
 
 ## 12. A minimal conforming module
 
@@ -320,6 +354,160 @@ Then export `FooSpec`/`build_foo` from `instances/common/__init__.py` and add a
 `test_foo.py`. Verify against the current API before copying — this is a shape guide,
 not a working kernel.
 
+## 13. Error handling
+
+This section is policy: it says how new and changed code reports bad input. Bringing
+existing code in line with it is tracked separately; do not mass-rewrite unrelated
+checks or messages in a feature change. Each bullet is one self-contained rule, so it
+can be applied (or extracted by a tool) on its own. A rule in its fullest form reads:
+
+```text
+RULE:  Raise ValueError, never `assert`, for a bad value reaching a public API.
+WHEN:  A public function or dataclass gets an argument of the right type but an
+       invalid value.
+DO:    raise ValueError(f"split_k failed - tile_k={tile_k}, expected a multiple of 16")
+DON'T: assert tile_k % 16 == 0
+WHY:   `python -O` strips assert statements, so the check silently disappears.
+```
+
+### 13.1 Principles
+
+- **Fail fast at the API boundary.** Reject bad input where it enters a public function
+  or dataclass, before any IR is emitted, so the error names the caller's argument
+  rather than surfacing later as a broken kernel or a lowering failure.
+- **Validation costs nothing in the kernel.** Checks are host-side Python and must never
+  emit IR: do not call the builder (`b.*`) inside a check (builder calls are
+  side-effecting, section 9). Validate once, in the constructor, factory, or public
+  entry point, not inside the loop that emits ops per element, per atom, or per K step.
+- **Contracts are enforced at runtime.** A constraint stated in a docstring or a type
+  hint is also checked in code if breaking it would produce a wrong kernel.
+
+> **Warning -- adding a check can break a caller.** A kernel that happened to work with
+> an input outside the documented contract will start raising once that contract is
+> checked. This is an intended, accepted behaviour change: such a kernel was relying
+> on undefined behaviour. Say so in the commit message and fix the caller; do not
+> loosen the check to keep it passing.
+
+### 13.2 Error messages
+
+- **Use the template `{what failed} - {param}={bad value}, expected {constraint}`.**
+  Name the offending parameter, show the value it had, and state what was required.
+- **List the valid options when the choice is from a fixed set** (`expected one of
+  ('workgroup', 'agent', 'system')`), so the fix is in the message.
+- **Use `!r` for strings and other non-numeric values** so an empty or whitespace
+  value is visible.
+- **For an `(ok, reason)` gate (section 7)** the reason string carries
+  `{param}={bad value}, expected {constraint}` and the builder that raises on it
+  supplies `{what failed}`.
+
+```python
+# Good: names the parameter, the value, and the constraint.
+raise ValueError(
+    f"make_tile failed - tile_k={tile_k}, expected a multiple of atom.k={atom.k}"
+)
+
+# Banned: says something is wrong, not what or how to fix it.
+raise ValueError("invalid shape")
+```
+
+### 13.3 Which exception
+
+| Exception | Raise it when | Example |
+|---|---|---|
+| `ValueError` (the default) | The argument has the right type but a bad value. | `raise ValueError(f"make_tile failed - tile_k={tile_k}, expected > 0")` |
+| `TypeError` | The argument is the wrong kind of object. | `raise TypeError(f"load_tile failed - view={type(view).__name__}, expected TensorView")` |
+| `KeyError` | A name is looked up in a registry or table and is not there. | `raise KeyError(f"lookup failed - arch={arch!r}, expected one of {sorted(ARCHES)}")` |
+| `NotImplementedError` | The input is valid but this code path is not written yet. | `raise NotImplementedError(f"no HIP lowering for op {op.name!r}")` |
+| `RuntimeError` | Something outside the caller's arguments failed, or the engine broke its own invariant. Raise the existing subclass where there is one. | `raise ComgrError(...)` (a `RuntimeError` from `runtime/comgr.py`); `HipError` (`runtime/hip_module.py`) for a HIP API failure |
+
+- **Never use `assert` to validate input to a public API.** `python -O` removes assert
+  statements, so the check vanishes in optimized runs. `assert` is fine in tests and for
+  internal sanity checks whose loss would not let bad input through.
+- **When callers need to catch one failure specifically, subclass the matching
+  built-in** exception (as `ComgrError(RuntimeError)` and
+  `PinRefused(ValueError)` do), so a caller catching the built-in still catches it.
+
+### 13.4 Where validation goes
+
+- **Public functions validate every input at entry, before emitting IR.**
+- **Dataclasses validate their own fields in `__post_init__`.** A spec that can be
+  constructed is internally consistent (see `QkScaleSpec` in `helpers/qk_scale.py`).
+  In a `frozen=True` dataclass, assign a normalized field with `object.__setattr__`.
+- **Checks that need context the dataclass does not hold** (the target arch, another
+  spec) go in `is_valid_spec` and are raised by the builder (section 7).
+- **A `_`-prefixed private function may skip validation** only when its public caller
+  has already checked the same input, when it runs inside an IR-emitting inner loop, or
+  when its docstring states the precondition it relies on.
+- **Rely on duck typing; add an `isinstance` check only where a wrong type would
+  otherwise fail with a cryptic error far from the call** (an `AttributeError` deep in
+  lowering, a silently wrong offset). No blanket `isinstance` guards on every argument.
+- **Check values in public APIs, highest-risk first:** block and grid sizes, vector
+  widths, tile sizes, and other numeric parameters that a wrong value turns into a
+  wrong kernel rather than an exception.
+
+### 13.5 Parity with the C++ engine
+
+- **A check mirrored in the C++ engine raises the same message text in both.** The C++
+  side of the contract (throw sites, the `extern "C"` boundary, status codes) is owned
+  by [CPP_STYLE.md section 6](CPP_STYLE.md#6-error-model-the-engines-core-contract). The
+  Python `raise` and the C++ call site look like this:
+
+```python
+if scope not in _FENCE_SCOPES:
+    raise ValueError(f"unknown fence scope {scope!r}")
+```
+
+```cpp
+if(!rocke_i_fence_scope_ok(scope))
+{
+    (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown fence scope '%s'", scope);
+    return;  // not reached: rocke_i_set_err throws (ckc::ValueError)
+}
+```
+
+- **The exception type picks the status code:** `ValueError` -> `ROCKE_ERR_VALUE`,
+  `TypeError` -> `ROCKE_ERR_TYPE`, `KeyError` -> `ROCKE_ERR_KEY`,
+  `NotImplementedError` -> `ROCKE_ERR_NOTIMPL`. There is no `RuntimeError` code.
+- **`{x!r}` on a string matches `'%s'` in C**, as long as the value holds no quote or backslash.
+- **Changing a mirrored message changes both engines in the same change**, along with
+  any test that matches on it.
+
+### 13.6 Testing error conditions (mandatory)
+
+- **Every added or hardened check gets a test** that asserts (a) the exception type and
+  (b) a message that names the bad value. Use `pytest.raises(Exc, match=...)`; a bare
+  `pytest.raises(Exception)` passes on any failure, including a typo in the test.
+- **Cover each kind of check:** choice from a fixed set, wrong type, value or range, and
+  `__post_init__` validation of a dataclass.
+- **`match` is a regular expression** (`re.search`): escape `(`, `)`, `[`, `.`, or use
+  `re.escape` on a literal message.
+
+```python
+# Before: passes on any exception, and never says which input was rejected.
+def test_qk_scale_spec_rejects_bad_input():
+    with pytest.raises(Exception):
+        QkScaleSpec(layout="per_tile")
+
+
+# After: pins the type and the message for each rejected input.
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"layout": "per_tile"}, r"layout must be 'per_head' or 'per_block', got 'per_tile'"),
+        ({"layout": "per_block", "scale_block": 0}, r"scale_block must be > 0 \(got 0\)"),
+    ],
+)
+def test_qk_scale_spec_rejects_bad_input(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        QkScaleSpec(**kwargs)
+```
+
+### 13.7 Type hints and runtime checks
+
+- **Type hints are required on public signatures (section 3) and do not replace
+  runtime checks.** Python does not enforce hints at runtime; a check from section 13.4
+  still applies where a bad value would produce a wrong kernel.
+
 ---
 
 ## Quick checklist for a new Python change
@@ -330,7 +518,8 @@ not a working kernel.
 - [ ] Public signatures typed; docstrings explain the *why* + any hw invariant
 - [ ] Verb-prefix naming (`build_*`/`is_valid_*`/`lower_*`/`emit_*`/`_op_<name>`)
 - [ ] Specs are `frozen=True`; derived fields via `@property`
-- [ ] Validation returns `(ok, reason)`; raise `ValueError`/`NotImplementedError`
+- [ ] Validation returns `(ok, reason)`; exception type + message per section 13
+- [ ] Every new or hardened check has a test asserting type and message (section 13.6)
 - [ ] Public names added to `__all__` / `__init__.py`
 - [ ] Emitter code: **no autofix**; `# noqa: F841 - ABI` for intentional unused ops
 - [ ] Emission changed? mirror in C++ + re-run the byte-identity gate

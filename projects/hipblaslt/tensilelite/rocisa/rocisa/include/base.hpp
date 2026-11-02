@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -102,13 +103,51 @@ namespace rocisa
                 = {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
             if(m_isainfo.find(isaVersion) != m_isainfo.end())
                 return;
-            // Init ISA
-            IsaInfo isainfo;
-            isainfo.asm_caps      = initAsmCaps(isaVersion, assemblerPath, debug);
-            isainfo.arch_caps     = initArchCaps(isaVersion);
-            isainfo.reg_caps      = initRegisterCaps(isaVersion, isainfo.arch_caps);
-            isainfo.asm_bugs      = initAsmBugs(isainfo.asm_caps);
-            m_isainfo[isaVersion] = isainfo;
+            addIsaInfo(isaVersion, initAsmCaps(isaVersion, assemblerPath, debug));
+        }
+
+        // Same as calling init() for each arch, but probes the assembler
+        // capabilities of all not-yet-initialized ISAs concurrently.  Each
+        // probe is an independent assembler run, so results are unchanged.
+        void initMany(const nb::iterable& archs,
+                      const std::string&  assemblerPath,
+                      bool                debug = false)
+        {
+            std::vector<IsaVersion> isaVersions;
+            for(nb::handle arch : archs)
+            {
+                auto       t = nb::cast<nb::tuple>(arch);
+                IsaVersion isaVersion
+                    = {nb::cast<int>(t[0]), nb::cast<int>(t[1]), nb::cast<int>(t[2])};
+                if(m_isainfo.find(isaVersion) == m_isainfo.end()
+                   && std::find(isaVersions.begin(), isaVersions.end(), isaVersion)
+                          == isaVersions.end())
+                    isaVersions.push_back(isaVersion);
+            }
+            std::vector<std::map<std::string, int>> asmCaps(isaVersions.size());
+            std::vector<std::exception_ptr>         errors(isaVersions.size());
+            {
+                nb::gil_scoped_release release;
+                // jthread joins on destruction, so the probes already started are
+                // joined even if starting a later thread throws.
+                std::vector<std::jthread> threads;
+                for(size_t i = 0; i < isaVersions.size(); ++i)
+                    threads.emplace_back([&, i]() {
+                        try
+                        {
+                            asmCaps[i] = initAsmCaps(isaVersions[i], assemblerPath, debug);
+                        }
+                        catch(...)
+                        {
+                            errors[i] = std::current_exception();
+                        }
+                    });
+            }
+            for(auto& e : errors)
+                if(e)
+                    std::rethrow_exception(e);
+            for(size_t i = 0; i < isaVersions.size(); ++i)
+                addIsaInfo(isaVersions[i], std::move(asmCaps[i]));
         }
 
         bool isInit()
@@ -180,6 +219,22 @@ namespace rocisa
             return m_vgprmsb[std::this_thread::get_id()];
         }
 
+        // gfx1250 low-precision WMMA scaled-form workaround toggle. Set per build
+        // from the concrete arch name (true only for gfx1250-strict / gfx1250v0,
+        // whose V0 silicon needs v_wmma_scale_* with scale=0). Deliberately NOT
+        // reset by setKernel: forceScaledWMMA() is evaluated at toString() time,
+        // and intervening setKernel calls (e.g. activation codegen) must not clear
+        // it. Defaults false, so base gfx1250 emits plain v_wmma_*.
+        bool getForceScaledWMMA()
+        {
+            // Lock for the lookup too: setForceScaledWMMA() may be inserting a new
+            // per-thread entry on another thread, which rebalances the std::map and
+            // would race this traversal (UB) even though entries are keyed by id.
+            std::lock_guard<std::mutex> guard(m_mutex);
+            auto it = m_forceScaledWMMA.find(std::this_thread::get_id());
+            return it != m_forceScaledWMMA.end() ? it->second : false;
+        }
+
         void setData(const std::map<IsaVersion, IsaInfo>& data)
         {
             m_isainfo = data;
@@ -217,8 +272,26 @@ namespace rocisa
             m_mutex.unlock();
         }
 
+        void setForceScaledWMMA(const bool v)
+        {
+            std::thread::id id = std::this_thread::get_id();
+            m_mutex.lock();
+            m_forceScaledWMMA[id] = v;
+            m_mutex.unlock();
+        }
+
     private:
         rocIsa() = default;
+
+        void addIsaInfo(const IsaVersion& isaVersion, std::map<std::string, int> asmCaps)
+        {
+            IsaInfo isainfo;
+            isainfo.asm_caps      = std::move(asmCaps);
+            isainfo.arch_caps     = initArchCaps(isaVersion);
+            isainfo.reg_caps      = initRegisterCaps(isaVersion, isainfo.arch_caps);
+            isainfo.asm_bugs      = initAsmBugs(isainfo.asm_caps);
+            m_isainfo[isaVersion] = std::move(isainfo);
+        }
 
         std::mutex                            m_mutex;
         std::map<std::thread::id, KernelInfo> m_threads;
@@ -226,6 +299,7 @@ namespace rocisa
         std::map<std::thread::id, OutputOptions> m_outputOptions;
         std::map<std::thread::id, std::map<std::string, int>> m_vgpridx;
         std::map<std::thread::id, int>        m_vgprmsb;
+        std::map<std::thread::id, bool>       m_forceScaledWMMA;
     };
 
     struct Item

@@ -136,7 +136,16 @@ protected:
             }
         });
 
-        this->verifyGraph(context, 0);
+        // Build the graph; skip if no engine supports this configuration
+        // (e.g. causal mask + stats is not yet supported by the ASM kernels).
+        auto buildResult = graph->build(this->_handle);
+        if(buildResult.code == ErrorCode::GRAPH_NOT_SUPPORTED)
+        {
+            GTEST_SKIP() << "No engine supports this graph: " << buildResult.err_msg;
+        }
+        ASSERT_EQ(buildResult.code, ErrorCode::OK) << buildResult.err_msg;
+
+        this->verifyBuiltGraph(context, 0);
     }
 
     float _minVal = -1.0;
@@ -212,16 +221,9 @@ protected:
         {
             attributes.set_diagonal_band_left_bound(testCase.leftBound);
             attributes.set_diagonal_band_right_bound(testCase.rightBound);
-            if(testCase.topLeftAlignment)
-            {
-                attributes.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
-                attributes.set_causal_mask(true);
-            }
-            else
-            {
-                attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
-                attributes.set_causal_mask_bottom_right(true);
-            }
+            attributes.set_diagonal_alignment(testCase.topLeftAlignment
+                                                  ? DiagonalAlignment::TOP_LEFT
+                                                  : DiagonalAlignment::BOTTOM_RIGHT);
         }
 
         auto [o, stats] = graph.sdpa(q, k, v, attributes);

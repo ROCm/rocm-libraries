@@ -13,6 +13,7 @@ import copy
 import hashlib
 import json
 from collections import defaultdict
+from pathlib import Path, PurePosixPath
 
 # --------------------------------------------------------------------------
 # Field policy constants
@@ -40,6 +41,86 @@ DTYPE_TOKEN = {
 }
 
 LAYOUT_BY_RANK = {4: ("nchw", "nhwc"), 5: ("ncdhw", "ndhwc"), 3: ("ncl", "nlc")}
+
+
+# --------------------------------------------------------------------------
+# Capture layout (Hop A output)
+# --------------------------------------------------------------------------
+
+
+def capture_suite_case(graph_path, capture_dir=None, suite=None):
+    """``(suite, case)`` for a graph in the capture layout, or None if it is not.
+
+    ``--capture-bundles`` writes ``<capture_dir>/<suite>/<case>/<case>.json``,
+    where the suite may contain ``/`` (``Smoke/IntegrationGpuConvFp32``) and is
+    also recorded as the sidecar's ``operation``. With ``capture_dir``, the
+    suite is the path between it and the case directory. Without one, nothing
+    says where the suite starts, so ``suite`` (the sidecar's ``operation``) is
+    accepted only if the path ends in it. The suite is always ``/``-separated,
+    so the reference_source built from it is the same on every platform.
+    """
+    if capture_dir is None:
+        graph_path = graph_path.resolve()
+    case_dir = graph_path.parent
+    case = case_dir.name
+    if graph_path.name.endswith(".meta.json") or graph_path.stem != case:
+        return None
+    if capture_dir is not None:
+        return case_dir.parent.relative_to(capture_dir).as_posix(), case
+    if not isinstance(suite, str) or not suite:
+        return None
+    suite_parts = PurePosixPath(suite).parts
+    if not suite_parts or case_dir.parent.parts[-len(suite_parts) :] != suite_parts:
+        return None
+    return suite, case
+
+
+def tier_for_suite(suite: str) -> str:
+    """The tier folder for a capture suite: ``TIER_MAP`` of its first component."""
+    parts = PurePosixPath(suite).parts
+    return TIER_MAP.get(parts[0], "quick") if parts else "quick"
+
+
+def capture_reference_source(suite: str, case: str) -> str:
+    """The ``reference_source`` that joins a bundle case to its C++ test."""
+    return f"c++ integration suite: {suite}.{case}"
+
+
+def inputs_error(inputs):
+    """Why ``inputs`` can't be remapped (a UID-keyed object), or None if it can."""
+    if not isinstance(inputs, dict):
+        return f"inputs: expected a JSON object, got {type(inputs).__name__}"
+    for k in inputs:
+        try:
+            int(k)
+        except ValueError:
+            return f"inputs: key {k!r} is not a tensor UID"
+    return None
+
+
+def read_capture_sidecar(graph_path):
+    """Load the ``<stem>.meta.json`` that ``--capture-bundles`` writes beside a graph.
+
+    Returns ``(path, meta, error)``. ``meta`` is None when the sidecar is absent
+    (a hand-authored graph) or unusable, and ``error`` is set only in the
+    unusable case, saying why. An ``inputs`` that :func:`remap_meta_inputs`
+    cannot remap counts as unusable.
+    """
+    path = graph_path.with_suffix(".meta.json")
+    if not path.exists():
+        return path, None, None
+    try:
+        with open(path) as f:
+            meta = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        return path, None, str(e)
+    if not isinstance(meta, dict):
+        return path, None, f"expected a JSON object, got {type(meta).__name__}"
+    if "inputs" in meta:
+        err = inputs_error(meta["inputs"])
+        if err is not None:
+            return path, None, err
+    return path, meta, None
 
 
 # --------------------------------------------------------------------------
@@ -309,6 +390,37 @@ def sanitize(s: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# Topology directory naming
+# --------------------------------------------------------------------------
+
+
+_SWEEP_MARKER_FILES = ("graph.template.json", "sweep.json", "support.json")
+
+
+def _topology_dir_occupied(op_dir: Path, name: str) -> bool:
+    """A topology folder is occupied if it already holds a bundle marker file."""
+    d = op_dir / name
+    return any((d / marker).exists() for marker in _SWEEP_MARKER_FILES)
+
+
+def next_free_topology_dir(op_dir: Path, preferred: str = "Default") -> str:
+    """An unoccupied topology folder name under an operation directory.
+
+    Mirrors place_bundles.py's Default/Variant2/Variant3/... convention for
+    multiple topologies of one op: ``preferred`` (the layout-derived name, or
+    "Default") is used if free; otherwise the first free ``VariantN`` (N >= 2)
+    wins. A folder counts as occupied only once it holds a template, sweep, or
+    support marker file, so an empty or unrelated directory is still free.
+    """
+    if not _topology_dir_occupied(op_dir, preferred):
+        return preferred
+    n = 2
+    while _topology_dir_occupied(op_dir, f"Variant{n}"):
+        n += 1
+    return f"Variant{n}"
+
+
+# --------------------------------------------------------------------------
 # Case-ID derivation
 # --------------------------------------------------------------------------
 
@@ -515,19 +627,25 @@ def assign_case_ids(sweep_cases: list):
             dtypes.add(json.dumps(dt))
             shapes.add(json.dumps(rep.get("dims")))
             layouts.add(json.dumps([rep.get("dims"), rep.get("strides")]))
-    dtype_varies = len(dtypes) > 1
-    layout_varies = len(layouts) > 1
-    shape_varies = len(shapes) > 1
+    # A lone case has nothing to vary against, but it is still fully identified
+    # by its own shape/dtype/layout/attrs -- treat every field as "varying" so
+    # a brand-new single-case sweep gets a descriptive id instead of the bare
+    # "case" fallback in derive_case_id.
+    solo = len(sweep_cases) == 1
+    dtype_varies = solo or len(dtypes) > 1
+    layout_varies = solo or len(layouts) > 1
+    shape_varies = solo or len(shapes) > 1
 
     # A node attribute is a discriminator when it takes more than one value
-    # across the sweep. Include list-valued attrs (conv pad/stride/dilation) —
-    # they are exactly what distinguishes cases sharing shape/dtype/layout.
+    # across the sweep (or the sweep is the solo case above). Include
+    # list-valued attrs (conv pad/stride/dilation) — they are exactly what
+    # distinguishes cases sharing shape/dtype/layout.
     feature_vals = defaultdict(set)
     for e in sweep_cases:
         for k, v in e["values"].get("attributes", {}).items():
             if v is None or isinstance(v, (bool, int, float, str, list)):
                 feature_vals[k].add(json.dumps(v))
-    feature_keys = sorted(k for k, vs in feature_vals.items() if len(vs) > 1)
+    feature_keys = sorted(k for k, vs in feature_vals.items() if len(vs) > 1 or solo)
 
     # First pass: readable base id for each case.
     bases = [

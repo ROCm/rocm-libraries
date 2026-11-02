@@ -32,9 +32,21 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h> /* strcmp */
 
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_choose_load_vec */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
+
+/* The split A/B address forms (defined after the descriptors that call them). */
+static rocke_value_t* conv_a_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* m_val,
+                                          rocke_value_t* k_val,
+                                          rocke_value_t** out_valid);
+static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* k_out,
+                                          rocke_value_t* kg,
+                                          rocke_value_t** out_valid);
 
 /* ===================================================================== *
  *  _choose_load_vec -- pick the widest fp16 load vector width.
@@ -50,13 +62,51 @@ int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
     /* spec.block_size = warp_m * warp_n * wave_size (the @property). */
     int block_size = rocke_implicit_gemm_conv_spec_block_size(spec);
     rocke_status_t st
-        = rocke_choose_load_vec(spec->tile_m, spec->tile_n, spec->tile_k, block_size, &out_vec);
+        = rocke_choose_load_vec(spec->tile_m, spec->tile_n, spec->tile_k, block_size, 2, &out_vec);
     /* On the Python ValueError path choose_load_vec raises; here the status is
      * ROCKE_ERR_VALUE and out_vec is left untouched (0). The prologue is the
      * gate that surfaces the spec validity error before this is reached. */
     if(st != ROCKE_OK)
         return out_vec;
     return out_vec;
+}
+
+/* ===================================================================== *
+ *  The default sync load width (Python _sync_load_vecs without an explicit
+ *  vector_size_*): the tile-geometry width clamped by the largest power of two
+ *  dividing the per-group channel count (A and B both stride over cpg). For
+ *  groups==1 cpg==C. For C=3 this yields 1; without the clamp the tile picker
+ *  returns a wider width Python never uses (e.g. the ImageNet-stem C3 conv).
+ *  Returns 0 when the tile admits no width at all.
+ * ===================================================================== */
+int rocke_conv_default_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
+{
+    int load_vec = rocke_conv_choose_load_vec(spec);
+    bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
+    int max_elem = is_fp32 ? 4 : 8;
+    /* The merged problem: on depthwise its cpg is Gm rather than 1, because the
+     * merged A tile really does address Gm consecutive NHWC channels. A plain
+     * copy of spec->problem at group_merge 1. */
+    rocke_conv_problem_t merged;
+    rocke_implicit_gemm_conv_spec_merged_problem(spec, &merged);
+    int c_dim = rocke_conv_problem_cpg(&merged);
+    int max_ab = (c_dim % max_elem == 0) ? max_elem
+                 : (c_dim % 4 == 0)      ? 4
+                 : (c_dim % 2 == 0)      ? 2
+                                         : 1;
+    if(load_vec > max_ab)
+        load_vec = max_ab;
+    return load_vec;
+}
+
+int rocke_conv_default_load_vec_b(const rocke_implicit_gemm_conv_spec_t* spec)
+{
+    /* B does NOT widen under merge: consecutive k_gemm differ in the merged
+     * group g_k and all but the diagonal one are masked off, a per-element
+     * predicate one vector load cannot carry. */
+    if(spec->group_merge > 1)
+        return 1;
+    return rocke_conv_default_load_vec(spec);
 }
 
 /* ===================================================================== *
@@ -119,7 +169,18 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
     if(ctx->is_pointwise)
     {
         rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
-        rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->ir_c_C_pw), k_val);
+        rocke_value_t* off;
+        if(ctx->ir_pw_a_chan_base != NULL)
+        {
+            /* Grouped: offset = m * C + g*cpg + c; c stays bounded by cpg below.
+             * Python adds the channel base before the row multiply. */
+            rocke_value_t* chan = rocke_b_add(b, ctx->ir_pw_a_chan_base, k_val);
+            off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->p_C), chan);
+        }
+        else
+        {
+            off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->ir_c_C_pw), k_val);
+        }
         rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, ctx->ir_c_M_pw);
         rocke_value_t* c_ok = rocke_b_cmp_lt(b, k_val, ctx->ir_c_C_pw);
         *out_valid = rocke_b_land(b, m_ok, c_ok);
@@ -164,6 +225,9 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
     else
         m_val = rocke_b_add(b, ctx->block_m_off_v, row);
 
+    if(ctx->split_ab)
+        return conv_a_offset_split(ctx, m_val, k_val, out_valid);
+
     if(ctx->group_idx != NULL)
     {
         /* A_desc.offset(b_, m=m_val, k=k_val, group=group_idx) */
@@ -189,12 +253,143 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
 }
 
 /* ===================================================================== *
+ *  mul_u24 / magic_divmod -- Python _conv_implicit_gemm_common helpers.
+ *
+ *  Every operand is bound to a temporary in Python's left-to-right order: C
+ *  leaves argument evaluation order unspecified and the SSA ids follow it.
+ * ===================================================================== */
+rocke_value_t* rocke_conv_mul_u24(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y)
+{
+    rocke_value_t* c24 = rocke_b_const_i32(b, 0xFFFFFF);
+    rocke_value_t* xm = rocke_b_land(b, x, c24);
+    rocke_value_t* ym = rocke_b_land(b, y, c24);
+    return rocke_b_mul(b, xm, ym);
+}
+
+void rocke_conv_magic_divmod(rocke_ir_builder_t* b,
+                             rocke_value_t* val,
+                             rocke_value_t* mult,
+                             rocke_value_t* shift,
+                             rocke_value_t* dim,
+                             bool u24,
+                             rocke_value_t** quot,
+                             rocke_value_t** rem)
+{
+    /* do_magic_division_dynamic: umul_hi, no-unsigned-wrap add, lshr */
+    rocke_value_t* tmp = rocke_b_umul_hi_i32(b, val, mult);
+    rocke_value_t* summed = rocke_b_add_nuw(b, tmp, val);
+    rocke_value_t* q = rocke_b_lshr(b, summed, shift);
+    rocke_value_t* prod = u24 ? rocke_conv_mul_u24(b, q, dim) : rocke_b_mul(b, q, dim);
+    *quot = q;
+    *rem = rocke_b_sub(b, val, prod);
+}
+
+/* Python k_decode (fwd): k -> (y, x, c) through the runtime magic pairs for
+ * cpg and X, with 24-bit remainder products.
+ *
+ * Under group_merge the innermost field of k is the merged group (the merged
+ * per-group channel run is Gm wide), split off with a shift and a mask; c is
+ * then the in-merge group index -- A's channel within the merged slab and B's
+ * diagonal coordinate. */
+static void conv_k_decode(rocke_conv_build_ctx_t* ctx,
+                          rocke_value_t* k_val,
+                          rocke_value_t** y,
+                          rocke_value_t** x,
+                          rocke_value_t** c)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* q_c = NULL;
+    if(ctx->merged)
+    {
+        q_c = rocke_b_lshr(b, k_val, ctx->c_gm_shift);
+        *c = rocke_b_land(b, k_val, ctx->c_gm_mask);
+        rocke_conv_magic_divmod(
+            b, q_c, ctx->p_magic_k_X_mult, ctx->p_magic_k_X_shift, ctx->p_X, true, y, x);
+        return;
+    }
+    rocke_conv_magic_divmod(
+        b, k_val, ctx->p_magic_k_cpg_mult, ctx->p_magic_k_cpg_shift, ctx->p_cpg, true, &q_c, c);
+    rocke_conv_magic_divmod(
+        b, q_c, ctx->p_magic_k_X_mult, ctx->p_magic_k_X_shift, ctx->p_X, true, y, x);
+}
+
+/* Python a_offset_split: the row part (m -> (n, ho, wo), the (hi, wi) origin,
+ * the base offset) and the k part (y, x, c), with the strides distributed so
+ * the row part is loop-invariant. */
+static rocke_value_t* conv_a_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* m_val,
+                                          rocke_value_t* k_val,
+                                          rocke_value_t** out_valid)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t *q_wo, *wo, *n, *ho;
+    rocke_conv_magic_divmod(
+        b, m_val, ctx->p_magic_m_Wo_mult, ctx->p_magic_m_Wo_shift, ctx->p_Wo, false, &q_wo, &wo);
+    rocke_conv_magic_divmod(
+        b, q_wo, ctx->p_magic_m_Ho_mult, ctx->p_magic_m_Ho_shift, ctx->p_Ho, false, &n, &ho);
+    rocke_value_t* ho_s = rocke_b_mul(b, ho, ctx->p_sH);
+    rocke_value_t* hi0 = rocke_b_add(b, ho_s, ctx->split_neg_pH);
+    rocke_value_t* wo_s = rocke_b_mul(b, wo, ctx->p_sW);
+    rocke_value_t* wi0 = rocke_b_add(b, wo_s, ctx->split_neg_pW);
+    rocke_value_t* n_off = rocke_b_mul(b, n, ctx->p_A_stride_n);
+    rocke_value_t* hi_off = rocke_b_mul(b, hi0, ctx->p_A_stride_hi);
+    rocke_value_t* base = rocke_b_add(b, n_off, hi_off);
+    rocke_value_t* wi_off = rocke_b_mul(b, wi0, ctx->p_A_stride_wi);
+    base = rocke_b_add(b, base, wi_off);
+    if(ctx->split_group_base != NULL)
+        base = rocke_b_add(b, base, ctx->split_group_base);
+
+    rocke_value_t *y, *x, *c;
+    conv_k_decode(ctx, k_val, &y, &x, &c);
+    rocke_value_t* y_dh = rocke_b_mul(b, y, ctx->p_dH);
+    rocke_value_t* hi = rocke_b_add(b, hi0, y_dh);
+    rocke_value_t* x_dw = rocke_b_mul(b, x, ctx->p_dW);
+    rocke_value_t* wi = rocke_b_add(b, wi0, x_dw);
+    rocke_value_t* hi_ge = rocke_b_cmp_ge(b, hi, ctx->c0);
+    rocke_value_t* hi_lt = rocke_b_cmp_lt(b, hi, ctx->p_Hi);
+    rocke_value_t* hi_ok = rocke_b_land(b, hi_ge, hi_lt);
+    rocke_value_t* wi_ge = rocke_b_cmp_ge(b, wi, ctx->c0);
+    rocke_value_t* wi_lt = rocke_b_cmp_lt(b, wi, ctx->p_Wi);
+    rocke_value_t* wi_ok = rocke_b_land(b, wi_ge, wi_lt);
+    rocke_value_t* ok = rocke_b_land(b, hi_ok, wi_ok);
+    rocke_value_t* y_ok = rocke_b_cmp_lt(b, y, ctx->p_Y);
+    ok = rocke_b_land(b, ok, y_ok);
+    rocke_value_t* y_off = rocke_b_mul(b, y, ctx->split_ystep);
+    rocke_value_t* off = rocke_b_add(b, base, y_off);
+    rocke_value_t* x_off = rocke_b_mul(b, x, ctx->split_xstep);
+    off = rocke_b_add(b, off, x_off);
+    off = rocke_b_add(b, off, c);
+    *out_valid = ok;
+    return off;
+}
+
+/* Python b_offset_split: k_out*stride_k + y*stride_y + x*stride_x + c, the
+ * filter strides through 24-bit multiplies. */
+static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
+                                          rocke_value_t* k_out,
+                                          rocke_value_t* kg,
+                                          rocke_value_t** out_valid)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* base = rocke_b_mul(b, k_out, ctx->p_B_stride_k);
+    rocke_value_t *y, *x, *c;
+    conv_k_decode(ctx, kg, &y, &x, &c);
+    rocke_value_t* y_off = rocke_conv_mul_u24(b, y, ctx->p_B_stride_y);
+    rocke_value_t* off = rocke_b_add(b, base, y_off);
+    rocke_value_t* x_off = rocke_conv_mul_u24(b, x, ctx->p_B_stride_x);
+    off = rocke_b_add(b, off, x_off);
+    off = rocke_b_add(b, off, c);
+    *out_valid = rocke_b_cmp_lt(b, y, ctx->p_Y);
+    return off;
+}
+
+/* ===================================================================== *
  *  b_descriptor -- the B global-address closure.
  *
  *  Python span: conv_implicit_gemm.py lines 976-982:
  *      def b_descriptor(b_, row, col):
- *          k_out = b_.add(block_n_off_v, row)
- *          if grouped: k_out = b_.add(k_out_group_base, k_out)
+ *          n_val = b_.add(block_n_off_v, row)
+ *          k_out = b_.add(k_out_group_base, n_val) if grouped else n_val
  *          kg = b_.add(k_off_capture[0], col)
  *          return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
  * ===================================================================== */
@@ -206,21 +401,26 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
 {
     rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)ctx_user;
 
-    rocke_value_t* k_out = rocke_b_add(b, ctx->block_n_off_v, row);
+    rocke_value_t* n_val = rocke_b_add(b, ctx->block_n_off_v, row);
     /* Grouped conv: fold in the absolute output-filter group base. */
-    if(ctx->k_out_group_base != NULL)
-        k_out = rocke_b_add(b, ctx->k_out_group_base, k_out);
+    rocke_value_t* k_out
+        = (ctx->k_out_group_base != NULL) ? rocke_b_add(b, ctx->k_out_group_base, n_val) : n_val;
     rocke_value_t* kg = rocke_b_add(b, ctx->k_off_capture, col);
 
-    /* Pointwise fast path: flat offset = k_out * C + c, valid = (k_out < K) & (c < C) */
+    /* Pointwise fast path: flat offset = k_out * cpg + c, valid = (n < kpg) & (c < cpg).
+     * The bound is on the within-group filter n, not the absolute k_out: every
+     * group past the first would otherwise load zeros. */
     if(ctx->is_pointwise)
     {
         rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, k_out, ctx->ir_c_C_pw), kg);
-        rocke_value_t* k_ok = rocke_b_cmp_lt(b, k_out, ctx->ir_c_K_pw);
+        rocke_value_t* k_ok = rocke_b_cmp_lt(b, n_val, ctx->ir_c_K_pw);
         rocke_value_t* c_ok = rocke_b_cmp_lt(b, kg, ctx->ir_c_C_pw);
         *out_valid = rocke_b_land(b, k_ok, c_ok);
         return off;
     }
+
+    if(ctx->split_ab)
+        return conv_b_offset_split(ctx, k_out, kg, out_valid);
 
     const char* names[2] = {"k_out", "k_gemm"};
     rocke_value_t* vals[2] = {k_out, kg};
@@ -228,6 +428,65 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
     rocke_value_t* valid = NULL;
     rocke_transforms_descriptor_offset(b, ctx->B_desc, names, vals, 2, &off, &valid);
     *out_valid = valid;
+    return off;
+}
+
+/* ===================================================================== *
+ *  b_descriptor_merged -- the B load for group_merge > 1.
+ *
+ *  Python span: conv_implicit_gemm.py b_descriptor_merged:
+ *      g_n = b_.add(block_n_off_v, row)
+ *      kg = b_.add(k_off_capture[0], col)
+ *      y, x, g_k = k_decode(b_, kg)
+ *      k_out = b_.add(k_out_group_base, g_n)
+ *      off = b_.add(b_.add(b_.mul(k_out, p_B_stride_k),
+ *                          mul_u24(b_, y, p_B_stride_y)),
+ *                   mul_u24(b_, x, p_B_stride_x))
+ *      diag = b_.cmp_eq(g_k, g_n)
+ *      return off, b_.land(b_.cmp_lt(y, p_Y), diag)
+ *
+ *  The merged GEMM indexes n by the merged group g_n and k by (y, x, g_k) with
+ *  g_k innermost. Only g_k == g_n is real work; every other (n, k) pair is a
+ *  redundant MAC that must contribute zero. The mask therefore rides on the
+ *  *weight* load, not the store: an invalid element is handed to the loader as
+ *  valid = False, takes the buffer descriptor's OOB sentinel, and reads back as
+ *  a hardware zero with no memory traffic -- so the redundant MAC is a no-op and
+ *  the output store stays a dense contiguous run of Gm real outputs.
+ *
+ *  The weight tensor is physical and does not merge: on depthwise it really is
+ *  W[K][Y][X][1], so the channel term is always 0. Merge is gated to the split
+ *  address form, so this never goes through B_desc. Every operand is bound to a
+ *  temporary in Python's left-to-right order (C leaves argument evaluation
+ *  order unspecified and the SSA ids follow it).
+ * ===================================================================== */
+rocke_value_t* rocke_conv_b_descriptor_merged(rocke_ir_builder_t* b,
+                                              rocke_value_t* row,
+                                              rocke_value_t* col,
+                                              rocke_value_t** out_valid,
+                                              void* ctx_user)
+{
+    rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)ctx_user;
+
+    /* g_n: which merged group this tile column owns. Self-bounding -- for
+     * row >= Gm the diagonal is false for every k, so no N-axis clamp is needed
+     * here (the epilogue still bounds the store). */
+    rocke_value_t* g_n = rocke_b_add(b, ctx->block_n_off_v, row);
+    rocke_value_t* kg = rocke_b_add(b, ctx->k_off_capture, col);
+    rocke_value_t *y, *x, *g_k;
+    conv_k_decode(ctx, kg, &y, &x, &g_k);
+
+    /* k_out is the ABSOLUTE output filter index into the physical weight
+     * tensor: merged_group * Gm + g_n. Merge always engages the grouped path. */
+    rocke_value_t* k_out = rocke_b_add(b, ctx->k_out_group_base, g_n);
+    rocke_value_t* base = rocke_b_mul(b, k_out, ctx->p_B_stride_k);
+    rocke_value_t* y_off = rocke_conv_mul_u24(b, y, ctx->p_B_stride_y);
+    rocke_value_t* off = rocke_b_add(b, base, y_off);
+    rocke_value_t* x_off = rocke_conv_mul_u24(b, x, ctx->p_B_stride_x);
+    off = rocke_b_add(b, off, x_off);
+
+    rocke_value_t* diag = rocke_b_cmp_eq(b, g_k, g_n);
+    rocke_value_t* y_ok = rocke_b_cmp_lt(b, y, ctx->p_Y);
+    *out_valid = rocke_b_land(b, y_ok, diag);
     return off;
 }
 

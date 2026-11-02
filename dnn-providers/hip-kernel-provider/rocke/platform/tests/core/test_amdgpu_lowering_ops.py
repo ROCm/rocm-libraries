@@ -14,6 +14,11 @@ These are engine-level (not kernel-family) contracts, so they live in
   map silently reinterpreted them as f16), and reject anything unmapped.
 * ``lower_hip`` arch seam -- an explicitly passed arch must resolve in the arch
   catalog; only an omitted arch falls back to the gfx950 baseline.
+* f64 ops without an f64 lowering (transcendental math, ``fma``, ``fmax3``,
+  ``fmin3``, ``vector_fma``) -- raise in both ``lower_hip`` and ``lower_llvm``
+  instead of computing through f32. f64 ``fabs`` has one and stays in double.
+* ``lower_llvm`` f64 ``vector_add`` / ``vector_sub`` / ``vector_mul`` -- emit
+  ``fadd`` / ``fsub`` / ``fmul`` on ``<N x double>``, not the integer ops.
 * ``lower_llvm._op_memref_global_atomic_add_pk_bf16`` -- lowers to a generic
   ``atomicrmw fadd <2 x bfloat>`` (the ``llvm.amdgcn.global.atomic.fadd.v2bf16``
   intrinsic does not exist in the shipping ROCm LLVM).
@@ -29,9 +34,11 @@ Run:  PYTHONPATH=python python3 tests/core/test_amdgpu_lowering_ops.py
 
 from __future__ import annotations
 
+import re
 import unittest
+from typing import ClassVar
 
-from rocke.core.ir import BF16, I32, IRBuilder, PtrType
+from rocke.core.ir import BF16, F64, I32, IRBuilder, PtrType
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
@@ -129,9 +136,9 @@ class TestSmemTypedVectorLoadHip(unittest.TestCase):
         from rocke.core.lower_hip import _vec_prefix
 
         with self.assertRaises(NotImplementedError) as cm:
-            _vec_prefix("f64", "global_load_vN")
+            _vec_prefix("i64", "global_load_vN")
         self.assertIn("global_load_vN", str(cm.exception))
-        self.assertIn("f64", str(cm.exception))
+        self.assertIn("i64", str(cm.exception))
 
 
 class TestHipArchSeamValidation(unittest.TestCase):
@@ -158,6 +165,102 @@ class TestHipArchSeamValidation(unittest.TestCase):
             lower_kernel_to_hip(self._kernel()),
             lower_kernel_to_hip(self._kernel(), arch="gfx950"),
         )
+
+
+class TestHipF64Rejection(unittest.TestCase):
+    """f64 ops without an f64 lowering fail explicitly in both lowerers."""
+
+    def _kernel(self, op_name):
+        b = IRBuilder(f"{op_name}_f64")
+        out = b.param("out", PtrType(F64, "global"))
+        idx = b.const_i32(0)
+        if op_name == "vector_fma":
+            v = b.global_load_vN(out, idx, F64, 2, align=16)
+            b.global_store_vN(out, idx, b.vector_fma(v, v, v), n=2, align=16)
+        else:
+            x = b.global_load(out, idx, F64, align=8)
+            args = (x, x, x) if op_name in ("fma", "fmax3", "fmin3") else (x,)
+            b.global_store(out, idx, getattr(b, op_name)(*args), align=8)
+        b.ret()
+        return b.kernel
+
+    # Each op's exact rejection message: (HIP lowerer, LLVM lowerer).
+    _REJECTIONS: ClassVar[dict[str, tuple[str, str]]] = {
+        "exp2": ("math.exp2 does not support f64", "math.exp2 currently supports f32"),
+        "log2": ("math.log2 does not support f64", "math.log2 currently supports f32"),
+        "sqrt": ("math.sqrt does not support f64", "math.sqrt currently supports f32"),
+        "rsqrt": (
+            "math.rsqrt does not support f64",
+            "math.rsqrt currently supports f32",
+        ),
+        "rcp_fast": (
+            "math.rcp_fast does not support f64",
+            "math.rcp_fast currently supports f32",
+        ),
+        "fma": ("arith.fma does not support f64", "fma: unsupported FP type 'f64'"),
+        "fmax3": (
+            "arith.fmax3 does not support f64",
+            "fmax3: unsupported FP type 'f64'",
+        ),
+        "fmin3": (
+            "arith.fmin3 does not support f64",
+            "fmin3: unsupported FP type 'f64'",
+        ),
+        "vector_fma": (
+            "vector.fma does not support f64",
+            "vector_fma: unsupported element type 'f64'",
+        ),
+    }
+
+    def test_unsupported_ops_raise(self):
+        # The whole message is pinned, not just the exception type, so a
+        # rejection raised for an unrelated reason cannot pass.
+        for op_name, (hip_msg, llvm_msg) in self._REJECTIONS.items():
+            with self.subTest(op=op_name):
+                kernel = self._kernel(op_name)
+                with self.assertRaisesRegex(
+                    NotImplementedError, rf"^{re.escape(hip_msg)}$"
+                ):
+                    lower_kernel_to_hip(kernel, arch="gfx942")
+                with self.assertRaisesRegex(
+                    NotImplementedError, rf"^{re.escape(llvm_msg)}$"
+                ):
+                    lower_kernel_to_llvm(kernel, arch="gfx942")
+
+    def test_fabs_stays_in_double(self):
+        # The f32 helper would round the value to f32; both lowerings keep it
+        # in double: LLVM through llvm.fabs.f64, HIP through the double fabs.
+        kernel = self._kernel("fabs")
+        ll = lower_kernel_to_llvm(kernel, arch="gfx942")
+        self.assertIn("declare double @llvm.fabs.f64(double)", ll)
+        self.assertRegex(ll, r"= call double @llvm\.fabs\.f64\(double %")
+        hip = lower_kernel_to_hip(kernel, arch="gfx942")
+        self.assertRegex(hip, r"double \S+ = fabs\(")
+        self.assertNotIn("fabsf", hip)
+
+    def test_rcp_divides_in_double(self):
+        hip = lower_kernel_to_hip(self._kernel("rcp"), arch="gfx942")
+        self.assertIn("= 1.0 / ", hip)
+        self.assertNotIn("__builtin_amdgcn_rcpf", hip)
+
+
+class TestF64VectorArith(unittest.TestCase):
+    def test_vector_binops_use_float_ops(self):
+        for op_name, llvm_op in (
+            ("vector_add", "fadd"),
+            ("vector_sub", "fsub"),
+            ("vector_mul", "fmul"),
+        ):
+            with self.subTest(op=op_name):
+                b = IRBuilder(f"{op_name}_f64")
+                out = b.param("out", PtrType(F64, "global"))
+                idx = b.const_i32(0)
+                v = b.global_load_vN(out, idx, F64, 2, align=16)
+                r = getattr(b, op_name)(v, v)
+                b.global_store_vN(out, idx, r, n=2, align=16)
+                b.ret()
+                ir = lower_kernel_to_llvm(b.kernel, arch="gfx942")
+                self.assertIn(f"{r.name} = {llvm_op} <2 x double>", ir)
 
 
 class TestDsReadTr16NameHint(unittest.TestCase):

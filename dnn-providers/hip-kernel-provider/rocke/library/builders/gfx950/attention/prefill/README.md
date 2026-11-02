@@ -38,8 +38,9 @@ Non-persistent kernels still take the shape parameters; that ABI does not make
 a baked diagonal safe to reuse for a different sequence-length difference.
 
 Tile/resource knobs are `block_n`, `waves_per_eu`, and `lds_k_group_pad`;
-persistent scheduling knobs are `num_persistent`, `persist_decode`, `interleave`,
-and `wide_lds_dma`.
+persistent scheduling knobs are `num_persistent`, `interleave`, and `wide_lds_dma`;
+block-order knobs are `persist_decode`, `nonpersist_decode`, and
+`chiplet_num_xcds` (see `../ALGORITHM.md` §8.2).
 
 ## Persistent (grid-stride) mode
 
@@ -49,15 +50,12 @@ a 1-D grid of `num_persistent` long-lived CTAs grid-strides over the
 setup + K/V-prime cold-start is amortized once per CU instead of once per query-block.
 This closes the causal fixed-cost amortization gap. `num_persistent=256` = one 8-wave
 block per CU on MI355X (256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail
-loss). The work-item decode is `persist_decode="auto"` by default. Auto selects:
-
-1. **gqa-pair** when its one-phase balance equation
-   (`NP == NQB*Hkv*B`, with even `NQB` and GQA ratio) holds;
-2. **gqa-pair-2phase** when its two-phase balance equation
-   (`NP == NQB*Hkv*B*gqa/2`, with even `NQB`) holds;
-3. **hkv-major** when its broader GQA balance condition
-   (`gqa*NQB*B >= 2*NP`) holds; or
-4. **qb-major** otherwise.
+loss). The work-item decode is `persist_decode="auto"` by default. For aligned
+causal attention auto selects `hq_minor_swz` for large MHA, else `bt_hkv_minor`
+with fewer batches than XCDs; otherwise `hkv_major` for GQA with enough work per
+KV head, else `qb_major`. Query blocks are folded
+or pair-folded under causal masking without a sliding window. The GQA-pair decodes below are explicit
+only.
 
 ### Balanced GQA-pair decode
 
@@ -69,16 +67,12 @@ through L2.
 
 The explicit mode requires persistent causal attention, aligned sequence lengths,
 even `NQB` and GQA ratio, and `NP == NQB*Hkv*B`. It composes numerically with
-`interleave`, attention sinks, and aligned sliding-window attention. Auto uses it
-for aligned non-windowed causal shapes whenever the balance equation holds.
-Sliding-window requests fall back to qb-major because complementary query blocks
-do not have constant combined work under a finite window. MHA (`Hq == Hkv`) also
-falls back because it has no grouped query heads to reuse.
+`interleave`, attention sinks, and aligned sliding-window attention. Auto does not
+select it: on the shapes it fits, the default block orders measured ahead.
 
 `persist_decode="gqa_pair_2phase"` assigns one query head to each CTA and processes
-complementary query blocks in two grid-stride phases. Auto selects it when
-`NP == NQB*Hkv*B*gqa/2`; this covers, for example, the D128 Hq32/Hkv8 S4096 and
-Hq64/Hkv8 S2048 dashboard shapes at NP=256.
+complementary query blocks in two grid-stride phases. It requires
+`NP == NQB*Hkv*B*gqa/2` and, like `gqa_pair`, is explicit only.
 
 ### Wide LDS DMA
 
@@ -92,11 +86,15 @@ per-row 32-bit DMA layout into FlyDSL-compatible slabs:
 - IGLP-1 instead of the narrow path's manual scheduling directives.
 
 The dispatcher enables it for aligned persistent causal D128/BN64 fp16 and bf16
-shapes without sliding windows, sinks, or ragged lengths. GQA-pair selection is
-independent: MHA and GQA shapes whose pair equations do not hold still use wide
-DMA with qb-major or hkv-major work ordering.
+shapes without sliding windows, sinks, or ragged lengths, whatever the block
+order.
 
 ## Measured (MI355X, bf16, D=128, Hq=128, Hkv=8, causal, Sq=8192)
+
+> These measurements predate the current block orders. Where they show
+> `hkv-major` as the default or `gqa-pair` as auto-selected, auto now picks
+> `bt_hkv_minor` / `qb_major`, which measured ahead of the pair decodes on
+> their shapes.
 
 Absolute MI355X TFLOPS swing **±25–30% with auto-clock**, so only **same-session
 ratios are load-bearing**; the table below is one representative session, with each
@@ -187,42 +185,187 @@ spec = Gfx950AttentionDenseSpec(
 kernel = build_attention_dense(spec)       # -> KernelDef; compile with backend="python"
 ```
 
-Through the dispatcher (opt-in; picks the persistent best-config for large Sq):
+### Optional LSE through the direct runner
+
+LSE (log-sum-exp — the logarithm of the softmax denominator) is an explicit
+compile-time opt-in on the concrete gfx950 dense spec. The caller allocates its
+buffer; the runner still returns only `out`.
 
 ```python
-from dispatch.attention import AttentionRequest, dispatch_attention, dense_spec_for_request
+import torch
+from kernels.gfx950.attention_dense import (
+    Gfx950AttentionDenseSpec,
+    run_attention_dense_torch,
+)
+
+spec = Gfx950AttentionDenseSpec(
+    batch=1, seqlen_q=512, seqlen_kv=512,
+    num_query_heads=32, num_kv_heads=8, head_size=128,
+    causal=True, dtype="fp16", emit_lse=True,
+)
+# q/out: [1, 512, 32, 128]; k/v: [1, 512, 8, 128], on the same GPU.
+lse = torch.empty((1, 32, 512, 1), dtype=torch.float32, device=q.device)
+result = run_attention_dense_torch(
+    spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=128**-0.5,
+)
+# result is out; lse is written on the launch stream.
+```
+
+Statistics use natural logarithms and FP32, not the output tensor's layout:
+fixed-length, fixed ragged, and paged queries use contiguous `[B, Hq, Sq, 1]`;
+packed queries use contiguous `[Tq, Hq, 1]` in packed Q order. The LSE buffer must
+share the inputs' device and must not overlap inputs, output, sinks, or metadata.
+With `emit_lse=True`, `lse` is required; with the flag disabled, supplying it is
+an error. Keep all buffers alive until the supplied stream completes.
+
+A row with no allowed real keys writes exact-zero output and `LSE=-inf`.
+A finite attention sink contributes only to the denominator; an otherwise empty
+row writes zero output and `LSE=sink`. Nonempty rows write the same `O` bits as
+the LSE-off kernel.
+
+This opt-in covers the existing legal gfx950 dense modes: ordinary/persistent,
+fp16/bf16, D64/D128, head sharing, supported masks/windows, fixed ragged, paged,
+aligned packed inputs, sinks, and supported wide-load variants. Existing mode
+restrictions still apply. Enabled packed inputs require same-device int32
+cumulative offsets of length `B+1`, monotone from zero to each packed extent.
+Each nonempty Q length must be a `block_m` multiple and at most spec `seqlen_q`;
+each KV length must be a positive `block_n` multiple and at most spec `seqlen_kv`.
+Zero-Q sequences write no rows. These offset-content checks may synchronize;
+LSE buffer checks use metadata only.
+
+Through the dispatcher, set `emit_lse=True` on a pinned dense `AttentionRequest` and
+pass the buffer as `tensors["lse"]`; `dispatch_attention(req).bind_torch(tensors)`
+then launches the LSE kernel. A candidate whose kernel cannot write LSE does not
+declare the `lse` feature, so an LSE request is refused rather than routed to a
+kernel without the output. The prefill CLI, hipDNN, and the standalone split-KV
+decode kernels do not write LSE; unified attention writes it on its split-KV and
+tiled 2D paths on gfx942/gfx950 (see `dispatch/attention/README.md`). The gfx942
+dense kernel has the same opt-in.
+
+Through the dispatcher (opt-in: pin the candidate by `algorithm` and `spec_id`,
+and optionally a swept point by `tuning_id`):
+
+```python
+from dispatch.attention import AttentionRequest, attention_tuning_spec
 from kernels.gfx950.attention_dense import run_attention_dense_torch
 
 req = AttentionRequest(
     batch=1, nhead_q=128, nhead_k=8, seqlen_q=8192, seqlen_k=8192,
     hdim_q=128, hdim_v=128, arch="gfx950", dtype="bf16", mask_type=1,
-    algorithm="attention_dense",   # opt-in; "auto" keeps the unified 2D/3D path
-    # dense_persistent="auto"      # "auto"|"on"|"off"; auto => persistent for large Sq
-    # dense_persist_decode="auto"  # also accepts gqa_pair / gqa_pair_2phase
 )
-res  = dispatch_attention(req)                 # res.spec.kernel_name() -> ...persist256_hkvmaj
-spec = dense_spec_for_request(req)             # launch-ready best-config AttentionDenseSpec
-run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
+tuning = attention_tuning_spec(req, "gfx950_dense_persist_widedma")
+# tuning.tuning_id replays this point; tuning.kernel_spec is the dense spec.
+run_attention_dense_torch(spec=tuning.kernel_spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
 ```
 
+There are two algorithms, one per body, and three candidates:
+
+| `algorithm` | `spec_id` | Body |
+|---|---|---|
+| `attention_dense_grid` | `gfx950_dense_grid` | one CTA per query block and head |
+| `attention_dense_persist` | `gfx950_dense_persist` | persistent grid-stride |
+| `attention_dense_persist` | `gfx950_dense_persist_widedma` | persistent with wide LDS DMA (D128, `block_n=64`) |
+
+Nothing is chosen for the caller: an unpinned request keeps the unified 2D/3D
+path. The tile (`block_m` 128 or 256, `block_n`) and knobs such as
+`num_persistent`, `persist_decode` (including `gqa_pair` / `gqa_pair_2phase`),
+`interleave`, `nonpersist_decode` (grid body) and `waves_per_eu` are spec
+fields of the candidate; set them with `tuning_spec_with_knobs(req, spec_id,
+knobs)` or replay a swept `tuning_id`. The kernel name exposes the decisions
+through `wdma` and the block-order tokens (e.g. `bthkvmin`, `gqapair`,
+`nphqminswz`).
+
 For bottom-right masking, set `mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL`
-(exported by `dispatch.attention`). With unequal Q/K lengths, this standalone
-gfx950 dense path uses a non-persistent grid under `dense_persistent="auto"` and
-rejects an explicit `"on"`. Equal lengths preserve the equivalent top-left path.
-`algorithm="auto"` still uses the existing unified 2D/3D paths or their eligible
-dense-pipe/D256 candidates: those kernels already shift the causal diagonal by
-each sequence's runtime KV/query length difference. The standalone gfx942 dense
-and gfx1250 WMMA candidates still reject a moving bottom-right diagonal.
+(exported by `dispatch.attention`). With unequal Q/K lengths, only the grid
+algorithm of this standalone gfx950 dense path admits it; the persistent
+candidates reject it. Equal lengths preserve the equivalent top-left path.
+`TOP_LEFT_CAUSAL` (unshifted `key_pos <= query_pos`) is served on gfx950 for
+unequal Q/K lengths too, including non-tile-aligned (ragged) lengths in both
+directions (`seqlen_q < seqlen_k` and `seqlen_q > seqlen_k`).
+
+**The attention band.** `algorithm="auto"` uses the unified 2D/3D paths or their
+eligible dense-pipe/D256 candidates. On gfx950 those kernels compute the cuDNN /
+hipDNN band `(left, right, diagonal_alignment)`: key `k` is visible to the query at
+diagonal position `d` iff `d - k < left` (when set) and `k <= d + right`. An
+`AttentionRequest` spells it with `sliding_window` (left, 0 = unbounded),
+`right_bound` (-1 unbounded = default, 0 causal, R > 0 lookahead) and
+`diagonal_alignment` (unset = TOP_LEFT, or the causal kind's own alignment; 0
+TOP_LEFT, 1 BOTTOM_RIGHT; only matters when `seqlen_q != seqlen_k`). Setting it
+against a causal kind's alignment, mixing it or `right_bound` with the explicit
+`window_left` / `window_right` / `window_bottom_right` fields, or naming
+`SLIDING_WINDOW` without a window or a lookahead is rejected, not ignored:
+
+| mask_type | band |
+|---|---|
+| `NO_MASK` | the trio as given: no bounds = full attention (the SDPA default in cuDNN, FlashAttention, PyTorch); `sliding_window` alone = a left-only (non-causal) window; with `right_bound` = a two-sided window or a lookahead |
+| `SLIDING_WINDOW` | the same trio, but it must name a window or a lookahead (`sliding_window > 0` and/or `right_bound > 0`); a bare causal mask is `TOP_LEFT_CAUSAL` |
+| `TOP_LEFT_CAUSAL` / `BOTTOM_RIGHT_CAUSAL` | right bound 0, alignment from the kind (a causal window = these + `sliding_window`) |
+
+Full attention at `seqlen_q == 1` (single-token decode) is the same computation as
+bottom-right causal, so it is dispatched to the causal kernels and the decode-only
+candidates (strided-KV, d256 decode) keep serving the default `NO_MASK` request. A
+decode *window* is a different band: `NO_MASK` + `sliding_window` is the top-left
+non-causal window, so a decode caller that wants the last-`W`-keys window passes
+`BOTTOM_RIGHT_CAUSAL` (or `diagonal_alignment=1`). Candidates without band support
+reject any real band with a `cannot serve features ['band']` capability reason.
+
+Kernel variants are distinct bodies and names: `_tl` (top-left), `_rbu` / `_rb<R>`
+(unbounded / R-key right bound, plus `_sw<W>` for a non-causal window); at equal
+length the alignments coincide, so the default body is kept. Window, right bound
+and the sinks / softcap options compose; ALiBi and QQ-bias are only defined for
+causal masks. At `seqlen_q == 1` top-left attends only key 0, which is the
+definition of top-left, not a bug. A row whose band holds no key outputs zeros (the
+same in the unified and dense kernels, and what PyTorch SDPA returns for a fully
+masked row).
+
+The standalone dense kernel (`algorithm="attention_dense_grid"` / `"attention_dense_persist"`) implements the same band
+on the top-left diagonal -- full attention (including ragged cross-attention
+`seqlen_q != seqlen_k`), left-only / two-sided windows and lookahead, in both the
+grid and persistent algorithms (kernel names `_full`, `_causal`, `_swa<W>`, `_rb<R>`).
+It does not implement a window or lookahead at bottom-right alignment with
+`seqlen_q != seqlen_k`; that request is rejected with a reason, and `algorithm="auto"`
+routes it to the unified kernels.
+
+Per-sequence alignment: for the paged unified kernels `seqlen_q` / `seqlen_k` are
+the batch maxima and the diagonal is derived per sequence at runtime, so on gfx950
+`TOP_LEFT_CAUSAL` (or the top-left alignment of the band fields) selects the `_tl`
+body even when the two maxima are equal; it is never folded into bottom-right. Only
+dense, which takes uniform lengths, folds the alignments at equal length. On arches
+without a top-left kernel (gfx942 / gfx1250) the legacy equal-length shortcut remains
+and serves top-left with the bottom-right body, which is correct only when every
+sequence has `q_len == kv_len`.
+
+Known gap: the C++ engine (`platform/cpp/instances/`, the tiled 2D / 3D and unified
+bodies, with the `library/tests/parity/*_emit` pairs) does not yet mirror the
+`causal_top_left` / `right_bound` bodies. The default mask is unchanged, so the
+Python/C++ byte-identity gate still holds, and the new variants' lowered IR is pinned
+by representative cases in `platform/tests/golden/rocke_representative_ir_sha256/`
+(Python only). Mirroring them in C++ and adding emit pairs is tracked as a follow-up.
+
+Every alias above (causal kinds fix the right bound at 0, full attention ignores the
+alignment, single-token full attention is causal, equal-length top-left folds for the
+dense kernel only) is resolved in one place, `normalize_band` in
+[common.py](dispatch/attention/common.py), into a frozen `AttentionBand(left_bound,
+right_bound, alignment)`. The unified problem fields, the feature set and the dense
+band all read that value. The feature vocabulary is `causal`, `full_attention`
+(no bound on either side), and `band` (a lookahead or non-causal window); a candidate
+that does not declare one is excluded for a request that needs it.
+
+Known gap: the gfx942 and gfx1250 tiled kernels are still causal-only. `NO_MASK` is
+the request default, so on those arches it keeps being served by the existing
+causal body (a window on it is a causal window, as before) instead of re-routing
+every default request to the slow scalar kernel; any other band is rejected with a
+reason, and a directly built non-default `UnifiedAttentionProblem` is rejected by
+their tiled gates. This is the only place the logical mask depends on the arch; the
+stacked follow-up (#13211) implements the band on the gfx942 tiled and dense kernels
+and removes it. A caller that maps hipDNN `(left, right)` bounds onto this
+request is responsible for passing the right bound through (the ingestor pack
+declines any bound it cannot serve).
+
+The standalone gfx942 dense and gfx1250 WMMA candidates still
+reject a moving bottom-right diagonal.
 That rejection does not disable gfx942 dense sliding-window attention: top-left
 and equal-length bottom-right requests retain the windowed path on both grids.
-
-`dense_persistent="auto"` turns on the persistent grid-stride variant once there is
-enough work to fill the grid (`⌈Sq/256⌉·Hq·B >= num_persistent`) — i.e. the large-Sq
-prefill regime — so the dispatcher reaches the persistent path, not the default
-grid. Aligned causal D128/BN64 shapes enable wide DMA/IGLP; auto then chooses a
-balanced pair mapping when its CTA-count equation holds. The kernel name exposes
-the decisions through `wdma`, `gqapair`, or `gqapair2` tokens. Callers may also
-request either pair mapping explicitly.
 
 ## Tuning — lds_k_group_pad
 

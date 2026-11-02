@@ -187,10 +187,9 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  \p rocsparse_sddmm supports different algorithms which can provide better performance for different matrices.
 *
 *  <table>
-*  <caption id="sddmm_algorithms">Algorithms</caption>
 *  <tr><th>Algorithms                        <th>Deterministic  <th>Preprocessing  <th>Notes
 *  <tr><td>rocsparse_sddmm_alg_default</td>  <td>Yes</td>       <td>No</td>        <td>Uses the sparsity pattern of matrix C to perform a limited set of dot products. </td>
-*  <tr><td>rocsparse_sddmm_alg_dense</td>    <td>Yes</td>       <td>No</td>        <td>Explicitly converts the matrix C into a dense matrix to perform a dense matrix multiply and add. </td>
+*  <tr><td>rocsparse_sddmm_alg_dense</td>    <td>Yes</td>       <td>No</td>        <td>Explicitly converts the matrix C into a dense matrix to perform a dense matrix multiply and add. Requires rocSPARSE to be built with rocBLAS, otherwise \ref rocsparse_status_not_implemented is returned. Deprecated, will be removed in a future release. </td>
 *  </table>
 *
 *  Currently, \p rocsparse_sddmm only supports the uniform precisions indicated in the table below. For the sparse matrix \f$C\f$, \p rocsparse_sddmm supports the index types
@@ -198,7 +197,6 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="sddmm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>rocsparse_datatype_f16_r
 *  <tr><td>rocsparse_datatype_f32_r
@@ -209,7 +207,6 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="sddmm_mixed">Mixed Precisions</caption>
 *  <tr><th>A / B                     <th>C                         <th>compute_type
 *  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r  <td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r

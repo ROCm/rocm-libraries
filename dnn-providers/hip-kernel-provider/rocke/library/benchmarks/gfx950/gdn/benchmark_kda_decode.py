@@ -35,21 +35,14 @@ import dataclasses as dc
 import statistics
 import sys
 import time
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
 
-import torch
-
-from builders.gfx950.gdn.gdn_decode import (
-    TOL,
-    launch,
-    launcher_for,
-    make_inputs,
-    precompute_kda_log_decay,
-    prepare,
-    ref_fp32,
+from builders.gfx950.gdn.tune import (
+    device_is_visible as tuning_device_is_visible,
+    legal_configs,
+    sweep_batch,
 )
-from builders.gfx950.gdn.tune import legal_configs, sweep_batch
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, gdn_decode_grid
 from rocke.runtime.hip_module import get_device_arch
@@ -57,6 +50,31 @@ from rocke.runtime.hip_module import get_device_arch
 ARCH = "gfx950"
 DEFAULT_BATCHES = (1, 8, 32, 128)
 KNOWN_VARIANTS = ("fused", "precomputed", "simple")
+
+
+def _load_device_backend() -> bool:
+    """Load Torch launch helpers when the benchmark is actually executed."""
+    global TOL, drain, launch, launcher_for, make_inputs
+    global precompute_kda_log_decay, prepare, ref_fp32, torch
+    try:
+        import torch as torch_module
+        from builders.gfx950.gdn.gdn_decode import (
+            TOL,
+            drain,
+            launch,
+            launcher_for,
+            make_inputs,
+            precompute_kda_log_decay,
+            prepare,
+            ref_fp32,
+        )
+    except ModuleNotFoundError as exc:
+        if exc.name == "torch":
+            return False
+        raise
+    torch = torch_module
+    # sweep_batch has its own lazy device backend; initialize it for --sweep-tiles.
+    return tuning_device_is_visible()
 
 
 @dataclass(frozen=True)
@@ -122,7 +140,7 @@ def production_variants(
             head_v_dim=head_dim,
         )
     )
-    fused = result.spec
+    fused = result.spec.kernel_spec
     variants = {}
     for name in names:
         if name == "fused":
@@ -187,7 +205,7 @@ def correctness_error(spec: GdnDecodeSpec, inp, batch: int) -> float:
     launcher = launcher_for(spec, arch=ARCH)
     values, cfg = prepare(spec, inp, batch)
     launch(launcher, values, cfg)
-    torch.cuda.synchronize()
+    drain()
     written = inp["write_indices"].long()
     return max(
         (values["out"].float() - ref_out).abs().max().item(),
@@ -207,6 +225,7 @@ def eager_us(spec: GdnDecodeSpec, inp, batch: int, reps: int = 200) -> float:
         call()
         torch.cuda.synchronize()
         samples.append((time.perf_counter_ns() - start) / 1e3)
+    drain()
     return statistics.median(samples)
 
 
@@ -226,7 +245,7 @@ def device_us(spec: GdnDecodeSpec, inp, batch: int, reps: int = 64) -> float | N
             f"    graph capture unavailable: {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
-        torch.cuda.synchronize()
+        drain()
         return None
     for _ in range(5):
         graph.replay()
@@ -240,6 +259,7 @@ def device_us(spec: GdnDecodeSpec, inp, batch: int, reps: int = 64) -> float | N
         end.record()
         torch.cuda.synchronize()
         best = min(best, start.elapsed_time(end) * 1e3 / reps)
+    drain()
     return best
 
 
@@ -276,9 +296,10 @@ def run_default(
                 head_dim=head_dim,
                 names=names,
             )
-            raw_inputs = make_inputs(result.spec, batch)
+            fused = result.spec.kernel_spec
+            raw_inputs = make_inputs(fused, batch)
             for name, spec in variants.items():
-                inp = inputs_for_variant(name, result.spec, raw_inputs)
+                inp = inputs_for_variant(name, fused, raw_inputs)
                 error = correctness_error(spec, inp, batch)
                 if error > TOL:
                     message = (
@@ -361,6 +382,10 @@ def main(argv: Iterable[str] | None = None) -> int:
         batches = tuple(int(x) for x in args.batches.split(","))
     except ValueError as exc:
         parser.error(str(exc))
+
+    if not _load_device_backend():
+        print("requires ROCm torch and a visible HIP device", file=sys.stderr)
+        return 2
 
     device_arch = get_device_arch()
     if not device_arch or not device_arch.startswith(ARCH):

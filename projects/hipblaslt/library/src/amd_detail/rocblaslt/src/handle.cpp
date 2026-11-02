@@ -28,6 +28,7 @@
 #include "check_numerics_matrix.hpp"
 #include "definitions.h"
 #include "logging.h"
+#include "rocblaslt_secure_env.hpp"
 #include "rocroller_host.hpp"
 
 #include <hip/hip_runtime.h>
@@ -45,22 +46,7 @@ namespace
     constexpr const char* kEnvScanFrom      = "HIPBLASLT_CHECK_NUMERICS_SCAN_FROM";
     constexpr const char* kEnvScanUntil     = "HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL";
     constexpr const char* kEnvStopOnFirst   = "HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST";
-
-    // Trim leading/trailing whitespace + lowercase. Used for the two
-    // text-token env vars; numeric-only vars use std::atoi.
-    std::string normalize_env(const char* raw)
-    {
-        std::string s(raw);
-        size_t      first = s.find_first_not_of(" \t");
-        if(first == std::string::npos)
-            return {};
-        s.erase(0, first);
-        if(auto p = s.find_last_not_of(" \t"); p != std::string::npos)
-            s.erase(p + 1);
-        for(auto& c : s)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        return s;
-    }
+    constexpr const char* kEnvCheckSynchronizer = "HIPBLASLT_CHECK_SYNCHRONIZER";
 } // namespace
 
 /*******************************************************************************
@@ -80,6 +66,7 @@ _rocblaslt_handle::_rocblaslt_handle()
 
 #ifdef HIPBLASLT_USE_ROCROLLER
     rocroller_create_handle(&rocroller_handle);
+#endif
     const char* rocRollerEnvVal = std::getenv("HIPBLASLT_USE_ROCROLLER");
     if((std::string(properties.gcnArchName).find("gfx1250") != std::string::npos))
     {
@@ -100,13 +87,12 @@ _rocblaslt_handle::_rocblaslt_handle()
     {
         useRocRoller = -1;
     }
-#endif
 
     // HIPBLASLT_CHECK_NUMERICS: 1/info, 2/warn, 0/none/off. Anything else
     // (including the removed =4 fail bit) collapses to no_check.
     if(const char* cn = std::getenv(kEnvCheckNumerics))
     {
-        const std::string s = normalize_env(cn);
+        const std::string s = rocblaslt::normalizeEnv(cn);
         if(s == "info" || s == "1")
             check_numerics = hipblaslt_check_numerics_mode_info;
         else if(s == "warn" || s == "2")
@@ -149,9 +135,12 @@ _rocblaslt_handle::_rocblaslt_handle()
 
     if(const char* sof = std::getenv(kEnvStopOnFirst))
     {
-        const std::string s = normalize_env(sof);
+        const std::string s          = rocblaslt::normalizeEnv(sof);
         check_numerics_stop_on_first = (s == "1" || s == "on" || s == "true");
     }
+
+    adaptive_sm = rocblaslt::adaptive_sm::Controller::create(
+        c_syncSkStreamSlots, uint32_t(properties.multiProcessorCount));
 
     // Allocate the device flag. STOP_ON_FIRST uses hipHostMalloc(MAPPED) so
     // scan_D can poll without sync; on any failure we fall back to hipMalloc
@@ -220,6 +209,14 @@ _rocblaslt_handle::_rocblaslt_handle()
                       << " was set but no scans will run for this handle." << std::endl;
             }
         }
+    }
+
+    // HIPBLASLT_CHECK_SYNCHRONIZER: opt-in debug check that a Stream-K or GSU
+    // MBSK kernel leaves the handle's flag buffers all-zero on exit.
+    if(const char* cs = std::getenv(kEnvCheckSynchronizer))
+    {
+        const std::string s = rocblaslt::normalizeEnv(cs);
+        check_synchronizer  = (s == "1" || s == "on" || s == "true");
     }
 }
 

@@ -3,7 +3,8 @@
 #
 # CTest categories for the two families descriptor-packaging/cmake/HkpPackaging.cmake
 # pre-registers via add_test() rather than through a GTest binary: the hkp pytest entries
-# (hkp_register_tests) and the census entries (hkp_register_census_tests).
+# (hkp_register_tests) and the census entries (hkp_register_census_tests). flydsl/ adds
+# one more pytest entry of the same kind, for its drift guards.
 #
 # The two pytest entries run DISJOINT sets -- quick is `-m quick` (the no-compile
 # subset), standard is `-m "not quick"`. The tier cascade labels a quick test
@@ -24,20 +25,22 @@
 # dnn-providers/cmake/Tests.cmake falls back to `ctest -L unit_test`.
 test_categories:
   quick:
-    description: "hkp descriptor-packaging pytest (no-compile subset) and the descriptor census"
+    description: "hkp descriptor-packaging pytest (no-compile subset), the descriptor census and the FlyDSL drift-guard tests"
     test_patterns:
       - "hip-kernel-provider-hkp-pack-quick"
       - "hip-kernel-provider-hkp-census-.*"
+      - "hip-kernel-provider-flydsl-drift-guards"
     labels:
       - "unit_test"
       - "hip-kernel-provider"
       - "host"
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks and census"
+    description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks, census and FlyDSL drift guards"
     test_patterns:
       - "hip-kernel-provider-hkp-pack-quick"
       - "hip-kernel-provider-hkp-census-.*"
+      - "hip-kernel-provider-flydsl-drift-guards"
     labels:
       - "ffm-full"
 

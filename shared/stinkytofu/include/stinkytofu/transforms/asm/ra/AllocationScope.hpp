@@ -69,12 +69,28 @@ class AllocationScope {
                                 const SSALiveIntervals& intervals, RegClassSet classes,
                                 SlotIndex cut, Containment rule = Containment::ContainedIn);
 
+    /// Registers named by an operand field that cannot select a VGPR bank. Such
+    /// a field reaches one bank only, and `encodeFieldToVgprOffSlot` reports it
+    /// as slot -1. Empty unless the register file is larger than one bank.
+    ///
+    /// These are registers to hold, not an upper limit to allocate under. The
+    /// producer already placed the operands where their fields can reach them,
+    /// so holding them is an answer known to work, where a limit would leave the
+    /// allocator to find room under it.
+    static std::vector<HeldRange> unbankableOperandRegisters(const Function& function,
+                                                             const AsmTargetRegisters& target);
+
     /// Hold \p ranges: every register in them keeps the value lifted into it,
     /// and no other value may be placed there.
     ///
     /// Not AsmTargetRegisters::reserve(), which withholds a register from
     /// everyone and so rejects the value already in it -- a live-in most of all.
     void pinRegisters(const AllocationConstraints& constraints, std::span<const HeldRange> ranges);
+
+    /// Hold \p ranges with the reason unbankableOperandRegisters() found them,
+    /// so a refusal names the operand's encoding rather than this run's choice.
+    void holdUnbankableOperands(const AllocationConstraints& constraints,
+                                std::span<const HeldRange> ranges);
 
     /// True when only the value lifted from \p idx may occupy it.
     bool isPinnedRegister(RegType regClass, uint32_t idx) const;
@@ -100,6 +116,9 @@ class AllocationScope {
    private:
     AllocationScope(RegClassSet classes, std::vector<const char*> reasonByValue,
                     std::optional<SlotIndex> regionCut, Containment containment);
+
+    void hold(const AllocationConstraints& constraints, std::span<const HeldRange> ranges,
+              const char* reason);
 
     static void applyClassScope(const AllocationConstraints& constraints, RegClassSet classes,
                                 std::vector<const char*>& reasons);

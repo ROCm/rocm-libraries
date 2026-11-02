@@ -65,6 +65,12 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # temporarily disable: LeakSanitizer reports a memory leak at exit
     # (assertions pass but the process leaks).
     list(APPEND SKIP_TESTS find_2_conv.cpp)
+    # temporarily disable (ALMIOPEN-3097): LeakSanitizer reports leaks at exit because these tests never call
+    # miopenDestroySolution on the solutions returned by miopenFindSolutions (assertions pass).
+    list(APPEND SKIP_TESTS
+        na_inference_find2.cpp
+        na_train_find2.cpp
+    )
     # temporarily disable: these fail under ASan even when run individually
     # on gfx942.
     list(APPEND SKIP_TESTS
@@ -78,7 +84,10 @@ endif()
 # registers exactly the tests it did before that work.
 if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
     list(APPEND SKIP_TESTS
+        hipdnn_lru_cache.cpp
         hipdnn_shim_conv.cpp
+        hipdnn_shim_conv_gaps.cpp
+        hipdnn_shim_conv_translation.cpp
         version_api.cpp
     )
 endif()
@@ -258,7 +267,9 @@ function(add_gtest TEST_NAME TEST_CPP)
     endif()
 
     if(MIOPEN_TEST_GFX94X)
-        add_gtest_negative_filter("Full/GPU_LstmMSRnn_FP32.TestFloat/1095") # Disable flaky test ALMIOPEN-1926
+        # Disable flaky test ALMIOPEN-1926: bias-only CPU/GPU mismatch, a different index each run (39 failures at 36 indices in
+        # 60 days of Jenkins gfx942 builds, 2026-08-24..10-23, incl. 11 of 37 develop builds after /1026 and /1095 were filtered).
+        add_gtest_negative_filter("Full/GPU_LstmMSRnn_FP32*")
     endif()
 
     # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.
@@ -305,9 +316,9 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   endif()
 
-  # Among discrete binaries only hipdnn_shim_conv.cpp has shim tests; any other would replay
-  # nothing, which the comparison rejects. No GPU: the shim tests are all GPU tests.
-  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP STREQUAL "hipdnn_shim_conv.cpp"))
+  # Among discrete binaries only the hipdnn_shim_conv*.cpp files have shim tests; any other
+  # would replay nothing, which the comparison rejects. No GPU: the shim tests are all GPU tests.
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP MATCHES "^hipdnn_shim_conv"))
     miopen_forwarding_parity_entries(BUILD ${TEST_NAME})
   endif()
 
@@ -347,8 +358,21 @@ target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOp
 # No include directory is needed: routing.cpp includes its own header by relative
 # path, and adding src/private here would expose miopen_private_rename.h to every
 # test-common source.
+#
+# hipdnn_graph.cpp (with the hipdnn_types.cpp it uses) comes along because
+# routing.cpp asks it whether hipDNN is available before reporting a route. The
+# test binary's copy answers that question and serves the last-error unit tests
+# in wrapper_routing.cpp. The forwarding the shim tests exercise happens inside
+# libMIOpen.so, against its own copy.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
-  target_sources(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
+  if(NOT TARGET hipdnn_frontend_dynamic)
+    find_package(hipdnn_frontend REQUIRED)
+  endif()
+  target_sources(miopen_gtest_common PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/private/routing.cpp
+    ${PROJECT_SOURCE_DIR}/src/private/hipdnn_graph.cpp
+    ${PROJECT_SOURCE_DIR}/src/private/hipdnn_types.cpp)
+  target_link_libraries(miopen_gtest_common PRIVATE hipdnn_frontend_dynamic)
 endif()
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
@@ -368,6 +392,7 @@ function(miopen_forwarding_parity_entry MODE TEST_NAME ENTRY_NAME LABELS)
         --filter ${MIOPEN_FORWARDING_PARITY_FILTER}
         --output-dir ${PROJECT_BINARY_DIR}/test_results
         --lib-dir $<TARGET_FILE_DIR:MIOpen>
+        --known-divergences ${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt
       WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
     )
     # RUN_SERIAL: unlike the shard entries, nothing else keeps this one off a busy GPU.
@@ -378,11 +403,11 @@ function(miopen_forwarding_parity_entry MODE TEST_NAME ENTRY_NAME LABELS)
       ENVIRONMENT "${PARITY_ENVIRONMENT}"
     )
   elseif(MODE STREQUAL "INSTALL")
-    # No --output-dir or --lib-dir: the script's defaults fit the installed layout. python3
-    # because the configure machine's interpreter path need not exist where the package is
-    # tested.
+    # No --output-dir, --lib-dir or --known-divergences: the script's defaults fit the
+    # installed layout. python3 because the configure machine's interpreter path need not
+    # exist where the package is tested.
     file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(${ENTRY_NAME} python3 \"../run_forwarding_parity.py\" \"--gtest\" \"../${TEST_NAME}\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")
+"add_test(${ENTRY_NAME} python3 \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/run_forwarding_parity.py\" \"--gtest\" \"../${TEST_NAME}\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")
 set_tests_properties(${ENTRY_NAME} PROPERTIES RUN_SERIAL TRUE TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT} LABELS \"${LABELS}\" ENVIRONMENT \"${PARITY_ENVIRONMENT}\")
 
 ")
@@ -408,6 +433,11 @@ endfunction()
 # test/gtest/README.md describes the harness and why it is set up this way.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+  # Every packaged flag-ON test file except miopen_gtest installs in this folder, so
+  # packagers can keep the fake hipDNN backend out of runtime packages with one path
+  # pattern. TheRock's ml-libs/artifact-miopen.toml names it; change both together.
+  set(MIOPEN_WRAPPER_TESTS_SUBDIR miopen_wrapper_tests)
 
   set(MIOPEN_FORWARDING_PARITY_FILTER "*HipdnnShim*" CACHE STRING
     "gtest filter selecting the tests the forwarding parity harness replays")
@@ -445,11 +475,43 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
       --lib-dir $<TARGET_FILE_DIR:MIOpen>
       --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
       --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
+      --wrapper-only ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_only_symbols.txt
       --public-header ${PROJECT_SOURCE_DIR}/include/miopen/miopen.h
   )
   set_tests_properties(wrapper_abi_check PROPERTIES
     LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
     TIMEOUT 300)
+
+  # A backend that hipDNN loads and then refuses. It has the real backend's file name, so it
+  # gets its own directory. MODULE, not SHARED: on Windows a SHARED library's DLL ignores the
+  # LIBRARY output and install directories and lands next to MIOpen.dll. hipDNN looks there
+  # before anywhere but HIPDNN_BACKEND_LIBRARY_PATH, so every other test would load the fake.
+  add_library(fake_hipdnn_backend MODULE forwarding_failure/fake_hipdnn_backend.cpp)
+  set_target_properties(fake_hipdnn_backend PROPERTIES
+    OUTPUT_NAME hipdnn_backend
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend")
+  add_dependencies(miopen-tests fake_hipdnn_backend)
+  add_dependencies(miopen-check fake_hipdnn_backend)
+
+  add_executable(forwarding_failure_probe forwarding_failure/forwarding_failure_probe.cpp)
+  target_link_libraries(forwarding_failure_probe PRIVATE MIOpen)
+  # TheRock sets an executable's install RPATH as if it were in bin/. This one is a folder
+  # deeper, so it would otherwise look in bin/lib.
+  set_target_properties(forwarding_failure_probe PROPERTIES
+    THEROCK_INSTALL_RPATH_ORIGIN "${CMAKE_INSTALL_BINDIR}/${MIOPEN_WRAPPER_TESTS_SUBDIR}")
+  add_dependencies(miopen-tests forwarding_failure_probe)
+  add_dependencies(miopen-check forwarding_failure_probe)
+
+  add_test(NAME forwarding_failure_modes
+    COMMAND ${Python3_EXECUTABLE} -m unittest -v test_forwarding_failure_modes
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+  set_tests_properties(forwarding_failure_modes PROPERTIES
+    LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
+    TIMEOUT 300
+    ENVIRONMENT
+      "PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=$<TARGET_FILE:forwarding_failure_probe>;MIOPEN_FAKE_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend"
+    ENVIRONMENT_MODIFICATION
+      "PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
 endif()
 
 if( MIOPEN_TEST_DISCRETE )
@@ -531,8 +593,16 @@ endif()
 # files, which the build-tree entry already covers.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(wrapper_abi_check python3 \"../check_wrapper_abi.py\" \"--baseline\" \"../public_symbols.baseline\" \"--excluded\" \"../wrapper_excluded_symbols.txt\")
+"add_test(wrapper_abi_check python3 \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/check_wrapper_abi.py\" \"--baseline\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/public_symbols.baseline\" \"--excluded\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/wrapper_excluded_symbols.txt\" \"--wrapper-only\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/wrapper_only_symbols.txt\")
 set_tests_properties(wrapper_abi_check PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\")
+
+")
+endif()
+
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
+  file(APPEND "${INSTALL_TEST_FILE}"
+"add_test(forwarding_failure_modes python3 \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/test_forwarding_failure_modes.py\" \"-v\")
+set_tests_properties(forwarding_failure_modes PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\" ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/forwarding_failure_probe${CMAKE_EXECUTABLE_SUFFIX};MIOPEN_FAKE_HIPDNN_BACKEND=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/fake_hipdnn_backend\")
 
 ")
 endif()
@@ -549,6 +619,7 @@ if( NOT ENABLE_ASAN_PACKAGING )
   # NOT MIOPEN_TEST_DISCRETE is for the parity scripts; a discrete build installs nothing
   # from this directory anyway, so it does not take the ABI check's files away.
   if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
+    set(MIOPEN_WRAPPER_TESTS_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}/${MIOPEN_WRAPPER_TESTS_SUBDIR}")
     install(
         PROGRAMS
           "${PROJECT_SOURCE_DIR}/script/check_wrapper_abi.py"
@@ -556,14 +627,25 @@ if( NOT ENABLE_ASAN_PACKAGING )
           "${PROJECT_SOURCE_DIR}/script/miopen_wrapper_libs.py"
           "${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py"
           "${PROJECT_SOURCE_DIR}/script/compare_forwarding_runs.py"
-        DESTINATION ${CMAKE_INSTALL_BINDIR}
+          "${PROJECT_SOURCE_DIR}/script/test_forwarding_failure_modes.py"
+        DESTINATION ${MIOPEN_WRAPPER_TESTS_INSTALL_DIR}
         COMPONENT tests
     )
     install(
         FILES
           "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
-        DESTINATION ${CMAKE_INSTALL_BINDIR}
+          "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_only_symbols.txt"
+          "${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt"
+        DESTINATION ${MIOPEN_WRAPPER_TESTS_INSTALL_DIR}
+        COMPONENT tests
+    )
+    install(TARGETS forwarding_failure_probe
+        DESTINATION ${MIOPEN_WRAPPER_TESTS_INSTALL_DIR}
+        COMPONENT tests
+    )
+    install(TARGETS fake_hipdnn_backend
+        LIBRARY DESTINATION ${MIOPEN_WRAPPER_TESTS_INSTALL_DIR}/fake_hipdnn_backend
         COMPONENT tests
     )
   endif()

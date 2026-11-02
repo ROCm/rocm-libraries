@@ -244,6 +244,19 @@ void testing_logging(const Arguments& arg)
     DEVICE_MEMCHECK(device_vector<T>, dc, (size_c));
     DEVICE_MEMCHECK(device_vector<T>, dd, (size_d));
 
+    // bf16 alpha_type in axpy_ex and scal_ex is only supported with an f32 execution type
+    rocblas_bfloat16  h_bf16_alpha(1.5f);
+    rocblas_bfloat16* bf16_alpha = &h_bf16_alpha;
+    DEVICE_MEMCHECK(device_vector<rocblas_bfloat16>, d_bf16_alpha, (1));
+    DEVICE_MEMCHECK(device_vector<rocblas_bfloat16>, dx_bf16, (size_x));
+    DEVICE_MEMCHECK(device_vector<rocblas_bfloat16>, dy_bf16, (size_y));
+    if(device_mode)
+    {
+        CHECK_HIP_ERROR(
+            hipMemcpy(d_bf16_alpha, bf16_alpha, sizeof(rocblas_bfloat16), hipMemcpyHostToDevice));
+        bf16_alpha = d_bf16_alpha;
+    }
+
     int64_t     h_i64_result;
     rocblas_int h_i32_result;
 
@@ -311,6 +324,19 @@ void testing_logging(const Arguments& arg)
         // fixed datatype dispatch
         rocblas_datatype dt = rocblas_type2datatype<T>();
         DAPI_CHECK(rocblas_axpy_ex_fn, (handle, n, alpha, dt, dx, dt, incx, dy, dt, incy, dt));
+
+        if constexpr(std::is_same_v<T, float>)
+        {
+            constexpr rocblas_datatype bf16 = rocblas_datatype_bf16_r;
+            constexpr rocblas_datatype f32  = rocblas_datatype_f32_r;
+            DAPI_CHECK(
+                rocblas_axpy_ex_fn,
+                (handle, n, bf16_alpha, bf16, dx_bf16, bf16, incx, dy_bf16, bf16, incy, f32));
+
+            auto rocblas_scal_ex_fn    = rocblas_scal_ex;
+            auto rocblas_scal_ex_fn_64 = rocblas_scal_ex_64;
+            DAPI_CHECK(rocblas_scal_ex_fn, (handle, n, bf16_alpha, bf16, dx_bf16, bf16, incx, f32));
+        }
 
         auto rocblas_dot_fn    = rocblas_dot<T>;
         auto rocblas_dot_fn_64 = rocblas_dot_64<T>;
@@ -655,6 +681,45 @@ void testing_logging(const Arguments& arg)
 
 #endif // BUILD_WITH_HIPBLASLT
 
+    // Smoke check for ROCBLAS_LAYER=0x10 (rocblas_layer_mode_log_kernel_select). We don't
+    // golden-file the line because the selected kernel name varies by GPU arch and backend
+    // build — just assert at least one bench-style record with the expected schema was emitted.
+    // Only source=/parent_api= are always present; kernel= is emitted for the Tensile backend
+    // only, so it is intentionally not required here (hipBLASLt-routed GEMMs omit it).
+    if constexpr(!rocblas_is_complex<T>)
+    {
+        const fs::path kernel_select_fspath
+            = tmp_dir + std::string("kernel_select_") + test_run + std::string(".txt");
+        const std::string kernel_select_path = kernel_select_fspath.generic_string();
+
+        setenv_status = setenv("ROCBLAS_LAYER", "0x10", true);
+        ASSERT_EQ(setenv_status, 0);
+        setenv_status = setenv("ROCBLAS_LOG_TRACE_PATH", kernel_select_path.c_str(), true);
+        ASSERT_EQ(setenv_status, 0);
+
+        {
+            rocblas_local_handle handle_ks;
+            rocblas_set_pointer_mode(handle_ks, test_pointer_mode);
+            CHECK_ROCBLAS_ERROR(rocblas_gemm<T>(
+                handle_ks, transA, transB, m, n, k, alpha, da, lda, db, ldb, beta, dc, ldc));
+        } // handle dtor flushes the stream
+
+        std::ifstream ks_ifs(kernel_select_path);
+        ASSERT_TRUE(ks_ifs.good()) << "could not open " << kernel_select_path;
+        bool found = false;
+        for(std::string line; std::getline(ks_ifs, line);)
+        {
+            if(line.find("-f gemm_ex ") != std::string::npos
+               && line.find("# source=") != std::string::npos
+               && line.find("parent_api=") != std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(found) << "ROCBLAS_LAYER=0x10 did not emit a kernel-select line";
+    }
+
     setenv_status = setenv("ROCBLAS_LAYER", "0", true);
     ASSERT_EQ(setenv_status, 0);
 
@@ -763,6 +828,47 @@ void testing_logging(const Arguments& arg)
                    << (void*)dx << "," << dt_str << "," << incx << "," << (void*)dy << "," << dt_str
                    << "," << incy << "," << dt_str << ",atomics_not_allowed\n";
         // no bench output TODO
+    }
+
+    //
+    // AXPY_EX and SCAL_EX with bf16 alpha_type
+    //
+    if constexpr(std::is_same_v<T, float>)
+    {
+        std::string bf16_str(rocblas_datatype_string(rocblas_datatype_bf16_r));
+        std::string f32_str(rocblas_datatype_string(rocblas_datatype_f32_r));
+        if(test_pointer_mode == rocblas_pointer_mode_host)
+        {
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_axpy_ex") << "," << n << ","
+                       << float(h_bf16_alpha) << "," << bf16_str << "," << (void*)dx_bf16 << ","
+                       << bf16_str << "," << incx << "," << (void*)dy_bf16 << "," << bf16_str << ","
+                       << incy << "," << f32_str << ",atomics_not_allowed\n";
+            bench_ofs2 << bench.c_str() << " -f axpy_ex"
+                       << " -n " << n << " "
+                       << rocblas_internal_log_bench_scalar_value("alpha", &h_bf16_alpha)
+                       << " --a_type " << bf16_str << " --b_type " << bf16_str << " --incx " << incx
+                       << " --c_type " << bf16_str << " --incy " << incy << " --compute_type "
+                       << f32_str << bench_endl;
+
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_scal_ex") << "," << n << ","
+                       << float(h_bf16_alpha) << "," << bf16_str << "," << (void*)dx_bf16 << ","
+                       << bf16_str << "," << incx << "," << f32_str << ",atomics_not_allowed\n";
+            bench_ofs2 << bench.c_str() << " -f scal_ex"
+                       << " -n " << n << " "
+                       << rocblas_internal_log_bench_scalar_value("alpha", &h_bf16_alpha)
+                       << " --incx " << incx << " --a_type " << bf16_str << " --b_type " << bf16_str
+                       << " --compute_type " << f32_str << bench_endl;
+        }
+        else
+        {
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_axpy_ex") << "," << n << "," << bf16_str
+                       << "," << (void*)dx_bf16 << "," << bf16_str << "," << incx << ","
+                       << (void*)dy_bf16 << "," << bf16_str << "," << incy << "," << f32_str
+                       << ",atomics_not_allowed\n";
+            trace_ofs2 << replaceX<T>(arg.api, "rocblas_scal_ex") << "," << n << "," << bf16_str
+                       << "," << (void*)dx_bf16 << "," << bf16_str << "," << incx << "," << f32_str
+                       << ",atomics_not_allowed\n";
+        }
     }
 
     //

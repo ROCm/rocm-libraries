@@ -245,15 +245,16 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     const int KV_BYTES = KV_FP8 ? 1 : 2;
     ctx->KV_BYTES = KV_BYTES;
     ctx->kv_io_dtype = KV_FP8 ? rocke_fp8e4m3() : dtype;
-    /* kv_cache_aux: {"all":ALL,"global":GLOBAL,"stream":STREAM,"nt":NT}. */
-    if(rocke_a2d_streq(spec->kv_cache_policy, "all"))
-        ctx->kv_cache_aux = (int)ROCKE_CACHE_ALL;
-    else if(rocke_a2d_streq(spec->kv_cache_policy, "global"))
-        ctx->kv_cache_aux = (int)ROCKE_CACHE_GLOBAL;
-    else if(rocke_a2d_streq(spec->kv_cache_policy, "stream"))
-        ctx->kv_cache_aux = (int)ROCKE_CACHE_STREAM;
-    else
-        ctx->kv_cache_aux = (int)ROCKE_NON_TEMPORAL;
+    /* kv_cache_aux = cache_policy_from_name(spec.kv_cache_policy). */
+    rocke_cache_policy_t kv_cache_bits;
+    if(!rocke_cache_policy_from_name(spec->kv_cache_policy, &kv_cache_bits))
+    {
+        b->status = ROCKE_ERR_VALUE;
+        snprintf(
+            b->err, ROCKE_ERR_MSG_CAP, "kv_cache_policy must be one of {all, global, stream, nt}");
+        return false;
+    }
+    ctx->kv_cache_aux = (int)kv_cache_bits;
 
     /* ---- 32x32 umbrella + QK/PV MFMA geometry (lines 1253-1281) ---- */
     const bool USE_MFMA_32X32X8 = spec->use_mfma_32x32x8;
@@ -397,6 +398,18 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        /* Appended LAST and only when requested, so the LSE-off ABI is unchanged. */
+        if(spec->emit_lse)
+        {
+            memset(&o, 0, sizeof(o));
+            o.noalias = true;
+            o.noalias_set = true;
+            o.writeonly = true;
+            o.writeonly_set = true;
+            o.align = 4;
+            o.align_set = true;
+            ctx->lse = rocke_b_param(b, "lse_ptr", ptr_f32, &o);
+        }
     }
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -22,6 +24,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "harness/BenchmarkReport.hpp"
 #include "harness/BundleMetadata.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
@@ -68,8 +71,16 @@ struct ClaimPhase
 
 /// Runs one bundle against the engine under test and decides what that says.
 ///
-/// Fallback chain: golden → GPU ref → CPU ref → SKIP (RFC 0010 §4.4). Inputs are
-/// read-only (shared); outputs are separate allocations per executor.
+/// Fallback chain: golden → GPU ref → CPU ref (RFC 0010 §4.4). In the reference modes
+/// (auto, gpu, cpu) the engine runs first, and a decline is a SKIP and a break a FAIL
+/// without consulting any oracle; the chain is only walked for an engine that ran.
+/// When nothing in it can verify the bundle, it is unverifiable, and that FAILs: an
+/// engine whose output nothing checks is untested. When the last reference tried
+/// errored rather than declined, the oracle itself is broken, and that FAILs too.
+/// --verification-mode=golden has no chain: it FAILs before running the engine if the
+/// bundle has no golden data.
+///
+/// Inputs are read-only (shared); outputs are separate allocations per executor.
 ///
 /// **This class has no virtual members.** Everything that needs a GPU, a handle, a
 /// loaded engine plugin, or process-wide state lives behind one of the four
@@ -169,7 +180,21 @@ public:
         // One from_binary, one ranked query, one applicability answer. Everything
         // below takes the session as an argument, so nothing re-derives it and
         // nothing caches it on the harness.
-        GraphSession session = openGraph();
+        //
+        // A throw here leaves before any outcome exists. GTest still fails the test,
+        // so it gets its verifier line too (NONE: nothing was compared), or the
+        // summary tally would be short a body that failed.
+        GraphSession session = [this] {
+            try
+            {
+                return openGraph();
+            }
+            catch(...)
+            {
+                _deps.reporter->recordVerifier(_bundlePath.string(), Verifier::NONE);
+                throw;
+            }
+        }();
 
         if(TestConfig::get().writeSupportClaims())
         {
@@ -204,9 +229,17 @@ public:
         commitClaims(claims.observation.results, outcome);
         // Unconditional: both rules are self-guarding, so neither needs a surrounding
         // condition here.
-        raiseComplaints(
-            {claims.complaint,
-             shallowPassComplaint(outcome, bundleRequiredDepth(), _bundlePath.string())});
+        raiseComplaints({claims.complaint,
+                         shallowPassComplaint(outcome, depthOwedByPass(), _bundlePath.string())});
+        // Before the disposition, which returns: a pass must say what it was compared
+        // against, or "auto" landing on a reference is indistinguishable from a skip.
+        _deps.reporter->recordVerifier(_bundlePath.string(), outcome.verifier);
+        // A benchmark exists only for a verified pass. Its failure fails the test but
+        // leaves the claim verdict above alone: the claim is about correctness.
+        if(_benchmark.has_value())
+        {
+            reportBenchmark(*_benchmark);
+        }
         reportOutcome(outcome);
     }
 
@@ -222,6 +255,13 @@ public:
     const TensorMap& packedInputs() const
     {
         return _packedInputs;
+    }
+
+    /// Exposed so a test can check the inputs this run read or generated. Owned by the
+    /// harness, so they are freed, host and device copies alike, when the test ends.
+    const TensorMap& inputs() const
+    {
+        return _inputs;
     }
 
     /// Mode B/C support observation: which engines take this graph?
@@ -286,8 +326,11 @@ private:
     // add a non-terminal failure before it, but it never decides what the test is.
     static void reportOutcome(const VerificationOutcome& outcome);
 
-    // Records the bundle as unverifiable and yields the skip outcome for TestBody()
-    // to issue.
+    // Records the bundle as unverifiable and returns the message the test reports,
+    // "Unverifiable: <reason> (<bundle>)".
+    std::string recordUnverifiable(const std::string& reason);
+    // recordUnverifiable(), as a SKIP. noOracle() is the one unverifiable outcome
+    // that FAILs instead.
     VerificationOutcome unverifiable(const std::string& reason,
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
@@ -322,11 +365,26 @@ private:
                                   : VerificationDepth::VERIFIED;
     }
 
+    // How far a test may go and still be a pass rather than a shallow one: the bundle's
+    // own depth, unless --skip-graph-validation asked for the applicability rung alone.
+    //
+    // Deliberately not folded into bundleRequiredDepth(). That one decides whether a
+    // claim is confirmed, and a run that never executed the graph must leave it merely
+    // accepted, not publish support nothing verified.
+    VerificationDepth depthOwedByPass() const
+    {
+        return _deps.policy.skipGraphValidation ? VerificationDepth::APPLICABLE
+                                                : bundleRequiredDepth();
+    }
+
     enum class RefStatus
     {
         RAN,
         CAPABILITY_MISS,
         RUNTIME_ERROR,
+        /// The harness could not prepare the reference's outputs on the device. Says
+        /// nothing about the reference, so it is never retried on another one.
+        HARNESS_ERROR,
     };
     struct RefRunResult
     {
@@ -357,49 +415,135 @@ private:
     // APPLICABILITY and BUILDABLE come here; FULL takes the comparison path.
     VerificationOutcome enforceAtLevel(EnforcementLevel level, GraphSession& session);
 
+    /// A reference executor whose isApplicable() said it can take this graph.
+    struct ResolvedReference
+    {
+        ReferenceExecutorType type = ReferenceExecutorType::CPU;
+        IReferenceGraphExecutor* executor = nullptr;
+    };
+
+    /// An oracle the chain tried that could not verify the bundle.
+    struct TriedOracle
+    {
+        /// How the "tried: ..." list names it, e.g. "CPU reference (not applicable)".
+        std::string entry;
+        /// Set only if it errored rather than declined: its line in the
+        /// reference-error report.
+        std::optional<std::string> error;
+    };
+
+    /// The references a reference mode may use, in fallback order, and what became
+    /// of each one tried. Probed lazily: only as far as the first applicable one, so
+    /// a working GPU reference never instantiates the CPU one; the rest are probed
+    /// only if the ones before them fail at execute().
+    struct OracleChain
+    {
+        VerificationMode mode = VerificationMode::AUTO;
+        std::vector<ReferenceExecutorType> candidates;
+        std::vector<TriedOracle> tried;
+
+        void declined(std::string entry)
+        {
+            tried.push_back({std::move(entry), std::nullopt});
+        }
+        bool anyErrored() const
+        {
+            return std::any_of(tried.begin(), tried.end(), [](const TriedOracle& oracle) {
+                return oracle.error.has_value();
+            });
+        }
+        /// The verdict rests on the last oracle tried; this says it is broken.
+        bool lastErrored() const
+        {
+            return !tried.empty() && tried.back().error.has_value();
+        }
+    };
+
+    static OracleChain resolveOracles(VerificationMode mode);
+    // Creates `type`'s executor and asks isApplicable(). If it cannot be used, notes
+    // why in the chain and returns nothing.
+    std::optional<ResolvedReference> probeReference(OracleChain& chain, ReferenceExecutorType type);
+    // Notes a reference that errored rather than declined, and puts it in the
+    // reference-error report, worded `error`.
+    void referenceErrored(OracleChain& chain, std::string entry, std::string error);
+
     VerificationOutcome runComparison(GraphSession& session);
     VerificationOutcome runGoldenMode(GraphSession& session);
-    VerificationOutcome runExplicitRefMode(GraphSession& session, ReferenceExecutorType type);
-    VerificationOutcome runAutoMode(GraphSession& session);
+    VerificationOutcome runReferenceMode(GraphSession& session);
+    VerificationOutcome runOracleChain(OutputTensors& engineOutputs, OracleChain& chain);
+
+    // The two ways a spent chain ends, both after the engine ran (EXECUTED).
+    //
+    // The last reference tried errored: an explicit mode's only oracle, or auto
+    // mode's last resort, is broken. An ORACLE FAIL, worded as the reference error
+    // itself rather than as "Unverifiable" -- the bundle is not in the Unverifiable
+    // report.
+    VerificationOutcome lastOracleErrored(const OracleChain& chain) const;
+    // Every oracle declined, possibly after an earlier one errored. Recorded as
+    // unverifiable and a FAIL (ORACLE if one errored along the way, HARNESS if not),
+    // worded "Unverifiable: ..." like the other unverifiable outcomes, which SKIP.
+    VerificationOutcome noOracle(const OracleChain& chain);
+    // "tried: ..." for both messages above.
+    std::string describeTried(const OracleChain& chain) const;
 
     // nullopt when the inputs are ready; otherwise the outcome to return.
     std::optional<VerificationOutcome> prepareInputs();
     std::optional<VerificationOutcome> fillBundleInputs();
 
-    OutputTensors allocateSentinelOutputs() const;
+    OutputTensors allocateSentinelOutputs(bool onDevice) const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
-    RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,
+    RefRunResult runReferenceCapturingOutputs(const ResolvedReference& ref,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
 
+    // Under --benchmark, times the engine on the outputs `outcome` just verified and
+    // keeps the result for TestBody() to report. Does nothing for any other outcome.
+    void benchmarkIfVerified(GraphSession& session,
+                             OutputTensors& engineOutputs,
+                             const VerificationOutcome& outcome);
+
     // Golden data is loaded on the host, so under --validator auto it is compared there.
     VerificationOutcome compareAgainstGolden(OutputTensors& engineOutputs);
-    VerificationOutcome
-        compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected, ValidationSite site);
+    VerificationOutcome compareOutputs(OutputTensors& engineOutputs,
+                                       OutputTensors& expected,
+                                       ValidationSite site,
+                                       Verifier verifier);
 
     // Resolves tolerances, runs bundle::compareOutputs() at `site` — or wherever
     // policy.validator overrides it to — and turns each mismatch it returns into one
     // failure. The comparison itself owns no gtest state.
     VerificationOutcome compareAgainst(OutputTensors& engineOutputs,
                                        const ExpectedTensorLookup& expectedFor,
-                                       ValidationSite site);
+                                       ValidationSite site,
+                                       Verifier verifier);
 
     // VERIFIED either way: the oracle ran and the outputs were examined. A mismatch
     // carries no message because compareAgainst() has already put one failure per
     // drifted tensor on the record — the only place in this harness where that is
     // true, and so the only caller of alreadyReportedFailure().
-    static VerificationOutcome comparisonOutcome(bool allMatched)
+    static VerificationOutcome comparisonOutcome(bool allMatched, Verifier verifier)
     {
-        return allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
-                          : VerificationOutcome::alreadyReportedFailure(VerificationDepth::VERIFIED,
-                                                                        FailureOrigin::COMPARISON);
+        auto outcome = allMatched ? VerificationOutcome::passed(VerificationDepth::VERIFIED)
+                                  : VerificationOutcome::alreadyReportedFailure(
+                                        VerificationDepth::VERIFIED, FailureOrigin::COMPARISON);
+        outcome.verifier = verifier;
+        return outcome;
     }
 
     void recordRefError(const std::string& reason);
+    // Names the fill path when some inputs were generated on the device, whose values
+    // differ from the host fill's, so a failure can be reproduced on the same path or
+    // re-run on the host. Empty when every input came from the host or from golden data.
+    std::string inputFillNote() const;
     static std::string refLabel(ReferenceExecutorType type);
+    static Verifier verifierFor(ReferenceExecutorType type)
+    {
+        return type == ReferenceExecutorType::GPU ? Verifier::GPU_REFERENCE
+                                                  : Verifier::CPU_REFERENCE;
+    }
 
     HarnessDependencies _deps;
     std::optional<LoadedEngine> _engineUnderTest;
@@ -408,6 +552,14 @@ private:
     std::shared_ptr<IntegrationTestBundle> _bundle;
     InputFillRecipes _inputFillRecipes;
     TensorMap _packedInputs;
+    // How many of this run's inputs fillBundleInputs() generated on the device.
+    std::size_t _deviceFilledInputs = 0;
+    // This run's inputs, plus the golden outputs when the bundle has them. Read or
+    // generated by prepareInputs() and owned here rather than by the shared bundle, so
+    // they live exactly as long as the test.
+    TensorMap _inputs;
+    // Set by benchmarkIfVerified(); reported at the end of TestBody().
+    std::optional<hipdnn_frontend::AutotuneResult> _benchmark;
 };
 
 } // namespace hipdnn_integration_tests::bundle

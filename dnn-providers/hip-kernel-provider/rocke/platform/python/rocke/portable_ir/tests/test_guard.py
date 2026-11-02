@@ -101,11 +101,15 @@ class TestDerivation(unittest.TestCase):
         """On a gate whose structure the candidate rules can express, derivation
         should reproduce it -- not merely stay sound. Sound-but-useless is the
         easy failure mode here, so this pins agreement in both directions."""
-        g = derive_guard(gate, CANDS, gate_name="test", arch="gfx950")
-        self.assertEqual(g["derivation"]["method"], "coupled")
-        report = verify_guard(g, gate, CANDS, samples=2000, seed=99)
-        self.assertEqual(report.unsound, [])
-        self.assertEqual(report.strict, [], "derivation lost coverage it could keep")
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                g = derive_guard(gate, CANDS, gate_name="test", arch=arch)
+                self.assertEqual(g["derivation"]["method"], "coupled")
+                report = verify_guard(g, gate, CANDS, samples=2000, seed=99)
+                self.assertEqual(report.unsound, [])
+                self.assertEqual(
+                    report.strict, [], "derivation lost coverage it could keep"
+                )
 
     def test_finds_the_coupling_rule(self):
         g = derive_guard(gate, CANDS, gate_name="test")
@@ -296,22 +300,10 @@ class TestRecipeIntegration(unittest.TestCase):
 
 
 def _online_lib():
-    """Path to a prebuilt shared librocke, or None. Same discovery the other
-    portable-IR tests use; building one here would make a unit test take
-    minutes."""
-    import os
-    import tempfile
+    """Return a source-matched prebuilt engine without making unit tests build."""
+    from rocke.portable_ir.src import online
 
-    here = os.path.dirname(os.path.abspath(__file__))
-    platform = os.path.normpath(os.path.join(here, "..", "..", "..", "..", ".."))
-    for cand in (
-        os.environ.get("ROCKE_ONLINE_LIB"),
-        os.path.join(tempfile.gettempdir(), "rocke_online", "librocke.so"),
-        os.path.join(platform, "build", "librocke.so"),
-    ):
-        if cand and os.path.exists(cand):
-            return cand
-    return None
+    return online.resolve_library_path(build=False)
 
 
 @unittest.skipIf(

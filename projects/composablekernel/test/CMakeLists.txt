@@ -75,9 +75,11 @@ set(REGRESSION_TESTS
     test_max_pool3d_fwd
     test_grouped_convnd_bwd_data
     test_monitor_mwait
+    test_barrier_device
     test_ck_tile_gemm_pipeline_tdm_wmma
     test_ck_tile_gemm_pipeline_wp
     test_ck_tile_gemm_pipeline_wp_tdm
+    test_ck_tile_gemm_pipeline_comp_tdm_v3_longk_wmma
     test_ck_tile_grouped_gemm_multi_d
     test_ck_tile_grouped_gemm_preshuffle
     test_memory_copy
@@ -133,6 +135,7 @@ set(KNOWN_FAILING_TESTS
     test_mx_bf6
     test_mx_fp8_pk4scale
     test_mx_bf8_pk4scale
+    test_cluster_load_async
 )
 
 function(add_test_executable TEST_NAME)
@@ -206,7 +209,7 @@ function(add_test_executable TEST_NAME)
         elseif(source_name_list MATCHES "_wmma")
              list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx950 amdgcnspirv)
         elseif(source_name_list MATCHES "_smfmac")
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx908 gfx90a gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic gfx1250 gfx1250-strict amdgcnspirv)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1170 gfx1171 gfx11-7-generic gfx908 gfx90a gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic gfx1250 gfx1250-strict amdgcnspirv)
         endif()
         set_source_files_properties(${ARGN} PROPERTIES LANGUAGE HIP)
         add_executable(${TEST_NAME} ${ARGN})
@@ -310,9 +313,9 @@ function(add_gtest_executable TEST_NAME)
         elseif(source_name_list MATCHES "monitor_mwait" OR source_name_list MATCHES "async_lds_load_store") #only build sync tests for gfx1250+
              list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx950 gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic amdgcnspirv)
         elseif(source_name_list MATCHES "_smfmac")
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx908 gfx90a gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic gfx1250 gfx1250-strict amdgcnspirv)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1170 gfx1171 gfx11-7-generic gfx908 gfx90a gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic gfx1250 gfx1250-strict amdgcnspirv)
         elseif(source_name_list MATCHES "_mx") #only build mx example for gfx950 and gfx125x
-             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic amdgcnspirv)
+             list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx908:xnack+ gfx908:xnack- gfx90a:xnack+ gfx90a:xnack- gfx908 gfx90a gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1170 gfx1171 gfx11-7-generic gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic amdgcnspirv)
              if(ARGN MATCHES "_pk4scale") #only build pk4scale for gfx1250
                 list(REMOVE_ITEM TEST_TARGETS gfx950)
              endif()

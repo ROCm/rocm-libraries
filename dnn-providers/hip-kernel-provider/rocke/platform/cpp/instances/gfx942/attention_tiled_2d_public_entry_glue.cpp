@@ -205,11 +205,12 @@ bool rocke_gfx942_attention_tiled_2d_supports(
         rocke__reason(reason, reason_cap, buf);
         return false;
     }
-    if(!(args->head_size == 64 || args->head_size == 128 || args->head_size == 256))
+    if(!(args->head_size == 64 || args->head_size == 128 || args->head_size == 192
+         || args->head_size == 256))
     {
         snprintf(buf,
                  sizeof(buf),
-                 "tiled 2D kernel only supports head_size in {64,128,256} "
+                 "tiled 2D kernel only supports head_size in {64,128,192,256} "
                  "(got %d)",
                  args->head_size);
         rocke__reason(reason, reason_cap, buf);
@@ -580,6 +581,9 @@ static rocke_status_t
             hkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
+            /* Python emits "fnuz" under the *same* condition as the kv part,
+             * not under a format test, so it keys off kv_buf being non-empty. */
+            kv_buf[0] ? "fnuz" : "",
             s->use_sinks ? "sinks" : "",
             sw_buf,
             s->has_softcap ? "softcap" : "",
@@ -619,6 +623,7 @@ static rocke_status_t
             s->use_k_sliced_ldsseq ? "ldsseq" : "",
             s->use_iglp_opt ? "iglp1" : "",
             s->use_k_single_buffer ? "k1buf" : "",
+            s->emit_lse ? "lse" : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(

@@ -122,6 +122,14 @@ if(USE_ROCRAND AND NOT TARGET roc::rocrand)
     set(USE_ROCRAND OFF)
 endif()
 
+# FillInputs.cpp generates large inputs with rocRAND (DeviceInputFiller). Only that
+# file is built with USE_ROCRAND: rocrand.h declares a global `half`, which is
+# ambiguous in any file that also pulls in hipdnn_data_sdk::types::half unqualified.
+if(USE_ROCRAND)
+    set_source_files_properties(src/harness/input-init/FillInputs.cpp
+        PROPERTIES COMPILE_DEFINITIONS USE_ROCRAND)
+endif()
+
 include(Dependencies)
 fetch_gtest_dependency()
 
@@ -150,6 +158,59 @@ if(Python3_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_verify_support_claims.py
     )
     set(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST hipdnn_support_claim_verifier_python_tests)
+
+    add_test(
+        NAME hipdnn_support_claim_harvest_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_harvest_support_claims.py
+    )
+    set(HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST hipdnn_support_claim_harvest_python_tests)
+
+    add_test(
+        NAME hipdnn_support_sidecar_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_support_sidecar.py
+    )
+    set(HIPDNN_IT_SUPPORT_SIDECAR_TEST hipdnn_support_sidecar_python_tests)
+
+    # pytest-style suites (fixtures, parametrize), so they run under -m pytest
+    # rather than as scripts; a bare `python file.py` would collect nothing.
+    add_test(
+        NAME hipdnn_bundle_discovery_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_bundle_discovery.py
+    )
+    set(HIPDNN_IT_BUNDLE_DISCOVERY_TEST hipdnn_bundle_discovery_python_tests)
+
+    add_test(
+        NAME hipdnn_support_matrix_renderer_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_render_support_matrix.py
+    )
+    set(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST hipdnn_support_matrix_renderer_python_tests)
+
+    add_test(
+        NAME hipdnn_support_features_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_support_features.py
+    )
+    set(HIPDNN_IT_SUPPORT_FEATURES_TEST hipdnn_support_features_python_tests)
+
+    # None of these suites uses a third-party plugin; don't let a broken one
+    # installed in the developer's environment fail them.
+    set_tests_properties(
+        hipdnn_bundle_discovery_python_tests hipdnn_support_matrix_renderer_python_tests
+        hipdnn_support_features_python_tests
+        PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
+    )
+
+    # Skips itself when PyTorch, which the generator needs, is not installed.
+    add_test(
+        NAME hipdnn_golden_generator_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_sdpa_fwd_golden.py
+    )
+    set(HIPDNN_IT_GOLDEN_GENERATOR_TEST hipdnn_golden_generator_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -173,8 +234,10 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/bundle/SupportClaimWriter.cpp
     src/harness/bundle/SupportClaims.cpp
     src/harness/bundle/SupportVerdict.cpp
+    src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/input-init/SdpaBackwardInputs.cpp
 )
 
 # Golden-data validation: validates our checked-in .bin data against our own
@@ -198,8 +261,10 @@ add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/harness/bundle/SupportClaimReport.cpp
     src/harness/bundle/SupportClaims.cpp
     src/harness/bundle/SupportVerdict.cpp
+    src/harness/bundle/SweepManifestCache.cpp
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/input-init/SdpaBackwardInputs.cpp
     src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     src/harness/reference-validation/GoldenDataPlan.cpp
     src/harness/reference-validation/GoldenDataRegistration.cpp
@@ -221,6 +286,7 @@ target_link_libraries(${GOLDEN_DATA_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
         $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
@@ -256,6 +322,7 @@ target_link_libraries(${INTEGRATION_TESTS_EXE}
         hipdnn_plugin_sdk
         GTest::gtest
         Threads::Threads
+        $<$<BOOL:${USE_ROCRAND}>:roc::rocrand>
         $<$<PLATFORM_ID:Windows>:shlwapi>
 )
 
@@ -286,6 +353,24 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     endif()
     if(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
+    endif()
+    if(HIPDNN_IT_BUNDLE_DISCOVERY_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_DISCOVERY_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_FEATURES_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_FEATURES_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})
     endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")

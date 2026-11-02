@@ -24,6 +24,7 @@
 
 #include "rocsparse_csric0_kernel_binsearch.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -76,7 +77,7 @@ namespace rocsparse
             const J local_col = csr_col_ind[j] - idx_base;
 
             // Corresponding value
-            T local_val = csr_val[j];
+            T local_val = rocsparse::load_done_row_data(&csr_val[j]);
 
             // Beginning of the row that corresponds to local_col
             const I local_begin = csr_row_ptr[local_col] - idx_base;
@@ -94,13 +95,13 @@ namespace rocsparse
             }
 
             // Spin loop until dependency has been resolved
-            (void)rocsparse::spin_loop<SLEEP>(&done[local_col], __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::spin_loop<SLEEP>(&done[local_col], __MEMORY_SCOPE_DEVICE);
 
-            // Make sure updated csr_val is visible globally
-            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+            // Read the results of the dependencies only after their done flags
+            rocsparse::acquire_done_rows();
 
             // Load diagonal entry
-            T diag_val = csr_val[local_diag];
+            T diag_val = rocsparse::load_done_row_data(&csr_val[local_diag]);
 
             // Row has numerical zero diagonal
             if(diag_val == static_cast<T>(0))
@@ -161,7 +162,10 @@ namespace rocsparse
                 if(col_j == col_k)
                 {
                     // If a match has been found, do linear combination
-                    local_sum = rocsparse::fma(csr_val[k], rocsparse::conj(csr_val[m]), local_sum);
+                    local_sum = rocsparse::fma(
+                        rocsparse::load_done_row_data(&csr_val[k]),
+                        rocsparse::conj(rocsparse::load_done_row_data(&csr_val[m])),
+                        local_sum);
                 }
             }
 
@@ -174,7 +178,7 @@ namespace rocsparse
                 local_val = (local_val - local_sum) * diag_val;
                 sum       = rocsparse::fma(local_val, rocsparse::conj(local_val), sum);
 
-                csr_val[j] = local_val;
+                rocsparse::store_done_row_data(&csr_val[j], local_val);
             }
         }
 
@@ -183,7 +187,7 @@ namespace rocsparse
         {
             if((row_diag >= 0))
             {
-                const T diag_val = csr_val[row_diag] - sum;
+                const T diag_val = rocsparse::load_done_row_data(&csr_val[row_diag]) - sum;
 
                 // check for negative value and numerical small value
                 if((rocsparse::imag(diag_val) == 0) && (rocsparse::real(diag_val) <= (tol_sq)))
@@ -191,8 +195,9 @@ namespace rocsparse
                     rocsparse::atomic_min(singular_pivot, (row + idx_base));
                 }
 
-                csr_val[row_diag] = rocsparse::sqrt(rocsparse::abs(csr_val[row_diag] - sum));
-                if(csr_val[row_diag] == static_cast<T>(0))
+                const T new_diag = rocsparse::sqrt(rocsparse::abs(diag_val));
+                rocsparse::store_done_row_data(&csr_val[row_diag], new_diag);
+                if(new_diag == static_cast<T>(0))
                 {
                     rocsparse::atomic_min(zero_pivot, (row + idx_base));
                 }
@@ -202,13 +207,14 @@ namespace rocsparse
         if(lid == WF_SIZE - 1)
         {
             // Last lane writes "we are done" flag
-            __hip_atomic_store(&done[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::set_done_flag(&done[row], 1);
         }
     }
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csric0_kernel_binsearch(J m,
+    void csric0_kernel_binsearch(J       m,
+                                 int64_t batch_count,
                                  const I* __restrict__ csr_row_ptr,
                                  const J* __restrict__ csr_col_ind,
                                  T*      csr_val,
@@ -233,19 +239,22 @@ namespace rocsparse
         const double tolerance
             = (tolerance_datatype == rocsparse_datatype_f64_r) ? tolerance_64 : tolerance_32;
 
-        const auto batch_index = hipBlockIdx_y;
-        rocsparse::csric0_device_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>(
-            m,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val + batch_index * csr_val_stride,
-            csr_diag_ind,
-            done + batch_index * done_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            singular_pivot + batch_index * singular_pivot_stride,
-            tolerance,
-            idx_base);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::csric0_device_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>(
+                m,
+                csr_row_ptr,
+                csr_col_ind,
+                rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
+                csr_diag_ind,
+                rocsparse::load_pointer(done, batch_index, done_stride),
+                map,
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                rocsparse::load_pointer(singular_pivot, batch_index, singular_pivot_stride),
+                tolerance,
+                idx_base);
+        }
     }
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
@@ -259,9 +268,11 @@ namespace rocsparse
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
+        // A zero value stride aliases every instance onto the same values.
+        const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
 
         const dim3 csric0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                                 A->batch_count);
+                                 rocsparse::get_grid_size_y(handle, A_batch_count));
 
         const dim3 csric0_threads(BLOCKSIZE);
 
@@ -282,6 +293,7 @@ namespace rocsparse
             0,
             handle->stream,
             A->rows,
+            A_batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),

@@ -9,6 +9,7 @@
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ComgrProbe.hpp"
+#include "stinkytofu/hardware/HwReg.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 
 namespace stinkytofu {
@@ -42,6 +43,13 @@ bool checkMajorIn(uint32_t major, std::initializer_list<uint32_t> list) {
 
 bool checkMajorNotIn(uint32_t major, std::initializer_list<uint32_t> list) {
     return !checkMajorIn(major, list);
+}
+
+// Bit position of DISABLE_XDL_ARB_STALL, read from HwReg so it has one source of truth.
+// -1 where the field does not exist; 0 would alias DEP_MODE's LSB.
+int arbStallBitOffset(GfxArchID archID) {
+    auto field = HwReg::schedModeDisableXdlArbStall(archID);
+    return field.size ? static_cast<int>(field.offset) : -1;
 }
 
 // ── asmCaps ──────────────────────────────────────────────────────────────
@@ -176,11 +184,19 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["HasCvtScalePk8Bf8F32"] =
         tryAsm(isaName, ws, "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0");
 
+    // NaN-propagating f32 clamp. PackData fp8 pk8 saturation uses this to pick
+    // v_pk_fma_f32 + v_maximumminimum_f32 over cmp_class/med3/cndmask
+    // (mirrors rocisa hardware_caps.hpp HasVMaximumMinimumF32).
+    rv["HasVMaximumMinimumF32"] = tryAsm(isaName, ws, "v_maximumminimum_f32 v0, v1, v2, v3");
+
     // v_movrelsd_2_b32: indirect-VGPR-write move used by CompactLoopStore
     // (mirrors rocisa hardware_caps.hpp HasMovRelsD2B32).
     rv["HasMovRelsD2B32"] = hasMnemonic(m, "v_movrelsd_2_b32");
 
     rv["HasAtomicAdd"] = hasAnyMnemonic(m, {"buffer_atomic_add_f32"});
+    // Packed 2xBF16 atomic add gating GSU AtomicDest for a BF16 D
+    // (mirrors rocisa hardware_caps.hpp HasAtomicPkAddBF16).
+    rv["HasAtomicPkAddBF16"] = hasAnyMnemonic(m, {"buffer_atomic_pk_add_bf16"});
 
     // Scalar-memory atomics (s_atomic_*): false on gfx12/gfx1250. The GSU and
     // StreamK paths gate on asmCaps["HasSAtomic"] (mirrors rocisa
@@ -272,7 +288,7 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
 }
 
 // ── archCaps ─────────────────────────────────────────────────────────────
-std::map<std::string, int> initArchCaps(const IsaVersion& v) {
+std::map<std::string, int> initArchCaps(const IsaVersion& v, GfxArchID archID) {
     std::map<std::string, int> rv;
 
     rv["HasEccHalf"] =
@@ -294,6 +310,9 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
 
     rv["CMPXWritesSGPR"] = checkMajorNotIn(v[0], {10, 11, 12});
     rv["HasWave32"] = checkMajorIn(v[0], {10, 11, 12});
+    // GFX12.5 always uses wave32 and reserves the descriptor's wave-size selector.
+    // Keep this separate from HasWave32, as in rocisa hardware_caps.hpp.
+    rv["HasWavefrontSize32Directive"] = rv["HasWave32"] && !(v[0] == 12 && v[1] == 5);
     rv["HasSchedMode"] = checkMajorIn(v[0], {12});
     rv["HasAccCD"] = checkInList(v, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(v, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
@@ -308,7 +327,13 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     rv["VOP3ByteSel"] = v[0] == 12;
     rv["HasFP8_OCP"] = v[0] == 12;
     rv["HasWmmaArbStallBit"] = v[0] == 12 && v[1] == 5;
+    rv["WmmaArbStallBitOffset"] = arbStallBitOffset(archID);
     rv["HasF32XEmulation"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
+    // F32X emulation Inf guard (v_cmp_class). The 3xBF16 split turns Inf into
+    // Inf - Inf = NaN unless the pack path substitutes a finite high part.
+    // gfx950 leaves it off: the extra VALU in the MFMA pack path regresses perf.
+    // Keep in lock-step with rocisa hardware_caps.hpp.
+    rv["F32XEmulationInfSupport"] = checkInList(v, {{12, 5, 0}});
     rv["MaxSgprPreload"] = checkInList(v, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"] =
         checkInList(v, {{9, 5, 0}}) || checkInList(v, {{9, 0, 10}}) || (v[0] == 9 && v[1] == 4);
@@ -320,6 +345,20 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
 
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4;
+
+    // Per-XCD work-queue count baked into StreamK dynamic-queue kernels. Single
+    // codegen-side mirror of origami get_default_num_xcds(): gfx942/gfx950 bake
+    // 8 (the MI300X value), every other arch 1. gfx942 covers BOTH MI300X (8
+    // XCDs) and MI300A (6 XCDs), which codegen cannot tell apart, so it always
+    // bakes 8; the host guard rejects a device whose runtime NUM_XCD != this
+    // baked value (so MI300A's 6 is excluded at runtime). Power-of-two keeps the
+    // StreamK queue masking (AND/shift) valid. Kept in sync with rocisa
+    // hardware_caps.hpp.
+    rv["NumXCD"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}}) ? 8 : 1;
+
+    // Per-queue counter stride = L2 cache-line size (uniform 128B on supported
+    // archs). Kept in sync with rocisa hardware_caps.hpp.
+    rv["CacheLineBytes"] = 128;
 
     return rv;
 }
@@ -412,7 +451,7 @@ HardwareCapsResult HardwareCaps::query(uint32_t major, uint32_t minor, uint32_t 
         const auto& mnemonicMap = info->getMnemonicToIsaOpcodeMap();
 
         entry.result.asmCaps = initAsmCaps(v, mnemonicMap, archID, info);
-        entry.result.archCaps = initArchCaps(v);
+        entry.result.archCaps = initArchCaps(v, archID);
         entry.result.regCaps = initRegCaps(v, entry.result.archCaps);
         entry.result.asmBugs = initAsmBugs(entry.result.asmCaps);
     });

@@ -37,7 +37,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SanityCheck)
     // Q[0,0,0,:] = [1,0], Q[0,0,1,:] = [0,1]
     // K[0,0,0,:] = [1,0], K[0,0,1,:] = [0,1]
     // V[0,0,0,:] = [1,2], V[0,0,1,:] = [3,4]
-    // Default scale = 1/sqrt(2)
+    // No attention scale given: 1.0, no scaling.
 
     Tensor<double> q({1, 1, 2, 2});
     Tensor<double> k({1, 1, 2, 2});
@@ -60,10 +60,10 @@ TEST(TestCpuFpReferenceSdpaFp64, SanityCheck)
 
     CpuFpReferenceSdpa::forward(q, k, v, o);
 
-    // Expected using default scale = 1/sqrt(2):
+    // Expected with the default scale of 1.0:
     // sq=0: S[0]=scale, S[1]=0 → P[0]=1/(1+exp(-scale)), P[1]=exp(-scale)/(1+exp(-scale))
     // sq=1: S[0]=0, S[1]=scale → P[0]=exp(-scale)/(1+exp(-scale)), P[1]=1/(1+exp(-scale))
-    const float scale = 1.0f / std::sqrt(2.0f);
+    const float scale = 1.0f; // no attention scale given
     const float eLow = std::exp(-scale);
     const float sumExp = 1.0f + eLow;
     const float pHigh = 1.0f / sumExp; // weight for the matching kv token
@@ -80,9 +80,9 @@ TEST(TestCpuFpReferenceSdpaFp64, SanityCheck)
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 1), static_cast<double>(pLow * 2.0f + pHigh * 4.0f), tol);
 }
 
-TEST(TestCpuFpReferenceSdpaFp64, DefaultScaleIs1OverSqrtD)
+TEST(TestCpuFpReferenceSdpaFp64, DefaultScaleIsOne)
 {
-    // Verify that the default attention scale equals 1/sqrt(headDim).
+    // An absent attention scale is 1.0 (no scaling), cuDNN's default, at any head size.
     // Q[0,0,0,0]=1, rest zero; K[0,0,0,0]=1 (dot=1), K[0,0,1,:]=0 (dot=0).
     const int64_t headDim = 4;
 
@@ -103,10 +103,9 @@ TEST(TestCpuFpReferenceSdpaFp64, DefaultScaleIs1OverSqrtD)
 
     CpuFpReferenceSdpa::forward(q, k, v, o);
 
-    // Default scale = 1/sqrt(headDim)
     // S[0] = 1 * scale, S[1] = 0
     // P[0] = 1/(1+exp(-scale)), P[1] = exp(-scale)/(1+exp(-scale))
-    const float defaultScale = 1.0f / std::sqrt(static_cast<float>(headDim));
+    const float defaultScale = 1.0f;
     const float e1 = std::exp(-defaultScale);
     const float sumE = 1.0f + e1;
     const float p0 = 1.0f / sumE;
@@ -118,7 +117,7 @@ TEST(TestCpuFpReferenceSdpaFp64, DefaultScaleIs1OverSqrtD)
 
 TEST(TestCpuFpReferenceSdpaFp64, CustomScale)
 {
-    // Verify that an explicit attnScaleValue overrides the default 1/sqrt(D).
+    // Verify that an explicit attnScaleValue overrides the default of 1.0.
     const int64_t headDim = 4;
 
     Tensor<double> q({1, 1, 1, headDim});
@@ -136,7 +135,7 @@ TEST(TestCpuFpReferenceSdpaFp64, CustomScale)
     v.setHostValue(1.0, 0, 0, 0, 0);
     v.setHostValue(2.0, 0, 0, 1, 0);
 
-    CpuFpReferenceSdpa::forward(q, k, v, oDefault); // default scale = 0.5
+    CpuFpReferenceSdpa::forward(q, k, v, oDefault); // default scale = 1.0
     CpuFpReferenceSdpa::forward(q, k, v, oCustom, std::optional<float>{2.0f}); // custom scale = 2.0
 
     // Expected with custom scale = 2.0: S[0]=2, S[1]=0
@@ -192,6 +191,65 @@ TEST(TestCpuFpReferenceSdpaFp64, WithAttnMask)
     // sq=1: unmasked, biased toward kv=1 (higher score) → O closer to V[0,0,1,:]=[3,4]
     EXPECT_GT(o.getHostValue(0, 0, 1, 0), 2.0);
     EXPECT_GT(o.getHostValue(0, 0, 1, 1), 3.0);
+}
+
+namespace
+{
+
+template <class MaskT>
+void expectTypedMaskMatchesFloatMask()
+{
+    // Skv=4 with distinct, exactly representable mask values: softmax is shift-invariant, so a
+    // uniform mask would pass even if the mask were misread.
+    Tensor<float> q({1, 1, 2, 4});
+    Tensor<float> k({1, 1, 4, 4});
+    Tensor<float> v({1, 1, 4, 4});
+    Tensor<float> oFloatMask({1, 1, 2, 4});
+    Tensor<float> oTypedMask({1, 1, 2, 4});
+    Tensor<float> floatMask({2, 4});
+    Tensor<MaskT> typedMask({2, 4});
+
+    q.fillWithRandomValues(-1.0f, 1.0f, 301);
+    k.fillWithRandomValues(-1.0f, 1.0f, 302);
+    v.fillWithRandomValues(-1.0f, 1.0f, 303);
+
+    const std::array<std::array<float, 4>, 2> values
+        = {{{0.0f, -0.5f, 1.0f, -2.0f}, {0.25f, 1.5f, -1.0f, 0.5f}}};
+    for(size_t sq = 0; sq < 2; ++sq)
+    {
+        for(size_t skv = 0; skv < 4; ++skv)
+        {
+            const auto sqIdx = static_cast<int64_t>(sq);
+            const auto skvIdx = static_cast<int64_t>(skv);
+            floatMask.setHostValue(values.at(sq).at(skv), sqIdx, skvIdx);
+            typedMask.setHostValue(static_cast<MaskT>(values.at(sq).at(skv)), sqIdx, skvIdx);
+        }
+    }
+
+    CpuFpReferenceSdpa::forward<float, float, float, float, float, float>(
+        q, k, v, oFloatMask, std::nullopt, &floatMask);
+    CpuFpReferenceSdpa::forward<float, float, float, float, float, MaskT>(
+        q, k, v, oTypedMask, std::nullopt, &typedMask);
+
+    for(int sq = 0; sq < 2; ++sq)
+    {
+        for(int d = 0; d < 4; ++d)
+        {
+            EXPECT_EQ(oTypedMask.getHostValue(0, 0, sq, d), oFloatMask.getHostValue(0, 0, sq, d));
+        }
+    }
+}
+
+} // namespace
+
+TEST(TestCpuFpReferenceSdpa, HalfMaskMatchesFloatMask)
+{
+    expectTypedMaskMatchesFloatMask<half>();
+}
+
+TEST(TestCpuFpReferenceSdpa, Bfloat16MaskMatchesFloatMask)
+{
+    expectTypedMaskMatchesFloatMask<bfloat16>();
 }
 
 TEST(TestCpuFpReferenceSdpaFp64, GqaSupport)
@@ -293,7 +351,7 @@ TEST(TestCpuFpReferenceSdpaFp64, GqaDifferentKVHeads)
 
     CpuFpReferenceSdpa::forward(q, k, v, o);
 
-    const float scale = 1.0f / std::sqrt(2.0f);
+    const float scale = 1.0f; // no attention scale given
     const float eLow = std::exp(-scale);
     const float sumExp = 1.0f + eLow;
     const float pHigh = 1.0f / sumExp;
@@ -363,7 +421,7 @@ TEST(TestCpuFpReferenceSdpaFp64, CausalMask)
     // [B=1, H=1, Sq=3, Skv=3, D=3, Dv=1]
     // Q[sq,:] = one-hot(sq), K[skv,:] = one-hot(skv) → dot(Q[sq], K[skv]) = δ(sq,skv)
     // V[skv,0] = skv+1: [1, 2, 3]
-    // scale = 1/sqrt(3), eNeg = exp(-scale)
+    // scale = 1.0 (none given), eNeg = exp(-scale)
     //
     // sq=0: only kv=0 unmasked, S[0]=scale → P[0]≈1       → O≈1
     // sq=1: kv=0,1 unmasked, S[0]=0, S[1]=scale           → O = eNeg/(1+eNeg)*1 + 1/(1+eNeg)*2
@@ -395,7 +453,7 @@ TEST(TestCpuFpReferenceSdpaFp64, CausalMask)
     const TensorBase<float>* noMask = nullptr;
     CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, /*causalMask=*/true);
 
-    const float scale = 1.0f / std::sqrt(3.0f);
+    const float scale = 1.0f; // no attention scale given
     const float eNeg = std::exp(-scale);
 
     // sq=0: only kv=0 unmasked → P[0]≈1 → O≈V[0,0]=1
@@ -503,8 +561,9 @@ TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSq)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
 {
-    // Generic sliding window with leftBound=1, rightBound=1 (TopLeft alignment).
-    // Square shape Sq=Skv=4. Window is centered at sq, width 3.
+    // Generic sliding window with leftBound=2, rightBound=1 (TopLeft alignment).
+    // leftBound=2 keeps 2 keys ending at the diagonal (cuDNN), so with rightBound=1
+    // the window is centered at sq, width 3. Square shape Sq=Skv=4.
     // Q=K=0 → all unmasked scores equal → softmax is uniform over the window.
     // V = {1, 2, 3, 4} → output is the mean of unmasked V values.
     //
@@ -535,7 +594,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/1,
+                                /*leftBound=*/2,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/true);
 
@@ -547,8 +606,9 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
 {
-    // Generic sliding window with leftBound=2, rightBound=1 (TopLeft alignment).
+    // Generic sliding window with leftBound=3, rightBound=1 (TopLeft alignment).
     // Asymmetric window (wider on the left) with Sq=4, Skv=5.
+    // Unmasked iff (sq - leftBound) < skv <= (sq + rightBound)
     //
     // Expected mask (1=unmasked):
     //    _____kv______
@@ -578,7 +638,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/2,
+                                /*leftBound=*/3,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/true);
 
@@ -590,10 +650,10 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricTopLeft)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
 {
-    // Generic sliding window with leftBound=2, rightBound=1 (BottomRight alignment).
+    // Generic sliding window with leftBound=3, rightBound=1 (BottomRight alignment).
     // Asymmetric window (wider on the left) with Sq=4, Skv=5.
     // diagonal offset = Skv - Sq = 1.
-    // Unmasked iff (sq + offset - leftBound) <= skv <= (sq + offset + rightBound)
+    // Unmasked iff (sq + offset - leftBound) < skv <= (sq + offset + rightBound)
     //         iff (sq - 1)                  <= skv <= (sq + 2)
     //
     // Expected mask (1=unmasked):
@@ -624,7 +684,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/2,
+                                /*leftBound=*/3,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/false);
 
@@ -636,9 +696,9 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowAsymmetricBottomRight)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
 {
-    // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.
+    // Generic sliding window with leftBound=2, rightBound=1, BottomRight alignment.
     // Sq=2, Skv=4 → diagonal offset = Skv - Sq = 2.
-    // Unmasked iff (sq + offset - leftBound) <= skv <= (sq + offset + rightBound)
+    // Unmasked iff (sq + offset - leftBound) < skv <= (sq + offset + rightBound)
     //         iff (sq + 1)                  <= skv <= (sq + 3)
     //
     // Expected mask (1=unmasked):
@@ -666,7 +726,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/1,
+                                /*leftBound=*/2,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/false);
 
@@ -676,9 +736,9 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSkv)
 
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSq)
 {
-    // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.
+    // Generic sliding window with leftBound=2, rightBound=1, BottomRight alignment.
     // Sq=4, Skv=2 → diagonal offset = Skv - Sq = -2.
-    // Unmasked iff (sq - 2 - 1) <= skv <= (sq - 2 + 1)
+    // Unmasked iff (sq - 2 - 2) < skv <= (sq - 2 + 1)
     //         iff (sq - 3)      <= skv <= (sq - 1)
     //
     // Expected mask (1=unmasked):
@@ -706,7 +766,7 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSq)
                                 o,
                                 std::nullopt,
                                 noMask,
-                                /*leftBound=*/1,
+                                /*leftBound=*/2,
                                 /*rightBound=*/1,
                                 /*topLeftAlignment=*/false);
 
@@ -714,6 +774,60 @@ TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowBottomRightLargerSq)
     EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 1.0, 1e-5);
     EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), 1.5, 1e-5);
     EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), 1.5, 1e-5);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, LeftBoundKeepsLKeysIncludingDiagonalLikeCudnn)
+{
+    // cuDNN's left bound: leftBound = L keeps the L keys ending at the diagonal,
+    // i.e. skv > sq - L (cudnn-frontend sliding_window_mask keeps col + L > row).
+    // With L = 2, TopLeft, query 5 attends to keys {4, 5}, not {3, 4, 5}.
+    // Q=K=0 makes the softmax uniform over the kept keys; V = {1..6}.
+    constexpr int64_t SEQ = 6;
+    Tensor<double> q({1, 1, SEQ, 1});
+    Tensor<double> k({1, 1, SEQ, 1});
+    Tensor<double> v({1, 1, SEQ, 1});
+    Tensor<double> o({1, 1, SEQ, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+    for(int64_t s = 0; s < SEQ; ++s)
+    {
+        v.setHostValue(static_cast<double>(s + 1), 0, 0, s, 0);
+    }
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/2,
+                                /*rightBound=*/0,
+                                /*topLeftAlignment=*/true);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 1.0, 1e-5); // keys {0}
+    for(int64_t s = 1; s < SEQ; ++s)
+    {
+        // keys {s - 1, s} -> mean(s, s + 1)
+        EXPECT_NEAR(o.getHostValue(0, 0, s, 0), static_cast<double>(s) + 0.5, 1e-5)
+            << "query " << s;
+    }
+
+    // L = 1 keeps only the diagonal.
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/1,
+                                /*rightBound=*/0,
+                                /*topLeftAlignment=*/true);
+    for(int64_t s = 0; s < SEQ; ++s)
+    {
+        EXPECT_NEAR(o.getHostValue(0, 0, s, 0), static_cast<double>(s + 1), 1e-5) << "query " << s;
+    }
 }
 
 TEST(TestCpuFpReferenceSdpaFp64, CausalMaskFutureTokensHaveNoEffect)
@@ -829,10 +943,11 @@ TEST(TestCpuFpReferenceSdpaFp64, LseOutputMatchesFormula)
     v.setHostValue(4.0, 0, 0, 1, 1);
 
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lse);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o, std::nullopt, noMask, false, &lse);
 
     // Manually compute expected LSE
-    const float scale = 1.0f / std::sqrt(2.0f);
+    const float scale = 1.0f; // no attention scale given
 
     // For sq=0: dot products are [1,0] → scores = [scale, 0]
     const float maxVal0 = scale;
@@ -901,7 +1016,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithMultipleBatchHeads)
     v.fillWithRandomValues(-1.0, 1.0, 202);
 
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lse);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o, std::nullopt, noMask, false, &lse);
 
     // Verify all LSE values are reasonable (no NaN, finite)
     for(int b = 0; b < 2; ++b)
@@ -934,7 +1050,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithCausalMask)
     v.fillWithValue(1.0);
 
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, true, &lse);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o, std::nullopt, noMask, true, &lse);
 
     // With uniform Q/K and causal mask:
     // sq=0: 1 valid position → smaller sumExp → smaller LSE
@@ -1012,7 +1129,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithAdditiveMask)
 
     // Forward without mask
     const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q, k, v, o1, std::nullopt, noMask, false, &lse1);
+    CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+        q, k, v, o1, std::nullopt, noMask, false, &lse1);
 
     // Forward with mask that suppresses one position
     Tensor<float> mask({2, 2});
@@ -1047,7 +1165,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWrongRank)
             k.fillWithValue(1.0);
             v.fillWithValue(1.0);
             const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-            CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lseWrong);
+            (CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+                q, k, v, o, std::nullopt, noMask, false, &lseWrong));
         },
         std::invalid_argument);
 }
@@ -1068,7 +1187,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWrongShape)
             k.fillWithRandomValues(-1.0, 1.0, 43);
             v.fillWithRandomValues(-1.0, 1.0, 44);
             const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-            CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lseWrong);
+            (CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+                q, k, v, o, std::nullopt, noMask, false, &lseWrong));
         },
         std::invalid_argument);
 }
@@ -1089,7 +1209,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseMismatchedBatch)
             k.fillWithRandomValues(-1.0, 1.0, 51);
             v.fillWithRandomValues(-1.0, 1.0, 52);
             const hipdnn_data_sdk::utilities::TensorBase<double>* noMask = nullptr;
-            CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, false, &lseWrong);
+            (CpuFpReferenceSdpa::forward<double, double, double, double, double>(
+                q, k, v, o, std::nullopt, noMask, false, &lseWrong));
         },
         std::invalid_argument);
 }
@@ -1148,7 +1269,7 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardSanity)
     // [B=1, H=1, Sq=2, Skv=2, D=2, Dv=2]
     //
     // Q = [[1,0],[0,1]]  K = [[1,0],[0,1]]  V = [[1,2],[3,4]]  dO = [[1,1],[1,1]]
-    // scale = 1/sqrt(2)
+    // scale = 1.0 (none given)
     //
     // By symmetry of Q and K (identity matrices), the softmax probabilities
     // for sq=0 are [pH, pL] and for sq=1 are [pL, pH], where:
@@ -1194,7 +1315,7 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardSanity)
     CpuFpReferenceSdpa::backward(q, k, v, o, dO, dQ, dK, dV);
 
     // Compute expected values
-    const float scale = 1.0f / std::sqrt(2.0f);
+    const float scale = 1.0f; // no attention scale given
     const float eS = std::exp(scale);
     const float pH = eS / (eS + 1.0f);
     const float pL = 1.0f / (eS + 1.0f);

@@ -116,6 +116,78 @@ def build_nested(b):
     b.ret()
 
 
+def build_if_else(b):
+    """scf.if_else with values defined (and used) inside each arm, plus a
+    barrier in both arms -- the reason the op exists."""
+    A = b.param("A", PtrType(F32, "global"))
+    C = b.param("C", PtrType(F32, "global"))
+    n = b.param("n", I32)
+    tid = b.thread_id_x()
+    cond = b.cmp_lt(tid, n)
+    with b.scf_if_else(cond) as (then_ctx, else_ctx):
+        with then_ctx:
+            v = b.global_load_f32(A, tid, align=4)
+            two = b.const_f32(2.0)
+            w = b.fmul(v, two)
+            b.global_store(C, tid, w, align=4)
+            b.sync()
+        with else_ctx:
+            z = b.const_f32(0.0)
+            b.global_store(C, tid, z, align=4)
+            b.sync()
+    b.ret()
+
+
+def build_if_else_nested(b):
+    """if_else inside the else arm of another if_else, with an scf.if inside the
+    then arm: arm routing must survive nesting in both directions."""
+    C = b.param("C", PtrType(F32, "global"))
+    n = b.param("n", I32)
+    tid = b.thread_id_x()
+    z = b.const_i32(0)
+    outer = b.cmp_lt(tid, n)
+    with b.scf_if_else(outer) as (then_ctx, else_ctx):
+        with then_ctx:
+            pos = b.cmp_gt(tid, z)
+            with b.scf_if(pos):
+                one = b.const_f32(1.0)
+                b.global_store(C, tid, one, align=4)
+        with else_ctx:
+            twice = b.add(n, n)
+            inner = b.cmp_lt(tid, twice)
+            with b.scf_if_else(inner) as (t2, e2):
+                with t2:
+                    two = b.const_f32(2.0)
+                    b.global_store(C, tid, two, align=4)
+                with e2:
+                    three = b.const_f32(3.0)
+                    b.global_store(C, tid, three, align=4)
+    b.ret()
+
+
+def build_if_else_in_for(b):
+    """scf.if_else inside an scf.for body, using the loop's iv and carry."""
+    C = b.param("C", PtrType(F32, "global"))
+    n = b.param("n", I32)
+    tid = b.thread_id_x()
+    lo = b.const_i32(0)
+    st = b.const_i32(1)
+    acc0 = b.const_f32(0.0)
+    loop = b.scf_for_iter(lo, n, st, [("acc", acc0)], iv_name="k")
+    with loop as (k, (acc,)):
+        odd = b.cmp_lt(k, tid)
+        with b.scf_if_else(odd) as (then_ctx, else_ctx):
+            with then_ctx:
+                b.global_store(C, k, acc, align=4)
+            with else_ctx:
+                one = b.const_f32(1.0)
+                bumped = b.fadd(acc, one)
+                b.global_store(C, k, bumped, align=4)
+        b.scf_yield(acc)
+    b.global_store(C, tid, loop.results[0], align=4)
+    b.ret()
+
+
 def build_inline_asm(b):
     C = b.param("C", PtrType(F32, "global"))
     tid = b.thread_id_x()
@@ -137,6 +209,28 @@ def build_inline_asm_multi(b):
     b.ret()
 
 
+def build_if_else_results(b):
+    """scf.if_else that yields a value; portable IR refuses to carry it."""
+    C = b.param("C", PtrType(F32, "global"))
+    n = b.param("n", I32)
+    tid = b.thread_id_x()
+    branch = b.scf_if_else(b.cmp_lt(tid, n), result_types=[F32])
+    with branch as (then_ctx, else_ctx):
+        with then_ctx:
+            b.scf_yield(b.const_f32(1.0))
+        with else_ctx:
+            b.scf_yield(b.const_f32(2.0))
+    b.global_store(C, tid, branch.results[0], align=4)
+    b.ret()
+
+
+# Kept out of KERNELS: recording it is refused, not replayed.
+IF_ELSE_RESULTS_MESSAGE = (
+    "portable IR does not support an scf.if_else with results; "
+    "lower the kernel directly"
+)
+
+
 KERNELS = {
     "scalar": build_scalar,
     "memory": build_memory,
@@ -144,6 +238,9 @@ KERNELS = {
     "forloop": build_forloop,
     "scf_if": build_scf_if,
     "nested": build_nested,
+    "if_else": build_if_else,
+    "if_else_nested": build_if_else_nested,
+    "if_else_in_for": build_if_else_in_for,
     "inline_asm": build_inline_asm,
     "inline_asm_multi": build_inline_asm_multi,
 }
@@ -164,7 +261,7 @@ def _count_ops(ops):
 def _count_instrs(prog):
     n = 0
     for i in prog:
-        if i.get("op") in ("emit", "scf_for", "scf_if", "ret"):
+        if i.get("op") in ("emit", "scf_for", "scf_if", "scf_if_else", "ret"):
             n += 1
         for key in ("body", "then", "else"):
             if key in i:
@@ -173,6 +270,23 @@ def _count_instrs(prog):
 
 
 class TestRecordingBuilder(unittest.TestCase):
+    def test_refuses_an_if_else_with_results(self):
+        """The recipe's scf_if_else carries no result types, so a recorded
+        result-bearing if/else would replay with its results unbound: the live
+        recorder and both post-hoc walks refuse it instead."""
+        from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+        with self.assertRaises(NotImplementedError) as live:
+            build_if_else_results(RecordingIRBuilder("if_else_results"))
+        self.assertEqual(str(live.exception), IF_ELSE_RESULTS_MESSAGE)
+        plain = IRBuilder("if_else_results")
+        build_if_else_results(plain)
+        for walk in (kernel_to_recipe, kerneldef_to_recipe):
+            with self.subTest(walk=walk.__name__):
+                with self.assertRaises(NotImplementedError) as posthoc:
+                    walk(plain.kernel)
+                self.assertEqual(str(posthoc.exception), IF_ELSE_RESULTS_MESSAGE)
+
     def test_non_invasive(self):
         """RecordingIRBuilder must build the IDENTICAL KernelDef as IRBuilder."""
         for name, fn in KERNELS.items():
@@ -248,6 +362,194 @@ class TestRecordingBuilder(unittest.TestCase):
             any(i["op"] == "scf_if" for i in scf_for["body"]),
             "scf.if was not nested inside the scf.for body",
         )
+
+    def test_if_else_records_both_arms(self):
+        """scf.if_else -> one scf_if_else instr carrying BOTH arms, each holding
+        exactly the ops (and the value definitions) built inside it."""
+        rb = RecordingIRBuilder("if_else")
+        build_if_else(rb)
+        body = [i for i in rb.recipe()["program"] if i.get("op") != "param"]
+        ie = [i for i in body if i["op"] == "scf_if_else"]
+        self.assertEqual(len(ie), 1)
+        ie = ie[0]
+        self.assertEqual(set(ie), {"op", "cond", "then", "else"})
+        then_ops = [i.get("opcode") for i in ie["then"]]
+        else_ops = [i.get("opcode") for i in ie["else"]]
+        self.assertIn("arith.fmul", then_ops)
+        self.assertNotIn("arith.fmul", else_ops)
+        self.assertEqual(then_ops[-1], else_ops[-1], "both arms end in the barrier")
+        # The cond is the cmp emitted just before, by name.
+        cmp = body[body.index(ie) - 1]
+        self.assertEqual(cmp["out"]["bind"], ie["cond"])
+        # A value defined in an arm is bound there, not at the top level.
+        top_binds = {i["out"]["bind"] for i in body if "out" in i}
+        arm_binds = {i["out"]["bind"] for i in ie["then"] + ie["else"] if "out" in i}
+        self.assertFalse(top_binds & arm_binds)
+
+    def test_if_else_nesting(self):
+        rb = RecordingIRBuilder("if_else_nested")
+        build_if_else_nested(rb)
+        body = [i for i in rb.recipe()["program"] if i.get("op") != "param"]
+        outer = next(i for i in body if i["op"] == "scf_if_else")
+        self.assertTrue(any(i["op"] == "scf_if" for i in outer["then"]))
+        self.assertFalse(any(i["op"] == "scf_if_else" for i in outer["then"]))
+        inner = next(i for i in outer["else"] if i["op"] == "scf_if_else")
+        self.assertEqual(len(inner["then"]), 2)
+        self.assertEqual(len(inner["else"]), 2)
+
+        rb = RecordingIRBuilder("if_else_in_for")
+        build_if_else_in_for(rb)
+        body = [i for i in rb.recipe()["program"] if i.get("op") != "param"]
+        scf_for = next(i for i in body if i["op"] == "scf_for")
+        ie = next(i for i in scf_for["body"] if i["op"] == "scf_if_else")
+        self.assertEqual(ie["then"][0]["in"][1], scf_for["iv"])
+
+    def test_if_else_matches_legacy_walk(self):
+        """kerneldef_to_recipe (the older post-hoc walk) spells scf_if_else the
+        same way the recorder does."""
+        from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+        for name in ("if_else", "if_else_nested", "if_else_in_for"):
+            with self.subTest(kernel=name):
+                rb = RecordingIRBuilder(name)
+                KERNELS[name](rb)
+                self.assertEqual(rb.recipe(), kerneldef_to_recipe(rb.kernel))
+
+    def test_if_else_expands_and_needs_level_three(self):
+        """The pure-Python VM mirror replays scf_if_else to an equivalent
+        program, and the ABI stamp says an engine must know the op."""
+        from rocke.portable_ir.src import abi
+        from rocke.portable_ir.utils import recipe_expand
+
+        for name in ("if_else", "if_else_nested", "if_else_in_for"):
+            with self.subTest(kernel=name):
+                rb = RecordingIRBuilder(name)
+                KERNELS[name](rb)
+                recipe = rb.recipe()
+                flat = recipe_expand.expand_recipe(recipe, {})
+                self.assertEqual(recipe_expand.equiv_reason(flat, recipe), "")
+                self.assertEqual(abi.recipe_min_reader(recipe), 3)
+        # Dropping the else arm is a detected difference, not a silent match.
+        rb = RecordingIRBuilder("if_else")
+        build_if_else(rb)
+        a = rb.recipe()
+        b = kernel_to_recipe(rb.kernel)
+        next(i for i in b["program"] if i.get("op") == "scf_if_else")["else"] = []
+        self.assertNotEqual(recipe_expand.equiv_reason(a, b), "")
+
+    def test_hand_recorder_if_else(self):
+        """RecipeRecorder.scf_if_else places the instr where the block opens and
+        routes each arm into its own body, like IRBuilder.scf_if_else."""
+        from rocke.portable_ir.src.recipe_recorder import PTR_F32, RecipeRecorder
+        from rocke.portable_ir.utils import recipe_expand
+
+        rec = RecipeRecorder("hand_if_else", [])
+        C = rec.param("C", PTR_F32)
+        n = rec.param("n", "i32")
+        tid = rec.thread_id_x()
+        cond = rec.cmp_gt(n, rec.const_i32(0))
+        with rec.scf_if_else(cond) as (then_ctx, else_ctx):
+            with then_ctx:
+                rec.store(C, tid, rec.const_f32(1.0))
+            with else_ctx:
+                rec.store(C, tid, rec.const_f32(2.0))
+        rec.ret()
+        recipe = rec.recipe()
+        prog = recipe["program"]
+        ie = [i for i in prog if i["op"] == "scf_if_else"]
+        self.assertEqual(len(ie), 1)
+        self.assertEqual(prog[prog.index(ie[0]) + 1]["op"], "ret")
+        self.assertEqual(ie[0]["cond"], cond.reg)
+        self.assertEqual([len(ie[0]["then"]), len(ie[0]["else"])], [2, 2])
+        flat = recipe_expand.expand_recipe(recipe, {})
+        self.assertEqual(recipe_expand.equiv_reason(flat, recipe), "")
+
+
+def _online_lib():
+    from rocke.portable_ir.src import online
+
+    return online.resolve_library_path(build=False)
+
+
+@unittest.skipIf(_online_lib() is None, "no shared librocke; run online.build_lib()")
+class TestIfElseReplay(unittest.TestCase):
+    """With a source-matched engine at hand, both replay paths rebuild the
+    scf.if_else kernels to the Python lowerer's .ll, byte for byte."""
+
+    def test_replay_is_byte_identical(self):
+        import os
+
+        from rocke.core import ir_export
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.portable_ir.src import online, recipe_bundle
+
+        saved = {
+            k: os.environ.get(k) for k in ("ROCKE_ONLINE_LIB", "ROCKE_LLVM_FLAVOR")
+        }
+        os.environ["ROCKE_ONLINE_LIB"] = _online_lib()
+        os.environ["ROCKE_LLVM_FLAVOR"] = "llvm20"
+        try:
+            online.load()
+            for name in ("if_else", "if_else_nested", "if_else_in_for"):
+                for arch in ("gfx942", "gfx950"):
+                    rb = RecordingIRBuilder(name)
+                    KERNELS[name](rb)
+                    py = lower_kernel_to_llvm(
+                        rb.kernel, llvm_flavor="llvm20", arch=arch
+                    )
+                    with self.subTest(kernel=name, arch=arch, path="recipe"):
+                        cbor = recipe_bundle.cbor_encode(rb.recipe())
+                        vm, _ = online.recipe_cbor_to_llvm(cbor, arch=arch)
+                        self.assertEqual(vm, py)
+                    with self.subTest(kernel=name, arch=arch, path="ir_json"):
+                        text = ir_export.export_kernel_ir_json(rb.kernel)
+                        eng, _ = online.ir_json_to_llvm(text, arch=arch)
+                        self.assertEqual(eng, py)
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def test_engine_refuses_an_if_else_with_results(self):
+        """Both C readers refuse an if/else that yields values with the
+        recorder's text: the IR JSON of one (whose results the JSON lists) and
+        a recipe whose scf_if_else lists results (no recorder writes one)."""
+        import os
+
+        from rocke.core import ir_export
+        from rocke.portable_ir.src import online, recipe_bundle
+
+        saved = os.environ.get("ROCKE_ONLINE_LIB")
+        os.environ["ROCKE_ONLINE_LIB"] = _online_lib()
+        try:
+            online.load()
+            plain = IRBuilder("if_else_results")
+            build_if_else_results(plain)
+            for arch in ("gfx942", "gfx950"):
+                with self.subTest(path="ir_json", arch=arch):
+                    text = ir_export.export_kernel_ir_json(plain.kernel)
+                    with self.assertRaises(RuntimeError) as imported:
+                        online.ir_json_to_llvm(text, arch=arch)
+                    self.assertIn(IF_ELSE_RESULTS_MESSAGE, str(imported.exception))
+                with self.subTest(path="recipe", arch=arch):
+                    rb = RecordingIRBuilder("if_else_carry")
+                    build_if_else(rb)
+                    recipe = rb.recipe()
+                    (instr,) = [
+                        i for i in recipe["program"] if i["op"] == "scf_if_else"
+                    ]
+                    instr["results"] = ["if0"]
+                    cbor = recipe_bundle.cbor_encode(recipe)
+                    with self.assertRaises(RuntimeError) as replayed:
+                        online.recipe_cbor_to_llvm(cbor, arch=arch)
+                    self.assertIn(IF_ELSE_RESULTS_MESSAGE, str(replayed.exception))
+        finally:
+            if saved is None:
+                os.environ.pop("ROCKE_ONLINE_LIB", None)
+            else:
+                os.environ["ROCKE_ONLINE_LIB"] = saved
 
 
 def _production_cases():

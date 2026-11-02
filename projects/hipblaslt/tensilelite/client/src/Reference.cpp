@@ -159,7 +159,6 @@ namespace TensileLite
             case rocisa::DataType::BFloat16:
                 roundThrough(TensileLite::BFloat16{});
                 return;
-#ifdef TENSILE_USE_FP8_BF8
             case rocisa::DataType::Float8:
                 roundThrough(TensileLite::Float8{});
                 return;
@@ -172,7 +171,6 @@ namespace TensileLite
             case rocisa::DataType::BFloat8_fnuz:
                 roundThrough(TensileLite::BFloat8_fnuz{});
                 return;
-#endif
             default:
                 throw std::runtime_error(
                     "Unsupported compute-input type for fast-path quantization.");
@@ -233,7 +231,6 @@ namespace TensileLite
                     m_storage = loadTo<AccumT, TensileLite::BFloat16>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
-#ifdef TENSILE_USE_FP8_BF8
                 else if(type == rocisa::DataType::Float8)
                 {
                     m_storage = loadTo<AccumT, TensileLite::Float8>(ptr, N);
@@ -254,7 +251,6 @@ namespace TensileLite
                     m_storage = loadTo<AccumT, TensileLite::BFloat8_fnuz>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
-#endif
 #ifndef _WIN32
                 else if(type == rocisa::DataType::Float4)
                 {
@@ -552,6 +548,7 @@ namespace TensileLite
             }
             break;
                 break;
+            case rocisa::DataType::Int4:
             case rocisa::DataType::XFloat32:
             case rocisa::DataType::ComplexFloat:
             case rocisa::DataType::ComplexDouble:
@@ -665,6 +662,7 @@ namespace TensileLite
                 typedPtr[pos] = SaturateCast<BFloat8_fnuz>(src);
             }
             break;
+            case rocisa::DataType::Int4:
             case rocisa::DataType::XFloat32:
             case rocisa::DataType::ComplexFloat:
             case rocisa::DataType::ComplexDouble:
@@ -723,6 +721,7 @@ namespace TensileLite
                 throw std::runtime_error("Not supported yet.");
             }
             break;
+            case rocisa::DataType::Int4:
             case rocisa::DataType::Count:
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
@@ -1008,17 +1007,9 @@ namespace TensileLite
                   typename MathOpAccum,
                   typename Type,
                   typename ComputeInputType,
-                  std::enable_if_t<true
-#ifdef TENSILE_USE_FP6
-                                       && !std::is_same<Float6x32, Type>::value
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
+                  std::enable_if_t<!std::is_same<Float6x32, Type>::value
                                        && !std::is_same<BFloat6x32, Type>::value
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
-                                       && !std::is_same<Float4x2, Type>::value
-#endif // #ifdef TENSILE_USE_FP4
-                                   ,
+                                       && !std::is_same<Float4x2, Type>::value,
                                    bool>
                   = true>
         inline Accumulator getElement(ContractionProblemGemm const& problem,
@@ -1059,23 +1050,14 @@ namespace TensileLite
             return static_cast<Accumulator>(static_cast<MultT>(static_cast<MathOpMultT>(val)));
         }
 
-#if !defined(_WIN32) \
-    && (defined(TENSILE_USE_FP6) || defined(TENSILE_USE_BF6) || defined(TENSILE_USE_FP4))
+#ifndef _WIN32
         template <typename Accumulator,
                   typename MathOpAccum,
                   typename Type,
                   typename ComputeInputType,
-                  std::enable_if_t<false
-#ifdef TENSILE_USE_FP6
-                                       || std::is_same<Float6x32, Type>::value
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
+                  std::enable_if_t<std::is_same<Float6x32, Type>::value
                                        || std::is_same<BFloat6x32, Type>::value
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
-                                       || std::is_same<Float4x2, Type>::value
-#endif // #ifdef TENSILE_USE_FP4
-                                   ,
+                                       || std::is_same<Float4x2, Type>::value,
                                    bool>
                   = true>
         inline Accumulator getElement(ContractionProblemGemm const& problem,
@@ -1089,7 +1071,7 @@ namespace TensileLite
 
             return static_cast<Accumulator>(ptr[packIdx].getElement(elemIdx));
         }
-#endif // !_WIN32 && (TENSILE_USE_FP6 || TENSILE_USE_BF6 || TENSILE_USE_FP4)
+#endif // !_WIN32
 
         template <typename Inputs,
                   typename Accumulator,
@@ -1164,13 +1146,11 @@ namespace TensileLite
             auto isSupportedInputType = [&](rocisa::DataType t) {
                 if(isSupportedOutputType(t))
                     return true;
-#ifdef TENSILE_USE_FP8_BF8
                 if(t == rocisa::DataType::Float8
                    || t == rocisa::DataType::BFloat8
                    || t == rocisa::DataType::Float8_fnuz
                    || t == rocisa::DataType::BFloat8_fnuz)
                     return true;
-#endif
 #ifndef _WIN32
                 if(t == rocisa::DataType::Float4)
                     return true;
@@ -1391,6 +1371,8 @@ namespace TensileLite
             size_t       mxsbI,
             size_t       mxBlockA,
             size_t       mxBlockB,
+            size_t       mxBlockFreeA,
+            size_t       mxBlockFreeB,
             size_t       strideMxsaM,
             size_t       strideMxsaBlk,
             size_t       strideMxsbN,
@@ -1402,9 +1384,12 @@ namespace TensileLite
                 if(global_m >= sizeM)
                     continue;
 
+                // mxBlockFreeA consecutive rows share a scale; 1 (the 1xmxBlockA
+                // layout) makes this divide the identity.
                 AccumT sa = (mxBlockA > 0 && mxsaBatch)
                     ? static_cast<AccumT>(static_cast<float>(
-                          mxsaBatch[global_m * strideMxsaM + mxsaI * strideMxsaBlk]))
+                          mxsaBatch[(global_m / mxBlockFreeA) * strideMxsaM
+                                    + mxsaI * strideMxsaBlk]))
                     : AccumT(1);
 
                 for(size_t nn = 0; nn < BLOCK_N; ++nn)
@@ -1415,7 +1400,8 @@ namespace TensileLite
 
                     AccumT sb = (mxBlockB > 0 && mxsbBatch)
                         ? static_cast<AccumT>(static_cast<float>(
-                              mxsbBatch[global_n * strideMxsbN + mxsbI * strideMxsbBlk]))
+                              mxsbBatch[(global_n / mxBlockFreeB) * strideMxsbN
+                                        + mxsbI * strideMxsbBlk]))
                         : AccumT(1);
 
                     cReg[mm * BLOCK_N + nn]
@@ -1547,6 +1533,10 @@ namespace TensileLite
             // MX block-scaling metadata (FP4 with MX)
             size_t         mxBlockA    = problem.mxBlockA();
             size_t         mxBlockB    = problem.mxBlockB();
+            // Free-dimension extent of one scaling tile. Never 0 (setMXScaleA/B
+            // clamp), but guard anyway since these are divisors.
+            size_t         mxBlockFreeA = std::max<size_t>(1, problem.mxBlockFreeA());
+            size_t         mxBlockFreeB = std::max<size_t>(1, problem.mxBlockFreeB());
             bool           hasMX       = (mxBlockA > 0) || (mxBlockB > 0);
             const E8* mxsaPtr
                 = (mxBlockA > 0) ? static_cast<const E8*>(inputs.mxsa) : nullptr;
@@ -1654,6 +1644,8 @@ namespace TensileLite
                                                                          mxsbI,
                                                                          mxBlockA,
                                                                          mxBlockB,
+                                                                         mxBlockFreeA,
+                                                                         mxBlockFreeB,
                                                                          strideMxsaM,
                                                                          strideMxsaBlk,
                                                                          strideMxsbN,
@@ -1968,17 +1960,23 @@ namespace TensileLite
 
                     cCoord[idx.c] = coord;
 
+                    // setMXScaleA/B divide the scale tensor's free dimension by the
+                    // tile extent, so divide the free coordinate to match (identity
+                    // at 1). The bound coordinate is divided further down; batch
+                    // coordinates are copied verbatim.
                     if(idx.isA)
                     {
                         aCoord[idx.i] = coord;
                         if(mxsaCoord.size())
-                            mxsaCoord[idx.i] = coord;
+                            mxsaCoord[idx.i]
+                                = coord / std::max<size_t>(1, problem.mxBlockFreeA());
                     }
                     else
                     {
                         bCoord[idx.i] = coord;
                         if(mxsbCoord.size())
-                            mxsbCoord[idx.i] = coord;
+                            mxsbCoord[idx.i]
+                                = coord / std::max<size_t>(1, problem.mxBlockFreeB());
                     }
                 }
 
@@ -2034,8 +2032,23 @@ namespace TensileLite
                             std::max<size_t>(problem.mxBlockA(), problem.mxBlockB()), 1);
                         for(size_t i = 0; i < boundSize[0]; i += innerMXLoop)
                         {
+                            // The last MX segment is short whenever K is not a multiple of
+                            // the block size (e.g. K=200 with mxBlock=128); clamp so the
+                            // summation never walks past K.
+                            //
+                            // NO-OP FOR BLOCK-ALIGNED K. The clamp can only bind when
+                            // boundSize[0] - i < innerMXLoop, i.e. when K is not a multiple
+                            // of the block size. Every kernel-dispatched problem has
+                            // K block-aligned (AssertSummationElementMultiple is raised to
+                            // max(MXBlockA, MXBlockB) during solution derivation), so for
+                            // all of them this is exactly the original `segment =
+                            // innerMXLoop` and results are bit-identical. Only direct
+                            // callers of the reference with arbitrary K are affected, where
+                            // the previous behaviour read past the end of A/B.
+                            // See ReferenceMXBlock128Demo.BlockAlignedKMakesTheSegmentClampANoOp.
+                            size_t      segment = std::min(innerMXLoop, boundSize[0] - i);
                             Accumulator val(0);
-                            for(size_t j = 0; j < innerMXLoop; j++)
+                            for(size_t j = 0; j < segment; j++)
                             {
                                 size_t idx = i + j;
                                 size_t aI
@@ -2401,7 +2414,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_Z_Z_Z>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#ifdef TENSILE_USE_HALF
             case TypedGemm_H_H_H::TypeId():
             {
                 if(isHPA)
@@ -2435,7 +2447,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_HS_H_H_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // TENSILE_USE_HALF
             case TypedGemm_I8x4_I32_I32::TypeId():
             {
                 return ReferenceSolution<TypedGemm_I8x4_I32_I32>::SolveCPU(
@@ -2471,7 +2482,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_I8_H_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#ifdef TENSILE_USE_BF16
             case TypedGemm_B_B_S::TypeId():
             {
                 if(isHPA)
@@ -2513,8 +2523,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_I8_B_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // TENSILE_USE_BF16
-#ifdef TENSILE_USE_FP8_BF8
             case TypedGemm_F8_S_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_F8_S_S, float>::SolveCPU(
@@ -2739,7 +2747,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_H_B8F8N_H_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#ifdef TENSILE_USE_HALF
             case TypedGemm_H_F8_H_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_H_F8_H_S, float>::SolveCPU(
@@ -2883,25 +2890,18 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F8NH_FP8_FP8_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // TENSILE_USE_HALF
-#endif // TENSILE_USE_FP8_BF8
 
 #ifndef _WIN32
-#ifdef TENSILE_USE_FP6
             case TypedGemm_F6_S_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_F6_S_S>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif //TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
             case TypedGemm_BF6_S_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_BF6_S_S>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif //TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
 
             case TypedGemm_F4_S_S::TypeId():
             {
@@ -2918,8 +2918,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F4_B_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif //TENSILE_USE_FP4
-#if defined(TENSILE_USE_FP6) && defined(TENSILE_USE_BF6)
             case TypedGemm_F6B6_S_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_F6B6_S_S>::SolveCPU(
@@ -2930,8 +2928,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_B6F6_S_S>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // defined(TENSILE_USE_FP6) && defined(TENSILE_USE_BF6)
-#if defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4)
             case TypedGemm_F6F4_S_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_F6F4_S_S>::SolveCPU(
@@ -2942,8 +2938,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F4F6_S_S>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4)
-#if defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
             case TypedGemm_F6F4_B_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_F6F4_B_S, float>::SolveCPU(
@@ -2954,8 +2948,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F4F6_B_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
-#if defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4)
             case TypedGemm_B6F4_S_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_B6F4_S_S>::SolveCPU(
@@ -2966,8 +2958,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F4B6_S_S>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4)
-#if defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
             case TypedGemm_B6F4_B_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_B6F4_B_S, float>::SolveCPU(
@@ -2978,9 +2968,7 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F4B6_B_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
 #endif // !_WIN32
-#if defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4)
             // F4 data (both A and B), F8 dest
             case TypedGemm_F4_F8_S::TypeId():
             {
@@ -3050,8 +3038,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F4B8_B8_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4)
-#if defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_HALF)
             // DestDataType: H
             case TypedGemm_F8F4_H_S::TypeId():
             {
@@ -3073,8 +3059,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F4B8_H_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_HALF)
-#if defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
             // DestDataType: B
             case TypedGemm_F8F4_B_S::TypeId():
             {
@@ -3096,8 +3080,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F4B8_B_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
-#if defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP6)
             case TypedGemm_F8F6_S_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_F8F6_S_S>::SolveCPU(
@@ -3118,8 +3100,6 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_F6B8_S_S>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP6)
-#if defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_BF6)
             case TypedGemm_F8B6_S_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_F8B6_S_S>::SolveCPU(
@@ -3140,7 +3120,149 @@ namespace TensileLite
                 return ReferenceSolution<TypedGemm_B6B8_S_S>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
-#endif // defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_BF6)
+#ifndef _WIN32
+            // Half/BFloat16 dest for 6-bit and 6-bit/other mixed gemms
+            case TypedGemm_F6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_BF6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_BF6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_BF6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_BF6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6B6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6B6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6B6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6B6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6F6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6F6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6F4_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6F4_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4F6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4F6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6F8_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6F8_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6F8_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6F8_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8F6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8F6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8F6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6B8_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6B8_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6B8_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6B8_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B8F6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8F6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B8F6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6F4_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F4_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4B6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4B6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6F8_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F8_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6F8_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F8_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8B6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8B6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8B6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8B6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6B8_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6B8_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6B8_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6B8_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B8B6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8B6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B8B6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8B6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#endif // !_WIN32
             default:;
             }
 

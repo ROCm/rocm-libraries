@@ -116,7 +116,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::ActivationEnumWhiteList>(),
                      Base::template Pair<Predicates::Contraction::UseBiasCheck>(),
                      Base::template Pair<Predicates::Contraction::UseEEqual>(),
-                     Base::template Pair<Predicates::Contraction::UseGateResidualEqual>(),
+                     Base::template Pair<Predicates::Contraction::UseGateResidualCheck>(),
                      Base::template Pair<Predicates::Contraction::DataTypeEEqual>(),
                      Base::template Pair<Predicates::Contraction::UseScaleABCheck>(),
                      Base::template Pair<Predicates::Contraction::UseScaleCDCheck>(),
@@ -135,8 +135,13 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::FusedA2ATileDivisible>(),
                      Base::template Pair<Predicates::Contraction::MXBlockA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
+                     Base::template Pair<Predicates::Contraction::MXBlockFreeA>(),
+                     Base::template Pair<Predicates::Contraction::MXBlockFreeB>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSA>(),
-                     Base::template Pair<Predicates::Contraction::DataTypeMXSB>()});
+                     Base::template Pair<Predicates::Contraction::DataTypeMXSB>(),
+                     Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
+                     Base::template Pair<Predicates::Contraction::ScaleZeroPointA>(),
+                     Base::template Pair<Predicates::Contraction::Int4EncodingA>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -341,6 +346,12 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct MappingTraits<Predicates::Contraction::Int4EncodingA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::Int4EncodingA, IO>
+        {
+        };
+
+        template <typename IO>
         struct MappingTraits<Predicates::Contraction::BufferLoadOffsetLimitCheck, IO>
             : public AutoMappingTraits<Predicates::Contraction::BufferLoadOffsetLimitCheck, IO>
         {
@@ -491,8 +502,8 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::Contraction::UseGateResidualEqual, IO>
-            : public AutoMappingTraits<Predicates::Contraction::UseGateResidualEqual, IO>
+        struct MappingTraits<Predicates::Contraction::UseGateResidualCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UseGateResidualCheck, IO>
         {
         };
 
@@ -609,6 +620,26 @@ namespace TensileLite
         {
         };
         template <typename IO>
+        struct MappingTraits<Predicates::Contraction::ScaleBlockSizeA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::ScaleBlockSizeA, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::ScaleZeroPointA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::ScaleZeroPointA, IO>
+        {
+        };
+                template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXBlockFreeA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXBlockFreeA, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXBlockFreeB, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXBlockFreeB, IO>
+        {
+        };
+        template <typename IO>
         struct MappingTraits<Predicates::Contraction::DataTypeMXSA, IO>
             : public AutoMappingTraits<Predicates::Contraction::DataTypeMXSA, IO>
         {
@@ -620,4 +651,3 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
-

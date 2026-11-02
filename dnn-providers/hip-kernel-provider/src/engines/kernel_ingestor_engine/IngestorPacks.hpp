@@ -48,12 +48,58 @@ void resetPointwiseModuleCache();
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvFwdModuleCache();
 
+/// The engine name gfx950_attention_dense.ued.json declares. The pack table, the pack's
+/// own log lines and the descriptor census (which looks the loaded set up by this name)
+/// all read it here, so a rename that misses the descriptor fails the census.
+inline constexpr std::string_view GFX950_ATTENTION_DENSE_ENGINE_NAME
+    = "hipkernel:Gfx950AttentionDense";
+
+/// @see packs/FlydslRmsNormNative.cpp
+void registerFlydslRmsNormSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslRmsNormModuleCache();
+
+/// @see packs/FlydslRmsNormBwdNative.cpp
+void registerFlydslRmsNormBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslRmsNormBwdModuleCache();
+
+/// @see packs/FlydslSdpaRdnaNative.cpp
+void registerFlydslSdpaRdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaRdnaModuleCache();
+
+/// @see packs/FlydslSdpaRdnaDecodeNative.cpp
+void registerFlydslSdpaRdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaRdnaDecodeModuleCache();
+
+/// @see packs/FlydslSdpaAiwNative.cpp
+void registerFlydslSdpaAiwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaAiwModuleCache();
+
+/// @see packs/FlydslSdpaCdnaNative.cpp
+void registerFlydslSdpaCdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaCdnaModuleCache();
+
+/// @see packs/FlydslSdpaCdnaDualwaveNative.cpp
+void registerFlydslSdpaCdnaDualwaveSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaCdnaDualwaveModuleCache();
+
+/// @see packs/FlydslSdpaCdnaDecodeNative.cpp
+void registerFlydslSdpaCdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaCdnaDecodeModuleCache();
+
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
 
-/// Drops every pack's cached kpack modules, so the next dispatch re-reads its archive
-/// from disk.
+/// @see packs/Gfx1151WmmaAttentionNative.cpp, which serves both engines
+void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx1151WmmaAttentionModuleCache();
+void registerGfx1151WmmaAttentionDecodeSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx1151WmmaAttentionDecodeModuleCache();
+
+/// Drops every pack's cached kpack modules and closes every kpack archive
+/// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
+/// stay held: the archive that next dispatch opens is retained again.
 ///
 /// FOR TESTS ONLY. Nothing in the product calls this: module residency is a deliberate
 /// process-lifetime guarantee -- one hipModule_t per (archive, toc_key, arch) -- not a
