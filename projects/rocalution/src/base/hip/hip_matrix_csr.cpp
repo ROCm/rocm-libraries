@@ -4828,85 +4828,82 @@ namespace rocalution
     bool HIPAcceleratorMatrixCSR<ValueType>::ReplaceColumnVector(int                          idx,
                                                                  const BaseVector<ValueType>& vec)
     {
-        if(this->nnz_ > 0)
-        {
-            const HIPAcceleratorVector<ValueType>* cast_vec
-                = dynamic_cast<const HIPAcceleratorVector<ValueType>*>(&vec);
+        const HIPAcceleratorVector<ValueType>* cast_vec
+            = dynamic_cast<const HIPAcceleratorVector<ValueType>*>(&vec);
 
-            assert(cast_vec != NULL);
-            assert(cast_vec->size_ == this->nrow_);
+        assert(cast_vec != NULL);
+        assert(cast_vec->size_ == this->nrow_);
 
-            PtrType*   row_offset = NULL;
-            int*       col        = NULL;
-            ValueType* val        = NULL;
+        PtrType*   row_offset = NULL;
+        int*       col        = NULL;
+        ValueType* val        = NULL;
 
-            int nrow = this->nrow_;
-            int ncol = this->ncol_;
+        int nrow = this->nrow_;
+        int ncol = this->ncol_;
 
-            allocate_hip(nrow + 1, &row_offset);
+        allocate_hip(nrow + 1, &row_offset);
 
-            dim3 BlockSize(this->local_backend_.HIP_block_size);
-            dim3 GridSize(nrow / this->local_backend_.HIP_block_size + 1);
+        dim3 BlockSize(this->local_backend_.HIP_block_size);
+        dim3 GridSize(nrow / this->local_backend_.HIP_block_size + 1);
 
-            kernel_csr_replace_column_vector_offset<<<
-                GridSize,
-                BlockSize,
-                0,
-                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
-                this->mat_.row_offset, this->mat_.col, nrow, idx, cast_vec->vec_, row_offset);
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+        kernel_csr_replace_column_vector_offset<<<
+            GridSize,
+            BlockSize,
+            0,
+            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+            this->mat_.row_offset, this->mat_.col, nrow, idx, cast_vec->vec_, row_offset);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-            size_t rocprim_size   = 0;
-            char*  rocprim_buffer = NULL;
+        size_t rocprim_size   = 0;
+        char*  rocprim_buffer = NULL;
 
-            CHECK_HIP_STATUS(
-                rocprim::exclusive_scan(NULL,
-                                        rocprim_size,
-                                        row_offset,
-                                        row_offset,
-                                        0,
-                                        this->nrow_ + 1,
-                                        rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
+        CHECK_HIP_STATUS(
+            rocprim::exclusive_scan(NULL,
+                                    rocprim_size,
+                                    row_offset,
+                                    row_offset,
+                                    0,
+                                    this->nrow_ + 1,
+                                    rocprim::plus<PtrType>(),
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
-            allocate_hip(rocprim_size, &rocprim_buffer);
+        allocate_hip(rocprim_size, &rocprim_buffer);
 
-            CHECK_HIP_STATUS(
-                rocprim::exclusive_scan(rocprim_buffer,
-                                        rocprim_size,
-                                        row_offset,
-                                        row_offset,
-                                        0,
-                                        this->nrow_,
-                                        rocprim::plus<PtrType>(),
-                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
+        CHECK_HIP_STATUS(
+            rocprim::exclusive_scan(rocprim_buffer,
+                                    rocprim_size,
+                                    row_offset,
+                                    row_offset,
+                                    0,
+                                    this->nrow_ + 1,
+                                    rocprim::plus<PtrType>(),
+                                    HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
-            free_hip(&rocprim_buffer);
+        free_hip(&rocprim_buffer);
 
-            PtrType nnz;
-            copy_d2h(1, row_offset + this->nrow_, &nnz);
+        PtrType nnz;
+        copy_d2h(1, row_offset + this->nrow_, &nnz);
 
-            allocate_hip(nnz, &col);
-            allocate_hip(nnz, &val);
+        allocate_hip(nnz, &col);
+        allocate_hip(nnz, &val);
 
-            kernel_csr_replace_column_vector<<<
-                GridSize,
-                BlockSize,
-                0,
-                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(this->mat_.row_offset,
-                                                                            this->mat_.col,
-                                                                            this->mat_.val,
-                                                                            nrow,
-                                                                            idx,
-                                                                            cast_vec->vec_,
-                                                                            row_offset,
-                                                                            col,
-                                                                            val);
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+        kernel_csr_replace_column_vector<<<
+            GridSize,
+            BlockSize,
+            0,
+            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(this->mat_.row_offset,
+                                                                        this->mat_.col,
+                                                                        this->mat_.val,
+                                                                        nrow,
+                                                                        idx,
+                                                                        cast_vec->vec_,
+                                                                        row_offset,
+                                                                        col,
+                                                                        val);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-            this->Clear();
-            this->SetDataPtrCSR(&row_offset, &col, &val, nnz, nrow, ncol);
-        }
+        this->Clear();
+        this->SetDataPtrCSR(&row_offset, &col, &val, nnz, nrow, ncol);
 
         return true;
     }
@@ -4915,31 +4912,28 @@ namespace rocalution
     bool HIPAcceleratorMatrixCSR<ValueType>::ExtractColumnVector(int                    idx,
                                                                  BaseVector<ValueType>* vec) const
     {
-        if(this->nnz_ > 0)
-        {
-            assert(vec != NULL);
+        assert(vec != NULL);
 
-            HIPAcceleratorVector<ValueType>* cast_vec
-                = dynamic_cast<HIPAcceleratorVector<ValueType>*>(vec);
+        HIPAcceleratorVector<ValueType>* cast_vec
+            = dynamic_cast<HIPAcceleratorVector<ValueType>*>(vec);
 
-            assert(cast_vec != NULL);
-            assert(cast_vec->size_ == this->nrow_);
+        assert(cast_vec != NULL);
+        assert(cast_vec->size_ == this->nrow_);
 
-            dim3 BlockSize(this->local_backend_.HIP_block_size);
-            dim3 GridSize(this->nrow_ / this->local_backend_.HIP_block_size + 1);
+        dim3 BlockSize(this->local_backend_.HIP_block_size);
+        dim3 GridSize(this->nrow_ / this->local_backend_.HIP_block_size + 1);
 
-            kernel_csr_extract_column_vector<<<
-                GridSize,
-                BlockSize,
-                0,
-                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(this->mat_.row_offset,
-                                                                            this->mat_.col,
-                                                                            this->mat_.val,
-                                                                            this->nrow_,
-                                                                            idx,
-                                                                            cast_vec->vec_);
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
-        }
+        kernel_csr_extract_column_vector<<<
+            GridSize,
+            BlockSize,
+            0,
+            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(this->mat_.row_offset,
+                                                                        this->mat_.col,
+                                                                        this->mat_.val,
+                                                                        this->nrow_,
+                                                                        idx,
+                                                                        cast_vec->vec_);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;
     }
@@ -4948,40 +4942,32 @@ namespace rocalution
     bool HIPAcceleratorMatrixCSR<ValueType>::ExtractRowVector(int                    idx,
                                                               BaseVector<ValueType>* vec) const
     {
-        if(this->nnz_ > 0)
-        {
-            assert(vec != NULL);
+        assert(vec != NULL);
 
-            HIPAcceleratorVector<ValueType>* cast_vec
-                = dynamic_cast<HIPAcceleratorVector<ValueType>*>(vec);
+        HIPAcceleratorVector<ValueType>* cast_vec
+            = dynamic_cast<HIPAcceleratorVector<ValueType>*>(vec);
 
-            assert(cast_vec != NULL);
-            assert(cast_vec->size_ == this->ncol_);
+        assert(cast_vec != NULL);
+        assert(cast_vec->size_ == this->ncol_);
 
-            cast_vec->Zeros();
+        cast_vec->Zeros();
 
-            // Get nnz of row idx
-            PtrType nnz[2];
+        // Get nnz of row idx
+        PtrType nnz[2];
 
-            copy_d2h(2, this->mat_.row_offset + idx, nnz);
+        copy_d2h(2, this->mat_.row_offset + idx, nnz);
 
-            int row_nnz = nnz[1] - nnz[0];
+        int row_nnz = nnz[1] - nnz[0];
 
-            dim3 BlockSize(this->local_backend_.HIP_block_size);
-            dim3 GridSize(row_nnz / this->local_backend_.HIP_block_size + 1);
+        dim3 BlockSize(this->local_backend_.HIP_block_size);
+        dim3 GridSize(row_nnz / this->local_backend_.HIP_block_size + 1);
 
-            kernel_csr_extract_row_vector<<<
-                GridSize,
-                BlockSize,
-                0,
-                HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(this->mat_.row_offset,
-                                                                            this->mat_.col,
-                                                                            this->mat_.val,
-                                                                            row_nnz,
-                                                                            idx,
-                                                                            cast_vec->vec_);
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
-        }
+        kernel_csr_extract_row_vector<<<GridSize,
+                                        BlockSize,
+                                        0,
+                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
+            this->mat_.row_offset, this->mat_.col, this->mat_.val, row_nnz, idx, cast_vec->vec_);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;
     }

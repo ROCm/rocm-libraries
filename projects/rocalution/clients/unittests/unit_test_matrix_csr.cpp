@@ -719,31 +719,18 @@ TYPED_TEST(matrix_csr, replace_column_vector)
         expect_same(csr_of(*A), from_dense(ref.n, ref.n, D));
     };
 
-    auto checks = [&] {
-        // Rows 1 and 3 hold column 2 and lose it, row 2 keeps it with a new value
-        std::vector<T> column(ref.n, T(0));
-        column[2] = 70;
-        {
-            SCOPED_TRACE("removed and replaced entries");
-            expect_replaced(column);
-        }
-
-        KNOWN_BUG("inserting an entry drops the next entry of its row");
-
-        // Row 4 does not hold column 2 and gains it before its column 3
-        column[4] = 90;
-        SCOPED_TRACE("an inserted entry");
-        expect_replaced(column);
-    };
-
-    if(TypeParam::backend == Backend::Accelerator)
+    // Rows 1 and 3 hold column 2 and lose it, row 2 keeps it with a new value
+    std::vector<T> column(ref.n, T(0));
+    column[2] = 70;
     {
-        KNOWN_BUG("the scan does not write the last row offset, so a garbage nnz leads to an "
-                  "illegal memory access that ends the process");
-        expect_in_child(checks);
-        return;
+        SCOPED_TRACE("removed and replaced entries");
+        expect_replaced(column);
     }
-    checks();
+
+    // Row 4 does not hold column 2 and gains it before its column 3
+    column[4] = 90;
+    SCOPED_TRACE("an inserted entry");
+    expect_replaced(column);
 }
 
 TYPED_TEST(matrix_csr, replace_row_vector)
@@ -1859,8 +1846,6 @@ TYPED_TEST(host_matrix_csr, rows_and_columns_of_a_matrix_without_entries)
 {
     using T     = typename TypeParam::value_type;
     const int n = 4;
-
-    KNOWN_BUG("rows and columns of a matrix without entries are neither extracted nor replaced");
 
     HostMatrixCSR<T> A(descriptor());
     A.AllocateCSR(0, n, n);

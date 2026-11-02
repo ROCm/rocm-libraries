@@ -41,6 +41,9 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `LocalMatrix::ReplaceColumnVector()` on CSR matrices dropping the entry that follows an inserted one on the host, which could corrupt memory, and ending the process with an illegal memory access on the accelerator. All other formats except DENSE and BCSR fall back to the host CSR code, so they were affected on both backends.
+* Fixed `LocalMatrix::ExtractColumnVector()`, `LocalMatrix::ExtractRowVector()`, `LocalMatrix::ReplaceColumnVector()` and `LocalMatrix::ReplaceRowVector()` doing nothing for a matrix without entries. The extractions now return zeros, and the replacements insert the nonzero values.
+* Fixed `LocalMatrix::ExtractRowVector()` on DENSE host matrices returning only as many columns as the matrix has rows, and writing past the end of the vector when the matrix has more rows than columns.
 
 ## (Unreleased) rocALUTION 4.1.1
 

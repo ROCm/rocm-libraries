@@ -1369,37 +1369,11 @@ TEST_P(local_matrix_formats, extracts_and_replaces_rows_and_columns)
         }
         const Csr<T> column_inserted = from_dense(ref.n, ref.m, D);
 
-        if(backend() == Backend::Accelerator && is(CSR))
-        {
-            KNOWN_BUG("HIP CSR ReplaceColumnVector kills the process");
-            expect_in_child([&] {
-                auto M = make(row_replaced);
-                M->ReplaceColumnVector(4, *vector_of(new_column));
-                expect_kept(*M, column_replaced);
-                M->ReplaceColumnVector(9, *vector_of(full_column));
-                expect_kept(*M, column_inserted);
-            });
-            return;
-        }
         A->ReplaceColumnVector(4, *vector_of(new_column));
         expect_kept(*A, column_replaced);
 
-        // The BCSR blocks already store the column, so only the other formats insert entries
-        if(is(DENSE) || is(BCSR))
-        {
-            A->ReplaceColumnVector(9, *vector_of(full_column));
-            expect_kept(*A, column_inserted);
-            return;
-        }
-
-        // The slot of the dropped entry stays uninitialized, which can corrupt memory
-        // when the result is converted back
-        KNOWN_BUG("host CSR ReplaceColumnVector drops the entry after an inserted one");
-        expect_in_child([&] {
-            auto M = make(column_replaced);
-            M->ReplaceColumnVector(9, *vector_of(full_column));
-            expect_kept(*M, column_inserted);
-        });
+        A->ReplaceColumnVector(9, *vector_of(full_column));
+        expect_kept(*A, column_inserted);
     });
 }
 
@@ -2786,8 +2760,6 @@ TYPED_TEST(local_matrix, rows_and_columns_of_a_matrix_without_entries)
     const std::vector<PtrType> no_entries(n + 1, 0);
     const std::vector<T>       values = {1, 0, 2, 3};
     const std::vector<T>       zeros(n, T(0));
-
-    KNOWN_BUG("rows and columns of a matrix without entries are neither extracted nor replaced");
 
     auto A = empty_local_matrix<T>(this->backend());
     A->CopyFromHostCSR(no_entries.data(), nullptr, nullptr, "E", 0, n, n);
