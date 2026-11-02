@@ -289,10 +289,9 @@ struct GeluBackward
         auto xCompute = static_cast<ComputeType>(x);
 
         // d/dx [x * Phi(x)] = Phi(x) + x * phi(x), with Phi the standard normal CDF and phi its PDF
-        static const ComputeType s_kSqrt2 = sqrt(ComputeType{2});
         static const ComputeType s_kInvSqrt2Pi
             = ComputeType{1} / sqrt(ComputeType{2} * static_cast<ComputeType>(3.14159265));
-        auto cdf = ComputeType{0.5} * (ComputeType{1} + erf(xCompute / s_kSqrt2));
+        auto cdf = ComputeType{0.5} * (ComputeType{1} + erf(xCompute / sqrt(ComputeType{2})));
         auto pdf = exp(ComputeType{-0.5} * xCompute * xCompute) * s_kInvSqrt2Pi;
         return static_cast<OutputType>(dyCompute * (cdf + xCompute * pdf));
     }

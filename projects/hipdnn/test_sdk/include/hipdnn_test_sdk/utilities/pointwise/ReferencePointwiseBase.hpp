@@ -74,17 +74,14 @@ public:
                                                                               softplusBeta);
     }
 
-    // GEN_INDEX: the input tensor only defines the shape; the output holds the coordinate of each
-    // element along the given axis.
-    template <typename InputType, typename ComputeType = double>
+    template <typename ComputeType = double>
     static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                  hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
-                                 const hipdnn_data_sdk::utilities::TensorBase<InputType>& /*input*/,
                                  const int64_t axis)
     {
         if(operation != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
         {
-            throw std::runtime_error("Only GEN_INDEX accepts an axis: "
+            throw std::runtime_error("This operation only supports GEN_INDEX mode but got: "
                                      + std::to_string(static_cast<int>(operation)));
         }
 

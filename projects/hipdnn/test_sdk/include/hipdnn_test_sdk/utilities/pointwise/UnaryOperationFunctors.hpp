@@ -318,7 +318,7 @@ struct SoftplusForward
         using hipdnn_data_sdk::types::log;
         auto xCompute = static_cast<ComputeType>(x);
         auto scaled = beta * xCompute;
-        // Softplus(x) = log(1 + exp(beta * x)) / beta; revert to x when exp would overflow
+        // Softplus(x) = log(1 + exp(beta * x)) / beta. Fallback to x when exp would overflow
         // and the result is indistinguishable from the linear regime.
         // The threshold of 20 is chosen as a safe value to avoid overflow in the exponential function
         // (The same value is used in PyTorch's implementation of Softplus)
@@ -328,7 +328,8 @@ struct SoftplusForward
     }
 };
 
-// Truthiness for logical operations; half/bfloat16 have no conversion to bool.
+// Truthiness for logical operations.
+// Floating-point types are casted to double for safe comparison with zero.
 template <typename X>
 bool isTrue(const X& x)
 {
