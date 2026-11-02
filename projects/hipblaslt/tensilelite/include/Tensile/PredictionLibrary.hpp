@@ -228,8 +228,6 @@ namespace TensileLite
                 auto prediction_result = origami::rank_configs(
                     origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
 
-                // Preserve Origami's ranking, including its preferences among
-                // candidates with similar predicted latency.
                 for(const auto& r : prediction_result)
                 {
                     if(r.config.index >= solution_list.size())
