@@ -59,7 +59,13 @@ from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmWavePartition, tdmWaveSeparated, \
                                        tdmKDimTrackable
 from ..Common.TypeValidationErrors import ConfigTypeError
-from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
+from ..CustomKernels import (
+  TILE_COUNT_GRIDS,
+  isCustomKernelConfig,
+  supportsUserSgprKernargPreload,
+  validateCustomKernelGrid,
+  validateCustomPersistentArgs,
+)
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config, \
                                                get_fp4_valid_blocks, get_fp8_valid_blocks, \
@@ -2158,7 +2164,8 @@ class Solution(collections.abc.Mapping):
 
     Raises:
       RuntimeError: If a macrotile component is supplied by neither the
-        CustomKernel block nor the consuming logic file, or if the solution
+        CustomKernel block nor the consuming logic file, if the grid mixes
+        wide/skinny and (m, n) tile counts, or if the solution
         can split K (GlobalSplitU other than 0 or 1) but its grid launches one
         GSU slice per tile.
     """
@@ -2183,6 +2190,8 @@ class Solution(collections.abc.Mapping):
           f"and the consuming logic file does not supply one.")
       macrotile[i] = value
       state[key]   = value
+    # For a wide/skinny grid MacroTile0/1 hold the wide and skinny tile, not m and
+    # n; the C++ host sizes such grids from customKernel.macrotile instead.
     # Keep the block the C++ runtime deserializes in step with the solution:
     # ContractionSolution reads customKernel.macrotile directly for custom-kernel
     # tile and workspace sizing.
@@ -2194,8 +2203,8 @@ class Solution(collections.abc.Mapping):
     # GlobalSplitU -1 lets the runtime pick a split above 1.
     gsu = state.get("GlobalSplitU", 1)
     grid = ck.get("grid", [])
-    oneSlicePerTile = all(
-      g in ("One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch") for g in grid)
+    validateCustomKernelGrid(grid, ck.get("name", "?"))
+    oneSlicePerTile = all(g in TILE_COUNT_GRIDS for g in grid)
     if gsu not in (0, 1) and oneSlicePerTile:
       raise RuntimeError(
         f"Custom kernel '{ck.get('name', '?')}' runs with GlobalSplitU {gsu}, but its "

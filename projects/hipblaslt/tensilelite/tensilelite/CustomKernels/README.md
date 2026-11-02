@@ -21,6 +21,7 @@ external manifest.
 | `ck/`         | External: Composable Kernel-sourced kernels.     |
 | `rocblas/`    | External: rocBLAS wvSpltK skinny-GEMM kernels.   |
 | `vllm/`       | External: vLLM wvSplitK skinny-GEMM kernels.     |
+| `skinny_mxfp8/` | External: skinny MXFP8 emitter kernels. |
 | `rocroller/`  | External: rocRoller-sourced kernels.              |
 | `wave/`       | External: Wave (handwritten) kernels.             |
 | `triton/`     | External: Triton-compiled GEMM kernels.           |
@@ -101,8 +102,40 @@ custom.config:
   WavefrontSize: 64
 ```
 
-`Source`, `Version`, and `Features` are presence-checked but otherwise
-provenance only — they are read by the validator, not by the runtime.
+`Source`, `Version`, and `Features` are presence-checked. `Source` and `Version` are
+provenance only. `Features` `SupportsBias`, `SupportsActivation` and `SupportsScaleAlpha`
+set to false make that solution reject bias, activation and scale-alpha-vector problems
+(see "ProblemType restriction" below).
+
+### Optional `CustomKernel` keys and predicates
+
+- `kStep`: K elements one k-loop iteration consumes (default 0, meaning undeclared). The `Spk` kernarg
+  is K rounded up to `kStep` (at least one step) and fails without it, and the client uses it as the
+  MX scale-gate K granule in place of the MatrixInstruction K.
+- `noSplitK`: the kernel accumulates all of K in one pass (default false), so the host reserves no
+  split-K workspace and runs no uniform-summation-order launch checks for it.
+- `grid` values `TilesWide`, `TilesSkinny` and `TilesWideSkinnyBatch`: tile counts along
+  `max(m, n)` and `min(m, n)`, so one kernel serves a skinny n and a skinny m. `TilesWideSkinnyBatch`
+  is their product with the batch count, for a flat one-dimensional grid. The macrotile is then
+  `[wide, skinny, depth]` rather than `[m, n, depth]`.
+- Kernarg semantics `NumWorkGroupsX`, `NumWorkGroupsY` and `NumWorkGroupsZ`: the launched grid per dimension,
+  never flattened, and `Spk` (see `kStep`).
+- Predicates: `AssertSizeMultiple` (`{index: value}`, size(index) % value == 0, for a K step above the 256 that
+  `AssertSummationElementMultiple` caps at), and `AssertStrideAMultiple` and `AssertStrideBMultiple`
+  (`{index: value}`, stride in elements), and `AssertTensorBytesLessThan` (every non-empty A, B, C and D
+  must have `totalAllocatedBytes()` below the value, for kernels whose 32-bit buffer sizes or out-of-range
+  offsets would overflow).
+  `custom.config` wins for every key it declares: a logic file can only add predicates the config does not
+  declare, which narrows what the solution accepts.
+- Mixed grids: `TilesWide`, `TilesSkinny` and `TilesWideSkinnyBatch` may only be combined with `One` and
+  `Batch`. Python rejects other mixes at solution build, and the C++ launch limits reject them without
+  aborting solution selection.
+- ProblemType restriction: when `custom.config` `Features` sets `SupportsBias`, `SupportsActivation` or
+  `SupportsScaleAlpha` to false, that solution gets its own `ProblemType` copy with `UseBias` 0, activation
+  off (`ActivationType` none) or `UseScaleAlphaVec` 0 respectively, so it rejects bias, activation and
+  scale-alpha-vector problems while the logic file's shared `ProblemType` and the other solutions are unchanged.
+  A config without a `Features` block, or with the flag absent or true, is never restricted; the config's
+  `ProblemType` flags are not consulted.
 
 ## Adding a new external kernel
 

@@ -24,13 +24,21 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <cstring>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/ContractionTaskPredicates.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 
 #include "FallbackTestUtils.hpp"
@@ -311,4 +319,870 @@ TEST(CustomKernelTest, FusedSegmentPacksEveryField)
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedWOffset), 2u);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedDrainOffset), FUSED_A2A_DRAIN_RECV);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedAMOffset), 256u);
+}
+
+constexpr size_t tileGridK = 64;
+
+// A wide extent of 1025 and a skinny extent of 9 give partial tiles on both axes of
+// the macrotiles below, so an off-by-one in the tile count shows up.
+static ContractionProblemGemm tileGridProblem(size_t m, size_t n, size_t batch)
+{
+    ContractionProblemGemm problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, tileGridK, m, tileGridK, m, 0.0, false, batch);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    return problem;
+}
+
+// Same extents as tileGridProblem, but C is transposed, which swaps the free extents back.
+static ContractionProblemGemm transposedTileGridProblem(size_t m, size_t n, size_t batch)
+{
+    ContractionProblemGemm problem
+        = ContractionProblemGemm::FromIndexSizes("Contraction_l_Ajlk_Blik_Cijk_Dijk",
+                                                 {m, n, batch, tileGridK},
+                                                 rocisa::DataType::Float,
+                                                 {},
+                                                 rocisa::DataType::Float,
+                                                 {},
+                                                 rocisa::DataType::Float,
+                                                 {},
+                                                 rocisa::DataType::Float,
+                                                 {},
+                                                 0.0);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    return problem;
+}
+
+static std::vector<CustomArgSemantic> perDimensionSemantics()
+{
+    return {CustomArgSemantic::NumWorkGroupsX,
+            CustomArgSemantic::NumWorkGroupsY,
+            CustomArgSemantic::NumWorkGroupsZ};
+}
+
+// A probe kernel carrying one uint32 kernarg per semantic, on the given grid.
+static KernelInvocation launchWithSemantics(ContractionSolution&                  solution,
+                                            vector3<CustomGridSize>               grid,
+                                            TensileLite::dim3                     macrotile,
+                                            std::vector<CustomArgSemantic> const& semantics,
+                                            ContractionProblemGemm const&         problem)
+{
+    configureProbeKernel(solution, {CustomArgType::uint32, semantics.front()});
+    solution.customKernel.grid      = grid;
+    solution.customKernel.macrotile = macrotile;
+    solution.customKernel.args.clear();
+    for(CustomArgSemantic semantic : semantics)
+        solution.customKernel.args.push_back({CustomArgType::uint32, semantic});
+
+    AMDGPU            device = probeDevice();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+
+    KernelInvocation invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+    EXPECT_EQ(invocation.args.size(), semantics.size() * sizeof(uint32_t));
+    return invocation;
+}
+
+static uint32_t emittedUint32(KernelInvocation const& invocation, size_t index)
+{
+    uint32_t value = 0;
+    std::memcpy(&value,
+                static_cast<uint8_t const*>(invocation.args.data()) + index * sizeof(value),
+                sizeof(value));
+    return value;
+}
+
+// The three kernargs starting at first must be the launched grid.
+static void expectPerDimensionArgs(KernelInvocation const& invocation, size_t first)
+{
+    EXPECT_EQ(emittedUint32(invocation, first + 0), invocation.numWorkGroups.x);
+    EXPECT_EQ(emittedUint32(invocation, first + 1), invocation.numWorkGroups.y);
+    EXPECT_EQ(emittedUint32(invocation, first + 2), invocation.numWorkGroups.z);
+}
+
+static vector3<CustomGridSize> wideSkinny3dGrid()
+{
+    return {CustomGridSize::TilesWide, CustomGridSize::TilesSkinny, CustomGridSize::Batch};
+}
+
+static vector3<CustomGridSize> wideSkinnyFlatGrid()
+{
+    return {CustomGridSize::TilesWideSkinnyBatch, CustomGridSize::One, CustomGridSize::One};
+}
+
+// A probe kernel on the given grid and macrotile that reports the launched grid.
+static void configureGridProbe(ContractionSolution&    solution,
+                               vector3<CustomGridSize> grid,
+                               TensileLite::dim3       macrotile)
+{
+    configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::NumWorkGroupsX});
+    solution.customKernel.macrotile = macrotile;
+    solution.customKernel.grid      = grid;
+    solution.customKernel.args      = {{CustomArgType::uint32, CustomArgSemantic::NumWorkGroupsX},
+                                  {CustomArgType::uint32, CustomArgSemantic::NumWorkGroupsY},
+                                  {CustomArgType::uint32, CustomArgSemantic::NumWorkGroupsZ}};
+}
+
+// Launches a probe kernel on the skinny MXFP8 wide/skinny grid; the expected grids below were
+// computed from the original name-derived emitter logic.
+static KernelInvocation launchSkinnyEmitter(ContractionSolution&          solution,
+                                            vector3<CustomGridSize>       grid,
+                                            TensileLite::dim3             macrotile,
+                                            ContractionProblemGemm const& problem)
+{
+    configureGridProbe(solution, grid, macrotile);
+
+    AMDGPU            device = probeDevice();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    return solution.generateCustomCall<false>(problem, inputs, device, sk);
+}
+
+// A split-K launch on a tile-count grid would leave D unwritten, wide/skinny grids included.
+TEST(CustomKernelTest, WideSkinnyGridRejectsSplitK)
+{
+    ContractionProblemGemm problem = tileGridProblem(1025, 9, 1);
+    AMDGPU                 device  = probeDevice();
+    ContractionInputs      inputs;
+    StreamKSettings        sk;
+
+    ContractionSolution solution;
+    configureGridProbe(solution, wideSkinny3dGrid(), TensileLite::dim3(32, 16, tileGridK));
+    solution.sizeMapping.globalSplitU = 1;
+    EXPECT_NO_THROW(solution.generateCustomCall<false>(problem, inputs, device, sk));
+
+    problem.setParams().setGSU(4);
+    EXPECT_THROW(solution.generateCustomCall<false>(problem, inputs, device, sk),
+                 std::runtime_error);
+}
+
+// Per-dimension NumWorkGroups kernargs must report the launched grid. Rows cover a 3-D
+// grid in both axis orders, the wide/skinny grid in both orientations (one macrotile must
+// launch the same grid whichever of m and n is skinny), a flat wide/skinny grid, the
+// wide-block-column case, and the NumWorkGroups kernarg with and without internal args
+// (flattening needs internalArgsSupport.version >= 1).
+namespace
+{
+    struct NumWorkGroupsCase
+    {
+        char const*             name;
+        vector3<CustomGridSize> grid;
+        TensileLite::dim3       macrotile;
+        size_t                  m, n, batch;
+        bool                    withNumWorkGroups;
+        int                     internalArgsVersion;
+        uint32_t                x, y, z;
+    };
+}
+
+TEST(CustomKernelTest, NumWorkGroupsPerDimensionReportTheLaunchedGrid)
+{
+    vector3<CustomGridSize> const tilesXY
+        = {CustomGridSize::TilesX, CustomGridSize::TilesY, CustomGridSize::Batch};
+    vector3<CustomGridSize> const tilesYX
+        = {CustomGridSize::TilesY, CustomGridSize::TilesX, CustomGridSize::Batch};
+
+    // The 1025 / 256 and 9 / 4 splits both leave a tail tile.
+    std::vector<NumWorkGroupsCase> const cases = {
+        {"tileGrid", tilesXY, {256, 4, tileGridK}, 1025, 9, 3, false, 1, 5, 3, 3},
+        {"swappedTileGrid", tilesYX, {4, 256, tileGridK}, 9, 1025, 3, false, 1, 5, 3, 3},
+        {"wideSkinnySkinnyN", wideSkinny3dGrid(), {256, 4, tileGridK}, 1025, 9, 3, false, 1, 5, 3, 3},
+        {"wideSkinnySkinnyM", wideSkinny3dGrid(), {256, 4, tileGridK}, 9, 1025, 3, false, 1, 5, 3, 3},
+        {"wideSkinnyFlat", wideSkinnyFlatGrid(), {32, 16, tileGridK}, 5120, 16, 1, false, 1, 160, 1, 1},
+        {"wideSkinnyBlockColumns", wideSkinny3dGrid(), {16, 16, tileGridK}, 1, 10240, 1, false, 1, 640, 1, 1},
+        {"unflattenedKernArgsVersion0", tilesXY, {256, 4, tileGridK}, 1025, 9, 7, true, 0, 5, 3, 7},
+        {"flattenedKernArgsVersion1", tilesXY, {256, 4, tileGridK}, 1025, 9, 3, true, 1, 45, 1, 1},
+    };
+
+    for(NumWorkGroupsCase const& c : cases)
+    {
+        SCOPED_TRACE(c.name);
+        ContractionSolution solution;
+        solution.internalArgsSupport.version = c.internalArgsVersion;
+
+        std::vector<CustomArgSemantic> semantics;
+        if(c.withNumWorkGroups)
+            semantics.push_back(CustomArgSemantic::NumWorkGroups);
+        for(CustomArgSemantic semantic : perDimensionSemantics())
+            semantics.push_back(semantic);
+
+        KernelInvocation invocation = launchWithSemantics(
+            solution, c.grid, c.macrotile, semantics, tileGridProblem(c.m, c.n, c.batch));
+
+        EXPECT_EQ(invocation.numWorkGroups.x, c.x);
+        EXPECT_EQ(invocation.numWorkGroups.y, c.y);
+        EXPECT_EQ(invocation.numWorkGroups.z, c.z);
+        expectPerDimensionArgs(invocation, c.withNumWorkGroups ? 1 : 0);
+        // The NumWorkGroups kernarg keeps its own meaning: the flattened x extent.
+        if(c.withNumWorkGroups && c.internalArgsVersion >= 1)
+            EXPECT_EQ(emittedUint32(invocation, 0), c.x);
+    }
+}
+
+// int32 ConstantZero kernargs after the per-dimension grid are zero dwords that keep the order
+// of the arguments.
+TEST(CustomKernelTest, Int32ConstantZeroArgsFollowThePerDimensionArgs)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::int32, CustomArgSemantic::NumWorkGroupsX});
+    solution.customKernel.grid      = wideSkinny3dGrid();
+    solution.customKernel.macrotile = TensileLite::dim3(256, 4, tileGridK);
+    solution.customKernel.args.clear();
+    for(CustomArgSemantic semantic : perDimensionSemantics())
+        solution.customKernel.args.push_back({CustomArgType::int32, semantic});
+    for(int32_t i = 0; i < 2; ++i)
+        solution.customKernel.args.push_back({CustomArgType::int32, CustomArgSemantic::ConstantZero});
+    solution.customKernel.args.push_back({CustomArgType::int32, CustomArgSemantic::ConstantOne});
+
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    KernelInvocation  invocation
+        = solution.generateCustomCall<false>(tileGridProblem(1025, 9, 3), inputs, probeDevice(), sk);
+
+    ASSERT_EQ(invocation.args.size(), 6 * sizeof(int32_t));
+    expectPerDimensionArgs(invocation, 0);
+    EXPECT_EQ(emittedUint32(invocation, 3), 0u);
+    EXPECT_EQ(emittedUint32(invocation, 4), 0u);
+    EXPECT_EQ(emittedUint32(invocation, 5), 1u);
+}
+
+// The skinny MXFP8 kernels read 116 bytes of kernargs: the 20 original arguments, then two int32
+// zero dwords right after NumWorkGroupsZ. The 120-byte segment size comes from the kernel metadata.
+TEST(SkinnyMxfp8LaunchTest, SkinnyMxfp8KernargLayoutPacksTheTwoConstantZeroDwords)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::address, CustomArgSemantic::AddressD});
+    solution.customKernel.grid      = wideSkinny3dGrid();
+    solution.customKernel.macrotile = TensileLite::dim3(16, 16, 4096);
+    solution.customKernel.threads   = TensileLite::dim3(128, 1, 1);
+    solution.customKernel.kStep     = 256;
+    solution.customKernel.args      = {
+        {CustomArgType::address, CustomArgSemantic::AddressD},
+        {CustomArgType::address, CustomArgSemantic::AddressA},
+        {CustomArgType::address, CustomArgSemantic::AddressB},
+        {CustomArgType::address, CustomArgSemantic::AddressMXScaleA},
+        {CustomArgType::address, CustomArgSemantic::AddressMXScaleB},
+        {CustomArgType::uint64, CustomArgSemantic::ConstantZero},
+        {CustomArgType::address, CustomArgSemantic::AddressC},
+        {CustomArgType::int32, CustomArgSemantic::StrideD0Bytes},
+        {CustomArgType::int32, CustomArgSemantic::StrideA0Bytes},
+        {CustomArgType::int32, CustomArgSemantic::StrideB0Bytes},
+        {CustomArgType::int32, CustomArgSemantic::SizeFree0},
+        {CustomArgType::int32, CustomArgSemantic::SizeFree1},
+        {CustomArgType::int32, CustomArgSemantic::SizeSum},
+        {CustomArgType::int32, CustomArgSemantic::Spk},
+        {CustomArgType::int32, CustomArgSemantic::StrideC0Bytes},
+        {CustomArgType::float32, CustomArgSemantic::Alpha},
+        {CustomArgType::float32, CustomArgSemantic::Beta},
+        {CustomArgType::int32, CustomArgSemantic::NumWorkGroupsX},
+        {CustomArgType::int32, CustomArgSemantic::NumWorkGroupsY},
+        {CustomArgType::int32, CustomArgSemantic::NumWorkGroupsZ},
+        {CustomArgType::int32, CustomArgSemantic::ConstantZero},
+        {CustomArgType::int32, CustomArgSemantic::ConstantZero}};
+
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    KernelInvocation  invocation
+        = solution.generateCustomCall<false>(tileGridProblem(5120, 3, 2), inputs, probeDevice(), sk);
+
+    constexpr size_t numWorkGroupsXDword = 96 / sizeof(uint32_t);
+    ASSERT_EQ(invocation.args.size(), 116u);
+    expectPerDimensionArgs(invocation, numWorkGroupsXDword);
+    EXPECT_EQ(emittedUint32(invocation, 108 / sizeof(uint32_t)), 0u);
+    EXPECT_EQ(emittedUint32(invocation, 112 / sizeof(uint32_t)), 0u);
+}
+
+
+// Spk is K rounded up to the declared k step, not to macrotile.z.
+static uint32_t emittedSpk(size_t kStep, size_t k, CustomArgType type = CustomArgType::uint32)
+{
+    ContractionSolution solution;
+    auto problem = ContractionProblemGemm::GEMM(false, false, 5120, 2, k, 5120, k, 5120, 0.0, false, 1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+
+    configureProbeKernel(solution, {type, CustomArgSemantic::Spk});
+    solution.customKernel.macrotile = TensileLite::dim3(8, 2, 4096);
+    solution.customKernel.grid      = wideSkinny3dGrid();
+    solution.customKernel.kStep     = kStep;
+
+    AMDGPU            device = probeDevice();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    KernelInvocation invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+    return emittedUint32(invocation, 0);
+}
+
+TEST(CustomKernelTest, SpkRequiresKStep)
+{
+    EXPECT_THROW(emittedSpk(0, 5120), std::runtime_error);
+}
+
+// The host sizes the grid from the wide and skinny free extents, so a problem and
+// its m <-> n swap must launch identically (equal extents are their own swap).
+TEST(CustomKernelTest, WideSkinnyLaunchIsIndependentOfTheOrientation)
+{
+    for(vector3<CustomGridSize> const& grid : {wideSkinny3dGrid(), wideSkinnyFlatGrid()})
+    {
+        for(auto const& [wide, skinny] : std::vector<std::pair<size_t, size_t>>{
+                {5120, 3}, {1025, 9}, {128256, 1}, {64, 64}})
+        {
+            ContractionSolution      solutionMN;
+            ContractionSolution      solutionNM;
+            ContractionProblemGemm   mn = tileGridProblem(wide, skinny, 2);
+            ContractionProblemGemm   nm = tileGridProblem(skinny, wide, 2);
+            TensileLite::dim3 const  macrotile(32, 16, 4096);
+
+            KernelInvocation a = launchSkinnyEmitter(solutionMN, grid, macrotile, mn);
+            KernelInvocation b = launchSkinnyEmitter(solutionNM, grid, macrotile, nm);
+
+            SCOPED_TRACE("wide=" + std::to_string(wide) + " skinny=" + std::to_string(skinny));
+            EXPECT_EQ(a.numWorkGroups.x, b.numWorkGroups.x);
+            EXPECT_EQ(a.numWorkGroups.y, b.numWorkGroups.y);
+            EXPECT_EQ(a.numWorkGroups.z, b.numWorkGroups.z);
+            EXPECT_EQ(a.workGroupSize.x, b.workGroupSize.x);
+            EXPECT_EQ(a.workGroupSize.y, b.workGroupSize.y);
+            EXPECT_EQ(a.workGroupSize.z, b.workGroupSize.z);
+            EXPECT_GT(a.numWorkGroups.x, 0u);
+        }
+    }
+}
+
+// calculateGrid (LaunchLimits) and the launch share the grid sizing; they must agree
+// for both orientations and for a transposed C too.
+TEST(CustomKernelTest, WideSkinnyLaunchLimitsAgreeWithTheLaunch)
+{
+    for(vector3<CustomGridSize> const& grid : {wideSkinny3dGrid(), wideSkinnyFlatGrid()})
+    {
+        for(auto const& [m, n] : std::vector<std::pair<size_t, size_t>>{{5120, 3}, {3, 5120}, {64, 64}})
+        {
+            for(bool transposed : {false, true})
+            {
+                SCOPED_TRACE("m=" + std::to_string(m) + " n=" + std::to_string(n)
+                             + " transposed=" + std::to_string(transposed));
+                ContractionSolution    solution;
+                ContractionProblemGemm problem = transposed ? transposedTileGridProblem(m, n, 2)
+                                                            : tileGridProblem(m, n, 2);
+                ASSERT_EQ(problem.transposeC01(), transposed);
+                KernelInvocation launch
+                    = launchSkinnyEmitter(solution, grid, TensileLite::dim3(32, 16, 4096), problem);
+
+                EXPECT_TRUE(solution.wideSkinnyGridObstacle().empty());
+                TensileLite::dim3 workGroupSize;
+                TensileLite::dim3 numWorkGroups;
+                solution.calculateGrid(workGroupSize, numWorkGroups, problem);
+
+                EXPECT_EQ(numWorkGroups.x, launch.numWorkGroups.x);
+                EXPECT_EQ(numWorkGroups.y, launch.numWorkGroups.y);
+                EXPECT_EQ(numWorkGroups.z, launch.numWorkGroups.z);
+                EXPECT_EQ(workGroupSize.x, launch.workGroupSize.x);
+
+                AMDGPU device = probeDevice();
+                Task   task(device, problem, solution);
+                EXPECT_TRUE(Predicates::Contraction::LaunchLimits()(task));
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Skinny MXFP8 launch sizing. The configurations below are representative grid
+// configurations, not the shipped kernels' values (the Python metadata tests pin those
+// from the .s files). The oracle is independent of the implementation:
+//   tilesWide   = ceil(max(m, n) / macrotile[0])
+//   tilesSkinny = ceil(min(m, n) / macrotile[1])
+//   spk         = max(ceil(k / kStep), 1) * kStep
+// ----------------------------------------------------------------------------
+
+namespace
+{
+    struct SkinnyGridConfig
+    {
+        TensileLite::dim3       macrotile;
+        size_t                  threads;
+        vector3<CustomGridSize> grid;
+        size_t                  kStep;
+    };
+
+    struct SkinnyShape
+    {
+        size_t m, n, k, batch;
+    };
+
+    size_t ceilDiv(size_t a, size_t b)
+    {
+        return (a + b - 1) / b;
+    }
+
+    void configureSkinnySolution(ContractionSolution&    solution,
+                                 SkinnyGridConfig const& config,
+                                 std::string const&      name)
+    {
+        configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::Spk});
+        solution.customKernel.name      = name;
+        solution.customKernel.macrotile = config.macrotile;
+        solution.customKernel.threads   = TensileLite::dim3(config.threads, 1, 1);
+        solution.customKernel.grid      = config.grid;
+        solution.customKernel.kStep     = config.kStep;
+        solution.customKernel.noSplitK  = true;
+    }
+
+    // C is either regular (A and B are column-major) or transposed (transposeC01).
+    ContractionProblemGemm skinnyProblem(SkinnyShape const& s, bool transposed)
+    {
+        ContractionProblemGemm problem
+            = transposed ? ContractionProblemGemm::FromIndexSizes("Contraction_l_Ajlk_Blik_Cijk_Dijk",
+                                                                  {s.m, s.n, s.batch, s.k},
+                                                                  rocisa::DataType::Float,
+                                                                  {},
+                                                                  rocisa::DataType::Float,
+                                                                  {},
+                                                                  rocisa::DataType::Float,
+                                                                  {},
+                                                                  rocisa::DataType::Float,
+                                                                  {},
+                                                                  0.0)
+                         : ContractionProblemGemm::GEMM(
+                             false, false, s.m, s.n, s.k, s.m, s.k, s.m, 0.0, false, s.batch);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        return problem;
+    }
+
+    void expectSkinnyLaunch(SkinnyGridConfig const& config,
+                            SkinnyShape const&      s,
+                            bool                    transposed)
+    {
+        SCOPED_TRACE("m=" + std::to_string(s.m) + " n=" + std::to_string(s.n)
+                     + " k=" + std::to_string(s.k) + " batch=" + std::to_string(s.batch)
+                     + " transposed=" + std::to_string(transposed));
+
+        size_t tilesWide   = ceilDiv(std::max(s.m, s.n), config.macrotile.x);
+        size_t tilesSkinny = ceilDiv(std::min(s.m, s.n), config.macrotile.y);
+        size_t spk         = std::max<size_t>(ceilDiv(s.k, config.kStep), 1) * config.kStep;
+        bool   flat        = config.grid.x == CustomGridSize::TilesWideSkinnyBatch;
+
+        ContractionSolution solution;
+        configureSkinnySolution(solution, config, "skinnyGridProbe");
+        ContractionProblemGemm problem = skinnyProblem(s, transposed);
+        ASSERT_EQ(problem.transposeC01(), transposed);
+
+        size_t tw = 0;
+        size_t ts = 0;
+        size_t nb = 0;
+        solution.calculateWideSkinnyTiles(tw, ts, nb, problem);
+        EXPECT_EQ(tw, tilesWide);
+        EXPECT_EQ(ts, tilesSkinny);
+        EXPECT_EQ(nb, s.batch);
+
+        AMDGPU            device = probeDevice();
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+        KernelInvocation  launch = solution.generateCustomCall<false>(problem, inputs, device, sk);
+
+        EXPECT_EQ(launch.numWorkGroups.x, flat ? tilesWide * tilesSkinny * s.batch : tilesWide);
+        EXPECT_EQ(launch.numWorkGroups.y, flat ? 1u : tilesSkinny);
+        EXPECT_EQ(launch.numWorkGroups.z, flat ? 1u : s.batch);
+        EXPECT_EQ(launch.workGroupSize.x, config.threads);
+        EXPECT_EQ(launch.workGroupSize.y, 1u);
+        EXPECT_EQ(launch.workGroupSize.z, 1u);
+        EXPECT_EQ(emittedUint32(launch, 0), spk);
+
+        // LaunchLimits sizes the grid through calculateGrid; it must agree.
+        TensileLite::dim3 workGroupSize;
+        TensileLite::dim3 numWorkGroups;
+        solution.calculateGrid(workGroupSize, numWorkGroups, problem);
+        EXPECT_EQ(numWorkGroups.x, launch.numWorkGroups.x);
+        EXPECT_EQ(numWorkGroups.y, launch.numWorkGroups.y);
+        EXPECT_EQ(numWorkGroups.z, launch.numWorkGroups.z);
+        EXPECT_EQ(workGroupSize.x, config.threads);
+    }
+}
+
+TEST(SkinnyMxfp8LaunchTest, GridWorkGroupSizeAndSpkFollowTheMetadata)
+{
+    std::vector<SkinnyGridConfig> const configs = {
+        {TensileLite::dim3(16, 16, 4096), 128, wideSkinny3dGrid(), 256},
+        {TensileLite::dim3(32, 16, 4096), 64, wideSkinny3dGrid(), 256},
+        {TensileLite::dim3(48, 16, 4096), 64, wideSkinny3dGrid(), 256},
+        {TensileLite::dim3(32, 16, 4096), 128, wideSkinnyFlatGrid(), 256},
+        {TensileLite::dim3(8, 2, 4096), 64, wideSkinny3dGrid(), 1024},
+        {TensileLite::dim3(8, 2, 4096), 64, wideSkinnyFlatGrid(), 1024},
+    };
+    // Each shape is run in both orientations; the extremes cover single-tile, partial-tile,
+    // multi-batch, K not a multiple of kStep and a 2^20 wide extent.
+    std::vector<SkinnyShape> const shapes = {
+        {5120, 3, 5120, 1},
+        {8191, 4, 2048, 1},
+        {33, 17, 1024, 3},
+        {29584, 1, 25600, 2},
+        {48, 5, 5121, 1},
+        {1048576, 2, 300, 1},
+        {64, 64, 256, 2},
+    };
+
+    for(SkinnyGridConfig const& config : configs)
+    {
+        SCOPED_TRACE("macrotile.x=" + std::to_string(config.macrotile.x) + " macrotile.y="
+                     + std::to_string(config.macrotile.y) + " threads="
+                     + std::to_string(config.threads) + " kStep=" + std::to_string(config.kStep)
+                     + " flat=" + std::to_string(config.grid.x
+                                                 == CustomGridSize::TilesWideSkinnyBatch));
+        for(SkinnyShape const& s : shapes)
+        {
+            for(bool transposed : {false, true})
+            {
+                expectSkinnyLaunch(config, s, transposed);
+                expectSkinnyLaunch(config, {s.n, s.m, s.k, s.batch}, transposed);
+            }
+        }
+    }
+}
+
+
+// A kernel without wide/skinny metadata keeps the generic grid sizing.
+TEST(CustomKernelTest, GenericGridIsUnchangedWithoutWideSkinnyMetadata)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::SizeFree0});
+    solution.sizeMapping.workGroupSize = TensileLite::dim3(16, 16, 1);
+
+    EXPECT_EQ(solution.customKernel.kStep, 0u);
+    EXPECT_FALSE(solution.customKernel.noSplitK);
+
+    ContractionProblemGemm problem = tileGridProblem(1025, 9, 3);
+
+    TensileLite::dim3 workGroupSize;
+    TensileLite::dim3 numWorkGroups;
+    solution.calculateGrid(workGroupSize, numWorkGroups, problem);
+    // sizeMapping.macroTile is 128 x 128.
+    EXPECT_EQ(workGroupSize.x, 256u);
+    EXPECT_EQ(numWorkGroups.x, 9u);
+    EXPECT_EQ(numWorkGroups.y, 1u);
+    EXPECT_EQ(numWorkGroups.z, 3u);
+
+    AMDGPU            device = probeDevice();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    KernelInvocation  launch = solution.generateCustomCall<false>(problem, inputs, device, sk);
+    EXPECT_EQ(launch.numWorkGroups.x, 9u);
+    EXPECT_EQ(launch.numWorkGroups.y, 1u);
+    EXPECT_EQ(launch.numWorkGroups.z, 1u);
+    EXPECT_EQ(launch.workGroupSize.x, 256u);
+}
+
+// A generated kernel never takes the wide/skinny path, whatever its grid says.
+TEST(CustomKernelTest, GeneratedKernelKeepsTheGenericCalculateGrid)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::SizeFree0});
+    solution.sizeMapping.workGroupSize = TensileLite::dim3(16, 16, 1);
+    solution.customKernel.generated    = true;
+    solution.customKernel.threads      = TensileLite::dim3(64, 1, 1);
+    solution.customKernel.grid = {CustomGridSize::TilesWide, CustomGridSize::TilesSkinny, CustomGridSize::Batch};
+
+    TensileLite::dim3 workGroupSize;
+    TensileLite::dim3 numWorkGroups;
+    solution.calculateGrid(workGroupSize, numWorkGroups, tileGridProblem(1025, 9, 3));
+    EXPECT_EQ(workGroupSize.x, 256u);
+    EXPECT_EQ(numWorkGroups.x, 9u);
+    EXPECT_EQ(numWorkGroups.y, 1u);
+    EXPECT_EQ(numWorkGroups.z, 3u);
+}
+
+// TilesX and TilesY count tiles of an (m, n) macrotile, which a [wide, skinny] one does not
+// describe, so the grid is rejected: selection must drop the solution without throwing, while
+// the launch paths throw.
+TEST(CustomKernelTest, MixedWideSkinnyGridIsRejectedWithoutAbortingSelection)
+{
+    for(vector3<CustomGridSize> const& grid :
+        {vector3<CustomGridSize>{CustomGridSize::TilesWide, CustomGridSize::TilesXY, CustomGridSize::One},
+         vector3<CustomGridSize>{CustomGridSize::TilesX, CustomGridSize::TilesWide, CustomGridSize::One},
+         vector3<CustomGridSize>{CustomGridSize::TilesWide, CustomGridSize::One, CustomGridSize::TilesXY}})
+    {
+        ContractionSolution    solution;
+        ContractionProblemGemm problem = tileGridProblem(1025, 9, 1);
+        configureGridProbe(solution, grid, TensileLite::dim3(32, 16, tileGridK));
+
+        EXPECT_NE(solution.wideSkinnyGridObstacle().find("combines wide/skinny tile counts"),
+                  std::string::npos);
+
+        AMDGPU device = probeDevice();
+        Task   task(device, problem, solution);
+        bool   accepted = true;
+        EXPECT_NO_THROW(accepted = Predicates::Contraction::LaunchLimits()(task));
+        EXPECT_FALSE(accepted);
+
+        TensileLite::dim3 workGroupSize;
+        TensileLite::dim3 numWorkGroups;
+        std::string gridMessage;
+        try
+        {
+            solution.calculateGrid(workGroupSize, numWorkGroups, problem);
+        }
+        catch(std::runtime_error const& error)
+        {
+            gridMessage = error.what();
+        }
+        EXPECT_NE(gridMessage.find("combines wide/skinny tile counts"), std::string::npos)
+            << gridMessage;
+
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+        std::string       callMessage;
+        try
+        {
+            solution.generateCustomCall<false>(problem, inputs, device, sk);
+        }
+        catch(std::runtime_error const& error)
+        {
+            callMessage = error.what();
+        }
+        EXPECT_NE(callMessage.find("combines wide/skinny tile counts"), std::string::npos)
+            << callMessage;
+
+        std::ostringstream stream;
+        EXPECT_FALSE(Predicates::Contraction::LaunchLimits().debugEval(task, stream));
+        EXPECT_NE(stream.str().find("combines wide/skinny tile counts"), std::string::npos)
+            << stream.str();
+    }
+}
+
+TEST(CustomKernelTest, WideSkinnyGridRejectsAZeroMacrotileOrThreadCount)
+{
+    // Zero in macrotile.x, macrotile.y or threads.x each divides by zero in the grid math.
+    for(int32_t zeroed : {0, 1, 2})
+    {
+        SCOPED_TRACE("zeroed field " + std::to_string(zeroed));
+        ContractionSolution solution;
+        configureGridProbe(solution,
+                           wideSkinny3dGrid(),
+                           TensileLite::dim3(zeroed == 0 ? 0 : 32, zeroed == 1 ? 0 : 16, tileGridK));
+        if(zeroed == 2)
+            solution.customKernel.threads = TensileLite::dim3(0, 1, 1);
+
+        EXPECT_NE(solution.wideSkinnyGridObstacle().find("zero macrotile or thread count"),
+                  std::string::npos);
+
+        AMDGPU                 device  = probeDevice();
+        ContractionProblemGemm problem = tileGridProblem(1025, 9, 1);
+        Task                   task(device, problem, solution);
+        EXPECT_FALSE(Predicates::Contraction::LaunchLimits()(task));
+    }
+}
+
+// Only handwritten kernels with a wide/skinny grid value have an obstacle to report.
+TEST(CustomKernelTest, GridsWithoutWideSkinnyValuesHaveNoObstacle)
+{
+    ContractionSolution solution;
+    configureGridProbe(solution,
+                       {CustomGridSize::TilesX, CustomGridSize::TilesY, CustomGridSize::Batch},
+                       TensileLite::dim3(0, 0, 0));
+    EXPECT_TRUE(solution.wideSkinnyGridObstacle().empty());
+
+    configureGridProbe(solution, wideSkinny3dGrid(), TensileLite::dim3(32, 16, tileGridK));
+    solution.customKernel.generated = true;
+    EXPECT_TRUE(solution.wideSkinnyGridObstacle().empty());
+}
+
+// The generic tile counts follow the output order whichever way C is transposed, and
+// a packed batch is not a tile dimension.
+TEST(CustomKernelTest, CalculateTilesFollowsTheMacrotileAndTheOutputOrder)
+{
+    ContractionSolution solution;
+    configureGridProbe(solution,
+                       {CustomGridSize::TilesX, CustomGridSize::TilesY, CustomGridSize::Batch},
+                       TensileLite::dim3(256, 4, tileGridK));
+
+    for(ContractionProblemGemm const& problem :
+        {tileGridProblem(1025, 9, 3), transposedTileGridProblem(1025, 9, 3)})
+    {
+        TensileLite::dim3 tiles;
+        solution.calculateTiles(tiles, problem);
+        EXPECT_EQ(tiles.x, 5u);
+        EXPECT_EQ(tiles.y, 3u);
+        EXPECT_EQ(tiles.z, 3u);
+    }
+
+    solution.sizeMapping.packBatchDims = 1;
+    TensileLite::dim3 tiles;
+    solution.calculateTiles(tiles, tileGridProblem(1025, 9, 3));
+    EXPECT_EQ(tiles.z, 1u);
+}
+
+// The kernels read Spk and the grid as unsigned 32-bit, so a value that does not fit must
+// throw instead of truncating.
+TEST(CustomKernelTest, SpkAtTheThirtyTwoBitLimit)
+{
+    constexpr size_t limit = size_t(1) << 32;
+    EXPECT_EQ(emittedSpk(256, limit - 256), limit - 256);
+    EXPECT_THROW(emittedSpk(256, limit - 255), std::runtime_error);
+}
+
+// A kernel that reads Spk as a signed 32-bit integer would see 2^31 as a negative number.
+TEST(CustomKernelTest, SignedSpkThrowsAtTwoToTheThirtyOne)
+{
+    constexpr size_t limit = size_t(1) << 31;
+    EXPECT_EQ(emittedSpk(256, limit - 256, CustomArgType::int32), limit - 256);
+    EXPECT_THROW(emittedSpk(256, limit - 255, CustomArgType::int32), std::runtime_error);
+    EXPECT_THROW(emittedSpk(256, limit - 32, CustomArgType::int32), std::runtime_error);
+    EXPECT_EQ(emittedSpk(256, limit - 32), limit);
+}
+
+TEST(CustomKernelTest, NumWorkGroupsKernArgsThrowBeyondThirtyTwoBits)
+{
+    constexpr size_t over = size_t(1) << 32;
+    struct Case
+    {
+        size_t      m, n, batch;
+        char const* name;
+    };
+    for(Case const& c : {Case{over, 1, 1, "NumWorkGroupsX"},
+                         Case{1, over, 1, "NumWorkGroupsY"},
+                         Case{1, 1, over, "NumWorkGroupsZ"}})
+    {
+        ContractionSolution solution;
+        std::string         message;
+        try
+        {
+            launchWithSemantics(
+                solution,
+                {CustomGridSize::TilesX, CustomGridSize::TilesY, CustomGridSize::Batch},
+                TensileLite::dim3(1, 1, tileGridK),
+                perDimensionSemantics(),
+                tileGridProblem(c.m, c.n, c.batch));
+        }
+        catch(std::runtime_error const& error)
+        {
+            message = error.what();
+        }
+        EXPECT_NE(message.find(std::string(c.name) + " 4294967296 does not fit"), std::string::npos)
+            << c.name << ": " << message;
+    }
+}
+
+// The largest launchable grid is 2^32 - 1 work-groups per dimension.
+TEST(CustomKernelTest, NumWorkGroupsKernArgsAcceptTheThirtyTwoBitMaximum)
+{
+    constexpr size_t maxCount = (size_t(1) << 32) - 1;
+    ContractionSolution solution;
+    KernelInvocation    invocation = launchWithSemantics(
+        solution,
+        {CustomGridSize::TilesX, CustomGridSize::TilesY, CustomGridSize::Batch},
+        TensileLite::dim3(1, 1, tileGridK),
+        perDimensionSemantics(),
+        tileGridProblem(maxCount, 1, 1));
+    EXPECT_EQ(emittedUint32(invocation, 0), 4294967295u);
+    EXPECT_EQ(invocation.numWorkGroups.x, 4294967295u);
+}
+
+// The byte strides must be computed in integers: a float product rounds to 24 bits.
+static std::array<uint32_t, 4> emittedByteStrides(rocisa::DataType abType,
+                                                  rocisa::DataType cdType,
+                                                  size_t           lda,
+                                                  size_t           ldb,
+                                                  size_t           ldc,
+                                                  size_t           ldd)
+{
+    ContractionProblemGemm problem = ContractionProblemGemm::GEMM_Strides(true,
+                                                                          false,
+                                                                          abType,
+                                                                          abType,
+                                                                          cdType,
+                                                                          cdType,
+                                                                          4,
+                                                                          2,
+                                                                          64,
+                                                                          1,
+                                                                          lda,
+                                                                          -1,
+                                                                          ldb,
+                                                                          -1,
+                                                                          ldc,
+                                                                          -1,
+                                                                          ldd,
+                                                                          -1,
+                                                                          0.0);
+    problem.setComputeInputTypeA(abType);
+    problem.setComputeInputTypeB(abType);
+
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::int32, CustomArgSemantic::StrideA0Bytes});
+    solution.customKernel.args = {{CustomArgType::int32, CustomArgSemantic::StrideA0Bytes},
+                                  {CustomArgType::int32, CustomArgSemantic::StrideB0Bytes},
+                                  {CustomArgType::int32, CustomArgSemantic::StrideC0Bytes},
+                                  {CustomArgType::int32, CustomArgSemantic::StrideD0Bytes}};
+
+    AMDGPU            device = probeDevice();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    KernelInvocation  invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+    EXPECT_EQ(invocation.args.size(), 4 * sizeof(uint32_t));
+    return {emittedUint32(invocation, 0),
+            emittedUint32(invocation, 1),
+            emittedUint32(invocation, 2),
+            emittedUint32(invocation, 3)};
+}
+
+TEST(CustomKernelTest, ByteStridesAreExactBeyondTheFloatMantissa)
+{
+    // 2-byte C/D: 2 * 16777219 = 33554438, which a float cannot represent.
+    std::array<uint32_t, 4> bf16 = emittedByteStrides(
+        rocisa::DataType::Float8, rocisa::DataType::BFloat16, 64, 64, 16777219, 16777219);
+    EXPECT_EQ(bf16[0], 64u);
+    EXPECT_EQ(bf16[1], 64u);
+    EXPECT_EQ(bf16[2], 33554438u);
+    EXPECT_EQ(bf16[3], 33554438u);
+
+    // 1-byte A/B: 2^26 + 4 needs 27 significant bits.
+    constexpr size_t big = (size_t(1) << 26) + 4;
+    std::array<uint32_t, 4> fp8
+        = emittedByteStrides(rocisa::DataType::Float8, rocisa::DataType::BFloat16, big, big, 4, 4);
+    EXPECT_EQ(fp8[0], 67108868u);
+    EXPECT_EQ(fp8[1], 67108868u);
+    EXPECT_EQ(fp8[2], 8u);
+    EXPECT_EQ(fp8[3], 8u);
+}
+
+// Byte strides are kernargs of 32 bits: up to 4 GiB is accepted, more throws instead of truncating.
+TEST(CustomKernelTest, ByteStridesThrowBeyondThirtyTwoBits)
+{
+    constexpr size_t fits = size_t(1) << 31;
+    std::array<uint32_t, 4> ok = emittedByteStrides(
+        rocisa::DataType::Float8, rocisa::DataType::BFloat16, 64, 64, fits - 1, fits - 1);
+    EXPECT_EQ(ok[2], 2 * (fits - 1));
+    EXPECT_THROW(emittedByteStrides(
+                     rocisa::DataType::Float8, rocisa::DataType::BFloat16, 64, 64, fits, fits),
+                 std::runtime_error);
+    EXPECT_THROW(emittedByteStrides(rocisa::DataType::Float8,
+                                    rocisa::DataType::BFloat16,
+                                    size_t(1) << 32,
+                                    64,
+                                    64,
+                                    64),
+                 std::runtime_error);
+}
+
+// A single-pass kernel has no split-K workspace and a launch-independent summation order;
+// the same kernel without noSplitK needs both.
+TEST(CustomKernelTest, NoSplitKSkipsTheWorkspaceAndUniformSummationOrderChecks)
+{
+    AMDGPU                 device  = probeDevice();
+    ContractionProblemGemm problem = tileGridProblem(5120, 3, 1);
+    problem.setBetaType(rocisa::DataType::Float);
+    problem.setParams().setGSU(4);
+    problem.setParams().setUniformSummationOrder(1);
+
+    for(bool noSplitK : {true, false})
+    {
+        SCOPED_TRACE("noSplitK=" + std::to_string(noSplitK));
+        ContractionSolution solution;
+        configureGridProbe(solution, wideSkinny3dGrid(), TensileLite::dim3(32, 16, tileGridK));
+        solution.sizeMapping.globalAccumulation = 1;
+        solution.customKernel.noSplitK          = noSplitK;
+
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device) == 0, noSplitK);
+        EXPECT_EQ(solution.uniformSummationOrderSupported(problem, device), noSplitK);
+    }
 }

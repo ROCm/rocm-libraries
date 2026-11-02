@@ -24,9 +24,18 @@
  *
  *******************************************************************************/
 
+#include <cstdint>
+#include <sstream>
+#include <string>
+#include <vector>
 #include <gtest/gtest.h>
 
 #include <Tensile/ContractionProblemPredicates.hpp>
+#ifndef TENSILE_YAML
+#include <Tensile/ContractionTaskPredicates.hpp>
+#include <Tensile/Serialization/ContractionPredicates.hpp>
+#include <Tensile/msgpack/MessagePack.hpp>
+#endif
 
 TEST(Predicates, ArithmeticIntensity)
 {
@@ -259,3 +268,416 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_NarrowOutputUsesItsOwnWidth)
     auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(macroTile1);
     EXPECT_TRUE((*pred)(bf16ColumnMajorD(m, n)));
 }
+
+// ----------------------------------------------------------------------------
+// StrideAMultiple / StrideBMultiple: strides are in elements.
+// ----------------------------------------------------------------------------
+
+// Non-transposed GEMM, so lda and ldb are the leading dimensions under test.
+static TensileLite::ContractionProblemGemm strideProblem(size_t lda, size_t ldb)
+{
+    using namespace TensileLite;
+    return ContractionProblemGemm::GEMM_Strides(false,
+                                                false,
+                                                rocisa::DataType::Float8,
+                                                rocisa::DataType::Float8,
+                                                rocisa::DataType::BFloat16,
+                                                rocisa::DataType::BFloat16,
+                                                /*m=*/64,
+                                                /*n=*/64,
+                                                /*k=*/64,
+                                                /*batchSize=*/1,
+                                                lda,
+                                                /*aStride=*/-1,
+                                                ldb,
+                                                /*bStride=*/-1,
+                                                /*ldc=*/64,
+                                                /*cStride=*/-1,
+                                                /*ldd=*/64,
+                                                /*dStride=*/-1,
+                                                /*beta=*/0.0);
+}
+
+struct StrideAOperand
+{
+    using Predicate                    = TensileLite::Predicates::Contraction::StrideAMultiple;
+    static constexpr char const* name = "StrideAMultiple";
+
+    static TensileLite::ContractionProblemGemm problem(size_t ld)
+    {
+        return strideProblem(ld, 64);
+    }
+};
+
+struct StrideBOperand
+{
+    using Predicate                    = TensileLite::Predicates::Contraction::StrideBMultiple;
+    static constexpr char const* name = "StrideBMultiple";
+
+    static TensileLite::ContractionProblemGemm problem(size_t ld)
+    {
+        return strideProblem(64, ld);
+    }
+};
+
+template <typename Operand>
+class StrideMultipleTest : public ::testing::Test
+{
+};
+
+using StrideOperands = ::testing::Types<StrideAOperand, StrideBOperand>;
+TYPED_TEST_SUITE(StrideMultipleTest, StrideOperands);
+
+TYPED_TEST(StrideMultipleTest, LeadingStrideMustBeANonZeroMultiple)
+{
+    using Predicate = typename TypeParam::Predicate;
+    EXPECT_EQ(Predicate::Type(), TypeParam::name);
+
+    Predicate multipleOfFour(1, 4);
+    for(size_t ld : {4, 8, 5120})
+        EXPECT_TRUE(multipleOfFour(TypeParam::problem(ld))) << "ld=" << ld;
+    for(size_t ld : {4098, 5121})
+        EXPECT_FALSE(multipleOfFour(TypeParam::problem(ld))) << "ld=" << ld;
+
+    // A broadcast stride would reach a kernel that takes it as a byte kernarg.
+    EXPECT_FALSE(multipleOfFour(TypeParam::problem(0)));
+    EXPECT_FALSE(Predicate(1, 0)(TypeParam::problem(5120)));
+    // Index 0 is the unit stride.
+    EXPECT_TRUE(Predicate(0, 1)(TypeParam::problem(5121)));
+    EXPECT_FALSE(Predicate(0, 4)(TypeParam::problem(5120)));
+}
+
+TYPED_TEST(StrideMultipleTest, OutOfRangeIndexIsRejectedAndReported)
+{
+    using Predicate = typename TypeParam::Predicate;
+    Predicate outOfRange(7, 4);
+
+    EXPECT_FALSE(outOfRange(TypeParam::problem(5120)));
+
+    std::ostringstream stream;
+    EXPECT_FALSE(outOfRange.debugEval(TypeParam::problem(5120), stream));
+    EXPECT_NE(stream.str().find("out of range"), std::string::npos) << stream.str();
+}
+
+// ----------------------------------------------------------------------------
+// K predicates of the skinny MXFP8 kernels: SizeGreaterThan {3: 0} rejects an empty K, and
+// the K multiple is the MX block, 32 (BoundSizeMultiple), on every kernel: the kernels handle a K tail.
+// ----------------------------------------------------------------------------
+
+static TensileLite::ContractionProblemGemm kProblem(size_t k, size_t m = 64, size_t n = 2)
+{
+    using namespace TensileLite;
+    return ContractionProblemGemm::GEMM_Strides(false,
+                                                false,
+                                                rocisa::DataType::Float8,
+                                                rocisa::DataType::Float8,
+                                                rocisa::DataType::BFloat16,
+                                                rocisa::DataType::BFloat16,
+                                                m,
+                                                n,
+                                                k,
+                                                /*batchSize=*/1,
+                                                /*lda=*/k,
+                                                /*aStride=*/-1,
+                                                /*ldb=*/k,
+                                                /*bStride=*/-1,
+                                                /*ldc=*/m,
+                                                /*cStride=*/-1,
+                                                /*ldd=*/m,
+                                                /*dStride=*/-1,
+                                                /*beta=*/0.0);
+}
+
+TEST(Predicates, KPredicatesOfTheSkinnyKernels)
+{
+    using namespace TensileLite;
+    using namespace TensileLite::Predicates::Contraction;
+
+    SizeGreaterThan notEmpty(3, 0);
+    BoundSizeMultiple whole32(-1, 32);
+    // A zero divisor would otherwise raise SIGFPE.
+    SizeMultiple multipleOfZero(3, 0);
+
+    struct PredicateRow
+    {
+        char const*                  name;
+        TensileLite::Predicates::Predicate<ContractionProblemGemm> const* predicate;
+        std::vector<size_t>          accepted;
+        std::vector<size_t>          rejected;
+    };
+
+    std::vector<PredicateRow> const rows = {
+        {"SizeGreaterThan{3,0}", &notEmpty, {1, 32, 1280}, {0}},
+        {"BoundSizeMultiple{-1,32}", &whole32, {32, 96, 1312, 4128, 25600}, {1, 31, 33, 4100, 5121}},
+        {"SizeMultiple{3,0}", &multipleOfZero, {}, {256}},
+    };
+    for(PredicateRow const& row : rows)
+    {
+        for(size_t k : row.accepted)
+            EXPECT_TRUE((*row.predicate)(kProblem(k))) << row.name << " k=" << k;
+        for(size_t k : row.rejected)
+        {
+            EXPECT_FALSE((*row.predicate)(kProblem(k))) << row.name << " k=" << k;
+            std::ostringstream stream;
+            EXPECT_FALSE(row.predicate->debugEval(kProblem(k), stream)) << row.name << " k=" << k;
+        }
+    }
+}
+
+// The wide cap {0: 1048577, 1: 1048577} bounds m and n independently and leaves k alone.
+TEST(Predicates, SizeLessThanBoundsEachIndexIndependently)
+{
+    using namespace TensileLite;
+    using TensileLite::Predicates::Contraction::SizeLessThan;
+    constexpr size_t cap = 1048577;
+    SizeLessThan     capM(0, cap);
+    SizeLessThan     capN(1, cap);
+
+    EXPECT_TRUE(capM(kProblem(256, cap - 1, 2)));
+    EXPECT_FALSE(capM(kProblem(256, cap, 2)));
+    EXPECT_TRUE(capM(kProblem(256, 2, cap)));
+    EXPECT_TRUE(capN(kProblem(256, 2, cap - 1)));
+    EXPECT_FALSE(capN(kProblem(256, 2, cap)));
+    EXPECT_TRUE(capN(kProblem(256, cap, 2)));
+
+    // K (index 3) is not bounded by the caps on indices 0 and 1.
+    EXPECT_TRUE(capM(kProblem(10 * cap)));
+    EXPECT_TRUE(capN(kProblem(10 * cap)));
+    EXPECT_FALSE(SizeLessThan(3, cap)(kProblem(cap)));
+}
+
+// The problem-type predicates Python emits for a solution without bias, activation or
+// ScaleAlphaVec (UseBias 0, Activation None, UseScaleAlphaVec 0) reject problems using them.
+TEST(Predicates, ProblemTypeWithoutBiasActivationOrScaleAlphaVecRejectsThem)
+{
+    using namespace TensileLite;
+    using namespace TensileLite::Predicates::Contraction;
+
+    UseBiasCheck          noBias(0);
+    ActivationCheck       noActivation(ActivationType::None);
+    UseScaleAlphaVecCheck noScaleAlphaVec(0);
+    EXPECT_EQ(UseBiasCheck::Type(), "UseBias");
+    EXPECT_EQ(ActivationCheck::Type(), "Activation");
+    EXPECT_EQ(UseScaleAlphaVecCheck::Type(), "UseScaleAlphaVec");
+
+    ContractionProblemGemm plain = kProblem(256);
+    EXPECT_TRUE(noBias(plain));
+    EXPECT_TRUE(noActivation(plain));
+    EXPECT_TRUE(noScaleAlphaVec(plain));
+
+    ContractionProblemGemm withBias = kProblem(256);
+    withBias.setUseBias(1);
+    EXPECT_FALSE(noBias(withBias));
+    EXPECT_TRUE(noActivation(withBias));
+    EXPECT_TRUE(noScaleAlphaVec(withBias));
+
+    ContractionProblemGemm withActivation = kProblem(256);
+    withActivation.setActivationType(ActivationType::Relu);
+    EXPECT_TRUE(noBias(withActivation));
+    EXPECT_FALSE(noActivation(withActivation));
+    EXPECT_TRUE(noScaleAlphaVec(withActivation));
+
+    ContractionProblemGemm withScaleAlphaVec = kProblem(256);
+    withScaleAlphaVec.setUseScaleAlphaVec(1);
+    EXPECT_TRUE(noBias(withScaleAlphaVec));
+    EXPECT_TRUE(noActivation(withScaleAlphaVec));
+    EXPECT_FALSE(noScaleAlphaVec(withScaleAlphaVec));
+
+    // A solution that supports them accepts them.
+    EXPECT_TRUE(UseBiasCheck(1)(withBias));
+    EXPECT_TRUE(ActivationCheck(ActivationType::Relu)(withActivation));
+    EXPECT_TRUE(UseScaleAlphaVecCheck(1)(withScaleAlphaVec));
+}
+
+// ----------------------------------------------------------------------------
+// TensorBytesLessThan: the skinny kernels compute each tensor's 32-bit buffer extent
+// from (rows - 1) * ld * elementBytes + extent * elementBytes, leading strides included.
+// The limit is a parameter of the predicate: the VALU kernel uses 2^32, which this test covers, and
+// the MFMA kernels use 2^31, which is pinned by the Python metadata tests.
+// ----------------------------------------------------------------------------
+
+static constexpr uint64_t bytesLimit = uint64_t(1) << 32;
+
+// TN with 1-byte A/B and 2-byte C/D, so each tensor's bytes are easy to place.
+static TensileLite::ContractionProblemGemm tensorBytesProblem(
+    size_t m, size_t n, size_t k, size_t lda, size_t ldb, size_t ldc, size_t ldd)
+{
+    using namespace TensileLite;
+    return ContractionProblemGemm::GEMM_Strides(true,
+                                                false,
+                                                rocisa::DataType::Float8,
+                                                rocisa::DataType::Float8,
+                                                rocisa::DataType::BFloat16,
+                                                rocisa::DataType::BFloat16,
+                                                m,
+                                                n,
+                                                k,
+                                                /*batchSize=*/1,
+                                                lda,
+                                                /*aStride=*/-1,
+                                                ldb,
+                                                /*bStride=*/-1,
+                                                ldc,
+                                                /*cStride=*/-1,
+                                                ldd,
+                                                /*dStride=*/-1,
+                                                /*beta=*/0.0);
+}
+
+namespace
+{
+    struct TensorBytesCase
+    {
+        char     tensor;
+        size_t   m, n, k;
+        size_t   ld;
+        uint64_t bytes;
+        bool     accepted;
+    };
+
+    struct TensorBytesProblem
+    {
+        TensileLite::ContractionProblemGemm problem;
+        uint64_t                            formulaBytes;
+        uint64_t                            descriptorBytes;
+    };
+}
+
+// Overrides the leading stride of the named tensor and returns its byte count from the
+// formula, independently of the descriptor.
+static TensorBytesProblem problemFor(TensorBytesCase const& c)
+{
+    using namespace TensileLite;
+    uint64_t const cdBytes = ((c.n - 1) * c.ld + c.m) * 2;
+    switch(c.tensor)
+    {
+    case 'A': {
+        ContractionProblemGemm problem = tensorBytesProblem(c.m, c.n, c.k, c.ld, c.k, c.m, c.m);
+        return {problem, (c.m - 1) * c.ld + c.k, problem.a().totalAllocatedBytes()};
+    }
+    case 'B': {
+        ContractionProblemGemm problem = tensorBytesProblem(c.m, c.n, c.k, c.k, c.ld, c.m, c.m);
+        return {problem, (c.n - 1) * c.ld + c.k, problem.b().totalAllocatedBytes()};
+    }
+    case 'C': {
+        ContractionProblemGemm problem = tensorBytesProblem(c.m, c.n, c.k, c.k, c.k, c.ld, c.m);
+        return {problem, cdBytes, problem.c().totalAllocatedBytes()};
+    }
+    default: {
+        ContractionProblemGemm problem = tensorBytesProblem(c.m, c.n, c.k, c.k, c.k, c.m, c.ld);
+        return {problem, cdBytes, problem.d().totalAllocatedBytes()};
+    }
+    }
+}
+
+TEST(Predicates, TensorBytesLessThanIsExactAtTwoToThe32)
+{
+    using namespace TensileLite;
+    Predicates::Contraction::TensorBytesLessThan pred(bytesLimit);
+    EXPECT_EQ(Predicates::Contraction::TensorBytesLessThan::Type(), "TensorBytesLessThan");
+
+    // A and B use 4096-byte rows, unpadded and padded; C and D pad the leading dimension of
+    // a tiny tensor up to the limit.
+    std::vector<TensorBytesCase> const cases = {
+        {'A', 1048575, 2, 4096, 4096, bytesLimit - 4096, true},
+        {'A', 1048576, 2, 4096, 4096, bytesLimit, false},
+        {'A', 524288, 2, 4096, 8192, bytesLimit - 4096, true},
+        {'A', 524288, 2, 4096, 8196, bytesLimit + 524287 * 4 - 4096, false},
+        {'B', 2, 1048575, 4096, 4096, bytesLimit - 4096, true},
+        {'B', 2, 1048576, 4096, 4096, bytesLimit, false},
+        {'B', 2, 524288, 4096, 8192, bytesLimit - 4096, true},
+        {'B', 2, 524288, 4096, 8196, bytesLimit + 524287 * 4 - 4096, false},
+        {'C', 4, 2, 64, (size_t(1) << 31) - 8, bytesLimit - 8, true},
+        {'C', 4, 2, 64, (size_t(1) << 31) - 4, bytesLimit, false},
+        {'D', 4, 2, 64, (size_t(1) << 31) - 8, bytesLimit - 8, true},
+        {'D', 4, 2, 64, (size_t(1) << 31) - 4, bytesLimit, false},
+    };
+    for(TensorBytesCase const& c : cases)
+    {
+        SCOPED_TRACE(std::string("tensor=") + c.tensor + " m=" + std::to_string(c.m)
+                     + " n=" + std::to_string(c.n) + " ld=" + std::to_string(c.ld));
+        TensorBytesProblem built = problemFor(c);
+
+        EXPECT_EQ(built.formulaBytes, c.bytes);
+        EXPECT_EQ(built.descriptorBytes, c.bytes);
+        EXPECT_EQ(pred(built.problem), c.accepted);
+
+        std::ostringstream stream;
+        EXPECT_EQ(pred.debugEval(built.problem, stream), c.accepted);
+    }
+}
+
+// The MFMA kernels pass 2^31 as the limit of the same predicate.
+TEST(Predicates, TensorBytesLessThanIsExactAtTwoToThe31)
+{
+    using namespace TensileLite;
+    constexpr uint64_t mfmaBytesLimit = uint64_t(1) << 31;
+    Predicates::Contraction::TensorBytesLessThan pred(mfmaBytesLimit);
+
+    TensorBytesCase const fits{'A', 524287, 2, 4096, 4096, mfmaBytesLimit - 4096, true};
+    TensorBytesCase const reaches{'A', 524288, 2, 4096, 4096, mfmaBytesLimit, false};
+    for(TensorBytesCase const& c : {fits, reaches})
+    {
+        TensorBytesProblem built = problemFor(c);
+        ASSERT_EQ(built.descriptorBytes, c.bytes);
+        EXPECT_EQ(pred(built.problem), c.accepted);
+    }
+}
+
+// A problem without a C tensor has no C extent to bound. The same problem with a C over the
+// limit proves the skip is what lets the empty-C case through.
+TEST(Predicates, TensorBytesLessThanSkipsAnEmptyC)
+{
+    using namespace TensileLite;
+    Predicates::Contraction::TensorBytesLessThan pred(bytesLimit);
+
+    // A, B and D are small; only C reaches the limit.
+    ContractionProblemGemm bigC = tensorBytesProblem(4, 2, 64, 64, 64, (size_t(1) << 31) - 4, 4);
+    ASSERT_EQ(bigC.c().totalAllocatedBytes(), bytesLimit);
+    EXPECT_FALSE(pred(bigC));
+
+    ContractionProblemGemm noC
+        = ContractionProblemGemm::GEMM(true,
+                                       false,
+                                       bigC.a(),
+                                       TensorOps(),
+                                       bigC.b(),
+                                       TensorOps(),
+                                       TensorDescriptor("c"),
+                                       TensorOps(),
+                                       bigC.d(),
+                                       TensorOps(),
+                                       0.0);
+    ASSERT_TRUE(noC.c().empty());
+    EXPECT_TRUE(pred(noC));
+    EXPECT_FALSE(Predicates::Contraction::TensorBytesLessThan(64)(noC));
+}
+
+#ifndef TENSILE_YAML
+// The predicate must survive the library round trip with a value that needs 33 bits.
+TEST(Predicates, TensorBytesLessThanDeserializesAFullWidthLimit)
+{
+    using namespace TensileLite;
+    msgpack::sbuffer                 packed;
+    msgpack::packer<msgpack::sbuffer> packer(packed);
+    packer.pack_map(2);
+    packer.pack(std::string("type"));
+    packer.pack(std::string("TensorBytesLessThan"));
+    packer.pack(std::string("value"));
+    packer.pack(uint64_t(1) << 32);
+
+    msgpack::object_handle unpacked = msgpack::unpack(packed.data(), packed.size());
+    Serialization::MessagePackInput reader(unpacked.get());
+    std::shared_ptr<Predicates::Predicate<ContractionProblemGemm>> pred;
+    reader.input(pred);
+    ASSERT_TRUE(reader.error.empty()) << reader.error.front();
+    ASSERT_NE(pred, nullptr);
+
+    ContractionProblemGemm over = tensorBytesProblem(1048576, 2, 4096, 4096, 4096, 1048576, 1048576);
+    ContractionProblemGemm under = tensorBytesProblem(1048575, 2, 4096, 4096, 4096, 1048575, 1048575);
+    ASSERT_EQ(over.a().totalAllocatedBytes(), bytesLimit);
+    ASSERT_EQ(under.a().totalAllocatedBytes(), bytesLimit - 4096);
+    EXPECT_FALSE((*pred)(over));
+    EXPECT_TRUE((*pred)(under));
+}
+#endif

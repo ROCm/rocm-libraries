@@ -65,6 +65,7 @@ namespace TensileLite
         X_MACRO(SizeSumDiv2) \
         X_MACRO(SizeSum1) \
         X_MACRO(SizeSum2) \
+        X_MACRO(Spk) \
         X_MACRO(StrideA0) \
         X_MACRO(StrideA1) \
         X_MACRO(StrideA2) \
@@ -183,7 +184,11 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        /* The kernels read the launched grid per dimension, which the flattened NumWorkGroups cannot give. */ \
+        X_MACRO(NumWorkGroupsX) \
+        X_MACRO(NumWorkGroupsY) \
+        X_MACRO(NumWorkGroupsZ)
 
     enum class CustomArgSemantic
     {
@@ -226,6 +231,9 @@ namespace TensileLite
         PersistentNoBatch,
         TilesYGSU,
         ComputeUnits,
+        TilesWide,
+        TilesSkinny,
+        TilesWideSkinnyBatch,
         CustomGridSize_Count,
     };
 
@@ -260,6 +268,10 @@ namespace TensileLite
         CustomWorkspaceType workspaceType = CustomWorkspaceType::None;
         size_t workspaceSizePerElemC      = 0;
         size_t workspaceSizePerElemBias   = 0;
+        // K elements one k-loop iteration consumes; 0 when the kernel does not declare it.
+        size_t kStep = 0;
+        // The kernel accumulates all of K in one pass: no split-K workspace or atomics.
+        bool noSplitK = false;
         // True when this CustomKernel was auto-populated for a Tensile-generated
         // kernel (vs. a hand-written custom kernel).  Generated kernels still
         // rely on sizeMapping for workspace/Stream-K decisions, so several code
@@ -1042,8 +1054,18 @@ namespace TensileLite
 
         size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
+        void                 calculateFreeExtents(size_t& extentX,
+                                                  size_t& extentY,
+                                                  ContractionSolution::Problem const& problem) const;
+        size_t               calculateBatchTiles(ContractionSolution::Problem const& problem) const;
         void                 calculateTiles(dim3& tiles,
                                             ContractionSolution::Problem const& problem) const;
+        void                 calculateWideSkinnyTiles(size_t& tilesWide,
+                                                      size_t& tilesSkinny,
+                                                      size_t& batches,
+                                                      ContractionSolution::Problem const& problem) const;
+        // Empty when the kernel has no wide/skinny grid or its grid is valid.
+        std::string          wideSkinnyGridObstacle() const;
         void                 calculateGrid(dim3&                               workGroupSize,
                                            dim3&                               numWorkGroups,
                                            ContractionSolution::Problem const& problem) const;

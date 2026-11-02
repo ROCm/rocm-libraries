@@ -627,14 +627,18 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return ((problem.size(index) % value) == 0);
+                    // A zero divisor would otherwise raise SIGFPE.
+                    return value != 0 && (problem.size(index) % value) == 0;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    return debugEvalCmp(
-                        problem, stream, "prob", problem.size(index), "%", "sol", value);
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob=" << problem.size(index) << " % sol=" << value << " == 0";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
                 }
             };
 
@@ -761,6 +765,120 @@ namespace TensileLite
                 {
                     return debugEvalCmp(
                         problem, stream, "prob", problem.b().strides()[index], "==", "sol", value);
+                }
+            };
+
+            // Divisibility of one A or B stride, in elements. A zero (broadcast) stride never
+            // satisfies it, because the kernels that declare it take the stride as a byte kernarg.
+            template <typename Class, TensorDescriptor const& (ContractionProblemGemm::*tensor)() const>
+            struct OperandStrideMultiple : public Predicate_CRTP<Class, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = true,
+                    HasValue = true
+                };
+                size_t index = 0;
+                size_t value = 0;
+
+                OperandStrideMultiple() = default;
+                OperandStrideMultiple(size_t index, size_t value)
+                    : index(index)
+                    , value(value)
+                {
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    std::vector<size_t> const& strides = (problem.*tensor)().strides();
+                    if(value == 0 || index >= strides.size() || strides[index] == 0)
+                        return false;
+                    return strides[index] % value == 0;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool                       rv      = (*this)(problem);
+                    std::vector<size_t> const& strides = (problem.*tensor)().strides();
+                    std::ostringstream         details;
+                    if(index >= strides.size())
+                        details << "index=" << index << " out of range, strides=" << strides.size();
+                    else
+                        details << "prob=" << strides[index] << " % sol=" << value << " == 0";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            struct StrideAMultiple
+                : public OperandStrideMultiple<StrideAMultiple, &ContractionProblemGemm::a>
+            {
+                using OperandStrideMultiple::OperandStrideMultiple;
+                StrideAMultiple() = default;
+
+                static std::string Type()
+                {
+                    return "StrideAMultiple";
+                }
+            };
+
+            struct StrideBMultiple
+                : public OperandStrideMultiple<StrideBMultiple, &ContractionProblemGemm::b>
+            {
+                using OperandStrideMultiple::OperandStrideMultiple;
+                StrideBMultiple() = default;
+
+                static std::string Type()
+                {
+                    return "StrideBMultiple";
+                }
+            };
+
+            // Handwritten kernels that address a whole tensor through one buffer resource
+            // compute its 32-bit num_records from these extents, leading strides included,
+            // so a larger tensor wraps.
+            struct TensorBytesLessThan
+                : public Predicate_CRTP<TensorBytesLessThan, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                size_t value = 0;
+
+                TensorBytesLessThan() = default;
+                TensorBytesLessThan(size_t value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "TensorBytesLessThan";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    for(TensorDescriptor const* tensor :
+                        {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
+                        if(!tensor->empty() && tensor->totalAllocatedBytes() >= value)
+                            return false;
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "bytes A=" << problem.a().totalAllocatedBytes()
+                            << " B=" << problem.b().totalAllocatedBytes()
+                            << " C=" << problem.c().totalAllocatedBytes()
+                            << " D=" << problem.d().totalAllocatedBytes() << " < sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
                 }
             };
 

@@ -46,6 +46,7 @@
 #include <iostream>
 #include <list>
 #include <map>
+#include <numeric>
 #include <tuple>
 
 namespace TensileLite
@@ -956,6 +957,34 @@ namespace TensileLite
             return 1.5;
         }
 
+        // Bytes of each tensor that createRotatingInput copies for a problem, indexed by tensor and
+        // tightly packed. Shared by the sizing in the constructor and by getRotatingSize so that the
+        // pool reserved for a problem is exactly what its copies need.
+        template <typename IsPresent>
+        static std::vector<size_t> getRotatingTensorSizes(ContractionProblemGemm const& problem,
+                                                          IsPresent const&              isPresent)
+        {
+            std::vector<size_t> sizes(ContractionProblemGemm::TENSOR::METADATA + 1, 0);
+            for(int32_t t : {ContractionProblemGemm::TENSOR::A,
+                             ContractionProblemGemm::TENSOR::B,
+                             ContractionProblemGemm::TENSOR::C,
+                             ContractionProblemGemm::TENSOR::D,
+                             ContractionProblemGemm::TENSOR::E,
+                             ContractionProblemGemm::TENSOR::SCALEA,
+                             ContractionProblemGemm::TENSOR::SCALEB,
+                             ContractionProblemGemm::TENSOR::BIAS,
+                             ContractionProblemGemm::TENSOR::SCALEALPHAVEC,
+                             ContractionProblemGemm::TENSOR::METADATA})
+            {
+                if(t == ContractionProblemGemm::TENSOR::C && !problem.beta())
+                    continue;
+                if(!isPresent(t))
+                    continue;
+                sizes[t] = problem.tensors()[t].totalAllocatedBytes();
+            }
+            return sizes;
+        }
+
         DataInitialization::DataInitialization(po::variables_map const&    args,
                                                ClientProblemFactory const& problemFactory)
             : m_maxBatch(0)
@@ -1250,12 +1279,26 @@ namespace TensileLite
                           << ToString(m_vdata[i].init) << std::endl;
             }
 
-            // Rotating buffer sizes must match post-bounds-check pristine.maxElements (e.g. guard
-            // page round-up). vec_rm was previously built before that adjustment, undersizing pools.
+            // The first rotating slot holds the pristine inputs, so it must match the post-bounds-check
+            // pristine.maxElements (e.g. guard page round-up). The rotating copies are instead sized
+            // per problem, as prepareRotatingGPUOutput copies only the problem's own tensors.
             if(m_rotatingBuffer)
             {
                 m_rm.reset();
                 bool isRMInitPost = false;
+                std::vector<size_t> originalSizes;
+                // A tensor with a pristine buffer is the one that has a non-null input pointer.
+                auto getCopySizes = [&](ContractionProblemGemm const& problem) {
+                    return getRotatingTensorSizes(problem, [&](int32_t t) {
+                        auto it = m_vdata[t].pristine.find(problem.tensors()[t].dataType());
+                        return it != m_vdata[t].pristine.end() && it->second.maxElements != 0;
+                    });
+                };
+                auto raiseOriginalSizes = [&](std::vector<size_t> const& sizes) {
+                    originalSizes.resize(sizes.size(), 0);
+                    for(size_t j = 0; j < sizes.size(); j++)
+                        originalSizes[j] = std::max(originalSizes[j], sizes[j]);
+                };
                 for(auto const& p : problemFactory.problems())
                 {
                     if(auto ptr = dynamic_cast<ContractionProblemGemm const*>(p.get()))
@@ -1287,14 +1330,20 @@ namespace TensileLite
                             m_rm          = std::make_shared<RotatingMemory>(vec_rm.size());
                             isRMInitPost = true;
                         }
-                        m_rm->addRotatingSize(vec_rm);
+                        m_rm->addRotatingSize(getCopySizes(problem));
+                        raiseOriginalSizes(vec_rm);
                     }
                     else if(auto ptr = dynamic_cast<ContractionProblemGroupedGemm const*>(p.get()))
                     {
                         const ContractionProblemGroupedGemm& grouped = *ptr;
                         std::vector<size_t>                    vec_rm;
+                        std::vector<size_t>                    copySizes;
                         for(auto const& problem : grouped.gemms)
                         {
+                            std::vector<size_t> tmpCopySizes = getCopySizes(problem);
+                            copySizes.resize(tmpCopySizes.size(), 0);
+                            for(size_t j = 0; j < tmpCopySizes.size(); j++)
+                                copySizes[j] += tmpCopySizes[j];
                             std::vector<size_t> tmp_rm;
                             for(size_t i = 0; i < problem.tensors().size(); i++)
                             {
@@ -1337,9 +1386,12 @@ namespace TensileLite
                             m_rm          = std::make_shared<RotatingMemory>(vec_rm.size());
                             isRMInitPost = true;
                         }
-                        m_rm->addRotatingSize(vec_rm);
+                        m_rm->addRotatingSize(copySizes);
+                        raiseOriginalSizes(vec_rm);
                     }
                 }
+                if(m_rm)
+                    m_rm->setOriginalSizes(originalSizes);
             }
 
             // Init contants
@@ -2120,7 +2172,13 @@ namespace TensileLite
                && m_currentSolution != nullptr)
             {
                 auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;
-                size_t           MiK           = static_cast<size_t>(mi[2]);
+                // Handwritten kernels declare a nominal MatrixInstruction (the skinny MXFP8 kernels
+                // state K 16 for a 16x16x128 MFMA, and the K16 kernel has no MFMA), which the MX-block
+                // gate below would reject; kStep is the K really consumed per iteration and is
+                // validated to be a multiple of the MX block.
+                size_t           MiK           = m_currentSolution->customKernel.kStep != 0
+                                                     ? m_currentSolution->customKernel.kStep
+                                                     : static_cast<size_t>(mi[2]);
                 constexpr size_t swizzleTileMN = 32; // 2 SIMDs * 16 lanes per wave for MN access
                 constexpr size_t tileK         = 256 / swizzleTileMN; // scale blocks per wave in K
 
@@ -3548,61 +3606,41 @@ namespace TensileLite
             return result;
         }
 
+        static bool hasInput(ContractionInputs const& inputs, int32_t tensor)
+        {
+            switch(tensor)
+            {
+            case ContractionProblemGemm::TENSOR::A:
+                return inputs.a != nullptr;
+            case ContractionProblemGemm::TENSOR::B:
+                return inputs.b != nullptr;
+            case ContractionProblemGemm::TENSOR::C:
+                return inputs.c != nullptr;
+            case ContractionProblemGemm::TENSOR::D:
+                return inputs.d != nullptr;
+            case ContractionProblemGemm::TENSOR::E:
+                return inputs.e != nullptr;
+            case ContractionProblemGemm::TENSOR::SCALEA:
+                return inputs.scaleA != nullptr;
+            case ContractionProblemGemm::TENSOR::SCALEB:
+                return inputs.scaleB != nullptr;
+            case ContractionProblemGemm::TENSOR::BIAS:
+                return inputs.bias != nullptr;
+            case ContractionProblemGemm::TENSOR::SCALEALPHAVEC:
+                return inputs.scaleAlphaVec != nullptr;
+            case ContractionProblemGemm::TENSOR::METADATA:
+                return inputs.metadata != nullptr;
+            default:
+                return false;
+            }
+        }
+
         size_t getRotatingSize(ContractionProblemGemm const& problem,
                                ContractionInputs const&      inputs)
         {
-            size_t rotatingSize = 0;
-            if(inputs.a != nullptr)
-            {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::A].totalAllocatedBytes();
-            }
-            if(inputs.b != nullptr)
-            {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::B].totalAllocatedBytes();
-            }
-            if(inputs.c != nullptr && problem.beta())
-            {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::C].totalAllocatedBytes();
-            }
-            if(inputs.d != nullptr)
-            {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::D].totalAllocatedBytes();
-            }
-            if(inputs.e != nullptr)
-            {
-                rotatingSize
-                    += problem.tensors()[ContractionProblemGemm::TENSOR::E].totalAllocatedBytes();
-            }
-            if(inputs.scaleA != nullptr)
-            {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::SCALEA]
-                                    .totalAllocatedBytes();
-            }
-            if(inputs.scaleB != nullptr)
-            {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::SCALEB]
-                                    .totalAllocatedBytes();
-            }
-            if(inputs.bias != nullptr)
-            {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::BIAS]
-                                    .totalAllocatedBytes();
-            }
-            if(inputs.scaleAlphaVec != nullptr)
-            {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
-                                    .totalAllocatedBytes();
-            }
-            if(inputs.metadata != nullptr)
-            {
-                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::METADATA]
-                                    .totalAllocatedBytes();
-            }
-            return rotatingSize;
+            std::vector<size_t> sizes = getRotatingTensorSizes(
+                problem, [&](int32_t t) { return hasInput(inputs, t); });
+            return std::accumulate(sizes.begin(), sizes.end(), size_t(0));
         }
 
         void* copyRotatingInput(

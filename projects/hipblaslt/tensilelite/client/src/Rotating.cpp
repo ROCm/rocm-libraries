@@ -46,6 +46,13 @@ namespace TensileLite
         m_rotatingInfo.push_back(RotatingUnitInfo{sizes, totalSize, 0});
     }
 
+    void RotatingMemory::setOriginalSizes(std::vector<size_t> sizes)
+    {
+        if(m_rotatingBufferNum != sizes.size())
+            throw std::runtime_error("rotating buffer number is not equal to original size number");
+        m_originalSizes = std::move(sizes);
+    }
+
     void RotatingMemory::createRotatingMemory(int32_t mode, size_t rotatingSize)
     {
         // Check how many rotating units are needed
@@ -75,6 +82,11 @@ namespace TensileLite
                 }
             }
         }
+
+        // The first slot holds the pristine inputs, which are sized for the largest problem
+        // independently of how much each problem copies.
+        for(size_t j = 0; j < m_originalSizes.size(); j++)
+            m_rotatingMemory[0][j].size = std::max(m_originalSizes[j], m_rotatingMemory[0][j].size);
 
         size_t totalSize = 0;
         size_t largestUnitSize = 0;
