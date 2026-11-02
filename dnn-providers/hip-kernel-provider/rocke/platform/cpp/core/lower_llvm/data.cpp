@@ -9,7 +9,8 @@
  *   - ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[]  (+ _COUNT)
  *                                                (Python ..._LLVM22_OVERRIDES)
  *   - ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[]  (+ _COUNT)
- *                                                (Python ..._LLVM23_OVERRIDES)
+ *   - ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[]  (+ _COUNT)
+ *                                                (Python ..._LLVM24_OVERRIDES)
  *
  * The decl table is INSERTION-ORDERED exactly like the Python dict; that order
  * drives finalize()'s emit order. Transcribed verbatim from
@@ -251,6 +252,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"sched.group.barrier",
      "declare void @llvm.amdgcn.sched.group.barrier(i32 immarg, i32 immarg, i32 immarg)"},
     {"s.setprio", "declare void @llvm.amdgcn.s.setprio(i16 immarg)"},
+    {"trap", "declare void @llvm.trap()"},
     {"s.waitcnt", "declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"},
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1) nocapture "
@@ -276,6 +278,13 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"raw.ptr.buffer.load.f16",
      "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16(ptr addrspace(8) nocapture readonly, i32, "
      "i32, i32 immarg)"},
+    /* 1-byte buffer load and store (Python _INTRINSIC_DECLS, same position). */
+    {"raw.ptr.buffer.load.i8",
+     "declare i8 @llvm.amdgcn.raw.ptr.buffer.load.i8(ptr addrspace(8) nocapture readonly, i32, "
+     "i32, i32 immarg)"},
+    {"raw.ptr.buffer.store.i8",
+     "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8(i8, ptr addrspace(8) nocapture "
+     "writeonly, i32, i32, i32 immarg)"},
     {"raw.ptr.buffer.store.i32",
      "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32, ptr addrspace(8) nocapture "
      "writeonly, i32, i32, i32 immarg)"},
@@ -510,6 +519,39 @@ const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT
     = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES)
             / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[0]));
 
+/* ---------------------------------------------------------------------- */
+/* LLVM24 overrides (Python _INTRINSIC_DECLS_LLVM24_OVERRIDES)            */
+/* Inherits LLVM23, with addrspace(15) named-barrier pointers.             */
+/* ---------------------------------------------------------------------- */
+
+const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[] = {
+    {"mfma.f32.16x16x32.fp8.fp8",
+     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
+     "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.16x16x32.bf8.bf8",
+     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8("
+     "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.32x32x16.fp8.fp8",
+     "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.fp8.fp8("
+     "i64, i64, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"mfma.f32.32x32x16.bf8.bf8",
+     "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf8.bf8("
+     "i64, i64, <16 x float>, i32 immarg, i32 immarg, i32 immarg)"},
+    {"make.buffer.rsrc.p1",
+     "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+     "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
+    {"s.barrier.init",
+     "declare void @llvm.amdgcn.s.barrier.init(ptr addrspace(15) nocapture, i32)"},
+    {"s.barrier.signal.var",
+     "declare void @llvm.amdgcn.s.barrier.signal.var(ptr addrspace(15) nocapture, i32)"},
+    {"s.barrier.join", "declare void @llvm.amdgcn.s.barrier.join(ptr addrspace(15) nocapture)"},
+    {"s.wakeup.barrier", "declare void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(15) nocapture)"},
+};
+
+const int ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT
+    = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES)
+            / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[0]));
+
 /* Resolve the flavor-specific override table (NULL/0 for non-modern flavors),
  * mirroring the Python _Lowerer choosing which OVERRIDES dict to .update(). */
 const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count)
@@ -526,6 +568,12 @@ const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int
         if(out_count)
             *out_count = ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
         return ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES;
+    }
+    if(profile && profile->declarations == ROCKE_LL_DECLARATION_ABI_LLVM24)
+    {
+        if(out_count)
+            *out_count = ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT;
+        return ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES;
     }
     if(out_count)
         *out_count = 0;

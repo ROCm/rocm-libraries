@@ -2227,20 +2227,32 @@ resolution, sweeping and sampling. Normalize device or process state into the
 request first; do not probe it from `base`. Attention's explicit tuning
 candidates therefore use `_tuning_problem`, while production path routing uses
 the live-CU-aware `_problem`. The candidate is opt-in by default. A family
-whose `auto` is itself one configuration of a registered variant (GDN decode:
-each tile's base configuration) passes `route_auto(req)` instead: the
-candidate is then not opt-in, resolves an `auto` request as if it pinned the
-candidate's `algorithm` and `spec_id`, and `route_auto` says whether it takes
-a request whose `spec_id` is `auto`.
+whose `auto` is itself one configuration of a registered variant passes
+`route_auto(req)` instead: the candidate is then not opt-in, resolves an
+`auto` request as if it pinned the candidate's `algorithm` and `spec_id`, and
+`route_auto` says whether it takes a request whose `spec_id` is `auto`. Its
+`auto` runs the space's default unless the family also passes
+`auto_knobs(req)`: the knobs `auto` runs on that candidate, resolved as a
+`tuning_knobs` pin is (a knob the request cannot read drops). An empty mapping
+runs the default; knobs that do not resolve on a request whose default does
+raise `RuntimeError` with the reason, never a quiet fallback; `auto_knobs`
+without `route_auto` is a construction error. An `auto` request that carries
+its own tuning pin (a `tuning_id` other than `auto`, or `tuning_knobs`)
+resolves that pin; the hook never replaces it. GDN decode uses both: `auto` is
+the case's knob stack on the case's tile (`library/dispatch/gdn/axes.py`,
+`AUTO_DEFAULTS`), and a fallback tile's default where the case's tile is
+illegal.
 
 **The test.** Call `assert_tuning_contract(candidate, requests,
 other_requests=..., default_knobs=..., refused_knobs=...)` for a
 representative set of candidates (`representative(candidates, prefixes)`
-picks them by name). It checks that `auto` is the first production spec, ids
+picks them by name). It checks that a pinned `auto` (the candidate's
+`spec_id`, no knobs: the space's default) is the first production spec, ids
 are unique, `(id, knobs)`, knobs alone, a bare id, and the stored dispatch
 request all reselect the spec, mismatched knobs are refused, default-valued
 knobs canonicalize to the default, and `config_key` survives a change of
-problem.
+problem. It does not exercise a production `auto` with `auto_knobs`; the
+family's own dispatch tests cover that.
 
 Worked examples: the toy family in
 `platform/tests/dispatch/dispatch_tests/tuning/test_tuning_template.py` (every

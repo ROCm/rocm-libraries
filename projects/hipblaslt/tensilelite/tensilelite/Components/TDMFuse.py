@@ -162,6 +162,19 @@ def tdmScaleSharesDataSet(ks, grouping=None):
                  and any(tc in TDM_SCALE_TENSORS for tc in g))
 
 
+def tdmHintDeciders(members):
+    """Positions in `members` whose cache hints decide one tensor_load_to_lds.
+
+    One instruction serves every member of a set, so its th/scope/nv bits are
+    instruction-wide. A set that holds a data tensor (A or B) follows its data
+    tensors: the scale tensors riding along (MXSA, MXSB) and any other member are
+    ignored, so the generated text follows A/B. A set without one, the
+    {MXSA, MXSB} set of TDMFuse=0, lets every member decide.
+    """
+    data = tuple(i for i, tc in enumerate(members) if tc in TDM_DATA_TENSORS)
+    return data or tuple(range(len(members)))
+
+
 def tdmSetGroup(ks, tc):
     """The full group `tc` rides, or None. Not the live one: see liveGroups."""
     for group in tdmGrouping(ks).groups:

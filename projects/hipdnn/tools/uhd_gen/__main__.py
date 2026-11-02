@@ -79,7 +79,13 @@ from .features import (
     parse_signature_entry,
     signature_references,
 )
-from .lgbm_to_flatbuffer import convert, resolve_training_date
+from .lgbm_to_flatbuffer import (
+    ENCODINGS,
+    LEAF_PRECISIONS,
+    SPLIT_LEAF,
+    convert,
+    resolve_training_date,
+)
 from .model_families import (
     FAMILIES,
     LIGHTGBM,
@@ -412,6 +418,7 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         dest="keep_lgbm",
         help="Keep intermediate .lgbm file",
     )
+    add_model_encoding_arguments(parser)
     parser.add_argument(
         "--model-family",
         choices=FAMILIES,
@@ -420,7 +427,9 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Library that fits the ensemble (default: lightgbm). Every family is written "
             "as the same tree_data artifact; xgboost needs the optional xgboost package. "
-            "--group-by-feature and --keep-lgbm are LightGBM only."
+            "--group-by-feature and --keep-lgbm are LightGBM only. A non-LightGBM model is "
+            "always written as node_arrays with exact float64 leaves, so --model-encoding "
+            "and --leaf-precision apply to LightGBM only."
         ),
     )
     parser.add_argument(
@@ -455,6 +464,35 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
             "the pair is simply overwritten in place."
         ),
     )
+
+
+def add_model_encoding_arguments(parser: argparse.ArgumentParser) -> None:
+    """How model.bin stores its trees: `train` and `generate` take the same two flags."""
+    parser.add_argument(
+        "--model-encoding",
+        choices=ENCODINGS,
+        default=SPLIT_LEAF,
+        help="Tree encoding of model.bin (gbdt_model.fbs). split_leaf (default) stores each "
+        "array in the narrowest type that holds it; node_arrays is the original encoding, for "
+        "a runtime that predates split_leaf",
+    )
+    parser.add_argument(
+        "--leaf-precision",
+        choices=LEAF_PRECISIONS,
+        default="float32",
+        help="Storage of split_leaf leaf values: float32 (default; each within 2**-24 of "
+        "itself) or float64 (exact)",
+    )
+
+
+def model_encoding_args(args: argparse.Namespace) -> list[str]:
+    """The `train` flags that write the encoding `args` asked for."""
+    return [
+        "--model-encoding",
+        args.model_encoding,
+        "--leaf-precision",
+        args.leaf_precision,
+    ]
 
 
 def _resolve_uhd_id(requested: str | None) -> str:
@@ -991,10 +1029,15 @@ def _run_train(args: argparse.Namespace) -> int:
             training_date=training_date,
             group_by_feature_index=group_index,
             group_models=group_models or None,
+            encoding=args.model_encoding,
+            leaf_precision=args.leaf_precision,
         )
         if not args.keep_lgbm:
             lgbm_path.unlink()
     else:
+        # Written in the node_arrays encoding with float64 leaves, which is what keeps the
+        # export bit-exact against the library; --model-encoding and --leaf-precision
+        # apply to LightGBM models only.
         model_sha256 = export_family(
             model,
             features_hash,

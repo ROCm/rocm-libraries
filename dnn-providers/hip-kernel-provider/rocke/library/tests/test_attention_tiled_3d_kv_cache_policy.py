@@ -50,6 +50,11 @@ def _problem(**kw) -> UnifiedAttentionProblem:
         ("gfx942", {"total_q": 64, "max_seqlen_q": 4}, "all"),
         ("gfx942", {"use_fp8": True}, "all"),
         ("gfx1250", {}, "all"),
+        # K/V read per call within the last-level cache (256 MiB) stays cached.
+        ("gfx950", {"total_q": 1, "num_seqs": 1, "max_seqlen_k": 16384}, "all"),
+        ("gfx942", {"total_q": 1, "num_seqs": 1, "max_seqlen_k": 16384}, "all"),
+        ("gfx950", {"max_seqlen_k": 4096}, "all"),
+        ("gfx942", {"max_seqlen_k": 4096}, "all"),
     ],
 )
 def test_dispatch_policy(arch, kw, expected):
@@ -199,6 +204,7 @@ def test_gfx942_wide_loader_takes_all_or_stream(policy):
         {"use_wide_kv_load": True, "kv_cache_policy": "stream"},
         {"kv_cache_policy": "nt"},
         {"kv_layout": "strided", "kv_cache_policy": "stream"},
+        {"kv_cache_policy": "stream", "waves_per_eu": 2},
     ],
 )
 def test_gfx942_native_builder_matches_python(kw):
@@ -208,9 +214,21 @@ def test_gfx942_native_builder_matches_python(kw):
 
     engine = pytest.importorskip("rocke_engine")
     spec = _gfx942_spec(num_query_heads=32, num_segments=8, num_seqs=3, **kw)
-    # The gfx942 binding lowers the segment kernel only.
+    # The binding lowers the segment kernel, then the reduce it derives from the
+    # segment spec (waves_per_eu included).
+    reduce = gfx942_3d.UnifiedAttentionReduceTiledSpec(
+        head_size=spec.head_size,
+        num_query_heads=spec.num_query_heads,
+        num_kv_heads=spec.num_kv_heads,
+        dtype=spec.dtype,
+        num_segments=spec.num_segments,
+        waves_per_eu=spec.waves_per_eu,
+    )
     expected = _lower_kernel_to_llvm_python(
         gfx942_3d.build_unified_attention_3d_tiled(spec, arch="gfx942"), arch="gfx942"
+    ) + _lower_kernel_to_llvm_python(
+        gfx942_3d.build_unified_attention_reduce_tiled(reduce, arch="gfx942"),
+        arch="gfx942",
     )
     actual = engine.gfx942_attention_tiled_3d_lower_llvm(asdict(spec), "gfx942")
     assert actual == expected

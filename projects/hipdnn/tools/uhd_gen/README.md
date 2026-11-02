@@ -175,6 +175,8 @@ with its constant value), so the provenance says what was asked for and what nev
 | `--early-stopping` | No | Early stopping patience (default: 50) |
 | `--model-family` | No | Library that fits the ensemble: `lightgbm` (default), `sklearn-hgb` or `xgboost`. Every family is the same `tree_data` artifact; see [Model families](#model-families) |
 | `--keep-lgbm` | No | Keep intermediate .lgbm file (LightGBM only) |
+| `--model-encoding` | No | `model.bin` tree encoding: `split_leaf` (default) or `node_arrays`, for a runtime that predates `split_leaf` (see [The `model.bin` encoding](#the-modelbin-encoding)). LightGBM only: the other model families always write `node_arrays` |
+| `--leaf-precision` | No | `split_leaf` leaf storage: `float32` (default) or `float64` (exact). LightGBM only: the other model families always store exact `float64` leaves |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 
@@ -1143,6 +1145,41 @@ SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python -m uhd_gen train ...
 sha256sum model.bin   # equals tree_data.hash, and equals it again on the next conversion
 ```
 
+## The `model.bin` encoding
+
+`gbdt_model.fbs` holds a tree in one of two encodings, and each tree says which it uses.
+
+- **`split_leaf`** (written by default) stores splits and leaves apart. Every array is a
+  union of typed arrays, so its tag in the file says how it is stored, and the writer picks
+  the narrowest type that holds it exactly: split features, children and threshold indices
+  as `int8`/`uint8`, `int16`/`uint16` or `int32`; thresholds once each in a model-wide
+  `threshold_table`, `float32` when every one is exactly a `float32` and `float64` otherwise;
+  leaves as `float32` (`--leaf-precision float64` keeps them exact); and the per-split
+  routing flags only when they are not all the default.
+- **`node_arrays`** is the original encoding: seven node-parallel arrays of `int32`,
+  `double` and `bool`. A runtime built before `split_leaf` reads only this one: `train` and
+  `generate` write it with `--model-encoding node_arrays`.
+
+The runtime reads both. It decodes either one, at load, into the same in-memory nodes the
+tree walk reads, so scoring speed does not depend on the encoding. A tag it does not know (a
+type a later schema adds) is refused by name ("stored as integer array type N, which this
+runtime cannot read") rather than read as another type.
+
+Measured on a 500-tree, 127-leaf model with 54 features:
+
+| Encoding | `model.bin` | Load | Score |
+|---|---|---|---|
+| `node_arrays` | 3.83 MB | 1.22 ms | 32 µs/row |
+| `split_leaf`, `float64` leaves | 0.98 MB | 1.15 ms | 32 µs/row, identical scores |
+| `split_leaf`, `float32` leaves | 0.72 MB | 1.15 ms | 32 µs/row, within 2.4e-7 |
+
+A `float32` leaf is within 2^-24 of its `float64` value, so a row's score moves by at most
+2^-24 × Σ over trees of that tree's largest |leaf|, far below the accuracy of a measured
+throughput. A leaf outside `float32`'s normal range (magnitude above 3.4e38, or nonzero
+below 1.2e-38) is refused when the model is written, with the advice to use
+`--leaf-precision float64`, rather than stored as `inf` or `0`. Thresholds are never
+rounded: a split compares against the value LightGBM chose.
+
 ## Generated FlatBuffers bindings
 
 `model.bin` is written through flatc-generated Python bindings that
@@ -1151,7 +1188,8 @@ live in `_generated/`, committed alongside the tool the same way the C++
 
 ```
 _generated/hipdnn_flatbuffers_sdk/data_objects/
-└── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
+├── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
+└── IntegerArray.py, RealArray.py, *Array.py                         # its typed arrays
 ```
 
 `uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import
@@ -1242,6 +1280,11 @@ own per-tree outputs added in the runtime's order. Two details make it so:
 Leaves are stored already scaled by the learning rate, so `learningRate` is 1.0. XGBoost
 `predict` itself differs from the runtime by float32 rounding of the sum (about 1e-6 on a
 log-time score); scikit-learn's by the order of the addition only.
+
+A family's `model.bin` is always written in the `node_arrays` encoding with `float64`
+leaves (see [The `model.bin` encoding](#the-modelbin-encoding)), because `float32` leaves
+would break the bit-exact match above. `--model-encoding` and `--leaf-precision` apply to
+LightGBM models only.
 
 Refused, with the reason: `--group-by-feature` and `--keep-lgbm` (LightGBM only), XGBoost
 `dart` with dropout (its trees are rescaled at prediction time), XGBoost objectives and

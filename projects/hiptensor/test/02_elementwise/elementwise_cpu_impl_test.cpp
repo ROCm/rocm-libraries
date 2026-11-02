@@ -117,11 +117,7 @@ auto permuteWithCpu(hiptensorDataType_t typeA,
             -205.8, -79.8,  -163.8, -247.8, -39.9,  -123.9, -207.9, -81.9,  -165.9, -249.9};
     }
 
-    std::vector<floatTypeB> referenceArray;
-    for(auto v : referenceValues)
-    {
-        referenceArray.push_back(static_cast<floatTypeB>(v));
-    }
+    std::vector<floatTypeB> referenceArray(referenceValues.begin(), referenceValues.end());
 
     const floatTypeCompute alphaValue = static_cast<floatTypeCompute>(2.1);
     hiptensorHandle_t      handle;
@@ -134,16 +130,16 @@ auto permuteWithCpu(hiptensorDataType_t typeA,
     CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
         handle, &descB, nmodeB, extentB.data(), NULL /* stride */, typeB, 0));
 
-    hiptensorElementwisePermuteReference(&alphaValue,
-                                  aArray.data(),
-                                  descA,
-                                  modeA.data(),
-                                  HIPTENSOR_OP_NEG,
-                                  bArray.data(),
-                                  descB,
-                                  modeB.data(),
-                                  typeCompute,
-                                  0);
+    CHECK_HIPTENSOR_ERROR(hiptensorElementwisePermuteReference(&alphaValue,
+                                                               aArray.data(),
+                                                               descA,
+                                                               modeA.data(),
+                                                               HIPTENSOR_OP_NEG,
+                                                               bArray.data(),
+                                                               descB,
+                                                               modeB.data(),
+                                                               typeCompute,
+                                                               0));
 
     CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
     if(descA)
