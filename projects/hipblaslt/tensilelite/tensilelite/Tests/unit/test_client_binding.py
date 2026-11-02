@@ -60,6 +60,22 @@ def test_different_worktrees_have_different_installation_keys(tmp_path, monkeypa
     assert identifiers[0] != identifiers[1]
 
 
+def test_current_installation_ignores_metadata_for_another_package_tree(tmp_path, monkeypatch):
+    package_dir = (tmp_path / "active" / "tensilelite").resolve()
+    stale_dir = (tmp_path / "stale" / "tensilelite").resolve()
+    distributions = [_Distribution(stale_dir), _Distribution(package_dir)]
+    distributions[0].version = "5.0.0+rocm9.9.9"
+    distributions[1].version = "5.0.0+rocm7.2.4"
+    monkeypatch.setattr(binding, "_package_dir", lambda: package_dir)
+    monkeypatch.setattr(
+        binding.metadata,
+        "distributions",
+        lambda **unused: distributions,
+    )
+
+    assert binding.current_installation().version == "5.0.0+rocm7.2.4"
+
+
 def test_binding_root_and_helper_cache_share_tensilelite_home(tmp_path, monkeypatch):
     monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: tmp_path))
     installation = binding.Installation(tmp_path / "package", "id", "1.0+rocm1.0.0")
