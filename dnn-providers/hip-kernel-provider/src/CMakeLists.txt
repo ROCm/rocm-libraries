@@ -450,7 +450,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
        AND _hkp_gfx942_attention_dense
        AND TARGET hipdnn_integration_tests)
-        hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942)
+        set(_gfx942_attention_dense_config
+            "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx942AttentionDense.toml")
+        hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942
+            FILES "${_gfx942_attention_dense_config}")
         add_external_integration_test_target(
             TARGET_NAME    ${PROJECT_NAME}-gfx942-attention-dense-external-integration-check
             PLUGIN_TARGET  hip_kernel_provider
@@ -458,7 +461,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_SUBDIR hip_kernel_provider
             INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx942
-            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx942AttentionDense.toml
+            TEST_CONFIG    ${_gfx942_attention_dense_config}
             GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}

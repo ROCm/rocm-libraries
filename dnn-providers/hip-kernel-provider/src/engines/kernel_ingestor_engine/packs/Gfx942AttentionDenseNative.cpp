@@ -102,7 +102,7 @@ constexpr std::string_view O_TOKEN = "gfx942_attention_dense.o.uid";
 /// The mask type graphMatches derived, so kernelMatches does not re-derive it.
 constexpr std::string_view CAUSAL_TOKEN = "gfx942_attention_dense.causal";
 /// The sliding window the candidate must have been built with: the number of keys a
-/// query attends, counting the diagonal (graph left_bound + 1), or 0 for none.
+/// query attends, counting the diagonal (the graph's left_bound), or 0 for none.
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx942_attention_dense.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx942_attention_dense.scale_bits";
@@ -363,8 +363,9 @@ struct AttentionDenseMask
  *
  * The kernel's causal clamp and window are anchored TOP-LEFT: key k is visible to query q
  * iff `q - sliding_window < k <= q`. The hipDNN reference keeps k iff
- * `q - left_bound <= k <= q + right_bound`, so a causal window of left_bound L is the
- * kernel's sliding_window L + 1. Bottom-right alignment coincides with top-left exactly
+ * `q - left_bound < k <= q + right_bound` (SEM-001), so a causal window of left_bound L
+ * is the kernel's sliding_window L. resolveDiagonalBand hands back L - 1, the keys left of
+ * the diagonal, and rejects L == 0. Bottom-right alignment coincides with top-left exactly
  * when seqlen_q == seqlen_kv, and is declined otherwise. A band with a right bound other
  * than 0 is not causal; the kernel computes no lookahead and no non-causal window.
  */
@@ -426,14 +427,7 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
                                    << "; the kernel's window is top-left");
             return std::nullopt;
         }
-        int64_t window = 0;
-        if(__builtin_add_overflow(band.leftBound, int64_t{1}, &window))
-        {
-            HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"} << "left_bound " << band.leftBound
-                                                    << " is out of range");
-            return std::nullopt;
-        }
-        return AttentionDenseMask{1, window};
+        return AttentionDenseMask{1, band.leftBound + 1};
     }
     default:
         HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"} << "mask type " << static_cast<int>(planMask)

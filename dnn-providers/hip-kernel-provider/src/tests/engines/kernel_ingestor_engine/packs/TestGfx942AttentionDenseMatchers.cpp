@@ -34,8 +34,8 @@
  * shared operand, layout and declined-feature rules:
  *   - head counts are runtime kernel arguments, so a candidate built at one head count
  *     serves every other;
- *   - a causal sliding window of graph left_bound L is the kernel's sliding_window L + 1,
- *     and every other band is declined;
+ *   - a causal sliding window of graph left_bound L (L keys, diagonal included) is the
+ *     kernel's sliding_window L, and every other band is declined;
  *   - the sliding-window zero-trip guard and tile divisibility are per candidate;
  *   - the cold ranking orders every knob combination, policy arms first.
  *
@@ -331,16 +331,16 @@ TEST(TestGfx942AttentionDenseGraphMatch, ServesNonSquareFullAttention)
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx942AttentionDenseGraphMatch, BindsACausalWindowAsLeftBoundPlusOneKeys)
+TEST(TestGfx942AttentionDenseGraphMatch, BindsACausalWindowAsLeftBoundKeys)
 {
-    // The reference keeps keys q - L .. q, L + 1 of them; the kernel's sliding_window
-    // counts the same keys: (q - W, q].
-    for(const int64_t leftBound : {int64_t{0}, int64_t{127}, int64_t{511}, int64_t{2047}})
+    // The reference keeps keys (q - L, q], L of them (SEM-001); the kernel's
+    // sliding_window counts the same keys: (q - W, q].
+    for(const int64_t leftBound : {int64_t{1}, int64_t{128}, int64_t{512}, int64_t{2048}})
     {
         const auto bound = matchGraph(windowGraph(leftBound));
         ASSERT_TRUE(bound.has_value()) << leftBound;
         EXPECT_EQ(tryGetBoundInt(*bound, CAUSAL_TOKEN), 1) << leftBound;
-        EXPECT_EQ(tryGetBoundInt(*bound, SLIDING_WINDOW_TOKEN), leftBound + 1) << leftBound;
+        EXPECT_EQ(tryGetBoundInt(*bound, SLIDING_WINDOW_TOKEN), leftBound) << leftBound;
     }
 }
 
@@ -355,7 +355,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, ServesABottomRightCausalMaskOnlyAtEqual
 
 TEST(TestGfx942AttentionDenseGraphMatch, ServesABottomRightWindowOnlyAtEqualLengths)
 {
-    auto spec = windowGraph(127);
+    auto spec = windowGraph(128);
     spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     const auto bound = matchGraph(spec);
     ASSERT_TRUE(bound.has_value());
@@ -366,7 +366,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, ServesABottomRightWindowOnlyAtEqualLeng
 
 TEST(TestGfx942AttentionDenseGraphMatch, ServesATopLeftWindowAtUnequalLengths)
 {
-    auto spec = windowGraph(127);
+    auto spec = windowGraph(128);
     spec.seqLenQ = 512;
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
@@ -381,19 +381,20 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesEveryBandThatIsNotCausal)
     EXPECT_FALSE(matchGraph(lookahead).has_value());
 
     GraphSpec leftOnly;
-    leftOnly.leftBound = 127;
+    leftOnly.leftBound = 128;
     leftOnly.rightBound = -1;
     EXPECT_FALSE(matchGraph(leftOnly).has_value());
 
     GraphSpec twoSided;
-    twoSided.leftBound = 127;
+    twoSided.leftBound = 128;
     twoSided.rightBound = 8;
     EXPECT_FALSE(matchGraph(twoSided).has_value());
 }
 
-TEST(TestGfx942AttentionDenseGraphMatch, DeclinesALeftBoundWhoseWindowOverflows)
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesALeftBoundOfZero)
 {
-    EXPECT_FALSE(matchGraph(windowGraph(std::numeric_limits<int64_t>::max())).has_value());
+    // left_bound 0 is outside hipDNN's band domain (SEM-005).
+    EXPECT_FALSE(matchGraph(windowGraph(0)).has_value());
 }
 
 TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSinksStatsMaskTensorAndVarlen)
@@ -495,19 +496,19 @@ TEST(TestGfx942AttentionDenseKernelMatch, ServesAWindowOnlyFromTheCandidateBuilt
     KernelSpec w512;
     w512.slidingWindow = 512;
 
-    EXPECT_TRUE(matches(windowGraph(127), w128));
-    EXPECT_FALSE(matches(windowGraph(127), w512));
-    EXPECT_FALSE(matches(windowGraph(127), KernelSpec{}));
+    EXPECT_TRUE(matches(windowGraph(128), w128));
+    EXPECT_FALSE(matches(windowGraph(128), w512));
+    EXPECT_FALSE(matches(windowGraph(128), KernelSpec{}));
     EXPECT_FALSE(matches(GraphSpec{}, w128));
-    // left_bound 128 asks for 129 keys, which no block_n-aligned build carries.
-    EXPECT_FALSE(matches(windowGraph(128), w128));
+    // left_bound 129 asks for 129 keys, which no block_n-aligned build carries.
+    EXPECT_FALSE(matches(windowGraph(129), w128));
 }
 
 TEST(TestGfx942AttentionDenseKernelMatch, RefusesAWindowThatLeavesTheLastQueryBlockNoKeys)
 {
     // Sq 4096 over Skv 512 at 256/64 with a 128-key window: the last query block's window
     // starts at key tile 58 of 8 (supports_attention_dense's verdict).
-    auto spec = windowGraph(127);
+    auto spec = windowGraph(128);
     spec.seqLenQ = 4096;
     spec.seqLenKv = 512;
     KernelSpec w128;

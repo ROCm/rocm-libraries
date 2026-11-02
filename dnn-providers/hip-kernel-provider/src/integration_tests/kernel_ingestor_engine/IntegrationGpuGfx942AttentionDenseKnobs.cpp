@@ -59,8 +59,8 @@ using namespace hip_kernel_provider::test_utilities;
  * class the catalog compiles, at a shape the tile divides; a coverage case asserts the
  * table and the installed catalog agree. Head counts vary across rows because the body
  * reads them at runtime. Window rows run Sq = Skv = 2W, so the window really excludes
- * keys, and spell the graph's left_bound as W - 1 (the reference keeps left_bound + 1
- * keys). Hand-written rows add cold selection, B > 1, Sq != Skv, both alignments, the
+ * keys, and spell the graph's left_bound as W (the reference keeps left_bound keys,
+ * diagonal included). Hand-written rows add cold selection, B > 1, Sq != Skv, both alignments, the
  * deprecated causal flag and the default and a non-default scale.
  *
  * Each expected kernel id is resolved at run time from the production descriptors: the
@@ -101,7 +101,7 @@ enum class Mask
     BOUNDS_TOP_LEFT,
     BOUNDS_BOTTOM_RIGHT,
     CAUSAL_MASK_FLAG,
-    /// left_bound W - 1, right_bound 0: a causal window of W keys.
+    /// left_bound W, right_bound 0: a causal window of W keys.
     WINDOW_TOP_LEFT,
     WINDOW_BOTTOM_RIGHT
 };
@@ -383,12 +383,12 @@ SdpaGraph buildSdpaGraph(const std::string& name, const GraphShape& shape)
         attributes.causal_mask = true;
         break;
     case Mask::WINDOW_TOP_LEFT:
-        attributes.set_diagonal_band_left_bound(shape.window - 1);
+        attributes.set_diagonal_band_left_bound(shape.window);
         attributes.set_diagonal_band_right_bound(0);
         attributes.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
         break;
     case Mask::WINDOW_BOTTOM_RIGHT:
-        attributes.set_diagonal_band_left_bound(shape.window - 1);
+        attributes.set_diagonal_band_left_bound(shape.window);
         attributes.set_diagonal_band_right_bound(0);
         attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
         break;
