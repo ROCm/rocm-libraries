@@ -29,13 +29,8 @@
 // problem, and equal keys hashing differently would make lookups miss.
 TEST(rocfft_internal, fmkey_fields_all_take_part_in_lookup)
 {
-    const FMKey base(64,
-                     64,
-                     rocfft_precision_single,
-                     CS_KERNEL_2D_SINGLE,
-                     NONE,
-                     KernelConfig::EmptyConfig(),
-                     "gfx942");
+    const FMKey base(
+        64, 64, rocfft_precision_single, CS_KERNEL_2D_SINGLE, NONE, KernelConfig::EmptyConfig());
 
     // lds_size_bytes is not part of the key: kernels that differ only in LDS
     // size share one key, and find_key_in_map picks among them, so it must not
@@ -54,7 +49,7 @@ TEST(rocfft_internal, fmkey_fields_all_take_part_in_lookup)
     different[4].scheme                       = CS_KERNEL_STOCKHAM;
     different[5].sbrcTrans                    = TILE_ALIGNED;
     different[6].kernel_config.workgroup_size = 512;
-    different[7].gcn_arch_name                = "gfx90a";
+    different[7].gcn_arch_name                = base.gcn_arch_name + "-other";
 
     for(size_t i = 0; i < different.size(); ++i)
     {
@@ -93,8 +88,7 @@ TEST(rocfft_internal, ppfmkey_orders_problem_then_batch_then_config)
                        1,
                        8,
                        KernelConfig::EmptyConfig(),
-                       KernelConfig::EmptyConfig(),
-                       "gfx90a");
+                       KernelConfig::EmptyConfig());
 
     // as for FMKey, the LDS size must not split one key into several
     PPFMKey other_lds        = base;
@@ -119,7 +113,7 @@ TEST(rocfft_internal, ppfmkey_orders_problem_then_batch_then_config)
     other.scheme = CS_KERNEL_3D_SINGLE;
     expect_problem_before_batch(base, other, "scheme");
     other               = base;
-    other.gcn_arch_name = "gfx942";
+    other.gcn_arch_name = base.gcn_arch_name + "-other";
     expect_problem_before_batch(base, other, "gcn_arch_name");
 
     // the batch range outranks the configs
