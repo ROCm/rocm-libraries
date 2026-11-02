@@ -523,6 +523,8 @@ if(ROCKE_INSTALL_TESTS)
     # bitcode. CTest resolves these lists at test time; they stay empty off Linux
     # or without ROCM_PATH. Tool discovery is separate from enforcement policy:
     # only entries whose compiler checks must run append the requirement list.
+    # Contract: tests/test_engine_linkage.py::
+    # test_installed_ctest_entries_get_scoped_environment_contracts.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set(_rocke_compiler_tool_environment)\n"
            "set(_rocke_compiler_requirement_environment)\n"
