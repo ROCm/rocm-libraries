@@ -41,6 +41,7 @@
 #include <miopen/miopen_internal.h>
 #include <miopen/fusion/fusion_invoke_params.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
+#include <miopen/solver/problem_description_interpreter.hpp>
 
 namespace miopen {
 
@@ -51,6 +52,49 @@ struct ProblemDescription;
 namespace solver {
 
 static constexpr int CkSplitkAutoDeduce = -1;
+
+// Deterministic mode forces split-K = 1 for the CK grouped wrw solvers. Each weight element is
+// then one FP32 accumulator chain over L = N*Do*Ho*Wo products. With same-sign data the chain
+// error grows about as L^2, because rounding drops small addends onto a large accumulator.
+// FP32 and TF32 output: a CPU model of the chain gives no element over rtol 1e-5 at L = 16384.
+// On gfx950 with U[0,1) data, 17 of 1.18M elements fail at L = 23104, and the error is 1.1e-3
+// at L = 2.56M.
+static constexpr std::size_t CkWrwDeterministicMaxChainLengthFp32 = std::size_t{1} << 14;
+// FP16 and BF16 output: the output rounding hides most of the chain error. On gfx950 at
+// L = 2^21, the FP16 max_rel is 5.3e-4 (rounding alone: 4.9e-4) and no element fails rtol 1e-3.
+// BF16 has a larger margin (half ULP 3.9e-3). Longer chains are not measured.
+static constexpr std::size_t CkWrwDeterministicMaxChainLength16Bit = std::size_t{1} << 21;
+
+/// Return false when deterministic mode is set and the split-K = 1 reduction chain of a CK
+/// grouped wrw solver is too long to give an accurate result for the output data type.
+inline bool IsCKWrwDeterministicChainLengthValid(const miopen::conv::ProblemDescription& problem)
+{
+    if(!problem.GetConv().attribute.deterministic)
+        return true;
+
+    const auto data_type = problem.GetWeightsDataType();
+    std::size_t max_chain_length;
+    if(data_type == miopenFloat)
+        max_chain_length = CkWrwDeterministicMaxChainLengthFp32;
+    else if(data_type == miopenHalf || data_type == miopenBFloat16)
+        max_chain_length = CkWrwDeterministicMaxChainLength16Bit;
+    else
+        return true;
+
+    const std::size_t chain_length =
+        static_cast<std::size_t>(ProblemInterpreter::GetBatchN(problem)) *
+        ProblemInterpreter::GetOutputDepthDo(problem) *
+        ProblemInterpreter::GetOutputHeightHo(problem) *
+        ProblemInterpreter::GetOutputWidthWo(problem);
+
+    if(chain_length > max_chain_length)
+    {
+        MIOPEN_LOG_I2("Not applicable in deterministic mode: split_k=1 chain length "
+                      << chain_length << " > " << max_chain_length);
+        return false;
+    }
+    return true;
+}
 
 template <int L, int H>
 inline static bool NextCKSplitkValue(int& v)

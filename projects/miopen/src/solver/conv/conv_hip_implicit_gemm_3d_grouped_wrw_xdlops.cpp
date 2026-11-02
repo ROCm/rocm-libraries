@@ -399,6 +399,8 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
     // needed because layout transpose kernel does not support non-packed tensors
     if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
         return false;
+    if(!IsCKWrwDeterministicChainLengthValid(problem))
+        return false;
     const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return false;
