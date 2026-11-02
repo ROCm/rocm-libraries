@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <future>
@@ -51,25 +52,86 @@
 #include <utility>
 #include <vector>
 
+// Begins the message of every test that stops because memory is short, so the test summary can
+// list those tests.
+#define MEMORY_SHORTAGE_STRING "Not enough memory: "
+
 #ifdef GOOGLE_TEST
 #define CHECK_SUCCESS(ERROR) ASSERT_EQ((ERROR), true)
 // Extra macro so that macro arguments get expanded before calling Google Test
 #define CHECK_HIP_ERROR2(ERROR) ASSERT_EQ(ERROR, hipSuccess)
 #define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
 
-#define CHECK_DEVICE_ALLOCATION(ERROR)                   \
-    do                                                   \
-    {                                                    \
-        /* Use error__ in case ERROR contains "error" */ \
-        hipError_t error__ = (ERROR);                    \
-        if(error__ != hipSuccess)                        \
-        {                                                \
-            if(error__ == hipErrorOutOfMemory)           \
-                SUCCEED() << LIMITED_MEMORY_STRING;      \
-            else                                         \
-                FAIL() << hipGetErrorString(error__);    \
-            return;                                      \
-        }                                                \
+// True when HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP is set to a value other than 0, so that a run on a
+// large-memory host fails, rather than skips, any case that does not fit.
+inline bool hipblaslt_memory_skip_fails()
+{
+    const char* value = std::getenv("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP");
+    return value && *value && strcmp(value, "0") != 0;
+}
+
+// Ends the test because memory is short, as WHY explains: a skip, or a failure under
+// HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP.
+#define SKIP_FOR_MEMORY(WHY)                                 \
+    do                                                       \
+    {                                                        \
+        if(hipblaslt_memory_skip_fails())                    \
+            FAIL() << MEMORY_SHORTAGE_STRING << (WHY);       \
+        else                                                 \
+            GTEST_SKIP() << MEMORY_SHORTAGE_STRING << (WHY); \
+    } while(0)
+
+// The tests that stopped because memory was short, for the summary at the end of the run.
+class MemoryShortageLog
+{
+public:
+    // Records the test when the message of one of its results contains MEMORY_SHORTAGE_STRING.
+    void record(const std::string& test, const char* message)
+    {
+        const char* why = message ? strstr(message, MEMORY_SHORTAGE_STRING) : nullptr;
+        if(!why)
+            return;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_entries.emplace_back(test, why + strlen(MEMORY_SHORTAGE_STRING));
+    }
+
+    size_t count() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_entries.size();
+    }
+
+    // One line per test with the reason, or an empty string when no test was short of memory.
+    std::string summary() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if(m_entries.empty())
+            return {};
+        std::ostringstream s;
+        s << "[ MEMORY   ] " << m_entries.size() << " test" << (m_entries.size() > 1 ? "s" : "")
+          << " stopped because memory was short:\n";
+        for(const auto& [test, why] : m_entries)
+            s << "[ MEMORY   ] " << test << ": " << why << "\n";
+        return s.str();
+    }
+
+private:
+    mutable std::mutex                               m_mutex;
+    std::vector<std::pair<std::string, std::string>> m_entries;
+};
+
+#define CHECK_DEVICE_ALLOCATION(ERROR)                                    \
+    do                                                                    \
+    {                                                                     \
+        /* Use error__ in case ERROR contains "error" */                  \
+        hipError_t error__ = (ERROR);                                     \
+        if(error__ == hipErrorOutOfMemory)                                \
+            SKIP_FOR_MEMORY("a device allocation failed: out of memory"); \
+        else if(error__ != hipSuccess)                                    \
+        {                                                                 \
+            FAIL() << hipGetErrorString(error__);                         \
+            return;                                                       \
+        }                                                                 \
     } while(0)
 
 // This wraps the hipBLASLt call with catch_signals_and_exceptions_as_failures().
@@ -94,12 +156,12 @@
     } while(0)
 
 // WHY is empty when the host allocations succeeded, and otherwise says which one failed.
-#define CHECK_HOST_ALLOCATION(WHY) \
-    do                             \
-    {                              \
-        std::string why__ = (WHY); \
-        if(!why__.empty())         \
-            GTEST_SKIP() << why__; \
+#define CHECK_HOST_ALLOCATION(WHY)  \
+    do                              \
+    {                               \
+        std::string why__ = (WHY);  \
+        if(!why__.empty())          \
+            SKIP_FOR_MEMORY(why__); \
     } while(0)
 
 #define CHECK_SOLUTION_FOUND(SOL_COUNT)     \
@@ -151,15 +213,19 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
 
 #define CHECK_DEVICE_ALLOCATION CHECK_HIP_ERROR
 
-#define CHECK_HOST_ALLOCATION(WHY)                             \
-    do                                                         \
-    {                                                          \
-        std::string why__ = (WHY);                             \
-        if(!why__.empty())                                     \
-        {                                                      \
-            hipblaslt_cerr << "error: " << why__ << std::endl; \
-            return;                                            \
-        }                                                      \
+#define SKIP_FOR_MEMORY(WHY)                                                         \
+    do                                                                               \
+    {                                                                                \
+        hipblaslt_cerr << "error: " << MEMORY_SHORTAGE_STRING << (WHY) << std::endl; \
+        return;                                                                      \
+    } while(0)
+
+#define CHECK_HOST_ALLOCATION(WHY)  \
+    do                              \
+    {                               \
+        std::string why__ = (WHY);  \
+        if(!why__.empty())          \
+            SKIP_FOR_MEMORY(why__); \
     } while(0)
 
 #define EXPECT_HIPBLAS_STATUS hipblaslt_expect_status
