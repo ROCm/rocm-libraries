@@ -15,8 +15,8 @@ forced IR flavor the loaded comgr rejects, is recognised by comgr's message:
   so a guard that skips there checks nothing.
 * **Environment facts** -- the loaded comgr is older than the kernel needs, or
   rejects the forced IR flavor: always skip. The flag is set on every Linux
-  entry that appends ``_rocke_compiler_env``, whatever its ROCm version, so
-  these are not missing tools.
+  entry that appends ``_rocke_compiler_requirement_environment``, whatever
+  its ROCm version, so these are not missing tools.
 * **Anything else** -- any other error once comgr has loaded: raise. It is a
   real compile failure.
 """

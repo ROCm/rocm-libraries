@@ -723,9 +723,10 @@ if(ROCKE_INSTALL_TESTS)
     # wiring, the IR golden, the fp32 oracle, the benchmark shape loader, and the
     # shared read-ahead helper. The prefill occupancy / agpr_acc guards compile
     # through comgr and read the code object with llvm-objdump, so the entry also
-    # takes the compiler environment; with it a missing tool fails rather than
-    # skips (a too-old comgr or a rejected IR flavor still skips). Same
-    # PYTHONPATH contract as the conv entry above; the staged library tree carries
+    # takes the compiler tool and requirement environments; with them a missing
+    # tool fails rather than skips (a too-old comgr or a rejected IR flavor
+    # still skips). Same PYTHONPATH contract as the conv entry above; the
+    # staged library tree carries
     # kernels/mla, dispatch/mla, builders/mla, benchmarks/common/mla_shapes.py and
     # tests/golden/mla_prefill_gfx942_ir_sha256.json.
     set(_ROCKE_LIBRARY_MLA_TEST_RELPATHS
