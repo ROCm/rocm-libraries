@@ -36,6 +36,18 @@
         }                                                                                   \
     } while(0)
 
+#define THROW_ON_HIP_FAILURE(status)                                                    \
+    do                                                                                  \
+    {                                                                                   \
+        const hipError_t hipStatusValue = (status);                                     \
+        if(hipStatusValue != hipSuccess)                                                \
+        {                                                                               \
+            throw hipdnn_plugin_sdk::HipdnnPluginException(                             \
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                    \
+                "HIP error occurred: " + std::string(hipGetErrorName(hipStatusValue))); \
+        }                                                                               \
+    } while(0)
+
 #define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                                 \
     do                                                                                      \
     {                                                                                       \
