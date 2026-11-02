@@ -8,10 +8,12 @@ default-on step needs its ``--no-...`` flag added to the argv lists below.
 """
 
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 import subprocess
 import shutil
+import sys
 
 import pytest
 
@@ -90,6 +92,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
 
     monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "available_cpus", lambda: 3)
     monkeypatch.setattr(
         runner.sys,
         "argv",
@@ -136,6 +139,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
         str(tmp_path),
         "--config",
         "Debug",
+        "--parallel",
+        "3",
     ]
     assert any(cmd[:3] == ["ctest", "-C", "Debug"] for cmd, _ in calls)
     # An explicit override skips the storage lookup; other binaries still resolve.
@@ -192,6 +197,157 @@ def test_ctest_readiness_and_failure_propagation(
         assert "ctest: SKIPPED" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("gate_rc", "only_ir", "expect_complete"),
+    [(0, "", True), (0, "gemm/gfx950/base", False), (1, "", False)],
+)
+def test_only_a_successful_unfiltered_arch_domain_gate_suppresses_pytest_delegation(
+    runner, monkeypatch, tmp_path, gate_rc, only_ir, expect_complete
+):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        rc = gate_rc if Path(command[1]).name == "check_arch_domain.py" else 0
+        return subprocess.CompletedProcess(command, rc)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "configure_pytest_build", lambda *_args: None)
+    monkeypatch.setattr(
+        runner,
+        "native_pytest_env",
+        lambda *_args: {},
+    )
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    argv = [
+        "run_all.py",
+        "--no-guard",
+        "--no-gate",
+        "--no-ir-validity",
+        "--no-both",
+        "--build-root",
+        str(tmp_path),
+    ]
+    if only_ir:
+        argv += ["--only-ir", only_ir]
+    monkeypatch.setattr(runner.sys, "argv", argv)
+
+    assert runner.main() == gate_rc
+    pytest_env = next(
+        kwargs["env"]
+        for command, kwargs in calls
+        if command[:3] == [runner.sys.executable, "-m", "pytest"]
+    )
+    if expect_complete:
+        assert pytest_env[runner._ARCH_DOMAIN_COMPLETE_ENV] == "1"
+    else:
+        assert runner._ARCH_DOMAIN_COMPLETE_ENV not in pytest_env
+
+
+def test_native_pytest_env_discards_ambient_arch_domain_completion(
+    runner, monkeypatch, tmp_path
+):
+    monkeypatch.setenv(runner._ARCH_DOMAIN_COMPLETE_ENV, "1")
+    assert runner._ARCH_DOMAIN_COMPLETE_ENV not in runner.native_pytest_env(
+        tmp_path, "Release"
+    )
+
+
+def test_pytest_targets_accept_paths_and_node_ids_but_reject_escapes(runner, tmp_path):
+    module = runner.TESTS / "tools" / "test_run_all.py"
+    selected = runner.pytest_targets(
+        [
+            "tools/test_run_all.py",
+            "tests/tools/test_run_all.py::test_ctest_discovery_failure_is_an_error",
+            str(module),
+        ]
+    )
+    assert selected == [
+        str(module),
+        f"{module}::test_ctest_discovery_failure_is_an_error",
+    ]
+    assert runner.pytest_targets([]) == [str(runner.TESTS)]
+
+    with pytest.raises(ValueError, match="escapes"):
+        runner.pytest_targets(["../run_all.py"])
+    with pytest.raises(ValueError, match="does not exist"):
+        runner.pytest_targets(["tools/not_a_test.py"])
+
+
+def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
+    runner, monkeypatch, tmp_path, capsys
+):
+    selected = "tools/test_run_all.py::test_ctest_discovery_failure_is_an_error"
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        # Make the extension probe succeed so both pytest passes execute.
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "configure_pytest_build", lambda *_args: None)
+    monkeypatch.setattr(runner, "native_pytest_env", lambda *_args: {})
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--pytest-target",
+            selected,
+            "--build-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert runner.main() == 0
+    expected = (
+        str(runner.TESTS / selected.split("::", 1)[0])
+        + "::"
+        + selected.split("::", 1)[1]
+    )
+    pytest_calls = [command for command in calls if command[1:3] == ["-m", "pytest"]]
+    assert len(pytest_calls) == 2
+    assert all(expected in command for command in pytest_calls)
+    assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [
+        ["--only", "gemm"],
+        ["--only-ir", "gemm/gfx950/base"],
+    ],
+)
+def test_corpus_selectors_label_the_overall_result_focused(
+    runner, monkeypatch, tmp_path, capsys, selector
+):
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+            *selector,
+        ],
+    )
+
+    assert runner.main() == 0
+    assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+
+
 def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
     runner, monkeypatch, tmp_path, capsys
 ):
@@ -246,6 +402,24 @@ def test_explicit_fixture_override_is_resolved_before_pytest_changes_directory(
     monkeypatch.setenv("ROCKE_STORAGE_TEST", "fixture")
     env = runner.native_pytest_env(tmp_path, "Release")
     assert env["ROCKE_STORAGE_TEST"] == str(executable)
+
+
+def test_installed_runner_bootstraps_staged_hostcaps(runner, tmp_path):
+    installed_tests = tmp_path / "installed" / "tests"
+    arch_domain = installed_tests / "arch_domain"
+    arch_domain.mkdir(parents=True)
+    shutil.copy2(runner.TESTS / "run_all.py", installed_tests / "run_all.py")
+    shutil.copy2(
+        Path(inspect.getfile(runner.available_cpus)), arch_domain / "_hostcaps.py"
+    )
+
+    proc = subprocess.run(
+        [sys.executable, "-I", str(installed_tests / "run_all.py"), "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "rocKE test/validation runner" in proc.stdout
 
 
 def test_pytest_build_configuration_owns_shared_engine(runner, monkeypatch, tmp_path):
