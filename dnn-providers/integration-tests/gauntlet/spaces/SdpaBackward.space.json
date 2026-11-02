@@ -47,7 +47,7 @@
   },
   "constraints": [
     {"rule": "rows_see_a_key", "reason": "a query row with no key left under the mask has an LSE of -inf in the derived stats (CpuFpReferenceSdpa.hpp forward, 'fully masked rows'), which is not an input the backward kernels define; SdpaFwd excludes the same samples (bottom-right causal needs sq <= skv). A key that no row sees is fine: its dK and dV are zero"},
-    {"rule": "b*hq*sq*skv*(d+d) <= 2**29", "reason": "Measured cost ceiling. On a gfx942 MI325X host the case time is linear above 2**26 at about 45 ns per cost unit (2**30 takes about 48 s, 2**31 about 91 s), so 2**29 keeps the worst drawn case near 24 s. The case includes the CPU backward reference, which is serial (CpuFpReferenceSdpa.hpp:624-628), and no gate caps it in the fuzz path (referenceShapeIsAffordable, ReferenceOpCoverage.cpp:139-207, gates the golden lanes only: GoldenDataPlan.cpp:115)"}
+    {"rule": "b*hq*sq*skv*(d+d) <= 2**29", "reason": "Measured cost ceiling. On a gfx942 MI325X host the case time is linear above 2**26 at about 45 ns per cost unit (2**30 takes about 48 s, 2**31 about 91 s), so 2**29 keeps the worst drawn case near 24 s. The case includes the CPU backward reference, which is serial (CpuFpReferenceSdpa.hpp:624-628), and no gate caps it in the fuzz path (referenceShapeIsAffordable, ReferenceOpCoverage.cpp:139-207, gates the golden lanes only: GoldenDataPlan.cpp:115). The 2026-11-02 gfx950 measurement (measure_oracle_cost.py) could not re-measure it: ASM_SDPA backward ranks no engine on gfx950, so the gfx942 figures stand"}
   ],
   "case": {
     "values": {

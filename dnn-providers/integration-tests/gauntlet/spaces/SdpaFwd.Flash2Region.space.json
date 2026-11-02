@@ -53,7 +53,7 @@
   "constraints": [
     {"rule": "above or slice == 'below_crossover'", "reason": "useFlash2ForShape (HipFlash2FwdPlanBuilder.hpp) takes a shape only above seqlen_q * seqlen_kv > ceil(seqlen_q / 64) * 6000; only the below_crossover probe slice is drawn under it"},
     {"rule": "not above or slice != 'below_crossover'", "reason": "the below_crossover slice must be under the crossover, or it is an ordinary region sample whose axis label would be wrong"},
-    {"rule": "b*hq*sq*skv*d <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14), as SdpaFwd/Default"}
+    {"rule": "b*hq*sq*skv*d <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14), as SdpaFwd/Default. Not measured: HIP_FLASH2 runs on gfx942 only and the 2026-11-02 oracle-cost measurement (measure_oracle_cost.py) had a gfx950 device only"}
   ],
   "case": {
     "values": {

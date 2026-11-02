@@ -85,7 +85,7 @@
   "constraints": [
     {"rule": "rows_see_a_key", "reason": "a query row with no key under the mask has a zero output row and an LSE of -inf in the references (CpuFpReferenceSdpa.hpp, 'fully masked rows'), which the kernel is not described to define; bottom-right causal needs sq <= skv, and a window must reach a key from every row"},
     {"rule": "decode_at_32 or not served_width", "reason": "this engine takes only what rdnaAttentionUseDecode (Gfx1151WmmaAttentionNative.cpp) routes to decode; the others go to the prefill engine (SdpaFwd/Gfx1151). The shapes the rule sends to decode at 32 compute units are decode at 40 too. A head size that is not a multiple of 8 is the decline probe and has no decode route"},
-    {"rule": "b*hq*sq*skv*dq <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14), as the other SdpaFwd spaces"}
+    {"rule": "b*hq*sq*skv*dq <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14), as the other SdpaFwd spaces. Not measured: the engine runs on gfx1151 only and the 2026-11-02 oracle-cost measurement (measure_oracle_cost.py) had a gfx950 device only"}
   ],
   "case": {
     "values": {

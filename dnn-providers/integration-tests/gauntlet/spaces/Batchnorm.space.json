@@ -45,7 +45,7 @@
   },
   "constraints": [
     {"rule": "n * hw > 1", "reason": "training computes batch statistics, so N * spatial must be > 1 (frontend validateBatchNormTrainingSpatialDimensions, Utilities.hpp:140; engine BatchnormValidator::validateSpatialDimensions, BatchnormApplicabilityChecks.cpp:29)"},
-    {"rule": "n * c * hw <= 2**30", "reason": "GPU reference cost ceiling for normalization ops (RFC 0023 section 14); also keeps HIP_PLUGIN_BN_NCHW/NHW/CHW inside the int template parameters of the kernel (Configuration.hpp proto_config, BatchnormFwdTrainingPlan.cpp:393-396)"},
+    {"rule": "n * c * hw <= 2**30", "reason": "oracle cost ceiling for normalization ops (RFC 0023 section 14), kept at 2**30 on measurement (gfx950, 2026-11-02, measure_oracle_cost.py): the oracle chain ran the GPU graph executor's signature-keyed plan (GPU lane; ReferenceOpCoverage.cpp gpuSupportedOps lists only convolution and SDPA because it gates checked-in bundle registration, not the gauntlet chain) and the rung at 2**30 took 184 ms, flat at about 166 ms from 2**16 up, fit over 8 rungs, 60 s only at about 3.7e12; also keeps HIP_PLUGIN_BN_NCHW/NHW/CHW inside the int template parameters of the kernel (Configuration.hpp proto_config, BatchnormFwdTrainingPlan.cpp:393-396)"},
     {"rule": "not (domain in ['nan', 'inf'] and c == 1)", "reason": "the special fill plants at least one non-finite element per tensor (FillInputs.cpp:494-498), so at c == 1 the only channel of scale is poisoned and every element of y is non-finite; a reference with no finite element fails under match_nonfinite whatever the engine wrote (docs/file-formats.md, validator section: 'A reference with no finite element ... fails')"}
   ],
   "case": {

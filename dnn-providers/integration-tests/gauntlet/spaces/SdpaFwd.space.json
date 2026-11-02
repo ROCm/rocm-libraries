@@ -57,7 +57,7 @@
   },
   "constraints": [
     {"rule": "not causal or sq <= skv", "reason": "bottom-right causal mask needs sq <= skv"},
-    {"rule": "b*hq*sq*skv*dqk <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14)"}
+    {"rule": "b*hq*sq*skv*dqk <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14), kept at 2**31 on measurement (gfx950, 2026-11-02, measure_oracle_cost.py): the oracle ran on the GPU lane at about 274 ms for 2**17 and 276 ms for 2**19 (cost b*hq*sq*skv*dqk), and the fit reference_ms = 273 + 6.2e-6 * cost predicts 13.6 s at 2**31, 60 s at about 9.6e9. The fit has 2 rungs only: ASM_SDPA declined the larger rungs of the ladder (no ranked engine for those rows), so the 13.6 s is an extrapolation, not a measurement. Raising the ceiling would only make fuzz cases slower"}
   ],
   "case": {
     "values": {

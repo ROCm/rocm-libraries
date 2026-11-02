@@ -45,7 +45,7 @@
   "constraints": [
     {"rule": "hq % hkv == 0", "reason": "GQA: query heads must be a multiple of kv heads"},
     {"rule": "not causal or sq == skv", "reason": "the kernel's causal mask is top-left; bottom-right coincides only when sq == skv"},
-    {"rule": "b*hq*sq*skv*d <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14)"}
+    {"rule": "b*hq*sq*skv*d <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14), kept at 2**31 on measurement (gfx950, 2026-11-02, measure_oracle_cost.py): the largest rung, cost 2**31, ran on the GPU lane in 458 ms (278 ms at 2**21), fit reference_ms = 278 + 8.4e-8 * cost over 6 rungs, r2 0.9995; 60 s is reached only at about 7.1e11. The ceiling is not the budget limit; raising it would make fuzz cases slower"}
   ],
   "case": {
     "values": {

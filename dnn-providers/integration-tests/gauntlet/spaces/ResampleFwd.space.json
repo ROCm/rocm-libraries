@@ -66,8 +66,8 @@
   },
   "constraints": [
     {"rule": "h + pre_h + post_h >= win_h and w + pre_w + post_w >= win_w and (ndim == 4 or d + pre_d + post_d >= win_d)", "reason": "the output extent (x + pre + post - window) / stride + 1 is the one hip-kernel-provider accepts (ResamplePlanUtils.hpp:131-133 validateResampleOutputShape, ResampleApplicabilityChecks.cpp:84-97) and the frontend infers (ResampleFwdNode.hpp:116); it is defined for a window that fits the padded input only, because C++ integer division truncates toward zero and would give 1 for a window that overhangs the padded input"},
-    {"rule": "n * c * d * h * w <= 2**30", "reason": "GPU reference cost ceiling on the input (RFC 0023 section 14)"},
-    {"rule": "n * c * od * oh * ow * wvol <= 2**30", "reason": "GPU reference cost ceiling on the pooled work: every output element reads one window (ResampleFwd.cpp:122-169; RFC 0023 section 14)"}
+    {"rule": "n * c * d * h * w <= 2**30", "reason": "oracle cost ceiling on the input (RFC 0023 section 14), kept at 2**30 on measurement (gfx950, 2026-11-02, measure_oracle_cost.py): the rows of the ladder on this cost ran the CPU reference lane (the lane depends on the row: the GPU Resample plan is keyed by dtype, compute type and index tensor, GpuResampleSignatureKey.hpp), 18 ms at 2**16 and 92 ms at 2**25, the largest rung that ran; fit reference_ms = 18 + 2.2e-6 * cost over 6 rungs, r2 0.9998, predicts 2.4 s at 2**30 (an extrapolation of 5 octaves) and 60 s at about 2.7e10"},
+    {"rule": "n * c * od * oh * ow * wvol <= 2**30", "reason": "oracle cost ceiling on the pooled work: every output element reads one window (ResampleFwd.cpp:122-169; RFC 0023 section 14), kept at 2**30 on measurement (gfx950, 2026-11-02, measure_oracle_cost.py): the rows of the ladder on this cost ran the GPU lane except the smallest rung, which ran the CPU lane and is excluded from the fit; 165 ms from 2.5e5 up to 169 ms at 1.1e8, the largest rung that ran; fit reference_ms = 165 + 2.9e-8 * cost over 6 rungs predicts 196 ms at 2**30 (extrapolated, r2 0.49 on a flat series) and 60 s at about 2.1e12"}
   ],
   "case": {
     "values": {
