@@ -3,6 +3,7 @@
 
 #include <hipdnn-gpu-ref/GpuFpReferenceReduction.hpp>
 
+#include <hipdnn-gpu-ref/detail/GpuRefHelpers.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefLaunch.hpp>
 
@@ -121,11 +122,7 @@ void GpuFpReferenceReduction::launchReduction(
     }
 
     detail::launchKernel1d(
-        kernel.function(),
-        std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>()),
-        BLOCK_SIZE,
-        &args,
-        sizeof(args));
+        kernel.function(), detail::elementCount(outputDims), BLOCK_SIZE, &args, sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref

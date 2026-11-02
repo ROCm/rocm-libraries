@@ -64,8 +64,4 @@ target_link_libraries(
     PRIVATE hiprtc::hiprtc hip::host
 )
 
-target_compile_definitions(
-    hipdnn_gpu_ref PRIVATE GPU_REF_HIP_INCLUDE_DIR="${ROCM_PATH}/include"
-)
-
 target_compile_options(hipdnn_gpu_ref PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})

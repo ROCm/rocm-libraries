@@ -87,7 +87,8 @@ inline bool
     validTensorMetadata(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
 {
     return tensor.dims() != nullptr && tensor.strides() != nullptr && !tensor.dims()->empty()
-           && tensor.dims()->size() == tensor.strides()->size() && tensor.dims()->size() <= 5;
+           && tensor.dims()->size() == tensor.strides()->size()
+           && tensor.dims()->size() <= hipdnn_gpu_ref::GpuFpReferenceBlockScale::MAX_TENSOR_RANK;
 }
 
 template <hipdnn_flatbuffers_sdk::data_objects::DataType XEnum,
@@ -119,25 +120,17 @@ public:
         const auto& x = *tensorMap.at(attributes->x_tensor_uid());
         const auto& y = *tensorMap.at(attributes->y_tensor_uid());
         const auto& scale = *tensorMap.at(attributes->scale_tensor_uid());
-        if(!validTensorMetadata(x) || !validTensorMetadata(y) || !validTensorMetadata(scale)
-           || attributes->block_size() <= 0)
+        if(!validTensorMetadata(x) || !validTensorMetadata(y) || !validTensorMetadata(scale))
         {
             return false;
         }
         const std::vector<int64_t> xDims(x.dims()->begin(), x.dims()->end());
         const std::vector<int64_t> yDims(y.dims()->begin(), y.dims()->end());
         const std::vector<int64_t> scaleDims(scale.dims()->begin(), scale.dims()->end());
-        const auto axis = attributes->axis().value_or(static_cast<int64_t>(xDims.size()) - 1);
-        if(xDims != yDims || scaleDims.size() != xDims.size() || axis < 0
-           || axis >= static_cast<int64_t>(xDims.size()))
-        {
-            return false;
-        }
-        auto expectedScaleDims = xDims;
-        expectedScaleDims[static_cast<size_t>(axis)]
-            = (xDims[static_cast<size_t>(axis)] + attributes->block_size() - 1)
-              / attributes->block_size();
-        return scaleDims == expectedScaleDims;
+        const auto axis
+            = attributes->axis() ? std::make_optional(attributes->axis().value()) : std::nullopt;
+        return !hipdnn_gpu_ref::GpuFpReferenceBlockScale::checkQuantize(
+            xDims, yDims, scaleDims, attributes->block_size(), axis);
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>
@@ -205,32 +198,10 @@ public:
         const std::vector<int64_t> xDims(x.dims()->begin(), x.dims()->end());
         const std::vector<int64_t> yDims(y.dims()->begin(), y.dims()->end());
         const std::vector<int64_t> scaleDims(scale.dims()->begin(), scale.dims()->end());
-        if(xDims != yDims || scaleDims.size() != xDims.size()
-           || attributes->block_size()->size() > xDims.size())
-        {
-            return false;
-        }
-        std::vector<int64_t> effectiveBlockSize(xDims.size(), 1);
-        const auto offset = xDims.size() - attributes->block_size()->size();
-        size_t blockDimension = 0;
-        for(const auto value : *attributes->block_size())
-        {
-            if(value <= 0)
-            {
-                return false;
-            }
-            effectiveBlockSize[offset + blockDimension] = value;
-            ++blockDimension;
-        }
-        for(size_t dim = 0; dim < xDims.size(); ++dim)
-        {
-            if(scaleDims[dim]
-               != (xDims[dim] + effectiveBlockSize[dim] - 1) / effectiveBlockSize[dim])
-            {
-                return false;
-            }
-        }
-        return true;
+        const std::vector<int32_t> blockSize(attributes->block_size()->begin(),
+                                             attributes->block_size()->end());
+        return !hipdnn_gpu_ref::GpuFpReferenceBlockScale::checkDequantize(
+            xDims, yDims, scaleDims, blockSize);
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>

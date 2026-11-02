@@ -8,6 +8,7 @@ struct BlockScaleQuantizeArgs
     const void* x;
     void* y;
     void* scale;
+    int* invalidInput;
     long long scaleElements;
     int nDim;
     int axis;
