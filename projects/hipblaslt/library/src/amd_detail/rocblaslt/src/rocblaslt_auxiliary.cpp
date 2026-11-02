@@ -975,6 +975,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     problem.fused_epilogue      = matmul_descr->fused_epilogue;
+    problem.fused_prologue      = matmul_descr->fused_prologue;
     problem.fused_a2a_world     = handle ? handle->device_comm_world : 0;
     problem.fused_a2a_rank      = handle ? handle->device_comm_rank : 0;
     problem.fused_a2a_peer_flag = handle ? handle->device_comm_peer_flags : nullptr;
@@ -2287,6 +2288,19 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE:
+                if(sizeof(const hipblasLtFusedEpilogueDescriptor*) <= sizeInBytes)
+                {
+                    const hipblasLtFusedEpilogueDescriptor* fused = nullptr;
+                    memcpy(&fused, buf, sizeof(fused));
+                    matmulDesc->fused_prologue = fused;
+                }
+                else
+                {
+                    log_error(__func__, "invalid fused_prologue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
 #endif
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
@@ -2731,6 +2745,16 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 memcpy(buf, &matmulDesc->fused_epilogue, sizeof(matmulDesc->fused_epilogue));
                 break;
+            case ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(const hipblasLtFusedEpilogueDescriptor*);
+                if(sizeInBytes < sizeof(const hipblasLtFusedEpilogueDescriptor*))
+                {
+                    log_error(__func__, "invalid fused_prologue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->fused_prologue, sizeof(matmulDesc->fused_prologue));
+                break;
 #endif
             case ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT:
                 if(sizeWritten)
@@ -3089,9 +3113,11 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
             return gate;
-        if(auto gate = rocblaslt_validate_fused_epilogue_dispatch(handle, matmul_descr, matD);
+        if(auto gate = rocblaslt_validate_fused_epilogue_dispatch(handle, matmul_descr, matB, matD);
            gate != rocblaslt_status_success)
             return gate;
+        if(fused_a2a_lacks_sdma_queues(prob))
+            return rocblaslt_status_invalid_value;
 #endif
         status = isSolutionSupported(handle, prob, gemmData, algo, workspaceSizeInBytes);
 

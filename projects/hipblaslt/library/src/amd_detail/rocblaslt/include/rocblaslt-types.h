@@ -403,12 +403,15 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
-    ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
-    ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT    = 105,
+    ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT = 104,
+    ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT = 105,
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE                 = 106,
+    ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,
 #endif
-    ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT            = 107,
+    ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT = 107,
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    ROCBLASLT_MATMUL_DESC_FUSED_PROLOGUE = 108,
+#endif
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -670,9 +673,10 @@ struct RocblasltContractionProblem
     bool adaptive_sm_count = false;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    // The four below are set post-construction, not through the constructor.
-    // fused_epilogue and fused_a2a_peer_flag are non-owning.
+    // The five below are set post-construction, not through the constructor.
+    // fused_epilogue, fused_prologue and fused_a2a_peer_flag are non-owning.
     const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue      = nullptr;
+    const struct hipblasLtFusedEpilogueDescriptor* fused_prologue      = nullptr;
     uint32_t                                       fused_a2a_world     = 0;
     uint32_t                                       fused_a2a_rank      = 0;
     void* const*                                   fused_a2a_peer_flag = nullptr;
@@ -757,31 +761,40 @@ struct RocblasltFusedEpilogueInfo
     {
         Disabled,
         GemmA2A,
+        A2AGemm,
     };
 
     Mode                         mode              = Mode::Disabled;
     const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
     void* const*                 a2aRecvPtrs       = nullptr;
+    void* const*                 a2aPeerBPtrs      = nullptr;
+    size_t                       a2aPeerBCount     = 0;
+    void*                        a2aGatherBuffer   = nullptr;
     int64_t                      a2aExtent         = 0;
     hipblasLtA2ACompletionMode_t a2aCompletionMode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
     uint32_t                     commChannel       = 0;
+    // A descriptor carries stages of the side it is not attached to, or both
+    // sides carry an all-to-all.
+    bool misattached = false;
 };
 
-// Returns false when desc is nullptr.
-bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
+// Returns false when both descriptors are nullptr.
+bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* epilogue,
+                                      const struct hipblasLtFusedEpilogueDescriptor* prologue,
                                       RocblasltFusedEpilogueInfo&                    out);
 
 // Returns false unless prob requests a fused all-to-all.
 inline bool rocblaslt_resolve_fused_a2a(const RocblasltContractionProblem& prob,
                                         RocblasltFusedEpilogueInfo&        out)
 {
-    return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, out)
+    return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, prob.fused_prologue, out)
            && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
 }
 
 // Every rejection is reported as rocblaslt_status_invalid_value.
 rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
                                                             rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matB,
                                                             rocblaslt_matrix_layout matD);
 #endif
 
