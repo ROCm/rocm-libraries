@@ -687,6 +687,98 @@ void testing_bdsqr(Arguments& argus)
     argus.validate_consumed();
 }
 
+
+// Regression test for GitHub issue #12188: out-of-bounds memory access in
+// bdsqr_update_endpoints, observed as a SIGSEGV/illegal-address fault when
+// solving a 3x3 upper bidiagonal matrix.
+//
+// Root cause: in the bdsqr_init kernel, the write of the final split block
+//     if(start < n - 1)
+//     {
+//         splits[4 * ii + 1] = start;
+//         splits[4 * ii + 2] = n - 1;
+//     }
+// is conditional, but the split-block counter that is derived right after it
+//     num_splits = ii + 1;
+// is unconditional. When the very last scanned off-diagonal element
+// (i = n - 2) is itself a split point, 'start' ends up equal to n - 1 at the
+// end of the scan, so the "if" above is false and slot 'ii' is never
+// initialized with valid k_start/k_end values -- yet num_splits still counts
+// it as a legitimate block. For small n, the reset loop that zero-initializes
+// the splits buffer (guarded by "4 * i + 3 < 2 * n") also fails to cover this
+// slot, so it retains genuinely uninitialized device memory. Later kernels,
+// such as bdsqr_update_endpoints, then read this phantom slot's garbage
+// k_end value and perform an out-of-bounds access (e.g. E[k_end - 1]).
+//
+// The data below (n = 3, D = {1, 2, 3}, E = {1, ~0}) is crafted so that the
+// trailing off-diagonal element E[1] is numerically indistinguishable from
+// zero (i.e. below the convergence threshold) while E[0] is not, forcing
+// exactly this condition.
+template <typename T>
+void testing_bdsqr_oob_regression()
+{
+    using S = decltype(std::real(T{}));
+
+    rocblas_local_handle handle;
+    rocblas_fill uplo = rocblas_fill_upper;
+    rocblas_int n = 3;
+    rocblas_int nv = 0, nu = 0, nc = 0;
+    rocblas_int ldv = 1, ldu = 1, ldc = 1;
+
+    host_strided_batch_vector<S> hD(n, 1, n, 1);
+    host_strided_batch_vector<S> hE(n - 1, 1, n - 1, 1);
+    host_strided_batch_vector<T> hV(1, 1, 1, 1);
+    host_strided_batch_vector<T> hU(1, 1, 1, 1);
+    host_strided_batch_vector<T> hC(1, 1, 1, 1);
+    host_strided_batch_vector<rocblas_int> hInfo(1, 1, 1, 1);
+    host_strided_batch_vector<S> hDRes(n, 1, n, 1);
+    host_strided_batch_vector<rocblas_int> hInfoRes(1, 1, 1, 1);
+
+    device_strided_batch_vector<S> dD(n, 1, n, 1);
+    device_strided_batch_vector<S> dE(n - 1, 1, n - 1, 1);
+    device_strided_batch_vector<T> dV(1, 1, 1, 1);
+    device_strided_batch_vector<T> dU(1, 1, 1, 1);
+    device_strided_batch_vector<T> dC(1, 1, 1, 1);
+    device_strided_batch_vector<rocblas_int> dInfo(1, 1, 1, 1);
+    CHECK_HIP_ERROR(dD.memcheck());
+    CHECK_HIP_ERROR(dE.memcheck());
+    CHECK_HIP_ERROR(dV.memcheck());
+    CHECK_HIP_ERROR(dU.memcheck());
+    CHECK_HIP_ERROR(dC.memcheck());
+    CHECK_HIP_ERROR(dInfo.memcheck());
+
+    // deterministic, hand-crafted degenerate bidiagonal data (see comment above)
+    hD[0][0] = S(1.0);
+    hD[0][1] = S(2.0);
+    hD[0][2] = S(3.0);
+    hE[0][0] = S(1.0);
+    hE[0][1] = S(1.0e-300);
+
+    CHECK_HIP_ERROR(dD.transfer_from(hD));
+    CHECK_HIP_ERROR(dE.transfer_from(hE));
+
+    // this call previously corrupted device memory / faulted with an
+    // illegal-address error inside bdsqr_update_endpoints due to the phantom
+    // split-block slot described above
+    CHECK_ROCBLAS_ERROR(rocsolver_bdsqr(handle, uplo, n, nv, nu, nc, dD.data(), dE.data(), dV.data(),
+                                        ldv, dU.data(), ldu, dC.data(), ldc, dInfo.data()));
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
+
+    // also verify correctness: resulting singular values should match the
+    // LAPACK-equivalent CPU reference on the same data
+    CHECK_HIP_ERROR(hDRes.transfer_from(dD));
+    CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
+
+    std::vector<S> hW(4 * n);
+    cpu_bdsqr(uplo, n, 0, 0, 0, hD[0], hE[0], hV[0], ldv, hU[0], ldu, hC[0], ldc, hW.data(),
+              hInfo[0]);
+
+    EXPECT_EQ(hInfo[0][0], hInfoRes[0][0]);
+    double err = norm_error('F', 1, n, 1, hD[0], hDRes[0]);
+    ROCSOLVER_TEST_CHECK(T, err, 2 * n);
+}
+
 #define EXTERN_TESTING_BDSQR(...) extern template void testing_bdsqr<__VA_ARGS__>(Arguments&);
 
 INSTANTIATE(EXTERN_TESTING_BDSQR, FOREACH_SCALAR_TYPE, APPLY_STAMP)

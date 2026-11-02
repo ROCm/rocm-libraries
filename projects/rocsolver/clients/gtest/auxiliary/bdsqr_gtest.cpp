@@ -197,3 +197,26 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          BDSQR_HYBRID,
                          Combine(ValuesIn(size_range), ValuesIn(opt_range)));
+
+// regression tests for GitHub issue #12188: out-of-bounds memory access in
+// bdsqr_update_endpoints for a 3x3 upper bidiagonal matrix (see the detailed
+// explanation in testing_bdsqr_oob_regression, in testing_bdsqr.hpp)
+TEST(BDSQR, __oob_regression_float)
+{
+    testing_bdsqr_oob_regression<float>();
+}
+
+TEST(BDSQR, __oob_regression_double)
+{
+    testing_bdsqr_oob_regression<double>();
+}
+
+TEST(BDSQR, __oob_regression_float_complex)
+{
+    testing_bdsqr_oob_regression<rocblas_float_complex>();
+}
+
+TEST(BDSQR, __oob_regression_double_complex)
+{
+    testing_bdsqr_oob_regression<rocblas_double_complex>();
+}
