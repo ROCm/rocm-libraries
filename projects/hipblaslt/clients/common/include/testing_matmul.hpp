@@ -1236,6 +1236,35 @@ inline void report_failed_solution(int64_t                failures_before,
                        << solution_description(handle, algo, sol, count, true) << std::endl;
 }
 
+// The skip_launch_solution self-test, after check(): the solution that was never launched must
+// fail the checks of D, and every other solution must pass them. Returns whether sol is the
+// solution that was never launched.
+inline bool check_skip_launch_self_test(const Arguments&       arg,
+                                        int64_t                failures_before,
+                                        hipblasLtHandle_t      handle,
+                                        hipblasLtMatmulAlgo_t& algo,
+                                        size_t                 sol,
+                                        size_t                 count)
+{
+    if(arg.skip_launch_solution < 0)
+        return false;
+    const bool skipped  = int64_t(sol) == arg.skip_launch_solution;
+    const bool reported = hipblaslt_bench_options::verification_failures() > failures_before;
+    if(skipped != reported)
+    {
+        const std::string error
+            = "skip_launch_solution: " + solution_description(handle, algo, sol, count, true)
+              + (skipped ? " was never launched, but D passed its checks"
+                         : " failed the checks of D");
+#ifdef GOOGLE_TEST
+        ADD_FAILURE() << error;
+#else
+        hipblaslt_cerr << error << std::endl;
+#endif
+    }
+    return skipped;
+}
+
 void check(hipStream_t                   stream,
            const Arguments&              arg,
            const uint32_t&               gemm_count,
@@ -2474,6 +2503,31 @@ void testing_matmul_with_bias(const Arguments& arg,
             why = "fast_check_inject must be -1 (no injection) or an iteration number";
         else if(arg.fast_check_inject >= arg.fast_check_repeat)
             why = "fast_check_inject must name an iteration below fast_check_repeat";
+        if(!why.empty())
+        {
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
+            return;
+#endif
+        }
+    }
+
+    // The self-test counts the allclose failures that check() reports per solution: unit_check
+    // and norm_check would fail the case outright on the NaN in the skipped solution's D. The
+    // skipped solution follows one that wrote D.
+    if(arg.skip_launch_solution != -1)
+    {
+        std::string why;
+        if(arg.skip_launch_solution < 1)
+            why = "skip_launch_solution must be -1 (none) or a position after the first solution";
+        else if(!arg.allclose_check || arg.unit_check || arg.norm_check || arg.fast_check
+                || arg.c_equal_d)
+            why = "skip_launch_solution requires allclose_check, without unit_check, norm_check, "
+                  "fast_check or c_equal_d";
+        else if(arg.use_ext || arg.grouped_gemm || batchMode != HIPBLASLT_BATCH_MODE_STRIDED)
+            why = "skip_launch_solution supports only the C API with strided batches";
         if(!why.empty())
         {
 #ifdef GOOGLE_TEST
@@ -5407,6 +5461,20 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
+    if(arg.skip_launch_solution >= int64_t(heuristicResult.size()))
+    {
+        const std::string why = "skip_launch_solution " + std::to_string(arg.skip_launch_solution)
+                                + " needs at least " + std::to_string(arg.skip_launch_solution + 1)
+                                + " solutions, and this case has "
+                                + std::to_string(heuristicResult.size());
+#ifdef GOOGLE_TEST
+        GTEST_SKIP() << why;
+#else
+        hipblaslt_cout << why << std::endl;
+        return;
+#endif
+    }
+
     // A placed workspace replaces the normal one, which placement runs never use: placement
     // requires fast_check, and fast_check refuses timing runs.
     const bool placeWorkspace = !strcmp(arg.placement, "workspace");
@@ -5892,6 +5960,22 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
     }
+    // Every solution writes the same D, so one that leaves D unwritten would be checked against
+    // the previous solution's result. Fill D before each verified launch so that cannot pass.
+    const bool verifyD = (arg.unit_check || arg.norm_check || arg.allclose_check || arg.fast_check)
+                         && !arg.c_equal_d;
+    auto fillDWithSentinel = [&]() {
+        for(auto& d : dD)
+        {
+            hipError_t err = fast_check_fill_sentinel_device(
+                d.buf(), To, d.getNumBytes() / realDataTypeSize(To), stream);
+            // fast_check rejects other D types up front; all ones still poisons them.
+            if(err == hipErrorInvalidValue)
+                err = hipMemsetAsync(d.buf(), 0xFF, d.getNumBytes(), stream);
+            CHECK_HIP_ERROR(err);
+        }
+    };
+    bool skippedSolutionChecked = false;
     if(!arg.timing)
     {
         // fast_check launches and checks each solution fast_check_repeat times, solution by
@@ -5996,12 +6080,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                     = placedWorkspace->straddle(heuristicResult[sol].workspaceSize, workspace_size);
                 workspaceBytes = heuristicResult[sol].workspaceSize;
             }
-            if(arg.fast_check && !arg.c_equal_d)
-            {
-                for(int i = 0; i < gemm_count; i++)
-                    CHECK_HIP_ERROR(
-                        fast_check_fill_sentinel_device((*dDp)[i].buf(), To, size_D[i], stream));
-            }
+            if(verifyD)
+                fillDWithSentinel();
             if(fcCheckE)
                 for(int i = 0; i < gemm_count; i++)
                     CHECK_HIP_ERROR(
@@ -6083,7 +6163,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                           stream),
                                           HIPBLAS_STATUS_SUCCESS);
                 }
-                else
+                else if(int64_t(sol) != arg.skip_launch_solution)
                 {
                     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
                     EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
@@ -6230,6 +6310,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                        heuristicResult[sol].algo,
                                        sol,
                                        heuristicResult.size());
+                skippedSolutionChecked |= check_skip_launch_self_test(arg,
+                                                                      failures_before,
+                                                                      handle,
+                                                                      heuristicResult[sol].algo,
+                                                                      sol,
+                                                                      heuristicResult.size());
             }
             if(arg.fast_check)
             {
@@ -6552,6 +6638,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         // Every path prepares a candidate with this first.
         auto prepareCandidate = [&](size_t) {
+            if(verifyD)
+                fillDWithSentinel();
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
@@ -6847,6 +6935,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                        heuristicResult[sol].algo,
                                        sol,
                                        heuristicResult.size());
+                skippedSolutionChecked |= check_skip_launch_self_test(arg,
+                                                                      failures_before,
+                                                                      handle,
+                                                                      heuristicResult[sol].algo,
+                                                                      sol,
+                                                                      heuristicResult.size());
                 first_launch_failed
                     = hipblaslt_bench_options::verification_failures() > failures_before;
             }
@@ -7064,6 +7158,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 // One launch of candidate sol on rotation block i % block_count, cold or timed.
                 auto launchMatmul = [&](size_t sol, int64_t i) {
+                    if(int64_t(sol) == arg.skip_launch_solution)
+                        return HIPBLAS_STATUS_SUCCESS;
                     int  b          = static_cast<int>(i % block_count);
                     auto ptr_matmul = matmul[b][0];
                     return hipblasLtMatmul(
@@ -7296,6 +7392,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                 best.avg_ulp,
                 search.best_timing);
         }
+    }
+
+    if(arg.skip_launch_solution >= 0 && !skippedSolutionChecked)
+    {
+        const std::string error = "skip_launch_solution: solution "
+                                  + std::to_string(arg.skip_launch_solution) + " was never checked";
+#ifdef GOOGLE_TEST
+        ADD_FAILURE() << error;
+#else
+        hipblaslt_cerr << error << std::endl;
+#endif
     }
 
     for(auto it : ptrs)
