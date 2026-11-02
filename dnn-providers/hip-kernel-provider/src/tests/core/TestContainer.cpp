@@ -5,6 +5,8 @@
 #include <array>
 #include <cstddef>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -27,6 +29,9 @@
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
+#ifdef HIPDNN_ENGINE_FLYDSL
+#include "tests/engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
+#endif
 #endif
 
 using namespace hip_kernel_provider;
@@ -70,8 +75,8 @@ static std::vector<std::string> expectedEngineNames()
 }
 
 /// Upper bound for the fixed-size buffers below. Raise it when a configuration exposes
-/// more engines than this.
-constexpr uint32_t MAX_EXPECTED_ENGINES = 8;
+/// more engines than this. FlyDSL alone adds one engine per kernel family.
+constexpr uint32_t MAX_EXPECTED_ENGINES = 32;
 
 TEST(TestContainer, ConstructsSuccessfully)
 {
@@ -374,7 +379,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
 
     Handle handle;
     auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-    if(deviceString != "gfx942" && deviceString != "gfx950")
+    if(deviceString != "gfx90a" && deviceString != "gfx942" && deviceString != "gfx950")
     {
         GTEST_SKIP();
     }
@@ -399,13 +404,42 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
         graphBuffer.data(), graphBuffer.size());
 
     auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
+    // Unused when neither the ASM nor the FlyDSL engines are built.
+    [[maybe_unused]] const auto applies = [&applicableEngines](auto engineId) {
+        return std::find(applicableEngines.begin(), applicableEngines.end(), engineId)
+               != applicableEngines.end();
+    };
 
+    // The engines that serve this graph on gfx90a, gfx942 and gfx950, and no others.
+    size_t expected = 0;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-    ASSERT_EQ(applicableEngines.size(), 1);
-    EXPECT_EQ(applicableEngines.front(), asm_sdpa_engine::AsmSdpaEngine::staticId());
-#else
-    EXPECT_TRUE(applicableEngines.empty());
+    // The assembly kernels are built for gfx942 and gfx950 only.
+    if(deviceString != "gfx90a")
+    {
+        EXPECT_TRUE(applies(asm_sdpa_engine::AsmSdpaEngine::staticId()));
+        ++expected;
+    }
 #endif
+#if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
+    // FlyDSL's CDNA SDPA engines, one per kernel family: each family that ships objects for
+    // this device has a bf16 head-dim-128 non-causal one, so it must serve this graph, and a
+    // family that ships none must not (the dual-wave kernel ships for gfx950 only).
+    for(const auto& [op, engine] : std::array<std::pair<std::string_view, std::string_view>, 3>{{
+            {"sdpa_cdna", "hipkernel:flydsl_sdpa_cdna"},
+            {"sdpa_cdna_dualwave", "hipkernel:flydsl_sdpa_cdna_dualwave"},
+            {"sdpa_cdna_decode", "hipkernel:flydsl_sdpa_cdna_decode"},
+        }})
+    {
+        const bool ships = kernel_ingestor_engine::testing::flydslShipsForThisDevice(op);
+        EXPECT_EQ(applies(hipdnn_data_sdk::utilities::engineNameToId(std::string(engine))), ships)
+            << engine;
+        if(ships)
+        {
+            ++expected;
+        }
+    }
+#endif
+    EXPECT_EQ(applicableEngines.size(), expected);
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -697,15 +697,18 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
 
         if(_fp32_out)
         {
+            /* Python: b.smem_load_vN(c_smem, row, col, dtype=F32, n=...) -- the
+             * generic vector load, not smem_load_vN_f32 (whose result name
+             * differs), so the f32 tile reads mirror it. */
             if(sv == 1)
             {
-                rocke_value_t* vf32 = rocke_b_smem_load_vN_f32(b, c_smem, idx, 2, 1);
+                rocke_value_t* vf32 = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_f32(), 1);
                 rocke_b_buffer_store_f32(
                     b, d_rsrc, safe, rocke_b_const_i32(b, 0), rocke_b_vec_extract(b, vf32, 0));
             }
             else
             {
-                rocke_value_t* vf32 = rocke_b_smem_load_vN_f32(b, c_smem, idx, 2, sv);
+                rocke_value_t* vf32 = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_f32(), sv);
                 rocke_b_buffer_store_vN_f32(b, d_rsrc, safe, rocke_b_const_i32(b, 0), vf32, sv);
             }
         }

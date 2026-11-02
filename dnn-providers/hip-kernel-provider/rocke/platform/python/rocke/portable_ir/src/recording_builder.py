@@ -85,6 +85,23 @@ def _result_fields(op: Op) -> Dict[str, Any]:
     }
 
 
+# The refusal for an scf.if_else that yields values. Its results' types live
+# only on the op (an scf.for's come from its iter inits), and the recipe's
+# scf_if_else carries none, so a recorded one would replay with its results
+# unbound. The C recipe VM (recipe_vm.cpp) and the IR JSON importer
+# (ir_import_json.cpp) refuse one with the same text.
+IF_ELSE_RESULTS_UNSUPPORTED = (
+    "portable IR does not support an scf.if_else with results; "
+    "lower the kernel directly"
+)
+
+
+def refuse_if_else_results(op: Op) -> None:
+    """Refuse recording the ``scf.if_else`` ``op`` when it yields values."""
+    if op.results:
+        raise NotImplementedError(IF_ELSE_RESULTS_UNSUPPORTED)
+
+
 def shallow_instr(op: Op) -> Tuple[Dict[str, Any], List[List]]:
     """Build the recipe instruction for `op` with EMPTY region bodies, returning
     (instr, [body_list_per_region]). The body lists are filled by the recorder
@@ -126,6 +143,7 @@ def shallow_instr(op: Op) -> Tuple[Dict[str, Any], List[List]]:
         # at one block. A distinct recipe op rather than scf_if + "else": an
         # engine that predates it must refuse the recipe, not silently drop the
         # else arm (older VMs ignore unknown keys on scf_if).
+        refuse_if_else_results(op)
         t_body: List = []
         e_body: List = []
         instr = {
