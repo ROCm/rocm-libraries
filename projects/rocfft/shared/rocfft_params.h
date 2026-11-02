@@ -423,9 +423,10 @@ public:
         return ret;
     }
 
-    // throws ROCFFT_FAIL if a device holding no brick requires work memory
-    // TODO: generalize to any brick layout once the gather/scatter fallback is addressed
-    void validate_work_memory()
+    // with exactly one input brick and one output brick on the same device, rocFFT should run
+    // there: throws ROCFFT_FAIL if any other device requires work memory
+    // TODO: extend to other layouts once rocFFT stops gathering any onto the current device
+    void validate_work_memory_devices()
     {
         if(mp_lib != fft_mp_lib_none || ifields.size() != 1 || ofields.size() != 1
            || ifields[0].bricks.size() != 1 || ofields[0].bricks.size() != 1
