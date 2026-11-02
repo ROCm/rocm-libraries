@@ -26,7 +26,6 @@
 #include "hipsparse_bench_app.hpp"
 #include "hipsparse_routine.hpp"
 #include "utility.hpp"
-#include <exception>
 #include <hipsparse.h>
 #include <iostream>
 

@@ -26,8 +26,6 @@
 #include "hipsparse_bench_cmdlines.hpp"
 #include "utility.hpp"
 
-#include <stdexcept>
-
 // Return version.
 std::string hipsparse_get_version()
 {
