@@ -79,7 +79,7 @@ include(CMakeDependentOption)
 # Disable -Werror
 option(DISABLE_WERROR "Disable building with Werror" ON)
 option(BUILD_TEST "Build tests" OFF)
-option(CODE_COVERAGE "Enable code coverage" OFF)
+option(BUILD_CODE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
 option(BUILD_EXAMPLE "Build example" OFF)
@@ -147,7 +147,7 @@ list(APPEND CMAKE_MODULE_PATH
 )
 
 # Set a default build type if none was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT CODE_COVERAGE)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT BUILD_CODE_COVERAGE)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
@@ -309,7 +309,7 @@ if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
 
-if(CODE_COVERAGE)
+if(BUILD_CODE_COVERAGE)
   # NOTE(hipccl2): switched from `set(CMAKE_CXX_FLAGS ...)` to
   # add_compile_options() for the same reason as the offload-compress flag
   # above - silences ROCMChecks' "set on a target where possible" warning.
