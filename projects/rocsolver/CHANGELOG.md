@@ -3,7 +3,7 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
-## (Unreleased) rocSOLVER
+## (Unreleased) rocSOLVER 3.39
 
 ### Added
 ### Changed
