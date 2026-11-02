@@ -124,8 +124,3 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [97, 193, 2, 1031]
           - Exact: [384, 384, 2, 8192]
-    - BenchmarkCommonParameters: *subtile_cluster_defaults
-      ForkParameters:
-        - PrefetchGlobalRead: [2]
-        - StreamKFixupTreeReduction: [1]
-      BenchmarkFinalParameters: *subtile_cluster_problems

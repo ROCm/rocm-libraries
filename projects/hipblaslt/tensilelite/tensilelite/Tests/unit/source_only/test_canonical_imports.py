@@ -79,7 +79,11 @@ def test_wheel_excludes_source_only_tests(tmp_path):
     for filename in ("pyproject.toml", "MANIFEST.in", "requirements.txt"):
         shutil.copyfile(project_root / filename, build_source / filename)
     result = subprocess.run(
-        [sys.executable, "-c", "from setuptools.build_meta import build_wheel; build_wheel('dist')"],
+        [
+            sys.executable,
+            "-c",
+            "from setuptools.build_meta import build_wheel; build_wheel('dist')",
+        ],
         cwd=build_source,
         capture_output=True,
         text=True,
@@ -91,3 +95,4 @@ def test_wheel_excludes_source_only_tests(tmp_path):
     assert "Tensile/__init__.py" in names
     assert "tensilelite/resources.py" in names
     assert not any(name.startswith("tensilelite/Tests/unit/source_only/") for name in names)
+    assert not any(name.endswith("/test_split_benchmark_groups.py") for name in names)

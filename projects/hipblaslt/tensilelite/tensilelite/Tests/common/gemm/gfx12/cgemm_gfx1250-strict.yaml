@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
   # gfx1250 CGEMM uses the WMMA TDM path (SIA4), so it does not share cgemm.yaml.
@@ -41,30 +44,6 @@ BenchmarkProblems:
 
   - # cgemm NT
     - {OperationType: GEMM, DataType: C, DestDataType: C, ComputeDataType: C, TransposeA: False, TransposeB: True, UseBeta: True, Batched: True}
-    - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
-      ForkParameters: *cwmma
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-
-  - # cgemm TN
-    - {OperationType: GEMM, DataType: C, DestDataType: C, ComputeDataType: C, TransposeA: True, TransposeB: False, UseBeta: True, Batched: True}
-    - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
-      ForkParameters: *cwmma
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-
-  - # cgemm TT + conjugate A and B
-    - {OperationType: GEMM, DataType: C, DestDataType: C, ComputeDataType: C, TransposeA: True, TransposeB: True, ComplexConjugateA: True, ComplexConjugateB: True, UseBeta: True, Batched: True}
-    - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
-      ForkParameters: *cwmma
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
-
-  - # cgemm NC (conjugate B)
-    - {OperationType: GEMM, DataType: C, DestDataType: C, ComputeDataType: C, TransposeA: False, TransposeB: True, ComplexConjugateB: True, UseBeta: True, Batched: True}
     - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
       ForkParameters: *cwmma
       BenchmarkFinalParameters:
