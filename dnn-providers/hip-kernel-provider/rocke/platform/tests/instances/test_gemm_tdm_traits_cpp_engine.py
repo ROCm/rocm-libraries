@@ -75,6 +75,35 @@ class TestGemmTdmTraitsSpecDict(unittest.TestCase):
                 self.assertEqual(d[key], getattr(spec.trait, key))
 
 
+class TestGemmTdmTraitsKernelName(unittest.TestCase):
+    """Kernels that differ only in a K-loop knob must not share a name."""
+
+    def test_every_arm_has_its_own_name(self):
+        names = {label: _spec(**kw).kernel_name() for label, kw in _ARMS.items()}
+        self.assertEqual(len(set(names.values())), len(names), names)
+
+    def test_tags_name_only_the_knobs_that_are_on(self):
+        base = _spec().kernel_name()
+        self.assertIn("_tdm2", base)  # the probe spec runs TDM at depth 2
+        for tag in ("_spb", "_alti", "_erf"):
+            self.assertNotIn(tag, base)
+        er = _spec(**_ARMS["early_refill"]).kernel_name()
+        for tag in ("_tdm2", "_spb", "_alti", "_erf"):
+            self.assertIn(tag, er)
+
+    def test_tdm_depth_is_in_the_name(self):
+        self.assertNotEqual(
+            _spec(tdm_depth=2).kernel_name(), _spec(tdm_depth=3).kernel_name()
+        )
+
+    def test_a_kernel_without_tdm_keeps_its_name(self):
+        from dataclasses import replace
+
+        spec = _spec()
+        off = replace(spec, trait=replace(spec.trait, tdm=False))
+        self.assertNotIn("tdm", off.kernel_name().replace(spec.name, ""))
+
+
 class TestGemmTdmTraitsCppEngine(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

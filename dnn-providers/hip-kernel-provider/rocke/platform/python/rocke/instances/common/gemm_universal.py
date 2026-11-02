@@ -400,6 +400,13 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 # Only named when overridden, so the resolved default leaves
                 # every existing kernel name untouched.
                 f"abeb{tr.ab_load_elem_bytes}": tr.ab_load_elem_bytes is not None,
+                # The gfx1250 TDM K-loop knobs, each named only when on, so
+                # every kernel without them keeps its name. tdm{N} carries the
+                # TDM depth.
+                f"tdm{tr.tdm_depth}": tr.tdm,
+                "spb": tr.split_barrier,
+                "alti": tr.tdm_alternate_issuers,
+                "erf": tr.tdm_early_refill,
             },
         )
 

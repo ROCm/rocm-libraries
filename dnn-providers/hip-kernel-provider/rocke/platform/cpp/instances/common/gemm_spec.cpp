@@ -253,7 +253,11 @@ void rocke_gemm_universal_spec_finalize(rocke_gemm_universal_spec_t* spec)
  *          f"{pipeline}_{scheduler}_{epilogue}",
  *          flags={"pad": any(pad_*), "pers": persistent, "bat": batched,
  *                 "preb": preshuffle_b, "dtl": direct_to_lds,
- *                 "pref": dtl_prefetch, "actt": active_tile_skip})
+ *                 "pref": dtl_prefetch, "actt": active_tile_skip,
+ *                 f"spk{split_k}": split_k > 1, "noalc": cshuffle_no_alias,
+ *                 f"abeb{ab_load_elem_bytes}": set, f"tdm{tdm_depth}": tdm,
+ *                 "spb": split_barrier, "alti": tdm_alternate_issuers,
+ *                 "erf": tdm_early_refill})
  *
  *  Flag iteration order matters (CPython 3.7+ dict insertion order); we pass the
  *  same fixed order to rocke_kernel_name_join.
@@ -270,8 +274,9 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_spk[32];
     const char* parts[5];
     char part_abeb[32];
-    const char* flag_names[10];
-    int flag_on[10];
+    char part_tdm[32];
+    const char* flag_names[14];
+    int flag_on[14];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -312,6 +317,14 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
      * existing kernel name untouched). */
     snprintf(part_abeb, sizeof(part_abeb), "abeb%d", tr->ab_load_elem_bytes);
     flag_names[9] = part_abeb;
+    /* The gfx1250 TDM K-loop knobs, each named only when on, so every kernel
+     * without them keeps its name. Python flag key f"tdm{tr.tdm_depth}" carries
+     * the TDM depth. */
+    snprintf(part_tdm, sizeof(part_tdm), "tdm%d", tr->tdm_depth);
+    flag_names[10] = part_tdm;
+    flag_names[11] = "spb";
+    flag_names[12] = "alti";
+    flag_names[13] = "erf";
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -323,9 +336,13 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_on[7] = (tr->split_k > 1) ? 1 : 0;
     flag_on[8] = tr->cshuffle_no_alias ? 1 : 0;
     flag_on[9] = tr->ab_load_elem_bytes_set ? 1 : 0;
+    flag_on[10] = tr->tdm ? 1 : 0;
+    flag_on[11] = tr->split_barrier ? 1 : 0;
+    flag_on[12] = tr->tdm_alternate_issuers ? 1 : 0;
+    flag_on[13] = tr->tdm_early_refill ? 1 : 0;
 
     return rocke_kernel_name_join(
-        spec->name, parts, 5, flag_names, flag_on, 10, out, out_cap, NULL);
+        spec->name, parts, 5, flag_names, flag_on, 14, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
