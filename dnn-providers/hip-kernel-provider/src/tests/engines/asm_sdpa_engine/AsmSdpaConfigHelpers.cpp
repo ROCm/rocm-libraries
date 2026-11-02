@@ -213,11 +213,12 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         break;
     }
 
-    // Configure batch mode (GROUP requires sequence length tensors)
+    // Configure batch mode (GROUP requires sequence length tensors, INT32 [B, 1, 1, 1] as the
+    // frontend requires of every SDPA forward graph)
     auto batchMode = static_cast<BatchMode>(config.mode);
     if(batchMode == BatchMode::GROUP)
     {
-        const std::vector<int64_t> seqLenDims = {batch};
+        const std::vector<int64_t> seqLenDims = {batch, 1, 1, 1};
         auto seqLenStrides = generateStrides(seqLenDims);
 
         auto seqLenQ = std::make_shared<TensorAttributes>();

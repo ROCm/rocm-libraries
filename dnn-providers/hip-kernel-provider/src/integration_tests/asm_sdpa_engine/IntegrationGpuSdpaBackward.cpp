@@ -133,12 +133,10 @@ protected:
             shallowK,
             shallowV,
             shallowO,
-            _attnScaleValue,
-            /*attnMask=*/nullptr,
-            _leftBound,
-            _rightBound,
-            _topLeftAlignment,
-            &shallowStats);
+            SdpaFwdOptions<float>{}
+                .setScale(_attnScaleValue)
+                .setBand(_leftBound, _rightBound, _topLeftAlignment)
+                .setLse(&shallowStats));
 
         // Mark O and stats as host-modified so the GPU bundle syncs to device
         oTensor.markHostModified();
