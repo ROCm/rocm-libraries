@@ -464,30 +464,41 @@ namespace
     // Memory preflight (AIHPBLAS-5352)
     // ----------------------------------------------------------------------------
 
-    // Sets an environment variable for one scope.
+    // Sets an environment variable for one scope, and then restores the value the run started
+    // with, which a CI lane may have set for every test.
     class ScopedVariable
     {
     public:
         ScopedVariable(const char* name, const char* value)
             : m_name(name)
         {
-#ifdef _WIN32
-            _putenv_s(name, value);
-#else
-            setenv(name, value, 1);
-#endif
+            if(const char* old = std::getenv(name))
+                m_saved = old;
+            set(value);
         }
         ~ScopedVariable()
         {
+            set(m_saved ? m_saved->c_str() : nullptr);
+        }
+        ScopedVariable(const ScopedVariable&)            = delete;
+        ScopedVariable& operator=(const ScopedVariable&) = delete;
+
+    private:
+        // nullptr unsets the variable.
+        void set(const char* value) const
+        {
 #ifdef _WIN32
-            _putenv_s(m_name, "");
+            _putenv_s(m_name, value ? value : "");
 #else
-            unsetenv(m_name);
+            if(value)
+                setenv(m_name, value, 1);
+            else
+                unsetenv(m_name);
 #endif
         }
 
-    private:
-        const char* m_name;
+        const char*                m_name;
+        std::optional<std::string> m_saved;
     };
 
     // An M x N x K NN GEMM, in and out of the same type, that the CPU reference checks with
