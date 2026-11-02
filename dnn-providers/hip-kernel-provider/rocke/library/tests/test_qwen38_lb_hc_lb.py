@@ -171,3 +171,75 @@ def test_params_and_strides():
     assert H.hc_params()[: len(H.HC_I64)] == H.HC_I64 and len(H.hc_params()) == 34
     s = H.strides(H.HcKnobs(tp=2, bucket=128))
     assert s["y"] == 2 * 128 * H.HID * 2 and s["xqs"] == 20 * 128 * 16 and s["aqs"] == 128 * 16
+
+
+@pytest.mark.parametrize("tp,rows", [(1, 5), (1, 16), (1, 64), (2, 128)])
+def test_ufold_lowers(tp, rows):
+    hk = H.HcKnobs(tp=tp, bucket=bucket(rows), prow=rows, pre="du")
+    base = ll(H.build_hc_kernel(hk))
+    uf = H.to_ufold(hk)
+    d, u = uf.parts()
+    assert d.fold == "none" and not d.yq and u.xsrc == "lds" and u.xscale == "glb" and not u.xu and not u.bpre
+    assert H.hc_kernel_name(uf) != H.hc_kernel_name(hk) and H.hc_kernel_name(uf).endswith("_ufold")
+    assert H.hc_kernel_name(uf) in ll(H.build_hc_kernel(uf))
+    for a in (replace(uf, dmut="ufold"), replace(uf, dmut="silu"), replace(uf, mutant="early"), replace(uf, dbg=True),
+              replace(uf, stamp=True), replace(uf, d=replace(d, splits=5, kw=2, mt=1)), replace(uf, sig="fast")):
+        assert H.hc_kernel_name(a) in ll(H.build_hc_kernel(a))
+    assert ll(H.build_hc_kernel(hk)) == base  # the ufold builds leave the base's IR unchanged
+
+
+def test_ufold_pre_and_refusals():
+    hk = H.HcKnobs(tp=1, bucket=16, prow=8)
+    d, u = hk.parts()
+    assert H.to_ufold(replace(hk, pre="DU", d=replace(d, xu=True), u=replace(u, xu=True))).pre == "Du"
+    uf = H.to_ufold(hk)
+    ud, uu = uf.parts()
+    bad = [
+        replace(hk, dmut="ufold"),  # the mutant needs ufold
+        replace(uf, d=replace(ud, fold="last")),
+        replace(uf, d=replace(ud, splits=1, kw=4)),
+        replace(uf, u=replace(uu, xsrc="global", xslay="row", xscale="lds")),
+        replace(uf, u=replace(uu, xu=True)),
+        replace(uf, norm="reassoc"),
+        replace(uf, pre="U", u=replace(uu, xu=True)),
+    ]
+    for b in bad:
+        with pytest.raises((ValueError, NotImplementedError)):
+            b.check()
+
+
+@pytest.mark.parametrize("cw", [2, 4])
+@pytest.mark.parametrize("tp,rows", [(1, 5), (1, 64), (2, 128)])
+def test_split_stream_c_lowers(cw, tp, rows):
+    hk = H.HcKnobs(tp=tp, bucket=bucket(rows), prow=rows, gplace="d", c=H.CKnobs(cw=cw))
+    assert H.hc_kernel_name(hk).endswith(f"_ccw{cw}")
+    assert H.hc_kernel_name(hk) in ll(H.build_hc_kernel(hk))
+    for m in ("ygate", "eps", "xblk", "rskip", "inj"):
+        assert "define" in ll(H.build_hc_kernel(replace(hk, c=replace(hk.c, mutant=m))))
+    assert "define" in ll(H.build_hc_kernel(H.to_ufold(replace(hk, gplace="u"))))
+    for bad in (replace(hk, gplace="c"), replace(hk, c=H.CKnobs(cw=3)), replace(hk, norm="reassoc", cstat="fold", cp=5)):
+        with pytest.raises(ValueError):
+            bad.check()
+
+
+@pytest.mark.parametrize("cw", [2, 4])
+@pytest.mark.parametrize("tp,rows", [(1, 8), (1, 128), (2, 128)])
+def test_gplace_s_lowers(cw, tp, rows):
+    hk = H.HcKnobs(tp=tp, bucket=bucket(rows), prow=rows, gplace="s", c=H.CKnobs(cw=cw))
+    assert H.hc_kernel_name(hk) in ll(H.build_hc_kernel(hk))
+    for a in (replace(hk, c=replace(hk.c, mutant="inj")), replace(hk, mutant="early"), replace(hk, dbg=True),
+              replace(hk, stamp=True), H.to_ufold(hk)):
+        assert H.hc_kernel_name(a) in ll(H.build_hc_kernel(a))
+    for bad in (replace(hk, c=H.CKnobs(cw=1)), replace(hk, norm="reassoc", d=None), replace(hk, cvec="pk")):
+        with pytest.raises(ValueError):
+            bad.check()
+
+
+@pytest.mark.parametrize("gp,cw", [("c", 1), ("d", 1), ("d", 4), ("s", 4), ("u", 2)])
+def test_cvec_pkx_lowers(gp, cw):
+    for tp, rows in ((1, 8), (2, 128)):
+        hk = H.HcKnobs(tp=tp, bucket=bucket(rows), prow=rows, gplace=gp, c=H.CKnobs(cw=cw), cvec="pkx")
+        assert H.hc_kernel_name(hk).endswith("_cvecpkx") or "_cvecpkx_" in H.hc_kernel_name(hk)
+        assert H.hc_kernel_name(hk) in ll(H.build_hc_kernel(hk))
+    with pytest.raises(ValueError):
+        H.HcKnobs(tp=1, bucket=16, prow=8, gplace="d", cvec="pk").check()

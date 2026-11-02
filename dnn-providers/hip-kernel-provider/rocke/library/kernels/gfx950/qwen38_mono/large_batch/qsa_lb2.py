@@ -41,6 +41,8 @@ the default arm. Read ``qsa_lb``'s docstring for the FlyTape-structure port and 
 * ``sst4`` (``score="mfma"``, ATOM semantics): one 16-byte store of a lane's 4 consecutive block scores.
 * ``heq`` (with ``hsel``): an all-equal test of the tied keys' low bits before the restricted search (zero states and
   planted ties: every key equal).
+* ``heqs`` (with ``heq``): the all-equal pass runs only when the tied set is not small (a zero-trip loop otherwise): on
+  random keys ``heq`` paid one extra pass over every score per select.
 * ``hsel`` (``sem="atom"``): the hierarchical 31-bit select: FlyTape's 16-bit search over ``key >> 15``, then the low
   15 bits among the keys tied at that boundary (compacted to LDS and searched by one wave with ballots when at most 256
   are tied, else the restricted search over all keys): the same boundary at about the 16-bit search's cost.
@@ -218,6 +220,7 @@ class QsaKnobs:
     sst4: bool = False  # score=mfma (sem=atom): one 16-byte score store per lane for its 4 consecutive blocks
     heq: bool = False  # hsel: when more than HSEL_MAX keys tie at the upper boundary, first test whether all their low
     # bits are equal (min == max: the boundary at once) before the restricted 15-bit search
+    heqs: bool = False  # heq: skip its min / max pass when the tied set is small (zero trips; the result is unused then)
 
     def check(self) -> None:
         if self.waves not in (4, 8):
@@ -272,6 +275,8 @@ class QsaKnobs:
             raise ValueError(f"mutant {self.mutant} needs sem=atom")
         if self.heq and not self.hsel:
             raise ValueError("heq needs hsel")
+        if self.heqs and not self.heq:
+            raise ValueError("heqs needs heq")
         if self.hsel and (self.sem != "atom" or self.sel not in ("bits", "v1", "v2")):
             raise ValueError("hsel: sem=atom with sel bits | v1 | v2")
         if self.fma64 and self.score != "f64":
@@ -1654,7 +1659,7 @@ class _Unit:
                     q.lw(res, lb)
             q.bar()
         if q.k.heq:
-            same = self._hsel_equal(lo, hi, b16, small, res)
+            same = self._hsel_equal(lo, b.select(small, lo, hi) if q.k.heqs else hi, b16, small, res)
             slow = b.land(b.lnot(small), b.lnot(same))
         else:
             slow = b.lnot(small)

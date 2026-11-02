@@ -95,3 +95,9 @@ absolute numbers in `hackathon-prep/private-perf/qwen38-true-mono/`.
   gates, and freezes FINAL-STACK.md. Then: documentation + repro scripts on the user's branches
   (copy-rocm-lib users/vanantha/rocke-monokernels working tree; ATOM-truemono on top of qwen38-megakernels).
   Best so far: K=3 c2s3/c2s3b 972.6/987.6 (n07-17, hybrid 869.7/880.5), K=0 c2s0b 491.5 (hybrid 431.6).
+- 2026-11-02: user: finish TP2 too, target measured 10k+ tok/s at B128 on 2 GPUs. W10 resumed (same run id
+  wf_505460aa-fed, script now includes WP-L5 TP2). Small-batch last push continues in the c2 agent.
+- 2026-11-02: user: build the structural pieces for the last ~1.5% at K=3. Round-boundary agent resumed (device-
+  resident round loop on c2s3b). W11 (run wf_bd1683cd-58c): P3x -> WP15 (N1 HC chain), WP17 (N2 out_proj K-split),
+  e2e on c2s3b. c2 agent: confirmations, then stacks verified pieces, freezes FINAL-STACK.md last.
+  Best now: K=3 c2s3b ~985 (n07-17) / ~970 (n01-09), K=0 ~492. W10 (TP2 10k) running.

@@ -704,3 +704,128 @@ decision 1's rule.
 - K=1 / K=2 on the second node (job rb-k12c-n07, 3 passes; rnd_med / hybrid): K=1 full3 0.955, full3_rb 0.872,
   **full3_rba 0.864** (tok/s per request 1.160 of the hybrid); K=2 full3 0.963, full3_rb 0.926, **full3_rba 0.913**
   (1.094). Both nodes agree with rb-k12-n01 (0.875 / 0.926 for full3_rb).
+- Decision-15 re-tests on base full3_l_rba (jobs rb-rt2-n01 / rb-rt2-n07, 3 passes; rnd_med / hybrid, base 0.918 /
+  0.919): **N8 64K draft vocab 0.914 / 0.915 (WIN on both nodes, every n01 pass below the base's range; tok/s per
+  request 1.095 / 1.076 vs 1.082 / 1.070)**; P9 verify `hdelay` 8 0.916 / 0.920, `hdelay` 16 0.917 / 0.918, `head_dg` 3
+  0.919 / 0.919 (NEUTRAL); P9 draft chain 0.921 / 0.922 (LOSS); `_FUSE=0` with `_ADV` 0.927 / 0.928 (LOSS: v1's extra
+  launches). N8 64K lost on full3 for acceptance; with the boundary off the host its shorter draft head pays.
+
+### 6. On base c2s3b (consolidated push 2): what host-related time is left in the round (2026-11-02)
+
+- Kernel trace without the API trace (job rb-kt2, n07-17, 152 rounds; `RB/rb_round_idle.py`): the GPU is busy 0.9933 of
+  the c2s3b round. Idle is 0.0066: 0 in the target pass and the drafts, ~0.003 after the target pass (verify tail /
+  draft front launches), ~0.0035 at the boundary. The boundary's GPU work (0.027 of the round) is the last draft
+  step's head launch (~0.011), the in-graph step prologue + verify meta (~0.004) and ~0.012 of step preparation: 4 H2D
+  copies, one packed scatter, the deferred-ids kernel, one fill, the device-path shift kernel, kv_indices.
+- No-profiler timeline (job rb-tl3, n01-09): the host waits for the GPU ~0.40 of every round, and the GPU was drained
+  at the next graph launch in 0-0.5 % of rounds.
+- So no host decision is left on the critical path. A device-resident loop could at most recover the idle plus the step
+  preparation, ~0.015-0.018 of the round. The part reachable without new kernels is the steady-state skip of the
+  remaining constant uploads (QSA token map, GDN spec slots: `_ADV=2` restricted) and of the spec-mask fill (`_TRIM`
+  extension).
+
+## Consolidated stack 2 (2026-11-02, agent "c2": every verified deployable win stacked, both nodes)
+
+Ratios only; absolute tok/s in `hackathon-prep/private-perf/qwen38-true-mono/quick/CONSOLIDATED2.md`. Arms:
+`hackathon-prep/qwen38/truemono-quick/arms.d/c2.sh` (new file); gates, tools and results: `hackathon-prep/qwen38/truemono/C2/`
+(`stage_c2.sh`, `c2_gates.sh`, `c2_alias.sh`, `c2_layer_gate.py`, `c2_sched_tune.py`, `c2_tune_job.sh`, `c2_e2e.py`,
+`results/`). Stages `h-qk-c2-<x>` (harness), `rocke-qk-c2-<x>` / `atom-truemono-c2-<x>` (login-node byte copies of
+`rocke-qk-w8wp2afx` / `atom-truemono-w8wp2afx`, the trees the WP2a / WP2b e2e jobs ran; sha256 equal), `hb-atom-c2-<x>`
+(= `atom-rkrepro`, the pinned hybrid). No git state changed, nothing deleted, ATOM-truemono not edited.
+
+### The stack (recipe `gen_c2Ab`, arms `c2s3b` K=3 / `c2s0b` K=0)
+
+| part | component | source / class |
+|---|---|---|
+| base | consolidated full stack: picksH + `qsa:qdense=3` + N8 96K draft vocab + subset-head pick + the P9 verify tail (K=3) / the K=0 fused-argmax tail | "Consolidated stack" above; qdense tolerance class (P13 / W9 N4a), the rest bitwise |
+| round boundary | lean draft round + `ATOM_Q38_RB_DEVMETA=1`, `_TRIM=1`, `_ADV=1` (= `full3_l_rba`, the previous K=3 best) | "Round boundary" above; bitwise |
+| QSA Q3-Q7 | WP2c rocKE functions on every narrow QSA build; FlyDSL Q3 / Q4 at r4s (`qsa2_34`); `numa=1,qdense=3,prepoll=q5+q6+q7,q5_kpre=True`; `qsa.r1:hold.q7=64` (= the fix round's e3b / e0 picks) | wave2/WP2c.md; bitwise |
+| HC A1 / A2 / M1 / M2 | WP2a rocKE functions with the picks (`WP2a-fix/picks_final.json`, 12 cells: r1, r2s-r4s of the three kinds) and their HC schedule groups | wave2/WP2a.md; bitwise |
+| GEMV B1 / C1 / Q1 / P1 | WP2b rocKE functions, `WP2b/picks_all.json` as staged 2026-11-02 04:27 UTC (48 cells; the CONC-1 cells r1 / r4s / r4 equal the later local file) | wave2/WP2b.md; bitwise |
+
+Not in the stack: P16 `fold.b1` (K=0) is a FlyDSL-B1 lever and WP2b replaces that B1; on the no-WP2b base it is
+NEUTRAL (`c2f0` / `c2p0`, pooled 0.997, 8/8 below 1 but inside the twins' band). The combination `c2s0bf` (WP2b except
+delta r1's B1, + fold) is gated (layer gate `c2AbF`) and kept as a knob; its e2e re-test was cut short (below).
+
+### Gates on the stacked served path (jobs qk-c2-gate1 / gate2 / gate3 / gate4; recipes c2A, c2Ab, c2AbF, c2T)
+
+| check | result |
+|---|---|
+| stacked layer gate (`c2_layer_gate.py`): REF = the previous stack's layer (its sched + MoE / B3 functions), ARM = the stack as served (every extern from the served function dir, the stack's sched), one rig snapshot, output + every state | bitwise in every cell: delta / delta_ple / qsa at r1 and r4s, qsa r4 (draft), qsa at L 1024 and 32,768; ARM also equals the plain mono; deterministic; every requested extern linked (FlyDSL only by design: r4s Q3 / Q4, the draft r4 HC) |
+| its must-fail mutants | HC `mix_avg`, WP2b C1 `put_bit`, QSA `q7_gate`: differ in every cell they apply to (all four recipes) |
+| CS tail gate (`CS/cs_gate.sh` unchanged; bases re-pointed by `c2_alias.sh`) | g3l (lean round): ATOM check mode 64 / 64 equal, every deep check 64 / 64 (verify front / counter / pos / qsa; both draft steps' token, six QSA metadata outputs, front, counter, pos, table; last token), transitions clean; g0: K=0 sample 64 / 64 equal; must-fail accept / fids / lean dpos / K=0 off-by-one caught; CS_GATE PASS |
+| RB gate (`RB/rb_gate.sh` unchanged; re-pointed) | c3la 64 / 64 OK (62-64 advanced), d3la deep 1,728 / 1,728 equal, c1a (K=1) 51-58 OK, d0 K=0 unaffected, ADV must-fail caught 16 / 16; RB GATE PASS |
+| T4 (P11 rev 3, `t4_gate.py` vs the hybrid pool), `c2s3b` and `c2u3`, 3 passes each | GSM8K flexible / strict, HumanEval, RULER mix v1 8K / 32K: PASS for both (deltas -0.006 .. +0.016; tolerances 0.012-0.057) |
+| T2 (P11 rev 3, K=0 teacher forcing, composed share 1.0, design k 4 / n 5), the stack's K=0 layers (`c2t0b`) | PASS (d = -0.2e-3 nats on gsm8k; within / 2x-exclusion / quiet hold); planted all:2^-4 must-fail FAILS (+2.9e-2) |
+
+Gate-job incidents (fixed): gate1 was requeued by the n07-17 drop-out (alola rule 223) after its CS part had passed;
+gate2's CS step hung on an `export Q38_PORT=0` that leaked from the layer step (the layer step now runs in a subshell);
+the CS gate passed again in gate3 and gate4.
+
+### End to end, both nodes, 4 rotated passes, same job as the hybrid (A-vs-A twins of the hybrid and the comparator)
+
+Jobs qk-c2-e1-n01 / e2-n07 (increments) and qk-c2-f1-n01 / f2-n07 (final candidates). `rnd_med` = ms per verify round
+(median over requests), `med` = tok/s per request (median over requests); ratios arm / ref per pair, pooled 8 pairs
+over both nodes, DESIGN 9.1 rule (median outside the union of both twins' bands, 7 of 8 pairs the right way).
+
+| arm / ref (K=3) | rnd_med pooled | tok/s pooled | verdict |
+|---|---|---|---|
+| c2w3 (rba + WP2c) / full3_l_rba | 0.9905 (8/8) | 1.020 | rnd WIN, tok/s NEUTRAL |
+| c2s3 (+ WP2a) / full3_l_rba | 0.976 (7/7) | 1.021 | rnd WIN |
+| **c2s3b (+ WP2b) / full3_l_rba** | **0.968 (8/8)** | **1.040 (8/8)** | **WIN on both** |
+| c2s3b / c2s3 | 0.991 (7/7) | 1.014 | rnd WIN |
+| **c2s3b / hybrid** | **0.888** | **1.128** | WIN |
+
+| arm / ref (K=0, tok/s per request) | pooled | verdict |
+|---|---|---|
+| c2s0 (WP2c + WP2a + fold.b1) / c2p0 (= full0_w8c) | 1.019 | WIN |
+| **c2s0b (WP2c + WP2a + WP2b) / c2p0** | **1.022** | **WIN** |
+| c2s0b / c2s0 | 1.004 | NEUTRAL |
+| **c2s0b / hybrid** | **1.137** | WIN |
+
+Per node (ratio of the 4-pass means): K=3 c2s3b / hybrid tok/s 1.128 (n01-09) and 1.136 (n07-17), rounds 0.889 / 0.887;
+K=0 c2s0b / hybrid 1.136 / 1.139.
+
+### Last mile: the schedule re-climbed with the rocKE stages in place (`c2_sched_tune.py`)
+
+The holds / prio / spread / dyn / pipe picks were tuned on FlyDSL stages. `c2_sched_tune.py` re-runs the quick track's
+lookback driver (`lookback/run.py`: SignedLookback over every lever and level incl. losers, order restarts, TPE,
+12-round confirmation with A-vs-A and recompiled controls) with a backend that links the stack's served functions and
+starts at the stack's served cell group (jobs qk-c2-tuA-tuD). In situ, layer time / the stack's layer:
+
+| cell | pick | in situ |
+|---|---|---|
+| delta r4s | holds a2 / m1, prio m3 / m4, b3pf off | 0.992 WIN (a second climb from the pick: no further gain) |
+| qsa r4s | dyn.q2, holds m2 / m3 / q2 / q5, prio q4 / q5 / m2 / m4 (solo-winners combination) | 0.972 WIN |
+| qsa r4 (draft, 4 rows) | head_sleep 128, hold.m3 64, pipe 3, prio.a2 2 | 0.984 WIN |
+| qsa r1 | head_sleep 0, hold.m3 32, hold.q2 32 | 0.992 WIN |
+| delta r1 | holds a2 / b1 / m1 / m2, pause 4, pipe 1, prio.b3 | 0.986 WIN |
+| delta_ple r1 / r4s | | 0.994 WIN / 0.999 NEUTRAL (r4s kept) |
+
+The tuned groups (`C2/c2t_sched_s2.txt`; arms `c2u3` / `c2u0` = c2Ab + these overrides) pass every gate (gate4:
+layer, CS, RB; T4). End to end they do not pay: K=3 `c2u3` / `c2s3b` rnd_med 1.002 (1/8), tok/s 0.999 (NEUTRAL); K=0
+`c2u0` / `c2s0b` 0.995 per token (7/8 pairs) but inside the twins' band (NEUTRAL; WIN on n01-09 alone). As with WP2b's
+own e2e, the in-situ rig (cold weight copies, one layer) over-predicts serving. Kept as knobs (`C2T_SCHED`).
+
+### Decision-15 re-tests on the stack (base c2u3 = c2s3b + the tuned groups, job qk-c2-rt2-n01, 3 passes; 1.5 passes on base c2s3b, n07-17, job cancelled to stay within 4 GPUs)
+
+| lever | rnd_med / base | verdict on base c2u3 |
+|---|---|---|
+| P9 verify hdelay 8 / 16 | 0.999 / 0.998 | NEUTRAL |
+| verify head head_dg 3 | 0.999 | NEUTRAL |
+| P9 draft chain instead of the lean round | 1.001 | NEUTRAL |
+| verify tail only (ATOM drafter, no lean round) | 1.014 | LOSS |
+| RB TRIM without ADV | 1.005 | LOSS |
+| WP2c all five functions at r4s (the pick keeps FlyDSL Q3 / Q4 there) | 0.998 | NEUTRAL |
+| N8 64K draft vocab (f1 / f2, 8 pairs; e4-n01 / e4-n07 on base c2s3b with its twin, 7 pairs) | 0.995 vs c2u3 (8/8); vs c2s3b 0.994 (6/7, n01-09 4/4 WIN, n07-17 0.999 NEUTRAL); tok/s per request 1.009 (4/7, NEUTRAL: acceptance 0.5 % lower) | **WIN on rnd_med (pooled), NEUTRAL on tok/s**: `c2s3b_n8_64k` is the K=3 integration base from here on |
+| WP2a port defaults instead of the picks | on base c2u3: refused at server start in 3 / 3 passes (ATOM: `rocke_q38_a1_r4s: built for spread 0, this build's is 2`; the port functions carry the stack's spread, the re-climbed delta r4s group asks spread 2: a correct refusal); on base c2s3b (n07-17, 2 passes before the cancel): round 1.003 / 1.003 | NEUTRAL on base c2s3b |
+
+### Where it stands (decisions 7 / 12)
+
+K=3 CONC 1: verify round 0.888 of the hybrid's, tok/s per request 1.13 of the hybrid's; the 1000 tok/s per-request target is
+not met on either node (n07-17 within about 1 %, n01-09 within about 2-3 %; absolute numbers in the private file). K=0:
+1.137 of the hybrid's tok/s (target: 0.78 per token, not met). Next (coordinator, 2026-11-02): the round-boundary
+device-resident round loop and W11's N1 (HC chain restructure) / N2 (out-proj K-split into the B3 / Q7 epilogues), each
+stacked on c2s3b when verified; FINAL-STACK.md is frozen only after those.
+
+Integration log: W11 N2 (out-proj K-split into B3) is REJECTED on base c2s3b (in situ every N2 arm loses 2-7 %; w11/WP17.md, arms `arms.d/w17.sh`): not stacked.

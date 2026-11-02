@@ -143,3 +143,6 @@ persistent `pass`/`round` path and the `layers=1` + tail-kernel fallback.
 19. (2026-11-02) Wrap-up: push the last piece (K=3 CONC 1 >= 1000 tok/s on both nodes, gated), freeze the stack
     (FINAL-STACK.md), then document and write repro scripts on the user's branches. All other tracks are stopped;
     their state is recorded in HANDOFF.md for a later restart.
+20. (2026-11-02) Multi-GPU large batch is finished too, not left as a projection: W10 resumed with WP-L5 (TP2 full
+    pass with the in-kernel CCL). Target: a MEASURED 10,000+ tok/s total on 2 GPUs at B128 (FlyTape TP2 7,742),
+    same-job vs FlyTape TP2 and ATOM DP2 K3, both nodes; keep climbing until met or every lever is documented.

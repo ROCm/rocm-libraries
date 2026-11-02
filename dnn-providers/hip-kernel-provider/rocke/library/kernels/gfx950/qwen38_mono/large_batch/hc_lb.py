@@ -75,6 +75,7 @@ __all__ = [
     "hc_lds_bytes",
     "default_d",
     "default_u",
+    "to_ufold",
     "pack_up_perm",
     "up_perm",
     "GS_BYTES",
@@ -102,7 +103,7 @@ NQ4_A = 1  # the up GEMM's K (320 -> 3 chunks)
 NQ4_O = -(-(HID // CHUNK) // 4)  # 5: the next GEMM's K (2560)
 
 C_MUTANTS = ("none", "ygate", "eps", "xblk", "inj", "rskip")
-D_MUTANTS = ("none", "silu")
+D_MUTANTS = ("none", "silu", "ufold")
 U_MUTANTS = ("none", "mix", "sig", "xs")
 CHAIN_MUTANTS = ("none", "early", "noacq")
 CP_VALUES = (1, 2, 4, 5, 10)
@@ -187,8 +188,8 @@ class CKnobs:
     mutant: str = "none"
 
     def check(self, waves: int) -> None:
-        if self.cw not in (1, 2) or waves % (4 * self.cw):
-            raise ValueError("C: cw 1 | 2 with 4 cw dividing the waves")
+        if self.cw not in (1, 2, 4) or waves % self.cw or (waves % (4 * self.cw) and 4 * self.cw < waves):
+            raise ValueError("C: cw 1 | 2 | 4 with 4 cw dividing the waves, or cw dividing them (split-stream units)")
         if self.inv not in ("f64", "rsq"):
             raise ValueError("C: inv f64 | rsq")
         if self.mutant not in C_MUTANTS:
@@ -365,6 +366,12 @@ class HcKnobs:
     # stage, after their own units: off C's critical path; the same bits)
     gplace: str = "c"
     eload: str = "mi"  # U's epilogue operand loads: "mi" (inv per weight x token tile) | "t" (inv once per token tile)
+    # the down GEMM's split-K fold moved into the up GEMM's activation staging (FlyTape's ``mix_reduce`` folded into
+    # ``mix_up``'s source, WP-L2a / P-L3 ``fold=none`` with the consumer read): D stores its f32 partials only (no
+    # last-arriver protocol, no activation pack); every U unit sums the partials of its token tile in split order, applies
+    # the activation and packs MXFP8 into its LDS staging (the bits of the D fold + ``yq``); the token block's first
+    # column group also stores ``dy`` / ``aq`` / ``aqs`` (the checker's D outputs). Needs ``to_ufold``'s plans.
+    ufold: bool = False
     # diagnosis: thread 0 of every CTA stores s_memrealtime (low 32 bits, 100 MHz) at the stage / edge boundaries of every
     # layer into the ``du`` buffer (``[layer][CTA][16]`` i32: 0 layer start, 1 C end, 2 edge 1 out, 3 D end, 4 edge 2
     # out, 5 U end, 6 edge 3 out; inside the CTA's last D / U unit: 7 / 10 unit start, 8 / 11 GEMM done, 9 / 12
@@ -412,8 +419,17 @@ class HcKnobs:
                 raise ValueError(f"{name}: mx, fp8 activations, sop")
             if k.chain or k.stamp or k.tstamp or k.diag != "none" or k.mfma != 16:
                 raise ValueError(f"{name}: no chain / stamps / diag / mfma=32 builds")
-        if d.k != HCW or not d.yq or d.fold == "spread":
+        if self.ufold:
+            if d.k != HCW or d.yq or d.fold != "none" or d.splits < 2 or d.kseg or d.mfma != 16:
+                raise ValueError("ufold: D k = 10240, splits > 1, fold none, no yq / kseg")
+            if self.norm != "faithful" or self.cstat != "cta" or self.cfuse or "U" in self.pre:
+                raise ValueError("ufold: norm faithful, cstat cta, no cfuse, no pre U")
+            if u.xsrc != "lds" or u.xscale != "glb" or u.xslay != "chunk" or u.xu or u.bpre:
+                raise ValueError("ufold: U xsrc lds, xscale glb, xslay chunk, no xu / bpre")
+        elif d.k != HCW or not d.yq or d.fold == "spread":
             raise ValueError("D: k = 10240 with the yq producer epilogue (fold last | none)")
+        if self.dmut == "ufold" and not self.ufold:
+            raise ValueError("dmut ufold: needs ufold")
         if self.cfuse:
             if self.norm != "reassoc" or d.kseg or not d.sop or d.xsrc != "lds" or d.xu or d.splits % 4 or d.bpre:
                 raise ValueError("cfuse: norm=reassoc; D sop, xsrc=lds, no xu / kseg / bpre, splits a multiple of 4")
@@ -438,12 +454,17 @@ class HcKnobs:
             raise ValueError("cstat=dfold: not with cfuse")
         if self.stamp and self.dbg:
             raise ValueError("stamp: not with dbg (both use the du buffer)")
-        if self.cvec not in ("scalar", "pk", "dot2") or (self.cvec != "scalar" and self.cstat != "cta"):
+        if self.cvec not in ("scalar", "pk", "dot2", "pkx") or (self.cvec != "scalar" and self.cstat != "cta"):
             raise ValueError("cvec scalar | pk | dot2 (cstat=cta)")
         if d.rows_per_unit > 128 or u.rows_per_unit > 256:
             raise ValueError("D rows per unit <= 128 (256-row down units corrupt memory in the chain: open), U <= 256")
-        if self.gplace not in ("c", "d", "u") or (self.gplace != "c" and (self.cstat != "cta" or self.cvec != "scalar")):
-            raise ValueError("gplace c | d | u (d / u: cstat=cta, cvec=scalar)")
+        if self.gplace not in ("c", "d", "u", "s") or (
+                self.gplace != "c" and (self.cstat != "cta" or self.cvec not in ("scalar", "pkx"))):
+            raise ValueError("gplace c | d | u | s (d / u / s: cstat=cta, cvec=scalar)")
+        if self.gplace == "s" and (4 * self.c.cw <= self.waves or self.norm != "faithful"):
+            raise ValueError("gplace s: split-stream C units (4 cw > waves), norm faithful")
+        if 4 * self.c.cw > self.waves and (self.gplace == "c" or self.cstat != "cta"):
+            raise ValueError("split-stream C units (4 cw > waves): gplace d | u, cstat=cta")
         if self.uvec not in ("scalar", "pk"):
             raise ValueError("uvec scalar | pk")
         if self.eload not in ("mi", "t"):
@@ -471,7 +492,22 @@ def hc_lds_bytes(hk: HcKnobs) -> int:
 
     d, u = hk.parts()
     own = d.lds_bytes() + u.lds_bytes() + hk.tbk * (u.rows_per_unit // 4) * 4 + 4 * 64 + 4 * CTL_WORDS + 256
+    if hk.ufold:  # U's X scale staging (``_UpF.xsc``)
+        own += 2 * u.kw * (u.tbt * TILE + u.xjunk) * 16
     return max(ONE_CTA_PER_CU_WORDS * 4, own + 1024)
+
+
+def to_ufold(hk: HcKnobs) -> HcKnobs:
+    """``hk`` with the down GEMM's fold moved into the up GEMM's staging (``ufold``): D ``fold="none"`` without ``yq``,
+    U staged through LDS (``xsrc="lds"``, X scales from the staging: ``xscale="glb"`` / ``xslay="chunk"``, no ``xu`` /
+    ``bpre``); a register prefetch of U (``pre`` U) becomes the L2 warm-up ``u``."""
+    d, u = hk.parts()
+    d = replace(d, fold="none", yq=False)
+    u = replace(u, xsrc="lds", xscale="glb", xslay="chunk", xu=False, bpre=0)
+    pre = hk.pre
+    if "U" in pre:
+        pre = pre.replace("U", "" if "u" in pre else "u") or "none"
+    return replace(hk, ufold=True, d=d, u=u, pre=pre)
 
 
 def hc_kernel_name(hk: HcKnobs) -> str:
@@ -556,11 +592,11 @@ class _Comb:
         sub = b.land(wave, _c(b, cw - 1)) if cw > 1 else _c(b, 0)
         t = b.add(b.mul(sub, _c(b, 64)), lane)
         rows = P["rows"]
-        units = b.readfirstlane(b.div(b.add(rows, _c(b, cr - 1)), _c(b, cr)))
+        units = b.readfirstlane(b.div(b.add(rows, _c(b, cr - 1)), _c(b, cr))) if cr else None
         bid = b.readfirstlane(b.block_id_x())
-        red = b.smem_alloc(F32, [cr * NS * cw * 5 + 8], name_hint="hccred")
-        with b.scf_if(b.cmp_lt(bid, units)):
-            brow = b.add(b.mul(bid, _c(b, cr)), rloc)
+        red = b.smem_alloc(F32, [max(cr, 1) * NS * cw * 5 + 8], name_hint="hccred")
+
+        def _unit(brow, stream):
             valid = b.cmp_lt(brow, rows)
             br = b.select(valid, brow, _c(b, 0))
             rin = _rsrc(b, P["rin"], _c(b, TP * HCW * 2))
@@ -588,14 +624,15 @@ class _Comb:
                                              dwords=4) for rk in range(hk.tp)]  # fmt: skip
                 rec["w"] = b.buffer_load_cp(wn, b.select(ok, b.mul(kk, _c(b, 2)), _c(b, OOB)), _c(b, 0), dwords=4)
                 rec["j"] = [b.buffer_load_cp(wj, b.select(ok, b.mul(b.add(kk, _c(b, j * HCW)), _c(b, 2)), _c(b, OOB)),
-                                             _c(b, 0), dwords=4) for j in range(NS)] if hk.gplace == "c" else []  # fmt: skip
+                                             _c(b, 0), dwords=4) for j in range(NS)] if hk.gplace in ("c", "s") else []  # fmt: skip
                 vs.append((v, kk, ro))
                 oks.append(ok)
                 L.append(rec)
             rp_all = []
             ss = None
-            pk = hk.cvec in ("pk", "dot2")
+            pk = hk.cvec in ("pk", "dot2", "pkx")
             d2 = hk.cvec == "dot2"
+            px = hk.cvec == "pkx"  # packed combine / normalisation, the scalar sum orders: the scalar build's bits
             if pk:
                 gate2 = b.vec_pack([gate, gate], F32)
             for p in range(passes):
@@ -619,6 +656,9 @@ class _Comb:
                         s8 = _f(b, 0.0)
                         for w32 in rpw:
                             s8 = _dot2(b, w32, w32, s8)
+                    elif px:
+                        q = [b.fmul(x, x) for x in rp]
+                        s8 = b.fadd(b.fadd(b.fadd(q[0], q[1]), b.fadd(q[2], q[3])), b.fadd(b.fadd(q[4], q[5]), b.fadd(q[6], q[7])))
                     else:  # pairs: (q0 q1) + (q2 q3), (q4 q5) + (q6 q7), then the two lanes of the pair
                         q2 = [b.fmul(_unpk(b, w32), _unpk(b, w32)) for w32 in rpw]
                         t2 = b.fadd(b.fadd(q2[0], q2[1]), b.fadd(q2[2], q2[3]))
@@ -652,6 +692,8 @@ class _Comb:
                 s0 = b.vec_extract(b.smem_load_vN_f32(red, b.sub(sidx, sub), n=1), 0)
                 s1 = b.vec_extract(b.smem_load_vN_f32(red, b.add(b.sub(sidx, sub), _c(b, 1)), n=1), 0)
                 ss = b.fadd(s0, s1)
+                for s_ in range(2, cw):
+                    ss = b.fadd(ss, b.vec_extract(b.smem_load_vN_f32(red, b.add(b.sub(sidx, sub), _c(b, s_)), n=1), 0))
             mean = b.fmul(ss, b.bitcast(_c(b, INV_HIDDEN), F32))
             stab = mean if k.mutant == "eps" else b.fadd(mean, b.bitcast(_c(b, EPS_BITS), F32))
             if k.inv == "f64":
@@ -698,7 +740,7 @@ class _Comb:
                              b.land(qc, _c(b, 3)))  # fmt: skip
                 with b.scf_if(b.land(ok, b.cmp_eq(p4, _c(b, 0)))):
                     b.inline_asm("global_store_byte $0, $1, off sc1", "v,v,~{memory}", [b.add(xqs_a, _i64(b, soff)), E], None)
-                for j in range(NS if hk.gplace == "c" else 0):
+                for j in range(NS if hk.gplace in ("c", "s") else 0):
                     jw = rec["j"][j]
                     acc = dots[j] if dots[j] is not None else _f(b, 0.0)
                     if pk and d2:
@@ -706,7 +748,7 @@ class _Comb:
                             acc = _dot2(b, b.vec_extract(jw, d), nw[d], acc)
                         dots[j] = acc
                         continue
-                    if pk:  # packed fma on (even, odd) element pairs; the pair's two sums added at the end of C
+                    if pk and not px:  # packed fma on (even, odd) element pairs; the pair's two sums added at the end of C
                         acc2 = dots2[j] if dots2[j] is not None else b.vec_pack([_f(b, 0.0), _f(b, 0.0)], F32)
                         for d in range(4):
                             acc2 = b.vector_fma(_unpk(b, b.vec_extract(jw, d)), _unpk(b, nw[d]), acc2)
@@ -717,9 +759,18 @@ class _Comb:
                         acc = b.fma(_hi(b, x) if e % 2 else _lo(b, x), n[e], acc)
                     dots[j] = acc
             # ---- gates: per-stream dot partials -> the row's 4 gates (stream order)
+            if hk.gplace == "s":  # split-stream units: this wave's 4 dot partials, finished off C (_GSum)
+                sp_rs = _rsrc(b, P["sp"], _c(b, SP_MAX * TP * 4))
+                for j in range(NS):
+                    dj = _wsum(b, dots[j])
+                    soff = b.mul(b.add(b.mul(b.add(b.mul(b.add(b.mul(br, _c(b, NS)), stream), _c(b, cw)), sub), _c(b, NS)),
+                                       _c(b, j)), _c(b, 4))  # fmt: skip
+                    with b.scf_if(b.land(valid, b.cmp_eq(lane, _c(b, 0)))):
+                        b.buffer_store_cp(b.bitcast(dj, I32), sp_rs, soff, _c(b, 0), aux=CPOL_SC1)
+                return
             if hk.gplace != "c":
                 return
-            if pk and not d2:
+            if pk and not d2 and not px:
                 dots = [b.fadd(b.vec_extract(x, 0), b.vec_extract(x, 1)) for x in dots2]
             base = cr * NS * cw
             for j in range(NS):
@@ -747,6 +798,20 @@ class _Comb:
                 gok = b.cmp_lt(grow, rows)
                 goff = b.mul(b.add(b.mul(b.select(gok, grow, _c(b, 0)), _c(b, NS)), j), _c(b, 4))
                 b.buffer_store_cp(b.bitcast(val, I32), gout, b.select(gok, goff, _c(b, OOB)), _c(b, 0), aux=CPOL_SC1)
+
+        if cr == 0:  # split-stream units (4 cw > waves): a CTA holds waves / cw streams of one token; the gates elsewhere
+            spc = W // cw
+            ng = NS // spc
+            nit = -(-hk.tbk * ng // GRID)
+            for it in range(nit):
+                ub = b.add(bid, _c(b, it * GRID)) if it else bid
+                with b.scf_if(b.cmp_lt(ub, b.mul(rows, _c(b, ng)))):
+                    _unit(b.div(ub, _c(b, ng)), b.add(b.mul(b.mod(ub, _c(b, ng)), _c(b, spc)), b.div(wave, _c(b, cw))))
+                if nit > 1:
+                    b.sync_lds_only()  # the reduce buffer is reused by the next unit
+            return
+        with b.scf_if(b.cmp_lt(bid, units)):
+            _unit(b.add(b.mul(bid, _c(b, cr)), rloc), stream)
 
 
     def emit_fold(self) -> None:
@@ -960,6 +1025,40 @@ class _RegPre:
         return super().wissue(u, c, xonly_gate, xonly)
 
 
+
+
+class _GSum:
+    """``gplace="s"`` (split-stream C units): C's waves store their 4 injection-dot partials (one per (token, stream,
+    sub-wave), the wave sums of C's fma chains); after the C -> D edge the top CTAs finish the gates, one thread per
+    (token, gate j): the partials summed stream-major then sub-wave (C's own order for cw > 1), the gate rule."""
+
+    def __init__(self, hk: HcKnobs, b, P: dict, TP: int):
+        self.hk, self.k, self.b, self.P, self.TP = hk, hk.c, b, P, TP
+
+    def emit(self) -> None:
+        b, hk, k, P, TP = self.b, self.hk, self.k, self.P, self.TP
+        cw = k.cw
+        nthr = 64 * hk.waves
+        tid = b.thread_id_x()
+        rows = P["rows"]
+        bid = b.readfirstlane(b.block_id_x())
+        gu = b.sub(_c(b, GRID - 1), bid)
+        sp_rs = _rsrc(b, P["sp"], _c(b, SP_MAX * TP * 4))
+        gout = _rsrc(b, P["gout"], _c(b, TP * NS * 4))
+        it = b.add(b.mul(gu, _c(b, nthr)), tid)
+        with b.scf_if(b.cmp_lt(it, b.mul(rows, _c(b, NS)))):
+            tok = b.lshr(it, _c(b, 2))
+            j = b.land(it, _c(b, 3))
+            tot = None
+            for i in range(NS - 1 if k.mutant == "inj" else NS):
+                for s_ in range(cw):
+                    off = b.mul(b.add(b.mul(b.add(b.mul(b.add(b.mul(tok, _c(b, NS)), _c(b, i)), _c(b, cw)), _c(b, s_)),
+                                            _c(b, NS)), j), _c(b, 4))  # fmt: skip
+                    x = b.bitcast(b.buffer_load_cp(sp_rs, off, _c(b, 0), dwords=1), F32)
+                    tot = x if tot is None else b.fadd(tot, x)
+            gv = _gate_rule(b, tot, hk.sig)
+            goff = b.mul(b.add(b.mul(tok, _c(b, NS)), j), _c(b, 4))
+            b.buffer_store_cp(b.bitcast(gv, I32), gout, goff, _c(b, 0), aux=CPOL_SC1)
 
 
 class _Gates:
@@ -1682,6 +1781,153 @@ class _Up(_RegPre, E1M._E1):
         b.sync_lds_only()
 
 
+class _UpF(_Up):
+    """``ufold``: the up GEMM stages its own activations from the down GEMM's f32 split-K partials (FlyTape's
+    ``mix_reduce`` inside ``mix_up``'s source; D runs ``fold="none"``). Per 16-byte piece (8 K of one token): the
+    ``splits`` partials summed in split order (E1's last-arriver fold order), ``y = bf16(sum)``, ``s = bf16(y / 4)``,
+    ``a = bf16(silu(s))`` (``_Dn._ybuf_put``), MXFP8 per 32-K block over 4 lanes (``yq_pass``'s rule): codes to the LDS
+    staging rows, the E8M0 byte to an LDS scale array read per chunk by op_sel (``_DnF``'s scheme). The units of column
+    group 0 also store ``y`` (bf16), the codes and the scales in the D outputs' layouts (``dy`` / ``aq`` / ``aqs``).
+    Mutant ``dmut="ufold"``: the last split is dropped."""
+
+    def __init__(self, k: E1M.E1Knobs, scope, hk: HcKnobs, TP: int):
+        super().__init__(k, scope, hk, TP)
+        b = self.b
+        P = scope
+        dk = hk.parts()[0]
+        self.S = dk.splits
+        self.dTP = dk.tiles * TILE
+        self.dMp = E1M.mpad(LR, dk)
+        self.part_rs = _rsrc(b, P.param("part", I64), _c(b, self.S * self.dTP * self.dMp * 4))
+        self.dyo_rs = _rsrc(b, P.param("dyo", I64), _c(b, self.dTP * self.dMp * 2))
+        self.yqc_rs = _rsrc(b, P.param("yqc", I64), _c(b, TP * LR))
+        self.yqs_a = b.readfirstlane(P.param("yqs", I64))
+        rows = k.tbt * TILE
+        self.xsc = b.smem_alloc(F32, [2 * k.kw, rows + k.xjunk, 4], name_hint="hcusc")
+
+    def xissue(self, u, c: int, gate=None) -> list:
+        b, k, hk = self.b, self.k, self.hk
+        q = b.add(u.q0, _c(b, c))
+        rows = k.tbt * TILE
+        total = rows * 16
+        tid, nthr = self._xthreads()
+        S = self.S - (1 if hk.dmut == "ufold" else 0)
+        out = _Regs()
+        out.c, out.u, out.meta, out.S = c, u, [], S
+        for it in range(-(-total // nthr)):
+            v = b.add(tid, _c(b, it * nthr))
+            live = b.cmp_lt(v, _c(b, total))
+            vv = b.select(live, v, _c(b, total - 1))
+            tl = E1M._udiv(b, vv, 16)
+            pc = E1M._umod(b, vv, 16)
+            rtok = b.add(u.tok0, tl)
+            tok = b.smin(rtok, self.rlast)
+            kk = b.add(b.mul(q, _c(b, CHUNK)), b.mul(pc, _c(b, 8)))
+            kin = b.cmp_lt(kk, _c(b, LR))
+            ok = b.land(b.land(live, u.valid), kin)
+            if gate is not None:
+                ok = b.land(ok, gate)
+            for s in range(S):
+                base = b.mul(b.add(b.mul(b.add(_c(b, s * self.dTP), tok), _c(b, self.dMp)), kk), _c(b, 4))
+                for h in range(2):
+                    off = b.select(ok, b.add(base, _c(b, 16 * h)), _c(b, OOB))
+                    out.append(b.buffer_load_cp(self.part_rs, off, _c(b, 0), dwords=4))
+            out.meta.append(dict(tl=tl, pc=pc, tok=tok, rtok=rtok, kk=kk, kin=kin, live=live, ok=ok))
+        return out
+
+    def xput(self, regs, buf) -> None:
+        b, k, hk = self.b, self.k, self.hk
+        rows = k.tbt * TILE
+        bufg = self.xbuf(buf)
+        S = regs.S
+        per = 2 * S
+        u = regs.u
+        st0 = b.land(u.valid, b.cmp_eq(u.rg, _c(b, 0)))  # every K group stages (and stores) its own chunks
+        for it, m in enumerate(regs.meta):
+            vals = regs[it * per : (it + 1) * per]
+            tot = None
+            for s in range(S):
+                f = [b.vec_bitcast(vals[2 * s + h], VectorType(F32, 4)) for h in range(2)]
+                x8 = [b.vec_extract(f[e // 4], e % 4) for e in range(8)]
+                tot = x8 if tot is None else [b.fadd(tot[e], x8[e]) for e in range(8)]
+            yw = b.vec_bitcast(b.vec_trunc_f32_to_bf16(b.vec_pack(tot, F32)), VectorType(I32, 4))
+            acts = []
+            for e in range(8):
+                w = b.vec_extract(yw, e // 2)
+                y = _hi(b, w) if e % 2 else _lo(b, w)
+                s_ = _bf16r(b, b.fmul(y, _f(b, 0.25)))
+                acts.append(s_ if hk.dmut == "silu" else _bf16r(b, _silu(b, s_, hk.sig)))
+            words, E = MQ.quantize_mxfp8(b, acts, 4)
+            words = [b.select(m["kin"], w_, _c(b, 0)) for w_ in words]
+            E = b.select(m["kin"], E, _c(b, 0))
+            tl = m["tl"]
+            if k.xjunk:
+                tl = b.select(m["live"], tl, _c(b, rows))
+            cv = b.vec_bitcast(b.vec_pack(words, I32), VectorType(I8, 8))
+            pred = None if k.xjunk else m["live"]
+            with contextlib.nullcontext() if pred is None else b.scf_if(pred):
+                b.smem_store_vN(self.xs, [bufg, tl, b.mul(m["pc"], _c(b, 8))], cv, 8)
+            lead = b.cmp_eq(b.land(m["pc"], _c(b, 3)), _c(b, 0))
+            with b.scf_if(b.land(lead, m["live"]) if not k.xjunk else lead):
+                b.smem_store_vN(self.xsc, [bufg, tl, b.lshr(m["pc"], _c(b, 2))], b.bitcast(E, F32), 1)
+            # the D outputs (checker): column group 0 of the token block
+            tok, kk = m["tok"], m["kk"]
+            sty = b.land(b.land(st0, m["live"]), b.cmp_lt(m["rtok"], self.rows))
+            sto = b.land(sty, m["kin"])
+            yoff = b.mul(b.add(b.mul(tok, _c(b, self.dMp)), kk), _c(b, 2))
+            # y rows up to the D row padding (zeros past 320, as the D fold writes them)
+            sty = b.land(sty, b.cmp_lt(kk, _c(b, self.dMp)))
+            b.buffer_store_cp(yw, self.dyo_rs, b.select(sty, yoff, _c(b, OOB)), _c(b, 0), aux=CPOL_SC1)
+            coff = b.add(b.mul(tok, _c(b, LR)), kk)
+            b.buffer_store_cp(b.vec_pack(words, I32), self.yqc_rs, b.select(sto, coff, _c(b, OOB)), _c(b, 0), aux=CPOL_SC1)
+            qq = b.lshr(kk, _c(b, 7))
+            gq = b.land(b.lshr(kk, _c(b, 5)), _c(b, 3))
+            soff = b.add(b.mul(b.add(b.mul(b.add(b.mul(b.lshr(qq, _c(b, 2)), _c(b, self.TP)), tok), _c(b, 4)), gq), _c(b, 4)),
+                         b.land(qq, _c(b, 3)))  # fmt: skip
+            with b.scf_if(b.land(sto, lead)):
+                b.inline_asm("global_store_byte $0, $1, off sc1", "v,v,~{memory}", [b.add(self.yqs_a, _i64(b, soff)), E],
+                             None)  # fmt: skip
+
+    # ---- MFMA with the X scales from LDS (byte j of the op_sel scale operand, per chunk): _DnF's
+    def _sop_math(self, acc, wl, buf, skip, j, u):
+        b, k = self.b, self.k
+        acc = [list(r) for r in acc]
+        if j == 0:
+            nws = k.mt * (2 if k.sop_funnel else 1)
+            ws = wl[k.mt : k.mt + nws]
+            if k.sop_funnel:
+                sh = b.mul(b.land(u.q0, _c(b, 3)), _c(b, 8))
+                sc = [E1M._funnel(b, ws[i], ws[k.mt + i], sh) for i in range(k.mt)]
+            else:
+                sc = list(ws)
+            if k.sop_short:
+                sh = b.mul(b.land(u.q0, _c(b, 3)), _c(b, 8))
+                sc = [b.lshr(v, sh) for v in sc]
+            self.sop_sc = sc
+        SA = self.sop_sc[: k.mt]
+        zw = b.vec_pack([_c(b, 0)] * 4, I32) if skip else None
+        js = (j + 1) % 4 if k.mutant == "sopsel" else j
+        bufg = self.xbuf(buf)
+        for t in range(k.tbt):
+            row = b.add(_c(b, t * TILE), self.l16)
+            e = b.bitcast(b.vec_extract(b.smem_load_vN_f32(self.xsc, bufg, row, self.g, n=1), 0), I32)
+            sb = b.shl(e, _c(b, 8 * js))
+            bv = self.bop(t, buf, None)[0]
+            for mi in range(k.mt):
+                acc[mi][t] = b.mfma_scale_mx(zw if skip else wl[mi], bv, acc[mi][t], SA[mi], sb, shape="16x16x128",
+                                             fmt_a="fp4", fmt_b="fp8", opsel_a=js, opsel_b=js)  # fmt: skip
+        return acc
+
+    def wissue(self, u, c: int, xonly_gate=None, xonly: bool = False) -> list:
+        """E1's sop weight loads without the X scale dwords (the X scales are staged in LDS)."""
+        out = super().wissue(u, c, xonly_gate, xonly)
+        if c % 4 == 0:
+            k = self.k
+            ng = 2 if k.sop_funnel else 1
+            out = out[: len(out) - ng * k.tbt]
+        return out
+
+
 # ------------------------------------------------------------------ the chain
 
 
@@ -1725,6 +1971,8 @@ class _HcChain:
             return self.stages_fused(li, lay, rin, rout, gin, gout, inv, aq, aqs, wn, la, lw, at)
         e0 = b.mul(li, _c(b, 3))
         pgate = dict(rout=rout, inv=inv, gout=gout, wn=wn, winj=at("winj", lw), rows=rows) if hk.gplace != "c" else None
+        if hk.gplace == "s":
+            pgate["sp"] = at("sp", la)
         self._stamp(li, 0)
         if "C" in hk.stages:
             self.late()
@@ -1764,6 +2012,8 @@ class _HcChain:
         if dn is not None:
             self.late()
             dn.build()
+        if hk.gplace == "s" and "C" in hk.stages:
+            _GSum(hk, self.scope("_g", pgate, inlaunch=(pgate["sp"],)), pgate, TP).emit()
         if hk.gplace == "d" and "C" in hk.stages:
             _Gates(hk, self.scope("_g", pgate, inlaunch=(rout, inv)), pgate, TP).emit()
         self._stamp(li, 3)
@@ -1771,7 +2021,11 @@ class _HcChain:
         if "U" in hk.stages:
             pu = e1p(at("wu", lw), at("wus", lw), aq, aqs, A["ydump"], b.add(cnt_l, b.const_i64(CNT_LAYER // 2)), HCW)
             pu.update(rp=rout, hinv=inv, wn=wn, xo=at("xo", la), xo8=at("xo8", la), xo8s=at("xo8s", la), du=at("du", la))
-            up = _Up(self.uk, self.scope("_u", pu, inlaunch=(aq, aqs, rout, inv)), hk, TP)
+            if hk.ufold:
+                pu.update(dyo=at("dy", la), yqc=aq, yqs=aqs)
+                up = _UpF(self.uk, self.scope("_u", pu, inlaunch=(aq, aqs, rout, inv, A["part"])), hk, TP)
+            else:
+                up = _Up(self.uk, self.scope("_u", pu, inlaunch=(aq, aqs, rout, inv)), hk, TP)
             if hk.stamp:
                 up._stampf = lambda ev: self._stamp(li, ev)
         pre2 = None

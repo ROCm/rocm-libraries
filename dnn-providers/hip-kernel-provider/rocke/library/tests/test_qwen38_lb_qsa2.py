@@ -52,7 +52,10 @@ def test_params_default_unchanged_and_extras_appended():
                                 dict(kvl="page16", sem="atom", score="mfma", kw16=True), dict(oq="x"), dict(pio="x"),
                                 dict(kvl="x"), dict(pgt="x"), dict(mutant="page"), dict(mutant="qnorm", kvl="page16"),
                                 dict(mutant="oqs"), dict(hsel=True), dict(kvl="page16", sem="atom", hsel=True, sel="nib"),
-                                dict(kvl="page16", sem="atom", fma64=True), dict(kvl="page16", sem="atom", mutant="hneed")])
+                                dict(kvl="page16", sem="atom", fma64=True), dict(kvl="page16", sem="atom", mutant="hneed"),
+                                dict(kvl="page16", sem="atom", s64dpp=True), dict(kvl="page16", sem="atom", sst4=True),
+                                dict(sst4=True, score="mfma"), dict(kvl="page16", sem="atom", heq=True),
+                                dict(kvl="page16", sem="atom", hsel=True, heqs=True)])
 def test_knob_validation(kw):
     with pytest.raises(ValueError):
         Q.resolve(Q.QsaKnobs(**kw))
@@ -85,6 +88,12 @@ ATOM = dict(batch=8, ctxcap=8256, kvl="page16", sem="atom")
     (Q.TP2, dict(batch=8, ctxcap=192, oq="both")),
     (Q.TP1, dict(ATOM, score="f64", fma64=True, hsel=True, sel="v1", sela=True, scan_its=4, mpad=True)),
     (Q.TP2, dict(ATOM, score="mfma", hsel=True, sel="v2", scan_its=8, mutant="hneed")),
+    (Q.TP2, dict(ATOM, score="f64", fma64=True, s64dpp=True, hsel=True, heq=True, sel="v1")),
+    (Q.TP1, dict(ATOM, score="f64", s64dpp=True, scan_its=4)),
+    (Q.TP2, dict(ATOM, score="mfma", sst4=True, hsel=True, heq=True, sel="v2", scan_its=8)),
+    (Q.TP2, dict(ATOM, score="f64", hsel=True, heq=True, mutant="hneed")),
+    (Q.TP1, dict(ATOM, score="mfma", sst4=True, hsel=True, heq=True, heqs=True, sel="v1", scan_its=8)),
+    (Q.TP2, dict(ATOM, score="f64", hsel=True, heq=True, heqs=True, mutant="hneed")),
 ] + [(Q.TP2, dict(ATOM, score="f64", oq="both", mutant=m)) for m in ("page", "qnorm", "ikey", "gate", "oqs", "sel16",
                                                                       "cmp", "rope", "scan", "iqrope")])
 def test_new_knobs_lower_with_hazard_pad(shape, kd):
