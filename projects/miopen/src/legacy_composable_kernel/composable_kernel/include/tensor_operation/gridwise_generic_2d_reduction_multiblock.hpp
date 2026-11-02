@@ -37,6 +37,7 @@ namespace ck {
 template <index_t BlockSize,
           typename srcDataType,
           typename dstDataType, // not used together with the beta input
+          typename wsDataType,  // type of the per-block partial results in the workspace
           typename compType,
           typename src2dDescType,
           typename dst1dDescType,
@@ -67,7 +68,7 @@ struct GridwiseReduction_xy_to_x_multiblock
                                srcDataType alpha,
                                const srcDataType* const __restrict__ p_src_global,
                                dstDataType beta,
-                               srcDataType* const __restrict__ ws_values_global,
+                               wsDataType* const __restrict__ ws_values_global,
                                int* const __restrict__ ws_indices_global);
 
     template <>
@@ -78,7 +79,7 @@ struct GridwiseReduction_xy_to_x_multiblock
                                   srcDataType alpha,
                                   const srcDataType* const __restrict__ p_src_global,
                                   dstDataType beta,
-                                  srcDataType* const __restrict__ ws_values_global,
+                                  wsDataType* const __restrict__ ws_values_global,
                                   int* const __restrict__ ws_indices_global)
     {
         (void)ws_indices_global;
@@ -182,7 +183,7 @@ struct GridwiseReduction_xy_to_x_multiblock
         {
             auto threadwise_workspace_store =
                 ThreadwiseTensorSliceTransfer_v1r3<compType,
-                                                   srcDataType,
+                                                   wsDataType,
                                                    decltype(ReducedDataDesc),
                                                    decltype(workspace_desc),
                                                    Sequence<1>,
@@ -210,7 +211,7 @@ struct GridwiseReduction_xy_to_x_multiblock
                                   srcDataType alpha,
                                   const srcDataType* const __restrict__ p_src_global,
                                   dstDataType beta,
-                                  srcDataType* const __restrict__ ws_values_global,
+                                  wsDataType* const __restrict__ ws_values_global,
                                   int* const __restrict__ ws_indices_global)
     {
         (void)alpha; // unused
@@ -332,7 +333,7 @@ struct GridwiseReduction_xy_to_x_multiblock
         {
             auto threadwise_workspace_val_store =
                 ThreadwiseTensorSliceTransfer_v1r3<compType,
-                                                   srcDataType,
+                                                   wsDataType,
                                                    decltype(ReducedDataDesc),
                                                    decltype(workspace_desc),
                                                    Sequence<1>,

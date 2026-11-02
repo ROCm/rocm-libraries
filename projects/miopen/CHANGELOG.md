@@ -67,6 +67,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   and byte spans above INT32_MAX, and single reductions of about 2^30 or more fp16, bf16 or int8
   elements, which produced incorrect results. Such tensors are now rejected with
   `miopenStatusBadParm`.
+* [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results when an output element
+  reduces more than 1024 input elements and the compute type is wider than the input type (for
+  example FP16 `AVG` with FP32 compute returned inf). The multi-block reduction stored the partial
+  result of each block in the input type; it now stores it in the compute type.
+  `miopenGetReductionWorkspaceSize` therefore returns a larger size for such reductions (the
+  partial results take the size of the compute type), so the workspace has to be allocated with
+  the size it returns.
 * [Conv] Fixed a `ConvHipConv` crash on gfx1250 for grouped convolutions with more than
   65535 group-batch tiles, and an LDS race in its gfx1250 direct kernel
   (hipconv v0.3.2).
