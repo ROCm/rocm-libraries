@@ -13,6 +13,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   device memory and beta remains on the host. The descriptor mode requires
   `scaleType = HIP_R_32F`; algorithm selection requires a scalar-alpha-capable kernel.
 
+### Optimized
+
+* Improved gfx950 performance of skinny BF16 and FP16 TN GEMMs with one to five tokens and a bias vector of D's type (`F.linear` with a bias) by routing them to bias-epilogue variants of the vLLM wave-split-K custom kernels.
+
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 
 ### Added
