@@ -1749,10 +1749,14 @@ struct FmhaFwdKernel
                     ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
                 if constexpr(kHasMask && !kIsGroupMode && !kHasDropout && kUseBatchLocalCausalOrder)
                 {
-                    // Square causal tiles have monotonically increasing work along Q.
-                    // Visit the longest tiles across all heads within each batch first.
+                    // Square causal tiles have monotonically increasing work along Q, with or
+                    // without a left window (sliding-window causal). Visit the longest tiles
+                    // across all heads within each batch first.
                     // Takes precedence over the XCD remap below.
-                    if(kargs.seqlen_q == kargs.seqlen_k && kargs.window_size_left < 0 &&
+                    const bool causal_window =
+                        kargs.window_size_left < 0 ||
+                        kargs.mask_type != GenericAttentionMaskEnum::MASK_GENERIC;
+                    if(kargs.seqlen_q == kargs.seqlen_k && causal_window &&
                        kargs.window_size_right == 0 && num_tile_n1 == 1)
                     {
                         return ck_tile::make_tuple(static_cast<index_t>(gridDim.y) - 1 -

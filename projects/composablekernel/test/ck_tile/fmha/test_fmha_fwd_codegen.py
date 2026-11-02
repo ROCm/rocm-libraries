@@ -132,6 +132,11 @@ struct fmha_fwd_traits {
 struct fmha_fwd_args {
     int hdim_q = 192, hdim_v = 128, seqlen_q = 128, max_seqlen_q = 128, seqlen_k = 128;
     int stride_q = 192, nhead_stride_q = 24576;
+    int nhead_stride_k = 24576, nhead_stride_v = 24576, nhead_stride_o = 24576;
+    int stride_k = 0, stride_v = 0, stride_o = 0;
+    int batch_stride_q = 0, batch_stride_k = 0, batch_stride_v = 0, batch_stride_o = 0;
+    const void* seqlen_q_ptr = nullptr;
+    const void* cu_seqlen_q_ptr = nullptr;
     int window_size_left = -1, window_size_right = -1;
     int batch = 2, nhead_q = 8, nhead_k = 2;
     const void* sink_ptr = nullptr;
@@ -150,13 +155,14 @@ _HOST_MAIN = """
 int main() {
     fmha_fwd_traits t;
     fmha_fwd_args a;
-    int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr;
+    int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr, layout;
+    int has_cu_sq, has_sq_ptr;
     if(!(std::cin >> t.hdim_q >> t.hdim_v >> a.seqlen_q >> a.seqlen_k
          >> t.is_group_mode >> t.is_v_rowmajor >> t.has_logits_soft_cap >> mask >> bias
          >> t.has_lse >> t.has_dropout >> scale >> t.skip_min_seqlen_q >> t.has_sink
          >> t.data_type >> arg_q >> arg_v >> max_q >> a.batch >> a.nhead_q
          >> a.nhead_k >> a.window_size_left >> a.window_size_right
-         >> has_cu_sk >> has_sk_ptr >> has_sink_ptr)) return 2;
+         >> has_cu_sk >> has_sk_ptr >> has_sink_ptr >> layout >> has_cu_sq >> has_sq_ptr)) return 2;
     t.mask_type = static_cast<mask_enum>(mask);
     t.bias_type = static_cast<bias_enum>(bias);
     t.qscale_type = static_cast<quant_scale_enum>(scale);
@@ -166,6 +172,34 @@ int main() {
     a.cu_seqlen_k_ptr = has_cu_sk ? &a : nullptr;
     a.seqlen_k_ptr = has_sk_ptr ? &a : nullptr;
     a.sink_ptr = has_sink_ptr ? &a : nullptr;
+    a.cu_seqlen_q_ptr = has_cu_sq ? &a : nullptr;
+    a.seqlen_q_ptr = has_sq_ptr ? &a : nullptr;
+    // layout < 0 keeps the legacy stub strides. Otherwise contiguous BSHD (0) with one
+    // deviation: 1 = BHSD everywhere, 2 = BHSD O, 3 = BHSD V, 4..7 = Q/K/V/O row pitch
+    // + 64 elements, 8..11 = Q/K/V/O batch stride + hdim elements.
+    if(layout >= 0) {
+        const bool bhsd_all = layout == 1;
+        a.stride_q = bhsd_all ? a.hdim_q : a.nhead_q * a.hdim_q;
+        a.stride_k = bhsd_all ? a.hdim_q : a.nhead_k * a.hdim_q;
+        a.stride_v = bhsd_all ? a.hdim_v : a.nhead_k * a.hdim_v;
+        a.stride_o = bhsd_all ? a.hdim_v : a.nhead_q * a.hdim_v;
+        a.nhead_stride_q = bhsd_all ? a.seqlen_q * a.hdim_q : a.hdim_q;
+        a.nhead_stride_k = bhsd_all ? a.seqlen_k * a.hdim_q : a.hdim_q;
+        a.nhead_stride_v = (bhsd_all || layout == 3) ? a.seqlen_k * a.hdim_v : a.hdim_v;
+        a.nhead_stride_o = (bhsd_all || layout == 2) ? a.seqlen_q * a.hdim_v : a.hdim_v;
+        a.batch_stride_q = a.seqlen_q * a.nhead_q * a.hdim_q;
+        a.batch_stride_k = a.seqlen_k * a.nhead_k * a.hdim_q;
+        a.batch_stride_v = a.seqlen_k * a.nhead_k * a.hdim_v;
+        a.batch_stride_o = a.seqlen_q * a.nhead_q * a.hdim_v;
+        if(layout == 4) a.stride_q += 64;
+        if(layout == 5) a.stride_k += 64;
+        if(layout == 6) a.stride_v += 64;
+        if(layout == 7) a.stride_o += 64;
+        if(layout == 8) a.batch_stride_q += a.hdim_q;
+        if(layout == 9) a.batch_stride_k += a.hdim_q;
+        if(layout == 10) a.batch_stride_v += a.hdim_v;
+        if(layout == 11) a.batch_stride_o += a.hdim_v;
+    }
     std::cout << fmha_fwd(t, a, {}) << '\\n';
 }
 """
@@ -278,6 +312,9 @@ class _CompiledDispatcher:
             has_cu_sk=0,
             has_sk_ptr=0,
             has_sink_ptr=0,
+            layout=-1,
+            has_cu_sq=0,
+            has_sq_ptr=0,
         )
         if changes.keys() - case.keys():
             raise ValueError(
@@ -1134,6 +1171,283 @@ _SUPPORTED_DISPATCH_FILTER = (
 )
 
 
+@unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
+class TestCompiledGfx125D64N128Dispatch(unittest.TestCase):
+    """N128 is tried before N64 only inside its measured contract."""
+
+    def compile(self, mutate=None):
+        pool, kernels = get_fwd_blobs(
+            targets=["gfx1250"],
+            kernel_filter="fmha_fwd_d*_*_nlogits*_nbias*_*lse*_ndropout*_nskip*_nqscale*",
+            receipt=600,
+            optdim_list=[64],
+            mask_impl="simplified",
+        )
+        return _CompiledDispatcher(self, pool, kernels, mutate=mutate), kernels
+
+    @staticmethod
+    def sched_id(
+        dispatch, mask="s_no", lse="f", bn0=64, spad="f", dtype="bf16", mode="batch"
+    ):
+        return dispatch.expected_id(
+            mode=mode,
+            dtype=dtype,
+            hdim=64,
+            pipeline="qr_tdm_sched",
+            mask=mask,
+            lse=lse,
+            bn0=bn0,
+            spad=spad,
+            sink="f",
+        )
+
+    @staticmethod
+    def case(**changes):
+        return dict(
+            hdim_q=64, hdim_v=64, seqlen_q=1024, seqlen_k=1024, layout=0, **changes
+        )
+
+    def n64_ids(self, dispatch, **fields):
+        return {
+            self.sched_id(dispatch, bn0=64, spad=spad, **fields) for spad in ("f", "t")
+        }
+
+    def test_n128_inside_contract(self):
+        self.check_n128_inside_contract("bf16")
+
+    def check_n128_inside_contract(self, dtype):
+        dispatch, _ = self.compile()
+        for lse in (0, 1):
+            lse_flag = "t" if lse else "f"
+            self.assertEqual(
+                dispatch.run(dtype=dtype, lse=lse, **self.case()),
+                [self.sched_id(dispatch, dtype=dtype, lse=lse_flag, bn0=128)],
+            )
+            for mask in (1, 2):
+                self.assertEqual(
+                    dispatch.run(
+                        dtype=dtype,
+                        lse=lse,
+                        mask=mask,
+                        window_size_left=-1,
+                        window_size_right=0,
+                        **self.case(),
+                    ),
+                    [
+                        self.sched_id(
+                            dispatch, dtype=dtype, mask="s_mask", lse=lse_flag, bn0=128
+                        )
+                    ],
+                )
+        for length in (256, 512, 2048):
+            self.assertEqual(
+                dispatch.run(
+                    dtype=dtype, **self.case() | dict(seqlen_q=length, seqlen_k=length)
+                ),
+                [self.sched_id(dispatch, dtype=dtype, bn0=128)],
+            )
+        for cus in (64, 256, 1024):
+            self.assertEqual(
+                dispatch.run(dtype=dtype, num_cus=cus, **self.case()),
+                [self.sched_id(dispatch, dtype=dtype, bn0=128)],
+            )
+
+    def test_everything_else_keeps_n64(self):
+        for dtype in ("bf16", "fp16"):
+            with self.subTest(dtype=dtype):
+                self.check_everything_else_keeps_n64(dtype)
+
+    def check_everything_else_keeps_n64(self, dtype):
+        dispatch, _ = self.compile()
+        cases = [
+            dict(seqlen_q=127, seqlen_k=128),
+            dict(seqlen_q=256, seqlen_k=257),
+            dict(seqlen_q=1000, seqlen_k=1000),
+            dict(has_sq_ptr=1),
+            dict(has_sk_ptr=1),
+            dict(mask=1, window_size_left=31, window_size_right=0),
+            dict(mask=2, window_size_left=127, window_size_right=7),
+            dict(mask=3),
+            dict(layout=1, batch=1, nhead_q=128),
+            dict(layout=1, batch=1, nhead_q=128, mask=1),
+            dict(layout=1, seqlen_q=256, seqlen_k=16384, batch=1, nhead_q=128, mask=1),
+            dict(layout=1, seqlen_q=384, seqlen_k=512, has_cu_sq=1, mask=2),
+            dict(group=1, seqlen_k=2047),
+        ]
+        for changes in cases:
+            with self.subTest(changes=changes):
+                args = self.case() | dict(window_size_right=0) | changes
+                result = dispatch.run(dtype=dtype, **args)
+                if args.get("seqlen_q") == 127:
+                    self.assertNotIn(result[0], self.n64_ids(dispatch, dtype=dtype))
+                    continue  # The existing short-Q fallback has M64.
+                fields = dict(mask="s_mask" if args.get("mask", 0) else "s_no")
+                if args.get("group"):
+                    fields.update(mode="group", spad="t")
+                    expected = {self.sched_id(dispatch, dtype=dtype, **fields)}
+                else:
+                    expected = self.n64_ids(dispatch, dtype=dtype, **fields)
+                self.assertIn(result[0], expected)
+        self.assertNotEqual(
+            dispatch.run(dtype=dtype, has_sink_ptr=1, **self.case()),
+            [self.sched_id(dispatch, dtype=dtype, bn0=128)],
+        )
+
+    def test_fp16_n128_inside_contract(self):
+        self.check_n128_inside_contract("fp16")
+
+    def test_expanded_layout_lengths_and_metadata(self):
+        dispatch, _ = self.compile()
+        for dtype in ("bf16", "fp16"):
+            for changes in (
+                dict(seqlen_q=384, seqlen_k=384),
+                dict(seqlen_q=129, seqlen_k=256),
+                dict(seqlen_q=384, seqlen_k=512),
+                dict(seqlen_q=1000, seqlen_k=1024, mask=2, window_size_right=0),
+                *[dict(layout=layout) for layout in range(1, 12)],
+                dict(has_cu_sq=1),
+                dict(has_cu_sk=1),
+                dict(has_cu_sq=1, has_cu_sk=1),
+                dict(group=1, seqlen_k=2048),
+                dict(mask=1, window_size_left=127, window_size_right=0),
+                dict(layout=1, has_cu_sq=1, seqlen_k=2048, mask=2, window_size_right=0),
+            ):
+                with self.subTest(dtype=dtype, changes=changes):
+                    fields = dict(
+                        dtype=dtype,
+                        bn0=128,
+                        mask="s_mask" if changes.get("mask", 0) else "s_no",
+                    )
+                    if changes.get("group"):
+                        fields.update(mode="group", spad="t")
+                    elif changes.get("has_cu_sq") or changes.get("has_cu_sk"):
+                        fields["spad"] = "t"
+                    self.assertEqual(
+                        dispatch.run(dtype=dtype, **self.case() | changes),
+                        [self.sched_id(dispatch, **fields)],
+                    )
+
+    def test_generic_causal_uses_its_measured_crossover(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d*_*_nlogits*_nbias*_*lse*_ndropout*_nskip*_nqscale*",
+            600,
+            [64],
+            "generic",
+        )
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        for dtype in ("bf16", "fp16"):
+            for length, batch, heads, mode, expected_n in (
+                (2048, 1, 128, "batch", 64),
+                (4096, 1, 128, "batch", 64),
+                (8192, 1, 128, "batch", 128),
+                (4096, 2, 32, "batch", 128),
+                (1024, 4, 4, "group", 64),
+                (2048, 4, 4, "group", 64),
+                (4096, 4, 4, "group", 128),
+            ):
+                with self.subTest(dtype=dtype, length=length, mode=mode):
+                    result = dispatch.run(
+                        dtype=dtype,
+                        **self.case()
+                        | dict(
+                            seqlen_q=length * (batch if mode == "group" else 1),
+                            seqlen_k=length * (batch if mode == "group" else 1),
+                            max_seqlen_q=length,
+                            batch=batch,
+                            nhead_q=heads,
+                            group=int(mode == "group"),
+                            mask=2,
+                            window_size_left=-1,
+                            window_size_right=0,
+                        ),
+                    )
+                    self.assertEqual(
+                        result,
+                        [
+                            self.sched_id(
+                                dispatch,
+                                dtype=dtype,
+                                mode=mode,
+                                mask="causal",
+                                bn0=expected_n,
+                                spad="t" if mode == "group" else "f",
+                            )
+                        ],
+                    )
+            # Only check N128 exclusion: upstream generic causal with a finite left
+            # window is unsupported, so the current fallback is not a correctness oracle.
+            result = dispatch.run(
+                dtype=dtype,
+                **self.case()
+                | dict(
+                    seqlen_q=8192,
+                    seqlen_k=8192,
+                    mask=1,
+                    window_size_left=2047,
+                    window_size_right=0,
+                ),
+            )
+            self.assertNotEqual(
+                result,
+                [self.sched_id(dispatch, dtype=dtype, mask="causal", bn0=128)],
+            )
+
+    def test_custom_n128_tile_cannot_bypass_the_contract(self):
+        pool, kernels = get_fwd_blobs(
+            targets=["gfx1250"],
+            kernel_filter="fmha_fwd_d*_*_nlogits*_nbias*_*lse*_ndropout*_nskip*_nqscale*",
+            receipt=600,
+            optdim_list=[64],
+            mask_impl="simplified",
+        )
+        custom = []
+        for kernel in kernels:
+            if kernel.F_tile.F_bn0 == 128:
+                kernel = replace(
+                    kernel, F_tile=replace(kernel.F_tile, F_constraint=CppConstraint())
+                )
+            custom.append(kernel)
+        rebuilt = FmhaFwdApiPool()
+        for kernel in custom:
+            trait = kernel.api_trait()
+            if kernel.F_tile.F_bn0 == 128:
+                for needle in (
+                    "a.seqlen_k % 128 == 0",
+                    "a.batch > 0",
+                    "a.window_size_left >= 127",
+                    "get_num_blocks(128)",
+                    "static_cast<long long>(1024) * a.batch",
+                ):
+                    self.assertIn(needle, trait.constraint.bool_expr)
+            rebuilt.register_traits(trait)
+        dispatch = _CompiledDispatcher(self, rebuilt, custom)
+        for changes in (
+            dict(seqlen_k=257),
+            dict(has_sk_ptr=1),
+            dict(group=1, seqlen_k=2047),
+            dict(mask=1, window_size_left=31, window_size_right=0),
+        ):
+            with self.subTest(changes=changes):
+                result = dispatch.run(**self.case() | changes)
+                self.assertNotEqual(result, [self.sched_id(dispatch, bn0=128)])
+        self.assertEqual(
+            dispatch.run(**self.case() | dict(seqlen_q=384, seqlen_k=512)),
+            [self.sched_id(dispatch, bn0=128)],
+        )
+
+    def test_boundary_gate_is_load_bearing(self):
+        dispatch, _ = self.compile(
+            mutate=lambda api: api.replace(
+                "a.seqlen_k > 0 && a.seqlen_k % 128 == 0", "a.seqlen_k > 0"
+            )
+        )
+        self.assertEqual(
+            dispatch.run(**self.case() | dict(seqlen_q=256, seqlen_k=257)),
+            [self.sched_id(dispatch, bn0=128, spad="t")],
+        )
+
+
 class TestGfx125V128Codegen(unittest.TestCase):
     @staticmethod
     def dimension_cases():
@@ -1210,7 +1524,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
             len(kernels),
             sum(
                 (
-                    {0: 12, 100: 8, 200: 4, 600: 12}[receipt]
+                    2 * {0: 12, 100: 8, 200: 4, 600: 12}[receipt]
                     if dim == 64
                     else count * (2 if dim == 192 else 1)
                 )
@@ -1256,23 +1570,51 @@ class TestGfx125V128Codegen(unittest.TestCase):
             pool, kernels = get_fwd_blobs(
                 ["gfx1250"], f"*d64_{dtype}*_qr_tdm_sched_*", 600, [64], "simplified"
             )
-            self.assertEqual(len(kernels), 12)
+            n64 = [k for k in kernels if k.F_tile.F_bn0 == 64]
+            n128 = [k for k in kernels if k.F_tile.F_bn0 == 128]
+            self.assertEqual(len(n64), 12)
+            # Both widths share aligned/padded batch and padded group traits.
+            self.assertEqual(len(n128), 12)
             for kernel in kernels:
                 self.assertEqual(kernel.F_tile.F_bm0, 128)
-                self.assertEqual(kernel.F_tile.F_bn0, 64)
                 self.assertEqual(kernel.F_tile.F_bn1, 64)
-                self.assertEqual(kernel.F_tile.F_occupancy, 3)
                 self.assertEqual(kernel.F_pipeline.F_dpad, "f")
                 self.assertEqual(kernel.F_pipeline.F_dvpad, "f")
+            for kernel in n64 + n128:
+                self.assertEqual(kernel.F_tile.F_occupancy, 3)
                 trait = kernel.api_trait()
                 if kernel.F_mode == "batch" and trait.skpad == "f":
-                    self.assertIn("a.seqlen_k % 64 == 0", trait.skcheck)
+                    self.assertIn(
+                        f"a.seqlen_k % {kernel.F_tile.F_bn0} == 0", trait.skcheck
+                    )
                     self.assertIn("a.seqlen_k != 0", trait.skcheck)
                     self.assertIn("a.cu_seqlen_k_ptr == nullptr", trait.skcheck)
                 else:
                     self.assertEqual(trait.spad, "t")
                     self.assertEqual(trait.skpad, "t")
+            for kernel in n128:
+                self.assertEqual(kernel.F_tile.F_occupancy, 3)
+                self.assertIn(kernel.F_pipeline.F_mask, ("s_no", "s_mask"))
+            self.assertEqual({k.F_mode for k in n128}, {"batch", "group"})
+            self.assertEqual({k.F_pipeline.F_spad for k in n128}, {"f", "t"})
             self.assertIn("a.hdim_v == 64", pool.render("test"))
+
+    def test_d64_generic_wide_emission_keeps_local_windows_on_n64(self):
+        for dtype in ("fp16", "bf16"):
+            _, kernels = get_fwd_blobs(
+                ["gfx1250"], f"*d64_{dtype}*_qr_tdm_sched_*", 600, [64], "generic"
+            )
+            n64 = [k for k in kernels if k.F_tile.F_bn0 == 64]
+            n128 = [k for k in kernels if k.F_tile.F_bn0 == 128]
+            self.assertEqual(len(n64), 18)
+            self.assertEqual(len(n128), 12)
+            self.assertEqual({k.F_pipeline.F_mask for k in n128}, {"no", "causal"})
+            self.assertTrue(any(k.F_pipeline.F_mask == "generic" for k in n64))
+            self.assertEqual({k.F_mode for k in n128}, {"batch", "group"})
+            for kernel in n128:
+                self.assertEqual(kernel.F_pipeline.F_spad, kernel.F_pipeline.F_skpad)
+                if kernel.F_mode == "group":
+                    self.assertEqual(kernel.F_pipeline.F_spad, "t")
 
     def test_fp16_bf16_d128_sched_emission(self):
         for dtype in ("fp16", "bf16"):
@@ -1432,6 +1774,15 @@ class TestGfx125V128Codegen(unittest.TestCase):
         "ROCm clang and HIP headers are required for generated TU host syntax",
     )
     def test_sched_generated_occupancy_contract(self):
+        resource_dir = subprocess.run(
+            [str(_HIP_HOST_CXX), "-print-resource-dir"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+        hip_wrapper = Path(resource_dir) / "include" / "__clang_hip_runtime_wrapper.h"
+        self.assertTrue(hip_wrapper.is_file(), str(hip_wrapper))
         _, kernels = get_fwd_blobs(["gfx1250"], "*", 200, [-1], "simplified")
         candidates = {}
         diagnostic = "qr_tdm_sched codegen occupancy must match policy tuning"
@@ -1446,6 +1797,13 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 candidates.setdefault(key, kernel)
             else:
                 self.assertNotIn(diagnostic, kernel.render())
+        # Retain the full-receipt check for both D64 widths and dtypes.
+        _, d64_n128 = get_fwd_blobs(
+            ["gfx1250"], "*d64_*16*_qr_tdm_sched_*", 600, [64], "simplified"
+        )
+        for kernel in d64_n128:
+            if kernel.F_tile.F_bn0 == 128:
+                candidates.setdefault((kernel.F_dtype, 64, 128, 64), kernel)
         self.assertEqual(
             set(candidates),
             {
@@ -1457,7 +1815,8 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     (192, 64, 128),
                     (192, 128, 128),
                 )
-            },
+            }
+            | {(dtype, 64, 128, 64) for dtype in ("bf16", "fp16")},
         )
         with tempfile.TemporaryDirectory(
             prefix="fmha-occupancy-contract-"
@@ -1489,7 +1848,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                                 "-nogpuinc",
                                 "-nogpulib",
                                 "-include",
-                                "__clang_hip_runtime_wrapper.h",
+                                str(hip_wrapper),
                                 "-std=c++20",
                                 "-DUSE_NEW_UNIFIED_FRAMEWORK=0",
                                 "-DCK_TILE_FMHA_FWD_FAST_EXP2=1",
@@ -1582,14 +1941,14 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                 "simplified",
             )
             dispatch = _CompiledDispatcher(self, pool, kernels)
-            for sq, sk, has_cu_sk, group in (
-                (127, 128, 0, 0),
-                (128, 128, 0, 0),
-                (129, 129, 0, 0),
-                (255, 255, 0, 0),
-                (128, 0, 0, 0),
-                (128, 128, 1, 0),
-                (255, 255, 0, 1),
+            for sq, sk, has_cu_sk, group, expected_n in (
+                (127, 128, 0, 0, 64),
+                (128, 128, 0, 0, 128),
+                (129, 129, 0, 0, 64),
+                (255, 255, 0, 0, 64),
+                (128, 0, 0, 0, 64),
+                (128, 128, 1, 0, 128),
+                (255, 255, 0, 1, 64),
             ):
                 candidate = dispatch.expected_id(
                     dtype=dtype,
@@ -1597,12 +1956,15 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                     mode="group" if group else "batch",
                     pipeline="qr_tdm" if sq < 128 else "qr_tdm_sched",
                     bm0=64 if sq < 128 else 128,
+                    bn0=expected_n,
                     mask="s_no",
                     lse="t",
                     dpad="f",
                     dvpad="f",
                     sink="f",
-                    spad="t" if group or has_cu_sk or sk == 0 or sk % 64 else "f",
+                    spad=(
+                        "t" if group or has_cu_sk or sk == 0 or sk % expected_n else "f"
+                    ),
                 )
                 self.assertEqual(
                     dispatch.run(

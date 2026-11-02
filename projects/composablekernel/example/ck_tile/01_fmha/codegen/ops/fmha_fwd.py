@@ -304,6 +304,7 @@ FMHA_FWD_API_KVSCALE_LOOKUP = """    struct row {{ const char* arch; const char*
 FMHA_FWD_API_KVSCALE_ROW = """        {{"{F_arch.name}", "{F_dtype_name}", {F_hdim}, {F_hdim_v}, fmha_fwd_kvscale_align_<{F_trait_type}, {F_arch.tag}>()}},
 """
 
+
 @dataclass
 class CppConstraint:
     bool_expr: str = None
@@ -420,7 +421,15 @@ class FmhaFwdApiTrait:
             if self.skpad == "t":
                 return "true"
             else:
-                return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
+                cumulative_q_check = (
+                    "(a.cu_seqlen_q_ptr == nullptr) && "
+                    if self.pipeline_tag == "qr_tdm_sched" and self.bn0 == 128
+                    else ""
+                )
+                return (
+                    cumulative_q_check
+                    + f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
+                )
         elif self.pipeline_tag in [
             "qr_async_trload",
             "qr_async_trload_v3",
@@ -981,8 +990,20 @@ class FmhaFwdKernel:
             tr_load=self.F_pipeline.F_trload,
             sink=self.F_pipeline.F_sink,
             occupancy=int(self.F_tile.F_occupancy),
-            constraint=self.F_tile.F_constraint & self.F_pipeline.F_constraint,
+            constraint=self._api_constraint(),
         )
+
+    def _api_constraint(self):
+        constraint = self.F_tile.F_constraint & self.F_pipeline.F_constraint
+        if (
+            self.F_pipeline.tag == "qr_tdm_sched"
+            and int(self.F_hdim) == 64
+            and self.F_tile.F_bn0 == 128
+        ):
+            constraint = constraint & GFX125_D64_N128_CONSTRAINT
+            if self.F_pipeline.F_mask == "causal":
+                constraint = constraint & GFX125_D64_N128_GENERIC_CAUSAL_CONSTRAINT
+        return constraint
 
 
 @dataclass
@@ -1585,6 +1606,43 @@ GFX125_QR_TDM_PINGPONG_RANGE = (
     " && a.batch * a.nhead_q >= 2 * static_cast<ck_tile::index_t>(num_cus)"
 )
 
+# Paired gfx1250 FP16/BF16 measurements cover both layouts, supported padded strides,
+# rectangular/partial Q and heterogeneous lengths. Keep measured N64 crossovers:
+# K tails, short high-supply BHSD, small Q-only masked BHSD, and narrow/local windows.
+# Group K is a physical total; compare its average with 64-bit multiplication.
+# These are tuning thresholds, not ISA restrictions. Attach them to every N128
+# API trait so custom-tune tiles cannot bypass the same fallback decisions.
+_LL = "static_cast<long long>"
+GFX125_D64_N128_CONSTRAINT = CppConstraint(
+    "(t.is_group_mode ?"
+    f" (a.batch > 0 && {_LL}(a.seqlen_k) >= {_LL}(1024) * a.batch) :"
+    " (a.seqlen_k > 0 && a.seqlen_k % 128 == 0"
+    " && a.seqlen_q_ptr == nullptr && a.seqlen_k_ptr == nullptr))"
+    " && (!(a.stride_q == a.hdim_q && a.nhead_stride_q > a.hdim_q) ||"
+    " ((t.mask_type == mask_enum::no_mask ?"
+    f" ({_LL}(a.seqlen_k) >= {_LL}(2048) * (t.is_group_mode ? a.batch : 1)"
+    f" || {_LL}(get_num_blocks(128)) <= {_LL}(2) * num_cus) :"
+    " (a.max_seqlen_q >= 2048 || get_num_blocks(128) < num_cus))"
+    " && (t.mask_type == mask_enum::no_mask || a.cu_seqlen_q_ptr == nullptr"
+    " || a.cu_seqlen_k_ptr != nullptr || a.seqlen_k >= 1024)))"
+    " && (t.mask_type == mask_enum::no_mask ||"
+    " ((t.mask_type == mask_enum::mask_top_left ||"
+    " t.mask_type == mask_enum::mask_bottom_right) && a.window_size_right == 0"
+    " && (a.window_size_left < 0 ||"
+    " (!t.is_group_mode && a.seqlen_q == a.seqlen_k && a.window_size_left >= 127"
+    " && a.seqlen_q_ptr == nullptr && a.seqlen_k_ptr == nullptr"
+    " && a.cu_seqlen_q_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr))))"
+)
+
+# GenericAttentionMask causal has a different measured crossover from the
+# simplified mask. Its non-local specialization must not accept finite windows.
+GFX125_D64_N128_GENERIC_CAUSAL_CONSTRAINT = CppConstraint(
+    "a.window_size_left < 0 && a.window_size_right == 0"
+    " && (a.max_seqlen_q >= 8192 ||"
+    " (a.max_seqlen_q >= 4096"
+    f" && {_LL}(get_num_blocks(128)) <= {_LL}(8) * num_cus))"
+)
+
 
 def _gfx125_qr_tdm_crossover_constraint(hdim):
     return CppConstraint(
@@ -1622,6 +1680,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     # compatibility share these entries; runtime constraints are attached to copies.
     _QR_TDM_SCHED_TILES = {
         (64, 64): (
+            FmhaFwdTileSize(128, 128, 32, 64, 32, 64, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 3),
             FmhaFwdTileSize(128, 64, 32, 64, 32, 64, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 3),
         ),
         (128, 128): (
@@ -1684,12 +1743,24 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return False
 
             if problem_ctx.hdim == 64:
+                # N128 shares the existing D64 sequence-padding contract. Emit
+                # padded batch/group and generic dense/causal candidates; their
+                # profitability belongs to the per-trait runtime constraint.
+                # Generic finite windows retain N64: the wider tile regresses
+                # those measured workloads despite supporting their geometry.
+                if (
+                    kernel_ctx.tile.F_bn0 == 128
+                    and kernel_ctx.pipeline.F_mask == "generic"
+                ):
+                    return False
                 # Match qr_tdm's exact D64/V64 head traits. Aligned batch can
                 # use unpadded sequences; group and tails retain padding.
                 return (
                     kernel_ctx.pipeline.F_vlayout == "row"
                     and kernel_ctx.pipeline.F_spad == kernel_ctx.pipeline.F_skpad
-                    and (problem_ctx.mode != "group" or kernel_ctx.pipeline.F_spad == "t")
+                    and (
+                        problem_ctx.mode != "group" or kernel_ctx.pipeline.F_spad == "t"
+                    )
                     and kernel_ctx.pipeline.F_dpad == "f"
                     and kernel_ctx.pipeline.F_dvpad == "f"
                 )
@@ -1790,8 +1861,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (512, 512) : [FmhaFwdTileSize( 64,  64,  32, 512,  32,  512,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
             })  # fmt: skip
             if dtype in cls._DT_FP16_BF16:
-                # D64 matches qr_tdm's M128/N64 geometry and occupancy hint3.
-                result[(64, 64)].extend(copy.deepcopy(cls._QR_TDM_SCHED_TILES[(64, 64)]))
+                # D64 tries N128 first (its measured contract is attached to every
+                # N128 trait in FmhaFwdKernel.api_trait), then N64.
+                result[(64, 64)].extend(
+                    copy.deepcopy(cls._QR_TDM_SCHED_TILES[(64, 64)])
+                )
                 # Append the qr_tdm_sched tiles. The codegen compatibility rule pairs
                 # these tile variants with the scheduled pipeline: D128 uses N128,
                 # while D192 tries N128 first and then N64. Batch mode passes
@@ -1814,9 +1888,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 result[(128, 128)].extend(
                     copy.deepcopy(cls._QR_TDM_SCHED_TILES[(128, 128)])
                 )
-                d192_n128, d192_n64 = copy.deepcopy(
-                    cls._QR_TDM_SCHED_TILES[(192, 128)]
-                )
+                d192_n128, d192_n64 = copy.deepcopy(cls._QR_TDM_SCHED_TILES[(192, 128)])
                 result[(192, 128)].extend(
                     [
                         replace(d192_n128, F_constraint=d192_n128_constraint),
@@ -1870,7 +1942,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 # padding their row pitch needs, and at D512 one would not fit
                 # in LDS at all. Progressive K reload stays on for both: the
                 # single-buffer path also stages whole K tiles now.
-                tdm_double_kv = "f" if (hdim, hdim_v) in ((256, 256), (512, 512)) else "t"
+                tdm_double_kv = (
+                    "f" if (hdim, hdim_v) in ((256, 256), (512, 512)) else "t"
+                )
                 tdm_prog_k = "t"
                 tdm_masks = list(get_mask_map(mask_impl))
                 if mask_impl == "simplified":
@@ -2389,9 +2463,9 @@ def get_fwd_blobs(
             if optdim_list != [-1] and hdim not in optdim_list:
                 continue
             for tile, next_tile in zip(tiles, tiles[1:]):
-                assert next_tile.F_bm0 >= tile.F_bm0, (
-                    "Tiles must be ordered by increasing bm0"
-                )
+                assert (
+                    next_tile.F_bm0 >= tile.F_bm0
+                ), "Tiles must be ordered by increasing bm0"
 
             for tile, pipeline in itertools.product(
                 tiles, factory.get_pipelines(dtype, hdim, hdim_v, receipt, mask_impl)

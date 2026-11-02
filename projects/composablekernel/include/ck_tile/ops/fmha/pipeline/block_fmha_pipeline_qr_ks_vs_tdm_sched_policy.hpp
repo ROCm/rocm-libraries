@@ -53,13 +53,64 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     // Named geometry knobs. Values frozen to the current D128/D192 formulas.
     static constexpr bool kEarlyOutputRescale = Geometry::kHeadDimQK == 128;
     static constexpr bool kLeadFirstLoad      = Geometry::kHeadDimQK == 128;
-    static constexpr bool kUseUnsignedCausalMask =
-        Geometry::kHeadDimQK == 128 || Geometry::kHeadDimQK == 192;
     static constexpr index_t kKPrefetchTensorCount = Tuning::kKWait;
     static constexpr index_t kVPrefetchTensorCount = Tuning::kVWait;
     static constexpr bool kPrefetchTailDrain       = Tuning::kTailDrain;
     static_assert(kKPrefetchTensorCount == 0 || kKPrefetchTensorCount == 1);
     static_assert(kVPrefetchTensorCount == 0 || kVPrefetchTensorCount == 1);
+
+    struct PreparedLdsReadContext
+    {
+        FmhaTdmPreparedKRead::Address qk_stage0{};
+        FmhaTdmPreparedKRead::Address v0{};
+        FmhaTdmPreparedKRead::Address pv_k0{};
+    };
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseEarlyLdsBases()
+    {
+        // The lead-first D128 placement uses its own reads. Masked D192 N128 retains the
+        // ordinary path to limit register pressure; D64 already prepares its read-first bases.
+        return !kLeadFirstLoad && Geometry::kHeadDimQK == 192 &&
+               (Geometry::kN == 64 || !Problem::FmhaMask::IsMasking);
+    }
+
+    template <typename Problem, typename KTileView, typename VTileWindow>
+    CK_TILE_DEVICE static void
+    PrepareIterationLdsReads(PreparedLdsReadContext& prepared_context,
+                             const KTileView& k_lds_read_view,
+                             typename Geometry::KDataType* k_lds_write_ptr,
+                             const VTileWindow& v_lds_read_window,
+                             typename Geometry::KDataType* k_lds_read_ptr)
+    {
+        auto next_su_window = make_tile_window(
+            k_lds_read_view,
+            make_tuple(number<Geometry::kQkSuColumns>{}, number<Geometry::kHeadDimQK>{}),
+            {Geometry::kQkSuColumns, 0},
+            MakeKSuRegTileDistribution<Problem>());
+        next_su_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
+        prepared_context.qk_stage0 = FmhaTdmPreparedKRead::Prepare<0>(next_su_window);
+        if constexpr(UseEarlyLdsBases<Problem>())
+        {
+            // Keep the tile's read bases in VGPRs before the WMMA stream. Otherwise a late
+            // VALU address write can make its LDS-read dependency wait drain intervening WMMA.
+            prepared_context.v0 = FmhaTdmPreparedKRead::Prepare<0>(v_lds_read_window);
+            asm volatile("" : "+v"(prepared_context.qk_stage0.byte_address));
+            asm volatile("" : "+v"(prepared_context.v0.byte_address));
+            // N64's final PV K reads use the ordinary instruction path.
+            if constexpr(Geometry::kN == 128)
+            {
+                auto pv_k_window = make_tile_window(
+                    k_lds_read_view,
+                    make_tuple(number<Geometry::kQkSuColumns>{}, number<Geometry::kHeadDimQK>{}),
+                    {0, 0},
+                    MakeKSuRegTileDistribution<Problem>());
+                pv_k_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
+                prepared_context.pv_k0 = FmhaTdmPreparedKRead::Prepare<0>(pv_k_window);
+                asm volatile("" : "+v"(prepared_context.pv_k0.byte_address));
+            }
+        }
+    }
 
     template <index_t Stage>
     CK_TILE_HOST_DEVICE static constexpr index_t GetQkTailDsCount()
@@ -223,20 +274,20 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
 
     template <index_t Stage,
               typename Mode,
+              typename Problem,
               typename BlockGemm,
               typename CBlockTensor,
               typename ABlockTensor,
               typename BBlockTensor,
               typename NextBBlockTensor,
               typename BTileWindow>
-    CK_TILE_DEVICE static void
-    RunQkScheduledStage(const BlockGemm&,
-                        CBlockTensor& c_block_tensor,
-                        const ABlockTensor& a_block_tensor,
-                        const BBlockTensor& b_block_tensor,
-                        NextBBlockTensor& next_b_block_tensor,
-                        const BTileWindow& b_lds_window,
-                        const FmhaTdmPreparedKRead::Address* prepared_stage0 = nullptr)
+    CK_TILE_DEVICE static void RunQkScheduledStage(const BlockGemm&,
+                                                   CBlockTensor& c_block_tensor,
+                                                   const ABlockTensor& a_block_tensor,
+                                                   const BBlockTensor& b_block_tensor,
+                                                   NextBBlockTensor& next_b_block_tensor,
+                                                   const BTileWindow& b_lds_window,
+                                                   const PreparedLdsReadContext& prepared_context)
     {
         using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
         using Executor         = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
@@ -247,22 +298,25 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                       (Stage == SelectedSchedule::kNumQkStages - 1 &&
                        BTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount));
         constexpr bool kUseAffineKRead = Stage < Geometry::kQkStages - 1;
+        constexpr bool kUsePreparedTailBase =
+            Stage == Geometry::kQkStages - 1 &&
+            Mode::SelectedPolicy::template UseEarlyLdsBases<Problem>();
 
         const auto affine_k0 = [&]() {
             if constexpr(kUseAffineKRead)
             {
                 if constexpr(Stage == 0)
-                {
-                    if(prepared_stage0 != nullptr)
-                        return *prepared_stage0;
-                }
-                return FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
+                    return prepared_context.qk_stage0;
+                else
+                    return FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
             }
             else
                 return FmhaTdmPreparedKRead::Address{};
         }();
         const auto affine_v0 = [&]() {
-            if constexpr(Stage == Geometry::kQkStages - 1)
+            if constexpr(kUsePreparedTailBase)
+                return prepared_context.v0;
+            else if constexpr(Stage == Geometry::kQkStages - 1)
                 return FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
             else
                 return FmhaTdmPreparedKRead::Address{};
@@ -323,18 +377,42 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
 
     template <index_t Stage,
               typename Mode,
+              typename Problem,
               typename NextBBlockTensor,
               typename BTileWindow,
               typename WmmaEmitter,
               typename RescaleEmitter>
-    CK_TILE_DEVICE static void RunPvScheduledStageWithWmma(NextBBlockTensor& next_b_block_tensor,
-                                                           const BTileWindow& b_lds_window,
-                                                           WmmaEmitter& emit_wmma,
-                                                           RescaleEmitter& emit_rescale)
+    CK_TILE_DEVICE static void
+    RunPvScheduledStageWithWmma(NextBBlockTensor& next_b_block_tensor,
+                                const BTileWindow& b_lds_window,
+                                WmmaEmitter& emit_wmma,
+                                RescaleEmitter& emit_rescale,
+                                const PreparedLdsReadContext& prepared_context)
     {
         using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
         using Executor         = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
         using Kind             = FmhaTdmSchedLoadKind;
+        constexpr bool kUsePreparedBase =
+            Mode::SelectedPolicy::template UseEarlyLdsBases<Problem>() &&
+            (Stage < Geometry::kPvStages - 1 || Geometry::kN == 128);
+        static_assert(!kUsePreparedBase || !Mode::SelectedPolicy::kLeadFirstLoad,
+                      "prepared PV bases require the WMMA-first placement");
+        // V stage s reads rows [(s+1)*kK1, (s+2)*kK1) of the QK tail's V buffer. Keep the
+        // stage offset constant so every read uses an immediate offset from its prepared base.
+        // N64's final K stage retains the ordinary instruction path.
+        [[maybe_unused]] const auto prepared_base = [&]() {
+            if constexpr(kUsePreparedBase && Stage < Geometry::kPvStages - 1)
+            {
+                auto base = prepared_context.v0;
+                base.byte_address += (Stage + 1) * Problem::BlockFmhaShape::kK1 * kVPhysicalStride *
+                                     sizeof(typename Geometry::VDataType);
+                return base;
+            }
+            else if constexpr(kUsePreparedBase)
+                return prepared_context.pv_k0;
+            else
+                return FmhaTdmPreparedKRead::Address{};
+        }();
         static_assert(Stage >= 0 && Stage < SelectedSchedule::kNumPvStages);
         static_assert((Stage < SelectedSchedule::kNumPvStages - 1 &&
                        BTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount) ||
@@ -365,7 +443,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             __builtin_amdgcn_sched_barrier(0);
         }
         auto emit_prepared_wmma = [&](auto stage, auto wmma) {
-            if constexpr(!kLeadFirstLoadThisStage && Stage == 0 && decltype(wmma)::value == 0)
+            if constexpr(!kUsePreparedBase && !kLeadFirstLoadThisStage && Stage == 0 &&
+                         decltype(wmma)::value == 0)
             {
                 prepared_v1 = FmhaTdmPreparedKRead::Prepare<1>(b_lds_window);
                 __builtin_amdgcn_sched_barrier(0);
@@ -373,7 +452,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             if constexpr(!kLeadFirstLoadThisStage && Stage == Geometry::kPvStages - 1 &&
                          decltype(wmma)::value == 0)
             {
-                affine_k0 = FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
+                if constexpr(kUsePreparedBase)
+                    affine_k0 = prepared_base;
+                else
+                    affine_k0 = FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
             }
             emit_wmma(stage, wmma);
         };
@@ -391,8 +473,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             else if constexpr(decltype(kind)::value == Kind::VRead)
             {
                 static_assert(Stage < Geometry::kPvStages - 1);
-                VLoad::template LoadAccess<decltype(access)::value>(next_b_block_tensor,
-                                                                    b_lds_window);
+                if constexpr(kUsePreparedBase)
+                    FmhaTdmAffineVRead::Load<decltype(access)::value, kVPhysicalStride>(
+                        next_b_block_tensor, b_lds_window, prepared_base);
+                else
+                    VLoad::template LoadAccess<decltype(access)::value>(next_b_block_tensor,
+                                                                        b_lds_window);
             }
         };
         auto emit_point = [](auto, auto, auto point) {
@@ -407,8 +493,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             {
                 // Access0 was issued before WMMA0; do not issue it twice.
             }
-            else if constexpr(Stage == 0 && decltype(kind)::value == Kind::VRead &&
-                              decltype(access)::value == 1)
+            else if constexpr(!kUsePreparedBase && Stage == 0 &&
+                              decltype(kind)::value == Kind::VRead && decltype(access)::value == 1)
                 FmhaTdmPreparedVRead::Load<1>(next_b_block_tensor, b_lds_window, prepared_v1);
             else
                 emit_token(kind, access);
@@ -422,8 +508,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool UseCountdownLoop()
     {
-        return Geometry::kHeadDimQK == 128 && !Problem::FmhaMask::IsMasking && !Problem::kHasSink &&
-               Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+        // Derive the key origin from the prefetched V window only when no sink phase or bias
+        // origin is needed. D192 N128 retains the index loop to limit register pressure.
+        return !Problem::kHasSink && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+               !(Geometry::kHeadDimQK == 192 && Geometry::kN == 128);
     }
 
     template <typename Problem>

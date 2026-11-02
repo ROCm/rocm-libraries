@@ -165,6 +165,42 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         return p_tile;
     }
 
+    // Per-pixel mask with the bounds of each score row formed once (see ApplyRowRangeMask). Sink
+    // tokens and the generic mask keep the per-element predicate. The row ranges follow
+    // IsOutOfBoundUnsigned for every head dim.
+    static constexpr bool kRowRangeMask =
+        !kHasSink && std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<true>>;
+
+    // Causal/window mask of one score tile: each row's valid key range is formed once, so every
+    // element costs one add, one unsigned compare and one select.
+    template <typename ScoreTile>
+    CK_TILE_DEVICE static void
+    ApplyRowRangeMask(ScoreTile& s, const FmhaMask& mask, index_t q_row0, index_t k_col0)
+    {
+        using Dstr           = typename ScoreTile::StaticTileDistribution;
+        constexpr auto spans = ScoreTile::get_distributed_spans();
+        using ColSpan        = remove_cvref_t<decltype(spans[I1])>;
+        constexpr auto col0 =
+            detail::make_tile_distributed_index(uniform_sequence_gen_t<ColSpan::Impl::size(), 0>{});
+        sweep_tile_span(spans[I0], [&](auto idx0) {
+            const index_t row =
+                q_row0 +
+                get_x_indices_from_distributed_indices(Dstr{}, make_tuple(idx0, col0)).at(I0);
+            const auto range = mask.GetRowRangeUnsigned(row);
+            uint32_t offset  = uint32_t(k_col0) - uint32_t(range.at(I0));
+            uint32_t width   = range.at(I1);
+            // Keep the row bounds opaque: otherwise the empty-row select is folded into a lane-mask
+            // OR for every element.
+            asm volatile("" : "+v"(offset), "+v"(width));
+            sweep_tile_span(spans[I1], [&](auto idx1) {
+                constexpr auto i_j = make_tuple(idx0, idx1);
+                const auto col     = get_x_indices_from_distributed_indices(Dstr{}, i_j).at(I1);
+                if(offset + uint32_t(col) >= width)
+                    s(i_j) = -numeric<SMPLComputeDataType>::infinity();
+            });
+        });
+    }
+
     // Prefill, double lds
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
@@ -229,10 +265,10 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         static_assert(Policy::OutputFragments::kNumN == PvBlockGemm::NIterPerWarp / 2);
         static_assert(OaccBlockTileType::get_thread_buffer_size() ==
                       Policy::OutputFragments::Mapping::kThreadBufferSize);
-        if constexpr(Geometry::kN == 128)
+        if constexpr(Geometry::kN == Geometry::kDv)
             static_assert(std::is_same_v<typename SaccBlockTileType::StaticTileDistribution,
                                          typename OaccBlockTileType::StaticTileDistribution>,
-                          "N128 score/output distributions must preserve the fragment "
+                          "Equal-width score/output distributions must preserve the fragment "
                           "reconstruction map");
 
         auto o_acc = Policy::OutputFragments::MakeZero();
@@ -240,8 +276,14 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         // infer Sacc, S, P, M, L, Oacc type
         using SBlockTileType = decltype(cast_tile<SMPLComputeDataType>(OaccBlockTileType{}));
 
-        using MLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
+        using MLBlockTileType      = decltype(block_tile_reduce<SMPLComputeDataType>(
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
+        using ScoreMLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
+            SaccBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
+        static_assert(
+            std::is_same_v<typename ScoreMLBlockTileType::StaticTileDistribution,
+                           typename MLBlockTileType::StaticTileDistribution>,
+            "Score and output must retain identical row ownership after column reduction");
 
         // The shared kernel can supply a sink logit independently of kHasSink,
         // which controls sink tokens in the mask. Preserve this runtime input.
@@ -402,12 +444,6 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             Policy::template MakeKLdsBlockDescriptor<Problem, true>().get_lengths(),
             {0, 0});
 
-        auto k_lds_read_window =
-            make_tile_window(k_lds_read_view,
-                             make_tuple(number<kN0>{}, number<kK0>{}),
-                             {0, 0},
-                             Policy::template MakeKRegTileDistribution<Problem>());
-
         // V tile in LDS (sink-aware start)
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,
@@ -438,10 +474,15 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             num_sink_loop;
 
         constexpr bool kUseCountdownLoop = Policy::template UseCountdownLoop<Problem>();
-        bool even_buffer                 = true;
-        index_t i_total_loops            = 0;
-        index_t remaining_loops          = num_total_loop;
-        constexpr index_t k1_loops       = kN0 / kK1;
+        // The V TDM issue recomputes its clamped global stride locally (fewer long-lived SGPRs).
+        // Tied to the countdown loop for BF16 N128/V128: D128 with and without a mask. D192 N128
+        // is excluded with the countdown loop; without the countdown loop it was not measured.
+        constexpr bool kRematerializeVStride =
+            kUseCountdownLoop && kN0 == 128 && kN1 == 128 && std::is_same_v<VDataType, bf16_t>;
+        bool even_buffer           = true;
+        index_t i_total_loops      = 0;
+        index_t remaining_loops    = num_total_loop;
+        constexpr index_t k1_loops = kN0 / kK1;
 
         static_assert(1 <= k1_loops);
         block_sync_lds<0>();
@@ -459,17 +500,17 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             static_cast<KDataType* __restrict__>(smem_ptrk1));
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
-        constexpr index_t k_lds_insts = k_lds_read_window.get_num_of_access();
-        constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
-        static_assert(k_lds_insts <= Geometry::kKSuLoadCount &&
-                      v_lds_insts == Geometry::kVStageLoadCount);
-
-        s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount>();
         auto initial_k_lds_su_read_window =
             make_tile_window(k_lds_read_view,
                              make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
                              {0, 0},
                              Policy::template MakeKSuRegTileDistribution<Problem>());
+        constexpr index_t k_lds_insts = initial_k_lds_su_read_window.get_num_of_access();
+        constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
+        static_assert(k_lds_insts <= Geometry::kKSuLoadCount &&
+                      v_lds_insts == Geometry::kVStageLoadCount);
+
+        s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount>();
         initial_k_lds_su_read_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk0));
         auto k_su0_tile = load_tile(initial_k_lds_su_read_window);
@@ -480,7 +521,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                             KDataType* __restrict__ k_lds_read_ptr,
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
-            FmhaTdmPreparedKRead::Address qk_stage0_base{};
+            typename Policy::PreparedLdsReadContext prepared_lds_reads{};
 
             decltype(load_tile_transpose(v_lds_read_window)) v_tile;
             [[maybe_unused]] float pv_output_scale_m0 = 1.0f;
@@ -544,8 +585,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                     rescale_fragment(ordinal);
                 };
 
-                Policy::template RunPvScheduledStageWithWmma<decltype(stage)::value, Mode>(
-                    next_b_block_tensor, b_lds_window, emit_wmma, emit_rescale);
+                Policy::template RunPvScheduledStageWithWmma<decltype(stage)::value, Mode, Problem>(
+                    next_b_block_tensor, b_lds_window, emit_wmma, emit_rescale, prepared_lds_reads);
             };
 
             auto run_pv = [&](const auto& p_tile) {
@@ -580,13 +621,11 @@ struct BlockFmhaPipelineQRKSVSTdmSched
 
             auto begin_iteration = [&]() {
                 // Fixed boundary: start the current V TDM transfer.
-                auto next_su_window = make_tile_window(
-                    k_lds_read_view,
-                    make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
-                    {Geometry::kQkSuColumns, 0},
-                    Policy::template MakeKSuRegTileDistribution<Problem>());
-                next_su_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-                qk_stage0_base = FmhaTdmPreparedKRead::Prepare<0>(next_su_window);
+                Policy::template PrepareIterationLdsReads<Problem>(prepared_lds_reads,
+                                                                   k_lds_read_view,
+                                                                   k_lds_write_ptr,
+                                                                   v_lds_read_window,
+                                                                   k_lds_read_ptr);
                 __builtin_amdgcn_sched_barrier(0);
 
                 // Reuse the V LDS buffer only after the preceding reads have completed.
@@ -600,8 +639,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                 }
                 move_tile_window(v_dram_window, {kN0, 0});
                 v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
-                if constexpr(kUseCountdownLoop && kN0 == 128 && kN1 == 128 &&
-                             std::is_same_v<VDataType, bf16_t>)
+                if constexpr(kRematerializeVStride)
                 {
                     v_dram_window.tdm_load_to_lds(
                         tdm_config_v,
@@ -636,21 +674,28 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                         move_tile_window(k_lds_su_read_window, {Geometry::kQkSuColumns, 0});
                         decltype(k_su_tile) k_su_tile_next;
 
-                        Policy::template RunQkScheduledStage<decltype(i_su)::value, Mode>(
+                        Policy::template RunQkScheduledStage<decltype(i_su)::value, Mode, Problem>(
                             gemm_0_su,
                             s_acc_su,
                             q_tile,
                             k_su_tile,
                             k_su_tile_next,
                             k_lds_su_read_window,
-                            &qk_stage0_base);
+                            prepared_lds_reads);
 
                         k_su_tile = k_su_tile_next;
                     }
                     else
                     {
-                        Policy::template RunQkScheduledStage<Geometry::kQkStages - 1, Mode>(
-                            gemm_0_su, s_acc_su, q_tile, k_su_tile, v_tile, v_lds_read_window);
+                        Policy::template RunQkScheduledStage<Geometry::kQkStages - 1,
+                                                             Mode,
+                                                             Problem>(gemm_0_su,
+                                                                      s_acc_su,
+                                                                      q_tile,
+                                                                      k_su_tile,
+                                                                      v_tile,
+                                                                      v_lds_read_window,
+                                                                      prepared_lds_reads);
                     }
                     set_slice_tile(
                         s_acc,
@@ -726,13 +771,44 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                         need_split_check = remaining_loops == 1 && needs_tail_predicate;
                     }
                     bool need_mask_check = false;
-                    if constexpr(kPadSeqLenK)
+                    if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
                     {
-                        need_mask_check = mask.IsEdgeTile(
+                        need_mask_check = mask.IsEdgeTileForValidRows(
                             q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                     }
 
-                    if(__builtin_expect(need_split_check || need_mask_check, false))
+                    if constexpr(FmhaMask::IsMasking)
+                    {
+                        // Under masking the edge test also covers the KV tail (the tile range is
+                        // rounded up to a tile), so only the mask predicate can fire; the two
+                        // predicates stay separate to keep each one cheap.
+                        if(__builtin_expect(need_split_check, false))
+                        {
+                            set_tile_if(s_acc,
+                                        -numeric<SMPLComputeDataType>::infinity(),
+                                        [&](auto tile_idx) {
+                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                            return physical_seqlen_k_end <= col;
+                                        });
+                        }
+                        if constexpr(kRowRangeMask)
+                        {
+                            if(__builtin_expect(need_mask_check, false))
+                                ApplyRowRangeMask(s_acc, mask, q_origin.at(I0), k_origin.at(I0));
+                        }
+                        else if(__builtin_expect(need_mask_check, false))
+                        {
+                            // Generic mask (the countdown loop excludes sinks).
+                            set_tile_if(s_acc,
+                                        -numeric<SMPLComputeDataType>::infinity(),
+                                        [&](auto tile_idx) {
+                                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                            return mask.IsOutOfBound(row, col);
+                                        });
+                        }
+                    }
+                    else if(__builtin_expect(need_split_check || need_mask_check, false))
                     {
                         set_tile_if(
                             s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
@@ -769,26 +845,29 @@ struct BlockFmhaPipelineQRKSVSTdmSched
 
                     if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
                     {
-                        bool need_perpixel_check = mask.IsEdgeTile(
+                        // Rows past seqlen_q are never stored (the kernel's O and LSE views are
+                        // bounded by seqlen_q), so they do not force the per-pixel check on every
+                        // key tile of a partial last query tile.
+                        bool need_perpixel_check = mask.IsEdgeTileForValidRows(
                             q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
-                        if(need_perpixel_check)
+                        if constexpr(kRowRangeMask)
                         {
-                            set_tile_if(
-                                s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&](auto tile_idx) {
-                                    const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                    if constexpr(kHasSink)
-                                        return mask.IsOutOfSinkBound(row, col);
-                                    else if constexpr(Policy::kUseUnsignedCausalMask &&
-                                                      std::is_same_v<
-                                                          FmhaMask,
-                                                          SimplifiedGenericAttentionMask<true>>)
-                                        return mask.IsOutOfBoundUnsigned(row, col);
-                                    else
-                                        return mask.IsOutOfBound(row, col);
-                                });
+                            if(need_perpixel_check)
+                                ApplyRowRangeMask(s_acc, mask, q_origin.at(I0), k_origin.at(I0));
+                        }
+                        else if(need_perpixel_check)
+                        {
+                            // Sink tokens or the generic mask.
+                            set_tile_if(s_acc,
+                                        -numeric<SMPLComputeDataType>::infinity(),
+                                        [&](auto tile_idx) {
+                                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                            if constexpr(kHasSink)
+                                                return mask.IsOutOfSinkBound(row, col);
+                                            else
+                                                return mask.IsOutOfBound(row, col);
+                                        });
                         }
                     }
                 }
